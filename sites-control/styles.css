@@ -124,6 +124,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid rgba(109, 59, 233, 0.
 .source-logo { width: 36px; height: 36px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 12px; font-size: 12px; font-weight: 850; }
 .source-logo-crm { background: #eaf1ff; color: #245dc9; }
 .source-logo-bank { background: #fff1c7; color: #8a5a00; }
+.source-logo-sheet { background: #e8f7ef; color: #19714a; }
 .source-logo-sites { background: var(--violet-soft); color: var(--violet); }
 .source-logo-other { background: #edf0f5; color: #5d6574; }
 .source-copy { min-width: 0; flex: 1; }

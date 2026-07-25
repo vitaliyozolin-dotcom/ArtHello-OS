@@ -1,6 +1,35 @@
 # ArtHello OS — Backlog
 
-## A.3 — live read-only verification
+## A.4 — sandbox ingestion и банковский OAuth
+
+- [~] `A4-13-01`: append-only raw + отдельные observations + обязательные raw/batch FK реализованы в migration `0014`, 29 data tests PASS; закрыть только после финального независимого Reviewer PASS.
+- [~] `A4-13-02`: completed-scope reconciliation, current/stale, lead→student и stale family evidence реализованы; partial scope не tombstone-ит. Закрыть только после финального Reviewer/Coordinator.
+- [~] `A4-13-03`: `pageSize`, repeated-page fail, max guard, transport failure и idempotent retry покрыты PGlite tests. Закрыть только после финального Reviewer/Coordinator.
+- [ ] `QA-A4-02`: выполнить `test:postgres` для exact candidate с migration `0014` на одноразовом PostgreSQL 16; текущая среда не содержит `TEST_DATABASE_URL`, поэтому исторический v10 PASS не переносится на этот candidate.
+- [x] Создать отдельную PostgreSQL-совместимую sandbox-БД вне source checkout.
+- [x] Добавить migration `0011` для raw imports, CRM normalized records, owner-confirmed master data и payroll evidence; подготовить rollback companion.
+- [x] Добавить migration `0012` с индексами sandbox-import hot paths и отдельным rollback companion.
+- [x] Импортировать реальную зарплатную таблицу и сверить raw, formulas, выплаты, начисления, дубли и юрлица.
+- [x] Оставить несопоставленные payroll identities unresolved; не активировать formulas как rules.
+- [x] Реализовать read-only AlfaCRM importer для учеников, архивов, оплат, групп, состава, занятий, посещаемости, педагогов и справочников.
+- [x] Отделить AlfaCRM leads (`is_study=0`) от students и запретить их попадание в student/family pipeline.
+- [x] Добавить customer subscriptions, четыре платёжных справочника и `log/index` с raw + normalized provenance.
+- [x] Добавить incremental discovery по change log с обязательным watermark и перекрытием 1–7 дней; не считать его полной rematerialization.
+- [x] Добавить migration `0013` и rollback companion; применить только в отдельной sandbox-БД.
+- [x] Перед `0014` создать копию отдельной sandbox-БД, применить migration и сохранить rollback companion; production не затрагивать.
+- [x] Запретить автоматическое объединение семей; создавать только manual-review candidates.
+- [x] Выполнить свежий AlfaCRM full run и честно зафиксировать network timeout с нулём сохранённых CRM records.
+- [x] Подтвердить новый production client «Точки» по token endpoint и отказ accounts без hybrid OAuth.
+- [x] Сделать сохранение encrypted bank connector config fail closed.
+- [ ] Запустить AlfaCRM full importer из защищённого backend с доступом к CRM и повторить coverage/integrity audit по всем обязательным endpoint.
+- [ ] После успешного full snapshot реализовать и проверить rematerialization сущностей по incremental change discovery.
+- [ ] Заменить Redirect URI «Точки» на точный защищённый backend `/api/banking/oauth/callback`.
+- [ ] После backup/rollback и protected env пройти read-only OAuth consent; не запрашивать payment permissions.
+- [ ] Выгрузить счета, остатки и операции в sandbox и провести контроль полноты без Sites PII.
+- [ ] После подтверждённого end-to-end перевыпустить раскрытые AlfaCRM/Tochka credentials.
+- [ ] Выпустить security/noindex/login исправления в Replit только через отдельные runtime-ворота.
+
+## A.3 — историческая live read-only verification
 
 - [x] Подтвердить AlfaCRM credentials без сохранения секретов.
 - [x] Получить актуальное количество филиалов: 8.
@@ -53,7 +82,7 @@
 
 ## P0 — read-only аудит данных
 
-Полная инвентаризация бизнес-записей и синхронизация запрещены до закрытия открытых HIGH и нового Reviewer/Coordinator gate. Ограниченный auth/metadata/count probe без сохранения записей разрешён решением D-021.
+Полная read-only инвентаризация AlfaCRM в отдельную sandbox-БД разрешена D-031. Production sync, запись в источники, bank data до OAuth и публикация детальных записей в Sites остаются запрещены.
 
 - [ ] Получить авторизованный read-only доступ или обезличенный snapshot БД.
 - [ ] Проверить текущее подключение AlfaCRM и зафиксировать время проверки.

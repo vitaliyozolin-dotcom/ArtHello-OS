@@ -56,6 +56,14 @@ const bankConfigVault = await import(
     ),
   ).href
 );
+const bankingOAuthRedirect = await import(
+  pathToFileURL(
+    path.join(
+      artifactDir,
+      "src/lib/banking/oauth-redirect.ts",
+    ),
+  ).href
+);
 const requestQueueModule = await import(
   pathToFileURL(
     path.join(
@@ -655,6 +663,10 @@ test("structured log sanitizer removes secrets, banking identities, and raw payl
     response: {
       rawBody: '{"phone":"+79991234567"}',
     },
+    accountId: "private-account-id",
+    statementId: "private-statement-id",
+    parsedBalanceValue: 100,
+    amount: 50,
     contact: "owner@example.com",
   });
 
@@ -662,7 +674,102 @@ test("structured log sanitizer removes secrets, banking identities, and raw payl
   assert.equal(sanitized.accessToken, "[REDACTED]");
   assert.equal(sanitized.customerCode, "[REDACTED]");
   assert.equal(sanitized.response, "[REDACTED]");
+  assert.equal(sanitized.accountId, "[REDACTED]");
+  assert.equal(sanitized.statementId, "[REDACTED]");
+  assert.equal(sanitized.parsedBalanceValue, "[REDACTED]");
+  assert.equal(sanitized.amount, "[REDACTED]");
   assert.equal(sanitized.contact, "[REDACTED_EMAIL]");
+});
+
+test("Tochka OAuth redirect is exact, backend-only, and required in production", () => {
+  assert.equal(
+    bankingOAuthRedirect.resolveTochkaOAuthRedirectUri({
+      NODE_ENV: "production",
+      TOCHKA_OAUTH_REDIRECT_URI:
+        "https://api.example.invalid/api/banking/oauth/callback",
+    }),
+    "https://api.example.invalid/api/banking/oauth/callback",
+  );
+  assert.throws(
+    () =>
+      bankingOAuthRedirect.resolveTochkaOAuthRedirectUri({
+        NODE_ENV: "production",
+      }),
+    /required in production/,
+  );
+  assert.throws(
+    () =>
+      bankingOAuthRedirect.resolveTochkaOAuthRedirectUri({
+        NODE_ENV: "production",
+        TOCHKA_OAUTH_REDIRECT_URI:
+          "https://api.example.invalid/",
+      }),
+    /exact path/,
+  );
+  assert.throws(
+    () =>
+      bankingOAuthRedirect.resolveTochkaOAuthRedirectUri({
+        NODE_ENV: "production",
+        TOCHKA_OAUTH_REDIRECT_URI:
+          "https://arthello-os-control.example.chatgpt.site/api/banking/oauth/callback",
+      }),
+    /Sites cannot receive/,
+  );
+});
+
+test("Tochka OAuth source is read-only, scope-consistent, and state-strict", async () => {
+  const connectorSource = await readFile(
+    path.join(
+      artifactDir,
+      "src/lib/banking/connectors/tochka.ts",
+    ),
+    "utf8",
+  );
+  const bankingRoute = await readFile(
+    path.join(artifactDir, "src/routes/banking.ts"),
+    "utf8",
+  );
+
+  assert.match(
+    connectorSource,
+    /OAUTH_SCOPE_READ_ONLY\s*=\s*\n?\s*"accounts balances customers statements"/,
+  );
+  assert.doesNotMatch(
+    connectorSource,
+    /OAUTH_SCOPE_READ_ONLY[\s\S]{0,120}\b(?:payments|sbp|acquiring)\b/,
+  );
+  assert.doesNotMatch(
+    connectorSource,
+    /"(?:CreatePaymentForSign|CreatePaymentOrder|MakeAcquiringOperation|EditSBPData)"/,
+  );
+  assert.doesNotMatch(
+    connectorSource,
+    /logger\.info\(\{[^}]*\b(?:authorizeUrl|consentId|tokenLength)\b/,
+  );
+  assert.match(
+    connectorSource,
+    /encrypted config persistence failed[\s\S]{0,220}throw new Error/,
+  );
+  assert.match(
+    connectorSource,
+    /\.returning\(\{ id: bankConnectorsTable\.id \}\)[\s\S]{0,180}Object\.assign\(this\.config, merged\)/,
+  );
+  assert.doesNotMatch(
+    connectorSource,
+    /failed to persist config \(non-fatal\)/,
+  );
+  assert.match(
+    bankingRoute,
+    /OAuthStateSchema[\s\S]{0,160}safeParse\(req\.body\)/,
+  );
+  assert.match(
+    bankingRoute,
+    /typeof config\["oauthState"\] !== "string"/,
+  );
+  assert.doesNotMatch(
+    bankingRoute,
+    /req\.log\.info\(\{\s*bank,\s*body\s*\}/,
+  );
 });
 
 test("logged Error objects never expose their message or stack", () => {

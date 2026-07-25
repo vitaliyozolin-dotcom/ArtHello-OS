@@ -4,7 +4,7 @@ import { Loader2, Lock, Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
   const { login } = useAuth();
-  const [loginStr, setLoginStr] = useState('owner');
+  const [loginStr, setLoginStr] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,18 +36,27 @@ export default function LoginPage() {
           <h2 className="text-lg font-semibold text-gray-900 mb-6">Войти в систему</h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Role selector */}
+            {/* Login */}
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Пользователь</label>
-              <select
+              <label
+                htmlFor="login"
+                className="block text-xs font-medium text-gray-500 mb-1.5"
+              >
+                Логин
+              </label>
+              <input
+                id="login"
+                name="username"
+                type="text"
                 value={loginStr}
                 onChange={(e) => setLoginStr(e.target.value)}
+                placeholder="Введите логин"
+                autoComplete="username"
+                maxLength={80}
+                required
+                autoFocus
                 className="w-full bg-[#F7F8FB] border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
-              >
-                <option value="owner">Владелец</option>
-                <option value="accountant">Бухгалтер</option>
-                <option value="viewer">Просмотр</option>
-              </select>
+              />
             </div>
 
             {/* Password */}
@@ -83,7 +92,7 @@ export default function LoginPage() {
             {/* Submit */}
             <button
               type="submit"
-              disabled={loading || !password}
+              disabled={loading || !loginStr.trim() || !password}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-violet-600 text-white text-sm font-semibold rounded-xl hover:bg-violet-700 disabled:opacity-50 transition-colors"
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}

@@ -20,6 +20,7 @@ import {
   decryptBankConnectorConfig,
   sealBankConnectorConfig,
 } from "../config-vault.js";
+import { resolveTochkaOAuthRedirectUri } from "../oauth-redirect.js";
 import crypto from "crypto";
 
 // ─── Tochka Open Banking endpoints ───────────────────────────────────────────
@@ -32,9 +33,10 @@ const TOCHKA_AUTH_URL       = "https://enter.tochka.com/connect/authorize";
 const CONSENT_PATH       = "/v1.0/consents";
 const ACCOUNTS_PATH      = "/open-banking/v1.0/accounts";
 const CUSTOMERS_PATH     = "/open-banking/v1.0/customers";
-const OAUTH_SCOPE_SERVICE = "accounts balances";
-// Authorization Code scope: accounts + balances + customers + statements (no openid)
-const OAUTH_SCOPE_CODE    = "accounts balances customers statements";
+// Tochka requires the same scope string through every OAuth step. This
+// read-only scope intentionally excludes payments, SBP and acquiring.
+const OAUTH_SCOPE_READ_ONLY =
+  "accounts balances customers statements";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -87,6 +89,22 @@ function responseShape(body: string): {
   };
 }
 
+function readOnlyOperationName(path: string): string {
+  if (path === ACCOUNTS_PATH) return "accounts_list";
+  if (path === CUSTOMERS_PATH) return "customers_list";
+  if (path === "/open-banking/v1.0/statements") {
+    return "statements_list_or_init";
+  }
+  if (path.includes("/balances")) return "account_balances";
+  if (path.includes("/statements/") && path.endsWith("/transactions")) {
+    return "statement_transactions";
+  }
+  if (path.includes("/statements/")) return "statement_download";
+  if (path.includes("/statements")) return "account_statements";
+  if (path.includes("/transactions")) return "account_transactions";
+  return "read_only_api";
+}
+
 function upstreamError(
   operation: string,
   status: number,
@@ -107,7 +125,7 @@ const DIAGNOSTIC_MESSAGES: Record<DiagnosticCode, string> = {
   not_configured:             "Укажите clientId и clientSecret в настройках коннектора.",
   auth_failed:                "Ошибка OAuth: неверный clientId или clientSecret.",
   token_expired:              "Hybrid token истёк — выполните обновление (refresh).",
-  scope_missing:              "Недостаточно прав (scopes). Убедитесь, что в Точке выданы: accounts, balances, transactions.",
+  scope_missing:              "Недостаточно прав. Требуются только read-only scopes: accounts, balances, customers, statements.",
   accounts_forbidden:         "Доступ к счетам запрещён. Пройдите Authorization Code flow и подтвердите consent.",
   open_banking_not_activated: "Open Banking не активирован в личном кабинете Точки → Интеграции → Open Banking.",
   sandbox_prod_mismatch:      "Несоответствие окружений: sandbox-ключи с production-URL или наоборот.",
@@ -123,9 +141,7 @@ const DIAGNOSTIC_MESSAGES: Record<DiagnosticCode, string> = {
 // ─── Redirect URI helper ──────────────────────────────────────────────────────
 
 export function getDefaultRedirectUri(): string {
-  const domain = process.env["REPLIT_DOMAINS"]?.split(",")[0]?.trim();
-  if (domain) return `https://${domain}/api/banking/oauth/callback`;
-  return `http://localhost:8080/api/banking/oauth/callback`;
+  return resolveTochkaOAuthRedirectUri();
 }
 
 // ─── TochkaConnector ──────────────────────────────────────────────────────────
@@ -165,9 +181,8 @@ export class TochkaConnector implements BankConnectorInterface {
   private async persistConfig(update: Partial<TochkaConfig>): Promise<void> {
     const merged = { ...this.config, ...update };
     merged.authStage = this.getAuthStageFrom(merged);
-    Object.assign(this.config, merged);
     try {
-      await db
+      const persisted = await db
         .update(bankConnectorsTable)
         .set({
           config: sealBankConnectorConfig(
@@ -176,9 +191,18 @@ export class TochkaConnector implements BankConnectorInterface {
           ),
           updatedAt: new Date(),
         })
-        .where(eq(bankConnectorsTable.id, this.connectorId));
+        .where(eq(bankConnectorsTable.id, this.connectorId))
+        .returning({ id: bankConnectorsTable.id });
+      if (persisted.length !== 1) {
+        throw new Error("connector row was not updated");
+      }
+      Object.assign(this.config, merged);
     } catch (err) {
-      logger.warn({ err, connectorId: this.connectorId }, "Tochka: failed to persist config (non-fatal)");
+      logger.error(
+        { err, connectorId: this.connectorId },
+        "Tochka: encrypted config persistence failed",
+      );
+      throw new Error("Tochka encrypted config persistence failed");
     }
   }
 
@@ -190,6 +214,12 @@ export class TochkaConnector implements BankConnectorInterface {
     }
     if (cfg.oauthState && cfg.consentId) return "awaiting_callback";
     if (cfg.consentId) return "consent_pending";
+    if (
+      cfg.serviceToken &&
+      !isExpired(cfg.serviceTokenExpiresAt)
+    ) {
+      return "service_token_ok";
+    }
     return "not_configured";
   }
 
@@ -207,7 +237,7 @@ export class TochkaConnector implements BankConnectorInterface {
       grant_type: "client_credentials",
       client_id: this.config.clientId!,
       client_secret: this.config.clientSecret!,
-      scope: OAUTH_SCOPE_SERVICE,
+      scope: OAUTH_SCOPE_READ_ONLY,
     });
     const res = await fetch(TOCHKA_TOKEN_URL, {
       method: "POST",
@@ -300,7 +330,11 @@ export class TochkaConnector implements BankConnectorInterface {
     }
     const consentStatus = String(dataBlock["Status"] ?? dataBlock["status"] ?? "AwaitingAuthorisation");
     await this.persistConfig({ consentId, consentStatus, consentCreatedAt: new Date().toISOString() });
-    logger.info({ connectorId: this.connectorId, consentId, consentStatus }, "Tochka: consent created");
+    logger.info({
+      connectorId: this.connectorId,
+      consentCreated: true,
+      consentStatus,
+    }, "Tochka: consent created");
     return consentId;
   }
 
@@ -313,7 +347,7 @@ export class TochkaConnector implements BankConnectorInterface {
       response_type: "code",
       state,
       redirect_uri: redirectUri,
-      scope: OAUTH_SCOPE_CODE,
+      scope: OAUTH_SCOPE_READ_ONLY,
       consent_id: consentId,
     });
     return `${TOCHKA_AUTH_URL}?${params.toString()}`;
@@ -323,16 +357,18 @@ export class TochkaConnector implements BankConnectorInterface {
 
   async startOAuthFlow(redirectUri?: string): Promise<TochkaOAuthStartResult> {
     if (!this.isConfigured()) throw new Error("Tochka: не настроен (нужны clientId и clientSecret)");
-    const resolvedRedirectUri = redirectUri ?? this.config.redirectUri ?? getDefaultRedirectUri();
+    const resolvedRedirectUri = redirectUri ?? getDefaultRedirectUri();
     const consentId = await this.createConsent();
     const state = generateState();
     const authorizeUrl = this.buildAuthorizeUrl(consentId, state, resolvedRedirectUri);
     await this.persistConfig({ oauthState: state });
-    logger.info({ connectorId: this.connectorId, consentId, authorizeUrl }, "Tochka: OAuth flow started");
+    logger.info({
+      connectorId: this.connectorId,
+      consentCreated: true,
+      authorizationUrlCreated: true,
+    }, "Tochka: OAuth flow started");
     return {
       authorizeUrl,
-      consentId,
-      state,
       stage: "awaiting_callback",
     };
   }
@@ -340,7 +376,7 @@ export class TochkaConnector implements BankConnectorInterface {
   // ─── Step 5: Exchange authorization code → hybrid tokens ─────────────────
 
   async exchangeCode(code: string, redirectUri?: string): Promise<void> {
-    const resolvedRedirectUri = redirectUri ?? this.config.redirectUri ?? getDefaultRedirectUri();
+    const resolvedRedirectUri = redirectUri ?? getDefaultRedirectUri();
     // scope must match what was used in the authorize request
     const params = new URLSearchParams({
       grant_type: "authorization_code",
@@ -348,13 +384,12 @@ export class TochkaConnector implements BankConnectorInterface {
       redirect_uri: resolvedRedirectUri,
       client_id: this.config.clientId!,
       client_secret: this.config.clientSecret!,
-      scope: OAUTH_SCOPE_CODE,
+      scope: OAUTH_SCOPE_READ_ONLY,
     });
     logger.info({
       connectorId: this.connectorId,
-      redirectUri: resolvedRedirectUri,
-      scope: OAUTH_SCOPE_CODE,
-      tokenUrl: TOCHKA_TOKEN_URL,
+      callbackConfigured: true,
+      readOnlyScope: true,
     }, "Tochka: exchanging auth code");
     const res = await fetch(TOCHKA_TOKEN_URL, {
       method: "POST",
@@ -448,7 +483,10 @@ export class TochkaConnector implements BankConnectorInterface {
       refreshToken,
       tokenExpiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
     });
-    logger.info({ connectorId: this.connectorId, tokenLength: accessToken.length }, "Tochka: hybrid token refreshed");
+    logger.info({
+      connectorId: this.connectorId,
+      hybridTokenRefreshed: true,
+    }, "Tochka: hybrid token refreshed");
   }
 
   // ─── BankConnectorInterface.authenticate() ────────────────────────────────
@@ -520,20 +558,23 @@ export class TochkaConnector implements BankConnectorInterface {
     logger.info({
       step: "api_fetch",
       status: "request",
-      path,
+      operation: readOnlyOperationName(path),
       sent_customer_header: sentCustomerHeader,
     }, "Tochka: apiFetch request");
 
     logger.debug({
       connectorId: this.connectorId,
-      url,
+      operation: readOnlyOperationName(path),
       sentCustomerHeader,
     }, "Tochka: API request");
 
     const res = await fetch(url, { headers });
 
     if (res.status === 401) {
-      logger.warn({ connectorId: this.connectorId, url }, "Tochka: 401 — refreshing hybrid token");
+      logger.warn({
+        connectorId: this.connectorId,
+        operation: readOnlyOperationName(path),
+      }, "Tochka: 401 — refreshing hybrid token");
       await this.refreshHybridToken();
       const retryToken = this.config.accessToken!;
       const retryHeaders: Record<string, string> = {
@@ -559,6 +600,11 @@ export class TochkaConnector implements BankConnectorInterface {
   // ─── API POST (for statement init and other write operations) ─────────────
 
   private async apiPost<T>(path: string, body: unknown): Promise<T> {
+    if (path !== "/open-banking/v1.0/statements") {
+      throw new Error(
+        "Tochka write endpoint blocked: only read-only statement initiation is allowed",
+      );
+    }
     const token = await this.ensureHybridToken();
     if (!this.config.customerCode) {
       throw new Error(`Tochka: CustomerCode не определён — невозможно POST ${path}. Запустите resolveCustomerCode().`);
@@ -575,14 +621,17 @@ export class TochkaConnector implements BankConnectorInterface {
     logger.info({
       step: "api_post",
       status: "request",
-      path,
+      operation: "statement_init_read_only",
       sent_customer_header: true,
     }, "Tochka: apiPost request");
 
     const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
 
     if (res.status === 401) {
-      logger.warn({ connectorId: this.connectorId, url }, "Tochka: 401 on POST — refreshing token");
+      logger.warn({
+        connectorId: this.connectorId,
+        operation: "statement_init_read_only",
+      }, "Tochka: 401 on POST — refreshing token");
       await this.refreshHybridToken();
       const retryToken = this.config.accessToken!;
       const retryHeaders: Record<string, string> = {
@@ -656,9 +705,6 @@ export class TochkaConnector implements BankConnectorInterface {
         logger.info({
           step: "get_balances",
           status: "ok",
-          accountId: id,
-          raw_balance_value: parseFloat(amountStr) || 0,
-          parsed_balance_value: signedAmount,
           credit_debit_indicator: indicator,
           balance_sign_source: indicator === "Credit" ? "inverted_credit_overdraft" : "debit_positive",
           currency,
@@ -676,7 +722,11 @@ export class TochkaConnector implements BankConnectorInterface {
           raw: bal,
         });
       } catch (err) {
-        logger.warn({ step: "get_balances", status: "error", accountId: id, err }, "Tochka: balance fetch failed for account (non-fatal)");
+        logger.warn({
+          step: "get_balances",
+          status: "error",
+          err,
+        }, "Tochka: balance fetch failed for account (non-fatal)");
       }
     }
     return results;
@@ -732,7 +782,6 @@ export class TochkaConnector implements BankConnectorInterface {
     logger.info({
       step: "get_statements",
       status: "ok",
-      accountId,
       statements_count: stmtArr.length,
       from: fromStr,
       to: toStr,
@@ -751,8 +800,6 @@ export class TochkaConnector implements BankConnectorInterface {
     logger.info({
       step: "get_statement_transactions",
       status: "ok",
-      accountId,
-      statementId,
       transactions_count: txArr.length,
     }, "Tochka: statement transactions fetched");
 
@@ -792,7 +839,6 @@ export class TochkaConnector implements BankConnectorInterface {
 
     logger.info({
       step: "init_statement",
-      accountId,
       startDateTime,
       endDateTime,
     }, "Tochka: initiating statement (async)");
@@ -812,8 +858,7 @@ export class TochkaConnector implements BankConnectorInterface {
     logger.info({
       step: "init_statement",
       status: "ok",
-      accountId,
-      statementId,
+      statementCreated: true,
     }, "Tochka: statement initiated — waiting for Ready status");
 
     return statementId;
@@ -853,8 +898,7 @@ export class TochkaConnector implements BankConnectorInterface {
 
     logger.info({
       step: "get_statement_by_id",
-      accountId,
-      statementId,
+      statementRequested: true,
     }, "Tochka: fetching ready statement");
 
     const data = await this.apiFetch<Record<string, unknown>>(path);
@@ -888,8 +932,6 @@ export class TochkaConnector implements BankConnectorInterface {
       tag: "TX_SYNC_STATEMENT_RAW",
       step: "get_statement_by_id",
       status: "raw_debug",
-      accountId,
-      statementId,
       top_level_keys: Object.keys(data),
       data_block_keys: Object.keys(dataBlock),
       stmt_block_keys: Object.keys(stmtBlock),
@@ -902,8 +944,6 @@ export class TochkaConnector implements BankConnectorInterface {
       tag: "TX_SYNC_READY",
       step: "get_statement_by_id",
       status: "ok",
-      accountId,
-      statementId,
       transactions_count: txArr.length,
       first_tx_keys: txArr[0] ? Object.keys(txArr[0]) : [],
     }, "[TX_SYNC_READY] Tochka: statement downloaded");
@@ -1021,7 +1061,10 @@ export class TochkaConnector implements BankConnectorInterface {
       `${this.config.clientId!}:${this.config.clientSecret!}`
     ).toString("base64");
 
-    logger.info({ connectorId: this.connectorId, url: TOCHKA_INTROSPECT_URL }, "Tochka: introspecting hybrid token");
+    logger.info({
+      connectorId: this.connectorId,
+      introspectionRequested: true,
+    }, "Tochka: introspecting hybrid token");
     const res = await fetch(TOCHKA_INTROSPECT_URL, {
       method: "POST",
       headers: {
@@ -1064,7 +1107,10 @@ export class TochkaConnector implements BankConnectorInterface {
       Accept: "application/json",
       "Content-Type": "application/json",
     };
-    logger.info({ connectorId: this.connectorId, url }, "Tochka: fetching customers");
+    logger.info({
+      connectorId: this.connectorId,
+      customerDiscoveryRequested: true,
+    }, "Tochka: fetching customers");
     const res = await fetch(url, { headers });
     const body = await res.text();
 
@@ -1375,11 +1421,9 @@ export class TochkaConnector implements BankConnectorInterface {
     logger.info({
       step: "normalize_account",
       status: "ok",
-      externalAccountId,
-      accountNumber,
-      maskedAccount,
-      accountName,
       accountStatus,
+      accountIdentifierPresent: !!externalAccountId,
+      accountNamePresent: !!accountName,
     }, "Tochka: normalizeAccount result");
 
     return {
@@ -1431,7 +1475,6 @@ export class TochkaConnector implements BankConnectorInterface {
     };
     return {
       stage,
-      consentId: this.config.consentId ?? null,
       consentStatus: this.config.consentStatus ?? null,
       hasHybridToken: !!this.config.accessToken,
       hybridTokenExpiresAt: this.config.tokenExpiresAt ?? null,
@@ -1479,21 +1522,10 @@ export class TochkaConnector implements BankConnectorInterface {
       let diagCode: DiagnosticCode;
       let message: string;
       let authOk = false;
-      let authorizeUrl: string | null = null;
 
       if (stage === "awaiting_callback" || stage === "consent_pending") {
         diagCode = "awaiting_user_authorization";
         message = "Hybrid token отсутствует — пользователь должен подтвердить доступ в Точке";
-        if (this.config.consentId) {
-          try {
-            const state = this.config.oauthState ?? generateState();
-            authorizeUrl = this.buildAuthorizeUrl(
-              this.config.consentId,
-              state,
-              this.config.redirectUri ?? getDefaultRedirectUri()
-            );
-          } catch {/* ignore */}
-        }
       } else if (stage === "token_expired") {
         diagCode = "token_expired";
         message = "Hybrid token истёк — выполните обновление через refresh_token";
@@ -1524,9 +1556,7 @@ export class TochkaConnector implements BankConnectorInterface {
         checkedAt,
         authOk,
         authStage: stage,
-        consentId: this.config.consentId ?? null,
         consentStatus: this.config.consentStatus ?? null,
-        authorizeUrl,
         scopesGranted: [],
         hasAccountsScope: false,
         hasTransactionsScope: false,
@@ -1634,7 +1664,6 @@ export class TochkaConnector implements BankConnectorInterface {
         checkedAt, authOk: true,
         tokenExpiresAt: this.config.tokenExpiresAt,
         authStage: stage,
-        consentId: this.config.consentId ?? null,
         consentStatus: this.config.consentStatus ?? null,
         scopesGranted: [],
         hasAccountsScope: false,
@@ -1670,9 +1699,8 @@ export class TochkaConnector implements BankConnectorInterface {
       tokenExpiresAt: this.config.tokenExpiresAt,
       tokenExpired: false,
       authStage: "token_ok",
-      consentId: this.config.consentId ?? null,
       consentStatus: "Authorised",
-      scopesGranted: ["accounts", "balances", "transactions"],
+      scopesGranted: ["accounts", "balances", "customers", "statements"],
       hasAccountsScope: true,
       hasTransactionsScope: true,
       accountsAccessOk: true,

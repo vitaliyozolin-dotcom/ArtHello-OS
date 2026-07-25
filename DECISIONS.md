@@ -1,5 +1,43 @@
 # ArtHello OS — Decisions
 
+## D-036 — Raw lineage и snapshot-state не восстанавливать догадкой
+
+Статус: принято в source candidate; независимый финальный gate ожидается
+
+`alpha_raw_records` является append-only. Повторное получение того же payload создаёт новое observation batch/scope/page, а изменённый payload — новую raw-версию. Каждая материализованная AlfaCRM-строка обязана ссылаться на существующие raw и batch; migration `0014` завершается fail closed при legacy rows без доказуемого provenance вместо автоматического backfill.
+
+Current/stale reconciliation выполняется только после полной успешной пагинации минимального scope. Partial, repeated page, max guard и network error не tombstone-ят предыдущий snapshot. Лиды и ученики сохраняют историю, но после успешного student snapshot одна запись не может одновременно оставаться current lead. Pending family candidates без текущего evidence становятся stale; решения человека не переписываются.
+
+## D-035 — Incremental AlfaCRM начинается с проверяемого change discovery
+
+Статус: принято в исходниках; live data не проверены
+
+Полный read-only snapshot остаётся обязательной базой. Лиды загружаются отдельно от учеников; абонементы клиентов, платёжные справочники и журнал изменений имеют raw + normalized слои с provenance и идемпотентными business keys. Incremental-режим читает `log/index` от watermark с перекрытием 1–7 дней и честно называется discovery: до реализации безопасной rematerialization он не доказывает обновление всех domain-таблиц. Запись в AlfaCRM запрещена.
+
+## D-034 — Sites не является банковским OAuth backend
+
+Статус: принято, текущий consent заблокирован
+
+Корень owner-only Sites нельзя регистрировать как Redirect URI «Точки»: контрольная оболочка не хранит банковские secrets и не должна получать authorization code. Допустим только точный HTTPS URL защищённого API вида `/api/banking/oauth/callback`, совпадающий с runtime config. `.chatgpt.site`, HTTP, корневой путь и произвольные callback-пути завершаются fail closed.
+
+## D-033 — Новый клиент «Точки» использовать только в read-only контуре
+
+Статус: production client auth подтверждён, доступ к данным заблокирован до OAuth
+
+Владелец разрешил временно использовать новый production client. Service token проверяет приложение, но не даёт доступа к счетам. До корректного callback, пользовательского consent, hybrid token, protected backend Secrets и backup/rollback разрешены только безопасные auth/status probes. Платёжные scopes, создание платежей и иные денежные действия запрещены.
+
+## D-032 — Реальный payroll импортировать как evidence, а не как утверждённые правила
+
+Статус: принято и выполнено в изолированной sandbox-БД
+
+Значения и formula snapshots реальной таблицы сохраняются с происхождением строки. Вычисленные выплаты и начисления можно сверять, но формулы, ставки, KPI и условия не становятся payroll rules без явного утверждения. Несопоставленные identities не объединяются автоматически; персональные строки, суммы и реквизиты не публикуются в Sites.
+
+## D-031 — Полный AlfaCRM read разрешён только в отдельную sandbox-БД
+
+Статус: разрешено владельцем; свежий импорт заблокирован сетью
+
+Текущие временные credentials допускаются для read-only загрузки всех требуемых CRM-сущностей в отдельную БД вне source checkout. Запись в AlfaCRM, production sync и передача PII в Sites запрещены. Семьи не подтверждаются автоматически по телефону: importer создаёт только кандидатов для ручного решения. После end-to-end проверки credentials перевыпускаются и помещаются только в protected backend environment.
+
 ## D-030 — Финансовые инварианты проверять без бизнес-допущений
 
 Статус: принято как synthetic guardrail, не как финансовая готовность

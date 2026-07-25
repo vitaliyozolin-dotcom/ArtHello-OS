@@ -175,14 +175,11 @@ export interface TochkaCustomer {
 
 export interface TochkaOAuthStartResult {
   authorizeUrl: string;
-  consentId: string;
-  state: string;
   stage: TochkaAuthStage;
 }
 
 export interface TochkaOAuthStatusResult {
   stage: TochkaAuthStage;
-  consentId: string | null;
   consentStatus: string | null;
   hasHybridToken: boolean;
   hybridTokenExpiresAt: string | null;

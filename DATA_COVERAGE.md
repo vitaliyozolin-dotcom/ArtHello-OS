@@ -1,12 +1,36 @@
 # ArtHello OS — Data Coverage
 
-## Live read-only срез A.3 — 2026-07-25
+## Sandbox data срез A.4 — 2026-07-25
+
+Migration `0014` применена после отдельной копии только к sandbox. Аудит показывает 0 broken provenance по 13 материализуемым таблицам, но сами AlfaCRM-таблицы пока содержат 0 свежих строк из-за предыдущего network timeout. Это доказывает схему и guardrails, а не фактическое покрытие источника. `A4-13-01/02/03` ждут независимого финального PASS.
+
+| Источник / область | Свежая проверка | Обезличенный результат | Статус |
+|---|---|---|---|
+| Payroll Google Sheet | полный snapshot с evaluated values и formulas | 22 вкладки, 3 689 raw, 114 identities, 1 881 выплат, 1 328 начислений | VERIFIED IN ISOLATED SANDBOX |
+| Payroll integrity | повторный source-vs-DB audit | counts и суммы совпали; duplicates 0; 26/17 unresolved | PASS WITH MANUAL REVIEW |
+| Payroll rules | активация formulas/KPI | не выполнялась | BLOCKED PENDING APPROVAL |
+| Legal entities | прямое подтверждение владельца | 3 юрлица и 3 operating-unit rules | OWNER-CONFIRMED MASTER DATA |
+| AlfaCRM full import | свежий read-only run | request timeout; fetched 0; saved 0 | NETWORK BLOCKED |
+| AlfaCRM importer coverage | code + 18 AlfaCRM tests, включая PGlite normalization smoke | students/leads separately, groups, memberships, teachers, lessons, attendance, payments, customer tariffs, payment dictionaries, change log | CODE/TEST VERIFIED, DATA NOT VERIFIED |
+| AlfaCRM incremental discovery | `log/index` + watermark overlap | change discovery with 1–7 day overlap; entity rematerialization not claimed | CODE/TEST VERIFIED, LIVE NOT VERIFIED |
+| Family identity | importer policy | manual candidates only; automatic merges 0 | SAFE CANDIDATE MODE |
+| Tochka production client | token + accounts probe | token HTTP 200; accounts HTTP 403 | AUTH VERIFIED, DATA REQUIRES OAUTH |
+| Tochka accounts/transactions | consent не создавался | 0 records | BLOCKED BY CALLBACK/OAUTH |
+| Public Replit | внешний HTTP audit | old build; indexing protections отсутствуют live | HIGH / RELEASE REQUIRED |
+| Sites control | sanitized static artifact | без PII, payroll sums, bank records и secrets | OWNER-ONLY SAFE CONTROL |
+
+Исторический AlfaCRM count `8` не является свежим результатом A.4. Пока защищённый backend не завершит full import, все фактические CRM counts, даты и branch-to-legal-entity mappings имеют статус `NOT VERIFIED`.
+
+В payroll Sites показывает только контрольные количества. Реальные имена, строки, суммы и формулы остаются в локальной sandbox-БД и source snapshot, не в frontend или deployment artifact.
+
+## Исторический live read-only срез A.3 — 2026-07-25
 
 | Источник | Проверка | Результат | Статус данных |
 |---|---|---|---|
 | AlfaCRM auth | официальный `/v2api/auth/login` | HTTP 200 | VERIFIED |
 | AlfaCRM branches | `/0/branch/index`, без публикации записей | 8 филиалов | VERIFIED COUNT |
 | AlfaCRM students/groups/teachers/subjects/payments/lessons | минимальные probes | сетевой контур нестабилен | NOT VERIFIED |
+| AlfaCRM leads/subscriptions/payment dictionaries/change log | обязательные read-only endpoints | реализованы и протестированы в коде; live rows не получены | CODE VERIFIED, DATA NOT VERIFIED |
 | Tochka client credentials | официальный `/connect/token` | HTTP 200, service token получен | VERIFIED AUTH |
 | Tochka accounts | service token, без consent | HTTP 403 | BLOCKED BY HYBRID OAUTH |
 | Tochka payments | не вызывались | действий не было | NOT ATTEMPTED |

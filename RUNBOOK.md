@@ -1,5 +1,37 @@
 # ArtHello OS — Runbook
 
+## A.4: изолированный импорт данных
+
+Sandbox DB обязана находиться по абсолютному пути вне source checkout. Единственная переменная пути — `ARTHELLO_SANDBOX_DB_PATH`; команда завершится fail closed при пустом, относительном, корневом или вложенном в репозиторий пути.
+
+```bash
+pnpm --filter @workspace/scripts run sandbox:init
+pnpm --filter @workspace/scripts run sandbox:import:alfacrm
+pnpm --filter @workspace/scripts run sandbox:audit:alfacrm
+pnpm --filter @workspace/scripts run sandbox:audit:payroll
+pnpm --filter @workspace/scripts run test
+```
+
+Payroll importer принимает owner-provided snapshot только через stdin. Snapshot и sandbox DB не помещаются в Git, Sites, stdout или frontend. Перед импортом payroll отдельно получить snapshot Google Sheet с `FORMATTED_VALUE` и `FORMULA`, затем передать один JSON-пакет в stdin без shell-history с секретами.
+
+AlfaCRM importer принимает `ALFACRM_DOMAIN`, `ALFACRM_EMAIL`, `ALFACRM_API_KEY` только через process environment защищённого процесса. Он использует только read endpoints, сериализует запросы не чаще одного старта в 260 ms, сохраняет raw + normalized records и выводит только безопасный агрегированный отчёт. `partial/request_timeout` не интерпретируется как нулевое покрытие источника.
+
+Полный режим используется по умолчанию: `ALFACRM_SYNC_MODE=full`. Он отдельно получает leads и students, затем groups, teachers, payments, lessons, memberships, customer tariffs, справочники и change log. Пагинация передаёт `page` + `pageSize: 50`. Каждая страница атомарно сохраняет immutable raw, observation и normalized row; reconciliation current/stale запускается только после полного completed scope. Repeat page, max guard, transport/normalization error оставляют scope `incomplete` и не tombstone-ят отсутствующие rows. Независимые customer/group scopes продолжаются после локальной ошибки.
+
+Перед `0014` обязательно создать копию sandbox. Migration завершается fail closed, если в legacy normalized AlfaCRM-таблицах есть строки без доказуемого raw/batch provenance; автоматического backfill по догадке нет. После apply выполнить `sandbox:audit:alfacrm`, проверить `normalizedRowsWithBrokenProvenance = 0`, raw UPDATE/DELETE rejection и rollback `0014_alfa_lineage_snapshot.down.sql`.
+
+Для режима только обнаружения изменений задать `ALFACRM_SYNC_MODE=incremental`, `ALFACRM_WATERMARK=<ISO timestamp>` и при необходимости `ALFACRM_OVERLAP_DAYS=1..7` (по умолчанию 2). Если watermark не передан, importer использует время последнего завершённого batch; при отсутствии такого batch останавливается fail closed. Этот режим обновляет change log, но не утверждает, что все изменившиеся domain rows rematerialized.
+
+### Tochka OAuth
+
+1. Поднять защищённый backend с exact callback `/api/banking/oauth/callback`, HTTPS, persistent DB, `SESSION_SECRET`, encryption key ring и protected Secrets.
+2. Создать backup ID, проверить restore/rollback и guarded migration encrypted connector config в sandbox.
+3. Зарегистрировать в кабинете банка exact backend URL. Sites root и любой `.chatgpt.site` URL запрещены.
+4. Проверить state-bound Authorization Code flow и запросить только read-only permissions для accounts, balances, customers и statements.
+5. Выполнить owner consent в пользовательском браузере. Authorization code, tokens и customer identifiers не выводить и не передавать через чат.
+6. Проверить accounts/balances/statements в sandbox; payment endpoints не вызывать.
+7. После end-to-end проверки перевыпустить временно раскрытый client secret и сохранить новый только в protected backend Secrets.
+
 ## A.3: безопасный live read-only probe
 
 Команда: `pnpm --filter @workspace/api-server run probe:live-read-only`.

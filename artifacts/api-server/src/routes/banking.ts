@@ -13,6 +13,7 @@ import { z } from "zod";
 import { syncConnector, buildConnector } from "../lib/banking/registry.js";
 import { TochkaConnector, getDefaultRedirectUri } from "../lib/banking/connectors/tochka.js";
 import { sanitizeConnectorHealthResponse } from "../lib/banking/sanitize-health.js";
+import { resolveBankingFrontendBaseUrl } from "../lib/banking/oauth-redirect.js";
 import {
   decryptBankConnectorConfig,
   sealBankConnectorConfig,
@@ -262,7 +263,12 @@ bankingRouter.get("/banking/connectors/:id/customers", async (req, res) => {
       business_count:              customers.filter(c => (c.customerType ?? "").toLowerCase() === "business").length,
     };
 
-    req.log.info({ debug }, "GET /customers resolved customerCode debug");
+    req.log.info({
+      connectorId: id,
+      customerCount: customers.length,
+      businessCustomerCount: debug.business_count,
+      customerCodeSaved: debug.customer_code_saved,
+    }, "GET /customers resolved customerCode");
     res.json({ customers, resolvedCustomerCode, debug });
   } catch (err) {
     req.log.error({ err }, "GET /banking/connectors/:id/customers failed");
@@ -297,7 +303,10 @@ bankingRouter.post("/banking/connectors/:id/resolve-customer", async (req, res) 
       })
       .where(eq(bankConnectorsTable.id, id));
 
-    req.log.info({ connectorId: id, customerCode: customerCode.trim() }, "Tochka: customerCode saved");
+    req.log.info({
+      connectorId: id,
+      customerCodeSaved: true,
+    }, "Tochka: customerCode saved");
     res.json({ ok: true, customerCode: customerCode.trim() });
   } catch (err) {
     req.log.error({ err }, "POST /banking/connectors/:id/resolve-customer failed");
@@ -355,11 +364,21 @@ bankingRouter.get("/banking/connectors/:id/oauth/status", async (req, res) => {
 // ─── POST /banking/connectors/:id/oauth/callback ──────────────────────────────
 // Step 2: receive code from frontend after Tochka redirects back
 
+const OAuthCodeSchema = z.string().min(1).max(2048);
+const OAuthStateSchema = z.string().regex(/^[a-f0-9]{48}$/);
+
 bankingRouter.post("/banking/connectors/:id/oauth/callback", async (req, res) => {
   const { id } = req.params;
-  const { code, state } = req.body as { code?: string; state?: string };
+  const parsedCallback = z.object({
+    code: OAuthCodeSchema,
+    state: OAuthStateSchema,
+  }).safeParse(req.body);
 
-  if (!code) { res.status(400).json({ error: "code is required" }); return; }
+  if (!parsedCallback.success) {
+    res.status(400).json({ error: "code and state are required" });
+    return;
+  }
+  const { code, state } = parsedCallback.data;
 
   try {
     const [row] = await db
@@ -370,9 +389,13 @@ bankingRouter.post("/banking/connectors/:id/oauth/callback", async (req, res) =>
 
     const config = decryptBankConnectorConfig(id, row.config);
 
-    // Verify state if provided (CSRF guard)
-    if (state && config["oauthState"] && config["oauthState"] !== state) {
-      res.status(400).json({ error: "OAuth state mismatch — возможная CSRF атака" }); return;
+    // State is mandatory and must match exactly (CSRF guard).
+    if (
+      typeof config["oauthState"] !== "string" ||
+      config["oauthState"] !== state
+    ) {
+      res.status(400).json({ error: "OAUTH_STATE_MISMATCH" });
+      return;
     }
 
     const connector = new TochkaConnector(id, config);
@@ -409,25 +432,30 @@ bankingRouter.post("/banking/connectors/:id/oauth/callback", async (req, res) =>
 // then redirects user back to the frontend banking page.
 
 bankingRouter.get("/banking/oauth/callback", async (req, res) => {
-  const code = req.query["code"] as string | undefined;
-  const state = req.query["state"] as string | undefined;
-  const error = req.query["error"] as string | undefined;
+  const code = OAuthCodeSchema.safeParse(req.query["code"]);
+  const state = OAuthStateSchema.safeParse(req.query["state"]);
+  const error =
+    typeof req.query["error"] === "string" &&
+    req.query["error"].length <= 128
+      ? req.query["error"]
+      : undefined;
 
-  const frontendBase = (() => {
-    const domain = process.env["REPLIT_DOMAINS"]?.split(",")[0]?.trim();
-    return domain ? `https://${domain}` : "http://localhost:21987";
-  })();
+  const frontendBase = resolveBankingFrontendBaseUrl();
 
   if (error) {
-    req.log.warn({ error, state }, "Tochka OAuth callback: error from bank");
-    res.redirect(`${frontendBase}/?tochka_error=${encodeURIComponent(error)}`);
+    req.log.warn({
+      providerErrorPresent: true,
+    }, "Tochka OAuth callback: error from bank");
+    res.redirect(`${frontendBase}/?tochka_error=provider_rejected`);
     return;
   }
 
-  if (!code || !state) {
+  if (!code.success || !state.success) {
     res.redirect(`${frontendBase}/?tochka_error=missing_code`);
     return;
   }
+  const codeValue = code.data;
+  const stateValue = state.data;
 
   try {
     // Find connector with matching oauthState
@@ -439,14 +467,16 @@ bankingRouter.get("/banking/oauth/callback", async (req, res) => {
     const matchingRow = rows.find((r) => {
       try {
         const cfg = decryptBankConnectorConfig(r.id, r.config);
-        return cfg["oauthState"] === state;
+        return cfg["oauthState"] === stateValue;
       } catch {
         return false;
       }
     });
 
     if (!matchingRow) {
-      req.log.warn({ state }, "Tochka OAuth callback: no connector with matching oauthState");
+      req.log.warn(
+        "Tochka OAuth callback: no connector with matching oauthState",
+      );
       res.redirect(`${frontendBase}/?tochka_error=state_mismatch`);
       return;
     }
@@ -458,7 +488,7 @@ bankingRouter.get("/banking/oauth/callback", async (req, res) => {
         matchingRow.config,
       ),
     );
-    await connector.exchangeCode(code, getDefaultRedirectUri());
+    await connector.exchangeCode(codeValue, getDefaultRedirectUri());
 
     await db
       .update(bankConnectorsTable)
@@ -1068,8 +1098,10 @@ bankingRouter.get("/banking/data-truth", async (req, res) => {
 
 bankingRouter.post("/banking/webhooks/:bank", async (req, res) => {
   const { bank } = req.params;
-  const body = req.body as Record<string, unknown>;
-  req.log.info({ bank, body }, "Banking webhook received");
+  req.log.info({
+    bank,
+    payloadPresent: Boolean(req.body),
+  }, "Banking webhook received");
 
   try {
     // Find active connector for this bank

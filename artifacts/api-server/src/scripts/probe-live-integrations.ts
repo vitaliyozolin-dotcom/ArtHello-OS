@@ -234,7 +234,7 @@ async function probeTochka(): Promise<JsonObject> {
           grant_type: "client_credentials",
           client_id: clientId,
           client_secret: clientSecret,
-          scope: "accounts balances",
+          scope: "accounts balances customers statements",
         }),
       },
       timeoutMs,

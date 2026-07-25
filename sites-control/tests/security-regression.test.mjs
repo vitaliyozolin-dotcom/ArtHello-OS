@@ -15,6 +15,8 @@ test("public credential and indexing regressions stay removed", async () => {
 
   const combined = `${login}\n${auth}`;
   assert.doesNotMatch(combined, /owner123|accountant123|viewer123/i);
+  assert.doesNotMatch(login, /<option value="(?:owner|accountant|viewer)"/i);
+  assert.match(login, /autoComplete="username"/);
   assert.match(auth, /process\.env\.VIEWER_PASSWORD/);
   assert.match(html, /noindex, nofollow, noarchive, nosnippet/);
   assert.match(robots, /Disallow: \//);

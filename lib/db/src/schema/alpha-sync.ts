@@ -9,6 +9,7 @@ import {
   integer,
   boolean,
   unique,
+  index,
 } from "drizzle-orm/pg-core";
 
 export const alphaSyncBatchesTable = pgTable("alpha_sync_batches", {
@@ -60,6 +61,73 @@ export const alphaRawRecordsTable = pgTable(
   },
   (t) => [
     unique("alpha_raw_records_uniq").on(t.alphaId, t.entityType, t.branchId, t.payloadHash),
+  ],
+);
+
+// Immutable payloads are deduplicated in alpha_raw_records. This append-only
+// table preserves every batch/page observation of those payloads.
+export const alphaRawObservationsTable = pgTable(
+  "alpha_raw_observations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    syncBatchId: uuid("sync_batch_id")
+      .notNull()
+      .references(() => alphaSyncBatchesTable.id, { onDelete: "restrict" }),
+    rawRecordId: uuid("raw_record_id")
+      .notNull()
+      .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+    endpoint: text("endpoint").notNull(),
+    branchId: text("branch_id").notNull(),
+    entityType: text("entity_type").notNull(),
+    scopeKey: text("scope_key").notNull(),
+    page: integer("page").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("alpha_raw_observations_batch_raw_uniq").on(
+      table.syncBatchId,
+      table.rawRecordId,
+    ),
+    index("alpha_raw_observations_batch_scope_idx").on(
+      table.syncBatchId,
+      table.scopeKey,
+    ),
+    index("alpha_raw_observations_raw_idx").on(table.rawRecordId),
+  ],
+);
+
+// Reconciliation is allowed only for a scope that reached completed after all
+// pages were read and normalized. Failed scopes retain their previous state.
+export const alphaSyncScopeRunsTable = pgTable(
+  "alpha_sync_scope_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    syncBatchId: uuid("sync_batch_id")
+      .notNull()
+      .references(() => alphaSyncBatchesTable.id, { onDelete: "restrict" }),
+    scopeKey: text("scope_key").notNull(),
+    branchId: text("branch_id").notNull(),
+    entityType: text("entity_type").notNull(),
+    status: text("status").notNull().default("running"),
+    pagesFetched: integer("pages_fetched").notNull().default(0),
+    recordsFetched: integer("records_fetched").notNull().default(0),
+    safeErrorCode: text("safe_error_code"),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("alpha_sync_scope_runs_batch_scope_uniq").on(
+      table.syncBatchId,
+      table.scopeKey,
+    ),
+    index("alpha_sync_scope_runs_status_idx").on(
+      table.syncBatchId,
+      table.status,
+    ),
   ],
 );
 

@@ -19,3 +19,4 @@ export * from "./employees.js";
 export * from "./alpha-sync.js";
 export * from "./evotor.js";
 export * from "./security.js";
+export * from "./master-data.js";

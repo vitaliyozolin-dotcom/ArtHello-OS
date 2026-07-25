@@ -8,6 +8,11 @@ import {
   jsonb,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import {
+  alphaRawRecordsTable,
+  alphaSyncBatchesTable,
+} from "./alpha-sync.js";
+import { requireExplicitAlfaProvenance } from "./alfa-provenance.js";
 
 // ─── Persons ──────────────────────────────────────────────────────────────────
 // Canonical unified identity — one row per real human being.
@@ -109,6 +114,20 @@ export const studentProfilesTable = pgTable("student_profiles", {
   status: text("status"),
   raw: jsonb("raw"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  rawRecordId: uuid("raw_record_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+  lastSeenBatchId: uuid("last_seen_batch_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaSyncBatchesTable.id, { onDelete: "restrict" }),
+  sourceScope: text("source_scope")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance),
+  recordState: text("record_state").notNull().default("current"),
+  staleAt: timestamp("stale_at", { withTimezone: true }),
+  staleReason: text("stale_reason"),
 });
 
 export type StudentProfile = typeof studentProfilesTable.$inferSelect;

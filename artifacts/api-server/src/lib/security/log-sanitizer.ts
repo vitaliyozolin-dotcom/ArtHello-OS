@@ -1,7 +1,7 @@
 const REDACTED = "[REDACTED]";
 
 const SENSITIVE_KEY =
-  /(?:^|_)(?:authorization|cookie|set_cookie|password|secret|token|masked|last4|credential|api_key|client_secret|oauth_state|state|raw|body|payload|request|response|customer|customers|taxpayer_number|inn|phone|email|account_number|counterparty|full_name|short_name|authorize_url|consent_id|sub|error)(?:$|_)/i;
+  /(?:^|_)(?:authorization|cookie|set_cookie|password|secret|token|masked|last4|credential|api_key|client_secret|oauth_state|state|raw|body|payload|request|response|customer|customers|taxpayer_number|inn|phone|email|account_id|account_number|statement_id|payment_id|document_id|counterparty|full_name|short_name|authorize_url|consent_id|balance|amount|purpose|sub|error)(?:$|_)/i;
 
 const MAX_DEPTH = 12;
 

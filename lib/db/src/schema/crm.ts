@@ -9,9 +9,15 @@ import {
   integer,
   boolean,
   unique,
+  index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import {
+  alphaRawRecordsTable,
+  alphaSyncBatchesTable,
+} from "./alpha-sync.js";
+import { requireExplicitAlfaProvenance } from "./alfa-provenance.js";
 
 export const crmBranchesTable = pgTable("crm_branches", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -19,6 +25,20 @@ export const crmBranchesTable = pgTable("crm_branches", {
   name: text("name"),
   raw: jsonb("raw"),
   syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
+  rawRecordId: uuid("raw_record_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+  lastSeenBatchId: uuid("last_seen_batch_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaSyncBatchesTable.id, { onDelete: "restrict" }),
+  sourceScope: text("source_scope")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance),
+  recordState: text("record_state").notNull().default("current"),
+  staleAt: timestamp("stale_at", { withTimezone: true }),
+  staleReason: text("stale_reason"),
 });
 
 export const insertCrmBranchSchema = createInsertSchema(crmBranchesTable).omit({ id: true, syncedAt: true });
@@ -36,6 +56,20 @@ export const crmStudentsTable = pgTable("crm_students", {
   createdAtCrm: timestamp("created_at_crm", { withTimezone: true }),
   raw: jsonb("raw"),
   syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
+  rawRecordId: uuid("raw_record_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+  lastSeenBatchId: uuid("last_seen_batch_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaSyncBatchesTable.id, { onDelete: "restrict" }),
+  sourceScope: text("source_scope")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance),
+  recordState: text("record_state").notNull().default("current"),
+  staleAt: timestamp("stale_at", { withTimezone: true }),
+  staleReason: text("stale_reason"),
 });
 
 export const insertCrmStudentSchema = createInsertSchema(crmStudentsTable).omit({ id: true, syncedAt: true });
@@ -53,6 +87,20 @@ export const crmPaymentsTable = pgTable("crm_payments", {
   comment: text("comment"),
   raw: jsonb("raw"),
   syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
+  rawRecordId: uuid("raw_record_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+  lastSeenBatchId: uuid("last_seen_batch_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaSyncBatchesTable.id, { onDelete: "restrict" }),
+  sourceScope: text("source_scope")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance),
+  recordState: text("record_state").notNull().default("current"),
+  staleAt: timestamp("stale_at", { withTimezone: true }),
+  staleReason: text("stale_reason"),
 });
 
 export const insertCrmPaymentSchema = createInsertSchema(crmPaymentsTable).omit({ id: true, syncedAt: true });
@@ -69,20 +117,61 @@ export const crmLessonsTable = pgTable("crm_lessons", {
   title: text("title"),
   raw: jsonb("raw"),
   syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
+  rawRecordId: uuid("raw_record_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+  lastSeenBatchId: uuid("last_seen_batch_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaSyncBatchesTable.id, { onDelete: "restrict" }),
+  sourceScope: text("source_scope")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance),
+  recordState: text("record_state").notNull().default("current"),
+  staleAt: timestamp("stale_at", { withTimezone: true }),
+  staleReason: text("stale_reason"),
 });
 
 export const insertCrmLessonSchema = createInsertSchema(crmLessonsTable).omit({ id: true, syncedAt: true });
 export type InsertCrmLesson = z.infer<typeof insertCrmLessonSchema>;
 export type CrmLesson = typeof crmLessonsTable.$inferSelect;
 
-export const crmAttendanceTable = pgTable("crm_attendance", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  lessonCrmId: text("lesson_crm_id"),
-  studentCrmId: text("student_crm_id"),
-  status: text("status"),
-  raw: jsonb("raw"),
-  syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
-});
+export const crmAttendanceTable = pgTable(
+  "crm_attendance",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    lessonCrmId: text("lesson_crm_id").notNull(),
+    studentCrmId: text("student_crm_id").notNull(),
+    status: text("status"),
+    raw: jsonb("raw"),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
+    rawRecordId: uuid("raw_record_id")
+      .notNull()
+      .$defaultFn(requireExplicitAlfaProvenance)
+      .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+    lastSeenBatchId: uuid("last_seen_batch_id")
+      .notNull()
+      .$defaultFn(requireExplicitAlfaProvenance)
+      .references(() => alphaSyncBatchesTable.id, { onDelete: "restrict" }),
+    sourceScope: text("source_scope")
+      .notNull()
+      .$defaultFn(requireExplicitAlfaProvenance),
+    recordState: text("record_state").notNull().default("current"),
+    staleAt: timestamp("stale_at", { withTimezone: true }),
+    staleReason: text("stale_reason"),
+  },
+  (table) => [
+    unique("crm_attendance_lesson_student_uniq").on(
+      table.lessonCrmId,
+      table.studentCrmId,
+    ),
+    index("crm_attendance_scope_state_idx").on(
+      table.sourceScope,
+      table.recordState,
+    ),
+  ],
+);
 
 export const insertCrmAttendanceSchema = createInsertSchema(crmAttendanceTable).omit({ id: true, syncedAt: true });
 export type InsertCrmAttendance = z.infer<typeof insertCrmAttendanceSchema>;
@@ -100,6 +189,20 @@ export const crmTeachersTable = pgTable("crm_teachers", {
   status: text("status"),   // 'active' | 'inactive' | etc from CRM
   raw: jsonb("raw"),
   syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
+  rawRecordId: uuid("raw_record_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+  lastSeenBatchId: uuid("last_seen_batch_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaSyncBatchesTable.id, { onDelete: "restrict" }),
+  sourceScope: text("source_scope")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance),
+  recordState: text("record_state").notNull().default("current"),
+  staleAt: timestamp("stale_at", { withTimezone: true }),
+  staleReason: text("stale_reason"),
 });
 
 export const insertCrmTeacherSchema = createInsertSchema(crmTeachersTable).omit({ id: true, syncedAt: true });
@@ -221,7 +324,10 @@ export const crmGroupsTable = pgTable("crm_groups", {
   syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
   lifecycleStatus: text("lifecycle_status"),
   alphaStatus: text("alpha_status"),
-  rawRecordId: uuid("raw_record_id"),
+  rawRecordId: uuid("raw_record_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
   sourcePayloadHash: text("source_payload_hash"),
   createdAtCrm: timestamp("created_at_crm", { withTimezone: true }),
   updatedAtCrm: timestamp("updated_at_crm", { withTimezone: true }),
@@ -229,6 +335,16 @@ export const crmGroupsTable = pgTable("crm_groups", {
   inferredSubjectName: text("inferred_subject_name"),
   subjectInferenceStatus: text("subject_inference_status"),
   subjectInferenceConfidence: numeric("subject_inference_confidence"),
+  lastSeenBatchId: uuid("last_seen_batch_id")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance)
+    .references(() => alphaSyncBatchesTable.id, { onDelete: "restrict" }),
+  sourceScope: text("source_scope")
+    .notNull()
+    .$defaultFn(requireExplicitAlfaProvenance),
+  recordState: text("record_state").notNull().default("current"),
+  staleAt: timestamp("stale_at", { withTimezone: true }),
+  staleReason: text("stale_reason"),
 });
 
 export type CrmGroup = typeof crmGroupsTable.$inferSelect;
