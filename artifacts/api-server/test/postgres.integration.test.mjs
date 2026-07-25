@@ -78,6 +78,7 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
   process.env.NODE_ENV = "test";
   process.env.DASHBOARD_PASSWORD =
     "sandbox-owner-password-that-is-never-used-in-production";
+  process.env.ALFACRM_DOMAIN = "sandbox.invalid";
   process.env.PORT = "41991";
 
   const databaseModule = await import("@workspace/db");
