@@ -1,5 +1,13 @@
 # ArtHello OS — Decisions
 
+## D-027 — Tree является ключом идентичности local/remote package
+
+Статус: принято для приватной Git Data history
+
+Local и remote commit SHA могут различаться, потому что remote branch создаётся через Git Data API поверх отдельной истории. Пакет считается содержательно одинаковым только при точном равенстве Git tree. Для каждого checkpoint дополнительно фиксируются private PR head, terminal CI run, Sites version/deployment и owner-only access. PR body обновляется после CI и deployment как внешний provenance manifest; это исключает невозможную самоссылку commit на собственный SHA.
+
+Равенство tree и отчёт Создателя не заменяют независимую проверку Ревизора.
+
 ## D-021 — Временная проверка текущими credentials
 
 Статус: разрешено владельцем только для A.3 read-only probe

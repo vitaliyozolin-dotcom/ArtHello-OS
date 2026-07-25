@@ -8,6 +8,8 @@
 - [x] Доказать, что service token не даёт доступ к счетам без hybrid OAuth.
 - [x] Удалить raw Tochka bodies/customer identifiers из logs и errors.
 - [x] Добавить повторяемый sanitized live probe.
+- [x] Расширить обязательный `MONTH_CLOSE_CHECKLIST.md` без вымышленных финансовых правил.
+- [x] Зафиксировать provenance v9: равенство local/remote tree, Draft PR head, CI run и Sites deployment.
 - [ ] Повторить AlfaCRM entity-count probes после восстановления сетевого контура.
 - [ ] Настроить корректный защищённый callback runtime и пройти Tochka consent.
 - [ ] После завершения проверки перевыпустить оба комплекта credentials.
@@ -81,7 +83,7 @@
 - [ ] Сверить счета, остатки и полноту банковских операций.
 - [ ] Утвердить правила дедупликации и reconciliation банка с AlfaCRM.
 - [ ] Утвердить статьи ДДС и ОПиУ.
-- [ ] Ввести месяц закрытия, исключения и контрольные суммы.
+- [~] Шаблон месяца закрытия, исключений и контрольных сумм формализован; runtime, источники и financial regression tests ещё отсутствуют.
 - [ ] Достичь статуса финансовой правды `READY`.
 
 ## P2 — интерфейс и развитие

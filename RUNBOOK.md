@@ -15,7 +15,7 @@ Credentials передаются только в process environment:
 
 1. Source импортирован в приватную ветку `codex/a3-live-read-only` без секретов; открыт Draft PR #1.
 2. `.github/workflows/quality.yml` выполнен на одноразовом PostgreSQL 16.
-3. Evidence: run #6 (`30161527465`) — `test:full`, `test:postgres`, `build:full` PASS.
+3. Evidence текущего checkpoint v9: run #7 (`30161981773`) — `test:full`, `test:postgres`, `build:full` PASS на remote head `3ab2cfe4310f5d22a42e0c874180428894dae788`.
 4. При каждом изменении runtime-кода повторять весь quality workflow; подготовленный или частично прошедший run доказательством не считать.
 5. Для bank-config migration сначала проверить snapshot, затем задать backup ID и одноразовый confirmation token.
 6. Не выполнять первый прогон против production `DATABASE_URL`.
@@ -111,6 +111,34 @@ pnpm run dev
 9. Пользователю передаётся только подтверждённый owner-only URL.
 
 Release evidence хранит immutable связку `commit_sha → Sites version_id → deployment_id`. Оpaque Sites IDs нельзя придумывать или записывать до ответа Sites.
+
+### Provenance package
+
+Для каждого gate Создатель передаёт Ревизору и Координатору один пакет:
+
+1. local commit и `git rev-parse HEAD^{tree}`;
+2. private PR number, draft/state и remote head;
+3. tree remote head; он должен совпадать с local tree;
+4. CI run ID, его head SHA и terminal conclusion;
+5. Sites project/version/deployment IDs, terminal deployment status и подтверждённый owner-only access;
+6. результаты agent preview для desktop/mobile и проверенных переходов.
+
+Local и remote commit SHA могут различаться только при отдельной Git Data history; в этом случае равенство tree обязательно и явно объясняется. PR body обновляется после terminal CI и Sites deployment, поэтому может хранить точные внешние IDs, не создавая самоссылочный Git commit. Ревизор не принимает пакет на веру и повторяет доступные read-only проверки.
+
+Зафиксированный пакет v9:
+
+```text
+local commit  0900b9cff88e330afd095bcc8ac17da11a6ce50c
+local tree    609e64852c47808c0447f247976d6dd4513bb038
+remote head   3ab2cfe4310f5d22a42e0c874180428894dae788
+remote tree   609e64852c47808c0447f247976d6dd4513bb038
+PR            #1, open/draft/unmerged
+CI            run #7 / 30161981773 / success
+Sites version appgprj_6a626e9e441481919bb30eee8ba97165~appgver_37098405ed048191ab3943dfea63c76c
+deployment    appgdep_6a64cae273e881919dc83dbf2f8645e0 / succeeded
+```
+
+Этот пакет разрешает только owner-only обезличенный checkpoint. Он не является production gate.
 
 ## Backup перед production-миграцией
 

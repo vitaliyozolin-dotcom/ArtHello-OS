@@ -8,8 +8,27 @@
 - Добавлен повторяемый `probe:live-read-only`: принимает секреты только через process environment, имеет limiter/circuit breaker и выводит лишь статусы и количества.
 - В коннекторе «Точки» upstream response bodies, customer identifiers и token fragments удалены из logs и исключений. Security suite расширен до 23 тестов.
 - Полное дерево source опубликовано в приватную ветку `codex/a3-live-read-only`; открыт Draft PR #1 без merge в `main`.
-- GitHub Actions quality run #6 (`30161527465`) прошёл `test:full`, `test:postgres` и `build:full`. Одноразовый PostgreSQL 16 подтвердил migrations 0009–0010, session/CSRF, разрешённый access audit, atomic website lead rollback/retry, schema drift, rollback companions и fail-closed startup.
+- GitHub Actions quality run #7 (`30161981773`) прошёл `test:full`, `test:postgres` и `build:full` на точном remote head. Одноразовый PostgreSQL 16 подтвердил migrations 0009–0010, session/CSRF, разрешённый access audit, atomic website lead rollback/retry, schema drift, rollback companions и fail-closed startup.
 - Production, подробные live-данные, банковские счета/операции, sync в БД и финансовая аналитика остаются заблокированы.
+
+## Provenance A.3 checkpoint v9
+
+| Узел доказательства | Точное значение |
+|---|---|
+| Local source commit | `0900b9cff88e330afd095bcc8ac17da11a6ce50c` |
+| Local Git tree | `609e64852c47808c0447f247976d6dd4513bb038` |
+| Private branch | `codex/a3-live-read-only` |
+| Private Draft PR | `vitaliyozolin-dotcom/ArtHello-OS#1`, open, draft, unmerged |
+| Remote PR head | `3ab2cfe4310f5d22a42e0c874180428894dae788` |
+| Remote Git tree | `609e64852c47808c0447f247976d6dd4513bb038` |
+| GitHub Actions | run #7, `30161981773`, conclusion `success` |
+| Sites version | `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_37098405ed048191ab3943dfea63c76c` |
+| Sites deployment | `appgdep_6a64cae273e881919dc83dbf2f8645e0`, status `succeeded` |
+| Sites access | owner-only/custom, только владелец |
+
+Local и remote commit SHA различаются, потому что приватная ветка собрана через Git Data API поверх отдельной remote history. Одинаковый Git tree доказывает идентичное содержимое файлов. Sites v9 создан из local commit после desktop/mobile agent preview; опубликованный URL не открывался во внутреннем cloud browser.
+
+Это provenance Создателя. Оно не заменяет независимый отчёт Ревизора: в цикле v9 Ревизор не вернул отчёт и поэтому имеет статус `BLOCKED`; Координатор разрешил оставить только owner-only обезличенный checkpoint и заблокировал завершение Фазы A, production и следующую продуктовую фазу.
 
 ## Обновление A.2 — 2026-07-25
 
@@ -192,7 +211,7 @@ Unit/source regression suite проверяет эти ветки без product
 - Для Sites добавлены проверка worker artifact, тесты безопасного интерфейса, полного risk register и fail-closed Alfa tenant configuration.
 - Checkpoint v7 A.2: commit `5a62864fdb4ba1237eeef5a8b47d9e6f9040cb66`, Sites version `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_30b80923a4c88191b4e838e434fdf37f`, deployment `appgdep_6a64b18edf788191a9cf2a2ae41e1982`, owner-only; desktop/mobile preview и переходы пройдены.
 - Прямые security regression tests проверяют отрицательные role/scope-сценарии, отсутствие browser bearer storage, cookie contract, route-template access audit, log redaction, strict health allowlist, schema inventory, fail-closed startup, atomic website idempotency/rollback/retry/recovery/conflict и отсутствие fallback-ключа Evotor.
-- PostgreSQL 16 integration suite выполнен в GitHub Actions run #6: `test:full`, `test:postgres`, `build:full` — PASS. Callback replay, audit-store outage/deny PostgreSQL smoke и financial calculation tests отсутствуют. AlfaCRM concurrency unit test пройден.
+- PostgreSQL 16 integration suite выполнен в GitHub Actions run #7 на remote tree `609e64852c47808c0447f247976d6dd4513bb038`: `test:full`, `test:postgres`, `build:full` — PASS. Callback replay, audit-store outage/deny PostgreSQL smoke и financial calculation tests отсутствуют. AlfaCRM concurrency unit test пройден.
 
 ## Production и миграции
 
