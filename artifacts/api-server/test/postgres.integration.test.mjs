@@ -342,7 +342,7 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
     );
 
     const child = spawn(
-      resolve(workspaceDir, "node_modules/.bin/tsx"),
+      resolve(artifactDir, "node_modules/.bin/tsx"),
       ["src/index.ts"],
       {
         cwd: artifactDir,
