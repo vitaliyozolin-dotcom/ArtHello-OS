@@ -228,6 +228,10 @@ test("sensitive access audit canonicalizes identifiers and skips only account li
     "/banking/connectors/:id/health",
   );
   assert.equal(
+    accessAudit.canonicalAuditPath("/banking/connectors"),
+    "/banking/connectors",
+  );
+  assert.equal(
     accessAudit.canonicalAuditPath(
       "/not-registered/alice@example.com",
     ),

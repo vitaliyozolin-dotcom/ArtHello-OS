@@ -6,6 +6,10 @@ const ROUTE_TEMPLATES: ReadonlyArray<{
   { pattern: /^\/auth\/logout\/?$/, template: "/auth/logout" },
   { pattern: /^\/auth\/users\/?$/, template: "/auth/users" },
   {
+    pattern: /^\/banking\/connectors\/?$/,
+    template: "/banking/connectors",
+  },
+  {
     pattern: /^\/banking\/connectors\/[^/]+\/customers\/?$/,
     template: "/banking/connectors/:id/customers",
   },
