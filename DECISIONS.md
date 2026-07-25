@@ -20,9 +20,9 @@ Secret-bearing config хранится только как AES-256-GCM envelope.
 
 ## D-024 — PostgreSQL 16 sandbox создаётся CI-сервисом
 
-Статус: подготовлено, runtime не доказан
+Статус: выполнено, GitHub Actions run #6 PASS
 
-Quality workflow поднимает одноразовый PostgreSQL 16 service и выполняет реальные migrations, HTTP/session/CSRF/audit checks, webhook rollback/retry, schema drift, rollback и fail-closed startup. До зелёного workflow это не evidence.
+Quality workflow поднимает одноразовый PostgreSQL 16 service и выполняет реальные migrations, HTTP/session/CSRF/audit checks, webhook rollback/retry, schema drift, rollback и fail-closed startup. Run #6 (`30161527465`) прошёл `test:full`, `test:postgres` и `build:full`. Это evidence только для синтетической одноразовой БД; оно не заменяет восстановленную sandbox-копию и не разрешает production migration.
 
 ## D-025 — Все AlfaCRM запросы проходят одну очередь
 
@@ -74,7 +74,7 @@ Quality workflow поднимает одноразовый PostgreSQL 16 service
 Дата: 2026-07-23  
 Статус: принято
 
-Sites не получает банковские или AlfaCRM секреты. A.2 реализует encrypted vault в исходниках; включать или обновлять банковские подключения нельзя до backup, guarded migration legacy rows, ротации раскрытых credentials и sandbox runtime evidence.
+Sites не получает банковские или AlfaCRM секреты. A.2 реализует encrypted vault в исходниках; включать или обновлять банковские подключения нельзя до backup, guarded migration legacy rows, ротации раскрытых credentials и проверки на восстановленной репрезентативной sandbox-копии.
 
 ## D-007 — Сохранить существующий визуальный язык
 
@@ -102,12 +102,12 @@ Migration runner и схема изучаются только статичес�
 Дата: 2026-07-23
 Статус: принято по решению Координатора
 
-Owner-only sanitized checkpoint и production readiness — разные статусы. Пока открыты migration legacy bank config, ротация раскрытых credentials, небезопасные legacy errors/probes, scoped handlers и callback authentication, а также нет sandbox evidence для security migrations, запрещены Replit release, production, постоянная синхронизация и чтение детальных AlfaCRM/банк/БД records, polling и реальные персональные или финансовые данные. D-021 разрешает только ephemeral auth/metadata/count probe без сохранения записей. Owner UI обязан показывать эти блокеры полностью; отсутствие детального live-доступа не считается доказательством безопасности.
+Owner-only sanitized checkpoint и production readiness — разные статусы. Одноразовый PostgreSQL 16 CI gate пройден, но пока открыты migration legacy bank config, ротация раскрытых credentials, небезопасные legacy errors/probes, scoped handlers, callback authentication и проверка на восстановленной репрезентативной sandbox-копии, запрещены Replit release, production, постоянная синхронизация и чтение детальных AlfaCRM/банк/БД records, polling и реальные персональные или финансовые данные. D-021 разрешает только ephemeral auth/metadata/count probe без сохранения записей. Owner UI обязан показывать эти блокеры полностью; отсутствие детального live-доступа не считается доказательством безопасности.
 
 ## D-011 — Browser auth только через server-side session
 
 Дата: 2026-07-24
-Статус: принято в исходниках, runtime gate не пройден
+Статус: PostgreSQL 16 CI PASS; production release gate не пройден
 
 Browser frontend не хранит bearer token. Session token передаётся в HttpOnly Secure SameSite cookie, а в PostgreSQL хранится только его SHA-256 hash. Изменяющие запросы требуют double-submit CSRF. Login lockout хранится в БД, чтобы несколько API-процессов не обходили лимит.
 
@@ -135,7 +135,7 @@ Session хранит явные списки филиалов и юридиче�
 ## D-015 — Sensitive access audit и startup должны быть fail closed
 
 Дата: 2026-07-24
-Статус: принято в исходниках, sandbox evidence отсутствует
+Статус: startup и allowed access audit подтверждены в PG16 CI; deny/outage audit smoke открыт
 
 Migration `0010` добавляет канонизированный audit разрешённых и запрещённых sensitive routes. Если разрешённый запрос нельзя записать в audit store, API возвращает `503`. Ошибка startup migration теперь прерывает запуск до listener и banking polling. Обе защиты должны быть доказаны на восстановленной sandbox-копии.
 
@@ -149,14 +149,14 @@ Website, bank и Evotor POST callbacks остаются за user auth/CSRF gate
 ## D-017 — Website lead записывать одной транзакцией
 
 Дата: 2026-07-24
-Статус: принято в исходниках, PostgreSQL sandbox evidence отсутствует
+Статус: принято в исходниках, PostgreSQL 16 CI PASS
 
-Одинаковый `Idempotency-Key` сериализуется PostgreSQL advisory transaction lock. Raw event, lead event, processed flag и source status записываются одной транзакцией. Key связан с hash canonical payload: другой payload получает `409`. Старый raw-only partial write восстанавливается повтором без второй raw-записи. Pure transactional tests проверяют rollback/retry/recovery; реальный PostgreSQL smoke обязателен до public callback.
+Одинаковый `Idempotency-Key` сериализуется PostgreSQL advisory transaction lock. Raw event, lead event, processed flag и source status записываются одной транзакцией. Key связан с hash canonical payload: другой payload получает `409`. Старый raw-only partial write восстанавливается повтором без второй raw-записи. PostgreSQL 16 CI подтвердил rollback/retry/recovery; до public callback всё равно обязательны provider-auth, replay protection и negative tests.
 
 ## D-018 — Security schema проверять до listener
 
 Дата: 2026-07-24
-Статус: принято в исходниках, PostgreSQL sandbox evidence отсутствует
+Статус: принято в исходниках, PostgreSQL 16 CI PASS
 
 Успех legacy startup runner недостаточен. API до `listen()` обязан подтвердить catalog columns и indexes auth/audit schema, а также timestamp и SHA-256 hash migrations `0009–0010` в `drizzle.__drizzle_migrations`. Любое расхождение останавливает процесс до polling.
 

@@ -42,9 +42,10 @@ test("owner risk register exposes every Phase A blocker before detailed live acc
     "CFG-01",
     "REV-A1-201",
     "REV-A1-202",
-    "CI evidence ещё отсутствует",
+    "CI / PostgreSQL 16: PASS",
+    "Draft PR #1",
     "Закрыть оставшиеся HIGH",
-    "PostgreSQL 16 suite",
+    "guarded bank migration",
     "Технический probe разрешён",
     "Расширить read-only инвентаризацию",
   ];
@@ -52,7 +53,7 @@ test("owner risk register exposes every Phase A blocker before detailed live acc
   for (const risk of requiredRisks) assert.match(html, new RegExp(risk));
   assert.doesNotMatch(html, /Исправления подготовлены/);
   assert.match(html, /Encrypted bank config, AlfaCRM queue, sessions, atomic webhook и schema preflight/);
-  assert.match(html, /A\.3 · source v5/);
+  assert.match(html, /A\.3 · source v6/);
   assert.match(html, /strict allowlist/);
   assert.match(html, /timestamp\+hash/);
   assert.match(html, /production[\s\S]*BLOCKED/i);

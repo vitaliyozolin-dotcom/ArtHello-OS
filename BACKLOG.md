@@ -18,7 +18,7 @@
 - [x] Добавить guarded migration существующей config после backup.
 - [x] Сделать AlfaCRM limiter concurrency-safe и покрыть unit-тестом.
 - [x] Подготовить disposable PostgreSQL 16 integration suite и CI workflow.
-- [ ] Импортировать source в приватный GitHub и выполнить quality workflow.
+- [x] Импортировать source в приватный GitHub и выполнить quality workflow (Draft PR #1, run #6 PASS).
 - [ ] Перевыпустить раскрытые AlfaCRM и Tochka credentials.
 - [ ] Выполнить bank-config migration на sandbox-копии, не production.
 
@@ -42,7 +42,7 @@
 - [ ] Прогнать migrations `0009–0010` на восстановленной sandbox-копии, проверить session lifecycle, CSRF, scope, audit и rollback.
 - [x] Любая ошибка startup migration останавливает listener и polling в исходниках.
 - [x] До listener проверять обязательные security columns/indexes и точные journal timestamp+hash migrations `0009–0010`.
-- [ ] Доказать fail-closed startup реальной контролируемой ошибкой PostgreSQL в sandbox.
+- [x] Доказать fail-closed startup реальной контролируемой ошибкой PostgreSQL в одноразовом CI sandbox.
 - [x] Заменить AlfaCRM timestamp limiter на сериализованную очередь и доказать интервал 260 ms конкурентным unit-тестом.
 - [x] Добавлены unit/source regression tests для website transaction rollback/retry/recovery/conflict, schema inventory, strict health allowlist и identifier-safe audit templates.
 - [~] Negative role/scope/security regression tests расширены; остаются HTTP+PG migration/rollback/transaction, callback replay, concurrency и финансовые failure tests.
@@ -62,9 +62,9 @@
 
 ## P1 — надёжность платформы
 
-- [~] CI workflow с typecheck, build, unit и PostgreSQL 16 integration/migration tests подготовлен; фактический run ожидает импорт source в GitHub.
+- [x] CI workflow с typecheck, build, unit и PostgreSQL 16 integration/migration tests выполнен: GitHub Actions run #6 PASS.
 - [ ] Добавить health/readiness checks для БД и каждой интеграции.
-- [~] Введены recursive redaction и access audit source; остаются runtime evidence, retention и correlation ID.
+- [~] Введены recursive redaction и access audit; allowed route подтверждён в PostgreSQL, остаются deny/outage smoke, retention и correlation ID.
 - [ ] Зафиксировать RPO/RTO и проверить восстановление из backup.
 - [ ] Удалить tracked build metadata или гарантировать воспроизводимую пересборку.
 

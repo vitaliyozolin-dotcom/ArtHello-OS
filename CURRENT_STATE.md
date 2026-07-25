@@ -7,14 +7,16 @@
 - Tochka `client_credentials` вернул HTTP 200 и service token. Запрос счетов с service token вернул ожидаемый HTTP 403: требуется пользовательский Authorization Code/consent и hybrid token. Consent не создавался, платежные действия не выполнялись.
 - Добавлен повторяемый `probe:live-read-only`: принимает секреты только через process environment, имеет limiter/circuit breaker и выводит лишь статусы и количества.
 - В коннекторе «Точки» upstream response bodies, customer identifiers и token fragments удалены из logs и исключений. Security suite расширен до 23 тестов.
+- Полное дерево source опубликовано в приватную ветку `codex/a3-live-read-only`; открыт Draft PR #1 без merge в `main`.
+- GitHub Actions quality run #6 (`30161527465`) прошёл `test:full`, `test:postgres` и `build:full`. Одноразовый PostgreSQL 16 подтвердил migrations 0009–0010, session/CSRF, разрешённый access audit, atomic website lead rollback/retry, schema drift, rollback companions и fail-closed startup.
 - Production, подробные live-данные, банковские счета/операции, sync в БД и финансовая аналитика остаются заблокированы.
 
 ## Обновление A.2 — 2026-07-25
 
-- Приватный GitHub `vitaliyozolin-dotcom/ArtHello-OS` подтверждён, но пока пустой; локальный source ещё не опубликован.
+- На момент A.2 приватный GitHub `vitaliyozolin-dotcom/ArtHello-OS` был пуст; в A.3 source опубликован в отдельную ветку и открыт Draft PR #1.
 - Для bank connector config реализован AES-256-GCM vault с key ID, AAD по connector ID, fail-closed чтением plaintext secrets и guarded migration после backup.
 - AlfaCRM вызовы сериализованы с интервалом 260 ms; параллельная аутентификация объединяется.
-- Подготовлены PostgreSQL 16 integration suite и GitHub Actions quality workflow. Runtime evidence отсутствует до фактического запуска.
+- Подготовлены PostgreSQL 16 integration suite и GitHub Actions quality workflow; фактическое runtime evidence получено в A.3 run #6.
 - На этапе A.2 ключи со скриншотов не использовались; в A.3 владелец разрешил только ephemeral read-only probe. До production и постоянной синхронизации они должны быть перевыпущены.
 - Sites preview embedding исправлен ограниченным allowlist ChatGPT; индексация и кэширование остаются запрещены.
 
@@ -59,7 +61,7 @@
 - banking health sanitization переведена с denylist на strict allowlist;
 - access audit использует явные route templates и не сохраняет slug/email/phone/UUID/numeric/percent-encoded identifiers.
 
-Unit/source regression suite проверяет эти ветки без production-данных. В текущей среде нет disposable PostgreSQL (`DATABASE_URL`, `psql`, `postgres`, `initdb` отсутствуют), поэтому runtime transaction и migrations 0009–0010 ещё должны быть проверены на восстановленной sandbox-копии. Это состояние не является runtime-release.
+Unit/source regression suite проверяет эти ветки без production-данных. В Sites checkout нет локального PostgreSQL (`DATABASE_URL`, `psql`, `postgres`, `initdb` отсутствуют), поэтому создана одноразовая PostgreSQL 16 CI-база. Run #6 подтвердил transaction, migrations 0009–0010, rollback и fail-closed startup на синтетических данных. Это не является production migration или runtime-release; перед выпуском Replit нужна восстановленная sandbox-копия и отдельные ворота.
 
 ## Репозиторий
 
@@ -97,12 +99,15 @@ Unit/source regression suite проверяет эти ветки без product
 - `ALFACRM_DOMAIN` обязателен: hardcoded tenant fallback удалён, отсутствие переменной останавливает клиент fail closed;
 - учётные данные читаются из environment.
 
+Подтверждено live в A.3:
+
+- авторизация API вернула HTTP 200;
+- endpoint филиалов вернул 8 записей без публикации названий или идентификаторов.
+
 Не подтверждено:
 
-- доступность API на текущую дату;
-- валидность учётных данных;
-- список и полнота филиалов;
-- свежесть и количество записей;
+- состав и полнота филиалов;
+- свежесть и количество остальных сущностей;
 - охват юридических лиц.
 
 ## Банки
@@ -176,7 +181,7 @@ Unit/source regression suite проверяет эти ветки без product
 - legacy upstream error bodies и отдельные debug/probe responses ещё требуют системного ограничения;
 - scoped non-owner handlers ещё не реализованы и поэтому business access этих ролей намеренно заблокирован;
 - provider-auth, replay protection и idempotency для bank/Evotor callbacks не реализованы;
-- migrations `0009` и `0010` не прошли sandbox apply/rollback/restore и поэтому auth/audit runtime не выпускался.
+- migrations `0009` и `0010` прошли apply/rollback на одноразовом PostgreSQL 16 CI, но ещё не проверялись на восстановленной репрезентативной sandbox-копии и не применялись к production.
 
 До их закрытия production, Replit release и любые live-данные запрещены.
 
@@ -187,7 +192,7 @@ Unit/source regression suite проверяет эти ветки без product
 - Для Sites добавлены проверка worker artifact, тесты безопасного интерфейса, полного risk register и fail-closed Alfa tenant configuration.
 - Checkpoint v7 A.2: commit `5a62864fdb4ba1237eeef5a8b47d9e6f9040cb66`, Sites version `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_30b80923a4c88191b4e838e434fdf37f`, deployment `appgdep_6a64b18edf788191a9cf2a2ae41e1982`, owner-only; desktop/mobile preview и переходы пройдены.
 - Прямые security regression tests проверяют отрицательные role/scope-сценарии, отсутствие browser bearer storage, cookie contract, route-template access audit, log redaction, strict health allowlist, schema inventory, fail-closed startup, atomic website idempotency/rollback/retry/recovery/conflict и отсутствие fallback-ключа Evotor.
-- PostgreSQL 16 integration suite подготовлен, но не выполнен; callback replay и financial calculation tests отсутствуют. AlfaCRM concurrency unit test пройден.
+- PostgreSQL 16 integration suite выполнен в GitHub Actions run #6: `test:full`, `test:postgres`, `build:full` — PASS. Callback replay, audit-store outage/deny PostgreSQL smoke и financial calculation tests отсутствуют. AlfaCRM concurrency unit test пройден.
 
 ## Production и миграции
 

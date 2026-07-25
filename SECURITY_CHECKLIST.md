@@ -22,7 +22,7 @@
 - [x] Plaintext secrets, tampering и неизвестный key ID завершаются fail closed.
 - [x] Bank-config migration требует backup ID и explicit confirmation.
 - [x] PostgreSQL 16 integration suite подготовлен.
-- [ ] PostgreSQL 16 suite фактически выполнен в CI.
+- [x] PostgreSQL 16 suite фактически выполнен в CI run #6: test/build/migrations/rollback/fail-closed PASS.
 - [ ] Раскрытые AlfaCRM и Tochka credentials перевыпущены.
 - [ ] Новые credentials сохранены только в protected backend Secrets.
 
@@ -53,7 +53,8 @@
 - [x] Все non-owner business routes fail closed до handler-level scope predicates.
 - [ ] Реализовать route-specific branch/legal-entity predicates и cross-scope tests.
 - [x] Добавлена double-submit CSRF-защита для cookie-based write actions.
-- [~] Auth/scope migrations `0009–0010` не применялись и требуют sandbox apply/rollback evidence.
+- [x] Auth/scope migrations `0009–0010` прошли apply/rollback на одноразовом PostgreSQL 16 CI.
+- [ ] Перед Replit release повторить migrations на восстановленной репрезентативной sandbox-копии; production не затрагивать.
 
 ## Сеть и callbacks
 
@@ -96,8 +97,8 @@
 - [x] В Фазе A production-миграции не выполнялись.
 - [x] Зафиксирована необходимость backup/restore test до миграции.
 - [x] Auth schema оформлена отдельной migration `0009` и не встроена в legacy startup runner.
-- [x] Подготовлен rollback companion для `0009`; он не выполнялся.
-- [x] Scope/audit schema оформлена migration `0010` с rollback companion; они не выполнялись.
+- [x] Rollback companion для `0009` выполнен на одноразовом PostgreSQL 16 CI; production не затрагивался.
+- [x] Migration `0010` и rollback companion выполнены на одноразовом PostgreSQL 16 CI; production не затрагивался.
 - [x] Migration error больше не поглощается; listener и polling fail closed в исходниках.
 - [x] Pre-listen gate проверяет auth/audit columns, indexes и точные timestamp+hash migrations `0009–0010`.
 - [x] Rollback `0010` явно документирует, что отозванные non-owner sessions не восстанавливаются и нужен повторный вход.
@@ -122,6 +123,6 @@
 
 ## Gate
 
-Security gate для production/live data: **FAIL / BLOCKED**, пока открыты migration legacy bank config, ротация раскрытых credentials, legacy upstream errors/probes, scoped handlers, provider-auth callbacks, sandbox runtime evidence и обязательные failure tests.
+Security gate для production/live data: **FAIL / BLOCKED**, пока открыты migration legacy bank config, ротация раскрытых credentials, legacy upstream errors/probes, scoped handlers, provider-auth callbacks, restored-sandbox evidence и обязательные negative/failure tests.
 
 Security gate для обезличенного owner-only Sites checkpoint: **может быть рассмотрен после preview и независимого Reviewer**, но не разрешает Replit release, live integrations или реальные данные.

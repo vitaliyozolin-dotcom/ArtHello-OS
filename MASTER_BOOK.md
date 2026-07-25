@@ -6,7 +6,7 @@
 
 ## Дополнение A.2 — технические ворота
 
-Bank connector config хранится в authenticated encrypted envelope и fail closed при legacy plaintext secrets. AlfaCRM read-only клиент сериализует запросы ниже лимита 4 req/s. Реальная PostgreSQL 16 проверка выполняется в одноразовом CI sandbox; подготовленный, но не запущенный suite не открывает production gate. Credentials, появившиеся в переписке или скриншотах, считаются раскрытыми и требуют ротации.
+Bank connector config хранится в authenticated encrypted envelope и fail closed при legacy plaintext secrets. AlfaCRM read-only клиент сериализует запросы ниже лимита 4 req/s. Реальная PostgreSQL 16 проверка выполнена в одноразовом CI sandbox: quality run #6 прошёл migrations, HTTP/session/CSRF/audit smoke, webhook rollback/retry, schema drift, rollback и fail-closed startup. Этот PASS не открывает production gate без оставшихся HIGH, восстановленной sandbox-копии и ротации credentials. Credentials, появившиеся в переписке или скриншотах, считаются раскрытыми и требуют ротации.
 
 Статус документа: рабочая книга проекта, восстановлена 2026-07-23 и обновлена 2026-07-24 на основе `ArtHello_OS_Master_Plan_and_Agent_Prompts_v0.1.md`.
 
@@ -97,9 +97,9 @@ Owner-only checkpoint принимается только если он пока
 - удалён fallback-ключ шифрования Evotor;
 - sessions/lockout оформлены migration `0009`, scope/audit — migration `0010`; обе не применялись к production.
 
-Pure/unit regression tests доказывают rollback mid-write, retry с одной парой raw/lead, восстановление legacy raw-only записи, payload conflict, schema inventory, allowlist и route canonicalization. В среде checkout нет `DATABASE_URL`, `psql`, `postgres` или `initdb`; поэтому PostgreSQL runtime apply/rollback и транзакционное evidence честно остаются непроверенными.
+Pure/unit regression tests доказывают rollback mid-write, retry с одной парой raw/lead, восстановление legacy raw-only записи, payload conflict, schema inventory, allowlist и route canonicalization. В среде checkout нет `DATABASE_URL`, `psql`, `postgres` или `initdb`; вместо локальной БД GitHub Actions run #6 создал одноразовый PostgreSQL 16 и подтвердил runtime apply/rollback, session/CSRF, разрешённый access audit, транзакционный failure/retry и fail-closed startup. Production и восстановленная sandbox-копия не затрагивались.
 
-Исторический срез A.1 не закрывал plaintext bank secrets и AlfaCRM concurrency limiter. В A.2 vault и serialized queue реализованы и покрыты unit-тестами; открыты guarded migration legacy rows, ротация ключей, legacy raw errors/probes, handler-level scope predicates, provider-specific webhook authentication/replay protection и sandbox runtime evidence.
+Исторический срез A.1 не закрывал plaintext bank secrets и AlfaCRM concurrency limiter. В A.2 vault и serialized queue реализованы и покрыты unit-тестами; A.3 добавляет PostgreSQL 16 CI evidence. Открыты guarded migration legacy rows, ротация ключей, legacy raw errors/probes, handler-level scope predicates, provider-specific webhook authentication/replay protection, PostgreSQL deny/outage tests и restored-sandbox evidence.
 
 ### Следующие фазы
 

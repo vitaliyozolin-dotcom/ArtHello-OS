@@ -13,10 +13,10 @@ Credentials передаются только в process environment:
 
 ## A.2: изолированный PostgreSQL 16
 
-1. Импортировать source в приватный GitHub без секретов.
-2. Запустить `.github/workflows/quality.yml`.
-3. Требовать зелёные `test:full`, `test:postgres` и `build:full`.
-4. Не считать подготовленный suite доказательством до успешного run.
+1. Source импортирован в приватную ветку `codex/a3-live-read-only` без секретов; открыт Draft PR #1.
+2. `.github/workflows/quality.yml` выполнен на одноразовом PostgreSQL 16.
+3. Evidence: run #6 (`30161527465`) — `test:full`, `test:postgres`, `build:full` PASS.
+4. При каждом изменении runtime-кода повторять весь quality workflow; подготовленный или частично прошедший run доказательством не считать.
 5. Для bank-config migration сначала проверить snapshot, затем задать backup ID и одноразовый confirmation token.
 6. Не выполнять первый прогон против production `DATABASE_URL`.
 
@@ -75,9 +75,9 @@ pnpm run dev
 
 ## Запуск API
 
-Текущий `artifacts/api-server/src/index.ts` вызывает `runMigrations()`, затем `assertSecuritySchemaReady()`, и только потом `listen()`. Ошибка migration, отсутствующий auth/audit column/index или несовпадение timestamp+hash migrations `0009–0010` останавливают listener и polling с кодом 1. Это подтверждено unit/source regression tests, но ещё не доказано с PostgreSQL в sandbox. Против production `DATABASE_URL` запуск запрещён.
+Текущий `artifacts/api-server/src/index.ts` вызывает `runMigrations()`, затем `assertSecuritySchemaReady()`, и только потом `listen()`. Ошибка migration, отсутствующий auth/audit column/index или несовпадение timestamp+hash migrations `0009–0010` останавливают listener и polling с кодом 1. Это подтверждено unit/source regression tests и controlled rollback/fail-closed процессом на одноразовом PostgreSQL 16 в CI run #6. Против production `DATABASE_URL` запуск запрещён.
 
-Новый auth runtime требует migration `0009_famous_ma_gnuci.sql`, а session scope и access audit — `0010_outstanding_cargill.sql`. Обе сгенерированы, но не применялись. Нельзя выпускать auth-код до проверки `backup → restore → apply → session/CSRF/scope/audit smoke → rollback` на изолированной sandbox-копии.
+Новый auth runtime требует migration `0009_famous_ma_gnuci.sql`, а session scope и access audit — `0010_outstanding_cargill.sql`. Обе прошли apply/rollback на одноразовом PostgreSQL 16 CI и не применялись к production. Нельзя выпускать auth-код до проверки `backup → restore → apply → session/CSRF/scope/audit smoke → rollback` на восстановленной репрезентативной sandbox-копии.
 
 Безопасный порядок для sandbox:
 
@@ -96,7 +96,7 @@ pnpm run dev
 13. проверить, что non-owner business routes возвращают `403`, пока predicates не зарегистрированы;
 14. отдельно проверить callback-контракты, provider authentication, replay и idempotency.
 
-До guarded migration legacy bank config после backup, ротации credentials, закрытия legacy upstream error/debug leaks, scoped handlers, callback authentication и получения sandbox evidence для `0009–0010` запрещены production/Replit release, live AlfaCRM/банк/БД, polling и персональные/зарплатные данные.
+До guarded migration legacy bank config после backup, ротации credentials, закрытия legacy upstream error/debug leaks, scoped handlers, callback authentication и проверки на восстановленной репрезентативной sandbox-копии запрещены production/Replit release, постоянный live AlfaCRM/банк/БД sync, polling и персональные/зарплатные данные.
 
 ## Agent preview и Sites checkpoint
 

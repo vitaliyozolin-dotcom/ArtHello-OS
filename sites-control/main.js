@@ -87,7 +87,7 @@ const moduleContent = {
     stateTitle: "Контуры разделены на уровне checkpoint",
     stateCopy: "Sites остаётся приватной контрольной оболочкой без production-секретов. Replit и production требуют отдельного выпуска.",
     found: ["Sites project с owner-only доступом", "API, sync-сервис и PostgreSQL-схема", "Аудит интеграций и безопасности"],
-    gates: ["Закрыть HIGH по scoped handlers, callbacks и оставшимся diagnostics", "Выполнить PostgreSQL 16 CI suite и guarded bank-config migration в sandbox", "Только затем расширять live read-only проверку"],
+    gates: ["Закрыть HIGH по scoped handlers, callbacks и оставшимся diagnostics", "Проверить guarded bank-config migration после backup в sandbox", "Только затем расширять live read-only проверку"],
   },
 };
 

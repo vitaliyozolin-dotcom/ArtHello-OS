@@ -10,12 +10,13 @@
 | Tochka client credentials | официальный `/connect/token` | HTTP 200, service token получен | VERIFIED AUTH |
 | Tochka accounts | service token, без consent | HTTP 403 | BLOCKED BY HYBRID OAUTH |
 | Tochka payments | не вызывались | действий не было | NOT ATTEMPTED |
+| PostgreSQL 16 CI | одноразовая БД, только синтетические записи | migrations/session/CSRF/audit/webhook/rollback/startup PASS | VERIFIED SANDBOX RUNTIME |
 
 Sites показывает только статус источника и число филиалов. Названия филиалов, сведения о людях, суммы, счета, токены и операции туда не передаются.
 
 ## Обновление A.2
 
-Никакие live-записи не читались. Новых количеств семей, учеников, филиалов, юридических лиц, счетов или операций нет. Credentials со скриншотов намеренно не использованы. PostgreSQL 16 suite использует только синтетические sandbox-записи.
+На этапе A.2 live-записи не читались. В A.3 подтверждены только auth и количество филиалов без публикации записей. PostgreSQL 16 suite использует исключительно синтетические sandbox-записи и не подключается к AlfaCRM или банкам.
 
 Дата: 2026-07-24
 Режим проверки: статический аудит исходников, без production-секретов и без доступа к БД
@@ -29,7 +30,7 @@ Sites показывает только статус источника и чи�
 
 | Область | Реализация | Live-подключение | Свежесть / период | Охват | Решение |
 |---|---|---|---|---|---|
-| AlfaCRM branches | CODE FOUND | NOT VERIFIED | неизвестно | филиалы не подтверждены | read-only инвентаризация |
+| AlfaCRM branches | CODE FOUND + LIVE COUNT | auth/endpoint HTTP 200 | 2026-07-25 | 8 филиалов; состав не подтверждён | обезличенная read-only инвентаризация |
 | AlfaCRM students | CODE FOUND | NOT VERIFIED | неизвестно | неизвестно | профиль объёма, дублей и дат |
 | AlfaCRM payments | CODE FOUND | NOT VERIFIED | неизвестно | неизвестно | сверка с банком |
 | Lessons / attendance | CODE FOUND | NOT VERIFIED | неизвестно | неизвестно | проверить endpoint и полноту |
@@ -47,16 +48,16 @@ Sites показывает только статус источника и чи�
 | ОПиУ | CODE FOUND | NOT VERIFIED | неизвестно | неизвестно | нельзя использовать |
 | AI CFO | CODE FOUND | не запускается | неприменимо | неприменимо | ждать `READY` |
 | Sites control | SAFE CONTROL | owner-only подтверждён | audit snapshot | без PII и денег | разрешён checkpoint |
-| Auth/RBAC evidence | CODE FOUND | migrations 0009–0010 не применялись | source snapshot 2026-07-24 | non-owner business routes fail closed | sandbox HTTP/PG apply/rollback |
+| Auth/RBAC evidence | CODE FOUND + PG16 CI PASS | migrations 0009–0010 apply/rollback в одноразовом CI | CI 2026-07-25 | non-owner business routes fail closed | restored sandbox до Replit release |
 | Branch/legal access scope | CODE FOUND | runtime NOT VERIFIED | source snapshot 2026-07-24 | scoped handlers отсутствуют | BLOCKED для non-owner business data |
-| Sensitive access audit | CODE FOUND | runtime NOT VERIFIED | source snapshot 2026-07-24 | canonical route metadata, без payload | sandbox allow/deny audit test |
-| Website lead atomicity | CODE FOUND + UNIT PASS | PostgreSQL NOT VERIFIED | source snapshot 2026-07-24 | canonical payload, без Sites data | sandbox PostgreSQL failure/retry smoke |
-| Security schema preflight | CODE FOUND + UNIT PASS | PostgreSQL NOT VERIFIED | source snapshot 2026-07-24 | columns/indexes/journal timestamp+hash | sandbox missing-schema startup test |
+| Sensitive access audit | CODE FOUND + UNIT PASS | allowed route PG16 PASS; deny/outage PG NOT VERIFIED | CI 2026-07-25 | canonical route metadata, без payload | PostgreSQL deny/outage smoke |
+| Website lead atomicity | CODE FOUND + PG16 CI PASS | failure/rollback/retry/duplicate/conflict PASS | CI 2026-07-25 | canonical payload, без Sites data | provider-auth до public callback |
+| Security schema preflight | CODE FOUND + PG16 CI PASS | controlled drift и fail-closed startup PASS | CI 2026-07-25 | columns/indexes/journal timestamp+hash | сохранить обязательный quality gate |
 | Banking health allowlist | CODE FOUND + UNIT PASS | live bank NOT VERIFIED | source snapshot 2026-07-24 | unknown fields dropped | sandbox connector contract test |
 
 ## Филиалы и юридические лица
 
-Текущий список филиалов не подтверждён. Исторические упоминания конкретного филиала в `replit.md` не считаются доказательством текущего охвата.
+Количество филиалов подтверждено live как 8. Названия, идентификаторы, состав и сопоставление с юридическими лицами не подтверждены и не публикуются. Исторические упоминания конкретного филиала в `replit.md` не считаются доказательством текущего охвата.
 
 Текущий список юридических лиц, ИНН, счетов и их связи с филиалами не извлекался и не публикуется.
 
