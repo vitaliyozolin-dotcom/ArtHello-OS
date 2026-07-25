@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
+    <meta name="description" content="Приватный контрольный контур ArtHello OS." />
+    <title>ArtHello OS — контроль интерфейса</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">К основному содержанию</a>
+    <div class="app-shell">
+      <div class="drawer-backdrop" data-drawer-close></div>
+
+      <aside class="sidebar" id="sidebar" aria-label="Основная навигация">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">A</div>
+          <div>
+            <strong>ArtHello</strong>
+            <span>операционная система</span>
+          </div>
+          <button class="icon-button sidebar-close" type="button" data-drawer-close aria-label="Закрыть меню">×</button>
+        </div>
+
+        <div class="environment-card">
+          <span class="environment-dot" aria-hidden="true"></span>
+          <div>
+            <strong>Контрольный контур Sites</strong>
+            <span>Только обезличенные данные</span>
+          </div>
+        </div>
+
+        <nav class="nav-groups">
+          <div class="nav-group">
+            <span class="nav-label">Контроль</span>
+            <button class="nav-item is-active" type="button" data-section="pulse">
+              <span class="nav-icon">⌁</span><span>Пульс собственника</span>
+            </button>
+            <button class="nav-item" type="button" data-section="quality">
+              <span class="nav-icon">✓</span><span>Качество данных</span>
+              <span class="nav-alert" aria-label="Есть блокеры">!</span>
+            </button>
+            <button class="nav-item" type="button" data-section="sources">
+              <span class="nav-icon">↻</span><span>Источники данных</span>
+            </button>
+          </div>
+
+          <div class="nav-group">
+            <span class="nav-label">Клиенты и обучение</span>
+            <button class="nav-item" type="button" data-section="families"><span class="nav-icon">⌂</span><span>Семьи</span></button>
+            <button class="nav-item" type="button" data-section="students"><span class="nav-icon">◉</span><span>Ученики</span></button>
+            <button class="nav-item" type="button" data-section="groups"><span class="nav-icon">▦</span><span>Группы и классы</span></button>
+          </div>
+
+          <div class="nav-group">
+            <span class="nav-label">Команда</span>
+            <button class="nav-item" type="button" data-section="employees"><span class="nav-icon">♙</span><span>Сотрудники</span></button>
+            <button class="nav-item" type="button" data-section="payroll"><span class="nav-icon">₽</span><span>Зарплата</span></button>
+          </div>
+
+          <div class="nav-group">
+            <span class="nav-label">Финансы</span>
+            <button class="nav-item" type="button" data-section="money"><span class="nav-icon">◒</span><span>Деньги</span></button>
+            <button class="nav-item" type="button" data-section="cashflow"><span class="nav-icon">⇅</span><span>ДДС</span></button>
+            <button class="nav-item" type="button" data-section="pnl"><span class="nav-icon">▥</span><span>ОПиУ</span></button>
+            <button class="nav-item" type="button" data-section="model"><span class="nav-icon">⌁</span><span>Финансовая модель</span></button>
+          </div>
+
+          <div class="nav-group nav-group-last">
+            <span class="nav-label">Управление</span>
+            <button class="nav-item" type="button" data-section="system"><span class="nav-icon">⚙</span><span>Система</span></button>
+          </div>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="avatar" aria-hidden="true">В</div>
+          <div><strong>Владелец</strong><span>owner-only доступ</span></div>
+        </div>
+      </aside>
+
+      <main class="main" id="main-content">
+        <header class="mobile-header">
+          <div class="mobile-brand"><span class="brand-mark">A</span><strong>ArtHello OS</strong></div>
+          <button class="icon-button" type="button" data-drawer-open aria-controls="sidebar" aria-expanded="false" aria-label="Открыть меню">☰</button>
+        </header>
+
+        <section class="view is-active" data-view="pulse" aria-labelledby="pulse-title">
+          <div class="page-heading">
+            <div>
+              <div class="eyebrow">Фаза A.3 · live read-only verification</div>
+              <h1 id="pulse-title">Что можно считать правдой сейчас</h1>
+              <p>Экран для собственника: только подтверждённые выводы аудита, без случайных цифр и скрытых допущений.</p>
+            </div>
+            <span class="checkpoint-chip"><span></span> A.3 · source v5</span>
+          </div>
+
+          <div class="demo-notice" role="note">
+            <span class="notice-icon">i</span>
+            <div>
+              <strong>Owner-only sanitized checkpoint</strong>
+              <p>Реальный источник здесь представлен только обезличенными статусами и числом филиалов. Данных детей, родителей, сотрудников, зарплат и банковских операций нет; production и детальные live-данные остаются <strong>BLOCKED</strong>.</p>
+            </div>
+          </div>
+
+          <article class="truth-hero">
+            <div class="truth-copy">
+              <span class="truth-kicker">Финансовая правда</span>
+              <h2>Пока не готова для управленческих решений</h2>
+              <p>Авторизация AlfaCRM и сервисные credentials «Точки» подтверждены. Полнота сущностей, счета, операции, юрлица и финансовая сверка ещё не доказаны.</p>
+              <button class="primary-button" type="button" data-go="quality">Открыть центр качества <span>→</span></button>
+            </div>
+            <div class="truth-state">
+              <div class="truth-orbit" aria-hidden="true"><span>!</span></div>
+              <strong>NOT READY</strong>
+              <span>ворота качества закрыты</span>
+            </div>
+          </article>
+
+          <div class="section-heading">
+            <div><h2>Три контрольных сигнала</h2><p>Что уже известно владельцу без доступа к production-данным.</p></div>
+          </div>
+          <div class="signal-grid">
+            <article class="signal-card signal-risk">
+              <span class="signal-icon">!</span>
+              <div class="signal-meta"><span>Безопасность</span><strong>Периметр усилен в исходниках</strong></div>
+              <p>Bank config vault и AlfaCRM queue добавлены и проверены unit/source tests. PostgreSQL 16 integration suite подготовлен для CI, но ещё не выполнялся.</p>
+              <button type="button" data-go="quality">Посмотреть риски →</button>
+            </article>
+            <article class="signal-card signal-warn">
+              <span class="signal-icon">↻</span>
+              <div class="signal-meta"><span>Источники</span><strong>Авторизация подтверждена частично</strong></div>
+              <p>AlfaCRM вернул успешную авторизацию и 8 филиалов. «Точка» выдала service token; для счетов нужен пользовательский OAuth consent.</p>
+              <button type="button" data-go="sources">Открыть источники →</button>
+            </article>
+            <article class="signal-card signal-neutral">
+              <span class="signal-icon">⌂</span>
+              <div class="signal-meta"><span>Покрытие</span><strong>8 филиалов · состав ещё не сверён</strong></div>
+              <p>Количество получено из реального AlfaCRM 25.07.2026. Названия, юрлица и полнота сущностей здесь не публикуются и ещё не сверены.</p>
+              <button type="button" data-go="sources">Проверить покрытие →</button>
+            </article>
+          </div>
+
+          <div class="content-grid">
+            <article class="panel">
+              <div class="panel-header">
+                <div><h2>Статус источников</h2><p>Разделяем наличие кода и фактическое подключение.</p></div>
+                <button class="text-button" type="button" data-go="sources">Все источники</button>
+              </div>
+              <div class="source-list">
+                <div class="source-row">
+                  <div class="source-logo source-logo-crm">A</div>
+                  <div class="source-copy"><strong>AlfaCRM</strong><span>реальный источник · auth OK · 8 филиалов</span></div>
+                  <span class="status status-safe">Auth подтверждена</span>
+                </div>
+                <div class="source-row">
+                  <div class="source-logo source-logo-bank">Б</div>
+                  <div class="source-copy"><strong>Банк «Точка»</strong><span>client credentials OK; счета требуют OAuth consent</span></div>
+                  <span class="status status-unverified">OAuth требуется</span>
+                </div>
+                <div class="source-row">
+                  <div class="source-logo source-logo-sites">S</div>
+                  <div class="source-copy"><strong>Sites control</strong><span>приватная оболочка без реальных данных</span></div>
+                  <span class="status status-safe">Безопасный режим</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel next-gate">
+              <div class="panel-header"><div><h2>Следующие ворота</h2><p>Технический probe разрешён; детальные данные и production пока закрыты.</p></div></div>
+              <ol class="gate-list">
+                <li><span>1</span><div><strong>Выполнить PostgreSQL 16 suite</strong><p>Apply migrations → HTTP/PG smoke → failure/retry → rollback → fail-closed startup.</p></div></li>
+                <li><span>2</span><div><strong>Закрыть оставшиеся HIGH</strong><p>Provider-auth callbacks, route-level scope predicates и legacy diagnostics.</p></div></li>
+                <li><span>3</span><div><strong>Расширить read-only инвентаризацию</strong><p>Текущими временными ключами, без сохранения записей; затем новая независимая проверка.</p></div></li>
+              </ol>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view="quality" aria-labelledby="quality-title">
+          <div class="page-heading">
+            <div><div class="eyebrow">Контроль качества · A.3</div><h1 id="quality-title">Центр качества данных</h1><p>Разделяем четыре состояния: подтверждено live, реализовано в коде, ожидает sandbox и запрещено для production.</p></div>
+            <span class="checkpoint-chip checkpoint-chip-risk"><span></span> Есть блокеры</span>
+          </div>
+
+          <div class="quality-summary">
+            <article><span class="summary-mark summary-blocker">!</span><div><strong>Production / detailed live data: BLOCKED</strong><p>Scoped handlers, callbacks, legacy diagnostics и ротация раскрытых ключей остаются HIGH</p></div></article>
+            <article><span class="summary-mark summary-fixed">✓</span><div><strong>Реализовано в исходниках</strong><p>Encrypted bank config, AlfaCRM queue, sessions, atomic webhook и schema preflight</p></div></article>
+            <article><span class="summary-mark summary-access">×</span><div><strong>CI evidence ещё отсутствует</strong><p>PostgreSQL 16 suite подготовлен, но не запускался из пустого GitHub-репозитория</p></div></article>
+          </div>
+
+          <article class="panel issue-panel">
+            <div class="panel-header issue-header">
+              <div><h2>Реестр найденных проблем</h2><p>Статусы не означают, что изменения уже выпущены в Replit.</p></div>
+              <div class="filters" role="group" aria-label="Фильтр проблем">
+                <button class="filter is-active" type="button" data-filter="all">Все</button>
+                <button class="filter" type="button" data-filter="blocker">Блокеры</button>
+                <button class="filter" type="button" data-filter="fixed">Исправлено</button>
+                <button class="filter" type="button" data-filter="access">Нужен доступ</button>
+              </div>
+            </div>
+            <div class="issue-table-wrap">
+              <table class="issue-table">
+                <thead><tr><th>Код</th><th>Проблема и влияние</th><th>Статус</th><th>Следующий шаг</th></tr></thead>
+                <tbody>
+                  <tr data-kind="fixed"><td><code>SEC-01</code></td><td><strong>Публичные демо-реквизиты</strong><span>Любой посетитель мог увидеть данные для входа.</span></td><td><span class="status status-fixed">Исправлено в коде</span></td><td>Контролируемо выпустить в Replit</td></tr>
+                  <tr data-kind="fixed"><td><code>SEC-02</code></td><td><strong>API без общего auth-gate</strong><span>Чувствительные read/write маршруты не были закрыты централизованно.</span></td><td><span class="status status-fixed">Исправлено в коде</span></td><td>Проверить callback-контракты до выпуска</td></tr>
+                  <tr data-kind="fixed"><td><code>SEC-03</code></td><td><strong>Служебный интерфейс индексировался</strong><span>HTML и robots.txt разрешали поисковую индексацию.</span></td><td><span class="status status-fixed">Исправлено в коде</span></td><td>Выпустить и перепроверить заголовки</td></tr>
+                  <tr data-kind="fixed"><td><code>SEC-04</code></td><td><strong>Банковские секреты в JSONB</strong><span>AES-256-GCM vault с key ID и привязкой к connector ID реализован; plaintext secret config завершается fail closed.</span></td><td><span class="status status-fixed">Исправлено · unit PASS</span></td><td>После backup выполнить guarded migration в sandbox</td></tr>
+                  <tr data-kind="blocker"><td><code>SEC-05</code></td><td><strong>Raw diagnostics закрыты в коннекторе «Точки»</strong><span>Upstream bodies, customer identifiers и token fragments удалены из ошибок и logs; health response использует strict allowlist. В других legacy API/probe обработчиках аудит ещё не завершён.</span></td><td><span class="status status-blocker">PARTIAL · 23 tests PASS</span></td><td>Закрыть оставшиеся legacy errors и probes</td></tr>
+                  <tr data-kind="blocker"><td><code>SEC-06</code></td><td><strong>Sessions, RBAC, CSRF и lockout готовы только в исходниках</strong><span>До listener проверяются обязательные columns, indexes и timestamp+hash migrations 0009–0010, но PostgreSQL sandbox smoke ещё не выполнен.</span></td><td><span class="status status-blocker">Код + unit готовы · PG нет</span></td><td>Restore → apply → HTTP/PG smoke → rollback</td></tr>
+                  <tr data-kind="fixed"><td><code>SEC-07</code></td><td><strong>Fallback-ключ Evotor</strong><span>Tracked fallback удалён; token operations без защищённого SESSION_SECRET завершаются fail closed.</span></td><td><span class="status status-fixed">Исправлено в коде</span></td><td>Проверить ротацию ключа в sandbox</td></tr>
+                  <tr data-kind="blocker"><td><code>SEC-08</code></td><td><strong>Scoped non-owner handlers ещё не реализованы</strong><span>Branch/legal-entity scope хранится в session; все business routes для non-owner теперь fail closed, пока каждый handler не применяет оба predicates.</span></td><td><span class="status status-blocker">HIGH · безопасно заблокировано</span></td><td>Включать маршруты только с cross-scope negative tests</td></tr>
+                  <tr data-kind="blocker"><td><code>SEC-09</code></td><td><strong>Audit чувствительного доступа не доказан в runtime</strong><span>Fail-closed middleware и route-template registry скрывают slug, email, phone, UUID, numeric и encoded identifiers; PostgreSQL allow/deny smoke ещё нужен.</span></td><td><span class="status status-blocker">Код + unit готовы · PG нет</span></td><td>Проверить allow/deny audit на PostgreSQL</td></tr>
+                  <tr data-kind="blocker"><td><code>OPS-02</code></td><td><strong>Startup fail closed усилен schema preflight</strong><span>Migration error или неполная auth/audit schema прерывают запуск до listener и polling; failure-path ещё не доказан в PostgreSQL sandbox.</span></td><td><span class="status status-blocker">Код + unit готовы · PG нет</span></td><td>Прогнать controlled schema failure</td></tr>
+                  <tr data-kind="fixed"><td><code>INT-01</code></td><td><strong>Limiter AlfaCRM не был защищён от конкуренции</strong><span>Все запросы сериализованы с интервалом 260 ms; параллельная аутентификация объединяется в один запрос.</span></td><td><span class="status status-fixed">Исправлено · unit PASS</span></td><td>Подтвердить на sandbox без production-данных</td></tr>
+                  <tr data-kind="blocker"><td><code>INT-02</code></td><td><strong>Внешние POST callbacks намеренно неработоспособны</strong><span>Website handler теперь atomic и payload-bound idempotent, но website, bank и Evotor callbacks остаются за user auth/CSRF до provider-auth и replay protection.</span></td><td><span class="status status-blocker">HIGH · безопасно заблокировано</span></td><td>Реализовать и проверить provider-specific contracts</td></tr>
+                  <tr data-kind="blocker"><td><code>QA-01</code></td><td><strong>PostgreSQL runtime evidence ещё нет</strong><span>PG16 CI suite подготовлен: migrations, sessions, CSRF, audit, webhook rollback/retry, schema drift, rollback и fail-closed startup.</span></td><td><span class="status status-blocker">Suite готов · запуск ожидает GitHub</span></td><td>Импортировать source и выполнить quality workflow</td></tr>
+                  <tr data-kind="blocker"><td><code>SEC-10</code></td><td><strong>Текущие ключи временно разрешены только для read-only проверки</strong><span>Они использованы одноразово без сохранения. Перед production обязательны ротация и protected backend env.</span></td><td><span class="status status-blocker">Ротация до production</span></td><td>После проверки перевыпустить оба комплекта ключей</td></tr>
+                  <tr data-kind="fixed"><td><code>REV-A1-201</code></td><td><strong>Website lead мог потеряться после partial write</strong><span>Raw, lead, processed flag и source update объединены одной transaction под advisory lock; retry создаёт ровно одну пару, другой payload получает 409.</span></td><td><span class="status status-fixed">Исправлено · unit PASS</span></td><td>Подтвердить failure/retry в PostgreSQL sandbox</td></tr>
+                  <tr data-kind="fixed"><td><code>REV-A1-202</code></td><td><strong>API мог начать listen без migrations 0009–0010</strong><span>Pre-listen gate проверяет columns, indexes и точные journal timestamp+hash; schema drift блокирует startup.</span></td><td><span class="status status-fixed">Исправлено · unit PASS</span></td><td>Подтвердить missing-schema path в sandbox</td></tr>
+                  <tr data-kind="fixed"><td><code>CFG-01</code></td><td><strong>Hardcoded AlfaCRM tenant fallback</strong><span>Tenant мог неявно выбираться при отсутствии ALFACRM_DOMAIN.</span></td><td><span class="status status-fixed">Исправлено в коде</span></td><td>Задать ALFACRM_DOMAIN только в protected env</td></tr>
+                  <tr data-kind="access"><td><code>DATA-01</code></td><td><strong>Количество филиалов подтверждено, карта бизнеса — нет</strong><span>AlfaCRM live вернул 8 филиалов; названия, юрлица и сопоставление с БД ещё не проверены.</span></td><td><span class="status status-access">PARTIAL · REAL SOURCE</span></td><td>Завершить обезличенную инвентаризацию</td></tr>
+                  <tr data-kind="access"><td><code>DATA-02</code></td><td><strong>Количество записей не перепроверено</strong><span>В checkpoint нет production-метрик и персональных данных.</span></td><td><span class="status status-access">Нужен доступ</span></td><td>Снять свежий обезличенный профиль</td></tr>
+                  <tr data-kind="access"><td><code>DATA-03</code></td><td><strong>Банк и AlfaCRM не сверены на свежих данных</strong><span>ДДС, ОПиУ и AI CFO пока нельзя считать надёжными.</span></td><td><span class="status status-access">Нужен доступ</span></td><td>Сверка после backup и контроля покрытия</td></tr>
+                  <tr data-kind="blocker"><td><code>OPS-01</code></td><td><strong>GitHub-репозиторий подключён, но пуст</strong><span>Source готов локально; текущая среда не имеет аутентифицированного Git CLI для первичного импорта.</span></td><td><span class="status status-blocker">Нужна авторизация публикации</span></td><td>Авторизовать GitHub CLI или выполнить первичный push владельцем</td></tr>
+                </tbody>
+              </table>
+              <div class="empty-filter" hidden>В этой категории проблем нет.</div>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" data-view="sources" aria-labelledby="sources-title">
+          <div class="page-heading">
+            <div><div class="eyebrow">Карта интеграций</div><h1 id="sources-title">Источники и покрытие</h1><p>Показываем отдельно подтверждённую авторизацию, доступ к данным и полноту покрытия.</p></div>
+          </div>
+
+          <div class="source-cards">
+            <article class="integration-card">
+              <div class="integration-top"><div class="source-logo source-logo-crm">A</div><span class="status status-safe">Auth подтверждена</span></div>
+              <h2>AlfaCRM</h2>
+              <p>Live read-only авторизация успешна. Получено только безопасное агрегированное покрытие; карточки людей и содержимое записей в Sites не передаются.</p>
+              <dl><div><dt>Авторизация</dt><dd>HTTP 200</dd></div><div><dt>Филиалы</dt><dd>8 · реальный источник</dd></div><div><dt>Limiter</dt><dd>Unit PASS</dd></div><div><dt>Полнота сущностей</dt><dd>Ещё не доказана</dd></div></dl>
+            </article>
+            <article class="integration-card">
+              <div class="integration-top"><div class="source-logo source-logo-bank">Т</div><span class="status status-unverified">Нужен OAuth consent</span></div>
+              <h2>Банк «Точка»</h2>
+              <p>Client credentials валидны: service token получен. Service token не даёт доступ к счетам — банк корректно требует пользовательский Authorization Code flow.</p>
+              <dl><div><dt>Client credentials</dt><dd>HTTP 200</dd></div><div><dt>Service token</dt><dd>Получен</dd></div><div><dt>Счета</dt><dd>403 · нужен hybrid OAuth</dd></div><div><dt>Платежи</dt><dd>Не инициировались</dd></div></dl>
+            </article>
+            <article class="integration-card">
+              <div class="integration-top"><div class="source-logo source-logo-other">Б</div><span class="status status-unverified">Live не проверены</span></div>
+              <h2>Другие банки</h2>
+              <p>Обнаружены модули Т-Банка и ВТБ. Их актуальные контракты и production-готовность не подтверждены.</p>
+              <dl><div><dt>Т-Банк</dt><dd>Код найден</dd></div><div><dt>ВТБ</dt><dd>Код найден</dd></div><div><dt>Операции</dt><dd>Не проверены</dd></div><div><dt>Платежи</dt><dd>Не инициируются</dd></div></dl>
+            </article>
+          </div>
+
+          <article class="panel coverage-panel">
+            <div class="panel-header"><div><h2>Покрытие бизнеса</h2><p>Пустые значения — честный результат отсутствия авторизованной проверки.</p></div></div>
+            <div class="coverage-grid">
+              <div><span>Филиалы</span><strong>8 подтверждено live</strong><p>Реальный AlfaCRM, 25.07.2026. Названия и сопоставление с БД не опубликованы.</p></div>
+              <div><span>Юридические лица</span><strong>Не подтверждены</strong><p>Нужна карта юрлицо → счета → филиалы.</p></div>
+              <div><span>Банковские счета</span><strong>Не подтверждены</strong><p>Sites не подключён к банковским секретам.</p></div>
+              <div><span>Несверенные данные</span><strong>Количество неизвестно</strong><p>Будет рассчитано только на свежем обезличенном профиле.</p></div>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" data-view="module" aria-labelledby="module-title">
+          <div class="page-heading">
+            <div><div class="eyebrow" id="module-eyebrow">Структура ArtHello OS</div><h1 id="module-title">Раздел</h1><p id="module-summary"></p></div>
+            <span class="checkpoint-chip checkpoint-chip-muted"><span></span> Каркас раздела</span>
+          </div>
+          <div class="module-layout">
+            <article class="module-hero">
+              <span class="module-icon" id="module-icon" aria-hidden="true">◉</span>
+              <div><span class="module-state">Текущее состояние</span><h2 id="module-state-title">Основание найдено</h2><p id="module-state-copy"></p></div>
+            </article>
+            <div class="module-grid">
+              <article class="panel"><div class="panel-header"><div><h2>Что найдено в проекте</h2></div></div><ul class="check-list" id="module-found"></ul></article>
+              <article class="panel"><div class="panel-header"><div><h2>Ворота перед использованием</h2></div></div><ul class="gate-check-list" id="module-gates"></ul></article>
+            </div>
+            <div class="demo-notice module-notice" role="note"><span class="notice-icon">i</span><div><strong>Без имитации готовой аналитики</strong><p>Раздел показывает структуру будущей системы. Метрики появятся только после проверки источников, правил расчёта и качества данных.</p></div></div>
+          </div>
+        </section>
+
+        <nav class="mobile-bottom-nav" aria-label="Быстрая навигация">
+          <button class="is-active" type="button" data-section="pulse"><span>⌁</span>Пульс</button>
+          <button type="button" data-section="quality"><span>✓</span>Качество</button>
+          <button type="button" data-section="sources"><span>↻</span>Источники</button>
+          <button type="button" data-drawer-open><span>☰</span>Ещё</button>
+        </nav>
+      </main>
+    </div>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

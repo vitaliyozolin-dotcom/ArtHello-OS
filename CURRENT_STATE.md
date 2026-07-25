@@ -1,0 +1,204 @@
+# ArtHello OS — Current State
+
+## Обновление A.3 — 2026-07-25
+
+- Владелец явно разрешил временно использовать текущие раскрытые credentials только для ограниченной read-only проверки. Они извлекались в память процесса, не записывались в файлы, Git, Sites, БД или постоянный environment.
+- AlfaCRM live auth вернул HTTP 200; `/0/branch/index` вернул 8 филиалов. Имена и записи не выводились. Последующие запросы стали получать сетевые timeout, поэтому количества учеников, групп, педагогов, занятий и оплат пока не считаются проверенными.
+- Tochka `client_credentials` вернул HTTP 200 и service token. Запрос счетов с service token вернул ожидаемый HTTP 403: требуется пользовательский Authorization Code/consent и hybrid token. Consent не создавался, платежные действия не выполнялись.
+- Добавлен повторяемый `probe:live-read-only`: принимает секреты только через process environment, имеет limiter/circuit breaker и выводит лишь статусы и количества.
+- В коннекторе «Точки» upstream response bodies, customer identifiers и token fragments удалены из logs и исключений. Security suite расширен до 23 тестов.
+- Production, подробные live-данные, банковские счета/операции, sync в БД и финансовая аналитика остаются заблокированы.
+
+## Обновление A.2 — 2026-07-25
+
+- Приватный GitHub `vitaliyozolin-dotcom/ArtHello-OS` подтверждён, но пока пустой; локальный source ещё не опубликован.
+- Для bank connector config реализован AES-256-GCM vault с key ID, AAD по connector ID, fail-closed чтением plaintext secrets и guarded migration после backup.
+- AlfaCRM вызовы сериализованы с интервалом 260 ms; параллельная аутентификация объединяется.
+- Подготовлены PostgreSQL 16 integration suite и GitHub Actions quality workflow. Runtime evidence отсутствует до фактического запуска.
+- На этапе A.2 ключи со скриншотов не использовались; в A.3 владелец разрешил только ephemeral read-only probe. До production и постоянной синхронизации они должны быть перевыпущены.
+- Sites preview embedding исправлен ограниченным allowlist ChatGPT; индексация и кэширование остаются запрещены.
+
+Дата среза: 2026-07-24
+Этап: Фаза A.1 — readiness for real data, security perimeter
+
+## Происхождение исходников
+
+- Источник: предоставленный архив `arthello-os-src.zip`.
+- SHA-256 архива: `714388e45dbd49d58fd3e3f6abb48e5f04d1896eaab3dc164407175e7944cf6e`.
+- Архив прошёл проверку целостности и проверку путей перед распаковкой.
+- В архиве не было `.git`; прежнюю ветку, историю и незавершённые изменения подтвердить невозможно.
+- Для продолжения Sites создана локальная baseline-версия на ветке `main`: `5b9546778bb7ec42cff2880849699550d896fe6a`.
+- Checkpoint №1 проверял commit `14639db870af9dc69a0702fa33a5a10b2ae8ddc8`, Sites version `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_fa731a9248348191902409ebe3f68bde`, deployment `appgdep_6a629f0960fc81918f1e925d0daffd21`.
+- Checkpoint №1 был owner-only и технически успешно развёрнут, но Координатор выдал `NO-GO`: owner UI не показывал все найденные production-блокеры.
+- Первая техническая попытка checkpoint №2 сохранила commit `4f57f9c92fcaf3e0dcc970a533154ec4d2ccd4c7` как Sites version `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_9d38f22c6aec819185cbfc117f5d34d8`, deployment `appgdep_6a62a6854b9c8191ad9b750d44633b9c`, но remote build завершился до deployment: builder не находил вложенный `pnpm`.
+- Root `build` сделан package-manager-neutral для Sites; полный монорепо-прогон сохранён как `build:full`. Новая immutable Sites version создаётся из отдельного commit, failed version повторно не разворачивается.
+- Security checkpoint цикла 1 проверял commit `41b131659072b083d99a24ca7bf0f0ba38e26c4f`, Sites version №4 `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_c09fda5b22488191b576857bdb0eda35`, deployment `appgdep_6a62c158cd9881919b3d0b004a5d3ffa`.
+- Ревизор цикла 1: `CONDITIONAL PASS` только для owner-only оболочки и `BLOCKED` для production/live. Координатор: `CONDITIONAL GO` на просмотр, `GO` на корректирующий цикл A.1 и `BLOCKED` для production/live/финансов.
+- Security checkpoint цикла 2 проверял commit `aa0543f8478787059c590750df77888b8f508573`, Sites version №5 `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_57b4c3a09b788191a61d4e2964a5c775`, deployment `appgdep_6a62c8edd18881919260fce24734d4dd`.
+- Ревизор цикла 2 разрешил owner-only sanitized checkpoint, но выявил потерю website lead при partial failure и отсутствие pre-listen проверки фактической security schema. Координатор разрешил третий, финальный корректирующий цикл и сохранил `NO-GO` для production/live/следующей продуктовой фазы.
+
+## Срез A.1
+
+После принятого owner-only checkpoint Фазы A начат отдельный security-срез без production-доступов:
+
+- bearer session token удалён из browser `localStorage`;
+- session token передаётся только в HttpOnly/SameSite cookie и хранится в БД только как SHA-256 hash;
+- CSRF token проверяется по cookie, header и hash в server-side session;
+- `owner`, `accountant`, `viewer` проверяются централизованной route policy;
+- owner сохраняет полный authenticated access; для accountant/viewer обязательны списки branch и legal-entity scope из protected environment;
+- все business routes для non-owner теперь fail closed, пока конкретный handler не применяет оба scope predicates и не получает cross-scope negative tests;
+- login attempts и lockout хранятся в PostgreSQL без raw login/IP;
+- разрешённые sensitive routes требуют записи обезличенного access audit; недоступность audit store возвращает `503`;
+- структурированные logs проходят recursive redaction; Error message и stack не журналируются;
+- fallback-ключ Evotor удалён, отсутствие `SESSION_SECRET` останавливает операции с token fail closed;
+- Drizzle migration `0009_famous_ma_gnuci.sql` создана отдельно и не применялась ни к sandbox, ни к production.
+- migration `0010_outstanding_cargill.sql` добавляет session scopes и security access audit; она также не применялась;
+- migration error теперь пробрасывается; перед listener выполняется fail-closed inventory обязательных auth/audit columns, indexes и точных timestamp+hash записей migrations `0009–0010`;
+- website lead handler требует `Idempotency-Key`; raw event, lead event, processed flag и source status теперь изменяются в одной PostgreSQL transaction под advisory lock;
+- повтор того же key с иным canonical payload получает `409`, а legacy raw-only partial write восстанавливается без второй raw-записи;
+- banking health sanitization переведена с denylist на strict allowlist;
+- access audit использует явные route templates и не сохраняет slug/email/phone/UUID/numeric/percent-encoded identifiers.
+
+Unit/source regression suite проверяет эти ветки без production-данных. В текущей среде нет disposable PostgreSQL (`DATABASE_URL`, `psql`, `postgres`, `initdb` отсутствуют), поэтому runtime transaction и migrations 0009–0010 ещё должны быть проверены на восстановленной sandbox-копии. Это состояние не является runtime-release.
+
+## Репозиторий
+
+| Область | Фактическое состояние |
+|---|---|
+| Package manager | pnpm workspace, lock-файл восстановлен |
+| Frontend | React 19, Vite, Tailwind, wouter, React Query |
+| API | Express 5, TypeScript |
+| БД | PostgreSQL, Drizzle, большой набор схем и встроенный migration runner |
+| Runtime Replit | Node 24, PostgreSQL 16 по `.replit` |
+| Sites | отдельная безопасная control surface внутри того же репозитория |
+
+В исходной конфигурации TypeScript incremental metadata считал отсутствующие declaration-файлы актуальными. Команда `typecheck:libs` переведена на принудительную пересборку, после чего baseline typecheck проходит.
+
+## Модули, найденные в коде
+
+- source connectors, raw events и lead events;
+- AlfaCRM branches, students, payments, lessons, attendance, teachers, groups и identities;
+- persons, families, student profiles и guardian links;
+- educational units, class groups, enrollments и schedule;
+- bank connectors, accounts, sync runs, raw statements, transactions и reconciliation;
+- ledger, financial articles, cashflow, P&L, recurring obligations и payables;
+- departments, employees, roles, assignments, payroll rules и payroll periods;
+- contracts, documents, taxes, contractors, month closing, trust score и ранний AI CFO.
+
+Наличие этих модулей не подтверждает production-готовность или текущую полноту данных.
+
+## AlfaCRM
+
+Подтверждено по коду:
+
+- read-only клиент использует `/v2api/auth/login` и `X-ALFACRM-TOKEN`;
+- реализованы пагинация, raw-слой, нормализация и журналы синхронизации;
+- все вызовы идут через сериализованную очередь с интервалом 260 ms; конкурентный unit-тест доказывает порядок и восстановление после ошибки;
+- `ALFACRM_DOMAIN` обязателен: hardcoded tenant fallback удалён, отсутствие переменной останавливает клиент fail closed;
+- учётные данные читаются из environment.
+
+Не подтверждено:
+
+- доступность API на текущую дату;
+- валидность учётных данных;
+- список и полнота филиалов;
+- свежесть и количество записей;
+- охват юридических лиц.
+
+## Банки
+
+Подтверждено по коду:
+
+- обнаружены коннекторы Точки, Т-Банка и ВТБ;
+- есть сущности счетов, остатков, операций, sync runs и raw statements;
+- у Точки реализованы OAuth, accounts, balances и statements;
+- явного кода инициирования банковских платежей не найдено.
+
+Критический gate:
+
+- новые secret-bearing `bank_connectors.config` шифруются AES-256-GCM и fail closed при plaintext; legacy rows ещё не мигрированы и требуют sandbox backup/guarded migration;
+- banking health response очищен от raw debug и пользовательские banking errors сделаны generic, но legacy API handlers и probes ещё требуют системного удаления raw errors.
+
+Не подтверждено:
+
+- какие коннекторы реально активны;
+- какие счета и юридические лица покрыты;
+- актуальность контрактов Т-Банка и ВТБ;
+- свежесть и полнота банковских операций.
+
+## Безопасность
+
+Найдено в исходной версии:
+
+- публично показанные демо-реквизиты входа;
+- fallback-пароли в API;
+- `robots=index,follow` и разрешающий `robots.txt`;
+- все API-модули монтировались без общего `requireAuth`;
+- CORS был открыт для любого origin;
+- bearer token хранится в `localStorage`, а серверные сессии — в памяти процесса;
+- route-level RBAC и login rate limiting отсутствуют;
+- webhook endpoints не имели подтверждённой схемы аутентификации;
+- исторически банковские секреты могли храниться в JSONB открытым текстом; A.2 добавляет vault, но legacy rows ещё не мигрированы;
+- token masks, customer identifiers, raw bank responses и lead PII могут попадать в diagnostics;
+- migration runner исторически поглощал ошибку, поэтому API listener и polling могли стартовать после неуспешной миграции;
+- исторический limiter AlfaCRM не защищал параллельные вызовы; в A.2 это исправлено serialized queue.
+
+Исправлено в текущих исходниках:
+
+- демонстрационные реквизиты удалены;
+- все пароли требуются из environment и не имеют fallback;
+- browser frontend больше не хранит bearer token; API использует server-side PostgreSQL sessions и HttpOnly cookie;
+- API закрыт общим auth-gate, кроме health, JSON-only login и state-protected browser callback Точки;
+- CORS по умолчанию выключен и открывается только через `APP_ORIGINS`;
+- credentialed CORS разрешён только для allowlist origin;
+- добавлены базовые security headers и `X-Robots-Tag`;
+- HTML и `robots.txt` запрещают индексацию;
+- входящие website, bank и Evotor webhooks теперь закрыты auth-gate до проектирования проверяемой аутентификации;
+- hardcoded AlfaCRM tenant fallback удалён; без `ALFACRM_DOMAIN` клиент останавливается fail closed.
+- добавлены route-level RBAC, CSRF и PostgreSQL login lockout;
+- добавлены branch/legal-entity scope metadata; non-owner business access безопасно отключён до route-level predicates;
+- добавлен fail-closed audit чувствительных разрешённых запросов с канонизацией resource IDs;
+- migration error теперь прерывает startup до listener и banking polling;
+- website lead handler получил atomic transaction, advisory lock, payload-bound idempotency key, `409` conflict и recovery raw-only partial write;
+- структурированные logs централизованно очищаются от token, raw body, customer, contact и banking identifiers;
+- detailed banking health использует allowlist и не возвращает raw upstream body, customer code, authorize URL, token diagnostics или неизвестные будущие поля;
+- startup проверяет обязательные security columns/indexes и точные journal timestamp+hash migrations `0009–0010` до listener;
+- access audit сворачивает неизвестные identifier-bearing paths в зарегистрированные route templates или `/unregistered/:path`;
+- удалён tracked fallback-ключ шифрования Evotor.
+- bank connector config использует authenticated encryption с fail-closed legacy plaintext handling;
+- AlfaCRM использует serialized queue 260 ms и coalesced authentication.
+
+Важно: эти исправления не выпускались в публичный Replit runtime в рамках Фазы A.
+
+Открытые HIGH-блокеры:
+
+- legacy bank config не прошла guarded migration после backup; раскрытые credentials не перевыпущены;
+- legacy upstream error bodies и отдельные debug/probe responses ещё требуют системного ограничения;
+- scoped non-owner handlers ещё не реализованы и поэтому business access этих ролей намеренно заблокирован;
+- provider-auth, replay protection и idempotency для bank/Evotor callbacks не реализованы;
+- migrations `0009` и `0010` не прошли sandbox apply/rollback/restore и поэтому auth/audit runtime не выпускался.
+
+До их закрытия production, Replit release и любые live-данные запрещены.
+
+## Тесты и сборка
+
+- Отдельных baseline unit/integration тестов почти нет; файлы `test-data` генерируют тестовые записи и не являются тестовым набором.
+- После принудительной пересборки library declarations TypeScript-проверка всех workspace-проектов проходит.
+- Для Sites добавлены проверка worker artifact, тесты безопасного интерфейса, полного risk register и fail-closed Alfa tenant configuration.
+- Checkpoint v7 A.2: commit `5a62864fdb4ba1237eeef5a8b47d9e6f9040cb66`, Sites version `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_30b80923a4c88191b4e838e434fdf37f`, deployment `appgdep_6a64b18edf788191a9cf2a2ae41e1982`, owner-only; desktop/mobile preview и переходы пройдены.
+- Прямые security regression tests проверяют отрицательные role/scope-сценарии, отсутствие browser bearer storage, cookie contract, route-template access audit, log redaction, strict health allowlist, schema inventory, fail-closed startup, atomic website idempotency/rollback/retry/recovery/conflict и отсутствие fallback-ключа Evotor.
+- PostgreSQL 16 integration suite подготовлен, но не выполнен; callback replay и financial calculation tests отсутствуют. AlfaCRM concurrency unit test пройден.
+
+## Production и миграции
+
+- `DATABASE_URL` и интеграционные секреты в Sites checkout отсутствуют.
+- Production БД не читалась и не изменялась.
+- Migration `0009_famous_ma_gnuci.sql` только сгенерирована; она создаёт `auth_sessions` и `auth_login_attempts`, но нигде не применялась.
+- Migration `0010_outstanding_cargill.sql` только сгенерирована; она добавляет business scope и `security_access_audit`, но нигде не применялась.
+- Startup sequence теперь fail closed в исходниках: ошибка migration или отсутствие обязательного security schema inventory блокирует listener и polling. Runtime failure-path ещё должен быть доказан в sandbox.
+- Backup production не выполнялся, потому что доступ не предоставлен.
+- Разрушительные и production-миграции не выполнялись.
+
+## Текущий вывод
+
+Кодовая база реальна и содержит значительный функциональный фундамент. Owner-only sanitized Sites checkpoint можно проверять без production-данных, но production/live-data gate имеет статус `BLOCKED`. Текущие количества записей, филиалы, юридические лица, подключение AlfaCRM, банковские счета и качество сверки остаются `NOT VERIFIED`. Поэтому live-инвентаризация, ДДС, ОПиУ, зарплата и AI CFO не могут начинаться до закрытия HIGH и нового Reviewer/Coordinator gate.

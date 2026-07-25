@@ -1,0 +1,13 @@
+node_modules/
+.sites-runtime/
+dist/
+**/dist/
+*.log
+.env
+.env.*
+!.env.example
+.cache/
+.wrangler/
+site.tar.gz
+.DS_Store
+

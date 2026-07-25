@@ -1,0 +1,26 @@
+{
+  "name": "workspace",
+  "version": "0.0.0",
+  "license": "MIT",
+  "scripts": {
+    "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
+    "build": "node sites-control/scripts/build.mjs && node sites-control/scripts/validate-artifact.mjs",
+    "build:full": "pnpm run build:application && pnpm run build:sites",
+    "build:application": "pnpm run typecheck && pnpm -r --filter \"./artifacts/**\" --if-present run build",
+    "build:sites": "node sites-control/scripts/build.mjs && node sites-control/scripts/validate-artifact.mjs",
+    "dev": "vite --config sites-control/vite.config.mjs",
+    "test": "pnpm run test:sites",
+    "test:sites": "pnpm run build:sites && node --test sites-control/tests/*.test.mjs",
+    "test:security": "pnpm --filter @workspace/api-server run test:security",
+    "test:postgres": "pnpm --filter @workspace/api-server run test:postgres",
+    "test:full": "pnpm run typecheck && pnpm run test:security && pnpm run test:sites",
+    "typecheck:libs": "tsc --build --force",
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
+  },
+  "private": true,
+  "devDependencies": {
+    "prettier": "^3.8.3",
+    "typescript": "~5.9.3",
+    "vite": "catalog:"
+  }
+}
