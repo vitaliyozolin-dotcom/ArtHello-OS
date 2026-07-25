@@ -22,7 +22,8 @@
 - [x] Plaintext secrets, tampering и неизвестный key ID завершаются fail closed.
 - [x] Bank-config migration требует backup ID и explicit confirmation.
 - [x] PostgreSQL 16 integration suite подготовлен.
-- [x] PostgreSQL 16 suite фактически выполнен в CI run #6: test/build/migrations/rollback/fail-closed PASS.
+- [x] PostgreSQL 16 suite фактически выполнен в историческом checkpoint v10, CI run #8: test/build/migrations/rollback/fail-closed PASS.
+- [x] Candidate workflow закреплён на exact PR head и экспортирует immutable `head_sha/tree_sha` provenance artifact.
 - [ ] Раскрытые AlfaCRM и Tochka credentials перевыпущены.
 - [ ] Новые credentials сохранены только в protected backend Secrets.
 
@@ -52,6 +53,7 @@
 - [x] Non-owner accounts требуют непустые branch и legal-entity scope lists.
 - [x] Все non-owner business routes fail closed до handler-level scope predicates.
 - [ ] Реализовать route-specific branch/legal-entity predicates и cross-scope tests.
+- [x] Добавлены cross-scope negative tests, подтверждающие, что неподготовленные non-owner handlers остаются недоступны.
 - [x] Добавлена double-submit CSRF-защита для cookie-based write actions.
 - [x] Auth/scope migrations `0009–0010` прошли apply/rollback на одноразовом PostgreSQL 16 CI.
 - [ ] Перед Replit release повторить migrations на восстановленной репрезентативной sandbox-копии; production не затрагивать.
@@ -64,6 +66,7 @@
 - [x] Website lead handler требует payload-bound `Idempotency-Key`, пишет raw/lead/source одной transaction под advisory lock, возвращает `409` при payload conflict и восстанавливает legacy raw-only partial write.
 - [ ] Определить HMAC/signature/mTLS контракт для каждого webhook.
 - [ ] Проверить durable replay protection и idempotency всех callbacks.
+- [x] Negative source test подтверждает, что provider POST callbacks не добавлены в public allowlist; website payload conflict/retry покрыты.
 - [ ] Проверить callback URL после каждого deployment change.
 - [x] Hardcoded AlfaCRM tenant fallback удалён; без `ALFACRM_DOMAIN` клиент fail closed.
 - [x] AlfaCRM limiter concurrency-safe: serialized queue 260 ms и конкурентный unit-тест.
@@ -75,11 +78,11 @@
 - [x] Удалён tracked fallback-ключ шифрования Evotor; без `SESSION_SECRET` token operations fail closed.
 - [x] Secret-bearing bank connector config шифруется authenticated envelope и plaintext fail closed.
 - [ ] Выполнить guarded migration legacy config после проверенного backup и настроить плановую ротацию.
-- [ ] Проверить, что error bodies не раскрывают upstream secrets или PII.
+- [x] Public 5xx response boundary заменяет exception/upstream/PII details фиксированным `INTERNAL_ERROR`; canary regression PASS.
 - [x] Structured logs очищают token masks, customer codes, raw payload, contacts и Error messages/stacks.
 - [x] Banking health response использует strict allowlist; raw body, customer code, authorize URL, token diagnostics и неизвестные будущие поля отбрасываются.
-- [ ] Убрать raw error responses из оставшихся legacy API handlers и probes.
-- [ ] Провести secret scan в CI.
+- [~] Историческая `/sync` поверхность fail closed кодом `LEGACY_SYNC_DISABLED`; недоступный legacy code удалить только после restored-sandbox замены.
+- [~] Canary tests проверяют response/log/Sites redaction; полноценный repository secret scanner ещё не добавлен.
 
 ## Персональные и финансовые данные
 
@@ -87,6 +90,7 @@
 - [x] Не публикуются дети, родители, сотрудники, зарплаты и операции.
 - [x] Введена recursive field-level redaction для structured logs.
 - [~] Детальные banking customer/OAuth read endpoints ограничены owner; legacy debug/probe endpoints требуют удаления.
+- [x] Legacy `/sync` logs/probes/writes недоступны на API boundary до проектирования новой scoped поверхности.
 - [ ] Утвердить retention и deletion policy для raw events/statements.
 - [x] Sensitive access audit реализован fail closed; registry шаблонов скрывает slug/email/phone/UUID/numeric/percent-encoded identifiers.
 - [~] Access audit migration/runtime не проверены в sandbox.
@@ -115,6 +119,7 @@
 - [x] Control surface не обращается к production API.
 - [x] Worker выставляет CSP с `frame-ancestors` только для self/ChatGPT, no-referrer и no-store.
 - [x] Для checkpoint v7 выполнены desktop/mobile preview, CTA, навигация и drawer.
+- [x] Исторический checkpoint v10: source commit `8735824a214e980ff9cb492fa7253959ab6c2123`, Sites version 10, deployment `appgdep_6a64d3b5e134819193ba100f503db92d`, owner-only; Reviewer `CONDITIONAL PASS`, Coordinator `CONDITIONAL GO` только для sanitized оболочки.
 - [x] Checkpoint №1: commit `14639db870af9dc69a0702fa33a5a10b2ae8ddc8`, Sites version `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_fa731a9248348191902409ebe3f68bde`, deployment `appgdep_6a629f0960fc81918f1e925d0daffd21`, owner-only.
 - [x] Checkpoint №1 получил `NO-GO`: risk register был неполным; это не production release.
 - [x] Исправленный checkpoint Фазы A: commit `3417a986dc559d5b89ac3d480eb885b3701013e9`, owner-only; Reviewer `PASS`, Coordinator `GO` только для sanitized control surface.
@@ -123,6 +128,6 @@
 
 ## Gate
 
-Security gate для production/live data: **FAIL / BLOCKED**, пока открыты migration legacy bank config, ротация раскрытых credentials, legacy upstream errors/probes, scoped handlers, provider-auth callbacks, restored-sandbox evidence и обязательные negative/failure tests.
+Security gate для production/live data: **FAIL / BLOCKED**, пока открыты migration legacy bank config, ротация раскрытых credentials, удаление недоступного legacy code, scoped handlers, provider-auth callbacks, restored-sandbox evidence и обязательные provider/runtime negative/failure tests.
 
 Security gate для обезличенного owner-only Sites checkpoint: **может быть рассмотрен после preview и независимого Reviewer**, но не разрешает Replit release, live integrations или реальные данные.

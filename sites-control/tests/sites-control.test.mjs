@@ -53,10 +53,11 @@ test("owner risk register exposes every Phase A blocker before detailed live acc
   for (const risk of requiredRisks) assert.match(html, new RegExp(risk));
   assert.doesNotMatch(html, /Исправления подготовлены/);
   assert.match(html, /Encrypted bank config, AlfaCRM queue, sessions, atomic webhook и schema preflight/);
-  assert.match(html, /A\.3 · source v6/);
+  assert.match(html, /A\.3 · audit snapshot/);
   assert.match(html, /strict allowlist/);
   assert.match(html, /timestamp\+hash/);
   assert.match(html, /production[\s\S]*BLOCKED/i);
+  assert.doesNotMatch(html, /GitHub Actions run #\d+/);
 });
 
 test("includes every required first-checkpoint section", async () => {

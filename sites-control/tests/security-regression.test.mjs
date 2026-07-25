@@ -123,3 +123,21 @@ test("Sites build contract stays package-manager-neutral", async () => {
   assert.match(packageJson.scripts.build, /sites-control\/scripts\/build\.mjs/);
   assert.match(packageJson.scripts["build:full"], /\bpnpm\b/);
 });
+
+test("GitHub quality evidence is pinned to the PR head and exported immutably", async () => {
+  const workflow = await readFile(
+    resolve(projectRoot, ".github/workflows/quality.yml"),
+    "utf8",
+  );
+
+  assert.match(
+    workflow,
+    /ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha\s*\|\|\s*github\.sha\s*\}\}/,
+  );
+  assert.match(workflow, /test "\$actual_head" = "\$EXPECTED_HEAD_SHA"/);
+  assert.match(workflow, /git rev-parse HEAD\^\{tree\}/);
+  assert.match(workflow, /source_archive_sha256/);
+  assert.match(workflow, /sites_artifact_sha256/);
+  assert.match(workflow, /actions\/upload-artifact@v4/);
+  assert.match(workflow, /arthello-provenance-\$\{\{\s*github\.run_id\s*\}\}/);
+});

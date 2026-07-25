@@ -1,10 +1,28 @@
 # ArtHello OS — Decisions
 
+## D-030 — Финансовые инварианты проверять без бизнес-допущений
+
+Статус: принято как synthetic guardrail, не как финансовая готовность
+
+Регрессионные тесты используют только integer minor units и вымышленные test IDs: проверяют `opening + inflows - outflows = closing`, исключение внутренних переводов из консолидированного ДДС, раздельные cashflow/accrual/P&L периоды, единственную активную версию payroll rule, точные reversals и deterministic rounding. Они не содержат реальных сумм, ставок, KPI или финансовых статей и не открывают financial truth gate.
+
+## D-029 — Legacy sync и public 5xx fail closed
+
+Статус: принято в исходниках, runtime release не выполнен
+
+Public 5xx boundary никогда не возвращает exception message, upstream body, probe output, идентификаторы или PII. Историческая `/sync` поверхность централизованно возвращает `LEGACY_SYNC_DISABLED` и остаётся недоступной, пока не заменена scoped source jobs. Это безопасное отключение, а не утверждение, что legacy code полностью удалён.
+
+## D-028 — PR body является индексом, CI artifact — доказательством
+
+Статус: принято для финального цикла 3
+
+Quality workflow checkout-ит точный `pull_request.head.sha`, сверяет фактический `HEAD` и публикует immutable artifact с `head_sha`, `tree_sha`, source archive SHA-256 и deterministic Sites artifact SHA-256. PR body обновляется после CI/Sites и только индексирует доказательства. Он изменяем и сам по себе не подтверждает равенство local/remote tree.
+
 ## D-027 — Tree является ключом идентичности local/remote package
 
 Статус: принято для приватной Git Data history
 
-Local и remote commit SHA могут различаться, потому что remote branch создаётся через Git Data API поверх отдельной истории. Пакет считается содержательно одинаковым только при точном равенстве Git tree. Для каждого checkpoint дополнительно фиксируются private PR head, terminal CI run, Sites version/deployment и owner-only access. PR body обновляется после CI и deployment как внешний provenance manifest; это исключает невозможную самоссылку commit на собственный SHA.
+Local и remote commit SHA могут различаться, потому что remote branch создаётся через Git Data API поверх отдельной истории. Пакет считается содержательно одинаковым только при точном равенстве Git tree. Для каждого checkpoint дополнительно фиксируются private PR head, terminal CI run, Sites version/deployment и owner-only access. D-028 уточняет механизм: PR body — индекс, а равенство tree доказывается immutable CI artifact.
 
 Равенство tree и отчёт Создателя не заменяют независимую проверку Ревизора.
 

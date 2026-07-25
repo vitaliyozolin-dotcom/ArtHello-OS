@@ -72,6 +72,30 @@ const securitySchemaInventory = await import(
     ),
   ).href
 );
+const publicErrorBoundaryModule = await import(
+  pathToFileURL(
+    path.join(
+      artifactDir,
+      "src/lib/security/public-error-boundary.ts",
+    ),
+  ).href
+);
+const legacySyncGateModule = await import(
+  pathToFileURL(
+    path.join(
+      artifactDir,
+      "src/lib/security/legacy-sync-gate.ts",
+    ),
+  ).href
+);
+const financialInvariants = await import(
+  pathToFileURL(
+    path.join(
+      artifactDir,
+      "src/lib/finance/financial-invariants.ts",
+    ),
+  ).href
+);
 
 const restrictedScope = {
   unrestricted: false,
@@ -202,6 +226,72 @@ test("accountant mutations stay disabled until route-level scope predicates exis
       restrictedScope,
     ).allowed,
     false,
+  );
+});
+
+test("cross-scope business routes remain fail closed for every non-owner role", () => {
+  const crossScopeCases = [
+    ["viewer", "GET", "/employees/employee-from-another-branch"],
+    ["viewer", "GET", "/finance?legalEntityId=entity-elsewhere"],
+    ["accountant", "GET", "/banking/transactions?branchId=branch-elsewhere"],
+    ["accountant", "PATCH", "/employees/employee-from-another-entity"],
+  ];
+
+  for (const [role, method, route] of crossScopeCases) {
+    const decision = accessPolicy.decideRouteAccess(
+      role,
+      method,
+      route,
+      restrictedScope,
+    );
+    assert.equal(decision.allowed, false, `${role} ${method} ${route}`);
+  }
+});
+
+test("legacy sync and provider callbacks stay fail closed", async () => {
+  const appSource = await readFile(
+    path.join(artifactDir, "src/app.ts"),
+    "utf8",
+  );
+
+  let nextCalled = false;
+  let responseStatus = 200;
+  let responseBody;
+  const response = {
+    statusCode: 200,
+    status(code) {
+      responseStatus = code;
+      this.statusCode = code;
+      return this;
+    },
+    json(body) {
+      responseBody = body;
+      return this;
+    },
+  };
+  publicErrorBoundaryModule.publicErrorBoundary(
+    {},
+    response,
+    () => {},
+  );
+  legacySyncGateModule.blockLegacySyncSurface(
+    { path: "/sync/discover" },
+    response,
+    () => {
+      nextCalled = true;
+    },
+  );
+
+  assert.equal(nextCalled, false);
+  assert.equal(responseStatus, 503);
+  assert.deepEqual(responseBody, {
+    success: false,
+    error: "LEGACY_SYNC_DISABLED",
+  });
+  assert.match(appSource, /blockLegacySyncSurface/);
+  assert.doesNotMatch(
+    appSource,
+    /req\.method === "POST"[\s\S]{0,120}req\.path === "\/(?:webhooks|evotor|banking\/webhook)/,
   );
 });
 
@@ -591,6 +681,55 @@ test("logged Error objects never expose their message or stack", () => {
   });
 });
 
+test("5xx response boundary removes exception, upstream, and PII details", () => {
+  let sentBody;
+  const response = {
+    statusCode: 502,
+    json(body) {
+      sentBody = body;
+      return this;
+    },
+  };
+
+  publicErrorBoundaryModule.publicErrorBoundary(
+    {},
+    response,
+    () => {},
+  );
+  response.json({
+    error: "token=secret",
+    message: "owner@example.com",
+    detail: { rawBody: '{"phone":"+79991234567"}' },
+  });
+
+  assert.deepEqual(sentBody, {
+    success: false,
+    error: "INTERNAL_ERROR",
+  });
+  assert.doesNotMatch(
+    JSON.stringify(sentBody),
+    /secret|example\.com|phone|rawBody/,
+  );
+});
+
+test("banking match handlers expose fixed error codes, never String(err)", async () => {
+  const source = await readFile(
+    path.join(
+      artifactDir,
+      "src/routes/banking-match.ts",
+    ),
+    "utf8",
+  );
+
+  assert.doesNotMatch(
+    source,
+    /res\.status\((?:400|500)\)\.json\(\{\s*error:\s*(?:String\(err\)|`[^`]*\$\{)/,
+  );
+  assert.match(source, /BANK_MATCHING_FAILED/);
+  assert.match(source, /BANK_MATCH_REPAIR_FAILED/);
+  assert.match(source, /INVALID_MATCH_ACTION/);
+});
+
 test("Tochka connector never logs or throws raw upstream bodies", async () => {
   const source = await readFile(
     path.join(
@@ -864,6 +1003,147 @@ test("serialized request queue preserves spacing and recovers after a failed tas
     starts,
     [0, 260, 520, 780, 1040, 1300, 1560, 1820],
   );
+});
+
+test("financial bank invariant and consolidated internal transfers use integer minor units", () => {
+  const accountMovements = [
+    { id: "income", amountMinor: 25_000n, direction: "in" },
+    { id: "expense", amountMinor: 10_000n, direction: "out" },
+  ];
+  assert.deepEqual(
+    financialInvariants.checkBankBalanceInvariant(
+      100_000n,
+      115_000n,
+      accountMovements,
+    ),
+    {
+      expectedClosingMinor: 115_000n,
+      actualClosingMinor: 115_000n,
+      differenceMinor: 0n,
+      balanced: true,
+    },
+  );
+
+  const consolidatedMovements = [
+    ...accountMovements,
+    {
+      id: "transfer-out",
+      amountMinor: 30_000n,
+      direction: "out",
+      isInternalTransfer: true,
+    },
+    {
+      id: "transfer-in",
+      amountMinor: 30_000n,
+      direction: "in",
+      isInternalTransfer: true,
+    },
+  ];
+  assert.equal(
+    financialInvariants.consolidatedCashflowMinor(
+      consolidatedMovements,
+    ),
+    15_000n,
+  );
+});
+
+test("financial periods, payroll rule versions, reversals, and rounding are deterministic", () => {
+  assert.deepEqual(
+    financialInvariants.reportingPeriods({
+      cashflowDate: "2026-02-01T10:00:00Z",
+      accrualDate: "2026-01-31T23:00:00Z",
+    }),
+    {
+      cashflowMonth: "2026-02",
+      pnlMonth: "2026-01",
+    },
+  );
+
+  const rules = [
+    {
+      id: "rule-a",
+      version: "v1",
+      effectiveFrom: "2026-01-01",
+      effectiveTo: "2026-03-31",
+    },
+    {
+      id: "rule-b",
+      version: "v2",
+      effectiveFrom: "2026-04-01",
+      effectiveTo: null,
+    },
+  ];
+  assert.equal(
+    financialInvariants.selectPayrollRuleVersion(
+      rules,
+      "2026-05-10T16:30:00Z",
+    ).version,
+    "v2",
+  );
+  assert.throws(
+    () =>
+      financialInvariants.selectPayrollRuleVersion(
+        [
+          ...rules,
+          {
+            id: "overlap",
+            version: "v3",
+            effectiveFrom: "2026-05-01",
+            effectiveTo: null,
+          },
+        ],
+        "2026-05-10",
+      ),
+    /overlap/,
+  );
+
+  const movements = [
+    { id: "original", amountMinor: 1_001n, direction: "in" },
+    {
+      id: "reversal",
+      reversalOf: "original",
+      amountMinor: 1_001n,
+      direction: "out",
+    },
+  ];
+  assert.doesNotThrow(() =>
+    financialInvariants.validateReversalPairs(movements),
+  );
+  assert.equal(
+    financialInvariants.consolidatedCashflowMinor(movements),
+    0n,
+  );
+  assert.throws(
+    () =>
+      financialInvariants.reportingPeriods({
+        cashflowDate: "2026-02-29",
+      }),
+    /calendar bounds/,
+  );
+  assert.deepEqual(
+    financialInvariants.reportingPeriods({
+      cashflowDate: "2028-02-29",
+    }),
+    {
+      cashflowMonth: "2028-02",
+      pnlMonth: "2028-02",
+    },
+  );
+  assert.throws(
+    () =>
+      financialInvariants.validateReversalPairs([
+        ...movements,
+        {
+          id: "second-reversal",
+          reversalOf: "original",
+          amountMinor: 1_001n,
+          direction: "out",
+        },
+      ]),
+    /multiple full reversals/,
+  );
+  assert.equal(financialInvariants.decimalToMinorUnits("10.005"), 1_001n);
+  assert.equal(financialInvariants.decimalToMinorUnits("-10.005"), -1_001n);
 });
 
 test("Evotor encryption has no tracked fallback key", async () => {

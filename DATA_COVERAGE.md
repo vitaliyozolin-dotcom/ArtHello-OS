@@ -11,8 +11,12 @@
 | Tochka accounts | service token, без consent | HTTP 403 | BLOCKED BY HYBRID OAUTH |
 | Tochka payments | не вызывались | действий не было | NOT ATTEMPTED |
 | PostgreSQL 16 CI | одноразовая БД, только синтетические записи | migrations/session/CSRF/audit/webhook/rollback/startup PASS | VERIFIED SANDBOX RUNTIME |
+| Financial invariants | pure synthetic tests, integer minor units | balance/transfers/reporting dates/payroll versions/reversals/rounding PASS локально | SYNTHETIC ONLY |
+| Legacy `/sync` API | централизованный fail-closed gate | `LEGACY_SYNC_DISABLED` | DISABLED |
 
 Sites показывает только статус источника и число филиалов. Названия филиалов, сведения о людях, суммы, счета, токены и операции туда не передаются.
+
+Synthetic financial invariants не являются данными ArtHello и не подтверждают реальные остатки, статьи, ставки, payroll или закрытие месяца.
 
 ## Обновление A.2
 

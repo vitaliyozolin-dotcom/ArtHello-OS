@@ -9,7 +9,8 @@
 - [x] Удалить raw Tochka bodies/customer identifiers из logs и errors.
 - [x] Добавить повторяемый sanitized live probe.
 - [x] Расширить обязательный `MONTH_CLOSE_CHECKLIST.md` без вымышленных финансовых правил.
-- [x] Зафиксировать provenance v9: равенство local/remote tree, Draft PR head, CI run и Sites deployment.
+- [x] Зафиксировать исторический provenance v10 и решение Reviewer/Coordinator.
+- [x] Закрепить candidate CI на exact PR head и экспортировать immutable `head_sha/tree_sha` + source/Sites digests.
 - [ ] Повторить AlfaCRM entity-count probes после восстановления сетевого контура.
 - [ ] Настроить корректный защищённый callback runtime и пройти Tochka consent.
 - [ ] После завершения проверки перевыпустить оба комплекта credentials.
@@ -20,7 +21,7 @@
 - [x] Добавить guarded migration существующей config после backup.
 - [x] Сделать AlfaCRM limiter concurrency-safe и покрыть unit-тестом.
 - [x] Подготовить disposable PostgreSQL 16 integration suite и CI workflow.
-- [x] Импортировать source в приватный GitHub и выполнить quality workflow (Draft PR #1, run #6 PASS).
+- [x] Импортировать source в приватный GitHub и выполнить quality workflow (Draft PR #1; исторический v10 run #8 PASS).
 - [ ] Перевыпустить раскрытые AlfaCRM и Tochka credentials.
 - [ ] Выполнить bank-config migration на sandbox-копии, не production.
 
@@ -32,13 +33,13 @@
 - [ ] Подготовить контролируемый выпуск security-исправлений в Replit после теста callback-контрактов.
 - [x] Удалить hardcoded AlfaCRM tenant fallback и останавливать клиент без `ALFACRM_DOMAIN`.
 - [x] Реализовать encrypted vault для bank connector config; legacy rows требуют guarded sandbox migration после backup.
-- [~] Structured logs очищаются централизованно; отдельно убрать raw upstream body из пользовательских ошибок и ограничить debug responses.
+- [~] Structured logs и public 5xx responses очищаются централизованно; legacy `/sync` API fail closed, но недоступный исторический code ещё требует замены/удаления.
 - [ ] Спроектировать аутентификацию website, bank и Evotor webhooks.
 - [x] Website lead handler использует payload-bound idempotency key, atomic transaction, advisory lock, `409` conflict и recovery raw-only partial write; public exposure всё ещё запрещён.
 - [x] Заменить in-memory bearer sessions на PostgreSQL session model с secure HttpOnly cookie и CSRF-защитой в исходниках.
 - [x] Ввести role RBAC и обязательные branch/legal-entity scope metadata.
 - [x] Fail closed все non-owner business routes до handler-level predicates.
-- [ ] Реализовать scoped predicates по маршрутам и cross-scope negative tests.
+- [~] Cross-scope negative tests подтверждают fail-closed; route-specific predicates ещё не реализованы.
 - [x] Добавить fail-closed audit разрешённого sensitive access в исходниках.
 - [x] Добавить PostgreSQL rate limiting и lockout для login.
 - [ ] Прогнать migrations `0009–0010` на восстановленной sandbox-копии, проверить session lifecycle, CSRF, scope, audit и rollback.
@@ -47,8 +48,8 @@
 - [x] Доказать fail-closed startup реальной контролируемой ошибкой PostgreSQL в одноразовом CI sandbox.
 - [x] Заменить AlfaCRM timestamp limiter на сериализованную очередь и доказать интервал 260 ms конкурентным unit-тестом.
 - [x] Добавлены unit/source regression tests для website transaction rollback/retry/recovery/conflict, schema inventory, strict health allowlist и identifier-safe audit templates.
-- [~] Negative role/scope/security regression tests расширены; остаются HTTP+PG migration/rollback/transaction, callback replay, concurrency и финансовые failure tests.
-- [ ] Проверить и ограничить debug/probe endpoints, способные вернуть PII.
+- [~] Negative role/scope/security regression tests расширены; остаются provider replay и restored-sandbox failure tests.
+- [~] Историческая `/sync` debug/probe поверхность заблокирована централизованно; недоступный code удалить после проектирования безопасной замены.
 
 ## P0 — read-only аудит данных
 
@@ -64,7 +65,7 @@
 
 ## P1 — надёжность платформы
 
-- [x] CI workflow с typecheck, build, unit и PostgreSQL 16 integration/migration tests выполнен: GitHub Actions run #6 PASS.
+- [x] CI workflow с typecheck, build, unit и PostgreSQL 16 integration/migration tests выполнен на историческом v10 run #8; candidate дополнительно публикует immutable provenance artifact.
 - [ ] Добавить health/readiness checks для БД и каждой интеграции.
 - [~] Введены recursive redaction и access audit; allowed route подтверждён в PostgreSQL, остаются deny/outage smoke, retention и correlation ID.
 - [ ] Зафиксировать RPO/RTO и проверить восстановление из backup.
@@ -83,7 +84,8 @@
 - [ ] Сверить счета, остатки и полноту банковских операций.
 - [ ] Утвердить правила дедупликации и reconciliation банка с AlfaCRM.
 - [ ] Утвердить статьи ДДС и ОПиУ.
-- [~] Шаблон месяца закрытия, исключений и контрольных сумм формализован; runtime, источники и financial regression tests ещё отсутствуют.
+- [~] Шаблон месяца закрытия и synthetic invariants формализованы; runtime, реальные источники, утверждённые правила и business-value regression tests отсутствуют.
+- [x] Добавлены синтетические regression tests базовых инвариантов без реальных ставок: balance, transfers, reporting dates, payroll rule versions, reversals и rounding.
 - [ ] Достичь статуса финансовой правды `READY`.
 
 ## P2 — интерфейс и развитие

@@ -322,7 +322,7 @@ bankingMatchRouter.post("/banking/run-matching", async (req, res) => {
     res.json({ matched, suggested, skipped, total: txns.length });
   } catch (err) {
     req.log.error({ err }, "POST /banking/run-matching failed");
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "BANK_MATCHING_FAILED" });
   }
 });
 
@@ -361,7 +361,7 @@ bankingMatchRouter.get("/banking/transactions", async (req, res) => {
     res.json({ transactions: rows, total: Number(total), limit, offset });
   } catch (err) {
     req.log.error({ err }, "GET /banking/transactions failed");
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "BANK_TRANSACTIONS_READ_FAILED" });
   }
 });
 
@@ -393,7 +393,7 @@ bankingMatchRouter.get("/banking/match-stats", async (req, res) => {
     });
   } catch (err) {
     req.log.error({ err }, "GET /banking/match-stats failed");
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "BANK_MATCH_STATS_FAILED" });
   }
 });
 
@@ -477,7 +477,7 @@ bankingMatchRouter.patch("/banking/transactions/:id/match", async (req, res) => 
         break;
       }
       default:
-        res.status(400).json({ error: `Unknown action: ${action}` });
+        res.status(400).json({ error: "INVALID_MATCH_ACTION" });
         return;
     }
 
@@ -496,7 +496,7 @@ bankingMatchRouter.patch("/banking/transactions/:id/match", async (req, res) => 
     res.json(updated);
   } catch (err) {
     req.log.error({ err }, "PATCH /banking/transactions/:id/match failed");
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "BANK_MATCH_UPDATE_FAILED" });
   }
 });
 
@@ -577,7 +577,7 @@ bankingMatchRouter.post("/banking/repair-matched-links", async (req, res) => {
     });
   } catch (err) {
     req.log.error({ err }, "POST /banking/repair-matched-links failed");
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "BANK_MATCH_REPAIR_FAILED" });
   }
 });
 
@@ -613,6 +613,6 @@ bankingMatchRouter.get("/banking/transactions/by-family/:familyId", async (req, 
     res.json(rows);
   } catch (err) {
     req.log.error({ err }, "GET /banking/transactions/by-family failed");
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "BANK_FAMILY_TRANSACTIONS_READ_FAILED" });
   }
 });

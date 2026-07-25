@@ -6,9 +6,9 @@
 
 ## Дополнение A.2 — технические ворота
 
-Bank connector config хранится в authenticated encrypted envelope и fail closed при legacy plaintext secrets. AlfaCRM read-only клиент сериализует запросы ниже лимита 4 req/s. Реальная PostgreSQL 16 проверка выполнена в одноразовом CI sandbox: quality run #6 прошёл migrations, HTTP/session/CSRF/audit smoke, webhook rollback/retry, schema drift, rollback и fail-closed startup. Этот PASS не открывает production gate без оставшихся HIGH, восстановленной sandbox-копии и ротации credentials. Credentials, появившиеся в переписке или скриншотах, считаются раскрытыми и требуют ротации.
+Bank connector config хранится в authenticated encrypted envelope и fail closed при legacy plaintext secrets. AlfaCRM read-only клиент сериализует запросы ниже лимита 4 req/s. PostgreSQL 16 проверки исторических checkpoints прошли migrations, HTTP/session/CSRF/audit smoke, webhook rollback/retry, schema drift, rollback и fail-closed startup. Candidate цикла 3 дополнительно публикует immutable CI head/tree/digest evidence. Эти PASS не открывают production gate без оставшихся HIGH, восстановленной sandbox-копии и ротации credentials. Credentials, появившиеся в переписке или скриншотах, считаются раскрытыми и требуют ротации.
 
-Статус документа: рабочая книга проекта, восстановлена 2026-07-23 и обновлена 2026-07-24 на основе `ArtHello_OS_Master_Plan_and_Agent_Prompts_v0.1.md`.
+Статус документа: рабочая книга проекта, восстановлена 2026-07-23 и обновлена 2026-07-25 на основе `ArtHello_OS_Master_Plan_and_Agent_Prompts_v0.1.md`.
 
 ## Миссия
 
@@ -91,15 +91,17 @@ Owner-only checkpoint принимается только если он пока
 - fail-closed security access audit с registry шаблонов маршрутов: slug, email, phone, UUID, numeric и percent-encoded identifiers не записываются открыто;
 - распределённый login lockout через PostgreSQL;
 - централизованная redaction структурированных logs;
+- public 5xx response boundary с фиксированным error code и без exception/upstream/PII details;
+- историческая `/sync` поверхность fail closed до замены на scoped source jobs;
 - generic banking errors и strict-allowlist detailed health response, неизвестные будущие поля автоматически отбрасываются;
 - migration failure и отсутствие обязательных columns/indexes/точных hash записей migrations `0009–0010` блокируют listener и banking polling;
 - website lead handler требует idempotency key, связывает его с canonical payload, выполняет raw + lead + source update в одной PostgreSQL transaction под advisory lock и возвращает `409` при повторном key с другим payload; внешний вызов всё ещё закрыт;
 - удалён fallback-ключ шифрования Evotor;
 - sessions/lockout оформлены migration `0009`, scope/audit — migration `0010`; обе не применялись к production.
 
-Pure/unit regression tests доказывают rollback mid-write, retry с одной парой raw/lead, восстановление legacy raw-only записи, payload conflict, schema inventory, allowlist и route canonicalization. В среде checkout нет `DATABASE_URL`, `psql`, `postgres` или `initdb`; вместо локальной БД GitHub Actions run #6 создал одноразовый PostgreSQL 16 и подтвердил runtime apply/rollback, session/CSRF, разрешённый access audit, транзакционный failure/retry и fail-closed startup. Production и восстановленная sandbox-копия не затрагивались.
+Pure/unit regression tests доказывают rollback mid-write, retry с одной парой raw/lead, восстановление legacy raw-only записи, payload conflict, schema inventory, allowlist, route canonicalization, cross-scope deny, public error redaction и базовые синтетические финансовые инварианты. Одноразовый PostgreSQL 16 CI подтвердил runtime apply/rollback, session/CSRF, разрешённый access audit, транзакционный failure/retry и fail-closed startup. Candidate evidence всегда связывается с exact PR head/tree через immutable CI artifact. Production и восстановленная sandbox-копия не затрагивались.
 
-Исторический срез A.1 не закрывал plaintext bank secrets и AlfaCRM concurrency limiter. В A.2 vault и serialized queue реализованы и покрыты unit-тестами; A.3 добавляет PostgreSQL 16 CI evidence. Открыты guarded migration legacy rows, ротация ключей, legacy raw errors/probes, handler-level scope predicates, provider-specific webhook authentication/replay protection, PostgreSQL deny/outage tests и restored-sandbox evidence.
+Исторический срез A.1 не закрывал plaintext bank secrets и AlfaCRM concurrency limiter. В A.2 vault и serialized queue реализованы и покрыты unit-тестами; A.3 добавляет PostgreSQL 16 CI evidence. Цикл 3 закрыл public 5xx boundary и заблокировал legacy `/sync`, но удаление недоступного legacy code остаётся отдельной release-задачей. Открыты guarded migration legacy rows, ротация ключей, handler-level scope predicates, provider-specific webhook authentication/replay protection, PostgreSQL deny/outage tests и restored-sandbox evidence.
 
 ### Следующие фазы
 

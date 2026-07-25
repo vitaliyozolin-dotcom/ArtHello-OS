@@ -2,16 +2,48 @@
 
 ## Обновление A.3 — 2026-07-25
 
+- Цикл 3 является последним корректирующим циклом. Точная candidate-версия не записывается самоссылкой внутрь собственного commit: её определяют immutable CI provenance artifact, source metadata Sites и поздний индекс в Draft PR #1.
 - Владелец явно разрешил временно использовать текущие раскрытые credentials только для ограниченной read-only проверки. Они извлекались в память процесса, не записывались в файлы, Git, Sites, БД или постоянный environment.
 - AlfaCRM live auth вернул HTTP 200; `/0/branch/index` вернул 8 филиалов. Имена и записи не выводились. Последующие запросы стали получать сетевые timeout, поэтому количества учеников, групп, педагогов, занятий и оплат пока не считаются проверенными.
 - Tochka `client_credentials` вернул HTTP 200 и service token. Запрос счетов с service token вернул ожидаемый HTTP 403: требуется пользовательский Authorization Code/consent и hybrid token. Consent не создавался, платежные действия не выполнялись.
 - Добавлен повторяемый `probe:live-read-only`: принимает секреты только через process environment, имеет limiter/circuit breaker и выводит лишь статусы и количества.
-- В коннекторе «Точки» upstream response bodies, customer identifiers и token fragments удалены из logs и исключений. Security suite расширен до 23 тестов.
+- В коннекторе «Точки» upstream response bodies, customer identifiers и token fragments удалены из logs и исключений. Security suite дополнена response-boundary, cross-scope, fail-closed sync и synthetic finance regressions.
 - Полное дерево source опубликовано в приватную ветку `codex/a3-live-read-only`; открыт Draft PR #1 без merge в `main`.
-- GitHub Actions quality run #7 (`30161981773`) прошёл `test:full`, `test:postgres` и `build:full` на точном remote head. Одноразовый PostgreSQL 16 подтвердил migrations 0009–0010, session/CSRF, разрешённый access audit, atomic website lead rollback/retry, schema drift, rollback companions и fail-closed startup.
+- Исторический checkpoint v10 прошёл GitHub Actions run #8 (`30163177884`): `test:full`, `test:postgres` и `build:full`. Это evidence предыдущего checkpoint, а не идентификатор candidate цикла 3.
+- Quality workflow цикла 3 checkout-ит точный PR head и публикует immutable artifact с `head_sha`, `tree_sha`, source archive digest и deterministic Sites artifact digest.
+- Public 5xx response boundary заменяет exception/upstream/PII details фиксированным кодом; историческая `/sync` поверхность по умолчанию недоступна. Это уменьшает автономную часть HIGH, но не открывает production.
+- Добавлены синтетические финансовые инварианты: баланс банка, исключение внутренних переводов из консолидированного ДДС, даты cashflow/accrual/P&L, версии payroll rules, reversals и integer-minor-unit rounding. Они не используют и не утверждают реальные ставки.
 - Production, подробные live-данные, банковские счета/операции, sync в БД и финансовая аналитика остаются заблокированы.
 
-## Provenance A.3 checkpoint v9
+## Candidate provenance — нормативный порядок
+
+Актуальный candidate определяется только внешним пакетом, созданным после commit:
+
+1. private PR head;
+2. immutable CI artifact `arthello-provenance-<run_id>`;
+3. равенство `local tree = CI tree` и `PR head = CI head`;
+4. source commit и artifact digest Sites version;
+5. terminal Sites deployment и owner-only access;
+6. поздний PR manifest как индекс этих неизменяемых доказательств.
+
+PR body сам по себе не является доказательством, потому что изменяем. Любые SHA/IDs ниже — явно исторические checkpoints, а не «текущая версия».
+
+## Историческое provenance A.3 checkpoint v10
+
+| Узел доказательства | Точное значение |
+|---|---|
+| Local source commit | `8735824a214e980ff9cb492fa7253959ab6c2123` |
+| Local Git tree | `b3ede5bc05cd8685b64031f80db8fc9bbd6ad799` |
+| Private Draft PR | `vitaliyozolin-dotcom/ArtHello-OS#1`, open, draft, unmerged |
+| Remote PR head | `7f175fa7f14a55b0f329b95a6f63d326682ec113` |
+| Claimed remote Git tree | `b3ede5bc05cd8685b64031f80db8fc9bbd6ad799`; не было независимого `tree.sha` evidence |
+| GitHub Actions | run #8, `30163177884`, conclusion `success` |
+| Sites version | `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_71ff653bbc548191b1b138dec8eaa332` |
+| Sites deployment | `appgdep_6a64d3b5e134819193ba100f503db92d`, status `succeeded` |
+| Reviewer | `CONDITIONAL PASS` только owner-only sanitized checkpoint |
+| Coordinator | `CONDITIONAL GO` только owner-only; цикл 3 разрешён; Phase A/production/next phase `BLOCKED` |
+
+## Историческое provenance A.3 checkpoint v9
 
 | Узел доказательства | Точное значение |
 |---|---|
@@ -26,7 +58,7 @@
 | Sites deployment | `appgdep_6a64cae273e881919dc83dbf2f8645e0`, status `succeeded` |
 | Sites access | owner-only/custom, только владелец |
 
-Local и remote commit SHA различаются, потому что приватная ветка собрана через Git Data API поверх отдельной remote history. Одинаковый Git tree доказывает идентичное содержимое файлов. Sites v9 создан из local commit после desktop/mobile agent preview; опубликованный URL не открывался во внутреннем cloud browser.
+Local и remote commit SHA различались, потому что приватная ветка собрана через Git Data API поверх отдельной remote history. Sites v9 создан из local commit после desktop/mobile agent preview; опубликованный URL не открывался во внутреннем cloud browser.
 
 Это provenance Создателя. Оно не заменяет независимый отчёт Ревизора: в цикле v9 Ревизор не вернул отчёт и поэтому имеет статус `BLOCKED`; Координатор разрешил оставить только owner-only обезличенный checkpoint и заблокировал завершение Фазы A, production и следующую продуктовую фазу.
 
@@ -141,7 +173,7 @@ Unit/source regression suite проверяет эти ветки без product
 Критический gate:
 
 - новые secret-bearing `bank_connectors.config` шифруются AES-256-GCM и fail closed при plaintext; legacy rows ещё не мигрированы и требуют sandbox backup/guarded migration;
-- banking health response очищен от raw debug и пользовательские banking errors сделаны generic, но legacy API handlers и probes ещё требуют системного удаления raw errors.
+- banking health response очищен от raw debug; public 5xx errors проходят фиксированную безопасную границу; legacy `/sync` handlers/probes недоступны и требуют последующей замены/удаления перед release.
 
 Не подтверждено:
 
@@ -197,7 +229,7 @@ Unit/source regression suite проверяет эти ветки без product
 Открытые HIGH-блокеры:
 
 - legacy bank config не прошла guarded migration после backup; раскрытые credentials не перевыпущены;
-- legacy upstream error bodies и отдельные debug/probe responses ещё требуют системного ограничения;
+- недоступный legacy `/sync` code и отдельные non-5xx diagnostics ещё требуют замены/удаления; public 5xx boundary уже fail closed;
 - scoped non-owner handlers ещё не реализованы и поэтому business access этих ролей намеренно заблокирован;
 - provider-auth, replay protection и idempotency для bank/Evotor callbacks не реализованы;
 - migrations `0009` и `0010` прошли apply/rollback на одноразовом PostgreSQL 16 CI, но ещё не проверялись на восстановленной репрезентативной sandbox-копии и не применялись к production.
@@ -211,7 +243,7 @@ Unit/source regression suite проверяет эти ветки без product
 - Для Sites добавлены проверка worker artifact, тесты безопасного интерфейса, полного risk register и fail-closed Alfa tenant configuration.
 - Checkpoint v7 A.2: commit `5a62864fdb4ba1237eeef5a8b47d9e6f9040cb66`, Sites version `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_30b80923a4c88191b4e838e434fdf37f`, deployment `appgdep_6a64b18edf788191a9cf2a2ae41e1982`, owner-only; desktop/mobile preview и переходы пройдены.
 - Прямые security regression tests проверяют отрицательные role/scope-сценарии, отсутствие browser bearer storage, cookie contract, route-template access audit, log redaction, strict health allowlist, schema inventory, fail-closed startup, atomic website idempotency/rollback/retry/recovery/conflict и отсутствие fallback-ключа Evotor.
-- PostgreSQL 16 integration suite выполнен в GitHub Actions run #7 на remote tree `609e64852c47808c0447f247976d6dd4513bb038`: `test:full`, `test:postgres`, `build:full` — PASS. Callback replay, audit-store outage/deny PostgreSQL smoke и financial calculation tests отсутствуют. AlfaCRM concurrency unit test пройден.
+- Исторический PostgreSQL 16 integration suite v10 выполнен в GitHub Actions run #8: `test:full`, `test:postgres`, `build:full` — PASS. Candidate цикла 3 обязан повторить эти шаги и экспортировать CI `head_sha/tree_sha` artifact. Audit-store outage/deny PostgreSQL smoke, provider-auth replay и реальные финансовые calculation tests остаются открыты; добавлены только синтетические инварианты. AlfaCRM concurrency unit test пройден.
 
 ## Production и миграции
 

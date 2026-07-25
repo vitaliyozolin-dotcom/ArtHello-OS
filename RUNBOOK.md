@@ -15,7 +15,7 @@ Credentials передаются только в process environment:
 
 1. Source импортирован в приватную ветку `codex/a3-live-read-only` без секретов; открыт Draft PR #1.
 2. `.github/workflows/quality.yml` выполнен на одноразовом PostgreSQL 16.
-3. Evidence текущего checkpoint v9: run #7 (`30161981773`) — `test:full`, `test:postgres`, `build:full` PASS на remote head `3ab2cfe4310f5d22a42e0c874180428894dae788`.
+3. Последнее историческое evidence перед циклом 3: checkpoint v10, run #8 (`30163177884`) — `test:full`, `test:postgres`, `build:full` PASS на remote head `7f175fa7f14a55b0f329b95a6f63d326682ec113`.
 4. При каждом изменении runtime-кода повторять весь quality workflow; подготовленный или частично прошедший run доказательством не считать.
 5. Для bank-config migration сначала проверить snapshot, затем задать backup ID и одноразовый confirmation token.
 6. Не выполнять первый прогон против production `DATABASE_URL`.
@@ -75,7 +75,7 @@ pnpm run dev
 
 ## Запуск API
 
-Текущий `artifacts/api-server/src/index.ts` вызывает `runMigrations()`, затем `assertSecuritySchemaReady()`, и только потом `listen()`. Ошибка migration, отсутствующий auth/audit column/index или несовпадение timestamp+hash migrations `0009–0010` останавливают listener и polling с кодом 1. Это подтверждено unit/source regression tests и controlled rollback/fail-closed процессом на одноразовом PostgreSQL 16 в CI run #6. Против production `DATABASE_URL` запуск запрещён.
+Текущий `artifacts/api-server/src/index.ts` вызывает `runMigrations()`, затем `assertSecuritySchemaReady()`, и только потом `listen()`. Ошибка migration, отсутствующий auth/audit column/index или несовпадение timestamp+hash migrations `0009–0010` останавливают listener и polling с кодом 1. Это подтверждалось unit/source regression tests и controlled rollback/fail-closed процессом на одноразовом PostgreSQL 16; каждый candidate обязан повторить тот же CI gate на exact PR head. Против production `DATABASE_URL` запуск запрещён.
 
 Новый auth runtime требует migration `0009_famous_ma_gnuci.sql`, а session scope и access audit — `0010_outstanding_cargill.sql`. Обе прошли apply/rollback на одноразовом PostgreSQL 16 CI и не применялись к production. Нельзя выпускать auth-код до проверки `backup → restore → apply → session/CSRF/scope/audit smoke → rollback` на восстановленной репрезентативной sandbox-копии.
 
@@ -96,7 +96,7 @@ pnpm run dev
 13. проверить, что non-owner business routes возвращают `403`, пока predicates не зарегистрированы;
 14. отдельно проверить callback-контракты, provider authentication, replay и idempotency.
 
-До guarded migration legacy bank config после backup, ротации credentials, закрытия legacy upstream error/debug leaks, scoped handlers, callback authentication и проверки на восстановленной репрезентативной sandbox-копии запрещены production/Replit release, постоянный live AlfaCRM/банк/БД sync, polling и персональные/зарплатные данные.
+До guarded migration legacy bank config после backup, ротации credentials, удаления недоступного legacy sync/debug code, scoped handlers, callback authentication и проверки на восстановленной репрезентативной sandbox-копии запрещены production/Replit release, постоянный live AlfaCRM/банк/БД sync, polling и персональные/зарплатные данные.
 
 ## Agent preview и Sites checkpoint
 
@@ -120,25 +120,26 @@ Release evidence хранит immutable связку `commit_sha → Sites versi
 2. private PR number, draft/state и remote head;
 3. tree remote head; он должен совпадать с local tree;
 4. CI run ID, его head SHA и terminal conclusion;
-5. Sites project/version/deployment IDs, terminal deployment status и подтверждённый owner-only access;
-6. результаты agent preview для desktop/mobile и проверенных переходов.
+5. скачанный immutable CI artifact `arthello-provenance-<run_id>` с `head_sha`, `tree_sha`, source archive digest и deterministic Sites artifact digest;
+6. Sites project/version/deployment IDs, source commit/digest, terminal deployment status и подтверждённый owner-only access;
+7. результаты agent preview для desktop/mobile и проверенных переходов.
 
-Local и remote commit SHA могут различаться только при отдельной Git Data history; в этом случае равенство tree обязательно и явно объясняется. PR body обновляется после terminal CI и Sites deployment, поэтому может хранить точные внешние IDs, не создавая самоссылочный Git commit. Ревизор не принимает пакет на веру и повторяет доступные read-only проверки.
+Workflow обязан checkout-ить `${{ github.event.pull_request.head.sha }}`, а не synthetic merge ref, и завершиться ошибкой при несовпадении `HEAD`. Local и remote commit SHA могут различаться только при отдельной Git Data history; в этом случае равенство tree обязательно подтверждает immutable CI artifact. PR body обновляется после terminal CI и Sites deployment и служит только индексом внешних evidence, а не доказательством. Ревизор повторяет сравнение независимо.
 
-Зафиксированный пакет v9:
+Зафиксированный исторический пакет v10:
 
 ```text
-local commit  0900b9cff88e330afd095bcc8ac17da11a6ce50c
-local tree    609e64852c47808c0447f247976d6dd4513bb038
-remote head   3ab2cfe4310f5d22a42e0c874180428894dae788
-remote tree   609e64852c47808c0447f247976d6dd4513bb038
+local commit  8735824a214e980ff9cb492fa7253959ab6c2123
+local tree    b3ede5bc05cd8685b64031f80db8fc9bbd6ad799
+remote head   7f175fa7f14a55b0f329b95a6f63d326682ec113
+remote tree   b3ede5bc05cd8685b64031f80db8fc9bbd6ad799 (claimed; independent tree evidence absent)
 PR            #1, open/draft/unmerged
-CI            run #7 / 30161981773 / success
-Sites version appgprj_6a626e9e441481919bb30eee8ba97165~appgver_37098405ed048191ab3943dfea63c76c
-deployment    appgdep_6a64cae273e881919dc83dbf2f8645e0 / succeeded
+CI            run #8 / 30163177884 / success
+Sites version appgprj_6a626e9e441481919bb30eee8ba97165~appgver_71ff653bbc548191b1b138dec8eaa332
+deployment    appgdep_6a64d3b5e134819193ba100f503db92d / succeeded
 ```
 
-Этот пакет разрешает только owner-only обезличенный checkpoint. Он не является production gate.
+Это исторический predecessor candidate цикла 3. Актуальная candidate chain всегда берётся из нового CI artifact + Sites metadata + позднего PR index; ни один SHA внутри source не называется «текущим». Любой такой пакет разрешает максимум owner-only обезличенный checkpoint и не является production gate.
 
 ## Backup перед production-миграцией
 
