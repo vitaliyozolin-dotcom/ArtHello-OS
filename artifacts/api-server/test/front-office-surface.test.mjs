@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const routeSource = readFileSync(
   new URL("../src/routes/front-office.ts", import.meta.url),
@@ -12,11 +12,28 @@ const schemaSource = readFileSync(
 );
 const migrationSource = readFileSync(
   new URL(
-    "../../../lib/db/drizzle/0016_uneven_the_santerians.sql",
+    "../../../lib/db/drizzle/0015_front_office_internal_alpha.sql",
     import.meta.url,
   ),
   "utf8",
 );
+const migrationsDirectory = new URL(
+  "../../../lib/db/drizzle/",
+  import.meta.url,
+);
+const migrationJournal = JSON.parse(
+  readFileSync(new URL("meta/_journal.json", migrationsDirectory), "utf8"),
+);
+
+test("every migration journal entry has a SQL file", () => {
+  for (const entry of migrationJournal.entries) {
+    assert.equal(
+      existsSync(new URL(`${entry.tag}.sql`, migrationsDirectory)),
+      true,
+      `Missing migration file for ${entry.tag}`,
+    );
+  }
+});
 
 test("Front Office API exposes no outbound message endpoint", () => {
   assert.doesNotMatch(routeSource, /front-office\/.*\/send/);
