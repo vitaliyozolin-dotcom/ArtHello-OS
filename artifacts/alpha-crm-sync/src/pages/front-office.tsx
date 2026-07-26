@@ -21,6 +21,7 @@ import {
   UserRoundPlus,
 } from "lucide-react";
 import { FRONT_OFFICE_PREVIEW_CONTRACT } from "@/features/front-office/preview-contract";
+import { KnowledgePreviewWorkspace } from "@/features/front-office/knowledge-preview-workspace";
 import { LeadPreviewDrawer } from "@/features/front-office/lead-preview-drawer";
 import {
   PREVIEW_LEADS,
@@ -554,7 +555,7 @@ function TasksPanel() {
   );
 }
 
-function KnowledgePanel() {
+function KnowledgeSummaryPanel() {
   return (
     <section className="rounded-2xl border border-black/[0.06] bg-white p-4 shadow-[0_1px_4px_rgba(0,0,0,0.04)]">
       <div className="mb-4">
@@ -781,7 +782,7 @@ export function FrontOfficePage() {
           <ServicePanel />
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <KnowledgePanel />
+            <KnowledgeSummaryPanel />
             <MarketingPanel />
           </div>
         </div>
@@ -790,7 +791,7 @@ export function FrontOfficePage() {
       {view === "pipeline" && <FunnelPanel />}
       {view === "service" && <ServicePanel />}
       {view === "tasks" && <TasksPanel />}
-      {view === "knowledge" && <KnowledgePanel />}
+      {view === "knowledge" && <KnowledgePreviewWorkspace />}
       {view === "marketing" && <MarketingPanel />}
 
       <div className="mt-5 grid gap-3 rounded-2xl border border-violet-100 bg-violet-50 p-4 sm:grid-cols-3">

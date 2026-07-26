@@ -9,6 +9,11 @@ export const FRONT_OFFICE_PREVIEW_CONTRACT = Object.freeze({
   sharedSchemaChanges: false,
   dataPersistence: false,
   ephemeralUiStateOnly: true,
+  knowledgeWrites: false,
+  aiCanPublishKnowledge: false,
+  aiUseOptional: true,
+  manualWorkflowAvailable: true,
+  aiOptOutMode: "MANUAL_WORKFLOW_REMAINS",
   alfaCrmAccess: false,
   bankAccess: false,
 } as const);
