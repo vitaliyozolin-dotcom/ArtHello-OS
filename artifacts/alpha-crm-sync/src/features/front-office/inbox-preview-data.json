@@ -27,12 +27,209 @@
       "label": "Требуют внимания"
     },
     {
+      "key": "follow_up",
+      "label": "Ожидают follow-up"
+    },
+    {
       "key": "sales",
       "label": "Продажи"
     },
     {
       "key": "service",
       "label": "Клиентский сервис"
+    }
+  ],
+  "collaborationStates": [
+    {
+      "conversationId": "CONV-AH-DEMO-0101",
+      "viewers": ["Менеджер 2 · DEMO"],
+      "draftReviewState": "REVIEW_REQUESTED",
+      "collisionState": "VIEWER_PRESENT",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0102",
+      "viewers": [],
+      "draftReviewState": "NONE",
+      "collisionState": "CLEAR",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0103",
+      "viewers": ["Администратор · DEMO"],
+      "draftReviewState": "NONE",
+      "collisionState": "VIEWER_PRESENT",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0104",
+      "viewers": ["Руководитель филиала · DEMO"],
+      "draftReviewState": "REVIEW_REQUESTED",
+      "collisionState": "VIEWER_PRESENT",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0105",
+      "viewers": [],
+      "draftReviewState": "REVIEW_REQUESTED",
+      "collisionState": "CLEAR",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0106",
+      "viewers": [],
+      "draftReviewState": "HUMAN_ONLY",
+      "collisionState": "CLEAR",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0107",
+      "viewers": ["Дежурный · DEMO"],
+      "draftReviewState": "HUMAN_ONLY",
+      "collisionState": "VIEWER_PRESENT",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0108",
+      "viewers": [],
+      "draftReviewState": "NONE",
+      "collisionState": "CLEAR",
+      "sharedDraftWrites": false
+    }
+  ],
+  "continuityChecks": [
+    {
+      "conversationId": "CONV-AH-DEMO-0101",
+      "threadKey": "CONV-AH-DEMO-0101",
+      "channels": [
+        {
+          "channel": "WEB_CHAT",
+          "state": "CURRENT"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0102",
+      "threadKey": "CONV-AH-DEMO-0102",
+      "channels": [
+        {
+          "channel": "MANUAL_ENTRY",
+          "state": "CURRENT"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0103",
+      "threadKey": "CONV-AH-DEMO-0103",
+      "channels": [
+        {
+          "channel": "MESSENGER",
+          "state": "CURRENT_UNVERIFIED_IDENTITY"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0104",
+      "threadKey": "CONV-AH-DEMO-0104",
+      "channels": [
+        {
+          "channel": "EMAIL",
+          "state": "CURRENT"
+        }
+      ],
+      "duplicateState": "POSSIBLE_RELATED",
+      "candidateIds": ["CONV-AH-DEMO-ARCHIVE-0004"],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0105",
+      "threadKey": "CONV-AH-DEMO-0105",
+      "channels": [
+        {
+          "channel": "EMAIL",
+          "state": "CURRENT"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0106",
+      "threadKey": "CONV-AH-DEMO-0106",
+      "channels": [
+        {
+          "channel": "PHONE_TRANSCRIPT",
+          "state": "CURRENT_TRANSCRIPT_REQUIRES_CONFIRMATION"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0107",
+      "threadKey": "CONV-AH-DEMO-0107",
+      "channels": [
+        {
+          "channel": "SITE_CHAT",
+          "state": "CURRENT_UNVERIFIED_IDENTITY"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0108",
+      "threadKey": "CONV-AH-DEMO-0108",
+      "channels": [
+        {
+          "channel": "WEB_CHAT",
+          "state": "CURRENT_ROUTING_ONLY"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    }
+  ],
+  "approvedSnippets": [
+    {
+      "id": "SNIPPET-AH-DEMO-QUALIFY-01",
+      "title": "Три уточнения для первичного подбора",
+      "appliesTo": ["LEAD_QUALIFICATION"],
+      "status": "APPROVED",
+      "sourceStatus": "VERIFIED",
+      "sourceRef": "KB-DEMO-SALES-QUALIFY · version 1.0",
+      "insertEnabled": false
+    },
+    {
+      "id": "SNIPPET-AH-DEMO-IDENTITY-01",
+      "title": "Безопасный переход к проверке личности",
+      "appliesTo": ["FAMILY_SCHEDULE"],
+      "status": "APPROVED",
+      "sourceStatus": "VERIFIED",
+      "sourceRef": "KB-DEMO-IDENTITY-GATE · version 1.0",
+      "insertEnabled": false
+    },
+    {
+      "id": "SNIPPET-AH-DEMO-PROGRAM-01",
+      "title": "Уточнение перед подбором программы",
+      "appliesTo": ["PUBLIC_PROGRAM_MATCH"],
+      "status": "APPROVED",
+      "sourceStatus": "VERIFIED",
+      "sourceRef": "KB-DEMO-PROGRAM-MATCH · version 1.0",
+      "insertEnabled": false
     }
   ],
   "conversations": [

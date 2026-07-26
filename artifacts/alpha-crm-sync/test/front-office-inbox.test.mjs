@@ -49,6 +49,9 @@ test("inbox preview is isolated, synthetic, and fails closed", () => {
   assert.match(contract, /assignmentWrites:\s*false/);
   assert.match(contract, /resolutionWrites:\s*false/);
   assert.match(contract, /outboundDelivery:\s*false/);
+  assert.match(contract, /automaticConversationMerge:\s*false/);
+  assert.match(contract, /sharedDraftWrites:\s*false/);
+  assert.match(contract, /snippetInsertion:\s*false/);
 });
 
 test("conversation and message identities are unique and immutable", () => {
@@ -174,6 +177,58 @@ test("drafts are unsent and every factual claim carries evidence", () => {
   }
 });
 
+test("continuity checks never merge profiles automatically", () => {
+  const conversationIds = inbox.conversations
+    .map((conversation) => conversation.id)
+    .sort();
+  const continuityIds = inbox.continuityChecks
+    .map((check) => check.conversationId)
+    .sort();
+  assert.deepEqual(continuityIds, conversationIds);
+
+  for (const check of inbox.continuityChecks) {
+    assert.equal(check.threadKey, check.conversationId);
+    assert.equal(check.automaticMergeAllowed, false);
+    assert.ok(check.channels.length > 0);
+    assert.ok(["NO_MATCH", "POSSIBLE_RELATED"].includes(check.duplicateState));
+    if (check.duplicateState === "POSSIBLE_RELATED") {
+      assert.ok(check.candidateIds.length > 0);
+    }
+  }
+});
+
+test("collaboration and collision indicators stay read-only", () => {
+  const conversationIds = inbox.conversations
+    .map((conversation) => conversation.id)
+    .sort();
+  const collaborationIds = inbox.collaborationStates
+    .map((state) => state.conversationId)
+    .sort();
+  assert.deepEqual(collaborationIds, conversationIds);
+
+  for (const state of inbox.collaborationStates) {
+    assert.equal(state.sharedDraftWrites, false);
+    assert.ok(["CLEAR", "VIEWER_PRESENT"].includes(state.collisionState));
+    if (state.collisionState === "VIEWER_PRESENT") {
+      assert.ok(state.viewers.length > 0);
+    }
+  }
+});
+
+test("only approved verified snippets are discoverable and none can be inserted", () => {
+  assert.ok(inbox.approvedSnippets.length > 0);
+  for (const snippet of inbox.approvedSnippets) {
+    assert.equal(snippet.status, "APPROVED");
+    assert.equal(snippet.sourceStatus, "VERIFIED");
+    assert.equal(snippet.insertEnabled, false);
+    assert.ok(snippet.sourceRef.trim());
+    assert.ok(snippet.appliesTo.length > 0);
+    assert.ok(!snippet.appliesTo.includes("CHILD_INJURY"));
+    assert.ok(!snippet.appliesTo.includes("DISPUTED_CHARGE"));
+    assert.ok(!snippet.appliesTo.includes("STAFF_COMPLAINT"));
+  }
+});
+
 test("synthetic inbox contains no direct payment or identity fields", () => {
   const forbiddenKeys = new Set([
     "fullName",
@@ -204,6 +259,11 @@ test("interactive inbox uses local state and keeps mutations disabled", () => {
   assert.match(workspace, /Назначение отключено/);
   assert.match(workspace, /Закрытие отключено/);
   assert.match(workspace, /Передача отключена/);
+  assert.match(workspace, /Автоматический merge запрещён/);
+  assert.match(workspace, /Совместное редактирование отключено/);
+  assert.match(workspace, /Вставка snippet отключена/);
+  assert.match(workspace, /Activity \/ audit history/);
+  assert.match(workspace, /follow_up/);
   assert.match(page, /InboxPreviewWorkspace/);
   assert.match(page, /key:\s*["']inbox["']/);
 });

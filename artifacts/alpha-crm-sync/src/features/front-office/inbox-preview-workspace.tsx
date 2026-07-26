@@ -34,6 +34,7 @@ type QueueKey =
   | "unassigned"
   | "urgent"
   | "overdue"
+  | "follow_up"
   | "sales"
   | "service";
 type DetailView = "thread" | "context" | "handoff";
@@ -78,6 +79,36 @@ interface PreviewHandoff {
   ownerRole: string;
   due: string;
   recommendedReply: string;
+}
+
+interface PreviewCollaborationState {
+  conversationId: string;
+  viewers: string[];
+  draftReviewState: "NONE" | "REVIEW_REQUESTED" | "HUMAN_ONLY";
+  collisionState: "CLEAR" | "VIEWER_PRESENT";
+  sharedDraftWrites: false;
+}
+
+interface PreviewContinuityCheck {
+  conversationId: string;
+  threadKey: string;
+  channels: {
+    channel: string;
+    state: string;
+  }[];
+  duplicateState: "NO_MATCH" | "POSSIBLE_RELATED";
+  candidateIds: string[];
+  automaticMergeAllowed: false;
+}
+
+interface PreviewSnippet {
+  id: string;
+  title: string;
+  appliesTo: string[];
+  status: "APPROVED";
+  sourceStatus: "VERIFIED";
+  sourceRef: string;
+  insertEnabled: false;
 }
 
 interface PreviewConversation {
@@ -150,6 +181,9 @@ interface InboxPreviewData {
     key: QueueKey;
     label: string;
   }[];
+  collaborationStates: PreviewCollaborationState[];
+  continuityChecks: PreviewContinuityCheck[];
+  approvedSnippets: PreviewSnippet[];
   conversations: PreviewConversation[];
 }
 
@@ -230,6 +264,8 @@ function matchesQueue(
       "URGENT_HANDOFF",
       "IDENTITY_BLOCKED",
     ].includes(conversation.slaState);
+  if (queue === "follow_up")
+    return conversation.followUp.required && conversation.status !== "CLOSED";
   if (queue === "sales") return conversation.kind === "SALES";
   return conversation.kind !== "SALES";
 }
@@ -241,6 +277,7 @@ function queueIcon(key: QueueKey): ReactNode {
     unassigned: <UserRoundX className="h-3.5 w-3.5" />,
     urgent: <ShieldAlert className="h-3.5 w-3.5" />,
     overdue: <Clock3 className="h-3.5 w-3.5" />,
+    follow_up: <Route className="h-3.5 w-3.5" />,
     sales: <UserCheck className="h-3.5 w-3.5" />,
     service: <Headphones className="h-3.5 w-3.5" />,
   };
@@ -447,7 +484,17 @@ function ThreadView({ conversation }: { conversation: PreviewConversation }) {
   );
 }
 
-function ContextView({ conversation }: { conversation: PreviewConversation }) {
+function ContextView({
+  conversation,
+  collaboration,
+  continuity,
+  snippets,
+}: {
+  conversation: PreviewConversation;
+  collaboration: PreviewCollaborationState | undefined;
+  continuity: PreviewContinuityCheck | undefined;
+  snippets: PreviewSnippet[];
+}) {
   return (
     <div className="grid gap-3 xl:grid-cols-2">
       <section className="rounded-xl border border-gray-200 bg-white p-3">
@@ -615,6 +662,163 @@ function ContextView({ conversation }: { conversation: PreviewConversation }) {
             </dd>
           </div>
         </dl>
+      </section>
+
+      {continuity && (
+        <section className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="flex items-center gap-2">
+            <MessagesSquare className="h-4 w-4 text-slate-700" />
+            <h3 className="text-xs font-semibold text-slate-950">
+              Связность и дубли
+            </h3>
+          </div>
+          <dl className="mt-3 space-y-2 text-[10px]">
+            <div>
+              <dt className="text-slate-500">Единый thread key</dt>
+              <dd className="mt-0.5 font-semibold text-slate-800">
+                {continuity.threadKey}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Каналы в истории</dt>
+              <dd className="mt-1 flex flex-wrap gap-1.5">
+                {continuity.channels.map((channel) => (
+                  <span
+                    key={`${channel.channel}-${channel.state}`}
+                    className="rounded-full bg-white px-2 py-1 font-medium text-slate-700 ring-1 ring-slate-200"
+                  >
+                    {channelLabel(channel.channel)} · {channel.state}
+                  </span>
+                ))}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Проверка дубля</dt>
+              <dd
+                className={`mt-0.5 font-semibold ${
+                  continuity.duplicateState === "POSSIBLE_RELATED"
+                    ? "text-amber-700"
+                    : "text-emerald-700"
+                }`}
+              >
+                {continuity.duplicateState}
+              </dd>
+            </div>
+          </dl>
+          {continuity.candidateIds.length > 0 && (
+            <p className="mt-2 text-[9px] leading-4 text-amber-700">
+              Возможная связь: {continuity.candidateIds.join(", ")}. Нужна
+              ручная проверка.
+            </p>
+          )}
+          <p className="mt-2 inline-flex items-center gap-1 text-[9px] font-semibold text-slate-600">
+            <LockKeyhole className="h-3 w-3" />
+            Автоматический merge запрещён
+          </p>
+        </section>
+      )}
+
+      {collaboration && (
+        <section className="rounded-xl border border-cyan-200 bg-cyan-50 p-3">
+          <div className="flex items-center gap-2">
+            <UserRoundCog className="h-4 w-4 text-cyan-700" />
+            <h3 className="text-xs font-semibold text-cyan-950">
+              Командная работа · synthetic
+            </h3>
+          </div>
+          <dl className="mt-3 space-y-2 text-[10px]">
+            <div>
+              <dt className="text-cyan-600">Присутствие</dt>
+              <dd className="mt-0.5 font-semibold text-cyan-900">
+                {collaboration.viewers.length > 0
+                  ? collaboration.viewers.join(", ")
+                  : "Никто больше не просматривает"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-cyan-600">Collision-состояние</dt>
+              <dd className="mt-0.5 font-semibold text-cyan-900">
+                {collaboration.collisionState}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-cyan-600">Проверка черновика</dt>
+              <dd className="mt-0.5 font-semibold text-cyan-900">
+                {collaboration.draftReviewState}
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-2 inline-flex items-center gap-1 text-[9px] font-semibold text-cyan-700">
+            <LockKeyhole className="h-3 w-3" />
+            Совместное редактирование отключено
+          </p>
+        </section>
+      )}
+
+      <section className="rounded-xl border border-violet-200 bg-violet-50 p-3">
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-violet-700" />
+          <h3 className="text-xs font-semibold text-violet-950">
+            Утверждённые snippets
+          </h3>
+        </div>
+        {snippets.length > 0 ? (
+          <div className="mt-3 space-y-2">
+            {snippets.map((snippet) => (
+              <div
+                key={snippet.id}
+                className="rounded-lg border border-violet-100 bg-white/80 p-2.5"
+              >
+                <p className="text-[10px] font-semibold text-violet-950">
+                  {snippet.title}
+                </p>
+                <p className="mt-1 text-[9px] text-violet-700">
+                  APPROVED · VERIFIED · {snippet.sourceRef}
+                </p>
+                <button
+                  type="button"
+                  disabled
+                  title="Вставка snippets отключена в preview"
+                  className="mt-2 inline-flex h-7 items-center rounded-lg bg-gray-100 px-2.5 text-[9px] font-semibold text-gray-400 disabled:cursor-not-allowed"
+                >
+                  Вставка snippet отключена
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-[10px] leading-4 text-violet-800">
+            Для этого intent нет утверждённого snippet. Критические и спорные
+            обращения не закрываются шаблоном.
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-3">
+        <div className="flex items-center gap-2">
+          <FileCheck2 className="h-4 w-4 text-gray-600" />
+          <h3 className="text-xs font-semibold text-gray-900">
+            Activity / audit history
+          </h3>
+        </div>
+        <div className="mt-3 space-y-2">
+          {conversation.audit.map((event) => (
+            <div
+              key={event.id}
+              className="border-l-2 border-gray-200 pl-2.5 text-[9px]"
+            >
+              <p className="font-semibold text-gray-800">{event.event}</p>
+              <p className="mt-0.5 leading-4 text-gray-500">
+                {event.at} · {event.actor}
+              </p>
+              <p className="text-gray-400">{event.id}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-[9px] font-medium text-gray-500">
+          Preview показывает только synthetic audit; рабочая история не
+          загружается.
+        </p>
       </section>
     </div>
   );
@@ -802,6 +1006,21 @@ export function InboxPreviewWorkspace() {
     ) ??
     filteredConversations[0] ??
     null;
+  const selectedCollaboration = selectedConversation
+    ? preview.collaborationStates.find(
+        (state) => state.conversationId === selectedConversation.id,
+      )
+    : undefined;
+  const selectedContinuity = selectedConversation
+    ? preview.continuityChecks.find(
+        (check) => check.conversationId === selectedConversation.id,
+      )
+    : undefined;
+  const selectedSnippets = selectedConversation
+    ? preview.approvedSnippets.filter((snippet) =>
+        snippet.appliesTo.includes(selectedConversation.intent),
+      )
+    : [];
 
   function selectQueue(nextQueue: QueueKey) {
     setQueue(nextQueue);
@@ -969,6 +1188,14 @@ export function InboxPreviewWorkspace() {
                       <UserRoundCog className="h-3 w-3" />
                       {selectedConversation.assignedTo}
                     </span>
+                    {selectedCollaboration &&
+                      selectedCollaboration.viewers.length > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 px-2.5 py-1 text-[9px] font-semibold text-cyan-700 ring-1 ring-cyan-200">
+                          <UserCheck className="h-3 w-3" />
+                          Сейчас смотрит:{" "}
+                          {selectedCollaboration.viewers.join(", ")}
+                        </span>
+                      )}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -1054,7 +1281,12 @@ export function InboxPreviewWorkspace() {
                 <ThreadView conversation={selectedConversation} />
               )}
               {detailView === "context" && (
-                <ContextView conversation={selectedConversation} />
+                <ContextView
+                  conversation={selectedConversation}
+                  collaboration={selectedCollaboration}
+                  continuity={selectedContinuity}
+                  snippets={selectedSnippets}
+                />
               )}
               {detailView === "handoff" && (
                 <HandoffView conversation={selectedConversation} />
