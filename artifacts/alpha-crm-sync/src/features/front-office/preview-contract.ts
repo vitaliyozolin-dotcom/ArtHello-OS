@@ -7,6 +7,8 @@ export const FRONT_OFFICE_PREVIEW_CONTRACT = Object.freeze({
   externalWrites: false,
   outboundMessages: false,
   sharedSchemaChanges: false,
+  dataPersistence: false,
+  ephemeralUiStateOnly: true,
   alfaCrmAccess: false,
   bankAccess: false,
 } as const);

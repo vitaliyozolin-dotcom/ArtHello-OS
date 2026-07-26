@@ -10,17 +10,32 @@ import {
   CircleAlert,
   Clock3,
   GraduationCap,
+  Headphones,
   ListChecks,
   Megaphone,
   MessageSquareText,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Target,
   UserRoundPlus,
 } from "lucide-react";
 import { FRONT_OFFICE_PREVIEW_CONTRACT } from "@/features/front-office/preview-contract";
+import { LeadPreviewDrawer } from "@/features/front-office/lead-preview-drawer";
+import {
+  PREVIEW_LEADS,
+  PREVIEW_LEAD_DETAILS,
+  PREVIEW_SERVICE_TICKETS,
+  type PreviewLead,
+} from "@/features/front-office/preview-data";
 
-type View = "overview" | "pipeline" | "tasks" | "knowledge" | "marketing";
+type View =
+  | "overview"
+  | "pipeline"
+  | "service"
+  | "tasks"
+  | "knowledge"
+  | "marketing";
 type Tone = "violet" | "blue" | "emerald" | "amber" | "rose" | "slate";
 
 const TONE_CLASSES: Record<
@@ -86,49 +101,6 @@ const PIPELINE = [
     tone: "emerald" as Tone,
   },
   { key: "WON", label: "Договор", count: 2, tone: "slate" as Tone },
-];
-
-const LEADS = [
-  {
-    id: "AH-DEMO-0042",
-    need: "Творческая программа · 6–7 лет",
-    area: "Север города",
-    stage: "QUALIFIED",
-    next: "Предложить два проверенных варианта",
-    due: "Сегодня, 14:00",
-    owner: "Менеджер 1",
-    risk: "normal",
-  },
-  {
-    id: "AH-DEMO-0043",
-    need: "Подготовка к школе · вечер",
-    area: "Рядом с филиалом",
-    stage: "PROGRAM_MATCHED",
-    next: "Уточнить удобный день пробного",
-    due: "Сегодня, 16:30",
-    owner: "Менеджер 2",
-    risk: "normal",
-  },
-  {
-    id: "AH-DEMO-0044",
-    need: "Детский сад · полный день",
-    area: "Район не подтверждён",
-    stage: "NEW",
-    next: "Уточнить возраст, район и дату старта",
-    due: "Просрочено на 24 мин",
-    owner: "Не назначен",
-    risk: "overdue",
-  },
-  {
-    id: "AH-DEMO-0045",
-    need: "Пробное занятие · выходные",
-    area: "Север города",
-    stage: "TRIAL_BOOKED",
-    next: "Подтвердить посещение сотрудником",
-    due: "Завтра, 10:00",
-    owner: "Менеджер 1",
-    risk: "normal",
-  },
 ];
 
 const TASKS = [
@@ -271,7 +243,7 @@ function SafetyBanner() {
   );
 }
 
-function LeadsPanel() {
+function LeadsPanel({ onOpen }: { onOpen: (lead: PreviewLead) => void }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.04)]">
       <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3.5">
@@ -288,7 +260,7 @@ function LeadsPanel() {
         </span>
       </div>
       <div className="divide-y divide-gray-100">
-        {LEADS.map((lead) => (
+        {PREVIEW_LEADS.map((lead) => (
           <div
             key={lead.id}
             className="grid gap-3 px-4 py-3.5 transition-colors hover:bg-gray-50/70 lg:grid-cols-[1.2fr_1fr_1.3fr_auto] lg:items-center"
@@ -332,15 +304,133 @@ function LeadsPanel() {
             </div>
             <button
               type="button"
-              disabled
-              title="Действия отключены в безопасном прототипе"
-              className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-gray-200 px-2.5 text-[11px] font-medium text-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
+              onClick={() => onOpen(lead)}
+              title="Открыть локальную синтетическую карточку"
+              className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-[11px] font-medium text-violet-700 transition-colors hover:bg-violet-100"
             >
               Карточка
               <ChevronRight className="h-3 w-3" />
             </button>
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function ServicePanel() {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.04)]">
+      <div className="flex flex-col gap-3 border-b border-gray-100 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Headphones className="h-4 w-4 text-violet-600" />
+            <h2 className="text-sm font-semibold text-gray-900">
+              Клиентский сервис
+            </h2>
+          </div>
+          <p className="mt-1 text-[11px] text-gray-400">
+            Продажная возможность и сервисный тикет остаются разными объектами
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-[10px] font-semibold">
+          <span className="rounded-full bg-rose-50 px-2.5 py-1 text-rose-700">
+            P2: 2
+          </span>
+          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">
+            Waiting internal: 2
+          </span>
+        </div>
+      </div>
+
+      <div className="divide-y divide-gray-100">
+        {PREVIEW_SERVICE_TICKETS.map((ticket) => (
+          <article
+            key={ticket.id}
+            className="grid gap-3 px-4 py-3.5 lg:grid-cols-[1.3fr_0.8fr_0.9fr_auto] lg:items-center"
+          >
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-semibold text-violet-600">
+                  {ticket.id}
+                </span>
+                <span
+                  className={`rounded-md px-1.5 py-0.5 text-[9px] font-bold ${
+                    ticket.priority === "P2"
+                      ? "bg-rose-50 text-rose-700"
+                      : ticket.priority === "P3"
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {ticket.priority}
+                </span>
+                <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[9px] font-semibold text-gray-500">
+                  {ticket.status}
+                </span>
+              </div>
+              <p className="mt-1.5 text-xs font-semibold text-gray-900">
+                {ticket.subject}
+              </p>
+              <p className="mt-1 text-[10px] font-medium text-gray-400">
+                {ticket.intent}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                Проверка личности
+              </p>
+              <p
+                className={`mt-1 text-xs font-medium ${
+                  ticket.identity === "verified"
+                    ? "text-emerald-700"
+                    : ticket.identity === "partial"
+                      ? "text-amber-700"
+                      : "text-gray-600"
+                }`}
+              >
+                {ticket.identity}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                Владелец и срок
+              </p>
+              <p className="mt-1 text-xs font-medium text-gray-700">
+                {ticket.owner}
+              </p>
+              <p className="mt-0.5 text-[10px] text-gray-400">{ticket.due}</p>
+            </div>
+
+            <div className="flex flex-col items-start gap-1.5 lg:items-end">
+              <span className="text-[10px] font-medium text-emerald-700">
+                VERIFIED: {ticket.verifiedFacts}
+              </span>
+              <span
+                className={`text-[10px] font-medium ${
+                  ticket.unverifiedClaims > 0
+                    ? "text-amber-700"
+                    : "text-gray-400"
+                }`}
+              >
+                UNVERIFIED: {ticket.unverifiedClaims}
+              </span>
+              {ticket.escalation && (
+                <span className="mt-1 inline-flex max-w-48 items-start gap-1 rounded-lg bg-rose-50 px-2 py-1 text-right text-[9px] font-semibold leading-3 text-rose-700">
+                  <ShieldAlert className="mt-px h-3 w-3 shrink-0" />
+                  {ticket.escalation}
+                </span>
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 text-[10px] leading-4 text-gray-500">
+        Статус <strong>RESOLVED</strong> не означает автоматическое закрытие:
+        сначала проверяется результат, открытый риск и обещанный follow-up.
       </div>
     </section>
   );
@@ -555,6 +645,12 @@ function MarketingPanel() {
 
 export function FrontOfficePage() {
   const [view, setView] = useState<View>("overview");
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const selectedLead =
+    PREVIEW_LEADS.find((lead) => lead.id === selectedLeadId) ?? null;
+  const selectedLeadDetail = selectedLead
+    ? PREVIEW_LEAD_DETAILS[selectedLead.id]
+    : null;
 
   const views: { key: View; label: string; icon: ReactNode }[] = [
     {
@@ -566,6 +662,11 @@ export function FrontOfficePage() {
       key: "pipeline",
       label: "Воронка",
       icon: <Target className="h-3.5 w-3.5" />,
+    },
+    {
+      key: "service",
+      label: "Сервис",
+      icon: <Headphones className="h-3.5 w-3.5" />,
     },
     {
       key: "tasks",
@@ -670,12 +771,14 @@ export function FrontOfficePage() {
             />
           </div>
 
-          <LeadsPanel />
+          <LeadsPanel onOpen={(lead) => setSelectedLeadId(lead.id)} />
 
           <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
             <FunnelPanel />
             <TasksPanel />
           </div>
+
+          <ServicePanel />
 
           <div className="grid gap-4 lg:grid-cols-2">
             <KnowledgePanel />
@@ -685,6 +788,7 @@ export function FrontOfficePage() {
       )}
 
       {view === "pipeline" && <FunnelPanel />}
+      {view === "service" && <ServicePanel />}
       {view === "tasks" && <TasksPanel />}
       {view === "knowledge" && <KnowledgePanel />}
       {view === "marketing" && <MarketingPanel />}
@@ -733,6 +837,14 @@ export function FrontOfficePage() {
         <Clock3 className="ml-1 h-3 w-3" />
         Данные не сохраняются
       </p>
+
+      {selectedLead && selectedLeadDetail && (
+        <LeadPreviewDrawer
+          lead={selectedLead}
+          detail={selectedLeadDetail}
+          onClose={() => setSelectedLeadId(null)}
+        />
+      )}
     </div>
   );
 }
