@@ -1,0 +1,451 @@
+{
+  "projectId": "ARTHELLO",
+  "currentMode": "DRAFT_ONLY",
+  "realChannelsEnabled": false,
+  "externalActionsEnabled": false,
+  "configurationVersion": "DEMO-0.1",
+  "approvedActions": [],
+  "roles": [
+    {
+      "key": "SUPPORT_OWNER_ROLE",
+      "label": "Владелец клиентского сервиса",
+      "purpose": "Утверждает политики, качество и переходы автономности",
+      "assigned": false,
+      "value": "Не назначен",
+      "requiredFor": ["DRAFT_ONLY", "AUTO_LOW_RISK"]
+    },
+    {
+      "key": "DUTY_MANAGER_ROLE",
+      "label": "Дежурный руководитель",
+      "purpose": "Принимает срочные P0/P1 и операционные конфликты",
+      "assigned": false,
+      "value": "Не назначен",
+      "requiredFor": ["P0", "P1"]
+    },
+    {
+      "key": "FINANCE_ESCALATION_ROLE",
+      "label": "Финансовая эскалация",
+      "purpose": "Решает возвраты, спорные начисления и оплаты",
+      "assigned": false,
+      "value": "Не назначен",
+      "requiredFor": ["FINANCE", "REFUND"]
+    },
+    {
+      "key": "LEGAL_ESCALATION_ROLE",
+      "label": "Юридическая эскалация",
+      "purpose": "Рассматривает претензии, договоры и запросы данных",
+      "assigned": false,
+      "value": "Не назначен",
+      "requiredFor": ["LEGAL", "PRIVACY"]
+    },
+    {
+      "key": "SAFETY_ESCALATION_ROLE",
+      "label": "Ответственный за безопасность",
+      "purpose": "Принимает инциденты с ребёнком и угрозой жизни",
+      "assigned": false,
+      "value": "Не назначен",
+      "requiredFor": ["P0", "CHILD_SAFETY"]
+    },
+    {
+      "key": "KNOWLEDGE_OWNER_ROLE",
+      "label": "Владелец базы знаний",
+      "purpose": "Следит за версиями, источниками и сроками пересмотра",
+      "assigned": false,
+      "value": "Не назначен",
+      "requiredFor": ["KNOWLEDGE_APPROVAL"]
+    }
+  ],
+  "sla": [
+    {
+      "priority": "P0",
+      "label": "Критический инцидент",
+      "example": "Угроза ребёнку, жизни или утечка данных",
+      "responseTarget": "Не утверждено",
+      "resolutionTarget": "По emergency playbook",
+      "escalationRole": "SAFETY_ESCALATION_ROLE",
+      "proposal": true,
+      "activated": false
+    },
+    {
+      "priority": "P1",
+      "label": "Срочное обращение",
+      "example": "Услуга идёт сейчас, критический конфликт или доступ",
+      "responseTarget": "Не утверждено",
+      "resolutionTarget": "Не утверждено",
+      "escalationRole": "DUTY_MANAGER_ROLE",
+      "proposal": true,
+      "activated": false
+    },
+    {
+      "priority": "P2",
+      "label": "Приоритетное решение",
+      "example": "Жалоба, возврат, спорное начисление или риск ухода",
+      "responseTarget": "Не утверждено",
+      "resolutionTarget": "Не утверждено",
+      "escalationRole": "SUPPORT_OWNER_ROLE",
+      "proposal": true,
+      "activated": false
+    },
+    {
+      "priority": "P3",
+      "label": "Стандартное обращение",
+      "example": "Документы, расписание, изменение или уточнение",
+      "responseTarget": "Не утверждено",
+      "resolutionTarget": "Не утверждено",
+      "escalationRole": "SUPPORT_OWNER_ROLE",
+      "proposal": true,
+      "activated": false
+    },
+    {
+      "priority": "P4",
+      "label": "Информационный запрос",
+      "example": "Публичная информация из утверждённого источника",
+      "responseTarget": "Не утверждено",
+      "resolutionTarget": "Не утверждено",
+      "escalationRole": "SUPPORT_OWNER_ROLE",
+      "proposal": true,
+      "activated": false
+    }
+  ],
+  "proposedActions": [
+    {
+      "key": "READ_APPROVED_KNOWLEDGE",
+      "label": "Читать утверждённые знания",
+      "risk": "LOW",
+      "status": "PREVIEW_ONLY",
+      "requiresApproval": true,
+      "idempotent": true,
+      "externalEffect": false
+    },
+    {
+      "key": "CREATE_INTERNAL_DRAFT",
+      "label": "Создать внутренний черновик",
+      "risk": "LOW",
+      "status": "PREVIEW_ONLY",
+      "requiresApproval": true,
+      "idempotent": true,
+      "externalEffect": false
+    },
+    {
+      "key": "CREATE_INTERNAL_TASK",
+      "label": "Создать внутреннюю задачу",
+      "risk": "LOW",
+      "status": "PREVIEW_ONLY",
+      "requiresApproval": true,
+      "idempotent": true,
+      "externalEffect": false
+    },
+    {
+      "key": "CREATE_KNOWLEDGE_GAP",
+      "label": "Зафиксировать пробел знаний",
+      "risk": "LOW",
+      "status": "PREVIEW_ONLY",
+      "requiresApproval": true,
+      "idempotent": true,
+      "externalEffect": false
+    },
+    {
+      "key": "SEND_CLIENT_MESSAGE",
+      "label": "Отправить сообщение клиенту",
+      "risk": "HIGH",
+      "status": "PROHIBITED",
+      "requiresApproval": true,
+      "idempotent": false,
+      "externalEffect": true
+    },
+    {
+      "key": "CHANGE_BOOKING_OR_ENROLLMENT",
+      "label": "Изменить запись, группу или зачисление",
+      "risk": "HIGH",
+      "status": "PROHIBITED",
+      "requiresApproval": true,
+      "idempotent": false,
+      "externalEffect": true
+    },
+    {
+      "key": "FINANCIAL_OR_CONTRACT_ACTION",
+      "label": "Возврат, скидка, платёж или договорное изменение",
+      "risk": "CRITICAL",
+      "status": "HUMAN_ONLY",
+      "requiresApproval": true,
+      "idempotent": false,
+      "externalEffect": true
+    }
+  ],
+  "autonomyLevels": [
+    {
+      "key": "SHADOW",
+      "status": "AVAILABLE",
+      "description": "Классификация и сравнение с человеком без отправки"
+    },
+    {
+      "key": "DRAFT_ONLY",
+      "status": "CURRENT",
+      "description": "Внутренний черновик; человек проверяет и отправляет"
+    },
+    {
+      "key": "AUTO_LOW_RISK",
+      "status": "LOCKED",
+      "description": "Заблокирован до QA EXPAND и утверждения конфигурации"
+    },
+    {
+      "key": "LIMITED_ACTIONS",
+      "status": "LOCKED",
+      "description": "Заблокирован до отдельного allowlist и rollback"
+    },
+    {
+      "key": "FULL_AUTONOMY",
+      "status": "PROHIBITED",
+      "description": "Запрещён для денег, договоров, детей и безопасности"
+    }
+  ],
+  "killSwitches": [
+    {
+      "key": "CROSS_PROJECT_LEAK",
+      "label": "Межпроектная маршрутизация или утечка",
+      "severity": "CRITICAL",
+      "armed": true,
+      "targetMode": "SHUTDOWN"
+    },
+    {
+      "key": "PERSONAL_DATA_DISCLOSURE",
+      "label": "Раскрытие чужих персональных данных",
+      "severity": "CRITICAL",
+      "armed": true,
+      "targetMode": "SHUTDOWN"
+    },
+    {
+      "key": "WRONG_CUSTOMER_PROFILE",
+      "label": "Обращение открыто не в том профиле",
+      "severity": "CRITICAL",
+      "armed": true,
+      "targetMode": "SHUTDOWN"
+    },
+    {
+      "key": "UNAUTHORIZED_FINANCIAL_ACTION",
+      "label": "Несанкционированный возврат, скидка или отмена",
+      "severity": "CRITICAL",
+      "armed": true,
+      "targetMode": "SHUTDOWN"
+    },
+    {
+      "key": "FALSE_OPERATIONAL_FACT",
+      "label": "Ложная цена, дата, расписание или наличие",
+      "severity": "HIGH",
+      "armed": true,
+      "targetMode": "DRAFT_ONLY"
+    },
+    {
+      "key": "MISSED_CHILD_SAFETY_ESCALATION",
+      "label": "Пропущена эскалация ребёнка или безопасности",
+      "severity": "CRITICAL",
+      "armed": true,
+      "targetMode": "SHUTDOWN"
+    },
+    {
+      "key": "SOURCE_OF_TRUTH_OUTAGE",
+      "label": "Системный сбой источника истины",
+      "severity": "HIGH",
+      "armed": true,
+      "targetMode": "DRAFT_ONLY"
+    },
+    {
+      "key": "QUALITY_THRESHOLD_BREACH",
+      "label": "Превышен порог ошибок или ухудшились CSAT и повторы",
+      "severity": "HIGH",
+      "armed": true,
+      "targetMode": "DRAFT_ONLY"
+    }
+  ],
+  "requiredConfiguration": [
+    {
+      "key": "PROJECT_ID",
+      "label": "Проект",
+      "value": "ARTHELLO",
+      "status": "CONFIGURED",
+      "blocking": false
+    },
+    {
+      "key": "MODE",
+      "label": "Режим автономности",
+      "value": "DRAFT_ONLY",
+      "status": "CONFIGURED",
+      "blocking": false
+    },
+    {
+      "key": "SUPPORTED_CHANNELS",
+      "label": "Поддерживаемые реальные каналы",
+      "value": "NONE",
+      "status": "SAFE_DEFAULT",
+      "blocking": true
+    },
+    {
+      "key": "BUSINESS_HOURS",
+      "label": "Рабочие часы",
+      "value": "Не заполнено",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "TIMEZONE",
+      "label": "Часовой пояс проекта",
+      "value": "Не заполнено",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "SUPPORT_OWNER_ROLE",
+      "label": "Владелец поддержки",
+      "value": "Не назначен",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "DUTY_MANAGER_ROLE",
+      "label": "Дежурный руководитель",
+      "value": "Не назначен",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "FINANCE_ESCALATION_ROLE",
+      "label": "Финансовая эскалация",
+      "value": "Не назначен",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "LEGAL_ESCALATION_ROLE",
+      "label": "Юридическая эскалация",
+      "value": "Не назначен",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "SAFETY_ESCALATION_ROLE",
+      "label": "Эскалация безопасности",
+      "value": "Не назначен",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "APPROVED_ACTIONS",
+      "label": "Белый список действий",
+      "value": "EMPTY",
+      "status": "SAFE_DEFAULT",
+      "blocking": true
+    },
+    {
+      "key": "FORBIDDEN_ACTIONS",
+      "label": "Запрещённые действия",
+      "value": "Активны в preview-контракте",
+      "status": "CONFIGURED",
+      "blocking": false
+    },
+    {
+      "key": "SLA_MATRIX",
+      "label": "Матрица SLA",
+      "value": "Только проект предложения",
+      "status": "PROPOSAL",
+      "blocking": true
+    },
+    {
+      "key": "REFUND_POLICY_ID",
+      "label": "Политика возвратов",
+      "value": "Не заполнено",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "CANCELLATION_POLICY_ID",
+      "label": "Политика отмен",
+      "value": "Не заполнено",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "DISCOUNT_LIMIT",
+      "label": "Лимит скидки",
+      "value": "Не заполнено",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "COMPENSATION_MATRIX",
+      "label": "Матрица компенсаций",
+      "value": "Не заполнено",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "IDENTITY_VERIFICATION_POLICY",
+      "label": "Проверка личности",
+      "value": "Не утверждено",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "DATA_RETENTION_POLICY",
+      "label": "Хранение данных",
+      "value": "Не утверждено",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "EMERGENCY_PLAYBOOK",
+      "label": "Аварийный протокол",
+      "value": "Не утверждено",
+      "status": "MISSING",
+      "blocking": true
+    },
+    {
+      "key": "KNOWLEDGE_BASE_VERSION",
+      "label": "Версия базы знаний",
+      "value": "DEMO-0.1",
+      "status": "PROPOSAL",
+      "blocking": true
+    },
+    {
+      "key": "SOURCE_OF_TRUTH_MAP",
+      "label": "Карта источников истины",
+      "value": "Смысловой проект без live-подключений",
+      "status": "PROPOSAL",
+      "blocking": true
+    }
+  ],
+  "processContract": {
+    "input": "Только синтетические обращения и утверждённые DEMO-знания",
+    "expectedResult": "Классификация, внутренний черновик, handoff или incident",
+    "allowed": [
+      "Локальная навигация",
+      "Синтетическая классификация",
+      "Внутренний AI-черновик без сохранения",
+      "Синтетический QA replay"
+    ],
+    "forbidden": [
+      "Клиентская отправка",
+      "Запись во внешнюю систему",
+      "Деньги и договоры",
+      "Изменение данных ребёнка или семьи",
+      "Публикация базы знаний"
+    ],
+    "responsibleHuman": "Не назначен",
+    "executionCost": "Не измеряется до пилотного контура",
+    "benefitMetrics": [
+      "Фактическая точность",
+      "Правильность эскалаций",
+      "Время подготовки черновика",
+      "Повторные обращения",
+      "CSAT относительно человеческой линии"
+    ],
+    "automaticShutdown": "8 синтетических триггеров взведены",
+    "optOut": {
+      "available": true,
+      "method": "Отключить AI-функции на уровне организации или процесса",
+      "withoutAi": "Ручной поиск, задачи, статьи и аудит сохраняются",
+      "stoppedProcessing": "AI-retrieval и создание AI-черновиков",
+      "retention": "Аудит хранится по утверждённой политике",
+      "reenable": "Только явным решением владельца"
+    }
+  }
+}

@@ -14,12 +14,14 @@ import {
   ListChecks,
   Megaphone,
   MessageSquareText,
+  Settings2,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
   Target,
   UserRoundPlus,
 } from "lucide-react";
+import { ControlCenterPreviewWorkspace } from "@/features/front-office/control-center-preview-workspace";
 import { FRONT_OFFICE_PREVIEW_CONTRACT } from "@/features/front-office/preview-contract";
 import { KnowledgePreviewWorkspace } from "@/features/front-office/knowledge-preview-workspace";
 import { LeadPreviewDrawer } from "@/features/front-office/lead-preview-drawer";
@@ -36,6 +38,7 @@ type View =
   | "service"
   | "tasks"
   | "knowledge"
+  | "control"
   | "marketing";
 type Tone = "violet" | "blue" | "emerald" | "amber" | "rose" | "slate";
 
@@ -680,6 +683,11 @@ export function FrontOfficePage() {
       icon: <BookOpenCheck className="h-3.5 w-3.5" />,
     },
     {
+      key: "control",
+      label: "Управление",
+      icon: <Settings2 className="h-3.5 w-3.5" />,
+    },
+    {
       key: "marketing",
       label: "Маркетинг",
       icon: <Megaphone className="h-3.5 w-3.5" />,
@@ -792,6 +800,7 @@ export function FrontOfficePage() {
       {view === "service" && <ServicePanel />}
       {view === "tasks" && <TasksPanel />}
       {view === "knowledge" && <KnowledgePreviewWorkspace />}
+      {view === "control" && <ControlCenterPreviewWorkspace />}
       {view === "marketing" && <MarketingPanel />}
 
       <div className="mt-5 grid gap-3 rounded-2xl border border-violet-100 bg-violet-50 p-4 sm:grid-cols-3">
