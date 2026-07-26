@@ -11,6 +11,7 @@ import {
   Clock3,
   GraduationCap,
   Headphones,
+  Inbox,
   ListChecks,
   Megaphone,
   MessageSquareText,
@@ -22,6 +23,7 @@ import {
   UserRoundPlus,
 } from "lucide-react";
 import { ControlCenterPreviewWorkspace } from "@/features/front-office/control-center-preview-workspace";
+import { InboxPreviewWorkspace } from "@/features/front-office/inbox-preview-workspace";
 import { FRONT_OFFICE_PREVIEW_CONTRACT } from "@/features/front-office/preview-contract";
 import { KnowledgePreviewWorkspace } from "@/features/front-office/knowledge-preview-workspace";
 import { LeadPreviewDrawer } from "@/features/front-office/lead-preview-drawer";
@@ -34,6 +36,7 @@ import {
 
 type View =
   | "overview"
+  | "inbox"
   | "pipeline"
   | "service"
   | "tasks"
@@ -663,6 +666,11 @@ export function FrontOfficePage() {
       icon: <BarChart3 className="h-3.5 w-3.5" />,
     },
     {
+      key: "inbox",
+      label: "Входящие",
+      icon: <Inbox className="h-3.5 w-3.5" />,
+    },
+    {
       key: "pipeline",
       label: "Воронка",
       icon: <Target className="h-3.5 w-3.5" />,
@@ -797,6 +805,7 @@ export function FrontOfficePage() {
       )}
 
       {view === "pipeline" && <FunnelPanel />}
+      {view === "inbox" && <InboxPreviewWorkspace />}
       {view === "service" && <ServicePanel />}
       {view === "tasks" && <TasksPanel />}
       {view === "knowledge" && <KnowledgePreviewWorkspace />}
