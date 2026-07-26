@@ -20,8 +20,8 @@ test("front-office preview contains no external data access", () => {
 });
 
 test("front-office preview contract fails closed", () => {
-  assert.match(contract, /autonomyMode:\s*'DRAFT_ONLY'/);
-  assert.match(contract, /dataMode:\s*'SYNTHETIC'/);
+  assert.match(contract, /autonomyMode:\s*["']DRAFT_ONLY["']/);
+  assert.match(contract, /dataMode:\s*["']SYNTHETIC["']/);
   assert.match(contract, /externalReads:\s*false/);
   assert.match(contract, /externalWrites:\s*false/);
   assert.match(contract, /outboundMessages:\s*false/);
@@ -31,7 +31,7 @@ test("front-office preview contract fails closed", () => {
 });
 
 test("front-office preview is gated by env flag and owner role", () => {
-  assert.match(contract, /VITE_FRONT_OFFICE_PREVIEW\s*===\s*'true'/);
-  assert.match(contract, /role\s*===\s*'owner'/);
+  assert.match(contract, /VITE_FRONT_OFFICE_PREVIEW\s*===\s*["']true["']/);
+  assert.match(contract, /role\s*===\s*["']owner["']/);
   assert.match(shell, /canViewFrontOfficePreview\(user\?\.role\)/);
 });
