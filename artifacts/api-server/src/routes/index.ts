@@ -39,6 +39,7 @@ import { coverageRouter } from "./coverage";
 import { auditRouter } from "./audit";
 import { evotorRouter } from "./evotor";
 import { employeesModuleRouter } from "./employees-module";
+import { frontOfficeRouter } from "./front-office";
 
 const router: IRouter = Router();
 
@@ -82,5 +83,6 @@ router.use(coverageRouter);
 router.use(auditRouter);
 router.use(evotorRouter);
 router.use(employeesModuleRouter);
+router.use(frontOfficeRouter);
 
 export default router;

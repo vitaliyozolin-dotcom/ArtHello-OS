@@ -9,6 +9,7 @@
     "migrate:bank-config-vault": "tsx src/scripts/encrypt-bank-configs.ts",
     "probe:live-read-only": "node --import tsx src/scripts/probe-live-integrations.ts",
     "start": "node --enable-source-maps ./dist/index.mjs",
+    "test:front-office": "node --import tsx --test test/front-office-*.test.mjs",
     "test:postgres": "node --import tsx --test test/postgres.integration.test.mjs",
     "test:security": "node --test test/security.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"

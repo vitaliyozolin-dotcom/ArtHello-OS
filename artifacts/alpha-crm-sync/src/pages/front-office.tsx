@@ -20,10 +20,10 @@ import {
   ShieldCheck,
   Sparkles,
   Target,
-  UserRoundPlus,
 } from "lucide-react";
 import { ControlCenterPreviewWorkspace } from "@/features/front-office/control-center-preview-workspace";
 import { InboxPreviewWorkspace } from "@/features/front-office/inbox-preview-workspace";
+import { InternalAlphaWorkspace } from "@/features/front-office/internal-alpha-workspace";
 import { FRONT_OFFICE_PREVIEW_CONTRACT } from "@/features/front-office/preview-contract";
 import { KnowledgePreviewWorkspace } from "@/features/front-office/knowledge-preview-workspace";
 import { LeadPreviewDrawer } from "@/features/front-office/lead-preview-drawer";
@@ -707,8 +707,8 @@ export function FrontOfficePage() {
       <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-violet-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-violet-700">
-              Preview
+            <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+              Internal Alpha
             </span>
             <span className="text-[11px] text-gray-400">
               Только для владельца
@@ -722,18 +722,7 @@ export function FrontOfficePage() {
             следующим шагом, сроком и доказуемым источником фактов.
           </p>
         </div>
-        <button
-          type="button"
-          disabled
-          title="Создание данных отключено в безопасном прототипе"
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-gray-200 px-4 text-sm font-semibold text-gray-500 disabled:cursor-not-allowed"
-        >
-          <UserRoundPlus className="h-4 w-4" />
-          Новый лид
-        </button>
       </div>
-
-      <SafetyBanner />
 
       <div className="mb-5 overflow-x-auto">
         <div className="inline-flex min-w-max gap-1 rounded-xl border border-gray-200 bg-white p-1">
@@ -755,54 +744,7 @@ export function FrontOfficePage() {
         </div>
       </div>
 
-      {view === "overview" && (
-        <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-              label="Новые обращения"
-              value="8"
-              note="3 ещё не квалифицированы"
-              icon={<MessageSquareText className="h-4 w-4" />}
-              tone="blue"
-            />
-            <MetricCard
-              label="Пробные назначены"
-              value="3"
-              note="2 требуют подтверждения сотрудником"
-              icon={<GraduationCap className="h-4 w-4" />}
-              tone="emerald"
-            />
-            <MetricCard
-              label="Просроченные действия"
-              value="1"
-              note="Лид без назначенного владельца"
-              icon={<CalendarClock className="h-4 w-4" />}
-              tone="rose"
-            />
-            <MetricCard
-              label="Знания готовы"
-              value="20 / 35"
-              note="Цены и отработки пока блокируют AI-факты"
-              icon={<BookOpenCheck className="h-4 w-4" />}
-              tone="amber"
-            />
-          </div>
-
-          <LeadsPanel onOpen={(lead) => setSelectedLeadId(lead.id)} />
-
-          <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
-            <FunnelPanel />
-            <TasksPanel />
-          </div>
-
-          <ServicePanel />
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <KnowledgeSummaryPanel />
-            <MarketingPanel />
-          </div>
-        </div>
-      )}
+      {view === "overview" && <InternalAlphaWorkspace />}
 
       {view === "pipeline" && <FunnelPanel />}
       {view === "inbox" && <InboxPreviewWorkspace />}
@@ -854,7 +796,8 @@ export function FrontOfficePage() {
         {FRONT_OFFICE_PREVIEW_CONTRACT.autonomyMode} ·{" "}
         {FRONT_OFFICE_PREVIEW_CONTRACT.dataMode}
         <Clock3 className="ml-1 h-3 w-3" />
-        Данные не сохраняются
+        Рабочий стол сохраняет только тестовые данные; соседние вкладки пока
+        остаются статическим preview
       </p>
 
       {selectedLead && selectedLeadDetail && (
