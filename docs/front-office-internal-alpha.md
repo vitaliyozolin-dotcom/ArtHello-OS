@@ -1,10 +1,10 @@
 # ArtHello Front Office — Internal Alpha
 
-Status: implemented, disabled in production by default  
-Project boundary: `ARTHELLO` only  
-Autonomy: `DRAFT_ONLY`  
-Data boundary: synthetic records only  
-External channels: disabled  
+Status: implemented, disabled in production by default
+Project boundary: `ARTHELLO` only
+Autonomy: `DRAFT_ONLY`
+Data boundary: synthetic records only
+External channels: disabled
 Outbound delivery: not implemented
 
 ## What this milestone adds
@@ -36,7 +36,7 @@ It does not support:
 
 ## Database model
 
-Migration: `lib/db/drizzle/0015_front_office_internal_alpha.sql`
+Migration: `lib/db/drizzle/0016_uneven_the_santerians.sql`
 
 Tables:
 
@@ -50,7 +50,7 @@ Every conversation is constrained to `project_id = 'ARTHELLO'`.
 
 The audit table is protected against update, delete and truncate operations by
 database triggers. The rollback is stored in
-`lib/db/rollbacks/0015_front_office_internal_alpha.down.sql`.
+`lib/db/rollbacks/0016_front_office_internal_alpha.down.sql`.
 
 ## Funnel state machine
 

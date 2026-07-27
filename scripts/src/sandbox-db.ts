@@ -9,6 +9,23 @@ const workspaceRoot = resolve(
 );
 const migrationsDirectory = resolve(workspaceRoot, "lib/db/drizzle");
 
+const legacySandboxMigrationAliases: Readonly<
+  Record<string, readonly string[]>
+> = {
+  "0017_serious_captain_cross.sql": [
+    "0016_serious_captain_cross.sql",
+  ],
+  "0018_green_typhoid_mary.sql": [
+    "0017_green_typhoid_mary.sql",
+  ],
+};
+
+export function legacySandboxMigrationNames(
+  migrationName: string,
+): readonly string[] {
+  return legacySandboxMigrationAliases[migrationName] ?? [];
+}
+
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -72,6 +89,34 @@ async function applyMigrations(database: PGlite): Promise<number> {
       }
       continue;
     }
+
+    let legacyAliasMatched = false;
+    for (const legacyName of legacySandboxMigrationNames(name)) {
+      const legacy = await database.query<{
+        content_hash: string;
+      }>(
+        `SELECT content_hash
+         FROM arthello_sandbox_migrations
+         WHERE name = $1`,
+        [legacyName],
+      );
+      const legacyHash = legacy.rows[0]?.content_hash;
+      if (!legacyHash) continue;
+      if (legacyHash !== contentHash) {
+        throw new Error(
+          `Applied legacy migration ${legacyName} does not match ${name}`,
+        );
+      }
+      await database.query(
+        `INSERT INTO arthello_sandbox_migrations (name, content_hash)
+         VALUES ($1, $2)
+         ON CONFLICT (name) DO NOTHING`,
+        [name, contentHash],
+      );
+      legacyAliasMatched = true;
+      break;
+    }
+    if (legacyAliasMatched) continue;
 
     await database.exec("BEGIN");
     try {

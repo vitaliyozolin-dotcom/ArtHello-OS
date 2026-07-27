@@ -157,6 +157,12 @@ importers:
 
   .:
     devDependencies:
+      drizzle-kit:
+        specifier: ^0.31.10
+        version: 0.31.10
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.2(@electric-sql/pglite@0.3.14)(@types/pg@8.20.0)(pg@8.22.0)
       prettier:
         specifier: ^3.8.3
         version: 3.9.6

@@ -3,7 +3,7 @@ import { PGlite } from "@electric-sql/pglite";
 
 const migrationsDirectory = new URL("../../lib/db/drizzle/", import.meta.url);
 
-export async function migrationSources(maximum = 14) {
+export async function migrationSources(maximum = 19) {
   const names = (await readdir(migrationsDirectory))
     .filter((name) => /^\d{4}_.+\.sql$/.test(name))
     .filter((name) => Number(name.slice(0, 4)) <= maximum)
@@ -25,7 +25,7 @@ export async function executeMigrationSource(database, source) {
   }
 }
 
-export async function openAlfaTestDatabase(maximum = 14) {
+export async function openAlfaTestDatabase(maximum = 19) {
   const database = new PGlite();
   for (const migration of await migrationSources(maximum)) {
     await executeMigrationSource(database, migration.source);
@@ -75,9 +75,23 @@ export async function createRawContext(
       batchId,
     ],
   );
+  const observation = await database.query(
+    `INSERT INTO alpha_raw_observations (
+       sync_batch_id,
+       raw_record_id,
+       endpoint,
+       branch_id,
+       entity_type,
+       scope_key,
+       page
+     ) VALUES ($1, $2, 'test/index', $3, $4, $5, 0)
+     RETURNING id`,
+    [batchId, raw.rows[0].id, branchId, entityType, scopeKey],
+  );
   return {
     batchId,
     rawId: raw.rows[0].id,
     scopeKey,
+    observationId: observation.rows[0].id,
   };
 }

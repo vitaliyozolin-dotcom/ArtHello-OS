@@ -86,9 +86,11 @@ export const alphaRawObservationsTable = pgTable(
       .defaultNow(),
   },
   (table) => [
-    unique("alpha_raw_observations_batch_raw_uniq").on(
+    unique("alpha_raw_observations_batch_raw_scope_page_uniq").on(
       table.syncBatchId,
       table.rawRecordId,
+      table.scopeKey,
+      table.page,
     ),
     index("alpha_raw_observations_batch_scope_idx").on(
       table.syncBatchId,

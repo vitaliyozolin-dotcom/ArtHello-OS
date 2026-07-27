@@ -6,7 +6,9 @@
     <meta name="robots" content="noindex, nofollow" />
     <title>ArtHello OS — mobile QA frame</title>
     <style>
-      * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
       body {
         min-height: 100vh;
         display: grid;
@@ -16,22 +18,32 @@
         background: #24202d;
         font-family: ui-sans-serif, system-ui, sans-serif;
       }
-      .qa-frame { display: grid; gap: 10px; }
-      .qa-label { color: #d5cfdf; font-size: 12px; text-align: center; }
+      .qa-frame {
+        display: grid;
+        gap: 10px;
+      }
+      .qa-label {
+        color: #d5cfdf;
+        font-size: 12px;
+        text-align: center;
+      }
       iframe {
         width: 390px;
         height: 844px;
         border: 0;
         border-radius: 28px;
         background: #f5f6fa;
-        box-shadow: 0 24px 70px rgba(0,0,0,.38);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
       }
     </style>
   </head>
   <body>
     <div class="qa-frame">
       <div class="qa-label">Внутренний QA · viewport 390 × 844</div>
-      <iframe src="/#pulse" title="ArtHello OS — mobile viewport"></iframe>
+      <iframe
+        src="/#integrations"
+        title="ArtHello OS — mobile integration viewport"
+      ></iframe>
     </div>
   </body>
 </html>

@@ -12,6 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import {
+  alphaRawObservationsTable,
   alphaRawRecordsTable,
   alphaSyncBatchesTable,
 } from "./alpha-sync.js";
@@ -176,6 +177,10 @@ export const crmGroupMembershipsTable = pgTable(
       .notNull()
       .$defaultFn(requireExplicitAlfaProvenance)
       .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+    rawObservationId: uuid("raw_observation_id")
+      .notNull()
+      .$defaultFn(requireExplicitAlfaProvenance)
+      .references(() => alphaRawObservationsTable.id, { onDelete: "restrict" }),
     raw: jsonb("raw"),
     syncedAt: timestamp("synced_at", { withTimezone: true })
       .notNull()
@@ -223,6 +228,10 @@ export const crmLeadsTable = pgTable(
       .notNull()
       .$defaultFn(requireExplicitAlfaProvenance)
       .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+    rawObservationId: uuid("raw_observation_id")
+      .notNull()
+      .$defaultFn(requireExplicitAlfaProvenance)
+      .references(() => alphaRawObservationsTable.id, { onDelete: "restrict" }),
     raw: jsonb("raw").notNull(),
     syncedAt: timestamp("synced_at", { withTimezone: true })
       .notNull()
@@ -265,6 +274,10 @@ export const crmCustomerTariffsTable = pgTable(
       .notNull()
       .$defaultFn(requireExplicitAlfaProvenance)
       .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+    rawObservationId: uuid("raw_observation_id")
+      .notNull()
+      .$defaultFn(requireExplicitAlfaProvenance)
+      .references(() => alphaRawObservationsTable.id, { onDelete: "restrict" }),
     raw: jsonb("raw").notNull(),
     syncedAt: timestamp("synced_at", { withTimezone: true })
       .notNull()
@@ -311,6 +324,10 @@ export const crmReferenceRecordsTable = pgTable(
       .notNull()
       .$defaultFn(requireExplicitAlfaProvenance)
       .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+    rawObservationId: uuid("raw_observation_id")
+      .notNull()
+      .$defaultFn(requireExplicitAlfaProvenance)
+      .references(() => alphaRawObservationsTable.id, { onDelete: "restrict" }),
     raw: jsonb("raw").notNull(),
     syncedAt: timestamp("synced_at", { withTimezone: true })
       .notNull()
@@ -360,6 +377,9 @@ export const crmChangeLogTable = pgTable(
     rawRecordId: uuid("raw_record_id")
       .notNull()
       .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+    rawObservationId: uuid("raw_observation_id")
+      .notNull()
+      .references(() => alphaRawObservationsTable.id, { onDelete: "restrict" }),
     raw: jsonb("raw").notNull(),
     syncedAt: timestamp("synced_at", { withTimezone: true })
       .notNull()
@@ -391,7 +411,9 @@ export const familyMergeCandidatesTable = pgTable(
   "family_merge_candidates",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    leftStudentBranchCrmId: text("left_student_branch_crm_id").notNull(),
     leftStudentCrmId: text("left_student_crm_id").notNull(),
+    rightStudentBranchCrmId: text("right_student_branch_crm_id").notNull(),
     rightStudentCrmId: text("right_student_crm_id").notNull(),
     branchCrmId: text("branch_crm_id"),
     candidateType: text("candidate_type").notNull(),
@@ -411,7 +433,9 @@ export const familyMergeCandidatesTable = pgTable(
   },
   (table) => [
     unique("family_merge_candidates_pair_uniq").on(
+      table.leftStudentBranchCrmId,
       table.leftStudentCrmId,
+      table.rightStudentBranchCrmId,
       table.rightStudentCrmId,
       table.candidateType,
     ),

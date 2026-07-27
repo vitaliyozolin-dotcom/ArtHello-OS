@@ -31,8 +31,42 @@ test("groups and teachers include active and archived rows", () => {
   );
 });
 
+test("array relationship ids are normalized and an interrupted sandbox batch can resume", () => {
+  assert.match(
+    importer,
+    /firstString\(item\["group_id"\] \?\? item\["group_ids"\]\)/,
+  );
+  assert.match(
+    importer,
+    /firstString\(item\["teacher_id"\] \?\? item\["teacher_ids"\]\)/,
+  );
+  assert.match(importer, /const teacherIds = Array\.isArray\(item\["teacher_ids"\]\)/);
+  assert.match(importer, /ALFACRM_RESUME_RUNNING_BATCH === "1"/);
+  assert.match(importer, /status IN \('running', 'partial'\)/);
+  assert.match(
+    importer,
+    /SET status = 'running', finished_at = NULL/,
+  );
+  assert.match(importer, /async function importEntityOrResume/);
+  assert.match(importer, /previousObservations/);
+  assert.match(importer, /pages_fetched = \$3,\s*records_fetched = \$4/);
+  assert.match(
+    importer,
+    /status = 'completed'[\s\S]*?return \{[\s\S]*?resumed: true/,
+  );
+});
+
 test("provider errors are not copied verbatim into the report", () => {
   assert.match(importer, /safeAlfaErrorCode\(error\)/);
+  assert.match(
+    importer,
+    /ALFACRM_REQUEST_TIMEOUT_MS"[\s\S]*?30_000,[\s\S]*?5_000,[\s\S]*?60_000/,
+  );
+  assert.match(
+    importer,
+    /ALFACRM_MAX_RETRY_ATTEMPTS"[\s\S]*?2,[\s\S]*?0,[\s\S]*?4/,
+  );
+  assert.match(importer, /isRetryableAlfaReadError/);
   assert.doesNotMatch(
     importer,
     /error instanceof Error \? error\.message : String\(error\)/,
@@ -53,6 +87,11 @@ test("customer subscriptions are fetched per student and normalized", () => {
   );
   assert.match(importer, /recordType:\s*"customer_tariffs"/);
   assert.match(importer, /INSERT INTO crm_customer_tariffs/);
+  assert.match(importer, /const tariffPrefetchConcurrency = 16/);
+  assert.match(importer, /const tariffPrefetchWindowSize = 64/);
+  assert.match(importer, /const tariffPageSize = 500/);
+  assert.match(importer, /async function prefetchFirstPages/);
+  assert.match(importer, /entity_type = 'customer_tariffs'/);
 });
 
 test("all payment dictionaries use their documented read endpoints", () => {
@@ -75,7 +114,10 @@ test("all payment dictionaries use their documented read endpoints", () => {
 });
 
 test("change log is stored raw and normalized with an incremental date_from", () => {
-  assert.match(importer, /endpoint:\s*`\$\{branchId\}\/log\/index`/);
+  assert.match(
+    importer,
+    /endpoint:\s*`\$\{branch\.crm_id\}\/log\/index`/,
+  );
   assert.match(importer, /recordType:\s*"change_log"/);
   assert.match(importer, /\{\s*date_from:\s*incrementalWindow\.dateFrom\s*\}/);
   assert.match(importer, /INSERT INTO alpha_raw_records/);
@@ -92,6 +134,9 @@ test("reference records retain raw provenance and a normalized idempotent row", 
 });
 
 test("pagination follows documented page and pageSize parameters", () => {
+  assert.match(importer, /const defaultPageSize = 50/);
+  assert.match(importer, /const paginationPrefetchConcurrency = 16/);
+  assert.match(importer, /async function prefetchPages/);
   assert.match(importer, /page,\s*pageSize,/);
   assert.doesNotMatch(importer, /count:\s*pageSize/);
   assert.match(importer, /new AlfaReadError\("repeated_page"\)/);
@@ -124,15 +169,38 @@ test("raw lineage is append-only and observed separately per batch", () => {
 
 test("independent tariff and membership scopes continue after local errors", () => {
   const tariffLoop = importer.slice(
-    importer.indexOf("for (const student of students.rows)"),
+    importer.indexOf("for (const [index] of window.entries())"),
     importer.indexOf("const groups = await database.query"),
   );
   const membershipLoop = importer.slice(
-    importer.indexOf("for (const group of groups.rows)"),
-    importer.indexOf("const changeLogKey"),
+    importer.indexOf("for (const [index] of groups.rows.entries())"),
+    importer.indexOf("const changeLogOptions"),
   );
   assert.doesNotMatch(tariffLoop, /\bbreak\b/);
   assert.doesNotMatch(membershipLoop, /\bbreak\b/);
   assert.match(tariffLoop, /recordImportError/);
   assert.match(membershipLoop, /recordImportError/);
+});
+
+test("independent resume pages overlap network waits without parallel database writes", () => {
+  const prefetch = importer.slice(
+    importer.indexOf("async function prefetchResumePages"),
+    importer.indexOf("export interface NormalizationContext"),
+  );
+  assert.match(prefetch, /status !== "completed"/);
+  assert.match(prefetch, /pages_fetched/);
+  assert.match(prefetch, /return prefetchFirstPages/);
+  assert.match(importer, /const membershipClient = await prefetchResumePages/);
+  assert.match(importer, /const changeLogClient = await prefetchResumePages/);
+  assert.doesNotMatch(prefetch, /database\.exec\("BEGIN"\)/);
+});
+
+test("family candidates preserve both branch-scoped student identities", () => {
+  assert.match(importer, /left_student_branch_crm_id/);
+  assert.match(importer, /right_student_branch_crm_id/);
+  assert.match(
+    importer,
+    /ON CONFLICT \(\s*left_student_branch_crm_id,\s*left_student_crm_id,\s*right_student_branch_crm_id,\s*right_student_crm_id,\s*candidate_type\s*\)/,
+  );
+  assert.match(importer, /requiresManualConfirmation:\s*true/);
 });

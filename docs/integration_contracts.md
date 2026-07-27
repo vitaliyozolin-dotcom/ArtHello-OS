@@ -101,10 +101,12 @@ None — file upload via UI.
 ## 3. Website Form Webhook
 
 **Source type:** `website`  
-**Status:** Implemented (v0.1)
+**Status:** Implemented for authenticated internal callers only (v0.1)
 
 ### ENV
-None (endpoint is public, authenticated by network / secret header if needed).
+Uses the application session, CSRF token, and route-access policy. The endpoint is
+not public. A provider-facing webhook must not be registered until a separate
+signed-request or shared-secret contract is implemented and tested.
 
 ### Endpoint
 ```
@@ -134,12 +136,18 @@ POST /api/webhooks/website-lead
 - `raw_events` (source_system = `website_webhook`, event_type = `lead`)
 - `lead_events` (linked via `raw_event_id`, channel derived from UTM)
 
-### Integration guide for website
-Add to your form submission handler:
+### Internal integration example
+Call only from an authenticated same-origin backend or administrative session.
+Every submission needs a stable idempotency key:
 ```js
 fetch("https://<your-domain>/api/webhooks/website-lead", {
   method: "POST",
-  headers: { "Content-Type": "application/json" },
+  credentials: "include",
+  headers: {
+    "Content-Type": "application/json",
+    "X-CSRF-Token": csrfToken,
+    "Idempotency-Key": stableSubmissionId
+  },
   body: JSON.stringify({ name, phone, utm_source, utm_campaign, ... })
 })
 ```

@@ -1,19 +1,134 @@
 # ArtHello OS — Current State
 
+## Обновление A.11 — exact checkpoint v28
+
+- Исполняемый candidate: commit
+  `025f82973807c03c90c558136b3a508aa17ed345`, tree
+  `6fa44f49c99c9f21e05550ae8621f61a87dce4a1`.
+- Sites version:
+  `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_377621254d0881919134e482c2649393`.
+- Deployment: `appgdep_6a66b291be588191909e6daff1fc23d1`,
+  terminal status `succeeded`.
+- Access: `custom`, один разрешённый owner account, ноль групп. Environment
+  revision `5`; `ARTHELLO_OWNER_EMAIL` совпадает с email этого account.
+- Полный local gate: typecheck PASS, full build PASS, scripts/data `62/62`,
+  security `31/31`, Sites/Worker `22/22`, Front Office `47/47`,
+  `git diff --check` PASS.
+- Agent preview desktop PASS: пульс, центр качества, сотрудники, система,
+  Front Office, интеграции и возврат из drawer. Raw application console errors
+  не найдены. Mobile подтверждён static responsive/navigation tests; отдельный
+  cloud-browser viewport harness запрещён политикой браузера и не обходился.
+- Sites identity contract подтверждён локальной документацией платформы:
+  `oai-authenticated-user-email`. Owner unit matrix возвращает `200`, missing
+  и foreign identity — `403`.
+- Production machine bypass не способен эмулировать owner identity: он удаляет
+  caller-supplied identity header. Служебный cloud renderer использует
+  отдельную redacted identity и ожидаемо получает `403`. Live URL во внутреннем
+  браузере не открывался. Фактический owner-session `200` остаётся внешней
+  проверкой на устройстве владельца.
+- Безопасный post-deploy status: `activeBatchId = null`,
+  `atomicSnapshot = false`, `attestationStatus = legacy_unattested`; payroll
+  counts `114 / 842 / 1318 / 1855 / 36`; все восемь operational AlfaCRM
+  datasets `0`; Tochka `active`, 16 счетов, payment actions `false`.
+- В A.11 новые PII rows не передавались, production PostgreSQL/Replit не
+  подключались и миграции production не выполнялись.
+
+## Обновление A.10 — 2026-07-26
+
+- Exact v27: commit `f0eea01f0d27ac5afdacbd71c9753401222577b9`, tree `48fe2669cf7ebf28fe5ed125117abd71b35cc52a`, Sites version `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_5581beb0e1308191ae6721b460e4bb68`, deployment `appgdep_6a66a77b5a408191b060ad9eece3f52e` = `succeeded`, access `custom / 1 owner / 0 groups`.
+- Reviewer v27: `FAIL`. Coordinator: `NO-GO`. Открыты были incremental terminal bypass, круговая digest-аттестация, production owner API `403`, raw UI error и отсутствие точного v27 evidence в документах.
+- В correction candidate exporter требует `full_sandbox_read_only` и полный scope inventory; publisher создаёт per-dataset manifest; Worker переводит batch в `verifying`, блокирует конкурентный staging, пересчитывает SHA-256 из канонических staged rows и только затем выполняет одну D1 transaction.
+- Произвольный digest, изменение строки после manifest и пропущенный непустой dataset возвращают `409`; предыдущий active snapshot остаётся неизменным. Порядок передачи одинаковых строк не влияет на digest.
+- Sites environment revision `5` подготовлена с `ARTHELLO_OWNER_EMAIL=vitaliyozolin@gmail.com`, совпадающим с единственным разрешённым Sites-пользователем. Access policy не менялась: `custom`, 1 user, 0 groups. Ревизия применяется только следующим deployment.
+- UI явно различает `atomic_attested` и `legacy_unattested`; malformed API rows дают безопасное пустое состояние, raw `error.message` пользователю не выводится.
+- Local gate candidate: typecheck PASS, full build PASS, scripts/data `62/62`, security `31/31`, Sites/Worker `22/22`, Front Office `47/47`, `git diff --check` PASS.
+- Agent preview desktop PASS: пульс, центр качества, сотрудники, Система, Front Office, Integration drawer и возврат проверены кликами; raw application console errors отсутствуют. Отдельный mobile iframe harness отклонён политикой cloud browser, поэтому mobile подтверждён только static responsive/navigation contract tests и остаётся ограничением независимой визуальной проверки.
+- Реальные данные в этом correction cycle не передавались. Текущие D1 counts `114/842/1318/1855/36` остаются legacy/unattested; Alfa operational datasets остаются `0`. Новый protected snapshot v5 запрещён до независимого PASS/GO и отдельного информированного PII approval.
+
+## Обновление A.9 — 2026-07-26
+
+- Sites v25 и exact source `1638b7d047b5cc72a6b902dce7d5119693c3eb66` были успешно развёрнуты owner-only, но защищённый payroll import не выполнялся: внешний safety gate остановил передачу PII до первого сетевого запроса.
+- Повторная независимая ревизия v25 выдала `FAIL`: full-mode publisher не проверял terminal Alfa evidence, а последовательная замена 14 datasets не была атомарной. Поэтому v25 допустим только как ограниченная оболочка с нулём новых PII rows и не является воротами следующей фазы.
+- Correction candidate требует completed Alfa batch, 0 failed entities, 0 incomplete scopes, terminal flags и согласованный `sync_status`; смена только `dataMode` теперь отклоняется.
+- Добавлены аддитивные Sites D1 таблицы publication manifest/staging. Все datasets сначала загружаются в batch с SHA-256 и expected counts, затем заменяются одной D1 transaction. Legacy per-dataset live import возвращает `410`; rollback-test доказывает сохранение прежнего active snapshot при ошибке staged row.
+- Текущий protected export v5 не изменён: payroll `114/842/1318/1855/36`, mismatches `0`; AlfaCRM operational rows `0`, batch `2672/2355/317/56659`, linkage findings `1125`, family candidates `555 pending / 0 confirmed`.
+- Реальные ФИО и зарплатные строки не передавались в Sites этим correction cycle. Для новой digest-bound передачи по-прежнему нужно отдельное информированное подтверждение владельца с указанием payload и owner-only назначения.
+- На correction candidate локально проходят полный monorepo typecheck/build, 31 security tests, 60 scripts/data tests, 17 Sites/Worker tests и 47 Front Office tests. Набор включает отрицательные terminal-gate сценарии и атомарный rollback; `git diff --check` также PASS. Agent preview перезапущен и сообщает `running`, но облачный HTTP proxy возвращает 502 до приложения; после bounded troubleshooting интерактивный browser QA остаётся инфраструктурно недоступен, static responsive/navigation contracts проходят. Live Sites URL внутри не открывался. Новый exact checkpoint и второй цикл Ревизор → Координатор ещё обязательны.
+- Correction checkpoint v26: source commit `8482395a71f234e982bcd52dcc9fb9a7801f9db7`, tree `7ffcbed66c30f0b919a28fc0124e4fd449216c85`, version `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_b7891fb810008191a51b9c6aa114ec01`. Первая deployment-попытка `appgdep_6a66a625002481918d52bebae9bad4ad` завершилась до build из-за npm metadata timeout; повтор той же version `appgdep_6a66a6a4d90c8191bb54af36d4e84523` получил `succeeded`.
+- Post-deploy policy повторно подтверждена: `custom`, 1 owner, 0 groups. Safe machine status: payroll datasets `114/842/1318/1855/36`, Alfa operational datasets все `0`, money missing/mismatch `0`, «Точка» `active/16/read_only/paymentActions=false`.
+- Эти payroll rows уже существовали в D1 после прежнего per-dataset lifecycle; текущий correction cycle их не передавал и не заменял. Поэтому `publication.activeBatchId = null`: deployed rows нельзя аттестовать как новый digest-bound atomic snapshot до отдельного разрешённого повторного импорта. Source status AlfaCRM остаётся `not_loaded` в Sites, а sandbox batch — partial.
+
+## Обновление A.8 — 2026-07-26
+
+- В отдельной sandbox-БД применены исходные branch-scoped migrations после файлового backup mode `600`; backup SHA-256: `e3631c6aecc40e8097d137ee7e2ef3e1fa4162867b18af38314cce938ac22805`. После объединения с Front Office они имеют номера `0017–0018`; additive `0019` безопасно сводит обе конкурентные migration-истории. Production БД и legacy Replit не изменялись.
+- AlfaCRM IDs переведены на branch-scoped identity. Rehydrate из immutable raw-наблюдений восстановил 2 020 учеников, 362 педагогов, 435 групп, 15 550 оплат и 19 678 занятий; broken provenance и normalized branch-key duplicates = 0.
+- Последний batch остаётся `partial`: 2 672 scope запрошено, 2 355 завершено, 317 не завершено, 56 659 записей fetched/saved. Все незавершённые scope имеют `request_timeout`; повторный probe остановился на timeout `/auth/login` до чтения domain endpoint.
+- Текущая диагностическая нормализация содержит 8 филиалов, 1 548 лидов, 2 335 клиентских тарифов, 10 550 записей change log, 74 770 посещений и 1 332 membership. Это неполное покрытие, а не текущая операционная истина.
+- Data-quality findings не скрыты: 2 membership без нормализованного ученика и 1 123 attendance без нормализованного ученика. Attendance без занятия, tariffs без ученика, broken provenance и family-candidate orphans = 0.
+- Построено 555 branch-scoped кандидатов семей только для ручной проверки. Подтверждённых семей и автоматических объединений — 0. До terminal batch эти строки не публикуются в Sites.
+- Protected export v5 имеет mode `owner_only_verified_payroll_partial_alfa_aggregate`: 114 сотрудников, 842 помесячные строки, 1 318 компонентов, 1 855 связанных выплат, 36 unresolved; money mismatches = 0. Все восемь операционных AlfaCRM datasets содержат 0 строк, доступен только агрегированный partial-status.
+- Runtime «Точки» остаётся ранее подтверждённым как `active`, 16 счетов, read-only, payment actions = false. Полнота выписок и банковская сверка ещё не доказаны.
+- Локально PASS: полный monorepo typecheck/build, 31 security test, 57 scripts/data tests, 16 Sites/Worker tests и 47 Front Office tests после выполнения exporter SQL на disposable migrated DB. Отдельные publication tests доказывают, что partial-mode отвергает любую операционную строку AlfaCRM. Front Office остаётся `DRAFT_ONLY` без outbound action. `git diff --check` также PASS. Agent preview запущен; модуль облачного браузера отсутствует, поэтому интерактивный desktop/mobile QA ограничен production build и static responsive/navigation contracts.
+- V25 lifecycle завершён owner-only deployment и независимой ревизией, но получил `FAIL`; PII import не выполнялся. Следующие ворота вынесены в A.9.
+
+## Обновление A.7 — 2026-07-26
+
+- Независимый Ревизор версии v16 выдал `FAIL`: общий formatter округлял реальные денежные значения до целых рублей. В затронутых наборах копейки присутствуют у 203/842 начислений, 437/842 выплат по месяцам, 241/1 318 компонентов, 650/1 855 фактических выплат и 16/36 unresolved rows. Координатор запретил переход дальше до exact minor-unit хранения и повторной сверки.
+- Correction candidate хранит авторитетные суммы в целых копейках, отдаёт через API только `*_minor` и форматирует их без деления через binary float. Legacy `REAL` оставлен неавторитетной совместимостью. Новая аддитивная Sites D1 migration backfill-ит minor-unit поля; production PostgreSQL/Replit не изменялись.
+- Свежий owner payroll export содержит 114 сотрудников, 842 помесячные строки, 1 318 компонентов, 1 855 связанных выплат и 36 unresolved rows. Все minor-unit поля являются safe integers; source-to-minor reconciliation mismatches = 0.
+- Machine endpoint считает отсутствующие minor-unit значения и расхождения legacy↔minor без выдачи сумм или персональных строк. Publisher обязан получить оба счётчика равными нулю.
+- Первый correction deployment v17 не принят: post-deploy machine check вернул HTTP 500 при выполнении объединённых money-audit запросов. Runtime log подтвердил точный маршрут и отказ без утечки данных. Candidate разделяет стабильный dataset/status batch и отдельный bounded money-audit batch из простых `COUNT` запросов; новый checkpoint обязателен.
+- Runtime status «Точки» подтверждён как `active`: 16 счетов, `lastErrorCode = null`, scope только read-only, payment actions = false. Статические тексты «ожидает OAuth» удалены; интерфейс отображает ответ runtime.
+- AlfaCRM batch всё ещё частичный: 76 scopes завершены, 52 не завершены; integrity finding — 70 attendance rows без нормализованного ученика. Экспорт частичного snapshot повторно заблокирован `ALFACRM_TERMINAL_SNAPSHOT_REQUIRED`; операционные rows в Sites не публикуются.
+- Локально проходят `typecheck`, `build:full`, 31 security test, 34 data/import tests и 13 Sites/Worker tests. Agent preview runtime доступен, но cloud browser возвращает `ERR_BLOCKED_BY_CLIENT`; live Sites URL во внутреннем браузере не открывался.
+- Следующие ворота: owner-only checkpoint correction candidate → безопасная machine verification → новый read-only Ревизор → новый Координатор. После этого AlfaCRM можно продолжить только с заново защищённо предоставленными тремя AlfaCRM credentials.
+
+## Обновление A.6 — 2026-07-26
+
+- Реализован явный resume прерванного полного AlfaCRM batch. Candidate пропускает 76 уже завершённых scopes и должен повторить 52 незавершённых; завершение batch и построение family candidates запрещены, пока остаётся хотя бы один incomplete scope.
+- Существующая sandbox-БД содержит частичное наблюдение, не финальную истину: 8 филиалов, 1 820 учеников, 998 лидов, 286 групп, 131 педагог, 18 700 оплат, 7 448 занятий и 22 452 посещения. Memberships и family candidates пока равны нулю; найдено 70 attendance rows без нормализованного ученика. Эти количества не публикуются как полное покрытие AlfaCRM.
+- Исправлена нормализация связей, которые AlfaCRM возвращает как массивы `teacher_ids`/`group_ids`. Для групп объединяются вложенные teachers и отдельные teacher IDs.
+- Owner read-model candidate содержит 114 карточек сотрудников, 842 помесячные строки, 1 318 связанных компонентов начислений, 1 855 связанных выплат и 36 unresolved payroll rows. Исходный payroll audit и формулы сохраняются отдельно; read-модель не превращает их в правила.
+- Добавлены экраны и API педагогов, ставок/evidence, компонентов начислений и фактических выплат. Связи педагог↔сотрудник по точному ФИО, class candidates и extra-lesson candidates явно требуют ручного подтверждения.
+- Налоги и страховые взносы имеют статус `not_sourced`: поиски по зарплатному источнику не выявили подтверждённой налоговой модели, расчёт не выполняется.
+- Добавлен безопасный агрегированный endpoint для машинной проверки deployment: только counts, статус/время банковской синхронизации и безопасный error code; без имён, сумм, account IDs, номеров счетов и секретов. Детальные owner endpoints остаются закрытыми.
+- D1 migration `0002_familiar_blockbuster.sql` аддитивно расширяет только Sites read-модель; production PostgreSQL и production migrations не затрагивались.
+- Локально PASS: полный TypeScript check, full production build, 31 API security test, 33 AlfaCRM/data tests и 12 Sites/Worker tests.
+- Agent preview server подтверждён healthy, но cloud browser возвращает инфраструктурный `ERR_BLOCKED_BY_CLIENT`; интерактивная desktop/mobile проверка текущего candidate ограничена статическими responsive/navigation contracts и production build. Live Sites URL во внутреннем браузере не открывался.
+- Пользователь сообщил об успешном consent «Точки». Статус считается неподтверждённым до машинной проверки именно нового deployment и агрегированного read-model status.
+
+## Обновление A.5 — 2026-07-26
+
+- Главный Library-документ версии 0.1 найден и полностью перечитан; текущий срез остаётся в воротах достоверных данных и не открывает AI CFO.
+- Единственный Sites-проект `arthello-os-control` подтверждён owner-only: разрешён один пользователь, групп и публичной аудитории нет. Runtime secrets внесены как protected environment variables; `.openai/hosting.json` содержит только opaque project ID и binding `DB`.
+- Добавлена D1 read-модель для сотрудников, помесячных начислений/выплат, unresolved payroll, филиалов, учеников, кандидатов семей, групп, занятий, оплат AlfaCRM, состояния «Точки» и маскированных счетов. В frontend нет встроенных персональных строк или секретов.
+- Owner API завершается `403` без подтверждённого владельца. Import API имеет отдельный длинный secret, ограничивает batch до 100 строк и принимает только фиксированные datasets/columns. Разрешённые просмотры и импорт журналируются в `sensitive_access_audit` без имён, сумм и поисковых запросов.
+- Интерфейс теперь загружает реальные строки: списки сотрудников, помесячную зарплату выбранного сотрудника, учеников, кандидатов семей, группы, занятия, оплаты AlfaCRM, счета и остатки. Неподключённый источник показывает ошибку/пустое состояние, а не demo-числа.
+- Технический OAuth перенесён в раздел «Система» согласно мастер-плану. Раздел «Деньги» оставлен для счетов, остатков и CRM-оплат; сверка ещё не заявлена готовой.
+- Tochka OAuth Worker использует одинаковые read-only scopes `accounts balances customers statements`, получает consent, проверяет SHA-256 state, обменивает code server-side, шифрует токены AES-GCM и перебирает все доступные business customers. Payment permissions, payment routes и инициирование платежей отсутствуют.
+- Банковский остаток берётся только из `ClosingAvailable` (резервно `OpeningAvailable`); `Expected` не показывается как деньги на счёте, а `CreditDebitIndicator` не меняет знак balance amount.
+- Зарплатный snapshot повторно посчитан: 2 593 raw-строки, 114 карточек сотрудников, 1 881 принятая выплата, 1 328 принятых начислений, 2 отклонённые строки без суммы, 26 unresolved payments и 17 unresolved accrual identities. Старое число 3 689 признано ошибочным и не используется.
+- Migration `0015` добавляет точный composite observation lineage для 13 нормализованных AlfaCRM-таблиц и защищает raw/observation от UPDATE, DELETE и TRUNCATE. Rollback `0014` теперь действительно удаляет все шесть оставшихся FK и допускает reapply перед `0015`. Stale students каскадируют зависимости и не могут быть воскрешены дочерними импортами.
+- Локально PASS: typecheck, full build, 31 API security tests, 32 AlfaCRM/data tests и 11 Sites tests, включая in-memory SQLite/D1 OAuth flow, multi-customer accounts, token sealing, owner/import denial и отсутствие полных account IDs в ответе.
+- Agent preview runtime запущен, но облачный браузер блокирует внутреннюю страницу до загрузки приложения (`ERR_BLOCKED_BY_CLIENT`). После обязательной ограниченной диагностики это классифицировано как инфраструктурное ограничение; responsive/navigation contracts проверены тестами, но интерактивный desktop/mobile просмотр ещё не получен.
+- Полный AlfaCRM read-only импорт продолжает писать в отдельную sandbox-БД. До terminal report и integrity audit фактическое покрытие не утверждается. Production БД и legacy Replit не изменялись.
+- Public legacy Replit отвечает, но остаётся индексируемым и имеет незащищённые read endpoints; реальные данные в него не направляются.
+- GitHub Draft PR #1 ещё не обновлён текущим candidate: обязательный `gh` отсутствует в среде. Sites checkpoint использует отдельный связанный source repository и не считается доказательством обновления GitHub PR.
+
 ## Обновление A.4 — 2026-07-25
 
 - Создана отдельная PostgreSQL-совместимая sandbox-БД вне source checkout; перед `0014` сохранена отдельная копия, затем применены 15 миграций. Аудит видит 113 таблиц с учётом sandbox migration ledger. Production БД не читалась и не изменялась.
 - По подтверждению владельца заведены три юридических лица и три операционных правила: «Атлас садик и школа» → ООО «АртХелло», «Лиственная» → ИП Тюрин Павел Олегович, «Школа 1-11» → ООО «УК Детское образование». Фактическая CRM-привязка филиалов ещё не доказана.
-- Реальная зарплатная таблица импортирована в sandbox: 3 689 raw-строк с formula snapshots, 114 уникальных внешних employee identities, 1 881 выплат и 1 328 ненулевых результатов начислений. Две строки выплат без суммы отклонены; 26 связей выплат и 17 связей начислений оставлены unresolved. Дублей нет, 11 периодов имеют юрлицо.
+- Реальная зарплатная таблица импортирована в sandbox: 2 593 raw-строки с formula snapshots, 114 уникальных внешних employee identities, 1 881 выплат и 1 328 ненулевых результатов начислений. Две строки выплат без суммы отклонены; 26 связей выплат и 17 связей начислений оставлены unresolved. Дублей нет, 11 периодов имеют юрлицо.
 - Контрольный аудит подтвердил совпадение числа и суммы принятых выплат/начислений с source snapshot. Формулы сохранены как evidence, но ни одно payroll rule, ставка или KPI не активированы.
 - Полный read-only AlfaCRM importer покрывает учеников отдельно от лидов, архив, группы, состав, педагогов, занятия трёх статусов, посещаемость, оплаты, абонементы клиентов, четыре платёжных справочника и журнал изменений. Candidate `0014` делает raw append-only, сохраняет отдельное observation на batch/scope/page, требует реальный raw/batch FK у каждой материализованной строки и выполняет stale reconciliation только после полностью успешной пагинации scope. Partial, repeated-page и pagination-guard не tombstone-ят отсутствующие записи. Incremental discovery остаётся только обнаружением изменений.
 - Свежий AlfaCRM full run из текущей среды завершился `partial/request_timeout` до branch inventory: fetched 0, saved 0. Прямое соединение также оборвано cloud proxy. Исторические 8 филиалов остаются только historical provenance и не показываются как текущее покрытие.
 - Предыдущий auth-probe production-клиента «Точки» вернул HTTP 200, accounts с service token — HTTP 403. Владелец передал новый временный credential, но он не записан в source/Sites/БД и ещё не введён через protected backend environment. Для счетов всё равно требуются Authorization Code consent и hybrid token. Consent не создавался, счета/операции не читались, платежные действия не выполнялись.
-- Зарегистрированный у банка redirect ведёт на корень Sites и не соответствует защищённому backend callback. Код требует точный HTTPS `/api/banking/oauth/callback` вне `.chatgpt.site`, строгий state и только read-only scopes.
+- Историческое ограничение статического Sites-клиента снято решением D-039: текущий owner-only Sites Worker принимает зарегистрированный root redirect, проверяет state и обменивает code server-side. До owner consent банковские записи всё равно отсутствуют.
 - Public Replit 25.07.2026 всё ещё отдаёт старую индексируемую сборку: исходники уже закрывают индексирование и убирают публичные account hints, но выпуск не выполнялся.
 - Ревизор v13 выдал `FAIL`: `A4-13-01` — raw provenance перезаписывался, `A4-13-02` — не было безопасного snapshot reconciliation, `A4-13-03` — использовался неверный pagination-параметр и не было failure tests. Поэтому прежнее заявление о закрытии A4-01 отозвано.
-- Migration `0014` и rollback companion исправляют эти три finding в source candidate и применены только к отдельной sandbox-БД после копии. 29 data-import tests, включая PGlite apply/upsert/rollback, FK/orphan rejection, raw UPDATE/DELETE rejection, atomic page rollback, page 0/1/2, repeated page, max guard, transport failure, retry, lead→student, stale branch exclusion и stale family evidence, проходят. `typecheck`, `build:full`, 31 API security test и 10 Sites tests также проходят. Текущий PostgreSQL 16 wire-protocol gate заблокирован отсутствующим `TEST_DATABASE_URL`; исторический PG16 PASS не считается доказательством migration `0014`. Независимые Reviewer/Coordinator ещё не завершены; `A4-13-01/02/03` остаются открытыми до их PASS.
-- Agent preview daemon подтвердил запущенный Sites runtime, но точный `terminal.local:4173` не отдал байты за 10 секунд (предыдущая попытка возвращала gateway `502`), а browser-инструмент в текущей сессии недоступен. Live Sites внутри не открывался; интерактивный desktop/mobile browser QA заменён 10 Sites tests: worker artifact, навигация, CTA, mobile drawer и responsive CSS. Это ограничение должен учитывать Ревизор.
+- Migrations `0014–0015` и rollback companions исправляют эти finding в source candidate и применены только к отдельной sandbox-БД после копии. 32 data-import tests, включая точный observation lineage, raw/observation UPDATE/DELETE/TRUNCATE rejection, rollback → reapply, atomic page rollback, pagination failures, stale student cascade и запрет resurrection, проходят. `typecheck`, `build:full`, 31 API security test и 11 Sites tests также проходят. Текущий PostgreSQL 16 wire-protocol gate ждёт CI; исторический PG16 PASS не считается доказательством migrations `0014–0015`. Независимые Reviewer/Coordinator ещё не завершены; `A4-13-01/02/03` остаются открытыми до их PASS.
+- Agent preview daemon подтвердил запущенный Sites runtime, но облачный браузер заблокировал внутреннюю страницу до загрузки (`ERR_BLOCKED_BY_CLIENT`). Live Sites внутри не открывался; интерактивный desktop/mobile browser QA заменён 11 Sites tests: worker/D1 artifact, owner/import gates, OAuth, навигация и responsive contracts. Это ограничение должен учитывать Ревизор.
 
 ## Обновление A.3 — 2026-07-25
 
@@ -258,7 +373,7 @@ Unit/source regression suite проверяет эти ветки без product
 - Для Sites добавлены проверка worker artifact, тесты безопасного интерфейса, полного risk register и fail-closed Alfa tenant configuration.
 - Checkpoint v7 A.2: commit `5a62864fdb4ba1237eeef5a8b47d9e6f9040cb66`, Sites version `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_30b80923a4c88191b4e838e434fdf37f`, deployment `appgdep_6a64b18edf788191a9cf2a2ae41e1982`, owner-only; desktop/mobile preview и переходы пройдены.
 - Прямые security regression tests проверяют отрицательные role/scope-сценарии, отсутствие browser bearer storage, cookie contract, route-template access audit, log redaction, strict health allowlist, schema inventory, fail-closed startup, atomic website idempotency/rollback/retry/recovery/conflict и отсутствие fallback-ключа Evotor.
-- Исторический PostgreSQL 16 integration suite v10 выполнен в GitHub Actions run #8: `test:full`, `test:postgres`, `build:full` — PASS. Для текущего candidate `typecheck`, `test:full`, 29 data-import tests и `build:full` прошли локально, но `test:postgres` корректно остановился до запуска из-за отсутствующего `TEST_DATABASE_URL`. Candidate цикла 3 обязан пройти этот шаг на exact head и экспортировать CI `head_sha/tree_sha` artifact. Audit-store outage/deny PostgreSQL smoke, provider-auth replay и реальные финансовые calculation tests остаются открыты; добавлены только синтетические инварианты. AlfaCRM concurrency unit test пройден.
+- Исторический PostgreSQL 16 integration suite v10 выполнен в GitHub Actions run #8: `test:full`, `test:postgres`, `build:full` — PASS. Для текущего candidate `typecheck`, `test:full`, 32 data-import tests и `build:full` прошли локально, но `test:postgres` ждёт exact GitHub candidate и одноразовый PostgreSQL 16. Candidate обязан экспортировать CI `head_sha/tree_sha` artifact. Audit-store outage/deny PostgreSQL smoke, provider-auth replay и реальные финансовые calculation tests остаются открыты; добавлены только синтетические инварианты. AlfaCRM concurrency unit test пройден.
 
 ## Production и миграции
 

@@ -12,7 +12,7 @@ const schemaSource = readFileSync(
 );
 const migrationSource = readFileSync(
   new URL(
-    "../../../lib/db/drizzle/0015_front_office_internal_alpha.sql",
+    "../../../lib/db/drizzle/0016_uneven_the_santerians.sql",
     import.meta.url,
   ),
   "utf8",

@@ -9,6 +9,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import {
+  alphaRawObservationsTable,
   alphaRawRecordsTable,
   alphaSyncBatchesTable,
 } from "./alpha-sync.js";
@@ -103,32 +104,45 @@ export type Family = typeof familiesTable.$inferSelect;
 // ─── Student Profiles ─────────────────────────────────────────────────────────
 // One row per CRM student (child). Bridges the CRM record to the identity layer.
 
-export const studentProfilesTable = pgTable("student_profiles", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  studentCrmId: text("student_crm_id").unique().notNull(),
-  studentPersonId: uuid("student_person_id"),
-  familyId: uuid("family_id"),
-  fullName: text("full_name"),
-  dob: text("dob"),  // stored as 'YYYY-MM-DD' string from raw
-  branchCrmId: text("branch_crm_id"),
-  status: text("status"),
-  raw: jsonb("raw"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  rawRecordId: uuid("raw_record_id")
-    .notNull()
-    .$defaultFn(requireExplicitAlfaProvenance)
-    .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
-  lastSeenBatchId: uuid("last_seen_batch_id")
-    .notNull()
-    .$defaultFn(requireExplicitAlfaProvenance)
-    .references(() => alphaSyncBatchesTable.id, { onDelete: "restrict" }),
-  sourceScope: text("source_scope")
-    .notNull()
-    .$defaultFn(requireExplicitAlfaProvenance),
-  recordState: text("record_state").notNull().default("current"),
-  staleAt: timestamp("stale_at", { withTimezone: true }),
-  staleReason: text("stale_reason"),
-});
+export const studentProfilesTable = pgTable(
+  "student_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    studentCrmId: text("student_crm_id").notNull(),
+    studentPersonId: uuid("student_person_id"),
+    familyId: uuid("family_id"),
+    fullName: text("full_name"),
+    dob: text("dob"),  // stored as 'YYYY-MM-DD' string from raw
+    branchCrmId: text("branch_crm_id").notNull(),
+    status: text("status"),
+    raw: jsonb("raw"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    rawRecordId: uuid("raw_record_id")
+      .notNull()
+      .$defaultFn(requireExplicitAlfaProvenance)
+      .references(() => alphaRawRecordsTable.id, { onDelete: "restrict" }),
+    rawObservationId: uuid("raw_observation_id")
+      .notNull()
+      .$defaultFn(requireExplicitAlfaProvenance)
+      .references(() => alphaRawObservationsTable.id, { onDelete: "restrict" }),
+    lastSeenBatchId: uuid("last_seen_batch_id")
+      .notNull()
+      .$defaultFn(requireExplicitAlfaProvenance)
+      .references(() => alphaSyncBatchesTable.id, { onDelete: "restrict" }),
+    sourceScope: text("source_scope")
+      .notNull()
+      .$defaultFn(requireExplicitAlfaProvenance),
+    recordState: text("record_state").notNull().default("current"),
+    staleAt: timestamp("stale_at", { withTimezone: true }),
+    staleReason: text("stale_reason"),
+  },
+  (table) => [
+    uniqueIndex("student_profiles_branch_crm_uniq").on(
+      table.branchCrmId,
+      table.studentCrmId,
+    ),
+  ],
+);
 
 export type StudentProfile = typeof studentProfilesTable.$inferSelect;
 

@@ -1,5 +1,157 @@
 # ArtHello OS — Runbook
 
+## A.11: owner-session verification для exact v28
+
+1. Не открывать live Sites URL во внутреннем cloud browser; для внутреннего QA
+   использовать только agent preview.
+2. Подтвердить через Sites metadata access `custom`, одного allowed owner и
+   отсутствие groups.
+3. Подтвердить protected environment revision и совпадение
+   `ARTHELLO_OWNER_EMAIL` с sole allowed account, не выводя секреты.
+4. Проверить unit matrix: owner identity даёт `200`, missing/foreign identity
+   дают `403` для owner summary, employees/payroll, Tochka status, integrations
+   и Front Office.
+5. Не считать bearer bypass owner session: dispatcher удаляет переданный
+   caller `oai-authenticated-user-email`. Служебный browser renderer также не
+   является доказательством identity владельца.
+6. Передать owner-only live URL владельцу. Владелец открывает его со своей
+   разрешённой ChatGPT/Sites учётной записью и проверяет указанные разделы.
+7. Если owner device получает `403`, зафиксировать только route, UTC time и
+   request ID без ФИО/сумм/токенов; не добавлять fallback auth. Проверить
+   redacted Worker logs и актуальность Sites account/environment.
+8. До успешной owner-device проверки не объявлять production owner access
+   доказанным и не публиковать новый protected snapshot.
+
+## A.10: server-attested snapshot
+
+Безопасный порядок публикации:
+
+1. Exporter подтверждает safety contract и terminal Alfa gate. Full mode допустим только для `full_sandbox_read_only` с полным scope inventory; incremental batch немедленно отклоняется.
+2. Publisher канонизирует строки каждого из 14 datasets, сортирует пары `row_key + row_digest`, вычисляет per-dataset digests и общий snapshot digest.
+3. `snapshot/begin` принимает exact counts, per-dataset digests и общий expected digest. Произвольный или несогласованный manifest получает `409`.
+4. Все chunks записываются только в staging. Каждый stage выполняет transactional guard `status = staging`.
+5. Commit атомарно переводит batch в `verifying`; после этого новые stage writes fail closed.
+6. Worker повторно читает staged rows, проецирует allowlisted columns, канонизирует, вычисляет все digests и сравнивает их с manifest.
+7. Любой count/dataset/payload mismatch получает `409`; прежний active snapshot и live tables не меняются.
+8. Только после полного совпадения одна D1 transaction заменяет все live datasets, записывает `computed_digest`, переключает active batch, добавляет audit и очищает staging.
+9. Machine status обязан вернуть тот же Worker-computed digest, exact counts, `atomicSnapshot=true` и `attestationStatus=atomic_attested`.
+
+При `activeBatchId=null` интерфейс и API показывают `legacy_unattested` и `atomicSnapshot=false`. Нельзя называть такие rows новым проверенным snapshot. Для повторной передачи реальных ФИО/зарплат нужны независимые PASS/GO, подтверждение `custom / 1 user / 0 groups` и отдельное информированное owner approval.
+
+Production owner verification после deployment:
+
+- sole allowed Sites account и `ARTHELLO_OWNER_EMAIL` должны совпадать;
+- owner summary, employees/payroll, Tochka status, integrations и Front Office возвращают `200` владельцу;
+- те же маршруты без authenticated identity и с чужой identity возвращают `403`;
+- в логах проверки не печатаются identity headers, PII, суммы, токены или банковские идентификаторы.
+
+## A.9: атомарная публикация owner read-модели
+
+Publisher сначала проверяет safety contract и exact minor units локально. Затем он вычисляет SHA-256 исходного protected JSON, создаёт manifest со всеми 14 datasets и expected counts, загружает строки только в D1 staging и вызывает один commit. Commit внутри одного `DB.batch` проверяет staging state, удаляет прежние live rows, копирует все datasets, переключает active batch, записывает audit и удаляет staging. D1 batch является транзакцией: ошибка любой строки откатывает весь набор.
+
+Оборванный процесс до commit не меняет live read-модель. Повторный запуск использует новый batch ID; begin помечает старый незавершённый staging как `abandoned`. Старый endpoint `/api/admin/read-model/:dataset` запрещён и должен отвечать `410 ATOMIC_SNAPSHOT_REQUIRED`.
+
+После commit `/api/admin/read-model/status` обязан вернуть:
+
+- exact active batch ID и SHA-256 payload;
+- `atomicSnapshot = true`;
+- counts всех 14 datasets, равные manifest;
+- missing minor rows `0` и legacy reconciliation mismatches `0`.
+
+При `SNAPSHOT_COMMIT_FAILED` или count mismatch не пытаться вручную дописывать datasets. Проверить, что active batch и его counts остались прежними, исправить protected source и повторить полный snapshot. D1 не очищать и не удалять.
+
+Terminal Alfa publication допустима только при `completed`, failed entities `0`, incomplete scopes `0`, terminal flags и `real_read_only_terminal`. Partial payroll split допустим только с нулём строк во всех восьми operational AlfaCRM datasets. В обоих случаях PII-флаг `owner_authorized` означает технический процессный gate и не заменяет отдельное информированное разрешение владельца.
+
+## A.8: восстановление branch-scoped идентичности AlfaCRM
+
+Эта процедура относится только к изолированной sandbox-БД. Production PostgreSQL/Replit не подключать.
+
+1. Остановить процессы, использующие sandbox, создать файловый backup БД и payroll snapshot, установить mode `600`, зафиксировать SHA-256.
+2. Применить migration `0017` только через транзакционный `openSandboxDatabase` после Front Office migration `0016`. Она должна завершиться fail closed, если нормализованная строка не имеет филиала или филиал attendance нельзя доказать точным `raw_observation_id`.
+3. Выполнить `sandbox:rehydrate:alfacrm`: переигрываются последние immutable raw-наблюдения студентов, педагогов, групп, оплат и занятий. Ничего не удалять и не запрашивать у провайдера.
+4. Запустить `sandbox:audit:alfacrm`; обязательны ноль `normalizedBranchKeyDuplicates`, ноль broken provenance и ноль attendance без lesson. Повторное использование CRM-ID между филиалами является доказанным свойством источника, а не дублем.
+5. После отдельного backup разрешено применить `0018` и выполнить диагностический `sandbox:rebuild:family-candidates` на уже сохранённых observations. При partial batch все кандидаты остаются неполной sandbox-очередью, не публикуются и не считаются семьями. После terminal batch rebuild обязателен повторно. Reviewed decision с неоднозначным филиалом блокирует migration; его нельзя исправлять догадкой. Автоматическое подтверждение семьи запрещено.
+6. Экспорт owner read-модели разрешён только при `completed`, нуле incomplete scopes и выполненном audit. Ненулевые source-linkage issues публикуются как `attention` и отображаются в центре качества, а не скрываются.
+7. Rollback `0017`/`0018` допустим только если companion script проходит lossless guard. `0019` намеренно не удаляет Front Office: для отката convergence используется сохранённый pre-migration backup.
+8. Единственное исключение до terminal gate — явный `ARTHELLO_ALLOW_PARTIAL_ALFA_AGGREGATE=owner_authorized_payroll_only`: разрешены проверенные payroll rows и AlfaCRM aggregate status, но все операционные AlfaCRM datasets обязаны иметь 0 строк.
+9. При `auth_request_timeout` не менять ключи и не создавать новый batch. Зафиксировать безопасный код, проверить, что запрос остановился до domain endpoint, и повторить один bounded probe после восстановления сети.
+10. После восстановления маршрута продолжить точный partial batch с resume, получить `completed`, повторить audit/rebuild/export и только затем заменить нулевые AlfaCRM datasets.
+
+## A.7: exact-money checkpoint и восстановление источников
+
+1. Экспортировать owner payroll read-модель только во внешний private path с mode `600`.
+2. До публикации проверить `moneyStorageMode = integer_minor_units`, scale `2`, safe-integer поля и source-to-minor mismatches `0`; строки и суммы в stdout не выводить.
+3. Выполнить `typecheck`, `build:full`, security/data/Sites tests и negative export частичного AlfaCRM snapshot.
+4. Проверить healthy agent preview. При подтверждённом `ERR_BLOCKED_BY_CLIENT` после bounded troubleshooting не открывать live Sites URL внутри; использовать artifact, worker/D1 и responsive static contracts и явно сохранить ограничение.
+5. Создать checkpoint только существующего `project_id`, дождаться terminal `succeeded`, повторно подтвердить access `custom`, 1 allowed user, 0 groups.
+6. Публиковать payroll JSON через protected import token и Sites bypass. После публикации machine endpoint обязан вернуть точные dataset counts, `missingMinorRows = 0`, `legacyReconciliationMismatches = 0`.
+7. Убедиться, что «Точка» остаётся `active`, account count не уменьшился без объяснения, scope read-only и payment actions false.
+8. Передать exact source commit/tree, Sites version/deployment и безопасные агрегаты новому Ревизору, затем Координатору.
+
+AlfaCRM resume запрещён без заново предоставленных через защищённый environment значений `ALFACRM_DOMAIN`, `ALFACRM_EMAIL`, `ALFACRM_API_KEY`. После их получения использовать `ALFACRM_RESUME_RUNNING_BATCH=1`; не создавать новый batch и не публиковать данные до `completed`, нуля incomplete scopes и разбора integrity findings.
+
+Если `/api/admin/read-model/status` отвечает 5xx, checkpoint не принимать и payroll не публиковать. Сначала проверить Sites Worker logs по точному маршруту. Dataset/status и money-audit запросы должны выполняться двумя bounded D1 batches; raw provider/DB error не возвращать клиенту.
+
+## A.6: возобновление AlfaCRM и безопасная верификация
+
+Перед resume сделать файловую копию sandbox-БД и зафиксировать её checksum. Production DB не подключать. Возобновление разрешено только для последнего running full batch:
+
+```bash
+ALFACRM_RESUME_RUNNING_BATCH=1 \
+ARTHELLO_SANDBOX_DB_PATH=/absolute/private/sandbox \
+pnpm --filter @workspace/scripts run sandbox:import:alfacrm
+```
+
+Credentials передаются только через защищённый process environment и не попадают в shell history, stdout, Git или Sites. После завершения обязательны:
+
+1. terminal batch status `completed`;
+2. ноль incomplete scopes;
+3. provenance audit без missing raw/observation/batch links;
+4. отдельный разбор integrity findings;
+5. только затем построение family candidates и export owner read-модели.
+
+Для payroll сначала повторно импортировать owner-provided snapshot в ту же завершённую sandbox-БД, затем выполнить payroll и cross-source audits. Exact-name teacher links, class candidates и extra-lesson candidates остаются review-only. Налоговый расчёт не запускать, пока источник ставок и правил не утверждён.
+
+Machine verification deployment выполняет запрос только к `/api/admin/read-model/status` через защищённый Sites bypass. В вывод допускаются counts, банковский status/account count/timestamp и безопасный error code. Bypass/import tokens, owner identity, PII, суммы, номера счетов и account IDs не печатать.
+
+Перед каждым checkpoint: healthy agent preview, browser QA если среда доступна, full build, security/data/Sites tests, source commit, owner-only deployment и terminal deployment status. Если cloud browser не может открыть healthy agent preview, применить bounded troubleshooting, не открывать live Sites URL внутри и явно зафиксировать ограничение доказательства.
+
+## A.5: owner-only Sites read-модель
+
+Перед публикацией:
+
+1. Проверить, что `.openai/hosting.json` содержит существующий `project_id` и D1 binding `DB`; новый Sites-проект не создавать.
+2. Через Sites access policy подтвердить ровно одного allowed user, отсутствие групп и режим `custom`.
+3. Проверить наличие protected runtime keys `ARTHELLO_OWNER_EMAIL`, `ARTHELLO_IMPORT_TOKEN`, `ARTHELLO_VAULT_KEY`, `TOCHKA_CLIENT_ID`, `TOCHKA_CLIENT_SECRET`; значения не выводить.
+4. Запустить `typecheck`, security/data/Sites tests, full build и agent preview. Если облачный браузер не достигает здорового preview после ограниченной диагностики, зафиксировать инфраструктурное ограничение и использовать production artifact contracts, не открывая live URL внутри.
+5. Убедиться, что D1 migration не содержит DROP/ALTER/DELETE. Текущий initial schema создаёт только новые таблицы и индексы; до него D1 не содержит business data.
+6. Создать Sites checkpoint, дождаться terminal status и только после подтверждённого deployment использовать protected import endpoint.
+
+Экспорт read-модели выполняется только после terminal AlfaCRM report и integrity audit. JSON содержит PII и должен находиться по абсолютному пути вне source checkout, не попадать в stdout, Git, Library или checkpoint artifact.
+
+```bash
+ARTHELLO_ALLOW_PII_EXPORT=owner_authorized \
+ARTHELLO_SANDBOX_DB_PATH=/absolute/private/sandbox \
+pnpm --filter @workspace/scripts run sandbox:export:sites-read-model \
+  > /absolute/private/sites-read-model.json
+```
+
+Публикация принимает URL и tokens только через environment защищённого процесса, делит данные на batches и выводит лишь dataset counts:
+
+```bash
+ARTHELLO_ALLOW_PII_EXPORT=owner_authorized \
+ARTHELLO_SITES_READ_MODEL_PATH=/absolute/private/sites-read-model.json \
+ARTHELLO_SITES_URL=https://owner-only-site.example/ \
+ARTHELLO_SITES_IMPORT_TOKEN=protected \
+OAI_SITES_BYPASS_TOKEN=protected \
+ARTHELLO_OWNER_EMAIL=protected \
+pnpm --filter @workspace/scripts run sites:publish:read-model
+```
+
+После публикации проверить только агрегированный `/api/admin/read-model/status`, затем пользователь проверяет реальные строки со своего устройства. Доступы к API без owner identity должны возвращать `403`; snapshot begin/stage/commit без отдельного token — `403`. Успешный atomic commit и каждый разрешённый чувствительный просмотр должны создавать запись `sensitive_access_audit`.
+
+Rollback UI выполняется повторным deployment предыдущей сохранённой Sites version. D1 не удалять. Если read-модель ошибочна, остановить дальнейший import и опубликовать предыдущий проверенный JSON новым atomic snapshot; source sandbox и raw evidence остаются неизменными.
+
 ## A.4: изолированный импорт данных
 
 Sandbox DB обязана находиться по абсолютному пути вне source checkout. Единственная переменная пути — `ARTHELLO_SANDBOX_DB_PATH`; команда завершится fail closed при пустом, относительном, корневом или вложенном в репозиторий пути.
@@ -18,19 +170,20 @@ AlfaCRM importer принимает `ALFACRM_DOMAIN`, `ALFACRM_EMAIL`, `ALFACRM_
 
 Полный режим используется по умолчанию: `ALFACRM_SYNC_MODE=full`. Он отдельно получает leads и students, затем groups, teachers, payments, lessons, memberships, customer tariffs, справочники и change log. Пагинация передаёт `page` + `pageSize: 50`. Каждая страница атомарно сохраняет immutable raw, observation и normalized row; reconciliation current/stale запускается только после полного completed scope. Repeat page, max guard, transport/normalization error оставляют scope `incomplete` и не tombstone-ят отсутствующие rows. Независимые customer/group scopes продолжаются после локальной ошибки.
 
-Перед `0014` обязательно создать копию sandbox. Migration завершается fail closed, если в legacy normalized AlfaCRM-таблицах есть строки без доказуемого raw/batch provenance; автоматического backfill по догадке нет. После apply выполнить `sandbox:audit:alfacrm`, проверить `normalizedRowsWithBrokenProvenance = 0`, raw UPDATE/DELETE rejection и rollback `0014_alfa_lineage_snapshot.down.sql`.
+Перед `0014` обязательно создать копию sandbox. Migration завершается fail closed, если в legacy normalized AlfaCRM-таблицах есть строки без доказуемого raw/batch provenance; автоматического backfill по догадке нет. Затем применить `0015`, выполнить `sandbox:audit:alfacrm`, проверить exact observation lineage, raw/observation UPDATE/DELETE/TRUNCATE rejection и сценарий rollback `0014` → reapply `0014` → apply `0015`.
 
 Для режима только обнаружения изменений задать `ALFACRM_SYNC_MODE=incremental`, `ALFACRM_WATERMARK=<ISO timestamp>` и при необходимости `ALFACRM_OVERLAP_DAYS=1..7` (по умолчанию 2). Если watermark не передан, importer использует время последнего завершённого batch; при отсутствии такого batch останавливается fail closed. Этот режим обновляет change log, но не утверждает, что все изменившиеся domain rows rematerialized.
 
 ### Tochka OAuth
 
-1. Поднять защищённый backend с exact callback `/api/banking/oauth/callback`, HTTPS, persistent DB, `SESSION_SECRET`, encryption key ring и protected Secrets.
-2. Создать backup ID, проверить restore/rollback и guarded migration encrypted connector config в sandbox.
-3. Зарегистрировать в кабинете банка exact backend URL. Sites root и любой `.chatgpt.site` URL запрещены.
-4. Проверить state-bound Authorization Code flow и запросить только read-only permissions для accounts, balances, customers и statements.
-5. Выполнить owner consent в пользовательском браузере. Authorization code, tokens и customer identifiers не выводить и не передавать через чат.
-6. Проверить accounts/balances/statements в sandbox; payment endpoints не вызывать.
-7. После end-to-end проверки перевыпустить временно раскрытый client secret и сохранить новый только в protected backend Secrets.
+1. Использовать только owner-only Sites Worker с persistent D1, protected environment и зарегистрированным exact root redirect.
+2. Проверить `state` hash, одноразовость callback, AES-GCM vault и отсутствие secrets в frontend/source.
+3. Создать consent только с scopes `accounts balances customers statements` и permissions `ReadAccountsBasic`, `ReadAccountsDetail`, `ReadBalances`, `ReadStatements`, `ReadCustomerData`.
+4. Передать владельцу short-lived банковскую authorize URL; code живёт 5 минут. Не открывать ссылку внутренним браузером и не передавать code/tokens через чат.
+5. После callback перечислить все `Business` customers, счета и остатки. Account ID хранить как hash, номер показывать маскированно.
+6. Выписки загружать отдельным срезом с явным периодом, raw evidence, дедупликацией и инвариантом; до этого не заявлять банковскую сверку.
+7. Payment permissions, endpoints и actions не добавлять и не вызывать.
+8. После end-to-end проверки перевыпустить временно раскрытый client secret и сохранить новый только в protected environment.
 
 ## A.3: безопасный live read-only probe
 

@@ -5,6 +5,19 @@ ALTER TABLE IF EXISTS crm_attendance
   DROP CONSTRAINT IF EXISTS crm_attendance_lesson_student_uniq;
 DROP INDEX IF EXISTS crm_attendance_scope_state_idx;
 
+ALTER TABLE IF EXISTS crm_groups
+  DROP CONSTRAINT IF EXISTS crm_groups_raw_record_id_alpha_raw_records_id_fk;
+ALTER TABLE IF EXISTS crm_change_log
+  DROP CONSTRAINT IF EXISTS crm_change_log_raw_record_id_alpha_raw_records_id_fk;
+ALTER TABLE IF EXISTS crm_customer_tariffs
+  DROP CONSTRAINT IF EXISTS crm_customer_tariffs_raw_record_id_alpha_raw_records_id_fk;
+ALTER TABLE IF EXISTS crm_group_memberships
+  DROP CONSTRAINT IF EXISTS crm_group_memberships_raw_record_id_alpha_raw_records_id_fk;
+ALTER TABLE IF EXISTS crm_leads
+  DROP CONSTRAINT IF EXISTS crm_leads_raw_record_id_alpha_raw_records_id_fk;
+ALTER TABLE IF EXISTS crm_reference_records
+  DROP CONSTRAINT IF EXISTS crm_reference_records_raw_record_id_alpha_raw_records_id_fk;
+
 ALTER TABLE IF EXISTS crm_attendance
   DROP COLUMN IF EXISTS stale_reason,
   DROP COLUMN IF EXISTS stale_at,

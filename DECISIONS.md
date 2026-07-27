@@ -1,5 +1,164 @@
 # ArtHello OS — Decisions
 
+## D-058 — V28 не переаттестует legacy PII автоматически
+
+Статус: принято для exact checkpoint v28
+
+Успешный code deployment не является разрешением повторно отправить protected
+payroll snapshot. Пока отдельное информированное подтверждение не получено,
+существующие D1 rows остаются `legacy_unattested`, operational AlfaCRM datasets
+остаются пустыми, а digest-bound atomic publication не запускается.
+
+## D-057 — Не ослаблять owner API ради машинного bypass
+
+Статус: принято для exact checkpoint v28
+
+Официальный Sites identity header —
+`oai-authenticated-user-email`. Protected owner email и sole allowed account
+совпадают. Машинный bypass удаляет caller-supplied identity headers, а
+служебный renderer не является owner session. Поэтому bypass `403` не
+устраняется fallback-заголовком, query token, debug route или разрешением
+любой непустой identity. Серверная проверка остаётся fail closed. Реальный
+owner-browser `200` подтверждает только владелец на своём устройстве; до этого
+это явно открытое verification evidence.
+
+## D-056 — Incremental AlfaCRM никогда не является terminal snapshot
+
+Дата: 2026-07-26
+Статус: принято после FAIL v27
+
+Full operational publication требует source `mode = full_sandbox_read_only`, `completed`, ненулевой согласованный inventory, `entitiesSucceeded = entitiesRequested = scopeRuns`, failed/incomplete `0`. `incremental_discovery_read_only` используется только для change discovery и не может провести прежнее normalized state как свежую полную materialization.
+
+## D-055 — Owner API и Sites allowlist используют одну identity
+
+Дата: 2026-07-26
+Статус: принято после FAIL v27
+
+`ARTHELLO_OWNER_EMAIL` обязан точно совпадать с единственным разрешённым Sites-пользователем. Изменение выполняется только в protected environment; frontend, Git и `.openai/hosting.json` identity не хранят. Access остаётся `custom / 1 user / 0 groups`; отсутствие или чужая identity всегда `403`.
+
+## D-054 — Digest считается Worker из staged rows
+
+Дата: 2026-07-26
+Статус: принято после FAIL v27
+
+Присланный payload digest является только ожидаемым manifest. До live transaction Worker блокирует batch в `verifying`, заново проецирует и канонизирует каждую staged row, вычисляет per-dataset SHA-256 и общий digest, сверяет их с manifest и сохраняет отдельный `computed_digest`. При любом mismatch — `409`, live rows и прежний active batch не меняются. Порядок строк не влияет на digest.
+
+## D-053 — Read-model переключать только атомарным snapshot
+
+Дата: 2026-07-26
+Статус: принято после FAIL v25
+
+Последовательная замена live datasets запрещена. Publisher создаёт manifest всех 14 datasets с expected counts и SHA-256 payload, загружает строки в generic staging и только после полной сверки вызывает commit. Один D1 transactional batch заменяет live tables, переключает active publication, пишет безопасный audit и удаляет staging. При любом constraint/query failure транзакция откатывается, а предыдущий active snapshot остаётся целиком. Legacy per-dataset endpoint отвечает `410`.
+
+## D-052 — Full publication требует независимого terminal evidence
+
+Дата: 2026-07-26
+Статус: принято после FAIL v25
+
+Строка `dataMode` не является доказательством завершённой AlfaCRM выгрузки. Full owner-only publication требует одновременно safety flag `alfaTerminalGatePassed = true`, source batch `completed`, `entitiesFailed = 0`, `incompleteScopes = 0`, `operationalRowsPublished = true` и согласованный `sync_status` с `real_read_only_terminal`. Невыполнение любого условия завершает publisher fail closed. Partial split остаётся отдельным режимом с физически пустыми operational AlfaCRM datasets.
+
+## D-051 — Диагностические кандидаты семей не являются подтверждёнными семьями
+
+Дата: 2026-07-26
+Статус: принято
+
+После branch-scoped migration кандидаты семей разрешено воспроизводимо перестраивать в sandbox из уже сохранённых immutable observations для проверки схемы и очереди ручного разбора. При незавершённом AlfaCRM batch они остаются `pending_review`, не публикуются в Sites и не считаются полным покрытием. После terminal batch кандидаты строятся повторно. Ни один слабый признак не подтверждает семью автоматически.
+
+## D-050 — Проверенный payroll публиковать независимо от частичного AlfaCRM
+
+Дата: 2026-07-26
+Статус: принято для owner-only checkpoint
+
+Terminal AlfaCRM gate продолжает блокировать любые операционные строки CRM. Он не должен блокировать отдельный, уже сверенный payroll source. Явный режим `owner_authorized_payroll_only` разрешает экспорт реальных payroll rows только в подтверждённый owner-only Sites, одновременно передавая по AlfaCRM только безопасные агрегированные counts/status. Экспортер и publisher обязаны физически требовать ноль строк branches/students/families/groups/teachers/rates/lessons/payments AlfaCRM, точный status `partial_aggregate_no_rows` и false-флаги `partialAlfaRowsPublished`/`operationalRowsPublished`/`alfaTerminalGatePassed`. Финансовые правила, налоги и межисточниковые связи не активируются.
+
+## D-049 — Расхождения источника показывать, а не превращать в зелёный статус
+
+Дата: 2026-07-26
+Статус: принято
+
+Терминальный `completed` batch доказывает завершение всех scope, но сам по себе не доказывает связность данных провайдера. Owner read-модель отдельно считает orphan membership, attendance, tariff и family-candidate связи. При ненулевом результате AlfaCRM получает статус `attention`, а центр качества показывает точное количество. Строки остаются доступны владельцу для проверки; ДДС, ОПиУ, зарплатные правила и финансовые выводы по расхождениям не активируются.
+
+## D-048 — Идентификаторы AlfaCRM являются branch-scoped
+
+Дата: 2026-07-26
+Статус: принято после фактического integrity audit
+
+Аудит immutable raw-наблюдений доказал повторное использование одних CRM-ID в разных филиалах. Поэтому ученики, профили, группы, педагоги, оплаты, занятия и посещаемость идентифицируются составным ключом `branch_crm_id + crm_id`; joins и Sites row IDs также включают филиал. Кандидат семьи хранит составную идентичность обоих учеников и остаётся только ручной гипотезой.
+
+После объединения с независимым Front Office-срезом его migration сохраняет номер `0016`, а sandbox migrations AlfaCRM перенумерованы в `0017–0018`. `0017` fail closed при отсутствии филиального provenance и backfill-ит филиал посещаемости только из точного immutable observation. `0018` сохраняет однозначные reviewed family decisions, блокирует неоднозначные reviewed decisions и может удалить только неоднозначные `pending_review/stale` производные кандидаты, которые затем воспроизводимо перестраиваются. Additive `0019` сходится для обеих историй конкурентных migrations и не переписывает business data. Перед каждой миграцией обязателен backup; rollback блокируется, если потерял бы branch-scoped identity.
+
+## D-047 — Интерфейс показывает фактический runtime status источника
+
+Дата: 2026-07-26
+Статус: принято
+
+Статический HTML не является источником статуса подключения. «Точка», AlfaCRM и payroll отображаются по ответу защищённого runtime API; недоступный ответ показывается как неизвестный/ошибка, но не заменяется старым optimistic текстом. Последняя безопасная machine verification «Точки»: `active`, 16 счетов, без error code, только read-only, payment actions выключены.
+
+## D-046 — Денежные значения owner read-модели хранить в minor units
+
+Дата: 2026-07-26
+Статус: принято после FAIL v16
+
+Авторитетное денежное представление — safe integer в копейках с масштабом 2. Legacy `REAL`-колонки допускаются только для обратной совместимости и не участвуют в новых расчётах. Экспорт выполняет source-to-minor сверку каждой строки; publisher требует mismatches = 0, а deployed machine status — ноль отсутствующих minor полей и ноль legacy reconciliation mismatches. UI показывает ровно две цифры после запятой без binary-float arithmetic. Финансовые расчёты остаются выключены до отдельной модели на minor/decimal типах.
+
+## D-045 — Налоги не рассчитывать без подтверждённого источника
+
+Дата: 2026-07-26
+Статус: принято
+
+Зарплатная таблица подтверждает строки начислений и выплат, но не даёт достаточного источника для налоговых ставок, баз, льгот и страховых взносов. До отдельного подтверждённого источника налоговый контур имеет статус `not_sourced`; никакие ставки и суммы не достраиваются.
+
+## D-044 — Классификации и кадровые связи являются кандидатами
+
+Дата: 2026-07-26
+Статус: принято
+
+Точное совпадение ФИО педагога AlfaCRM и сотрудника payroll, наличие слова «класс» в названии группы и keywords дополнительного занятия создают только review candidates. Они не являются authoritative связью, типом группы, кадровой ставкой или зарплатным правилом до ручного подтверждения.
+
+## D-043 — Прерванный full import продолжать только явно
+
+Дата: 2026-07-26
+Статус: принято
+
+`ALFACRM_RESUME_RUNNING_BATCH=1` продолжает только последний running full batch в той же sandbox-БД. Завершённые scopes пропускаются, незавершённые перечитываются. Без явного флага создаётся новый batch. Batch не получает `completed`, а family candidates не строятся, пока существует incomplete scope.
+
+## D-042 — Машинная проверка Sites использует только безопасный агрегат
+
+Дата: 2026-07-26
+Статус: принято
+
+Publisher и deployment verification не подделывают owner email. Машинный endpoint доступен только через owner-only Sites perimeter или его защищённый bypass и возвращает фиксированный агрегат: counts, безопасный статус/время банка и error code. PII, суммы, account identifiers, токены и detailed payroll evidence остаются только в owner endpoints.
+
+## D-041 — Остаток «Точки» не выводится из направления операции
+
+Статус: принято для read-only банковского среза
+
+В owner dashboard текущим доступным остатком считается документированный balance type `ClosingAvailable`; `Expected` является заблокированной суммой и не используется как остаток. `CreditDebitIndicator` не инвертирует знак balance amount: направление применяется только к операциям выписки. Если `ClosingAvailable` отсутствует, допускается `OpeningAvailable`; остальные типы и отсутствие корректного числового amount остаются `unknown`.
+
+## D-040 — Sites содержит минимальную owner-only read-модель реальных источников
+
+Статус: принято для текущего контрольного среза
+
+Владелец явно разрешил показать реальные AlfaCRM, payroll и read-only bank данные в единственном Sites-проекте после подтверждения owner-only access policy. D1 не является новым источником истины: это производная read-модель из изолированной БД и банковского API. В неё передаются только поля, необходимые для карточек и статусов. Frontend не содержит embedded data или secrets; API проверяет владельца; отдельный import secret защищает публикацию; чувствительные просмотры и imports журналируются без PII. Расширение аудитории требует нового решения владельца.
+
+## D-039 — Защищённый Sites Worker принимает OAuth callback «Точки»
+
+Статус: принято; заменяет D-034 для текущей server-side архитектуры
+
+Предыдущая D-034 исходила из статического Sites artifact без защищённого backend и vault. Текущий Sites Worker выполняет server-side code exchange, хранит secrets в protected environment, проверяет state, шифрует tokens и имеет persistent D1. Поэтому точный зарегистрированный root redirect допустим для текущего owner-only проекта. Технический control находится в «Системе». Запрашиваются только `accounts balances customers statements` и permissions чтения; payment scopes, payment endpoints и действия физически отсутствуют.
+
+## D-038 — Точный AlfaCRM observation является частью ключа происхождения
+
+Статус: принято в source candidate; независимый gate ожидается
+
+Ссылки только на raw payload и batch недостаточно: одинаковый payload мог наблюдаться на разных scope/page. Migration `0015` требует у каждой из 13 materialized tables exact `raw_observation_id` и composite FK raw/batch/scope/page. Raw records и observations неизменяемы через UPDATE, DELETE и TRUNCATE. Rollback `0014` исправлен и проверяется через rollback → reapply перед `0015`.
+
+## D-037 — Реальные зарплатные строки не превращаются в правила
+
+Статус: принято
+
+Owner-only интерфейс может показывать фактические карточки, начислено и выплачено из подтверждённой ведомости. Это не активирует формулы, ставки, KPI, оклады или юридические выводы. Unresolved identities остаются отдельной очередью, суммы помечаются как неутверждённые правила, а любое изменение расчётной логики требует отдельного подтверждения.
+
 ## D-036 — Raw lineage и snapshot-state не восстанавливать догадкой
 
 Статус: принято в source candidate; независимый финальный gate ожидается
@@ -14,15 +173,15 @@ Current/stale reconciliation выполняется только после по
 
 Полный read-only snapshot остаётся обязательной базой. Лиды загружаются отдельно от учеников; абонементы клиентов, платёжные справочники и журнал изменений имеют raw + normalized слои с provenance и идемпотентными business keys. Incremental-режим читает `log/index` от watermark с перекрытием 1–7 дней и честно называется discovery: до реализации безопасной rematerialization он не доказывает обновление всех domain-таблиц. Запись в AlfaCRM запрещена.
 
-## D-034 — Sites не является банковским OAuth backend
+## D-034 — Sites не является банковским OAuth backend (заменено D-039)
 
-Статус: принято, текущий consent заблокирован
+Статус: заменено D-039 после появления server-side Worker, protected env и persistent D1
 
 Корень owner-only Sites нельзя регистрировать как Redirect URI «Точки»: контрольная оболочка не хранит банковские secrets и не должна получать authorization code. Допустим только точный HTTPS URL защищённого API вида `/api/banking/oauth/callback`, совпадающий с runtime config. `.chatgpt.site`, HTTP, корневой путь и произвольные callback-пути завершаются fail closed.
 
 ## D-033 — Новый клиент «Точки» использовать только в read-only контуре
 
-Статус: production client auth подтверждён, доступ к данным заблокирован до OAuth
+Статус: protected client настроен; доступ к данным ждёт owner consent
 
 Владелец разрешил временно использовать новый production client. Service token проверяет приложение, но не даёт доступа к счетам. До корректного callback, пользовательского consent, hybrid token, protected backend Secrets и backup/rollback разрешены только безопасные auth/status probes. Платёжные scopes, создание платежей и иные денежные действия запрещены.
 
@@ -30,13 +189,13 @@ Current/stale reconciliation выполняется только после по
 
 Статус: принято и выполнено в изолированной sandbox-БД
 
-Значения и formula snapshots реальной таблицы сохраняются с происхождением строки. Вычисленные выплаты и начисления можно сверять, но формулы, ставки, KPI и условия не становятся payroll rules без явного утверждения. Несопоставленные identities не объединяются автоматически; персональные строки, суммы и реквизиты не публикуются в Sites.
+Значения и formula snapshots реальной таблицы сохраняются с происхождением строки. Вычисленные выплаты и начисления можно сверять, но формулы, ставки, KPI и условия не становятся payroll rules без явного утверждения. Несопоставленные identities не объединяются автоматически. Запрет публикации персональных строк относился к sanitized A.4; D-040 разрешает минимальную owner-only read-модель после отдельной авторизации владельца.
 
 ## D-031 — Полный AlfaCRM read разрешён только в отдельную sandbox-БД
 
-Статус: разрешено владельцем; свежий импорт заблокирован сетью
+Статус: разрешено владельцем; новый full import выполняется
 
-Текущие временные credentials допускаются для read-only загрузки всех требуемых CRM-сущностей в отдельную БД вне source checkout. Запись в AlfaCRM, production sync и передача PII в Sites запрещены. Семьи не подтверждаются автоматически по телефону: importer создаёт только кандидатов для ручного решения. После end-to-end проверки credentials перевыпускаются и помещаются только в protected backend environment.
+Текущие временные credentials допускаются для read-only загрузки всех требуемых CRM-сущностей в отдельную БД вне source checkout. Запись в AlfaCRM и production sync запрещены. Семьи не подтверждаются автоматически по телефону: importer создаёт только кандидатов для ручного решения. D-040 отдельно разрешает минимальную PII read-модель только в подтверждённый owner-only Sites. После end-to-end проверки credentials перевыпускаются и помещаются только в protected backend environment.
 
 ## D-030 — Финансовые инварианты проверять без бизнес-допущений
 
@@ -101,7 +260,7 @@ Quality workflow поднимает одноразовый PostgreSQL 16 service
 ## D-001 — Продолжать существующий монорепозиторий
 
 Дата: 2026-07-23
-Статус: принято
+Статус: заменено D-039 после появления server-side Worker, protected env и persistent D1
 
 Архив признан существующей кодовой базой ArtHello OS. Новый несвязанный продукт не создаётся. Sites control surface добавлена как отдельный безопасный runtime-адаптер внутри того же репозитория.
 

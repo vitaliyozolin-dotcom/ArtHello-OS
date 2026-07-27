@@ -460,7 +460,7 @@ router.post("/sync/students-atlas", async (req, res): Promise<void> => {
           syncedAt: new Date(),
         })
         .onConflictDoUpdate({
-          target: crmStudentsTable.crmId,
+          target: [crmStudentsTable.branchCrmId, crmStudentsTable.crmId],
           set: {
             fullName,
             status: item["is_study"] != null ? String(item["is_study"]) : null,
@@ -2487,7 +2487,7 @@ router.post("/sync/payments-atlas", async (req, res): Promise<void> => {
           syncedAt: new Date(),
         })
         .onConflictDoUpdate({
-          target: crmPaymentsTable.crmId,
+          target: [crmPaymentsTable.branchCrmId, crmPaymentsTable.crmId],
           set: {
             amount: item["income"] != null ? String(item["income"]) : null,
             paymentDate: toCrmDateStr(item["document_date"]) ?? toCrmDateStr(item["created_at"]),
@@ -2771,7 +2771,7 @@ router.post("/sync/lessons-atlas", async (req, res): Promise<void> => {
                 THEN ($3::jsonb->'teacher_ids'->>0) ELSE NULL END,
            $4, $5, $3::jsonb, NOW()
          )
-         ON CONFLICT (crm_id) DO UPDATE SET
+         ON CONFLICT (branch_crm_id, crm_id) DO UPDATE SET
            raw          = EXCLUDED.raw,
            synced_at    = NOW(),
            group_crm_id = CASE WHEN jsonb_typeof(EXCLUDED.raw->'group_ids')   = 'array'
@@ -2800,6 +2800,7 @@ router.post("/sync/lessons-atlas", async (req, res): Promise<void> => {
       const studentCrmId = item["customer_id"] ? String(item["customer_id"]) : null;
       if (!lessonCrmId || !studentCrmId) continue;
       await db.insert(crmAttendanceTable).values({
+        branchCrmId: atlasBranchId,
         lessonCrmId,
         studentCrmId,
         status: item["status"] != null ? String(item["status"]) : null,
@@ -2832,12 +2833,15 @@ router.post("/sync/teachers", async (req, res): Promise<void> => {
     for (const item of items) {
       const crmId = String(item["id"] ?? "");
       if (!crmId) continue;
+      const branchCrmId = item["branch_id"]
+        ? String(item["branch_id"])
+        : "1";
 
       await db
         .insert(crmTeachersTable)
         .values({
           crmId,
-          branchCrmId: item["branch_id"] ? String(item["branch_id"]) : null,
+          branchCrmId,
           fullName: item["name"] ? String(item["name"]) : null,
           phone: item["phone"] ? String(item["phone"]) : null,
           email: item["email"] ? String(item["email"]) : null,
@@ -2846,7 +2850,7 @@ router.post("/sync/teachers", async (req, res): Promise<void> => {
           syncedAt: new Date(),
         })
         .onConflictDoUpdate({
-          target: crmTeachersTable.crmId,
+          target: [crmTeachersTable.branchCrmId, crmTeachersTable.crmId],
           set: {
             fullName: item["name"] ? String(item["name"]) : null,
             phone: item["phone"] ? String(item["phone"]) : null,
@@ -2983,7 +2987,7 @@ router.post("/sync/full-resync", async (req, res): Promise<void> => {
         createdAtCrm: item["created_at"] ? new Date(String(item["created_at"])) : null,
         raw: item, syncedAt: new Date(),
       }).onConflictDoUpdate({
-        target: crmStudentsTable.crmId,
+        target: [crmStudentsTable.branchCrmId, crmStudentsTable.crmId],
         set: { fullName, status: item["is_study"] != null ? String(item["is_study"]) : null,
           phone: item["phone"] ? String(item["phone"]) : null, raw: item, syncedAt: new Date() },
       });
@@ -3017,7 +3021,7 @@ router.post("/sync/full-resync", async (req, res): Promise<void> => {
         comment: item["note"] ? String(item["note"]) : null,
         raw: item, syncedAt: new Date(),
       }).onConflictDoUpdate({
-        target: crmPaymentsTable.crmId,
+        target: [crmPaymentsTable.branchCrmId, crmPaymentsTable.crmId],
         set: { amount: item["income"] != null ? String(item["income"]) : null,
           paymentDate: toCrmDateStr(item["document_date"]) ?? toCrmDateStr(item["created_at"]),
           raw: item, syncedAt: new Date() },
@@ -3050,7 +3054,10 @@ router.post("/sync/full-resync", async (req, res): Promise<void> => {
         lessonDate: item["date"] ? new Date(String(item["date"])) : null,
         title: item["subject_id"] ? String(item["subject_id"]) : null,
         raw: item, syncedAt: new Date(),
-      }).onConflictDoUpdate({ target: crmLessonsTable.crmId, set: { raw: item, syncedAt: new Date() } });
+      }).onConflictDoUpdate({
+        target: [crmLessonsTable.branchCrmId, crmLessonsTable.crmId],
+        set: { raw: item, syncedAt: new Date() },
+      });
       upserted++;
     }
     await logSync("lessons", "success", `Full resync: ${upserted} lessons`, upserted, undefined, startedAt);
@@ -3064,8 +3071,15 @@ router.post("/sync/full-resync", async (req, res): Promise<void> => {
   try {
     await db.execute(sql`DELETE FROM crm_attendance`);
     const result = await db.execute(sql`
-      INSERT INTO crm_attendance (lesson_crm_id, student_crm_id, status, raw, synced_at)
-      SELECT l.crm_id, (det->>'customer_id'),
+      INSERT INTO crm_attendance (
+        branch_crm_id,
+        lesson_crm_id,
+        student_crm_id,
+        status,
+        raw,
+        synced_at
+      )
+      SELECT l.branch_crm_id, l.crm_id, (det->>'customer_id'),
         CASE WHEN (det->>'is_attend')::int = 1 THEN '1' ELSE '0' END,
         jsonb_build_object(
           'customer_id', det->>'customer_id', 'is_attend', det->>'is_attend',

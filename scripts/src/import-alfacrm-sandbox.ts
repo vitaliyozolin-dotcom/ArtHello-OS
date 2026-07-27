@@ -21,9 +21,42 @@ import {
   type IncrementalWindow,
 } from "./alfacrm-sync-plan.js";
 
-const pageSize = 50;
+const defaultPageSize = 50;
+const tariffPageSize = 500;
 const minimumRequestIntervalMs = 260;
-const requestTimeoutMs = 30_000;
+
+function boundedIntegerEnvironment(
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  if (!/^\d+$/.test(raw)) throw new Error(`invalid_${name.toLowerCase()}`);
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`invalid_${name.toLowerCase()}`);
+  }
+  return parsed;
+}
+
+const requestTimeoutMs = boundedIntegerEnvironment(
+  "ALFACRM_REQUEST_TIMEOUT_MS",
+  30_000,
+  5_000,
+  60_000,
+);
+const maximumRetryAttempts = boundedIntegerEnvironment(
+  "ALFACRM_MAX_RETRY_ATTEMPTS",
+  2,
+  0,
+  4,
+);
+const retryBaseDelayMs = 500;
+const tariffPrefetchConcurrency = 16;
+const tariffPrefetchWindowSize = 64;
+const paginationPrefetchConcurrency = 16;
 const normalizedReferenceTypes = new Set([
   "subjects",
   "lesson_types",
@@ -195,16 +228,28 @@ export interface ReadOnlyAlfaClient {
   postIndex(endpoint: string, body: JsonRecord): Promise<unknown>;
 }
 
-class SerializedReadOnlyAlfaClient implements ReadOnlyAlfaClient {
+export function isRetryableAlfaReadError(error: unknown): boolean {
+  const code = safeAlfaErrorCode(error);
+  return (
+    code === "request_timeout" ||
+    code === "network_unavailable" ||
+    code === "invalid_json" ||
+    /^(?:auth_)?http_(?:408|429|5\d\d)$/.test(code)
+  );
+}
+
+export class SerializedReadOnlyAlfaClient implements ReadOnlyAlfaClient {
   readonly #baseUrl: string;
   readonly #email: string;
   readonly #apiKey: string;
   #token: string | null = null;
   #tokenExpiresAt = 0;
-  #queue: Promise<void> = Promise.resolve();
+  #authentication: Promise<string> | null = null;
+  #requestStartQueue: Promise<void> = Promise.resolve();
   #lastRequestStartedAt = 0;
+  readonly #retryBaseDelayMs: number;
 
-  constructor() {
+  constructor(options: { retryBaseDelayMs?: number } = {}) {
     const domain = process.env.ALFACRM_DOMAIN?.trim();
     const email = process.env.ALFACRM_EMAIL?.trim();
     const apiKey = process.env.ALFACRM_API_KEY?.trim();
@@ -217,12 +262,14 @@ class SerializedReadOnlyAlfaClient implements ReadOnlyAlfaClient {
     this.#baseUrl = `https://${domain}/v2api`;
     this.#email = email;
     this.#apiKey = apiKey;
+    this.#retryBaseDelayMs =
+      options.retryBaseDelayMs ?? retryBaseDelayMs;
   }
 
-  async #serializedFetch(url: string, init: RequestInit): Promise<Response> {
+  async #rateLimitedFetch(url: string, init: RequestInit): Promise<Response> {
     let release: (() => void) | undefined;
-    const previous = this.#queue;
-    this.#queue = new Promise<void>((resolve) => {
+    const previous = this.#requestStartQueue;
+    this.#requestStartQueue = new Promise<void>((resolve) => {
       release = resolve;
     });
     await previous;
@@ -235,7 +282,7 @@ class SerializedReadOnlyAlfaClient implements ReadOnlyAlfaClient {
         await new Promise((resolve) => setTimeout(resolve, waitMs));
       }
       this.#lastRequestStartedAt = Date.now();
-      return await fetch(url, {
+      return fetch(url, {
         ...init,
         signal: AbortSignal.timeout(requestTimeoutMs),
       });
@@ -246,66 +293,203 @@ class SerializedReadOnlyAlfaClient implements ReadOnlyAlfaClient {
 
   async #authenticate(): Promise<string> {
     if (this.#token && Date.now() < this.#tokenExpiresAt) return this.#token;
-    const response = await this.#serializedFetch(
-      `${this.#baseUrl}/auth/login`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email: this.#email,
-          api_key: this.#apiKey,
-        }),
-      },
-    );
-    const body = await response.text();
-    const parsed = (() => {
-      try {
-        return JSON.parse(body) as unknown;
-      } catch {
-        return null;
-      }
-    })();
-    const token = asRecord(parsed)?.["token"];
-    if (response.status !== 200 || typeof token !== "string" || !token) {
-      throw new AlfaReadError(`auth_http_${response.status}`);
+    if (!this.#authentication) {
+      this.#authentication = (async () => {
+        const response = await this.#rateLimitedFetch(
+          `${this.#baseUrl}/auth/login`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              email: this.#email,
+              api_key: this.#apiKey,
+            }),
+          },
+        );
+        const body = await response.text();
+        const parsed = (() => {
+          try {
+            return JSON.parse(body) as unknown;
+          } catch {
+            return null;
+          }
+        })();
+        const token = asRecord(parsed)?.["token"];
+        if (response.status !== 200 || typeof token !== "string" || !token) {
+          throw new AlfaReadError(`auth_http_${response.status}`);
+        }
+        this.#token = token;
+        this.#tokenExpiresAt = Date.now() + 50 * 60 * 1000;
+        return token;
+      })();
     }
-    this.#token = token;
-    this.#tokenExpiresAt = Date.now() + 50 * 60 * 1000;
-    return token;
+    try {
+      return await this.#authentication;
+    } finally {
+      this.#authentication = null;
+    }
   }
 
   async postIndex(
     endpoint: string,
     body: JsonRecord,
     allowRefresh = true,
+    retryAttempt = 0,
   ): Promise<unknown> {
-    const token = await this.#authenticate();
-    const response = await this.#serializedFetch(
-      `${this.#baseUrl}/${endpoint}`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "X-ALFACRM-TOKEN": token,
-        },
-        body: JSON.stringify(body),
-      },
-    );
-    if (response.status === 401 && allowRefresh) {
-      await response.arrayBuffer();
-      this.#token = null;
-      return this.postIndex(endpoint, body, false);
-    }
-    const text = await response.text();
-    if (!response.ok) {
-      throw new AlfaReadError(`http_${response.status}`);
-    }
     try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      throw new AlfaReadError("invalid_json");
+      const token = await this.#authenticate();
+      const response = await this.#rateLimitedFetch(
+        `${this.#baseUrl}/${endpoint}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "X-ALFACRM-TOKEN": token,
+          },
+          body: JSON.stringify(body),
+        },
+      );
+      if (response.status === 401 && allowRefresh) {
+        await response.arrayBuffer();
+        if (this.#token === token) this.#token = null;
+        return this.postIndex(endpoint, body, false, retryAttempt);
+      }
+      const text = await response.text();
+      if (!response.ok) {
+        throw new AlfaReadError(`http_${response.status}`);
+      }
+      try {
+        return JSON.parse(text) as unknown;
+      } catch {
+        throw new AlfaReadError("invalid_json");
+      }
+    } catch (error) {
+      if (
+        retryAttempt >= maximumRetryAttempts ||
+        !isRetryableAlfaReadError(error)
+      ) {
+        throw error;
+      }
+      const backoffMs =
+        this.#retryBaseDelayMs * 2 ** retryAttempt +
+        Math.floor(Math.random() * Math.min(100, this.#retryBaseDelayMs));
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      return this.postIndex(endpoint, body, allowRefresh, retryAttempt + 1);
     }
   }
+}
+
+type PrefetchedResult =
+  | { ok: true; value: unknown }
+  | { ok: false; error: unknown };
+
+function alfaRequestKey(endpoint: string, body: JsonRecord): string {
+  return `${endpoint}\n${stableJson(body)}`;
+}
+
+class PrefetchedReadOnlyAlfaClient implements ReadOnlyAlfaClient {
+  readonly #client: ReadOnlyAlfaClient;
+  readonly #results: Map<string, PrefetchedResult>;
+
+  constructor(
+    client: ReadOnlyAlfaClient,
+    results: Map<string, PrefetchedResult>,
+  ) {
+    this.#client = client;
+    this.#results = results;
+  }
+
+  async postIndex(endpoint: string, body: JsonRecord): Promise<unknown> {
+    const key = alfaRequestKey(endpoint, body);
+    const prefetched = this.#results.get(key);
+    if (!prefetched) return this.#client.postIndex(endpoint, body);
+    this.#results.delete(key);
+    if (!prefetched.ok) throw prefetched.error;
+    return prefetched.value;
+  }
+}
+
+async function mapWithConcurrency<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.min(Math.max(1, concurrency), items.length) },
+    async () => {
+      while (cursor < items.length) {
+        const item = items[cursor];
+        cursor += 1;
+        if (item !== undefined) await worker(item);
+      }
+    },
+  );
+  await Promise.all(workers);
+}
+
+async function prefetchFirstPages(
+  client: ReadOnlyAlfaClient,
+  requests: ReadonlyArray<{
+    endpoint: string;
+    body?: JsonRecord;
+    page?: number;
+    pageSize?: number;
+  }>,
+): Promise<ReadOnlyAlfaClient> {
+  const results = new Map<string, PrefetchedResult>();
+  await mapWithConcurrency(
+    requests,
+    tariffPrefetchConcurrency,
+    async (request) => {
+      const body = {
+        ...(request.body ?? {}),
+        page: request.page ?? 0,
+        pageSize: request.pageSize ?? defaultPageSize,
+      };
+      const key = alfaRequestKey(request.endpoint, body);
+      try {
+        results.set(key, {
+          ok: true,
+          value: await client.postIndex(request.endpoint, body),
+        });
+      } catch (error) {
+        results.set(key, { ok: false, error });
+      }
+    },
+  );
+  return new PrefetchedReadOnlyAlfaClient(client, results);
+}
+
+async function prefetchPages(
+  client: ReadOnlyAlfaClient,
+  request: {
+    endpoint: string;
+    body?: JsonRecord;
+    pageSize: number;
+    pages: number[];
+  },
+): Promise<Map<number, PrefetchedResult>> {
+  const results = new Map<number, PrefetchedResult>();
+  await mapWithConcurrency(
+    request.pages,
+    paginationPrefetchConcurrency,
+    async (page) => {
+      try {
+        results.set(page, {
+          ok: true,
+          value: await client.postIndex(request.endpoint, {
+            ...(request.body ?? {}),
+            page,
+            pageSize: request.pageSize,
+          }),
+        });
+      } catch (error) {
+        results.set(page, { ok: false, error });
+      }
+    },
+  );
+  return results;
 }
 
 export interface EntityImportResult {
@@ -314,6 +498,7 @@ export interface EntityImportResult {
   rawSaved: number;
   normalized: number;
   repeatedPageStopped: boolean;
+  resumed?: boolean;
 }
 
 export interface ImportEntityOptions {
@@ -325,11 +510,50 @@ export interface ImportEntityOptions {
   forcedGroupId?: string;
   forcedCustomerId?: string;
   maxPages?: number;
+  pageSize?: number;
 }
 
-interface NormalizationContext {
+async function prefetchResumePages(
+  client: ReadOnlyAlfaClient,
+  database: PGlite,
+  batchId: string,
+  options: readonly ImportEntityOptions[],
+): Promise<ReadOnlyAlfaClient> {
+  if (options.length === 0) return client;
+  const scopeKeys = options.map((option) => option.scopeKey);
+  const states = await database.query<{
+    scope_key: string;
+    status: string;
+    pages_fetched: number;
+  }>(
+    `SELECT scope_key, status, pages_fetched
+     FROM alpha_sync_scope_runs
+     WHERE sync_batch_id = $1
+       AND scope_key = ANY($2::text[])`,
+    [batchId, scopeKeys],
+  );
+  const stateByScope = new Map(
+    states.rows.map((row) => [row.scope_key, row]),
+  );
+  const pending = options.filter(
+    (option) => stateByScope.get(option.scopeKey)?.status !== "completed",
+  );
+  if (pending.length === 0) return client;
+  return prefetchFirstPages(
+    client,
+    pending.map((option) => ({
+      endpoint: option.endpoint,
+      body: option.body,
+      page: Number(stateByScope.get(option.scopeKey)?.pages_fetched ?? 0),
+      pageSize: option.pageSize,
+    })),
+  );
+}
+
+export interface NormalizationContext {
   batchId: string;
   rawId: string;
+  observationId: string;
   scopeKey: string;
 }
 
@@ -339,7 +563,12 @@ async function saveRawRecord(
   options: ImportEntityOptions,
   item: JsonRecord,
   page: number,
-): Promise<{ rawId: string; payloadHash: string; created: boolean }> {
+): Promise<{
+  rawId: string;
+  observationId: string;
+  payloadHash: string;
+  created: boolean;
+}> {
   const payload = stableJson(item);
   const payloadHash = sha256(payload);
   const alphaId =
@@ -390,7 +619,7 @@ async function saveRawRecord(
     ).rows[0]?.id;
   const rawId = existing;
   if (!rawId) throw new Error("Raw AlfaCRM record was not returned");
-  await database.query(
+  const insertedObservation = await database.query<{ id: string }>(
     `INSERT INTO alpha_raw_observations (
        sync_batch_id,
        raw_record_id,
@@ -401,7 +630,13 @@ async function saveRawRecord(
        page,
        observed_at
      ) VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-     ON CONFLICT (sync_batch_id, raw_record_id) DO NOTHING`,
+     ON CONFLICT (
+       sync_batch_id,
+       raw_record_id,
+       scope_key,
+       page
+     ) DO NOTHING
+     RETURNING id`,
     [
       batchId,
       rawId,
@@ -412,7 +647,29 @@ async function saveRawRecord(
       page,
     ],
   );
-  return { rawId, payloadHash, created: inserted.rows.length === 1 };
+  const observationId =
+    insertedObservation.rows[0]?.id ??
+    (
+      await database.query<{ id: string }>(
+        `SELECT id
+         FROM alpha_raw_observations
+         WHERE sync_batch_id = $1
+           AND raw_record_id = $2
+           AND scope_key = $3
+           AND page = $4
+         LIMIT 1`,
+        [batchId, rawId, options.scopeKey, page],
+      )
+    ).rows[0]?.id;
+  if (!observationId) {
+    throw new Error("Raw AlfaCRM observation was not returned");
+  }
+  return {
+    rawId,
+    observationId,
+    payloadHash,
+    created: inserted.rows.length === 1,
+  };
 }
 
 async function normalizeBranch(
@@ -436,13 +693,18 @@ async function normalizeBranch(
        source_scope,
        record_state,
        stale_at,
-       stale_reason
+       stale_reason,
+       raw_observation_id
      )
-     VALUES ($1, $2, $3::jsonb, now(), $4, $5, $6, 'current', NULL, NULL)
+     VALUES (
+       $1, $2, $3::jsonb, now(), $4, $5, $6,
+       'current', NULL, NULL, $7
+     )
      ON CONFLICT (crm_id) DO UPDATE SET
        name = EXCLUDED.name,
        raw = EXCLUDED.raw,
        raw_record_id = EXCLUDED.raw_record_id,
+       raw_observation_id = EXCLUDED.raw_observation_id,
        last_seen_batch_id = EXCLUDED.last_seen_batch_id,
        source_scope = EXCLUDED.source_scope,
        record_state = 'current',
@@ -456,6 +718,7 @@ async function normalizeBranch(
       context.rawId,
       context.batchId,
       context.scopeKey,
+      context.observationId,
     ],
   );
   return true;
@@ -491,13 +754,13 @@ async function normalizeStudent(
        source_scope,
        record_state,
        stale_at,
-       stale_reason
+       stale_reason,
+       raw_observation_id
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8::jsonb, now(),
-       $9, $10, $11, 'current', NULL, NULL
+       $9, $10, $11, 'current', NULL, NULL, $12
      )
-     ON CONFLICT (crm_id) DO UPDATE SET
-       branch_crm_id = EXCLUDED.branch_crm_id,
+     ON CONFLICT (branch_crm_id, crm_id) DO UPDATE SET
        full_name = EXCLUDED.full_name,
        status = EXCLUDED.status,
        phone = EXCLUDED.phone,
@@ -505,6 +768,7 @@ async function normalizeStudent(
        created_at_crm = EXCLUDED.created_at_crm,
        raw = EXCLUDED.raw,
        raw_record_id = EXCLUDED.raw_record_id,
+       raw_observation_id = EXCLUDED.raw_observation_id,
        last_seen_batch_id = EXCLUDED.last_seen_batch_id,
        source_scope = EXCLUDED.source_scope,
        record_state = 'current',
@@ -523,6 +787,7 @@ async function normalizeStudent(
       context.rawId,
       context.batchId,
       context.scopeKey,
+      context.observationId,
     ],
   );
   await database.query(
@@ -538,18 +803,20 @@ async function normalizeStudent(
        source_scope,
        record_state,
        stale_at,
-       stale_reason
+       stale_reason,
+       raw_observation_id
      ) VALUES (
        $1, $2, $3, $4, $5, $6::jsonb,
-       $7, $8, $9, 'current', NULL, NULL
+       $7, $8, $9, 'current', NULL, NULL, $10
      )
-     ON CONFLICT (student_crm_id) DO UPDATE SET
+     ON CONFLICT (branch_crm_id, student_crm_id) DO UPDATE SET
        full_name = EXCLUDED.full_name,
        dob = EXCLUDED.dob,
        branch_crm_id = EXCLUDED.branch_crm_id,
        status = EXCLUDED.status,
        raw = EXCLUDED.raw,
        raw_record_id = EXCLUDED.raw_record_id,
+       raw_observation_id = EXCLUDED.raw_observation_id,
        last_seen_batch_id = EXCLUDED.last_seen_batch_id,
        source_scope = EXCLUDED.source_scope,
        record_state = 'current',
@@ -565,6 +832,7 @@ async function normalizeStudent(
       context.rawId,
       context.batchId,
       context.scopeKey,
+      context.observationId,
     ],
   );
   return true;
@@ -594,10 +862,11 @@ export async function normalizeLead(
        source_scope,
        record_state,
        stale_at,
-       stale_reason
+       stale_reason,
+       raw_observation_id
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, now(),
-       $10, $11, 'current', NULL, NULL
+       $10, $11, 'current', NULL, NULL, $12
      )
      ON CONFLICT (branch_crm_id, crm_id) DO UPDATE SET
        full_name = EXCLUDED.full_name,
@@ -606,6 +875,7 @@ export async function normalizeLead(
        source_crm_id = EXCLUDED.source_crm_id,
        created_at_crm = EXCLUDED.created_at_crm,
        raw_record_id = EXCLUDED.raw_record_id,
+       raw_observation_id = EXCLUDED.raw_observation_id,
        raw = EXCLUDED.raw,
        last_seen_batch_id = EXCLUDED.last_seen_batch_id,
        source_scope = EXCLUDED.source_scope,
@@ -631,6 +901,7 @@ export async function normalizeLead(
       stableJson(item),
       context.batchId,
       context.scopeKey,
+      context.observationId,
     ],
   );
   return true;
@@ -666,10 +937,11 @@ export async function normalizeCustomerTariff(
        source_scope,
        record_state,
        stale_at,
-       stale_reason
+       stale_reason,
+       raw_observation_id
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, now(),
-       $11, $12, 'current', NULL, NULL
+       $11, $12, 'current', NULL, NULL, $13
      )
      ON CONFLICT (branch_crm_id, crm_id) DO UPDATE SET
        customer_crm_id = EXCLUDED.customer_crm_id,
@@ -679,6 +951,7 @@ export async function normalizeCustomerTariff(
        valid_from = EXCLUDED.valid_from,
        valid_to = EXCLUDED.valid_to,
        raw_record_id = EXCLUDED.raw_record_id,
+       raw_observation_id = EXCLUDED.raw_observation_id,
        raw = EXCLUDED.raw,
        last_seen_batch_id = EXCLUDED.last_seen_batch_id,
        source_scope = EXCLUDED.source_scope,
@@ -699,6 +972,7 @@ export async function normalizeCustomerTariff(
       stableJson(item),
       context.batchId,
       context.scopeKey,
+      context.observationId,
     ],
   );
   return true;
@@ -728,16 +1002,18 @@ export async function normalizeReferenceRecord(
        source_scope,
        record_state,
        stale_at,
-       stale_reason
+       stale_reason,
+       raw_observation_id
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8::jsonb, now(),
-       $9, $10, 'current', NULL, NULL
+       $9, $10, 'current', NULL, NULL, $11
      )
      ON CONFLICT (branch_crm_id, reference_type, crm_id) DO UPDATE SET
        name = EXCLUDED.name,
        status = EXCLUDED.status,
        parent_crm_id = EXCLUDED.parent_crm_id,
        raw_record_id = EXCLUDED.raw_record_id,
+       raw_observation_id = EXCLUDED.raw_observation_id,
        raw = EXCLUDED.raw,
        last_seen_batch_id = EXCLUDED.last_seen_batch_id,
        source_scope = EXCLUDED.source_scope,
@@ -765,6 +1041,7 @@ export async function normalizeReferenceRecord(
       stableJson(item),
       context.batchId,
       context.scopeKey,
+      context.observationId,
     ],
   );
   return true;
@@ -796,11 +1073,12 @@ export async function normalizeChangeLog(
        raw,
        synced_at,
        last_seen_batch_id,
-       source_scope
+       source_scope,
+       raw_observation_id
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7,
        $8::jsonb, $9::jsonb, $10::jsonb, $11, $12::jsonb, now(),
-       $13, $14
+       $13, $14, $15
      )
      ON CONFLICT (branch_crm_id, crm_id) DO UPDATE SET
        entity_type = EXCLUDED.entity_type,
@@ -812,6 +1090,7 @@ export async function normalizeChangeLog(
        fields_new = EXCLUDED.fields_new,
        fields_related = EXCLUDED.fields_related,
        raw_record_id = EXCLUDED.raw_record_id,
+       raw_observation_id = EXCLUDED.raw_observation_id,
        raw = EXCLUDED.raw,
        last_seen_batch_id = EXCLUDED.last_seen_batch_id,
        source_scope = EXCLUDED.source_scope,
@@ -831,6 +1110,7 @@ export async function normalizeChangeLog(
       stableJson(item),
       context.batchId,
       context.scopeKey,
+      context.observationId,
     ],
   );
   return true;
@@ -859,19 +1139,20 @@ async function normalizeTeacher(
        source_scope,
        record_state,
        stale_at,
-       stale_reason
+       stale_reason,
+       raw_observation_id
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7::jsonb, now(),
-       $8, $9, $10, 'current', NULL, NULL
+       $8, $9, $10, 'current', NULL, NULL, $11
      )
-     ON CONFLICT (crm_id) DO UPDATE SET
-       branch_crm_id = EXCLUDED.branch_crm_id,
+     ON CONFLICT (branch_crm_id, crm_id) DO UPDATE SET
        full_name = EXCLUDED.full_name,
        phone = EXCLUDED.phone,
        email = EXCLUDED.email,
        status = EXCLUDED.status,
        raw = EXCLUDED.raw,
        raw_record_id = EXCLUDED.raw_record_id,
+       raw_observation_id = EXCLUDED.raw_observation_id,
        last_seen_batch_id = EXCLUDED.last_seen_batch_id,
        source_scope = EXCLUDED.source_scope,
        record_state = 'current',
@@ -889,6 +1170,7 @@ async function normalizeTeacher(
       context.rawId,
       context.batchId,
       context.scopeKey,
+      context.observationId,
     ],
   );
   return true;
@@ -902,11 +1184,17 @@ async function normalizeGroup(
 ): Promise<boolean> {
   const crmId = stringValue(item["id"]);
   if (!crmId) return false;
-  const teachers = Array.isArray(item["teachers"])
+  const nestedTeachers = Array.isArray(item["teachers"])
     ? (item["teachers"] as unknown[])
         .map((teacher) => stringValue(asRecord(teacher)?.["id"]))
         .filter((id): id is string => !!id)
     : [];
+  const teacherIds = Array.isArray(item["teacher_ids"])
+    ? (item["teacher_ids"] as unknown[])
+        .map((teacher) => stringValue(teacher))
+        .filter((id): id is string => !!id)
+    : [];
+  const teachers = [...new Set([...nestedTeachers, ...teacherIds])];
   await database.query(
     `INSERT INTO crm_groups (
        crm_id,
@@ -924,13 +1212,13 @@ async function normalizeGroup(
        source_scope,
        record_state,
        stale_at,
-       stale_reason
+       stale_reason,
+       raw_observation_id
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, now(),
-       $10, $11, $12, 'current', NULL, NULL
+       $10, $11, $12, 'current', NULL, NULL, $13
      )
-     ON CONFLICT (crm_id) DO UPDATE SET
-       branch_crm_id = EXCLUDED.branch_crm_id,
+     ON CONFLICT (branch_crm_id, crm_id) DO UPDATE SET
        name = EXCLUDED.name,
        note = EXCLUDED.note,
        b_date = EXCLUDED.b_date,
@@ -939,6 +1227,7 @@ async function normalizeGroup(
        teacher_crm_ids = EXCLUDED.teacher_crm_ids,
        raw = EXCLUDED.raw,
        raw_record_id = EXCLUDED.raw_record_id,
+       raw_observation_id = EXCLUDED.raw_observation_id,
        last_seen_batch_id = EXCLUDED.last_seen_batch_id,
        source_scope = EXCLUDED.source_scope,
        record_state = 'current',
@@ -958,6 +1247,7 @@ async function normalizeGroup(
       context.rawId,
       context.batchId,
       context.scopeKey,
+      context.observationId,
     ],
   );
   return true;
@@ -993,13 +1283,13 @@ async function normalizePayment(
        source_scope,
        record_state,
        stale_at,
-       stale_reason
+       stale_reason,
+       raw_observation_id
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8::jsonb, now(),
-       $9, $10, $11, 'current', NULL, NULL
+       $9, $10, $11, 'current', NULL, NULL, $12
      )
-     ON CONFLICT (crm_id) DO UPDATE SET
-       branch_crm_id = EXCLUDED.branch_crm_id,
+     ON CONFLICT (branch_crm_id, crm_id) DO UPDATE SET
        student_crm_id = EXCLUDED.student_crm_id,
        amount = EXCLUDED.amount,
        payment_date = EXCLUDED.payment_date,
@@ -1007,6 +1297,7 @@ async function normalizePayment(
        comment = EXCLUDED.comment,
        raw = EXCLUDED.raw,
        raw_record_id = EXCLUDED.raw_record_id,
+       raw_observation_id = EXCLUDED.raw_observation_id,
        last_seen_batch_id = EXCLUDED.last_seen_batch_id,
        source_scope = EXCLUDED.source_scope,
        record_state = 'current',
@@ -1030,7 +1321,26 @@ async function normalizePayment(
       context.rawId,
       context.batchId,
       context.scopeKey,
+      context.observationId,
     ],
+  );
+  await database.query(
+    `UPDATE crm_payments AS payment
+     SET
+       record_state = 'stale',
+       stale_at = now(),
+       stale_reason = 'student_parent_not_current'
+     WHERE payment.crm_id = $1
+       AND payment.branch_crm_id = $2
+       AND payment.student_crm_id IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1
+         FROM crm_students AS student
+         WHERE student.branch_crm_id = payment.branch_crm_id
+           AND student.crm_id = payment.student_crm_id
+           AND student.record_state = 'current'
+       )`,
+    [crmId, branchId],
   );
   return true;
 }
@@ -1062,19 +1372,20 @@ async function normalizeLesson(
        source_scope,
        record_state,
        stale_at,
-       stale_reason
+       stale_reason,
+       raw_observation_id
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7::jsonb, now(),
-       $8, $9, $10, 'current', NULL, NULL
+       $8, $9, $10, 'current', NULL, NULL, $11
      )
-     ON CONFLICT (crm_id) DO UPDATE SET
-       branch_crm_id = EXCLUDED.branch_crm_id,
+     ON CONFLICT (branch_crm_id, crm_id) DO UPDATE SET
        group_crm_id = EXCLUDED.group_crm_id,
        teacher_crm_id = EXCLUDED.teacher_crm_id,
        lesson_date = EXCLUDED.lesson_date,
        title = EXCLUDED.title,
        raw = EXCLUDED.raw,
        raw_record_id = EXCLUDED.raw_record_id,
+       raw_observation_id = EXCLUDED.raw_observation_id,
        last_seen_batch_id = EXCLUDED.last_seen_batch_id,
        source_scope = EXCLUDED.source_scope,
        record_state = 'current',
@@ -1084,14 +1395,15 @@ async function normalizeLesson(
     [
       crmId,
       branchId,
-      stringValue(item["group_id"]),
-      stringValue(item["teacher_id"]),
+      firstString(item["group_id"] ?? item["group_ids"]),
+      firstString(item["teacher_id"] ?? item["teacher_ids"]),
       lessonDate,
       stringValue(item["topic"] ?? item["name"] ?? item["title"]),
       stableJson(item),
       context.rawId,
       context.batchId,
       context.scopeKey,
+      context.observationId,
     ],
   );
 
@@ -1105,6 +1417,7 @@ async function normalizeLesson(
     if (!studentCrmId) continue;
     await database.query(
       `INSERT INTO crm_attendance (
+         branch_crm_id,
          lesson_crm_id,
          student_crm_id,
          status,
@@ -1115,15 +1428,17 @@ async function normalizeLesson(
          source_scope,
          record_state,
          stale_at,
-         stale_reason
+         stale_reason,
+         raw_observation_id
        ) VALUES (
-         $1, $2, $3, $4::jsonb, now(),
-         $5, $6, $7, 'current', NULL, NULL
+         $1, $2, $3, $4, $5::jsonb, now(),
+         $6, $7, $8, 'current', NULL, NULL, $9
        )
-       ON CONFLICT (lesson_crm_id, student_crm_id) DO UPDATE SET
+       ON CONFLICT (branch_crm_id, lesson_crm_id, student_crm_id) DO UPDATE SET
          status = EXCLUDED.status,
          raw = EXCLUDED.raw,
          raw_record_id = EXCLUDED.raw_record_id,
+         raw_observation_id = EXCLUDED.raw_observation_id,
          last_seen_batch_id = EXCLUDED.last_seen_batch_id,
          source_scope = EXCLUDED.source_scope,
          record_state = 'current',
@@ -1131,6 +1446,7 @@ async function normalizeLesson(
          stale_reason = NULL,
          synced_at = now()`,
       [
+        branchId,
         crmId,
         studentCrmId,
         stringValue(detail["status"] ?? detail["is_attend"] ?? detail["visit"]),
@@ -1138,7 +1454,30 @@ async function normalizeLesson(
         context.rawId,
         context.batchId,
         context.scopeKey,
+        context.observationId,
       ],
+    );
+    await database.query(
+      `UPDATE crm_attendance AS attendance
+       SET
+         record_state = 'stale',
+         stale_at = now(),
+         stale_reason = 'student_or_lesson_parent_not_current'
+       WHERE attendance.lesson_crm_id = $1
+         AND attendance.student_crm_id = $2
+         AND attendance.branch_crm_id = $3
+         AND NOT EXISTS (
+           SELECT 1
+           FROM crm_lessons AS lesson
+           JOIN crm_students AS student
+             ON student.branch_crm_id = lesson.branch_crm_id
+            AND student.crm_id = attendance.student_crm_id
+           WHERE lesson.branch_crm_id = attendance.branch_crm_id
+             AND lesson.crm_id = attendance.lesson_crm_id
+             AND lesson.record_state = 'current'
+             AND student.record_state = 'current'
+         )`,
+      [crmId, studentCrmId, branchId],
     );
   }
   return true;
@@ -1170,10 +1509,11 @@ async function normalizeGroupMembership(
        source_scope,
        record_state,
        stale_at,
-       stale_reason
+       stale_reason,
+       raw_observation_id
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, now(),
-       $10, $11, 'current', NULL, NULL
+       $10, $11, 'current', NULL, NULL, $12
      )
      ON CONFLICT (branch_crm_id, group_crm_id, student_crm_id)
      DO UPDATE SET
@@ -1182,6 +1522,7 @@ async function normalizeGroupMembership(
        enrolled_at = EXCLUDED.enrolled_at,
        unenrolled_at = EXCLUDED.unenrolled_at,
        raw_record_id = EXCLUDED.raw_record_id,
+       raw_observation_id = EXCLUDED.raw_observation_id,
        raw = EXCLUDED.raw,
        last_seen_batch_id = EXCLUDED.last_seen_batch_id,
        source_scope = EXCLUDED.source_scope,
@@ -1201,12 +1542,40 @@ async function normalizeGroupMembership(
       stableJson(item),
       context.batchId,
       context.scopeKey,
+      context.observationId,
     ],
+  );
+  await database.query(
+    `UPDATE crm_group_memberships AS membership
+     SET
+       record_state = 'stale',
+       stale_at = now(),
+       stale_reason = 'student_or_group_parent_not_current'
+     WHERE membership.branch_crm_id = $1
+       AND membership.group_crm_id = $2
+       AND membership.student_crm_id = $3
+       AND (
+         NOT EXISTS (
+           SELECT 1
+           FROM crm_students AS student
+           WHERE student.branch_crm_id = membership.branch_crm_id
+             AND student.crm_id = membership.student_crm_id
+             AND student.record_state = 'current'
+         )
+         OR NOT EXISTS (
+           SELECT 1
+           FROM crm_groups AS crm_group
+           WHERE crm_group.branch_crm_id = membership.branch_crm_id
+             AND crm_group.crm_id = membership.group_crm_id
+             AND crm_group.record_state = 'current'
+         )
+       )`,
+    [branchId, resolvedGroupId, studentCrmId],
   );
   return true;
 }
 
-async function normalizeEntity(
+export async function normalizeEntity(
   database: PGlite,
   options: ImportEntityOptions,
   item: JsonRecord,
@@ -1345,6 +1714,61 @@ async function reconcileScope(
              AND student.crm_id = tariff.customer_crm_id
              AND student.record_state = 'stale'
          )`,
+       [options.branchId],
+    );
+    await database.query(
+      `UPDATE crm_group_memberships AS membership
+       SET
+         record_state = 'stale',
+         stale_at = now(),
+         stale_reason = 'student_missing_from_completed_snapshot'
+       WHERE membership.branch_crm_id = $1
+         AND membership.record_state = 'current'
+         AND EXISTS (
+           SELECT 1
+           FROM crm_students AS student
+           WHERE student.branch_crm_id = membership.branch_crm_id
+             AND student.crm_id = membership.student_crm_id
+             AND student.record_state = 'stale'
+         )`,
+      [options.branchId],
+    );
+    await database.query(
+      `UPDATE crm_attendance AS attendance
+       SET
+         record_state = 'stale',
+         stale_at = now(),
+         stale_reason = 'student_missing_from_completed_snapshot'
+       WHERE attendance.record_state = 'current'
+         AND attendance.branch_crm_id = $1
+         AND EXISTS (
+           SELECT 1
+           FROM crm_lessons AS lesson
+           JOIN crm_students AS student
+             ON student.branch_crm_id = lesson.branch_crm_id
+            AND student.crm_id = attendance.student_crm_id
+           WHERE lesson.branch_crm_id = attendance.branch_crm_id
+             AND lesson.crm_id = attendance.lesson_crm_id
+             AND student.record_state = 'stale'
+         )`,
+      [options.branchId],
+    );
+    await database.query(
+      `UPDATE crm_payments AS payment
+       SET
+         record_state = 'stale',
+         stale_at = now(),
+         stale_reason = 'student_missing_from_completed_snapshot'
+       WHERE payment.branch_crm_id = $1
+         AND payment.student_crm_id IS NOT NULL
+         AND payment.record_state = 'current'
+         AND EXISTS (
+           SELECT 1
+           FROM crm_students AS student
+           WHERE student.branch_crm_id = payment.branch_crm_id
+             AND student.crm_id = payment.student_crm_id
+             AND student.record_state = 'stale'
+         )`,
       [options.branchId],
     );
   }
@@ -1429,7 +1853,8 @@ async function reconcileScope(
          AND EXISTS (
            SELECT 1
            FROM crm_lessons AS lesson
-           WHERE lesson.crm_id = attendance.lesson_crm_id
+           WHERE lesson.branch_crm_id = attendance.branch_crm_id
+             AND lesson.crm_id = attendance.lesson_crm_id
              AND lesson.record_state = 'stale'
          )`,
     );
@@ -1442,15 +1867,70 @@ export async function importEntity(
   batchId: string,
   options: ImportEntityOptions,
 ): Promise<EntityImportResult> {
-  let page = 0;
-  let records = 0;
+  const existingScope = await database.query<{
+    status: string;
+    pages_fetched: number;
+    records_fetched: number;
+  }>(
+    `SELECT status, pages_fetched, records_fetched
+     FROM alpha_sync_scope_runs
+     WHERE sync_batch_id = $1
+       AND scope_key = $2
+     LIMIT 1`,
+    [batchId, options.scopeKey],
+  );
+  const existing = existingScope.rows[0];
+  if (existing?.status === "completed") {
+    return {
+      pages: Number(existing.pages_fetched),
+      records: Number(existing.records_fetched),
+      rawSaved: 0,
+      normalized: Number(existing.records_fetched),
+      repeatedPageStopped: false,
+      resumed: true,
+    };
+  }
+
+  const previousObservations = await database.query<{
+    page: number;
+    payload_hash: string;
+  }>(
+    `SELECT observation.page, raw.payload_hash
+     FROM alpha_raw_observations AS observation
+     JOIN alpha_raw_records AS raw
+       ON raw.id = observation.raw_record_id
+     WHERE observation.sync_batch_id = $1
+       AND observation.scope_key = $2
+     ORDER BY observation.page, raw.payload_hash`,
+    [batchId, options.scopeKey],
+  );
+  const payloadHashesByPage = new Map<number, string[]>();
+  for (const row of previousObservations.rows) {
+    const hashes = payloadHashesByPage.get(Number(row.page)) ?? [];
+    hashes.push(row.payload_hash);
+    payloadHashesByPage.set(Number(row.page), hashes);
+  }
+  let inferredPages = 0;
+  while (payloadHashesByPage.has(inferredPages)) inferredPages += 1;
+
+  let page = Math.max(Number(existing?.pages_fetched ?? 0), inferredPages);
+  let records = Math.max(
+    Number(existing?.records_fetched ?? 0),
+    previousObservations.rows.length,
+  );
   let rawSaved = 0;
   let normalized = 0;
-  const observedPageHashes = new Set<string>();
+  const observedPageHashes = new Set(
+    [...payloadHashesByPage.values()].map((hashes) =>
+      sha256(stableJson([...hashes].sort())),
+    ),
+  );
+  const pageSize = options.pageSize ?? defaultPageSize;
   const maxPages =
     Number.isInteger(options.maxPages) && Number(options.maxPages) > 0
       ? Number(options.maxPages)
       : 100_000;
+  let prefetchedPages = new Map<number, PrefetchedResult>();
 
   await database.query(
     `INSERT INTO alpha_sync_scope_runs (
@@ -1467,10 +1947,7 @@ export async function importEntity(
      ) VALUES ($1, $2, $3, $4, 'running', 0, 0, NULL, now(), NULL)
      ON CONFLICT (sync_batch_id, scope_key) DO UPDATE SET
        status = 'running',
-       pages_fetched = 0,
-       records_fetched = 0,
        safe_error_code = NULL,
-       started_at = now(),
        finished_at = NULL`,
     [batchId, options.scopeKey, options.branchId, options.recordType],
   );
@@ -1478,14 +1955,26 @@ export async function importEntity(
   try {
     while (true) {
       if (page >= maxPages) throw new AlfaReadError("pagination_guard");
-      const response = await client.postIndex(options.endpoint, {
-        ...(options.body ?? {}),
-        page,
-        pageSize,
-      });
+      const prefetched = prefetchedPages.get(page);
+      prefetchedPages.delete(page);
+      const response = prefetched
+        ? prefetched.ok
+          ? prefetched.value
+          : (() => {
+              throw prefetched.error;
+            })()
+        : await client.postIndex(options.endpoint, {
+            ...(options.body ?? {}),
+            page,
+            pageSize,
+          });
       const items = listItems(response);
       const responseTotal = totalItems(response);
-      const pageHash = sha256(stableJson(items));
+      const pageHash = sha256(
+        stableJson(
+          items.map((item) => sha256(stableJson(item))).sort(),
+        ),
+      );
       if (items.length > 0 && observedPageHashes.has(pageHash)) {
         throw new AlfaReadError("repeated_page");
       }
@@ -1506,12 +1995,27 @@ export async function importEntity(
             await normalizeEntity(database, options, item, {
               batchId,
               rawId: raw.rawId,
+              observationId: raw.observationId,
               scopeKey: options.scopeKey,
             })
           ) {
             normalized += 1;
           }
         }
+        await database.query(
+          `UPDATE alpha_sync_scope_runs
+           SET
+             pages_fetched = $3,
+             records_fetched = $4
+           WHERE sync_batch_id = $1
+             AND scope_key = $2`,
+          [
+            batchId,
+            options.scopeKey,
+            page + 1,
+            records + items.length,
+          ],
+        );
         await database.exec("COMMIT");
       } catch (error) {
         await database.exec("ROLLBACK");
@@ -1523,6 +2027,32 @@ export async function importEntity(
       if (items.length === 0) break;
       if (responseTotal !== null && records >= responseTotal) break;
       if (items.length < pageSize) break;
+
+      if (
+        responseTotal !== null &&
+        prefetchedPages.size === 0 &&
+        page < maxPages
+      ) {
+        const remainingPages = Math.ceil(
+          Math.max(0, responseTotal - records) / pageSize,
+        );
+        const pagesToPrefetch = Math.min(
+          remainingPages,
+          paginationPrefetchConcurrency,
+          maxPages - page,
+        );
+        if (pagesToPrefetch > 0) {
+          prefetchedPages = await prefetchPages(client, {
+            endpoint: options.endpoint,
+            body: options.body,
+            pageSize,
+            pages: Array.from(
+              { length: pagesToPrefetch },
+              (_value, index) => page + index,
+            ),
+          });
+        }
+      }
     }
 
     await database.exec("BEGIN");
@@ -1572,6 +2102,38 @@ export async function importEntity(
     );
     throw error;
   }
+}
+
+async function importEntityOrResume(
+  client: ReadOnlyAlfaClient,
+  database: PGlite,
+  batchId: string,
+  options: ImportEntityOptions,
+): Promise<EntityImportResult> {
+  const completed = await database.query<{
+    pages_fetched: number;
+    records_fetched: number;
+  }>(
+    `SELECT pages_fetched, records_fetched
+     FROM alpha_sync_scope_runs
+     WHERE sync_batch_id = $1
+       AND scope_key = $2
+       AND status = 'completed'
+     LIMIT 1`,
+    [batchId, options.scopeKey],
+  );
+  const row = completed.rows[0];
+  if (row) {
+    return {
+      pages: Number(row.pages_fetched),
+      records: Number(row.records_fetched),
+      rawSaved: 0,
+      normalized: Number(row.records_fetched),
+      repeatedPageStopped: false,
+      resumed: true,
+    };
+  }
+  return importEntity(client, database, batchId, options);
 }
 
 async function mapBranchesToLegalEntities(database: PGlite): Promise<{
@@ -1638,7 +2200,7 @@ export async function buildFamilyCandidates(database: PGlite): Promise<number> {
   );
   const students = await database.query<{
     crm_id: string;
-    branch_crm_id: string | null;
+    branch_crm_id: string;
     phone: string | null;
     raw: JsonRecord | null;
   }>(
@@ -1667,9 +2229,20 @@ export async function buildFamilyCandidates(database: PGlite): Promise<number> {
         rightIndex < bucket.length;
         rightIndex += 1
       ) {
-        const left = bucket[leftIndex]!;
-        const right = bucket[rightIndex]!;
-        const [leftId, rightId] = [left.crm_id, right.crm_id].sort();
+        const pair = [bucket[leftIndex]!, bucket[rightIndex]!].sort(
+          (left, right) =>
+            `${left.branch_crm_id}\u0000${left.crm_id}`.localeCompare(
+              `${right.branch_crm_id}\u0000${right.crm_id}`,
+            ),
+        );
+        const left = pair[0]!;
+        const right = pair[1]!;
+        if (
+          left.branch_crm_id === right.branch_crm_id &&
+          left.crm_id === right.crm_id
+        ) {
+          continue;
+        }
         const leftGuardian = normalizeName(left.raw?.["legal_name"]);
         const rightGuardian = normalizeName(right.raw?.["legal_name"]);
         const guardianNameMatches =
@@ -1678,7 +2251,9 @@ export async function buildFamilyCandidates(database: PGlite): Promise<number> {
         const confidence = guardianNameMatches ? "0.8000" : "0.6500";
         await database.query(
           `INSERT INTO family_merge_candidates (
+             left_student_branch_crm_id,
              left_student_crm_id,
+             right_student_branch_crm_id,
              right_student_crm_id,
              branch_crm_id,
              candidate_type,
@@ -1691,15 +2266,19 @@ export async function buildFamilyCandidates(database: PGlite): Promise<number> {
              $1,
              $2,
              $3,
+             $4,
+             $5,
              'possible_shared_family',
-             $4::jsonb,
-             $5::jsonb,
-             $6,
+             $6::jsonb,
+             $7::jsonb,
+             $8,
              'pending_review',
              now()
            )
            ON CONFLICT (
+             left_student_branch_crm_id,
              left_student_crm_id,
+             right_student_branch_crm_id,
              right_student_crm_id,
              candidate_type
            ) DO UPDATE SET
@@ -1714,8 +2293,10 @@ export async function buildFamilyCandidates(database: PGlite): Promise<number> {
              END,
              updated_at = now()`,
           [
-            leftId,
-            rightId,
+            left.branch_crm_id,
+            left.crm_id,
+            right.branch_crm_id,
+            right.crm_id,
             left.branch_crm_id === right.branch_crm_id
               ? left.branch_crm_id
               : null,
@@ -1738,6 +2319,7 @@ export async function buildFamilyCandidates(database: PGlite): Promise<number> {
 interface SanitizedImportReport {
   mode: AlfaSyncMode;
   status: "completed" | "partial";
+  resumedBatch: boolean;
   checkedAt: string;
   incrementalWindow: Pick<
     IncrementalWindow,
@@ -1796,6 +2378,7 @@ async function main(): Promise<void> {
   const report: SanitizedImportReport = {
     mode: syncMode,
     status: "completed",
+    resumedBatch: false,
     checkedAt: new Date().toISOString(),
     incrementalWindow: null,
     migrationsApplied,
@@ -1862,25 +2445,51 @@ async function main(): Promise<void> {
         }
       : null;
     const client = new SerializedReadOnlyAlfaClient();
-    const batch = await database.query<{ id: string }>(
-      `INSERT INTO alpha_sync_batches (
-         status,
-         mode,
-         from_date,
-         to_date,
-         triggered_by
-       ) VALUES ('running', $1, $2, $3, 'owner_authorized_cli')
-       RETURNING id`,
-      [
-        syncMode,
-        incrementalWindow?.dateFrom ?? null,
-        incrementalWindow?.dateTo ?? null,
-      ],
-    );
-    batchId = batch.rows[0]?.id ?? null;
+    const resumeRequested =
+      syncMode === "full_sandbox_read_only" &&
+      process.env.ALFACRM_RESUME_RUNNING_BATCH === "1";
+    const resumable = resumeRequested
+      ? await database.query<{ id: string; status: string }>(
+          `SELECT id
+           FROM alpha_sync_batches
+           WHERE status IN ('running', 'partial')
+             AND mode = $1
+           ORDER BY started_at DESC
+           LIMIT 1`,
+          [syncMode],
+        )
+      : { rows: [] as Array<{ id: string; status: string }> };
+    batchId = resumable.rows[0]?.id ?? null;
+    report.resumedBatch = Boolean(batchId);
+    if (batchId) {
+      await database.query(
+        `UPDATE alpha_sync_batches
+         SET status = 'running', finished_at = NULL
+         WHERE id = $1`,
+        [batchId],
+      );
+    }
+    if (!batchId) {
+      const batch = await database.query<{ id: string }>(
+        `INSERT INTO alpha_sync_batches (
+           status,
+           mode,
+           from_date,
+           to_date,
+           triggered_by
+         ) VALUES ('running', $1, $2, $3, 'owner_authorized_cli')
+         RETURNING id`,
+        [
+          syncMode,
+          incrementalWindow?.dateFrom ?? null,
+          incrementalWindow?.dateTo ?? null,
+        ],
+      );
+      batchId = batch.rows[0]?.id ?? null;
+    }
     if (!batchId) throw new AlfaReadError("sandbox_batch_failed");
 
-    const branches = await importEntity(client, database, batchId, {
+    const branches = await importEntityOrResume(client, database, batchId, {
       branchId: "0",
       endpoint: "0/branch/index",
       recordType: "branches",
@@ -2035,40 +2644,60 @@ async function main(): Promise<void> {
           },
         ];
 
-        for (const entity of requiredEntities) {
+        const requiredOptions = requiredEntities.map<ImportEntityOptions>(
+          (entity) => ({
+            branchId,
+            endpoint: entity.endpoint,
+            recordType: entity.recordType,
+            scopeKey: `${branchId}:${entity.recordType}`,
+            body: entity.body,
+          }),
+        );
+        const requiredClient = await prefetchResumePages(
+          client,
+          database,
+          batchId,
+          requiredOptions,
+        );
+        for (const [index, entity] of requiredEntities.entries()) {
+          const options = requiredOptions[index]!;
           const reportKey = `branch_${branchId}.${entity.key}`;
           try {
-            report.entities[reportKey] = await importEntity(
-              client,
+            report.entities[reportKey] = await importEntityOrResume(
+              requiredClient,
               database,
               batchId,
-              {
-                branchId,
-                endpoint: entity.endpoint,
-                recordType: entity.recordType,
-                scopeKey: `${branchId}:${entity.recordType}`,
-                body: entity.body,
-              },
+              options,
             );
           } catch (error) {
             recordImportError(report, branchId, entity.key, error);
           }
         }
 
-        for (const status of [1, 2, 3]) {
+        const lessonOptions = [1, 2, 3].map<ImportEntityOptions>(
+          (status) => ({
+            branchId,
+            endpoint: `${branchId}/lesson/index`,
+            recordType: "lessons",
+            scopeKey: `${branchId}:lessons:status:${status}`,
+            body: { status },
+          }),
+        );
+        const lessonClient = await prefetchResumePages(
+          client,
+          database,
+          batchId,
+          lessonOptions,
+        );
+        for (const [index, status] of [1, 2, 3].entries()) {
+          const options = lessonOptions[index]!;
           const reportKey = `branch_${branchId}.lessons_status_${status}`;
           try {
-            report.entities[reportKey] = await importEntity(
-              client,
+            report.entities[reportKey] = await importEntityOrResume(
+              lessonClient,
               database,
               batchId,
-              {
-                branchId,
-                endpoint: `${branchId}/lesson/index`,
-                recordType: "lessons",
-                scopeKey: `${branchId}:lessons:status:${status}`,
-                body: { status },
-              },
+              options,
             );
           } catch (error) {
             recordImportError(
@@ -2080,20 +2709,30 @@ async function main(): Promise<void> {
           }
         }
 
-        for (const entity of referenceEntities) {
+        const referenceOptions = referenceEntities.map<ImportEntityOptions>(
+          (entity) => ({
+            branchId,
+            endpoint: entity.endpoint,
+            recordType: entity.recordType,
+            scopeKey: `${branchId}:reference:${entity.recordType}`,
+            body: entity.body,
+          }),
+        );
+        const referenceClient = await prefetchResumePages(
+          client,
+          database,
+          batchId,
+          referenceOptions,
+        );
+        for (const [index, entity] of referenceEntities.entries()) {
+          const options = referenceOptions[index]!;
           const reportKey = `branch_${branchId}.${entity.key}`;
           try {
-            report.entities[reportKey] = await importEntity(
-              client,
+            report.entities[reportKey] = await importEntityOrResume(
+              referenceClient,
               database,
               batchId,
-              {
-                branchId,
-                endpoint: entity.endpoint,
-                recordType: entity.recordType,
-                scopeKey: `${branchId}:reference:${entity.recordType}`,
-                body: entity.body,
-              },
+              options,
             );
           } catch (error) {
             recordImportError(report, branchId, entity.key, error);
@@ -2108,22 +2747,68 @@ async function main(): Promise<void> {
            ORDER BY crm_id`,
           [branchId],
         );
-        for (const student of students.rows) {
-          const reportKey = `branch_${branchId}.customer_tariffs`;
-          try {
-            const result = await importEntity(client, database, batchId, {
+        const completedTariffScopes = await database.query<{
+          scope_key: string;
+        }>(
+          `SELECT scope_key
+           FROM alpha_sync_scope_runs
+           WHERE sync_batch_id = $1
+             AND branch_id = $2
+             AND entity_type = 'customer_tariffs'
+             AND status = 'completed'`,
+          [batchId, branchId],
+        );
+        const completedTariffScopeKeys = new Set(
+          completedTariffScopes.rows.map((row) => row.scope_key),
+        );
+        const pendingStudents = students.rows.filter(
+          (student) =>
+            !completedTariffScopeKeys.has(
+              `${branchId}:customer_tariffs:${student.crm_id}`,
+            ),
+        );
+        for (
+          let offset = 0;
+          offset < pendingStudents.length;
+          offset += tariffPrefetchWindowSize
+        ) {
+          const window = pendingStudents.slice(
+            offset,
+            offset + tariffPrefetchWindowSize,
+          );
+          const tariffOptions = window.map<ImportEntityOptions>(
+            (student) => ({
               branchId,
               endpoint: `${branchId}/customer-tariff/index?customer_id=${encodeURIComponent(student.crm_id)}`,
               recordType: "customer_tariffs",
               scopeKey: `${branchId}:customer_tariffs:${student.crm_id}`,
               forcedCustomerId: student.crm_id,
-            });
-            report.entities[reportKey] = accumulateEntityResult(
-              report.entities[reportKey],
-              result,
-            );
-          } catch (error) {
-            recordImportError(report, branchId, "customer_tariffs", error);
+              pageSize: tariffPageSize,
+            }),
+          );
+          const prefetchedClient = await prefetchResumePages(
+            client,
+            database,
+            batchId,
+            tariffOptions,
+          );
+          for (const [index] of window.entries()) {
+            const options = tariffOptions[index]!;
+            const reportKey = `branch_${branchId}.customer_tariffs`;
+            try {
+              const result = await importEntityOrResume(
+                prefetchedClient,
+                database,
+                batchId,
+                options,
+              );
+              report.entities[reportKey] = accumulateEntityResult(
+                report.entities[reportKey],
+                result,
+              );
+            } catch (error) {
+              recordImportError(report, branchId, "customer_tariffs", error);
+            }
           }
         }
 
@@ -2135,17 +2820,32 @@ async function main(): Promise<void> {
            ORDER BY crm_id`,
           [branchId],
         );
-        for (const group of groups.rows) {
+        const membershipOptions = groups.rows.map<ImportEntityOptions>(
+          (group) => ({
+            branchId,
+            endpoint: `${branchId}/cgi/index?group_id=${encodeURIComponent(group.crm_id)}`,
+            recordType: "group_memberships",
+            scopeKey: `${branchId}:group_memberships:${group.crm_id}`,
+            body: { group_id: group.crm_id },
+            forcedGroupId: group.crm_id,
+          }),
+        );
+        const membershipClient = await prefetchResumePages(
+          client,
+          database,
+          batchId,
+          membershipOptions,
+        );
+        for (const [index] of groups.rows.entries()) {
+          const options = membershipOptions[index]!;
           const reportKey = `branch_${branchId}.group_membership`;
           try {
-            const result = await importEntity(client, database, batchId, {
-              branchId,
-              endpoint: `${branchId}/cgi/index?group_id=${encodeURIComponent(group.crm_id)}`,
-              recordType: "group_memberships",
-              scopeKey: `${branchId}:group_memberships:${group.crm_id}`,
-              body: { group_id: group.crm_id },
-              forcedGroupId: group.crm_id,
-            });
+            const result = await importEntityOrResume(
+              membershipClient,
+              database,
+              batchId,
+              options,
+            );
             report.entities[reportKey] = accumulateEntityResult(
               report.entities[reportKey],
               result,
@@ -2156,43 +2856,94 @@ async function main(): Promise<void> {
         }
       }
 
-      const changeLogKey = `branch_${branchId}.change_log`;
+    }
+
+    const changeLogOptions = branchRows.rows.map<ImportEntityOptions>(
+      (branch) => ({
+        branchId: branch.crm_id,
+        endpoint: `${branch.crm_id}/log/index`,
+        recordType: "change_log",
+        scopeKey: `${branch.crm_id}:change_log:${
+          incrementalWindow?.dateFrom ?? "full"
+        }`,
+        body: incrementalWindow
+          ? { date_from: incrementalWindow.dateFrom }
+          : undefined,
+      }),
+    );
+    const changeLogClient = await prefetchResumePages(
+      client,
+      database,
+      batchId,
+      changeLogOptions,
+    );
+    for (const [index, branch] of branchRows.rows.entries()) {
+      const options = changeLogOptions[index]!;
+      const changeLogKey = `branch_${branch.crm_id}.change_log`;
       try {
-        report.entities[changeLogKey] = await importEntity(
-          client,
+        report.entities[changeLogKey] = await importEntityOrResume(
+          changeLogClient,
           database,
           batchId,
-          {
-            branchId,
-            endpoint: `${branchId}/log/index`,
-            recordType: "change_log",
-            scopeKey: `${branchId}:change_log:${
-              incrementalWindow?.dateFrom ?? "full"
-            }`,
-            body: incrementalWindow
-              ? { date_from: incrementalWindow.dateFrom }
-              : undefined,
-          },
+          options,
         );
       } catch (error) {
-        recordImportError(report, branchId, "change_log", error);
+        recordImportError(report, branch.crm_id, "change_log", error);
       }
     }
 
-    if (
-      syncMode === "full_sandbox_read_only" &&
-      report.status === "completed"
-    ) {
+    const incompleteScopes = await database.query<{
+      branch_id: string;
+      entity_type: string;
+      safe_error_code: string | null;
+    }>(
+      `SELECT branch_id, entity_type, safe_error_code
+       FROM alpha_sync_scope_runs
+       WHERE sync_batch_id = $1
+         AND status <> 'completed'
+       ORDER BY branch_id, entity_type`,
+      [batchId],
+    );
+    if (incompleteScopes.rows.length > 0) {
+      report.status = "partial";
+      for (const scope of incompleteScopes.rows) {
+        report.errors.push({
+          branchId: scope.branch_id,
+          entity: scope.entity_type,
+          error: scope.safe_error_code ?? "incomplete_scope",
+        });
+      }
+    }
+    if (syncMode === "full_sandbox_read_only" && report.status === "completed") {
       report.familyCandidates = await buildFamilyCandidates(database);
     }
-    const totals = Object.values(report.entities).reduce(
-      (result, entity) => ({
-        fetched: result.fetched + entity.records,
-        saved: result.saved + entity.rawSaved,
-        normalized: result.normalized + entity.normalized,
-      }),
-      { fetched: 0, saved: 0, normalized: 0 },
+    const scopeTotals = await database.query<{
+      requested: number;
+      succeeded: number;
+      failed: number;
+      fetched: number;
+    }>(
+      `SELECT
+         COUNT(*)::int AS requested,
+         COUNT(*) FILTER (WHERE status = 'completed')::int AS succeeded,
+         COUNT(*) FILTER (WHERE status <> 'completed')::int AS failed,
+         COALESCE(SUM(records_fetched), 0)::int AS fetched
+       FROM alpha_sync_scope_runs
+       WHERE sync_batch_id = $1`,
+      [batchId],
     );
+    const observationTotals = await database.query<{ saved: number }>(
+      `SELECT COUNT(*)::int AS saved
+       FROM alpha_raw_observations
+       WHERE sync_batch_id = $1`,
+      [batchId],
+    );
+    const totals = scopeTotals.rows[0] ?? {
+      requested: 0,
+      succeeded: 0,
+      failed: 0,
+      fetched: 0,
+    };
     await database.query(
       `UPDATE alpha_sync_batches
        SET
@@ -2212,11 +2963,11 @@ async function main(): Promise<void> {
       [
         batchId,
         report.status,
-        Object.keys(report.entities).length + report.errors.length,
-        Object.keys(report.entities).length,
-        report.errors.length,
+        totals.requested,
+        totals.succeeded,
+        totals.failed,
         totals.fetched,
-        totals.saved,
+        Number(observationTotals.rows[0]?.saved ?? 0),
         JSON.stringify(report.errors),
       ],
     );

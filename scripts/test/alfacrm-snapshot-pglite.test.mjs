@@ -111,6 +111,177 @@ test("pagination uses pageSize and preserves immutable raw observations across b
   }
 });
 
+test("remaining pages overlap network latency and commit in page order", async () => {
+  const database = await openAlfaTestDatabase();
+  try {
+    const items = Array.from({ length: 201 }, (_value, index) => ({
+      id: `parallel-${index + 1}`,
+      name: `Parallel Student ${index + 1}`,
+      is_study: 1,
+    }));
+    let active = 0;
+    let maxActive = 0;
+    const client = new FakeAlfaClient(async (_endpoint, body) => {
+      const start = body.page * 50;
+      if (body.page > 0) {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.max(5, 45 - body.page * 5)),
+        );
+        active -= 1;
+      }
+      return {
+        total: items.length,
+        items: items.slice(start, start + 50),
+      };
+    });
+    const batchId = await createBatch(database);
+    const result = await importEntity(
+      client,
+      database,
+      batchId,
+      studentsOptions("branch-parallel"),
+    );
+
+    assert.equal(result.pages, 5);
+    assert.equal(result.records, 201);
+    assert.ok(maxActive >= 2);
+    assert.deepEqual(
+      client.calls.map((call) => call.body.page),
+      [0, 1, 2, 3, 4],
+    );
+    const scope = await database.query(
+      `SELECT status, pages_fetched, records_fetched
+       FROM alpha_sync_scope_runs
+       WHERE sync_batch_id = $1`,
+      [batchId],
+    );
+    assert.deepEqual(scope.rows[0], {
+      status: "completed",
+      pages_fetched: 5,
+      records_fetched: 201,
+    });
+  } finally {
+    await database.close();
+  }
+});
+
+test("raw lineage is append-only and normalized rows reference the exact observation", async () => {
+  const database = await openAlfaTestDatabase();
+  try {
+    const batchId = await createBatch(database);
+    const item = { id: "student-lineage", name: "Lineage Student", is_study: 1 };
+    await importEntity(
+      pageClient([item]),
+      database,
+      batchId,
+      studentsOptions("branch-lineage", {
+        scopeKey: "branch-lineage:students:primary",
+      }),
+    );
+    await importEntity(
+      pageClient([item]),
+      database,
+      batchId,
+      studentsOptions("branch-lineage", {
+        scopeKey: "branch-lineage:students:secondary",
+      }),
+    );
+
+    const lineage = await database.query(
+      `SELECT
+         student.raw_record_id,
+         student.raw_observation_id,
+         student.last_seen_batch_id,
+         student.source_scope,
+         observation.scope_key AS observation_scope,
+         observation.page AS observation_page
+       FROM crm_students AS student
+       JOIN alpha_raw_observations AS observation
+         ON observation.id = student.raw_observation_id
+       WHERE student.branch_crm_id = 'branch-lineage'
+         AND student.crm_id = 'student-lineage'`,
+    );
+    assert.equal(lineage.rows[0]?.source_scope, "branch-lineage:students:secondary");
+    assert.equal(
+      lineage.rows[0]?.observation_scope,
+      "branch-lineage:students:secondary",
+    );
+    assert.equal(lineage.rows[0]?.observation_page, 0);
+
+    const observations = await database.query(
+      `SELECT id, scope_key
+       FROM alpha_raw_observations
+       WHERE sync_batch_id = $1
+       ORDER BY scope_key`,
+      [batchId],
+    );
+    assert.deepEqual(
+      observations.rows.map((row) => row.scope_key),
+      [
+        "branch-lineage:students:primary",
+        "branch-lineage:students:secondary",
+      ],
+    );
+    await assert.rejects(
+      database.query(
+        `UPDATE crm_students
+         SET raw_observation_id = $1
+         WHERE branch_crm_id = 'branch-lineage'
+           AND crm_id = 'student-lineage'`,
+        [observations.rows[0]?.id],
+      ),
+      /foreign key|violates/i,
+    );
+
+    await assert.rejects(
+      database.query(
+        `UPDATE alpha_raw_records
+         SET source_payload = '{}'::jsonb
+         WHERE id = $1`,
+        [lineage.rows[0]?.raw_record_id],
+      ),
+      /append-only/i,
+    );
+    await assert.rejects(
+      database.query(
+        `DELETE FROM alpha_raw_records
+         WHERE id = $1`,
+        [lineage.rows[0]?.raw_record_id],
+      ),
+      /append-only/i,
+    );
+    await assert.rejects(
+      database.exec("TRUNCATE alpha_raw_records CASCADE"),
+      /append-only/i,
+    );
+    await assert.rejects(
+      database.query(
+        `UPDATE alpha_raw_observations
+         SET page = page + 1
+         WHERE id = $1`,
+        [lineage.rows[0]?.raw_observation_id],
+      ),
+      /append-only/i,
+    );
+    await assert.rejects(
+      database.query(
+        `DELETE FROM alpha_raw_observations
+         WHERE id = $1`,
+        [lineage.rows[0]?.raw_observation_id],
+      ),
+      /append-only/i,
+    );
+    await assert.rejects(
+      database.exec("TRUNCATE alpha_raw_observations CASCADE"),
+      /append-only/i,
+    );
+  } finally {
+    await database.close();
+  }
+});
+
 test("raw, observation, and normalization roll back together on a page failure", async () => {
   const database = await openAlfaTestDatabase();
   try {
@@ -169,6 +340,165 @@ test("raw, observation, and normalization roll back together on a page failure",
       status: "incomplete",
       pages_fetched: 0,
       records_fetched: 0,
+    });
+  } finally {
+    await database.close();
+  }
+});
+
+test("a stale student cascades to children and downstream imports cannot revive them", async () => {
+  const database = await openAlfaTestDatabase();
+  try {
+    const branchId = "branch-parent-lifecycle";
+    const studentOptions = studentsOptions(branchId);
+    const groupOptions = {
+      branchId,
+      endpoint: `${branchId}/group/index`,
+      recordType: "groups",
+      scopeKey: `${branchId}:groups`,
+    };
+    const membershipOptions = {
+      branchId,
+      endpoint: `${branchId}/cgi/index`,
+      recordType: "group_memberships",
+      scopeKey: `${branchId}:group_memberships:group-parent`,
+      forcedGroupId: "group-parent",
+    };
+    const lessonOptions = {
+      branchId,
+      endpoint: `${branchId}/lesson/index`,
+      recordType: "lessons",
+      scopeKey: `${branchId}:lessons`,
+    };
+    const paymentOptions = {
+      branchId,
+      endpoint: `${branchId}/pay/index`,
+      recordType: "payments",
+      scopeKey: `${branchId}:payments`,
+    };
+    const student = { id: "student-parent", name: "Parent Test", is_study: 1 };
+    const group = { id: "group-parent", name: "Parent Group" };
+    const membership = {
+      id: "membership-parent",
+      customer_id: "student-parent",
+      group_id: "group-parent",
+    };
+    const lesson = {
+      id: "lesson-parent",
+      group_id: "group-parent",
+      date: "2026-07-25",
+      details: [{ customer_id: "student-parent", status: "present" }],
+    };
+    const payment = {
+      id: "payment-parent",
+      customer_id: "student-parent",
+      amount: "1000",
+      document_date: "2026-07-25",
+    };
+
+    await importEntity(
+      pageClient([student]),
+      database,
+      await createBatch(database),
+      studentOptions,
+    );
+    await importEntity(
+      pageClient([group]),
+      database,
+      await createBatch(database),
+      groupOptions,
+    );
+    await importEntity(
+      pageClient([membership]),
+      database,
+      await createBatch(database),
+      membershipOptions,
+    );
+    await importEntity(
+      pageClient([lesson]),
+      database,
+      await createBatch(database),
+      lessonOptions,
+    );
+    await importEntity(
+      pageClient([payment]),
+      database,
+      await createBatch(database),
+      paymentOptions,
+    );
+
+    await importEntity(
+      pageClient([]),
+      database,
+      await createBatch(database),
+      studentOptions,
+    );
+
+    const cascaded = await database.query(
+      `SELECT
+         (SELECT record_state FROM crm_students
+          WHERE branch_crm_id = $1 AND crm_id = 'student-parent')
+           AS student,
+         (SELECT record_state FROM crm_group_memberships
+          WHERE branch_crm_id = $1
+            AND group_crm_id = 'group-parent'
+            AND student_crm_id = 'student-parent')
+           AS membership,
+         (SELECT record_state FROM crm_attendance
+          WHERE lesson_crm_id = 'lesson-parent'
+            AND student_crm_id = 'student-parent')
+           AS attendance,
+         (SELECT record_state FROM crm_payments
+          WHERE branch_crm_id = $1 AND crm_id = 'payment-parent')
+           AS payment`,
+      [branchId],
+    );
+    assert.deepEqual(cascaded.rows[0], {
+      student: "stale",
+      membership: "stale",
+      attendance: "stale",
+      payment: "stale",
+    });
+
+    await importEntity(
+      pageClient([membership]),
+      database,
+      await createBatch(database),
+      membershipOptions,
+    );
+    await importEntity(
+      pageClient([lesson]),
+      database,
+      await createBatch(database),
+      lessonOptions,
+    );
+    await importEntity(
+      pageClient([payment]),
+      database,
+      await createBatch(database),
+      paymentOptions,
+    );
+
+    const afterDownstreamRetry = await database.query(
+      `SELECT
+         (SELECT record_state FROM crm_group_memberships
+          WHERE branch_crm_id = $1
+            AND group_crm_id = 'group-parent'
+            AND student_crm_id = 'student-parent')
+           AS membership,
+         (SELECT record_state FROM crm_attendance
+          WHERE lesson_crm_id = 'lesson-parent'
+            AND student_crm_id = 'student-parent')
+           AS attendance,
+         (SELECT record_state FROM crm_payments
+          WHERE branch_crm_id = $1 AND crm_id = 'payment-parent')
+           AS payment`,
+      [branchId],
+    );
+    assert.deepEqual(afterDownstreamRetry.rows[0], {
+      membership: "stale",
+      attendance: "stale",
+      payment: "stale",
     });
   } finally {
     await database.close();
@@ -436,12 +766,37 @@ test("partial, repeated, and guarded pagination never reconcile missing rows", a
       records_fetched: 50,
     });
 
-    await importEntity(
-      pageClient(items),
+    await database.query(
+      `UPDATE alpha_sync_scope_runs
+       SET status = 'running', pages_fetched = 0, records_fetched = 0
+       WHERE sync_batch_id = $1`,
+      [failedBatch],
+    );
+    const resumedClient = pageClient(items);
+    const resumed = await importEntity(
+      resumedClient,
       database,
-      await createBatch(database),
+      failedBatch,
       options,
     );
+    assert.equal(resumed.pages, 2);
+    assert.equal(resumed.records, 51);
+    assert.deepEqual(
+      resumedClient.calls.map((call) => call.body.page),
+      [1],
+    );
+    const resumedScope = await database.query(
+      `SELECT status, pages_fetched, records_fetched
+       FROM alpha_sync_scope_runs
+       WHERE sync_batch_id = $1`,
+      [failedBatch],
+    );
+    assert.deepEqual(resumedScope.rows[0], {
+      status: "completed",
+      pages_fetched: 2,
+      records_fetched: 51,
+    });
+
     const retryCount = await database.query(
       `SELECT COUNT(*)::int AS count
        FROM crm_students
@@ -506,6 +861,54 @@ test("migration 0014 fails closed when legacy normalized rows lack provenance", 
       `SELECT to_regclass('public.alpha_raw_observations') AS relation`,
     );
     assert.equal(observations.rows[0]?.relation, null);
+  } finally {
+    await database.close();
+  }
+});
+
+test("migration 0014 rolls back cleanly and can be reapplied before 0015", async () => {
+  const database = await openAlfaTestDatabase(13);
+  try {
+    const migration14 = await readFile(
+      new URL(
+        "../../lib/db/drizzle/0014_green_millenium_guard.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const rollback14 = await readFile(
+      new URL(
+        "../../lib/db/rollbacks/0014_alfa_lineage_snapshot.down.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const migration15 = await readFile(
+      new URL(
+        "../../lib/db/drizzle/0015_peaceful_doomsday.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    await executeMigrationSource(database, migration14);
+    await database.exec(rollback14);
+    await executeMigrationSource(database, migration14);
+    await executeMigrationSource(database, migration15);
+
+    const schema = await database.query(
+      `SELECT
+         to_regclass('public.alpha_raw_observations') AS observations,
+         EXISTS (
+           SELECT 1
+           FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND table_name = 'crm_students'
+             AND column_name = 'raw_observation_id'
+         ) AS exact_observation_lineage`,
+    );
+    assert.equal(schema.rows[0]?.observations, "alpha_raw_observations");
+    assert.equal(schema.rows[0]?.exact_observation_lineage, true);
   } finally {
     await database.close();
   }

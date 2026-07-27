@@ -2,9 +2,15 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
-    <meta name="description" content="Приватный контрольный контур ArtHello OS." />
+    <meta
+      name="description"
+      content="Приватный контрольный контур ArtHello OS."
+    />
     <title>ArtHello OS — контроль интерфейса</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
@@ -20,21 +26,32 @@
             <strong>ArtHello</strong>
             <span>операционная система</span>
           </div>
-          <button class="icon-button sidebar-close" type="button" data-drawer-close aria-label="Закрыть меню">×</button>
+          <button
+            class="icon-button sidebar-close"
+            type="button"
+            data-drawer-close
+            aria-label="Закрыть меню"
+          >
+            ×
+          </button>
         </div>
 
         <div class="environment-card">
           <span class="environment-dot" aria-hidden="true"></span>
           <div>
             <strong>Контрольный контур Sites</strong>
-            <span>Только обезличенные данные</span>
+            <span>Реальные данные · только владелец</span>
           </div>
         </div>
 
         <nav class="nav-groups">
           <div class="nav-group">
             <span class="nav-label">Контроль</span>
-            <button class="nav-item is-active" type="button" data-section="pulse">
+            <button
+              class="nav-item is-active"
+              type="button"
+              data-section="pulse"
+            >
               <span class="nav-icon">⌁</span><span>Пульс собственника</span>
             </button>
             <button class="nav-item" type="button" data-section="quality">
@@ -47,29 +64,64 @@
           </div>
 
           <div class="nav-group">
+            <span class="nav-label">Продажи и сервис</span>
+            <button class="nav-item" type="button" data-section="front-office">
+              <span class="nav-icon">◫</span><span>Front Office</span>
+              <span class="nav-alpha">α</span>
+            </button>
+            <button class="nav-item" type="button" data-section="integrations">
+              <span class="nav-icon">⌘</span><span>Интеграции</span>
+              <span class="nav-alpha">0</span>
+            </button>
+          </div>
+
+          <div class="nav-group">
             <span class="nav-label">Клиенты и обучение</span>
-            <button class="nav-item" type="button" data-section="families"><span class="nav-icon">⌂</span><span>Семьи</span></button>
-            <button class="nav-item" type="button" data-section="students"><span class="nav-icon">◉</span><span>Ученики</span></button>
-            <button class="nav-item" type="button" data-section="groups"><span class="nav-icon">▦</span><span>Группы и классы</span></button>
+            <button class="nav-item" type="button" data-section="families">
+              <span class="nav-icon">⌂</span><span>Семьи</span>
+            </button>
+            <button class="nav-item" type="button" data-section="students">
+              <span class="nav-icon">◉</span><span>Ученики</span>
+            </button>
+            <button class="nav-item" type="button" data-section="groups">
+              <span class="nav-icon">▦</span><span>Группы и классы</span>
+            </button>
           </div>
 
           <div class="nav-group">
             <span class="nav-label">Команда</span>
-            <button class="nav-item" type="button" data-section="employees"><span class="nav-icon">♙</span><span>Сотрудники</span></button>
-            <button class="nav-item" type="button" data-section="payroll"><span class="nav-icon">₽</span><span>Зарплата</span></button>
+            <button class="nav-item" type="button" data-section="employees">
+              <span class="nav-icon">♙</span><span>Сотрудники</span>
+            </button>
+            <button class="nav-item" type="button" data-section="teachers">
+              <span class="nav-icon">◇</span><span>Педагоги</span>
+            </button>
+            <button class="nav-item" type="button" data-section="payroll">
+              <span class="nav-icon">₽</span><span>Зарплата</span>
+            </button>
           </div>
 
           <div class="nav-group">
             <span class="nav-label">Финансы</span>
-            <button class="nav-item" type="button" data-section="money"><span class="nav-icon">◒</span><span>Деньги</span></button>
-            <button class="nav-item" type="button" data-section="cashflow"><span class="nav-icon">⇅</span><span>ДДС</span></button>
-            <button class="nav-item" type="button" data-section="pnl"><span class="nav-icon">▥</span><span>ОПиУ</span></button>
-            <button class="nav-item" type="button" data-section="model"><span class="nav-icon">⌁</span><span>Финансовая модель</span></button>
+            <button class="nav-item" type="button" data-section="money">
+              <span class="nav-icon">◒</span><span>Деньги</span>
+            </button>
+            <button class="nav-item" type="button" data-section="cashflow">
+              <span class="nav-icon">⇅</span><span>ДДС</span>
+            </button>
+            <button class="nav-item" type="button" data-section="pnl">
+              <span class="nav-icon">▥</span><span>ОПиУ</span>
+            </button>
+            <button class="nav-item" type="button" data-section="model">
+              <span class="nav-icon">⌁</span><span>Финансовая модель</span>
+            </button>
           </div>
 
           <div class="nav-group nav-group-last">
             <span class="nav-label">Управление</span>
-            <button class="nav-item" type="button" data-section="system"><span class="nav-icon">⚙</span><span>Система</span></button>
+            <button class="nav-item" type="button" data-section="system">
+              <span class="nav-icon">⚙</span><span>Система</span>
+            </button>
           </div>
         </nav>
 
@@ -81,227 +133,2053 @@
 
       <main class="main" id="main-content">
         <header class="mobile-header">
-          <div class="mobile-brand"><span class="brand-mark">A</span><strong>ArtHello OS</strong></div>
-          <button class="icon-button" type="button" data-drawer-open aria-controls="sidebar" aria-expanded="false" aria-label="Открыть меню">☰</button>
+          <div class="mobile-brand">
+            <span class="brand-mark">A</span><strong>ArtHello OS</strong>
+          </div>
+          <button
+            class="icon-button"
+            type="button"
+            data-drawer-open
+            aria-controls="sidebar"
+            aria-expanded="false"
+            aria-label="Открыть меню"
+          >
+            ☰
+          </button>
         </header>
 
-        <section class="view is-active" data-view="pulse" aria-labelledby="pulse-title">
+        <section
+          class="view is-active"
+          data-view="pulse"
+          aria-labelledby="pulse-title"
+        >
           <div class="page-heading">
             <div>
-              <div class="eyebrow">Фаза A · аудит и sandbox-импорт</div>
-              <h1 id="pulse-title">Что можно считать правдой сейчас</h1>
-              <p>Экран для собственника: только подтверждённые выводы аудита, без случайных цифр и скрытых допущений.</p>
+              <div class="eyebrow">
+                Фаза A · реальные источники · owner-only
+              </div>
+              <h1 id="pulse-title">Операционный пульс ArtHello</h1>
+              <p>
+                Реальные данные показываются только после серверной проверки
+                источника; неподключённые разделы остаются честно пустыми.
+              </p>
             </div>
-            <span class="checkpoint-chip"><span></span> A.4 · sandbox control</span>
+            <span class="checkpoint-chip"
+              ><span></span> Контрольная оболочка</span
+            >
           </div>
 
           <div class="demo-notice" role="note">
             <span class="notice-icon">i</span>
             <div>
-              <strong>Owner-only sanitized checkpoint</strong>
-              <p>Реальные источники представлены только обезличенными статусами и контрольными количествами. Имен, контактов, сумм зарплаты, банковских счетов и операций здесь нет; production и детальные live-данные остаются <strong>BLOCKED</strong>.</p>
+              <strong
+                >Owner-only: реальные данные отделены от
+                демонстрационных</strong
+              >
+              <p>
+                Карточки сотрудников, зарплата и AlfaCRM загружаются в
+                защищённую серверную read-модель. В интерфейсе нет случайных
+                demo-цифр; источник и режим данных подписаны рядом с каждым
+                разделом.
+              </p>
             </div>
           </div>
 
           <article class="truth-hero">
             <div class="truth-copy">
               <span class="truth-kicker">Финансовая правда</span>
-              <h2>Пока не готова для управленческих решений</h2>
-              <p>Зарплатная таблица проверяемо импортирована в изолированную БД. Candidate `0014` исправляет lineage и snapshot AlfaCRM, но ждёт независимой проверки. Банковские счета требуют protected backend OAuth.</p>
-              <button class="primary-button" type="button" data-go="quality">Открыть центр качества <span>→</span></button>
+              <h2 id="truth-title">Загрузка проверенных данных</h2>
+              <p id="truth-copy">
+                Система получает статус источников с защищённого сервера.
+                Финансовые выводы не активируются до сверки AlfaCRM, зарплаты и
+                банка.
+              </p>
+              <button class="primary-button" type="button" data-go="quality">
+                Открыть центр качества <span>→</span>
+              </button>
             </div>
             <div class="truth-state">
               <div class="truth-orbit" aria-hidden="true"><span>!</span></div>
-              <strong>NOT READY</strong>
-              <span>ворота качества закрыты</span>
+              <strong id="truth-state-label">ПРОВЕРКА</strong>
+              <span id="truth-state-copy">идёт чтение источников</span>
             </div>
           </article>
 
           <div class="section-heading">
-            <div><h2>Три контрольных сигнала</h2><p>Что уже известно владельцу без доступа к production-данным.</p></div>
+            <div>
+              <h2>Три контрольных сигнала</h2>
+              <p>
+                Фактическое состояние подключённых источников и ещё не закрытых
+                сверок.
+              </p>
+            </div>
           </div>
           <div class="signal-grid">
             <article class="signal-card signal-risk">
               <span class="signal-icon">!</span>
-              <div class="signal-meta"><span>Зарплата · реальный источник</span><strong>Импорт в изолированную БД прошёл аудит</strong></div>
-              <p>3 689 raw-строк сохранены с формулами; 1 881 выплат и 1 328 ненулевых результатов начислений совпали с источником. Суммы и персональные строки в Sites не публикуются.</p>
-              <button type="button" data-go="quality">Посмотреть риски →</button>
+              <div class="signal-meta">
+                <span>Зарплата · реальный источник</span
+                ><strong id="payroll-signal-title">Загрузка статуса…</strong>
+              </div>
+              <p id="payroll-signal-copy">
+                Проверяем зарплатную ведомость и связи со справочником
+                сотрудников.
+              </p>
+              <button type="button" data-go="quality">
+                Посмотреть риски →
+              </button>
             </article>
             <article class="signal-card signal-warn">
               <span class="signal-icon">↻</span>
-              <div class="signal-meta"><span>Банк «Точка»</span><strong>OAuth и protected backend ещё не готовы</strong></div>
-              <p>Предыдущий auth-probe получил service token. Новый временный credential не хранится в Sites; счета требуют точного backend callback и пользовательского consent.</p>
-              <button type="button" data-go="sources">Открыть источники →</button>
+              <div class="signal-meta">
+                <span>Банк «Точка»</span
+                ><strong id="tochka-signal-title">Загрузка статуса…</strong>
+              </div>
+              <p id="tochka-signal-copy">
+                Доступ запрашивается только к счетам, остаткам, клиентам и
+                выпискам — без платёжных действий.
+              </p>
+              <button type="button" data-go="sources">
+                Открыть источники →
+              </button>
             </article>
             <article class="signal-card signal-neutral">
               <span class="signal-icon">⌂</span>
-              <div class="signal-meta"><span>AlfaCRM</span><strong>Свежая полная выгрузка не состоялась</strong></div>
-              <p>Импортёр покрывает учеников и лидов раздельно, группы, занятия, оплаты, абонементы, платёжные справочники и change log. Текущая среда не устанавливает соединение с CRM; исторические 8 филиалов не считаются свежей истиной.</p>
-              <button type="button" data-go="sources">Проверить покрытие →</button>
+              <div class="signal-meta">
+                <span>AlfaCRM</span
+                ><strong id="alfa-signal-title">Загрузка статуса…</strong>
+              </div>
+              <p id="alfa-signal-copy">
+                Полный read-only snapshot проверяет филиалы, учеников, группы,
+                занятия и оплаты.
+              </p>
+              <button type="button" data-go="sources">
+                Проверить покрытие →
+              </button>
             </article>
           </div>
 
           <div class="content-grid">
             <article class="panel">
               <div class="panel-header">
-                <div><h2>Статус источников</h2><p>Разделяем наличие кода и фактическое подключение.</p></div>
-                <button class="text-button" type="button" data-go="sources">Все источники</button>
+                <div>
+                  <h2>Статус источников</h2>
+                  <p>Разделяем наличие кода и фактическое подключение.</p>
+                </div>
+                <button class="text-button" type="button" data-go="sources">
+                  Все источники
+                </button>
               </div>
               <div class="source-list">
                 <div class="source-row">
                   <div class="source-logo source-logo-crm">A</div>
-                  <div class="source-copy"><strong>AlfaCRM</strong><span>реальный источник · свежий full import: network timeout</span></div>
-                  <span class="status status-blocker">Сеть блокирует</span>
+                  <div class="source-copy">
+                    <strong>AlfaCRM</strong
+                    ><span id="alfa-source-copy"
+                      >загрузка серверного статуса</span
+                    >
+                  </div>
+                  <span class="status status-unverified" id="alfa-source-status"
+                    >Проверка</span
+                  >
                 </div>
                 <div class="source-row">
                   <div class="source-logo source-logo-bank">Б</div>
-                  <div class="source-copy"><strong>Банк «Точка»</strong><span>auth-probe пройден ранее; новый credential ждёт protected backend injection</span></div>
-                  <span class="status status-unverified">OAuth требуется</span>
+                  <div class="source-copy">
+                    <strong>Банк «Точка»</strong
+                    ><span id="tochka-source-copy">read-only OAuth</span>
+                  </div>
+                  <span
+                    class="status status-unverified"
+                    id="tochka-source-status"
+                    >Проверка</span
+                  >
                 </div>
                 <div class="source-row">
                   <div class="source-logo source-logo-sheet">З</div>
-                  <div class="source-copy"><strong>Зарплатная таблица</strong><span>реальный источник · изолированная БД · контрольные суммы совпали</span></div>
-                  <span class="status status-safe">Импорт проверен</span>
+                  <div class="source-copy">
+                    <strong>Зарплатная таблица</strong
+                    ><span id="payroll-source-copy"
+                      >загрузка серверного статуса</span
+                    >
+                  </div>
+                  <span
+                    class="status status-unverified"
+                    id="payroll-source-status"
+                    >Проверка</span
+                  >
                 </div>
                 <div class="source-row">
                   <div class="source-logo source-logo-sites">S</div>
-                  <div class="source-copy"><strong>Sites control</strong><span>приватная оболочка без реальных данных</span></div>
-                  <span class="status status-safe">Безопасный режим</span>
+                  <div class="source-copy">
+                    <strong>Sites control</strong
+                    ><span
+                      >owner-only · серверная D1 read-модель · noindex</span
+                    >
+                  </div>
+                  <span class="status status-safe">Защищено</span>
                 </div>
               </div>
             </article>
 
             <article class="panel next-gate">
-              <div class="panel-header"><div><h2>Следующие ворота</h2><p>Код и изолированная БД готовы; внешние действия выполняются только через защищённый backend.</p></div></div>
+              <div class="panel-header">
+                <div>
+                  <h2>Следующие ворота</h2>
+                  <p>
+                    Код и изолированная БД готовы; внешние действия выполняются
+                    только через защищённый backend.
+                  </p>
+                </div>
+              </div>
               <ol class="gate-list">
-                <li><span>1</span><div><strong>Выполнить AlfaCRM import из доступной сети</strong><p>Защищённый backend должен видеть CRM; текущий облачный proxy обрывает CONNECT.</p></div></li>
-                <li><span>2</span><div><strong>Исправить Redirect URI «Точки»</strong><p>Точный backend callback, затем пользовательский consent. Sites не принимает банковский код.</p></div></li>
-                <li><span>3</span><div><strong>Выпустить защищённую сборку Replit</strong><p>После backup/rollback и protected env закрыть индексацию и старый public runtime.</p></div></li>
+                <li>
+                  <span>1</span>
+                  <div>
+                    <strong>Завершить и проверить AlfaCRM import</strong>
+                    <p>
+                      Принять только полный read-only snapshot без нарушений
+                      lineage, orphan-связей и скрытых ошибок.
+                    </p>
+                  </div>
+                </li>
+                <li>
+                  <span>2</span>
+                  <div>
+                    <strong id="tochka-next-gate-title"
+                      >Проверить read-only подключение «Точки»</strong
+                    >
+                    <p id="tochka-next-gate-copy">
+                      Runtime-статус загружается; платежные действия всегда
+                      выключены.
+                    </p>
+                  </div>
+                </li>
+                <li>
+                  <span>3</span>
+                  <div>
+                    <strong>Разобрать несверенные связи</strong>
+                    <p>
+                      Сотрудники, начисления, семьи и юридические лица не
+                      объединяются автоматически по слабым признакам.
+                    </p>
+                  </div>
+                </li>
               </ol>
             </article>
           </div>
         </section>
 
-        <section class="view" data-view="quality" aria-labelledby="quality-title">
+        <section
+          class="view"
+          data-view="quality"
+          aria-labelledby="quality-title"
+        >
           <div class="page-heading">
-            <div><div class="eyebrow">Контроль качества · Фаза A</div><h1 id="quality-title">Центр качества данных</h1><p>Разделяем четыре состояния: подтверждено источником, проверено в sandbox, реализовано в коде и выпущено live.</p></div>
-            <span class="checkpoint-chip checkpoint-chip-risk"><span></span> Есть блокеры</span>
+            <div>
+              <div class="eyebrow">Контроль качества · Фаза A</div>
+              <h1 id="quality-title">Центр качества данных</h1>
+              <p>
+                Разделяем четыре состояния: подтверждено источником, проверено в
+                sandbox, реализовано в коде и выпущено live.
+              </p>
+            </div>
+            <span class="checkpoint-chip checkpoint-chip-risk"
+              ><span></span> Есть блокеры</span
+            >
           </div>
 
           <div class="quality-summary">
-            <article><span class="summary-mark summary-blocker">!</span><div><strong>Production / detailed live data: BLOCKED</strong><p>Replit использует старую сборку; AlfaCRM недоступен из текущей сети; «Точке» нужен backend OAuth</p></div></article>
-            <article><span class="summary-mark summary-fixed">✓</span><div><strong>Payroll sandbox: PASS</strong><p>Raw, формулы, выплаты и начисления сверены без публикации сумм и персональных строк</p></div></article>
-            <article><span class="summary-mark summary-fixed">✓</span><div><strong>Source candidate tests: PASS</strong><p>31 API security + 29 data-import tests; банковский контур остаётся только read-only и без OAuth data access</p></div></article>
+            <article>
+              <span class="summary-mark summary-blocker">!</span>
+              <div>
+                <strong>Production / legacy Replit: BLOCKED</strong>
+                <p>
+                  Старая публичная сборка не используется для персональных
+                  данных; новый owner-only Sites контур проходит отдельные
+                  ворота
+                </p>
+              </div>
+            </article>
+            <article>
+              <span class="summary-mark summary-fixed">✓</span>
+              <div>
+                <strong>Payroll sandbox: PASS</strong>
+                <p>
+                  2 593 raw-строки, формулы, выплаты и начисления сверены;
+                  спорные связи оставлены на ручную проверку
+                </p>
+              </div>
+            </article>
+            <article>
+              <span class="summary-mark summary-fixed">✓</span>
+              <div>
+                <strong>Source candidate tests: PASS</strong>
+                <p>
+                  31 API security; полный data-import и Sites/Worker suites
+                  текущего commit. Банковский контур не имеет платёжных действий
+                </p>
+              </div>
+            </article>
+            <article>
+              <span
+                class="summary-mark summary-blocker"
+                id="quality-alfa-mark"
+                >!</span
+              >
+              <div>
+                <strong id="quality-alfa-title"
+                  >AlfaCRM sandbox: импорт продолжается</strong
+                >
+                <p id="quality-alfa-copy">
+                  Полнота и межфилиальные связи появятся только из
+                  опубликованной owner-only read-модели
+                </p>
+              </div>
+            </article>
           </div>
 
           <article class="panel issue-panel">
             <div class="panel-header issue-header">
-              <div><h2>Реестр найденных проблем</h2><p>Статусы не означают, что изменения уже выпущены в Replit.</p></div>
+              <div>
+                <h2>Реестр найденных проблем</h2>
+                <p>Статусы не означают, что изменения уже выпущены в Replit.</p>
+              </div>
               <div class="filters" role="group" aria-label="Фильтр проблем">
-                <button class="filter is-active" type="button" data-filter="all">Все</button>
-                <button class="filter" type="button" data-filter="blocker">Блокеры</button>
-                <button class="filter" type="button" data-filter="fixed">Исправлено</button>
-                <button class="filter" type="button" data-filter="access">Нужен доступ</button>
+                <button
+                  class="filter is-active"
+                  type="button"
+                  data-filter="all"
+                >
+                  Все
+                </button>
+                <button class="filter" type="button" data-filter="blocker">
+                  Блокеры
+                </button>
+                <button class="filter" type="button" data-filter="fixed">
+                  Исправлено
+                </button>
+                <button class="filter" type="button" data-filter="access">
+                  Нужен доступ
+                </button>
               </div>
             </div>
             <div class="issue-table-wrap">
               <table class="issue-table">
-                <thead><tr><th>Код</th><th>Проблема и влияние</th><th>Статус</th><th>Следующий шаг</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Код</th>
+                    <th>Проблема и влияние</th>
+                    <th>Статус</th>
+                    <th>Следующий шаг</th>
+                  </tr>
+                </thead>
                 <tbody>
-                  <tr data-kind="fixed"><td><code>SEC-01</code></td><td><strong>Публичные демо-реквизиты</strong><span>Любой посетитель мог увидеть данные для входа.</span></td><td><span class="status status-fixed">Исправлено в коде</span></td><td>Контролируемо выпустить в Replit</td></tr>
-                  <tr data-kind="fixed"><td><code>SEC-02</code></td><td><strong>API без общего auth-gate</strong><span>Чувствительные read/write маршруты не были закрыты централизованно.</span></td><td><span class="status status-fixed">Исправлено в коде</span></td><td>Проверить callback-контракты до выпуска</td></tr>
-                  <tr data-kind="blocker"><td><code>SEC-03</code></td><td><strong>Live Replit всё ещё допускает индексацию</strong><span>25.07.2026 на публичной сборке нет noindex meta/X-Robots-Tag, а robots.txt не запрещает обход. В исходниках исправлено, но live не обновлён.</span></td><td><span class="status status-blocker">HIGH · LIVE</span></td><td>Выпустить защищённую сборку и перепроверить снаружи</td></tr>
-                  <tr data-kind="fixed"><td><code>SEC-04</code></td><td><strong>Банковские секреты в JSONB</strong><span>AES-256-GCM vault с key ID и привязкой к connector ID реализован; plaintext secret config завершается fail closed.</span></td><td><span class="status status-fixed">Исправлено · unit PASS</span></td><td>После backup выполнить guarded migration в sandbox</td></tr>
-                  <tr data-kind="blocker"><td><code>SEC-05</code></td><td><strong>Public 5xx errors закрыты строгой границей</strong><span>Exception messages, upstream bodies, customer identifiers, token fragments и PII заменяются фиксированным кодом; banking health использует strict allowlist. Историческая /sync поверхность теперь fail closed; остальные legacy diagnostics ещё требуют удаления перед release.</span></td><td><span class="status status-blocker">PARTIAL · regression PASS</span></td><td>Удалить недоступный legacy code после restored-sandbox проверки</td></tr>
-                  <tr data-kind="fixed"><td><code>SEC-06</code></td><td><strong>Sessions, RBAC, CSRF и lockout подтверждены в PostgreSQL 16 CI</strong><span>Одноразовая БД применила migrations 0009–0010; login, session, CSRF и catalog preflight прошли. Production migration не выполнялась.</span></td><td><span class="status status-fixed">PG16 CI PASS</span></td><td>Перед Replit повторить на восстановленной sandbox-копии</td></tr>
-                  <tr data-kind="fixed"><td><code>SEC-07</code></td><td><strong>Fallback-ключ Evotor</strong><span>Tracked fallback удалён; token operations без защищённого SESSION_SECRET завершаются fail closed.</span></td><td><span class="status status-fixed">Исправлено в коде</span></td><td>Проверить ротацию ключа в sandbox</td></tr>
-                  <tr data-kind="blocker"><td><code>SEC-08</code></td><td><strong>Scoped non-owner handlers ещё не реализованы</strong><span>Branch/legal-entity scope хранится в session; все business routes для non-owner теперь fail closed, пока каждый handler не применяет оба predicates.</span></td><td><span class="status status-blocker">HIGH · безопасно заблокировано</span></td><td>Включать маршруты только с cross-scope negative tests</td></tr>
-                  <tr data-kind="blocker"><td><code>SEC-09</code></td><td><strong>Allowed access audit подтверждён в PostgreSQL</strong><span>Route-template registry скрывает идентификаторы; запись разрешённого banking route прошла CI. Deny/outage ветки ещё требуют PostgreSQL negative smoke.</span></td><td><span class="status status-blocker">PARTIAL · allowed PG PASS</span></td><td>Проверить denied и audit-store outage в PostgreSQL</td></tr>
-                  <tr data-kind="fixed"><td><code>OPS-02</code></td><td><strong>Startup fail closed подтверждён в PostgreSQL 16 CI</strong><span>После controlled rollback обязательной security schema отдельный API-процесс завершился до listener и polling с кодом 1.</span></td><td><span class="status status-fixed">PG16 CI PASS</span></td><td>Сохранять gate обязательным в каждом quality workflow</td></tr>
-                  <tr data-kind="fixed"><td><code>INT-01</code></td><td><strong>Read-only importer AlfaCRM усилен</strong><span>Запросы сериализованы; students и leads разделены; `pageSize`, scope status, retry, stale branch exclusion и snapshot guardrails проверены на PGlite.</span></td><td><span class="status status-fixed">29 data-import tests PASS</span></td><td>Дождаться независимого финального verdict</td></tr>
-                  <tr data-kind="blocker"><td><code>REV-A4-01</code></td><td><strong>Прежнее закрытие покрытия отозвано</strong><span>V13 добавил обязательные endpoints, но Ревизор обнаружил потерю raw lineage, отсутствие truthful snapshot и слабую pagination-защиту.</span></td><td><span class="status status-blocker">REOPENED · v13 FAIL</span></td><td>Принимать только вместе с A4-13-01/02/03</td></tr>
-                  <tr data-kind="blocker"><td><code>A4-13-01</code></td><td><strong>Неизменяемый raw lineage</strong><span>Migration 0014 запрещает raw UPDATE/DELETE, отделяет observations и требует реальные raw/batch FK. PGlite PASS, но finding ещё не закрыт независимо.</span></td><td><span class="status status-blocker">CANDIDATE FIX · REVIEW PENDING</span></td><td>Ревизор проверяет trigger, FK, anti-join и rollback</td></tr>
-                  <tr data-kind="blocker"><td><code>A4-13-02</code></td><td><strong>Truthful snapshot reconciliation</strong><span>Missing rows становятся stale только после completed scope; partial не tombstone-ит. Lead→student и family evidence покрыты тестами.</span></td><td><span class="status status-blocker">CANDIDATE FIX · REVIEW PENDING</span></td><td>Ревизор повторяет snapshot и failure scenarios</td></tr>
-                  <tr data-kind="blocker"><td><code>A4-13-03</code></td><td><strong>Пагинация и отказоустойчивость</strong><span>Используется `page` + `pageSize: 50`; repeat page, max guard, transport failure и retry завершаются безопасно.</span></td><td><span class="status status-blocker">CANDIDATE FIX · REVIEW PENDING</span></td><td>Закрыть только финальным Reviewer/Coordinator PASS</td></tr>
-                  <tr data-kind="blocker"><td><code>INT-02</code></td><td><strong>Внешние POST callbacks намеренно неработоспособны</strong><span>Website handler теперь atomic и payload-bound idempotent, но website, bank и Evotor callbacks остаются за user auth/CSRF до provider-auth и replay protection.</span></td><td><span class="status status-blocker">HIGH · безопасно заблокировано</span></td><td>Реализовать и проверить provider-specific contracts</td></tr>
-                  <tr data-kind="fixed"><td><code>QA-01</code></td><td><strong>Исторический PostgreSQL 16 runtime gate выполнен</strong><span>Checkpoint v10 прошёл test:full, test:postgres и build:full на точном private PR head; это не доказательство новой migration 0014.</span></td><td><span class="status status-fixed">HISTORICAL CI PASS</span></td><td>Не переносить verdict на текущий candidate</td></tr>
-                  <tr data-kind="access"><td><code>QA-A4-02</code></td><td><strong>Текущему candidate нужен PostgreSQL 16 gate</strong><span>Typecheck, build, 31 security, 29 data-import и 10 Sites tests проходят. `test:postgres` не запустился без `TEST_DATABASE_URL`, поэтому wire-protocol evidence для 0014 отсутствует.</span></td><td><span class="status status-access">BLOCKED BY TEST DB</span></td><td>Запустить exact commit на одноразовом PostgreSQL 16</td></tr>
-                  <tr data-kind="blocker"><td><code>SEC-10</code></td><td><strong>Текущие раскрытые ключи временно разрешены для проверки</strong><span>Новый credential «Точки» передан, но не сохранён и не введён в protected backend env. После доказательства end-to-end ключи нужно перевыпустить.</span></td><td><span class="status status-blocker">Ротация перед стабильным live</span></td><td>Не переносить секреты в Git, Sites или frontend</td></tr>
-                  <tr data-kind="fixed"><td><code>REV-A1-201</code></td><td><strong>Website lead мог потеряться после partial write</strong><span>Raw, lead, processed flag и source update объединены одной transaction под advisory lock; PostgreSQL failure/retry создаёт ровно одну пару, другой payload получает 409.</span></td><td><span class="status status-fixed">Исправлено · PG16 CI PASS</span></td><td>Добавить provider-auth до открытия callback</td></tr>
-                  <tr data-kind="fixed"><td><code>REV-A1-202</code></td><td><strong>API мог начать listen без migrations 0009–0010</strong><span>Pre-listen gate проверяет columns, indexes и точные journal timestamp+hash; controlled PostgreSQL schema drift блокирует startup.</span></td><td><span class="status status-fixed">Исправлено · PG16 CI PASS</span></td><td>Сохранять проверку обязательной</td></tr>
-                  <tr data-kind="fixed"><td><code>CFG-01</code></td><td><strong>Hardcoded AlfaCRM tenant fallback</strong><span>Tenant мог неявно выбираться при отсутствии ALFACRM_DOMAIN.</span></td><td><span class="status status-fixed">Исправлено в коде</span></td><td>Задать ALFACRM_DOMAIN только в protected env</td></tr>
-                  <tr data-kind="access"><td><code>DATA-01</code></td><td><strong>Свежая карта филиалов AlfaCRM не получена</strong><span>Исторический read-only probe возвращал 8 филиалов, но повторный full import 25.07.2026 завершился network timeout до branch inventory. Старое число не принято как текущая истина.</span></td><td><span class="status status-access">BLOCKED BY NETWORK</span></td><td>Запустить importer на защищённом backend с доступом к CRM</td></tr>
-                  <tr data-kind="access"><td><code>DATA-02</code></td><td><strong>Операционные данные AlfaCRM ещё не загружены</strong><span>Ученики, лиды, группы, оплаты, занятия, абонементы, справочники и change log имеют 0 свежих rows из-за сетевого блокера; это не означает отсутствие записей в источнике.</span></td><td><span class="status status-access">Свежих данных нет</span></td><td>Повторить full read-only import и выполнить integrity audit</td></tr>
-                  <tr data-kind="access"><td><code>DATA-03</code></td><td><strong>Банк и AlfaCRM не сверены на свежих данных</strong><span>ДДС, ОПиУ и AI CFO пока нельзя считать надёжными.</span></td><td><span class="status status-access">Нужен доступ</span></td><td>Сверка после backup и контроля покрытия</td></tr>
-                  <tr data-kind="fixed"><td><code>PAY-01</code></td><td><strong>Зарплатная таблица импортирована в изолированную БД</strong><span>3 689 raw-строк с формулами; 1 881 выплат и 1 328 ненулевых результатов начислений совпали с источником. Формулы не превращены в утверждённые правила.</span></td><td><span class="status status-fixed">SANDBOX AUDIT PASS</span></td><td>Разобрать 26 связей выплат и 17 идентичностей начислений вручную</td></tr>
-                  <tr data-kind="blocker"><td><code>BANK-01</code></td><td><strong>Redirect URI «Точки» указывает на Sites root</strong><span>Sites не является банковским backend и не принимает OAuth code. Код требует точный /api/banking/oauth/callback на защищённом API-хосте.</span></td><td><span class="status status-blocker">OAuth BLOCKED</span></td><td>Зарегистрировать точный backend callback и пройти consent</td></tr>
-                  <tr data-kind="blocker"><td><code>OPS-01</code></td><td><strong>GitHub содержит исторический Draft PR #1, но не текущий candidate</strong><span>Текущая среда не предоставляет обязательный gh CLI, поэтому новый exact tree пока нельзя опубликовать и проверить через PR quality workflow. Merge не выполнялся.</span></td><td><span class="status status-blocker">TOOLING BLOCKED</span></td><td>Восстановить gh CLI и опубликовать точный candidate без обходного пути</td></tr>
+                  <tr data-kind="fixed">
+                    <td><code>SEC-01</code></td>
+                    <td>
+                      <strong>Публичные демо-реквизиты</strong
+                      ><span
+                        >Любой посетитель мог увидеть данные для входа.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-fixed">Исправлено в коде</span>
+                    </td>
+                    <td>Контролируемо выпустить в Replit</td>
+                  </tr>
+                  <tr data-kind="fixed">
+                    <td><code>SEC-02</code></td>
+                    <td>
+                      <strong>API без общего auth-gate</strong
+                      ><span
+                        >Чувствительные read/write маршруты не были закрыты
+                        централизованно.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-fixed">Исправлено в коде</span>
+                    </td>
+                    <td>Проверить callback-контракты до выпуска</td>
+                  </tr>
+                  <tr data-kind="blocker">
+                    <td><code>SEC-03</code></td>
+                    <td>
+                      <strong>Live Replit всё ещё допускает индексацию</strong
+                      ><span
+                        >25.07.2026 на публичной сборке нет noindex
+                        meta/X-Robots-Tag, а robots.txt не запрещает обход. В
+                        исходниках исправлено, но live не обновлён.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-blocker">HIGH · LIVE</span>
+                    </td>
+                    <td>Выпустить защищённую сборку и перепроверить снаружи</td>
+                  </tr>
+                  <tr data-kind="fixed">
+                    <td><code>SEC-04</code></td>
+                    <td>
+                      <strong>Банковские секреты в JSONB</strong
+                      ><span
+                        >AES-256-GCM vault с key ID и привязкой к connector ID
+                        реализован; plaintext secret config завершается fail
+                        closed.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-fixed"
+                        >Исправлено · unit PASS</span
+                      >
+                    </td>
+                    <td>После backup выполнить guarded migration в sandbox</td>
+                  </tr>
+                  <tr data-kind="blocker">
+                    <td><code>SEC-05</code></td>
+                    <td>
+                      <strong>Public 5xx errors закрыты строгой границей</strong
+                      ><span
+                        >Exception messages, upstream bodies, customer
+                        identifiers, token fragments и PII заменяются
+                        фиксированным кодом; banking health использует strict
+                        allowlist. Историческая /sync поверхность теперь fail
+                        closed; остальные legacy diagnostics ещё требуют
+                        удаления перед release.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-blocker"
+                        >PARTIAL · regression PASS</span
+                      >
+                    </td>
+                    <td>
+                      Удалить недоступный legacy code после restored-sandbox
+                      проверки
+                    </td>
+                  </tr>
+                  <tr data-kind="fixed">
+                    <td><code>SEC-06</code></td>
+                    <td>
+                      <strong
+                        >Sessions, RBAC, CSRF и lockout подтверждены в
+                        PostgreSQL 16 CI</strong
+                      ><span
+                        >Одноразовая БД применила migrations 0009–0010; login,
+                        session, CSRF и catalog preflight прошли. Production
+                        migration не выполнялась.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-fixed">PG16 CI PASS</span>
+                    </td>
+                    <td>
+                      Перед Replit повторить на восстановленной sandbox-копии
+                    </td>
+                  </tr>
+                  <tr data-kind="fixed">
+                    <td><code>SEC-07</code></td>
+                    <td>
+                      <strong>Fallback-ключ Evotor</strong
+                      ><span
+                        >Tracked fallback удалён; token operations без
+                        защищённого SESSION_SECRET завершаются fail
+                        closed.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-fixed">Исправлено в коде</span>
+                    </td>
+                    <td>Проверить ротацию ключа в sandbox</td>
+                  </tr>
+                  <tr data-kind="blocker">
+                    <td><code>SEC-08</code></td>
+                    <td>
+                      <strong
+                        >Scoped non-owner handlers ещё не реализованы</strong
+                      ><span
+                        >Branch/legal-entity scope хранится в session; все
+                        business routes для non-owner теперь fail closed, пока
+                        каждый handler не применяет оба predicates.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-blocker"
+                        >HIGH · безопасно заблокировано</span
+                      >
+                    </td>
+                    <td>
+                      Включать маршруты только с cross-scope negative tests
+                    </td>
+                  </tr>
+                  <tr data-kind="blocker">
+                    <td><code>SEC-09</code></td>
+                    <td>
+                      <strong
+                        >Allowed access audit подтверждён в PostgreSQL</strong
+                      ><span
+                        >Route-template registry скрывает идентификаторы; запись
+                        разрешённого banking route прошла CI. Deny/outage ветки
+                        ещё требуют PostgreSQL negative smoke.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-blocker"
+                        >PARTIAL · allowed PG PASS</span
+                      >
+                    </td>
+                    <td>Проверить denied и audit-store outage в PostgreSQL</td>
+                  </tr>
+                  <tr data-kind="fixed">
+                    <td><code>OPS-02</code></td>
+                    <td>
+                      <strong
+                        >Startup fail closed подтверждён в PostgreSQL 16
+                        CI</strong
+                      ><span
+                        >После controlled rollback обязательной security schema
+                        отдельный API-процесс завершился до listener и polling с
+                        кодом 1.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-fixed">PG16 CI PASS</span>
+                    </td>
+                    <td>
+                      Сохранять gate обязательным в каждом quality workflow
+                    </td>
+                  </tr>
+                  <tr data-kind="fixed">
+                    <td><code>INT-01</code></td>
+                    <td>
+                      <strong>Read-only importer AlfaCRM усилен</strong
+                      ><span
+                        >Запросы сериализованы; students и leads разделены;
+                        `pageSize`, scope status, retry, stale branch exclusion
+                        и snapshot guardrails проверены на PGlite.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-fixed">DATA SUITE PASS</span>
+                    </td>
+                    <td>Дождаться независимого финального verdict</td>
+                  </tr>
+                  <tr data-kind="blocker" id="quality-alfa-linkage-row">
+                    <td><code>DATA-01</code></td>
+                    <td>
+                      <strong id="quality-alfa-linkage-title"
+                        >Межфилиальные связи AlfaCRM проверяются</strong
+                      ><span id="quality-alfa-linkage-copy"
+                        >ID учеников, групп, педагогов, оплат и занятий
+                        учитываются только вместе с филиалом.</span
+                      >
+                    </td>
+                    <td>
+                      <span
+                        class="status status-blocker"
+                        id="quality-alfa-linkage-status"
+                        >IMPORT IN PROGRESS</span
+                      >
+                    </td>
+                    <td id="quality-alfa-linkage-action">
+                      Завершить terminal snapshot и integrity audit
+                    </td>
+                  </tr>
+                  <tr data-kind="blocker">
+                    <td><code>REV-A4-01</code></td>
+                    <td>
+                      <strong>Прежнее закрытие покрытия отозвано</strong
+                      ><span
+                        >V13 добавил обязательные endpoints, но Ревизор
+                        обнаружил потерю raw lineage, отсутствие truthful
+                        snapshot и слабую pagination-защиту.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-blocker"
+                        >REOPENED · v13 FAIL</span
+                      >
+                    </td>
+                    <td>Принимать только вместе с A4-13-01/02/03</td>
+                  </tr>
+                  <tr data-kind="blocker">
+                    <td><code>A4-13-01</code></td>
+                    <td>
+                      <strong>Точная неизменяемая observation lineage</strong
+                      ><span
+                        >Migrations 0014–0015 запрещают raw/observation UPDATE,
+                        DELETE и TRUNCATE; каждая нормализованная строка связана
+                        с точным batch/scope/page observation. PGlite PASS,
+                        независимая проверка ещё впереди.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-blocker"
+                        >CANDIDATE FIX · REVIEW PENDING</span
+                      >
+                    </td>
+                    <td>
+                      Ревизор проверяет composite FK, triggers и rollback →
+                      reapply
+                    </td>
+                  </tr>
+                  <tr data-kind="blocker">
+                    <td><code>A4-13-02</code></td>
+                    <td>
+                      <strong>Truthful snapshot reconciliation</strong
+                      ><span
+                        >Missing rows становятся stale только после completed
+                        scope; stale student каскадирует дочерние связи, а
+                        partial scope не tombstone-ит данные и не воскресит
+                        детей.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-blocker"
+                        >CANDIDATE FIX · REVIEW PENDING</span
+                      >
+                    </td>
+                    <td>Ревизор повторяет snapshot и failure scenarios</td>
+                  </tr>
+                  <tr data-kind="blocker">
+                    <td><code>A4-13-03</code></td>
+                    <td>
+                      <strong>Пагинация и отказоустойчивость</strong
+                      ><span
+                        >Используется `page` + `pageSize: 50`; repeat page, max
+                        guard, transport failure и retry завершаются
+                        безопасно.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-blocker"
+                        >CANDIDATE FIX · REVIEW PENDING</span
+                      >
+                    </td>
+                    <td>Закрыть только финальным Reviewer/Coordinator PASS</td>
+                  </tr>
+                  <tr data-kind="blocker">
+                    <td><code>INT-02</code></td>
+                    <td>
+                      <strong
+                        >Внешние POST callbacks намеренно
+                        неработоспособны</strong
+                      ><span
+                        >Website handler теперь atomic и payload-bound
+                        idempotent, но website, bank и Evotor callbacks остаются
+                        за user auth/CSRF до provider-auth и replay
+                        protection.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-blocker"
+                        >HIGH · безопасно заблокировано</span
+                      >
+                    </td>
+                    <td>Реализовать и проверить provider-specific contracts</td>
+                  </tr>
+                  <tr data-kind="fixed">
+                    <td><code>QA-01</code></td>
+                    <td>
+                      <strong
+                        >Исторический PostgreSQL 16 runtime gate
+                        выполнен</strong
+                      ><span
+                        >Checkpoint v10 прошёл test:full, test:postgres и
+                        build:full на точном private PR head; это не
+                        доказательство новых migrations 0014–0015.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-fixed"
+                        >HISTORICAL CI PASS</span
+                      >
+                    </td>
+                    <td>Не переносить verdict на текущий candidate</td>
+                  </tr>
+                  <tr data-kind="access">
+                    <td><code>QA-A4-02</code></td>
+                    <td>
+                      <strong
+                        >Текущему candidate нужен PostgreSQL 16 gate</strong
+                      ><span
+                        >Typecheck, build, 31 security и полный data-import
+                        suite проходят локально. Exact rollback 0014 → reapply →
+                        0015 добавлен в PostgreSQL suite, но ещё ждёт CI.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-access">CI PENDING</span>
+                    </td>
+                    <td>
+                      Запустить точный commit на одноразовом PostgreSQL 16
+                    </td>
+                  </tr>
+                  <tr data-kind="blocker">
+                    <td><code>SEC-10</code></td>
+                    <td>
+                      <strong
+                        >Текущие раскрытые ключи временно разрешены для
+                        проверки</strong
+                      ><span
+                        >Ключи внесены только в protected Sites environment и
+                        отсутствуют в Git/frontend. После доказательства
+                        end-to-end их нужно перевыпустить.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-blocker"
+                        >Ротация перед стабильным live</span
+                      >
+                    </td>
+                    <td>
+                      После проверки заменить ключи через защищённый канал
+                    </td>
+                  </tr>
+                  <tr data-kind="fixed">
+                    <td><code>REV-A1-201</code></td>
+                    <td>
+                      <strong
+                        >Website lead мог потеряться после partial write</strong
+                      ><span
+                        >Raw, lead, processed flag и source update объединены
+                        одной transaction под advisory lock; PostgreSQL
+                        failure/retry создаёт ровно одну пару, другой payload
+                        получает 409.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-fixed"
+                        >Исправлено · PG16 CI PASS</span
+                      >
+                    </td>
+                    <td>Добавить provider-auth до открытия callback</td>
+                  </tr>
+                  <tr data-kind="fixed">
+                    <td><code>REV-A1-202</code></td>
+                    <td>
+                      <strong
+                        >API мог начать listen без migrations 0009–0010</strong
+                      ><span
+                        >Pre-listen gate проверяет columns, indexes и точные
+                        journal timestamp+hash; controlled PostgreSQL schema
+                        drift блокирует startup.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-fixed"
+                        >Исправлено · PG16 CI PASS</span
+                      >
+                    </td>
+                    <td>Сохранять проверку обязательной</td>
+                  </tr>
+                  <tr data-kind="fixed">
+                    <td><code>CFG-01</code></td>
+                    <td>
+                      <strong>Hardcoded AlfaCRM tenant fallback</strong
+                      ><span
+                        >Tenant мог неявно выбираться при отсутствии
+                        ALFACRM_DOMAIN.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-fixed">Исправлено в коде</span>
+                    </td>
+                    <td>Задать ALFACRM_DOMAIN только в protected env</td>
+                  </tr>
+                  <tr data-kind="access">
+                    <td><code>DATA-01</code></td>
+                    <td>
+                      <strong>Свежая карта филиалов AlfaCRM проверяется</strong
+                      ><span
+                        >Полный read-only импорт запущен в отдельную sandbox-БД.
+                        Исторические количества не принимаются как текущая
+                        истина до terminal report и integrity audit.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-access">IMPORT RUNNING</span>
+                    </td>
+                    <td>
+                      Зафиксировать только завершённые scopes и фактическое
+                      покрытие
+                    </td>
+                  </tr>
+                  <tr data-kind="access">
+                    <td><code>DATA-02</code></td>
+                    <td>
+                      <strong
+                        >Операционные данные AlfaCRM проходят загрузку</strong
+                      ><span
+                        >Ученики, лиды, группы, состав, оплаты, занятия,
+                        посещения, абонементы, справочники и change log не
+                        считаются доступными до завершения полного
+                        snapshot.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-access"
+                        >Проверка источника</span
+                      >
+                    </td>
+                    <td>
+                      Выполнить integrity audit и опубликовать owner-only
+                      read-модель
+                    </td>
+                  </tr>
+                  <tr data-kind="access">
+                    <td><code>DATA-03</code></td>
+                    <td>
+                      <strong>Банк и AlfaCRM не сверены на свежих данных</strong
+                      ><span
+                        >ДДС, ОПиУ и AI CFO пока нельзя считать надёжными.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-access">Нужен доступ</span>
+                    </td>
+                    <td>Сверка после backup и контроля покрытия</td>
+                  </tr>
+                  <tr data-kind="fixed">
+                    <td><code>PAY-01</code></td>
+                    <td>
+                      <strong
+                        >Зарплатная таблица импортирована в изолированную
+                        БД</strong
+                      ><span
+                        >2 593 raw-строки с формулами; 1 881 выплат и 1 328
+                        ненулевых результатов начислений совпали с источником.
+                        Формулы не превращены в утверждённые правила.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-fixed"
+                        >SANDBOX AUDIT PASS</span
+                      >
+                    </td>
+                    <td>
+                      Разобрать 26 связей выплат и 17 идентичностей начислений
+                      вручную
+                    </td>
+                  </tr>
+                  <tr data-kind="access">
+                    <td><code>BANK-01</code></td>
+                    <td>
+                      <strong id="bank-issue-title"
+                        >Runtime-статус read-only «Точки» загружается</strong
+                      ><span id="bank-issue-copy"
+                        >Защищённый Worker проверяет state, шифрует токены и не
+                        имеет платёжных scopes или маршрутов.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-access" id="bank-issue-status"
+                        >RUNTIME CHECK</span
+                      >
+                    </td>
+                    <td id="bank-issue-action">
+                      Сверить фактический runtime-статус и покрытие счетов
+                    </td>
+                  </tr>
+                  <tr data-kind="blocker">
+                    <td><code>OPS-01</code></td>
+                    <td>
+                      <strong
+                        >GitHub Draft PR #1 ещё не содержит текущий
+                        candidate</strong
+                      ><span
+                        >Изменения будут опубликованы одним точным commit после
+                        локальных тестов, agent preview и проверки Sites
+                        artifact. Merge не выполняется автоматически.</span
+                      >
+                    </td>
+                    <td>
+                      <span class="status status-blocker">PUBLISH PENDING</span>
+                    </td>
+                    <td>Запустить CI на точном candidate и сверить SHA</td>
+                  </tr>
                 </tbody>
               </table>
-              <div class="empty-filter" hidden>В этой категории проблем нет.</div>
+              <div class="empty-filter" hidden>
+                В этой категории проблем нет.
+              </div>
             </div>
           </article>
         </section>
 
-        <section class="view" data-view="sources" aria-labelledby="sources-title">
+        <section
+          class="view"
+          data-view="sources"
+          aria-labelledby="sources-title"
+        >
           <div class="page-heading">
-            <div><div class="eyebrow">Карта интеграций</div><h1 id="sources-title">Источники и покрытие</h1><p>Показываем отдельно подтверждённую авторизацию, доступ к данным и полноту покрытия.</p></div>
+            <div>
+              <div class="eyebrow">Карта интеграций</div>
+              <h1 id="sources-title">Источники и покрытие</h1>
+              <p>
+                Показываем отдельно подтверждённую авторизацию, доступ к данным
+                и полноту покрытия.
+              </p>
+            </div>
           </div>
 
           <div class="source-cards">
             <article class="integration-card">
-              <div class="integration-top"><div class="source-logo source-logo-crm">A</div><span class="status status-blocker">Network timeout</span></div>
+              <div class="integration-top">
+                <div class="source-logo source-logo-crm">A</div>
+                <span class="status status-unverified" id="alfa-card-status"
+                  >Импорт выполняется</span
+                >
+              </div>
               <h2>AlfaCRM</h2>
-              <p>Read-only importer сохраняет raw + normalized слои для обязательных сущностей. Full snapshot и incremental change discovery разделены; текущая сеть не установила соединение с CRM, поэтому кодовое покрытие не считается покрытием данных.</p>
-              <dl><div><dt>Последний full run</dt><dd>request timeout</dd></div><div><dt>Обязательное покрытие</dt><dd>Code + tests PASS</dd></div><div><dt>Incremental</dt><dd>Change discovery only</dd></div><div><dt>Свежих CRM rows</dt><dd>0 · network blocked</dd></div></dl>
+              <p id="alfa-card-copy">
+                Read-only importer сохраняет неизменяемый raw + observation +
+                normalized слои. Фактическое покрытие появится здесь только
+                после terminal report и integrity audit.
+              </p>
+              <dl>
+                <div>
+                  <dt>Последний full run</dt>
+                  <dd id="alfa-card-run">выполняется</dd>
+                </div>
+                <div>
+                  <dt>Обязательное покрытие</dt>
+                  <dd>Code + data suite PASS</dd>
+                </div>
+                <div>
+                  <dt>Incremental</dt>
+                  <dd>Change discovery only</dd>
+                </div>
+                <div>
+                  <dt>Свежие сущности</dt>
+                  <dd id="alfa-card-rows">ожидаем итог</dd>
+                </div>
+              </dl>
             </article>
             <article class="integration-card">
-              <div class="integration-top"><div class="source-logo source-logo-bank">Т</div><span class="status status-unverified">Нужен OAuth consent</span></div>
+              <div class="integration-top">
+                <div class="source-logo source-logo-bank">Т</div>
+                <span class="status status-unverified" id="tochka-card-status"
+                  >Статус загружается</span
+                >
+              </div>
               <h2>Банк «Точка»</h2>
-              <p>Предыдущий production auth-probe получил service token. Новый временный credential намеренно не сохранён в Sites или Git; для его проверки нужен protected backend environment. Service token всё равно не даёт доступ к счетам.</p>
-              <dl><div><dt>Предыдущий auth-probe</dt><dd>HTTP 200</dd></div><div><dt>Новый credential</dt><dd>Protected env pending</dd></div><div><dt>Счета</dt><dd>Нужен hybrid OAuth</dd></div><div><dt>Consent / платежи</dt><dd>Не создавались</dd></div></dl>
+              <p>
+                Клиент настроен в protected Sites environment. Consent и code
+                обрабатываются сервером; токены шифруются. Запрошены только
+                счета, остатки, клиенты и выписки, без создания или подписания
+                платежей.
+              </p>
+              <dl>
+                <div>
+                  <dt>Client credentials</dt>
+                  <dd>Protected env</dd>
+                </div>
+                <div>
+                  <dt>Redirect + state</dt>
+                  <dd>Server-side ready</dd>
+                </div>
+                <div>
+                  <dt>Счета</dt>
+                  <dd id="tochka-card-accounts">Статус загружается</dd>
+                </div>
+                <div>
+                  <dt>Платежи</dt>
+                  <dd>Не разрешены</dd>
+                </div>
+              </dl>
             </article>
             <article class="integration-card">
-              <div class="integration-top"><div class="source-logo source-logo-sheet">З</div><span class="status status-safe">Sandbox audit PASS</span></div>
+              <div class="integration-top">
+                <div class="source-logo source-logo-sheet">З</div>
+                <span class="status status-safe" id="payroll-card-status"
+                  >Sandbox audit PASS</span
+                >
+              </div>
               <h2>Зарплатная таблица</h2>
-              <p>Реальный Google Sheet импортирован в отдельную PostgreSQL-совместимую БД. В Sites переданы только контрольные количества — без имён, ставок, сумм и банковских реквизитов.</p>
-              <dl><div><dt>Raw + формулы</dt><dd>3 689 строк</dd></div><div><dt>Выплаты</dt><dd>1 881 принята</dd></div><div><dt>Начисления</dt><dd>1 328 принято</dd></div><div><dt>Дубли</dt><dd>0</dd></div></dl>
+              <p>
+                Реальный Google Sheet импортирован в отдельную
+                PostgreSQL-совместимую БД. Проверенные карточки, начисления и
+                выплаты доступны только владельцу через серверную read-модель
+                Sites.
+              </p>
+              <dl>
+                <div>
+                  <dt>Raw + формулы</dt>
+                  <dd>2 593 строки</dd>
+                </div>
+                <div>
+                  <dt>Сотрудники</dt>
+                  <dd id="payroll-card-employees">114 карточек</dd>
+                </div>
+                <div>
+                  <dt>Выплаты</dt>
+                  <dd>1 881 принята</dd>
+                </div>
+                <div>
+                  <dt>Начисления</dt>
+                  <dd>1 328 принято</dd>
+                </div>
+              </dl>
             </article>
           </div>
 
           <article class="panel coverage-panel">
-            <div class="panel-header"><div><h2>Покрытие бизнеса</h2><p>Пустые значения — честный результат отсутствия авторизованной проверки.</p></div></div>
+            <div class="panel-header">
+              <div>
+                <h2>Покрытие бизнеса</h2>
+                <p>
+                  Пустые значения — честный результат отсутствия авторизованной
+                  проверки.
+                </p>
+              </div>
+            </div>
             <div class="coverage-grid">
-              <div><span>Филиалы AlfaCRM</span><strong>Свежая инвентаризация blocked</strong><p>Исторический probe: 8. Повторный full run: network timeout. Текущее число не утверждено.</p></div>
-              <div><span>Юридические лица</span><strong>3 подтверждены владельцем</strong><p>Правила заведены; фактическая привязка филиалов ждёт свежего CRM import.</p></div>
-              <div><span>Банковские счета</span><strong>OAuth не завершён</strong><p>Service token валиден; Sites не хранит банковские секреты и операции.</p></div>
-              <div><span>Очередь проверки payroll</span><strong>26 выплат · 17 начислений</strong><p>Связи оставлены unresolved; автоматического слияния людей нет.</p></div>
+              <div>
+                <span>Филиалы AlfaCRM</span
+                ><strong id="coverage-branches"
+                  >Полная инвентаризация выполняется</strong
+                >
+                <p id="coverage-branches-copy">
+                  Исторические количества не используются; результат появится
+                  после завершённого snapshot.
+                </p>
+              </div>
+              <div>
+                <span>Юридические лица</span
+                ><strong>3 подтверждены владельцем</strong>
+                <p>
+                  Правила заведены; фактическая привязка филиалов ждёт свежего
+                  CRM import.
+                </p>
+              </div>
+              <div>
+                <span>Банковские счета</span
+                ><strong id="coverage-bank">Статус загружается</strong>
+                <p>
+                  Секреты находятся в protected environment; платёжных действий
+                  нет.
+                </p>
+              </div>
+              <div>
+                <span>Очередь проверки payroll</span
+                ><strong>26 выплат · 17 начислений</strong>
+                <p>
+                  Связи оставлены unresolved; автоматического слияния людей нет.
+                </p>
+              </div>
             </div>
           </article>
         </section>
 
+        <section
+          class="view front-office-view"
+          data-view="front-office"
+          aria-labelledby="front-office-title"
+        >
+          <div class="page-heading front-office-heading">
+            <div>
+              <div class="eyebrow">Продажи и клиентский сервис</div>
+              <h1 id="front-office-title">Front Office</h1>
+              <p>
+                Единое рабочее место от первого запроса до пробного занятия,
+                договора и дальнейшего сервиса.
+              </p>
+            </div>
+            <div class="front-office-safety" aria-label="Режим безопасности">
+              <span>ARTHELLO</span>
+              <span>MANUAL_REPLY</span>
+              <span id="fo-data-mode">ЗАГРУЗКА</span>
+            </div>
+          </div>
+
+          <div class="front-office-notice" role="note">
+            <span class="notice-icon">α</span>
+            <div>
+              <strong id="fo-data-title">Проверяем реальные входящие</strong>
+              <p>
+                Новые заявки подключённых каналов появляются здесь. Клиенту
+                ничего не отправляется: отвечает только менеджер вручную.
+              </p>
+            </div>
+            <span class="front-office-lock">Отправки заблокированы</span>
+          </div>
+
+          <div class="front-office-metrics" aria-label="Показатели воронки">
+            <button type="button" data-fo-metric="all">
+              <span>Все лиды</span>
+              <strong id="fo-metric-total">0</strong>
+              <small id="fo-metric-mode">входящий ящик</small>
+              <em>Открыть список →</em>
+            </button>
+            <button type="button" data-fo-metric="active">
+              <span>В работе</span>
+              <strong id="fo-metric-active">0</strong>
+              <small>есть следующий шаг</small>
+              <em>Показать активные →</em>
+            </button>
+            <button type="button" data-fo-metric="unassigned">
+              <span>Без ответственного</span>
+              <strong id="fo-metric-unassigned">0</strong>
+              <small>нужна маршрутизация</small>
+              <em>Назначить владельца →</em>
+            </button>
+            <button type="button" data-fo-metric="overdue">
+              <span>Просрочено</span>
+              <strong id="fo-metric-overdue">0</strong>
+              <small>требует внимания</small>
+              <em>Разобрать очередь →</em>
+            </button>
+            <button type="button" data-fo-metric="won">
+              <span>Договор</span>
+              <strong id="fo-metric-won">0</strong>
+              <small>результат воронки</small>
+              <em>Открыть завершённые →</em>
+            </button>
+          </div>
+
+          <div class="front-office-funnel" aria-label="Этапы воронки">
+            <div class="front-office-funnel-head">
+              <div>
+                <span class="module-state">Воронка продаж</span>
+                <strong>Запрос → программа → пробное → договор</strong>
+              </div>
+              <span id="fo-funnel-summary">0 активных лидов</span>
+            </div>
+            <div class="front-office-funnel-track" id="fo-funnel-track"></div>
+          </div>
+
+          <div class="front-office-workspace">
+            <aside class="front-office-inbox" aria-label="Список лидов">
+              <div class="front-office-panel-head">
+                <div>
+                  <span class="module-state">Входящий ящик</span>
+                  <h2>Лиды и обращения</h2>
+                </div>
+                <span class="front-office-count" id="fo-lead-count">0</span>
+              </div>
+              <div
+                class="front-office-filters"
+                role="group"
+                aria-label="Фильтр"
+              >
+                <button class="is-active" type="button" data-fo-filter="all">
+                  Все
+                </button>
+                <button type="button" data-fo-filter="attention">
+                  Внимание
+                </button>
+                <button type="button" data-fo-filter="unassigned">
+                  Без владельца
+                </button>
+              </div>
+              <div class="front-office-lead-list" id="fo-lead-list"></div>
+            </aside>
+
+            <section class="front-office-card" aria-label="Карточка лида">
+              <div class="front-office-card-head">
+                <div class="front-office-contact">
+                  <span class="front-office-avatar" id="fo-avatar">Т</span>
+                  <div>
+                    <span class="module-state">Тестовый контакт</span>
+                    <h2 id="fo-contact-name">Выберите лид</h2>
+                    <p id="fo-contact-meta">—</p>
+                  </div>
+                </div>
+                <div class="front-office-card-actions">
+                  <span class="front-office-priority" id="fo-priority">P3</span>
+                  <button
+                    class="front-office-open-profile"
+                    type="button"
+                    id="fo-open-profile"
+                    aria-haspopup="dialog"
+                    aria-controls="fo-profile-layer"
+                  >
+                    Полная карточка <span>↗</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="front-office-source-row">
+                <span>Источник: <strong id="fo-source">—</strong></span>
+                <span>Цель: <strong id="fo-intent">—</strong></span>
+                <span
+                  >Факт:
+                  <strong class="fact-unverified">UNVERIFIED</strong></span
+                >
+              </div>
+
+              <form class="front-office-editor" id="fo-editor">
+                <label>
+                  <span>Этап</span>
+                  <select id="fo-stage"></select>
+                </label>
+                <label>
+                  <span>Ответственный</span>
+                  <select id="fo-owner">
+                    <option value="">Не назначен</option>
+                    <option value="Анна">Анна</option>
+                    <option value="Мария">Мария</option>
+                    <option value="Руководитель филиала">
+                      Руководитель филиала
+                    </option>
+                  </select>
+                </label>
+                <label class="front-office-editor-wide">
+                  <span>Следующий шаг</span>
+                  <input id="fo-next-action" type="text" maxlength="140" />
+                </label>
+                <label>
+                  <span>Срок</span>
+                  <input id="fo-next-at" type="datetime-local" />
+                </label>
+                <label>
+                  <span>Программа</span>
+                  <input id="fo-program" type="text" maxlength="100" />
+                </label>
+                <div class="front-office-editor-actions">
+                  <span id="fo-save-status" aria-live="polite"></span>
+                  <button class="primary-button" type="submit">
+                    Сохранить внутри
+                  </button>
+                </div>
+              </form>
+
+              <div class="front-office-thread">
+                <div class="front-office-panel-head">
+                  <div>
+                    <span class="module-state">История</span>
+                    <h2>Диалог и внутренняя работа</h2>
+                  </div>
+                </div>
+                <div class="front-office-messages" id="fo-messages"></div>
+                <div class="front-office-composer">
+                  <div class="front-office-compose-tabs" role="tablist">
+                    <button
+                      class="is-active"
+                      type="button"
+                      data-fo-compose="internal_note"
+                    >
+                      Внутренняя заметка
+                    </button>
+                    <button type="button" data-fo-compose="ai_draft">
+                      AI-черновик
+                    </button>
+                  </div>
+                  <textarea
+                    id="fo-compose-body"
+                    rows="3"
+                    maxlength="800"
+                    placeholder="Запишите следующий контекст для команды"
+                  ></textarea>
+                  <div class="front-office-compose-actions">
+                    <span>Ничего не отправляется клиенту</span>
+                    <div>
+                      <button
+                        class="secondary-button"
+                        type="button"
+                        id="fo-save-note"
+                      >
+                        Сохранить
+                      </button>
+                      <button
+                        class="disabled-send"
+                        type="button"
+                        data-fo-send
+                        disabled
+                        title="Внешние отправки отключены"
+                      >
+                        Отправить клиенту
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <aside class="front-office-rail" aria-label="Контроль работы">
+              <section>
+                <div class="front-office-panel-head">
+                  <div>
+                    <span class="module-state">Контроль</span>
+                    <h2>Следующие действия</h2>
+                  </div>
+                </div>
+                <div class="front-office-task-list" id="fo-task-list"></div>
+              </section>
+              <section>
+                <div class="front-office-panel-head">
+                  <div>
+                    <span class="module-state">Аудит</span>
+                    <h2>Последние изменения</h2>
+                  </div>
+                </div>
+                <div class="front-office-audit" id="fo-audit"></div>
+              </section>
+              <section class="front-office-boundaries">
+                <strong>Сейчас разрешено</strong>
+                <ul>
+                  <li>Работать только с тестовыми лидами</li>
+                  <li>Создавать внутренние заметки и черновики</li>
+                  <li>Назначать ответственного и следующий шаг</li>
+                </ul>
+                <strong>Заблокировано</strong>
+                <ul>
+                  <li>Отправка сообщений</li>
+                  <li>Финансовые и договорные действия</li>
+                  <li>Доступ к данным семей и детей</li>
+                </ul>
+              </section>
+            </aside>
+          </div>
+
+          <div class="front-office-profile-layer" id="fo-profile-layer" hidden>
+            <button
+              class="front-office-profile-backdrop"
+              type="button"
+              data-fo-profile-close
+              aria-label="Закрыть карточку"
+            ></button>
+            <section
+              class="front-office-profile"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="fo-profile-name"
+              tabindex="-1"
+            >
+              <header class="front-office-profile-header">
+                <div class="front-office-profile-person">
+                  <span
+                    class="front-office-profile-avatar"
+                    id="fo-profile-avatar"
+                    >Т</span
+                  >
+                  <div>
+                    <span class="module-state">Контакт и лид · synthetic</span>
+                    <h2 id="fo-profile-name">Тестовый контакт</h2>
+                    <p id="fo-profile-meta">—</p>
+                    <div
+                      class="front-office-profile-badges"
+                      id="fo-profile-badges"
+                    ></div>
+                  </div>
+                </div>
+                <div class="front-office-profile-header-actions">
+                  <button
+                    class="disabled-send"
+                    type="button"
+                    disabled
+                    title="Внешние отправки отключены"
+                  >
+                    Написать клиенту
+                  </button>
+                  <button
+                    class="front-office-profile-close"
+                    type="button"
+                    data-fo-profile-close
+                    aria-label="Закрыть карточку"
+                  >
+                    ×
+                  </button>
+                </div>
+              </header>
+
+              <nav
+                class="front-office-profile-tabs"
+                aria-label="Разделы карточки"
+              >
+                <button
+                  class="is-active"
+                  type="button"
+                  data-fo-profile-tab="overview"
+                >
+                  Обзор
+                </button>
+                <button type="button" data-fo-profile-tab="history">
+                  История
+                  <span id="fo-profile-history-count">0</span>
+                </button>
+                <button type="button" data-fo-profile-tab="tasks">
+                  Задачи <span id="fo-profile-task-count">0</span>
+                </button>
+                <button type="button" data-fo-profile-tab="audit">
+                  Аудит <span id="fo-profile-audit-count">0</span>
+                </button>
+              </nav>
+
+              <div class="front-office-profile-body">
+                <section
+                  class="front-office-profile-panel is-active"
+                  data-fo-profile-panel="overview"
+                >
+                  <div class="front-office-profile-overview">
+                    <div class="front-office-profile-main">
+                      <article class="front-office-profile-section">
+                        <div class="front-office-profile-section-head">
+                          <div>
+                            <span class="module-state">Связь</span>
+                            <h3>Контакты и способ общения</h3>
+                          </div>
+                          <span class="fact-unverified">UNVERIFIED</span>
+                        </div>
+                        <dl
+                          class="front-office-profile-fields"
+                          id="fo-profile-contact-fields"
+                        ></dl>
+                      </article>
+
+                      <article class="front-office-profile-section">
+                        <div class="front-office-profile-section-head">
+                          <div>
+                            <span class="module-state">Квалификация</span>
+                            <h3>Задача и потребность семьи</h3>
+                          </div>
+                        </div>
+                        <dl
+                          class="front-office-profile-fields"
+                          id="fo-profile-request-fields"
+                        ></dl>
+                      </article>
+
+                      <article class="front-office-profile-section">
+                        <div class="front-office-profile-section-head">
+                          <div>
+                            <span class="module-state">Маркетинг</span>
+                            <h3>Откуда пришёл лид</h3>
+                          </div>
+                        </div>
+                        <dl
+                          class="front-office-profile-fields"
+                          id="fo-profile-marketing-fields"
+                        ></dl>
+                      </article>
+
+                      <article class="front-office-profile-section">
+                        <div class="front-office-profile-section-head">
+                          <div>
+                            <span class="module-state">Связи</span>
+                            <h3>Клиент, семья и договор</h3>
+                          </div>
+                        </div>
+                        <div class="front-office-profile-empty-link">
+                          <span>⌁</span>
+                          <div>
+                            <strong>Профиль семьи ещё не связан</strong>
+                            <p>
+                              Для реального обращения связь появится только
+                              после проверки личности и прав представителя.
+                            </p>
+                          </div>
+                        </div>
+                      </article>
+                    </div>
+
+                    <aside class="front-office-profile-side">
+                      <article class="front-office-profile-next">
+                        <span class="module-state">Следующий шаг</span>
+                        <strong id="fo-profile-next-action">—</strong>
+                        <p id="fo-profile-next-at">—</p>
+                        <div>
+                          <span>Ответственный</span>
+                          <strong id="fo-profile-owner">Не назначен</strong>
+                        </div>
+                      </article>
+
+                      <article class="front-office-profile-section">
+                        <div class="front-office-profile-section-head">
+                          <div>
+                            <span class="module-state">Продажи</span>
+                            <h3>Состояние лида</h3>
+                          </div>
+                        </div>
+                        <dl
+                          class="front-office-profile-fields is-single"
+                          id="fo-profile-sales-fields"
+                        ></dl>
+                      </article>
+
+                      <article class="front-office-profile-guard">
+                        <strong>Что защищено</strong>
+                        <p>
+                          Контакт тестовый. Отправка, финансы, договорные
+                          изменения и доступ к данным ребёнка заблокированы.
+                        </p>
+                      </article>
+                    </aside>
+                  </div>
+                </section>
+
+                <section
+                  class="front-office-profile-panel"
+                  data-fo-profile-panel="history"
+                >
+                  <div class="front-office-profile-panel-heading">
+                    <div>
+                      <span class="module-state">Все касания</span>
+                      <h3>История обращения</h3>
+                    </div>
+                    <span>Входящие, заметки и неотправленные черновики</span>
+                  </div>
+                  <div
+                    class="front-office-profile-history"
+                    id="fo-profile-history"
+                  ></div>
+                </section>
+
+                <section
+                  class="front-office-profile-panel"
+                  data-fo-profile-panel="tasks"
+                >
+                  <div class="front-office-profile-panel-heading">
+                    <div>
+                      <span class="module-state">Исполнение</span>
+                      <h3>Задачи и follow-up</h3>
+                    </div>
+                    <span>Строки можно отмечать выполненными</span>
+                  </div>
+                  <div
+                    class="front-office-profile-task-list"
+                    id="fo-profile-tasks"
+                  ></div>
+                </section>
+
+                <section
+                  class="front-office-profile-panel"
+                  data-fo-profile-panel="audit"
+                >
+                  <div class="front-office-profile-panel-heading">
+                    <div>
+                      <span class="module-state">Контроль</span>
+                      <h3>Полная история изменений</h3>
+                    </div>
+                    <span>Кто, что и когда изменил</span>
+                  </div>
+                  <div
+                    class="front-office-profile-audit"
+                    id="fo-profile-audit"
+                  ></div>
+                </section>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section
+          class="view integrations-view"
+          data-view="integrations"
+          aria-labelledby="integrations-title"
+        >
+          <div class="page-heading integrations-heading">
+            <div>
+              <div class="eyebrow">Продажи и клиентский сервис</div>
+              <h1 id="integrations-title">Подключения</h1>
+              <p>
+                Подключаем входящие каналы к ArtHello OS. Новые лиды видит
+                менеджер, ответы остаются ручными.
+              </p>
+            </div>
+            <div class="front-office-safety" aria-label="Режим безопасности">
+              <span>ARTHELLO</span>
+              <span>MANUAL_REPLY</span>
+              <span>OUTBOUND_OFF</span>
+            </div>
+          </div>
+
+          <div class="integrations-guard" role="note">
+            <span class="integrations-guard-icon" aria-hidden="true">↓</span>
+            <div>
+              <strong>Пилот на реальных входящих</strong>
+              <p>
+                Заявка попадает во входящий ящик. Вы и менеджер контролируете её
+                вручную. Автоответов и автоматических изменений нет.
+              </p>
+            </div>
+            <button
+              class="secondary-button integrations-go-front"
+              type="button"
+              data-go="front-office"
+            >
+              Открыть входящий ящик →
+            </button>
+          </div>
+
+          <div
+            class="integration-summary"
+            aria-label="Состояние подключений"
+            hidden
+          >
+            <article>
+              <span>Коннекторов в плане</span>
+              <strong id="integration-total">9</strong>
+              <small>каналы, аналитика и реклама</small>
+            </article>
+            <article>
+              <span>Подключено</span>
+              <strong id="integration-connected">0</strong>
+              <small>боевых подключений нет</small>
+            </article>
+            <article>
+              <span>Первая очередь</span>
+              <strong id="integration-first-wave">3</strong>
+              <small>сайт, Telegram и VK</small>
+            </article>
+            <article class="is-safe">
+              <span>Внешние действия</span>
+              <strong>0</strong>
+              <small>глобальная блокировка включена</small>
+            </article>
+          </div>
+
+          <section class="integration-hub" hidden>
+            <div class="integration-hub-top">
+              <div>
+                <span class="module-state">Integration Hub</span>
+                <h2>Один центр вместо девяти разрозненных подключений</h2>
+                <p>
+                  Канал передаёт событие в шлюз, OS проверяет дубль и проект,
+                  после чего создаёт обращение и сохраняет рекламный источник.
+                </p>
+              </div>
+              <span class="integration-master-lock"
+                ><i aria-hidden="true"></i> Исходящие заблокированы</span
+              >
+            </div>
+            <div class="integration-flow" aria-label="Путь события">
+              <div>
+                <span>01</span><strong>Канал</strong><small>webhook</small>
+              </div>
+              <b aria-hidden="true">→</b>
+              <div>
+                <span>02</span><strong>Шлюз</strong
+                ><small>проверка события</small>
+              </div>
+              <b aria-hidden="true">→</b>
+              <div>
+                <span>03</span><strong>Контакт</strong
+                ><small>кандидат, не автослияние</small>
+              </div>
+              <b aria-hidden="true">→</b>
+              <div>
+                <span>04</span><strong>Front Office</strong
+                ><small>лид, SLA и история</small>
+              </div>
+              <b aria-hidden="true">→</b>
+              <div>
+                <span>05</span><strong>Атрибуция</strong
+                ><small>расход → договор</small>
+              </div>
+            </div>
+          </section>
+
+          <div
+            class="integration-tabs"
+            role="tablist"
+            aria-label="Разделы центра интеграций"
+            hidden
+          >
+            <button
+              class="is-active"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              data-integration-tab="catalog"
+            >
+              Каталог <span>9</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              data-integration-tab="events"
+            >
+              События <span>4</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              data-integration-tab="routing"
+            >
+              Маршрутизация
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              data-integration-tab="health"
+            >
+              Диагностика
+            </button>
+          </div>
+
+          <section
+            class="integration-panel is-active"
+            role="tabpanel"
+            data-integration-panel="catalog"
+          >
+            <div class="integration-toolbar">
+              <div>
+                <span class="module-state">Начинаем с малого</span>
+                <h2>Что подключаем</h2>
+                <p>
+                  Сначала сайт. Следом — канал, где менеджер может ответить
+                  вручную.
+                </p>
+              </div>
+              <div
+                class="integration-filters"
+                role="group"
+                aria-label="Фильтр коннекторов"
+              >
+                <button
+                  class="is-active"
+                  type="button"
+                  data-integration-filter="pilot"
+                >
+                  Сейчас
+                </button>
+                <button type="button" data-integration-filter="all">Все</button>
+              </div>
+            </div>
+            <div
+              class="integration-catalog"
+              id="integration-catalog"
+              aria-live="polite"
+            ></div>
+          </section>
+
+          <section
+            class="integration-panel"
+            role="tabpanel"
+            data-integration-panel="events"
+            hidden
+          >
+            <div class="integration-toolbar">
+              <div>
+                <span class="module-state">Тестовый поток</span>
+                <h2>Последние события шлюза</h2>
+                <p>
+                  Только обезличенные сценарии. Реальные webhook-адреса ещё не
+                  выданы.
+                </p>
+              </div>
+              <span class="integration-mode-chip">SYNTHETIC_ONLY</span>
+            </div>
+            <div class="integration-event-table-wrap">
+              <table class="integration-event-table">
+                <thead>
+                  <tr>
+                    <th>Время</th>
+                    <th>Источник</th>
+                    <th>Событие</th>
+                    <th>Результат</th>
+                    <th>Следующий шаг</th>
+                  </tr>
+                </thead>
+                <tbody id="integration-event-list"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section
+            class="integration-panel"
+            role="tabpanel"
+            data-integration-panel="routing"
+            hidden
+          >
+            <div class="integration-toolbar">
+              <div>
+                <span class="module-state">Правила до подключения каналов</span>
+                <h2>Маршрутизация и защита от дублей</h2>
+                <p>
+                  Эти правила действуют одинаково для сайта, мессенджеров и
+                  рекламных источников.
+                </p>
+              </div>
+            </div>
+            <div class="integration-rules">
+              <article>
+                <span>01</span>
+                <div>
+                  <strong>Сначала определить проект</strong>
+                  <p>
+                    Событие без подтверждённого project_id не попадает к
+                    клиентским данным и уходит в карантин.
+                  </p>
+                </div>
+              </article>
+              <article>
+                <span>02</span>
+                <div>
+                  <strong>Не объединять только по телефону</strong>
+                  <p>
+                    Совпадение создаёт кандидата. Связь с человеком или семьёй
+                    подтверждается отдельно.
+                  </p>
+                </div>
+              </article>
+              <article>
+                <span>03</span>
+                <div>
+                  <strong>Одно событие — одно обращение</strong>
+                  <p>
+                    Повторная доставка webhook распознаётся по внешнему
+                    message_id и не создаёт дубль.
+                  </p>
+                </div>
+              </article>
+              <article>
+                <span>04</span>
+                <div>
+                  <strong>Реклама хранится до результата</strong>
+                  <p>
+                    UTM, yclid, кампания и объявление остаются в карточке до
+                    пробного занятия и договора.
+                  </p>
+                </div>
+              </article>
+              <article>
+                <span>05</span>
+                <div>
+                  <strong>AI работает только после маршрутизации</strong>
+                  <p>
+                    Сначала проект, риск и личность. Затем классификация и
+                    черновик ответа.
+                  </p>
+                </div>
+              </article>
+              <article>
+                <span>06</span>
+                <div>
+                  <strong>Отправка включается отдельно</strong>
+                  <p>
+                    Каждый intent и каждый канал проходит собственный тест,
+                    аудит и rollback.
+                  </p>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section
+            class="integration-panel"
+            role="tabpanel"
+            data-integration-panel="health"
+            hidden
+          >
+            <div class="integration-toolbar">
+              <div>
+                <span class="module-state">До боевого запуска</span>
+                <h2>Диагностика контура</h2>
+                <p>
+                  Проверки не подтверждают реальные API — они показывают, что OS
+                  готова безопасно принять будущие подключения.
+                </p>
+              </div>
+            </div>
+            <div class="integration-health-grid">
+              <article class="is-pass">
+                <span>PASS</span>
+                <strong>Изоляция ARTHELLO</strong>
+                <p>В центре нет коннекторов и данных BlackVillage.</p>
+              </article>
+              <article class="is-pass">
+                <span>PASS</span>
+                <strong>Глобальный DRAFT_ONLY</strong>
+                <p>В интерфейсе отсутствует рабочая внешняя отправка.</p>
+              </article>
+              <article class="is-pass">
+                <span>PASS</span>
+                <strong>Секреты вне браузера</strong>
+                <p>Токены не вводятся и не сохраняются на клиенте.</p>
+              </article>
+              <article class="is-wait">
+                <span>WAIT</span>
+                <strong>Webhook-подписи</strong>
+                <p>Будут проверяться после создания серверных адаптеров.</p>
+              </article>
+              <article class="is-wait">
+                <span>WAIT</span>
+                <strong>Боевые доступы</strong>
+                <p>Нужны кабинеты, роли и утверждённый минимальный scope.</p>
+              </article>
+              <article class="is-wait">
+                <span>WAIT</span>
+                <strong>Проверка доставки</strong>
+                <p>Требует отдельного теста каждого канала в sandbox.</p>
+              </article>
+            </div>
+          </section>
+
+          <div
+            class="integration-drawer-layer"
+            id="integration-drawer-layer"
+            hidden
+          >
+            <div class="integration-drawer-backdrop" aria-hidden="true"></div>
+            <aside
+              class="integration-drawer"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="integration-drawer-title"
+              tabindex="-1"
+            >
+              <header>
+                <button
+                  class="integration-drawer-back"
+                  type="button"
+                  data-integration-close
+                >
+                  ← Назад
+                </button>
+                <div class="integration-drawer-brand">
+                  <span id="integration-drawer-mark">WEB</span>
+                  <div>
+                    <small id="integration-drawer-kind">Канал</small>
+                    <h2 id="integration-drawer-title">Коннектор</h2>
+                  </div>
+                </div>
+              </header>
+              <div class="integration-drawer-body">
+                <span
+                  class="integration-drawer-status"
+                  id="integration-drawer-status"
+                  >Не подключено</span
+                >
+                <p id="integration-drawer-purpose"></p>
+                <div
+                  class="integration-simple-setup"
+                  id="integration-simple-setup"
+                  aria-live="polite"
+                ></div>
+              </div>
+              <footer>
+                <span id="integration-queue-status"
+                  >Клиенту ничего не отправляется</span
+                >
+                <button
+                  class="primary-button"
+                  type="button"
+                  id="integration-add-queue"
+                >
+                  Начать подключение
+                </button>
+              </footer>
+            </aside>
+          </div>
+        </section>
+
         <section class="view" data-view="module" aria-labelledby="module-title">
           <div class="page-heading">
-            <div><div class="eyebrow" id="module-eyebrow">Структура ArtHello OS</div><h1 id="module-title">Раздел</h1><p id="module-summary"></p></div>
-            <span class="checkpoint-chip checkpoint-chip-muted"><span></span> Каркас раздела</span>
+            <div>
+              <div class="eyebrow" id="module-eyebrow">
+                Структура ArtHello OS
+              </div>
+              <h1 id="module-title">Раздел</h1>
+              <p id="module-summary"></p>
+            </div>
+            <span
+              class="checkpoint-chip checkpoint-chip-muted"
+              id="module-data-chip"
+              ><span></span> Загрузка данных</span
+            >
           </div>
           <div class="module-layout">
             <article class="module-hero">
-              <span class="module-icon" id="module-icon" aria-hidden="true">◉</span>
-              <div><span class="module-state">Текущее состояние</span><h2 id="module-state-title">Основание найдено</h2><p id="module-state-copy"></p></div>
+              <span class="module-icon" id="module-icon" aria-hidden="true"
+                >◉</span
+              >
+              <div>
+                <span class="module-state">Текущее состояние</span>
+                <h2 id="module-state-title">Основание найдено</h2>
+                <p id="module-state-copy"></p>
+              </div>
             </article>
-            <div class="module-grid">
-              <article class="panel"><div class="panel-header"><div><h2>Что найдено в проекте</h2></div></div><ul class="check-list" id="module-found"></ul></article>
-              <article class="panel"><div class="panel-header"><div><h2>Ворота перед использованием</h2></div></div><ul class="gate-check-list" id="module-gates"></ul></article>
+            <section
+              class="live-data-panel panel"
+              id="module-live-data"
+              hidden
+              aria-live="polite"
+            >
+              <div class="live-data-toolbar">
+                <div>
+                  <span class="module-state" id="live-data-mode"
+                    >Источник проверяется</span
+                  >
+                  <h2 id="live-data-title">Данные раздела</h2>
+                  <p id="live-data-summary"></p>
+                </div>
+                <label class="search-control" id="live-search-label">
+                  <span class="sr-only">Поиск</span>
+                  <input
+                    id="live-search"
+                    type="search"
+                    placeholder="Поиск"
+                    autocomplete="off"
+                  />
+                </label>
+              </div>
+              <div class="live-actions" id="live-actions" hidden></div>
+              <div class="data-table-wrap">
+                <table class="data-table" id="live-data-table">
+                  <thead></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div class="data-empty" id="live-data-empty" hidden></div>
+              <div class="data-pagination">
+                <span id="live-data-range"></span>
+                <div>
+                  <button type="button" class="filter" id="live-prev">
+                    Назад
+                  </button>
+                  <button type="button" class="filter" id="live-next">
+                    Дальше
+                  </button>
+                </div>
+              </div>
+            </section>
+            <div class="module-grid" id="module-static-grid">
+              <article class="panel">
+                <div class="panel-header">
+                  <div><h2>Что найдено в проекте</h2></div>
+                </div>
+                <ul class="check-list" id="module-found"></ul>
+              </article>
+              <article class="panel">
+                <div class="panel-header">
+                  <div><h2>Ворота перед использованием</h2></div>
+                </div>
+                <ul class="gate-check-list" id="module-gates"></ul>
+              </article>
             </div>
-            <div class="demo-notice module-notice" role="note"><span class="notice-icon">i</span><div><strong>Без имитации готовой аналитики</strong><p>Раздел показывает структуру будущей системы. Метрики появятся только после проверки источников, правил расчёта и качества данных.</p></div></div>
+            <div
+              class="demo-notice module-notice"
+              role="note"
+              id="module-notice"
+            >
+              <span class="notice-icon">i</span>
+              <div>
+                <strong>Источник данных всегда указан</strong>
+                <p>
+                  Реальные строки помечены как данные AlfaCRM, зарплатной
+                  ведомости или банка. Если источник не прошёл проверку, раздел
+                  показывает блокер вместо выдуманных значений.
+                </p>
+              </div>
+            </div>
           </div>
         </section>
 
         <nav class="mobile-bottom-nav" aria-label="Быстрая навигация">
-          <button class="is-active" type="button" data-section="pulse"><span>⌁</span>Пульс</button>
-          <button type="button" data-section="quality"><span>✓</span>Качество</button>
-          <button type="button" data-section="sources"><span>↻</span>Источники</button>
+          <button class="is-active" type="button" data-section="pulse">
+            <span>⌁</span>Пульс
+          </button>
+          <button type="button" data-section="front-office">
+            <span>◫</span>Front Office
+          </button>
+          <button type="button" data-section="quality">
+            <span>✓</span>Качество
+          </button>
           <button type="button" data-drawer-open><span>☰</span>Ещё</button>
         </nav>
       </main>

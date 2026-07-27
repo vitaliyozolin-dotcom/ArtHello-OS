@@ -15,9 +15,16 @@ import {
   openAlfaTestDatabase,
 } from "./alfacrm-test-db.mjs";
 
-const rollback = await readFile(
+const rollback14 = await readFile(
   new URL(
     "../../lib/db/rollbacks/0014_alfa_lineage_snapshot.down.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const rollback15 = await readFile(
+  new URL(
+    "../../lib/db/rollbacks/0015_exact_alfa_observation.down.sql",
     import.meta.url,
   ),
   "utf8",
@@ -147,6 +154,7 @@ test("new AlfaCRM entities require real raw and batch provenance", async () => {
           batchId,
           rawId: randomUUID(),
           scopeKey: "branch-test:leads",
+          observationId: randomUUID(),
         },
       ),
       /foreign key|violates/i,
@@ -167,7 +175,8 @@ test("new AlfaCRM entities require real raw and batch provenance", async () => {
       /append-only/i,
     );
 
-    await database.exec(rollback);
+    await database.exec(rollback15);
+    await database.exec(rollback14);
     const remaining = await database.query(
       `SELECT COUNT(*)::int AS count
        FROM information_schema.tables

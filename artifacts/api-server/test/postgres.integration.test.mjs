@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -93,6 +93,62 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
       Number(version.rows[0]?.version_num) >= 160000,
       "integration database must be PostgreSQL 16 or newer",
     );
+
+    const migrationNames = (await readdir(migrationsFolder))
+      .filter((name) => /^\d{4}_.+\.sql$/.test(name))
+      .sort();
+    const migration14 = migrationNames.find((name) => name.startsWith("0014_"));
+    const migration15 = migrationNames.find((name) => name.startsWith("0015_"));
+    assert.ok(migration14, "migration 0014 is required");
+    assert.ok(migration15, "migration 0015 is required");
+
+    const rollbackClient = await pool.connect();
+    try {
+      await rollbackClient.query("BEGIN");
+      for (const name of migrationNames.filter(
+        (candidate) => Number(candidate.slice(0, 4)) <= 13,
+      )) {
+        await executeSqlFile(
+          rollbackClient,
+          resolve(migrationsFolder, name),
+        );
+      }
+      await executeSqlFile(
+        rollbackClient,
+        resolve(migrationsFolder, migration14),
+      );
+      await executeSqlFile(
+        rollbackClient,
+        resolve(
+          workspaceDir,
+          "lib/db/rollbacks/0014_alfa_lineage_snapshot.down.sql",
+        ),
+      );
+      await executeSqlFile(
+        rollbackClient,
+        resolve(migrationsFolder, migration14),
+      );
+      await executeSqlFile(
+        rollbackClient,
+        resolve(migrationsFolder, migration15),
+      );
+      const exactLineage = await rollbackClient.query(
+        `SELECT EXISTS (
+           SELECT 1
+           FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND table_name = 'crm_students'
+             AND column_name = 'raw_observation_id'
+         ) AS ready`,
+      );
+      assert.equal(exactLineage.rows[0]?.ready, true);
+      await rollbackClient.query("ROLLBACK");
+    } catch (error) {
+      await rollbackClient.query("ROLLBACK");
+      throw error;
+    } finally {
+      rollbackClient.release();
+    }
 
     await migrate(db, { migrationsFolder });
 
