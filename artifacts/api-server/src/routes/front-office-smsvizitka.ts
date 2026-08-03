@@ -1,5 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { z } from "zod/v4";
 import { pool } from "@workspace/db";
 
@@ -62,7 +62,7 @@ function phoneHash(value: string): string {
   return createHmac("sha256", secret).update(value).digest("hex");
 }
 
-function suppliedWebhookToken(req: Parameters<typeof smsVizitkaShadowRouter.post>[1] extends never ? never : any): string {
+function suppliedWebhookToken(req: Request): string {
   const authorization = String(req.header("authorization") ?? "").trim();
   if (authorization) {
     return authorization.replace(/^(Bearer|Token)\s+/i, "").trim();
