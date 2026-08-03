@@ -36,9 +36,9 @@ function isShadowEnabled(): boolean {
 }
 
 function configured(): boolean {
-  return Boolean(
-    process.env.SMSVIZITKA_WEBHOOK_TOKEN &&
-    process.env.FRONT_OFFICE_PHONE_MATCH_SECRET,
+  return (
+    (process.env.SMSVIZITKA_WEBHOOK_TOKEN?.length ?? 0) >= 32 &&
+    (process.env.FRONT_OFFICE_PHONE_MATCH_SECRET?.length ?? 0) >= 32
   );
 }
 
@@ -70,7 +70,6 @@ function suppliedWebhookToken(req: Request): string {
   return String(
     req.header("x-webhook-key") ??
     req.header("x-api-key") ??
-    req.query?.key ??
     "",
   ).trim();
 }
@@ -112,12 +111,18 @@ function fingerprint(payload: WebhookPayload, normalizedPhone: string): string {
 }
 
 function safeRaw(payload: WebhookPayload, maskedPhone: string): Record<string, unknown> {
-  const raw = { ...payload } as Record<string, unknown>;
-  delete raw.number;
-  delete raw.api_key;
-  delete raw.authorization;
-  raw.phone_masked = maskedPhone;
-  return raw;
+  return {
+    action: payload.action,
+    message_id: payload.message_id,
+    name: payload.name,
+    text_message: payload.text_message,
+    text_status: payload.text_status,
+    pack_code: payload.pack_code,
+    send_source: payload.send_source,
+    date: payload.date ?? null,
+    push_id: payload.push_id,
+    phone_masked: maskedPhone,
+  };
 }
 
 smsVizitkaShadowRouter.get("/integrations/smsvizitka/status", (_req, res) => {
