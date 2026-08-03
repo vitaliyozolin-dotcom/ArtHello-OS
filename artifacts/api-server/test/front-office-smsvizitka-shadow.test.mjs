@@ -10,6 +10,10 @@ const indexSource = readFileSync(
   new URL("../src/routes/index.ts", import.meta.url),
   "utf8",
 );
+const appSource = readFileSync(
+  new URL("../src/app.ts", import.meta.url),
+  "utf8",
+);
 const uiSource = readFileSync(
   new URL(
     "../../alpha-crm-sync/src/features/front-office/channel-inbox-workspace.tsx",
@@ -20,6 +24,7 @@ const uiSource = readFileSync(
 
 test("SMS-Vizitka adapter is mounted and fail-closed", () => {
   assert.match(indexSource, /smsVizitkaShadowRouter/);
+  assert.match(appSource, /req\.path === "\/webhooks\/smsvizitka"/);
   assert.match(routeSource, /SMSVIZITKA_SHADOW_ENABLED/);
   assert.match(routeSource, /SMSVIZITKA_WEBHOOK_TOKEN/);
   assert.match(routeSource, /FRONT_OFFICE_PHONE_MATCH_SECRET/);
