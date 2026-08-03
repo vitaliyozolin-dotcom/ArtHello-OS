@@ -73,6 +73,7 @@ app.use("/api", (req, res, next) => {
     ((req.method === "GET" || req.method === "HEAD") &&
       req.path === "/healthz") ||
     (req.method === "POST" && req.path === "/auth/login") ||
+    (req.method === "POST" && req.path === "/webhooks/smsvizitka") ||
     (req.method === "GET" && req.path === "/banking/oauth/callback");
 
   if (publicRoute) {
