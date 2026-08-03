@@ -22,7 +22,7 @@ import {
   Target,
 } from "lucide-react";
 import { ControlCenterPreviewWorkspace } from "@/features/front-office/control-center-preview-workspace";
-import { InboxPreviewWorkspace } from "@/features/front-office/inbox-preview-workspace";
+import { ChannelInboxWorkspace } from "@/features/front-office/channel-inbox-workspace";
 import { InternalAlphaWorkspace } from "@/features/front-office/internal-alpha-workspace";
 import { FRONT_OFFICE_PREVIEW_CONTRACT } from "@/features/front-office/preview-contract";
 import { KnowledgePreviewWorkspace } from "@/features/front-office/knowledge-preview-workspace";
@@ -747,7 +747,7 @@ export function FrontOfficePage() {
       {view === "overview" && <InternalAlphaWorkspace />}
 
       {view === "pipeline" && <FunnelPanel />}
-      {view === "inbox" && <InboxPreviewWorkspace />}
+      {view === "inbox" && <ChannelInboxWorkspace />}
       {view === "service" && <ServicePanel />}
       {view === "tasks" && <TasksPanel />}
       {view === "knowledge" && <KnowledgePreviewWorkspace />}
