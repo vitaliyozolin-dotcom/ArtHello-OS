@@ -40,6 +40,7 @@ import { auditRouter } from "./audit";
 import { evotorRouter } from "./evotor";
 import { employeesModuleRouter } from "./employees-module";
 import { frontOfficeRouter } from "./front-office";
+import { companyOsRouter } from "./company-os";
 
 const router: IRouter = Router();
 
@@ -84,5 +85,6 @@ router.use(auditRouter);
 router.use(evotorRouter);
 router.use(employeesModuleRouter);
 router.use(frontOfficeRouter);
+router.use(companyOsRouter);
 
 export default router;
