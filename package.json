@@ -12,8 +12,9 @@
     "test": "pnpm run test:sites",
     "test:sites": "pnpm run build:sites && node --test sites-control/tests/*.test.mjs",
     "test:security": "pnpm --filter @workspace/api-server run test:security",
+    "test:front-office": "pnpm --filter @workspace/api-server run test:front-office && pnpm --filter @workspace/alpha-crm-sync run test:front-office",
     "test:postgres": "pnpm --filter @workspace/api-server run test:postgres",
-    "test:full": "pnpm run typecheck && pnpm run test:security && pnpm run test:sites",
+    "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:sites",
     "typecheck:libs": "tsc --build --force",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },

@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import LoginPage from '@/pages/login';
 import { useQuery } from '@tanstack/react-query';
 import { useAppMode } from '@/context/AppModeContext';
+import { canViewFrontOfficePreview } from '@/features/front-office/preview-contract';
 import {
   Zap, Banknote, TrendingUp, BarChart2, Users,
   UserCheck, FileText, Settings, Bell, CheckSquare,
@@ -36,6 +37,7 @@ const EducationalPageComponent    = lazy(() => import('@/pages/educational'));
 const SchedulePageComponent       = lazy(() => import('@/pages/schedule'));
 const CoveragePageComponent       = lazy(() => import('@/pages/coverage'));
 const EmployeesPageComponent      = lazy(() => import('@/pages/employees').then((m) => ({ default: m.EmployeesPage })));
+const FrontOfficePageComponent     = lazy(() => import('@/pages/front-office').then((m) => ({ default: m.FrontOfficePage })));
 
 // ─── Nav definition ───────────────────────────────────────────────────────────
 
@@ -45,7 +47,7 @@ type OwnerSection =
   | 'contractors' | 'staff' | 'taxes' | 'families' | 'employees'
   | 'cfo' | 'trust-score' | 'month-closing' | 'finance-qa'
   | 'articles' | 'documents' | 'test-data' | 'settings'
-  | 'contracts' | 'educational' | 'schedule'
+  | 'front-office' | 'contracts' | 'educational' | 'schedule'
   | 'bank-integrations' | 'crm-coverage';
 
 type NavItem = { key: OwnerSection; label: string; Icon: React.FC<{ className?: string }> };
@@ -66,6 +68,12 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { key: 'pnl',                  label: 'ОПиУ',          Icon: BarChart2 },
       { key: 'finance-payment-plan', label: 'План платежей', Icon: CalendarDays },
       { key: 'finance-payables',     label: 'Обязательства',  Icon: ClipboardList },
+    ],
+  },
+  {
+    label: 'Продажи и сервис',
+    items: [
+      { key: 'front-office', label: 'Front Office', Icon: ClipboardList },
     ],
   },
   {
@@ -251,6 +259,7 @@ function Sidebar({
   onClose?: () => void;
 }) {
   const { isTechnical, toggleMode } = useAppMode();
+  const { user } = useAuth();
 
   const handleSection = (s: OwnerSection) => {
     onSection(s);
@@ -277,7 +286,9 @@ function Sidebar({
 
       {/* Nav — grouped, compact, scrollable */}
       <nav className="flex-1 overflow-y-auto px-2.5 py-3 space-y-3">
-        {NAV_GROUPS.map((group) => (
+        {NAV_GROUPS
+          .filter((group) => group.label !== 'Продажи и сервис' || canViewFrontOfficePreview(user?.role))
+          .map((group) => (
           <div key={group.label || '__top'}>
             {group.label && (
               <p className="px-2 mb-1 text-[9px] font-semibold text-gray-400 uppercase tracking-widest">
@@ -402,6 +413,7 @@ function MobileDrawer({
 function OwnerContent({ section }: { section: OwnerSection }) {
   switch (section) {
     case 'pulse':          return <PulsePageComponent />;
+    case 'front-office':    return <FrontOfficePageComponent />;
     case 'ledger':         return <LedgerPageComponent />;
     case 'reconciliation': return <ReconciliationPageComponent />;
     case 'employees':      return <EmployeesPageComponent />;
