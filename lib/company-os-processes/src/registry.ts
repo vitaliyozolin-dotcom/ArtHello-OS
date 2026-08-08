@@ -1,127 +1,28 @@
 import type { ProcessDefinition, ProcessId } from "./types";
 
-const ALL_AGENTS = [
-  "memory",
-  "intelligence",
-  "competence-network",
-  "execution",
-  "evolution",
-] as const;
+const ALL_AGENTS = ["memory", "intelligence", "competence-network", "execution", "evolution"] as const;
 
 export const PROCESS_LIBRARY: Record<ProcessId, ProcessDefinition> = {
-  "capacity-enrollment-planner": {
-    id: "capacity-enrollment-planner",
-    name: "Capacity & Enrollment Planner",
-    purpose:
-      "Связывает набор, вместимость, помещения, педагогическую нагрузку, ФОТ, цену и точку безубыточности.",
-    mode: "automatic",
-    triggers: ["education-capacity"],
-    agents: [...ALL_AGENTS],
-    outputs: [
-      "current-capacity",
-      "growth-scenarios",
-      "next-class-trigger",
-      "next-hire-trigger",
-      "break-even",
-      "safety-margin",
-    ],
-    guardrails: [
-      "не открывать класс или вакансию автоматически",
-      "не считать неизвестные данные нулём",
-      "отделять факт от прогноза",
-    ],
-    pilot:
-      "Финансовая модель школы и сада: 40 платных учеников школы и 10 платных детей сада с последующим ростом.",
-  },
-  "receivables-orchestrator": {
-    id: "receivables-orchestrator",
-    name: "Receivables Orchestrator",
-    purpose:
-      "Управляет уже начисленной дебиторкой и обещаниями оплатить до фактической сверки с банком.",
-    mode: "automatic",
-    triggers: ["receivables"],
-    agents: [...ALL_AGENTS],
-    outputs: [
-      "expected-receipts",
-      "kept-promises",
-      "broken-promises",
-      "amount-at-risk",
-      "next-action",
-    ],
-    guardrails: [
-      "не обещать скидки, возвраты или отсрочки без разрешения",
-      "не закрывать сомнительное совпадение платежа автоматически",
-      "не использовать давление на семьи",
-    ],
-    pilot: "Дебиторка и обещания оплатить в ArtHello OS.",
-  },
-  "growth-experiment-engine": {
-    id: "growth-experiment-engine",
-    name: "Growth Experiment Engine",
-    purpose:
-      "Превращает утверждённую маркетинговую гипотезу в ограниченный измеримый эксперимент со stop/scale rules.",
-    mode: "on-demand",
-    triggers: ["marketing-experiment"],
-    agents: [...ALL_AGENTS],
-    outputs: [
-      "experiment-contract",
-      "primary-metric",
-      "stop-rule",
-      "scale-rule",
-      "experiment-result",
-    ],
-    guardrails: [
-      "не оптимизировать vanity metrics",
-      "не запускать эксперимент без AI Process Contract",
-      "не продолжать тест после stop rule без нового решения",
-    ],
-    pilot:
-      "ИКИОМА, ArtHello/школа и мебель/Avito после подключения достоверного учёта заявок и продаж.",
-  },
-  "founder-bottleneck-miner": {
-    id: "founder-bottleneck-miner",
-    name: "Founder Bottleneck Miner",
-    purpose:
-      "Выявляет повторяющиеся обращения к собственнику и предлагает оставить, делегировать или автоматизировать их.",
-    mode: "advisory",
-    triggers: ["founder-repeat"],
-    agents: [...ALL_AGENTS],
-    outputs: [
-      "founder-bottlenecks",
-      "delegation-candidates",
-      "automation-candidates",
-      "expected-time-saving",
-    ],
-    guardrails: [
-      "не делегировать стратегические и необратимые решения автоматически",
-      "не расширять полномочия без утверждения",
-      "сохранять право собственника вернуть решение себе",
-    ],
-    pilot: "Повторяющиеся решения собственника в Company OS.",
-  },
-  "assumption-reality-check": {
-    id: "assumption-reality-check",
-    name: "Assumption Reality Check",
-    purpose:
-      "Сравнивает ключевые предположения финансовых и операционных моделей с фактом и пересчитывает влияние устойчивых отклонений.",
-    mode: "advisory",
-    triggers: ["financial-model"],
-    agents: [...ALL_AGENTS],
-    outputs: [
-      "planned-assumption",
-      "actual-value",
-      "variance",
-      "forecast-impact",
-      "review-recommendation",
-    ],
-    guardrails: [
-      "не считать единичный шум трендом",
-      "не переписывать исходную модель без утверждения",
-      "порог существенности задаётся контекстом проекта",
-    ],
-    pilot: "Финансовая модель школы и сада, затем ИКИОМА.",
-  },
+  "capacity-enrollment-planner": { id:"capacity-enrollment-planner", name:"Capacity & Enrollment Planner", purpose:"Связывает набор, вместимость, помещения, педагогическую нагрузку, ФОТ, цену и точку безубыточности.", mode:"automatic", triggers:["education-capacity"], agents:[...ALL_AGENTS], outputs:["current-capacity","growth-scenarios","next-class-trigger","next-hire-trigger","break-even","safety-margin"], guardrails:["не открывать класс или вакансию автоматически","не считать неизвестные данные нулём","отделять факт от прогноза"], pilot:"Финансовая модель школы и сада." },
+  "receivables-orchestrator": { id:"receivables-orchestrator", name:"Receivables Orchestrator", purpose:"Управляет уже начисленной дебиторкой и обещаниями оплатить до фактической сверки с банком.", mode:"automatic", triggers:["receivables"], agents:[...ALL_AGENTS], outputs:["expected-receipts","kept-promises","broken-promises","amount-at-risk","next-action"], guardrails:["не обещать скидки, возвраты или отсрочки без разрешения","не закрывать сомнительное совпадение платежа автоматически","не использовать давление на семьи"], pilot:"Дебиторка ArtHello OS." },
+  "growth-experiment-engine": { id:"growth-experiment-engine", name:"Growth Experiment Engine", purpose:"Превращает маркетинговую гипотезу в ограниченный измеримый эксперимент.", mode:"on-demand", triggers:["marketing-experiment"], agents:[...ALL_AGENTS], outputs:["experiment-contract","primary-metric","stop-rule","scale-rule","experiment-result"], guardrails:["не оптимизировать vanity metrics","не запускать без AI Process Contract","не продолжать после stop rule без решения"], pilot:"ИКИОМА, ArtHello, мебель." },
+  "founder-bottleneck-miner": { id:"founder-bottleneck-miner", name:"Founder Bottleneck Miner", purpose:"Выявляет повторяющиеся обращения к собственнику и предлагает оставить, делегировать или автоматизировать их.", mode:"advisory", triggers:["founder-repeat"], agents:[...ALL_AGENTS], outputs:["founder-bottlenecks","delegation-candidates","automation-candidates","expected-time-saving"], guardrails:["не делегировать стратегические и необратимые решения автоматически","не расширять полномочия без утверждения"], pilot:"Company OS." },
+  "assumption-reality-check": { id:"assumption-reality-check", name:"Assumption Reality Check", purpose:"Сравнивает ключевые предположения моделей с фактом.", mode:"advisory", triggers:["financial-model"], agents:[...ALL_AGENTS], outputs:["planned-assumption","actual-value","variance","forecast-impact","review-recommendation"], guardrails:["не считать единичный шум трендом","не переписывать модель без утверждения"], pilot:"Школа, сад, затем ИКИОМА." },
+
+  "owner-exceptions-brief": {
+    id:"owner-exceptions-brief", name:"Owner Exceptions Brief", purpose:"Собирает по портфелю только существенные отклонения и решения, действительно требующие внимания собственника.", mode:"automatic", triggers:["portfolio-exception"], agents:[...ALL_AGENTS], outputs:["top-exceptions","financial-exposure","recommended-action","owner-decision-needed","next-review"], guardrails:["не пересказывать нормальный статус","не показывать более пяти пунктов без критической причины","не эскалировать то, что может решить утверждённый процесс или ответственный"], pilot:"Единый brief по активным проектам Company OS." },
+
+  "opportunity-discovery-engine": {
+    id:"opportunity-discovery-engine", name:"Opportunity Discovery Engine", purpose:"Ищет свежие рыночные дисбалансы и превращает их в shortlist бизнес-возможностей для Level 0 DRP.", mode:"on-demand", triggers:["opportunity-discovery"], agents:[...ALL_AGENTS], outputs:["market-signals","opportunity-hypotheses","shortlist","founder-fit","drp-candidates"], guardrails:["использовать актуальное внешнее исследование","не выдавать тренд за бизнес-модель","каждый shortlist-кандидат должен иметь независимые доказательства","материальный кандидат проходит DRP и Second Pair of Eyes"], pilot:"Первый выбранный сектор или Open Discovery." },
+
+  "revenue-leakage-agent": {
+    id:"revenue-leakage-agent", name:"ArtHello Revenue Leakage Agent", purpose:"Ищет недополученную выручку и коммерческие потери в воронке, загрузке, тарифах, начислениях и follow-up.", mode:"automatic", triggers:["revenue-leakage"], agents:[...ALL_AGENTS], outputs:["leakage-cases","estimated-revenue-at-risk","root-cause","recoverability","next-action"], guardrails:["не считать свободную ёмкость гарантированной выручкой","не путать дебиторку с неначисленной выручкой","не менять тарифы и начисления автоматически","показывать диапазон при неопределённости"], pilot:"ArtHello: лиды → ученики → группы → начисления → оплаты." },
+
+  "ikioma-deal-gate": {
+    id:"ikioma-deal-gate", name:"ИКИОМА Deal Gate", purpose:"Проверяет экономику и исполнимость сделки по дому до отправки финального предложения клиенту.", mode:"automatic", triggers:["ikioma-deal"], agents:[...ALL_AGENTS], outputs:["deal-margin","cash-need","financing-cost","delivery-risk","minimum-safe-price","go-no-go-recommendation"], guardrails:["не считать неподтверждённую себестоимость фактом","не разрешать скидке скрывать отрицательную маржу","не менять цену клиенту автоматически","материальные допущения проходят DRP при высокой неопределённости"], pilot:"Следующее реальное коммерческое предложение ИКИОМА." },
+
+  "automatic-product-qa": {
+    id:"automatic-product-qa", name:"Automatic Product QA", purpose:"После доработки проверяет продукт против исходной задачи, UX, данных, адаптивности, безопасности и регрессий до приёмки.", mode:"automatic", triggers:["product-change"], agents:[...ALL_AGENTS], outputs:["acceptance-check","regressions","ux-defects","data-defects","security-findings","pass-fail"], guardrails:["не принимать работу только по заявлению исполнителя","проверять исходный scope и критерии приёмки","не блокировать релиз за косметику, если она не нарушает утверждённый quality bar","критические дефекты дают FAIL"], pilot:"ArtHello OS и School 1–11, затем остальные цифровые продукты." },
 };
 
-export const listProcesses = (): ProcessDefinition[] =>
-  Object.values(PROCESS_LIBRARY);
+export const listProcesses = (): ProcessDefinition[] => Object.values(PROCESS_LIBRARY);
