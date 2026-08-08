@@ -10,14 +10,24 @@ export type ProcessId =
   | "receivables-orchestrator"
   | "growth-experiment-engine"
   | "founder-bottleneck-miner"
-  | "assumption-reality-check";
+  | "assumption-reality-check"
+  | "owner-exceptions-brief"
+  | "opportunity-discovery-engine"
+  | "revenue-leakage-agent"
+  | "ikioma-deal-gate"
+  | "automatic-product-qa";
 
 export type ProjectSignal =
   | "education-capacity"
   | "receivables"
   | "marketing-experiment"
   | "founder-repeat"
-  | "financial-model";
+  | "financial-model"
+  | "portfolio-exception"
+  | "opportunity-discovery"
+  | "revenue-leakage"
+  | "ikioma-deal"
+  | "product-change";
 
 export type ProcessMode = "automatic" | "advisory" | "on-demand";
 
