@@ -36,6 +36,8 @@ export interface ProjectContext {
   signals: ProjectSignal[];
   expectedBenefit?: number;
   expectedProcessCost?: number;
+  /** When true, processes without a verified real-data binding are not selected. */
+  requireRealData?: boolean;
 }
 
 export interface ProcessDefinition {
