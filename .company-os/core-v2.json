@@ -1,0 +1,93 @@
+{
+  "version": "2.0",
+  "name": "Company OS Core Processes",
+  "execution_order": [
+    "source-of-truth-controller",
+    "ai-contract-gate",
+    "experiment-operator",
+    "revenue-recovery-agent",
+    "sop-compiler"
+  ],
+  "global_rules": {
+    "production_requires_ai_contract": true,
+    "conflicted_data_blocks_financial_actions": true,
+    "new_idea_requires_experiment_before_build": true,
+    "accepted_repeatable_work_requires_sop_review": true,
+    "revenue_recovery_requires_verified_source_data": true,
+    "human_approval_required_for": [
+      "money_transfer",
+      "contract_signature",
+      "legal_commitment",
+      "customer_data_deletion",
+      "irreversible_external_action"
+    ]
+  },
+  "processes": [
+    {
+      "id": "source-of-truth-controller",
+      "name": "Source-of-Truth Controller",
+      "purpose": "Maintain provenance, freshness and trust status for every decision-critical metric.",
+      "inputs": ["metric", "value", "source", "source_record_id", "observed_at"],
+      "outputs": ["canonical_value", "trust_status", "freshness_status", "conflicts", "source_trace"],
+      "states": ["verified", "stale", "conflict", "unverified"],
+      "rules": [
+        "Every critical metric must have a declared primary source.",
+        "A conflict between primary and secondary sources is surfaced, never silently overwritten.",
+        "Stale or conflicted financial data cannot trigger autonomous financial actions."
+      ]
+    },
+    {
+      "id": "ai-contract-gate",
+      "name": "AI Contract Gate",
+      "purpose": "Block AI processes from production until the mandatory AI Process Contract is valid.",
+      "inputs": ["ai_process_contract"],
+      "outputs": ["gate_status", "validation_errors"],
+      "states": ["blocked", "test_only", "approved", "paused", "killed"],
+      "rules": [
+        "Missing required contract fields means blocked.",
+        "Cost, benefit metric and shutdown condition are mandatory.",
+        "User opt-out behavior is mandatory.",
+        "Forbidden actions override allowed actions."
+      ]
+    },
+    {
+      "id": "experiment-operator",
+      "name": "Experiment Operator",
+      "purpose": "Convert ideas and major changes into bounded experiments before full implementation.",
+      "inputs": ["hypothesis", "target_segment", "success_metric", "budget_limit", "time_limit"],
+      "outputs": ["experiment_plan", "result", "decision", "evidence"],
+      "decisions": ["KILL", "ITERATE", "SCALE"],
+      "rules": [
+        "No SCALE decision without a predefined success metric.",
+        "Budget and time limits must exist before test start.",
+        "KILL is the default when evidence is insufficient after the agreed limit."
+      ]
+    },
+    {
+      "id": "revenue-recovery-agent",
+      "name": "Revenue Recovery Agent",
+      "purpose": "Find and prioritize recoverable revenue from unpaid, stalled or forgotten commercial opportunities.",
+      "inputs": ["verified_receivables", "verified_leads", "verified_deals", "last_customer_action"],
+      "outputs": ["recovery_queue", "recoverable_amount", "recommended_next_action", "owner"],
+      "priority_formula": "recoverable_amount * probability_of_recovery * urgency_factor",
+      "rules": [
+        "Only verified source data may enter the recovery queue.",
+        "Every recovery item must have an amount or expected value and a next action.",
+        "Customer communication requires channel permission and must respect opt-out status."
+      ]
+    },
+    {
+      "id": "sop-compiler",
+      "name": "SOP Compiler / Reuse Broker",
+      "purpose": "Turn accepted repeatable work into reusable operating knowledge and prefer reuse over re-solving.",
+      "inputs": ["accepted_result", "acceptance_criteria", "execution_trace", "exceptions"],
+      "outputs": ["sop", "checklist", "template", "prompt_or_module", "reuse_tags"],
+      "rules": [
+        "Only accepted work can become a canonical SOP.",
+        "Before starting similar work, search the SOP library first.",
+        "A reused SOP must retain version and source-result traceability.",
+        "Failed or obsolete SOPs are deprecated, not silently overwritten."
+      ]
+    }
+  ]
+}
