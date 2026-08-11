@@ -1,0 +1,71 @@
+{
+  "id": "ai-mystery-shopper",
+  "name": "AI Mystery Shopper",
+  "version": "1.0",
+  "purpose": "Audit the full customer journey from first contact to follow-up, identify conversion leaks, and produce evidence-backed fixes.",
+  "default_mode": "simulation_first",
+  "journey_stages": [
+    "landing_page",
+    "offer_clarity",
+    "trust_signals",
+    "cta_and_form",
+    "lead_submission",
+    "response_speed",
+    "manager_first_reply",
+    "qualification",
+    "proposal_or_calculation",
+    "objection_handling",
+    "follow_up",
+    "close_or_loss_reason"
+  ],
+  "scorecard": {
+    "total": 100,
+    "dimensions": {
+      "clarity_and_value_proposition": 15,
+      "trust_and_evidence": 10,
+      "friction_and_usability": 10,
+      "response_speed": 15,
+      "sales_quality": 20,
+      "personalization": 10,
+      "follow_up_discipline": 10,
+      "conversion_readiness": 10
+    },
+    "thresholds": {
+      "90_100": "excellent",
+      "75_89": "good_but_leaking",
+      "60_74": "material_conversion_loss",
+      "0_59": "critical"
+    }
+  },
+  "outputs": [
+    "journey_score",
+    "stage_scores",
+    "evidence_log",
+    "conversion_leaks",
+    "severity",
+    "estimated_business_impact",
+    "recommended_fix",
+    "fix_owner",
+    "retest_required"
+  ],
+  "severity_levels": ["critical", "high", "medium", "low"],
+  "execution_rules": [
+    "Always capture evidence for every material finding.",
+    "Separate observed facts from inference.",
+    "Do not fabricate response times, messages, prices, or customer interactions.",
+    "Simulation may be run without external contact.",
+    "Live mystery-shopping may use only approved test identities, channels, budgets and destinations.",
+    "Never complete a purchase, payment, contract, booking, or other binding commitment without explicit human approval.",
+    "Never use a real customer's identity or personal data as a test persona.",
+    "After each material fix, rerun the failed stage and compare before versus after.",
+    "Critical findings block a PASS result until retested."
+  ],
+  "result_states": ["PASS", "PASS_WITH_LEAKS", "FAIL", "BLOCKED"],
+  "pass_rule": "PASS requires score >= 90 and no critical or high severity unresolved findings.",
+  "integration": {
+    "source_of_truth": "All CRM timestamps, prices, lead statuses and communications must be verified before scoring.",
+    "ai_contract_gate": "Live execution is blocked unless the agent contract is approved.",
+    "sop_compiler": "Accepted fixes and successful response patterns should be candidates for SOP capture.",
+    "revenue_recovery": "Lost or stalled test journeys may create diagnostic inputs, but never customer recovery actions unless the record is a verified real lead."
+  }
+}
