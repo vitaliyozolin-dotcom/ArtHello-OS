@@ -47,6 +47,7 @@ jobs:
         shell: bash
         run: |
           python3 .company-os/agents/grant-subsidy-hunter/test_discovery.py
+          python3 -m py_compile .company-os/agents/grant-subsidy-hunter/runtime.py
 
       - name: Select scan mode
         id: mode
@@ -84,7 +85,7 @@ jobs:
       - name: Discover opportunities
         shell: bash
         run: |
-          python3 .company-os/agents/grant-subsidy-hunter/discovery.py \
+          python3 .company-os/agents/grant-subsidy-hunter/runtime.py \
             --mode "${{ steps.mode.outputs.mode }}" \
             --previous-report previous-report.md \
             --report grant-hunter-report.md \
