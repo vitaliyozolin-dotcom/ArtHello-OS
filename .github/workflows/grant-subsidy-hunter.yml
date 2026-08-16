@@ -37,6 +37,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Run safety tests
+        shell: bash
+        run: |
+          python3 .company-os/agents/grant-subsidy-hunter/test_discovery.py
+
       - name: Select scan mode
         id: mode
         shell: bash
