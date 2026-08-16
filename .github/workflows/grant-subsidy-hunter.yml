@@ -43,11 +43,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Run safety tests
+      - name: Run safety and quality tests
         shell: bash
         run: |
           python3 .company-os/agents/grant-subsidy-hunter/test_discovery.py
-          python3 -m py_compile .company-os/agents/grant-subsidy-hunter/runtime.py
+          python3 .company-os/agents/grant-subsidy-hunter/test_quality.py
+          python3 -m py_compile \
+            .company-os/agents/grant-subsidy-hunter/discovery.py \
+            .company-os/agents/grant-subsidy-hunter/quality.py \
+            .company-os/agents/grant-subsidy-hunter/runtime.py \
+            .company-os/agents/grant-subsidy-hunter/engine.py
 
       - name: Select scan mode
         id: mode
