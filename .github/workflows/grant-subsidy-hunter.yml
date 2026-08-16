@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - ".company-os/agents/grant-subsidy-hunter/**"
+      - "company-os/grants/**"
       - ".github/workflows/grant-subsidy-hunter.yml"
   schedule:
     - cron: "17 5 * * 1-5"
@@ -24,6 +25,8 @@ on:
 permissions:
   contents: read
   issues: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: grant-subsidy-hunter
@@ -31,7 +34,7 @@ concurrency:
 
 jobs:
   discover:
-    name: Scan official support sources
+    name: Scan, verify and build Company OS module
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -41,18 +44,20 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v6
 
-      - name: Run safety and quality tests
+      - name: Run safety, quality and privacy tests
         shell: bash
         run: |
           python3 .company-os/agents/grant-subsidy-hunter/test_discovery.py
           python3 .company-os/agents/grant-subsidy-hunter/test_quality.py
+          python3 .company-os/agents/grant-subsidy-hunter/test_dashboard.py
           python3 -m py_compile \
             .company-os/agents/grant-subsidy-hunter/discovery.py \
             .company-os/agents/grant-subsidy-hunter/quality.py \
             .company-os/agents/grant-subsidy-hunter/runtime.py \
-            .company-os/agents/grant-subsidy-hunter/engine.py
+            .company-os/agents/grant-subsidy-hunter/engine.py \
+            .company-os/agents/grant-subsidy-hunter/build_dashboard.py
 
       - name: Select scan mode
         id: mode
@@ -96,6 +101,16 @@ jobs:
             --report grant-hunter-report.md \
             --json grant-hunter-candidates.json
 
+      - name: Build anonymized Company OS interface
+        shell: bash
+        run: |
+          python3 .company-os/agents/grant-subsidy-hunter/build_dashboard.py \
+            --candidates grant-hunter-candidates.json \
+            --profiles .company-os/agents/grant-subsidy-hunter/anonymized-profiles.json \
+            --overrides .company-os/agents/grant-subsidy-hunter/verified-overrides.json \
+            --ui-dir company-os/grants \
+            --output _site
+
       - name: Publish portfolio issue
         shell: bash
         run: |
@@ -110,12 +125,43 @@ jobs:
               --body-file grant-hunter-report.md
           fi
 
+      - name: Configure Pages
+        id: pages
+        continue-on-error: true
+        uses: actions/configure-pages@v6
+
+      - name: Upload Company OS module
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
       - name: Add job summary
         if: always()
         shell: bash
         run: |
+          echo "# Grant Hunter / Company OS" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Environment: production" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Data mode: anonymized" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Submission: blocked" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
           if [[ -f grant-hunter-report.md ]]; then
             cat grant-hunter-report.md >> "${GITHUB_STEP_SUMMARY}"
           else
             echo "Grant Hunter did not produce a report." >> "${GITHUB_STEP_SUMMARY}"
           fi
+
+  deploy:
+    name: Deploy Company OS grants interface
+    needs: discover
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
