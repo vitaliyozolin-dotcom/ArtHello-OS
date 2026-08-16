@@ -1,6 +1,12 @@
 name: Grant & Subsidy Hunter
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".company-os/agents/grant-subsidy-hunter/**"
+      - ".github/workflows/grant-subsidy-hunter.yml"
   schedule:
     - cron: "17 5 * * 1-5"
     - cron: "47 5 * * 0"
@@ -49,6 +55,8 @@ jobs:
           mode="delta"
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             mode="${{ inputs.mode }}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            mode="full"
           elif [[ "${{ github.event.schedule }}" == "47 5 * * 0" ]]; then
             mode="full"
           fi
