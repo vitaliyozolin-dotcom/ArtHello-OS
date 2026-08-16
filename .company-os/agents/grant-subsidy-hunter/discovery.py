@@ -325,9 +325,13 @@ def clean_url(value: str, base_url: str) -> str | None:
 
 
 def same_official_domain(candidate_url: str, source_url: str) -> bool:
-    candidate_host = urlsplit(candidate_url).hostname or ""
-    source_host = urlsplit(source_url).hostname or ""
-    return candidate_host == source_host or candidate_host.endswith("." + source_host)
+    candidate_host = (urlsplit(candidate_url).hostname or "").removeprefix("www.")
+    source_host = (urlsplit(source_url).hostname or "").removeprefix("www.")
+    return (
+        candidate_host == source_host
+        or candidate_host.endswith("." + source_host)
+        or source_host.endswith("." + candidate_host)
+    )
 
 
 def fetch_html(url: str) -> str:
@@ -405,6 +409,12 @@ def likely_opportunity(text: str, url: str) -> tuple[bool, list[str]]:
     terms = find_terms(searchable, SUPPORT_TERMS)
     if not terms:
         return False, []
+
+    visible_years = {int(value) for value in re.findall(r"\b20\d{2}\b", searchable)}
+    current_year = datetime.now(timezone.utc).year
+    if visible_years and max(visible_years) < current_year:
+        return False, terms
+
     negative = (
         "итоги" in searchable
         or "победител" in searchable
@@ -529,7 +539,17 @@ def load_previous_fingerprints(path: Path | None) -> set[str]:
 
 
 def markdown_escape(value: str) -> str:
-    return normalize_text(value).replace("|", "\\|")
+    return (
+        normalize_text(value)
+        .replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+    )
+
+
+def markdown_url(value: str) -> str:
+    return value.replace("(", "%28").replace(")", "%29")
 
 
 def render_candidate_table(candidates: Sequence[Candidate]) -> list[str]:
@@ -543,7 +563,7 @@ def render_candidate_table(candidates: Sequence[Candidate]) -> list[str]:
         source = markdown_escape(item.source_name)
         lines.append(
             f"| {item.discovery_score:.1f} | {scopes} | "
-            f"[{title}]({item.url}) | {source} | `{item.status}` |"
+            f"[{title}]({markdown_url(item.url)}) | {source} | `{item.status}` |"
         )
     if not candidates:
         lines.append("| — | — | Новых кандидатов не найдено | — | — |")
