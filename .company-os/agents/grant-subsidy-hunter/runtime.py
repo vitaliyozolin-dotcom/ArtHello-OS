@@ -9,15 +9,28 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 
 
-MODULE_PATH = Path(__file__).with_name("discovery.py")
-SPEC = importlib.util.spec_from_file_location("grant_hunter_discovery_runtime_module", MODULE_PATH)
-if SPEC is None or SPEC.loader is None:
-    raise RuntimeError("Cannot load discovery.py")
-discovery = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = discovery
-SPEC.loader.exec_module(discovery)
+def load_local_module(filename: str, module_name: str) -> ModuleType:
+    path = Path(__file__).with_name(filename)
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load {filename}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+discovery = load_local_module(
+    "discovery.py",
+    "grant_hunter_discovery_runtime_module",
+)
+quality = load_local_module(
+    "quality.py",
+    "grant_hunter_quality_runtime_module",
+)
 
 MAX_WORKERS = 4
 discovery.TIMEOUT_SECONDS = 15
@@ -59,13 +72,8 @@ def main() -> int:
 
     health.sort(key=lambda item: source_order.get(item.source_id, 999))
 
-    deduplicated: dict[str, discovery.Candidate] = {}
-    for candidate in all_candidates:
-        existing = deduplicated.get(candidate.url)
-        if existing is None or candidate.discovery_score > existing.discovery_score:
-            deduplicated[candidate.url] = candidate
-
-    candidates = list(deduplicated.values())
+    raw_candidate_count = len(all_candidates)
+    candidates = quality.filter_candidates(all_candidates)
     generated_at = datetime.now(timezone.utc)
     report = discovery.build_report(candidates, health, args.mode, generated_at)
     args.report.write_text(report, encoding="utf-8")
@@ -78,12 +86,15 @@ def main() -> int:
             "timeout_seconds": discovery.TIMEOUT_SECONDS,
             "max_follow_delta": 1,
             "max_follow_full": 4,
+            "quality_gate": "precision-v1",
         },
         "summary": {
             "sources": len(health),
             "sources_failed": sum(item.status == "FAILED" for item in health),
             "sources_partial": sum(item.status == "PARTIAL" for item in health),
+            "raw_candidates": raw_candidate_count,
             "candidates": len(candidates),
+            "rejected_by_quality_gate": raw_candidate_count - len(candidates),
             "new_candidates": sum(item.is_new for item in candidates),
         },
         "candidates": [
