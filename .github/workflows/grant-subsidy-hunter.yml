@@ -1,0 +1,102 @@
+name: Grant & Subsidy Hunter
+
+on:
+  schedule:
+    - cron: "17 5 * * 1-5"
+    - cron: "47 5 * * 0"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Scan depth
+        required: true
+        default: full
+        type: choice
+        options:
+          - delta
+          - full
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: grant-subsidy-hunter
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    name: Scan official support sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: "1"
+      ISSUE_TITLE: "Grant Hunter — портфель возможностей"
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Select scan mode
+        id: mode
+        shell: bash
+        run: |
+          mode="delta"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            mode="${{ inputs.mode }}"
+          elif [[ "${{ github.event.schedule }}" == "47 5 * * 0" ]]; then
+            mode="full"
+          fi
+          echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
+
+      - name: Load previous portfolio
+        id: issue
+        shell: bash
+        run: |
+          issue_number="$(
+            gh issue list \
+              --state open \
+              --limit 100 \
+              --json number,title \
+              --jq '.[] | select(.title == "Grant Hunter — портфель возможностей") | .number' \
+              | head -n 1 || true
+          )"
+          if [[ -n "${issue_number}" ]]; then
+            gh issue view "${issue_number}" --json body --jq '.body' > previous-report.md
+          else
+            : > previous-report.md
+          fi
+          echo "issue_number=${issue_number}" >> "${GITHUB_OUTPUT}"
+
+      - name: Discover opportunities
+        shell: bash
+        run: |
+          python3 .company-os/agents/grant-subsidy-hunter/discovery.py \
+            --mode "${{ steps.mode.outputs.mode }}" \
+            --previous-report previous-report.md \
+            --report grant-hunter-report.md \
+            --json grant-hunter-candidates.json
+
+      - name: Publish portfolio issue
+        shell: bash
+        run: |
+          issue_number="${{ steps.issue.outputs.issue_number }}"
+          if [[ -n "${issue_number}" ]]; then
+            gh issue edit "${issue_number}" \
+              --title "${ISSUE_TITLE}" \
+              --body-file grant-hunter-report.md
+          else
+            gh issue create \
+              --title "${ISSUE_TITLE}" \
+              --body-file grant-hunter-report.md
+          fi
+
+      - name: Add job summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f grant-hunter-report.md ]]; then
+            cat grant-hunter-report.md >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "Grant Hunter did not produce a report." >> "${GITHUB_STEP_SUMMARY}"
+          fi
