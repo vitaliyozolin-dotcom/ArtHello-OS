@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>Company OS — Гранты и субсидии</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Основная навигация">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">C</div>
+        <div class="brand-copy">
+          <strong>Company OS</strong>
+          <span>Контур собственника</span>
+        </div>
+      </div>
+
+      <nav class="nav-list">
+        <a href="#overview" class="nav-item is-active" data-view-link="overview"><span class="nav-icon">⌂</span><span>Обзор</span></a>
+        <a href="#opportunities" class="nav-item" data-view-link="opportunities"><span class="nav-icon">◇</span><span>Возможности</span></a>
+        <a href="#applicants" class="nav-item" data-view-link="applicants"><span class="nav-icon">▦</span><span>Заявители</span></a>
+        <a href="#sources" class="nav-item" data-view-link="sources"><span class="nav-icon">◎</span><span>Источники</span></a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="runtime-card"><div class="runtime-dot"></div><div><strong>Hunter работает</strong><span id="sidebarRuntime">Проверяем состояние</span></div></div>
+        <p>Автоподача и юридические действия заблокированы.</p>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobileMenu" aria-label="Открыть меню">☰</button>
+        <div><div class="breadcrumbs">Капитал <span>/</span> Гранты и субсидии</div><h1>Гранты и субсидии</h1></div>
+        <div class="topbar-actions">
+          <div class="status-pill status-live"><span></span>Боевой поиск</div>
+          <div class="status-pill">Обезличенные данные</div>
+          <button class="icon-button" id="refreshButton" title="Перезагрузить данные" aria-label="Перезагрузить данные">↻</button>
+        </div>
+      </header>
+
+      <section class="notice" id="privacyNotice"><div class="notice-icon">i</div><div><strong>Режим предварительной проверки</strong><p id="noticeText">Загружаем данные агента.</p></div></section>
+
+      <section class="view is-visible" data-view="overview" id="overview">
+        <div class="metric-grid" id="metricGrid"></div>
+        <div class="content-grid content-grid-main">
+          <article class="panel panel-large">
+            <div class="panel-header"><div><span class="eyebrow">Приоритет</span><h2>Требуют внимания</h2></div><button class="text-button" data-go-view="opportunities">Все возможности →</button></div>
+            <div id="attentionList" class="attention-list"></div>
+          </article>
+          <aside class="panel">
+            <div class="panel-header compact"><div><span class="eyebrow">Радар</span><h2>Покрытие источников</h2></div></div>
+            <div class="coverage-wrap"><div class="coverage-ring" id="coverageRing"><span id="coverageValue">0%</span></div><div class="coverage-copy"><strong id="coverageTitle">0 из 0</strong><span>источников доступны</span></div></div>
+            <div id="sourceMiniList" class="source-mini-list"></div>
+            <button class="secondary-button full-width" data-go-view="sources">Открыть диагностику</button>
+          </aside>
+        </div>
+        <article class="panel">
+          <div class="panel-header"><div><span class="eyebrow">Портфель</span><h2>Обезличенные заявители</h2></div><button class="text-button" data-go-view="applicants">Открыть профили →</button></div>
+          <div id="profileStrip" class="profile-strip"></div>
+        </article>
+      </section>
+
+      <section class="view" data-view="opportunities" id="opportunities">
+        <div class="section-heading"><div><span class="eyebrow">Рабочий реестр</span><h2>Возможности</h2><p>Только официальные находки после quality gate. Высокий score не означает, что приём заявок открыт.</p></div></div>
+        <div class="filters panel">
+          <label class="search-field"><span>Поиск</span><input type="search" id="searchInput" placeholder="Название программы или источник" /></label>
+          <label><span>Портфель</span><select id="portfolioFilter"><option value="all">Все портфели</option></select></label>
+          <label><span>Статус</span><select id="statusFilter"><option value="all">Все статусы</option><option value="VERIFY_DEADLINE">Проверить дедлайн</option><option value="DATA_REQUIRED">Нужны данные</option><option value="CONFIRMED_OPEN">Подтверждён приём</option><option value="ARCHIVED">Архив</option></select></label>
+          <label><span>Приоритет</span><select id="priorityFilter"><option value="all">Все приоритеты</option><option value="critical">Критический</option><option value="high">Высокий</option><option value="medium">Средний</option><option value="low">Низкий</option></select></label>
+        </div>
+        <div class="panel table-panel">
+          <div class="table-meta"><span id="resultsCount">0 возможностей</span><span>Нажмите строку, чтобы открыть карточку</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Возможность</th><th>Портфель</th><th>Источник</th><th>Статус</th><th>Score</th><th></th></tr></thead><tbody id="opportunitiesTable"></tbody></table></div>
+          <div id="emptyState" class="empty-state is-hidden"><strong>Ничего не найдено</strong><span>Измените фильтры или дождитесь следующего сканирования.</span></div>
+        </div>
+      </section>
+
+      <section class="view" data-view="applicants" id="applicants">
+        <div class="section-heading"><div><span class="eyebrow">Без персональных данных</span><h2>Профили заявителей</h2><p>Эти профили разрешают боевой поиск, но не подтверждают eligibility и не позволяют подать заявку.</p></div></div>
+        <div class="profile-grid" id="profileGrid"></div>
+      </section>
+
+      <section class="view" data-view="sources" id="sources">
+        <div class="section-heading"><div><span class="eyebrow">Source of Truth</span><h2>Источники и покрытие</h2><p>Недоступный источник не считается отсутствием программ. Он снижает доверие к полноте поиска.</p></div></div>
+        <div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Источник</th><th>Состояние</th><th>Страниц</th><th>Ссылок</th><th>Кандидатов</th><th>Диагностика</th></tr></thead><tbody id="sourcesTable"></tbody></table></div></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  <aside class="drawer" id="opportunityDrawer" aria-hidden="true"><button class="drawer-close" id="drawerClose" aria-label="Закрыть">×</button><div id="drawerContent"></div></aside>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="./app.js" defer></script>
+</body>
+</html>
