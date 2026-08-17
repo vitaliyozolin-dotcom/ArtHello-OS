@@ -1,0 +1,30 @@
+{
+  "name": "@workspace/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "hello": "tsx ./src/hello.ts",
+    "migrate-p83": "tsx ./src/migrate-p83-counterparties.ts",
+    "sandbox:init": "node --import tsx ./src/init-data-sandbox.ts",
+    "sandbox:import:alfacrm": "node --import tsx ./src/import-alfacrm-sandbox.ts",
+    "sandbox:rehydrate:alfacrm": "node --import tsx ./src/rehydrate-alfacrm-sandbox.ts",
+    "sandbox:rebuild:family-candidates": "node --import tsx ./src/rebuild-family-candidates-sandbox.ts",
+    "sandbox:audit:alfacrm": "node --import tsx ./src/audit-alfacrm-sandbox.ts",
+    "sandbox:import:payroll": "node --import tsx ./src/import-payroll-sheet-sandbox.ts",
+    "sandbox:audit:payroll": "node --import tsx ./src/audit-payroll-sandbox.ts",
+    "sandbox:export:sites-read-model": "node --import tsx ./src/export-sites-read-model-sandbox.ts",
+    "sites:publish:read-model": "node --import tsx ./src/publish-sites-read-model.ts",
+    "test": "node --import tsx --test ./test/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
+    "@types/node": "catalog:",
+    "@types/pg": "^8.20.0",
+    "tsx": "catalog:"
+  }
+}

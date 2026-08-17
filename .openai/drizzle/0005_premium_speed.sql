@@ -1,0 +1,1 @@
+ALTER TABLE `front_office_connector_state` ADD `external_account_id` text;
