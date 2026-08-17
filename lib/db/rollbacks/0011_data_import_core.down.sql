@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS "payroll_payments";
+DROP TABLE IF EXISTS "salary_accruals";
+DROP TABLE IF EXISTS "payroll_periods";
+DROP TABLE IF EXISTS "employee_external_identities";
+DROP TABLE IF EXISTS "family_merge_candidates";
+DROP TABLE IF EXISTS "crm_group_memberships";
+DROP TABLE IF EXISTS "source_raw_records";
+DROP TABLE IF EXISTS "source_import_batches";
+DROP TABLE IF EXISTS "branch_legal_entity_assignments";
+DROP TABLE IF EXISTS "operating_unit_legal_entity";
+DROP TABLE IF EXISTS "legal_entities";
