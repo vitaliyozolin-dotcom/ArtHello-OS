@@ -15,6 +15,14 @@ const workspace = readFileSync(
   "utf8",
 );
 const page = readFileSync(`${artifactRoot}src/pages/front-office.tsx`, "utf8");
+const channelWorkspace = readFileSync(
+  `${artifactRoot}src/features/front-office/channel-inbox-workspace.tsx`,
+  "utf8",
+);
+const channelClient = readFileSync(
+  `${artifactRoot}src/features/front-office/channel-inbox-client.ts`,
+  "utf8",
+);
 const contract = readFileSync(
   `${artifactRoot}src/features/front-office/preview-contract.ts`,
   "utf8",
@@ -246,13 +254,12 @@ test("synthetic inbox contains no direct payment or identity fields", () => {
   assert.deepEqual(found, []);
 });
 
-test("interactive inbox uses local state and keeps mutations disabled", () => {
-  const sources = `${workspace}\n${page}`;
-  assert.doesNotMatch(sources, /\bfetch\s*\(/);
-  assert.doesNotMatch(sources, /\buseQuery\s*\(/);
-  assert.doesNotMatch(sources, /@workspace\/api-client-react/);
-  assert.doesNotMatch(sources, /\blocalStorage\b/);
-  assert.doesNotMatch(sources, /\bWebSocket\b/);
+test("legacy preview stays isolated and the live inbox stays read-only", () => {
+  assert.doesNotMatch(workspace, /\bfetch\s*\(/);
+  assert.doesNotMatch(workspace, /\buseQuery\s*\(/);
+  assert.doesNotMatch(workspace, /@workspace\/api-client-react/);
+  assert.doesNotMatch(workspace, /\blocalStorage\b/);
+  assert.doesNotMatch(workspace, /\bWebSocket\b/);
   assert.match(workspace, /inbox-preview-data\.json/);
   assert.match(workspace, /Отправка отключена/);
   assert.match(workspace, /Сохранение отключено/);
@@ -264,6 +271,23 @@ test("interactive inbox uses local state and keeps mutations disabled", () => {
   assert.match(workspace, /Вставка snippet отключена/);
   assert.match(workspace, /Activity \/ audit history/);
   assert.match(workspace, /follow_up/);
-  assert.match(page, /InboxPreviewWorkspace/);
+
+  assert.match(page, /ChannelInboxWorkspace/);
   assert.match(page, /key:\s*["']inbox["']/);
+  assert.match(channelWorkspace, /loadChannelInbox/);
+  assert.match(channelWorkspace, /loadSmsVizitkaStatus/);
+  assert.match(channelWorkspace, /SHADOW · только чтение/);
+  assert.match(channelWorkspace, /OUTBOUND OFF/);
+  assert.match(channelClient, /mode:\s*["']SHADOW["']/);
+  assert.match(channelClient, /outboundEnabled:\s*false/);
+  assert.match(channelClient, /\/api\/integrations\/smsvizitka\/status/);
+  assert.match(channelClient, /\/api\/front-office\/channel-inbox/);
+  assert.doesNotMatch(
+    channelClient,
+    /method:\s*["'](?:POST|PUT|PATCH|DELETE)["']/i,
+  );
+  assert.doesNotMatch(
+    channelClient,
+    /request\(["']\/api\/[^"']*(?:send|reply|dispatch)/i,
+  );
 });
