@@ -1,0 +1,66 @@
+project_id: ARTHELLO
+catalog_version: 1.0.0
+generated_at: 2026-07-26
+default_status: review
+project_boundary:
+  included:
+    - ARTHELLO
+  excluded:
+    - SCHOOL_1_11
+production_gate: closed
+external_send: false
+approved_actions: []
+sections:
+  - id: governance
+    path: 00_governance
+  - id: strategy
+    path: 01_vision_strategy
+  - id: product
+    path: 02_product
+  - id: architecture
+    path: 03_architecture
+  - id: data_integrations
+    path: 04_data_integrations
+  - id: sales_service
+    path: 05_sales_service
+  - id: knowledge_base
+    path: 06_knowledge_base
+  - id: decisions
+    path: 07_decisions
+  - id: qa_tests
+    path: 08_qa_tests
+  - id: operations
+    path: 09_operations
+  - id: archive
+    path: 99_archive
+canonical_documents:
+  - path: 00_governance/project-boundary.md
+    status: approved
+  - path: 00_governance/ai-process-contract-standard.md
+    status: approved
+  - path: 03_architecture/company-os-entity-model-v1.md
+    status: approved
+  - path: 03_architecture/implemented-schema-inventory-pr1.md
+    status: partial
+  - path: 03_architecture/entity-registry.yaml
+    status: review
+  - path: 04_data_integrations/source-of-truth-map.md
+    status: review
+  - path: 05_sales_service/front-office.md
+    status: review
+  - path: 05_sales_service/intent-taxonomy.md
+    status: review
+  - path: 05_sales_service/marketing-funnel.md
+    status: review
+  - path: 05_sales_service/ticket-card-and-handoff.md
+    status: review
+  - path: 05_sales_service/sla-escalation-draft.md
+    status: draft
+  - path: 06_knowledge_base/knowledge-governance.md
+    status: review
+  - path: 07_decisions/accepted-decisions.md
+    status: review
+  - path: 08_qa_tests/arthello-scenario-catalog-100.md
+    status: review
+  - path: 08_qa_tests/known-blockers.md
+    status: blocked
