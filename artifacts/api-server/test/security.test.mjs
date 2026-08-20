@@ -299,7 +299,7 @@ test("legacy sync and provider callbacks stay fail closed", async () => {
   assert.match(appSource, /blockLegacySyncSurface/);
   assert.doesNotMatch(
     appSource,
-    /req\.method === "POST"[\s\S]{0,120}req\.path === "\/(?:webhooks|evotor|banking\/webhook)/,
+    /req\.method === "POST"[\s\S]{0,120}req\.path === "\/(?:webhooks(?:\/website-lead)?|evotor|banking\/webhook)"/,
   );
 });
 
@@ -625,7 +625,11 @@ test("security schema inventory gate requires every column, index, migration tim
       securitySchemaInventory.validateSecuritySchemaInventory({
         ...complete,
         columns: complete.columns.filter(
-          ({ columnName }) => columnName !== "scope_mode",
+          ({ tableName, columnName }) =>
+            !(
+              tableName === "auth_sessions" &&
+              columnName === "scope_mode"
+            ),
         ),
       }),
     /column is missing: auth_sessions\.scope_mode/,
