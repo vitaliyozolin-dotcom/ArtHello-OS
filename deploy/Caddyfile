@@ -1,0 +1,19 @@
+{$ARTHELLO_HOST:os.arthelloteam.ru} {
+  encode zstd gzip
+
+  header {
+    -Server
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "no-referrer"
+    X-Frame-Options "DENY"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+  }
+
+  @api path /api/*
+  reverse_proxy @api api:8080
+
+  root * /srv
+  try_files {path} /index.html
+  file_server
+}

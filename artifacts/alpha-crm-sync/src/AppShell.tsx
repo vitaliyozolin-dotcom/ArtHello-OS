@@ -2,6 +2,7 @@ import { useState, lazy, Suspense } from 'react';
 import { NavigationProvider } from '@/context/NavigationContext';
 import { useAuth } from '@/context/AuthContext';
 import LoginPage from '@/pages/login';
+import ChangePasswordPage from '@/pages/change-password';
 import { useQuery } from '@tanstack/react-query';
 import { useAppMode } from '@/context/AppModeContext';
 import { canViewFrontOfficePreview } from '@/features/front-office/preview-contract';
@@ -496,6 +497,7 @@ export function AppShell() {
     );
   }
   if (!user) return <LoginPage />;
+  if (user.mustChangePassword) return <ChangePasswordPage />;
 
   return (
     <div className="flex overflow-hidden" style={{ height: '100dvh', background: '#F7F8FB' }}>

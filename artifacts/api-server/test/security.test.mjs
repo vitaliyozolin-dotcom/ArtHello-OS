@@ -1262,3 +1262,18 @@ test("Evotor encryption has no tracked fallback key", async () => {
   assert.doesNotMatch(evotorRoute, /fallback-key|RAW_KEY\s*=.*\?\?/);
   assert.match(evotorRoute, /SESSION_SECRET must be configured/);
 });
+
+
+test("personal password hashes are salted, verifiable, and reject malformed input", async () => {
+  const passwordModule = await import(
+    pathToFileURL(path.join(artifactDir, "src/lib/security/password.ts")).href
+  );
+  const password = "Correct-Horse-2026";
+  const first = await passwordModule.hashPassword(password);
+  const second = await passwordModule.hashPassword(password);
+  assert.notEqual(first, second);
+  assert.equal(await passwordModule.verifyPassword(password, first), true);
+  assert.equal(await passwordModule.verifyPassword("wrong-password-2026", first), false);
+  assert.equal(await passwordModule.verifyPassword(password, "not-a-valid-hash"), false);
+  assert.match(first, /^scrypt\$N=32768,r=8,p=1\$/);
+});

@@ -17,7 +17,8 @@ test("public credential and indexing regressions stay removed", async () => {
   assert.doesNotMatch(combined, /owner123|accountant123|viewer123/i);
   assert.doesNotMatch(login, /<option value="(?:owner|accountant|viewer)"/i);
   assert.match(login, /autoComplete="username"/);
-  assert.match(auth, /process\.env\.VIEWER_PASSWORD/);
+  assert.match(auth, /getActiveUserByLogin/);
+  assert.doesNotMatch(auth, /process\.env\.(?:DASHBOARD|ACCOUNTANT|VIEWER)_PASSWORD/);
   assert.match(html, /noindex, nofollow, noarchive, nosnippet/);
   assert.match(robots, /Disallow: \//);
 });
@@ -142,4 +143,24 @@ test("GitHub quality evidence is pinned to the PR head and exported immutably", 
   assert.match(workflow, /sites_artifact_sha256/);
   assert.match(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /arthello-provenance-\$\{\{\s*github\.run_id\s*\}\}/);
+});
+
+
+test("production auth uses personal PostgreSQL users and mandatory password change", async () => {
+  const [auth, store, password, migration, context, shell] = await Promise.all([
+    readFile(resolve(projectRoot, "artifacts/api-server/src/routes/auth.ts"), "utf8"),
+    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/security/auth-store.ts"), "utf8"),
+    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/security/password.ts"), "utf8"),
+    readFile(resolve(projectRoot, "lib/db/drizzle/0016_personal_auth.sql"), "utf8"),
+    readFile(resolve(projectRoot, "artifacts/alpha-crm-sync/src/context/AuthContext.tsx"), "utf8"),
+    readFile(resolve(projectRoot, "artifacts/alpha-crm-sync/src/AppShell.tsx"), "utf8"),
+  ]);
+  assert.match(migration, /CREATE TABLE "auth_users"/);
+  assert.match(store, /FROM auth_users/);
+  assert.match(password, /scrypt/);
+  assert.match(auth, /mustChangePassword/);
+  assert.match(auth, /revokeSessionsForUser/);
+  assert.match(context, /changePassword/);
+  assert.match(shell, /ChangePasswordPage/);
+  assert.doesNotMatch(auth, /DASHBOARD_PASSWORD|ACCOUNTANT_PASSWORD|VIEWER_PASSWORD/);
 });

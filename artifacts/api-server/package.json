@@ -12,7 +12,8 @@
     "test:front-office": "node --import tsx --test test/front-office-*.test.mjs",
     "test:postgres": "node --import tsx --test test/postgres.integration.test.mjs",
     "test:security": "node --test test/security.test.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "auth:create-owner": "node --import tsx src/scripts/create-owner.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

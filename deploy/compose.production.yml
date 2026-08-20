@@ -1,0 +1,81 @@
+name: arthello-os
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: /srv/arthello/shared/.env.production
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-arthello}
+      POSTGRES_USER: ${POSTGRES_USER:-arthello}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [backend]
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: api
+    restart: unless-stopped
+    env_file: /srv/arthello/shared/.env.production
+    depends_on:
+      db:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+    networks: [backend]
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: web
+    restart: unless-stopped
+    environment:
+      ARTHELLO_HOST: ${ARTHELLO_HOST:-os.arthelloteam.ru}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [backend, public]
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: /srv/arthello/shared/.env.production
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backup.sh:/usr/local/bin/arthello-backup:ro
+      - /srv/arthello/backups/postgres:/backups
+    command: ["/bin/sh", "/usr/local/bin/arthello-backup"]
+    networks: [backend]
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  backend:
+    internal: true
+  public:
