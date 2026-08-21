@@ -86,6 +86,7 @@ expected = {
     f"arthello-ru-images-{sha}.tar.gz": "bundle",
     f"arthello-ru-images-{sha}.manifest": "manifest",
     f"arthello-ru-images-{sha}.sha256": "checksums",
+    f"arthello-ru-pull-release-{sha}.sh": "script",
 }
 assets = {asset["name"]: asset for asset in release.get("assets", [])}
 missing = sorted(set(expected) - set(assets))
@@ -98,16 +99,18 @@ print(str(assets[f"arthello-ru-images-{sha}.tar.gz"]["id"]))
 print(assets[f"arthello-ru-images-{sha}.tar.gz"].get("digest") or "")
 print(str(assets[f"arthello-ru-images-{sha}.manifest"]["id"]))
 print(str(assets[f"arthello-ru-images-{sha}.sha256"]["id"]))
+print(str(assets[f"arthello-ru-pull-release-{sha}.sh"]["id"]))
 PY
 ) || fail invalid_release_metadata
 
-[ "${#release_fields[@]}" -eq 6 ] || fail invalid_release_metadata
+[ "${#release_fields[@]}" -eq 7 ] || fail invalid_release_metadata
 [ "${release_fields[0]}" = "$release_tag" ] || fail release_tag_mismatch
 [ "${release_fields[1]}" = "$release_sha" ] || fail release_target_mismatch
 bundle_asset_id="${release_fields[2]}"
 bundle_api_digest="${release_fields[3]}"
 manifest_asset_id="${release_fields[4]}"
 checksums_asset_id="${release_fields[5]}"
+script_asset_id="${release_fields[6]}"
 
 download_asset() {
   asset_id="$1"
@@ -126,12 +129,15 @@ download_asset() {
 bundle_name="arthello-ru-images-$release_sha.tar.gz"
 manifest_name="arthello-ru-images-$release_sha.manifest"
 checksums_name="arthello-ru-images-$release_sha.sha256"
+script_name="arthello-ru-pull-release-$release_sha.sh"
 download_asset "$bundle_asset_id" "$temporary_dir/$bundle_name" \
   || fail bundle_download_failed
 download_asset "$manifest_asset_id" "$temporary_dir/$manifest_name" \
   || fail manifest_download_failed
 download_asset "$checksums_asset_id" "$temporary_dir/$checksums_name" \
   || fail checksums_download_failed
+download_asset "$script_asset_id" "$temporary_dir/$script_name" \
+  || fail script_download_failed
 
 (
   cd "$temporary_dir"
@@ -155,6 +161,7 @@ grep -Fx 'first_owner=not_created' "$temporary_dir/$manifest_name" >/dev/null \
   || fail manifest_owner_boundary_missing
 grep -Fx 'dns=not_changed' "$temporary_dir/$manifest_name" >/dev/null \
   || fail manifest_dns_boundary_missing
+bash -n "$temporary_dir/$script_name" || fail downloaded_script_invalid
 
 if [ ! -d "$release_dir" ]; then
   test -d "$source_repo/objects" || fail source_repository_missing
@@ -208,6 +215,9 @@ docker image tag "arthello-os-web:$release_sha" arthello-os-web:local
 
 install -m 0444 "$temporary_dir/$manifest_name" "$release_dir/.arthello-image-manifest"
 install -m 0444 "$temporary_dir/$checksums_name" "$release_dir/.arthello-image-checksums"
+install -d -m 0750 -o "$deploy_user" -g "$deploy_user" "$root_dir/shared/bin"
+install -m 0755 -o root -g root \
+  "$temporary_dir/$script_name" "$root_dir/shared/bin/arthello-pull-release"
 
 cd "$release_dir/deploy"
 compose up -d --no-build --pull never --remove-orphans
