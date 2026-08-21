@@ -76,8 +76,8 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
   const databaseUrl = requiredDatabaseUrl();
   process.env.DATABASE_URL = databaseUrl;
   process.env.NODE_ENV = "test";
-  process.env.DASHBOARD_PASSWORD =
-    "sandbox-owner-password-that-is-never-used-in-production";
+  const initialOwnerPassword = "PostgresOwnerInitial2026";
+  const changedOwnerPassword = "PostgresOwnerChanged2026";
   process.env.ALFACRM_DOMAIN = "sandbox.invalid";
   process.env.PORT = "41991";
 
@@ -95,6 +95,26 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
     );
 
     await migrate(db, { migrationsFolder });
+
+    const { hashPassword } = await import(
+      pathToFileURL(
+        resolve(
+          artifactDir,
+          "src/lib/security/password.ts",
+        ),
+      ).href
+    );
+    await pool.query(
+      `INSERT INTO auth_users (
+         login, login_normalized, display_name, role, password_hash,
+         scope_mode, branch_ids, legal_entity_ids, is_active,
+         must_change_password
+       ) VALUES (
+         'owner', 'owner', 'Владелец', 'owner', $1,
+         'unrestricted', '[]'::jsonb, '[]'::jsonb, TRUE, TRUE
+       )`,
+      [await hashPassword(initialOwnerPassword)],
+    );
 
     const { assertSecuritySchemaReady } = await import(
       pathToFileURL(
@@ -121,15 +141,91 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
     assert.ok(address && typeof address === "object");
     const baseUrl = `http://127.0.0.1:${address.port}`;
 
+    const firstLogin = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        login: "owner",
+        password: initialOwnerPassword,
+      }),
+    });
+    assert.equal(firstLogin.status, 200);
+    assert.deepEqual(await firstLogin.json(), {
+      role: "owner",
+      name: "Владелец",
+      mustChangePassword: true,
+    });
+    const firstCookieHeader = cookiesFrom(firstLogin);
+    const firstCsrfToken = cookieValue(
+      firstCookieHeader,
+      "arthello_csrf",
+    );
+    assert.ok(firstCsrfToken);
+
+    const passwordGate = await fetch(
+      `${baseUrl}/api/banking/connectors`,
+      { headers: { cookie: firstCookieHeader } },
+    );
+    assert.equal(passwordGate.status, 403);
+    assert.deepEqual(await passwordGate.json(), {
+      error: "Требуется смена временного пароля",
+      code: "PASSWORD_CHANGE_REQUIRED",
+    });
+
+    const passwordChange = await fetch(
+      `${baseUrl}/api/auth/password`,
+      {
+        method: "POST",
+        headers: {
+          cookie: firstCookieHeader,
+          "content-type": "application/json",
+          "x-csrf-token": firstCsrfToken,
+        },
+        body: JSON.stringify({
+          currentPassword: initialOwnerPassword,
+          newPassword: changedOwnerPassword,
+        }),
+      },
+    );
+    assert.equal(passwordChange.status, 200);
+    assert.deepEqual(await passwordChange.json(), {
+      ok: true,
+      reauthenticate: true,
+    });
+
+    const revokedSession = await fetch(
+      `${baseUrl}/api/auth/me`,
+      { headers: { cookie: firstCookieHeader } },
+    );
+    assert.equal(revokedSession.status, 401);
+
+    const oldPasswordLogin = await fetch(
+      `${baseUrl}/api/auth/login`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          login: "owner",
+          password: initialOwnerPassword,
+        }),
+      },
+    );
+    assert.equal(oldPasswordLogin.status, 401);
+
     const login = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         login: "owner",
-        password: process.env.DASHBOARD_PASSWORD,
+        password: changedOwnerPassword,
       }),
     });
     assert.equal(login.status, 200);
+    assert.deepEqual(await login.json(), {
+      role: "owner",
+      name: "Владелец",
+      mustChangePassword: false,
+    });
     const cookieHeader = cookiesFrom(login);
     const csrfToken = cookieValue(
       cookieHeader,
@@ -149,6 +245,7 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
         branchIds: [],
         legalEntityIds: [],
       },
+      mustChangePassword: false,
     });
 
     const banking = await fetch(
