@@ -17,6 +17,6 @@ EXPOSE 8080
 ENTRYPOINT ["/app/deploy/api-entrypoint.sh"]
 
 FROM caddy:2.10-alpine AS web
-COPY --from=build /app/artifacts/alpha-crm-sync/.vite-dist /srv
+COPY --from=build /app/artifacts/alpha-crm-sync/dist/public /srv
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
 EXPOSE 80 443

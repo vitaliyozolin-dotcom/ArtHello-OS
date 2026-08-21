@@ -52,6 +52,13 @@ jobs:
             '+refs/heads/main:refs/remotes/origin/main'
           git merge-base --is-ancestor "$RELEASE_REF" refs/remotes/origin/main
 
+      - name: Checkout release infrastructure
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .release-infrastructure
+          persist-credentials: false
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -74,19 +81,20 @@ jobs:
           cat > .dockerignore <<'EOF'
           .git
           .github
+          .release-infrastructure
           node_modules
           **/node_modules
           coverage
           **/coverage
           EOF
           docker build \
-            --file deploy/Dockerfile \
+            --file .release-infrastructure/deploy/Dockerfile \
             --target api \
             --label "org.opencontainers.image.revision=$RELEASE_REF" \
             --tag "arthello-os-api:$RELEASE_REF" \
             .
           docker build \
-            --file deploy/Dockerfile \
+            --file .release-infrastructure/deploy/Dockerfile \
             --target web \
             --label "org.opencontainers.image.revision=$RELEASE_REF" \
             --tag "arthello-os-web:$RELEASE_REF" \
