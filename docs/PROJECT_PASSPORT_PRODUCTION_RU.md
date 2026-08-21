@@ -94,7 +94,7 @@
 ## Контракт AI-процесса: закрытый RU deployment
 
 - входные данные: immutable application SHA `f7bb971f362bb8fe3f76209eba01237c602d9946`, workflow из актуального `main`, private GitHub repository, существующий fine-grained token `Contents: Read`, подготовленный RU VPS;
-- ожидаемый результат: GitHub Actions проверяет source SHA, тесты и build, публикует закрытый bundle API/web/PostgreSQL с manifest и SHA-256; VPS проверяет release target, GitHub asset digest, manifest, image revision labels и запускает Compose без build/pull;
+- ожидаемый результат: GitHub Actions проверяет source SHA, тесты и build, публикует закрытый bundle API/web/PostgreSQL и pull-скрипт с manifest и SHA-256; VPS проверяет release target, GitHub asset digest, manifest, image revision labels и запускает Compose без build/pull;
 - разрешённые действия: создать `codex/arthello-offserver-build`, commit/push/PR, обновить workflow/документацию/паспорт, исправлять CI, squash-merge после зелёного CI, опубликовать private prerelease и развернуть указанный application SHA на `188.225.47.207`;
 - запрещённые действия: DNS cutover, создание первого owner, загрузка реальных данных, подключение AlfaCRM/Точки, изменение нидерландского сервера, сторонние package mirrors, передача сохранённого токена в чат или CI;
 - ответственный человек: Виталий Озолин; исполнитель — Codex;
@@ -293,7 +293,7 @@ decision:
   project_id: ARTHELLO-OS-PRODUCTION-RU
   status: active
   question: Как воспроизводимо доставить runtime на RU VPS, если GitHub SSH delivery недоступен, а VPS не устанавливает TLS к официальному npm registry?
-  statement: Собирать точный application SHA на GitHub-hosted runner, сохранять API/web/PostgreSQL images как private prerelease assets репозитория, а на RU VPS скачивать их существующим fine-grained token с Contents Read, проверять release target, GitHub digest, SHA-256 и image revision labels и запускать только через docker load и Compose --no-build --pull never.
+  statement: Собирать точный application SHA на GitHub-hosted runner, сохранять API/web/PostgreSQL images и проверенный pull-скрипт как private prerelease assets репозитория, а на RU VPS скачивать их существующим fine-grained token с Contents Read, проверять release target, GitHub digest, SHA-256 и image revision labels и запускать только через docker load и Compose --no-build --pull never.
   context: GitHub HTTPS source fetch на VPS работает. SSH 22/2222/443 delivery не дал рабочей цепочки. DNS registry.npmjs.org работает, но curl -4 с самого VPS завершается SSL connection timeout; Docker build падает на corepack prepare. npm status сообщает Package installation Operational.
   rationale: Убрать npm и build toolchain из production activation, не использовать нидерландский relay, сторонние mirrors и дополнительный package token, сохранить immutable provenance и переиспользовать уже ограниченный repository token.
   evidence:
