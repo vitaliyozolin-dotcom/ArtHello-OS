@@ -132,19 +132,35 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: release-infrastructure
+
       - uses: actions/download-artifact@v4
         with:
           name: arthello-ru-images-${{ inputs.ref }}
           path: /tmp/arthello-release
 
-      - name: Verify release assets before publication
+      - name: Add and verify deployment infrastructure
         env:
           RELEASE_REF: ${{ inputs.ref }}
         run: |
           set -Eeuo pipefail
           cd /tmp/arthello-release
+          script="arthello-ru-pull-release-$RELEASE_REF.sh"
+          cp "$GITHUB_WORKSPACE/release-infrastructure/deploy/pull-release.sh" "$script"
+          chmod 0755 "$script"
+          printf 'infrastructure_sha=%s\n' "$GITHUB_SHA" >> "arthello-ru-images-$RELEASE_REF.manifest"
+          sha256sum \
+            "arthello-ru-images-$RELEASE_REF.tar.gz" \
+            "arthello-ru-images-$RELEASE_REF.manifest" \
+            "$script" \
+            > "arthello-ru-images-$RELEASE_REF.sha256"
           sha256sum --check "arthello-ru-images-$RELEASE_REF.sha256"
+          bash -n "$script"
           grep -Fx "source_sha=$RELEASE_REF" "arthello-ru-images-$RELEASE_REF.manifest"
+          grep -Fx "infrastructure_sha=$GITHUB_SHA" "arthello-ru-images-$RELEASE_REF.manifest"
           test "$(printf %s "$RELEASE_REF" | wc -c)" -eq 40
           printf %s "$RELEASE_REF" | grep -Eq '^[0-9a-f]{40}$'
 
@@ -180,4 +196,5 @@ jobs:
             --prerelease \
             "arthello-ru-images-$RELEASE_REF.tar.gz" \
             "arthello-ru-images-$RELEASE_REF.manifest" \
-            "arthello-ru-images-$RELEASE_REF.sha256"
+            "arthello-ru-images-$RELEASE_REF.sha256" \
+            "arthello-ru-pull-release-$RELEASE_REF.sh"
