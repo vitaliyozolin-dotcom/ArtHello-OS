@@ -26,12 +26,12 @@ GitHub Environment `production-ru` хранит deploy-secrets. `ARTHELLO_RU_HOS
 
 Российский VPS не собирает JavaScript-зависимости и не обращается к npm во время deployment. Workflow `Build closed RU release` проверяет точный application SHA, собирает API/web-образы в GitHub Actions, добавляет образ PostgreSQL, формирует manifest и SHA-256 и публикует assets как prerelease приватного репозитория.
 
-Сервер скачивает эти assets существующим fine-grained токеном только с `Contents: Read`, проверяет target SHA, release manifest, GitHub asset digest и локальные SHA-256, затем выполняет `docker load` и `docker compose up --no-build --pull never`. Токен хранится только в `/srv/arthello/shared/github-https/token` с правами `0600`.
+Сервер скачивает эти assets существующим fine-grained токеном только с `Contents: Read`, проверяет target SHA, release manifest, GitHub asset digest и локальные SHA-256, затем выполняет `docker load` и `docker compose up --no-build --pull never`. Проверенный pull-скрипт входит в тот же checksum-set и после первой активации устанавливается в `/srv/arthello/shared/bin/arthello-pull-release`. Токен хранится только в `/srv/arthello/shared/github-https/token` с правами `0600`.
 
 Запуск из локальной консоли Timeweb:
 
 ```bash
-bash /srv/arthello/releases/<SHA>/deploy/pull-release.sh <SHA> :80
+bash /srv/arthello/shared/bin/arthello-pull-release <SHA> :80
 ```
 
 До успешного health-check активный symlink не переключается. DNS, первый владелец, реальные данные и интеграции этим сценарием не настраиваются.
