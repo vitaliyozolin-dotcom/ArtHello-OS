@@ -1,0 +1,1256 @@
+{
+  "projectId": "ARTHELLO",
+  "dataMode": "SYNTHETIC",
+  "autonomyMode": "DRAFT_ONLY",
+  "realIngressEnabled": false,
+  "outboundDeliveryEnabled": false,
+  "persistenceEnabled": false,
+  "queues": [
+    {
+      "key": "all",
+      "label": "Все обращения"
+    },
+    {
+      "key": "unread",
+      "label": "Непрочитанные"
+    },
+    {
+      "key": "unassigned",
+      "label": "Без владельца"
+    },
+    {
+      "key": "urgent",
+      "label": "P0–P1"
+    },
+    {
+      "key": "overdue",
+      "label": "Требуют внимания"
+    },
+    {
+      "key": "follow_up",
+      "label": "Ожидают follow-up"
+    },
+    {
+      "key": "sales",
+      "label": "Продажи"
+    },
+    {
+      "key": "service",
+      "label": "Клиентский сервис"
+    }
+  ],
+  "collaborationStates": [
+    {
+      "conversationId": "CONV-AH-DEMO-0101",
+      "viewers": ["Менеджер 2 · DEMO"],
+      "draftReviewState": "REVIEW_REQUESTED",
+      "collisionState": "VIEWER_PRESENT",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0102",
+      "viewers": [],
+      "draftReviewState": "NONE",
+      "collisionState": "CLEAR",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0103",
+      "viewers": ["Администратор · DEMO"],
+      "draftReviewState": "NONE",
+      "collisionState": "VIEWER_PRESENT",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0104",
+      "viewers": ["Руководитель филиала · DEMO"],
+      "draftReviewState": "REVIEW_REQUESTED",
+      "collisionState": "VIEWER_PRESENT",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0105",
+      "viewers": [],
+      "draftReviewState": "REVIEW_REQUESTED",
+      "collisionState": "CLEAR",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0106",
+      "viewers": [],
+      "draftReviewState": "HUMAN_ONLY",
+      "collisionState": "CLEAR",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0107",
+      "viewers": ["Дежурный · DEMO"],
+      "draftReviewState": "HUMAN_ONLY",
+      "collisionState": "VIEWER_PRESENT",
+      "sharedDraftWrites": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0108",
+      "viewers": [],
+      "draftReviewState": "NONE",
+      "collisionState": "CLEAR",
+      "sharedDraftWrites": false
+    }
+  ],
+  "continuityChecks": [
+    {
+      "conversationId": "CONV-AH-DEMO-0101",
+      "threadKey": "CONV-AH-DEMO-0101",
+      "channels": [
+        {
+          "channel": "WEB_CHAT",
+          "state": "CURRENT"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0102",
+      "threadKey": "CONV-AH-DEMO-0102",
+      "channels": [
+        {
+          "channel": "MANUAL_ENTRY",
+          "state": "CURRENT"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0103",
+      "threadKey": "CONV-AH-DEMO-0103",
+      "channels": [
+        {
+          "channel": "MESSENGER",
+          "state": "CURRENT_UNVERIFIED_IDENTITY"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0104",
+      "threadKey": "CONV-AH-DEMO-0104",
+      "channels": [
+        {
+          "channel": "EMAIL",
+          "state": "CURRENT"
+        }
+      ],
+      "duplicateState": "POSSIBLE_RELATED",
+      "candidateIds": ["CONV-AH-DEMO-ARCHIVE-0004"],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0105",
+      "threadKey": "CONV-AH-DEMO-0105",
+      "channels": [
+        {
+          "channel": "EMAIL",
+          "state": "CURRENT"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0106",
+      "threadKey": "CONV-AH-DEMO-0106",
+      "channels": [
+        {
+          "channel": "PHONE_TRANSCRIPT",
+          "state": "CURRENT_TRANSCRIPT_REQUIRES_CONFIRMATION"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0107",
+      "threadKey": "CONV-AH-DEMO-0107",
+      "channels": [
+        {
+          "channel": "SITE_CHAT",
+          "state": "CURRENT_UNVERIFIED_IDENTITY"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    },
+    {
+      "conversationId": "CONV-AH-DEMO-0108",
+      "threadKey": "CONV-AH-DEMO-0108",
+      "channels": [
+        {
+          "channel": "WEB_CHAT",
+          "state": "CURRENT_ROUTING_ONLY"
+        }
+      ],
+      "duplicateState": "NO_MATCH",
+      "candidateIds": [],
+      "automaticMergeAllowed": false
+    }
+  ],
+  "approvedSnippets": [
+    {
+      "id": "SNIPPET-AH-DEMO-QUALIFY-01",
+      "title": "Три уточнения для первичного подбора",
+      "appliesTo": ["LEAD_QUALIFICATION"],
+      "status": "APPROVED",
+      "sourceStatus": "VERIFIED",
+      "sourceRef": "KB-DEMO-SALES-QUALIFY · version 1.0",
+      "insertEnabled": false
+    },
+    {
+      "id": "SNIPPET-AH-DEMO-IDENTITY-01",
+      "title": "Безопасный переход к проверке личности",
+      "appliesTo": ["FAMILY_SCHEDULE"],
+      "status": "APPROVED",
+      "sourceStatus": "VERIFIED",
+      "sourceRef": "KB-DEMO-IDENTITY-GATE · version 1.0",
+      "insertEnabled": false
+    },
+    {
+      "id": "SNIPPET-AH-DEMO-PROGRAM-01",
+      "title": "Уточнение перед подбором программы",
+      "appliesTo": ["PUBLIC_PROGRAM_MATCH"],
+      "status": "APPROVED",
+      "sourceStatus": "VERIFIED",
+      "sourceRef": "KB-DEMO-PROGRAM-MATCH · version 1.0",
+      "insertEnabled": false
+    }
+  ],
+  "conversations": [
+    {
+      "id": "CONV-AH-DEMO-0101",
+      "subject": "Какая творческая программа подойдёт в 6–7 лет?",
+      "preview": "Нужна спокойная программа после 17:00, без перегрузки.",
+      "channel": "WEB_CHAT",
+      "kind": "SALES",
+      "status": "OPEN",
+      "priority": "P4",
+      "unread": true,
+      "identity": "not_required",
+      "assignedTo": "Менеджер 1 · DEMO",
+      "due": "DEMO · срок SLA не активирован",
+      "lastActivity": "26.07.2026 11:31 · TZ не настроена",
+      "slaState": "NOT_ACTIVATED",
+      "linkedObject": {
+        "type": "LEAD",
+        "id": "AH-DEMO-0042",
+        "label": "Первичный запрос · творческая программа",
+        "previewOnly": true
+      },
+      "personalDataRisk": false,
+      "mayRevealPrivateData": false,
+      "intent": "PUBLIC_PROGRAM_MATCH",
+      "confidence": "HIGH",
+      "emotion": "calm",
+      "churnRisk": "low",
+      "tags": ["новый лид", "творчество", "публичный вопрос"],
+      "nextAction": "Уточнить удобный филиал и дату старта, затем проверить актуальное расписание.",
+      "followUp": {
+        "required": true,
+        "status": "PLANNED",
+        "due": "DEMO · после ответа семьи",
+        "owner": "Менеджер 1 · DEMO",
+        "promisedChannel": "WEB_CHAT"
+      },
+      "messages": [
+        {
+          "id": "MSG-AH-DEMO-0101-01",
+          "type": "INCOMING",
+          "at": "26.07.2026 11:18 · TZ не настроена",
+          "actor": "Посетитель · DEMO",
+          "body": "Здравствуйте! Ищу творческую программу для возраста 6–7 лет. Удобно после 17:00.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0101-02",
+          "type": "INTERNAL_NOTE",
+          "at": "26.07.2026 11:26 · TZ не настроена",
+          "actor": "Менеджер 1 · DEMO",
+          "body": "Возраст, цель и предпочтительное время зафиксированы. Филиал и дата старта не подтверждены.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0101-03",
+          "type": "AI_DRAFT",
+          "at": "26.07.2026 11:31 · TZ не настроена",
+          "actor": "Front Office · DRAFT_ONLY",
+          "body": "Подготовлен уточняющий ответ. Отправка отключена.",
+          "immutable": true,
+          "synthetic": true
+        }
+      ],
+      "facts": {
+        "verified": [
+          {
+            "statement": "Возрастная группа и цель обращения указаны в текущем диалоге.",
+            "status": "VERIFIED",
+            "sourceRef": "MSG-AH-DEMO-0101-01"
+          },
+          {
+            "statement": "Конкретные расписание и наличие ещё не проверялись.",
+            "status": "VERIFIED",
+            "sourceRef": "AUDIT-AH-DEMO-0101-01"
+          }
+        ],
+        "unverified": [
+          {
+            "statement": "Какой филиал удобен семье.",
+            "status": "UNVERIFIED"
+          },
+          {
+            "statement": "Когда семья хочет начать.",
+            "status": "UNVERIFIED"
+          }
+        ]
+      },
+      "draft": {
+        "text": "Здравствуйте! Чтобы подобрать не более двух подходящих вариантов и затем проверить актуальное расписание, подскажите, пожалуйста, какой филиал вам удобнее и когда вы хотели бы начать.",
+        "claims": [
+          {
+            "assertion": "Подбор ограничен двумя релевантными вариантами.",
+            "status": "VERIFIED",
+            "evidence": "POLICY-DEMO-SALES-01 · preview"
+          },
+          {
+            "assertion": "Расписание должно быть отдельно проверено в актуальном источнике.",
+            "status": "VERIFIED",
+            "evidence": "SOURCE_OF_TRUTH_MAP · AlfaCRM read-only, не подключён"
+          }
+        ],
+        "sent": false,
+        "saved": false
+      },
+      "audit": [
+        {
+          "id": "AUDIT-AH-DEMO-0101-01",
+          "event": "CLASSIFIED",
+          "actor": "Front Office · DRAFT_ONLY",
+          "at": "26.07.2026 11:24 · TZ не настроена"
+        }
+      ]
+    },
+    {
+      "id": "CONV-AH-DEMO-0102",
+      "subject": "Нужен детский сад на полный день",
+      "preview": "Возраст, район и дата старта пока не указаны.",
+      "channel": "MANUAL_ENTRY",
+      "kind": "SALES",
+      "status": "OPEN",
+      "priority": "P3",
+      "unread": false,
+      "identity": "not_required",
+      "assignedTo": "UNASSIGNED",
+      "due": "DEMO · следующий шаг не назначен",
+      "lastActivity": "26.07.2026 10:54 · TZ не настроена",
+      "slaState": "ATTENTION_REQUIRED",
+      "linkedObject": {
+        "type": "LEAD",
+        "id": "AH-DEMO-0044",
+        "label": "Неполный первичный запрос",
+        "previewOnly": true
+      },
+      "personalDataRisk": false,
+      "mayRevealPrivateData": false,
+      "intent": "LEAD_QUALIFICATION",
+      "confidence": "MEDIUM",
+      "emotion": "calm",
+      "churnRisk": "medium",
+      "tags": ["новый лид", "неполные данные", "без владельца"],
+      "nextAction": "Назначить владельца и уточнить возраст, район и дату старта.",
+      "followUp": {
+        "required": true,
+        "status": "OVERDUE",
+        "due": "DEMO · требуется решение владельца",
+        "owner": "UNASSIGNED",
+        "promisedChannel": "ORIGINAL_CHANNEL"
+      },
+      "messages": [
+        {
+          "id": "MSG-AH-DEMO-0102-01",
+          "type": "INCOMING",
+          "at": "26.07.2026 10:54 · TZ не настроена",
+          "actor": "Посетитель · DEMO",
+          "body": "Подскажите по детскому саду на полный день.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0102-02",
+          "type": "INTERNAL_NOTE",
+          "at": "26.07.2026 11:02 · TZ не настроена",
+          "actor": "Система · DEMO",
+          "body": "Без возраста, района и даты старта нельзя безопасно подобрать программу.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0102-03",
+          "type": "AI_DRAFT",
+          "at": "26.07.2026 11:04 · TZ не настроена",
+          "actor": "Front Office · DRAFT_ONLY",
+          "body": "Подготовлены три необходимых уточнения. Отправка отключена.",
+          "immutable": true,
+          "synthetic": true
+        }
+      ],
+      "facts": {
+        "verified": [
+          {
+            "statement": "Клиент спрашивает о формате полного дня.",
+            "status": "VERIFIED",
+            "sourceRef": "MSG-AH-DEMO-0102-01"
+          }
+        ],
+        "unverified": [
+          {
+            "statement": "Возраст.",
+            "status": "UNVERIFIED"
+          },
+          {
+            "statement": "Район или филиал.",
+            "status": "UNVERIFIED"
+          },
+          {
+            "statement": "Желаемая дата старта.",
+            "status": "UNVERIFIED"
+          }
+        ]
+      },
+      "draft": {
+        "text": "Здравствуйте! Подскажите, пожалуйста, возраст, удобный район и желаемую дату старта. После этого сотрудник сможет подобрать подходящий формат и проверить актуальные условия.",
+        "claims": [
+          {
+            "assertion": "Для подбора не хватает трёх обязательных параметров.",
+            "status": "VERIFIED",
+            "evidence": "MSG-AH-DEMO-0102-01 + POLICY-DEMO-SALES-01"
+          }
+        ],
+        "sent": false,
+        "saved": false
+      },
+      "audit": [
+        {
+          "id": "AUDIT-AH-DEMO-0102-01",
+          "event": "OWNER_MISSING_DETECTED",
+          "actor": "Front Office · DRAFT_ONLY",
+          "at": "26.07.2026 11:02 · TZ не настроена"
+        }
+      ]
+    },
+    {
+      "id": "CONV-AH-DEMO-0103",
+      "subject": "Какое расписание у конкретной группы?",
+      "preview": "Запрошены семейные данные; проверка личности не завершена.",
+      "channel": "MESSENGER",
+      "kind": "SERVICE",
+      "status": "WAITING_CUSTOMER",
+      "priority": "P3",
+      "unread": true,
+      "identity": "partial",
+      "assignedTo": "Администратор · DEMO",
+      "due": "DEMO · после стандартной проверки личности",
+      "lastActivity": "26.07.2026 12:08 · TZ не настроена",
+      "slaState": "IDENTITY_BLOCKED",
+      "linkedObject": {
+        "type": "TICKET",
+        "id": "TICKET-AH-DEMO-0201",
+        "label": "Расписание конкретной семьи",
+        "previewOnly": true
+      },
+      "personalDataRisk": true,
+      "mayRevealPrivateData": false,
+      "intent": "FAMILY_SCHEDULE",
+      "confidence": "HIGH",
+      "emotion": "confused",
+      "churnRisk": "low",
+      "tags": ["действующая семья", "расписание", "нужна проверка личности"],
+      "nextAction": "Предложить только утверждённый способ стандартной проверки личности.",
+      "followUp": {
+        "required": true,
+        "status": "WAITING_CUSTOMER",
+        "due": "DEMO · после прохождения проверки",
+        "owner": "Администратор · DEMO",
+        "promisedChannel": "MESSENGER"
+      },
+      "messages": [
+        {
+          "id": "MSG-AH-DEMO-0103-01",
+          "type": "INCOMING",
+          "at": "26.07.2026 12:01 · TZ не настроена",
+          "actor": "Представитель семьи · DEMO",
+          "body": "Подскажите расписание нашей конкретной группы на следующей неделе.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0103-02",
+          "type": "INTERNAL_NOTE",
+          "at": "26.07.2026 12:05 · TZ не настроена",
+          "actor": "Администратор · DEMO",
+          "body": "Контакт в этом канале не считается подтверждённой личностью. Семейные данные не открывались.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0103-03",
+          "type": "AI_DRAFT",
+          "at": "26.07.2026 12:08 · TZ не настроена",
+          "actor": "Front Office · DRAFT_ONLY",
+          "body": "Подготовлен запрос стандартной проверки личности без раскрытия расписания.",
+          "immutable": true,
+          "synthetic": true
+        }
+      ],
+      "facts": {
+        "verified": [
+          {
+            "statement": "Запрошено расписание конкретной группы.",
+            "status": "VERIFIED",
+            "sourceRef": "MSG-AH-DEMO-0103-01"
+          },
+          {
+            "statement": "Проверка личности в текущем канале не завершена.",
+            "status": "VERIFIED",
+            "sourceRef": "AUDIT-AH-DEMO-0103-01"
+          }
+        ],
+        "unverified": [
+          {
+            "statement": "Право отправителя получать сведения этой семьи.",
+            "status": "UNVERIFIED"
+          }
+        ]
+      },
+      "draft": {
+        "text": "Чтобы проверить расписание конкретной группы, сначала нужно подтвердить доступ утверждённым способом. Семейные данные в этом канале пока не открывались. Сотрудник направит безопасный шаг проверки после подтверждения процесса.",
+        "claims": [
+          {
+            "assertion": "Для расписания конкретной семьи требуется проверка личности.",
+            "status": "VERIFIED",
+            "evidence": "IDENTITY_VERIFICATION_POLICY · обязательная настройка, не подключена"
+          }
+        ],
+        "sent": false,
+        "saved": false
+      },
+      "handoff": {
+        "requester": "Представитель семьи · личность частично подтверждена",
+        "goal": "Получить расписание конкретной группы",
+        "scope": "ARTHELLO · семейные данные не открывались",
+        "dates": "Следующая неделя по словам клиента",
+        "verifiedFacts": [
+          "Запрошено непубличное расписание",
+          "Проверка личности не завершена"
+        ],
+        "unverifiedClaims": ["Право отправителя на доступ к сведениям семьи"],
+        "emotion": "confused",
+        "risk": "privacy",
+        "policy": "IDENTITY_VERIFICATION_POLICY · требуется утверждение и подключение",
+        "actionsDone": [
+          "Создан синтетический тикет",
+          "Раскрытие данных заблокировано"
+        ],
+        "decisionRequired": "Провести утверждённую стандартную проверку личности",
+        "ownerRole": "SUPPORT_OWNER_ROLE · UNASSIGNED",
+        "due": "После утверждённой проверки; SLA не активирован",
+        "recommendedReply": "Подтвердить безопасный способ проверки и не раскрывать расписание до её завершения."
+      },
+      "audit": [
+        {
+          "id": "AUDIT-AH-DEMO-0103-01",
+          "event": "PRIVATE_DATA_ACCESS_BLOCKED",
+          "actor": "Front Office · DRAFT_ONLY",
+          "at": "26.07.2026 12:05 · TZ не настроена"
+        }
+      ]
+    },
+    {
+      "id": "CONV-AH-DEMO-0104",
+      "subject": "Повторная отмена и претензия к коммуникации",
+      "preview": "Клиент просит объяснение и решение после повторной отмены.",
+      "channel": "EMAIL",
+      "kind": "SERVICE",
+      "status": "WAITING_INTERNAL",
+      "priority": "P2",
+      "unread": false,
+      "identity": "partial",
+      "assignedTo": "Руководитель филиала · DEMO",
+      "due": "DEMO · требуется подтверждённый срок владельца",
+      "lastActivity": "26.07.2026 09:42 · TZ не настроена",
+      "slaState": "ESCALATED",
+      "linkedObject": {
+        "type": "TICKET",
+        "id": "TICKET-AH-DEMO-0202",
+        "label": "Жалоба на качество коммуникации",
+        "previewOnly": true
+      },
+      "personalDataRisk": true,
+      "mayRevealPrivateData": false,
+      "intent": "STAFF_COMPLAINT",
+      "confidence": "HIGH",
+      "emotion": "angry",
+      "churnRisk": "high",
+      "tags": ["жалоба", "повторное событие", "риск ухода", "только человек"],
+      "nextAction": "Руководителю проверить отмены и определить решение; AI не оценивает сотрудника.",
+      "followUp": {
+        "required": true,
+        "status": "WAITING_INTERNAL",
+        "due": "DEMO · срок должен подтвердить владелец",
+        "owner": "Руководитель филиала · DEMO",
+        "promisedChannel": "EMAIL"
+      },
+      "messages": [
+        {
+          "id": "MSG-AH-DEMO-0104-01",
+          "type": "INCOMING",
+          "at": "26.07.2026 09:14 · TZ не настроена",
+          "actor": "Клиент · DEMO",
+          "body": "Занятие снова отменили, а заранее никто не предупредил. Нужен конкретный ответ, что будет дальше.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0104-02",
+          "type": "INTERNAL_NOTE",
+          "at": "26.07.2026 09:31 · TZ не настроена",
+          "actor": "Менеджер 2 · DEMO",
+          "body": "Слова клиента сохранены отдельно от фактов. История отмен и уведомлений ещё не проверена.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0104-03",
+          "type": "AI_DRAFT",
+          "at": "26.07.2026 09:42 · TZ не настроена",
+          "actor": "Front Office · DRAFT_ONLY",
+          "body": "Подготовлено признание неудобства и handoff без признания юридической ответственности.",
+          "immutable": true,
+          "synthetic": true
+        }
+      ],
+      "facts": {
+        "verified": [
+          {
+            "statement": "Клиент сообщил о повторной отмене и отсутствии предупреждения.",
+            "status": "VERIFIED",
+            "sourceRef": "MSG-AH-DEMO-0104-01"
+          },
+          {
+            "statement": "Системная история отмен ещё не проверена.",
+            "status": "VERIFIED",
+            "sourceRef": "AUDIT-AH-DEMO-0104-01"
+          }
+        ],
+        "unverified": [
+          {
+            "statement": "Отмена действительно была повторной.",
+            "status": "UNVERIFIED"
+          },
+          {
+            "statement": "Уведомление не отправлялось.",
+            "status": "UNVERIFIED"
+          }
+        ]
+      },
+      "draft": {
+        "text": "Я вижу, что вы сообщаете о повторной отмене без предупреждения и хотите конкретное решение. Историю занятий и уведомлений ещё нужно проверить. Обращение подготовлено для руководителя филиала; срок следующего контакта должен подтвердить ответственный сотрудник.",
+        "claims": [
+          {
+            "assertion": "Слова клиента зафиксированы, но системные факты ещё не проверены.",
+            "status": "VERIFIED",
+            "evidence": "MSG-AH-DEMO-0104-01 + AUDIT-AH-DEMO-0104-01"
+          },
+          {
+            "assertion": "Жалоба на сотрудника требует решения человека.",
+            "status": "VERIFIED",
+            "evidence": "MASTER_POLICY · ALWAYS_HUMAN"
+          }
+        ],
+        "sent": false,
+        "saved": false
+      },
+      "handoff": {
+        "requester": "Клиент · личность частично подтверждена",
+        "goal": "Получить объяснение и конкретное решение после отмены",
+        "scope": "ARTHELLO · филиал ещё не подтверждён",
+        "dates": "Дата спорного занятия требует уточнения",
+        "verifiedFacts": [
+          "Клиент сообщил о повторной отмене",
+          "История ещё не сверена"
+        ],
+        "unverifiedClaims": [
+          "Отмена была повторной",
+          "Уведомление отсутствовало"
+        ],
+        "emotion": "angry",
+        "risk": "complaint + churn",
+        "policy": "Жалоба на сотрудника или качество · ALWAYS_HUMAN",
+        "actionsDone": [
+          "Создан синтетический тикет",
+          "Подготовлен нейтральный черновик"
+        ],
+        "decisionRequired": "Проверить историю и определить подтверждённое решение",
+        "ownerRole": "SUPPORT_OWNER_ROLE · UNASSIGNED",
+        "due": "Срок должен назначить ответственный; SLA не активирован",
+        "recommendedReply": "Назвать результат проверки, следующий шаг и контролируемый срок без обвинения клиента или сотрудника."
+      },
+      "audit": [
+        {
+          "id": "AUDIT-AH-DEMO-0104-01",
+          "event": "HUMAN_HANDOFF_PREPARED",
+          "actor": "Front Office · DRAFT_ONLY",
+          "at": "26.07.2026 09:37 · TZ не настроена"
+        }
+      ]
+    },
+    {
+      "id": "CONV-AH-DEMO-0105",
+      "subject": "Спорное начисление",
+      "preview": "Клиент видит начисление, которое считает ошибочным.",
+      "channel": "EMAIL",
+      "kind": "SERVICE",
+      "status": "WAITING_INTERNAL",
+      "priority": "P2",
+      "unread": true,
+      "identity": "verified",
+      "assignedTo": "Финансы · DEMO",
+      "due": "DEMO · требуется подтверждённый срок финансов",
+      "lastActivity": "26.07.2026 10:22 · TZ не настроена",
+      "slaState": "ESCALATED",
+      "linkedObject": {
+        "type": "TICKET",
+        "id": "TICKET-AH-DEMO-0203",
+        "label": "Проверка спорного начисления",
+        "previewOnly": true
+      },
+      "personalDataRisk": true,
+      "mayRevealPrivateData": false,
+      "intent": "DISPUTED_CHARGE",
+      "confidence": "HIGH",
+      "emotion": "worried",
+      "churnRisk": "medium",
+      "tags": ["финансы", "спорное начисление", "только человек"],
+      "nextAction": "Финансам сверить начисление, CRM-оплату и банковский статус.",
+      "followUp": {
+        "required": true,
+        "status": "WAITING_INTERNAL",
+        "due": "DEMO · после сверки трёх источников",
+        "owner": "FINANCE_ESCALATION_ROLE · UNASSIGNED",
+        "promisedChannel": "EMAIL"
+      },
+      "messages": [
+        {
+          "id": "MSG-AH-DEMO-0105-01",
+          "type": "INCOMING",
+          "at": "26.07.2026 10:03 · TZ не настроена",
+          "actor": "Проверенный клиент · DEMO",
+          "body": "В кабинете отображается начисление, которое я считаю ошибочным. Проверьте, пожалуйста.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0105-02",
+          "type": "INTERNAL_NOTE",
+          "at": "26.07.2026 10:14 · TZ не настроена",
+          "actor": "Администратор · DEMO",
+          "body": "Платёжные реквизиты не запрашивались. Источники платежа в preview не подключены.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0105-03",
+          "type": "AI_DRAFT",
+          "at": "26.07.2026 10:22 · TZ не настроена",
+          "actor": "Front Office · DRAFT_ONLY",
+          "body": "Подготовлен ответ о финансовой сверке без обещания возврата.",
+          "immutable": true,
+          "synthetic": true
+        }
+      ],
+      "facts": {
+        "verified": [
+          {
+            "statement": "Клиент оспаривает отображаемое начисление.",
+            "status": "VERIFIED",
+            "sourceRef": "MSG-AH-DEMO-0105-01"
+          },
+          {
+            "statement": "Финансовые источники в preview не подключены.",
+            "status": "VERIFIED",
+            "sourceRef": "FRONT_OFFICE_PREVIEW_CONTRACT"
+          }
+        ],
+        "unverified": [
+          {
+            "statement": "Начисление является ошибочным.",
+            "status": "UNVERIFIED"
+          },
+          {
+            "statement": "Был фактический платёж.",
+            "status": "UNVERIFIED"
+          }
+        ]
+      },
+      "draft": {
+        "text": "Начисление нужно сверить отдельно с учётной записью и фактическим банковским статусом. Пока проверка не завершена, я не буду называть его ошибочным или обещать возврат. Для финансов подготовлен полный контекст обращения.",
+        "claims": [
+          {
+            "assertion": "Начисление и движение денег являются разными фактами.",
+            "status": "VERIFIED",
+            "evidence": "ARTHELLO_PAYMENT_POLICY · source hierarchy"
+          },
+          {
+            "assertion": "Решение по спорному начислению принимает финансовый ответственный.",
+            "status": "VERIFIED",
+            "evidence": "MASTER_POLICY · financial escalation"
+          }
+        ],
+        "sent": false,
+        "saved": false
+      },
+      "handoff": {
+        "requester": "Проверенный клиент · DEMO",
+        "goal": "Проверить спорное начисление",
+        "scope": "ARTHELLO · финансовый тикет без платёжных реквизитов",
+        "dates": "Дата начисления не раскрывается в synthetic preview",
+        "verifiedFacts": [
+          "Клиент оспаривает начисление",
+          "Финансовые источники не подключены"
+        ],
+        "unverifiedClaims": ["Начисление ошибочно", "Платёж уже был получен"],
+        "emotion": "worried",
+        "risk": "financial + churn",
+        "policy": "Спорное начисление · FINANCE_ESCALATION_ROLE",
+        "actionsDone": [
+          "Создан синтетический тикет",
+          "Платёжные данные не запрашивались"
+        ],
+        "decisionRequired": "Сверить AlfaCRM, ArtHello OS и банковский статус",
+        "ownerRole": "FINANCE_ESCALATION_ROLE · UNASSIGNED",
+        "due": "Срок должен назначить финансовый ответственный",
+        "recommendedReply": "Сообщить подтверждённый результат сверки и следующий шаг без преждевременного обещания возврата."
+      },
+      "audit": [
+        {
+          "id": "AUDIT-AH-DEMO-0105-01",
+          "event": "FINANCE_HANDOFF_PREPARED",
+          "actor": "Front Office · DRAFT_ONLY",
+          "at": "26.07.2026 10:18 · TZ не настроена"
+        }
+      ]
+    },
+    {
+      "id": "CONV-AH-DEMO-0106",
+      "subject": "Сообщение о травме во время занятия",
+      "preview": "Потенциальный риск для ребёнка: только emergency playbook и человек.",
+      "channel": "PHONE_TRANSCRIPT",
+      "kind": "INCIDENT",
+      "status": "ESCALATED",
+      "priority": "P0",
+      "unread": true,
+      "identity": "partial",
+      "assignedTo": "SAFETY_ESCALATION_ROLE · UNASSIGNED",
+      "due": "НЕМЕДЛЕННО · emergency playbook не подключён",
+      "lastActivity": "26.07.2026 12:21 · TZ не настроена",
+      "slaState": "CRITICAL_HANDOFF",
+      "linkedObject": {
+        "type": "INCIDENT",
+        "id": "INCIDENT-AH-DEMO-0001",
+        "label": "Безопасность ребёнка · synthetic drill",
+        "previewOnly": true
+      },
+      "personalDataRisk": true,
+      "mayRevealPrivateData": false,
+      "intent": "CHILD_INJURY",
+      "confidence": "HIGH",
+      "emotion": "distressed",
+      "churnRisk": "high",
+      "tags": ["P0", "ребёнок", "безопасность", "только человек"],
+      "nextAction": "Немедленно активировать утверждённый emergency playbook и назначить ответственного.",
+      "followUp": {
+        "required": true,
+        "status": "CRITICAL",
+        "due": "Немедленно после назначения ответственного",
+        "owner": "SAFETY_ESCALATION_ROLE · UNASSIGNED",
+        "promisedChannel": "HUMAN_CALL"
+      },
+      "messages": [
+        {
+          "id": "MSG-AH-DEMO-0106-01",
+          "type": "INCOMING",
+          "at": "26.07.2026 12:17 · TZ не настроена",
+          "actor": "Звонящий · DEMO",
+          "body": "Сообщаю о травме во время занятия. Нужен срочный контакт ответственного.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0106-02",
+          "type": "INTERNAL_NOTE",
+          "at": "26.07.2026 12:19 · TZ не настроена",
+          "actor": "Front Office · DRAFT_ONLY",
+          "body": "Классифицировано P0. Расследование и медицинские рекомендации в чате запрещены.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0106-03",
+          "type": "AI_DRAFT",
+          "at": "26.07.2026 12:21 · TZ не настроена",
+          "actor": "Front Office · DRAFT_ONLY",
+          "body": "Подготовлено только подтверждение получения и срочная передача человеку. Отправка отключена.",
+          "immutable": true,
+          "synthetic": true
+        }
+      ],
+      "facts": {
+        "verified": [
+          {
+            "statement": "Получено сообщение о травме во время занятия.",
+            "status": "VERIFIED",
+            "sourceRef": "MSG-AH-DEMO-0106-01"
+          },
+          {
+            "statement": "Аварийный протокол и ответственная роль ещё не настроены.",
+            "status": "VERIFIED",
+            "sourceRef": "CONTROL_CENTER_PREVIEW"
+          }
+        ],
+        "unverified": [
+          {
+            "statement": "Тяжесть травмы и текущее состояние.",
+            "status": "UNVERIFIED"
+          },
+          {
+            "statement": "Точные время и место события.",
+            "status": "UNVERIFIED"
+          }
+        ]
+      },
+      "draft": {
+        "text": "Сообщение о травме получено и должно быть немедленно передано ответственному за безопасность. В чате нельзя проводить расследование или давать медицинские рекомендации. Требуется срочный человеческий контакт по утверждённому аварийному протоколу.",
+        "claims": [
+          {
+            "assertion": "Сообщение о потенциальной травме ребёнка классифицируется как P0.",
+            "status": "VERIFIED",
+            "evidence": "ARTHELLO_SAFETY_POLICY · P0"
+          },
+          {
+            "assertion": "Follow-up выполняет назначенный человек.",
+            "status": "VERIFIED",
+            "evidence": "ARTHELLO_SAFETY_POLICY · human follow-up"
+          }
+        ],
+        "sent": false,
+        "saved": false
+      },
+      "handoff": {
+        "requester": "Звонящий · личность частично подтверждена",
+        "goal": "Получить срочную помощь ответственного после сообщения о травме",
+        "scope": "ARTHELLO · потенциальная безопасность ребёнка",
+        "dates": "Событие сообщено 26.07.2026; точное время требует подтверждения",
+        "verifiedFacts": [
+          "Получено сообщение о травме",
+          "Emergency playbook не подключён"
+        ],
+        "unverifiedClaims": ["Тяжесть травмы", "Точное место и обстоятельства"],
+        "emotion": "distressed",
+        "risk": "child safety · P0",
+        "policy": "EMERGENCY_PLAYBOOK · MISSING/BLOCKING",
+        "actionsDone": [
+          "Создан синтетический incident",
+          "Подготовлена срочная передача",
+          "Автоответ не отправлен"
+        ],
+        "decisionRequired": "Немедленно активировать утверждённый playbook и назначить safety owner",
+        "ownerRole": "SAFETY_ESCALATION_ROLE · UNASSIGNED",
+        "due": "НЕМЕДЛЕННО",
+        "recommendedReply": "Кратко подтвердить получение и назвать подтверждённый человеческий следующий шаг; не обсуждать других детей и не расследовать в чате."
+      },
+      "audit": [
+        {
+          "id": "AUDIT-AH-DEMO-0106-01",
+          "event": "P0_DETECTED_AND_AUTO_SEND_BLOCKED",
+          "actor": "Front Office · DRAFT_ONLY",
+          "at": "26.07.2026 12:18 · TZ не настроена"
+        }
+      ]
+    },
+    {
+      "id": "CONV-AH-DEMO-0107",
+      "subject": "Семья не найдена в списке перед началом занятия",
+      "preview": "Услуга начинается сейчас; нужна срочная ручная проверка.",
+      "channel": "SITE_CHAT",
+      "kind": "SERVICE",
+      "status": "ESCALATED",
+      "priority": "P1",
+      "unread": true,
+      "identity": "partial",
+      "assignedTo": "DUTY_MANAGER_ROLE · UNASSIGNED",
+      "due": "СРОЧНО · SLA не активирован",
+      "lastActivity": "26.07.2026 12:12 · TZ не настроена",
+      "slaState": "URGENT_HANDOFF",
+      "linkedObject": {
+        "type": "TICKET",
+        "id": "TICKET-AH-DEMO-0204",
+        "label": "Доступ к услуге, которая начинается сейчас",
+        "previewOnly": true
+      },
+      "personalDataRisk": true,
+      "mayRevealPrivateData": false,
+      "intent": "ACTIVE_SERVICE_ACCESS",
+      "confidence": "HIGH",
+      "emotion": "worried",
+      "churnRisk": "high",
+      "tags": ["P1", "услуга сейчас", "ручная проверка"],
+      "nextAction": "Дежурному вручную проверить запись и дать подтверждённый ответ.",
+      "followUp": {
+        "required": true,
+        "status": "URGENT",
+        "due": "Срочно после назначения дежурного",
+        "owner": "DUTY_MANAGER_ROLE · UNASSIGNED",
+        "promisedChannel": "SITE_CHAT"
+      },
+      "messages": [
+        {
+          "id": "MSG-AH-DEMO-0107-01",
+          "type": "INCOMING",
+          "at": "26.07.2026 12:08 · TZ не настроена",
+          "actor": "Посетитель · DEMO",
+          "body": "Мы пришли на занятие, но нас не видят в списке. Занятие начинается сейчас.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0107-02",
+          "type": "INTERNAL_NOTE",
+          "at": "26.07.2026 12:10 · TZ не настроена",
+          "actor": "Front Office · DRAFT_ONLY",
+          "body": "P1: активная услуга. AlfaCRM не подключена, запись автоматически не проверяется и не изменяется.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0107-03",
+          "type": "AI_DRAFT",
+          "at": "26.07.2026 12:12 · TZ не настроена",
+          "actor": "Front Office · DRAFT_ONLY",
+          "body": "Подготовлен срочный handoff дежурному. Отправка отключена.",
+          "immutable": true,
+          "synthetic": true
+        }
+      ],
+      "facts": {
+        "verified": [
+          {
+            "statement": "Клиент сообщает, что услуга начинается сейчас.",
+            "status": "VERIFIED",
+            "sourceRef": "MSG-AH-DEMO-0107-01"
+          },
+          {
+            "statement": "AlfaCRM в preview не подключена.",
+            "status": "VERIFIED",
+            "sourceRef": "FRONT_OFFICE_PREVIEW_CONTRACT"
+          }
+        ],
+        "unverified": [
+          {
+            "statement": "Наличие подтверждённой записи.",
+            "status": "UNVERIFIED"
+          },
+          {
+            "statement": "Правильность выбранного филиала и времени.",
+            "status": "UNVERIFIED"
+          }
+        ]
+      },
+      "draft": {
+        "text": "Вижу, что занятие начинается сейчас, поэтому нужна срочная ручная проверка записи дежурным сотрудником. До проверки я не буду подтверждать или менять запись. Контекст обращения подготовлен для передачи без повторного рассказа.",
+        "claims": [
+          {
+            "assertion": "Проблема с услугой, которая идёт сейчас, требует срочной передачи.",
+            "status": "VERIFIED",
+            "evidence": "SLA_PROPOSAL · P1 classification, timings not activated"
+          }
+        ],
+        "sent": false,
+        "saved": false
+      },
+      "handoff": {
+        "requester": "Посетитель · личность частично подтверждена",
+        "goal": "Получить доступ к занятию, которое начинается сейчас",
+        "scope": "ARTHELLO · филиал и группа требуют подтверждения",
+        "dates": "Услуга идёт сейчас по словам клиента",
+        "verifiedFacts": [
+          "Получено срочное обращение",
+          "AlfaCRM не подключена"
+        ],
+        "unverifiedClaims": [
+          "Есть подтверждённая запись",
+          "Выбран правильный филиал"
+        ],
+        "emotion": "worried",
+        "risk": "active service disruption · P1",
+        "policy": "SLA P1 proposal · urgent human handoff",
+        "actionsDone": [
+          "Создан синтетический тикет",
+          "Контекст подготовлен без изменения записи"
+        ],
+        "decisionRequired": "Проверить запись и дать подтверждённое операционное решение",
+        "ownerRole": "DUTY_MANAGER_ROLE · UNASSIGNED",
+        "due": "СРОЧНО; точный SLA не активирован",
+        "recommendedReply": "Подтвердить, кто проверяет запись сейчас, и не заставлять клиента повторять историю."
+      },
+      "audit": [
+        {
+          "id": "AUDIT-AH-DEMO-0107-01",
+          "event": "P1_HANDOFF_PREPARED",
+          "actor": "Front Office · DRAFT_ONLY",
+          "at": "26.07.2026 12:10 · TZ не настроена"
+        }
+      ]
+    },
+    {
+      "id": "CONV-AH-DEMO-0108",
+      "subject": "Вопрос по проекту «Школа 1–11»",
+      "preview": "Отдельный контур: клиентские данные не открывались.",
+      "channel": "WEB_CHAT",
+      "kind": "ROUTING",
+      "status": "WAITING_INTERNAL",
+      "priority": "P3",
+      "unread": false,
+      "identity": "not_required",
+      "assignedTo": "Отдельная очередь школы · UNASSIGNED",
+      "due": "DEMO · маршрутизация требует утверждения",
+      "lastActivity": "26.07.2026 08:46 · TZ не настроена",
+      "slaState": "ROUTING_BLOCKED",
+      "linkedObject": {
+        "type": "ROUTING",
+        "id": "QUEUE-SCHOOL-DEMO",
+        "label": "Отдельный контур «Школа 1–11»",
+        "previewOnly": true
+      },
+      "personalDataRisk": false,
+      "mayRevealPrivateData": false,
+      "intent": "SCHOOL_CONTOUR_ROUTING",
+      "confidence": "HIGH",
+      "emotion": "calm",
+      "churnRisk": "low",
+      "tags": ["маршрутизация", "отдельный контур", "без открытия данных"],
+      "nextAction": "Передать в отдельную очередь школы после утверждения маршрута.",
+      "followUp": {
+        "required": true,
+        "status": "WAITING_INTERNAL",
+        "due": "DEMO · после назначения отдельной очереди",
+        "owner": "SCHOOL_QUEUE_OWNER · UNASSIGNED",
+        "promisedChannel": "WEB_CHAT"
+      },
+      "messages": [
+        {
+          "id": "MSG-AH-DEMO-0108-01",
+          "type": "INCOMING",
+          "at": "26.07.2026 08:42 · TZ не настроена",
+          "actor": "Посетитель · DEMO",
+          "body": "У меня вопрос по проекту «Школа 1–11».",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0108-02",
+          "type": "INTERNAL_NOTE",
+          "at": "26.07.2026 08:44 · TZ не настроена",
+          "actor": "Front Office · DRAFT_ONLY",
+          "body": "Определён отдельный контур. Поиск клиента и открытие данных не выполнялись.",
+          "immutable": true,
+          "synthetic": true
+        },
+        {
+          "id": "MSG-AH-DEMO-0108-03",
+          "type": "AI_DRAFT",
+          "at": "26.07.2026 08:46 · TZ не настроена",
+          "actor": "Front Office · DRAFT_ONLY",
+          "body": "Подготовлено безопасное сообщение о маршрутизации. Отправка отключена.",
+          "immutable": true,
+          "synthetic": true
+        }
+      ],
+      "facts": {
+        "verified": [
+          {
+            "statement": "Обращение прямо относится к проекту «Школа 1–11».",
+            "status": "VERIFIED",
+            "sourceRef": "MSG-AH-DEMO-0108-01"
+          },
+          {
+            "statement": "Школа должна обрабатываться в отдельном контуре.",
+            "status": "VERIFIED",
+            "sourceRef": "ARTHELLO_MASTER_POLICY · school boundary"
+          }
+        ],
+        "unverified": [
+          {
+            "statement": "Содержание вопроса клиента.",
+            "status": "UNVERIFIED"
+          }
+        ]
+      },
+      "draft": {
+        "text": "Вопрос относится к отдельному контуру «Школа 1–11». Клиентские данные не открывались. После утверждения маршрута обращение нужно передать в отдельную очередь вместе с этим сообщением.",
+        "claims": [
+          {
+            "assertion": "Контур школы не объединён с текущей поддержкой ArtHello.",
+            "status": "VERIFIED",
+            "evidence": "ARTHELLO_MASTER_POLICY · school boundary"
+          }
+        ],
+        "sent": false,
+        "saved": false
+      },
+      "handoff": {
+        "requester": "Посетитель · проверка не требуется для первичной маршрутизации",
+        "goal": "Задать вопрос по проекту «Школа 1–11»",
+        "scope": "Отдельный контур; данные ArtHello не открывались",
+        "dates": "Не указаны",
+        "verifiedFacts": ["Клиент назвал проект «Школа 1–11»"],
+        "unverifiedClaims": ["Точная тема обращения"],
+        "emotion": "calm",
+        "risk": "cross-contour routing",
+        "policy": "Школа 1–11 · отдельная очередь до явного объединения",
+        "actionsDone": [
+          "Поиск клиентских профилей не выполнялся",
+          "Подготовлена маршрутизация"
+        ],
+        "decisionRequired": "Утвердить и назначить отдельную очередь школы",
+        "ownerRole": "SCHOOL_QUEUE_OWNER · UNASSIGNED",
+        "due": "После утверждения маршрута",
+        "recommendedReply": "Сообщить о передаче в отдельную очередь и не просить повторять уже полученное сообщение."
+      },
+      "audit": [
+        {
+          "id": "AUDIT-AH-DEMO-0108-01",
+          "event": "SEPARATE_CONTOUR_DETECTED",
+          "actor": "Front Office · DRAFT_ONLY",
+          "at": "26.07.2026 08:44 · TZ не настроена"
+        }
+      ]
+    }
+  ]
+}

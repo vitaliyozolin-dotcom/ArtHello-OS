@@ -1,0 +1,148 @@
+name: Deploy RU candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Immutable commit SHA to deploy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arthello-production-ru
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: arthello_test
+          POSTGRES_USER: arthello_test
+          POSTGRES_PASSWORD: sandbox-only-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U arthello_test -d arthello_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DATABASE_URL: postgresql://arthello_test:sandbox-only-password@127.0.0.1:5432/arthello_test
+      TEST_DATABASE_URL: postgresql://arthello_test:sandbox-only-password@127.0.0.1:5432/arthello_test
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - name: Ref must be an immutable SHA
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_REF"
+          test "$(printf %s "$RELEASE_REF" | wc -c)" -eq 40
+          printf %s "$RELEASE_REF" | grep -Eq '^[0-9a-f]{40}$'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: corepack prepare pnpm@11.7.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:full
+      - run: pnpm run test:postgres
+      - run: pnpm run build:full
+      - name: Build deployment archive
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          tar --exclude=.git --exclude=node_modules --exclude='**/node_modules' \
+            --exclude=dist --exclude='**/dist' --exclude='.env*' \
+            -czf "/tmp/arthello-$RELEASE_REF.tgz" .
+          sha256sum "/tmp/arthello-$RELEASE_REF.tgz" > "/tmp/arthello-$RELEASE_REF.tgz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arthello-ru-${{ inputs.ref }}
+          path: |
+            /tmp/arthello-${{ inputs.ref }}.tgz
+            /tmp/arthello-${{ inputs.ref }}.tgz.sha256
+          retention-days: 7
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-ru
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: arthello-ru-${{ inputs.ref }}
+          path: /tmp/release
+      - name: Configure pinned SSH host
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          test -s ~/.ssh/id_ed25519
+          test -s ~/.ssh/known_hosts
+      - name: Upload immutable release
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          scp "/tmp/release/arthello-$RELEASE_REF.tgz" "/tmp/release/arthello-$RELEASE_REF.tgz.sha256" \
+            "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
+      - name: Activate and verify
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          RELEASE_SHA: ${{ inputs.ref }}
+          ARTHELLO_HOST: ${{ secrets.ARTHELLO_RU_HOST }}
+        run: |
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' -- "$RELEASE_SHA" "$ARTHELLO_HOST" <<'REMOTE'
+          set -euo pipefail
+          sha="$1"
+          host="$2"
+          root=/srv/arthello
+          release="$root/releases/$sha"
+          previous="$(readlink -f "$root/current" 2>/dev/null || true)"
+          test -f "$root/shared/.env.production"
+          (cd /tmp && sha256sum -c "arthello-$sha.tgz.sha256")
+          install -d -m 0750 "$release" "$root/backups/postgres"
+          tar -xzf "/tmp/arthello-$sha.tgz" -C "$release"
+          cd "$release/deploy"
+          ARTHELLO_HOST="$host" docker compose -f compose.production.yml build --pull
+          ARTHELLO_HOST="$host" docker compose -f compose.production.yml up -d
+          healthy=0
+          for _ in $(seq 1 30); do
+            if [ "$host" = ":80" ]; then
+              health_url=http://127.0.0.1/api/healthz
+              curl_args=""
+            else
+              health_url="https://$host/api/healthz"
+              curl_args="--resolve $host:443:127.0.0.1"
+            fi
+            if curl --fail --silent --show-error $curl_args "$health_url" >/dev/null; then
+              healthy=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$healthy" -ne 1 ]; then
+            if [ -n "$previous" ] && [ -f "$previous/deploy/compose.production.yml" ]; then
+              cd "$previous/deploy"
+              ARTHELLO_HOST="$host" docker compose -f compose.production.yml up -d
+            fi
+            exit 1
+          fi
+          ln -sfn "$release" "$root/current"
+          rm -f "/tmp/arthello-$sha.tgz" "/tmp/arthello-$sha.tgz.sha256"
+          REMOTE
