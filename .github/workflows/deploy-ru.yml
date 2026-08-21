@@ -48,6 +48,9 @@ jobs:
           test "$(git rev-parse HEAD)" = "$RELEASE_REF"
           test "$(printf %s "$RELEASE_REF" | wc -c)" -eq 40
           printf %s "$RELEASE_REF" | grep -Eq '^[0-9a-f]{40}$'
+          git fetch --force --no-tags origin \
+            '+refs/heads/main:refs/remotes/origin/main'
+          git merge-base --is-ancestor "$RELEASE_REF" refs/remotes/origin/main
 
       - uses: actions/setup-node@v4
         with:
