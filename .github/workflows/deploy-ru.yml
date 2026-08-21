@@ -1,10 +1,10 @@
-name: Deploy RU candidate
+name: Build closed RU release
 
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Immutable commit SHA to deploy
+        description: Immutable application commit SHA to package
         required: true
         type: string
 
@@ -16,9 +16,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify:
+  verify-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:16
@@ -39,122 +39,165 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
-      - name: Ref must be an immutable SHA
+
+      - name: Verify immutable application source
         env:
           RELEASE_REF: ${{ inputs.ref }}
         run: |
+          set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$RELEASE_REF"
           test "$(printf %s "$RELEASE_REF" | wc -c)" -eq 40
           printf %s "$RELEASE_REF" | grep -Eq '^[0-9a-f]{40}$'
+          git fetch --force --no-tags origin \
+            '+refs/heads/main:refs/remotes/origin/main'
+          git merge-base --is-ancestor "$RELEASE_REF" refs/remotes/origin/main
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+
       - run: corepack enable
       - run: corepack prepare pnpm@11.7.0 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm run test:full
       - run: pnpm run test:postgres
       - run: pnpm run build:full
-      - name: Build deployment archive
+
+      - name: Build immutable runtime images
         env:
           RELEASE_REF: ${{ inputs.ref }}
         run: |
-          tar --exclude=.git --exclude=node_modules --exclude='**/node_modules' \
-            --exclude=dist --exclude='**/dist' --exclude='.env*' \
-            -czf "/tmp/arthello-$RELEASE_REF.tgz" .
-          sha256sum "/tmp/arthello-$RELEASE_REF.tgz" > "/tmp/arthello-$RELEASE_REF.tgz.sha256"
+          set -Eeuo pipefail
+          docker build \
+            --file deploy/Dockerfile \
+            --target api \
+            --label "org.opencontainers.image.revision=$RELEASE_REF" \
+            --tag "arthello-os-api:$RELEASE_REF" \
+            .
+          docker build \
+            --file deploy/Dockerfile \
+            --target web \
+            --label "org.opencontainers.image.revision=$RELEASE_REF" \
+            --tag "arthello-os-web:$RELEASE_REF" \
+            .
+          docker pull postgres:16-alpine
+          docker image tag "arthello-os-api:$RELEASE_REF" arthello-os-api:local
+          docker image tag "arthello-os-web:$RELEASE_REF" arthello-os-web:local
+
+      - name: Package closed release assets
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          set -Eeuo pipefail
+          bundle="arthello-ru-images-$RELEASE_REF.tar.gz"
+          manifest="arthello-ru-images-$RELEASE_REF.manifest"
+          checksums="arthello-ru-images-$RELEASE_REF.sha256"
+          mkdir -p /tmp/arthello-release
+
+          docker image save \
+            "arthello-os-api:$RELEASE_REF" arthello-os-api:local \
+            "arthello-os-web:$RELEASE_REF" arthello-os-web:local \
+            postgres:16-alpine \
+            | gzip -1 > "/tmp/arthello-release/$bundle"
+
+          {
+            printf 'repository=%s\n' "$GITHUB_REPOSITORY"
+            printf 'source_sha=%s\n' "$RELEASE_REF"
+            printf 'source_tree=%s\n' "$(git rev-parse HEAD^{tree})"
+            printf 'workflow_run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'workflow_run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'api_image_id=%s\n' "$(docker image inspect --format '{{.Id}}' "arthello-os-api:$RELEASE_REF")"
+            printf 'web_image_id=%s\n' "$(docker image inspect --format '{{.Id}}' "arthello-os-web:$RELEASE_REF")"
+            printf 'postgres_image_id=%s\n' "$(docker image inspect --format '{{.Id}}' postgres:16-alpine)"
+            printf 'real_data=not_loaded\n'
+            printf 'integrations=disabled\n'
+            printf 'first_owner=not_created\n'
+            printf 'dns=not_changed\n'
+          } > "/tmp/arthello-release/$manifest"
+
+          (
+            cd /tmp/arthello-release
+            sha256sum "$bundle" "$manifest" > "$checksums"
+            sha256sum --check "$checksums"
+          )
+
       - uses: actions/upload-artifact@v4
         with:
-          name: arthello-ru-${{ inputs.ref }}
-          path: |
-            /tmp/arthello-${{ inputs.ref }}.tgz
-            /tmp/arthello-${{ inputs.ref }}.tgz.sha256
+          name: arthello-ru-images-${{ inputs.ref }}
+          path: /tmp/arthello-release/
+          if-no-files-found: error
           retention-days: 7
 
-  deploy:
-    needs: verify
+  publish-private-release:
+    needs: verify-build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: production-ru
+    timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: release-infrastructure
+
       - uses: actions/download-artifact@v4
         with:
-          name: arthello-ru-${{ inputs.ref }}
-          path: /tmp/release
-      - name: Configure pinned SSH host
+          name: arthello-ru-images-${{ inputs.ref }}
+          path: /tmp/arthello-release
+
+      - name: Add and verify deployment infrastructure
         env:
-          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
-          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
-        run: |
-          printf '%s' "$DEPLOY_PORT" | grep -Eq '^[0-9]{1,5}$'
-          test "$DEPLOY_PORT" -ge 1
-          test "$DEPLOY_PORT" -le 65535
-          install -m 0700 -d ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 0600 ~/.ssh/id_ed25519
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          test -s ~/.ssh/id_ed25519
-          test -s ~/.ssh/known_hosts
-          ssh-keygen -F "[$DEPLOY_HOST]:$DEPLOY_PORT" -f ~/.ssh/known_hosts >/dev/null
-      - name: Upload immutable release
-        env:
-          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
-          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
           RELEASE_REF: ${{ inputs.ref }}
         run: |
-          scp -P "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o ConnectTimeout=20 -o ConnectionAttempts=1 \
-            "/tmp/release/arthello-$RELEASE_REF.tgz" "/tmp/release/arthello-$RELEASE_REF.tgz.sha256" \
-            "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
-      - name: Activate and verify
+          set -Eeuo pipefail
+          cd /tmp/arthello-release
+          script="arthello-ru-pull-release-$RELEASE_REF.sh"
+          cp "$GITHUB_WORKSPACE/release-infrastructure/deploy/pull-release.sh" "$script"
+          chmod 0755 "$script"
+          printf 'infrastructure_sha=%s\n' "$GITHUB_SHA" >> "arthello-ru-images-$RELEASE_REF.manifest"
+          sha256sum \
+            "arthello-ru-images-$RELEASE_REF.tar.gz" \
+            "arthello-ru-images-$RELEASE_REF.manifest" \
+            "$script" \
+            > "arthello-ru-images-$RELEASE_REF.sha256"
+          sha256sum --check "arthello-ru-images-$RELEASE_REF.sha256"
+          bash -n "$script"
+          grep -Fx "source_sha=$RELEASE_REF" "arthello-ru-images-$RELEASE_REF.manifest"
+          grep -Fx "infrastructure_sha=$GITHUB_SHA" "arthello-ru-images-$RELEASE_REF.manifest"
+          test "$(printf %s "$RELEASE_REF" | wc -c)" -eq 40
+          printf %s "$RELEASE_REF" | grep -Eq '^[0-9a-f]{40}$'
+
+      - name: Publish immutable private release
         env:
-          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
-          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
-          RELEASE_SHA: ${{ inputs.ref }}
-          ARTHELLO_HOST: ${{ secrets.ARTHELLO_RU_HOST }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REF: ${{ inputs.ref }}
         run: |
-          ssh -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o ConnectTimeout=20 -o ConnectionAttempts=1 \
-            "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' -- "$RELEASE_SHA" "$ARTHELLO_HOST" <<'REMOTE'
-          set -euo pipefail
-          sha="$1"
-          host="$2"
-          root=/srv/arthello
-          release="$root/releases/$sha"
-          previous="$(readlink -f "$root/current" 2>/dev/null || true)"
-          test -f "$root/shared/.env.production"
-          (cd /tmp && sha256sum -c "arthello-$sha.tgz.sha256")
-          install -d -m 0750 "$release" "$root/backups/postgres"
-          tar -xzf "/tmp/arthello-$sha.tgz" -C "$release"
-          cd "$release/deploy"
-          ARTHELLO_HOST="$host" docker compose -f compose.production.yml build --pull
-          ARTHELLO_HOST="$host" docker compose -f compose.production.yml up -d
-          healthy=0
-          for _ in $(seq 1 30); do
-            if [ "$host" = ":80" ]; then
-              health_url=http://127.0.0.1/api/healthz
-              curl_args=""
-            else
-              health_url="https://$host/api/healthz"
-              curl_args="--resolve $host:443:127.0.0.1"
-            fi
-            if curl --fail --silent --show-error $curl_args "$health_url" >/dev/null; then
-              healthy=1
-              break
-            fi
-            sleep 5
-          done
-          if [ "$healthy" -ne 1 ]; then
-            if [ -n "$previous" ] && [ -f "$previous/deploy/compose.production.yml" ]; then
-              cd "$previous/deploy"
-              ARTHELLO_HOST="$host" docker compose -f compose.production.yml up -d
-            fi
+          set -Eeuo pipefail
+          tag="arthello-ru-$RELEASE_REF"
+          cd /tmp/arthello-release
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists; refusing to overwrite immutable assets." >&2
             exit 1
           fi
-          ln -sfn "$release" "$root/current"
-          rm -f "/tmp/arthello-$sha.tgz" "/tmp/arthello-$sha.tgz.sha256"
-          REMOTE
+
+          cat > release-notes.md <<EOF
+          Closed ArtHello OS RU runtime images.
+
+          - application source: \`$RELEASE_REF\`
+          - real data: not loaded
+          - integrations: disabled
+          - first owner: not created
+          - DNS: not changed
+          EOF
+
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_REF" \
+            --title "ArtHello OS RU $RELEASE_REF" \
+            --notes-file release-notes.md \
+            --prerelease \
+            "arthello-ru-images-$RELEASE_REF.tar.gz" \
+            "arthello-ru-images-$RELEASE_REF.manifest" \
+            "arthello-ru-images-$RELEASE_REF.sha256" \
+            "arthello-ru-pull-release-$RELEASE_REF.sh"

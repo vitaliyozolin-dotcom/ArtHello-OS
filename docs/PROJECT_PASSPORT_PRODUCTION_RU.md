@@ -24,7 +24,7 @@
 
 1. `RU-01` — атомарный baseline + production-код, персональная аутентификация, exact-head CI. Статус: `completed`; PR #27 направлен прямо в `main`, Quality gates пройдены.
 2. `RU-02` — отдельный RU-сервер, key-only deploy-user, SSH hardening, Docker/UFW и защищённый runtime env без данных и интеграций. Статус: `completed`.
-3. `RU-03` — merge завершён; GitHub Environment `production-ru` настроен; закрытый deploy по IP выполняется через выделенный SSH-порт `2222`, после чего проверяются первый владелец, обязательная смена пароля, login/logout/lockout/session revocation. Статус: `active`; зависит от зелёного `RU-01` и подготовленного `RU-02`.
+3. `RU-03` — merge завершён; приложение SHA `f7bb971f362bb8fe3f76209eba01237c602d9946` собирается вне VPS в GitHub Actions, публикуется закрытыми release-assets и загружается RU-сервером по HTTPS; после health-check отдельно проверяются первый владелец, обязательная смена пароля, login/logout/lockout/session revocation. Статус: `active`; зависит от зелёного `RU-01` и подготовленного `RU-02`.
 4. `RU-04` — backup/restore и security acceptance. Зависит от `RU-03`.
 5. `RU-05` — DNS и TLS. Зависит от `RU-04`.
 6. `RU-06` — восстановление AlfaCRM/Точки и файловый импорт в `SHADOW + DATA_AUDIT`. Зависит от `RU-05`.
@@ -55,11 +55,15 @@
 - GitHub Environment `production-ru` создан, ограничен веткой `main`, deploy-secrets сохранены;
 - два deploy-запуска успешно прошли verify/build, но доставка по SSH `22` оборвалась через 120 секунд с runner-регионов `westus` и `northcentralus` до запуска server activation;
 - `sshd`, UFW и fail2ban на RU-сервере исправны; Виталий применил дополнительный listener `2222`, основной SSH `22` сохранён;
-- приложение, данные, интеграции и DNS предыдущими неудачными попытками не изменены.
+- приложение, данные, интеграции и DNS предыдущими неудачными попытками не изменены;
+- fine-grained GitHub token с доступом только к `vitaliyozolin-dotcom/ArtHello-OS` и `Contents: Read` сохранён только на RU-сервере; HTTPS-fetch исходников SHA `f7bb971f…` подтверждён;
+- диагностика `ARTHELLO_NET_DIAG_VERSION=1`: DNS `registry.npmjs.org` работает, но HTTPS с самого VPS завершается `curl 28 / SSL connection timeout`; проблема возникает до Docker;
+- публичный npm status в момент диагностики показывает Package installation `Operational`, поэтому локальный build на VPS исключён как невоспроизводимый;
+- Виталий утвердил off-server build и private release pull 2026-08-21.
 
 ## Риски и блокеры
 
-- доступность SSH `2222` с GitHub-hosted runner ещё не подтверждена; критерий закрытия — успешная загрузка immutable archive и запуск server activation;
+- прямой SSH delivery из GitHub-hosted runner и локальный npm build на VPS признаны непригодными для этого контура; новый критерий закрытия — опубликованный private release с точным target SHA, проверенные digest/SHA-256, `docker load`, запуск с `--no-build --pull never` и успешный health-check;
 - первый owner и опубликованный auth flow ещё не проверены end-to-end;
 - фактический backup restore ещё не выполнен;
 - старое защищённое окружение AlfaCRM/Точки ещё не инвентаризировано;
@@ -69,9 +73,9 @@
 ## Текущий шаг
 
 - исполнитель: Codex; владелец решения — Виталий Озолин;
-- действие: добавить в production-workflow обязательный `ARTHELLO_RU_DEPLOY_PORT=2222`, закрепить host key для `[188.225.47.207]:2222`, получить зелёный CI, squash-merge технический PR и повторно развернуть immutable SHA `f7bb971f362bb8fe3f76209eba01237c602d9946`;
-- ограничения: без DNS, реальных данных, интеграций и первого owner; нидерландский сервер не изменять; SSH `22` не отключать;
-- доказательство выполнения: successful workflow, checksum archive, успешный server activation, `GET /api/healthz` через временный host `:80`, активный release symlink;
+- действие: в ветке `codex/arthello-offserver-build` добавить сборку API/web/PostgreSQL images на GitHub-hosted runner, private prerelease assets, проверяемый HTTPS pull на VPS и shell gate; получить зелёный CI, squash-merge, собрать exact application SHA `f7bb971f362bb8fe3f76209eba01237c602d9946`, затем выполнить server pull;
+- ограничения: без DNS, реальных данных, интеграций и первого owner; нидерландский сервер не изменять; существующие SSH listeners не менять; сторонние npm mirrors не использовать;
+- доказательство выполнения: successful PR checks, merge SHA инфраструктуры, private release target=`f7bb971f…`, asset digest + SHA-256, image revision labels, `GET /api/healthz` через временный host `:80`, active release symlink;
 - следующий переход: после принятого закрытого deploy — создать первого владельца и проверить полный auth flow.
 
 ## Контракт AI-процесса: CI и подготовка релиза
@@ -89,15 +93,15 @@
 
 ## Контракт AI-процесса: закрытый RU deployment
 
-- входные данные: immutable release SHA `f7bb971f362bb8fe3f76209eba01237c602d9946`, GitHub Environment `production-ru`, выделенный SSH-порт `2222`, подготовленный RU VPS;
-- ожидаемый результат: воспроизводимый закрытый deploy с проверенным checksum, атомарным release-каталогом и успешным health-check;
-- разрешённые действия: создать техническую ветку и PR, обновить workflow/паспорт, исправлять CI-дефекты, squash-merge после зелёного CI, обновить secret порта/known_hosts и запустить deployment указанного SHA;
-- запрещённые действия: DNS cutover, создание первого owner, загрузка реальных данных, подключение AlfaCRM/Точки, изменение нидерландского сервера, отключение SSH `22`;
+- входные данные: immutable application SHA `f7bb971f362bb8fe3f76209eba01237c602d9946`, workflow из актуального `main`, private GitHub repository, существующий fine-grained token `Contents: Read`, подготовленный RU VPS;
+- ожидаемый результат: GitHub Actions проверяет source SHA, тесты и build, публикует закрытый bundle API/web/PostgreSQL и pull-скрипт с manifest и SHA-256; VPS проверяет release target, GitHub asset digest, manifest, image revision labels и запускает Compose без build/pull;
+- разрешённые действия: создать `codex/arthello-offserver-build`, commit/push/PR, обновить workflow/документацию/паспорт, исправлять CI, squash-merge после зелёного CI, опубликовать private prerelease и развернуть указанный application SHA на `188.225.47.207`;
+- запрещённые действия: DNS cutover, создание первого owner, загрузка реальных данных, подключение AlfaCRM/Точки, изменение нидерландского сервера, сторонние package mirrors, передача сохранённого токена в чат или CI;
 - ответственный человек: Виталий Озолин; исполнитель — Codex;
-- стоимость выполнения: без новых платных ресурсов сверх действующих GitHub Actions и VPS;
-- метрика пользы: successful deploy с нулём запрещённых побочных эффектов и health-check не позднее 5 минут после activation;
-- автоматическое отключение: остановиться при недоступности `2222`, несовпадении host key/checksum, необходимости нового секрета или изменении production-данных;
-- отказ пользователя: разрешён до server activation; код и PR сохраняются, production и данные не изменяются.
+- стоимость выполнения: GitHub Actions storage/compute и трафик в пределах действующих ресурсов; новых VPS и платных сервисов не добавляется;
+- метрика пользы: private release и successful health-check при нуле npm-запросов с VPS во время activation и нуле запрещённых побочных эффектов;
+- автоматическое отключение: остановиться при несовпадении target SHA/digest/checksum/image label, расширении token scope, необходимости изменить данные/DNS/интеграции либо невозможности безопасного rollback;
+- отказ пользователя: разрешён до server activation; PR/release сохраняются как технические артефакты, production и данные не изменяются.
 
 ## Утверждённые решения
 
@@ -237,7 +241,7 @@ decision:
 decision:
   decision_id: D-PROD-RU-004
   project_id: ARTHELLO-OS-PRODUCTION-RU
-  status: active
+  status: superseded
   question: Как доставить проверенный релиз на RU VPS после сетевого отказа SSH 22 с GitHub-hosted runners?
   statement: Сохранить административный SSH на 22, добавить отдельный listener 2222 для GitHub deployment, хранить порт и port-qualified pinned host key в Environment production-ru и повторно развернуть тот же immutable SHA f7bb971f362bb8fe3f76209eba01237c602d9946.
   context: Два независимых runner-региона westus и northcentralus успешно собрали artifact, но оба scp-сеанса на 22 завершились через 120 секунд до server activation. Диагностика RU VPS подтвердила active sshd, открытый UFW, отсутствие fail2ban bans и отсутствие ошибки приложения.
@@ -257,7 +261,7 @@ decision:
   affected_stages: [RU-03]
   dependencies: [green_exact_head_ci, production_ru_port_secret, port_qualified_known_hosts]
   supersedes: []
-  superseded_by: null
+  superseded_by: D-PROD-RU-005
   source_links:
     - https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/32437357216
   raw_deliberation_ref: ChatGPT project conversation 2026-08-21
@@ -281,5 +285,69 @@ decision:
       owner: Codex
       due: 2026-08-21
       evidence_required: health-check, active release SHA, updated passport
+      status: open
+
+
+decision:
+  decision_id: D-PROD-RU-005
+  project_id: ARTHELLO-OS-PRODUCTION-RU
+  status: active
+  question: Как воспроизводимо доставить runtime на RU VPS, если GitHub SSH delivery недоступен, а VPS не устанавливает TLS к официальному npm registry?
+  statement: Собирать точный application SHA на GitHub-hosted runner, сохранять API/web/PostgreSQL images и проверенный pull-скрипт как private prerelease assets репозитория, а на RU VPS скачивать их существующим fine-grained token с Contents Read, проверять release target, GitHub digest, SHA-256 и image revision labels и запускать только через docker load и Compose --no-build --pull never.
+  context: GitHub HTTPS source fetch на VPS работает. SSH 22/2222/443 delivery не дал рабочей цепочки. DNS registry.npmjs.org работает, но curl -4 с самого VPS завершается SSL connection timeout; Docker build падает на corepack prepare. npm status сообщает Package installation Operational.
+  rationale: Убрать npm и build toolchain из production activation, не использовать нидерландский relay, сторонние mirrors и дополнительный package token, сохранить immutable provenance и переиспользовать уже ограниченный repository token.
+  evidence:
+    - ARTHELLO_HOST_DNS=OK
+    - ARTHELLO_HOST_NPM_HTTPS=FAIL:curl_28:http_000:SSL connection timeout
+    - successful GitHub HTTPS fetch of f7bb971f362bb8fe3f76209eba01237c602d9946
+    - https://status.npmjs.org/
+    - https://docs.github.com/en/rest/releases/assets
+    - explicit approval by Vitaly, 2026-08-21
+  assumptions:
+    - GitHub-hosted runner сохраняет доступ к официальному npm registry
+    - private release assets остаются доступны RU VPS через api.github.com
+    - compressed image bundle не превышает GitHub release asset limit
+  approved_by: Виталий Озолин
+  approved_at: 2026-08-21
+  owner: Виталий Озолин
+  deadline: null
+  review_at: 2026-11-01
+  affected_stages: [RU-03]
+  dependencies: [green_exact_head_ci, private_release_publication, existing_contents_read_token, server_health_check]
+  supersedes: [D-PROD-RU-004]
+  superseded_by: null
+  source_links:
+    - https://github.com/vitaliyozolin-dotcom/ArtHello-OS
+    - https://docs.github.com/en/rest/releases/assets
+    - https://status.npmjs.org/
+  raw_deliberation_ref: ChatGPT project conversation 2026-08-21
+  rejected_alternatives:
+    - option: Менять Docker DNS
+      reason: Ошибка воспроизводится curl с самого host после успешного DNS resolution; Docker DNS не является причиной.
+      reopen_condition: Только при новом доказательстве DNS failure.
+    - option: Использовать сторонний npm mirror
+      reason: Добавляет неутверждённый supply-chain источник в production build.
+      reopen_condition: Только после отдельного security review и pinning всех artifacts.
+    - option: Использовать private GHCR
+      reason: Для server pull потребуется отдельный classic token read:packages; существующий fine-grained Contents Read уже достаточен для private release assets.
+      reopen_condition: При переходе на централизованный container registry с отдельным утверждённым credential lifecycle.
+    - option: Использовать нидерландский сервер агентов как relay
+      reason: Нарушает серверную изоляцию и создаёт общую точку отказа.
+      reopen_condition: Только по отдельному архитектурному и юридическому решению.
+  actions:
+    - action: Создать off-server build PR и получить зелёный CI
+      owner: Codex
+      due: 2026-08-21
+      evidence_required: PR head SHA, successful test and secret-scan
+      status: open
+    - action: Squash-merge инфраструктуру и опубликовать private image release exact SHA f7bb971f
+      owner: Codex
+      due: 2026-08-21
+      evidence_required: merge SHA, workflow run, release tag, asset digests
+      status: open
+    - action: Выполнить server pull и проверить health
+      owner: Codex и Виталий Озолин
+      due: 2026-08-21
+      evidence_required: ARTHELLO_HEALTH=OK, active release symlink, compose ps
       status: open
 ```
