@@ -113,6 +113,9 @@ jobs:
           actual_head="$(git rev-parse HEAD)"
           test "$actual_head" = "$EXPECTED_HEAD_SHA"
 
+      - name: Validate production pull-deployment script
+        run: bash -n deploy/pull-release.sh
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
