@@ -83,31 +83,43 @@ jobs:
           path: /tmp/release
       - name: Configure pinned SSH host
         env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
           SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
         run: |
+          printf '%s' "$DEPLOY_PORT" | grep -Eq '^[0-9]{1,5}$'
+          test "$DEPLOY_PORT" -ge 1
+          test "$DEPLOY_PORT" -le 65535
           install -m 0700 -d ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 0600 ~/.ssh/id_ed25519
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           test -s ~/.ssh/id_ed25519
           test -s ~/.ssh/known_hosts
+          ssh-keygen -F "[$DEPLOY_HOST]:$DEPLOY_PORT" -f ~/.ssh/known_hosts >/dev/null
       - name: Upload immutable release
         env:
           DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
           DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
           RELEASE_REF: ${{ inputs.ref }}
         run: |
-          scp "/tmp/release/arthello-$RELEASE_REF.tgz" "/tmp/release/arthello-$RELEASE_REF.tgz.sha256" \
+          scp -P "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o ConnectTimeout=20 -o ConnectionAttempts=1 \
+            "/tmp/release/arthello-$RELEASE_REF.tgz" "/tmp/release/arthello-$RELEASE_REF.tgz.sha256" \
             "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
       - name: Activate and verify
         env:
           DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
           DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
           RELEASE_SHA: ${{ inputs.ref }}
           ARTHELLO_HOST: ${{ secrets.ARTHELLO_RU_HOST }}
         run: |
-          ssh "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' -- "$RELEASE_SHA" "$ARTHELLO_HOST" <<'REMOTE'
+          ssh -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o ConnectTimeout=20 -o ConnectionAttempts=1 \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' -- "$RELEASE_SHA" "$ARTHELLO_HOST" <<'REMOTE'
           set -euo pipefail
           sha="$1"
           host="$2"
