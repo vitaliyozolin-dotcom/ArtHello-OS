@@ -22,7 +22,7 @@
 
 ## Этапы и зависимости
 
-1. `RU-01` — атомарный baseline + production-код, персональная аутентификация, exact-head CI. Статус: код подготовлен; PR должен идти прямо в `main`.
+1. `RU-01` — атомарный baseline + production-код, персональная аутентификация, exact-head CI. Статус: `completed`; PR #27 направлен прямо в `main`, Quality gates пройдены.
 2. `RU-02` — отдельный RU-сервер, key-only deploy-user, SSH hardening, Docker/UFW и защищённый runtime env без данных и интеграций. Статус: `completed`.
 3. `RU-03` — разрешённый merge, GitHub Environment `production-ru`, закрытый deploy по IP, первый владелец, обязательная смена пароля, login/logout/lockout/session revocation. Зависит от зелёного `RU-01` и отдельного разрешения Виталия на merge/deploy.
 4. `RU-04` — backup/restore и security acceptance. Зависит от `RU-03`.
@@ -62,15 +62,15 @@
 - фактический backup restore ещё не выполнен;
 - старое защищённое окружение AlfaCRM/Точки ещё не инвентаризировано;
 - PR #7 имеет красный CI на своём head и не должен сливаться отдельно;
-- после изменения base PR #27 требуется новый зелёный exact-head CI.
+- зелёный exact-head CI должен сохраняться для текущего candidate до отдельного решения о merge.
 
 ## Текущий шаг
 
-- исполнитель: Codex;
-- действие: перенести PR #27 прямо на `main`, обновить паспорт и описание PR, получить зелёный exact-head CI;
-- ограничения: без merge и deploy; без DNS; без реальных данных и интеграций;
-- доказательство: base=`main`, актуальный head SHA, зелёный workflow `Quality gates`;
-- следующий переход: запросить у Виталия отдельное разрешение на merge и закрытый deploy по IP.
+- исполнитель: Виталий Озолин (решение) и Codex (исполнение после разрешения);
+- действие: получить отдельное разрешение на merge PR #27 и закрытый deploy по IP;
+- ограничения: без DNS; без реальных данных и интеграций; нидерландский сервер не изменять;
+- доказательство готовности: base=`main`, mergeable draft PR, зелёный workflow `Quality gates`, подготовленный RU-сервер;
+- следующий переход: после разрешения — merge, настройка GitHub Environment `production-ru` и закрытый deploy по IP.
 
 ## Контракт AI-процесса: CI и подготовка релиза
 
@@ -128,7 +128,7 @@ decision:
   evidence:
     - repository default_branch=main
     - PR #7 head 90318e8547252fd2f17f32ca464575021b330523: Quality gates failure
-    - PR #27 head 1325e9cf6dd1bc4a74098d865653ecf412f4df3f: Quality gates success before passport update
+    - PR #27 head 1a7bc8bc7e0be447ac4499e49d6217769ad2b26b: Quality gates run #57 success after retarget to main
     - RU server preparation evidence accepted 2026-08-21
   assumptions:
     - PR #27 после смены base остаётся mergeable
@@ -158,15 +158,15 @@ decision:
       owner: Codex
       due: 2026-08-21
       evidence_required: commit SHA
-      status: open
+      status: completed
     - action: Перенести PR #27 на main и обновить описание
       owner: Codex
       due: 2026-08-21
       evidence_required: PR metadata base=main
-      status: open
+      status: completed
     - action: Получить зелёный exact-head CI
       owner: Codex
       due: 2026-08-21
       evidence_required: completed successful workflow tied to current head SHA
-      status: open
+      status: completed
 ```
