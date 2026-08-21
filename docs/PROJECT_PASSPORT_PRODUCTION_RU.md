@@ -33,7 +33,8 @@
 
 - ноль API бизнес-данных без действующей персональной сессии;
 - ноль общих паролей ролей в runtime;
-- ноль секретов в Git и CI-артефактах;
+- ноль секретов в текущем дереве, достижимой Git-истории и CI-артефактах;
+- обязательный `secret-scan` использует pinned Gitleaks, fail-closed self-test, redacted output и полный history checkout;
 - каждый SHA, разрешённый к merge, обязан иметь зелёный exact-head CI;
 - RPO 24 часа, целевой RTO 4 часа до фактического замера;
 - health-check и login/logout/lockout/password-change проходят на опубликованном кандидате;
@@ -62,14 +63,14 @@
 - фактический backup restore ещё не выполнен;
 - старое защищённое окружение AlfaCRM/Точки ещё не инвентаризировано;
 - PR #7 имеет красный CI на своём head и не должен сливаться отдельно;
-- зелёный exact-head CI должен сохраняться для текущего candidate до отдельного решения о merge.
+- зелёные exact-head jobs `test` и `secret-scan` должны сохраняться для текущего candidate до отдельного решения о merge.
 
 ## Текущий шаг
 
 - исполнитель: Виталий Озолин (решение) и Codex (исполнение после разрешения);
 - действие: получить отдельное разрешение на merge PR #27 и закрытый deploy по IP;
 - ограничения: без DNS; без реальных данных и интеграций; нидерландский сервер не изменять;
-- доказательство готовности: base=`main`, mergeable draft PR, зелёный workflow `Quality gates`, подготовленный RU-сервер;
+- доказательство готовности: base=`main`, mergeable draft PR, зелёные exact-head jobs `test` и `secret-scan`, подготовленный RU-сервер;
 - следующий переход: после разрешения — merge, настройка GitHub Environment `production-ru` и закрытый deploy по IP.
 
 ## Контракт AI-процесса: CI и подготовка релиза
@@ -168,5 +169,55 @@ decision:
       owner: Codex
       due: 2026-08-21
       evidence_required: completed successful workflow tied to current head SHA
+      status: completed
+
+decision:
+  decision_id: D-PROD-RU-003
+  project_id: ARTHELLO-OS-PRODUCTION-RU
+  status: active
+  question: Как исключить попадание секретов в ArtHello OS до merge?
+  statement: Сделать secret-scan обязательным отдельным job в Quality gates. Проверять текущую файловую систему и всю Git-историю, достижимую из candidate HEAD, официальным Gitleaks v8.30.0, закреплённым по immutable GHCR digest; перед каждым сканированием выполнять fail-closed synthetic self-test; секреты в логах редактировать.
+  context: Зелёный functional CI не содержал явного repository-level secret scan. Gitleaks v8.30.1 не используется из-за опубликованной false-negative регрессии.
+  rationale: Удалённый из текущего файла ключ остаётся доступным в Git-истории; самописный regex и непроверенный запуск сканера дают ложную уверенность.
+  evidence:
+    - https://github.com/gitleaks/gitleaks
+    - https://github.com/gitleaks/gitleaks/issues/2170
+    - https://github.com/gitleaks/gitleaks/pkgs/container/gitleaks
+    - workflow job secret-scan tied to the exact PR head
+  assumptions:
+    - official v8.30.0 GHCR manifest digest remains retrievable by GitHub-hosted runners
+    - no allowlist is introduced without evidence that a finding is synthetic and safe
+  approved_by: Виталий Озолин
+  approved_at: 2026-08-21
+  owner: Виталий Озолин
+  deadline: 2026-08-21
+  review_at: null
+  affected_stages: [RU-01, RU-03]
+  dependencies: [full_git_checkout, pinned_scanner, green_exact_head_ci]
+  supersedes: []
+  superseded_by: null
+  source_links:
+    - https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/27
+  raw_deliberation_ref: ChatGPT project conversation 2026-08-21
+  rejected_alternatives:
+    - option: Проверять только текущие файлы
+      reason: Секрет может быть удалён из HEAD, но остаться доступным в истории.
+      reopen_condition: Никогда для release gate; допустимо только как дополнительная локальная проверка.
+    - option: Использовать Gitleaks v8.30.1
+      reason: Опубликована подтверждённая false-negative регрессия с пропуском canonical GitHub PAT.
+      reopen_condition: После исправленного официального релиза и отдельной проверки synthetic self-test.
+    - option: Разрешить широкие allowlist-исключения
+      reason: Они маскируют реальные утечки и превращают gate в декорацию.
+      reopen_condition: Только для конкретного redacted fingerprint после ручной классификации.
+  actions:
+    - action: Добавить fail-closed secret-scan в Quality gates
+      owner: Codex
+      due: 2026-08-21
+      evidence_required: workflow diff and immutable scanner digest
+      status: completed
+    - action: Получить зелёный secret-scan на exact candidate head
+      owner: Codex
+      due: 2026-08-21
+      evidence_required: successful GitHub Actions job tied to current head SHA
       status: completed
 ```
