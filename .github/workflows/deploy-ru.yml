@@ -68,6 +68,17 @@ jobs:
           RELEASE_REF: ${{ inputs.ref }}
         run: |
           set -Eeuo pipefail
+          # pnpm test/build steps create workspace node_modules before the
+          # image build. Never send those host artifacts into Docker: pnpm
+          # must install a clean dependency tree inside the image.
+          cat > .dockerignore <<'EOF'
+          .git
+          .github
+          node_modules
+          **/node_modules
+          coverage
+          **/coverage
+          EOF
           docker build \
             --file deploy/Dockerfile \
             --target api \
