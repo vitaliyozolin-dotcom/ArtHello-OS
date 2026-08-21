@@ -24,7 +24,7 @@
 
 1. `RU-01` — атомарный baseline + production-код, персональная аутентификация, exact-head CI. Статус: `completed`; PR #27 направлен прямо в `main`, Quality gates пройдены.
 2. `RU-02` — отдельный RU-сервер, key-only deploy-user, SSH hardening, Docker/UFW и защищённый runtime env без данных и интеграций. Статус: `completed`.
-3. `RU-03` — разрешённый merge, GitHub Environment `production-ru`, закрытый deploy по IP, первый владелец, обязательная смена пароля, login/logout/lockout/session revocation. Зависит от зелёного `RU-01` и отдельного разрешения Виталия на merge/deploy.
+3. `RU-03` — merge завершён; GitHub Environment `production-ru` настроен; закрытый deploy по IP выполняется через выделенный SSH-порт `2222`, после чего проверяются первый владелец, обязательная смена пароля, login/logout/lockout/session revocation. Статус: `active`; зависит от зелёного `RU-01` и подготовленного `RU-02`.
 4. `RU-04` — backup/restore и security acceptance. Зависит от `RU-03`.
 5. `RU-05` — DNS и TLS. Зависит от `RU-04`.
 6. `RU-06` — восстановление AlfaCRM/Точки и файловый импорт в `SHADOW + DATA_AUDIT`. Зависит от `RU-05`.
@@ -51,27 +51,28 @@
 - `/srv/arthello/shared/.env.production` создан с правами `600` и владельцем `deploy-arthello`;
 - AlfaCRM, banking и SMS-Vizitka выключены;
 - реальные данные не загружены;
-- candidate branch: `codex/arthello-production-ru`;
-- PR: `#27`; целевая база по утверждённому решению — `main`;
-- merge и deploy не разрешены.
+- PR #27 squash-merged в `main`; immutable release SHA: `f7bb971f362bb8fe3f76209eba01237c602d9946`;
+- GitHub Environment `production-ru` создан, ограничен веткой `main`, deploy-secrets сохранены;
+- два deploy-запуска успешно прошли verify/build, но доставка по SSH `22` оборвалась через 120 секунд с runner-регионов `westus` и `northcentralus` до запуска server activation;
+- `sshd`, UFW и fail2ban на RU-сервере исправны; Виталий применил дополнительный listener `2222`, основной SSH `22` сохранён;
+- приложение, данные, интеграции и DNS предыдущими неудачными попытками не изменены.
 
 ## Риски и блокеры
 
-- GitHub Environment `production-ru` и его SSH-secrets ещё не настроены;
-- закрытый deployment по IP ещё не выполнялся;
+- доступность SSH `2222` с GitHub-hosted runner ещё не подтверждена; критерий закрытия — успешная загрузка immutable archive и запуск server activation;
 - первый owner и опубликованный auth flow ещё не проверены end-to-end;
 - фактический backup restore ещё не выполнен;
 - старое защищённое окружение AlfaCRM/Точки ещё не инвентаризировано;
 - PR #7 имеет красный CI на своём head и не должен сливаться отдельно;
-- зелёные exact-head jobs `test` и `secret-scan` должны сохраняться для текущего candidate до отдельного решения о merge.
+- любые реальные данные, интеграции и DNS остаются заблокированы до отдельных ворот.
 
 ## Текущий шаг
 
-- исполнитель: Виталий Озолин (решение) и Codex (исполнение после разрешения);
-- действие: получить отдельное разрешение на merge PR #27 и закрытый deploy по IP;
-- ограничения: без DNS; без реальных данных и интеграций; нидерландский сервер не изменять;
-- доказательство готовности: base=`main`, mergeable draft PR, зелёные exact-head jobs `test` и `secret-scan`, подготовленный RU-сервер;
-- следующий переход: после разрешения — merge, настройка GitHub Environment `production-ru` и закрытый deploy по IP.
+- исполнитель: Codex; владелец решения — Виталий Озолин;
+- действие: добавить в production-workflow обязательный `ARTHELLO_RU_DEPLOY_PORT=2222`, закрепить host key для `[188.225.47.207]:2222`, получить зелёный CI, squash-merge технический PR и повторно развернуть immutable SHA `f7bb971f362bb8fe3f76209eba01237c602d9946`;
+- ограничения: без DNS, реальных данных, интеграций и первого owner; нидерландский сервер не изменять; SSH `22` не отключать;
+- доказательство выполнения: successful workflow, checksum archive, успешный server activation, `GET /api/healthz` через временный host `:80`, активный release symlink;
+- следующий переход: после принятого закрытого deploy — создать первого владельца и проверить полный auth flow.
 
 ## Контракт AI-процесса: CI и подготовка релиза
 
@@ -85,6 +86,18 @@
 - метрика пользы: ноль красных обязательных проверок и ноль недоказанных release-фактов;
 - автоматическое отключение: остановиться при необходимости расширить полномочия, изменить production-данные, получить секрет либо выполнить merge/deploy;
 - отказ пользователя: разрешён в любой момент; ветка и draft PR сохраняются, production не изменяется, данные не обрабатываются.
+
+## Контракт AI-процесса: закрытый RU deployment
+
+- входные данные: immutable release SHA `f7bb971f362bb8fe3f76209eba01237c602d9946`, GitHub Environment `production-ru`, выделенный SSH-порт `2222`, подготовленный RU VPS;
+- ожидаемый результат: воспроизводимый закрытый deploy с проверенным checksum, атомарным release-каталогом и успешным health-check;
+- разрешённые действия: создать техническую ветку и PR, обновить workflow/паспорт, исправлять CI-дефекты, squash-merge после зелёного CI, обновить secret порта/known_hosts и запустить deployment указанного SHA;
+- запрещённые действия: DNS cutover, создание первого owner, загрузка реальных данных, подключение AlfaCRM/Точки, изменение нидерландского сервера, отключение SSH `22`;
+- ответственный человек: Виталий Озолин; исполнитель — Codex;
+- стоимость выполнения: без новых платных ресурсов сверх действующих GitHub Actions и VPS;
+- метрика пользы: successful deploy с нулём запрещённых побочных эффектов и health-check не позднее 5 минут после activation;
+- автоматическое отключение: остановиться при недоступности `2222`, несовпадении host key/checksum, необходимости нового секрета или изменении production-данных;
+- отказ пользователя: разрешён до server activation; код и PR сохраняются, production и данные не изменяются.
 
 ## Утверждённые решения
 
@@ -220,4 +233,53 @@ decision:
       due: 2026-08-21
       evidence_required: successful GitHub Actions job tied to current head SHA
       status: completed
+
+decision:
+  decision_id: D-PROD-RU-004
+  project_id: ARTHELLO-OS-PRODUCTION-RU
+  status: active
+  question: Как доставить проверенный релиз на RU VPS после сетевого отказа SSH 22 с GitHub-hosted runners?
+  statement: Сохранить административный SSH на 22, добавить отдельный listener 2222 для GitHub deployment, хранить порт и port-qualified pinned host key в Environment production-ru и повторно развернуть тот же immutable SHA f7bb971f362bb8fe3f76209eba01237c602d9946.
+  context: Два независимых runner-региона westus и northcentralus успешно собрали artifact, но оба scp-сеанса на 22 завершились через 120 секунд до server activation. Диагностика RU VPS подтвердила active sshd, открытый UFW, отсутствие fail2ban bans и отсутствие ошибки приложения.
+  rationale: Устранить внешний сетевой блокер без ослабления SSH, без ручной невоспроизводимой загрузки и без использования нидерландского сервера как relay.
+  evidence:
+    - GitHub Actions run 32437357216, deploy jobs 96641590977 and 96642441389
+    - Timeweb SSH diagnostic ARTHELLO_SSH_DIAG=END, 2026-08-21
+    - explicit approval and server-side application by Vitaly, 2026-08-21
+  assumptions:
+    - Timeweb принимает входящий TCP 2222 после server-side listener/UFW change
+    - host key на 2222 совпадает с ранее проверенным ED25519 key сервера
+  approved_by: Виталий Озолин
+  approved_at: 2026-08-21
+  owner: Виталий Озолин
+  deadline: 2026-08-21
+  review_at: null
+  affected_stages: [RU-03]
+  dependencies: [green_exact_head_ci, production_ru_port_secret, port_qualified_known_hosts]
+  supersedes: []
+  superseded_by: null
+  source_links:
+    - https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/32437357216
+  raw_deliberation_ref: ChatGPT project conversation 2026-08-21
+  rejected_alternatives:
+    - option: Продолжать перезапускать delivery на SSH 22
+      reason: Два разных runner-региона воспроизвели одинаковый сетевой отказ; повтор без изменения фактов не даёт новой информации.
+      reopen_condition: Только после подтверждённого изменения внешнего маршрута Timeweb/GitHub.
+    - option: Использовать нидерландский сервер агентов как relay
+      reason: Нарушает утверждённую изоляцию серверов и создаёт новую общую точку отказа.
+      reopen_condition: Только по отдельному архитектурному и юридическому решению.
+    - option: Выполнить ручную загрузку приложения в обход GitHub
+      reason: Теряется immutable provenance и воспроизводимый release gate.
+      reopen_condition: Только как документированное аварийное восстановление по отдельному разрешению.
+  actions:
+    - action: Проверить порт 2222 реальным GitHub deployment
+      owner: Codex
+      due: 2026-08-21
+      evidence_required: successful artifact upload and server activation logs
+      status: open
+    - action: Зафиксировать результат deployment и следующий auth gate
+      owner: Codex
+      due: 2026-08-21
+      evidence_required: health-check, active release SHA, updated passport
+      status: open
 ```
