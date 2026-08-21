@@ -45,12 +45,20 @@ jobs:
 
           smoke_dir="$(mktemp -d)"
           trap 'rm -rf "$smoke_dir"' EXIT
-          printf 'token = "%s%s"\n' 'ghp_' 'abcdefghijklmnopqrstuvwxyz1234567890' > "$smoke_dir/synthetic-leak.txt"
+          cat > "$smoke_dir/gitleaks.toml" <<'EOF'
+          title = "CI secret scanner self-test"
+
+          [[rules]]
+          id = "ci-synthetic-leak"
+          description = "CI-only synthetic finding"
+          regex = '''SYNTHETIC_LEAK_[A-Z0-9]{16}'''
+          EOF
+          printf '%s%s\n' 'SYNTHETIC_' 'LEAK_A1B2C3D4E5F6G7H8' > "$smoke_dir/synthetic-leak.txt"
 
           set +e
           docker run --rm --user "$(id -u):$(id -g)" \
             -v "$smoke_dir:/scan:ro" \
-            "$GITLEAKS_IMAGE" dir --no-banner --redact --exit-code 23 /scan
+            "$GITLEAKS_IMAGE" dir --config /scan/gitleaks.toml --no-banner --redact --exit-code 23 /scan
           smoke_status=$?
           set -e
           if [[ "$smoke_status" -ne 23 ]]; then
