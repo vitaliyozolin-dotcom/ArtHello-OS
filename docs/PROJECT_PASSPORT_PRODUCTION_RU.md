@@ -3,7 +3,7 @@
 - `project_id`: `ARTHELLO-OS-PRODUCTION-RU`
 - владелец: Виталий Озолин
 - состояние: `approved` → `active`
-- актуально на: 2026-08-20
+- актуально на: 2026-08-21
 - область: перенос ArtHello OS на отдельный российский сервер Timeweb с персональными учётными записями; затем восстановление уже подключённых AlfaCRM и Точки.
 
 ## Цель и конечный результат
@@ -22,9 +22,9 @@
 
 ## Этапы и зависимости
 
-1. `RU-01` — ветка, production-инфраструктура, персональная аутентификация.
-2. `RU-02` — сервер, deploy-user, секреты, закрытый запуск по IP. Зависит от `RU-01`.
-3. `RU-03` — первый владелец, смена пароля, роли, аудит, recovery. Зависит от `RU-02`.
+1. `RU-01` — атомарный baseline + production-код, персональная аутентификация, exact-head CI. Статус: код подготовлен; PR должен идти прямо в `main`.
+2. `RU-02` — отдельный RU-сервер, key-only deploy-user, SSH hardening, Docker/UFW и защищённый runtime env без данных и интеграций. Статус: `completed`.
+3. `RU-03` — разрешённый merge, GitHub Environment `production-ru`, закрытый deploy по IP, первый владелец, обязательная смена пароля, login/logout/lockout/session revocation. Зависит от зелёного `RU-01` и отдельного разрешения Виталия на merge/deploy.
 4. `RU-04` — backup/restore и security acceptance. Зависит от `RU-03`.
 5. `RU-05` — DNS и TLS. Зависит от `RU-04`.
 6. `RU-06` — восстановление AlfaCRM/Точки и файловый импорт в `SHADOW + DATA_AUDIT`. Зависит от `RU-05`.
@@ -34,26 +34,58 @@
 - ноль API бизнес-данных без действующей персональной сессии;
 - ноль общих паролей ролей в runtime;
 - ноль секретов в Git и CI-артефактах;
+- каждый SHA, разрешённый к merge, обязан иметь зелёный exact-head CI;
 - RPO 24 часа, целевой RTO 4 часа до фактического замера;
 - health-check и login/logout/lockout/password-change проходят на опубликованном кандидате;
-- никакого DNS cutover при провале хотя бы одного обязательного ворота.
+- никакого merge, deploy или DNS cutover без отдельного разрешения Виталия и прохождения соответствующего ворота.
+
+## Подтверждённое состояние на 2026-08-21
+
+- российский Timeweb VPS: `188.225.47.207`;
+- нидерландский сервер агентов не изменялся;
+- deploy-user `deploy-arthello` входит только по SSH-ключу;
+- Docker `29.7.2`, Docker Compose `v5.5.0`;
+- UFW активен; разрешены только SSH, HTTP и HTTPS/HTTP3;
+- password authentication, keyboard-interactive authentication и root login по SSH отключены;
+- `/srv/arthello/shared/.env.production` создан с правами `600` и владельцем `deploy-arthello`;
+- AlfaCRM, banking и SMS-Vizitka выключены;
+- реальные данные не загружены;
+- candidate branch: `codex/arthello-production-ru`;
+- PR: `#27`; целевая база по утверждённому решению — `main`;
+- merge и deploy не разрешены.
 
 ## Риски и блокеры
 
-- IP нового российского сервера ещё не предоставлен;
-- GitHub Environment и SSH-secrets ещё не настроены;
+- GitHub Environment `production-ru` и его SSH-secrets ещё не настроены;
+- закрытый deployment по IP ещё не выполнялся;
+- первый owner и опубликованный auth flow ещё не проверены end-to-end;
 - фактический backup restore ещё не выполнен;
 - старое защищённое окружение AlfaCRM/Точки ещё не инвентаризировано;
-- baseline PR остаётся draft, поэтому production PR является stacked и не разрешает merge или запуск автоматически.
+- PR #7 имеет красный CI на своём head и не должен сливаться отдельно;
+- после изменения base PR #27 требуется новый зелёный exact-head CI.
 
 ## Текущий шаг
 
 - исполнитель: Codex;
-- действие: создать `codex/arthello-production-ru`, commit, push и draft PR;
-- доказательство: ссылка на draft PR, точный commit SHA, зелёные quality gates;
-- следующий переход: Виталий создаёт московский сервер и передаёт только публичный IP; root-пароль и приватный SSH-ключ в чат не отправляются.
+- действие: перенести PR #27 прямо на `main`, обновить паспорт и описание PR, получить зелёный exact-head CI;
+- ограничения: без merge и deploy; без DNS; без реальных данных и интеграций;
+- доказательство: base=`main`, актуальный head SHA, зелёный workflow `Quality gates`;
+- следующий переход: запросить у Виталия отдельное разрешение на merge и закрытый deploy по IP.
 
-## Утверждённое решение
+## Контракт AI-процесса: CI и подготовка релиза
+
+- входные данные: head SHA PR #27, workflow `Quality gates`, паспорт и production-конфигурация;
+- ожидаемый результат: один воспроизводимый кандидат с зелёным exact-head CI и подтверждаемым provenance;
+- разрешённые действия: обновлять паспорт и описание PR, перезапускать CI, исправлять только CI-дефекты в `codex/arthello-production-ru`;
+- запрещённые действия: merge, deploy, DNS, загрузка данных, подключение интеграций, изменение нидерландского сервера;
+- ответственный человек: Виталий Озолин;
+- исполнитель: Codex;
+- стоимость выполнения: инфраструктурные расходы отсутствуют сверх действующих GitHub Actions и VPS;
+- метрика пользы: ноль красных обязательных проверок и ноль недоказанных release-фактов;
+- автоматическое отключение: остановиться при необходимости расширить полномочия, изменить production-данные, получить секрет либо выполнить merge/deploy;
+- отказ пользователя: разрешён в любой момент; ветка и draft PR сохраняются, production не изменяется, данные не обрабатываются.
+
+## Утверждённые решения
 
 ```yaml
 decision:
@@ -78,10 +110,63 @@ decision:
       owner: Codex
       due: 2026-08-20
       evidence_required: branch, commit SHA, draft PR, CI
+      status: completed
+    - action: Создать и безопасно подготовить московский VPS
+      owner: Виталий Озолин и Codex
+      due: 2026-08-21
+      evidence_required: Timeweb server evidence without secrets, key-only SSH verification, hardened runtime env
+      status: completed
+
+decision:
+  decision_id: D-PROD-RU-002
+  project_id: ARTHELLO-OS-PRODUCTION-RU
+  status: active
+  question: Как доставить baseline и production-контур в main без промежуточного красного состояния?
+  statement: Перенести draft PR #27 из codex/arthello-production-ru прямо на main и рассматривать его как единый атомарный baseline + production-кандидат. PR #7 отдельно не сливать. До отдельного разрешения Виталия выполнять только обновление документации и CI-исправления.
+  context: Default branch main почти пуст; PR #7 является baseline, но его exact-head CI красный. PR #27 содержит baseline, production-изменения и зелёные исправления.
+  rationale: Не допустить заведомо сломанного промежуточного main и сделать каждый разрешённый к merge SHA проверяемым.
+  evidence:
+    - repository default_branch=main
+    - PR #7 head 90318e8547252fd2f17f32ca464575021b330523: Quality gates failure
+    - PR #27 head 1325e9cf6dd1bc4a74098d865653ecf412f4df3f: Quality gates success before passport update
+    - RU server preparation evidence accepted 2026-08-21
+  assumptions:
+    - PR #27 после смены base остаётся mergeable
+    - новый exact-head CI будет запущен и проверен
+  approved_by: Виталий Озолин
+  approved_at: 2026-08-21
+  owner: Виталий Озолин
+  deadline: null
+  review_at: null
+  affected_stages: [RU-01, RU-02, RU-03]
+  dependencies: [green_exact_head_ci, explicit_merge_authorization, explicit_deploy_authorization]
+  supersedes: []
+  superseded_by: null
+  source_links:
+    - https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/27
+    - https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/7
+  raw_deliberation_ref: ChatGPT project conversation 2026-08-21
+  rejected_alternatives:
+    - option: Сначала слить PR #7, затем PR #27
+      reason: PR #7 имеет красный CI на своём текущем head и создал бы сломанный промежуточный main.
+      reopen_condition: Только если PR #7 получит отдельный зелёный exact-head CI и маршрут будет повторно утверждён.
+    - option: Ручная загрузка приложения на VPS в обход GitHub
+      reason: Невоспроизводимый deployment без immutable provenance и release gate.
+      reopen_condition: Только как документированное аварийное восстановление после отдельного разрешения.
+  actions:
+    - action: Обновить паспорт на candidate branch
+      owner: Codex
+      due: 2026-08-21
+      evidence_required: commit SHA
       status: open
-    - action: Создать московский VPS и передать публичный IP
-      owner: Виталий Озолин
-      due: null
-      evidence_required: Timeweb server card without secrets
+    - action: Перенести PR #27 на main и обновить описание
+      owner: Codex
+      due: 2026-08-21
+      evidence_required: PR metadata base=main
+      status: open
+    - action: Получить зелёный exact-head CI
+      owner: Codex
+      due: 2026-08-21
+      evidence_required: completed successful workflow tied to current head SHA
       status: open
 ```
