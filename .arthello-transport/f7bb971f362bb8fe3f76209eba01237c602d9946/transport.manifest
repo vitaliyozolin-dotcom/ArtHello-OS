@@ -1,0 +1,12 @@
+repository=vitaliyozolin-dotcom/ArtHello-OS
+application_sha=f7bb971f362bb8fe3f76209eba01237c602d9946
+release_tag=arthello-ru-f7bb971f362bb8fe3f76209eba01237c602d9946
+transport_branch=transport/arthello-ru-f7bb971f362bb8fe3f76209eba01237c602d9946
+transport=git_chunks
+chunk_size=45M
+chunk_count=9
+transport_infrastructure_sha=9fbd12d15ba87b1783140d06c0be97f44c59ec68
+real_data=not_loaded
+integrations=disabled
+first_owner=not_created
+dns=not_changed
