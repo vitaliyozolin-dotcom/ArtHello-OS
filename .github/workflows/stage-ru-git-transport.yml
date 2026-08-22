@@ -1,0 +1,150 @@
+name: Stage RU Git transport
+
+on:
+  push:
+    branches:
+      - codex/arthello-offserver-build-fix2
+    paths:
+      - .github/workflows/stage-ru-git-transport.yml
+      - deploy/activate-git-transport.sh
+      - docs/PROJECT_PASSPORT_PRODUCTION_RU.md
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: arthello-production-ru-git-transport
+  cancel-in-progress: false
+
+env:
+  RELEASE_REF: f7bb971f362bb8fe3f76209eba01237c602d9946
+  RELEASE_TAG: arthello-ru-f7bb971f362bb8fe3f76209eba01237c602d9946
+  TRANSPORT_BRANCH: transport/arthello-ru-f7bb971f362bb8fe3f76209eba01237c602d9946
+
+jobs:
+  stage-verified-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Download and verify immutable private release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          release_dir=/tmp/arthello-release
+          mkdir -p "$release_dir"
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$release_dir" \
+            --pattern "arthello-ru-images-$RELEASE_REF.tar.gz" \
+            --pattern "arthello-ru-images-$RELEASE_REF.manifest" \
+            --pattern "arthello-ru-images-$RELEASE_REF.sha256" \
+            --pattern "arthello-ru-pull-release-$RELEASE_REF.sh"
+
+          release_json="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json tagName,targetCommitish,isDraft,isPrerelease)"
+          test "$(jq -r .tagName <<<"$release_json")" = "$RELEASE_TAG"
+          test "$(jq -r .targetCommitish <<<"$release_json")" = "$RELEASE_REF"
+          test "$(jq -r .isDraft <<<"$release_json")" = false
+          test "$(jq -r .isPrerelease <<<"$release_json")" = true
+
+          cd "$release_dir"
+          sha256sum --check "arthello-ru-images-$RELEASE_REF.sha256"
+          grep -Fx "repository=$GITHUB_REPOSITORY" \
+            "arthello-ru-images-$RELEASE_REF.manifest"
+          grep -Fx "source_sha=$RELEASE_REF" \
+            "arthello-ru-images-$RELEASE_REF.manifest"
+          grep -Fx 'real_data=not_loaded' \
+            "arthello-ru-images-$RELEASE_REF.manifest"
+          grep -Fx 'integrations=disabled' \
+            "arthello-ru-images-$RELEASE_REF.manifest"
+          grep -Fx 'first_owner=not_created' \
+            "arthello-ru-images-$RELEASE_REF.manifest"
+          grep -Fx 'dns=not_changed' \
+            "arthello-ru-images-$RELEASE_REF.manifest"
+          bash -n "arthello-ru-pull-release-$RELEASE_REF.sh"
+
+      - name: Split release into Git-safe verified chunks
+        run: |
+          set -Eeuo pipefail
+          release_dir=/tmp/arthello-release
+          payload_dir="/tmp/arthello-transport/$RELEASE_REF"
+          bundle="arthello-ru-images-$RELEASE_REF.tar.gz"
+          mkdir -p "$payload_dir"
+
+          cp "$release_dir/arthello-ru-images-$RELEASE_REF.manifest" "$payload_dir/"
+          cp "$release_dir/arthello-ru-images-$RELEASE_REF.sha256" "$payload_dir/"
+          cp "$release_dir/arthello-ru-pull-release-$RELEASE_REF.sh" "$payload_dir/"
+          cp deploy/activate-git-transport.sh "$payload_dir/activate-git-transport.sh"
+          chmod 0755 "$payload_dir/activate-git-transport.sh"
+
+          split --bytes=45M --numeric-suffixes=0 --suffix-length=3 \
+            "$release_dir/$bundle" "$payload_dir/$bundle.part-"
+
+          part_count="$(find "$payload_dir" -maxdepth 1 -type f \
+            -name "$bundle.part-*" | wc -l)"
+          test "$part_count" -gt 1
+          if find "$payload_dir" -maxdepth 1 -type f -size +46M | grep -q .; then
+            echo 'A transport chunk exceeds the Git-safe size gate.' >&2
+            exit 1
+          fi
+
+          {
+            printf 'repository=%s\n' "$GITHUB_REPOSITORY"
+            printf 'application_sha=%s\n' "$RELEASE_REF"
+            printf 'release_tag=%s\n' "$RELEASE_TAG"
+            printf 'transport_branch=%s\n' "$TRANSPORT_BRANCH"
+            printf 'transport=git_chunks\n'
+            printf 'chunk_size=45M\n'
+            printf 'chunk_count=%s\n' "$part_count"
+            printf 'transport_infrastructure_sha=%s\n' "$GITHUB_SHA"
+            printf 'real_data=not_loaded\n'
+            printf 'integrations=disabled\n'
+            printf 'first_owner=not_created\n'
+            printf 'dns=not_changed\n'
+          } > "$payload_dir/transport.manifest"
+
+          (
+            cd "$payload_dir"
+            find . -maxdepth 1 -type f ! -name transport.sha256 -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > transport.sha256
+            sha256sum --check transport.sha256
+          )
+
+      - name: Publish immutable private Git transport branch
+        run: |
+          set -Eeuo pipefail
+          if git ls-remote --exit-code --heads origin "$TRANSPORT_BRANCH" >/dev/null 2>&1; then
+            echo "Transport branch $TRANSPORT_BRANCH already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch --force --no-tags origin \
+            '+refs/heads/main:refs/remotes/origin/main'
+          git switch --detach origin/main
+          git switch -c "$TRANSPORT_BRANCH"
+          mkdir -p ".arthello-transport/$RELEASE_REF"
+          cp -a "/tmp/arthello-transport/$RELEASE_REF/." \
+            ".arthello-transport/$RELEASE_REF/"
+          git add -- ".arthello-transport/$RELEASE_REF"
+          git commit -m "release: stage ArtHello RU $RELEASE_REF transport"
+          git push origin "HEAD:refs/heads/$TRANSPORT_BRANCH"
+
+          transport_commit="$(git rev-parse HEAD)"
+          printf 'ARTHELLO_TRANSPORT_BRANCH=%s\n' "$TRANSPORT_BRANCH"
+          printf 'ARTHELLO_TRANSPORT_COMMIT=%s\n' "$transport_commit"
+          printf 'ARTHELLO_APPLICATION_SHA=%s\n' "$RELEASE_REF"
+          printf 'ARTHELLO_REAL_DATA=NOT_LOADED\n'
+          printf 'ARTHELLO_INTEGRATIONS=DISABLED\n'
+          printf 'ARTHELLO_FIRST_OWNER=NOT_CREATED\n'
+          printf 'ARTHELLO_DNS=NOT_CHANGED\n'
