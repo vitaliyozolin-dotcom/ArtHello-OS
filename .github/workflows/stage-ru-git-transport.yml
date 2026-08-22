@@ -123,8 +123,28 @@ jobs:
         run: |
           set -Eeuo pipefail
           if git ls-remote --exit-code --heads origin "$TRANSPORT_BRANCH" >/dev/null 2>&1; then
-            echo "Transport branch $TRANSPORT_BRANCH already exists; refusing to overwrite it." >&2
-            exit 1
+            git fetch --force --no-tags origin \
+              "+refs/heads/$TRANSPORT_BRANCH:refs/remotes/origin/$TRANSPORT_BRANCH"
+            existing_dir=/tmp/arthello-existing-transport
+            mkdir -p "$existing_dir"
+            git archive "refs/remotes/origin/$TRANSPORT_BRANCH" \
+              ".arthello-transport/$RELEASE_REF" | tar -x -C "$existing_dir"
+            existing_payload="$existing_dir/.arthello-transport/$RELEASE_REF"
+            (
+              cd "$existing_payload"
+              sha256sum --check transport.sha256
+            )
+            grep -Fx "application_sha=$RELEASE_REF" \
+              "$existing_payload/transport.manifest"
+            grep -Fx "transport_branch=$TRANSPORT_BRANCH" \
+              "$existing_payload/transport.manifest"
+            cmp deploy/activate-git-transport.sh \
+              "$existing_payload/activate-git-transport.sh"
+            printf 'ARTHELLO_TRANSPORT_REUSED=YES\n'
+            printf 'ARTHELLO_TRANSPORT_BRANCH=%s\n' "$TRANSPORT_BRANCH"
+            printf 'ARTHELLO_TRANSPORT_COMMIT=%s\n' \
+              "$(git rev-parse "refs/remotes/origin/$TRANSPORT_BRANCH")"
+            exit 0
           fi
 
           git config user.name github-actions[bot]
