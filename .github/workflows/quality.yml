@@ -124,6 +124,8 @@ jobs:
           grep -F 'db_workspace=/app/lib/db' deploy/api-entrypoint.sh
           grep -F 'cd "$db_workspace"' deploy/api-entrypoint.sh
           grep -F '"$drizzle_bin" migrate --config ./drizzle.config.ts' deploy/api-entrypoint.sh
+          grep -F 'ARTHELLO_API_STARTUP_ERROR=alfacrm_domain_missing_with_credentials' deploy/api-entrypoint.sh
+          grep -F 'export ALFACRM_DOMAIN=disabled.invalid' deploy/api-entrypoint.sh
           if grep -Eq '(^|[[:space:]])pnpm([[:space:]]|$)|corepack|registry\.npmjs\.org' \
             deploy/api-entrypoint.sh; then
             echo 'Production API entrypoint must not invoke a package manager or registry.' >&2
