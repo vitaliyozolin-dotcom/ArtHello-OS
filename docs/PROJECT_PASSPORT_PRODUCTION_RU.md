@@ -412,4 +412,54 @@ decision:
       due: 2026-08-22
       evidence_required: ARTHELLO_HEALTH=OK, active release SHA, compose ps
       status: open
+
+decision:
+  decision_id: D-PROD-RU-007
+  project_id: ARTHELLO-OS-PRODUCTION-RU
+  status: active
+  question: Как исключить любые обращения production API к npm при запуске?
+  statement: Удалить Corepack из финальной API-стадии, запускать миграции напрямую встроенным в образ локальным drizzle-kit и принимать runtime-образ только после успешного health-check в Docker-сети без внешнего выхода.
+  context: Первый verified Git-chunk deploy полностью доставил и проверил bundle, загрузил Docker images и поднял PostgreSQL, но API перезапускался: Corepack под runtime-пользователем node пытался получить pnpm/latest с registry.npmjs.org и завершался EAI_AGAIN. Это дефект образа, а не сервера или действий владельца.
+  rationale: Production runtime должен быть самодостаточным. Package manager и официальный registry допустимы на GitHub build-runner, но не на RU VPS во время запуска.
+  evidence:
+    - transport fetch 364.88 MiB completed and all transport/release SHA-256 checks passed
+    - postgres container became healthy
+    - API log: Corepack fetch pnpm/latest -> getaddrinfo EAI_AGAIN registry.npmjs.org
+  assumptions:
+    - /app/lib/db/node_modules/.bin/drizzle-kit присутствует после frozen pnpm install в build stage
+    - внутренний offline Docker smoke-test воспроизводит production read-only/tmpfs режим
+  approved_by: Виталий Озолин
+  approved_at: 2026-08-22
+  owner: Виталий Озолин
+  affected_stages: [RU-03]
+  dependencies: [green_exact_head_ci, offline_runtime_smoke, immutable_git_transport, server_health_check]
+  supersedes: []
+  superseded_by: null
+  source_links:
+    - https://github.com/vitaliyozolin-dotcom/ArtHello-OS
+  raw_deliberation_ref: ChatGPT project conversation 2026-08-22
+  rejected_alternatives:
+    - option: Исправлять DNS или разрешать npm на RU VPS
+      reason: Production runtime не должен скачивать package manager; это маскирует дефект образа и сохраняет сетевую зависимость.
+      reopen_condition: Не применяется к production activation.
+    - option: Вручную изменить уже загруженный Docker image
+      reason: Теряются immutable provenance, checksum gate и воспроизводимость.
+      reopen_condition: Только как отдельно разрешённое аварийное восстановление.
+  actions:
+    - action: Создать offline-runtime hotfix и обязательный CI-контракт
+      owner: Codex
+      due: 2026-08-22
+      evidence_required: PR diff, green secret-scan and test
+      status: in_progress
+    - action: Собрать image exact application SHA с runtime infrastructure SHA и проверить без egress
+      owner: Codex
+      due: 2026-08-22
+      evidence_required: offline_runtime_check=passed, image labels, checksums, transport commit
+      status: open
+    - action: Повторно активировать только исправленный runtime и получить health
+      owner: Codex и Виталий Озолин
+      due: 2026-08-22
+      evidence_required: ARTHELLO_HEALTH=OK, compose ps
+      status: open
+
 ```
