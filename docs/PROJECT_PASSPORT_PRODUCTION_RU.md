@@ -3,7 +3,7 @@
 - `project_id`: `ARTHELLO-OS-PRODUCTION-RU`
 - владелец: Виталий Озолин
 - состояние: `approved` → `active`
-- актуально на: 2026-08-21
+- актуально на: 2026-08-22
 - область: перенос ArtHello OS на отдельный российский сервер Timeweb с персональными учётными записями; затем восстановление уже подключённых AlfaCRM и Точки.
 
 ## Цель и конечный результат
@@ -288,10 +288,20 @@ decision:
       status: open
 
 
+
+## Обновление транспорта 2026-08-22
+
+- API GitHub с RU VPS доступен по IPv4: контрольный запрос к `api.github.com/meta` вернул HTTP 200.
+- Git HTTPS исходников ранее подтверждён и остаётся рабочим.
+- скачивание private release asset через redirect GitHub CDN стабильно завершается `curl 28 / SSL connection timeout`; IPv4 не устранил отказ;
+- ошибка происходит до Docker activation, поэтому приложение, база, интеграции, первый владелец и DNS не изменены;
+- аварийный маршрут: тот же проверенный bundle exact SHA делится в GitHub Actions на части по 45 MiB, публикуется в отдельной неизменяемой private Git-ветке, скачивается подтверждённым Git HTTPS, проверяется двумя слоями SHA-256, собирается и запускается без build/pull.
+- временная стоимость маршрута: около 383 МБ в отдельной transport-ветке приватного репозитория; удаление ветки выполняется только после принятого health-check отдельным действием.
+
 decision:
   decision_id: D-PROD-RU-005
   project_id: ARTHELLO-OS-PRODUCTION-RU
-  status: active
+  status: superseded
   question: Как воспроизводимо доставить runtime на RU VPS, если GitHub SSH delivery недоступен, а VPS не устанавливает TLS к официальному npm registry?
   statement: Собирать точный application SHA на GitHub-hosted runner, сохранять API/web/PostgreSQL images и проверенный pull-скрипт как private prerelease assets репозитория, а на RU VPS скачивать их существующим fine-grained token с Contents Read, проверять release target, GitHub digest, SHA-256 и image revision labels и запускать только через docker load и Compose --no-build --pull never.
   context: GitHub HTTPS source fetch на VPS работает. SSH 22/2222/443 delivery не дал рабочей цепочки. DNS registry.npmjs.org работает, но curl -4 с самого VPS завершается SSL connection timeout; Docker build падает на corepack prepare. npm status сообщает Package installation Operational.
@@ -315,7 +325,7 @@ decision:
   affected_stages: [RU-03]
   dependencies: [green_exact_head_ci, private_release_publication, existing_contents_read_token, server_health_check]
   supersedes: [D-PROD-RU-004]
-  superseded_by: null
+  superseded_by: D-PROD-RU-006
   source_links:
     - https://github.com/vitaliyozolin-dotcom/ArtHello-OS
     - https://docs.github.com/en/rest/releases/assets
@@ -349,5 +359,57 @@ decision:
       owner: Codex и Виталий Озолин
       due: 2026-08-21
       evidence_required: ARTHELLO_HEALTH=OK, active release symlink, compose ps
+      status: open
+decision:
+  decision_id: D-PROD-RU-006
+  project_id: ARTHELLO-OS-PRODUCTION-RU
+  status: active
+  question: Как доставить закрытый runtime на RU VPS, если GitHub release CDN недоступен, но обычный Git HTTPS работает?
+  statement: Переиспользовать уже проверенный private release exact application SHA f7bb971f362bb8fe3f76209eba01237c602d9946; в GitHub Actions разделить bundle на Git-safe части по 45 MiB, опубликовать их в отдельной неизменяемой private transport-ветке, на VPS скачать эту ветку существующим Contents Read token, проверить transport SHA-256 и исходный release SHA-256, затем выполнить docker load и Compose --no-build --pull never.
+  context: Контрольный IPv4-запрос RU VPS к api.github.com вернул HTTP 200, Git HTTPS source fetch ранее прошёл, но release asset redirect стабильно завершается curl 28 ещё до Docker activation. Повторные ручные попытки не добавляют новой информации.
+  rationale: Использовать единственный подтверждённый канал без новых ключей, внешних хранилищ, публичных образов и нидерландского relay, сохраняя exact SHA, boundary manifest и воспроизводимую проверку целостности.
+  evidence:
+    - api.github.com/meta over IPv4: HTTP 200, 2026-08-22
+    - private release asset redirect: repeated curl 28 / SSL connection timeout, 2026-08-22
+    - previous successful Git HTTPS fetch of f7bb971f362bb8fe3f76209eba01237c602d9946
+    - private release workflow run 32537614123 succeeded
+  assumptions:
+    - private Git branch push accepts individual chunks below GitHub file-size limit
+    - RU VPS continues to fetch ordinary repository objects over HTTPS
+  approved_by: Виталий Озолин
+  approved_at: 2026-08-22
+  owner: Виталий Озолин
+  deadline: null
+  review_at: 2026-08-23
+  affected_stages: [RU-03]
+  dependencies: [existing_contents_read_token, verified_private_release, source_git_https, server_health_check]
+  supersedes: [D-PROD-RU-005]
+  superseded_by: null
+  source_links:
+    - https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/32537614123
+  raw_deliberation_ref: ChatGPT project conversation 2026-08-22
+  rejected_alternatives:
+    - option: Продолжать повторять release asset download
+      reason: IPv4 API доступен, но отдельный CDN route воспроизводимо даёт curl 28; повтор не меняет маршрут.
+      reopen_condition: Только после подтверждённого изменения сетевой доступности CDN.
+    - option: Создать ещё один package/storage token
+      reason: Добавляет новый секрет и ручную настройку, хотя уже есть подтверждённый read-only Git HTTPS.
+      reopen_condition: При переходе на постоянный централизованный registry с отдельным credential lifecycle.
+    - option: Сделать runtime images публичными
+      reason: Нарушает утверждённый закрытый контур исходного приложения.
+      reopen_condition: Только после отдельного решения владельца о публикации кода.
+    - option: Использовать нидерландский сервер агентов как relay
+      reason: Нарушает серверную изоляцию и создаёт общую точку отказа.
+      reopen_condition: Только по отдельному архитектурному решению.
+  actions:
+    - action: Опубликовать transport branch с exact release chunks и двойными checksum gates
+      owner: Codex
+      due: 2026-08-22
+      evidence_required: workflow success, transport branch, transport commit, chunk checksums
+      status: in_progress
+    - action: Выполнить Git fetch, reassemble, docker load и health-check на RU VPS
+      owner: Codex и Виталий Озолин
+      due: 2026-08-22
+      evidence_required: ARTHELLO_HEALTH=OK, active release SHA, compose ps
       status: open
 ```
