@@ -201,29 +201,38 @@ jobs:
           route_device="$(ip -4 route show default | awk '{print $5; exit}')"
           test -n "$route_device"
           sudo ip link set dev "$route_device" mtu 1200
-          ssh -p "$deploy_port" -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes \
-            -o PreferredAuthentications=publickey \
-            -o PasswordAuthentication=no \
-            -o KbdInteractiveAuthentication=no \
-            -o BatchMode=yes \
-            -o ConnectTimeout=25 \
-            -o ServerAliveInterval=15 \
-            -o ServerAliveCountMax=40 \
-            -o IPQoS=none \
-            -o Compression=no \
-            -o KexAlgorithms=curve25519-sha256 \
-            -o HostKeyAlgorithms=ssh-ed25519 \
-            -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
-            -o Ciphers=aes128-ctr \
-            -o MACs=hmac-sha2-256 \
-            "$DEPLOY_USER@$DEPLOY_HOST" \
-            "RELEASE_SHA='$GITHUB_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' bash -s" <<'REMOTE'
+          ssh_args=(
+            -p "$deploy_port"
+            -i ~/.ssh/id_ed25519
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=12
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+          ssh_remote() {
+            ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "$@"
+          }
+
+          job_dir="/srv/arthello/ui-jobs/$GITHUB_SHA"
+          ssh_remote "install -d -m 0750 '$job_dir'"
+          ssh_remote "cat > '$job_dir/activate.sh'" <<'REMOTE'
           set -Eeuo pipefail
           root=/srv/arthello
           repository=vitaliyozolin-dotcom/ArtHello-OS
           release_sha="$RELEASE_SHA"
           domain="$PUBLIC_DOMAIN"
+          job_dir="$JOB_DIR"
           tag="arthello-ui-$release_sha"
           api="https://api.github.com/repos/$repository"
           token_file="$root/shared/github-https/token"
@@ -232,25 +241,33 @@ jobs:
           temporary_dir="$(mktemp -d /tmp/arthello-ui.XXXXXX)"
           curl_config="$(mktemp /tmp/arthello-ui-curl.XXXXXX)"
           switched=0
+          outcome="failed:unknown"
 
-          rollback() {
+          finish() {
             status=$?
-            if [ "$status" -ne 0 ] && [ "$switched" -eq 1 ]; then
+            if [ "$status" -ne 0 ]; then
+              outcome="failed:$status"
               docker rm -f arthello-os-newui >/dev/null 2>&1 || true
-              cd "$root/current/deploy"
-              ARTHELLO_HOST=:80 docker compose --env-file "$env_file" \
-                -f compose.production.yml up -d --no-build --pull never --force-recreate web || true
-              printf 'ARTHELLO_UI_ROLLBACK=RESTORED_LEGACY\n' >&2
+              if [ "$switched" -eq 1 ]; then
+                cd "$root/current/deploy"
+                ARTHELLO_HOST=:80 docker compose --env-file "$env_file" \
+                  -f compose.production.yml up -d --no-build --pull never --force-recreate web || true
+                printf 'ARTHELLO_UI_ROLLBACK=RESTORED_LEGACY\n' >&2
+              fi
             fi
+            printf '%s\n' "$outcome" > "$job_dir/status.tmp"
+            mv "$job_dir/status.tmp" "$job_dir/status"
             rm -rf -- "$temporary_dir"
             rm -f -- "$curl_config"
+            trap - EXIT
             exit "$status"
           }
-          trap rollback EXIT
+          trap finish EXIT
 
           test -s "$token_file"
           test -f "$env_file"
           test -L "$root/current"
+          test "$job_dir" = "$root/ui-jobs/$release_sha"
           printf '%s' "$release_sha" | grep -Eq '^[0-9a-f]{40}$'
           chmod 0600 "$curl_config"
           {
@@ -337,7 +354,28 @@ jobs:
           printf 'ARTHELLO_UI_HEALTH=OK\n'
           printf 'ARTHELLO_AUTH_GATE=POSTGRESQL_SESSION\n'
           printf 'ARTHELLO_LEGACY_ROLLBACK=PRESERVED\n'
+          outcome="success:$release_sha"
           REMOTE
+
+          ssh_remote "chmod 0500 '$job_dir/activate.sh' && rm -f '$job_dir/status' '$job_dir/status.tmp' && : > '$job_dir/activation.log' && nohup setsid env RELEASE_SHA='$GITHUB_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' JOB_DIR='$job_dir' bash '$job_dir/activate.sh' > '$job_dir/activation.log' 2>&1 < /dev/null & printf '%s\n' \$! > '$job_dir/pid'"
+
+          result=""
+          for attempt in $(seq 1 180); do
+            result="$(ssh_remote "test -f '$job_dir/status' && cat '$job_dir/status' || true" || true)"
+            case "$result" in
+              success:$GITHUB_SHA)
+                printf 'ARTHELLO_DETACHED_ACTIVATION=SUCCESS\n'
+                break
+                ;;
+              failed:*)
+                ssh_remote "tail -n 160 '$job_dir/activation.log'" || true
+                exit 1
+                ;;
+            esac
+            test "$attempt" -lt 180
+            sleep 10
+          done
+          test "$result" = "success:$GITHUB_SHA"
 
       - name: Verify public HTTPS
         run: |
