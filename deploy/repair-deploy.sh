@@ -12,9 +12,10 @@ ARTHELLO_WEB_CONTAINER=${ARTHELLO_WEB_CONTAINER:-arthello-os-web-1}
 ARCHIVE=$(mktemp /tmp/school-repair.XXXXXX.tar.gz)
 CURL_CONFIG=$(mktemp /tmp/school-curl.XXXXXX)
 RELEASE="$SCHOOL_ROOT/releases/repair-$(date +%Y%m%d%H%M%S)"
+PART_FIX=$(mktemp /tmp/school-part-022.XXXXXX)
 
 cleanup() {
-  rm -f "$ARCHIVE" "$CURL_CONFIG"
+  rm -f "$ARCHIVE" "$CURL_CONFIG" "$PART_FIX"
 }
 
 on_error() {
@@ -43,19 +44,51 @@ chmod 0600 "$CURL_CONFIG"
   printf 'show-error\n'
 } > "$CURL_CONFIG"
 
-echo "1/5 Скачиваем исправленный пакет дневника (прогресс виден ниже)..."
-curl --config "$CURL_CONFIG" \
-  --progress-bar \
-  --connect-timeout 20 \
-  --max-time 900 \
-  --retry 3 \
-  --retry-all-errors \
-  --output "$ARCHIVE" \
-  "https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/tarball/$DELIVERY_REF"
+PREVIOUS_RELEASE=$(find "$SCHOOL_ROOT/releases" \
+  -mindepth 1 \
+  -maxdepth 1 \
+  -type d \
+  -name 'repair-*' \
+  -print | sort | tail -1)
 
-echo "2/5 Проверяем пакет..."
-install -d -m 0755 "$RELEASE"
-tar -xzf "$ARCHIVE" --strip-components=1 -C "$RELEASE"
+PREVIOUS_PARTS_COUNT=0
+if [ -n "$PREVIOUS_RELEASE" ] && [ -d "$PREVIOUS_RELEASE/deploy" ]; then
+  PREVIOUS_PARTS_COUNT=$(find "$PREVIOUS_RELEASE/deploy" \
+    -maxdepth 1 \
+    -name 'offline-runtime-v2.part-*' \
+    -type f 2>/dev/null | wc -l)
+fi
+
+if [ "$PREVIOUS_PARTS_COUNT" -eq 68 ]; then
+  RELEASE=$PREVIOUS_RELEASE
+  echo "1/5 Загружаем только исправленный фрагмент runtime №22..."
+  curl --config "$CURL_CONFIG" \
+    --header "Accept: application/vnd.github.raw+json" \
+    --progress-bar \
+    --connect-timeout 20 \
+    --max-time 180 \
+    --retry 3 \
+    --retry-all-errors \
+    --output "$PART_FIX" \
+    "https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/contents/deploy/offline-runtime-v2.part-022?ref=$DELIVERY_REF"
+  test "$(wc -c < "$PART_FIX")" -eq 716800
+  mv -f "$PART_FIX" "$RELEASE/deploy/offline-runtime-v2.part-022"
+else
+  echo "1/5 Скачиваем исправленный пакет дневника (прогресс виден ниже)..."
+  curl --config "$CURL_CONFIG" \
+    --progress-bar \
+    --connect-timeout 20 \
+    --max-time 900 \
+    --retry 3 \
+    --retry-all-errors \
+    --output "$ARCHIVE" \
+    "https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/tarball/$DELIVERY_REF"
+
+  install -d -m 0755 "$RELEASE"
+  tar -xzf "$ARCHIVE" --strip-components=1 -C "$RELEASE"
+fi
+
+echo "2/5 Проверяем весь пакет..."
 
 PARTS_COUNT=$(find "$RELEASE/deploy" \
   -maxdepth 1 \
