@@ -3,10 +3,16 @@ FROM arthello-os-api:local
 USER root
 WORKDIR /school
 
-COPY deploy/offline-runtime.tar.gz /tmp/school-runtime.tar.gz
+COPY deploy/offline-runtime-v2.part-* /tmp/runtime-parts/
 
-RUN tar -xzf /tmp/school-runtime.tar.gz -C /school \
+RUN cat /tmp/runtime-parts/offline-runtime-v2.part-* > /tmp/school-runtime.tar.gz \
+    && printf '%s  %s\n' \
+      'a226213f1e04588560939d3682cf39652c7b8318fd0f2e03e2b5f4396c052fd5' \
+      '/tmp/school-runtime.tar.gz' \
+      | sha256sum --check --strict \
+    && tar -xzf /tmp/school-runtime.tar.gz -C /school \
     && rm -f /tmp/school-runtime.tar.gz \
+    && rm -rf /tmp/runtime-parts \
     && mkdir -p /data /backups \
     && chown -R node:node /school /data /backups
 
