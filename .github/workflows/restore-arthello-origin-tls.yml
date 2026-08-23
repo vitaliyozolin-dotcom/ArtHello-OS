@@ -1,0 +1,120 @@
+name: Restore ArtHello origin TLS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arthello-production-ru
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-ru
+    env:
+      PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+      DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+    steps:
+      - name: Configure pinned SSH identity
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+      - name: Restore the persistent HTTPS origin
+        run: |
+          set -Eeuo pipefail
+          deploy_port="${DEPLOY_PORT:-2222}"
+          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
+          test -n "$route_device"
+          sudo ip link set dev "$route_device" mtu 1200
+          ssh_args=(
+            -p "$deploy_port"
+            -i ~/.ssh/id_ed25519
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o ConnectTimeout=20
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=20
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+          payload="$(base64 -w0 <<'REMOTE'
+          set -Eeuo pipefail
+          root=/srv/arthello
+          env_file="$root/shared/.env.production"
+          test -L "$root/current"
+          test -f "$env_file"
+          release_dir="$(readlink -f "$root/current")"
+          test -f "$release_dir/deploy/compose.production.yml"
+          cd "$release_dir/deploy"
+          docker compose --env-file "$env_file" -f compose.production.yml \
+            up -d --no-deps --no-build --pull never --force-recreate web
+          origin_host="$(sed -n 's/^ARTHELLO_HOST=//p' "$env_file" | tail -n 1)"
+          origin_host="${origin_host%\"}"
+          origin_host="${origin_host#\"}"
+          origin_host="${origin_host:-os.arthelloteam.ru}"
+          case "$origin_host" in
+            :*|http://*|https://*) exit 1 ;;
+          esac
+          ready=0
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent --show-error --insecure \
+              --resolve "$origin_host:443:127.0.0.1" "https://$origin_host/" \
+              | grep -F 'ArtHello' >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          printf 'ARTHELLO_ORIGIN_TLS=RESTORED\n'
+          REMOTE
+          )"
+          test -n "$payload"
+          ssh_rc=0
+          ssh_started_at="$(date +%s)"
+          timeout --signal=TERM --kill-after=5s 150s \
+            ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "printf '%s' '$payload' | base64 -d | bash" \
+              </dev/null >/dev/null 2>&1 || ssh_rc=$?
+          ssh_elapsed="$(( $(date +%s) - ssh_started_at ))"
+          case "$ssh_rc" in
+            0|124|137) ;;
+            255) test "$ssh_elapsed" -ge 90 ;;
+            *) exit "$ssh_rc" ;;
+          esac
+
+      - name: Verify public HTTPS recovery
+        run: |
+          set -Eeuo pipefail
+          for attempt in $(seq 1 90); do
+            body="$(curl --fail --silent --show-error --max-time 20 "$PUBLIC_URL/" || true)"
+            if grep -F 'ArtHello' <<<"$body" >/dev/null \
+              && ! grep -F '502 Bad Gateway' <<<"$body" >/dev/null; then
+              printf 'ARTHELLO_PUBLIC_HTTPS=RESTORED\n'
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
