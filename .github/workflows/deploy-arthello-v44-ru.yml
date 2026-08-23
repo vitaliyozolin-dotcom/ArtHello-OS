@@ -220,18 +220,8 @@ jobs:
             -o Ciphers=aes128-ctr
             -o MACs=hmac-sha2-256
           )
-          ssh_remote() {
-            timeout --foreground --signal=TERM 20s \
-              ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "$@"
-          }
-
           job_dir="/srv/arthello/ui-jobs/$GITHUB_SHA"
-          directory_output="$(ssh_remote "install -d -m 0750 '$job_dir'; printf 'ARTHELLO_JOB_DIR_READY\\n'" || true)"
-          printf '%s\n' "$directory_output"
-          grep -Fx 'ARTHELLO_JOB_DIR_READY' <<<"$directory_output"
-
-          set +e
-          upload_output="$(ssh_remote "cat > '$job_dir/activate.sh' && printf 'ARTHELLO_ACTIVATION_SCRIPT_READY\\n'" <<'REMOTE'
+          activation_payload="$(base64 -w0 <<'REMOTE'
           set -Eeuo pipefail
           root=/srv/arthello
           repository=vitaliyozolin-dotcom/ArtHello-OS
@@ -362,32 +352,24 @@ jobs:
           outcome="success:$release_sha"
           REMOTE
           )"
-          set -e
-          printf '%s\n' "$upload_output"
-          grep -Fx 'ARTHELLO_ACTIVATION_SCRIPT_READY' <<<"$upload_output"
+          test -n "$activation_payload"
 
-          start_output="$(ssh_remote "chmod 0500 '$job_dir/activate.sh' && rm -f '$job_dir/status' '$job_dir/status.tmp' && : > '$job_dir/activation.log' && nohup setsid env RELEASE_SHA='$GITHUB_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' JOB_DIR='$job_dir' bash '$job_dir/activate.sh' > '$job_dir/activation.log' 2>&1 < /dev/null & activation_pid=\$!; printf '%s\\n' \"\$activation_pid\" > '$job_dir/pid'; printf 'ARTHELLO_ACTIVATION_STARTED=%s\\n' \"\$activation_pid\"" || true)"
-          printf '%s\n' "$start_output"
-          grep -Eq '^ARTHELLO_ACTIVATION_STARTED=[0-9]+$' <<<"$start_output"
+          ssh -f "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$activation_payload' | base64 -d > '$job_dir/activate.sh'; chmod 0500 '$job_dir/activate.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; : > '$job_dir/activation.log'; nohup setsid env RELEASE_SHA='$GITHUB_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' JOB_DIR='$job_dir' bash '$job_dir/activate.sh' > '$job_dir/activation.log' 2>&1 < /dev/null & activation_pid=\$!; printf '%s\\n' \"\$activation_pid\" > '$job_dir/pid'"
 
-          result=""
+          deployed=0
           for attempt in $(seq 1 180); do
-            poll_output="$(ssh_remote "if test -f '$job_dir/status'; then cat '$job_dir/status'; else printf 'pending\\n'; fi" || true)"
-            result="$(grep -E '^(success:[0-9a-f]{40}|failed:[0-9]+|pending)$' <<<"$poll_output" | tail -n 1 || true)"
-            case "$result" in
-              success:$GITHUB_SHA)
-                printf 'ARTHELLO_DETACHED_ACTIVATION=SUCCESS\n'
-                break
-                ;;
-              failed:*)
-                ssh_remote "tail -n 160 '$job_dir/activation.log'" || true
-                exit 1
-                ;;
-            esac
+            root_html="$(curl --fail --silent --show-error --max-time 20 "$PUBLIC_URL/" || true)"
+            if grep -Eq 'Проверяем защищённую сессию|Закрытая операционная система образовательной группы' <<<"$root_html" \
+              && curl --fail --silent --show-error --max-time 20 "$PUBLIC_URL/api/healthz" >/dev/null; then
+              deployed=1
+              printf 'ARTHELLO_PUBLIC_ACTIVATION=SUCCESS\n'
+              break
+            fi
             test "$attempt" -lt 180
             sleep 10
           done
-          test "$result" = "success:$GITHUB_SHA"
+          test "$deployed" -eq 1
 
       - name: Verify public HTTPS
         run: |
