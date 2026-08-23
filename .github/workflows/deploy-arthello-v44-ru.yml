@@ -354,22 +354,31 @@ jobs:
           )"
           test -n "$activation_payload"
 
-          # The hosting gateway keeps the SSH transport open for 120 seconds even
-          # after the detached server job has started. Close every runner-facing
-          # descriptor and treat the local 30-second transport timeout as expected;
-          # the public HTTPS probes below remain the source of truth for activation.
+          # The Timeweb gateway keeps remote-command channels open for about
+          # 120 seconds. Do not kill the SSH client before that boundary: doing so
+          # can prevent the detached activation command from reaching the VPS.
+          # The server process is still detached with closed descriptors, while
+          # public HTTPS remains the final source of truth.
           ssh_rc=0
-          timeout --signal=TERM --kill-after=5s 30s \
-            ssh -fn "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+          ssh_started_at="$(date +%s)"
+          timeout --signal=TERM --kill-after=5s 150s \
+            ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
               "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$activation_payload' | base64 -d > '$job_dir/activate.sh'; chmod 0500 '$job_dir/activate.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; : > '$job_dir/activation.log'; nohup setsid env RELEASE_SHA='$GITHUB_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' JOB_DIR='$job_dir' bash '$job_dir/activate.sh' > '$job_dir/activation.log' 2>&1 < /dev/null & activation_pid=\$!; printf '%s\\n' \"\$activation_pid\" > '$job_dir/pid'" \
               </dev/null >/dev/null 2>&1 || ssh_rc=$?
+          ssh_elapsed="$(( $(date +%s) - ssh_started_at ))"
           case "$ssh_rc" in
             0|124|137) ;;
+            255)
+              # A fast 255 is a real connection/authentication failure. The known
+              # Timeweb gateway close happens only after the command channel lived
+              # long enough for the remote command to be delivered.
+              test "$ssh_elapsed" -ge 90
+              ;;
             *) exit "$ssh_rc" ;;
           esac
 
           deployed=0
-          for attempt in $(seq 1 180); do
+          for attempt in $(seq 1 360); do
             root_html="$(curl --fail --silent --show-error --max-time 20 "$PUBLIC_URL/" || true)"
             if grep -Eq 'Проверяем защищённую сессию|Закрытая операционная система образовательной группы' <<<"$root_html" \
               && curl --fail --silent --show-error --max-time 20 "$PUBLIC_URL/api/healthz" >/dev/null; then
@@ -377,7 +386,7 @@ jobs:
               printf 'ARTHELLO_PUBLIC_ACTIVATION=SUCCESS\n'
               break
             fi
-            test "$attempt" -lt 180
+            test "$attempt" -lt 360
             sleep 10
           done
           test "$deployed" -eq 1
