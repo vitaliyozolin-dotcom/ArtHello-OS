@@ -16,6 +16,13 @@ on:
       - reopened
     paths:
       - .github/arthello-production-trigger
+  workflow_run:
+    workflows:
+      - Quality gates
+    types:
+      - completed
+    branches:
+      - codex/trigger-arthello-production-ru
 
 permissions:
   contents: read
@@ -33,7 +40,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           case "${{ github.event_name }}" in
-            pull_request|push|pull_request_target) ;;
+            pull_request|push|pull_request_target|workflow_run) ;;
             *) exit 1 ;;
           esac
           printf '%s\n' 'Timeweb terminates TLS; ArtHello Caddy must listen on plain HTTP :80.'
@@ -44,7 +51,11 @@ jobs:
       (github.event_name == 'pull_request_target' &&
        github.event.pull_request.base.ref == 'main' &&
        github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.head.ref == 'codex/trigger-arthello-production-ru')
+       github.event.pull_request.head.ref == 'codex/trigger-arthello-production-ru') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'codex/trigger-arthello-production-ru' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
