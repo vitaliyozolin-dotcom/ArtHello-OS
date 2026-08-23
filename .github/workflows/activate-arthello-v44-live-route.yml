@@ -236,12 +236,17 @@ jobs:
           test -n "$route_payload"
 
           ssh_rc=0
-          timeout --signal=TERM --kill-after=5s 30s \
-            ssh -fn "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+          ssh_started_at="$(date +%s)"
+          timeout --signal=TERM --kill-after=5s 150s \
+            ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
               "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$route_payload' | base64 -d > '$job_dir/activate-route.sh'; chmod 0500 '$job_dir/activate-route.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; nohup setsid env TARGET_SHA='$TARGET_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' JOB_DIR='$job_dir' bash '$job_dir/activate-route.sh' > '$job_dir/activation.log' 2>&1 < /dev/null &" \
               </dev/null >/dev/null 2>&1 || ssh_rc=$?
+          ssh_elapsed="$(( $(date +%s) - ssh_started_at ))"
           case "$ssh_rc" in
             0|124|137) ;;
+            255)
+              test "$ssh_elapsed" -ge 90
+              ;;
             *) exit "$ssh_rc" ;;
           esac
 
