@@ -354,8 +354,19 @@ jobs:
           )"
           test -n "$activation_payload"
 
-          ssh -f "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$activation_payload' | base64 -d > '$job_dir/activate.sh'; chmod 0500 '$job_dir/activate.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; : > '$job_dir/activation.log'; nohup setsid env RELEASE_SHA='$GITHUB_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' JOB_DIR='$job_dir' bash '$job_dir/activate.sh' > '$job_dir/activation.log' 2>&1 < /dev/null & activation_pid=\$!; printf '%s\\n' \"\$activation_pid\" > '$job_dir/pid'"
+          # The hosting gateway keeps the SSH transport open for 120 seconds even
+          # after the detached server job has started. Close every runner-facing
+          # descriptor and treat the local 30-second transport timeout as expected;
+          # the public HTTPS probes below remain the source of truth for activation.
+          ssh_rc=0
+          timeout --signal=TERM --kill-after=5s 30s \
+            ssh -fn "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$activation_payload' | base64 -d > '$job_dir/activate.sh'; chmod 0500 '$job_dir/activate.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; : > '$job_dir/activation.log'; nohup setsid env RELEASE_SHA='$GITHUB_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' JOB_DIR='$job_dir' bash '$job_dir/activate.sh' > '$job_dir/activation.log' 2>&1 < /dev/null & activation_pid=\$!; printf '%s\\n' \"\$activation_pid\" > '$job_dir/pid'" \
+              </dev/null >/dev/null 2>&1 || ssh_rc=$?
+          case "$ssh_rc" in
+            0|124|137) ;;
+            *) exit "$ssh_rc" ;;
+          esac
 
           deployed=0
           for attempt in $(seq 1 180); do
