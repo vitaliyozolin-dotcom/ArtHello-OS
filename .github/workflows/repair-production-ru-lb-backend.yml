@@ -45,7 +45,7 @@ jobs:
           esac
           printf '%s\n' 'Timeweb terminates TLS; ArtHello Caddy must listen on plain HTTP :80.'
 
-  repair:
+  announce:
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request_target' &&
@@ -57,6 +57,35 @@ jobs:
        github.event.workflow_run.head_branch == 'codex/trigger-arthello-production-ru' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
     needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      issue_number: ${{ steps.create_issue.outputs.issue_number }}
+    steps:
+      - name: Create production run record
+        id: create_issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          response="$(gh api "repos/$GITHUB_REPOSITORY/issues"             --method POST             -f "title=[production-ru] run $GITHUB_RUN_ID"             -f "body=Production repair is queued. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")"
+          issue_number="$(jq -r '.number' <<<"$response")"
+          test "$issue_number" != null
+          printf 'issue_number=%s\n' "$issue_number" >> "$GITHUB_OUTPUT"
+
+  repair:
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.base.ref == 'main' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'codex/trigger-arthello-production-ru') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'codex/trigger-arthello-production-ru' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    needs:
+      - validate
+      - announce
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production-ru
@@ -224,7 +253,9 @@ jobs:
             fi
             printf '```\n'
           } > "$report_file"
-          gh api "repos/$GITHUB_REPOSITORY/issues/35/comments"             --method POST             -f "body=$(cat "$report_file")" >/dev/null
+          issue_number="${{ needs.announce.outputs.issue_number }}"
+          test -n "$issue_number"
+          gh api "repos/$GITHUB_REPOSITORY/issues/$issue_number"             --method PATCH             -f "body=$(cat "$report_file")" >/dev/null
 
       - name: Enforce successful production result
         if: always()
