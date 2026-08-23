@@ -104,6 +104,8 @@ jobs:
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           test -s ~/.ssh/id_ed25519
           test -s ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+          ssh-keygen -lf ~/.ssh/id_ed25519
 
       - name: Restore HTTP backend and create first owner
         id: repair_backend
@@ -116,7 +118,7 @@ jobs:
           set -Eeuo pipefail
           log_file="$RUNNER_TEMP/arthello-repair.log"
           set +e
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20 "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE' 2>&1 | tee "$log_file"
+          ssh -vv -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20 "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE' 2>&1 | tee "$log_file"
           set -Eeuo pipefail
           trap 'rc=$?; printf "ARTHELLO_REPAIR_FAILED line=%s rc=%s\n" "$LINENO" "$rc" >&2; exit "$rc"' ERR
 
@@ -248,7 +250,7 @@ jobs:
             printf -- '- Public HTTPS: `%s`\n\n' "$PUBLIC_OUTCOME"
             printf 'Sanitized backend markers:\n\n```text\n'
             if [ -f "$log_file" ]; then
-              grep -E '^(ARTHELLO_|Error:|error:|curl:|ssh:|Permission denied|Host key)' "$log_file"                 | tail -n 80                 | sed -E 's/(PASSWORD|TOKEN|SECRET|PRIVATE_KEY)=.*/\1=[REDACTED]/Ig' || true
+              grep -E '^(ARTHELLO_|Error:|error:|curl:|ssh:|Permission denied|Host key|debug1: Offering public key|debug1: Server accepts key|debug1: Authentications that can continue|Load key|Connection closed)' "$log_file"                 | tail -n 80                 | sed -E 's/(PASSWORD|TOKEN|SECRET|PRIVATE_KEY)=.*/\1=[REDACTED]/Ig' || true
             else
               printf 'No backend log was produced.\n'
             fi
