@@ -29,8 +29,20 @@ jobs:
           install -m 0700 -d ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 0600 ~/.ssh/id_ed25519
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts.previous
           ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+          deploy_port="${DEPLOY_PORT:-2222}"
+          scanned_hosts="$RUNNER_TEMP/arthello-known-hosts"
+          for attempt in 1 2 3; do
+            ssh-keyscan -T 20 -p "$deploy_port" -t ed25519 "$DEPLOY_HOST" 2>/dev/null > "$scanned_hosts" || true
+            test -s "$scanned_hosts" && break
+            sleep 5
+          done
+          test -s "$scanned_hosts"
+          actual_fingerprint="$(ssh-keygen -lf "$scanned_hosts" -E sha256 | awk '{print $2; exit}')"
+          printf 'ARTHELLO_SSH_HOST_FINGERPRINT=%s\n' "$actual_fingerprint"
+          test "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scanned_hosts" ~/.ssh/known_hosts
 
       - name: Collect sanitized Caddy diagnostics
         run: |
