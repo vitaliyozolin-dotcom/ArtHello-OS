@@ -16,21 +16,13 @@ on:
       - reopened
     paths:
       - .github/arthello-production-trigger
-  workflow_run:
-    workflows:
-      - Quality gates
-    types:
-      - completed
-    branches:
-      - codex/trigger-arthello-production-ru
-
 permissions:
   contents: read
   issues: write
 
 concurrency:
   group: arthello-production-ru
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   validate:
@@ -40,7 +32,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           case "${{ github.event_name }}" in
-            pull_request|push|pull_request_target|workflow_run) ;;
+            pull_request|push|pull_request_target) ;;
             *) exit 1 ;;
           esac
           printf '%s\n' 'Timeweb terminates TLS; ArtHello Caddy must listen on plain HTTP :80.'
@@ -51,11 +43,7 @@ jobs:
       (github.event_name == 'pull_request_target' &&
        github.event.pull_request.base.ref == 'main' &&
        github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.head.ref == 'codex/trigger-arthello-production-ru') ||
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'codex/trigger-arthello-production-ru' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
+       github.event.pull_request.head.ref == 'codex/trigger-arthello-production-ru')
     needs: validate
     runs-on: ubuntu-latest
     outputs:
@@ -78,11 +66,7 @@ jobs:
       (github.event_name == 'pull_request_target' &&
        github.event.pull_request.base.ref == 'main' &&
        github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.head.ref == 'codex/trigger-arthello-production-ru') ||
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'codex/trigger-arthello-production-ru' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
+       github.event.pull_request.head.ref == 'codex/trigger-arthello-production-ru')
     needs:
       - validate
       - announce
@@ -114,11 +98,14 @@ jobs:
         env:
           DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
         run: |
           set -Eeuo pipefail
           log_file="$RUNNER_TEMP/arthello-repair.log"
           set +e
-          ssh -vv -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20 "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE' 2>&1 | tee "$log_file"
+          deploy_port="${DEPLOY_PORT:-2222}"
+          printf 'ARTHELLO_SSH_PORT=%s\n' "$deploy_port" | tee "$log_file"
+          ssh -vv -p "$deploy_port" -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20 "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE' 2>&1 | tee "$log_file"
           set -Eeuo pipefail
           trap 'rc=$?; printf "ARTHELLO_REPAIR_FAILED line=%s rc=%s\n" "$LINENO" "$rc" >&2; exit "$rc"' ERR
 
