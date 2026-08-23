@@ -116,7 +116,7 @@ jobs:
           set -Eeuo pipefail
           log_file="$RUNNER_TEMP/arthello-repair.log"
           set +e
-          ssh -o BatchMode=yes -o ConnectTimeout=20 "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE' 2>&1 | tee "$log_file"
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20 "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE' 2>&1 | tee "$log_file"
           set -Eeuo pipefail
           trap 'rc=$?; printf "ARTHELLO_REPAIR_FAILED line=%s rc=%s\n" "$LINENO" "$rc" >&2; exit "$rc"' ERR
 
@@ -161,7 +161,8 @@ jobs:
           docker compose --env-file "$env_file" -f "$compose_file"             up -d --no-build --pull never --force-recreate api web
 
           healthy=0
-          for _ in $(seq 1 36); do
+          for attempt in $(seq 1 36); do
+            printf 'ARTHELLO_HEALTH_WAIT attempt=%s\n' "$attempt"
             if curl --fail --silent --show-error http://127.0.0.1/api/healthz >/dev/null; then
               healthy=1
               break
