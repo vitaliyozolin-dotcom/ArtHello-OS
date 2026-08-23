@@ -9,6 +9,13 @@ on:
       - main
     paths:
       - .github/workflows/repair-production-ru-lb-backend.yml
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - .github/arthello-production-trigger
 
 permissions:
   contents: read
@@ -25,11 +32,19 @@ jobs:
       - name: Validate recovery contract
         run: |
           set -Eeuo pipefail
-          test "${{ github.event_name }}" = pull_request -o "${{ github.event_name }}" = push
+          case "${{ github.event_name }}" in
+            pull_request|push|pull_request_target) ;;
+            *) exit 1 ;;
+          esac
           printf '%s\n' 'Timeweb terminates TLS; ArtHello Caddy must listen on plain HTTP :80.'
 
   repair:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.base.ref == 'main' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'codex/trigger-arthello-production-ru')
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
