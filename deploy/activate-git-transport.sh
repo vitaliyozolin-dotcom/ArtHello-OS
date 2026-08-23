@@ -41,9 +41,11 @@ fi
 printf '%s' "$release_sha" | grep -Eq '^[0-9a-f]{40}$' \
   || fail invalid_release_sha
 case "$transport_ref" in
-  refs/remotes/origin/transport/arthello-ru-"$release_sha") ;;
+  refs/remotes/origin/transport/arthello-ru-"$release_sha" | \
+  refs/remotes/origin/transport/arthello-ru-"$release_sha"-*) ;;
   *) fail unexpected_transport_ref ;;
 esac
+transport_branch="${transport_ref#refs/remotes/origin/}"
 
 id "$deploy_user" >/dev/null || fail deploy_user_missing
 test -f "$root_dir/.bootstrap-phase1-complete" || fail server_bootstrap_incomplete
@@ -81,8 +83,11 @@ grep -Fx "repository=vitaliyozolin-dotcom/ArtHello-OS" "$transport_manifest" >/d
   || fail transport_repository_mismatch
 grep -Fx "application_sha=$release_sha" "$transport_manifest" >/dev/null \
   || fail transport_release_mismatch
-grep -Fx "transport_branch=transport/arthello-ru-$release_sha" "$transport_manifest" >/dev/null \
+grep -Fx "transport_branch=$transport_branch" "$transport_manifest" >/dev/null \
   || fail transport_branch_mismatch
+runtime_infrastructure_sha="$(sed -n 's/^runtime_infrastructure_sha=//p' "$transport_manifest")"
+printf '%s' "$runtime_infrastructure_sha" | grep -Eq '^[0-9a-f]{40}$' \
+  || fail runtime_infrastructure_sha_missing
 grep -Fx 'transport=git_chunks' "$transport_manifest" >/dev/null \
   || fail transport_type_mismatch
 grep -Fx 'real_data=not_loaded' "$transport_manifest" >/dev/null \
@@ -121,6 +126,11 @@ grep -Fx "repository=vitaliyozolin-dotcom/ArtHello-OS" \
   "$temporary_dir/$manifest_name" >/dev/null || fail manifest_repository_mismatch
 grep -Fx "source_sha=$release_sha" "$temporary_dir/$manifest_name" >/dev/null \
   || fail manifest_release_mismatch
+grep -Fx "runtime_infrastructure_sha=$runtime_infrastructure_sha" \
+  "$temporary_dir/$manifest_name" >/dev/null \
+  || fail manifest_runtime_infrastructure_mismatch
+grep -Fx 'offline_runtime_check=passed' "$temporary_dir/$manifest_name" >/dev/null \
+  || fail manifest_offline_runtime_check_missing
 grep -Fx 'real_data=not_loaded' "$temporary_dir/$manifest_name" >/dev/null \
   || fail manifest_real_data_boundary_missing
 grep -Fx 'integrations=disabled' "$temporary_dir/$manifest_name" >/dev/null \
@@ -175,6 +185,11 @@ for image_name in "arthello-os-api:$release_sha" "arthello-os-web:$release_sha";
     --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
     "$image_name")"
   [ "$image_revision" = "$release_sha" ] || fail image_revision_mismatch
+  runtime_revision="$(docker image inspect \
+    --format '{{index .Config.Labels "org.opencontainers.image.runtime-revision"}}' \
+    "$image_name")"
+  [ "$runtime_revision" = "$runtime_infrastructure_sha" ] \
+    || fail image_runtime_revision_mismatch
 done
 docker image inspect postgres:16-alpine >/dev/null || fail postgres_image_missing
 
@@ -223,6 +238,7 @@ ln -sfn "$release_dir" "$root_dir/current"
 printf 'ARTHELLO_DEPLOY_SHA=%s\n' "$release_sha"
 printf 'ARTHELLO_DEPLOY_SOURCE=private_git_chunks\n'
 printf 'ARTHELLO_TRANSPORT_COMMIT=%s\n' "$transport_commit"
+printf 'ARTHELLO_RUNTIME_INFRASTRUCTURE_SHA=%s\n' "$runtime_infrastructure_sha"
 printf 'ARTHELLO_HEALTH=OK\n'
 printf 'ARTHELLO_REAL_DATA=NOT_LOADED\n'
 printf 'ARTHELLO_INTEGRATIONS=DISABLED\n'

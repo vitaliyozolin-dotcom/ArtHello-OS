@@ -116,6 +116,33 @@ jobs:
       - name: Validate production pull-deployment script
         run: bash -n deploy/pull-release.sh
 
+      - name: Validate offline API runtime contract
+        run: |
+          set -Eeuo pipefail
+          bash -n deploy/activate-git-transport.sh
+          sh -n deploy/api-entrypoint.sh
+          grep -F 'db_workspace=/app/lib/db' deploy/api-entrypoint.sh
+          grep -F 'cd "$db_workspace"' deploy/api-entrypoint.sh
+          grep -F '"$drizzle_bin" migrate --config ./drizzle.config.ts' deploy/api-entrypoint.sh
+          grep -F 'ARTHELLO_API_STARTUP_ERROR=alfacrm_domain_missing_with_credentials' deploy/api-entrypoint.sh
+          grep -F 'export ALFACRM_DOMAIN=disabled.invalid' deploy/api-entrypoint.sh
+          if grep -Eq '(^|[[:space:]])pnpm([[:space:]]|$)|corepack|registry\.npmjs\.org' \
+            deploy/api-entrypoint.sh; then
+            echo 'Production API entrypoint must not invoke a package manager or registry.' >&2
+            exit 1
+          fi
+          api_stage="$(awk '
+            /^FROM .* AS api$/ { in_api=1 }
+            /^FROM .* AS web$/ { in_api=0 }
+            in_api { print }
+          ' deploy/Dockerfile)"
+          if grep -Eq 'corepack|pnpm|registry\.npmjs\.org' <<<"$api_stage"; then
+            echo 'Final API image stage must remain package-manager-free.' >&2
+            exit 1
+          fi
+          grep -F 'test -x /app/lib/db/node_modules/.bin/drizzle-kit' \
+            deploy/Dockerfile
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
