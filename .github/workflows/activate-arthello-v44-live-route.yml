@@ -1,0 +1,276 @@
+name: Activate ArtHello v44 in the live Caddy route
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Verified ArtHello UI release SHA
+        required: true
+        default: 49b1545aa0993d4f082ade227287305835034522
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arthello-production-ru
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production-ru
+    env:
+      PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+      DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+    steps:
+      - name: Validate activation contract
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -Eeuo pipefail
+          printf '%s' "$TARGET_SHA" | grep -Eq '^[0-9a-f]{40}$'
+          test "$PUBLIC_URL" = 'https://arthello-188-225-38-55.sslip.io'
+
+      - name: Configure pinned SSH identity
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          test -s ~/.ssh/id_ed25519
+          test -s ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+      - name: Merge the verified route into live Caddy
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -Eeuo pipefail
+          deploy_port="${DEPLOY_PORT:-2222}"
+          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
+          test -n "$route_device"
+          sudo ip link set dev "$route_device" mtu 1200
+          ssh_args=(
+            -p "$deploy_port"
+            -i ~/.ssh/id_ed25519
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o ConnectTimeout=20
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=20
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+          job_dir="/srv/arthello/ui-route-jobs/$TARGET_SHA"
+          route_payload="$(base64 -w0 <<'REMOTE'
+          set -Eeuo pipefail
+
+          target_sha="${TARGET_SHA:?TARGET_SHA is required}"
+          public_domain="${PUBLIC_DOMAIN:?PUBLIC_DOMAIN is required}"
+          job_dir="${JOB_DIR:?JOB_DIR is required}"
+          backup_json="$job_dir/caddy-before.json"
+          merged_json="$job_dir/caddy-merged.json"
+          route_caddy="$job_dir/route.Caddyfile"
+          route_json="$job_dir/route.json"
+          status_file="$job_dir/status"
+          web_id=""
+          switched=0
+
+          install -d -m 0750 "$job_dir"
+          finish() {
+            rc=$?
+            if [ "$rc" -ne 0 ] && [ "$switched" -eq 1 ] && [ -s "$backup_json" ] && [ -n "$web_id" ]; then
+              docker cp "$backup_json" "$web_id:/tmp/arthello-caddy-rollback.json" >/dev/null
+              docker exec "$web_id" caddy reload --config /tmp/arthello-caddy-rollback.json --adapter json >/dev/null 2>&1 || true
+            fi
+            if [ "$rc" -eq 0 ]; then
+              printf 'success:%s\n' "$target_sha" > "$status_file.tmp"
+            else
+              printf 'failed:%s\n' "$rc" > "$status_file.tmp"
+            fi
+            mv "$status_file.tmp" "$status_file"
+            trap - EXIT
+            exit "$rc"
+          }
+          trap finish EXIT
+
+          ready=0
+          for attempt in $(seq 1 270); do
+            if docker inspect arthello-os-newui >/dev/null 2>&1 \
+              && docker exec arthello-os-newui node -e \
+                "fetch('http://127.0.0.1:8081/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"; then
+              ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" -eq 1
+
+          running_sha="$(docker inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' arthello-os-newui)"
+          printf '%s' "$running_sha" | grep -Eq '^[0-9a-f]{40}$'
+          case "$running_sha" in
+            "$target_sha"|76b2cd2a050b516a4a73ae54c896a08dc1807c6a) ;;
+            *) exit 1 ;;
+          esac
+
+          web_id="$(docker ps --filter 'name=^/arthello-os-web-1$' --format '{{.ID}}' | head -n 1)"
+          if [ -z "$web_id" ]; then
+            web_id="$(docker ps --filter 'label=com.docker.compose.service=web' --format '{{.ID}}' | head -n 1)"
+          fi
+          test -n "$web_id"
+
+          docker exec "$web_id" sh -lc 'wget -qO- http://127.0.0.1:2019/config/' > "$backup_json"
+          test -s "$backup_json"
+
+          cat > "$route_caddy" <<EOF
+          http://$public_domain {
+            encode zstd gzip
+
+            header {
+              -Server
+              X-Content-Type-Options "nosniff"
+              Referrer-Policy "no-referrer"
+              X-Frame-Options "DENY"
+              Permissions-Policy "camera=(), microphone=(), geolocation=()"
+              X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+            }
+
+            @legacy_health path /api/healthz
+            handle @legacy_health {
+              reverse_proxy api:8080
+            }
+
+            @auth path /api/auth/*
+            handle @auth {
+              reverse_proxy api:8080
+            }
+
+            @protected_api path /api/*
+            handle @protected_api {
+              forward_auth api:8080 {
+                uri /api/auth/me
+              }
+              reverse_proxy arthello-os-newui:8081
+            }
+
+            handle {
+              reverse_proxy arthello-os-newui:8081
+            }
+          }
+          EOF
+          docker cp "$route_caddy" "$web_id:/tmp/arthello-live-route.Caddyfile" >/dev/null
+          docker exec "$web_id" caddy adapt --config /tmp/arthello-live-route.Caddyfile --adapter caddyfile --pretty > "$route_json"
+          test -s "$route_json"
+
+          python3 - "$backup_json" "$route_json" "$merged_json" "$public_domain" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          current_path, route_path, output_path, domain = sys.argv[1:]
+          current = json.loads(pathlib.Path(current_path).read_text(encoding="utf-8"))
+          fragment = json.loads(pathlib.Path(route_path).read_text(encoding="utf-8"))
+          current_servers = current["apps"]["http"]["servers"]
+          fragment_servers = fragment["apps"]["http"]["servers"]
+          source_server = next(iter(fragment_servers.values()))
+          source_routes = source_server.get("routes", [])
+          if not source_routes:
+              raise SystemExit("adapted route is empty")
+
+          def targets_domain(route):
+              for matcher_set in route.get("match", []):
+                  if domain in matcher_set.get("host", []):
+                      return True
+              return False
+
+          destination = None
+          for server in current_servers.values():
+              listens = server.get("listen", [])
+              if any(value.endswith(":80") or value == ":80" for value in listens):
+                  destination = server
+                  break
+          if destination is None:
+              destination = next(iter(current_servers.values()))
+          existing = [route for route in destination.get("routes", []) if not targets_domain(route)]
+          destination["routes"] = source_routes + existing
+          pathlib.Path(output_path).write_text(json.dumps(current), encoding="utf-8")
+          PY
+
+          docker cp "$merged_json" "$web_id:/tmp/arthello-caddy-merged.json" >/dev/null
+          docker exec "$web_id" caddy validate --config /tmp/arthello-caddy-merged.json --adapter json >/dev/null
+          switched=1
+          docker exec "$web_id" caddy reload --config /tmp/arthello-caddy-merged.json --adapter json >/dev/null
+
+          local_ready=0
+          for attempt in $(seq 1 60); do
+            root_html="$(curl --fail --silent --show-error -H "Host: $public_domain" http://127.0.0.1/ || true)"
+            health_body="$(curl --fail --silent --show-error -H "Host: $public_domain" http://127.0.0.1/api/healthz || true)"
+            auth_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Host: $public_domain" http://127.0.0.1/api/auth/me || true)"
+            if grep -Eq 'Проверяем защищённую сессию|Закрытая операционная система образовательной группы' <<<"$root_html" \
+              && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body" \
+              && [ "$auth_code" = 401 ]; then
+              local_ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$local_ready" -eq 1
+          switched=0
+          REMOTE
+          )"
+          test -n "$route_payload"
+
+          ssh_rc=0
+          ssh_started_at="$(date +%s)"
+          timeout --signal=TERM --kill-after=5s 150s \
+            ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$route_payload' | base64 -d > '$job_dir/activate-route.sh'; chmod 0500 '$job_dir/activate-route.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; nohup setsid env TARGET_SHA='$TARGET_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' JOB_DIR='$job_dir' bash '$job_dir/activate-route.sh' > '$job_dir/activation.log' 2>&1 < /dev/null &" \
+              </dev/null >/dev/null 2>&1 || ssh_rc=$?
+          ssh_elapsed="$(( $(date +%s) - ssh_started_at ))"
+          case "$ssh_rc" in
+            0|124|137) ;;
+            255)
+              test "$ssh_elapsed" -ge 90
+              ;;
+            *) exit "$ssh_rc" ;;
+          esac
+
+      - name: Verify public SSR, Postgres health, and access gates
+        run: |
+          set -Eeuo pipefail
+          ready=0
+          for attempt in $(seq 1 270); do
+            nonce="${GITHUB_RUN_ID}-${attempt}"
+            root_html="$(curl --fail --silent --show-error --max-time 20 -H 'Cache-Control: no-cache' "$PUBLIC_URL/?probe=$nonce" || true)"
+            health_body="$(curl --fail --silent --show-error --max-time 20 -H 'Cache-Control: no-cache' "$PUBLIC_URL/api/healthz?probe=$nonce" || true)"
+            auth_code="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' -H 'Cache-Control: no-cache' "$PUBLIC_URL/api/auth/me?probe=$nonce" || true)"
+            protected_code="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' -H 'Cache-Control: no-cache' "$PUBLIC_URL/api/settings?probe=$nonce" || true)"
+            if grep -Eq 'Проверяем защищённую сессию|Закрытая операционная система образовательной группы' <<<"$root_html" \
+              && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body" \
+              && [ "$auth_code" = 401 ] \
+              && [ "$protected_code" = 401 ]; then
+              ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" -eq 1
+          printf 'ARTHELLO_PUBLIC_SSR=OK\n'
+          printf 'ARTHELLO_POSTGRES_HEALTH=OK\n'
+          printf 'ARTHELLO_AUTH_GATE=OK\n'
+          printf 'ARTHELLO_PROTECTED_D1_GATE=OK\n'
