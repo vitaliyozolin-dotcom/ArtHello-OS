@@ -12,13 +12,22 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v44-source.tar.gz.part-* > /tm
     && npm run lint \
     && npm test
 
+FROM node:24-bookworm-slim AS runtime-dependencies
+
+WORKDIR /runtime
+RUN npm init -y \
+    && npm install --omit=dev --no-audit --no-fund miniflare@4.20260515.0 \
+    && npm cache clean --force
+
 FROM node:24-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
     PORT=8081 \
     ARTHELLO_D1_PATH=/data/d1
 WORKDIR /app
-COPY --from=application /app /app
+COPY --from=application /app/dist /app/dist
+COPY --from=application /app/production/runtime-server.mjs /app/production/runtime-server.mjs
+COPY --from=runtime-dependencies /runtime/node_modules /app/node_modules
 RUN mkdir -p /data/d1 && chown -R node:node /data
 USER node
 EXPOSE 8081
