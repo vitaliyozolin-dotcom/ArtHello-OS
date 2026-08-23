@@ -17,3 +17,19 @@
   try_files {path} /index.html
   file_server
 }
+
+school-188-225-47-207.sslip.io {
+  encode zstd gzip
+
+  header {
+    -Server
+    Strict-Transport-Security "max-age=31536000"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    X-Frame-Options "DENY"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+  }
+
+  reverse_proxy school-1-11:3000
+}
