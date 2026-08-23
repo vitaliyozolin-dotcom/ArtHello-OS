@@ -6,6 +6,8 @@ SCHOOL_HOST=${SCHOOL_HOST:-school-188-225-47-207.sslip.io}
 SCHOOL_CONTAINER=${SCHOOL_CONTAINER:-school-1-11}
 ARTHELLO_WEB_CONTAINER=${ARTHELLO_WEB_CONTAINER:-arthello-os-web-1}
 CADDY_FILE=/srv/arthello/shared/Caddyfile.school-runtime
+ARTHELLO_PUBLIC_NETWORK=${ARTHELLO_PUBLIC_NETWORK:-arthello-os_public}
+DEPLOYED_COMPOSE=/srv/school-1-11/current/deploy/compose.offline.yml
 
 on_error() {
   local code=$?
@@ -28,16 +30,27 @@ test "$(docker inspect \
 docker exec "$SCHOOL_CONTAINER" node -e \
   "fetch('http://127.0.0.1:3000/api/health').then(async r=>{console.log(await r.text());if(!r.ok)process.exit(1)}).catch(e=>{console.error(e);process.exit(1)})"
 
-SCHOOL_NETWORKS=$(docker inspect \
-  -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{"\n"}}{{end}}' \
-  "$SCHOOL_CONTAINER" | sort)
-WEB_NETWORKS=$(docker inspect \
-  -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{"\n"}}{{end}}' \
-  "$ARTHELLO_WEB_CONTAINER" | sort)
-SHARED_NETWORK=$(comm -12 \
-  <(printf '%s\n' "$SCHOOL_NETWORKS") \
-  <(printf '%s\n' "$WEB_NETWORKS") | head -1)
-test -n "$SHARED_NETWORK"
+docker network inspect "$ARTHELLO_PUBLIC_NETWORK" >/dev/null
+test "$(docker inspect \
+  -f '{{if index .NetworkSettings.Networks "arthello-os_public"}}yes{{end}}' \
+  "$ARTHELLO_WEB_CONTAINER")" = yes
+
+SCHOOL_ON_PUBLIC=$(docker inspect \
+  -f '{{if index .NetworkSettings.Networks "arthello-os_public"}}yes{{end}}' \
+  "$SCHOOL_CONTAINER")
+if [ "$SCHOOL_ON_PUBLIC" != yes ]; then
+  docker network connect \
+    --alias "$SCHOOL_CONTAINER" \
+    "$ARTHELLO_PUBLIC_NETWORK" \
+    "$SCHOOL_CONTAINER"
+fi
+
+if [ -f "$DEPLOYED_COMPOSE" ] && grep -q 'arthello-os_backend' "$DEPLOYED_COMPOSE"; then
+  sed -i \
+    -e 's/arthello_backend/arthello_public/g' \
+    -e 's/arthello-os_backend/arthello-os_public/g' \
+    "$DEPLOYED_COMPOSE"
+fi
 
 echo "2/3 Подключаем маршрут к действующему Caddy..."
 docker cp "$ARTHELLO_WEB_CONTAINER:/etc/caddy/Caddyfile" "$CADDY_FILE"
