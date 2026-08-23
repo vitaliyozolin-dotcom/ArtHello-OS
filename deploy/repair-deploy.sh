@@ -126,8 +126,8 @@ if [ "$SCHOOL_STATUS" != healthy ]; then
   exit 1
 fi
 
-curl --fail --silent --show-error http://127.0.0.1:3111/api/health
-echo
+docker exec school-1-11 node -e \
+  "fetch('http://127.0.0.1:3000/api/health').then(async r=>{console.log(await r.text());if(!r.ok)process.exit(1)}).catch(e=>{console.error(e);process.exit(1)})"
 
 echo "4/5 Подключаем дневник к действующему Caddy..."
 CADDY_FILE=/srv/arthello/shared/Caddyfile.school-runtime
