@@ -4,9 +4,9 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.offline
     networks:
-      - arthello_backend
+      - arthello_public
 
 networks:
-  arthello_backend:
+  arthello_public:
     external: true
-    name: arthello-os_backend
+    name: arthello-os_public
