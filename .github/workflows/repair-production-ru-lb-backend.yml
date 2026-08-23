@@ -105,7 +105,7 @@ jobs:
           set +e
           deploy_port="${DEPLOY_PORT:-2222}"
           printf 'ARTHELLO_SSH_PORT=%s\n' "$deploy_port" | tee "$log_file"
-          ssh -vv -p "$deploy_port" -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20 "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE' 2>&1 | tee "$log_file"
+          ssh -vv -p "$deploy_port" -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=20 -o IPQoS=none -o Compression=no -o KexAlgorithms=curve25519-sha256 -o HostKeyAlgorithms=ssh-ed25519 -o PubkeyAcceptedAlgorithms=ssh-ed25519 -o Ciphers=aes128-ctr -o MACs=hmac-sha2-256 "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE' 2>&1 | tee "$log_file"
           set -Eeuo pipefail
           trap 'rc=$?; printf "ARTHELLO_REPAIR_FAILED line=%s rc=%s\n" "$LINENO" "$rc" >&2; exit "$rc"' ERR
 
