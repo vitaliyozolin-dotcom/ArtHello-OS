@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 SCHOOL_ROOT=${SCHOOL_ROOT:-/srv/school-1-11}
-SCHOOL_HOST=${SCHOOL_HOST:-school-188-225-47-207.sslip.io}
+SCHOOL_HOST=${SCHOOL_HOST:-school-188-225-47-207.nip.io}
 TOKEN_FILE=${TOKEN_FILE:-/srv/arthello/shared/github-https/token}
 DELIVERY_REF=${DELIVERY_REF:-2bd115b3ae0a538e45a1d4b4d87504fab2fea03a}
 RUNTIME_SHA256=a226213f1e04588560939d3682cf39652c7b8318fd0f2e03e2b5f4396c052fd5
@@ -136,7 +136,7 @@ docker cp "$ARTHELLO_WEB_CONTAINER:/etc/caddy/Caddyfile" "$CADDY_FILE"
 if ! grep -q "^${SCHOOL_HOST} {" "$CADDY_FILE"; then
   cat >> "$CADDY_FILE" <<'CADDY'
 
-school-188-225-47-207.sslip.io {
+school-188-225-47-207.nip.io {
   encode zstd gzip
 
   header {

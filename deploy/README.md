@@ -3,9 +3,9 @@
 Временный публичный адрес до восстановления выпуска сертификатов для
 `arthelloteam.ru`:
 
-`https://school-188-225-47-207.sslip.io`
+`https://school-188-225-47-207.nip.io`
 
-`sslip.io` только направляет это имя на российский IP `188.225.47.207`.
+`nip.io` только направляет это имя на российский IP `188.225.47.207`.
 HTTPS выпускает и обновляет действующий Caddy, как в контурах StroiOS и
 ArtHello OS. При переходе на постоянный поддомен достаточно заменить адрес в
 `PUBLIC_APP_ORIGIN` и первую строку `deploy/Caddyfile.school`.
@@ -25,12 +25,12 @@ ArtHello OS. При переходе на постоянный поддомен 
 4. Добавить `deploy/Caddyfile.school` в действующую конфигурацию Caddy и сделать
    только валидируемый reload.
 5. Создать первого владельца:
-   `docker compose -f deploy/docker-compose.yml exec school node scripts/bootstrap-owner.mjs --phone <номер> --origin https://school-188-225-47-207.sslip.io`
+   `docker compose -f deploy/docker-compose.yml exec school node scripts/bootstrap-owner.mjs --phone <номер> --origin https://school-188-225-47-207.nip.io`
 6. Открыть выданную одноразовую ссылку и создать пароль.
 
 Для центральной выдачи ролей в ArtHello OS должны быть заданы:
 
-- `SCHOOL_DIARY_SYNC_URL=https://school-188-225-47-207.sslip.io`;
+- `SCHOOL_DIARY_SYNC_URL=https://school-188-225-47-207.nip.io`;
 - тот же `CENTRAL_ACCESS_SECRET`.
 
 Сотрудники создаются, блокируются и получают сброс пароля только в ArtHello OS.
