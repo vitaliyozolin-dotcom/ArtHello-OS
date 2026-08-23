@@ -1,45 +1,48 @@
-# ArtHello OS: российский production-контур
+# Российский контур «Школа 1–11»
 
-Этот каталог готовит отдельный сервер ArtHello OS в московском регионе Timeweb. Он не меняет и не перезапускает нидерландский сервер Telegram/Claude-агентов.
+Временный публичный адрес до восстановления выпуска сертификатов для
+`arthelloteam.ru`:
 
-## Границы первого запуска
+`https://school-188-225-47-207.sslip.io`
 
-- DNS `arthelloteam.ru` и действующие webhook агентов не меняются.
-- Кандидат проверяется сначала по IP и локальному Host-заголовку.
-- До создания персонального владельца API не считается готовым.
-- До отдельной приёмки AlfaCRM, Точка и реальные файлы остаются выключенными.
+`sslip.io` только направляет это имя на российский IP `188.225.47.207`.
+HTTPS выпускает и обновляет действующий Caddy, как в контурах StroiOS и
+ArtHello OS. При переходе на постоянный поддомен достаточно заменить адрес в
+`PUBLIC_APP_ORIGIN` и первую строку `deploy/Caddyfile.school`.
 
-## Сервер
+Приложение запускается отдельным Docker Compose-проектом и слушает только
+`127.0.0.1:3111`. Публичный HTTPS завершается существующим Caddy.
 
-Ubuntu 24.04 LTS, Docker Engine с Compose v2, отдельный пользователь `deploy-arthello`, вход только по SSH-ключу. Каталоги:
+В образ включён снимок текущей рабочей базы Sites: 146 строк из 26 таблиц.
+Он копируется в российскую SQLite-базу только при первом запуске пустого volume;
+последующие обновления образа не перезаписывают рабочие данные.
 
-- `/srv/arthello/releases` — неизменяемые релизы;
-- `/srv/arthello/current` — активный релиз;
-- `/srv/arthello/shared/.env.production` — секреты с правами `0600`;
-- `/srv/arthello/backups/postgres` — ежедневные дампы и SHA-256.
+Порядок запуска:
 
-Скопировать `production.env.example` в защищённый файл, заменить все `CHANGE_ME` и не коммитить результат.
+1. Создать общий ключ синхронизации: `export CENTRAL_ACCESS_SECRET="$(openssl rand -hex 32)"` и сохранить его в защищённом хранилище для ArtHello OS и дневника.
+2. `docker compose -f deploy/docker-compose.yml up -d --build`
+3. Проверить `docker inspect --format '{{.State.Health.Status}}' school-1-11`
+4. Добавить `deploy/Caddyfile.school` в действующую конфигурацию Caddy и сделать
+   только валидируемый reload.
+5. Создать первого владельца:
+   `docker compose -f deploy/docker-compose.yml exec school node scripts/bootstrap-owner.mjs --phone <номер> --origin https://school-188-225-47-207.sslip.io`
+6. Открыть выданную одноразовую ссылку и создать пароль.
 
-GitHub Environment `production-ru` хранит deploy-secrets. `ARTHELLO_RU_HOST` сначала равен `:80` для закрытой проверки по IP. После DNS-приёмки его меняют на `os.arthelloteam.ru`, и Caddy получает публичный TLS-сертификат.
+Для центральной выдачи ролей в ArtHello OS должны быть заданы:
 
-## Закрытая сборка вне VPS
+- `SCHOOL_DIARY_SYNC_URL=https://school-188-225-47-207.sslip.io`;
+- тот же `CENTRAL_ACCESS_SECRET`.
 
-Российский VPS не собирает JavaScript-зависимости и не обращается к npm во время deployment. Workflow `Build closed RU release` проверяет точный application SHA, собирает API/web-образы в GitHub Actions, добавляет образ PostgreSQL, формирует manifest и SHA-256 и публикует assets как prerelease приватного репозитория.
+Сотрудники создаются, блокируются и получают сброс пароля только в ArtHello OS.
+Дневник принимает подписанные события, а локально хранит учебные назначения
+«класс + предмет». Родители и ученики остаются локальными пользователями дневника.
 
-Сервер скачивает эти assets существующим fine-grained токеном только с `Contents: Read`, проверяет target SHA, release manifest, GitHub asset digest и локальные SHA-256, затем выполняет `docker load` и `docker compose up --no-build --pull never`. Проверенный pull-скрипт входит в тот же checksum-set и после первой активации устанавливается в `/srv/arthello/shared/bin/arthello-pull-release`. Токен хранится только в `/srv/arthello/shared/github-https/token` с правами `0600`.
+Телефон владельца вводится только в консоли сервера и не хранится в исходном
+коде. Ссылка первого входа действует 48 часов.
 
-Запуск из локальной консоли Timeweb:
+Резервная копия базы:
 
-```bash
-bash /srv/arthello/shared/bin/arthello-pull-release <SHA> :80
-```
+`docker compose -f deploy/docker-compose.yml exec school node scripts/backup-db.mjs`
 
-До успешного health-check активный symlink не переключается. DNS, первый владелец, реальные данные и интеграции этим сценарием не настраиваются.
-
-## Первый владелец
-
-После миграций выполнить на сервере одну команду внутри API-контейнера, передав логин, имя и временный пароль только в локальном терминале. Команда `pnpm --filter @workspace/api-server auth:create-owner` создаёт запись в PostgreSQL. После выполнения удалить `AUTH_BOOTSTRAP_OWNER_PASSWORD` из окружения. Первый вход принудительно потребует новый пароль и отзовёт стартовую сессию.
-
-## Переключение домена
-
-`os.arthelloteam.ru` можно направлять на российский IP только после прохождения health-check, входа владельца, смены пароля, проверки logout/lockout и восстановления тестового дампа. Корневой домен и агентские поддомены на этом этапе не трогать.
+Для cron запускать команду ежедневно и выгружать копию во второе физическое
+хранилище. Локальный volume не считается полноценной резервной копией.

@@ -1,0 +1,7 @@
+Onest variable font by Onest / Simpals.
+Source: https://github.com/google/fonts/tree/main/ofl/onest
+Project: https://github.com/simpals/onest
+License: SIL Open Font License 1.1.
+
+The locally hosted variable file covers weights 100–900 and extended Cyrillic.
+It is used for headings, body copy, navigation, tables, buttons and form fields.

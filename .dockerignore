@@ -1,0 +1,10 @@
+.git
+.next
+.openai
+.sites-runtime
+.wrangler
+.migration
+data
+dist
+node_modules
+npm-debug.log*
