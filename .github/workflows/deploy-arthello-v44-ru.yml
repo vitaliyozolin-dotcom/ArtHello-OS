@@ -1,0 +1,353 @@
+name: Deploy current ArtHello UI to RU
+
+on:
+  pull_request:
+    paths:
+      - deploy/v44/**
+      - .github/workflows/deploy-arthello-v44-ru.yml
+  push:
+    branches:
+      - main
+    paths:
+      - deploy/v44/**
+      - .github/workflows/deploy-arthello-v44-ru.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arthello-v44-production-ru
+  cancel-in-progress: false
+
+env:
+  PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Resolve exact source
+        id: source
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          candidate="${PR_HEAD:-$EVENT_SHA}"
+          printf '%s' "$candidate" | grep -Eq '^[0-9a-f]{40}$'
+          printf 'sha=%s\n' "$candidate" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Verify immutable checkout
+        env:
+          CANDIDATE_SHA: ${{ steps.source.outputs.sha }}
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - name: Build tested UI image
+        env:
+          CANDIDATE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          docker build \
+            --file deploy/v44/Dockerfile \
+            --label "org.opencontainers.image.revision=$CANDIDATE_SHA" \
+            --tag "arthello-os-ui:$CANDIDATE_SHA" \
+            .
+
+      - name: Smoke-test local D1 runtime
+        env:
+          CANDIDATE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          container="arthello-ui-smoke-$GITHUB_RUN_ID"
+          state_volume="arthello-ui-smoke-$GITHUB_RUN_ID"
+          docker volume create "$state_volume" >/dev/null
+          cleanup() {
+            docker rm -f "$container" >/dev/null 2>&1 || true
+            docker volume rm "$state_volume" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run -d --name "$container" \
+            -p 127.0.0.1:18081:8081 \
+            -v "$state_volume:/data" \
+            "arthello-os-ui:$CANDIDATE_SHA"
+          ready=0
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent --show-error http://127.0.0.1:18081/api/health >/dev/null; then
+              ready=1
+              break
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' "$container")" != true ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs "$container"
+            exit 1
+          fi
+          curl --fail --silent --show-error http://127.0.0.1:18081/ \
+            | grep -F 'ArtHello' >/dev/null
+          docker restart "$container" >/dev/null
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:18081/api/settings \
+              | grep -F 'Атлас — садик' >/dev/null; then
+              break
+            fi
+            test "$attempt" -lt 60
+            sleep 2
+          done
+          printf 'ARTHELLO_UI_SMOKE=PASSED\n'
+
+  release-and-deploy:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: production-ru
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Verify deploy source is main
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --force --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          test "$(git rev-parse refs/remotes/origin/main)" = "$GITHUB_SHA"
+
+      - name: Build immutable production image
+        run: |
+          set -Eeuo pipefail
+          docker build \
+            --file deploy/v44/Dockerfile \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "arthello-os-ui:$GITHUB_SHA" \
+            .
+
+      - name: Package private release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          release_dir="$RUNNER_TEMP/arthello-v44-release"
+          tag="arthello-ui-$GITHUB_SHA"
+          bundle="arthello-os-ui-$GITHUB_SHA.tar.gz"
+          mkdir -p "$release_dir"
+          docker image save "arthello-os-ui:$GITHUB_SHA" | gzip -1 > "$release_dir/$bundle"
+          cp deploy/v44/Caddyfile "$release_dir/Caddyfile"
+          cp deploy/v44/compose.ui.yml "$release_dir/compose.ui.yml"
+          {
+            printf 'repository=%s\n' "$GITHUB_REPOSITORY"
+            printf 'source_sha=%s\n' "$GITHUB_SHA"
+            printf 'source_tree=%s\n' "$(git rev-parse HEAD^{tree})"
+            printf 'image=%s\n' "arthello-os-ui:$GITHUB_SHA"
+            printf 'domain=%s\n' "$PUBLIC_URL"
+            printf 'database=new-ui-local-d1\n'
+            printf 'auth=existing-postgresql-session-gate\n'
+            printf 'legacy_runtime=preserved-for-rollback\n'
+          } > "$release_dir/manifest"
+          (
+            cd "$release_dir"
+            sha256sum "$bundle" Caddyfile compose.ui.yml manifest > checksums.sha256
+            sha256sum --check checksums.sha256
+          )
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            printf 'ARTHELLO_RELEASE_REUSED=%s\n' "$tag"
+          else
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "ArtHello UI $GITHUB_SHA" \
+              --notes "Verified ArtHello OS visual system for the Russian owner domain." \
+              --prerelease \
+              "$release_dir/$bundle" \
+              "$release_dir/Caddyfile" \
+              "$release_dir/compose.ui.yml" \
+              "$release_dir/manifest" \
+              "$release_dir/checksums.sha256"
+          fi
+
+      - name: Configure pinned SSH identity
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+      - name: Activate verified UI with rollback
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        run: |
+          set -Eeuo pipefail
+          deploy_port="${DEPLOY_PORT:-2222}"
+          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
+          test -n "$route_device"
+          sudo ip link set dev "$route_device" mtu 1200
+          ssh -p "$deploy_port" -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=publickey \
+            -o PasswordAuthentication=no \
+            -o KbdInteractiveAuthentication=no \
+            -o BatchMode=yes \
+            -o ConnectTimeout=25 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=40 \
+            -o IPQoS=none \
+            -o Compression=no \
+            -o KexAlgorithms=curve25519-sha256 \
+            -o HostKeyAlgorithms=ssh-ed25519 \
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
+            -o Ciphers=aes128-ctr \
+            -o MACs=hmac-sha2-256 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "RELEASE_SHA='$GITHUB_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          root=/srv/arthello
+          repository=vitaliyozolin-dotcom/ArtHello-OS
+          release_sha="$RELEASE_SHA"
+          domain="$PUBLIC_DOMAIN"
+          tag="arthello-ui-$release_sha"
+          api="https://api.github.com/repos/$repository"
+          token_file="$root/shared/github-https/token"
+          env_file="$root/shared/.env.production"
+          release_dir="$root/ui-releases/$release_sha"
+          temporary_dir="$(mktemp -d /tmp/arthello-ui.XXXXXX)"
+          curl_config="$(mktemp /tmp/arthello-ui-curl.XXXXXX)"
+          switched=0
+
+          rollback() {
+            status=$?
+            if [ "$status" -ne 0 ] && [ "$switched" -eq 1 ]; then
+              docker rm -f arthello-os-newui >/dev/null 2>&1 || true
+              cd "$root/current/deploy"
+              ARTHELLO_HOST=:80 docker compose --env-file "$env_file" \
+                -f compose.production.yml up -d --no-build --pull never --force-recreate web || true
+              printf 'ARTHELLO_UI_ROLLBACK=RESTORED_LEGACY\n' >&2
+            fi
+            rm -rf -- "$temporary_dir"
+            rm -f -- "$curl_config"
+            exit "$status"
+          }
+          trap rollback EXIT
+
+          test -s "$token_file"
+          test -f "$env_file"
+          test -L "$root/current"
+          printf '%s' "$release_sha" | grep -Eq '^[0-9a-f]{40}$'
+          chmod 0600 "$curl_config"
+          {
+            printf 'header = "Authorization: Bearer %s"\n' "$(cat "$token_file")"
+            printf 'header = "X-GitHub-Api-Version: 2022-11-28"\n'
+            printf 'proto = "=https"\n'
+            printf 'tlsv1.2\n'
+            printf 'silent\nshow-error\nfail\n'
+          } > "$curl_config"
+
+          curl --config "$curl_config" --header 'Accept: application/vnd.github+json' \
+            --output "$temporary_dir/release.json" "$api/releases/tags/$tag"
+          python3 - "$temporary_dir/release.json" "$temporary_dir/assets" <<'PY'
+          import json
+          import pathlib
+          import sys
+          release_path, output_path = sys.argv[1:]
+          release = json.loads(pathlib.Path(release_path).read_text(encoding="utf-8"))
+          expected = [
+              f"arthello-os-ui-{release['target_commitish']}.tar.gz",
+              "Caddyfile", "compose.ui.yml", "manifest", "checksums.sha256",
+          ]
+          assets = {asset["name"]: asset["id"] for asset in release.get("assets", [])}
+          missing = [name for name in expected if name not in assets]
+          if missing:
+              raise SystemExit("missing release assets: " + ", ".join(missing))
+          pathlib.Path(output_path).write_text(
+              "\n".join(f"{name}\t{assets[name]}" for name in expected) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          while IFS=$'\t' read -r name asset_id; do
+            curl --config "$curl_config" --location --retry 4 --retry-all-errors \
+              --connect-timeout 25 --max-time 3600 \
+              --header 'Accept: application/octet-stream' \
+              --output "$temporary_dir/$name" "$api/releases/assets/$asset_id"
+          done < "$temporary_dir/assets"
+          (
+            cd "$temporary_dir"
+            sha256sum --check checksums.sha256
+            grep -Fx "repository=$repository" manifest
+            grep -Fx "source_sha=$release_sha" manifest
+            grep -Fx "domain=https://$domain" manifest
+            grep -Fx 'auth=existing-postgresql-session-gate' manifest
+            grep -Fx 'legacy_runtime=preserved-for-rollback' manifest
+          )
+
+          bundle="$temporary_dir/arthello-os-ui-$release_sha.tar.gz"
+          docker image load --input "$bundle"
+          test "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' "arthello-os-ui:$release_sha")" = "$release_sha"
+
+          install -d -m 0750 "$release_dir"
+          install -m 0444 "$temporary_dir/Caddyfile" "$release_dir/Caddyfile"
+          install -m 0444 "$temporary_dir/compose.ui.yml" "$release_dir/compose.ui.yml"
+          install -m 0444 "$temporary_dir/manifest" "$release_dir/manifest"
+          install -m 0444 "$temporary_dir/checksums.sha256" "$release_dir/checksums.sha256"
+
+          cd "$release_dir"
+          export ARTHELLO_UI_IMAGE="arthello-os-ui:$release_sha"
+          docker compose -p arthello-os -f compose.ui.yml config >/dev/null
+          docker compose -p arthello-os -f compose.ui.yml up -d --no-deps newui
+          for attempt in $(seq 1 90); do
+            if docker exec arthello-os-newui node -e \
+              "fetch('http://127.0.0.1:8081/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"; then
+              break
+            fi
+            test "$attempt" -lt 90
+            sleep 2
+          done
+
+          switched=1
+          docker compose -p arthello-os -f compose.ui.yml up -d --no-deps web
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error -H "Host: $domain" http://127.0.0.1/ \
+              | grep -F 'ArtHello' >/dev/null \
+              && curl --fail --silent --show-error -H "Host: $domain" http://127.0.0.1/api/healthz >/dev/null; then
+              break
+            fi
+            test "$attempt" -lt 60
+            sleep 2
+          done
+          ln -sfn "$release_dir" "$root/ui-current"
+          printf 'ARTHELLO_UI_DEPLOY_SHA=%s\n' "$release_sha"
+          printf 'ARTHELLO_UI_HEALTH=OK\n'
+          printf 'ARTHELLO_AUTH_GATE=POSTGRESQL_SESSION\n'
+          printf 'ARTHELLO_LEGACY_ROLLBACK=PRESERVED\n'
+          REMOTE
+
+      - name: Verify public HTTPS
+        run: |
+          set -Eeuo pipefail
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error "$PUBLIC_URL/api/healthz" >/dev/null \
+              && curl --fail --silent --show-error "$PUBLIC_URL/" | grep -F 'ArtHello' >/dev/null; then
+              printf 'ARTHELLO_PUBLIC_UI=OK\n'
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1

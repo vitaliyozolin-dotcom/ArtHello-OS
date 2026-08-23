@@ -1,0 +1,53 @@
+name: arthello-os
+
+services:
+  newui:
+    image: ${ARTHELLO_UI_IMAGE:?ARTHELLO_UI_IMAGE is required}
+    container_name: arthello-os-newui
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      NODE_ENV: production
+      PORT: "8081"
+      ARTHELLO_D1_PATH: /data/d1
+    volumes:
+      - arthello_ui_d1:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8081/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    networks:
+      - backend
+
+  web:
+    image: arthello-os-web:local
+    restart: unless-stopped
+    depends_on:
+      newui:
+        condition: service_healthy
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - backend
+
+volumes:
+  arthello_ui_d1:
+    name: arthello-os-ui-d1
+  caddy_data:
+    external: true
+    name: arthello-os_caddy_data
+  caddy_config:
+    external: true
+    name: arthello-os_caddy_config
+
+networks:
+  backend:
+    external: true
+    name: arthello-os_backend

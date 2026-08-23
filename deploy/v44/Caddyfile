@@ -1,0 +1,34 @@
+:80 {
+  encode zstd gzip
+
+  header {
+    -Server
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "no-referrer"
+    X-Frame-Options "DENY"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+  }
+
+  @legacy_health path /api/healthz
+  handle @legacy_health {
+    reverse_proxy api:8080
+  }
+
+  @auth path /api/auth/*
+  handle @auth {
+    reverse_proxy api:8080
+  }
+
+  @protected_api path /api/*
+  handle @protected_api {
+    forward_auth api:8080 {
+      uri /api/auth/me
+    }
+    reverse_proxy newui:8081
+  }
+
+  handle {
+    reverse_proxy newui:8081
+  }
+}
