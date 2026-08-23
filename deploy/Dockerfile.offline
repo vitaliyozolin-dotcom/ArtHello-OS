@@ -1,0 +1,23 @@
+FROM arthello-os-api:local
+
+USER root
+WORKDIR /school
+
+COPY deploy/offline-runtime.tar.gz /tmp/school-runtime.tar.gz
+
+RUN tar -xzf /tmp/school-runtime.tar.gz -C /school \
+    && rm -f /tmp/school-runtime.tar.gz \
+    && mkdir -p /data /backups \
+    && chown -R node:node /school /data /backups
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+ENV DATABASE_PATH=/data/school-1-11.sqlite
+
+USER node
+EXPOSE 3000
+
+ENTRYPOINT ["./scripts/container-entrypoint.sh"]
+CMD ["node", "server.js"]

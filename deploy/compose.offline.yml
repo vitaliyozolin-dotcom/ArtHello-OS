@@ -1,0 +1,12 @@
+services:
+  school:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.offline
+    networks:
+      - arthello_backend
+
+networks:
+  arthello_backend:
+    external: true
+    name: arthello-os_backend
