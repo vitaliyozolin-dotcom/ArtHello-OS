@@ -66,13 +66,16 @@ jobs:
         run: |
           set -Eeuo pipefail
           container="arthello-ui-smoke-$GITHUB_RUN_ID"
-          state_dir="$RUNNER_TEMP/arthello-ui-d1"
-          mkdir -p "$state_dir"
-          cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
+          state_volume="arthello-ui-smoke-$GITHUB_RUN_ID"
+          docker volume create "$state_volume" >/dev/null
+          cleanup() {
+            docker rm -f "$container" >/dev/null 2>&1 || true
+            docker volume rm "$state_volume" >/dev/null 2>&1 || true
+          }
           trap cleanup EXIT
           docker run -d --name "$container" \
             -p 127.0.0.1:18081:8081 \
-            -v "$state_dir:/data" \
+            -v "$state_volume:/data" \
             "arthello-os-ui:$CANDIDATE_SHA"
           ready=0
           for attempt in $(seq 1 90); do
@@ -195,6 +198,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           deploy_port="${DEPLOY_PORT:-2222}"
+          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
+          test -n "$route_device"
+          sudo ip link set dev "$route_device" mtu 1200
           ssh -p "$deploy_port" -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o PreferredAuthentications=publickey \
@@ -205,6 +211,12 @@ jobs:
             -o ServerAliveInterval=15 \
             -o ServerAliveCountMax=40 \
             -o IPQoS=none \
+            -o Compression=no \
+            -o KexAlgorithms=curve25519-sha256 \
+            -o HostKeyAlgorithms=ssh-ed25519 \
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
+            -o Ciphers=aes128-ctr \
+            -o MACs=hmac-sha2-256 \
             "$DEPLOY_USER@$DEPLOY_HOST" \
             "RELEASE_SHA='$GITHUB_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' bash -s" <<'REMOTE'
           set -Eeuo pipefail
