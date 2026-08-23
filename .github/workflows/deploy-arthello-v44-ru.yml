@@ -221,12 +221,17 @@ jobs:
             -o MACs=hmac-sha2-256
           )
           ssh_remote() {
-            ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "$@"
+            timeout --foreground --signal=TERM 20s \
+              ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "$@"
           }
 
           job_dir="/srv/arthello/ui-jobs/$GITHUB_SHA"
-          ssh_remote "install -d -m 0750 '$job_dir'"
-          ssh_remote "cat > '$job_dir/activate.sh'" <<'REMOTE'
+          directory_output="$(ssh_remote "install -d -m 0750 '$job_dir'; printf 'ARTHELLO_JOB_DIR_READY\\n'" || true)"
+          printf '%s\n' "$directory_output"
+          grep -Fx 'ARTHELLO_JOB_DIR_READY' <<<"$directory_output"
+
+          set +e
+          upload_output="$(ssh_remote "cat > '$job_dir/activate.sh' && printf 'ARTHELLO_ACTIVATION_SCRIPT_READY\\n'" <<'REMOTE'
           set -Eeuo pipefail
           root=/srv/arthello
           repository=vitaliyozolin-dotcom/ArtHello-OS
@@ -356,12 +361,19 @@ jobs:
           printf 'ARTHELLO_LEGACY_ROLLBACK=PRESERVED\n'
           outcome="success:$release_sha"
           REMOTE
+          )"
+          set -e
+          printf '%s\n' "$upload_output"
+          grep -Fx 'ARTHELLO_ACTIVATION_SCRIPT_READY' <<<"$upload_output"
 
-          ssh_remote "chmod 0500 '$job_dir/activate.sh' && rm -f '$job_dir/status' '$job_dir/status.tmp' && : > '$job_dir/activation.log' && nohup setsid env RELEASE_SHA='$GITHUB_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' JOB_DIR='$job_dir' bash '$job_dir/activate.sh' > '$job_dir/activation.log' 2>&1 < /dev/null & printf '%s\n' \$! > '$job_dir/pid'"
+          start_output="$(ssh_remote "chmod 0500 '$job_dir/activate.sh' && rm -f '$job_dir/status' '$job_dir/status.tmp' && : > '$job_dir/activation.log' && nohup setsid env RELEASE_SHA='$GITHUB_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' JOB_DIR='$job_dir' bash '$job_dir/activate.sh' > '$job_dir/activation.log' 2>&1 < /dev/null & activation_pid=\$!; printf '%s\\n' \"\$activation_pid\" > '$job_dir/pid'; printf 'ARTHELLO_ACTIVATION_STARTED=%s\\n' \"\$activation_pid\"" || true)"
+          printf '%s\n' "$start_output"
+          grep -Eq '^ARTHELLO_ACTIVATION_STARTED=[0-9]+$' <<<"$start_output"
 
           result=""
           for attempt in $(seq 1 180); do
-            result="$(ssh_remote "test -f '$job_dir/status' && cat '$job_dir/status' || true" || true)"
+            poll_output="$(ssh_remote "if test -f '$job_dir/status'; then cat '$job_dir/status'; else printf 'pending\\n'; fi" || true)"
+            result="$(grep -E '^(success:[0-9a-f]{40}|failed:[0-9]+|pending)$' <<<"$poll_output" | tail -n 1 || true)"
             case "$result" in
               success:$GITHUB_SHA)
                 printf 'ARTHELLO_DETACHED_ACTIVATION=SUCCESS\n'
