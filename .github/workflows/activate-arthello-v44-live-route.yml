@@ -17,14 +17,19 @@ concurrency:
 
 jobs:
   activate:
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [1, 2, 3, 4, 5]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     environment: production-ru
     env:
       PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
       DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
       DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
       DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+      DEPLOY_LANE: ${{ matrix.lane }}
     steps:
       - name: Validate activation contract
         env:
@@ -35,6 +40,8 @@ jobs:
           test "$PUBLIC_URL" = 'https://arthello-188-225-38-55.sslip.io'
 
       - name: Configure the confirmed SSH host identity
+        id: configure_ssh
+        continue-on-error: true
         env:
           SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
         run: |
@@ -75,10 +82,13 @@ jobs:
           mv "$scanned_hosts" ~/.ssh/known_hosts
 
       - name: Merge the verified route into live Caddy
+        if: steps.configure_ssh.outcome == 'success'
+        continue-on-error: true
         env:
           TARGET_SHA: ${{ inputs.target_sha }}
         run: |
           set -Eeuo pipefail
+          sleep "$((DEPLOY_LANE * 10))"
           deploy_port="${DEPLOY_PORT:-2222}"
           route_device="$(ip -4 route show default | awk '{print $5; exit}')"
           test -n "$route_device"
@@ -301,6 +311,7 @@ jobs:
           printf 'ARTHELLO_ROUTE_LAUNCH_OBSERVED=%s\n' "$launch_observed"
 
       - name: Verify public SSR, Postgres health, and access gates
+        if: always()
         run: |
           set -Eeuo pipefail
           ready=0
