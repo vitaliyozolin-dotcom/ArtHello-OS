@@ -1,0 +1,427 @@
+/*
+ * Final mobile pass for the School 1–11 operational interface.
+ * Kept separate from globals.css so the production baseline stays auditable.
+ */
+
+@media (max-width: 800px) {
+  :root {
+    --mobile-gutter: 16px;
+  }
+
+  .l0-app {
+    background: #f4f2ed;
+  }
+
+  .l0-topbar {
+    padding: 0 var(--mobile-gutter);
+    gap: 10px;
+    border-bottom-color: rgba(218, 214, 205, 0.9);
+    background: rgba(250, 249, 246, 0.94);
+    box-shadow: 0 1px 0 rgba(27, 24, 18, 0.025);
+  }
+
+  .mobile-brand {
+    min-width: 0;
+    flex: 0 0 auto;
+  }
+
+  .mobile-brand img {
+    width: 36px;
+    height: 36px;
+  }
+
+  .mobile-brand strong {
+    font-size: 14px;
+    letter-spacing: -0.3px;
+  }
+
+  .notification-button {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    border-color: #e4e0d7;
+    box-shadow: 0 5px 16px rgba(31, 27, 20, 0.035);
+  }
+
+  .l0-topbar > .status-pill {
+    min-height: 32px;
+    padding: 7px 11px;
+    font-size: 11px;
+  }
+
+  .top-avatar .l0-avatar-sm {
+    width: 42px;
+    height: 42px;
+  }
+
+  .l0-main {
+    background:
+      radial-gradient(circle at 100% 0, rgba(232, 68, 18, 0.025), transparent 34%),
+      #f4f2ed;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .l0-main::-webkit-scrollbar {
+    display: none;
+  }
+
+  .page-shell {
+    padding: 22px var(--mobile-gutter) 42px;
+    gap: 18px;
+  }
+
+  .page-heading {
+    min-height: 0;
+    display: block;
+    position: relative;
+  }
+
+  .page-heading:has(> .primary-btn svg) {
+    padding-right: 60px;
+  }
+
+  .page-heading h1 {
+    margin-top: 8px;
+    font-size: clamp(29px, 8.2vw, 34px);
+    line-height: 1.04;
+    letter-spacing: -1.05px;
+    text-wrap: balance;
+  }
+
+  .page-heading p {
+    max-width: 34rem;
+    margin-top: 8px;
+    font-size: 14px;
+    line-height: 1.42;
+  }
+
+  .page-heading > .primary-btn:has(svg) {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
+    padding: 0;
+    border-radius: 16px;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 0;
+    line-height: 0;
+    box-shadow: 0 10px 24px rgba(232, 68, 18, 0.18);
+  }
+
+  .page-heading > .primary-btn:has(svg) svg {
+    width: 21px;
+    height: 21px;
+    margin: 0;
+    flex: 0 0 auto;
+  }
+
+  .eyebrow {
+    font-size: 10px;
+    line-height: 1.2;
+  }
+
+  .content-card,
+  .metric-card {
+    border-color: rgba(222, 218, 209, 0.96);
+    box-shadow: 0 9px 28px rgba(35, 31, 24, 0.035);
+  }
+
+  .content-card {
+    padding: 18px 16px;
+    border-radius: 24px;
+  }
+
+  .section-title {
+    min-height: 0;
+    margin-bottom: 16px;
+    align-items: flex-start;
+  }
+
+  .section-title h2 {
+    font-size: 21px;
+    line-height: 1.15;
+    letter-spacing: -0.45px;
+  }
+
+  .section-title p {
+    margin-top: 5px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .metric-grid {
+    gap: 10px;
+  }
+
+  .metric-card {
+    min-height: 108px;
+    padding: 14px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+  }
+
+  .metric-icon {
+    width: 40px;
+    height: 40px;
+    margin-bottom: 0;
+    border-radius: 12px;
+  }
+
+  .metric-card small {
+    font-size: 9px;
+    line-height: 1.25;
+  }
+
+  .metric-card strong {
+    margin-top: 4px;
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .l0-empty {
+    min-height: 180px;
+    padding: 24px 18px;
+    border-radius: 20px;
+  }
+
+  .l0-empty h3 {
+    font-size: 16px;
+  }
+
+  .l0-empty p {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  /* Readiness is a setup screen, not a daily dashboard. Keep it compact and legible. */
+  .readiness-page {
+    padding-top: 2px;
+  }
+
+  .admin-readiness {
+    min-height: 0;
+    padding: 24px 20px 20px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 24px;
+    grid-template-columns: 1fr;
+    gap: 20px;
+    box-shadow: 0 18px 44px rgba(27, 24, 19, 0.11);
+  }
+
+  .admin-readiness > div {
+    justify-content: flex-start;
+  }
+
+  .admin-readiness > div > strong {
+    margin-top: 12px;
+    font-size: 42px;
+    line-height: 1;
+    letter-spacing: -1.5px;
+  }
+
+  .admin-readiness > div > p {
+    margin-top: 12px;
+    font-size: 13px;
+    line-height: 1.52;
+  }
+
+  .readiness-track {
+    height: 8px;
+    margin-top: 20px;
+  }
+
+  .admin-readiness ul {
+    padding: 15px 0 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    gap: 3px;
+  }
+
+  .admin-readiness li {
+    min-height: 42px;
+    padding: 5px 0;
+    align-items: flex-start;
+    gap: 11px;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .admin-readiness li > span {
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+    flex: 0 0 auto;
+  }
+
+  /* The desktop table is unusable when horizontally scrolled on a phone.
+     Convert each user into a compact, readable access card instead. */
+  .admin-table {
+    overflow: visible;
+    display: grid;
+    gap: 10px;
+  }
+
+  .admin-table-head {
+    display: none;
+  }
+
+  .admin-table-row,
+  .admin-table-row:last-child {
+    min-width: 0;
+    min-height: 0;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 17px;
+    background: #fbfaf7;
+    box-shadow: 0 5px 18px rgba(35, 31, 24, 0.025);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "identity access"
+      "role access"
+      "child child";
+    align-items: start;
+    gap: 6px 12px;
+  }
+
+  .admin-table-row > span:nth-child(1) {
+    grid-area: identity;
+    min-width: 0;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .admin-table-row > span:nth-child(1) .l0-avatar-sm {
+    width: 38px;
+    height: 38px;
+    font-size: 11px;
+  }
+
+  .admin-table-row > span:nth-child(1) > span {
+    gap: 2px;
+  }
+
+  .admin-table-row strong {
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  .admin-table-row small {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    font-size: 9px;
+    line-height: 1.35;
+  }
+
+  .admin-table-row > span:nth-child(2) {
+    grid-area: role;
+    padding-left: 48px;
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.3;
+    font-weight: 800;
+  }
+
+  .admin-table-row > span:nth-child(2)::before {
+    content: "Роль · ";
+    font-weight: 650;
+  }
+
+  .admin-table-row > span:nth-child(3) {
+    grid-area: child;
+    min-width: 0;
+    margin-top: 3px;
+    padding: 9px 0 0 48px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .admin-table-row > span:nth-child(3)::before {
+    content: "Ребёнок · ";
+    font-weight: 750;
+  }
+
+  .admin-table-row > span:nth-child(4) {
+    grid-area: access;
+    max-width: 132px;
+    justify-self: end;
+    align-items: flex-end;
+    gap: 5px;
+  }
+
+  .access-actions .status-pill {
+    min-height: 30px;
+    padding: 6px 10px;
+    font-size: 10px;
+  }
+
+  .access-actions > small {
+    max-width: 122px;
+    text-align: right;
+    font-size: 8px;
+    line-height: 1.3;
+  }
+
+  .l0-bottom-nav {
+    border-top-color: rgba(218, 214, 205, 0.92);
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: 0 -12px 34px rgba(35, 31, 24, 0.055);
+  }
+
+  .l0-bottom-nav button {
+    min-width: 0;
+    padding: 4px 2px;
+    border-radius: 15px;
+    gap: 4px;
+    font-size: 9px;
+    line-height: 1.15;
+  }
+
+  .l0-bottom-nav button svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .l0-bottom-nav button span {
+    max-width: 70px;
+    text-align: center;
+    text-wrap: balance;
+  }
+}
+
+@media (max-width: 370px) {
+  :root {
+    --mobile-gutter: 14px;
+  }
+
+  .l0-topbar > .status-pill {
+    display: none;
+  }
+
+  .page-heading h1 {
+    font-size: 28px;
+  }
+
+  .admin-table-row {
+    gap: 6px 8px;
+  }
+
+  .admin-table-row > span:nth-child(4) {
+    max-width: 116px;
+  }
+
+  .access-actions .status-pill {
+    padding-inline: 8px;
+    font-size: 9px;
+  }
+}
