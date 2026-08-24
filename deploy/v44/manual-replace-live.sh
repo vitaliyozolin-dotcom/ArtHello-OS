@@ -94,8 +94,31 @@ fi
 
 cd "$SOURCE_ROOT"
 export ARTHELLO_UI_IMAGE="$IMAGE"
-docker compose -p arthello-os -f deploy/v44/compose.ui.yml config >/dev/null
-docker compose -p arthello-os -f deploy/v44/compose.ui.yml up -d --no-deps newui
+if docker compose -p arthello-os -f deploy/v44/compose.ui.yml config >/dev/null \
+  && docker compose -p arthello-os -f deploy/v44/compose.ui.yml up -d --no-deps newui; then
+  printf 'ARTHELLO_MANUAL_LAUNCH=compose\n'
+else
+  printf 'ARTHELLO_MANUAL_LAUNCH=direct_fallback\n'
+  existing_web_id="$(docker ps --filter 'name=^/arthello-os-web-1$' --format '{{.ID}}' | head -n 1)"
+  if [ -z "$existing_web_id" ]; then
+    existing_web_id="$(docker ps --filter 'label=com.docker.compose.service=web' --format '{{.ID}}' | head -n 1)"
+  fi
+  test -n "$existing_web_id"
+  backend_network="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$existing_web_id" | head -n 1)"
+  test -n "$backend_network"
+  docker rm -f arthello-os-newui >/dev/null 2>&1 || true
+  docker run -d \
+    --name arthello-os-newui \
+    --restart unless-stopped \
+    --read-only \
+    --tmpfs /tmp \
+    --env NODE_ENV=production \
+    --env PORT=8081 \
+    --env ARTHELLO_D1_PATH=/data/d1 \
+    --volume arthello-os-ui-d1:/data \
+    --network "$backend_network" \
+    "$IMAGE" >/dev/null
+fi
 
 ready=0
 for attempt in $(seq 1 120); do
