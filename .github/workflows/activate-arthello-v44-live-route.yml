@@ -55,7 +55,8 @@ jobs:
           : > "$scanned_hosts"
           chmod 0600 "$scanned_hosts"
           for attempt in 1 2 3; do
-            ssh -p "$deploy_port" \
+            timeout --signal=TERM --kill-after=5s 40s \
+              ssh -p "$deploy_port" \
               -o StrictHostKeyChecking=accept-new \
               -o UserKnownHostsFile="$scanned_hosts" \
               -o GlobalKnownHostsFile=/dev/null \
