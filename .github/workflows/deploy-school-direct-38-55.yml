@@ -1,4 +1,4 @@
-# Production trigger 2026-08-24T13:20+03:00
+# Observable production trigger 2026-08-24
 name: Deploy School 1-11 direct RU
 
 on:
@@ -28,6 +28,17 @@ jobs:
         with:
           ref: ${{ env.TRANSPORT_REF }}
           persist-credentials: false
+
+      - name: Create deployment record
+        id: record
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          response="$(gh api "repos/$GITHUB_REPOSITORY/issues" --method POST \
+            -f "title=[school-direct-production] run $GITHUB_RUN_ID" \
+            -f "body=Started direct deployment to 188.225.38.55. Transport: $TRANSPORT_REF. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")"
+          printf 'issue=%s\n' "$(jq -r '.number' <<<"$response")" >> "$GITHUB_OUTPUT"
 
       - name: Configure SSH key
         env:
@@ -141,11 +152,12 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.record.outputs.issue }}
           PORT_OUTCOME: ${{ steps.ssh_port.outcome }}
           DEPLOY_OUTCOME: ${{ steps.deploy_direct.outcome }}
           VERIFY_OUTCOME: ${{ steps.verify_public.outcome }}
         run: |
           set -Eeuo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/issues" --method POST \
-            -f "title=[school-direct-production] run $GITHUB_RUN_ID" \
+          test -n "$ISSUE_NUMBER"
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" --method PATCH \
             -f "body=Direct deployment to 188.225.38.55. SSH port resolution: $PORT_OUTCOME. Deployment: $DEPLOY_OUTCOME. Public verification: $VERIFY_OUTCOME. Transport: $TRANSPORT_REF. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
