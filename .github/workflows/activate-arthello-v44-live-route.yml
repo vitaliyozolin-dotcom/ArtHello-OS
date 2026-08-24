@@ -198,16 +198,28 @@ jobs:
                       return True
               return False
 
-          destination = None
+          updated_servers = 0
           for server in current_servers.values():
               listens = server.get("listen", [])
-              if any(value.endswith(":80") or value == ":80" for value in listens):
-                  destination = server
-                  break
-          if destination is None:
-              destination = next(iter(current_servers.values()))
-          existing = [route for route in destination.get("routes", []) if not targets_domain(route)]
-          destination["routes"] = source_routes + existing
+              serves_web = any(
+                  value == f":{port}" or value.endswith(f":{port}")
+                  for value in listens
+                  for port in (80, 443)
+              )
+              already_targets_domain = any(
+                  targets_domain(route) for route in server.get("routes", [])
+              )
+              if not serves_web and not already_targets_domain:
+                  continue
+              existing = [
+                  route for route in server.get("routes", [])
+                  if not targets_domain(route)
+              ]
+              server["routes"] = source_routes + existing
+              updated_servers += 1
+
+          if updated_servers == 0:
+              raise SystemExit("no HTTP or HTTPS Caddy server was updated")
           pathlib.Path(output_path).write_text(json.dumps(current), encoding="utf-8")
           PY
 
@@ -221,9 +233,15 @@ jobs:
             root_html="$(curl --fail --silent --show-error -H "Host: $public_domain" http://127.0.0.1/ || true)"
             health_body="$(curl --fail --silent --show-error -H "Host: $public_domain" http://127.0.0.1/api/healthz || true)"
             auth_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' -H "Host: $public_domain" http://127.0.0.1/api/auth/me || true)"
+            tls_root_html="$(curl --fail --silent --show-error --insecure --resolve "$public_domain:443:127.0.0.1" "https://$public_domain/" || true)"
+            tls_health_body="$(curl --fail --silent --show-error --insecure --resolve "$public_domain:443:127.0.0.1" "https://$public_domain/api/healthz" || true)"
+            tls_auth_code="$(curl --silent --show-error --insecure --resolve "$public_domain:443:127.0.0.1" --output /dev/null --write-out '%{http_code}' "https://$public_domain/api/auth/me" || true)"
             if grep -Eq 'Проверяем защищённую сессию|Закрытая операционная система образовательной группы' <<<"$root_html" \
               && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body" \
-              && [ "$auth_code" = 401 ]; then
+              && [ "$auth_code" = 401 ] \
+              && grep -Eq 'Проверяем защищённую сессию|Закрытая операционная система образовательной группы' <<<"$tls_root_html" \
+              && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$tls_health_body" \
+              && [ "$tls_auth_code" = 401 ]; then
               local_ready=1
               break
             fi
@@ -236,17 +254,12 @@ jobs:
           test -n "$route_payload"
 
           ssh_rc=0
-          ssh_started_at="$(date +%s)"
-          timeout --signal=TERM --kill-after=5s 150s \
-            ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+          timeout --signal=TERM --kill-after=5s 30s \
+            ssh -fn "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
               "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$route_payload' | base64 -d > '$job_dir/activate-route.sh'; chmod 0500 '$job_dir/activate-route.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; nohup setsid env TARGET_SHA='$TARGET_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' JOB_DIR='$job_dir' bash '$job_dir/activate-route.sh' > '$job_dir/activation.log' 2>&1 < /dev/null &" \
               </dev/null >/dev/null 2>&1 || ssh_rc=$?
-          ssh_elapsed="$(( $(date +%s) - ssh_started_at ))"
           case "$ssh_rc" in
             0|124|137) ;;
-            255)
-              test "$ssh_elapsed" -ge 90
-              ;;
             *) exit "$ssh_rc" ;;
           esac
 
