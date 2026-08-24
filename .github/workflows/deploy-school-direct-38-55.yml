@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 env:
   TRANSPORT_REF: cebe7be40383850ee821031245da8001c0503007
@@ -49,9 +50,7 @@ jobs:
           for port in 22 2222; do
             known="$RUNNER_TEMP/known-$port"
             : > "$known"
-            if timeout 25s ssh -n \
-              -p "$port" \
-              -i ~/.ssh/id_ed25519 \
+            if timeout 25s ssh -n -p "$port" -i ~/.ssh/id_ed25519 \
               -o IdentitiesOnly=yes \
               -o StrictHostKeyChecking=accept-new \
               -o UserKnownHostsFile="$known" \
@@ -73,6 +72,7 @@ jobs:
           printf 'SCHOOL_DIRECT_SSH_PORT=%s\n' "$found"
 
       - name: Start detached production deployment
+        id: deploy_direct
         env:
           DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
           DEPLOY_PORT: ${{ steps.ssh_port.outputs.port }}
@@ -94,13 +94,9 @@ jobs:
           exit "$status"
           REMOTE
           )"
-          ssh -n \
-            -p "$DEPLOY_PORT" \
-            -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile=~/.ssh/known_hosts \
-            -o BatchMode=yes \
+          ssh -n -p "$DEPLOY_PORT" -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts -o BatchMode=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" \
             "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$repair_payload' | base64 -d > '$job_dir/repair-deploy.sh'; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/repair-deploy.sh' '$job_dir/run.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$TRANSPORT_REF' SCHOOL_HOST='school-188-225-38-55.sslip.io' VERIFY_PUBLIC='0' JOB_DIR='$job_dir' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null & echo \$! > '$job_dir/pid'"
 
@@ -109,10 +105,7 @@ jobs:
             status="$(ssh -n -p "$DEPLOY_PORT" -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" "test -f '$job_dir/status' && cat '$job_dir/status' || true" </dev/null 2>/dev/null || true)"
             case "$status" in
               "success:$TRANSPORT_REF") break ;;
-              failed:*)
-                ssh -n -p "$DEPLOY_PORT" -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" "tail -n 200 '$job_dir/deploy.log'" || true
-                exit 1
-                ;;
+              failed:*) exit 1 ;;
             esac
             test "$attempt" -lt 180
             sleep 5
@@ -121,6 +114,7 @@ jobs:
           printf 'SCHOOL_DIRECT_DEPLOY=SUCCESS\n'
 
       - name: Verify public production
+        id: verify_public
         run: |
           set -Eeuo pipefail
           for attempt in $(seq 1 60); do
@@ -141,3 +135,16 @@ jobs:
           grep -F '.admin-table-head{display:none}' "$css" >/dev/null
           printf 'SCHOOL_PUBLIC_HTTPS=OK\n'
           printf 'SCHOOL_MOBILE_POLISH=VERIFIED\n'
+
+      - name: Publish direct deployment result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PORT_OUTCOME: ${{ steps.ssh_port.outcome }}
+          DEPLOY_OUTCOME: ${{ steps.deploy_direct.outcome }}
+          VERIFY_OUTCOME: ${{ steps.verify_public.outcome }}
+        run: |
+          set -Eeuo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/issues" --method POST \
+            -f "title=[school-direct-production] run $GITHUB_RUN_ID" \
+            -f "body=Direct deployment to 188.225.38.55. SSH port resolution: $PORT_OUTCOME. Deployment: $DEPLOY_OUTCOME. Public verification: $VERIFY_OUTCOME. Transport: $TRANSPORT_REF. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
