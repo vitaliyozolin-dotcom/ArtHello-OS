@@ -40,18 +40,16 @@ jobs:
           : > "$scanned_hosts"
           chmod 0600 "$scanned_hosts"
           for attempt in 1 2 3; do
-            ssh -p "$deploy_port" \
-              -o StrictHostKeyChecking=accept-new \
-              -o UserKnownHostsFile="$scanned_hosts" \
-              -o GlobalKnownHostsFile=/dev/null \
-              -o PreferredAuthentications=none \
-              -o PubkeyAuthentication=no \
-              -o PasswordAuthentication=no \
-              -o KbdInteractiveAuthentication=no \
-              -o ConnectTimeout=30 \
-              -o HostKeyAlgorithms=ssh-ed25519 \
-              "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
-            test -s "$scanned_hosts" && break
+            attempt_hosts="$scanned_hosts.attempt"
+            : > "$attempt_hosts"
+            chmod 0600 "$attempt_hosts"
+            ssh-keyscan -T 30 -p "$deploy_port" -t ed25519 "$DEPLOY_HOST" \
+              > "$attempt_hosts" 2>/dev/null || true
+            if test -s "$attempt_hosts"; then
+              mv "$attempt_hosts" "$scanned_hosts"
+              chmod 0600 "$scanned_hosts"
+              break
+            fi
             sleep 5
           done
           test -s "$scanned_hosts"
