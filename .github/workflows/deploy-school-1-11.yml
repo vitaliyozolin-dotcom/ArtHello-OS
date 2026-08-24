@@ -6,6 +6,13 @@ on:
       - main
     paths:
       - .github/workflows/deploy-school-1-11.yml
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - .github/school-fullscreen-production-trigger
   workflow_dispatch:
 
 permissions:
@@ -22,6 +29,11 @@ env:
 
 jobs:
   announce:
+    if: >-
+      github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.base.ref == 'main' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'codex/trigger-school-fullscreen-20260824')
     runs-on: ubuntu-latest
     outputs:
       issue_number: ${{ steps.issue.outputs.issue_number }}
@@ -41,6 +53,11 @@ jobs:
           printf 'issue_number=%s\n' "$issue_number" >> "$GITHUB_OUTPUT"
 
   deploy:
+    if: >-
+      github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.base.ref == 'main' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'codex/trigger-school-fullscreen-20260824')
     needs: announce
     runs-on: ubuntu-latest
     timeout-minutes: 35
