@@ -3,173 +3,158 @@
 set -Eeuo pipefail
 
 SCHOOL_ROOT=${SCHOOL_ROOT:-/srv/school-1-11}
-SCHOOL_HOST=${SCHOOL_HOST:-school-188-225-47-207.nip.io}
+SCHOOL_HOST=${SCHOOL_HOST:-school-188-225-38-55.sslip.io}
 TOKEN_FILE=${TOKEN_FILE:-/srv/arthello/shared/github-https/token}
-DELIVERY_REF=${DELIVERY_REF:-2bd115b3ae0a538e45a1d4b4d87504fab2fea03a}
-RUNTIME_SHA256=a226213f1e04588560939d3682cf39652c7b8318fd0f2e03e2b5f4396c052fd5
-ARTHELLO_WEB_CONTAINER=${ARTHELLO_WEB_CONTAINER:-arthello-os-web-1}
+DELIVERY_REF=${DELIVERY_REF:?DELIVERY_REF must be the immutable Git commit SHA}
+SOURCE_DIR=${SOURCE_DIR:-}
+VERIFY_PUBLIC=${VERIFY_PUBLIC:-1}
+RUNTIME_SHA256=9125b43319706f4bf3a9a45813b50a0495e61bef5b73f3305a1b97717406b349
+RUNTIME_PART_GLOB=offline-runtime-v3.part-\*
 
-ARCHIVE=$(mktemp /tmp/school-repair.XXXXXX.tar.gz)
-CURL_CONFIG=$(mktemp /tmp/school-curl.XXXXXX)
-RELEASE="$SCHOOL_ROOT/releases/repair-$(date +%Y%m%d%H%M%S)"
-PART_FIX=$(mktemp /tmp/school-part-022.XXXXXX)
+ARCHIVE=$(mktemp /tmp/school-release.XXXXXX.tar.gz)
+CURL_CONFIG=$(mktemp /tmp/school-release-curl.XXXXXX)
+RELEASE="$SCHOOL_ROOT/releases/school-$(date -u +%Y%m%dT%H%M%SZ)-${DELIVERY_REF:0:12}"
+PREVIOUS_RELEASE=""
+SWITCHED=0
 
 cleanup() {
-  rm -f "$ARCHIVE" "$CURL_CONFIG" "$PART_FIX"
+  rm -f "$ARCHIVE" "$CURL_CONFIG"
 }
 
-on_error() {
+compose() {
+  docker compose \
+    --env-file "$SCHOOL_ROOT/shared/.env" \
+    -p school-1-11 \
+    -f docker-compose.yml \
+    -f compose.offline.yml \
+    "$@"
+}
+
+rollback() {
   local code=$?
-  echo
-  echo "SCHOOL_REPAIR_ERROR: строка ${BASH_LINENO[0]}, код $code"
+  trap - ERR
+  if [ "$SWITCHED" -eq 1 ] && [ -n "$PREVIOUS_RELEASE" ] && [ -d "$PREVIOUS_RELEASE/deploy" ]; then
+    printf 'SCHOOL_ROLLBACK=STARTED\n' >&2
+    ln -sfn "$PREVIOUS_RELEASE" "$SCHOOL_ROOT/current"
+    cd "$PREVIOUS_RELEASE/deploy"
+    compose build school >&2 || true
+    compose up -d --no-build --force-recreate school >&2 || true
+    printf 'SCHOOL_ROLLBACK=FINISHED\n' >&2
+  fi
+  printf 'SCHOOL_DEPLOY_ERROR line=%s rc=%s\n' "${BASH_LINENO[0]}" "$code" >&2
   exit "$code"
 }
 
 trap cleanup EXIT
-trap on_error ERR
+trap rollback ERR
 
-test -s "$TOKEN_FILE"
+test "$(printf %s "$DELIVERY_REF" | wc -c)" -eq 40
+printf %s "$DELIVERY_REF" | grep -Eq '^[0-9a-f]{40}$'
 test -s "$SCHOOL_ROOT/shared/.env"
-docker inspect "$ARTHELLO_WEB_CONTAINER" >/dev/null
+docker image inspect arthello-os-api:local >/dev/null
+install -d -m 0755 "$SCHOOL_ROOT/releases" "$RELEASE"
 
-chmod 0600 "$CURL_CONFIG"
-{
-  printf 'header = "Authorization: Bearer %s"\n' "$(cat "$TOKEN_FILE")"
-  printf 'header = "X-GitHub-Api-Version: 2022-11-28"\n'
-  printf 'header = "Accept: application/vnd.github+json"\n'
-  printf 'proto = "=https"\n'
-  printf 'tlsv1.2\n'
-  printf 'location\n'
-  printf 'fail\n'
-  printf 'show-error\n'
-} > "$CURL_CONFIG"
-
-PREVIOUS_RELEASE=$(find "$SCHOOL_ROOT/releases" \
-  -mindepth 1 \
-  -maxdepth 1 \
-  -type d \
-  -name 'repair-*' \
-  -print | sort | tail -1)
-
-PREVIOUS_PARTS_COUNT=0
-if [ -n "$PREVIOUS_RELEASE" ] && [ -d "$PREVIOUS_RELEASE/deploy" ]; then
-  PREVIOUS_PARTS_COUNT=$(find "$PREVIOUS_RELEASE/deploy" \
-    -maxdepth 1 \
-    -name 'offline-runtime-v2.part-*' \
-    -type f 2>/dev/null | wc -l)
-fi
-
-if [ "$PREVIOUS_PARTS_COUNT" -eq 68 ]; then
-  RELEASE=$PREVIOUS_RELEASE
-  echo "1/5 Загружаем только исправленный фрагмент runtime №22..."
-  curl --config "$CURL_CONFIG" \
-    --header "Accept: application/vnd.github.raw+json" \
-    --progress-bar \
-    --connect-timeout 20 \
-    --max-time 180 \
-    --retry 3 \
-    --retry-all-errors \
-    --output "$PART_FIX" \
-    "https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/contents/deploy/offline-runtime-v2.part-022?ref=$DELIVERY_REF"
-  test "$(wc -c < "$PART_FIX")" -eq 716800
-  mv -f "$PART_FIX" "$RELEASE/deploy/offline-runtime-v2.part-022"
+if [ -n "$SOURCE_DIR" ]; then
+  test -d "$SOURCE_DIR/deploy"
+  cp -a "$SOURCE_DIR/." "$RELEASE/"
 else
-  echo "1/5 Скачиваем исправленный пакет дневника (прогресс виден ниже)..."
+  test -s "$TOKEN_FILE"
+  chmod 0600 "$CURL_CONFIG"
+  {
+    printf 'header = "Authorization: Bearer %s"\n' "$(tr -d '\r\n' < "$TOKEN_FILE")"
+    printf 'header = "X-GitHub-Api-Version: 2022-11-28"\n'
+    printf 'header = "Accept: application/vnd.github+json"\n'
+    printf 'proto = "=https"\n'
+    printf 'tlsv1.2\n'
+    printf 'location\n'
+    printf 'fail\n'
+    printf 'show-error\n'
+  } > "$CURL_CONFIG"
+
+  printf 'SCHOOL_DOWNLOAD=STARTED\n'
   curl --config "$CURL_CONFIG" \
-    --progress-bar \
     --connect-timeout 20 \
-    --max-time 900 \
-    --retry 3 \
+    --max-time 1200 \
+    --retry 4 \
     --retry-all-errors \
     --output "$ARCHIVE" \
     "https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/tarball/$DELIVERY_REF"
-
-  install -d -m 0755 "$RELEASE"
   tar -xzf "$ARCHIVE" --strip-components=1 -C "$RELEASE"
 fi
 
-echo "2/5 Проверяем весь пакет..."
-
-PARTS_COUNT=$(find "$RELEASE/deploy" \
-  -maxdepth 1 \
-  -name 'offline-runtime-v2.part-*' \
-  -type f | wc -l)
-test "$PARTS_COUNT" -eq 68
-
-RUNTIME_SHA=$(cat "$RELEASE"/deploy/offline-runtime-v2.part-* | sha256sum | cut -d ' ' -f 1)
+PART_COUNT=$(find "$RELEASE/deploy" -maxdepth 1 -type f -name "$RUNTIME_PART_GLOB" | wc -l)
+test "$PART_COUNT" -eq 66
+RUNTIME_SHA=$(cat "$RELEASE"/deploy/$RUNTIME_PART_GLOB | sha256sum | cut -d ' ' -f 1)
 test "$RUNTIME_SHA" = "$RUNTIME_SHA256"
+grep -Fx "$RUNTIME_SHA256  offline-runtime-v3.tar.gz" \
+  "$RELEASE/deploy/offline-runtime-v3.sha256" >/dev/null
+
+PREVIOUS_RELEASE=$(readlink -f "$SCHOOL_ROOT/current" 2>/dev/null || true)
+if docker inspect school-1-11 >/dev/null 2>&1; then
+  docker exec school-1-11 node scripts/backup-db.mjs
+fi
+
+python3 - "$SCHOOL_ROOT/shared/.env" "https://$SCHOOL_HOST" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+origin = sys.argv[2]
+lines = path.read_text(encoding="utf-8").splitlines()
+result = []
+found = False
+for line in lines:
+    if line.startswith("PUBLIC_APP_ORIGIN="):
+        result.append(f"PUBLIC_APP_ORIGIN={origin}")
+        found = True
+    else:
+        result.append(line)
+if not found:
+    result.append(f"PUBLIC_APP_ORIGIN={origin}")
+path.write_text("\n".join(result) + "\n", encoding="utf-8")
+PY
+chmod 0600 "$SCHOOL_ROOT/shared/.env"
 
 ln -sfn "$RELEASE" "$SCHOOL_ROOT/current"
-
-echo "3/5 Пересоздаём только контейнер дневника..."
+SWITCHED=1
 cd "$SCHOOL_ROOT/current/deploy"
-docker compose \
-  --env-file "$SCHOOL_ROOT/shared/.env" \
-  -p school-1-11 \
-  -f docker-compose.yml \
-  -f compose.offline.yml \
-  up -d --build --force-recreate
+compose config >/dev/null
+compose build school
+compose up -d --no-build --force-recreate school
 
 SCHOOL_STATUS=unknown
-for _attempt in $(seq 1 60); do
+for attempt in $(seq 1 90); do
   SCHOOL_STATUS=$(docker inspect \
     -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
     school-1-11 2>/dev/null || true)
-
   [ "$SCHOOL_STATUS" = healthy ] && break
   [ "$SCHOOL_STATUS" = unhealthy ] && break
   sleep 2
 done
 
 if [ "$SCHOOL_STATUS" != healthy ]; then
-  docker logs --tail 120 school-1-11
-  exit 1
+  docker logs --tail 160 school-1-11 >&2
+  false
 fi
 
 docker exec school-1-11 node -e \
   "fetch('http://127.0.0.1:3000/api/health').then(async r=>{console.log(await r.text());if(!r.ok)process.exit(1)}).catch(e=>{console.error(e);process.exit(1)})"
 
-echo "4/5 Подключаем дневник к действующему Caddy..."
-CADDY_FILE=/srv/arthello/shared/Caddyfile.school-runtime
-docker cp "$ARTHELLO_WEB_CONTAINER:/etc/caddy/Caddyfile" "$CADDY_FILE"
-
-if ! grep -q "^${SCHOOL_HOST} {" "$CADDY_FILE"; then
-  cat >> "$CADDY_FILE" <<'CADDY'
-
-school-188-225-47-207.nip.io {
-  encode zstd gzip
-
-  header {
-    -Server
-    Strict-Transport-Security "max-age=31536000"
-    X-Content-Type-Options "nosniff"
-    Referrer-Policy "strict-origin-when-cross-origin"
-    X-Frame-Options "DENY"
-    Permissions-Policy "camera=(), microphone=(), geolocation=()"
-    X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
-  }
-
-  reverse_proxy school-1-11:3000
-}
-CADDY
+if [ "$VERIFY_PUBLIC" -eq 1 ]; then
+  curl --fail --silent --show-error \
+    --connect-timeout 10 \
+    --max-time 180 \
+    --retry 30 \
+    --retry-all-errors \
+    --retry-delay 3 \
+    "https://$SCHOOL_HOST/api/health"
+  printf '\n'
 fi
 
-docker cp "$CADDY_FILE" "$ARTHELLO_WEB_CONTAINER:/tmp/Caddyfile.school"
-docker exec "$ARTHELLO_WEB_CONTAINER" \
-  caddy validate --config /tmp/Caddyfile.school
-docker cp "$CADDY_FILE" "$ARTHELLO_WEB_CONTAINER:/etc/caddy/Caddyfile"
-docker exec "$ARTHELLO_WEB_CONTAINER" \
-  caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
-
-echo "5/5 Проверяем HTTPS..."
-curl --fail --silent --show-error \
-  --connect-timeout 10 \
-  --max-time 180 \
-  --retry 30 \
-  --retry-all-errors \
-  --retry-delay 3 \
-  "https://${SCHOOL_HOST}/api/health"
-echo
-
-echo "ГОТОВО: https://${SCHOOL_HOST}"
-docker ps --filter name=school-1-11 --filter name="$ARTHELLO_WEB_CONTAINER"
+SWITCHED=0
+printf 'SCHOOL_DEPLOY=SUCCESS\n'
+printf 'SCHOOL_DELIVERY_REF=%s\n' "$DELIVERY_REF"
+printf 'SCHOOL_RUNTIME_SHA=%s\n' "$RUNTIME_SHA"
+printf 'SCHOOL_BACKUP=CREATED\n'
+printf 'SCHOOL_DATA_VOLUME=PRESERVED\n'
+printf 'SCHOOL_PUBLIC_URL=https://%s\n' "$SCHOOL_HOST"

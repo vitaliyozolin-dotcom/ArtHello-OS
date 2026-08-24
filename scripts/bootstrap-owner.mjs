@@ -9,7 +9,7 @@ const displayName = args.get("--name") || "Виталий Озолин";
 const origin = (
   args.get("--origin") ||
   process.env.PUBLIC_APP_ORIGIN ||
-  "https://school-188-225-47-207.sslip.io"
+  "https://school-188-225-38-55.sslip.io"
 ).replace(/\/$/, "");
 let digits = phoneInput.replace(/\D/g, "");
 if (digits.length === 11 && digits.startsWith("8"))

@@ -8,7 +8,7 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_PATH: /data/school-1-11.sqlite
-      PUBLIC_APP_ORIGIN: ${PUBLIC_APP_ORIGIN:-https://school-188-225-47-207.nip.io}
+      PUBLIC_APP_ORIGIN: ${PUBLIC_APP_ORIGIN:-https://school-188-225-38-55.sslip.io}
       CENTRAL_ACCESS_SECRET: ${CENTRAL_ACCESS_SECRET:?CENTRAL_ACCESS_SECRET must be set}
     ports:
       - "127.0.0.1:3111:3000"

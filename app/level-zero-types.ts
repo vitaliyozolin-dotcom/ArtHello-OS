@@ -1,11 +1,4 @@
-export type Role =
-  | "director"
-  | "deputy"
-  | "admin"
-  | "teacher"
-  | "parent"
-  | "student"
-  | "tech_admin";
+export type Role = "director" | "deputy" | "admin" | "teacher" | "parent" | "student" | "tech_admin";
 
 export const roleLabels: Record<Role, string> = {
   director: "Директор",
@@ -20,7 +13,7 @@ export const roleLabels: Record<Role, string> = {
 export type Viewer = {
   id: string;
   email: string;
-  phone: string;
+  phone?: string;
   displayName: string;
   role: Role;
   initials: string;
@@ -40,22 +33,12 @@ export type StudentRecord = {
 export type UserRecord = {
   id: string;
   email: string;
-  phone: string | null;
   displayName: string;
   role: Role;
   linkedStudentId: string | null;
   status: string;
-  profileStatus:
-    | "confirmed"
-    | "unconfirmed"
-    | "vacant"
-    | "needs_confirmation"
-    | "demo"
-    | string;
+  profileStatus: "confirmed" | "unconfirmed" | "vacant" | "needs_confirmation" | "demo" | string;
   notes: string;
-  passwordState: "pending" | "active" | "reset_required" | string;
-  centralUserId: string | null;
-  identitySource: "school_diary" | "arthello_os" | string;
 };
 
 export type ProgramRecord = {
@@ -67,14 +50,7 @@ export type ProgramRecord = {
   teacherUserId: string;
   teacherName: string;
   title: string;
-  status:
-    | "draft"
-    | "review"
-    | "changes_requested"
-    | "approved"
-    | "active"
-    | "archived"
-    | string;
+  status: "draft" | "review" | "changes_requested" | "approved" | "active" | "archived" | string;
   plannedLessons: number;
   completedLessons: number;
   updatedAt: string;
@@ -306,6 +282,41 @@ export type InvitationRecord = {
   createdAt: string;
 };
 
+export type RankingEntryRecord = {
+  position: number;
+  studentId: string | null;
+  displayName: string | null;
+  animal: string | null;
+  animalLabel: string | null;
+  isOwn: boolean;
+  score: number | null;
+  gradeCount: number | null;
+};
+
+export type RankingTableRecord = {
+  id: string;
+  subjectId: string | null;
+  label: string;
+  minimumEvidence: string;
+  totalStudents: number;
+  eligibleStudents: number;
+  ownPosition: number | null;
+  ownScore: number | null;
+  entries: RankingEntryRecord[];
+};
+
+export type ClassRankingRecord = {
+  className: string;
+  overall: RankingTableRecord;
+  subjects: RankingTableRecord[];
+};
+
+export type RankingSnapshot = {
+  mode: "named" | "anonymous" | "none";
+  classes: ClassRankingRecord[];
+  privacyNote: string;
+};
+
 export type SchoolSnapshot = {
   school: {
     name: string;
@@ -337,6 +348,7 @@ export type SchoolSnapshot = {
   programs: ProgramRecord[];
   attendance: AttendanceRecord[];
   notifications: NotificationRecord[];
+  rankings: RankingSnapshot;
   setup: {
     liveUserCount: number;
     templateRecords: boolean;

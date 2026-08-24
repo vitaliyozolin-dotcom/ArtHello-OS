@@ -648,6 +648,240 @@ async function rows<T>(query: string, bindings: unknown[] = []) {
   return result.results;
 }
 
+const RANKING_ANIMALS = [
+  ["🦊", "Лиса"], ["🐼", "Панда"], ["🦉", "Сова"], ["🐯", "Тигр"],
+  ["🐬", "Дельфин"], ["🦁", "Лев"], ["🐨", "Коала"], ["🐰", "Кролик"],
+  ["🐢", "Черепаха"], ["🦝", "Енот"], ["🐧", "Пингвин"], ["🦋", "Бабочка"],
+  ["🐙", "Осьминог"], ["🦄", "Единорог"], ["🐸", "Лягушка"], ["🐻", "Медведь"],
+  ["🦦", "Выдра"], ["🐺", "Волк"], ["🦥", "Ленивец"], ["🦔", "Ёж"],
+  ["🐘", "Слон"], ["🦒", "Жираф"], ["🦓", "Зебра"], ["🐆", "Леопард"],
+  ["🐊", "Крокодил"], ["🐳", "Кит"], ["🐝", "Пчела"], ["🐞", "Божья коровка"],
+  ["🦜", "Попугай"], ["🦩", "Фламинго"], ["🐿️", "Белка"], ["🦌", "Олень"],
+] as const;
+
+type RankingStudentRow = {
+  id: string;
+  fullName: string;
+  className: string;
+};
+
+type RankingGradeRow = {
+  studentId: string;
+  subjectId: string;
+  subjectName: string;
+  value: number;
+  weight: number;
+};
+
+type RankingScore = {
+  studentId: string;
+  fullName: string;
+  score: number;
+  gradeCount: number;
+};
+
+function rankScores(scores: RankingScore[]) {
+  const sorted = [...scores].sort(
+    (left, right) =>
+      right.score - left.score || left.fullName.localeCompare(right.fullName, "ru"),
+  );
+  let previousScore: number | null = null;
+  let previousPosition = 0;
+  return sorted.map((score, index) => {
+    const position =
+      previousScore !== null && Math.abs(score.score - previousScore) < 0.0001
+        ? previousPosition
+        : index + 1;
+    previousScore = score.score;
+    previousPosition = position;
+    return { ...score, position };
+  });
+}
+
+async function loadRankings(
+  viewer: UserRow,
+  selectedStudent: SchoolSnapshot["selectedStudent"],
+): Promise<SchoolSnapshot["rankings"]> {
+  const namedMode = leadershipRoles.has(viewer.role) || viewer.role === "teacher";
+  const anonymousMode = viewer.role === "parent" && Boolean(selectedStudent);
+  if (!namedMode && !anonymousMode) {
+    return {
+      mode: "none",
+      classes: [],
+      privacyNote: "Рейтинг недоступен этой роли.",
+    };
+  }
+
+  let classNames: string[] = [];
+  if (leadershipRoles.has(viewer.role)) {
+    classNames = (
+      await rows<{ name: string }>(
+        "SELECT name FROM school_classes WHERE status = 'active' ORDER BY grade, name",
+      )
+    ).map((item) => item.name);
+  } else if (viewer.role === "teacher") {
+    classNames = (
+      await rows<{ className: string }>(
+        "SELECT DISTINCT class_name AS className FROM teacher_assignments WHERE teacher_user_id = ? AND status = 'confirmed' ORDER BY class_name",
+        [viewer.id],
+      )
+    ).map((item) => item.className);
+  } else if (selectedStudent) {
+    classNames = [selectedStudent.className];
+  }
+  if (!classNames.length) {
+    return {
+      mode: namedMode ? "named" : "anonymous",
+      classes: [],
+      privacyNote: "Для рейтинга пока нет доступных классов.",
+    };
+  }
+
+  const placeholders = classNames.map(() => "?").join(",");
+  const rankingStudents = await rows<RankingStudentRow>(
+    `SELECT id, first_name || ' ' || last_name AS fullName, class_name AS className
+    FROM students WHERE status = 'active' AND class_name IN (${placeholders}) ORDER BY class_name, last_name, first_name`,
+    classNames,
+  );
+  const studentIds = rankingStudents.map((student) => student.id);
+  const studentPlaceholders = studentIds.map(() => "?").join(",") || "''";
+  const rankingGrades = studentIds.length
+    ? await rows<RankingGradeRow>(
+        `SELECT g.student_id AS studentId, g.subject_id AS subjectId,
+        s.name AS subjectName, g.value, g.weight
+        FROM grades g JOIN subjects s ON s.id = g.subject_id
+        WHERE g.student_id IN (${studentPlaceholders}) ORDER BY s.name`,
+        studentIds,
+      )
+    : [];
+
+  const classes: SchoolSnapshot["rankings"]["classes"] = [];
+  for (const className of classNames) {
+    const classStudents = rankingStudents.filter(
+      (student) => student.className === className,
+    );
+    const classStudentIds = new Set(classStudents.map((student) => student.id));
+    const classGrades = rankingGrades.filter((grade) =>
+      classStudentIds.has(grade.studentId),
+    );
+    const subjectIndex = new Map<string, string>();
+    classGrades.forEach((grade) =>
+      subjectIndex.set(grade.subjectId, grade.subjectName),
+    );
+
+    const animalOrder = await Promise.all(
+      classStudents.map(async (student) => ({
+        studentId: student.id,
+        key: await sha256(`${viewer.id}|${className}|${student.id}|2026/27`),
+      })),
+    );
+    animalOrder.sort((left, right) => left.key.localeCompare(right.key));
+    const animals = new Map(
+      animalOrder.map((item, index) => [
+        item.studentId,
+        RANKING_ANIMALS[index % RANKING_ANIMALS.length],
+      ]),
+    );
+
+    const scoreForSubject = (
+      student: RankingStudentRow,
+      subjectId: string | null,
+    ): RankingScore | null => {
+      if (subjectId) {
+        const grades = classGrades.filter(
+          (grade) =>
+            grade.studentId === student.id && grade.subjectId === subjectId,
+        );
+        if (grades.length < 2) return null;
+        const totalWeight = grades.reduce((sum, grade) => sum + grade.weight, 0);
+        return {
+          studentId: student.id,
+          fullName: student.fullName,
+          score:
+            grades.reduce((sum, grade) => sum + grade.value * grade.weight, 0) /
+            totalWeight,
+          gradeCount: grades.length,
+        };
+      }
+      const subjectScores = [...subjectIndex.keys()]
+        .map((id) => scoreForSubject(student, id))
+        .filter((score): score is RankingScore => Boolean(score));
+      const gradeCount = subjectScores.reduce(
+        (sum, score) => sum + score.gradeCount,
+        0,
+      );
+      if (subjectScores.length < 2 || gradeCount < 5) return null;
+      return {
+        studentId: student.id,
+        fullName: student.fullName,
+        score:
+          subjectScores.reduce((sum, score) => sum + score.score, 0) /
+          subjectScores.length,
+        gradeCount,
+      };
+    };
+
+    const buildTable = (
+      subjectId: string | null,
+      label: string,
+    ): SchoolSnapshot["rankings"]["classes"][number]["overall"] => {
+      const ranked = rankScores(
+        classStudents
+          .map((student) => scoreForSubject(student, subjectId))
+          .filter((score): score is RankingScore => Boolean(score)),
+      );
+      const own =
+        ranked.find((entry) => entry.studentId === selectedStudent?.id) ?? null;
+      return {
+        id: subjectId ?? "overall",
+        subjectId,
+        label,
+        minimumEvidence: subjectId
+          ? "Не менее 2 оценок по предмету"
+          : "Не менее 5 оценок по двум предметам",
+        totalStudents: classStudents.length,
+        eligibleStudents: ranked.length,
+        ownPosition: own?.position ?? null,
+        ownScore: own ? Number(own.score.toFixed(2)) : null,
+        entries: ranked.map((entry) => {
+          const isOwn = entry.studentId === selectedStudent?.id;
+          const animal = animals.get(entry.studentId) ?? RANKING_ANIMALS[0];
+          return {
+            position: entry.position,
+            studentId: namedMode ? entry.studentId : null,
+            displayName: namedMode
+              ? entry.fullName
+              : isOwn
+                ? "Ваш ребёнок"
+                : null,
+            animal: namedMode ? null : animal[0],
+            animalLabel: namedMode ? null : animal[1],
+            isOwn,
+            score: Number(entry.score.toFixed(2)),
+            gradeCount: namedMode || isOwn ? entry.gradeCount : null,
+          };
+        }),
+      };
+    };
+
+    classes.push({
+      className,
+      overall: buildTable(null, "В среднем по всем предметам"),
+      subjects: [...subjectIndex.entries()]
+        .sort((left, right) => left[1].localeCompare(right[1], "ru"))
+        .map(([subjectId, label]) => buildTable(subjectId, label)),
+    });
+  }
+
+  return {
+    mode: namedMode ? "named" : "anonymous",
+    classes,
+    privacyNote: namedMode
+      ? "Поимённый рейтинг доступен только директору, завучу и назначенному учителю в его классах."
+      : "Имена и идентификаторы других детей удалены на сервере. Точные средние баллы открыты обезличенно, а образы животных различаются для каждой семьи.",
+  };
+}
+
 async function loadSnapshot(
   actor: UserRow,
   request: Request,
@@ -680,6 +914,7 @@ async function loadSnapshot(
   ]);
   const selectedStudent =
     students.find((student) => student.id === selectedStudentId) ?? null;
+  const rankingsPromise = loadRankings(viewer, selectedStudent);
   const requestedClass = url.searchParams.get("class");
   const selectedClass =
     requestedClass && classes.some((item) => item.name === requestedClass)
@@ -854,6 +1089,7 @@ async function loadSnapshot(
     )
     .first<{ count: number }>();
   const liveUserCount = liveUser?.count ?? 0;
+  const rankings = await rankingsPromise;
 
   return {
     school: {
@@ -894,6 +1130,7 @@ async function loadSnapshot(
     programs,
     attendance,
     notifications,
+    rankings,
     setup: {
       liveUserCount,
       templateRecords: false,

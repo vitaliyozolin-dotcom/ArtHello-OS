@@ -3,5 +3,13 @@ Source: https://github.com/google/fonts/tree/main/ofl/onest
 Project: https://github.com/simpals/onest
 License: SIL Open Font License 1.1.
 
-The locally hosted variable file covers weights 100–900 and extended Cyrillic.
-It is used for headings, body copy, navigation, tables, buttons and form fields.
+The locally hosted Onest variable file covers weights 100–900 and extended Cyrillic.
+It is used for the business-facing roles, navigation, tables and forms.
+
+Rubik variable font by Philipp Hubert and Sebastian Fischer.
+Source package: @fontsource-variable/rubik
+Project: https://github.com/googlefonts/rubik
+License: SIL Open Font License 1.1; see RUBIK-OFL.txt.
+
+The locally hosted Rubik variable subsets cover weights 300–900 in Cyrillic and Latin.
+Rubik is scoped to the student experience only.

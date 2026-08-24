@@ -36,7 +36,7 @@ test("self-hosted service is not exposed without the HTTPS proxy", () => {
   assert.match(compose, /127\.0\.0\.1:3111:3000/);
   assert.match(compose, /no-new-privileges:true/);
   assert.match(compose, /healthcheck:/);
-  assert.match(compose, /school-188-225-47-207\.sslip\.io/);
-  assert.match(caddy, /^school-188-225-47-207\.sslip\.io/m);
+  assert.match(compose, /school-188-225-38-55\.sslip\.io/);
+  assert.match(caddy, /^school-188-225-38-55\.sslip\.io/m);
   assert.doesNotMatch(caddy, /^school\.arthelloteam\.ru/m);
 });

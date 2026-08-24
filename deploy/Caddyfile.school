@@ -1,4 +1,4 @@
-school-188-225-47-207.nip.io {
+school-188-225-38-55.sslip.io {
   encode zstd gzip
   reverse_proxy school-1-11:3000
 
