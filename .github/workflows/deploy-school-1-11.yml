@@ -1,0 +1,180 @@
+name: Deploy School 1-11 full-screen release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/deploy-school-1-11.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: school-1-11-production
+  cancel-in-progress: false
+
+env:
+  TRANSPORT_REF: 9768e2e119981d95d4a5629f3bea7d45271137dd
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    outputs:
+      issue_number: ${{ steps.issue.outputs.issue_number }}
+    steps:
+      - name: Create production run record
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          response="$(gh api "repos/$GITHUB_REPOSITORY/issues" \
+            --method POST \
+            -f "title=[school-production] full-screen run $GITHUB_RUN_ID" \
+            -f "body=Deployment is queued for transport commit $TRANSPORT_REF. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")"
+          issue_number="$(jq -r '.number' <<<"$response")"
+          test "$issue_number" != null
+          printf 'issue_number=%s\n' "$issue_number" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: announce
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production-ru
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TRANSPORT_REF }}
+          persist-credentials: false
+
+      - name: Configure pinned SSH host
+        id: configure_ssh
+        continue-on-error: true
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          test -s ~/.ssh/id_ed25519
+          test -s ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+      - name: Deploy immutable school release
+        id: deploy_school
+        if: steps.configure_ssh.outcome == 'success'
+        continue-on-error: true
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        run: |
+          set -Eeuo pipefail
+          log_file="$RUNNER_TEMP/school-deploy.log"
+          deploy_port="${DEPLOY_PORT:-2222}"
+          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
+          test -n "$route_device"
+          sudo ip link set dev "$route_device" mtu 1200
+          set +e
+          ssh -T \
+            -p "$deploy_port" \
+            -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=publickey \
+            -o PasswordAuthentication=no \
+            -o KbdInteractiveAuthentication=no \
+            -o BatchMode=yes \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=40 \
+            -o IPQoS=none \
+            -o Compression=no \
+            -o KexAlgorithms=curve25519-sha256 \
+            -o HostKeyAlgorithms=ssh-ed25519 \
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
+            -o Ciphers=aes128-ctr \
+            -o MACs=hmac-sha2-256 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "DELIVERY_REF=$TRANSPORT_REF SCHOOL_HOST=school-188-225-38-55.sslip.io VERIFY_PUBLIC=0 bash -s" \
+            < deploy/repair-deploy.sh 2>&1 | tee "$log_file"
+          status=${PIPESTATUS[0]}
+          set -e
+          exit "$status"
+
+      - name: Verify public full-screen release
+        id: verify_public
+        if: steps.deploy_school.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          healthy=0
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null; then
+              healthy=1
+              break
+            fi
+            sleep 3
+          done
+          test "$healthy" -eq 1
+          login_html="$RUNNER_TEMP/school-login.html"
+          css_file="$RUNNER_TEMP/school-globals.css"
+          curl --fail --silent --show-error "$SCHOOL_ORIGIN/login" > "$login_html"
+          css_path="$(grep -oE '/_next/static/css/[^"?]+\.css' "$login_html" | head -1)"
+          test -n "$css_path"
+          curl --fail --silent --show-error "$SCHOOL_ORIGIN$css_path" > "$css_file"
+          grep -F '.l0-stage{width:100%;height:100svh;overflow:hidden' "$css_file" >/dev/null
+          grep -F 'student-dashboard-hero-v1.webp' "$css_file" >/dev/null
+          printf 'SCHOOL_PUBLIC_HTTPS=OK\n'
+          printf 'SCHOOL_FULLSCREEN_CSS=VERIFIED\n'
+
+      - name: Publish sanitized production result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONFIGURE_OUTCOME: ${{ steps.configure_ssh.outcome }}
+          DEPLOY_OUTCOME: ${{ steps.deploy_school.outcome }}
+          PUBLIC_OUTCOME: ${{ steps.verify_public.outcome }}
+        run: |
+          set -Eeuo pipefail
+          log_file="$RUNNER_TEMP/school-deploy.log"
+          report_file="$RUNNER_TEMP/school-report.md"
+          {
+            printf 'School deployment run: %s\n\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            printf -- '- Transport commit: `%s`\n' "$TRANSPORT_REF"
+            printf -- '- SSH configuration: `%s`\n' "$CONFIGURE_OUTCOME"
+            printf -- '- Release deployment: `%s`\n' "$DEPLOY_OUTCOME"
+            printf -- '- Public full-screen verification: `%s`\n\n' "$PUBLIC_OUTCOME"
+            printf 'Sanitized deployment markers:\n\n```text\n'
+            if [ -f "$log_file" ]; then
+              grep -E '^(SCHOOL_|Error:|error:|curl:|ssh:|Permission denied|Host key|Connection closed)' "$log_file" \
+                | tail -n 100 \
+                | sed -E 's/(PASSWORD|TOKEN|SECRET|PRIVATE_KEY)=.*/\1=[REDACTED]/Ig' || true
+            else
+              printf 'No deployment log was produced.\n'
+            fi
+            printf '```\n'
+          } > "$report_file"
+          issue_number="${{ needs.announce.outputs.issue_number }}"
+          test -n "$issue_number"
+          gh api "repos/$GITHUB_REPOSITORY/issues/$issue_number" \
+            --method PATCH \
+            -f "body=$(cat "$report_file")" >/dev/null
+
+      - name: Enforce successful production result
+        if: always()
+        env:
+          CONFIGURE_OUTCOME: ${{ steps.configure_ssh.outcome }}
+          DEPLOY_OUTCOME: ${{ steps.deploy_school.outcome }}
+          PUBLIC_OUTCOME: ${{ steps.verify_public.outcome }}
+        run: |
+          set -Eeuo pipefail
+          test "$CONFIGURE_OUTCOME" = success
+          test "$DEPLOY_OUTCOME" = success
+          test "$PUBLIC_OUTCOME" = success
