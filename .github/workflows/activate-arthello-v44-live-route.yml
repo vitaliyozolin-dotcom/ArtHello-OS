@@ -54,22 +54,34 @@ jobs:
           scanned_hosts="$RUNNER_TEMP/arthello-known-hosts"
           : > "$scanned_hosts"
           chmod 0600 "$scanned_hosts"
-          for attempt in 1 2 3; do
-            timeout --signal=TERM --kill-after=5s 40s \
-              ssh -p "$deploy_port" \
-              -o StrictHostKeyChecking=accept-new \
-              -o UserKnownHostsFile="$scanned_hosts" \
-              -o GlobalKnownHostsFile=/dev/null \
-              -o PreferredAuthentications=none \
-              -o PubkeyAuthentication=no \
-              -o PasswordAuthentication=no \
-              -o KbdInteractiveAuthentication=no \
-              -o ConnectTimeout=30 \
-              -o HostKeyAlgorithms=ssh-ed25519 \
-              "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
-            test -s "$scanned_hosts" && break
-            sleep 5
-          done
+          probe_rc=0
+          timeout --signal=TERM --kill-after=5s 150s \
+            ssh -n -p "$deploy_port" \
+            -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=publickey \
+            -o PasswordAuthentication=no \
+            -o KbdInteractiveAuthentication=no \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$scanned_hosts" \
+            -o GlobalKnownHostsFile=/dev/null \
+            -o ConnectTimeout=30 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=6 \
+            -o IPQoS=none \
+            -o Compression=no \
+            -o KexAlgorithms=curve25519-sha256 \
+            -o HostKeyAlgorithms=ssh-ed25519 \
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
+            -o Ciphers=aes128-ctr \
+            -o MACs=hmac-sha2-256 \
+            "$DEPLOY_USER@$DEPLOY_HOST" true \
+            </dev/null >/dev/null 2>&1 || probe_rc=$?
+          case "$probe_rc" in
+            0|124|137|255) ;;
+            *) exit "$probe_rc" ;;
+          esac
           test -s "$scanned_hosts"
           actual_fingerprint="$(ssh-keygen -lf "$scanned_hosts" -E sha256 | awk '{print $2; exit}')"
           printf 'ARTHELLO_SSH_HOST_FINGERPRINT=%s\n' "$actual_fingerprint"
