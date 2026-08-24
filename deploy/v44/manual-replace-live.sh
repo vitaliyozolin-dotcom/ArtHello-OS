@@ -7,6 +7,7 @@ REPOSITORY="${REPOSITORY:-vitaliyozolin-dotcom/ArtHello-OS}"
 PUBLIC_DOMAIN="${PUBLIC_DOMAIN:-arthello-188-225-38-55.sslip.io}"
 ARTHELLO_ROOT="${ARTHELLO_ROOT:-/srv/arthello}"
 TOKEN_FILE="${GITHUB_TOKEN_FILE:-$ARTHELLO_ROOT/shared/github-release-token}"
+DEPLOY_KEY="${GITHUB_DEPLOY_KEY:-/root/.ssh/arthello_repo_ed25519}"
 SOURCE_DIGEST="c72c6c7ced52f0d533be16ff8a8aa2d11fad8d0743b6f1229bde7f034a057062"
 IMAGE="arthello-os-ui:$TARGET_SHA"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
@@ -47,23 +48,35 @@ rollback() {
 trap rollback EXIT
 
 install -d -m 0750 "$WORK_ROOT" "$SOURCE_ROOT"
-test -s "$TOKEN_FILE"
 
 printf '1/5 Скачиваем зафиксированную новую версию...\n'
-install -m 0600 /dev/null "$CURL_CONFIG"
-{
-  printf 'header = "Authorization: Bearer %s"\n' "$(cat "$TOKEN_FILE")"
-  printf 'header = "X-GitHub-Api-Version: 2022-11-28"\n'
-  printf 'proto = "=https"\n'
-  printf 'tlsv1.2\n'
-  printf 'silent\nshow-error\nfail\n'
-} > "$CURL_CONFIG"
-curl --config "$CURL_CONFIG" --location --retry 5 --retry-all-errors \
-  --connect-timeout 25 --max-time 1800 \
-  --output "$ARCHIVE" \
-  "https://api.github.com/repos/$REPOSITORY/tarball/$TARGET_SHA"
-test -s "$ARCHIVE"
-tar -xzf "$ARCHIVE" --strip-components=1 -C "$SOURCE_ROOT"
+if [ -s "$TOKEN_FILE" ]; then
+  install -m 0600 /dev/null "$CURL_CONFIG"
+  {
+    printf 'header = "Authorization: Bearer %s"\n' "$(cat "$TOKEN_FILE")"
+    printf 'header = "X-GitHub-Api-Version: 2022-11-28"\n'
+    printf 'proto = "=https"\n'
+    printf 'tlsv1.2\n'
+    printf 'silent\nshow-error\nfail\n'
+  } > "$CURL_CONFIG"
+  curl --config "$CURL_CONFIG" --location --retry 5 --retry-all-errors \
+    --connect-timeout 25 --max-time 1800 \
+    --output "$ARCHIVE" \
+    "https://api.github.com/repos/$REPOSITORY/tarball/$TARGET_SHA"
+  test -s "$ARCHIVE"
+  tar -xzf "$ARCHIVE" --strip-components=1 -C "$SOURCE_ROOT"
+elif [ -s "$DEPLOY_KEY" ]; then
+  command -v git >/dev/null
+  export GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+  git -C "$SOURCE_ROOT" init -q
+  git -C "$SOURCE_ROOT" remote add origin "ssh://git@ssh.github.com:443/$REPOSITORY.git"
+  git -C "$SOURCE_ROOT" fetch --depth 1 --filter=blob:none origin "$TARGET_SHA"
+  git -C "$SOURCE_ROOT" checkout -q --detach FETCH_HEAD
+  unset GIT_SSH_COMMAND
+else
+  printf 'ARTHELLO_MANUAL_ERROR=github_credentials_missing\n' >&2
+  exit 2
+fi
 test -f "$SOURCE_ROOT/deploy/v44/Dockerfile"
 test -f "$SOURCE_ROOT/deploy/v44/compose.ui.yml"
 actual_digest="$(cat "$SOURCE_ROOT"/deploy/v44/arthello-sites-v44-source.tar.gz.part-* | sha256sum | awk '{print $1}')"
