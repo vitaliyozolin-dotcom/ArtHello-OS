@@ -1,0 +1,122 @@
+name: Diagnose ArtHello v44 runtime state
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: ArtHello UI release SHA
+        required: true
+        default: 49b1545aa0993d4f082ade227287305835034522
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-ru
+    env:
+      DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+    steps:
+      - name: Validate diagnostic contract
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -Eeuo pipefail
+          printf '%s' "$TARGET_SHA" | grep -Eq '^[0-9a-f]{40}$'
+
+      - name: Configure pinned SSH identity
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          test -s ~/.ssh/id_ed25519
+          test -s ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+      - name: Read sanitized origin runtime state
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -Eeuo pipefail
+          deploy_port="${DEPLOY_PORT:-2222}"
+          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
+          test -n "$route_device"
+          sudo ip link set dev "$route_device" mtu 1200
+          ssh_args=(
+            -p "$deploy_port"
+            -i ~/.ssh/id_ed25519
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o ConnectTimeout=20
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=10
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+          diagnostic_payload="$(base64 -w0 <<'REMOTE'
+          set -u
+          target_sha="${TARGET_SHA:?TARGET_SHA is required}"
+          build_status="/srv/arthello/origin-build-jobs/$target_sha/status"
+          route_status="/srv/arthello/ui-route-jobs/$target_sha/status"
+
+          printf 'ARTHELLO_DIAG_BEGIN\n'
+          for item in "BUILD:$build_status" "ROUTE:$route_status"; do
+            label="${item%%:*}"
+            path="${item#*:}"
+            if [ -s "$path" ]; then
+              value="$(head -n 1 "$path" | tr -cd '[:alnum:]:_-')"
+              printf 'ARTHELLO_%s_STATUS=%s\n' "$label" "$value"
+            else
+              printf 'ARTHELLO_%s_STATUS=missing\n' "$label"
+            fi
+          done
+
+          if docker inspect arthello-os-newui >/dev/null 2>&1; then
+            state="$(docker inspect --format '{{.State.Status}}' arthello-os-newui)"
+            health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' arthello-os-newui)"
+            revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' arthello-os-newui)"
+            printf 'ARTHELLO_CONTAINER_PRESENT=yes\n'
+            printf 'ARTHELLO_CONTAINER_STATE=%s\n' "$state"
+            printf 'ARTHELLO_CONTAINER_HEALTH=%s\n' "$health"
+            printf 'ARTHELLO_CONTAINER_REVISION=%s\n' "$revision"
+            runtime_http="$(docker exec arthello-os-newui node -e "fetch('http://127.0.0.1:8081/api/health').then(r=>console.log(r.status)).catch(()=>console.log(0))" 2>/dev/null | tail -n 1)"
+            printf 'ARTHELLO_RUNTIME_HTTP=%s\n' "${runtime_http:-0}"
+          else
+            printf 'ARTHELLO_CONTAINER_PRESENT=no\n'
+          fi
+          printf 'ARTHELLO_DIAG_END\n'
+          REMOTE
+          )"
+          test -n "$diagnostic_payload"
+
+          diagnostic_rc=0
+          diagnostic_output="$(
+            timeout --signal=TERM --kill-after=5s 180s \
+              ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                "printf '%s' '$diagnostic_payload' | base64 -d | env TARGET_SHA='$TARGET_SHA' bash" \
+                </dev/null 2>/dev/null
+          )" || diagnostic_rc=$?
+          printf '%s\n' "$diagnostic_output"
+          grep -Fxq 'ARTHELLO_DIAG_BEGIN' <<<"$diagnostic_output"
+          grep -Fxq 'ARTHELLO_DIAG_END' <<<"$diagnostic_output"
+          case "$diagnostic_rc" in
+            0|124|137|255) ;;
+            *) exit "$diagnostic_rc" ;;
+          esac
