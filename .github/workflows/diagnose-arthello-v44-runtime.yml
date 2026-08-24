@@ -42,13 +42,23 @@ jobs:
           test -n "$route_device"
           sudo ip link set dev "$route_device" mtu 1200
           deploy_port="${DEPLOY_PORT:-2222}"
-          scanned_hosts="$RUNNER_TEMP/arthello-known-hosts"
-          : > "$scanned_hosts"
-          chmod 0600 "$scanned_hosts"
-          for attempt in 1 2 3 4 5; do
-            printf 'ARTHELLO_SSH_HOST_PROBE_ATTEMPT=%s\n' "$attempt"
+          selected_host=""
+          selected_port=""
+          selected_hosts_file=""
+          candidate_number=0
+          for candidate in \
+            "188.225.47.207|$deploy_port" \
+            "188.225.47.207|22" \
+            "$DEPLOY_HOST|$deploy_port"; do
+            candidate_number="$((candidate_number + 1))"
+            candidate_host="${candidate%%|*}"
+            candidate_port="${candidate##*|}"
+            scanned_hosts="$RUNNER_TEMP/arthello-known-hosts-$candidate_number"
+            : > "$scanned_hosts"
+            chmod 0600 "$scanned_hosts"
+            printf 'ARTHELLO_SSH_CANDIDATE=%s\n' "$candidate_number"
             timeout --signal=TERM --kill-after=5s 40s \
-              ssh -p "$deploy_port" \
+              ssh -p "$candidate_port" \
               -o StrictHostKeyChecking=accept-new \
               -o UserKnownHostsFile="$scanned_hosts" \
               -o GlobalKnownHostsFile=/dev/null \
@@ -58,15 +68,24 @@ jobs:
               -o KbdInteractiveAuthentication=no \
               -o ConnectTimeout=30 \
               -o HostKeyAlgorithms=ssh-ed25519 \
-              "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
-            test -s "$scanned_hosts" && break
-            sleep 5
+              "$DEPLOY_USER@$candidate_host" true </dev/null >/dev/null 2>&1 || true
+            test -s "$scanned_hosts" || continue
+            actual_fingerprint="$(ssh-keygen -lf "$scanned_hosts" -E sha256 | awk '{print $2; exit}')"
+            printf 'ARTHELLO_SSH_CANDIDATE_FINGERPRINT=%s:%s\n' "$candidate_number" "$actual_fingerprint"
+            if [ "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI' ]; then
+              selected_host="$candidate_host"
+              selected_port="$candidate_port"
+              selected_hosts_file="$scanned_hosts"
+              break
+            fi
           done
-          test -s "$scanned_hosts"
-          actual_fingerprint="$(ssh-keygen -lf "$scanned_hosts" -E sha256 | awk '{print $2; exit}')"
-          printf 'ARTHELLO_SSH_HOST_FINGERPRINT=%s\n' "$actual_fingerprint"
-          test "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
-          mv "$scanned_hosts" ~/.ssh/known_hosts
+          test -n "$selected_host"
+          test -n "$selected_port"
+          test -s "$selected_hosts_file"
+          mv "$selected_hosts_file" ~/.ssh/known_hosts
+          printf 'DEPLOY_HOST=%s\n' "$selected_host" >> "$GITHUB_ENV"
+          printf 'DEPLOY_PORT=%s\n' "$selected_port" >> "$GITHUB_ENV"
+          printf 'ARTHELLO_SSH_SELECTED_CANDIDATE=%s\n' "$candidate_number"
 
       - name: Read sanitized origin runtime state
         env:
