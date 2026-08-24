@@ -1,0 +1,143 @@
+name: Deploy School 1-11 direct RU
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/deploy-school-direct-38-55.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TRANSPORT_REF: cebe7be40383850ee821031245da8001c0503007
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+  DEPLOY_HOST: 188.225.38.55
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production-ru
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TRANSPORT_REF }}
+          persist-credentials: false
+
+      - name: Configure SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+      - name: Resolve working SSH port
+        id: ssh_port
+        env:
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
+          sudo ip link set dev "$route_device" mtu 1200
+          found=""
+          for port in 22 2222; do
+            known="$RUNNER_TEMP/known-$port"
+            : > "$known"
+            if timeout 25s ssh -n \
+              -p "$port" \
+              -i ~/.ssh/id_ed25519 \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$known" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=publickey \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o BatchMode=yes \
+              -o ConnectTimeout=15 \
+              "$DEPLOY_USER@$DEPLOY_HOST" 'printf SCHOOL_SSH_OK' \
+              </dev/null 2>/dev/null | grep -Fq SCHOOL_SSH_OK; then
+              found="$port"
+              cp "$known" ~/.ssh/known_hosts
+              break
+            fi
+          done
+          test -n "$found"
+          printf 'port=%s\n' "$found" >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_DIRECT_SSH_PORT=%s\n' "$found"
+
+      - name: Start detached production deployment
+        env:
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ steps.ssh_port.outputs.port }}
+        run: |
+          set -Eeuo pipefail
+          job_dir="/srv/school-1-11/deploy-jobs/$TRANSPORT_REF-direct"
+          repair_payload="$(base64 -w0 deploy/repair-deploy.sh)"
+          runner_payload="$(base64 -w0 <<'REMOTE'
+          #!/usr/bin/env bash
+          set -uo pipefail
+          status=0
+          bash "$JOB_DIR/repair-deploy.sh" || status=$?
+          if [ "$status" -eq 0 ]; then
+            printf 'success:%s\n' "$DELIVERY_REF" > "$JOB_DIR/status.tmp"
+          else
+            printf 'failed:%s\n' "$status" > "$JOB_DIR/status.tmp"
+          fi
+          mv "$JOB_DIR/status.tmp" "$JOB_DIR/status"
+          exit "$status"
+          REMOTE
+          )"
+          ssh -n \
+            -p "$DEPLOY_PORT" \
+            -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$repair_payload' | base64 -d > '$job_dir/repair-deploy.sh'; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/repair-deploy.sh' '$job_dir/run.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$TRANSPORT_REF' SCHOOL_HOST='school-188-225-38-55.sslip.io' VERIFY_PUBLIC='0' JOB_DIR='$job_dir' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null & echo \$! > '$job_dir/pid'"
+
+          status=""
+          for attempt in $(seq 1 180); do
+            status="$(ssh -n -p "$DEPLOY_PORT" -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" "test -f '$job_dir/status' && cat '$job_dir/status' || true" </dev/null 2>/dev/null || true)"
+            case "$status" in
+              "success:$TRANSPORT_REF") break ;;
+              failed:*)
+                ssh -n -p "$DEPLOY_PORT" -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" "tail -n 200 '$job_dir/deploy.log'" || true
+                exit 1
+                ;;
+            esac
+            test "$attempt" -lt 180
+            sleep 5
+          done
+          test "$status" = "success:$TRANSPORT_REF"
+          printf 'SCHOOL_DIRECT_DEPLOY=SUCCESS\n'
+
+      - name: Verify public production
+        run: |
+          set -Eeuo pipefail
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null; then
+              break
+            fi
+            test "$attempt" -lt 60
+            sleep 3
+          done
+          html="$RUNNER_TEMP/login.html"
+          css="$RUNNER_TEMP/all.css"
+          curl --fail --silent --show-error "$SCHOOL_ORIGIN/login" > "$html"
+          : > "$css"
+          grep -oE '/_next/static/css/[^"?]+\.css' "$html" | sort -u | while read -r path; do
+            curl --fail --silent --show-error "$SCHOOL_ORIGIN$path" >> "$css"
+          done
+          grep -F -- '--mobile-gutter:16px' "$css" >/dev/null
+          grep -F '.admin-table-head{display:none}' "$css" >/dev/null
+          printf 'SCHOOL_PUBLIC_HTTPS=OK\n'
+          printf 'SCHOOL_MOBILE_POLISH=VERIFIED\n'
