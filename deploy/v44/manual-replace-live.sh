@@ -22,10 +22,10 @@ MERGED_JSON="$WORK_ROOT/caddy-merged.json"
 WEB_ID=""
 SWITCHED=0
 
-case "$TARGET_SHA" in
-  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-  *) printf 'ARTHELLO_MANUAL_ERROR=invalid_target_sha\n' >&2; exit 2 ;;
-esac
+if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  printf 'ARTHELLO_MANUAL_ERROR=invalid_target_sha\n' >&2
+  exit 2
+fi
 
 if [ "$(id -u)" -ne 0 ]; then
   printf 'ARTHELLO_MANUAL_ERROR=root_required\n' >&2
