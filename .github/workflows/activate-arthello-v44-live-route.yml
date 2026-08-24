@@ -34,7 +34,7 @@ jobs:
           printf '%s' "$TARGET_SHA" | grep -Eq '^[0-9a-f]{40}$'
           test "$PUBLIC_URL" = 'https://arthello-188-225-38-55.sslip.io'
 
-      - name: Configure pinned SSH identity
+      - name: Configure the confirmed SSH host identity
         env:
           SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
@@ -43,10 +43,34 @@ jobs:
           install -m 0700 -d ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 0600 ~/.ssh/id_ed25519
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts.previous
           test -s ~/.ssh/id_ed25519
-          test -s ~/.ssh/known_hosts
           ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+          deploy_port="${DEPLOY_PORT:-2222}"
+          scanned_hosts="$RUNNER_TEMP/arthello-known-hosts"
+          : > "$scanned_hosts"
+          chmod 0600 "$scanned_hosts"
+          for attempt in 1 2 3; do
+            ssh -p "$deploy_port" \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$scanned_hosts" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=none \
+              -o PubkeyAuthentication=no \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o ConnectTimeout=30 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
+            test -s "$scanned_hosts" && break
+            sleep 5
+          done
+          test -s "$scanned_hosts"
+          actual_fingerprint="$(ssh-keygen -lf "$scanned_hosts" -E sha256 | awk '{print $2; exit}')"
+          printf 'ARTHELLO_SSH_HOST_FINGERPRINT=%s\n' "$actual_fingerprint"
+          test "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scanned_hosts" ~/.ssh/known_hosts
 
       - name: Merge the verified route into live Caddy
         env:
@@ -198,16 +222,26 @@ jobs:
                       return True
               return False
 
-          destination = None
+          destinations = []
           for server in current_servers.values():
               listens = server.get("listen", [])
-              if any(value.endswith(":80") or value == ":80" for value in listens):
-                  destination = server
-                  break
-          if destination is None:
-              destination = next(iter(current_servers.values()))
-          existing = [route for route in destination.get("routes", []) if not targets_domain(route)]
-          destination["routes"] = source_routes + existing
+              if any(
+                  value.endswith(":80")
+                  or value == ":80"
+                  or value.endswith(":443")
+                  or value == ":443"
+                  for value in listens
+              ):
+                  destinations.append(server)
+          if not destinations:
+              destinations = list(current_servers.values())
+          for destination in destinations:
+              existing = [
+                  route
+                  for route in destination.get("routes", [])
+                  if not targets_domain(route)
+              ]
+              destination["routes"] = source_routes + existing
           pathlib.Path(output_path).write_text(json.dumps(current), encoding="utf-8")
           PY
 
