@@ -37,17 +37,42 @@ jobs:
       - name: Configure the confirmed SSH host identity
         env:
           SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
         run: |
           set -Eeuo pipefail
           install -m 0700 -d ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 0600 ~/.ssh/id_ed25519
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts.previous
-          test -s ~/.ssh/id_ed25519
           ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
 
-          rm -f ~/.ssh/known_hosts.previous
+          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
+          test -n "$route_device"
+          sudo ip link set dev "$route_device" mtu 1200
+          deploy_port="${DEPLOY_PORT:-2222}"
+          scanned_hosts="$RUNNER_TEMP/arthello-known-hosts"
+          : > "$scanned_hosts"
+          chmod 0600 "$scanned_hosts"
+          for attempt in 1 2 3 4 5; do
+            printf 'ARTHELLO_SSH_HOST_PROBE_ATTEMPT=%s\n' "$attempt"
+            timeout --signal=TERM --kill-after=5s 40s \
+              ssh -p "$deploy_port" \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$scanned_hosts" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=none \
+              -o PubkeyAuthentication=no \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o ConnectTimeout=30 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
+            test -s "$scanned_hosts" && break
+            sleep 5
+          done
+          test -s "$scanned_hosts"
+          actual_fingerprint="$(ssh-keygen -lf "$scanned_hosts" -E sha256 | awk '{print $2; exit}')"
+          printf 'ARTHELLO_SSH_HOST_FINGERPRINT=%s\n' "$actual_fingerprint"
+          test "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scanned_hosts" ~/.ssh/known_hosts
 
       - name: Merge the verified route into live Caddy
         env:
@@ -58,9 +83,6 @@ jobs:
           route_device="$(ip -4 route show default | awk '{print $5; exit}')"
           test -n "$route_device"
           sudo ip link set dev "$route_device" mtu 1200
-          candidate_hosts="$RUNNER_TEMP/arthello-known-hosts.candidate"
-          : > "$candidate_hosts"
-          chmod 0600 "$candidate_hosts"
           ssh_args=(
             -p "$deploy_port"
             -i ~/.ssh/id_ed25519
@@ -69,8 +91,8 @@ jobs:
             -o PasswordAuthentication=no
             -o KbdInteractiveAuthentication=no
             -o BatchMode=yes
-            -o StrictHostKeyChecking=accept-new
-            -o UserKnownHostsFile="$candidate_hosts"
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile=~/.ssh/known_hosts
             -o GlobalKnownHostsFile=/dev/null
             -o ConnectTimeout=140
             -o ServerAliveInterval=15
@@ -259,10 +281,6 @@ jobs:
               "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$route_payload' | base64 -d > '$job_dir/activate-route.sh'; chmod 0500 '$job_dir/activate-route.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; nohup setsid env TARGET_SHA='$TARGET_SHA' PUBLIC_DOMAIN='arthello-188-225-38-55.sslip.io' JOB_DIR='$job_dir' bash '$job_dir/activate-route.sh' > '$job_dir/activation.log' 2>&1 < /dev/null &" \
               </dev/null >/dev/null 2>&1 || ssh_rc=$?
           ssh_elapsed="$(( $(date +%s) - ssh_started_at ))"
-          test -s "$candidate_hosts"
-          actual_fingerprint="$(ssh-keygen -lf "$candidate_hosts" -E sha256 | awk '{print $2; exit}')"
-          printf 'ARTHELLO_SSH_HOST_FINGERPRINT=%s\n' "$actual_fingerprint"
-          test "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
           case "$ssh_rc" in
             0|124|137) ;;
             255)
