@@ -21,7 +21,7 @@ permissions:
 
 concurrency:
   group: school-1-11-production
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   TRANSPORT_REF: cebe7be40383850ee821031245da8001c0503007
@@ -99,37 +99,103 @@ jobs:
           route_device="$(ip -4 route show default | awk '{print $5; exit}')"
           test -n "$route_device"
           sudo ip link set dev "$route_device" mtu 1200
-          status=1
-          for ssh_attempt in 1 2 3; do
-            set +e
-            ssh -T \
-              -p "$deploy_port" \
-              -i ~/.ssh/id_ed25519 \
-              -o IdentitiesOnly=yes \
-              -o PreferredAuthentications=publickey \
-              -o PasswordAuthentication=no \
-              -o KbdInteractiveAuthentication=no \
-              -o BatchMode=yes \
-              -o ConnectTimeout=20 \
-              -o ServerAliveInterval=15 \
-              -o ServerAliveCountMax=40 \
-              -o IPQoS=none \
-              -o Compression=no \
-              -o KexAlgorithms=curve25519-sha256 \
-              -o HostKeyAlgorithms=ssh-ed25519 \
-              -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
-              -o Ciphers=aes128-ctr \
-              -o MACs=hmac-sha2-256 \
-              "$DEPLOY_USER@$DEPLOY_HOST" \
-              "DELIVERY_REF=$TRANSPORT_REF SCHOOL_HOST=school-188-225-38-55.sslip.io VERIFY_PUBLIC=0 bash -s" \
-              < deploy/repair-deploy.sh 2>&1 | tee -a "$log_file"
-            status=${PIPESTATUS[0]}
-            set -e
-            [ "$status" -eq 0 ] && break
-            printf 'SCHOOL_SSH_RETRY=%s\n' "$ssh_attempt" | tee -a "$log_file"
-            sleep 15
-          done
+
+          ssh_args=(
+            -p "$deploy_port"
+            -i ~/.ssh/id_ed25519
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o ConnectTimeout=25
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=12
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+
+          job_dir="/srv/school-1-11/deploy-jobs/$TRANSPORT_REF"
+          repair_payload="$(base64 -w0 deploy/repair-deploy.sh)"
+          runner_payload="$(base64 -w0 <<'REMOTE'
+          #!/usr/bin/env bash
+          set -uo pipefail
+          status=0
+          bash "$JOB_DIR/repair-deploy.sh" || status=$?
+          if [ "$status" -eq 0 ]; then
+            result="success:$DELIVERY_REF"
+          else
+            result="failed:$status"
+          fi
+          printf '%s\n' "$result" > "$JOB_DIR/status.tmp"
+          mv "$JOB_DIR/status.tmp" "$JOB_DIR/status"
           exit "$status"
+          REMOTE
+          )"
+          test -n "$repair_payload"
+          test -n "$runner_payload"
+
+          launch_rc=0
+          launch_started_at="$(date +%s)"
+          timeout --signal=TERM --kill-after=5s 150s \
+            ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$repair_payload' | base64 -d > '$job_dir/repair-deploy.sh'; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/repair-deploy.sh' '$job_dir/run.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$TRANSPORT_REF' SCHOOL_HOST='school-188-225-38-55.sslip.io' VERIFY_PUBLIC='0' JOB_DIR='$job_dir' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null & deployment_pid=\$!; printf '%s\\n' \"\$deployment_pid\" > '$job_dir/pid'" \
+              </dev/null >/dev/null 2>&1 || launch_rc=$?
+          launch_elapsed="$(( $(date +%s) - launch_started_at ))"
+          case "$launch_rc" in
+            0|124|137) ;;
+            255)
+              test "$launch_elapsed" -ge 90
+              ;;
+            *) exit "$launch_rc" ;;
+          esac
+
+          fetch_remote_log() {
+            timeout --signal=TERM --kill-after=5s 45s \
+              ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                "tail -n 220 '$job_dir/deploy.log' 2>/dev/null || true" \
+                </dev/null 2>/dev/null || true
+          }
+
+          remote_status=""
+          for attempt in $(seq 1 180); do
+            set +e
+            remote_status="$(
+              timeout --signal=TERM --kill-after=5s 30s \
+                ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                  "test -f '$job_dir/status' && cat '$job_dir/status' || true" \
+                  </dev/null 2>/dev/null
+            )"
+            set -e
+            case "$remote_status" in
+              "success:$TRANSPORT_REF")
+                break
+                ;;
+              failed:*)
+                fetch_remote_log | tee "$log_file"
+                printf 'SCHOOL_REMOTE_STATUS=%s\n' "$remote_status" | tee -a "$log_file"
+                exit 1
+                ;;
+            esac
+            if [ "$attempt" -eq 180 ]; then
+              fetch_remote_log | tee "$log_file"
+              printf 'SCHOOL_REMOTE_STATUS=timeout\n' | tee -a "$log_file"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          test "$remote_status" = "success:$TRANSPORT_REF"
+          timeout --signal=TERM --kill-after=5s 45s \
+            ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "grep -E '^(SCHOOL_|Error:|error:|curl:|ssh:|Permission denied|Host key|Connection closed)' '$job_dir/deploy.log' | tail -n 160 || true" \
+              </dev/null 2>/dev/null | tee "$log_file" || true
+          printf 'SCHOOL_REMOTE_JOB=SUCCESS\n' | tee -a "$log_file"
 
       - name: Verify public full-screen release
         id: verify_public
@@ -146,16 +212,26 @@ jobs:
             sleep 3
           done
           test "$healthy" -eq 1
+
           login_html="$RUNNER_TEMP/school-login.html"
-          css_file="$RUNNER_TEMP/school-globals.css"
+          css_paths="$RUNNER_TEMP/school-css-paths.txt"
+          css_file="$RUNNER_TEMP/school-all.css"
           curl --fail --silent --show-error "$SCHOOL_ORIGIN/login" > "$login_html"
-          css_path="$(grep -oE '/_next/static/css/[^"?]+\.css' "$login_html" | head -1)"
-          test -n "$css_path"
-          curl --fail --silent --show-error "$SCHOOL_ORIGIN$css_path" > "$css_file"
+          grep -oE '/_next/static/css/[^"?]+\.css' "$login_html" | sort -u > "$css_paths"
+          test -s "$css_paths"
+          : > "$css_file"
+          while IFS= read -r css_path; do
+            curl --fail --silent --show-error "$SCHOOL_ORIGIN$css_path" >> "$css_file"
+            printf '\n' >> "$css_file"
+          done < "$css_paths"
+
           grep -F '.l0-stage{width:100%;height:100svh;overflow:hidden' "$css_file" >/dev/null
           grep -F 'student-dashboard-hero-v1.webp' "$css_file" >/dev/null
+          grep -F -- '--mobile-gutter:16px' "$css_file" >/dev/null
+          grep -F '.admin-table-head{display:none}' "$css_file" >/dev/null
           printf 'SCHOOL_PUBLIC_HTTPS=OK\n'
           printf 'SCHOOL_FULLSCREEN_CSS=VERIFIED\n'
+          printf 'SCHOOL_MOBILE_POLISH=VERIFIED\n'
 
       - name: Publish sanitized production result
         if: always()
@@ -177,7 +253,7 @@ jobs:
             printf 'Sanitized deployment markers:\n\n```text\n'
             if [ -f "$log_file" ]; then
               grep -E '^(SCHOOL_|Error:|error:|curl:|ssh:|Permission denied|Host key|Connection closed)' "$log_file" \
-                | tail -n 100 \
+                | tail -n 120 \
                 | sed -E 's/(PASSWORD|TOKEN|SECRET|PRIVATE_KEY)=.*/\1=[REDACTED]/Ig' || true
             else
               printf 'No deployment log was produced.\n'
