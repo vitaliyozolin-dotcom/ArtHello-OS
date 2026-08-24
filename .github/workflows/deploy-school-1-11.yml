@@ -60,7 +60,7 @@ jobs:
        github.event.pull_request.head.ref == 'codex/trigger-school-fullscreen-20260824')
     needs: announce
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     environment: production-ru
     steps:
       - uses: actions/checkout@v4
@@ -170,20 +170,31 @@ jobs:
           test -n "$repair_payload"
           test -n "$runner_payload"
 
-          launch_rc=0
-          launch_started_at="$(date +%s)"
-          timeout --signal=TERM --kill-after=5s 240s \
-            ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$repair_payload' | base64 -d > '$job_dir/repair-deploy.sh'; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/repair-deploy.sh' '$job_dir/run.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$TRANSPORT_REF' SCHOOL_HOST='school-188-225-38-55.sslip.io' VERIFY_PUBLIC='0' JOB_DIR='$job_dir' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null & deployment_pid=\$!; printf '%s\\n' \"\$deployment_pid\" > '$job_dir/pid'" \
-              </dev/null >/dev/null 2>&1 || launch_rc=$?
-          launch_elapsed="$(( $(date +%s) - launch_started_at ))"
-          case "$launch_rc" in
-            0|124|137) ;;
-            255)
-              test "$launch_elapsed" -ge 90
-              ;;
-            *) exit "$launch_rc" ;;
-          esac
+          launch_observed=0
+          for launch_attempt in 1 2 3 4; do
+            launch_rc=0
+            launch_started_at="$(date +%s)"
+            timeout --signal=TERM --kill-after=5s 240s \
+              ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                "set -Eeuo pipefail; install -d -m 0750 '$job_dir'; if test -f '$job_dir/status' && grep -Fxq 'success:$TRANSPORT_REF' '$job_dir/status'; then exit 0; elif test -s '$job_dir/pid' && kill -0 \$(cat '$job_dir/pid') 2>/dev/null; then exit 0; else printf '%s' '$repair_payload' | base64 -d > '$job_dir/repair-deploy.sh'; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/repair-deploy.sh' '$job_dir/run.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$TRANSPORT_REF' SCHOOL_HOST='school-188-225-38-55.sslip.io' VERIFY_PUBLIC='0' JOB_DIR='$job_dir' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null & deployment_pid=\$!; printf '%s\\n' \"\$deployment_pid\" > '$job_dir/pid'; fi" \
+                </dev/null >/dev/null 2>&1 || launch_rc=$?
+            launch_elapsed="$(( $(date +%s) - launch_started_at ))"
+            case "$launch_rc" in
+              0)
+                launch_observed=1
+                break
+                ;;
+              124|137) ;;
+              255)
+                test "$launch_elapsed" -ge 90
+                ;;
+              *) exit "$launch_rc" ;;
+            esac
+            printf 'SCHOOL_REMOTE_LAUNCH_RETRY=%s rc=%s elapsed=%s\n' \
+              "$launch_attempt" "$launch_rc" "$launch_elapsed"
+            sleep 20
+          done
+          printf 'SCHOOL_REMOTE_LAUNCH_OBSERVED=%s\n' "$launch_observed"
 
           fetch_remote_log() {
             timeout --signal=TERM --kill-after=5s 180s \
