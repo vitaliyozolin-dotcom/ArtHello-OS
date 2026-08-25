@@ -30,6 +30,10 @@ const runtime = new Miniflare({
   assets: {
     directory: `${applicationRoot}/dist/client`,
     binding: "ASSETS",
+    routerConfig: {
+      invoke_user_worker_ahead_of_assets: false,
+      has_user_worker: true,
+    },
   },
 });
 
