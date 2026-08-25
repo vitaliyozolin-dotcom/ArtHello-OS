@@ -19,39 +19,58 @@ jobs:
       - arthello-gateway
     timeout-minutes: 10
     steps:
-      - name: Verify runner host
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = '188.225.38.55'
-          printf 'RUNNER_HOST=188.225.38.55\n'
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
 
-      - name: Verify Docker and public Caddy
+      - name: Inspect v44 source and deployed assets
         shell: bash
         run: |
           set -Eeuo pipefail
-          docker version >/dev/null
-          docker compose version >/dev/null
-          test "$(docker inspect --format '{{.State.Running}}' stroios-caddy-1)" = true
-          printf 'DOCKER=OK\nCADDY=OK\n'
+          rm -rf "$RUNNER_TEMP/v44-diag"
+          mkdir -p "$RUNNER_TEMP/v44-diag"
+          cat deploy/v44/arthello-sites-v44-source.tar.gz.part-* > "$RUNNER_TEMP/v44-source.tar.gz"
+          tar -xzf "$RUNNER_TEMP/v44-source.tar.gz" -C "$RUNNER_TEMP/v44-diag"
 
-      - name: Verify existing public services
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          curl --fail --silent --show-error --max-time 20 \
-            https://school-188-225-38-55.sslip.io/api/health \
-            | grep -F '"status":"ok"' >/dev/null
-          curl --fail --silent --show-error --max-time 20 \
-            https://arthello-188-225-38-55.sslip.io/ \
-            >/dev/null
-          printf 'SCHOOL_PUBLIC=OK\nARTHELLO_PUBLIC=REACHABLE\n'
+          echo '=== SESSION TEXT SOURCE ==='
+          grep -R -n -B 12 -A 30 --exclude-dir=node_modules --exclude-dir=.git \
+            'Проверяем защищённую сессию' "$RUNNER_TEMP/v44-diag" || true
 
-      - name: Verify persistent external route import
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          docker exec stroios-caddy-1 sh -lc \
-            "grep -F 'import /data/external-routes.caddy' /etc/caddy/Caddyfile >/dev/null"
-          docker exec stroios-caddy-1 test -s /data/external-routes.caddy
-          printf 'PERSISTENT_ROUTES=OK\n'
+          echo '=== AUTH / SESSION FILE CANDIDATES ==='
+          grep -R -l -E --exclude-dir=node_modules --exclude-dir=.git \
+            'authenticated workspace identity|session|auth|Auth|protected' "$RUNNER_TEMP/v44-diag" \
+            | head -n 80 || true
+
+          echo '=== RUNTIME SERVER ==='
+          sed -n '1,280p' "$RUNNER_TEMP/v44-diag/production/runtime-server.mjs"
+
+          echo '=== PUBLIC ROOT HEADERS ==='
+          curl -fsS -D "$RUNNER_TEMP/root.headers" -o "$RUNNER_TEMP/root.html" \
+            'https://arthello-188-225-38-55.sslip.io/?diag=asset-check'
+          cat "$RUNNER_TEMP/root.headers"
+
+          echo '=== PUBLIC ROOT ASSET REFS ==='
+          grep -oE '(src|href)="[^"]+"' "$RUNNER_TEMP/root.html" | head -n 80 || true
+
+          echo '=== ROOT BODY MARKERS ==='
+          grep -oE 'Проверяем защищённую сессию|ArtHello OS|<script[^>]*>|<link[^>]*>' "$RUNNER_TEMP/root.html" | head -n 80 || true
+
+          echo '=== ASSET STATUS ==='
+          python3 - <<'PY'
+          import re, subprocess, pathlib
+          html = pathlib.Path(__import__('os').environ['RUNNER_TEMP'] + '/root.html').read_text(errors='replace')
+          refs = []
+          for m in re.finditer(r'(?:src|href)=["\']([^"\']+)["\']', html):
+              p = m.group(1)
+              if p.startswith('/') and p not in refs:
+                  refs.append(p)
+          for p in refs[:30]:
+              url = 'https://arthello-188-225-38-55.sslip.io' + p
+              cp = subprocess.run(['curl','-sS','-o','/dev/null','-w','%{http_code} %{content_type}', '--max-time','20',url], capture_output=True, text=True)
+              print(cp.stdout.strip(), p)
+          PY
+
+          echo '=== DIAG COMPLETE ==='
