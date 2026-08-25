@@ -23,11 +23,7 @@ env:
 
 jobs:
   deploy:
-    runs-on:
-      - self-hosted
-      - linux
-      - x64
-      - arthello-gateway
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 45
     environment: production-ru
 
@@ -47,11 +43,9 @@ jobs:
           docker version >/dev/null
           docker compose version >/dev/null
           test "$(docker inspect --format '{{.State.Running}}' "$CADDY_CONTAINER")" = true
-          docker exec "$CADDY_CONTAINER" sh -lc \
-            "grep -F 'import /data/external-routes.caddy' /etc/caddy/Caddyfile >/dev/null"
+          docker exec "$CADDY_CONTAINER" sh -lc "grep -F 'import /data/external-routes.caddy' /etc/caddy/Caddyfile >/dev/null"
           docker exec "$CADDY_CONTAINER" test -s /data/external-routes.caddy
-          curl --fail --silent --show-error --max-time 20 \
-            "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+          curl --fail --silent --show-error --max-time 20 "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null
           printf 'ARTHELLO_PREFLIGHT=OK\n'
 
       - name: Build candidate locally
@@ -59,11 +53,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           image="arthello-direct:$GITHUB_SHA"
-          docker build \
-            --file deploy/v44/Dockerfile \
-            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-            --tag "$image" \
-            .
+          docker build --file deploy/v44/Dockerfile --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag "$image" .
           test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
           printf 'ARTHELLO_BUILD=OK image=%s\n' "$image"
 
@@ -77,6 +67,19 @@ jobs:
           network="$(docker inspect "$CADDY_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1)"
           test -n "$network"
 
+          secret_dir="$HOME/.config/arthello"
+          secret_file="$secret_dir/bootstrap-password"
+          mkdir -p "$secret_dir"
+          chmod 700 "$secret_dir"
+          if [ ! -s "$secret_file" ]; then
+            umask 077
+            python3 -c 'import secrets; print(secrets.token_urlsafe(24), end="")' > "$secret_file"
+          fi
+          chmod 600 "$secret_file"
+          bootstrap_password="$(cat "$secret_file")"
+          test -n "$bootstrap_password"
+          echo "::add-mask::$bootstrap_password"
+
           docker rm -f "$candidate" >/dev/null 2>&1 || true
           docker volume create arthello-direct-v44-data >/dev/null
           docker run -d \
@@ -88,29 +91,47 @@ jobs:
             -e NODE_ENV=production \
             -e PORT=8081 \
             -e ARTHELLO_D1_PATH=/data/d1 \
+            -e ARTHELLO_BOOTSTRAP_LOGIN=owner \
+            -e ARTHELLO_BOOTSTRAP_PASSWORD="$bootstrap_password" \
             -v arthello-direct-v44-data:/data \
             "$image" >/dev/null
 
           ready=0
           for attempt in $(seq 1 90); do
-            if docker exec "$candidate" node -e \
-              "fetch('http://127.0.0.1:8081/api/health').then(async r=>{if(!r.ok)process.exit(1);const t=await r.text();if(!t.includes('ok'))process.exit(1)}).catch(()=>process.exit(1))"; then
+            if docker exec "$candidate" node - <<'NODE'
+          const base = 'http://127.0.0.1:8081';
+          try {
+            const health = await fetch(base + '/api/health');
+            if (!health.ok || !(await health.text()).includes('"status":"ok"')) process.exit(1);
+            const root = await fetch(base + '/');
+            if (!root.ok) process.exit(1);
+            const html = await root.text();
+            const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
+            if (refs.length < 2) process.exit(1);
+            for (const path of [...new Set(refs)]) {
+              const asset = await fetch(base + path);
+              if (!asset.ok) process.exit(1);
+            }
+            const me = await fetch(base + '/api/auth/me');
+            if (me.status !== 401) process.exit(1);
+          } catch { process.exit(1); }
+          NODE
+            then
               ready=1
               break
             fi
             sleep 2
           done
           if [ "$ready" -ne 1 ]; then
-            docker logs --tail 150 "$candidate" >&2 || true
+            docker logs --tail 200 "$candidate" >&2 || true
             docker rm -f "$candidate" >/dev/null 2>&1 || true
             exit 1
           fi
 
           printf 'name=%s\n' "$candidate" >> "$GITHUB_OUTPUT"
-          printf 'ARTHELLO_CANDIDATE=HEALTHY name=%s\n' "$candidate"
+          printf 'ARTHELLO_CANDIDATE=READY_WITH_ASSETS_AND_AUTH name=%s\n' "$candidate"
 
       - name: Atomic Caddy cutover with rollback
-        id: cutover
         shell: bash
         env:
           CANDIDATE: ${{ steps.candidate.outputs.name }}
@@ -121,7 +142,6 @@ jobs:
           mkdir -p "$work"
           backup="$work/external-routes.before.caddy"
           candidate_routes="$work/external-routes.candidate.caddy"
-
           docker cp "$CADDY_CONTAINER:/data/external-routes.caddy" "$backup"
           test -s "$backup"
 
@@ -130,8 +150,7 @@ jobs:
             if [ "$rc" -ne 0 ]; then
               printf 'ARTHELLO_ROLLBACK=START\n' >&2
               docker cp "$backup" "$CADDY_CONTAINER:/data/external-routes.caddy" >/dev/null 2>&1 || true
-              docker exec "$CADDY_CONTAINER" caddy reload \
-                --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+              docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
               docker rm -f "$CANDIDATE" >/dev/null 2>&1 || true
               printf 'ARTHELLO_ROLLBACK=COMPLETE\n' >&2
             fi
@@ -173,35 +192,42 @@ jobs:
           EOF
 
           docker cp "$candidate_routes" "$CADDY_CONTAINER:/data/external-routes.caddy.new"
-          docker exec "$CADDY_CONTAINER" sh -lc \
-            "sed 's#/data/external-routes.caddy#/data/external-routes.caddy.new#' /etc/caddy/Caddyfile > /tmp/Caddyfile.arthello-candidate"
-          docker exec "$CADDY_CONTAINER" caddy validate \
-            --config /tmp/Caddyfile.arthello-candidate --adapter caddyfile >/dev/null
+          docker exec "$CADDY_CONTAINER" sh -lc "sed 's#/data/external-routes.caddy#/data/external-routes.caddy.new#' /etc/caddy/Caddyfile > /tmp/Caddyfile.arthello-candidate"
+          docker exec "$CADDY_CONTAINER" caddy validate --config /tmp/Caddyfile.arthello-candidate --adapter caddyfile >/dev/null
+          docker exec "$CADDY_CONTAINER" sh -lc 'mv /data/external-routes.caddy.new /data/external-routes.caddy'
+          docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 
-          docker exec "$CADDY_CONTAINER" sh -lc \
-            'mv /data/external-routes.caddy.new /data/external-routes.caddy'
-          docker exec "$CADDY_CONTAINER" caddy reload \
-            --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
-
-          public_ok=0
-          for attempt in $(seq 1 60); do
-            nonce="$GITHUB_RUN_ID-$attempt"
-            body="$(curl --fail --silent --show-error --max-time 20 -H 'Cache-Control: no-cache' "$PUBLIC_URL/?probe=$nonce" || true)"
-            health="$(curl --fail --silent --show-error --max-time 20 -H 'Cache-Control: no-cache' "$PUBLIC_URL/api/health?probe=$nonce" || true)"
-            if grep -F 'ArtHello' <<<"$body" >/dev/null \
-              && grep -F '"status":"ok"' <<<"$health" >/dev/null; then
-              public_ok=1
-              break
-            fi
-            sleep 3
-          done
-          test "$public_ok" -eq 1
-
-          curl --fail --silent --show-error --max-time 20 \
-            "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+          node - <<'NODE'
+          const base = process.env.PUBLIC_URL;
+          const school = process.env.SCHOOL_URL;
+          for (let attempt = 1; attempt <= 40; attempt += 1) {
+            try {
+              const root = await fetch(`${base}/?probe=${process.env.GITHUB_RUN_ID}-${attempt}`, { headers: { 'cache-control': 'no-cache' } });
+              const html = await root.text();
+              const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
+              if (!root.ok || refs.length < 2) throw new Error('root/assets refs');
+              for (const path of [...new Set(refs)]) {
+                const asset = await fetch(base + path, { headers: { 'cache-control': 'no-cache' } });
+                if (!asset.ok) throw new Error(`asset ${path} ${asset.status}`);
+              }
+              const health = await fetch(base + '/api/health', { headers: { 'cache-control': 'no-cache' } });
+              if (!health.ok || !(await health.text()).includes('"status":"ok"')) throw new Error('health');
+              const me = await fetch(base + '/api/auth/me', { headers: { 'cache-control': 'no-cache' } });
+              if (me.status !== 401) throw new Error(`auth me ${me.status}`);
+              const schoolHealth = await fetch(school + '/api/health', { headers: { 'cache-control': 'no-cache' } });
+              if (!schoolHealth.ok || !(await schoolHealth.text()).includes('"status":"ok"')) throw new Error('school');
+              console.log('ARTHELLO_PUBLIC_ASSETS=OK');
+              console.log('ARTHELLO_PUBLIC_AUTH=OK');
+              console.log('SCHOOL_ROUTE_PRESERVED=OK');
+              process.exit(0);
+            } catch (error) {
+              if (attempt === 40) { console.error(error); process.exit(1); }
+              await new Promise((resolve) => setTimeout(resolve, 3000));
+            }
+          }
+          NODE
 
           trap - EXIT
-          printf 'ARTHELLO_PUBLIC=OK\nSCHOOL_ROUTE_PRESERVED=OK\n'
 
       - name: Remove superseded ArtHello containers
         if: success()
@@ -215,7 +241,6 @@ jobs:
             [ "$old" = "$CANDIDATE" ] && continue
             docker rm -f "$old" >/dev/null 2>&1 || true
           done < <(docker ps -a --filter 'name=^/arthello-direct-' --format '{{.Names}}')
-
           docker image prune -f >/dev/null || true
           printf 'ARTHELLO_RELEASE_SHA=%s\nARTHELLO_RELEASE_CONTAINER=%s\n' "$GITHUB_SHA" "$CANDIDATE"
 
@@ -230,5 +255,6 @@ jobs:
             echo "- Commit: $GITHUB_SHA"
             echo "- Public: $PUBLIC_URL"
             echo "- School guard: $SCHOOL_URL"
+            echo "- Acceptance: assets + auth endpoint + health + School guard"
             echo "- Result: ${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"

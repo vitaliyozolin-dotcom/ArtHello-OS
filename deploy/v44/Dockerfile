@@ -4,11 +4,13 @@ FROM node:24-bookworm-slim AS application
 ENV CI=1
 WORKDIR /app
 COPY deploy/v44/arthello-sites-v44-source.tar.gz.part-* /tmp/arthello-source-parts/
+COPY deploy/v44/overrides/ /tmp/arthello-overrides/
 RUN cat /tmp/arthello-source-parts/arthello-sites-v44-source.tar.gz.part-* > /tmp/arthello-source.tar.gz \
     && tar -xzf /tmp/arthello-source.tar.gz -C /app \
     && rm -f /tmp/arthello-source.tar.gz \
     && rm -rf /tmp/arthello-source-parts \
-    && sed -i '/^[[:space:]]*routerConfig: {$/,/^[[:space:]]*},$/d' /app/production/runtime-server.mjs \
+    && cp -a /tmp/arthello-overrides/. /app/ \
+    && rm -rf /tmp/arthello-overrides \
     && ! grep -q 'invoke_user_worker_ahead_of_assets' /app/production/runtime-server.mjs \
     && npm ci \
     && npm run lint \
