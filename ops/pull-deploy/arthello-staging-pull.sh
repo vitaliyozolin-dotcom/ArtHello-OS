@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO="vitaliyozolin-dotcom/ArtHello-OS"
+REPO_SSH="git@github.com:vitaliyozolin-dotcom/ArtHello-OS.git"
 BRANCH="develop"
 WORK_ROOT="/srv/arthello-staging-pull"
 SRC_DIR="$WORK_ROOT/source"
 STATE_DIR="$WORK_ROOT/state"
-TOKEN_FILE="/etc/arthello/github-token"
+SSH_KEY="/root/.ssh/arthello_repo_ed25519"
 CADDY_CONTAINER="stroios-caddy-1"
 STAGING_HOST="test-arthello-188-225-38-55.sslip.io"
 STAGING_URL="https://$STAGING_HOST"
@@ -19,49 +19,44 @@ flock -n 9 || exit 0
 log(){ printf '[%s] %s\n' "$(date -Is)" "$*"; }
 fail(){ log "ERROR: $*"; exit 1; }
 
+command -v git >/dev/null || fail "git missing"
 command -v curl >/dev/null || fail "curl missing"
 command -v docker >/dev/null || fail "docker missing"
-command -v tar >/dev/null || fail "tar missing"
-[ -s "$TOKEN_FILE" ] || fail "missing $TOKEN_FILE"
+[ -r "$SSH_KEY" ] || fail "missing SSH deploy key: $SSH_KEY"
 [ -S /var/run/docker.sock ] || fail "docker socket missing"
 [ "$(docker inspect --format '{{.State.Running}}' "$CADDY_CONTAINER" 2>/dev/null || true)" = true ] || fail "Caddy container is not running"
 
-TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE")"
-REMOTE_SHA="$(curl -fsS --connect-timeout 10 --max-time 30 \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Accept: application/vnd.github+json' \
-  -H 'X-GitHub-Api-Version: 2022-11-28' \
-  "https://api.github.com/repos/$REPO/commits/$BRANCH" | sed -n 's/^[[:space:]]*"sha":[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p' | head -n1)"
-[ -n "$REMOTE_SHA" ] || fail "cannot resolve remote SHA"
+GIT_SSH_COMMAND="ssh -i $SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+export GIT_SSH_COMMAND
 
+if [ ! -d "$SRC_DIR/.git" ]; then
+  rm -rf "$SRC_DIR"
+  git clone --depth 1 --branch "$BRANCH" "$REPO_SSH" "$SRC_DIR"
+else
+  git -C "$SRC_DIR" fetch --depth 1 origin "$BRANCH"
+  git -C "$SRC_DIR" checkout -B "$BRANCH" FETCH_HEAD
+  git -C "$SRC_DIR" reset --hard FETCH_HEAD
+  git -C "$SRC_DIR" clean -ffdx
+fi
+
+REMOTE_SHA="$(git -C "$SRC_DIR" rev-parse HEAD)"
 CURRENT_SHA="$(cat "$STATE_DIR/deployed-sha" 2>/dev/null || true)"
 if [ "$REMOTE_SHA" = "$CURRENT_SHA" ]; then exit 0; fi
 log "new staging revision: $REMOTE_SHA"
-
-TMP="$WORK_ROOT/.tmp-$REMOTE_SHA"
-ARCHIVE="$WORK_ROOT/.src-$REMOTE_SHA.tar.gz"
-rm -rf "$TMP" "$ARCHIVE"
-mkdir -p "$TMP"
-
-curl -fsSL --retry 4 --retry-all-errors --connect-timeout 15 --max-time 180 \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Accept: application/vnd.github+json' \
-  "https://api.github.com/repos/$REPO/tarball/$REMOTE_SHA" -o "$ARCHIVE"
-tar -xzf "$ARCHIVE" -C "$TMP" --strip-components=1
-rm -f "$ARCHIVE"
 
 IMAGE="arthello-staging:$REMOTE_SHA"
 CANDIDATE="arthello-staging-${REMOTE_SHA:0:12}"
 PREVIOUS_CONTAINER="$(cat "$STATE_DIR/container" 2>/dev/null || true)"
 NETWORK="$(docker inspect "$CADDY_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1)"
 [ -n "$NETWORK" ] || fail "cannot detect Caddy network"
-BOOTSTRAP_FILE="/run/secrets/bootstrap-password"
-[ -s "$BOOTSTRAP_FILE" ] || fail "bootstrap password secret missing"
+BOOTSTRAP_FILE="/home/github-runner/.config/arthello/bootstrap-password"
+[ -s "$BOOTSTRAP_FILE" ] || BOOTSTRAP_FILE="/root/.config/arthello/bootstrap-password"
+[ -s "$BOOTSTRAP_FILE" ] || fail "bootstrap password file missing"
 BOOTSTRAP_PASSWORD="$(cat "$BOOTSTRAP_FILE")"
 
-docker build --file "$TMP/deploy/v44/Dockerfile" \
+docker build --file "$SRC_DIR/deploy/v44/Dockerfile" \
   --label "org.opencontainers.image.revision=$REMOTE_SHA" \
-  --tag "$IMAGE" "$TMP"
+  --tag "$IMAGE" "$SRC_DIR"
 
 docker rm -f "$CANDIDATE" >/dev/null 2>&1 || true
 docker volume create arthello-staging-v44-data >/dev/null
@@ -83,7 +78,10 @@ docker run -d \
 ready=0
 for _ in $(seq 1 60); do
   state="$(docker inspect "$CANDIDATE" --format '{{.State.Status}}' 2>/dev/null || true)"
-  if [ "$state" = running ] && docker exec "$CANDIDATE" node -e "fetch('http://127.0.0.1:8081/api/health').then(async r=>process.exit(r.ok&&(await r.text()).includes('\\\"status\\\":\\\"ok\\\"')?0:1)).catch(()=>process.exit(1))"; then ready=1; break; fi
+  if [ "$state" = running ] && docker exec "$CANDIDATE" node -e "fetch('http://127.0.0.1:8081/api/health').then(async r=>process.exit(r.ok&&(await r.text()).includes('\\\"status\\\":\\\"ok\\\"')?0:1)).catch(()=>process.exit(1))"; then
+    ready=1
+    break
+  fi
   sleep 2
 done
 if [ "$ready" -ne 1 ]; then
@@ -129,7 +127,8 @@ for _ in $(seq 1 40); do
   if curl -fsS --max-time 20 "$STAGING_URL/api/health" | grep -F '"status":"ok"' >/dev/null \
     && curl -fsS --max-time 20 "$STAGING_URL/settings/access" | grep -F 'Пользователи и доступы' >/dev/null \
     && curl -fsSI --max-time 20 "$STAGING_URL/settings/access" | grep -qi '^x-arthello-environment: staging'; then
-    public_ok=1; break
+    public_ok=1
+    break
   fi
   sleep 3
 done
@@ -144,10 +143,10 @@ fi
 
 printf '%s\n' "$REMOTE_SHA" > "$STATE_DIR/deployed-sha"
 printf '%s\n' "$CANDIDATE" > "$STATE_DIR/container"
-rm -rf "$SRC_DIR"
-mv "$TMP" "$SRC_DIR"
 
-if [ -n "$PREVIOUS_CONTAINER" ] && [ "$PREVIOUS_CONTAINER" != "$CANDIDATE" ]; then docker rm -f "$PREVIOUS_CONTAINER" >/dev/null 2>&1 || true; fi
+if [ -n "$PREVIOUS_CONTAINER" ] && [ "$PREVIOUS_CONTAINER" != "$CANDIDATE" ]; then
+  docker rm -f "$PREVIOUS_CONTAINER" >/dev/null 2>&1 || true
+fi
 while IFS= read -r old; do
   [ -n "$old" ] || continue
   [ "$old" = "$CANDIDATE" ] && continue
