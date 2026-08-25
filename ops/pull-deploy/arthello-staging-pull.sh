@@ -10,22 +10,22 @@ TOKEN_FILE="/etc/arthello/github-token"
 CADDY_CONTAINER="stroios-caddy-1"
 STAGING_HOST="test-arthello-188-225-38-55.sslip.io"
 STAGING_URL="https://$STAGING_HOST"
-LOCK_FILE="/run/lock/arthello-staging-pull.lock"
+LOCK_FILE="$WORK_ROOT/deploy.lock"
 
+mkdir -p "$WORK_ROOT" "$STATE_DIR"
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
 
 log(){ printf '[%s] %s\n' "$(date -Is)" "$*"; }
 fail(){ log "ERROR: $*"; exit 1; }
 
-[ "$(id -u)" -eq 0 ] || fail "must run as root"
 command -v curl >/dev/null || fail "curl missing"
 command -v docker >/dev/null || fail "docker missing"
 command -v tar >/dev/null || fail "tar missing"
 [ -s "$TOKEN_FILE" ] || fail "missing $TOKEN_FILE"
+[ -S /var/run/docker.sock ] || fail "docker socket missing"
 [ "$(docker inspect --format '{{.State.Running}}' "$CADDY_CONTAINER" 2>/dev/null || true)" = true ] || fail "Caddy container is not running"
 
-mkdir -p "$WORK_ROOT" "$STATE_DIR"
 TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE")"
 REMOTE_SHA="$(curl -fsS --connect-timeout 10 --max-time 30 \
   -H "Authorization: Bearer $TOKEN" \
@@ -35,9 +35,7 @@ REMOTE_SHA="$(curl -fsS --connect-timeout 10 --max-time 30 \
 [ -n "$REMOTE_SHA" ] || fail "cannot resolve remote SHA"
 
 CURRENT_SHA="$(cat "$STATE_DIR/deployed-sha" 2>/dev/null || true)"
-if [ "$REMOTE_SHA" = "$CURRENT_SHA" ]; then
-  exit 0
-fi
+if [ "$REMOTE_SHA" = "$CURRENT_SHA" ]; then exit 0; fi
 log "new staging revision: $REMOTE_SHA"
 
 TMP="$WORK_ROOT/.tmp-$REMOTE_SHA"
@@ -57,9 +55,8 @@ CANDIDATE="arthello-staging-${REMOTE_SHA:0:12}"
 PREVIOUS_CONTAINER="$(cat "$STATE_DIR/container" 2>/dev/null || true)"
 NETWORK="$(docker inspect "$CADDY_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1)"
 [ -n "$NETWORK" ] || fail "cannot detect Caddy network"
-BOOTSTRAP_FILE="/home/github-runner/.config/arthello/bootstrap-password"
-[ -s "$BOOTSTRAP_FILE" ] || BOOTSTRAP_FILE="/root/.config/arthello/bootstrap-password"
-[ -s "$BOOTSTRAP_FILE" ] || fail "bootstrap password file missing"
+BOOTSTRAP_FILE="/run/secrets/bootstrap-password"
+[ -s "$BOOTSTRAP_FILE" ] || fail "bootstrap password secret missing"
 BOOTSTRAP_PASSWORD="$(cat "$BOOTSTRAP_FILE")"
 
 docker build --file "$TMP/deploy/v44/Dockerfile" \
@@ -86,9 +83,7 @@ docker run -d \
 ready=0
 for _ in $(seq 1 60); do
   state="$(docker inspect "$CANDIDATE" --format '{{.State.Status}}' 2>/dev/null || true)"
-  if [ "$state" = running ] && docker exec "$CANDIDATE" node -e "fetch('http://127.0.0.1:8081/api/health').then(async r=>process.exit(r.ok&&(await r.text()).includes('\\\"status\\\":\\\"ok\\\"')?0:1)).catch(()=>process.exit(1))"; then
-    ready=1; break
-  fi
+  if [ "$state" = running ] && docker exec "$CANDIDATE" node -e "fetch('http://127.0.0.1:8081/api/health').then(async r=>process.exit(r.ok&&(await r.text()).includes('\\\"status\\\":\\\"ok\\\"')?0:1)).catch(()=>process.exit(1))"; then ready=1; break; fi
   sleep 2
 done
 if [ "$ready" -ne 1 ]; then
@@ -152,9 +147,7 @@ printf '%s\n' "$CANDIDATE" > "$STATE_DIR/container"
 rm -rf "$SRC_DIR"
 mv "$TMP" "$SRC_DIR"
 
-if [ -n "$PREVIOUS_CONTAINER" ] && [ "$PREVIOUS_CONTAINER" != "$CANDIDATE" ]; then
-  docker rm -f "$PREVIOUS_CONTAINER" >/dev/null 2>&1 || true
-fi
+if [ -n "$PREVIOUS_CONTAINER" ] && [ "$PREVIOUS_CONTAINER" != "$CANDIDATE" ]; then docker rm -f "$PREVIOUS_CONTAINER" >/dev/null 2>&1 || true; fi
 while IFS= read -r old; do
   [ -n "$old" ] || continue
   [ "$old" = "$CANDIDATE" ] && continue
