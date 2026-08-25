@@ -1,0 +1,57 @@
+name: Self-hosted gateway smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/self-hosted-gateway-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - arthello-gateway
+    timeout-minutes: 10
+    steps:
+      - name: Verify runner host
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = '188.225.38.55'
+          printf 'RUNNER_HOST=188.225.38.55\n'
+
+      - name: Verify Docker and public Caddy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker version >/dev/null
+          docker compose version >/dev/null
+          test "$(docker inspect --format '{{.State.Running}}' stroios-caddy-1)" = true
+          printf 'DOCKER=OK\nCADDY=OK\n'
+
+      - name: Verify existing public services
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --max-time 20 \
+            https://school-188-225-38-55.sslip.io/api/health \
+            | grep -F '"status":"ok"' >/dev/null
+          curl --fail --silent --show-error --max-time 20 \
+            https://arthello-188-225-38-55.sslip.io/ \
+            >/dev/null
+          printf 'SCHOOL_PUBLIC=OK\nARTHELLO_PUBLIC=REACHABLE\n'
+
+      - name: Verify persistent external route import
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker exec stroios-caddy-1 sh -lc \
+            "grep -F 'import /data/external-routes.caddy' /etc/caddy/Caddyfile >/dev/null"
+          docker exec stroios-caddy-1 test -s /data/external-routes.caddy
+          printf 'PERSISTENT_ROUTES=OK\n'
