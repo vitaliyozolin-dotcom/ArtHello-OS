@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-html-link-for-pages */
 
 import { FormEvent, useEffect, useState } from "react";
 
@@ -62,7 +63,7 @@ export default function AccessSettingsPage() {
   return <main style={{maxWidth:1180,margin:"0 auto",padding:"32px 24px",fontFamily:"Inter,system-ui,sans-serif",color:"#171717"}}>
     <div style={{display:"flex",justifyContent:"space-between",gap:24,alignItems:"end",marginBottom:28}}>
       <div><div style={{fontSize:13,color:"#777",marginBottom:7}}>Настройки</div><h1 style={{margin:0,fontSize:32,letterSpacing:"-.03em"}}>Пользователи и доступы</h1><p style={{color:"#6c6c6c",margin:"10px 0 0"}}>Сотрудник получает одноразовую ссылку и сам устанавливает пароль.</p></div>
-      {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}<a href="/" style={{color:"#171717",textDecoration:"none",border:"1px solid #ddd",borderRadius:12,padding:"10px 14px"}}>← В систему</a>
+      <a href="/" style={{color:"#171717",textDecoration:"none",border:"1px solid #ddd",borderRadius:12,padding:"10px 14px"}}>← В систему</a>
     </div>
 
     <section style={{display:"grid",gridTemplateColumns:"minmax(320px,420px) minmax(0,1fr)",gap:24,alignItems:"start"}}>
