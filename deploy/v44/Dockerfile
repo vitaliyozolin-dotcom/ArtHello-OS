@@ -11,7 +11,9 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v44-source.tar.gz.part-* > /tm
     && rm -rf /tmp/arthello-source-parts \
     && cp -a /tmp/arthello-overrides/. /app/ \
     && rm -rf /tmp/arthello-overrides \
-    && ! grep -q 'invoke_user_worker_ahead_of_assets' /app/production/runtime-server.mjs \
+    && ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
+    && grep -q 'invoke_user_worker_ahead_of_assets: false' /app/production/runtime-server.mjs \
+    && grep -q 'has_user_worker: true' /app/production/runtime-server.mjs \
     && npm ci \
     && npm run lint \
     && npm test
