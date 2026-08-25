@@ -18,13 +18,15 @@ async function collectModules(dir) {
       continue;
     }
     if (!entry.isFile() || (!entry.name.endsWith(".js") && !entry.name.endsWith(".mjs"))) continue;
-    modules.push({ type: "ESModule", path: relative(serverRoot, absolute).replaceAll("\\", "/") });
+    modules.push({ type: "ESModule", path: absolute });
   }
   return modules;
 }
 
 const modules = await collectModules(serverRoot);
-if (!modules.some((module) => module.path === "index.js")) throw new Error("dist/server/index.js is missing");
+if (!modules.some((module) => relative(serverRoot, module.path).replaceAll("\\", "/") === "index.js")) {
+  throw new Error("dist/server/index.js is missing");
+}
 
 const runtime = new Miniflare({
   host: "0.0.0.0",
