@@ -1,0 +1,6 @@
+FROM docker:27-cli
+RUN apk add --no-cache bash curl tar coreutils util-linux grep sed gawk
+COPY ops/pull-deploy/arthello-staging-pull.sh /usr/local/sbin/arthello-staging-pull
+COPY ops/pull-deploy/controller-entrypoint.sh /usr/local/bin/controller-entrypoint
+RUN chmod 0755 /usr/local/sbin/arthello-staging-pull /usr/local/bin/controller-entrypoint
+ENTRYPOINT ["/usr/local/bin/controller-entrypoint"]
