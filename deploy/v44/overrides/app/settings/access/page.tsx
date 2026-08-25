@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 
 type Employee = { id:string; full_name:string; phone:string; email:string; position:string; branch:string; access_role:string; status:string };
 type InviteResult = { invitationUrl:string; smsText:string; expiresAt:number };
+type UsersResponse = { users?: Employee[]; error?: string };
 
 const roles = [
   ["administrator","Администратор"],["accountant","Бухгалтер"],["hr","HR"],["teacher","Учитель"],
@@ -16,30 +18,52 @@ export default function AccessSettingsPage() {
   const [error,setError] = useState("");
   const [invite,setInvite] = useState<InviteResult|null>(null);
   const [loading,setLoading] = useState(true);
-  const load = async () => {
-    setLoading(true); setError("");
-    const r = await fetch("/api/access/users",{cache:"no-store"});
-    const d = await r.json();
-    if(!r.ok){ setError(d.error || "Не удалось загрузить пользователей"); setUsers([]); }
-    else setUsers(d.users || []);
-    setLoading(false);
-  };
-  useEffect(()=>{ void load(); },[]);
+
+  useEffect(()=>{
+    let cancelled = false;
+    fetch("/api/access/users",{cache:"no-store"})
+      .then(async response => ({ response, payload: await response.json() as UsersResponse }))
+      .then(({ response, payload }) => {
+        if (cancelled) return;
+        if(!response.ok){ setError(payload.error || "Не удалось загрузить пользователей"); setUsers([]); }
+        else setUsers(payload.users || []);
+        setLoading(false);
+      })
+      .catch(()=>{
+        if (cancelled) return;
+        setError("Не удалось загрузить пользователей");
+        setUsers([]);
+        setLoading(false);
+      });
+    return ()=>{ cancelled = true; };
+  },[]);
+
+  async function reloadUsers(){
+    const response = await fetch("/api/access/users",{cache:"no-store"});
+    const payload = await response.json() as UsersResponse;
+    if(!response.ok){ setError(payload.error || "Не удалось загрузить пользователей"); setUsers([]); return; }
+    setUsers(payload.users || []);
+  }
 
   async function submit(e:FormEvent<HTMLFormElement>){
-    e.preventDefault(); setError(""); setInvite(null);
-    const fd = new FormData(e.currentTarget);
+    e.preventDefault();
+    setError("");
+    setInvite(null);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     const payload = Object.fromEntries(fd.entries());
-    const r = await fetch("/api/access/users",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
-    const d = await r.json();
-    if(!r.ok){ setError(d.error || "Не удалось создать приглашение"); return; }
-    setInvite(d); e.currentTarget.reset(); await load();
+    const response = await fetch("/api/access/users",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
+    const data = await response.json() as InviteResult & { error?: string };
+    if(!response.ok){ setError(data.error || "Не удалось создать приглашение"); return; }
+    setInvite(data);
+    form.reset();
+    await reloadUsers();
   }
 
   return <main style={{maxWidth:1180,margin:"0 auto",padding:"32px 24px",fontFamily:"Inter,system-ui,sans-serif",color:"#171717"}}>
     <div style={{display:"flex",justifyContent:"space-between",gap:24,alignItems:"end",marginBottom:28}}>
       <div><div style={{fontSize:13,color:"#777",marginBottom:7}}>Настройки</div><h1 style={{margin:0,fontSize:32,letterSpacing:"-.03em"}}>Пользователи и доступы</h1><p style={{color:"#6c6c6c",margin:"10px 0 0"}}>Сотрудник получает одноразовую ссылку и сам устанавливает пароль.</p></div>
-      <a href="/" style={{color:"#171717",textDecoration:"none",border:"1px solid #ddd",borderRadius:12,padding:"10px 14px"}}>← В систему</a>
+      <Link href="/" style={{color:"#171717",textDecoration:"none",border:"1px solid #ddd",borderRadius:12,padding:"10px 14px"}}>← В систему</Link>
     </div>
 
     <section style={{display:"grid",gridTemplateColumns:"minmax(320px,420px) minmax(0,1fr)",gap:24,alignItems:"start"}}>
