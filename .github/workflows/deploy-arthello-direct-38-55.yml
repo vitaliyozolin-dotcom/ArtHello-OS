@@ -1,169 +1,86 @@
-name: Deploy ArtHello direct 38.55
+name: Deploy ArtHello self-hosted RU
 
 on:
   push:
     branches: [main]
     paths:
+      - deploy/v44/**
       - .github/workflows/deploy-arthello-direct-38-55.yml
   workflow_dispatch:
 
 permissions:
   contents: read
-  issues: write
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
 
 env:
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   PUBLIC_HOST: arthello-188-225-38-55.sslip.io
-  DEPLOY_HOST: 188.225.38.55
+  SCHOOL_URL: https://school-188-225-38-55.sslip.io
+  CADDY_CONTAINER: stroios-caddy-1
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - arthello-gateway
+    timeout-minutes: 45
     environment: production-ru
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exact release
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
 
-      - name: Record deployment
-        id: record
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Preflight gateway
+        shell: bash
         run: |
           set -Eeuo pipefail
-          response="$(gh api "repos/$GITHUB_REPOSITORY/issues" --method POST \
-            -f "title=[arthello-direct-38-55] run $GITHUB_RUN_ID" \
-            -f "body=Deploying ArtHello UI directly on 188.225.38.55. SHA: $GITHUB_SHA. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")"
-          printf 'issue=%s\n' "$(jq -r '.number' <<<"$response")" >> "$GITHUB_OUTPUT"
+          test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = '188.225.38.55'
+          docker version >/dev/null
+          docker compose version >/dev/null
+          test "$(docker inspect --format '{{.State.Running}}' "$CADDY_CONTAINER")" = true
+          docker exec "$CADDY_CONTAINER" sh -lc \
+            "grep -F 'import /data/external-routes.caddy' /etc/caddy/Caddyfile >/dev/null"
+          docker exec "$CADDY_CONTAINER" test -s /data/external-routes.caddy
+          curl --fail --silent --show-error --max-time 20 \
+            "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+          printf 'ARTHELLO_PREFLIGHT=OK\n'
 
-      - name: Build verified UI image
+      - name: Build candidate locally
+        shell: bash
         run: |
           set -Eeuo pipefail
+          image="arthello-direct:$GITHUB_SHA"
           docker build \
             --file deploy/v44/Dockerfile \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-            --tag "arthello-direct:$GITHUB_SHA" \
+            --tag "$image" \
             .
-          docker image inspect "arthello-direct:$GITHUB_SHA" >/dev/null
-          printf 'ARTHELLO_DIRECT_BUILD=OK\n'
+          test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+          printf 'ARTHELLO_BUILD=OK image=%s\n' "$image"
 
-      - name: Package image into resumable chunks
+      - name: Start and verify candidate
+        id: candidate
+        shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p "$RUNNER_TEMP/arthello-image"
-          docker save "arthello-direct:$GITHUB_SHA" | gzip -1 > "$RUNNER_TEMP/arthello-image/image.tar.gz"
-          sha256sum "$RUNNER_TEMP/arthello-image/image.tar.gz" > "$RUNNER_TEMP/arthello-image/image.sha256"
-          split -b 20M -d -a 4 "$RUNNER_TEMP/arthello-image/image.tar.gz" "$RUNNER_TEMP/arthello-image/chunk-"
-          ls -lh "$RUNNER_TEMP/arthello-image"/
-
-      - name: Configure SSH
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
-        run: |
-          set -Eeuo pipefail
-          install -m 0700 -d ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 0600 ~/.ssh/id_ed25519
-          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
-
-      - name: Resolve working SSH port
-        id: ssh
-        env:
-          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
-        run: |
-          set -Eeuo pipefail
-          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
-          test -n "$route_device"
-          sudo ip link set dev "$route_device" mtu 1200
-          found=""
-          for port in 22 2222; do
-            known="$RUNNER_TEMP/known-$port"
-            : > "$known"
-            if timeout 25s ssh -n -p "$port" -i ~/.ssh/id_ed25519 \
-              -o IdentitiesOnly=yes \
-              -o StrictHostKeyChecking=accept-new \
-              -o UserKnownHostsFile="$known" \
-              -o GlobalKnownHostsFile=/dev/null \
-              -o PreferredAuthentications=publickey \
-              -o PasswordAuthentication=no \
-              -o KbdInteractiveAuthentication=no \
-              -o BatchMode=yes \
-              -o ConnectTimeout=15 \
-              "$DEPLOY_USER@$DEPLOY_HOST" 'printf ARTHELLO_GATEWAY_SSH_OK' \
-              </dev/null 2>/dev/null | grep -Fq ARTHELLO_GATEWAY_SSH_OK; then
-              found="$port"
-              cp "$known" ~/.ssh/known_hosts
-              break
-            fi
-          done
-          test -n "$found"
-          printf 'port=%s\n' "$found" >> "$GITHUB_OUTPUT"
-          printf 'ARTHELLO_DIRECT_SSH_PORT=%s\n' "$found"
-
-      - name: Upload image chunks
-        env:
-          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
-          DEPLOY_PORT: ${{ steps.ssh.outputs.port }}
-        run: |
-          set -Eeuo pipefail
-          remote_dir="/tmp/arthello-direct-$GITHUB_RUN_ID"
-          ssh -n -p "$DEPLOY_PORT" -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes \
-            "$DEPLOY_USER@$DEPLOY_HOST" "rm -rf '$remote_dir'; install -d -m 0750 '$remote_dir'"
-          for file in "$RUNNER_TEMP/arthello-image"/chunk-* "$RUNNER_TEMP/arthello-image/image.sha256"; do
-            uploaded=0
-            for attempt in 1 2 3 4 5; do
-              if scp -P "$DEPLOY_PORT" -i ~/.ssh/id_ed25519 \
-                -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes \
-                "$file" "$DEPLOY_USER@$DEPLOY_HOST:$remote_dir/$(basename "$file")"; then
-                uploaded=1
-                break
-              fi
-              sleep 4
-            done
-            test "$uploaded" -eq 1
-          done
-          printf 'ARTHELLO_DIRECT_UPLOAD=OK\n'
-
-      - name: Activate candidate with rollback
-        id: activate
-        env:
-          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
-          DEPLOY_PORT: ${{ steps.ssh.outputs.port }}
-        run: |
-          set -Eeuo pipefail
-          remote_dir="/tmp/arthello-direct-$GITHUB_RUN_ID"
+          image="arthello-direct:$GITHUB_SHA"
           candidate="arthello-direct-$GITHUB_RUN_ID"
-          ssh -n -p "$DEPLOY_PORT" -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes \
-            "$DEPLOY_USER@$DEPLOY_HOST" \
-            "REMOTE_DIR='$remote_dir' CANDIDATE='$candidate' IMAGE_SHA='$GITHUB_SHA' PUBLIC_HOST='$PUBLIC_HOST' bash -s" <<'REMOTE'
-          set -Eeuo pipefail
-          caddy=stroios-caddy-1
-          test "$(docker inspect --format '{{.State.Running}}' "$caddy")" = true
-
-          caddy_data="$(docker inspect "$caddy" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}')"
-          test -d "$caddy_data"
-          routes="$caddy_data/external-routes.caddy"
-          origin_ca="$caddy_data/arthello-origin-root.crt"
-          test -s "$origin_ca"
-          backup="$REMOTE_DIR/external-routes.before.caddy"
-          cp -a "$routes" "$backup"
-
-          network="$(docker inspect "$caddy" --format '{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}' | head -n1)"
+          network="$(docker inspect "$CADDY_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1)"
           test -n "$network"
 
-          cat "$REMOTE_DIR"/chunk-* > "$REMOTE_DIR/image.tar.gz"
-          (cd "$REMOTE_DIR" && sha256sum -c image.sha256)
-          gzip -dc "$REMOTE_DIR/image.tar.gz" | docker load >/dev/null
-          image="arthello-direct:$IMAGE_SHA"
-          docker image inspect "$image" >/dev/null
-
-          docker rm -f "$CANDIDATE" >/dev/null 2>&1 || true
+          docker rm -f "$candidate" >/dev/null 2>&1 || true
           docker volume create arthello-direct-v44-data >/dev/null
           docker run -d \
-            --name "$CANDIDATE" \
+            --name "$candidate" \
             --restart unless-stopped \
             --read-only \
             --tmpfs /tmp \
@@ -176,33 +93,60 @@ jobs:
 
           ready=0
           for attempt in $(seq 1 90); do
-            if docker exec "$CANDIDATE" node -e "fetch('http://127.0.0.1:8081/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"; then
+            if docker exec "$candidate" node -e \
+              "fetch('http://127.0.0.1:8081/api/health').then(async r=>{if(!r.ok)process.exit(1);const t=await r.text();if(!t.includes('ok'))process.exit(1)}).catch(()=>process.exit(1))"; then
               ready=1
               break
             fi
             sleep 2
           done
-          test "$ready" -eq 1
+          if [ "$ready" -ne 1 ]; then
+            docker logs --tail 150 "$candidate" >&2 || true
+            docker rm -f "$candidate" >/dev/null 2>&1 || true
+            exit 1
+          fi
+
+          printf 'name=%s\n' "$candidate" >> "$GITHUB_OUTPUT"
+          printf 'ARTHELLO_CANDIDATE=HEALTHY name=%s\n' "$candidate"
+
+      - name: Atomic Caddy cutover with rollback
+        id: cutover
+        shell: bash
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.name }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$CANDIDATE"
+          work="$RUNNER_TEMP/arthello-cutover-$GITHUB_RUN_ID"
+          mkdir -p "$work"
+          backup="$work/external-routes.before.caddy"
+          candidate_routes="$work/external-routes.candidate.caddy"
+
+          docker cp "$CADDY_CONTAINER:/data/external-routes.caddy" "$backup"
+          test -s "$backup"
 
           rollback() {
             rc=$?
             if [ "$rc" -ne 0 ]; then
-              cp -a "$backup" "$routes" || true
-              docker exec "$caddy" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+              printf 'ARTHELLO_ROLLBACK=START\n' >&2
+              docker cp "$backup" "$CADDY_CONTAINER:/data/external-routes.caddy" >/dev/null 2>&1 || true
+              docker exec "$CADDY_CONTAINER" caddy reload \
+                --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
               docker rm -f "$CANDIDATE" >/dev/null 2>&1 || true
-              printf 'ARTHELLO_DIRECT_ROLLBACK=complete\n' >&2
+              printf 'ARTHELLO_ROLLBACK=COMPLETE\n' >&2
             fi
             exit "$rc"
           }
           trap rollback EXIT
 
-          cat > "$routes" <<EOF
+          cat > "$candidate_routes" <<EOF
           $PUBLIC_HOST {
             encode zstd gzip
             reverse_proxy $CANDIDATE:8081
             header {
               Strict-Transport-Security "max-age=31536000; includeSubDomains"
               X-Frame-Options "DENY"
+              X-Content-Type-Options "nosniff"
               Referrer-Policy "same-origin"
               -Server
             }
@@ -221,67 +165,70 @@ jobs:
             header {
               Strict-Transport-Security "max-age=31536000; includeSubDomains"
               X-Frame-Options "DENY"
+              X-Content-Type-Options "nosniff"
               Referrer-Policy "same-origin"
               -Server
             }
           }
           EOF
 
-          docker exec "$caddy" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
-          docker exec "$caddy" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+          docker cp "$candidate_routes" "$CADDY_CONTAINER:/data/external-routes.caddy.new"
+          docker exec "$CADDY_CONTAINER" sh -lc \
+            "sed 's#/data/external-routes.caddy#/data/external-routes.caddy.new#' /etc/caddy/Caddyfile > /tmp/Caddyfile.arthello-candidate"
+          docker exec "$CADDY_CONTAINER" caddy validate \
+            --config /tmp/Caddyfile.arthello-candidate --adapter caddyfile >/dev/null
 
-          local_ok=0
+          docker exec "$CADDY_CONTAINER" sh -lc \
+            'mv /data/external-routes.caddy.new /data/external-routes.caddy'
+          docker exec "$CADDY_CONTAINER" caddy reload \
+            --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+
+          public_ok=0
           for attempt in $(seq 1 60); do
-            code="$(curl --silent --show-error --output /tmp/arthello-direct.html --write-out '%{http_code}' -H "Host: $PUBLIC_HOST" http://127.0.0.1/ || true)"
-            if [ "$code" = 200 ] && grep -F 'ArtHello' /tmp/arthello-direct.html >/dev/null; then
-              local_ok=1
+            nonce="$GITHUB_RUN_ID-$attempt"
+            body="$(curl --fail --silent --show-error --max-time 20 -H 'Cache-Control: no-cache' "$PUBLIC_URL/?probe=$nonce" || true)"
+            health="$(curl --fail --silent --show-error --max-time 20 -H 'Cache-Control: no-cache' "$PUBLIC_URL/api/health?probe=$nonce" || true)"
+            if grep -F 'ArtHello' <<<"$body" >/dev/null \
+              && grep -F '"status":"ok"' <<<"$health" >/dev/null; then
+              public_ok=1
               break
             fi
-            sleep 2
+            sleep 3
           done
-          test "$local_ok" -eq 1
-          trap - EXIT
+          test "$public_ok" -eq 1
 
+          curl --fail --silent --show-error --max-time 20 \
+            "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+
+          trap - EXIT
+          printf 'ARTHELLO_PUBLIC=OK\nSCHOOL_ROUTE_PRESERVED=OK\n'
+
+      - name: Remove superseded ArtHello containers
+        if: success()
+        shell: bash
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.name }}
+        run: |
+          set -Eeuo pipefail
           while IFS= read -r old; do
             [ -n "$old" ] || continue
             [ "$old" = "$CANDIDATE" ] && continue
             docker rm -f "$old" >/dev/null 2>&1 || true
           done < <(docker ps -a --filter 'name=^/arthello-direct-' --format '{{.Names}}')
 
-          rm -rf "$REMOTE_DIR"
-          printf 'ARTHELLO_DIRECT_ACTIVATION=OK\n'
-          REMOTE
+          docker image prune -f >/dev/null || true
+          printf 'ARTHELLO_RELEASE_SHA=%s\nARTHELLO_RELEASE_CONTAINER=%s\n' "$GITHUB_SHA" "$CANDIDATE"
 
-      - name: Verify public ArtHello and School
-        id: verify
-        run: |
-          set -Eeuo pipefail
-          ready=0
-          for attempt in $(seq 1 90); do
-            body="$(curl --fail --silent --show-error --max-time 20 -H 'Cache-Control: no-cache' "$PUBLIC_URL/?probe=$GITHUB_RUN_ID-$attempt" || true)"
-            health="$(curl --fail --silent --show-error --max-time 20 "$PUBLIC_URL/api/health" || true)"
-            if grep -F 'ArtHello' <<<"$body" >/dev/null && grep -F '"status":"ok"' <<<"$health" >/dev/null; then
-              ready=1
-              break
-            fi
-            sleep 3
-          done
-          test "$ready" -eq 1
-          curl --fail --silent --show-error --max-time 20 https://school-188-225-38-55.sslip.io/api/health | grep -F '"status":"ok"' >/dev/null
-          printf 'ARTHELLO_DIRECT_PUBLIC=OK\n'
-          printf 'SCHOOL_ROUTE_PRESERVED=OK\n'
-
-      - name: Publish result
+      - name: Production summary
         if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ steps.record.outputs.issue }}
-          ACTIVATE_OUTCOME: ${{ steps.activate.outcome }}
-          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+        shell: bash
         run: |
-          set -Eeuo pipefail
-          test -n "$ISSUE_NUMBER"
-          gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" --method PATCH \
-            -f "body=Direct ArtHello deployment on 188.225.38.55. Activation: $ACTIVATE_OUTCOME. Public verification: $VERIFY_OUTCOME. SHA: $GITHUB_SHA. URL: $PUBLIC_URL. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-          test "$ACTIVATE_OUTCOME" = success
-          test "$VERIFY_OUTCOME" = success
+          {
+            echo '## ArtHello production deployment'
+            echo
+            echo "- Runner: arthello-gateway / 188.225.38.55"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Public: $PUBLIC_URL"
+            echo "- School guard: $SCHOOL_URL"
+            echo "- Result: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
