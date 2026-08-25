@@ -8,6 +8,8 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v44-source.tar.gz.part-* > /tm
     && tar -xzf /tmp/arthello-source.tar.gz -C /app \
     && rm -f /tmp/arthello-source.tar.gz \
     && rm -rf /tmp/arthello-source-parts \
+    && sed -i '/^[[:space:]]*routerConfig: {$/,/^[[:space:]]*},$/d' /app/production/runtime-server.mjs \
+    && ! grep -q 'invoke_user_worker_ahead_of_assets' /app/production/runtime-server.mjs \
     && npm ci \
     && npm run lint \
     && npm test
