@@ -20,24 +20,24 @@ jobs:
           fetch-depth: 1
           clean: true
           persist-credentials: false
-      - name: Inspect auth bootstrap
+      - name: Inspect API and DB conventions
         shell: bash
         run: |
           set -Eeuo pipefail
           rm -rf "$RUNNER_TEMP/v44-diag" && mkdir -p "$RUNNER_TEMP/v44-diag"
           cat deploy/v44/arthello-sites-v44-source.tar.gz.part-* > "$RUNNER_TEMP/v44-source.tar.gz"
           tar -xzf "$RUNNER_TEMP/v44-source.tar.gz" -C "$RUNNER_TEMP/v44-diag"
-          echo '=== AUTH GATE FULL ==='
-          sed -n '1,180p' "$RUNNER_TEMP/v44-diag/app/components/ProductionAuthGate.tsx"
-          echo '=== API AUTH REFERENCES ==='
-          grep -R -n -B 4 -A 8 --exclude-dir=node_modules --exclude-dir=.git '/api/auth' "$RUNNER_TEMP/v44-diag" || true
-          echo '=== AUTH FILES ==='
-          find "$RUNNER_TEMP/v44-diag" -type f | grep -Ei '/auth|auth\.' | head -n 100 || true
-          echo '=== LIVE AUTH ENDPOINTS ==='
-          for p in /api/auth/session /api/auth/me /api/auth/login /api/health; do
-            echo "--- $p"
-            curl -sS -D - -o "$RUNNER_TEMP/auth-body" --max-time 20 "https://arthello-188-225-38-55.sslip.io$p" || true
-            head -c 800 "$RUNNER_TEMP/auth-body" || true
-            echo
-          done
+          cd "$RUNNER_TEMP/v44-diag"
+          echo '=== HEALTH ROUTE ==='
+          sed -n '1,220p' app/api/health/route.ts
+          echo '=== REQUEST USER ==='
+          sed -n '1,260p' lib/request-user.ts
+          echo '=== CHATGPT AUTH ==='
+          sed -n '1,260p' app/chatgpt-auth.ts
+          echo '=== DB INDEX ==='
+          sed -n '1,260p' db/index.ts
+          echo '=== AUTH/USER SCHEMA HITS ==='
+          grep -n -E -B 3 -A 12 'user|User|employee|Employee|access|Access|session|Session|password|Password' db/schema.ts | head -n 500 || true
+          echo '=== PACKAGE ==='
+          cat package.json
           echo '=== DIAG COMPLETE ==='
