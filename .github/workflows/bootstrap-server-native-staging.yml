@@ -1,0 +1,77 @@
+name: Bootstrap server-native ArtHello STAGING
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'ops/pull-deploy/**'
+      - '.github/workflows/bootstrap-server-native-staging.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: [self-hosted, arthello-gateway]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install server-native pull deploy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo install -d -m 0700 /etc/arthello
+          token_source=''
+          for p in \
+            /srv/arthello/shared/github-http/token \
+            /srv/arthello/shared/github-release-token \
+            /root/.config/arthello/github-token \
+            /home/github-runner/.config/arthello/github-token
+          do
+            if sudo test -s "$p"; then token_source="$p"; break; fi
+          done
+          if [ -z "$token_source" ]; then
+            echo 'NO_PERSISTENT_GITHUB_TOKEN_FOUND'
+            exit 42
+          fi
+          sudo sh -c "umask 077; cat '$token_source' > /etc/arthello/github-token"
+          sudo install -m 0750 ops/pull-deploy/arthello-staging-pull.sh /usr/local/sbin/arthello-staging-pull
+          sudo tee /etc/systemd/system/arthello-staging-pull.service >/dev/null <<'EOF'
+          [Unit]
+          Description=ArtHello STAGING server-native pull deploy
+          After=docker.service network-online.target
+          Wants=network-online.target
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/arthello-staging-pull
+          TimeoutStartSec=25min
+          Nice=10
+          IOSchedulingClass=best-effort
+          IOSchedulingPriority=6
+          EOF
+          sudo tee /etc/systemd/system/arthello-staging-pull.timer >/dev/null <<'EOF'
+          [Unit]
+          Description=Check ArtHello develop branch every minute
+
+          [Timer]
+          OnBootSec=30s
+          OnUnitActiveSec=60s
+          AccuracySec=5s
+          Persistent=true
+          Unit=arthello-staging-pull.service
+
+          [Install]
+          WantedBy=timers.target
+          EOF
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now arthello-staging-pull.timer
+          sudo systemctl start arthello-staging-pull.service
+          sudo systemctl --no-pager status arthello-staging-pull.timer
+          sudo journalctl -u arthello-staging-pull.service -n 120 --no-pager
