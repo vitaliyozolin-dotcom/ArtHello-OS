@@ -12,65 +12,32 @@ permissions:
 
 jobs:
   smoke:
-    runs-on:
-      - self-hosted
-      - linux
-      - x64
-      - arthello-gateway
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 1
           clean: true
           persist-credentials: false
-
-      - name: Inspect v44 source and deployed assets
+      - name: Inspect auth bootstrap
         shell: bash
         run: |
           set -Eeuo pipefail
-          rm -rf "$RUNNER_TEMP/v44-diag"
-          mkdir -p "$RUNNER_TEMP/v44-diag"
+          rm -rf "$RUNNER_TEMP/v44-diag" && mkdir -p "$RUNNER_TEMP/v44-diag"
           cat deploy/v44/arthello-sites-v44-source.tar.gz.part-* > "$RUNNER_TEMP/v44-source.tar.gz"
           tar -xzf "$RUNNER_TEMP/v44-source.tar.gz" -C "$RUNNER_TEMP/v44-diag"
-
-          echo '=== SESSION TEXT SOURCE ==='
-          grep -R -n -B 12 -A 30 --exclude-dir=node_modules --exclude-dir=.git \
-            'Проверяем защищённую сессию' "$RUNNER_TEMP/v44-diag" || true
-
-          echo '=== AUTH / SESSION FILE CANDIDATES ==='
-          grep -R -l -E --exclude-dir=node_modules --exclude-dir=.git \
-            'authenticated workspace identity|session|auth|Auth|protected' "$RUNNER_TEMP/v44-diag" \
-            | head -n 80 || true
-
-          echo '=== RUNTIME SERVER ==='
-          sed -n '1,280p' "$RUNNER_TEMP/v44-diag/production/runtime-server.mjs"
-
-          echo '=== PUBLIC ROOT HEADERS ==='
-          curl -fsS -D "$RUNNER_TEMP/root.headers" -o "$RUNNER_TEMP/root.html" \
-            'https://arthello-188-225-38-55.sslip.io/?diag=asset-check'
-          cat "$RUNNER_TEMP/root.headers"
-
-          echo '=== PUBLIC ROOT ASSET REFS ==='
-          grep -oE '(src|href)="[^"]+"' "$RUNNER_TEMP/root.html" | head -n 80 || true
-
-          echo '=== ROOT BODY MARKERS ==='
-          grep -oE 'Проверяем защищённую сессию|ArtHello OS|<script[^>]*>|<link[^>]*>' "$RUNNER_TEMP/root.html" | head -n 80 || true
-
-          echo '=== ASSET STATUS ==='
-          python3 - <<'PY'
-          import re, subprocess, pathlib
-          html = pathlib.Path(__import__('os').environ['RUNNER_TEMP'] + '/root.html').read_text(errors='replace')
-          refs = []
-          for m in re.finditer(r'(?:src|href)=["\']([^"\']+)["\']', html):
-              p = m.group(1)
-              if p.startswith('/') and p not in refs:
-                  refs.append(p)
-          for p in refs[:30]:
-              url = 'https://arthello-188-225-38-55.sslip.io' + p
-              cp = subprocess.run(['curl','-sS','-o','/dev/null','-w','%{http_code} %{content_type}', '--max-time','20',url], capture_output=True, text=True)
-              print(cp.stdout.strip(), p)
-          PY
-
+          echo '=== AUTH GATE FULL ==='
+          sed -n '1,180p' "$RUNNER_TEMP/v44-diag/app/components/ProductionAuthGate.tsx"
+          echo '=== API AUTH REFERENCES ==='
+          grep -R -n -B 4 -A 8 --exclude-dir=node_modules --exclude-dir=.git '/api/auth' "$RUNNER_TEMP/v44-diag" || true
+          echo '=== AUTH FILES ==='
+          find "$RUNNER_TEMP/v44-diag" -type f | grep -Ei '/auth|auth\.' | head -n 100 || true
+          echo '=== LIVE AUTH ENDPOINTS ==='
+          for p in /api/auth/session /api/auth/me /api/auth/login /api/health; do
+            echo "--- $p"
+            curl -sS -D - -o "$RUNNER_TEMP/auth-body" --max-time 20 "https://arthello-188-225-38-55.sslip.io$p" || true
+            head -c 800 "$RUNNER_TEMP/auth-body" || true
+            echo
+          done
           echo '=== DIAG COMPLETE ==='
