@@ -1,0 +1,151 @@
+name: Deploy School 1-11 PC direct
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-school-pc-direct.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  TRANSPORT_REF: cebe7be40383850ee821031245da8001c0503007
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+  DEPLOY_HOST: 188.225.38.55
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TRANSPORT_REF }}
+          persist-credentials: false
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+      - name: Resolve direct gateway SSH
+        id: ssh
+        env:
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$DEPLOY_USER"
+          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
+          test -n "$route_device"
+          sudo ip link set dev "$route_device" mtu 1200
+          found=""
+          for port in 22 2222; do
+            known="$RUNNER_TEMP/known-$port"
+            : > "$known"
+            if timeout 30s ssh -n -p "$port" -i ~/.ssh/id_ed25519 \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$known" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=publickey \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o BatchMode=yes \
+              -o ConnectTimeout=20 \
+              "$DEPLOY_USER@$DEPLOY_HOST" 'printf SCHOOL_PC_SSH_OK' \
+              </dev/null 2>/dev/null | grep -Fq SCHOOL_PC_SSH_OK; then
+              found="$port"
+              cp "$known" ~/.ssh/known_hosts
+              break
+            fi
+          done
+          test -n "$found"
+          printf 'port=%s\n' "$found" >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_PC_SSH_PORT=%s\n' "$found"
+
+      - name: Launch immutable full School release
+        env:
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ steps.ssh.outputs.port }}
+        run: |
+          set -Eeuo pipefail
+          job_dir="/srv/school-1-11/deploy-jobs/$TRANSPORT_REF-pc"
+          repair_payload="$(base64 -w0 deploy/repair-deploy.sh)"
+          runner_payload="$(base64 -w0 <<'REMOTE'
+          #!/usr/bin/env bash
+          set -uo pipefail
+          rc=0
+          bash "$JOB_DIR/repair-deploy.sh" || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            printf 'success:%s\n' "$DELIVERY_REF" > "$JOB_DIR/status.tmp"
+          else
+            printf 'failed:%s\n' "$rc" > "$JOB_DIR/status.tmp"
+          fi
+          mv "$JOB_DIR/status.tmp" "$JOB_DIR/status"
+          exit "$rc"
+          REMOTE
+          )"
+          remote="set -Eeuo pipefail; install -d -m 0750 '$job_dir'; printf '%s' '$repair_payload' | base64 -d > '$job_dir/repair-deploy.sh'; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/repair-deploy.sh' '$job_dir/run.sh'; rm -f '$job_dir/status' '$job_dir/status.tmp'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$TRANSPORT_REF' SCHOOL_HOST='school-188-225-38-55.sslip.io' VERIFY_PUBLIC='0' JOB_DIR='$job_dir' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null & echo \$! > '$job_dir/pid'"
+          ssh -n -p "$DEPLOY_PORT" -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$remote"
+
+          status=""
+          for attempt in $(seq 1 240); do
+            status="$(ssh -n -p "$DEPLOY_PORT" -i ~/.ssh/id_ed25519 \
+              -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "test -f '$job_dir/status' && cat '$job_dir/status' || true" </dev/null 2>/dev/null || true)"
+            case "$status" in
+              "success:$TRANSPORT_REF") break ;;
+              failed:*)
+                ssh -n -p "$DEPLOY_PORT" -i ~/.ssh/id_ed25519 \
+                  -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes \
+                  "$DEPLOY_USER@$DEPLOY_HOST" "tail -n 220 '$job_dir/deploy.log'" || true
+                exit 1
+                ;;
+            esac
+            test "$attempt" -lt 240
+            sleep 5
+          done
+          test "$status" = "success:$TRANSPORT_REF"
+          printf 'SCHOOL_PC_DEPLOY=SUCCESS\n'
+
+      - name: Verify full desktop production
+        run: |
+          set -Eeuo pipefail
+          healthy=0
+          for attempt in $(seq 1 80); do
+            if curl --fail --silent --show-error --max-time 20 "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null; then
+              healthy=1
+              break
+            fi
+            sleep 3
+          done
+          test "$healthy" -eq 1
+
+          html="$RUNNER_TEMP/login.html"
+          css="$RUNNER_TEMP/all.css"
+          curl --fail --silent --show-error --max-time 20 "$SCHOOL_ORIGIN/login?pc=$GITHUB_RUN_ID" > "$html"
+          : > "$css"
+          grep -oE '/_next/static/css/[^"?]+\.css' "$html" | sort -u | while read -r path; do
+            curl --fail --silent --show-error --max-time 20 "$SCHOOL_ORIGIN$path" >> "$css"
+            printf '\n' >> "$css"
+          done
+          test -s "$css"
+          grep -F '.l0-stage' "$css" >/dev/null
+          grep -F '.l0-sidebar' "$css" >/dev/null
+          grep -F '.desktop-only' "$css" >/dev/null
+          grep -F -- '--mobile-gutter:16px' "$css" >/dev/null
+          printf 'SCHOOL_PUBLIC_HTTPS=OK\n'
+          printf 'SCHOOL_DESKTOP_UI=VERIFIED\n'
+          printf 'SCHOOL_RESPONSIVE_UI=VERIFIED\n'
