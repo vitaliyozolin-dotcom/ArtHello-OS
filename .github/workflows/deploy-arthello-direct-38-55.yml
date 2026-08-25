@@ -45,7 +45,7 @@ jobs:
           test "$(docker inspect --format '{{.State.Running}}' "$CADDY_CONTAINER")" = true
           docker exec "$CADDY_CONTAINER" sh -lc "grep -F 'import /data/external-routes.caddy' /etc/caddy/Caddyfile >/dev/null"
           docker exec "$CADDY_CONTAINER" test -s /data/external-routes.caddy
-          curl --fail --silent --show-error --max-time 20 "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+          curl -fsS --max-time 20 "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null
           printf 'ARTHELLO_PREFLIGHT=OK\n'
 
       - name: Build candidate locally
@@ -99,7 +99,7 @@ jobs:
 
           ready=0
           for attempt in $(seq 1 90); do
-            if docker exec "$candidate" node - <<'NODE'
+            if docker exec -i "$candidate" node - <<'NODE'
           const base = 'http://127.0.0.1:8081';
           try {
             const health = await fetch(base + '/api/health');
@@ -107,7 +107,7 @@ jobs:
             const root = await fetch(base + '/');
             if (!root.ok) process.exit(1);
             const html = await root.text();
-            const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
+            const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
             if (refs.length < 2) process.exit(1);
             for (const path of [...new Set(refs)]) {
               const asset = await fetch(base + path);
@@ -198,36 +198,40 @@ jobs:
           docker exec "$CADDY_CONTAINER" sh -lc 'mv /data/external-routes.caddy.new /data/external-routes.caddy'
           docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 
-          node - <<'NODE'
+          public_ok=0
+          for attempt in $(seq 1 40); do
+            if docker exec -i \
+              -e PUBLIC_URL="$PUBLIC_URL" \
+              -e SCHOOL_URL="$SCHOOL_URL" \
+              -e PROBE="$GITHUB_RUN_ID-$attempt" \
+              "$CANDIDATE" node - <<'NODE'
           const base = process.env.PUBLIC_URL;
           const school = process.env.SCHOOL_URL;
-          for (let attempt = 1; attempt <= 40; attempt += 1) {
-            try {
-              const root = await fetch(`${base}/?probe=${process.env.GITHUB_RUN_ID}-${attempt}`, { headers: { 'cache-control': 'no-cache' } });
-              const html = await root.text();
-              const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
-              if (!root.ok || refs.length < 2) throw new Error('root/assets refs');
-              for (const path of [...new Set(refs)]) {
-                const asset = await fetch(base + path, { headers: { 'cache-control': 'no-cache' } });
-                if (!asset.ok) throw new Error(`asset ${path} ${asset.status}`);
-              }
-              const health = await fetch(base + '/api/health', { headers: { 'cache-control': 'no-cache' } });
-              if (!health.ok || !(await health.text()).includes('"status":"ok"')) throw new Error('health');
-              const me = await fetch(base + '/api/auth/me', { headers: { 'cache-control': 'no-cache' } });
-              if (me.status !== 401) throw new Error(`auth me ${me.status}`);
-              const schoolHealth = await fetch(school + '/api/health', { headers: { 'cache-control': 'no-cache' } });
-              if (!schoolHealth.ok || !(await schoolHealth.text()).includes('"status":"ok"')) throw new Error('school');
-              console.log('ARTHELLO_PUBLIC_ASSETS=OK');
-              console.log('ARTHELLO_PUBLIC_AUTH=OK');
-              console.log('SCHOOL_ROUTE_PRESERVED=OK');
-              process.exit(0);
-            } catch (error) {
-              if (attempt === 40) { console.error(error); process.exit(1); }
-              await new Promise((resolve) => setTimeout(resolve, 3000));
+          try {
+            const root = await fetch(`${base}/?probe=${process.env.PROBE}`, { headers: { 'cache-control': 'no-cache' } });
+            const html = await root.text();
+            const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
+            if (!root.ok || refs.length < 2) process.exit(1);
+            for (const path of [...new Set(refs)]) {
+              const asset = await fetch(base + path, { headers: { 'cache-control': 'no-cache' } });
+              if (!asset.ok) process.exit(1);
             }
-          }
+            const health = await fetch(base + '/api/health', { headers: { 'cache-control': 'no-cache' } });
+            if (!health.ok || !(await health.text()).includes('"status":"ok"')) process.exit(1);
+            const me = await fetch(base + '/api/auth/me', { headers: { 'cache-control': 'no-cache' } });
+            if (me.status !== 401) process.exit(1);
+            const schoolHealth = await fetch(school + '/api/health', { headers: { 'cache-control': 'no-cache' } });
+            if (!schoolHealth.ok || !(await schoolHealth.text()).includes('"status":"ok"')) process.exit(1);
+          } catch { process.exit(1); }
           NODE
-
+            then
+              public_ok=1
+              break
+            fi
+            sleep 3
+          done
+          test "$public_ok" -eq 1
+          printf 'ARTHELLO_PUBLIC_ASSETS=OK\nARTHELLO_PUBLIC_AUTH=OK\nSCHOOL_ROUTE_PRESERVED=OK\n'
           trap - EXIT
 
       - name: Remove superseded ArtHello containers
@@ -256,6 +260,6 @@ jobs:
             echo "- Commit: $GITHUB_SHA"
             echo "- Public: $PUBLIC_URL"
             echo "- School guard: $SCHOOL_URL"
-            echo "- Acceptance: assets + auth endpoint + health + School guard"
+            echo "- Acceptance: real asset loads + auth endpoint + health + School guard"
             echo "- Result: ${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"
