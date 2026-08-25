@@ -1,9 +1,30 @@
 import { Miniflare, Log, LogLevel } from "miniflare";
 import process from "node:process";
+import { readdir } from "node:fs/promises";
+import { join, relative } from "node:path";
 
 const applicationRoot = process.cwd();
+const serverRoot = join(applicationRoot, "dist/server");
 const dataRoot = process.env.ARTHELLO_D1_PATH || "/data/d1";
 const port = Number(process.env.PORT || 8081);
+
+async function collectModules(dir) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const modules = [];
+  for (const entry of entries) {
+    const absolute = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      modules.push(...await collectModules(absolute));
+      continue;
+    }
+    if (!entry.isFile() || (!entry.name.endsWith(".js") && !entry.name.endsWith(".mjs"))) continue;
+    modules.push({ type: "ESModule", path: relative(serverRoot, absolute).replaceAll("\\", "/") });
+  }
+  return modules;
+}
+
+const modules = await collectModules(serverRoot);
+if (!modules.some((module) => module.path === "index.js")) throw new Error("dist/server/index.js is missing");
 
 const runtime = new Miniflare({
   host: "0.0.0.0",
@@ -15,12 +36,8 @@ const runtime = new Miniflare({
   defaultPersistRoot: dataRoot,
   compatibilityDate: "2026-05-15",
   compatibilityFlags: ["nodejs_compat"],
-  modules: true,
-  scriptPath: `${applicationRoot}/dist/server/index.js`,
-  modulesRoot: `${applicationRoot}/dist/server`,
-  modulesRules: [
-    { type: "ESModule", include: ["**/*.js", "**/*.mjs"], fallthrough: true },
-  ],
+  modules,
+  modulesRoot: serverRoot,
   bindings: {
     ARTHELLO_BOOTSTRAP_LOGIN: process.env.ARTHELLO_BOOTSTRAP_LOGIN || "owner",
     ARTHELLO_BOOTSTRAP_PASSWORD: process.env.ARTHELLO_BOOTSTRAP_PASSWORD || "",
