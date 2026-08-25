@@ -23,10 +23,11 @@ async function collectModules(dir) {
   return modules;
 }
 
-const modules = await collectModules(serverRoot);
-if (!modules.some((module) => relative(serverRoot, module.path).replaceAll("\\", "/") === "index.js")) {
-  throw new Error("dist/server/index.js is missing");
-}
+const collected = await collectModules(serverRoot);
+const entryPath = join(serverRoot, "index.js");
+const entry = collected.find((module) => module.path === entryPath);
+if (!entry) throw new Error("dist/server/index.js is missing");
+const modules = [entry, ...collected.filter((module) => module.path !== entryPath)];
 
 const runtime = new Miniflare({
   host: "0.0.0.0",
