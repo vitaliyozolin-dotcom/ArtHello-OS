@@ -73,7 +73,7 @@ jobs:
             -v arthello-staging-v44-data:/data \
             "$image" >/dev/null
           ready=0
-          for attempt in $(seq 1 90); do
+          for attempt in $(seq 1 45); do
             if docker exec -i "$candidate" node - <<'NODE'
           const base='http://127.0.0.1:8081';
           try {
@@ -88,7 +88,13 @@ jobs:
             then ready=1; break; fi
             sleep 2
           done
-          test "$ready" -eq 1
+          if [ "$ready" -ne 1 ]; then
+            echo '=== STAGING CANDIDATE STATE ==='
+            docker inspect "$candidate" --format '{{json .State}}' || true
+            echo '=== STAGING CANDIDATE LOGS ==='
+            docker logs --tail 200 "$candidate" || true
+            exit 1
+          fi
           echo "name=$candidate" >> "$GITHUB_OUTPUT"
 
       - name: Publish staging route only
