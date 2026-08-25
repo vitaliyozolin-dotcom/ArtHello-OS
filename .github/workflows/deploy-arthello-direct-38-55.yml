@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: gateway-38-55-arthello-production
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -87,6 +87,7 @@ jobs:
             --restart unless-stopped \
             --read-only \
             --tmpfs /tmp \
+            --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
             --network "$network" \
             -e NODE_ENV=production \
             -e PORT=8081 \
