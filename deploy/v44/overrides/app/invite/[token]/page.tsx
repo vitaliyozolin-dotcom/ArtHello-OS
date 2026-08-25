@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-html-link-for-pages */
 
 import { FormEvent, useEffect, useState } from "react";
 
@@ -54,7 +55,7 @@ export default function InvitePage({ params }:{ params: Promise<{ token:string }
 
   return <main style={{minHeight:"70vh",display:"grid",placeItems:"center",padding:24,fontFamily:"Inter,system-ui,sans-serif",color:"#171717"}}><section style={{width:"100%",maxWidth:480,border:"1px solid #e6e6e6",borderRadius:20,padding:28,background:"#fff"}}>
     <div style={{fontSize:13,color:"#777",marginBottom:8}}>ArtHello OS</div><h1 style={{fontSize:28,margin:"0 0 10px",letterSpacing:"-.03em"}}>Создание доступа</h1>
-    {done ? <><p>Доступ активирован.</p><div style={{padding:14,borderRadius:12,background:"#f5f5f5",marginBottom:18}}><b>Логин</b><div style={{fontSize:20,marginTop:5}}>{done.login}</div></div>{/* eslint-disable-next-line @next/next/no-html-link-for-pages */}<a href="/" style={{display:"block",textAlign:"center",padding:"12px 16px",borderRadius:12,background:"#171717",color:"#fff",textDecoration:"none"}}>Войти в ArtHello OS</a></> : error && !data ? <div style={{padding:14,borderRadius:12,background:"#fff1f1",color:"#a11"}}>{error}</div> : !data ? <p style={{color:"#777"}}>Проверяем приглашение…</p> : <form onSubmit={submit}>
+    {done ? <><p>Доступ активирован.</p><div style={{padding:14,borderRadius:12,background:"#f5f5f5",marginBottom:18}}><b>Логин</b><div style={{fontSize:20,marginTop:5}}>{done.login}</div></div><a href="/" style={{display:"block",textAlign:"center",padding:"12px 16px",borderRadius:12,background:"#171717",color:"#fff",textDecoration:"none"}}>Войти в ArtHello OS</a></> : error && !data ? <div style={{padding:14,borderRadius:12,background:"#fff1f1",color:"#a11"}}>{error}</div> : !data ? <p style={{color:"#777"}}>Проверяем приглашение…</p> : <form onSubmit={submit}>
       <div style={{padding:14,borderRadius:12,background:"#f7f7f7",margin:"16px 0 20px"}}><b>{data.fullName}</b><div style={{fontSize:14,color:"#666",marginTop:5}}>{data.position} · {data.branch}</div><div style={{fontSize:14,color:"#666",marginTop:3}}>{data.phone}</div></div>
       <label style={labelStyle}>Придумайте пароль<input name="password" type="password" minLength={12} required autoComplete="new-password" style={inputStyle}/></label>
       <label style={labelStyle}>Повторите пароль<input name="confirm" type="password" minLength={12} required autoComplete="new-password" style={inputStyle}/></label>
