@@ -1,0 +1,253 @@
+name: Reset ArtHello production data
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/production-reset-trigger.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+
+env:
+  PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+  SCHOOL_URL: https://school-188-225-38-55.sslip.io
+  DATA_VOLUME: arthello-direct-v44-data
+
+jobs:
+  reset:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 30
+    environment: production-ru
+
+    steps:
+      - name: Checkout exact reset release
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
+          persist-credentials: false
+
+      - name: Backup, reset, verify, and restart
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = '188.225.38.55'
+          docker version >/dev/null
+          test "$(docker volume inspect "$DATA_VOLUME" --format '{{.Name}}')" = "$DATA_VOLUME"
+          curl -fsS --max-time 20 "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+          curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+
+          mapfile -t live_containers < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}')
+          test "${#live_containers[@]}" -eq 1
+          live="${live_containers[0]}"
+          image="$(docker inspect "$live" --format '{{.Config.Image}}')"
+          test -n "$image"
+          test "$(docker inspect "$live" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+
+          expected_release="$(tr -d '[:space:]' < .github/production-reset-trigger.txt)"
+          case "$expected_release" in
+            (*[!0-9a-f]*|'') echo 'Invalid expected release SHA' >&2; exit 1 ;;
+          esac
+          test "${#expected_release}" -eq 40
+          actual_release="$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+          test "$actual_release" = "$expected_release"
+
+          script="$GITHUB_WORKSPACE/deploy/v52/maintenance/production-clean-slate.mjs"
+          test -s "$script"
+          git cat-file -e "${expected_release}^{commit}"
+          git merge-base --is-ancestor "$expected_release" "$GITHUB_SHA"
+          mapfile -t trigger_changes < <(git diff --name-only --diff-filter=ACDMRTUXB "$expected_release" "$GITHUB_SHA")
+          test "${#trigger_changes[@]}" -eq 1
+          test "${trigger_changes[0]}" = '.github/production-reset-trigger.txt'
+          expected_script_blob="$(git rev-parse "$expected_release:deploy/v52/maintenance/production-clean-slate.mjs")"
+          current_script_blob="$(git rev-parse "$GITHUB_SHA:deploy/v52/maintenance/production-clean-slate.mjs")"
+          test "$current_script_blob" = "$expected_script_blob"
+
+          work="$RUNNER_TEMP/arthello-reset-$GITHUB_RUN_ID"
+          mkdir -p "$work"
+          chmod 700 "$work"
+          backup_json="$work/backup.json"
+          backup_manifest=''
+          backup_path=''
+          stopped=0
+          paused=0
+          maintenance=0
+          restore_needed=0
+          helper=''
+
+          run_read_only() {
+            docker run --rm --network none --read-only --tmpfs /tmp \
+              --mount "type=bind,src=$script,dst=/maintenance/production-clean-slate.mjs,readonly" \
+              --mount "type=volume,src=$DATA_VOLUME,dst=/data,readonly" \
+              "$image" node /maintenance/production-clean-slate.mjs "$@" --root /data
+          }
+
+          run_write() {
+            docker run --rm --network none --read-only --tmpfs /tmp \
+              -e ARTHELLO_APP_STOPPED=1 \
+              --mount "type=bind,src=$script,dst=/maintenance/production-clean-slate.mjs,readonly" \
+              --mount "type=volume,src=$DATA_VOLUME,dst=/data" \
+              "$image" node /maintenance/production-clean-slate.mjs "$@" --root /data
+          }
+
+          container_is_stopped() {
+            test "$(docker inspect "$live" --format '{{.State.Running}}' 2>/dev/null || printf unknown)" = false
+          }
+
+          stop_and_confirm() {
+            docker stop --time 30 "$live" >/dev/null 2>&1 || true
+            if ! container_is_stopped; then
+              docker kill "$live" >/dev/null 2>&1 || true
+            fi
+            container_is_stopped
+          }
+
+          unpause_and_confirm() {
+            docker unpause "$live" >/dev/null 2>&1 || true
+            test "$(docker inspect "$live" --format '{{.State.Paused}}' 2>/dev/null || printf unknown)" = false
+          }
+
+          wait_for_health() {
+            local ok=0
+            for attempt in $(seq 1 60); do
+              if curl -fsS --max-time 10 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null \
+                && curl -fsS --max-time 10 "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null; then
+                ok=1
+                break
+              fi
+              sleep 2
+            done
+            test "$ok" -eq 1
+          }
+
+          recover_on_failure() {
+            rc=$?
+            trap - EXIT
+            if [ -n "$helper" ]; then
+              docker rm -f "$helper" >/dev/null 2>&1 || true
+              helper=''
+            fi
+            if [ "$rc" -ne 0 ] && [ "$paused" -eq 1 ]; then
+              if unpause_and_confirm; then
+                paused=0
+              elif [ "$maintenance" -eq 0 ]; then
+                printf 'ARTHELLO_RESET_RECOVERY=FAILED_PRODUCTION_LEFT_PAUSED\n' >&2
+              fi
+            fi
+            if [ "$rc" -ne 0 ] && [ "$maintenance" -eq 1 ]; then
+              printf 'ARTHELLO_RESET_RECOVERY=START\n' >&2
+              recovery_ok=1
+              if [ "$restore_needed" -eq 1 ] && [ -n "$backup_manifest" ]; then
+                if ! stop_and_confirm; then
+                  recovery_ok=0
+                else
+                  stopped=1
+                  if ! run_write rollback --manifest "$backup_manifest" --confirm ROLLBACK_ARTHELLO_PRODUCTION >&2; then
+                    recovery_ok=0
+                  fi
+                fi
+              fi
+              if [ "$recovery_ok" -eq 1 ]; then
+                if docker start "$live" >/dev/null 2>&1; then
+                  stopped=0
+                  if ! wait_for_health >/dev/null 2>&1; then
+                    recovery_ok=0
+                    if stop_and_confirm; then
+                      stopped=1
+                    else
+                      stopped=0
+                    fi
+                  fi
+                else
+                  recovery_ok=0
+                  stopped=1
+                fi
+              fi
+              if [ "$recovery_ok" -ne 1 ]; then
+                if stop_and_confirm; then
+                  stopped=1
+                  printf 'ARTHELLO_RESET_RECOVERY=FAILED_PRODUCTION_LEFT_STOPPED\n' >&2
+                else
+                  stopped=0
+                  printf 'ARTHELLO_RESET_RECOVERY=FAILED_PRODUCTION_STOP_NOT_CONFIRMED\n' >&2
+                fi
+              else
+                printf 'ARTHELLO_RESET_RECOVERY=HEALTHY\n' >&2
+              fi
+              printf 'ARTHELLO_RESET_RECOVERY=COMPLETE\n' >&2
+            fi
+            exit "$rc"
+          }
+          trap recover_on_failure EXIT
+
+          docker pause "$live" >/dev/null
+          paused=1
+          run_read_only inventory
+          docker unpause "$live" >/dev/null
+          paused=0
+
+          stop_and_confirm
+          stopped=1
+          maintenance=1
+
+          run_write backup | tee "$backup_json"
+          backup_manifest="$(node -e 'const x=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!x.manifestPath) process.exit(1); process.stdout.write(x.manifestPath)' "$backup_json")"
+          backup_path="$(node -e 'const x=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!x.backupPath) process.exit(1); process.stdout.write(x.backupPath)' "$backup_json")"
+          case "$backup_manifest" in (/data/backups/*.manifest.json) ;; (*) exit 1 ;; esac
+          case "$backup_path" in (/data/backups/*.sqlite) ;; (*) exit 1 ;; esac
+
+          host_backup="$HOME/.config/arthello/backups/reset-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$host_backup"
+          chmod 700 "$HOME/.config/arthello" "$HOME/.config/arthello/backups" "$host_backup"
+          helper="arthello-reset-backup-$GITHUB_RUN_ID"
+          docker rm -f "$helper" >/dev/null 2>&1 || true
+          docker create --name "$helper" --read-only --mount "type=volume,src=$DATA_VOLUME,dst=/data,readonly" "$image" true >/dev/null
+          docker cp "$helper:$backup_manifest" "$host_backup/before.manifest.json"
+          docker cp "$helper:$backup_path" "$host_backup/before.sqlite"
+          docker rm -f "$helper" >/dev/null
+          helper=''
+          chmod 600 "$host_backup/before.manifest.json" "$host_backup/before.sqlite"
+          node -e 'const fs=require("fs"),crypto=require("crypto"); const m=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const h=crypto.createHash("sha256").update(fs.readFileSync(process.argv[2])).digest("hex"); if(h!==m.sha256) process.exit(1)' "$host_backup/before.manifest.json" "$host_backup/before.sqlite"
+
+          restore_needed=1
+          run_write execute --confirm CLEAN_SLATE_ARTHELLO_PRODUCTION
+          run_read_only verify
+
+          docker start "$live" >/dev/null
+          stopped=0
+          wait_for_health
+
+          docker pause "$live" >/dev/null
+          paused=1
+          run_read_only verify
+          docker unpause "$live" >/dev/null
+          paused=0
+
+          restore_needed=0
+          maintenance=0
+
+          printf 'ARTHELLO_PRODUCTION_CLEAN_SLATE=OK\n'
+          printf 'ARTHELLO_PRESERVED_PEOPLE=3\n'
+          printf 'ARTHELLO_BACKUP_SHA256=VERIFIED\n'
+          trap - EXIT
+
+      - name: Reset summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## ArtHello production clean slate'
+            echo
+            echo "- Requested release: $(tr -d '[:space:]' < .github/production-reset-trigger.txt)"
+            echo '- Preserved identities: 3 approved people'
+            echo '- Backup: restricted runner storage directory, SHA-256 verified'
+            echo '- School route guard: checked before and after reset'
+            echo "- Result: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
