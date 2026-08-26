@@ -40,6 +40,7 @@ jobs:
 
           test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = '188.225.38.55'
           docker version >/dev/null
+          python3 --version >/dev/null
           test "$(docker volume inspect "$DATA_VOLUME" --format '{{.Name}}')" = "$DATA_VOLUME"
           curl -fsS --max-time 20 "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null
           curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null
@@ -198,8 +199,8 @@ jobs:
           maintenance=1
 
           run_write backup | tee "$backup_json"
-          backup_manifest="$(node -e 'const x=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!x.manifestPath) process.exit(1); process.stdout.write(x.manifestPath)' "$backup_json")"
-          backup_path="$(node -e 'const x=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!x.backupPath) process.exit(1); process.stdout.write(x.backupPath)' "$backup_json")"
+          backup_manifest="$(python3 -c 'import json,sys; value=json.load(open(sys.argv[1], encoding="utf-8")).get("manifestPath"); value or sys.exit(1); print(value, end="")' "$backup_json")"
+          backup_path="$(python3 -c 'import json,sys; value=json.load(open(sys.argv[1], encoding="utf-8")).get("backupPath"); value or sys.exit(1); print(value, end="")' "$backup_json")"
           case "$backup_manifest" in (/data/backups/*.manifest.json) ;; (*) exit 1 ;; esac
           case "$backup_path" in (/data/backups/*.sqlite) ;; (*) exit 1 ;; esac
 
@@ -214,7 +215,7 @@ jobs:
           docker rm -f "$helper" >/dev/null
           helper=''
           chmod 600 "$host_backup/before.manifest.json" "$host_backup/before.sqlite"
-          node -e 'const fs=require("fs"),crypto=require("crypto"); const m=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const h=crypto.createHash("sha256").update(fs.readFileSync(process.argv[2])).digest("hex"); if(h!==m.sha256) process.exit(1)' "$host_backup/before.manifest.json" "$host_backup/before.sqlite"
+          python3 -c 'import hashlib,json,sys; manifest=json.load(open(sys.argv[1], encoding="utf-8")); actual=hashlib.sha256(open(sys.argv[2], "rb").read()).hexdigest(); sys.exit(0 if actual == manifest.get("sha256") else 1)' "$host_backup/before.manifest.json" "$host_backup/before.sqlite"
 
           restore_needed=1
           run_write execute --confirm CLEAN_SLATE_ARTHELLO_PRODUCTION

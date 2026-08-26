@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1.7
+# The guarded production reset is orchestrated by the pinned workflow release.
 FROM node:24-bookworm-slim AS application
 
 ENV CI=1
