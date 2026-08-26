@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
+import { stripTypeScriptTypes } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
-import ts from 'typescript';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const MATRIX_PATH = path.join(ROOT, 'quality-gates', 'permission-matrix.json');
@@ -14,10 +14,8 @@ const REPORT_PATH = reportArg >= 0 && process.argv[reportArg + 1]
 
 const matrix = JSON.parse(await fs.readFile(MATRIX_PATH, 'utf8'));
 const policySource = await fs.readFile(POLICY_PATH, 'utf8');
-const transpiled = ts.transpileModule(policySource, {
-  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
-}).outputText;
-const policy = await import(`data:text/javascript;base64,${Buffer.from(transpiled).toString('base64')}`);
+const stripped = stripTypeScriptTypes(policySource, { mode: 'strip' });
+const policy = await import(`data:text/javascript;base64,${Buffer.from(stripped).toString('base64')}`);
 const failures = [];
 const actualRoles = [...policy.AUTH_ROLES];
 
