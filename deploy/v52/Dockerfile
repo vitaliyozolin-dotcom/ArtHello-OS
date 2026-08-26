@@ -18,6 +18,7 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* \
     && node /app/scripts/patch-dashboard-personalization.mjs \
     && node /app/scripts/patch-sales-operating-workspace.mjs \
     && node /app/scripts/patch-system-foundation.mjs \
+    && node /app/scripts/normalize-system-patch-inputs.mjs \
     && node /app/scripts/patch-system-content-legal.mjs \
     && node /app/scripts/patch-system-analytics-readiness.mjs \
     && node /app/scripts/patch-system-operational-modules.mjs \
