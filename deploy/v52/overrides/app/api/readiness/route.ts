@@ -1,0 +1,74 @@
+import { env } from "cloudflare:workers";
+import { ensureCoreTables, getSystemDataMode } from "../../../db";
+import { canPromoteToProduction } from "../../../lib/readiness";
+import { getRequestUser } from "../../../lib/request-user";
+
+const readers = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "QUALITY", "ANALYTICS", "INTEGRATIONS"]);
+type Row = Record<string, unknown>;
+
+export async function GET(request: Request) {
+  if (!getRequestUser(request)) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  const role = request.headers.get("x-arthello-role") ?? "";
+  if (!readers.has(role)) return Response.json({ error: "Нет доступа к контуру готовности" }, { status: 403 });
+
+  try {
+    await ensureCoreTables();
+    const dataMode = await getSystemDataMode();
+    if (dataMode === "empty") {
+      return Response.json({
+        dataMode,
+        scenarios: [],
+        gates: [],
+        runs: [],
+        drills: [],
+        decisions: [],
+        summary: { passedScenarios: 0, totalScenarios: 0, passedGates: 0, totalGates: 0, productionReady: false, blockedGateIds: [] },
+        testLayers: [],
+        boundary: "Сценарии готовности ещё не настроены.",
+        medicalBoundary: "Медицинские сведения не используются в проверках готовности.",
+        productionDecision: "Решение о выпуске ещё не сформировано.",
+      });
+    }
+
+    const [scenarioRows, stepRows, gates, runs, drills, decisions] = await Promise.all([
+      all("SELECT * FROM readiness_scenarios ORDER BY number"),
+      all("SELECT * FROM readiness_scenario_steps ORDER BY scenario_id,step_order"),
+      all("SELECT * FROM release_gates ORDER BY id"),
+      all("SELECT * FROM readiness_validation_runs ORDER BY finished_at DESC LIMIT 20"),
+      all("SELECT * FROM recovery_drills ORDER BY id"),
+      all("SELECT * FROM acceptance_decisions WHERE stage='Этап 18 · сквозная проверка и готовность' ORDER BY created_at DESC"),
+    ]);
+    const scenarios = scenarioRows.map((scenario) => ({ ...scenario, steps: stepRows.filter((step) => step.scenario_id === scenario.id) }));
+    const passed = scenarios.filter((scenario) => scenario.status === "Пройдено").length;
+    const required = gates.filter((gate) => Boolean(gate.required));
+    const blocked = required.filter((gate) => gate.status !== "Пройдено");
+
+    return Response.json({
+      dataMode,
+      scenarios,
+      gates,
+      runs,
+      drills,
+      decisions,
+      summary: {
+        passedScenarios: passed,
+        totalScenarios: scenarios.length,
+        passedGates: required.length - blocked.length,
+        totalGates: required.length,
+        productionReady: canPromoteToProduction(gates.map((gate) => ({ status: String(gate.status), required: Boolean(gate.required) })), false),
+        blockedGateIds: blocked.map((gate) => gate.id),
+      },
+      testLayers: ["Unit", "API contract", "Integration", "Database", "Migration", "Permissions", "Lineage", "Reconciliation", "E2E", "Visual", "Accessibility", "Performance", "Security", "Backup restore", "Rollback", "Browser compatibility"],
+      boundary: "Тестовый контур проверяет маршруты на синтетических и обезличенных данных. Приёмка этапа 18 не разрешает production.",
+      medicalBoundary: "Медицинское содержание исключено: readiness получает только устойчивые ID, статус шага и факт защищённого аудита.",
+      productionDecision: "ЗАБЛОКИРОВАНО: нет реальных внешних источников, live D1 restore drill, полной browser/security matrix и отдельного разрешения представителя.",
+    });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error && error.message.includes("D1 binding") ? "База готовности ещё не подключена" : "Не удалось загрузить готовность" }, { status: 503 });
+  }
+}
+
+async function all(sql: string) {
+  const result = await env.DB.prepare(sql).all<Row>();
+  return result.results ?? [];
+}
