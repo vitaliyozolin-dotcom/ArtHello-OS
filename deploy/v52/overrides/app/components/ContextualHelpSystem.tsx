@@ -1,8 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FALLBACK_PROFILE, roleFor, type HelpAction, type HelpContext, type HelpField, type HelpQuestion, type HelpUser } from "./contextualHelpCatalog";
-import { clamp, isInsideHelp, labelRectFor, rectFor, scanHelpContext } from "./contextualHelpDom";
+import {
+  FALLBACK_PROFILE,
+  guideFor,
+  roleFor,
+  type HelpContext,
+  type HelpField,
+  type HelpGuide,
+  type HelpGuideStep,
+  type HelpRect,
+  type HelpUser,
+} from "./contextualHelpCatalog";
+import {
+  activeHelpScope,
+  clamp,
+  cleanText,
+  findInHelpScope,
+  isInsideHelp,
+  isRendered,
+  labelRectFor,
+  rectFor,
+  scanHelpContext,
+} from "./contextualHelpDom";
 import "./ContextualHelpSystem.css";
 
 const EMPTY_CONTEXT: HelpContext = {
@@ -16,18 +36,74 @@ const EMPTY_CONTEXT: HelpContext = {
   signature: "initial",
 };
 
+type RuntimeStep = HelpGuideStep & { element?: HTMLElement };
+type TourState = {
+  title: string;
+  steps: RuntimeStep[];
+  index: number;
+  restoreTabLabel: string;
+  single: boolean;
+};
+
+function selectedTabLabel() {
+  const scope = activeHelpScope();
+  const selected = Array.from(scope.querySelectorAll<HTMLElement>("[role=tab][aria-selected=true]"))
+    .find(isRendered);
+  return cleanText(selected?.textContent, 80);
+}
+
+function genericGuide(context: HelpContext): HelpGuide {
+  const steps: HelpGuideStep[] = [
+    {
+      id: `${context.profile.id}-overview`,
+      selector: "[data-page-title],h1,[role=heading][aria-level='1']",
+      title: context.title || context.profile.title,
+      text: context.profile.purpose,
+      can: context.profile.first,
+      cannot: "Действия, скрытые или заблокированные вашей ролью, не должны выполняться через помощника.",
+    },
+  ];
+
+  if (context.section) {
+    steps.push({
+      id: `${context.profile.id}-tabs`,
+      selector: "[role=tablist]",
+      title: `Вкладка «${context.section}»`,
+      text: "Вкладки разделяют разные процессы внутри раздела. Помощник учитывает только открытую вкладку и реально видимые элементы.",
+      can: "Переключаться между доступными вкладками и работать с данными текущей области.",
+      cannot: "Ожидать, что скрытая вкладка или недоступное вашей роли действие будет выполнено автоматически.",
+    });
+  }
+
+  steps.push({
+    id: `${context.profile.id}-workspace`,
+    selector: "form,article,[class*='panel'],[class*='workspace']",
+    title: "Рабочая область",
+    text: "Здесь находятся данные, поля и действия текущей страницы. Маленькие значки рядом с названиями открывают точную подсказку по конкретному полю.",
+    can: "Заполнять видимые поля и использовать доступные кнопки после проверки данных.",
+    cannot: "Сохранять случайные значения или обходить ограничения роли и обязательные проверки.",
+  });
+
+  return {
+    id: context.profile.id,
+    title: context.profile.title,
+    intro: "Покажу назначение текущей страницы и её рабочие блоки без большого окна поверх интерфейса.",
+    steps,
+  };
+}
+
 export function ContextualHelpSystem() {
   const [user, setUser] = useState<HelpUser | null>(null);
-  const [open, setOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [hints, setHints] = useState(true);
-  const [question, setQuestion] = useState<HelpQuestion>("overview");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [tour, setTour] = useState(0);
   const [context, setContext] = useState<HelpContext>(EMPTY_CONTEXT);
+  const [tour, setTour] = useState<TourState | null>(null);
+  const [tourRect, setTourRect] = useState<HelpRect | null>(null);
   const ids = useRef(new WeakMap<HTMLElement, string>());
   const counter = useRef(0);
   const frame = useRef<number | null>(null);
   const pageKey = useRef("");
+  const tourElement = useRef<HTMLElement | null>(null);
 
   const idFor = useCallback((element: HTMLElement, prefix: string) => {
     const existing = ids.current.get(element);
@@ -40,11 +116,12 @@ export function ContextualHelpSystem() {
   const scan = useCallback(() => {
     if (!document.body) return;
     const next = scanHelpContext(idFor);
-    const nextPageKey = `${next.path}\n${next.title}\n${next.section}`;
+    const nextPageKey = `${next.path}\n${next.title}`;
     if (pageKey.current && pageKey.current !== nextPageKey) {
-      setQuestion("overview");
-      setSelected(null);
-      setTour(0);
+      setMenuOpen(false);
+      setTour(null);
+      setTourRect(null);
+      tourElement.current = null;
     }
     pageKey.current = nextPageKey;
     setContext((current) => current.signature === next.signature ? current : next);
@@ -94,6 +171,7 @@ export function ContextualHelpSystem() {
     addEventListener("resize", update);
     addEventListener("scroll", update, true);
     addEventListener("popstate", update);
+    addEventListener("hashchange", update);
     document.addEventListener("focusin", updateFromEvent, true);
     document.addEventListener("input", updateFromEvent, true);
     document.addEventListener("change", updateFromEvent, true);
@@ -102,6 +180,7 @@ export function ContextualHelpSystem() {
       removeEventListener("resize", update);
       removeEventListener("scroll", update, true);
       removeEventListener("popstate", update);
+      removeEventListener("hashchange", update);
       document.removeEventListener("focusin", updateFromEvent, true);
       document.removeEventListener("input", updateFromEvent, true);
       document.removeEventListener("change", updateFromEvent, true);
@@ -109,40 +188,66 @@ export function ContextualHelpSystem() {
     };
   }, [schedule]);
 
+  const clickTab = useCallback((label: string) => {
+    if (!label) return null;
+    const scope = activeHelpScope();
+    const tab = Array.from(scope.querySelectorAll<HTMLElement>("[role=tab]"))
+      .find((item) => isRendered(item) && cleanText(item.textContent, 80) === label);
+    if (tab && tab.getAttribute("aria-selected") !== "true") tab.click();
+    return tab ?? null;
+  }, []);
+
+  const closeTour = useCallback((restore = true) => {
+    const restoreTabLabel = tour?.restoreTabLabel ?? "";
+    setTour(null);
+    setTourRect(null);
+    tourElement.current = null;
+    if (restore && restoreTabLabel) {
+      window.setTimeout(() => {
+        clickTab(restoreTabLabel);
+        schedule();
+      }, 70);
+    }
+  }, [clickTab, schedule, tour?.restoreTabLabel]);
+
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      if (tour) closeTour();
+      else setMenuOpen(false);
     };
     document.addEventListener("keydown", close);
     return () => document.removeEventListener("keydown", close);
-  }, []);
+  }, [closeTour, tour]);
 
-  const createAction = useMemo(() => context.actions.find((item) => /добавить|создать|нов(ая|ый|ое)|пригласить|загрузить/i.test(item.label)), [context.actions]);
-  const saveAction = useMemo(() => context.actions.find((item) => /сохранить|создать|добавить|подтвердить|отправить|применить/i.test(item.label)), [context.actions]);
-  const disabledActions = useMemo(() => context.actions.filter((item) => item.disabled), [context.actions]);
-  const problemFields = useMemo(() => context.fields.filter((item) => item.missing || item.invalid), [context.fields]);
-  const tourTargets = useMemo(() => [
-    ...context.fields,
-    ...context.actions.filter((item) => /добавить|создать|сохранить|применить|отправить|подтвердить/i.test(item.label)),
-  ], [context.fields, context.actions]);
+  const guide = useMemo(() => guideFor(context.profile.id) ?? genericGuide(context), [context.path, context.profile.id, context.profile.purpose, context.profile.title, context.profile.first, context.section, context.title]);
 
-  const target = useCallback((id: string | null) => {
-    return context.fields.find((item) => item.id === id) || context.actions.find((item) => item.id === id);
-  }, [context]);
+  const startGuide = useCallback((mode: "current" | "full") => {
+    const activeTab = selectedTabLabel();
+    let steps: RuntimeStep[] = guide.steps;
+    if (mode === "current") {
+      const matching = activeTab ? guide.steps.filter((step) => step.tabLabel === activeTab) : [];
+      steps = matching.length ? matching : guide.steps.slice(0, 1);
+    }
+    if (!steps.length) return;
+    setMenuOpen(false);
+    setTour({ title: guide.title, steps, index: 0, restoreTabLabel: activeTab, single: mode === "current" && steps.length === 1 });
+  }, [guide]);
 
-  const show = useCallback((id: string) => {
-    const item = target(id);
-    if (!item) return;
-    setSelected(id);
-    item.element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-    setTimeout(schedule, 260);
-  }, [schedule, target]);
-
-  const fieldHelp = useCallback((field: HelpField) => {
-    setOpen(true);
-    setQuestion(`field:${field.id}`);
-    show(field.id);
-  }, [show]);
+  const startFieldHelp = useCallback((field: HelpField) => {
+    const activeTab = selectedTabLabel();
+    const step: RuntimeStep = {
+      id: `field-${field.id}`,
+      selector: "",
+      element: field.element,
+      title: field.label,
+      text: field.hint,
+      can: `${field.required ? "Заполните обязательное поле" : "Заполните поле при необходимости"}. ${field.effect}`,
+      cannot: field.disabled ? "Поле сейчас недоступно из-за состояния записи или прав вашей роли." : "Не вводите случайное значение: оно попадёт в связанную карточку и отчёты.",
+    };
+    setMenuOpen(false);
+    setTour({ title: context.profile.title, steps: [step], index: 0, restoreTabLabel: activeTab, single: true });
+  }, [context.profile.title]);
 
   const setHintPreference = useCallback((value: boolean) => {
     setHints(value);
@@ -154,80 +259,64 @@ export function ContextualHelpSystem() {
   }, []);
 
   const moveTour = useCallback((index: number) => {
-    const next = clamp(index, 0, Math.max(0, tourTargets.length - 1));
-    setTour(next);
-    if (tourTargets[next]) show(tourTargets[next].id);
-  }, [show, tourTargets]);
+    setTour((current) => current ? { ...current, index: clamp(index, 0, Math.max(0, current.steps.length - 1)) } : current);
+  }, []);
 
-  const startTour = useCallback(() => {
-    setOpen(true);
-    setQuestion("tour");
-    moveTour(0);
-  }, [moveTour]);
+  const step = tour?.steps[tour.index];
 
-  const questions = useMemo(() => {
-    const result: Array<{ key: HelpQuestion; label: string }> = [{ key: "overview", label: "Что здесь делать?" }];
-    if (createAction) result.push({ key: "create", label: `Как выполнить «${createAction.label}»?` });
-    if (context.fields.length) result.push({ key: "fields", label: "Что нужно заполнить на этой странице?" });
-    context.fields.slice(0, 2).forEach((field) => result.push({ key: `field:${field.id}`, label: `Что означает поле «${field.label}»?` }));
-    if (disabledActions.length) result.push({ key: "disabled", label: "Почему кнопка недоступна?" });
-    if (saveAction) result.push({ key: "save", label: "Что произойдёт после сохранения?" });
-    if (context.errors.length || problemFields.length) result.push({ key: "errors", label: "Как исправить ошибки?" });
-    if (tourTargets.length) result.push({ key: "tour", label: "Показать всё пошагово" });
-    return result;
-  }, [context, createAction, disabledActions.length, problemFields.length, saveAction, tourTargets.length]);
+  useEffect(() => {
+    if (!step) return;
+    let cancelled = false;
+    const timers: number[] = [];
 
-  const answer = useMemo(() => {
-    if (question.startsWith("field:")) {
-      const field = context.fields.find((item) => item.id === question.slice(6));
-      return field ? {
-        title: field.label,
-        paragraphs: [
-          field.hint,
-          `${field.required ? "Поле обязательно" : "Поле необязательно"}${field.missing ? " и сейчас не заполнено" : ""}.`,
-          `После сохранения: ${field.effect}`,
-        ],
-        target: field as HelpField | HelpAction,
-      } : null;
-    }
-    if (question === "overview") return {
-      title: "Назначение страницы",
-      paragraphs: [context.profile.purpose, `С чего начать: ${context.profile.first}`, `На странице обнаружено ${context.fields.length} полей и ${context.actions.length} действий.`],
+    const measure = () => {
+      const element = tourElement.current;
+      if (!cancelled && element && document.contains(element) && isRendered(element)) setTourRect(rectFor(element));
     };
-    if (question === "create") return {
-      title: createAction ? `Действие «${createAction.label}»` : "Добавление записи",
-      paragraphs: createAction ? ["Нажмите выделенную кнопку, заполните обязательные поля, проверьте связи и сохраните запись.", createAction.disabled ? createAction.reason : "Действие доступно вашей роли."] : ["На текущем экране нет доступной кнопки создания."],
-      target: createAction,
+
+    const locate = (attempt: number) => {
+      if (cancelled) return;
+      const element = step.element && document.contains(step.element) && isRendered(step.element)
+        ? step.element
+        : step.selector
+          ? findInHelpScope(step.selector)
+          : null;
+
+      if (!element && attempt < 7) {
+        timers.push(window.setTimeout(() => locate(attempt + 1), 110));
+        return;
+      }
+
+      tourElement.current = element;
+      if (!element) {
+        setTourRect(null);
+        return;
+      }
+
+      const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      element.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center", inline: "nearest" });
+      timers.push(window.setTimeout(measure, reduced ? 30 : 300));
     };
-    if (question === "save") return {
-      title: "Сохранение данных",
-      paragraphs: [
-        "После ответа сервера данные станут частью текущей карточки и будут доступны связанным разделам в пределах прав пользователей.",
-        problemFields.length ? `Сначала исправьте проблемные поля: ${problemFields.slice(0, 5).map((field) => field.label).join(", ")}.` : "Явных незаполненных обязательных полей не обнаружено.",
-        saveAction?.disabled ? saveAction.reason : "",
-      ].filter(Boolean),
-      target: saveAction,
+
+    const begin = () => {
+      if (step.tabLabel) clickTab(step.tabLabel);
+      timers.push(window.setTimeout(() => locate(0), step.tabLabel ? 150 : 20));
     };
-    if (question === "fields") return {
-      title: "Поля страницы",
-      paragraphs: context.fields.length ? context.fields.slice(0, 10).map((field) => `${field.label}: ${field.required ? "обязательно" : "необязательно"}${field.missing ? ", не заполнено" : ""}.`) : ["Видимых полей ввода нет."],
+
+    timers.push(window.setTimeout(begin, 0));
+    addEventListener("resize", measure);
+    addEventListener("scroll", measure, true);
+    return () => {
+      cancelled = true;
+      timers.forEach((timer) => window.clearTimeout(timer));
+      removeEventListener("resize", measure);
+      removeEventListener("scroll", measure, true);
+      tourElement.current = null;
     };
-    if (question === "disabled") return {
-      title: "Недоступные действия",
-      paragraphs: disabledActions.length ? disabledActions.slice(0, 8).map((item) => `${item.label}: ${item.reason}`) : ["Все видимые действия доступны."],
-    };
-    if (question === "errors") {
-      const problems = [
-        ...problemFields.slice(0, 8).map((field) => `${field.label}: ${field.missing ? "обязательное поле не заполнено" : "значение некорректно"}.`),
-        ...context.errors,
-      ];
-      return { title: "Что исправить", paragraphs: problems.length ? problems : ["Видимых ошибок нет."] };
-    }
-    return null;
-  }, [context, createAction, disabledActions, problemFields, question, saveAction]);
+  }, [clickTab, step]);
 
   const fieldMarkers = useMemo(() => {
-    if (!hints || typeof window === "undefined") return [];
+    if (!hints || tour || typeof window === "undefined") return [];
     const seen = new Set<string>();
     const size = 16;
     const gap = 5;
@@ -253,11 +342,36 @@ export function ContextualHelpSystem() {
 
       return [{ field, left, top }];
     });
-  }, [context.fields, hints]);
+  }, [context.fields, hints, tour]);
 
-  const selectedTarget = target(selected);
-  const spotlight = selectedTarget ? rectFor(selectedTarget.element) : null;
-  const currentTour = tourTargets[tour];
+  const calloutStyle = useMemo(() => {
+    if (typeof window === "undefined") return { width: 360, left: 16, top: 120 };
+    const width = Math.min(370, window.innerWidth - 24);
+    const estimatedHeight = window.innerWidth <= 720 ? 245 : 225;
+    const safeBottom = window.innerWidth <= 720 ? 104 : 16;
+    if (!tourRect) return {
+      width,
+      left: Math.max(12, (window.innerWidth - width) / 2),
+      top: Math.max(12, window.innerHeight - estimatedHeight - safeBottom),
+    };
+
+    const below = tourRect.bottom + 14;
+    const belowFits = below + estimatedHeight <= window.innerHeight - safeBottom;
+    const above = tourRect.top - estimatedHeight - 14;
+    const top = belowFits ? below : above >= 12 ? above : Math.max(12, window.innerHeight - estimatedHeight - safeBottom);
+    const left = clamp(tourRect.left, 12, Math.max(12, window.innerWidth - width - 12));
+    return { width, left, top };
+  }, [tourRect, tour?.index]);
+
+  const holeStyle = useMemo(() => {
+    if (!tourRect || typeof window === "undefined") return null;
+    const padding = 6;
+    const top = clamp(tourRect.top - padding, 6, Math.max(6, window.innerHeight - 18));
+    const left = clamp(tourRect.left - padding, 6, Math.max(6, window.innerWidth - 18));
+    const right = clamp(tourRect.right + padding, left + 12, window.innerWidth - 6);
+    const bottom = clamp(tourRect.bottom + padding, top + 12, window.innerHeight - 6);
+    return { top, left, width: right - left, height: bottom - top };
+  }, [tourRect]);
 
   return (
     <div data-ah-help-root="true">
@@ -268,79 +382,71 @@ export function ContextualHelpSystem() {
           type="button"
           style={{ left, top }}
           aria-label={`Помощь по полю «${field.label}»`}
-          onClick={() => fieldHelp(field)}
+          onClick={() => startFieldHelp(field)}
         >?</button>
       ))}
 
-      {spotlight ? <div className="ah-spot" aria-hidden="true" style={{ top: spotlight.top - 5, left: spotlight.left - 5, width: spotlight.width + 10, height: spotlight.height + 10 }} /> : null}
-
-      {open ? (
-        <section className="ah-panel" role="dialog" aria-modal="false" aria-label="Контекстная помощь ArtHello OS">
-          <header className="ah-head">
+      {menuOpen && !tour ? (
+        <aside className="ah-menu" role="dialog" aria-modal="false" aria-label="Помощь по текущей странице">
+          <header>
             <div>
-              <p className="ah-kicker">Помощь по текущей странице</p>
-              <h2>{context.title || context.profile.title}</h2>
-              <p className="ah-sub">Раздел: {context.profile.title} · Роль: {roleFor(user)}</p>
+              <span>Помощь по текущей странице</span>
+              <strong>{context.title || context.profile.title}</strong>
+              <small>{context.section ? `${context.section} · ` : ""}{roleFor(user)}</small>
             </div>
-            <button className="ah-close" type="button" aria-label="Закрыть помощь" onClick={() => setOpen(false)}>×</button>
+            <button type="button" aria-label="Закрыть помощь" onClick={() => setMenuOpen(false)}>×</button>
           </header>
-          <div className="ah-body">
-            <div className="ah-page">
-              <strong>Что здесь можно сделать</strong>
-              <p>{context.profile.purpose}</p>
-              <div className="ah-meta">
-                <span className="ah-chip">{context.fields.length} полей</span>
-                <span className="ah-chip">{context.actions.length} действий</span>
-                {problemFields.length ? <span className="ah-chip">Исправить: {problemFields.length}</span> : null}
-              </div>
-            </div>
-            <div className="ah-tools">
-              <h3>Вопросы по этой странице</h3>
-              <label className="ah-toggle">
-                <input type="checkbox" checked={hints} onChange={(event: { currentTarget: HTMLInputElement }) => setHintPreference(event.currentTarget.checked)} />
-                Значки помощи у названий
-              </label>
-            </div>
-            <div className="ah-list">
-              {questions.map((item) => (
-                <button className="ah-q" key={item.key} type="button" aria-pressed={question === item.key} onClick={() => {
-                  if (item.key === "tour") startTour();
-                  else {
-                    setQuestion(item.key);
-                    if (item.key.startsWith("field:")) show(item.key.slice(6));
-                  }
-                }}>{item.label}</button>
-              ))}
-            </div>
-            {question === "tour" ? (
-              <div className="ah-answer">
-                <h4>Пошаговое обучение</h4>
-                {currentTour ? (
-                  <>
-                    <p><strong>Шаг {tour + 1} из {tourTargets.length}: {currentTour.label}</strong></p>
-                    <p>{"hint" in currentTour ? currentTour.hint : `Используйте действие «${currentTour.label}» после проверки обязательных данных.`}</p>
-                    <div className="ah-actions">
-                      <button className="ah-btn secondary" type="button" disabled={tour === 0} onClick={() => moveTour(tour - 1)}>Назад</button>
-                      <button className="ah-btn" type="button" onClick={() => show(currentTour.id)}>Показать</button>
-                      {tour < tourTargets.length - 1 ? <button className="ah-btn" type="button" onClick={() => moveTour(tour + 1)}>Далее</button> : <button className="ah-btn" type="button" onClick={() => { setQuestion("overview"); setSelected(null); }}>Завершить</button>}
-                    </div>
-                  </>
-                ) : <p>На странице нет элементов для обучения.</p>}
-              </div>
-            ) : answer ? (
-              <div className="ah-answer">
-                <h4>{answer.title}</h4>
-                {answer.paragraphs.map((paragraph, index) => <p key={`${index}-${paragraph}`} className={/не заполн|некоррект|недоступ/.test(paragraph) ? "ah-warn" : ""}>{paragraph}</p>)}
-                {answer.target ? <div className="ah-actions"><button className="ah-btn" type="button" onClick={() => show(answer.target!.id)}>Показать на странице</button></div> : null}
-              </div>
-            ) : null}
+          <p>{guide.intro}</p>
+          <div className="ah-menu-actions">
+            <button className="primary" type="button" onClick={() => startGuide("current")}>Объяснить текущую вкладку</button>
+            <button type="button" onClick={() => startGuide("full")}>Пройти обучение по разделу</button>
           </div>
-        </section>
+          <label className="ah-menu-toggle">
+            <input type="checkbox" checked={hints} onChange={(event) => setHintPreference(event.currentTarget.checked)} />
+            Маленькие значки помощи у названий
+          </label>
+        </aside>
       ) : null}
 
-      <button className="ah-launch" type="button" aria-expanded={open} aria-label={open ? "Закрыть помощь" : `Открыть помощь по разделу «${context.profile.title}»`} onClick={() => setOpen((value) => !value)}>
-        <b aria-hidden="true">?</b><span>Помощь</span>
-      </button>
+      {tour && step ? (
+        <>
+          <button className="ah-tour-blocker" type="button" aria-label="Закрыть обучение" onClick={() => closeTour()} />
+          {holeStyle ? <div className="ah-tour-hole" aria-hidden="true" style={holeStyle} /> : null}
+          <section className="ah-tour-callout" style={calloutStyle} role="status" aria-live="polite">
+            <div className="ah-tour-progress">
+              <span>{tour.single ? "Подсказка" : `Шаг ${tour.index + 1} из ${tour.steps.length}`}</span>
+              <button type="button" aria-label="Закрыть обучение" onClick={() => closeTour()}>×</button>
+            </div>
+            <h3>{step.title}</h3>
+            <p>{step.text}</p>
+            {step.can ? <div className="ah-tour-rule can"><strong>Можно</strong><span>{step.can}</span></div> : null}
+            {step.cannot ? <div className="ah-tour-rule cannot"><strong>Нельзя</strong><span>{step.cannot}</span></div> : null}
+            {!tourRect ? <small className="ah-tour-searching">Ищу соответствующий блок на странице…</small> : null}
+            <div className="ah-tour-actions">
+              {!tour.single ? <button type="button" disabled={tour.index === 0} onClick={() => moveTour(tour.index - 1)}>Назад</button> : null}
+              {tour.single ? (
+                <button className="primary" type="button" onClick={() => closeTour()}>Понятно</button>
+              ) : tour.index < tour.steps.length - 1 ? (
+                <button className="primary" type="button" onClick={() => moveTour(tour.index + 1)}>Дальше</button>
+              ) : (
+                <button className="primary" type="button" onClick={() => closeTour()}>Завершить</button>
+              )}
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {!tour ? (
+        <button
+          className="ah-launch"
+          type="button"
+          aria-expanded={menuOpen}
+          aria-label={menuOpen ? "Закрыть помощь" : `Открыть помощь по разделу «${context.profile.title}»`}
+          onClick={() => setMenuOpen((value) => !value)}
+        >
+          <b aria-hidden="true">?</b><span>Помощь</span>
+        </button>
+      ) : null}
     </div>
   );
 }

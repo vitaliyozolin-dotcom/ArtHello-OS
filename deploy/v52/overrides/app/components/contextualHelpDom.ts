@@ -10,12 +10,35 @@ export function isInsideHelp(node: Node | null) {
   return Boolean(element?.closest("[data-ah-help-root]"));
 }
 
-function isRendered(element: HTMLElement) {
+export function isRendered(element: HTMLElement) {
   if (element.closest("[data-ah-help-root]")) return false;
   const style = getComputedStyle(element);
   if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
   const rect = element.getBoundingClientRect();
   return rect.width > 1 && rect.height > 1;
+}
+
+export function activeHelpScope() {
+  const dialogs = Array.from(document.querySelectorAll<HTMLElement>("[role=dialog]"))
+    .filter((element) => !isInsideHelp(element) && isRendered(element));
+  if (dialogs.length) return dialogs[dialogs.length - 1];
+
+  const pages = Array.from(document.querySelectorAll<HTMLElement>(".page,[data-page-root],main"))
+    .filter(isRendered);
+  return pages[0] ?? document.body;
+}
+
+export function findInHelpScope(selector: string) {
+  const scope = activeHelpScope();
+  try {
+    if (scope.matches(selector) && isRendered(scope)) return scope;
+    const scoped = scope.querySelector<HTMLElement>(selector);
+    if (scoped && isRendered(scoped)) return scoped;
+    const global = document.querySelector<HTMLElement>(selector);
+    return global && isRendered(global) ? global : null;
+  } catch {
+    return null;
+  }
 }
 
 function toHelpRect(rect: DOMRect): HelpRect {
@@ -33,7 +56,7 @@ export function rectFor(element: HTMLElement): HelpRect {
   return toHelpRect(element.getBoundingClientRect());
 }
 
-function elementText(element?: HTMLElement) {
+export function elementText(element?: HTMLElement) {
   if (!element) return "";
   if (element instanceof HTMLInputElement && ["submit", "button", "reset"].includes(element.type)) return cleanText(element.value);
   return cleanText(element.innerText || element.textContent || element.getAttribute("aria-label") || element.title);
@@ -166,11 +189,12 @@ function isDisabled(element: HTMLElement) {
 }
 
 export function scanHelpContext(idFor: (element: HTMLElement, prefix: string) => string): HelpContext {
-  const heading = Array.from(document.querySelectorAll<HTMLElement>("[data-page-title],main h1,main h2,h1,[role=heading][aria-level='1']")).find(isRendered);
+  const scope = activeHelpScope();
+  const heading = Array.from(scope.querySelectorAll<HTMLElement>("[data-page-title],h1,h2,[role=heading][aria-level='1']")).find(isRendered);
   const title = cleanText(heading?.getAttribute("data-page-title") || heading?.innerText || document.title || "ArtHello OS", 100);
-  const active = Array.from(document.querySelectorAll<HTMLElement>("[aria-current=page],[data-active=true],nav .active,aside .active,[role=tab][aria-selected=true]")).find(isRendered);
+  const active = Array.from(scope.querySelectorAll<HTMLElement>("[role=tab][aria-selected=true],[aria-current=page],[data-active=true],.active")).find(isRendered);
   const section = elementText(active).slice(0, 90);
-  const path = location.pathname || "/";
+  const path = `${location.pathname || "/"}${location.hash || ""}`;
   const profile = profileFor(`${path} ${title} ${section} ${document.title}`);
 
   Array.from(document.querySelectorAll<HTMLElement>("nav a,nav button,aside a,aside button,[role=menuitem],[role=tab]"))
@@ -183,7 +207,7 @@ export function scanHelpContext(idFor: (element: HTMLElement, prefix: string) =>
       item.dataset.ahHelpMenu = "1";
     });
 
-  const fields = Array.from(document.querySelectorAll<HTMLElement>("input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]),select,textarea,[role=combobox],[contenteditable]:not([contenteditable=false])"))
+  const fields = Array.from(scope.querySelectorAll<HTMLElement>("input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]),select,textarea,[role=combobox],[contenteditable]:not([contenteditable=false])"))
     .filter(isRendered).slice(0, 80).map<HelpField>((element) => {
       const label = labelFor(element);
       const required = isRequired(element);
@@ -191,7 +215,7 @@ export function scanHelpContext(idFor: (element: HTMLElement, prefix: string) =>
     });
 
   const missing = fields.filter((field) => field.missing).map((field) => field.label);
-  const actions = Array.from(document.querySelectorAll<HTMLElement>("button,[role=button],input[type=submit],input[type=button]"))
+  const actions = Array.from(scope.querySelectorAll<HTMLElement>("button,[role=button],input[type=submit],input[type=button]"))
     .filter((element) => isRendered(element) && !element.closest("[data-ah-help-root]")).slice(0, 100)
     .map<HelpAction | null>((element) => {
       const label = elementText(element);
@@ -202,7 +226,7 @@ export function scanHelpContext(idFor: (element: HTMLElement, prefix: string) =>
       return { id: idFor(element, "action"), element, label, disabled, reason, rect: rectFor(element) };
     }).filter((item): item is HelpAction => Boolean(item));
 
-  const errors = Array.from(new Set(Array.from(document.querySelectorAll<HTMLElement>("[role=alert],[aria-live=assertive],[data-error],.field-error,.form-error")).filter(isRendered).map(elementText).filter(Boolean))).slice(0, 8);
+  const errors = Array.from(new Set(Array.from(scope.querySelectorAll<HTMLElement>("[role=alert],[aria-live=assertive],[data-error],.field-error,.form-error")).filter(isRendered).map(elementText).filter(Boolean))).slice(0, 8);
   const signature = JSON.stringify({
     path,
     title,
