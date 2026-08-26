@@ -44,12 +44,16 @@ FROM node:24-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
     PORT=8081 \
-    ARTHELLO_D1_PATH=/data/d1
+    ARTHELLO_D1_PATH=/data/d1 \
+    ARTHELLO_DATA_ROOT=/data \
+    ARTHELLO_BACKUP_ROOT=/backups \
+    ARTHELLO_BACKUP_TEMP_ROOT=/tmp/arthello-backup-work
 WORKDIR /app
 COPY --from=application /app/dist /app/dist
-COPY --from=application /app/production/runtime-server.mjs /app/production/runtime-server.mjs
+COPY --from=application /app/production /app/production
 COPY --from=runtime-dependencies /runtime/node_modules /app/node_modules
-RUN mkdir -p /data/d1 && chown -R node:node /data
+RUN mkdir -p /data/d1 /backups \
+    && chown -R node:node /data /backups
 USER node
 EXPOSE 8081
 CMD ["node", "production/runtime-server.mjs"]

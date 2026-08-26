@@ -3,17 +3,17 @@
 - `project_id`: `ARTHELLO-OS-PRODUCTION-RU`
 - владелец: Виталий Озолин
 - состояние: `approved` → `active`
-- актуально на: 2026-08-22
-- область: перенос ArtHello OS на отдельный российский сервер Timeweb с персональными учётными записями; затем восстановление уже подключённых AlfaCRM и Точки.
+- актуально на: 2026-08-26
+- область: ArtHello OS на отдельном российском сервере Timeweb с персональными учётными записями и фактической production-базой D1/SQLite; защищённый backup/restore до загрузки реальных данных; затем восстановление уже подключённых AlfaCRM и Точки.
 
 ## Цель и конечный результат
 
-Рабочая ArtHello OS доступна на `https://os.arthelloteam.ru`, хранит первичную базу персональных данных в России, требует персональный логин и пароль, ведёт аудит доступа и может безопасно получать read-only данные AlfaCRM и Точки. Нидерландский сервер продолжает обслуживать Telegram/Claude-агентов и не хранит полную операционную базу ArtHello OS.
+Рабочая ArtHello OS доступна на `https://os.arthelloteam.ru`, хранит первичную базу персональных данных в российском production-контуре D1/SQLite, требует персональный логин и пароль, ведёт аудит доступа и может безопасно получать read-only данные AlfaCRM и Точки. Нидерландский сервер продолжает обслуживать Telegram/Claude-агентов и не хранит полную операционную базу ArtHello OS.
 
 ## Критерии завершения
 
-1. Отдельный сервер Timeweb в Москве, TLS, закрытая PostgreSQL и автоматический backup.
-2. Персональные пользователи в PostgreSQL; общих паролей ролей нет.
+1. Отдельный сервер Timeweb в Москве, TLS, закрытая production D1/SQLite и проверяемый автоматический backup.
+2. Персональные пользователи в production D1/SQLite; общих паролей ролей нет.
 3. Временный пароль обязательно меняется; lockout, CSRF, Secure/HttpOnly cookies, отзыв сессий и аудит подтверждены тестами.
 4. Восстановление backup фактически проверено.
 5. DNS `os.arthelloteam.ru` переключён без изменения агентских записей.
@@ -25,7 +25,7 @@
 1. `RU-01` — атомарный baseline + production-код, персональная аутентификация, exact-head CI. Статус: `completed`; PR #27 направлен прямо в `main`, Quality gates пройдены.
 2. `RU-02` — отдельный RU-сервер, key-only deploy-user, SSH hardening, Docker/UFW и защищённый runtime env без данных и интеграций. Статус: `completed`.
 3. `RU-03` — merge завершён; приложение SHA `f7bb971f362bb8fe3f76209eba01237c602d9946` собирается вне VPS в GitHub Actions, публикуется закрытыми release-assets и загружается RU-сервером по HTTPS; после health-check отдельно проверяются первый владелец, обязательная смена пароля, login/logout/lockout/session revocation. Статус: `active`; зависит от зелёного `RU-01` и подготовленного `RU-02`.
-4. `RU-04` — backup/restore и security acceptance. Зависит от `RU-03`.
+4. `RU-04` — зашифрованные ручные и ежедневные backup D1/SQLite, изолированная проверка восстановления и off-server copy; data rollback отделён от rollback версии приложения. Зависит от `RU-03`.
 5. `RU-05` — DNS и TLS. Зависит от `RU-04`.
 6. `RU-06` — восстановление AlfaCRM/Точки и файловый импорт в `SHADOW + DATA_AUDIT`. Зависит от `RU-05`.
 
@@ -66,6 +66,8 @@
 - прямой SSH delivery из GitHub-hosted runner и локальный npm build на VPS признаны непригодными для этого контура; новый критерий закрытия — опубликованный private release с точным target SHA, проверенные digest/SHA-256, `docker load`, запуск с `--no-build --pull never` и успешный health-check;
 - первый owner и опубликованный auth flow ещё не проверены end-to-end;
 - фактический backup restore ещё не выполнен;
+- отдельная локальная backup-volume ещё не является защитой от потери всего VPS; off-server storage не настроен;
+- RU-04 нельзя считать operational, пока не выполнено изолированное восстановление и не подтверждена off-server copy;
 - старое защищённое окружение AlfaCRM/Точки ещё не инвентаризировано;
 - PR #7 имеет красный CI на своём head и не должен сливаться отдельно;
 - любые реальные данные, интеграции и DNS остаются заблокированы до отдельных ворот.
@@ -460,6 +462,113 @@ decision:
       owner: Codex и Виталий Озолин
       due: 2026-08-22
       evidence_required: ARTHELLO_HEALTH=OK, compose ps
+      status: open
+
+decision:
+  decision_id: D-PROD-RU-008
+  project_id: ARTHELLO-OS-PRODUCTION-RU
+  status: approved
+  question: Как защищать реальную production-базу и выполнять контролируемый откат данных?
+  statement: >-
+    Для фактической production v52 с D1-совместимой SQLite внедрить зашифрованные
+    AES-256-GCM точки восстановления: автоматическую ежедневно в 03:00
+    Europe/Moscow, ежемесячную, ручную из owner-only раздела настроек, а также
+    pre-deploy и pre-restore. Ежедневные копии хранить 30 дней, ежемесячные 12
+    месяцев, ручные — до явного удаления. Локальные копии хранить на отдельной
+    backup-volume. Восстановление разрешать только каноническому владельцу после
+    повторной проверки текущего пароля и точной подтверждающей фразы, всегда
+    создавая safety backup перед изменением рабочей базы.
+  context: >-
+    Фактический runtime v52 использует Miniflare/D1 и SQLite-файлы в production
+    volume, поэтому старый PostgreSQL pg_dump loop этот контур не защищает.
+    Начинается ввод реальных данных, и восстановимость должна быть доказана до
+    признания backup operational.
+  architecture_clarification: >-
+    D-PROD-RU-001 сохраняет решение о разделении российского сервера OS и
+    нидерландского сервера агентов; для RU-04 фактическим объектом backup является
+    production D1/SQLite, а не упомянутая в раннем плане PostgreSQL.
+  scope_boundary: >-
+    Восстановление точки backup откатывает состояние данных D1/SQLite. Откат
+    версии приложения выполняется отдельно через проверенный deployment artifact
+    и immutable application SHA; выбор точки данных не меняет код приложения.
+  rationale: >-
+    Комбинация расписания, ручной точки перед рискованной операцией, шифрования,
+    отдельного локального тома и проверенного restore ограничивает потерю данных и
+    ошибочный доступ. Off-server copy нужна отдельно, потому что локальный том не
+    защищает от потери VPS или его хранилища.
+  policy:
+    automatic_time: "03:00"
+    timezone: Europe/Moscow
+    daily_retention_days: 30
+    monthly_retention_months: 12
+    manual_retention: until_explicit_deletion
+    access: canonical_owner_only
+    encryption: AES-256-GCM
+    local_storage: separate_backup_volume
+    offsite_storage: not_configured
+    rpo: 24h
+    target_rto: 4h_pending_measurement
+  operational_acceptance:
+    - расписание создаёт зашифрованную копию не реже одного раза за 24 часа
+    - ручная копия и история точек доступны только каноническому владельцу
+    - checksum и SQLite integrity проверяются до публикации точки и перед restore
+    - изолированный restore восстанавливает ожидаемую схему и контрольные данные
+    - restore не возвращает старые сессии и не блокирует текущего владельца
+    - off-server copy создана и её получение проверено без раскрытия ключа
+    - фактические RPO и RTO зафиксированы в evidence
+  evidence:
+    - current v52 runtime and deployment configuration identify D1/SQLite under the persistent data volume
+    - legacy deploy/backup.sh is PostgreSQL-specific and is not evidence for v52 protection
+  assumptions:
+    - ключ шифрования хранится вне data и backup volumes и не попадает в Git, UI или logs
+    - совместимость restore проверяется по core schema; application revision сохраняется в manifest
+    - отдельная локальная backup-volume не считается off-server copy
+  approved_by: Виталий Озолин
+  approved_at: 2026-08-26
+  owner: Виталий Озолин
+  deadline: null
+  review_at: 2026-09-26
+  affected_stages: [RU-04, RU-05, RU-06]
+  dependencies:
+    - production_d1_sqlite_ready
+    - backup_encryption_key_outside_volumes
+    - separate_backup_volume
+    - isolated_restore_test
+    - off_server_backup_copy
+  clarifies: [D-PROD-RU-001]
+  supersedes: []
+  superseded_by: null
+  source_links:
+    - https://github.com/vitaliyozolin-dotcom/ArtHello-OS
+  raw_deliberation_ref: ChatGPT project conversation 2026-08-26
+  rejected_alternatives:
+    - option: Делать только ручные backup
+      reason: Человеческий фактор не обеспечивает RPO 24 часа.
+      reopen_condition: Не применяется к production с реальными данными.
+    - option: Делать только ежедневные автоматические backup
+      reason: Нельзя создать явную точку непосредственно перед импортом, миграцией или другой рискованной операцией.
+      reopen_condition: Не применяется к production с реальными данными.
+    - option: Хранить единственную копию рядом с рабочей SQLite на том же data volume
+      reason: Ошибка тома или VPS уничтожит рабочую базу и её копию одновременно.
+      reopen_condition: Только для локального тестового окружения без реальных данных.
+    - option: Считать выбор backup откатом версии приложения
+      reason: Состояние данных и application artifact имеют разные контракты совместимости и rollback gates.
+      reopen_condition: Только после отдельного доказанного единого release snapshot, включающего оба артефакта.
+  actions:
+    - action: Реализовать ручные, ежедневные, ежемесячные, pre-deploy и pre-restore encrypted backup D1/SQLite
+      owner: Codex
+      due: 2026-08-26
+      evidence_required: candidate diff, tests, encrypted artifact manifest, retention test
+      status: in_progress
+    - action: Выполнить isolated restore test и проверить сохранение доступа текущего канонического владельца
+      owner: Codex и Виталий Озолин
+      due: null
+      evidence_required: restore run log without secrets, integrity result, measured RPO and RTO
+      status: open
+    - action: Настроить и проверить off-server copy в российском контуре
+      owner: Виталий Озолин и Codex
+      due: null
+      evidence_required: remote object evidence, retrieval and isolated restore result without secrets
       status: open
 
 ```

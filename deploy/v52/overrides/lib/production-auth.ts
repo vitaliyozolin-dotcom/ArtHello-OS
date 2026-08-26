@@ -406,6 +406,43 @@ export async function issueTemporaryCredential(
   };
 }
 
+export async function verifyCurrentPassword(
+  context: AuthenticatedRequestContext,
+  passwordValue: unknown,
+) {
+  const password = typeof passwordValue === "string" ? passwordValue : "";
+  if (!password || password.length > 512) {
+    throw new ProductionAuthAdminError("Текущий пароль указан неверно", 403);
+  }
+
+  const credential = await database().prepare(`SELECT user_id,login,display_name,role,password_salt,password_hash,
+    must_change_password,temporary_password_expires_at,failed_attempts,locked_until
+    FROM production_auth_credentials WHERE user_id=?`)
+    .bind(context.auth.session.user_id).first<CredentialRow>();
+  if (!credential) throw new ProductionAuthAdminError("Учётная запись не найдена", 403);
+
+  const verifiedAt = nowSeconds();
+  if (credential.locked_until > verifiedAt) {
+    throw new ProductionAuthAdminError("Слишком много попыток. Повторите через 15 минут", 429);
+  }
+
+  const calculated = await derivePasswordHash(password, credential.password_salt);
+  if (!constantTimeEqual(calculated, credential.password_hash)) {
+    await database().prepare(`UPDATE production_auth_credentials
+      SET
+        locked_until=CASE WHEN failed_attempts + 1 >= 5 THEN ? ELSE 0 END,
+        failed_attempts=CASE WHEN failed_attempts + 1 >= 5 THEN 0 ELSE failed_attempts + 1 END,
+        updated_at=?
+      WHERE user_id=? AND locked_until<=?`)
+      .bind(verifiedAt + 15 * 60, verifiedAt, credential.user_id, verifiedAt).run();
+    throw new ProductionAuthAdminError("Текущий пароль указан неверно", 403);
+  }
+
+  await database().prepare(`UPDATE production_auth_credentials
+    SET failed_attempts=0, locked_until=0, updated_at=? WHERE user_id=?`)
+    .bind(verifiedAt, credential.user_id).run();
+}
+
 export async function changePassword(request: Request, currentValue: unknown, nextValue: unknown) {
   const context = await getAuthenticatedRequestContext(request);
   if (!context) throw new Error("Сессия истекла. Войдите заново.");

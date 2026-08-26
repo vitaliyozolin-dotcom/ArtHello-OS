@@ -20,11 +20,13 @@ env:
   PUBLIC_HOST: arthello-188-225-38-55.sslip.io
   SCHOOL_URL: https://school-188-225-38-55.sslip.io
   CADDY_CONTAINER: stroios-caddy-1
+  DATA_VOLUME: arthello-direct-v44-data
+  BACKUP_VOLUME: arthello-direct-v52-backups
 
 jobs:
   deploy:
     runs-on: [self-hosted, linux, x64, arthello-gateway]
-    timeout-minutes: 45
+    timeout-minutes: 360
     environment: production-ru
 
     steps:
@@ -39,9 +41,28 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          printf 'ARTHELLO_DEPLOY_STARTED_EPOCH=%s\n' "$(date +%s)" >> "$GITHUB_ENV"
           test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = '188.225.38.55'
           docker version >/dev/null
           docker compose version >/dev/null
+          stale_watchdog_ids="$(docker ps -aq --no-trunc --filter 'label=com.arthello.watchdog=inventory-unpause')"
+          while IFS= read -r watchdog_id; do
+            [ -n "$watchdog_id" ] || continue
+            case "$watchdog_id" in *[!a-f0-9]*|'') exit 64 ;; esac
+            test "${#watchdog_id}" -eq 64
+            target_id="$(docker inspect "$watchdog_id" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+              | awk -F= '$1 == "TARGET_CONTAINER_ID" {value=$2} END {print value}')"
+            case "$target_id" in
+              *[!a-f0-9]*|'') ;;
+              *)
+                if [ "${#target_id}" -eq 64 ] && docker container inspect "$target_id" >/dev/null 2>&1; then
+                  docker unpause "$target_id" >/dev/null 2>&1 || true
+                  test "$(docker inspect "$target_id" --format '{{.State.Paused}}')" = false
+                fi
+                ;;
+            esac
+            docker rm -f "$watchdog_id" >/dev/null
+          done <<< "$stale_watchdog_ids"
           test "$(docker inspect --format '{{.State.Running}}' "$CADDY_CONTAINER")" = true
           docker exec "$CADDY_CONTAINER" sh -lc "grep -F 'import /data/external-routes.caddy' /etc/caddy/Caddyfile >/dev/null"
           docker exec "$CADDY_CONTAINER" test -s /data/external-routes.caddy
@@ -49,38 +70,109 @@ jobs:
           printf 'ARTHELLO_PREFLIGHT=OK\n'
 
       - name: Inventory production data (read only)
+        id: inventory
         shell: bash
         run: |
           set -Eeuo pipefail
+          umask 077
           mapfile -t live_containers < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}')
           test "${#live_containers[@]}" -eq 1
           live="${live_containers[0]}"
+          case "$live" in arthello-direct-*) ;; *) exit 64 ;; esac
           image="$(docker inspect "$live" --format '{{.Config.Image}}')"
           test -n "$image"
-          test "$(docker inspect "$live" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = 'arthello-direct-v44-data'
+          live_id="$(docker inspect "$live" --format '{{.Id}}')"
+          case "$live_id" in *[!a-f0-9]*|'') exit 64 ;; esac
+          test "${#live_id}" -eq 64
+          test "$(docker inspect "$live" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
 
           work="$RUNNER_TEMP/arthello-inventory-$GITHUB_RUN_ID"
           helper="arthello-inventory-$GITHUB_RUN_ID"
+          watchdog="arthello-inventory-unpause-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           snapshot="$work/d1"
-          paused=0
           cleanup_inventory() {
             rc=$?
             docker rm -f "$helper" >/dev/null 2>&1 || true
-            if [ "$paused" -eq 1 ]; then docker unpause "$live" >/dev/null 2>&1 || true; fi
+            pause_state="$(docker inspect "$live" --format '{{.State.Paused}}' 2>/dev/null || printf unknown)"
+            if [ "$pause_state" = true ]; then
+              docker unpause "$live" >/dev/null 2>&1 || true
+              pause_state="$(docker inspect "$live" --format '{{.State.Paused}}' 2>/dev/null || printf unknown)"
+            fi
+            if [ "$pause_state" = false ]; then
+              docker rm -f "$watchdog" >/dev/null 2>&1 || true
+            else
+              printf 'ARTHELLO_INVENTORY_WATCHDOG=RETAINED_UNPAUSE_UNVERIFIED name=%s\n' "$watchdog" >&2
+            fi
+            if [ "$rc" -ne 0 ]; then rm -rf "$work"; fi
             exit "$rc"
           }
           trap cleanup_inventory EXIT
 
           mkdir -p "$snapshot"
+          chmod 700 "$work" "$snapshot"
+          docker rm -f "$watchdog" >/dev/null 2>&1 || true
+          docker run -d \
+            --name "$watchdog" \
+            --label com.arthello.watchdog=inventory-unpause \
+            --restart unless-stopped \
+            --user 0:0 \
+            --read-only \
+            --network none \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 64 \
+            --memory 128m \
+            -e TARGET_CONTAINER_ID="$live_id" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            "$image" node --input-type=module -e '
+              import http from "node:http";
+              import { setTimeout as wait } from "node:timers/promises";
+
+              const target = process.env.TARGET_CONTAINER_ID;
+              const self = process.env.HOSTNAME;
+              if (!/^[a-f0-9]{64}$/.test(target) || !/^[a-f0-9]{12,64}$/.test(self)) process.exit(64);
+
+              function post(path, body) {
+                return new Promise((resolve, reject) => {
+                  const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
+                  const request = http.request({
+                    socketPath: "/var/run/docker.sock",
+                    path,
+                    method: "POST",
+                    headers: payload ? {
+                      "content-type": "application/json",
+                      "content-length": String(payload.length),
+                    } : {},
+                  }, (response) => {
+                    response.resume();
+                    response.once("end", () => resolve(response.statusCode ?? 0));
+                  });
+                  request.setTimeout(10_000, () => request.destroy(new Error("Docker socket timeout")));
+                  request.once("error", reject);
+                  request.end(payload ?? undefined);
+                });
+              }
+
+              await wait(120_000);
+              const unpauseStatus = await post(`/containers/${target}/unpause`);
+              if (![204, 304, 409].includes(unpauseStatus)) throw new Error("Unable to unpause target");
+              const updateStatus = await post(`/containers/${self}/update`, {
+                RestartPolicy: { Name: "no", MaximumRetryCount: 0 },
+              });
+              if (updateStatus !== 200) throw new Error("Unable to disarm watchdog restart policy");
+            ' >/dev/null
+          test "$(docker inspect "$watchdog" --format '{{.State.Running}}')" = true
           docker pause "$live" >/dev/null
-          paused=1
-          docker create --name "$helper" --read-only -v arthello-direct-v44-data:/data:ro "$image" true >/dev/null
+          docker create --name "$helper" --read-only -v "$DATA_VOLUME:/data:ro" "$image" true >/dev/null
           docker cp "$helper:/data/d1/." "$snapshot"
+          test "$(docker inspect "$live" --format '{{.State.Paused}}')" = true
           docker unpause "$live" >/dev/null
-          paused=0
+          docker rm -f "$watchdog" >/dev/null
           docker rm -f "$helper" >/dev/null
           python3 deploy/v52/maintenance/production-data-inventory.py "$snapshot"
           curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+          printf 'live=%s\n' "$live" >> "$GITHUB_OUTPUT"
+          printf 'snapshot=%s\n' "$snapshot" >> "$GITHUB_OUTPUT"
           printf 'ARTHELLO_PRODUCTION_INVENTORY=OK\n'
           trap - EXIT
 
@@ -93,46 +185,233 @@ jobs:
           test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
           printf 'ARTHELLO_BUILD=OK image=%s\n' "$image"
 
-      - name: Start and verify candidate
-        id: candidate
+      - name: Prepare stable production secrets
         shell: bash
         run: |
           set -Eeuo pipefail
           image="arthello-direct:$GITHUB_SHA"
-          candidate="arthello-direct-$GITHUB_RUN_ID"
+          secret_dir="$HOME/.config/arthello"
+          bootstrap_file="$secret_dir/bootstrap-password"
+          encryption_file="$secret_dir/backup-encryption-key"
+          control_file="$secret_dir/backup-control-token"
+
+          test ! -L "$secret_dir"
+          mkdir -p "$secret_dir"
+          chmod 700 "$secret_dir"
+          test ! -L "$bootstrap_file"
+          test ! -L "$encryption_file"
+          test ! -L "$control_file"
+          docker volume create "$BACKUP_VOLUME" >/dev/null
+          docker run --rm --user 0:0 --read-only -v "$BACKUP_VOLUME:/backups" "$image" \
+            sh -ceu 'chown 1000:1000 /backups && chmod 700 /backups'
+
+          backup_volume_empty=0
+          if docker run --rm --read-only -v "$BACKUP_VOLUME:/backups:ro" "$image" \
+            sh -ceu 'test -z "$(find /backups -mindepth 1 -maxdepth 1 -print -quit)"'
+          then
+            backup_volume_empty=1
+          fi
+
+          if [ ! -s "$encryption_file" ]; then
+            if [ "$backup_volume_empty" -ne 1 ]; then
+              printf 'Encrypted backups exist but their host key is unavailable; refusing to replace it.\n' >&2
+              exit 1
+            fi
+            umask 077
+            python3 -c 'import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode(), end="")' > "$encryption_file"
+          fi
+          if [ ! -s "$control_file" ]; then
+            umask 077
+            python3 -c 'import secrets; print(secrets.token_urlsafe(48), end="")' > "$control_file"
+          fi
+          if [ ! -s "$bootstrap_file" ]; then
+            umask 077
+            python3 -c 'import secrets; print(secrets.token_urlsafe(24), end="")' > "$bootstrap_file"
+          fi
+          chmod 600 "$bootstrap_file" "$encryption_file" "$control_file"
+
+          python3 - "$encryption_file" <<'PY'
+          import base64
+          import pathlib
+          import sys
+
+          encoded = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+          if encoded != encoded.strip() or len(base64.b64decode(encoded, validate=True)) != 32:
+              raise SystemExit("backup encryption key must be strict base64 for exactly 32 bytes")
+          PY
+          python3 - "$control_file" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          token = pathlib.Path(sys.argv[1]).read_text(encoding="ascii")
+          if re.fullmatch(r"[!-~]{32,2048}", token) is None:
+              raise SystemExit("backup control token must be 32-2048 printable ASCII characters")
+          PY
+          test "$(stat -c '%a' "$secret_dir")" = 700
+          test "$(stat -c '%a' "$bootstrap_file")" = 600
+          test "$(stat -c '%a' "$encryption_file")" = 600
+          test "$(stat -c '%a' "$control_file")" = 600
+
+          printf '::add-mask::%s\n' "$(cat "$bootstrap_file")"
+          printf '::add-mask::%s\n' "$(cat "$encryption_file")"
+          printf '::add-mask::%s\n' "$(cat "$control_file")"
+          printf 'ARTHELLO_BACKUP_SECRETS=READY\n'
+
+      - name: Create and test encrypted validation backup
+        id: backup
+        shell: bash
+        env:
+          LIVE: ${{ steps.inventory.outputs.live }}
+          SNAPSHOT: ${{ steps.inventory.outputs.snapshot }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test -n "$LIVE"
+          test -d "$SNAPSHOT"
+          case "$SNAPSHOT" in "$RUNNER_TEMP/arthello-inventory-$GITHUB_RUN_ID/d1") ;; *) exit 64 ;; esac
+          inventory_work="${SNAPSHOT%/d1}"
+          test "$(docker inspect "$LIVE" --format '{{.State.Running}}')" = true
+          image="arthello-direct:$GITHUB_SHA"
+          clone_volume="arthello-validation-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-data"
+          test_backup_volume="arthello-validation-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-backups"
+          backup_helper="arthello-backup-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          clone_helper="arthello-clone-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          secret_dir="$HOME/.config/arthello"
+          export ARTHELLO_BACKUP_ENCRYPTION_KEY="$(cat "$secret_dir/backup-encryption-key")"
+          source_revision="$(docker inspect "$LIVE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+          if [ -z "$source_revision" ] || [ "$source_revision" = '<no value>' ]; then source_revision=unknown; fi
+
+          cleanup_backup() {
+            rc=$?
+            docker rm -f "$backup_helper" "$clone_helper" >/dev/null 2>&1 || true
+            if [ "$rc" -ne 0 ]; then
+              docker volume rm "$clone_volume" "$test_backup_volume" >/dev/null 2>&1 || true
+              rm -rf "$inventory_work"
+            fi
+            exit "$rc"
+          }
+          trap cleanup_backup EXIT
+
+          docker volume rm "$clone_volume" "$test_backup_volume" >/dev/null 2>&1 || true
+          docker volume create --label com.arthello.ephemeral=validation "$clone_volume" >/dev/null
+          docker volume create --label com.arthello.ephemeral=validation "$test_backup_volume" >/dev/null
+
+          validation_json="$(docker run --rm \
+            --name "$backup_helper" \
+            --read-only \
+            --tmpfs /tmp \
+            -e ARTHELLO_DATA_ROOT=/data \
+            -e ARTHELLO_BACKUP_ROOT=/backups \
+            -e ARTHELLO_BACKUP_ENCRYPTION_KEY \
+            -e ARTHELLO_APPLICATION_REVISION="$source_revision" \
+            -v "$DATA_VOLUME:/data:ro" \
+            -v "$BACKUP_VOLUME:/backups" \
+            "$image" node production/backup-manager.mjs create-no-retention pre_deploy)"
+          validation_id="$(BACKUP_JSON="$validation_json" python3 -c 'import json,os,re; value=json.loads(os.environ["BACKUP_JSON"]); assert value["verified"] is True and value["commitStatus"] == "committed" and value["auditStatus"] == "recorded" and re.fullmatch(r"arthello-pre_deploy-[A-Za-z0-9-]+", value["id"]); print(value["id"], end="")')"
+          validation_core_schema="$(BACKUP_JSON="$validation_json" python3 -c 'import json,os; value=json.loads(os.environ["BACKUP_JSON"]); assert value["verified"] is True; print(value["coreSchemaVersion"], end="")')"
+          test -n "$validation_id"
+          test -n "$validation_core_schema"
+
+          docker run --rm \
+            --name "$clone_helper" \
+            --user 0:0 \
+            --read-only \
+            -v "$SNAPSHOT:/source:ro" \
+            -v "$clone_volume:/clone" \
+            "$image" sh -ceu 'mkdir -p /clone/d1 && cp -a /source/. /clone/d1/ && chown -R 1000:1000 /clone'
+          rm -rf "$inventory_work"
+
+          docker run --rm \
+            --user 0:0 \
+            --read-only \
+            -e BACKUP_ID="$validation_id" \
+            -v "$BACKUP_VOLUME:/source:ro" \
+            -v "$test_backup_volume:/backups" \
+            "$image" sh -ceu '
+              case "$BACKUP_ID" in arthello-pre_deploy-*) ;; *) exit 64 ;; esac
+              cp "/source/$BACKUP_ID.sqlite.enc" "/backups/$BACKUP_ID.sqlite.enc"
+              cp "/source/$BACKUP_ID.manifest.json" "/backups/$BACKUP_ID.manifest.json"
+              chown -R 1000:1000 /backups
+            '
+
+          docker run --rm \
+            --read-only \
+            --tmpfs /tmp \
+            -e ARTHELLO_DATA_ROOT=/data \
+            -e ARTHELLO_BACKUP_ROOT=/backups \
+            -e ARTHELLO_BACKUP_ENCRYPTION_KEY \
+            -e ARTHELLO_APPLICATION_REVISION="$source_revision" \
+            -e ARTHELLO_SUPPORTED_CORE_SCHEMA_VERSIONS="$validation_core_schema" \
+            -e ARTHELLO_APP_STOPPED=1 \
+            -v "$clone_volume:/data" \
+            -v "$test_backup_volume:/backups" \
+            "$image" node production/backup-manager.mjs restore "$validation_id" >/dev/null
+
+          curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+          printf 'live=%s\n' "$LIVE" >> "$GITHUB_OUTPUT"
+          printf 'clone_volume=%s\n' "$clone_volume" >> "$GITHUB_OUTPUT"
+          printf 'test_backup_volume=%s\n' "$test_backup_volume" >> "$GITHUB_OUTPUT"
+          printf 'ARTHELLO_VALIDATION_BACKUP=RESTORE_VERIFIED id=%s\n' "$validation_id"
+          trap - EXIT
+
+      - name: Start and verify candidate on isolated data
+        id: validation
+        shell: bash
+        env:
+          CLONE_VOLUME: ${{ steps.backup.outputs.clone_volume }}
+          TEST_BACKUP_VOLUME: ${{ steps.backup.outputs.test_backup_volume }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$CLONE_VOLUME"
+          test -n "$TEST_BACKUP_VOLUME"
+          test "$CLONE_VOLUME" != "$DATA_VOLUME"
+          image="arthello-direct:$GITHUB_SHA"
+          candidate="arthello-validation-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           network="$(docker inspect "$CADDY_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1)"
           test -n "$network"
 
           secret_dir="$HOME/.config/arthello"
-          secret_file="$secret_dir/bootstrap-password"
-          mkdir -p "$secret_dir"
-          chmod 700 "$secret_dir"
-          if [ ! -s "$secret_file" ]; then
-            umask 077
-            python3 -c 'import secrets; print(secrets.token_urlsafe(24), end="")' > "$secret_file"
-          fi
-          chmod 600 "$secret_file"
-          bootstrap_password="$(cat "$secret_file")"
-          test -n "$bootstrap_password"
-          echo "::add-mask::$bootstrap_password"
+          export ARTHELLO_BOOTSTRAP_PASSWORD="$(cat "$secret_dir/bootstrap-password")"
+          export ARTHELLO_BACKUP_ENCRYPTION_KEY="$(cat "$secret_dir/backup-encryption-key")"
+          export ARTHELLO_BACKUP_CONTROL_TOKEN="$(cat "$secret_dir/backup-control-token")"
+          cleanup_validation() {
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              docker rm -f "$candidate" >/dev/null 2>&1 || true
+              docker volume rm "$CLONE_VOLUME" "$TEST_BACKUP_VOLUME" >/dev/null 2>&1 || true
+            fi
+            exit "$rc"
+          }
+          trap cleanup_validation EXIT
 
           docker rm -f "$candidate" >/dev/null 2>&1 || true
-          docker volume create arthello-direct-v44-data >/dev/null
           docker run -d \
             --name "$candidate" \
-            --restart unless-stopped \
+            --label com.arthello.ephemeral=validation \
             --read-only \
             --tmpfs /tmp \
             --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
             --network "$network" \
             -e NODE_ENV=production \
             -e PORT=8081 \
+            -e TZ=Europe/Moscow \
             -e ARTHELLO_D1_PATH=/data/d1 \
+            -e ARTHELLO_DATA_ROOT=/data \
+            -e ARTHELLO_BACKUP_ROOT=/backups \
+            -e ARTHELLO_BACKUP_ENCRYPTION_KEY \
+            -e ARTHELLO_BACKUP_CONTROL_TOKEN \
+            -e ARTHELLO_BACKUP_CONTROL_PORT=8082 \
+            -e ARTHELLO_APPLICATION_REVISION="$GITHUB_SHA" \
+            -e ARTHELLO_BACKUP_DAILY_DAYS=30 \
+            -e ARTHELLO_BACKUP_MONTHLY_MONTHS=12 \
             -e ARTHELLO_BOOTSTRAP_LOGIN=owner \
-            -e ARTHELLO_BOOTSTRAP_PASSWORD="$bootstrap_password" \
-            -v arthello-direct-v44-data:/data \
+            -e ARTHELLO_BOOTSTRAP_PASSWORD \
+            -v "$CLONE_VOLUME:/data" \
+            -v "$TEST_BACKUP_VOLUME:/backups" \
             "$image" >/dev/null
 
+          test "$(docker inspect "$candidate" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$CLONE_VOLUME"
           ready=0
           for attempt in $(seq 1 90); do
             if docker exec -i "$candidate" node - <<'NODE'
@@ -151,6 +430,8 @@ jobs:
             }
             const me = await fetch(base + '/api/auth/me');
             if (me.status !== 401) process.exit(1);
+            const backups = await fetch(base + '/api/settings/backups');
+            if (backups.status !== 401) process.exit(1);
             const forgedSettings = await fetch(base + '/api/settings', {
               headers: {
                 'oai-authenticated-user-email': 'vitaliyozolin@gmail.com',
@@ -168,35 +449,346 @@ jobs:
           done
           if [ "$ready" -ne 1 ]; then
             docker logs --tail 200 "$candidate" >&2 || true
-            docker rm -f "$candidate" >/dev/null 2>&1 || true
             exit 1
           fi
 
           printf 'name=%s\n' "$candidate" >> "$GITHUB_OUTPUT"
-          printf 'ARTHELLO_CANDIDATE=READY_WITH_ASSETS_AND_AUTH name=%s\n' "$candidate"
+          printf 'ARTHELLO_CANDIDATE=READY_ON_ISOLATED_RESTORE name=%s\n' "$candidate"
+          trap - EXIT
 
-      - name: Atomic Caddy cutover with rollback
+      - name: Single-writer cutover with final backup rollback
+        id: cutover
         shell: bash
         env:
-          CANDIDATE: ${{ steps.candidate.outputs.name }}
+          LIVE: ${{ steps.backup.outputs.live }}
+          VALIDATION: ${{ steps.validation.outputs.name }}
+          CLONE_VOLUME: ${{ steps.backup.outputs.clone_volume }}
+          TEST_BACKUP_VOLUME: ${{ steps.backup.outputs.test_backup_volume }}
         run: |
           set -Eeuo pipefail
-          test -n "$CANDIDATE"
-          work="$RUNNER_TEMP/arthello-cutover-$GITHUB_RUN_ID"
+          umask 077
+          test -n "$LIVE"
+          test -n "$VALIDATION"
+          test -n "$CLONE_VOLUME"
+          test -n "$TEST_BACKUP_VOLUME"
+          case "${ARTHELLO_DEPLOY_STARTED_EPOCH:-}" in ''|*[!0-9]*) exit 64 ;; esac
+          elapsed_seconds=$(( $(date +%s) - ARTHELLO_DEPLOY_STARTED_EPOCH ))
+          test "$elapsed_seconds" -ge 0
+          if [ "$elapsed_seconds" -gt 3600 ]; then
+            printf 'ARTHELLO_CUTOVER=ABORTED_INSUFFICIENT_TIMEOUT_RESERVE elapsed=%s\n' "$elapsed_seconds" >&2
+            exit 1
+          fi
+          printf 'ARTHELLO_CUTOVER_TIMEOUT_RESERVE=AT_LEAST_5_HOURS\n'
+          image="arthello-direct:$GITHUB_SHA"
+          candidate="arthello-direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          final_helper="arthello-final-backup-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          copy_helper="arthello-cutover-copy-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          rollback_volume="arthello-rollback-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-data"
+          final_restore_volume="arthello-final-restore-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-data"
+          failed_volume="arthello-failed-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-data"
+          network="$(docker inspect "$CADDY_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1)"
+          test -n "$network"
+
+          secret_dir="$HOME/.config/arthello"
+          export ARTHELLO_BOOTSTRAP_PASSWORD="$(cat "$secret_dir/bootstrap-password")"
+          export ARTHELLO_BACKUP_ENCRYPTION_KEY="$(cat "$secret_dir/backup-encryption-key")"
+          export ARTHELLO_BACKUP_CONTROL_TOKEN="$(cat "$secret_dir/backup-control-token")"
+          source_revision="$(docker inspect "$LIVE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+          if [ -z "$source_revision" ] || [ "$source_revision" = '<no value>' ]; then source_revision=unknown; fi
+          work="$RUNNER_TEMP/arthello-cutover-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir -p "$work"
-          backup="$work/external-routes.before.caddy"
+          chmod 700 "$work"
+          routes_backup="$work/external-routes.before.caddy"
           candidate_routes="$work/external-routes.candidate.caddy"
-          docker cp "$CADDY_CONTAINER:/data/external-routes.caddy" "$backup"
-          test -s "$backup"
+          probe_routes="$work/external-routes.probe.caddy"
+          probe_token="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32), end="")')"
+          printf '::add-mask::%s\n' "$probe_token"
+          docker cp "$CADDY_CONTAINER:/data/external-routes.caddy" "$routes_backup"
+          test -s "$routes_backup"
+          chmod 600 "$routes_backup"
+
+          gate_active=0
+          old_stop_started=0
+          old_stopped=0
+          live_data_exposed=0
+          raw_snapshot_ready=0
+          cutover_committed=0
+          cutover_verified=0
+          final_backup_id=""
+          final_core_schema=""
+
+          remove_deploy_gate() {
+            if ! docker run --rm -i \
+              --read-only \
+              -e DEPLOY_RUN_ID="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+              -v "$BACKUP_VOLUME:/backups" \
+              "$image" node --input-type=module - <<'NODE'
+          import { lstat, open, readFile, unlink } from "node:fs/promises";
+          try {
+            const details = await lstat("/backups/.deploy-gate");
+            if (!details.isFile() || details.isSymbolicLink() || details.size < 2 || details.size > 4096) {
+              throw new Error("deploy gate is not a safe regular file");
+            }
+            const record = JSON.parse(await readFile("/backups/.deploy-gate", "utf8"));
+            if (record?.format !== "arthello-deploy-gate-v1" || record?.runId !== process.env.DEPLOY_RUN_ID) {
+              throw new Error("refusing to remove a deploy gate owned by another run");
+            }
+            await unlink("/backups/.deploy-gate");
+          } catch (error) {
+            if (error?.code !== "ENOENT") throw error;
+          }
+          const directory = await open("/backups", "r");
+          await directory.sync();
+          await directory.close();
+          NODE
+            then
+              return 1
+            fi
+            gate_active=0
+          }
+
+          preserve_cutover_recovery() {
+            if [ -d "$work" ] && [ ! -L "$work" ]; then
+              if ! chmod 700 "$work"; then
+                printf 'ARTHELLO_CUTOVER_RECOVERY=MODE_ENFORCEMENT_FAILED path=%s\n' "$work" >&2
+              fi
+              for artifact in "$routes_backup" "$candidate_routes" "$probe_routes"; do
+                if [ -f "$artifact" ] && [ ! -L "$artifact" ]; then
+                  chmod 600 "$artifact" || true
+                fi
+              done
+              printf 'ARTHELLO_CUTOVER_RECOVERY=PRESERVED path=%s action=inspect_routes_and_retained_volumes\n' \
+                "$work" >&2
+            fi
+          }
 
           rollback() {
             rc=$?
             if [ "$rc" -ne 0 ]; then
+              if [ "$cutover_committed" -eq 1 ]; then
+                if [ "$cutover_verified" -eq 1 ] && [ "$gate_active" -eq 1 ]; then
+                  if ! remove_deploy_gate >/dev/null 2>&1; then
+                    printf 'ARTHELLO_POST_COMMIT_GATE=REMOVE_FAILED_OPERATOR_ACTION_REQUIRED\n' >&2
+                  fi
+                elif [ "$gate_active" -eq 1 ]; then
+                  printf 'ARTHELLO_POST_COMMIT_GATE=RETAINED_UNVERIFIED_OPERATOR_ACTION_REQUIRED\n' >&2
+                fi
+                docker rm -f "$VALIDATION" "$final_helper" "$copy_helper" >/dev/null 2>&1 || true
+                docker volume rm "$CLONE_VOLUME" "$TEST_BACKUP_VOLUME" "$final_restore_volume" >/dev/null 2>&1 || true
+                docker exec "$CADDY_CONTAINER" rm -f \
+                  /data/external-routes.caddy.new \
+                  /data/external-routes.caddy.probe >/dev/null 2>&1 || true
+                printf 'ARTHELLO_POST_COMMIT=DEGRADED candidate=%s backup=%s raw_volume=%s\n' \
+                  "$candidate" "$final_backup_id" "$rollback_volume" >&2
+                preserve_cutover_recovery
+                exit "$rc"
+              fi
+
+              rollback_ok=1
+              rollback_data_ready=1
               printf 'ARTHELLO_ROLLBACK=START\n' >&2
-              docker cp "$backup" "$CADDY_CONTAINER:/data/external-routes.caddy" >/dev/null 2>&1 || true
-              docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
-              docker rm -f "$CANDIDATE" >/dev/null 2>&1 || true
-              printf 'ARTHELLO_ROLLBACK=COMPLETE\n' >&2
+
+              if [ "$old_stop_started" -eq 1 ]; then
+                old_state="$(docker inspect "$LIVE" --format '{{.State.Running}}' 2>/dev/null || printf unknown)"
+                if [ "$old_state" != true ]; then old_stopped=1; fi
+              fi
+
+              docker stop --time 60 "$candidate" >/dev/null 2>&1 || true
+              docker rm -f "$candidate" >/dev/null 2>&1 || true
+              docker rm -f "$final_helper" "$copy_helper" >/dev/null 2>&1 || true
+
+              rollback_storage_idle=1
+              if [ "$old_stopped" -eq 1 ]; then
+                if ! rollback_data_users="$(docker ps --filter "volume=$DATA_VOLUME" --format '{{.Names}}')"; then
+                  rollback_storage_idle=0
+                  rollback_ok=0
+                  printf 'ARTHELLO_ROLLBACK_STORAGE=DATA_QUERY_FAILED\n' >&2
+                elif ! rollback_backup_users="$(docker ps --filter "volume=$BACKUP_VOLUME" --format '{{.Names}}')"; then
+                  rollback_storage_idle=0
+                  rollback_ok=0
+                  printf 'ARTHELLO_ROLLBACK_STORAGE=BACKUP_QUERY_FAILED\n' >&2
+                elif [ -n "$rollback_data_users" ] || [ -n "$rollback_backup_users" ]
+                then
+                  rollback_storage_idle=0
+                  rollback_ok=0
+                  printf 'ARTHELLO_ROLLBACK_STORAGE=BUSY\n' >&2
+                else
+                  if rollback_lock_state="$(docker run --rm -i \
+                    --read-only \
+                    -e DEPLOY_RUN_ID="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-rollback" \
+                    -v "$BACKUP_VOLUME:/backups" \
+                    "$image" node --input-type=module - <<'NODE'
+          import { lstat, open, rename } from "node:fs/promises";
+          const lockPath = "/backups/.backup-manager.lock";
+          const archivePath = lockPath + ".interrupted-" + process.env.DEPLOY_RUN_ID;
+          try {
+            const details = await lstat(lockPath);
+            if (!details.isFile() || details.isSymbolicLink() || details.size < 2 || details.size > 4096) {
+              throw new Error("backup manager lock is not a safe regular file");
+            }
+            await rename(lockPath, archivePath);
+            const directory = await open("/backups", "r");
+            await directory.sync();
+            await directory.close();
+            process.stdout.write("archived");
+          } catch (error) {
+            if (error?.code !== "ENOENT") throw error;
+            process.stdout.write("absent");
+          }
+          NODE
+                  )"
+                  then
+                    case "$rollback_lock_state" in absent|archived) ;; *) rollback_storage_idle=0; rollback_ok=0 ;; esac
+                  else
+                    rollback_storage_idle=0
+                    rollback_ok=0
+                  fi
+                fi
+              fi
+
+              if [ "$old_stopped" -eq 1 ] && [ "$live_data_exposed" -eq 1 ] && [ "$rollback_storage_idle" -eq 1 ]; then
+                rollback_data_ready=0
+                restored=0
+                if [ -n "$final_backup_id" ] && [ -n "$final_core_schema" ]; then
+                  if docker run --rm \
+                    --read-only \
+                    --tmpfs /tmp \
+                    -e ARTHELLO_DATA_ROOT=/data \
+                    -e ARTHELLO_BACKUP_ROOT=/backups \
+                    -e ARTHELLO_BACKUP_ENCRYPTION_KEY \
+                    -e ARTHELLO_SUPPORTED_CORE_SCHEMA_VERSIONS="$final_core_schema" \
+                    -e ARTHELLO_APPLICATION_REVISION="$GITHUB_SHA" \
+                    -e ARTHELLO_APP_STOPPED=1 \
+                    -v "$DATA_VOLUME:/data" \
+                    -v "$BACKUP_VOLUME:/backups" \
+                    "$image" node production/backup-manager.mjs restore "$final_backup_id" >/dev/null
+                  then
+                    restored=1
+                    printf 'ARTHELLO_ROLLBACK_DATA=ENCRYPTED_BACKUP_RESTORED\n' >&2
+                  fi
+                fi
+
+                if [ "$restored" -ne 1 ] && [ "$raw_snapshot_ready" -eq 1 ]; then
+                  if docker volume create --label com.arthello.safety=failed-cutover "$failed_volume" >/dev/null; then
+                    if docker run --rm \
+                      --name "$copy_helper" \
+                      --user 0:0 \
+                      --read-only \
+                      -v "$DATA_VOLUME:/live" \
+                      -v "$rollback_volume:/snapshot:ro" \
+                      -v "$failed_volume:/failed" \
+                      "$image" sh -ceu '
+                        test -d /live/d1
+                        test -d /snapshot/d1
+                        test ! -e /live/.arthello-rollback-new
+                        test ! -e /live/.arthello-failed-current
+                        cp -a /live/. /failed/
+                        sync
+                        cp -a /snapshot/d1 /live/.arthello-rollback-new
+                        chown -R 1000:1000 /live/.arthello-rollback-new
+                        mv /live/d1 /live/.arthello-failed-current
+                        mv /live/.arthello-rollback-new /live/d1
+                        sync
+                        rm -rf /live/.arthello-failed-current
+                        sync
+                      '
+                    then
+                      restored=1
+                      printf 'ARTHELLO_ROLLBACK_DATA=RAW_SNAPSHOT_RESTORED failed_state_volume=%s\n' "$failed_volume" >&2
+                    fi
+                  else
+                    printf 'ARTHELLO_ROLLBACK_FAILED_STATE_VOLUME=CREATE_FAILED volume=%s\n' "$failed_volume" >&2
+                  fi
+                fi
+                if [ "$restored" -ne 1 ]; then
+                  printf 'ARTHELLO_ROLLBACK_DATA=FAILED backup=%s raw_volume=%s\n' "$final_backup_id" "$rollback_volume" >&2
+                  rollback_ok=0
+                else
+                  rollback_data_ready=1
+                fi
+              fi
+
+              if [ "$old_stop_started" -eq 1 ] && [ "$old_stopped" -eq 0 ]; then
+                old_state="$(docker inspect "$LIVE" --format '{{.State.Running}}' 2>/dev/null || printf unknown)"
+                if [ "$old_state" != true ]; then old_stopped=1; fi
+              fi
+              if [ "$old_stopped" -eq 1 ] && [ "$rollback_storage_idle" -eq 1 ] && [ "$rollback_data_ready" -eq 1 ]; then
+                if ! docker start "$LIVE" >/dev/null 2>&1; then
+                  printf 'ARTHELLO_ROLLBACK_OLD_CONTAINER=FAILED name=%s\n' "$LIVE" >&2
+                  rollback_ok=0
+                else
+                  old_ready=0
+                  for attempt in $(seq 1 60); do
+                    if docker exec -i "$LIVE" node - <<'NODE'
+          try {
+            const response = await fetch("http://127.0.0.1:8081/api/health", {
+              signal: AbortSignal.timeout(5000),
+            });
+            if (response.ok && (await response.text()).includes('"status":"ok"')) process.exit(0);
+          } catch {}
+          process.exit(1);
+          NODE
+                    then
+                      old_ready=1
+                      break
+                    fi
+                    sleep 2
+                  done
+                  if [ "$old_ready" -ne 1 ]; then
+                    printf 'ARTHELLO_ROLLBACK_OLD_HEALTH=FAILED name=%s\n' "$LIVE" >&2
+                    rollback_ok=0
+                  fi
+                fi
+              elif [ "$old_stopped" -eq 1 ] && [ "$rollback_data_ready" -ne 1 ]; then
+                printf 'ARTHELLO_ROLLBACK_OLD_CONTAINER=NOT_STARTED_UNSAFE_DATA name=%s\n' "$LIVE" >&2
+                rollback_ok=0
+              fi
+
+              if ! docker cp "$routes_backup" "$CADDY_CONTAINER:/data/external-routes.caddy" >/dev/null 2>&1; then
+                rollback_ok=0
+              fi
+              if ! docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then
+                rollback_ok=0
+              fi
+              if ! curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null; then
+                rollback_ok=0
+              fi
+              if ! curl -fsS --max-time 20 "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null; then
+                rollback_ok=0
+              fi
+              if [ "$rollback_ok" -eq 1 ]; then
+                if rollback_writers="$(docker ps --filter "volume=$DATA_VOLUME" --format '{{.Names}}')"; then
+                  if [ "$rollback_writers" != "$LIVE" ]; then
+                    rollback_ok=0
+                    printf 'ARTHELLO_ROLLBACK_WRITER=NOT_EXACTLY_OLD_LIVE\n' >&2
+                  fi
+                else
+                  rollback_ok=0
+                  printf 'ARTHELLO_ROLLBACK_WRITER=QUERY_FAILED\n' >&2
+                fi
+              fi
+              if [ "$rollback_ok" -eq 1 ] && [ "$gate_active" -eq 1 ]; then
+                if ! remove_deploy_gate >/dev/null 2>&1; then
+                  rollback_ok=0
+                  printf 'ARTHELLO_ROLLBACK_GATE=REMOVE_FAILED_OPERATOR_ACTION_REQUIRED\n' >&2
+                fi
+              elif [ "$gate_active" -eq 1 ]; then
+                printf 'ARTHELLO_ROLLBACK_GATE=RETAINED_OPERATOR_ACTION_REQUIRED\n' >&2
+              fi
+              docker exec "$CADDY_CONTAINER" rm -f \
+                /data/external-routes.caddy.new \
+                /data/external-routes.caddy.probe >/dev/null 2>&1 || true
+
+              docker rm -f "$VALIDATION" >/dev/null 2>&1 || true
+              docker volume rm "$CLONE_VOLUME" "$TEST_BACKUP_VOLUME" "$final_restore_volume" >/dev/null 2>&1 || true
+              if [ "$rollback_ok" -eq 1 ]; then
+                docker volume rm "$rollback_volume" >/dev/null 2>&1 || true
+                printf 'ARTHELLO_ROLLBACK=COMPLETE backup=%s\n' "$final_backup_id" >&2
+                rm -rf "$work" >/dev/null 2>&1 || true
+              else
+                printf 'ARTHELLO_ROLLBACK=INCOMPLETE backup=%s raw_volume=%s\n' "$final_backup_id" "$rollback_volume" >&2
+                preserve_cutover_recovery
+              fi
             fi
             exit "$rc"
           }
@@ -205,7 +797,7 @@ jobs:
           cat > "$candidate_routes" <<EOF
           $PUBLIC_HOST {
             encode zstd gzip
-            reverse_proxy $CANDIDATE:8081
+            reverse_proxy $candidate:8081
             header {
               Strict-Transport-Security "max-age=31536000; includeSubDomains"
               X-Frame-Options "DENY"
@@ -234,12 +826,319 @@ jobs:
             }
           }
           EOF
+          cat > "$probe_routes" <<EOF
+          $PUBLIC_HOST {
+            encode zstd gzip
+            @deploy_probe header X-ArtHello-Deploy-Probe $probe_token
+            handle @deploy_probe {
+              reverse_proxy $candidate:8081
+            }
+            handle {
+              respond "ArtHello deployment in progress" 503
+            }
+            header {
+              Strict-Transport-Security "max-age=31536000; includeSubDomains"
+              X-Frame-Options "DENY"
+              X-Content-Type-Options "nosniff"
+              Referrer-Policy "same-origin"
+              -Server
+            }
+          }
 
+          school-188-225-38-55.sslip.io {
+            encode zstd gzip
+            reverse_proxy 188.225.47.207:443 {
+              header_up Host school-188-225-47-207.sslip.io
+              transport http {
+                tls
+                tls_server_name arthello-origin.internal
+                tls_trust_pool file /data/arthello-origin-root.crt
+              }
+            }
+            header {
+              Strict-Transport-Security "max-age=31536000; includeSubDomains"
+              X-Frame-Options "DENY"
+              X-Content-Type-Options "nosniff"
+              Referrer-Policy "same-origin"
+              -Server
+            }
+          }
+          EOF
+          chmod 600 "$candidate_routes" "$probe_routes"
           docker cp "$candidate_routes" "$CADDY_CONTAINER:/data/external-routes.caddy.new"
+          docker cp "$probe_routes" "$CADDY_CONTAINER:/data/external-routes.caddy.probe"
           docker exec "$CADDY_CONTAINER" sh -lc "sed 's#/data/external-routes.caddy#/data/external-routes.caddy.new#' /etc/caddy/Caddyfile > /tmp/Caddyfile.arthello-candidate"
           docker exec "$CADDY_CONTAINER" caddy validate --config /tmp/Caddyfile.arthello-candidate --adapter caddyfile >/dev/null
-          docker exec "$CADDY_CONTAINER" sh -lc 'mv /data/external-routes.caddy.new /data/external-routes.caddy'
+          docker exec "$CADDY_CONTAINER" sh -lc "sed 's#/data/external-routes.caddy#/data/external-routes.caddy.probe#' /etc/caddy/Caddyfile > /tmp/Caddyfile.arthello-probe"
+          docker exec "$CADDY_CONTAINER" caddy validate --config /tmp/Caddyfile.arthello-probe --adapter caddyfile >/dev/null
+
+          docker stop --time 60 "$VALIDATION" >/dev/null
+          docker rm "$VALIDATION" >/dev/null
+
+          docker run --rm -i \
+            --read-only \
+            -e DEPLOY_RUN_ID="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            -v "$BACKUP_VOLUME:/backups" \
+            "$image" node --input-type=module - <<'NODE'
+          import { open } from "node:fs/promises";
+          const finalPath = "/backups/.deploy-gate";
+          let handle;
+          try {
+            handle = await open(finalPath, "wx", 0o600);
+          } catch (error) {
+            if (error?.code === "EEXIST") {
+              process.stderr.write("ARTHELLO_DEPLOY_GATE=EXISTS_OPERATOR_ACTION_REQUIRED\n");
+              process.exit(73);
+            }
+            throw error;
+          }
+          try {
+            await handle.writeFile(JSON.stringify({
+              format: "arthello-deploy-gate-v1",
+              createdAt: new Date().toISOString(),
+              runId: process.env.DEPLOY_RUN_ID,
+            }) + "\n", "utf8");
+            await handle.chmod(0o600);
+            await handle.sync();
+          } finally {
+            await handle.close();
+          }
+          const directory = await open("/backups", "r");
+          await directory.sync();
+          await directory.close();
+          NODE
+          gate_active=1
+
+          if docker inspect "$LIVE" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            | awk '/^ARTHELLO_BACKUP_CONTROL_TOKEN=/{found=1} END{exit found ? 0 : 1}'
+          then
+            test "$(docker inspect "$LIVE" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Name}}{{end}}{{end}}')" = "$BACKUP_VOLUME"
+            drained=0
+            for attempt in $(seq 1 150); do
+              set +e
+              docker exec -i \
+                -e ARTHELLO_BACKUP_CONTROL_TOKEN \
+                "$LIVE" node - <<'NODE'
+          try {
+            const response = await fetch("http://127.0.0.1:8082/v1/status", {
+              headers: {
+                authorization: "Bearer " + process.env.ARTHELLO_BACKUP_CONTROL_TOKEN,
+              },
+              signal: AbortSignal.timeout(5000),
+            });
+            if (!response.ok) process.exit(20);
+            const state = await response.json();
+            if (state?.mutationState !== "ready") process.exit(30);
+            const active = state?.activeOperation;
+            if (active && (active.status === "queued" || active.status === "running")) process.exit(10);
+            process.exit(0);
+          } catch {
+            process.exit(20);
+          }
+          NODE
+              control_rc=$?
+              set -e
+              if [ "$control_rc" -eq 0 ]; then
+                drained=1
+                break
+              fi
+              if [ "$control_rc" -eq 30 ]; then
+                printf 'ARTHELLO_DEPLOY_DRAIN=MUTATION_STATE_BLOCKED_OPERATOR_ACTION_REQUIRED\n' >&2
+                exit 1
+              fi
+              if [ "$control_rc" -ne 10 ]; then
+                printf 'ARTHELLO_DEPLOY_DRAIN=CONTROL_FAILURE\n' >&2
+                exit 1
+              fi
+              sleep 2
+            done
+            test "$drained" -eq 1
+            printf 'ARTHELLO_DEPLOY_DRAIN=IDLE\n'
+          else
+            printf 'ARTHELLO_FIRST_ROLLOUT_NO_CONTROL=OK\n'
+          fi
+
+          docker exec "$CADDY_CONTAINER" sh -lc 'mv /data/external-routes.caddy.probe /data/external-routes.caddy'
           docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+          maintenance_status="$(curl -sS --max-time 20 \
+            -o /dev/null \
+            -w '%{http_code}' \
+            "$PUBLIC_URL/?maintenance_probe=$GITHUB_RUN_ID")"
+          test "$maintenance_status" = 503
+
+          docker rm -f "$candidate" >/dev/null 2>&1 || true
+          old_stop_started=1
+          docker stop --time 300 "$LIVE" >/dev/null
+          old_stopped=1
+          test "$(docker inspect "$LIVE" --format '{{.State.Running}}')" = false
+          data_volume_users="$(docker ps --filter "volume=$DATA_VOLUME" --format '{{.Names}}')"
+          backup_volume_users="$(docker ps --filter "volume=$BACKUP_VOLUME" --format '{{.Names}}')"
+          test -z "$data_volume_users"
+          test -z "$backup_volume_users"
+
+          lock_state="$(docker run --rm -i \
+            --read-only \
+            -e DEPLOY_RUN_ID="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            -v "$BACKUP_VOLUME:/backups" \
+            "$image" node --input-type=module - <<'NODE'
+          import { lstat, open, rename } from "node:fs/promises";
+          const lockPath = "/backups/.backup-manager.lock";
+          const archivePath = lockPath + ".interrupted-" + process.env.DEPLOY_RUN_ID;
+          try {
+            const details = await lstat(lockPath);
+            if (!details.isFile() || details.isSymbolicLink() || details.size < 2 || details.size > 4096) {
+              throw new Error("backup manager lock is not a safe regular file");
+            }
+            await rename(lockPath, archivePath);
+            const directory = await open("/backups", "r");
+            await directory.sync();
+            await directory.close();
+            process.stdout.write("archived");
+          } catch (error) {
+            if (error?.code !== "ENOENT") throw error;
+            process.stdout.write("absent");
+          }
+          NODE
+          )"
+          case "$lock_state" in
+            absent) ;;
+            archived) printf 'ARTHELLO_INTERRUPTED_BACKUP_LOCK=ARCHIVED\n' ;;
+            *) exit 1 ;;
+          esac
+
+          final_json="$(docker run --rm \
+            --name "$final_helper" \
+            --read-only \
+            --tmpfs /tmp \
+            -e ARTHELLO_DATA_ROOT=/data \
+            -e ARTHELLO_BACKUP_ROOT=/backups \
+            -e ARTHELLO_BACKUP_ENCRYPTION_KEY \
+            -e ARTHELLO_APPLICATION_REVISION="$source_revision" \
+            -e ARTHELLO_APP_STOPPED=1 \
+            -v "$DATA_VOLUME:/data:ro" \
+            -v "$BACKUP_VOLUME:/backups" \
+            "$image" node production/backup-manager.mjs create-no-retention pre_deploy)"
+          final_backup_id="$(BACKUP_JSON="$final_json" python3 -c 'import json,os,re; value=json.loads(os.environ["BACKUP_JSON"]); assert value["verified"] is True and value["commitStatus"] == "committed" and value["auditStatus"] == "recorded" and re.fullmatch(r"arthello-pre_deploy-[A-Za-z0-9-]+", value["id"]); print(value["id"], end="")')"
+          final_core_schema="$(BACKUP_JSON="$final_json" python3 -c 'import json,os; value=json.loads(os.environ["BACKUP_JSON"]); assert value["verified"] is True; print(value["coreSchemaVersion"], end="")')"
+          test -n "$final_backup_id"
+          test -n "$final_core_schema"
+
+          if docker volume inspect "$rollback_volume" >/dev/null 2>&1; then
+            docker volume rm "$rollback_volume" >/dev/null
+          fi
+          docker volume create --label com.arthello.safety=cutover-rollback "$rollback_volume" >/dev/null
+          docker run --rm \
+            --name "$copy_helper" \
+            --user 0:0 \
+            --read-only \
+            -v "$DATA_VOLUME:/source:ro" \
+            -v "$rollback_volume:/snapshot" \
+            "$image" sh -ceu 'cp -a /source/. /snapshot/ && chown -R 1000:1000 /snapshot'
+          raw_snapshot_ready=1
+
+          if docker volume inspect "$final_restore_volume" >/dev/null 2>&1; then
+            docker volume rm "$final_restore_volume" >/dev/null
+          fi
+          docker volume create --label com.arthello.ephemeral=final-restore "$final_restore_volume" >/dev/null
+          docker run --rm \
+            --name "$copy_helper" \
+            --user 0:0 \
+            --read-only \
+            -v "$rollback_volume:/source:ro" \
+            -v "$final_restore_volume:/target" \
+            "$image" sh -ceu 'cp -a /source/. /target/ && chown -R 1000:1000 /target'
+
+          docker run --rm \
+            --user 0:0 \
+            --read-only \
+            -e BACKUP_ID="$final_backup_id" \
+            -v "$BACKUP_VOLUME:/source:ro" \
+            -v "$TEST_BACKUP_VOLUME:/backups" \
+            "$image" sh -ceu '
+              case "$BACKUP_ID" in arthello-pre_deploy-*) ;; *) exit 64 ;; esac
+              cp "/source/$BACKUP_ID.sqlite.enc" "/backups/$BACKUP_ID.sqlite.enc"
+              cp "/source/$BACKUP_ID.manifest.json" "/backups/$BACKUP_ID.manifest.json"
+              chown -R 1000:1000 /backups
+            '
+          docker run --rm \
+            --read-only \
+            --tmpfs /tmp \
+            -e ARTHELLO_DATA_ROOT=/data \
+            -e ARTHELLO_BACKUP_ROOT=/backups \
+            -e ARTHELLO_BACKUP_ENCRYPTION_KEY \
+            -e ARTHELLO_APPLICATION_REVISION="$source_revision" \
+            -e ARTHELLO_SUPPORTED_CORE_SCHEMA_VERSIONS="$final_core_schema" \
+            -e ARTHELLO_APP_STOPPED=1 \
+            -v "$final_restore_volume:/data" \
+            -v "$TEST_BACKUP_VOLUME:/backups" \
+            "$image" node production/backup-manager.mjs restore "$final_backup_id" >/dev/null
+          docker volume rm "$final_restore_volume" >/dev/null
+
+          docker volume rm "$CLONE_VOLUME" "$TEST_BACKUP_VOLUME" >/dev/null
+
+          live_data_exposed=1
+          docker run -d \
+            --name "$candidate" \
+            --restart unless-stopped \
+            --read-only \
+            --tmpfs /tmp \
+            --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
+            --network "$network" \
+            -e NODE_ENV=production \
+            -e PORT=8081 \
+            -e TZ=Europe/Moscow \
+            -e ARTHELLO_D1_PATH=/data/d1 \
+            -e ARTHELLO_DATA_ROOT=/data \
+            -e ARTHELLO_BACKUP_ROOT=/backups \
+            -e ARTHELLO_BACKUP_ENCRYPTION_KEY \
+            -e ARTHELLO_BACKUP_CONTROL_TOKEN \
+            -e ARTHELLO_BACKUP_CONTROL_PORT=8082 \
+            -e ARTHELLO_APPLICATION_REVISION="$GITHUB_SHA" \
+            -e ARTHELLO_BACKUP_DAILY_DAYS=30 \
+            -e ARTHELLO_BACKUP_MONTHLY_MONTHS=12 \
+            -e ARTHELLO_BOOTSTRAP_LOGIN=owner \
+            -e ARTHELLO_BOOTSTRAP_PASSWORD \
+            -v "$DATA_VOLUME:/data" \
+            -v "$BACKUP_VOLUME:/backups" \
+            "$image" >/dev/null
+          test "$(docker inspect "$candidate" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+
+          ready=0
+          for attempt in $(seq 1 90); do
+            if docker exec -i "$candidate" node - <<'NODE'
+          const base = 'http://127.0.0.1:8081';
+          try {
+            const health = await fetch(base + '/api/health');
+            if (!health.ok || !(await health.text()).includes('"status":"ok"')) process.exit(1);
+            const root = await fetch(base + '/');
+            if (!root.ok) process.exit(1);
+            const html = await root.text();
+            const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
+            if (refs.length < 2) process.exit(1);
+            for (const path of [...new Set(refs)]) {
+              const asset = await fetch(base + path);
+              if (!asset.ok) process.exit(1);
+            }
+            const me = await fetch(base + '/api/auth/me');
+            if (me.status !== 401) process.exit(1);
+          } catch { process.exit(1); }
+          NODE
+            then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs --tail 200 "$candidate" >&2 || true
+            exit 1
+          fi
+
+          maintenance_status="$(curl -sS --max-time 20 \
+            -o /dev/null \
+            -w '%{http_code}' \
+            "$PUBLIC_URL/?maintenance_probe=$GITHUB_RUN_ID")"
+          test "$maintenance_status" = 503
 
           public_ok=0
           for attempt in $(seq 1 40); do
@@ -247,25 +1146,30 @@ jobs:
               -e PUBLIC_URL="$PUBLIC_URL" \
               -e SCHOOL_URL="$SCHOOL_URL" \
               -e PROBE="$GITHUB_RUN_ID-$attempt" \
-              "$CANDIDATE" node - <<'NODE'
+              -e PROBE_TOKEN="$probe_token" \
+              "$candidate" node - <<'NODE'
           const base = process.env.PUBLIC_URL;
           const school = process.env.SCHOOL_URL;
+          const probeHeaders = {
+            'cache-control': 'no-cache',
+            'x-arthello-deploy-probe': process.env.PROBE_TOKEN,
+          };
           try {
-            const root = await fetch(`${base}/?probe=${process.env.PROBE}`, { headers: { 'cache-control': 'no-cache' } });
+            const root = await fetch(base + '/?probe=' + process.env.PROBE, { headers: probeHeaders });
             const html = await root.text();
             const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
             if (!root.ok || refs.length < 2) process.exit(1);
             for (const path of [...new Set(refs)]) {
-              const asset = await fetch(base + path, { headers: { 'cache-control': 'no-cache' } });
+              const asset = await fetch(base + path, { headers: probeHeaders });
               if (!asset.ok) process.exit(1);
             }
-            const health = await fetch(base + '/api/health', { headers: { 'cache-control': 'no-cache' } });
+            const health = await fetch(base + '/api/health', { headers: probeHeaders });
             if (!health.ok || !(await health.text()).includes('"status":"ok"')) process.exit(1);
-            const me = await fetch(base + '/api/auth/me', { headers: { 'cache-control': 'no-cache' } });
+            const me = await fetch(base + '/api/auth/me', { headers: probeHeaders });
             if (me.status !== 401) process.exit(1);
             const forgedSettings = await fetch(base + '/api/settings', {
               headers: {
-                'cache-control': 'no-cache',
+                ...probeHeaders,
                 'oai-authenticated-user-email': 'vitaliyozolin@gmail.com',
                 'x-arthello-role': 'OWNER',
               },
@@ -282,16 +1186,159 @@ jobs:
             sleep 3
           done
           test "$public_ok" -eq 1
+
+          # From this point a successful Caddy reload may admit business writes.
+          # Any later failure is post-commit and must not restore pre-cutover data.
+          cutover_committed=1
+          docker exec "$CADDY_CONTAINER" sh -lc 'mv /data/external-routes.caddy.new /data/external-routes.caddy'
+          docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+          curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+          curl -fsS --max-time 20 "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+          commit_writers="$(docker ps --filter "volume=$DATA_VOLUME" --format '{{.Names}}')"
+          test "$commit_writers" = "$candidate"
+          cutover_verified=1
+          if [ "$gate_active" -eq 1 ]; then
+            remove_deploy_gate
+          fi
+
+          printf 'name=%s\n' "$candidate" >> "$GITHUB_OUTPUT"
+          printf 'final_backup_id=%s\n' "$final_backup_id" >> "$GITHUB_OUTPUT"
+          printf 'ARTHELLO_FINAL_PREDEPLOY_BACKUP=RESTORE_VERIFIED id=%s\n' "$final_backup_id"
+          printf 'ARTHELLO_SINGLE_WRITER_CUTOVER=OK\n'
           printf 'ARTHELLO_PUBLIC_ASSETS=OK\nARTHELLO_PUBLIC_AUTH=OK\nSCHOOL_ROUTE_PRESERVED=OK\n'
+          rm -rf "$work"
+          if ! docker volume rm "$rollback_volume" >/dev/null; then
+            printf 'ARTHELLO_ROLLBACK_VOLUME_CLEANUP=PENDING volume=%s\n' "$rollback_volume" >&2
+          fi
           trap - EXIT
+
+      - name: Always remove isolated validation artifacts and deploy gate
+        if: always()
+        shell: bash
+        env:
+          VALIDATION: ${{ steps.validation.outputs.name }}
+          CLONE_VOLUME: ${{ steps.backup.outputs.clone_volume }}
+          TEST_BACKUP_VOLUME: ${{ steps.backup.outputs.test_backup_volume }}
+          CUTOVER_OUTCOME: ${{ steps.cutover.outcome }}
+        run: |
+          set -Eeuo pipefail
+          image="arthello-direct:$GITHUB_SHA"
+          validation="${VALIDATION:-arthello-validation-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT}"
+          clone_volume="${CLONE_VOLUME:-arthello-validation-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-data}"
+          test_backup_volume="${TEST_BACKUP_VOLUME:-arthello-validation-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-backups}"
+          rollback_volume="arthello-rollback-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-data"
+          final_restore_volume="arthello-final-restore-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-data"
+          inventory_watchdog="arthello-inventory-unpause-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          inventory_work="$RUNNER_TEMP/arthello-inventory-$GITHUB_RUN_ID"
+          cutover_work="$RUNNER_TEMP/arthello-cutover-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
+          case "$validation" in arthello-validation-*) ;; *) exit 64 ;; esac
+          case "$clone_volume" in arthello-validation-*-data) ;; *) exit 64 ;; esac
+          case "$test_backup_volume" in arthello-validation-*-backups) ;; *) exit 64 ;; esac
+          case "$rollback_volume" in arthello-rollback-*-data) ;; *) exit 64 ;; esac
+          case "$final_restore_volume" in arthello-final-restore-*-data) ;; *) exit 64 ;; esac
+          case "$inventory_watchdog" in arthello-inventory-unpause-*) ;; *) exit 64 ;; esac
+          test "$inventory_work" = "$RUNNER_TEMP/arthello-inventory-$GITHUB_RUN_ID"
+          test "$cutover_work" = "$RUNNER_TEMP/arthello-cutover-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if docker container inspect "$inventory_watchdog" >/dev/null 2>&1; then
+            watchdog_target="$(docker inspect "$inventory_watchdog" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+              | awk -F= '$1 == "TARGET_CONTAINER_ID" {value=$2} END {print value}')"
+            watchdog_pause_state=unknown
+            case "$watchdog_target" in
+              *[!a-f0-9]*|'') ;;
+              *)
+                if [ "${#watchdog_target}" -eq 64 ] \
+                  && docker container inspect "$watchdog_target" >/dev/null 2>&1
+                then
+                  watchdog_pause_state="$(docker inspect "$watchdog_target" --format '{{.State.Paused}}' 2>/dev/null || printf unknown)"
+                  if [ "$watchdog_pause_state" = true ]; then
+                    docker unpause "$watchdog_target" >/dev/null 2>&1 || true
+                    watchdog_pause_state="$(docker inspect "$watchdog_target" --format '{{.State.Paused}}' 2>/dev/null || printf unknown)"
+                  fi
+                fi
+                ;;
+            esac
+            if [ "$watchdog_pause_state" = false ]; then
+              docker rm -f "$inventory_watchdog" >/dev/null
+            else
+              printf 'ARTHELLO_INVENTORY_WATCHDOG=RETAINED_UNPAUSE_UNVERIFIED name=%s\n' "$inventory_watchdog" >&2
+            fi
+          fi
+          if docker container inspect "$validation" >/dev/null 2>&1; then
+            docker rm -f "$validation" >/dev/null
+          fi
+          for volume in "$clone_volume" "$test_backup_volume" "$final_restore_volume"; do
+            if docker volume inspect "$volume" >/dev/null 2>&1; then
+              docker volume rm "$volume" >/dev/null
+            fi
+          done
+          if [ "$CUTOVER_OUTCOME" = success ] && docker volume inspect "$rollback_volume" >/dev/null 2>&1; then
+            docker volume rm "$rollback_volume" >/dev/null
+          fi
+          rm -rf "$inventory_work"
+          if [ "$CUTOVER_OUTCOME" = success ]; then
+            rm -rf "$cutover_work"
+          elif [ -d "$cutover_work" ] && [ ! -L "$cutover_work" ]; then
+            if ! chmod 700 "$cutover_work"; then
+              printf 'ARTHELLO_CUTOVER_RECOVERY=MODE_ENFORCEMENT_FAILED path=%s\n' "$cutover_work" >&2
+            fi
+            routes_recovery="$cutover_work/external-routes.before.caddy"
+            if [ -f "$routes_recovery" ] && [ ! -L "$routes_recovery" ]; then
+              chmod 600 "$routes_recovery" || true
+            fi
+            printf 'ARTHELLO_CUTOVER_RECOVERY=PRESERVED path=%s action=inspect_routes_and_retained_volumes\n' \
+              "$cutover_work" >&2
+          fi
+
+          if [ "$CUTOVER_OUTCOME" = success ] \
+            && docker image inspect "$image" >/dev/null 2>&1 \
+            && docker volume inspect "$BACKUP_VOLUME" >/dev/null 2>&1
+          then
+            docker run --rm -i \
+              --read-only \
+              -e DEPLOY_RUN_ID="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+              -v "$BACKUP_VOLUME:/backups" \
+              "$image" node --input-type=module - <<'NODE'
+          import { lstat, open, readFile, unlink } from "node:fs/promises";
+          const finalPath = "/backups/.deploy-gate";
+          try {
+            const details = await lstat(finalPath);
+            if (!details.isFile() || details.isSymbolicLink() || details.size < 2 || details.size > 4096) {
+              throw new Error("deploy gate is not a safe regular file");
+            }
+            const record = JSON.parse(await readFile(finalPath, "utf8"));
+            if (record?.format !== "arthello-deploy-gate-v1" || record?.runId !== process.env.DEPLOY_RUN_ID) {
+              throw new Error("refusing to remove a deploy gate owned by another run");
+            }
+            await unlink(finalPath);
+          } catch (error) {
+            if (error?.code !== "ENOENT") throw error;
+          }
+          try {
+            await unlink(finalPath + "." + process.env.DEPLOY_RUN_ID + ".tmp");
+          } catch (error) {
+            if (error?.code !== "ENOENT") throw error;
+          }
+          const directory = await open("/backups", "r");
+          await directory.sync();
+          await directory.close();
+          NODE
+          elif [ "$CUTOVER_OUTCOME" != success ] \
+            && docker image inspect "$image" >/dev/null 2>&1 \
+            && docker volume inspect "$BACKUP_VOLUME" >/dev/null 2>&1
+          then
+            printf 'ARTHELLO_DEPLOY_GATE=RETAINED_UNLESS_COMPLETED_ROLLBACK_ALREADY_REMOVED_IT\n' >&2
+          fi
+          printf 'ARTHELLO_EPHEMERAL_CLEANUP=OK\n'
 
       - name: Remove superseded ArtHello containers
         if: success()
         shell: bash
         env:
-          CANDIDATE: ${{ steps.candidate.outputs.name }}
+          CANDIDATE: ${{ steps.cutover.outputs.name }}
         run: |
           set -Eeuo pipefail
+          test -n "$CANDIDATE"
           while IFS= read -r old; do
             [ -n "$old" ] || continue
             [ "$old" = "$CANDIDATE" ] && continue
@@ -311,6 +1358,6 @@ jobs:
             echo "- Commit: $GITHUB_SHA"
             echo "- Public: $PUBLIC_URL"
             echo "- School guard: $SCHOOL_URL"
-            echo "- Acceptance: real asset loads + auth endpoint + health + School guard"
+            echo "- Acceptance: encrypted predeploy backup + isolated restore + single-writer cutover + real assets/auth/health + School guard"
             echo "- Result: ${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"

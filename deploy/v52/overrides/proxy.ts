@@ -3,6 +3,7 @@ import { getAuthenticatedRequestContext } from "./lib/production-auth";
 
 const PUBLIC_PATHS = new Set([
   "/api/health",
+  "/api/health/ready",
   "/api/integrations/tochka/callback",
 ]);
 
@@ -21,6 +22,7 @@ const withOwner = (...roles: Exclude<ApiRole, "OWNER">[]) => ["OWNER", ...roles]
 const allRoles = [...API_ROLES];
 
 const API_RULES: ApiRule[] = [
+  { prefix: "/api/settings/backups", read: withOwner(), write: withOwner() },
   { prefix: "/api/settings/temporary-credential", read: [], write: withOwner() },
   { prefix: "/api/settings", read: allRoles, write: withOwner() },
   { prefix: "/api/finance-actions", read: [], write: withOwner("DIRECTOR", "FINANCE") },
