@@ -107,12 +107,9 @@ export function SettingsWorkspace({ close, notify, onContextChanged }: { close: 
   }
 
   async function copyCredential(value: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      notify(`${label} скопирован`);
-    } catch {
-      notify("Не удалось скопировать. Выделите значение вручную.");
-    }
+    const copied = copyTextSynchronously(value) || await copyTextWithClipboardApi(value);
+    notify(copied ? `${label} скопирован` : "Не удалось скопировать. Нажмите на поле и выберите «Скопировать».");
+    return copied;
   }
 
   function invite(event: FormEvent<HTMLFormElement>) {
@@ -192,7 +189,7 @@ export function SettingsWorkspace({ close, notify, onContextChanged }: { close: 
               })}</div>
             </article>
             {data.canManage && accessEmployeeId ? <AccessAssignmentForm key={accessEmployeeId} user={data.users.find((user) => user.id === accessEmployeeId)!} data={data} busy={busy} close={() => setAccessEmployeeId("")} submit={invite} /> : <div className="settings-boundary access-source-boundary"><strong>Сотрудники здесь не создаются</strong><span>Добавление, импорт и исправление персональных данных выполняются в «Команда → Сотрудники». Здесь выбирается готовая карточка и отдельно подтверждаются системы, филиалы и роль доступа.</span></div>}
-            {credentialLink ? <div className="settings-boundary credential-result"><strong>Одноразовая ссылка готова</strong><span>Передайте её сотруднику безопасным каналом. Повторный сброс аннулирует предыдущую.</span><input readOnly value={credentialLink} onFocus={(event) => event.currentTarget.select()} /><button onClick={() => void navigator.clipboard.writeText(credentialLink)}>Скопировать ссылку</button></div> : null}
+            {credentialLink ? <div className="settings-boundary credential-result"><strong>Одноразовая ссылка готова</strong><span>Передайте её сотруднику безопасным каналом. Повторный сброс аннулирует предыдущую.</span><input readOnly value={credentialLink} onFocus={(event) => event.currentTarget.select()} /><button type="button" onClick={() => void copyCredential(credentialLink, "Ссылка")}>Скопировать ссылку</button></div> : null}
             <div className="settings-boundary"><strong>Как работает вход</strong><span>{data.authBoundary}</span></div>
           </div> : null}
 
@@ -224,7 +221,7 @@ export function SettingsWorkspace({ close, notify, onContextChanged }: { close: 
                 })}</div> : <div className="settings-empty"><strong>Нет связанных людей</strong><p>Сначала AlfaCRM должна передать ребёнка и представителей, а ArtHello OS — связать их со стабильной карточкой семьи.</p></div>}
               </section>)}</div> : <div className="settings-empty"><strong>Семьи ещё не синхронизированы</strong><p>Подключите AlfaCRM в разделе «Интеграции». Создавать параллельные карточки в дневнике больше не требуется.</p></div>}
             </article>
-            {credentialLink ? <div className="settings-boundary credential-result"><strong>Одноразовая ссылка готова</strong><span>Ссылка предназначена для первого входа или создания нового пароля. После подключения канала она отправляется выбранному человеку по SMS или email.</span><input readOnly value={credentialLink} onFocus={(event) => event.currentTarget.select()} /><button onClick={() => void navigator.clipboard.writeText(credentialLink)}>Скопировать ссылку</button></div> : null}
+            {credentialLink ? <div className="settings-boundary credential-result"><strong>Одноразовая ссылка готова</strong><span>Ссылка предназначена для первого входа или создания нового пароля. После подключения канала она отправляется выбранному человеку по SMS или email.</span><input readOnly value={credentialLink} onFocus={(event) => event.currentTarget.select()} /><button type="button" onClick={() => void copyCredential(credentialLink, "Ссылка")}>Скопировать ссылку</button></div> : null}
             <div className="settings-boundary"><strong>Граница систем</strong><span>{data.authBoundary}</span></div>
           </div> : null}
         </div>
@@ -234,23 +231,85 @@ export function SettingsWorkspace({ close, notify, onContextChanged }: { close: 
   </div>;
 }
 
-function TemporaryCredentialDialog({ credential, close, copy }: { credential: TemporaryCredential; close: () => void; copy: (value: string, label: string) => Promise<void> }) {
+function TemporaryCredentialDialog({ credential, close, copy }: { credential: TemporaryCredential; close: () => void; copy: (value: string, label: string) => Promise<boolean> }) {
+  const [copyState, setCopyState] = useState<{ target: "login" | "password" | "all"; message: string; copied: boolean } | null>(null);
   const bundle = `Логин: ${credential.login}\nВременный пароль: ${credential.temporaryPassword}`;
   const expiresAt = new Date(credential.expiresAt);
   const expiryLabel = Number.isNaN(expiresAt.getTime()) ? credential.expiresAt : expiresAt.toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" });
+
+  useEffect(() => {
+    if (!copyState) return;
+    const timer = window.setTimeout(() => setCopyState(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [copyState]);
+
+  async function handleCopy(target: "login" | "password" | "all", value: string, label: string) {
+    const copied = await copy(value, label);
+    setCopyState({
+      target,
+      copied,
+      message: copied ? `${label} скопирован` : "Не удалось скопировать. Нажмите на поле и выберите «Скопировать».",
+    });
+  }
+
+  const buttonLabel = (target: "login" | "password" | "all", fallback: string) => copyState?.copied && copyState.target === target ? "Скопировано ✓" : fallback;
   return <div className="temporary-credential-layer">
     <button className="temporary-credential-scrim" onClick={close} aria-label="Закрыть данные временного входа" />
     <section className="temporary-credential-dialog" role="dialog" aria-modal="true" aria-labelledby="temporary-credential-title">
-      <header><div><p>Одноразовый показ</p><h3 id="temporary-credential-title">Временный вход для {credential.displayName}</h3></div><button onClick={close} aria-label="Закрыть">×</button></header>
+      <header><div><p>Одноразовый показ</p><h3 id="temporary-credential-title">Временный вход для {credential.displayName}</h3></div><button type="button" onClick={close} aria-label="Закрыть">×</button></header>
       <div className="temporary-credential-warning"><strong>Сохраните данные сейчас</strong><span>После закрытия пароль больше не показывается. Новый временный вход аннулирует предыдущий, а сотрудник должен сменить пароль при первом входе.</span></div>
       <div className="temporary-credential-fields">
-        <label><span>Логин</span><div><input readOnly value={credential.login} onFocus={(event) => event.currentTarget.select()} /><button onClick={() => void copy(credential.login, "Логин")}>Скопировать</button></div></label>
-        <label><span>Временный пароль</span><div><input className="temporary-password" readOnly value={credential.temporaryPassword} onFocus={(event) => event.currentTarget.select()} /><button onClick={() => void copy(credential.temporaryPassword, "Пароль")}>Скопировать</button></div></label>
+        <label><span>Логин</span><div><input readOnly value={credential.login} onFocus={(event) => event.currentTarget.select()} /><button type="button" className={copyState?.copied && copyState.target === "login" ? "copy-confirmed" : ""} onClick={() => void handleCopy("login", credential.login, "Логин")}>{buttonLabel("login", "Скопировать")}</button></div></label>
+        <label><span>Временный пароль</span><div><input className="temporary-password" readOnly value={credential.temporaryPassword} onFocus={(event) => event.currentTarget.select()} /><button type="button" className={copyState?.copied && copyState.target === "password" ? "copy-confirmed" : ""} onClick={() => void handleCopy("password", credential.temporaryPassword, "Пароль")}>{buttonLabel("password", "Скопировать")}</button></div></label>
       </div>
+      <p className={copyState?.copied ? "temporary-credential-copy-status copied" : "temporary-credential-copy-status"} role="status" aria-live="polite">{copyState?.message ?? ""}</p>
       <p className="temporary-credential-expiry">Действует до {expiryLabel}. Используйте безопасный канал передачи.</p>
-      <footer><button onClick={() => void copy(bundle, "Логин и пароль")}>Скопировать всё</button><button onClick={close}>Готово, закрыть</button></footer>
+      <footer><button type="button" className={copyState?.copied && copyState.target === "all" ? "copy-confirmed" : ""} onClick={() => void handleCopy("all", bundle, "Логин и пароль")}>{buttonLabel("all", "Скопировать всё")}</button><button type="button" onClick={close}>Готово, закрыть</button></footer>
     </section>
   </div>;
+}
+
+function copyTextSynchronously(value: string) {
+  const textarea = document.createElement("textarea");
+  const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  textarea.value = value;
+  textarea.readOnly = true;
+  textarea.tabIndex = -1;
+  textarea.setAttribute("aria-hidden", "true");
+  Object.assign(textarea.style, {
+    position: "fixed",
+    top: "0",
+    left: "0",
+    width: "1px",
+    height: "1px",
+    padding: "0",
+    border: "0",
+    opacity: "0",
+    pointerEvents: "none",
+    fontSize: "16px",
+  });
+  document.body.appendChild(textarea);
+  try {
+    textarea.focus({ preventScroll: true });
+    textarea.select();
+    textarea.setSelectionRange(0, value.length);
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+    activeElement?.focus({ preventScroll: true });
+  }
+}
+
+async function copyTextWithClipboardApi(value: string) {
+  if (!navigator.clipboard?.writeText) return false;
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function readClientCookie(name: string) {
