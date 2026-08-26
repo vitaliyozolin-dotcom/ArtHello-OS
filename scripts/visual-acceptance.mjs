@@ -181,7 +181,8 @@ try {
   cdp.close();
 } finally {
   chrome.kill('SIGTERM');
-  await fs.rm(userDir, { recursive: true, force: true });
+  await sleep(250);
+  await fs.rm(userDir, { recursive: true, force: true }).catch(() => {});
 }
 
 report.summary = {
