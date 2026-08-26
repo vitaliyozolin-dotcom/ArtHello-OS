@@ -30,7 +30,12 @@ def normalized(value: object) -> str:
 def sqlite_files(root: Path) -> list[Path]:
     candidates: list[Path] = []
     for path in root.rglob("*"):
-        if not path.is_file() or path.name.endswith(("-wal", "-shm")):
+        if (
+            not path.is_file()
+            or path.name.endswith(("-wal", "-shm"))
+            or ".pre-rollback-" in path.name
+            or ".failed-restore-" in path.name
+        ):
             continue
         try:
             if path.read_bytes()[:16] == b"SQLite format 3\x00":
