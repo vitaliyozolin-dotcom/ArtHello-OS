@@ -1,13 +1,19 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { createContext, FormEvent, ReactNode, useContext, useEffect, useState } from "react";
 import "./ProductionAuthGate.css";
 
-type AuthUser = {
-  role: "owner" | "accountant" | "viewer";
+export type AuthUser = {
+  role: string;
   name: string;
   mustChangePassword: boolean;
 };
+
+const ProductionAuthContext = createContext<AuthUser | null>(null);
+
+export function useProductionAuthUser() {
+  return useContext(ProductionAuthContext);
+}
 
 export default function ProductionAuthGate({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -118,7 +124,7 @@ export default function ProductionAuthGate({ children }: { children: ReactNode }
     );
   }
 
-  return children;
+  return <ProductionAuthContext.Provider value={user}>{children}</ProductionAuthContext.Provider>;
 }
 
 function AuthScreen({ title, children }: { title: string; children: ReactNode }) {
