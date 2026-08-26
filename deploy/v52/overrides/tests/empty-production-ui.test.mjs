@@ -33,14 +33,16 @@ test("finance API derives totals and periods only from stored records", () => {
   assert.match(financeApi, /const openingBalanceMinor = 0/);
 });
 
-test("sales opens an empty state before resolving the acceptance chain", () => {
+test("sales keeps its operating sections available before the first lead", () => {
   const sales = read("../app/components/SalesWorkspace.tsx");
-  const emptyGuard = sales.indexOf("if (!data.leads.length)");
-  const chainLookup = sales.indexOf("const chainLead =");
 
-  assert.ok(emptyGuard > -1, "sales empty-state guard is missing");
-  assert.ok(chainLookup > emptyGuard, "acceptance chain is resolved before the empty-state guard");
-  assert.match(sales.slice(emptyGuard, chainLookup), /Лидов пока нет/);
+  assert.doesNotMatch(sales, /if \(!data\.leads\.length\) return/);
+  assert.match(sales, /DEFAULT_FUNNEL_STAGES/);
+  assert.match(sales, /Все разделы продаж уже доступны/);
+  assert.match(sales, /Добавить первый лид/);
+  assert.match(sales, /Подключить источники/);
+  assert.match(sales, /action: "createLead"/);
+  assert.match(sales, /EMPTY_LEAD/);
   assert.doesNotMatch(sales, /acceptanceChainLeadId\)!|chainLifecycle[^\n]*!|chainAccrual[^\n]*!|chainPayment[^\n]*!/);
 });
 
