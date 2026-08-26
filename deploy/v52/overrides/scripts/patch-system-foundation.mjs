@@ -158,8 +158,8 @@ patch("app/components/SalesWorkspace.tsx", (input) => {
   );
   source = replaceText(
     source,
-    '</div></form></div>;\n}\n\nfunction PanelHead',
-    '</div></form></div>, document.body);\n}\n\nfunction PanelHead',
+    '</footer></form></div>;\n}\n\nfunction PanelHead',
+    '</footer></form></div>, document.body);\n}\n\nfunction PanelHead',
     "lead create portal end",
   );
   source = replaceText(
