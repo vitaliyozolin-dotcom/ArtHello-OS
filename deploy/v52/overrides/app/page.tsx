@@ -1,5 +1,5 @@
-import ArtHelloShell from "../../components/ArtHelloShell";
-import ProductionAuthGate from "../../components/ProductionAuthGate";
+import ArtHelloShell from "./components/ArtHelloShell";
+import ProductionAuthGate from "./components/ProductionAuthGate";
 
 export const dynamic = "force-dynamic";
 
