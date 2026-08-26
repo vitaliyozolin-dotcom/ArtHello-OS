@@ -27,6 +27,7 @@ export function ContextualHelpSystem() {
   const ids = useRef(new WeakMap<HTMLElement, string>());
   const counter = useRef(0);
   const frame = useRef<number | null>(null);
+  const pageKey = useRef("");
 
   const idFor = useCallback((element: HTMLElement, prefix: string) => {
     const existing = ids.current.get(element);
@@ -39,6 +40,13 @@ export function ContextualHelpSystem() {
   const scan = useCallback(() => {
     if (!document.body) return;
     const next = scanHelpContext(idFor);
+    const nextPageKey = `${next.path}\n${next.title}\n${next.section}`;
+    if (pageKey.current && pageKey.current !== nextPageKey) {
+      setQuestion("overview");
+      setSelected(null);
+      setTour(0);
+    }
+    pageKey.current = nextPageKey;
     setContext((current) => current.signature === next.signature ? current : next);
   }, [idFor]);
 
@@ -51,8 +59,11 @@ export function ContextualHelpSystem() {
   }, [scan]);
 
   useEffect(() => {
+    let hintTimer: number | undefined;
     try {
-      if (localStorage.getItem("arthello.inline-help") === "0") setHints(false);
+      if (localStorage.getItem("arthello.inline-help") === "0") {
+        hintTimer = window.setTimeout(() => setHints(false), 0);
+      }
     } catch {
       // The preference remains session-only when storage is unavailable.
     }
@@ -60,6 +71,9 @@ export function ContextualHelpSystem() {
       .then(async (response) => response.ok ? await response.json() as HelpUser : null)
       .then(setUser)
       .catch(() => setUser(null));
+    return () => {
+      if (hintTimer !== undefined) window.clearTimeout(hintTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -102,12 +116,6 @@ export function ContextualHelpSystem() {
     document.addEventListener("keydown", close);
     return () => document.removeEventListener("keydown", close);
   }, []);
-
-  useEffect(() => {
-    setQuestion("overview");
-    setSelected(null);
-    setTour(0);
-  }, [context.path, context.title, context.section]);
 
   const createAction = useMemo(() => context.actions.find((item) => /добавить|создать|нов(ая|ый|ое)|пригласить|загрузить/i.test(item.label)), [context.actions]);
   const saveAction = useMemo(() => context.actions.find((item) => /сохранить|создать|добавить|подтвердить|отправить|применить/i.test(item.label)), [context.actions]);
