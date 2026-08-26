@@ -48,6 +48,13 @@ dashboard = replaceOnce(
   "Moscow date",
 );
 
+dashboard = replaceOnce(
+  dashboard,
+  '        <button type="button" onClick={createTask}><AppIcon name="plus" /> Новая задача</button>\n',
+  '',
+  "duplicate dashboard create button",
+);
+
 writeFileSync(dashboardTarget, dashboard, "utf8");
 
 const shellTarget = fileURLToPath(new URL("../app/components/ArtHelloShell.tsx", import.meta.url));
