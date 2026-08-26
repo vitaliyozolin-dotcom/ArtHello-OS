@@ -84,9 +84,11 @@ jobs:
           helper=''
 
           run_read_only() {
+            # The script opens SQLite with readOnly=true. The volume itself stays
+            # writable so SQLite WAL mode can create/refresh its -shm sidecar.
             docker run --rm --network none --read-only --tmpfs /tmp \
               --mount "type=bind,src=$script,dst=/maintenance/production-clean-slate.mjs,readonly" \
-              --mount "type=volume,src=$DATA_VOLUME,dst=/data,readonly" \
+              --mount "type=volume,src=$DATA_VOLUME,dst=/data" \
               "$image" node /maintenance/production-clean-slate.mjs "$@" --root /data
           }
 
