@@ -56,6 +56,22 @@
 
 Приоритеты отражают ворота качества, а не желаемый порядок экранов.
 
+## P0 — RU-04 production backup/restore
+
+- [x] Утвердить канонический контракт `D-PROD-RU-008` для фактической production D1/SQLite: daily `03:00 Europe/Moscow`, 30 daily, 12 monthly, manual до явного удаления, canonical-owner-only, AES-256-GCM.
+- [~] Реализовать manual, daily, monthly, pre-deploy и pre-restore точки с checksum, SQLite integrity, manifest, fail-closed совместимостью core schema и внешним append-only журналом операций.
+- [ ] Подключить отдельную production backup-volume и ключ AES-256-GCM, хранящийся вне data/backup volumes; подтвердить права доступа и отсутствие plaintext-копий.
+- [ ] Добавить owner-only раздел «Резервные копии» в настройках: состояние расписания, история, ручное создание и контролируемое восстановление с текущим паролем и точной подтверждающей фразой.
+- [ ] При restore всегда создавать safety backup, отзывать восстановленные сессии и сохранять доступ текущего канонического владельца.
+- [ ] Доказать ежедневный запуск в production и хранение по policy без удаления ручных копий.
+- [~] Синтетический изолированный restore из зашифрованной копии покрыт integration test; остаётся выполнить drill из фактической production-копии, проверить контрольные данные и измерить RPO/RTO против `24h/4h`.
+- [ ] Настроить off-server copy в российском контуре и доказать её получение и изолированное восстановление; локальный том сам по себе этот gate не закрывает.
+- [ ] Реализовать и проверить offline break-glass restore при повреждённой или отсутствующей текущей SQLite: приложение остановлено, target полностью проверен без live DB, повреждённое состояние сохранено для forensic recovery, владелец получает новый принудительно сменяемый доступ, затем проходит health-check.
+- [ ] Добавить pre-create retention/capacity gate и alerting для backup-volume и tmpfs; предусмотреть audited удаление manual-точек с защитой минимального набора исправных копий.
+- [ ] Зафиксировать escrow/rotation-процедуру ключа шифрования без хранения ключа на data/backup volumes.
+- [ ] Добавить внешний host-level commit-aware supervisor для cutover: после SIGKILL/потери runner он должен по durable state безопасно завершить commit либо вернуть данные, маршруты и ровно один writer; проверить fault-injection после остановки production writer.
+- [ ] Не открывать gate реальных данных, пока isolated restore и off-server copy не подтверждены evidence.
+
 ## P0 — блокеры безопасности и доказуемости
 
 - [ ] Получить оригинальный Git remote или Git bundle и сопоставить его с архивом.
@@ -97,7 +113,7 @@
 - [x] CI workflow с typecheck, build, unit и PostgreSQL 16 integration/migration tests выполнен на историческом v10 run #8; candidate дополнительно публикует immutable provenance artifact.
 - [ ] Добавить health/readiness checks для БД и каждой интеграции.
 - [~] Введены recursive redaction и access audit; allowed route подтверждён в PostgreSQL, остаются deny/outage smoke, retention и correlation ID.
-- [ ] Зафиксировать RPO/RTO и проверить восстановление из backup.
+- [~] Целевые RPO/RTO зафиксированы как `24h/4h`; фактический замер и проверка восстановления остаются P0 RU-04.
 - [ ] Удалить tracked build metadata или гарантировать воспроизводимую пересборку.
 
 ## P1 — операционная модель

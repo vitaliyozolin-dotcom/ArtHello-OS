@@ -19,6 +19,51 @@ type TemporaryCredential = {
   expiresAt: string;
   mustChangePassword: true;
 };
+type BackupKind = "automatic" | "monthly" | "manual" | "pre_deploy" | "pre_restore";
+type BackupPoint = {
+  id: string;
+  kind: BackupKind;
+  createdAt: string;
+  sizeBytes: number;
+  integrity: "verified" | "failed";
+  compatible: boolean;
+  applicationRevision: string;
+  coreSchemaVersion: string | null;
+  expiresAt: string | null;
+};
+type BackupOperation = {
+  id: string;
+  type: "create" | "restore";
+  status: "queued" | "running" | "succeeded" | "failed";
+  backupId?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  message?: string;
+};
+type RestoreMaintenanceState = {
+  operation: BackupOperation;
+  intentName: string;
+  intentKey: string;
+};
+type BackupData = {
+  policy: {
+    automaticEnabled: boolean;
+    time: string;
+    timezone: string;
+    dailyRetentionDays: number;
+    monthlyRetentionMonths: number;
+    scope: string;
+  };
+  health: {
+    status: "ok" | "degraded";
+    lastAutomaticAt: string | null;
+    nextAutomaticAt: string;
+    lastError: string | null;
+    storage: { local: "ready" | "error"; offsite: "configured" | "not_configured" | "error" };
+  };
+  points: BackupPoint[];
+  activeOperation: BackupOperation | null;
+};
 type SettingsData = AccessContext & {
   users: SettingsUser[];
   grants: Array<{ userId: string; branchId: string }>;
@@ -32,18 +77,21 @@ type SettingsData = AccessContext & {
   authBoundary: string;
 };
 
-const tabs = ["Филиалы", "Пользователи", "Семьи и доступы"] as const;
+const baseTabs = ["Филиалы", "Пользователи", "Семьи и доступы"] as const;
+type SettingsTab = typeof baseTabs[number] | "Резервные копии";
 const roles = ["Директор", "Администратор", "Завуч", "Финансы", "Бухгалтерия", "HR", "Продажи", "Маркетинг", "Педагог", "Методист", "Кухня", "Закупки", "Безопасность", "Медработник", "Юрист", "Интеграции", "Аналитика", "Проекты", "Сотрудник"];
 
 export function SettingsWorkspace({ close, notify, onContextChanged }: { close: () => void; notify: (value: string) => void; onContextChanged: (value: AccessContext) => void }) {
   const [data, setData] = useState<SettingsData | null>(null);
-  const [tab, setTab] = useState<typeof tabs[number]>("Филиалы");
+  const [tab, setTab] = useState<SettingsTab>("Филиалы");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [credentialLink, setCredentialLink] = useState("");
   const [accessEmployeeId, setAccessEmployeeId] = useState("");
   const [temporaryCredential, setTemporaryCredential] = useState<TemporaryCredential | null>(null);
+  const [restorePoint, setRestorePoint] = useState<BackupPoint | null>(null);
+  const [maintenance, setMaintenance] = useState<RestoreMaintenanceState | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -62,12 +110,66 @@ export function SettingsWorkspace({ close, notify, onContextChanged }: { close: 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (temporaryCredential) setTemporaryCredential(null);
+      if (maintenance) return;
+      if (restorePoint) setRestorePoint(null);
+      else if (temporaryCredential) setTemporaryCredential(null);
       else close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [close, temporaryCredential]);
+  }, [close, maintenance, restorePoint, temporaryCredential]);
+
+  useEffect(() => {
+    if (!maintenance) return;
+    let cancelled = false;
+    let timer = 0;
+    let sawHealthOutage = false;
+    let sawSessionRevoked = false;
+    const pollRestore = async () => {
+      let activeOperation: BackupOperation | null | undefined;
+      try {
+        const response = await fetch("/api/settings/backups", { cache: "no-store" });
+        if (response.ok) {
+          const payload = await response.json() as BackupData;
+          activeOperation = payload.activeOperation;
+          if (activeOperation?.id === maintenance.operation.id && activeOperation.status === "failed") {
+            if (!cancelled) {
+              clearBackupIntentKey(maintenance.intentName, maintenance.intentKey);
+              setMaintenance(null);
+              notify("Восстановление не выполнено. Рабочая база оставлена без изменений.");
+            }
+            return;
+          }
+        } else if (response.status === 401) {
+          sawSessionRevoked = true;
+          activeOperation = null;
+        }
+      } catch {
+        // The authenticated API is expected to disappear while Miniflare is stopped.
+      }
+      let healthReady = false;
+      try {
+        const response = await fetch("/api/health/ready", { cache: "no-store" });
+        if (response.ok) {
+          const payload = await response.json().catch(() => null) as { status?: unknown } | null;
+          healthReady = payload?.status === "ok";
+        }
+      } catch {
+        sawHealthOutage = true;
+      }
+      if (!healthReady) sawHealthOutage = true;
+      const operationSucceeded = activeOperation?.id === maintenance.operation.id && activeOperation.status === "succeeded";
+      const authenticatedOperationLostAfterRestart = sawHealthOutage && activeOperation === null;
+      if (!cancelled && healthReady && (operationSucceeded || sawSessionRevoked || authenticatedOperationLostAfterRestart)) {
+        if (operationSucceeded) clearBackupIntentKey(maintenance.intentName, maintenance.intentKey);
+        window.location.reload();
+        return;
+      }
+      if (!cancelled) timer = window.setTimeout(() => void pollRestore(), 1500);
+    };
+    timer = window.setTimeout(() => void pollRestore(), 500);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [maintenance, notify]);
 
   async function action(body: Record<string, unknown>, key: string) {
     setBusy(key);
@@ -145,13 +247,15 @@ export function SettingsWorkspace({ close, notify, onContextChanged }: { close: 
 
   const branchNames = useMemo(() => Object.fromEntries((data?.branches ?? []).map((branch) => [branch.id, branch.name])), [data]);
   const systemNames = useMemo(() => Object.fromEntries((data?.systems ?? []).map((system) => [system.id, system.name])), [data]);
+  const isCanonicalOwner = data?.me.id === "USR-OWNER" && data.me.role === "Собственник" && data.me.isAdministrative === true;
+  const visibleTabs: readonly SettingsTab[] = isCanonicalOwner ? [...baseTabs, "Резервные копии"] : baseTabs;
 
   return <div className="settings-layer">
-    <button className="drawer-scrim" onClick={close} aria-label="Закрыть настройки" />
+    <button className="drawer-scrim" onClick={close} aria-label="Закрыть настройки" disabled={maintenance} />
     <section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header className="settings-head"><div><p>Управление системой</p><h2 id="settings-title">Настройки</h2><span>Филиалы, пользователи и контуры доступа</span></div><button onClick={close} aria-label="Закрыть">×</button></header>
       {loading ? <div className="settings-state">Загружаем права и филиалы…</div> : error || !data ? <div className="settings-state"><strong>{error}</strong><button onClick={() => void load()}>Повторить</button></div> : <>
-        <nav className="settings-tabs">{tabs.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</nav>
+        <nav className="settings-tabs">{visibleTabs.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</nav>
         <div className="settings-body">
           {tab === "Филиалы" ? <div className="settings-grid">
             <article className="settings-card wide"><header><div><p>Рабочие контуры</p><h3>Филиалы</h3></div><span>{data.branches.length}</span></header><div className="branch-list">{data.branches.map((branch) => <div key={branch.id}><span>{branch.kind.slice(0, 2).toUpperCase()}</span><div><strong>{branch.name}</strong><small>{branch.kind} · {branch.status}</small></div><em>{data.me.isAdministrative ? "Доступен" : data.access.some((item) => item.branchId === branch.id) ? "Назначен" : "Нет доступа"}</em></div>)}</div></article>
@@ -224,11 +328,232 @@ export function SettingsWorkspace({ close, notify, onContextChanged }: { close: 
             {credentialLink ? <div className="settings-boundary credential-result"><strong>Одноразовая ссылка готова</strong><span>Ссылка предназначена для первого входа или создания нового пароля. После подключения канала она отправляется выбранному человеку по SMS или email.</span><input readOnly value={credentialLink} onFocus={(event) => event.currentTarget.select()} /><button type="button" onClick={() => void copyCredential(credentialLink, "Ссылка")}>Скопировать ссылку</button></div> : null}
             <div className="settings-boundary"><strong>Граница систем</strong><span>{data.authBoundary}</span></div>
           </div> : null}
+          {tab === "Резервные копии" && isCanonicalOwner ? <BackupWorkspace notify={notify} openRestore={setRestorePoint} /> : null}
         </div>
       </>}
     </section>
     {temporaryCredential ? <TemporaryCredentialDialog credential={temporaryCredential} close={() => setTemporaryCredential(null)} copy={copyCredential} /> : null}
+    {restorePoint ? <RestoreBackupDialog point={restorePoint} close={() => setRestorePoint(null)} notify={notify} startMaintenance={setMaintenance} /> : null}
+    {maintenance ? <RestoreMaintenance /> : null}
   </div>;
+}
+
+function BackupWorkspace({ notify, openRestore }: { notify: (value: string) => void; openRestore: (point: BackupPoint) => void }) {
+  const [data, setData] = useState<BackupData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadBackups = useCallback(async () => {
+    try {
+      const response = await fetch("/api/settings/backups", { cache: "no-store" });
+      const payload = await response.json() as BackupData & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Не удалось загрузить резервные копии");
+      setData(payload);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось загрузить резервные копии");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadBackups(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadBackups]);
+
+  const activeStatus = data?.activeOperation?.status;
+  useEffect(() => {
+    if (activeStatus !== "queued" && activeStatus !== "running") return;
+    const timer = window.setInterval(() => void loadBackups(), 2500);
+    return () => window.clearInterval(timer);
+  }, [activeStatus, loadBackups]);
+
+  async function createBackup() {
+    setCreating(true);
+    const intentKey = getOrCreateBackupIntentKey("manual");
+    try {
+      const response = await fetch("/api/settings/backups", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": readClientCookie("__Host-arthello_csrf"),
+          "idempotency-key": intentKey,
+        },
+        body: JSON.stringify({ action: "create" }),
+      });
+      const payload = await response.json() as { operation?: BackupOperation; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Не удалось запустить создание копии");
+      if (response.status !== 202) throw new Error("Сервер не подтвердил запуск создания копии");
+      clearBackupIntentKey("manual", intentKey);
+      notify("Создание резервной копии запущено");
+      setData((current) => current && payload.operation ? { ...current, activeOperation: payload.operation } : current);
+      await loadBackups();
+    } catch (cause) {
+      notify(cause instanceof Error ? cause.message : "Не удалось запустить создание копии");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  if (loading && !data) return <div className="settings-state">Загружаем журнал резервных копий…</div>;
+  if (error && !data) return <div className="settings-state"><strong>{error}</strong><button type="button" onClick={() => void loadBackups()}>Повторить</button></div>;
+  if (!data) return null;
+
+  const operationRunning = data.activeOperation?.status === "queued" || data.activeOperation?.status === "running";
+  const localStorageReady = data.health.storage.local === "ready";
+  const offsiteConfigured = data.health.storage.offsite === "configured";
+  return <div className="backup-workspace">
+    {error ? <div className="backup-inline-error" role="status"><strong>Журнал временно не обновляется</strong><span>{error}</span><button type="button" onClick={() => void loadBackups()}>Повторить</button></div> : null}
+    {operationRunning && data.activeOperation ? <div className="backup-operation" role="status" aria-live="polite"><span className="backup-spinner" aria-hidden="true" /><div><strong>{data.activeOperation.type === "restore" ? "Восстановление поставлено в очередь" : "Создаём резервную копию"}</strong><small>{data.activeOperation.message || "Не закрывайте настройки: статус обновится автоматически."}</small></div></div> : null}
+    <div className="backup-overview">
+      <article className="settings-card backup-summary-card">
+        <header><div><p>Расписание</p><h3>Автоматически каждый день</h3></div><span className={data.health.status === "ok" ? "backup-ok" : "backup-warning"}>{data.health.status === "ok" ? "Работает" : "Требует внимания"}</span></header>
+        <p className="backup-card-help">Система создаёт полную копию данных без участия сотрудников. Время указано по Москве.</p>
+        <dl><div><dt>Последняя</dt><dd>{data.health.lastAutomaticAt ? formatBackupDate(data.health.lastAutomaticAt) : "Ещё не создана"}</dd></div><div><dt>Следующая</dt><dd>{formatBackupDate(data.health.nextAutomaticAt)}</dd></div><div><dt>Время</dt><dd>{data.policy.time || "03:00"} МСК</dd></div></dl>
+      </article>
+      <article className="settings-card backup-summary-card">
+        <header><div><p>Хранилище</p><h3>Состояние копий</h3></div><span className={localStorageReady ? "backup-ok" : "backup-danger"}>{localStorageReady ? "Готово" : "Ошибка"}</span></header>
+        <p className="backup-card-help">Здесь видно, куда система может безопасно записать новую резервную копию.</p>
+        <div className="backup-storage-list"><div><i className={localStorageReady ? "ready" : "failed"} /><span><strong>Основное хранилище</strong><small>{localStorageReady ? "Доступно для записи" : "Недоступно — нужна проверка"}</small></span></div><div><i className={offsiteConfigured ? "ready" : data.health.storage.offsite === "error" ? "failed" : "pending"} /><span><strong>Внешняя копия</strong><small>{offsiteConfigured ? "Защита от потери сервера настроена" : data.health.storage.offsite === "error" ? "Ошибка внешнего хранилища" : "Пока не настроена"}</small></span></div></div>
+        {data.health.lastError ? <p className="backup-health-error">Последняя ошибка: {data.health.lastError}</p> : null}
+      </article>
+      <article className="settings-card backup-create-card">
+        <header><div><p>Ручная точка</p><h3>Создать копию сейчас</h3></div></header>
+        <p className="backup-card-help"><strong>Что произойдёт:</strong> система зафиксирует текущее состояние всей базы. Работа сотрудников продолжится, а готовая точка появится в журнале ниже.</p>
+        <button type="button" disabled={creating || operationRunning || !localStorageReady} onClick={() => void createBackup()}>{creating || (data.activeOperation?.type === "create" && operationRunning) ? "Создаём копию…" : "Создать резервную копию"}</button>
+        <small>{!localStorageReady ? "Действие недоступно, пока основное хранилище не восстановлено." : `Храним ежедневные копии ${data.policy.dailyRetentionDays} дн., ежемесячные — ${data.policy.monthlyRetentionMonths} мес.`}</small>
+      </article>
+    </div>
+    <article className="settings-card backup-points-card">
+      <header><div><p>История</p><h3>Точки восстановления</h3><small>Выберите проверенную совместимую точку, чтобы вернуть к ней всю систему. Данные, внесённые после выбранного времени, будут утрачены.</small></div><span>{data.points.length}</span></header>
+      {data.points.length ? <div className="backup-point-list">{data.points.map((point) => {
+        const canRestore = point.integrity === "verified" && point.compatible && !operationRunning;
+        return <div key={point.id} className="backup-point-row">
+          <span className={`backup-kind ${point.kind}`}>{backupKindLabel(point.kind)}</span>
+          <div className="backup-point-time"><strong>{formatBackupDate(point.createdAt)}</strong><small>{point.applicationRevision ? `Версия ${point.applicationRevision}` : "Версия не указана"}{point.coreSchemaVersion ? ` · схема ${point.coreSchemaVersion}` : ""}</small></div>
+          <div className="backup-point-size"><strong>{formatBackupSize(point.sizeBytes)}</strong><small>{point.expiresAt ? `Хранится до ${formatBackupDate(point.expiresAt)}` : "Без даты удаления"}</small></div>
+          <div className="backup-point-integrity"><b className={point.integrity === "verified" ? "verified" : "failed"}>{point.integrity === "verified" ? "Проверена" : "Повреждена"}</b><small>{point.compatible ? "Совместима" : "Несовместима с этой версией"}</small></div>
+          <div className="backup-restore-action"><small>{canRestore ? "Вернёт всю базу к этой точке" : "Восстановление недоступно"}</small><button type="button" disabled={!canRestore} onClick={() => openRestore(point)}>Восстановить</button></div>
+        </div>;
+      })}</div> : <div className="settings-empty backup-empty"><strong>Точек восстановления пока нет</strong><p>Создайте первую ручную копию. Следующая автоматическая копия запланирована на {formatBackupDate(data.health.nextAutomaticAt)}.</p></div>}
+      <footer className="backup-scope-note"><strong>Что входит в копию</strong><span>{data.policy.scope} Восстановление возвращает данные на выбранную дату, но не меняет версию приложения.</span></footer>
+    </article>
+  </div>;
+}
+
+function RestoreBackupDialog({ point, close, notify, startMaintenance }: { point: BackupPoint; close: () => void; notify: (value: string) => void; startMaintenance: (state: RestoreMaintenanceState) => void }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const confirmed = confirmation === "ВОССТАНОВИТЬ";
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!busy) close();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [busy, close]);
+
+  async function restore(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!confirmed || !currentPassword) return;
+    setBusy(true);
+    setError("");
+    const intentName = `restore:${point.id}`;
+    const intentKey = getOrCreateBackupIntentKey(intentName);
+    try {
+      const response = await fetch("/api/settings/backups", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": readClientCookie("__Host-arthello_csrf"),
+          "idempotency-key": intentKey,
+        },
+        body: JSON.stringify({ action: "restore", backupId: point.id, confirmation, currentPassword }),
+      });
+      const payload = await response.json() as { operation?: BackupOperation; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Не удалось запустить восстановление");
+      if (response.status !== 202) throw new Error("Сервер не подтвердил запуск восстановления");
+      if (!payload.operation || payload.operation.type !== "restore") throw new Error("Сервер вернул некорректный статус восстановления");
+      if (payload.operation.status === "failed") {
+        clearBackupIntentKey(intentName, intentKey);
+        throw new Error("Предыдущая попытка восстановления завершилась с ошибкой и не была запущена повторно.");
+      }
+      if (payload.operation.status === "succeeded") {
+        clearBackupIntentKey(intentName, intentKey);
+        setCurrentPassword("");
+        notify("Это восстановление уже было завершено и не запускалось повторно.");
+        close();
+        window.location.reload();
+        return;
+      }
+      setCurrentPassword("");
+      notify("Восстановление запущено. Система временно перейдёт в режим обслуживания.");
+      close();
+      startMaintenance({ operation: payload.operation, intentName, intentKey });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось запустить восстановление");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <div className="backup-restore-layer">
+    <button className="backup-restore-scrim" type="button" onClick={close} disabled={busy} aria-label="Отменить восстановление" />
+    <form className="backup-restore-dialog" role="dialog" aria-modal="true" aria-labelledby="backup-restore-title" aria-describedby="backup-restore-warning" onSubmit={restore}>
+      <header><div><p>Критическое действие</p><h3 id="backup-restore-title">Восстановить систему</h3></div><button type="button" onClick={close} disabled={busy} aria-label="Закрыть">×</button></header>
+      <div className="backup-restore-warning" id="backup-restore-warning"><strong>Все данные после выбранной точки будут утрачены</strong><span>Перед заменой базы система создаст страховочную копию текущего состояния. После восстановления все активные сеансы и пароли сотрудников будут сброшены, чтобы старая копия не вернула отозванный доступ; собственник выдаст новые временные доступы.</span></div>
+      <div className="backup-restore-point"><span>{backupKindLabel(point.kind)}</span><div><strong>{formatBackupDate(point.createdAt)}</strong><small>{formatBackupSize(point.sizeBytes)} · проверка целостности пройдена</small></div></div>
+      <div className="backup-restore-fields">
+        <label><span>Текущий пароль собственника</span><small>Нужен для повторной проверки личности. Пароль нигде не сохраняется и не показывается.</small><input type="password" autoComplete="current-password" required value={currentPassword} onChange={(event) => setCurrentPassword(event.currentTarget.value)} disabled={busy} /></label>
+        <label><span>Подтверждение восстановления</span><small>Введите без кавычек точную фразу: <strong>ВОССТАНОВИТЬ</strong></small><input type="text" autoComplete="off" spellCheck={false} required value={confirmation} onChange={(event) => setConfirmation(event.currentTarget.value)} disabled={busy} placeholder="ВОССТАНОВИТЬ" /></label>
+      </div>
+      {error ? <p className="backup-restore-error" role="alert">{error}</p> : null}
+      <footer><button type="button" onClick={close} disabled={busy}>Отмена</button><button type="submit" disabled={busy || !confirmed || !currentPassword}>{busy ? "Запускаем восстановление…" : "Подтвердить и восстановить"}</button></footer>
+    </form>
+  </div>;
+}
+
+function RestoreMaintenance() {
+  return <div className="backup-maintenance" role="status" aria-live="assertive">
+    <span className="backup-maintenance-spinner" aria-hidden="true" />
+    <p>Режим обслуживания</p>
+    <h2>Восстанавливаем ArtHello OS</h2>
+    <span>Система проверяет базу и безопасно перезапускается. Страница обновится автоматически, когда всё будет готово.</span>
+  </div>;
+}
+
+const backupKindLabels: Record<BackupKind, string> = {
+  automatic: "Ежедневная",
+  monthly: "Ежемесячная",
+  manual: "Ручная",
+  pre_deploy: "Перед обновлением",
+  pre_restore: "Страховочная",
+};
+
+function backupKindLabel(kind: BackupKind) {
+  return backupKindLabels[kind] ?? "Резервная";
+}
+
+function formatBackupDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "Не указано";
+  return `${date.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })} МСК`;
+}
+
+function formatBackupSize(sizeBytes: number) {
+  if (!Number.isFinite(sizeBytes) || sizeBytes < 0) return "Размер не указан";
+  if (sizeBytes < 1024) return `${sizeBytes} Б`;
+  if (sizeBytes < 1024 ** 2) return `${(sizeBytes / 1024).toFixed(1)} КБ`;
+  if (sizeBytes < 1024 ** 3) return `${(sizeBytes / 1024 ** 2).toFixed(1)} МБ`;
+  return `${(sizeBytes / 1024 ** 3).toFixed(1)} ГБ`;
 }
 
 function TemporaryCredentialDialog({ credential, close, copy }: { credential: TemporaryCredential; close: () => void; copy: (value: string, label: string) => Promise<boolean> }) {
@@ -317,6 +642,41 @@ function readClientCookie(name: string) {
   const item = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(prefix));
   if (!item) return "";
   try { return decodeURIComponent(item.slice(prefix.length)); } catch { return ""; }
+}
+
+const backupIntentMemory = new Map<string, string>();
+
+function getOrCreateBackupIntentKey(name: string) {
+  const storageKey = `arthello-backup-intent:${name}`;
+  try {
+    const stored = window.sessionStorage.getItem(storageKey);
+    if (stored && /^[A-Za-z0-9._:-]{8,128}$/.test(stored)) {
+      backupIntentMemory.set(name, stored);
+      return stored;
+    }
+    const remembered = backupIntentMemory.get(name);
+    if (remembered) return remembered;
+    const created = crypto.randomUUID();
+    backupIntentMemory.set(name, created);
+    window.sessionStorage.setItem(storageKey, created);
+    return created;
+  } catch {
+    const remembered = backupIntentMemory.get(name);
+    if (remembered) return remembered;
+    const created = crypto.randomUUID();
+    backupIntentMemory.set(name, created);
+    return created;
+  }
+}
+
+function clearBackupIntentKey(name: string, expected: string) {
+  const storageKey = `arthello-backup-intent:${name}`;
+  if (backupIntentMemory.get(name) === expected) backupIntentMemory.delete(name);
+  try {
+    if (window.sessionStorage.getItem(storageKey) === expected) window.sessionStorage.removeItem(storageKey);
+  } catch {
+    // A blocked storage API does not change the server-side idempotency guarantee.
+  }
 }
 
 function AccessAssignmentForm({ user, data, busy, close, submit }: { user: SettingsUser; data: SettingsData; busy: string; close: () => void; submit: (event: FormEvent<HTMLFormElement>) => void }) {

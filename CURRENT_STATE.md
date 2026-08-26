@@ -1,5 +1,17 @@
 # ArtHello OS — Current State
 
+## Обновление RU-04 — 2026-08-26
+
+- Владелец утвердил `D-PROD-RU-008`: до ввода реальных данных production v52 должна защищать фактическую D1/SQLite ручными и автоматическими зашифрованными точками восстановления.
+- Зафиксирован policy: ежедневно в `03:00 Europe/Moscow`; daily retention 30 дней; monthly retention 12 месяцев; ручные копии сохраняются до явного удаления; доступ к созданию и восстановлению — только у канонического владельца.
+- Локальные копии должны быть зашифрованы AES-256-GCM и находиться на отдельной backup-volume. Ключ не должен храниться на data/backup volumes, в Git, UI или logs.
+- Restore данных и rollback приложения разделены: выбранная точка восстанавливает D1/SQLite, а версия кода откатывается отдельным deployment-механизмом по immutable application SHA.
+- Это пока реализованный в candidate-коде контракт, а не доказательство production-защиты. Синтетический изолированный restore покрыт тестом, но restore из фактической production-копии ещё не выполнен; фактические RPO/RTO не измерены, off-server storage не настроен.
+- Отдельная локальная backup-volume не защищает от потери всего VPS. До успешной off-server copy и изолированного restore RU-04 остаётся `BLOCKED`, а backup нельзя считать operational.
+- Owner restore сейчас является контролируемым point-in-time rollback при читаемой текущей базе: она нужна для safety backup и сохранения актуального доступа владельца. Offline break-glass restore при повреждённой/утраченной SQLite ещё не реализован и остаётся отдельным P0 DR-gate.
+- Статус локального хранилища пока подтверждает читаемость каталога, но не достаточный запас места. До реальных данных нужны pre-create capacity check, контролируемый lifecycle бессрочных manual-точек и подтверждённый размер tmpfs для полного plaintext snapshot.
+- Workflow сохраняет deploy-gate, raw rollback и recovery-артефакты при неполном cutover, а короткий inventory pause защищён detached watchdog. Но аварийная потеря runner/host после остановки production writer ещё требует внешнего commit-aware supervisor; до его fault-injection проверки такой cutover нельзя считать unattended-safe.
+
 ## Обновление A.4 — 2026-07-25
 
 - Создана отдельная PostgreSQL-совместимая sandbox-БД вне source checkout; перед `0014` сохранена отдельная копия, затем применены 15 миграций. Аудит видит 113 таблиц с учётом sandbox migration ledger. Production БД не читалась и не изменялась.
