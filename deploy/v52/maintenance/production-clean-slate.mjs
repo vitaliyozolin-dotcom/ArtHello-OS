@@ -36,26 +36,39 @@ const EXECUTE_CONFIRMATION = "CLEAN_SLATE_ARTHELLO_PRODUCTION";
 const ROLLBACK_CONFIRMATION = "ROLLBACK_ARTHELLO_PRODUCTION";
 const DEFAULT_ROOT = "/data";
 const DEFAULT_MAX_DEPTH = 12;
+const ARTHELLO_SYSTEM_ID = "SYS-ARTHELLO-OS";
 
 const PEOPLE = Object.freeze([
   Object.freeze({
     key: "owner",
     appUserId: "USR-OWNER",
+    authUserId: "AUTH-OWNER",
+    employeeId: null,
     name: "Виталий Озолин",
+    expectedRole: "Собственник",
+    expectedAdministrative: true,
     preserveAppUser: true,
     preserveEmployee: false,
   }),
   Object.freeze({
     key: "gutakovskaya",
-    appUserId: null,
+    appUserId: "EMP-M-92B042CF",
+    authUserId: "EMP-M-92B042CF",
+    employeeId: "EMP-M-92B042CF",
     name: "Наталья Гутаковская",
+    expectedRole: "Директор",
+    expectedAdministrative: null,
     preserveAppUser: true,
     preserveEmployee: true,
   }),
   Object.freeze({
     key: "dmitrieva",
     appUserId: null,
+    authUserId: null,
+    employeeId: "EMP-M-95A08A4C",
     name: "Наталья Дмитриева",
+    expectedRole: null,
+    expectedAdministrative: null,
     preserveAppUser: false,
     preserveEmployee: true,
   }),
@@ -74,6 +87,8 @@ const REQUIRED_APP_TABLES = Object.freeze([
   "entities",
   "hr_employees",
   "hr_accesses",
+  "production_auth_credentials",
+  "production_auth_sessions",
 ]);
 
 const PRESERVED_CONFIG_TABLES = new Set([
@@ -149,6 +164,10 @@ function normalizeName(value) {
     .replace(/\s+/gu, " ")
     .replace(/ё/gu, "е")
     .toLocaleLowerCase("ru-RU");
+}
+
+function normalizeLogin(value) {
+  return String(value ?? "").trim().toLocaleLowerCase("ru-RU");
 }
 
 function quoteIdentifier(value) {
@@ -324,33 +343,106 @@ function countsByTable(db) {
 }
 
 function resolveAllowlist(db) {
-  requireColumns(db, "app_users", ["id", "display_name", "role", "status"]);
+  requireColumns(db, "app_users", [
+    "id",
+    "contact",
+    "display_name",
+    "role",
+    "status",
+    "is_administrative",
+    "access_version",
+  ]);
   const appUsers = db
-    .prepare("SELECT id, display_name, role, status FROM app_users ORDER BY id")
+    .prepare(`SELECT id, contact, display_name, role, status,
+      is_administrative, access_version FROM app_users ORDER BY id`)
     .all()
     .map((row) => ({
       id: String(row.id),
+      contact: String(row.contact),
       displayName: String(row.display_name),
       role: String(row.role),
       status: String(row.status),
+      isAdministrative: Number(row.is_administrative),
+      accessVersion: Number(row.access_version),
     }));
 
   const selectedUsers = [];
   for (const person of PEOPLE.filter((candidate) => candidate.preserveAppUser)) {
-    const normalized = normalizeName(person.name);
-    const matches = appUsers.filter((row) => normalizeName(row.displayName) === normalized);
-    if (matches.length !== 1) {
-      throw new Error(`Allowlisted person ${person.name} must match exactly one app_users row; found ${matches.length}`);
+    if (!person.appUserId) throw new Error(`Allowlisted person ${person.name} has no pinned app_users ID`);
+    const idMatches = appUsers.filter((row) => row.id === person.appUserId);
+    if (idMatches.length !== 1) {
+      throw new Error(`Allowlisted app_users.id=${person.appUserId} must exist exactly once`);
     }
-    const match = matches[0];
-    if (person.appUserId && match.id !== person.appUserId) {
-      throw new Error(`Allowlisted owner must have app_users.id=${person.appUserId}`);
+    const match = idMatches[0];
+    if (normalizeName(match.displayName) !== normalizeName(person.name)) {
+      throw new Error(`Pinned app user ${person.appUserId} does not have the expected display name`);
+    }
+    const nameMatches = appUsers.filter(
+      (row) => normalizeName(row.displayName) === normalizeName(person.name),
+    );
+    if (nameMatches.length !== 1 || nameMatches[0].id !== person.appUserId) {
+      throw new Error(`Allowlisted person ${person.name} is ambiguous in app_users`);
+    }
+    if (match.role !== person.expectedRole) {
+      throw new Error(`Allowlisted app user ${person.appUserId} has an unexpected role`);
+    }
+    if (match.status !== "Активен") {
+      throw new Error(`Allowlisted app user ${person.appUserId} is not active`);
+    }
+    if (
+      person.expectedAdministrative !== null
+      && Boolean(match.isAdministrative) !== person.expectedAdministrative
+    ) {
+      throw new Error(`Allowlisted app user ${person.appUserId} has an unexpected administrative scope`);
     }
     selectedUsers.push({ ...person, ...match });
   }
 
   const userIds = new Set(selectedUsers.map((row) => row.id));
   if (userIds.size !== EXPECTED_APP_USER_COUNT) throw new Error("Allowlist resolved to duplicate app_users IDs");
+
+  requireColumns(db, "app_systems", ["id", "status"]);
+  const artHelloSystems = db
+    .prepare("SELECT id, status FROM app_systems WHERE id=?")
+    .all(ARTHELLO_SYSTEM_ID);
+  if (artHelloSystems.length !== 1 || String(artHelloSystems[0].status) !== "Активна") {
+    throw new Error(`Required active application system ${ARTHELLO_SYSTEM_ID} is missing`);
+  }
+
+  requireColumns(db, "user_system_access", [
+    "user_id",
+    "system_id",
+    "role",
+    "status",
+    "access_version",
+  ]);
+  const accessRows = db
+    .prepare(`SELECT user_id, system_id, role, status, access_version
+      FROM user_system_access WHERE system_id=? ORDER BY user_id`)
+    .all(ARTHELLO_SYSTEM_ID)
+    .map((row) => ({
+      userId: String(row.user_id),
+      systemId: String(row.system_id),
+      role: String(row.role),
+      status: String(row.status),
+      accessVersion: Number(row.access_version),
+    }));
+  const artHelloGrants = [];
+  for (const user of selectedUsers) {
+    const matches = accessRows.filter((row) => row.userId === user.id);
+    if (matches.length !== 1) {
+      throw new Error(`Allowlisted app user ${user.id} must have exactly one ArtHello OS grant`);
+    }
+    const grant = matches[0];
+    if (
+      grant.status !== "Активен"
+      || grant.role !== user.role
+      || grant.accessVersion !== user.accessVersion
+    ) {
+      throw new Error(`Allowlisted app user ${user.id} has an inconsistent ArtHello OS grant`);
+    }
+    artHelloGrants.push(grant);
+  }
 
   requireColumns(db, "entities", ["id", "entity_type", "display_name"]);
   const entityRows = db
@@ -365,18 +457,28 @@ function resolveAllowlist(db) {
   const entityIds = new Set();
   const selectedEntities = [];
   for (const person of PEOPLE.filter((candidate) => candidate.preserveEmployee)) {
-    const matches = entityRows.filter(
+    if (!person.employeeId) throw new Error(`Allowlisted person ${person.name} has no pinned employee ID`);
+    const idMatches = entityRows.filter((row) => row.id === person.employeeId);
+    if (idMatches.length !== 1) {
+      throw new Error(`Allowlisted employee entity ${person.employeeId} must exist exactly once`);
+    }
+    const match = idMatches[0];
+    if (
+      normalizeName(match.displayName) !== normalizeName(person.name)
+      || !employeeTypes.has(normalizeName(match.entityType))
+    ) {
+      throw new Error(`Pinned employee entity ${person.employeeId} does not match the expected person`);
+    }
+    const nameMatches = entityRows.filter(
       (row) =>
-        normalizeName(row.displayName) === normalizeName(person.name) &&
-        employeeTypes.has(normalizeName(row.entityType)),
+        normalizeName(row.displayName) === normalizeName(person.name)
+        && employeeTypes.has(normalizeName(row.entityType)),
     );
-    if (matches.length > 1) {
-      throw new Error(`Allowlisted person ${person.name} matches more than one employee entity`);
+    if (nameMatches.length !== 1 || nameMatches[0].id !== person.employeeId) {
+      throw new Error(`Allowlisted person ${person.name} is ambiguous in employee entities`);
     }
-    if (matches.length === 1) {
-      entityIds.add(matches[0].id);
-      selectedEntities.push(matches[0]);
-    }
+    entityIds.add(match.id);
+    selectedEntities.push(match);
   }
   if (entityIds.size !== EXPECTED_EMPLOYEE_COUNT) {
     throw new Error(`Allowlist must resolve to exactly ${EXPECTED_EMPLOYEE_COUNT} employee entities`);
@@ -384,41 +486,66 @@ function resolveAllowlist(db) {
 
   requireColumns(db, "hr_employees", ["id"]);
   const employeeRows = db.prepare("SELECT id FROM hr_employees ORDER BY id").all();
-  const employeeIds = new Set(employeeRows.map((row) => String(row.id)).filter((id) => entityIds.has(id)));
+  const allEmployeeIds = new Set(employeeRows.map((row) => String(row.id)));
+  const employeeIds = new Set();
+  for (const person of PEOPLE.filter((candidate) => candidate.preserveEmployee)) {
+    if (!person.employeeId || !allEmployeeIds.has(person.employeeId)) {
+      throw new Error(`Pinned hr_employees row for ${person.name} is missing`);
+    }
+    employeeIds.add(person.employeeId);
+  }
   if (employeeIds.size !== EXPECTED_EMPLOYEE_COUNT) {
     throw new Error(`Allowlist must resolve to exactly ${EXPECTED_EMPLOYEE_COUNT} hr_employees rows`);
   }
 
-  const tables = new Set(tableNames(db));
+  requireColumns(db, "production_auth_credentials", ["user_id", "login", "display_name"]);
+  const credentials = db
+    .prepare("SELECT user_id, login, display_name FROM production_auth_credentials ORDER BY user_id")
+    .all()
+    .map((row) => ({
+      userId: String(row.user_id),
+      login: String(row.login),
+      displayName: String(row.display_name),
+    }));
   const credentialUserIds = new Set();
   const credentialCountsByPerson = Object.fromEntries(PEOPLE.map((person) => [person.key, 0]));
-  if (tables.has("production_auth_credentials")) {
-    requireColumns(db, "production_auth_credentials", ["user_id", "display_name"]);
-    const credentials = db
-      .prepare("SELECT user_id, display_name FROM production_auth_credentials ORDER BY user_id")
-      .all();
-    for (const credential of credentials) {
-      const credentialName = normalizeName(credential.display_name);
-      const credentialUserId = String(credential.user_id);
-      const person = PEOPLE.find(
-        (candidate) => candidate.preserveAppUser && normalizeName(candidate.name) === credentialName,
-      );
-      if (
-        !person &&
-        (userIds.has(credentialUserId) || credentialUserId === "AUTH-OWNER")
-      ) {
-        throw new Error("An allowlisted authentication user has a non-allowlisted display name");
-      }
-      if (!person) continue;
-      if (person.key === "owner" && !["USR-OWNER", "AUTH-OWNER"].includes(credentialUserId)) {
-        throw new Error("Owner authentication credential uses an unexpected user_id");
-      }
-      credentialCountsByPerson[person.key] += 1;
-      if (credentialCountsByPerson[person.key] > 1) {
-        throw new Error(`Allowlisted person ${person.name} has duplicate authentication credentials`);
-      }
-      credentialUserIds.add(credentialUserId);
+  for (const person of PEOPLE.filter((candidate) => candidate.preserveAppUser)) {
+    if (!person.authUserId || !person.appUserId) {
+      throw new Error(`Allowlisted person ${person.name} has no pinned authentication ID`);
     }
+    const matches = credentials.filter((credential) => credential.userId === person.authUserId);
+    if (matches.length !== 1) {
+      throw new Error(`Allowlisted authentication credential ${person.authUserId} must exist exactly once`);
+    }
+    const credential = matches[0];
+    if (normalizeName(credential.displayName) !== normalizeName(person.name)) {
+      throw new Error(`Pinned authentication credential ${person.authUserId} has an unexpected display name`);
+    }
+    const sameName = credentials.filter(
+      (candidate) => normalizeName(candidate.displayName) === normalizeName(person.name),
+    );
+    if (sameName.length !== 1 || sameName[0].userId !== person.authUserId) {
+      throw new Error(`Allowlisted person ${person.name} is ambiguous in authentication credentials`);
+    }
+    const appUser = selectedUsers.find((candidate) => candidate.id === person.appUserId);
+    if (!appUser) throw new Error(`Pinned app user ${person.appUserId} was not resolved`);
+    if (normalizeLogin(credential.login) === "") {
+      throw new Error(`Authentication login for ${person.authUserId} is empty`);
+    }
+    if (
+      person.key !== "owner"
+      && (
+        normalizeLogin(appUser.contact) === ""
+        || normalizeLogin(credential.login) !== normalizeLogin(appUser.contact)
+      )
+    ) {
+      throw new Error(`Authentication login for ${person.appUserId} does not match the app-user contact`);
+    }
+    credentialCountsByPerson[person.key] = 1;
+    credentialUserIds.add(person.authUserId);
+  }
+  if (credentialUserIds.size !== EXPECTED_APP_USER_COUNT) {
+    throw new Error(`Allowlist must resolve to exactly ${EXPECTED_APP_USER_COUNT} authentication credentials`);
   }
 
   return {
@@ -427,6 +554,7 @@ function resolveAllowlist(db) {
     entities: selectedEntities,
     entityIds,
     employeeIds,
+    artHelloGrants,
     credentialUserIds,
     credentialCountsByPerson,
   };
@@ -538,6 +666,11 @@ function verifyCleanState(db, dbPath, includeIntegrity = true) {
   }
   if (counts.hr_employees !== EXPECTED_EMPLOYEE_COUNT) {
     throw new Error(`Clean-state invariant failed: hr_employees must contain exactly ${EXPECTED_EMPLOYEE_COUNT} rows`);
+  }
+  if (counts.production_auth_credentials !== EXPECTED_APP_USER_COUNT) {
+    throw new Error(
+      `Clean-state invariant failed: production_auth_credentials must contain exactly ${EXPECTED_APP_USER_COUNT} rows`,
+    );
   }
 
   const runtimeRows = db
@@ -703,7 +836,13 @@ async function createBackup(db, dbPath, rootPath, prefix = "arthello-pre-clean-s
     backupPath,
     sha256,
     integrity: "ok",
-    allowlist: PEOPLE.map((person) => ({ key: person.key, appUserId: person.appUserId, name: person.name })),
+    allowlist: PEOPLE.map((person) => ({
+      key: person.key,
+      appUserId: person.appUserId,
+      authUserId: person.authUserId,
+      employeeId: person.employeeId,
+      name: person.name,
+    })),
   };
   const manifestPath = join(backupDirectory, `${prefix}-${timestamp}.manifest.json`);
   const manifestBody = `${JSON.stringify(manifest, null, 2)}\n`;
