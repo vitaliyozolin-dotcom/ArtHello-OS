@@ -7,6 +7,7 @@ import { getRequestUser } from "../../../lib/request-user";
 const salesRoles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "SALES"]);
 const touchpointTypes = new Set(["Звонок", "Переписка", "Консультация", "Посещение"]);
 const rejectionReasons = new Set(["Стоимость", "Не подошла программа", "Локация", "Срок", "Нет ответа", "Выбран конкурент", "Другое"]);
+const manualLeadSources = new Set(["Ручной ввод", "Сайт", "Телефон", "WhatsApp", "Telegram", "VK", "Яндекс", "Email", "Рекомендация", "Другое"]);
 
 export async function POST(request: Request) {
   const actor = getRequestUser(request);
@@ -17,6 +18,7 @@ export async function POST(request: Request) {
     await ensureCoreTables();
     const body = (await request.json()) as Record<string, unknown>;
     const action = clean(body.action, 50);
+    if (action === "createLead") return createLead(actor, body);
     if (action === "advanceStage") return advanceStage(actor, body);
     if (action === "logTouchpoint") return logTouchpoint(actor, body);
     if (action === "recordRejection") return recordRejection(actor, body);
@@ -24,6 +26,109 @@ export async function POST(request: Request) {
     return Response.json({ error: "Неизвестное действие продаж" }, { status: 400 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Действие не выполнено" }, { status: 500 });
+  }
+}
+
+async function createLead(actor: string, body: Record<string, unknown>) {
+  const name = clean(body.name, 160);
+  const phone = clean(body.phone, 60);
+  const email = clean(body.email, 160).toLocaleLowerCase("ru");
+  const requestedSource = clean(body.source, 60);
+  const source = manualLeadSources.has(requestedSource) ? requestedSource : "Ручной ввод";
+  const interest = clean(body.interest, 240);
+  const branchId = clean(body.branchId, 80);
+  const comment = clean(body.comment, 800);
+  const utmSource = clean(body.utmSource, 100);
+  const utmMedium = clean(body.utmMedium, 100);
+  const utmCampaign = clean(body.utmCampaign, 120);
+  const consent = body.consent === true;
+
+  if (name.length < 2) return Response.json({ error: "Укажите имя потенциального клиента" }, { status: 400 });
+  if (!phone && !email) return Response.json({ error: "Укажите телефон или email" }, { status: 400 });
+  if (email && !/^\S+@\S+\.\S+$/.test(email)) return Response.json({ error: "Проверьте email" }, { status: 400 });
+  if (!consent) return Response.json({ error: "Нужно подтвердить согласие на обработку контактных данных" }, { status: 400 });
+
+  const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase();
+  const leadId = `LEAD-M-${suffix}`;
+  const contactId = `PROSPECT-M-${suffix}`;
+  const touchpointId = `TP-${leadId}-01`;
+  const now = new Date().toISOString();
+  const tags = ["ручной ввод", interest || source].filter(Boolean).slice(0, 5);
+  const db = getDb();
+
+  try {
+    await db.insert(entities).values({
+      id: contactId,
+      entityType: "Потенциальный клиент",
+      displayName: name,
+      status: "На квалификации",
+      sourceSystem: "MANUAL_SALES",
+      sourceRecordId: leadId,
+      dataQuality: "Ручной ввод",
+      scope: branchId || "Продажи",
+      metadata: JSON.stringify({ phone, email, interest, branchId, comment, consentAt: now }),
+      createdBy: actor,
+      updatedAt: now,
+    });
+    await db.insert(salesLeads).values({
+      id: leadId,
+      firstClickAt: now,
+      source,
+      utmSource,
+      utmMedium,
+      utmCampaign,
+      utmContent: "",
+      campaignId: "",
+      creativeId: "",
+      offerId: interest,
+      formId: "MANUAL_UI",
+      managerEntityId: "",
+      stage: "Заявка",
+      status: "Активен",
+      familyEntityId: contactId,
+      childEntityId: "",
+      contractId: "",
+      serviceEntityId: "",
+      rejectionReason: "",
+      tags: JSON.stringify(tags),
+      dataQuality: "Ручной ввод · ожидает квалификации",
+      updatedAt: now,
+    });
+    await db.insert(salesTouchpoints).values({
+      id: touchpointId,
+      leadId,
+      touchpointType: "Заявка",
+      occurredAt: now,
+      channel: source,
+      direction: "Входящий",
+      summary: [name, phone, email, interest].filter(Boolean).join(" · "),
+      outcome: comment || "Лид создан вручную",
+      sourceRef: "MANUAL_UI",
+      createdBy: actor,
+    });
+    await db.insert(salesStageEvents).values({
+      leadId,
+      fromStage: "Первый клик",
+      toStage: "Заявка",
+      outcome: "Создано",
+      reason: `Ручной ввод · ${source}`,
+      actor,
+      occurredAt: now,
+    });
+    await db.insert(auditEvents).values({
+      actor,
+      action: "sales.lead_created",
+      entityType: "sales_lead",
+      entityId: leadId,
+      payload: JSON.stringify({ contactId, source, branchId, hasPhone: Boolean(phone), hasEmail: Boolean(email), consent: true }),
+    });
+    return Response.json({ lead: { id: leadId, contactId, name, stage: "Заявка", source } }, { status: 201 });
+  } catch (error) {
+    await db.delete(salesTouchpoints).where(eq(salesTouchpoints.leadId, leadId)).catch(() => undefined);
+    await db.delete(salesStageEvents).where(eq(salesStageEvents.leadId, leadId)).catch(() => undefined);
+    await db.delete(salesLeads).where(eq(salesLeads.id, leadId)).catch(() => undefined);
+    await db.delete(entities).where(eq(entities.id, contactId)).catch(() => undefined);
+    throw error;
   }
 }
 
