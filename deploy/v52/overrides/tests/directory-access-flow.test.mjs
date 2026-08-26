@@ -43,6 +43,12 @@ test("temporary staff credentials are disclosed once without replacing access as
   assert.match(workspace, /temporaryPassword/);
   assert.match(workspace, /После закрытия пароль больше не показывается/);
   assert.match(workspace, /Скопировать всё/);
+  assert.match(workspace, /copyTextSynchronously\(value\) \|\| await copyTextWithClipboardApi\(value\)/);
+  assert.match(workspace, /setSelectionRange\(0, value\.length\)/);
+  assert.match(workspace, /document\.execCommand\("copy"\)/);
+  assert.match(workspace, /Скопировано ✓/);
+  assert.match(workspace, /aria-live="polite"/);
+  assert.equal(workspace.match(/navigator\.clipboard\.writeText/g)?.length, 1);
   assert.match(workspace, /action: "inviteUser"/);
   assert.match(workspace, /Подтвердить и выдать доступ/);
   assert.match(styles, /\.temporary-credential-layer\{/);
