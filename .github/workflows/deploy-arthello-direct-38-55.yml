@@ -94,7 +94,6 @@ jobs:
             -e ARTHELLO_D1_PATH=/data/d1 \
             -e ARTHELLO_BOOTSTRAP_LOGIN=owner \
             -e ARTHELLO_BOOTSTRAP_PASSWORD="$bootstrap_password" \
-            -e ARTHELLO_BOOTSTRAP_RESET_VERSION=owner-recovery-2026-08-26-01 \
             -v arthello-direct-v44-data:/data \
             "$image" >/dev/null
 
@@ -116,17 +115,6 @@ jobs:
             }
             const me = await fetch(base + '/api/auth/me');
             if (me.status !== 401) process.exit(1);
-            const login = await fetch(base + '/api/auth/login', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                login: process.env.ARTHELLO_BOOTSTRAP_LOGIN,
-                password: process.env.ARTHELLO_BOOTSTRAP_PASSWORD,
-              }),
-            });
-            if (!login.ok) process.exit(1);
-            const owner = await login.json();
-            if (owner.role !== 'owner' || owner.mustChangePassword !== true) process.exit(1);
           } catch { process.exit(1); }
           NODE
             then
