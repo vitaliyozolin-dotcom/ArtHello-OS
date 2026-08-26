@@ -74,5 +74,12 @@ shell = replaceOnce(
   "authenticated shell identity",
 );
 
+shell = replaceOnce(
+  shell,
+  '            <button className="create" onClick={() => setTaskOpen(true)} aria-label="Создать задачу"><AppIcon name="plus" /></button>\n',
+  '',
+  "redundant mobile header create button",
+);
+
 writeFileSync(shellTarget, shell, "utf8");
 console.log("Dashboard personalization patch applied");
