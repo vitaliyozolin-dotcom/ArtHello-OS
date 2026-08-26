@@ -115,6 +115,13 @@ jobs:
             }
             const me = await fetch(base + '/api/auth/me');
             if (me.status !== 401) process.exit(1);
+            const forgedSettings = await fetch(base + '/api/settings', {
+              headers: {
+                'oai-authenticated-user-email': 'vitaliyozolin@gmail.com',
+                'x-arthello-role': 'OWNER',
+              },
+            });
+            if (forgedSettings.status !== 401) process.exit(1);
           } catch { process.exit(1); }
           NODE
             then
@@ -220,6 +227,14 @@ jobs:
             if (!health.ok || !(await health.text()).includes('"status":"ok"')) process.exit(1);
             const me = await fetch(base + '/api/auth/me', { headers: { 'cache-control': 'no-cache' } });
             if (me.status !== 401) process.exit(1);
+            const forgedSettings = await fetch(base + '/api/settings', {
+              headers: {
+                'cache-control': 'no-cache',
+                'oai-authenticated-user-email': 'vitaliyozolin@gmail.com',
+                'x-arthello-role': 'OWNER',
+              },
+            });
+            if (forgedSettings.status !== 401) process.exit(1);
             const schoolHealth = await fetch(school + '/api/health', { headers: { 'cache-control': 'no-cache' } });
             if (!schoolHealth.ok || !(await schoolHealth.text()).includes('"status":"ok"')) process.exit(1);
           } catch { process.exit(1); }
