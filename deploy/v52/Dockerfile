@@ -6,7 +6,6 @@ WORKDIR /app
 COPY deploy/v52/arthello-sites-v52-source.tar.gz.b64.part-* /tmp/arthello-source-parts/
 COPY deploy/v44/overrides/ /tmp/arthello-overrides/
 COPY deploy/v52/overrides/ /tmp/arthello-v52-overrides/
-COPY deploy/v52/patches/empty-data-mode.patch /tmp/empty-data-mode.patch
 RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* \
       | base64 -d > /tmp/arthello-source.tar.gz \
     && echo "e76fb44dca272825fda4486e7584290b14969c1fd054a8c955eae738899b7c12  /tmp/arthello-source.tar.gz" | sha256sum -c - \
@@ -15,8 +14,8 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* \
     && rm -rf /tmp/arthello-source-parts \
     && cp -a /tmp/arthello-overrides/. /app/ \
     && cp -a /tmp/arthello-v52-overrides/. /app/ \
-    && patch --batch --forward -p1 < /tmp/empty-data-mode.patch \
-    && rm -rf /tmp/arthello-overrides /tmp/arthello-v52-overrides /tmp/empty-data-mode.patch \
+    && echo "9e6ea6da02b531ab2bbaed4aceece5f5e7c9a9321709612adc9e12ae0d6554d0  /app/db/index.ts" | sha256sum -c - \
+    && rm -rf /tmp/arthello-overrides /tmp/arthello-v52-overrides \
     && ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
     && grep -q 'invoke_user_worker_ahead_of_assets: false' /app/production/runtime-server.mjs \
     && grep -q 'has_user_worker: true' /app/production/runtime-server.mjs \

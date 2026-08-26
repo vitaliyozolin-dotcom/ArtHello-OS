@@ -31,7 +31,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import process from "node:process";
 import { DatabaseSync, backup as sqliteBackup } from "node:sqlite";
 
-const SCRIPT_VERSION = "arthello-production-clean-slate-v1";
+const SCRIPT_VERSION = "arthello-production-clean-slate-v2";
 const EXECUTE_CONFIRMATION = "CLEAN_SLATE_ARTHELLO_PRODUCTION";
 const ROLLBACK_CONFIRMATION = "ROLLBACK_ARTHELLO_PRODUCTION";
 const DEFAULT_ROOT = "/data";
@@ -63,13 +63,13 @@ const PEOPLE = Object.freeze([
   }),
   Object.freeze({
     key: "dmitrieva",
-    appUserId: null,
-    authUserId: null,
+    appUserId: "EMP-M-95A08A4C",
+    authUserId: "EMP-M-95A08A4C",
     employeeId: "EMP-M-95A08A4C",
     name: "Наталья Дмитриева",
-    expectedRole: null,
+    expectedRole: "Завуч",
     expectedAdministrative: null,
-    preserveAppUser: false,
+    preserveAppUser: true,
     preserveEmployee: true,
   }),
 ]);
