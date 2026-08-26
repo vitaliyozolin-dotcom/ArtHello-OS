@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FALLBACK_PROFILE, roleFor, type HelpAction, type HelpContext, type HelpField, type HelpQuestion, type HelpUser } from "./contextualHelpCatalog";
-import { clamp, isInsideHelp, rectFor, scanHelpContext } from "./contextualHelpDom";
+import { clamp, isInsideHelp, labelRectFor, rectFor, scanHelpContext } from "./contextualHelpDom";
 import "./ContextualHelpSystem.css";
 
 const EMPTY_CONTEXT: HelpContext = {
@@ -226,25 +226,51 @@ export function ContextualHelpSystem() {
     return null;
   }, [context, createAction, disabledActions, problemFields, question, saveAction]);
 
+  const fieldMarkers = useMemo(() => {
+    if (!hints || typeof window === "undefined") return [];
+    const seen = new Set<string>();
+    const size = 16;
+    const gap = 5;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    return context.fields.flatMap((field) => {
+      const anchor = labelRectFor(field.element);
+      if (!anchor || anchor.bottom <= 0 || anchor.right <= 0 || anchor.top >= viewportHeight || anchor.left >= viewportWidth) return [];
+
+      const key = `${anchor.top}:${anchor.left}:${anchor.width}:${anchor.height}`;
+      if (seen.has(key)) return [];
+      seen.add(key);
+
+      const rightSide = anchor.right + gap;
+      const leftSide = anchor.left - gap - size;
+      const left = rightSide + size <= viewportWidth - 6
+        ? rightSide
+        : leftSide >= 6
+          ? leftSide
+          : clamp(anchor.right - size, 6, Math.max(6, viewportWidth - size - 6));
+      const top = clamp(anchor.top + (anchor.height - size) / 2, 6, Math.max(6, viewportHeight - size - 6));
+
+      return [{ field, left, top }];
+    });
+  }, [context.fields, hints]);
+
   const selectedTarget = target(selected);
   const spotlight = selectedTarget ? rectFor(selectedTarget.element) : null;
   const currentTour = tourTargets[tour];
 
   return (
     <div data-ah-help-root="true">
-      {hints ? context.fields
-        .filter((field) => field.rect.bottom > 0 && field.rect.right > 0 && field.rect.top < innerHeight && field.rect.left < innerWidth)
-        .map((field) => {
-          const width = clamp(field.rect.width, 168, 310);
-          const left = clamp(field.rect.left, 8, Math.max(8, innerWidth - width - 8));
-          const top = field.rect.top > 29 ? field.rect.top - 26 : field.rect.bottom + 4;
-          return (
-            <div className="ah-field" key={field.id} style={{ left, top, width }} title={`${field.label}: ${field.hint}`}>
-              <span>{field.hint}</span>
-              <button type="button" aria-label={`Помощь по полю «${field.label}»`} onClick={() => fieldHelp(field)}>?</button>
-            </div>
-          );
-        }) : null}
+      {fieldMarkers.map(({ field, left, top }) => (
+        <button
+          className="ah-field-icon"
+          key={field.id}
+          type="button"
+          style={{ left, top }}
+          aria-label={`Помощь по полю «${field.label}»`}
+          onClick={() => fieldHelp(field)}
+        >?</button>
+      ))}
 
       {spotlight ? <div className="ah-spot" aria-hidden="true" style={{ top: spotlight.top - 5, left: spotlight.left - 5, width: spotlight.width + 10, height: spotlight.height + 10 }} /> : null}
 
@@ -272,7 +298,7 @@ export function ContextualHelpSystem() {
               <h3>Вопросы по этой странице</h3>
               <label className="ah-toggle">
                 <input type="checkbox" checked={hints} onChange={(event: { currentTarget: HTMLInputElement }) => setHintPreference(event.currentTarget.checked)} />
-                Подсказки над полями
+                Значки помощи у названий
               </label>
             </div>
             <div className="ah-list">
