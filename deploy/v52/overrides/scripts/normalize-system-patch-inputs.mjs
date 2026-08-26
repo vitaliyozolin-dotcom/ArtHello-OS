@@ -25,6 +25,12 @@ operational = operational.replace(
   strictFoodWording,
   'source = source.replace("по тестовым складам", "по рабочим складам");',
 );
+
+const impureRequestDate = ' defaultValue={new Date(Date.now()+21*86400000).toISOString().slice(0,10)}';
+if (!operational.includes(impureRequestDate)) {
+  throw new Error("Patch input normalization failed for procurement request date");
+}
+operational = operational.replace(impureRequestDate, "");
 writeFileSync(operationalPath, operational, "utf8");
 
 console.log("System patch inputs normalized");
