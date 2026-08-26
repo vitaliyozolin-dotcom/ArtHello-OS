@@ -79,7 +79,7 @@ patch("app/api/legal-actions/route.ts", (input) => {
 
 patch("app/components/LegalWorkspace.tsx", (input) => {
   let source = input;
-  source = replaceText(source, 'import {useCallback,useEffect,useState}from "react";', 'import {FormEvent,useCallback,useEffect,useState}from "react";', "legal form event import");
+  source = replaceText(source, 'import {useCallback,useEffect,useState}from"react";', 'import {FormEvent,useCallback,useEffect,useState}from"react";', "legal form event import");
   source = replaceText(
     source,
     'export function LegalWorkspace({role,notify,onTasksChanged,focusId}:{role:string;notify:(v:string)=>void;onTasksChanged:()=>void;focusId?:string})',
