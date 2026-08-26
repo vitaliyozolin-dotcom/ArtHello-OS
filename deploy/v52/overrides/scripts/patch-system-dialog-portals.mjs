@@ -49,8 +49,8 @@ patch("app/components/LegalWorkspace.tsx", (input) => {
   let source = input;
   source = replaceText(
     source,
-    'import {FormEvent,useCallback,useEffect,useState}from "react";',
-    'import {FormEvent,useCallback,useEffect,useState}from "react";import{createPortal}from"react-dom";',
+    'import {FormEvent,useCallback,useEffect,useState}from"react";',
+    'import {FormEvent,useCallback,useEffect,useState}from"react";import{createPortal}from"react-dom";',
     "legal portal import",
   );
   source = replaceText(
