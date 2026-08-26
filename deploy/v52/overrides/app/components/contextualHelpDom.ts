@@ -208,7 +208,7 @@ export function scanHelpContext(idFor: (element: HTMLElement, prefix: string) =>
     title,
     section,
     profile: profile.id,
-    fields: fields.map((field) => [field.id, field.label, field.required, field.missing, field.invalid, field.disabled, field.rect, labelRectFor(field.element)]),
+    fields: fields.map((field) => [field.id, field.label, field.required, field.missing, field.invalid, field.disabled, field.rect]),
     actions: actions.map((action) => [action.id, action.label, action.disabled, action.rect]),
     errors,
   });
