@@ -17,12 +17,13 @@ export default function ProductionAuthGate({ children }: { children: ReactNode }
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    void fetch("/api/auth/me", { cache: "no-store" })
+    void fetchWithTimeout("/api/auth/me", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) return null;
         return (await response.json()) as AuthUser;
       })
       .then(setUser)
+      .catch(() => setUser(null))
       .finally(() => setLoading(false));
   }, []);
 
@@ -32,18 +33,23 @@ export default function ProductionAuthGate({ children }: { children: ReactNode }
     setError("");
     setNotice("");
     const data = new FormData(event.currentTarget);
-    const response = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ login: data.get("login"), password: data.get("password") }),
-    });
-    const body = await response.json() as AuthUser & { error?: string };
-    setBusy(false);
-    if (!response.ok) {
-      setError(body.error || "Не удалось войти");
-      return;
+    try {
+      const response = await fetchWithTimeout("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ login: data.get("login"), password: data.get("password") }),
+      });
+      const body = await response.json() as AuthUser & { error?: string };
+      if (!response.ok) {
+        setError(body.error || "Не удалось войти");
+        return;
+      }
+      setUser(body);
+    } catch {
+      setError("Сервер не ответил за 15 секунд. Проверьте соединение и повторите один раз.");
+    } finally {
+      setBusy(false);
     }
-    setUser(body);
   }
 
   async function changePassword(event: FormEvent<HTMLFormElement>) {
@@ -58,22 +64,27 @@ export default function ProductionAuthGate({ children }: { children: ReactNode }
       setError("Новые пароли не совпадают");
       return;
     }
-    const response = await fetch("/api/auth/password", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-csrf-token": readCookie("__Host-arthello_csrf"),
-      },
-      body: JSON.stringify({ currentPassword: data.get("currentPassword"), newPassword: next }),
-    });
-    const body = await response.json() as { error?: string };
-    setBusy(false);
-    if (!response.ok) {
-      setError(body.error || "Не удалось изменить пароль");
-      return;
+    try {
+      const response = await fetchWithTimeout("/api/auth/password", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-csrf-token": readCookie("__Host-arthello_csrf"),
+        },
+        body: JSON.stringify({ currentPassword: data.get("currentPassword"), newPassword: next }),
+      });
+      const body = await response.json() as { error?: string };
+      if (!response.ok) {
+        setError(body.error || "Не удалось изменить пароль");
+        return;
+      }
+      setUser(null);
+      setNotice("Пароль сохранён. Войдите ещё раз с новым паролем.");
+    } catch {
+      setError("Сервер не ответил за 15 секунд. Повторите сохранение один раз.");
+    } finally {
+      setBusy(false);
     }
-    setUser(null);
-    setNotice("Пароль сохранён. Войдите ещё раз с новым паролем.");
   }
 
   if (loading) return <AuthScreen title="Проверяем защищённый вход"><p>Загрузка…</p></AuthScreen>;
@@ -128,4 +139,14 @@ function readCookie(name: string) {
   const item = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(prefix));
   if (!item) return "";
   try { return decodeURIComponent(item.slice(prefix.length)); } catch { return ""; }
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 15_000);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
