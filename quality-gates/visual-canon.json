@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "source_of_truth": "ArtHello Design Memory",
+  "viewports": [
+    {"id": "desktop", "width": 1440, "height": 900, "deviceScaleFactor": 1},
+    {"id": "mobile", "width": 390, "height": 844, "deviceScaleFactor": 1}
+  ],
+  "rules": {
+    "root_must_render": true,
+    "max_horizontal_overflow_px": 2,
+    "interactive_viewport_tolerance_px": 2,
+    "dialog_center_tolerance_px": 40
+  },
+  "approved_invariants": [
+    {
+      "id": "layout-no-horizontal-overflow",
+      "description": "The rendered application must not create page-level horizontal overflow."
+    },
+    {
+      "id": "interactive-elements-stay-in-viewport",
+      "description": "Visible buttons, links, inputs and controls must remain inside the viewport horizontally."
+    },
+    {
+      "id": "dialogs-centered-when-visible",
+      "description": "A visible modal/dialog must remain inside the viewport and visually centered."
+    },
+    {
+      "id": "render-evidence-required",
+      "description": "Every proof-gate run captures desktop and mobile screenshots as CI evidence."
+    }
+  ]
+}
