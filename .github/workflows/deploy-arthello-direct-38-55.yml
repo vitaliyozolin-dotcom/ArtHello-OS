@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: gateway-38-55-arthello-production
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
