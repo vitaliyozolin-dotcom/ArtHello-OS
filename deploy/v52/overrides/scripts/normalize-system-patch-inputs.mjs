@@ -15,4 +15,16 @@ if (matches.length !== 1) {
 legal = legal.replace(matches[0], 'import {useCallback,useEffect,useState}from"react";');
 writeFileSync(legalPath, legal, "utf8");
 
+const operationalPath = fileURLToPath(new URL("./patch-system-operational-modules.mjs", import.meta.url));
+let operational = readFileSync(operationalPath, "utf8");
+const strictFoodWording = 'source = replaceText(source, "по тестовым складам", "по рабочим складам", "food stock wording");';
+if (!operational.includes(strictFoodWording)) {
+  throw new Error("Patch input normalization failed for optional food wording rule");
+}
+operational = operational.replace(
+  strictFoodWording,
+  'source = source.replace("по тестовым складам", "по рабочим складам");',
+);
+writeFileSync(operationalPath, operational, "utf8");
+
 console.log("System patch inputs normalized");
