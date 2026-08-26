@@ -18,9 +18,19 @@ function isRendered(element: HTMLElement) {
   return rect.width > 1 && rect.height > 1;
 }
 
+function toHelpRect(rect: DOMRect): HelpRect {
+  return {
+    top: Math.round(rect.top),
+    left: Math.round(rect.left),
+    right: Math.round(rect.right),
+    bottom: Math.round(rect.bottom),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  };
+}
+
 export function rectFor(element: HTMLElement): HelpRect {
-  const rect = element.getBoundingClientRect();
-  return { top: Math.round(rect.top), left: Math.round(rect.left), right: Math.round(rect.right), bottom: Math.round(rect.bottom), width: Math.round(rect.width), height: Math.round(rect.height) };
+  return toHelpRect(element.getBoundingClientRect());
 }
 
 function elementText(element?: HTMLElement) {
@@ -29,21 +39,75 @@ function elementText(element?: HTMLElement) {
   return cleanText(element.innerText || element.textContent || element.getAttribute("aria-label") || element.title);
 }
 
+function labelElementFor(element: HTMLElement): HTMLElement | null {
+  const selector = cleanText(element.getAttribute("data-help-label-selector"), 180);
+  if (selector) {
+    try {
+      const explicit = document.querySelector<HTMLElement>(selector);
+      if (explicit && isRendered(explicit)) return explicit;
+    } catch {
+      // Ignore an invalid optional selector and continue with native label discovery.
+    }
+  }
+
+  const labelledBy = element.getAttribute("aria-labelledby");
+  if (labelledBy) {
+    for (const id of labelledBy.split(/\s+/)) {
+      const labelled = document.getElementById(id);
+      if (labelled instanceof HTMLElement && isRendered(labelled) && cleanText(labelled.textContent, 80)) return labelled;
+    }
+  }
+
+  if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) {
+    const associated = element.labels?.[0];
+    if (associated && isRendered(associated)) return associated;
+  }
+
+  if (element.id) {
+    const associated = Array.from(document.getElementsByTagName("label")).find((item) => item.htmlFor === element.id);
+    if (associated && isRendered(associated)) return associated;
+  }
+
+  const wrapped = element.closest("label");
+  if (wrapped instanceof HTMLElement && isRendered(wrapped)) return wrapped;
+
+  const legend = element.closest("fieldset")?.querySelector<HTMLElement>(":scope > legend");
+  if (legend && isRendered(legend)) return legend;
+
+  return null;
+}
+
+function textRectWithin(container: HTMLElement, control: HTMLElement): HelpRect | null {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const parent = node.parentElement;
+    if (parent && !control.contains(parent) && cleanText(node.textContent, 80)) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rect = range.getBoundingClientRect();
+      range.detach();
+      if (rect.width > 1 && rect.height > 1) return toHelpRect(rect);
+    }
+    node = walker.nextNode();
+  }
+  return null;
+}
+
+export function labelRectFor(element: HTMLElement): HelpRect | null {
+  const label = labelElementFor(element);
+  if (!label) return null;
+  return textRectWithin(label, element) || rectFor(label);
+}
+
 function labelFor(element: HTMLElement) {
   const explicit = cleanText(element.getAttribute("data-help-title"), 80);
   if (explicit) return explicit;
-  const labelledBy = element.getAttribute("aria-labelledby");
-  if (labelledBy) {
-    const value = cleanText(labelledBy.split(/\s+/).map((id) => document.getElementById(id)?.textContent || "").join(" "), 80);
-    if (value) return value;
-  }
-  if (element.id) {
-    const label = Array.from(document.getElementsByTagName("label")).find((item) => item.htmlFor === element.id);
-    const value = cleanText(label?.textContent, 80);
-    if (value) return value;
-  }
-  const wrapped = cleanText(element.closest("label")?.textContent, 80);
-  if (wrapped) return wrapped;
+
+  const label = labelElementFor(element);
+  const labelText = cleanText(label?.textContent, 80);
+  if (labelText) return labelText;
+
   const aria = cleanText(element.getAttribute("aria-label"), 80);
   if (aria) return aria;
   const placeholder = cleanText(element.getAttribute("placeholder"), 80);
@@ -139,7 +203,15 @@ export function scanHelpContext(idFor: (element: HTMLElement, prefix: string) =>
     }).filter((item): item is HelpAction => Boolean(item));
 
   const errors = Array.from(new Set(Array.from(document.querySelectorAll<HTMLElement>("[role=alert],[aria-live=assertive],[data-error],.field-error,.form-error")).filter(isRendered).map(elementText).filter(Boolean))).slice(0, 8);
-  const signature = JSON.stringify({ path, title, section, profile: profile.id, fields: fields.map((field) => [field.id, field.label, field.required, field.missing, field.invalid, field.disabled, field.rect]), actions: actions.map((action) => [action.id, action.label, action.disabled, action.rect]), errors });
+  const signature = JSON.stringify({
+    path,
+    title,
+    section,
+    profile: profile.id,
+    fields: fields.map((field) => [field.id, field.label, field.required, field.missing, field.invalid, field.disabled, field.rect, labelRectFor(field.element)]),
+    actions: actions.map((action) => [action.id, action.label, action.disabled, action.rect]),
+    errors,
+  });
   return { path, title, section, profile, fields, actions, errors, signature };
 }
 
