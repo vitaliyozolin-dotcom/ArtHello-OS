@@ -73,6 +73,20 @@ type OwnerDashboardProps = {
   openOperation: (detail: OperationDetail) => void;
 };
 
+const MOSCOW_TIME_ZONE = "Europe/Moscow";
+const moscowHourFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: MOSCOW_TIME_ZONE,
+  hour: "2-digit",
+  hourCycle: "h23",
+});
+const moscowDateFormatter = new Intl.DateTimeFormat("ru-RU", {
+  timeZone: MOSCOW_TIME_ZONE,
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+
 const rub = new Intl.NumberFormat("ru-RU", {
   style: "currency",
   currency: "RUB",
@@ -107,6 +121,18 @@ function chartTick(value: number) {
   return `${Number((value / 100_000_000).toFixed(1)).toLocaleString("ru-RU")} млн`;
 }
 
+function greetingForMoscow(date: Date) {
+  const hour = Number(moscowHourFormatter.format(date)) % 24;
+  if (hour >= 5 && hour < 12) return "Доброе утро";
+  if (hour >= 12 && hour < 18) return "Добрый день";
+  if (hour >= 18 && hour < 23) return "Добрый вечер";
+  return "Доброй ночи";
+}
+
+function firstNameFrom(displayName: string) {
+  return displayName.trim().split(/\s+/)[0] || "коллега";
+}
+
 const kpiIcons = ["finance", "sales", "legal", "clients", "registry", "hr"] as const;
 
 export function OwnerDashboard({ displayName, roleLabel, tasks, sourceOnly, navigate, createTask, openOperation }: OwnerDashboardProps) {
@@ -117,6 +143,19 @@ export function OwnerDashboard({ displayName, roleLabel, tasks, sourceOnly, navi
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("Все типы");
   const [activeChartIndex, setActiveChartIndex] = useState<number | null>(null);
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const updateClock = () => setNow(new Date());
+    const timer = window.setInterval(updateClock, 60_000);
+    window.addEventListener("focus", updateClock);
+    document.addEventListener("visibilitychange", updateClock);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", updateClock);
+      document.removeEventListener("visibilitychange", updateClock);
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -149,7 +188,9 @@ export function OwnerDashboard({ displayName, roleLabel, tasks, sourceOnly, navi
   }, [direction, finance, query]);
 
   const selected = operations.find((operation) => operation.id === selectedId) ?? operations[0] ?? null;
-  const firstName = displayName.split(" ")[0] || "Виталий";
+  const firstName = firstNameFrom(displayName);
+  const greeting = greetingForMoscow(now);
+  const todayLabel = moscowDateFormatter.format(now).replace(/^./, (letter) => letter.toUpperCase());
   const summary = finance?.summary;
   const financePeriod = finance?.selectedPeriod ? monthLabel(finance.selectedPeriod, "long") : "Данных пока нет";
   const hasFinanceData = Boolean(finance?.operations.length || finance?.monthly.some((item) => item.receiptsMinor || item.outflowsMinor));
@@ -219,8 +260,8 @@ export function OwnerDashboard({ displayName, roleLabel, tasks, sourceOnly, navi
     <section className={styles.dashboard} aria-label={`Персональный дашборд: ${roleLabel}`}>
       <header className={styles.heading}>
         <div>
-          <h1>Доброе утро, {firstName}!</h1>
-          <p>{new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date()).replace(/^./, (letter) => letter.toUpperCase())}</p>
+          <h1>{greeting}, {firstName}!</h1>
+          <p>{todayLabel}</p>
         </div>
         <button type="button" onClick={createTask}><AppIcon name="plus" /> Новая задача</button>
       </header>
