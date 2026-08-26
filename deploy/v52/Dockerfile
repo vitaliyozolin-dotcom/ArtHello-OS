@@ -17,6 +17,12 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* \
     && cp -a /tmp/arthello-v52-overrides/. /app/ \
     && node /app/scripts/patch-dashboard-personalization.mjs \
     && node /app/scripts/patch-sales-operating-workspace.mjs \
+    && node /app/scripts/patch-system-foundation.mjs \
+    && node /app/scripts/patch-system-content-legal.mjs \
+    && node /app/scripts/patch-system-analytics-readiness.mjs \
+    && node /app/scripts/patch-system-operational-modules.mjs \
+    && node /app/scripts/patch-system-dialog-portals.mjs \
+    && node /app/scripts/verify-system-wide-operational-shells.mjs \
     && echo "9e6ea6da02b531ab2bbaed4aceece5f5e7c9a9321709612adc9e12ae0d6554d0  /app/db/index.ts" | sha256sum -c - \
     && rm -rf /tmp/arthello-overrides /tmp/arthello-v52-overrides \
     && ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
