@@ -48,6 +48,42 @@ jobs:
           curl -fsS --max-time 20 "$SCHOOL_URL/api/health" | grep -F '"status":"ok"' >/dev/null
           printf 'ARTHELLO_PREFLIGHT=OK\n'
 
+      - name: Inventory production data (read only)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t live_containers < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}')
+          test "${#live_containers[@]}" -eq 1
+          live="${live_containers[0]}"
+          image="$(docker inspect "$live" --format '{{.Config.Image}}')"
+          test -n "$image"
+          test "$(docker inspect "$live" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = 'arthello-direct-v44-data'
+
+          work="$RUNNER_TEMP/arthello-inventory-$GITHUB_RUN_ID"
+          helper="arthello-inventory-$GITHUB_RUN_ID"
+          snapshot="$work/d1"
+          paused=0
+          cleanup_inventory() {
+            rc=$?
+            docker rm -f "$helper" >/dev/null 2>&1 || true
+            if [ "$paused" -eq 1 ]; then docker unpause "$live" >/dev/null 2>&1 || true; fi
+            exit "$rc"
+          }
+          trap cleanup_inventory EXIT
+
+          mkdir -p "$snapshot"
+          docker pause "$live" >/dev/null
+          paused=1
+          docker create --name "$helper" --read-only -v arthello-direct-v44-data:/data:ro "$image" true >/dev/null
+          docker cp "$helper:/data/d1/." "$snapshot"
+          docker unpause "$live" >/dev/null
+          paused=0
+          docker rm -f "$helper" >/dev/null
+          python3 deploy/v52/maintenance/production-data-inventory.py "$snapshot"
+          curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+          printf 'ARTHELLO_PRODUCTION_INVENTORY=OK\n'
+          trap - EXIT
+
       - name: Build candidate locally
         shell: bash
         run: |
