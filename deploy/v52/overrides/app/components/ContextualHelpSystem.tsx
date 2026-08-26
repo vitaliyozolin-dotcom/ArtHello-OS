@@ -267,7 +267,6 @@ export function ContextualHelpSystem() {
           key={field.id}
           type="button"
           style={{ left, top }}
-          title={`${field.label}: ${field.hint}`}
           aria-label={`Помощь по полю «${field.label}»`}
           onClick={() => fieldHelp(field)}
         >?</button>
