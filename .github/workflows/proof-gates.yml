@@ -1,0 +1,82 @@
+name: ArtHello Proof Gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - 'artifacts/api-server/src/lib/security/**'
+      - 'artifacts/api-server/src/routes/**'
+      - 'artifacts/alpha-crm-sync/**'
+      - 'lib/db/drizzle/**'
+      - 'lib/db/rollbacks/**'
+      - 'quality-gates/**'
+      - 'scripts/permission-proof.mjs'
+      - 'scripts/visual-acceptance.mjs'
+      - 'lib/db/scripts/migration-twin.mjs'
+      - '.github/workflows/proof-gates.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arthello-proof-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: arthello_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d arthello_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/arthello_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.4.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Permission Proof Engine
+        run: node scripts/permission-proof.mjs --report .artifacts/permission-proof.json
+
+      - name: Database Migration Twin
+        run: pnpm --filter @workspace/db exec node scripts/migration-twin.mjs --report ../../.artifacts/migration-twin.json
+
+      - name: Build front office for visual proof
+        run: pnpm --filter @workspace/alpha-crm-sync build
+
+      - name: Start front office preview
+        run: |
+          pnpm --filter @workspace/alpha-crm-sync exec vite preview --config vite.config.ts --host 127.0.0.1 --port 4173 > /tmp/arthello-vite.log 2>&1 &
+          echo $! > /tmp/arthello-vite.pid
+          curl --fail --retry 30 --retry-delay 1 --retry-connrefused http://127.0.0.1:4173/ >/dev/null
+
+      - name: Design Memory + Visual Acceptance Gate
+        run: node scripts/visual-acceptance.mjs --url http://127.0.0.1:4173/ --out .artifacts/visual-acceptance
+
+      - name: Upload proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arthello-proof-evidence-${{ github.run_id }}
+          path: .artifacts/
+          if-no-files-found: warn
+          retention-days: 14
