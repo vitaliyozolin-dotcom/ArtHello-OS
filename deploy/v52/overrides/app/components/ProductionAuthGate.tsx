@@ -93,7 +93,7 @@ export default function ProductionAuthGate({ children }: { children: ReactNode }
     return (
       <AuthScreen title="Вход в ArtHello OS">
         <form onSubmit={login}>
-          <label><span>Логин</span><input name="login" autoComplete="username" defaultValue="owner" required /></label>
+          <label><span>Логин</span><input name="login" autoComplete="username" placeholder="Телефон или email" required /></label>
           <label><span>Пароль</span><input name="password" type="password" autoComplete="current-password" required /></label>
           {notice ? <p className="auth-notice">{notice}</p> : null}
           {error ? <p className="auth-error">{error}</p> : null}
