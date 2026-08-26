@@ -1,0 +1,51 @@
+name: ArtHello v52 candidate
+
+on:
+  pull_request:
+    paths:
+      - deploy/v52/**
+      - .github/workflows/v52-candidate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arthello-v52-candidate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+
+      - name: Verify exact source head
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+
+      - name: Build application candidate
+        run: |
+          set -Eeuo pipefail
+          docker build \
+            --file deploy/v52/Dockerfile \
+            --target application \
+            --tag arthello-v52-candidate:${GITHUB_SHA} \
+            .
+
+      - name: Verify application artifact
+        run: |
+          set -Eeuo pipefail
+          docker run --rm --entrypoint sh arthello-v52-candidate:${GITHUB_SHA} -lc '
+            test -d /app/dist
+            test -s /app/production/runtime-server.mjs
+            grep -R --include="*.js" -F "Все рабочие разделы доступны сразу" /app/dist >/dev/null
+            grep -R --include="*.css" -F "data-ah-help-inline" /app/dist >/dev/null
+          '
