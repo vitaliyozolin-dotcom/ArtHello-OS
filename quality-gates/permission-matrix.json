@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "source_of_truth": "artifacts/api-server/src/lib/security/access-policy.ts",
+  "production_roles": ["owner", "accountant", "viewer"],
+  "scopes": {
+    "none": null,
+    "complete": {
+      "unrestricted": false,
+      "branchIds": ["proof-branch"],
+      "legalEntityIds": ["proof-legal-entity"]
+    }
+  },
+  "persona_gaps": [
+    {"persona": "administrator", "status": "NOT_YET_AUTH_ROLE"},
+    {"persona": "teacher", "status": "NOT_YET_AUTH_ROLE"},
+    {"persona": "parent", "status": "NOT_YET_AUTH_ROLE"},
+    {"persona": "employee", "status": "NOT_YET_AUTH_ROLE"}
+  ],
+  "cases": [
+    {"id": "owner-read-finance", "role": "owner", "method": "GET", "path": "/finance/summary", "scope": "none", "allowed": true, "policy": "owner-full-access"},
+    {"id": "owner-write-finance", "role": "owner", "method": "POST", "path": "/finance/transactions", "scope": "none", "allowed": true, "policy": "owner-full-access"},
+    {"id": "accountant-account-self", "role": "accountant", "method": "GET", "path": "/auth/me", "scope": "none", "allowed": true, "policy": "authenticated-account-route"},
+    {"id": "viewer-account-logout", "role": "viewer", "method": "POST", "path": "/auth/logout", "scope": "none", "allowed": true, "policy": "authenticated-account-route"},
+    {"id": "accountant-owner-users-denied", "role": "accountant", "method": "GET", "path": "/auth/users", "scope": "complete", "allowed": false, "policy": "owner-only-read"},
+    {"id": "viewer-banking-customers-denied", "role": "viewer", "method": "GET", "path": "/banking/connectors/alfa/customers", "scope": "complete", "allowed": false, "policy": "owner-only-read"},
+    {"id": "accountant-without-scope-denied", "role": "accountant", "method": "GET", "path": "/finance/summary", "scope": "none", "allowed": false, "policy": "scope-required"},
+    {"id": "accountant-read-business-route-not-yet-enforced", "role": "accountant", "method": "GET", "path": "/finance/summary", "scope": "complete", "allowed": false, "policy": "scope-route-not-enforced"},
+    {"id": "viewer-read-business-route-not-yet-enforced", "role": "viewer", "method": "GET", "path": "/clients", "scope": "complete", "allowed": false, "policy": "scope-route-not-enforced"},
+    {"id": "accountant-write-denied", "role": "accountant", "method": "POST", "path": "/finance/transactions", "scope": "complete", "allowed": false, "policy": "write-denied"},
+    {"id": "viewer-write-denied", "role": "viewer", "method": "PATCH", "path": "/clients/proof-client", "scope": "complete", "allowed": false, "policy": "write-denied"}
+  ]
+}
