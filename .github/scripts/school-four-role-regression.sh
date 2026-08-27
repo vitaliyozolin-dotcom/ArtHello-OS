@@ -346,7 +346,7 @@ for (const role of roles) {
   });
   const permissionPayload = await permissionResponse.json();
   if (
-    permissionResponse.status !== 500 ||
+    permissionResponse.status !== 400 ||
     permissionPayload.error !== probe.error
   )
     throw new Error('Permission boundary failed for role ' + role);
