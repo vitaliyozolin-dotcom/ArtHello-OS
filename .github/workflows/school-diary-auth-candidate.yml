@@ -7,6 +7,7 @@ on:
       - .github/workflows/school-diary-auth-candidate.yml
       - .github/scripts/school-auth-stage.sh
       - .github/fixtures/school-hosting.json
+      - .github/fixtures/school-dockerignore
   workflow_dispatch:
 
 permissions:
@@ -49,7 +50,9 @@ jobs:
           test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
           install -m 0755 -d candidate/.openai
           cp .github/fixtures/school-hosting.json candidate/.openai/hosting.json
+          cp .github/fixtures/school-dockerignore candidate/.dockerignore
           test "$(sha256sum candidate/.openai/hosting.json | cut -d' ' -f1)" = "496e738fab42ede81bc826d1b5319609192bf4af7474777d66c9b5c8f8d5c16f"
+          test "$(sha256sum candidate/.dockerignore | cut -d' ' -f1)" = "c727c5d0f01245e7b3c488e6cb01429e0beee23b798eee8ae4dc7df46a2c4446"
           docker build --pull --target builder -t "$BUILDER_IMAGE" -f candidate/Dockerfile candidate
           docker run --rm --network none --entrypoint node "$BUILDER_IMAGE" \
             --test tests/phone-auth-contract.test.mjs

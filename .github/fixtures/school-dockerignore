@@ -1,0 +1,11 @@
+.git
+.next
+.openai/*
+!.openai/hosting.json
+.sites-runtime
+.wrangler
+.migration
+data
+dist
+node_modules
+npm-debug.log*
