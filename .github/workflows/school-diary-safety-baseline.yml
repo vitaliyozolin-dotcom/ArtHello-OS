@@ -260,6 +260,99 @@ jobs:
           console.log('SCHOOL_PERSISTED_BACKUP_VERIFY=OK');
           VERIFY_PERSISTED
 
+          restore_name="school-diary-restore-drill-$RUN_ID"
+          restore_volume="school-diary-restore-drill-$RUN_ID-data"
+          case "$restore_name:$restore_volume" in
+            school-diary-restore-drill-*:school-diary-restore-drill-*-data) ;;
+            *) printf 'Invalid restore drill target\n' >&2; exit 1 ;;
+          esac
+          cleanup_restore() {
+            case "$restore_name" in
+              school-diary-restore-drill-*) docker rm -f "$restore_name" >/dev/null 2>&1 || true ;;
+            esac
+            case "$restore_volume" in
+              school-diary-restore-drill-*-data) docker volume rm "$restore_volume" >/dev/null 2>&1 || true ;;
+            esac
+          }
+          cleanup_all() {
+            cleanup_restore
+            cleanup_work
+          }
+          trap cleanup_all EXIT
+          cleanup_restore
+          docker volume create "$restore_volume" >/dev/null
+
+          docker run --rm -i --network none --user 0:0 \
+            -e TARGET_REL="$target_rel" \
+            -v "$backup_volume:/backup:ro" -v "$restore_volume:/data" \
+            --entrypoint node "$image_ref" --input-type=module - <<'PREPARE_RESTORE'
+          import { chmodSync, copyFileSync } from 'node:fs';
+          const rel = process.env.TARGET_REL;
+          if (!/^design-system\/[0-9]{8}T[0-9]{6}Z-run-[0-9]+$/.test(rel)) throw new Error('Invalid source');
+          copyFileSync(`/backup/${rel}/database.sqlite`, '/data/school-1-11.sqlite');
+          chmodSync('/data/school-1-11.sqlite', 0o666);
+          console.log('SCHOOL_RESTORE_COPY=OK');
+          PREPARE_RESTORE
+
+          drill_secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+          test "${#drill_secret}" -eq 64
+          docker run -d --name "$restore_name" --network none \
+            -e NODE_ENV=production \
+            -e PORT=3000 \
+            -e DATABASE_PATH=/data/school-1-11.sqlite \
+            -e PUBLIC_APP_ORIGIN=http://127.0.0.1:3000 \
+            -e CENTRAL_ACCESS_SECRET="$drill_secret" \
+            -v "$restore_volume:/data" "$image_ref" >/dev/null
+
+          restore_healthy=0
+          for attempt in $(seq 1 90); do
+            if docker exec "$restore_name" node -e \
+              "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))" \
+              >/dev/null 2>&1; then
+              restore_healthy=1
+              break
+            fi
+            if [ "$(docker inspect "$restore_name" --format '{{.State.Running}}' 2>/dev/null || true)" != true ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$restore_healthy" -ne 1 ]; then
+            docker logs "$restore_name" --tail 120 >&2 || true
+            exit 1
+          fi
+
+          docker exec -i "$restore_name" node --input-type=module - <<'VERIFY_RESTORE'
+          import { DatabaseSync } from 'node:sqlite';
+          const db = new DatabaseSync('/data/school-1-11.sqlite', { readOnly: true });
+          const rows = db.prepare('PRAGMA integrity_check').all();
+          if (rows.length !== 1 || rows[0].integrity_check !== 'ok') throw new Error('Restore integrity_check failed');
+          const tableCount = db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type='table'").get().count;
+          if (tableCount < 1) throw new Error('Restored schema is empty');
+          db.close();
+          const health = await fetch('http://127.0.0.1:3000/api/health');
+          const healthText = await health.text();
+          if (!health.ok || !healthText.includes('"status":"ok"')) throw new Error('Restored health failed');
+          const login = await fetch('http://127.0.0.1:3000/login');
+          const loginText = await login.text();
+          if (!login.ok || loginText.length < 1000 || !loginText.includes('<html')) throw new Error('Restored login failed');
+          console.log(`SCHOOL_RESTORE_DB=OK tables=${tableCount}`);
+          console.log('SCHOOL_RESTORE_HEALTH=OK');
+          console.log('SCHOOL_RESTORE_LOGIN=OK');
+          VERIFY_RESTORE
+
+          test "$(docker inspect "$restore_name" --format '{{.HostConfig.NetworkMode}}')" = none
+          printf 'SCHOOL_RESTORE_NETWORK=isolated\n'
+          cleanup_restore
+          trap cleanup_work EXIT
+          test -z "$(docker ps -aq --filter "name=^/$restore_name$")"
+          if docker volume inspect "$restore_volume" >/dev/null 2>&1; then
+            printf 'Restore drill volume was not removed\n' >&2
+            exit 1
+          fi
+          printf 'SCHOOL_RESTORE_DRILL=OK\n'
+          printf 'SCHOOL_RESTORE_DRILL_CLEANUP=OK\n'
+
           started_after="$(docker inspect "$container" --format '{{.State.StartedAt}}')"
           test "$started_after" = "$started_before"
           test "$(docker inspect "$container" --format '{{.State.Running}}')" = true
