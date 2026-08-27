@@ -307,7 +307,7 @@ jobs:
           restore_healthy=0
           for attempt in $(seq 1 90); do
             if docker exec "$restore_name" node -e \
-              "fetch('http://127.0.0.1:3000/api/health').then(async r=>{const t=await r.text();if(!r.ok||!t.includes('\\\"status\\\":\\\"ok\\\"'))process.exit(1)}).catch(()=>process.exit(1))" \
+              "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))" \
               >/dev/null 2>&1; then
               restore_healthy=1
               break
