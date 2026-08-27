@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   candidate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 45
 
     steps:
@@ -25,6 +25,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Verify exact source head
         env:
@@ -40,6 +41,16 @@ jobs:
             --tag arthello-v52-candidate:${GITHUB_SHA} \
             .
 
+      - name: Verify Design System pilot source
+        run: |
+          set -Eeuo pipefail
+          docker run --rm --entrypoint sh arthello-v52-candidate:${GITHUB_SHA} -lc '
+            test -s /app/app/components/ContractorWorkspace.tsx
+            grep -F "from \"./design-system\"" /app/app/components/ContractorWorkspace.tsx >/dev/null
+            grep -F "PageContainer" /app/app/components/ContractorWorkspace.tsx >/dev/null
+            grep -F "EmptyState" /app/app/components/ContractorWorkspace.tsx >/dev/null
+          '
+
       - name: Verify application artifact
         run: |
           set -Eeuo pipefail
@@ -49,3 +60,7 @@ jobs:
             grep -R --include="*.js" -F "Все рабочие разделы доступны сразу" /app/dist >/dev/null
             grep -R --include="*.css" -F "data-ah-help-inline" /app/dist >/dev/null
           '
+
+      - name: Cleanup candidate image
+        if: always()
+        run: docker image rm -f arthello-v52-candidate:${GITHUB_SHA} >/dev/null 2>&1 || true
