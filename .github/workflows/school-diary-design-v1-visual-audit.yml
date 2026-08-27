@@ -108,9 +108,9 @@ jobs:
 
           timeout --signal=TERM --kill-after=10s 240s \
             ssh -T "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "test \"$(docker inspect school-1-11-staging --format '{{.Config.Image}}')\" = '$EXPECTED_IMAGE' &&
-               test \"$(docker inspect school-1-11-staging --format '{{index .Config.Labels \"school.candidate-sha\"}}')\" = '$EXPECTED_CANDIDATE_SHA' &&
-               test \"$(docker inspect school-1-11-staging --format '{{.State.Health.Status}}')\" = healthy"
+              "docker inspect school-1-11-staging --format '{{.Config.Image}}' | grep -Fx '$EXPECTED_IMAGE' &&
+               docker inspect school-1-11-staging --format '{{index .Config.Labels \"school.candidate-sha\"}}' | grep -Fx '$EXPECTED_CANDIDATE_SHA' &&
+               docker inspect school-1-11-staging --format '{{.State.Health.Status}}' | grep -Fx healthy"
 
           rm -rf -- school-design-visual-output
           install -m 0755 -d school-design-visual-output
