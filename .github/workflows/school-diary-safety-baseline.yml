@@ -29,29 +29,53 @@ jobs:
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 15
     steps:
-      - name: Verify host and live diary
+      - name: Inspect and verify host and live diary
         shell: bash
         run: |
           set -Eeuo pipefail
           exec 9>/var/lock/school-1-11-safety-baseline.lock
           flock -n 9
-          test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = '188.225.38.55'
-          test -d /srv/school-1-11
           container=school-1-11
-          test "$(docker inspect "$container" --format '{{.State.Running}}')" = true
-          health="$(docker inspect "$container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}')"
+          host_ips="$(hostname -I | tr ' ' '\n' | sed '/^$/d' | paste -sd, -)"
+          root_state=missing
+          test -d /srv/school-1-11 && root_state=present
+          container_state=missing
+          running=missing
+          health=missing
+          data_volume=
+          backup_volume=
+          release=
+          if docker inspect "$container" >/dev/null 2>&1; then
+            container_state=present
+            running="$(docker inspect "$container" --format '{{.State.Running}}')"
+            health="$(docker inspect "$container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}')"
+            data_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}')"
+            backup_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}')"
+          fi
+          release="$(readlink -f /srv/school-1-11/current 2>/dev/null || true)"
+          public_health="$(curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" 2>/dev/null || true)"
+
+          printf 'SCHOOL_HOST_IPS=%s\n' "$host_ips"
+          printf 'SCHOOL_ROOT=%s\n' "$root_state"
+          printf 'SCHOOL_CONTAINER=%s\n' "$container_state"
+          printf 'SCHOOL_RUNNING=%s\n' "$running"
+          printf 'SCHOOL_HEALTH=%s\n' "$health"
+          printf 'SCHOOL_LIVE_RELEASE=%s\n' "${release:-missing}"
+          printf 'SCHOOL_DATA_MOUNT=%s\n' "${data_volume:-missing}"
+          printf 'SCHOOL_BACKUP_MOUNT=%s\n' "${backup_volume:-missing}"
+          printf 'SCHOOL_PUBLIC_HEALTH_PRESENT=%s\n' "$([ -n "$public_health" ] && printf yes || printf no)"
+
+          printf '%s\n' "$host_ips" | tr ',' '\n' | grep -Fx '188.225.38.55' >/dev/null
+          test "$root_state" = present
+          test "$container_state" = present
+          test "$running" = true
           test "$health" = healthy
-          data_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
-          backup_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Name}}{{end}}{{end}}')"
           test -n "$data_volume"
           test -n "$backup_volume"
-          release="$(readlink -f /srv/school-1-11/current)"
+          test -n "$release"
           test -d "$release"
-          curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
+          grep -F '"status":"ok"' <<<"$public_health" >/dev/null
           printf 'SCHOOL_PREFLIGHT=OK\n'
-          printf 'SCHOOL_LIVE_RELEASE=%s\n' "$release"
-          printf 'SCHOOL_DATA_VOLUME=%s\n' "$data_volume"
-          printf 'SCHOOL_BACKUP_VOLUME=%s\n' "$backup_volume"
 
       - name: Create native consistent SQLite backup
         id: backup
@@ -165,10 +189,10 @@ jobs:
           {
             echo '## School diary safety baseline'
             echo
-            echo "- Production UI changed: no"
-            echo "- Production database changed: no"
-            echo "- Container restarted: no"
-            echo "- Code checkpoint: `$CHECKPOINT_REF`"
-            echo "- Backup target: `${TARGET:-not-created}`"
-            echo "- Result: `${{ job.status }}`"
+            printf -- '- Production UI changed: no\n'
+            printf -- '- Production business data changed: no\n'
+            printf -- '- Container restarted: no\n'
+            printf -- '- Code checkpoint: %s\n' "$CHECKPOINT_REF"
+            printf -- '- Backup target: %s\n' "${TARGET:-not-created}"
+            printf -- '- Result: %s\n' '${{ job.status }}'
           } >> "$GITHUB_STEP_SUMMARY"
