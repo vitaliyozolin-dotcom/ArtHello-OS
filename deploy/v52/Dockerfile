@@ -24,6 +24,10 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* \
     && node /app/scripts/patch-system-operational-modules.mjs \
     && node /app/scripts/patch-system-dialog-portals.mjs \
     && node /app/scripts/patch-mobile-visual-help-followup.mjs \
+    && cat /app/scripts/patch-mobile-visual-help-followup-v2.mjs.b64.part-* \
+      | base64 -d > /tmp/patch-mobile-visual-help-followup-v2.mjs \
+    && echo "5c8e74376ede63d784e8edfcb1aaf2fdd478ac6088b2c0b95ef3e55a59173667  /tmp/patch-mobile-visual-help-followup-v2.mjs" | sha256sum -c - \
+    && node /tmp/patch-mobile-visual-help-followup-v2.mjs \
     && node /app/scripts/verify-system-wide-operational-shells.mjs \
     && echo "9e6ea6da02b531ab2bbaed4aceece5f5e7c9a9321709612adc9e12ae0d6554d0  /app/db/index.ts" | sha256sum -c - \
     && rm -rf /tmp/arthello-overrides /tmp/arthello-v52-overrides \
