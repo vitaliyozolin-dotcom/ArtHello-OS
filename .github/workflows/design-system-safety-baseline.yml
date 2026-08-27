@@ -130,8 +130,8 @@ jobs:
             mcr.microsoft.com/playwright:v1.55.0-noble \
             bash -lc 'npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund --no-save playwright@1.55.0 >/dev/null && node capture.js'
           test -s "$target/manifest.json"
+          test "$(find "$target" -maxdepth 1 -name '*.png' | wc -l)" -eq 42
           printf '%s\n' "$CHECKPOINT_SHA" > "$target/checkpoint-sha.txt"
-          chmod -R a+rX "$target"
           ln -sfn "$target" "$BASELINE_ROOT/latest"
           printf 'ARTHELLO_VISUAL_BASELINE=OK path=%s\n' "$target"
 
