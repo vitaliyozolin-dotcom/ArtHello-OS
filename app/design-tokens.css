@@ -1,0 +1,286 @@
+/*
+ * School 1–11 Design Code
+ * Version: 1.0.0
+ * Status: APPROVED by product owner on 2026-08-27
+ *
+ * New variables are inert. Visual overrides are enabled only when
+ * <html data-design-code="v1"> is rendered by the explicit feature flag.
+ */
+
+:root {
+  /* Brand */
+  --brand-50: #fff5f1;
+  --brand-100: #ffe6dd;
+  --brand-200: #ffc8b6;
+  --brand-300: #ffa07e;
+  --brand-400: #f07142;
+  --brand-500: #e04512;
+  --brand-600: #c4380d;
+  --brand-700: #a82e0a;
+  --brand-800: #85270e;
+  --brand-900: #6e2412;
+
+  /* Neutral */
+  --neutral-0: #ffffff;
+  --neutral-25: #fcfcfd;
+  --neutral-50: #f7f8fa;
+  --neutral-100: #f2f4f7;
+  --neutral-200: #e4e7ec;
+  --neutral-300: #d0d5dd;
+  --neutral-400: #98a2b3;
+  --neutral-500: #667085;
+  --neutral-600: #475467;
+  --neutral-700: #344054;
+  --neutral-800: #1d2939;
+  --neutral-900: #171a1f;
+
+  /* Semantic */
+  --success-50: #ecfdf3;
+  --success-500: #168455;
+  --warning-50: #fff8e8;
+  --warning-500: #b96b00;
+  --danger-50: #fff1f0;
+  --danger-500: #d92d20;
+  --info-50: #eff6ff;
+  --info-500: #2563eb;
+
+  /* Subjects */
+  --subject-math: #6d5bd0;
+  --subject-russian: #e04512;
+  --subject-literature: #c78012;
+  --subject-world: #168455;
+  --subject-geography: #2563eb;
+  --subject-technology: #0e7490;
+
+  /* Theme aliases */
+  --color-page: var(--neutral-50);
+  --color-surface: var(--neutral-0);
+  --color-surface-muted: var(--neutral-100);
+  --color-surface-raised: var(--neutral-0);
+  --color-text: var(--neutral-900);
+  --color-text-secondary: var(--neutral-500);
+  --color-text-muted: var(--neutral-400);
+  --color-border: var(--neutral-200);
+  --color-border-strong: var(--neutral-300);
+  --color-accent: var(--brand-500);
+  --color-accent-hover: var(--brand-600);
+  --color-accent-active: var(--brand-700);
+  --color-accent-soft: var(--brand-50);
+  --color-focus: rgba(224, 69, 18, 0.24);
+  --color-overlay: rgba(23, 26, 31, 0.56);
+
+  /* Typography */
+  --font-sans: "Onest", Arial, sans-serif;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --text-display-size: 40px;
+  --text-display-line: 48px;
+  --text-h1-size: 32px;
+  --text-h1-line: 40px;
+  --text-h2-size: 24px;
+  --text-h2-line: 32px;
+  --text-h3-size: 20px;
+  --text-h3-line: 28px;
+  --text-body-size: 16px;
+  --text-body-line: 24px;
+  --text-small-size: 14px;
+  --text-small-line: 20px;
+  --text-caption-size: 12px;
+  --text-caption-line: 16px;
+
+  /* 4px spacing */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+
+  /* Approved geometry: 8, 12, 16, 20 and pill only */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* Elevation */
+  --shadow-none: none;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-md: 0 8px 24px rgba(16, 24, 40, 0.08);
+  --shadow-lg: 0 20px 48px rgba(16, 24, 40, 0.14);
+
+  /* Layout */
+  --sidebar-width: 256px;
+  --sidebar-compact-width: 80px;
+  --topbar-height: 72px;
+  --mobile-topbar-height: 64px;
+  --mobile-nav-height: 64px;
+  --content-max-width: 1840px;
+  --content-padding-wide: 32px;
+  --content-padding: 24px;
+  --content-padding-mobile: 16px;
+  --grid-gap: 16px;
+  --grid-gap-wide: 24px;
+
+  /* Components */
+  --control-height-sm: 36px;
+  --control-height-md: 44px;
+  --control-height-lg: 48px;
+  --card-padding: 24px;
+  --card-padding-compact: 16px;
+  --table-head-height: 44px;
+  --table-row-height: 56px;
+  --chart-height-dashboard: 280px;
+  --chart-height-report: 360px;
+  --modal-width-sm: 480px;
+  --modal-width-md: 640px;
+  --modal-width-lg: 960px;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-normal: 160ms;
+  --duration-slow: 220ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/*
+ * Foundation rollout. The current interface remains byte-for-byte styled by
+ * legacy CSS unless NEXT_PUBLIC_SCHOOL_DESIGN_V1=true at build time.
+ */
+html[data-design-code="v1"] {
+  color-scheme: light;
+  scrollbar-gutter: stable;
+
+  /* Compatibility aliases let existing screens adopt the approved palette. */
+  --orange: var(--brand-500);
+  --orange-dark: var(--brand-600);
+  --orange-soft: var(--brand-50);
+  --ink: var(--color-text);
+  --muted: var(--color-text-secondary);
+  --line: var(--color-border);
+  --canvas: var(--color-page);
+  --surface: var(--color-surface);
+  --shadow: var(--shadow-md);
+  --font-display: var(--font-sans);
+  --font-text: var(--font-sans);
+}
+
+html[data-design-code="v1"] body {
+  background: var(--color-page);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+
+html[data-design-code="v1"] button:focus-visible,
+html[data-design-code="v1"] a:focus-visible,
+html[data-design-code="v1"] input:focus-visible,
+html[data-design-code="v1"] select:focus-visible,
+html[data-design-code="v1"] textarea:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+html[data-design-code="v1"] .l0-app {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  background: var(--color-page);
+}
+
+html[data-design-code="v1"] .l0-workspace {
+  grid-template-rows: var(--topbar-height) minmax(0, 1fr);
+}
+
+html[data-design-code="v1"] .l0-topbar {
+  min-height: var(--topbar-height);
+  border-bottom-color: var(--color-border);
+  background: rgba(255, 255, 255, 0.94);
+}
+
+html[data-design-code="v1"] .page-shell {
+  width: min(100%, var(--content-max-width));
+  margin-inline: auto;
+  padding: var(--content-padding);
+  gap: var(--grid-gap);
+}
+
+html[data-design-code="v1"] .content-card {
+  border-color: var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--card-padding);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-design-code="v1"] .primary-btn,
+html[data-design-code="v1"] .ghost-btn {
+  min-height: var(--control-height-md);
+  border-radius: var(--radius-md);
+  padding-inline: var(--space-4);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] .primary-btn {
+  background: var(--color-accent);
+  box-shadow: none;
+}
+
+html[data-design-code="v1"] .primary-btn:hover {
+  background: var(--color-accent-hover);
+}
+
+html[data-design-code="v1"] .ghost-btn {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+@media (min-width: 1600px) {
+  html[data-design-code="v1"] .page-shell {
+    padding: var(--content-padding-wide);
+    gap: var(--grid-gap-wide);
+  }
+}
+
+@media (max-width: 1199px) and (min-width: 768px) {
+  html[data-design-code="v1"] .l0-app {
+    grid-template-columns: var(--sidebar-compact-width) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  html[data-design-code="v1"] .l0-workspace {
+    height: calc(100svh - var(--mobile-nav-height));
+    grid-template-rows: var(--mobile-topbar-height) minmax(0, 1fr);
+  }
+
+  html[data-design-code="v1"] .l0-topbar {
+    min-height: var(--mobile-topbar-height);
+  }
+
+  html[data-design-code="v1"] .l0-main {
+    height: calc(100svh - var(--mobile-topbar-height) - var(--mobile-nav-height));
+  }
+
+  html[data-design-code="v1"] .page-shell {
+    padding: var(--content-padding-mobile);
+    gap: var(--space-3);
+  }
+
+  html[data-design-code="v1"] .l0-bottom-nav {
+    height: var(--mobile-nav-height);
+  }
+
+  html[data-design-code="v1"] .content-card {
+    padding: var(--card-padding-compact);
+  }
+}
