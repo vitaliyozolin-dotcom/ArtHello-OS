@@ -59,6 +59,7 @@ jobs:
           docker build --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true -t "$CANDIDATE_IMAGE" -f candidate/Dockerfile candidate
           image_id="$(docker image inspect "$CANDIDATE_IMAGE" --format '{{.Id}}')"
           test -n "$image_id"
+          test "$(docker image inspect "$CANDIDATE_IMAGE" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^NEXT_PUBLIC_SCHOOL_DESIGN_V1=//p' | head -n1)" = true
           printf 'SCHOOL_DESIGN_BUILD=OK sha=%s image=%s\n' "$CANDIDATE_SHA" "$image_id"
 
       - name: Configure confirmed School SSH host
@@ -175,7 +176,7 @@ jobs:
             -o Ciphers=aes128-ctr
             -o MACs=hmac-sha2-256
           )
-          log_file="$RUNNER_TEMP/school-auth-candidate.log"
+          log_file="$RUNNER_TEMP/school-design-v1-candidate.log"
           timeout --signal=TERM --kill-after=15s 1200s \
             ssh -T "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
               "env RUN_ID='$GITHUB_RUN_ID' WORKFLOW_SHA='$GITHUB_SHA' CANDIDATE_SHA='$CANDIDATE_SHA' CANDIDATE_IMAGE='$CANDIDATE_IMAGE' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' STAGING_ORIGIN='$STAGING_ORIGIN' STAGING_PORT='$STAGING_PORT' bash -s" \
