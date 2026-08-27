@@ -1,6 +1,10 @@
 name: School diary safety baseline
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/school-diary-safety-baseline.yml
   pull_request:
     branches: [main]
     paths:
@@ -28,6 +32,7 @@ jobs:
        github.event.pull_request.head.ref == 'ops/school-diary-safety-baseline-20260827')
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 20
+    environment: production-ru
     steps:
       - name: Configure confirmed School SSH host
         env:
