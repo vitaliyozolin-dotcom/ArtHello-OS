@@ -16,8 +16,8 @@ concurrency:
 
 env:
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
-  BACKUP_ROOT: /srv/arthello/backups/design-system
-  BASELINE_ROOT: /srv/arthello/baselines/design-system
+  BACKUP_ROOT: /opt/actions-runner-arthello-gateway/_arthello-safety/backups/design-system
+  BASELINE_ROOT: /opt/actions-runner-arthello-gateway/_arthello-safety/baselines/design-system
   CHECKPOINT_SHA: 1aa562c534871a13685a019a67bca2e1cbbedf31
 
 jobs:
@@ -38,6 +38,7 @@ jobs:
           set -Eeuo pipefail
           test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = '188.225.38.55'
           test -n "$CHECKPOINT_SHA"
+          test -w /opt/actions-runner-arthello-gateway
           curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null
           printf 'DESIGN_SYSTEM_CHECKPOINT=OK sha=%s\n' "$CHECKPOINT_SHA"
 
