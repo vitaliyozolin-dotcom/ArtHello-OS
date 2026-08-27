@@ -91,39 +91,42 @@ jobs:
           set -Eeuo pipefail
           stamp="$(date -u +%Y%m%dT%H%M%SZ)"
           target="$BASELINE_ROOT/$stamp"
-          mkdir -p "$target"
           work="$RUNNER_TEMP/arthello-baseline-$GITHUB_RUN_ID"
-          mkdir -p "$work"
-          cd "$work"
-          npm init -y >/dev/null 2>&1
-          npm install --no-audit --no-fund playwright@1.55.0 >/dev/null
-          npx playwright install chromium >/dev/null
-          cat > capture.mjs <<'NODE'
-          import { chromium } from 'playwright';
-          import fs from 'node:fs';
-          const base=process.env.PUBLIC_URL, out=process.env.BASELINE_TARGET;
+          mkdir -p "$target" "$work"
+          cat > "$work/capture.js" <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('node:fs');
+          const base=process.env.PUBLIC_URL, out='/baseline';
           const viewports=[[375,812],[390,844],[430,932],[768,1024],[1440,900],[2560,1440]];
           const routes=['home','finance','clients','contractors','safety','education','access'];
-          const browser=await chromium.launch({headless:true});
-          const manifest=[];
-          for(const [width,height] of viewports){
-            const context=await browser.newContext({viewport:{width,height}});
-            const page=await context.newPage();
-            for(const route of routes){
-              const url=`${base}/?baseline=${Date.now()}#${route}`;
-              await page.goto(url,{waitUntil:'networkidle',timeout:30000});
-              await page.waitForTimeout(700);
-              const metrics=await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth,title:document.title}));
-              const file=`${route}-${width}x${height}.png`;
-              await page.screenshot({path:`${out}/${file}`,fullPage:true});
-              manifest.push({route,width,height,file,...metrics,horizontalOverflow:metrics.scrollWidth>metrics.clientWidth+1});
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const manifest=[];
+            for(const [width,height] of viewports){
+              const context=await browser.newContext({viewport:{width,height}});
+              const page=await context.newPage();
+              for(const route of routes){
+                const url=`${base}/?baseline=${Date.now()}#${route}`;
+                await page.goto(url,{waitUntil:'networkidle',timeout:30000});
+                await page.waitForTimeout(700);
+                const metrics=await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth,title:document.title}));
+                const file=`${route}-${width}x${height}.png`;
+                await page.screenshot({path:`${out}/${file}`,fullPage:true});
+                manifest.push({route,width,height,file,...metrics,horizontalOverflow:metrics.scrollWidth>metrics.clientWidth+1});
+              }
+              await context.close();
             }
-            await context.close();
-          }
-          await browser.close();
-          fs.writeFileSync(`${out}/manifest.json`,JSON.stringify(manifest,null,2));
+            await browser.close();
+            fs.writeFileSync(`${out}/manifest.json`,JSON.stringify(manifest,null,2));
+          })().catch((error)=>{console.error(error);process.exit(1)});
           NODE
-          PUBLIC_URL="$PUBLIC_URL" BASELINE_TARGET="$target" node capture.mjs
+          docker run --rm --network host \
+            -e PUBLIC_URL="$PUBLIC_URL" \
+            -v "$target:/baseline" \
+            -v "$work/capture.js:/work/capture.js:ro" \
+            -w /work \
+            mcr.microsoft.com/playwright:v1.55.0-noble \
+            node capture.js
           test -s "$target/manifest.json"
           printf '%s\n' "$CHECKPOINT_SHA" > "$target/checkpoint-sha.txt"
           ln -sfn "$target" "$BASELINE_ROOT/latest"
