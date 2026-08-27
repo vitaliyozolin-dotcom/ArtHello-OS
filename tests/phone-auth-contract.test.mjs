@@ -20,6 +20,24 @@ test("phone or email login uses hashed passwords and server sessions", () => {
   assert.doesNotMatch(schoolApi, /oai-authenticated-user-email/);
 });
 
+test("same-origin validation uses the configured public origin behind the proxy", () => {
+  assert.match(auth, /process\.env\.PUBLIC_APP_ORIGIN/);
+  assert.match(auth, /parseCanonicalOrigin\(configuredOrigin\)/);
+  assert.match(auth, /url\.protocol !== "http:"/);
+  assert.match(auth, /url\.protocol !== "https:"/);
+  assert.match(auth, /url\.pathname !== "\/"/);
+  assert.doesNotMatch(
+    auth,
+    /origin && origin !== new URL\(request\.url\)\.origin/,
+  );
+  assert.doesNotMatch(auth, /x-forwarded-(host|proto)/i);
+  assert.equal(
+    auth.match(/expectedRequestOrigin\(request\)\.startsWith\("https:\/\/"\)/g)
+      ?.length,
+    2,
+  );
+});
+
 test("first login and central reset invalidate previous access", () => {
   assert.match(migration, /credential_tokens/);
   assert.match(auth, /used_at IS NULL/);

@@ -100,10 +100,39 @@ function cookieValue(request: Request, name: string) {
   return "";
 }
 
+const ORIGIN_REJECTED = "Запрос отклонён системой безопасности";
+
+function parseCanonicalOrigin(value: string) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(ORIGIN_REJECTED);
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  )
+    throw new Error(ORIGIN_REJECTED);
+  return url.origin;
+}
+
+function expectedRequestOrigin(request: Request) {
+  const configuredOrigin = process.env.PUBLIC_APP_ORIGIN?.trim();
+  return configuredOrigin
+    ? parseCanonicalOrigin(configuredOrigin)
+    : new URL(request.url).origin;
+}
+
 export function assertSameOrigin(request: Request) {
   const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin)
-    throw new Error("Запрос отклонён системой безопасности");
+  if (!origin) return;
+  if (parseCanonicalOrigin(origin) !== expectedRequestOrigin(request))
+    throw new Error(ORIGIN_REJECTED);
 }
 
 export async function getSessionUser(
@@ -137,7 +166,9 @@ export async function createSession(user: SessionUser, request: Request) {
     )
     .bind(id, user.id, sha256(token), user.authVersion, expiresAt)
     .run();
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  const secure = expectedRequestOrigin(request).startsWith("https://")
+    ? "; Secure"
+    : "";
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`;
 }
 
@@ -148,7 +179,9 @@ export async function destroySession(request: Request) {
       .prepare("DELETE FROM auth_sessions WHERE token_hash = ?")
       .bind(sha256(token))
       .run();
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  const secure = expectedRequestOrigin(request).startsWith("https://")
+    ? "; Secure"
+    : "";
   return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }
 
