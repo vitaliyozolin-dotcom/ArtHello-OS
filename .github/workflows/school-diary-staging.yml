@@ -283,7 +283,7 @@ jobs:
           console.log('SCHOOL_STAGING_ORIGIN=OK');
           VERIFY_STAGING
 
-          binding="$(docker inspect "$staging" | python3 -c 'import json,sys; d=json.load(sys.stdin)[0]; b=d["HostConfig"]["PortBindings"]["3000/tcp"][0]; print(f"{b["HostIp"]}:{b["HostPort"]}")')"
+          binding="$(docker inspect "$staging" | python3 -c 'import json,sys; d=json.load(sys.stdin)[0]; b=d["HostConfig"]["PortBindings"]["3000/tcp"][0]; print(b["HostIp"]+":"+b["HostPort"])')"
           test "$binding" = "127.0.0.1:$STAGING_PORT"
           test "$(docker network inspect "$network" --format '{{.Internal}}')" = true
 
