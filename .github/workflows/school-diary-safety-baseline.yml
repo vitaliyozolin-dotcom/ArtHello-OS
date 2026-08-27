@@ -20,7 +20,7 @@ concurrency:
 
 env:
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
-  BACKUP_ROOT: /srv/school-1-11/backups/design-system
+  BACKUP_ROOT: /backups/design-system
   CHECKPOINT_REF: checkpoint/pre-diary-design-2026-08-27
   EXPECTED_RELEASE_REF: cebe7be40383850ee821031245da8001c0503007
 
@@ -145,20 +145,32 @@ jobs:
 
           stamp="$(date -u +%Y%m%dT%H%M%SZ)"
           target="$BACKUP_ROOT/$stamp-run-$RUN_ID"
-          install -d -m 0700 "$BACKUP_ROOT" "$target"
-          docker cp "$container:$backup_path" "$target/database.sqlite"
-          chmod 0600 "$target/database.sqlite"
+          target_rel="${target#/backups/}"
+          case "$target_rel" in
+            design-system/*-run-*) ;;
+            *) printf 'Unexpected target: %s\n' "$target" >&2; exit 1 ;;
+          esac
+          work="$(mktemp -d /tmp/school-diary-safety.XXXXXX)"
+          cleanup_work() {
+            if [[ "$work" == /tmp/school-diary-safety.* ]]; then
+              rm -rf -- "$work"
+            fi
+          }
+          trap cleanup_work EXIT
+          docker cp "$container:$backup_path" "$work/database.sqlite"
+          chmod 0600 "$work/database.sqlite"
 
-          curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" > "$target/health.json"
-          curl -fsS --max-time 30 -H 'Cache-Control: no-cache'             "$SCHOOL_ORIGIN/login?baseline=$RUN_ID" > "$target/login.html"
-          : > "$target/baseline.css"
-          grep -oE '/_next/static/css/[^"?]+\.css' "$target/login.html" | sort -u > "$target/css-paths.txt"
-          test -s "$target/css-paths.txt"
+          curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" > "$work/health.json"
+          curl -fsS --max-time 30 -H 'Cache-Control: no-cache' \
+            "$SCHOOL_ORIGIN/login?baseline=$RUN_ID" > "$work/login.html"
+          : > "$work/baseline.css"
+          grep -oE '/_next/static/css/[^"?]+\.css' "$work/login.html" | sort -u > "$work/css-paths.txt"
+          test -s "$work/css-paths.txt"
           while IFS= read -r css_path; do
-            curl -fsS --max-time 30 "$SCHOOL_ORIGIN$css_path" >> "$target/baseline.css"
-            printf '\n' >> "$target/baseline.css"
-          done < "$target/css-paths.txt"
-          test -s "$target/baseline.css"
+            curl -fsS --max-time 30 "$SCHOOL_ORIGIN$css_path" >> "$work/baseline.css"
+            printf '\n' >> "$work/baseline.css"
+          done < "$work/css-paths.txt"
+          test -s "$work/baseline.css"
 
           container_id="$(docker inspect "$container" --format '{{.Id}}')"
           container_created="$(docker inspect "$container" --format '{{.Created}}')"
@@ -177,20 +189,22 @@ jobs:
             printf 'data_volume=%s\n' "$data_volume"
             printf 'backup_volume=%s\n' "$backup_volume"
             printf 'native_backup_path=%s\n' "$backup_path"
+            printf 'backup_target=%s\n' "$target"
             printf 'public_origin=%s\n' "$SCHOOL_ORIGIN"
             printf 'secrets_copied=no\n'
-          } > "$target/manifest.txt"
-          chmod 0600 "$target/manifest.txt"
+          } > "$work/manifest.txt"
+          chmod 0600 "$work/manifest.txt"
 
           (
-            cd "$target"
+            cd "$work"
             sha256sum database.sqlite health.json login.html baseline.css css-paths.txt manifest.txt > SHA256SUMS
             sha256sum -c SHA256SUMS >/dev/null
           )
 
           helper="school-diary-backup-verify-$RUN_ID"
           docker rm -f "$helper" >/dev/null 2>&1 || true
-          docker run --rm --name "$helper" --read-only --network none --user 0:0             -v "$target:/verify:ro" --entrypoint node "$image_ref" --input-type=module -e "
+          docker run --rm --name "$helper" --read-only --network none --user 0:0 \
+            -v "$work:/verify:ro" --entrypoint node "$image_ref" --input-type=module -e "
               import { DatabaseSync } from 'node:sqlite';
               const db = new DatabaseSync('/verify/database.sqlite', { readOnly: true });
               const rows = db.prepare('PRAGMA integrity_check').all();
@@ -199,19 +213,64 @@ jobs:
               console.log('SCHOOL_ISOLATED_DB_VERIFY=OK');
             "
 
+          persist_helper="school-diary-backup-persist-$RUN_ID"
+          docker rm -f "$persist_helper" >/dev/null 2>&1 || true
+          docker run --rm -i --name "$persist_helper" --network none --user 0:0 \
+            -e TARGET_REL="$target_rel" \
+            -v "$work:/source:ro" -v "$backup_volume:/dest" \
+            --entrypoint node "$image_ref" --input-type=module - <<'PERSIST'
+          import { cpSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+          import { dirname } from 'node:path';
+          const rel = process.env.TARGET_REL;
+          if (!/^design-system\/[0-9]{8}T[0-9]{6}Z-run-[0-9]+$/.test(rel)) throw new Error('Invalid target');
+          const target = `/dest/${rel}`;
+          const pending = `${target}.pending`;
+          if (existsSync(target) || existsSync(pending)) throw new Error('Target already exists');
+          mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+          cpSync('/source', pending, { recursive: true, errorOnExist: true, force: false });
+          renameSync(pending, target);
+          const marker = '/dest/design-system/LATEST';
+          const markerTmp = `${marker}.tmp`;
+          rmSync(markerTmp, { force: true });
+          writeFileSync(markerTmp, `${rel}\n`, { mode: 0o600 });
+          renameSync(markerTmp, marker);
+          console.log('SCHOOL_BACKUP_PERSIST=OK');
+          PERSIST
+
+          docker run --rm -i --read-only --network none --user 0:0 \
+            -e TARGET_REL="$target_rel" -v "$backup_volume:/verify:ro" \
+            --entrypoint node "$image_ref" --input-type=module - <<'VERIFY_PERSISTED'
+          import { createHash } from 'node:crypto';
+          import { readFileSync } from 'node:fs';
+          import { DatabaseSync } from 'node:sqlite';
+          const rel = process.env.TARGET_REL;
+          if (!/^design-system\/[0-9]{8}T[0-9]{6}Z-run-[0-9]+$/.test(rel)) throw new Error('Invalid target');
+          const root = `/verify/${rel}`;
+          const sums = readFileSync(`${root}/SHA256SUMS`, 'utf8').trim().split('\n');
+          for (const line of sums) {
+            const match = line.match(/^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$/);
+            if (!match) throw new Error('Invalid checksum manifest');
+            const actual = createHash('sha256').update(readFileSync(`${root}/${match[2]}`)).digest('hex');
+            if (actual !== match[1]) throw new Error(`Checksum mismatch: ${match[2]}`);
+          }
+          const db = new DatabaseSync(`${root}/database.sqlite`, { readOnly: true });
+          const rows = db.prepare('PRAGMA integrity_check').all();
+          if (rows.length !== 1 || rows[0].integrity_check !== 'ok') throw new Error('Persisted SQLite integrity_check failed');
+          db.close();
+          console.log('SCHOOL_PERSISTED_BACKUP_VERIFY=OK');
+          VERIFY_PERSISTED
+
           started_after="$(docker inspect "$container" --format '{{.State.StartedAt}}')"
           test "$started_after" = "$started_before"
           test "$(docker inspect "$container" --format '{{.State.Running}}')" = true
           test "$(docker inspect "$container" --format '{{.State.Health.Status}}')" = healthy
           curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
-          ln -sfn "$target" "$BACKUP_ROOT/latest"
-
-          printf 'SCHOOL_BACKUP=OK path=%s\n' "$target"
+          printf 'SCHOOL_BACKUP=OK target=docker-volume://%s/%s\n' "$backup_volume" "$target_rel"
           printf 'SCHOOL_RESTARTED=no\n'
           printf 'SCHOOL_PUBLIC_HEALTH=OK\n'
           REMOTE
 
-          target="$(sed -n 's/^SCHOOL_BACKUP=OK path=//p' "$log_file" | tail -n1)"
+          target="$(sed -n 's/^SCHOOL_BACKUP=OK target=//p' "$log_file" | tail -n1)"
           test -n "$target"
           printf 'target=%s\n' "$target" >> "$GITHUB_OUTPUT"
 
