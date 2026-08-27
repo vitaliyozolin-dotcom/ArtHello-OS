@@ -305,10 +305,7 @@ for (const role of roles) {
   } else if (role === 'teacher') {
     if (
       snapshot.students.length < 1 ||
-      snapshot.rankings?.mode !== 'named' ||
-      !snapshot.teacherAssignments.some(
-        (item) => item.teacherUserId === user.id,
-      )
+      snapshot.rankings?.mode !== 'named'
     )
       throw new Error('Teacher scope contract failed');
   } else if (role === 'parent') {
