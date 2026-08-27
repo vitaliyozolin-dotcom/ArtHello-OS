@@ -49,9 +49,6 @@ jobs:
           test -s ~/.ssh/id_ed25519
           ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
 
-          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
-          test -n "$route_device"
-          sudo ip link set dev "$route_device" mtu 1200
           deploy_port="${DEPLOY_PORT:-2222}"
           scanned_hosts="$RUNNER_TEMP/school-known-hosts"
           : > "$scanned_hosts"
