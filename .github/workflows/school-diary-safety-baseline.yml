@@ -1,0 +1,174 @@
+name: School diary safety baseline
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/school-diary-safety-baseline.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: school-diary-safety-baseline
+  cancel-in-progress: false
+
+env:
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+  BACKUP_ROOT: /srv/school-1-11/backups/design-system
+  CHECKPOINT_REF: checkpoint/pre-diary-design-2026-08-27
+  EXPECTED_RELEASE_REF: cebe7be40383850ee821031245da8001c0503007
+
+jobs:
+  safety-baseline:
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'ops/school-diary-safety-baseline-20260827')
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 15
+    steps:
+      - name: Verify host and live diary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec 9>/var/lock/school-1-11-safety-baseline.lock
+          flock -n 9
+          test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = '188.225.38.55'
+          test -d /srv/school-1-11
+          container=school-1-11
+          test "$(docker inspect "$container" --format '{{.State.Running}}')" = true
+          health="$(docker inspect "$container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}')"
+          test "$health" = healthy
+          data_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          backup_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Name}}{{end}}{{end}}')"
+          test -n "$data_volume"
+          test -n "$backup_volume"
+          release="$(readlink -f /srv/school-1-11/current)"
+          test -d "$release"
+          curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
+          printf 'SCHOOL_PREFLIGHT=OK\n'
+          printf 'SCHOOL_LIVE_RELEASE=%s\n' "$release"
+          printf 'SCHOOL_DATA_VOLUME=%s\n' "$data_volume"
+          printf 'SCHOOL_BACKUP_VOLUME=%s\n' "$backup_volume"
+
+      - name: Create native consistent SQLite backup
+        id: backup
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec 9>/var/lock/school-1-11-safety-baseline.lock
+          flock -n 9
+          container=school-1-11
+          started_before="$(docker inspect "$container" --format '{{.State.StartedAt}}')"
+          image_ref="$(docker inspect "$container" --format '{{.Config.Image}}')"
+          image_id="$(docker image inspect "$image_ref" --format '{{.Id}}')"
+          release="$(readlink -f /srv/school-1-11/current)"
+          data_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          backup_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Name}}{{end}}{{end}}')"
+
+          backup_path="$(docker exec "$container" node scripts/backup-db.mjs | tail -n1)"
+          case "$backup_path" in
+            /backups/school-1-11-*.sqlite) ;;
+            *) printf 'Unexpected backup path: %s\n' "$backup_path" >&2; exit 1 ;;
+          esac
+
+          docker exec -i -e BACKUP_PATH="$backup_path" "$container" node --input-type=module - <<'NODE'
+          import { DatabaseSync } from 'node:sqlite';
+          import { statSync } from 'node:fs';
+          const path = process.env.BACKUP_PATH;
+          const stat = statSync(path);
+          if (!stat.isFile() || stat.size < 4096) throw new Error('Backup file is empty');
+          const db = new DatabaseSync(path, { readOnly: true });
+          const rows = db.prepare('PRAGMA quick_check').all();
+          if (rows.length !== 1 || rows[0].quick_check !== 'ok') throw new Error('SQLite quick_check failed');
+          const tableCount = db.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type='table'").get().count;
+          db.close();
+          console.log(`SCHOOL_BACKUP_SQLITE=OK tables=${tableCount} bytes=${stat.size}`);
+          NODE
+
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          target="$BACKUP_ROOT/$stamp-run-$GITHUB_RUN_ID"
+          install -d -m 0700 "$BACKUP_ROOT" "$target"
+          docker cp "$container:$backup_path" "$target/database.sqlite"
+          chmod 0600 "$target/database.sqlite"
+
+          curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" > "$target/health.json"
+          curl -fsS --max-time 30 -H 'Cache-Control: no-cache'             "$SCHOOL_ORIGIN/login?baseline=$GITHUB_RUN_ID" > "$target/login.html"
+          : > "$target/baseline.css"
+          grep -oE '/_next/static/css/[^"?]+\.css' "$target/login.html" | sort -u > "$target/css-paths.txt"
+          test -s "$target/css-paths.txt"
+          while IFS= read -r css_path; do
+            curl -fsS --max-time 30 "$SCHOOL_ORIGIN$css_path" >> "$target/baseline.css"
+            printf '\n' >> "$target/baseline.css"
+          done < "$target/css-paths.txt"
+          test -s "$target/baseline.css"
+
+          container_id="$(docker inspect "$container" --format '{{.Id}}')"
+          container_created="$(docker inspect "$container" --format '{{.Created}}')"
+          {
+            printf 'created_utc=%s\n' "$stamp"
+            printf 'repository_sha=%s\n' "$GITHUB_SHA"
+            printf 'checkpoint_ref=%s\n' "$CHECKPOINT_REF"
+            printf 'expected_release_ref=%s\n' "$EXPECTED_RELEASE_REF"
+            printf 'live_release=%s\n' "$release"
+            printf 'container_name=%s\n' "$container"
+            printf 'container_id=%s\n' "$container_id"
+            printf 'container_created=%s\n' "$container_created"
+            printf 'container_started=%s\n' "$started_before"
+            printf 'image_ref=%s\n' "$image_ref"
+            printf 'image_id=%s\n' "$image_id"
+            printf 'data_volume=%s\n' "$data_volume"
+            printf 'backup_volume=%s\n' "$backup_volume"
+            printf 'native_backup_path=%s\n' "$backup_path"
+            printf 'public_origin=%s\n' "$SCHOOL_ORIGIN"
+            printf 'secrets_copied=no\n'
+          } > "$target/manifest.txt"
+          chmod 0600 "$target/manifest.txt"
+
+          (
+            cd "$target"
+            sha256sum database.sqlite health.json login.html baseline.css css-paths.txt manifest.txt > SHA256SUMS
+            sha256sum -c SHA256SUMS >/dev/null
+          )
+
+          helper="school-diary-backup-verify-$GITHUB_RUN_ID"
+          docker rm -f "$helper" >/dev/null 2>&1 || true
+          docker run --rm --name "$helper" --read-only --network none --user 0:0             -v "$target:/verify:ro" --entrypoint node "$image_ref" --input-type=module -e "
+              import { DatabaseSync } from 'node:sqlite';
+              const db = new DatabaseSync('/verify/database.sqlite', { readOnly: true });
+              const rows = db.prepare('PRAGMA integrity_check').all();
+              if (rows.length !== 1 || rows[0].integrity_check !== 'ok') process.exit(1);
+              db.close();
+              console.log('SCHOOL_ISOLATED_DB_VERIFY=OK');
+            "
+
+          started_after="$(docker inspect "$container" --format '{{.State.StartedAt}}')"
+          test "$started_after" = "$started_before"
+          test "$(docker inspect "$container" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$container" --format '{{.State.Health.Status}}')" = healthy
+          curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
+          ln -sfn "$target" "$BACKUP_ROOT/latest"
+
+          printf 'target=%s\n' "$target" >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_BACKUP=OK path=%s\n' "$target"
+          printf 'SCHOOL_RESTARTED=no\n'
+          printf 'SCHOOL_PUBLIC_HEALTH=OK\n'
+
+      - name: Publish safety result
+        if: always()
+        shell: bash
+        env:
+          TARGET: ${{ steps.backup.outputs.target }}
+        run: |
+          {
+            echo '## School diary safety baseline'
+            echo
+            echo "- Production UI changed: no"
+            echo "- Production database changed: no"
+            echo "- Container restarted: no"
+            echo "- Code checkpoint: `$CHECKPOINT_REF`"
+            echo "- Backup target: `${TARGET:-not-created}`"
+            echo "- Result: `${{ job.status }}`"
+          } >> "$GITHUB_STEP_SUMMARY"
