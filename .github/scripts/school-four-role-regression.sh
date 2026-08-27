@@ -167,13 +167,26 @@ const integrityBefore = db.prepare('PRAGMA integrity_check').all();
 if (integrityBefore.length !== 1 || integrityBefore[0].integrity_check !== 'ok')
   throw new Error('Role regression input integrity failed');
 
-const student = db
+let student = db
   .prepare("SELECT id, class_name AS className FROM students WHERE status = 'active' ORDER BY class_name, id LIMIT 1")
   .get();
-const subject = db
+if (!student) {
+  const id = 'regression-synthetic-student';
+  db.prepare(
+    "INSERT INTO students (id, first_name, last_name, class_name, avatar_color, status) VALUES (?, 'Role', 'Regression', '1', '#e84412', 'active')",
+  ).run(id);
+  student = { id, className: '1' };
+}
+let subject = db
   .prepare("SELECT id FROM subjects WHERE status = 'active' ORDER BY id LIMIT 1")
   .get();
-if (!student || !subject) throw new Error('Role regression requires active school data');
+if (!subject) {
+  const id = 'regression-synthetic-subject';
+  db.prepare(
+    "INSERT INTO subjects (id, name, short_name, color, icon, stage, weekly_hours, status) VALUES (?, 'Role regression', 'Regression', '#e84412', 'R', '1', 1, 'active')",
+  ).run(id);
+  subject = { id };
+}
 
 const password = 'RoleRegression-' + randomBytes(18).toString('base64url') + '7a';
 const salt = randomBytes(16);
