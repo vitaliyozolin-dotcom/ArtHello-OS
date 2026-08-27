@@ -107,8 +107,9 @@ jobs:
               const page=await context.newPage();
               for(const route of routes){
                 const url=`${base}/?baseline=${Date.now()}#${route}`;
-                await page.goto(url,{waitUntil:'networkidle',timeout:30000});
-                await page.waitForTimeout(700);
+                await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
+                await page.waitForLoadState('load',{timeout:10000}).catch(()=>{});
+                await page.waitForTimeout(1200);
                 const metrics=await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth,title:document.title}));
                 const file=`${route}-${width}x${height}.png`;
                 await page.screenshot({path:`${out}/${file}`,fullPage:true});
