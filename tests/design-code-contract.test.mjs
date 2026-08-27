@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [tokens, layout] = await Promise.all([
+const [tokens, layout, dockerfile] = await Promise.all([
   readFile(new URL("../app/design-tokens.css", import.meta.url), "utf8"),
   readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
 ]);
 
 test("approved design-code identity is immutable", () => {
@@ -38,6 +39,20 @@ test("rollout is explicit and disabled by default", () => {
     layout.indexOf('import "./design-tokens.css"') <
       layout.indexOf('import "./globals.css"'),
     "tokens must load before legacy styles",
+  );
+});
+
+test("container build gate is false unless explicitly enabled", () => {
+  assert.match(dockerfile, /^ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1=false/m);
+  assert.equal(
+    (dockerfile.match(/^ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1$/gm) || []).length,
+    2,
+  );
+  assert.equal(
+    (dockerfile.match(
+      /^ENV NEXT_PUBLIC_SCHOOL_DESIGN_V1=\$NEXT_PUBLIC_SCHOOL_DESIGN_V1$/gm,
+    ) || []).length,
+    2,
   );
 });
 
