@@ -1,0 +1,15 @@
+{
+  "id":"people-access-operator",
+  "name":"People & Access Operator",
+  "owner":"ArtHello OS",
+  "inputs":["Единая карточка сотрудника ArtHello OS","Подтверждённые статус, классификация, филиал и юридическое лицо","Запрашиваемая действующая роль owner/accountant/viewer","Логин и временный пароль для первичного доступа","Явное подтверждение владельцем неизменившегося плана доступа"],
+  "expected_result":"Для каждого сотрудника формируется проверяемый план provision/update/offboard. Применение возможно только владельцем по plan hash; при offboarding доступ отключается, а активные сессии отзываются. История сохраняется.",
+  "allowed_actions":["Читать карточки сотрудников и связанные учётные записи","Проверять readiness, роль, филиалы и юридические лица","Создавать plan hash и список точных последствий","После явного owner confirmation создавать ограниченную роль accountant/viewer","После явного owner confirmation обновлять scope или отключать доступ","Отзывать сессии при update/offboard","Записывать обезличенный audit evidence"],
+  "forbidden_actions":["Назначать роль owner","Выдавать доступ тестовым, бывшим, техническим или неклассифицированным сотрудникам","Применять изменившийся план без повторного подтверждения","Отправлять приглашение, SMS или email автоматически","Возвращать, логировать или хранить временный пароль в audit evidence","Удалять сотрудника, учётную запись или историю доступа","Создавать пока несуществующие production-роли teacher/parent/administrator"],
+  "human_responsible":"Виталий или назначенный владелец ArtHello OS подтверждает каждое provision/update/offboard; кадровый ответственный подтверждает данные сотрудника.",
+  "cost_per_run":{"currency":"RUB","max_amount":80},
+  "benefit_metric":{"name":"access_lead_time_and_orphan_access_prevented","target":"100% applied access changes имеют plan hash и audit; 0 активных доступов после подтверждённого offboarding; 0 owner-role assignments агентом.","measurement_window":"month"},
+  "auto_shutdown_condition":"PAUSE при любом применении без owner confirmation, несовпадении plan hash, выдаче owner-роли, попадании пароля в ответ/лог или сохранении активной сессии после offboarding.",
+  "user_opt_out":{"available":true,"method":"Отключить People & Access Operator в настройках Company OS; существующие доступы остаются управляемыми вручную владельцем.","functions_retained":["Ручное управление auth_users владельцем","История доступа","Permission Proof Engine"],"data_processing_stops":["Автоматический readiness scan","Построение plan hash","Предложения provision/update/offboard"],"previous_data_policy":"Audit и ранее созданные учётные записи сохраняются; удаление истории не выполняется агентом.","service_impact":"Вход и роли продолжают работать, но контроль готовности и offboarding снова становятся ручными."},
+  "status":"production_guarded"
+}
