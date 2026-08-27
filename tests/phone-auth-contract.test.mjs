@@ -31,6 +31,11 @@ test("same-origin validation uses the configured public origin behind the proxy"
     /origin && origin !== new URL\(request\.url\)\.origin/,
   );
   assert.doesNotMatch(auth, /x-forwarded-(host|proto)/i);
+  assert.equal(
+    auth.match(/expectedRequestOrigin\(request\)\.startsWith\("https:\/\/"\)/g)
+      ?.length,
+    2,
+  );
 });
 
 test("first login and central reset invalidate previous access", () => {
