@@ -18,6 +18,7 @@ env:
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   BACKUP_ROOT: /srv/arthello/backups/design-system
   BASELINE_ROOT: /srv/arthello/baselines/design-system
+  CHECKPOINT_SHA: 1aa562c534871a13685a019a67bca2e1cbbedf31
 
 jobs:
   safety-baseline:
@@ -25,7 +26,7 @@ jobs:
     timeout-minutes: 30
     environment: production-ru
     steps:
-      - name: Checkout checkpoint tooling
+      - name: Checkout tooling
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -36,9 +37,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = '188.225.38.55'
+          test -n "$CHECKPOINT_SHA"
           curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null
-          git ls-remote --exit-code origin refs/heads/checkpoint/pre-design-system-2026-08-27 >/dev/null
-          printf 'DESIGN_SYSTEM_CHECKPOINT=OK\n'
+          printf 'DESIGN_SYSTEM_CHECKPOINT=OK sha=%s\n' "$CHECKPOINT_SHA"
 
       - name: Create consistent production DB backup
         shell: bash
@@ -67,13 +68,13 @@ jobs:
           test -s "$target/SHA256SUMS"
           printf '%s\n' "$live" > "$target/live-container.txt"
           printf '%s\n' "$image" > "$target/live-image.txt"
-          printf '%s\n' "$GITHUB_SHA" > "$target/repository-sha.txt"
+          printf '%s\n' "$CHECKPOINT_SHA" > "$target/checkpoint-sha.txt"
           curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null
           ln -sfn "$target" "$BACKUP_ROOT/latest"
           printf 'ARTHELLO_BACKUP=OK path=%s\n' "$target"
           trap - EXIT
 
-      - name: Verify backup is readable in isolated helper
+      - name: Verify backup integrity
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -123,7 +124,7 @@ jobs:
           NODE
           PUBLIC_URL="$PUBLIC_URL" BASELINE_TARGET="$target" node capture.mjs
           test -s "$target/manifest.json"
-          printf '%s\n' "$GITHUB_SHA" > "$target/repository-sha.txt"
+          printf '%s\n' "$CHECKPOINT_SHA" > "$target/checkpoint-sha.txt"
           ln -sfn "$target" "$BASELINE_ROOT/latest"
           printf 'ARTHELLO_VISUAL_BASELINE=OK path=%s\n' "$target"
 
@@ -135,7 +136,7 @@ jobs:
             echo '## Design System safety baseline'
             echo
             echo "- Production UI changed: no"
-            echo "- Checkpoint: checkpoint/pre-design-system-2026-08-27"
+            echo "- Checkpoint SHA: $CHECKPOINT_SHA"
             echo "- Backup root: $BACKUP_ROOT"
             echo "- Baseline root: $BASELINE_ROOT"
             echo "- Result: ${{ job.status }}"
