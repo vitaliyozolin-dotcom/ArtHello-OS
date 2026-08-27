@@ -166,7 +166,9 @@ export async function createSession(user: SessionUser, request: Request) {
     )
     .bind(id, user.id, sha256(token), user.authVersion, expiresAt)
     .run();
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  const secure = expectedRequestOrigin(request).startsWith("https://")
+    ? "; Secure"
+    : "";
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`;
 }
 
@@ -177,7 +179,9 @@ export async function destroySession(request: Request) {
       .prepare("DELETE FROM auth_sessions WHERE token_hash = ?")
       .bind(sha256(token))
       .run();
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  const secure = expectedRequestOrigin(request).startsWith("https://")
+    ? "; Secure"
+    : "";
   return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }
 
