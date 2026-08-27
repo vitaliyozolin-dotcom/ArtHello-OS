@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import "./design-tokens.css";
 import "./globals.css";
 import "./mobile-polish.css";
 
@@ -17,8 +18,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const designCodeVersion =
+    process.env.NEXT_PUBLIC_SCHOOL_DESIGN_V1 === "true" ? "v1" : undefined;
+
   return (
-    <html lang="ru">
+    <html lang="ru" data-design-code={designCodeVersion}>
       <body>{children}</body>
     </html>
   );
