@@ -10,6 +10,8 @@ regression_data="school-1-11_role_regression_${RUN_ID}_data"
 container_created=0
 volume_created=0
 success=0
+work=""
+container_backup_path=""
 
 case "$regression:$regression_data" in
   school-1-11-role-regression-*:school-1-11_role_regression_*_data) ;;
@@ -26,6 +28,14 @@ cleanup() {
   if [ "$volume_created" -eq 1 ]; then
     docker volume rm "$regression_data" >/dev/null 2>&1
   fi
+  case "$container_backup_path" in
+    /tmp/school-1-11-*.sqlite)
+      docker exec "$staging" rm -f -- "$container_backup_path" >/dev/null 2>&1
+      ;;
+  esac
+  case "$work" in
+    /tmp/school-four-role.*) rm -rf -- "$work" ;;
+  esac
   if [ "$success" -ne 1 ]; then
     printf 'SCHOOL_FOUR_ROLE_CLEANUP=ATTEMPTED_AFTER_FAILURE\n' >&2
   fi
@@ -48,20 +58,15 @@ if docker volume inspect "$regression_data" >/dev/null 2>&1; then
   exit 1
 fi
 
-backup_volume="$(docker inspect "$staging" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Name}}{{end}}{{end}}')"
-test -n "$backup_volume"
-backup_path="$(docker exec "$staging" node scripts/backup-db.mjs | tail -n1)"
-case "$backup_path" in
-  /backups/school-1-11-*.sqlite) ;;
+work="$(mktemp -d /tmp/school-four-role.XXXXXX)"
+chmod 0700 "$work"
+container_backup_path="$(docker exec -e BACKUP_DIR=/tmp "$staging" node scripts/backup-db.mjs | tail -n1)"
+case "$container_backup_path" in
+  /tmp/school-1-11-*.sqlite) ;;
   *) printf 'Unexpected staging backup path\n' >&2; exit 1 ;;
 esac
-backup_file="${backup_path#/backups/}"
-case "$backup_file" in
-  school-1-11-*.sqlite) ;;
-  *) printf 'Unexpected staging backup file\n' >&2; exit 1 ;;
-esac
 
-docker exec -i -e BACKUP_PATH="$backup_path" "$staging" node --input-type=module - <<'VERIFY_BACKUP'
+docker exec -i -e BACKUP_PATH="$container_backup_path" "$staging" node --input-type=module - <<'VERIFY_BACKUP'
 import { DatabaseSync } from 'node:sqlite';
 import { statSync } from 'node:fs';
 const path = process.env.BACKUP_PATH;
@@ -75,6 +80,12 @@ db.close();
 console.log('SCHOOL_FOUR_ROLE_BACKUP=OK bytes=' + stat.size);
 VERIFY_BACKUP
 
+docker cp "$staging:$container_backup_path" "$work/database.sqlite"
+chmod 0600 "$work/database.sqlite"
+test -s "$work/database.sqlite"
+docker exec "$staging" rm -f -- "$container_backup_path"
+container_backup_path=""
+backup_file=database.sqlite
 docker volume create \
   --label school.system=school-1-11 \
   --label school.environment=ephemeral-regression \
@@ -85,7 +96,7 @@ volume_created=1
 
 docker run --rm -i --network none --user 0:0 \
   -e BACKUP_FILE="$backup_file" \
-  -v "$backup_volume:/backup:ro" \
+  -v "$work:/backup:ro" \
   -v "$regression_data:/data" \
   --entrypoint node "$CANDIDATE_IMAGE" --input-type=module - <<'PREPARE_DATA'
 import { chmodSync, chownSync, copyFileSync } from 'node:fs';
@@ -384,6 +395,8 @@ docker rm -f "$regression" >/dev/null
 container_created=0
 docker volume rm "$regression_data" >/dev/null
 volume_created=0
+rm -rf -- "$work"
+work=""
 test -z "$(docker ps -aq --filter "name=^/$regression$")"
 if docker volume inspect "$regression_data" >/dev/null 2>&1; then
   printf 'Regression data volume was not removed\n' >&2
