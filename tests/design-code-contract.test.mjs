@@ -21,7 +21,7 @@ test("approved design-code identity is immutable", () => {
 
 test("only approved design radii are defined", () => {
   const radiusDefinitions = [
-    ...tokens.matchAll(/--radius-[\w-]+:\s*([^;]+);/g),
+    ...tokens.matchAll(/--ds-radius-[\w-]+:\s*([^;]+);/g),
   ].map((match) => match[1].trim());
 
   assert.deepEqual(radiusDefinitions, ["8px", "12px", "16px", "20px", "999px"]);
