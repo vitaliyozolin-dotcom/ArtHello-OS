@@ -19,6 +19,7 @@ function forbid(source, pattern, label) {
 
 const shell = read("app/components/ArtHelloShell.tsx");
 const help = read("app/components/ContextualHelpSystem.tsx");
+const helpCss = read("app/components/ContextualHelpSystem.css");
 const helpDom = read("app/components/contextualHelpDom.ts");
 const hr = read("app/components/HrWorkspace.tsx");
 const sales = read("app/components/SalesWorkspace.tsx");
@@ -71,6 +72,11 @@ requireText(polish, 'button[data-ah-help-inline="true"]', "static field help sty
 requireText(polish, ".crm-toolbar > div:last-child > button:first-child", "sales mobile action layout is missing");
 requireText(polish, ".modal-layer.staff-modal-layer", "employee dialog safe-area styling is missing");
 requireText(polish, ".hr-tabs", "system tab alignment rules are missing");
+
+requireText(polish, "/* ARTHELLO_MOBILE_CANONICAL_V5 */", "canonical mobile design system is missing");
+requireText(helpCss, "/* ARTHELLO_HELP_CANONICAL_V5 */", "canonical help styling is missing");
+forbid(polish, /ARTHELLO_MOBILE_VISUAL_HELP_FOLLOWUP|ARTHELLO_OPERATIONAL_UX_V3|ARTHELLO_MOBILE_DESIGN_SYSTEM_V4|ARTHELLO_HELP_MARKER_RIGHT_EDGE/, "legacy mobile CSS layers remain after canonical cleanup");
+forbid(helpCss, /ARTHELLO_HELP_UX_V3|ARTHELLO_HELP_VISIBILITY_V4/, "legacy help CSS layers remain after canonical cleanup");
 
 const productionSources = [procurement, food, safety, medical, strategy].join("\n");
 forbid(productionSources, /Тестовый комплект для класса/, "hard-coded procurement test request remains");
