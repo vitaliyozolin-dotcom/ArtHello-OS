@@ -1,56 +1,7 @@
 import fs from "node:fs";
-
-const path = "/app/app/components/SystemWideMobilePolish.css";
-let source = fs.readFileSync(path, "utf8");
-const marker = "/* ARTHELLO_HELP_MARKER_RIGHT_EDGE */";
-
-if (!source.includes(marker)) {
-  source += `\n\n${marker}
-
-/* Inline help markers must live on the right edge of the control, never before the search icon. */
-.family-workspace :is(label, div):has(> input[placeholder*="Найти семью"]) {
-  position: relative !important;
-}
-
-.family-workspace button[data-ah-help-inline="true"].ah-field-icon,
-.family-workspace :is(label, div):has(> input[placeholder*="Найти семью"]) > button.ah-field-icon {
-  position: absolute !important;
-  top: 50% !important;
-  right: 14px !important;
-  bottom: auto !important;
-  left: auto !important;
-  inset-inline-start: auto !important;
-  inset-inline-end: 14px !important;
-  width: 24px !important;
-  min-width: 24px !important;
-  height: 24px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  transform: translateY(-50%) !important;
-  z-index: 3 !important;
-  opacity: .95 !important;
-}
-
-.family-workspace :is(label, div):has(> input[placeholder*="Найти семью"]) > :is(span, i):first-child {
-  position: absolute !important;
-  left: 16px !important;
-  top: 50% !important;
-  width: 22px !important;
-  height: 22px !important;
-  display: grid !important;
-  place-items: center !important;
-  transform: translateY(-50%) !important;
-  font-size: 21px !important;
-  line-height: 1 !important;
-  z-index: 2 !important;
-}
-
-.family-workspace input[placeholder*="Найти семью"] {
-  padding-left: 50px !important;
-  padding-right: 52px !important;
-}
-`;
-}
-
-fs.writeFileSync(path, source);
+const path="/app/app/components/SystemWideMobilePolish.css";
+let source=fs.readFileSync(path,"utf8");
+const marker="/* ARTHELLO_HELP_MARKER_RIGHT_EDGE */";
+if(!source.includes(marker)) source+=`\n${marker}\n.family-workspace :is(label,div):has(>input[placeholder*="Найти семью"]){position:relative!important}.family-workspace button[data-ah-help-inline="true"].ah-field-icon,.family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])>button.ah-field-icon{position:absolute!important;top:50%!important;right:14px!important;bottom:auto!important;left:auto!important;inset-inline-start:auto!important;inset-inline-end:14px!important;width:24px!important;min-width:24px!important;height:24px!important;margin:0!important;padding:0!important;transform:translateY(-50%)!important;z-index:3!important;opacity:.95!important}.family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])>:is(span,i):first-child{position:absolute!important;left:16px!important;top:50%!important;width:22px!important;height:22px!important;display:grid!important;place-items:center!important;transform:translateY(-50%)!important;font-size:21px!important;line-height:1!important;z-index:2!important}.family-workspace input[placeholder*="Найти семью"]{padding-left:50px!important;padding-right:52px!important}\n`;
+fs.writeFileSync(path,source);
 console.log("patch-help-marker-right-edge: applied");
