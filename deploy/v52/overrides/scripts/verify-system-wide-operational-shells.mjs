@@ -6,19 +6,16 @@ function read(relativePath) {
 }
 
 function requireText(source, expected, label) {
-  if (!source.includes(expected)) {
-    throw new Error(`System-wide verification failed: ${label}`);
-  }
+  if (!source.includes(expected)) throw new Error(`System-wide verification failed: ${label}`);
 }
 
 function forbid(source, pattern, label) {
-  if (pattern.test(source)) {
-    throw new Error(`System-wide verification failed: ${label}`);
-  }
+  if (pattern.test(source)) throw new Error(`System-wide verification failed: ${label}`);
 }
 
 const shell = read("app/components/ArtHelloShell.tsx");
 const help = read("app/components/ContextualHelpSystem.tsx");
+const helpCss = read("app/components/ContextualHelpSystem.css");
 const helpDom = read("app/components/contextualHelpDom.ts");
 const hr = read("app/components/HrWorkspace.tsx");
 const sales = read("app/components/SalesWorkspace.tsx");
@@ -38,19 +35,12 @@ const polish = read("app/components/SystemWideMobilePolish.css");
 
 requireText(shell, 'import "./SystemWideMobilePolish.css";', "global polish stylesheet is not loaded");
 requireText(shell, "onOpenIntegrations={() => openModule(\"integrations\")}", "operational modules cannot open integrations");
-
 requireText(help, "data-ah-help-inline=\"true\"", "field help markers are not anchored inline");
 requireText(help, "createPortal", "inline field help is not portaled into labels");
 requireText(helpDom, "inlineHelpTargetFor", "inline field help target discovery is missing");
 forbid(help, /fieldMarkers\.map\(\(\{\s*field,\s*left,\s*top\s*\}\)/, "legacy floating field markers remain");
 
-for (const [name, source] of [
-  ["HR", hr],
-  ["Sales", sales],
-  ["Content", content],
-  ["Legal", legal],
-  ["Integrations", integration],
-]) {
+for (const [name, source] of [["HR", hr],["Sales", sales],["Content", content],["Legal", legal],["Integrations", integration]]) {
   requireText(source, "createPortal", `${name} dialogs are not rendered above the mobile shell`);
 }
 
@@ -64,13 +54,17 @@ requireText(food, "Партии, ТТК, производство, отгруз�
 requireText(safety, "Системы, оборудование, проверки, инциденты, ремонты", "safety still collapses when empty");
 requireText(medical, "Контроль, документы, ограничения, случаи, действия и аудит", "medical still collapses when empty");
 requireText(strategy, "Календарь, проекты, цели, KPI, прогнозы", "strategy still collapses when empty");
-
 requireText(family, "Импорт не равен доступу", "family import boundary is missing");
+
 requireText(polish, 'input[placeholder*="Найти семью"]', "family search readability rule is missing");
 requireText(polish, 'button[data-ah-help-inline="true"]', "static field help styling is missing");
 requireText(polish, ".crm-toolbar > div:last-child > button:first-child", "sales mobile action layout is missing");
 requireText(polish, ".modal-layer.staff-modal-layer", "employee dialog safe-area styling is missing");
 requireText(polish, ".hr-tabs", "system tab alignment rules are missing");
+requireText(polish, "/* ARTHELLO_MOBILE_CANONICAL_V5 */", "canonical mobile design system is missing");
+requireText(helpCss, "/* ARTHELLO_HELP_CANONICAL_V5 */", "canonical help styling is missing");
+forbid(polish, /ARTHELLO_MOBILE_VISUAL_HELP_FOLLOWUP|ARTHELLO_OPERATIONAL_UX_V3|ARTHELLO_MOBILE_DESIGN_SYSTEM_V4|ARTHELLO_HELP_MARKER_RIGHT_EDGE/, "legacy mobile CSS layers remain after canonical cleanup");
+forbid(helpCss, /ARTHELLO_HELP_UX_V3|ARTHELLO_HELP_VISIBILITY_V4/, "legacy help CSS layers remain after canonical cleanup");
 
 const productionSources = [procurement, food, safety, medical, strategy].join("\n");
 forbid(productionSources, /Тестовый комплект для класса/, "hard-coded procurement test request remains");
@@ -86,8 +80,6 @@ for (const file of readdirSync(componentsDir).filter((name) => name.endsWith("Wo
   const pattern = /if\s*\([^;]{0,900}(?:\.length|has[A-Z][A-Za-z]+Data)[^;]{0,900}\)\s*return\s*(?:<>\s*)?<section[^;]{0,2600}manual-module-empty/gs;
   if (pattern.test(source)) blocking.push(file);
 }
-if (blocking.length) {
-  throw new Error(`System-wide verification failed: blocking empty-state returns remain in ${blocking.join(", ")}`);
-}
+if (blocking.length) throw new Error(`System-wide verification failed: blocking empty-state returns remain in ${blocking.join(", ")}`);
 
 console.log("System-wide operational shell verification passed");
