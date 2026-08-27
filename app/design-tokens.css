@@ -105,11 +105,11 @@
   --space-20: 80px;
 
   /* Approved geometry: 8, 12, 16, 20 and pill only */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
-  --radius-pill: 999px;
+  --ds-radius-sm: 8px;
+  --ds-radius-md: 12px;
+  --ds-radius-lg: 16px;
+  --ds-radius-xl: 20px;
+  --ds-radius-pill: 999px;
 
   /* Elevation */
   --shadow-none: none;
@@ -168,6 +168,9 @@ html[data-design-code="v1"] {
   --line: var(--color-border);
   --canvas: var(--color-page);
   --surface: var(--color-surface);
+  --radius-sm: var(--ds-radius-md);
+  --radius-md: var(--ds-radius-lg);
+  --radius-lg: var(--ds-radius-lg);
   --shadow: var(--shadow-md);
   --font-display: var(--font-sans);
   --font-text: var(--font-sans);
@@ -214,7 +217,7 @@ html[data-design-code="v1"] .page-shell {
 
 html[data-design-code="v1"] .content-card {
   border-color: var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--ds-radius-lg);
   padding: var(--card-padding);
   background: var(--color-surface);
   box-shadow: var(--shadow-sm);
@@ -223,7 +226,7 @@ html[data-design-code="v1"] .content-card {
 html[data-design-code="v1"] .primary-btn,
 html[data-design-code="v1"] .ghost-btn {
   min-height: var(--control-height-md);
-  border-radius: var(--radius-md);
+  border-radius: var(--ds-radius-md);
   padding-inline: var(--space-4);
   font-size: var(--text-small-size);
   line-height: var(--text-small-line);
