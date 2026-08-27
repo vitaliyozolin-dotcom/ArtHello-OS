@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [tokens, layout, dockerfile] = await Promise.all([
+const [tokens, layout, dockerfile, login] = await Promise.all([
   readFile(new URL("../app/design-tokens.css", import.meta.url), "utf8"),
   readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
   readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
+  readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8"),
 ]);
 
 test("approved design-code identity is immutable", () => {
@@ -53,6 +54,28 @@ test("container build gate is false unless explicitly enabled", () => {
       /^ENV NEXT_PUBLIC_SCHOOL_DESIGN_V1=\$NEXT_PUBLIC_SCHOOL_DESIGN_V1$/gm,
     ) || []).length,
     2,
+  );
+});
+
+test("login follows the approved form contract", () => {
+  assert.match(login, /width=\{48\}[\s\S]*height=\{48\}/);
+  assert.match(login, /className="auth-error-slot"/);
+  assert.match(login, /aria-live="polite"/);
+  assert.match(login, /aria-invalid=\{Boolean\(error\)\}/);
+  assert.match(login, /aria-describedby=\{error \? "login-error" : undefined\}/);
+  assert.doesNotMatch(login, /ArtHello OS|Виталий/);
+
+  assert.match(
+    tokens,
+    /html\[data-design-code="v1"\] \.auth-card \{[\s\S]*?border-radius: var\(--ds-radius-lg\);/,
+  );
+  assert.match(
+    tokens,
+    /html\[data-design-code="v1"\] \.auth-field input \{[\s\S]*?height: var\(--control-height-lg\);[\s\S]*?border-radius: var\(--ds-radius-md\);/,
+  );
+  assert.match(
+    tokens,
+    /html\[data-design-code="v1"\] \.auth-error-slot \{[\s\S]*?min-height: var\(--text-small-line\);/,
   );
 });
 

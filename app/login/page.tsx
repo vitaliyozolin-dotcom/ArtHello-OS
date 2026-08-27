@@ -38,46 +38,73 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="gate-stage auth-stage">
-      <section className="access-card auth-card">
-        <Image src="/school-logo.svg" alt="" width={68} height={68} />
-        <span className="eyebrow">Школа 1–11</span>
-        <h1>Вход в дневник</h1>
-        <p>
-          Введите телефон или email из карточки семьи ArtHello OS и ваш пароль.
+    <main className="gate-stage auth-stage">
+      <section className="access-card auth-card" aria-labelledby="login-title">
+        <Image
+          className="auth-logo"
+          src="/school-logo.svg"
+          alt=""
+          width={48}
+          height={48}
+          priority
+        />
+        <span className="auth-brand-name">Школа 1–11</span>
+        <h1 id="login-title">Вход в дневник</h1>
+        <p className="auth-intro">
+          Используйте телефон или email, указанный при подключении к школе.
         </p>
-        <form onSubmit={submit}>
-          <label>
+
+        <form className="auth-form" onSubmit={submit}>
+          <label className="auth-field" htmlFor="login-identifier">
             <span>Телефон или email</span>
             <input
+              id="login-identifier"
               name="login"
               type="text"
-              inputMode="email"
               autoComplete="username"
               placeholder="+7 999 123-45-67 или name@example.ru"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "login-error" : undefined}
               required
             />
           </label>
-          <label>
+
+          <label className="auth-field" htmlFor="login-password">
             <span>Пароль</span>
             <input
+              id="login-password"
               name="password"
               type="password"
               autoComplete="current-password"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "login-error" : undefined}
               required
             />
           </label>
-          {error ? <p className="form-error">{error}</p> : null}
-          <button className="primary-btn" disabled={busy}>
+
+          <div className="auth-error-slot" aria-live="polite" aria-atomic="true">
+            {error ? (
+              <p id="login-error" className="auth-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+          </div>
+
+          <button
+            className="primary-btn auth-submit"
+            type="submit"
+            disabled={busy}
+            aria-busy={busy}
+          >
             <Icon name="lock" size={18} />
-            {busy ? "Проверяем…" : "Войти"}
+            {busy ? "Входим…" : "Войти"}
           </button>
         </form>
-        <small>
-          Первый пароль создаётся по одноразовой ссылке из SMS или письма. Если
-          вы его забыли, Виталий сбросит доступ в карточке семьи ArtHello OS.
+
+        <small className="auth-help">
+          Нет доступа или забыли пароль? Обратитесь к администратору школы.
         </small>
       </section>
-    </div>
+    </main>
   );
 }

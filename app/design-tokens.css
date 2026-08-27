@@ -247,6 +247,143 @@ html[data-design-code="v1"] .ghost-btn {
   color: var(--color-text);
 }
 
+
+/* Login v1: approved geometry, typography and a reserved error row. */
+html[data-design-code="v1"] .auth-stage {
+  min-width: 320px;
+  padding: var(--space-6);
+  overflow-y: auto;
+  background: var(--color-page);
+}
+
+html[data-design-code="v1"] .auth-card {
+  width: min(var(--modal-width-sm), 100%);
+  min-height: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--ds-radius-lg);
+  padding: var(--card-padding);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  align-items: stretch;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+html[data-design-code="v1"] .auth-card > .auth-logo {
+  width: 48px;
+  height: 48px;
+  border-radius: 0;
+  box-shadow: none;
+  align-self: center;
+}
+
+html[data-design-code="v1"] .auth-brand-name {
+  margin-top: var(--space-4);
+  align-self: center;
+  color: var(--color-text);
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 24px;
+}
+
+html[data-design-code="v1"] .auth-card > h1 {
+  margin-top: var(--space-6);
+  color: var(--color-text);
+  font-size: var(--text-h1-size);
+  line-height: var(--text-h1-line);
+  letter-spacing: -0.02em;
+  text-align: center;
+}
+
+html[data-design-code="v1"] .auth-card > .auth-intro {
+  max-width: none;
+  margin-top: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  text-align: center;
+}
+
+html[data-design-code="v1"] .auth-form {
+  width: 100%;
+  margin-top: var(--space-6);
+  display: grid;
+  gap: var(--space-4);
+}
+
+html[data-design-code="v1"] .auth-field {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--color-text);
+  text-align: left;
+}
+
+html[data-design-code="v1"] .auth-field > span {
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] .auth-field input {
+  width: 100%;
+  height: var(--control-height-lg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--ds-radius-md);
+  padding: var(--space-3) var(--space-4);
+  outline: 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  transition:
+    border-color var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard);
+}
+
+html[data-design-code="v1"] .auth-field input::placeholder {
+  color: var(--color-text-muted);
+}
+
+html[data-design-code="v1"] .auth-field input:focus-visible {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-focus);
+}
+
+html[data-design-code="v1"] .auth-field input[aria-invalid="true"] {
+  border-color: var(--danger-500);
+}
+
+html[data-design-code="v1"] .auth-error-slot {
+  min-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] .auth-error-slot > .auth-error {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--danger-500);
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--text-small-line);
+  text-align: left;
+}
+
+html[data-design-code="v1"] .auth-card .auth-submit {
+  width: 100%;
+  min-height: var(--control-height-lg);
+  margin-top: 0;
+}
+
+html[data-design-code="v1"] .auth-card > .auth-help {
+  max-width: none;
+  margin-top: var(--space-5);
+  color: var(--color-text-secondary);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  text-align: center;
+}
+
 @media (min-width: 1600px) {
   html[data-design-code="v1"] .page-shell {
     padding: var(--content-padding-wide);
@@ -261,6 +398,14 @@ html[data-design-code="v1"] .ghost-btn {
 }
 
 @media (max-width: 767px) {
+  html[data-design-code="v1"] .auth-stage {
+    padding: var(--content-padding-mobile);
+  }
+
+  html[data-design-code="v1"] .auth-card {
+    padding: var(--card-padding-compact);
+  }
+
   html[data-design-code="v1"] .l0-workspace {
     height: calc(100svh - var(--mobile-nav-height));
     grid-template-rows: var(--mobile-topbar-height) minmax(0, 1fr);
