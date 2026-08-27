@@ -28,7 +28,6 @@ jobs:
        github.event.pull_request.head.ref == 'ops/school-diary-safety-baseline-20260827')
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: production-ru
     steps:
       - name: Configure confirmed School SSH host
         env:
