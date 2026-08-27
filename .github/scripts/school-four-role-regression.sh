@@ -102,7 +102,7 @@ docker run --rm -i --network none --user 0:0 \
 import { chmodSync, chownSync, copyFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 const file = process.env.BACKUP_FILE;
-if (!/^school-1-11-[0-9TZ.-]+\.sqlite$/.test(file))
+if (file !== 'database.sqlite')
   throw new Error('Invalid regression backup file');
 const target = '/data/school-1-11.sqlite';
 copyFileSync('/backup/' + file, target);
