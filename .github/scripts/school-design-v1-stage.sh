@@ -14,6 +14,8 @@ acceptance_created=0
 old_renamed=0
 new_created=0
 new_data_created=0
+work=""
+container_backup_path=""
 
 case "$acceptance:$rollback:$new_data" in
   school-1-11-design-acceptance-*:school-1-11-staging-design-rollback-*:school-1-11_staging_design_*_data) ;;
@@ -42,6 +44,14 @@ cleanup() {
     fi
     printf 'SCHOOL_DESIGN_STAGING_ROLLBACK=ATTEMPTED\n' >&2
   fi
+  case "$container_backup_path" in
+    /tmp/school-1-11-*.sqlite)
+      docker exec "$staging" rm -f -- "$container_backup_path" >/dev/null 2>&1
+      ;;
+  esac
+  case "$work" in
+    /tmp/school-design-stage.*) rm -rf -- "$work" ;;
+  esac
   exit "$rc"
 }
 trap cleanup EXIT
@@ -83,17 +93,14 @@ esac
 binding="$(docker inspect "$staging" | python3 -c 'import json,sys; d=json.load(sys.stdin)[0]; b=d["HostConfig"]["PortBindings"]["3000/tcp"][0]; print(b["HostIp"]+":"+b["HostPort"])')"
 test "$binding" = "127.0.0.1:$STAGING_PORT"
 
-backup_path="$(docker exec "$staging" node scripts/backup-db.mjs | tail -n1)"
-case "$backup_path" in
-  /backups/school-1-11-*.sqlite) ;;
+work="$(mktemp -d /tmp/school-design-stage.XXXXXX)"
+chmod 0700 "$work"
+container_backup_path="$(docker exec -e BACKUP_DIR=/tmp "$staging" node scripts/backup-db.mjs | tail -n1)"
+case "$container_backup_path" in
+  /tmp/school-1-11-*.sqlite) ;;
   *) printf 'Unexpected staging backup path\n' >&2; exit 1 ;;
 esac
-backup_file="${backup_path#/backups/}"
-case "$backup_file" in
-  school-1-11-*.sqlite) ;;
-  *) printf 'Unexpected staging backup file\n' >&2; exit 1 ;;
-esac
-docker exec -i -e BACKUP_PATH="$backup_path" "$staging" node --input-type=module - <<'VERIFY_BACKUP'
+docker exec -i -e BACKUP_PATH="$container_backup_path" "$staging" node --input-type=module - <<'VERIFY_BACKUP'
 import { DatabaseSync } from 'node:sqlite';
 import { statSync } from 'node:fs';
 const path = process.env.BACKUP_PATH;
@@ -106,6 +113,13 @@ db.close();
 console.log('SCHOOL_DESIGN_STAGING_BACKUP=OK bytes=' + stat.size);
 VERIFY_BACKUP
 
+docker cp "$staging:$container_backup_path" "$work/database.sqlite"
+chmod 0600 "$work/database.sqlite"
+test -s "$work/database.sqlite"
+docker exec "$staging" rm -f -- "$container_backup_path"
+container_backup_path=""
+backup_file=database.sqlite
+
 docker volume create \
   --label school.system=school-1-11 \
   --label school.environment=staging \
@@ -116,13 +130,13 @@ new_data_created=1
 
 docker run --rm -i --network none --user 0:0 \
   -e BACKUP_FILE="$backup_file" \
-  -v "$backup_volume:/backup:ro" \
+  -v "$work:/backup:ro" \
   -v "$new_data:/data" \
   --entrypoint node "$CANDIDATE_IMAGE" --input-type=module - <<'PREPARE_DATA'
 import { chmodSync, chownSync, copyFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 const file = process.env.BACKUP_FILE;
-if (!/^school-1-11-[0-9TZ.-]+\.sqlite$/.test(file)) throw new Error('Invalid backup file');
+if (file !== 'database.sqlite') throw new Error('Invalid backup file');
 const target = '/data/school-1-11.sqlite';
 copyFileSync('/backup/' + file, target);
 chownSync('/data', 1001, 1001);
@@ -135,6 +149,9 @@ if (rows.length !== 1 || rows[0].integrity_check !== 'ok') throw new Error('Cand
 db.close();
 console.log('SCHOOL_DESIGN_CANDIDATE_DATA=OK');
 PREPARE_DATA
+
+rm -rf -- "$work"
+work=""
 
 acceptance_secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 test "${#acceptance_secret}" -eq 64
