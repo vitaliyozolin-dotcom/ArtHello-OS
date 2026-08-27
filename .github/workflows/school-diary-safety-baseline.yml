@@ -26,72 +26,102 @@ jobs:
       github.event_name != 'pull_request' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
        github.event.pull_request.head.ref == 'ops/school-diary-safety-baseline-20260827')
-    runs-on: [self-hosted, linux, x64, arthello-gateway]
-    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-ru
     steps:
-      - name: Inspect and verify host and live diary
+      - name: Configure confirmed School SSH host
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
         shell: bash
         run: |
+          set -Eeuo pipefail
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          test -s ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
+          test -n "$route_device"
+          sudo ip link set dev "$route_device" mtu 1200
+          deploy_port="${DEPLOY_PORT:-2222}"
+          scanned_hosts="$RUNNER_TEMP/school-known-hosts"
+          : > "$scanned_hosts"
+          chmod 0600 "$scanned_hosts"
+          for attempt in 1 2; do
+            printf 'SCHOOL_SSH_HOST_PROBE_ATTEMPT=%s\n' "$attempt"
+            timeout --signal=TERM --kill-after=5s 150s               ssh -p "$deploy_port"               -o StrictHostKeyChecking=accept-new               -o UserKnownHostsFile="$scanned_hosts"               -o GlobalKnownHostsFile=/dev/null               -o PreferredAuthentications=none               -o PubkeyAuthentication=no               -o PasswordAuthentication=no               -o KbdInteractiveAuthentication=no               -o ConnectTimeout=140               -o HostKeyAlgorithms=ssh-ed25519               "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
+            test -s "$scanned_hosts" && break
+            sleep 5
+          done
+          test -s "$scanned_hosts"
+          actual_fingerprint="$(ssh-keygen -lf "$scanned_hosts" -E sha256 | awk '{print $2; exit}')"
+          printf 'SCHOOL_SSH_HOST_FINGERPRINT=%s\n' "$actual_fingerprint"
+          test "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scanned_hosts" ~/.ssh/known_hosts
+          printf 'SCHOOL_SSH_HOST=VERIFIED\n'
+
+      - name: Create and verify remote safety baseline
+        id: backup
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          deploy_port="${DEPLOY_PORT:-2222}"
+          ssh_args=(
+            -p "$deploy_port"
+            -i ~/.ssh/id_ed25519
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile=~/.ssh/known_hosts
+            -o ConnectTimeout=140
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=12
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+          log_file="$RUNNER_TEMP/school-safety-baseline.log"
+          timeout --signal=TERM --kill-after=10s 900s             ssh -T "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST"               "env RUN_ID='$GITHUB_RUN_ID' WORKFLOW_SHA='$GITHUB_SHA' CHECKPOINT_REF='$CHECKPOINT_REF' EXPECTED_RELEASE_REF='$EXPECTED_RELEASE_REF' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' BACKUP_ROOT='$BACKUP_ROOT' bash -s"               <<'REMOTE' | tee "$log_file"
           set -Eeuo pipefail
           exec 9>/var/lock/school-1-11-safety-baseline.lock
           flock -n 9
           container=school-1-11
-          host_ips="$(hostname -I | tr ' ' '\n' | sed '/^$/d' | paste -sd, -)"
-          root_state=missing
-          test -d /srv/school-1-11 && root_state=present
-          container_state=missing
-          running=missing
-          health=missing
-          data_volume=
-          backup_volume=
-          release=
-          if docker inspect "$container" >/dev/null 2>&1; then
-            container_state=present
-            running="$(docker inspect "$container" --format '{{.State.Running}}')"
-            health="$(docker inspect "$container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}')"
-            data_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}')"
-            backup_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}')"
-          fi
-          release="$(readlink -f /srv/school-1-11/current 2>/dev/null || true)"
-          public_health="$(curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" 2>/dev/null || true)"
 
-          printf 'SCHOOL_HOST_IPS=%s\n' "$host_ips"
-          printf 'SCHOOL_ROOT=%s\n' "$root_state"
-          printf 'SCHOOL_CONTAINER=%s\n' "$container_state"
-          printf 'SCHOOL_RUNNING=%s\n' "$running"
-          printf 'SCHOOL_HEALTH=%s\n' "$health"
-          printf 'SCHOOL_LIVE_RELEASE=%s\n' "${release:-missing}"
-          printf 'SCHOOL_DATA_MOUNT=%s\n' "${data_volume:-missing}"
-          printf 'SCHOOL_BACKUP_MOUNT=%s\n' "${backup_volume:-missing}"
-          printf 'SCHOOL_PUBLIC_HEALTH_PRESENT=%s\n' "$([ -n "$public_health" ] && printf yes || printf no)"
-
-          printf '%s\n' "$host_ips" | tr ',' '\n' | grep -Fx '188.225.38.55' >/dev/null
-          test "$root_state" = present
-          test "$container_state" = present
-          test "$running" = true
+          test -d /srv/school-1-11
+          test "$(docker inspect "$container" --format '{{.State.Running}}')" = true
+          health="$(docker inspect "$container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}')"
           test "$health" = healthy
+          data_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}')"
+          backup_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}')"
+          release="$(readlink -f /srv/school-1-11/current)"
           test -n "$data_volume"
           test -n "$backup_volume"
-          test -n "$release"
           test -d "$release"
-          grep -F '"status":"ok"' <<<"$public_health" >/dev/null
+          curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
           printf 'SCHOOL_PREFLIGHT=OK\n'
+          printf 'SCHOOL_LIVE_RELEASE=%s\n' "$release"
+          printf 'SCHOOL_DATA_MOUNT=%s\n' "$data_volume"
+          printf 'SCHOOL_BACKUP_MOUNT=%s\n' "$backup_volume"
 
-      - name: Create native consistent SQLite backup
-        id: backup
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          exec 9>/var/lock/school-1-11-safety-baseline.lock
-          flock -n 9
-          container=school-1-11
           started_before="$(docker inspect "$container" --format '{{.State.StartedAt}}')"
           image_ref="$(docker inspect "$container" --format '{{.Config.Image}}')"
           image_id="$(docker image inspect "$image_ref" --format '{{.Id}}')"
-          release="$(readlink -f /srv/school-1-11/current)"
-          data_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
-          backup_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Name}}{{end}}{{end}}')"
-
           backup_path="$(docker exec "$container" node scripts/backup-db.mjs | tail -n1)"
           case "$backup_path" in
             /backups/school-1-11-*.sqlite) ;;
@@ -113,13 +143,13 @@ jobs:
           NODE
 
           stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-          target="$BACKUP_ROOT/$stamp-run-$GITHUB_RUN_ID"
+          target="$BACKUP_ROOT/$stamp-run-$RUN_ID"
           install -d -m 0700 "$BACKUP_ROOT" "$target"
           docker cp "$container:$backup_path" "$target/database.sqlite"
           chmod 0600 "$target/database.sqlite"
 
           curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" > "$target/health.json"
-          curl -fsS --max-time 30 -H 'Cache-Control: no-cache'             "$SCHOOL_ORIGIN/login?baseline=$GITHUB_RUN_ID" > "$target/login.html"
+          curl -fsS --max-time 30 -H 'Cache-Control: no-cache'             "$SCHOOL_ORIGIN/login?baseline=$RUN_ID" > "$target/login.html"
           : > "$target/baseline.css"
           grep -oE '/_next/static/css/[^"?]+\.css' "$target/login.html" | sort -u > "$target/css-paths.txt"
           test -s "$target/css-paths.txt"
@@ -133,7 +163,7 @@ jobs:
           container_created="$(docker inspect "$container" --format '{{.Created}}')"
           {
             printf 'created_utc=%s\n' "$stamp"
-            printf 'repository_sha=%s\n' "$GITHUB_SHA"
+            printf 'workflow_sha=%s\n' "$WORKFLOW_SHA"
             printf 'checkpoint_ref=%s\n' "$CHECKPOINT_REF"
             printf 'expected_release_ref=%s\n' "$EXPECTED_RELEASE_REF"
             printf 'live_release=%s\n' "$release"
@@ -157,7 +187,7 @@ jobs:
             sha256sum -c SHA256SUMS >/dev/null
           )
 
-          helper="school-diary-backup-verify-$GITHUB_RUN_ID"
+          helper="school-diary-backup-verify-$RUN_ID"
           docker rm -f "$helper" >/dev/null 2>&1 || true
           docker run --rm --name "$helper" --read-only --network none --user 0:0             -v "$target:/verify:ro" --entrypoint node "$image_ref" --input-type=module -e "
               import { DatabaseSync } from 'node:sqlite';
@@ -175,10 +205,14 @@ jobs:
           curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
           ln -sfn "$target" "$BACKUP_ROOT/latest"
 
-          printf 'target=%s\n' "$target" >> "$GITHUB_OUTPUT"
           printf 'SCHOOL_BACKUP=OK path=%s\n' "$target"
           printf 'SCHOOL_RESTARTED=no\n'
           printf 'SCHOOL_PUBLIC_HEALTH=OK\n'
+          REMOTE
+
+          target="$(sed -n 's/^SCHOOL_BACKUP=OK path=//p' "$log_file" | tail -n1)"
+          test -n "$target"
+          printf 'target=%s\n' "$target" >> "$GITHUB_OUTPUT"
 
       - name: Publish safety result
         if: always()
