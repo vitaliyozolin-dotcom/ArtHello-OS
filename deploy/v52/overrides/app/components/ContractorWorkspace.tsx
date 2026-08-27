@@ -31,13 +31,6 @@ const rub = new Intl.NumberFormat("ru-RU", {
   maximumFractionDigits: 0,
 });
 
-function SearchGlyph() {
-  return <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-    <path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-  </svg>;
-}
-
 function formatDate(value: string) {
   return new Date(`${value}T00:00:00Z`).toLocaleDateString("ru-RU");
 }
@@ -77,14 +70,14 @@ export function ContractorWorkspace({ notify, onOpenFinance }: {
 
   if (state === "loading") {
     return <PageContainer className="ahContractorPage">
-      <PageHeader eyebrow="Финансы" title="Подрядчики" description="Формируем реестр по подтверждённым банковским списаниям." />
+      <PageHeader eyebrow="Оплаты · контрагенты · договоры" title="Подрядчики" description="Формируем реестр по подтверждённым банковским списаниям." />
       <Card className="ahContractorStatus" role="status">Строим реестр по фактическим списаниям…</Card>
     </PageContainer>;
   }
 
   if (state === "error" || !data) {
     return <PageContainer className="ahContractorPage">
-      <PageHeader eyebrow="Финансы" title="Подрядчики" description="Единый реестр получателей подтверждённых оплат." />
+      <PageHeader eyebrow="Оплаты · контрагенты · договоры" title="Подрядчики" description="Единый реестр получателей подтверждённых оплат." />
       <Card className="ahContractorStatus">
         <EmptyState
           title="Реестр оплат временно недоступен"
@@ -97,7 +90,7 @@ export function ContractorWorkspace({ notify, onOpenFinance }: {
 
   return <PageContainer className="ahContractorPage contractor-workspace">
     <PageHeader
-      eyebrow="Только реестр оплат"
+      eyebrow="Оплаты · контрагенты · договоры"
       title="Подрядчики"
       description="Карточка появляется после первого подтверждённого списания. Другие разделы не создают подрядчиков."
       actions={<Button variant="primary" onClick={onOpenFinance}>Открыть операции</Button>}
@@ -122,7 +115,6 @@ export function ContractorWorkspace({ notify, onOpenFinance }: {
           value={query}
           onChange={setQuery}
           placeholder="Найти по ID, статье или договору"
-          icon={<SearchGlyph />}
         />
         <span className="ahContractorCount" aria-live="polite">{visible.length} {visible.length === 1 ? "запись" : "записей"}</span>
       </div>
