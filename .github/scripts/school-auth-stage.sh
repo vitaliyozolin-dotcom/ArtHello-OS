@@ -227,7 +227,8 @@ new_created=1
 
 staging_healthy=0
 for attempt in $(seq 1 90); do
-  if curl -fsS --max-time 5 "$STAGING_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null; then
+  if curl -fsS --max-time 5 "$STAGING_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null &&
+    [ "$(docker inspect "$staging" --format '{{.State.Health.Status}}' 2>/dev/null || true)" = healthy ]; then
     staging_healthy=1
     break
   fi
