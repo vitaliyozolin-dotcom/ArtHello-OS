@@ -49,3 +49,19 @@ jobs:
             grep -R --include="*.js" -F "Все рабочие разделы доступны сразу" /app/dist >/dev/null
             grep -R --include="*.css" -F "data-ah-help-inline" /app/dist >/dev/null
           '
+
+      - name: Export patched component sources for consolidation audit
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .arthello-source-audit
+          docker create --name arthello-source-audit arthello-v52-candidate:${GITHUB_SHA}
+          docker cp arthello-source-audit:/app/app/components .arthello-source-audit/components
+          docker rm arthello-source-audit
+
+      - name: Upload patched component sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: arthello-v52-patched-components-${{ github.sha }}
+          path: .arthello-source-audit/components
+          retention-days: 1
+          if-no-files-found: error
