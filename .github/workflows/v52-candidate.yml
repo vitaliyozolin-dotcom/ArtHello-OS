@@ -57,10 +57,6 @@ jobs:
               node scripts/patch-system-analytics-readiness.mjs
               node scripts/patch-system-operational-modules.mjs
               node scripts/patch-system-dialog-portals.mjs
-              node scripts/patch-mobile-visual-help-followup.mjs
-              node scripts/prepare-help-finance-ux-v3.mjs
-              node scripts/patch-help-finance-ux-v3.mjs
-              node scripts/patch-mobile-canonical-v5.mjs
               echo "=== CONTRACTOR WORKSPACE SOURCE ==="
               cat app/components/ContractorWorkspace.tsx
             '
