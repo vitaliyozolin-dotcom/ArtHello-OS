@@ -50,18 +50,20 @@ jobs:
             grep -R --include="*.css" -F "data-ah-help-inline" /app/dist >/dev/null
           '
 
-      - name: Export patched component sources for consolidation audit
+      - name: Inspect patched mobile source anchors
         run: |
           set -Eeuo pipefail
-          mkdir -p .arthello-source-audit
-          docker create --name arthello-source-audit arthello-v52-candidate:${GITHUB_SHA}
-          docker cp arthello-source-audit:/app/app/components .arthello-source-audit/components
-          docker rm arthello-source-audit
-
-      - name: Upload patched component sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: arthello-v52-patched-components-${{ github.sha }}
-          path: .arthello-source-audit/components
-          retention-days: 1
-          if-no-files-found: error
+          docker run --rm --entrypoint sh arthello-v52-candidate:${GITHUB_SHA} -lc '
+            echo "=== COMPONENT FILES ==="
+            grep -R -l -E "Безопасность объектов|Подрядчиков пока нет|Чистый денежный поток|finance-period-bar" /app/app/components || true
+            echo "=== SECURITY ==="
+            grep -R -n -C 12 -F "Безопасность объектов" /app/app/components || true
+            echo "=== CONTRACTORS ==="
+            grep -R -n -C 16 -F "Подрядчиков пока нет" /app/app/components || true
+            echo "=== CASHFLOW KPI ==="
+            grep -R -n -C 12 -F "Чистый денежный поток" /app/app/components || true
+            echo "=== FINANCE PERIOD ==="
+            grep -R -n -C 18 -F "finance-period-bar" /app/app/components || true
+            echo "=== MOBILE CSS MARKERS ==="
+            grep -R -n -E "ARTHELLO_MOBILE_VISUAL_HELP_FOLLOWUP|ARTHELLO_OPERATIONAL_UX_V3|ARTHELLO_MOBILE_DESIGN_SYSTEM_V4|ARTHELLO_HELP_UX_V3|ARTHELLO_HELP_VISIBILITY_V4" /app/app/components || true
+          '
