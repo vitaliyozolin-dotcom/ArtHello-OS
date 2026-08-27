@@ -1,267 +1,51 @@
 import fs from "node:fs";
 
-function stripFromMarker(source, marker) {
-  const index = source.indexOf(marker);
-  return index === -1 ? source : source.slice(0, index).trimEnd() + "\n";
-}
-
 const polishPath = "/app/app/components/SystemWideMobilePolish.css";
-let polish = fs.readFileSync(polishPath, "utf8");
-for (const marker of [
-  "/* ARTHELLO_MOBILE_VISUAL_HELP_FOLLOWUP */",
-  "/* ARTHELLO_OPERATIONAL_UX_V3 */",
-  "/* ARTHELLO_MOBILE_DESIGN_SYSTEM_V4 */",
-]) {
-  polish = stripFromMarker(polish, marker);
-}
-
-polish += `
-/* ARTHELLO_MOBILE_CANONICAL_V5 */
-:root {
-  --ah-mobile-gutter: 20px;
-  --ah-mobile-gap: 16px;
-  --ah-mobile-card-radius: 22px;
-  --ah-mobile-control-radius: 16px;
-  --ah-mobile-control-height: 48px;
-}
-
-@media (max-width: 720px) {
-  .page {
-    padding-left: var(--ah-mobile-gutter) !important;
-    padding-right: var(--ah-mobile-gutter) !important;
-  }
-
-  /* One geometry system for operational modules. */
-  .safety-workspace :is(.safety-kpis > *, .operational-empty-card, .operational-inline-empty, .safety-panel),
-  .proc-workspace :is(.proc-kpis > *, .operational-empty-card, .operational-inline-empty, .proc-panel),
-  .food-workspace :is(.food-kpis > *, .operational-empty-card, .operational-inline-empty, .food-panel),
-  .medical-workspace :is(.medical-kpis > *, .operational-empty-card, .operational-inline-empty, .medical-panel),
-  .strategy-workspace :is(.strategy-kpis > *, .operational-empty-card, .operational-inline-empty, .strategy-panel),
-  .accounting-workspace :is(.accounting-panel, .accounting-start-panel) {
-    border-radius: var(--ah-mobile-card-radius) !important;
-  }
-
-  .safety-workspace .safety-boundary,
-  .proc-workspace .proc-boundary,
-  .food-workspace .food-boundary,
-  .medical-workspace .medical-boundary,
-  .strategy-workspace .strategy-boundary,
-  .accounting-workspace .accounting-boundary {
-    border-radius: var(--ah-mobile-control-radius) !important;
-  }
-
-  /* Contractors: exactly one empty card. Never style text descendants as cards. */
-  .contractor-workspace {
-    display: block !important;
-    width: 100% !important;
-    min-width: 0 !important;
-  }
-
-  .contractor-workspace > .page {
-    padding-left: var(--ah-mobile-gutter) !important;
-    padding-right: var(--ah-mobile-gutter) !important;
-  }
-
-  .contractor-workspace .operational-inline-empty,
-  .contractor-workspace .manual-module-empty {
-    width: 100% !important;
-    max-width: 100% !important;
-    padding: 22px !important;
-    border: 1px solid var(--ah-system-line) !important;
-    border-radius: var(--ah-mobile-card-radius) !important;
-    background: #fff !important;
-    box-shadow: 0 10px 32px rgba(38, 43, 71, 0.045) !important;
-    overflow: hidden !important;
-  }
-
-  .contractor-workspace .operational-inline-empty > :is(strong, p, span, small),
-  .contractor-workspace .manual-module-empty > :is(h2, h3, strong, p, span, small) {
-    width: auto !important;
-    max-width: 100% !important;
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-    padding: 0 !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-    box-shadow: none !important;
-  }
-
-  .contractor-workspace .operational-inline-empty > button,
-  .contractor-workspace .manual-module-empty > button {
-    border-radius: var(--ah-mobile-control-radius) !important;
-  }
-
-  /* Dashboard KPI cards: fixed icon column + text column; no edge-clinging labels. */
-  [data-help-block="kpis"] > button {
-    display: grid !important;
-    grid-template-columns: 42px minmax(0, 1fr) !important;
-    align-items: center !important;
-    column-gap: 14px !important;
-    min-width: 0 !important;
-    padding: 18px !important;
-    border-radius: var(--ah-mobile-card-radius) !important;
-    text-align: left !important;
-  }
-
-  [data-help-block="kpis"] > button > span:first-child {
-    width: 42px !important;
-    min-width: 42px !important;
-    height: 42px !important;
-    margin: 0 !important;
-  }
-
-  [data-help-block="kpis"] > button > span:last-child {
-    display: grid !important;
-    min-width: 0 !important;
-    gap: 3px !important;
-    padding: 0 !important;
-    margin: 0 !important;
-  }
-
-  [data-help-block="kpis"] > button > span:last-child :is(small, strong, em) {
-    max-width: 100% !important;
-    margin: 0 !important;
-    white-space: normal !important;
-    overflow-wrap: normal !important;
-    word-break: normal !important;
-  }
-
-  /* Finance period is a compact filter, not a second dashboard card. */
-  .finance-period-bar {
-    display: grid !important;
-    grid-template-columns: minmax(0, 1fr) !important;
-    gap: 10px !important;
-    margin: 14px 0 16px !important;
-    padding: 0 !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-    box-shadow: none !important;
-  }
-
-  .finance-period-bar > div:first-child {
-    display: flex !important;
-    align-items: center !important;
-    justify-content: space-between !important;
-    gap: 10px !important;
-    min-width: 0 !important;
-  }
-
-  .finance-period-bar > div:first-child > span {
-    color: var(--ah-system-muted) !important;
-    font-size: 14px !important;
-    font-weight: 650 !important;
-  }
-
-  .finance-period-bar > div:first-child > strong,
-  .finance-period-bar > div:first-child > small {
-    display: none !important;
-  }
-
-  .finance-period-actions {
-    display: grid !important;
-    grid-template-columns: var(--ah-mobile-control-height) minmax(0, 1fr) var(--ah-mobile-control-height) auto !important;
-    align-items: center !important;
-    gap: 8px !important;
-    width: 100% !important;
-  }
-
-  .finance-period-actions > button:not(.finance-current-period),
-  .finance-period-actions input,
-  .finance-period-actions .finance-current-period {
-    height: var(--ah-mobile-control-height) !important;
-    min-height: var(--ah-mobile-control-height) !important;
-    border-radius: var(--ah-mobile-control-radius) !important;
-  }
-
-  .finance-period-actions > button:not(.finance-current-period) {
-    width: var(--ah-mobile-control-height) !important;
-    min-width: var(--ah-mobile-control-height) !important;
-    padding: 0 !important;
-  }
-
-  .finance-period-actions label {
-    min-width: 0 !important;
-  }
-
-  .finance-period-actions input {
-    width: 100% !important;
-    min-width: 0 !important;
-    padding: 0 12px !important;
-    text-align: center !important;
-    font-size: 16px !important;
-  }
-
-  .finance-period-actions .finance-current-period {
-    width: auto !important;
-    min-width: 0 !important;
-    padding: 0 14px !important;
-    white-space: nowrap !important;
-    font-size: 14px !important;
-  }
-
-  @media (max-width: 420px) {
-    .finance-period-actions {
-      grid-template-columns: var(--ah-mobile-control-height) minmax(0, 1fr) var(--ah-mobile-control-height) !important;
-    }
-    .finance-period-actions .finance-current-period {
-      grid-column: 1 / -1 !important;
-      width: 100% !important;
-    }
-  }
+const polish = `:root{--ah-system-radius:22px;--ah-system-radius-small:16px;--ah-system-line:#e1e5ef;--ah-system-text:#171a2b;--ah-system-muted:#71798f;--ah-system-surface:#fff;--ah-system-accent:#5d50ed;--ah-mobile-gutter:20px;--ah-mobile-gap:16px;--ah-mobile-control-height:48px}
+.page,.route-stage,.content-frame,.page>*,.route-stage>*{min-width:0;box-sizing:border-box}
+.operational-heading-actions,.sales-heading-buttons,.legal-heading-actions,.analytics-heading-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:10px;min-width:0}
+.operational-heading-actions button,.sales-heading-buttons button,.legal-heading-actions button,.analytics-heading-actions button{min-width:0;min-height:44px;padding:10px 16px;border:1px solid #dfe3ee;border-radius:var(--ah-system-radius-small);background:#fff;color:var(--ah-system-text);font:750 14px/1.25 inherit;white-space:normal;overflow-wrap:anywhere}
+.operational-heading-actions button:not(.secondary),.sales-heading-buttons button:not(.secondary),.legal-heading-actions button:not(.secondary),.analytics-heading-actions button:not(.secondary){border-color:var(--ah-system-accent);background:var(--ah-system-accent);color:#fff}
+.operational-empty-workspace{min-height:100%}.operational-empty-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;width:100%}
+.operational-empty-card,.operational-inline-empty,.empty-kanban>article,.accounting-start-panel{min-width:0;padding:20px;border:1px solid var(--ah-system-line);border-radius:var(--ah-system-radius);background:var(--ah-system-surface);box-shadow:0 10px 32px rgba(38,43,71,.045);color:var(--ah-system-text)}
+.operational-empty-card{display:flex;flex-direction:column;align-items:flex-start;gap:9px;text-align:left}button.operational-empty-card{width:100%;appearance:none;cursor:pointer}button.operational-empty-card:disabled{cursor:not-allowed;opacity:.62}
+.operational-empty-card>span:first-child,.operational-inline-empty>span:first-child{display:inline-grid;place-items:center;min-width:32px;height:32px;padding:0 10px;border-radius:999px;background:#eeecff;color:var(--ah-system-accent);font-size:13px;font-weight:850}
+.operational-empty-card strong,.operational-inline-empty strong{color:var(--ah-system-text);font-size:18px;line-height:1.25;overflow-wrap:anywhere}.operational-empty-card p,.operational-empty-card small,.operational-inline-empty p,.operational-inline-empty small,.modal-explanation{margin:0;color:var(--ah-system-muted);font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.operational-inline-empty{display:grid;justify-items:start;gap:10px;min-height:170px;align-content:center}.operational-inline-empty button{min-height:42px;padding:10px 15px;border:0;border-radius:var(--ah-system-radius-small);background:var(--ah-system-accent);color:#fff;font:750 14px/1.25 inherit}
+.empty-kanban{display:grid;grid-template-columns:repeat(4,minmax(180px,1fr));gap:12px;overflow-x:auto;padding-bottom:4px}.empty-kanban>article{min-height:180px}.empty-kanban header{display:flex;justify-content:space-between;gap:12px;margin-bottom:22px}.empty-kanban header span{color:var(--ah-system-accent);font-weight:800}
+button[data-ah-help-inline="true"].ah-field-icon{display:inline-grid!important;place-items:center!important;width:18px!important;min-width:18px!important;height:18px!important;padding:0!important;border:1px solid rgba(92,80,237,.26)!important;border-radius:50%!important;background:#fff!important;color:var(--ah-system-accent)!important;box-shadow:none!important;line-height:1!important;pointer-events:auto!important}button[data-ah-help-inline="true"].ah-field-icon::before{content:"?";font:800 11px/1 inherit}
+.hr-panel,.employee-grid>article,.staff-source-note,.crm-toolbar,.sales-start-panel,.content-panel,.legal-panel,.analytics-panel,.accounting-panel,.proc-panel,.food-panel,.safety-panel,.medical-panel,.strategy-panel,.integration-map,.connection-detail,.manual-module-empty,.readiness-decision>section,.readiness-decision>aside,.visual-gates,.visual-route{border-radius:var(--ah-system-radius)!important;overflow:hidden}
+.hr-boundary,.sales-source-boundary,.content-boundary,.legal-boundary,.analytics-boundary,.accounting-boundary,.proc-boundary,.food-boundary,.safety-boundary,.medical-boundary,.strategy-boundary,.integration-boundary,.readiness-alert,.edu-data-rule{border-radius:var(--ah-system-radius)!important;padding:16px 18px!important}
+.hr-chain>div,.legal-chain>div,.proc-chain>div,.content-chain-steps,.chain-ribbon,.readiness-route,.visual-route ol{padding:16px!important}.hr-chain>div>article,.legal-chain>div>article,.proc-chain>div>article,.content-chain-steps>article,.chain-ribbon>article{min-width:0;padding:12px!important;border-radius:var(--ah-system-radius-small)!important}
+.family-workspace input[placeholder*="Найти семью"]{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important;height:56px!important;padding:0 50px 0 52px!important;border:1px solid #dde2ed!important;border-radius:var(--ah-system-radius-small)!important;background:#fff!important;color:var(--ah-system-text)!important;font-size:16px!important;line-height:1.2!important;opacity:1!important;text-overflow:ellipsis}.family-workspace input[placeholder*="Найти семью"]::placeholder{color:#737b90!important;opacity:1!important}
+.family-workspace :is(label,div):has(>input[placeholder*="Найти семью"]){position:relative!important;display:block!important;width:100%!important;min-width:0!important}.family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])::before{content:"⌕";position:absolute;left:16px;top:50%;z-index:5;transform:translateY(-50%);font-size:27px;line-height:1;color:#171a2b;pointer-events:none}.family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])>:is(svg,[class*=search],[class*=icon]){opacity:0!important;pointer-events:none!important}
+.family-workspace :is([class*=toolbar],[class*=filters],[class*=search-row]){min-width:0;padding:16px!important;border:1px solid var(--ah-system-line)!important;border-radius:var(--ah-system-radius)!important;background:#fff!important;overflow:visible!important}.family-workspace :is([class*=toolbar],[class*=filters])>*{min-width:0}.family-workspace :is([class*=notice],[class*=boundary],[class*=rule],[class*=source-note],[class*=import-note]){padding:16px 18px!important;border:1px solid var(--ah-system-line)!important;border-radius:var(--ah-system-radius)!important;background:#fff!important;color:var(--ah-system-text)!important;box-shadow:0 10px 32px rgba(38,43,71,.045)!important}.family-workspace :is([class*=notice],[class*=boundary],[class*=rule],[class*=source-note],[class*=import-note]) :is(p,span,small){color:var(--ah-system-muted)!important;line-height:1.5!important}
+:is(.hr-workspace,.family-workspace,.sales-workspace,.content-workspace,.legal-workspace,.analytics-workspace,.accounting-workspace,.proc-workspace,.food-workspace,.safety-workspace,.medical-workspace,.strategy-workspace,.integration-workspace,.readiness-workspace,.edu-workspace) :is(h1,h2,h3,p,strong,span,small,dd,dt,button){max-width:100%;overflow-wrap:anywhere}
+.procurement-form-grid,.safety-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.procurement-form-grid .wide,.safety-form-grid .wide{grid-column:1/-1}
+.finance-period-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:14px;margin:16px 0;padding:14px 16px;border:1px solid var(--ah-system-line);border-radius:var(--ah-system-radius);background:#fff;box-shadow:0 8px 26px rgba(38,43,71,.04)}.finance-period-bar>div:first-child{display:grid;gap:2px}.finance-period-bar span,.finance-period-bar small{color:var(--ah-system-muted)}.finance-period-actions{display:flex;align-items:center;gap:8px}.finance-period-actions button,.finance-period-actions input{min-height:44px;border:1px solid #dde2ed;border-radius:var(--ah-system-radius-small);background:#fff;color:var(--ah-system-text);font:inherit}.finance-period-actions button{padding:0 13px}.finance-period-actions input{padding:0 12px}.finance-period-actions .finance-current-period{border-color:transparent;background:transparent;color:var(--ah-system-accent);font-weight:750}
+@media(max-width:720px){
+.page{width:100%!important;max-width:100%!important;padding-left:var(--ah-mobile-gutter)!important;padding-right:var(--ah-mobile-gutter)!important;padding-bottom:calc(128px + env(safe-area-inset-bottom))!important;overflow-x:clip}.page>:first-child{margin-top:0!important}
+:is(.hr-heading,.sales-heading,.content-heading,.legal-heading,.analytics-heading,.accounting-heading,.proc-heading,.food-heading,.safety-heading,.medical-heading,.strategy-heading,.integration-heading,.readiness-heading,.edu-heading){display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:14px!important;width:100%!important;padding-inline:0!important}:is(.hr-heading,.sales-heading,.content-heading,.legal-heading,.analytics-heading,.accounting-heading,.proc-heading,.food-heading,.safety-heading,.medical-heading,.strategy-heading,.integration-heading,.readiness-heading,.edu-heading) h1{font-size:clamp(34px,10vw,46px)!important;line-height:1.02!important;letter-spacing:-.035em}
+.operational-heading-actions,.sales-heading-buttons,.legal-heading-actions,.analytics-heading-actions,.hr-heading-actions,.edu-heading-actions{width:100%!important;justify-content:stretch!important}.operational-heading-actions>*,.sales-heading-buttons>*,.legal-heading-actions>*,.analytics-heading-actions>*,.hr-heading-actions>*,.edu-heading-actions>*{flex:1 1 145px}
+:is(.hr-tabs,.sales-tabs,.content-tabs,.legal-tabs,.analytics-tabs,.accounting-tabs,.proc-tabs,.food-tabs,.safety-tabs,.medical-tabs,.strategy-tabs,.integration-tabs,.readiness-tabs,.edu-tabs,.edu-branches){display:flex!important;width:100%!important;max-width:100%!important;margin:0!important;padding:2px 0 9px!important;gap:22px!important;overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;-webkit-overflow-scrolling:touch}:is(.hr-tabs,.sales-tabs,.content-tabs,.legal-tabs,.analytics-tabs,.accounting-tabs,.proc-tabs,.food-tabs,.safety-tabs,.medical-tabs,.strategy-tabs,.integration-tabs,.readiness-tabs,.edu-tabs,.edu-branches)::-webkit-scrollbar{display:none}:is(.hr-tabs,.sales-tabs,.content-tabs,.legal-tabs,.analytics-tabs,.accounting-tabs,.proc-tabs,.food-tabs,.safety-tabs,.medical-tabs,.strategy-tabs,.integration-tabs,.readiness-tabs,.edu-tabs,.edu-branches)>button{flex:0 0 auto!important;min-width:max-content!important;max-width:none!important;padding-inline:3px!important;white-space:nowrap!important}
+.crm-toolbar{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:16px!important;padding:18px!important;border-radius:var(--ah-system-radius)!important}.crm-toolbar>div:last-child{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important;width:100%!important}.crm-toolbar>div:last-child>button{width:100%!important;min-width:0!important;min-height:50px!important;padding:10px 12px!important;white-space:normal!important;border-radius:var(--ah-system-radius-small)!important;line-height:1.2!important}.crm-toolbar>div:last-child>button:first-child{grid-column:1/-1}
+.crm-board{display:flex!important;gap:14px!important;width:100%!important;max-width:100%!important;padding:2px 18px 10px 2px!important;overflow-x:auto!important;scroll-snap-type:x mandatory}.crm-column{flex:0 0 min(82vw,340px)!important;min-width:0!important;border:1px solid var(--ah-system-line)!important;border-radius:var(--ah-system-radius)!important;background:#fff!important;overflow:hidden!important;scroll-snap-align:start}.crm-column+.crm-column{margin-left:0!important}
+.employee-grid,.operational-empty-grid,.content-overview,.legal-chain-layout,.owner-dashboard,.hr-layout,.proc-layout,.food-layout,.safety-grid,.medical-grid,.strategy-grid,.accounting-chain{grid-template-columns:minmax(0,1fr)!important}.employee-grid>article,.staff-source-note,.operational-empty-card,.operational-inline-empty{width:100%!important;max-width:100%!important}.employee-grid dl{grid-template-columns:repeat(2,minmax(0,1fr))!important}.employee-grid dd,.employee-grid dt{word-break:normal;overflow-wrap:anywhere}.employee-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important}.employee-actions button{width:100%!important;min-width:0!important;white-space:normal!important}
+.modal-layer.staff-modal-layer,.modal-layer.registry-modal-layer,.modal-layer.procurement-modal-layer,.modal-layer.safety-modal-layer,.content-modal-layer,.integration-modal-layer,.lead-create-layer,.sales-drawer-layer,.legal-create-layer{position:fixed!important;inset:0!important;z-index:20000!important;display:flex!important;align-items:flex-start!important;justify-content:center!important;width:100vw!important;height:100dvh!important;padding:calc(env(safe-area-inset-top) + 12px) 12px calc(108px + env(safe-area-inset-bottom))!important;overflow-x:hidden!important;overflow-y:auto!important}
+:is(.staff-modal,.registry-modal,.content-modal,.setup-wizard,.connection-modal,.lead-create-modal,.sales-drawer,.legal-create-modal,.procurement-modal,.safety-modal){position:relative!important;inset:auto!important;transform:none!important;width:min(100%,680px)!important;max-width:100%!important;max-height:none!important;margin:0 auto!important;border-radius:var(--ah-system-radius)!important;overflow:visible!important}:is(.staff-modal,.registry-modal,.content-modal,.setup-wizard,.connection-modal,.lead-create-modal,.sales-drawer,.legal-create-modal,.procurement-modal,.safety-modal) :is(.drawer-head,header:first-child){position:sticky;top:0;z-index:2;border-radius:22px 22px 0 0;background:rgba(255,255,255,.98);backdrop-filter:blur(14px)}
+.staff-form-grid,.lead-create-grid,.legal-create-grid,.setup-grid,.procurement-form-grid,.safety-form-grid{grid-template-columns:minmax(0,1fr)!important}.staff-branch-picker{grid-column:1/-1!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:12px!important;border-radius:18px!important}.empty-kanban{grid-template-columns:repeat(4,minmax(76vw,280px))}.content-chain-steps,.chain-ribbon{overflow-x:auto}.content-chain-steps>article,.chain-ribbon>article{min-width:220px}.manual-module-empty{width:100%!important;min-height:240px!important;padding:24px!important}
+:is(.safety-workspace,.proc-workspace,.food-workspace,.medical-workspace,.strategy-workspace,.accounting-workspace) :is(.safety-boundary,.proc-boundary,.food-boundary,.medical-boundary,.strategy-boundary,.accounting-boundary,.safety-kpis>*,.proc-kpis>*,.food-kpis>*,.medical-kpis>*,.strategy-kpis>*,.operational-empty-card,.operational-inline-empty,.safety-panel,.proc-panel,.food-panel,.medical-panel,.strategy-panel,.accounting-panel,.accounting-start-panel){border-radius:var(--ah-system-radius)!important}
+.contractor-workspace{display:block!important;width:100%!important;min-width:0!important}.contractor-workspace>.page{padding-inline:var(--ah-mobile-gutter)!important}.contractor-workspace :is(.operational-inline-empty,.manual-module-empty){width:100%!important;max-width:100%!important;padding:22px!important;border:1px solid var(--ah-system-line)!important;border-radius:var(--ah-system-radius)!important;background:#fff!important;box-shadow:0 10px 32px rgba(38,43,71,.045)!important;overflow:hidden!important}.contractor-workspace :is(.operational-inline-empty,.manual-module-empty) :is(h1,h2,h3,strong,p,span,small,div):not(button){max-width:100%!important;margin-left:0!important;margin-right:0!important;padding:0!important;border:0!important;border-radius:0!important;outline:0!important;background:transparent!important;box-shadow:none!important}.contractor-workspace :is(.operational-inline-empty,.manual-module-empty) button:empty{display:none!important}
+[data-help-block="kpis"]>button{display:grid!important;grid-template-columns:42px minmax(0,1fr)!important;align-items:center!important;column-gap:14px!important;min-width:0!important;padding:18px!important;border-radius:var(--ah-system-radius)!important;text-align:left!important}[data-help-block="kpis"]>button>span:first-child{position:static!important;width:42px!important;min-width:42px!important;height:42px!important;margin:0!important}[data-help-block="kpis"]>button>span:last-child{display:grid!important;min-width:0!important;gap:3px!important;padding:0!important;margin:0!important}[data-help-block="kpis"]>button>span:last-child :is(small,strong,em){max-width:100%!important;margin:0!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:normal!important;word-break:normal!important}
+.finance-period-bar{position:relative!important;display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:8px!important;margin:12px 0 16px!important;padding:14px!important;border:1px solid var(--ah-system-line)!important;border-radius:var(--ah-system-radius)!important;background:#fff!important;box-shadow:0 8px 26px rgba(38,43,71,.04)!important}.finance-period-bar>div:first-child{display:flex!important;align-items:center!important;min-height:28px!important;padding-right:112px!important}.finance-period-bar>div:first-child>span{font-size:14px!important;font-weight:700!important}.finance-period-bar>div:first-child>:is(strong,small){display:none!important}.finance-period-actions{display:grid!important;grid-template-columns:var(--ah-mobile-control-height) minmax(0,1fr) var(--ah-mobile-control-height)!important;align-items:center!important;gap:8px!important;width:100%!important}.finance-period-actions>button:not(.finance-current-period),.finance-period-actions input{width:100%!important;height:var(--ah-mobile-control-height)!important;min-width:0!important;min-height:var(--ah-mobile-control-height)!important;border-radius:var(--ah-system-radius-small)!important}.finance-period-actions>button:not(.finance-current-period){padding:0!important}.finance-period-actions label{min-width:0!important}.finance-period-actions input{padding:0 12px!important;text-align:center!important;font-size:16px!important}.finance-period-actions .finance-current-period{position:absolute!important;top:12px!important;right:14px!important;width:auto!important;min-width:0!important;min-height:30px!important;height:30px!important;padding:0!important;border:0!important;background:transparent!important;color:var(--ah-system-accent)!important;white-space:nowrap!important;font-size:13px!important;font-weight:750!important}
 }
 `;
+fs.writeFileSync(polishPath,polish,"utf8");
 
-fs.writeFileSync(polishPath, polish, "utf8");
-
-const helpPath = "/app/app/components/ContextualHelpSystem.css";
-let help = fs.readFileSync(helpPath, "utf8");
-for (const marker of [
-  "/* ARTHELLO_HELP_UX_V3 */",
-  "/* ARTHELLO_HELP_VISIBILITY_V4 */",
-]) {
-  help = stripFromMarker(help, marker);
-}
-help += `
-/* ARTHELLO_HELP_CANONICAL_V5 */
-[data-ah-help-target="true"] { position: relative !important; overflow: visible !important; }
-[data-ah-help-target="true"] > button[data-ah-help-inline="true"].ah-field-icon {
-  position: absolute !important;
-  left: auto !important;
-  right: 12px !important;
-  top: 50% !important;
-  bottom: auto !important;
-  transform: translateY(-50%) !important;
-  width: 24px !important;
-  min-width: 24px !important;
-  height: 24px !important;
-  margin: 0 !important;
-  z-index: 40 !important;
-  opacity: .95 !important;
-  visibility: visible !important;
-  pointer-events: auto !important;
-}
-[data-ah-help-target="true"] > :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, [role="combobox"]) {
-  padding-right: 48px !important;
-}
-@media (max-width: 720px) {
-  .ah-tour-callout {
-    position: fixed !important;
-    left: 12px !important;
-    right: 12px !important;
-    top: auto !important;
-    bottom: calc(96px + env(safe-area-inset-bottom)) !important;
-    width: auto !important;
-    max-width: none !important;
-    max-height: min(56dvh, 520px) !important;
-    transform: none !important;
-    overflow: auto !important;
-  }
-  .ah-tour-hole { border-radius: 18px !important; pointer-events: none !important; }
-  .ah-tour-blocker { touch-action: none; }
-}
-`;
-fs.writeFileSync(helpPath, help, "utf8");
-
-console.log("patch-mobile-canonical-v5: layered mobile CSS removed; canonical system applied");
+function stripFromMarker(source,marker){const index=source.indexOf(marker);return index===-1?source:source.slice(0,index).trimEnd()+"\n"}
+const helpPath="/app/app/components/ContextualHelpSystem.css";
+let help=fs.readFileSync(helpPath,"utf8");
+for(const marker of ["/* ARTHELLO_HELP_UX_V3 */","/* ARTHELLO_HELP_VISIBILITY_V4 */","/* ARTHELLO_HELP_CANONICAL_V5 */"]){help=stripFromMarker(help,marker)}
+help+=`\n/* ARTHELLO_HELP_CANONICAL_V5 */\n[data-ah-help-target="true"]{position:relative!important;overflow:visible!important}[data-ah-help-target="true"]>button[data-ah-help-inline="true"].ah-field-icon{position:absolute!important;left:auto!important;right:12px!important;top:50%!important;bottom:auto!important;transform:translateY(-50%)!important;width:24px!important;min-width:24px!important;height:24px!important;margin:0!important;z-index:40!important;opacity:.95!important;visibility:visible!important;pointer-events:auto!important}[data-ah-help-target="true"]>:is(input:not([type="checkbox"]):not([type="radio"]),select,textarea,[role="combobox"]){padding-right:48px!important}@media(max-width:720px){.ah-tour-callout{position:fixed!important;left:12px!important;right:12px!important;top:auto!important;bottom:calc(96px + env(safe-area-inset-bottom))!important;width:auto!important;max-width:none!important;max-height:min(56dvh,520px)!important;transform:none!important;overflow:auto!important}.ah-tour-hole{border-radius:18px!important;pointer-events:none!important}.ah-tour-blocker{touch-action:none}}\n`;
+fs.writeFileSync(helpPath,help,"utf8");
+console.log("patch-mobile-canonical-v5: previous mobile stylesheet replaced by one canonical system");
