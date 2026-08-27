@@ -1,0 +1,142 @@
+name: Design System safety baseline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/design-system-safety-baseline.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arthello-design-system-safety-baseline
+  cancel-in-progress: false
+
+env:
+  PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+  BACKUP_ROOT: /srv/arthello/backups/design-system
+  BASELINE_ROOT: /srv/arthello/baselines/design-system
+
+jobs:
+  safety-baseline:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 30
+    environment: production-ru
+    steps:
+      - name: Checkout checkpoint tooling
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify production and checkpoint
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = '188.225.38.55'
+          curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+          git ls-remote --exit-code origin refs/heads/checkpoint/pre-design-system-2026-08-27 >/dev/null
+          printf 'DESIGN_SYSTEM_CHECKPOINT=OK\n'
+
+      - name: Create consistent production DB backup
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t live_containers < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}')
+          test "${#live_containers[@]}" -eq 1
+          live="${live_containers[0]}"
+          image="$(docker inspect "$live" --format '{{.Config.Image}}')"
+          volume="$(docker inspect "$live" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          test "$volume" = 'arthello-direct-v44-data'
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          target="$BACKUP_ROOT/$stamp"
+          mkdir -p "$target/d1"
+          helper="arthello-ds-backup-$GITHUB_RUN_ID"
+          paused=0
+          cleanup(){ rc=$?; docker rm -f "$helper" >/dev/null 2>&1 || true; if [ "$paused" -eq 1 ]; then docker unpause "$live" >/dev/null 2>&1 || true; fi; exit "$rc"; }
+          trap cleanup EXIT
+          docker pause "$live" >/dev/null; paused=1
+          docker create --name "$helper" --read-only -v "$volume":/data:ro "$image" true >/dev/null
+          docker cp "$helper:/data/d1/." "$target/d1"
+          docker unpause "$live" >/dev/null; paused=0
+          docker rm -f "$helper" >/dev/null
+          python3 deploy/v52/maintenance/production-data-inventory.py "$target/d1" > "$target/inventory.txt"
+          find "$target/d1" -type f -print0 | sort -z | xargs -0 sha256sum > "$target/SHA256SUMS"
+          test -s "$target/SHA256SUMS"
+          printf '%s\n' "$live" > "$target/live-container.txt"
+          printf '%s\n' "$image" > "$target/live-image.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$target/repository-sha.txt"
+          curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | grep -F '"status":"ok"' >/dev/null
+          ln -sfn "$target" "$BACKUP_ROOT/latest"
+          printf 'ARTHELLO_BACKUP=OK path=%s\n' "$target"
+          trap - EXIT
+
+      - name: Verify backup is readable in isolated helper
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          target="$(readlink -f "$BACKUP_ROOT/latest")"
+          test -d "$target/d1"
+          python3 deploy/v52/maintenance/production-data-inventory.py "$target/d1" >/dev/null
+          (cd "$target" && sha256sum -c SHA256SUMS >/dev/null)
+          printf 'ARTHELLO_BACKUP_VERIFY=OK\n'
+
+      - name: Capture production visual baseline
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          target="$BASELINE_ROOT/$stamp"
+          mkdir -p "$target"
+          work="$RUNNER_TEMP/arthello-baseline-$GITHUB_RUN_ID"
+          mkdir -p "$work"
+          cd "$work"
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund playwright@1.55.0 >/dev/null
+          npx playwright install chromium >/dev/null
+          cat > capture.mjs <<'NODE'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+          const base=process.env.PUBLIC_URL, out=process.env.BASELINE_TARGET;
+          const viewports=[[375,812],[390,844],[430,932],[768,1024],[1440,900],[2560,1440]];
+          const routes=['home','finance','clients','contractors','safety','education','access'];
+          const browser=await chromium.launch({headless:true});
+          const manifest=[];
+          for(const [width,height] of viewports){
+            const context=await browser.newContext({viewport:{width,height}});
+            const page=await context.newPage();
+            for(const route of routes){
+              const url=`${base}/?baseline=${Date.now()}#${route}`;
+              await page.goto(url,{waitUntil:'networkidle',timeout:30000});
+              await page.waitForTimeout(700);
+              const metrics=await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth,title:document.title}));
+              const file=`${route}-${width}x${height}.png`;
+              await page.screenshot({path:`${out}/${file}`,fullPage:true});
+              manifest.push({route,width,height,file,...metrics,horizontalOverflow:metrics.scrollWidth>metrics.clientWidth+1});
+            }
+            await context.close();
+          }
+          await browser.close();
+          fs.writeFileSync(`${out}/manifest.json`,JSON.stringify(manifest,null,2));
+          NODE
+          PUBLIC_URL="$PUBLIC_URL" BASELINE_TARGET="$target" node capture.mjs
+          test -s "$target/manifest.json"
+          printf '%s\n' "$GITHUB_SHA" > "$target/repository-sha.txt"
+          ln -sfn "$target" "$BASELINE_ROOT/latest"
+          printf 'ARTHELLO_VISUAL_BASELINE=OK path=%s\n' "$target"
+
+      - name: Safety summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Design System safety baseline'
+            echo
+            echo "- Production UI changed: no"
+            echo "- Checkpoint: checkpoint/pre-design-system-2026-08-27"
+            echo "- Backup root: $BACKUP_ROOT"
+            echo "- Baseline root: $BASELINE_ROOT"
+            echo "- Result: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
