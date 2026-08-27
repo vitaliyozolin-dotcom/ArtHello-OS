@@ -1,18 +1,24 @@
+ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1=false
+
 FROM node:24-bookworm-slim AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
 FROM node:24-bookworm-slim AS builder
+ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_SCHOOL_DESIGN_V1=$NEXT_PUBLIC_SCHOOL_DESIGN_V1
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
 FROM node:24-bookworm-slim AS runner
+ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1
 WORKDIR /app
 ENV NODE_ENV=production
+ENV NEXT_PUBLIC_SCHOOL_DESIGN_V1=$NEXT_PUBLIC_SCHOOL_DESIGN_V1
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
