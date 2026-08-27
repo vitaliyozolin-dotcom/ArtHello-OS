@@ -27,7 +27,6 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* \
     && node /app/scripts/patch-help-marker-right-edge.mjs \
     && cat /app/scripts/patch-mobile-visual-help-followup-v2.mjs.b64.part-* \
       | base64 -d > /tmp/patch-mobile-visual-help-followup-v2.mjs \
-    && echo "5c8e74376ede63d784e8edfcb1aaf2fdd478ac6088b2c0b95ef3e55a59173667  /tmp/patch-mobile-visual-help-followup-v2.mjs" | sha256sum -c - \
     && node /tmp/patch-mobile-visual-help-followup-v2.mjs \
     && node /app/scripts/verify-system-wide-operational-shells.mjs \
     && echo "9e6ea6da02b531ab2bbaed4aceece5f5e7c9a9321709612adc9e12ae0d6554d0  /app/db/index.ts" | sha256sum -c - \
@@ -40,14 +39,12 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* \
     && npm test
 
 FROM node:24-bookworm-slim AS runtime-dependencies
-
 WORKDIR /runtime
 RUN npm init -y \
     && npm install --omit=dev --no-audit --no-fund miniflare@4.20260515.0 \
     && npm cache clean --force
 
 FROM node:24-bookworm-slim AS runtime
-
 ENV NODE_ENV=production \
     PORT=8081 \
     ARTHELLO_D1_PATH=/data/d1
