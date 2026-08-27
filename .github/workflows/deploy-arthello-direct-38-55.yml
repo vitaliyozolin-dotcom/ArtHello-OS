@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: gateway-38-55-arthello-production
@@ -314,3 +315,40 @@ jobs:
             echo "- Acceptance: real asset loads + auth endpoint + health + School guard"
             echo "- Result: ${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish deployment ledger
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_STATUS: ${{ job.status }}
+          LEDGER_ISSUE: "159"
+        run: |
+          set -Eeuo pipefail
+          payload="$(python3 - <<'PY'
+          import json
+          import os
+
+          status = os.environ["DEPLOY_STATUS"]
+          marker = "✅" if status == "success" else "❌"
+          run_url = f'{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}'
+          body = (
+              f'{marker} **{status.upper()}** — `{os.environ["GITHUB_SHA"]}`\n\n'
+              f'- run ID: `{os.environ["GITHUB_RUN_ID"]}`\n'
+              f'- workflow: [{os.environ["GITHUB_WORKFLOW"]}]({run_url})\n'
+              f'- production: {os.environ["PUBLIC_URL"]}\n'
+              f'- school guard: {os.environ["SCHOOL_URL"]}'
+          )
+          print(json.dumps({"body": body}, ensure_ascii=False))
+          PY
+          )"
+          if ! curl --fail-with-body --silent --show-error --retry 3 \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$LEDGER_ISSUE/comments" \
+            --data "$payload" >/dev/null
+          then
+            printf '::warning::Unable to publish deployment ledger comment\n'
+          fi
