@@ -178,7 +178,7 @@ jobs:
               sock.bind(("127.0.0.1", port))
           PY
 
-          latest="$(docker run --rm --network none \
+          latest="$(docker run --rm --network none --user 0:0 \
             -v "$production_backup_volume:/backup:ro" \
             --entrypoint node "$image_ref" -e \
             "const{readFileSync}=require('node:fs');process.stdout.write(readFileSync('/backup/design-system/LATEST','utf8').trim())")"
