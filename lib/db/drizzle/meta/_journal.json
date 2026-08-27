@@ -2,124 +2,23 @@
   "version": "7",
   "dialect": "postgresql",
   "entries": [
-    {
-      "idx": 0,
-      "version": "7",
-      "when": 1779533561810,
-      "tag": "0000_uneven_blue_blade",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1779537865333,
-      "tag": "0001_curly_mandrill",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1779641757810,
-      "tag": "0002_reflective_chat",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1748102400000,
-      "tag": "0003_bank_alpha_reconciliation",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1780048515644,
-      "tag": "0004_lively_magik",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1780052614426,
-      "tag": "0005_fresh_sharon_ventura",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1780085083708,
-      "tag": "0006_confused_puma",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1780086047304,
-      "tag": "0007_chunky_post",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1780134308738,
-      "tag": "0008_mean_crystal",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1784855800331,
-      "tag": "0009_famous_ma_gnuci",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1784858251868,
-      "tag": "0010_outstanding_cargill",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
-      "when": 1785000755923,
-      "tag": "0011_data_import_core",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "7",
-      "when": 1785004733052,
-      "tag": "0012_yellow_hellcat",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "7",
-      "when": 1785006559523,
-      "tag": "0013_low_ego",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "7",
-      "when": 1785008758984,
-      "tag": "0014_green_millenium_guard",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "7",
-      "when": 1785092263278,
-      "tag": "0015_front_office_internal_alpha",
-      "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "7",
-      "when": 1787184000000,
-      "tag": "0016_personal_auth",
-      "breakpoints": true
-    }
+    {"idx":0,"version":"7","when":1779533561810,"tag":"0000_uneven_blue_blade","breakpoints":true},
+    {"idx":1,"version":"7","when":1779537865333,"tag":"0001_curly_mandrill","breakpoints":true},
+    {"idx":2,"version":"7","when":1779641757810,"tag":"0002_reflective_chat","breakpoints":true},
+    {"idx":3,"version":"7","when":1748102400000,"tag":"0003_bank_alpha_reconciliation","breakpoints":true},
+    {"idx":4,"version":"7","when":1780048515644,"tag":"0004_lively_magik","breakpoints":true},
+    {"idx":5,"version":"7","when":1780052614426,"tag":"0005_fresh_sharon_ventura","breakpoints":true},
+    {"idx":6,"version":"7","when":1780085083708,"tag":"0006_confused_puma","breakpoints":true},
+    {"idx":7,"version":"7","when":1780086047304,"tag":"0007_chunky_post","breakpoints":true},
+    {"idx":8,"version":"7","when":1780134308738,"tag":"0008_mean_crystal","breakpoints":true},
+    {"idx":9,"version":"7","when":1784855800331,"tag":"0009_famous_ma_gnuci","breakpoints":true},
+    {"idx":10,"version":"7","when":1784858251868,"tag":"0010_outstanding_cargill","breakpoints":true},
+    {"idx":11,"version":"7","when":1785000755923,"tag":"0011_data_import_core","breakpoints":true},
+    {"idx":12,"version":"7","when":1785004733052,"tag":"0012_yellow_hellcat","breakpoints":true},
+    {"idx":13,"version":"7","when":1785006559523,"tag":"0013_low_ego","breakpoints":true},
+    {"idx":14,"version":"7","when":1785008758984,"tag":"0014_green_millenium_guard","breakpoints":true},
+    {"idx":15,"version":"7","when":1785092263278,"tag":"0015_front_office_internal_alpha","breakpoints":true},
+    {"idx":16,"version":"7","when":1787184000000,"tag":"0016_personal_auth","breakpoints":true},
+    {"idx":17,"version":"7","when":1787788800000,"tag":"0017_people_access_operator","breakpoints":true}
   ]
 }

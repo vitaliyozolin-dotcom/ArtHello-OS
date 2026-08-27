@@ -4,6 +4,7 @@ export const authUsersTable = pgTable(
   "auth_users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    employeeId: uuid("employee_id"),
     login: text("login").notNull(),
     loginNormalized: text("login_normalized").notNull(),
     displayName: text("display_name").notNull(),
@@ -21,6 +22,7 @@ export const authUsersTable = pgTable(
   },
   (table) => [
     uniqueIndex("auth_users_login_normalized_uniq").on(table.loginNormalized),
+    uniqueIndex("auth_users_employee_id_uniq").on(table.employeeId),
     index("auth_users_active_role_idx").on(table.isActive, table.role),
   ],
 );
@@ -75,7 +77,27 @@ export const authLoginAttemptsTable = pgTable(
   (table) => [index("auth_login_attempts_blocked_until_idx").on(table.blockedUntil)],
 );
 
+export const peopleAccessAuditTable = pgTable(
+  "people_access_audit",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    employeeId: uuid("employee_id").notNull(),
+    authUserId: uuid("auth_user_id"),
+    action: text("action").notNull(),
+    planHash: text("plan_hash").notNull(),
+    outcome: text("outcome").notNull(),
+    requestedByUserId: uuid("requested_by_user_id").notNull(),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("people_access_audit_employee_created_idx").on(table.employeeId, table.createdAt),
+    index("people_access_audit_auth_user_created_idx").on(table.authUserId, table.createdAt),
+  ],
+);
+
 export type AuthUserRow = typeof authUsersTable.$inferSelect;
 export type AuthSessionRow = typeof authSessionsTable.$inferSelect;
 export type SecurityAccessAuditRow = typeof securityAccessAuditTable.$inferSelect;
 export type AuthLoginAttemptRow = typeof authLoginAttemptsTable.$inferSelect;
+export type PeopleAccessAuditRow = typeof peopleAccessAuditTable.$inferSelect;

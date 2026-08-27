@@ -9,6 +9,7 @@ const NON_BUSINESS_ACCOUNT_ROUTES: ReadonlyArray<{ method: string; path: string 
 ];
 const OWNER_ONLY_READ_PATTERNS = [
   /^\/auth\/users\/?$/,
+  /^\/people-access(?:\/.*)?$/,
   /^\/banking\/connectors\/[^/]+\/customers\/?$/,
   /^\/banking\/connectors\/[^/]+\/health\/?$/,
   /^\/banking\/connectors\/[^/]+\/oauth\/status\/?$/,
