@@ -1,0 +1,216 @@
+name: Preview Contractors Design System Pilot
+
+on:
+  push:
+    branches:
+      - design-system/pilot-contractors
+    paths:
+      - deploy/v52/**
+      - .github/workflows/preview-contractors-pilot.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arthello-contractors-pilot-preview
+  cancel-in-progress: false
+
+env:
+  PREVIEW_HOST: pilot-arthello-188-225-38-55.sslip.io
+  PREVIEW_URL: https://pilot-arthello-188-225-38-55.sslip.io
+  PREVIEW_CONTAINER: arthello-contractors-preview
+  PREVIEW_VOLUME: arthello-contractors-preview-data
+  PRODUCTION_VOLUME: arthello-direct-v44-data
+  CADDY_CONTAINER: stroios-caddy-1
+
+jobs:
+  preview:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout exact pilot
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify isolated preview prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = '188.225.38.55'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(docker inspect --format '{{.State.Running}}' "$CADDY_CONTAINER")" = true
+          mapfile -t live_containers < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}')
+          test "${#live_containers[@]}" -eq 1
+          test "$(docker inspect "${live_containers[0]}" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$PRODUCTION_VOLUME"
+          printf 'ARTHELLO_PREVIEW_PREFLIGHT=OK\n'
+
+      - name: Build pilot image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          image="arthello-contractors-preview:$GITHUB_SHA"
+          docker build \
+            --file deploy/v52/Dockerfile \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$image" \
+            .
+          test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+          printf 'ARTHELLO_PREVIEW_BUILD=OK image=%s\n' "$image"
+
+      - name: Create isolated snapshot volume
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t live_containers < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}')
+          test "${#live_containers[@]}" -eq 1
+          live="${live_containers[0]}"
+          paused=0
+          cleanup_snapshot() {
+            rc=$?
+            if [ "$paused" -eq 1 ]; then docker unpause "$live" >/dev/null 2>&1 || true; fi
+            exit "$rc"
+          }
+          trap cleanup_snapshot EXIT
+
+          docker rm -f "$PREVIEW_CONTAINER" >/dev/null 2>&1 || true
+          docker volume rm -f "$PREVIEW_VOLUME" >/dev/null 2>&1 || true
+          docker volume create "$PREVIEW_VOLUME" >/dev/null
+
+          docker pause "$live" >/dev/null
+          paused=1
+          docker run --rm --user 0 \
+            -v "$PRODUCTION_VOLUME":/source:ro \
+            -v "$PREVIEW_VOLUME":/target \
+            node:24-bookworm-slim \
+            sh -lc 'cp -a /source/. /target/'
+          docker unpause "$live" >/dev/null
+          paused=0
+
+          docker run --rm --user 0 -v "$PREVIEW_VOLUME":/data:ro node:24-bookworm-slim \
+            sh -lc 'test -d /data/d1 && find /data/d1 -maxdepth 2 -type f -print -quit | grep -q .'
+          printf 'ARTHELLO_PREVIEW_SNAPSHOT=OK volume=%s\n' "$PREVIEW_VOLUME"
+          trap - EXIT
+
+      - name: Start isolated pilot container
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          image="arthello-contractors-preview:$GITHUB_SHA"
+          network="$(docker inspect "$CADDY_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1)"
+          test -n "$network"
+          secret_file="$HOME/.config/arthello/bootstrap-password"
+          test -s "$secret_file"
+          bootstrap_password="$(cat "$secret_file")"
+          echo "::add-mask::$bootstrap_password"
+
+          docker rm -f "$PREVIEW_CONTAINER" >/dev/null 2>&1 || true
+          docker run -d \
+            --name "$PREVIEW_CONTAINER" \
+            --restart unless-stopped \
+            --read-only \
+            --tmpfs /tmp \
+            --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
+            --network "$network" \
+            -e NODE_ENV=production \
+            -e PORT=8081 \
+            -e ARTHELLO_D1_PATH=/data/d1 \
+            -e ARTHELLO_BOOTSTRAP_LOGIN=owner \
+            -e ARTHELLO_BOOTSTRAP_PASSWORD="$bootstrap_password" \
+            -v "$PREVIEW_VOLUME":/data \
+            "$image" >/dev/null
+
+          ready=0
+          for attempt in $(seq 1 90); do
+            if docker exec "$PREVIEW_CONTAINER" node -e "fetch('http://127.0.0.1:8081/api/health').then(async r=>{if(!r.ok||!(await r.text()).includes('status'))process.exit(1)}).catch(()=>process.exit(1))"; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs --tail 200 "$PREVIEW_CONTAINER" >&2 || true
+            exit 1
+          fi
+          printf 'ARTHELLO_PREVIEW_CONTAINER=READY name=%s\n' "$PREVIEW_CONTAINER"
+
+      - name: Publish preview route without touching production route
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$RUNNER_TEMP/arthello-preview-route-$GITHUB_RUN_ID"
+          mkdir -p "$work"
+          current="$work/external-routes.current.caddy"
+          candidate="$work/external-routes.preview.caddy"
+          docker cp "$CADDY_CONTAINER:/data/external-routes.caddy" "$current"
+          test -s "$current"
+
+          python3 - "$current" "$candidate" "$PREVIEW_HOST" "$PREVIEW_CONTAINER" <<'PY'
+          import pathlib, re, sys
+          source, target, host, container = sys.argv[1:]
+          text = pathlib.Path(source).read_text()
+          text = re.sub(r'\n?# ARTHELLO_CONTRACTORS_PREVIEW_START\n.*?# ARTHELLO_CONTRACTORS_PREVIEW_END\n?', '\n', text, flags=re.S)
+          block = f'''\n# ARTHELLO_CONTRACTORS_PREVIEW_START
+          {host} {{
+            encode zstd gzip
+            reverse_proxy {container}:8081
+            header {{
+              Strict-Transport-Security "max-age=31536000; includeSubDomains"
+              X-Frame-Options "DENY"
+              X-Content-Type-Options "nosniff"
+              Referrer-Policy "same-origin"
+              X-Robots-Tag "noindex, nofollow, noarchive"
+              -Server
+            }}
+          }}
+          # ARTHELLO_CONTRACTORS_PREVIEW_END
+          '''
+          pathlib.Path(target).write_text(text.rstrip() + '\n' + block)
+          PY
+
+          rollback() {
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              docker cp "$current" "$CADDY_CONTAINER:/data/external-routes.caddy" >/dev/null 2>&1 || true
+              docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+            fi
+            exit "$rc"
+          }
+          trap rollback EXIT
+
+          docker cp "$candidate" "$CADDY_CONTAINER:/data/external-routes.caddy.preview"
+          docker exec "$CADDY_CONTAINER" sh -lc "sed 's#/data/external-routes.caddy#/data/external-routes.caddy.preview#' /etc/caddy/Caddyfile > /tmp/Caddyfile.preview"
+          docker exec "$CADDY_CONTAINER" caddy validate --config /tmp/Caddyfile.preview --adapter caddyfile >/dev/null
+          docker exec "$CADDY_CONTAINER" sh -lc 'mv /data/external-routes.caddy.preview /data/external-routes.caddy'
+          docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+
+          public_ok=0
+          for attempt in $(seq 1 60); do
+            if curl -fsS --max-time 20 "$PREVIEW_URL/api/health" | grep -F '"status":"ok"' >/dev/null; then
+              public_ok=1
+              break
+            fi
+            sleep 3
+          done
+          test "$public_ok" -eq 1
+          curl -fsS --max-time 20 https://arthello-188-225-38-55.sslip.io/api/health | grep -F '"status":"ok"' >/dev/null
+          curl -fsS --max-time 20 https://school-188-225-38-55.sslip.io/api/health | grep -F '"status":"ok"' >/dev/null
+          printf 'ARTHELLO_PREVIEW_PUBLIC=OK url=%s\nARTHELLO_PRODUCTION_PRESERVED=OK\nSCHOOL_ROUTE_PRESERVED=OK\n' "$PREVIEW_URL"
+          trap - EXIT
+
+      - name: Preview summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Contractors Design System pilot preview'
+            echo
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Preview: $PREVIEW_URL/#contractors"
+            echo '- Data: isolated snapshot volume; production is not mounted'
+            echo "- Result: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
