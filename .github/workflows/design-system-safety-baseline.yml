@@ -122,13 +122,15 @@ jobs:
           NODE
           docker run --rm --network host \
             -e PUBLIC_URL="$PUBLIC_URL" \
+            -e PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
             -v "$target:/baseline" \
-            -v "$work/capture.js:/work/capture.js:ro" \
+            -v "$work:/work" \
             -w /work \
             mcr.microsoft.com/playwright:v1.55.0-noble \
-            node capture.js
+            bash -lc 'npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund --no-save playwright@1.55.0 >/dev/null && node capture.js'
           test -s "$target/manifest.json"
           printf '%s\n' "$CHECKPOINT_SHA" > "$target/checkpoint-sha.txt"
+          chmod -R a+rX "$target"
           ln -sfn "$target" "$BASELINE_ROOT/latest"
           printf 'ARTHELLO_VISUAL_BASELINE=OK path=%s\n' "$target"
 
