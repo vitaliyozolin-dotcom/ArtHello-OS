@@ -32,6 +32,39 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
 
+      - name: Inspect exact contractor source before pilot transform
+        run: |
+          set -Eeuo pipefail
+          work="$RUNNER_TEMP/arthello-contractor-inspect-$GITHUB_RUN_ID"
+          rm -rf "$work" && mkdir -p "$work"
+          docker run --rm \
+            -v "$PWD:/repo:ro" \
+            -v "$work:/work" \
+            node:24-bookworm-slim bash -lc '
+              set -Eeuo pipefail
+              mkdir -p /work/app /work/source-parts
+              cp /repo/deploy/v52/arthello-sites-v52-source.tar.gz.b64.part-* /work/source-parts/
+              cat /work/source-parts/arthello-sites-v52-source.tar.gz.b64.part-* | base64 -d > /work/source.tar.gz
+              tar -xzf /work/source.tar.gz -C /work/app
+              cp -a /repo/deploy/v44/overrides/. /work/app/
+              cp -a /repo/deploy/v52/overrides/. /work/app/
+              cd /work/app
+              node scripts/patch-dashboard-personalization.mjs
+              node scripts/patch-sales-operating-workspace.mjs
+              node scripts/patch-system-foundation.mjs
+              node scripts/normalize-system-patch-inputs.mjs
+              node scripts/patch-system-content-legal.mjs
+              node scripts/patch-system-analytics-readiness.mjs
+              node scripts/patch-system-operational-modules.mjs
+              node scripts/patch-system-dialog-portals.mjs
+              node scripts/patch-mobile-visual-help-followup.mjs
+              node scripts/prepare-help-finance-ux-v3.mjs
+              node scripts/patch-help-finance-ux-v3.mjs
+              node scripts/patch-mobile-canonical-v5.mjs
+              echo "=== CONTRACTOR WORKSPACE SOURCE ==="
+              cat app/components/ContractorWorkspace.tsx
+            '
+
       - name: Build application candidate
         run: |
           set -Eeuo pipefail
