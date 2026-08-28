@@ -267,7 +267,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .audit-list strong { font-size: 11px; }
 .audit-list small { color: var(--muted); font-size: 9px; }
 
-.student-hero { min-height: 210px; border-radius: 28px; padding: 31px 34px; background: var(--student-hero-base-a); color: var(--student-on-dark); display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.student-hero { min-height: 210px; border-radius: 28px; padding: 31px 34px; background: var(--student-hero-background); color: var(--student-on-dark); display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .student-hero h1 { margin-top: 9px; font-size: clamp(34px, 5vw, 50px); letter-spacing: -1.7px; }
 .student-hero p { color: var(--student-text-62); margin-top: 8px; font-size: 14px; }
 .student-hero > div:last-child { width: 132px; height: 132px; border-radius: 50%; border: 1px solid var(--student-line-14); background: var(--student-fill-06); display: flex; flex-direction: column; align-items: center; justify-content: center; }
@@ -282,14 +282,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .role-student .l0-topbar { border-color: var(--student-line-08); background: var(--student-topbar); color: var(--student-on-dark); }
 .role-student .notification-button { border-color: var(--student-line-12); background: var(--student-fill-08); color: var(--student-on-dark); }
 .role-student .status-pill { border-radius: 9px; }
-.role-student .l0-main { background: var(--student-page); }
+.role-student .l0-main { background: var(--student-main-background); }
 .role-student .page-heading h1, .role-student .page-heading p { color: var(--student-on-dark); }
 .role-student .page-heading p { opacity: .62; }
 .role-student .tab-row button { border-color: var(--student-line-10); background: var(--student-surface); color: var(--student-text-62); }
 .role-student .tab-row button.active { border-color: var(--student-action); background: var(--student-action); color: var(--student-on-dark); }
 .student-dashboard { position: relative; }
-.student-dashboard .student-hero { min-height: 330px; padding: 38px 42px; border: 1px solid var(--student-line-08); border-radius: 20px; background-color: var(--student-hero-base-a); background-image: url("/student-dashboard-hero-v1.webp"); background-size: cover; background-position: center; box-shadow: 0 24px 55px var(--student-shadow-28); position: relative; overflow: hidden; }
-.student-dashboard .student-hero::after { content: ""; position: absolute; inset: 0; background: var(--student-hero-overlay-06); pointer-events: none; }
+.student-dashboard .student-hero { min-height: 330px; padding: 38px 42px; border: 1px solid var(--student-line-08); border-radius: 20px; background-image: var(--student-dashboard-hero-image); background-size: cover; background-position: center; box-shadow: 0 24px 55px var(--student-shadow-28); position: relative; overflow: hidden; }
+.student-dashboard .student-hero::after { content: ""; position: absolute; inset: 0; background: var(--student-hero-overlay); pointer-events: none; }
 .student-hero-copy { max-width: 55%; position: relative; z-index: 2; }
 .student-kicker { color: var(--student-highlight); font-size: 10px; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
 .student-dashboard .student-hero h1 { margin-top: 12px; font-size: clamp(40px, 5vw, 62px); line-height: 1.02; font-weight: 820; letter-spacing: -.045em; }
@@ -753,7 +753,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .student-hero > div:last-child { width: 100px; height: 100px; }
   .student-hero > div:last-child strong { font-size: 30px; }
   .student-dashboard .student-hero { min-height: 390px; padding: 25px; align-items: flex-end; background-position: 61% center; }
-  .student-dashboard .student-hero::after { background: var(--student-hero-overlay-30); }
+  .student-dashboard .student-hero::after { background: var(--student-hero-overlay-mobile); }
   .student-hero-copy { max-width: 70%; }
   .student-dashboard .student-hero h1 { font-size: 43px; }
   .student-dashboard .student-hero > .student-score-orbit { width: 126px; min-height: 74px; height: auto; border-radius: 11px; padding: 11px 11px 10px; gap: 5px 6px; position: absolute; right: 16px; top: 16px; }
