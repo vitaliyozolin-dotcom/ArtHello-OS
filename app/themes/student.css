@@ -230,14 +230,14 @@ html[data-design-code="v1"][data-theme="student"] .role-student .privacy-card p 
   color: var(--color-text-secondary);
 }
 
-html[data-design-code="v1"][data-theme="student"] .role-student .day-switch button {
+html[data-design-code="v1"][data-theme="student"] .role-student .day-switch > button {
   border-color: var(--color-border);
   background: var(--color-surface-muted);
   color: var(--color-text);
 }
 
-html[data-design-code="v1"][data-theme="student"] .role-student .day-switch button.active {
-  border-color: var(--color-accent);
+html[data-design-code="v1"][data-theme="student"] .role-student .day-switch > button.active {
+  border-color: var(--color-text);
   background: var(--color-surface);
   color: var(--color-accent);
 }
@@ -247,7 +247,7 @@ html[data-design-code="v1"][data-theme="student"] .role-student .lesson-order {
   color: var(--color-text-secondary);
 }
 
-html[data-design-code="v1"][data-theme="student"] .role-student .notification-list article.unread {
+html[data-design-code="v1"][data-theme="student"] .role-student .notification-list > article.unread {
   border-color: var(--color-accent);
   background: var(--color-surface-raised);
   color: var(--color-text);
