@@ -24,6 +24,27 @@ assert_candidate_image() {
   test "$(docker inspect "$staging" --format '{{.Image}}')" = "$CANDIDATE_IMAGE_ID"
 }
 
+service_fingerprint() {
+  local service="$1"
+  docker inspect "$service" --format '{{.Id}}|{{.Image}}|{{.State.StartedAt}}|{{json .HostConfig.PortBindings}}|{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}'
+}
+
+staging_database_fingerprint() {
+  docker exec -i "$staging" node --input-type=module - <<'FINGERPRINT_DATABASE'
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+for (const path of ['/data/school-1-11.sqlite', '/data/school-1-11.sqlite-wal']) {
+  try {
+    const bytes = readFileSync(path);
+    console.log(`${path}|${bytes.length}|${createHash('sha256').update(bytes).digest('hex')}`);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    console.log(`${path}|absent`);
+  }
+}
+FINGERPRINT_DATABASE
+}
+
 case "$regression:$regression_data" in
   school-1-11-role-regression-*:school-1-11_role_regression_*_data) ;;
   *) printf 'Invalid regression resource names\n' >&2; exit 1 ;;
@@ -57,6 +78,7 @@ trap cleanup EXIT
 test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
 test "$(docker inspect "$production" --format '{{.State.Health.Status}}')" = healthy
 production_started_before="$(docker inspect "$production" --format '{{.State.StartedAt}}')"
+production_fingerprint_before="$(service_fingerprint "$production")"
 curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
 
 test "$(docker inspect "$staging" --format '{{.State.Running}}')" = true
@@ -64,6 +86,8 @@ test "$(docker inspect "$staging" --format '{{.Config.Image}}')" = "$CANDIDATE_I
 assert_candidate_image
 test "$(docker inspect "$staging" --format '{{index .Config.Labels "school.candidate-sha"}}')" = "$CANDIDATE_SHA"
 curl -fsS --max-time 15 "$STAGING_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
+staging_fingerprint_before="$(service_fingerprint "$staging")"
+staging_database_before="$(staging_database_fingerprint)"
 test -z "$(docker ps -aq --filter "name=^/$regression$")"
 if docker volume inspect "$regression_data" >/dev/null 2>&1; then
   printf 'Regression data volume already exists\n' >&2
@@ -431,17 +455,21 @@ fi
 printf 'SCHOOL_FOUR_ROLE_CLEANUP=OK\n'
 
 test "$(docker inspect "$production" --format '{{.State.StartedAt}}')" = "$production_started_before"
+test "$(service_fingerprint "$production")" = "$production_fingerprint_before"
 test "$(docker inspect "$production" --format '{{.State.Health.Status}}')" = healthy
 curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
 test "$(docker inspect "$staging" --format '{{.State.Running}}')" = true
 test "$(docker inspect "$staging" --format '{{.Config.Image}}')" = "$CANDIDATE_IMAGE"
 assert_candidate_image
 curl -fsS --max-time 15 "$STAGING_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
+test "$(service_fingerprint "$staging")" = "$staging_fingerprint_before"
+test "$(staging_database_fingerprint)" = "$staging_database_before"
 
 success=1
 printf 'SCHOOL_FOUR_ROLE_CANDIDATE_IMAGE_ID=%s\n' "$CANDIDATE_IMAGE_ID"
 printf 'SCHOOL_FOUR_ROLE_IMAGE_PIN=IMMUTABLE\n'
 printf 'SCHOOL_FOUR_ROLE_REGRESSION=OK\n'
+printf 'SCHOOL_FOUR_ROLE_STAGING_FINGERPRINT=UNCHANGED\n'
 printf 'SCHOOL_FOUR_ROLE_STAGING_CHANGED=no\n'
 printf 'SCHOOL_FOUR_ROLE_PRODUCTION_RESTARTED=no\n'
 printf 'SCHOOL_FOUR_ROLE_PRODUCTION_HEALTH=OK\n'
