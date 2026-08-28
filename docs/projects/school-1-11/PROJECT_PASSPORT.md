@@ -35,16 +35,20 @@
 - DS-02 candidate `796fdd7af23de11f03460672fb4d82a5d66ce4a5` собран в image `sha256:bee90a14e40b39c278876a63dbe468fc9a92d362b3268ea093f502abda8d640e`; staging run [33152127917](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33152127917) прошёл.
 - Граничный audit run [33152762563](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33152762563) проверил 4 роли × 6 ширин 767/768/800/801/1199/1200: 24/24 снимка, `DS-02 shell violations = 0`; artifact `9678390875`, digest `sha256:88ee92eecd691e0fdc40865132babb6b9c779fba1dcfe58cfd02274f97009bba`.
 - Four-role regression run [33152565608](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33152565608) прошёл для директора, учителя, родителя и ученика на ephemeral clone; staging data не менялись.
-- Осталось 233 отклонения полного дизайн-кода; они не относятся к каркасу DS-02 и остаются входом для DS-03–DS-05.
 - Реализация DS-02 принята PR [#202](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/202), merge SHA `f509debad93ec2fa3668aa60a8f90fc5deeb7321`; blob SHA трёх изменённых файлов совпадают с проверенным candidate.
+- DS-03 candidate `fb0737f83438128c2c62bc14f3167a21c27a51f7` собран в immutable image `sha256:05381e535d0ef89c7fea20b25635e56ed48873994848de652fb08cf23c066389`; staging run [33162466000](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33162466000) прошёл 14/14 контрактных тестов в изолированном loopback-контуре.
+- Финальный audit run [33162775259](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33162775259) проверил 45/45 снимков: `P0 = 0`, `DS-02 violations = 0`, `DS-03 violations = 0`, `CLS = 0`, 153/153 student-поверхности соответствуют токенам, Onest загружен на 21/21 student-снимках без TTF/Rubik; artifact `9682354656`, digest `sha256:1fea44d6cf0eef190d0b56e7230d2f73cb27bed040291cacb8d87edeced1228d`.
+- Four-role regression run [33162775257](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33162775257) прошёл для директора, учителя, родителя и ученика на том же immutable image и синтетических ephemeral-данных; production и staging не менялись и не перезапускались.
+- Реализация DS-03 принята PR [#209](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/209), squash merge SHA `fe2a46ba288eebb553e073e6fff29ceed9af2e91` в `school/staging-foundation-20260827`.
+- После DS-03 осталось 227 отклонений `P1` по типографике, touch targets и радиусам; они относятся к DS-04. Отклонений `P0` нет.
 - Глобальный ArtHello OS Design Code сохраняется для основной ArtHello OS, но не переопределяет специальные правила «Школы 1–11».
 
 ## Этапы и зависимости
 
 1. `DS-01` — устранить конфликт источников, закрепить канонический документ, иерархию и указатель в школьной ветке. Статус: `completed`.
 2. `DS-02` — исправить каркас 768–1199 px и добавить граничные проверки 767/768/800/801/1199/1200. Статус: `completed`; зависит от `DS-01`.
-3. `DS-03` — перевести student-тему на утверждённые токены и Onest без изменения геометрии. Статус: `next`; зависит от `DS-02`.
-4. `DS-04` — унифицировать Typography, Button, Tabs, Card, Table и HelpButton. Статус: `pending`; зависит от `DS-02`.
+3. `DS-03` — перевести student-тему на утверждённые токены и Onest без изменения геометрии. Статус: `completed`; зависит от `DS-02`.
+4. `DS-04` — унифицировать Typography, Button, Tabs, Card, Table и HelpButton. Статус: `next`; зависит от `DS-03`.
 5. `DS-05` — переносить маршруты по одному: родитель, ученик, директор, последним журнал учителя. Статус: `pending`; зависит от `DS-03` и `DS-04`.
 6. `DS-06` — полный visual/functional acceptance и production cutover точного image digest. Статус: `pending`; зависит от `DS-05` и отдельного разрешения владельца.
 
@@ -72,16 +76,16 @@
 - legacy `globals.css` и `mobile-polish.css` могут поздним cascade переопределять токены;
 - текущий audit workflow привязан к конкретному candidate и ещё должен стать обязательным воротом для каждого UI SHA;
 - состояния loading, empty, error, disabled и long-content пока не прошли полную визуальную приёмку;
-- DS-02 проверен на полной граничной runtime-матрице; 233 отклонения следующих этапов ещё требуют последовательного устранения;
+- DS-02 и DS-03 проверены на полной runtime-матрице; 227 отклонений `P1` этапа DS-04 ещё требуют последовательного устранения;
 - срок полного переноса экранов не утверждён.
 
 ## Текущий шаг
 
-- этап: `DS-03`;
+- этап: `DS-04`;
 - исполнитель: Codex; владелец решения: Виталий Озолин;
-- действие: отдельным feature-flagged PR перевести только student-тему на утверждённые семантические токены и Onest, сохранив геометрию принятого shell;
-- доказательство: exact candidate SHA/image digest, четыре роли на контрольных и граничных ширинах, ноль новых shell-нарушений, отсутствие raw colors вне token layer, функциональный regression и неизменные production/staging данные;
-- следующий переход: после принятой student-темы перейти к общим Typography, Button, Tabs, Card, Table и HelpButton.
+- действие: отдельным feature-flagged PR унифицировать Typography, Button, Tabs, Card, Table и HelpButton, последовательно устраняя 227 известных `P1` по типографике, touch targets и радиусам без изменения бизнес-логики, данных, ролевой навигации и принятой геометрии shell;
+- доказательство: exact candidate SHA/image digest, четыре роли на контрольных и граничных ширинах, `P0 = 0`, сохранённые `DS-02 violations = 0` и `DS-03 violations = 0`, `CLS <= 0.02`, снижение целевых `P1`, функциональный regression, изолированные staging-данные и неизменный production;
+- следующий переход: после принятия общих компонентов переносить маршруты в DS-05 по одному — родитель, ученик, директор, последним журнал учителя.
 
 ## Контракт AI-процесса: хранитель School Design Code
 
@@ -126,6 +130,10 @@ decision:
     - ../../design/school-1-11/DESIGN_CODE.md
     - https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/200
     - https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33146238926
+    - https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/209
+    - https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33162466000
+    - https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33162775259
+    - https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33162775257
   raw_deliberation_ref: ChatGPT project conversation 2026-08-27..2026-08-28
   rejected_alternatives:
     - option: Применить фиолетовый ArtHello OS Design Code ко всем школьным кабинетам
@@ -150,4 +158,14 @@ decision:
       due: 2026-08-28
       evidence_required: merged PR to main with relative canonical link
       status: completed
+    - action: Завершить DS-03 — student-тема на токенах и локальном Onest без изменения геометрии
+      owner: Codex
+      due: 2026-08-28
+      evidence_required: PR #209 merged as fe2a46ba288eebb553e073e6fff29ceed9af2e91; staging run 33162466000; audit run 33162775259; four-role run 33162775257; immutable image sha256:05381e535d0ef89c7fea20b25635e56ed48873994848de652fb08cf23c066389
+      status: completed
+    - action: Выполнить DS-04 — унифицировать Typography, Button, Tabs, Card, Table и HelpButton
+      owner: Codex
+      due: null
+      evidence_required: exact candidate/image; P0 = 0; DS-02 = 0; DS-03 = 0; CLS <= 0.02; four-role regression; снижение 227 целевых P1; production unchanged
+      status: pending
 ```
