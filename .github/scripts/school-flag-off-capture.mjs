@@ -434,7 +434,7 @@ async function captureVariant(
           }
           const anchors = runtime.anchors;
           if (probe.id === "director-management" && (
-            anchors.directorManagementRows !== 4 || anchors.directorLegacyTitles !== 0
+            anchors.directorManagementRows !== 16 || anchors.directorLegacyTitles !== 0
           )) throw new Error("Director management legacy title anchors are invalid");
           if (probe.id.startsWith("teacher-journal") && (
             anchors.journalRows !== 6 ||
@@ -453,7 +453,7 @@ async function captureVariant(
           )) throw new Error("Parent homework legacy tab anchors are invalid");
           if (probe.id === "parent-ranking" && (
             anchors.rankingBoards !== 1 ||
-            anchors.rankingButtons === 0 ||
+            anchors.rankingButtons !== 3 ||
             anchors.rankingTypedButtons !== 0
           )) throw new Error("Ranking legacy ARIA/type anchors are invalid");
           if (probe.id === "student-schedule" && (
