@@ -454,7 +454,6 @@ async function createContext(browser, viewport) {
 }
 
 const browser = await chromium.launch({ headless: true });
-let studentCookies = null;
 
 try {
   for (const role of roles) {
@@ -484,7 +483,6 @@ try {
     if (!cookies.some((cookie) => cookie.name === "school_session")) {
       throw new Error("Session cookie missing for " + role.id);
     }
-    if (role.id === "student") studentCookies = cookies;
     await loginContext.close();
 
     for (const control of controls) {
@@ -849,20 +847,21 @@ try {
     }
   }
 
-  if (!studentCookies) {
-    throw new Error("Student session was not captured for route audit");
-  }
   for (const control of studentRouteControls) {
     const context = await createContext(browser, control);
-    await context.addCookies(studentCookies);
     const page = await context.newPage();
-    const response = await page.goto(origin + "/", {
+    const response = await page.goto(origin + "/login", {
       waitUntil: "networkidle",
       timeout: 30000,
     });
     if (!response?.ok()) {
-      throw new Error("Student route audit entry failed at " + control.width + "px");
+      throw new Error("Student route audit login failed at " + control.width + "px");
     }
+    await page.locator('input[name="login"]').fill(
+      "authorized-visual-" + runId + "-student@invalid.local",
+    );
+    await page.locator('input[name="password"]').fill(password);
+    await page.locator('button[type="submit"]').click();
     await page
       .locator('html[data-design-code="v1"][data-theme="student"] .role-student')
       .waitFor({ state: "visible", timeout: 30000 });
@@ -1018,11 +1017,6 @@ try {
           "=CAPTURED",
       );
     }
-    const refreshedStudentCookies = await context.cookies();
-    if (!refreshedStudentCookies.some((cookie) => cookie.name === "school_session")) {
-      throw new Error("Student route session cookie was not refreshed");
-    }
-    studentCookies = refreshedStudentCookies;
     await context.close();
   }
 } finally {
