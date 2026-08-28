@@ -60,23 +60,21 @@ jobs:
             docker image rm "$image" >/dev/null 2>&1 || true
           done
 
+          # BuildKit cache is disposable; reclaim it before the two exact builds
+          # so the runner cannot run out of disk halfway through a Docker layer.
+          docker image prune --force >/dev/null
+          docker builder prune --all --force >/dev/null
           docker_root="$(docker info --format '{{.DockerRootDir}}')"
           available_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
-          if [ "$available_kb" -lt 4194304 ]; then
-            docker image prune --force >/dev/null
-            docker builder prune --all --force >/dev/null
-            available_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
-          fi
           printf 'ARTHELLO_BUILD_SPACE_KB=%s\n' "$available_kb"
-          test "$available_kb" -ge 2097152
+          test "$available_kb" -ge 6291456
 
-      - name: Build baseline and pilot images
+      - name: Build pilot application and runtime images
         shell: bash
         run: |
           set -Eeuo pipefail
           docker build --file candidate/deploy/v52/Dockerfile --target application --tag arthello-ds-pilot-app:${HEAD_SHA} candidate
           docker build --file candidate/deploy/v52/Dockerfile --tag arthello-ds-pilot-runtime:${HEAD_SHA} candidate
-          docker build --file baseline/deploy/v52/Dockerfile --tag arthello-ds-baseline-runtime:${BASE_SHA} baseline
 
       - name: Verify Design System pilot source and artifact
         shell: bash
@@ -98,6 +96,28 @@ jobs:
             test -d /app/dist
             test -s /app/production/runtime-server.mjs
           '
+
+      - name: Reclaim pilot-only layers before baseline
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker image rm arthello-ds-pilot-app:${HEAD_SHA} >/dev/null
+          docker builder prune --all --force >/dev/null
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          available_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
+          printf 'ARTHELLO_BASELINE_BUILD_SPACE_KB=%s\n' "$available_kb"
+          test "$available_kb" -ge 4194304
+
+      - name: Build exact baseline runtime image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker build --file baseline/deploy/v52/Dockerfile --tag arthello-ds-baseline-runtime:${BASE_SHA} baseline
+          docker builder prune --all --force >/dev/null
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          available_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
+          printf 'ARTHELLO_VISUAL_SPACE_KB=%s\n' "$available_kb"
+          test "$available_kb" -ge 2097152
 
       - name: Capture isolated A/B visual acceptance
         id: visual
