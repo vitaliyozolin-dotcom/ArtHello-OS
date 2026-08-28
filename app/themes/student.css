@@ -184,3 +184,46 @@ html[data-design-code="v1"][data-theme="student"] .role-student .l0-topbar {
   background: var(--student-topbar);
   color: var(--student-on-dark);
 }
+
+/* Shared route surfaces must inherit the approved dark student palette. */
+html[data-design-code="v1"][data-theme="student"] .role-student .calendar-toolbar > label,
+html[data-design-code="v1"][data-theme="student"] .role-student .calendar-week > article,
+html[data-design-code="v1"][data-theme="student"] .role-student .calendar-lesson,
+html[data-design-code="v1"][data-theme="student"] .role-student .menu-grid > article,
+html[data-design-code="v1"][data-theme="student"] .role-student .privacy-card {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+html[data-design-code="v1"][data-theme="student"] .role-student .segmented {
+  background: var(--color-surface-muted);
+}
+
+html[data-design-code="v1"][data-theme="student"] .role-student .segmented button {
+  color: var(--color-text-secondary);
+}
+
+html[data-design-code="v1"][data-theme="student"] .role-student .segmented button.active {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+html[data-design-code="v1"][data-theme="student"] .role-student .calendar-week > article > header {
+  border-color: var(--color-border);
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+
+html[data-design-code="v1"][data-theme="student"] .role-student .menu-grid > article.featured {
+  border-color: var(--color-accent);
+}
+
+html[data-design-code="v1"][data-theme="student"] .role-student .privacy-card > span {
+  background: color-mix(in srgb, var(--success-500) 14%, transparent);
+  color: var(--success-500);
+}
+
+html[data-design-code="v1"][data-theme="student"] .role-student .privacy-card p {
+  color: var(--color-text-secondary);
+}
