@@ -17,10 +17,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CANDIDATE_SHA: 0947e866afb0bcbbe1a33a3303e9168351f5e9f1
-  CANDIDATE_IMAGE: school-1-11-design-v1:0947e866afb0
-  CANDIDATE_IMAGE_ID: sha256:94bcaa9dfe45d1bbfc1042c397a4556cbacb258e810b7e56b581d7a2b44570ea
-  AUDIT_WIDTHS: "767,768,800,801,1199,1200"
+  CANDIDATE_SHA: 034be78c5cb30402ebb7d3786133d0f3be390be9
+  CANDIDATE_IMAGE: school-1-11-design-v1:034be78c5cb3
+  CANDIDATE_IMAGE_ID: sha256:cfa869407edd53b4d54dfffef5ba12c16cd1f3e9ee2430d6975e89bfd64075b3
+  AUDIT_WIDTHS: "360,390,767,768,800,801,1199,1200,1280,1440,1920,2560"
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   STAGING_ORIGIN: http://127.0.0.1:3211
   AUDIT_BIND_ORIGIN: http://127.0.0.1:3212
@@ -216,7 +216,7 @@ jobs:
             '
 
           test -s school-authorized-visual-output/manifest.json
-          test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 51
+          test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 75
           manifest_values="$(python3 - <<'READ_MANIFEST'
           import collections
           import json
@@ -330,7 +330,7 @@ jobs:
               'auditRunId': os.environ['GITHUB_RUN_ID'],
               'candidateSha': os.environ['CANDIDATE_SHA'],
               'candidateImageId': os.environ['CANDIDATE_IMAGE_ID'],
-              'sourceOfTruth': 'School 1–11 design code 1.0.0, approved 2026-08-27',
+              'sourceOfTruth': 'School 1–11 design code 1.0.0, approved 2026-08-27, SHA-256 cebdc3f3ae76cb50103734c0e6144cef713108b4c6fd9b39de93cf3f8828dd48',
               'origin': 'loopback-ssh-tunnel',
               'fixture': 'empty schema from candidate migrations, seeded with synthetic data',
               'credentialsStored': False,
@@ -342,12 +342,18 @@ jobs:
               raise RuntimeError('Capture timestamp invariant failed')
 
           expected_controls = [
+              {'width': 360, 'height': 800},
+              {'width': 390, 'height': 844},
               {'width': 767, 'height': 1024},
               {'width': 768, 'height': 1024},
               {'width': 800, 'height': 1024},
               {'width': 801, 'height': 1024},
               {'width': 1199, 'height': 960},
               {'width': 1200, 'height': 960},
+              {'width': 1280, 'height': 960},
+              {'width': 1440, 'height': 1000},
+              {'width': 1920, 'height': 1080},
+              {'width': 2560, 'height': 1200},
           ]
           expected_roles = [
               {'id': 'director', 'route': '/management'},
@@ -403,13 +409,13 @@ jobs:
                   raise RuntimeError('Unexpected selector requirements outside School')
 
           results = manifest['results']
-          if type(results) is not list or len(results) != 51:
-              raise RuntimeError('Combined result list must contain exactly 51 records')
+          if type(results) is not list or len(results) != 75:
+              raise RuntimeError('Combined result list must contain exactly 75 records')
           if any(type(item) is not dict for item in results):
               raise RuntimeError('Every capture result must be an object')
           boundary_results = [item for item in results if 'routeStateId' not in item]
           student_results = [item for item in results if 'routeStateId' in item]
-          if len(boundary_results) != 24 or len(student_results) != 27:
+          if len(boundary_results) != 48 or len(student_results) != 27:
               raise RuntimeError('Wrong boundary/student result partition')
 
           expected_boundary_matrix = {}
@@ -1375,7 +1381,7 @@ jobs:
               'STUDENT_SCHOOL_FOCUS_STYLE',
               'STUDENT_SCHOOL_FOCUS_NONTEXT', 'CLS',
           }
-          deferred_codes = {
+          ds04_codes = {
               'HEADER_LOGO_WIDTH', 'HEADER_LOGO_HEIGHT',
               'H1_SIZE', 'H1_LINE_HEIGHT', 'H1_WEIGHT',
               'H2_SIZE', 'H2_LINE_HEIGHT',
@@ -1384,7 +1390,7 @@ jobs:
               'TOUCH_TARGETS', 'HELP_BUTTON', 'FOCUS_RING',
               'CONTENT_MAX_WIDTH',
           }
-          all_known_codes = ds02_codes | ds03_codes | deferred_codes
+          all_known_codes = ds02_codes | ds03_codes | ds04_codes
           valid_roles = {role['id'] for role in expected_roles}
           valid_widths = {
               control['width'] for control in [*expected_controls, *expected_route_controls]
@@ -1441,15 +1447,25 @@ jobs:
                   'DS-03 theme/font/route violations: ' +
                   json.dumps(ds03_violations, ensure_ascii=False)
               )
+          ds04_violations = [
+              violation for violation in violation_records
+              if violation['code'] in ds04_codes
+          ]
+          if ds04_violations:
+              raise RuntimeError(
+                  'DS-04 component violations: ' +
+                  json.dumps(ds04_violations, ensure_ascii=False)
+              )
           print(
               f"{len(manifest['violations'])} "
               f"{str(manifest['compliant']).lower()} "
               f"{len(ds02_violations)} "
-              f"{len(ds03_violations)}"
+              f"{len(ds03_violations)} "
+              f"{len(ds04_violations)}"
           )
           READ_MANIFEST
           )"
-          read -r violation_count compliant ds02_violation_count ds03_violation_count <<< "$manifest_values"
+          read -r violation_count compliant ds02_violation_count ds03_violation_count ds04_violation_count <<< "$manifest_values"
 
           kill "$tunnel_pid"
           wait "$tunnel_pid" >/dev/null 2>&1 || true
@@ -1464,7 +1480,8 @@ jobs:
           printf 'compliant=%s\n' "$compliant" >> "$GITHUB_OUTPUT"
           printf 'ds02_violation_count=%s\n' "$ds02_violation_count" >> "$GITHUB_OUTPUT"
           printf 'ds03_violation_count=%s\n' "$ds03_violation_count" >> "$GITHUB_OUTPUT"
-          printf 'SCHOOL_AUTHORIZED_VISUAL_CAPTURE=OK captures=51 ds02_violations=%s ds03_violations=%s violations=%s compliant=%s\n' "$ds02_violation_count" "$ds03_violation_count" "$violation_count" "$compliant"
+          printf 'ds04_violation_count=%s\n' "$ds04_violation_count" >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_AUTHORIZED_VISUAL_CAPTURE=OK captures=75 ds02_violations=%s ds03_violations=%s ds04_violations=%s violations=%s compliant=%s\n' "$ds02_violation_count" "$ds03_violation_count" "$ds04_violation_count" "$violation_count" "$compliant"
 
       - name: Enforce remote teardown
         if: always()
@@ -1544,6 +1561,7 @@ jobs:
           COMPLIANT: ${{ steps.capture.outputs.compliant }}
           DS02_VIOLATIONS: ${{ steps.capture.outputs.ds02_violation_count }}
           DS03_VIOLATIONS: ${{ steps.capture.outputs.ds03_violation_count }}
+          DS04_VIOLATIONS: ${{ steps.capture.outputs.ds04_violation_count }}
         shell: bash
         run: |
           {
@@ -1554,11 +1572,13 @@ jobs:
             printf -- '- Roles: director, teacher, parent, student\n'
             printf -- '- DS-02 boundary routes: /management, /journal, /homework, /schedule\n'
             printf -- '- DS-02 widths: 767, 768, 800, 801, 1199, 1200 px\n'
+            printf -- '- Canonical Design Code widths across all four roles: 360, 390, 768, 1280, 1440, 1920, 2560 px\n'
             printf -- '- DS-03 student routes: /, /schedule, /journal, /homework, /calendar, /school, /profile\n'
             printf -- '- DS-03 School states: Меню, Мероприятия, Доп. занятия\n'
             printf -- '- DS-03 School evidence schema: 1.3.0 selector/count/contrast/focus\n'
             printf -- '- DS-03 route widths: 390, 768, 1440 px\n'
-            printf -- '- Evidence: 51 screenshots plus computed-style manifest\n'
+            printf -- '- DS-04 components: logo, headings, primary controls, cards, touch targets, Help, focus ring, content width\n'
+            printf -- '- Evidence: 75 screenshots plus computed-style manifest\n'
             printf -- '- Data: empty schema from candidate migrations; synthetic only\n'
             printf -- '- Exposure: isolated no-masquerade bridge, loopback port, SSH tunnel\n'
             printf -- '- Production/staging UI, data, restart changed: no\n'
@@ -1566,7 +1586,8 @@ jobs:
             printf -- '- Design compliant: %s\n' "${COMPLIANT:-not measured}"
             printf -- '- DS-02 shell violations: %s\n' "${DS02_VIOLATIONS:-not measured}"
             printf -- '- DS-03 theme/font/route violations: %s\n' "${DS03_VIOLATIONS:-not measured}"
-            printf -- '- All-design violations (future stages included): %s\n' "${VIOLATION_COUNT:-not measured}"
+            printf -- '- DS-04 component violations: %s\n' "${DS04_VIOLATIONS:-not measured}"
+            printf -- '- All audited design violations: %s\n' "${VIOLATION_COUNT:-not measured}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report authorized capture as commit status

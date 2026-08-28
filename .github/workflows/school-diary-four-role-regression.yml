@@ -16,9 +16,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CANDIDATE_SHA: 0947e866afb0bcbbe1a33a3303e9168351f5e9f1
-  CANDIDATE_IMAGE: school-1-11-design-v1:0947e866afb0
-  CANDIDATE_IMAGE_ID: sha256:94bcaa9dfe45d1bbfc1042c397a4556cbacb258e810b7e56b581d7a2b44570ea
+  CANDIDATE_SHA: 034be78c5cb30402ebb7d3786133d0f3be390be9
+  CANDIDATE_IMAGE: school-1-11-design-v1:034be78c5cb3
+  CANDIDATE_IMAGE_ID: sha256:cfa869407edd53b4d54dfffef5ba12c16cd1f3e9ee2430d6975e89bfd64075b3
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   STAGING_ORIGIN: http://127.0.0.1:3211
 
@@ -155,6 +155,7 @@ jobs:
           expect_marker SCHOOL_FOUR_ROLE_LOGOUT OK
           expect_marker SCHOOL_FOUR_ROLE_NETWORK isolated
           expect_marker SCHOOL_FOUR_ROLE_CLEANUP OK
+          expect_marker SCHOOL_FOUR_ROLE_STAGING_FINGERPRINT UNCHANGED
           expect_marker SCHOOL_FOUR_ROLE_STAGING_CHANGED no
           expect_marker SCHOOL_FOUR_ROLE_PRODUCTION_RESTARTED no
           expect_marker SCHOOL_FOUR_ROLE_PRODUCTION_HEALTH OK
