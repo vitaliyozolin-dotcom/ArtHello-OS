@@ -255,7 +255,7 @@ jobs:
               'STUDENT_THEME_TOKEN', 'NON_STUDENT_THEME_TOKEN',
               'STUDENT_THEME_PREPAINT', 'STUDENT_THEME_VALUE',
               'STUDENT_THEME_SURFACE', 'STUDENT_ROUTE',
-              'STUDENT_ROUTE_ANCHOR', 'STUDENT_ROUTE_HEADING',
+              'STUDENT_ROUTE_ANCHOR', 'STUDENT_ROUTE_HEADING', 'CLS',
           }
           ds03_violations = [
               violation for violation in manifest['violations']
