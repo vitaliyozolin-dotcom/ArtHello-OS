@@ -244,7 +244,7 @@ html[data-design-code="v1"][data-theme="student"] .role-student textarea:focus-v
 
 html[data-design-code="v1"][data-theme="student"] .role-student .privacy-card > span {
   background: color-mix(in srgb, var(--success-500) 14%, transparent);
-  color: var(--success-500);
+  color: var(--success-50);
 }
 
 html[data-design-code="v1"][data-theme="student"] .role-student .privacy-card p {
