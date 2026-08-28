@@ -288,11 +288,11 @@ test("DS-03 student theme changes tokens and typography only", () => {
   );
   assert.match(
     sharedRouteSurfaceBlock,
-    /\.day-switch button \{[\s\S]*?background: var\(--color-surface-muted\);[\s\S]*?color: var\(--color-text\);/,
+    /\.day-switch > button \{[\s\S]*?background: var\(--color-surface-muted\);[\s\S]*?color: var\(--color-text\);/,
   );
   assert.match(
     sharedRouteSurfaceBlock,
-    /\.day-switch button\.active \{[\s\S]*?border-color: var\(--color-accent\);[\s\S]*?background: var\(--color-surface\);[\s\S]*?color: var\(--color-accent\);/,
+    /\.day-switch > button\.active \{[\s\S]*?border-color: var\(--color-accent\);[\s\S]*?background: var\(--color-surface\);[\s\S]*?color: var\(--color-text\);/,
   );
   assert.match(
     sharedRouteSurfaceBlock,
@@ -300,7 +300,7 @@ test("DS-03 student theme changes tokens and typography only", () => {
   );
   assert.match(
     sharedRouteSurfaceBlock,
-    /\.notification-list article\.unread \{[\s\S]*?border-color: var\(--color-accent\);[\s\S]*?background: var\(--color-surface-raised\);[\s\S]*?color: var\(--color-text\);/,
+    /\.notification-list > article\.unread \{[\s\S]*?border-color: var\(--color-accent\);[\s\S]*?background: var\(--color-surface-raised\);[\s\S]*?color: var\(--color-text\);/,
   );
   assert.doesNotMatch(
     sharedRouteSurfaceBlock,
