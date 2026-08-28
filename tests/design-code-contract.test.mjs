@@ -316,6 +316,10 @@ test("DS-03 student theme changes tokens and typography only", () => {
   );
   assert.match(
     sharedRouteSurfaceBlock,
+    /\.compact-tabs > button\.active \{[\s\S]*?border-color: var\(--brand-400\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
     /button:focus-visible,[\s\S]*?textarea:focus-visible \{[\s\S]*?outline-color: var\(--brand-400\);/,
   );
   assert.match(
