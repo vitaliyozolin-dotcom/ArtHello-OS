@@ -710,7 +710,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .l0-bottom-nav { height: 70px; padding: 6px 5px calc(6px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: rgba(255,255,255,.96); backdrop-filter: blur(16px); display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; position: absolute; left: 0; right: 0; bottom: 0; z-index: 40; }
   .l0-bottom-nav button { border: 0; border-radius: 12px; background: transparent; color: #89867e; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 9px; font-weight: 750; cursor: pointer; }
   .l0-bottom-nav button.active { color: var(--orange); background: var(--orange-soft); }
-  .role-student .l0-bottom-nav { border-color: var(--student-line-08); background: var(--student-topbar); }
+  .role-student .l0-bottom-nav { border-color: var(--student-line-08); background: var(--student-bottom-nav); }
   .role-student .l0-bottom-nav button { color: var(--student-text-48); }
   .role-student .l0-bottom-nav button.active { color: var(--student-highlight); background: var(--student-highlight-faint); }
   .template-banner { align-items: flex-start; }
