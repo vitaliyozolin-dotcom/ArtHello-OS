@@ -183,19 +183,19 @@ jobs:
             grep -F "EmptyState" /app/app/components/ContractorWorkspace.tsx >/dev/null
             grep -F "SearchField" /app/app/components/ContractorWorkspace.tsx >/dev/null
             ! grep -F "ContractorWorkspace.module.css" /app/app/components/ContractorWorkspace.tsx >/dev/null
-            ! grep -F 'className="ahContractorPage contractor-workspace"' /app/app/components/ContractorWorkspace.tsx >/dev/null
-            grep -F 'className="ahContractorScope"' /app/app/components/ArtHelloShell.tsx >/dev/null
-            ! grep -F 'className="contractor-workspace"' /app/app/components/ArtHelloShell.tsx >/dev/null
+            ! grep -F "className=\"ahContractorPage contractor-workspace\"" /app/app/components/ContractorWorkspace.tsx >/dev/null
+            grep -F "className=\"ahContractorScope\"" /app/app/components/ArtHelloShell.tsx >/dev/null
+            ! grep -F "className=\"contractor-workspace\"" /app/app/components/ArtHelloShell.tsx >/dev/null
             test -s /app/app/components/LegalWorkspace.tsx
             test -s /app/app/components/LegalWorkspace.ds.css
-            grep -F 'className="ahLegalPage"' /app/app/components/LegalWorkspace.tsx >/dev/null
-            grep -F 'from "./design-system"' /app/app/components/LegalWorkspace.tsx >/dev/null
-            ! grep -F 'className="page legal-workspace"' /app/app/components/LegalWorkspace.tsx >/dev/null
+            grep -F "className=\"ahLegalPage\"" /app/app/components/LegalWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/LegalWorkspace.tsx >/dev/null
+            ! grep -F "className=\"page legal-workspace\"" /app/app/components/LegalWorkspace.tsx >/dev/null
             test -s /app/app/components/AccountingWorkspace.tsx
             test -s /app/app/components/AccountingWorkspace.ds.css
-            grep -F 'className="ahAccountingPage"' /app/app/components/AccountingWorkspace.tsx >/dev/null
-            grep -F 'from "./design-system"' /app/app/components/AccountingWorkspace.tsx >/dev/null
-            ! grep -F 'className="page accounting-workspace"' /app/app/components/AccountingWorkspace.tsx >/dev/null
+            grep -F "className=\"ahAccountingPage\"" /app/app/components/AccountingWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/AccountingWorkspace.tsx >/dev/null
+            ! grep -F "className=\"page accounting-workspace\"" /app/app/components/AccountingWorkspace.tsx >/dev/null
             test -d /app/dist
             test -s /app/production/runtime-server.mjs
           '
