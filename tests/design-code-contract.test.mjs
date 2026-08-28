@@ -216,6 +216,19 @@ test("DS-03 student theme changes tokens and typography only", () => {
     /:root \{[\s\S]*?--student-main-background:\s*radial-gradient\([\s\S]*?--student-hero-background:\s*linear-gradient\([\s\S]*?--student-dashboard-hero-image:\s*linear-gradient\([\s\S]*?--student-hero-overlay-mobile:\s*linear-gradient\(/,
     "flag-off student backgrounds must retain their legacy gradients",
   );
+  assert.match(
+    studentTheme,
+    /:root \{[\s\S]*?--student-bottom-nav:\s*rgba\(10, 11, 18, 0\.96\);/,
+    "flag-off mobile student navigation must retain its legacy background",
+  );
+  assert.match(
+    studentTheme,
+    /html\[data-design-code="v1"\]\[data-theme="student"\] \{[\s\S]*?--student-bottom-nav:\s*color-mix\(in srgb, var\(--neutral-900\) 96%, transparent\);/,
+  );
+  assert.match(
+    globals,
+    /\.role-student \.l0-bottom-nav \{[^}]*background:\s*var\(--student-bottom-nav\);/,
+  );
   for (const mapping of [
     ["student-main-background", "color-page"],
     ["student-hero-background", "color-surface"],
