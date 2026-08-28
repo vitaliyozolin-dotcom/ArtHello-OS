@@ -213,6 +213,11 @@ test("DS-03 student theme changes tokens and typography only", () => {
   assert.match(studentTheme, /--student-font-family:\s*var\(--font-sans\);/);
   assert.match(
     studentTheme,
+    /--student-app-shadow:\s*0 30px 100px color-mix\(in srgb, var\(--neutral-900\) 36%, transparent\);/,
+    "DS-03 may recolor but must not reshape the accepted app shadow",
+  );
+  assert.match(
+    studentTheme,
     /html\[data-design-code="v1"\]\[data-theme="student"\] \.role-student \.l0-topbar \{[\s\S]*?border-color: var\(--student-line-08\);[\s\S]*?background: var\(--student-topbar\);[\s\S]*?color: var\(--student-on-dark\);[\s\S]*?\}/,
     "student topbar colors must beat the shared v1 selector",
   );
