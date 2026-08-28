@@ -3,6 +3,12 @@ set -Eeuo pipefail
 exec 9>/var/lock/school-1-11-four-role-regression.lock
 flock -n 9
 
+: "${CANDIDATE_IMAGE_ID:?CANDIDATE_IMAGE_ID is required}"
+if [[ ! "$CANDIDATE_IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+  printf 'Invalid CANDIDATE_IMAGE_ID\n' >&2
+  exit 1
+fi
+
 production=school-1-11
 staging=school-1-11-staging
 regression="school-1-11-role-regression-$RUN_ID"
@@ -12,6 +18,11 @@ volume_created=0
 success=0
 work=""
 container_backup_path=""
+
+assert_candidate_image() {
+  test "$(docker image inspect "$CANDIDATE_IMAGE" --format '{{.Id}}')" = "$CANDIDATE_IMAGE_ID"
+  test "$(docker inspect "$staging" --format '{{.Image}}')" = "$CANDIDATE_IMAGE_ID"
+}
 
 case "$regression:$regression_data" in
   school-1-11-role-regression-*:school-1-11_role_regression_*_data) ;;
@@ -50,6 +61,7 @@ curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/
 
 test "$(docker inspect "$staging" --format '{{.State.Running}}')" = true
 test "$(docker inspect "$staging" --format '{{.Config.Image}}')" = "$CANDIDATE_IMAGE"
+assert_candidate_image
 test "$(docker inspect "$staging" --format '{{index .Config.Labels "school.candidate-sha"}}')" = "$CANDIDATE_SHA"
 curl -fsS --max-time 15 "$STAGING_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
 test -z "$(docker ps -aq --filter "name=^/$regression$")"
@@ -98,7 +110,7 @@ docker run --rm -i --network none --user 0:0 \
   -e BACKUP_FILE="$backup_file" \
   -v "$work:/backup:ro" \
   -v "$regression_data:/data" \
-  --entrypoint node "$CANDIDATE_IMAGE" --input-type=module - <<'PREPARE_DATA'
+  --entrypoint node "$CANDIDATE_IMAGE_ID" --input-type=module - <<'PREPARE_DATA'
 import { chmodSync, chownSync, copyFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 const file = process.env.BACKUP_FILE;
@@ -131,8 +143,9 @@ docker run -d \
   -e CENTRAL_ACCESS_SECRET="$regression_secret" \
   -e REGRESSION_RUN_ID="$RUN_ID" \
   -v "$regression_data:/data" \
-  "$CANDIDATE_IMAGE" >/dev/null
+  "$CANDIDATE_IMAGE_ID" >/dev/null
 container_created=1
+test "$(docker inspect "$regression" --format '{{.Image}}')" = "$CANDIDATE_IMAGE_ID"
 
 regression_healthy=0
 for attempt in $(seq 1 90); do
@@ -422,9 +435,12 @@ test "$(docker inspect "$production" --format '{{.State.Health.Status}}')" = hea
 curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
 test "$(docker inspect "$staging" --format '{{.State.Running}}')" = true
 test "$(docker inspect "$staging" --format '{{.Config.Image}}')" = "$CANDIDATE_IMAGE"
+assert_candidate_image
 curl -fsS --max-time 15 "$STAGING_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
 
 success=1
+printf 'SCHOOL_FOUR_ROLE_CANDIDATE_IMAGE_ID=%s\n' "$CANDIDATE_IMAGE_ID"
+printf 'SCHOOL_FOUR_ROLE_IMAGE_PIN=IMMUTABLE\n'
 printf 'SCHOOL_FOUR_ROLE_REGRESSION=OK\n'
 printf 'SCHOOL_FOUR_ROLE_STAGING_CHANGED=no\n'
 printf 'SCHOOL_FOUR_ROLE_PRODUCTION_RESTARTED=no\n'

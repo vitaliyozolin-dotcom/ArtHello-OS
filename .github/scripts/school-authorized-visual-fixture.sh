@@ -6,6 +6,7 @@ umask 077
 : "${RUN_ID:?RUN_ID is required}"
 : "${CANDIDATE_SHA:?CANDIDATE_SHA is required}"
 : "${CANDIDATE_IMAGE:?CANDIDATE_IMAGE is required}"
+: "${CANDIDATE_IMAGE_ID:?CANDIDATE_IMAGE_ID is required}"
 : "${SCHOOL_ORIGIN:?SCHOOL_ORIGIN is required}"
 : "${STAGING_ORIGIN:?STAGING_ORIGIN is required}"
 : "${AUDIT_PUBLIC_ORIGIN:?AUDIT_PUBLIC_ORIGIN is required}"
@@ -14,6 +15,10 @@ umask 077
 case "$RUN_ID" in
   ''|*[!0-9]*) printf 'Invalid RUN_ID\n' >&2; exit 1 ;;
 esac
+if [[ ! "$CANDIDATE_IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+  printf 'Invalid CANDIDATE_IMAGE_ID\n' >&2
+  exit 1
+fi
 case "$AUDIT_PUBLIC_ORIGIN" in
   http://127.0.0.1:33212) ;;
   *) printf 'Invalid audit public origin\n' >&2; exit 1 ;;
@@ -45,6 +50,8 @@ assert_services() {
   test "$(docker inspect "$staging" --format '{{.State.Running}}')" = true
   test "$(docker inspect "$staging" --format '{{.State.Health.Status}}')" = healthy
   test "$(docker inspect "$staging" --format '{{.Config.Image}}')" = "$CANDIDATE_IMAGE"
+  test "$(docker image inspect "$CANDIDATE_IMAGE" --format '{{.Id}}')" = "$CANDIDATE_IMAGE_ID"
+  test "$(docker inspect "$staging" --format '{{.Image}}')" = "$CANDIDATE_IMAGE_ID"
   test "$(docker inspect "$staging" --format '{{index .Config.Labels "school.candidate-sha"}}')" = "$CANDIDATE_SHA"
   curl -fsS --max-time 15 "$STAGING_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null
 }
@@ -134,7 +141,7 @@ case "$ACTION" in
       -e AUDIT_PASSWORD="$AUDIT_PASSWORD" \
       -e AUDIT_RUN_ID="$RUN_ID" \
       -v "$audit_data:/data" \
-      --entrypoint node "$CANDIDATE_IMAGE" --input-type=module - <<'PREPARE_DATA'
+      --entrypoint node "$CANDIDATE_IMAGE_ID" --input-type=module - <<'PREPARE_DATA'
 import { randomBytes, scrypt as scryptCallback } from 'node:crypto';
 import { chmodSync, chownSync, readdirSync, readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
@@ -539,7 +546,9 @@ PREPARE_DATA
       -e PUBLIC_APP_ORIGIN="$AUDIT_PUBLIC_ORIGIN" \
       -e CENTRAL_ACCESS_SECRET="$audit_secret" \
       -v "$audit_data:/data" \
-      "$CANDIDATE_IMAGE" >/dev/null
+      "$CANDIDATE_IMAGE_ID" >/dev/null
+
+    test "$(docker inspect "$audit" --format '{{.Image}}')" = "$CANDIDATE_IMAGE_ID"
 
     audit_healthy=0
     for attempt in $(seq 1 90); do
@@ -593,6 +602,8 @@ VERIFY_BINDING
     test "$(docker inspect "$staging" --format '{{.State.StartedAt}}')" = "$staging_started_before"
     assert_services
     prepare_finished=1
+    printf 'SCHOOL_AUTHORIZED_VISUAL_CANDIDATE_IMAGE_ID=%s\n' "$CANDIDATE_IMAGE_ID"
+    printf 'SCHOOL_AUTHORIZED_VISUAL_IMAGE_PIN=IMMUTABLE\n'
     printf 'SCHOOL_AUTHORIZED_VISUAL_FIXTURE=READY\n'
     printf 'SCHOOL_AUTHORIZED_VISUAL_PRODUCTION_RESTARTED=no\n'
     ;;
