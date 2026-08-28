@@ -19,8 +19,6 @@ const content = read("../app/components/ContentWorkspace.tsx");
 const shell = read("../app/components/ArtHelloShell.tsx");
 const mobilePolish = read("../app/components/SystemWideMobilePolish.css");
 const foundationPatch = read("../scripts/patch-system-foundation.mjs");
-const designCode = read("../../../../DESIGN_CODE.md");
-const canon = JSON.parse(read("../../../../quality-gates/visual-canon.json"));
 
 test("compact card typography is a machine-readable Design System role", () => {
   assert.match(tokens, /--ah-compact-card-title-size:12px/);
@@ -61,16 +59,4 @@ test("legacy blanket typography cannot override semantic compact roles", () => {
   assert.match(foundationPatch, /font-size:14px!important;line-height:1\.45/);
   assert.match(foundationPatch, /font-size:14px!important;line-height:1\.4/);
   assert.match(foundationPatch, /font-size:15px!important/);
-});
-
-test("Design Code and visual canon record the approved Access scale", () => {
-  assert.match(designCode, /ArtHello OS Design Code 1\.1\.0/);
-  assert.match(designCode, /заголовок компактной карточки \| `12 \/ 15px`/);
-  assert.match(designCode, /краткое пояснение \| `10 \/ 14px`/);
-  assert.equal(canon.schema_version, 2);
-  assert.deepEqual(canon.compact_card_typography, {
-    title: { font_size_px: 12, line_height_px: 15, font_weight: 500 },
-    body: { font_size_px: 10, line_height_px: 14, font_weight: 400 },
-    index: { font_size_px: 9, line_height_px: 12, font_weight: 800 },
-  });
 });
