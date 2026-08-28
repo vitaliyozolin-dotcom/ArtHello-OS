@@ -18,8 +18,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CANDIDATE_SHA: e0d2c55db2bf4214aa8feff0c49b5c88c63d74e4
-  CANDIDATE_IMAGE: school-1-11-design-v1:e0d2c55db2bf
+  CANDIDATE_SHA: 796fdd7af23de11f03460672fb4d82a5d66ce4a5
+  CANDIDATE_IMAGE: school-1-11-design-v1:796fdd7af23d
+  AUDIT_WIDTHS: "767,768,800,801,1199,1200"
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   STAGING_ORIGIN: http://127.0.0.1:3211
   AUDIT_BIND_ORIGIN: http://127.0.0.1:3212
@@ -183,6 +184,7 @@ jobs:
             -e AUDIT_PASSWORD="$audit_password" \
             -e AUDIT_RUN_ID="$GITHUB_RUN_ID" \
             -e CANDIDATE_SHA="$CANDIDATE_SHA" \
+            -e AUDIT_WIDTHS="$AUDIT_WIDTHS" \
             -e PLAYWRIGHT_VERSION="$PLAYWRIGHT_VERSION" \
             -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
             -v "$PWD/.github/scripts/school-authorized-visual-audit.mjs:/control/audit.mjs:ro" \
@@ -198,22 +200,45 @@ jobs:
             '
 
           test -s school-authorized-visual-output/manifest.json
-          test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 28
+          test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 24
           manifest_values="$(python3 - <<'READ_MANIFEST'
           import json
 
           with open('school-authorized-visual-output/manifest.json', encoding='utf-8') as source:
               manifest = json.load(source)
-          if manifest['captures'] != 28:
+          if manifest['captures'] != 24:
               raise RuntimeError('Incomplete authorized capture matrix')
           if manifest['credentialsStored'] is not False:
               raise RuntimeError('Credential storage invariant failed')
           if manifest['fixture'] != 'empty schema from candidate migrations, seeded with synthetic data':
               raise RuntimeError('Fixture invariant failed')
-          print(f"{len(manifest['violations'])} {str(manifest['compliant']).lower()}")
+          expected_widths = [767, 768, 800, 801, 1199, 1200]
+          if [item['width'] for item in manifest['controls']] != expected_widths:
+              raise RuntimeError('Wrong DS-02 boundary matrix')
+          ds02_codes = {
+              'DESIGN_CODE_FLAG', 'ROUTE', 'HORIZONTAL_OVERFLOW',
+              'PHONE_RAIL', 'PHONE_NAV', 'PHONE_NAV_HEIGHT',
+              'RAIL_VISIBLE', 'DESKTOP_NAV', 'TABLET_RAIL_WIDTH',
+              'DESKTOP_RAIL_WIDTH', 'TOPBAR_HEIGHT', 'PAGE_PADDING_LEFT',
+              'PAGE_PADDING_RIGHT', 'TABLET_RAIL_LABEL', 'TABLET_RAIL_TOOLTIP',
+          }
+          ds02_violations = [
+              violation for violation in manifest['violations']
+              if violation['code'] in ds02_codes
+          ]
+          if ds02_violations:
+              raise RuntimeError(
+                  'DS-02 shell violations: ' +
+                  json.dumps(ds02_violations, ensure_ascii=False)
+              )
+          print(
+              f"{len(manifest['violations'])} "
+              f"{str(manifest['compliant']).lower()} "
+              f"{len(ds02_violations)}"
+          )
           READ_MANIFEST
           )"
-          read -r violation_count compliant <<< "$manifest_values"
+          read -r violation_count compliant ds02_violation_count <<< "$manifest_values"
 
           kill "$tunnel_pid"
           wait "$tunnel_pid" >/dev/null 2>&1 || true
@@ -226,7 +251,8 @@ jobs:
           printf 'result=OK\n' >> "$GITHUB_OUTPUT"
           printf 'violation_count=%s\n' "$violation_count" >> "$GITHUB_OUTPUT"
           printf 'compliant=%s\n' "$compliant" >> "$GITHUB_OUTPUT"
-          printf 'SCHOOL_AUTHORIZED_VISUAL_CAPTURE=OK captures=28 violations=%s compliant=%s\n' "$violation_count" "$compliant"
+          printf 'ds02_violation_count=%s\n' "$ds02_violation_count" >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_AUTHORIZED_VISUAL_CAPTURE=OK captures=24 ds02_violations=%s violations=%s compliant=%s\n' "$ds02_violation_count" "$violation_count" "$compliant"
 
       - name: Enforce remote teardown
         if: always()
@@ -278,6 +304,7 @@ jobs:
           CAPTURE_RESULT: ${{ steps.capture.outputs.result }}
           VIOLATION_COUNT: ${{ steps.capture.outputs.violation_count }}
           COMPLIANT: ${{ steps.capture.outputs.compliant }}
+          DS02_VIOLATIONS: ${{ steps.capture.outputs.ds02_violation_count }}
         shell: bash
         run: |
           {
@@ -286,14 +313,15 @@ jobs:
             printf -- '- Candidate: %s\n' "$CANDIDATE_SHA"
             printf -- '- Roles: director, teacher, parent, student\n'
             printf -- '- Routes: /management, /journal, /homework, /schedule\n'
-            printf -- '- Widths: 360, 390, 768, 1280, 1440, 1920, 2560 px\n'
-            printf -- '- Evidence: 28 screenshots plus computed-style manifest\n'
+            printf -- '- Widths: 767, 768, 800, 801, 1199, 1200 px\n'
+            printf -- '- Evidence: 24 screenshots plus computed-style manifest\n'
             printf -- '- Data: empty schema from candidate migrations; synthetic only\n'
             printf -- '- Exposure: isolated no-masquerade bridge, loopback port, SSH tunnel\n'
             printf -- '- Production/staging UI, data, restart changed: no\n'
             printf -- '- Capture result: %s\n' "${CAPTURE_RESULT:-failed}"
             printf -- '- Design compliant: %s\n' "${COMPLIANT:-not measured}"
-            printf -- '- Violations: %s\n' "${VIOLATION_COUNT:-not measured}"
+            printf -- '- DS-02 shell violations: %s\n' "${DS02_VIOLATIONS:-not measured}"
+            printf -- '- All-design violations (future stages included): %s\n' "${VIOLATION_COUNT:-not measured}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report authorized capture as commit status
