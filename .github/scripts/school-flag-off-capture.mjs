@@ -6,6 +6,7 @@ import { chromium } from "playwright";
 const origin = process.env.AUDIT_ORIGIN;
 const password = process.env.AUDIT_PASSWORD;
 const runId = process.env.AUDIT_RUN_ID;
+const runAttempt = process.env.AUDIT_RUN_ATTEMPT;
 const seedDate = process.env.AUDIT_SEED_DATE;
 const controlSha = process.env.AUDIT_CONTROL_SHA;
 const baseSha = process.env.AUDIT_BASE_SHA;
@@ -24,6 +25,9 @@ if (!password || !/^[A-Za-z0-9_-]{32,}$/.test(password)) {
 }
 if (!runId || !/^[0-9]+$/.test(runId)) {
   throw new Error("AUDIT_RUN_ID is invalid");
+}
+if (!runAttempt || !/^[1-9][0-9]*$/.test(runAttempt)) {
+  throw new Error("AUDIT_RUN_ATTEMPT is invalid");
 }
 if (!controlSha || !/^[a-f0-9]{40}$/.test(controlSha)) {
   throw new Error("AUDIT_CONTROL_SHA is invalid");
@@ -112,8 +116,7 @@ async function writeMarker(filename, payload) {
   await writeFile(temporary, JSON.stringify(payload) + "\n", {
     encoding: "utf8",
     flag: "wx",
-    // The exchange directory is host-owned 0700. Markers must remain readable
-    // when the Playwright container runs as root but the runner does not.
+    // The exchange tree is owned by the dedicated non-root audit identity.
     mode: 0o644,
   });
   await rename(temporary, destination);
@@ -138,6 +141,7 @@ async function waitForRequest(side, browserSessionId) {
   assertExactKeys(request, [
     "version",
     "runId",
+    "runAttempt",
     "controlSha",
     "token",
     "browserSessionId",
@@ -150,6 +154,7 @@ async function waitForRequest(side, browserSessionId) {
   if (
     request.version !== "1.0.0" ||
     request.runId !== runId ||
+    request.runAttempt !== runAttempt ||
     request.controlSha !== controlSha ||
     request.token !== handshakeToken ||
     request.browserSessionId !== browserSessionId ||
@@ -462,6 +467,15 @@ async function captureVariant(
 
           const filename = `${probe.id}-${control.width}`;
           const screenshotPath = join(outputDir, `${filename}.png`);
+          const fullPageHeight = await page.evaluate(
+            () => Math.max(
+              document.documentElement.scrollHeight,
+              document.body.scrollHeight,
+            ),
+          );
+          if (!Number.isInteger(fullPageHeight) || fullPageHeight < 1 || fullPageHeight > 10000) {
+            throw new Error(`Unsafe full-page height: ${fullPageHeight}`);
+          }
           const screenshotOptions = {
             fullPage: true,
             animations: "disabled",
@@ -511,9 +525,7 @@ async function captureVariant(
             domSha256: sha256(appHtml + "\n"),
             aria: `${filename}.aria.yml`,
             ariaSha256: sha256(ariaSnapshot + "\n"),
-            fullPageHeight: await page.evaluate(
-              () => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
-            ),
+            fullPageHeight,
             designCode: runtime.designCode,
             helpButtons: runtime.helpButtons,
             tabRoles: runtime.tabRoles,
@@ -540,14 +552,15 @@ async function captureVariant(
     join(outputDir, "manifest.json"),
     JSON.stringify(
       {
-        version: "1.2.0",
+        version: "1.3.0",
         runId,
+        runAttempt,
         side,
         auditSha,
         auditImageId,
         seedDate,
         flagValue: false,
-        origin: "loopback-ssh-tunnel",
+        origin: "loopback-unix-socket",
         browserSessionId,
         browserVersion,
         rendererProfile,
@@ -568,7 +581,7 @@ async function captureVariant(
   return results.length;
 }
 
-const expectedOwner = `${runId}|${controlSha}`;
+const expectedOwner = `${runId}|${runAttempt}|${controlSha}`;
 const actualOwner = (await readFile(join(exchangeDir, "owner"), "utf8")).trim();
 if (actualOwner !== expectedOwner) throw new Error("Browser exchange ownership failed");
 
@@ -594,6 +607,7 @@ try {
   await writeMarker("ready.json", {
     version: "1.0.0",
     runId,
+    runAttempt,
     controlSha,
     token: handshakeToken,
     browserSessionId,
@@ -615,6 +629,7 @@ try {
     await writeMarker(`captured-${side}.json`, {
       version: "1.0.0",
       runId,
+      runAttempt,
       controlSha,
       token: handshakeToken,
       browserSessionId,
@@ -629,6 +644,7 @@ try {
   await writeMarker("complete.json", {
     version: "1.0.0",
     runId,
+    runAttempt,
     controlSha,
     token: handshakeToken,
     browserSessionId,
@@ -641,6 +657,7 @@ try {
     await writeMarker("failed.json", {
       version: "1.0.0",
       runId,
+      runAttempt,
       controlSha,
       browserSessionId,
       state: "failed",
