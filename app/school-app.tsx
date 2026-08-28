@@ -149,6 +149,14 @@ function AppShell({ snapshot, activeView, onView, onStudent, children }: {
   const mobileNav = nav.length > 5 ? [...nav.slice(0, 4), nav.at(-1)!] : nav;
   const familyContext = snapshot.viewer.role === "parent" || snapshot.viewer.role === "student";
 
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = snapshot.viewer.role === "student" ? "student" : "light";
+    return () => {
+      delete root.dataset.theme;
+    };
+  }, [snapshot.viewer.role]);
+
   return (
     <div className="l0-stage">
       <div className={cn("l0-app", `role-${snapshot.viewer.role}`)}>
