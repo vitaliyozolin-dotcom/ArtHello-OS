@@ -10,6 +10,12 @@
   --ah-compact-card-body-size:10px;--ah-compact-card-body-line:14px;
   --ah-compact-card-index-size:9px;--ah-compact-card-index-line:12px;
 
+  /* Compact operational-registry KPI: approved Contractor workspace geometry. */
+  --ah-registry-kpi-gap:12px;--ah-registry-kpi-min-height:98px;--ah-registry-kpi-radius:16px;--ah-registry-kpi-padding-block:16px;--ah-registry-kpi-padding-inline:16px;
+  --ah-registry-kpi-label-size:13px;--ah-registry-kpi-label-line:18px;--ah-registry-kpi-label-weight:400;--ah-registry-kpi-value-size:24px;--ah-registry-kpi-value-line:28px;--ah-registry-kpi-value-weight:700;--ah-registry-kpi-note-size:12px;--ah-registry-kpi-note-line:17px;--ah-registry-kpi-note-weight:400;--ah-registry-kpi-value-gap:5px;--ah-registry-kpi-note-gap:4px;
+  --ah-registry-kpi-mobile-gap:11px;--ah-registry-kpi-mobile-min-height:84px;--ah-registry-kpi-mobile-radius:13px;--ah-registry-kpi-mobile-padding-block:11px;--ah-registry-kpi-mobile-padding-inline:12px;
+  --ah-registry-kpi-mobile-label-size:11px;--ah-registry-kpi-mobile-label-line:13px;--ah-registry-kpi-mobile-value-size:26px;--ah-registry-kpi-mobile-value-line:28px;--ah-registry-kpi-mobile-note-size:11px;--ah-registry-kpi-mobile-note-line:13px;--ah-registry-kpi-mobile-value-gap:3px;--ah-registry-kpi-mobile-note-gap:3px;
+
   /* Mobile visual canon: the measured Access workspace roles and density. */
   --ah-mobile-section-gap:16px;--ah-mobile-kpi-gap:11px;
   --ah-mobile-eyebrow-size:11px;--ah-mobile-eyebrow-line:14px;
@@ -18,3 +24,4 @@
   --ah-mobile-kpi-height:96px;--ah-mobile-kpi-radius:15px;--ah-mobile-kpi-padding:13px;--ah-mobile-kpi-label-size:12px;--ah-mobile-kpi-label-line:14px;--ah-mobile-kpi-value-size:30px;--ah-mobile-kpi-value-line:30px;--ah-mobile-kpi-note-size:12px;--ah-mobile-kpi-note-line:14px;
   --ah-mobile-search-height:42px;--ah-mobile-search-radius:10px;--ah-mobile-search-padding:12px;
 }
+

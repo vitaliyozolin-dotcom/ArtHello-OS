@@ -411,7 +411,7 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
           ) : active === "hr" ? (
             <HrWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenDocuments={(focusId) => openModule("legal", focusId)} />
           ) : active === "legal" ? (
-            <LegalWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} focusId={moduleFocus?.module === "legal" ? moduleFocus.id : undefined} />
+            <LegalWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenIntegrations={() => openModule("integrations")} focusId={moduleFocus?.module === "legal" ? moduleFocus.id : undefined} />
           ) : active === "procurement" ? (
             <ProcurementWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenFinance={() => openModule("finance")} />
           ) : active === "food" ? (
@@ -639,3 +639,4 @@ function initials(name: string) {
   const parts = name.split(/[\s@.]+/).filter(Boolean).slice(0, 2);
   return parts.map((part) => part[0]?.toUpperCase()).join("") || "ВО";
 }
+

@@ -1,0 +1,1136 @@
+.ahAccountingPage {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+  padding-top: 4px;
+}
+
+.ahAccountingPage .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahAccountingPage .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahAccountingPage .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahAccountingPage .ahPageHeaderCopy p {
+  max-width: 780px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahAccountingPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahAccountingState {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  overflow: hidden;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ahAccountingState > .ahEmptyState,
+.ahAccountingEmpty > .ahEmptyState,
+.ahAccountingInlineEmpty > .ahEmptyState {
+  min-height: 116px;
+  padding: 24px 20px;
+}
+
+.ahAccountingState > .ahEmptyState h3,
+.ahAccountingEmpty > .ahEmptyState h3,
+.ahAccountingInlineEmpty > .ahEmptyState h3 {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahAccountingState > .ahEmptyState p,
+.ahAccountingEmpty > .ahEmptyState p,
+.ahAccountingInlineEmpty > .ahEmptyState p {
+  font-size: var(--ah-compact-card-body-size);
+  font-weight: 400;
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahAccountingEmpty,
+.ahAccountingInlineEmpty {
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 0;
+}
+
+.ahAccountingEmpty .ahButton,
+.ahAccountingInlineEmpty .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahAccountingBoundary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+
+.ahAccountingBoundary strong {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 5px 10px;
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 16px;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.ahAccountingBoundary span {
+  min-width: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ahAccountingKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahAccountingKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+}
+
+.ahAccountingKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahAccountingKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahAccountingKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahAccountingKpiWarning {
+  border-color: #f0d4b5;
+  background: var(--ah-color-warning-soft);
+}
+
+.ahAccountingTabs,
+.ahAccountingPage > .ahTabs {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border-bottom: 1px solid var(--ah-color-border);
+}
+
+.ahAccountingTabs .ahTabs,
+.ahAccountingPage > .ahTabs {
+  width: 100%;
+  gap: 18px;
+}
+
+.ahAccountingTabs .ahTabs button,
+.ahAccountingPage > .ahTabs button {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+.ahAccountingPanel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.ahAccountingPanelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ahAccountingPanelHead > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.ahAccountingPanelHead p,
+.ahAccountingPanelHead h2 {
+  margin: 0;
+}
+
+.ahAccountingPanelHead p {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 14px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.ahAccountingPanelHead h2 {
+  color: var(--ah-color-text-primary);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 21px;
+}
+
+.ahAccountingPanelHead > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 5px 8px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAccountingTableWrap,
+.ahAccountingTable {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.ahAccountingTable table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  color: var(--ah-color-text-primary);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.ahAccountingTable th,
+.ahAccountingTable td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--ah-color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ahAccountingTable th {
+  background: var(--ah-color-surface-soft);
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+}
+
+.ahAccountingTable td strong,
+.ahAccountingTable td small {
+  display: block;
+}
+
+.ahAccountingTable td strong {
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 15px;
+}
+
+.ahAccountingTable td small {
+  margin-top: 3px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAccountingTable td > span {
+  display: inline-flex;
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 4px 7px;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAccountingTable button,
+.ahAccountingPanel > button,
+.ahAccountingChecks button {
+  min-height: 34px;
+  box-sizing: border-box;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  padding-inline: 11px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ahAccountingTable button:hover,
+.ahAccountingPanel > button:hover,
+.ahAccountingChecks button:hover {
+  border-color: var(--ah-color-primary);
+  color: var(--ah-color-primary);
+}
+
+.ahAccountingTable button:disabled,
+.ahAccountingPanel > button:disabled,
+.ahAccountingChecks button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.ahAccountingChecks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ahAccountingChecks > .ahAccountingPanel {
+  align-content: start;
+}
+
+.ahAccountingDocumentSet {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ahAccountingDocumentSet > div {
+  display: flex;
+  align-content: flex-start;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  border-radius: 11px;
+  background: var(--ah-color-surface-soft);
+  padding: 10px;
+}
+
+.ahAccountingDocumentSet small {
+  flex: 1 0 100%;
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 12px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.ahAccountingDocumentSet span,
+.ahAccountingDocumentSet strong,
+.ahAccountingDocumentSet em {
+  border-radius: 999px;
+  background: var(--ah-color-surface);
+  padding: 4px 7px;
+  color: var(--ah-color-text-primary);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+  line-height: 14px;
+}
+
+.ahAccountingDocumentSet strong {
+  background: var(--ah-color-warning-soft);
+  color: var(--ah-color-warning);
+}
+
+.ahAccountingDocumentSet em {
+  background: var(--ah-color-success-soft);
+  color: var(--ah-color-success);
+}
+
+.ahAccountingChecks .ahAccountingPanel > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ah-color-border);
+}
+
+.ahAccountingChecks .ahAccountingPanel > footer span,
+.ahAccountingChecks .ahAccountingPanel > footer b {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAccountingTrace,
+.ahAccountingChain {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+
+.ahAccountingChain ol,
+.ahAccountingTrace ol {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ahAccountingChain li,
+.ahAccountingTrace li {
+  display: grid;
+  grid-template-columns: minmax(90px, .65fr) minmax(0, 1.35fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--ah-color-border);
+}
+
+.ahAccountingChain li span,
+.ahAccountingTrace li span {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAccountingChain li strong,
+.ahAccountingTrace li strong {
+  color: var(--ah-color-text-primary);
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 15px;
+  overflow-wrap: anywhere;
+}
+
+.ahAccountingLinks {
+  display: grid;
+  gap: 8px;
+}
+
+.ahAccountingLinkRow,
+.ahAccountingLinks > article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 11px;
+  padding: 10px;
+}
+
+.ahAccountingLinkRow strong,
+.ahAccountingLinks > article strong {
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 15px;
+  overflow-wrap: anywhere;
+}
+
+.ahAccountingLinkRow > span,
+.ahAccountingLinks > article > span {
+  color: var(--ah-color-primary);
+  text-align: center;
+}
+
+.ahAccountingLinkRow p,
+.ahAccountingLinks > article p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAccountingIntegrationGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ahAccountingIntegrationCard,
+.ahAccountingIntegrationGrid > .ahAccountingPanel {
+  align-content: start;
+}
+
+.ahAccountingIntegrationCard > header,
+.ahAccountingIntegrationGrid > .ahAccountingPanel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ahAccountingIntegrationCard > header span,
+.ahAccountingIntegrationGrid > .ahAccountingPanel > header span {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 14px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.ahAccountingIntegrationCard > header em,
+.ahAccountingIntegrationGrid > .ahAccountingPanel > header em {
+  border-radius: 999px;
+  background: var(--ah-color-success-soft);
+  padding: 4px 7px;
+  color: var(--ah-color-success);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 12px;
+}
+
+.ahAccountingIntegrationCard h2,
+.ahAccountingIntegrationGrid > .ahAccountingPanel h2 {
+  margin: 0;
+  color: var(--ah-color-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.ahAccountingIntegrationCard > p,
+.ahAccountingIntegrationGrid > .ahAccountingPanel > p,
+.ahAccountingExportCreate > p {
+  margin: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahAccountingIntegrationCard dl,
+.ahAccountingIntegrationGrid > .ahAccountingPanel dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.ahAccountingIntegrationCard dl > div,
+.ahAccountingIntegrationGrid > .ahAccountingPanel dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--ah-color-border);
+}
+
+.ahAccountingIntegrationCard dt,
+.ahAccountingIntegrationCard dd,
+.ahAccountingIntegrationGrid > .ahAccountingPanel dt,
+.ahAccountingIntegrationGrid > .ahAccountingPanel dd {
+  margin: 0;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAccountingIntegrationCard dt,
+.ahAccountingIntegrationGrid > .ahAccountingPanel dt,
+.ahAccountingIntegrationCard > footer,
+.ahAccountingIntegrationGrid > .ahAccountingPanel > footer {
+  color: var(--ah-color-text-secondary);
+}
+
+.ahAccountingIntegrationCard dd,
+.ahAccountingIntegrationGrid > .ahAccountingPanel dd {
+  color: var(--ah-color-text-primary);
+  text-align: right;
+}
+
+.ahAccountingIntegrationCard > footer,
+.ahAccountingIntegrationGrid > .ahAccountingPanel > footer {
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAccountingExportCreate {
+  align-content: start;
+}
+
+.ahAccountingExportCreate > button {
+  justify-self: start;
+  min-height: 40px;
+  border-color: var(--ah-color-primary);
+  background: var(--ah-color-primary);
+  padding-inline: 14px;
+  color: #fff;
+  font-size: 12px;
+}
+
+.ahAccountingExportCreate > button:hover {
+  border-color: var(--ah-color-primary-hover);
+  background: var(--ah-color-primary-hover);
+  color: #fff;
+}
+
+.ahAccountingExportList {
+  display: grid;
+  gap: 0;
+}
+
+.ahAccountingExportRow,
+.ahAccountingExportList > article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content max-content;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--ah-color-border);
+}
+
+.ahAccountingExportRow:last-child,
+.ahAccountingExportList > article:last-child {
+  border-bottom: 0;
+}
+
+.ahAccountingExportRow > div,
+.ahAccountingExportList > article > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.ahAccountingExportRow strong,
+.ahAccountingExportList > article strong {
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 15px;
+  overflow-wrap: anywhere;
+}
+
+.ahAccountingExportRow small,
+.ahAccountingExportRow span,
+.ahAccountingExportRow b,
+.ahAccountingExportRow em,
+.ahAccountingExportList > article small,
+.ahAccountingExportList > article span,
+.ahAccountingExportList > article b,
+.ahAccountingExportList > article em {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 14px;
+}
+
+.ahAccountingExportRow b,
+.ahAccountingExportList > article b {
+  color: var(--ah-color-text-primary);
+  font-weight: 600;
+}
+
+.ahAccountingExportRow em,
+.ahAccountingExportList > article em {
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 4px 7px;
+}
+
+.ahAccountingModalLayer {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  overflow-y: auto;
+  background: rgba(17, 21, 39, .48);
+  padding: 20px;
+}
+
+.ahAccountingModalLayer > button {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.ahAccountingModal {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 14px;
+  width: min(680px, 100%);
+  max-height: calc(100dvh - 40px);
+  box-sizing: border-box;
+  overflow-y: auto;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 20px;
+  background: var(--ah-color-surface);
+  padding: 20px;
+  box-shadow: 0 24px 70px rgba(17, 21, 39, .2);
+}
+
+.ahAccountingModalHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ahAccountingModalHead p,
+.ahAccountingModalHead h2 {
+  margin: 0;
+}
+
+.ahAccountingModalHead p {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahAccountingModalHead h2 {
+  color: var(--ah-color-text-primary);
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.ahAccountingModalHead > button {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.ahAccountingFormRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ahAccountingFormRow label,
+.ahAccountingModal > label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahAccountingFormRow input,
+.ahAccountingFormRow select,
+.ahAccountingModal > label input,
+.ahAccountingModal > label select {
+  width: 100%;
+  height: 42px;
+  box-sizing: border-box;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  outline: 0;
+  background: var(--ah-color-surface);
+  padding-inline: 11px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.ahAccountingFormRow input:focus,
+.ahAccountingFormRow select:focus,
+.ahAccountingModal > label input:focus,
+.ahAccountingModal > label select:focus {
+  border-color: var(--ah-color-primary);
+  box-shadow: 0 0 0 3px var(--ah-color-primary-soft);
+}
+
+.ahAccountingNotice {
+  display: grid;
+  gap: 4px;
+  border-radius: 11px;
+  background: var(--ah-color-primary-soft);
+  padding: 10px 12px;
+}
+
+.ahAccountingNotice strong,
+.ahAccountingNotice span {
+  display: block;
+}
+
+.ahAccountingNotice strong {
+  color: var(--ah-color-text-primary);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahAccountingNotice span {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAccountingModalActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.ahAccountingModalActions > button {
+  min-height: 40px;
+  box-sizing: border-box;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 11px;
+  background: var(--ah-color-surface);
+  padding-inline: 14px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.ahAccountingModalActions > button:last-child {
+  border-color: var(--ah-color-primary);
+  background: var(--ah-color-primary);
+  color: #fff;
+}
+
+.ahAccountingModalActions > button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+@media (max-width: 1024px) {
+  .ahAccountingKpis,
+  .ahAccountingChecks,
+  .ahAccountingIntegrationGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ahAccountingTrace,
+  .ahAccountingChain {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .ahAccountingPage {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahAccountingPage .ahPageHeader {
+    align-items: start;
+  }
+
+  .ahAccountingPage .ahPageHeaderCopy > small {
+    margin-bottom: 5px;
+    font-size: var(--ah-mobile-eyebrow-size);
+    font-weight: 750;
+    line-height: var(--ah-mobile-eyebrow-line);
+    letter-spacing: .12em;
+  }
+
+  .ahAccountingPage .ahPageHeaderCopy h1 {
+    font-size: var(--ah-font-size-page-title-mobile);
+    font-weight: 700;
+    line-height: var(--ah-line-height-page-title-mobile);
+  }
+
+  .ahAccountingPage .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahAccountingPage .ahPageHeaderActions .ahButton {
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    padding-inline: 14px;
+    font-size: var(--ah-mobile-action-size);
+  }
+
+  .ahAccountingBoundary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    border-radius: var(--ah-mobile-info-radius);
+    padding: var(--ah-mobile-info-padding-block) var(--ah-mobile-info-padding-inline);
+  }
+
+  .ahAccountingBoundary strong {
+    min-height: 0;
+    padding: 5px 8px;
+    font-size: var(--ah-mobile-info-label-size);
+    font-weight: 800;
+    line-height: var(--ah-mobile-info-label-line);
+    letter-spacing: .06em;
+  }
+
+  .ahAccountingBoundary span {
+    font-size: var(--ah-mobile-info-body-size);
+    line-height: var(--ah-mobile-info-body-line);
+  }
+
+  .ahAccountingKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahAccountingKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahAccountingKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahAccountingKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahAccountingKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahAccountingTabs,
+  .ahAccountingPage > .ahTabs {
+    gap: 14px;
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+
+  .ahAccountingTabs .ahTabs button,
+  .ahAccountingPage > .ahTabs button {
+    min-height: 38px;
+    font-size: 12px;
+  }
+
+  .ahAccountingPanel {
+    gap: 14px;
+    border-radius: 14px;
+    padding: 13px;
+  }
+
+  .ahAccountingPanelHead {
+    gap: 10px;
+  }
+
+  .ahAccountingPanelHead h2 {
+    font-size: 14px;
+    line-height: 18px;
+  }
+
+  .ahAccountingPanelHead > span {
+    font-size: 9px;
+    line-height: 12px;
+  }
+
+  .ahAccountingTableWrap,
+  .ahAccountingTable {
+    overflow: visible;
+  }
+
+  .ahAccountingTable table,
+  .ahAccountingTable tbody,
+  .ahAccountingTable tr,
+  .ahAccountingTable td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .ahAccountingTable thead {
+    display: none;
+  }
+
+  .ahAccountingTable tbody {
+    display: grid;
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahAccountingTable tr {
+    display: grid;
+    gap: 0;
+    border: 1px solid var(--ah-color-border);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    background: var(--ah-color-surface);
+    padding: 9px 12px;
+  }
+
+  .ahAccountingTable td {
+    display: grid;
+    grid-template-columns: minmax(84px, .7fr) minmax(0, 1.3fr);
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--ah-color-border);
+    font-size: var(--ah-compact-card-body-size);
+    line-height: var(--ah-compact-card-body-line);
+    overflow-wrap: anywhere;
+  }
+
+  .ahAccountingTable td::before {
+    content: attr(data-label);
+    color: var(--ah-color-text-secondary);
+    font-size: var(--ah-compact-card-body-size);
+    font-weight: 400;
+    line-height: var(--ah-compact-card-body-line);
+  }
+
+  .ahAccountingTable td:last-child {
+    border-bottom: 0;
+  }
+
+  .ahAccountingTable td strong,
+  .ahAccountingTable td small {
+    grid-column: 2;
+    min-width: 0;
+    margin-top: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .ahAccountingTable td > button {
+    width: 100%;
+    min-height: 40px;
+  }
+
+  .ahAccountingChecks,
+  .ahAccountingIntegrationGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahAccountingDocumentSet {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahAccountingChecks .ahAccountingPanel > footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ahAccountingChecks .ahAccountingPanel > footer button {
+    width: 100%;
+    min-height: 40px;
+  }
+
+  .ahAccountingExportCreate > button {
+    width: 100%;
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    font-size: var(--ah-mobile-action-size);
+  }
+
+  .ahAccountingExportRow,
+  .ahAccountingExportList > article {
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 6px 10px;
+  }
+
+  .ahAccountingExportRow > span,
+  .ahAccountingExportList > article > span {
+    justify-self: end;
+  }
+
+  .ahAccountingExportRow > b,
+  .ahAccountingExportList > article > b {
+    grid-column: 1;
+  }
+
+  .ahAccountingExportRow > em,
+  .ahAccountingExportList > article > em {
+    justify-self: end;
+  }
+
+  .ahAccountingState > .ahEmptyState,
+  .ahAccountingEmpty > .ahEmptyState,
+  .ahAccountingInlineEmpty > .ahEmptyState {
+    gap: 10px;
+    min-height: 116px;
+    padding: 20px 14px;
+  }
+
+  .ahAccountingEmpty .ahButton,
+  .ahAccountingInlineEmpty .ahButton {
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    padding-inline: 14px;
+    font-size: var(--ah-mobile-action-size);
+  }
+
+  .ahAccountingModalLayer {
+    place-items: end center;
+    padding: 12px;
+  }
+
+  .ahAccountingModal {
+    gap: 14px;
+    max-height: calc(100dvh - 24px);
+    border-radius: 16px;
+    padding: 16px;
+  }
+
+  .ahAccountingFormRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahAccountingModalActions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .ahAccountingModalActions > button {
+    width: 100%;
+    min-height: var(--ah-mobile-action-height);
+  }
+}
+
+@media (max-width: 359px) {
+  .ahAccountingKpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

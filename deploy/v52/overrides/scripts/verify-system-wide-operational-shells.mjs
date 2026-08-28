@@ -45,10 +45,22 @@ for (const [name, source] of [["HR", hr],["Sales", sales],["Content", content],[
 }
 
 requireText(content, "Все рабочие разделы доступны сразу", "content still collapses to one empty card");
-requireText(legal, "Реестр, версии, контроль сроков", "legal workspace still collapses when empty");
+requireText(legal, "ahLegalPage", "legal workspace is not mounted on the design-system shell");
+requireText(legal, "<PageContainer", "legal page container is missing");
+requireText(legal, "<PageHeader", "legal page header is missing");
+requireText(legal, "<Tabs", "legal tabs are hidden by an empty-state branch");
+requireText(legal, "<KpiCard", "legal registry KPI cards are missing");
+forbid(legal, /\blegal-workspace\b/, "legacy legal workspace wrapper remains");
+forbid(legal, /if\s*\(\s*!\s*(?:hasData|hasLegalData)\s*\)\s*(?:\{[\s\S]{0,160}?\breturn\b|return\b)/, "legal workspace still collapses when empty");
 requireText(analytics, "Все аналитические разделы доступны сразу", "analytics still collapses when empty");
 requireText(readiness, "Визуальная проверка, сценарии", "readiness still collapses when empty");
-requireText(accounting, "accounting-start-panel", "accounting tabs are hidden by an empty-state branch");
+requireText(accounting, "ahAccountingPage", "accounting workspace is not mounted on the design-system shell");
+requireText(accounting, "<PageContainer", "accounting page container is missing");
+requireText(accounting, "<PageHeader", "accounting page header is missing");
+requireText(accounting, "<Tabs", "accounting tabs are hidden by an empty-state branch");
+requireText(accounting, "<KpiCard", "accounting registry KPI cards are missing");
+forbid(accounting, /\baccounting-workspace\b/, "legacy accounting workspace wrapper remains");
+forbid(accounting, /if\s*\(\s*!\s*hasAccountingData\s*\)\s*(?:\{[\s\S]{0,160}?\breturn\b|return\b)/, "accounting workspace still collapses when empty");
 requireText(procurement, "Заявки, поставщики, склад, имущество", "procurement still collapses when empty");
 requireText(food, "Партии, ТТК, производство, отгрузки и экономика остаются доступными", "food still collapses when empty");
 requireText(safety, "Системы, оборудование, проверки, инциденты, ремонты", "safety still collapses when empty");

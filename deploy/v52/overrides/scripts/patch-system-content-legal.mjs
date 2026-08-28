@@ -77,46 +77,5 @@ patch("app/api/legal-actions/route.ts", (input) => {
   return source;
 });
 
-patch("app/components/LegalWorkspace.tsx", (input) => {
-  let source = input;
-  source = replaceText(source, 'import {useCallback,useEffect,useState}from"react";', 'import {FormEvent,useCallback,useEffect,useState}from"react";', "legal form event import");
-  source = replaceText(
-    source,
-    'export function LegalWorkspace({role,notify,onTasksChanged,focusId}:{role:string;notify:(v:string)=>void;onTasksChanged:()=>void;focusId?:string})',
-    'export function LegalWorkspace({role,notify,onTasksChanged,onOpenIntegrations,focusId}:{role:string;notify:(v:string)=>void;onTasksChanged:()=>void;onOpenIntegrations:()=>void;focusId?:string})',
-    "legal integration prop",
-  );
-  source = replaceText(
-    source,
-    '[busy,setBusy]=useState("");',
-    '[busy,setBusy]=useState(""),[createOpen,setCreateOpen]=useState(false);',
-    "legal create modal state",
-  );
-  source = replaceRegex(
-    source,
-    /async function action\(body:Record<string,unknown>,key:string\)\{[\s\S]*?\}if\(loading\)/,
-    `async function action(body:Record<string,unknown>,key:string){setBusy(key);try{const r=await fetch("/api/legal-actions",{method:"POST",headers:{"content-type":"application/json","x-arthello-role":codes[role]??""},body:JSON.stringify(body)}),p=await r.json() as{error?:string;reused?:boolean};if(!r.ok)throw new Error(p.error??"Ошибка");notify(p.reused?"Результат уже существует":"Юридическое действие сохранено");await load();onTasksChanged();return true}catch(e){notify(e instanceof Error?e.message:"Ошибка");return false}finally{setBusy("")}}if(loading)`,
-    "legal action result",
-  );
-  source = replaceRegex(
-    source,
-    /if\(!data\.contracts\.length&&!data\.documents\.length&&!data\.checks\.length&&!data\.zones\.length\)return <section className="page legal-workspace">[\s\S]*?<\/section>;/,
-    `if(!data.contracts.length&&!data.documents.length&&!data.checks.length&&!data.zones.length)return <><section className="page legal-workspace operational-empty-workspace"><div className="legal-heading"><div><p className="eyebrow">Документы и обязательства</p><h1>Юридический контур</h1><p>Реестр, версии, контроль сроков, ответственность и сквозная цепочка доступны до появления первого договора.</p></div><div className="legal-heading-actions"><button onClick={()=>setCreateOpen(true)}>+ Договор</button><button className="secondary" onClick={onOpenIntegrations}>Подключить ЭДО</button></div></div><div className="legal-boundary"><strong>РАБОЧАЯ СТРУКТУРА</strong><span>Пустой реестр не скрывает юридические процессы. Электронная подпись и ЭДО включаются только после реального подключения.</span></div><div className="legal-kpis"><button onClick={()=>setTab("Реестр")}><span>Договоры</span><strong>0</strong><small>реестр пуст</small></button><button onClick={()=>setTab("Контроль")}><span>Истекают</span><strong>0</strong><small>нет сроков</small></button><button className="warn" onClick={()=>setTab("Документы")}><span>Нет обязательных</span><strong>0</strong><small>нет комплектов</small></button><button onClick={()=>setTab("Контроль")}><span>Открытые сигналы</span><strong>0</strong><small>нет проверок</small></button></div><div className="legal-tabs">{tabs.map(x=><button key={x} className={tab===x?"active":""} onClick={()=>setTab(x)}>{x}</button>)}</div>{tab==="Реестр"?<div className="operational-inline-empty"><span>0</span><strong>Договоров пока нет</strong><p>Создайте первую карточку договора вручную. Система назначит рабочие ID и сохранит запись со статусом «На проверке».</p><button onClick={()=>setCreateOpen(true)}>Добавить договор</button></div>:null}{tab==="Документы"?<div className="operational-inline-empty"><span>v1</span><strong>Версий и приложений пока нет</strong><p>После создания договора здесь появятся основной документ, приложения, акты, согласия и закрывающие документы.</p></div>:null}{tab==="Контроль"?<div className="operational-inline-empty"><span>0</span><strong>Сигналов контроля пока нет</strong><p>Сроки, неподписанные документы, лимиты и комплектность проверяются только по сохранённым договорам.</p></div>:null}{tab==="Ответственность"?<div className="operational-inline-empty"><span>0</span><strong>Зоны ответственности не назначены</strong><p>Владельцы обязательств появятся после создания договора и распределения ролей.</p></div>:null}{tab==="Сквозная цепочка"?<div className="operational-inline-empty"><span>→</span><strong>Сквозная цепочка ещё не собрана</strong><p>Сторона → договор → документ → обязательство → сигнал → решение. Пустые этапы не подменяются фиктивными.</p></div>:null}</section>{createOpen?<ContractModal busy={busy==="create-contract"} close={()=>setCreateOpen(false)} save={async body=>{const ok=await action({...body,action:"createContract"},"create-contract");if(ok){setCreateOpen(false);setTab("Реестр")}}}/>:null}</>;`,
-    "legal complete empty shell",
-  );
-  source = replaceText(
-    source,
-    '<div className="legal-heading"><div><p className="eyebrow">Этап 9 · документы до обязательства</p><h1>Юридический контур</h1><p>Договоры, версии, сроки, лимиты и закрывающие документы с доказательными сигналами.</p></div><span>ЭП: не подключена</span></div>',
-    '<div className="legal-heading"><div><p className="eyebrow">Документы до обязательства</p><h1>Юридический контур</h1><p>Договоры, версии, сроки, лимиты и закрывающие документы с доказательными сигналами.</p></div><div className="legal-heading-actions"><button onClick={()=>setCreateOpen(true)}>+ Договор</button><button className="secondary" onClick={onOpenIntegrations}>ЭДО и подпись</button></div></div>',
-    "legal working heading actions",
-  );
-  source = replaceText(
-    source,
-    '</section>}\nfunction Head',
-    '{createOpen?<ContractModal busy={busy==="create-contract"} close={()=>setCreateOpen(false)} save={async body=>{const ok=await action({...body,action:"createContract"},"create-contract");if(ok){setCreateOpen(false);setTab("Реестр")}}}/>:null}</section>}\nfunction ContractModal({busy,close,save}:{busy:boolean;close:()=>void;save:(body:Record<string,unknown>)=>Promise<void>}){function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();void save(Object.fromEntries(new FormData(event.currentTarget).entries()))}return <div className="modal-layer legal-create-layer"><button className="drawer-scrim" type="button" onClick={close} aria-label="Закрыть форму"/><form className="task-modal legal-create-modal" onSubmit={submit}><div className="drawer-head"><div><p>Юридический контур</p><h2>Добавить договор</h2></div><button type="button" onClick={close}>×</button></div><div className="legal-create-grid"><label><span>Сторона договора *</span><input name="partyName" required minLength={3} placeholder="Наименование организации или ФИО"/></label><label><span>Тип стороны</span><select name="partyType" defaultValue="Контрагент"><option>Контрагент</option><option>Клиент</option><option>Сотрудник</option><option>Подрядчик</option><option>Поставщик</option><option>Арендодатель</option></select></label><label><span>Тип договора</span><select name="contractType" defaultValue="Договор"><option>Договор</option><option>Клиентский договор</option><option>Трудовой договор</option><option>Договор поставки</option><option>Договор подряда</option><option>Договор аренды</option></select></label><label><span>Номер *</span><input name="number" required minLength={2} placeholder="Например, 14/26"/></label><label><span>Действует с *</span><input type="date" name="validFrom" required/></label><label><span>Действует до *</span><input type="date" name="validUntil" required/></label><label><span>Сумма или лимит, ₽</span><input type="number" min="0" step="0.01" name="limitRubles" defaultValue="0"/></label><label><span>Подпись</span><select name="signedStatus" defaultValue="Не подписан"><option>Не подписан</option><option>Подписан</option><option>На согласовании</option></select></label></div><label className="legal-closing-check"><input type="checkbox" name="closingRequired"/><span>Требуются закрывающие документы</span></label><div className="access-separation"><strong>Ручной ввод требует проверки</strong><span>Система создаст сторону, договор и версию v1. Электронная подпись и реквизиты не считаются подтверждёнными до отдельной сверки.</span></div><div className="modal-actions"><button type="button" onClick={close}>Отмена</button><button disabled={busy}>{busy?"Сохраняем…":"Сохранить договор"}</button></div></form></div>}\nfunction Head',
-    "legal modal render and helper",
-  );
-  return source;
-});
-
 console.log("System-wide patch content_legal applied");
+

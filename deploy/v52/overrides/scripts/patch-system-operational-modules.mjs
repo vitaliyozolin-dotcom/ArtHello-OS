@@ -31,23 +31,6 @@ function patch(relativePath, transform) {
   writeFileSync(path, after, "utf8");
 }
 
-patch("app/components/AccountingWorkspace.tsx", (input) => {
-  let source = input;
-  source = replaceText(
-    source,
-    `      {!hasAccountingData ? <div className="manual-module-empty">\n        <span>＋</span>\n        <h2>Документов пока нет</h2>\n        <p>{counterparties.length ? "Добавьте первый первичный документ вручную. Его рабочий ID назначит система." : "Сначала создайте карточку контрагента в «Единых карточках», затем добавьте документ."}</p>\n        <button type="button" onClick={() => setCreateOpen(true)}>Добавить первый документ</button>\n      </div> : <>`,
-    `      {!hasAccountingData ? <div className="accounting-start-panel operational-inline-empty">\n        <span>0</span>\n        <strong>Первичных документов пока нет</strong>\n        <p>{counterparties.length ? "Добавьте первый документ вручную. После сохранения останутся доступны комплектность, связь с оплатами, ЭДО и выгрузки." : "Сначала создайте карточку контрагента в «Единых карточках», затем добавьте документ."}</p>\n        <button type="button" onClick={() => setCreateOpen(true)}>Добавить первый документ</button>\n      </div> : null}\n      <>`,
-    "accounting non-blocking empty state",
-  );
-  source = replaceText(
-    source,
-    `      </>}\n    </section>`,
-    `      </>\n    </section>`,
-    "accounting always-visible workspace",
-  );
-  return source;
-});
-
 patch("app/components/ProcurementWorkspace.tsx", (input) => {
   let source = input;
   source = replaceText(
@@ -215,3 +198,4 @@ patch("app/components/StrategyWorkspace.tsx", (input) => {
 });
 
 console.log("System-wide operational modules patch applied");
+

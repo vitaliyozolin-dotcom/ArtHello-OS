@@ -47,12 +47,6 @@ patch("app/components/ArtHelloShell.tsx", (input) => {
   );
   source = replaceText(
     source,
-    '<LegalWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} focusId={moduleFocus?.module === "legal" ? moduleFocus.id : undefined} />',
-    '<LegalWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenIntegrations={() => openModule("integrations")} focusId={moduleFocus?.module === "legal" ? moduleFocus.id : undefined} />',
-    "legal integration navigation",
-  );
-  source = replaceText(
-    source,
     '<AnalyticsWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} />',
     '<AnalyticsWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenIntegrations={() => openModule("integrations")} />',
     "analytics integration navigation",
@@ -201,3 +195,4 @@ patch("app/globals.css", (input) => {
 });
 
 console.log("System-wide patch foundation applied");
+

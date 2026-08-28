@@ -130,6 +130,15 @@ jobs:
           set -Eeuo pipefail
           test "$(git -C candidate rev-parse HEAD)" = "$HEAD_SHA"
           test "$(git -C baseline rev-parse HEAD)" = "$BASE_SHA"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          canon = json.loads(Path("candidate/quality-gates/visual-canon.json").read_text())
+          assert canon["schema_version"] == 3
+          assert canon["compact_registry_kpi"]["desktop"]["min_height_px"] == 98
+          assert canon["compact_registry_kpi"]["mobile"]["min_height_px"] == 84
+          PY
 
       - name: Reclaim isolated pilot build space
         shell: bash
@@ -174,9 +183,19 @@ jobs:
             grep -F "EmptyState" /app/app/components/ContractorWorkspace.tsx >/dev/null
             grep -F "SearchField" /app/app/components/ContractorWorkspace.tsx >/dev/null
             ! grep -F "ContractorWorkspace.module.css" /app/app/components/ContractorWorkspace.tsx >/dev/null
-            ! grep -F 'className="ahContractorPage contractor-workspace"' /app/app/components/ContractorWorkspace.tsx >/dev/null
-            grep -F 'className="ahContractorScope"' /app/app/components/ArtHelloShell.tsx >/dev/null
-            ! grep -F 'className="contractor-workspace"' /app/app/components/ArtHelloShell.tsx >/dev/null
+            ! grep -F "className=\"ahContractorPage contractor-workspace\"" /app/app/components/ContractorWorkspace.tsx >/dev/null
+            grep -F "className=\"ahContractorScope\"" /app/app/components/ArtHelloShell.tsx >/dev/null
+            ! grep -F "className=\"contractor-workspace\"" /app/app/components/ArtHelloShell.tsx >/dev/null
+            test -s /app/app/components/LegalWorkspace.tsx
+            test -s /app/app/components/LegalWorkspace.ds.css
+            grep -F "className=\"ahLegalPage\"" /app/app/components/LegalWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/LegalWorkspace.tsx >/dev/null
+            ! grep -F "className=\"page legal-workspace\"" /app/app/components/LegalWorkspace.tsx >/dev/null
+            test -s /app/app/components/AccountingWorkspace.tsx
+            test -s /app/app/components/AccountingWorkspace.ds.css
+            grep -F "className=\"ahAccountingPage\"" /app/app/components/AccountingWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/AccountingWorkspace.tsx >/dev/null
+            ! grep -F "className=\"page accounting-workspace\"" /app/app/components/AccountingWorkspace.tsx >/dev/null
             test -d /app/dist
             test -s /app/production/runtime-server.mjs
           '
@@ -299,16 +318,16 @@ jobs:
             bash -lc 'npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund --no-save playwright@1.55.0 pixelmatch@7.1.0 pngjs@7.0.0 >/dev/null && cp /repo/deploy/v52/visual/contractors-design-system.cjs ./capture.cjs && node capture.cjs'
 
           test -s "$out/manifest.json"
-          test "$(find "$out" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" -eq 32
+          test "$(find "$out" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" -eq 88
           printf 'ARTHELLO_DS_VISUAL=OK path=%s\n' "$out"
           trap - EXIT
           cleanup
 
-      - name: Upload contractors visual acceptance
+      - name: Upload Design System visual acceptance
         if: always() && steps.visual.outputs.path != ''
         uses: actions/upload-artifact@v4
         with:
-          name: contractors-design-system-visual-${{ env.HEAD_SHA }}
+          name: arthello-design-system-visual-${{ env.HEAD_SHA }}
           path: ${{ steps.visual.outputs.path }}
           retention-days: 7
           if-no-files-found: warn

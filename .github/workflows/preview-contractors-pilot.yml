@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - design-system/compact-card-typography
+      - design-system/migration-wave-1-registry
     paths:
       - deploy/v52/**
       - .github/workflows/preview-contractors-pilot.yml
@@ -230,10 +231,12 @@ jobs:
         shell: bash
         run: |
           {
-            echo '## Contractors Design System pilot preview'
+            echo '## ArtHello Design System preview'
             echo
             echo "- Commit: $GITHUB_SHA"
-            echo "- Preview: $PREVIEW_URL/#contractors"
+            echo "- Contractors: $PREVIEW_URL/#contractors"
+            echo "- Legal: $PREVIEW_URL/#legal"
+            echo "- Accounting: $PREVIEW_URL/#accounting"
             echo '- Data: isolated snapshot volume; production is not mounted'
             echo "- Result: ${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"
