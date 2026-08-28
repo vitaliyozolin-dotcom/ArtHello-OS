@@ -1330,7 +1330,7 @@ jobs:
                   if result["ownedRoots"] != expected_owned_roots:
                       raise RuntimeError("Wrong owned-root count for " + repr(key))
                   if result["probe"] == "director-management" and (
-                      anchors["directorManagementRows"] != 4
+                      anchors["directorManagementRows"] != 16
                       or anchors["directorLegacyTitles"] != 0
                   ):
                       raise RuntimeError("Director title/count anchor failed")
@@ -1353,7 +1353,7 @@ jobs:
                       raise RuntimeError("Parent legacy tab/count anchor failed")
                   if result["probe"] == "parent-ranking" and (
                       anchors["rankingBoards"] != 1
-                      or anchors["rankingButtons"] < 1
+                      or anchors["rankingButtons"] != 3
                       or anchors["rankingTypedButtons"] != 0
                   ):
                       raise RuntimeError("Ranking ARIA/type/count anchor failed")
