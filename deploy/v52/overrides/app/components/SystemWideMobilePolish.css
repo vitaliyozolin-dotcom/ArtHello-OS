@@ -114,15 +114,22 @@ button.operational-empty-card:disabled {
 .operational-empty-card strong,
 .operational-inline-empty strong {
   color: var(--ah-system-text);
-  font-size: 18px;
-  line-height: 1.25;
+  font-size: var(--ah-compact-card-title-size);
+  line-height: var(--ah-compact-card-title-line);
   overflow-wrap: anywhere;
 }
 
 .operational-empty-card p,
 .operational-empty-card small,
 .operational-inline-empty p,
-.operational-inline-empty small,
+.operational-inline-empty small {
+  margin: 0;
+  color: var(--ah-system-muted);
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+  overflow-wrap: anywhere;
+}
+
 .modal-explanation {
   margin: 0;
   color: var(--ah-system-muted);
@@ -717,3 +724,15 @@ button[data-ah-help-inline="true"].ah-field-icon:focus-visible {
     padding: 24px !important;
   }
 }
+
+/* Legacy embedded empty states now consume the same compact-card tokens. */
+:where(.manual-module-empty, .system-empty, .settings-empty, .studio-placeholder, .crm-column-empty) :where(strong, h2, h3) {
+  font-size: var(--ah-compact-card-title-size);
+  line-height: var(--ah-compact-card-title-line);
+}
+
+:where(.manual-module-empty, .system-empty, .settings-empty, .studio-placeholder, .crm-column-empty) :where(p, small) {
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+}
+

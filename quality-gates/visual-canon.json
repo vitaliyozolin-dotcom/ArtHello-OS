@@ -1,9 +1,19 @@
 {
-  "schema_version": 1,
-  "source_of_truth": "ArtHello Design Memory",
+  "schema_version": 2,
+  "source_of_truth": "ArtHello OS Design Code 1.1",
   "viewports": [
-    {"id": "desktop", "width": 1440, "height": 900, "deviceScaleFactor": 1},
-    {"id": "mobile", "width": 390, "height": 844, "deviceScaleFactor": 1}
+    {
+      "id": "desktop",
+      "width": 1440,
+      "height": 900,
+      "deviceScaleFactor": 1
+    },
+    {
+      "id": "mobile",
+      "width": 390,
+      "height": 844,
+      "deviceScaleFactor": 1
+    }
   ],
   "rules": {
     "root_must_render": true,
@@ -27,6 +37,27 @@
     {
       "id": "render-evidence-required",
       "description": "Every proof-gate run captures desktop and mobile screenshots as CI evidence."
+    },
+    {
+      "id": "compact-card-typography-matches-access",
+      "description": "Compact list cards and embedded compact empty states use the approved Access typography roles."
     }
-  ]
+  ],
+  "compact_card_typography": {
+    "title": {
+      "font_size_px": 12,
+      "line_height_px": 15,
+      "font_weight": 500
+    },
+    "body": {
+      "font_size_px": 10,
+      "line_height_px": 14,
+      "font_weight": 400
+    },
+    "index": {
+      "font_size_px": 9,
+      "line_height_px": 12,
+      "font_weight": 800
+    }
+  }
 }

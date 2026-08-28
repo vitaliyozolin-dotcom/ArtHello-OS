@@ -2,6 +2,19 @@
   --ah-color-background:#f6f7fc;--ah-color-surface:#fff;--ah-color-surface-soft:#f9fafd;--ah-color-text-primary:#111527;--ah-color-text-secondary:#747c96;--ah-color-border:#dde2ee;--ah-color-primary:#5b52f5;--ah-color-primary-hover:#4b43e5;--ah-color-primary-soft:#efeeff;--ah-color-success:#31795d;--ah-color-success-soft:#eef8f3;--ah-color-warning:#a45f29;--ah-color-warning-soft:#fff6ec;--ah-color-danger:#a53d4d;--ah-color-danger-soft:#fff0f2;
   --ah-radius-card:22px;--ah-radius-panel:28px;--ah-radius-control:16px;--ah-radius-status:12px;
   --ah-space-1:4px;--ah-space-2:8px;--ah-space-3:12px;--ah-space-4:16px;--ah-space-5:20px;--ah-space-6:24px;--ah-space-7:32px;--ah-space-8:40px;--ah-space-9:48px;--ah-space-10:64px;
-  --ah-page-gutter-mobile:20px;--ah-page-gutter-tablet:28px;--ah-page-gutter-desktop:32px;--ah-page-gutter-wide:40px;--ah-control-height:48px;--ah-search-height:56px;--ah-card-padding:20px;--ah-panel-padding:24px;--ah-section-gap:24px;--ah-card-gap:16px;
-  --ah-font-size-page-title-mobile:38px;--ah-line-height-page-title-mobile:42px;--ah-font-size-section-title:22px;--ah-line-height-section-title:28px;--ah-font-size-card-title:18px;--ah-line-height-card-title:24px;--ah-font-size-body:16px;--ah-line-height-body:24px;--ah-font-size-label:14px;--ah-line-height-label:20px;
+  --ah-page-gutter-mobile:12px;--ah-page-gutter-tablet:28px;--ah-page-gutter-desktop:32px;--ah-page-gutter-wide:40px;--ah-control-height:48px;--ah-search-height:56px;--ah-card-padding:20px;--ah-panel-padding:24px;--ah-section-gap:24px;--ah-card-gap:16px;
+  --ah-font-size-page-title-mobile:32px;--ah-line-height-page-title-mobile:32px;--ah-font-size-section-title:22px;--ah-line-height-section-title:28px;--ah-font-size-card-title:18px;--ah-line-height-card-title:24px;--ah-font-size-body:16px;--ah-line-height-body:24px;--ah-font-size-label:14px;--ah-line-height-label:20px;
+
+  /* Compact information/list card typography: canonical Access workspace roles. */
+  --ah-compact-card-title-size:12px;--ah-compact-card-title-line:15px;
+  --ah-compact-card-body-size:10px;--ah-compact-card-body-line:14px;
+  --ah-compact-card-index-size:9px;--ah-compact-card-index-line:12px;
+
+  /* Mobile visual canon: the measured Access workspace roles and density. */
+  --ah-mobile-section-gap:16px;--ah-mobile-kpi-gap:11px;
+  --ah-mobile-eyebrow-size:11px;--ah-mobile-eyebrow-line:14px;
+  --ah-mobile-action-height:44px;--ah-mobile-action-radius:11px;--ah-mobile-action-size:14px;
+  --ah-mobile-info-radius:12px;--ah-mobile-info-padding-block:11px;--ah-mobile-info-padding-inline:14px;--ah-mobile-info-label-size:10px;--ah-mobile-info-label-line:12px;--ah-mobile-info-body-size:13px;--ah-mobile-info-body-line:19px;
+  --ah-mobile-kpi-height:96px;--ah-mobile-kpi-radius:15px;--ah-mobile-kpi-padding:13px;--ah-mobile-kpi-label-size:12px;--ah-mobile-kpi-label-line:14px;--ah-mobile-kpi-value-size:30px;--ah-mobile-kpi-value-line:30px;--ah-mobile-kpi-note-size:12px;--ah-mobile-kpi-note-line:14px;
+  --ah-mobile-search-height:42px;--ah-mobile-search-radius:10px;--ah-mobile-search-padding:12px;
 }

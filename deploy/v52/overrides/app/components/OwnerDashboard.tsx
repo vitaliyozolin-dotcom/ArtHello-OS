@@ -237,8 +237,8 @@ export function OwnerDashboard({ displayName, roleLabel, tasks, sourceOnly, navi
       <div className={styles.insights}>
         <article className={styles.panel}>
           <header><strong>Сигналы и риски</strong><button onClick={() => navigate("analytics")}>Открыть аналитику</button></header>
-          <div className={styles.signalList}>
-            <div className={styles.inlineEmpty}>
+          <div data-ah-compact-card="true" className={styles.signalList}>
+            <div data-ah-compact-card="true" className={styles.inlineEmpty}>
               <strong>Сигналов пока нет</strong>
               <span>Они появятся после добавления данных или подключения подтверждённых источников.</span>
               <button onClick={() => navigate("integrations")}>Открыть интеграции</button>
@@ -248,14 +248,14 @@ export function OwnerDashboard({ displayName, roleLabel, tasks, sourceOnly, navi
 
         <article className={styles.panel}>
           <header><strong>Что требует моего решения</strong><button onClick={() => navigate("tasks")}>Все задачи ({tasks.length})</button></header>
-          <div className={styles.decisionList}>
+          <div data-ah-compact-card="true" className={styles.decisionList}>
             {decisions.length ? decisions.map((task) => (
               <button key={task.id} onClick={() => navigate("tasks")}>
                 <AppIcon name="tasks" />
                 <span><strong>{task.title}</strong><small>{task.sourceId || "Ручная задача"}</small></span>
                 <em>{task.dueDate || task.status}</em>
               </button>
-            )) : <div className={styles.inlineEmpty}><strong>Нет открытых решений</strong><span>Создайте задачу или подключите источник сигналов.</span><button onClick={createTask}>Создать задачу</button></div>}
+            )) : <div data-ah-compact-card="true" className={styles.inlineEmpty}><strong>Нет открытых решений</strong><span>Создайте задачу или подключите источник сигналов.</span><button onClick={createTask}>Создать задачу</button></div>}
           </div>
         </article>
 
@@ -288,13 +288,13 @@ export function OwnerDashboard({ displayName, roleLabel, tasks, sourceOnly, navi
               {chartData.map((item, index) => <button key={item.period} type="button" aria-label={`${monthLabel(item.period, "long")}: открыть операции`} onMouseEnter={() => setActiveChartIndex(index)} onFocus={() => setActiveChartIndex(index)} onClick={() => navigate("finance")} />)}
             </div>
             {activeChartIndex !== null && shownChartItem && shownChartPoint ? <div className={chartStyles.chartTooltip} style={{ left: `${(shownChartPoint.x / chartGeometry.width) * 100}%` }}><strong>{monthLabel(shownChartItem.period, "long")}</strong><span>Факт ОДДС · нажмите для детализации</span></div> : null}
-          </div> : <div className={styles.inlineEmpty}><strong>Движения денег пока нет</strong><span>График появится после добавления первой финансовой операции.</span><button onClick={() => navigate("finance")}>Открыть финансы</button></div>}
+          </div> : <div data-ah-compact-card="true" className={styles.inlineEmpty}><strong>Движения денег пока нет</strong><span>График появится после добавления первой финансовой операции.</span><button onClick={() => navigate("finance")}>Открыть финансы</button></div>}
         </article>
 
         <article className={styles.panel}>
           <header><strong>Ближайшие контрольные точки</strong><button onClick={() => navigate("projects")}>Календарь</button></header>
-          <div className={styles.eventList}>
-            <div className={styles.inlineEmpty}>
+          <div data-ah-compact-card="true" className={styles.eventList}>
+            <div data-ah-compact-card="true" className={styles.inlineEmpty}>
               <strong>Контрольных точек пока нет</strong>
               <span>Создайте задачу с датой — она появится в рабочем календаре.</span>
               <button onClick={createTask}>Создать задачу</button>
@@ -313,13 +313,13 @@ export function OwnerDashboard({ displayName, roleLabel, tasks, sourceOnly, navi
             <button type="button" onClick={() => navigate("finance")}><AppIcon name="settings" /> Фильтры</button>
           </div>
           <div className={styles.registrySummary}><span>Записей: <strong>{finance?.operations.length ?? 0}</strong></span><span>Поступления: <strong>{summary ? rubles(summary.receiptsMinor) : "—"}</strong></span><span>Списания: <strong>{summary ? rubles(summary.outflowsMinor) : "—"}</strong></span></div>
-          {loading ? <div className={styles.registryState}><span className={styles.loader} /><strong>Загружаем реестр…</strong></div> : error ? <div className={styles.registryState}><strong>Реестр временно недоступен</strong><span>{error}</span><button onClick={() => navigate("finance")}>Открыть финансовый раздел</button></div> : operations.length ? (
+          {loading ? <div data-ah-compact-card="true" className={styles.registryState}><span className={styles.loader} /><strong>Загружаем реестр…</strong></div> : error ? <div data-ah-compact-card="true" className={styles.registryState}><strong>Реестр временно недоступен</strong><span>{error}</span><button onClick={() => navigate("finance")}>Открыть финансовый раздел</button></div> : operations.length ? (
             <div className={styles.tableWrap}><table><thead><tr><th>Дата</th><th>Контрагент</th><th>Назначение</th><th>Сумма</th><th>Статус</th></tr></thead><tbody>{operations.map((operation) => (
               <tr key={operation.id} className={selected?.id === operation.id ? styles.selectedRow : ""} onClick={() => setSelectedId(operation.id)} onDoubleClick={() => showOperation(operation)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") showOperation(operation); }}>
                 <td>{formatDate(operation.operationDate)}</td><td><strong>{finance?.entityNames[operation.counterpartyEntityId] ?? operation.counterpartyEntityId}</strong><small>{operation.contractId || "Без договора"}</small></td><td><strong>{operation.category}</strong><small>{operation.reportClass}</small></td><td className={operation.direction === "Поступление" ? styles.income : styles.expense}>{operation.direction === "Поступление" ? "+" : "−"}{rubles(operation.amountMinor)}</td><td><span className={styles.status}>{operation.status}</span></td>
               </tr>
             ))}</tbody></table></div>
-          ) : <div className={styles.registryState}><strong>Операций пока нет</strong><span>{sourceOnly ? "Демонстрационные записи удалены. Реестр заполнится после подключения банка." : "В выбранном периоде нет операций."}</span><button onClick={() => navigate("integrations")}>Подключить банк</button></div>}
+          ) : <div data-ah-compact-card="true" className={styles.registryState}><strong>Операций пока нет</strong><span>{sourceOnly ? "Демонстрационные записи удалены. Реестр заполнится после подключения банка." : "В выбранном периоде нет операций."}</span><button onClick={() => navigate("integrations")}>Подключить банк</button></div>}
         </article>
 
         <aside className={`${styles.panel} ${styles.preview}`} aria-live="polite">
@@ -329,7 +329,7 @@ export function OwnerDashboard({ displayName, roleLabel, tasks, sourceOnly, navi
             <nav><button className={styles.activeTab}>Детали</button><button onClick={() => showOperation(selected)}>Связи</button><button onClick={() => showOperation(selected)}>Источник</button></nav>
             <dl><div><dt>Источник</dt><dd>{selected.sourceFile}</dd></div><div><dt>Контрагент</dt><dd>{finance?.entityNames[selected.counterpartyEntityId] ?? selected.counterpartyEntityId}</dd></div><div><dt>Назначение</dt><dd>{selected.category}</dd></div><div><dt>Договор</dt><dd>{selected.contractId || "Не указан"}</dd></div><div><dt>Документ</dt><dd>{selected.documentId || "Не указан"}</dd></div></dl>
             <footer><button onClick={() => showOperation(selected)}>Открыть карточку</button><button onClick={() => navigate("finance")}>Все действия</button></footer>
-          </> : <div className={styles.previewEmpty}><AppIcon name="finance" /><strong>Выберите операцию</strong><span>Предпросмотр появится здесь, а полная карточка откроется по центру экрана.</span></div>}
+          </> : <div data-ah-compact-card="true" className={styles.previewEmpty}><AppIcon name="finance" /><strong>Выберите операцию</strong><span>Предпросмотр появится здесь, а полная карточка откроется по центру экрана.</span></div>}
         </aside>
       </div>
     </section>

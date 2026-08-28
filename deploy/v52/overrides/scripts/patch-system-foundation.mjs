@@ -36,8 +36,8 @@ patch("app/components/ArtHelloShell.tsx", (input) => {
   source = replaceText(
     source,
     'import "./ContentModern.css";\n',
-    'import "./ContentModern.css";\nimport "./SystemWideMobilePolish.css";\n',
-    "shell mobile polish import",
+    'import "./ContentModern.css";\nimport "./design-system/tokens.css";\nimport "./design-system/design-system.css";\nimport "./SystemWideMobilePolish.css";\n',
+    "global design system and mobile polish imports",
   );
   source = replaceText(
     source,
@@ -173,6 +173,29 @@ patch("app/components/SalesWorkspace.tsx", (input) => {
     '</div></aside></div>;\n}',
     '</div></aside></div>, document.body);\n}',
     "lead drawer portal end",
+  );
+  return source;
+});
+
+patch("app/globals.css", (input) => {
+  let source = input;
+  source = replaceText(
+    source,
+    '.content-frame [class$="-workspace"] :where(p,span,small,em,strong,dt,dd,time,label,button,input,select,textarea,th,td){font-size:14px!important;line-height:1.45}',
+    '.content-frame [class$="-workspace"] :where(p,span,small,em,strong,dt,dd,time,label,button,input,select,textarea,th,td):not([data-ah-compact-card], [data-ah-compact-card] *){font-size:14px!important;line-height:1.45}',
+    "legacy workspace 14px blanket",
+  );
+  source = replaceText(
+    source,
+    '.analytics-workspace :where(strong,span,small,em,p,dt,dd,button,select),.readiness-workspace :where(strong,span,small,em,p,dt,dd,button,select),.integration-workspace :where(strong,span,small,em,p,dt,dd,button,select){font-size:14px!important;line-height:1.4}',
+    '.analytics-workspace :where(strong,span,small,em,p,dt,dd,button,select):not([data-ah-compact-card], [data-ah-compact-card] *),.readiness-workspace :where(strong,span,small,em,p,dt,dd,button,select):not([data-ah-compact-card], [data-ah-compact-card] *),.integration-workspace :where(strong,span,small,em,p,dt,dd,button,select):not([data-ah-compact-card], [data-ah-compact-card] *){font-size:14px!important;line-height:1.4}',
+    "legacy specialist workspace 14px blanket",
+  );
+  source = replaceText(
+    source,
+    '.content-frame [class$="-workspace"] :where(p,span,small,em,dt,dd,time,label,button,input,select,textarea,th,td){font-size:15px!important}',
+    '.content-frame [class$="-workspace"] :where(p,span,small,em,dt,dd,time,label,button,input,select,textarea,th,td):not([data-ah-compact-card], [data-ah-compact-card] *){font-size:15px!important}',
+    "legacy desktop workspace 15px blanket",
   );
   return source;
 });

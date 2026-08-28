@@ -38,7 +38,7 @@ test("desktop typography and KPI cards do not depend on clipped microcopy", () =
   assert.match(ownerStyles, /\.tableWrap table\{font-size:12px\}/);
   assert.match(ownerStyles, /\.kpiCopy small\{font-size:13px\}/);
   assert.match(shellFoundation, /\.nav-item\{min-height:36px;font-size:14px!important\}/);
-  assert.match(css, /font-size:15px!important/);
+  assert.match(css, /:not\(\[data-ah-compact-card\],\s*\[data-ah-compact-card\] \*\)\{font-size:15px!important\}/);
 });
 
 test("owner cash flow is a source-backed interactive chart instead of decorative lines", () => {

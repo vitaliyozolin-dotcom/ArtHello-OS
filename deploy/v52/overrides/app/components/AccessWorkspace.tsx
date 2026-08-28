@@ -3,6 +3,7 @@
 import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import styles from "./AccessWorkspace.module.css";
 import { SoftSelect } from "./SoftSelect";
+import { CompactListCard } from "./design-system";
 
 type Branch = { id: string; name: string; kind: string; status: string };
 type User = {
@@ -179,7 +180,11 @@ export function AccessWorkspace({ notify }: { role: string; notify: (value: stri
     </header>
 
     <div className={styles.boundary}><span>Рабочий контур доступа</span><p>Права проверяются сервером при каждом запросе. Изменение роли, филиалов или систем сохраняется в журнале действий.</p></div>
-    <div className={styles.setupGrid}><article><span>01</span><div><strong>Вход в ArtHello OS</strong><small>Пользователь входит по выданному логину и личному паролю. Временный пароль требуется сменить при первом входе.</small></div></article><article><span>02</span><div><strong>Синхронизация дневника</strong><small>Подключается отдельно после настройки защищённого обмена между системами.</small></div></article><article><span>03</span><div><strong>Доставка приглашений</strong><small>До подключения Email или SMS администратор один раз копирует временные данные входа и передаёт их по защищённому каналу.</small></div></article></div>
+    <div className={styles.setupGrid}>
+      <CompactListCard index="01" title="Вход в ArtHello OS" description="Пользователь входит по выданному логину и личному паролю. Временный пароль требуется сменить при первом входе." />
+      <CompactListCard index="02" title="Синхронизация дневника" description="Подключается отдельно после настройки защищённого обмена между системами." />
+      <CompactListCard index="03" title="Доставка приглашений" description="До подключения Email или SMS администратор один раз копирует временные данные входа и передаёт их по защищённому каналу." />
+    </div>
 
     <div className={styles.metrics}>
       <button onClick={() => { setStatus("Активные"); setTab("Пользователи"); }}><span>Активные</span><strong>{metrics.active}</strong><small>могут войти</small></button>
@@ -201,7 +206,7 @@ export function AccessWorkspace({ notify }: { role: string; notify: (value: stri
         {filteredUsers.map((user) => {
           const branches = user.isAdministrative ? ["Все филиалы"] : data.grants.filter((grant) => grant.userId === user.id).map((grant) => branchNames[grant.branchId]).filter(Boolean);
           const systems = data.systemGrants.filter((grant) => grant.userId === user.id);
-          return <button className={styles.userRow} key={user.id} onClick={() => setSelectedUser(user)}>
+          return <button data-ah-compact-card="true" className={styles.userRow} key={user.id} onClick={() => setSelectedUser(user)}>
             <span className={styles.identity}><i>{initials(user.displayName)}</i><span><strong>{user.displayName}</strong><small>{user.contact}</small></span></span>
             <span><strong>{user.position || user.role}</strong><small>{user.unit || (user.isAdministrative ? "Административный контур" : "Рабочая роль")}</small></span>
             <span><strong>{branches.slice(0, 2).join(", ") || "Не назначены"}</strong><small>{branches.length > 2 ? `ещё ${branches.length - 2}` : "область работы"}</small></span>
@@ -218,7 +223,7 @@ export function AccessWorkspace({ notify }: { role: string; notify: (value: stri
         <header><div><strong>{family.displayName}</strong><small>{family.id} · {family.scope}</small></div><em>{family.dataQuality}</em></header>
         {family.members.map((member) => {
           const grant = data.familyAccessGrants.find((item) => item.principalEntityId === member.id);
-          return <div className={styles.familyMember} key={member.id}>
+          return <div data-ah-compact-card="true" className={styles.familyMember} key={member.id}>
             <span className={styles.identity}><i>{initials(member.displayName)}</i><span><strong>{member.displayName}</strong><small>{member.entityType === "Ребёнок" ? "Ученик" : "Родитель"} · {member.relation}</small></span></span>
             <span><strong>{grant?.login || member.phone || member.email || "Контакт не указан"}</strong><small>{grant ? `версия прав ${grant.accessVersion}` : "доступ ещё не выдавался"}</small></span>
             <span><b className={grant?.status === "Активен" ? styles.good : grant ? styles.bad : styles.neutral}>{grant?.status ?? "Не выдан"}</b><small>{grant?.lastSyncStatus ?? "—"}</small></span>
@@ -232,17 +237,17 @@ export function AccessWorkspace({ notify }: { role: string; notify: (value: stri
     </div> : null}
 
     {tab === "Роли и права" ? <div className={styles.rolesLayout}>
-      <aside className={styles.roleList}><header><p>Шаблоны ролей</p><h2>{roleTemplates.length}</h2></header>{roleTemplates.map((item) => <button key={item.name} className={selectedRole === item.name ? styles.selectedRole : ""} onClick={() => setSelectedRole(item.name)}><strong>{item.name}</strong><small>{item.scope}</small></button>)}</aside>
+      <aside className={styles.roleList}><header><p>Шаблоны ролей</p><h2>{roleTemplates.length}</h2></header>{roleTemplates.map((item) => <button data-ah-compact-card="true" key={item.name} className={selectedRole === item.name ? styles.selectedRole : ""} onClick={() => setSelectedRole(item.name)}><strong>{item.name}</strong><small>{item.scope}</small></button>)}</aside>
       <article className={styles.permissionCard}>
         <header><div><p>Матрица прав</p><h2>{roleTemplate.name}</h2><span>{roleTemplate.description}</span></div><b>{roleTemplate.scope}</b></header>
-        <div className={styles.permissionList}>{permissionDomains.map(([key, label]) => <div key={key}><span><strong>{label}</strong><small>{permissionHint(key)}</small></span><b className={permissionClass(roleTemplate.permissions[key], styles)}>{roleTemplate.permissions[key]}</b></div>)}</div>
+        <div data-ah-compact-card="true" className={styles.permissionList}>{permissionDomains.map(([key, label]) => <div key={key}><span><strong>{label}</strong><small>{permissionHint(key)}</small></span><b className={permissionClass(roleTemplate.permissions[key], styles)}>{roleTemplate.permissions[key]}</b></div>)}</div>
         <footer><strong>Правило безопасности</strong><span>Скрытие кнопки — только визуальная часть. Каждое чтение и изменение обязано повторно проверяться на сервере.</span></footer>
       </article>
     </div> : null}
 
     {tab === "Журнал" ? <div className={styles.historyLayout}>
-      <article className={styles.historyCard}><header><div><p>Действия</p><h2>История доступов</h2></div><span>{data.accessHistory.length}</span></header>{data.accessHistory.length ? <div className={styles.timeline}>{data.accessHistory.map((event) => <div key={event.id}><i /><span><strong>{auditLabels[event.action] ?? event.action}</strong><small>{event.entityId} · {event.actor}</small></span><time>{formatDate(event.createdAt)}</time></div>)}</div> : <Empty title="История пока пуста" text="Выдача, изменение, блокировка и восстановление появятся здесь автоматически." />}</article>
-      <article className={styles.historyCard}><header><div><p>Системы</p><h2>Синхронизация</h2></div><span>{data.syncEvents.length}</span></header>{data.syncEvents.length ? <div className={styles.timeline}>{data.syncEvents.map((event) => <div key={event.id}><i className={event.status.includes("Ошибка") ? styles.errorDot : ""} /><span><strong>{event.eventType} · {systemNames[event.systemId] ?? event.systemId}</strong><small>{event.userId}{event.lastError ? ` · ${event.lastError}` : ""}</small></span><time>{formatDate(event.createdAt)}</time></div>)}</div> : <Empty title="Событий синхронизации нет" text="Подключённые системы ещё не получали изменений доступа." />}</article>
+      <article className={styles.historyCard}><header><div><p>Действия</p><h2>История доступов</h2></div><span>{data.accessHistory.length}</span></header>{data.accessHistory.length ? <div data-ah-compact-card="true" className={styles.timeline}>{data.accessHistory.map((event) => <div key={event.id}><i /><span><strong>{auditLabels[event.action] ?? event.action}</strong><small>{event.entityId} · {event.actor}</small></span><time>{formatDate(event.createdAt)}</time></div>)}</div> : <Empty title="История пока пуста" text="Выдача, изменение, блокировка и восстановление появятся здесь автоматически." />}</article>
+      <article className={styles.historyCard}><header><div><p>Системы</p><h2>Синхронизация</h2></div><span>{data.syncEvents.length}</span></header>{data.syncEvents.length ? <div data-ah-compact-card="true" className={styles.timeline}>{data.syncEvents.map((event) => <div key={event.id}><i className={event.status.includes("Ошибка") ? styles.errorDot : ""} /><span><strong>{event.eventType} · {systemNames[event.systemId] ?? event.systemId}</strong><small>{event.userId}{event.lastError ? ` · ${event.lastError}` : ""}</small></span><time>{formatDate(event.createdAt)}</time></div>)}</div> : <Empty title="Событий синхронизации нет" text="Подключённые системы ещё не получали изменений доступа." />}</article>
     </div> : null}
 
     {selectedUser ? <Modal title="Карточка доступа" subtitle={selectedUser.displayName} close={() => setSelectedUser(null)}>

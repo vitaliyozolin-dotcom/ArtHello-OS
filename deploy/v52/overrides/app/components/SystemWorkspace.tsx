@@ -120,7 +120,7 @@ export function SystemWorkspace({
             <div><p>{tab}</p><h2>Рабочий реестр</h2></div>
             <label className="system-search"><AppIcon name="search" /><span className="sr-only">Поиск</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ID, объект, статус или ответственный" /></label>
           </header>
-          <div className="system-list" role="list">
+          <div data-ah-compact-card="true" className="system-list" role="list">
             {visible.map((item) => (
               <button role="listitem" className={selected?.id === item.id ? "active" : ""} key={item.id} onClick={() => setSelectedId(item.id)}>
                 <span className="system-record-icon"><AppIcon name={module} /></span>
@@ -129,7 +129,7 @@ export function SystemWorkspace({
                 <AppIcon name="chevron" />
               </button>
             ))}
-            {visible.length === 0 ? <div className="system-empty"><strong>{query ? "Ничего не найдено" : "Данных пока нет"}</strong><p>{query ? `Измените запрос. Фильтр «${tab}» сохранён в текущем разделе.` : "Записи появятся после ручного добавления или подтверждённого импорта."}</p>{query ? <button onClick={() => setQuery("")}>Сбросить поиск</button> : null}</div> : null}
+            {visible.length === 0 ? <div data-ah-compact-card="true" className="system-empty"><strong>{query ? "Ничего не найдено" : "Данных пока нет"}</strong><p>{query ? `Измените запрос. Фильтр «${tab}» сохранён в текущем разделе.` : "Записи появятся после ручного добавления или подтверждённого импорта."}</p>{query ? <button onClick={() => setQuery("")}>Сбросить поиск</button> : null}</div> : null}
           </div>
         </section>
 
@@ -143,7 +143,7 @@ export function SystemWorkspace({
           </dl>
           <section className="system-lineage"><p>Связи</p><button onClick={() => navigate(selected.relation.module)}><span>{selected.relation.label}</span><AppIcon name="chevron" /></button><button onClick={() => navigate("tasks")}><span>Связанные задачи</span><AppIcon name="chevron" /></button></section>
           <footer><button className="primary-action" onClick={createTask}>Создать задачу</button><button className="secondary-action" onClick={() => notify(`История ${selected.id}: изменений пока нет`)}>История изменений</button></footer>
-        </aside> : <aside className="system-detail"><div className="system-empty"><AppIcon name={module} /><strong>Карточка не выбрана</strong><p>В реестре пока нет записей. Структура раздела готова к работе.</p></div></aside>}
+        </aside> : <aside className="system-detail"><div data-ah-compact-card="true" className="system-empty"><AppIcon name={module} /><strong>Карточка не выбрана</strong><p>В реестре пока нет записей. Структура раздела готова к работе.</p></div></aside>}
       </div>
     </section>
   );
