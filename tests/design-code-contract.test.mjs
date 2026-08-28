@@ -259,6 +259,8 @@ test("DS-03 student theme changes tokens and typography only", () => {
     ".calendar-week > article",
     ".calendar-lesson",
     ".menu-grid > article",
+    ".event-grid > article",
+    ".activity-grid > article",
     ".privacy-card",
     ".segmented",
     ".day-switch > button",
