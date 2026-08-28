@@ -158,7 +158,7 @@ jobs:
           remote_fixture prepare | tee "$prepare_log"
           remote_prepared=1
           test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_FIXTURE=//p' "$prepare_log" | tail -n1)" = READY
-          test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_SOURCE=//p' "$prepare_log" | tail -n1)" = candidate-bootstrap-only
+          test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_SOURCE=//p' "$prepare_log" | tail -n1)" = candidate-migrations-only
           test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_DATA=//p' "$prepare_log" | tail -n1)" = SYNTHETIC
 
           ssh -N "${ssh_args[@]}" \
@@ -203,7 +203,7 @@ jobs:
           const manifest = JSON.parse(require('node:fs').readFileSync('school-authorized-visual-output/manifest.json', 'utf8'));
           if (manifest.captures !== 28) throw new Error('Incomplete authorized capture matrix');
           if (manifest.credentialsStored !== false) throw new Error('Credential storage invariant failed');
-          if (manifest.fixture !== 'candidate bootstrap, wiped and reseeded with synthetic data') throw new Error('Fixture invariant failed');
+          if (manifest.fixture !== 'empty schema from candidate migrations, seeded with synthetic data') throw new Error('Fixture invariant failed');
           console.log(String(manifest.violations.length) + ' ' + String(manifest.compliant));
           READ_MANIFEST
           )"
@@ -282,7 +282,7 @@ jobs:
             printf -- '- Routes: /management, /journal, /homework, /schedule\n'
             printf -- '- Widths: 360, 390, 768, 1280, 1440, 1920, 2560 px\n'
             printf -- '- Evidence: 28 screenshots plus computed-style manifest\n'
-            printf -- '- Data: candidate bootstrap wiped and reseeded; synthetic only\n'
+            printf -- '- Data: empty schema from candidate migrations; synthetic only\n'
             printf -- '- Exposure: loopback container plus SSH tunnel only\n'
             printf -- '- Production/staging UI, data, restart changed: no\n'
             printf -- '- Capture result: %s\n' "${CAPTURE_RESULT:-failed}"
