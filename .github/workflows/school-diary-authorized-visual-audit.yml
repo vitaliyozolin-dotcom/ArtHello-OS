@@ -1,0 +1,314 @@
+name: School diary authorized design audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/school-diary-authorized-visual-audit.yml
+      - .github/scripts/school-authorized-visual-fixture.sh
+      - .github/scripts/school-authorized-visual-audit.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: school-diary-authorized-visual-audit
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: e0d2c55db2bf4214aa8feff0c49b5c88c63d74e4
+  CANDIDATE_IMAGE: school-1-11-design-v1:e0d2c55db2bf
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+  STAGING_ORIGIN: http://127.0.0.1:3211
+  AUDIT_BIND_ORIGIN: http://127.0.0.1:3212
+  AUDIT_ORIGIN: http://127.0.0.1:33212
+  PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.55.0-noble
+  PLAYWRIGHT_VERSION: 1.55.0
+
+jobs:
+  authorized-visual-audit:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 35
+    environment: production-ru
+    steps:
+      - name: Check out authorized visual audit controls
+        uses: actions/checkout@v4
+
+      - name: Configure confirmed School SSH host
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          test -s ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+          deploy_port="${DEPLOY_PORT:-2222}"
+          scanned_hosts="$RUNNER_TEMP/school-known-hosts"
+          : > "$scanned_hosts"
+          chmod 0600 "$scanned_hosts"
+          for attempt in 1 2; do
+            printf 'SCHOOL_AUTHORIZED_VISUAL_SSH_PROBE_ATTEMPT=%s\n' "$attempt"
+            timeout --signal=TERM --kill-after=5s 150s \
+              ssh -p "$deploy_port" \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$scanned_hosts" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=none \
+              -o PubkeyAuthentication=no \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o ConnectTimeout=140 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
+            test -s "$scanned_hosts" && break
+            sleep 5
+          done
+          test -s "$scanned_hosts"
+          actual_fingerprint="$(ssh-keygen -lf "$scanned_hosts" -E sha256 | awk '{print $2; exit}')"
+          test "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scanned_hosts" ~/.ssh/known_hosts
+          printf 'SCHOOL_AUTHORIZED_VISUAL_SSH=VERIFIED\n'
+
+      - name: Capture four roles at approved control widths
+        id: capture
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          deploy_port="${DEPLOY_PORT:-2222}"
+          ssh_args=(
+            -p "$deploy_port"
+            -i ~/.ssh/id_ed25519
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile=~/.ssh/known_hosts
+            -o ConnectTimeout=140
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=12
+            -o ExitOnForwardFailure=yes
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+
+          audit_password="Audit_${GITHUB_RUN_ID}_$(openssl rand -hex 24)"
+          test "${#audit_password}" -ge 32
+          printf '::add-mask::%s\n' "$audit_password"
+
+          remote_fixture() {
+            local fixture_action="$1"
+            local remote_password=""
+            if [ "$fixture_action" = prepare ]; then
+              remote_password="AUDIT_PASSWORD='$audit_password'"
+            fi
+            timeout --signal=TERM --kill-after=15s 900s \
+              ssh -T "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                "env ACTION='$fixture_action' RUN_ID='$GITHUB_RUN_ID' CANDIDATE_SHA='$CANDIDATE_SHA' CANDIDATE_IMAGE='$CANDIDATE_IMAGE' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' STAGING_ORIGIN='$STAGING_ORIGIN' AUDIT_PUBLIC_ORIGIN='$AUDIT_ORIGIN' AUDIT_BIND_ORIGIN='$AUDIT_BIND_ORIGIN' $remote_password bash -s" \
+                < .github/scripts/school-authorized-visual-fixture.sh
+          }
+
+          rm -rf -- school-authorized-visual-output
+          install -m 0755 -d school-authorized-visual-output
+          remote_prepared=0
+          tunnel_pid=""
+          cleanup() {
+            rc=$?
+            trap - EXIT INT TERM HUP
+            set +e
+            if [ -n "$tunnel_pid" ]; then
+              kill "$tunnel_pid" >/dev/null 2>&1
+              wait "$tunnel_pid" >/dev/null 2>&1
+              tunnel_pid=""
+            fi
+            cleanup_rc=0
+            if [ "$remote_prepared" -eq 1 ]; then
+              remote_fixture cleanup | tee "$RUNNER_TEMP/school-authorized-visual-cleanup.log"
+              cleanup_rc=${PIPESTATUS[0]}
+            fi
+            if [ "$rc" -eq 0 ] && [ "$cleanup_rc" -ne 0 ]; then
+              rc="$cleanup_rc"
+            fi
+            exit "$rc"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM HUP
+
+          prepare_log="$RUNNER_TEMP/school-authorized-visual-prepare.log"
+          remote_fixture prepare | tee "$prepare_log"
+          remote_prepared=1
+          test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_FIXTURE=//p' "$prepare_log" | tail -n1)" = READY
+          test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_SOURCE=//p' "$prepare_log" | tail -n1)" = candidate-bootstrap-only
+          test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_DATA=//p' "$prepare_log" | tail -n1)" = SYNTHETIC
+
+          ssh -N "${ssh_args[@]}" \
+            -L 127.0.0.1:33212:127.0.0.1:3212 \
+            "$DEPLOY_USER@$DEPLOY_HOST" &
+          tunnel_pid=$!
+
+          tunnel_ready=0
+          for attempt in $(seq 1 60); do
+            if curl -fsS --max-time 3 "$AUDIT_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null; then
+              tunnel_ready=1
+              break
+            fi
+            kill -0 "$tunnel_pid" >/dev/null 2>&1 || break
+            sleep 1
+          done
+          test "$tunnel_ready" -eq 1
+
+          docker pull "$PLAYWRIGHT_IMAGE"
+          docker run --rm --network host \
+            -e AUDIT_ORIGIN="$AUDIT_ORIGIN" \
+            -e AUDIT_PASSWORD="$audit_password" \
+            -e AUDIT_RUN_ID="$GITHUB_RUN_ID" \
+            -e CANDIDATE_SHA="$CANDIDATE_SHA" \
+            -e PLAYWRIGHT_VERSION="$PLAYWRIGHT_VERSION" \
+            -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+            -v "$PWD/.github/scripts/school-authorized-visual-audit.mjs:/control/audit.mjs:ro" \
+            -v "$PWD/school-authorized-visual-output:/output" \
+            "$PLAYWRIGHT_IMAGE" bash -lc '
+              set -Eeuo pipefail
+              install -m 0755 -d /tmp/school-authorized-visual
+              cd /tmp/school-authorized-visual
+              npm init -y >/dev/null
+              npm install --silent --no-audit --no-fund "playwright@$PLAYWRIGHT_VERSION"
+              cp /control/audit.mjs ./audit.mjs
+              node audit.mjs
+            '
+
+          test -s school-authorized-visual-output/manifest.json
+          test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 28
+          manifest_values="$(node - <<'READ_MANIFEST'
+          const manifest = JSON.parse(require('node:fs').readFileSync('school-authorized-visual-output/manifest.json', 'utf8'));
+          if (manifest.captures !== 28) throw new Error('Incomplete authorized capture matrix');
+          if (manifest.credentialsStored !== false) throw new Error('Credential storage invariant failed');
+          if (manifest.fixture !== 'candidate bootstrap, wiped and reseeded with synthetic data') throw new Error('Fixture invariant failed');
+          console.log(String(manifest.violations.length) + ' ' + String(manifest.compliant));
+          READ_MANIFEST
+          )"
+          read -r violation_count compliant <<< "$manifest_values"
+
+          kill "$tunnel_pid"
+          wait "$tunnel_pid" >/dev/null 2>&1 || true
+          tunnel_pid=""
+          cleanup_log="$RUNNER_TEMP/school-authorized-visual-cleanup.log"
+          remote_fixture cleanup | tee "$cleanup_log"
+          test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_CLEANUP=//p' "$cleanup_log" | tail -n1)" = OK
+          remote_prepared=0
+
+          printf 'result=OK\n' >> "$GITHUB_OUTPUT"
+          printf 'violation_count=%s\n' "$violation_count" >> "$GITHUB_OUTPUT"
+          printf 'compliant=%s\n' "$compliant" >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_AUTHORIZED_VISUAL_CAPTURE=OK captures=28 violations=%s compliant=%s\n' "$violation_count" "$compliant"
+
+      - name: Enforce remote teardown
+        if: always()
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          deploy_port="${DEPLOY_PORT:-2222}"
+          timeout --signal=TERM --kill-after=15s 900s \
+            ssh -T \
+              -p "$deploy_port" \
+              -i ~/.ssh/id_ed25519 \
+              -o IdentitiesOnly=yes \
+              -o PreferredAuthentications=publickey \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o ConnectTimeout=140 \
+              -o ServerAliveInterval=10 \
+              -o ServerAliveCountMax=12 \
+              -o IPQoS=none \
+              -o Compression=no \
+              -o KexAlgorithms=curve25519-sha256 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
+              -o Ciphers=aes128-ctr \
+              -o MACs=hmac-sha2-256 \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "env ACTION='cleanup' RUN_ID='$GITHUB_RUN_ID' CANDIDATE_SHA='$CANDIDATE_SHA' CANDIDATE_IMAGE='$CANDIDATE_IMAGE' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' STAGING_ORIGIN='$STAGING_ORIGIN' AUDIT_PUBLIC_ORIGIN='$AUDIT_ORIGIN' AUDIT_BIND_ORIGIN='$AUDIT_BIND_ORIGIN' bash -s" \
+              < .github/scripts/school-authorized-visual-fixture.sh
+
+      - name: Upload authorized visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: school-authorized-design-audit-${{ github.run_id }}
+          path: school-authorized-visual-output
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish authorized audit result
+        if: always()
+        env:
+          CAPTURE_RESULT: ${{ steps.capture.outputs.result }}
+          VIOLATION_COUNT: ${{ steps.capture.outputs.violation_count }}
+          COMPLIANT: ${{ steps.capture.outputs.compliant }}
+        shell: bash
+        run: |
+          {
+            echo '## School diary authorized design audit'
+            echo
+            printf -- '- Candidate: %s\n' "$CANDIDATE_SHA"
+            printf -- '- Roles: director, teacher, parent, student\n'
+            printf -- '- Routes: /management, /journal, /homework, /schedule\n'
+            printf -- '- Widths: 360, 390, 768, 1280, 1440, 1920, 2560 px\n'
+            printf -- '- Evidence: 28 screenshots plus computed-style manifest\n'
+            printf -- '- Data: candidate bootstrap wiped and reseeded; synthetic only\n'
+            printf -- '- Exposure: loopback container plus SSH tunnel only\n'
+            printf -- '- Production/staging UI, data, restart changed: no\n'
+            printf -- '- Capture result: %s\n' "${CAPTURE_RESULT:-failed}"
+            printf -- '- Design compliant: %s\n' "${COMPLIANT:-not measured}"
+            printf -- '- Violations: %s\n' "${VIOLATION_COUNT:-not measured}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report authorized capture as commit status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            const state =
+              process.env.JOB_STATUS === "success" ? "success" : "failure";
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.sha,
+              state,
+              context: "school-diary/authorized-visual-capture",
+              description: "Authorized visual capture " + process.env.JOB_STATUS,
+              target_url:
+                process.env.GITHUB_SERVER_URL +
+                "/" +
+                process.env.GITHUB_REPOSITORY +
+                "/actions/runs/" +
+                process.env.GITHUB_RUN_ID,
+            });
