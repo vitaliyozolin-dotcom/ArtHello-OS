@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icons";
 import { roleLabels, type ActionKind, type Role, type SchoolSnapshot } from "./level-zero-types";
 
@@ -23,6 +24,7 @@ type AccessState = {
 type InviteResult = { inviteLink: string; inviteCode: string; expiresAt: string };
 
 const cn = (...values: Array<string | false | null | undefined>) => values.filter(Boolean).join(" ");
+const designCodeV1 = process.env.NEXT_PUBLIC_SCHOOL_DESIGN_V1 === "true";
 const weekdays = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 const weekdayShort = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 const bellSlots = [
@@ -83,6 +85,195 @@ function EmptyState({ title, text, icon = "info" }: { title: string; text: strin
   return <div className="l0-empty"><span><Icon name={icon} /></span><h3>{title}</h3><p>{text}</p></div>;
 }
 
+type TabOption<T extends string> = { id: T; label: string; disabled?: boolean };
+
+function Tabs<T extends string>({ id, value, options, onChange, ariaLabel, className }: {
+  id: string;
+  value: T;
+  options: readonly TabOption<T>[];
+  onChange: (value: T) => void;
+  ariaLabel: string;
+  className?: string;
+}) {
+  const enabledIndices = options.flatMap((option, index) => option.disabled ? [] : [index]);
+  const moveIndex = (index: number, direction: 1 | -1) => {
+    if (!enabledIndices.length) return index;
+    const position = enabledIndices.indexOf(index);
+    const safePosition = position < 0 ? 0 : position;
+    return enabledIndices[(safePosition + direction + enabledIndices.length) % enabledIndices.length];
+  };
+
+  return (
+    <div className={className ?? "tab-row"} role={designCodeV1 ? "tablist" : undefined} aria-label={designCodeV1 ? ariaLabel : undefined}>
+      {options.map((option, index) => (
+        <button
+          key={option.id}
+          id={designCodeV1 ? `${id}-tab-${option.id}` : undefined}
+          type="button"
+          role={designCodeV1 ? "tab" : undefined}
+          aria-selected={designCodeV1 ? value === option.id : undefined}
+          aria-controls={designCodeV1 && value === option.id ? `${id}-panel-${option.id}` : undefined}
+          tabIndex={designCodeV1 ? (value === option.id ? 0 : -1) : undefined}
+          disabled={option.disabled}
+          className={cn(value === option.id && "active")}
+          onClick={() => onChange(option.id)}
+          onKeyDown={designCodeV1 ? (event) => {
+            const nextIndex = event.key === "ArrowRight"
+              ? moveIndex(index, 1)
+              : event.key === "ArrowLeft"
+                ? moveIndex(index, -1)
+                : event.key === "Home"
+                  ? enabledIndices[0]
+                  : event.key === "End"
+                    ? enabledIndices.at(-1)
+                    : null;
+            if (nextIndex === null || nextIndex === undefined) return;
+            event.preventDefault();
+            onChange(options[nextIndex].id);
+            const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+            requestAnimationFrame(() => tabs?.[nextIndex]?.focus());
+          } : undefined}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TabPanel<T extends string>({ tabsId, value, children }: {
+  tabsId: string;
+  value: T;
+  children: ReactNode;
+}) {
+  if (!designCodeV1) return <>{children}</>;
+  return (
+    <div
+      className="tabs-panel"
+      id={`${tabsId}-panel-${value}`}
+      role="tabpanel"
+      aria-labelledby={`${tabsId}-tab-${value}`}
+      tabIndex={0}
+    >
+      {children}
+    </div>
+  );
+}
+
+const helpPageLabels: Record<View, string> = {
+  home: "Главная",
+  calendar: "Календарь",
+  schedule: "Расписание",
+  programs: "Учебные программы",
+  journal: "Журнал",
+  homework: "Домашние задания",
+  people: "Люди и классы",
+  school: "Школьная жизнь",
+  messages: "Сообщения",
+  management: "Управление",
+  profile: "Профиль",
+};
+
+const helpPageActions: Record<View, string> = {
+  home: "Проверьте основные показатели и откройте нужный рабочий раздел.",
+  calendar: "Просмотрите события или добавьте доступное вашей роли событие.",
+  schedule: "Выберите день и проверьте уроки, кабинеты и изменения.",
+  programs: "Откройте класс и предмет, чтобы увидеть утверждённый учебный план.",
+  journal: "Переключайтесь между оценками, заданиями, успехами и комментариями.",
+  homework: "Проверьте опубликованные задания, сроки и прикреплённые пояснения.",
+  people: "Откройте только разрешённые вашей роли карточки учеников, семей или сотрудников.",
+  school: "Переключайтесь между меню, мероприятиями и дополнительными занятиями.",
+  messages: "Выберите официальный диалог и отправьте сообщение уполномоченному участнику.",
+  management: "Проверьте готовность системы и доступные административные действия.",
+  profile: "Проверьте данные профиля, роль и настройки безопасного доступа.",
+};
+
+function HelpButton({ view, role, selectedStudentName, action, overlayKey }: {
+  view: View;
+  role: Role;
+  selectedStudentName?: string;
+  action?: ActionKind;
+  overlayKey?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [portalTargetKey, setPortalTargetKey] = useState<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  const close = useCallback(() => {
+    setOpen(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    closeRef.current?.focus();
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [close, open]);
+
+  useLayoutEffect(() => {
+    if (!action) {
+      setPortalTarget(null);
+      setPortalTargetKey(null);
+      return;
+    }
+    setOpen(false);
+    const modal = document.querySelector<HTMLElement>(".action-modal");
+    setPortalTarget(modal);
+    setPortalTargetKey(overlayKey ?? null);
+    requestAnimationFrame(() => {
+      modal?.querySelector<HTMLElement>('button, input:not([type="hidden"]), select, textarea')?.focus();
+    });
+  }, [action, overlayKey]);
+
+  const panelId = "school-context-help";
+  const titleId = `${panelId}-title`;
+  const contextLabel = action
+    ? `Открыта форма «${modalTitles[action]}»`
+    : selectedStudentName
+      ? `Выбрана запись ученика: ${selectedStudentName}`
+      : "Отдельная запись или форма сейчас не выбрана";
+  const content = (
+    <div className="help-button-root" data-view={view} data-role={role} data-action={action ?? "view"} data-overlay={overlayKey ?? "page"}>
+      {open ? (
+        <section className="help-panel" id={panelId} role="dialog" aria-modal={false} aria-labelledby={titleId}>
+          <header>
+            <div><span>Помощь по странице</span><h2 id={titleId}>{helpPageLabels[view]}</h2></div>
+            <button ref={closeRef} type="button" onClick={close} aria-label="Закрыть помощь"><Icon name="close" size={20} /></button>
+          </header>
+          <p>{helpPageActions[view]}</p>
+          <dl>
+            <div><dt>Что здесь делать?</dt><dd>{helpPageActions[view]}</dd></div>
+            <div><dt>Почему действие недоступно?</dt><dd>Доступ зависит от роли «{roleLabels[role]}» и назначенных вам прав.</dd></div>
+            <div><dt>Текущий контекст</dt><dd>{contextLabel}</dd></div>
+            <div><dt>Что произойдёт после сохранения?</dt><dd>Изменение появится только в разрешённом контуре и сохранится в истории действий.</dd></div>
+          </dl>
+        </section>
+      ) : null}
+      <button
+        ref={triggerRef}
+        type="button"
+        className="help-button"
+        data-help-button
+        aria-label="Помощь по текущей странице"
+        title="Помощь"
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Icon name="info" size={20} />
+        <span className="visually-hidden">Помощь</span>
+      </button>
+    </div>
+  );
+  return action ? (portalTarget && portalTargetKey === overlayKey ? createPortal(content, portalTarget) : null) : content;
+}
+
 function NavIcon({ view }: { view: View }) {
   const icons: Record<View, IconName> = {
     home: "home", calendar: "calendar", schedule: "clock", programs: "book", journal: "chart",
@@ -138,11 +329,13 @@ function viewFromPath(pathname: string): View {
   return entry?.[0] ?? "home";
 }
 
-function AppShell({ snapshot, activeView, onView, onStudent, children }: {
+function AppShell({ snapshot, activeView, onView, onStudent, helpAction, helpOverlayKey, children }: {
   snapshot: SchoolSnapshot;
   activeView: View;
   onView: (view: View) => void;
   onStudent: (studentId: string) => void;
+  helpAction?: ActionKind;
+  helpOverlayKey?: string;
   children: ReactNode;
 }) {
   const nav = navigationByRole[snapshot.viewer.role];
@@ -190,6 +383,7 @@ function AppShell({ snapshot, activeView, onView, onStudent, children }: {
         <nav className="l0-bottom-nav" aria-label="Основная навигация">
           {mobileNav.map((item) => <button key={item.id} className={cn(activeView === item.id && "active")} onClick={() => onView(item.id)}><NavIcon view={item.id} /><span>{item.label}</span></button>)}
         </nav>
+        {designCodeV1 ? <HelpButton view={activeView} role={snapshot.viewer.role} selectedStudentName={snapshot.selectedStudent?.fullName} action={helpAction} overlayKey={helpOverlayKey} /> : null}
       </div>
     </div>
   );
@@ -257,7 +451,8 @@ function RankingBoard({ snapshot, compact = false }: { snapshot: SchoolSnapshot;
   const anonymous = snapshot.rankings.mode === "anonymous";
   return <section className={cn("content-card", "ranking-panel", compact && "ranking-compact")}>
     <div className="ranking-heading"><div><span className="eyebrow">{anonymous ? "Позиция в своём классе" : "Рейтинг по классам"}</span><h2>{anonymous ? `${classRanking.className} класс` : "Учебные результаты"}</h2><p>{anonymous ? "Другие дети показаны только образами животных" : "Поимённо, отдельно по каждому классу и предмету"}</p></div>{!anonymous && snapshot.rankings.classes.length > 1 ? <label className="ranking-class-select"><span>Класс</span><select value={classRanking.className} onChange={(event) => { setClassName(event.target.value); setMetricId("overall"); }}>{snapshot.rankings.classes.map((item) => <option key={item.className} value={item.className}>{item.className} класс</option>)}</select></label> : null}</div>
-    <div className="ranking-tabs" aria-label="Показатель рейтинга">{tables.map((item) => <button key={item.id} className={cn(table.id === item.id && "active")} onClick={() => setMetricId(item.id)}>{item.id === "overall" ? "Общий рейтинг" : item.label}</button>)}</div>
+    <Tabs id="ranking-metric" value={table.id} options={tables.map((item) => ({ id: item.id, label: item.id === "overall" ? "Общий рейтинг" : item.label }))} onChange={setMetricId} ariaLabel="Показатель рейтинга" className="ranking-tabs" />
+    <TabPanel tabsId="ranking-metric" value={table.id}>
     {anonymous ? <div className="ranking-own-summary"><span><Icon name="chart" /></span><div><small>{table.label}</small><strong>{table.ownPosition ? `${table.ownPosition} место из ${table.eligibleStudents}` : "Пока без места"}</strong><p>{table.ownScore !== null ? `Средний балл ${String(table.ownScore).replace(".", ",")}${gapToNext !== null && gapToNext > 0 ? ` · до следующего места ${gapToNext.toFixed(2).replace(".", ",")}` : table.ownPosition === 1 ? " · первое место" : ""}` : table.minimumEvidence}</p></div></div> : <div className="ranking-table-meta"><strong>{classRanking.className} класс · {table.label}</strong><span>{table.eligibleStudents} из {table.totalStudents} учеников участвуют</span></div>}
     {table.entries.length ? <div className="ranking-list">{table.entries.map((entry) => <div className={cn("ranking-row", entry.isOwn && "own")} key={`${table.id}-${entry.studentId ?? entry.animalLabel}-${entry.position}`}>
       <b className="ranking-position">{entry.position}</b>
@@ -266,6 +461,7 @@ function RankingBoard({ snapshot, compact = false }: { snapshot: SchoolSnapshot;
       {entry.score !== null ? <span className="ranking-score"><strong>{String(entry.score).replace(".", ",")}</strong><small>средний</small></span> : <span className="ranking-hidden-score" aria-label="Балл скрыт"><Icon name="lock" size={15} /></span>}
     </div>)}</div> : <EmptyState title="Пока недостаточно оценок" text={table.minimumEvidence} icon="chart" />}
     <div className="ranking-privacy"><Icon name="lock" size={16} /><span>{snapshot.rankings.privacyNote}</span></div>
+    </TabPanel>
   </section>;
 }
 
@@ -435,14 +631,26 @@ function StudyPage({ snapshot, openAction, initialTab = "schedule" }: { snapshot
   return (
     <div className="page-shell">
       <div className="page-heading"><div><span className="eyebrow">{academicMode || scheduleEditor ? "Учебный процесс" : snapshot.selectedStudent?.fullName}</span><h1>{tab === "schedule" ? "Расписание" : tab === "homework" ? "Домашние задания" : tab === "grades" ? "Журнал" : "Учёба"}</h1><p>{academicMode ? "Оценки, задания, успехи и комментарии — в одной системе" : "Расписание и результаты без поиска по чатам"}</p></div>{teacherWriteMode && tab === "grades" ? <button className="primary-btn" onClick={() => openAction("grade.create")}><Icon name="chart" size={18} />Новая оценка</button> : null}</div>
-      <div className="tab-row">{[
-        ["schedule", "Расписание"], ["grades", "Оценки"], ["homework", "Задания"], ["success", "Успехи"], ["comments", "Комментарии"],
-      ].map(([id, label]) => <button key={id} className={cn(tab === id && "active")} onClick={() => setTab(id as typeof tab)}>{label}</button>)}</div>
+      <Tabs
+        id="study-view"
+        value={tab}
+        options={[
+          { id: "schedule", label: "Расписание" },
+          { id: "grades", label: "Оценки" },
+          { id: "homework", label: "Задания" },
+          { id: "success", label: "Успехи" },
+          { id: "comments", label: "Комментарии" },
+        ]}
+        onChange={setTab}
+        ariaLabel="Раздел учебного процесса"
+      />
+      <TabPanel tabsId="study-view" value={tab}>
       {tab === "schedule" ? <section className="content-card study-panel schedule-editor">{scheduleEditor ? <div className="schedule-toolbar"><label><span>Класс</span><select value={scheduleClass} onChange={(event) => setScheduleClass(event.target.value)}>{snapshot.classes.map((schoolClass) => <option value={schoolClass.name} key={schoolClass.id}>{schoolClass.name} класс{schoolClass.homeroomTeacherName ? ` · ${schoolClass.homeroomTeacherName}` : ""}</option>)}</select></label><div><button className="ghost-btn" onClick={() => openAction("lesson.copy-day", { className: scheduleClass, sourceWeekday: String(day) })}><Icon name="clipboard" size={17} />Скопировать день</button><button className="primary-btn" onClick={addLesson}><Icon name="calendar" size={17} />Добавить урок</button></div></div> : null}<div className="day-switch">{[1, 2, 3, 4, 5, 6].map((weekday) => <button key={weekday} className={cn(day === weekday && "active")} onClick={() => setDay(weekday)}><span>{weekdayShort[weekday]}</span><small>{snapshot.lessons.filter((lesson) => lesson.weekday === weekday && (!scheduleEditor || lesson.className === scheduleClass)).length} уроков</small></button>)}</div><SectionTitle title={weekdays[day]} subtitle={`${scheduleEditor ? scheduleClass : snapshot.selectedStudent?.className ?? scheduleClass} класс${scheduleEditor ? " · нажмите «Изменить» у нужного урока" : ""}`} /><LessonList snapshot={snapshot} day={day} className={scheduleEditor ? scheduleClass : undefined} onEdit={scheduleEditor ? editLesson : undefined} /></section> : null}
-      {tab === "grades" ? <section className="content-card study-panel"><SectionTitle title={academicMode ? "Журнал оценок" : `Средний балл ${weightedAverage(snapshot.grades.filter((grade) => grade.studentId === selectedStudentId))}`} subtitle={academicMode ? `${snapshot.students.length} учеников в разрешённом контуре` : "С учётом веса работ"} action={teacherWriteMode ? "Поставить оценку" : undefined} onAction={teacherWriteMode ? () => openAction("grade.create") : undefined} />{academicMode ? <div className="journal-table"><div className="journal-head"><span>Ученик</span><span>Средний</span><span>Последние оценки</span><span /></div>{snapshot.students.map((student) => { const grades = snapshot.grades.filter((grade) => grade.studentId === student.id); return <div className="journal-row" key={student.id}><span><Avatar name={student.fullName} color={student.avatarColor} size="sm" /><strong>{student.fullName}</strong></span><b>{weightedAverage(grades)}</b><span className="grade-dots">{grades.slice(0, 4).map((grade) => <i key={grade.id} className={`grade-${grade.value}`}>{grade.value}</i>)}</span>{teacherWriteMode ? <button onClick={() => openAction("grade.create", { studentId: student.id })}>Оценка</button> : <span />}</div>; })}</div> : <GradeList snapshot={snapshot} studentId={selectedStudentId} />}</section> : null}
+      {tab === "grades" ? <section className="content-card study-panel"><SectionTitle title={academicMode ? "Журнал оценок" : `Средний балл ${weightedAverage(snapshot.grades.filter((grade) => grade.studentId === selectedStudentId))}`} subtitle={academicMode ? `${snapshot.students.length} учеников в разрешённом контуре` : "С учётом веса работ"} action={teacherWriteMode ? "Поставить оценку" : undefined} onAction={teacherWriteMode ? () => openAction("grade.create") : undefined} />{academicMode ? <div className="journal-table"><div className="journal-head"><span>Ученик</span><span>Средний</span><span>Последние оценки</span><span /></div>{snapshot.students.map((student) => { const grades = snapshot.grades.filter((grade) => grade.studentId === student.id); return <div className="journal-row" key={student.id}><span><Avatar name={student.fullName} color={student.avatarColor} size="sm" /><strong title={student.fullName}>{student.fullName}</strong></span><b>{weightedAverage(grades)}</b><span className="grade-dots">{grades.slice(0, 4).map((grade) => <i key={grade.id} className={`grade-${grade.value}`}>{grade.value}</i>)}</span>{teacherWriteMode ? <button onClick={() => openAction("grade.create", { studentId: student.id })}>Оценка</button> : <span />}</div>; })}</div> : <GradeList snapshot={snapshot} studentId={selectedStudentId} />}</section> : null}
       {tab === "homework" ? <section className="content-card study-panel"><SectionTitle title="Домашние задания" subtitle="Опубликованные задания и сроки" action={teacherWriteMode ? "Добавить" : undefined} onAction={teacherWriteMode ? () => openAction("homework.create") : undefined} /><HomeworkList snapshot={snapshot} /></section> : null}
       {tab === "success" ? <section className="content-card study-panel"><SectionTitle title="Успехи" subtitle="Позитивные наблюдения учителей" action={teacherWriteMode ? "Отметить успех" : undefined} onAction={teacherWriteMode ? () => openAction("achievement.create") : undefined} />{snapshot.achievements.length ? <div className="achievement-grid">{snapshot.achievements.map((item) => <article key={item.id}><span><Icon name="star" /></span><div><small>{item.studentName} · {item.category} · {formatDate(item.achievementDate)}</small><strong>{item.title}</strong><p>{item.description}</p><em>{item.teacherName}</em></div></article>)}</div> : <EmptyState title="Успехов пока нет" text="Учитель сможет зафиксировать сильное действие за несколько секунд." icon="star" />}</section> : null}
       {tab === "comments" ? <section className="content-card study-panel"><SectionTitle title="Комментарии учителей" subtitle="Личная обратная связь для семьи" action={teacherWriteMode ? "Оставить комментарий" : undefined} onAction={teacherWriteMode ? () => openAction("comment.create") : undefined} />{snapshot.comments.length ? <div className="comment-list">{snapshot.comments.map((item) => <article key={item.id}><Avatar name={item.teacherName} size="sm" /><div><small>{item.studentName} · {item.subjectName ?? "Общее"} · {formatDate(item.commentDate)}</small><p>{item.body}</p><strong>{item.teacherName}</strong></div></article>)}</div> : <EmptyState title="Комментариев нет" text="Здесь будет только содержательная личная обратная связь." icon="message" />}</section> : null}
+      </TabPanel>
     </div>
   );
 }
@@ -457,8 +665,10 @@ function CalendarPage({ snapshot, openAction }: { snapshot: SchoolSnapshot; open
   ].sort((a, b) => a.at.localeCompare(b.at));
   return <div className="page-shell">
     <div className="page-heading"><div><span className="eyebrow">Общий календарь</span><h1>Календарь школы</h1><p>Учебные работы, изменения расписания, события и личные напоминания</p></div>{canPublish ? <button className="primary-btn" onClick={() => openAction("event.create")}><Icon name="calendar" size={18} />Создать событие</button> : null}</div>
-    <div className="calendar-toolbar"><div className="segmented"><button className={cn(mode === "week" && "active")} onClick={() => setMode("week")}>Неделя</button><button className={cn(mode === "list" && "active")} onClick={() => setMode("list")}>Список</button></div><label><span>Показывать</span><select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)}><option value="relevant">Мои события</option><option value="school">Вся школа</option></select></label></div>
+    <div className="calendar-toolbar"><Tabs id="calendar-view" value={mode} options={[{ id: "week", label: "Неделя" }, { id: "list", label: "Список" }]} onChange={setMode} ariaLabel="Вид календаря" className="segmented" /><label><span>Показывать</span><select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)}><option value="relevant">Мои события</option><option value="school">Вся школа</option></select></label></div>
+    <TabPanel tabsId="calendar-view" value={mode}>
     {mode === "week" ? <section className="calendar-week">{[1, 2, 3, 4, 5, 6].map((day) => <article key={day}><header><strong>{weekdayShort[day]}</strong><span>{snapshot.lessons.filter((lesson) => lesson.weekday === day).length} уроков</span></header><div>{snapshot.lessons.filter((lesson) => lesson.weekday === day).slice(0, 6).map((lesson) => <div className="calendar-lesson" key={lesson.id} style={{ borderLeftColor: lesson.subjectColor }}><small>{lesson.startsAt}</small><strong>{lesson.subjectName}</strong><span>{lesson.className} класс</span></div>)}{!snapshot.lessons.some((lesson) => lesson.weekday === day) ? <p>Нет уроков</p> : null}</div></article>)}</section> : <section className="content-card"><SectionTitle title="Все ближайшие события" subtitle={scope === "school" ? "Школьный контур" : "Только относящиеся к пользователю"} />{calendarItems.length ? <div className="calendar-list">{calendarItems.map((item) => <article key={`${item.type}-${item.id}`}><span className={`calendar-dot ${item.tone}`} /><div><small>{item.type} · {formatDateTime(item.at)}</small><strong>{item.title}</strong><p>{item.meta}</p></div></article>)}</div> : <EmptyState title="Календарь пока пуст" text="После публикации расписания и событий они появятся здесь автоматически." icon="calendar" />}</section>}
+    </TabPanel>
     <section className="content-card notifications-card"><SectionTitle title="Уведомления" subtitle="Каждое ведёт на конкретный объект" />{snapshot.notifications.length ? <div className="notification-list">{snapshot.notifications.map((item) => <article key={item.id} className={cn(!item.readAt && "unread")}><span><Icon name={item.critical ? "info" : "bell"} size={17} /></span><div><strong>{item.title}</strong><p>{item.body}</p><small>{formatDateTime(item.createdAt)}</small></div></article>)}</div> : <EmptyState title="Новых уведомлений нет" text="Критические изменения расписания появятся здесь и не потеряются." icon="bell" />}</section>
   </div>;
 }
@@ -501,7 +711,39 @@ function AccessDeniedPage({ onHome }: { onHome: () => void }) {
 function SchoolPage({ snapshot, openAction }: { snapshot: SchoolSnapshot; openAction: (kind: ActionKind, preset?: Record<string, string>) => void }) {
   const [tab, setTab] = useState<"menu" | "events" | "activities">("menu");
   const admin = snapshot.viewer.role === "admin" || snapshot.viewer.role === "director" || snapshot.viewer.role === "deputy";
-  return <div className="page-shell"><div className="page-heading"><div><span className="eyebrow">Школьная жизнь</span><h1>Школа</h1><p>Питание, мероприятия и дополнительные занятия</p></div>{admin ? <button className="primary-btn" onClick={() => openAction(tab === "menu" ? "menu.update" : tab === "events" ? "event.create" : "activity.create")}><Icon name="calendar" size={18} />Добавить</button> : null}</div><div className="tab-row compact-tabs"><button className={cn(tab === "menu" && "active")} onClick={() => setTab("menu")}>Меню</button><button className={cn(tab === "events" && "active")} onClick={() => setTab("events")}>Мероприятия</button><button className={cn(tab === "activities" && "active")} onClick={() => setTab("activities")}>Доп. занятия</button></div>{tab === "menu" ? <div className="menu-grid">{snapshot.menu.map((day, index) => <article key={day.id} className={cn(index === 0 && "featured")}><header><span>{formatDate(day.dayDate, { weekday: "long", day: "numeric", month: "long" })}</span>{index === 0 ? <StatusPill tone="good">Сегодня</StatusPill> : null}</header><dl><div><dt>Завтрак</dt><dd>{day.breakfast}</dd></div><div><dt>Обед</dt><dd>{day.lunch}</dd></div><div><dt>Полдник</dt><dd>{day.snack}</dd></div></dl><footer><Icon name="info" size={16} />Аллергены: {day.allergens || "не указаны"}</footer></article>)}</div> : null}{tab === "events" ? <div className="event-grid">{snapshot.events.map((event) => <article key={event.id}><div className="event-date"><strong>{formatDate(event.startsAt, { day: "2-digit" })}</strong><span>{formatDate(event.startsAt, { month: "short" })}</span></div><div><span className="item-overline">{formatDateTime(event.startsAt)} · {event.location}</span><h3>{event.title}</h3><p>{event.description}</p><footer><StatusPill tone="blue">{event.audience === "all" ? "Для всей школы" : event.audience}</StatusPill>{event.capacity ? <small>{event.capacity} мест</small> : null}</footer></div></article>)}</div> : null}{tab === "activities" ? <div className="activity-grid">{snapshot.activities.map((activity) => <article key={activity.id}><span className="activity-icon"><Icon name="star" /></span><div><small>{activity.schedule}</small><h3>{activity.title}</h3><p>{activity.teacher}</p><div className="capacity"><span><i style={{ width: `${Math.min(100, activity.enrolled / Math.max(activity.capacity, 1) * 100)}%` }} /></span><small>{activity.enrolled} из {activity.capacity} мест</small></div></div><footer><strong>{activity.price ? formatMoney(activity.price) : "Включено"}</strong><StatusPill tone={activity.enrolled < activity.capacity ? "good" : "warn"}>{activity.enrolled < activity.capacity ? "Есть места" : "Лист ожидания"}</StatusPill></footer></article>)}</div> : null}</div>;
+  return (
+    <div className="page-shell">
+      <div className="page-heading">
+        <div><span className="eyebrow">Школьная жизнь</span><h1>Школа</h1><p>Питание, мероприятия и дополнительные занятия</p></div>
+        {admin ? <button className="primary-btn" onClick={() => openAction(tab === "menu" ? "menu.update" : tab === "events" ? "event.create" : "activity.create")}><Icon name="calendar" size={18} />Добавить</button> : null}
+      </div>
+      <Tabs
+        id="school-life"
+        value={tab}
+        options={[{ id: "menu", label: "Меню" }, { id: "events", label: "Мероприятия" }, { id: "activities", label: "Доп. занятия" }]}
+        onChange={setTab}
+        ariaLabel="Раздел школьной жизни"
+        className="tab-row compact-tabs"
+      />
+      <TabPanel tabsId="school-life" value={tab}>
+        {tab === "menu" ? (
+          <div className="menu-grid">
+            {snapshot.menu.map((day, index) => <article key={day.id} className={cn(index === 0 && "featured")}><header><span>{formatDate(day.dayDate, { weekday: "long", day: "numeric", month: "long" })}</span>{index === 0 ? <StatusPill tone="good">Сегодня</StatusPill> : null}</header><dl><div><dt>Завтрак</dt><dd>{day.breakfast}</dd></div><div><dt>Обед</dt><dd>{day.lunch}</dd></div><div><dt>Полдник</dt><dd>{day.snack}</dd></div></dl><footer><Icon name="info" size={16} />Аллергены: {day.allergens || "не указаны"}</footer></article>)}
+          </div>
+        ) : null}
+        {tab === "events" ? (
+          <div className="event-grid">
+            {snapshot.events.map((event) => <article key={event.id}><div className="event-date"><strong>{formatDate(event.startsAt, { day: "2-digit" })}</strong><span>{formatDate(event.startsAt, { month: "short" })}</span></div><div><span className="item-overline">{formatDateTime(event.startsAt)} · {event.location}</span><h3>{event.title}</h3><p>{event.description}</p><footer><StatusPill tone="blue">{event.audience === "all" ? "Для всей школы" : event.audience}</StatusPill>{event.capacity ? <small>{event.capacity} мест</small> : null}</footer></div></article>)}
+          </div>
+        ) : null}
+        {tab === "activities" ? (
+          <div className="activity-grid">
+            {snapshot.activities.map((activity) => <article key={activity.id}><span className="activity-icon"><Icon name="star" /></span><div><small>{activity.schedule}</small><h3>{activity.title}</h3><p>{activity.teacher}</p><div className="capacity"><span><i style={{ width: `${Math.min(100, activity.enrolled / Math.max(activity.capacity, 1) * 100)}%` }} /></span><small>{activity.enrolled} из {activity.capacity} мест</small></div></div><footer><strong>{activity.price ? formatMoney(activity.price) : "Включено"}</strong><StatusPill tone={activity.enrolled < activity.capacity ? "good" : "warn"}>{activity.enrolled < activity.capacity ? "Есть места" : "Лист ожидания"}</StatusPill></footer></article>)}
+          </div>
+        ) : null}
+      </TabPanel>
+    </div>
+  );
 }
 
 function MessagesPage({ snapshot, send, viewThread }: { snapshot: SchoolSnapshot; send: (threadId: string, body: string) => Promise<void>; viewThread: (threadId: string) => Promise<void> }) {
@@ -532,7 +774,7 @@ function AdminManagement({ snapshot }: { snapshot: SchoolSnapshot; openAction: (
     <div className="page-heading"><div><span className="eyebrow">Администрирование</span><h1>Семьи и доступы</h1><p>Read-only проекция центральных карточек; выдача доступа перенесена в ArtHello OS</p></div><StatusPill tone="good">Источник: ArtHello OS</StatusPill></div>
     <section className="content-card privacy-card"><span><Icon name="lock" /></span><div><strong>Сотрудники, семьи, родители, ученики и классы создаются один раз — в ArtHello OS</strong><p>AlfaCRM передаёт исходные карточки по API. Дневник не создаёт параллельные записи; здесь остаются расписание, назначения учителя, уроки, оценки, посещаемость и задания.</p></div></section>
     <section className="content-card registration-queue"><SectionTitle title="Выдача доступа перенесена в карточку семьи" subtitle="Телефон или email, одноразовая ссылка, блокировка и сброс — в ArtHello OS" /><EmptyState title="Локальная регистрация отключена" text="Откройте семью в ArtHello OS, выберите родителя или ученика и выдайте доступ к дневнику. Российский контур примет подписанную проекцию и подготовит ссылку для создания пароля." icon="check" /></section>
-    <section className="content-card"><SectionTitle title="Пользователи" subtitle={`${snapshot.users.length} аккаунтов · только центральная проекция`} /><div className="admin-table"><div className="admin-table-head"><span>Пользователь</span><span>Роль</span><span>Ребёнок</span><span>Статус</span></div>{snapshot.users.map((user) => { const child = snapshot.students.find((student) => student.id === user.linkedStudentId); return <div className="admin-table-row" key={user.id}><span><Avatar name={user.displayName} size="sm" /><span><strong>{user.displayName}</strong><small>{user.email.endsWith("@school.local") ? "Устаревшая локальная запись" : user.email}</small></span></span><span>{roleLabels[user.role]}</span><span>{child?.fullName ?? "—"}</span><span><StatusPill tone={user.status === "active" ? "good" : "warn"}>{user.status === "active" ? "Активен" : user.status}</StatusPill></span></div>; })}</div></section>
+    <section className="content-card"><SectionTitle title="Пользователи" subtitle={`${snapshot.users.length} аккаунтов · только центральная проекция`} /><div className="admin-table"><div className="admin-table-head"><span>Пользователь</span><span>Роль</span><span>Ребёнок</span><span>Статус</span></div>{snapshot.users.map((user) => { const child = snapshot.students.find((student) => student.id === user.linkedStudentId); const email = user.email.endsWith("@school.local") ? "Устаревшая локальная запись" : user.email; return <div className="admin-table-row" key={user.id}><span><Avatar name={user.displayName} size="sm" /><span><strong title={user.displayName}>{user.displayName}</strong><small title={email}>{email}</small></span></span><span>{roleLabels[user.role]}</span><span title={child?.fullName}>{child?.fullName ?? "—"}</span><span><StatusPill tone={user.status === "active" ? "good" : "warn"}>{user.status === "active" ? "Активен" : user.status}</StatusPill></span></div>; })}</div></section>
     <section className="two-column-grid"><div className="content-card"><SectionTitle title="Что редактируется в дневнике" /><ul className="security-list"><li><Icon name="check" size={16} />Классы и предметы учителя</li><li><Icon name="check" size={16} />Расписание, уроки и кабинеты</li><li><Icon name="check" size={16} />Оценки, посещаемость и задания</li><li><Icon name="check" size={16} />Комментарии и сообщения</li></ul></div><div className="content-card"><SectionTitle title="Контроль безопасности" /><ul className="security-list"><li><Icon name="check" size={16} />Единые стабильные ID ArtHello OS</li><li><Icon name="check" size={16} />Локальные дублирующие действия заблокированы</li><li><Icon name="check" size={16} />Сброс пароля — только централизованно</li><li className="pending"><Icon name="info" size={16} />Правовые документы — до пилота</li></ul></div></section>
   </div>;
 }
@@ -613,7 +855,61 @@ function RegistrationGate({ access, retry, activated }: { access: AccessState; r
     } finally { setBusy(false); }
   };
 
-  return <div className="gate-stage registration-stage"><section className="registration-card"><aside><Image src="/school-logo.svg" alt="" width={62} height={62} /><span className="eyebrow">Электронный дневник</span><h1>Создайте кабинет семьи</h1><p>Расписание, оценки, задания, меню, мероприятия и связь с учителем — только по вашему ребёнку.</p><ul><li><Icon name="check" size={16} />Родитель добавляет ребёнка сам</li><li><Icon name="check" size={16} />Школа подтверждает спорные связи</li><li><Icon name="check" size={16} />Отдельный вход ребёнку создаёт родитель</li></ul><small>{access.email ? `Подтверждённый email: ${access.email}` : ""}</small></aside><div className="registration-form"><div className="registration-tabs"><button className={cn(mode === "invite" && "active")} onClick={() => setMode("invite")} type="button">По приглашению</button><button className={cn(mode === "request" && "active")} onClick={() => setMode("request")} type="button">Без приглашения</button></div>{mode === "invite" ? invitation ? <><div className="invite-summary"><Icon name={invitation.targetRole === "student" ? "user" : "users"} /><div><strong>{invitation.targetRole === "student" ? "Личный вход ученика" : claimInstantly ? `Приглашение для семьи ${invitation.studentName}` : `Приглашение в ${invitation.className} класс`}</strong><span>{claimInstantly ? "Доступ откроется сразу после подтверждения" : "Школа проверит данные ребёнка"}</span></div></div><form onSubmit={submitRegistration}><input type="hidden" name="displayName" value={access.displayName ?? "Родитель"} />{!claimInstantly ? <div className="registration-name-grid"><Field label="Имя ребёнка"><input name="studentFirstName" required maxLength={80} /></Field><Field label="Фамилия ребёнка"><input name="studentLastName" required maxLength={80} /></Field></div> : null}{!claimInstantly ? <Field label="Класс"><input name="className" required defaultValue={invitation.className ?? ""} maxLength={20} /></Field> : null}{invitation.targetRole === "parent" ? <Field label="Кем вы приходитесь ребёнку"><select name="relation" defaultValue="mother"><option value="mother">Мама</option><option value="father">Папа</option><option value="guardian">Опекун</option><option value="other">Другой законный представитель</option></select></Field> : <input type="hidden" name="relation" value="self" />}{error ? <p className="form-error">{error}</p> : null}<button className="primary-btn" disabled={busy}>{busy ? "Проверяем…" : claimInstantly ? "Создать кабинет" : "Отправить на проверку"}</button></form></> : <div className="missing-invite"><Icon name="info" /><h2>Приглашение не найдено</h2><p>Откройте персональную ссылку школы или выберите регистрацию без приглашения.</p></div> : <form onSubmit={submitRegistration}><input type="hidden" name="displayName" value={access.displayName ?? "Родитель"} /><div className="registration-name-grid"><Field label="Имя ребёнка"><input name="studentFirstName" required maxLength={80} /></Field><Field label="Фамилия ребёнка"><input name="studentLastName" required maxLength={80} /></Field></div><Field label="Класс"><input name="className" required placeholder="Например, 5А" maxLength={20} /></Field><Field label="Кем вы приходитесь ребёнку"><select name="relation" defaultValue="mother"><option value="mother">Мама</option><option value="father">Папа</option><option value="guardian">Опекун</option><option value="other">Другой законный представитель</option></select></Field>{error ? <p className="form-error">{error}</p> : null}<button className="primary-btn" disabled={busy}>{busy ? "Отправляем…" : "Отправить заявку"}</button><small>До подтверждения школа не покажет оценки, сообщения или другие данные ребёнка.</small></form>}</div></section></div>;
+  return (
+    <div className="gate-stage registration-stage">
+      <section className="registration-card">
+        <aside>
+          <Image src="/school-logo.svg" alt="" width={62} height={62} />
+          <span className="eyebrow">Электронный дневник</span>
+          <h1>Создайте кабинет семьи</h1>
+          <p>Расписание, оценки, задания, меню, мероприятия и связь с учителем — только по вашему ребёнку.</p>
+          <ul>
+            <li><Icon name="check" size={16} />Родитель добавляет ребёнка сам</li>
+            <li><Icon name="check" size={16} />Школа подтверждает спорные связи</li>
+            <li><Icon name="check" size={16} />Отдельный вход ребёнку создаёт родитель</li>
+          </ul>
+          <small>{access.email ? `Подтверждённый email: ${access.email}` : ""}</small>
+        </aside>
+        <div className="registration-form">
+          <Tabs
+            id="registration-mode"
+            value={mode}
+            options={[{ id: "invite", label: "По приглашению" }, { id: "request", label: "Без приглашения" }]}
+            onChange={setMode}
+            ariaLabel="Способ регистрации"
+            className="registration-tabs"
+          />
+          <TabPanel tabsId="registration-mode" value={mode}>
+            {mode === "invite" ? invitation ? (
+              <>
+                <div className="invite-summary"><Icon name={invitation.targetRole === "student" ? "user" : "users"} /><div><strong>{invitation.targetRole === "student" ? "Личный вход ученика" : claimInstantly ? `Приглашение для семьи ${invitation.studentName}` : `Приглашение в ${invitation.className} класс`}</strong><span>{claimInstantly ? "Доступ откроется сразу после подтверждения" : "Школа проверит данные ребёнка"}</span></div></div>
+                <form onSubmit={submitRegistration}>
+                  <input type="hidden" name="displayName" value={access.displayName ?? "Родитель"} />
+                  {!claimInstantly ? <div className="registration-name-grid"><Field label="Имя ребёнка"><input name="studentFirstName" required maxLength={80} /></Field><Field label="Фамилия ребёнка"><input name="studentLastName" required maxLength={80} /></Field></div> : null}
+                  {!claimInstantly ? <Field label="Класс"><input name="className" required defaultValue={invitation.className ?? ""} maxLength={20} /></Field> : null}
+                  {invitation.targetRole === "parent" ? <Field label="Кем вы приходитесь ребёнку"><select name="relation" defaultValue="mother"><option value="mother">Мама</option><option value="father">Папа</option><option value="guardian">Опекун</option><option value="other">Другой законный представитель</option></select></Field> : <input type="hidden" name="relation" value="self" />}
+                  {error ? <p className="form-error">{error}</p> : null}
+                  <button className="primary-btn" disabled={busy}>{busy ? "Проверяем…" : claimInstantly ? "Создать кабинет" : "Отправить на проверку"}</button>
+                </form>
+              </>
+            ) : (
+              <div className="missing-invite"><Icon name="info" /><h2>Приглашение не найдено</h2><p>Откройте персональную ссылку школы или выберите регистрацию без приглашения.</p></div>
+            ) : (
+              <form onSubmit={submitRegistration}>
+                <input type="hidden" name="displayName" value={access.displayName ?? "Родитель"} />
+                <div className="registration-name-grid"><Field label="Имя ребёнка"><input name="studentFirstName" required maxLength={80} /></Field><Field label="Фамилия ребёнка"><input name="studentLastName" required maxLength={80} /></Field></div>
+                <Field label="Класс"><input name="className" required placeholder="Например, 5А" maxLength={20} /></Field>
+                <Field label="Кем вы приходитесь ребёнку"><select name="relation" defaultValue="mother"><option value="mother">Мама</option><option value="father">Папа</option><option value="guardian">Опекун</option><option value="other">Другой законный представитель</option></select></Field>
+                {error ? <p className="form-error">{error}</p> : null}
+                <button className="primary-btn" disabled={busy}>{busy ? "Отправляем…" : "Отправить заявку"}</button>
+                <small>До подтверждения школа не покажет оценки, сообщения или другие данные ребёнка.</small>
+              </form>
+            )}
+          </TabPanel>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function InviteResultModal({ result, close }: { result: InviteResult; close: () => void }) {
@@ -693,6 +989,15 @@ export default function SchoolApp() {
                     : activeView === "management" ? <ManagementPage snapshot={snapshot} openAction={openAction} />
                       : <ProfilePage snapshot={snapshot} openAction={openAction} />;
   const content = hasAccess ? routedContent : <AccessDeniedPage onHome={() => navigate("home")} />;
+  const helpAction = modal?.kind ?? (generatedInvite ? "family.invite.create" : undefined);
+  const helpOverlayKey = modal ? "action-form" : generatedInvite ? "invite-result" : undefined;
 
-  return <><AppShell snapshot={snapshot} activeView={activeView} onView={navigate} onStudent={(nextStudent) => void switchStudent(nextStudent)}>{content}</AppShell>{modal ? <ActionModal state={modal} snapshot={snapshot} close={() => setModal(null)} submit={async (kind, values) => { try { await submit(kind, values); } catch (error) { setToast(error instanceof Error ? error.message : "Не удалось сохранить"); throw error; } }} /> : null}{generatedInvite ? <InviteResultModal result={generatedInvite} close={() => setGeneratedInvite(null)} /> : null}{toast ? <div className="l0-toast"><Icon name="check" size={17} />{toast}</div> : null}</>;
+  return (
+    <>
+      <AppShell snapshot={snapshot} activeView={activeView} onView={navigate} onStudent={(nextStudent) => void switchStudent(nextStudent)} helpAction={helpAction} helpOverlayKey={helpOverlayKey}>{content}</AppShell>
+      {modal ? <ActionModal state={modal} snapshot={snapshot} close={() => setModal(null)} submit={async (kind, values) => { try { await submit(kind, values); } catch (error) { setToast(error instanceof Error ? error.message : "Не удалось сохранить"); throw error; } }} /> : null}
+      {generatedInvite ? <InviteResultModal result={generatedInvite} close={() => setGeneratedInvite(null)} /> : null}
+      {toast ? <div className="l0-toast"><Icon name="check" size={17} />{toast}</div> : null}
+    </>
+  );
 }
