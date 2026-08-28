@@ -210,6 +210,19 @@ test("DS-03 student theme changes tokens and typography only", () => {
     studentTheme,
     /--student-action-strong:\s*var\(--color-accent-hover\);/,
   );
+  assert.match(
+    studentTheme,
+    /--student-accent:\s*var\(--color-accent-hover\);/,
+  );
+  assert.match(studentTheme, /--student-highlight:\s*var\(--brand-400\);/);
+  assert.match(
+    studentTheme,
+    /--student-highlight-text:\s*var\(--success-50\);/,
+  );
+  assert.match(
+    studentTheme,
+    /--student-achievement:\s*var\(--success-50\);/,
+  );
   for (const token of [
     "color-border",
     "color-border-strong",
@@ -295,7 +308,7 @@ test("DS-03 student theme changes tokens and typography only", () => {
   );
   assert.match(
     sharedRouteSurfaceBlock,
-    /\.eyebrow,[\s\S]*?\.menu-grid dt \{[\s\S]*?color: var\(--brand-400\);/,
+    /\.eyebrow,[\s\S]*?\.menu-grid dt,[\s\S]*?\.text-action \{[\s\S]*?color: var\(--brand-400\);/,
   );
   assert.match(
     sharedRouteSurfaceBlock,
