@@ -1,0 +1,169 @@
+/*
+ * School 1–11 student theme.
+ *
+ * The :root values preserve the legacy, feature-flag-off rendering.
+ * The approved theme below changes color tokens and typography only.
+ * Geometry, navigation and component behavior remain owned by shared layers.
+ */
+
+:root {
+  --student-font-family: "Rubik", "Onest", ui-sans-serif, sans-serif;
+  --student-app-border: rgba(136, 111, 255, 0.2);
+  --student-app-frame: #0e101a;
+  --student-app-shadow: 0 30px 100px rgba(5, 6, 13, 0.36);
+  --student-rail: #090a11;
+  --student-page: #10121d;
+  --student-surface: #1a1d2b;
+  --student-surface-raised: #171a27;
+  --student-topbar: rgba(12, 14, 23, 0.86);
+  --student-orbit: rgba(10, 12, 23, 0.72);
+  --student-on-dark: #ffffff;
+  --student-text-48: rgba(255, 255, 255, 0.48);
+  --student-text-52: rgba(255, 255, 255, 0.52);
+  --student-text-58: rgba(255, 255, 255, 0.58);
+  --student-text-62: rgba(255, 255, 255, 0.62);
+  --student-text-68: rgba(255, 255, 255, 0.68);
+  --student-line-05: rgba(255, 255, 255, 0.05);
+  --student-line-08: rgba(255, 255, 255, 0.08);
+  --student-line-09: rgba(255, 255, 255, 0.09);
+  --student-line-10: rgba(255, 255, 255, 0.1);
+  --student-line-12: rgba(255, 255, 255, 0.12);
+  --student-line-14: rgba(255, 255, 255, 0.14);
+  --student-line-19: rgba(255, 255, 255, 0.19);
+  --student-fill-06: rgba(255, 255, 255, 0.06);
+  --student-fill-08: rgba(255, 255, 255, 0.08);
+  --student-fill-24: rgba(255, 255, 255, 0.24);
+  --student-shadow-16: rgba(0, 0, 0, 0.16);
+  --student-shadow-23: rgba(0, 0, 0, 0.23);
+  --student-shadow-28: rgba(0, 0, 0, 0.28);
+  --student-accent: #7758f6;
+  --student-accent-shadow: rgba(119, 88, 246, 0.28);
+  --student-main-glow: rgba(119, 88, 246, 0.13);
+  --student-action: #ff6536;
+  --student-action-strong: #ff5b2e;
+  --student-action-shadow: rgba(255, 91, 46, 0.28);
+  --student-highlight: #b8ff48;
+  --student-highlight-text: #caff78;
+  --student-highlight-soft: rgba(184, 255, 72, 0.13);
+  --student-highlight-faint: rgba(197, 244, 77, 0.1);
+  --student-hero-base-a: #20201c;
+  --student-hero-base-b: #37332d;
+  --student-hero-overlay-02: rgba(8, 10, 18, 0.02);
+  --student-hero-overlay-04: rgba(8, 10, 18, 0.04);
+  --student-hero-overlay-06: rgba(8, 10, 18, 0.06);
+  --student-hero-overlay-08: rgba(8, 10, 18, 0.08);
+  --student-hero-overlay-30: rgba(8, 10, 18, 0.3);
+  --student-launch-orange: #ff6536;
+  --student-launch-orange-text: #24140f;
+  --student-launch-violet: #785cff;
+  --student-launch-violet-text: #ffffff;
+  --student-launch-cyan: #48d9f2;
+  --student-launch-cyan-text: #0d2228;
+  --student-launch-lime: #c5f44d;
+  --student-launch-lime-text: #18220a;
+  --student-launch-icon: rgba(255, 255, 255, 0.24);
+  --student-achievement: #b97917;
+  --student-achievement-soft: #fff2da;
+  --student-achievement-meta: #98958d;
+}
+
+html[data-design-code="v1"][data-theme="student"] {
+  color-scheme: dark;
+
+  --color-page: var(--neutral-900);
+  --color-surface: var(--neutral-800);
+  --color-surface-muted: var(--neutral-700);
+  --color-surface-raised: var(--neutral-800);
+  --color-text: var(--neutral-0);
+  --color-text-secondary: var(--neutral-300);
+  --color-text-muted: var(--neutral-400);
+  --color-border: color-mix(in srgb, var(--neutral-0) 10%, transparent);
+  --color-border-strong: color-mix(in srgb, var(--neutral-0) 16%, transparent);
+  --color-accent: var(--brand-500);
+  --color-accent-hover: var(--brand-600);
+  --color-accent-active: var(--brand-700);
+  --color-accent-soft: color-mix(in srgb, var(--brand-500) 16%, transparent);
+  --color-focus: color-mix(in srgb, var(--brand-500) 32%, transparent);
+  --color-overlay: color-mix(in srgb, var(--neutral-900) 72%, transparent);
+
+  --orange: var(--color-accent);
+  --orange-dark: var(--color-accent-hover);
+  --orange-soft: var(--color-accent-soft);
+  --ink: var(--color-text);
+  --muted: var(--color-text-secondary);
+  --line: var(--color-border);
+  --canvas: var(--color-page);
+  --surface: var(--color-surface);
+  --font-display: var(--font-sans);
+  --font-text: var(--font-sans);
+
+  --student-font-family: var(--font-sans);
+  --student-app-border: var(--color-border);
+  --student-app-frame: var(--color-page);
+  --student-app-shadow: var(--shadow-lg);
+  --student-rail: var(--neutral-900);
+  --student-page: var(--color-page);
+  --student-surface: var(--color-surface);
+  --student-surface-raised: var(--color-surface-raised);
+  --student-topbar: color-mix(in srgb, var(--neutral-900) 94%, transparent);
+  --student-orbit: color-mix(in srgb, var(--neutral-900) 78%, transparent);
+  --student-on-dark: var(--neutral-0);
+  --student-text-48: color-mix(in srgb, var(--neutral-0) 48%, transparent);
+  --student-text-52: color-mix(in srgb, var(--neutral-0) 52%, transparent);
+  --student-text-58: color-mix(in srgb, var(--neutral-0) 58%, transparent);
+  --student-text-62: color-mix(in srgb, var(--neutral-0) 62%, transparent);
+  --student-text-68: color-mix(in srgb, var(--neutral-0) 68%, transparent);
+  --student-line-05: color-mix(in srgb, var(--neutral-0) 5%, transparent);
+  --student-line-08: color-mix(in srgb, var(--neutral-0) 8%, transparent);
+  --student-line-09: color-mix(in srgb, var(--neutral-0) 9%, transparent);
+  --student-line-10: var(--color-border);
+  --student-line-12: color-mix(in srgb, var(--neutral-0) 12%, transparent);
+  --student-line-14: color-mix(in srgb, var(--neutral-0) 14%, transparent);
+  --student-line-19: color-mix(in srgb, var(--neutral-0) 19%, transparent);
+  --student-fill-06: color-mix(in srgb, var(--neutral-0) 6%, transparent);
+  --student-fill-08: color-mix(in srgb, var(--neutral-0) 8%, transparent);
+  --student-fill-24: color-mix(in srgb, var(--neutral-0) 24%, transparent);
+  --student-shadow-16: color-mix(in srgb, var(--neutral-900) 16%, transparent);
+  --student-shadow-23: color-mix(in srgb, var(--neutral-900) 23%, transparent);
+  --student-shadow-28: color-mix(in srgb, var(--neutral-900) 28%, transparent);
+  --student-accent: var(--color-accent);
+  --student-accent-shadow: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  --student-main-glow: color-mix(in srgb, var(--color-accent) 13%, transparent);
+  --student-action: var(--color-accent);
+  --student-action-strong: var(--color-accent);
+  --student-action-shadow: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  --student-highlight: var(--color-accent);
+  --student-highlight-text: var(--success-500);
+  --student-highlight-soft: color-mix(in srgb, var(--success-500) 13%, transparent);
+  --student-highlight-faint: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  --student-hero-base-a: var(--neutral-800);
+  --student-hero-base-b: var(--neutral-700);
+  --student-hero-overlay-02: color-mix(in srgb, var(--neutral-900) 2%, transparent);
+  --student-hero-overlay-04: color-mix(in srgb, var(--neutral-900) 4%, transparent);
+  --student-hero-overlay-06: color-mix(in srgb, var(--neutral-900) 6%, transparent);
+  --student-hero-overlay-08: color-mix(in srgb, var(--neutral-900) 8%, transparent);
+  --student-hero-overlay-30: color-mix(in srgb, var(--neutral-900) 30%, transparent);
+  --student-launch-orange: var(--color-surface-raised);
+  --student-launch-orange-text: var(--color-text);
+  --student-launch-violet: var(--color-surface-raised);
+  --student-launch-violet-text: var(--color-text);
+  --student-launch-cyan: var(--color-surface-raised);
+  --student-launch-cyan-text: var(--color-text);
+  --student-launch-lime: var(--color-surface-raised);
+  --student-launch-lime-text: var(--color-text);
+  --student-launch-icon: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  --student-achievement: var(--success-500);
+  --student-achievement-soft: color-mix(in srgb, var(--success-500) 14%, transparent);
+  --student-achievement-meta: var(--color-text-muted);
+}
+
+html[data-design-code="v1"][data-theme="student"] .role-student,
+html[data-design-code="v1"][data-theme="student"] .role-student h1,
+html[data-design-code="v1"][data-theme="student"] .role-student h2,
+html[data-design-code="v1"][data-theme="student"] .role-student h3,
+html[data-design-code="v1"][data-theme="student"] .role-student button,
+html[data-design-code="v1"][data-theme="student"] .role-student input,
+html[data-design-code="v1"][data-theme="student"] .role-student select,
+html[data-design-code="v1"][data-theme="student"] .role-student textarea {
+  font-family: var(--font-sans);
+}
