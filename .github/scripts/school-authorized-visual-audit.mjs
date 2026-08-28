@@ -19,7 +19,7 @@ if (!candidateSha || !/^[a-f0-9]{40}$/.test(candidateSha)) {
   throw new Error("CANDIDATE_SHA is invalid");
 }
 
-const controls = [
+const defaultControls = [
   { width: 360, height: 800 },
   { width: 390, height: 844 },
   { width: 768, height: 1024 },
@@ -28,6 +28,16 @@ const controls = [
   { width: 1920, height: 1080 },
   { width: 2560, height: 1200 },
 ];
+const boundaryWidths = process.env.AUDIT_WIDTHS;
+if (boundaryWidths && boundaryWidths !== "767,768,800,801,1199,1200") {
+  throw new Error("AUDIT_WIDTHS must be the approved DS-02 boundary matrix");
+}
+const controls = boundaryWidths
+  ? boundaryWidths.split(",").map((value) => {
+      const width = Number.parseInt(value, 10);
+      return { width, height: width <= 801 ? 1024 : 960 };
+    })
+  : defaultControls;
 
 const roles = [
   { id: "director", route: "/management" },
@@ -238,6 +248,11 @@ try {
           railBrandText: one(".l0-brand > span"),
           railNavText: one(".l0-nav button span"),
           railContextText: one(".rail-context > span"),
+          railTooltips: [...document.querySelectorAll(".l0-brand, .l0-nav button, .rail-context")].map((node) => ({
+            tag: node.tagName.toLowerCase(),
+            title: node.getAttribute("title") || "",
+            ariaLabel: node.getAttribute("aria-label") || "",
+          })),
           workspace: one(".l0-workspace"),
           topbar: one(".l0-topbar"),
           mobileLogo: one(".mobile-brand img"),
@@ -368,6 +383,12 @@ try {
           if (item.rect && item.style?.display !== "none") {
             addViolation(role.id, width, "P0", "TABLET_RAIL_LABEL", item.selector, "hidden", "visible");
           }
+        }
+        const invalidTooltip = metrics.railTooltips.find(
+          (item) => !item.title.trim() || (item.tag === "button" && item.ariaLabel !== item.title),
+        );
+        if (invalidTooltip) {
+          addViolation(role.id, width, "P0", "TABLET_RAIL_TOOLTIP", ".l0-rail", "title and matching button aria-label", invalidTooltip);
         }
       }
 
