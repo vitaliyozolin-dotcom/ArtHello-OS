@@ -16,9 +16,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CANDIDATE_SHA: b21363c5cd4b3756400eb665c41685d5dbcebc14
-  CANDIDATE_IMAGE: school-1-11-design-v1:b21363c5cd4b
-  CANDIDATE_IMAGE_ID: sha256:8d857f25cfdadc378c9897c1a9f6236dd2bbf34138c725a19c84f4427acb5382
+  CANDIDATE_SHA: 034be78c5cb30402ebb7d3786133d0f3be390be9
+  CANDIDATE_IMAGE: school-1-11-design-v1:034be78c5cb3
+  CANDIDATE_IMAGE_ID: sha256:cfa869407edd53b4d54dfffef5ba12c16cd1f3e9ee2430d6975e89bfd64075b3
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   STAGING_ORIGIN: http://127.0.0.1:3211
 
