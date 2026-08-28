@@ -23,7 +23,6 @@ jobs:
     name: reclaim disposable runner cache
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: production-ru
     env:
       DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
       DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
