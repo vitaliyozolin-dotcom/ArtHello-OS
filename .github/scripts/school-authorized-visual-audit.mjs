@@ -23,14 +23,33 @@ if (!candidateImageId || !/^sha256:[a-f0-9]{64}$/.test(candidateImageId)) {
   throw new Error("CANDIDATE_IMAGE_ID is invalid");
 }
 
-const approvedBoundaryWidths = "767,768,800,801,1199,1200";
-const boundaryWidths = process.env.AUDIT_WIDTHS;
-if (boundaryWidths !== approvedBoundaryWidths) {
-  throw new Error("AUDIT_WIDTHS must be the approved DS-02 boundary matrix");
+const approvedRoleWidths =
+  "360,390,767,768,800,801,1199,1200,1280,1440,1920,2560";
+const roleWidths = process.env.AUDIT_WIDTHS;
+if (roleWidths !== approvedRoleWidths) {
+  throw new Error(
+    "AUDIT_WIDTHS must combine the seven canonical widths and DS-02 boundaries",
+  );
 }
-const controls = boundaryWidths.split(",").map((value) => {
+const roleViewportHeights = new Map([
+  [360, 800],
+  [390, 844],
+  [767, 1024],
+  [768, 1024],
+  [800, 1024],
+  [801, 1024],
+  [1199, 960],
+  [1200, 960],
+  [1280, 960],
+  [1440, 1000],
+  [1920, 1080],
+  [2560, 1200],
+]);
+const controls = roleWidths.split(",").map((value) => {
   const width = Number.parseInt(value, 10);
-  return { width, height: width <= 801 ? 1024 : 960 };
+  const height = roleViewportHeights.get(width);
+  if (!height) throw new Error("Missing approved role viewport height");
+  return { width, height };
 });
 
 const roles = [
