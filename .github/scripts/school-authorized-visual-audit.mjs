@@ -1165,7 +1165,7 @@ try {
       if (route.tab) {
         routeTab = page
           .locator(".compact-tabs")
-          .getByRole("button", { name: route.tab, exact: true })
+          .getByRole("tab", { name: route.tab, exact: true })
           .first();
         await routeTab.waitFor({ state: "visible", timeout: 30000 });
         await page.evaluate(() => document.fonts.ready);
