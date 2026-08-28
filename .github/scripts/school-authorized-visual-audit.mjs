@@ -672,7 +672,23 @@ async function createContext(browser, viewport) {
   });
   await context.addInitScript(() => {
     window.__schoolAuditCLS = 0;
+    window.__schoolAuditCLSObserver = null;
     window.__schoolThemeBeforeShell = [];
+    const collectLayoutShifts = () => {
+      if (window.__schoolAuditCLS === null) return null;
+      const observer = window.__schoolAuditCLSObserver;
+      if (observer) {
+        for (const entry of observer.takeRecords()) {
+          if (!entry.hadRecentInput) window.__schoolAuditCLS += entry.value;
+        }
+      }
+      return window.__schoolAuditCLS;
+    };
+    window.__schoolAuditReadCLS = collectLayoutShifts;
+    window.__schoolAuditResetCLS = () => {
+      collectLayoutShifts();
+      if (window.__schoolAuditCLS !== null) window.__schoolAuditCLS = 0;
+    };
     try {
       const observer = new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
@@ -680,6 +696,7 @@ async function createContext(browser, viewport) {
         }
       });
       observer.observe({ type: "layout-shift", buffered: true });
+      window.__schoolAuditCLSObserver = observer;
     } catch {
       window.__schoolAuditCLS = null;
     }
@@ -1127,9 +1144,16 @@ try {
     }
 
     for (const route of studentRouteStates) {
+      // LayoutShift marks entries for roughly 500 ms after trusted input.
+      // Let the previous login/tab keyboard action leave that window before
+      // starting a new route-load phase, otherwise real route shifts can be
+      // excluded as hadRecentInput.
+      await page.waitForTimeout(600);
       await page.evaluate(() => {
-        window.__schoolAuditCLS = 0;
+        window.__schoolAuditResetCLS();
       });
+      let routeLoadCls = null;
+      let stateChangeCls = null;
       await page.evaluate((path) => {
         history.pushState({}, "", path);
         window.dispatchEvent(new PopStateEvent("popstate"));
@@ -1144,10 +1168,13 @@ try {
           .getByRole("button", { name: route.tab, exact: true })
           .first();
         await routeTab.waitFor({ state: "visible", timeout: 30000 });
+        await page.evaluate(() => document.fonts.ready);
+        await page.waitForTimeout(600);
+        routeLoadCls = await page.evaluate(() => window.__schoolAuditReadCLS());
         await page.evaluate(() => {
-          window.__schoolAuditCLS = 0;
+          window.__schoolAuditResetCLS();
         });
-        await routeTab.click();
+        await routeTab.evaluate((node) => node.click());
         await page.waitForFunction(
           ({ tab, anchor }) => {
             const activeTabs = [
@@ -1180,7 +1207,13 @@ try {
       }
       await page.evaluate(() => document.fonts.ready);
       await page.waitForTimeout(600);
+      if (routeTab) {
+        stateChangeCls = await page.evaluate(() =>
+          window.__schoolAuditReadCLS(),
+        );
+      }
 
+      let focusEvidence = null;
       if (routeTab) {
         await routeTab.focus();
         await page.keyboard.press("Shift+Tab");
@@ -1200,11 +1233,58 @@ try {
           route.tab,
           { timeout: 30000 },
         );
+        focusEvidence = await routeTab.evaluate((node) => {
+          const style = getComputedStyle(node);
+          let effectiveOpacity = 1;
+          let flatPaintPass = true;
+          let current = node;
+          while (current instanceof Element) {
+            const currentStyle = getComputedStyle(current);
+            const opacity = Number.parseFloat(currentStyle.opacity);
+            if (Number.isFinite(opacity)) {
+              effectiveOpacity *= Math.min(1, Math.max(0, opacity));
+            }
+            if (
+              currentStyle.backgroundImage !== "none" ||
+              currentStyle.mixBlendMode !== "normal" ||
+              currentStyle.filter !== "none" ||
+              (currentStyle.backdropFilter &&
+                currentStyle.backdropFilter !== "none")
+            ) {
+              flatPaintPass = false;
+            }
+            current = current.parentElement;
+          }
+          return {
+            activeElement: document.activeElement === node,
+            focusVisible: node.matches(":focus-visible"),
+            outlineStyle: style.outlineStyle,
+            outlineWidth: style.outlineWidth,
+            outlineOffset: style.outlineOffset,
+            outlineColor: style.outlineColor,
+            effectiveOpacity,
+            opacityPass: Math.abs(effectiveOpacity - 1) <= 1e-7,
+            flatPaintPass,
+          };
+        });
+        await page.evaluate(() => {
+          if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+          }
+        });
+        await page.evaluate(
+          () => new Promise((resolve) => requestAnimationFrame(() => resolve())),
+        );
       }
 
       const schoolStateMetrics = route.tab
         ? await page.evaluate(
-            ({ items, expectedItems, selectorRequirements }) => {
+            ({
+              items,
+              expectedItems,
+              selectorRequirements,
+              focusEvidence,
+            }) => {
               const probe = document.createElement("span");
               probe.setAttribute("aria-hidden", "true");
               probe.style.cssText =
@@ -1350,6 +1430,41 @@ try {
                 }
                 return result;
               };
+              const flatPaintPass = (node) => {
+                let current = node;
+                while (current instanceof Element) {
+                  const style = getComputedStyle(current);
+                  if (
+                    style.backgroundImage !== "none" ||
+                    style.mixBlendMode !== "normal" ||
+                    style.filter !== "none" ||
+                    (style.backdropFilter && style.backdropFilter !== "none")
+                  ) {
+                    return false;
+                  }
+                  current = current.parentElement;
+                }
+                return true;
+              };
+              const opacityModelPass = (node) => {
+                let current = node;
+                while (current instanceof Element) {
+                  const style = getComputedStyle(current);
+                  const opacity = Number.parseFloat(style.opacity);
+                  if (Number.isFinite(opacity) && opacity < 1) {
+                    const background = parseColor(style.backgroundColor);
+                    if (
+                      current !== node ||
+                      !background ||
+                      background.a > 1e-7
+                    ) {
+                      return false;
+                    }
+                  }
+                  current = current.parentElement;
+                }
+                return true;
+              };
               const applyOpacity = (color, opacity) =>
                 color ? { ...color, a: color.a * opacity } : null;
               const backgroundFor = (node, includeNode = true) => {
@@ -1405,6 +1520,11 @@ try {
                 const text = node.textContent?.trim() ?? "";
                 const authoredForeground = style.color;
                 const opacity = effectiveOpacity(node);
+                const opacityPass =
+                  opacity > 0 &&
+                  opacity <= 1 &&
+                  opacityModelPass(node);
+                const solidPaintPass = flatPaintPass(node);
                 const parsedForeground = applyOpacity(
                   parseColor(authoredForeground),
                   opacity,
@@ -1424,12 +1544,16 @@ try {
                   textRole: requirement.textRole,
                   minimumContrast: requirement.minimumContrast,
                   effectiveOpacity: opacity,
+                  opacityPass,
+                  flatPaintPass: solidPaintPass,
                   authoredForeground,
                   renderedForeground: serializeColor(renderedForeground),
                   renderedBackground: serializeColor(renderedBackground),
                   ratio,
                   pass:
                     text.length > 0 &&
+                    opacityPass &&
+                    solidPaintPass &&
                     ratio !== null &&
                     ratio >= requirement.minimumContrast,
                 };
@@ -1472,6 +1596,7 @@ try {
               ].filter(visible);
               const tabs = tabNodes.map((node) => {
                 const style = getComputedStyle(node);
+                const opacity = effectiveOpacity(node);
                 const externalBackground = backgroundFor(node, false);
                 const parsedBackground = parseColor(style.backgroundColor);
                 const renderedBackground = parsedBackground
@@ -1480,7 +1605,7 @@ try {
                 const parsedForeground = parseColor(style.color);
                 const renderedForegroundColor = applyOpacity(
                   parsedForeground,
-                  effectiveOpacity(node),
+                  opacity,
                 );
                 const renderedForeground =
                   renderedForegroundColor && renderedBackground
@@ -1496,9 +1621,32 @@ try {
                 const renderedBorders = borderParsed.map((color) =>
                   color ? composite(color, externalBackground) : null,
                 );
+                const borderWidths = [
+                  style.borderTopWidth,
+                  style.borderRightWidth,
+                  style.borderBottomWidth,
+                  style.borderLeftWidth,
+                ].map((value) => Number.parseFloat(value));
+                const borderStyles = [
+                  style.borderTopStyle,
+                  style.borderRightStyle,
+                  style.borderBottomStyle,
+                  style.borderLeftStyle,
+                ];
+                const borderVisible =
+                  borderWidths.length === 4 &&
+                  borderWidths.every(
+                    (value) => Number.isFinite(value) && value > 0,
+                  ) &&
+                  borderStyles.every(
+                    (value) => value !== "none" && value !== "hidden",
+                  );
                 return {
                   label: node.textContent?.trim() ?? "",
                   active: node.classList.contains("active"),
+                  effectiveOpacity: opacity,
+                  opacityPass: Math.abs(opacity - 1) <= 1e-7,
+                  flatPaintPass: flatPaintPass(node),
                   backgroundAuthored: style.backgroundColor,
                   backgroundParsed: serializeColor(parsedBackground),
                   backgroundRendered: serializeColor(renderedBackground),
@@ -1508,6 +1656,9 @@ try {
                   borderAuthored,
                   borderParsed: borderParsed.map(serializeColor),
                   borderRendered: renderedBorders.map(serializeColor),
+                  borderWidths,
+                  borderStyles,
+                  borderVisible,
                   externalBackground: serializeColor(externalBackground),
                 };
               });
@@ -1529,6 +1680,15 @@ try {
               const selectedStyle = activeTab
                 ? getComputedStyle(activeTab)
                 : null;
+              const selectedOpacity = activeTab
+                ? effectiveOpacity(activeTab)
+                : null;
+              const selectedOpacityPass =
+                selectedOpacity !== null &&
+                Math.abs(selectedOpacity - 1) <= 1e-7;
+              const selectedFlatPaintPass = Boolean(
+                activeTab && flatPaintPass(activeTab),
+              );
               const selectedBorders = selectedStyle
                 ? [
                     selectedStyle.borderTopColor,
@@ -1537,6 +1697,31 @@ try {
                     selectedStyle.borderLeftColor,
                   ].map(parseColor)
                 : [];
+              const selectedBorderWidths = selectedStyle
+                ? [
+                    selectedStyle.borderTopWidth,
+                    selectedStyle.borderRightWidth,
+                    selectedStyle.borderBottomWidth,
+                    selectedStyle.borderLeftWidth,
+                  ].map((value) => Number.parseFloat(value))
+                : [];
+              const selectedBorderStyles = selectedStyle
+                ? [
+                    selectedStyle.borderTopStyle,
+                    selectedStyle.borderRightStyle,
+                    selectedStyle.borderBottomStyle,
+                    selectedStyle.borderLeftStyle,
+                  ]
+                : [];
+              const selectedBorderVisible =
+                selectedBorderWidths.length === 4 &&
+                selectedBorderWidths.every(
+                  (value) => Number.isFinite(value) && value > 0,
+                ) &&
+                selectedBorderStyles.length === 4 &&
+                selectedBorderStyles.every(
+                  (value) => value !== "none" && value !== "hidden",
+                );
               const selectedRenderedBorders = selectedBorders.map((color) =>
                 color && selectedExternal
                   ? composite(color, selectedExternal)
@@ -1556,6 +1741,54 @@ try {
               const borderRatios = selectedRenderedBorders.map((border) =>
                 contrast(border, selectedExternal),
               );
+              const fillPass = fillRatio !== null && fillRatio >= 3;
+              const borderPass =
+                selectedBorderVisible &&
+                borderRatios.some(
+                  (ratio) => ratio !== null && ratio >= 3,
+                );
+              const externalPass = fillPass || borderPass;
+              const inactiveBackgrounds = tabs
+                .filter((tab) => !tab.active)
+                .map((tab) => ({
+                  label: tab.label,
+                  renderedBackground: tab.backgroundRendered,
+                }));
+              const inactiveComparisons = inactiveBackgrounds.map(
+                ({ label, renderedBackground }) => {
+                  const inactiveFillRatio = contrast(
+                    selectedRenderedFill,
+                    renderedBackground,
+                  );
+                  const inactiveBorderRatios = selectedRenderedBorders.map(
+                    (border) => contrast(border, renderedBackground),
+                  );
+                  const inactiveFillPass =
+                    inactiveFillRatio !== null && inactiveFillRatio >= 3;
+                  const inactiveBorderPass =
+                    selectedBorderVisible &&
+                    inactiveBorderRatios.some(
+                      (ratio) => ratio !== null && ratio >= 3,
+                    );
+                  return {
+                    label,
+                    renderedBackground,
+                    fillRatio: inactiveFillRatio,
+                    borderRatios: inactiveBorderRatios,
+                    fillPass: inactiveFillPass,
+                    borderPass: inactiveBorderPass,
+                    pass: inactiveFillPass || inactiveBorderPass,
+                  };
+                },
+              );
+              const inactivePass =
+                inactiveComparisons.length === 2 &&
+                inactiveComparisons.every((item) => item.pass);
+              const borderColorPass =
+                selectedBorders.length === 4 &&
+                selectedBorders.every((color) =>
+                  colorsEqual(color, expectedParsed.brand400),
+                );
               const selected = {
                 activeCount: activeTabNodes.length,
                 label: activeTab?.textContent?.trim() ?? null,
@@ -1566,65 +1799,88 @@ try {
                     selectedFill,
                     expectedParsed.brand600,
                   ),
-                  borderPass:
-                    selectedBorders.length === 4 &&
-                    selectedBorders.every((color) =>
-                      colorsEqual(color, expectedParsed.brand400),
-                    ),
+                  borderColorPass,
+                  borderVisiblePass: selectedBorderVisible,
+                  borderPass: borderColorPass && selectedBorderVisible,
                   textPass: colorsEqual(
                     selectedForeground,
                     expectedParsed.text,
                   ),
+                  opacityPass: selectedOpacityPass,
+                  flatPaintPass: selectedFlatPaintPass,
                 },
                 nonText: {
                   externalBackground: serializeColor(selectedExternal),
                   renderedFill: serializeColor(selectedRenderedFill),
                   renderedBorders: selectedRenderedBorders.map(serializeColor),
+                  borderWidths: selectedBorderWidths,
+                  borderStyles: selectedBorderStyles,
+                  borderVisiblePass: selectedBorderVisible,
+                  effectiveOpacity: selectedOpacity,
+                  opacityPass: selectedOpacityPass,
+                  flatPaintPass: selectedFlatPaintPass,
                   fillRatio,
                   borderRatios,
                   minimumContrast: 3,
-                  fillPass: fillRatio !== null && fillRatio >= 3,
-                  borderPass: borderRatios.some(
-                    (ratio) => ratio !== null && ratio >= 3,
-                  ),
+                  fillPass,
+                  borderPass,
+                  externalPass,
+                  inactiveComparisons,
+                  inactivePass,
                   pass:
-                    (fillRatio !== null && fillRatio >= 3) ||
-                    borderRatios.some(
-                      (ratio) => ratio !== null && ratio >= 3,
-                    ),
+                    selectedOpacityPass &&
+                    selectedFlatPaintPass &&
+                    externalPass &&
+                    inactivePass,
                 },
               };
               selected.mapping.pass =
                 selected.mapping.backgroundPass &&
                 selected.mapping.borderPass &&
-                selected.mapping.textPass;
+                selected.mapping.textPass &&
+                selected.mapping.opacityPass &&
+                selected.mapping.flatPaintPass;
 
-              const focusStyle = activeTab ? getComputedStyle(activeTab) : null;
               const focusExternal = activeTab
                 ? backgroundFor(activeTab, false)
                 : null;
-              const outlineParsed = focusStyle
-                ? parseColor(focusStyle.outlineColor)
+              const outlineParsed = focusEvidence
+                ? parseColor(focusEvidence.outlineColor)
                 : null;
               const renderedOutline =
                 outlineParsed && focusExternal
                   ? composite(outlineParsed, focusExternal)
                   : null;
               const outlineRatio = contrast(renderedOutline, focusExternal);
-              const outlineWidth = focusStyle
-                ? Number.parseFloat(focusStyle.outlineWidth)
+              const outlineWidth = focusEvidence
+                ? Number.parseFloat(focusEvidence.outlineWidth)
                 : null;
+              const outlineOffset = focusEvidence
+                ? Number.parseFloat(focusEvidence.outlineOffset)
+                : null;
+              const focusInactiveRatios = inactiveBackgrounds.map(
+                ({ label, renderedBackground }) => ({
+                  label,
+                  renderedBackground,
+                  ratio: contrast(renderedOutline, renderedBackground),
+                }),
+              );
+              const focusExternalPass =
+                outlineRatio !== null && outlineRatio >= 3;
+              const focusInactivePass =
+                focusInactiveRatios.length === 2 &&
+                focusInactiveRatios.every(
+                  ({ ratio }) => ratio !== null && ratio >= 3,
+                );
               const focus = {
-                activeElement: Boolean(
-                  activeTab && document.activeElement === activeTab,
-                ),
-                focusVisible: Boolean(
-                  activeTab && activeTab.matches(":focus-visible"),
-                ),
-                outlineStyle: focusStyle?.outlineStyle ?? null,
+                activeElement: focusEvidence?.activeElement === true,
+                focusVisible: focusEvidence?.focusVisible === true,
+                outlineStyle: focusEvidence?.outlineStyle ?? null,
                 outlineWidth:
                   Number.isFinite(outlineWidth) ? outlineWidth : null,
-                outlineAuthored: focusStyle?.outlineColor ?? null,
+                outlineOffset:
+                  Number.isFinite(outlineOffset) ? outlineOffset : null,
+                outlineAuthored: focusEvidence?.outlineColor ?? null,
                 outlineParsed: serializeColor(outlineParsed),
                 renderedOutline: serializeColor(renderedOutline),
                 externalBackground: serializeColor(focusExternal),
@@ -1633,17 +1889,27 @@ try {
                   outlineParsed,
                   expectedParsed.brand400,
                 ),
+                effectiveOpacity: focusEvidence?.effectiveOpacity ?? null,
+                opacityPass: focusEvidence?.opacityPass === true,
+                flatPaintPass: focusEvidence?.flatPaintPass === true,
                 minimumContrast: 3,
                 ratio: outlineRatio,
-                contrastPass: outlineRatio !== null && outlineRatio >= 3,
+                externalPass: focusExternalPass,
+                inactiveRatios: focusInactiveRatios,
+                inactivePass: focusInactivePass,
+                contrastPass: focusExternalPass && focusInactivePass,
               };
               focus.authoredPass = Boolean(
                 focus.activeElement &&
                   focus.focusVisible &&
                   focus.outlineStyle !== "none" &&
                   focus.outlineWidth !== null &&
-                  focus.outlineWidth > 0 &&
-                  focus.outlineColorPass,
+                  focus.outlineWidth >= 3 &&
+                  focus.outlineOffset !== null &&
+                  focus.outlineOffset >= 2 &&
+                  focus.outlineColorPass &&
+                  focus.opacityPass &&
+                  focus.flatPaintPass,
               );
               focus.pass = focus.authoredPass && focus.contrastPass;
 
@@ -1652,6 +1918,9 @@ try {
               );
               const cards = cardNodes.map((node, index) => {
                 const style = getComputedStyle(node);
+                const opacity = effectiveOpacity(node);
+                const opacityPass = Math.abs(opacity - 1) <= 1e-7;
+                const solidPaintPass = flatPaintPass(node);
                 const externalBackground = backgroundFor(node, false);
                 const parsedBackground = parseColor(style.backgroundColor);
                 const renderedBackground = parsedBackground
@@ -1678,9 +1947,16 @@ try {
                   foregroundAuthored: style.color,
                   foregroundParsed: serializeColor(parsedForeground),
                   foregroundRendered: serializeColor(renderedForeground),
+                  effectiveOpacity: opacity,
+                  opacityPass,
+                  flatPaintPass: solidPaintPass,
                   backgroundPass,
                   textPass,
-                  pass: backgroundPass && textPass,
+                  pass:
+                    backgroundPass &&
+                    textPass &&
+                    opacityPass &&
+                    solidPaintPass,
                 };
               });
               const activeTabs = tabs.filter((tab) => tab.active);
@@ -1703,9 +1979,13 @@ try {
               const inactiveTabsPass = tabs
                 .filter((tab) => !tab.active)
                 .every((tab) =>
-                  colorsEqual(
-                    tab.backgroundParsed,
-                    expectedParsed.surface,
+                  Boolean(
+                    colorsEqual(
+                      tab.backgroundParsed,
+                      expectedParsed.surface,
+                    ) &&
+                      tab.opacityPass &&
+                      tab.flatPaintPass,
                   ),
                 );
               probe.remove();
@@ -1738,27 +2018,31 @@ try {
               items: route.items,
               expectedItems: route.expectedItems,
               selectorRequirements: route.selectorRequirements,
+              focusEvidence,
             },
           )
         : null;
-      if (routeTab) {
-        await page.evaluate(() => {
-          if (document.activeElement instanceof HTMLElement) {
-            document.activeElement.blur();
-          }
-        });
-        await page.evaluate(
-          () => new Promise((resolve) => requestAnimationFrame(() => resolve())),
-        );
-      }
+      const observedRouteMetrics = await page.evaluate(() => ({
+        hrefPath: location.pathname,
+        designCode: document.documentElement.dataset.designCode || null,
+        documentWidth: document.documentElement.scrollWidth,
+        bodyWidth: document.body.scrollWidth,
+        cls: window.__schoolAuditReadCLS(),
+      }));
+      const clsPhases = routeTab
+        ? { routeLoad: routeLoadCls, stateChange: stateChangeCls }
+        : null;
+      const schoolClsValues = routeTab
+        ? [routeLoadCls, stateChangeCls].filter(Number.isFinite)
+        : [];
       const routeMetrics = {
-        ...(await page.evaluate(() => ({
-          hrefPath: location.pathname,
-          designCode: document.documentElement.dataset.designCode || null,
-          documentWidth: document.documentElement.scrollWidth,
-          bodyWidth: document.body.scrollWidth,
-          cls: window.__schoolAuditCLS,
-        }))),
+        ...observedRouteMetrics,
+        cls: routeTab
+          ? schoolClsValues.length > 0
+            ? Math.max(...schoolClsValues)
+            : null
+          : observedRouteMetrics.cls,
+        clsPhases,
         anchorPresent: await routeAnchor.isVisible(),
         headingPresent: routeHeading ? await routeHeading.isVisible() : true,
         stateAnchorPresent: await routeAnchor.isVisible(),
@@ -1925,7 +2209,7 @@ try {
             "P0",
             "STUDENT_SCHOOL_SELECTED_NONTEXT",
             ".compact-tabs > button.active",
-            "fill or border >=3:1 against actual external page",
+            "opaque flat fill or visible border >=3:1 against the external page and inactive tabs",
             routeMetrics.selected.nonText,
             route.route,
           );
@@ -1949,7 +2233,7 @@ try {
             "P0",
             "STUDENT_SCHOOL_FOCUS_NONTEXT",
             ".compact-tabs > button.active:focus-visible",
-            ">=3:1 against actual external page",
+            ">=3:1 against the external page and inactive tabs",
             routeMetrics.focus,
             route.route,
           );
@@ -2043,6 +2327,7 @@ const severityCounts = violations.reduce(
 );
 const manifest = {
   version: "1.3.0",
+  auditRunId: runId,
   capturedAt: new Date().toISOString(),
   candidateSha,
   candidateImageId,
