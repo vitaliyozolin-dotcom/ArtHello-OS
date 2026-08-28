@@ -212,6 +212,11 @@ test("DS-03 student theme changes tokens and typography only", () => {
   }
   assert.match(studentTheme, /--student-font-family:\s*var\(--font-sans\);/);
   assert.match(
+    studentTheme,
+    /html\[data-design-code="v1"\]\[data-theme="student"\] \.role-student \.l0-topbar \{[\s\S]*?border-color: var\(--student-line-08\);[\s\S]*?background: var\(--student-topbar\);[\s\S]*?color: var\(--student-on-dark\);[\s\S]*?\}/,
+    "student topbar colors must beat the shared v1 selector",
+  );
+  assert.match(
     schoolApp,
     /root\.dataset\.theme = snapshot\.viewer\.role === "student" \? "student" : "light"/,
   );
