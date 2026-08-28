@@ -229,7 +229,11 @@ test("DS-03 student theme changes tokens and typography only", () => {
   );
   assert.doesNotMatch(studentRules, /Rubik/);
   assert.doesNotMatch(studentRules, /(?:linear|radial)-gradient/i);
-  assert.doesNotMatch(globals, /\.role-student \.status-pill\s*\{/);
+  assert.match(
+    globals,
+    /\.role-student \.status-pill\s*\{\s*border-radius:\s*9px;\s*\}/,
+    "DS-03 must preserve the accepted student status-pill geometry",
+  );
 
   const approvedThemeBlock = studentTheme
     .split('html[data-design-code="v1"][data-theme="student"] {')[1]
