@@ -261,6 +261,9 @@ test("DS-03 student theme changes tokens and typography only", () => {
     ".menu-grid > article",
     ".privacy-card",
     ".segmented",
+    ".day-switch > button",
+    ".lesson-order",
+    ".notification-list > article",
   ]) {
     assert.ok(
       studentTheme.includes(".role-student " + selector),
@@ -282,6 +285,22 @@ test("DS-03 student theme changes tokens and typography only", () => {
   assert.match(
     sharedRouteSurfaceBlock,
     /\.segmented button\.active \{[\s\S]*?background: var\(--color-surface\);[\s\S]*?color: var\(--color-text\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.day-switch button \{[\s\S]*?background: var\(--color-surface-muted\);[\s\S]*?color: var\(--color-text\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.day-switch button\.active \{[\s\S]*?border-color: var\(--color-accent\);[\s\S]*?background: var\(--color-surface\);[\s\S]*?color: var\(--color-accent\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.lesson-order \{[\s\S]*?background: var\(--color-surface-muted\);[\s\S]*?color: var\(--color-text-secondary\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.notification-list article\.unread \{[\s\S]*?border-color: var\(--color-accent\);[\s\S]*?background: var\(--color-surface-raised\);[\s\S]*?color: var\(--color-text\);/,
   );
   assert.doesNotMatch(
     sharedRouteSurfaceBlock,
