@@ -476,7 +476,7 @@ const manifest = {
   candidateSha,
   sourceOfTruth: "School 1–11 design code 1.0.0, approved 2026-08-27",
   origin: "loopback-ssh-tunnel",
-  fixture: "candidate bootstrap, wiped and reseeded with synthetic data",
+  fixture: "empty schema from candidate migrations, seeded with synthetic data",
   credentialsStored: false,
   controls,
   roles: roles.map(({ id, route }) => ({ id, route })),

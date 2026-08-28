@@ -137,7 +137,7 @@ case "$ACTION" in
       -v "$audit_data:/data" \
       --entrypoint node "$CANDIDATE_IMAGE" --input-type=module - <<'PREPARE_DATA'
 import { randomBytes, scrypt as scryptCallback } from 'node:crypto';
-import { chmodSync, chownSync, copyFileSync } from 'node:fs';
+import { chmodSync, chownSync, readdirSync, readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -147,13 +147,16 @@ if (!/^[0-9]+$/.test(run || '')) throw new Error('Invalid audit run id');
 if (!/^[A-Za-z0-9_-]{32,}$/.test(password || '')) throw new Error('Invalid audit password');
 
 const target = '/data/school-1-11.sqlite';
-copyFileSync('/app/bootstrap/school-1-11.sqlite', target);
 const db = new DatabaseSync(target);
-db.exec('PRAGMA secure_delete = ON');
-const integrityBefore = db.prepare('PRAGMA integrity_check').all();
-if (integrityBefore.length !== 1 || integrityBefore[0].integrity_check !== 'ok') {
-  throw new Error('Authorized visual input integrity failed');
+db.exec('PRAGMA foreign_keys = OFF');
+const migrationFiles = readdirSync('/app/drizzle')
+  .filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/.test(name))
+  .sort();
+if (migrationFiles.length < 6) throw new Error('Candidate migration inventory is incomplete');
+for (const file of migrationFiles) {
+  db.exec(readFileSync('/app/drizzle/' + file, 'utf8'));
 }
+db.exec('PRAGMA foreign_keys = ON');
 
 const userTables = db
   .prepare(`SELECT name FROM sqlite_schema
@@ -164,25 +167,11 @@ const userTables = db
     ORDER BY name`)
   .all()
   .map((row) => row.name);
-if (userTables.length < 20) throw new Error('Unexpected bootstrap table inventory');
+if (userTables.length < 20) throw new Error('Unexpected candidate table inventory');
 const quoteIdentifier = (value) => '"' + String(value).replaceAll('"', '""') + '"';
-
-db.exec('PRAGMA foreign_keys = OFF');
-db.exec('BEGIN IMMEDIATE');
-try {
-  for (const table of userTables) {
-    db.exec('DELETE FROM ' + quoteIdentifier(table));
-  }
-  db.exec('COMMIT');
-} catch (error) {
-  db.exec('ROLLBACK');
-  throw error;
-}
-db.exec('VACUUM');
-db.exec('PRAGMA foreign_keys = ON');
 for (const table of userTables) {
   const count = db.prepare('SELECT COUNT(*) AS count FROM ' + quoteIdentifier(table)).get().count;
-  if (count !== 0) throw new Error('Bootstrap wipe failed for ' + table);
+  if (count !== 0) throw new Error('Candidate migration schema is not empty: ' + table);
 }
 
 const className = '1А';
@@ -526,7 +515,7 @@ chownSync('/data', 1001, 1001);
 chmodSync('/data', 0o750);
 chownSync(target, 1001, 1001);
 chmodSync(target, 0o640);
-console.log('SCHOOL_AUTHORIZED_VISUAL_SOURCE=candidate-bootstrap-only');
+console.log('SCHOOL_AUTHORIZED_VISUAL_SOURCE=candidate-migrations-only');
 console.log('SCHOOL_AUTHORIZED_VISUAL_DATA=SYNTHETIC');
 console.log('SCHOOL_AUTHORIZED_VISUAL_ROLES=SEEDED');
 PREPARE_DATA
