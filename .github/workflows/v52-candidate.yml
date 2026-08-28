@@ -59,11 +59,11 @@ jobs:
             # Docker refuses to remove an image used by a running container.
             docker image rm "$image" >/dev/null 2>&1 || true
           done
-          docker image prune --force >/dev/null
 
           docker_root="$(docker info --format '{{.DockerRootDir}}')"
           available_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
           if [ "$available_kb" -lt 4194304 ]; then
+            docker image prune --force >/dev/null
             docker builder prune --all --force >/dev/null
             available_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
           fi
@@ -129,14 +129,13 @@ jobs:
           docker volume create "$pilot_volume" >/dev/null
 
           run_preview() {
-            local name="$1" image="$2" volume="$3" alias="$4"
+            local name="$1" image="$2" volume="$3"
             docker run -d \
               --name "$name" \
               --read-only \
               --tmpfs /tmp \
               --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
               --network "$network" \
-              --network-alias "$alias" \
               -e NODE_ENV=production \
               -e PORT=8081 \
               -e ARTHELLO_D1_PATH=/data/d1 \
@@ -163,8 +162,8 @@ jobs:
             done
           }
 
-          run_preview "$baseline_container" "arthello-ds-baseline-runtime:${BASE_SHA}" "$baseline_volume" baseline.localhost
-          run_preview "$pilot_container" "arthello-ds-pilot-runtime:${HEAD_SHA}" "$pilot_volume" pilot.localhost
+          run_preview "$baseline_container" "arthello-ds-baseline-runtime:${BASE_SHA}" "$baseline_volume"
+          run_preview "$pilot_container" "arthello-ds-pilot-runtime:${HEAD_SHA}" "$pilot_volume"
           wait_for_previews
 
           docker stop --time 20 "$baseline_container" "$pilot_container" >/dev/null
@@ -177,13 +176,13 @@ jobs:
               node:24-bookworm-slim node /fixture.mjs
           done
 
-          run_preview "$baseline_container" "arthello-ds-baseline-runtime:${BASE_SHA}" "$baseline_volume" baseline.localhost
-          run_preview "$pilot_container" "arthello-ds-pilot-runtime:${HEAD_SHA}" "$pilot_volume" pilot.localhost
+          run_preview "$baseline_container" "arthello-ds-baseline-runtime:${BASE_SHA}" "$baseline_volume"
+          run_preview "$pilot_container" "arthello-ds-pilot-runtime:${HEAD_SHA}" "$pilot_volume"
           wait_for_previews
 
           docker run --rm --network "$network" \
-            -e BASELINE_URL="http://baseline.localhost:8081" \
-            -e PILOT_URL="http://pilot.localhost:8081" \
+            -e BASELINE_UPSTREAM="http://$baseline_container:8081" \
+            -e PILOT_UPSTREAM="http://$pilot_container:8081" \
             -e TEMP_PASSWORD="$temp_password" \
             -e PERMANENT_PASSWORD="$permanent_password" \
             -e VISUAL_OUTPUT=/screens \

@@ -1,10 +1,13 @@
 const { chromium } = require("playwright");
 const { PNG } = require("pngjs");
 const fs = require("node:fs");
+const http = require("node:http");
 const path = require("node:path");
 
-const baselineUrl = process.env.BASELINE_URL;
-const pilotUrl = process.env.PILOT_URL;
+const baselineUpstream = process.env.BASELINE_UPSTREAM;
+const pilotUpstream = process.env.PILOT_UPSTREAM;
+const baselineUrl = "http://localhost:18081";
+const pilotUrl = "http://localhost:18082";
 const tempPassword = process.env.TEMP_PASSWORD;
 const permanentPassword = process.env.PERMANENT_PASSWORD;
 const output = process.env.VISUAL_OUTPUT || "/screens";
@@ -14,6 +17,32 @@ const manifest = [];
 
 function persist() {
   fs.writeFileSync(path.join(output, "manifest.json"), JSON.stringify(manifest, null, 2));
+}
+
+function startLoopbackProxy(upstream, port) {
+  const upstreamUrl = new URL(upstream);
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((request, response) => {
+      const target = new URL(request.url || "/", upstreamUrl);
+      const headers = { ...request.headers, host: upstreamUrl.host };
+      delete headers.connection;
+      const forwarded = http.request(target, { method: request.method, headers }, (received) => {
+        response.writeHead(received.statusCode || 502, received.headers);
+        received.pipe(response);
+      });
+      forwarded.on("error", (error) => {
+        if (!response.headersSent) response.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+        response.end(`Visual proxy error: ${error.message}`);
+      });
+      request.pipe(forwarded);
+    });
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolve(server));
+  });
+}
+
+function closeServer(server) {
+  return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
 
 async function visible(locator) {
@@ -280,8 +309,13 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
 }
 
 (async () => {
+  if (!baselineUpstream || !pilotUpstream) throw new Error("Visual upstream URLs are required");
   fs.mkdirSync(output, { recursive: true });
   const pixelmatch = (await import("pixelmatch")).default;
+  const proxies = await Promise.all([
+    startLoopbackProxy(baselineUpstream, 18081),
+    startLoopbackProxy(pilotUpstream, 18082),
+  ]);
   const browser = await chromium.launch({ headless: true });
   try {
     const baselineState = await establishAuth(browser, baselineUrl);
@@ -326,6 +360,7 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
     }
   } finally {
     await browser.close();
+    await Promise.all(proxies.map(closeServer));
     persist();
   }
 })().catch((error) => { console.error(error); process.exit(1); });
