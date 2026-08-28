@@ -21,84 +21,13 @@ env:
 jobs:
   reclaim-runner:
     name: reclaim disposable runner cache
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
-      DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
-      DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 10
 
     steps:
-      - name: Configure the confirmed SSH host identity
-        shell: bash
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
-        run: |
-          set -Eeuo pipefail
-          test -n "$DEPLOY_HOST"
-          test -n "$DEPLOY_USER"
-          test -n "$SSH_PRIVATE_KEY"
-          install -m 0700 -d ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 0600 ~/.ssh/id_ed25519
-          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
-
-          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
-          test -n "$route_device"
-          sudo ip link set dev "$route_device" mtu 1200
-          deploy_port="${DEPLOY_PORT:-2222}"
-          scanned_hosts="$RUNNER_TEMP/arthello-known-hosts"
-          : > "$scanned_hosts"
-          chmod 0600 "$scanned_hosts"
-          for attempt in 1 2 3 4 5; do
-            timeout --signal=TERM --kill-after=5s 40s \
-              ssh -p "$deploy_port" \
-              -o StrictHostKeyChecking=accept-new \
-              -o UserKnownHostsFile="$scanned_hosts" \
-              -o GlobalKnownHostsFile=/dev/null \
-              -o PreferredAuthentications=none \
-              -o PubkeyAuthentication=no \
-              -o PasswordAuthentication=no \
-              -o KbdInteractiveAuthentication=no \
-              -o ConnectTimeout=30 \
-              -o HostKeyAlgorithms=ssh-ed25519 \
-              "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
-            test -s "$scanned_hosts" && break
-            sleep 5
-          done
-          test -s "$scanned_hosts"
-          actual_fingerprint="$(ssh-keygen -lf "$scanned_hosts" -E sha256 | awk '{print $2; exit}')"
-          test "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
-          mv "$scanned_hosts" ~/.ssh/known_hosts
-
       - name: Reclaim only isolated acceptance artifacts
         shell: bash
         run: |
-          set -Eeuo pipefail
-          deploy_port="${DEPLOY_PORT:-2222}"
-          route_device="$(ip -4 route show default | awk '{print $5; exit}')"
-          test -n "$route_device"
-          sudo ip link set dev "$route_device" mtu 1200
-          ssh_args=(
-            -p "$deploy_port"
-            -i ~/.ssh/id_ed25519
-            -o IdentitiesOnly=yes
-            -o PreferredAuthentications=publickey
-            -o PasswordAuthentication=no
-            -o KbdInteractiveAuthentication=no
-            -o BatchMode=yes
-            -o ConnectTimeout=140
-            -o ServerAliveInterval=15
-            -o ServerAliveCountMax=10
-            -o IPQoS=none
-            -o Compression=no
-            -o KexAlgorithms=curve25519-sha256
-            -o HostKeyAlgorithms=ssh-ed25519
-            -o PubkeyAcceptedAlgorithms=ssh-ed25519
-            -o Ciphers=aes128-ctr
-            -o MACs=hmac-sha2-256
-          )
-          maintenance_payload="$(base64 -w0 <<'REMOTE'
           set -Eeuo pipefail
           test "$(docker inspect --format '{{.State.Running}}' stroios-caddy-1)" = true
           mapfile -t live_containers < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}')
@@ -144,12 +73,6 @@ jobs:
           curl -fsS --max-time 20 https://school-188-225-38-55.sslip.io/api/health | grep -F '"status":"ok"' >/dev/null
           curl -fsS --max-time 20 https://pilot-arthello-188-225-38-55.sslip.io/api/health | grep -F '"status":"ok"' >/dev/null
           printf 'ARTHELLO_RUNNER_RECLAIM=OK\nARTHELLO_PRODUCTION_PRESERVED=OK\nARTHELLO_PREVIEW_PRESERVED=OK\n'
-          REMOTE
-          )"
-          test -n "$maintenance_payload"
-          timeout --signal=TERM --kill-after=5s 300s \
-            ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "printf '%s' '$maintenance_payload' | base64 -d | bash" </dev/null
 
   candidate:
     needs: reclaim-runner
