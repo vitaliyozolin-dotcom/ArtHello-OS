@@ -137,9 +137,9 @@ html[data-design-code="v1"][data-theme="student"] {
   --student-accent-shadow: color-mix(in srgb, var(--color-accent) 28%, transparent);
   --student-main-glow: color-mix(in srgb, var(--color-accent) 13%, transparent);
   --student-main-background: var(--color-page);
-  --student-action: var(--color-accent);
-  --student-action-strong: var(--color-accent);
-  --student-action-shadow: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  --student-action: var(--color-accent-hover);
+  --student-action-strong: var(--color-accent-hover);
+  --student-action-shadow: color-mix(in srgb, var(--color-accent-hover) 28%, transparent);
   --student-highlight: var(--color-accent);
   --student-highlight-text: var(--success-500);
   --student-highlight-soft: color-mix(in srgb, var(--success-500) 13%, transparent);
@@ -221,6 +221,24 @@ html[data-design-code="v1"][data-theme="student"] .role-student .calendar-week >
 
 html[data-design-code="v1"][data-theme="student"] .role-student .menu-grid > article.featured {
   border-color: var(--color-accent);
+}
+
+html[data-design-code="v1"][data-theme="student"] .role-student .eyebrow,
+html[data-design-code="v1"][data-theme="student"] .role-student .menu-grid dt {
+  color: var(--brand-400);
+}
+
+html[data-design-code="v1"][data-theme="student"] .role-student .event-date {
+  background: var(--color-accent-hover);
+  color: var(--color-text);
+}
+
+html[data-design-code="v1"][data-theme="student"] .role-student button:focus-visible,
+html[data-design-code="v1"][data-theme="student"] .role-student a:focus-visible,
+html[data-design-code="v1"][data-theme="student"] .role-student input:focus-visible,
+html[data-design-code="v1"][data-theme="student"] .role-student select:focus-visible,
+html[data-design-code="v1"][data-theme="student"] .role-student textarea:focus-visible {
+  outline-color: var(--brand-400);
 }
 
 html[data-design-code="v1"][data-theme="student"] .role-student .privacy-card > span {
