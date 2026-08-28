@@ -69,6 +69,27 @@ test("rollout is explicit and disabled by default", () => {
   );
 });
 
+test("approved Onest is served as a local preloaded WOFF2", () => {
+  const onestFace = globals.match(
+    /@font-face\s*\{[\s\S]*?font-family:\s*"Onest";[\s\S]*?\}/,
+  )?.[0];
+
+  assert.ok(onestFace, "Onest font-face is required");
+  assert.match(
+    onestFace,
+    /url\("\/fonts\/onest-variable\.woff2"\) format\("woff2-variations"\)/,
+  );
+  assert.ok(
+    onestFace.indexOf("onest-variable.woff2") <
+      onestFace.indexOf("onest-variable.ttf"),
+    "WOFF2 must be the primary Onest source",
+  );
+  assert.match(
+    layout,
+    /\{designCodeVersion \? \([\s\S]*?rel="preload"[\s\S]*?href="\/fonts\/onest-variable\.woff2"[\s\S]*?as="font"[\s\S]*?type="font\/woff2"[\s\S]*?crossOrigin="anonymous"/,
+  );
+});
+
 test("container build gate is false unless explicitly enabled", () => {
   assert.match(dockerfile, /^ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1=false/m);
   assert.equal(
@@ -163,23 +184,43 @@ test("DS-03 student theme changes tokens and typography only", () => {
     studentTheme,
     /html\[data-design-code="v1"\]\[data-theme="student"\] \{/,
   );
-  assert.match(studentTheme, /--color-page:\s*var\(--neutral-900\);/);
-  assert.match(studentTheme, /--color-surface:\s*var\(--neutral-800\);/);
-  assert.match(studentTheme, /--color-text:\s*var\(--neutral-0\);/);
-  assert.match(studentTheme, /--color-accent:\s*var\(--brand-500\);/);
+  for (const mapping of [
+    ["color-page", "neutral-900"],
+    ["color-surface", "neutral-800"],
+    ["color-surface-muted", "neutral-700"],
+    ["color-surface-raised", "neutral-800"],
+    ["color-text", "neutral-0"],
+    ["color-text-secondary", "neutral-300"],
+    ["color-text-muted", "neutral-400"],
+    ["color-accent", "brand-500"],
+    ["color-accent-hover", "brand-600"],
+    ["color-accent-active", "brand-700"],
+  ]) {
+    assert.match(
+      studentTheme,
+      new RegExp(`--${mapping[0]}:\\s*var\\(--${mapping[1]}\\);`),
+    );
+  }
+  for (const token of [
+    "color-border",
+    "color-border-strong",
+    "color-accent-soft",
+    "color-focus",
+    "color-overlay",
+  ]) {
+    assert.match(studentTheme, new RegExp(`--${token}:\\s*color-mix\\(`));
+  }
   assert.match(studentTheme, /--student-font-family:\s*var\(--font-sans\);/);
   assert.match(
     schoolApp,
     /root\.dataset\.theme = snapshot\.viewer\.role === "student" \? "student" : "light"/,
   );
 
-  const studentRules = globals
-    .split("\n")
-    .filter((line) =>
-      /\.role-student|\.student-(?:hero|dashboard|kicker|hero-copy|launch-grid|quote|day-grid|achievements|score-orbit)|\.launch-(?:orange|violet|cyan|lime)/.test(
-        line,
-      ),
-    )
+  const studentSelector =
+    /\.role-student|\.student-(?:hero|dashboard|kicker|hero-copy|launch-grid|quote|day-grid|achievements|score-orbit)|\.launch-(?:orange|violet|cyan|lime)/;
+  const studentRules = [...globals.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((match) => studentSelector.test(match[1]))
+    .map((match) => `${match[1]} {${match[2]}}`)
     .join("\n");
   assert.doesNotMatch(
     studentRules,
@@ -187,6 +228,7 @@ test("DS-03 student theme changes tokens and typography only", () => {
     "student colors must live only in the theme token layer",
   );
   assert.doesNotMatch(studentRules, /Rubik/);
+  assert.doesNotMatch(studentRules, /(?:linear|radial)-gradient/i);
   assert.doesNotMatch(globals, /\.role-student \.status-pill\s*\{/);
 
   const approvedThemeBlock = studentTheme
