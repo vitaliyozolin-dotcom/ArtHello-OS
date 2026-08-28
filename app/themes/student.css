@@ -16,6 +16,7 @@
   --student-surface: #1a1d2b;
   --student-surface-raised: #171a27;
   --student-topbar: rgba(12, 14, 23, 0.86);
+  --student-bottom-nav: rgba(10, 11, 18, 0.96);
   --student-orbit: rgba(10, 12, 23, 0.72);
   --student-on-dark: #ffffff;
   --student-text-48: rgba(255, 255, 255, 0.48);
@@ -111,6 +112,7 @@ html[data-design-code="v1"][data-theme="student"] {
   --student-surface: var(--color-surface);
   --student-surface-raised: var(--color-surface-raised);
   --student-topbar: color-mix(in srgb, var(--neutral-900) 94%, transparent);
+  --student-bottom-nav: color-mix(in srgb, var(--neutral-900) 96%, transparent);
   --student-orbit: color-mix(in srgb, var(--neutral-900) 78%, transparent);
   --student-on-dark: var(--neutral-0);
   --student-text-48: color-mix(in srgb, var(--neutral-0) 48%, transparent);
