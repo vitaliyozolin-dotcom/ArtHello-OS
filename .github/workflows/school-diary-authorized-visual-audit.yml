@@ -378,7 +378,7 @@ jobs:
                       'selector': '.event-grid .event-date > strong',
                       'expectedCount': 2,
                       'textRole': 'primary-large',
-                      'minimumContrast': 3,
+                      'minimumContrast': 4.5,
                   },
                   {
                       'id': 'event-month-secondary',
@@ -556,6 +556,7 @@ jobs:
                               or ratio < minimum_contrast
                               or sample['pass'] is not True
                               or not sample['text']
+                              or sample['textPresent'] is not True
                               or not isinstance(sample['effectiveOpacity'], (int, float))
                               or not 0 < sample['effectiveOpacity'] <= 1
                               or sample['renderedForeground'] is None
