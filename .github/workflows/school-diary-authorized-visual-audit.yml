@@ -199,12 +199,18 @@ jobs:
 
           test -s school-authorized-visual-output/manifest.json
           test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 28
-          manifest_values="$(node - <<'READ_MANIFEST'
-          const manifest = JSON.parse(require('node:fs').readFileSync('school-authorized-visual-output/manifest.json', 'utf8'));
-          if (manifest.captures !== 28) throw new Error('Incomplete authorized capture matrix');
-          if (manifest.credentialsStored !== false) throw new Error('Credential storage invariant failed');
-          if (manifest.fixture !== 'empty schema from candidate migrations, seeded with synthetic data') throw new Error('Fixture invariant failed');
-          console.log(String(manifest.violations.length) + ' ' + String(manifest.compliant));
+          manifest_values="$(python3 - <<'READ_MANIFEST'
+          import json
+
+          with open('school-authorized-visual-output/manifest.json', encoding='utf-8') as source:
+              manifest = json.load(source)
+          if manifest['captures'] != 28:
+              raise RuntimeError('Incomplete authorized capture matrix')
+          if manifest['credentialsStored'] is not False:
+              raise RuntimeError('Credential storage invariant failed')
+          if manifest['fixture'] != 'empty schema from candidate migrations, seeded with synthetic data':
+              raise RuntimeError('Fixture invariant failed')
+          print(f"{len(manifest['violations'])} {str(manifest['compliant']).lower()}")
           READ_MANIFEST
           )"
           read -r violation_count compliant <<< "$manifest_values"
