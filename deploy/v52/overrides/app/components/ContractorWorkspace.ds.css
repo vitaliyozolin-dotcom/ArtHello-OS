@@ -226,7 +226,7 @@
 
 @media (max-width: 720px) {
   .ahContractorPage {
-    gap: 16px;
+    gap: 20px;
     padding-top: 0;
   }
 
@@ -259,13 +259,15 @@
 
   .ahContractorSource {
     grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
+    gap: 10px;
     border-radius: 22px;
-    padding: 16px;
+    padding: 18px;
   }
 
   .ahContractorSource strong {
     width: fit-content;
+    font-size: 12px;
+    line-height: 16px;
   }
 
   .ahContractorSource span {
@@ -274,7 +276,7 @@
   }
 
   .ahContractorKpis {
-    gap: 12px;
+    gap: 14px;
   }
 
   .ahContractorKpis > .ahKpiCard {
@@ -283,9 +285,21 @@
     padding: 16px;
   }
 
+  .ahContractorKpis .ahKpiCopy small {
+    font-size: 14px;
+    line-height: 20px;
+  }
+
   .ahContractorKpis .ahKpiCopy strong {
+    margin-top: 5px;
     font-size: 24px;
     line-height: 28px;
+  }
+
+  .ahContractorKpis .ahKpiCopy > span {
+    margin-top: 6px;
+    font-size: 13px;
+    line-height: 18px;
   }
 
   .ahContractorRegistry {
@@ -338,7 +352,7 @@
 
   .ahContractorMobileList {
     display: grid;
-    gap: 12px;
+    gap: 14px;
     padding: 16px;
   }
 
@@ -386,7 +400,7 @@
   .ahContractorMobileGrid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: 14px;
   }
 
   .ahContractorMobileGrid > span {
