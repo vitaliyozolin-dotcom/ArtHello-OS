@@ -68,6 +68,9 @@ jobs:
           docker builder prune --all --force >/dev/null
           after_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
           printf 'ARTHELLO_RUNNER_SPACE_BEFORE_KB=%s\nARTHELLO_RUNNER_SPACE_AFTER_KB=%s\n' "$before_kb" "$after_kb"
+          df -h / "$docker_root" "$RUNNER_TEMP" || true
+          docker system df --verbose || true
+          du -x -h --max-depth=2 "$(dirname "$RUNNER_TEMP")" 2>/dev/null | sort -h | tail -n 80 || true
           test "$after_kb" -ge 6291456
           curl -fsS --max-time 20 https://arthello-188-225-38-55.sslip.io/api/health | grep -F '"status":"ok"' >/dev/null
           curl -fsS --max-time 20 https://school-188-225-38-55.sslip.io/api/health | grep -F '"status":"ok"' >/dev/null
