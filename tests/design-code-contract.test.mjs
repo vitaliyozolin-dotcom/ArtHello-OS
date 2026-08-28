@@ -2,14 +2,24 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [tokens, layout, dockerfile, login, designCodePointer, schoolApp] =
-  await Promise.all([
+const [
+  tokens,
+  layout,
+  dockerfile,
+  login,
+  designCodePointer,
+  schoolApp,
+  globals,
+  studentTheme,
+] = await Promise.all([
     readFile(new URL("../app/design-tokens.css", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
     readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../DESIGN_CODE.md", import.meta.url), "utf8"),
     readFile(new URL("../app/school-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/themes/student.css", import.meta.url), "utf8"),
   ]);
 
 test("approved design-code identity is immutable", () => {
@@ -139,4 +149,51 @@ test("DS-02 tablet shell is fixed at the approved 768–1199 range", () => {
   assert.match(schoolApp, /aria-label=\{item\.label\} title=\{item\.label\}/);
   assert.match(schoolApp, /className="rail-context" title=/);
   assert.doesNotMatch(tokens, /!important/);
+});
+
+test("DS-03 student theme changes tokens and typography only", () => {
+  assert.ok(
+    layout.indexOf('import "./design-tokens.css"') <
+      layout.indexOf('import "./themes/student.css"') &&
+      layout.indexOf('import "./themes/student.css"') <
+        layout.indexOf('import "./globals.css"'),
+    "student theme tokens must load between approved tokens and legacy styles",
+  );
+  assert.match(
+    studentTheme,
+    /html\[data-design-code="v1"\]\[data-theme="student"\] \{/,
+  );
+  assert.match(studentTheme, /--color-page:\s*var\(--neutral-900\);/);
+  assert.match(studentTheme, /--color-surface:\s*var\(--neutral-800\);/);
+  assert.match(studentTheme, /--color-text:\s*var\(--neutral-0\);/);
+  assert.match(studentTheme, /--color-accent:\s*var\(--brand-500\);/);
+  assert.match(studentTheme, /--student-font-family:\s*var\(--font-sans\);/);
+  assert.match(
+    schoolApp,
+    /root\.dataset\.theme = snapshot\.viewer\.role === "student" \? "student" : "light"/,
+  );
+
+  const studentRules = globals
+    .split("\n")
+    .filter((line) => /student|launch-(?:orange|violet|cyan|lime)/.test(line))
+    .join("\n");
+  assert.doesNotMatch(
+    studentRules,
+    /#[0-9a-f]{3,8}\b|rgba?\(|\bwhite\b|\bblack\b/i,
+    "student colors must live only in the theme token layer",
+  );
+  assert.doesNotMatch(studentRules, /Rubik/);
+  assert.doesNotMatch(globals, /\.role-student \.status-pill\s*\{/);
+
+  const approvedThemeBlock = studentTheme
+    .split('html[data-design-code="v1"][data-theme="student"] {')[1]
+    ?.split(
+      'html[data-design-code="v1"][data-theme="student"] .role-student,',
+    )[0];
+  assert.ok(approvedThemeBlock, "approved student theme block is required");
+  assert.doesNotMatch(
+    approvedThemeBlock,
+    /(?:^|\n)\s*(?:width|height|min-width|max-width|min-height|max-height|margin|padding|gap|display|position|grid-template|border-radius):/m,
+    "student theme must not own geometry",
+  );
 });
