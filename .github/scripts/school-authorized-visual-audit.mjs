@@ -348,22 +348,22 @@ try {
         role: role.id,
         width,
         code: "PAGE_PADDING_LEFT",
-        selector: ".l0-main",
+        selector: ".page-shell",
         expected: shellMode === "phone" ? 16 : width >= 1600 ? 32 : 24,
-        actual: numeric(metrics.main.style?.paddingLeft),
+        actual: numeric(metrics.pageShell.style?.paddingLeft),
         severity: "P0",
       });
       expectNumber({
         role: role.id,
         width,
         code: "PAGE_PADDING_RIGHT",
-        selector: ".l0-main",
+        selector: ".page-shell",
         expected: shellMode === "phone" ? 16 : width >= 1600 ? 32 : 24,
-        actual: numeric(metrics.main.style?.paddingRight),
+        actual: numeric(metrics.pageShell.style?.paddingRight),
         severity: "P0",
       });
 
-      if (shellMode === "tablet") {
+      if (shellMode === "tablet" && railVisible) {
         for (const item of [metrics.railBrandText, metrics.railNavText, metrics.railContextText]) {
           if (item.rect && item.style?.display !== "none") {
             addViolation(role.id, width, "P0", "TABLET_RAIL_LABEL", item.selector, "hidden", "visible");
@@ -436,8 +436,8 @@ try {
       if (!focus || ((focus.outlineStyle === "none" || focus.outlineWidth === "0px") && focus.boxShadow === "none")) {
         addViolation(role.id, width, "P1", "FOCUS_RING", "first keyboard target", "visible", focus);
       }
-      if (metrics.pageRoot.rect && metrics.pageRoot.rect.width > 1841) {
-        addViolation(role.id, width, "P1", "CONTENT_MAX_WIDTH", ".l0-main > *", "<=1840", metrics.pageRoot.rect.width);
+      if (metrics.pageShell.rect && metrics.pageShell.rect.width > 1841) {
+        addViolation(role.id, width, "P1", "CONTENT_MAX_WIDTH", ".page-shell", "<=1840", metrics.pageShell.rect.width);
       }
 
       const screenshot = role.id + "-" + width + ".png";
