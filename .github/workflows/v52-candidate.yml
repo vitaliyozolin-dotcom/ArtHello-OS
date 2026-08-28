@@ -134,7 +134,7 @@ jobs:
           import json
           from pathlib import Path
 
-          canon = json.loads(Path("candidate/deploy/v52/quality-gates/visual-canon.json").read_text())
+          canon = json.loads(Path("candidate/quality-gates/visual-canon.json").read_text())
           assert canon["schema_version"] == 3
           assert canon["compact_registry_kpi"]["desktop"]["min_height_px"] == 98
           assert canon["compact_registry_kpi"]["mobile"]["min_height_px"] == 84
