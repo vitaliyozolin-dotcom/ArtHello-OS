@@ -320,6 +320,10 @@ test("DS-03 student theme changes tokens and typography only", () => {
   );
   assert.match(
     sharedRouteSurfaceBlock,
+    /\.privacy-card > span \{[\s\S]*?background: color-mix\(in srgb, var\(--success-500\) 14%, transparent\);[\s\S]*?color: var\(--success-50\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
     /\.segmented button\.active \{[\s\S]*?background: var\(--color-surface\);[\s\S]*?color: var\(--color-text\);/,
   );
   assert.match(
