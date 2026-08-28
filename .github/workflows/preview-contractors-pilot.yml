@@ -49,6 +49,26 @@ jobs:
           test "$(docker inspect "${live_containers[0]}" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$PRODUCTION_VOLUME"
           printf 'ARTHELLO_PREVIEW_PREFLIGHT=OK\n'
 
+      - name: Reclaim isolated pilot build space
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t stale_images < <(
+            docker image ls --format '{{.Repository}}:{{.Tag}}' |
+              grep -E '^(arthello-contractors-preview|arthello-ds-pilot-app|arthello-ds-pilot-runtime|arthello-ds-baseline-runtime):' || true
+          )
+          for image in "${stale_images[@]}"; do
+            # Docker refuses to remove an image used by a running container.
+            docker image rm "$image" >/dev/null 2>&1 || true
+          done
+          docker image prune --force >/dev/null
+          docker builder prune --all --force >/dev/null
+
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          available_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
+          printf 'ARTHELLO_BUILD_SPACE_KB=%s\n' "$available_kb"
+          test "$available_kb" -ge 2097152
+
       - name: Build pilot image
         shell: bash
         run: |
