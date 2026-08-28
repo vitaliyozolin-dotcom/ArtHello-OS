@@ -2331,7 +2331,7 @@ const manifest = {
   capturedAt: new Date().toISOString(),
   candidateSha,
   candidateImageId,
-  sourceOfTruth: "School 1–11 design code 1.0.0, approved 2026-08-27",
+  sourceOfTruth: "School 1–11 design code 1.0.0, approved 2026-08-27, SHA-256 cebdc3f3ae76cb50103734c0e6144cef713108b4c6fd9b39de93cf3f8828dd48",
   origin: "loopback-ssh-tunnel",
   fixture: "empty schema from candidate migrations, seeded with synthetic data",
   credentialsStored: false,
