@@ -3,6 +3,8 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { currentAccountingPeriod, rublesToMinorUnits } from "../../lib/accounting";
+import { Button, Card, EmptyState, KpiCard, PageContainer, PageHeader, Tabs } from "./design-system";
+import "./AccountingWorkspace.ds.css";
 
 type AccountingDocument = {
   id: string;
@@ -127,8 +129,8 @@ export function AccountingWorkspace({
     }
   }
 
-  if (loading) return <section className="accounting-state">Загружаем первичные документы…</section>;
-  if (error || !data) return <section className="accounting-state"><strong>{error}</strong><small>Доступ разрешён бухгалтерии, финансам, юристу, руководителям и Представителю.</small></section>;
+  if (loading) return <PageContainer className="ahAccountingPage"><PageHeader eyebrow="Документы · оплаты · учёт" title="Бухгалтерия и первичка" description="Первичные документы и их связь с подтверждёнными операциями." /><Card className="ahAccountingState">Загружаем первичные документы…</Card></PageContainer>;
+  if (error || !data) return <PageContainer className="ahAccountingPage"><PageHeader eyebrow="Документы · оплаты · учёт" title="Бухгалтерия и первичка" description="Доступ зависит от роли и выданных полномочий." /><Card className="ahAccountingState"><EmptyState density="compact" title="Бухгалтерский контур недоступен" description={error || "Доступ разрешён бухгалтерии, финансам, юристу и руководителям."} /></Card></PageContainer>;
 
   const counterparties = data.counterparties
     .map((item) => [item.id, item.displayName] as [string, string])
@@ -160,72 +162,73 @@ export function AccountingWorkspace({
   }
 
   return <>
-    <section className="page accounting-workspace">
-      <div className="accounting-heading">
-        <div>
-          <p className="eyebrow">Документы и учёт</p>
-          <h1>Бухгалтерия и первичка</h1>
-          <p>Счета, акты, накладные, чеки и УПД — с комплектностью, подписью и связью до операции.</p>
-        </div>
-        <button className="primary-action" disabled={busy === "new"} onClick={() => setCreateOpen(true)}>+ Добавить документ</button>
-      </div>
+    <PageContainer className="ahAccountingPage">
+      <PageHeader
+        eyebrow="Документы · оплаты · учёт"
+        title="Бухгалтерия и первичка"
+        description="Счета, акты, накладные, чеки и УПД — с комплектностью, подписью и связью до операции."
+        actions={<Button variant="primary" disabled={busy === "new"} onClick={() => setCreateOpen(true)}>+ Добавить документ</Button>}
+      />
 
-      {!hasAccountingData ? <div className="manual-module-empty">
-        <span>＋</span>
-        <h2>Документов пока нет</h2>
-        <p>{counterparties.length ? "Добавьте первый первичный документ вручную. Его рабочий ID назначит система." : "Сначала создайте карточку контрагента в «Единых карточках», затем добавьте документ."}</p>
-        <button type="button" onClick={() => setCreateOpen(true)}>Добавить первый документ</button>
-      </div> : <>
-        <div className="accounting-boundary"><strong>РАБОЧИЙ КОНТУР</strong><span>{data.boundary}</span></div>
-        <div className="accounting-kpis">
-          <button onClick={() => setTab("Первичные документы")}><span>Документы</span><strong>{data.summary.documents}</strong><small>{rub(data.summary.totalMinor)}</small></button>
-          <button onClick={() => setTab("Связь с оплатами")}><span>Связаны с оплатой</span><strong>{data.summary.linked}</strong><small>из {data.summary.documents}</small></button>
-          <button className="warn" onClick={() => setTab("Комплектность")}><span>Не комплектно</span><strong>{data.summary.incomplete}</strong><small>по открытым проверкам</small></button>
-          <button className="warn" onClick={() => setTab("ЭДО и 1С")}><span>Подпись на проверке</span><strong>{data.summary.unsigned}</strong><small>ожидает подтверждения</small></button>
+      {!hasAccountingData ? <Card className="ahAccountingEmpty"><EmptyState
+        density="compact"
+        title="Первичных документов пока нет"
+        description={counterparties.length ? "Добавьте первый документ вручную. После сохранения останутся доступны комплектность, связь с оплатами, ЭДО и выгрузки." : "Сначала создайте карточку контрагента в «Единых карточках», затем добавьте документ."}
+        action={<Button variant="primary" onClick={() => setCreateOpen(true)}>Добавить первый документ</Button>}
+      /></Card> : null}
+      <>
+        <Card className="ahAccountingBoundary"><strong>Рабочий контур</strong><span>{data.boundary}</span></Card>
+        <section className="ahAccountingKpis" aria-label="Показатели бухгалтерского контура">
+          <KpiCard label="Документы" value={data.summary.documents} note={rub(data.summary.totalMinor)} onClick={() => setTab("Первичные документы")} />
+          <KpiCard label="Связаны с оплатой" value={data.summary.linked} note={`из ${data.summary.documents}`} onClick={() => setTab("Связь с оплатами")} />
+          <KpiCard className="ahAccountingKpiWarning" label="Не комплектно" value={data.summary.incomplete} note="по открытым проверкам" onClick={() => setTab("Комплектность")} />
+          <KpiCard className="ahAccountingKpiWarning" label="Подпись на проверке" value={data.summary.unsigned} note="ожидает подтверждения" onClick={() => setTab("ЭДО и 1С")} />
+        </section>
+        <div className="ahAccountingTabs">
+          <Tabs<Tab> items={tabs.map((item) => ({ id: item, label: item }))} value={tab} onChange={setTab} ariaLabel="Разделы бухгалтерского контура" />
         </div>
-        <div className="accounting-tabs">{tabs.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</div>
 
-        {tab === "Первичные документы" ? <article className="accounting-panel">
+        {tab === "Первичные документы" ? <article className="ahAccountingPanel ahCard">
           <Head p="Единый реестр" h="Первичные документы" s={`${data.documents.length} записей`} />
-          <div className="accounting-table"><table><thead><tr><th>Документ</th><th>Дата</th><th>Контрагент</th><th>Договор</th><th>Сумма</th><th>Подпись</th><th>Оплата</th><th>Статус</th></tr></thead><tbody>
-            {data.documents.map((document) => <tr key={document.id}>
-              <td><strong>{document.documentType} · {document.number}</strong><small>{document.id}</small></td>
-              <td>{document.documentDate}</td>
-              <td>{data.entityNames[document.counterpartyEntityId] || document.counterpartyEntityId}</td>
-              <td>{document.contractId || "—"}</td>
-              <td>{rub(document.amountMinor)}</td>
-              <td>{document.signatureStatus === "На проверке" ? <button disabled={busy === document.id} onClick={() => void action({ action: "confirmSignature", documentId: document.id, evidence: "Реквизиты и подпись сверены бухгалтером по оригиналу" }, document.id, "Подпись подтверждена")}>Подтвердить</button> : document.signatureStatus}</td>
-              <td>{document.paymentOperationId || "Не связана"}</td>
-              <td><span>{document.status}</span></td>
+          {data.documents.length ? <div className="ahAccountingTable"><table><thead><tr><th>Документ</th><th>Дата</th><th>Контрагент</th><th>Договор</th><th>Сумма</th><th>Подпись</th><th>Оплата</th><th>Статус</th></tr></thead><tbody>
+            {data.documents.map((document) => <tr key={document.id} data-ah-compact-card="true">
+              <td data-label="Документ"><strong>{document.documentType} · {document.number}</strong><small>{document.id}</small></td>
+              <td data-label="Дата">{document.documentDate}</td>
+              <td data-label="Контрагент">{data.entityNames[document.counterpartyEntityId] || document.counterpartyEntityId}</td>
+              <td data-label="Договор">{document.contractId || "—"}</td>
+              <td data-label="Сумма">{rub(document.amountMinor)}</td>
+              <td data-label="Подпись">{document.signatureStatus === "На проверке" ? <button disabled={busy === document.id} onClick={() => void action({ action: "confirmSignature", documentId: document.id, evidence: "Реквизиты и подпись сверены бухгалтером по оригиналу" }, document.id, "Подпись подтверждена")}>Подтвердить</button> : document.signatureStatus}</td>
+              <td data-label="Оплата">{document.paymentOperationId || "Не связана"}</td>
+              <td data-label="Статус"><span>{document.status}</span></td>
             </tr>)}
-          </tbody></table></div>
+          </tbody></table></div> : <EmptyState density="compact" title="Документов пока нет" description="Добавьте первый первичный документ — строка появится в реестре после сохранения." />}
         </article> : null}
 
-        {tab === "Комплектность" ? <div className="accounting-checks">{data.checks.map((check) => <article key={check.id} className="accounting-panel">
+        {tab === "Комплектность" ? data.checks.length ? <div className="ahAccountingChecks">{data.checks.map((check) => <article key={check.id} className="ahAccountingPanel ahCard" data-ah-compact-card="true">
           <Head p={check.operationId || "Без операции"} h={check.contractId || "Без договора"} s={check.status} />
-          <div className="document-set"><div><small>Требуется</small>{check.requiredTypes.map((type) => <span key={type}>{type}</span>)}</div><div><small>Отсутствует</small>{check.missingTypes.length ? check.missingTypes.map((type) => <strong key={type}>{type}</strong>) : <em>Комплект полный</em>}</div></div>
+          <div className="ahAccountingDocumentSet"><div><small>Требуется</small>{check.requiredTypes.map((type) => <span key={type}>{type}</span>)}</div><div><small>Отсутствует</small>{check.missingTypes.length ? check.missingTypes.map((type) => <strong key={type}>{type}</strong>) : <em>Комплект полный</em>}</div></div>
           <footer><span>Проверено {check.checkedAt.slice(0, 10)} · {check.ownerEntityId || "Ответственный не назначен"}</span>{check.relatedTaskId ? <b>TSK-{check.relatedTaskId}</b> : check.missingTypes.length ? <button disabled={busy === check.id} onClick={() => void action({ action: "createMissingTask", checkId: check.id }, check.id, "Задача создана")}>Создать задачу</button> : null}</footer>
-        </article>)}</div> : null}
+        </article>)}</div> : <Card className="ahAccountingInlineEmpty"><EmptyState density="compact" title="Проверок комплектности пока нет" description="Проверки появятся после добавления первичных документов и их связи с договором." /></Card> : null}
 
-        {tab === "Связь с оплатами" ? <div className="accounting-chain">
-          <article className="accounting-panel"><Head p="Проверяемая цепочка" h="Счёт → акт → договор → платёж" s="до источника" /><ol>
+        {tab === "Связь с оплатами" ? data.documents.length || data.links.length ? <div className="ahAccountingChain">
+          <article className="ahAccountingPanel ahCard"><Head p="Проверяемая цепочка" h="Счёт → акт → договор → платёж" s="до источника" /><ol>
             <li><span>Счёт</span><strong>{data.chain.invoiceId || "Не связан"}</strong></li>
             <li><span>Акт</span><strong>{data.chain.actId || "Не связан"}</strong></li>
             <li><span>Договор</span><strong>{data.chain.contractId || "Не связан"}</strong></li>
             <li><span>Операция</span><strong>{data.chain.paymentId || "Не связана"}</strong></li>
             <li><span>Источник</span><strong>{data.operations[data.chain.paymentId]?.sourceSystem || "—"}</strong></li>
           </ol><button onClick={onOpenFinance}>Открыть в финансах</button></article>
-          <article className="accounting-panel"><Head p="Связи документов" h="Основание сопоставления" s={`${data.links.length} связи`} /><div className="accounting-links">{data.links.map((link) => <article key={link.id}><strong>{link.fromDocumentId}</strong><span>→</span><strong>{link.toDocumentId}</strong><p>{link.relationType} · {link.evidence}</p></article>)}</div></article>
-        </div> : null}
+          <article className="ahAccountingPanel ahCard"><Head p="Связи документов" h="Основание сопоставления" s={`${data.links.length} связи`} />{data.links.length ? <div className="ahAccountingLinks">{data.links.map((link) => <article key={link.id} data-ah-compact-card="true"><strong>{link.fromDocumentId}</strong><span>→</span><strong>{link.toDocumentId}</strong><p>{link.relationType} · {link.evidence}</p></article>)}</div> : <EmptyState density="compact" title="Связей пока нет" description="Основание сопоставления появится после связи документа с подтверждённой оплатой." />}</article>
+        </div> : <Card className="ahAccountingInlineEmpty"><EmptyState density="compact" title="Связей с оплатами пока нет" description="Сначала добавьте первичный документ. Затем его можно будет связать с подтверждённой операцией." /></Card> : null}
 
-        {tab === "ЭДО и 1С" ? data.integrations.length ? <div className="integration-status-grid">{data.integrations.map((integration) => <article key={integration.id} className="accounting-panel"><header><span>{integration.system}</span><em>{integration.status}</em></header><h2>{integration.mode}</h2><p>{integration.truth}</p><dl><div><dt>Последний успех</dt><dd>{integration.lastSuccessAt || "Не было"}</dd></div><div><dt>Записей</dt><dd>{integration.recordCount}</dd></div></dl><footer>{integration.error}</footer></article>)}</div> : <div className="manual-module-empty"><span>↔</span><h2>Интеграции не подключены</h2><p>Первичку можно вести вручную. Подключение ЭДО и учётной системы добавим отдельно.</p></div> : null}
+        {tab === "ЭДО и 1С" ? data.integrations.length ? <div className="ahAccountingIntegrationGrid">{data.integrations.map((integration) => <article key={integration.id} className="ahAccountingPanel ahCard" data-ah-compact-card="true"><header><span>{integration.system}</span><em>{integration.status}</em></header><h2>{integration.mode}</h2><p>{integration.truth}</p><dl><div><dt>Последний успех</dt><dd>{integration.lastSuccessAt || "Не было"}</dd></div><div><dt>Записей</dt><dd>{integration.recordCount}</dd></div></dl><footer>{integration.error}</footer></article>)}</div> : <Card className="ahAccountingInlineEmpty"><EmptyState density="compact" title="Интеграции не подключены" description="Первичку можно вести вручную. Подключение ЭДО и учётной системы добавим отдельно." /></Card> : null}
 
-        {tab === "Выгрузки" ? <div className="accounting-chain">
-          <article className="accounting-panel export-create"><Head p="Контролируемый файл" h="Пакет для 1С" s="без отправки" /><p>Создаётся проверяемый реестр. Передачи в 1С и изменения учёта нет.</p><button disabled={busy === "export"} onClick={() => void action({ action: "prepareExport", period: currentPeriod }, "export", "Реестр подготовлен")}>Подготовить выгрузку за {currentPeriod}</button></article>
-          <article className="accounting-panel"><Head p="История" h="Подготовленные пакеты" s={`${data.exports.length} записей`} /><div className="export-list">{data.exports.map((item) => <article key={item.id}><div><strong>{item.id}</strong><small>{item.exportType} · {item.period}</small></div><span>{item.documentCount} док.</span><b>{rub(item.amountMinor)}</b><em>{item.status}</em></article>)}</div></article>
+        {tab === "Выгрузки" ? <div className="ahAccountingChain">
+          <article className="ahAccountingPanel ahCard ahAccountingExportCreate"><Head p="Контролируемый файл" h="Пакет для 1С" s="без отправки" /><p>Создаётся проверяемый реестр. Передачи в 1С и изменения учёта нет.</p><button disabled={busy === "export"} onClick={() => void action({ action: "prepareExport", period: currentPeriod }, "export", "Реестр подготовлен")}>Подготовить выгрузку за {currentPeriod}</button></article>
+          <article className="ahAccountingPanel ahCard"><Head p="История" h="Подготовленные пакеты" s={`${data.exports.length} записей`} />{data.exports.length ? <div className="ahAccountingExportList">{data.exports.map((item) => <article key={item.id} data-ah-compact-card="true"><div><strong>{item.id}</strong><small>{item.exportType} · {item.period}</small></div><span>{item.documentCount} док.</span><b>{rub(item.amountMinor)}</b><em>{item.status}</em></article>)}</div> : <EmptyState density="compact" title="Пакетов пока нет" description="Подготовленные реестры появятся здесь после создания первой выгрузки." />}</article>
         </div> : null}
-      </>}
-    </section>
+      </>
+    </PageContainer>
 
     {createOpen ? <ManualDocumentModal counterparties={counterparties} saving={busy === "new"} close={() => setCreateOpen(false)} submit={createDocument} /> : null}
   </>;
@@ -252,26 +255,26 @@ function ManualDocumentModal({ counterparties, saving, close, submit }: {
     await submit(values);
   }
 
-  return createPortal(<div className="modal-layer registry-modal-layer">
+  return createPortal(<div className="modal-layer registry-modal-layer ahAccountingModalLayer">
     <button className="drawer-scrim" type="button" onClick={close} aria-label="Закрыть форму" />
-    <form className="task-modal registry-modal" onSubmit={(event) => void onSubmit(event)}>
-      <div className="drawer-head"><div><p>Бухгалтерия и первичка</p><h2>Добавить документ</h2></div><button type="button" onClick={close}>×</button></div>
-      <div className="form-row">
+    <form className="task-modal registry-modal ahAccountingModal" onSubmit={(event) => void onSubmit(event)}>
+      <div className="drawer-head ahAccountingModalHead"><div><p>Бухгалтерия и первичка</p><h2>Добавить документ</h2></div><button type="button" onClick={close}>×</button></div>
+      <div className="form-row ahAccountingFormRow">
         <label><span>Тип документа</span><select name="documentType" defaultValue="Счёт" required><option>Счёт</option><option>Акт</option><option>Накладная</option><option>УПД</option><option>Чек</option><option>Иное</option></select></label>
         <label><span>Номер документа</span><input name="number" required maxLength={80} placeholder="Например: 48/26" /></label>
       </div>
-      <div className="form-row">
+      <div className="form-row ahAccountingFormRow">
         <label><span>Дата документа</span><input type="date" name="documentDate" defaultValue={new Date().toISOString().slice(0, 10)} required /></label>
         <label><span>Сумма, ₽</span><input type="number" name="amountRub" min="0.01" step="0.01" inputMode="decimal" required placeholder="0,00" /></label>
       </div>
       <label><span>Контрагент</span><select name="counterpartyEntityId" defaultValue="" required><option value="" disabled>{counterparties.length ? "Выберите карточку" : "Сначала создайте карточку контрагента"}</option>{counterparties.map(([id, name]) => <option key={id} value={id}>{name} · {id}</option>)}</select></label>
       <label><span>Договор, если есть</span><input name="contractId" maxLength={80} placeholder="ID существующего договора" /></label>
-      <div className="merge-warning"><strong>ID и источник назначит система</strong><span>Документ будет сохранён как ручной ввод с постоянным рабочим ID. Договор проверяется по юридическому реестру.</span></div>
-      <div className="modal-actions"><button type="button" onClick={close}>Отмена</button><button type="submit" disabled={saving || !counterparties.length}>{saving ? "Сохраняем…" : "Сохранить документ"}</button></div>
+      <div className="merge-warning ahAccountingNotice"><strong>ID и источник назначит система</strong><span>Документ будет сохранён как ручной ввод с постоянным рабочим ID. Договор проверяется по юридическому реестру.</span></div>
+      <div className="modal-actions ahAccountingModalActions"><button type="button" onClick={close}>Отмена</button><button type="submit" disabled={saving || !counterparties.length}>{saving ? "Сохраняем…" : "Сохранить документ"}</button></div>
     </form>
   </div>, document.body);
 }
 
 function Head({ p, h, s }: { p: string; h: string; s: string }) {
-  return <header className="accounting-panel-head"><div><p>{p}</p><h2>{h}</h2></div><span>{s}</span></header>;
+  return <header className="ahAccountingPanelHead"><div><p>{p}</p><h2>{h}</h2></div><span>{s}</span></header>;
 }

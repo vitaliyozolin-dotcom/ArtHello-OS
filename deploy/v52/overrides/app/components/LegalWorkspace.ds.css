@@ -1,0 +1,1163 @@
+.ahLegalPage {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+  padding-top: 4px;
+}
+
+.ahLegalPage .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahLegalPage .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahLegalPage .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahLegalPage .ahPageHeaderCopy p {
+  max-width: 780px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahLegalPage .ahPageHeaderActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ahLegalPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahLegalSignature {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  box-sizing: border-box;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 999px;
+  background: var(--ah-color-surface);
+  padding: 6px 11px;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 16px;
+}
+
+.ahLegalStatus {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ahLegalStateCard {
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 0;
+}
+
+.ahLegalStateCard > .ahEmptyState {
+  min-height: 120px;
+  padding: 24px 20px;
+}
+
+.ahLegalStateCard > .ahEmptyState h3,
+.ahLegalRegistry > .ahEmptyState h3,
+.ahLegalPanel > .ahEmptyState h3 {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahLegalStateCard > .ahEmptyState p,
+.ahLegalRegistry > .ahEmptyState p,
+.ahLegalPanel > .ahEmptyState p {
+  font-size: var(--ah-compact-card-body-size);
+  font-weight: 400;
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahLegalBoundary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+
+.ahLegalBoundary strong {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 5px 10px;
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 16px;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.ahLegalBoundary span {
+  min-width: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ahLegalKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahLegalKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+}
+
+.ahLegalKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahLegalKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahLegalKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahLegalKpiWarning {
+  border-color: #f0d4b5;
+  background: var(--ah-color-warning-soft);
+}
+
+.ahLegalKpiDanger {
+  border-color: #efcbd1;
+  background: var(--ah-color-danger-soft);
+}
+
+.ahLegalTabs {
+  min-width: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--ah-color-border);
+}
+
+.ahLegalTabs .ahTabs {
+  width: 100%;
+  max-width: 100%;
+  gap: 18px;
+}
+
+.ahLegalTabs .ahTabs button {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+.ahLegalPanel {
+  display: grid;
+  gap: 16px;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.ahLegalDocuments {
+  min-width: 0;
+}
+
+.ahLegalPanelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ahLegalPanelHead > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.ahLegalPanelHead p,
+.ahLegalPanelHead h2 {
+  margin: 0;
+}
+
+.ahLegalPanelHead p {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 14px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.ahLegalPanelHead h2 {
+  color: var(--ah-color-text-primary);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 21px;
+}
+
+.ahLegalPanelHead > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 5px 8px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahLegalDocumentTableWrap {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.ahLegalDocumentTable {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  color: var(--ah-color-text-primary);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.ahLegalDocumentTable th,
+.ahLegalDocumentTable td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--ah-color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ahLegalDocumentTable th {
+  background: var(--ah-color-surface-soft);
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+}
+
+.ahLegalDocumentTable td strong,
+.ahLegalDocumentTable td small {
+  display: block;
+}
+
+.ahLegalDocumentTable td strong {
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 15px;
+}
+
+.ahLegalDocumentTable td small {
+  margin-top: 3px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahLegalDocumentTable .isMissing {
+  color: var(--ah-color-danger);
+  font-weight: 650;
+}
+
+.ahLegalDocumentAction {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.ahLegalInlineButton,
+.ahLegalSmallButton {
+  min-height: 34px;
+  border-radius: 10px;
+  padding-inline: 11px;
+  font-size: 11px;
+}
+
+.ahLegalSignalGrid,
+.ahLegalZoneGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ahLegalSignal,
+.ahLegalZone {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.ahLegalSignalHeader,
+.ahLegalSignalFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ahLegalSignalHeader > span,
+.ahLegalZoneId {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 14px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.ahLegalSignalHeader > em {
+  border-radius: 999px;
+  background: var(--ah-color-warning-soft);
+  padding: 4px 7px;
+  color: var(--ah-color-warning);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 12px;
+}
+
+.ahLegalSignal h2,
+.ahLegalZone h2 {
+  margin: 0;
+  color: var(--ah-color-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.ahLegalSignal > p,
+.ahLegalZone > p {
+  margin: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahLegalRecommendation {
+  display: grid;
+  gap: 4px;
+  border-radius: 10px;
+  background: var(--ah-color-surface-soft);
+  padding: 10px;
+}
+
+.ahLegalRecommendation strong,
+.ahLegalRecommendation span {
+  display: block;
+}
+
+.ahLegalRecommendation strong {
+  color: var(--ah-color-text-primary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahLegalRecommendation span {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahLegalSignalFooter {
+  min-height: 34px;
+}
+
+.ahLegalSignalFooter em,
+.ahLegalSignalFooter small,
+.ahLegalSignalFooter span {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+}
+
+.ahLegalZone dl,
+.ahLegalProof dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.ahLegalZone dl > div,
+.ahLegalProof dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--ah-color-border);
+}
+
+.ahLegalZone dt,
+.ahLegalZone dd,
+.ahLegalProof dt,
+.ahLegalProof dd {
+  margin: 0;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahLegalZone dt,
+.ahLegalProof dt {
+  color: var(--ah-color-text-secondary);
+}
+
+.ahLegalZone dd,
+.ahLegalProof dd {
+  color: var(--ah-color-text-primary);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.ahLegalChainLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, .8fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.ahLegalChainSteps {
+  display: grid;
+  gap: 8px;
+}
+
+.ahLegalChainStep {
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  border-radius: 12px;
+  padding: 11px 12px;
+}
+
+.ahLegalChainStep > span {
+  min-height: 28px;
+  border-radius: 9px;
+  background: var(--ah-color-primary-soft);
+  color: var(--ah-color-primary);
+}
+
+.ahLegalProof blockquote {
+  margin: 0;
+  border-radius: 12px;
+  background: var(--ah-color-surface-soft);
+  padding: 12px;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahLegalRegistry {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 0;
+}
+
+.ahLegalRegistryToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid var(--ah-color-border);
+}
+
+.ahLegalRegistryToolbar .ahSearchField input {
+  height: 44px;
+  border-radius: 12px;
+  padding-inline: 14px;
+  font-size: 13px;
+}
+
+.ahLegalRegistryCount {
+  min-width: max-content;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahLegalRegistryFilters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ah-color-border);
+  scrollbar-width: none;
+}
+
+.ahLegalRegistryFilters::-webkit-scrollbar {
+  display: none;
+}
+
+.ahLegalFilterLabel {
+  flex: 0 0 auto;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahLegalRegistryFilters button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 999px;
+  background: var(--ah-color-surface);
+  padding: 5px 9px;
+  color: var(--ah-color-text-secondary);
+  font: inherit;
+  font-size: 10px;
+  line-height: 14px;
+  cursor: pointer;
+}
+
+.ahLegalRegistryFilters button b {
+  color: inherit;
+  font-size: 9px;
+}
+
+.ahLegalRegistryFilters button.isActive {
+  border-color: var(--ah-color-primary);
+  background: var(--ah-color-primary-soft);
+  color: var(--ah-color-primary);
+  font-weight: 650;
+}
+
+.ahLegalRegistryTable {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.ahLegalRegistryHead,
+.ahLegalRegistryRow {
+  display: grid;
+  grid-template-columns: minmax(230px, 1.45fr) minmax(150px, .9fr) minmax(130px, .75fr) minmax(150px, .9fr) minmax(130px, .75fr) minmax(120px, .7fr);
+  min-width: 960px;
+}
+
+.ahLegalRegistryHead {
+  background: var(--ah-color-surface-soft);
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+}
+
+.ahLegalRegistryHead > span,
+.ahLegalRegistryCell {
+  min-width: 0;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--ah-color-border);
+}
+
+.ahLegalRegistryRow {
+  width: 100%;
+  border: 0;
+  background: var(--ah-color-surface);
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .14s ease;
+}
+
+.ahLegalRegistryRow:hover,
+.ahLegalRegistryRow:focus-visible,
+.ahLegalRegistryRow.isFocused {
+  outline: 0;
+  background: var(--ah-color-primary-soft);
+}
+
+.ahLegalRegistryCell strong,
+.ahLegalRegistryCell small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ahLegalRegistryCell strong {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahLegalRegistryPrimary strong {
+  color: var(--ah-color-text-primary);
+}
+
+.ahLegalRegistryCell small {
+  margin-top: 3px;
+  color: var(--ah-color-text-secondary);
+  font-size: var(--ah-compact-card-body-size);
+  font-weight: 400;
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahLegalRegistryCell .isOver,
+.ahLegalRegistryCell .isBad {
+  color: var(--ah-color-danger);
+}
+
+.ahLegalRegistryCell .isOk {
+  color: var(--ah-color-success);
+}
+
+.ahLegalRegistry > .ahEmptyState {
+  min-height: 116px;
+  padding: 24px 20px;
+}
+
+.ahLegalCreateLayer {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  overflow-y: auto;
+  background: rgba(17, 21, 39, .48);
+  padding: 20px;
+}
+
+.ahLegalCreateLayer > button {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.ahLegalCreateModal {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 16px;
+  width: min(720px, 100%);
+  max-height: calc(100dvh - 40px);
+  box-sizing: border-box;
+  overflow-y: auto;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 20px;
+  background: var(--ah-color-surface);
+  padding: 20px;
+  box-shadow: 0 24px 70px rgba(17, 21, 39, .2);
+}
+
+.ahLegalCreateModal > div:first-child,
+.ahLegalCreateModal > div:last-child {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ahLegalCreateModal > div:first-child h2,
+.ahLegalCreateModal > div:first-child p {
+  margin: 0;
+}
+
+.ahLegalCreateModal > div:first-child h2 {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.ahLegalCreateModal > div:first-child p {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahLegalCreateModal > div:first-child > button {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.ahLegalCreateModal > div:last-child > button {
+  min-height: 40px;
+  box-sizing: border-box;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 11px;
+  background: var(--ah-color-surface);
+  padding-inline: 14px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.ahLegalCreateModal > div:last-child > button:last-child {
+  border-color: var(--ah-color-primary);
+  background: var(--ah-color-primary);
+  color: #fff;
+}
+
+.ahLegalCreateGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ahLegalCreateGrid label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahLegalCreateGrid input,
+.ahLegalCreateGrid select {
+  width: 100%;
+  height: 42px;
+  box-sizing: border-box;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  outline: 0;
+  background: var(--ah-color-surface);
+  padding-inline: 11px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.ahLegalCreateGrid input:focus,
+.ahLegalCreateGrid select:focus {
+  border-color: var(--ah-color-primary);
+  box-shadow: 0 0 0 3px var(--ah-color-primary-soft);
+}
+
+.ahLegalClosingCheck {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  grid-column: 1 / -1;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahLegalClosingCheck input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+@media (max-width: 1024px) {
+  .ahLegalKpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ahLegalChainLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .ahLegalPage {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahLegalPage .ahPageHeader {
+    align-items: start;
+  }
+
+  .ahLegalPage .ahPageHeaderCopy > small {
+    margin-bottom: 5px;
+    font-size: var(--ah-mobile-eyebrow-size);
+    font-weight: 750;
+    line-height: var(--ah-mobile-eyebrow-line);
+    letter-spacing: .12em;
+  }
+
+  .ahLegalPage .ahPageHeaderCopy h1 {
+    font-size: var(--ah-font-size-page-title-mobile);
+    font-weight: 700;
+    line-height: var(--ah-line-height-page-title-mobile);
+  }
+
+  .ahLegalPage .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahLegalPage .ahPageHeaderActions {
+    justify-content: stretch;
+  }
+
+  .ahLegalPage .ahPageHeaderActions .ahButton {
+    flex: 1 1 180px;
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    padding-inline: 14px;
+    font-size: var(--ah-mobile-action-size);
+  }
+
+  .ahLegalSignature {
+    min-height: 30px;
+    padding: 5px 9px;
+    font-size: 10px;
+    line-height: 14px;
+  }
+
+  .ahLegalBoundary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    border-radius: var(--ah-mobile-info-radius);
+    padding: var(--ah-mobile-info-padding-block) var(--ah-mobile-info-padding-inline);
+  }
+
+  .ahLegalBoundary strong {
+    min-height: 0;
+    padding: 5px 8px;
+    font-size: var(--ah-mobile-info-label-size);
+    font-weight: 800;
+    line-height: var(--ah-mobile-info-label-line);
+    letter-spacing: .06em;
+  }
+
+  .ahLegalBoundary span {
+    font-size: var(--ah-mobile-info-body-size);
+    line-height: var(--ah-mobile-info-body-line);
+  }
+
+  .ahLegalKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahLegalKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahLegalKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahLegalKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahLegalKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahLegalTabs .ahTabs {
+    gap: 14px;
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+
+  .ahLegalTabs .ahTabs button {
+    min-height: 38px;
+    font-size: 12px;
+  }
+
+  .ahLegalPanel {
+    gap: 14px;
+    border-radius: 14px;
+    padding: 13px;
+  }
+
+  .ahLegalPanelHead {
+    gap: 10px;
+  }
+
+  .ahLegalPanelHead h2 {
+    font-size: 14px;
+    line-height: 18px;
+  }
+
+  .ahLegalPanelHead > span {
+    font-size: 9px;
+    line-height: 12px;
+  }
+
+  .ahLegalDocumentTableWrap {
+    overflow: visible;
+  }
+
+  .ahLegalDocumentTable,
+  .ahLegalDocumentTable tbody,
+  .ahLegalDocumentTable tr,
+  .ahLegalDocumentTable td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .ahLegalDocumentTable thead {
+    display: none;
+  }
+
+  .ahLegalDocumentTable tbody {
+    display: grid;
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahLegalDocumentTable tr {
+    display: grid;
+    gap: 0;
+    border: 1px solid var(--ah-color-border);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    background: var(--ah-color-surface);
+    padding: 9px 12px;
+  }
+
+  .ahLegalDocumentTable td {
+    display: grid;
+    grid-template-columns: minmax(84px, .7fr) minmax(0, 1.3fr);
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--ah-color-border);
+    font-size: var(--ah-compact-card-body-size);
+    line-height: var(--ah-compact-card-body-line);
+    overflow-wrap: anywhere;
+  }
+
+  .ahLegalDocumentTable td::before {
+    content: attr(data-label);
+    color: var(--ah-color-text-secondary);
+    font-size: var(--ah-compact-card-body-size);
+    font-weight: 400;
+    line-height: var(--ah-compact-card-body-line);
+  }
+
+  .ahLegalDocumentTable td strong,
+  .ahLegalDocumentTable td small {
+    grid-column: 2;
+    min-width: 0;
+    margin-top: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .ahLegalDocumentTable td:last-child {
+    border-bottom: 0;
+  }
+
+  .ahLegalDocumentAction {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 10px;
+  }
+
+  .ahLegalDocumentAction::before {
+    content: none;
+  }
+
+  .ahLegalDocumentAction .ahButton {
+    width: 100%;
+    min-height: 40px;
+  }
+
+  .ahLegalSignalGrid,
+  .ahLegalZoneGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahLegalSignal,
+  .ahLegalZone {
+    border-radius: 13px;
+    padding: 12px;
+  }
+
+  .ahLegalRegistry {
+    border-radius: 14px;
+  }
+
+  .ahLegalRegistryToolbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 11px;
+  }
+
+  .ahLegalRegistryToolbar .ahSearchField input {
+    height: var(--ah-mobile-search-height);
+    border-radius: var(--ah-mobile-search-radius);
+    padding-inline: var(--ah-mobile-search-padding);
+    font-size: 16px;
+  }
+
+  .ahLegalRegistryCount {
+    font-size: 10px;
+    line-height: 14px;
+  }
+
+  .ahLegalRegistryFilters {
+    padding: 9px 11px;
+  }
+
+  .ahLegalRegistryHead,
+  .ahLegalRegistryRow {
+    min-width: 0;
+  }
+
+  .ahLegalRegistryTable {
+    display: grid;
+    gap: var(--ah-registry-kpi-mobile-gap);
+    overflow: visible;
+    padding: 11px;
+  }
+
+  .ahLegalRegistryHead {
+    display: none;
+  }
+
+  .ahLegalRegistryRow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid var(--ah-color-border);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: 9px 12px;
+  }
+
+  .ahLegalRegistryCell {
+    display: grid;
+    grid-template-columns: minmax(84px, .7fr) minmax(0, 1.3fr);
+    gap: 0 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--ah-color-border);
+  }
+
+  .ahLegalRegistryCell:last-child {
+    border-bottom: 0;
+  }
+
+  .ahLegalRegistryCell::before {
+    content: attr(data-label);
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    color: var(--ah-color-text-secondary);
+    font-size: var(--ah-compact-card-body-size);
+    font-weight: 400;
+    line-height: var(--ah-compact-card-body-line);
+  }
+
+  .ahLegalRegistryCell strong,
+  .ahLegalRegistryCell small {
+    grid-column: 2;
+    margin-top: 0;
+  }
+
+  .ahLegalRegistry > .ahEmptyState,
+  .ahLegalStateCard > .ahEmptyState,
+  .ahLegalPanel > .ahEmptyState {
+    gap: 10px;
+    min-height: 116px;
+    padding: 20px 14px;
+  }
+
+  .ahLegalRegistry > .ahEmptyState .ahButton,
+  .ahLegalStateCard > .ahEmptyState .ahButton,
+  .ahLegalPanel > .ahEmptyState .ahButton {
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    padding-inline: 14px;
+    font-size: var(--ah-mobile-action-size);
+  }
+
+  .ahLegalCreateLayer {
+    place-items: end center;
+    padding: 12px;
+  }
+
+  .ahLegalCreateModal {
+    gap: 14px;
+    max-height: calc(100dvh - 24px);
+    border-radius: 16px;
+    padding: 16px;
+  }
+
+  .ahLegalCreateGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahLegalCreateModal > div:last-child {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .ahLegalCreateModal > div:last-child > button {
+    width: 100%;
+    min-height: var(--ah-mobile-action-height);
+  }
+}
+
+@media (max-width: 359px) {
+  .ahLegalKpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

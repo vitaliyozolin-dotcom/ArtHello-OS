@@ -14,6 +14,8 @@ test("empty production UI does not expose synthetic fallback entities", () => {
     "../app/components/SalesWorkspace.tsx",
     "../app/components/ContentWorkspace.tsx",
     "../app/components/EducationWorkspace.tsx",
+    "../app/components/LegalWorkspace.tsx",
+    "../app/components/AccountingWorkspace.tsx",
     "../app/api/education/route.ts",
     "../app/api/education-actions/route.ts",
     "../app/api/hr-actions/route.ts",

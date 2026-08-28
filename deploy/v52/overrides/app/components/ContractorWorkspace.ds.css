@@ -83,31 +83,34 @@
 .ahContractorKpis {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--ah-registry-kpi-gap);
 }
 
 .ahContractorKpis > .ahKpiCard {
   min-width: 0;
-  min-height: 98px;
-  border-radius: 16px;
-  padding: 16px;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
 }
 
 .ahContractorKpis .ahKpiCopy small {
-  font-size: 13px;
-  line-height: 18px;
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
 }
 
 .ahContractorKpis .ahKpiCopy strong {
-  margin-top: 5px;
-  font-size: 24px;
-  line-height: 28px;
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
 }
 
 .ahContractorKpis .ahKpiCopy > span {
-  margin-top: 4px;
-  font-size: 12px;
-  line-height: 17px;
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
 }
 
 .ahContractorRegistry {
@@ -284,30 +287,30 @@
   }
 
   .ahContractorKpis {
-    gap: var(--ah-mobile-kpi-gap);
+    gap: var(--ah-registry-kpi-mobile-gap);
   }
 
   .ahContractorKpis > .ahKpiCard {
-    min-height: 84px;
-    border-radius: 13px;
-    padding: 11px 12px;
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
   }
 
   .ahContractorKpis .ahKpiCopy small {
-    font-size: 11px;
-    line-height: 13px;
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
   }
 
   .ahContractorKpis .ahKpiCopy strong {
-    margin-top: 3px;
-    font-size: 26px;
-    line-height: 28px;
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
   }
 
   .ahContractorKpis .ahKpiCopy > span {
-    margin-top: 3px;
-    font-size: 11px;
-    line-height: 13px;
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
   }
 
   .ahContractorRegistry {
@@ -438,3 +441,4 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
