@@ -167,3 +167,10 @@ html[data-design-code="v1"][data-theme="student"] .role-student select,
 html[data-design-code="v1"][data-theme="student"] .role-student textarea {
   font-family: var(--font-sans);
 }
+
+/* Beats the shared v1 topbar selector without owning shell geometry. */
+html[data-design-code="v1"][data-theme="student"] .role-student .l0-topbar {
+  border-color: var(--student-line-08);
+  background: var(--student-topbar);
+  color: var(--student-on-dark);
+}
