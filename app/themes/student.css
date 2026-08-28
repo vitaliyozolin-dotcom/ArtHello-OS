@@ -234,6 +234,10 @@ html[data-design-code="v1"][data-theme="student"] .role-student .event-date {
   color: var(--color-text);
 }
 
+html[data-design-code="v1"][data-theme="student"] .role-student .compact-tabs > button.active {
+  border-color: var(--brand-400);
+}
+
 html[data-design-code="v1"][data-theme="student"] .role-student button:focus-visible,
 html[data-design-code="v1"][data-theme="student"] .role-student a:focus-visible,
 html[data-design-code="v1"][data-theme="student"] .role-student input:focus-visible,
