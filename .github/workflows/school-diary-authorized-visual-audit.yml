@@ -18,9 +18,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CANDIDATE_SHA: fb0737f83438128c2c62bc14f3167a21c27a51f7
-  CANDIDATE_IMAGE: school-1-11-design-v1:fb0737f83438
-  CANDIDATE_IMAGE_ID: sha256:05381e535d0ef89c7fea20b25635e56ed48873994848de652fb08cf23c066389
+  CANDIDATE_SHA: 0947e866afb0bcbbe1a33a3303e9168351f5e9f1
+  CANDIDATE_IMAGE: school-1-11-design-v1:0947e866afb0
+  CANDIDATE_IMAGE_ID: sha256:94bcaa9dfe45d1bbfc1042c397a4556cbacb258e810b7e56b581d7a2b44570ea
   AUDIT_WIDTHS: "767,768,800,801,1199,1200"
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   STAGING_ORIGIN: http://127.0.0.1:3211
@@ -204,7 +204,7 @@ jobs:
             '
 
           test -s school-authorized-visual-output/manifest.json
-          test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 45
+          test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 51
           manifest_values="$(python3 - <<'READ_MANIFEST'
           import json
           import os
@@ -215,14 +215,20 @@ jobs:
               raise RuntimeError('Candidate SHA invariant failed')
           if manifest['candidateImageId'] != os.environ['CANDIDATE_IMAGE_ID']:
               raise RuntimeError('Candidate image ID invariant failed')
-          if manifest['version'] != '1.1.0':
+          if manifest['version'] != '1.3.0':
               raise RuntimeError('Wrong DS-03 manifest version')
-          if manifest['captures'] != 45:
+          if manifest['captures'] != 51:
               raise RuntimeError('Incomplete combined capture matrix')
           if manifest['boundaryCaptures'] != 24:
               raise RuntimeError('Incomplete DS-02 boundary matrix')
-          if manifest['studentRouteCaptures'] != 21:
+          if manifest['studentRouteCaptures'] != 27:
               raise RuntimeError('Incomplete DS-03 student route matrix')
+          if manifest['studentRouteStateCount'] != 9:
+              raise RuntimeError('Wrong DS-03 route state count')
+          if manifest['studentRouteStateCaptures'] != 27:
+              raise RuntimeError('Incomplete DS-03 route state matrix')
+          if manifest['schoolTabCaptures'] != 9:
+              raise RuntimeError('Incomplete School tab matrix')
           if manifest['credentialsStored'] is not False:
               raise RuntimeError('Credential storage invariant failed')
           if manifest['fixture'] != 'empty schema from candidate migrations, seeded with synthetic data':
@@ -239,6 +245,386 @@ jobs:
           ]
           if [item['route'] for item in manifest['studentRoutes']] != expected_routes:
               raise RuntimeError('Wrong DS-03 student routes')
+          expected_route_states = [
+              'home', 'schedule', 'journal', 'homework', 'calendar',
+              'school-menu', 'school-events', 'school-activities', 'profile',
+          ]
+          if [
+              item['routeStateId'] for item in manifest['studentRouteStates']
+          ] != expected_route_states:
+              raise RuntimeError('Wrong DS-03 student route states')
+          student_results = [
+              item for item in manifest['results']
+              if item.get('routeStateId')
+          ]
+          expected_state_matrix = {
+              (route_state, width)
+              for route_state in expected_route_states
+              for width in expected_route_widths
+          }
+          actual_state_matrix = {
+              (item['routeStateId'], item['width'])
+              for item in student_results
+          }
+          if (
+              len(student_results) != len(expected_state_matrix)
+              or actual_state_matrix != expected_state_matrix
+          ):
+              raise RuntimeError('Incomplete or duplicate DS-03 route state matrix')
+          expected_school_states = {
+              'school-menu': ('Меню', 3),
+              'school-events': ('Мероприятия', 2),
+              'school-activities': ('Доп. занятия', 2),
+          }
+          common_selector_requirements = [
+              {
+                  'id': 'common-eyebrow',
+                  'selector': '.page-heading .eyebrow',
+                  'expectedCount': 1,
+                  'textRole': 'accent',
+                  'minimumContrast': 4.5,
+              },
+              {
+                  'id': 'common-heading-primary',
+                  'selector': '.page-heading h1',
+                  'expectedCount': 1,
+                  'textRole': 'primary',
+                  'minimumContrast': 4.5,
+              },
+              {
+                  'id': 'common-heading-secondary',
+                  'selector': '.page-heading p',
+                  'expectedCount': 1,
+                  'textRole': 'secondary',
+                  'minimumContrast': 4.5,
+              },
+              {
+                  'id': 'common-tabs',
+                  'selector': '.compact-tabs > button',
+                  'expectedCount': 3,
+                  'textRole': 'tab',
+                  'minimumContrast': 4.5,
+              },
+              {
+                  'id': 'common-active-tab',
+                  'selector': '.compact-tabs > button.active',
+                  'expectedCount': 1,
+                  'textRole': None,
+                  'minimumContrast': None,
+              },
+          ]
+          expected_selector_requirements = {
+              'school-menu': common_selector_requirements + [
+                  {
+                      'id': 'menu-articles',
+                      'selector': '.menu-grid > article',
+                      'expectedCount': 3,
+                      'textRole': None,
+                      'minimumContrast': None,
+                  },
+                  {
+                      'id': 'menu-date-primary',
+                      'selector': '.menu-grid > article > header > span:first-child',
+                      'expectedCount': 3,
+                      'textRole': 'primary',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'menu-term-accent',
+                      'selector': '.menu-grid dt',
+                      'expectedCount': 9,
+                      'textRole': 'accent',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'menu-value-primary',
+                      'selector': '.menu-grid dd',
+                      'expectedCount': 9,
+                      'textRole': 'primary',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'menu-footer-secondary',
+                      'selector': '.menu-grid > article > footer',
+                      'expectedCount': 3,
+                      'textRole': 'secondary',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'menu-status',
+                      'selector': '.menu-grid > article > header .status-pill',
+                      'expectedCount': 1,
+                      'textRole': 'status',
+                      'minimumContrast': 4.5,
+                  },
+              ],
+              'school-events': common_selector_requirements + [
+                  {
+                      'id': 'event-articles',
+                      'selector': '.event-grid > article',
+                      'expectedCount': 2,
+                      'textRole': None,
+                      'minimumContrast': None,
+                  },
+                  {
+                      'id': 'event-dates',
+                      'selector': '.event-grid .event-date',
+                      'expectedCount': 2,
+                      'textRole': None,
+                      'minimumContrast': None,
+                  },
+                  {
+                      'id': 'event-day-large',
+                      'selector': '.event-grid .event-date > strong',
+                      'expectedCount': 2,
+                      'textRole': 'primary-large',
+                      'minimumContrast': 3,
+                  },
+                  {
+                      'id': 'event-month-secondary',
+                      'selector': '.event-grid .event-date > span',
+                      'expectedCount': 2,
+                      'textRole': 'secondary',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'event-overline-secondary',
+                      'selector': '.event-grid > article > div:last-child > .item-overline',
+                      'expectedCount': 2,
+                      'textRole': 'secondary',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'event-title-primary',
+                      'selector': '.event-grid > article > div:last-child > h3',
+                      'expectedCount': 2,
+                      'textRole': 'primary',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'event-description-secondary',
+                      'selector': '.event-grid > article > div:last-child > p',
+                      'expectedCount': 2,
+                      'textRole': 'secondary',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'event-status',
+                      'selector': '.event-grid > article footer .status-pill',
+                      'expectedCount': 2,
+                      'textRole': 'status',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'event-capacity-secondary',
+                      'selector': '.event-grid > article footer > small',
+                      'expectedCount': 2,
+                      'textRole': 'secondary',
+                      'minimumContrast': 4.5,
+                  },
+              ],
+              'school-activities': common_selector_requirements + [
+                  {
+                      'id': 'activity-articles',
+                      'selector': '.activity-grid > article',
+                      'expectedCount': 2,
+                      'textRole': None,
+                      'minimumContrast': None,
+                  },
+                  {
+                      'id': 'activity-schedule-secondary',
+                      'selector': '.activity-grid > article > div > small',
+                      'expectedCount': 2,
+                      'textRole': 'secondary',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'activity-title-primary',
+                      'selector': '.activity-grid > article > div > h3',
+                      'expectedCount': 2,
+                      'textRole': 'primary',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'activity-teacher-secondary',
+                      'selector': '.activity-grid > article > div > p',
+                      'expectedCount': 2,
+                      'textRole': 'secondary',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'activity-capacity-secondary',
+                      'selector': '.activity-grid > article .capacity > small',
+                      'expectedCount': 2,
+                      'textRole': 'secondary',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'activity-price-primary',
+                      'selector': '.activity-grid > article > footer > strong',
+                      'expectedCount': 2,
+                      'textRole': 'primary',
+                      'minimumContrast': 4.5,
+                  },
+                  {
+                      'id': 'activity-status',
+                      'selector': '.activity-grid > article > footer .status-pill',
+                      'expectedCount': 2,
+                      'textRole': 'status',
+                      'minimumContrast': 4.5,
+                  },
+              ],
+          }
+          manifest_requirements = manifest['schoolStateSelectorRequirements']
+          if set(manifest_requirements) != {'menu', 'events', 'activities'}:
+              raise RuntimeError('Wrong School selector requirement states')
+          for route_state, state_id in {
+              'school-menu': 'menu',
+              'school-events': 'events',
+              'school-activities': 'activities',
+          }.items():
+              if manifest_requirements[state_id] != expected_selector_requirements[route_state]:
+                  raise RuntimeError(
+                      'Wrong School selector requirement contract: ' + route_state
+                  )
+          school_results = [
+              item for item in student_results
+              if item['routeStateId'] in expected_school_states
+          ]
+          if len(school_results) != 9:
+              raise RuntimeError('Incomplete School tab results')
+          for item in school_results:
+              expected_tab, expected_items = expected_school_states[
+                  item['routeStateId']
+              ]
+              expected_checks = expected_selector_requirements[
+                  item['routeStateId']
+              ]
+              metrics = item['metrics']
+              if (
+                  item['tab'] != expected_tab
+                  or metrics['activeTab'] != expected_tab
+                  or metrics['activeTabCount'] != 1
+                  or metrics['stateAnchorPresent'] is not True
+                  or metrics['itemCount'] != expected_items
+                  or metrics['expectedItemCount'] != expected_items
+              ):
+                  raise RuntimeError(
+                      'School tab state invariant failed: ' +
+                      json.dumps(item, ensure_ascii=False)
+                  )
+              checks = metrics['selectorChecks']
+              if len(checks) != len(expected_checks):
+                  raise RuntimeError('Incomplete School selector checks')
+              for check, expected_check in zip(checks, expected_checks):
+                  contract_fields = {
+                      key: check[key]
+                      for key in (
+                          'id', 'selector', 'expectedCount',
+                          'textRole', 'minimumContrast',
+                      )
+                  }
+                  if contract_fields != expected_check:
+                      raise RuntimeError(
+                          'School selector contract mismatch: ' +
+                          json.dumps(check, ensure_ascii=False)
+                      )
+                  expected_count = expected_check['expectedCount']
+                  if (
+                      check['actualCount'] != expected_count
+                      or check['visibleCount'] != expected_count
+                      or check['hiddenCount'] != 0
+                      or check['countPass'] is not True
+                  ):
+                      raise RuntimeError(
+                          'School selector count/visibility failed: ' +
+                          json.dumps(check, ensure_ascii=False)
+                      )
+                  minimum_contrast = expected_check['minimumContrast']
+                  samples = check['samples']
+                  if minimum_contrast is None:
+                      if samples or check['contrastPass'] is not True:
+                          raise RuntimeError('Unexpected non-text contrast samples')
+                  else:
+                      if len(samples) != expected_count:
+                          raise RuntimeError('Incomplete School text samples')
+                      for sample in samples:
+                          ratio = sample['ratio']
+                          if (
+                              sample['minimumContrast'] != minimum_contrast
+                              or not isinstance(ratio, (int, float))
+                              or ratio < minimum_contrast
+                              or sample['pass'] is not True
+                              or not sample['text']
+                              or sample['renderedForeground'] is None
+                              or sample['renderedBackground'] is None
+                          ):
+                              raise RuntimeError(
+                                  'School text contrast failed: ' +
+                                  json.dumps(sample, ensure_ascii=False)
+                              )
+                      if check['contrastPass'] is not True:
+                          raise RuntimeError('School selector contrast aggregate failed')
+              selected = metrics['selected']
+              mapping = selected['mapping']
+              non_text = selected['nonText']
+              if (
+                  selected['activeCount'] != 1
+                  or selected['label'] != expected_tab
+                  or mapping['backgroundPass'] is not True
+                  or mapping['borderPass'] is not True
+                  or mapping['textPass'] is not True
+                  or mapping['pass'] is not True
+                  or non_text['minimumContrast'] != 3
+                  or not isinstance(non_text['fillRatio'], (int, float))
+                  or len(non_text['borderRatios']) != 4
+                  or any(
+                      not isinstance(ratio, (int, float))
+                      for ratio in non_text['borderRatios']
+                  )
+                  or non_text['pass'] is not True
+                  or not (
+                      non_text['fillRatio'] >= 3
+                      or any(ratio >= 3 for ratio in non_text['borderRatios'])
+                  )
+              ):
+                  raise RuntimeError(
+                      'School selected-state invariant failed: ' +
+                      json.dumps(selected, ensure_ascii=False)
+                  )
+              focus = metrics['focus']
+              if (
+                  focus['activeElement'] is not True
+                  or focus['focusVisible'] is not True
+                  or focus['outlineStyle'] == 'none'
+                  or not isinstance(focus['outlineWidth'], (int, float))
+                  or focus['outlineWidth'] <= 0
+                  or focus['outlineColorPass'] is not True
+                  or focus['authoredPass'] is not True
+                  or focus['minimumContrast'] != 3
+                  or not isinstance(focus['ratio'], (int, float))
+                  or focus['ratio'] < 3
+                  or focus['contrastPass'] is not True
+                  or focus['pass'] is not True
+              ):
+                  raise RuntimeError(
+                      'School focus invariant failed: ' +
+                      json.dumps(focus, ensure_ascii=False)
+                  )
+              cards = metrics['cards']
+              if (
+                  len(cards) != expected_items
+                  or any(card['pass'] is not True for card in cards)
+                  or metrics['cardStylePass'] is not True
+                  or metrics['inactiveTabsPass'] is not True
+                  or metrics['selectorCompletenessPass'] is not True
+                  or metrics['textContrastPass'] is not True
+                  or metrics['schoolStatePass'] is not True
+              ):
+                  raise RuntimeError(
+                      'School state aggregate failed: ' +
+                      json.dumps(metrics, ensure_ascii=False)
+                  )
           ds02_codes = {
               'DESIGN_CODE_FLAG', 'ROUTE', 'HORIZONTAL_OVERFLOW',
               'PHONE_RAIL', 'PHONE_NAV', 'PHONE_NAV_HEIGHT',
@@ -261,7 +647,16 @@ jobs:
               'STUDENT_THEME_TOKEN', 'NON_STUDENT_THEME_TOKEN',
               'STUDENT_THEME_PREPAINT', 'STUDENT_THEME_VALUE',
               'STUDENT_THEME_SURFACE', 'STUDENT_ROUTE',
-              'STUDENT_ROUTE_ANCHOR', 'STUDENT_ROUTE_HEADING', 'CLS',
+              'STUDENT_ROUTE_ANCHOR', 'STUDENT_ROUTE_HEADING',
+              'STUDENT_ROUTE_STATE_TAB', 'STUDENT_ROUTE_STATE_ACTIVE',
+              'STUDENT_ROUTE_STATE_ANCHOR', 'STUDENT_ROUTE_STATE_ITEMS',
+              'STUDENT_SCHOOL_TAB_STYLE', 'STUDENT_SCHOOL_CARD_STYLE',
+              'STUDENT_SCHOOL_SELECTOR_COUNT',
+              'STUDENT_SCHOOL_TEXT_CONTRAST',
+              'STUDENT_SCHOOL_SELECTED_MAPPING',
+              'STUDENT_SCHOOL_SELECTED_NONTEXT',
+              'STUDENT_SCHOOL_FOCUS_STYLE',
+              'STUDENT_SCHOOL_FOCUS_NONTEXT', 'CLS',
           }
           ds03_violations = [
               violation for violation in manifest['violations']
@@ -295,7 +690,7 @@ jobs:
           printf 'compliant=%s\n' "$compliant" >> "$GITHUB_OUTPUT"
           printf 'ds02_violation_count=%s\n' "$ds02_violation_count" >> "$GITHUB_OUTPUT"
           printf 'ds03_violation_count=%s\n' "$ds03_violation_count" >> "$GITHUB_OUTPUT"
-          printf 'SCHOOL_AUTHORIZED_VISUAL_CAPTURE=OK captures=45 ds02_violations=%s ds03_violations=%s violations=%s compliant=%s\n' "$ds02_violation_count" "$ds03_violation_count" "$violation_count" "$compliant"
+          printf 'SCHOOL_AUTHORIZED_VISUAL_CAPTURE=OK captures=51 ds02_violations=%s ds03_violations=%s violations=%s compliant=%s\n' "$ds02_violation_count" "$ds03_violation_count" "$violation_count" "$compliant"
 
       - name: Enforce remote teardown
         if: always()
@@ -360,8 +755,10 @@ jobs:
             printf -- '- DS-02 boundary routes: /management, /journal, /homework, /schedule\n'
             printf -- '- DS-02 widths: 767, 768, 800, 801, 1199, 1200 px\n'
             printf -- '- DS-03 student routes: /, /schedule, /journal, /homework, /calendar, /school, /profile\n'
+            printf -- '- DS-03 School states: Меню, Мероприятия, Доп. занятия\n'
+            printf -- '- DS-03 School evidence schema: 1.3.0 selector/count/contrast/focus\n'
             printf -- '- DS-03 route widths: 390, 768, 1440 px\n'
-            printf -- '- Evidence: 45 screenshots plus computed-style manifest\n'
+            printf -- '- Evidence: 51 screenshots plus computed-style manifest\n'
             printf -- '- Data: empty schema from candidate migrations; synthetic only\n'
             printf -- '- Exposure: isolated no-masquerade bridge, loopback port, SSH tunnel\n'
             printf -- '- Production/staging UI, data, restart changed: no\n'
