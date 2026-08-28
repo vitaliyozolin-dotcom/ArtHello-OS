@@ -26,7 +26,7 @@ test("approved design-code identity is immutable", () => {
     tokens,
     /Canonical Design Code SHA-256: cebdc3f3ae76cb50103734c0e6144cef713108b4c6fd9b39de93cf3f8828dd48/,
   );
-  assert.match(designCodePointer, /status этого файла: \`POINTER_ONLY\`/);
+  assert.match(designCodePointer, /статус этого файла: `POINTER_ONLY`/);
   assert.match(
     designCodePointer,
     /blob\/main\/docs\/design\/school-1-11\/DESIGN_CODE\.md/,
