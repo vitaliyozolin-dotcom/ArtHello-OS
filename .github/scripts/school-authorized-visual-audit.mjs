@@ -179,6 +179,16 @@ async function collectDs03Metrics(page) {
       "#344054",
       "#e04512",
     ].map(resolveColor);
+    const transparent = resolveColor("transparent");
+    const effectiveBackground = (node) => {
+      let current = node;
+      while (current) {
+        const value = resolveColor(getComputedStyle(current).backgroundColor);
+        if (value !== transparent) return value;
+        current = current.parentElement;
+      }
+      return transparent;
+    };
     const routeSurfaceSelector = [
       ".content-card",
       ".student-hero",
@@ -186,8 +196,11 @@ async function collectDs03Metrics(page) {
       ".student-quote",
       ".student-achievements",
       ".achievement-grid > article",
+      ".schedule-toolbar",
+      ".journal-head",
       ".calendar-week > article",
       ".calendar-week > article > header",
+      ".calendar-lesson",
       ".menu-grid > article",
       ".subscription-grid > article",
       ".privacy-card",
@@ -212,7 +225,7 @@ async function collectDs03Metrics(page) {
           "[route-surface=" +
           index +
           "]",
-        actual: resolveColor(getComputedStyle(node).backgroundColor),
+        actual: effectiveBackground(node),
       }));
     probe.remove();
 
