@@ -1214,12 +1214,27 @@ test("DS-04 stays merge-blocking and inert when its feature flag is off", () => 
   for (const fragment of [
     'role={designCodeV1 ? "tablist" : undefined}',
     'role={designCodeV1 ? "tab" : undefined}',
-    'aria-label={designCodeV1 ? ariaLabel : undefined}',
+    'aria-label={designCodeV1 ? ariaLabel : legacyAriaLabel}',
+    'type={designCodeV1 ? "button" : legacyButtonType}',
     'role={designCodeV1 ? "table" : undefined}',
     "aria-colcount={designCodeV1 ? 4 : undefined}",
     "width={44} height={44}",
     "width={36} height={36}",
   ]) assert.ok(schoolApp.includes(fragment), `Feature-off guard is missing: ${fragment}`);
+  assert.ok(
+    schoolApp.includes('legacyAriaLabel="Показатель рейтинга"'),
+    "The legacy ranking aria-label must survive flag-off",
+  );
+  assert.ok(
+    schoolApp.includes('legacyButtonType="button"'),
+    "The legacy registration tab button type must survive flag-off",
+  );
+  for (const fragment of [
+    "title={designCodeV1 ? student.fullName : undefined}",
+    "title={designCodeV1 ? user.displayName : undefined}",
+    "title={designCodeV1 ? email : undefined}",
+    "title={designCodeV1 ? child?.fullName : undefined}",
+  ]) assert.ok(schoolApp.includes(fragment), `Flag-off title leaked from v1: ${fragment}`);
 
   const marker = tokens.indexOf("DS-04 — shared component contract.");
   const ds04Start = marker < 0 ? -1 : tokens.indexOf("*/", marker) + 2;
