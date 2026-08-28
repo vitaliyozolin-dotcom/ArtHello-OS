@@ -153,14 +153,14 @@ function AppShell({ snapshot, activeView, onView, onStudent, children }: {
     <div className="l0-stage">
       <div className={cn("l0-app", `role-${snapshot.viewer.role}`)}>
         <aside className="l0-rail">
-          <button className="l0-brand" onClick={() => onView("home")} aria-label="На главную">
+          <button className="l0-brand" onClick={() => onView("home")} aria-label="На главную" title="На главную">
             <Image src="/school-logo.svg" alt="" width={44} height={44} />
             <span><strong>Школа 1–11</strong><small>электронный дневник</small></span>
           </button>
           <nav className="l0-nav" aria-label="Основная навигация">
-            {nav.map((item) => <button key={item.id} className={cn(activeView === item.id && "active")} onClick={() => onView(item.id)}><NavIcon view={item.id} /><span>{item.label}</span></button>)}
+            {nav.map((item) => <button key={item.id} className={cn(activeView === item.id && "active")} onClick={() => onView(item.id)} aria-label={item.label} title={item.label}><NavIcon view={item.id} /><span>{item.label}</span></button>)}
           </nav>
-          <div className="rail-context">
+          <div className="rail-context" title={familyContext && snapshot.selectedStudent ? `${snapshot.selectedStudent.firstName}, ${snapshot.selectedStudent.className} класс` : `${snapshot.viewer.displayName}, ${roleLabels[snapshot.viewer.role]}`}>
             {familyContext && snapshot.selectedStudent ? <><Avatar name={snapshot.selectedStudent.fullName} color={snapshot.selectedStudent.avatarColor} size="sm" /><span><strong>{snapshot.selectedStudent.firstName}</strong><small>{snapshot.selectedStudent.className} класс</small></span></> : <><Avatar name={snapshot.viewer.displayName} size="sm" /><span><strong>{snapshot.viewer.displayName}</strong><small>{roleLabels[snapshot.viewer.role]}</small></span></>}
           </div>
         </aside>

@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [tokens, layout, dockerfile, login, designCodePointer] =
+const [tokens, layout, dockerfile, login, designCodePointer, schoolApp] =
   await Promise.all([
     readFile(new URL("../app/design-tokens.css", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
     readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../DESIGN_CODE.md", import.meta.url), "utf8"),
+    readFile(new URL("../app/school-app.tsx", import.meta.url), "utf8"),
   ]);
 
 test("approved design-code identity is immutable", () => {
@@ -25,7 +26,7 @@ test("approved design-code identity is immutable", () => {
     tokens,
     /Canonical Design Code SHA-256: cebdc3f3ae76cb50103734c0e6144cef713108b4c6fd9b39de93cf3f8828dd48/,
   );
-  assert.match(designCodePointer, /status этого файла: \`POINTER_ONLY\`/);
+  assert.match(designCodePointer, /статус этого файла: `POINTER_ONLY`/);
   assert.match(
     designCodePointer,
     /blob\/main\/docs\/design\/school-1-11\/DESIGN_CODE\.md/,
@@ -116,4 +117,26 @@ test("foundation overrides are scoped to the v1 feature flag", () => {
       selector + " must remain behind the v1 flag",
     );
   }
+});
+
+test("DS-02 tablet shell is fixed at the approved 768–1199 range", () => {
+  assert.match(
+    tokens,
+    /@media \(max-width: 1199px\) and \(min-width: 768px\) \{[\s\S]*?html\[data-design-code="v1"\] \.l0-app \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: var\(--sidebar-compact-width\) minmax\(0, 1fr\);/,
+  );
+  assert.match(
+    tokens,
+    /@media \(max-width: 1199px\) and \(min-width: 768px\) \{[\s\S]*?html\[data-design-code="v1"\] \.l0-rail \{[\s\S]*?display: flex;/,
+  );
+  assert.match(
+    tokens,
+    /html\[data-design-code="v1"\] \.l0-bottom-nav \{\s*display: none;/,
+  );
+  assert.match(
+    tokens,
+    /html\[data-design-code="v1"\] \.l0-nav button > span,[\s\S]*?display: none;/,
+  );
+  assert.match(schoolApp, /aria-label=\{item\.label\} title=\{item\.label\}/);
+  assert.match(schoolApp, /className="rail-context" title=/);
+  assert.doesNotMatch(tokens, /!important/);
 });

@@ -396,8 +396,75 @@ html[data-design-code="v1"] .auth-card > .auth-help {
 }
 
 @media (max-width: 1199px) and (min-width: 768px) {
+  /*
+   * DS-02 owns the complete tablet shell. The feature-flagged selector is
+   * intentionally more specific than the legacy <=800 mobile layer.
+   */
   html[data-design-code="v1"] .l0-app {
+    height: 100svh;
+    display: grid;
     grid-template-columns: var(--sidebar-compact-width) minmax(0, 1fr);
+  }
+
+  html[data-design-code="v1"] .l0-rail {
+    display: flex;
+    padding: var(--space-4) var(--space-3);
+    overflow: hidden;
+  }
+
+  html[data-design-code="v1"] .l0-brand {
+    min-height: var(--control-height-lg);
+    padding: 0 0 var(--space-5);
+    justify-content: center;
+  }
+
+  html[data-design-code="v1"] .l0-brand > span,
+  html[data-design-code="v1"] .l0-nav button > span,
+  html[data-design-code="v1"] .rail-context > span:last-child {
+    display: none;
+  }
+
+  html[data-design-code="v1"] .l0-nav button {
+    width: 56px;
+    min-height: var(--control-height-lg);
+    margin-inline: auto;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+    border-radius: var(--ds-radius-md);
+  }
+
+  html[data-design-code="v1"] .rail-context {
+    min-height: 56px;
+    padding: var(--space-2);
+    justify-content: center;
+    border-radius: var(--ds-radius-lg);
+  }
+
+  html[data-design-code="v1"] .l0-workspace {
+    height: 100%;
+    grid-template-rows: var(--topbar-height) minmax(0, 1fr);
+  }
+
+  html[data-design-code="v1"] .l0-topbar {
+    min-height: var(--topbar-height);
+    padding-inline: var(--content-padding);
+  }
+
+  html[data-design-code="v1"] .mobile-brand {
+    display: none;
+  }
+
+  html[data-design-code="v1"] .compact-select {
+    display: flex;
+  }
+
+  html[data-design-code="v1"] .l0-main {
+    height: 100%;
+  }
+
+  html[data-design-code="v1"] .l0-bottom-nav {
+    display: none;
   }
 }
 
