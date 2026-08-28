@@ -18,8 +18,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CANDIDATE_SHA: 796fdd7af23de11f03460672fb4d82a5d66ce4a5
-  CANDIDATE_IMAGE: school-1-11-design-v1:796fdd7af23d
+  CANDIDATE_SHA: 29f0d4d2500938bc7edc4431091eb4cbf368ec32
+  CANDIDATE_IMAGE: school-1-11-design-v1:29f0d4d25009
   AUDIT_WIDTHS: "767,768,800,801,1199,1200"
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   STAGING_ORIGIN: http://127.0.0.1:3211
@@ -31,7 +31,7 @@ env:
 jobs:
   authorized-visual-audit:
     runs-on: [self-hosted, linux, x64, arthello-gateway]
-    timeout-minutes: 35
+    timeout-minutes: 45
     environment: production-ru
     steps:
       - name: Check out authorized visual audit controls
@@ -79,7 +79,7 @@ jobs:
           mv "$scanned_hosts" ~/.ssh/known_hosts
           printf 'SCHOOL_AUTHORIZED_VISUAL_SSH=VERIFIED\n'
 
-      - name: Capture four roles at approved control widths
+      - name: Capture four roles and all student routes
         id: capture
         env:
           DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
@@ -200,14 +200,23 @@ jobs:
             '
 
           test -s school-authorized-visual-output/manifest.json
-          test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 24
+          test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 45
           manifest_values="$(python3 - <<'READ_MANIFEST'
           import json
+          import os
 
           with open('school-authorized-visual-output/manifest.json', encoding='utf-8') as source:
               manifest = json.load(source)
-          if manifest['captures'] != 24:
-              raise RuntimeError('Incomplete authorized capture matrix')
+          if manifest['candidateSha'] != os.environ['CANDIDATE_SHA']:
+              raise RuntimeError('Candidate SHA invariant failed')
+          if manifest['version'] != '1.1.0':
+              raise RuntimeError('Wrong DS-03 manifest version')
+          if manifest['captures'] != 45:
+              raise RuntimeError('Incomplete combined capture matrix')
+          if manifest['boundaryCaptures'] != 24:
+              raise RuntimeError('Incomplete DS-02 boundary matrix')
+          if manifest['studentRouteCaptures'] != 21:
+              raise RuntimeError('Incomplete DS-03 student route matrix')
           if manifest['credentialsStored'] is not False:
               raise RuntimeError('Credential storage invariant failed')
           if manifest['fixture'] != 'empty schema from candidate migrations, seeded with synthetic data':
@@ -215,6 +224,15 @@ jobs:
           expected_widths = [767, 768, 800, 801, 1199, 1200]
           if [item['width'] for item in manifest['controls']] != expected_widths:
               raise RuntimeError('Wrong DS-02 boundary matrix')
+          expected_route_widths = [390, 768, 1440]
+          if [item['width'] for item in manifest['studentRouteControls']] != expected_route_widths:
+              raise RuntimeError('Wrong DS-03 student route widths')
+          expected_routes = [
+              '/', '/schedule', '/journal', '/homework',
+              '/calendar', '/school', '/profile',
+          ]
+          if [item['route'] for item in manifest['studentRoutes']] != expected_routes:
+              raise RuntimeError('Wrong DS-03 student routes')
           ds02_codes = {
               'DESIGN_CODE_FLAG', 'ROUTE', 'HORIZONTAL_OVERFLOW',
               'PHONE_RAIL', 'PHONE_NAV', 'PHONE_NAV_HEIGHT',
@@ -231,14 +249,32 @@ jobs:
                   'DS-02 shell violations: ' +
                   json.dumps(ds02_violations, ensure_ascii=False)
               )
+          ds03_codes = {
+              'APP_FONT', 'VISIBLE_FONT_FIRST_FAMILY', 'FONT_READY',
+              'FONT_PRELOAD', 'FONT_WOFF2_RESOURCE', 'FONT_TTF_FALLBACK',
+              'STUDENT_THEME_TOKEN', 'NON_STUDENT_THEME_TOKEN',
+              'STUDENT_THEME_PREPAINT', 'STUDENT_THEME_VALUE',
+              'STUDENT_THEME_SURFACE', 'STUDENT_ROUTE',
+              'STUDENT_ROUTE_ANCHOR', 'STUDENT_ROUTE_HEADING',
+          }
+          ds03_violations = [
+              violation for violation in manifest['violations']
+              if violation['code'] in ds03_codes
+          ]
+          if ds03_violations:
+              raise RuntimeError(
+                  'DS-03 theme/font/route violations: ' +
+                  json.dumps(ds03_violations, ensure_ascii=False)
+              )
           print(
               f"{len(manifest['violations'])} "
               f"{str(manifest['compliant']).lower()} "
-              f"{len(ds02_violations)}"
+              f"{len(ds02_violations)} "
+              f"{len(ds03_violations)}"
           )
           READ_MANIFEST
           )"
-          read -r violation_count compliant ds02_violation_count <<< "$manifest_values"
+          read -r violation_count compliant ds02_violation_count ds03_violation_count <<< "$manifest_values"
 
           kill "$tunnel_pid"
           wait "$tunnel_pid" >/dev/null 2>&1 || true
@@ -252,7 +288,8 @@ jobs:
           printf 'violation_count=%s\n' "$violation_count" >> "$GITHUB_OUTPUT"
           printf 'compliant=%s\n' "$compliant" >> "$GITHUB_OUTPUT"
           printf 'ds02_violation_count=%s\n' "$ds02_violation_count" >> "$GITHUB_OUTPUT"
-          printf 'SCHOOL_AUTHORIZED_VISUAL_CAPTURE=OK captures=24 ds02_violations=%s violations=%s compliant=%s\n' "$ds02_violation_count" "$violation_count" "$compliant"
+          printf 'ds03_violation_count=%s\n' "$ds03_violation_count" >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_AUTHORIZED_VISUAL_CAPTURE=OK captures=45 ds02_violations=%s ds03_violations=%s violations=%s compliant=%s\n' "$ds02_violation_count" "$ds03_violation_count" "$violation_count" "$compliant"
 
       - name: Enforce remote teardown
         if: always()
@@ -305,6 +342,7 @@ jobs:
           VIOLATION_COUNT: ${{ steps.capture.outputs.violation_count }}
           COMPLIANT: ${{ steps.capture.outputs.compliant }}
           DS02_VIOLATIONS: ${{ steps.capture.outputs.ds02_violation_count }}
+          DS03_VIOLATIONS: ${{ steps.capture.outputs.ds03_violation_count }}
         shell: bash
         run: |
           {
@@ -312,15 +350,18 @@ jobs:
             echo
             printf -- '- Candidate: %s\n' "$CANDIDATE_SHA"
             printf -- '- Roles: director, teacher, parent, student\n'
-            printf -- '- Routes: /management, /journal, /homework, /schedule\n'
-            printf -- '- Widths: 767, 768, 800, 801, 1199, 1200 px\n'
-            printf -- '- Evidence: 24 screenshots plus computed-style manifest\n'
+            printf -- '- DS-02 boundary routes: /management, /journal, /homework, /schedule\n'
+            printf -- '- DS-02 widths: 767, 768, 800, 801, 1199, 1200 px\n'
+            printf -- '- DS-03 student routes: /, /schedule, /journal, /homework, /calendar, /school, /profile\n'
+            printf -- '- DS-03 route widths: 390, 768, 1440 px\n'
+            printf -- '- Evidence: 45 screenshots plus computed-style manifest\n'
             printf -- '- Data: empty schema from candidate migrations; synthetic only\n'
             printf -- '- Exposure: isolated no-masquerade bridge, loopback port, SSH tunnel\n'
             printf -- '- Production/staging UI, data, restart changed: no\n'
             printf -- '- Capture result: %s\n' "${CAPTURE_RESULT:-failed}"
             printf -- '- Design compliant: %s\n' "${COMPLIANT:-not measured}"
             printf -- '- DS-02 shell violations: %s\n' "${DS02_VIOLATIONS:-not measured}"
+            printf -- '- DS-03 theme/font/route violations: %s\n' "${DS03_VIOLATIONS:-not measured}"
             printf -- '- All-design violations (future stages included): %s\n' "${VIOLATION_COUNT:-not measured}"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -329,13 +370,14 @@ jobs:
         uses: actions/github-script@v7
         env:
           JOB_STATUS: ${{ job.status }}
+          CANDIDATE_SHA: ${{ env.CANDIDATE_SHA }}
         with:
           script: |
             const state =
               process.env.JOB_STATUS === "success" ? "success" : "failure";
             await github.rest.repos.createCommitStatus({
               ...context.repo,
-              sha: context.sha,
+              sha: process.env.CANDIDATE_SHA,
               state,
               context: "school-diary/authorized-visual-capture",
               description: "Authorized visual capture " + process.env.JOB_STATUS,
