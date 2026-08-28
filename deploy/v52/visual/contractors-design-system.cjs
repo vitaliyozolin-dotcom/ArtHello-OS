@@ -29,20 +29,32 @@ async function establishAuth(browser, base) {
   await page.locator('input[name="password"]').fill(tempPassword);
   await page.locator("form button").click();
 
-  await page.waitForFunction(() => {
+  const firstLogin = await page.waitForFunction(() => {
     const shown = (element) => Boolean(element && element.getClientRects().length);
-    return shown(document.querySelector('input[name="currentPassword"]')) || !shown(document.querySelector('input[name="login"]'));
+    const error = document.querySelector(".auth-error");
+    if (shown(error) && error.textContent?.trim()) return { state: "error", message: error.textContent.trim() };
+    if (shown(document.querySelector('input[name="currentPassword"]'))) return { state: "password-change" };
+    if (!shown(document.querySelector('input[name="login"]'))) return { state: "authenticated" };
+    return null;
   }, null, { timeout: 30000 });
+  const firstLoginResult = await firstLogin.jsonValue();
+  if (firstLoginResult.state === "error") throw new Error(`Initial authentication failed: ${firstLoginResult.message}`);
 
   if (await visible(page.locator('input[name="currentPassword"]'))) {
     await page.locator('input[name="currentPassword"]').fill(tempPassword);
     await page.locator('input[name="newPassword"]').fill(permanentPassword);
     await page.locator('input[name="confirmation"]').fill(permanentPassword);
     await page.locator("form button").click();
-    await page.waitForFunction(() => {
+    const passwordChange = await page.waitForFunction(() => {
+      const shown = (element) => Boolean(element && element.getClientRects().length);
+      const error = document.querySelector(".auth-error");
+      if (shown(error) && error.textContent?.trim()) return { state: "error", message: error.textContent.trim() };
       const current = document.querySelector('input[name="currentPassword"]');
-      return !current || !current.getClientRects().length;
+      if (!shown(current)) return { state: "complete" };
+      return null;
     }, null, { timeout: 30000 });
+    const passwordChangeResult = await passwordChange.jsonValue();
+    if (passwordChangeResult.state === "error") throw new Error(`Password change failed: ${passwordChangeResult.message}`);
 
     if (await visible(page.locator('input[name="login"]'))) {
       await page.locator('input[name="login"]').fill("owner");
@@ -51,10 +63,17 @@ async function establishAuth(browser, base) {
     }
   }
 
-  await page.waitForFunction(() => {
+  const finalLogin = await page.waitForFunction(() => {
     const shown = (element) => Boolean(element && element.getClientRects().length);
-    return !shown(document.querySelector('input[name="login"]')) && !shown(document.querySelector('input[name="currentPassword"]'));
+    const error = document.querySelector(".auth-error");
+    if (shown(error) && error.textContent?.trim()) return { state: "error", message: error.textContent.trim() };
+    if (!shown(document.querySelector('input[name="login"]')) && !shown(document.querySelector('input[name="currentPassword"]'))) {
+      return { state: "authenticated" };
+    }
+    return null;
   }, null, { timeout: 30000 });
+  const finalLoginResult = await finalLogin.jsonValue();
+  if (finalLoginResult.state === "error") throw new Error(`Final authentication failed: ${finalLoginResult.message}`);
   await page.goto(`${base}/#contractors`, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.getByRole("heading", { name: "Подрядчики", exact: true }).waitFor({ state: "visible", timeout: 30000 });
   const state = await context.storageState();
