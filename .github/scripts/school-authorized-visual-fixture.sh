@@ -560,7 +560,7 @@ PREPARE_DATA
     test "$(docker network inspect "$audit_network" --format '{{.Internal}}')" = false
     test "$(docker network inspect "$audit_network" --format '{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}')" = false
     test "$(docker network inspect "$audit_network" --format '{{index .Options "com.docker.network.bridge.enable_icc"}}')" = false
-    docker exec "$audit" node --input-type=module - <<'VERIFY_EGRESS'
+    docker exec -i "$audit" node --input-type=module - <<'VERIFY_EGRESS'
 import { connect } from 'node:net';
 const socket = connect({ host: '1.1.1.1', port: 443 });
 let settled = false;
@@ -573,17 +573,20 @@ const finish = (blocked) => {
 };
 socket.setTimeout(2500, () => finish(true));
 socket.once('error', () => finish(true));
-socket.once('connect', () => finish(false));
+    socket.once('connect', () => finish(false));
 VERIFY_EGRESS
     binding="$(docker inspect "$audit" --format '{{json .HostConfig.PortBindings}}')"
-    BINDING="$binding" node - <<'VERIFY_BINDING'
-const bindings = JSON.parse(process.env.BINDING);
-const target = bindings['3000/tcp'];
-if (!Array.isArray(target) || target.length !== 1) throw new Error('Unexpected audit port binding');
-if (target[0].HostIp !== '127.0.0.1' || target[0].HostPort !== '3212') {
-  throw new Error('Audit port is not loopback-only');
-}
-console.log('SCHOOL_AUTHORIZED_VISUAL_BINDING=loopback-only');
+    BINDING="$binding" python3 - <<'VERIFY_BINDING'
+import json
+import os
+
+bindings = json.loads(os.environ['BINDING'])
+target = bindings.get('3000/tcp')
+if not isinstance(target, list) or len(target) != 1:
+    raise RuntimeError('Unexpected audit port binding')
+if target[0].get('HostIp') != '127.0.0.1' or target[0].get('HostPort') != '3212':
+    raise RuntimeError('Audit port is not loopback-only')
+print('SCHOOL_AUTHORIZED_VISUAL_BINDING=loopback-only')
 VERIFY_BINDING
 
     test "$(docker inspect "$production" --format '{{.State.StartedAt}}')" = "$production_started_before"
