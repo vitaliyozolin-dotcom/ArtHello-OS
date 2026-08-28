@@ -415,7 +415,7 @@ jobs:
               raise RuntimeError('Every capture result must be an object')
           boundary_results = [item for item in results if 'routeStateId' not in item]
           student_results = [item for item in results if 'routeStateId' in item]
-          if len(boundary_results) != 24 or len(student_results) != 27:
+          if len(boundary_results) != 48 or len(student_results) != 27:
               raise RuntimeError('Wrong boundary/student result partition')
 
           expected_boundary_matrix = {}
