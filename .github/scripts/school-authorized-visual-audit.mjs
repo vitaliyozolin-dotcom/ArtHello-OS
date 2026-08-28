@@ -64,6 +64,257 @@ const studentRoutes = [
   { id: "school", route: "/school", anchor: ".compact-tabs", heading: "Школа" },
   { id: "profile", route: "/profile", anchor: ".profile-head", heading: null },
 ];
+const schoolCommonSelectorRequirements = [
+  {
+    id: "common-eyebrow",
+    selector: ".page-heading .eyebrow",
+    expectedCount: 1,
+    textRole: "accent",
+    minimumContrast: 4.5,
+  },
+  {
+    id: "common-heading-primary",
+    selector: ".page-heading h1",
+    expectedCount: 1,
+    textRole: "primary",
+    minimumContrast: 4.5,
+  },
+  {
+    id: "common-heading-secondary",
+    selector: ".page-heading p",
+    expectedCount: 1,
+    textRole: "secondary",
+    minimumContrast: 4.5,
+  },
+  {
+    id: "common-tabs",
+    selector: ".compact-tabs > button",
+    expectedCount: 3,
+    textRole: "tab",
+    minimumContrast: 4.5,
+  },
+  {
+    id: "common-active-tab",
+    selector: ".compact-tabs > button.active",
+    expectedCount: 1,
+    textRole: null,
+    minimumContrast: null,
+  },
+];
+const schoolStateSelectorRequirements = {
+  menu: [
+    {
+      id: "menu-articles",
+      selector: ".menu-grid > article",
+      expectedCount: 3,
+      textRole: null,
+      minimumContrast: null,
+    },
+    {
+      id: "menu-date-primary",
+      selector: ".menu-grid > article > header > span:first-child",
+      expectedCount: 3,
+      textRole: "primary",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "menu-term-accent",
+      selector: ".menu-grid dt",
+      expectedCount: 9,
+      textRole: "accent",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "menu-value-primary",
+      selector: ".menu-grid dd",
+      expectedCount: 9,
+      textRole: "primary",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "menu-footer-secondary",
+      selector: ".menu-grid > article > footer",
+      expectedCount: 3,
+      textRole: "secondary",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "menu-status",
+      selector: ".menu-grid > article > header .status-pill",
+      expectedCount: 1,
+      textRole: "status",
+      minimumContrast: 4.5,
+    },
+  ],
+  events: [
+    {
+      id: "event-articles",
+      selector: ".event-grid > article",
+      expectedCount: 2,
+      textRole: null,
+      minimumContrast: null,
+    },
+    {
+      id: "event-dates",
+      selector: ".event-grid .event-date",
+      expectedCount: 2,
+      textRole: null,
+      minimumContrast: null,
+    },
+    {
+      id: "event-day-large",
+      selector: ".event-grid .event-date > strong",
+      expectedCount: 2,
+      textRole: "primary-large",
+      minimumContrast: 3,
+    },
+    {
+      id: "event-month-secondary",
+      selector: ".event-grid .event-date > span",
+      expectedCount: 2,
+      textRole: "secondary",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "event-overline-secondary",
+      selector: ".event-grid > article > div:last-child > .item-overline",
+      expectedCount: 2,
+      textRole: "secondary",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "event-title-primary",
+      selector: ".event-grid > article > div:last-child > h3",
+      expectedCount: 2,
+      textRole: "primary",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "event-description-secondary",
+      selector: ".event-grid > article > div:last-child > p",
+      expectedCount: 2,
+      textRole: "secondary",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "event-status",
+      selector: ".event-grid > article footer .status-pill",
+      expectedCount: 2,
+      textRole: "status",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "event-capacity-secondary",
+      selector: ".event-grid > article footer > small",
+      expectedCount: 2,
+      textRole: "secondary",
+      minimumContrast: 4.5,
+    },
+  ],
+  activities: [
+    {
+      id: "activity-articles",
+      selector: ".activity-grid > article",
+      expectedCount: 2,
+      textRole: null,
+      minimumContrast: null,
+    },
+    {
+      id: "activity-schedule-secondary",
+      selector: ".activity-grid > article > div > small",
+      expectedCount: 2,
+      textRole: "secondary",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "activity-title-primary",
+      selector: ".activity-grid > article > div > h3",
+      expectedCount: 2,
+      textRole: "primary",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "activity-teacher-secondary",
+      selector: ".activity-grid > article > div > p",
+      expectedCount: 2,
+      textRole: "secondary",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "activity-capacity-secondary",
+      selector: ".activity-grid > article .capacity > small",
+      expectedCount: 2,
+      textRole: "secondary",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "activity-price-primary",
+      selector: ".activity-grid > article > footer > strong",
+      expectedCount: 2,
+      textRole: "primary",
+      minimumContrast: 4.5,
+    },
+    {
+      id: "activity-status",
+      selector: ".activity-grid > article > footer .status-pill",
+      expectedCount: 2,
+      textRole: "status",
+      minimumContrast: 4.5,
+    },
+  ],
+};
+const schoolTabStates = [
+  {
+    stateId: "menu",
+    routeStateId: "school-menu",
+    tab: "Меню",
+    anchor: ".menu-grid",
+    items: ".menu-grid > article",
+    expectedItems: 3,
+    selectorRequirements: [
+      ...schoolCommonSelectorRequirements,
+      ...schoolStateSelectorRequirements.menu,
+    ],
+  },
+  {
+    stateId: "events",
+    routeStateId: "school-events",
+    tab: "Мероприятия",
+    anchor: ".event-grid",
+    items: ".event-grid > article",
+    expectedItems: 2,
+    selectorRequirements: [
+      ...schoolCommonSelectorRequirements,
+      ...schoolStateSelectorRequirements.events,
+    ],
+  },
+  {
+    stateId: "activities",
+    routeStateId: "school-activities",
+    tab: "Доп. занятия",
+    anchor: ".activity-grid",
+    items: ".activity-grid > article",
+    expectedItems: 2,
+    selectorRequirements: [
+      ...schoolCommonSelectorRequirements,
+      ...schoolStateSelectorRequirements.activities,
+    ],
+  },
+];
+const studentRouteStates = studentRoutes.flatMap((route) =>
+  route.id === "school"
+    ? schoolTabStates.map((state) => ({ ...route, ...state }))
+    : [
+        {
+          ...route,
+          stateId: "default",
+          routeStateId: route.id,
+          tab: null,
+          items: null,
+          expectedItems: null,
+        },
+      ],
+);
 const studentThemeExpected = {
   "--color-page": "#171a1f",
   "--color-surface": "#1d2939",
@@ -178,6 +429,7 @@ async function collectDs03Metrics(page) {
       "#1d2939",
       "#344054",
       "#e04512",
+      "#c4380d",
     ].map(resolveColor);
     const transparent = resolveColor("transparent");
     const effectiveBackground = (node) => {
@@ -200,6 +452,7 @@ async function collectDs03Metrics(page) {
       ".journal-head",
       ".segmented",
       ".segmented > button",
+      ".compact-tabs > button",
       ".calendar-toolbar > label",
       ".day-switch > button",
       ".lesson-order",
@@ -208,6 +461,8 @@ async function collectDs03Metrics(page) {
       ".calendar-week > article > header",
       ".calendar-lesson",
       ".menu-grid > article",
+      ".event-grid > article",
+      ".activity-grid > article",
       ".subscription-grid > article",
       ".privacy-card",
     ].join(", ");
@@ -881,7 +1136,7 @@ try {
       throw new Error("Student route audit role mismatch");
     }
 
-    for (const route of studentRoutes) {
+    for (const route of studentRouteStates) {
       await page.evaluate(() => {
         window.__schoolAuditCLS = 0;
       });
@@ -892,6 +1147,39 @@ try {
       await page.waitForURL((url) => url.pathname === route.route, {
         timeout: 30000,
       });
+      let routeTab = null;
+      if (route.tab) {
+        routeTab = page
+          .locator(".compact-tabs")
+          .getByRole("button", { name: route.tab, exact: true })
+          .first();
+        await routeTab.waitFor({ state: "visible", timeout: 30000 });
+        await page.evaluate(() => {
+          window.__schoolAuditCLS = 0;
+        });
+        await routeTab.click();
+        await page.waitForFunction(
+          ({ tab, anchor }) => {
+            const activeTabs = [
+              ...document.querySelectorAll(".compact-tabs > button.active"),
+            ];
+            const panel = document.querySelector(anchor);
+            if (!panel) return false;
+            const style = getComputedStyle(panel);
+            const rect = panel.getBoundingClientRect();
+            return (
+              activeTabs.length === 1 &&
+              activeTabs[0].textContent?.trim() === tab &&
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              rect.width > 0 &&
+              rect.height > 0
+            );
+          },
+          { tab: route.tab, anchor: route.anchor },
+          { timeout: 30000 },
+        );
+      }
       const routeAnchor = page.locator(route.anchor).first();
       await routeAnchor.waitFor({ state: "visible", timeout: 30000 });
       const routeHeading = route.heading
@@ -903,6 +1191,572 @@ try {
       await page.evaluate(() => document.fonts.ready);
       await page.waitForTimeout(600);
 
+      if (routeTab) {
+        await routeTab.focus();
+        await page.keyboard.press("Shift+Tab");
+        await page.keyboard.press("Tab");
+        await page.waitForFunction(
+          (tab) => {
+            const active = document.querySelector(
+              ".compact-tabs > button.active",
+            );
+            return (
+              active instanceof HTMLElement &&
+              active.textContent?.trim() === tab &&
+              document.activeElement === active &&
+              active.matches(":focus-visible")
+            );
+          },
+          route.tab,
+          { timeout: 30000 },
+        );
+      }
+
+      const schoolStateMetrics = route.tab
+        ? await page.evaluate(
+            ({ items, expectedItems, selectorRequirements }) => {
+              const probe = document.createElement("span");
+              probe.setAttribute("aria-hidden", "true");
+              probe.style.cssText =
+                "position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;pointer-events:none";
+              document.body.append(probe);
+              const resolveColor = (value) => {
+                probe.style.color = "";
+                probe.style.color = value;
+                return getComputedStyle(probe).color;
+              };
+              const clamp = (value) => Math.min(1, Math.max(0, value));
+              const parseUnit = (value, scale) => {
+                const text = value.trim();
+                const parsed = Number.parseFloat(text);
+                if (!Number.isFinite(parsed)) return null;
+                return text.endsWith("%")
+                  ? clamp(parsed / 100)
+                  : clamp(parsed / scale);
+              };
+              const parseAlpha = (value) => {
+                if (value === undefined || value === null || value === "") {
+                  return 1;
+                }
+                return parseUnit(value, 1);
+              };
+              const parseColor = (value) => {
+                const text = value.trim().toLowerCase();
+                if (text === "transparent") {
+                  return { r: 0, g: 0, b: 0, a: 0 };
+                }
+                const rgbMatch = text.match(/^rgba?\((.*)\)$/);
+                if (rgbMatch) {
+                  const slashParts = rgbMatch[1].split("/");
+                  const channelTokens = slashParts[0]
+                    .replaceAll(",", " ")
+                    .trim()
+                    .split(/\s+/)
+                    .filter(Boolean);
+                  let alphaToken = slashParts[1]?.trim();
+                  if (!alphaToken && channelTokens.length > 3) {
+                    alphaToken = channelTokens.pop();
+                  }
+                  if (channelTokens.length !== 3) return null;
+                  const channels = channelTokens.map((token) =>
+                    parseUnit(token, 255),
+                  );
+                  const alpha = parseAlpha(alphaToken);
+                  if (channels.some((channel) => channel === null) || alpha === null) {
+                    return null;
+                  }
+                  return {
+                    r: channels[0],
+                    g: channels[1],
+                    b: channels[2],
+                    a: alpha,
+                  };
+                }
+                const srgbMatch = text.match(/^color\(srgb\s+(.+)\)$/);
+                if (srgbMatch) {
+                  const slashParts = srgbMatch[1].split("/");
+                  const channelTokens = slashParts[0]
+                    .trim()
+                    .split(/\s+/)
+                    .filter(Boolean);
+                  if (channelTokens.length !== 3) return null;
+                  const channels = channelTokens.map((token) =>
+                    parseUnit(token, 1),
+                  );
+                  const alpha = parseAlpha(slashParts[1]?.trim());
+                  if (channels.some((channel) => channel === null) || alpha === null) {
+                    return null;
+                  }
+                  return {
+                    r: channels[0],
+                    g: channels[1],
+                    b: channels[2],
+                    a: alpha,
+                  };
+                }
+                return null;
+              };
+              const composite = (foreground, background) => {
+                const alpha =
+                  foreground.a + background.a * (1 - foreground.a);
+                if (alpha === 0) return { r: 0, g: 0, b: 0, a: 0 };
+                return {
+                  r:
+                    (foreground.r * foreground.a +
+                      background.r * background.a * (1 - foreground.a)) /
+                    alpha,
+                  g:
+                    (foreground.g * foreground.a +
+                      background.g * background.a * (1 - foreground.a)) /
+                    alpha,
+                  b:
+                    (foreground.b * foreground.a +
+                      background.b * background.a * (1 - foreground.a)) /
+                    alpha,
+                  a: alpha,
+                };
+              };
+              const serializeColor = (value) =>
+                value
+                  ? { r: value.r, g: value.g, b: value.b, a: value.a }
+                  : null;
+              const colorsEqual = (left, right) =>
+                Boolean(
+                  left &&
+                    right &&
+                    Math.abs(left.r - right.r) <= 1e-7 &&
+                    Math.abs(left.g - right.g) <= 1e-7 &&
+                    Math.abs(left.b - right.b) <= 1e-7 &&
+                    Math.abs(left.a - right.a) <= 1e-7,
+                );
+              const visible = (node) => {
+                const rect = node.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) return false;
+                let current = node;
+                while (current instanceof Element) {
+                  const style = getComputedStyle(current);
+                  const opacity = Number.parseFloat(style.opacity);
+                  if (
+                    style.display === "none" ||
+                    style.visibility === "hidden" ||
+                    style.visibility === "collapse" ||
+                    (Number.isFinite(opacity) && opacity <= 0)
+                  ) {
+                    return false;
+                  }
+                  current = current.parentElement;
+                }
+                return true;
+              };
+              const effectiveOpacity = (node) => {
+                let result = 1;
+                let current = node;
+                while (current instanceof Element) {
+                  const opacity = Number.parseFloat(
+                    getComputedStyle(current).opacity,
+                  );
+                  if (Number.isFinite(opacity)) result *= clamp(opacity);
+                  current = current.parentElement;
+                }
+                return result;
+              };
+              const applyOpacity = (color, opacity) =>
+                color ? { ...color, a: color.a * opacity } : null;
+              const backgroundFor = (node, includeNode = true) => {
+                const chain = [];
+                let current = includeNode ? node : node.parentElement;
+                while (current instanceof Element) {
+                  chain.push(current);
+                  current = current.parentElement;
+                }
+                let result = { r: 1, g: 1, b: 1, a: 1 };
+                for (const element of chain.reverse()) {
+                  const layer = parseColor(
+                    getComputedStyle(element).backgroundColor,
+                  );
+                  if (layer) result = composite(layer, result);
+                }
+                return result;
+              };
+              const luminance = (value) => {
+                if (!value) return null;
+                const linear = [value.r, value.g, value.b].map((channel) => {
+                  return channel <= 0.04045
+                    ? channel / 12.92
+                    : ((channel + 0.055) / 1.055) ** 2.4;
+                });
+                return (
+                  0.2126 * linear[0] +
+                  0.7152 * linear[1] +
+                  0.0722 * linear[2]
+                );
+              };
+              const contrast = (foreground, background) => {
+                const foregroundLuminance = luminance(foreground);
+                const backgroundLuminance = luminance(background);
+                if (
+                  foregroundLuminance === null ||
+                  backgroundLuminance === null
+                ) {
+                  return null;
+                }
+                const lighter = Math.max(
+                  foregroundLuminance,
+                  backgroundLuminance,
+                );
+                const darker = Math.min(
+                  foregroundLuminance,
+                  backgroundLuminance,
+                );
+                return (lighter + 0.05) / (darker + 0.05);
+              };
+              const textSample = (node, requirement, index) => {
+                const style = getComputedStyle(node);
+                const authoredForeground = style.color;
+                const opacity = effectiveOpacity(node);
+                const parsedForeground = applyOpacity(
+                  parseColor(authoredForeground),
+                  opacity,
+                );
+                const renderedBackground = backgroundFor(node, true);
+                const renderedForeground = parsedForeground
+                  ? composite(parsedForeground, renderedBackground)
+                  : null;
+                const ratio = contrast(
+                  renderedForeground,
+                  renderedBackground,
+                );
+                return {
+                  index,
+                  text: node.textContent?.trim() ?? "",
+                  textRole: requirement.textRole,
+                  minimumContrast: requirement.minimumContrast,
+                  effectiveOpacity: opacity,
+                  authoredForeground,
+                  renderedForeground: serializeColor(renderedForeground),
+                  renderedBackground: serializeColor(renderedBackground),
+                  ratio,
+                  pass:
+                    ratio !== null && ratio >= requirement.minimumContrast,
+                };
+              };
+              const selectorChecks = selectorRequirements.map((requirement) => {
+                const allNodes = [...document.querySelectorAll(requirement.selector)];
+                const visibleNodes = allNodes.filter(visible);
+                const samples =
+                  requirement.minimumContrast === null
+                    ? []
+                    : visibleNodes.map((node, index) =>
+                        textSample(node, requirement, index),
+                      );
+                return {
+                  ...requirement,
+                  actualCount: allNodes.length,
+                  visibleCount: visibleNodes.length,
+                  hiddenCount: allNodes.length - visibleNodes.length,
+                  countPass:
+                    allNodes.length === requirement.expectedCount &&
+                    visibleNodes.length === requirement.expectedCount,
+                  samples,
+                  contrastPass: samples.every((sample) => sample.pass),
+                };
+              });
+              const expectedAuthored = {
+                surface: resolveColor("var(--color-surface)"),
+                text: resolveColor("var(--neutral-0)"),
+                brand400: resolveColor("var(--brand-400)"),
+                brand600: resolveColor("var(--brand-600)"),
+              };
+              const expectedParsed = Object.fromEntries(
+                Object.entries(expectedAuthored).map(([key, value]) => [
+                  key,
+                  parseColor(value),
+                ]),
+              );
+              const tabNodes = [
+                ...document.querySelectorAll(".compact-tabs > button"),
+              ].filter(visible);
+              const tabs = tabNodes.map((node) => {
+                const style = getComputedStyle(node);
+                const externalBackground = backgroundFor(node, false);
+                const parsedBackground = parseColor(style.backgroundColor);
+                const renderedBackground = parsedBackground
+                  ? composite(parsedBackground, externalBackground)
+                  : null;
+                const parsedForeground = parseColor(style.color);
+                const renderedForegroundColor = applyOpacity(
+                  parsedForeground,
+                  effectiveOpacity(node),
+                );
+                const renderedForeground =
+                  renderedForegroundColor && renderedBackground
+                    ? composite(renderedForegroundColor, renderedBackground)
+                    : null;
+                const borderAuthored = [
+                  style.borderTopColor,
+                  style.borderRightColor,
+                  style.borderBottomColor,
+                  style.borderLeftColor,
+                ];
+                const borderParsed = borderAuthored.map(parseColor);
+                const renderedBorders = borderParsed.map((color) =>
+                  color ? composite(color, externalBackground) : null,
+                );
+                return {
+                  label: node.textContent?.trim() ?? "",
+                  active: node.classList.contains("active"),
+                  backgroundAuthored: style.backgroundColor,
+                  backgroundParsed: serializeColor(parsedBackground),
+                  backgroundRendered: serializeColor(renderedBackground),
+                  foregroundAuthored: style.color,
+                  foregroundParsed: serializeColor(parsedForeground),
+                  foregroundRendered: serializeColor(renderedForeground),
+                  borderAuthored,
+                  borderParsed: borderParsed.map(serializeColor),
+                  borderRendered: renderedBorders.map(serializeColor),
+                  externalBackground: serializeColor(externalBackground),
+                };
+              });
+              const activeTabNodes = tabNodes.filter((node) =>
+                node.classList.contains("active"),
+              );
+              const activeTab = activeTabNodes[0] ?? null;
+              const activeTabMetrics = tabs.find((tab) => tab.active) ?? null;
+              const selectedExternal = activeTab
+                ? backgroundFor(activeTab, false)
+                : null;
+              const selectedFill = activeTab
+                ? parseColor(getComputedStyle(activeTab).backgroundColor)
+                : null;
+              const selectedRenderedFill =
+                selectedFill && selectedExternal
+                  ? composite(selectedFill, selectedExternal)
+                  : null;
+              const selectedStyle = activeTab
+                ? getComputedStyle(activeTab)
+                : null;
+              const selectedBorders = selectedStyle
+                ? [
+                    selectedStyle.borderTopColor,
+                    selectedStyle.borderRightColor,
+                    selectedStyle.borderBottomColor,
+                    selectedStyle.borderLeftColor,
+                  ].map(parseColor)
+                : [];
+              const selectedRenderedBorders = selectedBorders.map((color) =>
+                color && selectedExternal
+                  ? composite(color, selectedExternal)
+                  : null,
+              );
+              const selectedForeground = selectedStyle
+                ? parseColor(selectedStyle.color)
+                : null;
+              const selectedRenderedForeground =
+                selectedForeground && selectedRenderedFill
+                  ? composite(selectedForeground, selectedRenderedFill)
+                  : null;
+              const fillRatio = contrast(
+                selectedRenderedFill,
+                selectedExternal,
+              );
+              const borderRatios = selectedRenderedBorders.map((border) =>
+                contrast(border, selectedExternal),
+              );
+              const selected = {
+                activeCount: activeTabNodes.length,
+                label: activeTab?.textContent?.trim() ?? null,
+                expected: expectedAuthored,
+                actual: activeTabMetrics,
+                mapping: {
+                  backgroundPass: colorsEqual(
+                    selectedFill,
+                    expectedParsed.brand600,
+                  ),
+                  borderPass:
+                    selectedBorders.length === 4 &&
+                    selectedBorders.every((color) =>
+                      colorsEqual(color, expectedParsed.brand400),
+                    ),
+                  textPass: colorsEqual(
+                    selectedForeground,
+                    expectedParsed.text,
+                  ),
+                },
+                nonText: {
+                  externalBackground: serializeColor(selectedExternal),
+                  renderedFill: serializeColor(selectedRenderedFill),
+                  renderedBorders: selectedRenderedBorders.map(serializeColor),
+                  fillRatio,
+                  borderRatios,
+                  minimumContrast: 3,
+                  fillPass: fillRatio !== null && fillRatio >= 3,
+                  borderPass: borderRatios.some(
+                    (ratio) => ratio !== null && ratio >= 3,
+                  ),
+                  pass:
+                    (fillRatio !== null && fillRatio >= 3) ||
+                    borderRatios.some(
+                      (ratio) => ratio !== null && ratio >= 3,
+                    ),
+                },
+              };
+              selected.mapping.pass =
+                selected.mapping.backgroundPass &&
+                selected.mapping.borderPass &&
+                selected.mapping.textPass;
+
+              const focusStyle = activeTab ? getComputedStyle(activeTab) : null;
+              const focusExternal = activeTab
+                ? backgroundFor(activeTab, false)
+                : null;
+              const outlineParsed = focusStyle
+                ? parseColor(focusStyle.outlineColor)
+                : null;
+              const renderedOutline =
+                outlineParsed && focusExternal
+                  ? composite(outlineParsed, focusExternal)
+                  : null;
+              const outlineRatio = contrast(renderedOutline, focusExternal);
+              const outlineWidth = focusStyle
+                ? Number.parseFloat(focusStyle.outlineWidth)
+                : null;
+              const focus = {
+                activeElement: Boolean(
+                  activeTab && document.activeElement === activeTab,
+                ),
+                focusVisible: Boolean(
+                  activeTab && activeTab.matches(":focus-visible"),
+                ),
+                outlineStyle: focusStyle?.outlineStyle ?? null,
+                outlineWidth:
+                  Number.isFinite(outlineWidth) ? outlineWidth : null,
+                outlineAuthored: focusStyle?.outlineColor ?? null,
+                outlineParsed: serializeColor(outlineParsed),
+                renderedOutline: serializeColor(renderedOutline),
+                externalBackground: serializeColor(focusExternal),
+                expectedOutline: expectedAuthored.brand400,
+                outlineColorPass: colorsEqual(
+                  outlineParsed,
+                  expectedParsed.brand400,
+                ),
+                minimumContrast: 3,
+                ratio: outlineRatio,
+                contrastPass: outlineRatio !== null && outlineRatio >= 3,
+              };
+              focus.authoredPass = Boolean(
+                focus.activeElement &&
+                  focus.focusVisible &&
+                  focus.outlineStyle !== "none" &&
+                  focus.outlineWidth !== null &&
+                  focus.outlineWidth > 0 &&
+                  focus.outlineColorPass,
+              );
+              focus.pass = focus.authoredPass && focus.contrastPass;
+
+              const cardNodes = [...document.querySelectorAll(items)].filter(
+                visible,
+              );
+              const cards = cardNodes.map((node, index) => {
+                const style = getComputedStyle(node);
+                const externalBackground = backgroundFor(node, false);
+                const parsedBackground = parseColor(style.backgroundColor);
+                const renderedBackground = parsedBackground
+                  ? composite(parsedBackground, externalBackground)
+                  : null;
+                const parsedForeground = parseColor(style.color);
+                const renderedForeground =
+                  parsedForeground && renderedBackground
+                    ? composite(parsedForeground, renderedBackground)
+                    : null;
+                const backgroundPass = colorsEqual(
+                  parsedBackground,
+                  expectedParsed.surface,
+                );
+                const textPass = colorsEqual(
+                  parsedForeground,
+                  expectedParsed.text,
+                );
+                return {
+                  index,
+                  backgroundAuthored: style.backgroundColor,
+                  backgroundParsed: serializeColor(parsedBackground),
+                  backgroundRendered: serializeColor(renderedBackground),
+                  foregroundAuthored: style.color,
+                  foregroundParsed: serializeColor(parsedForeground),
+                  foregroundRendered: serializeColor(renderedForeground),
+                  backgroundPass,
+                  textPass,
+                  pass: backgroundPass && textPass,
+                };
+              });
+              const activeTabs = tabs.filter((tab) => tab.active);
+              const textContrasts = selectorChecks.flatMap((check) =>
+                check.samples.map((sample) => ({
+                  requirementId: check.id,
+                  selector: check.selector,
+                  ...sample,
+                })),
+              );
+              const selectorCompletenessPass = selectorChecks.every(
+                (check) => check.countPass,
+              );
+              const textContrastPass = selectorChecks.every(
+                (check) => check.contrastPass,
+              );
+              const cardStylePass =
+                cards.length === expectedItems &&
+                cards.every((card) => card.pass);
+              const inactiveTabsPass = tabs
+                .filter((tab) => !tab.active)
+                .every((tab) =>
+                  colorsEqual(
+                    tab.backgroundParsed,
+                    expectedParsed.surface,
+                  ),
+                );
+              probe.remove();
+              return {
+                activeTab: activeTabs[0]?.label ?? null,
+                activeTabCount: activeTabs.length,
+                itemCount: cards.length,
+                expectedItemCount: expectedItems,
+                selectorChecks,
+                selectorCompletenessPass,
+                tabs,
+                cards,
+                cardStylePass,
+                inactiveTabsPass,
+                textContrasts,
+                textContrastPass,
+                selected,
+                focus,
+                schoolStatePass:
+                  selectorCompletenessPass &&
+                  textContrastPass &&
+                  selected.mapping.pass &&
+                  selected.nonText.pass &&
+                  focus.pass &&
+                  cardStylePass &&
+                  inactiveTabsPass,
+              };
+            },
+            {
+              items: route.items,
+              expectedItems: route.expectedItems,
+              selectorRequirements: route.selectorRequirements,
+            },
+          )
+        : null;
+      if (routeTab) {
+        await page.evaluate(() => {
+          if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+          }
+        });
+        await page.evaluate(
+          () => new Promise((resolve) => requestAnimationFrame(() => resolve())),
+        );
+      }
       const routeMetrics = {
         ...(await page.evaluate(() => ({
           hrefPath: location.pathname,
@@ -913,6 +1767,13 @@ try {
         }))),
         anchorPresent: await routeAnchor.isVisible(),
         headingPresent: routeHeading ? await routeHeading.isVisible() : true,
+        stateAnchorPresent: await routeAnchor.isVisible(),
+        ...(schoolStateMetrics ?? {
+          activeTab: null,
+          activeTabCount: 0,
+          itemCount: null,
+          expectedItemCount: null,
+        }),
       };
       const ds03Metrics = await collectDs03Metrics(page);
       const width = control.width;
@@ -946,7 +1807,7 @@ try {
           "student",
           width,
           "P0",
-          "STUDENT_ROUTE_ANCHOR",
+          route.tab ? "STUDENT_ROUTE_STATE_ANCHOR" : "STUDENT_ROUTE_ANCHOR",
           route.anchor,
           "present",
           "missing",
@@ -964,6 +1825,153 @@ try {
           "missing",
           route.route,
         );
+      }
+      if (route.tab) {
+        if (routeMetrics.activeTabCount !== 1) {
+          addViolation(
+            "student",
+            width,
+            "P0",
+            "STUDENT_ROUTE_STATE_ACTIVE",
+            ".compact-tabs > button.active",
+            1,
+            routeMetrics.activeTabCount,
+            route.route,
+          );
+        }
+        if (routeMetrics.activeTab !== route.tab) {
+          addViolation(
+            "student",
+            width,
+            "P0",
+            "STUDENT_ROUTE_STATE_TAB",
+            ".compact-tabs > button.active",
+            route.tab,
+            routeMetrics.activeTab,
+            route.route,
+          );
+        }
+        if (routeMetrics.itemCount !== route.expectedItems) {
+          addViolation(
+            "student",
+            width,
+            "P0",
+            "STUDENT_ROUTE_STATE_ITEMS",
+            route.items,
+            route.expectedItems,
+            routeMetrics.itemCount,
+            route.route,
+          );
+        }
+        for (const check of routeMetrics.selectorChecks) {
+          if (!check.countPass) {
+            addViolation(
+              "student",
+              width,
+              "P0",
+              "STUDENT_SCHOOL_SELECTOR_COUNT",
+              check.selector,
+              {
+                requirementId: check.id,
+                expectedCount: check.expectedCount,
+                visibleCount: check.expectedCount,
+              },
+              {
+                actualCount: check.actualCount,
+                visibleCount: check.visibleCount,
+                hiddenCount: check.hiddenCount,
+              },
+              route.route,
+            );
+          }
+          if (!check.contrastPass) {
+            addViolation(
+              "student",
+              width,
+              "P0",
+              "STUDENT_SCHOOL_TEXT_CONTRAST",
+              check.selector,
+              {
+                requirementId: check.id,
+                minimumContrast: check.minimumContrast,
+              },
+              check.samples,
+              route.route,
+            );
+          }
+        }
+        if (!routeMetrics.selected.mapping.pass) {
+          addViolation(
+            "student",
+            width,
+            "P0",
+            "STUDENT_SCHOOL_SELECTED_MAPPING",
+            ".compact-tabs > button.active",
+            "background Brand600, border Brand400, text neutral-0",
+            routeMetrics.selected,
+            route.route,
+          );
+        }
+        if (!routeMetrics.inactiveTabsPass) {
+          addViolation(
+            "student",
+            width,
+            "P0",
+            "STUDENT_SCHOOL_TAB_STYLE",
+            ".compact-tabs > button:not(.active)",
+            "--color-surface background",
+            routeMetrics.tabs.filter((tab) => !tab.active),
+            route.route,
+          );
+        }
+        if (!routeMetrics.selected.nonText.pass) {
+          addViolation(
+            "student",
+            width,
+            "P0",
+            "STUDENT_SCHOOL_SELECTED_NONTEXT",
+            ".compact-tabs > button.active",
+            "fill or border >=3:1 against actual external page",
+            routeMetrics.selected.nonText,
+            route.route,
+          );
+        }
+        if (!routeMetrics.focus.authoredPass) {
+          addViolation(
+            "student",
+            width,
+            "P0",
+            "STUDENT_SCHOOL_FOCUS_STYLE",
+            ".compact-tabs > button.active:focus-visible",
+            "authored visible Brand400 outline",
+            routeMetrics.focus,
+            route.route,
+          );
+        }
+        if (!routeMetrics.focus.contrastPass) {
+          addViolation(
+            "student",
+            width,
+            "P0",
+            "STUDENT_SCHOOL_FOCUS_NONTEXT",
+            ".compact-tabs > button.active:focus-visible",
+            ">=3:1 against actual external page",
+            routeMetrics.focus,
+            route.route,
+          );
+        }
+        if (!routeMetrics.cardStylePass) {
+          addViolation(
+            "student",
+            width,
+            "P0",
+            "STUDENT_SCHOOL_CARD_STYLE",
+            route.items,
+            "surface background and neutral-0 inherited text",
+            routeMetrics.cards,
+            route.route,
+          );
+        }
       }
       if (
         routeMetrics.documentWidth > width + 1 ||
@@ -1000,7 +2008,7 @@ try {
       });
 
       const screenshot =
-        "student-route-" + route.id + "-" + control.width + ".png";
+        "student-route-" + route.routeStateId + "-" + control.width + ".png";
       await page.screenshot({
         path: "/output/" + screenshot,
         fullPage: true,
@@ -1010,6 +2018,9 @@ try {
         role: "student",
         route: route.route,
         routeId: route.id,
+        routeStateId: route.routeStateId,
+        stateId: route.stateId,
+        tab: route.tab,
         ...control,
         metrics: routeMetrics,
         ds03: ds03Metrics,
@@ -1017,7 +2028,7 @@ try {
       });
       console.log(
         "SCHOOL_DS03_ROUTE_" +
-          route.id.toUpperCase() +
+          route.routeStateId.toUpperCase().replaceAll("-", "_") +
           "_" +
           control.width +
           "=CAPTURED",
@@ -1037,7 +2048,7 @@ const severityCounts = violations.reduce(
   {},
 );
 const manifest = {
-  version: "1.1.0",
+  version: "1.3.0",
   capturedAt: new Date().toISOString(),
   candidateSha,
   candidateImageId,
@@ -1048,14 +2059,50 @@ const manifest = {
   controls,
   roles: roles.map(({ id, route }) => ({ id, route })),
   studentRouteControls,
+  schoolStateSelectorRequirements: Object.fromEntries(
+    schoolTabStates.map(({ stateId, selectorRequirements }) => [
+      stateId,
+      selectorRequirements,
+    ]),
+  ),
   studentRoutes: studentRoutes.map(({ id, route, anchor, heading }) => ({
     id,
     route,
     anchor,
     heading,
   })),
+  studentRouteStateCount: studentRouteStates.length,
+  studentRouteStates: studentRouteStates.map(
+    ({
+      id,
+      route,
+      routeStateId,
+      stateId,
+      tab,
+      anchor,
+      items,
+      expectedItems,
+      heading,
+      selectorRequirements,
+    }) => ({
+      id,
+      route,
+      routeStateId,
+      stateId,
+      tab,
+      anchor,
+      items,
+      expectedItems,
+      heading,
+      selectorRequirements: selectorRequirements ?? null,
+    }),
+  ),
   boundaryCaptures: results.length,
   studentRouteCaptures: studentRouteResults.length,
+  studentRouteStateCaptures: studentRouteResults.length,
+  schoolTabCaptures: studentRouteResults.filter(
+    (result) => result.routeId === "school",
+  ).length,
   captures: results.length + studentRouteResults.length,
   compliant: violations.length === 0,
   severityCounts,
@@ -1072,7 +2119,10 @@ await writeFile(
 if (results.length !== roles.length * controls.length) {
   throw new Error("Authorized visual capture matrix is incomplete");
 }
-if (studentRouteResults.length !== studentRoutes.length * studentRouteControls.length) {
+if (
+  studentRouteResults.length !==
+  studentRouteStates.length * studentRouteControls.length
+) {
   throw new Error("DS-03 student route capture matrix is incomplete");
 }
 console.log(
