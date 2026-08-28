@@ -110,7 +110,7 @@ export function SalesWorkspace({ workspace, role, notify, onTasksChanged, onOpen
   if (error || !data) return <section className="sales-loading sales-error"><strong>{error || "Нет данных"}</strong><button onClick={() => { setLoading(true); void load(); }}>Повторить</button></section>;
   if (!data.leads.length) return <section className="page sales-workspace">
     <div className="sales-heading"><div><p className="eyebrow">Воронка · единый путь клиента</p><h1>Продажи</h1><p>Лиды, контакты, этапы воронки и связанные платежи появятся после добавления данных.</p></div></div>
-    <div data-ah-compact-card="true" className="manual-module-empty"><span>＋</span><h2>Лидов пока нет</h2><p>Подключите CRM или добавьте первую заявку вручную.</p></div>
+    <div className="manual-module-empty"><span>＋</span><h2>Лидов пока нет</h2><p>Подключите CRM или добавьте первую заявку вручную.</p></div>
   </section>;
 
   const chainLead = data.leads.find((lead) => lead.id === data.acceptanceChainLeadId) ?? data.leads[0];
