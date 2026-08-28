@@ -237,9 +237,9 @@ html[data-design-code="v1"][data-theme="student"] .role-student .day-switch > bu
 }
 
 html[data-design-code="v1"][data-theme="student"] .role-student .day-switch > button.active {
-  border-color: var(--color-text);
+  border-color: var(--color-accent);
   background: var(--color-surface);
-  color: var(--color-accent);
+  color: var(--color-text);
 }
 
 html[data-design-code="v1"][data-theme="student"] .role-student .lesson-order {
