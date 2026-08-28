@@ -354,14 +354,80 @@ jobs:
           }
 
           tunnel_pid=""
+          browser_pid=""
+          browser_name="school-flag-off-browser-$GITHUB_RUN_ID"
+          browser_exchange="$RUNNER_TEMP/school-flag-off-browser-$GITHUB_RUN_ID"
+          browser_log="$RUNNER_TEMP/school-flag-off-browser-$GITHUB_RUN_ID.log"
+          browser_session=""
+          handshake_token="$(openssl rand -hex 32)"
+          [[ "$handshake_token" =~ ^[a-f0-9]{64}$ ]]
+          printf '::add-mask::%s\n' "$handshake_token"
           fixture_prepared=0
           active_sha="$REVIEWED_CANDIDATE_SHA"
           active_image="$CANDIDATE_OFF_IMAGE"
           active_id="$CANDIDATE_IMAGE_ID"
           active_source=candidate-migrations-only
-          cleanup_active() {
+
+          cleanup_browser_exchange() {
+            local cleanup_rc=0
+            if [ ! -e "$browser_exchange" ]; then
+              return 0
+            fi
+            case "$browser_exchange" in
+              "$RUNNER_TEMP"/school-flag-off-browser-"$GITHUB_RUN_ID") ;;
+              *) return 1 ;;
+            esac
+            if [ ! -f "$browser_exchange/owner" ] ||
+              [ "$(cat "$browser_exchange/owner")" != "$GITHUB_RUN_ID|$GITHUB_SHA" ]; then
+              return 1
+            fi
+            if find "$browser_exchange" -mindepth 1 -maxdepth 1 ! -type f -print -quit |
+              grep -q .; then
+              return 1
+            fi
+            while IFS= read -r marker; do
+              case "$(basename "$marker")" in
+                owner|ready.json|request-base.json|captured-base.json|request-candidate.json|captured-candidate.json|complete.json|failed.json) ;;
+                ready.json.[0-9]*.tmp|captured-base.json.[0-9]*.tmp|captured-candidate.json.[0-9]*.tmp|complete.json.[0-9]*.tmp|failed.json.[0-9]*.tmp|request-base.json.host.tmp|request-candidate.json.host.tmp) ;;
+                *) cleanup_rc=1 ;;
+              esac
+            done < <(find "$browser_exchange" -mindepth 1 -maxdepth 1 -type f -print)
+            if [ "$cleanup_rc" -ne 0 ]; then
+              return "$cleanup_rc"
+            fi
+            find "$browser_exchange" -mindepth 1 -maxdepth 1 -type f -delete
+            rmdir -- "$browser_exchange"
+          }
+
+          cleanup_browser() {
             local cleanup_rc=0
             set +e
+            if docker container inspect "$browser_name" >/dev/null 2>&1; then
+              if [ "$(docker inspect "$browser_name" --format '{{index .Config.Labels "school.system"}}')" != school-1-11 ] ||
+                [ "$(docker inspect "$browser_name" --format '{{index .Config.Labels "school.environment"}}')" != synthetic ] ||
+                [ "$(docker inspect "$browser_name" --format '{{index .Config.Labels "school.purpose"}}')" != flag-off-single-browser ] ||
+                [ "$(docker inspect "$browser_name" --format '{{index .Config.Labels "school.run-id"}}')" != "$GITHUB_RUN_ID" ] ||
+                [ "$(docker inspect "$browser_name" --format '{{index .Config.Labels "school.control-sha"}}')" != "$GITHUB_SHA" ]; then
+                cleanup_rc=1
+              else
+                docker stop --time 10 "$browser_name" >/dev/null 2>&1 || cleanup_rc=$?
+              fi
+            fi
+            if [ -n "$browser_pid" ]; then
+              wait "$browser_pid" >/dev/null 2>&1 || true
+              browser_pid=""
+            fi
+            set -e
+            return "$cleanup_rc"
+          }
+
+          cleanup_active() {
+            local cleanup_rc=0
+            local step_rc=0
+            set +e
+            cleanup_browser
+            step_rc=$?
+            if [ "$step_rc" -ne 0 ]; then cleanup_rc="$step_rc"; fi
             if [ -n "$tunnel_pid" ]; then
               kill "$tunnel_pid" >/dev/null 2>&1
               wait "$tunnel_pid" >/dev/null 2>&1
@@ -371,9 +437,13 @@ jobs:
               remote_fixture cleanup \
                 "$active_sha" "$active_image" "$active_id" "$active_source" \
                 > "$RUNNER_TEMP/school-flag-off-trap-cleanup.log" 2>&1
-              cleanup_rc=$?
+              step_rc=$?
+              if [ "$step_rc" -ne 0 ]; then cleanup_rc="$step_rc"; fi
               fixture_prepared=0
             fi
+            cleanup_browser_exchange
+            step_rc=$?
+            if [ "$step_rc" -ne 0 ]; then cleanup_rc="$step_rc"; fi
             set -e
             return "$cleanup_rc"
           }
@@ -386,6 +456,178 @@ jobs:
           trap finish EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM HUP
+
+          wait_browser_marker() {
+            local marker="$1"
+            local attempts="$2"
+            for attempt in $(seq 1 "$attempts"); do
+              if [ -s "$marker" ]; then
+                return 0
+              fi
+              if [ -s "$browser_exchange/failed.json" ]; then
+                cat "$browser_exchange/failed.json" >&2
+                tail -n 200 "$browser_log" >&2 || true
+                return 1
+              fi
+              if [ -n "$browser_pid" ] && ! kill -0 "$browser_pid" >/dev/null 2>&1; then
+                wait "$browser_pid" || true
+                browser_pid=""
+                tail -n 200 "$browser_log" >&2 || true
+                return 1
+              fi
+              sleep 1
+            done
+            printf 'Timed out waiting for browser marker: %s\n' "$marker" >&2
+            tail -n 200 "$browser_log" >&2 || true
+            return 1
+          }
+
+          validate_browser_marker() {
+            local marker="$1"
+            local expected_state="$2"
+            local expected_side="${3:-}"
+            local expected_sha="${4:-}"
+            local expected_id="${5:-}"
+            MARKER="$marker" EXPECTED_STATE="$expected_state" \
+              EXPECTED_SIDE="$expected_side" EXPECTED_SHA="$expected_sha" \
+              EXPECTED_ID="$expected_id" BROWSER_SESSION="$browser_session" \
+              HANDSHAKE_TOKEN="$handshake_token" python3 - <<'PY'
+          import json
+          import os
+          import re
+
+          def reject_duplicates(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise RuntimeError("Duplicate marker key: " + key)
+                  result[key] = value
+              return result
+
+          with open(os.environ["MARKER"], encoding="utf-8") as source:
+              marker = json.load(source, object_pairs_hook=reject_duplicates)
+          state = os.environ["EXPECTED_STATE"]
+          common = {
+              "version": "1.0.0",
+              "runId": os.environ["GITHUB_RUN_ID"],
+              "controlSha": os.environ["GITHUB_SHA"],
+              "token": os.environ["HANDSHAKE_TOKEN"],
+              "state": state,
+          }
+          if state == "ready":
+              expected_keys = set(common) | {"browserSessionId", "expectedSides"}
+          elif state == "captured":
+              expected_keys = set(common) | {
+                  "browserSessionId", "side", "auditSha", "auditImageId", "captures",
+              }
+          elif state == "complete":
+              expected_keys = set(common) | {"browserSessionId", "sides"}
+          else:
+              raise RuntimeError("Unsupported marker state")
+          if set(marker) != expected_keys:
+              raise RuntimeError("Wrong marker schema for " + state)
+          for key, value in common.items():
+              if marker.get(key) != value:
+                  raise RuntimeError("Wrong marker provenance: " + key)
+          session = marker.get("browserSessionId")
+          if not isinstance(session, str) or not re.fullmatch(
+              r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+              session,
+          ):
+              raise RuntimeError("Invalid browser session")
+          expected_session = os.environ["BROWSER_SESSION"]
+          if expected_session and session != expected_session:
+              raise RuntimeError("Browser process changed between capture sides")
+          if state == "ready" and marker["expectedSides"] != ["base", "candidate"]:
+              raise RuntimeError("Wrong capture order")
+          if state == "captured" and (
+              marker["side"] != os.environ["EXPECTED_SIDE"]
+              or marker["auditSha"] != os.environ["EXPECTED_SHA"]
+              or marker["auditImageId"] != os.environ["EXPECTED_ID"]
+              or marker["captures"] != 12
+          ):
+              raise RuntimeError("Wrong captured-side provenance")
+          if state == "complete" and marker["sides"] != ["base", "candidate"]:
+              raise RuntimeError("Incomplete single-browser capture order")
+          print(session)
+          PY
+          }
+
+          signal_browser_capture() {
+            local variant="$1"
+            local audit_sha="$2"
+            local audit_image_id="$3"
+            local request="$browser_exchange/request-$variant.json"
+            local temporary="$request.host.tmp"
+            test ! -e "$request"
+            test ! -e "$temporary"
+            umask 077
+            printf '{"version":"1.0.0","runId":"%s","controlSha":"%s","token":"%s","browserSessionId":"%s","side":"%s","auditSha":"%s","auditImageId":"%s","seedDate":"%s"}\n' \
+              "$GITHUB_RUN_ID" "$GITHUB_SHA" "$handshake_token" "$browser_session" \
+              "$variant" "$audit_sha" "$audit_image_id" "$audit_seed_date" > "$temporary"
+            mv -- "$temporary" "$request"
+          }
+
+          start_single_browser() {
+            case "$browser_exchange" in
+              "$RUNNER_TEMP"/school-flag-off-browser-"$GITHUB_RUN_ID") ;;
+              *) return 1 ;;
+            esac
+            test ! -e "$browser_exchange"
+            test -z "$(docker ps -aq --filter "name=^/$browser_name$")"
+            install -m 0700 -d "$browser_exchange"
+            printf '%s\n' "$GITHUB_RUN_ID|$GITHUB_SHA" > "$browser_exchange/owner"
+            chmod 0600 "$browser_exchange/owner"
+            : > "$browser_log"
+            chmod 0600 "$browser_log"
+            for variant in base candidate; do
+              variant_dir="$PWD/$EVIDENCE_DIR/$variant"
+              install -m 0755 -d "$variant_dir"
+              test -z "$(find "$variant_dir" -mindepth 1 -maxdepth 1 -print -quit)"
+            done
+
+            docker run --rm --init --network host \
+              --name "$browser_name" \
+              --label school.system=school-1-11 \
+              --label school.environment=synthetic \
+              --label school.purpose=flag-off-single-browser \
+              --label "school.run-id=$GITHUB_RUN_ID" \
+              --label "school.control-sha=$GITHUB_SHA" \
+              -e AUDIT_ORIGIN="$AUDIT_ORIGIN" \
+              -e AUDIT_PASSWORD="$audit_password" \
+              -e AUDIT_RUN_ID="$GITHUB_RUN_ID" \
+              -e AUDIT_SEED_DATE="$audit_seed_date" \
+              -e AUDIT_CONTROL_SHA="$GITHUB_SHA" \
+              -e AUDIT_BASE_SHA="$BASE_SHA" \
+              -e AUDIT_BASE_IMAGE_ID="$BASE_IMAGE_ID" \
+              -e AUDIT_CANDIDATE_SHA="$REVIEWED_CANDIDATE_SHA" \
+              -e AUDIT_CANDIDATE_IMAGE_ID="$CANDIDATE_IMAGE_ID" \
+              -e AUDIT_HANDSHAKE_TOKEN="$handshake_token" \
+              -e AUDIT_EXCHANGE_DIR=/exchange \
+              -e AUDIT_OUTPUT_ROOT=/output \
+              -e PLAYWRIGHT_VERSION="$PLAYWRIGHT_VERSION" \
+              -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+              -v "$PWD/.github/scripts/school-flag-off-capture.mjs:/control/capture.mjs:ro" \
+              -v "$PWD/$EVIDENCE_DIR:/output" \
+              -v "$browser_exchange:/exchange" \
+              "$PLAYWRIGHT_IMAGE" bash -lc '
+                set -Eeuo pipefail
+                work="$(mktemp -d /tmp/school-flag-off-capture.XXXXXX)"
+                trap '"'"'rm -rf -- "$work"'"'"' EXIT
+                cd "$work"
+                npm init -y >/dev/null
+                npm install --silent --no-audit --no-fund --ignore-scripts \
+                  "playwright@$PLAYWRIGHT_VERSION"
+                cp /control/capture.mjs ./capture.mjs
+                node capture.mjs
+              ' > "$browser_log" 2>&1 &
+            browser_pid=$!
+            wait_browser_marker "$browser_exchange/ready.json" 600
+            browser_session="$(
+              validate_browser_marker "$browser_exchange/ready.json" ready
+            )"
+            printf 'SCHOOL_FLAG_OFF_SINGLE_BROWSER=READY session=%s\n' "$browser_session"
+          }
 
           capture_variant() {
             local variant="$1"
@@ -414,14 +656,12 @@ jobs:
             test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_SOURCE=//p' "$prepare_log" | tail -n1)" = "$active_source"
             test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_SEED_DATE=//p' "$prepare_log" | tail -n1)" = "$audit_seed_date"
 
-            variant_dir="$PWD/$EVIDENCE_DIR/$variant"
-            install -m 0755 -d "$variant_dir"
-            test -z "$(find "$variant_dir" -mindepth 1 -maxdepth 1 -print -quit)"
-
-            ssh -N "${ssh_args[@]}" \
-              -L 127.0.0.1:33212:127.0.0.1:3212 \
-              "$DEPLOY_USER@$DEPLOY_HOST" &
-            tunnel_pid=$!
+            if [ -z "$tunnel_pid" ]; then
+              ssh -N "${ssh_args[@]}" \
+                -L 127.0.0.1:33212:127.0.0.1:3212 \
+                "$DEPLOY_USER@$DEPLOY_HOST" &
+              tunnel_pid=$!
+            fi
             tunnel_ready=0
             for attempt in $(seq 1 60); do
               if curl -fsS --max-time 3 "$AUDIT_ORIGIN/api/health" |
@@ -433,34 +673,14 @@ jobs:
               sleep 1
             done
             test "$tunnel_ready" -eq 1
-
-            docker run --rm --network host \
-              -e AUDIT_ORIGIN="$AUDIT_ORIGIN" \
-              -e AUDIT_PASSWORD="$audit_password" \
-              -e AUDIT_RUN_ID="$GITHUB_RUN_ID" \
-              -e AUDIT_SIDE="$variant" \
-              -e AUDIT_SHA="$active_sha" \
-              -e AUDIT_IMAGE_ID="$active_id" \
-              -e AUDIT_SEED_DATE="$audit_seed_date" \
-              -e PLAYWRIGHT_VERSION="$PLAYWRIGHT_VERSION" \
-              -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-              -v "$PWD/.github/scripts/school-flag-off-capture.mjs:/control/capture.mjs:ro" \
-              -v "$variant_dir:/output" \
-              "$PLAYWRIGHT_IMAGE" bash -lc '
-                set -Eeuo pipefail
-                work="$(mktemp -d /tmp/school-flag-off-capture.XXXXXX)"
-                trap '"'"'rm -rf -- "$work"'"'"' EXIT
-                cd "$work"
-                npm init -y >/dev/null
-                npm install --silent --no-audit --no-fund --ignore-scripts \
-                  "playwright@$PLAYWRIGHT_VERSION"
-                cp /control/capture.mjs ./capture.mjs
-                node capture.mjs
-              '
-
-            kill "$tunnel_pid"
-            wait "$tunnel_pid" >/dev/null 2>&1 || true
-            tunnel_pid=""
+            kill -0 "$browser_pid" >/dev/null 2>&1
+            signal_browser_capture "$variant" "$active_sha" "$active_id"
+            wait_browser_marker "$browser_exchange/captured-$variant.json" 1200
+            test "$(
+              validate_browser_marker \
+                "$browser_exchange/captured-$variant.json" captured \
+                "$variant" "$active_sha" "$active_id"
+            )" = "$browser_session"
             remote_fixture cleanup \
               "$active_sha" "$active_image" "$active_id" "$active_source" |
               tee "$cleanup_log"
@@ -471,14 +691,72 @@ jobs:
           }
 
           docker pull "$PLAYWRIGHT_IMAGE"
+          start_single_browser
           capture_variant base \
             "$BASE_SHA" "$BASE_OFF_IMAGE" "$BASE_IMAGE_ID" base-migrations-only
           capture_variant candidate \
             "$REVIEWED_CANDIDATE_SHA" "$CANDIDATE_OFF_IMAGE" \
             "$CANDIDATE_IMAGE_ID" candidate-migrations-only
+          wait_browser_marker "$browser_exchange/complete.json" 120
+          test "$(
+            validate_browser_marker "$browser_exchange/complete.json" complete
+          )" = "$browser_session"
+          browser_rc=0
+          wait "$browser_pid" || browser_rc=$?
+          browser_pid=""
+          cat "$browser_log"
+          test "$browser_rc" -eq 0
+          test -z "$(docker ps -aq --filter "name=^/$browser_name$")"
+          cleanup_browser_exchange
+          test ! -e "$browser_exchange"
           remote_service_fingerprint > "$EVIDENCE_DIR/service-after.txt"
           cmp "$EVIDENCE_DIR/service-before.txt" "$EVIDENCE_DIR/service-after.txt"
           printf 'result=CAPTURED\n' >> "$GITHUB_OUTPUT"
+
+      - name: Enforce local single-browser cleanup
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          browser_name="school-flag-off-browser-$GITHUB_RUN_ID"
+          browser_exchange="$RUNNER_TEMP/school-flag-off-browser-$GITHUB_RUN_ID"
+          if docker container inspect "$browser_name" >/dev/null 2>&1; then
+            test "$(docker inspect "$browser_name" --format '{{index .Config.Labels "school.system"}}')" = school-1-11
+            test "$(docker inspect "$browser_name" --format '{{index .Config.Labels "school.environment"}}')" = synthetic
+            test "$(docker inspect "$browser_name" --format '{{index .Config.Labels "school.purpose"}}')" = flag-off-single-browser
+            test "$(docker inspect "$browser_name" --format '{{index .Config.Labels "school.run-id"}}')" = "$GITHUB_RUN_ID"
+            test "$(docker inspect "$browser_name" --format '{{index .Config.Labels "school.control-sha"}}')" = "$GITHUB_SHA"
+            docker stop --time 10 "$browser_name" >/dev/null 2>&1 || true
+            if docker container inspect "$browser_name" >/dev/null 2>&1; then
+              docker rm --force "$browser_name" >/dev/null
+            fi
+          fi
+          test -z "$(docker ps -aq --filter "name=^/$browser_name$")"
+
+          if [ -e "$browser_exchange" ]; then
+            case "$browser_exchange" in
+              "$RUNNER_TEMP"/school-flag-off-browser-"$GITHUB_RUN_ID") ;;
+              *) exit 1 ;;
+            esac
+            test -f "$browser_exchange/owner"
+            test "$(cat "$browser_exchange/owner")" = "$GITHUB_RUN_ID|$GITHUB_SHA"
+            test -z "$(find "$browser_exchange" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+            invalid=0
+            while IFS= read -r marker; do
+              case "$(basename "$marker")" in
+                owner|ready.json|request-base.json|captured-base.json|request-candidate.json|captured-candidate.json|complete.json|failed.json) ;;
+                ready.json.[0-9]*.tmp|captured-base.json.[0-9]*.tmp|captured-candidate.json.[0-9]*.tmp|complete.json.[0-9]*.tmp|failed.json.[0-9]*.tmp|request-base.json.host.tmp|request-candidate.json.host.tmp) ;;
+                *) invalid=1 ;;
+              esac
+            done < <(find "$browser_exchange" -mindepth 1 -maxdepth 1 -type f -print)
+            test "$invalid" -eq 0
+            find "$browser_exchange" -mindepth 1 -maxdepth 1 -type f -delete
+            rmdir -- "$browser_exchange"
+          fi
+          test ! -e "$browser_exchange"
+          printf 'SCHOOL_FLAG_OFF_SINGLE_BROWSER_CLEANUP=OK\n'
 
       - name: Compare all probe pixels DOM accessibility and geometry exactly
         id: compare
@@ -493,6 +771,7 @@ jobs:
           import json
           import os
           import pathlib
+          import re
           import struct
 
           root = pathlib.Path(os.environ["EVIDENCE_DIR"])
@@ -514,8 +793,25 @@ jobs:
               {"width": 390, "height": 844},
               {"width": 1440, "height": 1000},
           ]
+          renderer_profile = "deterministic-cpu-serial-raster-v1"
+          renderer_args = [
+              "--disable-gpu-rasterization",
+              "--disable-oop-rasterization",
+              "--disable-partial-raster",
+              "--num-raster-threads=1",
+              "--disable-skia-runtime-opts",
+              "--disable-gpu-compositing",
+          ]
+          screenshot_protocol = {
+              "warmupFrames": 1,
+              "evidenceFrames": 2,
+              "evidenceByteIdentical": True,
+              "retries": 0,
+          }
           comparisons = []
           violations = []
+          browser_session_id = None
+          browser_version = None
 
           def digest(path):
               return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -610,12 +906,16 @@ jobs:
                   )
               capture = json.loads((root / variant / "manifest.json").read_text())
               if (
-                  capture.get("side") != variant
+                  capture.get("version") != "1.2.0"
+                  or capture.get("side") != variant
                   or capture.get("auditSha") != expected_sha
                   or capture.get("auditImageId") != expected_id
                   or capture.get("seedDate") != os.environ["AUDIT_SEED_DATE"]
                   or capture.get("flagValue") is not False
                   or capture.get("origin") != "loopback-ssh-tunnel"
+                  or capture.get("rendererProfile") != renderer_profile
+                  or capture.get("rendererArgs") != renderer_args
+                  or capture.get("screenshotProtocol") != screenshot_protocol
                   or capture.get("roles") != roles
                   or capture.get("probes") != probes
                   or capture.get("controls") != controls
@@ -623,6 +923,21 @@ jobs:
                   or len(capture.get("results", [])) != 12
               ):
                   raise RuntimeError("Capture provenance failed for " + variant)
+              if not re.fullmatch(
+                  r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+                  capture.get("browserSessionId", ""),
+              ):
+                  raise RuntimeError("Invalid browser session provenance for " + variant)
+              if not re.fullmatch(r"\d+(?:\.\d+){1,3}", capture.get("browserVersion", "")):
+                  raise RuntimeError("Invalid browser version provenance for " + variant)
+              if browser_session_id is None:
+                  browser_session_id = capture["browserSessionId"]
+                  browser_version = capture["browserVersion"]
+              elif (
+                  capture["browserSessionId"] != browser_session_id
+                  or capture["browserVersion"] != browser_version
+              ):
+                  raise RuntimeError("Base/candidate did not use one Chromium process")
               result_keys = {
                   (item.get("probe"), item.get("width"))
                   for item in capture["results"]
@@ -635,7 +950,7 @@ jobs:
                   raise RuntimeError("Capture probe matrix failed for " + variant)
 
           manifest = {
-              "version": "1.1.0",
+              "version": "1.3.0",
               "runId": os.environ["GITHUB_RUN_ID"],
               "baseSha": os.environ["BASE_SHA"],
               "candidateSha": os.environ["REVIEWED_CANDIDATE_SHA"],
@@ -648,6 +963,11 @@ jobs:
                   "synthetic data only"
               ),
               "credentialsStored": False,
+              "browserSessionId": browser_session_id,
+              "browserVersion": browser_version,
+              "rendererProfile": renderer_profile,
+              "rendererArgs": renderer_args,
+              "screenshotProtocol": screenshot_protocol,
               "roles": roles,
               "probes": probes,
               "controls": controls,
@@ -655,8 +975,11 @@ jobs:
               "variantArtifactCount": expected_variant_files,
               "comparisons": comparisons,
               "serviceFingerprintSha256": digest(before),
-              "compliant": not violations,
-              "violations": violations,
+              "validationStatus": "pending-strict-validation",
+              "compliant": False,
+              "violations": violations or [
+                  {"surface": "strict-validation-not-completed"}
+              ],
           }
           (root / "manifest.json").write_text(
               json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
@@ -685,6 +1008,8 @@ jobs:
           import json
           import os
           import pathlib
+          import re
+          import struct
 
           def reject_constant(value):
               raise RuntimeError("Non-finite JSON number: " + value)
@@ -696,6 +1021,12 @@ jobs:
                       raise RuntimeError("Duplicate JSON key: " + key)
                   result[key] = value
               return result
+
+          def png_size(path):
+              data = path.read_bytes()
+              if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
+                  raise RuntimeError("Invalid PNG: " + str(path))
+              return struct.unpack(">II", data[16:24])
 
           root = pathlib.Path(os.environ["EVIDENCE_DIR"])
           manifest = json.loads(
@@ -709,10 +1040,13 @@ jobs:
               "credentialsStored", "roles", "probes", "controls",
               "captureCountPerVariant", "variantArtifactCount", "comparisons",
               "serviceFingerprintSha256", "compliant", "violations",
+              "browserSessionId", "browserVersion", "rendererProfile",
+              "rendererArgs", "screenshotProtocol",
+              "validationStatus",
           }
           if set(manifest) != expected_keys:
               raise RuntimeError("Wrong strict manifest root schema")
-          if manifest["version"] != "1.1.0":
+          if manifest["version"] != "1.3.0":
               raise RuntimeError("Wrong manifest version")
           if manifest["runId"] != os.environ["GITHUB_RUN_ID"]:
               raise RuntimeError("Wrong run provenance")
@@ -735,8 +1069,41 @@ jobs:
               raise RuntimeError("Wrong synthetic source provenance")
           if manifest["credentialsStored"] is not False:
               raise RuntimeError("Credential privacy provenance failed")
-          if manifest["compliant"] is not True or manifest["violations"] != []:
-              raise RuntimeError("Flag-off parity is not compliant")
+          expected_renderer_args = [
+              "--disable-gpu-rasterization",
+              "--disable-oop-rasterization",
+              "--disable-partial-raster",
+              "--num-raster-threads=1",
+              "--disable-skia-runtime-opts",
+              "--disable-gpu-compositing",
+          ]
+          expected_screenshot_protocol = {
+              "warmupFrames": 1,
+              "evidenceFrames": 2,
+              "evidenceByteIdentical": True,
+              "retries": 0,
+          }
+          if not re.fullmatch(
+              r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+              manifest["browserSessionId"],
+          ):
+              raise RuntimeError("Invalid single-browser session provenance")
+          if not re.fullmatch(r"\d+(?:\.\d+){1,3}", manifest["browserVersion"]):
+              raise RuntimeError("Invalid Chromium version provenance")
+          if (
+              manifest["rendererProfile"] != "deterministic-cpu-serial-raster-v1"
+              or manifest["rendererArgs"] != expected_renderer_args
+              or manifest["screenshotProtocol"] != expected_screenshot_protocol
+          ):
+              raise RuntimeError("Wrong deterministic renderer provenance")
+          if (
+              manifest["validationStatus"] != "pending-strict-validation"
+              or manifest["compliant"] is not False
+              or manifest["violations"] != [
+                  {"surface": "strict-validation-not-completed"}
+              ]
+          ):
+              raise RuntimeError("Comparison stage did not leave fail-closed pending state")
           before_bytes = (root / "service-before.txt").read_bytes()
           after_bytes = (root / "service-after.txt").read_bytes()
           if before_bytes != after_bytes:
@@ -776,11 +1143,37 @@ jobs:
               "renderedHeight", "pixelExact", "differingPixels", "domExact",
               "geometryExact", "a11yExact", "files",
           }
+          expected_probe_by_id = {
+              probe["id"]: probe for probe in expected_probes
+          }
+          expected_control_by_width = {
+              control["width"]: control for control in expected_controls
+          }
           for comparison in manifest["comparisons"]:
               if set(comparison) != expected_comparison_keys:
                   raise RuntimeError("Wrong strict comparison schema")
+              probe = expected_probe_by_id.get(comparison["probe"])
+              control = expected_control_by_width.get(comparison["width"])
+              if probe is None or control is None:
+                  raise RuntimeError("Unknown comparison probe/viewport")
+              stem = f"{probe['id']}-{control['width']}"
+              rendered_width, rendered_height = png_size(
+                  root / "base" / (stem + ".png")
+              )
+              candidate_width, candidate_height = png_size(
+                  root / "candidate" / (stem + ".png")
+              )
               if (
-                  comparison["pixelExact"] is not True
+                  comparison["role"] != probe["role"]
+                  or comparison["route"] != probe["route"]
+                  or comparison["state"] != probe["state"]
+                  or comparison["height"] != control["height"]
+                  or rendered_width != control["width"]
+                  or rendered_height < control["height"]
+                  or (candidate_width, candidate_height)
+                      != (rendered_width, rendered_height)
+                  or comparison["renderedHeight"] != rendered_height
+                  or comparison["pixelExact"] is not True
                   or comparison["differingPixels"] != 0
                   or comparison["domExact"] is not True
                   or comparison["geometryExact"] is not True
@@ -791,11 +1184,16 @@ jobs:
                   "png", "dom.html", "geometry.json", "aria.yml",
               }:
                   raise RuntimeError("Wrong strict comparison file schema")
-              for file_record in comparison["files"].values():
+              for suffix, file_record in comparison["files"].items():
                   if set(file_record) != {
                       "base", "candidate", "baseSha256", "candidateSha256",
                   }:
                       raise RuntimeError("Wrong strict comparison digest schema")
+                  if (
+                      file_record["base"] != f"base/{stem}.{suffix}"
+                      or file_record["candidate"] != f"candidate/{stem}.{suffix}"
+                  ):
+                      raise RuntimeError("Comparison file is not bound to its matrix record")
                   if file_record["baseSha256"] != file_record["candidateSha256"]:
                       raise RuntimeError("Exact comparison digests differ")
                   for side, digest_key in (
@@ -823,6 +1221,8 @@ jobs:
               "version", "runId", "side", "auditSha", "auditImageId",
               "seedDate", "flagValue", "origin", "roles", "probes",
               "controls", "captures", "results",
+              "browserSessionId", "browserVersion", "rendererProfile",
+              "rendererArgs", "screenshotProtocol",
           }
           expected_result_keys = {
               "probe", "role", "route", "state", "width", "height",
@@ -831,6 +1231,8 @@ jobs:
               "ariaSha256", "fullPageHeight", "designCode", "helpButtons",
               "tabRoles", "ownedRoots", "anchors", "consoleErrors",
               "pageErrors", "externalRequests",
+              "warmupScreenshotSha256", "verificationScreenshotSha256",
+              "screenshotAttempts",
           }
           expected_anchor_keys = {
               "directorManagementRows", "directorLegacyTitles",
@@ -856,7 +1258,7 @@ jobs:
               if set(child) != expected_side_keys:
                   raise RuntimeError("Wrong child manifest schema for " + variant)
               if (
-                  child["version"] != "1.0.0"
+                  child["version"] != "1.2.0"
                   or child["runId"] != os.environ["GITHUB_RUN_ID"]
                   or child["side"] != variant
                   or child["auditSha"] != expected_sha
@@ -864,6 +1266,11 @@ jobs:
                   or child["seedDate"] != manifest["seedDate"]
                   or child["flagValue"] is not False
                   or child["origin"] != "loopback-ssh-tunnel"
+                  or child["browserSessionId"] != manifest["browserSessionId"]
+                  or child["browserVersion"] != manifest["browserVersion"]
+                  or child["rendererProfile"] != manifest["rendererProfile"]
+                  or child["rendererArgs"] != expected_renderer_args
+                  or child["screenshotProtocol"] != expected_screenshot_protocol
                   or child["roles"] != manifest["roles"]
                   or child["probes"] != manifest["probes"]
                   or child["controls"] != manifest["controls"]
@@ -895,6 +1302,12 @@ jobs:
                       or result["consoleErrors"] != []
                       or result["pageErrors"] != []
                       or result["externalRequests"] != []
+                      or result["screenshotAttempts"] != 3
+                      or not re.fullmatch(
+                          r"[a-f0-9]{64}", result["warmupScreenshotSha256"]
+                      )
+                      or result["verificationScreenshotSha256"]
+                          != result["screenshotSha256"]
                   ):
                       raise RuntimeError("Flag-off runtime result failed for " + repr(key))
                   stem = f"{result['probe']}-{result['width']}"
@@ -999,6 +1412,31 @@ jobs:
               )
           if len(actual_files) != 101:
               raise RuntimeError("Wrong total artifact count: " + str(len(actual_files)))
+          manifest["validationStatus"] = "strict-validated-pending-finalization"
+          manifest["compliant"] = False
+          manifest["violations"] = [
+              {"surface": "finalization-not-completed"}
+          ]
+          validated = root / ".manifest.validated.tmp"
+          validated.write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          os.replace(validated, root / "manifest.json")
+          final_manifest = json.loads(
+              (root / "manifest.json").read_text(),
+              object_pairs_hook=reject_duplicates,
+              parse_constant=reject_constant,
+          )
+          if (
+              final_manifest["validationStatus"]
+                  != "strict-validated-pending-finalization"
+              or final_manifest["compliant"] is not False
+              or final_manifest["violations"] != [
+                  {"surface": "finalization-not-completed"}
+              ]
+          ):
+              raise RuntimeError("Strict pending-finalization transition failed")
           print("SCHOOL_FLAG_OFF_ARTIFACT=STRICT_OK files=" + str(len(actual_files)))
           VALIDATE
 
@@ -1196,6 +1634,77 @@ jobs:
           fi
           printf 'SCHOOL_FLAG_OFF_LOCAL_CLEANUP=OK\n'
 
+      - name: Finalize compliant evidence after all gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'FINALIZE'
+          import json
+          import os
+          import pathlib
+
+          def reject_constant(value):
+              raise RuntimeError("Non-finite JSON number: " + value)
+
+          def reject_duplicates(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise RuntimeError("Duplicate JSON key: " + key)
+                  result[key] = value
+              return result
+
+          root = pathlib.Path(os.environ["EVIDENCE_DIR"])
+          path = root / "manifest.json"
+          manifest = json.loads(
+              path.read_text(),
+              object_pairs_hook=reject_duplicates,
+              parse_constant=reject_constant,
+          )
+          if (
+              manifest.get("version") != "1.3.0"
+              or manifest.get("runId") != os.environ["GITHUB_RUN_ID"]
+              or manifest.get("baseSha") != os.environ["BASE_SHA"]
+              or manifest.get("candidateSha")
+                  != os.environ["REVIEWED_CANDIDATE_SHA"]
+              or manifest.get("validationStatus")
+                  != "strict-validated-pending-finalization"
+              or manifest.get("compliant") is not False
+              or manifest.get("violations") != [
+                  {"surface": "finalization-not-completed"}
+              ]
+          ):
+              raise RuntimeError("Evidence is not in strict pending-finalization state")
+          files = [item for item in root.rglob("*") if item.is_file()]
+          if len(files) != 101:
+              raise RuntimeError("Final evidence inventory is not 101 files")
+          if (root / "service-before.txt").read_bytes() != (
+              root / "service-after.txt"
+          ).read_bytes():
+              raise RuntimeError("Final service fingerprint changed")
+          manifest["validationStatus"] = "passed"
+          manifest["compliant"] = True
+          manifest["violations"] = []
+          temporary = root / ".manifest.finalized.tmp"
+          temporary.write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          os.replace(temporary, path)
+          final = json.loads(
+              path.read_text(),
+              object_pairs_hook=reject_duplicates,
+              parse_constant=reject_constant,
+          )
+          if (
+              final.get("validationStatus") != "passed"
+              or final.get("compliant") is not True
+              or final.get("violations") != []
+          ):
+              raise RuntimeError("Final compliant manifest transition failed")
+          print("SCHOOL_FLAG_OFF_MANIFEST=COMPLIANT files=101")
+          FINALIZE
+
       - name: Upload strict flag-off evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -1226,6 +1735,8 @@ jobs:
             printf -- '- Roles: director, teacher, parent, student\n'
             printf -- '- Probes: ranking ARIA/type; Journal/Admin titles; modal/root outside app\n'
             printf -- '- Exact surfaces: screenshot, owned-root DOM, body accessibility, geometry\n'
+            printf -- '- Renderer: one long-lived Chromium browser launch; verified six-flag CPU/serial raster profile\n'
+            printf -- '- Screenshot stability: one discarded warm-up + two byte-identical evidence frames; zero retries\n'
             printf -- '- Strict inventory: 49 files/image; 101 files total\n'
             printf -- '- Data: fixed-date synthetic only\n'
             printf -- '- Exact comparison step: %s\n' "${COMPARE_RESULT:-not-completed}"
