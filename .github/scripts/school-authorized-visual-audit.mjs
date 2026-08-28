@@ -23,25 +23,15 @@ if (!candidateImageId || !/^sha256:[a-f0-9]{64}$/.test(candidateImageId)) {
   throw new Error("CANDIDATE_IMAGE_ID is invalid");
 }
 
-const defaultControls = [
-  { width: 360, height: 800 },
-  { width: 390, height: 844 },
-  { width: 768, height: 1024 },
-  { width: 1280, height: 960 },
-  { width: 1440, height: 1000 },
-  { width: 1920, height: 1080 },
-  { width: 2560, height: 1200 },
-];
+const approvedBoundaryWidths = "767,768,800,801,1199,1200";
 const boundaryWidths = process.env.AUDIT_WIDTHS;
-if (boundaryWidths && boundaryWidths !== "767,768,800,801,1199,1200") {
+if (boundaryWidths !== approvedBoundaryWidths) {
   throw new Error("AUDIT_WIDTHS must be the approved DS-02 boundary matrix");
 }
-const controls = boundaryWidths
-  ? boundaryWidths.split(",").map((value) => {
-      const width = Number.parseInt(value, 10);
-      return { width, height: width <= 801 ? 1024 : 960 };
-    })
-  : defaultControls;
+const controls = boundaryWidths.split(",").map((value) => {
+  const width = Number.parseInt(value, 10);
+  return { width, height: width <= 801 ? 1024 : 960 };
+});
 
 const roles = [
   { id: "director", route: "/management" },
@@ -166,7 +156,7 @@ const schoolStateSelectorRequirements = {
       selector: ".event-grid .event-date > strong",
       expectedCount: 2,
       textRole: "primary-large",
-      minimumContrast: 3,
+      minimumContrast: 4.5,
     },
     {
       id: "event-month-secondary",
@@ -1412,6 +1402,7 @@ try {
               };
               const textSample = (node, requirement, index) => {
                 const style = getComputedStyle(node);
+                const text = node.textContent?.trim() ?? "";
                 const authoredForeground = style.color;
                 const opacity = effectiveOpacity(node);
                 const parsedForeground = applyOpacity(
@@ -1428,7 +1419,8 @@ try {
                 );
                 return {
                   index,
-                  text: node.textContent?.trim() ?? "",
+                  text,
+                  textPresent: text.length > 0,
                   textRole: requirement.textRole,
                   minimumContrast: requirement.minimumContrast,
                   effectiveOpacity: opacity,
@@ -1437,7 +1429,9 @@ try {
                   renderedBackground: serializeColor(renderedBackground),
                   ratio,
                   pass:
-                    ratio !== null && ratio >= requirement.minimumContrast,
+                    text.length > 0 &&
+                    ratio !== null &&
+                    ratio >= requirement.minimumContrast,
                 };
               };
               const selectorChecks = selectorRequirements.map((requirement) => {
