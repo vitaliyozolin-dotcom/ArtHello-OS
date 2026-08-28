@@ -100,7 +100,7 @@ html[data-design-code="v1"][data-theme="student"] {
   --student-font-family: var(--font-sans);
   --student-app-border: var(--color-border);
   --student-app-frame: var(--color-page);
-  --student-app-shadow: var(--shadow-lg);
+  --student-app-shadow: 0 30px 100px color-mix(in srgb, var(--neutral-900) 36%, transparent);
   --student-rail: var(--neutral-900);
   --student-page: var(--color-page);
   --student-surface: var(--color-surface);
