@@ -17,8 +17,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  EXPECTED_CANDIDATE_SHA: ce11356c9c3244a721ca83a2a649778870c6c7a0
-  EXPECTED_IMAGE: school-1-11-design-v1:ce11356c9c32
+  EXPECTED_CANDIDATE_SHA: e0d2c55db2bf4214aa8feff0c49b5c88c63d74e4
+  EXPECTED_IMAGE: school-1-11-design-v1:e0d2c55db2bf
   STAGING_ORIGIN: http://127.0.0.1:3211
   TUNNEL_ORIGIN: http://127.0.0.1:33211
   PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.55.0-noble
