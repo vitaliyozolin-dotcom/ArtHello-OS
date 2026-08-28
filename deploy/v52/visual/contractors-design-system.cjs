@@ -144,12 +144,20 @@ async function captureContractors(browser, base, storageState, label, viewport) 
     const kpiLabel = firstKpi?.querySelector("small");
     const kpiValue = firstKpi?.querySelector("strong");
     const kpiNote = firstKpi?.querySelector(".ahKpiCopy > span");
+    const registry = document.querySelector(".ahContractorRegistry");
+    const toolbar = document.querySelector(".ahContractorToolbar");
     const search = document.querySelector(".ahContractorToolbar .ahSearchField input");
+    const count = document.querySelector(".ahContractorCount");
     const pageBox = pageElement?.getBoundingClientRect();
     const sourceBox = source?.getBoundingClientRect();
+    const registryBox = registry?.getBoundingClientRect();
+    const toolbarBox = toolbar?.getBoundingClientRect();
     const searchIcon = document.querySelector(".ahContractorToolbar .ahSearchIcon svg")?.getBoundingClientRect();
-    const emptyTitle = document.querySelector(".ahContractorRegistry .ahEmptyState h3");
-    const emptyText = document.querySelector(".ahContractorRegistry .ahEmptyState p");
+    const emptyState = document.querySelector(".ahContractorRegistry .ahEmptyState");
+    const emptyBox = emptyState?.getBoundingClientRect();
+    const emptyTitle = emptyState?.querySelector("h3");
+    const emptyText = emptyState?.querySelector("p");
+    const emptyAction = emptyState?.querySelector(".ahButton");
     const mobileList = document.querySelector(".ahContractorMobileList");
     const table = document.querySelector(".ahContractorTableWrap");
     const kpiColumns = kpiGrid ? getComputedStyle(kpiGrid).gridTemplateColumns.split(" ").filter(Boolean).length : 0;
@@ -159,7 +167,14 @@ async function captureContractors(browser, base, storageState, label, viewport) 
     const sourceStyle = style(source);
     const kpiGridStyle = style(kpiGrid);
     const kpiStyle = style(firstKpi);
+    const registryStyle = style(registry);
+    const toolbarStyle = style(toolbar);
     const searchStyle = style(search);
+    const countStyle = style(count);
+    const emptyStyle = style(emptyState);
+    const emptyTitleStyle = style(emptyTitle);
+    const emptyTextStyle = style(emptyText);
+    const emptyActionStyle = style(emptyAction);
     return {
       clientWidth: root.clientWidth,
       scrollWidth: root.scrollWidth,
@@ -192,14 +207,35 @@ async function captureContractors(browser, base, storageState, label, viewport) 
       kpiLabelFontSize: style(kpiLabel)?.fontSize ?? null,
       kpiValueFontSize: style(kpiValue)?.fontSize ?? null,
       kpiNoteFontSize: style(kpiNote)?.fontSize ?? null,
+      registryHeight: registryBox?.height ?? null,
+      registryRadius: registryStyle?.borderRadius ?? null,
+      toolbarHeight: toolbarBox?.height ?? null,
+      toolbarGap: toolbarStyle?.rowGap ?? null,
+      toolbarPaddingTop: toolbarStyle?.paddingTop ?? null,
+      toolbarPaddingLeft: toolbarStyle?.paddingLeft ?? null,
       searchHeight: searchStyle?.height ?? null,
       searchRadius: searchStyle?.borderRadius ?? null,
       searchPaddingLeft: searchStyle?.paddingLeft ?? null,
       searchFontSize: searchStyle?.fontSize ?? null,
+      countFontSize: countStyle?.fontSize ?? null,
+      countLineHeight: countStyle?.lineHeight ?? null,
       searchIconWidth: searchIcon?.width ?? 0,
       searchIconHeight: searchIcon?.height ?? 0,
-      emptyTitleBorder: emptyTitle ? getComputedStyle(emptyTitle).borderWidth : null,
-      emptyTextBorder: emptyText ? getComputedStyle(emptyText).borderWidth : null,
+      emptyHeight: emptyBox?.height ?? null,
+      emptyGap: emptyStyle?.rowGap ?? null,
+      emptyMinHeight: emptyStyle?.minHeight ?? null,
+      emptyPaddingTop: emptyStyle?.paddingTop ?? null,
+      emptyPaddingLeft: emptyStyle?.paddingLeft ?? null,
+      emptyTitleFontSize: emptyTitleStyle?.fontSize ?? null,
+      emptyTitleLineHeight: emptyTitleStyle?.lineHeight ?? null,
+      emptyTextFontSize: emptyTextStyle?.fontSize ?? null,
+      emptyTextLineHeight: emptyTextStyle?.lineHeight ?? null,
+      emptyActionMinHeight: emptyActionStyle?.minHeight ?? null,
+      emptyActionRadius: emptyActionStyle?.borderRadius ?? null,
+      emptyActionPaddingLeft: emptyActionStyle?.paddingLeft ?? null,
+      emptyActionFontSize: emptyActionStyle?.fontSize ?? null,
+      emptyTitleBorder: emptyTitleStyle?.borderWidth ?? null,
+      emptyTextBorder: emptyTextStyle?.borderWidth ?? null,
       mobileListDisplay: mobileList ? getComputedStyle(mobileList).display : null,
       tableDisplay: table ? getComputedStyle(table).display : null,
       legacyContractorScope: Boolean(pageElement?.closest(".contractor-workspace")),
@@ -277,7 +313,6 @@ function assertSameMobileCanon(contractors, access) {
     "actionMinHeight", "actionRadius", "actionFontSize",
     "sourceRadius", "sourcePaddingTop", "sourcePaddingLeft", "sourceLabelFontSize", "sourceBodyFontSize",
     "kpiGap",
-    "searchHeight", "searchRadius", "searchPaddingLeft", "searchFontSize",
   ];
   const mismatches = keys
     .filter((key) => contractors[key] !== access[key])
@@ -302,6 +337,39 @@ function assertCompactMobileContractorKpis(contractors) {
     .map(([key, value]) => `${key}: contractors=${contractors[key]} expected=${value}`);
   if (mismatches.length > 0) {
     throw new Error(`Compact mobile contractor KPI mismatches:\n${mismatches.join("\n")}`);
+  }
+}
+
+function assertCompactMobileContractorRegistry(contractors) {
+  const expected = {
+    registryRadius: "14px",
+    toolbarGap: "8px",
+    toolbarPaddingTop: "11px",
+    toolbarPaddingLeft: "11px",
+    searchHeight: "40px",
+    searchRadius: "9px",
+    searchPaddingLeft: "11px",
+    searchFontSize: "16px",
+    countFontSize: "11px",
+    countLineHeight: "14px",
+    emptyGap: "10px",
+    emptyMinHeight: "126px",
+    emptyPaddingTop: "24px",
+    emptyPaddingLeft: "16px",
+    emptyTitleFontSize: "16px",
+    emptyTitleLineHeight: "21px",
+    emptyTextFontSize: "13px",
+    emptyTextLineHeight: "18px",
+    emptyActionMinHeight: "44px",
+    emptyActionRadius: "13px",
+    emptyActionPaddingLeft: "14px",
+    emptyActionFontSize: "14px",
+  };
+  const mismatches = Object.entries(expected)
+    .filter(([key, value]) => contractors[key] !== value)
+    .map(([key, value]) => `${key}: contractors=${contractors[key]} expected=${value}`);
+  if (mismatches.length > 0) {
+    throw new Error(`Compact mobile contractor registry mismatches:\n${mismatches.join("\n")}`);
   }
 }
 
@@ -372,6 +440,7 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
         const contractors = pilotContractors.get(viewport.join("x"));
         assertSameMobileCanon(contractors, access);
         assertCompactMobileContractorKpis(contractors);
+        assertCompactMobileContractorRegistry(contractors);
       }
     }
 

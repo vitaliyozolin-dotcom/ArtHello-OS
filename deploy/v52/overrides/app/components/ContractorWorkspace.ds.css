@@ -311,47 +311,49 @@
   }
 
   .ahContractorRegistry {
-    border-radius: 16px;
+    border-radius: 14px;
   }
 
   .ahContractorToolbar {
     grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
-    padding: 13px;
+    gap: 8px;
+    padding: 11px;
   }
 
   .ahContractorToolbar .ahSearchField input {
-    height: var(--ah-mobile-search-height);
-    border-radius: var(--ah-mobile-search-radius);
-    padding-inline: var(--ah-mobile-search-padding);
+    height: 40px;
+    border-radius: 9px;
+    padding-inline: 11px;
     font-size: 16px;
   }
 
   .ahContractorCount {
     padding-inline: 0;
-    font-size: 12px;
-    line-height: 16px;
+    font-size: 11px;
+    line-height: 14px;
   }
 
   .ahContractorRegistry > .ahEmptyState {
-    min-height: 150px;
-    padding: 32px 18px;
+    gap: 10px;
+    min-height: 126px;
+    padding: 24px 16px;
   }
 
   .ahContractorRegistry > .ahEmptyState h3 {
-    font-size: 18px;
-    line-height: 24px;
+    font-size: 16px;
+    line-height: 21px;
   }
 
   .ahContractorRegistry > .ahEmptyState p {
-    font-size: 15px;
-    line-height: 22px;
+    font-size: 13px;
+    line-height: 18px;
   }
 
   .ahContractorRegistry > .ahEmptyState .ahButton {
-    min-height: 48px;
-    border-radius: 16px;
-    font-size: 16px;
+    min-height: 44px;
+    border-radius: 13px;
+    padding-inline: 14px;
+    font-size: 14px;
   }
 
   .ahContractorTableWrap {
