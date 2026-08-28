@@ -5,6 +5,7 @@ const origin = process.env.AUDIT_ORIGIN;
 const password = process.env.AUDIT_PASSWORD;
 const runId = process.env.AUDIT_RUN_ID;
 const candidateSha = process.env.CANDIDATE_SHA;
+const candidateImageId = process.env.CANDIDATE_IMAGE_ID;
 
 if (!origin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) {
   throw new Error("AUDIT_ORIGIN must be a loopback HTTP origin");
@@ -17,6 +18,9 @@ if (!runId || !/^[0-9]+$/.test(runId)) {
 }
 if (!candidateSha || !/^[a-f0-9]{40}$/.test(candidateSha)) {
   throw new Error("CANDIDATE_SHA is invalid");
+}
+if (!candidateImageId || !/^sha256:[a-f0-9]{64}$/.test(candidateImageId)) {
+  throw new Error("CANDIDATE_IMAGE_ID is invalid");
 }
 
 const defaultControls = [
@@ -168,12 +172,48 @@ async function collectDs03Metrics(page) {
           "color-mix(in srgb, #171a1f 94%, transparent)",
         ),
       },
-      card: {
-        selector: ".content-card",
-        actual: background(".content-card"),
-        expected: resolveColor("#1d2939"),
-      },
     };
+    const approvedRouteSurfaceColors = [
+      "#171a1f",
+      "#1d2939",
+      "#344054",
+      "#e04512",
+    ].map(resolveColor);
+    const routeSurfaceSelector = [
+      ".content-card",
+      ".student-hero",
+      ".student-launch-grid > button",
+      ".student-quote",
+      ".student-achievements",
+      ".achievement-grid > article",
+      ".calendar-week > article",
+      ".calendar-week > article > header",
+      ".menu-grid > article",
+      ".subscription-grid > article",
+      ".privacy-card",
+    ].join(", ");
+    const routeSurfaces = [...document.querySelectorAll(routeSurfaceSelector)]
+      .filter((node) => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.display !== "none" &&
+          style.visibility !== "hidden"
+        );
+      })
+      .map((node, index) => ({
+        selector:
+          node.tagName.toLowerCase() +
+          (typeof node.className === "string" && node.className.trim()
+            ? "." + node.className.trim().split(/\s+/).join(".")
+            : "") +
+          "[route-surface=" +
+          index +
+          "]",
+        actual: resolveColor(getComputedStyle(node).backgroundColor),
+      }));
     probe.remove();
 
     const app = document.querySelector(".l0-app");
@@ -256,6 +296,8 @@ async function collectDs03Metrics(page) {
       themeBeforeShell: window.__schoolThemeBeforeShell ?? null,
       themeTokens,
       surfaces,
+      approvedRouteSurfaceColors,
+      routeSurfaces,
     };
   }, studentThemeExpected);
 }
@@ -337,6 +379,16 @@ function enforceDs03({ role, width, route, metrics }) {
           "STUDENT_THEME_SURFACE",
           value.selector,
           value.expected,
+          value.actual,
+        );
+      }
+    }
+    for (const value of metrics.routeSurfaces) {
+      if (!metrics.approvedRouteSurfaceColors.includes(value.actual)) {
+        violation(
+          "STUDENT_THEME_SURFACE",
+          value.selector,
+          metrics.approvedRouteSurfaceColors,
           value.actual,
         );
       }
@@ -819,40 +871,31 @@ try {
         history.pushState({}, "", path);
         window.dispatchEvent(new PopStateEvent("popstate"));
       }, route.route);
-      await page.waitForFunction(
-        ({ path, anchor, heading }) =>
-          location.pathname === path &&
-          Boolean(document.querySelector(anchor)) &&
-          (!heading ||
-            [...document.querySelectorAll("h1")].some(
-              (node) => node.textContent?.trim() === heading,
-            )),
-        {
-          path: route.route,
-          anchor: route.anchor,
-          heading: route.heading,
-        },
-        { timeout: 30000 },
-      );
+      await page.waitForURL((url) => url.pathname === route.route, {
+        timeout: 30000,
+      });
+      const routeAnchor = page.locator(route.anchor).first();
+      await routeAnchor.waitFor({ state: "visible", timeout: 30000 });
+      const routeHeading = route.heading
+        ? page.getByRole("heading", { name: route.heading, exact: true }).first()
+        : null;
+      if (routeHeading) {
+        await routeHeading.waitFor({ state: "visible", timeout: 30000 });
+      }
       await page.evaluate(() => document.fonts.ready);
       await page.waitForTimeout(600);
 
-      const routeMetrics = await page.evaluate(({ anchor, heading }) => ({
-        hrefPath: location.pathname,
-        designCode: document.documentElement.dataset.designCode || null,
-        documentWidth: document.documentElement.scrollWidth,
-        bodyWidth: document.body.scrollWidth,
-        anchorPresent: Boolean(document.querySelector(anchor)),
-        headingPresent:
-          !heading ||
-          [...document.querySelectorAll("h1")].some(
-            (node) => node.textContent?.trim() === heading,
-          ),
-        cls: window.__schoolAuditCLS,
-      }), {
-        anchor: route.anchor,
-        heading: route.heading,
-      });
+      const routeMetrics = {
+        ...(await page.evaluate(() => ({
+          hrefPath: location.pathname,
+          designCode: document.documentElement.dataset.designCode || null,
+          documentWidth: document.documentElement.scrollWidth,
+          bodyWidth: document.body.scrollWidth,
+          cls: window.__schoolAuditCLS,
+        }))),
+        anchorPresent: await routeAnchor.isVisible(),
+        headingPresent: routeHeading ? await routeHeading.isVisible() : true,
+      };
       const ds03Metrics = await collectDs03Metrics(page);
       const width = control.width;
 
@@ -979,6 +1022,7 @@ const manifest = {
   version: "1.1.0",
   capturedAt: new Date().toISOString(),
   candidateSha,
+  candidateImageId,
   sourceOfTruth: "School 1–11 design code 1.0.0, approved 2026-08-27",
   origin: "loopback-ssh-tunnel",
   fixture: "empty schema from candidate migrations, seeded with synthetic data",
