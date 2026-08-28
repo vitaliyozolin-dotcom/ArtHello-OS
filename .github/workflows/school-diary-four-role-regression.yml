@@ -155,7 +155,7 @@ jobs:
           expect_marker SCHOOL_FOUR_ROLE_LOGOUT OK
           expect_marker SCHOOL_FOUR_ROLE_NETWORK isolated
           expect_marker SCHOOL_FOUR_ROLE_CLEANUP OK
-          expect_marker SCHOOL_FOUR_ROLE_STAGING_CHANGED no
+          expect_marker SCHOOL_FOUR_ROLE_STAGING_FINGERPRINT UNCHANGED\n          expect_marker SCHOOL_FOUR_ROLE_STAGING_CHANGED no
           expect_marker SCHOOL_FOUR_ROLE_PRODUCTION_RESTARTED no
           expect_marker SCHOOL_FOUR_ROLE_PRODUCTION_HEALTH OK
           printf 'result=OK\n' >> "$GITHUB_OUTPUT"
