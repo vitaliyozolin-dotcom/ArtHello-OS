@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [tokens, layout, dockerfile, login] = await Promise.all([
-  readFile(new URL("../app/design-tokens.css", import.meta.url), "utf8"),
-  readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-  readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
-  readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8"),
-]);
+const [tokens, layout, dockerfile, login, designCodePointer] =
+  await Promise.all([
+    readFile(new URL("../app/design-tokens.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
+    readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../DESIGN_CODE.md", import.meta.url), "utf8"),
+  ]);
 
 test("approved design-code identity is immutable", () => {
   assert.match(tokens, /Version: 1\.0\.0/);
@@ -19,6 +21,19 @@ test("approved design-code identity is immutable", () => {
   assert.match(tokens, /--neutral-500:\s*#667085;/i);
   assert.match(tokens, /--neutral-200:\s*#e4e7ec;/i);
   assert.match(tokens, /--font-sans:\s*"Onest"/);
+  assert.match(
+    tokens,
+    /Canonical Design Code SHA-256: cebdc3f3ae76cb50103734c0e6144cef713108b4c6fd9b39de93cf3f8828dd48/,
+  );
+  assert.match(designCodePointer, /status этого файла: \`POINTER_ONLY\`/);
+  assert.match(
+    designCodePointer,
+    /blob\/main\/docs\/design\/school-1-11\/DESIGN_CODE\.md/,
+  );
+  assert.match(
+    designCodePointer,
+    /cebdc3f3ae76cb50103734c0e6144cef713108b4c6fd9b39de93cf3f8828dd48/,
+  );
 });
 
 test("only approved design radii are defined", () => {
