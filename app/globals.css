@@ -281,6 +281,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .role-student .l0-workspace { background: var(--student-page); }
 .role-student .l0-topbar { border-color: var(--student-line-08); background: var(--student-topbar); color: var(--student-on-dark); }
 .role-student .notification-button { border-color: var(--student-line-12); background: var(--student-fill-08); color: var(--student-on-dark); }
+.role-student .status-pill { border-radius: 9px; }
 .role-student .l0-main { background: var(--student-page); }
 .role-student .page-heading h1, .role-student .page-heading p { color: var(--student-on-dark); }
 .role-student .page-heading p { opacity: .62; }
