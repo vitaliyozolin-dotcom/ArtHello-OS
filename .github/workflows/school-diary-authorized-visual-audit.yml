@@ -556,6 +556,8 @@ jobs:
                               or ratio < minimum_contrast
                               or sample['pass'] is not True
                               or not sample['text']
+                              or not isinstance(sample['effectiveOpacity'], (int, float))
+                              or not 0 < sample['effectiveOpacity'] <= 1
                               or sample['renderedForeground'] is None
                               or sample['renderedBackground'] is None
                           ):
