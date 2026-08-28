@@ -19,9 +19,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CANDIDATE_SHA: 29f0d4d2500938bc7edc4431091eb4cbf368ec32
-  CANDIDATE_IMAGE: school-1-11-design-v1:29f0d4d25009
-  BUILDER_IMAGE: school-1-11-design-v1-builder:29f0d4d25009
+  CANDIDATE_SHA: 038cba668d89a852a3b8637047511f76d938922f
+  CANDIDATE_IMAGE: school-1-11-design-v1:038cba668d89
+  BUILDER_IMAGE: school-1-11-design-v1-builder:038cba668d89
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   STAGING_ORIGIN: http://127.0.0.1:3211
   STAGING_PORT: "3211"
