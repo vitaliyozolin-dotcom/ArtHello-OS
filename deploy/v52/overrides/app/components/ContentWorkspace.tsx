@@ -41,7 +41,7 @@ export function ContentWorkspace({ role, notify, onTasksChanged, onOpenSales, on
   if (!sourceOnly && !hasContentData && activeTab !== "studio") return <section className="page content-workspace">
     <div className="content-heading"><div><p className="eyebrow">Контент-студия ArtHello</p><h1>Контент и маркетинг</h1><p>План, публикации и аналитика появятся после подключения каналов или добавления первого материала.</p></div><button onClick={() => setTab("studio")}>Открыть ИИ-студию</button></div>
     <div className="content-boundary"><strong>Данных пока нет</strong><span>Подключите социальные сети в интеграциях или создайте первый материал после настройки аккаунта и ответственного.</span><em>фиктивные показатели не показываются</em></div>
-    <article className="content-panel"><Head eyebrow="Пустой контур" title="Контент ещё не подключён" aside="0 публикаций" /><div className="studio-placeholder"><strong>Здесь появятся реальные каналы, контент-план и статистика</strong><small>До подключения источников охваты, лиды, договоры и выручка остаются пустыми.</small></div></article>
+    <article className="content-panel"><Head eyebrow="Пустой контур" title="Контент ещё не подключён" aside="0 публикаций" /><div data-ah-compact-card="true" className="studio-placeholder"><strong>Здесь появятся реальные каналы, контент-план и статистика</strong><small>До подключения источников охваты, лиды, договоры и выручка остаются пустыми.</small></div></article>
   </section>;
   return <section className="page content-workspace">
     <div className="content-heading"><div><p className="eyebrow">Контент-студия ArtHello</p><h1>Контент и маркетинг</h1><p>{studioMode ? "Создавайте визуалы на основе описания и референсов. План и аналитика появятся после подключения выбранных каналов." : "План, публикации и метрики объединены с переходами, заявками, договорами и выручкой."}</p></div>{!studioMode && data.accounts.length ? <button onClick={() => setCreateOpen(true)}>+ Материал в план</button> : null}</div>
@@ -65,7 +65,7 @@ export function ContentWorkspace({ role, notify, onTasksChanged, onOpenSales, on
       </form>
       <article className="content-panel studio-result">
         <Head eyebrow="Результат" title="Рабочий кадр" aside={generated ? "не сохранён" : "ожидает генерации"} />
-        {generated ? <><Image src={generated} alt="Созданный визуал ArtHello" width={1024} height={1024} unoptimized /><div><a href={generated} download="arthello-generated.png">Скачать PNG</a><button onClick={() => { setGenerated(""); setPrompt(""); setReference(null); }}>Новый вариант</button></div></> : <div className="studio-placeholder"><span>AI</span><strong>Здесь появится готовый визуал</strong><small>Добавьте описание и, при желании, референс ArtHello. Без подключённого ключа система покажет инструкцию, а не фиктивный результат.</small></div>}
+        {generated ? <><Image src={generated} alt="Созданный визуал ArtHello" width={1024} height={1024} unoptimized /><div><a href={generated} download="arthello-generated.png">Скачать PNG</a><button onClick={() => { setGenerated(""); setPrompt(""); setReference(null); }}>Новый вариант</button></div></> : <div data-ah-compact-card="true" className="studio-placeholder"><span>AI</span><strong>Здесь появится готовый визуал</strong><small>Добавьте описание и, при желании, референс ArtHello. Без подключённого ключа система покажет инструкцию, а не фиктивный результат.</small></div>}
       </article>
     </div> : null}
 

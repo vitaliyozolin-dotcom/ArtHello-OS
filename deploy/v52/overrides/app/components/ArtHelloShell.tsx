@@ -517,7 +517,7 @@ function ManualStartWorkspace({ module, selectedBranch, branches, openSettings, 
   }, [module, selectedBranch]);
   const entry = moduleCatalog.find((item) => item.id === module);
   const branchName = selectedBranch === "ALL" ? "Все филиалы" : branches.find((branch) => branch.id === selectedBranch)?.name ?? "Филиал";
-  return <section className="page manual-start-workspace"><header><div><p className="eyebrow">Первичный ввод · {branchName}</p><h1>{entry?.label}</h1><p>Здесь показываются только данные, введённые вручную или полученные из выбранных вами полей интеграции.</p></div><div><button onClick={openSettings}>+ Ввести данные</button><button onClick={openIntegrations}>Подключить источник</button></div></header>{records.length ? <div className="manual-module-list">{records.map((record) => <article key={record.id}><span>{record.recordType}</span><h2>{record.title}</h2><p>{branches.find((branch) => branch.id === record.branchId)?.name}{record.period ? ` · ${record.period}` : ""}</p><footer><strong>{record.amountMinor ? rub.format(record.amountMinor / 100) : record.status}</strong><em>{record.id}</em></footer></article>)}</div> : <div className="manual-module-empty"><span>＋</span><h2>Данных пока нет</h2><p>Введите исходные записи вручную или подключите источник и выберите, какие именно поля разрешено получать.</p><button onClick={openSettings}>Открыть первичный ввод</button></div>}</section>;
+  return <section className="page manual-start-workspace"><header><div><p className="eyebrow">Первичный ввод · {branchName}</p><h1>{entry?.label}</h1><p>Здесь показываются только данные, введённые вручную или полученные из выбранных вами полей интеграции.</p></div><div><button onClick={openSettings}>+ Ввести данные</button><button onClick={openIntegrations}>Подключить источник</button></div></header>{records.length ? <div className="manual-module-list">{records.map((record) => <article key={record.id}><span>{record.recordType}</span><h2>{record.title}</h2><p>{branches.find((branch) => branch.id === record.branchId)?.name}{record.period ? ` · ${record.period}` : ""}</p><footer><strong>{record.amountMinor ? rub.format(record.amountMinor / 100) : record.status}</strong><em>{record.id}</em></footer></article>)}</div> : <div data-ah-compact-card="true" className="manual-module-empty"><span>＋</span><h2>Данных пока нет</h2><p>Введите исходные записи вручную или подключите источник и выберите, какие именно поля разрешено получать.</p><button onClick={openSettings}>Открыть первичный ввод</button></div>}</section>;
 }
 
 function EmptyModuleWorkspace({ module, openIntegrations }: { module: ModuleId; openIntegrations: () => void }) {
@@ -532,7 +532,7 @@ function EmptyModuleWorkspace({ module, openIntegrations }: { module: ModuleId; 
           <p>Здесь появятся данные после ручного добавления или подключения подтверждённого источника.</p>
         </div>
       </div>
-      <div className="manual-module-empty">
+      <div data-ah-compact-card="true" className="manual-module-empty">
         <span>＋</span>
         <h2>Данных пока нет</h2>
         <p>Структура раздела готова. Подключите источник, когда будете готовы начать наполнение системы.</p>

@@ -366,22 +366,22 @@
 }
 
 /* Semantic compact-card roles intentionally outrank legacy module typography without force overrides. */
-:root [data-ah-compact-card] :where(strong, h2, h3, [data-ah-compact-title]),
-:root [data-ah-compact-card]:where(strong, h2, h3, [data-ah-compact-title]) {
+:root [data-ah-compact-card][data-ah-compact-card] :where(strong, h2, h3, [data-ah-compact-title]),
+:root [data-ah-compact-card][data-ah-compact-card]:where(strong, h2, h3, [data-ah-compact-title]) {
   font-size: var(--ah-compact-card-title-size);
   font-weight: 500;
   line-height: var(--ah-compact-card-title-line);
 }
 
-:root [data-ah-compact-card] :where(small, p, [data-ah-compact-body]),
-:root [data-ah-compact-card]:where(small, p, [data-ah-compact-body]) {
+:root [data-ah-compact-card][data-ah-compact-card] :where(small, p, [data-ah-compact-body]),
+:root [data-ah-compact-card][data-ah-compact-card]:where(small, p, [data-ah-compact-body]) {
   font-size: var(--ah-compact-card-body-size);
   font-weight: 400;
   line-height: var(--ah-compact-card-body-line);
 }
 
-:root [data-ah-compact-card] [data-ah-compact-index],
-:root [data-ah-compact-card][data-ah-compact-index] {
+:root [data-ah-compact-card][data-ah-compact-card] [data-ah-compact-index],
+:root [data-ah-compact-card][data-ah-compact-card][data-ah-compact-index] {
   font-size: var(--ah-compact-card-index-size);
   font-weight: 800;
   line-height: var(--ah-compact-card-index-line);

@@ -15,6 +15,8 @@ const education = read("../app/components/EducationWorkspace.tsx");
 const system = read("../app/components/SystemWorkspace.tsx");
 const workflow = read("../app/components/WorkflowWorkspace.tsx");
 const settings = read("../app/components/SettingsWorkspace.tsx");
+const content = read("../app/components/ContentWorkspace.tsx");
+const shell = read("../app/components/ArtHelloShell.tsx");
 const mobilePolish = read("../app/components/SystemWideMobilePolish.css");
 const foundationPatch = read("../scripts/patch-system-foundation.mjs");
 const designCode = read("../../../../DESIGN_CODE.md");
@@ -45,7 +47,7 @@ test("shared compact cards and compact empty states expose explicit semantics", 
 });
 
 test("audited compact list and embedded-empty roles use the shared semantic marker", () => {
-  for (const [name, source] of Object.entries({ access, owner, sales, education, system, workflow, settings, contractor })) {
+  for (const [name, source] of Object.entries({ access, owner, sales, education, system, workflow, settings, content, shell, contractor })) {
     assert.match(source, /data-ah-compact-card|density="compact"|<CompactListCard/, `${name} has no compact-card adoption`);
   }
   assert.match(mobilePolish, /\.manual-module-empty[\s\S]*--ah-compact-card-title-size/);
