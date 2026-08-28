@@ -20,6 +20,7 @@ concurrency:
 env:
   CANDIDATE_SHA: 29f0d4d2500938bc7edc4431091eb4cbf368ec32
   CANDIDATE_IMAGE: school-1-11-design-v1:29f0d4d25009
+  CANDIDATE_IMAGE_ID: sha256:cd71018f782e7753cd0f2dae5c8eea3eb917238de0494bf56838d23b2f1e3888
   AUDIT_WIDTHS: "767,768,800,801,1199,1200"
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   STAGING_ORIGIN: http://127.0.0.1:3211
@@ -124,7 +125,7 @@ jobs:
             fi
             timeout --signal=TERM --kill-after=15s 900s \
               ssh -T "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-                "env ACTION='$fixture_action' RUN_ID='$GITHUB_RUN_ID' CANDIDATE_SHA='$CANDIDATE_SHA' CANDIDATE_IMAGE='$CANDIDATE_IMAGE' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' STAGING_ORIGIN='$STAGING_ORIGIN' AUDIT_PUBLIC_ORIGIN='$AUDIT_ORIGIN' AUDIT_BIND_ORIGIN='$AUDIT_BIND_ORIGIN' $remote_password bash -s" \
+                "env ACTION='$fixture_action' RUN_ID='$GITHUB_RUN_ID' CANDIDATE_SHA='$CANDIDATE_SHA' CANDIDATE_IMAGE='$CANDIDATE_IMAGE' CANDIDATE_IMAGE_ID='$CANDIDATE_IMAGE_ID' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' STAGING_ORIGIN='$STAGING_ORIGIN' AUDIT_PUBLIC_ORIGIN='$AUDIT_ORIGIN' AUDIT_BIND_ORIGIN='$AUDIT_BIND_ORIGIN' $remote_password bash -s" \
                 < .github/scripts/school-authorized-visual-fixture.sh
           }
 
@@ -161,6 +162,8 @@ jobs:
           test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_FIXTURE=//p' "$prepare_log" | tail -n1)" = READY
           test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_SOURCE=//p' "$prepare_log" | tail -n1)" = candidate-migrations-only
           test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_DATA=//p' "$prepare_log" | tail -n1)" = SYNTHETIC
+          test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_CANDIDATE_IMAGE_ID=//p' "$prepare_log" | tail -n1)" = "$CANDIDATE_IMAGE_ID"
+          test "$(sed -n 's/^SCHOOL_AUTHORIZED_VISUAL_IMAGE_PIN=//p' "$prepare_log" | tail -n1)" = IMMUTABLE
 
           ssh -N "${ssh_args[@]}" \
             -L 127.0.0.1:33212:127.0.0.1:3212 \
@@ -184,6 +187,7 @@ jobs:
             -e AUDIT_PASSWORD="$audit_password" \
             -e AUDIT_RUN_ID="$GITHUB_RUN_ID" \
             -e CANDIDATE_SHA="$CANDIDATE_SHA" \
+            -e CANDIDATE_IMAGE_ID="$CANDIDATE_IMAGE_ID" \
             -e AUDIT_WIDTHS="$AUDIT_WIDTHS" \
             -e PLAYWRIGHT_VERSION="$PLAYWRIGHT_VERSION" \
             -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
@@ -209,6 +213,8 @@ jobs:
               manifest = json.load(source)
           if manifest['candidateSha'] != os.environ['CANDIDATE_SHA']:
               raise RuntimeError('Candidate SHA invariant failed')
+          if manifest['candidateImageId'] != os.environ['CANDIDATE_IMAGE_ID']:
+              raise RuntimeError('Candidate image ID invariant failed')
           if manifest['version'] != '1.1.0':
               raise RuntimeError('Wrong DS-03 manifest version')
           if manifest['captures'] != 45:
@@ -323,7 +329,7 @@ jobs:
               -o Ciphers=aes128-ctr \
               -o MACs=hmac-sha2-256 \
               "$DEPLOY_USER@$DEPLOY_HOST" \
-              "env ACTION='cleanup' RUN_ID='$GITHUB_RUN_ID' CANDIDATE_SHA='$CANDIDATE_SHA' CANDIDATE_IMAGE='$CANDIDATE_IMAGE' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' STAGING_ORIGIN='$STAGING_ORIGIN' AUDIT_PUBLIC_ORIGIN='$AUDIT_ORIGIN' AUDIT_BIND_ORIGIN='$AUDIT_BIND_ORIGIN' bash -s" \
+              "env ACTION='cleanup' RUN_ID='$GITHUB_RUN_ID' CANDIDATE_SHA='$CANDIDATE_SHA' CANDIDATE_IMAGE='$CANDIDATE_IMAGE' CANDIDATE_IMAGE_ID='$CANDIDATE_IMAGE_ID' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' STAGING_ORIGIN='$STAGING_ORIGIN' AUDIT_PUBLIC_ORIGIN='$AUDIT_ORIGIN' AUDIT_BIND_ORIGIN='$AUDIT_BIND_ORIGIN' bash -s" \
               < .github/scripts/school-authorized-visual-fixture.sh
 
       - name: Upload authorized visual evidence
@@ -349,6 +355,7 @@ jobs:
             echo '## School diary authorized design audit'
             echo
             printf -- '- Candidate: %s\n' "$CANDIDATE_SHA"
+            printf -- '- Immutable image ID: %s\n' "$CANDIDATE_IMAGE_ID"
             printf -- '- Roles: director, teacher, parent, student\n'
             printf -- '- DS-02 boundary routes: /management, /journal, /homework, /schedule\n'
             printf -- '- DS-02 widths: 767, 768, 800, 801, 1199, 1200 px\n'
