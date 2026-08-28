@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./design-tokens.css";
+import "./themes/student.css";
 import "./globals.css";
 import "./mobile-polish.css";
 
