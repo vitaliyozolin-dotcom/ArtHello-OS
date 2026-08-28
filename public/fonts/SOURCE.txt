@@ -3,8 +3,11 @@ Source: https://github.com/google/fonts/tree/main/ofl/onest
 Project: https://github.com/simpals/onest
 License: SIL Open Font License 1.1.
 
-The locally hosted Onest variable file covers weights 100–900 and extended Cyrillic.
-It is used for the business-facing roles, navigation, tables and forms.
+The locally hosted Onest variable files cover weights 100–900 and extended Cyrillic.
+The WOFF2 file is a web-font container conversion of the same checked-in TTF:
+- onest-variable.ttf SHA-256: 966c5c29b4755da84b6854d5c21dd4eaa2420225d0e9874de602de176d4a9f31
+- onest-variable.woff2 SHA-256: 618dcd9ba7ab663774ba37667035550744303b5ebd62eb2df8ead6fe23955bae
+Onest is the approved interface font for every role.
 
 Rubik variable font by Philipp Hubert and Sebastian Fischer.
 Source package: @fontsource-variable/rubik

@@ -2,14 +2,24 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [tokens, layout, dockerfile, login, designCodePointer, schoolApp] =
-  await Promise.all([
+const [
+  tokens,
+  layout,
+  dockerfile,
+  login,
+  designCodePointer,
+  schoolApp,
+  globals,
+  studentTheme,
+] = await Promise.all([
     readFile(new URL("../app/design-tokens.css", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
     readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../DESIGN_CODE.md", import.meta.url), "utf8"),
     readFile(new URL("../app/school-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/themes/student.css", import.meta.url), "utf8"),
   ]);
 
 test("approved design-code identity is immutable", () => {
@@ -56,6 +66,27 @@ test("rollout is explicit and disabled by default", () => {
     layout.indexOf('import "./design-tokens.css"') <
       layout.indexOf('import "./globals.css"'),
     "tokens must load before legacy styles",
+  );
+});
+
+test("approved Onest is served as a local preloaded WOFF2", () => {
+  const onestFace = globals.match(
+    /@font-face\s*\{[\s\S]*?font-family:\s*"Onest";[\s\S]*?\}/,
+  )?.[0];
+
+  assert.ok(onestFace, "Onest font-face is required");
+  assert.match(
+    onestFace,
+    /url\("\/fonts\/onest-variable\.woff2"\) format\("woff2-variations"\)/,
+  );
+  assert.ok(
+    onestFace.indexOf("onest-variable.woff2") <
+      onestFace.indexOf("onest-variable.ttf"),
+    "WOFF2 must be the primary Onest source",
+  );
+  assert.match(
+    layout,
+    /\{designCodeVersion \? \([\s\S]*?rel="preload"[\s\S]*?href="\/fonts\/onest-variable\.woff2"[\s\S]*?as="font"[\s\S]*?type="font\/woff2"[\s\S]*?crossOrigin="anonymous"/,
   );
 });
 
@@ -139,4 +170,181 @@ test("DS-02 tablet shell is fixed at the approved 768–1199 range", () => {
   assert.match(schoolApp, /aria-label=\{item\.label\} title=\{item\.label\}/);
   assert.match(schoolApp, /className="rail-context" title=/);
   assert.doesNotMatch(tokens, /!important/);
+});
+
+test("DS-03 student theme changes tokens and typography only", () => {
+  assert.ok(
+    layout.indexOf('import "./design-tokens.css"') <
+      layout.indexOf('import "./themes/student.css"') &&
+      layout.indexOf('import "./themes/student.css"') <
+        layout.indexOf('import "./globals.css"'),
+    "student theme tokens must load between approved tokens and legacy styles",
+  );
+  assert.match(
+    studentTheme,
+    /html\[data-design-code="v1"\]\[data-theme="student"\] \{/,
+  );
+  for (const mapping of [
+    ["color-page", "neutral-900"],
+    ["color-surface", "neutral-800"],
+    ["color-surface-muted", "neutral-700"],
+    ["color-surface-raised", "neutral-800"],
+    ["color-text", "neutral-0"],
+    ["color-text-secondary", "neutral-300"],
+    ["color-text-muted", "neutral-400"],
+    ["color-accent", "brand-500"],
+    ["color-accent-hover", "brand-600"],
+    ["color-accent-active", "brand-700"],
+  ]) {
+    assert.match(
+      studentTheme,
+      new RegExp(`--${mapping[0]}:\\s*var\\(--${mapping[1]}\\);`),
+    );
+  }
+  for (const token of [
+    "color-border",
+    "color-border-strong",
+    "color-accent-soft",
+    "color-focus",
+    "color-overlay",
+  ]) {
+    assert.match(studentTheme, new RegExp(`--${token}:\\s*color-mix\\(`));
+  }
+  assert.match(studentTheme, /--student-font-family:\s*var\(--font-sans\);/);
+  assert.match(
+    studentTheme,
+    /:root \{[\s\S]*?--student-main-background:\s*radial-gradient\([\s\S]*?--student-hero-background:\s*linear-gradient\([\s\S]*?--student-dashboard-hero-image:\s*linear-gradient\([\s\S]*?--student-hero-overlay-mobile:\s*linear-gradient\(/,
+    "flag-off student backgrounds must retain their legacy gradients",
+  );
+  assert.match(
+    studentTheme,
+    /:root \{[\s\S]*?--student-bottom-nav:\s*rgba\(10, 11, 18, 0\.96\);/,
+    "flag-off mobile student navigation must retain its legacy background",
+  );
+  assert.match(
+    studentTheme,
+    /html\[data-design-code="v1"\]\[data-theme="student"\] \{[\s\S]*?--student-bottom-nav:\s*color-mix\(in srgb, var\(--neutral-900\) 96%, transparent\);/,
+  );
+  assert.match(
+    globals,
+    /\.role-student \.l0-bottom-nav \{[^}]*background:\s*var\(--student-bottom-nav\);/,
+  );
+  for (const mapping of [
+    ["student-main-background", "color-page"],
+    ["student-hero-background", "color-surface"],
+    ["student-hero-overlay", "student-hero-overlay-06"],
+    ["student-hero-overlay-mobile", "student-hero-overlay-30"],
+  ]) {
+    assert.match(
+      studentTheme,
+      new RegExp(`--${mapping[0]}:\\s*var\\(--${mapping[1]}\\);`),
+    );
+  }
+  assert.match(
+    studentTheme,
+    /--student-dashboard-hero-image:\s*url\("\/student-dashboard-hero-v1\.webp"\);/,
+  );
+  assert.match(
+    studentTheme,
+    /--student-app-shadow:\s*0 30px 100px color-mix\(in srgb, var\(--neutral-900\) 36%, transparent\);/,
+    "DS-03 may recolor but must not reshape the accepted app shadow",
+  );
+  assert.match(
+    studentTheme,
+    /html\[data-design-code="v1"\]\[data-theme="student"\] \.role-student \.l0-topbar \{[\s\S]*?border-color: var\(--student-line-08\);[\s\S]*?background: var\(--student-topbar\);[\s\S]*?color: var\(--student-on-dark\);[\s\S]*?\}/,
+    "student topbar colors must beat the shared v1 selector",
+  );
+  for (const selector of [
+    ".calendar-toolbar > label",
+    ".calendar-week > article",
+    ".calendar-lesson",
+    ".menu-grid > article",
+    ".privacy-card",
+    ".segmented",
+    ".day-switch > button",
+    ".lesson-order",
+    ".notification-list > article",
+  ]) {
+    assert.ok(
+      studentTheme.includes(".role-student " + selector),
+      selector + " must inherit the approved student palette",
+    );
+  }
+  const sharedRouteSurfaceBlock = studentTheme.split(
+    "/* Shared route surfaces must inherit the approved dark student palette. */",
+  )[1];
+  assert.ok(sharedRouteSurfaceBlock, "shared student route surface block is required");
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.calendar-toolbar > label,[\s\S]*?\.privacy-card \{[\s\S]*?background: var\(--color-surface\);[\s\S]*?color: var\(--color-text\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.calendar-week > article > header \{[\s\S]*?background: var\(--color-surface-muted\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.segmented button\.active \{[\s\S]*?background: var\(--color-surface\);[\s\S]*?color: var\(--color-text\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.day-switch > button \{[\s\S]*?background: var\(--color-surface-muted\);[\s\S]*?color: var\(--color-text\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.day-switch > button\.active \{[\s\S]*?border-color: var\(--color-accent\);[\s\S]*?background: var\(--color-surface\);[\s\S]*?color: var\(--color-text\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.lesson-order \{[\s\S]*?background: var\(--color-surface-muted\);[\s\S]*?color: var\(--color-text-secondary\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.notification-list > article\.unread \{[\s\S]*?border-color: var\(--color-accent\);[\s\S]*?background: var\(--color-surface-raised\);[\s\S]*?color: var\(--color-text\);/,
+  );
+  assert.doesNotMatch(
+    sharedRouteSurfaceBlock,
+    /(?:^|\n)\s*(?:width|height|min-width|max-width|min-height|max-height|margin|padding|gap|display|position|grid-template|border-radius):/m,
+    "DS-03 route surface fixes must not own geometry",
+  );
+  assert.match(
+    schoolApp,
+    /root\.dataset\.theme = snapshot\.viewer\.role === "student" \? "student" : "light"/,
+  );
+  assert.match(
+    schoolApp,
+    /useLayoutEffect\(\(\) => \{[\s\S]*?root\.dataset\.theme = snapshot\.viewer\.role === "student" \? "student" : "light"/,
+    "theme state must be applied before the student shell paints",
+  );
+
+  const studentSelector =
+    /\.role-student|\.student-(?:hero|dashboard|kicker|hero-copy|launch-grid|quote|day-grid|achievements|score-orbit)|\.launch-(?:orange|violet|cyan|lime)/;
+  const studentRules = [...globals.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((match) => studentSelector.test(match[1]))
+    .map((match) => `${match[1]} {${match[2]}}`)
+    .join("\n");
+  assert.doesNotMatch(
+    studentRules,
+    /(?:color|background(?:-color|-image)?|border-color|box-shadow|font-family):[^;]*(?:#[0-9a-f]{3,8}\b|rgba?\(|\bwhite\b|\bblack\b)/i,
+    "student colors must live only in the theme token layer",
+  );
+  assert.doesNotMatch(studentRules, /Rubik/);
+  assert.doesNotMatch(studentRules, /(?:linear|radial)-gradient/i);
+  assert.match(
+    globals,
+    /\.role-student \.status-pill\s*\{\s*border-radius:\s*9px;\s*\}/,
+    "DS-03 must preserve the accepted student status-pill geometry",
+  );
+
+  const approvedThemeBlock = studentTheme
+    .split('html[data-design-code="v1"][data-theme="student"] {')[1]
+    ?.split(
+      'html[data-design-code="v1"][data-theme="student"] .role-student,',
+    )[0];
+  assert.ok(approvedThemeBlock, "approved student theme block is required");
+  assert.doesNotMatch(
+    approvedThemeBlock,
+    /(?:^|\n)\s*(?:width|height|min-width|max-width|min-height|max-height|margin|padding|gap|display|position|grid-template|border-radius):/m,
+    "student theme must not own geometry",
+  );
 });

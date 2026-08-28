@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./design-tokens.css";
+import "./themes/student.css";
 import "./globals.css";
 import "./mobile-polish.css";
 
@@ -23,6 +24,17 @@ export default function RootLayout({
 
   return (
     <html lang="ru" data-design-code={designCodeVersion}>
+      <head>
+        {designCodeVersion ? (
+          <link
+            rel="preload"
+            href="/fonts/onest-variable.woff2"
+            as="font"
+            type="font/woff2"
+            crossOrigin="anonymous"
+          />
+        ) : null}
+      </head>
       <body>{children}</body>
     </html>
   );

@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Icon, type IconName } from "./icons";
 import { roleLabels, type ActionKind, type Role, type SchoolSnapshot } from "./level-zero-types";
 
@@ -148,6 +148,14 @@ function AppShell({ snapshot, activeView, onView, onStudent, children }: {
   const nav = navigationByRole[snapshot.viewer.role];
   const mobileNav = nav.length > 5 ? [...nav.slice(0, 4), nav.at(-1)!] : nav;
   const familyContext = snapshot.viewer.role === "parent" || snapshot.viewer.role === "student";
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = snapshot.viewer.role === "student" ? "student" : "light";
+    return () => {
+      delete root.dataset.theme;
+    };
+  }, [snapshot.viewer.role]);
 
   return (
     <div className="l0-stage">
