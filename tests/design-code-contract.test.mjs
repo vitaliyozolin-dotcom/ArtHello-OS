@@ -241,6 +241,40 @@ test("DS-03 student theme changes tokens and typography only", () => {
     /html\[data-design-code="v1"\]\[data-theme="student"\] \.role-student \.l0-topbar \{[\s\S]*?border-color: var\(--student-line-08\);[\s\S]*?background: var\(--student-topbar\);[\s\S]*?color: var\(--student-on-dark\);[\s\S]*?\}/,
     "student topbar colors must beat the shared v1 selector",
   );
+  for (const selector of [
+    ".calendar-toolbar > label",
+    ".calendar-week > article",
+    ".calendar-lesson",
+    ".menu-grid > article",
+    ".privacy-card",
+    ".segmented",
+  ]) {
+    assert.ok(
+      studentTheme.includes(".role-student " + selector),
+      selector + " must inherit the approved student palette",
+    );
+  }
+  const sharedRouteSurfaceBlock = studentTheme.split(
+    "/* Shared route surfaces must inherit the approved dark student palette. */",
+  )[1];
+  assert.ok(sharedRouteSurfaceBlock, "shared student route surface block is required");
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.calendar-toolbar > label,[\s\S]*?\.privacy-card \{[\s\S]*?background: var\(--color-surface\);[\s\S]*?color: var\(--color-text\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.calendar-week > article > header \{[\s\S]*?background: var\(--color-surface-muted\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.segmented button\.active \{[\s\S]*?background: var\(--color-surface\);[\s\S]*?color: var\(--color-text\);/,
+  );
+  assert.doesNotMatch(
+    sharedRouteSurfaceBlock,
+    /(?:^|\n)\s*(?:width|height|min-width|max-width|min-height|max-height|margin|padding|gap|display|position|grid-template|border-radius):/m,
+    "DS-03 route surface fixes must not own geometry",
+  );
   assert.match(
     schoolApp,
     /root\.dataset\.theme = snapshot\.viewer\.role === "student" \? "student" : "light"/,
