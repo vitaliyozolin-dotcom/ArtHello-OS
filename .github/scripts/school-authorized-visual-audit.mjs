@@ -247,7 +247,7 @@ try {
           railLogo: one(".l0-brand img"),
           railBrandText: one(".l0-brand > span"),
           railNavText: one(".l0-nav button span"),
-          railContextText: one(".rail-context > span"),
+          railContextText: one(".rail-context > span:last-child"),
           railTooltips: [...document.querySelectorAll(".l0-brand, .l0-nav button, .rail-context")].map((node) => ({
             tag: node.tagName.toLowerCase(),
             title: node.getAttribute("title") || "",
