@@ -28,20 +28,35 @@ async function establishAuth(browser, base) {
   await page.locator('input[name="login"]').fill("owner");
   await page.locator('input[name="password"]').fill(tempPassword);
   await page.locator("form button").click();
-  await page.waitForTimeout(700);
+
+  await page.waitForFunction(() => {
+    const shown = (element) => Boolean(element && element.getClientRects().length);
+    return shown(document.querySelector('input[name="currentPassword"]')) || !shown(document.querySelector('input[name="login"]'));
+  }, null, { timeout: 30000 });
 
   if (await visible(page.locator('input[name="currentPassword"]'))) {
     await page.locator('input[name="currentPassword"]').fill(tempPassword);
     await page.locator('input[name="newPassword"]').fill(permanentPassword);
     await page.locator('input[name="confirmation"]').fill(permanentPassword);
     await page.locator("form button").click();
-    await page.locator('input[name="login"]').waitFor({ state: "visible", timeout: 30000 });
-    await page.locator('input[name="login"]').fill("owner");
-    await page.locator('input[name="password"]').fill(permanentPassword);
-    await page.locator("form button").click();
+    await page.waitForFunction(() => {
+      const current = document.querySelector('input[name="currentPassword"]');
+      return !current || !current.getClientRects().length;
+    }, null, { timeout: 30000 });
+
+    if (await visible(page.locator('input[name="login"]'))) {
+      await page.locator('input[name="login"]').fill("owner");
+      await page.locator('input[name="password"]').fill(permanentPassword);
+      await page.locator("form button").click();
+    }
   }
 
-  await page.waitForFunction(() => !document.querySelector('input[name="login"]') && !document.querySelector('input[name="currentPassword"]'), null, { timeout: 30000 });
+  await page.waitForFunction(() => {
+    const shown = (element) => Boolean(element && element.getClientRects().length);
+    return !shown(document.querySelector('input[name="login"]')) && !shown(document.querySelector('input[name="currentPassword"]'));
+  }, null, { timeout: 30000 });
+  await page.goto(`${base}/#contractors`, { waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.getByRole("heading", { name: "Подрядчики", exact: true }).waitFor({ state: "visible", timeout: 30000 });
   const state = await context.storageState();
   await context.close();
   return state;
@@ -66,16 +81,36 @@ async function captureContractors(browser, base, storageState, label, viewport) 
   await page.screenshot({ path: path.join(output, `${fileBase}-viewport.png`), fullPage: false });
   const metrics = await page.evaluate(() => {
     const root = document.documentElement;
+    const pageElement = document.querySelector(".ahContractorPage");
+    const header = document.querySelector(".ahContractorPage .ahPageHeader");
+    const title = header?.querySelector("h1");
+    const eyebrow = header?.querySelector("small");
+    const action = header?.querySelector(".ahButton");
+    const source = document.querySelector(".ahContractorSource");
+    const sourceLabel = source?.querySelector("strong");
+    const sourceBody = source?.querySelector("span");
     const kpiGrid = document.querySelector(".ahContractorKpis");
     const kpis = [...document.querySelectorAll(".ahContractorKpis > .ahKpiCard")];
-    const pageBox = document.querySelector(".ahContractorPage")?.getBoundingClientRect();
-    const sourceBox = document.querySelector(".ahContractorSource")?.getBoundingClientRect();
-    const searchIcon = document.querySelector(".ahSearchIcon svg")?.getBoundingClientRect();
+    const firstKpi = kpis[0];
+    const kpiLabel = firstKpi?.querySelector("small");
+    const kpiValue = firstKpi?.querySelector("strong");
+    const kpiNote = firstKpi?.querySelector(".ahKpiCopy > span");
+    const search = document.querySelector(".ahContractorToolbar .ahSearchField input");
+    const pageBox = pageElement?.getBoundingClientRect();
+    const sourceBox = source?.getBoundingClientRect();
+    const searchIcon = document.querySelector(".ahContractorToolbar .ahSearchIcon svg")?.getBoundingClientRect();
     const emptyTitle = document.querySelector(".ahContractorRegistry .ahEmptyState h3");
     const emptyText = document.querySelector(".ahContractorRegistry .ahEmptyState p");
     const mobileList = document.querySelector(".ahContractorMobileList");
     const table = document.querySelector(".ahContractorTableWrap");
     const kpiColumns = kpiGrid ? getComputedStyle(kpiGrid).gridTemplateColumns.split(" ").filter(Boolean).length : 0;
+    const style = (element) => element ? getComputedStyle(element) : null;
+    const pageStyle = style(pageElement);
+    const actionStyle = style(action);
+    const sourceStyle = style(source);
+    const kpiGridStyle = style(kpiGrid);
+    const kpiStyle = style(firstKpi);
+    const searchStyle = style(search);
     return {
       clientWidth: root.clientWidth,
       scrollWidth: root.scrollWidth,
@@ -86,6 +121,31 @@ async function captureContractors(browser, base, storageState, label, viewport) 
       sourceRight: sourceBox?.right ?? null,
       kpiCount: kpis.length,
       kpiColumns,
+      pageDisplay: pageStyle?.display ?? null,
+      pagePaddingLeft: pageStyle?.paddingLeft ?? null,
+      pageGap: pageStyle?.rowGap ?? null,
+      titleFontSize: style(title)?.fontSize ?? null,
+      eyebrowFontSize: style(eyebrow)?.fontSize ?? null,
+      actionMinHeight: actionStyle?.minHeight ?? null,
+      actionRadius: actionStyle?.borderRadius ?? null,
+      actionFontSize: actionStyle?.fontSize ?? null,
+      sourceRadius: sourceStyle?.borderRadius ?? null,
+      sourcePaddingTop: sourceStyle?.paddingTop ?? null,
+      sourcePaddingLeft: sourceStyle?.paddingLeft ?? null,
+      sourceLabelFontSize: style(sourceLabel)?.fontSize ?? null,
+      sourceBodyFontSize: style(sourceBody)?.fontSize ?? null,
+      kpiGap: kpiGridStyle?.rowGap ?? null,
+      kpiMinHeight: kpiStyle?.minHeight ?? null,
+      kpiRadius: kpiStyle?.borderRadius ?? null,
+      kpiPaddingTop: kpiStyle?.paddingTop ?? null,
+      kpiPaddingLeft: kpiStyle?.paddingLeft ?? null,
+      kpiLabelFontSize: style(kpiLabel)?.fontSize ?? null,
+      kpiValueFontSize: style(kpiValue)?.fontSize ?? null,
+      kpiNoteFontSize: style(kpiNote)?.fontSize ?? null,
+      searchHeight: searchStyle?.height ?? null,
+      searchRadius: searchStyle?.borderRadius ?? null,
+      searchPaddingLeft: searchStyle?.paddingLeft ?? null,
+      searchFontSize: searchStyle?.fontSize ?? null,
       searchIconWidth: searchIcon?.width ?? 0,
       searchIconHeight: searchIcon?.height ?? 0,
       emptyTitleBorder: emptyTitle ? getComputedStyle(emptyTitle).borderWidth : null,
@@ -97,6 +157,79 @@ async function captureContractors(browser, base, storageState, label, viewport) 
   });
   await context.close();
   return { label, route: "contractors", width: viewport[0], height: viewport[1], ...metrics };
+}
+
+async function captureAccessReference(browser, base, storageState, viewport) {
+  const { context, page } = await stablePage(browser, base, storageState, viewport, "access");
+  await page.getByRole("heading", { name: "Доступы", exact: true }).waitFor({ state: "visible", timeout: 30000 });
+  const file = `pilot-access-reference-${viewport[0]}x${viewport[1]}.png`;
+  await page.screenshot({ path: path.join(output, file), fullPage: false });
+  const metrics = await page.evaluate(() => {
+    const title = [...document.querySelectorAll("h1")].find((element) => element.textContent?.trim() === "Доступы");
+    const workspace = title?.closest("section");
+    const header = title?.closest("header");
+    const eyebrow = header?.querySelector("p");
+    const action = header?.querySelector("button");
+    const boundary = [...(workspace?.children ?? [])].find((element) => element.querySelector(":scope > span")?.textContent?.trim() === "Рабочий контур доступа");
+    const boundaryLabel = boundary?.querySelector(":scope > span");
+    const boundaryBody = boundary?.querySelector(":scope > p");
+    const metric = [...(workspace?.querySelectorAll("button") ?? [])].find((button) => button.querySelector(":scope > span")?.textContent?.trim() === "Активные" && button.querySelector(":scope > strong"));
+    const kpiGrid = metric?.parentElement;
+    const kpiLabel = metric?.querySelector(":scope > span");
+    const kpiValue = metric?.querySelector(":scope > strong");
+    const kpiNote = metric?.querySelector(":scope > small");
+    const search = workspace?.querySelector('input[placeholder="Найти по имени, роли или контакту"]');
+    const style = (element) => element ? getComputedStyle(element) : null;
+    const workspaceStyle = style(workspace);
+    const actionStyle = style(action);
+    const boundaryStyle = style(boundary);
+    const kpiGridStyle = style(kpiGrid);
+    const kpiStyle = style(metric);
+    const searchStyle = style(search);
+    return {
+      pageDisplay: workspaceStyle?.display ?? null,
+      pagePaddingLeft: workspaceStyle?.paddingLeft ?? null,
+      pageGap: workspaceStyle?.rowGap ?? null,
+      titleFontSize: style(title)?.fontSize ?? null,
+      eyebrowFontSize: style(eyebrow)?.fontSize ?? null,
+      actionMinHeight: actionStyle?.minHeight ?? null,
+      actionRadius: actionStyle?.borderRadius ?? null,
+      actionFontSize: actionStyle?.fontSize ?? null,
+      sourceRadius: boundaryStyle?.borderRadius ?? null,
+      sourcePaddingTop: boundaryStyle?.paddingTop ?? null,
+      sourcePaddingLeft: boundaryStyle?.paddingLeft ?? null,
+      sourceLabelFontSize: style(boundaryLabel)?.fontSize ?? null,
+      sourceBodyFontSize: style(boundaryBody)?.fontSize ?? null,
+      kpiGap: kpiGridStyle?.rowGap ?? null,
+      kpiMinHeight: kpiStyle?.minHeight ?? null,
+      kpiRadius: kpiStyle?.borderRadius ?? null,
+      kpiPaddingTop: kpiStyle?.paddingTop ?? null,
+      kpiPaddingLeft: kpiStyle?.paddingLeft ?? null,
+      kpiLabelFontSize: style(kpiLabel)?.fontSize ?? null,
+      kpiValueFontSize: style(kpiValue)?.fontSize ?? null,
+      kpiNoteFontSize: style(kpiNote)?.fontSize ?? null,
+      searchHeight: searchStyle?.height ?? null,
+      searchRadius: searchStyle?.borderRadius ?? null,
+      searchPaddingLeft: searchStyle?.paddingLeft ?? null,
+      searchFontSize: searchStyle?.fontSize ?? null,
+    };
+  });
+  await context.close();
+  return { label: "pilot", route: "access-reference", width: viewport[0], height: viewport[1], file, ...metrics };
+}
+
+function assertSameMobileCanon(contractors, access) {
+  const keys = [
+    "pageDisplay", "pagePaddingLeft", "pageGap", "titleFontSize", "eyebrowFontSize",
+    "actionMinHeight", "actionRadius", "actionFontSize",
+    "sourceRadius", "sourcePaddingTop", "sourcePaddingLeft", "sourceLabelFontSize", "sourceBodyFontSize",
+    "kpiGap", "kpiMinHeight", "kpiRadius", "kpiPaddingTop", "kpiPaddingLeft",
+    "kpiLabelFontSize", "kpiValueFontSize", "kpiNoteFontSize",
+    "searchHeight", "searchRadius", "searchPaddingLeft", "searchFontSize",
+  ];
+  for (const key of keys) {
+    if (contractors[key] !== access[key]) throw new Error(`Mobile Access canon mismatch for ${key}: contractors=${contractors[key]} access=${access[key]}`);
+  }
 }
 
 async function captureEducationAfterContractors(browser, base, storageState, label, viewport) {
@@ -134,20 +267,29 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
   try {
     const baselineState = await establishAuth(browser, baselineUrl);
     const pilotState = await establishAuth(browser, pilotUrl);
+    const pilotContractors = new Map();
 
     for (const viewport of viewports) {
       manifest.push(await captureContractors(browser, baselineUrl, baselineState, "baseline", viewport));
       const pilot = await captureContractors(browser, pilotUrl, pilotState, "pilot", viewport);
       manifest.push(pilot);
+      pilotContractors.set(viewport.join("x"), pilot);
       persist();
 
       if (pilot.horizontalOverflow) throw new Error(`Pilot horizontal overflow at ${viewport.join("x")}`);
       if (!pilot.designSystem || pilot.kpiCount !== 4) throw new Error(`Pilot Design System structure missing at ${viewport.join("x")}`);
       const expectedColumns = viewport[0] <= 1024 ? 2 : 4;
       if (pilot.kpiColumns !== expectedColumns) throw new Error(`Pilot KPI columns ${pilot.kpiColumns}, expected ${expectedColumns} at ${viewport.join("x")}`);
-      if (pilot.searchIconWidth < 20 || pilot.searchIconHeight < 20) throw new Error(`Pilot search icon too small at ${viewport.join("x")}`);
+      if (pilot.searchIconWidth !== 0 || pilot.searchIconHeight !== 0) throw new Error(`Pilot contractor search icon must be absent at ${viewport.join("x")}`);
       if (pilot.emptyTitleBorder !== "0px" || pilot.emptyTextBorder !== "0px") throw new Error(`Pilot empty-state text has a border at ${viewport.join("x")}`);
       if (pilot.pageLeft < -1 || pilot.pageRight > pilot.clientWidth + 1 || pilot.sourceLeft < -1 || pilot.sourceRight > pilot.clientWidth + 1) throw new Error(`Pilot content exceeds viewport at ${viewport.join("x")}`);
+    }
+
+    for (const viewport of [[390, 844], [1440, 900]]) {
+      const access = await captureAccessReference(browser, pilotUrl, pilotState, viewport);
+      manifest.push(access);
+      if (viewport[0] <= 720) assertSameMobileCanon(pilotContractors.get(viewport.join("x")), access);
+      persist();
     }
 
     for (const viewport of [[390, 844], [1440, 900]]) {

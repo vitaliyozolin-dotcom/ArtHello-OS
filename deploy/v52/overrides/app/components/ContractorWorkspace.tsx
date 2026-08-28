@@ -88,7 +88,7 @@ export function ContractorWorkspace({ notify, onOpenFinance }: {
     </PageContainer>;
   }
 
-  return <PageContainer className="ahContractorPage contractor-workspace">
+  return <PageContainer className="ahContractorPage">
     <PageHeader
       eyebrow="Оплаты · контрагенты · договоры"
       title="Подрядчики"

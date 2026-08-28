@@ -226,7 +226,7 @@
 
 @media (max-width: 720px) {
   .ahContractorPage {
-    gap: 20px;
+    gap: var(--ah-mobile-section-gap);
     padding-top: 0;
   }
 
@@ -235,14 +235,17 @@
   }
 
   .ahContractorPage .ahPageHeaderCopy > small {
-    margin-bottom: 8px;
-    font-size: 13px;
-    line-height: 18px;
+    margin-bottom: 5px;
+    font-size: var(--ah-mobile-eyebrow-size);
+    font-weight: 750;
+    line-height: var(--ah-mobile-eyebrow-line);
+    letter-spacing: .12em;
   }
 
   .ahContractorPage .ahPageHeaderCopy h1 {
-    font-size: 38px;
-    line-height: 42px;
+    font-size: var(--ah-font-size-page-title-mobile);
+    font-weight: 700;
+    line-height: var(--ah-line-height-page-title-mobile);
   }
 
   .ahContractorPage .ahPageHeaderCopy p {
@@ -252,77 +255,82 @@
   }
 
   .ahContractorPage .ahPageHeaderActions .ahButton {
-    min-height: 48px;
-    border-radius: 16px;
-    font-size: 16px;
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    padding-inline: 17px;
+    font-size: var(--ah-mobile-action-size);
   }
 
   .ahContractorSource {
     grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
-    border-radius: 22px;
-    padding: 18px;
+    gap: 12px;
+    border-radius: var(--ah-mobile-info-radius);
+    padding: var(--ah-mobile-info-padding-block) var(--ah-mobile-info-padding-inline);
   }
 
   .ahContractorSource strong {
     width: fit-content;
-    font-size: 12px;
-    line-height: 16px;
+    min-height: 0;
+    padding: 5px 8px;
+    font-size: var(--ah-mobile-info-label-size);
+    font-weight: 800;
+    line-height: var(--ah-mobile-info-label-line);
+    letter-spacing: .06em;
   }
 
   .ahContractorSource span {
-    font-size: 15px;
-    line-height: 22px;
+    font-size: var(--ah-mobile-info-body-size);
+    line-height: var(--ah-mobile-info-body-line);
   }
 
   .ahContractorKpis {
-    gap: 14px;
+    gap: var(--ah-mobile-kpi-gap);
   }
 
   .ahContractorKpis > .ahKpiCard {
-    min-height: 112px;
-    border-radius: 22px;
-    padding: 16px;
+    min-height: var(--ah-mobile-kpi-height);
+    border-radius: var(--ah-mobile-kpi-radius);
+    padding: var(--ah-mobile-kpi-padding);
   }
 
   .ahContractorKpis .ahKpiCopy small {
-    font-size: 14px;
-    line-height: 20px;
+    font-size: var(--ah-mobile-kpi-label-size);
+    line-height: var(--ah-mobile-kpi-label-line);
   }
 
   .ahContractorKpis .ahKpiCopy strong {
     margin-top: 5px;
-    font-size: 24px;
-    line-height: 28px;
+    font-size: var(--ah-mobile-kpi-value-size);
+    line-height: var(--ah-mobile-kpi-value-line);
   }
 
   .ahContractorKpis .ahKpiCopy > span {
-    margin-top: 6px;
-    font-size: 13px;
-    line-height: 18px;
+    margin-top: 5px;
+    font-size: var(--ah-mobile-kpi-note-size);
+    line-height: var(--ah-mobile-kpi-note-line);
   }
 
   .ahContractorRegistry {
-    border-radius: 22px;
+    border-radius: 16px;
   }
 
   .ahContractorToolbar {
     grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-    padding: 16px;
+    gap: 10px;
+    padding: 13px;
   }
 
   .ahContractorToolbar .ahSearchField input {
-    height: 52px;
-    border-radius: 16px;
-    padding-inline: 16px;
+    height: var(--ah-mobile-search-height);
+    border-radius: var(--ah-mobile-search-radius);
+    padding-inline: var(--ah-mobile-search-padding);
     font-size: 16px;
   }
 
   .ahContractorCount {
-    padding-inline: 2px;
-    font-size: 13px;
-    line-height: 18px;
+    padding-inline: 0;
+    font-size: 12px;
+    line-height: 16px;
   }
 
   .ahContractorRegistry > .ahEmptyState {
@@ -352,7 +360,7 @@
 
   .ahContractorMobileList {
     display: grid;
-    gap: 14px;
+    gap: var(--ah-mobile-kpi-gap);
     padding: 16px;
   }
 
@@ -400,7 +408,7 @@
   .ahContractorMobileGrid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 14px;
+    gap: var(--ah-mobile-kpi-gap);
   }
 
   .ahContractorMobileGrid > span {
