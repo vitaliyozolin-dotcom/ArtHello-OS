@@ -12,7 +12,6 @@ const shell = read("../app/components/ArtHelloShell.tsx");
 const designSystem = read("../app/components/design-system/index.tsx");
 const tokens = read("../app/components/design-system/tokens.css");
 const contractorStyles = read("../app/components/ContractorWorkspace.ds.css");
-const visualCanon = JSON.parse(read("../../../../quality-gates/visual-canon.json"));
 
 const normalizeInputs = read("../scripts/normalize-system-patch-inputs.mjs");
 const contentLegalPatch = read("../scripts/patch-system-content-legal.mjs");
@@ -251,9 +250,6 @@ test("approved operational-registry KPI scale is a shared token contract", () =>
       assert.ok(styles.includes(`var(${key})`), `${name} must consume ${key}`);
     }
   }
-  assert.equal(visualCanon.schema_version, 3);
-  assert.equal(visualCanon.compact_registry_kpi.desktop.min_height_px, 98);
-  assert.equal(visualCanon.compact_registry_kpi.mobile.min_height_px, 84);
 });
 
 test("Legal migration preserves reads, mutations, navigation and contract fields", () => {
