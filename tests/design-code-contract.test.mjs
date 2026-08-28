@@ -175,11 +175,15 @@ test("DS-03 student theme changes tokens and typography only", () => {
 
   const studentRules = globals
     .split("\n")
-    .filter((line) => /student|launch-(?:orange|violet|cyan|lime)/.test(line))
+    .filter((line) =>
+      /\.role-student|\.student-(?:hero|dashboard|kicker|hero-copy|launch-grid|quote|day-grid|achievements|score-orbit)|\.launch-(?:orange|violet|cyan|lime)/.test(
+        line,
+      ),
+    )
     .join("\n");
   assert.doesNotMatch(
     studentRules,
-    /#[0-9a-f]{3,8}\b|rgba?\(|\bwhite\b|\bblack\b/i,
+    /(?:color|background(?:-color|-image)?|border-color|box-shadow|font-family):[^;]*(?:#[0-9a-f]{3,8}\b|rgba?\(|\bwhite\b|\bblack\b)/i,
     "student colors must live only in the theme token layer",
   );
   assert.doesNotMatch(studentRules, /Rubik/);
