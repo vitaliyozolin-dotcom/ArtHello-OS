@@ -122,7 +122,6 @@ case "$ACTION" in
 
     docker network create \
       --driver bridge \
-      --internal \
       --opt com.docker.network.bridge.enable_ip_masquerade=false \
       --opt com.docker.network.bridge.enable_icc=false \
       --label school.system=school-1-11 \
@@ -558,7 +557,24 @@ PREPARE_DATA
       exit 1
     fi
 
-    test "$(docker network inspect "$audit_network" --format '{{.Internal}}')" = true
+    test "$(docker network inspect "$audit_network" --format '{{.Internal}}')" = false
+    test "$(docker network inspect "$audit_network" --format '{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}')" = false
+    test "$(docker network inspect "$audit_network" --format '{{index .Options "com.docker.network.bridge.enable_icc"}}')" = false
+    docker exec "$audit" node --input-type=module - <<'VERIFY_EGRESS'
+import { connect } from 'node:net';
+const socket = connect({ host: '1.1.1.1', port: 443 });
+let settled = false;
+const finish = (blocked) => {
+  if (settled) return;
+  settled = true;
+  socket.destroy();
+  if (!blocked) throw new Error('Authorized visual fixture has external egress');
+  console.log('SCHOOL_AUTHORIZED_VISUAL_EGRESS=blocked');
+};
+socket.setTimeout(2500, () => finish(true));
+socket.once('error', () => finish(true));
+socket.once('connect', () => finish(false));
+VERIFY_EGRESS
     binding="$(docker inspect "$audit" --format '{{json .HostConfig.PortBindings}}')"
     BINDING="$binding" node - <<'VERIFY_BINDING'
 const bindings = JSON.parse(process.env.BINDING);
