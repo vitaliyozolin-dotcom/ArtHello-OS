@@ -168,7 +168,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .metric-orange { color: var(--orange); background: var(--orange-soft); }
 .metric-amber { color: var(--amber); background: #fff2da; }
 .metric-green { color: var(--green); background: #e7f5ee; }
-.metric-blue { color: var(--blue); background: #e8f3fa; }
+.metric-blue { color: var(--info-state-icon); background: var(--info-state-background); }
 .metric-violet { color: var(--violet); background: #efecff; }
 .two-column-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .three-column-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -211,7 +211,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .action-orange { color: var(--orange); background: var(--orange-soft); }
 .action-violet { color: var(--violet); background: #efecff; }
 .action-green { color: var(--green); background: #e6f5ed; }
-.action-blue { color: var(--blue); background: #e8f3fa; }
+.action-blue { color: var(--info-state-icon); background: var(--info-state-background); }
 .teacher-action-grid strong { margin-top: 13px; font-size: 14px; }
 .teacher-action-grid small { color: var(--muted); margin-top: 4px; font-size: 11px; }
 .student-mini-list { display: grid; gap: 7px; }
