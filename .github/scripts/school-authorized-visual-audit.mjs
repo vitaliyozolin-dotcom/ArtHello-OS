@@ -1018,6 +1018,11 @@ try {
           "=CAPTURED",
       );
     }
+    const refreshedStudentCookies = await context.cookies();
+    if (!refreshedStudentCookies.some((cookie) => cookie.name === "school_session")) {
+      throw new Error("Student route session cookie was not refreshed");
+    }
+    studentCookies = refreshedStudentCookies;
     await context.close();
   }
 } finally {
