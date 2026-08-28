@@ -108,12 +108,12 @@ decision:
   status: active
   question: Какой документ управляет визуальной системой «Школы 1–11» и что делать при конфликте с общим ArtHello OS Design Code?
   statement: Единственным нормативным источником для электронного дневника и кабинетов четырёх ролей является docs/design/school-1-11/DESIGN_CODE.md версии 1.0.0. В этой области он имеет приоритет над конфликтующими правилами общего ArtHello OS Design Code. app/design-tokens.css является производным машинным слоем той же версии, а CSS страниц, компоненты, рендеры и устные договорённости не являются источником дизайн-правил.
-  context: Утверждённый School Design Code использует фирменный алый #E04512 и геометрию школы, тогда как глобальный стандарт ArtHello OS использует фиолетовую палитру и другую геометрию.
+  context: "Утверждённый School Design Code использует фирменный алый #E04512 и геометрию школы, тогда как глобальный стандарт ArtHello OS использует фиолетовую палитру и другую геометрию."
   rationale: Явно разрешить конфликт областей, сохранить отдельную идентичность школы и исключить визуальный дрейф при последующих изменениях.
   evidence:
     - Явное утверждение School 1–11 Design Code Виталием 2026-08-27
     - Поручение Виталия «Фиксируй единый источник» 2026-08-28
-    - Authorized visual audit run 33146238926: 28 captures, 279 violations, production/staging unchanged
+    - "Authorized visual audit run 33146238926: 28 captures, 279 violations, production/staging unchanged"
   assumptions:
     - «Школа 1–11» сохраняет отдельную фирменную идентичность внутри экосистемы ArtHello
   approved_by: Виталий Озолин
@@ -151,7 +151,7 @@ decision:
     - action: Добавить в школьную ветку указатель и контрактную проверку версии/хеша
       owner: Codex
       due: 2026-08-28
-      evidence_required: PR #200 merged as 3b31be97809856c163369d5bed307379dd9e0bed into school/staging-foundation-20260827
+      evidence_required: "PR #200 merged as 3b31be97809856c163369d5bed307379dd9e0bed into school/staging-foundation-20260827"
       status: completed
     - action: Зафиксировать исключение в глобальном ArtHello OS Design Code
       owner: Codex
@@ -161,11 +161,11 @@ decision:
     - action: Завершить DS-03 — student-тема на токенах и локальном Onest без изменения геометрии
       owner: Codex
       due: 2026-08-28
-      evidence_required: PR #209 merged as fe2a46ba288eebb553e073e6fff29ceed9af2e91; staging run 33162466000; audit run 33162775259; four-role run 33162775257; immutable image sha256:05381e535d0ef89c7fea20b25635e56ed48873994848de652fb08cf23c066389
+      evidence_required: "PR #209 merged as fe2a46ba288eebb553e073e6fff29ceed9af2e91; staging run 33162466000; audit run 33162775259; four-role run 33162775257; immutable image sha256:05381e535d0ef89c7fea20b25635e56ed48873994848de652fb08cf23c066389"
       status: completed
     - action: Выполнить DS-04 — унифицировать Typography, Button, Tabs, Card, Table и HelpButton
       owner: Codex
       due: null
-      evidence_required: exact candidate/image; P0 = 0; DS-02 = 0; DS-03 = 0; CLS <= 0.02; four-role regression; снижение 227 целевых P1; production unchanged
+      evidence_required: "exact candidate/image; P0 = 0; DS-02 = 0; DS-03 = 0; CLS <= 0.02; four-role regression; снижение 227 целевых P1; production unchanged"
       status: pending
 ```
