@@ -288,26 +288,26 @@
   }
 
   .ahContractorKpis > .ahKpiCard {
-    min-height: var(--ah-mobile-kpi-height);
-    border-radius: var(--ah-mobile-kpi-radius);
-    padding: var(--ah-mobile-kpi-padding);
+    min-height: 84px;
+    border-radius: 13px;
+    padding: 11px 12px;
   }
 
   .ahContractorKpis .ahKpiCopy small {
-    font-size: var(--ah-mobile-kpi-label-size);
-    line-height: var(--ah-mobile-kpi-label-line);
+    font-size: 11px;
+    line-height: 13px;
   }
 
   .ahContractorKpis .ahKpiCopy strong {
-    margin-top: 5px;
-    font-size: var(--ah-mobile-kpi-value-size);
-    line-height: var(--ah-mobile-kpi-value-line);
+    margin-top: 3px;
+    font-size: 26px;
+    line-height: 28px;
   }
 
   .ahContractorKpis .ahKpiCopy > span {
-    margin-top: 5px;
-    font-size: var(--ah-mobile-kpi-note-size);
-    line-height: var(--ah-mobile-kpi-note-line);
+    margin-top: 3px;
+    font-size: 11px;
+    line-height: 13px;
   }
 
   .ahContractorRegistry {

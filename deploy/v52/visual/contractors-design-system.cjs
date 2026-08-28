@@ -276,8 +276,7 @@ function assertSameMobileCanon(contractors, access) {
     "pageDisplay", "pagePaddingLeft", "pageGap", "titleFontSize", "eyebrowFontSize", "descriptionFontSize",
     "actionMinHeight", "actionRadius", "actionFontSize",
     "sourceRadius", "sourcePaddingTop", "sourcePaddingLeft", "sourceLabelFontSize", "sourceBodyFontSize",
-    "kpiGap", "kpiMinHeight", "kpiRadius", "kpiPaddingTop", "kpiPaddingLeft",
-    "kpiLabelFontSize", "kpiValueFontSize", "kpiNoteFontSize",
+    "kpiGap",
     "searchHeight", "searchRadius", "searchPaddingLeft", "searchFontSize",
   ];
   const mismatches = keys
@@ -285,6 +284,24 @@ function assertSameMobileCanon(contractors, access) {
     .map((key) => `${key}: contractors=${contractors[key]} access=${access[key]}`);
   if (mismatches.length > 0) {
     throw new Error(`Mobile Access canon mismatches:\n${mismatches.join("\n")}`);
+  }
+}
+
+function assertCompactMobileContractorKpis(contractors) {
+  const expected = {
+    kpiMinHeight: "84px",
+    kpiRadius: "13px",
+    kpiPaddingTop: "11px",
+    kpiPaddingLeft: "12px",
+    kpiLabelFontSize: "11px",
+    kpiValueFontSize: "26px",
+    kpiNoteFontSize: "11px",
+  };
+  const mismatches = Object.entries(expected)
+    .filter(([key, value]) => contractors[key] !== value)
+    .map(([key, value]) => `${key}: contractors=${contractors[key]} expected=${value}`);
+  if (mismatches.length > 0) {
+    throw new Error(`Compact mobile contractor KPI mismatches:\n${mismatches.join("\n")}`);
   }
 }
 
@@ -351,7 +368,11 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
       const access = await captureAccessReference(browser, pilotUrl, pilotState, viewport);
       manifest.push(access);
       persist();
-      if (viewport[0] <= 720) assertSameMobileCanon(pilotContractors.get(viewport.join("x")), access);
+      if (viewport[0] <= 720) {
+        const contractors = pilotContractors.get(viewport.join("x"));
+        assertSameMobileCanon(contractors, access);
+        assertCompactMobileContractorKpis(contractors);
+      }
     }
 
     for (const viewport of [[390, 844], [1440, 900]]) {
