@@ -20,7 +20,7 @@ env:
   CANDIDATE_SHA: b21363c5cd4b3756400eb665c41685d5dbcebc14
   CANDIDATE_IMAGE: school-1-11-design-v1:b21363c5cd4b
   CANDIDATE_IMAGE_ID: sha256:8d857f25cfdadc378c9897c1a9f6236dd2bbf34138c725a19c84f4427acb5382
-  AUDIT_WIDTHS: "767,768,800,801,1199,1200"
+  AUDIT_WIDTHS: "360,390,767,768,800,801,1199,1200,1280,1440,1920,2560"
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   STAGING_ORIGIN: http://127.0.0.1:3211
   AUDIT_BIND_ORIGIN: http://127.0.0.1:3212
@@ -216,7 +216,7 @@ jobs:
             '
 
           test -s school-authorized-visual-output/manifest.json
-          test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 51
+          test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 75
           manifest_values="$(python3 - <<'READ_MANIFEST'
           import collections
           import json
@@ -342,12 +342,18 @@ jobs:
               raise RuntimeError('Capture timestamp invariant failed')
 
           expected_controls = [
+              {'width': 360, 'height': 1024},
+              {'width': 390, 'height': 1024},
               {'width': 767, 'height': 1024},
               {'width': 768, 'height': 1024},
               {'width': 800, 'height': 1024},
               {'width': 801, 'height': 1024},
               {'width': 1199, 'height': 960},
               {'width': 1200, 'height': 960},
+              {'width': 1280, 'height': 960},
+              {'width': 1440, 'height': 960},
+              {'width': 1920, 'height': 960},
+              {'width': 2560, 'height': 960},
           ]
           expected_roles = [
               {'id': 'director', 'route': '/management'},
@@ -403,8 +409,8 @@ jobs:
                   raise RuntimeError('Unexpected selector requirements outside School')
 
           results = manifest['results']
-          if type(results) is not list or len(results) != 51:
-              raise RuntimeError('Combined result list must contain exactly 51 records')
+          if type(results) is not list or len(results) != 75:
+              raise RuntimeError('Combined result list must contain exactly 75 records')
           if any(type(item) is not dict for item in results):
               raise RuntimeError('Every capture result must be an object')
           boundary_results = [item for item in results if 'routeStateId' not in item]
@@ -1475,7 +1481,7 @@ jobs:
           printf 'ds02_violation_count=%s\n' "$ds02_violation_count" >> "$GITHUB_OUTPUT"
           printf 'ds03_violation_count=%s\n' "$ds03_violation_count" >> "$GITHUB_OUTPUT"
           printf 'ds04_violation_count=%s\n' "$ds04_violation_count" >> "$GITHUB_OUTPUT"
-          printf 'SCHOOL_AUTHORIZED_VISUAL_CAPTURE=OK captures=51 ds02_violations=%s ds03_violations=%s ds04_violations=%s violations=%s compliant=%s\n' "$ds02_violation_count" "$ds03_violation_count" "$ds04_violation_count" "$violation_count" "$compliant"
+          printf 'SCHOOL_AUTHORIZED_VISUAL_CAPTURE=OK captures=75 ds02_violations=%s ds03_violations=%s ds04_violations=%s violations=%s compliant=%s\n' "$ds02_violation_count" "$ds03_violation_count" "$ds04_violation_count" "$violation_count" "$compliant"
 
       - name: Enforce remote teardown
         if: always()
@@ -1566,12 +1572,13 @@ jobs:
             printf -- '- Roles: director, teacher, parent, student\n'
             printf -- '- DS-02 boundary routes: /management, /journal, /homework, /schedule\n'
             printf -- '- DS-02 widths: 767, 768, 800, 801, 1199, 1200 px\n'
+            printf -- '- Canonical Design Code widths across all four roles: 360, 390, 768, 1280, 1440, 1920, 2560 px\n'
             printf -- '- DS-03 student routes: /, /schedule, /journal, /homework, /calendar, /school, /profile\n'
             printf -- '- DS-03 School states: Меню, Мероприятия, Доп. занятия\n'
             printf -- '- DS-03 School evidence schema: 1.3.0 selector/count/contrast/focus\n'
             printf -- '- DS-03 route widths: 390, 768, 1440 px\n'
             printf -- '- DS-04 components: logo, headings, primary controls, cards, touch targets, Help, focus ring, content width\n'
-            printf -- '- Evidence: 51 screenshots plus computed-style manifest\n'
+            printf -- '- Evidence: 75 screenshots plus computed-style manifest\n'
             printf -- '- Data: empty schema from candidate migrations; synthetic only\n'
             printf -- '- Exposure: isolated no-masquerade bridge, loopback port, SSH tunnel\n'
             printf -- '- Production/staging UI, data, restart changed: no\n'
