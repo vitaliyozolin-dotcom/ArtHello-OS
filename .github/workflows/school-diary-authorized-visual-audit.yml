@@ -7,7 +7,6 @@ on:
       - .github/workflows/school-diary-authorized-visual-audit.yml
       - .github/scripts/school-authorized-visual-fixture.sh
       - .github/scripts/school-authorized-visual-audit.mjs
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -37,6 +36,8 @@ jobs:
     steps:
       - name: Check out authorized visual audit controls
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Configure confirmed School SSH host
         env:
@@ -47,14 +48,18 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          install -m 0700 -d ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 0600 ~/.ssh/id_ed25519
-          test -s ~/.ssh/id_ed25519
-          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          ssh_dir="$RUNNER_TEMP/school-authorized-visual-ssh-$GITHUB_RUN_ID"
+          ssh_key="$ssh_dir/id_ed25519"
+          known_hosts="$ssh_dir/known_hosts"
+          install -m 0700 -d "$ssh_dir"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_key"
+          chmod 0600 "$ssh_key"
+          test -s "$ssh_key"
+          ssh-keygen -y -f "$ssh_key" >/dev/null
 
           deploy_port="${DEPLOY_PORT:-2222}"
-          scanned_hosts="$RUNNER_TEMP/school-known-hosts"
+          scanned_hosts="$ssh_dir/known_hosts.scan"
           : > "$scanned_hosts"
           chmod 0600 "$scanned_hosts"
           for attempt in 1 2; do
@@ -77,7 +82,7 @@ jobs:
           test -s "$scanned_hosts"
           actual_fingerprint="$(ssh-keygen -lf "$scanned_hosts" -E sha256 | awk '{print $2; exit}')"
           test "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
-          mv "$scanned_hosts" ~/.ssh/known_hosts
+          mv "$scanned_hosts" "$known_hosts"
           printf 'SCHOOL_AUTHORIZED_VISUAL_SSH=VERIFIED\n'
 
       - name: Capture four roles and all student routes
@@ -89,17 +94,24 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          ssh_dir="$RUNNER_TEMP/school-authorized-visual-ssh-$GITHUB_RUN_ID"
+          ssh_key="$ssh_dir/id_ed25519"
+          known_hosts="$ssh_dir/known_hosts"
+          test -s "$ssh_key"
+          test -s "$known_hosts"
           deploy_port="${DEPLOY_PORT:-2222}"
           ssh_args=(
             -p "$deploy_port"
-            -i ~/.ssh/id_ed25519
+            -i "$ssh_key"
             -o IdentitiesOnly=yes
             -o PreferredAuthentications=publickey
             -o PasswordAuthentication=no
             -o KbdInteractiveAuthentication=no
             -o BatchMode=yes
             -o StrictHostKeyChecking=yes
-            -o UserKnownHostsFile=~/.ssh/known_hosts
+            -o UserKnownHostsFile="$known_hosts"
+            -o GlobalKnownHostsFile=/dev/null
             -o ConnectTimeout=140
             -o ServerAliveInterval=10
             -o ServerAliveCountMax=12
@@ -206,71 +218,316 @@ jobs:
           test -s school-authorized-visual-output/manifest.json
           test "$(find school-authorized-visual-output -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 51
           manifest_values="$(python3 - <<'READ_MANIFEST'
+          import collections
           import json
+          import math
           import os
+          import pathlib
+          import struct
+
+          def reject_constant(value):
+              raise RuntimeError('Non-finite JSON number is forbidden: ' + value)
+
+          def reject_duplicate_keys(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise RuntimeError('Duplicate JSON key is forbidden: ' + key)
+                  result[key] = value
+              return result
+
+          def strict_equal(actual, expected):
+              if type(actual) is not type(expected):
+                  return False
+              if type(expected) is dict:
+                  return (
+                      set(actual) == set(expected)
+                      and all(strict_equal(actual[key], value) for key, value in expected.items())
+                  )
+              if type(expected) is list:
+                  return (
+                      len(actual) == len(expected)
+                      and all(strict_equal(left, right) for left, right in zip(actual, expected))
+                  )
+              return actual == expected
+
+          def is_int(value):
+              return type(value) is int
+
+          def is_number(value):
+              return type(value) in (int, float) and math.isfinite(value)
+
+          def require_exact_int(value, expected, label):
+              if not is_int(value) or value != expected:
+                  raise RuntimeError(label)
+
+          def require_color(value, label):
+              if type(value) is not dict or set(value) != {'r', 'g', 'b', 'a'}:
+                  raise RuntimeError(label + ': invalid rendered color object')
+              if any(not is_number(value[channel]) for channel in ('r', 'g', 'b', 'a')):
+                  raise RuntimeError(label + ': non-finite rendered color channel')
+              if any(not 0 <= value[channel] <= 1 for channel in ('r', 'g', 'b', 'a')):
+                  raise RuntimeError(label + ': rendered color channel out of range')
+
+          def color_luminance(value):
+              channels = []
+              for channel in ('r', 'g', 'b'):
+                  component = value[channel]
+                  channels.append(
+                      component / 12.92
+                      if component <= 0.04045
+                      else ((component + 0.055) / 1.055) ** 2.4
+                  )
+              return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+          def computed_contrast(foreground, background):
+              foreground_luminance = color_luminance(foreground)
+              background_luminance = color_luminance(background)
+              lighter = max(foreground_luminance, background_luminance)
+              darker = min(foreground_luminance, background_luminance)
+              return (lighter + 0.05) / (darker + 0.05)
+
+          def require_ratio(value, foreground, background, label):
+              if not is_number(value) or not 1 <= value <= 21:
+                  raise RuntimeError(label + ': invalid contrast ratio')
+              if (
+                  not math.isclose(foreground['a'], 1, rel_tol=0, abs_tol=1e-9)
+                  or not math.isclose(background['a'], 1, rel_tol=0, abs_tol=1e-9)
+              ):
+                  raise RuntimeError(label + ': rendered colors must be opaque')
+              expected = computed_contrast(foreground, background)
+              if not math.isclose(value, expected, rel_tol=1e-9, abs_tol=1e-9):
+                  raise RuntimeError(label + ': contrast ratio was not independently reproduced')
+
+          def colors_close(actual, expected):
+              return all(
+                  math.isclose(actual[channel], expected[channel], rel_tol=0, abs_tol=1e-7)
+                  for channel in ('r', 'g', 'b', 'a')
+              )
 
           with open('school-authorized-visual-output/manifest.json', encoding='utf-8') as source:
-              manifest = json.load(source)
-          if manifest['candidateSha'] != os.environ['CANDIDATE_SHA']:
-              raise RuntimeError('Candidate SHA invariant failed')
-          if manifest['candidateImageId'] != os.environ['CANDIDATE_IMAGE_ID']:
-              raise RuntimeError('Candidate image ID invariant failed')
-          if manifest['version'] != '1.3.0':
-              raise RuntimeError('Wrong DS-03 manifest version')
-          if manifest['captures'] != 51:
-              raise RuntimeError('Incomplete combined capture matrix')
-          if manifest['boundaryCaptures'] != 24:
-              raise RuntimeError('Incomplete DS-02 boundary matrix')
-          if manifest['studentRouteCaptures'] != 27:
-              raise RuntimeError('Incomplete DS-03 student route matrix')
-          if manifest['studentRouteStateCount'] != 9:
-              raise RuntimeError('Wrong DS-03 route state count')
-          if manifest['studentRouteStateCaptures'] != 27:
-              raise RuntimeError('Incomplete DS-03 route state matrix')
-          if manifest['schoolTabCaptures'] != 9:
-              raise RuntimeError('Incomplete School tab matrix')
-          if manifest['credentialsStored'] is not False:
-              raise RuntimeError('Credential storage invariant failed')
-          if manifest['fixture'] != 'empty schema from candidate migrations, seeded with synthetic data':
-              raise RuntimeError('Fixture invariant failed')
-          expected_widths = [767, 768, 800, 801, 1199, 1200]
-          if [item['width'] for item in manifest['controls']] != expected_widths:
-              raise RuntimeError('Wrong DS-02 boundary matrix')
-          expected_route_widths = [390, 768, 1440]
-          if [item['width'] for item in manifest['studentRouteControls']] != expected_route_widths:
-              raise RuntimeError('Wrong DS-03 student route widths')
-          expected_routes = [
-              '/', '/schedule', '/journal', '/homework',
-              '/calendar', '/school', '/profile',
-          ]
-          if [item['route'] for item in manifest['studentRoutes']] != expected_routes:
-              raise RuntimeError('Wrong DS-03 student routes')
-          expected_route_states = [
-              'home', 'schedule', 'journal', 'homework', 'calendar',
-              'school-menu', 'school-events', 'school-activities', 'profile',
-          ]
-          if [
-              item['routeStateId'] for item in manifest['studentRouteStates']
-          ] != expected_route_states:
-              raise RuntimeError('Wrong DS-03 student route states')
-          student_results = [
-              item for item in manifest['results']
-              if item.get('routeStateId')
-          ]
-          expected_state_matrix = {
-              (route_state, width)
-              for route_state in expected_route_states
-              for width in expected_route_widths
+              manifest = json.load(
+                  source,
+                  object_pairs_hook=reject_duplicate_keys,
+                  parse_constant=reject_constant,
+              )
+          if type(manifest) is not dict:
+              raise RuntimeError('Manifest root must be an object')
+          expected_root_keys = {
+              'version', 'auditRunId', 'capturedAt', 'candidateSha',
+              'candidateImageId', 'sourceOfTruth', 'origin', 'fixture',
+              'credentialsStored', 'controls', 'roles', 'studentRouteControls',
+              'schoolStateSelectorRequirements', 'studentRoutes',
+              'studentRouteStateCount', 'studentRouteStates',
+              'boundaryCaptures', 'studentRouteCaptures',
+              'studentRouteStateCaptures', 'schoolTabCaptures', 'captures',
+              'compliant', 'severityCounts', 'results', 'violations',
           }
-          actual_state_matrix = {
-              (item['routeStateId'], item['width'])
-              for item in student_results
+          if set(manifest) != expected_root_keys:
+              raise RuntimeError('Wrong manifest 1.3.0 root schema')
+          fixed_manifest_values = {
+              'version': '1.3.0',
+              'auditRunId': os.environ['GITHUB_RUN_ID'],
+              'candidateSha': os.environ['CANDIDATE_SHA'],
+              'candidateImageId': os.environ['CANDIDATE_IMAGE_ID'],
+              'sourceOfTruth': 'School 1–11 design code 1.0.0, approved 2026-08-27',
+              'origin': 'loopback-ssh-tunnel',
+              'fixture': 'empty schema from candidate migrations, seeded with synthetic data',
+              'credentialsStored': False,
           }
-          if (
-              len(student_results) != len(expected_state_matrix)
-              or actual_state_matrix != expected_state_matrix
+          for key, expected in fixed_manifest_values.items():
+              if not strict_equal(manifest[key], expected):
+                  raise RuntimeError('Manifest provenance invariant failed: ' + key)
+          if type(manifest['capturedAt']) is not str or not manifest['capturedAt'].endswith('Z'):
+              raise RuntimeError('Capture timestamp invariant failed')
+
+          expected_controls = [
+              {'width': 767, 'height': 1024},
+              {'width': 768, 'height': 1024},
+              {'width': 800, 'height': 1024},
+              {'width': 801, 'height': 1024},
+              {'width': 1199, 'height': 960},
+              {'width': 1200, 'height': 960},
+          ]
+          expected_roles = [
+              {'id': 'director', 'route': '/management'},
+              {'id': 'teacher', 'route': '/journal'},
+              {'id': 'parent', 'route': '/homework'},
+              {'id': 'student', 'route': '/schedule'},
+          ]
+          expected_route_controls = [
+              {'width': 390, 'height': 844},
+              {'width': 768, 'height': 1024},
+              {'width': 1440, 'height': 1000},
+          ]
+          expected_student_routes = [
+              {'id': 'home', 'route': '/', 'anchor': '.student-dashboard', 'heading': None},
+              {'id': 'schedule', 'route': '/schedule', 'anchor': '.study-panel.schedule-editor', 'heading': 'Расписание'},
+              {'id': 'journal', 'route': '/journal', 'anchor': '.study-panel', 'heading': 'Журнал'},
+              {'id': 'homework', 'route': '/homework', 'anchor': '.study-panel', 'heading': 'Домашние задания'},
+              {'id': 'calendar', 'route': '/calendar', 'anchor': '.calendar-toolbar', 'heading': 'Календарь школы'},
+              {'id': 'school', 'route': '/school', 'anchor': '.compact-tabs', 'heading': 'Школа'},
+              {'id': 'profile', 'route': '/profile', 'anchor': '.profile-head', 'heading': None},
+          ]
+          for actual, expected, label in (
+              (manifest['controls'], expected_controls, 'DS-02 controls'),
+              (manifest['roles'], expected_roles, 'role contract'),
+              (manifest['studentRouteControls'], expected_route_controls, 'DS-03 controls'),
+              (manifest['studentRoutes'], expected_student_routes, 'DS-03 routes'),
           ):
-              raise RuntimeError('Incomplete or duplicate DS-03 route state matrix')
+              if not strict_equal(actual, expected):
+                  raise RuntimeError('Wrong ' + label)
+
+          expected_state_descriptors = [
+              {'id': 'home', 'route': '/', 'routeStateId': 'home', 'stateId': 'default', 'tab': None, 'anchor': '.student-dashboard', 'items': None, 'expectedItems': None, 'heading': None},
+              {'id': 'schedule', 'route': '/schedule', 'routeStateId': 'schedule', 'stateId': 'default', 'tab': None, 'anchor': '.study-panel.schedule-editor', 'items': None, 'expectedItems': None, 'heading': 'Расписание'},
+              {'id': 'journal', 'route': '/journal', 'routeStateId': 'journal', 'stateId': 'default', 'tab': None, 'anchor': '.study-panel', 'items': None, 'expectedItems': None, 'heading': 'Журнал'},
+              {'id': 'homework', 'route': '/homework', 'routeStateId': 'homework', 'stateId': 'default', 'tab': None, 'anchor': '.study-panel', 'items': None, 'expectedItems': None, 'heading': 'Домашние задания'},
+              {'id': 'calendar', 'route': '/calendar', 'routeStateId': 'calendar', 'stateId': 'default', 'tab': None, 'anchor': '.calendar-toolbar', 'items': None, 'expectedItems': None, 'heading': 'Календарь школы'},
+              {'id': 'school', 'route': '/school', 'routeStateId': 'school-menu', 'stateId': 'menu', 'tab': 'Меню', 'anchor': '.menu-grid', 'items': '.menu-grid > article', 'expectedItems': 3, 'heading': 'Школа'},
+              {'id': 'school', 'route': '/school', 'routeStateId': 'school-events', 'stateId': 'events', 'tab': 'Мероприятия', 'anchor': '.event-grid', 'items': '.event-grid > article', 'expectedItems': 2, 'heading': 'Школа'},
+              {'id': 'school', 'route': '/school', 'routeStateId': 'school-activities', 'stateId': 'activities', 'tab': 'Доп. занятия', 'anchor': '.activity-grid', 'items': '.activity-grid > article', 'expectedItems': 2, 'heading': 'Школа'},
+              {'id': 'profile', 'route': '/profile', 'routeStateId': 'profile', 'stateId': 'default', 'tab': None, 'anchor': '.profile-head', 'items': None, 'expectedItems': None, 'heading': None},
+          ]
+          state_identity_keys = tuple(expected_state_descriptors[0])
+          state_descriptors = manifest['studentRouteStates']
+          if type(state_descriptors) is not list or len(state_descriptors) != 9:
+              raise RuntimeError('Wrong DS-03 route state descriptors')
+          for actual, expected in zip(state_descriptors, expected_state_descriptors):
+              if type(actual) is not dict or 'selectorRequirements' not in actual:
+                  raise RuntimeError('Incomplete DS-03 route state descriptor')
+              identity = {key: actual[key] for key in state_identity_keys}
+              if not strict_equal(identity, expected):
+                  raise RuntimeError('Wrong DS-03 route state identity')
+              if expected['id'] != 'school' and actual['selectorRequirements'] is not None:
+                  raise RuntimeError('Unexpected selector requirements outside School')
+
+          results = manifest['results']
+          if type(results) is not list or len(results) != 51:
+              raise RuntimeError('Combined result list must contain exactly 51 records')
+          if any(type(item) is not dict for item in results):
+              raise RuntimeError('Every capture result must be an object')
+          boundary_results = [item for item in results if 'routeStateId' not in item]
+          student_results = [item for item in results if 'routeStateId' in item]
+          if len(boundary_results) != 24 or len(student_results) != 27:
+              raise RuntimeError('Wrong boundary/student result partition')
+
+          expected_boundary_matrix = {}
+          for role in expected_roles:
+              for control in expected_controls:
+                  width = control['width']
+                  descriptor = {
+                      'role': role['id'],
+                      'route': role['route'],
+                      'width': width,
+                      'height': control['height'],
+                      'shellMode': 'phone' if width <= 767 else 'tablet' if width < 1200 else 'desktop',
+                      'screenshot': f"{role['id']}-{width}.png",
+                  }
+                  expected_boundary_matrix[(role['id'], width)] = descriptor
+          actual_boundary_matrix = {}
+          for item in boundary_results:
+              if set(item) != {
+                  'role', 'route', 'width', 'height', 'shellMode',
+                  'metrics', 'ds03', 'focus', 'screenshot',
+              }:
+                  raise RuntimeError('Wrong DS-02 result schema')
+              if (
+                  type(item['metrics']) is not dict
+                  or type(item['ds03']) is not dict
+                  or item['focus'] is not None and type(item['focus']) is not dict
+              ):
+                  raise RuntimeError('Incomplete DS-02 result evidence')
+              key = (item.get('role'), item.get('width'))
+              if key in actual_boundary_matrix or key not in expected_boundary_matrix:
+                  raise RuntimeError('Unknown or duplicate DS-02 result identity')
+              actual_boundary_matrix[key] = item
+              expected = expected_boundary_matrix[key]
+              identity = {field: item.get(field) for field in expected}
+              if not strict_equal(identity, expected):
+                  raise RuntimeError('DS-02 result binding failed: ' + repr(key))
+          if set(actual_boundary_matrix) != set(expected_boundary_matrix):
+              raise RuntimeError('Incomplete DS-02 result matrix')
+
+          expected_student_matrix = {}
+          for state in expected_state_descriptors:
+              for control in expected_route_controls:
+                  width = control['width']
+                  descriptor = {
+                      'role': 'student',
+                      'route': state['route'],
+                      'routeId': state['id'],
+                      'routeStateId': state['routeStateId'],
+                      'stateId': state['stateId'],
+                      'tab': state['tab'],
+                      'width': width,
+                      'height': control['height'],
+                      'screenshot': f"student-route-{state['routeStateId']}-{width}.png",
+                  }
+                  expected_student_matrix[(state['routeStateId'], width)] = descriptor
+          actual_student_matrix = {}
+          for item in student_results:
+              if set(item) != {
+                  'role', 'route', 'routeId', 'routeStateId', 'stateId', 'tab',
+                  'width', 'height', 'metrics', 'ds03', 'screenshot',
+              }:
+                  raise RuntimeError('Wrong DS-03 result schema')
+              if type(item['metrics']) is not dict or type(item['ds03']) is not dict:
+                  raise RuntimeError('Incomplete DS-03 result evidence')
+              key = (item.get('routeStateId'), item.get('width'))
+              if key in actual_student_matrix or key not in expected_student_matrix:
+                  raise RuntimeError('Unknown or duplicate DS-03 result identity')
+              actual_student_matrix[key] = item
+              expected = expected_student_matrix[key]
+              identity = {field: item.get(field) for field in expected}
+              if not strict_equal(identity, expected):
+                  raise RuntimeError('DS-03 result binding failed: ' + repr(key))
+          if set(actual_student_matrix) != set(expected_student_matrix):
+              raise RuntimeError('Incomplete DS-03 result matrix')
+
+          expected_screenshots = {
+              item['screenshot'] for item in expected_boundary_matrix.values()
+          } | {
+              item['screenshot'] for item in expected_student_matrix.values()
+          }
+          output_dir = pathlib.Path('school-authorized-visual-output')
+          actual_png_paths = {path.name: path for path in output_dir.glob('*.png')}
+          result_screenshots = [item.get('screenshot') for item in results]
+          if (
+              len(result_screenshots) != len(set(result_screenshots))
+              or set(result_screenshots) != expected_screenshots
+              or set(actual_png_paths) != expected_screenshots
+          ):
+              raise RuntimeError('Capture-to-screenshot matrix binding failed')
+          expected_screenshot_sizes = {
+              item['screenshot']: (item['width'], item['height'])
+              for item in [*expected_boundary_matrix.values(), *expected_student_matrix.values()]
+          }
+          for name, path in actual_png_paths.items():
+              if not path.is_file() or path.is_symlink() or path.stat().st_size <= 24:
+                  raise RuntimeError('Missing or empty screenshot: ' + name)
+              with path.open('rb') as screenshot_source:
+                  header = screenshot_source.read(24)
+              if (
+                  header[:8] != b'\x89PNG\r\n\x1a\n'
+                  or struct.unpack('>I', header[8:12])[0] != 13
+                  or header[12:16] != b'IHDR'
+              ):
+                  raise RuntimeError('Invalid PNG header: ' + name)
+              pixel_width, pixel_height = struct.unpack('>II', header[16:24])
+              expected_width, minimum_height = expected_screenshot_sizes[name]
+              if pixel_width != expected_width or pixel_height < minimum_height:
+                  raise RuntimeError('Wrong screenshot dimensions: ' + name)
+
+          require_exact_int(manifest['captures'], len(results), 'Incomplete combined capture matrix')
+          require_exact_int(manifest['boundaryCaptures'], len(boundary_results), 'Incomplete DS-02 boundary matrix')
+          require_exact_int(manifest['studentRouteCaptures'], len(student_results), 'Incomplete DS-03 student route matrix')
+          require_exact_int(manifest['studentRouteStateCount'], len(state_descriptors), 'Wrong DS-03 route state count')
+          require_exact_int(manifest['studentRouteStateCaptures'], len(student_results), 'Incomplete DS-03 route state matrix')
+          school_result_count = sum(item['routeId'] == 'school' for item in student_results)
+          require_exact_int(manifest['schoolTabCaptures'], school_result_count, 'Incomplete School tab matrix')
+          expected_route_states = [item['routeStateId'] for item in expected_state_descriptors]
+          expected_route_widths = [item['width'] for item in expected_route_controls]
           expected_school_states = {
               'school-menu': ('Меню', 3),
               'school-events': ('Мероприятия', 2),
@@ -476,23 +733,75 @@ jobs:
               ],
           }
           manifest_requirements = manifest['schoolStateSelectorRequirements']
-          if set(manifest_requirements) != {'menu', 'events', 'activities'}:
+          if (
+              type(manifest_requirements) is not dict
+              or set(manifest_requirements) != {'menu', 'events', 'activities'}
+          ):
               raise RuntimeError('Wrong School selector requirement states')
           for route_state, state_id in {
               'school-menu': 'menu',
               'school-events': 'events',
               'school-activities': 'activities',
           }.items():
-              if manifest_requirements[state_id] != expected_selector_requirements[route_state]:
+              expected_requirements = expected_selector_requirements[route_state]
+              if not strict_equal(manifest_requirements[state_id], expected_requirements):
                   raise RuntimeError(
                       'Wrong School selector requirement contract: ' + route_state
                   )
+              descriptor = next(
+                  item for item in state_descriptors
+                  if item['routeStateId'] == route_state
+              )
+              if not strict_equal(descriptor['selectorRequirements'], expected_requirements):
+                  raise RuntimeError(
+                      'Wrong School route-state selector contract: ' + route_state
+                  )
+          for item in student_results:
+              metrics = item['metrics']
+              if (
+                  metrics.get('hrefPath') != item['route']
+                  or metrics.get('designCode') != 'v1'
+                  or not is_number(metrics.get('documentWidth'))
+                  or metrics['documentWidth'] > item['width'] + 1
+                  or not is_number(metrics.get('bodyWidth'))
+                  or metrics['bodyWidth'] > item['width'] + 1
+                  or metrics.get('anchorPresent') is not True
+                  or metrics.get('headingPresent') is not True
+                  or metrics.get('stateAnchorPresent') is not True
+              ):
+                  raise RuntimeError('Student route base invariant failed')
+              if item['routeId'] != 'school':
+                  if set(metrics) != {
+                      'hrefPath', 'designCode', 'documentWidth', 'bodyWidth',
+                      'cls', 'clsPhases', 'anchorPresent', 'headingPresent',
+                      'stateAnchorPresent', 'activeTab', 'activeTabCount',
+                      'itemCount', 'expectedItemCount',
+                  }:
+                      raise RuntimeError('Wrong non-School route metrics schema')
+                  if (
+                      not is_number(metrics['cls'])
+                      or metrics['cls'] < 0
+                      or metrics['cls'] > 0.02
+                      or metrics['clsPhases'] is not None
+                      or metrics['activeTab'] is not None
+                      or not is_int(metrics['activeTabCount'])
+                      or metrics['activeTabCount'] != 0
+                      or metrics['itemCount'] is not None
+                      or metrics['expectedItemCount'] is not None
+                  ):
+                      raise RuntimeError('Non-School route state invariant failed')
           school_results = [
               item for item in student_results
               if item['routeStateId'] in expected_school_states
           ]
           if len(school_results) != 9:
               raise RuntimeError('Incomplete School tab results')
+          expected_colors = {
+              'surface': {'r': 29 / 255, 'g': 41 / 255, 'b': 57 / 255, 'a': 1},
+              'text': {'r': 1, 'g': 1, 'b': 1, 'a': 1},
+              'brand400': {'r': 240 / 255, 'g': 113 / 255, 'b': 66 / 255, 'a': 1},
+              'brand600': {'r': 196 / 255, 'g': 56 / 255, 'b': 13 / 255, 'a': 1},
+          }
           for item in school_results:
               expected_tab, expected_items = expected_school_states[
                   item['routeStateId']
@@ -501,22 +810,59 @@ jobs:
                   item['routeStateId']
               ]
               metrics = item['metrics']
+              if type(metrics) is not dict:
+                  raise RuntimeError('School metrics must be an object')
+              if set(metrics) != {
+                  'hrefPath', 'designCode', 'documentWidth', 'bodyWidth',
+                  'cls', 'clsPhases', 'anchorPresent', 'headingPresent',
+                  'stateAnchorPresent', 'activeTab', 'activeTabCount',
+                  'itemCount', 'expectedItemCount', 'selectorChecks',
+                  'selectorCompletenessPass', 'tabs', 'cards',
+                  'cardStylePass', 'inactiveTabsPass', 'textContrasts',
+                  'textContrastPass', 'selected', 'focus', 'schoolStatePass',
+              }:
+                  raise RuntimeError('Wrong School metrics schema')
               if (
-                  item['tab'] != expected_tab
-                  or metrics['activeTab'] != expected_tab
+                  not strict_equal(item['tab'], expected_tab)
+                  or not strict_equal(metrics['activeTab'], expected_tab)
+                  or not is_int(metrics['activeTabCount'])
                   or metrics['activeTabCount'] != 1
                   or metrics['stateAnchorPresent'] is not True
+                  or not is_int(metrics['itemCount'])
                   or metrics['itemCount'] != expected_items
+                  or not is_int(metrics['expectedItemCount'])
                   or metrics['expectedItemCount'] != expected_items
               ):
                   raise RuntimeError(
                       'School tab state invariant failed: ' +
                       json.dumps(item, ensure_ascii=False)
                   )
+              cls_phases = metrics['clsPhases']
+              if type(cls_phases) is not dict or set(cls_phases) != {'routeLoad', 'stateChange'}:
+                  raise RuntimeError('School CLS phase schema failed')
+              for phase, value in cls_phases.items():
+                  if not is_number(value) or value < 0 or value > 0.02:
+                      raise RuntimeError(
+                          f'School CLS phase failed ({phase}): ' +
+                          json.dumps(cls_phases, ensure_ascii=False)
+                      )
+              if (
+                  not is_number(metrics['cls'])
+                  or metrics['cls'] != max(cls_phases.values())
+              ):
+                  raise RuntimeError('School CLS aggregate failed')
               checks = metrics['selectorChecks']
-              if len(checks) != len(expected_checks):
+              if type(checks) is not list or len(checks) != len(expected_checks):
                   raise RuntimeError('Incomplete School selector checks')
               for check, expected_check in zip(checks, expected_checks):
+                  if type(check) is not dict:
+                      raise RuntimeError('School selector check must be an object')
+                  if set(check) != {
+                      'id', 'selector', 'expectedCount', 'textRole',
+                      'minimumContrast', 'actualCount', 'visibleCount',
+                      'hiddenCount', 'countPass', 'samples', 'contrastPass',
+                  }:
+                      raise RuntimeError('Wrong School selector-check schema')
                   contract_fields = {
                       key: check[key]
                       for key in (
@@ -524,15 +870,18 @@ jobs:
                           'textRole', 'minimumContrast',
                       )
                   }
-                  if contract_fields != expected_check:
+                  if not strict_equal(contract_fields, expected_check):
                       raise RuntimeError(
                           'School selector contract mismatch: ' +
                           json.dumps(check, ensure_ascii=False)
                       )
                   expected_count = expected_check['expectedCount']
                   if (
-                      check['actualCount'] != expected_count
+                      not is_int(check['actualCount'])
+                      or check['actualCount'] != expected_count
+                      or not is_int(check['visibleCount'])
                       or check['visibleCount'] != expected_count
+                      or not is_int(check['hiddenCount'])
                       or check['hiddenCount'] != 0
                       or check['countPass'] is not True
                   ):
@@ -542,71 +891,358 @@ jobs:
                       )
                   minimum_contrast = expected_check['minimumContrast']
                   samples = check['samples']
+                  if type(samples) is not list:
+                      raise RuntimeError('School contrast samples must be a list')
                   if minimum_contrast is None:
                       if samples or check['contrastPass'] is not True:
                           raise RuntimeError('Unexpected non-text contrast samples')
                   else:
                       if len(samples) != expected_count:
                           raise RuntimeError('Incomplete School text samples')
-                      for sample in samples:
+                      for index, sample in enumerate(samples):
+                          if type(sample) is not dict:
+                              raise RuntimeError('School text sample must be an object')
+                          if set(sample) != {
+                              'index', 'text', 'textPresent', 'textRole',
+                              'minimumContrast', 'effectiveOpacity',
+                              'opacityPass', 'flatPaintPass',
+                              'authoredForeground', 'renderedForeground',
+                              'renderedBackground', 'ratio', 'pass',
+                          }:
+                              raise RuntimeError('Wrong School text-sample schema')
                           ratio = sample['ratio']
                           if (
-                              sample['minimumContrast'] != minimum_contrast
-                              or not isinstance(ratio, (int, float))
+                              not strict_equal(sample['minimumContrast'], minimum_contrast)
+                              or not is_int(sample['index'])
+                              or sample['index'] != index
+                              or not is_number(ratio)
                               or ratio < minimum_contrast
                               or sample['pass'] is not True
-                              or not sample['text']
+                              or type(sample['text']) is not str
+                              or not sample['text'].strip()
                               or sample['textPresent'] is not True
-                              or not isinstance(sample['effectiveOpacity'], (int, float))
+                              or not is_number(sample['effectiveOpacity'])
                               or not 0 < sample['effectiveOpacity'] <= 1
-                              or sample['renderedForeground'] is None
-                              or sample['renderedBackground'] is None
+                              or sample['opacityPass'] is not True
+                              or sample['flatPaintPass'] is not True
+                              or type(sample['authoredForeground']) is not str
+                              or not sample['authoredForeground']
                           ):
                               raise RuntimeError(
                                   'School text contrast failed: ' +
                                   json.dumps(sample, ensure_ascii=False)
                               )
+                          require_color(
+                              sample['renderedForeground'],
+                              'School rendered text foreground',
+                          )
+                          require_color(
+                              sample['renderedBackground'],
+                              'School rendered text background',
+                          )
+                          require_ratio(
+                              ratio,
+                              sample['renderedForeground'],
+                              sample['renderedBackground'],
+                              'School text contrast',
+                          )
                       if check['contrastPass'] is not True:
                           raise RuntimeError('School selector contrast aggregate failed')
+              expected_text_contrasts = []
+              for check in checks:
+                  for sample in check['samples']:
+                      expected_text_contrasts.append({
+                          'requirementId': check['id'],
+                          'selector': check['selector'],
+                          **sample,
+                      })
+              if not strict_equal(metrics['textContrasts'], expected_text_contrasts):
+                  raise RuntimeError('School flattened text evidence is inconsistent')
+              if (
+                  metrics['selectorCompletenessPass'] is not True
+                  or metrics['textContrastPass'] is not True
+              ):
+                  raise RuntimeError('School selector aggregate failed')
+
+              tabs = metrics['tabs']
+              if type(tabs) is not list or len(tabs) != 3:
+                  raise RuntimeError('School tab evidence must contain three tabs')
+              if [tab.get('label') for tab in tabs] != ['Меню', 'Мероприятия', 'Доп. занятия']:
+                  raise RuntimeError('School tab labels changed')
+              if sum(tab.get('active') is True for tab in tabs) != 1:
+                  raise RuntimeError('School active-tab evidence failed')
+              for tab in tabs:
+                  if (
+                      type(tab) is not dict
+                      or type(tab['active']) is not bool
+                      or not is_number(tab['effectiveOpacity'])
+                      or tab['effectiveOpacity'] != 1
+                      or tab['opacityPass'] is not True
+                      or tab['flatPaintPass'] is not True
+                  ):
+                      raise RuntimeError('School tab opaque flat-paint contract failed')
+                  if set(tab) != {
+                      'label', 'active', 'effectiveOpacity', 'opacityPass',
+                      'flatPaintPass', 'backgroundAuthored',
+                      'backgroundParsed', 'backgroundRendered',
+                      'foregroundAuthored', 'foregroundParsed',
+                      'foregroundRendered', 'borderAuthored', 'borderParsed',
+                      'borderRendered', 'borderWidths', 'borderStyles',
+                      'borderVisible', 'externalBackground',
+                  }:
+                      raise RuntimeError('Wrong School tab evidence schema')
+                  for color_key in (
+                      'backgroundParsed', 'backgroundRendered',
+                      'foregroundParsed', 'foregroundRendered',
+                      'externalBackground',
+                  ):
+                      require_color(tab[color_key], 'School tab ' + color_key)
+                  require_color(tab['backgroundRendered'], 'School tab background')
+              active_tab_evidence = next(tab for tab in tabs if tab['active'])
+              if (
+                  active_tab_evidence['label'] != expected_tab
+                  or active_tab_evidence['borderVisible'] is not True
+              ):
+                  raise RuntimeError('School active-tab label binding failed')
+              if not colors_close(
+                  active_tab_evidence['foregroundParsed'],
+                  expected_colors['text'],
+              ):
+                  raise RuntimeError('Selected text token binding failed')
+              active_border_colors = active_tab_evidence['borderParsed']
+              if (
+                  type(active_border_colors) is not list
+                  or len(active_border_colors) != 4
+              ):
+                  raise RuntimeError('Selected border-color evidence failed')
+              for color in active_border_colors:
+                  require_color(color, 'Selected authored border color')
+                  if not colors_close(color, expected_colors['brand400']):
+                      raise RuntimeError('Selected border token binding failed')
+              for tab in tabs:
+                  expected_background = (
+                      expected_colors['brand600']
+                      if tab['active']
+                      else expected_colors['surface']
+                  )
+                  if not colors_close(tab['backgroundParsed'], expected_background):
+                      raise RuntimeError('School tab background token binding failed')
+
               selected = metrics['selected']
               mapping = selected['mapping']
               non_text = selected['nonText']
+              if type(selected) is not dict or type(mapping) is not dict or type(non_text) is not dict:
+                  raise RuntimeError('School selected-state schema failed')
+              if set(selected) != {'activeCount', 'label', 'expected', 'actual', 'mapping', 'nonText'}:
+                  raise RuntimeError('Wrong selected-state evidence schema')
+              if set(mapping) != {
+                  'backgroundPass', 'borderColorPass', 'borderVisiblePass',
+                  'borderPass', 'textPass', 'opacityPass', 'flatPaintPass',
+                  'pass',
+              }:
+                  raise RuntimeError('Wrong selected mapping schema')
+              if not strict_equal(selected['actual'], active_tab_evidence):
+                  raise RuntimeError('Selected evidence is not bound to active tab')
+              if type(selected['expected']) is not dict or set(selected['expected']) != {
+                  'surface', 'text', 'brand400', 'brand600',
+              }:
+                  raise RuntimeError('Wrong selected token evidence schema')
+              border_ratios = non_text['borderRatios']
+              border_widths = non_text['borderWidths']
+              border_styles = non_text['borderStyles']
+              if set(non_text) != {
+                  'externalBackground', 'renderedFill', 'renderedBorders',
+                  'borderWidths', 'borderStyles', 'borderVisiblePass',
+                  'effectiveOpacity', 'opacityPass', 'flatPaintPass',
+                  'fillRatio', 'borderRatios', 'minimumContrast',
+                  'fillPass', 'borderPass', 'externalPass',
+                  'inactiveComparisons', 'inactivePass', 'pass',
+              }:
+                  raise RuntimeError('Wrong selected non-text schema')
               if (
-                  selected['activeCount'] != 1
-                  or selected['label'] != expected_tab
+                  not strict_equal(
+                      non_text['externalBackground'],
+                      active_tab_evidence['externalBackground'],
+                  )
+                  or not strict_equal(
+                      non_text['renderedFill'],
+                      active_tab_evidence['backgroundRendered'],
+                  )
+                  or not strict_equal(
+                      non_text['renderedBorders'],
+                      active_tab_evidence['borderRendered'],
+                  )
+                  or not strict_equal(
+                      non_text['borderWidths'],
+                      active_tab_evidence['borderWidths'],
+                  )
+                  or not strict_equal(
+                      non_text['borderStyles'],
+                      active_tab_evidence['borderStyles'],
+                  )
+              ):
+                  raise RuntimeError('Selected non-text evidence is not bound to active tab')
+              external_fill_pass = non_text['fillRatio'] >= 3 if is_number(non_text['fillRatio']) else False
+              external_border_pass = (
+                  type(border_ratios) is list
+                  and len(border_ratios) == 4
+                  and all(is_number(ratio) for ratio in border_ratios)
+                  and type(border_widths) is list
+                  and len(border_widths) == 4
+                  and all(is_number(width) and width > 0 for width in border_widths)
+                  and type(border_styles) is list
+                  and len(border_styles) == 4
+                  and all(type(style) is str and style not in {'none', 'hidden'} for style in border_styles)
+                  and any(ratio >= 3 for ratio in border_ratios)
+              )
+              if (
+                  not is_int(selected['activeCount'])
+                  or selected['activeCount'] != 1
+                  or not strict_equal(selected['label'], expected_tab)
                   or mapping['backgroundPass'] is not True
+                  or mapping['borderColorPass'] is not True
+                  or mapping['borderVisiblePass'] is not True
                   or mapping['borderPass'] is not True
                   or mapping['textPass'] is not True
+                  or mapping['opacityPass'] is not True
+                  or mapping['flatPaintPass'] is not True
                   or mapping['pass'] is not True
+                  or not is_int(non_text['minimumContrast'])
                   or non_text['minimumContrast'] != 3
-                  or not isinstance(non_text['fillRatio'], (int, float))
-                  or len(non_text['borderRatios']) != 4
-                  or any(
-                      not isinstance(ratio, (int, float))
-                      for ratio in non_text['borderRatios']
-                  )
+                  or not is_number(non_text['fillRatio'])
+                  or not is_number(non_text['effectiveOpacity'])
+                  or non_text['effectiveOpacity'] != 1
+                  or non_text['opacityPass'] is not True
+                  or non_text['flatPaintPass'] is not True
+                  or non_text['borderVisiblePass'] is not True
+                  or non_text['fillPass'] is not external_fill_pass
+                  or non_text['borderPass'] is not external_border_pass
+                  or non_text['externalPass'] is not (external_fill_pass or external_border_pass)
+                  or non_text['externalPass'] is not True
                   or non_text['pass'] is not True
-                  or not (
-                      non_text['fillRatio'] >= 3
-                      or any(ratio >= 3 for ratio in non_text['borderRatios'])
-                  )
               ):
                   raise RuntimeError(
                       'School selected-state invariant failed: ' +
                       json.dumps(selected, ensure_ascii=False)
                   )
+              require_color(non_text['externalBackground'], 'Selected external background')
+              require_color(non_text['renderedFill'], 'Selected rendered fill')
+              if type(non_text['renderedBorders']) is not list or len(non_text['renderedBorders']) != 4:
+                  raise RuntimeError('Selected rendered border evidence failed')
+              for color in non_text['renderedBorders']:
+                  require_color(color, 'Selected rendered border')
+              require_ratio(
+                  non_text['fillRatio'],
+                  non_text['renderedFill'],
+                  non_text['externalBackground'],
+                  'Selected fill/external contrast',
+              )
+              for ratio, color in zip(
+                  non_text['borderRatios'],
+                  non_text['renderedBorders'],
+              ):
+                  require_ratio(
+                      ratio,
+                      color,
+                      non_text['externalBackground'],
+                      'Selected border/external contrast',
+                  )
+              inactive_comparisons = non_text['inactiveComparisons']
+              if type(inactive_comparisons) is not list or len(inactive_comparisons) != 2:
+                  raise RuntimeError('Selected inactive-tab comparisons incomplete')
+              expected_inactive_labels = {
+                  label for label in ('Меню', 'Мероприятия', 'Доп. занятия')
+                  if label != expected_tab
+              }
+              if {comparison.get('label') for comparison in inactive_comparisons} != expected_inactive_labels:
+                  raise RuntimeError('Selected inactive-tab labels failed')
+              for comparison in inactive_comparisons:
+                  if type(comparison) is not dict:
+                      raise RuntimeError('Selected inactive comparison must be an object')
+                  if set(comparison) != {
+                      'label', 'renderedBackground', 'fillRatio',
+                      'borderRatios', 'fillPass', 'borderPass', 'pass',
+                  }:
+                      raise RuntimeError('Wrong selected inactive-comparison schema')
+                  require_color(
+                      comparison['renderedBackground'],
+                      'Inactive tab rendered background',
+                  )
+                  if not colors_close(
+                      comparison['renderedBackground'],
+                      expected_colors['surface'],
+                  ):
+                      raise RuntimeError('Inactive tab rendered token binding failed')
+                  comparison_ratios = comparison['borderRatios']
+                  if (
+                      not is_number(comparison['fillRatio'])
+                      or type(comparison_ratios) is not list
+                      or len(comparison_ratios) != 4
+                      or any(not is_number(ratio) for ratio in comparison_ratios)
+                  ):
+                      raise RuntimeError('Selected inactive-tab ratio schema failed')
+                  comparison_fill_pass = comparison['fillRatio'] >= 3
+                  comparison_border_pass = any(ratio >= 3 for ratio in comparison_ratios)
+                  require_ratio(
+                      comparison['fillRatio'],
+                      non_text['renderedFill'],
+                      comparison['renderedBackground'],
+                      'Selected fill/inactive contrast',
+                  )
+                  for ratio, color in zip(
+                      comparison_ratios,
+                      non_text['renderedBorders'],
+                  ):
+                      require_ratio(
+                          ratio,
+                          color,
+                          comparison['renderedBackground'],
+                          'Selected border/inactive contrast',
+                      )
+                  if (
+                      comparison['fillPass'] is not comparison_fill_pass
+                      or comparison['borderPass'] is not comparison_border_pass
+                      or comparison['pass'] is not (comparison_fill_pass or comparison_border_pass)
+                      or comparison['pass'] is not True
+                  ):
+                      raise RuntimeError('Selected inactive-tab contrast failed')
+              if non_text['inactivePass'] is not True:
+                  raise RuntimeError('Selected inactive-tab aggregate failed')
+
               focus = metrics['focus']
+              if type(focus) is not dict or set(focus) != {
+                  'activeElement', 'focusVisible', 'outlineStyle',
+                  'outlineWidth', 'outlineOffset', 'outlineAuthored',
+                  'outlineParsed', 'renderedOutline', 'externalBackground',
+                  'expectedOutline', 'outlineColorPass', 'effectiveOpacity',
+                  'opacityPass', 'flatPaintPass', 'minimumContrast', 'ratio',
+                  'externalPass', 'inactiveRatios', 'inactivePass',
+                  'contrastPass', 'authoredPass', 'pass',
+              }:
+                  raise RuntimeError('Wrong School focus evidence schema')
+              inactive_focus_ratios = focus['inactiveRatios']
               if (
                   focus['activeElement'] is not True
                   or focus['focusVisible'] is not True
-                  or focus['outlineStyle'] == 'none'
-                  or not isinstance(focus['outlineWidth'], (int, float))
-                  or focus['outlineWidth'] <= 0
+                  or type(focus['outlineStyle']) is not str
+                  or focus['outlineStyle'] in {'none', 'hidden'}
+                  or not is_number(focus['outlineWidth'])
+                  or focus['outlineWidth'] < 3
+                  or not is_number(focus['outlineOffset'])
+                  or focus['outlineOffset'] < 2
                   or focus['outlineColorPass'] is not True
+                  or not is_number(focus['effectiveOpacity'])
+                  or focus['effectiveOpacity'] != 1
+                  or focus['opacityPass'] is not True
+                  or focus['flatPaintPass'] is not True
                   or focus['authoredPass'] is not True
+                  or not is_int(focus['minimumContrast'])
                   or focus['minimumContrast'] != 3
-                  or not isinstance(focus['ratio'], (int, float))
+                  or not is_number(focus['ratio'])
                   or focus['ratio'] < 3
+                  or focus['externalPass'] is not True
+                  or type(inactive_focus_ratios) is not list
+                  or len(inactive_focus_ratios) != 2
                   or focus['contrastPass'] is not True
                   or focus['pass'] is not True
               ):
@@ -614,20 +1250,98 @@ jobs:
                       'School focus invariant failed: ' +
                       json.dumps(focus, ensure_ascii=False)
                   )
+              require_color(focus['outlineParsed'], 'Focus parsed outline')
+              require_color(focus['renderedOutline'], 'Focus rendered outline')
+              require_color(focus['externalBackground'], 'Focus external background')
+              if (
+                  not colors_close(focus['outlineParsed'], expected_colors['brand400'])
+                  or not colors_close(focus['renderedOutline'], expected_colors['brand400'])
+                  or not strict_equal(
+                      focus['externalBackground'],
+                      active_tab_evidence['externalBackground'],
+                  )
+              ):
+                  raise RuntimeError('Focus token/background binding failed')
+              require_ratio(
+                  focus['ratio'],
+                  focus['renderedOutline'],
+                  focus['externalBackground'],
+                  'Focus outline/external contrast',
+              )
+              if {entry.get('label') for entry in inactive_focus_ratios} != expected_inactive_labels:
+                  raise RuntimeError('Focus inactive-tab labels failed')
+              for entry in inactive_focus_ratios:
+                  if (
+                      type(entry) is not dict
+                      or set(entry) != {'label', 'renderedBackground', 'ratio'}
+                      or not is_number(entry['ratio'])
+                      or entry['ratio'] < 3
+                  ):
+                      raise RuntimeError('Focus inactive-tab ratio failed')
+                  require_color(
+                      entry['renderedBackground'],
+                      'Focus inactive-tab background',
+                  )
+                  if not colors_close(
+                      entry['renderedBackground'],
+                      expected_colors['surface'],
+                  ):
+                      raise RuntimeError('Focus inactive background token failed')
+                  require_ratio(
+                      entry['ratio'],
+                      focus['renderedOutline'],
+                      entry['renderedBackground'],
+                      'Focus outline/inactive contrast',
+                  )
+              if focus['inactivePass'] is not True:
+                  raise RuntimeError('Focus inactive-tab aggregate failed')
+
               cards = metrics['cards']
               if (
-                  len(cards) != expected_items
-                  or any(card['pass'] is not True for card in cards)
+                  type(cards) is not list
+                  or len(cards) != expected_items
+                  or any(type(card) is not dict for card in cards)
                   or metrics['cardStylePass'] is not True
                   or metrics['inactiveTabsPass'] is not True
-                  or metrics['selectorCompletenessPass'] is not True
-                  or metrics['textContrastPass'] is not True
                   or metrics['schoolStatePass'] is not True
               ):
                   raise RuntimeError(
                       'School state aggregate failed: ' +
                       json.dumps(metrics, ensure_ascii=False)
                   )
+              for index, card in enumerate(cards):
+                  if set(card) != {
+                      'index', 'backgroundAuthored', 'backgroundParsed',
+                      'backgroundRendered', 'foregroundAuthored',
+                      'foregroundParsed', 'foregroundRendered',
+                      'effectiveOpacity', 'opacityPass', 'flatPaintPass',
+                      'backgroundPass', 'textPass', 'pass',
+                  }:
+                      raise RuntimeError('Wrong School card evidence schema')
+                  if (
+                      not is_int(card['index'])
+                      or card['index'] != index
+                      or not is_number(card['effectiveOpacity'])
+                      or card['effectiveOpacity'] != 1
+                      or card['opacityPass'] is not True
+                      or card['flatPaintPass'] is not True
+                      or card['backgroundPass'] is not True
+                      or card['textPass'] is not True
+                      or card['pass'] is not True
+                  ):
+                      raise RuntimeError('School card opaque flat-paint contract failed')
+                  require_color(card['backgroundParsed'], 'School card parsed background')
+                  require_color(card['backgroundRendered'], 'School card background')
+                  require_color(card['foregroundParsed'], 'School card parsed foreground')
+                  require_color(card['foregroundRendered'], 'School card foreground')
+                  if (
+                      not colors_close(card['backgroundParsed'], expected_colors['surface'])
+                      or not colors_close(card['foregroundParsed'], expected_colors['text'])
+                  ):
+                      raise RuntimeError('School card token binding failed')
+          violation_records = manifest['violations']
+          if type(violation_records) is not list:
+              raise RuntimeError('Manifest violations must be a list')
           ds02_codes = {
               'DESIGN_CODE_FLAG', 'ROUTE', 'HORIZONTAL_OVERFLOW',
               'PHONE_RAIL', 'PHONE_NAV', 'PHONE_NAV_HEIGHT',
@@ -636,7 +1350,7 @@ jobs:
               'PAGE_PADDING_RIGHT', 'TABLET_RAIL_LABEL', 'TABLET_RAIL_TOOLTIP',
           }
           ds02_violations = [
-              violation for violation in manifest['violations']
+              violation for violation in violation_records
               if violation['code'] in ds02_codes
           ]
           if ds02_violations:
@@ -661,8 +1375,65 @@ jobs:
               'STUDENT_SCHOOL_FOCUS_STYLE',
               'STUDENT_SCHOOL_FOCUS_NONTEXT', 'CLS',
           }
+          deferred_codes = {
+              'HEADER_LOGO_WIDTH', 'HEADER_LOGO_HEIGHT',
+              'H1_SIZE', 'H1_LINE_HEIGHT', 'H1_WEIGHT',
+              'H2_SIZE', 'H2_LINE_HEIGHT',
+              'PRIMARY_HEIGHT', 'PRIMARY_RADIUS', 'PRIMARY_FONT',
+              'CARD_RADIUS', 'CARD_PADDING', 'RANDOM_RADIUS',
+              'TOUCH_TARGETS', 'HELP_BUTTON', 'FOCUS_RING',
+              'CONTENT_MAX_WIDTH',
+          }
+          all_known_codes = ds02_codes | ds03_codes | deferred_codes
+          valid_roles = {role['id'] for role in expected_roles}
+          valid_widths = {
+              control['width'] for control in [*expected_controls, *expected_route_controls]
+          }
+          valid_routes = {
+              route['route'] for route in [*expected_roles, *expected_student_routes]
+          }
+          for violation in violation_records:
+              if type(violation) is not dict:
+                  raise RuntimeError('Violation must be an object')
+              required_keys = {
+                  'role', 'width', 'severity', 'code',
+                  'selector', 'expected', 'actual',
+              }
+              if set(violation) not in (required_keys, required_keys | {'route'}):
+                  raise RuntimeError('Wrong violation schema')
+              if (
+                  type(violation['role']) is not str
+                  or violation['role'] not in valid_roles
+                  or not is_int(violation['width'])
+                  or violation['width'] not in valid_widths
+                  or type(violation['severity']) is not str
+                  or violation['severity'] not in {'P0', 'P1'}
+                  or type(violation['code']) is not str
+                  or violation['code'] not in all_known_codes
+                  or type(violation['selector']) is not str
+                  or not violation['selector']
+              ):
+                  raise RuntimeError(
+                      'Invalid or unknown violation: ' +
+                      json.dumps(violation, ensure_ascii=False)
+                  )
+              if 'route' in violation and (
+                  type(violation['route']) is not str
+                  or violation['route'] not in valid_routes
+              ):
+                  raise RuntimeError('Invalid violation route')
+          expected_severity_counts = dict(
+              collections.Counter(item['severity'] for item in violation_records)
+          )
+          if not strict_equal(manifest['severityCounts'], expected_severity_counts):
+              raise RuntimeError('Violation severity counts are inconsistent')
+          if (
+              type(manifest['compliant']) is not bool
+              or manifest['compliant'] is not (len(violation_records) == 0)
+          ):
+              raise RuntimeError('Manifest compliant flag is inconsistent')
           ds03_violations = [
-              violation for violation in manifest['violations']
+              violation for violation in violation_records
               if violation['code'] in ds03_codes
           ]
           if ds03_violations:
@@ -704,18 +1475,25 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          ssh_dir="$RUNNER_TEMP/school-authorized-visual-ssh-$GITHUB_RUN_ID"
+          ssh_key="$ssh_dir/id_ed25519"
+          known_hosts="$ssh_dir/known_hosts"
+          test -s "$ssh_key"
+          test -s "$known_hosts"
           deploy_port="${DEPLOY_PORT:-2222}"
           timeout --signal=TERM --kill-after=15s 900s \
             ssh -T \
               -p "$deploy_port" \
-              -i ~/.ssh/id_ed25519 \
+              -i "$ssh_key" \
               -o IdentitiesOnly=yes \
               -o PreferredAuthentications=publickey \
               -o PasswordAuthentication=no \
               -o KbdInteractiveAuthentication=no \
               -o BatchMode=yes \
               -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o UserKnownHostsFile="$known_hosts" \
+              -o GlobalKnownHostsFile=/dev/null \
               -o ConnectTimeout=140 \
               -o ServerAliveInterval=10 \
               -o ServerAliveCountMax=12 \
@@ -729,6 +1507,25 @@ jobs:
               "$DEPLOY_USER@$DEPLOY_HOST" \
               "env ACTION='cleanup' RUN_ID='$GITHUB_RUN_ID' CANDIDATE_SHA='$CANDIDATE_SHA' CANDIDATE_IMAGE='$CANDIDATE_IMAGE' CANDIDATE_IMAGE_ID='$CANDIDATE_IMAGE_ID' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' STAGING_ORIGIN='$STAGING_ORIGIN' AUDIT_PUBLIC_ORIGIN='$AUDIT_ORIGIN' AUDIT_BIND_ORIGIN='$AUDIT_BIND_ORIGIN' bash -s" \
               < .github/scripts/school-authorized-visual-fixture.sh
+
+      - name: Remove run-scoped SSH material
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          ssh_dir="$RUNNER_TEMP/school-authorized-visual-ssh-$GITHUB_RUN_ID"
+          case "$ssh_dir" in
+            "$RUNNER_TEMP"/school-authorized-visual-ssh-*) ;;
+            *) exit 1 ;;
+          esac
+          if [ -d "$ssh_dir" ]; then
+            rm -f -- \
+              "$ssh_dir/id_ed25519" \
+              "$ssh_dir/known_hosts" \
+              "$ssh_dir/known_hosts.scan"
+            rmdir -- "$ssh_dir"
+          fi
 
       - name: Upload authorized visual evidence
         if: always()
