@@ -12,11 +12,42 @@ umask 077
 : "${AUDIT_PUBLIC_ORIGIN:?AUDIT_PUBLIC_ORIGIN is required}"
 : "${AUDIT_BIND_ORIGIN:?AUDIT_BIND_ORIGIN is required}"
 
+AUDIT_SHA="${AUDIT_SHA:-$CANDIDATE_SHA}"
+AUDIT_IMAGE="${AUDIT_IMAGE:-$CANDIDATE_IMAGE}"
+AUDIT_IMAGE_ID="${AUDIT_IMAGE_ID:-$CANDIDATE_IMAGE_ID}"
+AUDIT_EXPECTED_DESIGN_FLAG="${AUDIT_EXPECTED_DESIGN_FLAG:-true}"
+AUDIT_SEED_DATE="${AUDIT_SEED_DATE:-}"
+AUDIT_SOURCE="${AUDIT_SOURCE:-candidate-migrations-only}"
+
 case "$RUN_ID" in
   ''|*[!0-9]*) printf 'Invalid RUN_ID\n' >&2; exit 1 ;;
 esac
+if [[ ! "$CANDIDATE_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+  printf 'Invalid CANDIDATE_SHA\n' >&2
+  exit 1
+fi
 if [[ ! "$CANDIDATE_IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]]; then
   printf 'Invalid CANDIDATE_IMAGE_ID\n' >&2
+  exit 1
+fi
+if [[ ! "$AUDIT_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+  printf 'Invalid AUDIT_SHA\n' >&2
+  exit 1
+fi
+if [[ ! "$AUDIT_IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+  printf 'Invalid AUDIT_IMAGE_ID\n' >&2
+  exit 1
+fi
+case "$AUDIT_EXPECTED_DESIGN_FLAG" in
+  true|false) ;;
+  *) printf 'Invalid AUDIT_EXPECTED_DESIGN_FLAG\n' >&2; exit 1 ;;
+esac
+case "$AUDIT_SOURCE" in
+  base-migrations-only|candidate-migrations-only) ;;
+  *) printf 'Invalid AUDIT_SOURCE\n' >&2; exit 1 ;;
+esac
+if [ -n "$AUDIT_SEED_DATE" ] && [[ ! "$AUDIT_SEED_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  printf 'Invalid AUDIT_SEED_DATE\n' >&2
   exit 1
 fi
 case "$AUDIT_PUBLIC_ORIGIN" in
@@ -36,11 +67,24 @@ audit_network="school-1-11-authorized-visual-$RUN_ID-net"
 work="/tmp/school-authorized-visual-$RUN_ID"
 production_state_file="$work/production-started-at"
 staging_state_file="$work/staging-started-at"
+production_fingerprint_file="$work/production-fingerprint"
+staging_fingerprint_file="$work/staging-fingerprint"
+work_sentinel="$work/.school-authorized-visual-owner"
 
 case "$audit:$audit_data:$audit_network:$work" in
   school-1-11-authorized-visual-*:school-1-11_authorized_visual_*_data:school-1-11-authorized-visual-*-net:/tmp/school-authorized-visual-*) ;;
   *) printf 'Invalid audit resource names\n' >&2; exit 1 ;;
 esac
+
+service_fingerprint() {
+  local service="$1"
+  docker inspect "$service" --format '{{.Id}}|{{.Image}}|{{.State.StartedAt}}|{{json .HostConfig.PortBindings}}|{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}'
+}
+
+service_data_ref() {
+  local service="$1"
+  docker inspect "$service" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}'
+}
 
 assert_services() {
   test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
@@ -58,18 +102,32 @@ assert_services() {
 
 remove_resources() {
   if docker container inspect "$audit" >/dev/null 2>&1; then
+    test "$(docker inspect "$audit" --format '{{index .Config.Labels "school.system"}}')" = school-1-11
+    test "$(docker inspect "$audit" --format '{{index .Config.Labels "school.environment"}}')" = ephemeral-authorized-visual-audit
+    test "$(docker inspect "$audit" --format '{{index .Config.Labels "school.purpose"}}')" = design-v1-authorized-audit
+    test "$(docker inspect "$audit" --format '{{index .Config.Labels "school.audit-sha"}}')" = "$AUDIT_SHA"
     test "$(docker inspect "$audit" --format '{{index .Config.Labels "school.audit-run-id"}}')" = "$RUN_ID"
     docker rm -f "$audit" >/dev/null
   fi
   if docker network inspect "$audit_network" >/dev/null 2>&1; then
+    test "$(docker network inspect "$audit_network" --format '{{index .Labels "school.system"}}')" = school-1-11
+    test "$(docker network inspect "$audit_network" --format '{{index .Labels "school.environment"}}')" = ephemeral-authorized-visual-audit
+    test "$(docker network inspect "$audit_network" --format '{{index .Labels "school.purpose"}}')" = design-v1-authorized-audit
+    test "$(docker network inspect "$audit_network" --format '{{index .Labels "school.audit-sha"}}')" = "$AUDIT_SHA"
     test "$(docker network inspect "$audit_network" --format '{{index .Labels "school.audit-run-id"}}')" = "$RUN_ID"
     docker network rm "$audit_network" >/dev/null
   fi
   if docker volume inspect "$audit_data" >/dev/null 2>&1; then
+    test "$(docker volume inspect "$audit_data" --format '{{index .Labels "school.system"}}')" = school-1-11
+    test "$(docker volume inspect "$audit_data" --format '{{index .Labels "school.environment"}}')" = ephemeral-authorized-visual-audit
+    test "$(docker volume inspect "$audit_data" --format '{{index .Labels "school.purpose"}}')" = design-v1-authorized-audit
+    test "$(docker volume inspect "$audit_data" --format '{{index .Labels "school.audit-sha"}}')" = "$AUDIT_SHA"
     test "$(docker volume inspect "$audit_data" --format '{{index .Labels "school.audit-run-id"}}')" = "$RUN_ID"
     docker volume rm "$audit_data" >/dev/null
   fi
   if [ -d "$work" ]; then
+    test -f "$work_sentinel"
+    test "$(cat "$work_sentinel")" = "$RUN_ID|$AUDIT_SHA"
     rm -rf -- "$work"
   fi
 }
@@ -85,8 +143,21 @@ case "$ACTION" in
     exec 9>/var/lock/school-1-11-authorized-visual.lock
     flock -n 9
     assert_services
+    test "$(docker image inspect "$AUDIT_IMAGE" --format '{{.Id}}')" = "$AUDIT_IMAGE_ID"
+    design_flag_values="$(docker image inspect "$AUDIT_IMAGE_ID" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^NEXT_PUBLIC_SCHOOL_DESIGN_V1=//p' | sed '/^$/d')"
+    test "$(printf '%s\n' "$design_flag_values" | wc -l)" -eq 1
+    test "$design_flag_values" = "$AUDIT_EXPECTED_DESIGN_FLAG"
     production_started_before="$(docker inspect "$production" --format '{{.State.StartedAt}}')"
     staging_started_before="$(docker inspect "$staging" --format '{{.State.StartedAt}}')"
+    production_fingerprint_before="$(service_fingerprint "$production")"
+    staging_fingerprint_before="$(service_fingerprint "$staging")"
+    production_data_ref="$(service_data_ref "$production")"
+    staging_data_ref="$(service_data_ref "$staging")"
+    test -n "$production_data_ref"
+    test -n "$staging_data_ref"
+    test "$production_data_ref" != "$staging_data_ref"
+    test "$audit_data" != "$production_data_ref"
+    test "$audit_data" != "$staging_data_ref"
 
     test -z "$(docker ps -aq --filter "name=^/$audit$")"
     if docker volume inspect "$audit_data" >/dev/null 2>&1; then
@@ -103,8 +174,11 @@ case "$ACTION" in
     fi
 
     install -m 0700 -d "$work"
+    printf '%s|%s\n' "$RUN_ID" "$AUDIT_SHA" > "$work_sentinel"
     printf '%s\n' "$production_started_before" > "$production_state_file"
     printf '%s\n' "$staging_started_before" > "$staging_state_file"
+    printf '%s\n' "$production_fingerprint_before" > "$production_fingerprint_file"
+    printf '%s\n' "$staging_fingerprint_before" > "$staging_fingerprint_file"
 
     prepare_finished=0
     prepare_cleanup() {
@@ -123,7 +197,8 @@ case "$ACTION" in
       --label school.system=school-1-11 \
       --label school.environment=ephemeral-authorized-visual-audit \
       --label school.purpose=design-v1-authorized-audit \
-      --label school.candidate-sha="$CANDIDATE_SHA" \
+      --label school.candidate-sha="$AUDIT_SHA" \
+      --label school.audit-sha="$AUDIT_SHA" \
       --label school.audit-run-id="$RUN_ID" \
       "$audit_data" >/dev/null
 
@@ -133,15 +208,19 @@ case "$ACTION" in
       --opt com.docker.network.bridge.enable_icc=false \
       --label school.system=school-1-11 \
       --label school.environment=ephemeral-authorized-visual-audit \
-      --label school.candidate-sha="$CANDIDATE_SHA" \
+      --label school.purpose=design-v1-authorized-audit \
+      --label school.candidate-sha="$AUDIT_SHA" \
+      --label school.audit-sha="$AUDIT_SHA" \
       --label school.audit-run-id="$RUN_ID" \
       "$audit_network" >/dev/null
 
     docker run --rm -i --network none --user 0:0 \
       -e AUDIT_PASSWORD="$AUDIT_PASSWORD" \
       -e AUDIT_RUN_ID="$RUN_ID" \
+      -e AUDIT_SEED_DATE="$AUDIT_SEED_DATE" \
+      -e AUDIT_SOURCE="$AUDIT_SOURCE" \
       -v "$audit_data:/data" \
-      --entrypoint node "$CANDIDATE_IMAGE_ID" --input-type=module - <<'PREPARE_DATA'
+      --entrypoint node "$AUDIT_IMAGE_ID" --input-type=module - <<'PREPARE_DATA'
 import { randomBytes, scrypt as scryptCallback } from 'node:crypto';
 import { chmodSync, chownSync, readdirSync, readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
@@ -149,8 +228,14 @@ import { DatabaseSync } from 'node:sqlite';
 
 const run = process.env.AUDIT_RUN_ID;
 const password = process.env.AUDIT_PASSWORD;
+const seedDate = process.env.AUDIT_SEED_DATE || '';
+const source = process.env.AUDIT_SOURCE;
 if (!/^[0-9]+$/.test(run || '')) throw new Error('Invalid audit run id');
 if (!/^[A-Za-z0-9_-]{32,}$/.test(password || '')) throw new Error('Invalid audit password');
+if (!new Set(['base-migrations-only', 'candidate-migrations-only']).has(source)) {
+  throw new Error('Invalid audit source');
+}
+if (seedDate && !/^\d{4}-\d{2}-\d{2}$/.test(seedDate)) throw new Error('Invalid audit seed date');
 
 const target = '/data/school-1-11.sqlite';
 const db = new DatabaseSync(target);
@@ -297,7 +382,10 @@ for (let weekday = 1; weekday <= 5; weekday += 1) {
   );
 }
 
-const today = new Date();
+const today = seedDate ? new Date(seedDate + 'T12:00:00.000Z') : new Date();
+if (Number.isNaN(today.valueOf()) || (seedDate && today.toISOString().slice(0, 10) !== seedDate)) {
+  throw new Error('Invalid normalized audit seed date');
+}
 const addDays = (amount) => {
   const value = new Date(today);
   value.setUTCDate(value.getUTCDate() + amount);
@@ -521,7 +609,7 @@ chownSync('/data', 1001, 1001);
 chmodSync('/data', 0o750);
 chownSync(target, 1001, 1001);
 chmodSync(target, 0o640);
-console.log('SCHOOL_AUTHORIZED_VISUAL_SOURCE=candidate-migrations-only');
+console.log(`SCHOOL_AUTHORIZED_VISUAL_SOURCE=${source}`);
 console.log('SCHOOL_AUTHORIZED_VISUAL_DATA=SYNTHETIC');
 console.log('SCHOOL_AUTHORIZED_VISUAL_ROLES=SEEDED');
 PREPARE_DATA
@@ -538,7 +626,9 @@ PREPARE_DATA
       --pids-limit 256 \
       --label school.system=school-1-11 \
       --label school.environment=ephemeral-authorized-visual-audit \
-      --label school.candidate-sha="$CANDIDATE_SHA" \
+      --label school.purpose=design-v1-authorized-audit \
+      --label school.candidate-sha="$AUDIT_SHA" \
+      --label school.audit-sha="$AUDIT_SHA" \
       --label school.audit-run-id="$RUN_ID" \
       -e NODE_ENV=production \
       -e PORT=3000 \
@@ -546,9 +636,11 @@ PREPARE_DATA
       -e PUBLIC_APP_ORIGIN="$AUDIT_PUBLIC_ORIGIN" \
       -e CENTRAL_ACCESS_SECRET="$audit_secret" \
       -v "$audit_data:/data" \
-      "$CANDIDATE_IMAGE_ID" >/dev/null
+      "$AUDIT_IMAGE_ID" >/dev/null
 
-    test "$(docker inspect "$audit" --format '{{.Image}}')" = "$CANDIDATE_IMAGE_ID"
+    test "$(docker inspect "$audit" --format '{{.Image}}')" = "$AUDIT_IMAGE_ID"
+    test "$(docker inspect "$audit" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$audit_data"
+    test "$(docker inspect "$audit" --format '{{len .Mounts}}')" = 1
 
     audit_healthy=0
     for attempt in $(seq 1 90); do
@@ -600,9 +692,15 @@ VERIFY_BINDING
 
     test "$(docker inspect "$production" --format '{{.State.StartedAt}}')" = "$production_started_before"
     test "$(docker inspect "$staging" --format '{{.State.StartedAt}}')" = "$staging_started_before"
+    test "$(service_fingerprint "$production")" = "$production_fingerprint_before"
+    test "$(service_fingerprint "$staging")" = "$staging_fingerprint_before"
     assert_services
     prepare_finished=1
     printf 'SCHOOL_AUTHORIZED_VISUAL_CANDIDATE_IMAGE_ID=%s\n' "$CANDIDATE_IMAGE_ID"
+    printf 'SCHOOL_AUTHORIZED_VISUAL_AUDIT_SHA=%s\n' "$AUDIT_SHA"
+    printf 'SCHOOL_AUTHORIZED_VISUAL_AUDIT_IMAGE_ID=%s\n' "$AUDIT_IMAGE_ID"
+    printf 'SCHOOL_AUTHORIZED_VISUAL_DESIGN_FLAG=%s\n' "$AUDIT_EXPECTED_DESIGN_FLAG"
+    printf 'SCHOOL_AUTHORIZED_VISUAL_SEED_DATE=%s\n' "${AUDIT_SEED_DATE:-runtime-current-date}"
     printf 'SCHOOL_AUTHORIZED_VISUAL_IMAGE_PIN=IMMUTABLE\n'
     printf 'SCHOOL_AUTHORIZED_VISUAL_FIXTURE=READY\n'
     printf 'SCHOOL_AUTHORIZED_VISUAL_PRODUCTION_RESTARTED=no\n'
@@ -613,11 +711,19 @@ VERIFY_BINDING
     flock -n 9
     production_started_before=""
     staging_started_before=""
+    production_fingerprint_before=""
+    staging_fingerprint_before=""
     if [ -f "$production_state_file" ]; then
       production_started_before="$(head -n1 "$production_state_file")"
     fi
     if [ -f "$staging_state_file" ]; then
       staging_started_before="$(head -n1 "$staging_state_file")"
+    fi
+    if [ -f "$production_fingerprint_file" ]; then
+      production_fingerprint_before="$(head -n1 "$production_fingerprint_file")"
+    fi
+    if [ -f "$staging_fingerprint_file" ]; then
+      staging_fingerprint_before="$(head -n1 "$staging_fingerprint_file")"
     fi
     remove_resources
     test -z "$(docker ps -aq --filter "name=^/$audit$")"
@@ -630,8 +736,15 @@ VERIFY_BINDING
     if [ -n "$staging_started_before" ]; then
       test "$(docker inspect "$staging" --format '{{.State.StartedAt}}')" = "$staging_started_before"
     fi
+    if [ -n "$production_fingerprint_before" ]; then
+      test "$(service_fingerprint "$production")" = "$production_fingerprint_before"
+    fi
+    if [ -n "$staging_fingerprint_before" ]; then
+      test "$(service_fingerprint "$staging")" = "$staging_fingerprint_before"
+    fi
     assert_services
     printf 'SCHOOL_AUTHORIZED_VISUAL_CLEANUP=OK\n'
+    printf 'SCHOOL_AUTHORIZED_VISUAL_SERVICE_FINGERPRINTS=UNCHANGED\n'
     printf 'SCHOOL_AUTHORIZED_VISUAL_STAGING_CHANGED=no\n'
     printf 'SCHOOL_AUTHORIZED_VISUAL_PRODUCTION_RESTARTED=no\n'
     ;;
