@@ -342,8 +342,8 @@ jobs:
               raise RuntimeError('Capture timestamp invariant failed')
 
           expected_controls = [
-              {'width': 360, 'height': 1024},
-              {'width': 390, 'height': 1024},
+              {'width': 360, 'height': 800},
+              {'width': 390, 'height': 844},
               {'width': 767, 'height': 1024},
               {'width': 768, 'height': 1024},
               {'width': 800, 'height': 1024},
@@ -351,9 +351,9 @@ jobs:
               {'width': 1199, 'height': 960},
               {'width': 1200, 'height': 960},
               {'width': 1280, 'height': 960},
-              {'width': 1440, 'height': 960},
-              {'width': 1920, 'height': 960},
-              {'width': 2560, 'height': 960},
+              {'width': 1440, 'height': 1000},
+              {'width': 1920, 'height': 1080},
+              {'width': 2560, 'height': 1200},
           ]
           expected_roles = [
               {'id': 'director', 'route': '/management'},
