@@ -1,0 +1,215 @@
+name: School diary design v1 visual audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/school-diary-design-v1-visual-audit.yml
+      - .github/scripts/school-design-visual-audit.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: school-diary-design-v1-visual-audit
+  cancel-in-progress: false
+
+env:
+  EXPECTED_CANDIDATE_SHA: e0d2c55db2bf4214aa8feff0c49b5c88c63d74e4
+  EXPECTED_IMAGE: school-1-11-design-v1:e0d2c55db2bf
+  STAGING_ORIGIN: http://127.0.0.1:3211
+  TUNNEL_ORIGIN: http://127.0.0.1:33211
+  PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.55.0-noble
+  PLAYWRIGHT_VERSION: 1.55.0
+
+jobs:
+  visual-audit:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 30
+    environment: production-ru
+    steps:
+      - name: Check out visual audit controls
+        uses: actions/checkout@v4
+
+      - name: Configure confirmed School SSH host
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          test -s ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+          deploy_port="${DEPLOY_PORT:-2222}"
+          scanned_hosts="$RUNNER_TEMP/school-known-hosts"
+          : > "$scanned_hosts"
+          chmod 0600 "$scanned_hosts"
+          for attempt in 1 2; do
+            timeout --signal=TERM --kill-after=5s 150s \
+              ssh -p "$deploy_port" \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$scanned_hosts" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=none \
+              -o PubkeyAuthentication=no \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o ConnectTimeout=140 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
+            test -s "$scanned_hosts" && break
+            sleep 5
+          done
+          test -s "$scanned_hosts"
+          actual_fingerprint="$(ssh-keygen -lf "$scanned_hosts" -E sha256 | awk '{print $2; exit}')"
+          test "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scanned_hosts" ~/.ssh/known_hosts
+          printf 'SCHOOL_VISUAL_SSH=VERIFIED\n'
+
+      - name: Capture approved control widths through SSH tunnel
+        id: capture
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          deploy_port="${DEPLOY_PORT:-2222}"
+          ssh_args=(
+            -p "$deploy_port"
+            -i ~/.ssh/id_ed25519
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile=~/.ssh/known_hosts
+            -o ConnectTimeout=140
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=12
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+
+          timeout --signal=TERM --kill-after=10s 240s \
+            ssh -T "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "docker inspect school-1-11-staging --format '{{.Config.Image}}' | grep -Fx '$EXPECTED_IMAGE' &&
+               docker inspect school-1-11-staging --format '{{index .Config.Labels \"school.candidate-sha\"}}' | grep -Fx '$EXPECTED_CANDIDATE_SHA' &&
+               docker inspect school-1-11-staging --format '{{.State.Health.Status}}' | grep -Fx healthy"
+
+          rm -rf -- school-design-visual-output
+          install -m 0755 -d school-design-visual-output
+          tunnel_pid=""
+          cleanup() {
+            rc=$?
+            trap - EXIT
+            set +e
+            if [ -n "$tunnel_pid" ]; then
+              kill "$tunnel_pid" >/dev/null 2>&1
+              wait "$tunnel_pid" >/dev/null 2>&1
+            fi
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          ssh -N "${ssh_args[@]}" \
+            -L 127.0.0.1:33211:127.0.0.1:3211 \
+            "$DEPLOY_USER@$DEPLOY_HOST" &
+          tunnel_pid=$!
+
+          tunnel_ready=0
+          for attempt in $(seq 1 60); do
+            if curl -fsS --max-time 3 "$TUNNEL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null; then
+              tunnel_ready=1
+              break
+            fi
+            kill -0 "$tunnel_pid" >/dev/null 2>&1 || break
+            sleep 1
+          done
+          test "$tunnel_ready" -eq 1
+
+          docker pull "$PLAYWRIGHT_IMAGE"
+          docker run --rm --network host \
+            -e AUDIT_ORIGIN="$TUNNEL_ORIGIN" \
+            -e PLAYWRIGHT_VERSION="$PLAYWRIGHT_VERSION" \
+            -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+            -v "$PWD/.github/scripts/school-design-visual-audit.mjs:/control/audit.mjs:ro" \
+            -v "$PWD/school-design-visual-output:/output" \
+            "$PLAYWRIGHT_IMAGE" bash -lc '
+              set -Eeuo pipefail
+              install -m 0755 -d /tmp/school-visual
+              cd /tmp/school-visual
+              npm init -y >/dev/null
+              npm install --silent --no-audit --no-fund "playwright@$PLAYWRIGHT_VERSION"
+              cp /control/audit.mjs ./audit.mjs
+              node audit.mjs
+            '
+
+          test -s school-design-visual-output/manifest.json
+          test "$(find school-design-visual-output -maxdepth 1 -name 'login-*.png' | wc -l)" -eq 7
+          printf 'result=OK\n' >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_VISUAL_AUDIT=OK widths=360,390,768,1280,1440,1920,2560\n'
+
+      - name: Upload visual audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: school-design-v1-visual-audit-${{ github.run_id }}
+          path: school-design-visual-output
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish visual audit result
+        if: always()
+        env:
+          CAPTURE_RESULT: ${{ steps.capture.outputs.result }}
+        shell: bash
+        run: |
+          {
+            echo '## School diary design v1 visual audit'
+            echo
+            printf -- '- Candidate: %s\n' "$EXPECTED_CANDIDATE_SHA"
+            printf -- '- Widths: 360, 390, 768, 1280, 1440, 1920, 2560 px\n'
+            printf -- '- Page: login (no credentials, no personal data)\n'
+            printf -- '- Staging exposure: SSH tunnel only\n'
+            printf -- '- Production changed: no\n'
+            printf -- '- Result: %s\n' "${CAPTURE_RESULT:-failed}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report visual audit as commit status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            const state =
+              process.env.JOB_STATUS === "success" ? "success" : "failure";
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.sha,
+              state,
+              context: "school-diary/design-v1-visual-audit",
+              description: "Design v1 visual audit " + process.env.JOB_STATUS,
+              target_url:
+                process.env.GITHUB_SERVER_URL +
+                "/" +
+                process.env.GITHUB_REPOSITORY +
+                "/actions/runs/" +
+                process.env.GITHUB_RUN_ID,
+            });
