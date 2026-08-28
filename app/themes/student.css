@@ -192,6 +192,8 @@ html[data-design-code="v1"][data-theme="student"] .role-student .calendar-toolba
 html[data-design-code="v1"][data-theme="student"] .role-student .calendar-week > article,
 html[data-design-code="v1"][data-theme="student"] .role-student .calendar-lesson,
 html[data-design-code="v1"][data-theme="student"] .role-student .menu-grid > article,
+html[data-design-code="v1"][data-theme="student"] .role-student .event-grid > article,
+html[data-design-code="v1"][data-theme="student"] .role-student .activity-grid > article,
 html[data-design-code="v1"][data-theme="student"] .role-student .privacy-card {
   border-color: var(--color-border);
   background: var(--color-surface);
