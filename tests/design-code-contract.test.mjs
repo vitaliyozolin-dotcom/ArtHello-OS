@@ -201,6 +201,15 @@ test("DS-03 student theme changes tokens and typography only", () => {
       new RegExp(`--${mapping[0]}:\\s*var\\(--${mapping[1]}\\);`),
     );
   }
+  assert.match(tokens, /--brand-400:\s*#f07142;/i);
+  assert.match(
+    studentTheme,
+    /--student-action:\s*var\(--color-accent-hover\);/,
+  );
+  assert.match(
+    studentTheme,
+    /--student-action-strong:\s*var\(--color-accent-hover\);/,
+  );
   for (const token of [
     "color-border",
     "color-border-strong",
@@ -283,6 +292,18 @@ test("DS-03 student theme changes tokens and typography only", () => {
   assert.match(
     sharedRouteSurfaceBlock,
     /\.calendar-week > article > header \{[\s\S]*?background: var\(--color-surface-muted\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.eyebrow,[\s\S]*?\.menu-grid dt \{[\s\S]*?color: var\(--brand-400\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /\.event-date \{[\s\S]*?background: var\(--color-accent-hover\);[\s\S]*?color: var\(--color-text\);/,
+  );
+  assert.match(
+    sharedRouteSurfaceBlock,
+    /button:focus-visible,[\s\S]*?textarea:focus-visible \{[\s\S]*?outline-color: var\(--brand-400\);/,
   );
   assert.match(
     sharedRouteSurfaceBlock,
