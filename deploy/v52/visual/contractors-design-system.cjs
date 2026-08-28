@@ -133,6 +133,7 @@ async function captureContractors(browser, base, storageState, label, viewport) 
     const header = document.querySelector(".ahContractorPage .ahPageHeader");
     const title = header?.querySelector("h1");
     const eyebrow = header?.querySelector("small");
+    const description = header?.querySelector(".ahPageHeaderCopy > p");
     const action = header?.querySelector(".ahButton");
     const source = document.querySelector(".ahContractorSource");
     const sourceLabel = source?.querySelector("strong");
@@ -174,6 +175,7 @@ async function captureContractors(browser, base, storageState, label, viewport) 
       pageGap: pageStyle?.rowGap ?? null,
       titleFontSize: style(title)?.fontSize ?? null,
       eyebrowFontSize: style(eyebrow)?.fontSize ?? null,
+      descriptionFontSize: style(description)?.fontSize ?? null,
       actionMinHeight: actionStyle?.minHeight ?? null,
       actionRadius: actionStyle?.borderRadius ?? null,
       actionFontSize: actionStyle?.fontSize ?? null,
@@ -200,6 +202,7 @@ async function captureContractors(browser, base, storageState, label, viewport) 
       emptyTextBorder: emptyText ? getComputedStyle(emptyText).borderWidth : null,
       mobileListDisplay: mobileList ? getComputedStyle(mobileList).display : null,
       tableDisplay: table ? getComputedStyle(table).display : null,
+      legacyContractorScope: Boolean(pageElement?.closest(".contractor-workspace")),
       designSystem: Boolean(document.querySelector(".ahContractorPage")),
     };
   });
@@ -217,6 +220,7 @@ async function captureAccessReference(browser, base, storageState, viewport) {
     const workspace = title?.closest("section");
     const header = title?.closest("header");
     const eyebrow = header?.querySelector("p");
+    const description = header?.querySelector("span");
     const action = header?.querySelector("button");
     const boundary = [...(workspace?.children ?? [])].find((element) => element.querySelector(":scope > span")?.textContent?.trim() === "Рабочий контур доступа");
     const boundaryLabel = boundary?.querySelector(":scope > span");
@@ -240,6 +244,7 @@ async function captureAccessReference(browser, base, storageState, viewport) {
       pageGap: workspaceStyle?.rowGap ?? null,
       titleFontSize: style(title)?.fontSize ?? null,
       eyebrowFontSize: style(eyebrow)?.fontSize ?? null,
+      descriptionFontSize: style(description)?.fontSize ?? null,
       actionMinHeight: actionStyle?.minHeight ?? null,
       actionRadius: actionStyle?.borderRadius ?? null,
       actionFontSize: actionStyle?.fontSize ?? null,
@@ -268,15 +273,18 @@ async function captureAccessReference(browser, base, storageState, viewport) {
 
 function assertSameMobileCanon(contractors, access) {
   const keys = [
-    "pageDisplay", "pagePaddingLeft", "pageGap", "titleFontSize", "eyebrowFontSize",
+    "pageDisplay", "pagePaddingLeft", "pageGap", "titleFontSize", "eyebrowFontSize", "descriptionFontSize",
     "actionMinHeight", "actionRadius", "actionFontSize",
     "sourceRadius", "sourcePaddingTop", "sourcePaddingLeft", "sourceLabelFontSize", "sourceBodyFontSize",
     "kpiGap", "kpiMinHeight", "kpiRadius", "kpiPaddingTop", "kpiPaddingLeft",
     "kpiLabelFontSize", "kpiValueFontSize", "kpiNoteFontSize",
     "searchHeight", "searchRadius", "searchPaddingLeft", "searchFontSize",
   ];
-  for (const key of keys) {
-    if (contractors[key] !== access[key]) throw new Error(`Mobile Access canon mismatch for ${key}: contractors=${contractors[key]} access=${access[key]}`);
+  const mismatches = keys
+    .filter((key) => contractors[key] !== access[key])
+    .map((key) => `${key}: contractors=${contractors[key]} access=${access[key]}`);
+  if (mismatches.length > 0) {
+    throw new Error(`Mobile Access canon mismatches:\n${mismatches.join("\n")}`);
   }
 }
 
@@ -331,6 +339,7 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
 
       if (pilot.horizontalOverflow) throw new Error(`Pilot horizontal overflow at ${viewport.join("x")}`);
       if (!pilot.designSystem || pilot.kpiCount !== 4) throw new Error(`Pilot Design System structure missing at ${viewport.join("x")}`);
+      if (pilot.legacyContractorScope) throw new Error(`Legacy contractor-workspace scope is still active at ${viewport.join("x")}`);
       const expectedColumns = viewport[0] <= 1024 ? 2 : 4;
       if (pilot.kpiColumns !== expectedColumns) throw new Error(`Pilot KPI columns ${pilot.kpiColumns}, expected ${expectedColumns} at ${viewport.join("x")}`);
       if (pilot.searchIconWidth !== 0 || pilot.searchIconHeight !== 0) throw new Error(`Pilot contractor search icon must be absent at ${viewport.join("x")}`);
@@ -341,8 +350,8 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
     for (const viewport of [[390, 844], [1440, 900]]) {
       const access = await captureAccessReference(browser, pilotUrl, pilotState, viewport);
       manifest.push(access);
-      if (viewport[0] <= 720) assertSameMobileCanon(pilotContractors.get(viewport.join("x")), access);
       persist();
+      if (viewport[0] <= 720) assertSameMobileCanon(pilotContractors.get(viewport.join("x")), access);
     }
 
     for (const viewport of [[390, 844], [1440, 900]]) {

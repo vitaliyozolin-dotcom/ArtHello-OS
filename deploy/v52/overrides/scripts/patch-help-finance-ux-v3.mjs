@@ -64,8 +64,8 @@ function replaceRegex(source, regex, replacement, label) {
   source = replaceOnce(
     source,
     '<ContractorWorkspace notify={setNotice} onOpenFinance={() => openModule("finance")} />',
-    '<div className="contractor-workspace"><ContractorWorkspace notify={setNotice} onOpenFinance={() => openModule("finance")} /></div>',
-    "contractor style scope",
+    '<div className="ahContractorScope"><ContractorWorkspace notify={setNotice} onOpenFinance={() => openModule("finance")} /></div>',
+    "contractor Design System scope",
   );
   write(path, source);
 }
