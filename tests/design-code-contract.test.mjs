@@ -213,6 +213,26 @@ test("DS-03 student theme changes tokens and typography only", () => {
   assert.match(studentTheme, /--student-font-family:\s*var\(--font-sans\);/);
   assert.match(
     studentTheme,
+    /:root \{[\s\S]*?--student-main-background:\s*radial-gradient\([\s\S]*?--student-hero-background:\s*linear-gradient\([\s\S]*?--student-dashboard-hero-image:\s*linear-gradient\([\s\S]*?--student-hero-overlay-mobile:\s*linear-gradient\(/,
+    "flag-off student backgrounds must retain their legacy gradients",
+  );
+  for (const mapping of [
+    ["student-main-background", "color-page"],
+    ["student-hero-background", "color-surface"],
+    ["student-hero-overlay", "student-hero-overlay-06"],
+    ["student-hero-overlay-mobile", "student-hero-overlay-30"],
+  ]) {
+    assert.match(
+      studentTheme,
+      new RegExp(`--${mapping[0]}:\\s*var\\(--${mapping[1]}\\);`),
+    );
+  }
+  assert.match(
+    studentTheme,
+    /--student-dashboard-hero-image:\s*url\("\/student-dashboard-hero-v1\.webp"\);/,
+  );
+  assert.match(
+    studentTheme,
     /--student-app-shadow:\s*0 30px 100px color-mix\(in srgb, var\(--neutral-900\) 36%, transparent\);/,
     "DS-03 may recolor but must not reshape the accepted app shadow",
   );
@@ -224,6 +244,11 @@ test("DS-03 student theme changes tokens and typography only", () => {
   assert.match(
     schoolApp,
     /root\.dataset\.theme = snapshot\.viewer\.role === "student" \? "student" : "light"/,
+  );
+  assert.match(
+    schoolApp,
+    /useLayoutEffect\(\(\) => \{[\s\S]*?root\.dataset\.theme = snapshot\.viewer\.role === "student" \? "student" : "light"/,
+    "theme state must be applied before the student shell paints",
   );
 
   const studentSelector =
