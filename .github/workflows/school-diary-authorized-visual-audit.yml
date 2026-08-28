@@ -283,7 +283,7 @@ jobs:
             printf -- '- Widths: 360, 390, 768, 1280, 1440, 1920, 2560 px\n'
             printf -- '- Evidence: 28 screenshots plus computed-style manifest\n'
             printf -- '- Data: empty schema from candidate migrations; synthetic only\n'
-            printf -- '- Exposure: loopback container plus SSH tunnel only\n'
+            printf -- '- Exposure: isolated no-masquerade bridge, loopback port, SSH tunnel\n'
             printf -- '- Production/staging UI, data, restart changed: no\n'
             printf -- '- Capture result: %s\n' "${CAPTURE_RESULT:-failed}"
             printf -- '- Design compliant: %s\n' "${COMPLIANT:-not measured}"
