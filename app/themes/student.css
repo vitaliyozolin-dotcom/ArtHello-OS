@@ -39,6 +39,7 @@
   --student-accent: #7758f6;
   --student-accent-shadow: rgba(119, 88, 246, 0.28);
   --student-main-glow: rgba(119, 88, 246, 0.13);
+  --student-main-background: radial-gradient(circle at 86% 8%, rgba(119, 88, 246, 0.13), transparent 30%), #10121d;
   --student-action: #ff6536;
   --student-action-strong: #ff5b2e;
   --student-action-shadow: rgba(255, 91, 46, 0.28);
@@ -48,6 +49,10 @@
   --student-highlight-faint: rgba(197, 244, 77, 0.1);
   --student-hero-base-a: #20201c;
   --student-hero-base-b: #37332d;
+  --student-hero-background: linear-gradient(130deg, #20201c, #37332d);
+  --student-dashboard-hero-image: linear-gradient(90deg, rgba(8, 10, 18, 0.04) 0%, rgba(8, 10, 18, 0.02) 48%, rgba(8, 10, 18, 0.08) 100%), url("/student-dashboard-hero-v1.webp");
+  --student-hero-overlay: linear-gradient(90deg, rgba(8, 10, 18, 0.06), transparent 60%);
+  --student-hero-overlay-mobile: linear-gradient(90deg, rgba(8, 10, 18, 0.3), rgba(8, 10, 18, 0.04));
   --student-hero-overlay-02: rgba(8, 10, 18, 0.02);
   --student-hero-overlay-04: rgba(8, 10, 18, 0.04);
   --student-hero-overlay-06: rgba(8, 10, 18, 0.06);
@@ -129,6 +134,7 @@ html[data-design-code="v1"][data-theme="student"] {
   --student-accent: var(--color-accent);
   --student-accent-shadow: color-mix(in srgb, var(--color-accent) 28%, transparent);
   --student-main-glow: color-mix(in srgb, var(--color-accent) 13%, transparent);
+  --student-main-background: var(--color-page);
   --student-action: var(--color-accent);
   --student-action-strong: var(--color-accent);
   --student-action-shadow: color-mix(in srgb, var(--color-accent) 28%, transparent);
@@ -138,6 +144,10 @@ html[data-design-code="v1"][data-theme="student"] {
   --student-highlight-faint: color-mix(in srgb, var(--color-accent) 10%, transparent);
   --student-hero-base-a: var(--neutral-800);
   --student-hero-base-b: var(--neutral-700);
+  --student-hero-background: var(--color-surface);
+  --student-dashboard-hero-image: url("/student-dashboard-hero-v1.webp");
+  --student-hero-overlay: var(--student-hero-overlay-06);
+  --student-hero-overlay-mobile: var(--student-hero-overlay-30);
   --student-hero-overlay-02: color-mix(in srgb, var(--neutral-900) 2%, transparent);
   --student-hero-overlay-04: color-mix(in srgb, var(--neutral-900) 4%, transparent);
   --student-hero-overlay-06: color-mix(in srgb, var(--neutral-900) 6%, transparent);
