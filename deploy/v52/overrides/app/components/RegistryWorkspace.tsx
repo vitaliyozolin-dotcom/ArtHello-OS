@@ -113,7 +113,7 @@ export function RegistryWorkspace({ notify }: { notify: (value: string) => void 
       {state === "loading" ? <RegistryState title="Загружаем реестр" text="Проверяем карточки, источники и устойчивые ID." /> : null}
       {state === "error" ? <RegistryState title="Реестр временно недоступен" text="Данные не заменены заглушкой." action="Повторить" onAction={() => void loadEntities()} /> : null}
       {state === "ready" && entities.length === 0 ? <RegistryState title="Карточки не найдены" text="Измените фильтры или создайте новую карточку." action="Создать карточку" onAction={() => setAction("create")} /> : null}
-      {state === "ready" && entities.length > 0 ? <div className="registry-table-wrap"><table className="registry-table"><thead><tr><th>Карточка</th><th>Тип</th><th>Используется в</th><th>Источник</th><th>Качество</th><th>Статус</th><th /></tr></thead><tbody>
+      {state === "ready" && entities.length > 0 ? <div className="ahRegistryTable"><table className="registry-table"><thead><tr><th>Карточка</th><th>Тип</th><th>Используется в</th><th>Источник</th><th>Качество</th><th>Статус</th><th /></tr></thead><tbody>
         {entities.map((entity) => <tr key={entity.id} onClick={() => setSelectedId(entity.id)}>
           <td><strong>{entity.displayName}</strong><small>{entity.id}</small></td>
           <td><span className="entity-type-badge">{entity.entityType}</span></td>

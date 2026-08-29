@@ -202,7 +202,7 @@
   font-size: 12px;
 }
 
-.ahWorkflowPage .workflow-table-wrap {
+.ahWorkflowTable {
   width: 100%;
   max-width: 100%;
   overflow-x: auto;
@@ -445,7 +445,7 @@
     font-size: 16px;
   }
 
-  .ahWorkflowPage .workflow-table-wrap {
+  .ahWorkflowTable {
     overflow-x: visible;
     padding: 10px;
   }
