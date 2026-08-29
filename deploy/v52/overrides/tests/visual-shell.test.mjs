@@ -16,6 +16,7 @@ const ownerStyles = read("../app/components/OwnerDashboard.module.css");
 const shellFoundation = read("../app/components/ShellFoundation.css");
 const airyLayout = read("../app/components/AiryLayout.css");
 const contentModern = read("../app/components/ContentModern.css");
+const mobilePatch = read("../scripts/patch-mobile-design-system-v4.mjs");
 const db = read("../db/index.ts");
 
 test("design tokens expose the required semantic system", () => {
@@ -78,6 +79,22 @@ test("mobile shell uses a dedicated composition with touch-sized controls", () =
   assert.match(css, /\.mobile-dock button\{height:50px/);
   assert.match(css, /\.top-icon-action\.create\{width:42px;height:42px\}/);
   assert.match(shell, /aria-label="Мобильная навигация"/);
+});
+
+test("mobile owner KPIs remain readable two-column cards", () => {
+  assert.match(ownerDashboard, /owner-dashboard-kpis/);
+  assert.match(ownerDashboard, /owner-dashboard-kpi-icon/);
+  assert.match(ownerDashboard, /owner-dashboard-kpi-copy/);
+  assert.match(mobilePatch, /owner-dashboard-kpis\{display:grid!important;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)!important/);
+  assert.match(mobilePatch, /owner-dashboard-kpi\{[^\n]*min-height:104px!important/);
+  assert.match(mobilePatch, /owner-dashboard-kpi-copy\{display:grid!important/);
+});
+
+test("family search has one search affordance without detached inline help", () => {
+  assert.doesNotMatch(mobilePatch, /content:"⌕"/);
+  assert.match(mobilePatch, /input\[placeholder\*="Найти семью"\][^\n]*padding-right:16px!important/);
+  assert.match(mobilePatch, /::before\{content:none!important;display:none!important\}/);
+  assert.match(mobilePatch, /:has\(input\[placeholder\*="Найти семью"\]\)>button\[data-ah-help-inline=true\]\.ah-field-icon\{display:none!important\}/);
 });
 
 test("required personal dashboards have independent role profiles", () => {
