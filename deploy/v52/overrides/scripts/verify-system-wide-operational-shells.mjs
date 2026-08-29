@@ -109,7 +109,7 @@ requireText(strategy, "<PageHeader", "strategy page header is missing");
 requireText(strategy, "<Tabs", "strategy tabs are hidden by an empty-state branch");
 requireText(strategy, "<KpiCard", "strategy KPI cards are missing");
 forbid(strategy, /\bstrategy-workspace\b/, "legacy strategy workspace wrapper remains");
-forbid(strategy, /if\s*\(\s*!data\.goals\.length[\s\S]{0,160}?\)\s*return/, "strategy workspace still collapses when empty");
+forbid(strategy, /if\s*\(\s*!data\.goals\.length[\s\S]{0,180}?\)\s*(?:\{\s*)?return\s*<section/, "strategy workspace still collapses when empty");
 requireText(family, "Импорт не равен доступу", "family import boundary is missing");
 
 requireText(polish, 'input[placeholder*="Найти семью"]', "family search readability rule is missing");
