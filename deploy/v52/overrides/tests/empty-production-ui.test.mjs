@@ -77,7 +77,7 @@ test("content and education use real records instead of demo identities", () => 
     read("../app/api/education-actions/route.ts"),
   ].join("\n");
 
-  assert.match(content, /Данных пока нет/);
+  assert.match(content, /Контент ещё не подключён/);
   assert.match(content, /Math\.max\(1,/);
   assert.doesNotMatch(content, /EMP-T-CONTENT|OFF-T-001|Тестовые данные|синтетический финансовый/);
   assert.doesNotMatch(education, /EMP-T-032|FAM-T-014|PRG-T-012|GRP-T-3A|LES-T-3A/);
