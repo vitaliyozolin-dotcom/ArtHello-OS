@@ -90,7 +90,13 @@ requireText(medical, "<KpiCard", "medical registry KPI cards are missing");
 requireText(medical, "Нет счётчиков, списков, документов", "medical denied state can leak indirect data");
 forbid(medical, /\bmedical-workspace\b/, "legacy medical workspace wrapper remains");
 forbid(medical, /if\s*\(\s*!\s*hasMedicalData\s*\)\s*(?:\{[\s\S]{0,160}?\breturn\b|return\b)/, "medical workspace still collapses when empty");
-requireText(strategy, "Календарь, проекты, цели, KPI, прогнозы", "strategy still collapses when empty");
+requireText(strategy, "ahStrategyPage", "strategy workspace is not mounted on the design-system shell");
+requireText(strategy, "<PageContainer", "strategy page container is missing");
+requireText(strategy, "<PageHeader", "strategy page header is missing");
+requireText(strategy, "<Tabs", "strategy tabs are hidden by an empty-state branch");
+requireText(strategy, "<KpiCard", "strategy registry KPI cards are missing");
+forbid(strategy, /\bstrategy-workspace\b/, "legacy strategy workspace wrapper remains");
+forbid(strategy, /if\s*\(\s*!\s*hasStrategyData\s*\)\s*(?:\{[\s\S]{0,160}?\breturn\b|return\b)/, "strategy workspace still collapses when empty");
 requireText(family, "Импорт не равен доступу", "family import boundary is missing");
 
 requireText(polish, 'input[placeholder*="Найти семью"]', "family search readability rule is missing");

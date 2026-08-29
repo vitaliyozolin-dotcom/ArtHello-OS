@@ -145,7 +145,7 @@ test("migrated component patch blocks are retired and later operational patches 
   assert.equal(patchesFile(operationalPatch, "app/components/FoodWorkspace.tsx"), false);
   assert.equal(patchesFile(operationalPatch, "app/components/SafetyWorkspace.tsx"), false);
   assert.equal(patchesFile(operationalPatch, "app/components/MedicalWorkspace.tsx"), false);
-  assert.equal(patchesFile(operationalPatch, "app/components/StrategyWorkspace.tsx"), true);
+  assert.equal(patchesFile(operationalPatch, "app/components/StrategyWorkspace.tsx"), false);
   assert.doesNotMatch(normalizeInputs, /patch-system-operational-modules\.mjs/);
 });
 
