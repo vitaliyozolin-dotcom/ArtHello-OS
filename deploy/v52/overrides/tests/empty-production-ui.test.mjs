@@ -48,14 +48,18 @@ test("sales keeps its operating sections available before the first lead", () =>
   assert.doesNotMatch(sales, /acceptanceChainLeadId\)!|chainLifecycle[^\n]*!|chainAccrual[^\n]*!|chainPayment[^\n]*!/);
 });
 
-test("array-backed workspaces guard empty data before first-row access", () => {
-  const cases = [
-    ["../app/components/FoodWorkspace.tsx", "if(!data.products.length", "const recipe="],
+test("array-backed workspaces handle empty data before unsafe first-row access", () => {
+  const food = read("../app/components/FoodWorkspace.tsx");
+  assert.match(food, /data\.recipes\[0\]\s*\?\?/);
+  assert.match(food, /\bhasFoodData\b/);
+  assert.doesNotMatch(food, /if\s*\(\s*!\s*hasFoodData\s*\)\s*return\b/);
+
+  const guardedCases = [
     ["../app/components/IntegrationWorkspace.tsx", "if (!data.connections.length)", "const current ="],
     ["../app/components/ReadinessWorkspace.tsx", "if (!data.scenarios.length)", "const scenario ="],
   ];
 
-  for (const [path, guard, access] of cases) {
+  for (const [path, guard, access] of guardedCases) {
     const source = read(path);
     assert.ok(source.indexOf(guard) > -1, `${path} has no empty guard`);
     assert.ok(source.indexOf(access) > source.indexOf(guard), `${path} reads the first row before its empty guard`);
