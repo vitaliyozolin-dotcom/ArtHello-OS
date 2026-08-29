@@ -249,14 +249,14 @@ jobs:
             ! grep -F "sales-workspace" /app/app/components/SalesWorkspace.tsx >/dev/null
             test -s /app/app/components/HrWorkspace.tsx
             test -s /app/app/components/HrWorkspace.ds.css
-            grep -F "className="ahHrPage"" /app/app/components/HrWorkspace.tsx >/dev/null
-            grep -F "from "./design-system"" /app/app/components/HrWorkspace.tsx >/dev/null
+            grep -F "className=\"ahHrPage\"" /app/app/components/HrWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/HrWorkspace.tsx >/dev/null
             grep -F "function EmployeeModal" /app/app/components/HrWorkspace.tsx >/dev/null
             ! grep -F "hr-workspace" /app/app/components/HrWorkspace.tsx >/dev/null
             test -s /app/app/components/ContentWorkspace.tsx
             test -s /app/app/components/ContentWorkspace.ds.css
-            grep -F "className="ahContentPage"" /app/app/components/ContentWorkspace.tsx >/dev/null
-            grep -F "from "./design-system"" /app/app/components/ContentWorkspace.tsx >/dev/null
+            grep -F "className=\"ahContentPage\"" /app/app/components/ContentWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/ContentWorkspace.tsx >/dev/null
             grep -F "Каналов и материалов пока нет" /app/app/components/ContentWorkspace.tsx >/dev/null
             ! grep -F "content-workspace" /app/app/components/ContentWorkspace.tsx >/dev/null
             test -d /app/dist
