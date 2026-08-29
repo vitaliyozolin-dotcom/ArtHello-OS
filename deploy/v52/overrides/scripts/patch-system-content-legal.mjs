@@ -31,7 +31,12 @@ function patch(relativePath, transform) {
   writeFileSync(path, after, "utf8");
 }
 
-patch("app/components/ContentWorkspace.tsx", (input) => {
+const contentWorkspacePath = target("app/components/ContentWorkspace.tsx");
+const contentWorkspaceSource = readFileSync(contentWorkspacePath, "utf8");
+if (contentWorkspaceSource.includes('className="ahContentPage"')) {
+  console.log("ContentWorkspace Design System override already owns the complete content shell");
+} else {
+  patch("app/components/ContentWorkspace.tsx", (input) => {
   let source = input;
   source = replaceText(
     source,
@@ -58,7 +63,8 @@ patch("app/components/ContentWorkspace.tsx", (input) => {
     "content studio navigation",
   );
   return source;
-});
+  });
+}
 
 patch("app/api/legal-actions/route.ts", (input) => {
   let source = input;
