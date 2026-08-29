@@ -39,7 +39,7 @@ test("shared compact cards and compact empty states expose explicit semantics", 
   assert.match(components, /data-ah-compact-index/);
   assert.match(components, /density\?: "default" \| "compact"/);
   assert.match(components, /data-ah-compact-card=\{density === "compact"/);
-  assert.match(components, /designSystemVersion = "1\.2-operational-registry"/);
+  assert.match(components, /designSystemVersion = "1\.3-protected-operations"/);
   assert.equal((access.match(/<CompactListCard/g) ?? []).length, 3);
   assert.match(contractor, /<EmptyState\s+density="compact"\s+title="Подрядчиков пока нет"/);
   assert.match(contractorStyles, /\.ahContractorRegistry > \.ahEmptyState h3 \{\s+font-size: var\(--ah-compact-card-title-size\)/);

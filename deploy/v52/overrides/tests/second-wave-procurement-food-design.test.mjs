@@ -84,7 +84,7 @@ test("Wave 2 workspaces use the shared operational-registry shell", () => {
   assert.equal(occurrences(food, /<KpiCard\b/g), 4);
   assert.equal(occurrences(procurement, /<Tabs\b/g), 1);
   assert.equal(occurrences(food, /<Tabs\b/g), 1);
-  assert.match(designSystem, /designSystemVersion\s*=\s*["']1\.2-operational-registry["']/);
+  assert.match(designSystem, /designSystemVersion\s*=\s*["']1\.3-protected-operations["']/);
 });
 
 test("Wave 2 does not collapse its navigation when data is empty", () => {
@@ -143,8 +143,8 @@ test("Wave 2 components and styles are isolated from legacy workspaces", () => {
 test("migrated component patch blocks are retired and later operational patches remain", () => {
   assert.equal(patchesFile(operationalPatch, "app/components/ProcurementWorkspace.tsx"), false);
   assert.equal(patchesFile(operationalPatch, "app/components/FoodWorkspace.tsx"), false);
-  assert.equal(patchesFile(operationalPatch, "app/components/SafetyWorkspace.tsx"), true);
-  assert.equal(patchesFile(operationalPatch, "app/components/MedicalWorkspace.tsx"), true);
+  assert.equal(patchesFile(operationalPatch, "app/components/SafetyWorkspace.tsx"), false);
+  assert.equal(patchesFile(operationalPatch, "app/components/MedicalWorkspace.tsx"), false);
   assert.equal(patchesFile(operationalPatch, "app/components/StrategyWorkspace.tsx"), true);
   assert.doesNotMatch(normalizeInputs, /patch-system-operational-modules\.mjs/);
 });
