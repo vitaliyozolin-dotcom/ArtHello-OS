@@ -237,6 +237,13 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, focusId }: { ro
         <span>Банк, бюджет и ОПиУ остаются тестовыми до подключения утверждённых источников.</span>
       </div>
 
+      <label className="ahFinancePeriod ahFinancePeriodMobile">
+        <span>Период отчёта</span>
+        <select aria-label="Месяц финансового отчёта" value={period} onChange={(event) => setPeriod(event.target.value)}>
+          {Object.entries(periodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </label>
+
       <div className="ahFinanceKpis">
         <KpiCard label={`Поступления · ${periodLabels[period]}`} value={rubles(data.summary.receiptsMinor)} note="сверено с ОДДС" onClick={() => setTab("cashflow")} />
         <KpiCard label="Списания" value={rubles(data.summary.outflowsMinor)} note="сверено с ОДДС" onClick={() => setTab("cashflow")} />
@@ -246,7 +253,7 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, focusId }: { ro
 
       <div className="ahFinanceNavigation">
         <div className="ahFinanceTabs"><Tabs items={tabs.map((item) => ({ id: item.id, label: item.id === "reconciliation" ? <>{item.label}{data.summary.openIssues ? <b>{data.summary.openIssues}</b> : null}</> : item.label }))} value={tab} onChange={setTab} ariaLabel="Разделы финансов" /></div>
-        <label className="ahFinancePeriod"><span>Период</span><select value={period} onChange={(event) => setPeriod(event.target.value)}>{Object.entries(periodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label className="ahFinancePeriod ahFinancePeriodDesktop"><span>Период</span><select aria-label="Месяц финансового отчёта" value={period} onChange={(event) => setPeriod(event.target.value)}>{Object.entries(periodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       </div>
 
       {tab === "register" ? (
