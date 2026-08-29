@@ -135,17 +135,15 @@
 
 .ahStrategyTabs {
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  overflow: hidden;
+  border-bottom: 1px solid var(--ah-color-border);
 }
 
 .ahStrategyTabs .ahTabs {
-  width: max-content;
-  min-width: 100%;
-  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
   gap: 18px;
-  margin-inline: 0;
-  padding-inline: 0;
+  overflow-x: auto;
 }
 
 .ahStrategyTabs .ahTabs button {
