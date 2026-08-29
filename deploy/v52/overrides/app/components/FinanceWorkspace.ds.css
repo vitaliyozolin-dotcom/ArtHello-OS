@@ -375,11 +375,30 @@
 
   .ahFinanceKpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--ah-registry-kpi-gap);
+    gap: var(--ah-registry-kpi-mobile-gap);
   }
 
   .ahFinanceKpis > .ahKpiCard {
-    min-height: var(--ah-registry-kpi-min-height);
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahFinanceKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahFinanceKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahFinanceKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
   }
 
   .ahFinanceNavigation {
