@@ -657,10 +657,11 @@ async function captureWaveRoute(browser, base, storageState, label, viewport, ro
   const apiFixture = { endpoint: config.endpoint, payload: waveFixtures[routeName][mode] };
   const route = label === "baseline" && config.baselineRoute ? config.baselineRoute : routeName;
   const { context, page } = await stablePage(browser, base, storageState, viewport, route, apiFixture);
-  const expectedHeading = label === "baseline" && mode === "empty" && config.baselineEmptyHeading
-    ? config.baselineEmptyHeading
-    : config.heading;
-  await page.getByRole("heading", { name: expectedHeading, exact: true }).waitFor({ state: "visible", timeout: 30000 });
+  if (label === "baseline") {
+    await page.locator(`${config.root}, ${config.legacy}`).first().waitFor({ state: "visible", timeout: 30000 });
+  } else {
+    await page.getByRole("heading", { name: config.heading, exact: true }).waitFor({ state: "visible", timeout: 30000 });
+  }
   if (mode === "populated" && config.populatedTab) {
     const semanticTab = page.locator(config.tabs).getByRole("tab", { name: config.populatedTab, exact: true });
     const legacyTab = page.getByRole("button", { name: config.populatedTab, exact: true });
