@@ -22,29 +22,6 @@ function patch(relativePath, transform) {
   writeFileSync(path, after, "utf8");
 }
 
-patch("app/components/ContentWorkspace.tsx", (input) => {
-  let source = input;
-  source = replaceText(
-    source,
-    'import Image from "next/image";\n',
-    'import Image from "next/image";\nimport { createPortal } from "react-dom";\n',
-    "content portal import",
-  );
-  source = replaceText(
-    source,
-    '{createOpen ? <div className="content-modal-layer"><button className="drawer-scrim" onClick={() => setCreateOpen(false)} /><form className="content-modal" onSubmit={create}>',
-    '{createOpen ? createPortal(<div className="content-modal-layer"><button className="drawer-scrim" onClick={() => setCreateOpen(false)} /><form className="content-modal" onSubmit={create}>',
-    "content modal portal start",
-  );
-  source = replaceText(
-    source,
-    '</footer></form></div> : null}\n  </section>;',
-    '</footer></form></div>, document.body) : null}\n  </section>;',
-    "content modal portal end",
-  );
-  return source;
-});
-
 patch("app/components/IntegrationWorkspace.tsx", (input) => {
   let source = input;
   source = replaceText(
