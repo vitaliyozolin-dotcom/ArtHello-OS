@@ -14,7 +14,7 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 452;
+const expectedPngCount = 502;
 
 const waveRoutes = {
   finance: {
@@ -81,6 +81,39 @@ const waveRoutes = {
     modalFields: ["scheduledAt", "accountId", "authorEntityId", "format", "campaignId", "topic", "brief"],
     expectedTabCount: 6,
     requireTable: false,
+  },
+  education: {
+    heading: "Обучение",
+    root: ".ahEducationPage",
+    legacy: ".edu-workspace",
+    legacyTabs: ".edu-tabs",
+    endpoint: /\/api\/education(?:\?.*)?$/,
+    kpis: ".ahEducationKpis > .ahKpiCard",
+    kpiGrid: ".ahEducationKpis",
+    tabs: ".ahEducationTabs .ahTabs",
+    table: ".edu-table",
+    empty: ".ahEducationPage .ahEmptyState",
+    populatedTab: "Журнал",
+    modal: ".edu-editor",
+    modalTrigger: /^Добавить$/,
+    modalFields: ["name", "branchId", "programId", "teacherId"],
+    expectedTabCount: 6,
+  },
+  integrations: {
+    heading: "Центр интеграций",
+    root: ".ahIntegrationPage",
+    legacy: ".integration-workspace",
+    legacyTabs: ".integration-tabs",
+    endpoint: /\/api\/integrations(?:\?.*)?$/,
+    kpis: ".ahIntegrationKpis > .ahKpiCard",
+    kpiGrid: ".ahIntegrationKpis",
+    tabs: ".ahIntegrationTabs .ahTabs",
+    table: ".integration-catalog",
+    empty: ".ahIntegrationPage .ahEmptyState",
+    populatedTab: "Каталог",
+    expectedTabCount: 5,
+    requireTable: false,
+    requireModal: false,
   },
   registry: {
     heading: "Единые карточки",
@@ -346,6 +379,208 @@ const populatedContent = {
   chain: [{ id: "CHAIN-VISUAL-001", publicationId: "PUB-VISUAL-001", clickId: "CLICK-VISUAL-001", leadId: "LEAD-VISUAL-001", contractId: "LCON-VISUAL-001", paymentOperationId: "FIN-VISUAL-001", revenueMinor: 32000000, attributionModel: "Последний подтверждённый переход", publication: { id: "PUB-VISUAL-001", planItemId: "PLAN-VISUAL-001", publishedAt: "2026-08-25T12:00:00.000Z", publicationRef: "visual://publication", reach: 820, views: 940, reactions: 76, clicks: 31, leads: 4, contracts: 1, revenueMinor: 32000000, dataQuality: "Visual fixture", rates: { engagementPercent: 9.3, clickPercent: 3.3, leadPercent: 12.9, contractPercent: 25 } }, planItem: { id: "PLAN-VISUAL-001", scheduledAt: "2026-09-02T12:00:00.000Z", accountId: "SOC-VISUAL-001", authorEntityId: "EMP-VISUAL-001", format: "Пост", topic: "Открытый урок", offerId: "OFF-VISUAL-001", campaignId: "CMP-VISUAL-001", status: "Опубликовано", brief: "Проверить интерес к открытому уроку" }, lead: { id: "LEAD-VISUAL-001", source: "VK", campaignId: "CMP-VISUAL-001", offerId: "OFF-VISUAL-001" }, payment: { id: "FIN-VISUAL-001", amountMinor: 32000000, operationDate: "2026-08-28", dataQuality: "Visual fixture" } }],
   summary: { reach: 820, views: 940, reactions: 76, clicks: 31, leads: 4, contracts: 1, revenueMinor: 32000000 },
   sourcePolicy: { status: "Подключено", note: "Метрики получены от visual fixture канала.", ranking: "выручка → договор → заявка → переход" },
+};
+
+const emptyEducation = {
+  scope: { kind: "all", id: "all" },
+  programs: [],
+  groups: [],
+  students: [],
+  lessons: [],
+  attendance: [],
+  progress: [],
+  feedback: [],
+  communications: [],
+  entityNames: {},
+  summary: { groups: 0, students: 0, lessonsToday: 0, attendance: { total: 0, present: 0, percent: 0 }, openFeedback: 0 },
+  chain: { programId: "", teacherId: "", groupId: "", lessonId: "", attendanceId: "", progressId: "", feedbackId: "" },
+  privacy: "Только синтетические записи visual gate; медицинские данные не используются.",
+};
+
+const populatedEducation = {
+  ...emptyEducation,
+  programs: [{
+    id: "EDU-PROGRAM-VISUAL-001",
+    title: "Основы исследовательского мышления",
+    version: 2,
+    status: "Действует",
+    authorEntityId: "ENT-VISUAL-METHODIST",
+    methodistEntityId: "ENT-VISUAL-METHODIST",
+    scope: "Начальная школа",
+    materialRef: "visual://education/program",
+    expectedResult: "Ученик формулирует гипотезу и фиксирует наблюдение.",
+  }],
+  groups: [{
+    id: "EDU-GROUP-VISUAL-001",
+    name: "3А · visual fixture",
+    unitEntityId: "BR-ATLAS-SCHOOL",
+    programId: "EDU-PROGRAM-VISUAL-001",
+    teacherEntityId: "ENT-VISUAL-TEACHER",
+    room: "Кабинет 12",
+    status: "Активна",
+  }],
+  students: [{
+    id: "EDU-STUDENT-VISUAL-001",
+    childEntityId: "ENT-VISUAL-CHILD",
+    familyEntityId: "ENT-VISUAL-FAMILY",
+    groupId: "EDU-GROUP-VISUAL-001",
+    cabinetStatus: "Не выдан",
+    status: "Проверено",
+  }],
+  lessons: [{
+    id: "EDU-LESSON-VISUAL-001",
+    groupId: "EDU-GROUP-VISUAL-001",
+    programId: "EDU-PROGRAM-VISUAL-001",
+    scheduledAt: "2026-08-29T09:00:00.000Z",
+    topic: "Наблюдение и гипотеза",
+    teacherEntityId: "ENT-VISUAL-TEACHER",
+    substituteEntityId: "",
+    room: "Кабинет 12",
+    status: "Проведено",
+    homework: "Записать одно наблюдение.",
+  }],
+  attendance: [{
+    id: "EDU-ATTENDANCE-VISUAL-001",
+    lessonId: "EDU-LESSON-VISUAL-001",
+    studentId: "EDU-STUDENT-VISUAL-001",
+    attendanceStatus: "Присутствовал",
+    grade: "5",
+    result: "Гипотеза сформулирована.",
+  }],
+  progress: [{
+    id: "EDU-PROGRESS-VISUAL-001",
+    studentId: "EDU-STUDENT-VISUAL-001",
+    programId: "EDU-PROGRAM-VISUAL-001",
+    period: "2026-08",
+    metric: "Исследовательский навык",
+    score: 82,
+    trend: "Рост",
+    evidence: "Работа на занятии visual fixture.",
+    band: "Уверенно",
+  }],
+  feedback: [{
+    id: "EDU-FEEDBACK-VISUAL-001",
+    studentId: "EDU-STUDENT-VISUAL-001",
+    familyEntityId: "ENT-VISUAL-FAMILY",
+    programId: "EDU-PROGRAM-VISUAL-001",
+    rating: 5,
+    comment: "Понятная структура занятия.",
+    recommendation: "Продолжить практику наблюдений.",
+    status: "Принято",
+    relatedTaskId: null,
+  }],
+  communications: [{
+    id: "EDU-COMM-VISUAL-001",
+    communicationType: "Новость",
+    audienceType: "Группа",
+    audienceId: "EDU-GROUP-VISUAL-001",
+    title: "Следующее занятие",
+    body: "Возьмите тетрадь наблюдений.",
+    eventAt: "2026-09-01T09:00:00.000Z",
+    createdBy: "ENT-VISUAL-TEACHER",
+  }],
+  entityNames: {
+    "ENT-VISUAL-METHODIST": "Методист visual fixture",
+    "ENT-VISUAL-TEACHER": "Педагог visual fixture",
+    "ENT-VISUAL-CHILD": "Ученик visual fixture",
+    "ENT-VISUAL-FAMILY": "Семья visual fixture",
+  },
+  summary: { groups: 1, students: 1, lessonsToday: 1, attendance: { total: 1, present: 1, percent: 100 }, openFeedback: 0 },
+  chain: {
+    programId: "EDU-PROGRAM-VISUAL-001",
+    teacherId: "ENT-VISUAL-TEACHER",
+    groupId: "EDU-GROUP-VISUAL-001",
+    lessonId: "EDU-LESSON-VISUAL-001",
+    attendanceId: "EDU-ATTENDANCE-VISUAL-001",
+    progressId: "EDU-PROGRESS-VISUAL-001",
+    feedbackId: "EDU-FEEDBACK-VISUAL-001",
+  },
+};
+
+const emptyIntegrations = {
+  connections: [],
+  runs: [],
+  logs: [],
+  conflicts: [],
+  setups: {},
+  summary: { total: 0, connected: 0, snapshots: 0, waiting: 0, openConflicts: 0, errors: 0, accepted: 0 },
+  boundary: "Секреты не входят в интерфейс и передаются только через защищённое хранилище.",
+};
+
+const populatedIntegrations = {
+  ...emptyIntegrations,
+  connections: [{
+    id: "INT-T-D1",
+    system: "D1",
+    category: "Внутренний контур",
+    targetModule: "ArtHello OS",
+    ownerEntityId: "ENT-VISUAL-OWNER",
+    sourceOfTruth: "Синтетический visual fixture",
+    mode: "Проверяемая синхронизация",
+    status: "Активно",
+    authStatus: "Подтверждено",
+    credentialExpiresAt: "2027-08-29",
+    lastSuccessAt: "2026-08-29T08:45:00.000Z",
+    nextSyncAt: "2026-08-29T09:45:00.000Z",
+    receivedCount: 14,
+    acceptedCount: 14,
+    rejectedCount: 0,
+    errorCount: 0,
+    conflictCount: 0,
+    impact: "Критичное · центральный рабочий контур",
+    adapterVersion: "visual-1.0",
+    verifiedTransfer: true,
+    isEnabled: true,
+    connection: { state: "connected", label: "Подключено", connected: true },
+    credentialState: "connected",
+  }],
+  runs: [{
+    id: "INT-RUN-VISUAL-001",
+    connectionId: "INT-T-D1",
+    startedAt: "2026-08-29T08:45:00.000Z",
+    finishedAt: "2026-08-29T08:45:02.000Z",
+    trigger: "Плановая проверка",
+    status: "Успешно",
+    receivedCount: 14,
+    acceptedCount: 14,
+    rejectedCount: 0,
+    errorCount: 0,
+    conflictCount: 0,
+    checkpoint: "VISUAL-CHECKPOINT-001",
+    errorMessage: "",
+    initiatedBy: "visual-gate",
+    dryRun: false,
+  }],
+  logs: [{
+    id: 1,
+    runId: "INT-RUN-VISUAL-001",
+    connectionId: "INT-T-D1",
+    level: "INFO",
+    event: "SYNC_COMPLETE",
+    message: "Синтетический обмен завершён.",
+    recordRef: "VISUAL-RECORD-001",
+    createdAt: "2026-08-29T08:45:02.000Z",
+  }],
+  conflicts: [],
+  setups: {
+    "INT-T-D1": {
+      connectionId: "INT-T-D1",
+      authMethod: "Service binding",
+      startDate: "2026-08-01",
+      syncIntervalMinutes: 60,
+      syncMinute: 5,
+      endpoint: "",
+      branchId: "all",
+      accountScope: "Все записи",
+      channelType: "Внутренний",
+      sourceMapping: "stable-id",
+      dataScopes: ["Реестр", "Журнал"],
+      secretStatus: "external_required",
+      updatedAt: "2026-08-29T08:45:00.000Z",
+    },
+  },
+  summary: { total: 1, connected: 1, snapshots: 0, waiting: 0, openConflicts: 0, errors: 0, accepted: 14 },
+  boundary: "Только синтетические записи visual gate; рабочие секреты и данные не используются.",
 };
 
 const emptyRegistry = {
@@ -779,6 +1014,8 @@ const waveFixtures = {
   sales: { empty: emptySales, populated: populatedSales },
   hr: { empty: emptyHr, populated: populatedHr },
   content: { empty: emptyContent, populated: populatedContent },
+  education: { empty: emptyEducation, populated: populatedEducation },
+  integrations: { empty: emptyIntegrations, populated: populatedIntegrations },
   registry: { empty: emptyRegistry, populated: populatedRegistry },
   tasks: { empty: emptyWorkflow, populated: populatedWorkflow },
   legal: { empty: emptyLegal, populated: populatedLegal },
@@ -1543,20 +1780,6 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
           assertWaveMobileCanon(wave, access);
         }
       }
-    }
-
-    for (const viewport of [[390, 844], [1440, 900]]) {
-      const baseline = await captureEducationAfterContractors(browser, baselineUrl, baselineState, "baseline", viewport);
-      const pilot = await captureEducationAfterContractors(browser, pilotUrl, pilotState, "pilot", viewport);
-      manifest.push(baseline, pilot);
-      if (baseline.horizontalOverflow || pilot.horizontalOverflow) throw new Error(`Education overflow at ${viewport.join("x")}`);
-      const baselinePath = path.join(output, baseline.file);
-      const pilotPath = path.join(output, pilot.file);
-      const diffPath = path.join(output, `diff-education-after-contractors-${viewport[0]}x${viewport[1]}.png`);
-      const diff = diffPng(baselinePath, pilotPath, diffPath, pixelmatch);
-      manifest.push({ route: "education-diff", width: viewport[0], height: viewport[1], file: path.basename(diffPath), ...diff });
-      persist();
-      if (diff.ratio > 0.03) throw new Error(`Unrelated Education visual diff ${(diff.ratio * 100).toFixed(2)}% exceeds 3% at ${viewport.join("x")}`);
     }
 
     const pngCount = fs.readdirSync(output).filter((file) => file.endsWith(".png")).length;

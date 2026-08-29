@@ -2,7 +2,9 @@
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { EDUCATION_BRANCHES, educationBranchId, parseEducationCsv } from "../../lib/education";
+import { Button, Card, EmptyState, KpiCard, PageContainer, PageHeader, Tabs } from "./design-system";
 import "./EducationWorkspace.css";
+import "./EducationWorkspace.ds.css";
 
 type Program = { id: string; title: string; version: number; status: string; authorEntityId: string; methodistEntityId: string; scope: string; materialRef: string; expectedResult: string };
 type Group = { id: string; name: string; unitEntityId: string; programId: string; teacherEntityId: string; room: string; status: string };
@@ -66,8 +68,8 @@ export function EducationWorkspace({ workspace, role, notify, onTasksChanged, on
   const canManage = ["Собственник", "Директор", "Представитель Виталия", "Методист"].includes(role);
   const branchCounts = useMemo(() => Object.fromEntries(EDUCATION_BRANCHES.map((branch) => [branch.id, data?.groups.filter((group) => educationBranchId(group.unitEntityId) === branch.id).length ?? 0])), [data]);
 
-  if (loading) return <section className="edu-state">Загружаем учебный контур…</section>;
-  if (error || !data) return <section className="edu-state"><strong>{error}</strong><small>Роль не получает скрытые образовательные или медицинские данные.</small></section>;
+  if (loading) return <PageContainer className="ahEducationPage"><EmptyState className="ahEducationEmpty" density="compact" title="Загружаем учебный контур" description="Проверяем программы, группы, занятия и журнал." /></PageContainer>;
+  if (error || !data) return <PageContainer className="ahEducationPage"><EmptyState className="ahEducationEmpty" density="compact" title={error || "Учебный контур недоступен"} description="Роль не получает скрытые образовательные или медицинские данные." action={<Button variant="secondary" onClick={() => void load()}>Повторить</Button>} /></PageContainer>;
 
   const focusedStudent = data.students.find((student) => student.id === focusId || student.childEntityId === focusId);
   const requestedGroupId = selectedGroupId || focusedStudent?.groupId || focusId || "";
@@ -87,31 +89,36 @@ export function EducationWorkspace({ workspace, role, notify, onTasksChanged, on
   const chainProgress = visibleProgress[0];
   const chainFeedback = data.feedback.find((row) => studentIds.has(row.studentId));
   const attendancePercent = visibleAttendance.length ? Math.round(visibleAttendance.filter((row) => row.attendanceStatus === "Присутствовал").length / visibleAttendance.length * 100) : 0;
-  const workspaceTitle=workspace==="methods"?"Методики":"Обучение";
+  const workspaceTitle = workspace === "methods" ? "Методики" : "Обучение";
+  const hasEducationData = Boolean(data.programs.length || data.groups.length || data.students.length || data.lessons.length || data.attendance.length || data.progress.length || data.feedback.length || data.communications.length);
 
-  return <section className="page edu-workspace">
-    <div className="edu-heading">
-      <div><p className="eyebrow">{workspace === "methods" ? "Версии программ · результаты · улучшения" : "Структура · расписание · журнал"}</p><h1>{workspaceTitle}</h1><p>{workspace === "methods" ? "Программы, материалы, версии и результаты образуют проверяемую цепочку улучшения." : "Филиал → класс или группа → ученики → занятия → журнал. Новые данные создаются вручную или приходят контролируемым импортом."}</p></div>
-      {canManage ? <div className="edu-heading-actions"><button className="secondary-action" onClick={() => setImportOpen(true)}>Импортировать</button><button className="primary-action" onClick={() => setEditor(data.programs.length ? "group" : "program")}>{data.programs.length ? "+ Добавить" : "+ Создать программу"}</button></div> : null}
+  return <PageContainer className="ahEducationPage">
+    <PageHeader
+      eyebrow={workspace === "methods" ? "ВЕРСИИ ПРОГРАММ · РЕЗУЛЬТАТЫ · УЛУЧШЕНИЯ" : "СТРУКТУРА · РАСПИСАНИЕ · ЖУРНАЛ"}
+      title={workspaceTitle}
+      description={workspace === "methods" ? "Программы, материалы, версии и результаты образуют проверяемую цепочку улучшения." : "Филиал → класс или группа → ученики → занятия → журнал. Новые данные создаются вручную или приходят контролируемым импортом."}
+      actions={canManage ? <div className="ahEducationHeaderActions"><Button variant="secondary" onClick={() => setImportOpen(true)}>Импортировать</Button><Button variant="primary" onClick={() => setEditor(data.programs.length ? "group" : "program")}>{data.programs.length ? "Добавить" : "Создать программу"}</Button></div> : undefined}
+    />
+
+    <Card className="ahEducationRule"><strong>ЕДИНЫЙ ИСТОЧНИК</strong><span>Семьи и дети создаются в «Клиентах». Здесь они только назначаются в класс или группу. Импорт не выдаёт доступ и всегда сохраняется со статусом «На проверке».</span></Card>
+
+    <div className="ahEducationBranches"><Tabs value={branchId} onChange={(value) => { setBranchId(value); setSelectedGroupId(""); }} ariaLabel="Филиалы обучения" items={[
+      { id: "all", label: <>Все филиалы <b>{data.groups.length}</b></> },
+      ...EDUCATION_BRANCHES.map((branch) => ({ id: branch.id, label: <>{branch.label} <b>{branchCounts[branch.id]}</b></> })),
+    ]} /></div>
+
+    {focusedGroup ? <Card className="ahEducationFocus"><div><small>Открыт класс / группа</small><strong>{focusedGroup.name}</strong><span>{EDUCATION_BRANCHES.find((branch) => branch.id === educationBranchId(focusedGroup.unitEntityId))?.label} · {visibleStudents.length} учеников · {focusedGroup.room || "кабинет не указан"}</span></div><Button variant="ghost" onClick={() => { setSelectedGroupId(""); setTab("Структура"); }}>Все группы филиала</Button></Card> : null}
+
+    <div className="ahEducationKpis">
+      <KpiCard label="Классы и группы" value={String(visibleGroups.length)} note={branchId === "all" ? "во всех филиалах" : "в выбранном филиале"} onClick={() => setTab("Структура")} />
+      <KpiCard label="Занятия" value={String(visibleLessons.length)} note="в текущем фильтре" onClick={() => setTab("Сегодня")} />
+      <KpiCard label="Посещаемость" value={`${attendancePercent}%`} note={`${visibleAttendance.filter((row) => row.attendanceStatus === "Присутствовал").length} из ${visibleAttendance.length}`} onClick={() => setTab("Журнал")} />
+      <KpiCard label="Ученики" value={String(visibleStudents.length)} note={`${visibleStudents.filter((student) => student.status === "На проверке").length} на проверке`} onClick={() => setTab("Прогресс")} />
     </div>
 
-    <div className="edu-data-rule"><strong>Единый источник</strong><span>Семьи и дети создаются в «Клиентах». Здесь они только назначаются в класс или группу. Импорт не выдаёт доступ и всегда сохраняется со статусом «На проверке».</span></div>
+    <div className="ahEducationTabs"><Tabs items={tabs.map((item) => ({ id: item, label: item }))} value={tab} onChange={setTab} ariaLabel="Разделы обучения" /></div>
 
-    <nav className="edu-branches" aria-label="Филиалы обучения">
-      <button className={branchId === "all" ? "active" : ""} onClick={() => { setBranchId("all"); setSelectedGroupId(""); }}>Все филиалы <b>{data.groups.length}</b></button>
-      {EDUCATION_BRANCHES.map((branch) => <button key={branch.id} className={branchId === branch.id ? "active" : ""} onClick={() => { setBranchId(branch.id); setSelectedGroupId(""); }}>{branch.label}<b>{branchCounts[branch.id]}</b></button>)}
-    </nav>
-
-    {focusedGroup ? <div className="edu-group-focus"><div><small>Открыт класс / группа</small><strong>{focusedGroup.name}</strong><span>{EDUCATION_BRANCHES.find((branch) => branch.id === educationBranchId(focusedGroup.unitEntityId))?.label} · {visibleStudents.length} учеников · {focusedGroup.room || "кабинет не указан"}</span></div><button onClick={() => { setSelectedGroupId(""); setTab("Структура"); }}>Все группы филиала</button></div> : null}
-
-    <div className="edu-kpis">
-      <button onClick={() => setTab("Структура")}><span>Классы и группы</span><strong>{visibleGroups.length}</strong><small>{branchId === "all" ? "во всех филиалах" : "в выбранном филиале"}</small></button>
-      <button onClick={() => setTab("Сегодня")}><span>Занятия</span><strong>{visibleLessons.length}</strong><small>в текущем фильтре</small></button>
-      <button onClick={() => setTab("Журнал")}><span>Посещаемость</span><strong>{attendancePercent}%</strong><small>{visibleAttendance.filter((row) => row.attendanceStatus === "Присутствовал").length} из {visibleAttendance.length}</small></button>
-      <button onClick={() => setTab("Прогресс")}><span>Ученики</span><strong>{visibleStudents.length}</strong><small>{visibleStudents.filter((student) => student.status === "На проверке").length} на проверке</small></button>
-    </div>
-
-    <div className="edu-tabs" role="tablist">{tabs.map((item) => <button key={item} role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</div>
+    {hasEducationData ? <>
 
     {tab === "Структура" ? <div className="edu-structure">
       <article className="edu-panel edu-groups-panel"><Head p="Структура филиала" h="Классы и группы" s={`${visibleGroups.length} записей`} /><div className="edu-group-grid">{visibleGroups.map((group) => {
@@ -143,10 +150,11 @@ export function EducationWorkspace({ workspace, role, notify, onTasksChanged, on
     {tab === "Программы" ? data.programs.length ? <div className="program-grid">{data.programs.filter((item) => visibleGroups.some((group) => group.programId === item.id) || branchId === "all").map((item) => <article key={item.id}><header><span>{item.id}</span><em>{item.status}</em></header><h2>{item.title} · v{item.version}</h2><p>{item.expectedResult}</p><dl><div><dt>Автор</dt><dd>{data.entityNames[item.authorEntityId] ?? item.authorEntityId}</dd></div><div><dt>Методист</dt><dd>{data.entityNames[item.methodistEntityId] ?? item.methodistEntityId}</dd></div><div><dt>Материал</dt><dd>{item.materialRef || "Не указан"}</dd></div><div><dt>Область</dt><dd>{item.scope}</dd></div></dl><button disabled={busy === item.id} onClick={() => void action({ action: "createProgramVersion", programId: item.id, note: "Обновление по результату занятия и обратной связи семьи" }, item.id)}>+ Версия с основанием</button></article>)}</div> : <div data-ah-compact-card="true" className="manual-module-empty"><span>＋</span><h2>Учебных программ пока нет</h2><p>Создайте первую рабочую программу. После сохранения её можно будет выбрать при создании класса или группы.</p>{canManage ? <button className="primary-action" onClick={() => setEditor("program")}>Создать программу</button> : null}</div> : null}
 
     {tab === "Семья и коммуникации" ? <div className="edu-layout"><article className="edu-panel"><Head p="Обратная связь" h="Отзывы и рекомендации" s={`${data.feedback.length} записей`} /><div className="feedback-list">{data.feedback.map((row) => <article key={row.id}><header><strong>{data.entityNames[row.familyEntityId]}</strong><span>{"★".repeat(row.rating)}</span><em>{row.status}</em></header><p>{row.comment}</p><div>{row.recommendation}</div><footer>{row.relatedTaskId ? <span>Задача TSK-{String(row.relatedTaskId).padStart(4, "0")}</span> : <button disabled={busy === row.id} onClick={() => void action({ action: "createFeedbackTask", feedbackId: row.id }, row.id)}>+ Методическая задача</button>}</footer></article>)}</div></article><article className="edu-panel"><Head p="Личный кабинет" h="Новости, события и чат" s="по области доступа" /><div className="comm-list">{data.communications.map((row) => <article key={row.id}><span>{row.communicationType.slice(0, 1)}</span><div><strong>{row.title}</strong><p>{row.body}</p><small>{row.audienceType} · {row.audienceId}{row.eventAt ? ` · ${fmt(row.eventAt)}` : ""}</small></div></article>)}</div></article></div> : null}
+    </> : <EmptyState className="ahEducationEmpty" density="compact" title="Учебных данных пока нет" description="Создайте первую программу или импортируйте проверенный набор. Доступы ученикам и родителям автоматически не выдаются." action={canManage ? <Button variant="primary" onClick={() => setEditor("program")}>Создать программу</Button> : undefined} />}
 
     {editor ? <EducationEditor kind={editor} data={data} defaultGroupId={focusedGroup?.id ?? ""} busy={busy} close={() => setEditor(null)} submit={(body) => void action(body, `create:${editor}`)} setKind={(kind) => setEditor(kind)} /> : null}
     {importOpen ? <EducationImport busy={busy} close={() => setImportOpen(false)} openIntegrations={onOpenIntegrations} submit={(rows) => void action({ action: "importEducationRows", rows }, "import")} /> : null}
-  </section>;
+  </PageContainer>;
 }
 
 function EducationEditor({ kind, data, defaultGroupId, busy, close, submit, setKind }: { kind: EditorKind; data: Data; defaultGroupId: string; busy: string; close: () => void; submit: (body: Record<string, unknown>) => void; setKind: (kind: EditorKind) => void }) {

@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { Button, Card, EmptyState, KpiCard, PageContainer, PageHeader, SearchField, Tabs } from "./design-system";
+import "./IntegrationWorkspace.ds.css";
 
 type Connection = {
   id: string;
@@ -221,37 +223,20 @@ export function IntegrationWorkspace({
     ));
   }, [data, query, category]);
 
-  if (loading) return <section className="integration-state">Проверяем подключения и журналы…</section>;
-  if (error || !data) {
-    return <section className="integration-state">
-      <strong>{error}</strong>
-      <small>Доступ разрешён владельцу, Представителю, интеграторам, финансам и бухгалтерии.</small>
-      <button onClick={() => void load()}>Повторить</button>
-    </section>;
-  }
-
-  if (!data.connections.length) {
-    return <section className="page integration-workspace">
-      <div className="integration-heading">
-        <div><p className="eyebrow">Источники и правила загрузки</p><h1>Центр интеграций</h1><p>Подключения появятся только после явной настройки и подтверждения доступа.</p></div>
-      </div>
-      <div className="manual-module-empty"><span>＋</span><h2>Подключений пока нет</h2><p>Добавьте первый источник, когда будете готовы передавать данные в систему.</p></div>
-    </section>;
-  }
+  if (loading) return <PageContainer className="ahIntegrationPage"><EmptyState className="ahIntegrationEmpty" density="compact" title="Проверяем подключения" description="Сверяем авторизацию, синхронизации и журналы." /></PageContainer>;
+  if (error || !data) return <PageContainer className="ahIntegrationPage"><EmptyState className="ahIntegrationEmpty" density="compact" title={error || "Центр интеграций недоступен"} description="Доступ разрешён владельцу, Представителю, интеграторам, финансам и бухгалтерии." action={<Button variant="secondary" onClick={() => void load()}>Повторить</Button>} /></PageContainer>;
 
   const current = data.connections.find((item) => item.id === selected) ?? data.connections[0];
 
-  return <section className="page integration-workspace">
-    <div className="integration-heading">
-      <div>
-        <p className="eyebrow">Источники и правила загрузки</p>
-        <h1>Центр интеграций</h1>
-        <p>Авторизация, синхронизации, конфликты и влияние ошибок — без декоративных подключений.</p>
-      </div>
-      <button disabled={busy === "INT-T-D1"} onClick={() => void action({ action: "retrySync", connectionId: "INT-T-D1" }, "INT-T-D1")}>Проверить ядро</button>
-    </div>
+  return <PageContainer className="ahIntegrationPage">
+    <PageHeader
+      eyebrow="ИСТОЧНИКИ · ПРАВИЛА ЗАГРУЗКИ · КОНТРОЛЬ"
+      title="Центр интеграций"
+      description="Авторизация, синхронизации, конфликты и влияние ошибок — без декоративных подключений."
+      actions={<Button variant="primary" disabled={busy === "INT-T-D1"} onClick={() => data.connections.some((item) => item.id === "INT-T-D1") ? void action({ action: "retrySync", connectionId: "INT-T-D1" }, "INT-T-D1") : void load()}>{data.connections.length ? "Проверить ядро" : "Обновить контур"}</Button>}
+    />
 
-    <section className="integration-connect-start">
+    <Card className="integration-connect-start">
       <Head p="Пошаговая настройка" h="Подключить источник" s="секреты — только в защищённом хранилище" />
       <div>
         {[
@@ -266,18 +251,16 @@ export function IntegrationWorkspace({
           <strong>{name}</strong><small>{note}</small><span>Настроить →</span>
         </button>)}
       </div>
-    </section>
+    </Card>
 
-    <div className="integration-boundary"><strong>БЕЗ СЕКРЕТОВ</strong><span>{data.boundary}</span></div>
-    <div className="integration-kpis">
-      <button onClick={() => setTab("Каталог")}><span>Всего источников</span><strong>{data.summary.total}</strong><small>единый реестр</small></button>
-      <button className="ok" onClick={() => setTab("Контур")}><span>Проверено online</span><strong>{data.summary.connected}</strong><small>реальная передача</small></button>
-      <button onClick={() => setTab("Каталог")}><span>Файловые снимки</span><strong>{data.summary.snapshots}</strong><small>не live-подключение</small></button>
-      <button className="warn" onClick={() => setTab("Конфликты")}><span>Открытые конфликты</span><strong>{data.summary.openConflicts}</strong><small>{data.summary.errors} ошибок запуска</small></button>
+    <Card className="ahIntegrationBoundary"><strong>БЕЗ СЕКРЕТОВ</strong><span>{data.boundary}</span></Card>
+    <div className="ahIntegrationKpis">
+      <KpiCard label="Всего источников" value={String(data.summary.total)} note="единый реестр" onClick={() => setTab("Каталог")} />
+      <KpiCard className="ahIntegrationKpiOk" label="Проверено online" value={String(data.summary.connected)} note="реальная передача" onClick={() => setTab("Контур")} />
+      <KpiCard label="Файловые снимки" value={String(data.summary.snapshots)} note="не live-подключение" onClick={() => setTab("Каталог")} />
+      <KpiCard className="ahIntegrationKpiWarning" label="Открытые конфликты" value={String(data.summary.openConflicts)} note={`${data.summary.errors} ошибок запуска`} onClick={() => setTab("Конфликты")} />
     </div>
-    <div className="integration-tabs">
-      {tabs.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}
-    </div>
+    <div className="ahIntegrationTabs"><Tabs items={tabs.map((item) => ({ id: item, label: item }))} value={tab} onChange={setTab} ariaLabel="Разделы центра интеграций" /></div>
 
     {tab === "Контур" ? <div className="integration-overview">
       <article className="integration-map">
@@ -306,9 +289,9 @@ export function IntegrationWorkspace({
     </div> : null}
 
     {tab === "Каталог" ? <>
-      <div className="integration-toolbar">
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти систему или модуль" />
-        <select value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item}>{item}</option>)}</select>
+      <div className="ahIntegrationToolbar">
+        <SearchField value={query} onChange={setQuery} placeholder="Найти систему или модуль" label="Поиск по источникам и модулям" />
+        <select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Категория источника">{categories.map((item) => <option key={item}>{item}</option>)}</select>
         <span>{visible.length} из {data.connections.length}</span>
       </div>
       <div className="integration-catalog">
@@ -403,7 +386,7 @@ export function IntegrationWorkspace({
       close={() => setWizardId("")}
       save={(setup) => void action({ action: "saveSetup", setup }, `setup-${wizardId}`).then(() => setWizardId(""))}
     /> : null}
-  </section>;
+  </PageContainer>;
 }
 
 function ConnectionWizard({ connection, existing, busy, close, save }: {
@@ -490,5 +473,5 @@ function Fact({ k, v }: { k: string; v: string }) {
 }
 
 function Empty({ title }: { title: string }) {
-  return <div className="integration-empty"><span>○</span><p>{title}</p></div>;
+  return <EmptyState className="ahIntegrationEmpty" density="compact" title={title} description="Данные появятся после подтверждённой настройки или синхронизации." />;
 }

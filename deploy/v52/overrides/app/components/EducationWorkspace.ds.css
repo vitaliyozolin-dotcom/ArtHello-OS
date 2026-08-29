@@ -1,0 +1,476 @@
+.ahEducationPage {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.ahEducationPage .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahEducationPage .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahEducationPage .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahEducationPage .ahPageHeaderCopy p {
+  max-width: 900px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahEducationPage .ahPageHeaderActions,
+.ahEducationHeaderActions {
+  display: flex;
+  gap: 8px;
+}
+
+.ahEducationPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahEducationRule {
+  display: grid;
+  gap: 7px;
+  border-radius: 16px;
+  padding: 15px 17px;
+}
+
+.ahEducationRule > strong {
+  width: fit-content;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 4px 8px;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 13px;
+  letter-spacing: .04em;
+}
+
+.ahEducationRule > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.ahEducationBranches,
+.ahEducationTabs {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 14px;
+  background: var(--ah-color-surface);
+  padding-inline: 15px;
+}
+
+.ahEducationBranches .ahTabs,
+.ahEducationTabs .ahTabs {
+  width: 100%;
+  max-width: 100%;
+  gap: 18px;
+  overflow-x: auto;
+}
+
+.ahEducationBranches .ahTabs button,
+.ahEducationTabs .ahTabs button {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding-inline: 0;
+  font-size: 12px;
+}
+
+.ahEducationBranches .ahTabs b {
+  min-width: 18px;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 2px 5px;
+  color: var(--ah-color-primary);
+  font-size: 9px;
+  line-height: 13px;
+}
+
+.ahEducationFocus {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 14px;
+  align-items: center;
+  border-radius: 15px;
+  padding: 13px 15px;
+}
+
+.ahEducationFocus > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ahEducationFocus small,
+.ahEducationFocus span {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahEducationFocus strong {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.ahEducationKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahEducationKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+  text-align: left;
+}
+
+.ahEducationKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahEducationKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahEducationKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahEducationEmpty {
+  gap: 12px;
+  min-height: 144px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 16px;
+  background: var(--ah-color-surface);
+  padding: 28px 18px;
+}
+
+.ahEducationEmpty h3 {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahEducationEmpty p {
+  max-width: 620px;
+  font-size: var(--ah-compact-card-body-size);
+  font-weight: 400;
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahEducationEmpty .ahButton {
+  min-height: 36px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.ahEducationPage .edu-structure,
+.ahEducationPage .edu-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, .75fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.ahEducationPage .edu-panel,
+.ahEducationPage .program-grid > article,
+.ahEducationPage .progress-grid > article {
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 16px;
+  background: var(--ah-color-surface);
+  padding: 15px;
+  box-shadow: none;
+}
+
+.ahEducationPage .edu-panel-head {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.ahEducationPage .edu-panel-head p,
+.ahEducationPage .edu-panel-head > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 13px;
+  letter-spacing: .04em;
+}
+
+.ahEducationPage .edu-panel-head h2 {
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 19px;
+}
+
+.ahEducationPage .edu-group-grid,
+.ahEducationPage .program-grid,
+.ahEducationPage .progress-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.ahEducationPage .edu-group-grid > button,
+.ahEducationPage .program-grid > article,
+.ahEducationPage .progress-grid > article,
+.ahEducationPage .lesson-list > article,
+.ahEducationPage .feedback-list > article,
+.ahEducationPage .comm-list > article {
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 13px;
+  background: var(--ah-color-surface);
+  padding: 12px;
+  color: var(--ah-color-text-primary);
+  text-align: left;
+}
+
+.ahEducationPage [data-ah-compact-card="true"] strong,
+.ahEducationPage [data-ah-compact-card="true"] h2,
+.ahEducationPage [data-ah-compact-card="true"] h3 {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahEducationPage [data-ah-compact-card="true"] small,
+.ahEducationPage [data-ah-compact-card="true"] p {
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahEducationPage .edu-table {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ahEducationPage .edu-table table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+}
+
+.ahEducationPage .edu-table th {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ah-color-border);
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.ahEducationPage .edu-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--ah-color-border);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahEducationPage .edu-inline-add,
+.ahEducationPage .edu-panel button,
+.ahEducationPage .program-grid button {
+  min-height: 34px;
+  border-radius: 9px;
+  font-size: 11px;
+}
+
+@media (max-width: 1024px) {
+  .ahEducationKpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ahEducationPage .edu-structure,
+  .ahEducationPage .edu-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .ahEducationPage {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahEducationPage .ahPageHeader {
+    display: grid;
+    gap: 16px;
+    align-items: start;
+  }
+
+  .ahEducationPage .ahPageHeaderCopy > small {
+    margin-bottom: 4px;
+    font-size: 11px;
+    line-height: 14px;
+  }
+
+  .ahEducationPage .ahPageHeaderCopy h1 {
+    font-size: 32px;
+    line-height: 1.02;
+  }
+
+  .ahEducationPage .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahEducationPage .ahPageHeaderActions,
+  .ahEducationPage .ahPageHeaderActions .ahEducationHeaderActions,
+  .ahEducationPage .ahPageHeaderActions .ahButton {
+    width: 100%;
+  }
+
+  .ahEducationHeaderActions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ahEducationPage .ahPageHeaderActions .ahButton {
+    min-height: 44px;
+    border-radius: 11px;
+    padding-inline: 10px;
+    font-size: 14px;
+  }
+
+  .ahEducationRule {
+    border-radius: 13px;
+    padding: 13px;
+  }
+
+  .ahEducationBranches,
+  .ahEducationTabs {
+    border-radius: 13px;
+    padding-inline: 12px;
+  }
+
+  .ahEducationFocus {
+    grid-template-columns: minmax(0, 1fr);
+    border-radius: 13px;
+    padding: 12px;
+  }
+
+  .ahEducationKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahEducationKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahEducationKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahEducationKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahEducationKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahEducationPage .edu-group-grid,
+  .ahEducationPage .program-grid,
+  .ahEducationPage .progress-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahEducationPage .edu-panel,
+  .ahEducationPage .program-grid > article,
+  .ahEducationPage .progress-grid > article {
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .ahEducationPage .edu-table {
+    overflow-x: visible;
+  }
+
+  .ahEducationPage .edu-table table,
+  .ahEducationPage .edu-table tbody {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .ahEducationPage .edu-table thead {
+    display: none;
+  }
+
+  .ahEducationPage .edu-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .ahEducationPage .edu-table tbody tr {
+    display: grid;
+    gap: 8px;
+    border: 1px solid var(--ah-color-border);
+    border-radius: 13px;
+    background: var(--ah-color-surface);
+    padding: 12px;
+  }
+
+  .ahEducationPage .edu-table td {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+    gap: 8px;
+    border: 0;
+    padding: 0;
+    font-size: 11px;
+    line-height: 15px;
+  }
+}
+
+@media (max-width: 359px) {
+  .ahEducationKpis,
+  .ahEducationHeaderActions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
