@@ -14,7 +14,7 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 144;
+const expectedPngCount = 200;
 
 const waveRoutes = {
   legal: {
@@ -71,6 +71,34 @@ const waveRoutes = {
     table: ".ahFoodShipmentTable",
     empty: ".ahFoodPage .ahEmptyState",
     populatedTab: "Отгрузки",
+    requireModal: false,
+  },
+  safety: {
+    heading: "Безопасность объектов",
+    root: ".ahSafetyPage",
+    legacy: ".safety-workspace",
+    endpoint: /\/api\/safety(?:\?.*)?$/,
+    kpis: ".ahSafetyKpis > .ahKpiCard",
+    kpiGrid: ".ahSafetyKpis",
+    tabs: ".ahSafetyTabs .ahTabs",
+    table: ".ahSafetyRepairTable",
+    empty: ".ahSafetyPage .ahEmptyState",
+    modal: ".ahSafetyModal",
+    modalTrigger: /^\+\s*Зафиксировать инцидент$/,
+    modalFields: ["systemId", "category", "severity", "description"],
+    populatedTab: "Ремонты и документы",
+  },
+  medical: {
+    heading: "Медицинское сопровождение",
+    root: ".ahMedicalPage",
+    legacy: ".medical-workspace",
+    endpoint: /\/api\/medical(?:\?.*)?$/,
+    kpis: ".ahMedicalKpis > .ahKpiCard",
+    kpiGrid: ".ahMedicalKpis",
+    tabs: ".ahMedicalTabs .ahTabs",
+    table: ".ahMedicalAuditTable",
+    empty: ".ahMedicalPage .ahEmptyState",
+    populatedTab: "Аудит просмотров",
     requireModal: false,
   },
 };
@@ -186,11 +214,52 @@ const populatedFood = {
   boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
 };
 
+const emptySafety = {
+  systems: [], equipment: [], checks: [], faults: [], incidents: [], repairs: [], nextChecks: [], guardShifts: [], entityNames: {},
+  summary: { systems: 0, equipment: 0, criticalEquipment: 0, completed: 0, failed: 0, openFaults: 0, readinessPercent: 0, actsMissing: 0 },
+  chain: { equipmentId: "", checkId: "", faultId: "", repairId: "", actId: "", paymentId: "", nextCheckId: "" },
+  boundary: "Пустой контур не создаёт системы, проверки, неисправности или инциденты автоматически.",
+};
+
+const populatedSafety = {
+  systems: [{ id: "SAFE-VISUAL-001", systemType: "СКУД", name: "Контроль доступа", objectEntityId: "OBJ-VISUAL-001", schemeRef: "SCHEME-VISUAL-001", journalRef: "JOURNAL-VISUAL-001", responsibleEntityId: "ENT-VISUAL-SAFETY", status: "Работает" }],
+  equipment: [{ id: "EQUIP-VISUAL-001", systemId: "SAFE-VISUAL-001", name: "Контроллер входа", inventoryNumber: "INV-VISUAL-001", location: "Главный вход", contractorId: "ENT-VISUAL-CONTRACTOR", criticality: "Высокая", nextCheckAt: "2026-09-10", status: "Работает" }],
+  checks: [{ id: "CHECK-VISUAL-SAFE-001", equipmentId: "EQUIP-VISUAL-001", objectEntityId: "OBJ-VISUAL-001", checkType: "Плановая проверка", scheduledAt: "2026-08-28", checkedAt: "2026-08-28T09:00:00.000Z", result: "Выявлена неисправность", evidence: "Протокол visual fixture", responsibleEntityId: "ENT-VISUAL-SAFETY", status: "Завершена" }],
+  faults: [{ id: "FAULT-VISUAL-001", checkId: "CHECK-VISUAL-SAFE-001", equipmentId: "EQUIP-VISUAL-001", severity: "Высокая", description: "Нестабильный сигнал датчика", detectedAt: "2026-08-28T09:00:00.000Z", status: "В ремонте", relatedTaskId: 712, sla: "8 часов" }],
+  incidents: [{ id: "INC-VISUAL-001", objectEntityId: "OBJ-VISUAL-001", systemId: "SAFE-VISUAL-001", happenedAt: "2026-08-28T11:30:00.000Z", category: "СКУД", severity: "Средняя", description: "Сигнал контроля потребовал проверки", response: "Ответственный уведомлён", status: "В работе" }],
+  repairs: [{ id: "REPAIR-VISUAL-001", faultId: "FAULT-VISUAL-001", contractorId: "ENT-VISUAL-CONTRACTOR", actionType: "Диагностика", startedAt: "2026-08-28", completedAt: "", result: "", actDocumentId: "", costMinor: 1250000, paymentOperationId: "", status: "В работе", payable: false }],
+  nextChecks: [{ id: "NEXT-VISUAL-001", equipmentId: "EQUIP-VISUAL-001", sourceRepairId: "REPAIR-VISUAL-001", scheduledAt: "2026-09-10", checkType: "Контроль после ремонта", responsibleEntityId: "ENT-VISUAL-SAFETY", status: "Запланирована" }],
+  guardShifts: [{ id: "SHIFT-VISUAL-SAFE-001", objectEntityId: "OBJ-VISUAL-001", employeeEntityId: "ENT-VISUAL-GUARD", post: "Главный вход", startedAt: "2026-08-29T08:00:00.000Z", endedAt: "2026-08-29T20:00:00.000Z", journalRef: "JOURNAL-VISUAL-002", status: "На посту" }],
+  entityNames: { "ENT-VISUAL-SAFETY": "Ответственный visual fixture", "ENT-VISUAL-CONTRACTOR": "Синтетический подрядчик", "ENT-VISUAL-GUARD": "Сотрудник visual fixture" },
+  summary: { systems: 1, equipment: 1, criticalEquipment: 1, completed: 1, failed: 1, openFaults: 1, readinessPercent: 84, actsMissing: 1 },
+  chain: { equipmentId: "EQUIP-VISUAL-001", checkId: "CHECK-VISUAL-SAFE-001", faultId: "FAULT-VISUAL-001", repairId: "REPAIR-VISUAL-001", actId: "не приложен", paymentId: "заблокирована", nextCheckId: "NEXT-VISUAL-001" },
+  boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
+};
+
+const emptyMedical = {
+  documents: [], restrictions: [], cases: [], incidents: [], actions: [], audit: [],
+  summary: { documents: 0, expiring: 0, activeRestrictions: 0, openCases: 0, pendingActions: 0 },
+  boundary: "Пустой контур не раскрывает персональные или косвенные медицинские сведения.",
+};
+
+const populatedMedical = {
+  documents: [{ id: "MEDDOC-VISUAL-001", subjectEntityId: "ENT-VISUAL-SUBJECT", subjectType: "Сотрудник", documentType: "Допуск к работе", documentRef: "MEDREF-VISUAL-001", validFrom: "2026-08-01", validUntil: "2027-08-01", status: "Действует", storageClass: "Защищённое хранение", minimumSummary: "Допуск подтверждён без раскрытия избыточных сведений", confirmedAt: "2026-08-28T10:00:00.000Z", expiryBand: "Действует" }],
+  restrictions: [{ id: "MEDREST-VISUAL-001", subjectEntityId: "ENT-VISUAL-SUBJECT", recordId: "MEDDOC-VISUAL-001", category: "Рабочий режим", limitation: "Щадящий режим", validUntil: "2026-09-30", actionScope: "Только необходимая корректировка нагрузки", status: "Активно" }],
+  cases: [{ id: "MEDCASE-VISUAL-001", subjectEntityId: "ENT-VISUAL-SUBJECT", caseType: "Контроль допуска", openedAt: "2026-08-28T09:00:00.000Z", severity: "Плановая", minimumSummary: "Требуется подтверждение рабочего режима", responsibleEntityId: "ENT-VISUAL-MEDICAL", dueAt: "2026-08-30T12:00:00.000Z", status: "Открыт", closedAt: "", confirmationRef: "" }],
+  incidents: [{ id: "MEDINC-VISUAL-001", caseId: "MEDCASE-VISUAL-001", happenedAt: "2026-08-28T09:00:00.000Z", incidentType: "Запрос контроля", minimumFacts: "Получен запрос на проверку допуска", responseRequired: "Подтвердить режим", status: "Открыт" }],
+  actions: [{ id: "MEDACT-VISUAL-001", caseId: "MEDCASE-VISUAL-001", incidentId: "MEDINC-VISUAL-001", actionType: "Проверить допуск", responsibleEntityId: "ENT-VISUAL-MEDICAL", dueAt: "2026-08-30T12:00:00.000Z", completedAt: "", result: "", confirmationRef: "", status: "Ожидает" }],
+  audit: [{ id: 1, action: "VIEW", entityType: "MEDICAL_SCOPE", entityId: "MEDCASE-VISUAL-001", createdAt: "2026-08-29T08:00:00.000Z" }],
+  summary: { documents: 1, expiring: 0, activeRestrictions: 1, openCases: 1, pendingActions: 1 },
+  boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
+};
+
 const waveFixtures = {
   legal: { empty: emptyLegal, populated: populatedLegal },
   accounting: { empty: emptyAccounting, populated: populatedAccounting },
   procurement: { empty: emptyProcurement, populated: populatedProcurement },
   food: { empty: emptyFood, populated: populatedFood },
+  safety: { empty: emptySafety, populated: populatedSafety },
+  medical: { empty: emptyMedical, populated: populatedMedical },
 };
 
 function persist() {

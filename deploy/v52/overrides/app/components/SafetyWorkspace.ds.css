@@ -1,0 +1,742 @@
+.ahSafetyPage {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.ahSafetyPage .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahSafetyPage .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahSafetyPage .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahSafetyPage .ahPageHeaderCopy p {
+  max-width: 780px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahSafetyPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahSafetyStatus {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ahSafetyStatus > .ahCard {
+  width: min(620px, 100%);
+  padding: 0;
+}
+
+.ahSafetyBoundary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+
+.ahSafetyBoundary strong {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 5px 10px;
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 16px;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.ahSafetyBoundary span {
+  min-width: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ahSafetyKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahSafetyKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+}
+
+.ahSafetyKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahSafetyKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahSafetyKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahSafetyKpiWarning {
+  border-color: #f0d4b5;
+  background: var(--ah-color-warning-soft);
+}
+
+.ahSafetyTabs {
+  min-width: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--ah-color-border);
+}
+
+.ahSafetyTabs .ahTabs {
+  width: 100%;
+  max-width: 100%;
+  gap: 18px;
+  overflow-x: auto;
+}
+
+.ahSafetyTabs .ahTabs button {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+.ahSafetyLayout,
+.ahSafetySystemGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ahSafetyPanel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.ahSafetyPanel > .ahEmptyState,
+.ahSafetyStatus .ahEmptyState {
+  min-height: 120px;
+  padding: 24px 20px;
+}
+
+.ahSafetyPanel > .ahEmptyState h3,
+.ahSafetyStatus .ahEmptyState h3 {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 15px;
+}
+
+.ahSafetyPanel > .ahEmptyState p,
+.ahSafetyStatus .ahEmptyState p {
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+}
+
+.ahSafetyPanelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ahSafetyPanelHead > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.ahSafetyPanelHead p,
+.ahSafetyPanelHead h2 {
+  margin: 0;
+}
+
+.ahSafetyPanelHead p {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 14px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.ahSafetyPanelHead h2 {
+  color: var(--ah-color-text-primary);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 21px;
+}
+
+.ahSafetyPanelHead > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 5px 8px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahSafetySystemList,
+.ahSafetyChain,
+.ahSafetyCheckList,
+.ahSafetyGuardList,
+.ahSafetyEquipmentList,
+.ahSafetyFaultList,
+.ahSafetyIncidentList {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ahSafetySystemList .ahCompactListCard,
+.ahSafetyChain .ahCompactListCard,
+.ahSafetyCheckList .ahCompactListCard,
+.ahSafetyGuardList .ahCompactListCard {
+  min-height: 58px;
+  border-radius: 13px;
+  padding: 10px 12px;
+}
+
+.ahSafetySystemMeta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ahSafetySystemMeta span {
+  display: grid;
+  gap: 3px;
+  border-radius: 11px;
+  background: var(--ah-color-surface-soft);
+  padding: 10px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahSafetySystemMeta strong {
+  color: var(--ah-color-text-primary);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.ahSafetyEquipmentList > article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content max-content;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 13px;
+  padding: 12px;
+}
+
+.ahSafetyEquipmentList > article > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.ahSafetyEquipmentList strong,
+.ahSafetyFaultList strong,
+.ahSafetyIncidentList strong {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahSafetyEquipmentList small,
+.ahSafetyFaultList p,
+.ahSafetyIncidentList p,
+.ahSafetyIncidentList small {
+  margin: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahSafetyEquipmentList em,
+.ahSafetyEquipmentList span,
+.ahSafetyIncidentList em {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+}
+
+.ahSafetyEquipmentList .ahButton,
+.ahSafetyFaultList .ahButton,
+.ahSafetyRepairTable .ahButton {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.ahSafetyFaultList > article,
+.ahSafetyIncidentList > article {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 13px;
+  padding: 12px;
+}
+
+.ahSafetyFaultList header,
+.ahSafetyIncidentList header,
+.ahSafetyFaultList footer,
+.ahSafetyIncidentList footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahSafetyRepairTable {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.ahSafetyRepairTable table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahSafetyRepairTable th,
+.ahSafetyRepairTable td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--ah-color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ahSafetyRepairTable th {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.ahSafetyRepairTable td:first-child {
+  display: grid;
+  gap: 3px;
+  font-weight: 600;
+}
+
+.ahSafetyRepairTable td small {
+  color: var(--ah-color-text-secondary);
+  font-weight: 400;
+}
+
+.ahSafetyModalLayer {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.ahSafetyModalScrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(17, 22, 45, .46);
+}
+
+.ahSafetyModal {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(650px, 100%);
+  max-height: calc(100dvh - 48px);
+  gap: 16px;
+  overflow: auto;
+  box-sizing: border-box;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 20px;
+  background: var(--ah-color-surface);
+  padding: 20px;
+  box-shadow: 0 24px 70px rgba(17, 22, 45, .18);
+}
+
+.ahSafetyModalCompact {
+  width: min(540px, 100%);
+}
+
+.ahSafetyModal > header,
+.ahSafetyModal > footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ahSafetyModal > header div {
+  display: grid;
+  gap: 3px;
+}
+
+.ahSafetyModal > header p,
+.ahSafetyModal > header h2 {
+  margin: 0;
+}
+
+.ahSafetyModal > header p {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 14px;
+  text-transform: uppercase;
+}
+
+.ahSafetyModal > header h2 {
+  font-size: 21px;
+  line-height: 26px;
+}
+
+.ahSafetyModal > header > button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  font-size: 22px;
+}
+
+.ahSafetyFormGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.ahSafetyModal label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahSafetyModal input,
+.ahSafetyModal select,
+.ahSafetyModal textarea {
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 11px;
+  background: var(--ah-color-surface);
+  padding: 9px 11px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.ahSafetyModal textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.ahSafetyModal > footer {
+  justify-content: flex-end;
+}
+
+@media (max-width: 1024px) {
+  .ahSafetyKpis,
+  .ahSafetySystemGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .ahSafetyPage {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahSafetyPage .ahPageHeader {
+    align-items: start;
+  }
+
+  .ahSafetyPage .ahPageHeaderCopy > small {
+    margin-bottom: 5px;
+    font-size: var(--ah-mobile-eyebrow-size);
+    font-weight: 750;
+    line-height: var(--ah-mobile-eyebrow-line);
+    letter-spacing: .12em;
+  }
+
+  .ahSafetyPage .ahPageHeaderCopy h1 {
+    font-size: var(--ah-font-size-page-title-mobile);
+    font-weight: 700;
+    line-height: var(--ah-line-height-page-title-mobile);
+  }
+
+  .ahSafetyPage .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahSafetyPage .ahPageHeaderActions,
+  .ahSafetyPage .ahPageHeaderActions .ahButton {
+    width: 100%;
+  }
+
+  .ahSafetyPage .ahPageHeaderActions .ahButton {
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    font-size: var(--ah-mobile-action-size);
+  }
+
+  .ahSafetyBoundary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    border-radius: var(--ah-mobile-info-radius);
+    padding: var(--ah-mobile-info-padding-block) var(--ah-mobile-info-padding-inline);
+  }
+
+  .ahSafetyBoundary strong {
+    min-height: 0;
+    padding: 5px 8px;
+    font-size: var(--ah-mobile-info-label-size);
+    font-weight: 800;
+    line-height: var(--ah-mobile-info-label-line);
+  }
+
+  .ahSafetyBoundary span {
+    font-size: var(--ah-mobile-info-body-size);
+    line-height: var(--ah-mobile-info-body-line);
+  }
+
+  .ahSafetyKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahSafetyKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahSafetyKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahSafetyKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahSafetyKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahSafetyTabs .ahTabs {
+    gap: 14px;
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+
+  .ahSafetyTabs .ahTabs button {
+    min-height: 38px;
+    font-size: 12px;
+  }
+
+  .ahSafetyLayout,
+  .ahSafetySystemGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahSafetyPanel {
+    gap: 14px;
+    border-radius: 14px;
+    padding: 13px;
+  }
+
+  .ahSafetyPanelHead {
+    gap: 10px;
+  }
+
+  .ahSafetyPanelHead h2 {
+    font-size: 14px;
+    line-height: 18px;
+  }
+
+  .ahSafetyPanelHead > span {
+    font-size: 9px;
+    line-height: 12px;
+  }
+
+  .ahSafetySystemList .ahCompactListCard,
+  .ahSafetyChain .ahCompactListCard,
+  .ahSafetyCheckList .ahCompactListCard,
+  .ahSafetyGuardList .ahCompactListCard,
+  .ahSafetyEquipmentList > article,
+  .ahSafetyFaultList > article,
+  .ahSafetyIncidentList > article {
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+  }
+
+  .ahSafetyEquipmentList > article {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .ahSafetyEquipmentList > article > span,
+  .ahSafetyEquipmentList > article > .ahButton {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .ahSafetyRepairTable {
+    overflow: visible;
+  }
+
+  .ahSafetyRepairTable table,
+  .ahSafetyRepairTable tbody,
+  .ahSafetyRepairTable tr,
+  .ahSafetyRepairTable td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .ahSafetyRepairTable thead {
+    display: none;
+  }
+
+  .ahSafetyRepairTable tbody {
+    display: grid;
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahSafetyRepairTable tr {
+    display: grid;
+    gap: 0;
+    border: 1px solid var(--ah-color-border);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    background: var(--ah-color-surface);
+    padding: 9px 12px;
+  }
+
+  .ahSafetyRepairTable td,
+  .ahSafetyRepairTable td:first-child {
+    display: grid;
+    grid-template-columns: minmax(84px, .7fr) minmax(0, 1.3fr);
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--ah-color-border);
+    font-size: var(--ah-compact-card-body-size);
+    line-height: var(--ah-compact-card-body-line);
+    overflow-wrap: anywhere;
+  }
+
+  .ahSafetyRepairTable td::before {
+    content: attr(data-label);
+    color: var(--ah-color-text-secondary);
+    font-size: var(--ah-compact-card-body-size);
+    font-weight: 400;
+  }
+
+  .ahSafetyRepairTable td:last-child {
+    border-bottom: 0;
+  }
+
+  .ahSafetyPanel > .ahEmptyState {
+    gap: 10px;
+    min-height: 116px;
+    padding: 20px 14px;
+  }
+
+  .ahSafetyModalLayer {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .ahSafetyModal {
+    width: 100%;
+    max-height: calc(100dvh - 24px);
+    border-radius: 18px;
+    padding: 16px;
+  }
+
+  .ahSafetyFormGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahSafetyModal > footer {
+    flex-direction: column-reverse;
+  }
+
+  .ahSafetyModal > footer .ahButton {
+    width: 100%;
+    min-height: var(--ah-mobile-action-height);
+  }
+}
+
+@media (max-width: 359px) {
+  .ahSafetyKpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

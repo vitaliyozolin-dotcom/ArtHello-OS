@@ -115,4 +115,4 @@ export function PeriodSelector({ label = "Отчётный период", period
   return <div className="ahPeriodSelector"><div className="ahPeriodTop"><strong>{label}</strong><button type="button" onClick={onCurrent}>Текущий месяц</button></div><div className="ahPeriodControls"><button type="button" onClick={onPrevious} aria-label="Предыдущий месяц">←</button>{centerControl ?? <div aria-label={label}>{periodLabel}</div>}<button type="button" onClick={onNext} aria-label="Следующий месяц">→</button></div></div>;
 }
 
-export const designSystemVersion = "1.2-operational-registry";
+export const designSystemVersion = "1.3-protected-operations";
