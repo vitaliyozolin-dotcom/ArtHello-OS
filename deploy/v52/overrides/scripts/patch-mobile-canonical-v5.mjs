@@ -36,7 +36,7 @@ polish += `
 .owner-dashboard-kpis{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:12px!important;overflow:visible!important}
 .owner-dashboard-kpi{width:100%!important;min-width:0!important;min-height:104px!important;height:auto!important;max-height:none!important;padding:16px!important;display:grid!important;grid-template-columns:42px minmax(0,1fr)!important;align-items:center!important;column-gap:14px!important;text-align:left!important}
 .owner-dashboard-kpi-icon{width:42px!important;min-width:42px!important;height:42px!important;margin:0!important}
-.owner-dashboard-kpi-copy{position:static!important;display:grid!important;min-width:0!important;gap:3px!important;padding:0!important;margin:0!important;opacity:1!important;visibility:visible!important}
+.owner-dashboard-kpi-copy{display:grid!important;position:static!important;min-width:0!important;gap:3px!important;padding:0!important;margin:0!important;opacity:1!important;visibility:visible!important}
 .owner-dashboard-kpi-copy strong{font-size:22px!important;line-height:26px!important;color:var(--ah-system-text)!important}
 .owner-dashboard-kpi-copy em{font-size:10px!important;line-height:13px!important;color:var(--ah-system-muted)!important}
 .family-workspace,.contractor-workspace{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important}
