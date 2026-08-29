@@ -472,7 +472,11 @@ async function captureWaveRoute(browser, base, storageState, label, viewport, ro
   const { context, page } = await stablePage(browser, base, storageState, viewport, routeName, apiFixture);
   await page.getByRole("heading", { name: config.heading, exact: true }).waitFor({ state: "visible", timeout: 30000 });
   if (mode === "populated" && config.populatedTab) {
-    await page.getByRole("button", { name: config.populatedTab, exact: true }).first().click();
+    const populatedTab = label === "pilot"
+      ? page.locator(config.tabs).getByRole("tab", { name: config.populatedTab, exact: true })
+      : page.getByRole("button", { name: config.populatedTab, exact: true });
+    if (await populatedTab.count() !== 1) throw new Error(`${config.heading}: populated tab ${config.populatedTab} is missing or ambiguous`);
+    await populatedTab.click();
     await page.waitForTimeout(250);
   }
   if (label === "pilot") {
