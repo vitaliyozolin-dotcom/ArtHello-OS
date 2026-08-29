@@ -259,7 +259,7 @@ function PurchaseRequestModal({ entities, busy, close, save }: {
         <label className="ahProcurementWideField"><span>Что требуется *</span><input name="itemName" required minLength={4} placeholder="Товар, оборудование или услуга" /></label>
         <label><span>Количество *</span><input name="quantity" type="number" min="1" step="1" required defaultValue="1" /></label>
         <label><span>Бюджет, ₽ *</span><input name="budgetRubles" type="number" min="0.01" step="0.01" required /></label>
-        <label><span>Нужно до *</span><input name="needBy" type="date" required defaultValue={new Date(Date.now() + 21 * 86400000).toISOString().slice(0, 10)} /></label>
+        <label><span>Нужно до *</span><input name="needBy" type="date" required /></label>
         <label className="ahProcurementWideField"><span>Обоснование *</span><textarea name="justification" required minLength={8} placeholder="Зачем нужна закупка и какой результат ожидается" /></label>
       </div>
       <footer><Button variant="secondary" onClick={close}>Отмена</Button><Button type="submit" variant="primary" disabled={busy || !entities.length}>{busy ? "Сохраняем…" : "Создать заявку"}</Button></footer>

@@ -112,6 +112,7 @@ test("Wave 2 preserves procurement reads, mutations, forms and navigation", () =
   assert.match(procurement, /\bonOpenFinance\b/);
   assert.match(procurement, /await\s+load\s*\(\s*\)/);
   assert.match(procurement, /onTasksChanged\s*\(\s*\)/);
+  assert.doesNotMatch(procurement, /Date\.now\s*\(/, "ProcurementWorkspace must stay pure during render");
 });
 
 test("Wave 2 preserves food reads, mutations and finance navigation", () => {
