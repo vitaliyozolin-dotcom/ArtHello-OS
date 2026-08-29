@@ -14,7 +14,7 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 200;
+const expectedPngCount = 284;
 
 const waveRoutes = {
   legal: {
@@ -100,6 +100,50 @@ const waveRoutes = {
     empty: ".ahMedicalPage .ahEmptyState",
     populatedTab: "Аудит просмотров",
     requireModal: false,
+  },
+  strategy: {
+    heading: "Проекты и стратегия",
+    root: ".ahStrategyPage",
+    legacy: ".strategy-workspace",
+    endpoint: /\/api\/strategy(?:\?.*)?$/,
+    kpis: ".ahStrategyKpis > .ahKpiCard",
+    kpiGrid: ".ahStrategyKpis",
+    tabs: ".ahStrategyTabs .ahTabs",
+    table: ".ahStrategyProjectGrid",
+    empty: ".ahStrategyPage .ahEmptyState",
+    populatedTab: "Проекты",
+    requireModal: false,
+    requireTable: false,
+  },
+  analytics: {
+    heading: "Аналитика и ИИ",
+    root: ".ahAnalyticsPage",
+    legacy: ".analytics-workspace",
+    endpoint: /\/api\/analytics(?:\?.*)?$/,
+    kpis: ".ahAnalyticsKpis > .ahKpiCard",
+    kpiGrid: ".ahAnalyticsKpis",
+    tabs: ".ahAnalyticsTabs .ahTabs",
+    table: ".ahAnalyticsMetricTable",
+    empty: ".ahAnalyticsPage .ahEmptyState",
+    populatedTab: "Сигналы",
+    requireModal: false,
+    requireTable: false,
+    tabCount: 6,
+  },
+  readiness: {
+    heading: "Готовность ArtHello OS",
+    root: ".ahReadinessPage",
+    legacy: ".readiness-workspace",
+    endpoint: /\/api\/readiness(?:\?.*)?$/,
+    kpis: ".ahReadinessKpis > .ahKpiCard",
+    kpiGrid: ".ahReadinessKpis",
+    tabs: ".ahReadinessTabs .ahTabs",
+    table: ".ahReadinessGateGrid",
+    empty: ".ahReadinessPage .ahEmptyState",
+    populatedTab: "Release gates",
+    requireModal: false,
+    requireTable: false,
+    tabCount: 6,
   },
 };
 
@@ -253,6 +297,70 @@ const populatedMedical = {
   boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
 };
 
+const emptyStrategy = {
+  goals: [], kpis: [], initiatives: [], projects: [], events: [], participants: [], results: [], deviations: [],
+  summary: { goals: 0, kpisOnTrack: 0, kpisTotal: 0, projects: 0, projectsAtRisk: 0, openDeviations: 0, past: 0, future: 0, feedbackAverage: 0 },
+  chain: {},
+  boundary: "Пустой контур не создаёт цели, проекты, KPI или результаты автоматически.",
+};
+
+const populatedStrategy = {
+  goals: [{ id: "GOAL-VISUAL-001", level: "Компания", unitEntityId: "ENT-VISUAL-UNIT", title: "Повысить предсказуемость проектов", period: "2026", ownerEntityId: "ENT-VISUAL-OWNER", status: "В работе", successDefinition: "Все контрольные события имеют владельца, срок и измеримый результат" }],
+  kpis: [{ id: "KPI-VISUAL-001", goalId: "GOAL-VISUAL-001", name: "Проекты в срок", unit: "%", targetValue: 90, actualValue: 82, forecastValue: 88, varianceValue: -8, status: "Риск", sourceRef: "VISUAL-FIXTURE", updatedAt: "2026-08-29T08:00:00.000Z" }],
+  initiatives: [{ id: "INIT-VISUAL-001", goalId: "GOAL-VISUAL-001", kpiId: "KPI-VISUAL-001", title: "Единый проектный ритм", hypothesis: "Еженедельная проверка контрольных событий сократит отклонения", ownerEntityId: "ENT-VISUAL-OWNER", plannedStart: "2026-08-01", plannedEnd: "2026-12-31", status: "В работе" }],
+  projects: [{ id: "PRJ-VISUAL-001", initiativeId: "INIT-VISUAL-001", goalId: "GOAL-VISUAL-001", title: "Миграция Design System", ownerEntityId: "ENT-VISUAL-OWNER", budgetId: "BUD-VISUAL-001", budgetPlanMinor: 24000000, budgetActualMinor: 12300000, startedAt: "2026-08-01", dueAt: "2026-10-01", status: "В работе", outcome: "Единая визуальная система для рабочих разделов", budget: { remainingMinor: 11700000, utilizationPercent: 51, status: "В норме" } }],
+  events: [{ id: "EVENT-VISUAL-001", projectId: "PRJ-VISUAL-001", title: "Контрольный просмотр миграции", eventAt: "2026-09-01T10:00:00.000Z", location: "Онлайн", responsibleEntityId: "ENT-VISUAL-OWNER", budgetMinor: 0, actualMinor: 0, status: "Запланировано", result: "", feedbackScore: 0 }],
+  participants: [{ id: "PART-VISUAL-001", eventId: "EVENT-VISUAL-001", participantEntityId: "ENT-VISUAL-OWNER", participantRole: "Владелец", attendanceStatus: "Ожидается", feedback: "" }],
+  results: [],
+  deviations: [{ id: "DEV-VISUAL-001", kpiId: "KPI-VISUAL-001", projectId: "PRJ-VISUAL-001", deviationType: "Срок", varianceValue: -8, explanation: "Часть разделов ещё не прошла визуальный gate", decision: "Продолжить плановую миграцию волнами", status: "Открыто", relatedTaskId: null, detectedAt: "2026-08-29T08:00:00.000Z" }],
+  summary: { goals: 1, kpisOnTrack: 0, kpisTotal: 1, projects: 1, projectsAtRisk: 1, openDeviations: 1, past: 0, future: 1, feedbackAverage: 0 },
+  chain: { goalId: "GOAL-VISUAL-001", initiativeId: "INIT-VISUAL-001", projectId: "PRJ-VISUAL-001", eventId: "EVENT-VISUAL-001" },
+  boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
+};
+
+const emptyAnalytics = {
+  dataMode: "empty", metricDefinitions: [], signals: [], contracts: [], runs: [], optOuts: [],
+  owner: { cashPeriod: "", cashFlowMinor: 0, cashAprilMinor: 0, cashForecastFloorMinor: 0, nextPaymentsMinor: 0, highRiskFamilies: 0, averageProgress: 0, activeEmployees: 0, openSafetyFaults: 0, foodMarginPercent: 0, projectsAtRisk: 0, openDataIssues: 0, verifiedLiveSources: 0 },
+  charts: { cash: [], forecast: [], risks: [] },
+  sourceCoverage: { fact: [], synthetic: [], unavailable: [] },
+  boundary: "Пустой аналитический контур не создаёт метрики или сигналы автоматически.",
+  modelBoundary: "Модельный расчёт недоступен без проверяемого контракта.",
+};
+
+const populatedAnalytics = {
+  dataMode: "source_only",
+  metricDefinitions: [{ id: "METRIC-VISUAL-001", name: "Чистый денежный поток", category: "Финансы", definition: "Поступления минус списания", formula: "receipts - outflows", unit: "₽", grain: "месяц", sourceTables: "operations", sourceQuality: "Проверено visual fixture", freshness: "2026-08-29", ownerEntityId: "ENT-VISUAL-OWNER", targetValue: 1000000, sensitive: false }],
+  signals: [{ id: "SIGNAL-VISUAL-001", contractId: "CONTRACT-VISUAL-001", domain: "Финансы", signalType: "Отклонение", severity: "Высокая", title: "Прогноз ниже целевого остатка", evidence: "Синтетический денежный сценарий", explanation: "Плановые списания превышают поступления", recommendation: "Проверить календарь оплат", sourceRefs: "VISUAL-FIXTURE", confidence: 88, status: "Открыт", relatedTaskId: null, humanDecision: "", decisionEvidence: "", detectedAt: "2026-08-29T08:00:00.000Z" }],
+  contracts: [{ id: "CONTRACT-VISUAL-001", name: "Контроль денежного разрыва", inputData: "Операции и план оплат", expectedResult: "Предупреждение о прогнозном разрыве", allowedActions: "Показать сигнал", forbiddenActions: "Изменять операции или выполнять оплату", humanOwner: "ENT-VISUAL-OWNER", costMinor: 1000, benefitMetric: "Количество предотвращённых разрывов", autoStopCondition: "Нет проверяемого источника", optOutAllowed: true, optOutProcedure: "Отключить контракт в реестре", fallbackFunctionality: "Ручной финансовый отчёт", stoppedDataProcessing: "Плановые операции", historicalDataPolicy: "Сохраняется аудит решения", optOutImpact: "Сигналы перестанут формироваться", status: "Активен", version: "1.0", sourceRefs: "VISUAL-FIXTURE", activeOptOuts: 0 }],
+  runs: [{ id: "RUN-VISUAL-001", contractId: "CONTRACT-VISUAL-001", ranAt: "2026-08-29T08:00:00.000Z", modelVersion: "rule-1.0", status: "Завершён", inputSnapshotRef: "VISUAL-SNAPSHOT", outputType: "SIGNAL", outputSummary: "Обнаружен прогнозный риск", confidence: 88, costMinor: 1000, explanation: "Расчёт по синтетическому fixture", humanDecision: "Ожидается", isSynthetic: true }],
+  optOuts: [],
+  owner: { cashPeriod: "2026-08", cashFlowMinor: 6500000, cashAprilMinor: 6500000, cashForecastFloorMinor: -1200000, nextPaymentsMinor: 4300000, highRiskFamilies: 1, averageProgress: 84, activeEmployees: 12, openSafetyFaults: 1, foodMarginPercent: 33, projectsAtRisk: 1, openDataIssues: 1, verifiedLiveSources: 2 },
+  charts: { cash: [{ period: "2026-08", receiptsMinor: 12000000, outflowsMinor: 5500000, netMinor: 6500000, factRows: 2, syntheticRows: 0 }], forecast: [{ forecastDate: "2026-09-01", direction: "Списание", amountMinor: 4300000, probability: 80, weightedMinor: 3440000, balanceMinor: -1200000, isGap: true }], risks: [{ domain: "Финансы", total: 1, high: 1 }] },
+  sourceCoverage: { fact: ["Операции"], synthetic: ["Прогноз"], unavailable: ["Банк API"] },
+  boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
+  modelBoundary: "Прогноз является расчётным сценарием и требует решения человека.",
+};
+
+const emptyReadiness = {
+  dataMode: "empty", scenarios: [], gates: [], runs: [], drills: [], decisions: [],
+  summary: { passedScenarios: 0, totalScenarios: 0, passedGates: 0, totalGates: 0, productionReady: false, blockedGateIds: [] },
+  testLayers: [], boundary: "Проверки не настроены.", medicalBoundary: "Медицинские данные закрыты.", productionDecision: "Production закрыт до сохранённой приёмки.",
+};
+
+const populatedReadiness = {
+  dataMode: "source_only",
+  scenarios: [{ id: "SCN-VISUAL-001", number: 1, name: "Проверка рабочего раздела", chain: "route → data → action → audit", owner_entity_id: "ENT-VISUAL-OWNER", status: "Пройден", data_boundary: "Только синтетический visual fixture", evidence: "VISUAL-REPORT", failure: "", last_run_at: "2026-08-29T08:00:00.000Z", duration_ms: 840, steps: [{ id: "STEP-VISUAL-001", step_order: 1, step_name: "Открыть раздел", entity_type: "ROUTE", entity_id: "strategy", check_type: "VISUAL", status: "Пройден", evidence: "Скриншот сохранён" }] }],
+  gates: [{ id: "GATE-VISUAL-001", name: "Design System visual", status: "Пройден", required: 1, evidence: "Синтетический A/B-отчёт", owner_entity_id: "ENT-VISUAL-OWNER", updated_at: "2026-08-29T08:00:00.000Z" }],
+  runs: [{ id: "READY-RUN-VISUAL-001", status: "Пройден", passed: 1, failed: 0, finished_at: "2026-08-29T08:00:00.000Z", initiated_by: "visual-gate" }],
+  drills: [{ id: "DRILL-VISUAL-001", drill_type: "Application rollback", scope: "Изолированный preview", status: "Пройден", rpo_minutes: 0, rto_minutes: 5, evidence: "Checkpoint доступен", limitation: "Не заменяет live restore базы" }],
+  decisions: [],
+  summary: { passedScenarios: 1, totalScenarios: 1, passedGates: 1, totalGates: 1, productionReady: false, blockedGateIds: ["PRODUCTION-APPROVAL"] },
+  testLayers: ["Function", "API contract", "Visual regression", "Backup restore"],
+  boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
+  medicalBoundary: "Медицинские данные не входят в visual fixture.",
+  productionDecision: "Production закрыт до отдельного решения представителя.",
+};
+
 const waveFixtures = {
   legal: { empty: emptyLegal, populated: populatedLegal },
   accounting: { empty: emptyAccounting, populated: populatedAccounting },
@@ -260,6 +368,9 @@ const waveFixtures = {
   food: { empty: emptyFood, populated: populatedFood },
   safety: { empty: emptySafety, populated: populatedSafety },
   medical: { empty: emptyMedical, populated: populatedMedical },
+  strategy: { empty: emptyStrategy, populated: populatedStrategy },
+  analytics: { empty: emptyAnalytics, populated: populatedAnalytics },
+  readiness: { empty: emptyReadiness, populated: populatedReadiness },
 };
 
 function persist() {
@@ -522,7 +633,8 @@ async function verifyWaveModal(page, config) {
 async function verifyWaveTabs(page, config) {
   const tabs = page.locator(config.tabs).getByRole("tab");
   const count = await tabs.count();
-  if (count !== 5) throw new Error(`${config.heading}: ${count} tabs, expected 5`);
+  const expectedCount = config.tabCount ?? 5;
+  if (count !== expectedCount) throw new Error(`${config.heading}: ${count} tabs, expected ${expectedCount}`);
   for (let index = 0; index < count; index += 1) {
     const tab = tabs.nth(index);
     await tab.click();
@@ -541,10 +653,14 @@ async function captureWaveRoute(browser, base, storageState, label, viewport, ro
   const { context, page } = await stablePage(browser, base, storageState, viewport, routeName, apiFixture);
   await page.getByRole("heading", { name: config.heading, exact: true }).waitFor({ state: "visible", timeout: 30000 });
   if (mode === "populated" && config.populatedTab) {
-    const scopedTab = page.locator(config.tabs).getByRole("tab", { name: config.populatedTab, exact: true });
-    const legacyButton = page.getByRole("button", { name: config.populatedTab, exact: true });
-    const populatedTab = await scopedTab.count() === 1 ? scopedTab : legacyButton;
-    if (await populatedTab.count() !== 1) throw new Error(`${config.heading}: populated tab ${config.populatedTab} is missing or ambiguous`);
+    const semanticTab = page.locator(config.tabs).getByRole("tab", { name: config.populatedTab, exact: true });
+    const legacyTab = page.getByRole("button", { name: config.populatedTab, exact: true });
+    const semanticCount = await semanticTab.count();
+    const legacyCount = await legacyTab.count();
+    const populatedTab = semanticCount === 1 ? semanticTab : legacyCount === 1 ? legacyTab : null;
+    if (!populatedTab) {
+      throw new Error(`${config.heading}: populated tab ${config.populatedTab} is missing or ambiguous (semantic=${semanticCount}, legacy=${legacyCount})`);
+    }
     await populatedTab.click();
     await page.waitForTimeout(250);
   }

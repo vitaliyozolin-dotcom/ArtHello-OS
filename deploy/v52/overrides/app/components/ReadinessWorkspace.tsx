@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Button, Card, CompactListCard, EmptyState, KpiCard, PageContainer, PageHeader, Tabs } from "./design-system";
+import "./ReadinessWorkspace.ds.css";
 
 type Step = { id: string; step_order: number; step_name: string; entity_type: string; entity_id: string; check_type: string; status: string; evidence: string };
 type Scenario = { id: string; number: number; name: string; chain: string; owner_entity_id: string; status: string; data_boundary: string; evidence: string; failure: string; last_run_at: string; duration_ms: number; steps: Step[] };
 type Gate = { id: string; name: string; status: string; required: number; evidence: string; owner_entity_id: string; updated_at: string };
 type Drill = { id: string; drill_type: string; scope: string; status: string; rpo_minutes: number; rto_minutes: number; evidence: string; limitation: string };
 type Decision = { id: number; verdict: string; comment: string; actor: string; created_at: string };
-type Data = {
+type ReadinessData = {
   dataMode: "test" | "source_only" | "empty";
   scenarios: Scenario[];
   gates: Gate[];
@@ -22,32 +24,29 @@ type Data = {
 };
 
 const roles: Record<string, string> = {
-  "Контроль качества": "QUALITY",
-  "Аналитика": "ANALYTICS",
-  "Интеграции": "INTEGRATIONS",
-  "Собственник": "OWNER",
-  "Директор": "DIRECTOR",
-  "Представитель Виталия": "REPRESENTATIVE",
+  "Контроль качества": "QUALITY", "Аналитика": "ANALYTICS", "Интеграции": "INTEGRATIONS",
+  "Собственник": "OWNER", "Директор": "DIRECTOR", "Представитель Виталия": "REPRESENTATIVE",
 };
 const tabs = ["Визуальная оболочка", "10 сценариев", "Матрица проверок", "Release gates", "Recovery и rollback", "Решение представителя"] as const;
-type Tab = typeof tabs[number];
+type ReadinessTab = typeof tabs[number];
 
 const visualGates = [
-  ["Айдентика", "Единые токены, AH-монограмма, изумрудный каркас и точечный лаймовый акцент"],
-  ["Типографика", "16 px основной текст, 14 px служебный; микротекст поздних модулей нормализован"],
-  ["Навигация", "25 разделов, push-history, хлебные крошки, логический возврат, недавние и начало раздела"],
-  ["Поиск", "Разделы, семьи, сотрудники, договоры, платежи, задачи и быстрые действия"],
-  ["Роли", "8 персональных профилей дашборда и серверные ограничения чувствительных данных"],
-  ["Интеграции", "8 реальных управляющих действий, журнал, конфликты, add/delete test data"],
-  ["Responsive", "Отдельные desktop, tablet и mobile-композиции; mobile dock и navigation drawer"],
-  ["Performance", "Ленивая загрузка модулей; основной shell 64 kB при бюджете 100 kB"],
+  ["Иерархия", "Крупный заголовок раздела, компактная служебная типографика и единый вертикальный ритм"],
+  ["Карточки", "Общие радиусы, границы, KPI-токены и аккуратные списки по эталону «Доступы»"],
+  ["Навигация", "Маршруты, логический возврат, группы разделов и мобильный dock"],
+  ["Поиск", "Назначение каждого поля однозначно; декоративные иконки не дублируют подсказку"],
+  ["Роли", "Персональные профили и серверные ограничения чувствительных данных"],
+  ["Интеграции", "Управляющие действия, журнал, конфликты и контролируемые тестовые данные"],
+  ["Адаптивность", "Desktop, tablet и mobile проверяются на утверждённых разрешениях"],
+  ["Безопасность выпуска", "Точная сборка, изолированный preview, A/B-скриншоты, backup и rollback"],
 ] as const;
 
 export function ReadinessWorkspace({ role, notify }: { role: string; notify: (value: string) => void }) {
-  const [data, setData] = useState<Data | null>(null);
-  const [tab, setTab] = useState<Tab>("Визуальная оболочка");
+  const [data, setData] = useState<ReadinessData | null>(null);
+  const [tab, setTab] = useState<ReadinessTab>("Визуальная оболочка");
   const [selected, setSelected] = useState("SCN-T-01");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [comment, setComment] = useState("");
 
@@ -55,20 +54,21 @@ export function ReadinessWorkspace({ role, notify }: { role: string; notify: (va
     setLoading(true);
     try {
       const response = await fetch("/api/readiness", { cache: "no-store", headers: { "x-arthello-role": roles[role] ?? "" } });
-      const payload = await response.json() as Data & { error?: string };
+      const payload = await response.json() as ReadinessData & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Ошибка");
       setData(payload);
-    } catch (cause) {
+      setError("");
+    } catch (reason) {
       setData(null);
-      notify(cause instanceof Error ? cause.message : "Не удалось загрузить готовность");
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить готовность");
     } finally {
       setLoading(false);
     }
-  }, [role, notify]);
+  }, [role]);
 
   useEffect(() => {
-    const id = setTimeout(() => void load(), 0);
-    return () => clearTimeout(id);
+    const timer = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timer);
   }, [load]);
 
   async function runAll() {
@@ -83,8 +83,8 @@ export function ReadinessWorkspace({ role, notify }: { role: string; notify: (va
       if (!response.ok) throw new Error(payload.error ?? "Проверка не выполнена");
       notify(`Сквозная проверка завершена: ${payload.passed ?? 0} пройдено, ${payload.failed ?? 0} не пройдено`);
       await load();
-    } catch (cause) {
-      notify(cause instanceof Error ? cause.message : "Проверка не выполнена");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "Проверка не выполнена");
     } finally {
       setBusy(false);
     }
@@ -92,88 +92,91 @@ export function ReadinessWorkspace({ role, notify }: { role: string; notify: (va
 
   async function decide(verdict: "ПРИНЯТО ПРЕДСТАВИТЕЛЕМ" | "ОТКЛОНЕНО ПРЕДСТАВИТЕЛЕМ") {
     if (role !== "Представитель Виталия") return;
-    if (comment.trim().length < 8) {
-      notify("Добавьте содержательный комментарий представителя");
-      return;
-    }
+    if (comment.trim().length < 8) { notify("Добавьте содержательный комментарий представителя"); return; }
     setBusy(true);
     try {
       const response = await fetch("/api/acceptance", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ stage: "Этап 19 · единая визуальная оболочка и UX master-route", verdict, comment: comment.trim() }),
+        body: JSON.stringify({ stage: "Плановая миграция Design System", verdict, comment: comment.trim() }),
       });
       if (!response.ok) throw new Error("Решение не сохранено");
       setComment("");
-      notify("Решение представителя записано; production не разрешён");
+      notify("Решение представителя записано; production не разрешён автоматически");
       await load();
-    } catch (cause) {
-      notify(cause instanceof Error ? cause.message : "Решение не сохранено");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "Решение не сохранено");
     } finally {
       setBusy(false);
     }
   }
 
-  if (loading) return <section className="readiness-state">Собираем сквозные доказательства…</section>;
-  if (!data) return <section className="readiness-state">Контур готовности недоступен для выбранной роли.</section>;
-  if (!data.scenarios.length) {
-    return <section className="page readiness-workspace">
-      <header className="readiness-heading"><div><p className="eyebrow">Контроль готовности</p><h1>Готовность ArtHello OS</h1><p>Сценарии, ворота выпуска и результаты проверок появятся после их настройки.</p></div></header>
-      <div className="manual-module-empty"><span>＋</span><h2>Проверок пока нет</h2><p>Система не создаёт результаты приёмки и готовности автоматически.</p></div>
-    </section>;
-  }
+  if (loading) return <section className="ahReadinessStatus">Собираем сквозные доказательства…</section>;
+  if (error || !data) return <section className="ahReadinessStatus"><Card><EmptyState title="Контур готовности недоступен" description={error || "Для просмотра требуется разрешённая роль."} density="compact" /></Card></section>;
 
   const scenario = data.scenarios.find((item) => item.id === selected) ?? data.scenarios[0];
   const canRun = ["Собственник", "Директор", "Представитель Виталия", "Контроль качества"].includes(role);
   const isDemo = data.dataMode === "test";
+  const hasData = Boolean(data.scenarios.length || data.gates.length || data.runs.length || data.drills.length || data.decisions.length || data.testLayers.length);
 
-  return <section className="page readiness-workspace">
-    <header className="readiness-heading">
-      <div><p className="eyebrow">{isDemo ? "Этап 19 · единая визуальная оболочка" : "Контроль готовности"}</p><h1>Готовность ArtHello OS</h1><p>{isDemo ? "Айдентика, разделы, персональные дашборды, навигация и сквозные доказательства собраны в закрытом контуре." : "Сценарии и ворота выпуска отражают только сохранённые результаты проверок."}</p></div>
-      <div><span className="readiness-release ready">{isDemo ? "ГОТОВО К ИТОГОВОЙ ПРОВЕРКЕ" : "ТЕКУЩЕЕ СОСТОЯНИЕ"}</span><button disabled={!canRun || busy} onClick={() => void runAll()}>{busy ? "Проверяем…" : isDemo ? "Запустить 10 сценариев" : "Запустить проверки"}</button></div>
-    </header>
-    <div className="readiness-alert"><strong>{isDemo ? "PRODUCTION ЗАКРЫТ" : "РЕШЕНИЕ О ВЫПУСКЕ"}</strong><span>{data.productionDecision}</span></div>
-    <div className="readiness-kpis">
-      <article><span>{isDemo ? "Разделы" : "Сценарии"}</span><strong>{isDemo ? "25/25" : data.summary.totalScenarios}</strong><small>{isDemo ? "открытие с первого клика" : "сохранено в контуре"}</small></article>
-      <article><span>{isDemo ? "Действия" : "Пройдено"}</span><strong>{isDemo ? "181" : data.summary.passedScenarios}</strong><small>{isDemo ? "аудируемый реестр" : "сценариев"}</small></article>
-      <article><span>{isDemo ? "Автотесты" : "Ворота выпуска"}</span><strong>{isDemo ? "84/84" : `${data.summary.passedGates}/${data.summary.totalGates}`}</strong><small>{isDemo ? "lint и production build пройдены" : "по сохранённым результатам"}</small></article>
-      <article className="blocked"><span>Production</span><strong>запрещён</strong><small>{data.summary.blockedGateIds.length} незакрытых gates</small></article>
+  return <PageContainer className="ahReadinessPage">
+    <PageHeader
+      eyebrow="СЦЕНАРИИ · GATES · ROLLBACK"
+      title="Готовность ArtHello OS"
+      description="Визуальная проверка, сквозные сценарии, ворота выпуска и восстановление — только по сохранённым доказательствам."
+      actions={<Button variant="primary" disabled={!canRun || busy || !data.scenarios.length} onClick={() => void runAll()}>{busy ? "Проверяем…" : "Запустить проверки"}</Button>}
+    />
+
+    <Card className="ahReadinessBoundary"><strong>{data.summary.productionReady ? "Готово к решению" : "Production закрыт"}</strong><span>{hasData ? data.productionDecision : "Система не создаёт результаты приёмки автоматически. Настройте сценарии и ворота выпуска."}</span></Card>
+
+    <div className="ahReadinessKpis">
+      <KpiCard label="Сценарии" value={`${data.summary.passedScenarios}/${data.summary.totalScenarios}`} note="пройдено" onClick={() => setTab("10 сценариев")} />
+      <KpiCard label="Ворота выпуска" value={`${data.summary.passedGates}/${data.summary.totalGates}`} note="по доказательствам" onClick={() => setTab("Release gates")} />
+      <KpiCard label="Recovery drills" value={data.drills.length} note="сохранённых проверок" onClick={() => setTab("Recovery и rollback")} />
+      <KpiCard className={data.summary.blockedGateIds.length ? "ahReadinessKpiWarning" : undefined} label="Блокирующие gates" value={data.summary.blockedGateIds.length} note={data.summary.productionReady ? "нет блокеров" : "выпуск запрещён"} onClick={() => setTab("Release gates")} />
     </div>
-    <nav className="readiness-tabs">{tabs.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</nav>
 
-    {tab === "Визуальная оболочка" ? isDemo ? <VisualHandoff /> : <div className="manual-module-empty"><span>＋</span><h2>Результаты визуальной проверки не добавлены</h2><p>Здесь появятся только сохранённые результаты рабочей приёмки интерфейса.</p></div> : null}
+    <div className="ahReadinessTabs"><Tabs items={tabs.map((item) => ({ id: item, label: item }))} value={tab} onChange={setTab} ariaLabel="Разделы готовности" /></div>
+
+    {tab === "Визуальная оболочка" ? isDemo ? <VisualHandoff /> : <Card className="ahReadinessPanel"><EmptyState title="Результаты визуальной проверки не добавлены" description="Здесь появятся только сохранённые результаты рабочей A/B-приёмки интерфейса." density="compact" /></Card> : null}
     {tab === "10 сценариев" ? <ScenarioPanel data={data} scenario={scenario} select={setSelected} /> : null}
     {tab === "Матрица проверок" ? <TestMatrix layers={data.testLayers} /> : null}
     {tab === "Release gates" ? <GatePanel gates={data.gates} /> : null}
     {tab === "Recovery и rollback" ? <RecoveryPanel drills={data.drills} /> : null}
-    {tab === "Решение представителя" ? <div className="readiness-decision">
-      <section><p>Контроль собственника</p><h2>Итоговая приёмка визуальной оболочки</h2><div className="production-seal">НЕ ЯВЛЯЕТСЯ РАЗРЕШЕНИЕМ НА PRODUCTION</div><label><span>Комментарий представителя</span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder={isDemo ? "Принято для тестового контура или конкретный список замечаний" : "Решение и конкретные замечания по рабочей проверке"} /></label>{role !== "Представитель Виталия" ? <small>Для решения выберите роль «Представитель Виталия».</small> : null}<footer><button disabled={role !== "Представитель Виталия" || busy || comment.trim().length < 8} onClick={() => void decide("ОТКЛОНЕНО ПРЕДСТАВИТЕЛЕМ")}>Отклонить оболочку</button><button disabled={role !== "Представитель Виталия" || busy || comment.trim().length < 8} onClick={() => void decide("ПРИНЯТО ПРЕДСТАВИТЕЛЕМ")}>Принять оболочку</button></footer></section>
-      <aside><p>История решений</p>{data.decisions.length ? data.decisions.map((item) => <article key={item.id}><strong>{item.verdict}</strong><small>{item.created_at} · {item.actor}</small><span>{item.comment || "Без комментария"}</span></article>) : <div>Решений по итоговой визуальной приёмке ещё нет.</div>}</aside>
-    </div> : null}
-  </section>;
+    {tab === "Решение представителя" ? <DecisionPanel data={data} role={role} busy={busy} comment={comment} setComment={setComment} decide={decide} /> : null}
+  </PageContainer>;
 }
 
 function VisualHandoff() {
-  return <div className="visual-handoff">
-    <section className="visual-gates"><header><div><p>Внутренние ворота</p><h2>Что собрано и проверено</h2></div><span>8/8 покрыто</span></header><div>{visualGates.map(([name, evidence], index) => <article key={name}><b>{String(index + 1).padStart(2, "0")}</b><span><strong>{name}</strong><small>{evidence}</small></span><em>ПРОЙДЕНО</em></article>)}</div></section>
-    <aside className="visual-route"><p>Маршрут представителя</p><h2>Итоговая проверка</h2><ol><li>Переключить роль и проверить персональный дашборд.</li><li>Открыть разделы из каждой группы меню с первого клика.</li><li>Раскрыть KPI, строку, источник, расчёт и связи.</li><li>Проверить поиск и командную палитру.</li><li>Пройти интеграции: test, sync, log, errors, test data.</li><li>Запустить 10 D1-сценариев.</li><li>Зафиксировать решение в последней вкладке.</li></ol><div><strong>Известные ограничения</strong><span>Реальные CRM, банки, ЭДО, СКУД и секреты не предоставлены. Локальные исходники фирменного шрифта и утверждённый пакет логотипа отсутствуют. Медицинские данные остаются закрытыми по умолчанию.</span></div></aside>
-  </div>;
+  return <div className="ahReadinessLayout"><Card className="ahReadinessPanel"><PanelHead eyebrow="Внутренние ворота" title="Что собрано и проверено" note="8/8 покрыто" /><div className="ahReadinessCompactList">{visualGates.map(([name, evidence], index) => <CompactListCard key={name} index={String(index + 1).padStart(2, "0")} title={name} description={evidence} />)}</div></Card><Card className="ahReadinessPanel"><PanelHead eyebrow="Маршрут представителя" title="Итоговая проверка" note="до production" /><ol className="ahReadinessRoute"><li>Проверить персональный дашборд для ключевых ролей.</li><li>Открыть все разделы с первого клика.</li><li>Раскрыть KPI, источник, расчёт и связи.</li><li>Проверить поиск и командную палитру.</li><li>Пройти интеграции и журнал ошибок.</li><li>Запустить сквозные сценарии.</li><li>Зафиксировать решение в последней вкладке.</li></ol><div className="ahReadinessLimit"><strong>Известные ограничения</strong><span>Внешние CRM, банки, ЭДО, СКУД и секреты проверяются только при наличии рабочего подключения. Медицинские данные закрыты по умолчанию.</span></div></Card></div>;
 }
 
-function ScenarioPanel({ data, scenario, select }: { data: Data; scenario: Scenario; select: (id: string) => void }) {
-  return <div className="scenario-layout"><div className="scenario-list">{data.scenarios.map((item) => <button key={item.id} className={item.id === scenario.id ? "active" : ""} onClick={() => select(item.id)}><span>{String(item.number).padStart(2, "0")}</span><p><strong>{item.name}</strong><small>{item.chain}</small></p><em className={statusClass(item.status)}>{item.status}</em></button>)}</div><article className="scenario-detail"><header><div><p>{scenario.id} · {scenario.owner_entity_id}</p><h2>{scenario.name}</h2></div><span className={statusClass(scenario.status)}>{scenario.status}</span></header><p className="scenario-boundary">{scenario.data_boundary}</p><div className="step-rail">{scenario.steps.map((step) => <article key={step.id} className={statusClass(step.status)}><b>{String(step.step_order).padStart(2, "0")}</b><div><strong>{step.step_name}</strong><small>{step.entity_type} · {step.entity_id}</small><em>{step.evidence || "Будет проверено по D1"}</em></div><span>{step.status}</span></article>)}</div>{scenario.id === "SCN-T-09" ? <footer>{data.medicalBoundary}</footer> : null}</article></div>;
+function ScenarioPanel({ data, scenario, select }: { data: ReadinessData; scenario?: Scenario; select: (id: string) => void }) {
+  if (!data.scenarios.length || !scenario) return <Card className="ahReadinessPanel"><EmptyState title="Сценариев пока нет" description="Сценарий должен иметь владельца, цепочку, шаги, границу данных и проверяемое доказательство." density="compact" /></Card>;
+  return <div className="ahReadinessScenarioShell"><Card className="ahReadinessPanel"><PanelHead eyebrow="Сквозные сценарии" title="Выберите цепочку" note={`${data.scenarios.length}`} /><div className="ahReadinessScenarioList">{data.scenarios.map((item) => <button type="button" key={item.id} className={item.id === scenario.id ? "active" : ""} onClick={() => select(item.id)}><b>{String(item.number).padStart(2, "0")}</b><span><strong>{item.name}</strong><small>{item.chain}</small></span><em className={statusClass(item.status)}>{item.status}</em></button>)}</div></Card><Card className="ahReadinessPanel"><PanelHead eyebrow={`${scenario.id} · ${scenario.owner_entity_id}`} title={scenario.name} note={scenario.status} /><p className="ahReadinessLimit">{scenario.data_boundary}</p><div className="ahReadinessCompactList">{scenario.steps.map((step) => <CompactListCard key={step.id} index={String(step.step_order).padStart(2, "0")} title={`${step.step_name} · ${step.status}`} description={`${step.entity_type} · ${step.entity_id} · ${step.evidence || "Будет проверено по D1"}`} />)}</div>{scenario.id === "SCN-T-09" ? <p className="ahReadinessLimit">{data.medicalBoundary}</p> : null}</Card></div>;
 }
 
 function TestMatrix({ layers }: { layers: string[] }) {
-  return <section className="test-matrix"><header><div><p>Coverage уровней</p><h2>От функции до восстановления</h2></div><span>16 обязательных уровней</span></header><div>{layers.map((layer, index) => { const limited = layer === "Backup restore" || layer === "Browser compatibility" || layer === "Security"; return <article key={layer}><b>{String(index + 1).padStart(2, "0")}</b><strong>{layer}</strong><span className={limited ? "limited" : "passed"}>{layer === "Backup restore" ? "НЕ ВЫПОЛНЕНО" : limited ? "ОГРАНИЧЕНО" : "ПОКРЫТО"}</span><small>{layer === "Backup restore" ? "Нужен live D1 restore drill" : limited ? "Нужна внешняя production-проверка" : "Проверяется автоматической suite или доменным контрактом"}</small></article>; })}</div></section>;
+  if (!layers.length) return <Card className="ahReadinessPanel"><EmptyState title="Матрица проверок не настроена" description="Добавьте обязательные уровни от функции и контракта до backup restore." density="compact" /></Card>;
+  return <Card className="ahReadinessPanel"><PanelHead eyebrow="Coverage уровней" title="От функции до восстановления" note={`${layers.length} уровней`} /><div className="ahReadinessMatrix">{layers.map((layer, index) => { const limited = layer === "Backup restore" || layer === "Browser compatibility" || layer === "Security"; const status = layer === "Backup restore" ? "Не выполнено" : limited ? "Ограничено" : "Покрыто"; return <CompactListCard key={layer} index={String(index + 1).padStart(2, "0")} title={`${layer} · ${status}`} description={layer === "Backup restore" ? "Нужен live D1 restore drill" : limited ? "Нужна внешняя production-проверка" : "Проверяется автоматической suite или доменным контрактом"} />; })}</div></Card>;
 }
 
 function GatePanel({ gates }: { gates: Gate[] }) {
-  return <section className="gate-grid">{gates.map((gate) => <article key={gate.id} className={statusClass(gate.status)}><header><span>{gate.id}</span><em>{gate.status}</em></header><h2>{gate.name}</h2><p>{gate.evidence}</p><footer>{gate.owner_entity_id} · {gate.required ? "обязательный" : "информационный"}</footer></article>)}</section>;
+  if (!gates.length) return <Card className="ahReadinessPanel"><EmptyState title="Ворота выпуска не настроены" description="Production остаётся закрытым, пока обязательные gates и их доказательства не зафиксированы." density="compact" /></Card>;
+  return <div className="ahReadinessGateGrid">{gates.map((gate) => <Card key={gate.id} className={`ahReadinessPanel ${statusClass(gate.status)}`}><PanelHead eyebrow={gate.id} title={gate.name} note={gate.status} /><p>{gate.evidence || "Доказательство не приложено"}</p><small>{gate.owner_entity_id} · {gate.required ? "обязательный" : "информационный"}</small></Card>)}</div>;
 }
 
 function RecoveryPanel({ drills }: { drills: Drill[] }) {
-  return <div className="recovery-layout"><section><header><p>Recovery drills</p><h2>Что реально проверено</h2></header>{drills.map((drill) => <article key={drill.id}><div><strong>{drill.drill_type}</strong><span className={statusClass(drill.status)}>{drill.status}</span></div><p>{drill.scope} · {drill.evidence}</p><small>Ограничение: {drill.limitation}</small></article>)}</section><aside><p>Rollback</p><h2>Возврат приложения</h2><strong>Sites checkpoint + аддитивная D1-схема</strong><span>Каждая опубликованная версия неизменяема. Откат интерфейса возможен на предыдущий checkpoint; destructive migration не используется.</span><div>Важно: rollback приложения не заменяет проверенное восстановление базы.</div></aside></div>;
+  if (!drills.length) return <Card className="ahReadinessPanel"><EmptyState title="Recovery drills пока не выполнены" description="Rollback приложения не заменяет проверенное восстановление базы и контроль RPO/RTO." density="compact" /></Card>;
+  return <div className="ahReadinessLayout"><Card className="ahReadinessPanel"><PanelHead eyebrow="Recovery drills" title="Что реально проверено" note={`${drills.length}`} /><div className="ahReadinessCompactList">{drills.map((drill, index) => <CompactListCard key={drill.id} index={String(index + 1).padStart(2, "0")} title={`${drill.drill_type} · ${drill.status}`} description={`${drill.scope} · ${drill.evidence} · ограничение: ${drill.limitation}`} />)}</div></Card><Card className="ahReadinessPanel"><PanelHead eyebrow="Rollback" title="Возврат приложения" note="без destructive migration" /><CompactListCard title="Sites checkpoint + аддитивная D1-схема" description="Каждая опубликованная версия неизменяема. Интерфейс можно вернуть на предыдущий checkpoint." /><p className="ahReadinessLimit">Важно: rollback приложения не заменяет проверенное восстановление базы.</p></Card></div>;
+}
+
+function DecisionPanel({ data, role, busy, comment, setComment, decide }: { data: ReadinessData; role: string; busy: boolean; comment: string; setComment: (value: string) => void; decide: (verdict: "ПРИНЯТО ПРЕДСТАВИТЕЛЕМ" | "ОТКЛОНЕНО ПРЕДСТАВИТЕЛЕМ") => Promise<void> }) {
+  return <div className="ahReadinessLayout"><Card className="ahReadinessPanel"><PanelHead eyebrow="Контроль собственника" title="Итоговая приёмка" note="не включает production" /><div className="ahReadinessSeal">НЕ ЯВЛЯЕТСЯ РАЗРЕШЕНИЕМ НА PRODUCTION</div><label className="ahReadinessComment"><span>Комментарий представителя</span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Решение и конкретные замечания по рабочей проверке" /></label>{role !== "Представитель Виталия" ? <small>Для решения выберите роль «Представитель Виталия».</small> : null}<footer className="ahReadinessActions"><Button variant="secondary" disabled={role !== "Представитель Виталия" || busy || comment.trim().length < 8} onClick={() => void decide("ОТКЛОНЕНО ПРЕДСТАВИТЕЛЕМ")}>Отклонить</Button><Button variant="primary" disabled={role !== "Представитель Виталия" || busy || comment.trim().length < 8} onClick={() => void decide("ПРИНЯТО ПРЕДСТАВИТЕЛЕМ")}>Принять</Button></footer></Card><Card className="ahReadinessPanel"><PanelHead eyebrow="Append-only" title="История решений" note={`${data.decisions.length}`} />{data.decisions.length ? <div className="ahReadinessCompactList">{data.decisions.map((item, index) => <CompactListCard key={item.id} index={String(index + 1).padStart(2, "0")} title={item.verdict} description={`${item.created_at} · ${item.actor} · ${item.comment || "Без комментария"}`} />)}</div> : <EmptyState title="Решений ещё нет" description="История появится после явного решения представителя." density="compact" />}</Card></div>;
+}
+
+function PanelHead({ eyebrow, title, note }: { eyebrow: string; title: string; note: string }) {
+  return <header className="ahReadinessPanelHead"><div><p>{eyebrow}</p><h2>{title}</h2></div><span>{note}</span></header>;
 }
 
 function statusClass(value: string) {

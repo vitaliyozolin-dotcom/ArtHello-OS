@@ -78,7 +78,7 @@ test("Wave 3 workspaces use the shared protected-operations shell", () => {
   assert.equal(occurrences(medical, /<KpiCard\b/g), 4);
   assert.equal(occurrences(safety, /<Tabs\b/g), 1);
   assert.equal(occurrences(medical, /<Tabs\b/g), 1);
-  assert.match(designSystem, /designSystemVersion\s*=\s*["']1\.3-protected-operations["']/);
+  assert.match(designSystem, /designSystemVersion\s*=\s*["']1\.4-management-insight["']/);
 });
 
 test("Wave 3 keeps five working sections visible before the first record", () => {
@@ -134,7 +134,7 @@ test("Wave 3 components and styles are isolated from legacy workspaces", () => {
 test("migrated safety and medical patch blocks are retired while strategy remains", () => {
   assert.equal(patchesFile(operationalPatch, "app/components/SafetyWorkspace.tsx"), false);
   assert.equal(patchesFile(operationalPatch, "app/components/MedicalWorkspace.tsx"), false);
-  assert.equal(patchesFile(operationalPatch, "app/components/StrategyWorkspace.tsx"), true);
+  assert.equal(patchesFile(operationalPatch, "app/components/StrategyWorkspace.tsx"), false);
   assert.doesNotMatch(normalizeInputs, /patch-system-operational-modules\.mjs/);
 });
 

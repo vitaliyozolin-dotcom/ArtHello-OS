@@ -1,0 +1,185 @@
+.ahAnalyticsPage { display: grid; gap: 20px; min-width: 0; padding-top: 4px; }
+.ahAnalyticsPage .ahPageHeader { align-items: flex-end; margin-bottom: 0; }
+.ahAnalyticsPage .ahPageHeaderCopy > small { margin-bottom: 6px; font-size: 12px; line-height: 16px; letter-spacing: .09em; }
+.ahAnalyticsPage .ahPageHeaderCopy h1 { font-size: clamp(34px, 2vw, 40px); font-weight: 720; line-height: 1.04; letter-spacing: -.035em; }
+.ahAnalyticsPage .ahPageHeaderCopy p { max-width: 820px; margin-top: 6px; font-size: 14px; line-height: 20px; }
+.ahAnalyticsPage .ahPageHeaderActions .ahButton { min-height: 40px; border-radius: 12px; padding-inline: 16px; font-size: 13px; }
+
+.ahAnalyticsStatus { display: grid; place-items: center; min-height: 160px; color: var(--ah-color-text-secondary); font-size: 13px; line-height: 19px; }
+.ahAnalyticsStatus > .ahCard { width: min(620px, 100%); padding: 0; }
+
+.ahAnalyticsBoundary { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 12px; border-radius: 16px; padding: 12px 14px; }
+.ahAnalyticsBoundary strong { display: inline-flex; align-items: center; width: fit-content; min-height: 28px; border-radius: 999px; background: var(--ah-color-primary-soft); padding: 5px 10px; color: var(--ah-color-primary); font-size: 11px; font-weight: 750; line-height: 16px; letter-spacing: .045em; text-transform: uppercase; }
+.ahAnalyticsBoundary span { min-width: 0; color: var(--ah-color-text-secondary); font-size: 13px; line-height: 19px; }
+
+.ahAnalyticsKpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--ah-registry-kpi-gap); }
+.ahAnalyticsKpis > .ahKpiCard { min-width: 0; min-height: var(--ah-registry-kpi-min-height); border-radius: var(--ah-registry-kpi-radius); padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline); }
+.ahAnalyticsKpis .ahKpiCopy small { font-size: var(--ah-registry-kpi-label-size); font-weight: var(--ah-registry-kpi-label-weight); line-height: var(--ah-registry-kpi-label-line); }
+.ahAnalyticsKpis .ahKpiCopy strong { margin-top: var(--ah-registry-kpi-value-gap); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ah-registry-kpi-value-size); font-weight: var(--ah-registry-kpi-value-weight); line-height: var(--ah-registry-kpi-value-line); }
+.ahAnalyticsKpis .ahKpiCopy > span { margin-top: var(--ah-registry-kpi-note-gap); font-size: var(--ah-registry-kpi-note-size); font-weight: var(--ah-registry-kpi-note-weight); line-height: var(--ah-registry-kpi-note-line); }
+.ahAnalyticsKpiWarning { border-color: #f0d4b5; background: var(--ah-color-warning-soft); }
+
+.ahAnalyticsTabs { min-width: 0; overflow: hidden; border-bottom: 1px solid var(--ah-color-border); }
+.ahAnalyticsTabs .ahTabs { width: 100%; max-width: 100%; gap: 18px; overflow-x: auto; }
+.ahAnalyticsTabs .ahTabs button { min-height: 40px; font-size: 13px; }
+
+.ahAnalyticsLayout,
+.ahAnalyticsSignalShell { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; min-width: 0; }
+.ahAnalyticsLayout .ahAnalyticsSources { grid-column: 1 / -1; }
+.ahAnalyticsPanel { display: grid; gap: 16px; min-width: 0; overflow: hidden; border-radius: 16px; padding: 16px; }
+.ahAnalyticsPanel > .ahEmptyState,
+.ahAnalyticsStatus .ahEmptyState { min-height: 120px; padding: 24px 20px; }
+.ahAnalyticsPanel > .ahEmptyState h3,
+.ahAnalyticsStatus .ahEmptyState h3 { font-size: 12px; font-weight: 500; line-height: 15px; }
+.ahAnalyticsPanel > .ahEmptyState p,
+.ahAnalyticsStatus .ahEmptyState p { font-size: 10px; font-weight: 400; line-height: 14px; }
+.ahAnalyticsPanel > .ahEmptyState select { min-height: 34px; border: 1px solid var(--ah-color-border); border-radius: 10px; background: var(--ah-color-surface); padding: 6px 10px; color: var(--ah-color-text-primary); font-size: 11px; }
+
+.ahAnalyticsPanelHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.ahAnalyticsPanelHead > div { display: grid; min-width: 0; gap: 4px; }
+.ahAnalyticsPanelHead p,
+.ahAnalyticsPanelHead h2 { margin: 0; }
+.ahAnalyticsPanelHead p { color: var(--ah-color-primary); font-size: 10px; font-weight: 750; line-height: 14px; letter-spacing: .06em; text-transform: uppercase; }
+.ahAnalyticsPanelHead h2 { color: var(--ah-color-text-primary); font-size: 16px; font-weight: 650; line-height: 21px; }
+.ahAnalyticsPanelHead > span { flex: 0 0 auto; border-radius: 999px; background: var(--ah-color-surface-soft); padding: 5px 8px; color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+
+.ahAnalyticsDomainGrid,
+.ahAnalyticsCompactList,
+.ahAnalyticsForecast,
+.ahAnalyticsRunList { display: grid; gap: 10px; min-width: 0; }
+.ahAnalyticsDomainGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ahAnalyticsDomainGrid .ahCompactListCard,
+.ahAnalyticsCompactList .ahCompactListCard,
+.ahAnalyticsForecast .ahCompactListCard,
+.ahAnalyticsRunList .ahCompactListCard { min-height: 58px; border-radius: 13px; padding: 10px 12px; }
+
+.ahAnalyticsRiskList { display: grid; gap: 8px; }
+.ahAnalyticsRiskList button { display: grid; grid-template-columns: minmax(0, 1fr) minmax(70px, .7fr) max-content; align-items: center; gap: 10px; min-height: 54px; border: 1px solid var(--ah-color-border); border-radius: 12px; background: var(--ah-color-surface); padding: 9px 10px; color: var(--ah-color-text-primary); text-align: left; }
+.ahAnalyticsRiskList button > span { display: grid; gap: 2px; min-width: 0; }
+.ahAnalyticsRiskList strong { font-size: 12px; font-weight: 600; line-height: 15px; }
+.ahAnalyticsRiskList small { color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+.ahAnalyticsRiskList i { height: 6px; overflow: hidden; border-radius: 999px; background: var(--ah-color-surface-soft); }
+.ahAnalyticsRiskList i b { display: block; height: 100%; border-radius: inherit; background: var(--ah-color-primary); }
+.ahAnalyticsRiskList em { color: var(--ah-color-primary); font-size: 12px; font-style: normal; font-weight: 700; }
+
+.ahAnalyticsSources > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ahAnalyticsSources section { display: grid; align-content: start; gap: 6px; border-radius: 12px; background: var(--ah-color-surface-soft); padding: 11px; }
+.ahAnalyticsSources section strong { color: var(--ah-color-primary); font-size: 10px; line-height: 14px; letter-spacing: .05em; text-transform: uppercase; }
+.ahAnalyticsSources section span,
+.ahAnalyticsSources section small { color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+
+.ahAnalyticsCashBars { display: flex; align-items: flex-end; gap: 10px; min-height: 220px; overflow-x: auto; padding: 8px 2px 0; }
+.ahAnalyticsCashBars article { display: grid; flex: 1 0 54px; justify-items: center; gap: 4px; min-width: 0; }
+.ahAnalyticsCashBars article > div { display: flex; align-items: flex-end; justify-content: center; gap: 4px; width: 100%; height: 150px; }
+.ahAnalyticsCashBars i { width: min(18px, 38%); min-height: 3px; border-radius: 5px 5px 2px 2px; }
+.ahAnalyticsCashBars i.in { background: var(--ah-color-primary); }
+.ahAnalyticsCashBars i.out { background: #d9a774; }
+.ahAnalyticsCashBars strong { font-size: 11px; line-height: 14px; }
+.ahAnalyticsCashBars small,
+.ahAnalyticsCashBars em { color: var(--ah-color-text-secondary); font-size: 9px; font-style: normal; line-height: 12px; text-align: center; }
+.ahAnalyticsModelBoundary { margin: 0; border-radius: 11px; background: var(--ah-color-surface-soft); padding: 10px; color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+
+.ahAnalyticsFilter { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ahAnalyticsFilter select { min-height: 34px; min-width: 130px; border: 1px solid var(--ah-color-border); border-radius: 10px; background: var(--ah-color-surface); padding: 6px 10px; color: var(--ah-color-text-primary); font-size: 11px; }
+.ahAnalyticsFilter span { color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+
+.ahAnalyticsSignalList,
+.ahAnalyticsContractList { display: grid; gap: 8px; }
+.ahAnalyticsSignalList button,
+.ahAnalyticsContractList button { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; gap: 10px; min-height: 58px; border: 1px solid var(--ah-color-border); border-radius: 12px; background: var(--ah-color-surface); padding: 9px 11px; color: var(--ah-color-text-primary); text-align: left; }
+.ahAnalyticsContractList button { grid-template-columns: max-content minmax(0, 1fr) max-content; }
+.ahAnalyticsSignalList button.active,
+.ahAnalyticsContractList button.active { border-color: var(--ah-color-primary); background: var(--ah-color-primary-soft); }
+.ahAnalyticsSignalList button > span,
+.ahAnalyticsContractList button > span { display: grid; gap: 2px; min-width: 0; }
+.ahAnalyticsSignalList small,
+.ahAnalyticsContractList small { color: var(--ah-color-text-secondary); font-size: 9px; line-height: 13px; }
+.ahAnalyticsSignalList strong,
+.ahAnalyticsContractList strong { font-size: 12px; font-weight: 600; line-height: 15px; }
+.ahAnalyticsSignalList em,
+.ahAnalyticsContractList em { color: var(--ah-color-text-secondary); font-size: 9px; font-style: normal; line-height: 13px; }
+.ahAnalyticsSignalList b { color: var(--ah-color-primary); font-size: 12px; }
+.ahAnalyticsContractList b { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--ah-color-primary-soft); color: var(--ah-color-primary); font-size: 10px; }
+
+.ahAnalyticsContractFacts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ahAnalyticsContractFacts .ahCompactListCard { min-height: 64px; border-radius: 12px; padding: 10px; }
+.ahAnalyticsActions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.ahAnalyticsActions .ahButton { min-height: 34px; border-radius: 10px; padding: 7px 11px; font-size: 11px; }
+
+.ahAnalyticsMetricTable { min-width: 0; max-width: 100%; overflow-x: auto; }
+.ahAnalyticsMetricTable table { width: 100%; min-width: 760px; border-collapse: collapse; }
+.ahAnalyticsMetricTable th { border-bottom: 1px solid var(--ah-color-border); padding: 10px; color: var(--ah-color-text-secondary); font-size: 10px; font-weight: 600; line-height: 14px; text-align: left; }
+.ahAnalyticsMetricTable td { border-bottom: 1px solid var(--ah-color-border); padding: 11px 10px; color: var(--ah-color-text-primary); font-size: 11px; line-height: 15px; vertical-align: top; }
+.ahAnalyticsMetricTable td small { display: block; margin-top: 3px; color: var(--ah-color-text-secondary); font-size: 9px; line-height: 13px; }
+
+@media (max-width: 1024px) {
+  .ahAnalyticsKpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ahAnalyticsLayout,
+  .ahAnalyticsSignalShell { grid-template-columns: 1fr; }
+  .ahAnalyticsLayout .ahAnalyticsSources { grid-column: auto; }
+}
+
+@media (max-width: 720px) {
+  .ahAnalyticsPage { gap: 16px; padding-top: 0; }
+  .ahAnalyticsPage .ahPageHeader { align-items: stretch; }
+  .ahAnalyticsPage .ahPageHeaderCopy > small { margin-bottom: 5px; font-size: 11px; line-height: 15px; }
+  .ahAnalyticsPage .ahPageHeaderCopy h1 { font-size: 32px; line-height: 1.04; }
+  .ahAnalyticsPage .ahPageHeaderCopy p { margin-top: 6px; font-size: 15px; line-height: 21px; }
+  .ahAnalyticsPage .ahPageHeaderActions,
+  .ahAnalyticsPage .ahPageHeaderActions .ahButton { width: 100%; }
+  .ahAnalyticsPage .ahPageHeaderActions .ahButton { min-height: 44px; border-radius: 11px; font-size: 14px; }
+
+  .ahAnalyticsBoundary { grid-template-columns: 1fr; gap: 8px; border-radius: 12px; padding: 12px; }
+  .ahAnalyticsBoundary strong { min-height: 24px; padding: 4px 8px; font-size: 10px; line-height: 13px; }
+  .ahAnalyticsBoundary span { font-size: 13px; line-height: 18px; }
+
+  .ahAnalyticsKpis > .ahKpiCard { min-height: var(--ah-registry-kpi-min-height); border-radius: var(--ah-registry-kpi-radius); padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline); }
+  .ahAnalyticsKpis .ahKpiCopy small { font-size: var(--ah-registry-kpi-label-size); line-height: var(--ah-registry-kpi-label-line); }
+  .ahAnalyticsKpis .ahKpiCopy strong { font-size: var(--ah-registry-kpi-value-size); line-height: var(--ah-registry-kpi-value-line); }
+  .ahAnalyticsKpis .ahKpiCopy > span { font-size: var(--ah-registry-kpi-note-size); line-height: var(--ah-registry-kpi-note-line); }
+
+  .ahAnalyticsTabs .ahTabs { gap: 14px; }
+  .ahAnalyticsTabs .ahTabs button { min-height: 38px; font-size: 12px; white-space: nowrap; }
+  .ahAnalyticsLayout,
+  .ahAnalyticsSignalShell { gap: 12px; }
+  .ahAnalyticsPanel { gap: 12px; border-radius: 13px; padding: 12px; }
+  .ahAnalyticsPanel > .ahEmptyState,
+  .ahAnalyticsStatus .ahEmptyState { min-height: 104px; padding: 20px 16px; }
+  .ahAnalyticsPanelHead { gap: 10px; }
+  .ahAnalyticsPanelHead p { font-size: 9px; line-height: 13px; }
+  .ahAnalyticsPanelHead h2 { font-size: 13px; line-height: 17px; }
+  .ahAnalyticsPanelHead > span { padding: 4px 7px; font-size: 9px; line-height: 13px; }
+  .ahAnalyticsDomainGrid { grid-template-columns: 1fr; gap: 8px; }
+  .ahAnalyticsDomainGrid .ahCompactListCard,
+  .ahAnalyticsCompactList .ahCompactListCard,
+  .ahAnalyticsForecast .ahCompactListCard,
+  .ahAnalyticsRunList .ahCompactListCard { min-height: 54px; border-radius: 12px; padding: 9px 10px; }
+  .ahAnalyticsSources > div { grid-template-columns: 1fr; gap: 8px; }
+  .ahAnalyticsCashBars { min-height: 190px; }
+  .ahAnalyticsCashBars article > div { height: 125px; }
+  .ahAnalyticsFilter { align-items: stretch; flex-direction: column; }
+  .ahAnalyticsFilter select { width: 100%; }
+  .ahAnalyticsSignalList button,
+  .ahAnalyticsContractList button { min-height: 54px; padding: 8px 9px; }
+  .ahAnalyticsContractFacts { grid-template-columns: 1fr; }
+  .ahAnalyticsActions { align-items: stretch; flex-direction: column; }
+  .ahAnalyticsActions .ahButton { width: 100%; }
+
+  .ahAnalyticsMetricTable { overflow-x: visible; }
+  .ahAnalyticsMetricTable table,
+  .ahAnalyticsMetricTable thead,
+  .ahAnalyticsMetricTable tbody,
+  .ahAnalyticsMetricTable tr,
+  .ahAnalyticsMetricTable td { display: block; width: 100%; min-width: 0; }
+  .ahAnalyticsMetricTable thead { display: none; }
+  .ahAnalyticsMetricTable tbody { display: grid; gap: 9px; }
+  .ahAnalyticsMetricTable tr { display: grid; gap: 7px; border: 1px solid var(--ah-color-border); border-radius: 12px; background: var(--ah-color-surface); padding: 10px; }
+  .ahAnalyticsMetricTable td { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 6px 10px; border: 0; padding: 0; font-size: 10px; line-height: 14px; }
+  .ahAnalyticsMetricTable td::before { grid-row: span 2; content: attr(data-label); color: var(--ah-color-text-secondary); font-size: 9px; line-height: 13px; }
+  .ahAnalyticsMetricTable td small { margin: 0; font-size: 9px; line-height: 13px; }
+}
+
+@media (max-width: 359px) {
+  .ahAnalyticsMetricTable td { grid-template-columns: 1fr; }
+  .ahAnalyticsMetricTable td::before { grid-row: auto; }
+}

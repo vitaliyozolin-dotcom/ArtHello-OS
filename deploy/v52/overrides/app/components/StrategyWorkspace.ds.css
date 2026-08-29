@@ -1,0 +1,126 @@
+.ahStrategyPage {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.ahStrategyPage .ahPageHeader { align-items: flex-end; margin-bottom: 0; }
+.ahStrategyPage .ahPageHeaderCopy > small { margin-bottom: 6px; font-size: 12px; line-height: 16px; letter-spacing: .09em; }
+.ahStrategyPage .ahPageHeaderCopy h1 { font-size: clamp(34px, 2vw, 40px); font-weight: 720; line-height: 1.04; letter-spacing: -.035em; }
+.ahStrategyPage .ahPageHeaderCopy p { max-width: 780px; margin-top: 6px; font-size: 14px; line-height: 20px; }
+.ahStrategyPage .ahPageHeaderActions .ahButton { min-height: 40px; border-radius: 12px; padding-inline: 16px; font-size: 13px; }
+
+.ahStrategyStatus { display: grid; place-items: center; min-height: 160px; color: var(--ah-color-text-secondary); font-size: 13px; line-height: 19px; }
+.ahStrategyStatus > .ahCard { width: min(620px, 100%); padding: 0; }
+
+.ahStrategyBoundary { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 12px; border-radius: 16px; padding: 12px 14px; }
+.ahStrategyBoundary strong { display: inline-flex; align-items: center; width: fit-content; min-height: 28px; border-radius: 999px; background: var(--ah-color-primary-soft); padding: 5px 10px; color: var(--ah-color-primary); font-size: 11px; font-weight: 750; line-height: 16px; letter-spacing: .045em; text-transform: uppercase; }
+.ahStrategyBoundary span { min-width: 0; color: var(--ah-color-text-secondary); font-size: 13px; line-height: 19px; }
+
+.ahStrategyKpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--ah-registry-kpi-gap); }
+.ahStrategyKpis > .ahKpiCard { min-width: 0; min-height: var(--ah-registry-kpi-min-height); border-radius: var(--ah-registry-kpi-radius); padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline); }
+.ahStrategyKpis .ahKpiCopy small { font-size: var(--ah-registry-kpi-label-size); font-weight: var(--ah-registry-kpi-label-weight); line-height: var(--ah-registry-kpi-label-line); }
+.ahStrategyKpis .ahKpiCopy strong { margin-top: var(--ah-registry-kpi-value-gap); font-size: var(--ah-registry-kpi-value-size); font-weight: var(--ah-registry-kpi-value-weight); line-height: var(--ah-registry-kpi-value-line); }
+.ahStrategyKpis .ahKpiCopy > span { margin-top: var(--ah-registry-kpi-note-gap); font-size: var(--ah-registry-kpi-note-size); font-weight: var(--ah-registry-kpi-note-weight); line-height: var(--ah-registry-kpi-note-line); }
+.ahStrategyKpiWarning { border-color: #f0d4b5; background: var(--ah-color-warning-soft); }
+
+.ahStrategyTabs { min-width: 0; overflow: hidden; border-bottom: 1px solid var(--ah-color-border); }
+.ahStrategyTabs .ahTabs { width: 100%; max-width: 100%; gap: 18px; overflow-x: auto; }
+.ahStrategyTabs .ahTabs button { min-height: 40px; font-size: 13px; }
+
+.ahStrategyCardGrid,
+.ahStrategyProjectGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; min-width: 0; }
+
+.ahStrategyPanel { display: grid; gap: 16px; min-width: 0; overflow: hidden; border-radius: 16px; padding: 16px; }
+.ahStrategyPanel > .ahEmptyState,
+.ahStrategyStatus .ahEmptyState { min-height: 120px; padding: 24px 20px; }
+.ahStrategyPanel > .ahEmptyState h3,
+.ahStrategyStatus .ahEmptyState h3 { font-size: 12px; font-weight: 500; line-height: 15px; }
+.ahStrategyPanel > .ahEmptyState p,
+.ahStrategyStatus .ahEmptyState p { font-size: 10px; font-weight: 400; line-height: 14px; }
+
+.ahStrategyPanelHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.ahStrategyPanelHead > div { display: grid; min-width: 0; gap: 4px; }
+.ahStrategyPanelHead p,
+.ahStrategyPanelHead h2 { margin: 0; }
+.ahStrategyPanelHead p { color: var(--ah-color-primary); font-size: 10px; font-weight: 750; line-height: 14px; letter-spacing: .06em; text-transform: uppercase; }
+.ahStrategyPanelHead h2 { color: var(--ah-color-text-primary); font-size: 16px; font-weight: 650; line-height: 21px; }
+.ahStrategyPanelHead > span { flex: 0 0 auto; border-radius: 999px; background: var(--ah-color-surface-soft); padding: 5px 8px; color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+
+.ahStrategyLead,
+.ahStrategySource { margin: 0; color: var(--ah-color-text-secondary); font-size: 11px; line-height: 16px; }
+.ahStrategySource { border-radius: 11px; background: var(--ah-color-surface-soft); padding: 9px 10px; }
+
+.ahStrategyFacts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.ahStrategyFacts > span { display: grid; gap: 4px; min-width: 0; border-radius: 11px; background: var(--ah-color-surface-soft); padding: 10px; color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+.ahStrategyFacts strong { overflow-wrap: anywhere; color: var(--ah-color-text-primary); font-size: 13px; font-weight: 650; line-height: 17px; }
+.ahStrategyFacts .negative strong { color: var(--ah-color-danger); }
+.ahStrategyFacts .positive strong { color: var(--ah-color-success); }
+
+.ahStrategyCompactList { display: grid; gap: 10px; min-width: 0; }
+.ahStrategyCompactList .ahCompactListCard { min-height: 58px; border-radius: 13px; padding: 10px 12px; }
+
+.ahStrategyProgress { display: grid; gap: 8px; }
+.ahStrategyProgress header,
+.ahStrategyProgress footer { display: flex; justify-content: space-between; gap: 12px; color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+.ahStrategyProgress header strong { color: var(--ah-color-text-primary); font-size: 12px; }
+.ahStrategyProgress i { display: block; height: 7px; overflow: hidden; border-radius: 999px; background: var(--ah-color-surface-soft); }
+.ahStrategyProgress i b { display: block; height: 100%; border-radius: inherit; background: var(--ah-color-primary); }
+
+.ahStrategyActions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+.ahStrategyActions .ahButton,
+.ahStrategyPanel > .ahButton { min-height: 34px; border-radius: 10px; padding: 7px 11px; font-size: 11px; }
+
+@media (max-width: 1024px) {
+  .ahStrategyKpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ahStrategyFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .ahStrategyPage { gap: 16px; padding-top: 0; }
+  .ahStrategyPage .ahPageHeader { align-items: stretch; }
+  .ahStrategyPage .ahPageHeaderCopy > small { margin-bottom: 5px; font-size: 11px; line-height: 15px; }
+  .ahStrategyPage .ahPageHeaderCopy h1 { font-size: 32px; line-height: 1.04; }
+  .ahStrategyPage .ahPageHeaderCopy p { margin-top: 6px; font-size: 15px; line-height: 21px; }
+  .ahStrategyPage .ahPageHeaderActions,
+  .ahStrategyPage .ahPageHeaderActions .ahButton { width: 100%; }
+  .ahStrategyPage .ahPageHeaderActions .ahButton { min-height: 44px; border-radius: 11px; font-size: 14px; }
+
+  .ahStrategyBoundary { grid-template-columns: 1fr; gap: 8px; border-radius: 12px; padding: 12px; }
+  .ahStrategyBoundary strong { min-height: 24px; padding: 4px 8px; font-size: 10px; line-height: 13px; }
+  .ahStrategyBoundary span { font-size: 13px; line-height: 18px; }
+
+  .ahStrategyKpis { gap: var(--ah-registry-kpi-gap); }
+  .ahStrategyKpis > .ahKpiCard { min-height: var(--ah-registry-kpi-min-height); border-radius: var(--ah-registry-kpi-radius); padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline); }
+  .ahStrategyKpis .ahKpiCopy small { font-size: var(--ah-registry-kpi-label-size); line-height: var(--ah-registry-kpi-label-line); }
+  .ahStrategyKpis .ahKpiCopy strong { font-size: var(--ah-registry-kpi-value-size); line-height: var(--ah-registry-kpi-value-line); }
+  .ahStrategyKpis .ahKpiCopy > span { font-size: var(--ah-registry-kpi-note-size); line-height: var(--ah-registry-kpi-note-line); }
+
+  .ahStrategyTabs .ahTabs { gap: 14px; }
+  .ahStrategyTabs .ahTabs button { min-height: 38px; font-size: 12px; white-space: nowrap; }
+
+  .ahStrategyCardGrid,
+  .ahStrategyProjectGrid { grid-template-columns: 1fr; gap: 12px; }
+  .ahStrategyPanel { gap: 12px; border-radius: 13px; padding: 12px; }
+  .ahStrategyPanel > .ahEmptyState,
+  .ahStrategyStatus .ahEmptyState { min-height: 104px; padding: 20px 16px; }
+  .ahStrategyPanelHead { gap: 10px; }
+  .ahStrategyPanelHead p { font-size: 9px; line-height: 13px; }
+  .ahStrategyPanelHead h2 { font-size: 13px; line-height: 17px; }
+  .ahStrategyPanelHead > span { padding: 4px 7px; font-size: 9px; line-height: 13px; }
+  .ahStrategyLead,
+  .ahStrategySource { font-size: 10px; line-height: 14px; }
+  .ahStrategyFacts { gap: 7px; }
+  .ahStrategyFacts > span { padding: 9px; font-size: 9px; line-height: 13px; }
+  .ahStrategyFacts strong { font-size: 12px; line-height: 15px; }
+  .ahStrategyCompactList { gap: 8px; }
+  .ahStrategyCompactList .ahCompactListCard { min-height: 54px; border-radius: 12px; padding: 9px 10px; }
+  .ahStrategyProgress header,
+  .ahStrategyProgress footer,
+  .ahStrategyActions { font-size: 9px; line-height: 13px; }
+}
+
+@media (max-width: 359px) {
+  .ahStrategyFacts { grid-template-columns: 1fr; }
+}

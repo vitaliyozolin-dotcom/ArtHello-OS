@@ -1,0 +1,134 @@
+.ahReadinessPage { display: grid; gap: 20px; min-width: 0; padding-top: 4px; }
+.ahReadinessPage .ahPageHeader { align-items: flex-end; margin-bottom: 0; }
+.ahReadinessPage .ahPageHeaderCopy > small { margin-bottom: 6px; font-size: 12px; line-height: 16px; letter-spacing: .09em; }
+.ahReadinessPage .ahPageHeaderCopy h1 { font-size: clamp(34px, 2vw, 40px); font-weight: 720; line-height: 1.04; letter-spacing: -.035em; }
+.ahReadinessPage .ahPageHeaderCopy p { max-width: 820px; margin-top: 6px; font-size: 14px; line-height: 20px; }
+.ahReadinessPage .ahPageHeaderActions .ahButton { min-height: 40px; border-radius: 12px; padding-inline: 16px; font-size: 13px; }
+
+.ahReadinessStatus { display: grid; place-items: center; min-height: 160px; color: var(--ah-color-text-secondary); font-size: 13px; line-height: 19px; }
+.ahReadinessStatus > .ahCard { width: min(620px, 100%); padding: 0; }
+
+.ahReadinessBoundary { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 12px; border-radius: 16px; padding: 12px 14px; }
+.ahReadinessBoundary strong { display: inline-flex; align-items: center; width: fit-content; min-height: 28px; border-radius: 999px; background: var(--ah-color-primary-soft); padding: 5px 10px; color: var(--ah-color-primary); font-size: 11px; font-weight: 750; line-height: 16px; letter-spacing: .045em; text-transform: uppercase; }
+.ahReadinessBoundary span { min-width: 0; color: var(--ah-color-text-secondary); font-size: 13px; line-height: 19px; }
+
+.ahReadinessKpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--ah-registry-kpi-gap); }
+.ahReadinessKpis > .ahKpiCard { min-width: 0; min-height: var(--ah-registry-kpi-min-height); border-radius: var(--ah-registry-kpi-radius); padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline); }
+.ahReadinessKpis .ahKpiCopy small { font-size: var(--ah-registry-kpi-label-size); font-weight: var(--ah-registry-kpi-label-weight); line-height: var(--ah-registry-kpi-label-line); }
+.ahReadinessKpis .ahKpiCopy strong { margin-top: var(--ah-registry-kpi-value-gap); font-size: var(--ah-registry-kpi-value-size); font-weight: var(--ah-registry-kpi-value-weight); line-height: var(--ah-registry-kpi-value-line); }
+.ahReadinessKpis .ahKpiCopy > span { margin-top: var(--ah-registry-kpi-note-gap); font-size: var(--ah-registry-kpi-note-size); font-weight: var(--ah-registry-kpi-note-weight); line-height: var(--ah-registry-kpi-note-line); }
+.ahReadinessKpiWarning { border-color: #f0d4b5; background: var(--ah-color-warning-soft); }
+
+.ahReadinessTabs { min-width: 0; overflow: hidden; border-bottom: 1px solid var(--ah-color-border); }
+.ahReadinessTabs .ahTabs { width: 100%; max-width: 100%; gap: 18px; overflow-x: auto; }
+.ahReadinessTabs .ahTabs button { min-height: 40px; font-size: 13px; }
+
+.ahReadinessLayout,
+.ahReadinessScenarioShell { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; min-width: 0; }
+.ahReadinessGateGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; gap: 14px; min-width: 0; }
+.ahReadinessPanel { display: grid; gap: 16px; min-width: 0; overflow: hidden; border-radius: 16px; padding: 16px; }
+.ahReadinessPanel > .ahEmptyState,
+.ahReadinessStatus .ahEmptyState { min-height: 120px; padding: 24px 20px; }
+.ahReadinessPanel > .ahEmptyState h3,
+.ahReadinessStatus .ahEmptyState h3 { font-size: 12px; font-weight: 500; line-height: 15px; }
+.ahReadinessPanel > .ahEmptyState p,
+.ahReadinessStatus .ahEmptyState p { font-size: 10px; font-weight: 400; line-height: 14px; }
+
+.ahReadinessPanelHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.ahReadinessPanelHead > div { display: grid; min-width: 0; gap: 4px; }
+.ahReadinessPanelHead p,
+.ahReadinessPanelHead h2 { margin: 0; }
+.ahReadinessPanelHead p { color: var(--ah-color-primary); font-size: 10px; font-weight: 750; line-height: 14px; letter-spacing: .06em; text-transform: uppercase; }
+.ahReadinessPanelHead h2 { color: var(--ah-color-text-primary); font-size: 16px; font-weight: 650; line-height: 21px; }
+.ahReadinessPanelHead > span { flex: 0 0 auto; border-radius: 999px; background: var(--ah-color-surface-soft); padding: 5px 8px; color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+
+.ahReadinessCompactList,
+.ahReadinessMatrix { display: grid; gap: 10px; min-width: 0; }
+.ahReadinessMatrix { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ahReadinessCompactList .ahCompactListCard,
+.ahReadinessMatrix .ahCompactListCard { min-height: 58px; border-radius: 13px; padding: 10px 12px; }
+
+.ahReadinessRoute { display: grid; gap: 8px; margin: 0; padding-left: 20px; color: var(--ah-color-text-secondary); font-size: 11px; line-height: 16px; }
+.ahReadinessRoute li::marker { color: var(--ah-color-primary); font-size: 10px; font-weight: 700; }
+.ahReadinessLimit { margin: 0; border-radius: 11px; background: var(--ah-color-surface-soft); padding: 10px; color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+.ahReadinessLimit strong,
+.ahReadinessLimit span { display: block; }
+.ahReadinessLimit strong { margin-bottom: 4px; color: var(--ah-color-text-primary); font-size: 11px; line-height: 15px; }
+
+.ahReadinessScenarioList { display: grid; gap: 8px; }
+.ahReadinessScenarioList button { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; align-items: center; gap: 10px; min-height: 58px; border: 1px solid var(--ah-color-border); border-radius: 12px; background: var(--ah-color-surface); padding: 9px 10px; color: var(--ah-color-text-primary); text-align: left; }
+.ahReadinessScenarioList button.active { border-color: var(--ah-color-primary); background: var(--ah-color-primary-soft); }
+.ahReadinessScenarioList b { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--ah-color-primary-soft); color: var(--ah-color-primary); font-size: 10px; }
+.ahReadinessScenarioList button > span { display: grid; gap: 2px; min-width: 0; }
+.ahReadinessScenarioList strong { font-size: 12px; font-weight: 600; line-height: 15px; }
+.ahReadinessScenarioList small { overflow: hidden; color: var(--ah-color-text-secondary); font-size: 9px; line-height: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.ahReadinessScenarioList em { border-radius: 999px; padding: 4px 7px; background: var(--ah-color-surface-soft); color: var(--ah-color-text-secondary); font-size: 9px; font-style: normal; line-height: 13px; }
+.ahReadinessScenarioList em.passed { background: #edf8f3; color: var(--ah-color-success); }
+.ahReadinessScenarioList em.blocked { background: var(--ah-color-danger-soft); color: var(--ah-color-danger); }
+
+.ahReadinessGateGrid .ahReadinessPanel { min-height: 168px; }
+.ahReadinessGateGrid .passed { border-color: #cce9dc; }
+.ahReadinessGateGrid .blocked { border-color: #efcaca; }
+.ahReadinessGateGrid .limited { border-color: #f0d4b5; }
+.ahReadinessGateGrid p { margin: 0; color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+.ahReadinessGateGrid small { align-self: end; color: var(--ah-color-text-secondary); font-size: 9px; line-height: 13px; }
+
+.ahReadinessSeal { border-radius: 11px; background: var(--ah-color-warning-soft); padding: 10px; color: #8a5525; font-size: 10px; font-weight: 700; line-height: 14px; text-align: center; }
+.ahReadinessComment { display: grid; gap: 6px; }
+.ahReadinessComment > span { color: var(--ah-color-text-secondary); font-size: 10px; font-weight: 600; line-height: 14px; }
+.ahReadinessComment textarea { min-height: 120px; resize: vertical; border: 1px solid var(--ah-color-border); border-radius: 12px; background: var(--ah-color-surface); padding: 11px; color: var(--ah-color-text-primary); font: inherit; font-size: 12px; line-height: 17px; }
+.ahReadinessPanel > small { color: var(--ah-color-text-secondary); font-size: 9px; line-height: 13px; }
+.ahReadinessActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.ahReadinessActions .ahButton { min-height: 34px; border-radius: 10px; padding: 7px 11px; font-size: 11px; }
+
+@media (max-width: 1100px) {
+  .ahReadinessGateGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1024px) {
+  .ahReadinessKpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ahReadinessLayout,
+  .ahReadinessScenarioShell { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 720px) {
+  .ahReadinessPage { gap: 16px; padding-top: 0; }
+  .ahReadinessPage .ahPageHeader { align-items: stretch; }
+  .ahReadinessPage .ahPageHeaderCopy > small { margin-bottom: 5px; font-size: 11px; line-height: 15px; }
+  .ahReadinessPage .ahPageHeaderCopy h1 { font-size: 32px; line-height: 1.04; }
+  .ahReadinessPage .ahPageHeaderCopy p { margin-top: 6px; font-size: 15px; line-height: 21px; }
+  .ahReadinessPage .ahPageHeaderActions,
+  .ahReadinessPage .ahPageHeaderActions .ahButton { width: 100%; }
+  .ahReadinessPage .ahPageHeaderActions .ahButton { min-height: 44px; border-radius: 11px; font-size: 14px; }
+
+  .ahReadinessBoundary { grid-template-columns: 1fr; gap: 8px; border-radius: 12px; padding: 12px; }
+  .ahReadinessBoundary strong { min-height: 24px; padding: 4px 8px; font-size: 10px; line-height: 13px; }
+  .ahReadinessBoundary span { font-size: 13px; line-height: 18px; }
+
+  .ahReadinessKpis > .ahKpiCard { min-height: var(--ah-registry-kpi-min-height); border-radius: var(--ah-registry-kpi-radius); padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline); }
+  .ahReadinessKpis .ahKpiCopy small { font-size: var(--ah-registry-kpi-label-size); line-height: var(--ah-registry-kpi-label-line); }
+  .ahReadinessKpis .ahKpiCopy strong { font-size: var(--ah-registry-kpi-value-size); line-height: var(--ah-registry-kpi-value-line); }
+  .ahReadinessKpis .ahKpiCopy > span { font-size: var(--ah-registry-kpi-note-size); line-height: var(--ah-registry-kpi-note-line); }
+
+  .ahReadinessTabs .ahTabs { gap: 14px; }
+  .ahReadinessTabs .ahTabs button { min-height: 38px; font-size: 12px; white-space: nowrap; }
+  .ahReadinessLayout,
+  .ahReadinessScenarioShell,
+  .ahReadinessGateGrid { grid-template-columns: 1fr; gap: 12px; }
+  .ahReadinessPanel { gap: 12px; border-radius: 13px; padding: 12px; }
+  .ahReadinessPanel > .ahEmptyState,
+  .ahReadinessStatus .ahEmptyState { min-height: 104px; padding: 20px 16px; }
+  .ahReadinessPanelHead { gap: 10px; }
+  .ahReadinessPanelHead p { font-size: 9px; line-height: 13px; }
+  .ahReadinessPanelHead h2 { font-size: 13px; line-height: 17px; }
+  .ahReadinessPanelHead > span { padding: 4px 7px; font-size: 9px; line-height: 13px; }
+  .ahReadinessCompactList,
+  .ahReadinessMatrix { grid-template-columns: 1fr; gap: 8px; }
+  .ahReadinessCompactList .ahCompactListCard,
+  .ahReadinessMatrix .ahCompactListCard { min-height: 54px; border-radius: 12px; padding: 9px 10px; }
+  .ahReadinessRoute { font-size: 10px; line-height: 14px; }
+  .ahReadinessScenarioList button { min-height: 54px; padding: 8px 9px; }
+  .ahReadinessGateGrid .ahReadinessPanel { min-height: 0; }
+  .ahReadinessActions { align-items: stretch; flex-direction: column; }
+  .ahReadinessActions .ahButton { width: 100%; }
+}

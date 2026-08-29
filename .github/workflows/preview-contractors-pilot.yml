@@ -6,7 +6,7 @@ on:
       - design-system/compact-card-typography
       - design-system/migration-wave-1-registry
       - design-system/migration-wave-2-procurement-food
-      - design-system/migration-wave-3-safety-medical
+      - design-system/migration-wave-4-management-insight
     paths:
       - app/components/**
       - scripts/**
@@ -247,6 +247,9 @@ jobs:
             echo "- Food: $PREVIEW_URL/#food"
             echo "- Safety: $PREVIEW_URL/#safety"
             echo "- Medical: $PREVIEW_URL/#medical"
+            echo "- Strategy: $PREVIEW_URL/#strategy"
+            echo "- Analytics: $PREVIEW_URL/#analytics"
+            echo "- Readiness: $PREVIEW_URL/#readiness"
             echo '- Data: isolated snapshot volume; production is not mounted'
             echo "- Result: ${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"

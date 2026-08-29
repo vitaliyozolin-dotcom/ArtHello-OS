@@ -220,7 +220,7 @@ test("Wave 1 CSS is locally scoped and uses the approved registry density", () =
 });
 
 test("approved operational-registry KPI scale is a shared token contract", () => {
-  assert.match(designSystem, /designSystemVersion\s*=\s*["']1\.3-protected-operations["']/);
+  assert.match(designSystem, /designSystemVersion\s*=\s*["']1\.4-management-insight["']/);
   const expected = {
     "--ah-registry-kpi-min-height": "98px",
     "--ah-registry-kpi-radius": "16px",
@@ -362,7 +362,7 @@ test("component-specific build patches are retired without deleting unrelated pa
   assert.equal(patchesFile(operationalPatch, "app/components/FoodWorkspace.tsx"), false);
   assert.equal(patchesFile(operationalPatch, "app/components/SafetyWorkspace.tsx"), false);
   assert.equal(patchesFile(operationalPatch, "app/components/MedicalWorkspace.tsx"), false);
-  assert.equal(patchesFile(operationalPatch, "app/components/StrategyWorkspace.tsx"), true);
+  assert.equal(patchesFile(operationalPatch, "app/components/StrategyWorkspace.tsx"), false);
   assert.equal(patchesFile(foundationPatch, "app/components/ArtHelloShell.tsx"), true);
   assert.doesNotMatch(normalizeInputs, /patch-system-operational-modules\.mjs/);
 });
