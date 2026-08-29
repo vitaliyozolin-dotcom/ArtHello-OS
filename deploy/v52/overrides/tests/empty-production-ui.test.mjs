@@ -38,13 +38,15 @@ test("finance API derives totals and periods only from stored records", () => {
 test("sales keeps its operating sections available before the first lead", () => {
   const sales = read("../app/components/SalesWorkspace.tsx");
 
-  assert.doesNotMatch(sales, /if \(!data\.leads\.length\) return/);
-  assert.match(sales, /DEFAULT_FUNNEL_STAGES/);
-  assert.match(sales, /Все разделы продаж уже доступны/);
+  assert.doesNotMatch(sales, /if\s*\(\s*!\s*data\.leads\.length\s*\)\s*return/);
+  assert.match(sales, /\bhasSalesData\b/);
+  assert.match(sales, /Лидов и этапов пока нет/);
+  assert.match(sales, /Сквозная цепочка пока не собрана/);
   assert.match(sales, /Добавить первый лид/);
-  assert.match(sales, /Подключить источники/);
+  assert.match(sales, /onOpenIntegrations/);
   assert.match(sales, /action: "createLead"/);
-  assert.match(sales, /EMPTY_LEAD/);
+  assert.match(sales, /function LeadCreateModal/);
+  assert.match(sales, /chainLead\s*\?/);
   assert.doesNotMatch(sales, /acceptanceChainLeadId\)!|chainLifecycle[^\n]*!|chainAccrual[^\n]*!|chainPayment[^\n]*!/);
 });
 

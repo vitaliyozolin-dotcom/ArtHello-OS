@@ -18,6 +18,7 @@ const help = read("app/components/ContextualHelpSystem.tsx");
 const helpCss = read("app/components/ContextualHelpSystem.css");
 const helpDom = read("app/components/contextualHelpDom.ts");
 const hr = read("app/components/HrWorkspace.tsx");
+const finance = read("app/components/FinanceWorkspace.tsx");
 const sales = read("app/components/SalesWorkspace.tsx");
 const family = read("app/components/FamilyWorkspace.tsx");
 const content = read("app/components/ContentWorkspace.tsx");
@@ -45,6 +46,23 @@ for (const [name, source] of [["HR", hr],["Sales", sales],["Content", content],[
 }
 
 requireText(content, "Все рабочие разделы доступны сразу", "content still collapses to one empty card");
+requireText(finance, "ahFinancePage", "finance workspace is not mounted on the design-system shell");
+requireText(finance, "<PageContainer", "finance page container is missing");
+requireText(finance, "<PageHeader", "finance page header is missing");
+requireText(finance, "<Tabs", "finance tabs are hidden by an empty-state branch");
+requireText(finance, "<KpiCard", "finance registry KPI cards are missing");
+requireText(finance, "Операций за период пока нет", "finance empty register is not honest");
+forbid(finance, /\bfinance-page\b/, "legacy finance workspace wrapper remains");
+forbid(finance, /if\s*\(\s*!\s*data\.operations\.length\s*\)\s*(?:\{[\s\S]{0,160}?\breturn\b|return\b)/, "finance workspace still collapses when empty");
+requireText(sales, "ahSalesPage", "sales workspace is not mounted on the design-system shell");
+requireText(sales, "<PageContainer", "sales page container is missing");
+requireText(sales, "<PageHeader", "sales page header is missing");
+requireText(sales, "<Tabs", "sales tabs are hidden by an empty-state branch");
+requireText(sales, "<KpiCard", "sales registry KPI cards are missing");
+requireText(sales, "Лидов и этапов пока нет", "sales empty funnel is not honest");
+requireText(sales, "function LeadCreateModal", "manual lead creation was lost in the design migration");
+forbid(sales, /\bsales-workspace\b/, "legacy sales workspace wrapper remains");
+forbid(sales, /if\s*\(\s*!\s*data\.leads\.length\s*\)\s*(?:\{[\s\S]{0,160}?\breturn\b|return\b)/, "sales workspace still collapses when empty");
 requireText(legal, "ahLegalPage", "legal workspace is not mounted on the design-system shell");
 requireText(legal, "<PageContainer", "legal page container is missing");
 requireText(legal, "<PageHeader", "legal page header is missing");
@@ -121,12 +139,13 @@ requireText(helpCss, "/* ARTHELLO_HELP_CANONICAL_V5 */", "canonical help styling
 forbid(polish, /ARTHELLO_MOBILE_VISUAL_HELP_FOLLOWUP|ARTHELLO_OPERATIONAL_UX_V3|ARTHELLO_MOBILE_DESIGN_SYSTEM_V4|ARTHELLO_HELP_MARKER_RIGHT_EDGE/, "legacy mobile CSS layers remain after canonical cleanup");
 forbid(helpCss, /ARTHELLO_HELP_UX_V3|ARTHELLO_HELP_VISIBILITY_V4/, "legacy help CSS layers remain after canonical cleanup");
 
-const productionSources = [procurement, food, safety, medical, strategy, analytics, readiness].join("\n");
+const productionSources = [finance, sales, procurement, food, safety, medical, strategy, analytics, readiness].join("\n");
 forbid(productionSources, /Тестовый комплект для класса/, "hard-coded procurement test request remains");
 forbid(productionSources, /SAFE-SYS-T-ACS-01|OBJ-T-002|ACT-SAFE-T-032/, "hard-coded safety test references remain");
 forbid(productionSources, /MEDICAL_FULL_SYNTHETIC|ЗАЩИЩЁННАЯ ЗОНА · ТЕСТ/, "medical test labels remain");
 forbid(productionSources, /ТЕСТОВАЯ СТРАТЕГИЯ|STR-PRJ-T-014/, "strategy test references remain");
 forbid(productionSources, /ОПУБЛИКОВАННЫЙ ТЕСТОВЫЙ СНИМОК|SCN-T-09|25\/25|84\/84/, "fixed analytics or readiness acceptance claims remain");
+forbid(productionSources, /SYNTHETIC TEST|CHAIN STATUS\s*·\s*PASS|MODEL STATUS\s*·\s*PASS/, "fixed finance or sales pass claims remain");
 forbid(productionSources, /ТЕСТОВЫЙ РЫНОК|ТЕСТОВЫЙ КОНТУР/, "production modules still advertise a test contour");
 
 const componentsDir = fileURLToPath(new URL("../app/components/", import.meta.url));

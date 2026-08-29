@@ -14,9 +14,40 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 284;
+const expectedPngCount = 340;
 
 const waveRoutes = {
+  finance: {
+    heading: "Финансы",
+    root: ".ahFinancePage",
+    legacy: ".finance-page",
+    endpoint: /\/api\/finance(?:\?.*)?$/,
+    kpis: ".ahFinanceKpis > .ahKpiCard",
+    kpiGrid: ".ahFinanceKpis",
+    tabs: ".ahFinanceTabs .ahTabs",
+    table: ".finance-table-wrap",
+    empty: ".ahFinancePage .ahEmptyState",
+    expectedTabCount: 6,
+    requireTable: false,
+    requireModal: false,
+  },
+  sales: {
+    heading: "Продажи",
+    root: ".ahSalesPage",
+    legacy: ".sales-workspace",
+    legacyTabs: ".sales-tabs",
+    endpoint: /\/api\/sales(?:\?.*)?$/,
+    kpis: ".ahSalesKpis > .ahKpiCard",
+    kpiGrid: ".ahSalesKpis",
+    tabs: ".ahSalesTabs .ahTabs",
+    table: ".sales-table-wrap",
+    empty: ".ahSalesPage .ahEmptyState",
+    populatedTab: /^Лиды и контакты(?:\s*\d+)?$/,
+    modal: ".lead-create-modal",
+    modalTrigger: /^Добавить лид$/,
+    modalFields: ["name", "source", "phone", "email", "interest", "branchId", "comment"],
+    requireTable: false,
+  },
   legal: {
     heading: "Юридический контур",
     root: ".ahLegalPage",
@@ -145,6 +176,65 @@ const waveRoutes = {
     requireTable: false,
     requireModal: false,
   },
+};
+
+const emptyFinance = {
+  selectedPeriod: "2026-04",
+  operations: [], accruals: [], budgets: [], payroll: [], corrections: [], issues: [],
+  entityNames: {}, monthly: [], pnlLines: [],
+  forecast: { openingBalanceMinor: 0, timeline: [], firstGap: null },
+  ltvPlan: { families: [], actualLtvMinor: 0, averageActualLtvMinor: 0, baseNext12MonthsMinor: 0, riskAdjustedNext12MonthsMinor: 0, forecastLtvMinor: 0, method: "Методика не определена" },
+  summary: { receiptsMinor: 0, outflowsMinor: 0, netMinor: 0, revenueMinor: 0, expenseMinor: 0, resultMinor: 0, planRevenueMinor: 0, planExpenseMinor: 0, planResultMinor: 0, debtMinor: 0, openIssues: 0 },
+  checks: [], sourcePolicy: {},
+};
+
+const populatedFinance = {
+  ...emptyFinance,
+  operations: [{
+    id: "FIN-VISUAL-001", operationDate: "2026-04-12", period: "2026-04", direction: "Поступление", amountMinor: 32000000,
+    category: "Оплата обучения", reportClass: "Доходы ОПиУ", counterpartyEntityId: "FAM-VISUAL-001", contractId: "CON-VISUAL-001",
+    documentId: "DOC-VISUAL-001", projectEntityId: "PRJ-VISUAL-001", legalEntityId: "ORG-VISUAL-001", objectEntityId: "OBJ-VISUAL-001",
+    cfrEntityId: "CFR-VISUAL-001", bankOperationRef: "BANK-VISUAL-001", operationKind: "Банковская операция", sourceSystem: "Visual fixture",
+    sourceFile: "visual-finance.xlsx", sourceSheet: "ОДДС", sourceRef: "R2", dataQuality: "Подтверждено visual gate", status: "Разнесено",
+  }],
+  accruals: [{ id: "ACCR-VISUAL-001", period: "2026-04", contour: "Семьи", recordsCount: 1, accrualMinor: 36000000, paidMinor: 32000000, debtMinor: 4000000, debtCases: 1, sourceFile: "visual-payments.xlsx", sourceSheet: "Апрель", dataQuality: "Visual fixture" }],
+  budgets: [{ id: "BUD-VISUAL-001", period: "2026-04", line: "Выручка", planMinor: 35000000, scenario: "Базовый", assumption: "Visual fixture", sourceType: "Сценарий" }],
+  payroll: [{ id: "PAY-VISUAL-001", period: "2026-04", amountMinor: 12000000, scope: "Общий итог", sourceSheet: "Апрель", dataQuality: "Обезличено" }],
+  corrections: [],
+  issues: [{ id: "FIN-RISK-VISUAL-001", title: "Проверить задолженность visual fixture", severity: "Средний", sourceA: "Начисления", sourceB: "Оплаты", differenceMinor: 4000000, ownerEntityId: "ENT-VISUAL-OWNER", status: "Открыто", relatedTaskId: null, resolution: "" }],
+  entityNames: { "FAM-VISUAL-001": "Семья visual fixture", "CON-VISUAL-001": "Договор visual fixture", "ORG-VISUAL-001": "ArtHello", "OBJ-VISUAL-001": "Корпус 1", "PRJ-VISUAL-001": "Основная деятельность", "CFR-VISUAL-001": "Образование" },
+  monthly: [{ period: "2026-04", receiptsMinor: 32000000, outflowsMinor: 12000000, netMinor: 20000000, revenueMinor: 32000000, expenseMinor: 12000000, resultMinor: 20000000, planRevenueMinor: 35000000, planExpenseMinor: 14000000, planResultMinor: 21000000 }],
+  pnlLines: [{ category: "Оплата обучения", reportClass: "Доходы ОПиУ", amountMinor: 32000000, operationIds: ["FIN-VISUAL-001"] }],
+  forecast: { openingBalanceMinor: 24000000, timeline: [{ id: "FORECAST-VISUAL-001", forecastDate: "2026-05-05", direction: "Поступление", amountMinor: 18000000, probability: 90, category: "Следующая оплата", sourceType: "Visual fixture", assumption: "Подтверждение ожидается", linkedEntityId: "FAM-VISUAL-001", balanceMinor: 42000000, isGap: false }], firstGap: null },
+  ltvPlan: { families: [{ familyEntityId: "FAM-VISUAL-001", actualLtvMinor: 96000000, monthlyValueMinor: 32000000, retentionProbability: 80, baseNext12MonthsMinor: 384000000, riskAdjustedNext12MonthsMinor: 307200000, forecastLtvMinor: 403200000 }], actualLtvMinor: 96000000, averageActualLtvMinor: 96000000, baseNext12MonthsMinor: 384000000, riskAdjustedNext12MonthsMinor: 307200000, forecastLtvMinor: 403200000, method: "Факт плюс риск-скорректированный сценарий visual gate" },
+  summary: { receiptsMinor: 32000000, outflowsMinor: 12000000, netMinor: 20000000, revenueMinor: 32000000, expenseMinor: 12000000, resultMinor: 20000000, planRevenueMinor: 35000000, planExpenseMinor: 14000000, planResultMinor: 21000000, debtMinor: 4000000, openIssues: 1 },
+  checks: [{ id: "CHECK-VISUAL-001", title: "Поступления ОДДС", actualMinor: 32000000, expectedMinor: 32000000, differenceMinor: 0, status: "OK", source: "visual-finance.xlsx · ОДДС" }],
+};
+
+const emptySales = {
+  leads: [], touchpoints: [], stageEvents: [], lifecycles: [], accruals: [], bonuses: [], operations: [], entityNames: {}, funnel: [], campaigns: [],
+  summary: { leads: 0, activeLeads: 0, paidLeads: 0, leadToPaymentPercent: 0, revenueMinor: 0, nextPaymentsMinor: 0, highRisk: 0, families: 0 },
+  sourcePolicy: { mode: "empty", note: "Сохранённых лидов и подключённых источников пока нет.", financeLink: "Финансовая операция появится только после подтверждённой оплаты." },
+  ltvPlan: { families: [], actualLtvMinor: 0, averageActualLtvMinor: 0, baseNext12MonthsMinor: 0, riskAdjustedNext12MonthsMinor: 0, forecastLtvMinor: 0, method: "Методика не рассчитывается без данных" },
+  acceptanceChainLeadId: "",
+};
+
+const populatedSales = {
+  ...emptySales,
+  leads: [{ id: "LEAD-VISUAL-001", firstClickAt: "2026-08-10T09:00:00.000Z", source: "Сайт", utmSource: "visual", utmMedium: "fixture", utmCampaign: "wave-6", utmContent: "card", campaignId: "CMP-VISUAL-001", creativeId: "CR-VISUAL-001", offerId: "OFF-VISUAL-001", formId: "FORM-VISUAL-001", managerEntityId: "EMP-VISUAL-001", stage: "Договор", status: "Активен", familyEntityId: "FAM-VISUAL-001", childEntityId: "CHILD-VISUAL-001", contractId: "CON-VISUAL-001", serviceEntityId: "SERVICE-VISUAL-001", rejectionReason: "", tags: ["visual gate"], dataQuality: "Visual fixture" }],
+  touchpoints: [{ id: "TOUCH-VISUAL-001", leadId: "LEAD-VISUAL-001", touchpointType: "Консультация", occurredAt: "2026-08-11T10:30:00.000Z", channel: "Телефон", direction: "Исходящий", summary: "Согласованы условия visual fixture", outcome: "Договор подготовлен", sourceRef: "VISUAL-TOUCH-001" }],
+  stageEvents: [{ id: 1, leadId: "LEAD-VISUAL-001", fromStage: "Консультация", toStage: "Договор", outcome: "Подтверждено", reason: "Visual fixture", actor: "EMP-VISUAL-001", occurredAt: "2026-08-11T11:00:00.000Z" }],
+  lifecycles: [{ id: "LIFE-VISUAL-001", leadId: "LEAD-VISUAL-001", familyEntityId: "FAM-VISUAL-001", childEntityId: "CHILD-VISUAL-001", contractId: "CON-VISUAL-001", serviceEntityId: "SERVICE-VISUAL-001", accrualId: "ACCR-VISUAL-001", paymentOperationId: "FIN-VISUAL-001", serviceStartDate: "2026-08-15", monthlyValueMinor: 32000000, ltvMinor: 96000000, lifetimeMonths: 3, nextPaymentDate: "2026-09-05", nextPaymentMinor: 32000000, churnRiskScore: 34, churnRiskBand: "Средний", loyaltyTier: "Базовый", repeatOffer: "Продление программы", status: "Активна", risk: { score: 34, band: "Средний", factors: ["Visual fixture"], disclaimer: "Решение принимает менеджер" } }],
+  accruals: [{ id: "ACCR-VISUAL-001", familyEntityId: "FAM-VISUAL-001", childEntityId: "CHILD-VISUAL-001", contractId: "CON-VISUAL-001", serviceEntityId: "SERVICE-VISUAL-001", period: "2026-08", amountMinor: 32000000, dueDate: "2026-08-15", status: "Оплачено", paymentOperationId: "FIN-VISUAL-001", sourceType: "Visual fixture" }],
+  bonuses: [{ id: "BONUS-VISUAL-001", familyEntityId: "FAM-VISUAL-001", eventType: "Начисление", points: 100, reason: "Visual fixture", relatedContractId: "CON-VISUAL-001", occurredAt: "2026-08-12" }],
+  operations: [{ id: "FIN-VISUAL-001", operationDate: "2026-08-15", amountMinor: 32000000, category: "Оплата обучения", contractId: "CON-VISUAL-001", counterpartyEntityId: "FAM-VISUAL-001", bankOperationRef: "BANK-VISUAL-001", sourceSystem: "Visual fixture", dataQuality: "Подтверждено" }],
+  entityNames: { "EMP-VISUAL-001": "Менеджер visual fixture", "FAM-VISUAL-001": "Семья visual fixture", "CHILD-VISUAL-001": "Ребёнок visual fixture", "SERVICE-VISUAL-001": "Образовательная программа" },
+  funnel: [{ stage: "Договор", reached: 1, conversionPercent: 100 }],
+  campaigns: [{ campaignId: "CMP-VISUAL-001", leads: 1, contracts: 1, payments: 1, revenueMinor: 32000000 }],
+  summary: { leads: 1, activeLeads: 1, paidLeads: 1, leadToPaymentPercent: 100, revenueMinor: 32000000, nextPaymentsMinor: 32000000, highRisk: 0, families: 1 },
+  sourcePolicy: { mode: "visual", note: "Только синтетические записи visual gate; рабочие данные не используются.", financeLink: "Платёж связан с FIN-VISUAL-001." },
+  ltvPlan: { families: [{ familyEntityId: "FAM-VISUAL-001", actualLtvMinor: 96000000, monthlyValueMinor: 32000000, retentionProbability: 80, baseNext12MonthsMinor: 384000000, riskAdjustedNext12MonthsMinor: 307200000, forecastLtvMinor: 403200000 }], actualLtvMinor: 96000000, averageActualLtvMinor: 96000000, baseNext12MonthsMinor: 384000000, riskAdjustedNext12MonthsMinor: 307200000, forecastLtvMinor: 403200000, method: "Факт плюс риск-скорректированный сценарий visual gate" },
+  acceptanceChainLeadId: "LEAD-VISUAL-001",
 };
 
 const emptyLegal = {
@@ -512,6 +602,8 @@ const populatedReadiness = {
 };
 
 const waveFixtures = {
+  finance: { empty: emptyFinance, populated: populatedFinance },
+  sales: { empty: emptySales, populated: populatedSales },
   legal: { empty: emptyLegal, populated: populatedLegal },
   accounting: { empty: emptyAccounting, populated: populatedAccounting },
   procurement: { empty: emptyProcurement, populated: populatedProcurement },
@@ -804,9 +896,12 @@ async function captureWaveRoute(browser, base, storageState, label, viewport, ro
   await page.getByRole("heading", { name: config.heading, exact: true }).waitFor({ state: "visible", timeout: 30000 });
   if (mode === "populated" && config.populatedTab) {
     const scopedTab = page.locator(config.tabs).getByRole("tab", { name: config.populatedTab, exact: true });
-    const legacyButton = page.getByRole("button", { name: config.populatedTab, exact: true });
-    const populatedTab = await scopedTab.count() === 1 ? scopedTab : legacyButton;
-    if (await populatedTab.count() !== 1) throw new Error(`${config.heading}: populated tab ${config.populatedTab} is missing or ambiguous`);
+    const legacyScope = config.legacyTabs ? page.locator(config.legacyTabs) : page.locator(config.legacy);
+  const legacyTab = legacyScope.locator("button").filter({ hasText: config.populatedTab });
+    const scopedCount = await scopedTab.count();
+    const legacyCount = await legacyTab.count();
+    const populatedTab = scopedCount === 1 ? scopedTab : legacyCount === 1 ? legacyTab : null;
+    if (!populatedTab) throw new Error(`${config.heading}: populated tab ${config.populatedTab} is missing or ambiguous (scoped=${scopedCount}, legacy=${legacyCount})`);
     await populatedTab.click();
     await page.waitForTimeout(250);
   }

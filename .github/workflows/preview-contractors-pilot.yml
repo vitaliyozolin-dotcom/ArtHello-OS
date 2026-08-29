@@ -9,6 +9,7 @@ on:
       - design-system/migration-wave-3-safety-medical
       - design-system/migration-wave-4-strategy
       - design-system/migration-wave-5-analytics-readiness
+      - design-system/migration-wave-6-finance-sales
     paths:
       - app/components/**
       - scripts/**

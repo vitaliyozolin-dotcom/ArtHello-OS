@@ -70,43 +70,7 @@ function replaceRegex(source, regex, replacement, label) {
   write(path, source);
 }
 
-// 4) Finance: one visible Moscow-time period control shared by Register, Cash Flow,
-// P&L, plan/forecast and debts. It accepts months even when no rows exist yet.
-{
-  const path = "/app/app/components/FinanceWorkspace.tsx";
-  let source = read(path);
-  source = replaceOnce(
-    source,
-    'const currentPeriod = () => new Date().toISOString().slice(0, 7);',
-    `const currentPeriod = () => {\n  const parts = new Intl.DateTimeFormat("en", { timeZone: "Europe/Moscow", year: "numeric", month: "2-digit" }).formatToParts(new Date());\n  const year = parts.find((part) => part.type === "year")?.value ?? "";\n  const month = parts.find((part) => part.type === "month")?.value ?? "";\n  return year && month ? \`${year}-\${month}\` : new Date().toISOString().slice(0, 7);\n};`,
-    "Moscow current finance period",
-  );
-  source = replaceOnce(
-    source,
-    '  const operationCloseRef = useRef<HTMLButtonElement>(null);\n\n  const closeOperation = useCallback(() => {',
-    `  const operationCloseRef = useRef<HTMLButtonElement>(null);\n\n  const movePeriod = useCallback((delta: number) => {\n    setPeriod((value) => {\n      const base = /^\\d{4}-\\d{2}$/.test(value) ? value : currentPeriod();\n      const [year, month] = base.split("-").map(Number);\n      const date = new Date(Date.UTC(year, month - 1 + delta, 1));\n      return \`${date.getUTCFullYear()}-\${String(date.getUTCMonth() + 1).padStart(2, "0")}\`;\n    });\n  }, []);\n\n  const closeOperation = useCallback(() => {`,
-    "period navigation helper",
-  );
-  source = replaceRegex(
-    source,
-    /\n  const availablePeriods = \[\.\.\.new Set\([\s\S]*?\n  const operationCorrections =/,
-    '\n  const operationCorrections =',
-    "remove hidden period list",
-  );
-  source = replaceOnce(
-    source,
-    '      </div>\n\n      <div className="finance-kpis">',
-    `      </div>\n\n      <section className="finance-period-bar" data-help-block="finance-period" aria-label="Отчётный период">\n        <div><span>Отчётный период</span><strong>{periodLabel(period)}</strong><small>Один месяц для Реестра, ДДС, ОПиУ, план‑факта и долгов</small></div>\n        <div className="finance-period-actions">\n          <button type="button" onClick={() => movePeriod(-1)} aria-label="Предыдущий месяц">←</button>\n          <label><span className="sr-only">Выбрать месяц</span><input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} aria-label="Выбрать отчётный месяц" /></label>\n          <button type="button" onClick={() => movePeriod(1)} aria-label="Следующий месяц">→</button>\n          <button className="finance-current-period" type="button" onClick={() => setPeriod(currentPeriod())}>Текущий месяц</button>\n        </div>\n      </section>\n\n      <div className="finance-kpis">`,
-    "visible finance period bar",
-  );
-  source = replaceOnce(
-    source,
-    '        <label><span>Период</span><select value={period} onChange={(event) => setPeriod(event.target.value)}>{availablePeriods.map((value) => <option key={value} value={value}>{periodLabel(value)}</option>)}</select></label>\n',
-    '',
-    "remove period from hidden tab strip",
-  );
-  write(path, source);
-}
+console.log("FinanceWorkspace Design System override is already installed; legacy period patch skipped");
 
 // 5) Rounded family empty state, contractor blocks and the shared finance period bar.
 {
@@ -118,3 +82,5 @@ function replaceRegex(source, regex, replacement, label) {
 }
 
 console.log("patch-help-finance-ux-v3: applied");
+
+
