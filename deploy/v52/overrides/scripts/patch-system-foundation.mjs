@@ -101,41 +101,6 @@ patch("app/components/ContextualHelpSystem.tsx", (input) => {
   return source;
 });
 
-patch("app/components/HrWorkspace.tsx", (input) => {
-  let source = input;
-  source = replaceText(
-    source,
-    'import { SoftSelect } from "./SoftSelect";\n',
-    'import { SoftSelect } from "./SoftSelect";\nimport { createPortal } from "react-dom";\n',
-    "HR portal import",
-  );
-  source = replaceText(
-    source,
-    '  return <div className="modal-layer staff-modal-layer"><button className="drawer-scrim" onClick={close} aria-label="Закрыть"/><form className="task-modal staff-modal" onSubmit={save}>',
-    '  return createPortal(<div className="modal-layer staff-modal-layer"><button className="drawer-scrim" onClick={close} aria-label="Закрыть"/><form className="task-modal staff-modal" onSubmit={save}>',
-    "employee modal portal start",
-  );
-  source = replaceText(
-    source,
-    '</div><div className="modal-actions"><button type="button" onClick={close}>Отмена</button><button disabled={busy==="save-employee"}>{busy==="save-employee"?"Сохраняем…":"Сохранить сотрудника"}</button></div></form></div>\n}',
-    '</div><div className="modal-actions"><button type="button" onClick={close}>Отмена</button><button disabled={busy==="save-employee"}>{busy==="save-employee"?"Сохраняем…":"Сохранить сотрудника"}</button></div></form></div>, document.body)\n}',
-    "employee modal portal end",
-  );
-  source = replaceText(
-    source,
-    '  return <div className="modal-layer staff-modal-layer"><button className="drawer-scrim" onClick={close} aria-label="Закрыть"/><section className="task-modal staff-modal import-staff-modal">',
-    '  return createPortal(<div className="modal-layer staff-modal-layer"><button className="drawer-scrim" onClick={close} aria-label="Закрыть"/><section className="task-modal staff-modal import-staff-modal">',
-    "employee import portal start",
-  );
-  source = replaceText(
-    source,
-    '</div><div className="modal-actions"><button onClick={close}>Отмена</button><button disabled={!rows.length||busy==="import-employees"} onClick={()=>void submit(rows)}>{busy==="import-employees"?"Импортируем…":"Импортировать на проверку"}</button></div></section></div>\n}',
-    '</div><div className="modal-actions"><button onClick={close}>Отмена</button><button disabled={!rows.length||busy==="import-employees"} onClick={()=>void submit(rows)}>{busy==="import-employees"?"Импортируем…":"Импортировать на проверку"}</button></div></section></div>, document.body)\n}',
-    "employee import portal end",
-  );
-  return source;
-});
-
 patch("app/components/SalesWorkspace.tsx", (input) => {
   let source = input;
   source = replaceText(
