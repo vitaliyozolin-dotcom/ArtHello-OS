@@ -103,6 +103,7 @@ const waveRoutes = {
   },
   strategy: {
     heading: "Проекты и стратегия",
+    baselineRoute: "projects",
     baselineEmptyHeading: "Данных пока нет",
     root: ".ahStrategyPage",
     legacy: ".strategy-workspace",
@@ -134,6 +135,7 @@ const waveRoutes = {
   },
   readiness: {
     heading: "Готовность ArtHello OS",
+    baselineRoute: "acceptance",
     baselineEmptyHeading: "Проверок пока нет",
     root: ".ahReadinessPage",
     legacy: ".readiness-workspace",
@@ -653,7 +655,8 @@ async function verifyWaveTabs(page, config) {
 async function captureWaveRoute(browser, base, storageState, label, viewport, routeName, mode) {
   const config = waveRoutes[routeName];
   const apiFixture = { endpoint: config.endpoint, payload: waveFixtures[routeName][mode] };
-  const { context, page } = await stablePage(browser, base, storageState, viewport, routeName, apiFixture);
+  const route = label === "baseline" && config.baselineRoute ? config.baselineRoute : routeName;
+  const { context, page } = await stablePage(browser, base, storageState, viewport, route, apiFixture);
   const expectedHeading = label === "baseline" && mode === "empty" && config.baselineEmptyHeading
     ? config.baselineEmptyHeading
     : config.heading;
