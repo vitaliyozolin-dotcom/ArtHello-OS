@@ -14,7 +14,7 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 340;
+const expectedPngCount = 396;
 
 const waveRoutes = {
   finance: {
@@ -47,6 +47,36 @@ const waveRoutes = {
     modalTrigger: /^Добавить лид$/,
     modalFields: ["name", "source", "phone", "email", "interest", "branchId", "comment"],
     requireTable: false,
+  },
+  content: {
+    heading: "Контент и маркетинг",
+    root: ".ahContentPage",
+    legacy: ".content-workspace",
+    endpoint: /\/api\/content(?:\?.*)?$/,
+    kpis: ".ahContentKpis > .ahKpiCard",
+    kpiGrid: ".ahContentKpis",
+    tabs: ".ahContentTabs .ahTabs",
+    table: ".publication-grid",
+    empty: ".ahContentPage .ahEmptyState",
+    populatedTab: "Публикации",
+    expectedTabCount: 6,
+    requireTable: false,
+    requireModal: false,
+  },
+  hr: {
+    heading: "Команда",
+    root: ".ahHrPage",
+    legacy: ".hr-workspace",
+    endpoint: /\/api\/hr(?:\?.*)?$/,
+    kpis: ".ahHrKpis > .ahKpiCard",
+    kpiGrid: ".ahHrKpis",
+    tabs: ".ahHrTabs .ahTabs",
+    table: ".employee-grid",
+    empty: ".ahHrPage .ahEmptyState",
+    populatedTab: "Сотрудники",
+    expectedTabCount: 5,
+    requireTable: false,
+    requireModal: false,
   },
   legal: {
     heading: "Юридический контур",
@@ -601,9 +631,67 @@ const populatedReadiness = {
   productionDecision: "Выпуск ожидает решения представителя.",
 };
 
+const emptyContent = {
+  accounts: [],
+  plan: [],
+  publications: [],
+  recommendations: [],
+  entityNames: {},
+  summary: { reach: 0, views: 0, reactions: 0, clicks: 0, leads: 0, contracts: 0, revenueMinor: 0 },
+  chain: [],
+  sourcePolicy: { status: "empty", note: "Подтверждённых каналов и публикаций пока нет.", ranking: "Фиктивные показатели не создаются." },
+};
+
+const populatedContent = {
+  accounts: [{ id: "ACCOUNT-VISUAL-001", platform: "Telegram", displayName: "ArtHello visual fixture", status: "Подключён", audienceCount: 1200, sourceType: "Visual fixture" }],
+  plan: [{ id: "PLAN-VISUAL-001", scheduledAt: "2026-08-29T09:00:00.000Z", accountId: "ACCOUNT-VISUAL-001", authorEntityId: "ENT-VISUAL-MARKETING", format: "Пост", topic: "День открытых дверей", offerId: "OFFER-VISUAL-001", campaignId: "CAMPAIGN-VISUAL-001", status: "Опубликовано", brief: "Синтетический материал только для visual gate." }],
+  publications: [{
+    id: "PUBLICATION-VISUAL-001", planItemId: "PLAN-VISUAL-001", publishedAt: "2026-08-29T09:00:00.000Z", publicationRef: "visual://publication-001",
+    reach: 1200, views: 980, reactions: 84, clicks: 36, leads: 5, contracts: 1, revenueMinor: 32000000, dataQuality: "Visual fixture",
+    rates: { engagementPercent: 7, clickPercent: 3.7, leadPercent: 13.9, contractPercent: 20 },
+    planItem: { id: "PLAN-VISUAL-001", scheduledAt: "2026-08-29T09:00:00.000Z", accountId: "ACCOUNT-VISUAL-001", authorEntityId: "ENT-VISUAL-MARKETING", format: "Пост", topic: "День открытых дверей", offerId: "OFFER-VISUAL-001", campaignId: "CAMPAIGN-VISUAL-001", status: "Опубликовано", brief: "Синтетический материал только для visual gate." },
+    account: { id: "ACCOUNT-VISUAL-001", platform: "Telegram", displayName: "ArtHello visual fixture" },
+  }],
+  recommendations: [{ id: "REC-VISUAL-001", publicationId: "PUBLICATION-VISUAL-001", signalType: "Проверка канала", evidence: "Синтетическая метрика visual gate.", recommendation: "Проверить атрибуцию перед масштабированием.", status: "Открыта", relatedTaskId: null }],
+  entityNames: { "ENT-VISUAL-MARKETING": "Маркетолог visual fixture" },
+  summary: { reach: 1200, views: 980, reactions: 84, clicks: 36, leads: 5, contracts: 1, revenueMinor: 32000000 },
+  chain: [{ id: "CHAIN-VISUAL-CONTENT-001", publicationId: "PUBLICATION-VISUAL-001", clickId: "CLICK-VISUAL-001", leadId: "LEAD-VISUAL-001", contractId: "CON-VISUAL-001", paymentOperationId: "FIN-VISUAL-001", revenueMinor: 32000000, attributionModel: "Visual fixture", publication: null, planItem: { id: "PLAN-VISUAL-001", scheduledAt: "2026-08-29T09:00:00.000Z", accountId: "ACCOUNT-VISUAL-001", authorEntityId: "ENT-VISUAL-MARKETING", format: "Пост", topic: "День открытых дверей", offerId: "OFFER-VISUAL-001", campaignId: "CAMPAIGN-VISUAL-001", status: "Опубликовано", brief: "Visual fixture" }, lead: { id: "LEAD-VISUAL-001", source: "Telegram", campaignId: "CAMPAIGN-VISUAL-001", offerId: "OFFER-VISUAL-001" }, payment: { id: "FIN-VISUAL-001", amountMinor: 32000000, operationDate: "2026-08-29", dataQuality: "Visual fixture" } }],
+  sourcePolicy: { status: "visual", note: "Только синтетические записи visual gate; рабочие данные не используются.", ranking: "Результат требует проверки владельцем." },
+};
+
+const emptyHr = {
+  vacancies: [], candidates: [], interviews: [], employees: [], onboarding: [], development: [], rewards: [], accesses: [],
+  entityNames: {}, employeeProfiles: {}, branches: [], documents: [], tasks: [], payroll: [], funnel: [],
+  summary: { openVacancies: 0, candidates: 0, activeEmployees: 0, revokedAccesses: 0 },
+  chain: { vacancyId: "", candidateId: "", interviewId: "", employeeId: "", contractId: "", positionId: "", accessId: "", onboardingId: "", payrollId: "", evaluationId: "" },
+  boundary: "Сотрудник создаётся один раз; доступ выдаётся отдельным подтверждённым действием.",
+};
+
+const populatedHr = {
+  vacancies: [{ id: "VAC-VISUAL-001", title: "Педагог visual fixture", unit: "Школа 1–11", headcount: 1, status: "Закрыта" }],
+  candidates: [{ id: "CAND-VISUAL-001", entityId: "ENT-VISUAL-EMPLOYEE", vacancyId: "VAC-VISUAL-001", source: "Рекомендация", stage: "Оформлен", score: 88, decision: "Принять", rejectionReason: "", offerStatus: "Принят", evidence: "Синтетическое доказательство visual gate." }],
+  interviews: [{ id: "INT-VISUAL-001", candidateId: "CAND-VISUAL-001", scheduledAt: "2026-08-20T10:00:00.000Z", score: 88, summary: "Visual fixture", decision: "Принять" }],
+  employees: [{ id: "EMP-VISUAL-001", candidateId: "CAND-VISUAL-001", contractId: "LCON-VISUAL-001", positionId: "Педагог", unit: "Школа 1–11", rateMinor: 12000000, hireDate: "2026-08-25", status: "Работает", terminationDate: "", terminationReason: "", accessStatus: "Не выдан" }],
+  onboarding: [{ id: "ONBOARD-VISUAL-001", employeeId: "EMP-VISUAL-001", step: "Знакомство с регламентами", status: "В работе", dueDate: "2026-09-01", evidence: "Visual fixture", relatedTaskId: null }],
+  development: [{ id: "DEV-VISUAL-001", employeeId: "EMP-VISUAL-001", eventType: "Обучение", title: "Вводный курс", eventDate: "2026-08-27", score: 92, status: "Завершено", evidence: "Visual fixture" }],
+  rewards: [{ id: "REWARD-VISUAL-001", employeeId: "EMP-VISUAL-001", eventType: "Премия", amountMinor: 500000, reason: "Visual fixture", period: "2026-08", status: "На согласовании" }],
+  accesses: [{ id: "ACCESS-VISUAL-001", employeeId: "EMP-VISUAL-001", system: "ArtHello OS", role: "Педагог", status: "Не выдан", grantedAt: "", revokedAt: "", revocationReason: "" }],
+  entityNames: { "ENT-VISUAL-EMPLOYEE": "Кандидат visual fixture", "EMP-VISUAL-001": "Сотрудник visual fixture" },
+  employeeProfiles: { "EMP-VISUAL-001": { contact: "visual@example.invalid", employmentType: "Штат", note: "Visual fixture", branches: ["Школа 1–11"], branchIds: ["BRANCH-VISUAL-001"], sourceSystem: "VISUAL", dataQuality: "Visual fixture" } },
+  branches: [{ id: "BRANCH-VISUAL-001", name: "Школа 1–11", kind: "Школа", status: "Активен" }],
+  documents: [{ id: "LCON-VISUAL-001", title: "Трудовой договор visual fixture", status: "Подписан" }],
+  tasks: [], payroll: [{ id: "PAYROLL-VISUAL-001", counterpartyEntityId: "EMP-VISUAL-001", amountMinor: 12000000, period: "2026-08", dataQuality: "Visual fixture" }],
+  funnel: [{ stage: "Отклик", count: 1 }, { stage: "Интервью", count: 1 }, { stage: "Оформлен", count: 1 }],
+  summary: { openVacancies: 0, candidates: 1, activeEmployees: 1, revokedAccesses: 0 },
+  chain: { vacancyId: "VAC-VISUAL-001", candidateId: "CAND-VISUAL-001", interviewId: "INT-VISUAL-001", employeeId: "EMP-VISUAL-001", contractId: "LCON-VISUAL-001", positionId: "Педагог", accessId: "ACCESS-VISUAL-001", onboardingId: "ONBOARD-VISUAL-001", payrollId: "PAYROLL-VISUAL-001", evaluationId: "DEV-VISUAL-001" },
+  boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
+};
+
 const waveFixtures = {
   finance: { empty: emptyFinance, populated: populatedFinance },
   sales: { empty: emptySales, populated: populatedSales },
+  content: { empty: emptyContent, populated: populatedContent },
+  hr: { empty: emptyHr, populated: populatedHr },
   legal: { empty: emptyLegal, populated: populatedLegal },
   accounting: { empty: emptyAccounting, populated: populatedAccounting },
   procurement: { empty: emptyProcurement, populated: populatedProcurement },
