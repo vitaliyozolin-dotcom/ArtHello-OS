@@ -1409,6 +1409,7 @@ async function captureWaveRoute(browser, base, storageState, label, viewport, ro
     const eyebrow = header?.querySelector(".ahPageHeaderCopy > small");
     const description = header?.querySelector(".ahPageHeaderCopy > p");
     const action = header?.querySelector(".ahPageHeaderActions .ahButton");
+    const actionIcon = action?.querySelector("svg");
     const emptyState = pageElement?.querySelector(".ahEmptyState");
     const emptyTitle = emptyState?.querySelector("h3");
     const emptyText = emptyState?.querySelector("p");
@@ -1424,6 +1425,8 @@ async function captureWaveRoute(browser, base, storageState, label, viewport, ro
     const style = (element) => element ? getComputedStyle(element) : null;
     const box = (element) => element?.getBoundingClientRect();
     const pageBox = box(pageElement);
+    const actionBox = box(action);
+    const actionIconBox = box(actionIcon);
     const tabsBox = box(tabs);
     const tableBox = box(table);
     const pageStyle = style(pageElement);
@@ -1450,6 +1453,9 @@ async function captureWaveRoute(browser, base, storageState, label, viewport, ro
       actionMinHeight: actionStyle?.minHeight ?? null,
       actionRadius: actionStyle?.borderRadius ?? null,
       actionFontSize: actionStyle?.fontSize ?? null,
+      actionHeight: actionBox?.height ?? null,
+      actionIconWidth: actionIconBox?.width ?? null,
+      actionIconHeight: actionIconBox?.height ?? null,
       emptyCount: pageElement?.querySelectorAll(".ahEmptyState").length ?? 0,
       emptyTitleFontSize: style(emptyTitle)?.fontSize ?? null,
       emptyTitleLineHeight: style(emptyTitle)?.lineHeight ?? null,
@@ -1549,12 +1555,25 @@ function assertWaveMobileHeaderGeometry(metrics) {
   if (mismatches.length) throw new Error(`${metrics.route}: approved mobile PageHeader mismatch at ${metrics.width}x${metrics.height}\n${mismatches.join("\n")}`);
 }
 
+function assertWaveActionGeometry(metrics) {
+  if (metrics.actionHeight !== null && metrics.actionHeight > 56) {
+    throw new Error(`${metrics.route}: PageHeader action expanded to ${metrics.actionHeight}px at ${metrics.width}x${metrics.height}`);
+  }
+  if (metrics.actionIconWidth !== null) {
+    const iconMismatch = Math.abs(metrics.actionIconWidth - 18) > .5 || Math.abs(metrics.actionIconHeight - 18) > .5;
+    if (iconMismatch) {
+      throw new Error(`${metrics.route}: PageHeader action icon is ${metrics.actionIconWidth}x${metrics.actionIconHeight}px, expected 18x18 at ${metrics.width}x${metrics.height}`);
+    }
+  }
+}
+
 function assertWaveStructure(metrics) {
   assertWaveIdentity(metrics);
   if (metrics.kpiCount !== 4) throw new Error(`${metrics.route}: ${metrics.kpiCount} KPI cards, expected 4 at ${metrics.width}x${metrics.height}`);
   const expectedColumns = metrics.width <= 1024 ? 2 : 4;
   if (metrics.kpiColumns !== expectedColumns) throw new Error(`${metrics.route}: ${metrics.kpiColumns} KPI columns, expected ${expectedColumns} at ${metrics.width}x${metrics.height}`);
   assertWaveMobileHeaderGeometry(metrics);
+  assertWaveActionGeometry(metrics);
   assertWaveKpiGeometry(metrics);
 }
 
