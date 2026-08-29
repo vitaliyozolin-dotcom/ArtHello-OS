@@ -80,6 +80,7 @@ help += `
 /* ARTHELLO_HELP_CANONICAL_V5 */
 [data-ah-help-target=true]{position:relative!important;overflow:visible!important}
 [data-ah-help-target=true]>button[data-ah-help-inline=true].ah-field-icon{position:absolute!important;left:auto!important;right:12px!important;top:50%!important;bottom:auto!important;width:26px!important;min-width:26px!important;height:26px!important;margin:0!important;padding:0!important;transform:translateY(-50%)!important;z-index:40!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important}
+.ahFinancePeriodMobile>span>button[data-ah-help-inline=true].ah-field-icon{display:none!important}
 [data-ah-help-target=true]>:is(input:not([type=checkbox]):not([type=radio]),select,textarea,[role=combobox]){padding-right:50px!important}
 @media(max-width:720px){.ah-tour-callout{position:fixed!important;left:12px!important;right:12px!important;top:auto!important;bottom:calc(92px + env(safe-area-inset-bottom))!important;width:auto!important;max-width:none!important;max-height:min(56dvh,520px)!important;overflow:auto!important;transform:none!important}.ah-tour-hole{pointer-events:none!important;border-radius:18px!important}}
 `;
