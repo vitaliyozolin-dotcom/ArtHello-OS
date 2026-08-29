@@ -62,6 +62,7 @@ const waveRoutes = {
     modal: ".staff-modal",
     modalTrigger: /^Добавить сотрудника$/,
     modalFields: ["displayName", "contact", "positionId", "rateRubles", "hireDate", "status", "contractId", "note"],
+    modalFieldSelectors: { status: '[aria-label="Статус сотрудника"]' },
     requireTable: false,
   },
   content: {
@@ -944,7 +945,8 @@ async function verifyWaveModal(page, config) {
   const modal = page.locator(config.modal).first();
   await modal.waitFor({ state: "visible", timeout: 10000 });
   for (const field of config.modalFields) {
-    const input = modal.locator(`[name="${field}"]`).first();
+    const selector = config.modalFieldSelectors?.[field] ?? `[name="${field}"]`;
+    const input = modal.locator(selector).first();
     if (await input.count() !== 1 || !await input.isVisible()) throw new Error(`${config.heading}: modal field ${field} is not visible`);
   }
   const cancel = page.getByRole("button", { name: "Отмена", exact: true }).last();
