@@ -41,7 +41,7 @@ const waveRoutes = {
     tabs: ".ahSalesTabs .ahTabs",
     table: ".sales-table-wrap",
     empty: ".ahSalesPage .ahEmptyState",
-    populatedTab: "Лиды и контакты",
+    populatedTab: /^Лиды и контакты(?:\s+\d+)?$/,
     modal: ".lead-create-modal",
     modalTrigger: /^Добавить лид$/,
     modalFields: ["name", "source", "phone", "email", "interest", "branchId", "comment"],
