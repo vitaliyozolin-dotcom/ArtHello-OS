@@ -178,7 +178,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test -s candidate/deploy/v52/visual/prepare-visual-fixture.mjs
-          docker run --rm --entrypoint sh arthello-ds-pilot-app:${HEAD_SHA} -lc '
+          docker run --rm --entrypoint sh arthello-ds-pilot-app:${HEAD_SHA} -euc '
             test -s /app/app/components/ContractorWorkspace.tsx
             test -s /app/app/components/ContractorWorkspace.ds.css
             grep -F "from \"./design-system\"" /app/app/components/ContractorWorkspace.tsx >/dev/null
