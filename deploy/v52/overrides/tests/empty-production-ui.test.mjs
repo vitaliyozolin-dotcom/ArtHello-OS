@@ -57,11 +57,10 @@ test("array-backed workspaces handle empty data before unsafe first-row access",
   assert.doesNotMatch(food, /if\s*\(\s*!\s*hasFoodData\s*\)\s*return\b/);
 
   const integration = read("../app/components/IntegrationWorkspace.tsx");
-  assert.ok(integration.indexOf("if (!data.connections.length)") > -1, "IntegrationWorkspace has no empty guard");
-  assert.ok(
-    integration.indexOf("const current =") > integration.indexOf("if (!data.connections.length)"),
-    "IntegrationWorkspace reads the first row before its empty guard",
-  );
+  assert.doesNotMatch(integration, /if\s*\(\s*!data\.connections\.length\s*\)\s*return/);
+  assert.match(integration, /const current = data\.connections\.find[\s\S]*?\?\? data\.connections\[0\]/);
+  assert.match(integration, /current\s*\?\s*<aside className="connection-detail"/);
+  assert.match(integration, /Подключения появятся после добавления источника/);
 
   const readiness = read("../app/components/ReadinessWorkspace.tsx");
   assert.match(readiness, /data\.scenarios\.find[\s\S]*?\?\?\s*data\.scenarios\[0\]/);

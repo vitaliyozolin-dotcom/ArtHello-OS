@@ -271,6 +271,18 @@ jobs:
             grep -F "from \"./design-system\"" /app/app/components/WorkflowWorkspace.tsx >/dev/null
             grep -F "function TaskCreateModal" /app/app/components/WorkflowWorkspace.tsx >/dev/null
             ! grep -F "workflow-page" /app/app/components/WorkflowWorkspace.tsx >/dev/null
+            test -s /app/app/components/EducationWorkspace.tsx
+            test -s /app/app/components/EducationWorkspace.ds.css
+            grep -F "className=\"ahEducationPage\"" /app/app/components/EducationWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/EducationWorkspace.tsx >/dev/null
+            grep -F "function EducationEditor" /app/app/components/EducationWorkspace.tsx >/dev/null
+            ! grep -F "page edu-workspace" /app/app/components/EducationWorkspace.tsx >/dev/null
+            test -s /app/app/components/IntegrationWorkspace.tsx
+            test -s /app/app/components/IntegrationWorkspace.ds.css
+            grep -F "className=\"ahIntegrationPage\"" /app/app/components/IntegrationWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/IntegrationWorkspace.tsx >/dev/null
+            grep -F "function ConnectionWizard" /app/app/components/IntegrationWorkspace.tsx >/dev/null
+            ! grep -F "page integration-workspace" /app/app/components/IntegrationWorkspace.tsx >/dev/null
             test -d /app/dist
             test -s /app/production/runtime-server.mjs
           '
@@ -393,7 +405,7 @@ jobs:
             bash -lc 'npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund --no-save playwright@1.55.0 pixelmatch@7.1.0 pngjs@7.0.0 >/dev/null && cp /repo/deploy/v52/visual/contractors-design-system.cjs ./capture.cjs && node capture.cjs'
 
           test -s "$out/manifest.json"
-          test "$(find "$out" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" -eq 452
+          test "$(find "$out" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" -eq 502
           printf 'ARTHELLO_DS_VISUAL=OK path=%s\n' "$out"
           trap - EXIT
           cleanup

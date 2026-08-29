@@ -1,0 +1,483 @@
+.ahIntegrationPage {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.ahIntegrationPage .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahIntegrationPage .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahIntegrationPage .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahIntegrationPage .ahPageHeaderCopy p {
+  max-width: 860px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahIntegrationPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahIntegrationPage .integration-connect-start {
+  min-width: 0;
+  border-radius: 16px;
+  padding: 15px;
+}
+
+.ahIntegrationPage .integration-panel-head {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.ahIntegrationPage .integration-panel-head p,
+.ahIntegrationPage .integration-panel-head > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 13px;
+  letter-spacing: .04em;
+}
+
+.ahIntegrationPage .integration-panel-head h2 {
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 19px;
+}
+
+.ahIntegrationPage .integration-connect-start > div {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.ahIntegrationPage .integration-connect-start > div > button {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 12px;
+  background: var(--ah-color-surface);
+  padding: 11px;
+  color: var(--ah-color-text-primary);
+  text-align: left;
+}
+
+.ahIntegrationPage .integration-connect-start > div > button strong {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahIntegrationPage .integration-connect-start > div > button small,
+.ahIntegrationPage .integration-connect-start > div > button span {
+  color: var(--ah-color-text-secondary);
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahIntegrationBoundary {
+  display: grid;
+  gap: 7px;
+  border-radius: 16px;
+  padding: 15px 17px;
+}
+
+.ahIntegrationBoundary > strong {
+  width: fit-content;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 4px 8px;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 13px;
+  letter-spacing: .04em;
+}
+
+.ahIntegrationBoundary > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.ahIntegrationKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahIntegrationKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+  text-align: left;
+}
+
+.ahIntegrationKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahIntegrationKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahIntegrationKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahIntegrationKpiOk {
+  border-color: #c9e7da;
+  background: #f5fbf8;
+}
+
+.ahIntegrationKpiWarning {
+  border-color: #ead6aa;
+  background: #fffaf0;
+}
+
+.ahIntegrationTabs {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 14px;
+  background: var(--ah-color-surface);
+  padding-inline: 15px;
+}
+
+.ahIntegrationTabs .ahTabs {
+  width: 100%;
+  max-width: 100%;
+  gap: 18px;
+  overflow-x: auto;
+}
+
+.ahIntegrationTabs .ahTabs button {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding-inline: 0;
+  font-size: 12px;
+}
+
+.ahIntegrationPage .integration-overview,
+.ahIntegrationPage .integration-catalog {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  min-width: 0;
+}
+
+.ahIntegrationPage .integration-map,
+.ahIntegrationPage .connection-list,
+.ahIntegrationPage .connection-detail,
+.ahIntegrationPage .integration-run-list > article,
+.ahIntegrationPage .conflict-board > article,
+.ahIntegrationPage .auth-board > article {
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 16px;
+  background: var(--ah-color-surface);
+  padding: 15px;
+  box-shadow: none;
+}
+
+.ahIntegrationPage .integration-flow {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, auto));
+  gap: 6px;
+  align-items: center;
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahIntegrationPage .integration-critical,
+.ahIntegrationPage .run-mini,
+.ahIntegrationPage .connection-list,
+.ahIntegrationPage .integration-run-list,
+.ahIntegrationPage .conflict-board,
+.ahIntegrationPage .auth-board {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.ahIntegrationPage .integration-critical > button,
+.ahIntegrationPage .run-mini > button,
+.ahIntegrationPage .connection-list > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 12px;
+  background: var(--ah-color-surface);
+  padding: 10px;
+  color: var(--ah-color-text-primary);
+  text-align: left;
+}
+
+.ahIntegrationToolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 210px max-content;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 14px;
+  background: var(--ah-color-surface);
+  padding: 13px;
+}
+
+.ahIntegrationToolbar select {
+  width: 100%;
+  height: 42px;
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  padding: 0 12px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.ahIntegrationToolbar > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahIntegrationPage .integration-run-list,
+.ahIntegrationPage .conflict-board,
+.ahIntegrationPage .auth-board {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ahIntegrationEmpty {
+  gap: 12px;
+  min-height: 144px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 16px;
+  background: var(--ah-color-surface);
+  padding: 28px 18px;
+}
+
+.ahIntegrationEmpty h3 {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahIntegrationEmpty p {
+  max-width: 620px;
+  font-size: var(--ah-compact-card-body-size);
+  font-weight: 400;
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahIntegrationEmpty .ahButton {
+  min-height: 36px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.ahIntegrationPage .connection-detail dl,
+.ahIntegrationPage .connection-modal dl,
+.ahIntegrationPage .auth-board dl,
+.ahIntegrationPage .run-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ahIntegrationPage .connection-detail dt,
+.ahIntegrationPage .connection-modal dt,
+.ahIntegrationPage .auth-board dt,
+.ahIntegrationPage .run-stats small {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 13px;
+}
+
+.ahIntegrationPage .connection-detail dd,
+.ahIntegrationPage .connection-modal dd,
+.ahIntegrationPage .auth-board dd,
+.ahIntegrationPage .run-stats strong {
+  font-size: 11px;
+  line-height: 15px;
+}
+
+@media (max-width: 1024px) {
+  .ahIntegrationKpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ahIntegrationPage .integration-connect-start > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .ahIntegrationPage {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahIntegrationPage .ahPageHeader {
+    display: grid;
+    gap: 16px;
+    align-items: start;
+  }
+
+  .ahIntegrationPage .ahPageHeaderCopy > small {
+    margin-bottom: 4px;
+    font-size: 11px;
+    line-height: 14px;
+  }
+
+  .ahIntegrationPage .ahPageHeaderCopy h1 {
+    font-size: 32px;
+    line-height: 1.02;
+  }
+
+  .ahIntegrationPage .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahIntegrationPage .ahPageHeaderActions,
+  .ahIntegrationPage .ahPageHeaderActions .ahButton {
+    width: 100%;
+  }
+
+  .ahIntegrationPage .ahPageHeaderActions .ahButton {
+    min-height: 44px;
+    border-radius: 11px;
+    font-size: 14px;
+  }
+
+  .ahIntegrationPage .integration-connect-start,
+  .ahIntegrationBoundary {
+    border-radius: 13px;
+    padding: 13px;
+  }
+
+  .ahIntegrationPage .integration-connect-start > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahIntegrationKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahIntegrationKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahIntegrationKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahIntegrationKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahIntegrationKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahIntegrationTabs {
+    border-radius: 13px;
+    padding-inline: 12px;
+  }
+
+  .ahIntegrationToolbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    border-radius: 13px;
+    padding: 12px;
+  }
+
+  .ahIntegrationToolbar input,
+  .ahIntegrationToolbar select {
+    font-size: 16px;
+  }
+
+  .ahIntegrationPage .integration-overview,
+  .ahIntegrationPage .integration-catalog,
+  .ahIntegrationPage .integration-run-list,
+  .ahIntegrationPage .conflict-board,
+  .ahIntegrationPage .auth-board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahIntegrationPage .integration-map,
+  .ahIntegrationPage .connection-list,
+  .ahIntegrationPage .connection-detail,
+  .ahIntegrationPage .integration-run-list > article,
+  .ahIntegrationPage .conflict-board > article,
+  .ahIntegrationPage .auth-board > article {
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .ahIntegrationPage .integration-flow {
+    overflow-x: auto;
+  }
+
+  .ahIntegrationPage .connection-detail dl,
+  .ahIntegrationPage .connection-modal dl,
+  .ahIntegrationPage .auth-board dl,
+  .ahIntegrationPage .run-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 359px) {
+  .ahIntegrationKpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
