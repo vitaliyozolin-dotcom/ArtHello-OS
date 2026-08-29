@@ -1768,7 +1768,12 @@ async function captureSettings(browser, base, storageState, label, viewport) {
     endpoint: /\/api\/settings(?:\?.*)?$/,
     payload: settingsFixture,
   });
-  await page.locator(".role-switch").first().click();
+  const settingsButton = page.locator('.sidebar-tools button[title="Настройки"]');
+  if (!(await settingsButton.isVisible())) {
+    await page.getByRole("button", { name: "Открыть меню", exact: true }).click();
+    await settingsButton.waitFor({ state: "visible", timeout: 10000 });
+  }
+  await settingsButton.click();
   await page.getByRole("heading", { name: "Настройки", exact: true }).waitFor({ state: "visible", timeout: 30000 });
   if (label === "pilot" && viewport[0] === 390) {
     const tabs = page.locator(".ahSettingsTabs .ahTabs").getByRole("tab");
