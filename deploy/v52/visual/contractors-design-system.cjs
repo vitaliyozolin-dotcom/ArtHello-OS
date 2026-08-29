@@ -14,7 +14,7 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 502;
+const expectedPngCount = 590;
 
 const waveRoutes = {
   finance: {
@@ -81,6 +81,48 @@ const waveRoutes = {
     modalFields: ["scheduledAt", "accountId", "authorEntityId", "format", "campaignId", "topic", "brief"],
     expectedTabCount: 6,
     requireTable: false,
+  },
+  events: {
+    heading: "События",
+    root: ".ahSystemPage",
+    legacy: ".system-workspace",
+    endpoint: /\/api\/system-visual-never(?:\?.*)?$/,
+    kpis: ".ahSystemKpis > .ahKpiCard",
+    kpiGrid: ".ahSystemKpis",
+    tabs: ".ahSystemTabs .ahTabs",
+    table: ".ahSystemList",
+    empty: ".ahSystemPage .ahEmptyState",
+    expectedTabCount: 5,
+    requireTable: false,
+    requireModal: false,
+  },
+  assets: {
+    heading: "Имущество",
+    root: ".ahSystemPage",
+    legacy: ".system-workspace",
+    endpoint: /\/api\/system-visual-never(?:\?.*)?$/,
+    kpis: ".ahSystemKpis > .ahKpiCard",
+    kpiGrid: ".ahSystemKpis",
+    tabs: ".ahSystemTabs .ahTabs",
+    table: ".ahSystemList",
+    empty: ".ahSystemPage .ahEmptyState",
+    expectedTabCount: 7,
+    requireTable: false,
+    requireModal: false,
+  },
+  quality: {
+    heading: "Качество и обращения",
+    root: ".ahSystemPage",
+    legacy: ".system-workspace",
+    endpoint: /\/api\/system-visual-never(?:\?.*)?$/,
+    kpis: ".ahSystemKpis > .ahKpiCard",
+    kpiGrid: ".ahSystemKpis",
+    tabs: ".ahSystemTabs .ahTabs",
+    table: ".ahSystemList",
+    empty: ".ahSystemPage .ahEmptyState",
+    expectedTabCount: 7,
+    requireTable: false,
+    requireModal: false,
   },
   education: {
     heading: "Обучение",
@@ -379,6 +421,25 @@ const populatedContent = {
   chain: [{ id: "CHAIN-VISUAL-001", publicationId: "PUB-VISUAL-001", clickId: "CLICK-VISUAL-001", leadId: "LEAD-VISUAL-001", contractId: "LCON-VISUAL-001", paymentOperationId: "FIN-VISUAL-001", revenueMinor: 32000000, attributionModel: "Последний подтверждённый переход", publication: { id: "PUB-VISUAL-001", planItemId: "PLAN-VISUAL-001", publishedAt: "2026-08-25T12:00:00.000Z", publicationRef: "visual://publication", reach: 820, views: 940, reactions: 76, clicks: 31, leads: 4, contracts: 1, revenueMinor: 32000000, dataQuality: "Visual fixture", rates: { engagementPercent: 9.3, clickPercent: 3.3, leadPercent: 12.9, contractPercent: 25 } }, planItem: { id: "PLAN-VISUAL-001", scheduledAt: "2026-09-02T12:00:00.000Z", accountId: "SOC-VISUAL-001", authorEntityId: "EMP-VISUAL-001", format: "Пост", topic: "Открытый урок", offerId: "OFF-VISUAL-001", campaignId: "CMP-VISUAL-001", status: "Опубликовано", brief: "Проверить интерес к открытому уроку" }, lead: { id: "LEAD-VISUAL-001", source: "VK", campaignId: "CMP-VISUAL-001", offerId: "OFF-VISUAL-001" }, payment: { id: "FIN-VISUAL-001", amountMinor: 32000000, operationDate: "2026-08-28", dataQuality: "Visual fixture" } }],
   summary: { reach: 820, views: 940, reactions: 76, clicks: 31, leads: 4, contracts: 1, revenueMinor: 32000000 },
   sourcePolicy: { status: "Подключено", note: "Метрики получены от visual fixture канала.", ranking: "выручка → договор → заявка → переход" },
+};
+
+const emptySystemModule = {};
+const populatedSystemModule = {};
+
+const settingsFixture = {
+  me: { id: "ENT-VISUAL-OWNER", displayName: "Владелец visual fixture", role: "Собственник", isAdministrative: true, contact: "owner@example.test" },
+  branches: [],
+  access: [],
+  users: [],
+  grants: [],
+  systems: [],
+  systemGrants: [],
+  syncEvents: [],
+  familyDirectory: [],
+  familyAccessGrants: [],
+  systemRoleOptions: {},
+  canManage: true,
+  authBoundary: "Только синтетические настройки visual gate; рабочие пользователи и секреты не используются.",
 };
 
 const emptyEducation = {
@@ -1014,6 +1075,9 @@ const waveFixtures = {
   sales: { empty: emptySales, populated: populatedSales },
   hr: { empty: emptyHr, populated: populatedHr },
   content: { empty: emptyContent, populated: populatedContent },
+  events: { empty: emptySystemModule, populated: populatedSystemModule },
+  assets: { empty: emptySystemModule, populated: populatedSystemModule },
+  quality: { empty: emptySystemModule, populated: populatedSystemModule },
   education: { empty: emptyEducation, populated: populatedEducation },
   integrations: { empty: emptyIntegrations, populated: populatedIntegrations },
   registry: { empty: emptyRegistry, populated: populatedRegistry },
@@ -1699,6 +1763,46 @@ async function captureEducationAfterContractors(browser, base, storageState, lab
   return { label, route: "education-after-contractors", width: viewport[0], height: viewport[1], file, ...metrics };
 }
 
+async function captureSettings(browser, base, storageState, label, viewport) {
+  const { context, page } = await stablePage(browser, base, storageState, viewport, "home", {
+    endpoint: /\/api\/settings(?:\?.*)?$/,
+    payload: settingsFixture,
+  });
+  await page.locator(".role-switch").first().click();
+  await page.getByRole("heading", { name: "Настройки", exact: true }).waitFor({ state: "visible", timeout: 30000 });
+  if (label === "pilot" && viewport[0] === 390) {
+    const tabs = page.locator(".ahSettingsTabs .ahTabs").getByRole("tab");
+    if (await tabs.count() !== 3) throw new Error("settings: expected 3 tabs");
+    for (let index = 0; index < 3; index += 1) {
+      await tabs.nth(index).click();
+      await page.waitForFunction((selectedIndex) => document.querySelectorAll(".ahSettingsTabs [role=tab]")[selectedIndex]?.getAttribute("aria-selected") === "true", index, { timeout: 5000 });
+    }
+    await tabs.first().click();
+  }
+  const file = `${label}-settings-${viewport[0]}x${viewport[1]}.png`;
+  await page.screenshot({ path: path.join(output, file), fullPage: false });
+  const metrics = await page.evaluate(() => {
+    const root = document.documentElement;
+    const layer = document.querySelector(".ahSettingsLayer");
+    const dialog = document.querySelector(".ahSettingsModal");
+    const tabs = document.querySelector(".ahSettingsTabs .ahTabs");
+    const dialogBox = dialog?.getBoundingClientRect();
+    const style = (element) => element ? getComputedStyle(element) : null;
+    return {
+      clientWidth: root.clientWidth,
+      scrollWidth: root.scrollWidth,
+      horizontalOverflow: root.scrollWidth > root.clientWidth + 1,
+      designSystem: Boolean(layer && dialog),
+      legacyScope: Boolean(document.querySelector(".settings-layer, .settings-modal")),
+      dialogContained: Boolean(dialogBox && dialogBox.left >= -1 && dialogBox.right <= root.clientWidth + 1 && dialogBox.top >= -1 && dialogBox.bottom <= window.innerHeight + 1),
+      tabCount: document.querySelectorAll(".ahSettingsTabs [role=tab]").length,
+      tabsOverflowX: style(tabs)?.overflowX ?? null,
+    };
+  });
+  await context.close();
+  return { label, route: "settings", width: viewport[0], height: viewport[1], file, ...metrics };
+}
+
 function diffPng(aPath, bPath, outPath, pixelmatch) {
   const a = PNG.sync.read(fs.readFileSync(aPath));
   const b = PNG.sync.read(fs.readFileSync(bPath));
@@ -1780,6 +1884,15 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
           assertWaveMobileCanon(wave, access);
         }
       }
+    }
+
+    for (const viewport of [[390, 844], [1440, 900]]) {
+      const baseline = await captureSettings(browser, baselineUrl, baselineState, "baseline", viewport);
+      const pilot = await captureSettings(browser, pilotUrl, pilotState, "pilot", viewport);
+      manifest.push(baseline, pilot);
+      persist();
+      if (!pilot.designSystem || pilot.legacyScope || pilot.horizontalOverflow || !pilot.dialogContained) throw new Error(`settings: Design System modal is not contained at ${viewport.join("x")}`);
+      if (pilot.tabCount !== 3 || !["auto", "scroll"].includes(pilot.tabsOverflowX)) throw new Error(`settings: tabs contract mismatch at ${viewport.join("x")}`);
     }
 
     const pngCount = fs.readdirSync(output).filter((file) => file.endsWith(".png")).length;

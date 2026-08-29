@@ -13,6 +13,7 @@ on:
       - design-system/migration-wave-7-hr-content
       - design-system/migration-wave-8-registry-workflow
       - design-system/migration-wave-9-education-integrations
+      - design-system/migration-wave-10-system-settings
     paths:
       - app/components/**
       - scripts/**
@@ -260,6 +261,10 @@ jobs:
             echo "- Workflow: $PREVIEW_URL/#tasks"
             echo "- Education: $PREVIEW_URL/#education"
             echo "- Integrations: $PREVIEW_URL/#integrations"
+            echo "- Events: $PREVIEW_URL/#events"
+            echo "- Assets: $PREVIEW_URL/#assets"
+            echo "- Quality: $PREVIEW_URL/#quality"
+            echo "- Settings: use the Settings button in the preview"
             echo '- Data: isolated snapshot volume; production is not mounted'
             echo "- Result: ${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"

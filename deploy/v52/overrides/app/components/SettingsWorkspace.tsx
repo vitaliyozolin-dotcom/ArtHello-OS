@@ -2,6 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { SoftSelect } from "./SoftSelect";
+import { Button, EmptyState, Tabs } from "./design-system";
+import "./SettingsWorkspace.ds.css";
 
 export type Branch = { id: string; name: string; kind: string; status: string };
 export type AccessContext = {
@@ -146,12 +148,12 @@ export function SettingsWorkspace({ close, notify, onContextChanged }: { close: 
   const branchNames = useMemo(() => Object.fromEntries((data?.branches ?? []).map((branch) => [branch.id, branch.name])), [data]);
   const systemNames = useMemo(() => Object.fromEntries((data?.systems ?? []).map((system) => [system.id, system.name])), [data]);
 
-  return <div className="settings-layer">
+  return <div className="ahSettingsLayer">
     <button className="drawer-scrim" onClick={close} aria-label="Закрыть настройки" />
-    <section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <section className="ahSettingsModal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header className="settings-head"><div><p>Управление системой</p><h2 id="settings-title">Настройки</h2><span>Филиалы, пользователи и контуры доступа</span></div><button onClick={close} aria-label="Закрыть">×</button></header>
-      {loading ? <div className="settings-state">Загружаем права и филиалы…</div> : error || !data ? <div className="settings-state"><strong>{error}</strong><button onClick={() => void load()}>Повторить</button></div> : <>
-        <nav className="settings-tabs">{tabs.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</nav>
+      {loading ? <EmptyState className="ahSettingsState" density="compact" title="Загружаем настройки" description="Проверяем права, филиалы и доступные системы." /> : error || !data ? <EmptyState className="ahSettingsState" density="compact" title={error || "Настройки недоступны"} description="Рабочие права и филиалы не заменены заглушкой." action={<Button variant="secondary" onClick={() => void load()}>Повторить</Button>} /> : <>
+        <div className="ahSettingsTabs"><Tabs items={tabs.map((item) => ({ id: item, label: item }))} value={tab} onChange={setTab} ariaLabel="Разделы настроек" /></div>
         <div className="settings-body">
           {tab === "Филиалы" ? <div className="settings-grid">
             <article className="settings-card wide"><header><div><p>Рабочие контуры</p><h3>Филиалы</h3></div><span>{data.branches.length}</span></header><div className="branch-list">{data.branches.map((branch) => <div key={branch.id}><span>{branch.kind.slice(0, 2).toUpperCase()}</span><div><strong>{branch.name}</strong><small>{branch.kind} · {branch.status}</small></div><em>{data.me.isAdministrative ? "Доступен" : data.access.some((item) => item.branchId === branch.id) ? "Назначен" : "Нет доступа"}</em></div>)}</div></article>

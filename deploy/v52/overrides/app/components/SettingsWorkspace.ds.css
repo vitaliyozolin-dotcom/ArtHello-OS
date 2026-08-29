@@ -1,0 +1,439 @@
+.ahSettingsLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.ahSettingsLayer > .drawer-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(20, 24, 45, .42);
+  backdrop-filter: blur(5px);
+}
+
+.ahSettingsModal {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  width: min(1160px, 100%);
+  max-height: min(860px, calc(100dvh - 48px));
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 20px;
+  background: var(--ah-color-surface);
+  box-shadow: 0 24px 80px rgba(26, 28, 55, .22);
+}
+
+.ahSettingsModal .settings-head {
+  display: flex;
+  gap: 16px;
+  align-items: start;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--ah-color-border);
+  padding: 17px 20px;
+}
+
+.ahSettingsModal .settings-head p {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.ahSettingsModal .settings-head h2 {
+  margin-top: 3px;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 29px;
+  letter-spacing: -.02em;
+}
+
+.ahSettingsModal .settings-head span {
+  display: block;
+  margin-top: 3px;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahSettingsModal .settings-head > button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  font-size: 20px;
+}
+
+.ahSettingsTabs {
+  min-width: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--ah-color-border);
+  padding-inline: 20px;
+}
+
+.ahSettingsTabs .ahTabs {
+  width: 100%;
+  max-width: 100%;
+  gap: 20px;
+  overflow-x: auto;
+}
+
+.ahSettingsTabs .ahTabs button {
+  flex: 0 0 auto;
+  min-height: 43px;
+  padding-inline: 0;
+  font-size: 12px;
+}
+
+.ahSettingsState {
+  gap: 12px;
+  min-height: 180px;
+  margin: 18px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 16px;
+  background: var(--ah-color-surface);
+  padding: 32px 18px;
+}
+
+.ahSettingsState h3 {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahSettingsState p {
+  font-size: var(--ah-compact-card-body-size);
+  font-weight: 400;
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahSettingsModal .settings-body {
+  min-width: 0;
+  overflow: auto;
+  padding: 16px 18px 22px;
+}
+
+.ahSettingsModal .settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.ahSettingsModal .settings-grid > .wide,
+.ahSettingsModal .settings-grid > .settings-boundary,
+.ahSettingsModal .settings-grid > .access-assignment-form {
+  grid-column: 1 / -1;
+}
+
+.ahSettingsModal .settings-card,
+.ahSettingsModal .settings-boundary {
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 15px;
+  background: var(--ah-color-surface);
+  padding: 14px;
+}
+
+.ahSettingsModal .settings-card > header {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+  margin-bottom: 11px;
+}
+
+.ahSettingsModal .settings-card > header p,
+.ahSettingsModal .settings-card > header > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 13px;
+  letter-spacing: .04em;
+}
+
+.ahSettingsModal .settings-card > header h3 {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 18px;
+}
+
+.ahSettingsModal .settings-card dl {
+  display: grid;
+  gap: 8px;
+}
+
+.ahSettingsModal .settings-card dt {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 13px;
+}
+
+.ahSettingsModal .settings-card dd {
+  margin-top: 1px;
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahSettingsModal .branch-list,
+.ahSettingsModal .user-list,
+.ahSettingsModal .family-access-list,
+.ahSettingsModal .family-member-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ahSettingsModal .branch-list > div,
+.ahSettingsModal .user-list > div,
+.ahSettingsModal .family-access-card,
+.ahSettingsModal .family-member-access {
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 12px;
+  background: var(--ah-color-surface);
+  padding: 11px;
+}
+
+.ahSettingsModal .branch-list > div,
+.ahSettingsModal .user-list > div {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) max-content;
+  gap: 9px;
+  align-items: center;
+}
+
+.ahSettingsModal .branch-list strong,
+.ahSettingsModal .user-list strong,
+.ahSettingsModal .family-access-card strong,
+.ahSettingsModal .family-member-access strong {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahSettingsModal .branch-list small,
+.ahSettingsModal .user-list small,
+.ahSettingsModal .user-list em,
+.ahSettingsModal .family-access-card small,
+.ahSettingsModal .family-member-access small,
+.ahSettingsModal .family-member-access em {
+  display: block;
+  color: var(--ah-color-text-secondary);
+  font-size: var(--ah-compact-card-body-size);
+  font-style: normal;
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahSettingsModal .settings-form,
+.ahSettingsModal .access-form-columns,
+.ahSettingsModal .family-member-access {
+  display: grid;
+  gap: 10px;
+}
+
+.ahSettingsModal .access-form-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ahSettingsModal label,
+.ahSettingsModal fieldset {
+  min-width: 0;
+}
+
+.ahSettingsModal label > span,
+.ahSettingsModal legend {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahSettingsModal input,
+.ahSettingsModal select,
+.ahSettingsModal textarea {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 9px;
+  background: var(--ah-color-surface);
+  padding: 8px 10px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.ahSettingsModal fieldset {
+  border: 1px solid var(--ah-color-border);
+  border-radius: 11px;
+  padding: 10px;
+}
+
+.ahSettingsModal button {
+  min-height: 34px;
+  border-radius: 9px;
+  font-size: 11px;
+}
+
+.ahSettingsModal .settings-boundary {
+  display: grid;
+  gap: 5px;
+  background: var(--ah-color-primary-soft);
+}
+
+.ahSettingsModal .settings-boundary strong {
+  color: var(--ah-color-primary);
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahSettingsModal .settings-boundary span {
+  color: var(--ah-color-text-secondary);
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahSettingsModal .settings-empty {
+  display: grid;
+  gap: 7px;
+  min-height: 108px;
+  place-content: center;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 12px;
+  padding: 20px 14px;
+  text-align: center;
+}
+
+.ahSettingsModal .settings-empty strong {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahSettingsModal .settings-empty p {
+  color: var(--ah-color-text-secondary);
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahSettingsLayer .temporary-credential-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.ahSettingsLayer .temporary-credential-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(20, 24, 45, .5);
+}
+
+.ahSettingsLayer .temporary-credential-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(600px, 100%);
+  border: 1px solid var(--ah-color-border);
+  border-radius: 18px;
+  background: var(--ah-color-surface);
+  padding: 16px;
+  box-shadow: 0 24px 70px rgba(26, 28, 55, .25);
+}
+
+.ahSettingsLayer .temporary-credential-dialog header,
+.ahSettingsLayer .temporary-credential-dialog footer {
+  display: flex;
+  gap: 10px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.ahSettingsLayer .temporary-credential-dialog h3 {
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.ahSettingsLayer .temporary-credential-fields {
+  display: grid;
+  gap: 10px;
+  margin-block: 12px;
+}
+
+@media (max-width: 720px) {
+  .ahSettingsLayer {
+    align-items: end;
+    padding: 0;
+  }
+
+  .ahSettingsModal {
+    width: 100%;
+    max-height: calc(100dvh - 18px);
+    border-radius: 18px 18px 0 0;
+  }
+
+  .ahSettingsModal .settings-head {
+    padding: 14px;
+  }
+
+  .ahSettingsModal .settings-head h2 {
+    font-size: 21px;
+    line-height: 26px;
+  }
+
+  .ahSettingsTabs {
+    padding-inline: 14px;
+  }
+
+  .ahSettingsModal .settings-body {
+    padding: 12px 12px 24px;
+  }
+
+  .ahSettingsModal .settings-grid,
+  .ahSettingsModal .access-form-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahSettingsModal .settings-grid > .wide,
+  .ahSettingsModal .settings-grid > .settings-boundary,
+  .ahSettingsModal .settings-grid > .access-assignment-form {
+    grid-column: auto;
+  }
+
+  .ahSettingsModal .settings-card,
+  .ahSettingsModal .settings-boundary {
+    border-radius: 13px;
+    padding: 12px;
+  }
+
+  .ahSettingsModal .user-list > div {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .ahSettingsModal .user-list > div > b,
+  .ahSettingsModal .user-list > div > .user-access-buttons {
+    grid-column: 2;
+  }
+
+  .ahSettingsModal input,
+  .ahSettingsModal select,
+  .ahSettingsModal textarea {
+    font-size: 16px;
+  }
+}
