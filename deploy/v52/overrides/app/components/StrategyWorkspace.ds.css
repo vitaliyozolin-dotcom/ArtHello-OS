@@ -1,0 +1,648 @@
+.ahStrategyPage,
+.ahStrategyDenied {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.ahStrategyPage .ahPageHeader,
+.ahStrategyDenied .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahStrategyPage .ahPageHeaderCopy > small,
+.ahStrategyDenied .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahStrategyPage .ahPageHeaderCopy h1,
+.ahStrategyDenied .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahStrategyPage .ahPageHeaderCopy p,
+.ahStrategyDenied .ahPageHeaderCopy p {
+  max-width: 780px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahStrategyPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahStrategyStatus {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  color: var(--ah-color-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahStrategyDenied {
+  align-content: start;
+}
+
+.ahStrategyDenied > .ahCard {
+  min-height: 180px;
+}
+
+.ahStrategyBoundary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 16px;
+  background: var(--ah-color-surface);
+  padding: 12px 14px;
+}
+
+.ahStrategyBoundary strong {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 5px 10px;
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: .045em;
+}
+
+.ahStrategyBoundary span {
+  min-width: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.ahStrategyKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahStrategyKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+}
+
+.ahStrategyKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahStrategyKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahStrategyKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahStrategyKpiWarning {
+  border-color: #f0d4b5;
+  background: var(--ah-color-warning-soft);
+}
+
+.ahStrategyTabs {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.ahStrategyTabs .ahTabs {
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+  gap: 18px;
+  margin-inline: 0;
+  padding-inline: 0;
+}
+
+.ahStrategyTabs .ahTabs button {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding-inline: 0;
+  font-size: 13px;
+}
+
+.ahStrategyPanel,
+.ahStrategyEvent,
+.ahStrategyProject,
+.ahStrategyGoal,
+.ahStrategyMetric,
+.ahStrategyDeviation {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.ahStrategyPanel > .ahEmptyState,
+.ahStrategyDenied .ahEmptyState {
+  gap: 12px;
+  min-height: 126px;
+  padding: 24px 18px;
+}
+
+.ahStrategyPanel > .ahEmptyState h3,
+.ahStrategyDenied .ahEmptyState h3 {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: var(--ah-compact-card-title-weight);
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahStrategyPanel > .ahEmptyState p,
+.ahStrategyDenied .ahEmptyState p {
+  font-size: var(--ah-compact-card-body-size);
+  font-weight: var(--ah-compact-card-body-weight);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahStrategyPanelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ahStrategyPanelHead > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ahStrategyPanelHead p {
+  margin: 0;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 14px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.ahStrategyPanelHead h2 {
+  margin: 0;
+  color: var(--ah-color-text-primary);
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.ahStrategyPanelHead > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 5px 9px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahStrategyEventGrid,
+.ahStrategyProjectGrid,
+.ahStrategyGoalGrid,
+.ahStrategyMetricGrid,
+.ahStrategyDeviationGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  min-width: 0;
+}
+
+.ahStrategyEvent > header,
+.ahStrategyMetric > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ahStrategyEvent > header time {
+  display: grid;
+  color: var(--ah-color-primary);
+  font-size: 18px;
+  font-weight: 750;
+  line-height: 22px;
+}
+
+.ahStrategyEvent > header time small {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+}
+
+.ahStrategyEvent > header > span,
+.ahStrategyMetric > header > em {
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 5px 9px;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+}
+
+.ahStrategyEvent h2,
+.ahStrategyMetric h2 {
+  margin: 0;
+  color: var(--ah-color-text-primary);
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.ahStrategyEvent > p,
+.ahStrategyProject > p,
+.ahStrategyGoal > p,
+.ahStrategyMetric > p,
+.ahStrategyDeviation > p {
+  margin: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.ahStrategyEvent dl,
+.ahStrategyProject dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.ahStrategyEvent dl > div,
+.ahStrategyProject dl > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border-radius: 12px;
+  background: var(--ah-color-surface-soft);
+  padding: 10px;
+}
+
+.ahStrategyEvent dt,
+.ahStrategyProject dt {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahStrategyEvent dd,
+.ahStrategyProject dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--ah-color-text-primary);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 17px;
+  overflow-wrap: anywhere;
+}
+
+.ahStrategyEvent > footer,
+.ahStrategyDeviation > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ahStrategyEvent > footer > span,
+.ahStrategyDeviation > footer > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahStrategyBudget {
+  display: grid;
+  gap: 8px;
+}
+
+.ahStrategyBudget header,
+.ahStrategyBudget footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahStrategyBudget header strong {
+  color: var(--ah-color-text-primary);
+  font-size: 13px;
+}
+
+.ahStrategyBudget i {
+  display: block;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+}
+
+.ahStrategyBudget i b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ah-color-primary);
+}
+
+.ahStrategyInitiatives {
+  display: grid;
+  gap: 10px;
+}
+
+.ahStrategyInitiatives .ahCompactListCard {
+  border: 1px solid var(--ah-color-border);
+  border-radius: 14px;
+  background: var(--ah-color-surface-soft);
+  padding: 12px;
+}
+
+.ahStrategyMetricValues {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ahStrategyMetricValues > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border-radius: 12px;
+  background: var(--ah-color-surface-soft);
+  padding: 10px;
+}
+
+.ahStrategyMetricValues small {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 12px;
+}
+
+.ahStrategyMetricValues strong {
+  color: var(--ah-color-text-primary);
+  font-size: 15px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.ahStrategyMetricValues .ahStrategyNegative strong {
+  color: var(--ah-color-danger);
+}
+
+.ahStrategyMetricValues .ahStrategyPositive strong {
+  color: var(--ah-color-success);
+}
+
+.ahStrategyMetric > .ahButton {
+  justify-self: start;
+}
+
+.ahStrategyDecision {
+  display: grid;
+  gap: 4px;
+  border-radius: 14px;
+  background: var(--ah-color-surface-soft);
+  padding: 12px;
+}
+
+.ahStrategyDecision small {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 12px;
+  text-transform: uppercase;
+}
+
+.ahStrategyDecision strong {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+@media (max-width: 1024px) {
+  .ahStrategyKpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ahStrategyEventGrid,
+  .ahStrategyProjectGrid,
+  .ahStrategyGoalGrid,
+  .ahStrategyMetricGrid,
+  .ahStrategyDeviationGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .ahStrategyPage,
+  .ahStrategyDenied {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahStrategyPage .ahPageHeader,
+  .ahStrategyDenied .ahPageHeader {
+    align-items: start;
+  }
+
+  .ahStrategyPage .ahPageHeaderCopy > small,
+  .ahStrategyDenied .ahPageHeaderCopy > small {
+    margin-bottom: 5px;
+    font-size: var(--ah-mobile-eyebrow-size);
+    font-weight: 750;
+    line-height: var(--ah-mobile-eyebrow-line);
+    letter-spacing: .12em;
+  }
+
+  .ahStrategyPage .ahPageHeaderCopy h1,
+  .ahStrategyDenied .ahPageHeaderCopy h1 {
+    font-size: var(--ah-font-size-page-title-mobile);
+    font-weight: 700;
+    line-height: var(--ah-line-height-page-title-mobile);
+  }
+
+  .ahStrategyPage .ahPageHeaderCopy p,
+  .ahStrategyDenied .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahStrategyPage .ahPageHeaderActions,
+  .ahStrategyPage .ahPageHeaderActions .ahButton {
+    width: 100%;
+  }
+
+  .ahStrategyPage .ahPageHeaderActions .ahButton {
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    font-size: var(--ah-mobile-action-size);
+  }
+
+  .ahStrategyBoundary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    border-radius: var(--ah-mobile-info-radius);
+    padding: var(--ah-mobile-info-padding-block) var(--ah-mobile-info-padding-inline);
+  }
+
+  .ahStrategyBoundary strong {
+    min-height: 0;
+    padding: 5px 8px;
+    font-size: var(--ah-mobile-info-label-size);
+    font-weight: 800;
+    line-height: var(--ah-mobile-info-label-line);
+  }
+
+  .ahStrategyBoundary span {
+    font-size: var(--ah-mobile-info-body-size);
+    line-height: var(--ah-mobile-info-body-line);
+  }
+
+  .ahStrategyKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahStrategyKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahStrategyKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahStrategyKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahStrategyKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahStrategyTabs .ahTabs {
+    gap: 14px;
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+
+  .ahStrategyTabs .ahTabs button {
+    min-height: 38px;
+    font-size: 12px;
+  }
+
+  .ahStrategyEventGrid,
+  .ahStrategyProjectGrid,
+  .ahStrategyGoalGrid,
+  .ahStrategyMetricGrid,
+  .ahStrategyDeviationGrid {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahStrategyPanel,
+  .ahStrategyEvent,
+  .ahStrategyProject,
+  .ahStrategyGoal,
+  .ahStrategyMetric,
+  .ahStrategyDeviation {
+    gap: 14px;
+    border-radius: 14px;
+    padding: 13px;
+  }
+
+  .ahStrategyPanelHead {
+    gap: 10px;
+  }
+
+  .ahStrategyPanelHead h2,
+  .ahStrategyEvent h2,
+  .ahStrategyMetric h2 {
+    font-size: 14px;
+    line-height: 18px;
+  }
+
+  .ahStrategyPanelHead > span {
+    font-size: 9px;
+    line-height: 12px;
+  }
+
+  .ahStrategyEvent dl,
+  .ahStrategyProject dl,
+  .ahStrategyMetricValues {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ahStrategyInitiatives .ahCompactListCard {
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+  }
+
+  .ahStrategyEvent > footer,
+  .ahStrategyDeviation > footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ahStrategyEvent > footer .ahButton,
+  .ahStrategyDeviation > footer .ahButton,
+  .ahStrategyMetric > .ahButton {
+    width: 100%;
+    min-height: var(--ah-mobile-action-height);
+  }
+
+  .ahStrategyPanel > .ahEmptyState,
+  .ahStrategyDenied .ahEmptyState {
+    gap: 10px;
+    min-height: 116px;
+    padding: 20px 14px;
+  }
+}
+
+@media (max-width: 359px) {
+  .ahStrategyKpis,
+  .ahStrategyEvent dl,
+  .ahStrategyProject dl,
+  .ahStrategyMetricValues {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -220,6 +220,11 @@ jobs:
             grep -F "className=\"ahMedicalPage\"" /app/app/components/MedicalWorkspace.tsx >/dev/null
             grep -F "from \"./design-system\"" /app/app/components/MedicalWorkspace.tsx >/dev/null
             ! grep -F "medical-workspace" /app/app/components/MedicalWorkspace.tsx >/dev/null
+            test -s /app/app/components/StrategyWorkspace.tsx
+            test -s /app/app/components/StrategyWorkspace.ds.css
+            grep -F "className=\"ahStrategyPage\"" /app/app/components/StrategyWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/StrategyWorkspace.tsx >/dev/null
+            ! grep -F "strategy-workspace" /app/app/components/StrategyWorkspace.tsx >/dev/null
             test -d /app/dist
             test -s /app/production/runtime-server.mjs
           '
@@ -342,7 +347,7 @@ jobs:
             bash -lc 'npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund --no-save playwright@1.55.0 pixelmatch@7.1.0 pngjs@7.0.0 >/dev/null && cp /repo/deploy/v52/visual/contractors-design-system.cjs ./capture.cjs && node capture.cjs'
 
           test -s "$out/manifest.json"
-          test "$(find "$out" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" -eq 200
+          test "$(find "$out" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" -eq 228
           printf 'ARTHELLO_DS_VISUAL=OK path=%s\n' "$out"
           trap - EXIT
           cleanup

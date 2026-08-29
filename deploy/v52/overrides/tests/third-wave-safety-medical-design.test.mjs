@@ -131,10 +131,10 @@ test("Wave 3 components and styles are isolated from legacy workspaces", () => {
   assert.match(medicalStyles, /overflow-x\s*:\s*auto/);
 });
 
-test("migrated safety and medical patch blocks are retired while strategy remains", () => {
+test("migrated operational patch blocks stay retired", () => {
   assert.equal(patchesFile(operationalPatch, "app/components/SafetyWorkspace.tsx"), false);
   assert.equal(patchesFile(operationalPatch, "app/components/MedicalWorkspace.tsx"), false);
-  assert.equal(patchesFile(operationalPatch, "app/components/StrategyWorkspace.tsx"), true);
+  assert.equal(patchesFile(operationalPatch, "app/components/StrategyWorkspace.tsx"), false);
   assert.doesNotMatch(normalizeInputs, /patch-system-operational-modules\.mjs/);
 });
 

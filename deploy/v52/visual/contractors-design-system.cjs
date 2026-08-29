@@ -14,7 +14,7 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 200;
+const expectedPngCount = 228;
 
 const waveRoutes = {
   legal: {
@@ -99,6 +99,20 @@ const waveRoutes = {
     table: ".ahMedicalAuditTable",
     empty: ".ahMedicalPage .ahEmptyState",
     populatedTab: "Аудит просмотров",
+    requireModal: false,
+  },
+  strategy: {
+    heading: "Проекты и стратегия",
+    root: ".ahStrategyPage",
+    legacy: ".strategy-workspace",
+    endpoint: /\/api\/strategy(?:\?.*)?$/,
+    kpis: ".ahStrategyKpis > .ahKpiCard",
+    kpiGrid: ".ahStrategyKpis",
+    tabs: ".ahStrategyTabs .ahTabs",
+    table: ".ahStrategyDeviationGrid",
+    empty: ".ahStrategyPage .ahEmptyState",
+    populatedTab: "Отклонения и решения",
+    requireTable: false,
     requireModal: false,
   },
 };
@@ -253,6 +267,27 @@ const populatedMedical = {
   boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
 };
 
+const emptyStrategy = {
+  goals: [], kpis: [], initiatives: [], projects: [], events: [], participants: [], results: [], deviations: [],
+  summary: { goals: 0, kpisOnTrack: 0, kpisTotal: 0, projects: 0, projectsAtRisk: 0, openDeviations: 0, past: 0, future: 0, feedbackAverage: 0 },
+  chain: { goalId: "", kpiId: "", initiativeId: "", projectId: "", eventId: "", resultId: "", deviationId: "", taskId: "" },
+  boundary: "Пустой контур не создаёт цели, показатели, проекты, события или результаты автоматически.",
+};
+
+const populatedStrategy = {
+  goals: [{ id: "GOAL-VISUAL-001", level: "Компания", unitEntityId: "UNIT-VISUAL-001", title: "Повысить качество сервиса", period: "2026", ownerEntityId: "ENT-VISUAL-OWNER", status: "В работе", successDefinition: "Целевой показатель подтверждён рабочим источником" }],
+  kpis: [{ id: "KPI-VISUAL-001", goalId: "GOAL-VISUAL-001", name: "Индекс качества", unit: "%", targetValue: 90, actualValue: 82, forecastValue: 86, varianceValue: -8, status: "Требует внимания", sourceRef: "SRC-VISUAL-001", updatedAt: "2026-08-29T08:00:00.000Z" }],
+  initiatives: [{ id: "INIT-VISUAL-001", goalId: "GOAL-VISUAL-001", kpiId: "KPI-VISUAL-001", title: "Стандарт обратной связи", hypothesis: "Единый цикл контроля уменьшит отклонение", ownerEntityId: "ENT-VISUAL-OWNER", plannedStart: "2026-08-01", plannedEnd: "2026-10-31", status: "В работе" }],
+  projects: [{ id: "PROJECT-VISUAL-001", initiativeId: "INIT-VISUAL-001", goalId: "GOAL-VISUAL-001", title: "Контроль качества сервиса", ownerEntityId: "ENT-VISUAL-OWNER", budgetId: "BUDGET-VISUAL-001", budgetPlanMinor: 24000000, budgetActualMinor: 11200000, startedAt: "2026-08-01", dueAt: "2026-10-31", status: "Под риском", outcome: "Контрольный результат ожидается после события", budget: { remainingMinor: 12800000, utilizationPercent: 47, status: "В пределах" } }],
+  events: [{ id: "EVENT-VISUAL-001", projectId: "PROJECT-VISUAL-001", title: "Контрольная встреча по качеству", eventAt: "2026-09-05T11:00:00.000Z", location: "Главный офис", responsibleEntityId: "ENT-VISUAL-OWNER", budgetMinor: 1200000, actualMinor: 0, status: "Запланировано", result: "", feedbackScore: 0 }],
+  participants: [{ id: "PART-VISUAL-001", eventId: "EVENT-VISUAL-001", participantEntityId: "ENT-VISUAL-PARTICIPANT", participantRole: "Участник", attendanceStatus: "Ожидается", feedback: "" }],
+  results: [{ id: "RESULT-VISUAL-001", projectId: "PROJECT-VISUAL-001", eventId: "EVENT-VISUAL-001", resultType: "Промежуточный", metricName: "Индекс качества", metricValue: 82, unit: "%", evidence: "SRC-VISUAL-001", recordedAt: "2026-08-29T08:00:00.000Z" }],
+  deviations: [{ id: "DEV-VISUAL-001", kpiId: "KPI-VISUAL-001", projectId: "PROJECT-VISUAL-001", deviationType: "Ниже цели", varianceValue: -8, explanation: "Фактическое значение ниже целевого порога", decision: "Провести контрольное событие и повторный замер", status: "Открыто", relatedTaskId: null, detectedAt: "2026-08-29T08:00:00.000Z" }],
+  summary: { goals: 1, kpisOnTrack: 0, kpisTotal: 1, projects: 1, projectsAtRisk: 1, openDeviations: 1, past: 0, future: 1, feedbackAverage: 0 },
+  chain: { goalId: "GOAL-VISUAL-001", kpiId: "KPI-VISUAL-001", initiativeId: "INIT-VISUAL-001", projectId: "PROJECT-VISUAL-001", eventId: "EVENT-VISUAL-001", resultId: "RESULT-VISUAL-001", deviationId: "DEV-VISUAL-001", taskId: "" },
+  boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
+};
+
 const waveFixtures = {
   legal: { empty: emptyLegal, populated: populatedLegal },
   accounting: { empty: emptyAccounting, populated: populatedAccounting },
@@ -260,6 +295,7 @@ const waveFixtures = {
   food: { empty: emptyFood, populated: populatedFood },
   safety: { empty: emptySafety, populated: populatedSafety },
   medical: { empty: emptyMedical, populated: populatedMedical },
+  strategy: { empty: emptyStrategy, populated: populatedStrategy },
 };
 
 function persist() {
