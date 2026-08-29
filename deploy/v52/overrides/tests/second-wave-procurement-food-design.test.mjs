@@ -8,6 +8,7 @@ const procurementStyles = read("../app/components/ProcurementWorkspace.ds.css");
 const food = read("../app/components/FoodWorkspace.tsx");
 const foodStyles = read("../app/components/FoodWorkspace.ds.css");
 const operationalPatch = read("../scripts/patch-system-operational-modules.mjs");
+const normalizeInputs = read("../scripts/normalize-system-patch-inputs.mjs");
 const designSystem = read("../app/components/design-system/index.tsx");
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -144,6 +145,7 @@ test("migrated component patch blocks are retired and later operational patches 
   assert.equal(patchesFile(operationalPatch, "app/components/SafetyWorkspace.tsx"), true);
   assert.equal(patchesFile(operationalPatch, "app/components/MedicalWorkspace.tsx"), true);
   assert.equal(patchesFile(operationalPatch, "app/components/StrategyWorkspace.tsx"), true);
+  assert.doesNotMatch(normalizeInputs, /patch-system-operational-modules\.mjs/);
 });
 
 test("Wave 2 source contains no synthetic production labels", () => {

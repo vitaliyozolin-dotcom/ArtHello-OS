@@ -362,5 +362,5 @@ test("component-specific build patches are retired without deleting unrelated pa
   assert.equal(patchesFile(operationalPatch, "app/components/FoodWorkspace.tsx"), false);
   assert.equal(patchesFile(operationalPatch, "app/components/SafetyWorkspace.tsx"), true);
   assert.equal(patchesFile(foundationPatch, "app/components/ArtHelloShell.tsx"), true);
-  assert.match(normalizeInputs, /patch-system-operational-modules\.mjs/);
+  assert.doesNotMatch(normalizeInputs, /patch-system-operational-modules\.mjs/);
 });
