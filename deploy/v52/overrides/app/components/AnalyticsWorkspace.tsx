@@ -100,7 +100,7 @@ export function AnalyticsWorkspace({ role, notify, onTasksChanged, onOpenIntegra
     <PageHeader
       eyebrow="ФАКТЫ · ПРОГНОЗЫ · РЕШЕНИЯ"
       title="Аналитика и ИИ"
-      description="Каждый показатель раскрывается до формулы и источника, каждый модельный сигнал — до факторов, контракта и решения человека."
+      description="Каждый показатель раскрывается до формулы и источника, каждый модельный сигнал — до факторов и контракта; решение всегда за человеком."
       actions={contract
         ? <Button variant="primary" disabled={busy === contract.id} onClick={() => void action({ action: "runScenario", contractId: contract.id }, contract.id)}>Контрольный запуск</Button>
         : <Button variant="primary" onClick={onOpenIntegrations}>Загрузить данные</Button>}

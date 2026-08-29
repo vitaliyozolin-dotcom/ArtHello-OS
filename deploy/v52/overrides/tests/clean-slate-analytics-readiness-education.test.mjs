@@ -14,8 +14,8 @@ test("analytics empty mode has no phantom cash, snapshot or model source claims"
   assert.match(api, /sourceCoverage: isEmptyMode \? \{ fact: \[\], synthetic: \[\], unavailable: \[\] \}/);
   assert.match(api, /Аналитика строится только по сохранённым рабочим записям/);
   assert.match(api, /Модельные расчёты появятся только после подключения источника/);
-  assert.match(ui, /isDemo=data\.dataMode==="test"/);
-  assert.match(ui, /isDemo\?"ОПУБЛИКОВАННЫЙ ТЕСТОВЫЙ СНИМОК":"РАБОЧИЕ ДАННЫЕ"/);
+  assert.match(ui, /const isDemo = data\.dataMode === "test"/);
+  assert.match(ui, /isDemo \? "Тестовый снимок" : "Рабочие данные"/);
   assert.match(ui, /data\.owner\.cashPeriod/);
 });
 

@@ -114,7 +114,9 @@ export function ReadinessWorkspace({ role, notify }: { role: string; notify: (va
   if (loading) return <section className="ahReadinessStatus">Собираем сквозные доказательства…</section>;
   if (error || !data) return <section className="ahReadinessStatus"><Card><EmptyState title="Контур готовности недоступен" description={error || "Для просмотра требуется разрешённая роль."} density="compact" /></Card></section>;
 
-  const scenario = data.scenarios.find((item) => item.id === selected) ?? data.scenarios[0];
+  let selectedScenarioId = selected;
+  if (!data.scenarios.length) selectedScenarioId = "";
+  const scenario = data.scenarios.find((item) => item.id === selectedScenarioId) ?? data.scenarios[0];
   const canRun = ["Собственник", "Директор", "Представитель Виталия", "Контроль качества"].includes(role);
   const isDemo = data.dataMode === "test";
   const hasData = Boolean(data.scenarios.length || data.gates.length || data.runs.length || data.drills.length || data.decisions.length || data.testLayers.length);
@@ -127,7 +129,7 @@ export function ReadinessWorkspace({ role, notify }: { role: string; notify: (va
       actions={<Button variant="primary" disabled={!canRun || busy || !data.scenarios.length} onClick={() => void runAll()}>{busy ? "Проверяем…" : "Запустить проверки"}</Button>}
     />
 
-    <Card className="ahReadinessBoundary"><strong>{data.summary.productionReady ? "Готово к решению" : "Production закрыт"}</strong><span>{hasData ? data.productionDecision : "Система не создаёт результаты приёмки автоматически. Настройте сценарии и ворота выпуска."}</span></Card>
+    <Card className="ahReadinessBoundary"><strong>{data.summary.productionReady ? "ГОТОВО К ИТОГОВОЙ ПРОВЕРКЕ" : "Production закрыт"}</strong><span>{hasData ? data.productionDecision : "Система не создаёт результаты приёмки автоматически. Настройте сценарии и ворота выпуска."}</span></Card>
 
     <div className="ahReadinessKpis">
       <KpiCard label="Сценарии" value={`${data.summary.passedScenarios}/${data.summary.totalScenarios}`} note="пройдено" onClick={() => setTab("10 сценариев")} />
