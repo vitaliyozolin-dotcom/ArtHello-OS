@@ -14,7 +14,7 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 396;
+const expectedPngCount = 452;
 
 const waveRoutes = {
   finance: {
@@ -81,6 +81,36 @@ const waveRoutes = {
     modalFields: ["scheduledAt", "accountId", "authorEntityId", "format", "campaignId", "topic", "brief"],
     expectedTabCount: 6,
     requireTable: false,
+  },
+  registry: {
+    heading: "Единые карточки",
+    root: ".ahRegistryPage",
+    legacy: ".registry-page",
+    endpoint: /\/api\/entities(?:\?.*)?$/,
+    kpis: ".ahRegistryKpis > .ahKpiCard",
+    kpiGrid: ".ahRegistryKpis",
+    tabs: ".ahRegistryTabs .ahTabs",
+    table: ".ahRegistryTable",
+    empty: ".ahRegistryPage .ahEmptyState",
+    modal: ".registry-modal",
+    modalTrigger: /^Новая карточка$/,
+    modalFields: ["entityType", "displayName", "scope"],
+    expectedTabCount: 1,
+  },
+  tasks: {
+    heading: "Задачи и процессы",
+    root: ".ahWorkflowPage",
+    legacy: ".workflow-page",
+    endpoint: /\/api\/work-items(?:\?.*)?$/,
+    kpis: ".ahWorkflowKpis > .ahKpiCard",
+    kpiGrid: ".ahWorkflowKpis",
+    tabs: ".ahWorkflowTabs .ahTabs",
+    table: ".ahWorkflowTable",
+    empty: ".ahWorkflowPage .ahEmptyState",
+    modal: ".workflow-modal",
+    modalTrigger: /^Новая задача$/,
+    modalFields: ["title", "description", "assigneeEntityId", "dueDate"],
+    expectedTabCount: 4,
   },
   legal: {
     heading: "Юридический контур",
@@ -316,6 +346,68 @@ const populatedContent = {
   chain: [{ id: "CHAIN-VISUAL-001", publicationId: "PUB-VISUAL-001", clickId: "CLICK-VISUAL-001", leadId: "LEAD-VISUAL-001", contractId: "LCON-VISUAL-001", paymentOperationId: "FIN-VISUAL-001", revenueMinor: 32000000, attributionModel: "Последний подтверждённый переход", publication: { id: "PUB-VISUAL-001", planItemId: "PLAN-VISUAL-001", publishedAt: "2026-08-25T12:00:00.000Z", publicationRef: "visual://publication", reach: 820, views: 940, reactions: 76, clicks: 31, leads: 4, contracts: 1, revenueMinor: 32000000, dataQuality: "Visual fixture", rates: { engagementPercent: 9.3, clickPercent: 3.3, leadPercent: 12.9, contractPercent: 25 } }, planItem: { id: "PLAN-VISUAL-001", scheduledAt: "2026-09-02T12:00:00.000Z", accountId: "SOC-VISUAL-001", authorEntityId: "EMP-VISUAL-001", format: "Пост", topic: "Открытый урок", offerId: "OFF-VISUAL-001", campaignId: "CMP-VISUAL-001", status: "Опубликовано", brief: "Проверить интерес к открытому уроку" }, lead: { id: "LEAD-VISUAL-001", source: "VK", campaignId: "CMP-VISUAL-001", offerId: "OFF-VISUAL-001" }, payment: { id: "FIN-VISUAL-001", amountMinor: 32000000, operationDate: "2026-08-28", dataQuality: "Visual fixture" } }],
   summary: { reach: 820, views: 940, reactions: 76, clicks: 31, leads: 4, contracts: 1, revenueMinor: 32000000 },
   sourcePolicy: { status: "Подключено", note: "Метрики получены от visual fixture канала.", ranking: "выручка → договор → заявка → переход" },
+};
+
+const emptyRegistry = {
+  entities: [],
+  stats: { total: 0, needsReview: 0, duplicateGroups: 0, sources: 0 },
+  typeCounts: {},
+};
+
+const populatedRegistry = {
+  entities: [{
+    id: "ENT-VISUAL-REGISTRY-001",
+    entityType: "Сотрудник",
+    displayName: "Сотрудник visual fixture",
+    status: "Активна",
+    sourceSystem: "MANUAL",
+    sourceRecordId: "MANUAL-VISUAL-001",
+    dataQuality: "Проверено",
+    scope: "ArtHello OS",
+    createdBy: "visual-gate",
+    createdAt: "2026-08-29T08:00:00.000Z",
+    updatedAt: "2026-08-29T08:00:00.000Z",
+  }],
+  stats: { total: 1, needsReview: 0, duplicateGroups: 0, sources: 1 },
+  typeCounts: { "Сотрудник": 1 },
+};
+
+const emptyWorkflow = {
+  tasks: [],
+  notifications: [],
+  escalations: [],
+  documents: [],
+  obligations: [],
+  assignees: [],
+  stats: { open: 0, overdue: 0, waitingApproval: 0, escalations: 0 },
+};
+
+const populatedWorkflow = {
+  ...emptyWorkflow,
+  tasks: [{
+    id: 801,
+    title: "Проверить результат visual fixture",
+    owner: "Сотрудник visual fixture",
+    dueDate: "2026-09-01",
+    priority: "Средний",
+    status: "В работе",
+    sourceType: "Ручная задача",
+    sourceId: "MANUAL-VISUAL-001",
+    description: "Синтетическая задача только для визуальной приёмки.",
+    assigneeEntityId: "ENT-VISUAL-REGISTRY-001",
+    parentTaskId: null,
+    kind: "Задача",
+    recurrenceRule: "",
+    requiresApproval: false,
+    result: "",
+    resultEvidence: "",
+    completedAt: "",
+    createdBy: "visual-gate",
+    createdAt: "2026-08-29T08:00:00.000Z",
+    updatedAt: "2026-08-29T08:00:00.000Z",
+  }],
+  assignees: [{ id: "ENT-VISUAL-REGISTRY-001", displayName: "Сотрудник visual fixture" }],
+  stats: { open: 1, overdue: 0, waitingApproval: 0, escalations: 0 },
 };
 
 const emptyLegal = {
@@ -687,6 +779,8 @@ const waveFixtures = {
   sales: { empty: emptySales, populated: populatedSales },
   hr: { empty: emptyHr, populated: populatedHr },
   content: { empty: emptyContent, populated: populatedContent },
+  registry: { empty: emptyRegistry, populated: populatedRegistry },
+  tasks: { empty: emptyWorkflow, populated: populatedWorkflow },
   legal: { empty: emptyLegal, populated: populatedLegal },
   accounting: { empty: emptyAccounting, populated: populatedAccounting },
   procurement: { empty: emptyProcurement, populated: populatedProcurement },

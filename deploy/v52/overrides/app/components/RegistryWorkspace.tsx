@@ -3,6 +3,8 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { entityTypes, relationTypes } from "../../lib/registry";
+import { Button, Card, EmptyState, KpiCard, PageContainer, PageHeader, SearchField, Tabs } from "./design-system";
+import "./RegistryWorkspace.ds.css";
 
 type EntityRecord = {
   id: string;
@@ -79,35 +81,39 @@ export function RegistryWorkspace({ notify }: { notify: (value: string) => void 
     if (entityId) setSelectedId(entityId);
   }
 
-  return <section className="page registry-page">
-    <div className="page-heading registry-heading">
-      <div><p className="eyebrow">Этап 2 · единая модель данных</p><h1>Единые карточки</h1><p>Сотрудник, ребёнок или организация создаются один раз и связываются со всеми рабочими контурами.</p></div>
-      <button className="primary-action" onClick={() => setAction("create")}>+ Новая карточка</button>
+  const registryTabs = [
+    { id: "", label: <>Все <b>{stats.total}</b></> },
+    ...entityTypes.filter((item) => typeCounts[item]).map((item) => ({ id: item, label: <>{item} <b>{typeCounts[item]}</b></> })),
+  ];
+
+  return <PageContainer className="ahRegistryPage">
+    <PageHeader
+      eyebrow="ЛЮДИ · ОРГАНИЗАЦИИ · СВЯЗИ"
+      title="Единые карточки"
+      description="Сотрудник, ребёнок или организация создаются один раз и связываются со всеми рабочими контурами."
+      actions={<Button variant="primary" onClick={() => setAction("create")}>Новая карточка</Button>}
+    />
+
+    <div className="ahRegistryKpis">
+      <KpiCard label="Активные карточки" value={String(stats.total)} note="единый центральный реестр" />
+      <KpiCard className={stats.needsReview ? "ahRegistryKpiWarning" : undefined} label="Требуют сверки" value={String(stats.needsReview)} note="не выдаём за проверенные" />
+      <KpiCard className={stats.duplicateGroups ? "ahRegistryKpiDanger" : undefined} label="Группы дублей" value={String(stats.duplicateGroups)} note="без удаления истории" />
+      <KpiCard label="Источники" value={String(stats.sources)} note="ручной ввод · импорт · интеграции" />
     </div>
 
-    <div className="registry-kpis">
-      <RegistryKpi label="Активные карточки" value={String(stats.total)} note="единый центральный реестр" tone="green" />
-      <RegistryKpi label="Требуют сверки" value={String(stats.needsReview)} note="не выдаём за проверенные" tone={stats.needsReview ? "amber" : "green"} />
-      <RegistryKpi label="Группы дублей" value={String(stats.duplicateGroups)} note="объединяются без удаления истории" tone={stats.duplicateGroups ? "coral" : "green"} />
-      <RegistryKpi label="Источники" value={String(stats.sources)} note="Ручной ввод · подтверждённый импорт · интеграции" tone="blue" />
-    </div>
-
-    <article className="registry-shell">
-      <div className="registry-toolbar">
-        <label className="registry-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти по ID, названию, источнику или области" aria-label="Поиск по единому реестру" /></label>
+    <Card className="ahRegistryShell">
+      <div className="ahRegistryToolbar">
+        <SearchField className="ahRegistrySearch" value={query} onChange={setQuery} placeholder="Найти по ID, названию, источнику или области" label="Поиск по единому реестру" />
         <select value={type} onChange={(event) => setType(event.target.value)} aria-label="Фильтр по типу"><option value="">Все типы</option>{entityTypes.map((item) => <option key={item}>{item}</option>)}</select>
         <select value={quality} onChange={(event) => setQuality(event.target.value)} aria-label="Фильтр по качеству"><option value="">Любое качество</option>{qualityOptions.map((item) => <option key={item}>{item}</option>)}</select>
-        {(query || type || quality) ? <button className="clear-filter" onClick={() => { setQuery(""); setType(""); setQuality(""); }}>Сбросить</button> : null}
+        {(query || type || quality) ? <Button variant="ghost" className="ahRegistryClear" onClick={() => { setQuery(""); setType(""); setQuality(""); }}>Сбросить</Button> : null}
       </div>
-      <div className="registry-type-strip" aria-label="Типы карточек">
-        <button className={!type ? "active" : ""} onClick={() => setType("")}>Все <b>{stats.total}</b></button>
-        {entityTypes.filter((item) => typeCounts[item]).map((item) => <button key={item} className={type === item ? "active" : ""} onClick={() => setType(item)}>{item} <b>{typeCounts[item]}</b></button>)}
-      </div>
+      <div className="ahRegistryTabs"><Tabs items={registryTabs} value={type} onChange={setType} ariaLabel="Типы карточек" /></div>
 
       {state === "loading" ? <RegistryState title="Загружаем реестр" text="Проверяем карточки, источники и устойчивые ID." /> : null}
       {state === "error" ? <RegistryState title="Реестр временно недоступен" text="Данные не заменены заглушкой." action="Повторить" onAction={() => void loadEntities()} /> : null}
       {state === "ready" && entities.length === 0 ? <RegistryState title="Карточки не найдены" text="Измените фильтры или создайте новую карточку." action="Создать карточку" onAction={() => setAction("create")} /> : null}
-      {state === "ready" && entities.length > 0 ? <div className="registry-table-wrap"><table className="registry-table"><thead><tr><th>Карточка</th><th>Тип</th><th>Используется в</th><th>Источник</th><th>Качество</th><th>Статус</th><th /></tr></thead><tbody>
+      {state === "ready" && entities.length > 0 ? <div className="ahRegistryTable"><table className="registry-table"><thead><tr><th>Карточка</th><th>Тип</th><th>Используется в</th><th>Источник</th><th>Качество</th><th>Статус</th><th /></tr></thead><tbody>
         {entities.map((entity) => <tr key={entity.id} onClick={() => setSelectedId(entity.id)}>
           <td><strong>{entity.displayName}</strong><small>{entity.id}</small></td>
           <td><span className="entity-type-badge">{entity.entityType}</span></td>
@@ -117,19 +123,15 @@ export function RegistryWorkspace({ notify }: { notify: (value: string) => void 
           <td>{entity.status}</td><td><button aria-label={`Открыть ${entity.displayName}`}>→</button></td>
         </tr>)}
       </tbody></table></div> : null}
-    </article>
+    </Card>
 
     {selectedId ? <EntityPanel key={selectedId} entityId={selectedId} close={() => setSelectedId(null)} notify={notify} refreshList={loadEntities} onNavigate={setSelectedId} /> : null}
     {action === "create" ? <RegistryActionModal action="create" close={() => setAction(null)} onDone={actionDone} notify={notify} /> : null}
-  </section>;
-}
-
-function RegistryKpi({ label, value, note, tone }: { label: string; value: string; note: string; tone: string }) {
-  return <article className={`registry-kpi ${tone}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>;
+  </PageContainer>;
 }
 
 function RegistryState({ title, text, action, onAction }: { title: string; text: string; action?: string; onAction?: () => void }) {
-  return <div className="registry-state"><span>ID</span><h2>{title}</h2><p>{text}</p>{action ? <button onClick={onAction}>{action}</button> : null}</div>;
+  return <EmptyState className="ahRegistryEmpty" density="compact" title={title} description={text} action={action ? <Button variant="secondary" onClick={onAction}>{action}</Button> : undefined} />;
 }
 
 export function EntityPanel({ entityId, close, notify, refreshList, onNavigate, readOnly = false, backLabel, initialTab = "overview" }: { entityId: string; close: () => void; notify: (value: string) => void; refreshList?: () => Promise<void>; onNavigate?: (id: string) => void; readOnly?: boolean; backLabel?: string; initialTab?: "overview" | "relations" | "documents" | "history" }) {
