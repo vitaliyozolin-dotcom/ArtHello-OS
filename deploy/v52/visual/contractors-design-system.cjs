@@ -101,7 +101,7 @@ const waveRoutes = {
     populatedTab: "Аудит просмотров",
     requireModal: false,
   },
-  strategy: {
+  projects: {
     heading: "Проекты и стратегия",
     root: ".ahStrategyPage",
     legacy: ".strategy-workspace",
@@ -295,7 +295,7 @@ const waveFixtures = {
   food: { empty: emptyFood, populated: populatedFood },
   safety: { empty: emptySafety, populated: populatedSafety },
   medical: { empty: emptyMedical, populated: populatedMedical },
-  strategy: { empty: emptyStrategy, populated: populatedStrategy },
+  projects: { empty: emptyStrategy, populated: populatedStrategy },
 };
 
 function persist() {
