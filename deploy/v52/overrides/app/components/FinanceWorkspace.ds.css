@@ -433,7 +433,7 @@
   }
 
   .ahFinancePeriodMobile > span > button[data-ah-help-inline="true"].ah-field-icon {
-    display: none !important;
+    display: none;
   }
 
   .ahFinancePeriodMobile select {
