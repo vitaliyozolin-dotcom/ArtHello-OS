@@ -101,7 +101,9 @@ patch("app/components/ContextualHelpSystem.tsx", (input) => {
   return source;
 });
 
-patch("app/components/HrWorkspace.tsx", (input) => {
+if (readFileSync(target("app/components/HrWorkspace.tsx"), "utf8").includes('className="ahHrPage"')) {
+  console.log("HrWorkspace Design System override already owns its dialog portals");
+} else patch("app/components/HrWorkspace.tsx", (input) => {
   let source = input;
   source = replaceText(
     source,

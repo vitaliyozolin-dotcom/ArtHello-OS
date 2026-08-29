@@ -22,7 +22,9 @@ function patch(relativePath, transform) {
   writeFileSync(path, after, "utf8");
 }
 
-patch("app/components/ContentWorkspace.tsx", (input) => {
+if (readFileSync(target("app/components/ContentWorkspace.tsx"), "utf8").includes('className="ahContentPage"')) {
+  console.log("ContentWorkspace Design System override already owns its dialog portal");
+} else patch("app/components/ContentWorkspace.tsx", (input) => {
   let source = input;
   source = replaceText(
     source,
