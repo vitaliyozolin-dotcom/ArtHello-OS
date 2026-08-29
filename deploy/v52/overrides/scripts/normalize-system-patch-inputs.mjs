@@ -4,21 +4,9 @@ import { fileURLToPath } from "node:url";
 function replaceExactlyOnce(source, search, replacement, label) {
   const first = source.indexOf(search);
   const second = first === -1 ? -1 : source.indexOf(search, first + search.length);
-  if (first === -1 || second !== -1) {
-    throw new Error(`Patch input normalization failed for ${label}`);
-  }
+  if (first === -1 || second !== -1) throw new Error(`Patch input normalization failed for ${label}`);
   return `${source.slice(0, first)}${replacement}${source.slice(first + search.length)}`;
 }
-
-const analyticsPath = fileURLToPath(new URL("./patch-system-analytics-readiness.mjs", import.meta.url));
-let analytics = readFileSync(analyticsPath, "utf8");
-analytics = replaceExactlyOnce(
-  analytics,
-  '<div className="analytics-heading-actions"><button onClick={onOpenIntegrations}>Подключить источники</button></div>',
-  '<div className="analytics-heading-actions"><button onClick={onOpenIntegrations}>Загрузить данные</button></div>',
-  "analytics stable empty-state action",
-);
-writeFileSync(analyticsPath, analytics, "utf8");
 
 const contentPath = fileURLToPath(new URL("./patch-system-content-legal.mjs", import.meta.url));
 let content = readFileSync(contentPath, "utf8");
@@ -31,4 +19,3 @@ content = replaceExactlyOnce(
 writeFileSync(contentPath, content, "utf8");
 
 console.log("System patch inputs normalized");
-

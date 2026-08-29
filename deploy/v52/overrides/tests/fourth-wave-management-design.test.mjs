@@ -11,6 +11,7 @@ const analyticsStyles = read("../app/components/AnalyticsWorkspace.ds.css");
 const readiness = read("../app/components/ReadinessWorkspace.tsx");
 const readinessStyles = read("../app/components/ReadinessWorkspace.ds.css");
 const designSystem = read("../app/components/design-system/index.tsx");
+const analyticsReadinessPatch = read("../scripts/patch-system-analytics-readiness.mjs");
 const operationalPatch = read("../scripts/patch-system-operational-modules.mjs");
 const normalizeInputs = read("../scripts/normalize-system-patch-inputs.mjs");
 
@@ -92,6 +93,8 @@ test("Analytics preserves human control and opt-out contracts", () => {
   assert.match(analytics, /решение за человеком/i);
   assert.match(analytics, /fallbackFunctionality/);
   assert.match(analytics, /historicalDataPolicy/);
+  assert.match(analytics, /onOpenIntegrations:\s*\(\)\s*=>\s*void/);
+  assert.match(analytics, /onClick=\{onOpenIntegrations\}/);
   assert.match(analytics, /onTasksChanged\(\)/);
 });
 
@@ -117,7 +120,10 @@ test("Wave 4 CSS is scoped to the approved compact typography canon", () => {
 });
 
 test("The legacy operational patch is fully retired", () => {
+  assert.doesNotMatch(analyticsReadinessPatch, /patch\s*\(/);
+  assert.doesNotMatch(analyticsReadinessPatch, /AnalyticsWorkspace\.tsx|ReadinessWorkspace\.tsx/);
   assert.doesNotMatch(operationalPatch, /patch\s*\(/);
   assert.doesNotMatch(operationalPatch, /StrategyWorkspace\.tsx|AnalyticsWorkspace\.tsx|ReadinessWorkspace\.tsx/);
+  assert.doesNotMatch(normalizeInputs, /patch-system-analytics-readiness\.mjs/);
   assert.doesNotMatch(normalizeInputs, /patch-system-operational-modules\.mjs/);
 });

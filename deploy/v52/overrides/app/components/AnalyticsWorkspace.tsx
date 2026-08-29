@@ -34,7 +34,7 @@ type AnalyticsTab = typeof tabs[number];
 const rub = (value: number) => new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(value / 100);
 const short = (value: number) => new Intl.NumberFormat("ru-RU", { notation: "compact", maximumFractionDigits: 1 }).format(value / 100);
 
-export function AnalyticsWorkspace({ role, notify, onTasksChanged }: { role: string; notify: (value: string) => void; onTasksChanged: () => void }) {
+export function AnalyticsWorkspace({ role, notify, onTasksChanged, onOpenIntegrations }: { role: string; notify: (value: string) => void; onTasksChanged: () => void; onOpenIntegrations: () => void }) {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -101,7 +101,9 @@ export function AnalyticsWorkspace({ role, notify, onTasksChanged }: { role: str
       eyebrow="ФАКТЫ · ПРОГНОЗЫ · РЕШЕНИЯ"
       title="Аналитика и ИИ"
       description="Каждый показатель раскрывается до формулы и источника, каждый модельный сигнал — до факторов, контракта и решения человека."
-      actions={<Button variant="primary" disabled={!contract || busy === contract.id} onClick={() => contract && void action({ action: "runScenario", contractId: contract.id }, contract.id)}>Контрольный запуск</Button>}
+      actions={contract
+        ? <Button variant="primary" disabled={busy === contract.id} onClick={() => void action({ action: "runScenario", contractId: contract.id }, contract.id)}>Контрольный запуск</Button>
+        : <Button variant="primary" onClick={onOpenIntegrations}>Загрузить данные</Button>}
     />
 
     <Card className="ahAnalyticsBoundary"><strong>{hasData ? (isDemo ? "Тестовый снимок" : "Рабочие данные") : "Рабочая структура"}</strong><span>{hasData ? data.boundary : "Источники, метрики и модельные контракты не создаются автоматически. Подключите проверяемые рабочие данные."}</span></Card>

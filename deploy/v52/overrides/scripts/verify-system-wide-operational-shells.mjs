@@ -57,6 +57,7 @@ requireText(analytics, "<PageContainer", "analytics page container is missing");
 requireText(analytics, "<PageHeader", "analytics page header is missing");
 requireText(analytics, "<Tabs", "analytics tabs are hidden by an empty-state branch");
 requireText(analytics, "<KpiCard", "analytics KPI cards are missing");
+requireText(analytics, "onOpenIntegrations", "analytics cannot open integrations from its empty state");
 forbid(analytics, /\banalytics-workspace\b/, "legacy analytics workspace wrapper remains");
 forbid(analytics, /if\s*\(\s*!data\.contracts\.length\s*\)\s*return/, "analytics workspace still collapses when empty");
 requireText(readiness, "ahReadinessPage", "readiness workspace is not mounted on the design-system shell");
