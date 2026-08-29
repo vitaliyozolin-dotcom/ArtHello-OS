@@ -245,7 +245,8 @@ export function StrategyWorkspace({
         actions={
           <Button
             disabled={!firstProject || busy === "event"}
-            onClick={() =>
+            onClick={() => {
+              if (!firstProject) return;
               void action(
                 {
                   action: "createEvent",
@@ -256,8 +257,8 @@ export function StrategyWorkspace({
                   budgetMinor: 0,
                 },
                 "event",
-              )
-            }
+              );
+            }}
           >
             + Событие
           </Button>
