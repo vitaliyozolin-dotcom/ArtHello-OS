@@ -14,7 +14,7 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 88;
+const expectedPngCount = 144;
 
 const waveRoutes = {
   legal: {
@@ -44,6 +44,34 @@ const waveRoutes = {
     modal: ".ahAccountingModal",
     modalTrigger: /^\+\s*(?:Добавить|Принять) документ$/,
     modalFields: ["documentType", "number", "documentDate", "amountRub", "counterpartyEntityId", "contractId"],
+  },
+  procurement: {
+    heading: "Закупки и имущество",
+    root: ".ahProcurementPage",
+    legacy: ".proc-workspace",
+    endpoint: /\/api\/procurement(?:\?.*)?$/,
+    kpis: ".ahProcurementKpis > .ahKpiCard",
+    kpiGrid: ".ahProcurementKpis",
+    tabs: ".ahProcurementTabs .ahTabs",
+    table: ".ahProcurementRequestList",
+    empty: ".ahProcurementPage .ahEmptyState",
+    modal: ".ahProcurementModal",
+    modalTrigger: /^\+\s*Новая заявка$/,
+    modalFields: ["requesterEntityId", "unit", "itemName", "quantity", "budgetRubles", "needBy", "justification"],
+    requireTable: false,
+  },
+  food: {
+    heading: "Кухня",
+    root: ".ahFoodPage",
+    legacy: ".food-workspace",
+    endpoint: /\/api\/food(?:\?.*)?$/,
+    kpis: ".ahFoodKpis > .ahKpiCard",
+    kpiGrid: ".ahFoodKpis",
+    tabs: ".ahFoodTabs .ahTabs",
+    table: ".ahFoodShipmentTable",
+    empty: ".ahFoodPage .ahEmptyState",
+    populatedTab: "Отгрузки",
+    requireModal: false,
   },
 };
 
@@ -109,9 +137,60 @@ const populatedAccounting = {
   boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
 };
 
+const emptyProcurement = {
+  suppliers: [], requests: [], offers: [], orders: [], deliveries: [], items: [], events: [], assets: [], maintenance: [],
+  entityNames: { "ENT-VISUAL-REQUESTER": "Синтетический заявитель" },
+  summary: { requests: 0, offers: 0, stockUnits: 0, assets: 0, serviceDue: 0 },
+  chain: { requestId: "", approvalId: "", offerId: "", supplierId: "", orderId: "", deliveryId: "", itemId: "", assetId: "", documentId: "", paymentId: "" },
+  boundary: "Пустой контур не создаёт заявки, поставщиков, остатки или имущество автоматически.",
+};
+
+const populatedProcurement = {
+  suppliers: [{ id: "SUP-VISUAL-001", entityId: "ENT-VISUAL-SUPPLIER", specialization: "Оборудование", contractId: "LCON-VISUAL-001", basePriceMinor: 24000000, qualityScore: 92, rating: 4.8, marketIndex: 97, status: "Проверен", dataQuality: "Синтетический visual fixture" }],
+  requests: [{ id: "REQ-VISUAL-001", requesterEntityId: "ENT-VISUAL-REQUESTER", unit: "Учебный центр", itemName: "Комплект оборудования", quantity: 4, budgetMinor: 26000000, needBy: "2026-09-20", status: "На согласовании", justification: "Плановое оснащение нового кабинета", approverEntityId: "", approvedAt: "" }],
+  offers: [{ id: "OFF-VISUAL-001", requestId: "REQ-VISUAL-001", supplierId: "SUP-VISUAL-001", priceMinor: 24000000, deliveryDays: 14, warrantyMonths: 24, qualityScore: 92, status: "Рекомендовано", comparisonNote: "Лучший общий балл", score: 94 }],
+  orders: [{ id: "ORD-VISUAL-001", requestId: "REQ-VISUAL-001", offerId: "OFF-VISUAL-001", supplierId: "SUP-VISUAL-001", orderNumber: "VIS-ORD-01", amountMinor: 24000000, status: "Заказан", orderedAt: "2026-08-28", expectedAt: "2026-09-11", contractId: "LCON-VISUAL-001" }],
+  deliveries: [{ id: "DEL-VISUAL-001", orderId: "ORD-VISUAL-001", deliveredAt: "2026-09-11", documentId: "ACT-VISUAL-001", status: "Принято", quantity: 4, acceptedQuantity: 4, qualityNote: "Комплектность подтверждена" }],
+  items: [{ id: "ITEM-VISUAL-001", sku: "SKU-VIS-001", name: "Комплект оборудования", category: "Оборудование", warehouse: "Основной склад", quantity: 4, unitCostMinor: 6000000, assetId: "ASSET-VISUAL-001", status: "На складе" }],
+  events: [{ id: "MOVE-VISUAL-001", itemId: "ITEM-VISUAL-001", eventType: "Приёмка", quantity: 4, fromLocation: "Поставщик", toLocation: "Основной склад", documentId: "ACT-VISUAL-001", occurredAt: "2026-09-11T10:00:00.000Z" }],
+  assets: [{ id: "ASSET-VISUAL-001", itemId: "ITEM-VISUAL-001", serialNumber: "VIS-SN-001", objectEntityId: "OBJ-VISUAL-001", assignedToEntityId: "ENT-VISUAL-REQUESTER", warrantyUntil: "2028-09-11", serviceDue: "2027-03-11", status: "В эксплуатации", acquisitionDate: "2026-09-11", costMinor: 6000000, monthlyDepreciationMinor: 100000, warrantyState: "Действует" }],
+  maintenance: [{ id: "MAINT-VISUAL-001", assetId: "ASSET-VISUAL-001", maintenanceType: "Плановая проверка", scheduledAt: "2027-03-11", contractorId: "ENT-VISUAL-SUPPLIER", status: "Запланировано", costMinor: 0, documentId: "", relatedTaskId: null }],
+  entityNames: { "ENT-VISUAL-REQUESTER": "Синтетический заявитель", "ENT-VISUAL-SUPPLIER": "Синтетический поставщик" },
+  payment: { id: "PAY-VISUAL-001", amountMinor: 24000000, reportClass: "Операционные расходы", dataQuality: "Синтетическая связь visual gate" },
+  summary: { requests: 1, offers: 1, stockUnits: 4, assets: 1, serviceDue: 1 },
+  chain: { requestId: "REQ-VISUAL-001", approvalId: "APR-VISUAL-001", offerId: "OFF-VISUAL-001", supplierId: "SUP-VISUAL-001", orderId: "ORD-VISUAL-001", deliveryId: "DEL-VISUAL-001", itemId: "ITEM-VISUAL-001", assetId: "ASSET-VISUAL-001", documentId: "ACT-VISUAL-001", paymentId: "PAY-VISUAL-001" },
+  boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
+};
+
+const emptyFood = {
+  products: [], batches: [], recipes: [], ingredients: [], production: [], shipments: [], shifts: [], checks: [], entityNames: {},
+  economics: { revenueMinor: 0, materialMinor: 0, laborMinor: 0, profitMinor: 0, marginPercent: 0 },
+  summary: { products: 0, batches: 0, urgentBatches: 0, planned: 0, actual: 0, consumed: 0, waste: 0 },
+  chain: { purchaseId: "", batchId: "", recipeId: "", productionId: "", shipmentId: "", costId: "", revenueId: "" },
+  boundary: "Пустой контур не создаёт рецепты, производство, отгрузки или выручку автоматически.",
+};
+
+const populatedFood = {
+  products: [{ id: "PROD-VISUAL-001", name: "Овощная смесь", supplierId: "ENT-VISUAL-SUPPLIER", unit: "г", purchaseCostMinor: 42000, storageNorm: "Хранить при +2…+6 °C", status: "Активен" }],
+  batches: [{ id: "BATCH-VISUAL-001", productId: "PROD-VISUAL-001", purchaseRequestId: "REQ-VISUAL-001", receivedAt: "2026-08-27", expiresAt: "2026-09-05", quantity: 5000, remainingQuantity: 2400, unit: "г", warehouse: "Холодильный склад", status: "Открыта", qualityNote: "Входной контроль пройден", expiryBand: "Срочная" }],
+  recipes: [{ id: "RECIPE-VISUAL-001", dishName: "Овощное рагу", version: 2, yieldPortions: 40, standardCostMinor: 780000, normDescription: "Утверждённая технологическая карта", menuDate: "2026-08-29", status: "Действует" }],
+  ingredients: [{ id: "ING-VISUAL-001", recipeId: "RECIPE-VISUAL-001", productId: "PROD-VISUAL-001", quantityPerBatch: 2400, unit: "г", costMinor: 420000 }],
+  production: [{ id: "KITCHEN-VISUAL-001", productionDate: "2026-08-29", recipeId: "RECIPE-VISUAL-001", shiftId: "SHIFT-VISUAL-001", plannedPortions: 40, actualPortions: 38, materialCostMinor: 741000, status: "Завершено", evidence: "Фактический выход подтверждён сменой" }],
+  shipments: [{ id: "SHIP-VISUAL-001", productionId: "KITCHEN-VISUAL-001", destinationObjectId: "OBJ-VISUAL-001", shippedPortions: 38, consumedPortions: 36, returnedPortions: 1, writtenOffPortions: 1, revenueMinor: 1520000, status: "Закрыта", documentId: "SHIPDOC-VISUAL-001", balance: 0 }],
+  shifts: [{ id: "SHIFT-VISUAL-001", employeeEntityId: "ENT-VISUAL-COOK", startedAt: "2026-08-29T07:00:00.000Z", endedAt: "2026-08-29T15:00:00.000Z", rateMinor: 280000, status: "Закрыта", role: "Повар" }],
+  checks: [{ id: "CHECK-VISUAL-001", checkType: "Контроль температуры", objectEntityId: "OBJ-VISUAL-001", checkedAt: "2026-08-29T08:00:00.000Z", result: "Соответствует", violation: "", evidence: "Журнал температуры", status: "Закрыта", relatedTaskId: null }],
+  entityNames: { "ENT-VISUAL-COOK": "Синтетический сотрудник", "ENT-VISUAL-SUPPLIER": "Синтетический поставщик" },
+  economics: { revenueMinor: 1520000, materialMinor: 741000, laborMinor: 280000, profitMinor: 499000, marginPercent: 33 },
+  summary: { products: 1, batches: 1, urgentBatches: 1, planned: 40, actual: 38, consumed: 36, waste: 1 },
+  chain: { purchaseId: "REQ-VISUAL-001", batchId: "BATCH-VISUAL-001", recipeId: "RECIPE-VISUAL-001", productionId: "KITCHEN-VISUAL-001", shipmentId: "SHIP-VISUAL-001", costId: "COST-VISUAL-001", revenueId: "REV-VISUAL-001" },
+  boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
+};
+
 const waveFixtures = {
   legal: { empty: emptyLegal, populated: populatedLegal },
   accounting: { empty: emptyAccounting, populated: populatedAccounting },
+  procurement: { empty: emptyProcurement, populated: populatedProcurement },
+  food: { empty: emptyFood, populated: populatedFood },
 };
 
 function persist() {
@@ -392,6 +471,14 @@ async function captureWaveRoute(browser, base, storageState, label, viewport, ro
   const apiFixture = { endpoint: config.endpoint, payload: waveFixtures[routeName][mode] };
   const { context, page } = await stablePage(browser, base, storageState, viewport, routeName, apiFixture);
   await page.getByRole("heading", { name: config.heading, exact: true }).waitFor({ state: "visible", timeout: 30000 });
+  if (mode === "populated" && config.populatedTab) {
+    const populatedTab = label === "pilot"
+      ? page.locator(config.tabs).getByRole("tab", { name: config.populatedTab, exact: true })
+      : page.getByRole("button", { name: config.populatedTab, exact: true });
+    if (await populatedTab.count() !== 1) throw new Error(`${config.heading}: populated tab ${config.populatedTab} is missing or ambiguous`);
+    await populatedTab.click();
+    await page.waitForTimeout(250);
+  }
   if (label === "pilot") {
     await page.locator(config.root).waitFor({ state: "visible", timeout: 30000 });
     if (mode === "empty") await page.locator(config.empty).first().waitFor({ state: "visible", timeout: 30000 });
@@ -495,7 +582,9 @@ async function captureWaveRoute(browser, base, storageState, label, viewport, ro
     table: config.table,
   });
 
-  const modalVerified = label === "pilot" && mode === "populated" ? await verifyWaveModal(page, config) : null;
+  const modalVerified = label === "pilot" && mode === "populated" && config.requireModal !== false
+    ? await verifyWaveModal(page, config)
+    : null;
   await context.close();
   return { label, route: routeName, mode, width: viewport[0], height: viewport[1], files, tabsVerified, modalVerified, ...metrics };
 }
@@ -566,13 +655,16 @@ function assertWaveStructure(metrics) {
 
 function assertWavePopulated(metrics) {
   assertWaveStructure(metrics);
-  if (!metrics.tablePresent || !metrics.tableContained) throw new Error(`${metrics.route}: registry table is not contained at ${metrics.width}x${metrics.height}`);
-  if (metrics.width <= 720) {
-    if (!metrics.tableCardMode || metrics.tableOverflowX !== "visible") throw new Error(`${metrics.route}: mobile registry is not rendered as contained cards at ${metrics.width}x${metrics.height}`);
-  } else if (!["auto", "scroll"].includes(metrics.tableOverflowX)) {
-    throw new Error(`${metrics.route}: desktop registry lacks contained horizontal scrolling at ${metrics.width}x${metrics.height}`);
+  const config = waveRoutes[metrics.route];
+  if (config.requireTable !== false) {
+    if (!metrics.tablePresent || !metrics.tableContained) throw new Error(`${metrics.route}: registry table is not contained at ${metrics.width}x${metrics.height}`);
+    if (metrics.width <= 720) {
+      if (!metrics.tableCardMode || metrics.tableOverflowX !== "visible") throw new Error(`${metrics.route}: mobile registry is not rendered as contained cards at ${metrics.width}x${metrics.height}`);
+    } else if (!["auto", "scroll"].includes(metrics.tableOverflowX)) {
+      throw new Error(`${metrics.route}: desktop registry lacks contained horizontal scrolling at ${metrics.width}x${metrics.height}`);
+    }
   }
-  if (!metrics.modalVerified) throw new Error(`${metrics.route}: create modal contract did not pass at ${metrics.width}x${metrics.height}`);
+  if (config.requireModal !== false && !metrics.modalVerified) throw new Error(`${metrics.route}: create modal contract did not pass at ${metrics.width}x${metrics.height}`);
 }
 
 function assertWaveMobileCanon(metrics, access) {

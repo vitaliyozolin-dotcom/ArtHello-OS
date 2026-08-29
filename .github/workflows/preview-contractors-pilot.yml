@@ -5,7 +5,12 @@ on:
     branches:
       - design-system/compact-card-typography
       - design-system/migration-wave-1-registry
+      - design-system/migration-wave-2-procurement-food
     paths:
+      - app/components/**
+      - scripts/**
+      - tests/**
+      - quality-gates/**
       - deploy/v52/**
       - .github/workflows/preview-contractors-pilot.yml
   workflow_dispatch:
@@ -237,6 +242,8 @@ jobs:
             echo "- Contractors: $PREVIEW_URL/#contractors"
             echo "- Legal: $PREVIEW_URL/#legal"
             echo "- Accounting: $PREVIEW_URL/#accounting"
+            echo "- Procurement: $PREVIEW_URL/#procurement"
+            echo "- Food: $PREVIEW_URL/#food"
             echo '- Data: isolated snapshot volume; production is not mounted'
             echo "- Result: ${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"

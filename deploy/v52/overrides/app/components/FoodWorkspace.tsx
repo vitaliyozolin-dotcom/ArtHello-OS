@@ -1,12 +1,219 @@
-"use client";import{useCallback,useEffect,useState}from"react";
-type Data={products:Array<{id:string;name:string;supplierId:string;unit:string;purchaseCostMinor:number;storageNorm:string;status:string}>;batches:Array<{id:string;productId:string;purchaseRequestId:string;receivedAt:string;expiresAt:string;quantity:number;remainingQuantity:number;unit:string;warehouse:string;status:string;qualityNote:string;expiryBand:string}>;recipes:Array<{id:string;dishName:string;version:number;yieldPortions:number;standardCostMinor:number;normDescription:string;menuDate:string;status:string}>;ingredients:Array<{id:string;recipeId:string;productId:string;quantityPerBatch:number;unit:string;costMinor:number}>;production:Array<{id:string;productionDate:string;recipeId:string;shiftId:string;plannedPortions:number;actualPortions:number;materialCostMinor:number;status:string;evidence:string}>;shipments:Array<{id:string;productionId:string;destinationObjectId:string;shippedPortions:number;consumedPortions:number;returnedPortions:number;writtenOffPortions:number;revenueMinor:number;status:string;documentId:string;balance:number}>;shifts:Array<{id:string;employeeEntityId:string;startedAt:string;endedAt:string;rateMinor:number;status:string;role:string}>;checks:Array<{id:string;checkType:string;objectEntityId:string;checkedAt:string;result:string;violation:string;evidence:string;status:string;relatedTaskId:number|null}>;entityNames:Record<string,string>;economics:{revenueMinor:number;materialMinor:number;laborMinor:number;profitMinor:number;marginPercent:number};summary:{products:number;batches:number;urgentBatches:number;planned:number;actual:number;consumed:number;waste:number};chain:{purchaseId:string;batchId:string;recipeId:string;productionId:string;shipmentId:string;costId:string;revenueId:string};boundary:string};
-const codes:Record<string,string>={"Собственник":"OWNER","Директор":"DIRECTOR","Представитель Виталия":"REPRESENTATIVE","Кухня":"KITCHEN","Финансы":"FINANCE","Закупки":"PROCUREMENT","Юрист":"LEGAL","HR":"HR","Продажи":"SALES","Маркетинг":"MARKETING","Педагог":"TEACHER","Методист":"METHODIST","Родитель":"PARENT"},tabs=["Сегодня","Партии и склад","ТТК и меню","Отгрузки","Экономика и проверки"]as const;type Tab=typeof tabs[number];const rub=(v:number)=>new Intl.NumberFormat("ru-RU",{style:"currency",currency:"RUB",maximumFractionDigits:0}).format(v/100);
-export function FoodWorkspace({role,notify,onTasksChanged,onOpenFinance}:{role:string;notify:(v:string)=>void;onTasksChanged:()=>void;onOpenFinance:()=>void}){const[data,setData]=useState<Data|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState(""),[tab,setTab]=useState<Tab>("Сегодня"),[busy,setBusy]=useState("");const load=useCallback(async()=>{setLoading(true);try{const r=await fetch("/api/food",{cache:"no-store",headers:{"x-arthello-role":codes[role]??""}}),p=await r.json()as Data&{error?:string};if(!r.ok)throw new Error(p.error??"Ошибка");setData(p);setError("")}catch(e){setData(null);setError(e instanceof Error?e.message:"Нет доступа")}finally{setLoading(false)}},[role]);useEffect(()=>{const id=setTimeout(()=>void load(),0);return()=>clearTimeout(id)},[load]);async function action(body:Record<string,unknown>,key:string){setBusy(key);try{const r=await fetch("/api/food-actions",{method:"POST",headers:{"content-type":"application/json","x-arthello-role":codes[role]??""},body:JSON.stringify(body)}),p=await r.json()as{error?:string;reused?:boolean};if(!r.ok)throw new Error(p.error??"Ошибка");notify(p.reused?"Действие уже существует":"Действие кухни сохранено");await load();onTasksChanged()}catch(e){notify(e instanceof Error?e.message:"Ошибка")}finally{setBusy("")}}if(loading)return <section className="food-state">Загружаем проект кухни…</section>;if(error||!data)return <section className="food-state"><strong>{error}</strong><small>Кухня доступна своей роли, финансам, руководителям и Представителю.</small></section>;
-if(!data.products.length&&!data.batches.length&&!data.recipes.length&&!data.production.length&&!data.shipments.length&&!data.shifts.length&&!data.checks.length)return <section className="page food-workspace"><div className="food-heading"><div><p className="eyebrow">Питание и производство</p><h1>Кухня</h1><p>Партии, ТТК, производство, отгрузки и экономика появятся после добавления исходных данных.</p></div></div><div className="manual-module-empty"><span>＋</span><h2>Данных пока нет</h2><p>Добавьте продукты и технологические карты или подключите подтверждённый источник.</p></div></section>;
-const recipe=data.recipes[0];return <section className="page food-workspace"><div className="food-heading"><div><p className="eyebrow">Этап 11 · отдельный P&amp;L</p><h1>Кухня</h1><p>Партии, ТТК, производство, отгрузки и прибыльность проекта PRJ-T-KITCHEN.</p></div><span>CFR-T-KITCHEN</span></div><div className="food-boundary"><strong>ТЕСТОВЫЙ КОНТУР</strong><span>{data.boundary}</span></div><div className="food-kpis"><button onClick={()=>setTab("Сегодня")}><span>Произведено</span><strong>{data.summary.actual}</strong><small>из {data.summary.planned} порций</small></button><button onClick={()=>setTab("Отгрузки")}><span>Потреблено</span><strong>{data.summary.consumed}</strong><small>{data.summary.waste} порции списано</small></button><button className="warn" onClick={()=>setTab("Партии и склад")}><span>Срочные партии</span><strong>{data.summary.urgentBatches}</strong><small>по сроку годности</small></button><button className="positive" onClick={()=>setTab("Экономика и проверки")}><span>Прибыль</span><strong>{rub(data.economics.profitMinor)}</strong><small>маржа {data.economics.marginPercent}%</small></button></div><div className="food-tabs">{tabs.map(x=><button key={x}className={tab===x?"active":""}onClick={()=>setTab(x)}>{x}</button>)}</div>
-{tab==="Сегодня"?<div className="food-layout"><article className="food-panel"><Head p="Производственные задания" h="Смена 21 августа" s="план → факт"/><div className="production-list">{data.production.map(x=><article key={x.id}><span>{x.actualPortions}</span><div><strong>{data.recipes.find(r=>r.id===x.recipeId)?.dishName}</strong><small>{x.id} · {x.shiftId} · план {x.plannedPortions}</small><p>{x.evidence}</p></div><em>{x.status}</em></article>)}</div></article><article className="food-panel"><Head p="Сотрудники и смены" h="Труд кухни" s={rub(data.economics.laborMinor)}/><div className="shift-list">{data.shifts.map(x=><article key={x.id}><div><strong>{data.entityNames[x.employeeEntityId]}</strong><small>{x.role} · {x.startedAt.slice(11,16)}–{x.endedAt.slice(11,16)}</small></div><em>{rub(x.rateMinor)}</em><span>{x.status}</span></article>)}</div></article></div>:null}
-{tab==="Партии и склад"?<div className="batch-grid">{data.batches.map(x=><article key={x.id}className={`expiry-${x.expiryBand.toLowerCase()}`}><header><span>{x.id}</span><em>{x.expiryBand}</em></header><h2>{data.products.find(p=>p.id===x.productId)?.name}</h2><dl><div><dt>Получено</dt><dd>{x.quantity} {x.unit}</dd></div><div><dt>Остаток</dt><dd>{x.remainingQuantity} {x.unit}</dd></div><div><dt>Годен до</dt><dd>{x.expiresAt}</dd></div><div><dt>Склад</dt><dd>{x.warehouse}</dd></div></dl><p>{x.qualityNote}</p><footer><span>{data.products.find(p=>p.id===x.productId)?.storageNorm}</span><button disabled={busy===x.id||x.remainingQuantity<100}onClick={()=>void action({action:"writeOffBatch",batchId:x.id,quantity:100,reason:"Тестовое документированное списание после контроля остатка"},x.id)}>Списать 100 {x.unit}</button></footer></article>)}</div>:null}
-{tab==="ТТК и меню"?<div className="food-layout"><article className="food-panel recipe-card"><Head p="Технологическая карта" h={`${recipe.dishName} · v${recipe.version}`} s={recipe.status}/><p>{recipe.normDescription}</p><div>{data.ingredients.filter(x=>x.recipeId===recipe.id).map(x=><article key={x.id}><span>{data.products.find(p=>p.id===x.productId)?.name}</span><strong>{x.quantityPerBatch} {x.unit}</strong><em>{rub(x.costMinor)}</em></article>)}</div><footer><span>Выход {recipe.yieldPortions} порций · норма {rub(recipe.standardCostMinor)}</span><button disabled={busy===recipe.id}onClick={()=>void action({action:"createRecipeVersion",recipeId:recipe.id,note:"Уточнение нормы по фактическому выходу и списанию"},recipe.id)}>+ версия</button></footer></article><article className="food-panel"><Head p="Меню" h="21 августа" s="объекты ArtHello"/><div className="menu-card"><span>Основное блюдо</span><strong>{recipe.dishName}</strong><p>Норма и себестоимость берутся из ТТК v{recipe.version}. Замена рецептуры требует новой версии и основания.</p><dl><div><dt>План</dt><dd>{data.summary.planned}</dd></div><div><dt>Факт</dt><dd>{data.summary.actual}</dd></div></dl></div></article></div>:null}
-{tab==="Отгрузки"?<article className="food-panel"><Head p="Ежедневные отгрузки" h="Потребление, возвраты и списание" s="баланс должен быть 0"/><div className="shipment-table"><table><thead><tr><th>ID</th><th>Объект</th><th>Отгружено</th><th>Потреблено</th><th>Возврат</th><th>Списание</th><th>Баланс</th><th>Документ</th><th>Выручка</th></tr></thead><tbody>{data.shipments.map(x=><tr key={x.id}><td>{x.id}</td><td>{x.destinationObjectId}</td><td>{x.shippedPortions}</td><td>{x.consumedPortions}</td><td>{x.returnedPortions}</td><td>{x.writtenOffPortions}</td><td><strong>{x.balance}</strong></td><td>{x.documentId}</td><td>{rub(x.revenueMinor)}</td></tr>)}</tbody></table></div></article>:null}
-{tab==="Экономика и проверки"?<div className="food-layout"><article className="food-panel food-economics"><Head p="Центр результата" h="Прибыльность кухни" s="PRJ-T-KITCHEN"/><div><span><small>Выручка</small><strong>{rub(data.economics.revenueMinor)}</strong></span><span><small>Продукты</small><strong>− {rub(data.economics.materialMinor)}</strong></span><span><small>Смены</small><strong>− {rub(data.economics.laborMinor)}</strong></span><span className="profit"><small>Прибыль</small><strong>{rub(data.economics.profitMinor)}</strong><em>{data.economics.marginPercent}%</em></span></div><button onClick={onOpenFinance}>Открыть операции в финансах</button></article><article className="food-panel"><Head p="Контроль" h="Нарушения и проверки" s={`${data.checks.length} записи`}/><div className="food-checks">{data.checks.map(x=><article key={x.id}><header><strong>{x.checkType}</strong><em>{x.result}</em></header><p>{x.violation||"Замечаний нет"}</p><small>{x.evidence}</small><footer>{x.relatedTaskId?<span>TSK-{x.relatedTaskId}</span>:x.status!=="Закрыта"?<button disabled={busy===x.id}onClick={()=>void action({action:"createCheckTask",checkId:x.id},x.id)}>+ Задача</button>:<span>{x.status}</span>}</footer></article>)}</div></article></div>:null}</section>}
-function Head({p,h,s}:{p:string;h:string;s:string}){return <header className="food-panel-head"><div><p>{p}</p><h2>{h}</h2></div><span>{s}</span></header>}
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import {
+  Button,
+  Card,
+  CompactListCard,
+  EmptyState,
+  KpiCard,
+  PageContainer,
+  PageHeader,
+  Tabs,
+} from "./design-system";
+import "./FoodWorkspace.ds.css";
+
+type Data = {
+  products: Array<{ id: string; name: string; supplierId: string; unit: string; purchaseCostMinor: number; storageNorm: string; status: string }>;
+  batches: Array<{ id: string; productId: string; purchaseRequestId: string; receivedAt: string; expiresAt: string; quantity: number; remainingQuantity: number; unit: string; warehouse: string; status: string; qualityNote: string; expiryBand: string }>;
+  recipes: Array<{ id: string; dishName: string; version: number; yieldPortions: number; standardCostMinor: number; normDescription: string; menuDate: string; status: string }>;
+  ingredients: Array<{ id: string; recipeId: string; productId: string; quantityPerBatch: number; unit: string; costMinor: number }>;
+  production: Array<{ id: string; productionDate: string; recipeId: string; shiftId: string; plannedPortions: number; actualPortions: number; materialCostMinor: number; status: string; evidence: string }>;
+  shipments: Array<{ id: string; productionId: string; destinationObjectId: string; shippedPortions: number; consumedPortions: number; returnedPortions: number; writtenOffPortions: number; revenueMinor: number; status: string; documentId: string; balance: number }>;
+  shifts: Array<{ id: string; employeeEntityId: string; startedAt: string; endedAt: string; rateMinor: number; status: string; role: string }>;
+  checks: Array<{ id: string; checkType: string; objectEntityId: string; checkedAt: string; result: string; violation: string; evidence: string; status: string; relatedTaskId: number | null }>;
+  entityNames: Record<string, string>;
+  economics: { revenueMinor: number; materialMinor: number; laborMinor: number; profitMinor: number; marginPercent: number };
+  summary: { products: number; batches: number; urgentBatches: number; planned: number; actual: number; consumed: number; waste: number };
+  chain: { purchaseId: string; batchId: string; recipeId: string; productionId: string; shipmentId: string; costId: string; revenueId: string };
+  boundary: string;
+};
+
+const codes: Record<string, string> = {
+  "Собственник": "OWNER",
+  "Директор": "DIRECTOR",
+  "Представитель Виталия": "REPRESENTATIVE",
+  "Кухня": "KITCHEN",
+  "Финансы": "FINANCE",
+  "Закупки": "PROCUREMENT",
+  "Юрист": "LEGAL",
+  "HR": "HR",
+  "Продажи": "SALES",
+  "Маркетинг": "MARKETING",
+  "Педагог": "TEACHER",
+  "Методист": "METHODIST",
+  "Родитель": "PARENT",
+};
+
+const tabs = ["Сегодня", "Партии и склад", "ТТК и меню", "Отгрузки", "Экономика и проверки"] as const;
+type Tab = (typeof tabs)[number];
+const tabItems = tabs.map((id) => ({ id, label: id }));
+const rub = (value: number) => new Intl.NumberFormat("ru-RU", {
+  style: "currency",
+  currency: "RUB",
+  maximumFractionDigits: 0,
+}).format(value / 100);
+
+export function FoodWorkspace({ role, notify, onTasksChanged, onOpenFinance }: {
+  role: string;
+  notify: (value: string) => void;
+  onTasksChanged: () => void;
+  onOpenFinance: () => void;
+}) {
+  const [data, setData] = useState<Data | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState<Tab>("Сегодня");
+  const [busy, setBusy] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/food", {
+        cache: "no-store",
+        headers: { "x-arthello-role": codes[role] ?? "" },
+      });
+      const payload = await response.json() as Data & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Ошибка");
+      setData(payload);
+      setError("");
+    } catch (caught) {
+      setData(null);
+      setError(caught instanceof Error ? caught.message : "Нет доступа");
+    } finally {
+      setLoading(false);
+    }
+  }, [role]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  async function action(body: Record<string, unknown>, key: string) {
+    setBusy(key);
+    try {
+      const response = await fetch("/api/food-actions", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-arthello-role": codes[role] ?? "" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json() as { error?: string; reused?: boolean };
+      if (!response.ok) throw new Error(payload.error ?? "Ошибка");
+      notify(payload.reused ? "Действие уже существует" : "Действие кухни сохранено");
+      await load();
+      onTasksChanged();
+    } catch (caught) {
+      notify(caught instanceof Error ? caught.message : "Ошибка");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  if (loading) {
+    return <PageContainer className="ahFoodPage">
+      <PageHeader eyebrow="От производства до результата" title="Кухня" description="Партии, ТТК, производство, отгрузки и экономика." />
+      <Card className="ahFoodStatus"><span role="status">Загружаем питание и производство…</span></Card>
+    </PageContainer>;
+  }
+
+  if (error || !data) {
+    return <PageContainer className="ahFoodPage">
+      <PageHeader eyebrow="От производства до результата" title="Кухня" description="Партии, ТТК, производство, отгрузки и экономика." />
+      <Card className="ahFoodStateCard"><EmptyState density="compact" title={error || "Раздел кухни недоступен"} description="Кухня доступна своей роли, финансам, руководителям и Представителю." action={<Button variant="primary" onClick={() => void load()}>Повторить</Button>} /></Card>
+    </PageContainer>;
+  }
+
+  const recipe = data.recipes[0] ?? {
+    id: "",
+    dishName: "ТТК не создана",
+    version: 0,
+    yieldPortions: 0,
+    standardCostMinor: 0,
+    normDescription: "Добавьте технологическую карту",
+    menuDate: "",
+    status: "Нет данных",
+  };
+  const hasFoodData = Boolean(data.products.length || data.batches.length || data.recipes.length || data.production.length || data.shipments.length || data.shifts.length || data.checks.length);
+
+  return <PageContainer className="ahFoodPage">
+    <PageHeader
+      eyebrow="От производства до результата"
+      title="Кухня"
+      description="Партии, ТТК, производство, отгрузки и прибыльность отдельного проекта кухни."
+      actions={<Button variant="secondary" onClick={onOpenFinance}>Открыть финансы</Button>}
+    />
+
+    <Card className="ahFoodBoundary">
+      <strong>{hasFoodData ? "Рабочий контур" : "Рабочая структура"}</strong>
+      <span>{hasFoodData ? data.boundary : "Система не создаёт рецепты, остатки, производство или выручку без фактических исходных данных."}</span>
+    </Card>
+
+    <section className="ahFoodKpis" aria-label="Показатели питания и производства">
+      <KpiCard label="Произведено" value={data.summary.actual} note={`из ${data.summary.planned} порций`} onClick={() => setTab("Сегодня")} />
+      <KpiCard label="Потреблено" value={data.summary.consumed} note={`${data.summary.waste} порций списано`} onClick={() => setTab("Отгрузки")} />
+      <KpiCard className="ahFoodKpiWarning" label="Срочные партии" value={data.summary.urgentBatches} note="по сроку годности" onClick={() => setTab("Партии и склад")} />
+      <KpiCard className="ahFoodKpiPositive" label="Прибыль" value={rub(data.economics.profitMinor)} note={`маржа ${data.economics.marginPercent}%`} onClick={() => setTab("Экономика и проверки")} />
+    </section>
+
+    <div className="ahFoodTabs"><Tabs items={tabItems} value={tab} onChange={setTab} ariaLabel="Разделы питания и производства" /></div>
+
+    {tab === "Сегодня" ? <div className="ahFoodLayout">
+      <Card className="ahFoodPanel">
+        <PanelHead eyebrow="Производственные задания" title={data.production[0]?.productionDate ? `Смена ${data.production[0].productionDate}` : "Текущая смена"} meta="план → факт" />
+        {data.production.length ? <div className="ahFoodProductionList">{data.production.map((item) => <article key={item.id} data-ah-compact-card="true"><span>{item.actualPortions}</span><div><strong>{data.recipes.find((entry) => entry.id === item.recipeId)?.dishName ?? item.recipeId}</strong><small>{item.id} · {item.shiftId} · план {item.plannedPortions}</small><p>{item.evidence}</p></div><em>{item.status}</em></article>)}</div> : <EmptyState density="compact" title="Производственных заданий пока нет" description="Смена формируется из действующей ТТК и фактического плана порций." />}
+      </Card>
+      <Card className="ahFoodPanel">
+        <PanelHead eyebrow="Сотрудники и смены" title="Труд кухни" meta={rub(data.economics.laborMinor)} />
+        {data.shifts.length ? <div className="ahFoodShiftList">{data.shifts.map((shift) => <CompactListCard key={shift.id} index={shift.id} title={data.entityNames[shift.employeeEntityId] ?? shift.employeeEntityId} description={`${shift.role} · ${shift.startedAt.slice(11, 16)}–${shift.endedAt.slice(11, 16)} · ${rub(shift.rateMinor)} · ${shift.status}`} />)}</div> : <EmptyState density="compact" title="Смен пока нет" description="Труд и стоимость смен появятся после назначения реальных сотрудников." />}
+      </Card>
+    </div> : null}
+
+    {tab === "Партии и склад" ? data.batches.length ? <div className="ahFoodBatchGrid">{data.batches.map((batch) => <Card key={batch.id} className={`ahFoodBatch ahFoodExpiry${expiryClass(batch.expiryBand)}`}>
+      <header><span>{batch.id}</span><em>{batch.expiryBand}</em></header><h2>{data.products.find((product) => product.id === batch.productId)?.name ?? batch.productId}</h2>
+      <dl><div><dt>Получено</dt><dd>{batch.quantity} {batch.unit}</dd></div><div><dt>Остаток</dt><dd>{batch.remainingQuantity} {batch.unit}</dd></div><div><dt>Годен до</dt><dd>{batch.expiresAt}</dd></div><div><dt>Склад</dt><dd>{batch.warehouse}</dd></div></dl>
+      <p>{batch.qualityNote}</p><footer><span>{data.products.find((product) => product.id === batch.productId)?.storageNorm}</span><Button className="ahFoodInlineButton" variant="secondary" disabled={busy === batch.id || batch.remainingQuantity < 100} onClick={() => void action({ action: "writeOffBatch", batchId: batch.id, quantity: 100, reason: "Списание подтверждено ответственным после проверки фактического остатка" }, batch.id)}>Списать 100 {batch.unit}</Button></footer>
+    </Card>)}</div> : <Card className="ahFoodStateCard"><EmptyState density="compact" title="Партии и склад пока пусты" description="Здесь будут остаток, срок годности, место хранения, качество и документированное списание." /></Card> : null}
+
+    {tab === "ТТК и меню" ? <div className="ahFoodLayout">
+      <Card className="ahFoodPanel ahFoodRecipe">
+        <PanelHead eyebrow="Технологическая карта" title={`${recipe.dishName} · v${recipe.version}`} meta={recipe.status} />
+        <p>{recipe.normDescription}</p>
+        {recipe.id ? <div className="ahFoodIngredientList">{data.ingredients.filter((item) => item.recipeId === recipe.id).map((item) => <article key={item.id} data-ah-compact-card="true"><span>{data.products.find((product) => product.id === item.productId)?.name ?? item.productId}</span><strong>{item.quantityPerBatch} {item.unit}</strong><em>{rub(item.costMinor)}</em></article>)}</div> : <EmptyState density="compact" title="Технологических карт пока нет" description="Версии рецептуры, нормы, выход и себестоимость появятся после добавления ТТК." />}
+        <footer><span>Выход {recipe.yieldPortions} порций · норма {rub(recipe.standardCostMinor)}</span><Button className="ahFoodInlineButton" variant="secondary" disabled={!recipe.id || busy === recipe.id} onClick={() => void action({ action: "createRecipeVersion", recipeId: recipe.id, note: "Уточнение нормы по фактическому выходу и списанию" }, recipe.id)}>+ версия</Button></footer>
+      </Card>
+      <Card className="ahFoodPanel">
+        <PanelHead eyebrow="Меню" title={recipe.menuDate || "Текущий день"} meta="объекты ArtHello" />
+        {recipe.id ? <div className="ahFoodMenuCard"><span>Основное блюдо</span><strong>{recipe.dishName}</strong><p>Норма и себестоимость берутся из ТТК v{recipe.version}. Замена рецептуры требует новой версии и основания.</p><dl><div><dt>План</dt><dd>{data.summary.planned}</dd></div><div><dt>Факт</dt><dd>{data.summary.actual}</dd></div></dl></div> : <EmptyState density="compact" title="Меню пока не сформировано" description="План и факт порций формируются только после утверждённой ТТК." />}
+      </Card>
+    </div> : null}
+
+    {tab === "Отгрузки" ? <Card className="ahFoodPanel">
+      <PanelHead eyebrow="Ежедневные отгрузки" title="Потребление, возвраты и списание" meta="баланс должен быть 0" />
+      {data.shipments.length ? <div className="ahFoodShipmentTable"><table><thead><tr><th>ID</th><th>Объект</th><th>Отгружено</th><th>Потреблено</th><th>Возврат</th><th>Списание</th><th>Баланс</th><th>Документ</th><th>Выручка</th></tr></thead><tbody>{data.shipments.map((shipment) => <tr key={shipment.id} data-ah-compact-card="true"><td data-label="ID">{shipment.id}</td><td data-label="Объект">{shipment.destinationObjectId}</td><td data-label="Отгружено">{shipment.shippedPortions}</td><td data-label="Потреблено">{shipment.consumedPortions}</td><td data-label="Возврат">{shipment.returnedPortions}</td><td data-label="Списание">{shipment.writtenOffPortions}</td><td data-label="Баланс"><strong>{shipment.balance}</strong></td><td data-label="Документ">{shipment.documentId}</td><td data-label="Выручка">{rub(shipment.revenueMinor)}</td></tr>)}</tbody></table></div> : <EmptyState density="compact" title="Отгрузок пока нет" description="Отгружено = потреблено + возврат + списание. Несходящийся баланс не закрывается." />}
+    </Card> : null}
+
+    {tab === "Экономика и проверки" ? <div className="ahFoodLayout">
+      <Card className="ahFoodPanel ahFoodEconomics">
+        <PanelHead eyebrow="Центр результата" title="Прибыльность кухни" meta="отдельный проект" />
+        <div><span><small>Выручка</small><strong>{rub(data.economics.revenueMinor)}</strong></span><span><small>Продукты</small><strong>− {rub(data.economics.materialMinor)}</strong></span><span><small>Смены</small><strong>− {rub(data.economics.laborMinor)}</strong></span><span className="ahFoodProfit"><small>Прибыль</small><strong>{rub(data.economics.profitMinor)}</strong><em>{data.economics.marginPercent}%</em></span></div>
+        <Button variant="secondary" onClick={onOpenFinance}>Открыть операции в финансах</Button>
+      </Card>
+      <Card className="ahFoodPanel">
+        <PanelHead eyebrow="Контроль" title="Нарушения и проверки" meta={`${data.checks.length} записей`} />
+        {data.checks.length ? <div className="ahFoodChecks">{data.checks.map((check) => <article key={check.id} data-ah-compact-card="true"><header><strong>{check.checkType}</strong><em>{check.result}</em></header><p>{check.violation || "Замечаний нет"}</p><small>{check.evidence}</small><footer>{check.relatedTaskId ? <span>TSK-{check.relatedTaskId}</span> : check.status !== "Закрыта" ? <Button className="ahFoodInlineButton" variant="secondary" disabled={busy === check.id} onClick={() => void action({ action: "createCheckTask", checkId: check.id }, check.id)}>+ Задача</Button> : <span>{check.status}</span>}</footer></article>)}</div> : <EmptyState density="compact" title="Проверок пока нет" description="Нарушения, доказательства, задачи и закрытие результата появятся после первой проверки." />}
+      </Card>
+    </div> : null}
+  </PageContainer>;
+}
+
+function PanelHead({ eyebrow, title, meta }: { eyebrow: string; title: string; meta: string }) {
+  return <header className="ahFoodPanelHead"><div><p>{eyebrow}</p><h2>{title}</h2></div><span>{meta}</span></header>;
+}
+
+function expiryClass(value: string) {
+  const normalized = value.toLocaleLowerCase("ru");
+  if (normalized.includes("крит") || normalized.includes("проср")) return "Danger";
+  if (normalized.includes("сроч") || normalized.includes("скоро")) return "Warning";
+  return "Normal";
+}

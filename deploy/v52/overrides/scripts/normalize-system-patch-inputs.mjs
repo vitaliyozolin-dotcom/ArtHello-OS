@@ -10,24 +10,6 @@ function replaceExactlyOnce(source, search, replacement, label) {
   return `${source.slice(0, first)}${replacement}${source.slice(first + search.length)}`;
 }
 
-const operationalPath = fileURLToPath(new URL("./patch-system-operational-modules.mjs", import.meta.url));
-let operational = readFileSync(operationalPath, "utf8");
-const strictFoodWording = 'source = replaceText(source, "по тестовым складам", "по рабочим складам", "food stock wording");';
-if (!operational.includes(strictFoodWording)) {
-  throw new Error("Patch input normalization failed for optional food wording rule");
-}
-operational = operational.replace(
-  strictFoodWording,
-  'source = source.replace("по тестовым складам", "по рабочим складам");',
-);
-
-const impureRequestDate = ' defaultValue={new Date(Date.now()+21*86400000).toISOString().slice(0,10)}';
-if (!operational.includes(impureRequestDate)) {
-  throw new Error("Patch input normalization failed for procurement request date");
-}
-operational = operational.replace(impureRequestDate, "");
-writeFileSync(operationalPath, operational, "utf8");
-
 const analyticsPath = fileURLToPath(new URL("./patch-system-analytics-readiness.mjs", import.meta.url));
 let analytics = readFileSync(analyticsPath, "utf8");
 analytics = replaceExactlyOnce(

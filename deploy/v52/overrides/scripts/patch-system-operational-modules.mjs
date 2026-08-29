@@ -31,85 +31,6 @@ function patch(relativePath, transform) {
   writeFileSync(path, after, "utf8");
 }
 
-patch("app/components/ProcurementWorkspace.tsx", (input) => {
-  let source = input;
-  source = replaceText(
-    source,
-    '"use client";import{useCallback,useEffect,useState}from"react";',
-    '"use client";import{FormEvent,useCallback,useEffect,useState}from"react";import{createPortal}from"react-dom";',
-    "procurement form and portal imports",
-  );
-  source = replaceText(
-    source,
-    '[busy,setBusy]=useState("");',
-    '[busy,setBusy]=useState(""),[requestOpen,setRequestOpen]=useState(false),[approvalRequestId,setApprovalRequestId]=useState("");',
-    "procurement dialog state",
-  );
-  source = replaceRegex(
-    source,
-    /async function action\(body:Record<string,unknown>,key:string\)\{[\s\S]*?\}if\(loading\)/,
-    `async function action(body:Record<string,unknown>,key:string){setBusy(key);try{const r=await fetch("/api/procurement-actions",{method:"POST",headers:{"content-type":"application/json","x-arthello-role":codes[role]??""},body:JSON.stringify(body)}),p=await r.json()as{error?:string;reused?:boolean};if(!r.ok)throw new Error(p.error??"Ошибка");notify(p.reused?"Действие уже выполнено":"Операция закупки сохранена");await load();onTasksChanged();return true}catch(e){notify(e instanceof Error?e.message:"Ошибка");return false}finally{setBusy("")}}if(loading)`,
-    "procurement action result",
-  );
-  source = replaceRegex(
-    source,
-    /if\(!data\.suppliers\.length&&!data\.requests\.length&&!data\.offers\.length&&!data\.orders\.length&&!data\.deliveries\.length&&!data\.items\.length&&!data\.assets\.length&&!data\.maintenance\.length\)return <section className="page proc-workspace">[\s\S]*?<\/section>;/,
-    `if(!data.suppliers.length&&!data.requests.length&&!data.offers.length&&!data.orders.length&&!data.deliveries.length&&!data.items.length&&!data.assets.length&&!data.maintenance.length)return <><section className="page proc-workspace operational-empty-workspace"><div className="proc-heading"><div><p className="eyebrow">Закупки и имущество</p><h1>Закупки и имущество</h1><p>Заявки, поставщики, склад, имущество и сквозная цепочка доступны до первой операции.</p></div><div className="operational-heading-actions"><button disabled={!Object.keys(data.entityNames).length} onClick={()=>setRequestOpen(true)}>+ Новая заявка</button></div></div><div className="proc-boundary"><strong>РАБОЧАЯ СТРУКТУРА</strong><span>Пустой контур не скрывает процессы и не создаёт тестовую закупку. Для заявки нужен реальный сотрудник из единого справочника.</span></div><div className="proc-kpis"><button onClick={()=>setTab("Закупка")}><span>Заявки</span><strong>0</strong><small>нет потребностей</small></button><button onClick={()=>setTab("Поставщики")}><span>Поставщики</span><strong>0</strong><small>реестр пуст</small></button><button onClick={()=>setTab("Склад")}><span>Остатки</span><strong>0</strong><small>склад не заполнен</small></button><button onClick={()=>setTab("Имущество")}><span>Обслуживание</span><strong>0</strong><small>нет карточек имущества</small></button></div><div className="proc-tabs">{tabs.map(x=><button key={x} className={tab===x?"active":""} onClick={()=>setTab(x)}>{x}</button>)}</div>{tab==="Закупка"?<div className="operational-empty-grid"><button className="operational-empty-card" disabled={!Object.keys(data.entityNames).length} onClick={()=>setRequestOpen(true)}><span>01</span><strong>Создать заявку</strong><p>Укажите предмет, подразделение, количество, бюджет, срок и обоснование.</p></button><article className="operational-empty-card"><span>02</span><strong>Согласование</strong><p>Руководитель подтверждает заявку и фиксирует себя как согласующего.</p></article><article className="operational-empty-card"><span>03</span><strong>Предложения</strong><p>Сравнение поставщиков появится после добавления рабочих предложений и договоров.</p></article></div>:null}{tab==="Поставщики"?<div className="operational-inline-empty"><span>0</span><strong>Поставщиков пока нет</strong><p>Карточки поставщиков должны быть связаны с реальными контрагентами и договорами.</p></div>:null}{tab==="Склад"?<div className="operational-inline-empty"><span>0</span><strong>Склад не заполнен</strong><p>Приёмка, выдача, перемещение, списание и инвентаризация появятся после первой номенклатуры.</p></div>:null}{tab==="Имущество"?<div className="operational-inline-empty"><span>0</span><strong>Карточек имущества пока нет</strong><p>Серийные номера, объект, ответственный, гарантия и обслуживание будут храниться в одной карточке.</p></div>:null}{tab==="Сквозная цепочка"?<div className="operational-inline-empty"><span>→</span><strong>Цепочка ещё не собрана</strong><p>Заявка → согласование → предложение → заказ → поставка → склад → имущество → документ → оплата.</p></div>:null}</section>{requestOpen?<PurchaseRequestModal entities={Object.entries(data.entityNames)} busy={busy==="new-request"} close={()=>setRequestOpen(false)} save={async body=>{const ok=await action({action:"createRequest",...body},"new-request");if(ok){setRequestOpen(false);setTab("Закупка")}}}/>:null}</>;`,
-    "procurement complete empty shell",
-  );
-  source = replaceText(
-    source,
-    '<div className="proc-heading"><div><p className="eyebrow">Этап 10 · от потребности до ОПиУ</p><h1>Закупки и имущество</h1><p>Заявки, поставщики, поставка, склад и жизненный цикл оборудования в одном контуре.</p></div><button onClick={()=>void action({action:"createRequest",itemName:"Тестовый комплект для класса",unit:"Школа 1–11",quantity:1,budgetMinor:2500000,justification:"Проверка полного маршрута новой заявки"},"new")}>+ Новая заявка</button></div>',
-    '<div className="proc-heading"><div><p className="eyebrow">От потребности до результата</p><h1>Закупки и имущество</h1><p>Заявки, поставщики, поставка, склад и жизненный цикл оборудования в одном контуре.</p></div><button onClick={()=>setRequestOpen(true)}>+ Новая заявка</button></div>',
-    "procurement working create action",
-  );
-  source = replaceText(
-    source,
-    '<div className="proc-boundary"><strong>ТЕСТОВЫЙ РЫНОК</strong><span>{data.boundary}</span></div>',
-    '<div className="proc-boundary"><strong>РАБОЧИЙ КОНТУР</strong><span>{data.boundary}</span></div>',
-    "procurement production boundary",
-  );
-  source = replaceText(source, "единиц по тестовым складам", "единиц по рабочим складам", "procurement stock wording");
-  source = replaceText(
-    source,
-    '<button disabled={busy===x.id}onClick={()=>void action({action:"approveRequest",requestId:x.id},x.id)}>Согласовать</button>',
-    '<button disabled={busy===x.id}onClick={()=>setApprovalRequestId(x.id)}>Согласовать</button>',
-    "procurement approval modal",
-  );
-  source = replaceText(
-    source,
-    '</section>}\nfunction Head',
-    '{requestOpen?<PurchaseRequestModal entities={Object.entries(data.entityNames)} busy={busy==="new-request"} close={()=>setRequestOpen(false)} save={async body=>{const ok=await action({action:"createRequest",...body},"new-request");if(ok){setRequestOpen(false);setTab("Закупка")}}}/>:null}{approvalRequestId?<PurchaseApprovalModal requestId={approvalRequestId} entities={Object.entries(data.entityNames)} busy={busy===approvalRequestId} close={()=>setApprovalRequestId("")} save={async approverEntityId=>{const ok=await action({action:"approveRequest",requestId:approvalRequestId,approverEntityId},approvalRequestId);if(ok)setApprovalRequestId("")}}/>:null}</section>}\nfunction PurchaseRequestModal({entities,busy,close,save}:{entities:Array<[string,string]>;busy:boolean;close:()=>void;save:(body:Record<string,unknown>)=>Promise<void>}){function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();const form=new FormData(event.currentTarget);void save({requesterEntityId:String(form.get("requesterEntityId")??""),itemName:String(form.get("itemName")??""),unit:String(form.get("unit")??""),quantity:Number(form.get("quantity")??0),budgetMinor:Math.round(Number(form.get("budgetRubles")??0)*100),needBy:String(form.get("needBy")??""),justification:String(form.get("justification")??"")})}return createPortal(<div className="modal-layer procurement-modal-layer"><button className="drawer-scrim" type="button" onClick={close} aria-label="Закрыть форму"/><form className="task-modal procurement-modal" onSubmit={submit}><div className="drawer-head"><div><p>Закупки и имущество</p><h2>Новая заявка</h2></div><button type="button" onClick={close}>×</button></div><div className="procurement-form-grid"><label><span>Заявитель *</span><select name="requesterEntityId" required defaultValue=""><option value="">Выберите сотрудника</option>{entities.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label><label><span>Подразделение *</span><input name="unit" required minLength={2} placeholder="Например, Атлас — школа"/></label><label className="wide"><span>Что требуется *</span><input name="itemName" required minLength={4} placeholder="Наименование товара, оборудования или услуги"/></label><label><span>Количество *</span><input name="quantity" type="number" min="1" step="1" required defaultValue="1"/></label><label><span>Бюджет, ₽ *</span><input name="budgetRubles" type="number" min="0.01" step="0.01" required/></label><label><span>Нужно до *</span><input name="needBy" type="date" required defaultValue={new Date(Date.now()+21*86400000).toISOString().slice(0,10)}/></label><label className="wide"><span>Обоснование *</span><textarea name="justification" required minLength={8} placeholder="Зачем нужна закупка и какой результат ожидается"/></label></div><div className="modal-actions"><button type="button" onClick={close}>Отмена</button><button disabled={busy||!entities.length}>{busy?"Сохраняем…":"Создать заявку"}</button></div></form></div>,document.body)}\nfunction PurchaseApprovalModal({requestId,entities,busy,close,save}:{requestId:string;entities:Array<[string,string]>;busy:boolean;close:()=>void;save:(approverEntityId:string)=>Promise<void>}){const[value,setValue]=useState("");return createPortal(<div className="modal-layer procurement-modal-layer"><button className="drawer-scrim" type="button" onClick={close} aria-label="Закрыть согласование"/><form className="task-modal procurement-modal compact" onSubmit={event=>{event.preventDefault();void save(value)}}><div className="drawer-head"><div><p>{requestId}</p><h2>Согласовать заявку</h2></div><button type="button" onClick={close}>×</button></div><label><span>Согласующий *</span><select value={value} onChange={event=>setValue(event.target.value)} required><option value="">Выберите руководителя</option>{entities.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label><p className="modal-explanation">Согласование фиксируется в истории с выбранным сотрудником и текущим пользователем.</p><div className="modal-actions"><button type="button" onClick={close}>Отмена</button><button disabled={busy||!value}>{busy?"Сохраняем…":"Подтвердить согласование"}</button></div></form></div>,document.body)}\nfunction Head',
-    "procurement modals",
-  );
-  return source;
-});
-
-patch("app/components/FoodWorkspace.tsx", (input) => {
-  let source = input;
-  source = replaceRegex(
-    source,
-    /if\(!data\.products\.length&&!data\.batches\.length&&!data\.recipes\.length&&!data\.production\.length&&!data\.shipments\.length&&!data\.shifts\.length&&!data\.checks\.length\)return <section className="page food-workspace">[\s\S]*?<\/section>;/,
-    `if(!data.products.length&&!data.batches.length&&!data.recipes.length&&!data.production.length&&!data.shipments.length&&!data.shifts.length&&!data.checks.length)return <section className="page food-workspace operational-empty-workspace"><div className="food-heading"><div><p className="eyebrow">Питание и производство</p><h1>Кухня</h1><p>Партии, ТТК, производство, отгрузки и экономика остаются доступными до первой записи.</p></div><span>Отдельный центр результата</span></div><div className="food-boundary"><strong>РАБОЧАЯ СТРУКТУРА</strong><span>Система не создаёт рецепты, остатки, производство или выручку без фактических исходных данных.</span></div><div className="food-kpis"><button onClick={()=>setTab("Сегодня")}><span>Произведено</span><strong>0</strong><small>нет смен</small></button><button onClick={()=>setTab("Отгрузки")}><span>Потреблено</span><strong>0</strong><small>нет отгрузок</small></button><button onClick={()=>setTab("Партии и склад")}><span>Срочные партии</span><strong>0</strong><small>склад пуст</small></button><button onClick={()=>setTab("Экономика и проверки")}><span>Прибыль</span><strong>{rub(0)}</strong><small>нет операций</small></button></div><div className="food-tabs">{tabs.map(x=><button key={x} className={tab===x?"active":""} onClick={()=>setTab(x)}>{x}</button>)}</div>{tab==="Сегодня"?<div className="operational-empty-grid"><article className="operational-empty-card"><span>01</span><strong>Производственные задания</strong><p>Смена формируется из действующей ТТК и фактического плана порций.</p></article><article className="operational-empty-card"><span>02</span><strong>Сотрудники и смены</strong><p>Труд и стоимость смен появятся после назначения реальных сотрудников.</p></article></div>:null}{tab==="Партии и склад"?<div className="operational-inline-empty"><span>0</span><strong>Партии и склад пока пусты</strong><p>Здесь будут остаток, срок годности, место хранения, качество и документированное списание.</p></div>:null}{tab==="ТТК и меню"?<div className="operational-empty-grid"><article className="operational-empty-card"><span>ТТК</span><strong>Технологические карты</strong><p>Версии рецептуры, нормы, выход и себестоимость.</p></article><article className="operational-empty-card"><span>МЕНЮ</span><strong>Меню по объектам</strong><p>План и факт порций формируются только после утверждённой ТТК.</p></article></div>:null}{tab==="Отгрузки"?<div className="operational-inline-empty"><span>0</span><strong>Отгрузок пока нет</strong><p>Отгружено = потреблено + возврат + списание. Несходящийся баланс не закрывается.</p></div>:null}{tab==="Экономика и проверки"?<div className="operational-empty-grid"><article className="operational-empty-card"><span>₽</span><strong>Экономика кухни</strong><p>Выручка, продукты, смены, прибыль и маржа.</p></article><article className="operational-empty-card"><span>✓</span><strong>Проверки</strong><p>Нарушения, доказательства, задачи и закрытие результата.</p></article></div>:null}</section>;`,
-    "food complete empty shell",
-  );
-  source = replaceText(source, 'const recipe=data.recipes[0];', 'const recipe=data.recipes[0]??{id:"",dishName:"ТТК не создана",version:0,yieldPortions:0,standardCostMinor:0,normDescription:"Добавьте технологическую карту",menuDate:"",status:"Нет данных"};', "food partial-data safety");
-  source = replaceText(
-    source,
-    '<div className="food-heading"><div><p className="eyebrow">Этап 11 · отдельный P&amp;L</p><h1>Кухня</h1><p>Партии, ТТК, производство, отгрузки и прибыльность проекта PRJ-T-KITCHEN.</p></div><span>CFR-T-KITCHEN</span></div>',
-    '<div className="food-heading"><div><p className="eyebrow">От производства до результата</p><h1>Кухня</h1><p>Партии, ТТК, производство, отгрузки и прибыльность отдельного проекта кухни.</p></div><span>Отдельный центр результата</span></div>',
-    "food production heading",
-  );
-  source = replaceText(source, '<div className="food-boundary"><strong>ТЕСТОВЫЙ КОНТУР</strong><span>{data.boundary}</span></div>', '<div className="food-boundary"><strong>РАБОЧИЙ КОНТУР</strong><span>{data.boundary}</span></div>', "food production boundary");
-  source = replaceText(source, "по тестовым складам", "по рабочим складам", "food stock wording");
-  source = replaceText(source, 'reason:"Тестовое документированное списание после контроля остатка"', 'reason:"Списание подтверждено ответственным после проверки фактического остатка"', "food writeoff evidence");
-  source = replaceText(source, '<Head p="Производственные задания" h="Смена 21 августа" s="план → факт"/>', '<Head p="Производственные задания" h={data.production[0]?.productionDate?`Смена ${data.production[0].productionDate}`:"Текущая смена"} s="план → факт"/>', "food shift date");
-  source = replaceText(source, '<Head p="Меню" h="21 августа" s="объекты ArtHello"/>', '<Head p="Меню" h={recipe.menuDate||"Текущий день"} s="объекты ArtHello"/>', "food menu date");
-  source = replaceText(source, '<Head p="Центр результата" h="Прибыльность кухни" s="PRJ-T-KITCHEN"/>', '<Head p="Центр результата" h="Прибыльность кухни" s="отдельный проект"/>', "food result label");
-  source = replaceText(source, '<button disabled={busy===recipe.id}onClick={()=>void action({action:"createRecipeVersion",recipeId:recipe.id,note:"Уточнение нормы по фактическому выходу и списанию"},recipe.id)}>+ версия</button>', '<button disabled={!recipe.id||busy===recipe.id}onClick={()=>void action({action:"createRecipeVersion",recipeId:recipe.id,note:"Уточнение нормы по фактическому выходу и списанию"},recipe.id)}>+ версия</button>', "food empty recipe guard");
-  return source;
-});
-
 patch("app/components/SafetyWorkspace.tsx", (input) => {
   let source = input;
   source = replaceText(
@@ -198,4 +119,6 @@ patch("app/components/StrategyWorkspace.tsx", (input) => {
 });
 
 console.log("System-wide operational modules patch applied");
+
+
 
