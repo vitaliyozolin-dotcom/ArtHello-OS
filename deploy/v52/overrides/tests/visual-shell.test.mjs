@@ -94,7 +94,8 @@ test("family search has one search affordance without detached inline help", () 
   assert.doesNotMatch(mobilePatch, /content:"⌕"/);
   assert.match(mobilePatch, /input\[placeholder\*="Найти семью"\][^\n]*padding-right:16px!important/);
   assert.match(mobilePatch, /::before\{content:none!important;display:none!important\}/);
-  assert.match(mobilePatch, /:has\(input\[placeholder\*="Найти семью"\]\)>button\[data-ah-help-inline=true\]\.ah-field-icon\{display:none!important\}/);
+  assert.match(mobilePatch, /label:has\(>input\[placeholder\*="Найти семью"\]\)>span:first-child\{[^\n]*font-size:0!important/);
+  assert.match(mobilePatch, /span:first-child>button\[data-ah-help-inline=true\]\.ah-field-icon\{display:none!important\}/);
 });
 
 test("required personal dashboards have independent role profiles", () => {
