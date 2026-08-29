@@ -1,0 +1,879 @@
+.ahReadinessPage,
+.ahReadinessDenied {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.ahReadinessPage .ahPageHeader,
+.ahReadinessDenied .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahReadinessPage .ahPageHeaderCopy > small,
+.ahReadinessDenied .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahReadinessPage .ahPageHeaderCopy h1,
+.ahReadinessDenied .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahReadinessPage .ahPageHeaderCopy p,
+.ahReadinessDenied .ahPageHeaderCopy p {
+  max-width: 790px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahReadinessPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahReadinessStatus {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  color: var(--ah-color-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahReadinessDenied {
+  align-content: start;
+}
+
+.ahReadinessDenied > .ahCard {
+  min-height: 180px;
+}
+
+.ahReadinessBoundary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 16px;
+  background: var(--ah-color-surface);
+  padding: 12px 14px;
+}
+
+.ahReadinessBoundary strong {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--ah-color-warning-soft);
+  padding: 5px 10px;
+  color: #8a4f17;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: .045em;
+}
+
+.ahReadinessBoundary span {
+  min-width: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.ahReadinessKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahReadinessKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+}
+
+.ahReadinessKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahReadinessKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahReadinessKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahReadinessKpiBlocked {
+  border-color: #efc9c3;
+  background: #fff7f6;
+}
+
+.ahReadinessTabs {
+  min-width: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--ah-color-border);
+}
+
+.ahReadinessTabs .ahTabs {
+  width: 100%;
+  max-width: 100%;
+  gap: 18px;
+  overflow-x: auto;
+}
+
+.ahReadinessTabs .ahTabs button {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding-inline: 0;
+  font-size: 13px;
+}
+
+.ahReadinessPanel,
+.ahReadinessScenarioList,
+.ahReadinessScenarioDetail,
+.ahReadinessRoute,
+.ahReadinessGate,
+.ahReadinessRollback,
+.ahReadinessDecisionForm,
+.ahReadinessDecisionHistory {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.ahReadinessPanel > .ahEmptyState,
+.ahReadinessDecisionHistory > .ahEmptyState,
+.ahReadinessDenied .ahEmptyState {
+  gap: 12px;
+  min-height: 126px;
+  padding: 24px 18px;
+}
+
+.ahReadinessPanel > .ahEmptyState h3,
+.ahReadinessDecisionHistory > .ahEmptyState h3,
+.ahReadinessDenied .ahEmptyState h3 {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: var(--ah-compact-card-title-weight);
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahReadinessPanel > .ahEmptyState p,
+.ahReadinessDecisionHistory > .ahEmptyState p,
+.ahReadinessDenied .ahEmptyState p {
+  font-size: var(--ah-compact-card-body-size);
+  font-weight: var(--ah-compact-card-body-weight);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahReadinessPanelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ahReadinessPanelHead > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ahReadinessPanelHead p,
+.ahReadinessRoute > p,
+.ahReadinessRollback > p,
+.ahReadinessDecisionForm > p {
+  margin: 0;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 14px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.ahReadinessPanelHead h2,
+.ahReadinessRoute > h2,
+.ahReadinessRollback > h2,
+.ahReadinessDecisionForm > h2 {
+  margin: 0;
+  color: var(--ah-color-text-primary);
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.ahReadinessPanelHead > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 5px 9px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahReadinessVisualLayout,
+.ahReadinessScenarioLayout,
+.ahReadinessRecoveryLayout,
+.ahReadinessDecisionLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr);
+  gap: 16px;
+  min-width: 0;
+}
+
+.ahReadinessVisualGates,
+.ahReadinessMatrix,
+.ahReadinessDecisionHistory > div {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ahReadinessVisualGates .ahCompactListCard,
+.ahReadinessMatrix .ahCompactListCard,
+.ahReadinessDecisionHistory .ahCompactListCard {
+  min-width: 0;
+  border-radius: 13px;
+  padding: 11px;
+}
+
+.ahReadinessVisualGates .ahCompactListCard > div,
+.ahReadinessMatrix .ahCompactListCard > div,
+.ahReadinessDecisionHistory .ahCompactListCard > div {
+  min-width: 0;
+}
+
+.ahReadinessRoute {
+  align-content: start;
+  background: var(--ah-color-surface-soft);
+}
+
+.ahReadinessRoute ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 22px;
+  color: var(--ah-color-text-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ahReadinessRoute > div {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 13px;
+  background: var(--ah-color-surface);
+  padding: 11px;
+}
+
+.ahReadinessRoute > div strong {
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahReadinessRoute > div span {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.ahReadinessScenarioLayout {
+  grid-template-columns: minmax(280px, .72fr) minmax(0, 1.28fr);
+}
+
+.ahReadinessScenarioList {
+  align-content: start;
+}
+
+.ahReadinessScenarioList > div {
+  display: grid;
+  gap: 8px;
+}
+
+.ahReadinessScenarioList button {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 13px;
+  background: var(--ah-color-surface);
+  padding: 11px;
+  color: var(--ah-color-text-primary);
+  text-align: left;
+}
+
+.ahReadinessScenarioList button[aria-pressed="true"] {
+  border-color: var(--ah-color-primary);
+  background: var(--ah-color-primary-soft);
+}
+
+.ahReadinessScenarioList button > b {
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahReadinessScenarioList button > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ahReadinessScenarioList button strong,
+.ahReadinessScenarioList button small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ahReadinessScenarioList button strong {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.ahReadinessScenarioList button small {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahReadinessScenarioList button em,
+.ahReadinessScenarioDetail > header > span,
+.ahReadinessStepRail article > span,
+.ahReadinessGate header em,
+.ahReadinessDrillList header span {
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 9px;
+  font-style: normal;
+  line-height: 13px;
+  white-space: nowrap;
+}
+
+.ahReadinessStatusPassed {
+  background: var(--ah-color-primary-soft);
+  color: var(--ah-color-primary);
+}
+
+.ahReadinessStatusBlocked {
+  background: #fdecea;
+  color: #a13f34;
+}
+
+.ahReadinessStatusLimited {
+  background: var(--ah-color-warning-soft);
+  color: #8a4f17;
+}
+
+.ahReadinessScenarioDetail {
+  align-content: start;
+}
+
+.ahReadinessScenarioDetail > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ahReadinessScenarioDetail > header > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ahReadinessScenarioDetail > header p {
+  margin: 0;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahReadinessScenarioDetail > header h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 22px;
+  overflow-wrap: anywhere;
+}
+
+.ahReadinessScenarioBoundary {
+  margin: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 13px;
+  background: var(--ah-color-surface-soft);
+  padding: 10px 12px;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.ahReadinessStepRail {
+  display: grid;
+  gap: 8px;
+}
+
+.ahReadinessStepRail article {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) max-content;
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+  border-bottom: 1px solid var(--ah-color-border);
+  padding: 9px 0;
+}
+
+.ahReadinessStepRail article > b {
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahReadinessStepRail article > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ahReadinessStepRail article strong {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.ahReadinessStepRail article small,
+.ahReadinessStepRail article em {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 15px;
+  overflow-wrap: anywhere;
+}
+
+.ahReadinessScenarioDetail > footer {
+  border-radius: 13px;
+  background: var(--ah-color-surface-soft);
+  padding: 10px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.ahReadinessMatrix {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ahReadinessGateGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  min-width: 0;
+}
+
+.ahReadinessGate {
+  align-content: start;
+}
+
+.ahReadinessGate > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ahReadinessGate > header > span {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+}
+
+.ahReadinessGate h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 21px;
+}
+
+.ahReadinessGate p {
+  margin: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 17px;
+  overflow-wrap: anywhere;
+}
+
+.ahReadinessGate footer {
+  align-self: end;
+  border-top: 1px solid var(--ah-color-border);
+  padding-top: 10px;
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 14px;
+  overflow-wrap: anywhere;
+}
+
+.ahReadinessDrillList {
+  display: grid;
+  gap: 10px;
+}
+
+.ahReadinessDrillList > article {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.ahReadinessDrillList header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ahReadinessDrillList header strong {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.ahReadinessDrillList p {
+  margin: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.ahReadinessDrillList dl {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+}
+
+.ahReadinessDrillList dl > div {
+  display: flex;
+  gap: 5px;
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 5px 8px;
+  font-size: 9px;
+  line-height: 13px;
+}
+
+.ahReadinessDrillList dt,
+.ahReadinessDrillList dd {
+  margin: 0;
+}
+
+.ahReadinessDrillList small {
+  color: var(--ah-color-text-tertiary);
+  font-size: 9px;
+  line-height: 14px;
+}
+
+.ahReadinessRollback {
+  align-content: start;
+  background: var(--ah-color-surface-soft);
+}
+
+.ahReadinessRollback > strong {
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.ahReadinessRollback > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.ahReadinessRollback > div {
+  border: 1px solid #efc9c3;
+  border-radius: 13px;
+  background: #fff7f6;
+  padding: 10px;
+  color: #8d433a;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.ahReadinessDecisionForm {
+  align-content: start;
+}
+
+.ahReadinessDecisionForm > div {
+  width: fit-content;
+  border-radius: 999px;
+  background: var(--ah-color-warning-soft);
+  padding: 6px 10px;
+  color: #8a4f17;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  letter-spacing: .04em;
+}
+
+.ahReadinessDecisionForm label {
+  display: grid;
+  gap: 6px;
+}
+
+.ahReadinessDecisionForm label > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahReadinessDecisionForm textarea {
+  min-height: 128px;
+  resize: vertical;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 13px;
+  background: var(--ah-color-surface);
+  padding: 11px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ahReadinessDecisionForm > small {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.ahReadinessDecisionForm > footer {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ahReadinessDecisionHistory {
+  align-content: start;
+}
+
+@media (max-width: 1100px) {
+  .ahReadinessGateGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1024px) {
+  .ahReadinessKpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ahReadinessVisualLayout,
+  .ahReadinessScenarioLayout,
+  .ahReadinessRecoveryLayout,
+  .ahReadinessDecisionLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .ahReadinessPage,
+  .ahReadinessDenied {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahReadinessPage .ahPageHeader,
+  .ahReadinessDenied .ahPageHeader {
+    align-items: start;
+  }
+
+  .ahReadinessPage .ahPageHeaderCopy > small,
+  .ahReadinessDenied .ahPageHeaderCopy > small {
+    margin-bottom: 5px;
+    font-size: var(--ah-mobile-eyebrow-size);
+    font-weight: 750;
+    line-height: var(--ah-mobile-eyebrow-line);
+    letter-spacing: .12em;
+  }
+
+  .ahReadinessPage .ahPageHeaderCopy h1,
+  .ahReadinessDenied .ahPageHeaderCopy h1 {
+    font-size: var(--ah-font-size-page-title-mobile);
+    font-weight: 700;
+    line-height: var(--ah-line-height-page-title-mobile);
+  }
+
+  .ahReadinessPage .ahPageHeaderCopy p,
+  .ahReadinessDenied .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahReadinessPage .ahPageHeaderActions,
+  .ahReadinessPage .ahPageHeaderActions .ahButton {
+    width: 100%;
+  }
+
+  .ahReadinessPage .ahPageHeaderActions .ahButton {
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    font-size: var(--ah-mobile-action-size);
+  }
+
+  .ahReadinessBoundary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    border-radius: var(--ah-mobile-info-radius);
+    padding: var(--ah-mobile-info-padding-block) var(--ah-mobile-info-padding-inline);
+  }
+
+  .ahReadinessBoundary strong {
+    min-height: 0;
+    padding: 5px 8px;
+    font-size: var(--ah-mobile-info-label-size);
+    font-weight: 800;
+    line-height: var(--ah-mobile-info-label-line);
+  }
+
+  .ahReadinessBoundary span {
+    font-size: var(--ah-mobile-info-body-size);
+    line-height: var(--ah-mobile-info-body-line);
+  }
+
+  .ahReadinessKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahReadinessKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahReadinessKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahReadinessKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahReadinessKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahReadinessTabs .ahTabs {
+    gap: 14px;
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+
+  .ahReadinessTabs .ahTabs button {
+    min-height: 38px;
+    font-size: 12px;
+  }
+
+  .ahReadinessPanel,
+  .ahReadinessScenarioList,
+  .ahReadinessScenarioDetail,
+  .ahReadinessRoute,
+  .ahReadinessGate,
+  .ahReadinessRollback,
+  .ahReadinessDecisionForm,
+  .ahReadinessDecisionHistory {
+    gap: 14px;
+    padding: 13px;
+  }
+
+  .ahReadinessPanelHead {
+    gap: 10px;
+  }
+
+  .ahReadinessPanelHead > span {
+    max-width: 42%;
+    text-align: right;
+    white-space: normal;
+  }
+
+  .ahReadinessMatrix,
+  .ahReadinessGateGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahReadinessScenarioList button {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .ahReadinessScenarioList button > em {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .ahReadinessScenarioDetail > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ahReadinessScenarioDetail > header > span {
+    width: fit-content;
+  }
+
+  .ahReadinessStepRail article {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .ahReadinessStepRail article > span {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .ahReadinessDecisionForm > footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahReadinessDecisionForm > footer .ahButton {
+    width: 100%;
+  }
+}
+
+@media (max-width: 359px) {
+  .ahReadinessKpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

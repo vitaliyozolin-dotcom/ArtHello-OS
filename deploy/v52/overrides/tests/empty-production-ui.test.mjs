@@ -54,16 +54,17 @@ test("array-backed workspaces handle empty data before unsafe first-row access",
   assert.match(food, /\bhasFoodData\b/);
   assert.doesNotMatch(food, /if\s*\(\s*!\s*hasFoodData\s*\)\s*return\b/);
 
-  const guardedCases = [
-    ["../app/components/IntegrationWorkspace.tsx", "if (!data.connections.length)", "const current ="],
-    ["../app/components/ReadinessWorkspace.tsx", "if (!data.scenarios.length)", "const scenario ="],
-  ];
+  const integration = read("../app/components/IntegrationWorkspace.tsx");
+  assert.ok(integration.indexOf("if (!data.connections.length)") > -1, "IntegrationWorkspace has no empty guard");
+  assert.ok(
+    integration.indexOf("const current =") > integration.indexOf("if (!data.connections.length)"),
+    "IntegrationWorkspace reads the first row before its empty guard",
+  );
 
-  for (const [path, guard, access] of guardedCases) {
-    const source = read(path);
-    assert.ok(source.indexOf(guard) > -1, `${path} has no empty guard`);
-    assert.ok(source.indexOf(access) > source.indexOf(guard), `${path} reads the first row before its empty guard`);
-  }
+  const readiness = read("../app/components/ReadinessWorkspace.tsx");
+  assert.match(readiness, /data\.scenarios\.find[\s\S]*?\?\?\s*data\.scenarios\[0\]/);
+  assert.match(readiness, /\bhasReadinessData\b/);
+  assert.doesNotMatch(readiness, /if\s*\(\s*!\s*hasReadinessData\s*\)\s*return\b/);
 });
 
 test("content and education use real records instead of demo identities", () => {

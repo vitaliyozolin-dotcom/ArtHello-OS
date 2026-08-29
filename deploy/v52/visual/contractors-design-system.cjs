@@ -14,7 +14,7 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 228;
+const expectedPngCount = 284;
 
 const waveRoutes = {
   legal: {
@@ -112,6 +112,36 @@ const waveRoutes = {
     table: ".ahStrategyDeviationGrid",
     empty: ".ahStrategyPage .ahEmptyState",
     populatedTab: "Отклонения и решения",
+    requireTable: false,
+    requireModal: false,
+  },
+  analytics: {
+    heading: "Аналитика и ИИ",
+    root: ".ahAnalyticsPage",
+    legacy: ".analytics-workspace",
+    endpoint: /\/api\/analytics(?:\?.*)?$/,
+    kpis: ".ahAnalyticsKpis > .ahKpiCard",
+    kpiGrid: ".ahAnalyticsKpis",
+    tabs: ".ahAnalyticsTabs .ahTabs",
+    table: ".ahAnalyticsMetricTable",
+    empty: ".ahAnalyticsPage .ahEmptyState",
+    populatedTab: "Метрики",
+    expectedTabCount: 6,
+    requireTable: false,
+    requireModal: false,
+  },
+  acceptance: {
+    heading: "Готовность ArtHello OS",
+    root: ".ahReadinessPage",
+    legacy: ".readiness-workspace",
+    endpoint: /\/api\/readiness(?:\?.*)?$/,
+    kpis: ".ahReadinessKpis > .ahKpiCard",
+    kpiGrid: ".ahReadinessKpis",
+    tabs: ".ahReadinessTabs .ahTabs",
+    table: ".ahReadinessGateGrid",
+    empty: ".ahReadinessPage .ahEmptyState",
+    populatedTab: "Release gates",
+    expectedTabCount: 6,
     requireTable: false,
     requireModal: false,
   },
@@ -288,6 +318,199 @@ const populatedStrategy = {
   boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
 };
 
+const emptyAnalytics = {
+  dataMode: "empty",
+  metricDefinitions: [],
+  signals: [],
+  contracts: [],
+  runs: [],
+  optOuts: [],
+  owner: {
+    cashPeriod: "",
+    cashFlowMinor: 0,
+    cashAprilMinor: 0,
+    cashForecastFloorMinor: 0,
+    nextPaymentsMinor: 0,
+    highRiskFamilies: 0,
+    averageProgress: 0,
+    activeEmployees: 0,
+    openSafetyFaults: 0,
+    foodMarginPercent: 0,
+    projectsAtRisk: 0,
+    openDataIssues: 0,
+    verifiedLiveSources: 0,
+  },
+  charts: { cash: [], forecast: [], risks: [] },
+  sourceCoverage: { fact: [], synthetic: [], unavailable: [] },
+  boundary: "Пустой контур не создаёт показатели, сигналы, контракты или решения автоматически.",
+  modelBoundary: "Модельные расчёты появятся только после подключения источника.",
+};
+
+const populatedAnalytics = {
+  dataMode: "source_only",
+  metricDefinitions: [{
+    id: "METRIC-VISUAL-001",
+    name: "Чистый денежный поток",
+    category: "Финансы",
+    definition: "Разница сохранённых поступлений и списаний",
+    formula: "receipts - outflows",
+    unit: "RUB",
+    grain: "month",
+    sourceTables: "finance_operations",
+    sourceQuality: "Подтверждено",
+    freshness: "2026-08-29",
+    ownerEntityId: "ENT-VISUAL-OWNER",
+    targetValue: 25000000,
+    sensitive: false,
+  }],
+  signals: [{
+    id: "SIGNAL-VISUAL-001",
+    contractId: "AI-CONTRACT-VISUAL-001",
+    domain: "Финансы",
+    signalType: "Отклонение",
+    severity: "Высокая",
+    title: "Прогноз ниже целевого остатка",
+    evidence: "Сохранённый платёжный календарь",
+    explanation: "Плановые списания превышают ожидаемые поступления",
+    recommendation: "Проверить даты и владельцев платежей",
+    sourceRefs: "finance_operations, payment_calendar",
+    confidence: 86,
+    status: "Открыт",
+    relatedTaskId: null,
+    humanDecision: "",
+    decisionEvidence: "",
+    detectedAt: "2026-08-29T08:00:00.000Z",
+  }],
+  contracts: [{
+    id: "AI-CONTRACT-VISUAL-001",
+    name: "Контроль денежного разрыва",
+    inputData: "Сохранённые операции и платёжный календарь",
+    expectedResult: "Сигнал с объяснением и источниками",
+    allowedActions: "Рассчитать прогноз и предложить проверку",
+    forbiddenActions: "Изменять финансовый факт или проводить платёж",
+    humanOwner: "ENT-VISUAL-OWNER",
+    costMinor: 1200,
+    benefitMetric: "Раннее обнаружение риска",
+    autoStopCondition: "Нет свежего источника",
+    optOutAllowed: true,
+    optOutProcedure: "Отключить сценарий в контракте",
+    fallbackFunctionality: "Финансовый реестр и календарь",
+    stoppedDataProcessing: "Новые модельные запуски",
+    historicalDataPolicy: "Сохранить аудит решений",
+    optOutImpact: "Сигналы больше не рассчитываются",
+    status: "Активен",
+    version: "1.0",
+    sourceRefs: "finance_operations, payment_calendar",
+    activeOptOuts: 0,
+  }],
+  runs: [{
+    id: "RUN-VISUAL-001",
+    contractId: "AI-CONTRACT-VISUAL-001",
+    ranAt: "2026-08-29T08:00:00.000Z",
+    modelVersion: "rules-1.0",
+    status: "Завершён",
+    inputSnapshotRef: "SNAPSHOT-VISUAL-001",
+    outputType: "SIGNAL",
+    outputSummary: "Обнаружен риск снижения остатка",
+    confidence: 86,
+    costMinor: 1200,
+    explanation: "Сопоставлены сохранённые операции и план",
+    humanDecision: "Ожидается",
+    isSynthetic: true,
+  }],
+  optOuts: [],
+  owner: {
+    cashPeriod: "август",
+    cashFlowMinor: 32000000,
+    cashAprilMinor: 0,
+    cashForecastFloorMinor: 18000000,
+    nextPaymentsMinor: 12500000,
+    highRiskFamilies: 1,
+    averageProgress: 82,
+    activeEmployees: 24,
+    openSafetyFaults: 1,
+    foodMarginPercent: 31,
+    projectsAtRisk: 1,
+    openDataIssues: 1,
+    verifiedLiveSources: 3,
+  },
+  charts: {
+    cash: [{ period: "2026-08", receiptsMinor: 88000000, outflowsMinor: 56000000, netMinor: 32000000, factRows: 18, syntheticRows: 0 }],
+    forecast: [{ forecastDate: "2026-09-05", direction: "Списание", amountMinor: 12500000, probability: 90, weightedMinor: 11250000, balanceMinor: 20750000, isGap: false }],
+    risks: [{ domain: "Финансы", total: 1, high: 1 }],
+  },
+  sourceCoverage: { fact: ["Финансовые операции"], synthetic: ["Прогноз"], unavailable: ["CRM"] },
+  boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
+  modelBoundary: "Расчёт ограничен сохранёнными источниками visual gate.",
+};
+
+const emptyReadiness = {
+  dataMode: "empty",
+  scenarios: [],
+  gates: [],
+  runs: [],
+  drills: [],
+  decisions: [],
+  summary: { passedScenarios: 0, totalScenarios: 0, passedGates: 0, totalGates: 0, productionReady: false, blockedGateIds: [] },
+  testLayers: [],
+  boundary: "Пустой контур не создаёт результаты приёмки или готовности автоматически.",
+  medicalBoundary: "Медицинские данные закрыты по умолчанию.",
+  productionDecision: "Выпуск не подтверждён: сохранённых проверок пока нет.",
+};
+
+const populatedReadiness = {
+  dataMode: "source_only",
+  scenarios: [{
+    id: "SCENARIO-VISUAL-001",
+    number: 1,
+    name: "Создание и контроль рабочей записи",
+    chain: "источник → запись → задача → доказательство",
+    owner_entity_id: "ENT-VISUAL-QUALITY",
+    status: "Пройдено",
+    data_boundary: "Только синтетические записи visual gate.",
+    evidence: "EVIDENCE-VISUAL-001",
+    failure: "",
+    last_run_at: "2026-08-29T08:00:00.000Z",
+    duration_ms: 840,
+    steps: [{
+      id: "STEP-VISUAL-001",
+      step_order: 1,
+      step_name: "Проверить сохранение записи",
+      entity_type: "QUALITY_CHECK",
+      entity_id: "CHECK-VISUAL-001",
+      check_type: "READ_AFTER_WRITE",
+      status: "Пройдено",
+      evidence: "EVIDENCE-VISUAL-001",
+    }],
+  }],
+  gates: [{
+    id: "GATE-VISUAL-001",
+    name: "Единая визуальная оболочка",
+    status: "Пройдено",
+    required: 1,
+    evidence: "Responsive visual artifact",
+    owner_entity_id: "ENT-VISUAL-QUALITY",
+    updated_at: "2026-08-29T08:00:00.000Z",
+  }],
+  runs: [{ id: "RUN-VISUAL-READINESS-001", status: "Завершён", passed: 1, failed: 0, finished_at: "2026-08-29T08:00:00.000Z", initiated_by: "ENT-VISUAL-QUALITY" }],
+  drills: [{
+    id: "DRILL-VISUAL-001",
+    drill_type: "Rollback приложения",
+    scope: "Визуальный контур",
+    status: "Пройдено",
+    rpo_minutes: 0,
+    rto_minutes: 8,
+    evidence: "CHECKPOINT-VISUAL-001",
+    limitation: "Не заменяет восстановление базы",
+  }],
+  decisions: [],
+  summary: { passedScenarios: 1, totalScenarios: 1, passedGates: 1, totalGates: 1, productionReady: false, blockedGateIds: ["REPRESENTATIVE_DECISION"] },
+  testLayers: ["Unit", "API contract", "Responsive visual"],
+  boundary: "Только синтетические записи visual gate; рабочие данные не используются.",
+  medicalBoundary: "Медицинские данные закрыты по умолчанию.",
+  productionDecision: "Выпуск ожидает решения представителя.",
+};
+
 const waveFixtures = {
   legal: { empty: emptyLegal, populated: populatedLegal },
   accounting: { empty: emptyAccounting, populated: populatedAccounting },
@@ -296,6 +519,8 @@ const waveFixtures = {
   safety: { empty: emptySafety, populated: populatedSafety },
   medical: { empty: emptyMedical, populated: populatedMedical },
   projects: { empty: emptyStrategy, populated: populatedStrategy },
+  analytics: { empty: emptyAnalytics, populated: populatedAnalytics },
+  acceptance: { empty: emptyReadiness, populated: populatedReadiness },
 };
 
 function persist() {
@@ -558,7 +783,8 @@ async function verifyWaveModal(page, config) {
 async function verifyWaveTabs(page, config) {
   const tabs = page.locator(config.tabs).getByRole("tab");
   const count = await tabs.count();
-  if (count !== 5) throw new Error(`${config.heading}: ${count} tabs, expected 5`);
+  const expected = config.expectedTabCount ?? 5;
+  if (count !== expected) throw new Error(`${config.heading}: ${count} tabs, expected ${expected}`);
   for (let index = 0; index < count; index += 1) {
     const tab = tabs.nth(index);
     await tab.click();

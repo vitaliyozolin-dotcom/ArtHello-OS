@@ -1,17 +1,696 @@
 "use client";
-import{useCallback,useEffect,useMemo,useState}from"react";
-type Signal={id:string;contractId:string;domain:string;signalType:string;severity:string;title:string;evidence:string;explanation:string;recommendation:string;sourceRefs:string;confidence:number;status:string;relatedTaskId:number|null;humanDecision:string;decisionEvidence:string;detectedAt:string};
-type Contract={id:string;name:string;inputData:string;expectedResult:string;allowedActions:string;forbiddenActions:string;humanOwner:string;costMinor:number;benefitMetric:string;autoStopCondition:string;optOutAllowed:boolean;optOutProcedure:string;fallbackFunctionality:string;stoppedDataProcessing:string;historicalDataPolicy:string;optOutImpact:string;status:string;version:string;sourceRefs:string;activeOptOuts:number};
-type Run={id:string;contractId:string;ranAt:string;modelVersion:string;status:string;inputSnapshotRef:string;outputType:string;outputSummary:string;confidence:number;costMinor:number;explanation:string;humanDecision:string;isSynthetic:boolean};
-type Metric={id:string;name:string;category:string;definition:string;formula:string;unit:string;grain:string;sourceTables:string;sourceQuality:string;freshness:string;ownerEntityId:string;targetValue:number|null;sensitive:boolean};
-type Data={dataMode:"test"|"source_only"|"empty";metricDefinitions:Metric[];signals:Signal[];contracts:Contract[];runs:Run[];optOuts:Array<{id:string;contractId:string;scopeType:string;scopeRef:string;requestedBy:string;reason:string;status:string;stopsProcessingAt:string;historicalDataPolicy:string}>;owner:{cashPeriod:string;cashFlowMinor:number;cashAprilMinor:number;cashForecastFloorMinor:number;nextPaymentsMinor:number;highRiskFamilies:number;averageProgress:number;activeEmployees:number;openSafetyFaults:number;foodMarginPercent:number;projectsAtRisk:number;openDataIssues:number;verifiedLiveSources:number};charts:{cash:Array<{period:string;receiptsMinor:number;outflowsMinor:number;netMinor:number;factRows:number;syntheticRows:number}>;forecast:Array<{forecastDate:string;direction:string;amountMinor:number;probability:number;weightedMinor:number;balanceMinor:number;isGap:boolean}>;risks:Array<{domain:string;total:number;high:number}>};sourceCoverage:{fact:string[];synthetic:string[];unavailable:string[]};boundary:string;modelBoundary:string};
-const roles:Record<string,string>={"Аналитика":"ANALYTICS","Интеграции":"INTEGRATIONS","Проекты":"PROJECTS","Бухгалтерия":"ACCOUNTING","Медработник":"MEDICAL","Собственник":"OWNER","Директор":"DIRECTOR","Представитель Виталия":"REPRESENTATIVE","Безопасность":"SAFETY","Финансы":"FINANCE","Кухня":"KITCHEN","Закупки":"PROCUREMENT","Юрист":"LEGAL","HR":"HR","Продажи":"SALES","Маркетинг":"MARKETING","Педагог":"TEACHER","Методист":"METHODIST","Родитель":"PARENT"};const tabs=["Обзор","Деньги","Сигналы","AI-контракты","Решения и отказ","Метрики"]as const;type Tab=typeof tabs[number];const rub=(value:number)=>new Intl.NumberFormat("ru-RU",{style:"currency",currency:"RUB",maximumFractionDigits:0}).format(value/100),short=(value:number)=>new Intl.NumberFormat("ru-RU",{notation:"compact",maximumFractionDigits:1}).format(value/100);
-export function AnalyticsWorkspace({role,notify,onTasksChanged}:{role:string;notify:(value:string)=>void;onTasksChanged:()=>void}){const[data,setData]=useState<Data|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState(""),[tab,setTab]=useState<Tab>("Обзор"),[selectedSignal,setSelectedSignal]=useState(""),[selectedContract,setSelectedContract]=useState(""),[domain,setDomain]=useState("Все"),[busy,setBusy]=useState("");const load=useCallback(async()=>{setLoading(true);try{const response=await fetch("/api/analytics",{cache:"no-store",headers:{"x-arthello-role":roles[role]??""}}),payload=await response.json()as Data&{error?:string};if(!response.ok)throw new Error(payload.error??"Ошибка");setData(payload);setError("")}catch(cause){setData(null);setError(cause instanceof Error?cause.message:"Нет доступа")}finally{setLoading(false)}},[role]);useEffect(()=>{const id=setTimeout(()=>void load(),0);return()=>clearTimeout(id)},[load]);async function action(body:Record<string,unknown>,key:string){setBusy(key);try{const response=await fetch("/api/analytics-actions",{method:"POST",headers:{"content-type":"application/json","x-arthello-role":roles[role]??""},body:JSON.stringify(body)}),payload=await response.json()as{error?:string;reused?:boolean};if(!response.ok)throw new Error(payload.error??"Ошибка");notify(payload.reused?"Запись уже существует":"Действие сохранено; бизнес-данные не изменены");await load();onTasksChanged()}catch(cause){notify(cause instanceof Error?cause.message:"Ошибка")}finally{setBusy("")}}const domains=useMemo(()=>["Все",...new Set((data?.signals??[]).map(item=>item.domain))],[data]);if(loading)return <section className="analytics-state">Собираем доказательную аналитику…</section>;if(error||!data)return <section className="analytics-state"><strong>{error}</strong><small>Управленческая аналитика доступна владельцу, Представителю, аналитикам и финансам.</small><button onClick={()=>void load()}>Повторить</button></section>;if(!data.contracts.length)return <section className="page analytics-workspace"><div className="analytics-heading"><div><p className="eyebrow">Факты, прогнозы и решения</p><h1>Аналитика и ИИ</h1><p>Метрики и модельные сигналы появятся после подключения источников.</p></div></div><div className="manual-module-empty"><span>＋</span><h2>Данных для аналитики пока нет</h2><p>Загрузить данные можно через интеграции или рабочие записи в профильных разделах.</p></div></section>;const signal=data.signals.find(item=>item.id===selectedSignal)??data.signals[0],contract=data.contracts.find(item=>item.id===selectedContract)??data.contracts[0],visibleSignals=data.signals.filter(item=>domain==="Все"||item.domain===domain),maxCash=Math.max(1,...data.charts.cash.flatMap(item=>[item.receiptsMinor,item.outflowsMinor])),isDemo=data.dataMode==="test";
-	return <section className="page analytics-workspace"><div className="analytics-heading"><div><p className="eyebrow">Факты, прогнозы и решения</p><h1>Аналитика и ИИ</h1><p>Показатель раскрывается до формулы и источника; модельный сигнал — до факторов, контракта и человека.</p></div><button disabled={busy===contract.id}onClick={()=>void action({action:"runScenario",contractId:contract.id},contract.id)}>Контрольный запуск</button></div><div className="analytics-boundary"><strong>{isDemo?"ОПУБЛИКОВАННЫЙ ТЕСТОВЫЙ СНИМОК":"РАБОЧИЕ ДАННЫЕ"}</strong><span>{data.boundary}</span></div><div className="analytics-tabs">{tabs.map(item=><button key={item}className={tab===item?"active":""}onClick={()=>setTab(item)}>{item}</button>)}</div>
-{tab==="Обзор"?<><div className="analytics-heroes"><Hero label={isDemo?"Чистый поток · апрель":`Чистый поток${data.owner.cashPeriod?` · ${data.owner.cashPeriod}`:""}`} value={rub(isDemo?data.owner.cashAprilMinor:data.owner.cashFlowMinor)} note={isDemo?"Факт ОДДС · строки 2/34/111":"По сохранённым операциям"} tone="good"/><Hero label="Минимум прогноза" value={rub(data.owner.cashForecastFloorMinor)} note={isDemo?"Синтетический сценарий · не факт":"Расчёт по сохранённому плану"} tone={data.owner.cashForecastFloorMinor<0?"bad":"good"}/><Hero label="Семьи высокого риска" value={String(data.owner.highRiskFamilies)} note={isDemo?"Тестовые карточки · human review":"Требуют проверки человеком"} tone="warn"/><Hero label="Качество данных" value={String(data.owner.openDataIssues)} note="Открытые сверки и конфликты" tone="bad"/><Hero label="Live-источники" value={String(data.owner.verifiedLiveSources)} note="Только подтверждённая передача" tone="neutral"/></div><div className="owner-dashboard"><article className="analytics-panel domain-health"><PanelHead p="Управленческий обзор" h="Состояние контуров" s="Без медицинских данных"/><div><Domain k="Следующие оплаты" v={rub(data.owner.nextPaymentsMinor)} n={isDemo?"синтетический план":"по сохранённым данным"}/><Domain k="Учебный прогресс" v={`${data.owner.averageProgress}%`} n={isDemo?"обезличенный тест":"по сохранённым данным"}/><Domain k="Активный штат" v={String(data.owner.activeEmployees)} n={isDemo?"синтетический HR":"по сохранённым данным"}/><Domain k="Безопасность" v={String(data.owner.openSafetyFaults)} n="открытые неисправности"/><Domain k="Маржа кухни" v={`${data.owner.foodMarginPercent}%`} n={isDemo?"синтетическая экономика":"по сохранённым данным"}/><Domain k="Проекты под риском" v={String(data.owner.projectsAtRisk)} n={isDemo?"тестовая стратегия":"по сохранённым данным"}/></div></article><article className="analytics-panel risk-summary"><PanelHead p="Ранние сигналы" h="Где нужен человек" s={`${data.signals.filter(item=>item.status!=="Закрыт").length} открыто`}/><div>{data.charts.risks.map(item=><button key={item.domain}onClick={()=>{setDomain(item.domain);setTab("Сигналы")}}><span><strong>{item.domain}</strong><small>{item.high} высокой важности</small></span><i style={{width:`${Math.max(8,item.total*16)}%`}}/><em>{item.total}</em></button>)}</div></article></div><div className="source-coverage"><article><strong>ФАКТ</strong>{data.sourceCoverage.fact.map(item=><span key={item}>{item}</span>)}</article><article><strong>{isDemo?"СИНТЕТИЧЕСКОЕ":"РАСЧЁТНОЕ"}</strong>{data.sourceCoverage.synthetic.map(item=><span key={item}>{item}</span>)}</article><article><strong>НЕТ ИСТОЧНИКА</strong>{data.sourceCoverage.unavailable.map(item=><span key={item}>{item}</span>)}</article></div></>:null}
-{tab==="Деньги"?<div className="money-analytics"><article className="analytics-panel cash-chart"><PanelHead p="ДДС" h="Поступления и списания" s="₽ · по месяцам"/><div className="cash-bars">{data.charts.cash.map(item=><div key={item.period}><div><i className="in"style={{height:`${Math.max(3,item.receiptsMinor/maxCash*100)}%`}}/><i className="out"style={{height:`${Math.max(3,item.outflowsMinor/maxCash*100)}%`}}/></div><strong>{item.period.slice(5)}</strong><small>{short(item.netMinor)}</small><em>{isDemo?(item.factRows?"XLSX":"TEST"):(item.factRows?"Исходная запись":"Расчётная запись")}</em></div>)}</div><footer><span className="legend-in">Поступления</span><span className="legend-out">Списания</span></footer></article><article className="analytics-panel forecast-chart"><PanelHead p="Вероятностный сценарий" h="Прогноз остатка" s={isDemo?"TEST-RULES-v0.1":"По сохранённому плану"}/><div>{data.charts.forecast.map(item=><article key={item.forecastDate}className={item.isGap?"gap":""}><time>{item.forecastDate.slice(5)}</time><span><strong>{item.direction} · {rub(item.weightedMinor)}</strong><small>{item.probability}% · {rub(item.amountMinor)}</small></span><em>{rub(item.balanceMinor)}</em></article>)}</div><footer>{data.modelBoundary}</footer></article></div>:null}
-{tab==="Сигналы"?<><div className="analytics-filter"><select value={domain}onChange={event=>setDomain(event.target.value)}>{domains.map(item=><option key={item}>{item}</option>)}</select><span>{visibleSignals.length} сигналов · решение всегда за человеком</span></div><div className="signal-layout"><div className="signal-list">{visibleSignals.map(item=><button key={item.id}className={selectedSignal===item.id?"active":""}onClick={()=>setSelectedSignal(item.id)}><i className={`severity-${item.severity.toLowerCase()}`}/><span><small>{item.domain} · {item.signalType}</small><strong>{item.title}</strong><em>{item.status}</em></span><b>{item.confidence}%</b></button>)}</div>{signal?<aside className="signal-detail"><header><div><p>{signal.id} · {signal.severity}</p><h2>{signal.title}</h2></div><strong>{signal.confidence}%</strong></header><section><small>Доказательство</small><p>{signal.evidence}</p></section><section><small>Объяснение</small><p>{signal.explanation}</p></section><section><small>Рекомендация</small><p>{signal.recommendation}</p></section><dl><div><dt>Источники</dt><dd>{signal.sourceRefs}</dd></div><div><dt>AI-контракт</dt><dd>{signal.contractId}</dd></div><div><dt>Решение человека</dt><dd>{signal.humanDecision||"Ожидается"}</dd></div></dl><footer><button disabled={busy===`task-${signal.id}`}onClick={()=>void action({action:"createSignalTask",signalId:signal.id},`task-${signal.id}`)}>Создать задачу</button><button disabled={busy===`decision-${signal.id}`}onClick={()=>void action({action:"recordDecision",signalId:signal.id,decision:"Проверить владельцем процесса и выполнить контролируемое действие",evidence:`HUMAN-REVIEW:${signal.id}`},`decision-${signal.id}`)}>Зафиксировать решение</button></footer></aside>:null}</div></>:null}
-{tab==="AI-контракты"?<div className="contract-layout"><div className="contract-list">{data.contracts.map(item=><button key={item.id}className={selectedContract===item.id?"active":""}onClick={()=>setSelectedContract(item.id)}><span><strong>{item.name}</strong><small>{item.id} · {item.version}</small></span><em>{item.status}</em></button>)}</div>{contract?<aside className="contract-detail"><header><div><p>{contract.id}</p><h2>{contract.name}</h2></div><span>{contract.status}</span></header><div className="contract-grid"><Fact k="Входные данные" v={contract.inputData}/><Fact k="Ожидаемый результат" v={contract.expectedResult}/><Fact k="Разрешено" v={contract.allowedActions}/><Fact k="Запрещено" v={contract.forbiddenActions}/><Fact k="Ответственный человек" v={contract.humanOwner}/><Fact k="Стоимость запуска" v={`${rub(contract.costMinor)} · ${isDemo?"тестовый rule engine":"расчётный модуль"}`}/><Fact k="Метрика пользы" v={contract.benefitMetric}/><Fact k="Автоотключение" v={contract.autoStopCondition}/><Fact k="Как отказаться" v={contract.optOutProcedure}/><Fact k="Без ИИ продолжит работать" v={contract.fallbackFunctionality}/><Fact k="Перестанет обрабатываться" v={contract.stoppedDataProcessing}/><Fact k="Исторические данные" v={contract.historicalDataPolicy}/><Fact k="Влияние отказа" v={contract.optOutImpact}/><Fact k="Источники" v={contract.sourceRefs}/></div><footer><button disabled={busy===contract.id||contract.status!=="Активен"}onClick={()=>void action({action:"runScenario",contractId:contract.id},contract.id)}>Запустить проверку</button><button className="optout"disabled={busy===`opt-${contract.id}`}onClick={()=>void action(contract.status==="Активен"?{action:"optOut",contractId:contract.id,reason:isDemo?"Контрольный отказ пользователя на тестовом контуре":"Отказ пользователя от сценария",scopeRef:"ALL"}:{action:"restoreContract",contractId:contract.id,reason:"Возобновить после контрольной проверки отказа"},`opt-${contract.id}`)}>{contract.status==="Активен"?"Отказаться от сценария":"Возобновить"}</button></footer></aside>:null}</div>:null}
-{tab==="Решения и отказ"?<div className="decision-run-grid"><article className="analytics-panel"><PanelHead p="Append-only" h="Запуски моделей" s={`${data.runs.length}`}/><div className="model-runs">{data.runs.map(item=><article key={item.id}><header><span>{item.modelVersion}</span><em>{item.status}</em></header><strong>{data.contracts.find(contractItem=>contractItem.id===item.contractId)?.name}</strong><p>{item.outputSummary}</p><footer>{item.confidence}% · {rub(item.costMinor)} · {item.isSynthetic?"синтетический":"внешний"}</footer></article>)}</div></article><article className="analytics-panel"><PanelHead p="Права пользователя" h="Отказы" s={`${data.optOuts.filter(item=>item.status==="Активен").length} активно`}/><div className="optout-list">{data.optOuts.length?data.optOuts.map(item=><article key={item.id}><strong>{data.contracts.find(contractItem=>contractItem.id===item.contractId)?.name}</strong><p>{item.reason}</p><small>{item.scopeType}: {item.scopeRef} · {item.status}</small><em>{item.historicalDataPolicy}</em></article>):<p>Отказов ещё нет. Любой сценарий можно отключить в его контракте.</p>}</div></article></div>:null}
-{tab==="Метрики"?<div className="metric-dictionary"><header><span>Метрика</span><span>Определение и формула</span><span>Источник</span><span>Свежесть / качество</span></header>{data.metricDefinitions.map(item=><article key={item.id}><span><strong>{item.name}</strong><small>{item.id} · {item.category} · {item.unit}</small></span><span><strong>{item.definition}</strong><small>{item.formula} · grain: {item.grain}</small></span><span><strong>{item.sourceTables}</strong><small>{item.ownerEntityId}</small></span><span><strong>{item.freshness}</strong><small>{item.sourceQuality}</small></span></article>)}</div>:null}</section>}
-function Hero({label,value,note,tone}:{label:string;value:string;note:string;tone:string}){return <article className={`analytics-hero ${tone}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>}function Domain({k,v,n}:{k:string;v:string;n:string}){return <article><span>{k}</span><strong>{v}</strong><small>{n}</small></article>}function PanelHead({p,h,s}:{p:string;h:string;s:string}){return <header className="analytics-panel-head"><div><p>{p}</p><h2>{h}</h2></div><span>{s}</span></header>}function Fact({k,v}:{k:string;v:string}){return <article><small>{k}</small><p>{v}</p></article>}
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Button,
+  Card,
+  CompactListCard,
+  EmptyState,
+  KpiCard,
+  PageContainer,
+  PageHeader,
+  Tabs,
+} from "./design-system";
+import "./AnalyticsWorkspace.ds.css";
+
+type Signal = {
+  id: string;
+  contractId: string;
+  domain: string;
+  signalType: string;
+  severity: string;
+  title: string;
+  evidence: string;
+  explanation: string;
+  recommendation: string;
+  sourceRefs: string;
+  confidence: number;
+  status: string;
+  relatedTaskId: number | null;
+  humanDecision: string;
+  decisionEvidence: string;
+  detectedAt: string;
+};
+
+type Contract = {
+  id: string;
+  name: string;
+  inputData: string;
+  expectedResult: string;
+  allowedActions: string;
+  forbiddenActions: string;
+  humanOwner: string;
+  costMinor: number;
+  benefitMetric: string;
+  autoStopCondition: string;
+  optOutAllowed: boolean;
+  optOutProcedure: string;
+  fallbackFunctionality: string;
+  stoppedDataProcessing: string;
+  historicalDataPolicy: string;
+  optOutImpact: string;
+  status: string;
+  version: string;
+  sourceRefs: string;
+  activeOptOuts: number;
+};
+
+type Run = {
+  id: string;
+  contractId: string;
+  ranAt: string;
+  modelVersion: string;
+  status: string;
+  inputSnapshotRef: string;
+  outputType: string;
+  outputSummary: string;
+  confidence: number;
+  costMinor: number;
+  explanation: string;
+  humanDecision: string;
+  isSynthetic: boolean;
+};
+
+type Metric = {
+  id: string;
+  name: string;
+  category: string;
+  definition: string;
+  formula: string;
+  unit: string;
+  grain: string;
+  sourceTables: string;
+  sourceQuality: string;
+  freshness: string;
+  ownerEntityId: string;
+  targetValue: number | null;
+  sensitive: boolean;
+};
+
+type Data = {
+  dataMode: "test" | "source_only" | "empty";
+  metricDefinitions: Metric[];
+  signals: Signal[];
+  contracts: Contract[];
+  runs: Run[];
+  optOuts: Array<{
+    id: string;
+    contractId: string;
+    scopeType: string;
+    scopeRef: string;
+    requestedBy: string;
+    reason: string;
+    status: string;
+    stopsProcessingAt: string;
+    historicalDataPolicy: string;
+  }>;
+  owner: {
+    cashPeriod: string;
+    cashFlowMinor: number;
+    cashAprilMinor: number;
+    cashForecastFloorMinor: number;
+    nextPaymentsMinor: number;
+    highRiskFamilies: number;
+    averageProgress: number;
+    activeEmployees: number;
+    openSafetyFaults: number;
+    foodMarginPercent: number;
+    projectsAtRisk: number;
+    openDataIssues: number;
+    verifiedLiveSources: number;
+  };
+  charts: {
+    cash: Array<{
+      period: string;
+      receiptsMinor: number;
+      outflowsMinor: number;
+      netMinor: number;
+      factRows: number;
+      syntheticRows: number;
+    }>;
+    forecast: Array<{
+      forecastDate: string;
+      direction: string;
+      amountMinor: number;
+      probability: number;
+      weightedMinor: number;
+      balanceMinor: number;
+      isGap: boolean;
+    }>;
+    risks: Array<{ domain: string; total: number; high: number }>;
+  };
+  sourceCoverage: { fact: string[]; synthetic: string[]; unavailable: string[] };
+  boundary: string;
+  modelBoundary: string;
+};
+
+const roles: Record<string, string> = {
+  Аналитика: "ANALYTICS",
+  Интеграции: "INTEGRATIONS",
+  Проекты: "PROJECTS",
+  Бухгалтерия: "ACCOUNTING",
+  Медработник: "MEDICAL",
+  Собственник: "OWNER",
+  Директор: "DIRECTOR",
+  "Представитель Виталия": "REPRESENTATIVE",
+  Безопасность: "SAFETY",
+  Финансы: "FINANCE",
+  Кухня: "KITCHEN",
+  Закупки: "PROCUREMENT",
+  Юрист: "LEGAL",
+  HR: "HR",
+  Продажи: "SALES",
+  Маркетинг: "MARKETING",
+  Педагог: "TEACHER",
+  Методист: "METHODIST",
+  Родитель: "PARENT",
+};
+
+const tabs = ["Обзор", "Деньги", "Сигналы", "AI-контракты", "Решения и отказ", "Метрики"] as const;
+type Tab = (typeof tabs)[number];
+
+const rub = (value: number) =>
+  new Intl.NumberFormat("ru-RU", {
+    style: "currency",
+    currency: "RUB",
+    maximumFractionDigits: 0,
+  }).format(value / 100);
+
+const short = (value: number) =>
+  new Intl.NumberFormat("ru-RU", { notation: "compact", maximumFractionDigits: 1 }).format(value / 100);
+
+export function AnalyticsWorkspace({
+  role,
+  notify,
+  onTasksChanged,
+  onOpenIntegrations,
+}: {
+  role: string;
+  notify: (value: string) => void;
+  onTasksChanged: () => void;
+  onOpenIntegrations: () => void;
+}) {
+  const [data, setData] = useState<Data | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState<Tab>("Обзор");
+  const [selectedSignal, setSelectedSignal] = useState("");
+  const [selectedContract, setSelectedContract] = useState("");
+  const [domain, setDomain] = useState("Все");
+  const [busy, setBusy] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/analytics", {
+        cache: "no-store",
+        headers: { "x-arthello-role": roles[role] ?? "" },
+      });
+      const payload = (await response.json()) as Data & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Ошибка");
+      setData(payload);
+      setError("");
+    } catch (cause) {
+      setData(null);
+      setError(cause instanceof Error ? cause.message : "Нет доступа");
+    } finally {
+      setLoading(false);
+    }
+  }, [role]);
+
+  useEffect(() => {
+    const id = setTimeout(() => void load(), 0);
+    return () => clearTimeout(id);
+  }, [load]);
+
+  async function action(body: Record<string, unknown>, key: string) {
+    setBusy(key);
+    try {
+      const response = await fetch("/api/analytics-actions", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-arthello-role": roles[role] ?? "" },
+        body: JSON.stringify(body),
+      });
+      const payload = (await response.json()) as { error?: string; reused?: boolean };
+      if (!response.ok) throw new Error(payload.error ?? "Ошибка");
+      notify(payload.reused ? "Запись уже существует" : "Действие сохранено; бизнес-данные не изменены");
+      await load();
+      onTasksChanged();
+    } catch (cause) {
+      notify(cause instanceof Error ? cause.message : "Ошибка");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const domains = useMemo(
+    () => ["Все", ...new Set((data?.signals ?? []).map((item) => item.domain))],
+    [data],
+  );
+
+  if (loading) return <section className="ahAnalyticsStatus">Собираем доказательную аналитику…</section>;
+  if (error || !data) {
+    return (
+      <PageContainer className="ahAnalyticsDenied">
+        <Card>
+          <EmptyState
+            title="Контур аналитики недоступен"
+            description={error || "Доступ разрешён владельцу, Представителю, аналитикам и финансам."}
+            density="compact"
+            action={<Button onClick={() => void load()}>Повторить</Button>}
+          />
+        </Card>
+      </PageContainer>
+    );
+  }
+
+  const signal = data.signals.find((item) => item.id === selectedSignal) ?? data.signals[0];
+  const contract = data.contracts.find((item) => item.id === selectedContract) ?? data.contracts[0];
+  const visibleSignals = data.signals.filter((item) => domain === "Все" || item.domain === domain);
+  const maxCash = Math.max(1, ...data.charts.cash.flatMap((item) => [item.receiptsMinor, item.outflowsMinor]));
+  const hasAnalyticsData = Boolean(
+    data.metricDefinitions.length ||
+      data.signals.length ||
+      data.contracts.length ||
+      data.runs.length ||
+      data.optOuts.length ||
+      data.charts.cash.length ||
+      data.charts.forecast.length,
+  );
+
+  return (
+    <PageContainer className="ahAnalyticsPage">
+      <PageHeader
+        eyebrow="АНАЛИТИКА · ИСТОЧНИКИ · РЕШЕНИЯ"
+        title="Аналитика и ИИ"
+        description="Каждый показатель раскрывается до формулы и источника, а модельный сигнал — до факторов, контракта и решения человека."
+        actions={
+          contract ? (
+            <Button
+              variant="primary"
+              disabled={busy === contract.id || contract.status !== "Активен"}
+              onClick={() => void action({ action: "runScenario", contractId: contract.id }, contract.id)}
+            >
+              Контрольный запуск
+            </Button>
+          ) : (
+            <Button variant="primary" onClick={onOpenIntegrations}>Подключить источники</Button>
+          )
+        }
+      />
+
+      <div className="ahAnalyticsBoundary">
+        <strong>{hasAnalyticsData ? "СОХРАНЁННЫЕ ДАННЫЕ" : "НЕТ ИСХОДНЫХ ДАННЫХ"}</strong>
+        <span>{data.boundary}</span>
+      </div>
+
+      <div className="ahAnalyticsKpis">
+        <KpiCard
+          label={data.owner.cashPeriod ? `Чистый поток · ${data.owner.cashPeriod}` : "Чистый поток"}
+          value={rub(data.owner.cashFlowMinor)}
+          note={data.charts.cash.length ? "по сохранённым операциям" : "операций пока нет"}
+        />
+        <KpiCard
+          label="Семьи высокого риска"
+          value={data.owner.highRiskFamilies}
+          note={data.owner.highRiskFamilies ? "требуют проверки человеком" : "сигналов пока нет"}
+          className={data.owner.highRiskFamilies ? "ahAnalyticsKpiWarning" : undefined}
+        />
+        <KpiCard
+          label="Качество данных"
+          value={data.owner.openDataIssues}
+          note={data.owner.openDataIssues ? "открытые сверки и конфликты" : "открытых сверок нет"}
+          className={data.owner.openDataIssues ? "ahAnalyticsKpiWarning" : undefined}
+        />
+        <KpiCard
+          label="Live-источники"
+          value={data.owner.verifiedLiveSources}
+          note={data.owner.verifiedLiveSources ? "подтверждённая передача" : "источники не подключены"}
+        />
+      </div>
+
+      <div className="ahAnalyticsTabs">
+        <Tabs
+          items={tabs.map((item) => ({ id: item, label: item }))}
+          value={tab}
+          onChange={setTab}
+          ariaLabel="Разделы аналитики"
+        />
+      </div>
+
+      {tab === "Обзор" ? (
+        <OverviewPanel
+          data={data}
+          hasAnalyticsData={hasAnalyticsData}
+          onOpenSignals={(nextDomain) => {
+            setDomain(nextDomain);
+            setTab("Сигналы");
+          }}
+        />
+      ) : null}
+
+      {tab === "Деньги" ? <MoneyPanel data={data} maxCash={maxCash} /> : null}
+
+      {tab === "Сигналы" ? (
+        <Card className="ahAnalyticsPanel">
+          <PanelHead eyebrow="Ранние сигналы" title="Где нужен человек" meta={`${visibleSignals.length} открыто`} />
+          <div className="ahAnalyticsFilter">
+            <label>
+              <span>Контур</span>
+              <select value={domain} onChange={(event) => setDomain(event.target.value)}>
+                {domains.map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <span>Решение всегда остаётся за человеком</span>
+          </div>
+          {visibleSignals.length ? (
+            <div className="ahAnalyticsSignalLayout">
+              <div className="ahAnalyticsSignalList">
+                {visibleSignals.map((item, index) => (
+                  <button
+                    type="button"
+                    key={item.id}
+                    aria-pressed={signal?.id === item.id}
+                    onClick={() => setSelectedSignal(item.id)}
+                  >
+                    <b>{String(index + 1).padStart(2, "0")}</b>
+                    <span>
+                      <small>{item.domain} · {item.signalType}</small>
+                      <strong>{item.title}</strong>
+                      <em>{item.status}</em>
+                    </span>
+                    <i>{item.confidence}%</i>
+                  </button>
+                ))}
+              </div>
+              {signal ? (
+                <aside className="ahAnalyticsSignalDetail">
+                  <header>
+                    <div><p>{signal.id} · {signal.severity}</p><h2>{signal.title}</h2></div>
+                    <strong>{signal.confidence}%</strong>
+                  </header>
+                  <Fact label="Доказательство" value={signal.evidence} />
+                  <Fact label="Объяснение" value={signal.explanation} />
+                  <Fact label="Рекомендация" value={signal.recommendation} />
+                  <dl>
+                    <div><dt>Источники</dt><dd>{signal.sourceRefs}</dd></div>
+                    <div><dt>AI-контракт</dt><dd>{signal.contractId}</dd></div>
+                    <div><dt>Решение человека</dt><dd>{signal.humanDecision || "Ожидается"}</dd></div>
+                  </dl>
+                  <footer>
+                    <Button
+                      disabled={busy === `task-${signal.id}`}
+                      onClick={() => void action({ action: "createSignalTask", signalId: signal.id }, `task-${signal.id}`)}
+                    >
+                      Создать задачу
+                    </Button>
+                    <Button
+                      variant="primary"
+                      disabled={busy === `decision-${signal.id}`}
+                      onClick={() => void action({
+                        action: "recordDecision",
+                        signalId: signal.id,
+                        decision: "Проверить владельцем процесса и выполнить контролируемое действие",
+                        evidence: `HUMAN-REVIEW:${signal.id}`,
+                      }, `decision-${signal.id}`)}
+                    >
+                      Зафиксировать решение
+                    </Button>
+                  </footer>
+                </aside>
+              ) : null}
+            </div>
+          ) : (
+            <EmptyState
+              title="Сигналов пока нет"
+              description="Риск или рекомендация появятся только с доказательством, источником и ответственным человеком."
+              density="compact"
+            />
+          )}
+        </Card>
+      ) : null}
+
+      {tab === "AI-контракты" ? (
+        <Card className="ahAnalyticsPanel">
+          <PanelHead eyebrow="Управляемый ИИ" title="AI-контракты" meta={String(data.contracts.length)} />
+          {data.contracts.length ? (
+            <div className="ahAnalyticsContractLayout">
+              <div className="ahAnalyticsContractList">
+                {data.contracts.map((item, index) => (
+                  <button
+                    type="button"
+                    key={item.id}
+                    aria-pressed={contract?.id === item.id}
+                    onClick={() => setSelectedContract(item.id)}
+                  >
+                    <b>{String(index + 1).padStart(2, "0")}</b>
+                    <span><strong>{item.name}</strong><small>{item.id} · {item.version}</small></span>
+                    <em>{item.status}</em>
+                  </button>
+                ))}
+              </div>
+              {contract ? (
+                <aside className="ahAnalyticsContractDetail">
+                  <header>
+                    <div><p>{contract.id}</p><h2>{contract.name}</h2></div>
+                    <span>{contract.status}</span>
+                  </header>
+                  <div className="ahAnalyticsFactGrid">
+                    <Fact label="Входные данные" value={contract.inputData} />
+                    <Fact label="Ожидаемый результат" value={contract.expectedResult} />
+                    <Fact label="Разрешено" value={contract.allowedActions} />
+                    <Fact label="Запрещено" value={contract.forbiddenActions} />
+                    <Fact label="Ответственный человек" value={contract.humanOwner} />
+                    <Fact label="Стоимость запуска" value={rub(contract.costMinor)} />
+                    <Fact label="Метрика пользы" value={contract.benefitMetric} />
+                    <Fact label="Автоотключение" value={contract.autoStopCondition} />
+                    <Fact label="Как отказаться" value={contract.optOutProcedure} />
+                    <Fact label="Без ИИ продолжит работать" value={contract.fallbackFunctionality} />
+                    <Fact label="Перестанет обрабатываться" value={contract.stoppedDataProcessing} />
+                    <Fact label="Исторические данные" value={contract.historicalDataPolicy} />
+                    <Fact label="Влияние отказа" value={contract.optOutImpact} />
+                    <Fact label="Источники" value={contract.sourceRefs} />
+                  </div>
+                  <footer>
+                    <Button
+                      disabled={busy === contract.id || contract.status !== "Активен"}
+                      onClick={() => void action({ action: "runScenario", contractId: contract.id }, contract.id)}
+                    >
+                      Запустить проверку
+                    </Button>
+                    <Button
+                      variant="primary"
+                      disabled={busy === `opt-${contract.id}`}
+                      onClick={() => void action(
+                        contract.status === "Активен"
+                          ? { action: "optOut", contractId: contract.id, reason: "Отказ пользователя от сценария", scopeRef: "ALL" }
+                          : { action: "restoreContract", contractId: contract.id, reason: "Возобновить после контрольной проверки отказа" },
+                        `opt-${contract.id}`,
+                      )}
+                    >
+                      {contract.status === "Активен" ? "Отказаться от сценария" : "Возобновить"}
+                    </Button>
+                  </footer>
+                </aside>
+              ) : null}
+            </div>
+          ) : (
+            <EmptyState
+              title="AI-контракты не созданы"
+              description="Сначала определите входные данные, разрешённые действия, стоимость, метрику пользы, отказ и автоотключение."
+              density="compact"
+              action={<Button onClick={onOpenIntegrations}>Подключить источники</Button>}
+            />
+          )}
+        </Card>
+      ) : null}
+
+      {tab === "Решения и отказ" ? (
+        <div className="ahAnalyticsDecisionGrid">
+          <Card className="ahAnalyticsPanel">
+            <PanelHead eyebrow="Append-only" title="Запуски моделей" meta={String(data.runs.length)} />
+            {data.runs.length ? (
+              <div className="ahAnalyticsRunList">
+                {data.runs.map((item, index) => (
+                  <CompactListCard
+                    key={item.id}
+                    index={String(index + 1).padStart(2, "0")}
+                    title={`${data.contracts.find((entry) => entry.id === item.contractId)?.name ?? item.contractId} · ${item.status}`}
+                    description={`${item.outputSummary} · ${item.confidence}% · ${rub(item.costMinor)}`}
+                  />
+                ))}
+              </div>
+            ) : (
+              <EmptyState title="Запусков пока нет" description="История появится после ручного запуска утверждённого сценария." density="compact" />
+            )}
+          </Card>
+          <Card className="ahAnalyticsPanel">
+            <PanelHead
+              eyebrow="Права пользователя"
+              title="Отказы"
+              meta={`${data.optOuts.filter((item) => item.status === "Активен").length} активно`}
+            />
+            {data.optOuts.length ? (
+              <div className="ahAnalyticsRunList">
+                {data.optOuts.map((item, index) => (
+                  <CompactListCard
+                    key={item.id}
+                    index={String(index + 1).padStart(2, "0")}
+                    title={`${data.contracts.find((entry) => entry.id === item.contractId)?.name ?? item.contractId} · ${item.status}`}
+                    description={`${item.reason} · ${item.scopeType}: ${item.scopeRef}`}
+                  />
+                ))}
+              </div>
+            ) : (
+              <EmptyState title="Отказов пока нет" description="Любой разрешённый сценарий можно отключить в его AI-контракте." density="compact" />
+            )}
+          </Card>
+        </div>
+      ) : null}
+
+      {tab === "Метрики" ? (
+        <Card className="ahAnalyticsPanel">
+          <PanelHead eyebrow="Словарь показателей" title="Метрики, формулы и источники" meta={String(data.metricDefinitions.length)} />
+          {data.metricDefinitions.length ? (
+            <div className="ahAnalyticsMetricTable">
+              <header><span>Метрика</span><span>Определение и формула</span><span>Источник</span><span>Свежесть / качество</span></header>
+              {data.metricDefinitions.map((item) => (
+                <article key={item.id}>
+                  <span><strong>{item.name}</strong><small>{item.id} · {item.category} · {item.unit}</small></span>
+                  <span><strong>{item.definition}</strong><small>{item.formula} · grain: {item.grain}</small></span>
+                  <span><strong>{item.sourceTables}</strong><small>{item.ownerEntityId}</small></span>
+                  <span><strong>{item.freshness}</strong><small>{item.sourceQuality}</small></span>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              title="Словарь метрик пуст"
+              description="Определения появятся после утверждения показателей, формул, владельцев и источников."
+              density="compact"
+            />
+          )}
+        </Card>
+      ) : null}
+    </PageContainer>
+  );
+}
+
+function OverviewPanel({
+  data,
+  hasAnalyticsData,
+  onOpenSignals,
+}: {
+  data: Data;
+  hasAnalyticsData: boolean;
+  onOpenSignals: (domain: string) => void;
+}) {
+  return (
+    <Card className="ahAnalyticsPanel">
+      <PanelHead eyebrow="Управленческий обзор" title="Состояние контуров" meta="Без медицинских данных" />
+      {hasAnalyticsData ? (
+        <>
+          <div className="ahAnalyticsDomainGrid">
+            <Domain label="Следующие оплаты" value={rub(data.owner.nextPaymentsMinor)} note="по сохранённым данным" />
+            <Domain label="Учебный прогресс" value={`${data.owner.averageProgress}%`} note="по сохранённым данным" />
+            <Domain label="Активный штат" value={String(data.owner.activeEmployees)} note="по сохранённым данным" />
+            <Domain label="Безопасность" value={String(data.owner.openSafetyFaults)} note="открытые неисправности" />
+            <Domain label="Маржа кухни" value={`${data.owner.foodMarginPercent}%`} note="по сохранённым данным" />
+            <Domain label="Проекты под риском" value={String(data.owner.projectsAtRisk)} note="по сохранённым данным" />
+          </div>
+          {data.charts.risks.length ? (
+            <div className="ahAnalyticsRiskList">
+              {data.charts.risks.map((item) => (
+                <button type="button" key={item.domain} onClick={() => onOpenSignals(item.domain)}>
+                  <span><strong>{item.domain}</strong><small>{item.high} высокой важности</small></span>
+                  <i style={{ width: `${Math.min(100, Math.max(8, item.total * 16))}%` }} />
+                  <em>{item.total}</em>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className="ahAnalyticsCoverage">
+            <Coverage title="ФАКТ" items={data.sourceCoverage.fact} />
+            <Coverage title="РАСЧЁТНОЕ" items={data.sourceCoverage.synthetic} />
+            <Coverage title="НЕТ ИСТОЧНИКА" items={data.sourceCoverage.unavailable} />
+          </div>
+        </>
+      ) : (
+        <EmptyState
+          title="Данных для обзора пока нет"
+          description="Показатели и сигналы появятся только после подключения и сохранения рабочих источников."
+          density="compact"
+        />
+      )}
+    </Card>
+  );
+}
+
+function MoneyPanel({ data, maxCash }: { data: Data; maxCash: number }) {
+  return (
+    <div className="ahAnalyticsMoneyGrid">
+      <Card className="ahAnalyticsPanel">
+        <PanelHead eyebrow="ДДС" title="Поступления и списания" meta="₽ · по месяцам" />
+        {data.charts.cash.length ? (
+          <div className="ahAnalyticsCashBars">
+            {data.charts.cash.map((item) => (
+              <div key={item.period}>
+                <div>
+                  <i className="ahAnalyticsCashIn" style={{ height: `${Math.max(3, item.receiptsMinor / maxCash * 100)}%` }} />
+                  <i className="ahAnalyticsCashOut" style={{ height: `${Math.max(3, item.outflowsMinor / maxCash * 100)}%` }} />
+                </div>
+                <strong>{item.period.slice(5)}</strong>
+                <small>{short(item.netMinor)}</small>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="Финансовых операций пока нет" description="График появится после загрузки поступлений и списаний." density="compact" />
+        )}
+      </Card>
+      <Card className="ahAnalyticsPanel">
+        <PanelHead eyebrow="Вероятностный сценарий" title="Прогноз остатка" meta="По сохранённому плану" />
+        {data.charts.forecast.length ? (
+          <div className="ahAnalyticsForecast">
+            {data.charts.forecast.map((item) => (
+              <article key={item.forecastDate}>
+                <time>{item.forecastDate.slice(5)}</time>
+                <span><strong>{item.direction} · {rub(item.weightedMinor)}</strong><small>{item.probability}% · {rub(item.amountMinor)}</small></span>
+                <em>{rub(item.balanceMinor)}</em>
+              </article>
+            ))}
+            <footer>{data.modelBoundary}</footer>
+          </div>
+        ) : (
+          <EmptyState title="Прогноз пока не рассчитан" description="Вероятностный сценарий строится только по сохранённому платёжному календарю." density="compact" />
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function PanelHead({ eyebrow, title, meta }: { eyebrow: string; title: string; meta: string }) {
+  return (
+    <header className="ahAnalyticsPanelHead">
+      <div><p>{eyebrow}</p><h2>{title}</h2></div>
+      <span>{meta}</span>
+    </header>
+  );
+}
+
+function Domain({ label, value, note }: { label: string; value: string; note: string }) {
+  return <article className="ahAnalyticsDomain"><span>{label}</span><strong>{value}</strong><small>{note}</small></article>;
+}
+
+function Coverage({ title, items }: { title: string; items: string[] }) {
+  return (
+    <article className="ahAnalyticsCoverageCard">
+      <strong>{title}</strong>
+      {items.length ? items.map((item) => <span key={item}>{item}</span>) : <small>Нет записей</small>}
+    </article>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: string }) {
+  return <article className="ahAnalyticsFact"><small>{label}</small><p>{value || "Не указано"}</p></article>;
+}
