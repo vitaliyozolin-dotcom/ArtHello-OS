@@ -49,7 +49,7 @@ const waveRoutes = {
     requireTable: false,
   },
   hr: {
-    heading: "Сотрудники",
+    heading: "Команда",
     root: ".ahHrPage",
     legacy: ".hr-workspace",
     endpoint: /\/api\/hr(?:\?.*)?$/,
