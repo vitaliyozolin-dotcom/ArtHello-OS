@@ -78,6 +78,11 @@
 }
 
 .ahButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ah-space-2);
+  max-width: 100%;
   min-height: var(--ah-control-height);
   box-sizing: border-box;
   border: 1px solid transparent;
@@ -89,6 +94,12 @@
   line-height: 1;
   cursor: pointer;
   transition: background-color .16s ease, border-color .16s ease, transform .16s ease;
+}
+
+.ahButton > svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
 }
 
 .ahButton:active {
