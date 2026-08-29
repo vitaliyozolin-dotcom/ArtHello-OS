@@ -103,6 +103,7 @@ const waveRoutes = {
   },
   strategy: {
     heading: "Проекты и стратегия",
+    baselineEmptyHeading: "Данных пока нет",
     root: ".ahStrategyPage",
     legacy: ".strategy-workspace",
     endpoint: /\/api\/strategy(?:\?.*)?$/,
@@ -117,6 +118,7 @@ const waveRoutes = {
   },
   analytics: {
     heading: "Аналитика и ИИ",
+    baselineEmptyHeading: "Данных для аналитики пока нет",
     root: ".ahAnalyticsPage",
     legacy: ".analytics-workspace",
     endpoint: /\/api\/analytics(?:\?.*)?$/,
@@ -132,6 +134,7 @@ const waveRoutes = {
   },
   readiness: {
     heading: "Готовность ArtHello OS",
+    baselineEmptyHeading: "Проверок пока нет",
     root: ".ahReadinessPage",
     legacy: ".readiness-workspace",
     endpoint: /\/api\/readiness(?:\?.*)?$/,
@@ -651,7 +654,10 @@ async function captureWaveRoute(browser, base, storageState, label, viewport, ro
   const config = waveRoutes[routeName];
   const apiFixture = { endpoint: config.endpoint, payload: waveFixtures[routeName][mode] };
   const { context, page } = await stablePage(browser, base, storageState, viewport, routeName, apiFixture);
-  await page.getByRole("heading", { name: config.heading, exact: true }).waitFor({ state: "visible", timeout: 30000 });
+  const expectedHeading = label === "baseline" && mode === "empty" && config.baselineEmptyHeading
+    ? config.baselineEmptyHeading
+    : config.heading;
+  await page.getByRole("heading", { name: expectedHeading, exact: true }).waitFor({ state: "visible", timeout: 30000 });
   if (mode === "populated" && config.populatedTab) {
     const semanticTab = page.locator(config.tabs).getByRole("tab", { name: config.populatedTab, exact: true });
     const legacyTab = page.getByRole("button", { name: config.populatedTab, exact: true });
