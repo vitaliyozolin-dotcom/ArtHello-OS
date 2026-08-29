@@ -416,7 +416,7 @@ jobs:
             bash -lc 'npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund --no-save playwright@1.55.0 pixelmatch@7.1.0 pngjs@7.0.0 >/dev/null && cp /repo/deploy/v52/visual/contractors-design-system.cjs ./capture.cjs && node capture.cjs'
 
           test -s "$out/manifest.json"
-          test "$(find "$out" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" -eq 590
+          test "$(find "$out" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" -eq 593
           printf 'ARTHELLO_DS_VISUAL=OK path=%s\n' "$out"
           trap - EXIT
           cleanup
