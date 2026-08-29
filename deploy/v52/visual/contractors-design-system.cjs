@@ -35,6 +35,7 @@ const waveRoutes = {
     heading: "Продажи",
     root: ".ahSalesPage",
     legacy: ".sales-workspace",
+    legacyTabs: ".sales-tabs",
     endpoint: /\/api\/sales(?:\?.*)?$/,
     kpis: ".ahSalesKpis > .ahKpiCard",
     kpiGrid: ".ahSalesKpis",
@@ -895,7 +896,8 @@ async function captureWaveRoute(browser, base, storageState, label, viewport, ro
   await page.getByRole("heading", { name: config.heading, exact: true }).waitFor({ state: "visible", timeout: 30000 });
   if (mode === "populated" && config.populatedTab) {
     const scopedTab = page.locator(config.tabs).getByRole("tab", { name: config.populatedTab, exact: true });
-    const legacyTab = page.locator(config.legacy).getByRole("tab", { name: config.populatedTab, exact: false });
+    const legacyScope = config.legacyTabs ? page.locator(config.legacyTabs) : page.locator(config.legacy);
+  const legacyTab = legacyScope.locator("button").filter({ hasText: config.populatedTab });
     const scopedCount = await scopedTab.count();
     const legacyCount = await legacyTab.count();
     const populatedTab = scopedCount === 1 ? scopedTab : legacyCount === 1 ? legacyTab : null;
