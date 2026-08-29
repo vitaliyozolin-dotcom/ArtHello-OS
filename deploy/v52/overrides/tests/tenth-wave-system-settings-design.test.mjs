@@ -7,6 +7,7 @@ const system = read("../app/components/SystemWorkspace.tsx");
 const systemStyles = read("../app/components/SystemWorkspace.ds.css");
 const settings = read("../app/components/SettingsWorkspace.tsx");
 const settingsStyles = read("../app/components/SettingsWorkspace.ds.css");
+const designSystemStyles = read("../app/components/design-system/design-system.css");
 
 const escapeRegExp = (value) => value.replace(/[.*+?^\$\{\}()|[\]\\]/g, "\\$&");
 
@@ -45,6 +46,13 @@ test("Wave 10 system modules and settings use shared Design System roles", () =>
   assert.match(system, /<SearchField\b/);
   assert.match(system, /<Tabs\b/);
   assert.match(settings, /<Tabs\b/);
+});
+
+test("shared Button keeps action icons at control scale", () => {
+  assert.match(designSystemStyles, /\.ahButton\s*\{[^}]*display\s*:\s*inline-flex/s);
+  assert.match(designSystemStyles, /\.ahButton\s*\{[^}]*align-items\s*:\s*center/s);
+  assert.match(designSystemStyles, /\.ahButton\s*\{[^}]*justify-content\s*:\s*center/s);
+  assert.match(designSystemStyles, /\.ahButton\s*>\s*svg\s*\{[^}]*width\s*:\s*18px[^}]*height\s*:\s*18px/s);
 });
 
 test("Wave 10 keeps every generic system module, tab and action", () => {
