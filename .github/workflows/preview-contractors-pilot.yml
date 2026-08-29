@@ -11,6 +11,7 @@ on:
       - design-system/migration-wave-5-analytics-readiness
       - design-system/migration-wave-6-finance-sales
       - design-system/migration-wave-7-hr-content
+      - design-system/migration-wave-8-registry-workflow
     paths:
       - app/components/**
       - scripts/**
@@ -254,6 +255,8 @@ jobs:
             echo "- Strategy: $PREVIEW_URL/#projects"
             echo "- Analytics: $PREVIEW_URL/#analytics"
             echo "- Readiness: $PREVIEW_URL/#acceptance"
+            echo "- Registry: $PREVIEW_URL/#registry"
+            echo "- Workflow: $PREVIEW_URL/#tasks"
             echo '- Data: isolated snapshot volume; production is not mounted'
             echo "- Result: ${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"

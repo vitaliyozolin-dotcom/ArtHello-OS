@@ -2,6 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { getNextTaskStatus, taskStatuses } from "../../lib/workflow";
+import { Button, Card, EmptyState, KpiCard, PageContainer, PageHeader, SearchField, Tabs } from "./design-system";
+import "./WorkflowWorkspace.ds.css";
 
 type Task = {
   id: number; title: string; owner: string; dueDate: string; priority: string; status: string;
@@ -72,21 +74,33 @@ export function WorkflowWorkspace({ role, notify, onChanged }: { role: string; n
     await changed("Уведомление отмечено прочитанным");
   }
 
-  return <section className="page workflow-page">
-    <div className="page-heading workflow-heading"><div><p className="eyebrow">Исполнение и контроль</p><h1>Задачи и процессы</h1><p>Сигнал проходит путь до подтверждённого результата; сроки, документы и решения остаются в истории.</p></div><button className="primary-action" onClick={() => setCreateParent(null)}>+ Новая задача</button></div>
-    <div className="workflow-kpis">
-      <WorkflowKpi label="Открытые" value={data.stats.open} note="задачи и поручения" />
-      <WorkflowKpi label="Просрочены" value={data.stats.overdue} note="требуют эскалации" tone={data.stats.overdue ? "danger" : ""} />
-      <WorkflowKpi label="На согласовании" value={data.stats.waitingApproval} note="нужен вердикт руководителя" tone="blue" />
-      <WorkflowKpi label="Эскалации" value={data.stats.escalations} note="видит руководитель" tone={data.stats.escalations ? "amber" : ""} />
+  const workflowTabs: Array<{ id: View; label: string }> = [
+    { id: "queue", label: "Моя очередь" },
+    { id: "board", label: "Доска процесса" },
+    { id: "notifications", label: `Уведомления ${data.notifications.filter((item) => item.status === "Новое").length}` },
+    { id: "documents", label: `Документы ${data.documents.length}` },
+  ];
+
+  return <PageContainer className="ahWorkflowPage">
+    <PageHeader
+      eyebrow="ИСПОЛНЕНИЕ · СРОКИ · РЕЗУЛЬТАТ"
+      title="Задачи и процессы"
+      description="Сигнал проходит путь до подтверждённого результата; сроки, документы и решения остаются в истории."
+      actions={<Button variant="primary" onClick={() => setCreateParent(null)}>Новая задача</Button>}
+    />
+    <div className="ahWorkflowKpis">
+      <KpiCard label="Открытые" value={data.stats.open} note="задачи и поручения" />
+      <KpiCard className={data.stats.overdue ? "ahWorkflowKpiDanger" : undefined} label="Просрочены" value={data.stats.overdue} note="требуют эскалации" />
+      <KpiCard label="На согласовании" value={data.stats.waitingApproval} note="нужен вердикт руководителя" />
+      <KpiCard className={data.stats.escalations ? "ahWorkflowKpiWarning" : undefined} label="Эскалации" value={data.stats.escalations} note="видит руководитель" />
     </div>
 
     {expiry ? <button className="workflow-risk" onClick={() => expiryTask && setSelectedId(expiryTask.id)}><span>!</span><div><small>Автоматический контроль обязательства</small><strong>Договор {expiry.documentId} истекает {formatDate(expiry.dueDate)}</strong><p>Уведомление руководителю и задача ответственному созданы системой. Нажмите, чтобы проверить цепочку.</p></div><em>Открыть риск →</em></button> : null}
 
-    <article className="workflow-shell">
-      <div className="workflow-viewbar">
-        <nav>{([ ["queue", "Моя очередь"], ["board", "Доска процесса"], ["notifications", `Уведомления ${data.notifications.filter((item) => item.status === "Новое").length}`], ["documents", `Документы ${data.documents.length}`] ] as Array<[View, string]>).map(([id, label]) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}>{label}</button>)}</nav>
-        {(view === "queue" || view === "board") ? <div className="workflow-filters"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по задаче, ID или источнику" aria-label="Поиск задач" /><select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Фильтр статуса"><option value="">Все статусы</option>{statuses.map((item) => <option key={item}>{item}</option>)}</select></div> : null}
+    <Card className="ahWorkflowShell">
+      <div className="ahWorkflowViewbar">
+        <div className="ahWorkflowTabs"><Tabs items={workflowTabs} value={view} onChange={setView} ariaLabel="Представления процессов" /></div>
+        {(view === "queue" || view === "board") ? <div className="ahWorkflowFilters"><SearchField value={query} onChange={setQuery} placeholder="Поиск по задаче, ID или источнику" label="Поиск задач" /><select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Фильтр статуса"><option value="">Все статусы</option>{statuses.map((item) => <option key={item}>{item}</option>)}</select></div> : null}
       </div>
 
       {state === "loading" ? <WorkflowState title="Загружаем процессы" text="Собираем задачи, сроки, уведомления и документы." /> : null}
@@ -95,17 +109,15 @@ export function WorkflowWorkspace({ role, notify, onChanged }: { role: string; n
       {state === "ready" && view === "board" ? <BoardView tasks={filtered} open={setSelectedId} /> : null}
       {state === "ready" && view === "notifications" ? <NotificationView notifications={data.notifications} escalations={data.escalations} openTask={setSelectedId} markRead={markNotification} /> : null}
       {state === "ready" && view === "documents" ? <DocumentView documents={data.documents} obligations={data.obligations} assignees={data.assignees} create={() => setDocumentAction({ mode: "create" })} version={(document) => setDocumentAction({ mode: "version", document })} /> : null}
-    </article>
+    </Card>
 
     {selectedId ? <TaskPanel role={role} taskId={selectedId} close={() => setSelectedId(null)} notify={notify} changed={changed} createSubtask={() => setCreateParent(selectedId)} /> : null}
     {createParent !== undefined ? <TaskCreateModal parentTaskId={createParent} assignees={data.assignees} close={() => setCreateParent(undefined)} done={async () => { const parent = createParent; setCreateParent(undefined); await changed(parent ? "Подзадача создана" : "Задача создана"); if (parent) { setSelectedId(null); window.setTimeout(() => setSelectedId(parent), 0); } }} notify={notify} /> : null}
     {documentAction ? <DocumentModal action={documentAction} assignees={data.assignees} close={() => setDocumentAction(null)} done={async (message) => { setDocumentAction(null); await changed(message); }} notify={notify} /> : null}
-  </section>;
+  </PageContainer>;
 }
 
-function WorkflowKpi({ label, value, note, tone = "" }: { label: string; value: number; note: string; tone?: string }) { return <article className={`workflow-kpi ${tone}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>; }
-
-function WorkflowState({ title, text, action, onAction }: { title: string; text: string; action?: string; onAction?: () => void }) { return <div className="workflow-state"><span>↻</span><h2>{title}</h2><p>{text}</p>{action ? <button onClick={onAction}>{action}</button> : null}</div>; }
+function WorkflowState({ title, text, action, onAction }: { title: string; text: string; action?: string; onAction?: () => void }) { return <EmptyState className="ahWorkflowEmpty" density="compact" title={title} description={text} action={action ? <Button variant="secondary" onClick={onAction}>{action}</Button> : undefined} />; }
 
 function QueueView({ tasks, open, create }: { tasks: Task[]; open: (id: number) => void; create: () => void }) {
   if (!tasks.length) return <WorkflowState title="Задач не найдено" text="Измените фильтры или создайте задачу." action="Создать задачу" onAction={create} />;

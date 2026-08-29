@@ -1,0 +1,425 @@
+.ahRegistryPage {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.ahRegistryPage .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahRegistryPage .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahRegistryPage .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahRegistryPage .ahPageHeaderCopy p {
+  max-width: 820px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahRegistryPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahRegistryKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahRegistryKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+  text-align: left;
+}
+
+.ahRegistryKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahRegistryKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahRegistryKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahRegistryKpiWarning {
+  border-color: #ead6aa;
+  background: #fffaf0;
+}
+
+.ahRegistryKpiDanger {
+  border-color: #efc8c3;
+  background: #fff7f6;
+}
+
+.ahRegistryShell {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 18px;
+  padding: 0;
+}
+
+.ahRegistryToolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 180px 180px max-content;
+  gap: 10px;
+  align-items: center;
+  padding: 16px;
+}
+
+.ahRegistrySearch {
+  min-width: 0;
+}
+
+.ahRegistryToolbar select {
+  width: 100%;
+  height: 42px;
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  padding: 0 12px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.ahRegistryClear {
+  min-height: 42px;
+}
+
+.ahRegistryTabs {
+  min-width: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--ah-color-border);
+  border-bottom: 1px solid var(--ah-color-border);
+  padding-inline: 16px;
+}
+
+.ahRegistryTabs .ahTabs {
+  width: 100%;
+  max-width: 100%;
+  gap: 18px;
+  overflow-x: auto;
+}
+
+.ahRegistryTabs .ahTabs button {
+  flex: 0 0 auto;
+  min-height: 42px;
+  gap: 6px;
+  padding-inline: 0;
+  font-size: 13px;
+}
+
+.ahRegistryTabs .ahTabs b {
+  min-width: 18px;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 2px 5px;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahRegistryEmpty {
+  gap: 12px;
+  min-height: 144px;
+  padding: 28px 18px;
+}
+
+.ahRegistryEmpty h3 {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahRegistryEmpty p {
+  max-width: 560px;
+  font-size: var(--ah-compact-card-body-size);
+  font-weight: 400;
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahRegistryEmpty .ahButton {
+  min-height: 36px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.ahRegistryPage .registry-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ahRegistryPage .registry-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+}
+
+.ahRegistryPage .registry-table th {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--ah-color-border);
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  letter-spacing: .05em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.ahRegistryPage .registry-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--ah-color-border);
+  color: var(--ah-color-text-primary);
+  font-size: 12px;
+  line-height: 16px;
+  vertical-align: middle;
+}
+
+.ahRegistryPage .registry-table tbody tr {
+  cursor: pointer;
+}
+
+.ahRegistryPage .registry-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ahRegistryPage .registry-table td strong,
+.ahRegistryPage .registry-table td small {
+  display: block;
+}
+
+.ahRegistryPage .registry-table td strong {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.ahRegistryPage .registry-table td small {
+  margin-top: 2px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahRegistryPage .entity-type-badge,
+.ahRegistryPage .quality-badge {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 4px 7px;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 14px;
+}
+
+@media (max-width: 1024px) {
+  .ahRegistryKpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ahRegistryToolbar {
+    grid-template-columns: minmax(0, 1fr) minmax(150px, .42fr) minmax(150px, .42fr);
+  }
+
+  .ahRegistryClear {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+@media (max-width: 720px) {
+  .ahRegistryPage {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahRegistryPage .ahPageHeader {
+    display: grid;
+    gap: 16px;
+    align-items: start;
+  }
+
+  .ahRegistryPage .ahPageHeaderCopy > small {
+    margin-bottom: 4px;
+    font-size: 11px;
+    line-height: 14px;
+  }
+
+  .ahRegistryPage .ahPageHeaderCopy h1 {
+    font-size: 32px;
+    line-height: 1.02;
+  }
+
+  .ahRegistryPage .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahRegistryPage .ahPageHeaderActions,
+  .ahRegistryPage .ahPageHeaderActions .ahButton {
+    width: 100%;
+  }
+
+  .ahRegistryPage .ahPageHeaderActions .ahButton {
+    min-height: 44px;
+    border-radius: 11px;
+    font-size: 14px;
+  }
+
+  .ahRegistryKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahRegistryKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahRegistryKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahRegistryKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahRegistryKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahRegistryShell {
+    overflow: visible;
+    border-radius: 14px;
+  }
+
+  .ahRegistryToolbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .ahRegistryToolbar select,
+  .ahRegistrySearch input {
+    font-size: 16px;
+  }
+
+  .ahRegistryClear {
+    grid-column: auto;
+    width: 100%;
+  }
+
+  .ahRegistryTabs {
+    padding-inline: 12px;
+  }
+
+  .ahRegistryTabs .ahTabs {
+    gap: 18px;
+  }
+
+  .ahRegistryPage .registry-table-wrap {
+    overflow-x: visible;
+    padding: 10px;
+  }
+
+  .ahRegistryPage .registry-table,
+  .ahRegistryPage .registry-table tbody {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .ahRegistryPage .registry-table thead {
+    display: none;
+  }
+
+  .ahRegistryPage .registry-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .ahRegistryPage .registry-table tbody tr {
+    display: grid;
+    gap: 8px;
+    border: 1px solid var(--ah-color-border);
+    border-radius: 13px;
+    background: var(--ah-color-surface);
+    padding: 12px;
+  }
+
+  .ahRegistryPage .registry-table td {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    border: 0;
+    padding: 0;
+    font-size: 11px;
+    line-height: 15px;
+  }
+
+  .ahRegistryPage .registry-table td::before {
+    color: var(--ah-color-text-secondary);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 13px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .ahRegistryPage .registry-table td:nth-child(1)::before { content: "Карточка"; }
+  .ahRegistryPage .registry-table td:nth-child(2)::before { content: "Тип"; }
+  .ahRegistryPage .registry-table td:nth-child(3)::before { content: "Используется"; }
+  .ahRegistryPage .registry-table td:nth-child(4)::before { content: "Источник"; }
+  .ahRegistryPage .registry-table td:nth-child(5)::before { content: "Качество"; }
+  .ahRegistryPage .registry-table td:nth-child(6)::before { content: "Статус"; }
+  .ahRegistryPage .registry-table td:nth-child(7) { display: none; }
+}
+
+@media (max-width: 359px) {
+  .ahRegistryKpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

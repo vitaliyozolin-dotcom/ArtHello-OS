@@ -259,6 +259,18 @@ jobs:
             grep -F "from \"./design-system\"" /app/app/components/ContentWorkspace.tsx >/dev/null
             grep -F "Каналов и материалов пока нет" /app/app/components/ContentWorkspace.tsx >/dev/null
             ! grep -F "content-workspace" /app/app/components/ContentWorkspace.tsx >/dev/null
+            test -s /app/app/components/RegistryWorkspace.tsx
+            test -s /app/app/components/RegistryWorkspace.ds.css
+            grep -F "className=\"ahRegistryPage\"" /app/app/components/RegistryWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/RegistryWorkspace.tsx >/dev/null
+            grep -F "function RegistryActionModal" /app/app/components/RegistryWorkspace.tsx >/dev/null
+            ! grep -F "registry-page" /app/app/components/RegistryWorkspace.tsx >/dev/null
+            test -s /app/app/components/WorkflowWorkspace.tsx
+            test -s /app/app/components/WorkflowWorkspace.ds.css
+            grep -F "className=\"ahWorkflowPage\"" /app/app/components/WorkflowWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/WorkflowWorkspace.tsx >/dev/null
+            grep -F "function TaskCreateModal" /app/app/components/WorkflowWorkspace.tsx >/dev/null
+            ! grep -F "workflow-page" /app/app/components/WorkflowWorkspace.tsx >/dev/null
             test -d /app/dist
             test -s /app/production/runtime-server.mjs
           '
@@ -381,7 +393,7 @@ jobs:
             bash -lc 'npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund --no-save playwright@1.55.0 pixelmatch@7.1.0 pngjs@7.0.0 >/dev/null && cp /repo/deploy/v52/visual/contractors-design-system.cjs ./capture.cjs && node capture.cjs'
 
           test -s "$out/manifest.json"
-          test "$(find "$out" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" -eq 396
+          test "$(find "$out" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" -eq 452
           printf 'ARTHELLO_DS_VISUAL=OK path=%s\n' "$out"
           trap - EXIT
           cleanup
