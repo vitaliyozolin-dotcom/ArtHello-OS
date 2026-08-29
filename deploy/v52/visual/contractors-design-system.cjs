@@ -1809,11 +1809,14 @@ async function captureFinalMobileAcceptance(browser, base, storageState, route) 
     const firstKpi = document.querySelector(".ahFinanceKpis > .ahKpiCard");
     const periodBox = period?.getBoundingClientRect();
     const kpiBox = firstKpi?.getBoundingClientRect();
+    const periodInlineHelpVisible = [...(period?.querySelectorAll('button[data-ah-help-inline="true"].ah-field-icon') ?? [])]
+      .filter((button) => getComputedStyle(button).display !== "none" && button.getClientRects().length > 0).length;
     return {
       ...common,
       periodVisible: Boolean(period && getComputedStyle(period).display !== "none" && periodBox && periodBox.height >= 44),
       periodBeforeKpis: Boolean(periodBox && kpiBox && periodBox.bottom <= kpiBox.top + 1),
       periodValue: period?.querySelector("select")?.value ?? null,
+      periodInlineHelpVisible,
     };
   }, route);
   await context.close();
@@ -1979,8 +1982,8 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
       if (route === "clients" && (!item.inputContained || item.searchPaddingLeft < 48 || item.inlineHelpVisible !== 0 || !["none", "normal", '""'].includes(item.pseudoContent))) {
         throw new Error("clients: search still contains detached duplicate affordances");
       }
-      if (route === "finance" && (!item.periodVisible || !item.periodBeforeKpis || !item.periodValue)) {
-        throw new Error("finance: mobile month selector is not visible before KPI values");
+      if (route === "finance" && (!item.periodVisible || !item.periodBeforeKpis || !item.periodValue || item.periodInlineHelpVisible !== 0)) {
+        throw new Error("finance: mobile month selector is not cleanly visible before KPI values");
       }
     }
 
