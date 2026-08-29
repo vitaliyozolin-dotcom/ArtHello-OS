@@ -10,6 +10,7 @@ on:
       - design-system/migration-wave-4-strategy
       - design-system/migration-wave-5-analytics-readiness
       - design-system/migration-wave-6-finance-sales
+      - design-system/migration-wave-7-content-hr
     paths:
       - app/components/**
       - scripts/**
