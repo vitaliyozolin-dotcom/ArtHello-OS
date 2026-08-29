@@ -1,0 +1,988 @@
+.ahAnalyticsPage,
+.ahAnalyticsDenied {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.ahAnalyticsPage .ahPageHeader,
+.ahAnalyticsDenied .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahAnalyticsPage .ahPageHeaderCopy > small,
+.ahAnalyticsDenied .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahAnalyticsPage .ahPageHeaderCopy h1,
+.ahAnalyticsDenied .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahAnalyticsPage .ahPageHeaderCopy p,
+.ahAnalyticsDenied .ahPageHeaderCopy p {
+  max-width: 790px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahAnalyticsPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahAnalyticsStatus {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  color: var(--ah-color-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahAnalyticsDenied {
+  align-content: start;
+}
+
+.ahAnalyticsDenied > .ahCard {
+  min-height: 180px;
+}
+
+.ahAnalyticsBoundary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 16px;
+  background: var(--ah-color-surface);
+  padding: 12px 14px;
+}
+
+.ahAnalyticsBoundary strong {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 5px 10px;
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: .045em;
+}
+
+.ahAnalyticsBoundary span {
+  min-width: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.ahAnalyticsKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahAnalyticsKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+}
+
+.ahAnalyticsKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahAnalyticsKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahAnalyticsKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahAnalyticsKpiWarning {
+  border-color: #f0d4b5;
+  background: var(--ah-color-warning-soft);
+}
+
+.ahAnalyticsTabs {
+  min-width: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--ah-color-border);
+}
+
+.ahAnalyticsTabs .ahTabs {
+  width: 100%;
+  max-width: 100%;
+  gap: 18px;
+  overflow-x: auto;
+}
+
+.ahAnalyticsTabs .ahTabs button {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding-inline: 0;
+  font-size: 13px;
+}
+
+.ahAnalyticsPanel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.ahAnalyticsPanel > .ahEmptyState,
+.ahAnalyticsDenied .ahEmptyState {
+  gap: 12px;
+  min-height: 126px;
+  padding: 24px 18px;
+}
+
+.ahAnalyticsPanel > .ahEmptyState h3,
+.ahAnalyticsDenied .ahEmptyState h3 {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: var(--ah-compact-card-title-weight);
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahAnalyticsPanel > .ahEmptyState p,
+.ahAnalyticsDenied .ahEmptyState p {
+  font-size: var(--ah-compact-card-body-size);
+  font-weight: var(--ah-compact-card-body-weight);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahAnalyticsPanelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ahAnalyticsPanelHead > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ahAnalyticsPanelHead p {
+  margin: 0;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 14px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.ahAnalyticsPanelHead h2 {
+  margin: 0;
+  color: var(--ah-color-text-primary);
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.ahAnalyticsPanelHead > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 5px 9px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAnalyticsDomainGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.ahAnalyticsDomain {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 14px;
+  background: var(--ah-color-surface-soft);
+  padding: 13px;
+}
+
+.ahAnalyticsDomain span,
+.ahAnalyticsDomain small {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahAnalyticsDomain strong {
+  color: var(--ah-color-text-primary);
+  font-size: 19px;
+  line-height: 23px;
+  overflow-wrap: anywhere;
+}
+
+.ahAnalyticsRiskList {
+  display: grid;
+  gap: 8px;
+}
+
+.ahAnalyticsRiskList button {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) minmax(80px, 1fr) max-content;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 13px;
+  background: var(--ah-color-surface);
+  padding: 10px 12px;
+  color: var(--ah-color-text-primary);
+  text-align: left;
+}
+
+.ahAnalyticsRiskList button:hover {
+  border-color: var(--ah-color-primary);
+}
+
+.ahAnalyticsRiskList button span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ahAnalyticsRiskList button strong,
+.ahAnalyticsRiskList button small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ahAnalyticsRiskList button small {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAnalyticsRiskList button i {
+  display: block;
+  height: 6px;
+  max-width: 100%;
+  border-radius: 99px;
+  background: var(--ah-color-primary);
+}
+
+.ahAnalyticsRiskList button em {
+  color: var(--ah-color-text-secondary);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.ahAnalyticsCoverage {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.ahAnalyticsCoverageCard {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.ahAnalyticsCoverageCard > strong {
+  width: 100%;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+  letter-spacing: .06em;
+}
+
+.ahAnalyticsCoverageCard > span {
+  max-width: 100%;
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 5px 8px;
+  color: var(--ah-color-text-primary);
+  font-size: 10px;
+  line-height: 14px;
+  overflow-wrap: anywhere;
+}
+
+.ahAnalyticsCoverageCard > small {
+  color: var(--ah-color-text-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahAnalyticsMoneyGrid,
+.ahAnalyticsDecisionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  min-width: 0;
+}
+
+.ahAnalyticsCashBars {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(44px, 1fr);
+  align-items: end;
+  gap: 10px;
+  min-width: 0;
+  min-height: 260px;
+  overflow-x: auto;
+  padding: 12px 2px 2px;
+}
+
+.ahAnalyticsCashBars > div {
+  display: grid;
+  gap: 5px;
+  min-width: 44px;
+  text-align: center;
+}
+
+.ahAnalyticsCashBars > div > div {
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  gap: 4px;
+  height: 190px;
+}
+
+.ahAnalyticsCashBars i {
+  display: block;
+  width: 11px;
+  min-height: 3px;
+  border-radius: 4px 4px 1px 1px;
+}
+
+.ahAnalyticsCashIn {
+  background: var(--ah-color-primary);
+}
+
+.ahAnalyticsCashOut {
+  background: #d9a267;
+}
+
+.ahAnalyticsCashBars strong {
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahAnalyticsCashBars small {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAnalyticsForecast {
+  display: grid;
+  gap: 8px;
+}
+
+.ahAnalyticsForecast article {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  border-bottom: 1px solid var(--ah-color-border);
+  padding: 9px 0;
+}
+
+.ahAnalyticsForecast time {
+  color: var(--ah-color-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ahAnalyticsForecast article > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ahAnalyticsForecast article strong,
+.ahAnalyticsForecast article small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ahAnalyticsForecast article small,
+.ahAnalyticsForecast footer {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.ahAnalyticsForecast article em {
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.ahAnalyticsForecast footer {
+  padding-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.ahAnalyticsFilter {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ahAnalyticsFilter label {
+  display: grid;
+  gap: 5px;
+  min-width: min(260px, 100%);
+}
+
+.ahAnalyticsFilter label > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahAnalyticsFilter select {
+  min-height: 40px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 12px;
+  background: var(--ah-color-surface);
+  padding: 8px 34px 8px 11px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.ahAnalyticsFilter > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahAnalyticsSignalLayout,
+.ahAnalyticsContractLayout {
+  display: grid;
+  grid-template-columns: minmax(260px, .72fr) minmax(0, 1.28fr);
+  gap: 16px;
+  min-width: 0;
+}
+
+.ahAnalyticsSignalList,
+.ahAnalyticsContractList,
+.ahAnalyticsRunList {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ahAnalyticsSignalList > button,
+.ahAnalyticsContractList > button {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 13px;
+  background: var(--ah-color-surface);
+  padding: 11px;
+  color: var(--ah-color-text-primary);
+  text-align: left;
+}
+
+.ahAnalyticsSignalList > button[aria-pressed="true"],
+.ahAnalyticsContractList > button[aria-pressed="true"] {
+  border-color: var(--ah-color-primary);
+  background: var(--ah-color-primary-soft);
+}
+
+.ahAnalyticsSignalList > button > b,
+.ahAnalyticsContractList > button > b {
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahAnalyticsSignalList > button > span,
+.ahAnalyticsContractList > button > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ahAnalyticsSignalList > button small,
+.ahAnalyticsContractList > button small,
+.ahAnalyticsSignalList > button em {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ahAnalyticsSignalList > button strong,
+.ahAnalyticsContractList > button strong {
+  font-size: 12px;
+  line-height: 17px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ahAnalyticsSignalList > button > i,
+.ahAnalyticsContractList > button > em {
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 5px 8px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+}
+
+.ahAnalyticsSignalDetail,
+.ahAnalyticsContractDetail {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 16px;
+  background: var(--ah-color-surface-soft);
+  padding: 14px;
+}
+
+.ahAnalyticsSignalDetail > header,
+.ahAnalyticsContractDetail > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ahAnalyticsSignalDetail > header > div,
+.ahAnalyticsContractDetail > header > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ahAnalyticsSignalDetail > header p,
+.ahAnalyticsContractDetail > header p {
+  margin: 0;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAnalyticsSignalDetail > header h2,
+.ahAnalyticsContractDetail > header h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 21px;
+  overflow-wrap: anywhere;
+}
+
+.ahAnalyticsSignalDetail > header > strong,
+.ahAnalyticsContractDetail > header > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 5px 8px;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAnalyticsSignalDetail dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.ahAnalyticsSignalDetail dl > div {
+  min-width: 0;
+  border-radius: 12px;
+  background: var(--ah-color-surface);
+  padding: 9px;
+}
+
+.ahAnalyticsSignalDetail dt,
+.ahAnalyticsSignalDetail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ahAnalyticsSignalDetail dt {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 13px;
+}
+
+.ahAnalyticsSignalDetail dd {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahAnalyticsSignalDetail > footer,
+.ahAnalyticsContractDetail > footer {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ahAnalyticsFactGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ahAnalyticsFact {
+  min-width: 0;
+  border-radius: 12px;
+  background: var(--ah-color-surface);
+  padding: 10px;
+}
+
+.ahAnalyticsFact small {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 13px;
+}
+
+.ahAnalyticsFact p {
+  margin: 5px 0 0;
+  color: var(--ah-color-text-primary);
+  font-size: 11px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
+.ahAnalyticsRunList .ahCompactListCard {
+  min-width: 0;
+  border-radius: 13px;
+  padding: 11px;
+}
+
+.ahAnalyticsRunList .ahCompactListCard > div {
+  min-width: 0;
+}
+
+.ahAnalyticsMetricTable {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.ahAnalyticsMetricTable > header,
+.ahAnalyticsMetricTable > article {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr 1fr 1fr;
+  gap: 12px;
+  min-width: 780px;
+  border-bottom: 1px solid var(--ah-color-border);
+  padding: 10px;
+}
+
+.ahAnalyticsMetricTable > header {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahAnalyticsMetricTable > article > span {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ahAnalyticsMetricTable > article strong,
+.ahAnalyticsMetricTable > article small {
+  overflow-wrap: anywhere;
+}
+
+.ahAnalyticsMetricTable > article strong {
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahAnalyticsMetricTable > article small {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 14px;
+}
+
+@media (max-width: 1024px) {
+  .ahAnalyticsKpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ahAnalyticsDomainGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ahAnalyticsMoneyGrid,
+  .ahAnalyticsDecisionGrid,
+  .ahAnalyticsSignalLayout,
+  .ahAnalyticsContractLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .ahAnalyticsPage,
+  .ahAnalyticsDenied {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahAnalyticsPage .ahPageHeader,
+  .ahAnalyticsDenied .ahPageHeader {
+    align-items: start;
+  }
+
+  .ahAnalyticsPage .ahPageHeaderCopy > small,
+  .ahAnalyticsDenied .ahPageHeaderCopy > small {
+    margin-bottom: 5px;
+    font-size: var(--ah-mobile-eyebrow-size);
+    font-weight: 750;
+    line-height: var(--ah-mobile-eyebrow-line);
+    letter-spacing: .12em;
+  }
+
+  .ahAnalyticsPage .ahPageHeaderCopy h1,
+  .ahAnalyticsDenied .ahPageHeaderCopy h1 {
+    font-size: var(--ah-font-size-page-title-mobile);
+    font-weight: 700;
+    line-height: var(--ah-line-height-page-title-mobile);
+  }
+
+  .ahAnalyticsPage .ahPageHeaderCopy p,
+  .ahAnalyticsDenied .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahAnalyticsPage .ahPageHeaderActions,
+  .ahAnalyticsPage .ahPageHeaderActions .ahButton {
+    width: 100%;
+  }
+
+  .ahAnalyticsPage .ahPageHeaderActions .ahButton {
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    font-size: var(--ah-mobile-action-size);
+  }
+
+  .ahAnalyticsBoundary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    border-radius: var(--ah-mobile-info-radius);
+    padding: var(--ah-mobile-info-padding-block) var(--ah-mobile-info-padding-inline);
+  }
+
+  .ahAnalyticsBoundary strong {
+    min-height: 0;
+    padding: 5px 8px;
+    font-size: var(--ah-mobile-info-label-size);
+    font-weight: 800;
+    line-height: var(--ah-mobile-info-label-line);
+  }
+
+  .ahAnalyticsBoundary span {
+    font-size: var(--ah-mobile-info-body-size);
+    line-height: var(--ah-mobile-info-body-line);
+  }
+
+  .ahAnalyticsKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahAnalyticsKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahAnalyticsKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahAnalyticsKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahAnalyticsKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahAnalyticsTabs .ahTabs {
+    gap: 14px;
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+
+  .ahAnalyticsTabs .ahTabs button {
+    min-height: 38px;
+    font-size: 12px;
+  }
+
+  .ahAnalyticsPanel {
+    gap: 14px;
+    padding: 13px;
+  }
+
+  .ahAnalyticsPanelHead {
+    gap: 10px;
+  }
+
+  .ahAnalyticsPanelHead > span {
+    max-width: 42%;
+    text-align: right;
+    white-space: normal;
+  }
+
+  .ahAnalyticsDomainGrid,
+  .ahAnalyticsCoverage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahAnalyticsRiskList button {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .ahAnalyticsRiskList button i {
+    grid-column: 1 / -1;
+  }
+
+  .ahAnalyticsFilter {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ahAnalyticsFilter label {
+    min-width: 0;
+  }
+
+  .ahAnalyticsSignalList > button,
+  .ahAnalyticsContractList > button {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .ahAnalyticsSignalList > button > i,
+  .ahAnalyticsContractList > button > em {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .ahAnalyticsSignalDetail dl,
+  .ahAnalyticsFactGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahAnalyticsSignalDetail > footer,
+  .ahAnalyticsContractDetail > footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahAnalyticsSignalDetail > footer .ahButton,
+  .ahAnalyticsContractDetail > footer .ahButton {
+    width: 100%;
+  }
+
+  .ahAnalyticsForecast article {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .ahAnalyticsForecast article > em {
+    grid-column: 2;
+  }
+
+  .ahAnalyticsMetricTable {
+    overflow: visible;
+  }
+
+  .ahAnalyticsMetricTable > header {
+    display: none;
+  }
+
+  .ahAnalyticsMetricTable > article {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    min-width: 0;
+    border: 1px solid var(--ah-color-border);
+    border-radius: 13px;
+    padding: 11px;
+  }
+
+  .ahAnalyticsMetricTable > article + article {
+    margin-top: 8px;
+  }
+}
+
+@media (max-width: 359px) {
+  .ahAnalyticsKpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

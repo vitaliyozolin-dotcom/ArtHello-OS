@@ -8,6 +8,7 @@ on:
       - design-system/migration-wave-2-procurement-food
       - design-system/migration-wave-3-safety-medical
       - design-system/migration-wave-4-strategy
+      - design-system/migration-wave-5-analytics-readiness
     paths:
       - app/components/**
       - scripts/**
@@ -248,6 +249,9 @@ jobs:
             echo "- Food: $PREVIEW_URL/#food"
             echo "- Safety: $PREVIEW_URL/#safety"
             echo "- Medical: $PREVIEW_URL/#medical"
+            echo "- Strategy: $PREVIEW_URL/#projects"
+            echo "- Analytics: $PREVIEW_URL/#analytics"
+            echo "- Readiness: $PREVIEW_URL/#acceptance"
             echo '- Data: isolated snapshot volume; production is not mounted'
             echo "- Result: ${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"

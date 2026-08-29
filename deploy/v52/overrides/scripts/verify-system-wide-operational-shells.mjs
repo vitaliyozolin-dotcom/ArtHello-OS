@@ -52,8 +52,20 @@ requireText(legal, "<Tabs", "legal tabs are hidden by an empty-state branch");
 requireText(legal, "<KpiCard", "legal registry KPI cards are missing");
 forbid(legal, /\blegal-workspace\b/, "legacy legal workspace wrapper remains");
 forbid(legal, /if\s*\(\s*!\s*(?:hasData|hasLegalData)\s*\)\s*(?:\{[\s\S]{0,160}?\breturn\b|return\b)/, "legal workspace still collapses when empty");
-requireText(analytics, "Все аналитические разделы доступны сразу", "analytics still collapses when empty");
-requireText(readiness, "Визуальная проверка, сценарии", "readiness still collapses when empty");
+requireText(analytics, "ahAnalyticsPage", "analytics workspace is not mounted on the design-system shell");
+requireText(analytics, "<PageContainer", "analytics page container is missing");
+requireText(analytics, "<PageHeader", "analytics page header is missing");
+requireText(analytics, "<Tabs", "analytics tabs are hidden by an empty-state branch");
+requireText(analytics, "<KpiCard", "analytics registry KPI cards are missing");
+forbid(analytics, /\banalytics-workspace\b/, "legacy analytics workspace wrapper remains");
+forbid(analytics, /if\s*\(\s*!\s*hasAnalyticsData\s*\)\s*(?:\{[\s\S]{0,160}?\breturn\b|return\b)/, "analytics workspace still collapses when empty");
+requireText(readiness, "ahReadinessPage", "readiness workspace is not mounted on the design-system shell");
+requireText(readiness, "<PageContainer", "readiness page container is missing");
+requireText(readiness, "<PageHeader", "readiness page header is missing");
+requireText(readiness, "<Tabs", "readiness tabs are hidden by an empty-state branch");
+requireText(readiness, "<KpiCard", "readiness registry KPI cards are missing");
+forbid(readiness, /\breadiness-workspace\b/, "legacy readiness workspace wrapper remains");
+forbid(readiness, /if\s*\(\s*!\s*hasReadinessData\s*\)\s*(?:\{[\s\S]{0,160}?\breturn\b|return\b)/, "readiness workspace still collapses when empty");
 requireText(accounting, "ahAccountingPage", "accounting workspace is not mounted on the design-system shell");
 requireText(accounting, "<PageContainer", "accounting page container is missing");
 requireText(accounting, "<PageHeader", "accounting page header is missing");
@@ -109,11 +121,12 @@ requireText(helpCss, "/* ARTHELLO_HELP_CANONICAL_V5 */", "canonical help styling
 forbid(polish, /ARTHELLO_MOBILE_VISUAL_HELP_FOLLOWUP|ARTHELLO_OPERATIONAL_UX_V3|ARTHELLO_MOBILE_DESIGN_SYSTEM_V4|ARTHELLO_HELP_MARKER_RIGHT_EDGE/, "legacy mobile CSS layers remain after canonical cleanup");
 forbid(helpCss, /ARTHELLO_HELP_UX_V3|ARTHELLO_HELP_VISIBILITY_V4/, "legacy help CSS layers remain after canonical cleanup");
 
-const productionSources = [procurement, food, safety, medical, strategy].join("\n");
+const productionSources = [procurement, food, safety, medical, strategy, analytics, readiness].join("\n");
 forbid(productionSources, /Тестовый комплект для класса/, "hard-coded procurement test request remains");
 forbid(productionSources, /SAFE-SYS-T-ACS-01|OBJ-T-002|ACT-SAFE-T-032/, "hard-coded safety test references remain");
 forbid(productionSources, /MEDICAL_FULL_SYNTHETIC|ЗАЩИЩЁННАЯ ЗОНА · ТЕСТ/, "medical test labels remain");
 forbid(productionSources, /ТЕСТОВАЯ СТРАТЕГИЯ|STR-PRJ-T-014/, "strategy test references remain");
+forbid(productionSources, /ОПУБЛИКОВАННЫЙ ТЕСТОВЫЙ СНИМОК|SCN-T-09|25\/25|84\/84/, "fixed analytics or readiness acceptance claims remain");
 forbid(productionSources, /ТЕСТОВЫЙ РЫНОК|ТЕСТОВЫЙ КОНТУР/, "production modules still advertise a test contour");
 
 const componentsDir = fileURLToPath(new URL("../app/components/", import.meta.url));
