@@ -432,6 +432,10 @@
     line-height: 16px;
   }
 
+  .ahFinancePeriodMobile > span > button[data-ah-help-inline="true"].ah-field-icon {
+    display: none !important;
+  }
+
   .ahFinancePeriodMobile select {
     width: 100%;
     min-width: 0;
