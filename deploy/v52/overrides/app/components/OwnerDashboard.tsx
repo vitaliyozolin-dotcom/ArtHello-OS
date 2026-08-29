@@ -216,7 +216,7 @@ export function OwnerDashboard({ displayName, roleLabel, tasks, sourceOnly, navi
   }
 
   return (
-    <section className={styles.dashboard} aria-label={`Персональный дашборд: ${roleLabel}`}>
+    <section className={`${styles.dashboard} owner-dashboard`} aria-label={`Персональный дашборд: ${roleLabel}`}>
       <header className={styles.heading}>
         <div>
           <h1>Доброе утро, {firstName}!</h1>
@@ -225,11 +225,11 @@ export function OwnerDashboard({ displayName, roleLabel, tasks, sourceOnly, navi
         <button type="button" onClick={createTask}><AppIcon name="plus" /> Новая задача</button>
       </header>
 
-      <div className={styles.kpis}>
+      <div className={`${styles.kpis} owner-dashboard-kpis`}>
         {metrics.map((metric, index) => (
-          <button key={metric.label} type="button" onClick={() => navigate(metric.module)} className={styles[metric.tone]}>
-            <span className={styles.kpiIcon}><AppIcon name={kpiIcons[index]} /></span>
-            <span className={styles.kpiCopy}><small>{metric.label}</small><strong>{metric.value}</strong><em>{metric.note}</em></span>
+          <button key={metric.label} type="button" onClick={() => navigate(metric.module)} className={`${styles[metric.tone]} owner-dashboard-kpi`}>
+            <span className={`${styles.kpiIcon} owner-dashboard-kpi-icon`}><AppIcon name={kpiIcons[index]} /></span>
+            <span className={`${styles.kpiCopy} owner-dashboard-kpi-copy`}><small>{metric.label}</small><strong>{metric.value}</strong><em>{metric.note}</em></span>
           </button>
         ))}
       </div>
