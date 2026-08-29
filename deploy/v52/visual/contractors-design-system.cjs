@@ -91,7 +91,7 @@ const waveRoutes = {
     kpis: ".ahEducationKpis > .ahKpiCard",
     kpiGrid: ".ahEducationKpis",
     tabs: ".ahEducationTabs .ahTabs",
-    table: ".edu-table",
+    table: ".ahEducationTable",
     empty: ".ahEducationPage .ahEmptyState",
     populatedTab: "Журнал",
     modal: ".edu-editor",
