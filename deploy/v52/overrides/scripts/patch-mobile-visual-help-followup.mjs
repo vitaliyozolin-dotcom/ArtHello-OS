@@ -25,7 +25,7 @@ function replaceRequired(source, before, after, label) {
     '  const decisions = tasks.slice(0, 5);\n  const chartData = useMemo(() => finance?.monthly ?? [], [finance]);',
     '  const decisions = tasks.slice(0, 5);\n  const availableDashboardPeriods = useMemo(() => {\n    const values = [finance?.selectedPeriod, ...(finance?.monthly.map((item) => item.period) ?? [])].filter((value): value is string => Boolean(value));\n    return [...new Set(values)].sort().reverse();\n  }, [finance]);\n  const chartData = useMemo(() => finance?.monthly ?? [], [finance]);', "available dashboard periods");
   const anchors = [
-    ['<div className={styles.kpis}>','<div className={styles.kpis} data-help-block="kpis">'],
+    ['<div className={`${styles.kpis} owner-dashboard-kpis`}>','<div className={`${styles.kpis} owner-dashboard-kpis`} data-help-block="kpis">'],
     ['<article className={styles.panel}>\n          <header><strong>Сигналы и риски</strong>','<article className={styles.panel} data-help-block="signals">\n          <header><strong>Сигналы и риски</strong>'],
     ['<article className={styles.panel}>\n          <header><strong>Что требует моего решения</strong>','<article className={styles.panel} data-help-block="decisions">\n          <header><strong>Что требует моего решения</strong>'],
     ['<article className={`${styles.panel} ${chartStyles.chartPanel}`}>','<article className={`${styles.panel} ${chartStyles.chartPanel}`} data-help-block="cashflow">'],
