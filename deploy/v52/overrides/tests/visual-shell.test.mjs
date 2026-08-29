@@ -16,7 +16,7 @@ const ownerStyles = read("../app/components/OwnerDashboard.module.css");
 const shellFoundation = read("../app/components/ShellFoundation.css");
 const airyLayout = read("../app/components/AiryLayout.css");
 const contentModern = read("../app/components/ContentModern.css");
-const mobilePatch = read("../scripts/patch-mobile-design-system-v4.mjs");
+const mobilePatch = read("../scripts/patch-mobile-canonical-v5.mjs");
 const db = read("../db/index.ts");
 
 test("design tokens expose the required semantic system", () => {
