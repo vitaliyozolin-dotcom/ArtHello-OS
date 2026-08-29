@@ -31,35 +31,6 @@ function patch(relativePath, transform) {
   writeFileSync(path, after, "utf8");
 }
 
-patch("app/components/ContentWorkspace.tsx", (input) => {
-  let source = input;
-  source = replaceText(
-    source,
-    'export function ContentWorkspace({ role, notify, onTasksChanged, onOpenSales, onOpenFinance, sourceOnly = false }: { role: string; notify: (value: string) => void; onTasksChanged: () => void; onOpenSales: () => void; onOpenFinance: () => void; sourceOnly?: boolean }) {',
-    'export function ContentWorkspace({ role, notify, onTasksChanged, onOpenSales, onOpenFinance, onOpenIntegrations, sourceOnly = false }: { role: string; notify: (value: string) => void; onTasksChanged: () => void; onOpenSales: () => void; onOpenFinance: () => void; onOpenIntegrations: () => void; sourceOnly?: boolean }) {',
-    "content integration prop",
-  );
-  source = replaceRegex(
-    source,
-    /  if \(!sourceOnly && !hasContentData && activeTab !== "studio"\) return <section className="page content-workspace">[\s\S]*?\n  <\/section>;/,
-    `  if (!sourceOnly && !hasContentData && activeTab !== "studio") return <section className="page content-workspace operational-empty-workspace">\n    <div className="content-heading"><div><p className="eyebrow">Контент-студия ArtHello</p><h1>Контент и маркетинг</h1><p>Все рабочие разделы доступны сразу. Реальные показатели появятся после подключения каналов или создания первого материала.</p></div><div className="operational-heading-actions"><button onClick={() => setTab("studio")}>Открыть студию</button><button className="secondary" onClick={onOpenIntegrations}>Подключить каналы</button></div></div>\n    <div className="content-boundary"><strong>РАБОЧАЯ СТРУКТУРА</strong><span>Контент-план, публикации, атрибуция и рекомендации остаются доступными при нулевых данных.</span><em>фиктивные показатели не создаются</em></div>\n    <div className="content-kpis"><button onClick={() => setTab("publications")}><span>Охват</span><strong>0</strong><small>каналы не подключены</small></button><button onClick={() => setTab("publications")}><span>Переходы</span><strong>0</strong><small>метрик пока нет</small></button><button onClick={() => setTab("chain")}><span>Заявки → договоры</span><strong>0 → 0</strong><small>атрибуция пуста</small></button><button className="positive" onClick={() => setTab("chain")}><span>Выручка</span><strong>{rubles(0)}</strong><small>нет связанных операций</small></button></div>\n    <div className="content-tabs">{tabs.map((item) => <button key={item.id} className={activeTab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}{item.id === "recommendations" ? <b>0</b> : null}</button>)}</div>\n    {activeTab === "overview" ? <div className="operational-empty-grid"><button className="operational-empty-card" onClick={onOpenIntegrations}><span>01</span><strong>Каналы</strong><p>Подключите VK, Telegram, сайт, email, Яндекс или другие утверждённые источники.</p></button><button className="operational-empty-card" onClick={() => setTab("studio")}><span>02</span><strong>Студия</strong><p>Создавайте изображения по описанию и референсу после подключения провайдера.</p></button><button className="operational-empty-card" onClick={() => setTab("plan")}><span>03</span><strong>Контент-план</strong><p>Черновики, согласование, расписание и ответственные остаются в одном процессе.</p></button><button className="operational-empty-card" onClick={() => setTab("publications")}><span>04</span><strong>Публикации</strong><p>Ссылки, форматы и фактические метрики появятся после первого материала.</p></button><button className="operational-empty-card" onClick={() => setTab("chain")}><span>05</span><strong>До выручки</strong><p>Публикация связывается с переходом, лидом, договором и оплатой только по подтверждённым данным.</p></button><button className="operational-empty-card" onClick={() => setTab("recommendations")}><span>06</span><strong>Рекомендации</strong><p>Система не предлагает масштабирование без реальной статистики и атрибуции.</p></button></div> : null}\n    {activeTab === "plan" ? <article className="content-panel"><Head eyebrow="Редакционный ритм" title="Контент-план" aside="0 материалов" /><div className="empty-kanban">{["Черновик", "На согласовании", "Запланировано", "Опубликовано"].map((status) => <article key={status}><header><strong>{status}</strong><span>0</span></header><p>Материалы появятся после подключения канала и назначения автора.</p></article>)}</div></article> : null}\n    {activeTab === "publications" ? <div className="operational-inline-empty"><span>0</span><strong>Публикаций пока нет</strong><p>Подключите канал или подтвердите первую рабочую ссылку на опубликованный материал.</p><button onClick={onOpenIntegrations}>Подключить канал</button></div> : null}\n    {activeTab === "chain" ? <div className="operational-inline-empty"><span>→</span><strong>Атрибуция ещё не собрана</strong><p>Здесь появится маршрут публикация → переход → заявка → договор → платёж. Пустые связи не подменяются тестовыми.</p></div> : null}\n    {activeTab === "recommendations" ? <div className="operational-inline-empty"><span>0</span><strong>Рекомендаций пока нет</strong><p>Рекомендации формируются только после появления фактических публикаций и измеримых результатов.</p></div> : null}\n  </section>;`,
-    "content complete empty shell",
-  );
-  source = replaceText(
-    source,
-    '{!studioMode && data.accounts.length ? <button onClick={() => setCreateOpen(true)}>+ Материал в план</button> : null}</div>',
-    '<div className="operational-heading-actions">{!studioMode && data.accounts.length ? <button onClick={() => setCreateOpen(true)}>+ Материал в план</button> : null}{studioMode ? <button onClick={() => setTab("overview")}>Обзор контента</button> : null}<button className="secondary" onClick={onOpenIntegrations}>Подключить каналы</button></div></div>',
-    "content heading actions",
-  );
-  source = replaceText(
-    source,
-    '\n\n    {activeTab === "overview" ?',
-    '\n    {studioMode ? <div className="content-tabs">{tabs.map((item) => <button key={item.id} className={activeTab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}{item.id === "recommendations" ? <b>{data.recommendations.filter((row) => row.status !== "Закрыта").length}</b> : null}</button>)}</div> : null}\n\n    {activeTab === "overview" ?',
-    "content studio navigation",
-  );
-  return source;
-});
-
 patch("app/api/legal-actions/route.ts", (input) => {
   let source = input;
   source = replaceText(
