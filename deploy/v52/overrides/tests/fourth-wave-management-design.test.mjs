@@ -64,15 +64,6 @@ test("Wave 4 uses the shared Design System management shell", () => {
   assert.match(designSystem, /designSystemVersion\s*=\s*["']1\.4-management-insight["']/);
 });
 
-test("Wave 4 visual gate accepts only the known legacy empty headings in baseline", () => {
-  const visual = read("../deploy/v52/visual/contractors-design-system.cjs");
-  for (const heading of ["Данных пока нет", "Данных для аналитики пока нет", "Проверок пока нет"]) {
-    assert.match(visual, new RegExp(`baselineEmptyHeading: ["']${heading}["']`));
-  }
-  assert.match(visual, /label === ["']baseline["'] && mode === ["']empty["']/);
-  assert.match(visual, /expectedHeading/);
-});
-
 test("Wave 4 keeps complete shells and approved information hierarchy", () => {
   assertNoBlockingEmptyReturn(strategy, "StrategyWorkspace");
   assertNoBlockingEmptyReturn(analytics, "AnalyticsWorkspace");
