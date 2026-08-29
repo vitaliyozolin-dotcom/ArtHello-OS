@@ -69,7 +69,7 @@ test("array-backed workspaces handle empty data before unsafe first-row access",
   assert.doesNotMatch(readiness, /if\s*\(\s*!\s*hasReadinessData\s*\)\s*return\b/);
 });
 
-test("content and education use real records instead of demo identities", () => {
+test("content keeps every section available and uses real records instead of demo identities", () => {
   const content = read("../app/components/ContentWorkspace.tsx");
   const education = [
     read("../app/components/EducationWorkspace.tsx"),
@@ -77,7 +77,12 @@ test("content and education use real records instead of demo identities", () => 
     read("../app/api/education-actions/route.ts"),
   ].join("\n");
 
-  assert.match(content, /Данных пока нет/);
+  assert.match(content, /ДАННЫХ ПОКА НЕТ/);
+  assert.match(content, /\bhasContentData\b/);
+  assert.match(content, /<PageContainer\b[^>]*className="ahContentPage"/);
+  assert.match(content, /<Tabs\b/);
+  assert.doesNotMatch(content, /if\s*\(\s*!sourceOnly\s*&&\s*!hasContentData[\s\S]{0,40}?\)\s*return\b/);
+  assert.doesNotMatch(content, /CHAIN STATUS\s*·\s*PASS/);
   assert.match(content, /Math\.max\(1,/);
   assert.doesNotMatch(content, /EMP-T-CONTENT|OFF-T-001|Тестовые данные|синтетический финансовый/);
   assert.doesNotMatch(education, /EMP-T-032|FAM-T-014|PRG-T-012|GRP-T-3A|LES-T-3A/);

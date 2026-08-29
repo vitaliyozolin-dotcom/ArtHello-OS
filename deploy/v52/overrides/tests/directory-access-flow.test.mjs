@@ -14,7 +14,7 @@ test("team is the employee directory and supports controlled manual and file ent
     assert.match(workspace, new RegExp(action));
   }
   assert.match(workspace, /Импортировать/);
-  assert.match(workspace, /\+ Сотрудник/);
+  assert.match(workspace, /Добавить сотрудника/);
   assert.match(actions, /accessStatus:\s*"Доступ не выдан"/);
 });
 

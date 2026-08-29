@@ -14,7 +14,7 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 340;
+const expectedPngCount = 396;
 
 const waveRoutes = {
   finance: {
@@ -46,6 +46,40 @@ const waveRoutes = {
     modal: ".lead-create-modal",
     modalTrigger: /^Добавить лид$/,
     modalFields: ["name", "source", "phone", "email", "interest", "branchId", "comment"],
+    requireTable: false,
+  },
+  hr: {
+    heading: "Команда",
+    root: ".ahHrPage",
+    legacy: ".hr-workspace",
+    endpoint: /\/api\/hr(?:\?.*)?$/,
+    kpis: ".ahHrKpis > .ahKpiCard",
+    kpiGrid: ".ahHrKpis",
+    tabs: ".ahHrTabs .ahTabs",
+    table: ".employee-grid",
+    empty: ".ahHrPage .ahEmptyState",
+    populatedTab: "Сотрудники",
+    modal: ".staff-modal",
+    modalTrigger: /^Добавить сотрудника$/,
+    modalFields: ["displayName", "contact", "positionId", "rateRubles", "hireDate", "status", "contractId", "note"],
+    modalFieldSelectors: { status: '[aria-label="Статус сотрудника"]' },
+    requireTable: false,
+  },
+  content: {
+    heading: "Контент и маркетинг",
+    root: ".ahContentPage",
+    legacy: ".content-workspace",
+    endpoint: /\/api\/content(?:\?.*)?$/,
+    kpis: ".ahContentKpis > .ahKpiCard",
+    kpiGrid: ".ahContentKpis",
+    tabs: ".ahContentTabs .ahTabs",
+    table: ".publication-grid",
+    empty: ".ahContentPage .ahEmptyState",
+    populatedTab: "Контент-план",
+    modal: ".content-modal",
+    modalTrigger: /^Добавить материал$/,
+    modalFields: ["scheduledAt", "accountId", "authorEntityId", "format", "campaignId", "topic", "brief"],
+    expectedTabCount: 6,
     requireTable: false,
   },
   legal: {
@@ -235,6 +269,53 @@ const populatedSales = {
   sourcePolicy: { mode: "visual", note: "Только синтетические записи visual gate; рабочие данные не используются.", financeLink: "Платёж связан с FIN-VISUAL-001." },
   ltvPlan: { families: [{ familyEntityId: "FAM-VISUAL-001", actualLtvMinor: 96000000, monthlyValueMinor: 32000000, retentionProbability: 80, baseNext12MonthsMinor: 384000000, riskAdjustedNext12MonthsMinor: 307200000, forecastLtvMinor: 403200000 }], actualLtvMinor: 96000000, averageActualLtvMinor: 96000000, baseNext12MonthsMinor: 384000000, riskAdjustedNext12MonthsMinor: 307200000, forecastLtvMinor: 403200000, method: "Факт плюс риск-скорректированный сценарий visual gate" },
   acceptanceChainLeadId: "LEAD-VISUAL-001",
+};
+
+const emptyHr = {
+  vacancies: [], candidates: [], interviews: [], employees: [], onboarding: [], development: [], rewards: [], accesses: [],
+  entityNames: {}, employeeProfiles: {}, branches: [], documents: [], tasks: [], payroll: [], funnel: [],
+  summary: { openVacancies: 0, candidates: 0, activeEmployees: 0, revokedAccesses: 0 },
+  chain: { vacancyId: "", candidateId: "", interviewId: "", employeeId: "", contractId: "", positionId: "", accessId: "", onboardingId: "", payrollId: "", evaluationId: "" },
+  boundary: "Сотрудник создаётся один раз; импорт не выдаёт доступ автоматически.",
+};
+
+const populatedHr = {
+  ...emptyHr,
+  vacancies: [{ id: "VAC-VISUAL-001", title: "Педагог", unit: "Школа", headcount: 1, status: "В работе" }],
+  candidates: [{ id: "CAND-VISUAL-001", entityId: "PERSON-VISUAL-001", vacancyId: "VAC-VISUAL-001", source: "Рекомендация", stage: "Интервью", score: 82, decision: "", rejectionReason: "", offerStatus: "Не создан", evidence: "Подтверждённое интервью visual gate" }],
+  interviews: [{ id: "INT-VISUAL-001", candidateId: "CAND-VISUAL-001", scheduledAt: "2026-08-20T10:00:00.000Z", score: 82, summary: "Квалификация подтверждена", decision: "Продолжить" }],
+  employees: [{ id: "EMP-VISUAL-001", candidateId: "CAND-VISUAL-001", contractId: "LCON-VISUAL-001", positionId: "Педагог", unit: "Школа", rateMinor: 9500000, hireDate: "2026-08-25", status: "Работает", terminationDate: "", terminationReason: "", accessStatus: "Не выдан" }],
+  onboarding: [{ id: "ONB-VISUAL-001", employeeId: "EMP-VISUAL-001", step: "Знакомство с процессами", status: "В работе", dueDate: "2026-09-01", evidence: "Задача создана", relatedTaskId: 101 }],
+  development: [{ id: "DEV-VISUAL-001", employeeId: "EMP-VISUAL-001", eventType: "Аттестация", title: "Вводная оценка", eventDate: "2026-08-27", score: 82, status: "Завершено", evidence: "Протокол visual gate" }],
+  rewards: [],
+  accesses: [{ id: "ACCESS-VISUAL-001", employeeId: "EMP-VISUAL-001", system: "ArtHello OS", role: "Педагог", status: "Не выдан", grantedAt: "", revokedAt: "", revocationReason: "" }],
+  entityNames: { "PERSON-VISUAL-001": "Кандидат visual fixture", "EMP-VISUAL-001": "Сотрудник visual fixture" },
+  employeeProfiles: { "EMP-VISUAL-001": { contact: "employee@example.test", employmentType: "Штат", note: "Visual fixture", branches: ["Школа"], branchIds: ["BR-VISUAL-001"], sourceSystem: "MANUAL", dataQuality: "Visual fixture" } },
+  branches: [{ id: "BR-VISUAL-001", name: "Школа", kind: "Филиал", status: "Активен" }],
+  documents: [{ id: "LCON-VISUAL-001", title: "Трудовой договор", status: "На проверке" }],
+  tasks: [{ id: 101, sourceId: "EMP-VISUAL-001", status: "В работе", result: "" }],
+  payroll: [{ id: "PAY-VISUAL-001", counterpartyEntityId: "EMP-VISUAL-001", amountMinor: 9500000, period: "2026-08", dataQuality: "Visual fixture" }],
+  funnel: [{ stage: "Интервью", count: 1 }, { stage: "Оформлен", count: 1 }],
+  summary: { openVacancies: 1, candidates: 1, activeEmployees: 1, revokedAccesses: 0 },
+  chain: { vacancyId: "VAC-VISUAL-001", candidateId: "CAND-VISUAL-001", interviewId: "INT-VISUAL-001", employeeId: "EMP-VISUAL-001", contractId: "LCON-VISUAL-001", positionId: "Педагог", accessId: "ACCESS-VISUAL-001", onboardingId: "ONB-VISUAL-001", payrollId: "PAY-VISUAL-001", evaluationId: "DEV-VISUAL-001" },
+};
+
+const emptyContent = {
+  accounts: [], plan: [], publications: [], recommendations: [], entityNames: {}, chain: [],
+  summary: { reach: 0, views: 0, reactions: 0, clicks: 0, leads: 0, contracts: 0, revenueMinor: 0 },
+  sourcePolicy: { status: "Нет данных", note: "Подключённых каналов и публикаций пока нет.", ranking: "только подтверждённые ответы источников" },
+};
+
+const populatedContent = {
+  ...emptyContent,
+  accounts: [{ id: "SOC-VISUAL-001", platform: "VK", displayName: "ArtHello visual fixture", status: "Подключён", audienceCount: 1250, sourceType: "Visual fixture" }],
+  plan: [{ id: "PLAN-VISUAL-001", scheduledAt: "2026-09-02T12:00:00.000Z", accountId: "SOC-VISUAL-001", authorEntityId: "EMP-VISUAL-001", format: "Пост", topic: "Открытый урок", offerId: "OFF-VISUAL-001", campaignId: "CMP-VISUAL-001", status: "Запланировано", brief: "Проверить интерес к открытому уроку" }],
+  publications: [{ id: "PUB-VISUAL-001", planItemId: "PLAN-VISUAL-001", publishedAt: "2026-08-25T12:00:00.000Z", publicationRef: "visual://publication", reach: 820, views: 940, reactions: 76, clicks: 31, leads: 4, contracts: 1, revenueMinor: 32000000, dataQuality: "Visual fixture", rates: { engagementPercent: 9.3, clickPercent: 3.3, leadPercent: 12.9, contractPercent: 25 }, planItem: { id: "PLAN-VISUAL-001", scheduledAt: "2026-09-02T12:00:00.000Z", accountId: "SOC-VISUAL-001", authorEntityId: "EMP-VISUAL-001", format: "Пост", topic: "Открытый урок", offerId: "OFF-VISUAL-001", campaignId: "CMP-VISUAL-001", status: "Опубликовано", brief: "Проверить интерес к открытому уроку" }, account: { id: "SOC-VISUAL-001", platform: "VK", displayName: "ArtHello visual fixture" } }],
+  recommendations: [{ id: "REC-VISUAL-001", publicationId: "PUB-VISUAL-001", signalType: "Конверсия", evidence: "4 заявки из 31 перехода", recommendation: "Проверить повтор формата", status: "Открыта", relatedTaskId: null }],
+  entityNames: { "EMP-VISUAL-001": "Автор visual fixture" },
+  chain: [{ id: "CHAIN-VISUAL-001", publicationId: "PUB-VISUAL-001", clickId: "CLICK-VISUAL-001", leadId: "LEAD-VISUAL-001", contractId: "LCON-VISUAL-001", paymentOperationId: "FIN-VISUAL-001", revenueMinor: 32000000, attributionModel: "Последний подтверждённый переход", publication: { id: "PUB-VISUAL-001", planItemId: "PLAN-VISUAL-001", publishedAt: "2026-08-25T12:00:00.000Z", publicationRef: "visual://publication", reach: 820, views: 940, reactions: 76, clicks: 31, leads: 4, contracts: 1, revenueMinor: 32000000, dataQuality: "Visual fixture", rates: { engagementPercent: 9.3, clickPercent: 3.3, leadPercent: 12.9, contractPercent: 25 } }, planItem: { id: "PLAN-VISUAL-001", scheduledAt: "2026-09-02T12:00:00.000Z", accountId: "SOC-VISUAL-001", authorEntityId: "EMP-VISUAL-001", format: "Пост", topic: "Открытый урок", offerId: "OFF-VISUAL-001", campaignId: "CMP-VISUAL-001", status: "Опубликовано", brief: "Проверить интерес к открытому уроку" }, lead: { id: "LEAD-VISUAL-001", source: "VK", campaignId: "CMP-VISUAL-001", offerId: "OFF-VISUAL-001" }, payment: { id: "FIN-VISUAL-001", amountMinor: 32000000, operationDate: "2026-08-28", dataQuality: "Visual fixture" } }],
+  summary: { reach: 820, views: 940, reactions: 76, clicks: 31, leads: 4, contracts: 1, revenueMinor: 32000000 },
+  sourcePolicy: { status: "Подключено", note: "Метрики получены от visual fixture канала.", ranking: "выручка → договор → заявка → переход" },
 };
 
 const emptyLegal = {
@@ -604,6 +685,8 @@ const populatedReadiness = {
 const waveFixtures = {
   finance: { empty: emptyFinance, populated: populatedFinance },
   sales: { empty: emptySales, populated: populatedSales },
+  hr: { empty: emptyHr, populated: populatedHr },
+  content: { empty: emptyContent, populated: populatedContent },
   legal: { empty: emptyLegal, populated: populatedLegal },
   accounting: { empty: emptyAccounting, populated: populatedAccounting },
   procurement: { empty: emptyProcurement, populated: populatedProcurement },
@@ -862,7 +945,8 @@ async function verifyWaveModal(page, config) {
   const modal = page.locator(config.modal).first();
   await modal.waitFor({ state: "visible", timeout: 10000 });
   for (const field of config.modalFields) {
-    const input = modal.locator(`[name="${field}"]`).first();
+    const selector = config.modalFieldSelectors?.[field] ?? `[name="${field}"]`;
+    const input = modal.locator(selector).first();
     if (await input.count() !== 1 || !await input.isVisible()) throw new Error(`${config.heading}: modal field ${field} is not visible`);
   }
   const cancel = page.getByRole("button", { name: "Отмена", exact: true }).last();
@@ -897,7 +981,7 @@ async function captureWaveRoute(browser, base, storageState, label, viewport, ro
   if (mode === "populated" && config.populatedTab) {
     const scopedTab = page.locator(config.tabs).getByRole("tab", { name: config.populatedTab, exact: true });
     const legacyScope = config.legacyTabs ? page.locator(config.legacyTabs) : page.locator(config.legacy);
-  const legacyTab = legacyScope.locator("button").filter({ hasText: config.populatedTab });
+    const legacyTab = legacyScope.locator("button").filter({ hasText: config.populatedTab });
     const scopedCount = await scopedTab.count();
     const legacyCount = await legacyTab.count();
     const populatedTab = scopedCount === 1 ? scopedTab : legacyCount === 1 ? legacyTab : null;

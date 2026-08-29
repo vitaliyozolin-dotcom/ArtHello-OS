@@ -45,7 +45,22 @@ for (const [name, source] of [["HR", hr],["Sales", sales],["Content", content],[
   requireText(source, "createPortal", `${name} dialogs are not rendered above the mobile shell`);
 }
 
-requireText(content, "Все рабочие разделы доступны сразу", "content still collapses to one empty card");
+requireText(hr, "ahHrPage", "HR workspace is not mounted on the design-system shell");
+requireText(hr, "<PageContainer", "HR page container is missing");
+requireText(hr, "<PageHeader", "HR page header is missing");
+requireText(hr, "<Tabs", "HR tabs are hidden by an empty-state branch");
+requireText(hr, "<KpiCard", "HR registry KPI cards are missing");
+requireText(hr, "Связанных кадровых этапов пока нет", "HR empty lifecycle is not honest");
+forbid(hr, /\bhr-workspace\b/, "legacy HR workspace wrapper remains");
+forbid(hr, /if\s*\(\s*!\s*(?:data\.employees\.length|hasHrData)\s*\)\s*(?:\{[\s\S]{0,160}?\breturn\b|return\b)/, "HR workspace still collapses when empty");
+requireText(content, "ahContentPage", "content workspace is not mounted on the design-system shell");
+requireText(content, "<PageContainer", "content page container is missing");
+requireText(content, "<PageHeader", "content page header is missing");
+requireText(content, "<Tabs", "content tabs are hidden by an empty-state branch");
+requireText(content, "<KpiCard", "content registry KPI cards are missing");
+requireText(content, "Каналов и материалов пока нет", "content empty overview is not honest");
+forbid(content, /\bcontent-workspace\b/, "legacy content workspace wrapper remains");
+forbid(content, /if\s*\(\s*!sourceOnly\s*&&\s*!hasContentData[\s\S]{0,40}?\)\s*return\b/, "content workspace still collapses when empty");
 requireText(finance, "ahFinancePage", "finance workspace is not mounted on the design-system shell");
 requireText(finance, "<PageContainer", "finance page container is missing");
 requireText(finance, "<PageHeader", "finance page header is missing");
@@ -139,7 +154,7 @@ requireText(helpCss, "/* ARTHELLO_HELP_CANONICAL_V5 */", "canonical help styling
 forbid(polish, /ARTHELLO_MOBILE_VISUAL_HELP_FOLLOWUP|ARTHELLO_OPERATIONAL_UX_V3|ARTHELLO_MOBILE_DESIGN_SYSTEM_V4|ARTHELLO_HELP_MARKER_RIGHT_EDGE/, "legacy mobile CSS layers remain after canonical cleanup");
 forbid(helpCss, /ARTHELLO_HELP_UX_V3|ARTHELLO_HELP_VISIBILITY_V4/, "legacy help CSS layers remain after canonical cleanup");
 
-const productionSources = [finance, sales, procurement, food, safety, medical, strategy, analytics, readiness].join("\n");
+const productionSources = [finance, sales, procurement, food, safety, medical, strategy, analytics, readiness, hr, content].join("\n");
 forbid(productionSources, /Тестовый комплект для класса/, "hard-coded procurement test request remains");
 forbid(productionSources, /SAFE-SYS-T-ACS-01|OBJ-T-002|ACT-SAFE-T-032/, "hard-coded safety test references remain");
 forbid(productionSources, /MEDICAL_FULL_SYNTHETIC|ЗАЩИЩЁННАЯ ЗОНА · ТЕСТ/, "medical test labels remain");
@@ -147,6 +162,7 @@ forbid(productionSources, /ТЕСТОВАЯ СТРАТЕГИЯ|STR-PRJ-T-014/, "
 forbid(productionSources, /ОПУБЛИКОВАННЫЙ ТЕСТОВЫЙ СНИМОК|SCN-T-09|25\/25|84\/84/, "fixed analytics or readiness acceptance claims remain");
 forbid(productionSources, /SYNTHETIC TEST|CHAIN STATUS\s*·\s*PASS|MODEL STATUS\s*·\s*PASS/, "fixed finance or sales pass claims remain");
 forbid(productionSources, /ТЕСТОВЫЙ РЫНОК|ТЕСТОВЫЙ КОНТУР/, "production modules still advertise a test contour");
+forbid(productionSources, /CHAIN STATUS\s*·\s*PASS/, "content contains a fixed acceptance claim");
 
 const componentsDir = fileURLToPath(new URL("../app/components/", import.meta.url));
 const blocking = [];
