@@ -1769,10 +1769,12 @@ async function captureSettings(browser, base, storageState, label, viewport) {
     payload: settingsFixture,
   });
   const settingsButton = page.locator('.sidebar-tools button[title="Настройки"]');
-  if (!(await settingsButton.isVisible())) {
-    await page.getByRole("button", { name: "Открыть меню", exact: true }).click();
-    await settingsButton.waitFor({ state: "visible", timeout: 10000 });
+  const mobileMenu = page.getByRole("button", { name: "Открыть меню", exact: true });
+  if (await mobileMenu.isVisible()) {
+    await mobileMenu.click();
+    await page.waitForFunction(() => document.querySelector(".sidebar")?.classList.contains("sidebar-open"), null, { timeout: 10000 });
   }
+  await settingsButton.scrollIntoViewIfNeeded();
   await settingsButton.click();
   await page.getByRole("heading", { name: "Настройки", exact: true }).waitFor({ state: "visible", timeout: 30000 });
   if (label === "pilot" && viewport[0] === 390) {
