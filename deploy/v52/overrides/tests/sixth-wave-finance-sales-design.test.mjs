@@ -68,6 +68,19 @@ test("Wave 6 exposes every core finance section before the first operation", () 
   assert.match(finance, /ahFinancePeriod/);
 });
 
+test("Wave 6 keeps an explicit month selector above mobile finance KPIs", () => {
+  const mobilePeriodIndex = finance.indexOf('className="ahFinancePeriod ahFinancePeriodMobile"');
+  const kpiIndex = finance.indexOf('className="ahFinanceKpis"');
+  assert.ok(mobilePeriodIndex >= 0, "mobile finance period selector is missing");
+  assert.ok(mobilePeriodIndex < kpiIndex, "mobile finance period must appear before KPI values");
+  assert.match(finance, /Период отчёта/);
+  assert.match(finance, /aria-label="Месяц финансового отчёта"/);
+  assert.match(finance, /className="ahFinancePeriod ahFinancePeriodDesktop"/);
+  assert.doesNotMatch(financeStyles, /\.ahFinancePeriod\s*\{\s*display:\s*none/);
+  assert.match(financeStyles, /@media \(max-width: 767px\)[\s\S]*\.ahFinancePeriodMobile \{\s*display: grid;/);
+  assert.match(financeStyles, /\.ahFinancePeriodDesktop \{\s*display: none;/);
+});
+
 test("Wave 6 exposes every core sales section before the first lead", () => {
   for (const tab of ["Воронка", "Лиды и контакты", "Сквозная цепочка", "Семьи и услуги", "LTV и лояльность"]) {
     assert.match(sales, new RegExp(escapeRegExp(tab)));
