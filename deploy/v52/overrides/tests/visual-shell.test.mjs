@@ -90,7 +90,7 @@ test("clients and methods are independent workspaces instead of shared placehold
   assert.match(shell, /const FamilyWorkspace = lazy/);
   assert.match(shell, /active === "clients"/);
   assert.match(shell, /<FamilyWorkspace/);
-  assert.match(education, /workspace==="methods"\?"Методики":"Обучение"/);
+  assert.match(education, /workspace\s*===\s*"methods"\s*\?\s*"Методики"\s*:\s*"Обучение"/);
   assert.match(shell, /<SalesWorkspace workspace="sales"/);
   assert.match(shell, /<EducationWorkspace key=\{active\} workspace=\{active\}/);
 });
