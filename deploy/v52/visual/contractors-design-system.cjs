@@ -61,7 +61,7 @@ const waveRoutes = {
     populatedTab: "Сотрудники",
     modal: ".staff-modal",
     modalTrigger: /^Добавить сотрудника$/,
-    modalFields: ["displayName", "contact", "positionId", "rateRubles", "hireDate", "contractId", "note"],
+    modalFields: ["displayName", "contact", "positionId", "rateRubles", "hireDate", "status", "contractId", "note"],
     modalFieldSelectors: { status: '[aria-label="Статус сотрудника"]' },
     requireTable: false,
   },
