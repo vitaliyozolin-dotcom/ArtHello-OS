@@ -326,7 +326,7 @@
 .ahSalesPage .sales-panel > .ahEmptyState h3,
 .ahSalesDenied .ahEmptyState h3 {
   font-size: var(--ah-compact-card-title-size);
-  font-weight: var(--ah-compact-card-title-weight);
+  font-weight: 500;
   line-height: var(--ah-compact-card-title-line);
 }
 
