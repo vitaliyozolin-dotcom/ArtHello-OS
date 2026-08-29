@@ -14,7 +14,7 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 590;
+const expectedPngCount = 593;
 
 const waveRoutes = {
   finance: {
@@ -1764,6 +1764,62 @@ function assertCompactMobileContractorRegistry(contractors) {
   }
 }
 
+async function captureFinalMobileAcceptance(browser, base, storageState, route) {
+  const viewport = [390, 844];
+  const { context, page } = await stablePage(browser, base, storageState, viewport, route);
+  if (route === "home") await page.locator(".owner-dashboard").waitFor({ state: "visible", timeout: 30000 });
+  if (route === "clients") await page.locator('input[placeholder*="Найти семью"]').waitFor({ state: "visible", timeout: 30000 });
+  if (route === "finance") await page.locator(".ahFinancePage").waitFor({ state: "visible", timeout: 30000 });
+  const file = "pilot-final-" + route + "-390x844.png";
+  await page.screenshot({ path: path.join(output, file), fullPage: false });
+  const metrics = await page.evaluate((currentRoute) => {
+    const root = document.documentElement;
+    const common = {
+      clientWidth: root.clientWidth,
+      scrollWidth: root.scrollWidth,
+      horizontalOverflow: root.scrollWidth > root.clientWidth + 1,
+    };
+    if (currentRoute === "home") {
+      const grid = document.querySelector(".owner-dashboard-kpis");
+      const cards = [...document.querySelectorAll(".owner-dashboard-kpi")];
+      const columns = grid ? getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length : 0;
+      const widths = cards.map((card) => card.getBoundingClientRect().width);
+      const copyVisible = cards.every((card) => {
+        const copy = card.querySelector(".owner-dashboard-kpi-copy");
+        return Boolean(copy && getComputedStyle(copy).display !== "none" && copy.getBoundingClientRect().width > 40);
+      });
+      return { ...common, cardCount: cards.length, columns, minCardWidth: widths.length ? Math.min(...widths) : 0, copyVisible };
+    }
+    if (currentRoute === "clients") {
+      const input = document.querySelector('input[placeholder*="Найти семью"]');
+      const target = input?.closest("[data-ah-help-target=true]") ?? input?.parentElement;
+      const inputBox = input?.getBoundingClientRect();
+      const pseudoContent = target ? getComputedStyle(target, "::before").content : null;
+      const inlineHelpVisible = [...document.querySelectorAll('.family-workspace button[data-ah-help-inline="true"].ah-field-icon')]
+        .filter((button) => getComputedStyle(button).display !== "none" && button.getClientRects().length > 0).length;
+      return {
+        ...common,
+        inputContained: Boolean(inputBox && inputBox.left >= -1 && inputBox.right <= root.clientWidth + 1),
+        searchPaddingLeft: input ? Number.parseFloat(getComputedStyle(input).paddingLeft) : 0,
+        pseudoContent,
+        inlineHelpVisible,
+      };
+    }
+    const period = document.querySelector(".ahFinancePeriodMobile");
+    const firstKpi = document.querySelector(".ahFinanceKpis > .ahKpiCard");
+    const periodBox = period?.getBoundingClientRect();
+    const kpiBox = firstKpi?.getBoundingClientRect();
+    return {
+      ...common,
+      periodVisible: Boolean(period && getComputedStyle(period).display !== "none" && periodBox && periodBox.height >= 44),
+      periodBeforeKpis: Boolean(periodBox && kpiBox && periodBox.bottom <= kpiBox.top + 1),
+      periodValue: period?.querySelector("select")?.value ?? null,
+    };
+  }, route);
+  await context.close();
+  return { label: "pilot", route: "final-" + route, width: viewport[0], height: viewport[1], file, ...metrics };
+}
+
 async function captureEducationAfterContractors(browser, base, storageState, label, viewport) {
   const { context, page } = await stablePage(browser, base, storageState, viewport, "contractors");
   await page.getByRole("heading", { name: "Подрядчики", exact: true }).waitFor({ state: "visible", timeout: 30000 });
@@ -1909,6 +1965,22 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
           if (!wave) throw new Error(`${routeName}: missing ${viewport.join("x")} empty-state metrics`);
           assertWaveMobileCanon(wave, access);
         }
+      }
+    }
+
+    for (const route of ["home", "clients", "finance"]) {
+      const item = await captureFinalMobileAcceptance(browser, pilotUrl, pilotState, route);
+      manifest.push(item);
+      persist();
+      if (item.horizontalOverflow) throw new Error(route + ": final mobile acceptance has horizontal overflow");
+      if (route === "home" && (item.cardCount !== 6 || item.columns !== 2 || item.minCardWidth < 150 || !item.copyVisible)) {
+        throw new Error("home: mobile KPI cards are not readable two-column cards");
+      }
+      if (route === "clients" && (!item.inputContained || item.searchPaddingLeft < 48 || item.inlineHelpVisible !== 0 || !["none", "normal", '""'].includes(item.pseudoContent))) {
+        throw new Error("clients: search still contains detached duplicate affordances");
+      }
+      if (route === "finance" && (!item.periodVisible || !item.periodBeforeKpis || !item.periodValue)) {
+        throw new Error("finance: mobile month selector is not visible before KPI values");
       }
     }
 
