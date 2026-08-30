@@ -73,6 +73,41 @@
   --color-focus: rgba(224, 69, 18, 0.24);
   --color-overlay: rgba(23, 26, 31, 0.56);
 
+  /*
+   * Component semantic aliases. The values in :root intentionally reproduce
+   * the legacy, feature-flag-off rendering. The approved v1 mappings below
+   * remove raw status pairs from screen CSS without changing the baseline.
+   */
+  --status-neutral-text: #66645e;
+  --status-neutral-background: #f0efeb;
+  --status-neutral-border: transparent;
+  --status-success-text: #19724e;
+  --status-success-background: #e4f5ec;
+  --status-success-border: transparent;
+  --status-warning-text: #91600f;
+  --status-warning-background: #fff0d2;
+  --status-warning-border: transparent;
+  --status-danger-text: #aa3535;
+  --status-danger-background: #ffe8e8;
+  --status-danger-border: transparent;
+  --status-info-text: #286c99;
+  --status-info-background: #e5f2fa;
+  --status-info-border: transparent;
+  --capacity-track-background: #eeeae3;
+  --capacity-track-fill: var(--orange);
+  --featured-card-border: #efc6b4;
+  --featured-card-shadow: 0 14px 35px rgba(232, 68, 18, 0.07);
+  --warning-state-text: #88682c;
+  --warning-state-icon: var(--amber);
+  --warning-state-background: #fff1d6;
+  --warning-state-border: transparent;
+  --danger-state-text: var(--danger);
+  --danger-state-icon: var(--danger);
+  --danger-state-background: #ffe9e9;
+  --info-state-text: var(--blue);
+  --info-state-icon: var(--blue);
+  --info-state-background: #e8f3fa;
+
   /* Typography */
   --font-sans: "Onest", Arial, sans-serif;
   --font-weight-regular: 400;
@@ -178,6 +213,37 @@ html[data-design-code="v1"] {
   --shadow: var(--shadow-md);
   --font-display: var(--font-sans);
   --font-text: var(--font-sans);
+
+  /* Semantic color carries meaning through border/icon; text stays legible. */
+  --status-neutral-text: var(--color-text);
+  --status-neutral-background: var(--color-surface-muted);
+  --status-neutral-border: var(--color-border-strong);
+  --status-success-text: var(--color-text);
+  --status-success-background: var(--success-50);
+  --status-success-border: var(--success-500);
+  --status-warning-text: var(--color-text);
+  --status-warning-background: var(--warning-50);
+  --status-warning-border: var(--warning-500);
+  --status-danger-text: var(--color-text);
+  --status-danger-background: var(--danger-50);
+  --status-danger-border: var(--danger-500);
+  --status-info-text: var(--color-text);
+  --status-info-background: var(--info-50);
+  --status-info-border: var(--info-500);
+  --capacity-track-background: var(--color-surface-muted);
+  --capacity-track-fill: var(--color-accent);
+  --featured-card-border: var(--color-border-strong);
+  --featured-card-shadow: var(--shadow-sm);
+  --warning-state-text: var(--color-text);
+  --warning-state-icon: var(--warning-500);
+  --warning-state-background: var(--warning-50);
+  --warning-state-border: var(--warning-500);
+  --danger-state-text: var(--color-text);
+  --danger-state-icon: var(--danger-500);
+  --danger-state-background: var(--danger-50);
+  --info-state-text: var(--color-text);
+  --info-state-icon: var(--info-500);
+  --info-state-background: var(--info-50);
 }
 
 html[data-design-code="v1"] body {
@@ -501,5 +567,1197 @@ html[data-design-code="v1"] .auth-card > .auth-help {
 
   html[data-design-code="v1"] .content-card {
     padding: var(--card-padding-compact);
+  }
+}
+
+/*
+ * DS-04 — shared component contract.
+ * These selectors are deliberately feature-flagged and more specific than
+ * the legacy and mobile polish layers which load later in the cascade.
+ */
+
+/* Typography */
+html[data-design-code="v1"] :is(.l0-app, .gate-stage) h1 {
+  font-family: var(--font-sans);
+  font-size: var(--text-h1-size);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--text-h1-line);
+  letter-spacing: -0.02em;
+}
+
+html[data-design-code="v1"] .page-heading h1 {
+  font-family: var(--font-sans);
+  font-size: var(--text-h1-size);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--text-h1-line);
+  letter-spacing: -0.02em;
+}
+
+html[data-design-code="v1"] .section-title h2 {
+  font-family: var(--font-sans);
+  font-size: var(--text-h2-size);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--text-h2-line);
+  letter-spacing: -0.02em;
+}
+
+html[data-design-code="v1"] :is(.l0-app, .gate-stage, .modal-backdrop) h3 {
+  font-family: var(--font-sans);
+  font-size: var(--text-h3-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-h3-line);
+  letter-spacing: -0.01em;
+}
+
+html[data-design-code="v1"] .student-dashboard .student-hero h1 {
+  font-family: var(--font-sans);
+  font-size: var(--text-display-size);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--text-display-line);
+  letter-spacing: -0.02em;
+}
+
+html[data-design-code="v1"] :is(.parent-hero .hero-copy h1, .registration-card > aside h1) {
+  font-family: var(--font-sans);
+  font-size: var(--text-display-size);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--text-display-line);
+  letter-spacing: -0.02em;
+}
+
+html[data-design-code="v1"] .ranking-heading h2 {
+  font-family: var(--font-sans);
+  font-size: var(--text-h2-size);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--text-h2-line);
+  letter-spacing: -0.02em;
+}
+
+html[data-design-code="v1"] :is(.action-modal h2, .child-profile h2, .missing-invite h2) {
+  font-family: var(--font-sans);
+  font-size: var(--text-h3-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-h3-line);
+  letter-spacing: -0.01em;
+}
+
+html[data-design-code="v1"] .l0-app .l0-brand strong {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 24px;
+}
+
+html[data-design-code="v1"] .mobile-brand strong {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 24px;
+}
+
+html[data-design-code="v1"] .page-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+html[data-design-code="v1"] .page-heading > div > p {
+  margin-top: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+
+html[data-design-code="v1"] .section-title > div > p {
+  margin-top: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] :is(.gate-stage, .modal-backdrop) :is(button, a[href]),
+html[data-design-code="v1"] .l0-app :is(button, a[href]):not(.l0-bottom-nav button) {
+  font-family: var(--font-sans);
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] :is(
+  .day-switch button > span,
+  .feature-card > em,
+  .student-launch-grid button > em
+) {
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] :is(.l0-app, .gate-stage, .modal-backdrop) :is(input, select, textarea) {
+  font-family: var(--font-sans);
+  font-size: var(--text-body-size);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--text-body-line);
+}
+
+html[data-design-code="v1"] :is(.l0-app, .gate-stage, .modal-backdrop) :is(p, li, dd) {
+  font-size: var(--text-body-size);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--text-body-line);
+}
+
+html[data-design-code="v1"] :is(.l0-app, .gate-stage, .modal-backdrop) :is(strong, b) {
+  font-size: var(--text-body-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-body-line);
+}
+
+html[data-design-code="v1"] :is(.l0-app, .gate-stage, .modal-backdrop) :is(small, cite) {
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--text-small-line);
+  text-transform: none;
+}
+
+html[data-design-code="v1"] :is(.l0-app, .gate-stage, .modal-backdrop) :is(dt, em, .eyebrow, .item-overline, .status-pill) {
+  font-size: var(--text-caption-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--text-caption-line);
+  text-transform: none;
+}
+
+html[data-design-code="v1"] :is(
+  .hero-signal > span,
+  .teacher-quote > span,
+  .student-kicker,
+  .student-score-orbit > span,
+  .student-quote > span,
+  .lesson-order,
+  .subject-badge,
+  .staff-tags > span,
+  .grade-dots > i,
+  .schedule-toolbar > label > span,
+  .calendar-toolbar label > span,
+  .ranking-class-select > span,
+  .event-date > span
+) {
+  font-size: var(--text-caption-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--text-caption-line);
+  text-transform: none;
+}
+
+html[data-design-code="v1"] .message-stream article > span {
+  font-size: var(--text-body-size);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--text-body-line);
+}
+
+html[data-design-code="v1"] .event-compact-list button > span:is(:first-child, :nth-child(2)) strong {
+  font-size: var(--text-body-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-body-line);
+}
+
+html[data-design-code="v1"] .event-compact-list button > span:is(:first-child, :nth-child(2)) small {
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--text-small-line);
+  text-transform: none;
+}
+
+html[data-design-code="v1"] :is(.l0-avatar, .grade-value, .menu-grid header > span, .l0-toast) {
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] .class-grid .class-card > span {
+  font-size: var(--text-h3-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-h3-line);
+}
+
+html[data-design-code="v1"] :is(.metric-card strong, .event-date strong, .ranking-own-summary strong, .student-launch-grid strong) {
+  font-size: var(--text-h2-size);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--text-h2-line);
+}
+
+html[data-design-code="v1"] :is(
+  .admin-readiness > div > strong,
+  .student-hero > div:last-child strong,
+  .student-dashboard .student-score-orbit strong
+) {
+  font-size: var(--text-display-size);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--text-display-line);
+}
+
+html[data-design-code="v1"] .hero-signal strong {
+  font-size: var(--text-h3-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-h3-line);
+}
+
+html[data-design-code="v1"] .metric-card small {
+  font-size: var(--text-caption-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--text-caption-line);
+}
+
+html[data-design-code="v1"] :is(.journal-head, .admin-table-head) {
+  font-size: var(--text-caption-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-caption-line);
+  text-transform: none;
+}
+
+html[data-design-code="v1"] :is(
+  .metric-card strong,
+  .journal-row > b,
+  .grade-value,
+  .event-date strong,
+  .capacity small,
+  .ranking-position,
+  .ranking-score,
+  time,
+  input[type="date"],
+  input[type="datetime-local"],
+  input[type="number"],
+  input[type="time"]
+) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Logo */
+html[data-design-code="v1"] .l0-brand img,
+html[data-design-code="v1"] .mobile-brand img {
+  width: 32px;
+  height: 32px;
+  border-radius: 0;
+  background: var(--neutral-0);
+  box-shadow: none;
+  object-fit: contain;
+}
+
+/* One accessible hit-area rule for the shared application shell. */
+html[data-design-code="v1"] :is(.l0-app, .gate-stage, .modal-backdrop) :is(
+  button,
+  a[href],
+  input,
+  select,
+  textarea,
+  [role="button"]
+) {
+  min-width: var(--control-height-md);
+  min-height: var(--control-height-md);
+}
+
+html[data-design-code="v1"] .notification-button,
+html[data-design-code="v1"] .top-avatar {
+  width: var(--control-height-md);
+  height: var(--control-height-md);
+}
+
+html[data-design-code="v1"] .notification-button {
+  border-radius: var(--ds-radius-md);
+}
+
+html[data-design-code="v1"] .top-avatar .l0-avatar-sm {
+  width: 40px;
+  height: 40px;
+}
+
+html[data-design-code="v1"] :is(.compact-select, .role-switch) {
+  height: auto;
+  min-height: 60px;
+  padding-block: var(--space-1);
+}
+
+html[data-design-code="v1"] :is(.compact-select, .role-switch) select {
+  height: var(--control-height-md);
+  min-height: var(--control-height-md);
+}
+
+html[data-design-code="v1"] :is(
+  .compact-select,
+  .role-switch,
+  .form-field input,
+  .form-field select,
+  .form-field textarea,
+  .message-form textarea,
+  .invite-result-body input,
+  .schedule-toolbar select,
+  .ranking-class-select select,
+  .calendar-toolbar select
+) {
+  border-radius: var(--ds-radius-md);
+}
+
+html[data-design-code="v1"] :is(
+  .compact-select select,
+  .role-switch select,
+  .schedule-toolbar select,
+  .ranking-class-select select,
+  .calendar-toolbar select,
+  .form-field input,
+  .form-field select,
+  .invite-result-body input
+) {
+  height: var(--control-height-md);
+  min-height: var(--control-height-md);
+}
+
+html[data-design-code="v1"] .form-field > span {
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] .form-field {
+  gap: var(--space-2);
+}
+
+html[data-design-code="v1"] :is(
+  .compact-select,
+  .role-switch,
+  .schedule-toolbar > label,
+  .ranking-class-select,
+  .calendar-toolbar > label,
+  .invite-result-body label
+) > span {
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-small-line);
+  text-transform: none;
+}
+
+html[data-design-code="v1"] .form-field > small {
+  min-height: var(--text-small-line);
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] .form-error-slot {
+  min-height: calc(var(--text-small-line) + var(--space-5));
+  display: flex;
+  align-items: flex-start;
+}
+
+html[data-design-code="v1"] .form-error-slot > .form-error {
+  width: 100%;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--ds-radius-md);
+  background: var(--danger-50);
+  color: var(--danger-500);
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] .form-field :is(input, select, textarea):disabled {
+  border-color: var(--color-border);
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+html[data-design-code="v1"] .form-field :is(
+  input,
+  select,
+  textarea
+):is([aria-invalid="true"], :user-invalid) {
+  border-color: var(--danger-500);
+}
+
+html[data-design-code="v1"] .form-field :is(
+  input,
+  select,
+  textarea
+):is([aria-invalid="true"], :user-invalid):focus-visible {
+  border-color: var(--danger-500);
+  outline-color: color-mix(in srgb, var(--danger-500) 24%, transparent);
+}
+
+/* Modal and form geometry remain stable while the form body scrolls. */
+html[data-design-code="v1"] .modal-backdrop {
+  padding: var(--space-5);
+  align-items: center;
+  justify-content: center;
+}
+
+html[data-design-code="v1"] .action-modal {
+  width: min(640px, 100%);
+  max-height: 88vh;
+  border-radius: var(--ds-radius-xl);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-lg);
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+html[data-design-code="v1"] .action-modal.invite-result {
+  width: min(480px, 100%);
+}
+
+html[data-design-code="v1"] .action-modal > header {
+  min-height: var(--space-20);
+  padding: var(--space-4) var(--space-6);
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  gap: var(--space-3);
+}
+
+html[data-design-code="v1"] .action-modal > header > button {
+  width: var(--control-height-md);
+  height: var(--control-height-md);
+  min-width: var(--control-height-md);
+  min-height: var(--control-height-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--ds-radius-md);
+  padding: 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+html[data-design-code="v1"] .action-modal form {
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+html[data-design-code="v1"] .action-modal .form-grid {
+  min-height: 0;
+  padding: var(--space-6);
+  overflow-y: auto;
+}
+
+html[data-design-code="v1"] .action-modal form > footer {
+  min-height: var(--space-20);
+  margin: 0;
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  align-items: center;
+  gap: var(--space-2);
+}
+
+html[data-design-code="v1"] .invite-result-body {
+  min-height: 0;
+  padding: var(--space-6);
+  overflow-y: auto;
+}
+
+/* Button */
+html[data-design-code="v1"] .primary-btn,
+html[data-design-code="v1"] .ghost-btn,
+html[data-design-code="v1"] .text-action,
+html[data-design-code="v1"] .journal-row > button {
+  height: var(--control-height-md);
+  min-height: var(--control-height-md);
+  border-radius: var(--ds-radius-md);
+  padding-inline: var(--space-4);
+  gap: var(--space-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-small-line);
+  transition:
+    background-color var(--duration-normal) var(--ease-standard),
+    border-color var(--duration-normal) var(--ease-standard),
+    color var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+html[data-design-code="v1"] .primary-btn {
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent);
+  color: var(--neutral-0);
+  box-shadow: none;
+}
+
+html[data-design-code="v1"] .primary-btn:hover:not(:disabled) {
+  border-color: var(--color-accent-hover);
+  background: var(--color-accent-hover);
+}
+
+html[data-design-code="v1"] .primary-btn:active:not(:disabled) {
+  border-color: var(--color-accent-active);
+  background: var(--color-accent-active);
+  transform: translateY(1px);
+}
+
+html[data-design-code="v1"] .ghost-btn {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: none;
+}
+
+html[data-design-code="v1"] .ghost-btn:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-muted);
+}
+
+html[data-design-code="v1"] .ghost-btn:active:not(:disabled) {
+  background: var(--color-surface-muted);
+  transform: translateY(1px);
+}
+
+html[data-design-code="v1"] :is(.primary-btn, .ghost-btn, .text-action):disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+html[data-design-code="v1"] :is(.primary-btn, .ghost-btn, .danger-btn)[aria-busy="true"],
+html[data-design-code="v1"] :is(.primary-btn, .ghost-btn, .danger-btn).is-loading {
+  cursor: progress;
+  pointer-events: none;
+}
+
+html[data-design-code="v1"] .button-label-stack {
+  min-width: 0;
+  display: inline-grid;
+}
+
+html[data-design-code="v1"] .button-label-stack > span {
+  grid-area: 1 / 1;
+}
+
+html[data-design-code="v1"] .button-label-stack > .is-hidden {
+  visibility: hidden;
+}
+
+html[data-design-code="v1"] .danger-btn {
+  height: var(--control-height-md);
+  min-height: var(--control-height-md);
+  border: 1px solid var(--danger-500);
+  border-radius: var(--ds-radius-md);
+  padding-inline: var(--space-4);
+  background: var(--danger-50);
+  color: var(--color-text);
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] .danger-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger-500) 14%, var(--color-surface));
+}
+
+html[data-design-code="v1"] .danger-btn:active:not(:disabled) {
+  background: color-mix(in srgb, var(--danger-500) 20%, var(--color-surface));
+  transform: translateY(1px);
+}
+
+html[data-design-code="v1"] .text-action {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-accent);
+}
+
+html[data-design-code="v1"] .text-action:hover:not(:disabled) {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-hover);
+}
+
+html[data-design-code="v1"] :is(.teacher-action-grid button, .student-launch-grid button):hover {
+  transform: none;
+}
+
+html[data-design-code="v1"] .student-launch-grid button {
+  border-radius: var(--ds-radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-design-code="v1"] .page-heading > .primary-btn:has(svg) {
+  position: static;
+  width: auto;
+  min-width: var(--control-height-md);
+  height: var(--control-height-md);
+  min-height: var(--control-height-md);
+  padding-inline: var(--space-4);
+  border-radius: var(--ds-radius-md);
+  flex: 0 0 auto;
+  gap: var(--space-2);
+  overflow: visible;
+  white-space: nowrap;
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  box-shadow: none;
+}
+
+html[data-design-code="v1"] .page-heading > .primary-btn:has(svg) svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Tabs */
+html[data-design-code="v1"] :is(
+  .tab-row,
+  .ranking-tabs,
+  .registration-tabs,
+  .segmented
+) {
+  gap: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+html[data-design-code="v1"] :is(
+  .tab-row,
+  .ranking-tabs,
+  .registration-tabs,
+  .segmented
+)::-webkit-scrollbar {
+  display: none;
+}
+
+html[data-design-code="v1"] :is(
+  .tab-row,
+  .ranking-tabs,
+  .registration-tabs,
+  .segmented
+) > button {
+  min-width: var(--control-height-md);
+  min-height: var(--control-height-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--ds-radius-md);
+  padding-inline: var(--space-4);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-small-line);
+  white-space: nowrap;
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-normal) var(--ease-standard),
+    border-color var(--duration-normal) var(--ease-standard),
+    color var(--duration-normal) var(--ease-standard);
+}
+
+html[data-design-code="v1"] :is(
+  .tab-row,
+  .ranking-tabs,
+  .registration-tabs,
+  .segmented
+) > button:hover:not(:disabled):not(.active) {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+
+html[data-design-code="v1"] :is(
+  .tab-row,
+  .ranking-tabs,
+  .registration-tabs,
+  .segmented
+) > button:is(.active, [aria-selected="true"]) {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--neutral-0);
+  box-shadow: none;
+}
+
+html[data-design-code="v1"] :is(
+  .tab-row,
+  .ranking-tabs,
+  .registration-tabs,
+  .segmented
+) > button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+html[data-design-code="v1"] .tabs-panel {
+  min-width: 0;
+}
+
+html[data-design-code="v1"] .ranking-panel > .tabs-panel {
+  display: grid;
+  gap: var(--grid-gap);
+}
+
+html[data-design-code="v1"] :is(.registration-tabs, .segmented) {
+  padding: var(--space-1);
+  border-radius: var(--ds-radius-lg);
+  background: var(--color-surface-muted);
+}
+
+html[data-design-code="v1"] .registration-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Card */
+html[data-design-code="v1"] :is(
+  .content-card,
+  .metric-card,
+  .homework-item,
+  .feature-card,
+  .comment-list > article,
+  .menu-grid > article,
+  .event-grid > article,
+  .activity-grid > article,
+  .subscription-grid > article,
+  .teacher-action-grid > button,
+  .admin-actions > button,
+  .staff-card,
+  .achievement-grid > article,
+  .grade-item,
+  .program-grid > button,
+  .student-directory > button,
+  .class-grid > .class-card
+) {
+  border: 1px solid var(--color-border);
+  border-radius: var(--ds-radius-lg);
+  padding: var(--card-padding);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-design-code="v1"] .menu-grid > article.featured {
+  border-color: var(--featured-card-border);
+  box-shadow: var(--featured-card-shadow);
+}
+
+html[data-design-code="v1"] .metric-button:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-sm);
+  transform: none;
+}
+
+html[data-design-code="v1"] .admin-readiness {
+  border-radius: var(--ds-radius-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Table */
+html[data-design-code="v1"] :is(.journal-table, .admin-table) {
+  border: 1px solid var(--color-border);
+  border-radius: var(--ds-radius-lg);
+  table-layout: fixed;
+  overflow-x: auto;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-design-code="v1"] :is(.journal-head, .admin-table-head) {
+  min-height: var(--table-head-height);
+  border-radius: 0;
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+}
+
+html[data-design-code="v1"] :is(.journal-row, .admin-table-row) {
+  min-height: var(--table-row-height);
+  border-color: var(--color-border);
+  background: var(--color-surface);
+}
+
+html[data-design-code="v1"] :is(.journal-head, .journal-row) {
+  min-width: 690px;
+  grid-template-columns: minmax(230px, 1.2fr) 90px minmax(160px, 0.8fr) 85px;
+}
+
+html[data-design-code="v1"] :is(.journal-head, .admin-table-head) {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+html[data-design-code="v1"] .journal-row > b {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-design-code="v1"] .admin-table-row > :last-child {
+  text-align: center;
+}
+
+html[data-design-code="v1"] :is(.journal-row strong, .admin-table-row strong, .admin-table-row small) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html[data-design-code="v1"] .journal-row > button {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-accent);
+}
+
+html[data-design-code="v1"] .table-action-cell {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: stretch;
+}
+
+html[data-design-code="v1"] .journal-row .table-action-cell > button {
+  width: 100%;
+  height: var(--control-height-md);
+  min-height: var(--control-height-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--ds-radius-md);
+  padding-inline: var(--space-4);
+  background: var(--color-surface);
+  color: var(--color-accent);
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-small-line);
+}
+
+/* Status and registered semantic debt */
+html[data-design-code="v1"] .status-pill {
+  border: 1px solid var(--status-neutral-border);
+  border-radius: var(--ds-radius-pill);
+  background: var(--status-neutral-background);
+  color: var(--status-neutral-text);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+}
+
+html[data-design-code="v1"] .status-good {
+  border-color: var(--status-success-border);
+  background: var(--status-success-background);
+  color: var(--status-success-text);
+}
+
+html[data-design-code="v1"] .status-warn {
+  border-color: var(--status-warning-border);
+  background: var(--status-warning-background);
+  color: var(--status-warning-text);
+}
+
+html[data-design-code="v1"] .status-danger {
+  border-color: var(--status-danger-border);
+  background: var(--status-danger-background);
+  color: var(--status-danger-text);
+}
+
+html[data-design-code="v1"] .status-blue {
+  border-color: var(--status-info-border);
+  background: var(--status-info-background);
+  color: var(--status-info-text);
+}
+
+/* HelpButton */
+html[data-design-code="v1"] .help-button-root {
+  display: block;
+  position: fixed;
+  right: var(--space-6);
+  bottom: var(--space-6);
+  z-index: 130;
+}
+
+/* Keep page Help clear of the message composer primary action. */
+html[data-design-code="v1"] .l0-app:has(.messages-shell) > .help-button-root {
+  right: calc(var(--space-20) + var(--space-20) + var(--space-3));
+}
+
+html[data-design-code="v1"] .help-button {
+  width: var(--control-height-md);
+  height: var(--control-height-md);
+  min-width: var(--control-height-md);
+  min-height: var(--control-height-md);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--ds-radius-md);
+  padding: 0;
+  background: var(--color-accent);
+  color: var(--neutral-0);
+  display: grid;
+  place-items: center;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+}
+
+html[data-design-code="v1"] .help-button:hover {
+  border-color: var(--color-accent-hover);
+  background: var(--color-accent-hover);
+}
+
+html[data-design-code="v1"] .help-button:active {
+  border-color: var(--color-accent-active);
+  background: var(--color-accent-active);
+}
+
+html[data-design-code="v1"] .help-panel {
+  width: min(360px, calc(100vw - var(--space-8)));
+  max-height: min(480px, calc(100svh - 144px));
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--ds-radius-xl);
+  padding: var(--card-padding);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-lg);
+  overflow-y: auto;
+  position: absolute;
+  right: 0;
+  bottom: calc(var(--control-height-md) + var(--space-3));
+}
+
+html[data-design-code="v1"] .help-panel > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+html[data-design-code="v1"] .help-panel > header span {
+  color: var(--color-text-secondary);
+  font-size: var(--text-caption-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--text-caption-line);
+}
+
+html[data-design-code="v1"] .help-panel h2 {
+  margin-top: var(--space-1);
+  font-size: var(--text-h3-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-h3-line);
+}
+
+html[data-design-code="v1"] .help-panel > header button {
+  width: var(--control-height-md);
+  height: var(--control-height-md);
+  min-width: var(--control-height-md);
+  min-height: var(--control-height-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--ds-radius-md);
+  padding: 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+html[data-design-code="v1"] .help-panel > p {
+  margin-top: var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] .help-panel dl {
+  margin-top: var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+}
+
+html[data-design-code="v1"] .help-panel dl > div {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+html[data-design-code="v1"] .help-panel dt {
+  font-size: var(--text-small-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-small-line);
+}
+
+html[data-design-code="v1"] .help-panel dd {
+  margin-top: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+
+/* Inside a dialog Help lives in the header; its panel stays in the upper
+ * viewport region and therefore cannot cover the fixed action footer. */
+html[data-design-code="v1"] .action-modal > .help-button-root {
+  position: absolute;
+  top: var(--space-5);
+  right: calc(var(--space-6) + var(--control-height-md) + var(--space-3));
+  bottom: auto;
+}
+
+html[data-design-code="v1"] .action-modal > .help-button-root .help-panel {
+  position: fixed;
+  top: var(--space-4);
+  right: var(--space-4);
+  bottom: auto;
+  max-height: calc(50svh - var(--space-4));
+}
+
+@media (max-width: 800px) {
+  html[data-design-code="v1"] .l0-app:has(.messages-shell) > .help-button-root {
+    right: calc(var(--space-16) + var(--space-3));
+  }
+
+  html[data-design-code="v1"] .page-heading {
+    display: flex;
+    align-items: center;
+  }
+
+  html[data-design-code="v1"] .page-heading:has(> .primary-btn svg) {
+    padding-right: 0;
+  }
+
+  html[data-design-code="v1"] .admin-table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  html[data-design-code="v1"] .admin-table-head {
+    min-width: 700px;
+    display: grid;
+  }
+
+  html[data-design-code="v1"] .admin-table-row,
+  html[data-design-code="v1"] .admin-table-row:last-child {
+    min-width: 700px;
+    min-height: var(--table-row-height);
+    padding: 0 var(--space-3);
+    border-width: 0 0 1px;
+    border-style: solid;
+    border-color: var(--color-border);
+    border-radius: 0;
+    background: var(--color-surface);
+    box-shadow: none;
+    display: grid;
+    grid-template-columns: minmax(280px, 1.4fr) 150px minmax(190px, 1fr) 100px;
+    grid-template-areas: none;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  html[data-design-code="v1"] .admin-table-row > span:nth-child(n) {
+    grid-area: auto;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    align-items: center;
+    justify-self: stretch;
+    font-size: var(--text-small-size);
+    line-height: var(--text-small-line);
+    text-align: left;
+  }
+
+  html[data-design-code="v1"] .admin-table-row > span:nth-child(2)::before,
+  html[data-design-code="v1"] .admin-table-row > span:nth-child(3)::before {
+    content: none;
+  }
+}
+
+@media (max-width: 767px) {
+  html[data-design-code="v1"] .page-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-3);
+    align-items: start;
+  }
+
+  html[data-design-code="v1"] .page-heading > .primary-btn:has(svg) {
+    width: 100%;
+  }
+
+  html[data-design-code="v1"] :is(.compact-select, .role-switch) {
+    min-height: var(--control-height-md);
+    padding-block: 0;
+  }
+
+  html[data-design-code="v1"] :is(.compact-select, .role-switch) > span {
+    display: none;
+  }
+
+  html[data-design-code="v1"] .action-modal {
+    width: 100%;
+    max-height: 88svh;
+    border-radius: var(--ds-radius-xl) var(--ds-radius-xl) 0 0;
+  }
+
+  html[data-design-code="v1"] .modal-backdrop {
+    padding: 0;
+    align-items: end;
+    justify-content: center;
+  }
+
+  html[data-design-code="v1"] .action-modal .form-grid,
+  html[data-design-code="v1"] .invite-result-body {
+    padding: var(--card-padding-compact);
+  }
+
+  html[data-design-code="v1"] .action-modal form > footer {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  html[data-design-code="v1"] :is(
+    .content-card,
+    .metric-card,
+    .homework-item,
+    .feature-card,
+    .comment-list > article,
+    .menu-grid > article,
+    .event-grid > article,
+    .activity-grid > article,
+    .subscription-grid > article,
+    .teacher-action-grid > button,
+    .admin-actions > button,
+    .staff-card,
+    .achievement-grid > article,
+    .grade-item,
+    .program-grid > button,
+    .student-directory > button,
+    .class-grid > .class-card
+  ) {
+    padding: var(--card-padding-compact);
+  }
+
+  html[data-design-code="v1"] .help-button-root {
+    right: var(--space-4);
+    bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--space-3));
+  }
+
+  html[data-design-code="v1"] .help-panel {
+    width: min(360px, calc(100vw - var(--space-8)));
+    max-height: calc(100svh - var(--mobile-topbar-height) - var(--mobile-nav-height) - var(--space-16));
+    padding: var(--card-padding-compact);
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-design-code="v1"] :is(
+    .primary-btn,
+    .ghost-btn,
+    .text-action,
+    .tab-row > button,
+    .ranking-tabs > button,
+    .registration-tabs > button,
+    .segmented > button,
+    .teacher-action-grid button,
+    .student-launch-grid button
+  ) {
+    transition: none;
+  }
+
+  html[data-design-code="v1"] :is(
+    .primary-btn,
+    .ghost-btn,
+    .danger-btn,
+    .teacher-action-grid button,
+    .student-launch-grid button
+  ):is(:hover, :active) {
+    transform: none;
   }
 }

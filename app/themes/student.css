@@ -92,6 +92,36 @@ html[data-design-code="v1"][data-theme="student"] {
   --color-focus: color-mix(in srgb, var(--brand-500) 32%, transparent);
   --color-overlay: color-mix(in srgb, var(--neutral-900) 72%, transparent);
 
+  --status-neutral-text: var(--color-text);
+  --status-neutral-background: var(--color-surface-muted);
+  --status-neutral-border: var(--color-border-strong);
+  --status-success-text: var(--color-text);
+  --status-success-background: color-mix(in srgb, var(--success-500) 18%, var(--color-surface));
+  --status-success-border: var(--success-500);
+  --status-warning-text: var(--color-text);
+  --status-warning-background: color-mix(in srgb, var(--warning-500) 18%, var(--color-surface));
+  --status-warning-border: var(--warning-500);
+  --status-danger-text: var(--color-text);
+  --status-danger-background: color-mix(in srgb, var(--danger-500) 18%, var(--color-surface));
+  --status-danger-border: var(--danger-500);
+  --status-info-text: var(--color-text);
+  --status-info-background: color-mix(in srgb, var(--info-500) 18%, var(--color-surface));
+  --status-info-border: var(--info-500);
+  --capacity-track-background: var(--color-surface-muted);
+  --capacity-track-fill: var(--color-accent);
+  --featured-card-border: var(--color-border-strong);
+  --featured-card-shadow: var(--shadow-sm);
+  --warning-state-text: var(--color-text);
+  --warning-state-icon: var(--warning-500);
+  --warning-state-background: color-mix(in srgb, var(--warning-500) 18%, var(--color-surface));
+  --warning-state-border: var(--warning-500);
+  --danger-state-text: var(--color-text);
+  --danger-state-icon: var(--danger-500);
+  --danger-state-background: color-mix(in srgb, var(--danger-500) 18%, var(--color-surface));
+  --info-state-text: var(--color-text);
+  --info-state-icon: var(--info-500);
+  --info-state-background: color-mix(in srgb, var(--info-500) 18%, var(--color-surface));
+
   --orange: var(--color-accent);
   --orange-dark: var(--color-accent-hover);
   --orange-soft: var(--color-accent-soft);
@@ -236,6 +266,16 @@ html[data-design-code="v1"][data-theme="student"] .role-student .event-date {
 
 html[data-design-code="v1"][data-theme="student"] .role-student .compact-tabs > button.active {
   border-color: var(--brand-400);
+}
+
+html[data-design-code="v1"][data-theme="student"] .role-student :is(
+  .tab-row,
+  .ranking-tabs,
+  .segmented
+) > button[aria-selected="true"] {
+  border-color: var(--brand-400);
+  background: var(--student-action);
+  color: var(--student-on-dark);
 }
 
 html[data-design-code="v1"][data-theme="student"] .role-student button:focus-visible,
