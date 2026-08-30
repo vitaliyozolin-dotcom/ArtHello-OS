@@ -284,8 +284,19 @@ jobs:
             *) printf 'Unexpected application port\n' >&2; exit 1 ;;
           esac
           test "$database_path" = /data/school-1-11.sqlite
-          test "$public_origin" = "$SCHOOL_ORIGIN"
+          origin_repair_required=no
+          case "$public_origin" in
+            "$SCHOOL_ORIGIN") ;;
+            https://school-188-225-47-207.sslip.io)
+              origin_repair_required=yes
+              ;;
+            *)
+              printf 'Unexpected production public Origin\n' >&2
+              exit 1
+              ;;
+          esac
           test "$secret_length" -eq 64
+          printf 'SCHOOL_READINESS_ORIGIN_REPAIR_REQUIRED=%s\n' "$origin_repair_required"
 
           backup_path="$(
             docker exec -e BACKUP_DIR=/backups/design-v1-cutover "$production" \
