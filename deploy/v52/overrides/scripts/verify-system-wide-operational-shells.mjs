@@ -149,6 +149,8 @@ requireText(family, "Импорт не равен доступу", "family impor
 
 requireText(polish, 'input[placeholder*="Найти семью"]', "family search readability rule is missing");
 requireText(polish, 'button[data-ah-help-inline="true"]', "static field help styling is missing");
+requireText(polish, '.ahWorkflowDialog .checklist-list button[data-ah-help-inline="true"].ah-field-icon', "workflow checklist help suppression is missing");
+requireText(polish, 'body:has(.ahWorkflowDialog) [data-ah-help-root] .ah-launch', "mobile workflow help launcher suppression is missing");
 requireText(polish, ".crm-toolbar > div:last-child > button:first-child", "sales mobile action layout is missing");
 requireText(polish, ".modal-layer.staff-modal-layer", "employee dialog safe-area styling is missing");
 requireText(polish, ".workflow-drawer-layer.ahWorkflowDialogLayer", "workflow detail viewport styling is missing");

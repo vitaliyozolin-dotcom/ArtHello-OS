@@ -216,6 +216,10 @@ button[data-ah-help-inline="true"].ah-field-icon:focus-visible {
   background: #f3f1ff !important;
 }
 
+.ahWorkflowDialog .checklist-list button[data-ah-help-inline="true"].ah-field-icon {
+  display: none !important;
+}
+
 .hr-panel,
 .employee-grid > article,
 .staff-source-note,
@@ -740,6 +744,10 @@ button[data-ah-help-inline="true"].ah-field-icon:focus-visible {
 
 /* Portaled workflow and education dialogs must own the mobile visual viewport. */
 @media (max-width: 720px) {
+  body:has(.ahWorkflowDialog) [data-ah-help-root] .ah-launch {
+    display: none !important;
+  }
+
   .workflow-drawer-layer.ahWorkflowDialogLayer {
     position: fixed !important;
     inset: 0 !important;

@@ -707,6 +707,7 @@ const populatedWorkflow = {
 };
 
 
+
 const populatedWorkflowDetail = {
   task: { ...populatedWorkflow.tasks[0], priority: "Высокий", status: "Входящие" },
   parent: null,
@@ -1804,6 +1805,7 @@ function assertCompactMobileContractorRegistry(contractors) {
   }
 }
 
+
 async function captureWorkflowDialog(browser, base, storageState, viewport) {
   const overviewFixture = { endpoint: waveRoutes.tasks.endpoint, payload: populatedWorkflow };
   const { context, page } = await stablePage(browser, base, storageState, viewport, "tasks", overviewFixture);
@@ -1831,6 +1833,9 @@ async function captureWorkflowDialog(browser, base, storageState, viewport) {
     const footer = dialog?.querySelector(".workflow-drawer-footer");
     const action = footer?.querySelector("button");
     const close = dialog?.querySelector('.workflow-drawer-head > button[aria-label="Закрыть"]');
+    const checklistHelpVisible = [...(dialog?.querySelectorAll('.checklist-list button[data-ah-help-inline="true"].ah-field-icon') ?? [])]
+      .filter((button) => getComputedStyle(button).display !== "none" && button.getClientRects().length > 0).length;
+    const helpLauncher = document.querySelector("[data-ah-help-root] .ah-launch");
     const layerBox = layer?.getBoundingClientRect();
     const dialogBox = dialog?.getBoundingClientRect();
     const bodyBox = body?.getBoundingClientRect();
@@ -1851,6 +1856,8 @@ async function captureWorkflowDialog(browser, base, storageState, viewport) {
       footerVisible: Boolean(footerBox && footerBox.height >= 64 && footerBox.bottom <= (dialogBox?.bottom ?? 0) + 1),
       actionVisible: Boolean(action && getComputedStyle(action).display !== "none" && action.getClientRects().length),
       closeVisible: Boolean(close && getComputedStyle(close).display !== "none" && close.getClientRects().length),
+      checklistHelpVisible,
+      helpLauncherVisible: Boolean(helpLauncher && getComputedStyle(helpLauncher).display !== "none" && helpLauncher.getClientRects().length),
     };
   });
   await context.close();
@@ -2073,6 +2080,9 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
       }
       if (!["auto", "scroll"].includes(item.bodyOverflowY) || item.bodyFooterOverlap || !item.footerVisible || !item.actionVisible || !item.closeVisible) {
         throw new Error(`workflow-dialog: scroll/footer contract failed at ${viewport.join("x")}`);
+      }
+      if (item.checklistHelpVisible !== 0 || (viewport[0] <= 720 && item.helpLauncherVisible)) {
+        throw new Error(`workflow-dialog: contextual help overlaps task content at ${viewport.join("x")}`);
       }
       if (viewport[0] <= 720 && (item.dialogWidth < viewport[0] - 20 || item.dialogHeight < viewport[1] - 20)) {
         throw new Error("workflow-dialog: mobile dialog does not own the visible viewport");
