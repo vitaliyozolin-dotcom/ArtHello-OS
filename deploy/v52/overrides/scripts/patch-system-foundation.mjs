@@ -36,20 +36,14 @@ patch("app/components/ArtHelloShell.tsx", (input) => {
   source = replaceText(
     source,
     'import "./ContentModern.css";\n',
-    'import "./ContentModern.css";\nimport "./SystemWideMobilePolish.css";\n',
-    "shell mobile polish import",
+    'import "./ContentModern.css";\nimport "./design-system/tokens.css";\nimport "./design-system/design-system.css";\nimport "./SystemWideMobilePolish.css";\n',
+    "global design system and mobile polish imports",
   );
   source = replaceText(
     source,
     '<ContentWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenSales={() => openModule("sales")} onOpenFinance={() => openModule("finance")} />',
     '<ContentWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenSales={() => openModule("sales")} onOpenFinance={() => openModule("finance")} onOpenIntegrations={() => openModule("integrations")} />',
     "content integration navigation",
-  );
-  source = replaceText(
-    source,
-    '<LegalWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} focusId={moduleFocus?.module === "legal" ? moduleFocus.id : undefined} />',
-    '<LegalWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenIntegrations={() => openModule("integrations")} focusId={moduleFocus?.module === "legal" ? moduleFocus.id : undefined} />',
-    "legal integration navigation",
   );
   source = replaceText(
     source,
@@ -107,7 +101,9 @@ patch("app/components/ContextualHelpSystem.tsx", (input) => {
   return source;
 });
 
-patch("app/components/HrWorkspace.tsx", (input) => {
+if (readFileSync(target("app/components/HrWorkspace.tsx"), "utf8").includes('className="ahHrPage"')) {
+  console.log("HrWorkspace Design System override already owns its dialog portals");
+} else patch("app/components/HrWorkspace.tsx", (input) => {
   let source = input;
   source = replaceText(
     source,
@@ -177,4 +173,28 @@ patch("app/components/SalesWorkspace.tsx", (input) => {
   return source;
 });
 
+patch("app/globals.css", (input) => {
+  let source = input;
+  source = replaceText(
+    source,
+    '.content-frame [class$="-workspace"] :where(p,span,small,em,strong,dt,dd,time,label,button,input,select,textarea,th,td){font-size:14px!important;line-height:1.45}',
+    '.content-frame [class$="-workspace"] :where(p,span,small,em,strong,dt,dd,time,label,button,input,select,textarea,th,td):not([data-ah-compact-card], [data-ah-compact-card] *){font-size:14px!important;line-height:1.45}',
+    "legacy workspace 14px blanket",
+  );
+  source = replaceText(
+    source,
+    '.analytics-workspace :where(strong,span,small,em,p,dt,dd,button,select),.readiness-workspace :where(strong,span,small,em,p,dt,dd,button,select),.integration-workspace :where(strong,span,small,em,p,dt,dd,button,select){font-size:14px!important;line-height:1.4}',
+    '.analytics-workspace :where(strong,span,small,em,p,dt,dd,button,select):not([data-ah-compact-card], [data-ah-compact-card] *),.readiness-workspace :where(strong,span,small,em,p,dt,dd,button,select):not([data-ah-compact-card], [data-ah-compact-card] *),.integration-workspace :where(strong,span,small,em,p,dt,dd,button,select):not([data-ah-compact-card], [data-ah-compact-card] *){font-size:14px!important;line-height:1.4}',
+    "legacy specialist workspace 14px blanket",
+  );
+  source = replaceText(
+    source,
+    '.content-frame [class$="-workspace"] :where(p,span,small,em,dt,dd,time,label,button,input,select,textarea,th,td){font-size:15px!important}',
+    '.content-frame [class$="-workspace"] :where(p,span,small,em,dt,dd,time,label,button,input,select,textarea,th,td):not([data-ah-compact-card], [data-ah-compact-card] *){font-size:15px!important}',
+    "legacy desktop workspace 15px blanket",
+  );
+  return source;
+});
+
 console.log("System-wide patch foundation applied");
+

@@ -1,0 +1,921 @@
+.ahWorkflowPage {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.ahWorkflowPage .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahWorkflowPage .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahWorkflowPage .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahWorkflowPage .ahPageHeaderCopy p {
+  max-width: 820px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahWorkflowPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahWorkflowKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahWorkflowKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+  text-align: left;
+}
+
+.ahWorkflowKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahWorkflowKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahWorkflowKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahWorkflowKpiDanger {
+  border-color: #efc8c3;
+  background: #fff7f6;
+}
+
+.ahWorkflowKpiWarning {
+  border-color: #ead6aa;
+  background: #fffaf0;
+}
+
+.ahWorkflowPage .workflow-risk {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) max-content;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  border: 1px solid #ead6aa;
+  border-radius: 16px;
+  background: #fffaf0;
+  padding: 13px 15px;
+  color: var(--ah-color-text-primary);
+  text-align: left;
+}
+
+.ahWorkflowPage .workflow-risk > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: #f1dba9;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ahWorkflowPage .workflow-risk small,
+.ahWorkflowPage .workflow-risk p,
+.ahWorkflowPage .workflow-risk em {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+}
+
+.ahWorkflowPage .workflow-risk strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.ahWorkflowShell {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 18px;
+  padding: 0;
+}
+
+.ahWorkflowViewbar {
+  display: grid;
+  min-width: 0;
+}
+
+.ahWorkflowTabs {
+  min-width: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--ah-color-border);
+  padding-inline: 16px;
+}
+
+.ahWorkflowTabs .ahTabs {
+  width: 100%;
+  max-width: 100%;
+  gap: 18px;
+  overflow-x: auto;
+}
+
+.ahWorkflowTabs .ahTabs button {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding-inline: 0;
+  font-size: 13px;
+}
+
+.ahWorkflowFilters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 190px;
+  gap: 10px;
+  align-items: center;
+  padding: 14px 16px;
+}
+
+.ahWorkflowFilters select {
+  width: 100%;
+  height: 42px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  padding: 0 12px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.ahWorkflowEmpty {
+  gap: 12px;
+  min-height: 144px;
+  padding: 28px 18px;
+}
+
+.ahWorkflowEmpty h3 {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahWorkflowEmpty p {
+  max-width: 560px;
+  font-size: var(--ah-compact-card-body-size);
+  font-weight: 400;
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahWorkflowEmpty .ahButton {
+  min-height: 36px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.ahWorkflowTable {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ahWorkflowPage .workflow-table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+}
+
+.ahWorkflowPage .workflow-table th {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--ah-color-border);
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  letter-spacing: .05em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.ahWorkflowPage .workflow-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--ah-color-border);
+  color: var(--ah-color-text-primary);
+  font-size: 12px;
+  line-height: 16px;
+  vertical-align: middle;
+}
+
+.ahWorkflowPage .workflow-table tbody tr {
+  cursor: pointer;
+}
+
+.ahWorkflowPage .workflow-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ahWorkflowPage .workflow-table td strong,
+.ahWorkflowPage .workflow-table td small {
+  display: block;
+}
+
+.ahWorkflowPage .workflow-table td strong {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.ahWorkflowPage .workflow-table td small {
+  margin-top: 2px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahWorkflowPage .task-title-cell {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.ahWorkflowPage .priority-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--ah-color-primary);
+}
+
+.ahWorkflowPage .priority-dot.high {
+  background: #d96c61;
+}
+
+.ahWorkflowPage .priority-dot.low {
+  background: #75b9a1;
+}
+
+.ahWorkflowPage .status-pill {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 4px 7px;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 14px;
+}
+
+.ahWorkflowPage .process-board,
+.ahWorkflowPage .notification-layout,
+.ahWorkflowPage .document-workspace {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.ahWorkflowPage .process-board {
+  grid-template-columns: repeat(5, minmax(180px, 1fr));
+  overflow-x: auto;
+}
+
+.ahWorkflowPage .process-board > section,
+.ahWorkflowPage .notification-layout > section,
+.ahWorkflowPage .notification-layout > aside,
+.ahWorkflowPage .document-workspace > section,
+.ahWorkflowPage .document-workspace > aside {
+  min-width: 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 14px;
+  background: var(--ah-color-surface-soft);
+  padding: 12px;
+}
+
+.ahWorkflowPage .process-board > section > header,
+.ahWorkflowPage .workflow-section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.ahWorkflowPage .process-board button,
+.ahWorkflowPage .notification-list article,
+.ahWorkflowPage .workflow-doc-list article {
+  border: 1px solid var(--ah-color-border);
+  border-radius: 12px;
+  background: var(--ah-color-surface);
+}
+
+@media (max-width: 1024px) {
+  .ahWorkflowKpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .ahWorkflowPage {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahWorkflowPage .ahPageHeader {
+    display: grid;
+    gap: 16px;
+    align-items: start;
+  }
+
+  .ahWorkflowPage .ahPageHeaderCopy > small {
+    margin-bottom: 4px;
+    font-size: 11px;
+    line-height: 14px;
+  }
+
+  .ahWorkflowPage .ahPageHeaderCopy h1 {
+    font-size: 32px;
+    line-height: 1.02;
+  }
+
+  .ahWorkflowPage .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahWorkflowPage .ahPageHeaderActions,
+  .ahWorkflowPage .ahPageHeaderActions .ahButton {
+    width: 100%;
+  }
+
+  .ahWorkflowPage .ahPageHeaderActions .ahButton {
+    min-height: 44px;
+    border-radius: 11px;
+    font-size: 14px;
+  }
+
+  .ahWorkflowKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahWorkflowKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahWorkflowKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahWorkflowKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahWorkflowKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahWorkflowPage .workflow-risk {
+    grid-template-columns: 28px minmax(0, 1fr);
+    border-radius: 13px;
+    padding: 11px 12px;
+  }
+
+  .ahWorkflowPage .workflow-risk em {
+    grid-column: 2;
+  }
+
+  .ahWorkflowShell {
+    overflow: visible;
+    border-radius: 14px;
+  }
+
+  .ahWorkflowTabs {
+    padding-inline: 12px;
+  }
+
+  .ahWorkflowTabs .ahTabs {
+    gap: 18px;
+  }
+
+  .ahWorkflowFilters {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .ahWorkflowFilters select,
+  .ahWorkflowFilters input {
+    font-size: 16px;
+  }
+
+  .ahWorkflowTable {
+    overflow-x: visible;
+    padding: 10px;
+  }
+
+  .ahWorkflowPage .workflow-table,
+  .ahWorkflowPage .workflow-table tbody {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .ahWorkflowPage .workflow-table thead {
+    display: none;
+  }
+
+  .ahWorkflowPage .workflow-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .ahWorkflowPage .workflow-table tbody tr {
+    display: grid;
+    gap: 8px;
+    border: 1px solid var(--ah-color-border);
+    border-radius: 13px;
+    background: var(--ah-color-surface);
+    padding: 12px;
+  }
+
+  .ahWorkflowPage .workflow-table td {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    border: 0;
+    padding: 0;
+    font-size: 11px;
+    line-height: 15px;
+  }
+
+  .ahWorkflowPage .workflow-table td::before {
+    color: var(--ah-color-text-secondary);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 13px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .ahWorkflowPage .workflow-table td:nth-child(1)::before { content: "Задача"; }
+  .ahWorkflowPage .workflow-table td:nth-child(2)::before { content: "Цепочка"; }
+  .ahWorkflowPage .workflow-table td:nth-child(3)::before { content: "Ответственный"; }
+  .ahWorkflowPage .workflow-table td:nth-child(4)::before { content: "Срок"; }
+  .ahWorkflowPage .workflow-table td:nth-child(5)::before { content: "Статус"; }
+  .ahWorkflowPage .workflow-table td:nth-child(6) { display: none; }
+
+  .ahWorkflowPage .process-board {
+    grid-template-columns: repeat(5, minmax(220px, 1fr));
+    padding: 10px;
+  }
+
+  .ahWorkflowPage .notification-layout,
+  .ahWorkflowPage .document-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 10px;
+  }
+}
+
+@media (max-width: 359px) {
+  .ahWorkflowKpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+
+/* Task detail and nested workflow dialogs use the same surface canon as Access. */
+.ahWorkflowDialogLayer {
+  color: var(--ah-color-text-primary);
+}
+
+.ahWorkflowDialog {
+  isolation: isolate;
+  color: var(--ah-color-text-primary);
+}
+
+.ahWorkflowDialog .workflow-drawer-head {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--ah-color-border);
+  padding: 18px 20px 14px;
+  background: var(--ah-color-surface);
+}
+
+.ahWorkflowDialog .workflow-drawer-head > div {
+  min-width: 0;
+}
+
+.ahWorkflowDialog .workflow-drawer-head > div > span {
+  min-height: 24px;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding-inline: 9px;
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ahWorkflowDialog .workflow-drawer-head h2 {
+  margin: 7px 0 3px;
+  color: var(--ah-color-text-primary);
+  font-size: 22px;
+  line-height: 27px;
+  overflow-wrap: anywhere;
+}
+
+.ahWorkflowDialog .workflow-drawer-head p {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 15px;
+  overflow-wrap: anywhere;
+}
+
+.ahWorkflowDialog .workflow-drawer-head > button {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-color: var(--ah-color-border);
+  border-radius: 12px;
+  color: var(--ah-color-text-primary);
+}
+
+.ahWorkflowDialog .process-rail {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--ah-color-border);
+  padding: 10px 18px 12px;
+  background: var(--ah-color-surface);
+}
+
+.ahWorkflowDialog .process-rail > div {
+  min-width: 0;
+  color: var(--ah-color-text-secondary);
+}
+
+.ahWorkflowDialog .process-rail span {
+  border-color: var(--ah-color-border);
+  color: var(--ah-color-text-secondary);
+}
+
+.ahWorkflowDialog .process-rail div.done span {
+  border-color: var(--ah-color-primary);
+  background: var(--ah-color-primary);
+}
+
+.ahWorkflowDialog .process-rail div.current span {
+  border-color: var(--ah-color-primary);
+  color: var(--ah-color-primary);
+  box-shadow: 0 0 0 4px var(--ah-color-primary-soft);
+}
+
+.ahWorkflowDialog .process-rail > div.done:not(:last-child)::after {
+  background: var(--ah-color-primary);
+}
+
+.ahWorkflowDialog .process-rail div.current small {
+  color: var(--ah-color-primary);
+}
+
+.ahWorkflowDialog .workflow-tabs {
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow-x: auto;
+  border-color: var(--ah-color-border);
+  padding-inline: 12px;
+  background: var(--ah-color-surface);
+  scrollbar-width: none;
+}
+
+.ahWorkflowDialog .workflow-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.ahWorkflowDialog .workflow-tabs button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  border-color: transparent;
+  padding-inline: 10px;
+  color: var(--ah-color-text-secondary);
+  white-space: nowrap;
+}
+
+.ahWorkflowDialog .workflow-tabs button.active {
+  border-color: var(--ah-color-primary);
+  color: var(--ah-color-primary);
+}
+
+.ahWorkflowDialog .workflow-drawer-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 16px 20px;
+  background: #f7f8fc;
+}
+
+.ahWorkflowDialog .task-summary,
+.ahWorkflowDialog .task-block,
+.ahWorkflowDialog .approval-card {
+  border-color: var(--ah-color-border);
+  border-radius: 16px;
+  background: var(--ah-color-surface);
+}
+
+.ahWorkflowDialog .task-summary > p,
+.ahWorkflowDialog .empty-inline {
+  color: var(--ah-color-text-secondary);
+}
+
+.ahWorkflowDialog .workflow-section-head h3 {
+  margin: 2px 0 0;
+  color: var(--ah-color-text-primary);
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.ahWorkflowDialog .workflow-section-head small,
+.ahWorkflowDialog .task-summary dt,
+.ahWorkflowDialog .task-summary dd small {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahWorkflowDialog .workflow-section-head > button,
+.ahWorkflowDialog .inline-add button,
+.ahWorkflowDialog .comment-add button {
+  min-height: 40px;
+  border-color: var(--ah-color-primary);
+  border-radius: 11px;
+  background: var(--ah-color-primary);
+  color: #fff;
+}
+
+.ahWorkflowDialog .status-pill {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 4px 8px;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 14px;
+}
+
+.ahWorkflowDialog .priority-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 0;
+  border-radius: 50%;
+  background: var(--ah-color-primary);
+}
+
+.ahWorkflowDialog .priority-dot.high {
+  background: #d96c61;
+}
+
+.ahWorkflowDialog .priority-dot.low {
+  background: #75b9a1;
+}
+
+.ahWorkflowDialog .workflow-drawer-footer {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  min-height: 72px;
+  border-color: var(--ah-color-border);
+  padding: 12px 16px;
+  background: var(--ah-color-surface);
+  box-shadow: 0 -10px 28px rgba(38, 43, 71, .06);
+}
+
+.ahWorkflowDialog .workflow-drawer-footer > div {
+  min-width: 0;
+}
+
+.ahWorkflowDialog .workflow-drawer-footer p {
+  min-width: 0;
+}
+
+.ahWorkflowDialog .workflow-drawer-footer strong,
+.ahWorkflowDialog .workflow-drawer-footer small {
+  overflow-wrap: anywhere;
+}
+
+.ahWorkflowDialog .workflow-drawer-footer > button {
+  min-height: 44px;
+  border-radius: 12px;
+  background: var(--ah-color-primary);
+  padding-inline: 16px;
+  color: #fff;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.ahWorkflowDialog .result-layer {
+  background: rgba(23, 26, 43, .34);
+}
+
+.ahWorkflowDialog .result-layer form {
+  border: 1px solid var(--ah-color-border);
+  border-radius: 20px;
+  box-shadow: 0 28px 80px rgba(23, 26, 43, .24);
+}
+
+.ahWorkflowModalLayer {
+  color: var(--ah-color-text-primary);
+}
+
+.ahWorkflowModal {
+  border-color: var(--ah-color-border);
+  color: var(--ah-color-text-primary);
+}
+
+.ahWorkflowModal .drawer-head h2 {
+  color: var(--ah-color-text-primary);
+}
+
+.ahWorkflowModal .drawer-head p,
+.ahWorkflowModal label > span,
+.ahWorkflowModal label > small {
+  color: var(--ah-color-text-secondary);
+}
+
+.ahWorkflowModal .modal-actions button:last-child {
+  border-color: var(--ah-color-primary);
+  background: var(--ah-color-primary);
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  .ahWorkflowDialog .workflow-drawer-head {
+    gap: 10px;
+    padding: 13px 14px 11px;
+  }
+
+  .ahWorkflowDialog .workflow-drawer-head h2 {
+    margin-top: 5px;
+    font-size: 19px;
+    line-height: 23px;
+  }
+
+  .ahWorkflowDialog .workflow-drawer-head > button {
+    width: 38px;
+    height: 38px;
+  }
+
+  .ahWorkflowDialog .process-rail {
+    padding: 8px 6px 10px;
+  }
+
+  .ahWorkflowDialog .process-rail span {
+    width: 24px;
+    height: 24px;
+    font-size: 11px;
+  }
+
+  .ahWorkflowDialog .process-rail small {
+    max-width: 64px;
+    font-size: 9px;
+    line-height: 11px;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  .ahWorkflowDialog .process-rail > div:not(:last-child)::after {
+    top: 11px;
+    left: calc(50% + 13px);
+    right: calc(-50% + 13px);
+  }
+
+  .ahWorkflowDialog .workflow-tabs {
+    padding-inline: 5px;
+  }
+
+  .ahWorkflowDialog .workflow-tabs button {
+    padding-inline: 10px;
+    font-size: 12px;
+  }
+
+  .ahWorkflowDialog .workflow-drawer-body {
+    padding: 11px 12px 16px;
+  }
+
+  .ahWorkflowDialog .task-summary,
+  .ahWorkflowDialog .task-block,
+  .ahWorkflowDialog .approval-card {
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .ahWorkflowDialog .task-summary dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahWorkflowDialog .workflow-section-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .ahWorkflowDialog .workflow-section-head > button {
+    min-height: 38px;
+    padding-inline: 12px;
+  }
+
+  .ahWorkflowDialog .workflow-drawer-footer {
+    min-height: 76px;
+    padding: 11px 12px max(11px, env(safe-area-inset-bottom));
+  }
+
+  .ahWorkflowDialog .workflow-drawer-footer strong {
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .ahWorkflowDialog .workflow-drawer-footer small {
+    font-size: 11px;
+    line-height: 14px;
+  }
+
+  .ahWorkflowDialog .workflow-drawer-footer > button {
+    max-width: 190px;
+    min-height: 46px;
+    padding-inline: 14px;
+    font-size: 13px;
+    white-space: normal;
+  }
+
+  .ahWorkflowDialog .result-layer {
+    align-items: flex-end;
+    padding: 10px;
+  }
+
+  .ahWorkflowDialog .result-layer form {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+    overflow-y: auto;
+    border-radius: 20px;
+  }
+
+  .ahWorkflowModal {
+    border-radius: 20px;
+  }
+
+  .ahWorkflowModal .form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 359px) {
+  .ahWorkflowDialog .workflow-drawer-footer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahWorkflowDialog .workflow-drawer-footer > button {
+    width: 100%;
+    max-width: none;
+  }
+}

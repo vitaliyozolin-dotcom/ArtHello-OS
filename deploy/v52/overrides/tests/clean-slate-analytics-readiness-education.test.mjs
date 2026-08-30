@@ -14,13 +14,15 @@ test("analytics empty mode has no phantom cash, snapshot or model source claims"
   assert.match(api, /sourceCoverage: isEmptyMode \? \{ fact: \[\], synthetic: \[\], unavailable: \[\] \}/);
   assert.match(api, /Аналитика строится только по сохранённым рабочим записям/);
   assert.match(api, /Модельные расчёты появятся только после подключения источника/);
-  assert.match(ui, /isDemo=data\.dataMode==="test"/);
-  assert.match(ui, /isDemo\?"ОПУБЛИКОВАННЫЙ ТЕСТОВЫЙ СНИМОК":"РАБОЧИЕ ДАННЫЕ"/);
+  assert.match(ui, /\bhasAnalyticsData\b/);
+  assert.doesNotMatch(ui, /if\s*\(\s*!\s*hasAnalyticsData\s*\)\s*return\b/);
+  assert.doesNotMatch(ui, /isDemo|ОПУБЛИКОВАННЫЙ ТЕСТОВЫЙ СНИМОК/);
   assert.match(ui, /data\.owner\.cashPeriod/);
 });
 
 test("readiness empty mode returns no demo scenarios or fixed test matrix", () => {
   const api = read("../app/api/readiness/route.ts");
+  const ui = read("../app/components/ReadinessWorkspace.tsx");
   const emptyGuard = api.indexOf('if (dataMode === "empty")');
   const firstScenarioQuery = api.indexOf('SELECT * FROM readiness_scenarios');
   const emptyResponse = api.slice(emptyGuard, firstScenarioQuery);
@@ -30,6 +32,9 @@ test("readiness empty mode returns no demo scenarios or fixed test matrix", () =
   assert.match(emptyResponse, /scenarios: \[\]/);
   assert.match(emptyResponse, /testLayers: \[\]/);
   assert.doesNotMatch(emptyResponse, /Unit|Browser compatibility|Тестовый контур|синтетическ/);
+  assert.match(ui, /\bhasReadinessData\b/);
+  assert.doesNotMatch(ui, /if\s*\(\s*!\s*hasReadinessData\s*\)\s*return\b/);
+  assert.doesNotMatch(ui, /isDemo|SCN-T-09|Этап 19/);
 });
 
 test("education can create the first real program before the first group", () => {

@@ -16,6 +16,7 @@ const ownerStyles = read("../app/components/OwnerDashboard.module.css");
 const shellFoundation = read("../app/components/ShellFoundation.css");
 const airyLayout = read("../app/components/AiryLayout.css");
 const contentModern = read("../app/components/ContentModern.css");
+const mobilePatch = read("../scripts/patch-mobile-canonical-v5.mjs");
 const db = read("../db/index.ts");
 
 test("design tokens expose the required semantic system", () => {
@@ -38,7 +39,7 @@ test("desktop typography and KPI cards do not depend on clipped microcopy", () =
   assert.match(ownerStyles, /\.tableWrap table\{font-size:12px\}/);
   assert.match(ownerStyles, /\.kpiCopy small\{font-size:13px\}/);
   assert.match(shellFoundation, /\.nav-item\{min-height:36px;font-size:14px!important\}/);
-  assert.match(css, /font-size:15px!important/);
+  assert.match(css, /:not\(\[data-ah-compact-card\],\s*\[data-ah-compact-card\] \*\)\{font-size:15px!important\}/);
 });
 
 test("owner cash flow is a source-backed interactive chart instead of decorative lines", () => {
@@ -80,6 +81,23 @@ test("mobile shell uses a dedicated composition with touch-sized controls", () =
   assert.match(shell, /aria-label="Мобильная навигация"/);
 });
 
+test("mobile owner KPIs remain readable two-column cards", () => {
+  assert.match(ownerDashboard, /owner-dashboard-kpis/);
+  assert.match(ownerDashboard, /owner-dashboard-kpi-icon/);
+  assert.match(ownerDashboard, /owner-dashboard-kpi-copy/);
+  assert.match(mobilePatch, /owner-dashboard-kpis\{display:grid!important;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)!important/);
+  assert.match(mobilePatch, /owner-dashboard-kpi\{[^\n]*min-height:104px!important/);
+  assert.match(mobilePatch, /owner-dashboard-kpi-copy\{display:grid!important/);
+});
+
+test("family search has one search affordance without detached inline help", () => {
+  assert.doesNotMatch(mobilePatch, /content:"⌕"/);
+  assert.match(mobilePatch, /input\[placeholder\*="Найти семью"\][^\n]*padding-right:16px!important/);
+  assert.match(mobilePatch, /::before\{content:none!important;display:none!important\}/);
+  assert.match(mobilePatch, /label:has\(>input\[placeholder\*="Найти семью"\]\)>span:first-child\{[^\n]*font-size:0!important/);
+  assert.match(mobilePatch, /span:first-child>button\[data-ah-help-inline=true\]\.ah-field-icon\{display:none!important\}/);
+});
+
 test("required personal dashboards have independent role profiles", () => {
   for (const role of ["Собственник", "Директор", "Финансы", "Продажи", "HR", "Кухня", "Сотрудник", "Представитель Виталия"]) {
     assert.match(shell, new RegExp(`"${role}": \\{`), `${role} dashboard profile is missing`);
@@ -90,7 +108,7 @@ test("clients and methods are independent workspaces instead of shared placehold
   assert.match(shell, /const FamilyWorkspace = lazy/);
   assert.match(shell, /active === "clients"/);
   assert.match(shell, /<FamilyWorkspace/);
-  assert.match(education, /workspace==="methods"\?"Методики":"Обучение"/);
+  assert.match(education, /workspace\s*===\s*"methods"\s*\?\s*"Методики"\s*:\s*"Обучение"/);
   assert.match(shell, /<SalesWorkspace workspace="sales"/);
   assert.match(shell, /<EducationWorkspace key=\{active\} workspace=\{active\}/);
 });

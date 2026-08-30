@@ -1,0 +1,767 @@
+.ahFoodPage {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.ahFoodPage .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahFoodPage .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahFoodPage .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahFoodPage .ahPageHeaderCopy p {
+  max-width: 780px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahFoodPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahFoodStatus {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ahFoodStateCard {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 0;
+}
+
+.ahFoodStateCard > .ahEmptyState,
+.ahFoodPanel > .ahEmptyState {
+  min-height: 120px;
+  padding: 24px 20px;
+}
+
+.ahFoodStateCard > .ahEmptyState h3,
+.ahFoodPanel > .ahEmptyState h3 {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahFoodStateCard > .ahEmptyState p,
+.ahFoodPanel > .ahEmptyState p {
+  font-size: var(--ah-compact-card-body-size);
+  font-weight: 400;
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahFoodBoundary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+
+.ahFoodBoundary strong {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 5px 10px;
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 16px;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.ahFoodBoundary span {
+  min-width: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ahFoodKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahFoodKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+}
+
+.ahFoodKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahFoodKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahFoodKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahFoodKpiWarning {
+  border-color: #f0d4b5;
+  background: var(--ah-color-warning-soft);
+}
+
+.ahFoodKpiPositive {
+  border-color: #c9e2d6;
+  background: #f2faf6;
+}
+
+.ahFoodTabs {
+  min-width: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--ah-color-border);
+}
+
+.ahFoodTabs .ahTabs {
+  width: 100%;
+  max-width: 100%;
+  gap: 18px;
+}
+
+.ahFoodTabs .ahTabs button {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+.ahFoodLayout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ahFoodPanel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.ahFoodPanelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ahFoodPanelHead > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.ahFoodPanelHead p,
+.ahFoodPanelHead h2 {
+  margin: 0;
+}
+
+.ahFoodPanelHead p {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 14px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.ahFoodPanelHead h2 {
+  color: var(--ah-color-text-primary);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 21px;
+}
+
+.ahFoodPanelHead > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 5px 8px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahFoodProductionList,
+.ahFoodShiftList,
+.ahFoodIngredientList,
+.ahFoodChecks {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ahFoodProductionList > article,
+.ahFoodIngredientList > article,
+.ahFoodChecks > article {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 13px;
+  background: var(--ah-color-surface);
+  padding: 12px;
+}
+
+.ahFoodProductionList > article {
+  grid-template-columns: 38px minmax(0, 1fr) max-content;
+  align-items: start;
+}
+
+.ahFoodProductionList > article > span {
+  display: grid;
+  place-items: center;
+  min-height: 38px;
+  border-radius: 10px;
+  background: var(--ah-color-primary-soft);
+  color: var(--ah-color-primary);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.ahFoodProductionList > article > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.ahFoodProductionList strong,
+.ahFoodIngredientList strong,
+.ahFoodChecks strong {
+  font-size: var(--ah-compact-card-title-size);
+  font-weight: 500;
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahFoodProductionList small,
+.ahFoodProductionList p,
+.ahFoodChecks small,
+.ahFoodChecks p {
+  margin: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahFoodProductionList em,
+.ahFoodIngredientList em,
+.ahFoodChecks em {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+}
+
+.ahFoodShiftList .ahCompactListCard {
+  min-height: 58px;
+  border-radius: 13px;
+  padding: 10px 12px;
+}
+
+.ahFoodBatchGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.ahFoodBatch {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  border-radius: 15px;
+  padding: 14px;
+}
+
+.ahFoodExpiryWarning {
+  border-color: #f0d4b5;
+  background: var(--ah-color-warning-soft);
+}
+
+.ahFoodExpiryDanger {
+  border-color: #efcbd1;
+  background: var(--ah-color-danger-soft);
+}
+
+.ahFoodBatch header,
+.ahFoodBatch footer,
+.ahFoodChecks header,
+.ahFoodChecks footer,
+.ahFoodRecipe > footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ahFoodBatch header span {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+}
+
+.ahFoodBatch header em {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+}
+
+.ahFoodBatch h2,
+.ahFoodBatch p,
+.ahFoodRecipe > p,
+.ahFoodMenuCard p {
+  margin: 0;
+}
+
+.ahFoodBatch h2 {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 19px;
+}
+
+.ahFoodBatch dl,
+.ahFoodMenuCard dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.ahFoodBatch dl > div,
+.ahFoodMenuCard dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ahFoodBatch dt,
+.ahFoodMenuCard dt {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 12px;
+}
+
+.ahFoodBatch dd,
+.ahFoodMenuCard dd {
+  margin: 0;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: right;
+}
+
+.ahFoodBatch > p,
+.ahFoodRecipe > p,
+.ahFoodMenuCard p {
+  color: var(--ah-color-text-secondary);
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahFoodBatch footer {
+  align-items: center;
+}
+
+.ahFoodBatch footer > span,
+.ahFoodRecipe > footer > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 13px;
+}
+
+.ahFoodInlineButton {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.ahFoodIngredientList > article {
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  align-items: center;
+}
+
+.ahFoodMenuCard {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 13px;
+  padding: 13px;
+}
+
+.ahFoodMenuCard > span {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-transform: uppercase;
+}
+
+.ahFoodMenuCard > strong {
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.ahFoodShipmentTable {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.ahFoodShipmentTable table {
+  width: 100%;
+  min-width: 940px;
+  border-collapse: collapse;
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahFoodShipmentTable th,
+.ahFoodShipmentTable td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--ah-color-border);
+  text-align: left;
+}
+
+.ahFoodShipmentTable th {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.ahFoodEconomics > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ahFoodEconomics > div > span {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.ahFoodEconomics small {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 12px;
+}
+
+.ahFoodEconomics strong {
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.ahFoodProfit {
+  border-color: #c9e2d6;
+  background: #f2faf6;
+}
+
+.ahFoodProfit em {
+  color: #32745a;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+}
+
+.ahFoodEconomics > .ahButton {
+  justify-self: start;
+}
+
+.ahFoodChecks > article {
+  gap: 7px;
+}
+
+.ahFoodChecks footer {
+  justify-content: flex-end;
+}
+
+@media (max-width: 1024px) {
+  .ahFoodKpis,
+  .ahFoodBatchGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .ahFoodPage {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahFoodPage .ahPageHeader {
+    align-items: start;
+  }
+
+  .ahFoodPage .ahPageHeaderCopy > small {
+    margin-bottom: 5px;
+    font-size: var(--ah-mobile-eyebrow-size);
+    font-weight: 750;
+    line-height: var(--ah-mobile-eyebrow-line);
+    letter-spacing: .12em;
+  }
+
+  .ahFoodPage .ahPageHeaderCopy h1 {
+    font-size: var(--ah-font-size-page-title-mobile);
+    font-weight: 700;
+    line-height: var(--ah-line-height-page-title-mobile);
+  }
+
+  .ahFoodPage .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahFoodPage .ahPageHeaderActions,
+  .ahFoodPage .ahPageHeaderActions .ahButton {
+    width: 100%;
+  }
+
+  .ahFoodPage .ahPageHeaderActions .ahButton {
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    font-size: var(--ah-mobile-action-size);
+  }
+
+  .ahFoodBoundary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    border-radius: var(--ah-mobile-info-radius);
+    padding: var(--ah-mobile-info-padding-block) var(--ah-mobile-info-padding-inline);
+  }
+
+  .ahFoodBoundary strong {
+    min-height: 0;
+    padding: 5px 8px;
+    font-size: var(--ah-mobile-info-label-size);
+    font-weight: 800;
+    line-height: var(--ah-mobile-info-label-line);
+  }
+
+  .ahFoodBoundary span {
+    font-size: var(--ah-mobile-info-body-size);
+    line-height: var(--ah-mobile-info-body-line);
+  }
+
+  .ahFoodKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahFoodKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahFoodKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahFoodKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahFoodKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahFoodTabs .ahTabs {
+    gap: 14px;
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+
+  .ahFoodTabs .ahTabs button {
+    min-height: 38px;
+    font-size: 12px;
+  }
+
+  .ahFoodLayout,
+  .ahFoodBatchGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahFoodPanel,
+  .ahFoodBatch {
+    gap: 14px;
+    border-radius: 14px;
+    padding: 13px;
+  }
+
+  .ahFoodPanelHead {
+    gap: 10px;
+  }
+
+  .ahFoodPanelHead h2 {
+    font-size: 14px;
+    line-height: 18px;
+  }
+
+  .ahFoodPanelHead > span {
+    font-size: 9px;
+    line-height: 12px;
+  }
+
+  .ahFoodProductionList > article,
+  .ahFoodIngredientList > article,
+  .ahFoodChecks > article,
+  .ahFoodShiftList .ahCompactListCard,
+  .ahFoodMenuCard {
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+  }
+
+  .ahFoodProductionList > article {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .ahFoodProductionList > article > em {
+    grid-column: 2;
+  }
+
+  .ahFoodBatch footer,
+  .ahFoodRecipe > footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ahFoodBatch footer .ahButton,
+  .ahFoodRecipe > footer .ahButton {
+    width: 100%;
+    min-height: var(--ah-mobile-action-height);
+  }
+
+  .ahFoodShipmentTable {
+    overflow: visible;
+  }
+
+  .ahFoodShipmentTable table,
+  .ahFoodShipmentTable tbody,
+  .ahFoodShipmentTable tr,
+  .ahFoodShipmentTable td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .ahFoodShipmentTable thead {
+    display: none;
+  }
+
+  .ahFoodShipmentTable tbody {
+    display: grid;
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahFoodShipmentTable tr {
+    display: grid;
+    gap: 0;
+    border: 1px solid var(--ah-color-border);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    background: var(--ah-color-surface);
+    padding: 9px 12px;
+  }
+
+  .ahFoodShipmentTable td {
+    display: grid;
+    grid-template-columns: minmax(84px, .7fr) minmax(0, 1.3fr);
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--ah-color-border);
+    font-size: var(--ah-compact-card-body-size);
+    line-height: var(--ah-compact-card-body-line);
+    overflow-wrap: anywhere;
+  }
+
+  .ahFoodShipmentTable td::before {
+    content: attr(data-label);
+    color: var(--ah-color-text-secondary);
+    font-size: var(--ah-compact-card-body-size);
+    line-height: var(--ah-compact-card-body-line);
+  }
+
+  .ahFoodShipmentTable td:last-child {
+    border-bottom: 0;
+  }
+
+  .ahFoodEconomics > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahFoodStateCard > .ahEmptyState,
+  .ahFoodPanel > .ahEmptyState {
+    gap: 10px;
+    min-height: 116px;
+    padding: 20px 14px;
+  }
+
+  .ahFoodStateCard .ahButton,
+  .ahFoodPanel > .ahEmptyState .ahButton {
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    font-size: var(--ah-mobile-action-size);
+  }
+}
+
+@media (max-width: 359px) {
+  .ahFoodKpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

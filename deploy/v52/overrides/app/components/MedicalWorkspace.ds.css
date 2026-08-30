@@ -1,0 +1,619 @@
+.ahMedicalPage,
+.ahMedicalDenied {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.ahMedicalPage .ahPageHeader,
+.ahMedicalDenied .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahMedicalPage .ahPageHeaderCopy > small,
+.ahMedicalDenied .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahMedicalPage .ahPageHeaderCopy h1,
+.ahMedicalDenied .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahMedicalPage .ahPageHeaderCopy p,
+.ahMedicalDenied .ahPageHeaderCopy p {
+  max-width: 780px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahMedicalPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahMedicalStatus {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ahMedicalDenied > .ahCard {
+  padding: 0;
+}
+
+.ahMedicalBoundary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+
+.ahMedicalBoundary strong {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 5px 10px;
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 16px;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.ahMedicalBoundary span {
+  min-width: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ahMedicalKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahMedicalKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+}
+
+.ahMedicalKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahMedicalKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahMedicalKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahMedicalKpiWarning {
+  border-color: #f0d4b5;
+  background: var(--ah-color-warning-soft);
+}
+
+.ahMedicalTabs {
+  min-width: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--ah-color-border);
+}
+
+.ahMedicalTabs .ahTabs {
+  width: 100%;
+  max-width: 100%;
+  gap: 18px;
+  overflow-x: auto;
+}
+
+.ahMedicalTabs .ahTabs button {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+.ahMedicalLayout,
+.ahMedicalCardGrid,
+.ahMedicalCaseGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ahMedicalPanel,
+.ahMedicalDocument,
+.ahMedicalRestriction,
+.ahMedicalCase {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.ahMedicalPanel > .ahEmptyState,
+.ahMedicalDenied .ahEmptyState {
+  min-height: 120px;
+  padding: 24px 20px;
+}
+
+.ahMedicalPanel > .ahEmptyState h3,
+.ahMedicalDenied .ahEmptyState h3 {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 15px;
+}
+
+.ahMedicalPanel > .ahEmptyState p,
+.ahMedicalDenied .ahEmptyState p {
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+}
+
+.ahMedicalPanelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ahMedicalPanelHead > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.ahMedicalPanelHead p,
+.ahMedicalPanelHead h2 {
+  margin: 0;
+}
+
+.ahMedicalPanelHead p {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 14px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.ahMedicalPanelHead h2 {
+  color: var(--ah-color-text-primary);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 21px;
+}
+
+.ahMedicalPanelHead > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ah-color-surface-soft);
+  padding: 5px 8px;
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahMedicalRules,
+.ahMedicalDue,
+.ahMedicalTimeline {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ahMedicalRules .ahCompactListCard,
+.ahMedicalDue .ahCompactListCard,
+.ahMedicalTimeline .ahCompactListCard {
+  min-height: 58px;
+  border-radius: 13px;
+  padding: 10px 12px;
+}
+
+.ahMedicalDocument header,
+.ahMedicalRestriction header,
+.ahMedicalDocument footer,
+.ahMedicalRestriction footer,
+.ahMedicalCase > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ahMedicalDocument header span,
+.ahMedicalRestriction header span {
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 14px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.ahMedicalDocument header em,
+.ahMedicalRestriction header em,
+.ahMedicalDocument footer,
+.ahMedicalRestriction footer,
+.ahMedicalCase > footer {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+}
+
+.ahMedicalDocument h2,
+.ahMedicalRestriction h2,
+.ahMedicalDocument p,
+.ahMedicalRestriction p,
+.ahMedicalCase > p {
+  margin: 0;
+}
+
+.ahMedicalDocument h2,
+.ahMedicalRestriction h2 {
+  font-size: 16px;
+  line-height: 21px;
+}
+
+.ahMedicalDocument p,
+.ahMedicalRestriction p,
+.ahMedicalCase > p {
+  color: var(--ah-color-text-secondary);
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahMedicalDocument dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.ahMedicalDocument dl > div {
+  display: grid;
+  gap: 3px;
+  border-radius: 11px;
+  background: var(--ah-color-surface-soft);
+  padding: 10px;
+}
+
+.ahMedicalDocument dt,
+.ahMedicalDocument dd {
+  margin: 0;
+}
+
+.ahMedicalDocument dt {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  line-height: 12px;
+}
+
+.ahMedicalDocument dd {
+  font-size: 11px;
+  line-height: 15px;
+  overflow-wrap: anywhere;
+}
+
+.ahMedicalDocument .ahButton,
+.ahMedicalTimeline .ahButton,
+.ahMedicalCase > footer .ahButton {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.ahMedicalTimeline > article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 10px;
+}
+
+.ahMedicalAuditTable {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.ahMedicalAuditTable table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ahMedicalAuditTable th,
+.ahMedicalAuditTable td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--ah-color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ahMedicalAuditTable th {
+  color: var(--ah-color-text-secondary);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 1024px) {
+  .ahMedicalKpis,
+  .ahMedicalCardGrid,
+  .ahMedicalCaseGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .ahMedicalPage,
+  .ahMedicalDenied {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahMedicalPage .ahPageHeader,
+  .ahMedicalDenied .ahPageHeader {
+    align-items: start;
+  }
+
+  .ahMedicalPage .ahPageHeaderCopy > small,
+  .ahMedicalDenied .ahPageHeaderCopy > small {
+    margin-bottom: 5px;
+    font-size: var(--ah-mobile-eyebrow-size);
+    font-weight: 750;
+    line-height: var(--ah-mobile-eyebrow-line);
+    letter-spacing: .12em;
+  }
+
+  .ahMedicalPage .ahPageHeaderCopy h1,
+  .ahMedicalDenied .ahPageHeaderCopy h1 {
+    font-size: var(--ah-font-size-page-title-mobile);
+    font-weight: 700;
+    line-height: var(--ah-line-height-page-title-mobile);
+  }
+
+  .ahMedicalPage .ahPageHeaderCopy p,
+  .ahMedicalDenied .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahMedicalPage .ahPageHeaderActions,
+  .ahMedicalPage .ahPageHeaderActions .ahButton {
+    width: 100%;
+  }
+
+  .ahMedicalPage .ahPageHeaderActions .ahButton {
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    font-size: var(--ah-mobile-action-size);
+  }
+
+  .ahMedicalBoundary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    border-radius: var(--ah-mobile-info-radius);
+    padding: var(--ah-mobile-info-padding-block) var(--ah-mobile-info-padding-inline);
+  }
+
+  .ahMedicalBoundary strong {
+    min-height: 0;
+    padding: 5px 8px;
+    font-size: var(--ah-mobile-info-label-size);
+    font-weight: 800;
+    line-height: var(--ah-mobile-info-label-line);
+  }
+
+  .ahMedicalBoundary span {
+    font-size: var(--ah-mobile-info-body-size);
+    line-height: var(--ah-mobile-info-body-line);
+  }
+
+  .ahMedicalKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahMedicalKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahMedicalKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahMedicalKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahMedicalKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahMedicalTabs .ahTabs {
+    gap: 14px;
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+
+  .ahMedicalTabs .ahTabs button {
+    min-height: 38px;
+    font-size: 12px;
+  }
+
+  .ahMedicalLayout,
+  .ahMedicalCardGrid,
+  .ahMedicalCaseGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahMedicalPanel,
+  .ahMedicalDocument,
+  .ahMedicalRestriction,
+  .ahMedicalCase {
+    gap: 14px;
+    border-radius: 14px;
+    padding: 13px;
+  }
+
+  .ahMedicalPanelHead {
+    gap: 10px;
+  }
+
+  .ahMedicalPanelHead h2 {
+    font-size: 14px;
+    line-height: 18px;
+  }
+
+  .ahMedicalPanelHead > span {
+    font-size: 9px;
+    line-height: 12px;
+  }
+
+  .ahMedicalRules .ahCompactListCard,
+  .ahMedicalDue .ahCompactListCard,
+  .ahMedicalTimeline .ahCompactListCard {
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+  }
+
+  .ahMedicalDocument dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahMedicalDocument footer,
+  .ahMedicalCase > footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ahMedicalDocument footer .ahButton,
+  .ahMedicalCase > footer .ahButton {
+    width: 100%;
+    min-height: var(--ah-mobile-action-height);
+  }
+
+  .ahMedicalTimeline > article {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahMedicalTimeline > article > .ahButton {
+    width: 100%;
+    min-height: var(--ah-mobile-action-height);
+  }
+
+  .ahMedicalAuditTable {
+    overflow: visible;
+  }
+
+  .ahMedicalAuditTable table,
+  .ahMedicalAuditTable tbody,
+  .ahMedicalAuditTable tr,
+  .ahMedicalAuditTable td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .ahMedicalAuditTable thead {
+    display: none;
+  }
+
+  .ahMedicalAuditTable tbody {
+    display: grid;
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahMedicalAuditTable tr {
+    display: grid;
+    gap: 0;
+    border: 1px solid var(--ah-color-border);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    background: var(--ah-color-surface);
+    padding: 9px 12px;
+  }
+
+  .ahMedicalAuditTable td {
+    display: grid;
+    grid-template-columns: minmax(84px, .7fr) minmax(0, 1.3fr);
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--ah-color-border);
+    font-size: var(--ah-compact-card-body-size);
+    line-height: var(--ah-compact-card-body-line);
+    overflow-wrap: anywhere;
+  }
+
+  .ahMedicalAuditTable td::before {
+    content: attr(data-label);
+    color: var(--ah-color-text-secondary);
+    font-size: var(--ah-compact-card-body-size);
+  }
+
+  .ahMedicalAuditTable td:last-child {
+    border-bottom: 0;
+  }
+
+  .ahMedicalPanel > .ahEmptyState,
+  .ahMedicalDenied .ahEmptyState {
+    gap: 10px;
+    min-height: 116px;
+    padding: 20px 14px;
+  }
+}
+
+@media (max-width: 359px) {
+  .ahMedicalKpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

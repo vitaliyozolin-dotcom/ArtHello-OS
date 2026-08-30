@@ -114,15 +114,22 @@ button.operational-empty-card:disabled {
 .operational-empty-card strong,
 .operational-inline-empty strong {
   color: var(--ah-system-text);
-  font-size: 18px;
-  line-height: 1.25;
+  font-size: var(--ah-compact-card-title-size);
+  line-height: var(--ah-compact-card-title-line);
   overflow-wrap: anywhere;
 }
 
 .operational-empty-card p,
 .operational-empty-card small,
 .operational-inline-empty p,
-.operational-inline-empty small,
+.operational-inline-empty small {
+  margin: 0;
+  color: var(--ah-system-muted);
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+  overflow-wrap: anywhere;
+}
+
 .modal-explanation {
   margin: 0;
   color: var(--ah-system-muted);
@@ -207,6 +214,10 @@ button[data-ah-help-inline="true"].ah-field-icon:hover,
 button[data-ah-help-inline="true"].ah-field-icon:focus-visible {
   opacity: 1 !important;
   background: #f3f1ff !important;
+}
+
+.ahWorkflowDialog .checklist-list button[data-ah-help-inline="true"].ah-field-icon {
+  display: none !important;
 }
 
 .hr-panel,
@@ -715,5 +726,88 @@ button[data-ah-help-inline="true"].ah-field-icon:focus-visible {
     width: 100% !important;
     min-height: 240px !important;
     padding: 24px !important;
+  }
+}
+
+/* Legacy embedded empty states now consume the same compact-card tokens. */
+:where(.manual-module-empty, .system-empty, .settings-empty, .studio-placeholder, .crm-column-empty) :where(strong, h2, h3) {
+  font-size: var(--ah-compact-card-title-size);
+  line-height: var(--ah-compact-card-title-line);
+}
+
+:where(.manual-module-empty, .system-empty, .settings-empty, .studio-placeholder, .crm-column-empty) :where(p, small) {
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+
+
+/* Portaled workflow and education dialogs must own the mobile visual viewport. */
+@media (max-width: 720px) {
+  body:has(.ahWorkflowDialog) [data-ah-help-root] .ah-launch {
+    display: none !important;
+  }
+
+  .workflow-drawer-layer.ahWorkflowDialogLayer {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 20000 !important;
+    display: grid !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    place-content: center !important;
+    padding: 8px !important;
+    overflow: hidden !important;
+  }
+
+  .workflow-drawer-layer.ahWorkflowDialogLayer > .drawer-scrim,
+  .modal-layer.workflow-modal-layer.ahWorkflowModalLayer > .drawer-scrim,
+  .modal-layer.edu-modal-layer.ahEducationModalLayer > .drawer-scrim {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    border: 0 !important;
+  }
+
+  .workflow-drawer.ahWorkflowDialog {
+    position: relative !important;
+    inset: auto !important;
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+    height: calc(100dvh - 16px) !important;
+    max-height: calc(100dvh - 16px) !important;
+    margin: 0 !important;
+    transform: none !important;
+    border-radius: 20px !important;
+    overflow: hidden !important;
+  }
+
+  .modal-layer.workflow-modal-layer.ahWorkflowModalLayer,
+  .modal-layer.edu-modal-layer.ahEducationModalLayer {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 20000 !important;
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    padding: calc(env(safe-area-inset-top) + 12px) 12px calc(108px + env(safe-area-inset-bottom)) !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  .workflow-modal.ahWorkflowModal,
+  .ahEducationModal {
+    position: relative !important;
+    inset: auto !important;
+    width: min(100%, 680px) !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    margin: 0 auto !important;
+    transform: none !important;
+    border-radius: 22px !important;
+    overflow: visible !important;
   }
 }

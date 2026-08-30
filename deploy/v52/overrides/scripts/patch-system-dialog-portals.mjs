@@ -22,7 +22,9 @@ function patch(relativePath, transform) {
   writeFileSync(path, after, "utf8");
 }
 
-patch("app/components/ContentWorkspace.tsx", (input) => {
+if (readFileSync(target("app/components/ContentWorkspace.tsx"), "utf8").includes('className="ahContentPage"')) {
+  console.log("ContentWorkspace Design System override already owns its dialog portal");
+} else patch("app/components/ContentWorkspace.tsx", (input) => {
   let source = input;
   source = replaceText(
     source,
@@ -41,29 +43,6 @@ patch("app/components/ContentWorkspace.tsx", (input) => {
     '</footer></form></div> : null}\n  </section>;',
     '</footer></form></div>, document.body) : null}\n  </section>;',
     "content modal portal end",
-  );
-  return source;
-});
-
-patch("app/components/LegalWorkspace.tsx", (input) => {
-  let source = input;
-  source = replaceText(
-    source,
-    'import {FormEvent,useCallback,useEffect,useState}from"react";',
-    'import {FormEvent,useCallback,useEffect,useState}from"react";import{createPortal}from"react-dom";',
-    "legal portal import",
-  );
-  source = replaceText(
-    source,
-    'return <div className="modal-layer legal-create-layer"><button className="drawer-scrim" type="button" onClick={close} aria-label="Закрыть форму"/><form className="task-modal legal-create-modal" onSubmit={submit}>',
-    'return createPortal(<div className="modal-layer legal-create-layer"><button className="drawer-scrim" type="button" onClick={close} aria-label="Закрыть форму"/><form className="task-modal legal-create-modal" onSubmit={submit}>',
-    "legal modal portal start",
-  );
-  source = replaceText(
-    source,
-    '</div></form></div>}\nfunction Head',
-    '</div></form></div>,document.body)}\nfunction Head',
-    "legal modal portal end",
   );
   return source;
 });
@@ -104,3 +83,4 @@ patch("app/components/IntegrationWorkspace.tsx", (input) => {
 });
 
 console.log("System-wide dialog portals applied");
+

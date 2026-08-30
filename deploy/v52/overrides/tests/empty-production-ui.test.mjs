@@ -14,6 +14,8 @@ test("empty production UI does not expose synthetic fallback entities", () => {
     "../app/components/SalesWorkspace.tsx",
     "../app/components/ContentWorkspace.tsx",
     "../app/components/EducationWorkspace.tsx",
+    "../app/components/LegalWorkspace.tsx",
+    "../app/components/AccountingWorkspace.tsx",
     "../app/api/education/route.ts",
     "../app/api/education-actions/route.ts",
     "../app/api/hr-actions/route.ts",
@@ -36,31 +38,37 @@ test("finance API derives totals and periods only from stored records", () => {
 test("sales keeps its operating sections available before the first lead", () => {
   const sales = read("../app/components/SalesWorkspace.tsx");
 
-  assert.doesNotMatch(sales, /if \(!data\.leads\.length\) return/);
-  assert.match(sales, /DEFAULT_FUNNEL_STAGES/);
-  assert.match(sales, /Все разделы продаж уже доступны/);
+  assert.doesNotMatch(sales, /if\s*\(\s*!\s*data\.leads\.length\s*\)\s*return/);
+  assert.match(sales, /\bhasSalesData\b/);
+  assert.match(sales, /Лидов и этапов пока нет/);
+  assert.match(sales, /Сквозная цепочка пока не собрана/);
   assert.match(sales, /Добавить первый лид/);
-  assert.match(sales, /Подключить источники/);
+  assert.match(sales, /onOpenIntegrations/);
   assert.match(sales, /action: "createLead"/);
-  assert.match(sales, /EMPTY_LEAD/);
+  assert.match(sales, /function LeadCreateModal/);
+  assert.match(sales, /chainLead\s*\?/);
   assert.doesNotMatch(sales, /acceptanceChainLeadId\)!|chainLifecycle[^\n]*!|chainAccrual[^\n]*!|chainPayment[^\n]*!/);
 });
 
-test("array-backed workspaces guard empty data before first-row access", () => {
-  const cases = [
-    ["../app/components/FoodWorkspace.tsx", "if(!data.products.length", "const recipe="],
-    ["../app/components/IntegrationWorkspace.tsx", "if (!data.connections.length)", "const current ="],
-    ["../app/components/ReadinessWorkspace.tsx", "if (!data.scenarios.length)", "const scenario ="],
-  ];
+test("array-backed workspaces handle empty data before unsafe first-row access", () => {
+  const food = read("../app/components/FoodWorkspace.tsx");
+  assert.match(food, /data\.recipes\[0\]\s*\?\?/);
+  assert.match(food, /\bhasFoodData\b/);
+  assert.doesNotMatch(food, /if\s*\(\s*!\s*hasFoodData\s*\)\s*return\b/);
 
-  for (const [path, guard, access] of cases) {
-    const source = read(path);
-    assert.ok(source.indexOf(guard) > -1, `${path} has no empty guard`);
-    assert.ok(source.indexOf(access) > source.indexOf(guard), `${path} reads the first row before its empty guard`);
-  }
+  const integration = read("../app/components/IntegrationWorkspace.tsx");
+  assert.doesNotMatch(integration, /if\s*\(\s*!data\.connections\.length\s*\)\s*return/);
+  assert.match(integration, /const current = data\.connections\.find[\s\S]*?\?\? data\.connections\[0\]/);
+  assert.match(integration, /current\s*\?\s*<aside className="connection-detail"/);
+  assert.match(integration, /Подключения появятся после добавления источника/);
+
+  const readiness = read("../app/components/ReadinessWorkspace.tsx");
+  assert.match(readiness, /data\.scenarios\.find[\s\S]*?\?\?\s*data\.scenarios\[0\]/);
+  assert.match(readiness, /\bhasReadinessData\b/);
+  assert.doesNotMatch(readiness, /if\s*\(\s*!\s*hasReadinessData\s*\)\s*return\b/);
 });
 
-test("content and education use real records instead of demo identities", () => {
+test("content keeps every section available and uses real records instead of demo identities", () => {
   const content = read("../app/components/ContentWorkspace.tsx");
   const education = [
     read("../app/components/EducationWorkspace.tsx"),
@@ -68,7 +76,12 @@ test("content and education use real records instead of demo identities", () => 
     read("../app/api/education-actions/route.ts"),
   ].join("\n");
 
-  assert.match(content, /Данных пока нет/);
+  assert.match(content, /ДАННЫХ ПОКА НЕТ/);
+  assert.match(content, /\bhasContentData\b/);
+  assert.match(content, /<PageContainer\b[^>]*className="ahContentPage"/);
+  assert.match(content, /<Tabs\b/);
+  assert.doesNotMatch(content, /if\s*\(\s*!sourceOnly\s*&&\s*!hasContentData[\s\S]{0,40}?\)\s*return\b/);
+  assert.doesNotMatch(content, /CHAIN STATUS\s*·\s*PASS/);
   assert.match(content, /Math\.max\(1,/);
   assert.doesNotMatch(content, /EMP-T-CONTENT|OFF-T-001|Тестовые данные|синтетический финансовый/);
   assert.doesNotMatch(education, /EMP-T-032|FAM-T-014|PRG-T-012|GRP-T-3A|LES-T-3A/);

@@ -1,0 +1,444 @@
+.ahContractorPage {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+  padding-top: 4px;
+}
+
+.ahContractorPage .ahPageHeader {
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.ahContractorPage .ahPageHeaderCopy > small {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: .09em;
+}
+
+.ahContractorPage .ahPageHeaderCopy h1 {
+  font-size: clamp(34px, 2vw, 40px);
+  font-weight: 720;
+  line-height: 1.04;
+  letter-spacing: -.035em;
+}
+
+.ahContractorPage .ahPageHeaderCopy p {
+  max-width: 780px;
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahContractorPage .ahPageHeaderActions .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahContractorStatus {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  color: var(--ah-color-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ahContractorSource {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--ah-color-surface);
+}
+
+.ahContractorSource strong {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 5px 10px;
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.ahContractorSource span {
+  min-width: 0;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.ahContractorKpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ah-registry-kpi-gap);
+}
+
+.ahContractorKpis > .ahKpiCard {
+  min-width: 0;
+  min-height: var(--ah-registry-kpi-min-height);
+  border-radius: var(--ah-registry-kpi-radius);
+  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
+}
+
+.ahContractorKpis .ahKpiCopy small {
+  font-size: var(--ah-registry-kpi-label-size);
+  font-weight: var(--ah-registry-kpi-label-weight);
+  line-height: var(--ah-registry-kpi-label-line);
+}
+
+.ahContractorKpis .ahKpiCopy strong {
+  margin-top: var(--ah-registry-kpi-value-gap);
+  font-size: var(--ah-registry-kpi-value-size);
+  font-weight: var(--ah-registry-kpi-value-weight);
+  line-height: var(--ah-registry-kpi-value-line);
+}
+
+.ahContractorKpis .ahKpiCopy > span {
+  margin-top: var(--ah-registry-kpi-note-gap);
+  font-size: var(--ah-registry-kpi-note-size);
+  font-weight: var(--ah-registry-kpi-note-weight);
+  line-height: var(--ah-registry-kpi-note-line);
+}
+
+.ahContractorRegistry {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 0;
+}
+
+.ahContractorToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid var(--ah-color-border);
+}
+
+.ahContractorToolbar .ahSearchField input {
+  height: 44px;
+  border-radius: 12px;
+  padding-inline: 14px;
+  font-size: 13px;
+}
+
+.ahContractorCount {
+  min-width: max-content;
+  padding-right: 2px;
+  color: var(--ah-color-text-secondary);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.ahContractorRegistry > .ahEmptyState {
+  min-height: 116px;
+  padding: 24px 20px 26px;
+}
+
+.ahContractorRegistry > .ahEmptyState h3 {
+  font-size: var(--ah-compact-card-title-size);
+  line-height: var(--ah-compact-card-title-line);
+}
+
+.ahContractorRegistry > .ahEmptyState p {
+  font-size: var(--ah-compact-card-body-size);
+  line-height: var(--ah-compact-card-body-line);
+}
+
+.ahContractorRegistry > .ahEmptyState .ahButton {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  font-size: 13px;
+}
+
+.ahContractorTableWrap {
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.ahContractorTable {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  color: var(--ah-color-text-primary);
+  font-size: 13px;
+}
+
+.ahContractorTable th,
+.ahContractorTable td {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--ah-color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ahContractorTable th {
+  background: var(--ah-color-surface-soft);
+  color: var(--ah-color-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ahContractorTable tbody tr {
+  cursor: pointer;
+  transition: background-color .14s ease;
+}
+
+.ahContractorTable tbody tr:hover,
+.ahContractorTable tbody tr:focus-visible {
+  outline: 0;
+  background: var(--ah-color-primary-soft);
+}
+
+.ahContractorTable td:first-child strong,
+.ahContractorTable td:first-child small {
+  display: block;
+}
+
+.ahContractorTable td:first-child small {
+  margin-top: 4px;
+  color: var(--ah-color-text-secondary);
+}
+
+.ahContractorMobileList {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .ahContractorKpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .ahContractorPage {
+    gap: var(--ah-mobile-section-gap);
+    padding-top: 0;
+  }
+
+  .ahContractorPage .ahPageHeader {
+    align-items: start;
+  }
+
+  .ahContractorPage .ahPageHeaderCopy > small {
+    margin-bottom: 5px;
+    font-size: var(--ah-mobile-eyebrow-size);
+    font-weight: 750;
+    line-height: var(--ah-mobile-eyebrow-line);
+    letter-spacing: .12em;
+  }
+
+  .ahContractorPage .ahPageHeaderCopy h1 {
+    font-size: var(--ah-font-size-page-title-mobile);
+    font-weight: 700;
+    line-height: var(--ah-line-height-page-title-mobile);
+  }
+
+  .ahContractorPage .ahPageHeaderCopy p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .ahContractorPage .ahPageHeaderActions .ahButton {
+    min-height: var(--ah-mobile-action-height);
+    border-radius: var(--ah-mobile-action-radius);
+    padding-inline: 17px;
+    font-size: var(--ah-mobile-action-size);
+  }
+
+  .ahContractorSource {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    border-radius: var(--ah-mobile-info-radius);
+    padding: var(--ah-mobile-info-padding-block) var(--ah-mobile-info-padding-inline);
+  }
+
+  .ahContractorSource strong {
+    width: fit-content;
+    min-height: 0;
+    padding: 5px 8px;
+    font-size: var(--ah-mobile-info-label-size);
+    font-weight: 800;
+    line-height: var(--ah-mobile-info-label-line);
+    letter-spacing: .06em;
+  }
+
+  .ahContractorSource span {
+    font-size: var(--ah-mobile-info-body-size);
+    line-height: var(--ah-mobile-info-body-line);
+  }
+
+  .ahContractorKpis {
+    gap: var(--ah-registry-kpi-mobile-gap);
+  }
+
+  .ahContractorKpis > .ahKpiCard {
+    min-height: var(--ah-registry-kpi-mobile-min-height);
+    border-radius: var(--ah-registry-kpi-mobile-radius);
+    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  }
+
+  .ahContractorKpis .ahKpiCopy small {
+    font-size: var(--ah-registry-kpi-mobile-label-size);
+    line-height: var(--ah-registry-kpi-mobile-label-line);
+  }
+
+  .ahContractorKpis .ahKpiCopy strong {
+    margin-top: var(--ah-registry-kpi-mobile-value-gap);
+    font-size: var(--ah-registry-kpi-mobile-value-size);
+    line-height: var(--ah-registry-kpi-mobile-value-line);
+  }
+
+  .ahContractorKpis .ahKpiCopy > span {
+    margin-top: var(--ah-registry-kpi-mobile-note-gap);
+    font-size: var(--ah-registry-kpi-mobile-note-size);
+    line-height: var(--ah-registry-kpi-mobile-note-line);
+  }
+
+  .ahContractorRegistry {
+    border-radius: 14px;
+  }
+
+  .ahContractorToolbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 11px;
+  }
+
+  .ahContractorToolbar .ahSearchField input {
+    height: 40px;
+    border-radius: 9px;
+    padding-inline: 11px;
+    font-size: 16px;
+  }
+
+  .ahContractorCount {
+    padding-inline: 0;
+    font-size: 11px;
+    line-height: 14px;
+  }
+
+  .ahContractorRegistry > .ahEmptyState {
+    gap: 10px;
+    min-height: 126px;
+    padding: 24px 16px;
+  }
+
+  .ahContractorRegistry > .ahEmptyState h3 {
+    font-size: var(--ah-compact-card-title-size);
+    line-height: var(--ah-compact-card-title-line);
+  }
+
+  .ahContractorRegistry > .ahEmptyState p {
+    font-size: var(--ah-compact-card-body-size);
+    line-height: var(--ah-compact-card-body-line);
+  }
+
+  .ahContractorRegistry > .ahEmptyState .ahButton {
+    min-height: 44px;
+    border-radius: 13px;
+    padding-inline: 14px;
+    font-size: 14px;
+  }
+
+  .ahContractorTableWrap {
+    display: none;
+  }
+
+  .ahContractorMobileList {
+    display: grid;
+    gap: var(--ah-mobile-kpi-gap);
+    padding: 16px;
+  }
+
+  .ahContractorMobileCard {
+    display: grid;
+    gap: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--ah-color-border);
+    border-radius: var(--ah-radius-control);
+    background: var(--ah-color-surface);
+    padding: 16px;
+    color: var(--ah-color-text-primary);
+    font: inherit;
+    text-align: left;
+  }
+
+  .ahContractorMobileHead {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .ahContractorMobileHead strong {
+    min-width: 0;
+    font-size: var(--ah-compact-card-title-size);
+    line-height: var(--ah-compact-card-title-line);
+    overflow-wrap: anywhere;
+  }
+
+  .ahContractorMobileHead b {
+    flex: 0 0 auto;
+    color: var(--ah-color-primary);
+    font-size: 16px;
+  }
+
+  .ahContractorMobileMeta {
+    color: var(--ah-color-text-secondary);
+    font-size: var(--ah-compact-card-body-size);
+    line-height: var(--ah-compact-card-body-line);
+    overflow-wrap: anywhere;
+  }
+
+  .ahContractorMobileGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--ah-mobile-kpi-gap);
+  }
+
+  .ahContractorMobileGrid > span {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .ahContractorMobileGrid small {
+    color: var(--ah-color-text-secondary);
+    font-size: var(--ah-compact-card-body-size);
+    line-height: var(--ah-compact-card-body-line);
+  }
+
+  .ahContractorMobileGrid strong {
+    font-size: var(--ah-compact-card-title-size);
+    line-height: var(--ah-compact-card-title-line);
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 359px) {
+  .ahContractorKpis,
+  .ahContractorMobileGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+

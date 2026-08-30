@@ -33,14 +33,26 @@ polish += `
 [data-help-block="kpis"]>button>span:first-child{width:42px!important;min-width:42px!important;height:42px!important;margin:0!important}
 [data-help-block="kpis"]>button>span:last-child{display:grid!important;min-width:0!important;gap:3px!important;padding:0!important;margin:0!important}
 [data-help-block="kpis"] :is(strong,span,p,small,em){max-width:100%!important;min-width:0!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:normal!important;word-break:normal!important}
+.owner-dashboard-kpis{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:12px!important;overflow:visible!important}
+.owner-dashboard-kpi{width:100%!important;min-width:0!important;min-height:104px!important;height:auto!important;max-height:none!important;padding:16px!important;display:grid!important;grid-template-columns:42px minmax(0,1fr)!important;align-items:center!important;column-gap:14px!important;text-align:left!important}
+.owner-dashboard-kpi-icon{width:42px!important;min-width:42px!important;height:42px!important;margin:0!important}
+.owner-dashboard-kpi-copy{display:grid!important;position:static!important;min-width:0!important;gap:3px!important;padding:0!important;margin:0!important;opacity:1!important;visibility:visible!important}
+.owner-dashboard-kpi-copy strong{font-size:22px!important;line-height:26px!important;color:var(--ah-system-text)!important}
+.owner-dashboard-kpi-copy em{font-size:10px!important;line-height:13px!important;color:var(--ah-system-muted)!important}
 .family-workspace,.contractor-workspace{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important}
 .family-workspace>.page,.contractor-workspace>.page{padding-left:var(--ah-mobile-gutter)!important;padding-right:var(--ah-mobile-gutter)!important}
 .family-workspace :is([class*=toolbar],[class*=filters],[class*=search-row]){position:relative!important;overflow:visible!important;margin-bottom:var(--ah-mobile-gap)!important;padding:16px!important;border:1px solid var(--ah-system-line)!important;border-radius:var(--ah-mobile-card-radius)!important;background:#fff!important}
-.family-workspace input[placeholder*="Найти семью"]{width:100%!important;height:56px!important;padding-left:54px!important;padding-right:54px!important;border-radius:var(--ah-mobile-control-radius)!important;font-size:16px!important;box-sizing:border-box!important}
+.family-workspace input[placeholder*="Найти семью"]{width:100%!important;height:56px!important;padding-left:52px!important;padding-right:16px!important;border-radius:var(--ah-mobile-control-radius)!important;font-size:16px!important;box-sizing:border-box!important}
 .family-workspace :is(label,div):has(>input[placeholder*="Найти семью"]){position:relative!important;display:block!important;width:100%!important}
-.family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])::before{content:"⌕";position:absolute;left:17px;top:50%;transform:translateY(-50%);z-index:5;font-size:30px;line-height:1;color:#171a2b;pointer-events:none}
-.family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])>:is(svg,[class*=search],[class*=icon]){opacity:0!important;pointer-events:none!important}
+.family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])::before{content:none!important;display:none!important}
+.family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])>svg{position:absolute!important;left:16px!important;top:50%!important;transform:translateY(-50%)!important;width:22px!important;height:22px!important;opacity:1!important;pointer-events:none!important}
+.family-workspace label:has(>input[placeholder*="Найти семью"])>span:first-child{position:absolute!important;left:16px!important;top:50%!important;transform:translateY(-50%)!important;width:22px!important;height:22px!important;display:block!important;font-size:0!important;line-height:0!important;color:#171a2b!important;z-index:2!important;pointer-events:none!important}
+.family-workspace label:has(>input[placeholder*="Найти семью"])>span:first-child::before{content:""!important;display:block!important;position:absolute!important;left:2px!important;top:2px!important;width:12px!important;height:12px!important;border:2px solid currentColor!important;border-radius:50%!important;box-sizing:border-box!important}
+.family-workspace label:has(>input[placeholder*="Найти семью"])>span:first-child::after{content:""!important;display:block!important;position:absolute!important;left:12px!important;top:13px!important;width:7px!important;height:2px!important;border-radius:999px!important;background:currentColor!important;transform:rotate(45deg)!important;transform-origin:left center!important}
+.family-workspace label:has(>input[placeholder*="Найти семью"])>span:first-child>button[data-ah-help-inline=true].ah-field-icon{display:none!important}
 .family-workspace [data-ah-help-target=true]>button[data-ah-help-inline=true].ah-field-icon{position:absolute!important;left:auto!important;right:14px!important;top:50%!important;bottom:auto!important;transform:translateY(-50%)!important;width:28px!important;min-width:28px!important;height:28px!important;margin:0!important;padding:0!important;z-index:30!important;opacity:1!important;visibility:visible!important;background:#fff!important}
+.family-workspace [data-ah-help-target=true]:has(input[placeholder*="Найти семью"])>input[placeholder*="Найти семью"]{padding-right:16px!important}
+.family-workspace [data-ah-help-target=true]:has(input[placeholder*="Найти семью"])>button[data-ah-help-inline=true].ah-field-icon{display:none!important}
 .family-workspace .page>:last-child{margin-top:var(--ah-mobile-gap)!important;padding:22px!important;min-height:280px!important;border:1px solid var(--ah-system-line)!important;background:#fff!important;overflow:hidden!important}
 .contractor-workspace .page>:last-child{margin-top:var(--ah-mobile-gap)!important;padding:20px!important;border:1px solid var(--ah-system-line)!important;background:#fff!important;overflow:hidden!important}
 .contractor-workspace .page>:last-child>*{border:0!important;outline:0!important;box-shadow:none!important;background:transparent!important;border-radius:0!important}
@@ -68,6 +80,7 @@ help += `
 /* ARTHELLO_HELP_CANONICAL_V5 */
 [data-ah-help-target=true]{position:relative!important;overflow:visible!important}
 [data-ah-help-target=true]>button[data-ah-help-inline=true].ah-field-icon{position:absolute!important;left:auto!important;right:12px!important;top:50%!important;bottom:auto!important;width:26px!important;min-width:26px!important;height:26px!important;margin:0!important;padding:0!important;transform:translateY(-50%)!important;z-index:40!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important}
+.ahFinancePeriodMobile>span>button[data-ah-help-inline=true].ah-field-icon{display:none!important}
 [data-ah-help-target=true]>:is(input:not([type=checkbox]):not([type=radio]),select,textarea,[role=combobox]){padding-right:50px!important}
 @media(max-width:720px){.ah-tour-callout{position:fixed!important;left:12px!important;right:12px!important;top:auto!important;bottom:calc(92px + env(safe-area-inset-bottom))!important;width:auto!important;max-width:none!important;max-height:min(56dvh,520px)!important;overflow:auto!important;transform:none!important}.ah-tour-hole{pointer-events:none!important;border-radius:18px!important}}
 `;

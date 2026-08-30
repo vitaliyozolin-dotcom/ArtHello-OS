@@ -3,6 +3,10 @@ name: ArtHello v52 candidate
 on:
   pull_request:
     paths:
+      - app/components/**
+      - scripts/**
+      - tests/**
+      - quality-gates/**
       - deploy/v52/**
       - .github/workflows/v52-candidate.yml
   workflow_dispatch:
@@ -14,38 +18,423 @@ concurrency:
   group: arthello-v52-candidate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+
 jobs:
+  reclaim-runner:
+    name: reclaim disposable runner cache
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 10
+
+    steps:
+      - name: Reclaim only isolated acceptance artifacts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(docker inspect --format '{{.State.Running}}' stroios-caddy-1)" = true
+          mapfile -t live_containers < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}')
+          test "${#live_containers[@]}" -eq 1
+          production_image="$(docker inspect "${live_containers[0]}" --format '{{.Config.Image}}')"
+          production_volume="$(docker inspect "${live_containers[0]}" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          test -n "$production_image"
+          test "$production_volume" = 'arthello-direct-v44-data'
+
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          before_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
+
+          # Legacy docker build may leave anonymous build containers alive after ENOSPC.
+          # Preserve all named ArtHello/Stroios services and remove only containers
+          # whose backing image has no repository tag.
+          mapfile -t running_ids < <(docker ps --quiet)
+          for container_id in "${running_ids[@]}"; do
+            container_name="$(docker inspect "$container_id" --format '{{.Name}}' | sed 's#^/##')"
+            case "$container_name" in
+              arthello-*|stroios-*) continue ;;
+            esac
+            image_id="$(docker inspect "$container_id" --format '{{.Image}}')"
+            image_tags="$(docker image inspect "$image_id" --format '{{if .RepoTags}}{{join .RepoTags ","}}{{end}}')"
+            if [ -z "$image_tags" ]; then
+              docker rm -f "$container_id" >/dev/null
+            fi
+          done
+
+          # Stopped build/test containers have no durable state; their writable
+          # layers were the largest disk consumer.
+          docker container prune --force >/dev/null
+
+          mapfile -t school_builder_images < <(
+            docker image ls --format '{{.Repository}}:{{.Tag}}' |
+              grep -E '^(school-1-11-design-v1-builder|school-1-11-auth-builder):' || true
+          )
+          for image in "${school_builder_images[@]}"; do
+            docker image rm "$image" >/dev/null 2>&1 || true
+          done
+
+          mapfile -t stale_containers < <(
+            docker ps -a --format '{{.Names}}' |
+              grep -E '^arthello-ds-(baseline|pilot)-[0-9]+$' || true
+          )
+          for container in "${stale_containers[@]}"; do
+            docker rm -f "$container" >/dev/null
+          done
+
+          mapfile -t stale_volumes < <(
+            docker volume ls --format '{{.Name}}' |
+              grep -E '^arthello-ds-(baseline|pilot)-data-[0-9]+$' || true
+          )
+          for volume in "${stale_volumes[@]}"; do
+            docker volume rm "$volume" >/dev/null 2>&1 || true
+          done
+
+          mapfile -t stale_images < <(
+            docker image ls --format '{{.Repository}}:{{.Tag}}' |
+              grep -E '^(arthello-contractors-preview|arthello-ds-pilot-app|arthello-ds-pilot-runtime|arthello-ds-baseline-runtime):' || true
+          )
+          for image in "${stale_images[@]}"; do
+            docker image rm "$image" >/dev/null 2>&1 || true
+          done
+
+          docker image prune --force >/dev/null
+          docker builder prune --all --force >/dev/null
+          after_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
+          printf 'ARTHELLO_RUNNER_SPACE_BEFORE_KB=%s\nARTHELLO_RUNNER_SPACE_AFTER_KB=%s\n' "$before_kb" "$after_kb"
+          test "$after_kb" -ge 6291456
+          curl -fsS --max-time 20 https://arthello-188-225-38-55.sslip.io/api/health | grep -F '"status":"ok"' >/dev/null
+          curl -fsS --max-time 20 https://school-188-225-38-55.sslip.io/api/health | grep -F '"status":"ok"' >/dev/null
+          curl -fsS --max-time 20 https://pilot-arthello-188-225-38-55.sslip.io/api/health | grep -F '"status":"ok"' >/dev/null
+          printf 'ARTHELLO_RUNNER_RECLAIM=OK\nARTHELLO_PRODUCTION_PRESERVED=OK\nARTHELLO_PREVIEW_PRESERVED=OK\n'
+
   candidate:
-    runs-on: ubuntu-latest
+    needs: reclaim-runner
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 45
 
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.HEAD_SHA }}
           fetch-depth: 1
+          persist-credentials: false
+          path: candidate
 
-      - name: Verify exact source head
-        env:
-          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - name: Checkout exact baseline
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: baseline
 
-      - name: Build application candidate
+      - name: Verify exact source heads
+        shell: bash
         run: |
           set -Eeuo pipefail
-          docker build \
-            --file deploy/v52/Dockerfile \
-            --target application \
-            --tag arthello-v52-candidate:${GITHUB_SHA} \
-            .
+          test "$(git -C candidate rev-parse HEAD)" = "$HEAD_SHA"
+          test "$(git -C baseline rev-parse HEAD)" = "$BASE_SHA"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
 
-      - name: Verify application artifact
+          canon = json.loads(Path("candidate/quality-gates/visual-canon.json").read_text())
+          assert canon["schema_version"] == 3
+          assert canon["compact_registry_kpi"]["desktop"]["min_height_px"] == 98
+          assert canon["compact_registry_kpi"]["mobile"]["min_height_px"] == 84
+          PY
+
+      - name: Reclaim isolated pilot build space
+        shell: bash
         run: |
           set -Eeuo pipefail
-          docker run --rm --entrypoint sh arthello-v52-candidate:${GITHUB_SHA} -lc '
+          mapfile -t stale_images < <(
+            docker image ls --format '{{.Repository}}:{{.Tag}}' |
+              grep -E '^(arthello-contractors-preview|arthello-ds-pilot-app|arthello-ds-pilot-runtime|arthello-ds-baseline-runtime):' || true
+          )
+          for image in "${stale_images[@]}"; do
+            # Docker refuses to remove an image used by a running container.
+            docker image rm "$image" >/dev/null 2>&1 || true
+          done
+
+          # BuildKit cache is disposable; reclaim it before the two exact builds
+          # so the runner cannot run out of disk halfway through a Docker layer.
+          docker image prune --force >/dev/null
+          docker builder prune --all --force >/dev/null
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          available_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
+          printf 'ARTHELLO_BUILD_SPACE_KB=%s\n' "$available_kb"
+          test "$available_kb" -ge 6291456
+
+      - name: Build pilot application and runtime images
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker build --file candidate/deploy/v52/Dockerfile --target application --tag arthello-ds-pilot-app:${HEAD_SHA} candidate
+          docker build --file candidate/deploy/v52/Dockerfile --tag arthello-ds-pilot-runtime:${HEAD_SHA} candidate
+
+      - name: Verify Design System pilot source and artifact
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -s candidate/deploy/v52/visual/prepare-visual-fixture.mjs
+          docker run --rm --entrypoint sh arthello-ds-pilot-app:${HEAD_SHA} -euc '
+            test -s /app/app/components/ContractorWorkspace.tsx
+            test -s /app/app/components/ContractorWorkspace.ds.css
+            grep -F "from \"./design-system\"" /app/app/components/ContractorWorkspace.tsx >/dev/null
+            grep -F "PageContainer" /app/app/components/ContractorWorkspace.tsx >/dev/null
+            grep -F "KpiCard" /app/app/components/ContractorWorkspace.tsx >/dev/null
+            grep -F "EmptyState" /app/app/components/ContractorWorkspace.tsx >/dev/null
+            grep -F "SearchField" /app/app/components/ContractorWorkspace.tsx >/dev/null
+            ! grep -F "ContractorWorkspace.module.css" /app/app/components/ContractorWorkspace.tsx >/dev/null
+            ! grep -F "className=\"ahContractorPage contractor-workspace\"" /app/app/components/ContractorWorkspace.tsx >/dev/null
+            grep -F "className=\"ahContractorScope\"" /app/app/components/ArtHelloShell.tsx >/dev/null
+            ! grep -F "className=\"contractor-workspace\"" /app/app/components/ArtHelloShell.tsx >/dev/null
+            test -s /app/app/components/LegalWorkspace.tsx
+            test -s /app/app/components/LegalWorkspace.ds.css
+            grep -F "className=\"ahLegalPage\"" /app/app/components/LegalWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/LegalWorkspace.tsx >/dev/null
+            ! grep -F "className=\"page legal-workspace\"" /app/app/components/LegalWorkspace.tsx >/dev/null
+            test -s /app/app/components/AccountingWorkspace.tsx
+            test -s /app/app/components/AccountingWorkspace.ds.css
+            grep -F "className=\"ahAccountingPage\"" /app/app/components/AccountingWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/AccountingWorkspace.tsx >/dev/null
+            ! grep -F "className=\"page accounting-workspace\"" /app/app/components/AccountingWorkspace.tsx >/dev/null
+            test -s /app/app/components/ProcurementWorkspace.tsx
+            test -s /app/app/components/ProcurementWorkspace.ds.css
+            grep -F "className=\"ahProcurementPage\"" /app/app/components/ProcurementWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/ProcurementWorkspace.tsx >/dev/null
+            ! grep -F "proc-workspace" /app/app/components/ProcurementWorkspace.tsx >/dev/null
+            test -s /app/app/components/FoodWorkspace.tsx
+            test -s /app/app/components/FoodWorkspace.ds.css
+            grep -F "className=\"ahFoodPage\"" /app/app/components/FoodWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/FoodWorkspace.tsx >/dev/null
+            ! grep -F "food-workspace" /app/app/components/FoodWorkspace.tsx >/dev/null
+            test -s /app/app/components/SafetyWorkspace.tsx
+            test -s /app/app/components/SafetyWorkspace.ds.css
+            grep -F "className=\"ahSafetyPage\"" /app/app/components/SafetyWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/SafetyWorkspace.tsx >/dev/null
+            ! grep -F "safety-workspace" /app/app/components/SafetyWorkspace.tsx >/dev/null
+            test -s /app/app/components/MedicalWorkspace.tsx
+            test -s /app/app/components/MedicalWorkspace.ds.css
+            grep -F "className=\"ahMedicalPage\"" /app/app/components/MedicalWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/MedicalWorkspace.tsx >/dev/null
+            ! grep -F "medical-workspace" /app/app/components/MedicalWorkspace.tsx >/dev/null
+            test -s /app/app/components/StrategyWorkspace.tsx
+            test -s /app/app/components/StrategyWorkspace.ds.css
+            grep -F "className=\"ahStrategyPage\"" /app/app/components/StrategyWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/StrategyWorkspace.tsx >/dev/null
+            ! grep -F "strategy-workspace" /app/app/components/StrategyWorkspace.tsx >/dev/null
+            test -s /app/app/components/AnalyticsWorkspace.tsx
+            test -s /app/app/components/AnalyticsWorkspace.ds.css
+            grep -F "className=\"ahAnalyticsPage\"" /app/app/components/AnalyticsWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/AnalyticsWorkspace.tsx >/dev/null
+            ! grep -F "analytics-workspace" /app/app/components/AnalyticsWorkspace.tsx >/dev/null
+            test -s /app/app/components/ReadinessWorkspace.tsx
+            test -s /app/app/components/ReadinessWorkspace.ds.css
+            grep -F "className=\"ahReadinessPage\"" /app/app/components/ReadinessWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/ReadinessWorkspace.tsx >/dev/null
+            ! grep -F "readiness-workspace" /app/app/components/ReadinessWorkspace.tsx >/dev/null
+            test -s /app/app/components/FinanceWorkspace.tsx
+            test -s /app/app/components/FinanceWorkspace.ds.css
+            grep -F "className=\"ahFinancePage\"" /app/app/components/FinanceWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/FinanceWorkspace.tsx >/dev/null
+            grep -F "Операций за период пока нет" /app/app/components/FinanceWorkspace.tsx >/dev/null
+            ! grep -F "finance-page" /app/app/components/FinanceWorkspace.tsx >/dev/null
+            test -s /app/app/components/SalesWorkspace.tsx
+            test -s /app/app/components/SalesWorkspace.ds.css
+            grep -F "className=\"ahSalesPage\"" /app/app/components/SalesWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/SalesWorkspace.tsx >/dev/null
+            grep -F "function LeadCreateModal" /app/app/components/SalesWorkspace.tsx >/dev/null
+            ! grep -F "sales-workspace" /app/app/components/SalesWorkspace.tsx >/dev/null
+            test -s /app/app/components/HrWorkspace.tsx
+            test -s /app/app/components/HrWorkspace.ds.css
+            grep -F "className=\"ahHrPage\"" /app/app/components/HrWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/HrWorkspace.tsx >/dev/null
+            grep -F "function EmployeeModal" /app/app/components/HrWorkspace.tsx >/dev/null
+            ! grep -F "hr-workspace" /app/app/components/HrWorkspace.tsx >/dev/null
+            test -s /app/app/components/ContentWorkspace.tsx
+            test -s /app/app/components/ContentWorkspace.ds.css
+            grep -F "className=\"ahContentPage\"" /app/app/components/ContentWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/ContentWorkspace.tsx >/dev/null
+            grep -F "Каналов и материалов пока нет" /app/app/components/ContentWorkspace.tsx >/dev/null
+            ! grep -F "content-workspace" /app/app/components/ContentWorkspace.tsx >/dev/null
+            test -s /app/app/components/RegistryWorkspace.tsx
+            test -s /app/app/components/RegistryWorkspace.ds.css
+            grep -F "className=\"ahRegistryPage\"" /app/app/components/RegistryWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/RegistryWorkspace.tsx >/dev/null
+            grep -F "function RegistryActionModal" /app/app/components/RegistryWorkspace.tsx >/dev/null
+            ! grep -F "registry-page" /app/app/components/RegistryWorkspace.tsx >/dev/null
+            test -s /app/app/components/WorkflowWorkspace.tsx
+            test -s /app/app/components/WorkflowWorkspace.ds.css
+            grep -F "className=\"ahWorkflowPage\"" /app/app/components/WorkflowWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/WorkflowWorkspace.tsx >/dev/null
+            grep -F "function TaskCreateModal" /app/app/components/WorkflowWorkspace.tsx >/dev/null
+            ! grep -F "workflow-page" /app/app/components/WorkflowWorkspace.tsx >/dev/null
+            test -s /app/app/components/EducationWorkspace.tsx
+            test -s /app/app/components/EducationWorkspace.ds.css
+            grep -F "className=\"ahEducationPage\"" /app/app/components/EducationWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/EducationWorkspace.tsx >/dev/null
+            grep -F "function EducationEditor" /app/app/components/EducationWorkspace.tsx >/dev/null
+            ! grep -F "page edu-workspace" /app/app/components/EducationWorkspace.tsx >/dev/null
+            test -s /app/app/components/IntegrationWorkspace.tsx
+            test -s /app/app/components/IntegrationWorkspace.ds.css
+            grep -F "className=\"ahIntegrationPage\"" /app/app/components/IntegrationWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/IntegrationWorkspace.tsx >/dev/null
+            grep -F "function ConnectionWizard" /app/app/components/IntegrationWorkspace.tsx >/dev/null
+            ! grep -F "page integration-workspace" /app/app/components/IntegrationWorkspace.tsx >/dev/null
+            test -s /app/app/components/SystemWorkspace.tsx
+            test -s /app/app/components/SystemWorkspace.ds.css
+            grep -F "className=\"ahSystemPage\"" /app/app/components/SystemWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/SystemWorkspace.tsx >/dev/null
+            ! grep -F "page system-workspace" /app/app/components/SystemWorkspace.tsx >/dev/null
+            test -s /app/app/components/SettingsWorkspace.tsx
+            test -s /app/app/components/SettingsWorkspace.ds.css
+            grep -F "className=\"ahSettingsLayer\"" /app/app/components/SettingsWorkspace.tsx >/dev/null
+            grep -F "className=\"ahSettingsModal\"" /app/app/components/SettingsWorkspace.tsx >/dev/null
+            grep -F "from \"./design-system\"" /app/app/components/SettingsWorkspace.tsx >/dev/null
+            ! grep -F "className=\"settings-layer\"" /app/app/components/SettingsWorkspace.tsx >/dev/null
             test -d /app/dist
             test -s /app/production/runtime-server.mjs
-            grep -R --include="*.js" -F "Все рабочие разделы доступны сразу" /app/dist >/dev/null
-            grep -R --include="*.css" -F "data-ah-help-inline" /app/dist >/dev/null
           '
+
+      - name: Reclaim pilot-only layers before baseline
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker image rm arthello-ds-pilot-app:${HEAD_SHA} >/dev/null
+          docker builder prune --all --force >/dev/null
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          available_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
+          printf 'ARTHELLO_BASELINE_BUILD_SPACE_KB=%s\n' "$available_kb"
+          test "$available_kb" -ge 4194304
+
+      - name: Build exact baseline runtime image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker build --file baseline/deploy/v52/Dockerfile --tag arthello-ds-baseline-runtime:${BASE_SHA} baseline
+          docker builder prune --all --force >/dev/null
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          available_kb="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
+          printf 'ARTHELLO_VISUAL_SPACE_KB=%s\n' "$available_kb"
+          test "$available_kb" -ge 2097152
+
+      - name: Capture isolated A/B visual acceptance
+        id: visual
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          network="arthello-ds-pilot-${GITHUB_RUN_ID}"
+          baseline_container="arthello-ds-baseline-${GITHUB_RUN_ID}"
+          pilot_container="arthello-ds-pilot-${GITHUB_RUN_ID}"
+          baseline_volume="arthello-ds-baseline-data-${GITHUB_RUN_ID}"
+          pilot_volume="arthello-ds-pilot-data-${GITHUB_RUN_ID}"
+          out="$RUNNER_TEMP/arthello-ds-visual-${GITHUB_RUN_ID}"
+          mkdir -p "$out"
+          printf 'path=%s\n' "$out" >> "$GITHUB_OUTPUT"
+          temp_password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24), end="")')"
+          permanent_password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(28), end="")')"
+          echo "::add-mask::$temp_password"
+          echo "::add-mask::$permanent_password"
+
+          cleanup() {
+            rc=$?
+            docker rm -f "$baseline_container" "$pilot_container" >/dev/null 2>&1 || true
+            docker volume rm -f "$baseline_volume" "$pilot_volume" >/dev/null 2>&1 || true
+            docker network rm "$network" >/dev/null 2>&1 || true
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          docker network create "$network" >/dev/null
+          docker volume create "$baseline_volume" >/dev/null
+          docker volume create "$pilot_volume" >/dev/null
+
+          run_preview() {
+            local name="$1" image="$2" volume="$3"
+            docker run -d \
+              --name "$name" \
+              --read-only \
+              --tmpfs /tmp \
+              --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
+              --network "$network" \
+              -e NODE_ENV=production \
+              -e PORT=8081 \
+              -e ARTHELLO_D1_PATH=/data/d1 \
+              -e ARTHELLO_BOOTSTRAP_LOGIN=owner \
+              -e ARTHELLO_BOOTSTRAP_PASSWORD="$temp_password" \
+              -v "$volume":/data \
+              "$image" >/dev/null
+          }
+
+          wait_for_previews() {
+            for container in "$baseline_container" "$pilot_container"; do
+              ready=0
+              for attempt in $(seq 1 90); do
+                if docker exec "$container" node -e "fetch('http://127.0.0.1:8081/api/health').then(async r=>{if(!r.ok||!(await r.text()).includes('status'))process.exit(1)}).catch(()=>process.exit(1))"; then
+                  ready=1
+                  break
+                fi
+                sleep 2
+              done
+              if [ "$ready" -ne 1 ]; then
+                docker logs --tail 200 "$container" >&2 || true
+                exit 1
+              fi
+            done
+          }
+
+          run_preview "$baseline_container" "arthello-ds-baseline-runtime:${BASE_SHA}" "$baseline_volume"
+          run_preview "$pilot_container" "arthello-ds-pilot-runtime:${HEAD_SHA}" "$pilot_volume"
+          wait_for_previews
+
+          docker stop --time 20 "$baseline_container" "$pilot_container" >/dev/null
+          docker rm "$baseline_container" "$pilot_container" >/dev/null
+          for volume in "$baseline_volume" "$pilot_volume"; do
+            docker run --rm --user 0 \
+              -e VISUAL_TEMP_PASSWORD="$temp_password" \
+              -v "$volume:/data" \
+              -v "$PWD/candidate/deploy/v52/visual/prepare-visual-fixture.mjs:/fixture.mjs:ro" \
+              node:24-bookworm-slim node /fixture.mjs
+          done
+
+          run_preview "$baseline_container" "arthello-ds-baseline-runtime:${BASE_SHA}" "$baseline_volume"
+          run_preview "$pilot_container" "arthello-ds-pilot-runtime:${HEAD_SHA}" "$pilot_volume"
+          wait_for_previews
+
+          docker run --rm --network "$network" \
+            -e BASELINE_UPSTREAM="http://$baseline_container:8081" \
+            -e PILOT_UPSTREAM="http://$pilot_container:8081" \
+            -e TEMP_PASSWORD="$temp_password" \
+            -e PERMANENT_PASSWORD="$permanent_password" \
+            -e VISUAL_OUTPUT=/screens \
+            -v "$out:/screens" \
+            -v "$PWD/candidate:/repo:ro" \
+            -w /tmp/visual \
+            mcr.microsoft.com/playwright:v1.55.0-noble \
+            bash -lc 'npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund --no-save playwright@1.55.0 pixelmatch@7.1.0 pngjs@7.0.0 >/dev/null && cp /repo/deploy/v52/visual/contractors-design-system.cjs ./capture.cjs && node capture.cjs'
+
+          test -s "$out/manifest.json"
+          test "$(find "$out" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" -eq 595
+          printf 'ARTHELLO_DS_VISUAL=OK path=%s\n' "$out"
+          trap - EXIT
+          cleanup
+
+      - name: Upload Design System visual acceptance
+        if: always() && steps.visual.outputs.path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: arthello-design-system-visual-${{ env.HEAD_SHA }}
+          path: ${{ steps.visual.outputs.path }}
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Cleanup candidate images
+        if: always()
+        shell: bash
+        run: |
+          docker image rm -f \
+            arthello-ds-pilot-app:${HEAD_SHA} \
+            arthello-ds-pilot-runtime:${HEAD_SHA} \
+            arthello-ds-baseline-runtime:${BASE_SHA} >/dev/null 2>&1 || true

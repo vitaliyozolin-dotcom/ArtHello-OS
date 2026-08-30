@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import type { ModuleId } from "../../data/test-snapshot";
 import { AppIcon } from "./AppIcon";
+import { Button, Card, EmptyState, KpiCard, PageContainer, PageHeader, SearchField, Tabs } from "./design-system";
+import "./SystemWorkspace.ds.css";
 
 type SystemModule = Extract<ModuleId, "events" | "contractors" | "access" | "assets" | "quality">;
 
@@ -78,49 +80,29 @@ export function SystemWorkspace({
   }, [config.records, query]);
 
   if (module === "access" && !accessRoles.has(role)) {
-    return (
-      <section className="page system-workspace">
-        <div className="system-state" role="status">
-          <AppIcon name="access" />
-          <p className="eyebrow">Доступ ограничен</p>
-          <h1>Матрица прав скрыта для роли «{role}»</h1>
-          <p>Запросите временный допуск у владельца системы. Отказ зафиксирован без раскрытия пользователей и прав.</p>
-          <button className="secondary-action" onClick={() => navigate("home")}>Вернуться на дашборд</button>
-        </div>
-      </section>
-    );
+    return <PageContainer className="ahSystemPage">
+      <PageHeader eyebrow="ДОСТУП ОГРАНИЧЕН" title={`Матрица прав скрыта для роли «${role}»`} description="Отказ зафиксирован без раскрытия пользователей и прав." actions={<Button variant="secondary" onClick={() => navigate("home")}>Вернуться на дашборд</Button>} />
+      <EmptyState className="ahSystemEmpty" density="compact" title="Нужен временный допуск" description="Запросите доступ у владельца системы. До подтверждения пользователи и эффективные права остаются скрыты." />
+    </PageContainer>;
   }
 
   return (
-    <section className="page system-workspace">
-      <header className="system-heading">
-        <div>
-          <p className="eyebrow">{config.eyebrow}</p>
-          <h1>{config.title}</h1>
-          <p>{config.subtitle}</p>
-        </div>
-        <button className="primary-action" onClick={createTask}><AppIcon name="plus" />Создать связанную задачу</button>
-      </header>
+    <PageContainer className="ahSystemPage">
+      <PageHeader eyebrow={config.eyebrow.toUpperCase()} title={config.title} description={config.subtitle} actions={<Button variant="primary" onClick={createTask}><AppIcon name="plus" />Создать связанную задачу</Button>} />
 
-      <div className="system-kpis" aria-label={`Ключевые показатели раздела ${config.title}`}>
-        {config.kpis.map((kpi) => (
-          <button key={kpi.label} className={kpi.tone ?? ""} disabled={config.records.length === 0} onClick={() => notify(`Открыта детализация: ${kpi.label}`)}>
-            <span>{kpi.label}</span><strong>{kpi.value}</strong><small>{kpi.note}</small><em>{config.records.length ? "К источнику" : "Реестр пуст"}</em>
-          </button>
-        ))}
+      <div className="ahSystemKpis" aria-label={`Ключевые показатели раздела ${config.title}`}>
+        {config.kpis.map((kpi) => <KpiCard key={kpi.label} className={kpi.tone ? `ahSystemKpi-${kpi.tone}` : undefined} label={kpi.label} value={kpi.value} note={kpi.note} onClick={config.records.length ? () => notify(`Открыта детализация: ${kpi.label}`) : undefined} />)}
       </div>
 
-      <div className="system-tabs" role="tablist" aria-label={`Представления раздела ${config.title}`}>
-        {config.tabs.map((item) => <button role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>{item}</button>)}
-      </div>
+      <div className="ahSystemTabs"><Tabs items={config.tabs.map((item) => ({ id: item, label: item }))} value={tab} onChange={setTab} ariaLabel={`Представления раздела ${config.title}`} /></div>
 
-      <div className="system-layout">
-        <section className="system-list-panel">
+      <div className="ahSystemLayout">
+        <Card className="ahSystemListPanel">
           <header>
             <div><p>{tab}</p><h2>Рабочий реестр</h2></div>
-            <label className="system-search"><AppIcon name="search" /><span className="sr-only">Поиск</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ID, объект, статус или ответственный" /></label>
+            <SearchField value={query} onChange={setQuery} placeholder="ID, объект, статус или ответственный" label={`Поиск в разделе ${config.title}`} />
           </header>
-          <div className="system-list" role="list">
+          <div data-ah-compact-card="true" className="ahSystemList" role="list">
             {visible.map((item) => (
               <button role="listitem" className={selected?.id === item.id ? "active" : ""} key={item.id} onClick={() => setSelectedId(item.id)}>
                 <span className="system-record-icon"><AppIcon name={module} /></span>
@@ -129,11 +111,11 @@ export function SystemWorkspace({
                 <AppIcon name="chevron" />
               </button>
             ))}
-            {visible.length === 0 ? <div className="system-empty"><strong>{query ? "Ничего не найдено" : "Данных пока нет"}</strong><p>{query ? `Измените запрос. Фильтр «${tab}» сохранён в текущем разделе.` : "Записи появятся после ручного добавления или подтверждённого импорта."}</p>{query ? <button onClick={() => setQuery("")}>Сбросить поиск</button> : null}</div> : null}
+            {visible.length === 0 ? <EmptyState className="ahSystemEmpty" density="compact" title={query ? "Ничего не найдено" : "Данных пока нет"} description={query ? `Измените запрос. Фильтр «${tab}» сохранён в текущем разделе.` : "Записи появятся после ручного добавления или подтверждённого импорта."} action={query ? <Button variant="ghost" onClick={() => setQuery("")}>Сбросить поиск</Button> : undefined} /> : null}
           </div>
-        </section>
+        </Card>
 
-        {selected ? <aside className="system-detail" aria-label={`Карточка ${selected.title}`}>
+        {selected ? <Card className="ahSystemDetail">
           <header><div><p>{selected.id}</p><h2>{selected.title}</h2><span>{selected.context}</span></div><b>{selected.status}</b></header>
           <dl>
             <div><dt>Ответственный</dt><dd>{selected.owner}</dd></div>
@@ -143,8 +125,8 @@ export function SystemWorkspace({
           </dl>
           <section className="system-lineage"><p>Связи</p><button onClick={() => navigate(selected.relation.module)}><span>{selected.relation.label}</span><AppIcon name="chevron" /></button><button onClick={() => navigate("tasks")}><span>Связанные задачи</span><AppIcon name="chevron" /></button></section>
           <footer><button className="primary-action" onClick={createTask}>Создать задачу</button><button className="secondary-action" onClick={() => notify(`История ${selected.id}: изменений пока нет`)}>История изменений</button></footer>
-        </aside> : <aside className="system-detail"><div className="system-empty"><AppIcon name={module} /><strong>Карточка не выбрана</strong><p>В реестре пока нет записей. Структура раздела готова к работе.</p></div></aside>}
+        </Card> : <Card className="ahSystemDetail"><EmptyState className="ahSystemEmpty" density="compact" title="Карточка не выбрана" description="В реестре пока нет записей. Структура раздела готова к работе." /></Card>}
       </div>
-    </section>
+    </PageContainer>
   );
 }
