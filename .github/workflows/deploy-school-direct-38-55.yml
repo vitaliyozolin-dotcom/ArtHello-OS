@@ -1,4 +1,4 @@
-# Observable production trigger 2026-08-24
+# RETIRED: old transport cebe7be must not overwrite the accepted School production image.\n# Observable production trigger 2026-08-24
 name: Deploy School 1-11 direct RU
 
 on:
@@ -27,11 +27,8 @@ env:
 
 jobs:
   deploy:
-    if: >-
-      github.event_name != 'pull_request_target' ||
-      (github.event.pull_request.base.ref == 'main' &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.head.ref == 'codex/trigger-school-fullscreen-20260824')
+    # Superseded by the immutable Design Code v1 cutover. Never deploy the old transport.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: production-ru
