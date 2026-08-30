@@ -264,11 +264,11 @@ decision:
       owner: Виталий Озолин
       due: 2026-09-06
       evidence_required: "явное решение владельца после периода рабочего использования"
-      status: pending
+      status: open
     - action: Продолжить DS-05 route-by-route без изменения Design Code 1.0.0
       owner: Codex
       due: null
       evidence_required: "separate exact candidate/evidence per route"
-      status: pending
+      status: open
 ```
 
