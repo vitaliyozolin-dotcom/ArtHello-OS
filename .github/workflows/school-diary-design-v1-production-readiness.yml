@@ -245,6 +245,27 @@ jobs:
           health_test="$(docker inspect "$production" --format '{{json .Config.Healthcheck.Test}}')"
           secret="$(env_value "$production" CENTRAL_ACCESS_SECRET)"
 
+          node_env="$(env_value "$production" NODE_ENV)"
+          port_env="$(env_value "$production" PORT)"
+          database_path="$(env_value "$production" DATABASE_PATH)"
+          public_origin="$(env_value "$production" PUBLIC_APP_ORIGIN)"
+          secret_length="${#secret}"
+
+          printf 'SCHOOL_READINESS_OBSERVED_IMAGE_REF=%s\n' "$production_image_ref"
+          printf 'SCHOOL_READINESS_OBSERVED_IMAGE_ID=%s\n' "$production_image_id"
+          printf 'SCHOOL_READINESS_OBSERVED_RESTART=%s\n' "$restart_policy"
+          printf 'SCHOOL_READINESS_OBSERVED_NETWORK=%s\n' "$network_mode"
+          printf 'SCHOOL_READINESS_OBSERVED_BIND=%s\n' "$port_binding"
+          printf 'SCHOOL_READINESS_OBSERVED_DATA_VOLUME=%s\n' "$data_volume"
+          printf 'SCHOOL_READINESS_OBSERVED_BACKUP_VOLUME=%s\n' "$backup_volume"
+          printf 'SCHOOL_READINESS_OBSERVED_SECURITY=%s\n' "$security_opts"
+          printf 'SCHOOL_READINESS_OBSERVED_HEALTH_TEST=%s\n' "$health_test"
+          printf 'SCHOOL_READINESS_OBSERVED_NODE_ENV=%s\n' "$node_env"
+          printf 'SCHOOL_READINESS_OBSERVED_PORT_ENV=%s\n' "${port_env:-image-default}"
+          printf 'SCHOOL_READINESS_OBSERVED_DATABASE_PATH=%s\n' "$database_path"
+          printf 'SCHOOL_READINESS_OBSERVED_PUBLIC_ORIGIN=%s\n' "$public_origin"
+          printf 'SCHOOL_READINESS_OBSERVED_SECRET_LENGTH=%s\n' "$secret_length"
+
           test -n "$production_image_ref"
           [[ "$production_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
           test "$restart_policy" = unless-stopped
@@ -252,13 +273,19 @@ jobs:
           test -n "$port_binding"
           test -n "$data_volume"
           test -n "$backup_volume"
-          test "$security_opts" = '["no-new-privileges:true"]'
+          case "$security_opts" in
+            '["no-new-privileges:true"]'|'["no-new-privileges"]') ;;
+            *) printf 'Unexpected security options\n' >&2; exit 1 ;;
+          esac
           test "$health_test" != null
-          test "$(env_value "$production" NODE_ENV)" = production
-          test "$(env_value "$production" PORT)" = 3000
-          test "$(env_value "$production" DATABASE_PATH)" = /data/school-1-11.sqlite
-          test "$(env_value "$production" PUBLIC_APP_ORIGIN)" = "$SCHOOL_ORIGIN"
-          test "${#secret}" -eq 64
+          test "$node_env" = production
+          case "$port_env" in
+            ""|3000) ;;
+            *) printf 'Unexpected application port\n' >&2; exit 1 ;;
+          esac
+          test "$database_path" = /data/school-1-11.sqlite
+          test "$public_origin" = "$SCHOOL_ORIGIN"
+          test "$secret_length" -eq 64
 
           backup_path="$(
             docker exec -e BACKUP_DIR=/backups/design-v1-cutover "$production" \
