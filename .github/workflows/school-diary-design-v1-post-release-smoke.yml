@@ -1,0 +1,349 @@
+name: School diary design v1 post-release smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/school-diary-design-v1-post-release-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: school-1-11-production
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: 034be78c5cb30402ebb7d3786133d0f3be390be9
+  CANDIDATE_IMAGE: school-1-11-design-v1:034be78c5cb3
+  CANDIDATE_IMAGE_ID: sha256:b926e67b021a549bb694cc12a65f909c62e6228caf48ece4ef14f0b96457fede
+  PREVIOUS_IMAGE_ID: sha256:69602a49691c48f84c6736ee910a874693f70b6c592183af95acbfef254e6f96
+  CUTOVER_RUN_ID: "33338634771"
+  CUTOVER_RUN_SHA: dd2885c9e5eeeb1cbf57e175276531c3e843df56
+  CUTOVER_PR: "262"
+  ROLLBACK_CONTAINER: school-1-11-production-design-rollback-33338634771
+  CUTOVER_BACKUP: /backups/design-v1-cutover/school-1-11-2026-08-30T22-15-22-514Z.sqlite
+  CUTOVER_BACKUP_BYTES: "335872"
+  CUTOVER_BACKUP_SHA256: 51f60761f9fbdc12a6390c150b49464a4f1d485df408d200799b59b304816ec1
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+  STAGING_ORIGIN: http://127.0.0.1:3211
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 20
+    environment: production-ru
+    steps:
+      - name: Check out smoke controls
+        uses: actions/checkout@v4
+
+      - name: Verify cutover provenance
+        uses: actions/github-script@v7
+        env:
+          CUTOVER_RUN_ID: ${{ env.CUTOVER_RUN_ID }}
+          CUTOVER_RUN_SHA: ${{ env.CUTOVER_RUN_SHA }}
+          CUTOVER_PR: ${{ env.CUTOVER_PR }}
+          CANDIDATE_SHA: ${{ env.CANDIDATE_SHA }}
+        with:
+          script: |
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              ...context.repo,
+              run_id: Number(process.env.CUTOVER_RUN_ID),
+            });
+            if (
+              run.conclusion !== "success" ||
+              run.head_sha !== process.env.CUTOVER_RUN_SHA
+            ) {
+              core.setFailed("Production cutover provenance mismatch");
+              return;
+            }
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: Number(process.env.CUTOVER_PR),
+            });
+            if (
+              pr.state !== "closed" ||
+              !pr.merged_at ||
+              pr.merge_commit_sha !== process.env.CUTOVER_RUN_SHA
+            ) {
+              core.setFailed("Production cutover PR provenance mismatch");
+              return;
+            }
+            core.info("SCHOOL_POST_RELEASE_CUTOVER_PROVENANCE=OK");
+
+      - name: Configure confirmed School SSH host
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh_dir="$RUNNER_TEMP/school-post-release-ssh-$GITHUB_RUN_ID"
+          install -m 0700 -d "$ssh_dir"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+          chmod 0600 "$ssh_dir/id_ed25519"
+          ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+          deploy_port="${DEPLOY_PORT:-2222}"
+          scan="$ssh_dir/known_hosts.scan"
+          : > "$scan"
+          chmod 0600 "$scan"
+          for attempt in 1 2; do
+            timeout --signal=TERM --kill-after=5s 150s \
+              ssh -p "$deploy_port" \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$scan" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=none \
+              -o PubkeyAuthentication=no \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o ConnectTimeout=140 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
+            test -s "$scan" && break
+            sleep 5
+          done
+          test -s "$scan"
+          actual_fingerprint="$(ssh-keygen -lf "$scan" -E sha256 | awk '{print $2; exit}')"
+          test "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scan" "$ssh_dir/known_hosts"
+          printf 'ssh_dir=%s\n' "$ssh_dir" >> "$GITHUB_ENV"
+          printf 'deploy_port=%s\n' "$deploy_port" >> "$GITHUB_ENV"
+          printf 'SCHOOL_POST_RELEASE_SSH=VERIFIED\n'
+
+      - name: Verify stable live state without mutation
+        id: smoke
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh_args=(
+            -p "$deploy_port"
+            -i "$ssh_dir/id_ed25519"
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$ssh_dir/known_hosts"
+            -o ConnectTimeout=140
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=12
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+          log_file="$RUNNER_TEMP/school-post-release-smoke.log"
+          timeout --signal=TERM --kill-after=15s 900s \
+            ssh -T "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "env CANDIDATE_SHA='$CANDIDATE_SHA' CANDIDATE_IMAGE='$CANDIDATE_IMAGE' CANDIDATE_IMAGE_ID='$CANDIDATE_IMAGE_ID' PREVIOUS_IMAGE_ID='$PREVIOUS_IMAGE_ID' ROLLBACK_CONTAINER='$ROLLBACK_CONTAINER' CUTOVER_BACKUP='$CUTOVER_BACKUP' CUTOVER_BACKUP_BYTES='$CUTOVER_BACKUP_BYTES' CUTOVER_BACKUP_SHA256='$CUTOVER_BACKUP_SHA256' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' STAGING_ORIGIN='$STAGING_ORIGIN' bash -s" \
+              <<'REMOTE' | tee "$log_file"
+          set -Eeuo pipefail
+          exec 9>/var/lock/school-1-11-production.lock
+          flock -n 9
+
+          production=school-1-11
+          staging=school-1-11-staging
+          work=""
+
+          cleanup() {
+            rc=$?
+            trap - EXIT
+            case "$work" in
+              /tmp/school-post-release.*) rm -rf -- "$work" ;;
+            esac
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          env_value() {
+            docker inspect "$1" --format '{{range .Config.Env}}{{println .}}{{end}}' |
+              sed -n "s/^$2=//p" | head -n1
+          }
+
+          test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$production" --format '{{.State.Health.Status}}')" = healthy
+          started_before="$(docker inspect "$production" --format '{{.State.StartedAt}}')"
+          test "$(docker inspect "$production" --format '{{.Config.Image}}')" = "$CANDIDATE_IMAGE"
+          test "$(docker inspect "$production" --format '{{.Image}}')" = "$CANDIDATE_IMAGE_ID"
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.candidate-sha"}}')" = "$CANDIDATE_SHA"
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.design-code"}}')" = 1.0.0
+          test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}')" = unless-stopped
+          test "$(docker inspect "$production" --format '{{.HostConfig.NetworkMode}}')" = arthello-os_backend
+          binding="$(docker inspect "$production" | python3 -c 'import json,sys; d=json.load(sys.stdin)[0]; b=d["HostConfig"]["PortBindings"]["3000/tcp"][0]; print(b["HostIp"]+":"+b["HostPort"])')"
+          test "$binding" = 127.0.0.1:3111
+          test "$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = school-1-11_school_data
+          test "$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Name}}{{end}}{{end}}')" = school-1-11_school_backups
+          test "$(env_value "$production" PUBLIC_APP_ORIGIN)" = "$SCHOOL_ORIGIN"
+          secret="$(env_value "$production" CENTRAL_ACCESS_SECRET)"
+          test "${#secret}" -eq 64
+
+          test "$(docker inspect "$ROLLBACK_CONTAINER" --format '{{.State.Running}}')" = false
+          test "$(docker inspect "$ROLLBACK_CONTAINER" --format '{{.Image}}')" = "$PREVIOUS_IMAGE_ID"
+          test "$(docker inspect "$ROLLBACK_CONTAINER" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = school-1-11_school_data
+
+          test "$(docker inspect "$staging" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$staging" --format '{{.State.Health.Status}}')" = healthy
+          test "$(docker inspect "$staging" --format '{{.Image}}')" = "$CANDIDATE_IMAGE_ID"
+          curl -fsS --max-time 15 "$STAGING_ORIGIN/api/health" |
+            grep -F '"status":"ok"' >/dev/null
+
+          backup_proof="$(
+            docker exec -i -e BACKUP_PATH="$CUTOVER_BACKUP" "$production" \
+              node --input-type=module - <<'VERIFY_BACKUP'
+          import { createHash } from 'node:crypto';
+          import { readFileSync, statSync } from 'node:fs';
+          import { DatabaseSync } from 'node:sqlite';
+          const path = process.env.BACKUP_PATH;
+          const stat = statSync(path);
+          const db = new DatabaseSync(path, { readOnly: true });
+          const rows = db.prepare('PRAGMA integrity_check').all();
+          if (rows.length !== 1 || rows[0].integrity_check !== 'ok')
+            throw new Error('Post-release backup integrity failed');
+          db.close();
+          console.log(
+            stat.size + ':' +
+            createHash('sha256').update(readFileSync(path)).digest('hex')
+          );
+          VERIFY_BACKUP
+          )"
+          test "${backup_proof%%:*}" = "$CUTOVER_BACKUP_BYTES"
+          test "${backup_proof#*:}" = "$CUTOVER_BACKUP_SHA256"
+
+          docker exec -i -e EXPECTED_ORIGIN="$SCHOOL_ORIGIN" "$production" \
+            node --input-type=module - <<'VERIFY_LIVE'
+          import { DatabaseSync } from 'node:sqlite';
+          const db = new DatabaseSync('/data/school-1-11.sqlite', { readOnly: true });
+          const rows = db.prepare('PRAGMA integrity_check').all();
+          if (rows.length !== 1 || rows[0].integrity_check !== 'ok')
+            throw new Error('Live DB integrity failed');
+          const tables = db.prepare(
+            "SELECT count(*) AS count FROM sqlite_master WHERE type='table'"
+          ).get().count;
+          db.close();
+          if (tables !== 29) throw new Error('Unexpected live table count: ' + tables);
+
+          const base = 'http://127.0.0.1:3000';
+          const health = await fetch(base + '/api/health');
+          if (!health.ok || !(await health.text()).includes('"status":"ok"'))
+            throw new Error('Live internal health failed');
+          const login = await fetch(base + '/login');
+          const html = await login.text();
+          if (!login.ok || !html.includes('data-design-code="v1"'))
+            throw new Error('Live Design Code v1 marker missing');
+          console.log('SCHOOL_POST_RELEASE_INTERNAL=OK tables=' + tables);
+          VERIFY_LIVE
+
+          work="$(mktemp -d /tmp/school-post-release.XXXXXX)"
+          chmod 0700 "$work"
+          curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" |
+            grep -F '"status":"ok"' >/dev/null
+          curl -fsS --max-time 30 "$SCHOOL_ORIGIN/login" > "$work/login.html"
+          grep -F 'data-design-code="v1"' "$work/login.html" >/dev/null
+
+          accepted_status="$(
+            curl -sS --max-time 30 -o "$work/accepted.json" -w '%{http_code}' \
+              -X POST "$SCHOOL_ORIGIN/api/auth/login" \
+              -H "Origin: $SCHOOL_ORIGIN" \
+              -H 'Content-Type: application/json' \
+              --data '{"login":"+79990000000","password":"InvalidPassword1"}'
+          )"
+          test "$accepted_status" = 401
+          python3 - "$work/accepted.json" <<'VERIFY_ACCEPTED'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as file:
+              payload = json.load(file)
+          assert payload == {"error": "Неверный логин или пароль"}
+          VERIFY_ACCEPTED
+
+          rejected_status="$(
+            curl -sS --max-time 30 -o "$work/rejected.json" -w '%{http_code}' \
+              -X POST "$SCHOOL_ORIGIN/api/auth/login" \
+              -H 'Origin: https://evil.invalid' \
+              -H 'Content-Type: application/json' \
+              --data '{"login":"+79990000000","password":"InvalidPassword1"}'
+          )"
+          test "$rejected_status" = 401
+          python3 - "$work/rejected.json" <<'VERIFY_REJECTED'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as file:
+              payload = json.load(file)
+          assert payload == {"error": "Запрос отклонён системой безопасности"}
+          VERIFY_REJECTED
+
+          sleep 15
+          test "$(docker inspect "$production" --format '{{.State.StartedAt}}')" = "$started_before"
+          test "$(docker inspect "$production" --format '{{.State.Health.Status}}')" = healthy
+          test "$(docker inspect "$production" --format '{{.Image}}')" = "$CANDIDATE_IMAGE_ID"
+          curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" |
+            grep -F '"status":"ok"' >/dev/null
+
+          rm -rf -- "$work"
+          work=""
+          printf 'SCHOOL_POST_RELEASE=PASS\n'
+          printf 'SCHOOL_POST_RELEASE_IMAGE_ID=%s\n' "$CANDIDATE_IMAGE_ID"
+          printf 'SCHOOL_POST_RELEASE_STARTED_AT=%s\n' "$started_before"
+          printf 'SCHOOL_POST_RELEASE_BIND=%s\n' "$binding"
+          printf 'SCHOOL_POST_RELEASE_DB_TABLES=29\n'
+          printf 'SCHOOL_POST_RELEASE_BACKUP=VERIFIED\n'
+          printf 'SCHOOL_POST_RELEASE_ROLLBACK=READY:%s\n' "$ROLLBACK_CONTAINER"
+          printf 'SCHOOL_POST_RELEASE_STAGING=HEALTHY\n'
+          printf 'SCHOOL_POST_RELEASE_PUBLIC_HEALTH=OK\n'
+          printf 'SCHOOL_POST_RELEASE_PUBLIC_LOGIN=DESIGN_V1\n'
+          printf 'SCHOOL_POST_RELEASE_PUBLIC_AUTH_ORIGIN=OK\n'
+          printf 'SCHOOL_POST_RELEASE_RESTARTED_DURING_SMOKE=no\n'
+          REMOTE
+
+          test "$(sed -n 's/^SCHOOL_POST_RELEASE=//p' "$log_file" | tail -n1)" = PASS
+          printf 'result=PASS\n' >> "$GITHUB_OUTPUT"
+
+      - name: Publish post-release result
+        if: always()
+        shell: bash
+        env:
+          RESULT: ${{ steps.smoke.outputs.result }}
+        run: |
+          {
+            echo '## School diary design v1 post-release smoke'
+            echo
+            printf -- '- Cutover run: %s\n' "$CUTOVER_RUN_ID"
+            printf -- '- Live image: %s\n' "$CANDIDATE_IMAGE_ID"
+            printf -- '- Public URL: %s\n' "$SCHOOL_ORIGIN"
+            printf -- '- Cutover backup: verified\n'
+            printf -- '- Rollback container: %s\n' "$ROLLBACK_CONTAINER"
+            printf -- '- Restarted during smoke: no\n'
+            printf -- '- Result: %s\n' "${RESULT:-FAIL}"
+            printf -- '- Job: %s\n' '${{ job.status }}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report post-release status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.sha,
+              state: process.env.JOB_STATUS === "success" ? "success" : "failure",
+              context: "school-diary/design-v1-post-release",
+              description: "Design v1 post-release smoke " + process.env.JOB_STATUS,
+              target_url:
+                process.env.GITHUB_SERVER_URL + "/" +
+                process.env.GITHUB_REPOSITORY + "/actions/runs/" +
+                process.env.GITHUB_RUN_ID,
+            });
