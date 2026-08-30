@@ -14,7 +14,7 @@ const output = process.env.VISUAL_OUTPUT || "/screens";
 const viewports = [[375, 812], [390, 844], [430, 932], [768, 1024], [1440, 900], [2560, 1440]];
 const disableMotion = "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;caret-color:transparent!important}";
 const manifest = [];
-const expectedPngCount = 593;
+const expectedPngCount = 595;
 
 const waveRoutes = {
   finance: {
@@ -706,6 +706,29 @@ const populatedWorkflow = {
   stats: { open: 1, overdue: 0, waitingApproval: 0, escalations: 0 },
 };
 
+
+const populatedWorkflowDetail = {
+  task: { ...populatedWorkflow.tasks[0], priority: "Высокий", status: "Входящие" },
+  parent: null,
+  subtasks: [
+    { ...populatedWorkflow.tasks[0], id: 802, title: "Сверить исходные данные", parentTaskId: 801, status: "Запланировано" },
+    { ...populatedWorkflow.tasks[0], id: 803, title: "Подтвердить результат", parentTaskId: 801, status: "Входящие" },
+  ],
+  watchers: [],
+  checklist: [
+    { id: 1, title: "Проверить исходную запись", isDone: true },
+    { id: 2, title: "Сверить ответственного", isDone: false },
+    { id: 3, title: "Подтвердить срок", isDone: false },
+    { id: 4, title: "Зафиксировать результат", isDone: false },
+    { id: 5, title: "Приложить основание", isDone: false },
+  ],
+  comments: [],
+  approvals: [],
+  documents: [],
+  history: [{ id: 1, action: "task.created", actor: "visual-gate", payload: "{}", createdAt: "2026-08-29T08:00:00.000Z" }],
+  assignees: populatedWorkflow.assignees,
+};
+
 const emptyLegal = {
   contracts: [], documents: [], zones: [], checks: [], entityNames: {}, tasks: [],
   summary: { contracts: 0, unsigned: 0, expiring: 0, openSignals: 0, missingRequired: 0 },
@@ -1344,11 +1367,28 @@ async function verifyWaveModal(page, config) {
     const input = modal.locator(selector).first();
     if (await input.count() !== 1 || !await input.isVisible()) throw new Error(`${config.heading}: modal field ${field} is not visible`);
   }
+  const geometry = await modal.evaluate((element) => {
+    const layer = element.parentElement;
+    const box = element.getBoundingClientRect();
+    const layerBox = layer?.getBoundingClientRect();
+    const layerStyle = layer ? getComputedStyle(layer) : null;
+    return {
+      portalParent: layer?.parentElement === document.body,
+      layerFixed: layerStyle?.position === "fixed",
+      layerCoversViewport: Boolean(layerBox && layerBox.left >= -1 && layerBox.top >= -1 && layerBox.right <= window.innerWidth + 1 && layerBox.bottom <= window.innerHeight + 1),
+      horizontallyContained: box.left >= -1 && box.right <= window.innerWidth + 1,
+      verticallyReachable: box.top >= -1 && (box.bottom <= window.innerHeight + 1 || ["auto", "scroll"].includes(layerStyle?.overflowY ?? "")),
+      horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+    };
+  });
+  if (!geometry.portalParent || !geometry.layerFixed || !geometry.layerCoversViewport || !geometry.horizontallyContained || !geometry.verticallyReachable || geometry.horizontalOverflow) {
+    throw new Error(`${config.heading}: modal is not a contained body-level viewport layer: ${JSON.stringify(geometry)}`);
+  }
   const cancel = page.getByRole("button", { name: "Отмена", exact: true }).last();
   if (await cancel.count()) await cancel.click();
   else await page.getByRole("button", { name: "Закрыть форму", exact: true }).click();
   await modal.waitFor({ state: "hidden", timeout: 10000 });
-  return true;
+  return geometry;
 }
 
 async function verifyWaveTabs(page, config) {
@@ -1764,6 +1804,59 @@ function assertCompactMobileContractorRegistry(contractors) {
   }
 }
 
+async function captureWorkflowDialog(browser, base, storageState, viewport) {
+  const overviewFixture = { endpoint: waveRoutes.tasks.endpoint, payload: populatedWorkflow };
+  const { context, page } = await stablePage(browser, base, storageState, viewport, "tasks", overviewFixture);
+  await context.route(/\/api\/work-items\?id=801$/, async (requestRoute) => {
+    await requestRoute.fulfill({
+      status: 200,
+      contentType: "application/json; charset=utf-8",
+      body: JSON.stringify(populatedWorkflowDetail),
+    });
+  });
+  await page.getByRole("heading", { name: "Задачи и процессы", exact: true }).waitFor({ state: "visible", timeout: 30000 });
+  const row = page.locator(".ahWorkflowTable tbody tr").first();
+  await row.waitFor({ state: "visible", timeout: 30000 });
+  await row.click();
+  const dialog = page.locator(".ahWorkflowDialog");
+  await dialog.waitFor({ state: "visible", timeout: 30000 });
+  await page.getByRole("heading", { name: "Проверить результат visual fixture", exact: true }).waitFor({ state: "visible", timeout: 30000 });
+  const file = `pilot-workflow-dialog-${viewport[0]}x${viewport[1]}.png`;
+  await page.screenshot({ path: path.join(output, file), fullPage: false });
+  const metrics = await page.evaluate(() => {
+    const root = document.documentElement;
+    const layer = document.querySelector(".ahWorkflowDialogLayer");
+    const dialog = document.querySelector(".ahWorkflowDialog");
+    const body = dialog?.querySelector(".workflow-drawer-body");
+    const footer = dialog?.querySelector(".workflow-drawer-footer");
+    const action = footer?.querySelector("button");
+    const close = dialog?.querySelector('.workflow-drawer-head > button[aria-label="Закрыть"]');
+    const layerBox = layer?.getBoundingClientRect();
+    const dialogBox = dialog?.getBoundingClientRect();
+    const bodyBox = body?.getBoundingClientRect();
+    const footerBox = footer?.getBoundingClientRect();
+    const overlaps = Boolean(bodyBox && footerBox && bodyBox.top < footerBox.bottom - 1 && bodyBox.bottom > footerBox.top + 1);
+    return {
+      clientWidth: root.clientWidth,
+      scrollWidth: root.scrollWidth,
+      horizontalOverflow: root.scrollWidth > root.clientWidth + 1,
+      portalParent: layer?.parentElement === document.body,
+      layerPosition: layer ? getComputedStyle(layer).position : null,
+      layerCoversViewport: Boolean(layerBox && layerBox.left >= -1 && layerBox.top >= -1 && layerBox.right <= window.innerWidth + 1 && layerBox.bottom <= window.innerHeight + 1),
+      dialogContained: Boolean(dialogBox && dialogBox.left >= -1 && dialogBox.top >= -1 && dialogBox.right <= window.innerWidth + 1 && dialogBox.bottom <= window.innerHeight + 1),
+      dialogWidth: dialogBox?.width ?? 0,
+      dialogHeight: dialogBox?.height ?? 0,
+      bodyOverflowY: body ? getComputedStyle(body).overflowY : null,
+      bodyFooterOverlap: overlaps,
+      footerVisible: Boolean(footerBox && footerBox.height >= 64 && footerBox.bottom <= (dialogBox?.bottom ?? 0) + 1),
+      actionVisible: Boolean(action && getComputedStyle(action).display !== "none" && action.getClientRects().length),
+      closeVisible: Boolean(close && getComputedStyle(close).display !== "none" && close.getClientRects().length),
+    };
+  });
+  await context.close();
+  return { label: "pilot", route: "workflow-dialog", width: viewport[0], height: viewport[1], file, ...metrics };
+}
+
 async function captureFinalMobileAcceptance(browser, base, storageState, route) {
   const viewport = [390, 844];
   const { context, page } = await stablePage(browser, base, storageState, viewport, route);
@@ -1968,6 +2061,21 @@ function diffPng(aPath, bPath, outPath, pixelmatch) {
           if (!wave) throw new Error(`${routeName}: missing ${viewport.join("x")} empty-state metrics`);
           assertWaveMobileCanon(wave, access);
         }
+      }
+    }
+
+    for (const viewport of [[390, 844], [1440, 900]]) {
+      const item = await captureWorkflowDialog(browser, pilotUrl, pilotState, viewport);
+      manifest.push(item);
+      persist();
+      if (item.horizontalOverflow || !item.portalParent || item.layerPosition !== "fixed" || !item.layerCoversViewport || !item.dialogContained) {
+        throw new Error(`workflow-dialog: viewport containment failed at ${viewport.join("x")}`);
+      }
+      if (!["auto", "scroll"].includes(item.bodyOverflowY) || item.bodyFooterOverlap || !item.footerVisible || !item.actionVisible || !item.closeVisible) {
+        throw new Error(`workflow-dialog: scroll/footer contract failed at ${viewport.join("x")}`);
+      }
+      if (viewport[0] <= 720 && (item.dialogWidth < viewport[0] - 20 || item.dialogHeight < viewport[1] - 20)) {
+        throw new Error("workflow-dialog: mobile dialog does not own the visible viewport");
       }
     }
 

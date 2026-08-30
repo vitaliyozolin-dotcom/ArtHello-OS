@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import styles from "./AccessWorkspace.module.css";
 import { SoftSelect } from "./SoftSelect";
 import { CompactListCard } from "./design-system";
@@ -307,7 +308,7 @@ function FamilyAccessModal({ family, member, grant, busy, close, submit }: { fam
 }
 
 function Modal({ title, subtitle, close, wide = false, children }: { title: string; subtitle: string; close: () => void; wide?: boolean; children: ReactNode }) {
-  return <div className={styles.modalLayer}><button className={styles.scrim} onClick={close} aria-label="Закрыть окно" /><section className={`${styles.modal} ${wide ? styles.modalWide : ""}`} role="dialog" aria-modal="true" aria-label={title}><header><div><p>{subtitle}</p><h2>{title}</h2></div><button onClick={close} aria-label="Закрыть">×</button></header><div className={styles.modalBody}>{children}</div></section></div>;
+  return createPortal(<div className={styles.modalLayer}><button className={styles.scrim} onClick={close} aria-label="Закрыть окно" /><section className={`${styles.modal} ${wide ? styles.modalWide : ""}`} role="dialog" aria-modal="true" aria-label={title}><header><div><p>{subtitle}</p><h2>{title}</h2></div><button onClick={close} aria-label="Закрыть">×</button></header><div className={styles.modalBody}>{children}</div></section></div>, document.body);
 }
 
 function Empty({ title, text }: { title: string; text: string }) { return <div className={styles.empty}><span>＋</span><strong>{title}</strong><p>{text}</p></div>; }

@@ -18,6 +18,9 @@ const help = read("app/components/ContextualHelpSystem.tsx");
 const helpCss = read("app/components/ContextualHelpSystem.css");
 const helpDom = read("app/components/contextualHelpDom.ts");
 const hr = read("app/components/HrWorkspace.tsx");
+const access = read("app/components/AccessWorkspace.tsx");
+const education = read("app/components/EducationWorkspace.tsx");
+const workflow = read("app/components/WorkflowWorkspace.tsx");
 const finance = read("app/components/FinanceWorkspace.tsx");
 const sales = read("app/components/SalesWorkspace.tsx");
 const family = read("app/components/FamilyWorkspace.tsx");
@@ -41,7 +44,7 @@ requireText(help, "createPortal", "inline field help is not portaled into labels
 requireText(helpDom, "inlineHelpTargetFor", "inline field help target discovery is missing");
 forbid(help, /fieldMarkers\.map\(\(\{\s*field,\s*left,\s*top\s*\}\)/, "legacy floating field markers remain");
 
-for (const [name, source] of [["HR", hr],["Sales", sales],["Content", content],["Legal", legal],["Integrations", integration]]) {
+for (const [name, source] of [["Access", access],["Education", education],["Workflow", workflow],["HR", hr],["Sales", sales],["Content", content],["Legal", legal],["Integrations", integration]]) {
   requireText(source, "createPortal", `${name} dialogs are not rendered above the mobile shell`);
 }
 
@@ -148,6 +151,9 @@ requireText(polish, 'input[placeholder*="Найти семью"]', "family searc
 requireText(polish, 'button[data-ah-help-inline="true"]', "static field help styling is missing");
 requireText(polish, ".crm-toolbar > div:last-child > button:first-child", "sales mobile action layout is missing");
 requireText(polish, ".modal-layer.staff-modal-layer", "employee dialog safe-area styling is missing");
+requireText(polish, ".workflow-drawer-layer.ahWorkflowDialogLayer", "workflow detail viewport styling is missing");
+requireText(polish, ".modal-layer.workflow-modal-layer.ahWorkflowModalLayer", "workflow form safe-area styling is missing");
+requireText(polish, ".modal-layer.edu-modal-layer.ahEducationModalLayer", "education form safe-area styling is missing");
 requireText(polish, ".hr-tabs", "system tab alignment rules are missing");
 requireText(polish, "/* ARTHELLO_MOBILE_CANONICAL_V5 */", "canonical mobile design system is missing");
 requireText(helpCss, "/* ARTHELLO_HELP_CANONICAL_V5 */", "canonical help styling is missing");

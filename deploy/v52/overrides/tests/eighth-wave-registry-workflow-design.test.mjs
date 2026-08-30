@@ -89,6 +89,11 @@ test("Wave 8 keeps all workflow views, reads and mutations", () => {
   for (const state of ["Задач не найдено", "Процессы временно недоступны", "Загружаем процессы"]) {
     assert.match(workflow, new RegExp(escapeRegExp(state)));
   }
+  assert.match(workflow, /import\s*\{\s*createPortal\s*\}\s*from\s*["\']react-dom["\']/);
+  assert.equal(occurrences(workflow, /createPortal\s*\(/g), 3, "task detail and both workflow forms must be portaled");
+  for (const className of ["ahWorkflowDialogLayer", "ahWorkflowDialog", "ahWorkflowModalLayer", "ahWorkflowModal"]) {
+    assert.match(workflow, new RegExp(`className=["\'][^"\']*${className}`));
+  }
 });
 
 test("Wave 8 is isolated from both legacy top-level shells", () => {
