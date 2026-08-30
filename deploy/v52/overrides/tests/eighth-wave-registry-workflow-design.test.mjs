@@ -70,7 +70,8 @@ test("Wave 8 keeps the registry filters, honest states and entity operations", (
   for (const state of ["Карточки не найдены", "Реестр временно недоступен", "Загружаем реестр"]) {
     assert.match(registry, new RegExp(escapeRegExp(state)));
   }
-  assert.match(registry, /createPortal\s*\(/);
+  assert.equal(occurrences(registry, /createPortal\s*\(/g), 2, "registry drawer and action modal must both render at document.body");
+  assert.match(registry, /registry-modal[\s\S]*?role=["']dialog["'][\s\S]*?aria-modal=["']true["']/);
 });
 
 test("Wave 8 keeps all workflow views, reads and mutations", () => {

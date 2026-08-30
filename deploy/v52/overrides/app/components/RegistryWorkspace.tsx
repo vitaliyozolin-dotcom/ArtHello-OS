@@ -215,8 +215,8 @@ function RegistryActionModal({ action, detail, close, onDone, notify }: { action
     finally { setSaving(false); }
   }
 
-  return <div className="modal-layer registry-modal-layer"><button className="drawer-scrim" onClick={close} aria-label="Закрыть форму" /><form className="task-modal registry-modal" onSubmit={submit}>
-    <div className="drawer-head"><div><p>Единый справочник</p><h2>{actionTitle(action)}</h2></div><button type="button" onClick={close}>×</button></div>
+  return createPortal(<div className="modal-layer registry-modal-layer"><button className="drawer-scrim" onClick={close} aria-label="Закрыть форму" /><form className="task-modal registry-modal" onSubmit={submit} role="dialog" aria-modal="true" aria-label={actionTitle(action)}>
+    <div className="drawer-head"><div><p>Единый справочник</p><h2>{actionTitle(action)}</h2></div><button type="button" onClick={close} aria-label="Закрыть">×</button></div>
     {action === "create" ? <>
       <label><span>Тип сущности</span><select name="entityType" defaultValue="Семья">{entityTypes.map((item) => <option key={item}>{item}</option>)}</select></label>
       <label><span>Название карточки</span><input name="displayName" required minLength={3} placeholder="Например: Семья Ивановых" /></label>
@@ -232,7 +232,7 @@ function RegistryActionModal({ action, detail, close, onDone, notify }: { action
     {action === "document" ? <><div className="form-row"><label><span>Название / номер</span><input name="title" required minLength={3} placeholder="Например: Договор 15/2026" /></label><label><span>Тип документа</span><input name="documentType" required defaultValue={entity?.entityType === "Семья" ? "Договор с семьёй" : ""} placeholder="Договор, акт, согласие" /></label></div><div className="form-row"><label><span>Статус</span><select name="status" defaultValue="На проверке"><option>Актуален</option><option>На проверке</option><option>Истекает</option><option>Нет файла</option></select></label><label><span>Действует до</span><input type="date" name="validUntil" /></label></div><input type="hidden" name="source" value="MANUAL" /></> : null}
     {action === "merge" && detail ? <><div className="merge-warning"><strong>История не удаляется</strong><span>Дубль станет неактивным, а его связи, документы и аудит останутся доступны из основной карточки.</span></div><label><span>Карточка-дубль</span><select name="duplicateId" required defaultValue=""><option value="" disabled>Выберите дубль того же типа</option>{detail.duplicateCandidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.displayName} · {candidate.id}</option>)}</select></label><label><span>Причина объединения</span><textarea name="reason" required minLength={8} placeholder="Как подтверждено, что это одна сущность" /></label></> : null}
     <div className="modal-actions"><button type="button" onClick={close}>Отмена</button><button type="submit" disabled={saving}>{saving ? "Сохраняем…" : actionSubmit(action)}</button></div>
-  </form></div>;
+  </form></div>, document.body);
 }
 
 function sourceLabel(source: string) { return source === "MANUAL" ? "Ручной ввод" : source.endsWith("_IMPORT") ? "Подтверждённый импорт" : "Интеграция"; }
