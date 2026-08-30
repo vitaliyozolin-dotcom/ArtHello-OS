@@ -1,4 +1,4 @@
-name: Deploy School 1-11 PC direct
+# RETIRED: implicit main-path deployment could overwrite the accepted School production image.\nname: Deploy School 1-11 PC direct
 
 on:
   push:
@@ -21,6 +21,8 @@ env:
 
 jobs:
   deploy:
+    # Superseded by the immutable Design Code v1 cutover. Never run repair-deploy.sh implicitly.
+    if: ${{ false }}
     runs-on: [self-hosted, linux, x64, school-prod]
     timeout-minutes: 45
     concurrency:

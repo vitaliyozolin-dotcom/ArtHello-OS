@@ -1,4 +1,4 @@
-name: Deploy School 1-11 full-screen release
+# RETIRED: old transport cebe7be must not overwrite the accepted School production image.\nname: Deploy School 1-11 full-screen release
 
 on:
   push:
@@ -29,11 +29,8 @@ env:
 
 jobs:
   announce:
-    if: >-
-      github.event_name != 'pull_request_target' ||
-      (github.event.pull_request.base.ref == 'main' &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.head.ref == 'codex/trigger-school-fullscreen-20260824')
+    # Superseded by the immutable Design Code v1 cutover. Never deploy the old transport.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     outputs:
       issue_number: ${{ steps.issue.outputs.issue_number }}
@@ -53,11 +50,8 @@ jobs:
           printf 'issue_number=%s\n' "$issue_number" >> "$GITHUB_OUTPUT"
 
   deploy:
-    if: >-
-      github.event_name != 'pull_request_target' ||
-      (github.event.pull_request.base.ref == 'main' &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.head.ref == 'codex/trigger-school-fullscreen-20260824')
+    # Superseded by the immutable Design Code v1 cutover. Never deploy the old transport.
+    if: ${{ false }}
     needs: announce
     runs-on: ubuntu-latest
     timeout-minutes: 50
