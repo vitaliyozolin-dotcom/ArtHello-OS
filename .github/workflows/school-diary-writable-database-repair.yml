@@ -1,0 +1,385 @@
+name: School diary writable database repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/school-diary-writable-database-repair.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: school-1-11-production
+  cancel-in-progress: false
+
+env:
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+  EXPECTED_IMAGE: school-1-11-design-v1:034be78c5cb3
+  EXPECTED_IMAGE_ID: sha256:b926e67b021a549bb694cc12a65f909c62e6228caf48ece4ef14f0b96457fede
+  EXPECTED_CANDIDATE_SHA: 034be78c5cb30402ebb7d3786133d0f3be390be9
+  PRODUCTION_CONTAINER: school-1-11
+  DATA_VOLUME: school-1-11_school_data
+  BACKUP_VOLUME: school-1-11_school_backups
+
+jobs:
+  repair:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 20
+    environment: production-ru
+    steps:
+      - name: Check out repair controls
+        uses: actions/checkout@v4
+
+      - name: Configure confirmed School SSH host
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh_dir="$RUNNER_TEMP/school-db-write-repair-ssh-$GITHUB_RUN_ID"
+          install -m 0700 -d "$ssh_dir"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+          chmod 0600 "$ssh_dir/id_ed25519"
+          ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+
+          deploy_port="${DEPLOY_PORT:-2222}"
+          scan="$ssh_dir/known_hosts.scan"
+          : > "$scan"
+          chmod 0600 "$scan"
+          for attempt in 1 2; do
+            timeout --signal=TERM --kill-after=5s 150s \
+              ssh -p "$deploy_port" \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$scan" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=none \
+              -o PubkeyAuthentication=no \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o ConnectTimeout=140 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
+            test -s "$scan" && break
+            sleep 5
+          done
+          test -s "$scan"
+          actual_fingerprint="$(ssh-keygen -lf "$scan" -E sha256 | awk '{print $2; exit}')"
+          test "$actual_fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scan" "$ssh_dir/known_hosts"
+          printf 'ssh_dir=%s\n' "$ssh_dir" >> "$GITHUB_ENV"
+          printf 'deploy_port=%s\n' "$deploy_port" >> "$GITHUB_ENV"
+          printf 'SCHOOL_DB_REPAIR_SSH=VERIFIED\n'
+
+      - name: Repair writable SQLite volume with backup and restart
+        id: repair
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh_args=(
+            -p "$deploy_port"
+            -i "$ssh_dir/id_ed25519"
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$ssh_dir/known_hosts"
+            -o ConnectTimeout=140
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=12
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+          log_file="$RUNNER_TEMP/school-db-write-repair.log"
+          timeout --signal=TERM --kill-after=15s 1000s \
+            ssh -T "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "env RUN_ID='$GITHUB_RUN_ID' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' EXPECTED_IMAGE='$EXPECTED_IMAGE' EXPECTED_IMAGE_ID='$EXPECTED_IMAGE_ID' EXPECTED_CANDIDATE_SHA='$EXPECTED_CANDIDATE_SHA' PRODUCTION_CONTAINER='$PRODUCTION_CONTAINER' DATA_VOLUME='$DATA_VOLUME' BACKUP_VOLUME='$BACKUP_VOLUME' bash -s" \
+              <<'REMOTE' | tee "$log_file"
+          set -Eeuo pipefail
+          exec 9>/var/lock/school-1-11-production.lock
+          flock -n 9
+
+          production="$PRODUCTION_CONTAINER"
+          repair_started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          work=""
+
+          cleanup() {
+            rc=$?
+            trap - EXIT
+            case "$work" in
+              /tmp/school-db-write-repair.*) rm -rf -- "$work" ;;
+            esac
+            if [ "$rc" -ne 0 ]; then
+              printf 'SCHOOL_DB_WRITE_REPAIR=FAIL\n' >&2
+            fi
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          env_value() {
+            docker inspect "$1" --format '{{range .Config.Env}}{{println .}}{{end}}' |
+              sed -n "s/^$2=//p" | head -n1
+          }
+
+          wait_for_live() {
+            local ready=0
+            for attempt in $(seq 1 90); do
+              if
+                [ "$(docker inspect "$production" --format '{{.State.Health.Status}}' 2>/dev/null || true)" = healthy ] &&
+                curl -fsS --max-time 8 "$SCHOOL_ORIGIN/api/health" |
+                  grep -F '"status":"ok"' >/dev/null
+              then
+                ready=1
+                break
+              fi
+              if [ "$(docker inspect "$production" --format '{{.State.Running}}' 2>/dev/null || true)" != true ]; then
+                break
+              fi
+              sleep 2
+            done
+            test "$ready" -eq 1
+          }
+
+          test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$production" --format '{{.State.Health.Status}}')" = healthy
+          test "$(docker inspect "$production" --format '{{.Config.Image}}')" = "$EXPECTED_IMAGE"
+          test "$(docker inspect "$production" --format '{{.Image}}')" = "$EXPECTED_IMAGE_ID"
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.candidate-sha"}}')" = "$EXPECTED_CANDIDATE_SHA"
+          test "$(env_value "$production" DATABASE_PATH)" = /data/school-1-11.sqlite
+          test "$(env_value "$production" PUBLIC_APP_ORIGIN)" = "$SCHOOL_ORIGIN"
+
+          data_name="$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          data_rw="$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.RW}}{{end}}{{end}}')"
+          backup_name="$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Name}}{{end}}{{end}}')"
+          backup_rw="$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.RW}}{{end}}{{end}}')"
+          test "$data_name" = "$DATA_VOLUME"
+          test "$data_rw" = true
+          test "$backup_name" = "$BACKUP_VOLUME"
+          test "$backup_rw" = true
+
+          before_data="$(docker exec --user 0:0 "$production" stat -c '%u:%g:%a' /data)"
+          before_db="$(docker exec --user 0:0 "$production" stat -c '%u:%g:%a' /data/school-1-11.sqlite)"
+          before_backups="$(docker exec --user 0:0 "$production" stat -c '%u:%g:%a' /backups)"
+          printf 'SCHOOL_DB_WRITE_REPAIR_BEFORE_DATA=%s\n' "$before_data"
+          printf 'SCHOOL_DB_WRITE_REPAIR_BEFORE_DB=%s\n' "$before_db"
+          printf 'SCHOOL_DB_WRITE_REPAIR_BEFORE_BACKUPS=%s\n' "$before_backups"
+
+          backup_path="$(
+            docker exec --user 0:0 \
+              -e BACKUP_DIR=/backups/readonly-repair \
+              "$production" node scripts/backup-db.mjs |
+              tail -n1
+          )"
+          case "$backup_path" in
+            /backups/readonly-repair/school-1-11-*.sqlite) ;;
+            *) printf 'Unexpected repair backup path\n' >&2; exit 1 ;;
+          esac
+          backup_proof="$(
+            docker exec --user 0:0 -i \
+              -e BACKUP_PATH="$backup_path" "$production" \
+              node --input-type=module - <<'VERIFY_BACKUP'
+          import { createHash } from 'node:crypto';
+          import { readFileSync, statSync } from 'node:fs';
+          import { DatabaseSync } from 'node:sqlite';
+          const path = process.env.BACKUP_PATH;
+          const stat = statSync(path);
+          if (!stat.isFile() || stat.size < 4096)
+            throw new Error('Repair backup is empty');
+          const db = new DatabaseSync(path, { readOnly: true });
+          const result = db.prepare('PRAGMA integrity_check').all();
+          if (result.length !== 1 || result[0].integrity_check !== 'ok')
+            throw new Error('Repair backup integrity failed');
+          db.close();
+          console.log(
+            stat.size + ':' +
+            createHash('sha256').update(readFileSync(path)).digest('hex')
+          );
+          VERIFY_BACKUP
+          )"
+          backup_bytes="${backup_proof%%:*}"
+          backup_sha256="${backup_proof#*:}"
+          [[ "$backup_bytes" =~ ^[0-9]+$ ]]
+          [[ "$backup_sha256" =~ ^[a-f0-9]{64}$ ]]
+
+          docker exec --user 0:0 "$production" sh -eu -c '
+            chown 1001:1001 /data /backups
+            chmod 0750 /data /backups
+            find /data -maxdepth 1 -type f -name "school-1-11.sqlite*" \
+              -exec chown 1001:1001 {} +
+            find /data -maxdepth 1 -type f -name "school-1-11.sqlite*" \
+              -exec chmod 0640 {} +
+            find /backups -type d -exec chown 1001:1001 {} +
+            find /backups -type d -exec chmod 0750 {} +
+            find /backups -type f -exec chown 1001:1001 {} +
+            find /backups -type f -exec chmod 0640 {} +
+          '
+
+          after_data="$(docker exec --user 0:0 "$production" stat -c '%u:%g:%a' /data)"
+          after_db="$(docker exec --user 0:0 "$production" stat -c '%u:%g:%a' /data/school-1-11.sqlite)"
+          after_backups="$(docker exec --user 0:0 "$production" stat -c '%u:%g:%a' /backups)"
+          test "$after_data" = 1001:1001:750
+          test "$after_db" = 1001:1001:640
+          test "$after_backups" = 1001:1001:750
+
+          docker restart -t 30 "$production" >/dev/null
+          wait_for_live
+
+          test "$(docker inspect "$production" --format '{{.Config.Image}}')" = "$EXPECTED_IMAGE"
+          test "$(docker inspect "$production" --format '{{.Image}}')" = "$EXPECTED_IMAGE_ID"
+          test "$(docker inspect "$production" --format '{{.State.Health.Status}}')" = healthy
+          test "$(docker exec "$production" id -u)" = 1001
+          docker exec "$production" sh -eu -c '
+            test -w /data
+            test -w /data/school-1-11.sqlite
+            test -w /backups
+          '
+
+          docker exec -i "$production" node --input-type=module - <<'VERIFY_WRITE_PATH'
+          import { randomUUID, createHash } from 'node:crypto';
+          import { DatabaseSync } from 'node:sqlite';
+
+          const db = new DatabaseSync('/data/school-1-11.sqlite');
+          const integrity = db.prepare('PRAGMA integrity_check').all();
+          if (integrity.length !== 1 || integrity[0].integrity_check !== 'ok')
+            throw new Error('Live database integrity failed');
+
+          const user = db.prepare(
+            "SELECT id, auth_version AS authVersion FROM users WHERE status = 'active' LIMIT 1"
+          ).get();
+          if (!user) throw new Error('No active user for transactional write probe');
+
+          const sessionId = `write-probe-${randomUUID()}`;
+          const tokenHash = createHash('sha256')
+            .update(sessionId)
+            .digest('hex');
+
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            db.prepare(
+              'UPDATE users SET last_login_at = last_login_at, updated_at = updated_at WHERE id = ?'
+            ).run(user.id);
+            db.prepare(
+              `INSERT INTO auth_sessions
+                (id, user_id, token_hash, auth_version, expires_at)
+               VALUES (?, ?, ?, ?, ?)`
+            ).run(
+              sessionId,
+              user.id,
+              tokenHash,
+              Number(user.authVersion),
+              new Date(Date.now() + 60_000).toISOString(),
+            );
+            db.prepare('DELETE FROM auth_sessions WHERE id = ?').run(sessionId);
+            db.exec('ROLLBACK');
+          } catch (error) {
+            try { db.exec('ROLLBACK'); } catch {}
+            throw error;
+          }
+
+          const residue = db.prepare(
+            'SELECT count(*) AS count FROM auth_sessions WHERE id = ?'
+          ).get(sessionId).count;
+          if (residue !== 0) throw new Error('Write probe left session residue');
+          db.close();
+          console.log('SCHOOL_DB_WRITE_REPAIR_TRANSACTION=PASS');
+          VERIFY_WRITE_PATH
+
+          work="$(mktemp -d /tmp/school-db-write-repair.XXXXXX)"
+          chmod 0700 "$work"
+          login_status="$(
+            curl -sS --max-time 30 \
+              -o "$work/login.json" \
+              -w '%{http_code}' \
+              -X POST "$SCHOOL_ORIGIN/api/auth/login" \
+              -H "Origin: $SCHOOL_ORIGIN" \
+              -H 'Content-Type: application/json' \
+              --data '{"login":"+79990000000","password":"InvalidPassword1"}'
+          )"
+          test "$login_status" = 401
+          python3 - "$work/login.json" <<'VERIFY_LOGIN'
+          import json, sys
+          with open(sys.argv[1], encoding='utf-8') as file:
+              payload = json.load(file)
+          assert payload == {'error': 'Неверный логин или пароль'}, payload
+          VERIFY_LOGIN
+
+          if docker logs --since "$repair_started" "$production" 2>&1 |
+            grep -F 'attempt to write a readonly database' >/dev/null
+          then
+            printf 'Readonly database error still present after repair\n' >&2
+            exit 1
+          fi
+
+          rm -rf -- "$work"
+          work=""
+          printf 'SCHOOL_DB_WRITE_REPAIR=PASS\n'
+          printf 'SCHOOL_DB_WRITE_REPAIR_IMAGE_ID=%s\n' "$EXPECTED_IMAGE_ID"
+          printf 'SCHOOL_DB_WRITE_REPAIR_AFTER_DATA=%s\n' "$after_data"
+          printf 'SCHOOL_DB_WRITE_REPAIR_AFTER_DB=%s\n' "$after_db"
+          printf 'SCHOOL_DB_WRITE_REPAIR_AFTER_BACKUPS=%s\n' "$after_backups"
+          printf 'SCHOOL_DB_WRITE_REPAIR_BACKUP_PATH=%s\n' "$backup_path"
+          printf 'SCHOOL_DB_WRITE_REPAIR_BACKUP_BYTES=%s\n' "$backup_bytes"
+          printf 'SCHOOL_DB_WRITE_REPAIR_BACKUP_SHA256=%s\n' "$backup_sha256"
+          printf 'SCHOOL_DB_WRITE_REPAIR_PUBLIC_HEALTH=OK\n'
+          printf 'SCHOOL_DB_WRITE_REPAIR_LOGIN_ENDPOINT=OK\n'
+          REMOTE
+
+          test "$(sed -n 's/^SCHOOL_DB_WRITE_REPAIR=//p' "$log_file" | tail -n1)" = PASS
+          backup="$(sed -n 's/^SCHOOL_DB_WRITE_REPAIR_BACKUP_PATH=//p' "$log_file" | tail -n1)"
+          test -n "$backup"
+          printf 'result=PASS\n' >> "$GITHUB_OUTPUT"
+          printf 'backup=%s\n' "$backup" >> "$GITHUB_OUTPUT"
+
+      - name: Publish repair result
+        if: always()
+        shell: bash
+        env:
+          RESULT: ${{ steps.repair.outputs.result }}
+          BACKUP: ${{ steps.repair.outputs.backup }}
+        run: |
+          {
+            echo '## School diary writable database repair'
+            echo
+            printf -- '- Live image unchanged: %s\n' "$EXPECTED_IMAGE_ID"
+            printf -- '- Production SQLite volume ownership repaired for uid/gid 1001\n'
+            printf -- '- Fresh repair backup: %s\n' "${BACKUP:-not-created}"
+            printf -- '- Transactional login write path: checked with rollback\n'
+            printf -- '- Public login endpoint: checked\n'
+            printf -- '- Result: %s\n' "${RESULT:-FAIL}"
+            printf -- '- Job: %s\n' '${{ job.status }}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report repair status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.sha,
+              state: process.env.JOB_STATUS === "success" ? "success" : "failure",
+              context: "school-diary/database-write-repair",
+              description: "School database write repair " + process.env.JOB_STATUS,
+              target_url:
+                process.env.GITHUB_SERVER_URL + "/" +
+                process.env.GITHUB_REPOSITORY +
+                "/actions/runs/" +
+                process.env.GITHUB_RUN_ID,
+            });
