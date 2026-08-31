@@ -14,10 +14,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  announce:
+  deploy:
     runs-on: [self-hosted, linux, x64, arthello-gateway]
-    outputs:
-      issue_number: ${{ steps.issue.outputs.issue_number }}
+    timeout-minutes: 35
+    environment: production-ru
     steps:
       - name: Create production run record
         id: issue
@@ -40,12 +40,6 @@ jobs:
           test "$issue_number" != null
           printf 'issue_number=%s\n' "$issue_number" >> "$GITHUB_OUTPUT"
 
-  deploy:
-    needs: announce
-    runs-on: [self-hosted, linux, x64, arthello-gateway]
-    timeout-minutes: 35
-    environment: production-ru
-    steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -172,7 +166,7 @@ jobs:
             fi
             printf '```\n'
           } > "$report_file"
-          issue_number="${{ needs.announce.outputs.issue_number }}"
+          issue_number="${{ steps.issue.outputs.issue_number }}"
           test -n "$issue_number"
           payload="$(jq -n --rawfile body "$report_file" '{body: $body}')"
           curl --fail-with-body --silent --show-error \
