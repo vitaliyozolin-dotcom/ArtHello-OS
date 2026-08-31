@@ -85,6 +85,41 @@ test("XLSX parser still rejects a numbered lesson without hours", async () => {
   );
 });
 
+test("XLSX parser rejects an ambiguous topic-only row when optional columns are absent", async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("КТП");
+  sheet.addRow(["Тема урока", "Количество часов"]);
+  sheet.addRow(["Сложение", ""]);
+  await assert.rejects(
+    () => parseCurriculumWorkbook(workbook.xlsx.writeBuffer()),
+    /количество часов должно быть целым числом/,
+  );
+});
+
+test("XLSX parser accepts explicit sections without optional columns", async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("КТП");
+  sheet.addRow(["Тема урока", "Количество часов"]);
+  sheet.addRow(["Раздел 1. Числа", ""]);
+  sheet.addRow(["Сложение", 1]);
+  sheet.addRow(["Итого", 1]);
+  const result = await parseCurriculumWorkbook(
+    await workbook.xlsx.writeBuffer(),
+  );
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].topic, "Сложение");
+});
+
+test("XLSX parser rejects signed and arbitrary hour values", async () => {
+  for (const hours of ["-1", "+1", "1-2", "часов: 2"]) {
+    const buffer = await makeWorkbook([[1, "Сложение", hours, ""]]);
+    await assert.rejects(
+      () => parseCurriculumWorkbook(buffer),
+      /количество часов должно быть целым числом/,
+    );
+  }
+});
+
 test("2026/27 calendar gives 136 math slots for Monday, Tuesday, Thursday and Friday", () => {
   const lessons = [
     { id: "math-mon", weekday: 1, startsAt: "08:30" },
