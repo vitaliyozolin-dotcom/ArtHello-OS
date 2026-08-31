@@ -1,0 +1,92 @@
+name: ArtHello School SSO targeted
+
+on:
+  push:
+    branches:
+      - codex/arthello-school-sso-20260831
+    paths:
+      - deploy/v52/**
+      - docs/security/**
+      - .github/workflows/arthello-school-sso-targeted.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: arthello-school-sso-targeted
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 50
+    steps:
+      - name: Check out exact SSO candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact source and SSO contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          docker run --rm --network none \
+            --volume "$PWD:/repo:ro" \
+            --workdir /repo \
+            node:24-bookworm-slim \
+            node --test deploy/v52/overrides/tests/school-sso-contract.test.mjs
+
+      - name: Build complete ArtHello application image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          image="arthello-school-sso-check:${GITHUB_SHA}"
+          docker build \
+            --file deploy/v52/Dockerfile \
+            --target application \
+            --tag "$image" \
+            .
+          docker run --rm --network none --entrypoint node "$image" \
+            --test /app/tests/school-sso-contract.test.mjs
+          printf 'ARTHELLO_SCHOOL_SSO_BUILD=PASS\n'
+
+      - name: Report configured delivery capabilities without values
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t production < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}')
+          test "${#production[@]}" -eq 1
+          names="$(docker inspect "${production[0]}" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed 's/=.*//' | grep -Ei '(^|_)(SMTP|MAIL|EMAIL|RESEND|SENDGRID|MAILGUN|SMS|SMSAERO|SMSRU|TELEGRAM|NOTIFY|DELIVERY)(_|$)' || true)"
+          if [ -n "$names" ]; then
+            printf 'ARTHELLO_DELIVERY_ENV_NAMES_PRESENT=yes\n'
+            printf '%s\n' "$names" | sort -u | sed 's/^/ARTHELLO_DELIVERY_ENV_NAME=/'
+          else
+            printf 'ARTHELLO_DELIVERY_ENV_NAMES_PRESENT=no\n'
+          fi
+
+      - name: Cleanup candidate image
+        if: always()
+        shell: bash
+        run: |
+          docker image rm "arthello-school-sso-check:${GITHUB_SHA}" >/dev/null 2>&1 || true
+
+      - name: Publish commit status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.sha,
+              state: process.env.JOB_STATUS === 'success' ? 'success' : 'failure',
+              context: 'arthello/school-sso-targeted',
+              description: 'ArtHello School SSO targeted ' + process.env.JOB_STATUS,
+              target_url: process.env.GITHUB_SERVER_URL + '/' + process.env.GITHUB_REPOSITORY + '/actions/runs/' + process.env.GITHUB_RUN_ID,
+            });
