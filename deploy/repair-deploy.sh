@@ -10,6 +10,8 @@ SOURCE_DIR=${SOURCE_DIR:-}
 VERIFY_PUBLIC=${VERIFY_PUBLIC:-1}
 RUNTIME_SHA256=9125b43319706f4bf3a9a45813b50a0495e61bef5b73f3305a1b97717406b349
 RUNTIME_PART_GLOB=offline-runtime-v3.part-\*
+DELTA_SHA256=84a453f982dd99cec14ec2ebc7a05c0cfd319d8b3ec9bf47a1da79bc6801554b
+DELTA_PART_GLOB=offline-runtime-v4-delta.part-\*
 
 ARCHIVE=$(mktemp /tmp/school-release.XXXXXX.tar.gz)
 CURL_CONFIG=$(mktemp /tmp/school-release-curl.XXXXXX)
@@ -88,6 +90,12 @@ RUNTIME_SHA=$(cat "$RELEASE"/deploy/$RUNTIME_PART_GLOB | sha256sum | cut -d ' ' 
 test "$RUNTIME_SHA" = "$RUNTIME_SHA256"
 grep -Fx "$RUNTIME_SHA256  offline-runtime-v3.tar.gz" \
   "$RELEASE/deploy/offline-runtime-v3.sha256" >/dev/null
+DELTA_PART_COUNT=$(find "$RELEASE/deploy" -maxdepth 1 -type f -name "$DELTA_PART_GLOB" | wc -l)
+test "$DELTA_PART_COUNT" -eq 2
+DELTA_SHA=$(cat "$RELEASE"/deploy/$DELTA_PART_GLOB | sha256sum | cut -d ' ' -f 1)
+test "$DELTA_SHA" = "$DELTA_SHA256"
+grep -Fx "$DELTA_SHA256  offline-runtime-v4-delta.tar.gz" \
+  "$RELEASE/deploy/offline-runtime-v4-delta.sha256" >/dev/null
 
 PREVIOUS_RELEASE=$(readlink -f "$SCHOOL_ROOT/current" 2>/dev/null || true)
 if docker inspect school-1-11 >/dev/null 2>&1; then
@@ -140,6 +148,49 @@ fi
 docker exec school-1-11 node -e \
   "fetch('http://127.0.0.1:3000/api/health').then(async r=>{console.log(await r.text());if(!r.ok)process.exit(1)}).catch(e=>{console.error(e);process.exit(1)})"
 
+SCHEDULE_IMPORT_OUTPUT=$(docker exec school-1-11 \
+  node scripts/import-school-schedule.mjs \
+  data/schedules/school-1-11-2026-2027.json 2>&1)
+printf '%s\n' "$SCHEDULE_IMPORT_OUTPUT"
+printf '%s\n' "$SCHEDULE_IMPORT_OUTPUT" \
+  | grep -Eq '^SCHOOL_SCHEDULE_IMPORT=(SUCCESS|ALREADY_APPLIED)$'
+
+docker exec school-1-11 node --input-type=module -e "
+  import { DatabaseSync } from 'node:sqlite';
+  const db = new DatabaseSync(process.env.DATABASE_PATH);
+  const rows = db.prepare(\`
+    SELECT class_name AS className, COUNT(*) AS lessonCount
+    FROM lessons
+    WHERE id LIKE 'schedule-2026-2027-%'
+      AND status NOT IN ('archived', 'cancelled')
+    GROUP BY class_name ORDER BY CAST(class_name AS INTEGER)
+  \`).all();
+  const expected = JSON.stringify([
+    { className: '1', lessonCount: 41 },
+    { className: '2', lessonCount: 28 },
+    { className: '3', lessonCount: 29 },
+    { className: '4', lessonCount: 29 },
+    { className: '5', lessonCount: 31 },
+    { className: '6', lessonCount: 31 },
+  ]);
+  if (JSON.stringify(rows) !== expected) {
+    console.error('SCHOOL_SCHEDULE_VERIFY=FAILED');
+    console.error(JSON.stringify(rows));
+    process.exit(1);
+  }
+  const mathDays = db.prepare(\`
+    SELECT COUNT(DISTINCT weekday) AS count
+    FROM lessons
+    WHERE class_name = '2' AND subject_id = 'math'
+      AND id LIKE 'schedule-2026-2027-%'
+      AND status NOT IN ('archived', 'cancelled')
+  \`).get().count;
+  if (mathDays !== 5) process.exit(1);
+  console.log('SCHOOL_SCHEDULE_VERIFY=SUCCESS');
+  console.log('SCHOOL_SCHEDULE_CLASS_COUNTS=1:41,2:28,3:29,4:29,5:31,6:31');
+  console.log('SCHOOL_SCHEDULE_MATH_2_WEEKDAYS=5');
+"
+
 if [ "$VERIFY_PUBLIC" -eq 1 ]; then
   curl --fail --silent --show-error \
     --connect-timeout 10 \
@@ -155,6 +206,7 @@ SWITCHED=0
 printf 'SCHOOL_DEPLOY=SUCCESS\n'
 printf 'SCHOOL_DELIVERY_REF=%s\n' "$DELIVERY_REF"
 printf 'SCHOOL_RUNTIME_SHA=%s\n' "$RUNTIME_SHA"
+printf 'SCHOOL_DELTA_SHA=%s\n' "$DELTA_SHA"
 printf 'SCHOOL_BACKUP=CREATED\n'
 printf 'SCHOOL_DATA_VOLUME=PRESERVED\n'
 printf 'SCHOOL_PUBLIC_URL=https://%s\n' "$SCHOOL_HOST"

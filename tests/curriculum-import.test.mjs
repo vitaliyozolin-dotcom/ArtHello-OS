@@ -120,7 +120,7 @@ test("XLSX parser rejects signed and arbitrary hour values", async () => {
   }
 });
 
-test("2026/27 calendar gives 136 math slots for Monday, Tuesday, Thursday and Friday", () => {
+test("a four-day timetable gives 136 math slots after the 2026/27 vacations", () => {
   const lessons = [
     { id: "math-mon", weekday: 1, startsAt: "08:30" },
     { id: "math-tue", weekday: 2, startsAt: "08:30" },
@@ -144,7 +144,42 @@ test("2026/27 calendar gives 136 math slots for Monday, Tuesday, Thursday and Fr
   assert.equal(slots.some((slot) => slot.date === "2027-02-19"), false);
 });
 
-test("170 imported hours are kept, with 136 dated and 34 explicitly unscheduled", () => {
+test("the received five-day timetable gives 171 second-grade math slots", () => {
+  const lessons = [1, 2, 3, 4, 5].map((weekday) => ({
+    id: `math-${weekday}`,
+    weekday,
+    startsAt: "08:30",
+  }));
+  const periods = [
+    { startsOn: "2026-10-26", endsOn: "2026-11-03" },
+    { startsOn: "2026-12-31", endsOn: "2027-01-10" },
+    { startsOn: "2027-02-15", endsOn: "2027-02-21" },
+    { startsOn: "2027-03-27", endsOn: "2027-04-04" },
+  ];
+  const slots = buildScheduleSlots({
+    startDate: "2026-09-01",
+    endDate: "2027-05-31",
+    lessons,
+    periods,
+  });
+  assert.equal(slots.length, 171);
+
+  const rows = Array.from({ length: 170 }, (_, index) => ({
+    sourceRow: index + 2,
+    sequence: String(index + 1),
+    topic: `Тема ${index + 1}`,
+    hours: 1,
+    homework: "",
+    sourceDate: null,
+  }));
+  const result = allocateCurriculumRows(rows, slots);
+  assert.equal(result.scheduledHours, 170);
+  assert.equal(result.unscheduledHours, 0);
+  assert.equal(result.status, "reserve");
+  assert.equal(slots.length - result.scheduledHours, 1);
+});
+
+test("a 170-hour program remains complete and explicit when only 136 slots exist", () => {
   const rows = Array.from({ length: 170 }, (_, index) => ({
     sourceRow: index + 2,
     sequence: String(index + 1),

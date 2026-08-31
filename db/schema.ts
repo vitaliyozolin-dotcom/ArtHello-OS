@@ -192,6 +192,9 @@ export const lessons = sqliteTable("lessons", {
     .notNull()
     .references(() => subjects.id),
   teacherUserId: text("teacher_user_id").references(() => users.id),
+  displayLabel: text("display_label"),
+  groupName: text("group_name"),
+  sharedSessionKey: text("shared_session_key"),
   room: text("room").notNull(),
   status: text("status").notNull().default("scheduled"),
   note: text("note"),
@@ -435,6 +438,8 @@ export const programTopicSessions = sqliteTable("program_topic_sessions", {
     onDelete: "set null",
   }),
   startsAt: text("starts_at"),
+  topicOverride: text("topic_override"),
+  homeworkOverride: text("homework_override"),
   status: text("status").notNull().default("scheduled"),
   ...timestamps,
 });

@@ -72,7 +72,7 @@ test("operating modules use persistent schema and audited actions", () => {
   for (const table of ["programs", "programImports", "programTopics", "programTopicSessions", "academicCalendarPeriods", "attendance", "notifications", "gradeRevisions", "menuRatings", "consents"]) {
     assert.match(schemaSource, new RegExp(`export const ${table}`));
   }
-  for (const action of ["program.upsert", "program.import", "program.reschedule", "attendance.mark", "thread.view", "notification.read", "menu.rate"]) {
+  for (const action of ["program.upsert", "program.import", "program.topic.update", "attendance.mark", "thread.view", "notification.read", "menu.rate"]) {
     assert.equal(apiSource.includes(`action === "${action}"`), true);
   }
   assert.match(apiSource, /templateRecords: false/);
@@ -100,7 +100,9 @@ test("KTP import is role-scoped, calendar-aware and blocks false approval", () =
   assert.doesNotMatch(topicSnapshotQuery, /LIMIT\s+\d+/i);
   assert.match(appSource, /Импортировать XLSX/);
   assert.match(appSource, /Программа не помещается в расписание/);
-  assert.match(appSource, /Пересчитать даты/);
+  assert.match(appSource, /Даты не сдвигаются автоматически/);
+  assert.match(appSource, /Изменить тему и домашнее задание/);
+  assert.doesNotMatch(appSource, /Пересчитать даты/);
 });
 
 test("setup readiness is separated from daily workspaces", () => {

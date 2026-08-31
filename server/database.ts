@@ -96,6 +96,7 @@ export function loadMigrationSql() {
     "0005_central_staff_access.sql",
     "0006_identity_broker.sql",
     "0007_curriculum_import.sql",
+    "0008_schedule_groups.sql",
   ];
   return filenames.map((filename) =>
     readFileSync(join(process.cwd(), "drizzle", filename), "utf8"),
@@ -144,6 +145,31 @@ async function initializeDatabase() {
     "users",
     "profile_status",
     "ALTER TABLE users ADD profile_status text DEFAULT 'confirmed' NOT NULL",
+  );
+  await ensureColumn(
+    "lessons",
+    "display_label",
+    "ALTER TABLE lessons ADD display_label text",
+  );
+  await ensureColumn(
+    "lessons",
+    "group_name",
+    "ALTER TABLE lessons ADD group_name text",
+  );
+  await ensureColumn(
+    "lessons",
+    "shared_session_key",
+    "ALTER TABLE lessons ADD shared_session_key text",
+  );
+  await ensureColumn(
+    "program_topic_sessions",
+    "topic_override",
+    "ALTER TABLE program_topic_sessions ADD topic_override text",
+  );
+  await ensureColumn(
+    "program_topic_sessions",
+    "homework_override",
+    "ALTER TABLE program_topic_sessions ADD homework_override text",
   );
   await ensureColumn(
     "users",
