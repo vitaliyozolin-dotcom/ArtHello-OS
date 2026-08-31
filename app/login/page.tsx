@@ -25,7 +25,7 @@ function safeReturnTo() {
 export default function LoginPage() {
   const [identifier, setIdentifier] = useState("");
   const [challenge, setChallenge] = useState<PasswordlessChallenge | null>(null);
-  const [familyMethod, setFamilyMethod] = useState<FamilyMethod>("code");
+  const [familyMethod, setFamilyMethod] = useState<FamilyMethod>("password");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -261,10 +261,10 @@ export default function LoginPage() {
         {familyMethod === "password" ? (
           <form className="auth-form" onSubmit={loginWithPassword}>
             <div className={styles.codeSummary} role="note">
-              <strong>Временный резервный вход</strong>
+              <strong>Вход для семьи и ученика</strong>
               <small>
-                Только для родителей и учеников, которым школа уже выдала пароль.
-                Сотрудники входят через рабочую систему школы.
+                Используйте действующие данные, выданные школой. Сотрудники входят
+                через рабочую систему школы.
               </small>
             </div>
             <label className="auth-field" htmlFor="legacy-identifier">
