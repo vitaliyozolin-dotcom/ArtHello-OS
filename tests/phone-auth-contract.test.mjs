@@ -17,7 +17,7 @@ const compose = readFileSync("deploy/docker-compose.yml", "utf8");
 const caddy = readFileSync("deploy/Caddyfile.school", "utf8");
 
 test("parents and students keep direct diary entry while OTP is introduced", () => {
-  assert.match(loginPage, /Получить одноразовый код/);
+  assert.match(loginPage, /Получить код/);
   assert.match(loginPage, /one-time-code/);
   assert.match(loginPage, /Войти по выданному паролю/);
   assert.match(loginPage, /Вход для семьи и ученика/);
