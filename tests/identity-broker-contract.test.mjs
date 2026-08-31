@@ -46,9 +46,12 @@ test("central employee SSO is stateful, PKCE-bound and fixed-audience", async ()
   assert.doesNotMatch(central, /redirect_uri/);
 });
 
-test("legacy diary password login is disabled unless explicitly restored", async () => {
+test("staff passwords are retired while family fallback remains controllable", async () => {
   const route = await read("../app/api/auth/login/route.ts");
-  assert.match(route, /ENABLE_LEGACY_PASSWORD_LOGIN !== "true"/);
+  assert.match(route, /ENABLE_LEGACY_PASSWORD_LOGIN/);
+  assert.match(route, /value !== "false" && value !== "0"/);
+  assert.match(route, /staffRoles\.has\(user\.role\)/);
+  assert.match(route, /Сотрудники входят через ArtHello OS/);
   assert.match(route, /status: 410/);
-  assert.match(route, /одноразовый код или ArtHello OS/);
+  assert.match(route, /createSession\(user, request\)/);
 });
