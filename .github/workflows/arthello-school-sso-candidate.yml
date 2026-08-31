@@ -47,14 +47,29 @@ jobs:
           docker build --file candidate/deploy/v52/Dockerfile --target application --tag "$APP_IMAGE" candidate
           docker build --file candidate/deploy/v52/Dockerfile --tag "$RUNTIME_IMAGE" candidate
           docker run --rm --entrypoint sh "$APP_IMAGE" -euc '
-            test -s /app/app/api/school-sso/authorize/route.ts
-            test -s /app/app/api/school-sso/exchange/route.ts
-            test -s /app/lib/school-sso.ts
-            test -s /app/app/school-sso/login/page.tsx
-            grep -F "Открыть дневник" /app/app/components/EducationWorkspace.tsx >/dev/null
-            grep -F "SCHOOL_DIARY_SSO_URL" /app/app/components/EducationWorkspace.tsx >/dev/null
-            grep -F "Завершить входы" /app/app/components/SettingsWorkspace.tsx >/dev/null
-            ! grep -F ">Сбросить пароль</button>" /app/app/components/SettingsWorkspace.tsx >/dev/null
+            check_file() {
+              test -s "$1" || { printf "MISSING_FILE=%s\n" "$1" >&2; exit 1; }
+              printf "ARTHELLO_SSO_FILE=OK:%s\n" "$1"
+            }
+            check_text() {
+              grep -F "$1" "$2" >/dev/null || {
+                printf "MISSING_TEXT=%s file=%s\n" "$1" "$2" >&2
+                exit 1
+              }
+              printf "ARTHELLO_SSO_TEXT=OK:%s\n" "$1"
+            }
+            check_file /app/app/api/school-sso/authorize/route.ts
+            check_file /app/app/api/school-sso/exchange/route.ts
+            check_file /app/lib/school-sso.ts
+            check_file /app/app/school-sso/login/page.tsx
+            check_text "Открыть дневник" /app/app/components/EducationWorkspace.tsx
+            check_text "SCHOOL_DIARY_SSO_URL" /app/app/components/EducationWorkspace.tsx
+            check_text "Завершить входы" /app/app/components/SettingsWorkspace.tsx
+            if grep -F ">Сбросить пароль</button>" /app/app/components/SettingsWorkspace.tsx >/dev/null; then
+              printf "LEGACY_DIARY_PASSWORD_ACTION=FOUND\n" >&2
+              exit 1
+            fi
+            printf "ARTHELLO_SSO_LEGACY_PASSWORD_ACTION=ABSENT\n"
           '
           printf 'ARTHELLO_SCHOOL_SSO_BUILD=OK\n'
 
