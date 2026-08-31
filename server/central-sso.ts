@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { Role } from "../app/level-zero-types";
 import { createSession } from "./auth";
 import {
@@ -52,8 +52,12 @@ function arthelloOrigin() {
   } catch {
     throw new Error("Центр авторизации ArtHello OS настроен некорректно");
   }
+  const isolatedLocalTest =
+    process.env.NODE_ENV !== "production" &&
+    url.protocol === "http:" &&
+    (url.hostname === "127.0.0.1" || url.hostname === "localhost");
   if (
-    url.protocol !== "https:" ||
+    (url.protocol !== "https:" && !isolatedLocalTest) ||
     url.username ||
     url.password ||
     url.pathname !== "/" ||
@@ -196,7 +200,7 @@ export async function finishCentralSso(
       "INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id, details) VALUES (?, ?, 'auth.central_sso', 'user', ?, ?)",
     )
     .bind(
-      `audit-${crypto.randomUUID()}`,
+      `audit-${randomUUID()}`,
       user.id,
       user.id,
       `ArtHello OS SSO: ${identity.centralUserId}`.slice(0, 500),
