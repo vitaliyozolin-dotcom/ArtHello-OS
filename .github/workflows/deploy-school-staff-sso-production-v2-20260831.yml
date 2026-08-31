@@ -1,0 +1,69 @@
+name: Deploy School staff SSO production v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-school-staff-sso-production-v2-20260831.yml
+      - .github/scripts/school-staff-sso-production-cutover-v2.sh.gz.b64
+      - .github/scripts/school-staff-sso-workflow-controller-v2.sh.gz.b64
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: school-1-11-production
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: 5d7955ccf80a3ee8ff4a2c96d4781fb37a758d72
+  CANDIDATE_TREE: e89aa95c6e5b59bf957eae5c7559422a49132f50
+  VALIDATED_SHA: 40617f8f2b2df608b5e02e5efd4f7f4380dce2a9
+  VALIDATION_RUN_ID: "33415299367"
+  SOURCE_PR: "287"
+  SOURCE_BASE: school/staging-foundation-20260827
+  CUTOVER_SCRIPT_SHA256: 6c8d945addce8644a0bcfbfaff555463042c6b2bbb46d09df06f52820fa93b25
+  CONTROLLER_SCRIPT_SHA256: dfb22bf067e81f027164e190edffcc09a6992bcad3e74babd786d1f8ceb86cbf
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+  ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 70
+    environment: production-ru
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+      SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Check out exact production controls
+        uses: actions/checkout@v4
+        with:
+          path: controls
+
+      - name: Check out exact accepted School source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: school-source
+
+      - name: Execute verified backup-first cutover
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          controller="$RUNNER_TEMP/school-staff-sso-controller-v2-$GITHUB_RUN_ID.sh"
+          base64 -d controls/.github/scripts/school-staff-sso-workflow-controller-v2.sh.gz.b64 |
+            gzip -d > "$controller"
+          chmod 0500 "$controller"
+          printf '%s  %s\n' "$CONTROLLER_SCRIPT_SHA256" "$controller" | sha256sum -c -
+          bash -n "$controller"
+          exec "$controller"
