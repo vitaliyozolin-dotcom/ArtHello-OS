@@ -3,21 +3,43 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const auth = readFileSync("server/auth.ts", "utf8");
+const identityBroker = readFileSync("server/identity-broker.ts", "utf8");
+const centralSso = readFileSync("server/central-sso.ts", "utf8");
+const legacyLogin = readFileSync("app/api/auth/login/route.ts", "utf8");
+const loginPage = readFileSync("app/login/page.tsx", "utf8");
 const schoolApi = readFileSync("app/api/school/route.ts", "utf8");
-const migration = readFileSync("drizzle/0004_phone_auth.sql", "utf8");
+const passwordlessMigration = readFileSync(
+  "drizzle/0006_identity_broker.sql",
+  "utf8",
+);
 const interfaceSource = readFileSync("app/school-app.tsx", "utf8");
 const compose = readFileSync("deploy/docker-compose.yml", "utf8");
 const caddy = readFileSync("deploy/Caddyfile.school", "utf8");
 
-test("phone or email login uses hashed passwords and server sessions", () => {
-  assert.match(auth, /scrypt\$/);
-  assert.match(auth, /timingSafeEqual/);
+test("parents and students use one-time code or link without a diary password", () => {
+  assert.match(loginPage, /Получить код/);
+  assert.match(loginPage, /one-time-code/);
+  assert.match(loginPage, /Постоянный пароль не нужен/);
+  assert.doesNotMatch(loginPage, /name="password"/);
+  assert.match(identityBroker, /randomInt\(0, 1_000_000\)/);
+  assert.match(identityBroker, /magicToken/);
+  assert.match(identityBroker, /PASSWORDLESS_TTL_SECONDS = 10 \* 60/);
+  assert.match(identityBroker, /PASSWORDLESS_MAX_ATTEMPTS = 5/);
+  assert.match(passwordlessMigration, /passwordless_challenges/);
+  assert.match(passwordlessMigration, /code_hash text NOT NULL/);
+  assert.match(passwordlessMigration, /magic_token_hash text NOT NULL/);
+});
+
+test("employees use ArtHello OS SSO and the diary keeps only a technical session", () => {
+  assert.match(loginPage, /Войти сотруднику через ArtHello OS/);
+  assert.match(centralSso, /code_challenge/);
+  assert.match(centralSso, /codeVerifier/);
+  assert.match(centralSso, /reconcileCentralStaff/);
   assert.match(auth, /HttpOnly/);
   assert.match(auth, /SameSite=Lax/);
   assert.match(auth, /auth_sessions/);
-  assert.match(auth, /lower\(email\)/);
-  assert.match(migration, /token_hash text NOT NULL/);
-  assert.doesNotMatch(schoolApi, /oai-authenticated-user-email/);
+  assert.match(legacyLogin, /ENABLE_LEGACY_PASSWORD_LOGIN/);
+  assert.match(legacyLogin, /status: 410/);
 });
 
 test("same-origin validation uses the configured public origin behind the proxy", () => {
@@ -38,11 +60,11 @@ test("same-origin validation uses the configured public origin behind the proxy"
   );
 });
 
-test("first login and central reset invalidate previous access", () => {
-  assert.match(migration, /credential_tokens/);
-  assert.match(auth, /used_at IS NULL/);
-  assert.match(schoolApi, /user\.password\.reset/);
+test("central revocation invalidates existing technical access", () => {
   assert.match(schoolApi, /centralDirectoryActions/);
+  assert.match(identityBroker, /status = 'active'/);
+  assert.match(identityBroker, /DELETE FROM auth_sessions WHERE user_id = \?/);
+  assert.match(identityBroker, /identity_source = 'arthello_os'/);
 });
 
 test("management exposes central identity source", () => {
