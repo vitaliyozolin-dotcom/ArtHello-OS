@@ -29,6 +29,9 @@ jobs:
 
           mapfile -t parts < <(printf '%s\n' .github/scripts/school-staff-sso-production-cutover-v3.sh.gz.b64.part-* | sort)
           test "${#parts[@]}" -eq 10
+          printf 'SCHOOL_STAFF_SSO_TRANSFER_PART_CHECKSUMS_BEGIN\n'
+          sha256sum "${parts[@]}"
+          printf 'SCHOOL_STAFF_SSO_TRANSFER_PART_CHECKSUMS_END\n'
           cat "${parts[@]}" | tr -d '\r\n\t ' | base64 -d | gzip -d > "$work/cutover.sh"
           base64 -d .github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64 | gzip -d > "$work/controller.sh"
 
