@@ -1,0 +1,159 @@
+name: School staff SSO safe rollout
+
+on:
+  push:
+    branches:
+      - school/staff-sso-safe-rollout-20260831
+    paths:
+      - app/login/**
+      - app/api/auth/login/**
+      - server/**
+      - tests/**
+      - Dockerfile
+      - package.json
+      - package-lock.json
+      - .github/workflows/school-staff-sso-safe-rollout.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: school-staff-sso-safe-rollout
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 50
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Build candidate and run identity contracts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          builder="school-staff-sso-builder:${GITHUB_SHA}"
+          runtime="school-staff-sso-runtime:${GITHUB_SHA}"
+          docker build --pull \
+            --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true \
+            --target builder \
+            --tag "$builder" .
+          docker run --rm --network none --entrypoint node "$builder" \
+            --test \
+            tests/phone-auth-contract.test.mjs \
+            tests/central-access-contract.test.mjs \
+            tests/central-family-directory.test.mjs \
+            tests/identity-broker-contract.test.mjs \
+            tests/design-code-contract.test.mjs \
+            tests/school-structure-contract.test.mjs
+          docker build \
+            --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true \
+            --tag "$runtime" .
+          printf 'SCHOOL_STAFF_SSO_BUILD=PASS\n'
+
+      - name: Verify isolated runtime and public entry contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          runtime="school-staff-sso-runtime:${GITHUB_SHA}"
+          suffix="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          container="school-staff-sso-check-${suffix}"
+          volume="school_staff_sso_check_${suffix}_data"
+          secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+          cleanup() {
+            docker rm -f "$container" >/dev/null 2>&1 || true
+            docker volume rm "$volume" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker volume create "$volume" >/dev/null
+          docker run -d \
+            --name "$container" \
+            --network none \
+            --security-opt no-new-privileges:true \
+            -e NODE_ENV=production \
+            -e PORT=3000 \
+            -e DATABASE_PATH=/data/school-1-11.sqlite \
+            -e PUBLIC_APP_ORIGIN=http://127.0.0.1:3000 \
+            -e ARTHELLO_PUBLIC_ORIGIN=https://arthello-188-225-38-55.sslip.io \
+            -e CENTRAL_ACCESS_SECRET="$secret" \
+            -v "$volume:/data" \
+            "$runtime" >/dev/null
+
+          ready=0
+          for attempt in $(seq 1 90); do
+            if docker exec "$container" node -e \
+              "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"; then
+              ready=1
+              break
+            fi
+            if [ "$(docker inspect "$container" --format '{{.State.Running}}' 2>/dev/null || true)" != true ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs "$container" --tail 180 >&2 || true
+            exit 1
+          fi
+
+          docker exec -i "$container" node --input-type=module - <<'VERIFY'
+          const base = 'http://127.0.0.1:3000';
+          const login = await fetch(base + '/login');
+          const html = await login.text();
+          if (!login.ok) throw new Error('Login page failed');
+          for (const marker of [
+            'staff-sso-safe-rollout',
+            'Вход для сотрудников',
+            'Получить одноразовый код',
+            'Войти по выданному паролю',
+          ]) if (!html.includes(marker)) throw new Error('Missing marker: ' + marker);
+
+          const sso = await fetch(base + '/auth/central/start', { redirect: 'manual' });
+          if (sso.status !== 303) throw new Error('SSO start failed');
+          const location = sso.headers.get('location') || '';
+          if (!location.startsWith('https://arthello-188-225-38-55.sslip.io/api/school-sso/authorize'))
+            throw new Error('Unexpected SSO authority');
+
+          const legacy = await fetch(base + '/api/auth/login', {
+            method: 'POST',
+            headers: { origin: base, 'content-type': 'application/json' },
+            body: JSON.stringify({ login: 'nobody@example.invalid', password: 'InvalidPassword1' }),
+          });
+          if (legacy.status !== 401)
+            throw new Error('Family fallback is not enabled by default');
+          console.log('SCHOOL_STAFF_SSO_RUNTIME=PASS');
+          VERIFY
+
+          cleanup
+          trap - EXIT
+
+      - name: Cleanup candidate images
+        if: always()
+        shell: bash
+        run: |
+          docker image rm "school-staff-sso-runtime:${GITHUB_SHA}" >/dev/null 2>&1 || true
+          docker image rm "school-staff-sso-builder:${GITHUB_SHA}" >/dev/null 2>&1 || true
+
+      - name: Publish commit status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.sha,
+              state: process.env.JOB_STATUS === 'success' ? 'success' : 'failure',
+              context: 'school/staff-sso-safe-rollout',
+              description: 'School staff SSO safe rollout ' + process.env.JOB_STATUS,
+              target_url: process.env.GITHUB_SERVER_URL + '/' + process.env.GITHUB_REPOSITORY + '/actions/runs/' + process.env.GITHUB_RUN_ID,
+            });
