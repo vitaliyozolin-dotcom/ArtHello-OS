@@ -15,6 +15,20 @@ on:
       - package-lock.json
       - Dockerfile
       - .github/workflows/school-ktp-import-targeted.yml
+  pull_request:
+    branches:
+      - school/staging-foundation-20260827
+    paths:
+      - app/**
+      - db/**
+      - drizzle/**
+      - lib/**
+      - server/**
+      - tests/**
+      - package.json
+      - package-lock.json
+      - Dockerfile
+      - .github/workflows/school-ktp-import-targeted.yml
   workflow_dispatch:
 
 permissions:
