@@ -1,0 +1,210 @@
+name: ArtHello School SSO candidate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/arthello-school-sso-candidate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: arthello-school-sso-candidate
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: bf2a9e85c3140fbb188bbcaeb79da681d59fadaf
+  APP_IMAGE: arthello-school-sso-app:bf2a9e85c314
+  RUNTIME_IMAGE: arthello-school-sso-runtime:bf2a9e85c314
+  TEST_CONTAINER: arthello-school-sso-test
+  TEST_VOLUME: arthello-school-sso-test-data
+  TEST_ORIGIN: http://127.0.0.1:3331
+
+jobs:
+  candidate:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 50
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: candidate
+
+      - name: Build exact application and runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
+          docker rm -f "$TEST_CONTAINER" >/dev/null 2>&1 || true
+          docker volume rm "$TEST_VOLUME" >/dev/null 2>&1 || true
+          docker image rm "$APP_IMAGE" "$RUNTIME_IMAGE" >/dev/null 2>&1 || true
+          docker build --file candidate/deploy/v52/Dockerfile --target application --tag "$APP_IMAGE" candidate
+          docker build --file candidate/deploy/v52/Dockerfile --tag "$RUNTIME_IMAGE" candidate
+          docker run --rm --entrypoint sh "$APP_IMAGE" -euc '
+            test -s /app/app/api/school-sso/authorize/route.ts
+            test -s /app/app/api/school-sso/exchange/route.ts
+            test -s /app/lib/school-sso.ts
+            test -s /app/app/school-sso/login/page.tsx
+            grep -F "Открыть дневник" /app/app/components/EducationWorkspace.tsx >/dev/null
+            grep -F "SCHOOL_DIARY_SSO_URL" /app/app/components/EducationWorkspace.tsx >/dev/null
+            grep -F "Завершить входы" /app/app/components/SettingsWorkspace.tsx >/dev/null
+            ! grep -F ">Сбросить пароль</button>" /app/app/components/SettingsWorkspace.tsx >/dev/null
+          '
+          printf 'ARTHELLO_SCHOOL_SSO_BUILD=OK\n'
+
+      - name: Run isolated SSO authorization and replay test
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cleanup() {
+            rc=$?
+            set +e
+            docker rm -f "$TEST_CONTAINER" >/dev/null 2>&1
+            docker volume rm "$TEST_VOLUME" >/dev/null 2>&1
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          docker volume create "$TEST_VOLUME" >/dev/null
+          docker run -d \
+            --name "$TEST_CONTAINER" \
+            --network bridge \
+            -p 127.0.0.1:3331:8081 \
+            -e NODE_ENV=production \
+            -e PORT=8081 \
+            -e ARTHELLO_D1_PATH=/data/d1 \
+            -e ARTHELLO_BOOTSTRAP_ADMIN_LOGIN=sso-owner \
+            -e ARTHELLO_BOOTSTRAP_ADMIN_PASSWORD=SchoolSsoCandidate2026A1 \
+            -e ARTHELLO_BOOTSTRAP_ADMIN_NAME='SSO Owner' \
+            -v "$TEST_VOLUME:/data" \
+            "$RUNTIME_IMAGE" >/dev/null
+
+          ready=0
+          for attempt in $(seq 1 90); do
+            if curl -fsS --max-time 4 "$TEST_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null; then
+              ready=1
+              break
+            fi
+            if [ "$(docker inspect "$TEST_CONTAINER" --format '{{.State.Running}}' 2>/dev/null || true)" != true ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs "$TEST_CONTAINER" --tail 160 >&2 || true
+            exit 1
+          fi
+
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"; cleanup' EXIT
+          login_status="$(
+            curl -sS --max-time 20 \
+              -D "$work/login.headers" \
+              -o "$work/login.json" \
+              -w '%{http_code}' \
+              -X POST "$TEST_ORIGIN/api/auth/login" \
+              -H "Origin: $TEST_ORIGIN" \
+              -H 'Content-Type: application/json' \
+              --data '{"login":"sso-owner","password":"SchoolSsoCandidate2026A1"}'
+          )"
+          test "$login_status" = 200
+          session_cookie="$(
+            tr -d '\r' < "$work/login.headers" |
+              sed -n 's/^set-cookie: \(__Host-arthello_session=[^;]*\).*/\1/ip' |
+              head -n1
+          )"
+          test -n "$session_cookie"
+
+          verifier='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+          challenge="$(python3 - "$verifier" <<'PY'
+          import base64, hashlib, sys
+          print(base64.urlsafe_b64encode(hashlib.sha256(sys.argv[1].encode()).digest()).decode().rstrip('='))
+          PY
+          )"
+          state='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+          authorize="$TEST_ORIGIN/api/school-sso/authorize?state=$state&code_challenge=$challenge&return_to=%2F"
+          authorize_status="$(
+            curl -sS --max-time 20 \
+              -D "$work/authorize.headers" \
+              -o /dev/null \
+              -w '%{http_code}' \
+              -H "Cookie: $session_cookie" \
+              "$authorize"
+          )"
+          test "$authorize_status" = 303
+          location="$(tr -d '\r' < "$work/authorize.headers" | sed -n 's/^location: //ip' | tail -n1)"
+          case "$location" in
+            https://school-188-225-38-55.sslip.io/auth/central/callback*) ;;
+            *) printf 'Unexpected School callback: %s\n' "$location" >&2; exit 1 ;;
+          esac
+          code="$(python3 - "$location" "$state" <<'PY'
+          import sys, urllib.parse
+          q = urllib.parse.parse_qs(urllib.parse.urlparse(sys.argv[1]).query)
+          assert q.get('state') == [sys.argv[2]]
+          code = q.get('code', [''])[0]
+          assert len(code) >= 40
+          print(code)
+          PY
+          )"
+
+          python3 - "$code" "$verifier" > "$work/exchange.json" <<'PY'
+          import json, sys
+          print(json.dumps({'code': sys.argv[1], 'codeVerifier': sys.argv[2]}))
+          PY
+          exchange_status="$(
+            curl -sS --max-time 20 \
+              -o "$work/exchange-result.json" \
+              -w '%{http_code}' \
+              -X POST "$TEST_ORIGIN/api/school-sso/exchange" \
+              -H 'Content-Type: application/json' \
+              --data-binary @"$work/exchange.json"
+          )"
+          test "$exchange_status" = 200
+          python3 - "$work/exchange-result.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert data['ok'] is True
+          assert data['identity']['role'] == 'director'
+          assert data['identity']['displayName'] == 'SSO Owner'
+          assert data['identity']['centralUserId']
+          assert data['identity']['accessVersion'] >= 1
+          PY
+
+          replay_status="$(
+            curl -sS --max-time 20 \
+              -o "$work/replay.json" \
+              -w '%{http_code}' \
+              -X POST "$TEST_ORIGIN/api/school-sso/exchange" \
+              -H 'Content-Type: application/json' \
+              --data-binary @"$work/exchange.json"
+          )"
+          test "$replay_status" = 401
+          printf 'ARTHELLO_SCHOOL_SSO_RUNTIME=OK\n'
+          printf 'ARTHELLO_SCHOOL_SSO_REPLAY=REJECTED\n'
+          rm -rf "$work"
+          trap cleanup EXIT
+
+      - name: Report candidate status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: process.env.CANDIDATE_SHA,
+              state: process.env.JOB_STATUS === "success" ? "success" : "failure",
+              context: "arthello/school-sso-candidate",
+              description: "ArtHello School SSO candidate " + process.env.JOB_STATUS,
+              target_url:
+                process.env.GITHUB_SERVER_URL + "/" +
+                process.env.GITHUB_REPOSITORY +
+                "/actions/runs/" + process.env.GITHUB_RUN_ID,
+            });
