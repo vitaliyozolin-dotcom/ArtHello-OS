@@ -64,6 +64,7 @@ jobs:
           runtime="school-staff-sso-runtime:${GITHUB_SHA}"
           docker build --pull \
             --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true \
+            --build-arg NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED=false \
             --target builder \
             --tag "$builder" .
           docker run --rm --network none --entrypoint node "$builder" \
@@ -76,6 +77,7 @@ jobs:
             tests/school-structure-contract.test.mjs
           docker build \
             --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true \
+            --build-arg NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED=false \
             --tag "$runtime" .
           printf 'SCHOOL_STAFF_SSO_BUILD=PASS\n'
 
@@ -132,9 +134,11 @@ jobs:
           for (const marker of [
             'staff-sso-safe-rollout',
             'Вход для сотрудников',
-            'Получить код',
             'Вход для семьи и ученика',
+            'Пароль, выданный школой',
           ]) if (!html.includes(marker)) throw new Error('Missing marker: ' + marker);
+          if (html.includes('Получить код'))
+            throw new Error('Parent OTP is visible without a configured delivery provider');
 
           const sso = await fetch(base + '/auth/central/start', { redirect: 'manual' });
           if (sso.status !== 303) throw new Error('SSO start failed');
