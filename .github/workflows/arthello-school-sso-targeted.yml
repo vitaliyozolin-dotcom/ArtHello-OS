@@ -35,7 +35,11 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          node --test deploy/v52/overrides/tests/school-sso-contract.test.mjs
+          docker run --rm --network none \
+            --volume "$PWD:/repo:ro" \
+            --workdir /repo \
+            node:24-bookworm-slim \
+            node --test deploy/v52/overrides/tests/school-sso-contract.test.mjs
 
       - name: Build complete ArtHello application image
         shell: bash
