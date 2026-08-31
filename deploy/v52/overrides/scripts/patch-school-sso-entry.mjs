@@ -13,6 +13,18 @@ async function replaceExact(path, before, after, label) {
   await writeFile(path, next, "utf8");
 }
 
+async function replaceEveryExact(path, before, after, label) {
+  const source = await readFile(path, "utf8");
+  const count = source.split(before).length - 1;
+  if (count < 1)
+    throw new Error(`School SSO patch anchor missing: ${label}`);
+  const next = source.split(before).join(after);
+  if (next.includes(before))
+    throw new Error(`School SSO patch left a legacy anchor: ${label}`);
+  await writeFile(path, next, "utf8");
+  return count;
+}
+
 await replaceExact(
   educationPath,
   'const fmt = (value: string) => new Date(value).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });',
@@ -27,7 +39,7 @@ await replaceExact(
   "education SSO action",
 );
 
-await replaceExact(
+const retiredPasswordActions = await replaceEveryExact(
   settingsPath,
   '>Сбросить пароль</button>',
   '>Завершить входы</button>',
@@ -41,4 +53,11 @@ await replaceExact(
   "temporary credential clarification",
 );
 
+const settings = await readFile(settingsPath, "utf8");
+if (settings.includes("Сбросить пароль"))
+  throw new Error("Legacy diary password wording remains in SettingsWorkspace");
+if (!settings.includes("Завершить входы"))
+  throw new Error("Session termination wording is absent in SettingsWorkspace");
+
+console.log(`SCHOOL_SSO_PASSWORD_ACTIONS_RETIRED=${retiredPasswordActions}`);
 console.log("SCHOOL_SSO_UI_PATCH=OK");
