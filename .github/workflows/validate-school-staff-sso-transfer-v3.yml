@@ -7,7 +7,7 @@ on:
     paths:
       - .github/workflows/validate-school-staff-sso-transfer-v3.yml
       - .github/scripts/school-staff-sso-production-cutover-v3.sh.gz.b64.part-*
-      - .github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64
+      - .github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64.part-*
       - .github/workflows/deploy-school-staff-sso-production-v3-20260831.yml
 
 permissions:
@@ -27,13 +27,24 @@ jobs:
           work="$(mktemp -d)"
           trap 'rm -rf -- "$work"' EXIT
 
-          mapfile -t parts < <(printf '%s\n' .github/scripts/school-staff-sso-production-cutover-v3.sh.gz.b64.part-* | sort)
-          test "${#parts[@]}" -eq 10
-          printf 'SCHOOL_STAFF_SSO_TRANSFER_PART_CHECKSUMS_BEGIN\n'
-          sha256sum "${parts[@]}"
-          printf 'SCHOOL_STAFF_SSO_TRANSFER_PART_CHECKSUMS_END\n'
-          cat "${parts[@]}" | tr -d '\r\n\t ' | base64 -d | gzip -d > "$work/cutover.sh"
-          base64 -d .github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64 | gzip -d > "$work/controller.sh"
+          mapfile -t cutover_parts < <(
+            printf '%s\n' .github/scripts/school-staff-sso-production-cutover-v3.sh.gz.b64.part-* | sort
+          )
+          mapfile -t controller_parts < <(
+            printf '%s\n' .github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64.part-* | sort
+          )
+          test "${#cutover_parts[@]}" -eq 10
+          test "${#controller_parts[@]}" -eq 5
+
+          printf 'SCHOOL_STAFF_SSO_CUTOVER_PART_CHECKSUMS_BEGIN\n'
+          sha256sum "${cutover_parts[@]}"
+          printf 'SCHOOL_STAFF_SSO_CUTOVER_PART_CHECKSUMS_END\n'
+          printf 'SCHOOL_STAFF_SSO_CONTROLLER_PART_CHECKSUMS_BEGIN\n'
+          sha256sum "${controller_parts[@]}"
+          printf 'SCHOOL_STAFF_SSO_CONTROLLER_PART_CHECKSUMS_END\n'
+
+          cat "${cutover_parts[@]}" | tr -d '\r\n\t ' | base64 -d | gzip -d > "$work/cutover.sh"
+          cat "${controller_parts[@]}" | tr -d '\r\n\t ' | base64 -d | gzip -d > "$work/controller.sh"
 
           printf '%s  %s\n' '6c8d945addce8644a0bcfbfaff555463042c6b2bbb46d09df06f52820fa93b25' "$work/cutover.sh" | sha256sum -c -
           printf '%s  %s\n' 'c164a3a935efdd305b56af3c35f2efd17c63cb7ea885485e80bb23b1fd6c303b' "$work/controller.sh" | sha256sum -c -
