@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
