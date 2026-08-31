@@ -16,9 +16,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CANDIDATE_SHA: bf2a9e85c3140fbb188bbcaeb79da681d59fadaf
-  APP_IMAGE: arthello-school-sso-app:bf2a9e85c314
-  RUNTIME_IMAGE: arthello-school-sso-runtime:bf2a9e85c314
+  CANDIDATE_SHA: 59baa2b6cb068e0157f759699687c9377ef02112
+  APP_IMAGE: arthello-school-sso-app:59baa2b6cb06
+  RUNTIME_IMAGE: arthello-school-sso-runtime:59baa2b6cb06
   TEST_CONTAINER: arthello-school-sso-test
   TEST_VOLUME: arthello-school-sso-test-data
   TEST_ORIGIN: http://127.0.0.1:3331
