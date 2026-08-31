@@ -6,6 +6,11 @@ import {
   normalizePhone,
 } from "../../../server/auth";
 import { ensureDatabaseReady, getDatabase } from "../../../server/database";
+import {
+  allocateCurriculumRows,
+  buildScheduleSlots,
+  parseCurriculumWorkbook,
+} from "../../../lib/curriculum-import.mjs";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -29,6 +34,8 @@ const teacherActions = new Set<ActionKind>([
   "comment.create",
   "attendance.mark",
   "program.upsert",
+  "program.import",
+  "program.reschedule",
 ]);
 const adminActions = new Set<ActionKind>([
   "family.registration.approve",
@@ -117,6 +124,19 @@ const SCHOOL_CLASSES = [
   },
   { id: "class-5", name: "5", grade: 5, homeroomTeacherUserId: null },
   { id: "class-6", name: "6", grade: 6, homeroomTeacherUserId: null },
+] as const;
+
+const ACADEMIC_YEAR = {
+  id: "2026/27",
+  startsOn: "2026-09-01",
+  endsOn: "2027-05-31",
+} as const;
+
+const ACADEMIC_CALENDAR_PERIODS = [
+  { id: "vacation-autumn-2026", title: "Осенние каникулы", startsOn: "2026-10-26", endsOn: "2026-11-03" },
+  { id: "vacation-winter-2026", title: "Зимние каникулы", startsOn: "2026-12-31", endsOn: "2027-01-10" },
+  { id: "vacation-february-2027", title: "Дополнительные каникулы", startsOn: "2027-02-15", endsOn: "2027-02-21" },
+  { id: "vacation-spring-2027", title: "Весенние каникулы", startsOn: "2027-03-27", endsOn: "2027-04-04" },
 ] as const;
 
 const SCHOOL_SUBJECTS = [
@@ -533,6 +553,18 @@ async function ensureSchoolStructure() {
           assignment.status,
           assignment.notes,
         ),
+    ),
+    ...ACADEMIC_CALENDAR_PERIODS.map((period) =>
+      db
+        .prepare(
+          `INSERT INTO academic_calendar_periods
+      (id, academic_year, kind, title, starts_on, ends_on)
+      VALUES (?, ?, 'vacation', ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET academic_year = excluded.academic_year,
+        kind = excluded.kind, title = excluded.title, starts_on = excluded.starts_on,
+        ends_on = excluded.ends_on, updated_at = CURRENT_TIMESTAMP`,
+        )
+        .bind(period.id, ACADEMIC_YEAR.id, period.title, period.startsOn, period.endsOn),
     ),
     db.prepare(
       "UPDATE subjects SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id IN ('algebra', 'geometry', 'social', 'physics', 'chemistry', 'biology')",
@@ -1035,7 +1067,8 @@ async function loadSnapshot(
         "SELECT id, email, phone, display_name AS displayName, role, linked_student_id AS linkedStudentId, status, profile_status AS profileStatus, notes, password_state AS passwordState, central_user_id AS centralUserId, identity_source AS identitySource FROM users ORDER BY role, display_name",
       )
     : [];
-  const teacherAssignments = operationalRoles.has(viewer.role)
+  const canViewAssignments = operationalRoles.has(viewer.role) || viewer.role === "teacher";
+  const teacherAssignments = canViewAssignments
     ? await rows<SchoolSnapshot["teacherAssignments"][number]>(`SELECT a.id,
         a.teacher_user_id AS teacherUserId, u.display_name AS teacherName,
         u.profile_status AS teacherProfileStatus, a.class_name AS className,
@@ -1043,7 +1076,9 @@ async function loadSnapshot(
         a.status, a.notes
       FROM teacher_assignments a JOIN users u ON u.id = a.teacher_user_id
       JOIN subjects s ON s.id = a.subject_id
-      ORDER BY u.display_name, CAST(a.class_name AS INTEGER), s.name`)
+      ${viewer.role === "teacher" ? "WHERE a.teacher_user_id = ?" : ""}
+      ORDER BY u.display_name, CAST(a.class_name AS INTEGER), s.name`,
+      viewer.role === "teacher" ? [viewer.id] : [])
     : [];
   const audit = operationalRoles.has(viewer.role)
     ? await rows<SchoolSnapshot["audit"][number]>(
@@ -1060,17 +1095,58 @@ async function loadSnapshot(
         "SELECT i.id, i.target_role AS targetRole, i.student_id AS studentId, CASE WHEN st.id IS NULL THEN NULL ELSE st.first_name || ' ' || st.last_name END AS studentName, COALESCE(i.class_name, st.class_name) AS className, i.expires_at AS expiresAt, i.max_uses AS maxUses, i.used_count AS usedCount, i.status, i.created_at AS createdAt FROM account_invitations i LEFT JOIN students st ON st.id = i.student_id ORDER BY i.created_at DESC LIMIT 50",
       )
     : [];
+  const canViewPrograms =
+    viewer.role === "teacher" || leadershipRoles.has(viewer.role);
   const programWhere =
     viewer.role === "teacher" ? "WHERE p.teacher_user_id = ?" : "";
-  const programs = await rows<SchoolSnapshot["programs"][number]>(
-    `SELECT p.id, p.academic_year AS academicYear,
-      p.class_name AS className, p.subject_id AS subjectId, s.name AS subjectName,
-      p.teacher_user_id AS teacherUserId, u.display_name AS teacherName, p.title, p.status,
-      p.planned_lessons AS plannedLessons, p.completed_lessons AS completedLessons, p.updated_at AS updatedAt
-    FROM programs p JOIN subjects s ON s.id = p.subject_id JOIN users u ON u.id = p.teacher_user_id
-    ${programWhere} ORDER BY p.class_name, s.name`,
-    viewer.role === "teacher" ? [viewer.id] : [],
-  );
+  const programBindings = viewer.role === "teacher" ? [viewer.id] : [];
+  const programs = canViewPrograms
+    ? await rows<SchoolSnapshot["programs"][number]>(
+        `SELECT p.id, p.academic_year AS academicYear,
+          p.class_name AS className, p.subject_id AS subjectId, s.name AS subjectName,
+          p.teacher_user_id AS teacherUserId, u.display_name AS teacherName, p.title, p.status,
+          p.planned_lessons AS plannedLessons, p.completed_lessons AS completedLessons,
+          COALESCE(pi.row_count, 0) AS importedRows,
+          COALESCE(pi.available_slots, 0) AS availableSlots,
+          COALESCE(pi.scheduled_hours, 0) AS scheduledLessons,
+          COALESCE(pi.unscheduled_hours, 0) AS unscheduledLessons,
+          COALESCE(pi.validation_status, 'manual') AS validationStatus,
+          pi.file_name AS sourceFileName, p.updated_at AS updatedAt
+        FROM programs p
+        JOIN subjects s ON s.id = p.subject_id
+        JOIN users u ON u.id = p.teacher_user_id
+        LEFT JOIN program_imports pi ON pi.id = (
+          SELECT latest.id FROM program_imports latest
+          WHERE latest.program_id = p.id
+          ORDER BY latest.created_at DESC, latest.rowid DESC LIMIT 1
+        )
+        ${programWhere} ORDER BY p.class_name, s.name`,
+        programBindings,
+      )
+    : [];
+  const programTopics = canViewPrograms
+    ? await rows<SchoolSnapshot["programTopics"][number]>(
+        `SELECT ps.id, pt.program_id AS programId, pt.source_row AS sourceRow,
+          pt.sequence, pt.topic, pt.planned_hours AS plannedHours, pt.homework,
+          pt.sort_order AS sortOrder, ps.session_index AS sessionIndex,
+          ps.scheduled_date AS scheduledDate, ps.starts_at AS startsAt, ps.status
+        FROM program_topics pt
+        JOIN program_topic_sessions ps ON ps.topic_id = pt.id
+        JOIN programs p ON p.id = pt.program_id
+        WHERE 1 = 1 ${viewer.role === "teacher" ? "AND p.teacher_user_id = ?" : ""}
+        ORDER BY p.class_name, p.subject_id, pt.sort_order, ps.session_index`,
+        programBindings,
+      )
+    : [];
+  const academicCalendarPeriods = canViewPrograms
+    ? await rows<SchoolSnapshot["academicCalendarPeriods"][number]>(
+        `SELECT id, academic_year AS academicYear, kind, title,
+          starts_on AS startsOn, ends_on AS endsOn
+        FROM academic_calendar_periods
+        WHERE academic_year = ? ORDER BY starts_on`,
+        [ACADEMIC_YEAR.id],
+      )
+    : [];
   const attendance = await rows<SchoolSnapshot["attendance"][number]>(
     `SELECT a.id, a.lesson_id AS lessonId,
       a.student_id AS studentId, a.status, a.note, a.marked_at AS markedAt
@@ -1128,6 +1204,8 @@ async function loadSnapshot(
     registrationRequests,
     invitations,
     programs,
+    programTopics,
+    academicCalendarPeriods,
     attendance,
     notifications,
     rankings,
@@ -1228,15 +1306,67 @@ async function assertTeacherClassScope(
   if (leadershipRoles.has(viewer.role)) return;
   if (viewer.role !== "teacher")
     throw new Error("Нет доступа к учебным данным");
+  await assertConfirmedTeacherAssignment(viewer.id, className, subjectId);
+}
+
+async function assertConfirmedTeacherAssignment(
+  teacherUserId: string,
+  className: string,
+  subjectId: string,
+) {
   const db = await database();
   const assignment = await db
     .prepare(
       "SELECT id FROM teacher_assignments WHERE teacher_user_id = ? AND class_name = ? AND subject_id = ? AND status = 'confirmed' LIMIT 1",
     )
-    .bind(viewer.id, className, subjectId)
+    .bind(teacherUserId, className, subjectId)
     .first<{ id: string }>();
   if (!assignment)
     throw new Error("Учитель не назначен этому классу или предмету");
+}
+
+type CurriculumRowInput = {
+  sourceRow: number;
+  sequence: string;
+  topic: string;
+  hours: number;
+  homework: string;
+  sourceDate: string | null;
+};
+
+async function calculateCurriculumAllocation(
+  className: string,
+  subjectId: string,
+  teacherUserId: string,
+  topicRows: CurriculumRowInput[],
+) {
+  const db = await database();
+  const lessonResult = await db
+    .prepare(
+      `SELECT id, weekday, starts_at AS startsAt
+      FROM lessons
+      WHERE class_name = ? AND subject_id = ? AND teacher_user_id = ?
+        AND status NOT IN ('cancelled', 'archived')
+      ORDER BY weekday, starts_at`,
+    )
+    .bind(className, subjectId, teacherUserId)
+    .all<{ id: string; weekday: number; startsAt: string }>();
+  const periodResult = await db
+    .prepare(
+      `SELECT starts_on AS startsOn, ends_on AS endsOn
+      FROM academic_calendar_periods
+      WHERE academic_year = ? AND kind IN ('vacation', 'holiday', 'non_instruction')
+      ORDER BY starts_on`,
+    )
+    .bind(ACADEMIC_YEAR.id)
+    .all<{ startsOn: string; endsOn: string }>();
+  const slots = buildScheduleSlots({
+    startDate: ACADEMIC_YEAR.startsOn,
+    endDate: ACADEMIC_YEAR.endsOn,
+    lessons: lessonResult.results,
+    periods: periodResult.results,
+  });
+  return allocateCurriculumRows(topicRows, slots);
 }
 
 type ScheduleConflictInput = {
@@ -1546,8 +1676,14 @@ export async function POST(request: Request) {
   try {
     await ensureSchoolStructure();
     assertSameOrigin(request);
-    const body = (await request.json()) as RequestBody;
-    const action = body.action;
+    const isMultipart = request.headers
+      .get("content-type")
+      ?.toLowerCase()
+      .includes("multipart/form-data");
+    const body = (isMultipart
+      ? Object.fromEntries((await request.formData()).entries())
+      : await request.json()) as RequestBody;
+    const action = typeof body.action === "string" ? body.action : undefined;
     if (!action)
       return Response.json({ error: "Не указано действие" }, { status: 400 });
     if (centralDirectoryActions.has(action))
@@ -1588,6 +1724,7 @@ export async function POST(request: Request) {
 
     const db = await database();
     const id = `${action.replace(".", "-")}-${crypto.randomUUID()}`;
+    let responsePayload: Record<string, unknown> = {};
     const today = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Europe/Moscow",
     }).format(new Date());
@@ -2265,6 +2402,316 @@ export async function POST(request: Request) {
         `${className}-${targetWeekday}`,
         `${sourceWeekday} → ${targetWeekday}; ${copied.length} уроков`,
       );
+    } else if (action === "program.import") {
+      const file = body.file;
+      if (!(file instanceof File)) throw new Error("Выберите файл XLSX");
+      if (!file.name.toLowerCase().endsWith(".xlsx"))
+        throw new Error("Поддерживается только формат XLSX");
+      if (file.size <= 0) throw new Error("Выбранный XLSX пуст");
+      if (file.size > 5 * 1024 * 1024)
+        throw new Error("Размер XLSX не должен превышать 5 МБ");
+      const className = textValue(body.className, 20);
+      const subjectId = textValue(body.subjectId, 80);
+      const teacherUserId = leadershipRoles.has(actor.role)
+        ? textValue(body.teacherUserId, 100)
+        : actor.id;
+      if (leadershipRoles.has(actor.role)) {
+        const teacher = await db
+          .prepare(
+            "SELECT id FROM users WHERE id = ? AND role = 'teacher' AND profile_status NOT IN ('vacant', 'demo')",
+          )
+          .bind(teacherUserId)
+          .first<{ id: string }>();
+        if (!teacher) throw new Error("Выберите действующего преподавателя");
+        await assertConfirmedTeacherAssignment(
+          teacherUserId,
+          className,
+          subjectId,
+        );
+      }
+      if (!leadershipRoles.has(actor.role))
+        await assertTeacherClassScope(actor, className, subjectId);
+
+      const existingProgram = await db
+        .prepare(
+          `SELECT id, status FROM programs
+          WHERE academic_year = ? AND class_name = ? AND subject_id = ? AND teacher_user_id = ?`,
+        )
+        .bind(ACADEMIC_YEAR.id, className, subjectId, teacherUserId)
+        .first<{ id: string; status: string }>();
+      if (
+        actor.role === "teacher" &&
+        existingProgram &&
+        ["approved", "active"].includes(existingProgram.status)
+      ) {
+        throw new Error(
+          "Утверждённую программу возвращает в работу завуч или директор",
+        );
+      }
+
+      let parsed;
+      try {
+        parsed = await parseCurriculumWorkbook(await file.arrayBuffer());
+      } catch (parseError) {
+        const parseMessage =
+          parseError instanceof Error ? parseError.message : "файл повреждён";
+        throw new Error(`Не удалось прочитать XLSX: ${parseMessage}`);
+      }
+      const allocation = await calculateCurriculumAllocation(
+        className,
+        subjectId,
+        teacherUserId,
+        parsed.rows,
+      );
+      const programId =
+        existingProgram?.id ?? `program-${crypto.randomUUID()}`;
+      const importId = `program-import-${crypto.randomUUID()}`;
+      const defaultTitle = file.name.replace(/\.xlsx$/i, "").trim();
+      const title =
+        textValue(body.title, 180, false) ||
+        defaultTitle ||
+        `Рабочая программа ${ACADEMIC_YEAR.id}`;
+      const statements = [
+        db
+          .prepare(
+            `INSERT INTO programs
+            (id, academic_year, class_name, subject_id, teacher_user_id, title, status, planned_lessons)
+            VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)
+            ON CONFLICT(academic_year, class_name, subject_id, teacher_user_id)
+            DO UPDATE SET title = excluded.title, status = 'draft',
+              planned_lessons = excluded.planned_lessons, updated_at = CURRENT_TIMESTAMP`,
+          )
+          .bind(
+            programId,
+            ACADEMIC_YEAR.id,
+            className,
+            subjectId,
+            teacherUserId,
+            title,
+            parsed.totalHours,
+          ),
+        db
+          .prepare("DELETE FROM program_topics WHERE program_id = ?")
+          .bind(programId),
+        db
+          .prepare(
+            `INSERT INTO program_imports
+            (id, program_id, file_name, sheet_name, imported_by_user_id, row_count,
+              required_hours, available_slots, scheduled_hours, unscheduled_hours, validation_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            importId,
+            programId,
+            file.name.slice(0, 180),
+            parsed.sheetName.slice(0, 120),
+            actor.id,
+            parsed.rows.length,
+            allocation.requiredHours,
+            allocation.availableSlots,
+            allocation.scheduledHours,
+            allocation.unscheduledHours,
+            allocation.status,
+          ),
+      ];
+      for (const topic of allocation.topics) {
+        const topicId = `program-topic-${crypto.randomUUID()}`;
+        statements.push(
+          db
+            .prepare(
+              `INSERT INTO program_topics
+              (id, program_id, import_id, source_row, sequence, topic, planned_hours,
+                homework, source_date, sort_order, status)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned')`,
+            )
+            .bind(
+              topicId,
+              programId,
+              importId,
+              topic.sourceRow,
+              topic.sequence,
+              topic.topic,
+              topic.hours,
+              topic.homework,
+              topic.sourceDate,
+              topic.sortOrder,
+            ),
+        );
+        for (const session of topic.sessions) {
+          statements.push(
+            db
+              .prepare(
+                `INSERT INTO program_topic_sessions
+                (id, program_id, topic_id, session_index, scheduled_date,
+                  template_lesson_id, starts_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              )
+              .bind(
+                `program-session-${crypto.randomUUID()}`,
+                programId,
+                topicId,
+                session.sessionIndex,
+                session.scheduledDate,
+                session.templateLessonId,
+                session.startsAt,
+                session.status,
+              ),
+          );
+        }
+      }
+      await db.batch(statements);
+      responsePayload = {
+        importSummary: {
+          programId,
+          rows: parsed.rows.length,
+          requiredHours: allocation.requiredHours,
+          availableSlots: allocation.availableSlots,
+          scheduledHours: allocation.scheduledHours,
+          unscheduledHours: allocation.unscheduledHours,
+          unusedSlots: allocation.unusedSlots,
+          status: allocation.status,
+        },
+      };
+      await audit(
+        actor,
+        action,
+        "program",
+        programId,
+        `${file.name}; ${allocation.requiredHours} ч.; ${allocation.availableSlots} слотов; ${allocation.unscheduledHours} без даты`,
+      );
+    } else if (action === "program.reschedule") {
+      const programId = textValue(body.programId, 120);
+      const program = await db
+        .prepare(
+          `SELECT id, class_name AS className, subject_id AS subjectId,
+            teacher_user_id AS teacherUserId, status
+          FROM programs WHERE id = ?`,
+        )
+        .bind(programId)
+        .first<{
+          id: string;
+          className: string;
+          subjectId: string;
+          teacherUserId: string;
+          status: string;
+        }>();
+      if (!program) throw new Error("Программа не найдена");
+      if (actor.role === "teacher" && program.teacherUserId !== actor.id)
+        throw new Error("Нет доступа к этой программе");
+      await assertTeacherClassScope(
+        effectiveUser,
+        program.className,
+        program.subjectId,
+      );
+      const topicResult = await db
+        .prepare(
+          `SELECT source_row AS sourceRow, sequence, topic,
+            planned_hours AS hours, homework, source_date AS sourceDate
+          FROM program_topics WHERE program_id = ? ORDER BY sort_order`,
+        )
+        .bind(programId)
+        .all<CurriculumRowInput>();
+      if (!topicResult.results.length)
+        throw new Error("Сначала импортируйте темы из XLSX");
+      const allocation = await calculateCurriculumAllocation(
+        program.className,
+        program.subjectId,
+        program.teacherUserId,
+        topicResult.results,
+      );
+      const latestImport = await db
+        .prepare(
+          `SELECT id FROM program_imports
+          WHERE program_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+        )
+        .bind(programId)
+        .first<{ id: string }>();
+      if (!latestImport) throw new Error("История импорта не найдена");
+      const topicsByOrder = await db
+        .prepare(
+          "SELECT id, sort_order AS sortOrder FROM program_topics WHERE program_id = ? ORDER BY sort_order",
+        )
+        .bind(programId)
+        .all<{ id: string; sortOrder: number }>();
+      const topicIds = new Map(
+        topicsByOrder.results.map((topic) => [topic.sortOrder, topic.id]),
+      );
+      const statements = [
+        db
+          .prepare("DELETE FROM program_topic_sessions WHERE program_id = ?")
+          .bind(programId),
+      ];
+      for (const topic of allocation.topics) {
+        const topicId = topicIds.get(topic.sortOrder);
+        if (!topicId) throw new Error("Структура программы повреждена");
+        for (const session of topic.sessions) {
+          statements.push(
+            db
+              .prepare(
+                `INSERT INTO program_topic_sessions
+                (id, program_id, topic_id, session_index, scheduled_date,
+                  template_lesson_id, starts_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              )
+              .bind(
+                `program-session-${crypto.randomUUID()}`,
+                programId,
+                topicId,
+                session.sessionIndex,
+                session.scheduledDate,
+                session.templateLessonId,
+                session.startsAt,
+                session.status,
+              ),
+          );
+        }
+      }
+      statements.push(
+        db
+          .prepare(
+            `UPDATE program_imports
+            SET available_slots = ?, scheduled_hours = ?, unscheduled_hours = ?,
+              validation_status = ?
+            WHERE id = ?`,
+          )
+          .bind(
+            allocation.availableSlots,
+            allocation.scheduledHours,
+            allocation.unscheduledHours,
+            allocation.status,
+            latestImport.id,
+          ),
+        db
+          .prepare(
+            `UPDATE programs
+            SET status = CASE
+              WHEN status IN ('approved', 'active') AND ? > 0 THEN 'changes_requested'
+              ELSE status END,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?`,
+          )
+          .bind(allocation.unscheduledHours, programId),
+      );
+      await db.batch(statements);
+      responsePayload = {
+        importSummary: {
+          programId,
+          rows: topicResult.results.length,
+          requiredHours: allocation.requiredHours,
+          availableSlots: allocation.availableSlots,
+          scheduledHours: allocation.scheduledHours,
+          unscheduledHours: allocation.unscheduledHours,
+          unusedSlots: allocation.unusedSlots,
+          status: allocation.status,
+        },
+      };
+      await audit(
+        actor,
+        action,
+        "program",
+        programId,
+        `Перерасчёт: ${allocation.requiredHours} ч.; ${allocation.availableSlots} слотов; ${allocation.unscheduledHours} без даты`,
+      );
     } else if (action === "program.upsert") {
       const className = textValue(body.className, 20);
       const subjectId = textValue(body.subjectId, 80);
@@ -2282,6 +2729,11 @@ export async function POST(request: Request) {
           .bind(teacherUserId)
           .first<{ id: string }>();
         if (!teacher) throw new Error("Выберите действующего преподавателя");
+        await assertConfirmedTeacherAssignment(
+          teacherUserId,
+          className,
+          subjectId,
+        );
       }
       if (!leadershipRoles.has(actor.role))
         await assertTeacherClassScope(actor, className, subjectId);
@@ -2297,6 +2749,34 @@ export async function POST(request: Request) {
         : ["draft", "review"];
       if (!allowedStatuses.includes(requestedStatus))
         throw new Error("Выберите допустимый статус программы");
+      const importedValidation = await db
+        .prepare(
+          `SELECT pi.required_hours AS requiredHours,
+            pi.unscheduled_hours AS unscheduledHours
+          FROM program_imports pi
+          JOIN programs p ON p.id = pi.program_id
+          WHERE p.academic_year = ? AND p.class_name = ? AND p.subject_id = ?
+            AND p.teacher_user_id = ?
+          ORDER BY pi.created_at DESC, pi.rowid DESC LIMIT 1`,
+        )
+        .bind(ACADEMIC_YEAR.id, className, subjectId, teacherUserId)
+        .first<{ requiredHours: number; unscheduledHours: number }>();
+      if (
+        importedValidation &&
+        plannedLessons !== importedValidation.requiredHours
+      ) {
+        throw new Error(
+          "Количество часов импортированной программы изменяется только через новый XLSX",
+        );
+      }
+      if (
+        importedValidation?.unscheduledHours &&
+        ["approved", "active"].includes(requestedStatus)
+      ) {
+        throw new Error(
+          `Нельзя утвердить программу: ${importedValidation.unscheduledHours} ч. не помещаются в расписание`,
+        );
+      }
       const programId = textValue(body.programId, 120, false) || id;
       await db
         .prepare(
@@ -2455,7 +2935,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Неизвестное действие" }, { status: 400 });
     }
 
-    return Response.json({ ok: true, id });
+    return Response.json({ ok: true, id, ...responsePayload });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Не удалось сохранить действие";

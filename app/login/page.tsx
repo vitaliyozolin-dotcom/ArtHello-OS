@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { Icon } from "../icons";
 import styles from "./passwordless-login.module.css";
@@ -26,13 +27,16 @@ export default function LoginPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const code = new URLSearchParams(window.location.search).get("authError");
-    if (code === "expired_link")
-      setError("Ссылка уже использована или срок её действия истёк.");
-    if (code === "central_denied")
-      setError("Не удалось подтвердить доступ сотрудника к дневнику.");
-    if (code === "central_unavailable")
-      setError("Вход сотрудников временно недоступен. Повторите позже.");
+    const frame = requestAnimationFrame(() => {
+      const code = new URLSearchParams(window.location.search).get("authError");
+      if (code === "expired_link")
+        setError("Ссылка уже использована или срок её действия истёк.");
+      if (code === "central_denied")
+        setError("Не удалось подтвердить доступ сотрудника к дневнику.");
+      if (code === "central_unavailable")
+        setError("Вход сотрудников временно недоступен. Повторите позже.");
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   async function requestCode(event: FormEvent<HTMLFormElement>) {
@@ -203,10 +207,10 @@ export default function LoginPage() {
         <div className={styles.separator} aria-hidden="true">
           <span>или</span>
         </div>
-        <a className={`ghost-btn ${styles.sso}`} href="/auth/central/start">
+        <Link className={`ghost-btn ${styles.sso}`} href="/auth/central/start">
           <Icon name="school" size={18} />
           Вход для сотрудников
-        </a>
+        </Link>
 
         <small className="auth-help">
           Доступ выдаёт школа. Родители и ученики входят только в электронный дневник.

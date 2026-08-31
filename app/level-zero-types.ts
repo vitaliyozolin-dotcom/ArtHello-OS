@@ -53,7 +53,37 @@ export type ProgramRecord = {
   status: "draft" | "review" | "changes_requested" | "approved" | "active" | "archived" | string;
   plannedLessons: number;
   completedLessons: number;
+  importedRows: number;
+  availableSlots: number;
+  scheduledLessons: number;
+  unscheduledLessons: number;
+  validationStatus: "balanced" | "deficit" | "reserve" | "manual" | string;
+  sourceFileName: string | null;
   updatedAt: string;
+};
+
+export type ProgramTopicSessionRecord = {
+  id: string;
+  programId: string;
+  sourceRow: number;
+  sequence: string;
+  topic: string;
+  plannedHours: number;
+  homework: string;
+  sortOrder: number;
+  sessionIndex: number;
+  scheduledDate: string | null;
+  startsAt: string | null;
+  status: "scheduled" | "unscheduled" | "completed" | string;
+};
+
+export type AcademicCalendarPeriodRecord = {
+  id: string;
+  academicYear: string;
+  kind: string;
+  title: string;
+  startsOn: string;
+  endsOn: string;
 };
 
 export type AttendanceRecord = {
@@ -346,6 +376,8 @@ export type SchoolSnapshot = {
   registrationRequests: RegistrationRequestRecord[];
   invitations: InvitationRecord[];
   programs: ProgramRecord[];
+  programTopics: ProgramTopicSessionRecord[];
+  academicCalendarPeriods: AcademicCalendarPeriodRecord[];
   attendance: AttendanceRecord[];
   notifications: NotificationRecord[];
   rankings: RankingSnapshot;
@@ -377,6 +409,8 @@ export type ActionKind =
   | "activity.create"
   | "subscription.upsert"
   | "program.upsert"
+  | "program.import"
+  | "program.reschedule"
   | "attendance.mark"
   | "notification.read"
   | "menu.rate"

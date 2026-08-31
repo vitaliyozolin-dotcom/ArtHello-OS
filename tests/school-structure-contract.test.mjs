@@ -63,19 +63,44 @@ test("role access is fixed by the authenticated account and cannot be impersonat
 test("teacher writes are restricted to confirmed class and subject assignments", () => {
   assert.match(apiSource, /async function assertTeacherScope/);
   assert.match(apiSource, /async function assertTeacherClassScope/);
+  assert.match(apiSource, /async function assertConfirmedTeacherAssignment/);
   assert.match(apiSource, /teacher_user_id = \? AND class_name = \? AND subject_id = \? AND status = 'confirmed'/);
   assert.match(apiSource, /teacherOnlyAction && effectiveRole !== "teacher"/);
 });
 
 test("operating modules use persistent schema and audited actions", () => {
-  for (const table of ["programs", "attendance", "notifications", "gradeRevisions", "menuRatings", "consents"]) {
+  for (const table of ["programs", "programImports", "programTopics", "programTopicSessions", "academicCalendarPeriods", "attendance", "notifications", "gradeRevisions", "menuRatings", "consents"]) {
     assert.match(schemaSource, new RegExp(`export const ${table}`));
   }
-  for (const action of ["program.upsert", "attendance.mark", "thread.view", "notification.read", "menu.rate"]) {
+  for (const action of ["program.upsert", "program.import", "program.reschedule", "attendance.mark", "thread.view", "notification.read", "menu.rate"]) {
     assert.equal(apiSource.includes(`action === "${action}"`), true);
   }
   assert.match(apiSource, /templateRecords: false/);
   assert.doesNotMatch(apiSource, /ensureSeedData/);
+});
+
+test("KTP import is role-scoped, calendar-aware and blocks false approval", () => {
+  assert.match(apiSource, /parseCurriculumWorkbook/);
+  assert.match(apiSource, /calculateCurriculumAllocation/);
+  assert.match(
+    apiSource,
+    /async function calculateCurriculumAllocation\(\s*className: string,\s*subjectId: string,\s*teacherUserId: string,/,
+  );
+  assert.match(
+    apiSource,
+    /WHERE class_name = \? AND subject_id = \? AND teacher_user_id = \?[\s\S]*?\.bind\(className, subjectId, teacherUserId\)/,
+  );
+  assert.match(apiSource, /ACADEMIC_CALENDAR_PERIODS/);
+  assert.match(apiSource, /Утверждённую программу возвращает в работу завуч или директор/);
+  assert.match(apiSource, /Нельзя утвердить программу/);
+  const topicSnapshotQuery = apiSource.slice(
+    apiSource.indexOf("const programTopics ="),
+    apiSource.indexOf("const academicCalendarPeriods ="),
+  );
+  assert.doesNotMatch(topicSnapshotQuery, /LIMIT\s+\d+/i);
+  assert.match(appSource, /Импортировать XLSX/);
+  assert.match(appSource, /Программа не помещается в расписание/);
+  assert.match(appSource, /Пересчитать даты/);
 });
 
 test("setup readiness is separated from daily workspaces", () => {

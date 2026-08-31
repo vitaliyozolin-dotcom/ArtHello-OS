@@ -1,0 +1,196 @@
+name: School KTP import targeted
+
+on:
+  push:
+    branches:
+      - codex/school-ktp-xlsx-import-20260831
+    paths:
+      - app/**
+      - db/**
+      - drizzle/**
+      - lib/**
+      - server/**
+      - tests/**
+      - package.json
+      - package-lock.json
+      - Dockerfile
+      - .github/workflows/school-ktp-import-targeted.yml
+  pull_request:
+    branches:
+      - school/staging-foundation-20260827
+    paths:
+      - app/**
+      - db/**
+      - drizzle/**
+      - lib/**
+      - server/**
+      - tests/**
+      - package.json
+      - package-lock.json
+      - Dockerfile
+      - .github/workflows/school-ktp-import-targeted.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: school-ktp-import-targeted
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 50
+    steps:
+      - name: Check out exact School candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prepare deterministic School build context
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -m 0755 -d .openai
+          printf '%s\n' '{"d1": null, "r2": null}' > .openai/hosting.json
+          cat > .dockerignore <<'EOF'
+          .git
+          .next
+          .openai/*
+          !.openai/hosting.json
+          .sites-runtime
+          .wrangler
+          .migration
+          data
+          dist
+          node_modules
+          npm-debug.log*
+          EOF
+
+      - name: Build candidate, lint and run contracts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          builder="school-ktp-builder:${GITHUB_SHA}"
+          runtime="school-ktp-runtime:${GITHUB_SHA}"
+          if ! docker build --pull --target builder --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$builder" .; then
+            printf 'Cached builder failed; retrying without Docker cache.\n' >&2
+            docker build --pull --no-cache --target builder --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$builder" .
+          fi
+          docker run --rm --network none --entrypoint npm "$builder" run lint
+          docker run --rm --network none --entrypoint node "$builder" \
+            --test \
+            tests/registration-contract.test.mjs \
+            tests/school-structure-contract.test.mjs \
+            tests/phone-auth-contract.test.mjs \
+            tests/central-access-contract.test.mjs \
+            tests/central-family-directory.test.mjs \
+            tests/identity-broker-contract.test.mjs \
+            tests/design-code-contract.test.mjs \
+            tests/curriculum-import.test.mjs
+          if ! docker build --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$runtime" .; then
+            printf 'Cached runtime failed; retrying without Docker cache.\n' >&2
+            docker build --no-cache --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$runtime" .
+          fi
+          printf 'SCHOOL_KTP_BUILD=PASS\n'
+
+      - name: Verify isolated runtime and both migrations
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          runtime="school-ktp-runtime:${GITHUB_SHA}"
+          suffix="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          container="school-ktp-check-${suffix}"
+          data="school_ktp_check_${suffix}_data"
+          secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+          delivery="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+          cleanup() {
+            docker rm -f "$container" >/dev/null 2>&1 || true
+            docker volume rm "$data" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker volume create "$data" >/dev/null
+          docker run -d \
+            --name "$container" \
+            --network none \
+            --security-opt no-new-privileges:true \
+            -e NODE_ENV=production \
+            -e PORT=3000 \
+            -e DATABASE_PATH=/data/school-1-11.sqlite \
+            -e PUBLIC_APP_ORIGIN=http://127.0.0.1:3000 \
+            -e ARTHELLO_PUBLIC_ORIGIN=https://arthello.invalid \
+            -e CENTRAL_ACCESS_SECRET="$secret" \
+            -e PASSWORDLESS_PEPPER="$secret" \
+            -e PASSWORDLESS_DELIVERY_URL=https://delivery.invalid/school-passwordless \
+            -e PASSWORDLESS_DELIVERY_TOKEN="$delivery" \
+            -v "$data:/data" \
+            "$runtime" >/dev/null
+
+          ready=0
+          for attempt in $(seq 1 90); do
+            if docker exec "$container" node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"; then
+              ready=1
+              break
+            fi
+            if [ "$(docker inspect "$container" --format '{{.State.Running}}' 2>/dev/null || true)" != true ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs "$container" --tail 160 >&2 || true
+            exit 1
+          fi
+
+          docker exec -i "$container" node --input-type=module - <<'VERIFY_RUNTIME'
+          import { DatabaseSync } from 'node:sqlite';
+          const db = new DatabaseSync('/data/school-1-11.sqlite', { readOnly: true });
+          const required = [
+            'passwordless_challenges',
+            'academic_calendar_periods',
+            'program_imports',
+            'program_topics',
+            'program_topic_sessions',
+          ];
+          const tables = db.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+          ).all().map((row) => row.name);
+          const integrity = db.prepare('PRAGMA integrity_check').get().integrity_check;
+          db.close();
+          for (const table of required) {
+            if (!tables.includes(table)) throw new Error('Missing table: ' + table);
+          }
+          if (integrity !== 'ok') throw new Error('SQLite integrity failed');
+          console.log('SCHOOL_KTP_RUNTIME=PASS');
+          VERIFY_RUNTIME
+
+          cleanup
+          trap - EXIT
+
+      - name: Cleanup candidate images
+        if: always()
+        shell: bash
+        run: |
+          docker image rm "school-ktp-runtime:${GITHUB_SHA}" >/dev/null 2>&1 || true
+          docker image rm "school-ktp-builder:${GITHUB_SHA}" >/dev/null 2>&1 || true
+
+      - name: Publish commit status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.sha,
+              state: process.env.JOB_STATUS === 'success' ? 'success' : 'failure',
+              context: 'school/ktp-import-targeted',
+              description: 'School KTP import targeted ' + process.env.JOB_STATUS,
+              target_url: process.env.GITHUB_SERVER_URL + '/' + process.env.GITHUB_REPOSITORY + '/actions/runs/' + process.env.GITHUB_RUN_ID,
+            });
