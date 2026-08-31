@@ -1,0 +1,62 @@
+name: Identity delivery inventory
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/identity-delivery-inventory.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: identity-delivery-inventory
+  cancel-in-progress: true
+
+jobs:
+  inventory:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 10
+    steps:
+      - name: Inventory runtime channel configuration without values
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          pattern='(PASSWORDLESS|SMS|SMTP|MAIL|EMAIL|RESEND|SENDGRID|UNISENDER|SMSC|VIZIT|ALFA|NOTIFY|MESSAGE|DELIVERY)'
+          printf 'IDENTITY_DELIVERY_INVENTORY=START\n'
+          docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' |
+            grep -Ei 'school|arthello|api' |
+            sed -E 's/\|/ image=/' |
+            sed -E 's/\|/ status=/' || true
+
+          while IFS= read -r container; do
+            test -n "$container" || continue
+            printf 'CONTAINER=%s\n' "$container"
+            docker inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}' |
+              sed -E 's/=.*$//' |
+              grep -Ei "$pattern" |
+              sort -u |
+              sed 's/^/ENV_KEY=/' || true
+          done < <(
+            docker ps --format '{{.Names}}' |
+              grep -Ei 'school|arthello|api' |
+              sort -u
+          )
+
+          for root in /srv/arthello /srv/arthello-os /srv/school-1-11; do
+            test -d "$root" || continue
+            while IFS= read -r file; do
+              printf 'ENV_FILE=%s\n' "$file"
+              sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "$file" |
+                grep -Ei "$pattern" |
+                sort -u |
+                sed 's/^/ENV_FILE_KEY=/' || true
+            done < <(
+              find "$root" -maxdepth 3 -type f \
+                \( -name '.env' -o -name '.env.*' -o -name '*env.production*' \) \
+                2>/dev/null | sort
+            )
+          done
+
+          printf 'IDENTITY_DELIVERY_INVENTORY=COMPLETE\n'
