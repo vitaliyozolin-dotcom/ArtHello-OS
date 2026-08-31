@@ -82,9 +82,22 @@ test("operating modules use persistent schema and audited actions", () => {
 test("KTP import is role-scoped, calendar-aware and blocks false approval", () => {
   assert.match(apiSource, /parseCurriculumWorkbook/);
   assert.match(apiSource, /calculateCurriculumAllocation/);
+  assert.match(
+    apiSource,
+    /async function calculateCurriculumAllocation\(\s*className: string,\s*subjectId: string,\s*teacherUserId: string,/,
+  );
+  assert.match(
+    apiSource,
+    /WHERE class_name = \? AND subject_id = \? AND teacher_user_id = \?[\s\S]*?\.bind\(className, subjectId, teacherUserId\)/,
+  );
   assert.match(apiSource, /ACADEMIC_CALENDAR_PERIODS/);
   assert.match(apiSource, /Утверждённую программу возвращает в работу завуч или директор/);
   assert.match(apiSource, /Нельзя утвердить программу/);
+  const topicSnapshotQuery = apiSource.slice(
+    apiSource.indexOf("const programTopics ="),
+    apiSource.indexOf("const academicCalendarPeriods ="),
+  );
+  assert.doesNotMatch(topicSnapshotQuery, /LIMIT\s+\d+/i);
   assert.match(appSource, /Импортировать XLSX/);
   assert.match(appSource, /Программа не помещается в расписание/);
   assert.match(appSource, /Пересчитать даты/);
