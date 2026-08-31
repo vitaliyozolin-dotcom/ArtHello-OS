@@ -7,24 +7,51 @@ import { ensureDatabaseReady } from "../../../../server/database";
 
 export const runtime = "nodejs";
 
+const staffRoles = new Set([
+  "director",
+  "deputy",
+  "admin",
+  "teacher",
+  "tech_admin",
+]);
+
+function legacyPasswordEnabled() {
+  const value = (process.env.ENABLE_LEGACY_PASSWORD_LOGIN || "").
+    trim().
+    toLowerCase();
+  return value !== "false" && value !== "0";
+}
+
 export async function POST(request: Request) {
-  if (process.env.ENABLE_LEGACY_PASSWORD_LOGIN !== "true")
-    return Response.json(
-      {
-        error:
-          "Вход по отдельному паролю дневника отключён. Используйте одноразовый код или ArtHello OS.",
-      },
-      { status: 410, headers: { "cache-control": "no-store" } },
-    );
   try {
     assertSameOrigin(request);
     await ensureDatabaseReady();
+
+    if (!legacyPasswordEnabled())
+      return Response.json(
+        {
+          error:
+            "Вход по постоянному паролю отключён. Используйте одноразовый код.",
+        },
+        { status: 410, headers: { "cache-control": "no-store" } },
+      );
+
     const body = (await request.json()) as {
       login?: string;
       phone?: string;
       password?: string;
     };
     const user = await authenticate(body.login ?? body.phone, body.password);
+
+    if (staffRoles.has(user.role))
+      return Response.json(
+        {
+          error:
+            "Сотрудники входят через ArtHello OS. Второй пароль дневника не используется.",
+        },
+        { status: 410, headers: { "cache-control": "no-store" } },
+      );
+
     const cookie = await createSession(user, request);
     return Response.json(
       { ok: true, legacy: true },
