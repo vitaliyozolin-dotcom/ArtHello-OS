@@ -1,0 +1,546 @@
+name: School identity broker candidate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/school-identity-broker-candidate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: school-identity-broker-candidate
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: 66e53b72112c067345c2669e2f2064ee8a8148a3
+  BUILDER_IMAGE: school-identity-builder:66e53b72112c
+  RUNTIME_IMAGE: school-identity-runtime:66e53b72112c
+  SCHOOL_PORT: "3332"
+  BROKER_PORT: "3340"
+  SCHOOL_ORIGIN: http://127.0.0.1:3332
+  BROKER_ORIGIN: http://127.0.0.1:3340
+  DELIVERY_TOKEN: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  CENTRAL_SECRET: abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+  PASSWORDLESS_PEPPER: 89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567
+
+jobs:
+  candidate:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 50
+    steps:
+      - name: Check out validation controls
+        uses: actions/checkout@v4
+
+      - name: Check out exact School candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: candidate
+
+      - name: Build and run School contract tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
+          install -d -m 0755 candidate/.openai
+          cp .github/fixtures/school-hosting.json candidate/.openai/hosting.json
+          cp .github/fixtures/school-dockerignore candidate/.dockerignore
+          docker image rm "$BUILDER_IMAGE" "$RUNTIME_IMAGE" >/dev/null 2>&1 || true
+          docker build \
+            --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true \
+            --target builder \
+            --tag "$BUILDER_IMAGE" \
+            --file candidate/Dockerfile candidate
+          docker run --rm --network none --entrypoint node "$BUILDER_IMAGE" \
+            --test \
+            tests/phone-auth-contract.test.mjs \
+            tests/central-access-contract.test.mjs \
+            tests/central-family-directory.test.mjs \
+            tests/identity-broker-contract.test.mjs \
+            tests/design-code-contract.test.mjs
+          docker run --rm --network none --entrypoint npm "$BUILDER_IMAGE" run lint
+          docker build \
+            --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true \
+            --tag "$RUNTIME_IMAGE" \
+            --file candidate/Dockerfile candidate
+          printf 'SCHOOL_IDENTITY_BUILD=OK\n'
+
+      - name: Run isolated passwordless and SSO flows
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          container="school-identity-candidate-$GITHUB_RUN_ID"
+          volume="school_identity_candidate_${GITHUB_RUN_ID}_data"
+          delivery_file="$RUNNER_TEMP/school-delivery-$GITHUB_RUN_ID.json"
+          broker_file="$RUNNER_TEMP/school-fake-broker-$GITHUB_RUN_ID.mjs"
+          broker_log="$RUNNER_TEMP/school-fake-broker-$GITHUB_RUN_ID.log"
+          broker_pid=""
+          work=""
+
+          cleanup() {
+            rc=$?
+            set +e
+            if [ -n "$broker_pid" ]; then kill "$broker_pid" >/dev/null 2>&1; fi
+            docker rm -f "$container" >/dev/null 2>&1
+            docker volume rm "$volume" >/dev/null 2>&1
+            rm -f "$broker_file" "$delivery_file" "$broker_log"
+            case "$work" in
+              "$RUNNER_TEMP"/school-identity-test-*) rm -rf -- "$work" ;;
+            esac
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          for port in "$SCHOOL_PORT" "$BROKER_PORT"; do
+            if ss -ltn | awk '{print $4}' | grep -Eq "(^|:)$port$"; then
+              printf 'Required isolated port %s is occupied\n' "$port" >&2
+              exit 1
+            fi
+          done
+
+          cat > "$broker_file" <<'NODE'
+          import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+          import { writeFile } from 'node:fs/promises';
+          import http from 'node:http';
+
+          const port = Number(process.env.BROKER_PORT);
+          const schoolOrigin = process.env.SCHOOL_ORIGIN;
+          const deliveryToken = process.env.DELIVERY_TOKEN;
+          const deliveryFile = process.env.DELIVERY_FILE;
+          const codes = new Map();
+
+          const readBody = (request) => new Promise((resolve, reject) => {
+            const chunks = [];
+            request.on('data', (chunk) => chunks.push(chunk));
+            request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+            request.on('error', reject);
+          });
+          const json = (response, status, value) => {
+            const body = JSON.stringify(value);
+            response.writeHead(status, {
+              'content-type': 'application/json',
+              'content-length': Buffer.byteLength(body),
+              'cache-control': 'no-store',
+            });
+            response.end(body);
+          };
+          const base64urlSha256 = (value) =>
+            createHash('sha256').update(value).digest('base64url');
+
+          const server = http.createServer(async (request, response) => {
+            try {
+              const url = new URL(request.url, `http://127.0.0.1:${port}`);
+              if (request.method === 'GET' && url.pathname === '/health')
+                return json(response, 200, { status: 'ok' });
+
+              if (request.method === 'POST' && url.pathname === '/delivery') {
+                const body = await readBody(request);
+                const timestamp = request.headers['x-arthello-timestamp'] || '';
+                const signature = request.headers['x-arthello-signature'] || '';
+                const expected = createHmac('sha256', deliveryToken)
+                  .update(`${timestamp}.${body}`)
+                  .digest('hex');
+                const actualBuffer = /^[a-f0-9]{64}$/i.test(String(signature))
+                  ? Buffer.from(String(signature), 'hex')
+                  : Buffer.alloc(0);
+                const expectedBuffer = Buffer.from(expected, 'hex');
+                const issuedAt = Number(timestamp) * 1000;
+                if (
+                  expectedBuffer.length !== actualBuffer.length ||
+                  !timingSafeEqual(expectedBuffer, actualBuffer) ||
+                  !Number.isFinite(issuedAt) ||
+                  Math.abs(Date.now() - issuedAt) > 300_000
+                ) return json(response, 401, { error: 'invalid signature' });
+                const payload = JSON.parse(body);
+                await writeFile(deliveryFile, JSON.stringify(payload), 'utf8');
+                return json(response, 200, { ok: true });
+              }
+
+              if (
+                request.method === 'GET' &&
+                url.pathname === '/api/school-sso/authorize'
+              ) {
+                const state = url.searchParams.get('state') || '';
+                const challenge = url.searchParams.get('code_challenge') || '';
+                if (!state || !challenge)
+                  return json(response, 400, { error: 'invalid authorization' });
+                const code = randomBytes(32).toString('base64url');
+                codes.set(code, challenge);
+                const callback = new URL('/auth/central/callback', schoolOrigin);
+                callback.searchParams.set('code', code);
+                callback.searchParams.set('state', state);
+                response.writeHead(303, {
+                  location: callback.toString(),
+                  'cache-control': 'no-store',
+                });
+                return response.end();
+              }
+
+              if (
+                request.method === 'POST' &&
+                url.pathname === '/api/school-sso/exchange'
+              ) {
+                const body = JSON.parse(await readBody(request));
+                const expectedChallenge = codes.get(body.code);
+                if (
+                  !expectedChallenge ||
+                  base64urlSha256(String(body.codeVerifier || '')) !== expectedChallenge
+                ) return json(response, 401, { error: 'invalid or used code' });
+                codes.delete(body.code);
+                return json(response, 200, {
+                  ok: true,
+                  identity: {
+                    centralUserId: 'staff-sso-1',
+                    displayName: 'Тестовый сотрудник',
+                    contact: '+79995550022',
+                    role: 'teacher',
+                    accessVersion: 1,
+                  },
+                });
+              }
+
+              return json(response, 404, { error: 'not found' });
+            } catch (error) {
+              return json(response, 500, { error: String(error) });
+            }
+          });
+          server.listen(port, '127.0.0.1', () => {
+            console.log(`BROKER_READY=${port}`);
+          });
+          const close = () => server.close(() => process.exit(0));
+          process.on('SIGTERM', close);
+          process.on('SIGINT', close);
+          NODE
+
+          BROKER_PORT="$BROKER_PORT" \
+          SCHOOL_ORIGIN="$SCHOOL_ORIGIN" \
+          DELIVERY_TOKEN="$DELIVERY_TOKEN" \
+          DELIVERY_FILE="$delivery_file" \
+            node "$broker_file" > "$broker_log" 2>&1 &
+          broker_pid=$!
+
+          broker_ready=0
+          for attempt in $(seq 1 50); do
+            if curl -fsS --max-time 2 "$BROKER_ORIGIN/health" | grep -F '"status":"ok"' >/dev/null; then
+              broker_ready=1
+              break
+            fi
+            kill -0 "$broker_pid" 2>/dev/null || break
+            sleep 1
+          done
+          if [ "$broker_ready" -ne 1 ]; then
+            cat "$broker_log" >&2 || true
+            exit 1
+          fi
+
+          docker volume create "$volume" >/dev/null
+          docker run -d \
+            --name "$container" \
+            --network host \
+            --security-opt no-new-privileges:true \
+            -e NODE_ENV=test \
+            -e PORT="$SCHOOL_PORT" \
+            -e HOSTNAME=127.0.0.1 \
+            -e DATABASE_PATH=/data/school-1-11.sqlite \
+            -e PUBLIC_APP_ORIGIN="$SCHOOL_ORIGIN" \
+            -e ARTHELLO_PUBLIC_ORIGIN="$BROKER_ORIGIN" \
+            -e CENTRAL_ACCESS_SECRET="$CENTRAL_SECRET" \
+            -e PASSWORDLESS_PEPPER="$PASSWORDLESS_PEPPER" \
+            -e PASSWORDLESS_DELIVERY_URL="$BROKER_ORIGIN/delivery" \
+            -e PASSWORDLESS_DELIVERY_TOKEN="$DELIVERY_TOKEN" \
+            -v "$volume:/data" \
+            "$RUNTIME_IMAGE" >/dev/null
+
+          ready=0
+          for attempt in $(seq 1 90); do
+            if curl -fsS --max-time 4 "$SCHOOL_ORIGIN/api/health" | grep -F '"status":"ok"' >/dev/null; then
+              ready=1
+              break
+            fi
+            if [ "$(docker inspect "$container" --format '{{.State.Running}}' 2>/dev/null || true)" != true ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs "$container" --tail 180 >&2 || true
+            exit 1
+          fi
+
+          work="$(mktemp -d "$RUNNER_TEMP/school-identity-test-XXXXXX")"
+          curl -fsS --max-time 20 "$SCHOOL_ORIGIN/login" > "$work/login.html"
+          grep -F 'Получить код' "$work/login.html" >/dev/null
+          grep -F 'Войти сотруднику через ArtHello OS' "$work/login.html" >/dev/null
+          ! grep -F 'name="password"' "$work/login.html" >/dev/null
+
+          docker exec -i "$container" node --input-type=module <<'SEED'
+          import { DatabaseSync } from 'node:sqlite';
+          const db = new DatabaseSync('/data/school-1-11.sqlite');
+          db.prepare(`INSERT INTO users
+            (id, email, display_name, role, linked_student_id, status,
+             phone, password_hash, password_state, auth_version,
+             failed_login_count, central_user_id, identity_source,
+             central_access_version)
+            VALUES (?, ?, ?, 'parent', NULL, 'active', ?, NULL, 'external',
+              1, 0, ?, 'arthello_os', 1)`)
+            .run(
+              'parent-passwordless-1',
+              'parent.identity@example.test',
+              'Тестовый родитель',
+              '+79995550011',
+              'guardian-central-1',
+            );
+          db.close();
+          SEED
+
+          rm -f "$delivery_file"
+          request_status="$(
+            curl -sS --max-time 20 \
+              -o "$work/request.json" \
+              -w '%{http_code}' \
+              -X POST "$SCHOOL_ORIGIN/api/auth/passwordless/request" \
+              -H "Origin: $SCHOOL_ORIGIN" \
+              -H 'Content-Type: application/json' \
+              --data '{"identifier":"+79995550011","returnTo":"/"}'
+          )"
+          test "$request_status" = 200
+          for attempt in $(seq 1 30); do
+            test -s "$delivery_file" && break
+            sleep 1
+          done
+          test -s "$delivery_file"
+          challenge_id="$(python3 - "$work/request.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert data['challengeId'].startswith('passwordless-')
+          assert data['channel'] == 'sms'
+          assert data['expiresInSeconds'] == 600
+          print(data['challengeId'])
+          PY
+          )"
+          code="$(python3 - "$delivery_file" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert data['channel'] == 'sms'
+          assert data['target'] == '+79995550011'
+          assert len(data['code']) == 6 and data['code'].isdigit()
+          print(data['code'])
+          PY
+          )"
+          python3 - "$challenge_id" "$code" > "$work/verify-body.json" <<'PY'
+          import json, sys
+          print(json.dumps({
+            'identifier': '+79995550011',
+            'challengeId': sys.argv[1],
+            'code': sys.argv[2],
+          }))
+          PY
+          verify_status="$(
+            curl -sS --max-time 20 \
+              -D "$work/verify.headers" \
+              -o "$work/verify.json" \
+              -w '%{http_code}' \
+              -X POST "$SCHOOL_ORIGIN/api/auth/passwordless/verify" \
+              -H "Origin: $SCHOOL_ORIGIN" \
+              -H 'Content-Type: application/json' \
+              --data-binary @"$work/verify-body.json"
+          )"
+          test "$verify_status" = 200
+          family_cookie="$(
+            tr -d '\r' < "$work/verify.headers" |
+              sed -n 's/^set-cookie: \(school_session=[^;]*\).*/\1/ip' |
+              head -n1
+          )"
+          test -n "$family_cookie"
+          family_snapshot_status="$(
+            curl -sS --max-time 20 \
+              -o "$work/family-snapshot.json" \
+              -w '%{http_code}' \
+              -H "Cookie: $family_cookie" \
+              "$SCHOOL_ORIGIN/api/school"
+          )"
+          test "$family_snapshot_status" = 200
+
+          replay_status="$(
+            curl -sS --max-time 20 \
+              -o "$work/replay.json" \
+              -w '%{http_code}' \
+              -X POST "$SCHOOL_ORIGIN/api/auth/passwordless/verify" \
+              -H "Origin: $SCHOOL_ORIGIN" \
+              -H 'Content-Type: application/json' \
+              --data-binary @"$work/verify-body.json"
+          )"
+          test "$replay_status" = 401
+
+          rm -f "$delivery_file"
+          email_request_status="$(
+            curl -sS --max-time 20 \
+              -o "$work/email-request.json" \
+              -w '%{http_code}' \
+              -X POST "$SCHOOL_ORIGIN/api/auth/passwordless/request" \
+              -H "Origin: $SCHOOL_ORIGIN" \
+              -H 'Content-Type: application/json' \
+              --data '{"identifier":"parent.identity@example.test","returnTo":"/"}'
+          )"
+          test "$email_request_status" = 200
+          for attempt in $(seq 1 30); do
+            test -s "$delivery_file" && break
+            sleep 1
+          done
+          magic_link="$(python3 - "$delivery_file" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert data['channel'] == 'email'
+          assert data['target'] == 'parent.identity@example.test'
+          assert data['magicLink'].startswith('http://127.0.0.1:3332/api/auth/passwordless/magic?token=')
+          print(data['magicLink'])
+          PY
+          )"
+          magic_status="$(
+            curl -sS --max-time 20 \
+              -D "$work/magic.headers" \
+              -o /dev/null \
+              -w '%{http_code}' \
+              "$magic_link"
+          )"
+          test "$magic_status" = 303
+          grep -i '^set-cookie: school_session=' "$work/magic.headers" >/dev/null
+
+          legacy_status="$(
+            curl -sS --max-time 20 \
+              -o "$work/legacy.json" \
+              -w '%{http_code}' \
+              -X POST "$SCHOOL_ORIGIN/api/auth/login" \
+              -H "Origin: $SCHOOL_ORIGIN" \
+              -H 'Content-Type: application/json' \
+              --data '{"login":"parent.identity@example.test","password":"irrelevant"}'
+          )"
+          test "$legacy_status" = 410
+
+          start_status="$(
+            curl -sS --max-time 20 \
+              -D "$work/sso-start.headers" \
+              -o /dev/null \
+              -w '%{http_code}' \
+              "$SCHOOL_ORIGIN/auth/central/start?returnTo=%2F"
+          )"
+          test "$start_status" = 303
+          transaction_cookie="$(
+            tr -d '\r' < "$work/sso-start.headers" |
+              sed -n 's/^set-cookie: \(school_sso_tx=[^;]*\).*/\1/ip' |
+              head -n1
+          )"
+          authorize_location="$(
+            tr -d '\r' < "$work/sso-start.headers" |
+              sed -n 's/^location: //ip' | tail -n1
+          )"
+          test -n "$transaction_cookie"
+          case "$authorize_location" in
+            "$BROKER_ORIGIN"/api/school-sso/authorize*) ;;
+            *) printf 'Unexpected SSO authorize URL: %s\n' "$authorize_location" >&2; exit 1 ;;
+          esac
+
+          authorize_status="$(
+            curl -sS --max-time 20 \
+              -D "$work/sso-authorize.headers" \
+              -o /dev/null \
+              -w '%{http_code}' \
+              "$authorize_location"
+          )"
+          test "$authorize_status" = 303
+          callback_location="$(
+            tr -d '\r' < "$work/sso-authorize.headers" |
+              sed -n 's/^location: //ip' | tail -n1
+          )"
+          case "$callback_location" in
+            "$SCHOOL_ORIGIN"/auth/central/callback*) ;;
+            *) printf 'Unexpected SSO callback URL: %s\n' "$callback_location" >&2; exit 1 ;;
+          esac
+
+          callback_status="$(
+            curl -sS --max-time 20 \
+              -D "$work/sso-callback.headers" \
+              -o /dev/null \
+              -w '%{http_code}' \
+              -H "Cookie: $transaction_cookie" \
+              "$callback_location"
+          )"
+          test "$callback_status" = 303
+          staff_cookie="$(
+            tr -d '\r' < "$work/sso-callback.headers" |
+              sed -n 's/^set-cookie: \(school_session=[^;]*\).*/\1/ip' |
+              head -n1
+          )"
+          test -n "$staff_cookie"
+          staff_snapshot_status="$(
+            curl -sS --max-time 20 \
+              -o "$work/staff-snapshot.json" \
+              -w '%{http_code}' \
+              -H "Cookie: $staff_cookie" \
+              "$SCHOOL_ORIGIN/api/school"
+          )"
+          test "$staff_snapshot_status" = 200
+
+          callback_replay_status="$(
+            curl -sS --max-time 20 \
+              -D "$work/sso-replay.headers" \
+              -o /dev/null \
+              -w '%{http_code}' \
+              -H "Cookie: $transaction_cookie" \
+              "$callback_location"
+          )"
+          test "$callback_replay_status" = 303
+          grep -i '^location: .*authError=central_denied' "$work/sso-replay.headers" >/dev/null
+
+          docker exec -i "$container" node --input-type=module <<'VERIFY_DB'
+          import { DatabaseSync } from 'node:sqlite';
+          const db = new DatabaseSync('/data/school-1-11.sqlite', { readOnly: true });
+          const parent = db.prepare(`SELECT password_hash AS passwordHash,
+            password_state AS passwordState, identity_source AS source
+            FROM users WHERE id = 'parent-passwordless-1'`).get();
+          if (!parent || parent.passwordHash !== null || parent.passwordState !== 'external' || parent.source !== 'arthello_os')
+            throw new Error('Parent passwordless identity contract failed');
+          const staff = db.prepare(`SELECT role, password_hash AS passwordHash,
+            password_state AS passwordState, identity_source AS source
+            FROM users WHERE central_user_id = 'staff-sso-1'`).get();
+          if (!staff || staff.role !== 'teacher' || staff.passwordHash !== null || staff.passwordState !== 'external' || staff.source !== 'arthello_os')
+            throw new Error('Staff SSO identity contract failed');
+          const challenges = db.prepare(
+            'SELECT count(*) AS count FROM passwordless_challenges WHERE code_hash IS NOT NULL AND magic_token_hash IS NOT NULL'
+          ).get().count;
+          if (challenges < 2) throw new Error('Passwordless challenge evidence missing');
+          db.close();
+          console.log('SCHOOL_IDENTITY_DB=OK');
+          VERIFY_DB
+
+          printf 'SCHOOL_PASSWORDLESS_CODE=OK\n'
+          printf 'SCHOOL_PASSWORDLESS_MAGIC=OK\n'
+          printf 'SCHOOL_PASSWORDLESS_REPLAY=REJECTED\n'
+          printf 'SCHOOL_STAFF_SSO=OK\n'
+          printf 'SCHOOL_STAFF_SSO_REPLAY=REJECTED\n'
+          printf 'SCHOOL_LEGACY_PASSWORD=DISABLED\n'
+
+      - name: Report School identity candidate status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: process.env.CANDIDATE_SHA,
+              state: process.env.JOB_STATUS === "success" ? "success" : "failure",
+              context: "school-diary/identity-broker-candidate",
+              description: "School identity candidate " + process.env.JOB_STATUS,
+              target_url:
+                process.env.GITHUB_SERVER_URL + "/" +
+                process.env.GITHUB_REPOSITORY +
+                "/actions/runs/" + process.env.GITHUB_RUN_ID,
+            });
