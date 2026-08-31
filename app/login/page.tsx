@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Icon } from "../icons";
 import styles from "./passwordless-login.module.css";
 
@@ -33,11 +33,6 @@ export default function LoginPage() {
       setError("ArtHello OS не подтвердила доступ сотрудника к дневнику.");
     if (code === "central_unavailable")
       setError("Вход сотрудников временно недоступен. Повторите позже.");
-  }, []);
-
-  const staffLoginHref = useMemo(() => {
-    if (typeof window === "undefined") return "/auth/central/start";
-    return `/auth/central/start?returnTo=${encodeURIComponent(safeReturnTo())}`;
   }, []);
 
   async function requestCode(event: FormEvent<HTMLFormElement>) {
@@ -208,8 +203,8 @@ export default function LoginPage() {
         <div className={styles.separator} aria-hidden="true">
           <span>или</span>
         </div>
-        <a className={`ghost-btn ${styles.sso}`} href={staffLoginHref}>
-          <Icon name="briefcase" size={18} />
+        <a className={`ghost-btn ${styles.sso}`} href="/auth/central/start">
+          <Icon name="school" size={18} />
           Войти сотруднику через ArtHello OS
         </a>
 
