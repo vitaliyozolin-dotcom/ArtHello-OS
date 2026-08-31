@@ -54,12 +54,18 @@ await replaceExact(
   "temporary credential clarification",
 );
 
-await replaceExact(
-  centralStaffTestPath,
-  "  assert.match(settingsSource, /Сбросить пароль/);",
-  "  assert.match(settingsSource, /Завершить входы/);\n  assert.doesNotMatch(settingsSource, /Сбросить пароль/);",
-  "central staff passwordless lifecycle contract",
+const centralStaffTestSource = await readFile(centralStaffTestPath, "utf8");
+const legacyAssertion = /assert\.match\(\s*settingsSource\s*,\s*\/Сбросить пароль\/\s*\);/g;
+const legacyAssertionCount = centralStaffTestSource.match(legacyAssertion)?.length ?? 0;
+if (legacyAssertionCount !== 1)
+  throw new Error(
+    `Expected exactly one legacy central staff password assertion, found ${legacyAssertionCount}`,
+  );
+const migratedCentralStaffTest = centralStaffTestSource.replace(
+  legacyAssertion,
+  "assert.match(settingsSource, /Завершить входы/);\n  assert.doesNotMatch(settingsSource, /Сбросить пароль/);",
 );
+await writeFile(centralStaffTestPath, migratedCentralStaffTest, "utf8");
 
 const settings = await readFile(settingsPath, "utf8");
 if (settings.includes("Сбросить пароль"))
@@ -70,7 +76,7 @@ if (!settings.includes("Завершить входы"))
 const centralStaffTest = await readFile(centralStaffTestPath, "utf8");
 if (!centralStaffTest.includes("Завершить входы"))
   throw new Error("Central staff test did not adopt the passwordless lifecycle");
-if (centralStaffTest.includes("assert.match(settingsSource, /Сбросить пароль/);"))
+if (legacyAssertion.test(centralStaffTest))
   throw new Error("Central staff test still requires a diary password action");
 
 console.log(`SCHOOL_SSO_PASSWORD_ACTIONS_RETIRED=${retiredPasswordActions}`);
