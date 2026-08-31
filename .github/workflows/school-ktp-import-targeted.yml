@@ -92,7 +92,8 @@ jobs:
             tests/central-family-directory.test.mjs \
             tests/identity-broker-contract.test.mjs \
             tests/design-code-contract.test.mjs \
-            tests/curriculum-import.test.mjs
+            tests/curriculum-import.test.mjs \
+            tests/schedule-import.test.mjs
           if ! docker build --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$runtime" .; then
             printf 'Cached runtime failed; retrying without Docker cache.\n' >&2
             docker build --no-cache --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$runtime" .
@@ -156,6 +157,8 @@ jobs:
             'program_imports',
             'program_topics',
             'program_topic_sessions',
+            'schedule_imports',
+            'schedule_exceptions',
           ];
           const tables = db.prepare(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
