@@ -95,6 +95,7 @@ export function loadMigrationSql() {
     "0004_phone_auth.sql",
     "0005_central_staff_access.sql",
     "0006_identity_broker.sql",
+    "0007_curriculum_import.sql",
   ];
   return filenames.map((filename) =>
     readFileSync(join(process.cwd(), "drizzle", filename), "utf8"),

@@ -610,18 +610,44 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .notification-list strong { font-size: 11px; }
 .notification-list p, .notification-list small { color: var(--muted); font-size: 9px; line-height: 1.45; }
 
+.page-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .program-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
-.program-grid > button { min-height: 225px; border: 1px solid var(--line); border-radius: 22px; padding: 17px; background: white; display: flex; flex-direction: column; align-items: stretch; text-align: left; cursor: pointer; }
-.program-grid > button:disabled { cursor: default; }
+.program-grid > article { min-height: 255px; border: 1px solid var(--line); border-radius: 20px; padding: 17px; background: white; display: flex; flex-direction: column; align-items: stretch; text-align: left; }
+.program-grid > article.selected { border-color: var(--orange); box-shadow: 0 0 0 2px var(--orange-soft); }
+.program-grid > article.has-deficit { background: #fffaf6; }
 .program-grid header { display: flex; justify-content: space-between; align-items: center; }
-.program-grid header > span { width: 42px; height: 42px; border-radius: 13px; color: var(--orange); display: grid; place-items: center; }
-.program-grid > button > small { color: var(--muted); margin-top: 15px; font-size: 10px; }
-.program-grid > button > strong { margin-top: 5px; font-size: 15px; line-height: 1.35; }
-.program-grid > button > p { color: var(--muted); margin-top: 7px; font-size: 10px; }
+.program-grid header > span { width: 42px; height: 42px; border-radius: 12px; color: var(--orange); display: grid; place-items: center; }
+.program-grid > article > small { color: var(--muted); margin-top: 15px; font-size: 12px; }
+.program-grid > article > strong { margin-top: 5px; font-size: 16px; line-height: 1.35; }
+.program-grid > article > p { color: var(--muted); margin-top: 7px; font-size: 12px; }
+.program-grid > article > footer { margin-top: 13px; padding-top: 11px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
+.program-grid > article > footer button { min-height: 34px; border: 0; border-radius: 8px; padding: 0 9px; background: transparent; color: var(--orange); font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+.program-grid > article > footer button:hover { background: var(--orange-soft); }
+.program-validation { min-height: 34px; margin-top: 12px; border-radius: 8px; padding: 7px 9px; background: #f7f8fa; color: var(--muted); display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700; }
+.has-deficit .program-validation { background: #fff0e8; color: #a3411e; }
 .program-progress { margin-top: auto; padding-top: 18px; display: grid; gap: 7px; }
 .program-progress > span { height: 6px; border-radius: 99px; background: #ece9e2; overflow: hidden; }
 .program-progress i { display: block; height: 100%; border-radius: inherit; background: var(--orange); }
-.program-progress small { color: var(--muted); font-size: 9px; }
+.program-progress small { color: var(--muted); font-size: 11px; }
+.curriculum-detail { display: grid; gap: 16px; }
+.curriculum-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.curriculum-detail-head .section-title { flex: 1; }
+.curriculum-alert { border: 1px solid #f2c6b3; border-radius: 12px; padding: 13px 15px; background: #fff6f1; color: #8e3518; display: flex; align-items: flex-start; gap: 10px; }
+.curriculum-alert > svg { flex: 0 0 auto; }
+.curriculum-alert div { display: grid; gap: 4px; }
+.curriculum-alert strong { font-size: 14px; }
+.curriculum-alert p { font-size: 12px; line-height: 1.45; }
+.curriculum-table { border: 1px solid var(--line); border-radius: 12px; overflow: auto; }
+.curriculum-row { min-width: 780px; min-height: 54px; border-bottom: 1px solid var(--line); padding: 9px 12px; display: grid; grid-template-columns: 54px 150px minmax(260px,1fr) minmax(180px,.7fr); align-items: center; gap: 12px; font-size: 12px; }
+.curriculum-row:last-child { border-bottom: 0; }
+.curriculum-row > span { color: var(--muted); }
+.curriculum-row > strong { line-height: 1.4; }
+.curriculum-head { min-height: 42px; background: #f7f8fa; color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.curriculum-row.unscheduled { background: #fff8f4; }
+.curriculum-row.unscheduled > span:nth-child(2) { color: #b04420; font-weight: 800; }
+.calendar-period-strip { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: white; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 11px; }
+.calendar-period-strip > strong { font-size: 12px; }
+.calendar-period-strip > span { border-radius: 999px; padding: 6px 9px; background: #f7f8fa; color: var(--muted); }
 
 .student-directory { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
 .student-directory > button { min-height: 110px; border: 1px solid var(--line); border-radius: 20px; padding: 14px; background: white; display: flex; align-items: center; gap: 13px; text-align: left; cursor: pointer; }
@@ -720,6 +746,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .page-heading .primary-btn:has(svg) { gap: 0; font-size: 0; }
   .page-heading .primary-btn:not(:has(svg)) { width: auto; flex-basis: auto; font-size: 13px; }
   .page-heading .primary-btn svg + * { display: none; }
+  .page-actions { flex: 0 0 auto; }
+  .page-actions .ghost-btn { width: 45px; min-width: 45px; padding: 0; font-size: 0; }
   .parent-hero { min-height: 330px; padding: 25px; grid-template-columns: 1fr; gap: 17px; }
   .hero-copy h1 { font-size: 36px; }
   .hero-signal { min-height: 125px; }
@@ -741,6 +769,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .admin-readiness { min-height: 420px; padding: 25px; grid-template-columns: 1fr; gap: 17px; }
   .admin-actions { grid-template-columns: 1fr; }
   .program-grid, .class-grid, .student-directory { grid-template-columns: 1fr; }
+  .curriculum-detail-head { align-items: stretch; flex-direction: column; }
+  .curriculum-detail-head .ghost-btn { width: 100%; }
+  .calendar-period-strip { align-items: flex-start; flex-direction: column; }
   .ranking-heading { align-items: stretch; flex-direction: column; }
   .ranking-class-select { min-width: 0; }
   .ranking-table-meta { align-items: flex-start; flex-direction: column; gap: 4px; }

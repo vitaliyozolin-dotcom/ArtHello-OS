@@ -11,7 +11,6 @@ const [
   schoolApp,
   globals,
   studentTheme,
-  mobilePolish,
 ] = await Promise.all([
     readFile(new URL("../app/design-tokens.css", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -19,10 +18,9 @@ const [
     readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../DESIGN_CODE.md", import.meta.url), "utf8"),
     readFile(new URL("../app/school-app.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
-    readFile(new URL("../app/themes/student.css", import.meta.url), "utf8"),
-    readFile(new URL("../app/mobile-polish.css", import.meta.url), "utf8"),
-  ]);
+  readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  readFile(new URL("../app/themes/student.css", import.meta.url), "utf8"),
+]);
 
 const sourceBetween = (source, start, end) => {
   const startIndex = source.indexOf(start);
@@ -194,9 +192,6 @@ const exactRule = (css, selector, { atRule, topLevel = false, declarations = {} 
   );
   return matches[0];
 };
-
-const ruleBody = (css, selector, options) => exactRule(css, selector, options).body;
-const exactRuleBody = ruleBody;
 
 const declarationValues = (rule, property) => declarationEntries(rule.body)
   .filter(([name]) => name === property)
@@ -664,7 +659,8 @@ test("DS-04 HelpButton closes with its action and stays inside the active overla
     assert.ok(helpContract.includes(`${view}:`), `Missing HelpButton page context: ${view}`);
   }
   for (const fragment of [
-    "if (!action) { setOpen(false); return; }",
+    "const frame = requestAnimationFrame(() => { setOpen(false); if (action)",
+    "return () => cancelAnimationFrame(frame)",
     "overlayLabel?: string",
     "const contextLabel = overlayLabel",
     "portalTarget?.isConnected",

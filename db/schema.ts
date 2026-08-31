@@ -371,6 +371,74 @@ export const programs = sqliteTable("programs", {
   ...timestamps,
 });
 
+export const academicCalendarPeriods = sqliteTable("academic_calendar_periods", {
+  id: text("id").primaryKey(),
+  academicYear: text("academic_year").notNull(),
+  kind: text("kind").notNull().default("vacation"),
+  title: text("title").notNull(),
+  startsOn: text("starts_on").notNull(),
+  endsOn: text("ends_on").notNull(),
+  ...timestamps,
+});
+
+export const programImports = sqliteTable("program_imports", {
+  id: text("id").primaryKey(),
+  programId: text("program_id")
+    .notNull()
+    .references(() => programs.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  sheetName: text("sheet_name").notNull(),
+  importedByUserId: text("imported_by_user_id")
+    .notNull()
+    .references(() => users.id),
+  rowCount: integer("row_count").notNull(),
+  requiredHours: integer("required_hours").notNull(),
+  availableSlots: integer("available_slots").notNull(),
+  scheduledHours: integer("scheduled_hours").notNull(),
+  unscheduledHours: integer("unscheduled_hours").notNull(),
+  validationStatus: text("validation_status").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const programTopics = sqliteTable("program_topics", {
+  id: text("id").primaryKey(),
+  programId: text("program_id")
+    .notNull()
+    .references(() => programs.id, { onDelete: "cascade" }),
+  importId: text("import_id")
+    .notNull()
+    .references(() => programImports.id, { onDelete: "cascade" }),
+  sourceRow: integer("source_row").notNull(),
+  sequence: text("sequence").notNull(),
+  topic: text("topic").notNull(),
+  plannedHours: integer("planned_hours").notNull().default(1),
+  homework: text("homework").notNull().default(""),
+  sourceDate: text("source_date"),
+  sortOrder: integer("sort_order").notNull(),
+  status: text("status").notNull().default("planned"),
+  ...timestamps,
+});
+
+export const programTopicSessions = sqliteTable("program_topic_sessions", {
+  id: text("id").primaryKey(),
+  programId: text("program_id")
+    .notNull()
+    .references(() => programs.id, { onDelete: "cascade" }),
+  topicId: text("topic_id")
+    .notNull()
+    .references(() => programTopics.id, { onDelete: "cascade" }),
+  sessionIndex: integer("session_index").notNull(),
+  scheduledDate: text("scheduled_date"),
+  templateLessonId: text("template_lesson_id").references(() => lessons.id, {
+    onDelete: "set null",
+  }),
+  startsAt: text("starts_at"),
+  status: text("status").notNull().default("scheduled"),
+  ...timestamps,
+});
+
 export const attendance = sqliteTable("attendance", {
   id: text("id").primaryKey(),
   lessonId: text("lesson_id")
