@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Icon } from "../icons";
+import styles from "./passwordless-login.module.css";
 
 type PasswordlessChallenge = {
   challengeId: string;
@@ -154,7 +155,7 @@ export default function LoginPage() {
           </form>
         ) : (
           <form className="auth-form" onSubmit={verifyCode}>
-            <div className="auth-code-summary" role="status">
+            <div className={styles.codeSummary} role="status">
               <strong>Код отправлен</strong>
               <span>{challenge.maskedTarget}</span>
               <small>Код действует 10 минут и подходит только для одного входа.</small>
@@ -194,16 +195,20 @@ export default function LoginPage() {
               <Icon name="lock" size={18} />
               {busy ? "Проверяем…" : "Войти"}
             </button>
-            <button className="ghost-btn auth-secondary" type="button" onClick={restart}>
+            <button
+              className={`ghost-btn ${styles.secondary}`}
+              type="button"
+              onClick={restart}
+            >
               Изменить телефон или email
             </button>
           </form>
         )}
 
-        <div className="auth-separator" aria-hidden="true">
+        <div className={styles.separator} aria-hidden="true">
           <span>или</span>
         </div>
-        <a className="ghost-btn auth-sso" href={staffLoginHref}>
+        <a className={`ghost-btn ${styles.sso}`} href={staffLoginHref}>
           <Icon name="briefcase" size={18} />
           Войти сотруднику через ArtHello OS
         </a>
