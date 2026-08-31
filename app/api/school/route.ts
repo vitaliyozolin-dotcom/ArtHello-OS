@@ -1134,8 +1134,7 @@ async function loadSnapshot(
         JOIN program_topic_sessions ps ON ps.topic_id = pt.id
         JOIN programs p ON p.id = pt.program_id
         WHERE 1 = 1 ${viewer.role === "teacher" ? "AND p.teacher_user_id = ?" : ""}
-        ORDER BY p.class_name, p.subject_id, pt.sort_order, ps.session_index
-        LIMIT 1500`,
+        ORDER BY p.class_name, p.subject_id, pt.sort_order, ps.session_index`,
         programBindings,
       )
     : [];
@@ -1338,6 +1337,7 @@ type CurriculumRowInput = {
 async function calculateCurriculumAllocation(
   className: string,
   subjectId: string,
+  teacherUserId: string,
   topicRows: CurriculumRowInput[],
 ) {
   const db = await database();
@@ -1345,10 +1345,11 @@ async function calculateCurriculumAllocation(
     .prepare(
       `SELECT id, weekday, starts_at AS startsAt
       FROM lessons
-      WHERE class_name = ? AND subject_id = ? AND status NOT IN ('cancelled', 'archived')
+      WHERE class_name = ? AND subject_id = ? AND teacher_user_id = ?
+        AND status NOT IN ('cancelled', 'archived')
       ORDER BY weekday, starts_at`,
     )
-    .bind(className, subjectId)
+    .bind(className, subjectId, teacherUserId)
     .all<{ id: string; weekday: number; startsAt: string }>();
   const periodResult = await db
     .prepare(
@@ -2459,6 +2460,7 @@ export async function POST(request: Request) {
       const allocation = await calculateCurriculumAllocation(
         className,
         subjectId,
+        teacherUserId,
         parsed.rows,
       );
       const programId =
@@ -2614,6 +2616,7 @@ export async function POST(request: Request) {
       const allocation = await calculateCurriculumAllocation(
         program.className,
         program.subjectId,
+        program.teacherUserId,
         topicResult.results,
       );
       const latestImport = await db
