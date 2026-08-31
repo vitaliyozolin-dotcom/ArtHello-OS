@@ -20,7 +20,7 @@ test("parents and students keep direct diary entry while OTP is introduced", () 
   assert.match(loginPage, /Получить одноразовый код/);
   assert.match(loginPage, /one-time-code/);
   assert.match(loginPage, /Войти по выданному паролю/);
-  assert.match(loginPage, /Временный резервный вход/);
+  assert.match(loginPage, /Вход для семьи и ученика/);
   assert.match(loginPage, /name="password"/);
   assert.match(identityBroker, /randomInt\(0, 1_000_000\)/);
   assert.match(identityBroker, /magicToken/);
