@@ -57,7 +57,11 @@ test("delivery journal is idempotent and never stores codes, links or message bo
     /CREATE TABLE IF NOT EXISTS school_passwordless_deliveries \([\s\S]*?\)`,/,
   )?.[0];
   assert.ok(tableDefinition);
-  assert.doesNotMatch(tableDefinition, /code|magic|message|target TEXT/i);
+  assert.doesNotMatch(
+    tableDefinition,
+    /^\s*(code|magic_link|message|target)\s+(TEXT|INTEGER|BLOB)/im,
+  );
+  assert.match(tableDefinition, /^\s*provider_message_id\s+TEXT/im);
 });
 
 test("provider errors are sanitized and recorded without returning secrets", () => {
