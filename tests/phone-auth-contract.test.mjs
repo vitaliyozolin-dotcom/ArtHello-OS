@@ -31,7 +31,8 @@ test("parents and students use one-time code or link without a diary password", 
 });
 
 test("employees use ArtHello OS SSO and the diary keeps only a technical session", () => {
-  assert.match(loginPage, /Войти сотруднику через ArtHello OS/);
+  assert.match(loginPage, /Вход для сотрудников/);
+  assert.doesNotMatch(loginPage, /ArtHello OS|Виталий/);
   assert.match(centralSso, /code_challenge/);
   assert.match(centralSso, /codeVerifier/);
   assert.match(centralSso, /reconcileCentralStaff/);
