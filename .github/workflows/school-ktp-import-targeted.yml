@@ -78,7 +78,10 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           builder="school-ktp-builder:${GITHUB_SHA}"
           runtime="school-ktp-runtime:${GITHUB_SHA}"
-          docker build --pull --target builder --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$builder" .
+          if ! docker build --pull --target builder --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$builder" .; then
+            printf 'Cached builder failed; retrying without Docker cache.\n' >&2
+            docker build --pull --no-cache --target builder --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$builder" .
+          fi
           docker run --rm --network none --entrypoint npm "$builder" run lint
           docker run --rm --network none --entrypoint node "$builder" \
             --test \
@@ -90,7 +93,10 @@ jobs:
             tests/identity-broker-contract.test.mjs \
             tests/design-code-contract.test.mjs \
             tests/curriculum-import.test.mjs
-          docker build --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$runtime" .
+          if ! docker build --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$runtime" .; then
+            printf 'Cached runtime failed; retrying without Docker cache.\n' >&2
+            docker build --no-cache --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$runtime" .
+          fi
           printf 'SCHOOL_KTP_BUILD=PASS\n'
 
       - name: Verify isolated runtime and both migrations
