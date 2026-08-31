@@ -1,0 +1,113 @@
+name: Verify live School staff SSO path
+
+on:
+  push:
+    branches:
+      - ops/verify-school-staff-sso-live-20260831
+    paths:
+      - .github/workflows/verify-school-staff-sso-live-20260831.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-school-staff-sso-live-20260831
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 20
+    steps:
+      - name: Check out controls
+        uses: actions/checkout@v4
+
+      - name: Verify current production without mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          school_origin='https://school-188-225-38-55.sslip.io'
+          arthello_origin='https://arthello-188-225-38-55.sslip.io'
+          work="$(mktemp -d "$RUNNER_TEMP/school-sso-live-XXXXXX")"
+          trap 'rm -rf -- "$work"' EXIT
+
+          printf '=== CONTAINERS ===\n'
+          docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' | grep -E '(^|\|)(school|arthello)' || true
+
+          test "$(docker inspect school-1-11 --format '{{.State.Running}}')" = true
+          printf 'SCHOOL_CONTAINER=school-1-11\n'
+          printf 'SCHOOL_IMAGE_REF=%s\n' "$(docker inspect school-1-11 --format '{{.Config.Image}}')"
+          printf 'SCHOOL_IMAGE_ID=%s\n' "$(docker inspect school-1-11 --format '{{.Image}}')"
+          printf 'SCHOOL_HEALTH=%s\n' "$(docker inspect school-1-11 --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}')"
+          printf 'SCHOOL_STARTED_AT=%s\n' "$(docker inspect school-1-11 --format '{{.State.StartedAt}}')"
+          printf 'SCHOOL_CANDIDATE_SHA=%s\n' "$(docker inspect school-1-11 --format '{{index .Config.Labels "school.candidate-sha"}}')"
+          printf 'SCHOOL_IDENTITY_LABEL=%s\n' "$(docker inspect school-1-11 --format '{{index .Config.Labels "school.identity-core"}}')"
+          printf 'SCHOOL_STAFF_SSO_FLAG=%s\n' "$(docker inspect school-1-11 --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^SCHOOL_STAFF_SSO_ENABLED=//p' | head -n1)"
+          printf 'SCHOOL_PARENT_OTP_FLAG=%s\n' "$(docker inspect school-1-11 --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^SCHOOL_PARENT_OTP_ENABLED=//p' | head -n1)"
+          printf 'SCHOOL_LEGACY_PASSWORD_FLAG=%s\n' "$(docker inspect school-1-11 --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^SCHOOL_LEGACY_PASSWORD_LOGIN=//p' | head -n1)"
+          printf 'SCHOOL_HAS_IDENTITY_SECRET=%s\n' "$(docker inspect school-1-11 --format '{{range .Config.Env}}{{println .}}{{end}}' | awk -F= '$1=="IDENTITY_CORE_SECRET" || $1=="CENTRAL_ACCESS_SECRET" {found=1} END {print found?"yes":"no"}')"
+
+          curl -fsS --max-time 20 "$school_origin/api/health" > "$work/school-health.json"
+          grep -F '"status":"ok"' "$work/school-health.json" >/dev/null
+          printf 'SCHOOL_PUBLIC_HEALTH=OK\n'
+          curl -fsS --max-time 20 "$school_origin/login" > "$work/school-login.html"
+          printf 'SCHOOL_LOGIN_BYTES=%s\n' "$(wc -c < "$work/school-login.html")"
+          for marker in \
+            'data-auth-mode="identity-core-v1"' \
+            'Вход для сотрудников' \
+            'Получить код' \
+            'Постоянный пароль не нужен'; do
+            if grep -F "$marker" "$work/school-login.html" >/dev/null; then
+              printf 'SCHOOL_LOGIN_MARKER_%s=yes\n' "$(printf '%s' "$marker" | sha256sum | cut -c1-10)"
+            else
+              printf 'SCHOOL_LOGIN_MARKER_%s=no\n' "$(printf '%s' "$marker" | sha256sum | cut -c1-10)"
+            fi
+          done
+          if grep -E 'name=["'"']password["'"']|type=["'"']password["'"']' "$work/school-login.html" >/dev/null; then
+            printf 'SCHOOL_PUBLIC_PASSWORD_FIELD=yes\n'
+          else
+            printf 'SCHOOL_PUBLIC_PASSWORD_FIELD=no\n'
+          fi
+
+          curl -sS --max-time 20 -D "$work/school-sso.headers" -o /dev/null \
+            "$school_origin/auth/central/start"
+          school_sso_status="$(awk 'NR==1{print $2}' "$work/school-sso.headers")"
+          school_sso_location="$(tr -d '\r' < "$work/school-sso.headers" | sed -n 's/^location: //Ip' | tail -n1)"
+          printf 'SCHOOL_SSO_START_STATUS=%s\n' "$school_sso_status"
+          printf 'SCHOOL_SSO_START_LOCATION_HOST=%s\n' "$(python3 - "$school_sso_location" <<'PY'
+          import sys, urllib.parse
+          value=sys.argv[1]
+          print(urllib.parse.urlparse(value).netloc if value else '')
+          PY
+          )"
+
+          curl -fsS --max-time 20 "$arthello_origin/api/health" > "$work/arthello-health.json"
+          grep -F '"status":"ok"' "$work/arthello-health.json" >/dev/null
+          printf 'ARTHELLO_PUBLIC_HEALTH=OK\n'
+
+          mapfile -t arthello_candidates < <(
+            docker ps --format '{{.Names}}' | grep -E '^arthello-(direct-|os-newui$|os-web-1$)' || true
+          )
+          printf 'ARTHELLO_CANDIDATES=%s\n' "${#arthello_candidates[@]}"
+          for name in "${arthello_candidates[@]}"; do
+            printf 'ARTHELLO_CONTAINER=%s|IMAGE=%s|HEALTH=%s|SSO_LABEL=%s\n' \
+              "$name" \
+              "$(docker inspect "$name" --format '{{.Config.Image}}')" \
+              "$(docker inspect "$name" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}')" \
+              "$(docker inspect "$name" --format '{{index .Config.Labels "arthello.school-sso"}}')"
+          done
+
+          curl -sS --max-time 20 -D "$work/arthello-sso.headers" -o /dev/null \
+            "$arthello_origin/api/school-sso/authorize?state=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&code_challenge=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb&return_to=%2F"
+          arthello_sso_status="$(awk 'NR==1{print $2}' "$work/arthello-sso.headers")"
+          arthello_sso_location="$(tr -d '\r' < "$work/arthello-sso.headers" | sed -n 's/^location: //Ip' | tail -n1)"
+          printf 'ARTHELLO_SSO_UNAUTH_STATUS=%s\n' "$arthello_sso_status"
+          printf 'ARTHELLO_SSO_UNAUTH_LOCATION_PATH=%s\n' "$(python3 - "$arthello_sso_location" <<'PY'
+          import sys, urllib.parse
+          value=sys.argv[1]
+          print(urllib.parse.urlparse(value).path if value else '')
+          PY
+          )"
+
+          printf 'VERIFY_SCHOOL_STAFF_SSO_LIVE=COMPLETE\n'
