@@ -30,7 +30,7 @@ export default function LoginPage() {
     if (code === "expired_link")
       setError("Ссылка уже использована или срок её действия истёк.");
     if (code === "central_denied")
-      setError("ArtHello OS не подтвердила доступ сотрудника к дневнику.");
+      setError("Не удалось подтвердить доступ сотрудника к дневнику.");
     if (code === "central_unavailable")
       setError("Вход сотрудников временно недоступен. Повторите позже.");
   }, []);
@@ -205,11 +205,11 @@ export default function LoginPage() {
         </div>
         <a className={`ghost-btn ${styles.sso}`} href="/auth/central/start">
           <Icon name="school" size={18} />
-          Войти сотруднику через ArtHello OS
+          Вход для сотрудников
         </a>
 
         <small className="auth-help">
-          Доступ выдаёт школа. Родитель видит только дневник; интерфейс ArtHello OS ему не показывается.
+          Доступ выдаёт школа. Родители и ученики входят только в электронный дневник.
         </small>
       </section>
     </main>
