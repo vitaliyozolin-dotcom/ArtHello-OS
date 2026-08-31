@@ -3,6 +3,7 @@ name: Verify live School staff SSO path
 on:
   push:
     branches:
+      - main
       - ops/verify-school-staff-sso-live-20260831
     paths:
       - .github/workflows/verify-school-staff-sso-live-20260831.yml
