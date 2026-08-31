@@ -1,4 +1,4 @@
-import { processSchoolPasswordlessDelivery } from "../../../../lib/school-passwordless-delivery";
+import { processSchoolPasswordlessDelivery } from "../../../lib/school-passwordless-delivery";
 
 export const dynamic = "force-dynamic";
 
