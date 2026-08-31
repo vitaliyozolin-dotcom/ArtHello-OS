@@ -35,7 +35,7 @@ const teacherActions = new Set<ActionKind>([
   "attendance.mark",
   "program.upsert",
   "program.import",
-  "program.reschedule",
+  "program.topic.update",
 ]);
 const adminActions = new Set<ActionKind>([
   "family.registration.approve",
@@ -958,8 +958,10 @@ async function loadSnapshot(
 
   const lessonSelect = `SELECT l.id, l.class_name AS className, l.weekday,
     l.starts_at AS startsAt, l.ends_at AS endsAt, l.subject_id AS subjectId,
-    s.name AS subjectName, s.color AS subjectColor, l.teacher_user_id AS teacherUserId,
-    u.display_name AS teacherName, l.room, l.status, l.note
+    s.name AS subjectName, l.display_label AS displayLabel,
+    s.color AS subjectColor, l.teacher_user_id AS teacherUserId,
+    u.display_name AS teacherName, l.group_name AS groupName,
+    l.shared_session_key AS sharedSessionKey, l.room, l.status, l.note
     FROM lessons l JOIN subjects s ON s.id = l.subject_id
     LEFT JOIN users u ON u.id = l.teacher_user_id`;
   const lessonQuery = operationalRoles.has(viewer.role)
@@ -1127,7 +1129,9 @@ async function loadSnapshot(
   const programTopics = canViewPrograms
     ? await rows<SchoolSnapshot["programTopics"][number]>(
         `SELECT ps.id, pt.program_id AS programId, pt.source_row AS sourceRow,
-          pt.sequence, pt.topic, pt.planned_hours AS plannedHours, pt.homework,
+          pt.sequence, COALESCE(ps.topic_override, pt.topic) AS topic,
+          pt.planned_hours AS plannedHours,
+          COALESCE(ps.homework_override, pt.homework) AS homework,
           pt.sort_order AS sortOrder, ps.session_index AS sessionIndex,
           ps.scheduled_date AS scheduledDate, ps.starts_at AS startsAt, ps.status
         FROM program_topics pt
@@ -1377,6 +1381,8 @@ type ScheduleConflictInput = {
   endsAt: string;
   teacherId: string;
   room: string;
+  groupName: string;
+  sharedSessionKey: string;
 };
 
 async function assertNoScheduleConflict(input: ScheduleConflictInput) {
@@ -1386,7 +1392,10 @@ async function assertNoScheduleConflict(input: ScheduleConflictInput) {
     "weekday = ? AND starts_at < ? AND ends_at > ? AND status NOT IN ('cancelled', 'archived') AND id != ?";
   const classConflict = await db
     .prepare(
-      `SELECT id, starts_at AS startsAt, ends_at AS endsAt FROM lessons WHERE ${overlapSql} AND class_name = ? LIMIT 1`,
+      `SELECT id, starts_at AS startsAt, ends_at AS endsAt FROM lessons
+      WHERE ${overlapSql} AND class_name = ?
+        AND (COALESCE(group_name, '') = '' OR ? = '' OR group_name = ?)
+      LIMIT 1`,
     )
     .bind(
       input.weekday,
@@ -1394,6 +1403,8 @@ async function assertNoScheduleConflict(input: ScheduleConflictInput) {
       input.startsAt,
       excludedId,
       input.className,
+      input.groupName,
+      input.groupName,
     )
     .first<{ id: string; startsAt: string; endsAt: string }>();
   if (classConflict)
@@ -1409,7 +1420,9 @@ async function assertNoScheduleConflict(input: ScheduleConflictInput) {
         (SELECT display_name FROM users WHERE id = l.teacher_user_id) AS teacherName
       FROM lessons l WHERE l.weekday = ? AND l.starts_at < ? AND l.ends_at > ?
         AND l.status NOT IN ('cancelled', 'archived') AND l.id != ?
-        AND l.teacher_user_id = ? LIMIT 1`,
+        AND l.teacher_user_id = ?
+        AND NOT (COALESCE(l.shared_session_key, '') != '' AND l.shared_session_key = ?)
+      LIMIT 1`,
       )
       .bind(
         input.weekday,
@@ -1417,6 +1430,7 @@ async function assertNoScheduleConflict(input: ScheduleConflictInput) {
         input.startsAt,
         excludedId,
         input.teacherId,
+        input.sharedSessionKey,
       )
       .first<{
         id: string;
@@ -1434,9 +1448,19 @@ async function assertNoScheduleConflict(input: ScheduleConflictInput) {
   if (input.room && input.room.toLocaleLowerCase("ru-RU") !== "уточняется") {
     const roomConflict = await db
       .prepare(
-        `SELECT id, class_name AS className, starts_at AS startsAt, ends_at AS endsAt FROM lessons WHERE ${overlapSql} AND lower(room) = lower(?) LIMIT 1`,
+        `SELECT id, class_name AS className, starts_at AS startsAt, ends_at AS endsAt
+        FROM lessons WHERE ${overlapSql} AND lower(room) = lower(?)
+          AND NOT (COALESCE(shared_session_key, '') != '' AND shared_session_key = ?)
+        LIMIT 1`,
       )
-      .bind(input.weekday, input.endsAt, input.startsAt, excludedId, input.room)
+      .bind(
+        input.weekday,
+        input.endsAt,
+        input.startsAt,
+        excludedId,
+        input.room,
+        input.sharedSessionKey,
+      )
       .first<{
         id: string;
         className: string;
@@ -2200,6 +2224,9 @@ export async function POST(request: Request) {
       const endsAt = textValue(body.endsAt, 10);
       const subjectId = textValue(body.subjectId, 80);
       const teacherId = textValue(body.teacherId, 80, false);
+      const displayLabel = textValue(body.displayLabel, 140, false);
+      const groupName = textValue(body.groupName, 80, false);
+      const sharedSessionKey = textValue(body.sharedSessionKey, 180, false);
       const room = textValue(body.room, 80, false) || "Уточняется";
       const status = textValue(body.status, 30);
       const note = textValue(body.note, 300, false);
@@ -2210,7 +2237,7 @@ export async function POST(request: Request) {
       ) {
         throw new Error("Проверьте время начала и окончания урока");
       }
-      if (!["scheduled", "moved", "cancelled"].includes(status))
+      if (!["scheduled", "moved"].includes(status))
         throw new Error("Проверьте статус урока");
       const schoolClass = await db
         .prepare(
@@ -2248,6 +2275,8 @@ export async function POST(request: Request) {
         endsAt,
         teacherId,
         room,
+        groupName,
+        sharedSessionKey,
       });
       const savedLessonId = lessonId || id;
       if (lessonId) {
@@ -2259,7 +2288,8 @@ export async function POST(request: Request) {
         await db
           .prepare(
             `UPDATE lessons SET class_name = ?, weekday = ?, starts_at = ?, ends_at = ?,
-          subject_id = ?, teacher_user_id = ?, room = ?, status = ?, note = ?, updated_at = CURRENT_TIMESTAMP
+          subject_id = ?, teacher_user_id = ?, display_label = ?, group_name = ?,
+          shared_session_key = ?, room = ?, status = ?, note = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?`,
           )
           .bind(
@@ -2269,6 +2299,9 @@ export async function POST(request: Request) {
             endsAt,
             subjectId,
             teacherId || null,
+            displayLabel || null,
+            groupName || null,
+            sharedSessionKey || null,
             room,
             status,
             note || null,
@@ -2278,7 +2311,10 @@ export async function POST(request: Request) {
       } else {
         await db
           .prepare(
-            "INSERT INTO lessons (id, class_name, weekday, starts_at, ends_at, subject_id, teacher_user_id, room, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            `INSERT INTO lessons
+            (id, class_name, weekday, starts_at, ends_at, subject_id, teacher_user_id,
+             display_label, group_name, shared_session_key, room, status, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             savedLessonId,
@@ -2288,6 +2324,9 @@ export async function POST(request: Request) {
             endsAt,
             subjectId,
             teacherId || null,
+            displayLabel || null,
+            groupName || null,
+            sharedSessionKey || null,
             room,
             status,
             note || null,
@@ -2339,7 +2378,9 @@ export async function POST(request: Request) {
       const sourceLessons = await db
         .prepare(
           `SELECT id, starts_at AS startsAt, ends_at AS endsAt,
-        subject_id AS subjectId, teacher_user_id AS teacherId, room, status, note
+        subject_id AS subjectId, teacher_user_id AS teacherId,
+        display_label AS displayLabel, group_name AS groupName,
+        shared_session_key AS sharedSessionKey, room, status, note
         FROM lessons WHERE class_name = ? AND weekday = ? AND status NOT IN ('cancelled', 'archived') ORDER BY starts_at`,
         )
         .bind(className, sourceWeekday)
@@ -2349,6 +2390,9 @@ export async function POST(request: Request) {
           endsAt: string;
           subjectId: string;
           teacherId: string | null;
+          displayLabel: string | null;
+          groupName: string | null;
+          sharedSessionKey: string | null;
           room: string;
           status: string;
           note: string | null;
@@ -2373,13 +2417,18 @@ export async function POST(request: Request) {
           endsAt: lesson.endsAt,
           teacherId: lesson.teacherId ?? "",
           room: lesson.room,
+          groupName: lesson.groupName ?? "",
+          sharedSessionKey: lesson.sharedSessionKey ?? "",
         });
       }
       const copied = sourceLessons.results.map((lesson) => {
         const copiedId = `lesson-copy-${crypto.randomUUID()}`;
         return db
           .prepare(
-            "INSERT INTO lessons (id, class_name, weekday, starts_at, ends_at, subject_id, teacher_user_id, room, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            `INSERT INTO lessons
+            (id, class_name, weekday, starts_at, ends_at, subject_id, teacher_user_id,
+             display_label, group_name, shared_session_key, room, status, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             copiedId,
@@ -2389,6 +2438,9 @@ export async function POST(request: Request) {
             lesson.endsAt,
             lesson.subjectId,
             lesson.teacherId,
+            lesson.displayLabel,
+            lesson.groupName,
+            lesson.sharedSessionKey,
             lesson.room,
             "scheduled",
             lesson.note,
@@ -2579,138 +2631,49 @@ export async function POST(request: Request) {
         programId,
         `${file.name}; ${allocation.requiredHours} ч.; ${allocation.availableSlots} слотов; ${allocation.unscheduledHours} без даты`,
       );
-    } else if (action === "program.reschedule") {
-      const programId = textValue(body.programId, 120);
-      const program = await db
+    } else if (action === "program.topic.update") {
+      const sessionId = textValue(body.sessionId, 140);
+      const topic = textValue(body.topic, 500);
+      const homework = textValue(body.homework, 1200, false);
+      const session = await db
         .prepare(
-          `SELECT id, class_name AS className, subject_id AS subjectId,
-            teacher_user_id AS teacherUserId, status
-          FROM programs WHERE id = ?`,
+          `SELECT ps.id, ps.program_id AS programId,
+            p.class_name AS className, p.subject_id AS subjectId,
+            p.teacher_user_id AS teacherUserId
+          FROM program_topic_sessions ps
+          JOIN programs p ON p.id = ps.program_id
+          WHERE ps.id = ?`,
         )
-        .bind(programId)
+        .bind(sessionId)
         .first<{
           id: string;
+          programId: string;
           className: string;
           subjectId: string;
           teacherUserId: string;
-          status: string;
         }>();
-      if (!program) throw new Error("Программа не найдена");
-      if (actor.role === "teacher" && program.teacherUserId !== actor.id)
-        throw new Error("Нет доступа к этой программе");
+      if (!session) throw new Error("Урок программы не найден");
+      if (actor.role === "teacher" && session.teacherUserId !== actor.id)
+        throw new Error("Нет доступа к этому уроку");
       await assertTeacherClassScope(
         effectiveUser,
-        program.className,
-        program.subjectId,
+        session.className,
+        session.subjectId,
       );
-      const topicResult = await db
+      await db
         .prepare(
-          `SELECT source_row AS sourceRow, sequence, topic,
-            planned_hours AS hours, homework, source_date AS sourceDate
-          FROM program_topics WHERE program_id = ? ORDER BY sort_order`,
+          `UPDATE program_topic_sessions
+          SET topic_override = ?, homework_override = ?
+          WHERE id = ?`,
         )
-        .bind(programId)
-        .all<CurriculumRowInput>();
-      if (!topicResult.results.length)
-        throw new Error("Сначала импортируйте темы из XLSX");
-      const allocation = await calculateCurriculumAllocation(
-        program.className,
-        program.subjectId,
-        program.teacherUserId,
-        topicResult.results,
-      );
-      const latestImport = await db
-        .prepare(
-          `SELECT id FROM program_imports
-          WHERE program_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`,
-        )
-        .bind(programId)
-        .first<{ id: string }>();
-      if (!latestImport) throw new Error("История импорта не найдена");
-      const topicsByOrder = await db
-        .prepare(
-          "SELECT id, sort_order AS sortOrder FROM program_topics WHERE program_id = ? ORDER BY sort_order",
-        )
-        .bind(programId)
-        .all<{ id: string; sortOrder: number }>();
-      const topicIds = new Map(
-        topicsByOrder.results.map((topic) => [topic.sortOrder, topic.id]),
-      );
-      const statements = [
-        db
-          .prepare("DELETE FROM program_topic_sessions WHERE program_id = ?")
-          .bind(programId),
-      ];
-      for (const topic of allocation.topics) {
-        const topicId = topicIds.get(topic.sortOrder);
-        if (!topicId) throw new Error("Структура программы повреждена");
-        for (const session of topic.sessions) {
-          statements.push(
-            db
-              .prepare(
-                `INSERT INTO program_topic_sessions
-                (id, program_id, topic_id, session_index, scheduled_date,
-                  template_lesson_id, starts_at, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-              )
-              .bind(
-                `program-session-${crypto.randomUUID()}`,
-                programId,
-                topicId,
-                session.sessionIndex,
-                session.scheduledDate,
-                session.templateLessonId,
-                session.startsAt,
-                session.status,
-              ),
-          );
-        }
-      }
-      statements.push(
-        db
-          .prepare(
-            `UPDATE program_imports
-            SET available_slots = ?, scheduled_hours = ?, unscheduled_hours = ?,
-              validation_status = ?
-            WHERE id = ?`,
-          )
-          .bind(
-            allocation.availableSlots,
-            allocation.scheduledHours,
-            allocation.unscheduledHours,
-            allocation.status,
-            latestImport.id,
-          ),
-        db
-          .prepare(
-            `UPDATE programs
-            SET status = CASE
-              WHEN status IN ('approved', 'active') AND ? > 0 THEN 'changes_requested'
-              ELSE status END,
-              updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?`,
-          )
-          .bind(allocation.unscheduledHours, programId),
-      );
-      await db.batch(statements);
-      responsePayload = {
-        importSummary: {
-          programId,
-          rows: topicResult.results.length,
-          requiredHours: allocation.requiredHours,
-          availableSlots: allocation.availableSlots,
-          scheduledHours: allocation.scheduledHours,
-          unscheduledHours: allocation.unscheduledHours,
-          unusedSlots: allocation.unusedSlots,
-          status: allocation.status,
-        },
-      };
+        .bind(topic, homework, sessionId)
+        .run();
       await audit(
         actor,
         action,
-        "program",
-        programId,
-        `Перерасчёт: ${allocation.requiredHours} ч.; ${allocation.availableSlots} слотов; ${allocation.unscheduledHours} без даты`,
+        "program_topic_session",
+        sessionId,
+        `${session.className} класс: тема и домашнее задание изменены вручную`,
       );
     } else if (action === "program.upsert") {
       const className = textValue(body.className, 20);

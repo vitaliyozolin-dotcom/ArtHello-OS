@@ -134,9 +134,12 @@ export type LessonRecord = {
   endsAt: string;
   subjectId: string;
   subjectName: string;
+  displayLabel: string | null;
   subjectColor: string;
   teacherUserId: string | null;
   teacherName: string | null;
+  groupName: string | null;
+  sharedSessionKey: string | null;
   room: string;
   status: string;
   note: string | null;
@@ -410,7 +413,7 @@ export type ActionKind =
   | "subscription.upsert"
   | "program.upsert"
   | "program.import"
-  | "program.reschedule"
+  | "program.topic.update"
   | "attendance.mark"
   | "notification.read"
   | "menu.rate"

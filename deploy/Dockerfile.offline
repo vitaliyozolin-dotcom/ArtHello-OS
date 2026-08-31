@@ -3,16 +3,23 @@ FROM arthello-os-api:local
 USER root
 WORKDIR /school
 
-COPY deploy/offline-runtime-v3.part-* /tmp/runtime-parts/
+COPY deploy/offline-runtime-v3.part-* /tmp/runtime-v3-parts/
+COPY deploy/offline-runtime-v4-delta.part-* /tmp/runtime-v4-parts/
 
-RUN cat /tmp/runtime-parts/offline-runtime-v3.part-* > /tmp/school-runtime.tar.gz \
+RUN cat /tmp/runtime-v3-parts/offline-runtime-v3.part-* > /tmp/school-runtime-v3.tar.gz \
     && printf '%s  %s\n' \
       '9125b43319706f4bf3a9a45813b50a0495e61bef5b73f3305a1b97717406b349' \
-      '/tmp/school-runtime.tar.gz' \
+      '/tmp/school-runtime-v3.tar.gz' \
       | sha256sum --check --strict \
-    && tar -xzf /tmp/school-runtime.tar.gz -C /school \
-    && rm -f /tmp/school-runtime.tar.gz \
-    && rm -rf /tmp/runtime-parts \
+    && tar -xzf /tmp/school-runtime-v3.tar.gz -C /school \
+    && cat /tmp/runtime-v4-parts/offline-runtime-v4-delta.part-* > /tmp/school-runtime-v4-delta.tar.gz \
+    && printf '%s  %s\n' \
+      'a4ef97eb6795cb81c860ab62b0ae7510e693b1fec1e5f6129aea072ce2ca2c9f' \
+      '/tmp/school-runtime-v4-delta.tar.gz' \
+      | sha256sum --check --strict \
+    && tar -xzf /tmp/school-runtime-v4-delta.tar.gz -C /school \
+    && rm -f /tmp/school-runtime-v3.tar.gz /tmp/school-runtime-v4-delta.tar.gz \
+    && rm -rf /tmp/runtime-v3-parts /tmp/runtime-v4-parts \
     && mkdir -p /data /backups \
     && chown -R node:node /school /data /backups
 
