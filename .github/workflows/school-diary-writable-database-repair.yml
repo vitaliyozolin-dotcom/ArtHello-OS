@@ -163,22 +163,14 @@ jobs:
           test "$(env_value "$production" DATABASE_PATH)" = /data/school-1-11.sqlite
           test "$(env_value "$production" PUBLIC_APP_ORIGIN)" = "$SCHOOL_ORIGIN"
 
-          mount_proof="$(
-            docker inspect "$production" |
-              python3 -c '
-          import json, sys
-          d = json.load(sys.stdin)[0]
-          mounts = {m["Destination"]: m for m in d["Mounts"]}
-          data = mounts["/data"]
-          backups = mounts["/backups"]
-          print(
-              f"{data.get(chr(78)+chr(97)+chr(109)+chr(101), chr(0))}:{str(data.get(chr(82)+chr(87), False)).lower()}:"
-              f"{backups.get(chr(78)+chr(97)+chr(109)+chr(101), chr(0))}:{str(backups.get(chr(82)+chr(87), False)).lower()}"
-          )
-          '
-          )"
-          mount_proof="${mount_proof//$'\0'/}"
-          test "$mount_proof" = "$DATA_VOLUME:true:$BACKUP_VOLUME:true"
+          data_name="$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          data_rw="$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.RW}}{{end}}{{end}}')"
+          backup_name="$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Name}}{{end}}{{end}}')"
+          backup_rw="$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.RW}}{{end}}{{end}}')"
+          test "$data_name" = "$DATA_VOLUME"
+          test "$data_rw" = true
+          test "$backup_name" = "$BACKUP_VOLUME"
+          test "$backup_rw" = true
 
           before_data="$(docker exec --user 0:0 "$production" stat -c '%u:%g:%a' /data)"
           before_db="$(docker exec --user 0:0 "$production" stat -c '%u:%g:%a' /data/school-1-11.sqlite)"
