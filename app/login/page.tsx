@@ -194,7 +194,7 @@ export default function LoginPage() {
               aria-busy={busy}
             >
               <Icon name="lock" size={18} />
-              {busy ? "Отправляем…" : "Получить одноразовый код"}
+              {busy ? "Отправляем…" : "Получить код"}
             </button>
             <button
               className={`ghost-btn ${styles.secondary}`}
@@ -316,7 +316,7 @@ export default function LoginPage() {
               type="button"
               onClick={() => selectFamilyMethod("code")}
             >
-              Получить одноразовый код
+              Получить код
             </button>
           </form>
         ) : null}
