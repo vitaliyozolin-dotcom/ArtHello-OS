@@ -15,6 +15,8 @@ type PasswordlessChallenge = {
   error?: string;
 };
 
+type FamilyMethod = "code" | "password";
+
 function safeReturnTo() {
   const value = new URLSearchParams(window.location.search).get("returnTo") || "/";
   return value.startsWith("/") && !value.startsWith("//") ? value : "/";
@@ -23,6 +25,8 @@ function safeReturnTo() {
 export default function LoginPage() {
   const [identifier, setIdentifier] = useState("");
   const [challenge, setChallenge] = useState<PasswordlessChallenge | null>(null);
+  const [familyMethod, setFamilyMethod] = useState<FamilyMethod>("code");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -94,13 +98,44 @@ export default function LoginPage() {
     }
   }
 
-  function restart() {
+  async function loginWithPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ login: identifier, password }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.ok)
+        throw new Error(payload.error || "Не удалось войти");
+      window.location.assign(safeReturnTo());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось войти");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function restartCode() {
     setChallenge(null);
     setError("");
   }
 
+  function selectFamilyMethod(method: FamilyMethod) {
+    setFamilyMethod(method);
+    setChallenge(null);
+    setPassword("");
+    setError("");
+  }
+
   return (
-    <main className="gate-stage auth-stage">
+    <main className="gate-stage auth-stage" data-auth-mode="staff-sso-safe-rollout">
       <section className="access-card auth-card" aria-labelledby="login-title">
         <Image
           className="auth-logo"
@@ -113,10 +148,20 @@ export default function LoginPage() {
         <span className="auth-brand-name">Школа 1–11</span>
         <h1 id="login-title">Вход в дневник</h1>
         <p className="auth-intro">
-          Родители и ученики входят по одноразовому коду. Постоянный пароль не нужен.
+          Сотрудникам не нужен второй пароль. Родители и ученики входят прямо в
+          электронный дневник.
         </p>
 
-        {!challenge ? (
+        <Link className={`ghost-btn ${styles.sso}`} href="/auth/central/start">
+          <Icon name="school" size={18} />
+          Вход для сотрудников
+        </Link>
+
+        <div className={styles.separator} aria-hidden="true">
+          <span>родителям и ученикам</span>
+        </div>
+
+        {familyMethod === "code" && !challenge ? (
           <form className="auth-form" onSubmit={requestCode}>
             <label className="auth-field" htmlFor="login-identifier">
               <span>Телефон или email</span>
@@ -149,10 +194,19 @@ export default function LoginPage() {
               aria-busy={busy}
             >
               <Icon name="lock" size={18} />
-              {busy ? "Отправляем…" : "Получить код"}
+              {busy ? "Отправляем…" : "Получить одноразовый код"}
+            </button>
+            <button
+              className={`ghost-btn ${styles.secondary}`}
+              type="button"
+              onClick={() => selectFamilyMethod("password")}
+            >
+              Войти по выданному паролю
             </button>
           </form>
-        ) : (
+        ) : null}
+
+        {familyMethod === "code" && challenge ? (
           <form className="auth-form" onSubmit={verifyCode}>
             <div className={styles.codeSummary} role="status">
               <strong>Код отправлен</strong>
@@ -197,23 +251,78 @@ export default function LoginPage() {
             <button
               className={`ghost-btn ${styles.secondary}`}
               type="button"
-              onClick={restart}
+              onClick={restartCode}
             >
               Изменить телефон или email
             </button>
           </form>
-        )}
+        ) : null}
 
-        <div className={styles.separator} aria-hidden="true">
-          <span>или</span>
-        </div>
-        <Link className={`ghost-btn ${styles.sso}`} href="/auth/central/start">
-          <Icon name="school" size={18} />
-          Вход для сотрудников
-        </Link>
+        {familyMethod === "password" ? (
+          <form className="auth-form" onSubmit={loginWithPassword}>
+            <div className={styles.codeSummary} role="note">
+              <strong>Временный резервный вход</strong>
+              <small>
+                Только для родителей и учеников, которым школа уже выдала пароль.
+                Сотрудники входят через рабочую систему школы.
+              </small>
+            </div>
+            <label className="auth-field" htmlFor="legacy-identifier">
+              <span>Телефон или email</span>
+              <input
+                id="legacy-identifier"
+                name="login"
+                type="text"
+                autoComplete="username"
+                value={identifier}
+                onChange={(event) => setIdentifier(event.currentTarget.value)}
+                aria-invalid={Boolean(error)}
+                required
+              />
+            </label>
+            <label className="auth-field" htmlFor="legacy-password">
+              <span>Пароль, выданный школой</span>
+              <input
+                id="legacy-password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.currentTarget.value)}
+                aria-invalid={Boolean(error)}
+                required
+              />
+            </label>
+
+            <div className="auth-error-slot" aria-live="polite" aria-atomic="true">
+              {error ? (
+                <p id="login-error" className="auth-error" role="alert">
+                  {error}
+                </p>
+              ) : null}
+            </div>
+
+            <button
+              className="primary-btn auth-submit"
+              type="submit"
+              disabled={busy}
+              aria-busy={busy}
+            >
+              <Icon name="lock" size={18} />
+              {busy ? "Входим…" : "Войти в дневник"}
+            </button>
+            <button
+              className={`ghost-btn ${styles.secondary}`}
+              type="button"
+              onClick={() => selectFamilyMethod("code")}
+            >
+              Получить одноразовый код
+            </button>
+          </form>
+        ) : null}
 
         <small className="auth-help">
-          Доступ выдаёт школа. Родители и ученики входят только в электронный дневник.
+          Нет доступа или изменился контакт? Обратитесь к администратору школы.
         </small>
       </section>
     </main>
