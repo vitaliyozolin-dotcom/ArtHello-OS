@@ -25,6 +25,7 @@ test("diary accepts central family projections and blocks local duplicates", asy
   assert.doesNotMatch(sync, /createCredentialToken/);
   assert.match(login, /Телефон или email/);
   assert.match(login, /Получить код/);
-  assert.doesNotMatch(login, /name="password"/);
+  assert.match(login, /Войти по выданному паролю/);
+  assert.match(login, /Сотрудникам не нужен второй пароль/);
   assert.match(broker, /role IN \('parent', 'student'\)/);
 });
