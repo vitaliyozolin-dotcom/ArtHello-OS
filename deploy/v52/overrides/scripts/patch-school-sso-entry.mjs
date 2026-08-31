@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 
 const educationPath = "/app/app/components/EducationWorkspace.tsx";
 const settingsPath = "/app/app/components/SettingsWorkspace.tsx";
+const centralStaffTestPath = "/app/tests/central-staff-access.test.mjs";
 
 async function replaceExact(path, before, after, label) {
   const source = await readFile(path, "utf8");
@@ -53,11 +54,25 @@ await replaceExact(
   "temporary credential clarification",
 );
 
+await replaceExact(
+  centralStaffTestPath,
+  "  assert.match(settingsSource, /Сбросить пароль/);",
+  "  assert.match(settingsSource, /Завершить входы/);\n  assert.doesNotMatch(settingsSource, /Сбросить пароль/);",
+  "central staff passwordless lifecycle contract",
+);
+
 const settings = await readFile(settingsPath, "utf8");
 if (settings.includes("Сбросить пароль"))
   throw new Error("Legacy diary password wording remains in SettingsWorkspace");
 if (!settings.includes("Завершить входы"))
   throw new Error("Session termination wording is absent in SettingsWorkspace");
 
+const centralStaffTest = await readFile(centralStaffTestPath, "utf8");
+if (!centralStaffTest.includes("Завершить входы"))
+  throw new Error("Central staff test did not adopt the passwordless lifecycle");
+if (centralStaffTest.includes("assert.match(settingsSource, /Сбросить пароль/);"))
+  throw new Error("Central staff test still requires a diary password action");
+
 console.log(`SCHOOL_SSO_PASSWORD_ACTIONS_RETIRED=${retiredPasswordActions}`);
+console.log("SCHOOL_SSO_CENTRAL_STAFF_CONTRACT=PASSWORDLESS");
 console.log("SCHOOL_SSO_UI_PATCH=OK");
