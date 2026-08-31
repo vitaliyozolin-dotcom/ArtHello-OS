@@ -113,7 +113,7 @@ jobs:
             'staff-sso-safe-rollout',
             'Вход для сотрудников',
             'Получить одноразовый код',
-            'Войти по выданному паролю',
+            'Вход для семьи и ученика',
           ]) if (!html.includes(marker)) throw new Error('Missing marker: ' + marker);
 
           const sso = await fetch(base + '/auth/central/start', { redirect: 'manual' });
