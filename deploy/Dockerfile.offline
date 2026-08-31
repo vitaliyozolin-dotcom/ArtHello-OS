@@ -14,7 +14,7 @@ RUN cat /tmp/runtime-v3-parts/offline-runtime-v3.part-* > /tmp/school-runtime-v3
     && tar -xzf /tmp/school-runtime-v3.tar.gz -C /school \
     && cat /tmp/runtime-v4-parts/offline-runtime-v4-delta.part-* > /tmp/school-runtime-v4-delta.tar.gz \
     && printf '%s  %s\n' \
-      '84a453f982dd99cec14ec2ebc7a05c0cfd319d8b3ec9bf47a1da79bc6801554b' \
+      'a4ef97eb6795cb81c860ab62b0ae7510e693b1fec1e5f6129aea072ce2ca2c9f' \
       '/tmp/school-runtime-v4-delta.tar.gz' \
       | sha256sum --check --strict \
     && tar -xzf /tmp/school-runtime-v4-delta.tar.gz -C /school \
