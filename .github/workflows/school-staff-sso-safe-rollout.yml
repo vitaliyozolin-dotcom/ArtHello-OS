@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 50
     steps:
       - name: Check out exact candidate
