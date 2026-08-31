@@ -58,6 +58,33 @@ test("XLSX parser skips a cover sheet and finds the curriculum sheet", async () 
   assert.equal(result.rows[0].topic, "Повторение");
 });
 
+test("XLSX parser skips section headings and aggregate footers inside the lesson table", async () => {
+  const buffer = await makeWorkbook([
+    ["", "Раздел 1. Числа", "", ""],
+    [1, "Сложение", 1, "№ 1–3"],
+    [2, "Вычитание", 2, "№ 4–6"],
+    ["", "Итого за раздел", 3, ""],
+    ["", "Всего часов", 170, ""],
+  ]);
+  const result = await parseCurriculumWorkbook(buffer);
+  assert.equal(result.totalHours, 3);
+  assert.deepEqual(
+    result.rows.map(({ topic, hours }) => ({ topic, hours })),
+    [
+      { topic: "Сложение", hours: 1 },
+      { topic: "Вычитание", hours: 2 },
+    ],
+  );
+});
+
+test("XLSX parser still rejects a numbered lesson without hours", async () => {
+  const buffer = await makeWorkbook([[1, "Сложение", "", ""]]);
+  await assert.rejects(
+    () => parseCurriculumWorkbook(buffer),
+    /количество часов должно быть целым числом/,
+  );
+});
+
 test("2026/27 calendar gives 136 math slots for Monday, Tuesday, Thursday and Friday", () => {
   const lessons = [
     { id: "math-mon", weekday: 1, startsAt: "08:30" },
