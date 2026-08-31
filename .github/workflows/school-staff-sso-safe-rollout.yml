@@ -35,6 +35,26 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Prepare deterministic School build context
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -m 0755 -d .openai
+          printf '%s\n' '{"d1": null, "r2": null}' > .openai/hosting.json
+          cat > .dockerignore <<'EOF'
+          .git
+          .next
+          .openai/*
+          !.openai/hosting.json
+          .sites-runtime
+          .wrangler
+          .migration
+          data
+          dist
+          node_modules
+          npm-debug.log*
+          EOF
+
       - name: Build candidate and run identity contracts
         shell: bash
         run: |
