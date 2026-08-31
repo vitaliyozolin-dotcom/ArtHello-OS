@@ -68,10 +68,20 @@ jobs:
           data/*
           !data/schedules
           !data/schedules/**
+          deploy/offline-runtime-*.part-*
+          deploy/offline-runtime-*.tar.gz
           dist
           node_modules
           npm-debug.log*
           EOF
+
+      - name: Reclaim unused Docker build cache
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker image prune --force
+          docker builder prune --force
+          docker system df
 
       - name: Build candidate, lint and run contracts
         shell: bash
