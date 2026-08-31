@@ -51,6 +51,6 @@ test("ArtHello education workspace exposes the controlled diary entry", async ()
   assert.match(patch, /SCHOOL_DIARY_SSO_URL/);
   assert.match(patch, /\/auth\/central\/start/);
   assert.match(patch, /Открыть дневник/);
-  assert.match(patch, /Завершить входы/);
-  assert.doesNotMatch(patch, /Сбросить пароль<\/button>/);
+  assert.match(patch, />Завершить входы<\/button>/);
+  assert.match(patch, /temporary credential clarification/);
 });
