@@ -132,7 +132,7 @@ jobs:
           for (const marker of [
             'staff-sso-safe-rollout',
             'Вход для сотрудников',
-            'Получить одноразовый код',
+            'Получить код',
             'Вход для семьи и ученика',
           ]) if (!html.includes(marker)) throw new Error('Missing marker: ' + marker);
 
