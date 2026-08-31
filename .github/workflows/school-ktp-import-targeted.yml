@@ -65,7 +65,9 @@ jobs:
           .sites-runtime
           .wrangler
           .migration
-          data
+          data/*
+          !data/schedules
+          !data/schedules/**
           dist
           node_modules
           npm-debug.log*
