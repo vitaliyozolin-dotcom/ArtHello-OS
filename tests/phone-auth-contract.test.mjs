@@ -16,11 +16,12 @@ const interfaceSource = readFileSync("app/school-app.tsx", "utf8");
 const compose = readFileSync("deploy/docker-compose.yml", "utf8");
 const caddy = readFileSync("deploy/Caddyfile.school", "utf8");
 
-test("parents and students use one-time code or link without a diary password", () => {
-  assert.match(loginPage, /Получить код/);
+test("parents and students keep direct diary entry while OTP is introduced", () => {
+  assert.match(loginPage, /Получить одноразовый код/);
   assert.match(loginPage, /one-time-code/);
-  assert.match(loginPage, /Постоянный пароль не нужен/);
-  assert.doesNotMatch(loginPage, /name="password"/);
+  assert.match(loginPage, /Войти по выданному паролю/);
+  assert.match(loginPage, /Временный резервный вход/);
+  assert.match(loginPage, /name="password"/);
   assert.match(identityBroker, /randomInt\(0, 1_000_000\)/);
   assert.match(identityBroker, /magicToken/);
   assert.match(identityBroker, /PASSWORDLESS_TTL_SECONDS = 10 \* 60/);
@@ -30,7 +31,7 @@ test("parents and students use one-time code or link without a diary password", 
   assert.match(passwordlessMigration, /magic_token_hash text NOT NULL/);
 });
 
-test("employees use ArtHello OS SSO and the diary keeps only a technical session", () => {
+test("employees use ArtHello OS SSO and cannot create a diary password session", () => {
   assert.match(loginPage, /Вход для сотрудников/);
   assert.doesNotMatch(loginPage, /ArtHello OS|Виталий/);
   assert.match(centralSso, /code_challenge/);
@@ -39,7 +40,8 @@ test("employees use ArtHello OS SSO and the diary keeps only a technical session
   assert.match(auth, /HttpOnly/);
   assert.match(auth, /SameSite=Lax/);
   assert.match(auth, /auth_sessions/);
-  assert.match(legacyLogin, /ENABLE_LEGACY_PASSWORD_LOGIN/);
+  assert.match(legacyLogin, /staffRoles\.has\(user\.role\)/);
+  assert.match(legacyLogin, /Сотрудники входят через ArtHello OS/);
   assert.match(legacyLogin, /status: 410/);
 });
 
