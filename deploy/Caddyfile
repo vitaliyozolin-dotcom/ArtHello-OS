@@ -10,12 +10,15 @@
     X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
   }
 
-  @api path /api/*
-  reverse_proxy @api api:8080
+  handle /api/* {
+    reverse_proxy api:8080
+  }
 
-  root * /srv
-  try_files {path} /index.html
-  file_server
+  handle {
+    root * /srv
+    try_files {path} /index.html
+    file_server
+  }
 }
 
 school-188-225-47-207.sslip.io {
