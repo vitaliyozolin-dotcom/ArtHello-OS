@@ -6,7 +6,7 @@ on:
     paths:
       - .github/workflows/deploy-school-staff-sso-production-v3-20260831.yml
       - .github/scripts/school-staff-sso-production-cutover-v3.sh.gz.b64.part-*
-      - .github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64
+      - .github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64.part-*
   workflow_dispatch:
 
 permissions:
@@ -61,8 +61,11 @@ jobs:
         run: |
           set -Eeuo pipefail
           controller="$RUNNER_TEMP/school-staff-sso-controller-v3-$GITHUB_RUN_ID.sh"
-          base64 -d controls/.github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64 |
-            gzip -d > "$controller"
+          mapfile -t controller_parts < <(
+            printf '%s\n' controls/.github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64.part-* | sort
+          )
+          test "${#controller_parts[@]}" -eq 5
+          cat "${controller_parts[@]}" | tr -d '\r\n\t ' | base64 -d | gzip -d > "$controller"
           chmod 0500 "$controller"
           printf '%s  %s\n' "$CONTROLLER_SCRIPT_SHA256" "$controller" | sha256sum -c -
           bash -n "$controller"
