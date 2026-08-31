@@ -17,6 +17,9 @@ type PasswordlessChallenge = {
 
 type FamilyMethod = "code" | "password";
 
+const parentOtpEnabled =
+  process.env.NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED === "true";
+
 function safeReturnTo() {
   const value = new URLSearchParams(window.location.search).get("returnTo") || "/";
   return value.startsWith("/") && !value.startsWith("//") ? value : "/";
@@ -161,7 +164,7 @@ export default function LoginPage() {
           <span>родителям и ученикам</span>
         </div>
 
-        {familyMethod === "code" && !challenge ? (
+        {parentOtpEnabled && familyMethod === "code" && !challenge ? (
           <form className="auth-form" onSubmit={requestCode}>
             <label className="auth-field" htmlFor="login-identifier">
               <span>Телефон или email</span>
@@ -206,7 +209,7 @@ export default function LoginPage() {
           </form>
         ) : null}
 
-        {familyMethod === "code" && challenge ? (
+        {parentOtpEnabled && familyMethod === "code" && challenge ? (
           <form className="auth-form" onSubmit={verifyCode}>
             <div className={styles.codeSummary} role="status">
               <strong>Код отправлен</strong>
@@ -311,13 +314,15 @@ export default function LoginPage() {
               <Icon name="lock" size={18} />
               {busy ? "Входим…" : "Войти в дневник"}
             </button>
-            <button
-              className={`ghost-btn ${styles.secondary}`}
-              type="button"
-              onClick={() => selectFamilyMethod("code")}
-            >
-              Получить код
-            </button>
+            {parentOtpEnabled ? (
+              <button
+                className={`ghost-btn ${styles.secondary}`}
+                type="button"
+                onClick={() => selectFamilyMethod("code")}
+              >
+                Получить код
+              </button>
+            ) : null}
           </form>
         ) : null}
 
