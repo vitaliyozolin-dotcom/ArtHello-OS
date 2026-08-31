@@ -94,6 +94,7 @@ export function loadMigrationSql() {
     "0003_daffy_quentin_quire.sql",
     "0004_phone_auth.sql",
     "0005_central_staff_access.sql",
+    "0006_identity_broker.sql",
   ];
   return filenames.map((filename) =>
     readFileSync(join(process.cwd(), "drizzle", filename), "utf8"),

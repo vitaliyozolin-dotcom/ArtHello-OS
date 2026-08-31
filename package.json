@@ -14,7 +14,7 @@
     "start": "NEXT_TELEMETRY_DISABLED=1 next start",
     "start:selfhost": "npm run start",
     "start:sites-legacy": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
-    "test": "npm run build && node --test tests/registration-contract.test.mjs tests/school-structure-contract.test.mjs tests/phone-auth-contract.test.mjs tests/central-access-contract.test.mjs tests/central-family-directory.test.mjs tests/design-code-contract.test.mjs",
+    "test": "npm run build && node --test tests/registration-contract.test.mjs tests/school-structure-contract.test.mjs tests/phone-auth-contract.test.mjs tests/central-access-contract.test.mjs tests/central-family-directory.test.mjs tests/identity-broker-contract.test.mjs tests/design-code-contract.test.mjs",
     "test:design-code": "node --test tests/design-code-contract.test.mjs",
     "validate:artifact": "bash scripts/validate-artifact.sh",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
