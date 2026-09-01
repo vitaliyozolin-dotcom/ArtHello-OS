@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/school-identity-broker-candidate-v2.yml
+      - scripts/school-candidate-secrets.mjs
   workflow_dispatch:
 
 permissions:
@@ -22,9 +23,6 @@ env:
   SCHOOL_ORIGIN: http://127.0.0.1:3432
   BROKER_HOST_ORIGIN: http://127.0.0.1:3440
   BROKER_INTERNAL_ORIGIN: http://broker:3340
-  CENTRAL_SECRET: abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
-  PASSWORDLESS_PEPPER: 89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567
-  DELIVERY_TOKEN: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
 jobs:
   candidate:
@@ -33,6 +31,9 @@ jobs:
     steps:
       - name: Check out validation controls
         uses: actions/checkout@v4
+
+      - name: Generate ephemeral masked candidate secrets
+        run: node scripts/school-candidate-secrets.mjs
 
       - name: Check out exact School candidate
         uses: actions/checkout@v4

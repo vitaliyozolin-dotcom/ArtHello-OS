@@ -1,0 +1,8 @@
+# Deterministic candidate fixtures removed from the current tree.
+# Keep these ignores scoped to the exact historical commit, path, rule and line.
+345b04df1b66693117c1ffe4cfb1944afee0b0b0:.github/workflows/school-identity-broker-candidate-v2.yml:generic-api-key:25
+345b04df1b66693117c1ffe4cfb1944afee0b0b0:.github/workflows/school-identity-broker-candidate-v2.yml:generic-api-key:26
+345b04df1b66693117c1ffe4cfb1944afee0b0b0:.github/workflows/school-identity-broker-candidate-v2.yml:generic-api-key:27
+485689cf021366c973e957b1eefce42e24393a45:.github/workflows/school-identity-broker-candidate.yml:generic-api-key:26
+485689cf021366c973e957b1eefce42e24393a45:.github/workflows/school-identity-broker-candidate.yml:generic-api-key:27
+485689cf021366c973e957b1eefce42e24393a45:.github/workflows/school-identity-broker-candidate.yml:generic-api-key:28
