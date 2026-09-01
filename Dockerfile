@@ -34,7 +34,7 @@ COPY --from=builder --chown=school:school /app/.next/static ./.next/static
 COPY --from=builder --chown=school:school /app/public ./public
 COPY --from=builder --chown=school:school /app/drizzle ./drizzle
 COPY --from=builder --chown=school:school /app/deploy/bootstrap ./bootstrap
-COPY --from=builder --chown=school:school /app/lib/curriculum-import.mjs ./lib/curriculum-import.mjs
+COPY --from=builder --chown=school:school /app/lib/curriculum-import.mjs /app/lib/curriculum-allocation.mjs ./lib/
 COPY --from=builder --chown=school:school /app/data/schedules ./data/schedules
 COPY --from=builder --chown=school:school /app/data/curricula ./data/curricula
 COPY --from=builder --chown=school:school /app/scripts/bootstrap-owner.mjs /app/scripts/backup-db.mjs /app/scripts/container-entrypoint.sh /app/scripts/import-school-schedule.mjs /app/scripts/import-school-curriculum.mjs ./scripts/

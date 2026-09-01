@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   allocateCurriculumRows,
   buildScheduleSlots,
-} from "../lib/curriculum-import.mjs";
+} from "../lib/curriculum-allocation.mjs";
 
 const curriculumPath = resolve(
   process.argv.find((item) => item.endsWith(".json")) ??

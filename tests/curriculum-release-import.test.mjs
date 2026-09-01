@@ -138,27 +138,82 @@ test("release importer runs from an isolated runtime without ExcelJS", (t) => {
   t.after(() => rmSync(isolatedRoot, { recursive: true, force: true }));
   mkdirSync(join(isolatedRoot, "scripts"), { recursive: true });
   mkdirSync(join(isolatedRoot, "lib"), { recursive: true });
+  mkdirSync(join(isolatedRoot, "data", "curricula"), { recursive: true });
   copyFileSync(
     join(repositoryRoot, "scripts", "import-school-curriculum.mjs"),
     join(isolatedRoot, "scripts", "import-school-curriculum.mjs"),
   );
   copyFileSync(
-    join(repositoryRoot, "lib", "curriculum-import.mjs"),
-    join(isolatedRoot, "lib", "curriculum-import.mjs"),
+    join(repositoryRoot, "lib", "curriculum-allocation.mjs"),
+    join(isolatedRoot, "lib", "curriculum-allocation.mjs"),
+  );
+  const isolatedCurriculumPath = join(isolatedRoot, curriculumFile);
+  copyFileSync(
+    join(repositoryRoot, curriculumFile),
+    isolatedCurriculumPath,
   );
 
-  const result = runImporter(databasePath, {
+  const isolatedOptions = {
     scriptPath: join(isolatedRoot, "scripts", "import-school-curriculum.mjs"),
-    curriculumPath: join(repositoryRoot, curriculumFile),
+    curriculumPath: isolatedCurriculumPath,
     cwd: isolatedRoot,
-  });
-  assert.equal(
-    result.status,
-    0,
-    `Изолированный импорт завершился с ошибкой:\n${result.stdout}${result.stderr}`,
+  };
+  for (const runNumber of [1, 2]) {
+    const result = runImporter(databasePath, isolatedOptions);
+    assert.equal(
+      result.status,
+      0,
+      `Изолированный импорт №${runNumber} завершился с ошибкой:\n${result.stdout}${result.stderr}`,
+    );
+    assert.doesNotMatch(result.stderr, /ERR_MODULE_NOT_FOUND|exceljs/i);
+    assert.match(
+      result.stdout,
+      runNumber === 1
+        ? /SCHOOL_CURRICULUM_IMPORT=SUCCESS/
+        : /SCHOOL_CURRICULUM_IMPORT=ALREADY_APPLIED/,
+    );
+    assert.match(result.stdout, /SCHOOL_CURRICULUM_AVAILABLE_SLOTS=171/);
+    assert.match(result.stdout, /SCHOOL_CURRICULUM_UNUSED_SLOTS=1/);
+  }
+
+  const verificationDb = new DatabaseSync(databasePath, { readOnly: true });
+  assert.deepEqual(
+    plainRows(
+      verificationDb
+        .prepare(
+          `SELECT
+            (SELECT COUNT(*) FROM programs) AS programs,
+            (SELECT COUNT(*) FROM program_imports) AS imports,
+            (SELECT COUNT(*) FROM program_topics) AS topics,
+            (SELECT COUNT(*) FROM program_topic_sessions) AS sessions`,
+        )
+        .get(),
+    ),
+    { programs: 1, imports: 1, topics: 170, sessions: 170 },
   );
-  assert.doesNotMatch(result.stderr, /ERR_MODULE_NOT_FOUND|exceljs/i);
-  assert.match(result.stdout, /SCHOOL_CURRICULUM_IMPORT=SUCCESS/);
+  verificationDb.close();
+});
+
+test("offline image overlays the ExcelJS-free release importer", () => {
+  const dockerfile = readFileSync(
+    join(repositoryRoot, "deploy", "Dockerfile.offline"),
+    "utf8",
+  );
+  const archiveOverlay = dockerfile.indexOf(
+    "tar -xzf /tmp/school-runtime-v5-delta.tar.gz -C /school",
+  );
+  const helperOverlay = dockerfile.indexOf(
+    "COPY --chown=node:node lib/curriculum-allocation.mjs /school/lib/curriculum-allocation.mjs",
+  );
+  const importerOverlay = dockerfile.indexOf(
+    "COPY --chown=node:node scripts/import-school-curriculum.mjs /school/scripts/import-school-curriculum.mjs",
+  );
+  const runtimeUser = dockerfile.indexOf("USER node");
+  assert.ok(archiveOverlay >= 0);
+  assert.ok(helperOverlay > archiveOverlay);
+  assert.ok(importerOverlay > archiveOverlay);
+  assert.ok(runtimeUser > helperOverlay);
+  assert.ok(runtimeUser > importerOverlay);
 });
 
 test("approved 170-hour math KTP is imported once across the full 2026/27 calendar", (t) => {

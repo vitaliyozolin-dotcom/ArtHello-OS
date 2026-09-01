@@ -31,6 +31,12 @@ RUN cat /tmp/runtime-v3-parts/offline-runtime-v3.part-* > /tmp/school-runtime-v3
     && mkdir -p /data /backups \
     && chown -R node:node /school /data /backups
 
+# Overlay the dependency-free release importer from the exact delivery SHA.
+# The prebuilt runtime archive contains the interactive application, while
+# these files are deliberately kept auditable and executable without ExcelJS.
+COPY --chown=node:node lib/curriculum-allocation.mjs /school/lib/curriculum-allocation.mjs
+COPY --chown=node:node scripts/import-school-curriculum.mjs /school/scripts/import-school-curriculum.mjs
+
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
