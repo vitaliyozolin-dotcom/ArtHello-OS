@@ -161,29 +161,44 @@ verify_public_release() {
 verify_public_write_gate() {
   local origin="https://$SCHOOL_HOST"
   local status
+  local attempt
+  local verified=0
   PUBLIC_WRITE_GATE_FILE=$(mktemp /tmp/school-public-write-gate.XXXXXX.json)
   PUBLIC_WRITE_GATE_HEADERS=$(mktemp /tmp/school-public-write-gate.XXXXXX.headers)
-  status=$(curl --silent --show-error --max-time 30 \
-    --output "$PUBLIC_WRITE_GATE_FILE" \
-    --dump-header "$PUBLIC_WRITE_GATE_HEADERS" \
-    --write-out '%{http_code}' \
-    --request POST \
-    --header "Origin: $origin" \
-    --header 'Content-Type: application/json' \
-    --data '{"action":"deployment.write-gate.probe"}' \
-    "$origin/api/school")
-  test "$status" = 503
-  grep -Eq '"code"[[:space:]]*:[[:space:]]*"deployment_read_only"' \
-    "$PUBLIC_WRITE_GATE_FILE"
-  grep -Eiq '^Retry-After:[[:space:]]*30[[:space:]]*$' "$PUBLIC_WRITE_GATE_HEADERS"
-  grep -Eiq '^Cache-Control:[[:space:]]*no-store[[:space:]]*$' "$PUBLIC_WRITE_GATE_HEADERS"
+  for attempt in $(seq 1 20); do
+    : > "$PUBLIC_WRITE_GATE_FILE"
+    : > "$PUBLIC_WRITE_GATE_HEADERS"
+    if status=$(curl --silent --show-error --max-time 30 \
+      --output "$PUBLIC_WRITE_GATE_FILE" \
+      --dump-header "$PUBLIC_WRITE_GATE_HEADERS" \
+      --write-out '%{http_code}' \
+      --request POST \
+      --header "Origin: $origin" \
+      --header 'Content-Type: application/json' \
+      --data '{"action":"deployment.write-gate.probe"}' \
+      "$origin/api/school"); then
+      if [ "$status" = 503 ] \
+        && grep -Eq '"code"[[:space:]]*:[[:space:]]*"deployment_read_only"' \
+          "$PUBLIC_WRITE_GATE_FILE" \
+        && grep -Eiq '^Retry-After:[[:space:]]*30[[:space:]]*$' \
+          "$PUBLIC_WRITE_GATE_HEADERS" \
+        && grep -Eiq '^Cache-Control:[[:space:]]*no-store[[:space:]]*$' \
+          "$PUBLIC_WRITE_GATE_HEADERS"; then
+        verified=1
+        break
+      fi
+    fi
+    sleep 2
+  done
+  test "$verified" -eq 1
   printf 'SCHOOL_PUBLIC_WRITE_GATE=VERIFIED\n'
 }
 
 verify_private_write_gate() {
-  docker exec -i school-1-11 node --input-type=module <<'VERIFY_PRIVATE_WRITE_GATE'
-const origin = 'http://127.0.0.1:3000';
-const response = await fetch(`${origin}/api/school`, {
+  docker exec --env "SCHOOL_PROBE_ORIGIN=https://$SCHOOL_HOST" \
+    -i school-1-11 node --input-type=module <<'VERIFY_PRIVATE_WRITE_GATE'
+const origin = process.env.SCHOOL_PROBE_ORIGIN;
+const response = await fetch('http://127.0.0.1:3000/api/school', {
   method: 'POST',
   headers: {
     Origin: origin,

@@ -302,6 +302,8 @@ test("production cutover cannot restore a backup after accepting new writes", ()
   assert.match(deploySource, /"maintenance":false/);
   assert.match(deploySource, /SCHOOL_PRIVATE_WRITE_GATE=VERIFIED/);
   assert.match(deploySource, /SCHOOL_PUBLIC_NETWORK=ATTACHED/);
+  assert.match(deploySource, /for attempt in \$\(seq 1 20\)/);
+  assert.match(deploySource, /SCHOOL_PROBE_ORIGIN=https:\/\/\$SCHOOL_HOST/);
   assert.match(deploySource, /docker network connect[\s\S]*?--alias school-1-11/);
   assert.match(privateComposeSource, /school_candidate:/);
   assert.match(privateComposeSource, /internal: true/);
