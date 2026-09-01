@@ -1,0 +1,460 @@
+name: Deploy School curriculum production
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/deploy-school-curriculum-main.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: school-1-11-production
+  cancel-in-progress: false
+
+env:
+  RELEASE_SHA: 4a1476c83fd0245101a8e81ab9edc192b8462dd9
+  REPAIR_SHA256: af02ee458d59e6ea9d3929c7013fd2fd5bcde9141d3c28052ec4214421f7380e
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+
+jobs:
+  deploy:
+    if: >-
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 75
+    environment: production-ru
+    steps:
+      - name: Create production run record
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          payload="$(jq -n \
+            --arg title "[school-production] curriculum run $GITHUB_RUN_ID" \
+            --arg body "Deployment is queued for immutable School release $RELEASE_SHA. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{title: $title, body: $body}')"
+          response="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --data "$payload" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues")"
+          issue_number="$(jq -r '.number' <<<"$response")"
+          test "$issue_number" != null
+          printf 'issue_number=%s\n' "$issue_number" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact accepted School release
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify immutable release source
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test "$(sha256sum deploy/repair-deploy.sh | cut -d ' ' -f 1)" = "$REPAIR_SHA256"
+          bash -n deploy/repair-deploy.sh
+          printf 'SCHOOL_RELEASE_SOURCE=VERIFIED\n'
+
+      - name: Configure protected SSH transport
+        id: configure_ssh
+        continue-on-error: true
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          ssh_dir="$RUNNER_TEMP/school-curriculum-ssh"
+          install -m 0700 -d "$ssh_dir"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+          chmod 0600 "$ssh_dir/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 0600 "$ssh_dir/known_hosts"
+          test -s "$ssh_dir/id_ed25519"
+          test -s "$ssh_dir/known_hosts"
+          ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+          ssh-keygen -l -f "$ssh_dir/known_hosts" >/dev/null
+          printf 'key_path=%s\n' "$ssh_dir/id_ed25519" >> "$GITHUB_OUTPUT"
+          printf 'known_hosts_path=%s\n' "$ssh_dir/known_hosts" >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_PROTECTED_SSH=VERIFIED\n'
+
+      - name: Deploy immutable School release
+        id: deploy_school
+        if: steps.configure_ssh.outcome == 'success'
+        continue-on-error: true
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+          SSH_KEY_PATH: ${{ steps.configure_ssh.outputs.key_path }}
+          SSH_KNOWN_HOSTS_PATH: ${{ steps.configure_ssh.outputs.known_hosts_path }}
+        run: |
+          set -Eeuo pipefail
+          log_file="$RUNNER_TEMP/school-curriculum-deploy.log"
+          deploy_port="${DEPLOY_PORT:-2222}"
+          job_dir="/srv/school-1-11/deploy-jobs/${RELEASE_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh_args=(
+            -T
+            -p "$deploy_port"
+            -i "$SSH_KEY_PATH"
+            -o UserKnownHostsFile="$SSH_KNOWN_HOSTS_PATH"
+            -o GlobalKnownHostsFile=/dev/null
+            -o StrictHostKeyChecking=yes
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o ConnectTimeout=20
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=12
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+
+          launch_nonce="$(openssl rand -hex 16)"
+          printf '%s' "$launch_nonce" | grep -Eq '^[0-9a-f]{32}$'
+          repair_payload="$(base64 -w0 deploy/repair-deploy.sh)"
+          runner_payload="$(base64 -w0 <<'REMOTE'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          umask 077
+          worker_pid=""
+
+          write_result() {
+            local result=$1
+            printf '%s\n' "$result" > "$JOB_DIR/status.tmp"
+            mv "$JOB_DIR/status.tmp" "$JOB_DIR/status"
+          }
+
+          if [ "${1:-}" = worker ]; then
+            printf '%s\n' "$$" > "$JOB_DIR/worker-pid.tmp"
+            mv "$JOB_DIR/worker-pid.tmp" "$JOB_DIR/worker-pid"
+            test ! -e "$JOB_DIR/cancel-request"
+            printf 'started:%s\n' "$LAUNCH_NONCE" > "$JOB_DIR/ack.tmp"
+            mv "$JOB_DIR/ack.tmp" "$JOB_DIR/ack"
+            test ! -e "$JOB_DIR/cancel-request"
+            exec timeout --signal=TERM --kill-after=600s 3000s \
+              bash "$JOB_DIR/repair-deploy.sh"
+          fi
+
+          terminate_worker() {
+            local signal_status=$1
+            local worker_status=$signal_status
+            trap - HUP INT TERM
+            set +e
+            if [ -f "$JOB_DIR/status" ]; then
+              exit "$signal_status"
+            fi
+            if [[ "$worker_pid" =~ ^[0-9]+$ ]]; then
+              if kill -0 "$worker_pid" 2>/dev/null; then
+                kill -TERM -- "-$worker_pid" 2>/dev/null || kill -TERM "$worker_pid" 2>/dev/null || true
+              fi
+              wait "$worker_pid"
+              worker_status=$?
+            fi
+            if [ "$worker_status" -eq 0 ]; then
+              write_result "success:$DELIVERY_REF:$LAUNCH_NONCE"
+              exit 0
+            fi
+            write_result "failed:$worker_status:$LAUNCH_NONCE"
+            exit "$signal_status"
+          }
+
+          trap 'terminate_worker 129' HUP
+          trap 'terminate_worker 130' INT
+          trap 'terminate_worker 143' TERM
+          printf '%s\n' "$$" > "$JOB_DIR/pid.tmp"
+          mv "$JOB_DIR/pid.tmp" "$JOB_DIR/pid"
+          if [ -e "$JOB_DIR/cancel-request" ]; then
+            write_result "failed:143:$LAUNCH_NONCE"
+            exit 143
+          fi
+          status=0
+          setsid bash "$JOB_DIR/run.sh" worker &
+          worker_pid=$!
+          wait "$worker_pid" || status=$?
+          if [ "$status" -eq 0 ]; then
+            result="success:$DELIVERY_REF:$LAUNCH_NONCE"
+          else
+            result="failed:$status:$LAUNCH_NONCE"
+          fi
+          write_result "$result"
+          exit "$status"
+          REMOTE
+          )"
+          cancel_payload="$(base64 -w0 <<'REMOTE_CANCEL'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          : "${JOB_DIR:?}"
+          : "${LAUNCH_NONCE:?}"
+          job_parent=/srv/school-1-11/deploy-jobs
+          job_name=${JOB_DIR##*/}
+          [[ "$job_name" =~ ^[0-9a-f]{40}-[0-9]+-[0-9]+$ ]]
+          test "$JOB_DIR" = "$job_parent/$job_name"
+          [[ "$LAUNCH_NONCE" =~ ^[0-9a-f]{32}$ ]]
+          install -d -m 0750 "$job_parent"
+          if [ ! -e "$JOB_DIR" ]; then
+            mkdir -m 0750 "$JOB_DIR" 2>/dev/null || true
+          fi
+          test -d "$JOB_DIR"
+          test ! -L "$JOB_DIR"
+          printf 'cancel:%s\n' "$LAUNCH_NONCE" > "$JOB_DIR/cancel-request.tmp.$$"
+          mv "$JOB_DIR/cancel-request.tmp.$$" "$JOB_DIR/cancel-request"
+
+          process_matches() {
+            local candidate_pid=$1
+            [[ "$candidate_pid" =~ ^[0-9]+$ ]] || return 1
+            test -r "/proc/$candidate_pid/environ" || return 1
+            tr '\0' '\n' < "/proc/$candidate_pid/environ" | grep -Fx "JOB_DIR=$JOB_DIR" >/dev/null || return 1
+            tr '\0' '\n' < "/proc/$candidate_pid/environ" | grep -Fx "LAUNCH_NONCE=$LAUNCH_NONCE" >/dev/null || return 1
+          }
+
+          worker_signaled=0
+          worker_pid=""
+          if [ -f "$JOB_DIR/worker-pid" ]; then
+            worker_pid=$(cat "$JOB_DIR/worker-pid" 2>/dev/null || true)
+          fi
+          if process_matches "$worker_pid" \
+            && [ "$(ps -o pgid= -p "$worker_pid" | tr -d ' ')" = "$worker_pid" ] \
+            && kill -TERM -- "-$worker_pid" 2>/dev/null; then
+            worker_signaled=1
+          fi
+
+          if [ "$worker_signaled" -eq 0 ]; then
+            controller_pid=""
+            if [ -f "$JOB_DIR/pid" ]; then
+              controller_pid=$(cat "$JOB_DIR/pid" 2>/dev/null || true)
+            fi
+            if process_matches "$controller_pid" \
+              && [ "$(ps -o sid= -p "$controller_pid" | tr -d ' ')" = "$controller_pid" ]; then
+              kill -TERM "$controller_pid" 2>/dev/null || true
+            fi
+          fi
+          printf 'cancel-requested:%s\n' "$LAUNCH_NONCE"
+          REMOTE_CANCEL
+          )"
+          test -n "$repair_payload"
+          test -n "$runner_payload"
+          test -n "$cancel_payload"
+
+          remote_job_active=0
+          remote_job_complete=0
+          reconcile_remote_job() {
+            local exit_code=$?
+            trap - EXIT INT TERM
+            if [ "$remote_job_active" -eq 1 ] && [ "$remote_job_complete" -ne 1 ]; then
+              set +e
+              timeout --signal=TERM --kill-after=5s 90s \
+                ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                  "printf '%s' '$cancel_payload' | base64 -d | env JOB_DIR='$job_dir' LAUNCH_NONCE='$launch_nonce' bash" \
+                  </dev/null >/dev/null 2>&1
+              cancel_rc=$?
+              if [ "$cancel_rc" -eq 0 ]; then
+                printf 'SCHOOL_REMOTE_CANCEL=REQUESTED\n' | tee -a "$log_file"
+              else
+                printf 'SCHOOL_REMOTE_CANCEL=NOT_ACTIVE_OR_UNREACHABLE\n' | tee -a "$log_file"
+              fi
+            fi
+            exit "$exit_code"
+          }
+          trap reconcile_remote_job EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf 'SCHOOL_DEPLOY_TRANSPORT=PROTECTED_SSH\n' | tee "$log_file"
+          launch_rc=0
+          launch_started_at="$(date +%s)"
+          remote_job_active=1
+          timeout --signal=TERM --kill-after=5s 240s \
+            ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -Eeuo pipefail; install -d -m 0750 /srv/school-1-11/deploy-jobs; mkdir -m 0750 '$job_dir'; printf '%s' '$repair_payload' | base64 -d > '$job_dir/repair-deploy.sh'; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/repair-deploy.sh' '$job_dir/run.sh'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$RELEASE_SHA' SCHOOL_HOST='school-188-225-38-55.sslip.io' VERIFY_PUBLIC=1 JOB_DIR='$job_dir' LAUNCH_NONCE='$launch_nonce' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null &" \
+              </dev/null >/dev/null 2>&1 || launch_rc=$?
+          launch_elapsed="$(( $(date +%s) - launch_started_at ))"
+          printf 'SCHOOL_REMOTE_LAUNCH_RETURN=%s elapsed=%ss\n' "$launch_rc" "$launch_elapsed" | tee -a "$log_file"
+
+          remote_ack=""
+          for ack_attempt in $(seq 1 12); do
+            set +e
+            remote_ack="$(
+              timeout --signal=TERM --kill-after=5s 75s \
+                ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                  "test -f '$job_dir/ack' && cat '$job_dir/ack' || true" \
+                  </dev/null 2>/dev/null
+            )"
+            ack_rc=$?
+            set -e
+            if [ "$ack_rc" -eq 0 ] && [ "$remote_ack" = "started:$launch_nonce" ]; then
+              break
+            fi
+            remote_ack=""
+            sleep 5
+          done
+          test "$remote_ack" = "started:$launch_nonce"
+          printf 'SCHOOL_REMOTE_LAUNCH=ACKNOWLEDGED\n' | tee -a "$log_file"
+
+          fetch_remote_log() {
+            timeout --signal=TERM --kill-after=5s 90s \
+              ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                "grep -E '^(SCHOOL_|Error:|error:|curl:|ssh:|Permission denied|Host key|Connection closed)' '$job_dir/deploy.log' 2>/dev/null | tail -n 220 | sed -E 's/(PASSWORD|TOKEN|SECRET|PRIVATE_KEY)=.*/\\1=[REDACTED]/Ig' || true" \
+                </dev/null 2>/dev/null || true
+          }
+
+          remote_status=""
+          for attempt in $(seq 1 390); do
+            set +e
+            remote_status="$(
+              timeout --signal=TERM --kill-after=5s 75s \
+                ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                  "test -f '$job_dir/status' && cat '$job_dir/status' || true" \
+                  </dev/null 2>/dev/null
+            )"
+            poll_rc=$?
+            set -e
+            if [ "$poll_rc" -ne 0 ]; then
+              remote_status=""
+              sleep 10
+              continue
+            fi
+            case "$remote_status" in
+              "success:$RELEASE_SHA:$launch_nonce")
+                break
+                ;;
+              failed:*:"$launch_nonce")
+                fetch_remote_log | tee -a "$log_file"
+                printf 'SCHOOL_REMOTE_STATUS=%s\n' "$remote_status" | tee -a "$log_file"
+                exit 1
+                ;;
+            esac
+            if [ "$attempt" -eq 390 ]; then
+              fetch_remote_log | tee -a "$log_file"
+              printf 'SCHOOL_REMOTE_STATUS=timeout\n' | tee -a "$log_file"
+              exit 1
+            fi
+            sleep 10
+          done
+
+          test "$remote_status" = "success:$RELEASE_SHA:$launch_nonce"
+          fetch_remote_log | tee -a "$log_file"
+          grep -Fx 'SCHOOL_DEPLOY=SUCCESS' "$log_file" >/dev/null
+          grep -Fx "SCHOOL_DELIVERY_REF=$RELEASE_SHA" "$log_file" >/dev/null
+          remote_job_complete=1
+          printf 'SCHOOL_REMOTE_JOB=SUCCESS\n' | tee -a "$log_file"
+
+      - name: Verify public School release
+        id: verify_public
+        if: steps.deploy_school.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          healthy=0
+          for attempt in $(seq 1 60); do
+            health="$(curl --fail --silent --show-error --max-time 30 "$SCHOOL_ORIGIN/api/health" || true)"
+            if grep -F '"status":"ok"' <<<"$health" >/dev/null \
+              && grep -F '"maintenance":false' <<<"$health" >/dev/null; then
+              healthy=1
+              break
+            fi
+            sleep 3
+          done
+          test "$healthy" -eq 1
+          login_html="$RUNNER_TEMP/school-curriculum-login.html"
+          css_file="$RUNNER_TEMP/school-curriculum.css"
+          curl --fail --silent --show-error --max-time 60 \
+            -H 'Cache-Control: no-cache' \
+            "$SCHOOL_ORIGIN/login?release=$RELEASE_SHA" > "$login_html"
+          : > "$css_file"
+          css_count=0
+          while IFS= read -r css_path; do
+            test -n "$css_path"
+            curl --fail --silent --show-error --max-time 60 \
+              "$SCHOOL_ORIGIN$css_path" >> "$css_file"
+            printf '\n' >> "$css_file"
+            css_count=$((css_count + 1))
+          done < <(grep -oE '/_next/static/css/[^"?]+\.css' "$login_html" | sort -u)
+          test "$css_count" -gt 0
+          grep -F '.l0-stage{width:100%;height:100svh;overflow:hidden' "$css_file" >/dev/null
+          grep -F 'student-dashboard-hero-v1.webp' "$css_file" >/dev/null
+          printf 'SCHOOL_PUBLIC_HTTPS=OK\n'
+          printf 'SCHOOL_FULLSCREEN_CSS=VERIFIED\n'
+          printf 'SCHOOL_MAINTENANCE=RELEASED\n'
+
+      - name: Remove temporary SSH material
+        if: always()
+        run: |
+          rm -f \
+            "$RUNNER_TEMP/school-curriculum-ssh/id_ed25519" \
+            "$RUNNER_TEMP/school-curriculum-ssh/known_hosts"
+
+      - name: Publish sanitized production result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONFIGURE_OUTCOME: ${{ steps.configure_ssh.outcome }}
+          DEPLOY_OUTCOME: ${{ steps.deploy_school.outcome }}
+          PUBLIC_OUTCOME: ${{ steps.verify_public.outcome }}
+        run: |
+          set -Eeuo pipefail
+          log_file="$RUNNER_TEMP/school-curriculum-deploy.log"
+          report_file="$RUNNER_TEMP/school-curriculum-report.md"
+          {
+            printf 'School curriculum deployment run: %s\n\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            printf -- '- Immutable release: `%s`\n' "$RELEASE_SHA"
+            printf -- '- Protected SSH configuration: `%s`\n' "$CONFIGURE_OUTCOME"
+            printf -- '- Release deployment: `%s`\n' "$DEPLOY_OUTCOME"
+            printf -- '- Public verification: `%s`\n\n' "$PUBLIC_OUTCOME"
+            printf 'Sanitized deployment markers:\n\n```text\n'
+            if [ -f "$log_file" ]; then
+              grep -E '^(SCHOOL_|Error:|error:|curl:|ssh:|Permission denied|Host key|Connection closed)' "$log_file" \
+                | tail -n 180 \
+                | sed -E 's/(PASSWORD|TOKEN|SECRET|PRIVATE_KEY)=.*/\1=[REDACTED]/Ig' || true
+            else
+              printf 'No deployment log was produced.\n'
+            fi
+            printf '```\n'
+          } > "$report_file"
+          issue_number="${{ steps.issue.outputs.issue_number }}"
+          test -n "$issue_number"
+          payload="$(jq -n --rawfile body "$report_file" '{body: $body}')"
+          curl --fail-with-body --silent --show-error \
+            --request PATCH \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --data "$payload" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$issue_number" \
+            >/dev/null
+
+      - name: Enforce successful production result
+        if: always()
+        env:
+          CONFIGURE_OUTCOME: ${{ steps.configure_ssh.outcome }}
+          DEPLOY_OUTCOME: ${{ steps.deploy_school.outcome }}
+          PUBLIC_OUTCOME: ${{ steps.verify_public.outcome }}
+        run: |
+          set -Eeuo pipefail
+          test "$CONFIGURE_OUTCOME" = success
+          test "$DEPLOY_OUTCOME" = success
+          test "$PUBLIC_OUTCOME" = success
