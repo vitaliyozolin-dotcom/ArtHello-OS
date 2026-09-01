@@ -25,6 +25,7 @@ PREVIOUS_RELEASE=""
 SWITCHED=0
 ROLLBACK_ARMED=0
 PRE_ARM_RECOVERY=0
+POST_COMMIT_GATE_RECOVERY=0
 ENV_UPDATE_TMP=""
 CURRENT_LINK_TMP=""
 PUBLIC_LOGIN_FILE=""
@@ -424,6 +425,14 @@ rollback() {
       printf 'SCHOOL_ROLLBACK=FINISHED\n' >&2
     else
       printf 'SCHOOL_ROLLBACK=FAILED_MANUAL_RECOVERY_REQUIRED\n' >&2
+    fi
+  elif [ "$POST_COMMIT_GATE_RECOVERY" -eq 1 ]; then
+    printf 'SCHOOL_POST_COMMIT_GATE_RECOVERY=STARTED\n' >&2
+    if clear_write_gate >&2 && verify_public_write_gate_released >&2; then
+      POST_COMMIT_GATE_RECOVERY=0
+      printf 'SCHOOL_POST_COMMIT_GATE_RECOVERY=FINISHED\n' >&2
+    else
+      printf 'SCHOOL_POST_COMMIT_GATE_RECOVERY=FAILED_MANUAL_RECOVERY_REQUIRED\n' >&2
     fi
   fi
   printf 'SCHOOL_DEPLOY_ERROR line=%s rc=%s\n' "${BASH_LINENO[0]}" "$code" >&2
@@ -942,10 +951,12 @@ verify_host_sqlite "$HOST_DATABASE_BACKUP"
 test "$(sha256sum "$HOST_DATABASE_BACKUP" | cut -d ' ' -f 1)" = "$DATABASE_BACKUP_SHA256"
 test "$(sha256sum "$HOST_ENV_BACKUP" | cut -d ' ' -f 1)" = "$ENV_BACKUP_SHA256"
 
+POST_COMMIT_GATE_RECOVERY=1
 ROLLBACK_ARMED=0
 printf 'SCHOOL_DEPLOY_COMMIT=DATABASE_ROLLBACK_DISARMED\n'
 clear_write_gate
 verify_public_write_gate_released
+POST_COMMIT_GATE_RECOVERY=0
 SWITCHED=0
 printf 'SCHOOL_DEPLOY=SUCCESS\n'
 printf 'SCHOOL_DELIVERY_REF=%s\n' "$DELIVERY_REF"

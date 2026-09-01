@@ -238,6 +238,10 @@ test("production cutover cannot restore a backup after accepting new writes", ()
   const publicVerify = main.indexOf("\nverify_public_release\n");
   const disarmRollback = main.lastIndexOf("ROLLBACK_ARMED=0");
   const clearGate = main.lastIndexOf("\nclear_write_gate\n");
+  const postCommitRecovery = main.lastIndexOf("POST_COMMIT_GATE_RECOVERY=1");
+  const finishPostCommitRecovery = main.lastIndexOf(
+    "POST_COMMIT_GATE_RECOVERY=0",
+  );
 
   for (const [label, position] of Object.entries({
     build,
@@ -251,8 +255,10 @@ test("production cutover cannot restore a backup after accepting new writes", ()
     scheduleImport,
     curriculumImport,
     publicVerify,
+    postCommitRecovery,
     disarmRollback,
     clearGate,
+    finishPostCommitRecovery,
   })) {
     assert.notEqual(position, -1, `missing deploy phase: ${label}`);
   }
@@ -267,11 +273,13 @@ test("production cutover cannot restore a backup after accepting new writes", ()
   assert.ok(gateProbe < scheduleImport);
   assert.ok(scheduleImport < curriculumImport);
   assert.ok(curriculumImport < publicVerify);
-  assert.ok(publicVerify < disarmRollback);
+  assert.ok(publicVerify < postCommitRecovery);
+  assert.ok(postCommitRecovery < disarmRollback);
   assert.ok(disarmRollback < clearGate);
   assert.ok(
     clearGate < main.lastIndexOf("verify_public_write_gate_released"),
   );
+  assert.ok(clearGate < finishPostCommitRecovery);
 
   assert.match(deploySource, /WRITE_GATE_PATH=\/data\/\.school-deploy-read-only/);
   assert.match(deploySource, /"code"\[\[:space:\]\]\*:\[\[:space:\]\]\*"deployment_read_only"/);
@@ -287,6 +295,8 @@ test("production cutover cannot restore a backup after accepting new writes", ()
   );
   assert.match(rollback, /ROLLBACK_ARMED" -eq 1 \] \|\| \[ "\$PRE_ARM_RECOVERY" -eq 1/);
   assert.match(rollback, /SCHOOL_ROLLBACK_DATABASE=UNCHANGED_PRE_BACKUP/);
+  assert.match(rollback, /POST_COMMIT_GATE_RECOVERY" -eq 1/);
+  assert.match(rollback, /SCHOOL_POST_COMMIT_GATE_RECOVERY=FINISHED/);
   assert.match(rollback, /docker rm -f "\$OFFLINE_BACKUP_CONTAINER"/);
   assert.ok(
     rollback.indexOf("wait_for_school_health") <
