@@ -4,7 +4,7 @@
 
 ## Карта проекта
 
-- `artifacts/api-server` — Express API; `artifacts/alpha-crm-sync` — React SPA; `artifacts/mockup-sandbox` — preview-harness.
+- `artifacts/api-server` — Express API; `artifacts/alpha-crm-sync` — React SPA.
 - `lib/db` — Drizzle/PostgreSQL: схемы, миграции, rollbacks и `migration-twin.mjs`.
 - `lib/api-spec/openapi.yaml` — источник API-контракта и кодогенерации.
 - `scripts` — sandbox-импортёры AlfaCRM/payroll с отдельной sandbox-БД.

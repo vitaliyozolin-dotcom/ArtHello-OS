@@ -7,21 +7,19 @@
 
 ## 1. Инвентаризация
 
-**Монорепо (pnpm), 10 workspace-членов:**
+**Монорепо (pnpm), 7 workspace-членов:**
 
 | Пакет | Назначение | Объём |
 |---|---|---|
 | `artifacts/api-server` | Express 5 REST API, 290 путей / 44 route-модуля | ~38 300 строк |
 | `artifacts/alpha-crm-sync` | React 19 SPA бэк-офиса (финансы, банк, staff, front-office) | ~41 500 строк |
-| `artifacts/mockup-sandbox` | Preview-harness; фактически пуст (generated map пустой) | ~6 300 строк |
 | `lib/db` | Drizzle + 26 схем + 18 миграций + rollbacks + migration-twin | ~3 700 строк |
 | `lib/api-spec` | `openapi.yaml` (171 путь) + orval codegen | 7 516 строк yaml |
 | `lib/api-client-react` | Сгенерированный React Query клиент (80 хуков) + custom-fetch | ~18 400 строк |
 | `lib/api-zod` | Сгенерированные Zod-схемы | ~4 400 строк |
-| `lib/integrations-openai-ai-{server,react}` | OpenAI-хелперы — **0 потребителей** | ~1 260 строк |
 | `scripts` | Sandbox-импортёры AlfaCRM/payroll на PGlite | ~5 700 строк |
 
-**Вне workspace:** `sites-control/` (4-й фронтенд → воркер для OpenAI Sites; владеет корневыми `dev`/`build`/`test`), `deploy/` (~22 000 строк TS/TSX/MJS, невидимых для tsc: v44/v52 School-контур на Cloudflare D1, третья реализация auth), `lib/integrations/openai_ai_integrations` (сирота-форк без package.json).
+**Вне workspace:** `sites-control/` (3-й фронтенд → воркер для OpenAI Sites; владеет корневыми `dev`/`build`/`test`), `deploy/` (~22 000 строк TS/TSX/MJS, невидимых для tsc: v44/v52 School-контур на Cloudflare D1, третья реализация auth).
 
 **Пути «commit → production» (3 активных после cleanup 2026-09-01):**
 1. **Sites control** — `pnpm build:sites` → воркер → ручная публикация через Sites CLI.
@@ -86,7 +84,7 @@
 | R19 | `preview.allowedHosts: true` в vite-конфиге sites-control (DNS-rebinding класс, dev-only); `build.outDir` — мёртвый конфиг | Ограничить/удалить |
 | R20 | Анти-дрейф тесты ассертят содержимое CI-файлов и прозу («3 689 raw-строк») — работают как рачеты, но рутинные правки копирайта ломают suite | Осознанно сохранить; задокументировать в CLAUDE.md |
 | R21 | Governance `.company-os` (`production_requires_ai_contract: true`) ничем не энфорсится; pytest-тесты grant-subsidy-hunter не запускает ни один CI-job | CI-джоб валидации контрактов или явная пометка «документация» |
-| DEAD | `routes/sync.ts` 4 785 строк недостижим (503-гейт `legacy-sync-gate.ts`), но смонтирован, включая one-off repair-эндпоинты; сирота-форк `lib/integrations/openai_ai_integrations`; 2 openai-библиотеки без потребителей вне typecheck; mockup-sandbox пуст; 40/55 UI-компонентов не используются (в т.ч. `sidebar.tsx` 727 строк ×2); схемы `messages`/`conversations` вне barrel | Удаление (частично уже в BACKLOG: `/sync`) |
+| DEAD | `routes/sync.ts` 4 785 строк недостижим (503-гейт `legacy-sync-gate.ts`), но смонтирован, включая one-off repair-эндпоинты; 40/55 UI-компонентов не используются (в т.ч. `sidebar.tsx` 727 строк ×2); схемы `messages`/`conversations` вне barrel | Удаление (частично уже в BACKLOG: `/sync`) |
 
 ### 2.5 Архитектурные находки (не уязвимости, но входят в план)
 
@@ -149,8 +147,8 @@ Acceptance evidence: machine-readable workflow inventory без необъясн
 ### Фаза 1 — мёртвый код, гигиена репо и workspace (M; в основном удаления)
 
 1. **[DEL после design gate]** Инвентаризировать каждый endpoint `routes/sync.ts` и все call-site'ы/операционные подсказки: для каждого зафиксировать решение `удалить` / `заменить scoped source job` / `перенести в sandbox script`. Сначала спроектировать и доказать необходимые безопасные замены согласно D-029 и `BACKLOG.md`, удалить/заменить ссылки в `audit.ts`, UI и документации; затем удалить `routes/sync.ts` и mount. Представительный 503 доказывает только текущую недоступность, но не достаточен как доказательство отсутствия нужной функциональности.
-2. **[DEL]** `lib/integrations-openai-ai-react`, `-server`, сирота-форк `lib/integrations/openai_ai_integrations` (сначала `grep -rn "integrations-openai" artifacts lib scripts` = пусто).
-3. **[DEL]** `artifacts/mockup-sandbox` + ссылки в workspace.
+2. **[DEL, выполнено 2026-09-01]** Удалены `lib/integrations-openai-ai-react`, `-server` и сирота-форк `lib/integrations/openai_ai_integrations`; поиск потребителей перед удалением был пуст.
+3. **[DEL, выполнено 2026-09-01]** Удалён `artifacts/mockup-sandbox`; ссылки workspace и lockfile очищены.
 4. **[DEL]** ~40 неиспользуемых UI-компонентов в **обеих** копиях (evidence: import-graph по каждому = 0 импортёров). Дедуп используемых — фаза 5.
 5. **[BEH]** `sites-control` → член workspace `@workspace/sites-control`; корневые скрипты переезжают. Его анти-дрейф тесты обязаны пройти без правок — это и есть доказательство механичности переноса.
 6. **[BEH]** Гигиена зависимостей: решить `zod/v4` vs catalog-пин (через D-номер); runtime-deps из `devDependencies`; поле `packageManager` + единый pnpm в `quality.yml`/`proof-gates.yml` (R16); нормализация `.js`-расширений в одну сторону.
