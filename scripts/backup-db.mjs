@@ -10,6 +10,13 @@ if (!target.startsWith(`${backupDir}/`))
   throw new Error("Некорректный каталог резервной копии");
 const escaped = target.replace(/'/g, "''");
 const db = new DatabaseSync(databasePath);
-db.exec("PRAGMA wal_checkpoint(FULL)");
-db.exec(`VACUUM INTO '${escaped}'`);
+try {
+  db.exec("PRAGMA busy_timeout = 15000");
+  const checkpoint = db.prepare("PRAGMA wal_checkpoint(FULL)").get();
+  if (Number(checkpoint?.busy ?? 0) !== 0)
+    throw new Error("Не удалось завершить WAL checkpoint перед резервным копированием");
+  db.exec(`VACUUM INTO '${escaped}'`);
+} finally {
+  db.close();
+}
 console.log(target);

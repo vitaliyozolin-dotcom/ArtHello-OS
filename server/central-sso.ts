@@ -139,6 +139,7 @@ function validateIdentity(payload: ExchangePayload): CentralStaffIdentity {
   const allowedRoles = new Set<Role>([
     "director",
     "deputy",
+    "methodist",
     "admin",
     "teacher",
     "tech_admin",

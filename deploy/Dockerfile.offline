@@ -5,6 +5,7 @@ WORKDIR /school
 
 COPY deploy/offline-runtime-v3.part-* /tmp/runtime-v3-parts/
 COPY deploy/offline-runtime-v4-delta.part-* /tmp/runtime-v4-parts/
+COPY deploy/offline-runtime-v5-delta.part-* /tmp/runtime-v5-parts/
 
 RUN cat /tmp/runtime-v3-parts/offline-runtime-v3.part-* > /tmp/school-runtime-v3.tar.gz \
     && printf '%s  %s\n' \
@@ -18,10 +19,23 @@ RUN cat /tmp/runtime-v3-parts/offline-runtime-v3.part-* > /tmp/school-runtime-v3
       '/tmp/school-runtime-v4-delta.tar.gz' \
       | sha256sum --check --strict \
     && tar -xzf /tmp/school-runtime-v4-delta.tar.gz -C /school \
-    && rm -f /tmp/school-runtime-v3.tar.gz /tmp/school-runtime-v4-delta.tar.gz \
-    && rm -rf /tmp/runtime-v3-parts /tmp/runtime-v4-parts \
+    && cat /tmp/runtime-v5-parts/offline-runtime-v5-delta.part-* > /tmp/school-runtime-v5-delta.tar.gz \
+    && printf '%s  %s\n' \
+      'b451004c5d1584546233ba39d6ea37c0701a1653c1fd8f7b5ba2d21bd6b201d2' \
+      '/tmp/school-runtime-v5-delta.tar.gz' \
+      | sha256sum --check --strict \
+    && tar -xzf /tmp/school-runtime-v5-delta.tar.gz -C /school \
+    && rm -f /tmp/school-runtime-v3.tar.gz /tmp/school-runtime-v4-delta.tar.gz /tmp/school-runtime-v5-delta.tar.gz \
+    && rm -rf /tmp/runtime-v3-parts /tmp/runtime-v4-parts /tmp/runtime-v5-parts \
+    && chmod 0755 /school/scripts/container-entrypoint.sh \
     && mkdir -p /data /backups \
     && chown -R node:node /school /data /backups
+
+# Overlay the dependency-free release importer from the exact delivery SHA.
+# The prebuilt runtime archive contains the interactive application, while
+# these files are deliberately kept auditable and executable without ExcelJS.
+COPY --chown=node:node lib/curriculum-allocation.mjs /school/lib/curriculum-allocation.mjs
+COPY --chown=node:node scripts/import-school-curriculum.mjs /school/scripts/import-school-curriculum.mjs
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

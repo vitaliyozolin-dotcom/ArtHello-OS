@@ -1,0 +1,1415 @@
+{
+  "schemaVersion": 1,
+  "academicYear": {
+    "id": "2026/27",
+    "startsOn": "2026-09-01",
+    "endsOn": "2027-05-31"
+  },
+  "calendarPeriods": [
+    {
+      "id": "vacation-autumn-2026",
+      "kind": "vacation",
+      "title": "Осенние каникулы",
+      "startsOn": "2026-10-26",
+      "endsOn": "2026-11-03"
+    },
+    {
+      "id": "vacation-winter-2026",
+      "kind": "vacation",
+      "title": "Зимние каникулы",
+      "startsOn": "2026-12-31",
+      "endsOn": "2027-01-10"
+    },
+    {
+      "id": "vacation-february-2027",
+      "kind": "vacation",
+      "title": "Дополнительные каникулы",
+      "startsOn": "2027-02-15",
+      "endsOn": "2027-02-21"
+    },
+    {
+      "id": "vacation-spring-2027",
+      "kind": "vacation",
+      "title": "Весенние каникулы",
+      "startsOn": "2027-03-27",
+      "endsOn": "2027-04-04"
+    }
+  ],
+  "program": {
+    "id": "program-2026-2027-2-math",
+    "className": "2",
+    "subjectId": "math",
+    "teacherUserId": "teacher-nasyrova",
+    "title": "КТП по математике · 2 класс · 2026/27",
+    "status": "active"
+  },
+  "source": {
+    "fileName": "КТП по математике 2 класс.xlsx",
+    "sheetName": "Лист1",
+    "sha256": "1d6f9925b3d80060ad46323f77db559d8fafa4f8034364760e6fdd76bc3338ae",
+    "rowCount": 170,
+    "totalHours": 170
+  },
+  "topics": [
+    {
+      "sourceRow": 2,
+      "sequence": "1",
+      "topic": "Повторение. Цепочки.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 3,
+      "sequence": "2",
+      "topic": "Повторение. Цепочки.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 4,
+      "sequence": "3",
+      "topic": "Повторение. Цепочки.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 5,
+      "sequence": "4",
+      "topic": "Повторение. Цепочки.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 6,
+      "sequence": "5",
+      "topic": "Точка. Прямая. Построение прямой по двум заданным точкам.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 7,
+      "sequence": "6",
+      "topic": "Точка. Прямая. Построение прямой по двум заданным точкам.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 8,
+      "sequence": "7",
+      "topic": "Сложение и вычитание двузначных чисел; запись «в столбик».",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 9,
+      "sequence": "8",
+      "topic": "Сложение двузначных чисел типа: 32+8, 32 +28.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 10,
+      "sequence": "9",
+      "topic": "Запись сложения и вычитания «в столбик». Сложение двузначных чисел типа: 32+8, 32 +28.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 11,
+      "sequence": "10",
+      "topic": "Вычитание двузначных чисел: 40-6, 40-26.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 12,
+      "sequence": "11",
+      "topic": "Вычитание двузначных чисел: 40-26, 40-26.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 13,
+      "sequence": "12",
+      "topic": "Вычитание двузначных чисел: 40-26, 40-26.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 14,
+      "sequence": "13",
+      "topic": "Сложение и вычитание двузначных чисел по частям.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 15,
+      "sequence": "14",
+      "topic": "Входная контрольная работа.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 16,
+      "sequence": "15",
+      "topic": "Работа над ошибками. Сложение двузначных чисел с переходом через разряд: 37+15.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 17,
+      "sequence": "16",
+      "topic": "Сложение двузначных чисел с переходом через разряд: 37+15.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 18,
+      "sequence": "17",
+      "topic": "Сложение двузначных чисел с переходом через разряд: 37+15.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 19,
+      "sequence": "18",
+      "topic": "Вычитание двузначных чисел с переходом через разряд: 32-15.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 20,
+      "sequence": "19",
+      "topic": "Вычитание двузначных чисел с переходом через разряд: 32-15.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 21,
+      "sequence": "20",
+      "topic": "Сложение и вычитание двузначных чисел с переходом через разряд.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 22,
+      "sequence": "21",
+      "topic": "Приёмы устных вычислений: 73-19, 14- 28, 38+25.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 23,
+      "sequence": "22",
+      "topic": "Приёмы устных вычислений: 73-19, 14- 28, 38+25.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 24,
+      "sequence": "23",
+      "topic": "Приёмы устных вычислений: 73-19, 14- 28, 38+25.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 25,
+      "sequence": "24",
+      "topic": "Сложение и вычитание двузначных чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 26,
+      "sequence": "25",
+      "topic": "Контрольная работа №1 по теме «Сложение и вычитание двузначных чисел».",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 27,
+      "sequence": "26",
+      "topic": "Работа над ошибками. Сложение и вычитание двузначных чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 28,
+      "sequence": "27",
+      "topic": "Сотня. Счёт сотнями.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 29,
+      "sequence": "28",
+      "topic": "Метр.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 30,
+      "sequence": "29",
+      "topic": "Сравнение, сложение и вычитание именованных чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 31,
+      "sequence": "30",
+      "topic": "Сотня. Метр. Сложение и вычитание именованных чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 32,
+      "sequence": "31",
+      "topic": "Чтение и запись трёхзначных чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 33,
+      "sequence": "32",
+      "topic": "Чтение и запись трёхзначных чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 34,
+      "sequence": "33",
+      "topic": "Чтение и запись трёхзначных чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 35,
+      "sequence": "34",
+      "topic": "Сравнение трёхзначных чисел. Запись трехзначного числа в виде суммы разрядных слагаемых.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 36,
+      "sequence": "35",
+      "topic": "Чтение и запись трёхзначных чисел, сравнение.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 37,
+      "sequence": "36",
+      "topic": "Сложение и вычитание трёхзначных чисел: 261+124, 372-162.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 38,
+      "sequence": "37",
+      "topic": "Сложение и вычитание трёхзначных чисел: 261+124, 372-162.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 39,
+      "sequence": "38",
+      "topic": "Сложение трёхзначных чисел с переходом через разряд: 162+ 153,176+145.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 40,
+      "sequence": "39",
+      "topic": "Сложение трёхзначных чисел с переходом через разряд.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 41,
+      "sequence": "40",
+      "topic": "Контрольная работа за I четверть.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 42,
+      "sequence": "41",
+      "topic": "Работа над ошибками. Сложение трёхзначных чисел с переходом через разряд.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 43,
+      "sequence": "42",
+      "topic": "Сложение трёхзначных чисел с переходом через разряд.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 44,
+      "sequence": "43",
+      "topic": "Вычитание трёхзначных чисел с переходом через разряд: 243-114. Способы проверки сложения и вычитания трехзначных чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 45,
+      "sequence": "44",
+      "topic": "Вычитание трёхзначных чисел с переходом через разряд: 243-114. Способы проверки сложения и вычитания трехзначных чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 46,
+      "sequence": "45",
+      "topic": "Вычитание трёхзначных чисел с переходом через разряд: 243-114. Способы проверки сложения и вычитания трехзначных чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 47,
+      "sequence": "46",
+      "topic": "Вычитание трёхзначных чисел с переходом через разряд.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 48,
+      "sequence": "47",
+      "topic": "Вычитание трёхзначных чисел с переходом через разряд.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 49,
+      "sequence": "48",
+      "topic": "Вычитание трёхзначных чисел с переходом через разряд: 300-124, 200-37.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 50,
+      "sequence": "49",
+      "topic": "Вычитание трёхзначных чисел с переходом через разряд:3 00-124, 200-37.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 51,
+      "sequence": "50",
+      "topic": "Вычитание трёхзначных чисел с переходом через разряд.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 52,
+      "sequence": "51",
+      "topic": "Сложение и вычитание трёхзначных чисел с переходом через разряд.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 53,
+      "sequence": "52",
+      "topic": "Контрольная работа №2 по теме «Сложение и вычитание трёхзначных чисел с переходом через разряд»",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 54,
+      "sequence": "53",
+      "topic": "Работа над ошибками. Операции.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 55,
+      "sequence": "54",
+      "topic": "Обратные операции.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 56,
+      "sequence": "55",
+      "topic": "Прямая. Луч. Отрезок.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 57,
+      "sequence": "56",
+      "topic": "Операции. Прямая. Луч. Отрезок.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 58,
+      "sequence": "57",
+      "topic": "Программа действий. Алгоритм.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 59,
+      "sequence": "58",
+      "topic": "Ломаная. Длина ломаной. Периметр.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 60,
+      "sequence": "59",
+      "topic": "Программа действий. Периметр.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 61,
+      "sequence": "60",
+      "topic": "Выражения.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 62,
+      "sequence": "61",
+      "topic": "Порядок действий в выражениях.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 63,
+      "sequence": "62",
+      "topic": "Выражения. Порядок действия в выражениях.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 64,
+      "sequence": "63",
+      "topic": "Выражения. Порядок действия в выражениях.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 65,
+      "sequence": "64",
+      "topic": "Программа с вопросами. Виды алгоритмов.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 66,
+      "sequence": "65",
+      "topic": "Программа с вопросами. Виды алгоритмов.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 67,
+      "sequence": "66",
+      "topic": "Плоскость. Угол. Прямой угол.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 68,
+      "sequence": "67",
+      "topic": "Свойства сложения.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 69,
+      "sequence": "68",
+      "topic": "Свойства сложения.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 70,
+      "sequence": "69",
+      "topic": "Вычитание суммы из числа.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 71,
+      "sequence": "70",
+      "topic": "Вычитание суммы из числа.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 72,
+      "sequence": "71",
+      "topic": "Вычитание числа из суммы.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 73,
+      "sequence": "72",
+      "topic": "Вычитание числа из суммы.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 74,
+      "sequence": "73",
+      "topic": "Вычитание суммы из числа и числа из суммы.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 75,
+      "sequence": "74",
+      "topic": "Прямоугольник. Квадрат.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 76,
+      "sequence": "75",
+      "topic": "Прямоугольник. Квадрат. Нахождение периметра квадрата.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 77,
+      "sequence": "76",
+      "topic": "Площадь фигур.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 78,
+      "sequence": "77",
+      "topic": "Единицы площади. Прямоугольный параллелепипед.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 79,
+      "sequence": "78",
+      "topic": "Контрольная работа за II четверть.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 80,
+      "sequence": "79",
+      "topic": "Площадь фигур. Единицы площади.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 81,
+      "sequence": "80",
+      "topic": "Площадь фигур. Единицы площади.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 82,
+      "sequence": "81",
+      "topic": "Площадь фигур. Единицы площади.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 83,
+      "sequence": "82",
+      "topic": "Контрольная работа №3 по теме «Свойства сложения. Площадь фигур».",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 84,
+      "sequence": "83",
+      "topic": "Работа над ошибками. Площадь фигур. Единицы площади.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 85,
+      "sequence": "84",
+      "topic": "Новые мерки и умножение. Смысл умножения.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 86,
+      "sequence": "85",
+      "topic": "Название и взаимосвязь компонентов действия умножения.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 87,
+      "sequence": "86",
+      "topic": "Название и взаимосвязь компонентов действия умножения.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 88,
+      "sequence": "87",
+      "topic": "Смысл умножения. Название и взаимосвязь компонентов.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 89,
+      "sequence": "88",
+      "topic": "Площадь прямоугольника. Переместительное свойство умножения.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 90,
+      "sequence": "89",
+      "topic": "Площадь прямоугольника. Переместительное свойство умножения.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 91,
+      "sequence": "90",
+      "topic": "Умножение на 0 и 1.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 92,
+      "sequence": "91",
+      "topic": "Таблица умножения.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 93,
+      "sequence": "92",
+      "topic": "Умножение числа 2. Умножение на 2.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 94,
+      "sequence": "93",
+      "topic": "Частные случаи умножения. Таблица умножения на 2.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 95,
+      "sequence": "94",
+      "topic": "Смысл деления. Название компонентов деления.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 96,
+      "sequence": "95",
+      "topic": "Свойство 0 и 1 при делении чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 97,
+      "sequence": "96",
+      "topic": "Смысл деления. Частные случаи деления.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 98,
+      "sequence": "97",
+      "topic": "Смысл деления. Частные случаи деления.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 99,
+      "sequence": "98",
+      "topic": "Взаимосвязь умножения и деления. Четные и нечетные числа.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 100,
+      "sequence": "99",
+      "topic": "Взаимосвязь умножения и деления. Четные и нечетные числа.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 101,
+      "sequence": "100",
+      "topic": "Взаимосвязь умножения и деления. Четные и нечетные числа.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 102,
+      "sequence": "101",
+      "topic": "Деление по содержанию.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 103,
+      "sequence": "102",
+      "topic": "Деление по содержанию.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 104,
+      "sequence": "103",
+      "topic": "Взаимосвязь умножения и деления. Деление по содержанию.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 105,
+      "sequence": "104",
+      "topic": "Контрольная работа №4 по теме «Таблица умножения».",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 106,
+      "sequence": "105",
+      "topic": "Работа над ошибками. Таблица умножения и деления на 3.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 107,
+      "sequence": "106",
+      "topic": "Виды углов.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 108,
+      "sequence": "107",
+      "topic": "Таблица умножения и деления на 3. Виды углов.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 109,
+      "sequence": "108",
+      "topic": "Решение уравнений.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 110,
+      "sequence": "109",
+      "topic": "Решение уравнений.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 111,
+      "sequence": "110",
+      "topic": "Решение уравнений.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 112,
+      "sequence": "111",
+      "topic": "Решение уравнений.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 113,
+      "sequence": "112",
+      "topic": "Таблица умножения и деления на 4.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 114,
+      "sequence": "113",
+      "topic": "Увеличение и уменьшение в несколько раз.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 115,
+      "sequence": "114",
+      "topic": "Решение задач на увеличение и уменьшение в несколько раз.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 116,
+      "sequence": "115",
+      "topic": "Увеличение и уменьшение в несколько раз.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 117,
+      "sequence": "116",
+      "topic": "Решение задач на увеличение и уменьшение в несколько раз.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 118,
+      "sequence": "117",
+      "topic": "Таблица умножения и деления на 5.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 119,
+      "sequence": "118",
+      "topic": "Порядок действий в выражениях без скобок.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 120,
+      "sequence": "119",
+      "topic": "Делители и кратные.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 121,
+      "sequence": "120",
+      "topic": "Таблица умножения и деления на 5. Порядок действий в выражениях без скобок. Делители и кратные.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 122,
+      "sequence": "121",
+      "topic": "Контрольная работа №5 по теме «Таблица умножения и деления на 5».",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 123,
+      "sequence": "122",
+      "topic": "Работа над ошибками. Таблица умножения и деления на 6.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 124,
+      "sequence": "123",
+      "topic": "Порядок действий в выражениях со скобками.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 125,
+      "sequence": "124",
+      "topic": "Контрольная работа за III четверть.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 126,
+      "sequence": "125",
+      "topic": "Работа над ошибками. Порядок действий в выражениях со скобками.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 127,
+      "sequence": "126",
+      "topic": "Таблица умножения и деления на 7.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 128,
+      "sequence": "127",
+      "topic": "Взаимосвязь между компонентами и результатами деления.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 129,
+      "sequence": "128",
+      "topic": "Кратное сравнение. Решение задач на кратное сравнение.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 130,
+      "sequence": "129",
+      "topic": "Таблица умножения на 7. Кратное сравнение.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 131,
+      "sequence": "130",
+      "topic": "Таблица умножения и деления на 8 и 9.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 132,
+      "sequence": "131",
+      "topic": "Окружность. Вычерчивание узоров из окружностей.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 133,
+      "sequence": "132",
+      "topic": "Таблица умножения и деления на 8 и 9.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 134,
+      "sequence": "133",
+      "topic": "Умножение и деление на 10 и 100.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 135,
+      "sequence": "134",
+      "topic": "Контрольная работа № 6 по теме «Таблица умножения».",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 136,
+      "sequence": "135",
+      "topic": "Работа над ошибками. Умножение и деление на 10 и 100.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 137,
+      "sequence": "136",
+      "topic": "Объём фигуры.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 138,
+      "sequence": "137",
+      "topic": "Тысяча.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 139,
+      "sequence": "138",
+      "topic": "Свойства умножения.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 140,
+      "sequence": "139",
+      "topic": "Свойства умножения.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 141,
+      "sequence": "140",
+      "topic": "Свойства умножения.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 142,
+      "sequence": "141",
+      "topic": "Умножение круглых чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 143,
+      "sequence": "142",
+      "topic": "Умножение круглых чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 144,
+      "sequence": "143",
+      "topic": "Умножение и деление круглых чисел.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 145,
+      "sequence": "144",
+      "topic": "Умножение суммы на число. Умножение двузначного числа на однозначное.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 146,
+      "sequence": "145",
+      "topic": "Умножение суммы на число. Умножение двузначного числа на однозначное.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 147,
+      "sequence": "146",
+      "topic": "Внетабличное умножение.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 148,
+      "sequence": "147",
+      "topic": "Контрольная работа №7 по теме «Свойства умножения».",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 149,
+      "sequence": "148",
+      "topic": "Работа над ошибками. Единицы длины. Миллиметр. Километр.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 150,
+      "sequence": "149",
+      "topic": "Деление суммы на число.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 151,
+      "sequence": "150",
+      "topic": "Внетабличное деление: 72:6.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 152,
+      "sequence": "151",
+      "topic": "Внетабличное деление: 36:12.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 153,
+      "sequence": "152",
+      "topic": "Внетабличное деление.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 154,
+      "sequence": "153",
+      "topic": "Единицы длины. Километр.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 155,
+      "sequence": "154",
+      "topic": "Деление с остатком.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 156,
+      "sequence": "155",
+      "topic": "Деление с остатком.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 157,
+      "sequence": "156",
+      "topic": "Деление с остатком.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 158,
+      "sequence": "157",
+      "topic": "Дерево возможностей.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 159,
+      "sequence": "158",
+      "topic": "Дерево возможностей.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 160,
+      "sequence": "159",
+      "topic": "Итоговое повторение.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 161,
+      "sequence": "160",
+      "topic": "Итоговое повторение.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 162,
+      "sequence": "161",
+      "topic": "Итоговое повторение.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 163,
+      "sequence": "162",
+      "topic": "Итоговое повторение.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 164,
+      "sequence": "163",
+      "topic": "Итоговое повторение.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 165,
+      "sequence": "164",
+      "topic": "Итоговое повторение.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 166,
+      "sequence": "165",
+      "topic": "Итоговое повторение.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 167,
+      "sequence": "166",
+      "topic": "Итоговое повторение.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 168,
+      "sequence": "167",
+      "topic": "Переводная контрольная работа.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 169,
+      "sequence": "168",
+      "topic": "Работа над ошибками.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 170,
+      "sequence": "169",
+      "topic": "Итоговая контрольная работа.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    },
+    {
+      "sourceRow": 171,
+      "sequence": "170",
+      "topic": "Работа над ошибками. Обобщение знаний.",
+      "hours": 1,
+      "homework": "",
+      "sourceDate": null
+    }
+  ]
+}

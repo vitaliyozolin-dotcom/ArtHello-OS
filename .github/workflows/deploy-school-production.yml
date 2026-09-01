@@ -15,9 +15,12 @@ concurrency:
 
 jobs:
   deploy:
+    # GitHub Free does not expose deployment environments for private repos.
+    # Keep the release gate explicit: only the repository owner may move the
+    # dedicated delivery ref that triggers this job.
+    if: github.actor == 'vitaliyozolin-dotcom'
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 35
-    environment: production-ru
     steps:
       - name: Create production run record
         id: issue
@@ -51,8 +54,14 @@ jobs:
         env:
           SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
         run: |
           set -Eeuo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
           ssh_dir="$RUNNER_TEMP/school-deploy-ssh"
           install -m 0700 -d "$ssh_dir"
           printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
@@ -99,7 +108,7 @@ jobs:
             -o Ciphers=aes128-ctr \
             -o MACs=hmac-sha2-256 \
             "$DEPLOY_USER@$DEPLOY_HOST" \
-            "DELIVERY_REF=$GITHUB_SHA SCHOOL_HOST=school-188-225-38-55.sslip.io VERIFY_PUBLIC=0 bash -s" \
+            "DELIVERY_REF=$GITHUB_SHA SCHOOL_HOST=school-188-225-38-55.sslip.io VERIFY_PUBLIC=1 bash -s" \
             < deploy/repair-deploy.sh 2>&1 | tee "$log_file"
           status=${PIPESTATUS[0]}
           set -e
@@ -114,7 +123,9 @@ jobs:
           origin=https://school-188-225-38-55.sslip.io
           healthy=0
           for attempt in $(seq 1 60); do
-            if curl --fail --silent --show-error "$origin/api/health" | grep -F '"status":"ok"' >/dev/null; then
+            health="$(curl --fail --silent --show-error "$origin/api/health" || true)"
+            if grep -F '"status":"ok"' <<<"$health" >/dev/null \
+              && grep -F '"maintenance":false' <<<"$health" >/dev/null; then
               healthy=1
               break
             fi
@@ -124,9 +135,15 @@ jobs:
           login_html="$RUNNER_TEMP/school-login.html"
           css_file="$RUNNER_TEMP/school-globals.css"
           curl --fail --silent --show-error "$origin/login" > "$login_html"
-          css_path="$(grep -oE '/_next/static/css/[^"?]+\.css' "$login_html" | head -1)"
-          test -n "$css_path"
-          curl --fail --silent --show-error "$origin$css_path" > "$css_file"
+          : > "$css_file"
+          css_count=0
+          while IFS= read -r css_path; do
+            test -n "$css_path"
+            curl --fail --silent --show-error "$origin$css_path" >> "$css_file"
+            printf '\n' >> "$css_file"
+            css_count=$((css_count + 1))
+          done < <(grep -oE '/_next/static/css/[^"?]+\.css' "$login_html" | sort -u)
+          test "$css_count" -gt 0
           grep -F '.l0-stage{width:100%;height:100svh;overflow:hidden' "$css_file" >/dev/null
           grep -F 'student-dashboard-hero-v1.webp' "$css_file" >/dev/null
           printf 'SCHOOL_PUBLIC_HTTPS=OK\n'

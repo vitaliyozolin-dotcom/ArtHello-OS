@@ -25,6 +25,7 @@ const GENERIC_PASSWORDLESS_MESSAGE =
 const staffRoles = new Set<Role>([
   "director",
   "deputy",
+  "methodist",
   "admin",
   "teacher",
   "tech_admin",

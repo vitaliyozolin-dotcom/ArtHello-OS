@@ -30,6 +30,7 @@ export const users = sqliteTable("users", {
     enum: [
       "director",
       "deputy",
+      "methodist",
       "admin",
       "teacher",
       "parent",
