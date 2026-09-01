@@ -15,9 +15,26 @@ const [htmlSource, css, javascript, hostingSource] = await Promise.all([
 
 JSON.parse(hostingSource);
 
-const page = htmlSource
-  .replace('<link rel="stylesheet" href="/styles.css" />', `<style>${css}</style>`)
-  .replace('<script type="module" src="/main.js"></script>', `<script type="module">${javascript}</script>`);
+function replaceRequired(source, marker, replacement, label) {
+  if (!source.includes(marker)) {
+    throw new Error(`Sites build failed: required ${label} marker is missing`);
+  }
+
+  return source.replace(marker, replacement);
+}
+
+const pageWithStyles = replaceRequired(
+  htmlSource,
+  '<link rel="stylesheet" href="/styles.css" />',
+  `<style>${css}</style>`,
+  "stylesheet",
+);
+const page = replaceRequired(
+  pageWithStyles,
+  '<script type="module" src="/main.js"></script>',
+  `<script type="module">${javascript}</script>`,
+  "script",
+);
 
 const worker = `const page = ${JSON.stringify(page)};
 

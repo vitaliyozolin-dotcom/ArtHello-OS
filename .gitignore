@@ -3,6 +3,7 @@ node_modules/
 dist/
 **/dist/
 *.log
+*.tsbuildinfo
 .env
 .env.*
 !.env.example
@@ -10,4 +11,3 @@ dist/
 .wrangler/
 site.tar.gz
 .DS_Store
-
