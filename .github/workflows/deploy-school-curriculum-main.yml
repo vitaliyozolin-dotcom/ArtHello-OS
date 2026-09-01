@@ -72,25 +72,72 @@ jobs:
         continue-on-error: true
         env:
           SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
           DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
         run: |
           set -Eeuo pipefail
           test -n "$SSH_PRIVATE_KEY"
-          test -n "$SSH_KNOWN_HOSTS"
           test -n "$DEPLOY_HOST"
           test -n "$DEPLOY_USER"
+          deploy_port="${DEPLOY_PORT:-2222}"
           ssh_dir="$RUNNER_TEMP/school-curriculum-ssh"
           install -m 0700 -d "$ssh_dir"
           printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
           chmod 0600 "$ssh_dir/id_ed25519"
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
-          chmod 0600 "$ssh_dir/known_hosts"
           test -s "$ssh_dir/id_ed25519"
-          test -s "$ssh_dir/known_hosts"
           ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+
+          scan="$ssh_dir/known_hosts.scan"
+          : > "$scan"
+          chmod 0600 "$scan"
+          for attempt in 1 2 3; do
+            timeout --signal=TERM --kill-after=5s 150s \
+              ssh -p "$deploy_port" \
+                -o StrictHostKeyChecking=accept-new \
+                -o UserKnownHostsFile="$scan" \
+                -o GlobalKnownHostsFile=/dev/null \
+                -o PreferredAuthentications=none \
+                -o PubkeyAuthentication=no \
+                -o PasswordAuthentication=no \
+                -o KbdInteractiveAuthentication=no \
+                -o ConnectTimeout=140 \
+                -o HostKeyAlgorithms=ssh-ed25519 \
+                "$DEPLOY_USER@$DEPLOY_HOST" true \
+                </dev/null >/dev/null 2>&1 || true
+            test -s "$scan" && break
+            sleep 5
+          done
+          test -s "$scan"
+          fingerprint="$(ssh-keygen -lf "$scan" -E sha256 | awk '{print $2; exit}')"
+          test "$fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scan" "$ssh_dir/known_hosts"
           ssh-keygen -l -f "$ssh_dir/known_hosts" >/dev/null
+
+          timeout --signal=TERM --kill-after=5s 180s \
+            ssh -T \
+              -p "$deploy_port" \
+              -i "$ssh_dir/id_ed25519" \
+              -o IdentitiesOnly=yes \
+              -o PreferredAuthentications=publickey \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o ConnectTimeout=140 \
+              -o ServerAliveInterval=10 \
+              -o ServerAliveCountMax=30 \
+              -o IPQoS=none \
+              -o Compression=no \
+              -o KexAlgorithms=curve25519-sha256 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
+              -o Ciphers=aes128-ctr \
+              -o MACs=hmac-sha2-256 \
+              "$DEPLOY_USER@$DEPLOY_HOST" true \
+              </dev/null >/dev/null
           printf 'key_path=%s\n' "$ssh_dir/id_ed25519" >> "$GITHUB_OUTPUT"
           printf 'known_hosts_path=%s\n' "$ssh_dir/known_hosts" >> "$GITHUB_OUTPUT"
           printf 'SCHOOL_PROTECTED_SSH=VERIFIED\n'
@@ -122,9 +169,9 @@ jobs:
             -o PasswordAuthentication=no
             -o KbdInteractiveAuthentication=no
             -o BatchMode=yes
-            -o ConnectTimeout=20
-            -o ServerAliveInterval=15
-            -o ServerAliveCountMax=12
+            -o ConnectTimeout=140
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=30
             -o IPQoS=none
             -o Compression=no
             -o KexAlgorithms=curve25519-sha256
