@@ -314,7 +314,7 @@ jobs:
             trap - EXIT INT TERM
             if [ "$remote_job_active" -eq 1 ] && [ "$remote_job_complete" -ne 1 ]; then
               set +e
-              timeout --signal=TERM --kill-after=5s 90s \
+              timeout --signal=TERM --kill-after=5s 180s \
                 ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
                   "printf '%s' '$cancel_payload' | base64 -d | env JOB_DIR='$job_dir' LAUNCH_NONCE='$launch_nonce' bash" \
                   </dev/null >/dev/null 2>&1
@@ -346,7 +346,7 @@ jobs:
           for ack_attempt in $(seq 1 12); do
             set +e
             remote_ack="$(
-              timeout --signal=TERM --kill-after=5s 75s \
+              timeout --signal=TERM --kill-after=5s 180s \
                 ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
                   "test -f '$job_dir/ack' && cat '$job_dir/ack' || true" \
                   </dev/null 2>/dev/null
@@ -363,7 +363,7 @@ jobs:
           printf 'SCHOOL_REMOTE_LAUNCH=ACKNOWLEDGED\n' | tee -a "$log_file"
 
           fetch_remote_log() {
-            timeout --signal=TERM --kill-after=5s 90s \
+            timeout --signal=TERM --kill-after=5s 180s \
               ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
                 "grep -E '^(SCHOOL_|Error:|error:|curl:|ssh:|Permission denied|Host key|Connection closed)' '$job_dir/deploy.log' 2>/dev/null | tail -n 220 | sed -E 's/(PASSWORD|TOKEN|SECRET|PRIVATE_KEY)=.*/\\1=[REDACTED]/Ig' || true" \
                 </dev/null 2>/dev/null || true
@@ -373,7 +373,7 @@ jobs:
           for attempt in $(seq 1 390); do
             set +e
             remote_status="$(
-              timeout --signal=TERM --kill-after=5s 75s \
+              timeout --signal=TERM --kill-after=5s 180s \
                 ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
                   "test -f '$job_dir/status' && cat '$job_dir/status' || true" \
                   </dev/null 2>/dev/null
