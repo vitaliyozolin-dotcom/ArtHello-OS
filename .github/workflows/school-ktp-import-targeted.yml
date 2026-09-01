@@ -137,6 +137,19 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          private_compose="$RUNNER_TEMP/school-candidate-private.yml"
+          CENTRAL_ACCESS_SECRET=ci-contract-secret \
+            docker compose \
+              -p school-1-11 \
+              -f deploy/docker-compose.yml \
+              -f deploy/compose.candidate-private.yml \
+              config > "$private_compose"
+          grep -F 'school_candidate:' "$private_compose" >/dev/null
+          grep -F 'internal: true' "$private_compose" >/dev/null
+          if grep -F 'arthello-os_public' "$private_compose" >/dev/null; then
+            printf 'Private candidate unexpectedly has public routing.\n' >&2
+            exit 1
+          fi
           builder="school-ktp-builder:${GITHUB_SHA}"
           runtime="school-ktp-runtime:${GITHUB_SHA}"
           if ! docker build --pull --target builder --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$builder" .; then

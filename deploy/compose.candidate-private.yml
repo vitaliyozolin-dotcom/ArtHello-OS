@@ -1,0 +1,11 @@
+services:
+  school:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.offline
+    networks:
+      - school_candidate
+
+networks:
+  school_candidate:
+    internal: true

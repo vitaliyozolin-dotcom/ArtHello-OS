@@ -13,6 +13,10 @@ const deploySource = await readFile(
   new URL("../deploy/repair-deploy.sh", import.meta.url),
   "utf8",
 );
+const privateComposeSource = await readFile(
+  new URL("../deploy/compose.candidate-private.yml", import.meta.url),
+  "utf8",
+);
 
 test("school structure contains classes 1 through 6 and the supplied staff", () => {
   for (const className of ["1", "2", "3", "4", "5", "6"]) {
@@ -221,7 +225,7 @@ test("setup readiness is separated from daily workspaces", () => {
 
 test("production cutover cannot restore a backup after accepting new writes", () => {
   const main = deploySource.slice(deploySource.indexOf("PART_COUNT="));
-  const build = main.indexOf("compose build school");
+  const build = main.indexOf("compose_private build school");
   const preArm = main.indexOf("PRE_ARM_RECOVERY=1");
   const stopOld = main.indexOf("docker stop --time 30 school-1-11");
   const createGate = main.indexOf("\ncreate_write_gate\n");
@@ -230,8 +234,11 @@ test("production cutover cannot restore a backup after accepting new writes", ()
   );
   const armRollback = main.indexOf("ROLLBACK_ARMED=1");
   const startCandidate = main.indexOf(
-    "compose up -d --no-build --force-recreate school",
+    "compose_private up -d --no-build --force-recreate school",
   );
+  const privateRouting = main.indexOf("SCHOOL_CANDIDATE_ROUTING=PRIVATE");
+  const privateGateProbe = main.indexOf("\nverify_private_write_gate\n");
+  const attachPublicNetwork = main.indexOf("\nattach_public_network\n");
   const gateProbe = main.indexOf("\nverify_public_write_gate\n");
   const scheduleImport = main.indexOf("SCHEDULE_IMPORT_OUTPUT=");
   const curriculumImport = main.indexOf("CURRICULUM_IMPORT_OUTPUT=");
@@ -251,6 +258,9 @@ test("production cutover cannot restore a backup after accepting new writes", ()
     offlineBackup,
     armRollback,
     startCandidate,
+    privateRouting,
+    privateGateProbe,
+    attachPublicNetwork,
     gateProbe,
     scheduleImport,
     curriculumImport,
@@ -269,6 +279,10 @@ test("production cutover cannot restore a backup after accepting new writes", ()
   assert.ok(createGate < offlineBackup);
   assert.ok(offlineBackup < armRollback);
   assert.ok(armRollback < startCandidate);
+  assert.ok(startCandidate < privateRouting);
+  assert.ok(privateRouting < privateGateProbe);
+  assert.ok(privateGateProbe < attachPublicNetwork);
+  assert.ok(attachPublicNetwork < gateProbe);
   assert.ok(startCandidate < gateProbe);
   assert.ok(gateProbe < scheduleImport);
   assert.ok(scheduleImport < curriculumImport);
@@ -286,6 +300,12 @@ test("production cutover cannot restore a backup after accepting new writes", ()
   assert.match(deploySource, /Retry-After:\[\[:space:\]\]\*30/);
   assert.match(deploySource, /Cache-Control:\[\[:space:\]\]\*no-store/);
   assert.match(deploySource, /"maintenance":false/);
+  assert.match(deploySource, /SCHOOL_PRIVATE_WRITE_GATE=VERIFIED/);
+  assert.match(deploySource, /SCHOOL_PUBLIC_NETWORK=ATTACHED/);
+  assert.match(deploySource, /docker network connect[\s\S]*?--alias school-1-11/);
+  assert.match(privateComposeSource, /school_candidate:/);
+  assert.match(privateComposeSource, /internal: true/);
+  assert.doesNotMatch(privateComposeSource, /arthello[_-]public/);
   assert.match(main, /--network none[\s\S]*?--read-only[\s\S]*?"\$CANDIDATE_IMAGE_ID"[\s\S]*?scripts\/backup-db\.mjs/);
   assert.doesNotMatch(main, /docker exec school-1-11 node scripts\/backup-db\.mjs/);
 

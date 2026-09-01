@@ -16,6 +16,7 @@ DELTA_PART_GLOB=offline-runtime-v4-delta.part-\*
 RELEASE_DELTA_SHA256=b451004c5d1584546233ba39d6ea37c0701a1653c1fd8f7b5ba2d21bd6b201d2
 RELEASE_DELTA_PART_GLOB=offline-runtime-v5-delta.part-\*
 WRITE_GATE_PATH=/data/.school-deploy-read-only
+PUBLIC_NETWORK_NAME=${PUBLIC_NETWORK_NAME:-arthello-os_public}
 DEPLOY_SHELL_PID=$BASHPID
 
 ARCHIVE=$(mktemp /tmp/school-release.XXXXXX.tar.gz)
@@ -83,6 +84,15 @@ compose() {
     -p school-1-11 \
     -f docker-compose.yml \
     -f compose.offline.yml \
+    "$@"
+}
+
+compose_private() {
+  docker compose \
+    --env-file "$SCHOOL_ROOT/shared/.env" \
+    -p school-1-11 \
+    -f docker-compose.yml \
+    -f compose.candidate-private.yml \
     "$@"
 }
 
@@ -168,6 +178,53 @@ verify_public_write_gate() {
   grep -Eiq '^Retry-After:[[:space:]]*30[[:space:]]*$' "$PUBLIC_WRITE_GATE_HEADERS"
   grep -Eiq '^Cache-Control:[[:space:]]*no-store[[:space:]]*$' "$PUBLIC_WRITE_GATE_HEADERS"
   printf 'SCHOOL_PUBLIC_WRITE_GATE=VERIFIED\n'
+}
+
+verify_private_write_gate() {
+  docker exec -i school-1-11 node --input-type=module <<'VERIFY_PRIVATE_WRITE_GATE'
+const origin = 'http://127.0.0.1:3000';
+const response = await fetch(`${origin}/api/school`, {
+  method: 'POST',
+  headers: {
+    Origin: origin,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ action: 'deployment.write-gate.private-probe' }),
+});
+const body = await response.json();
+if (
+  response.status !== 503 ||
+  body?.code !== 'deployment_read_only' ||
+  response.headers.get('retry-after') !== '30' ||
+  response.headers.get('cache-control') !== 'no-store'
+) {
+  console.error(JSON.stringify({
+    status: response.status,
+    body,
+    retryAfter: response.headers.get('retry-after'),
+    cacheControl: response.headers.get('cache-control'),
+  }));
+  process.exit(1);
+}
+VERIFY_PRIVATE_WRITE_GATE
+  printf 'SCHOOL_PRIVATE_WRITE_GATE=VERIFIED\n'
+}
+
+public_network_state() {
+  docker inspect \
+    --format "{{if index .NetworkSettings.Networks \"$PUBLIC_NETWORK_NAME\"}}attached{{end}}" \
+    school-1-11
+}
+
+attach_public_network() {
+  docker network inspect "$PUBLIC_NETWORK_NAME" >/dev/null
+  test -z "$(public_network_state)"
+  docker network connect \
+    --alias school-1-11 \
+    "$PUBLIC_NETWORK_NAME" \
+    school-1-11
+  test "$(public_network_state)" = attached
+  printf 'SCHOOL_PUBLIC_NETWORK=ATTACHED\n'
 }
 
 verify_public_write_gate_released() {
@@ -573,8 +630,8 @@ ENV_BACKUP_SHA256=$(sha256sum "$HOST_ENV_BACKUP" | cut -d ' ' -f 1)
 test -n "$ENV_BACKUP_SHA256"
 
 cd "$RELEASE/deploy"
-compose config >/dev/null
-compose build school
+compose_private config >/dev/null
+compose_private build school
 CANDIDATE_IMAGE_ID=$(docker image inspect "$PREVIOUS_IMAGE_NAME" --format '{{.Id}}')
 printf '%s' "$CANDIDATE_IMAGE_ID" | grep -Eq '^sha256:[0-9a-f]{64}$'
 printf 'SCHOOL_CANDIDATE_BUILD=VERIFIED\n'
@@ -688,8 +745,11 @@ ENV_UPDATE_TMP=""
 atomic_switch_release "$RELEASE"
 SWITCHED=1
 cd "$SCHOOL_ROOT/current/deploy"
-compose config >/dev/null
-compose up -d --no-build --force-recreate school
+compose_private config >/dev/null
+compose_private up -d --no-build --force-recreate school
+
+test -z "$(public_network_state)"
+printf 'SCHOOL_CANDIDATE_ROUTING=PRIVATE\n'
 
 SCHOOL_STATUS=unknown
 for attempt in $(seq 1 90); do
@@ -710,6 +770,8 @@ docker exec school-1-11 node -e \
   "fetch('http://127.0.0.1:3000/api/health').then(async r=>{console.log(await r.text());if(!r.ok)process.exit(1)}).catch(e=>{console.error(e);process.exit(1)})"
 
 docker exec school-1-11 test -f "$WRITE_GATE_PATH"
+verify_private_write_gate
+attach_public_network
 verify_public_write_gate
 
 SCHEDULE_IMPORT_OUTPUT=$(docker exec school-1-11 \
