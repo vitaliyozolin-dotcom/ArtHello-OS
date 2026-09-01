@@ -15,6 +15,10 @@ concurrency:
 
 jobs:
   deploy:
+    # GitHub Free does not expose deployment environments for private repos.
+    # Keep the release gate explicit: only the repository owner may move the
+    # dedicated delivery ref that triggers this job.
+    if: github.actor == 'vitaliyozolin-dotcom'
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 35
     steps:
@@ -50,8 +54,14 @@ jobs:
         env:
           SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
         run: |
           set -Eeuo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
           ssh_dir="$RUNNER_TEMP/school-deploy-ssh"
           install -m 0700 -d "$ssh_dir"
           printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
