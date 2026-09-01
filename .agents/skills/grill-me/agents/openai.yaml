@@ -1,0 +1,4 @@
+interface:
+  display_name: "Grill Me"
+  short_description: "Адверсариально проверить идею до старта"
+  default_prompt: "Используй $grill-me, чтобы жёстко проверить идею или план до начала реализации."

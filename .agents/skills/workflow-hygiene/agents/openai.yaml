@@ -1,0 +1,4 @@
+interface:
+  display_name: "Гигиена workflow"
+  short_description: "Проверить безопасность GitHub Actions workflow"
+  default_prompt: "Используй $workflow-hygiene, чтобы инвентаризировать GitHub Actions и выявить опасные или устаревшие workflow."

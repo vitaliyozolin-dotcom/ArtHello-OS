@@ -1,0 +1,4 @@
+interface:
+  display_name: "Аудит релиза"
+  short_description: "Проверить provenance и готовность релиза"
+  default_prompt: "Используй $audit-release, чтобы проверить provenance и готовность кандидата к релизу без внесения изменений."

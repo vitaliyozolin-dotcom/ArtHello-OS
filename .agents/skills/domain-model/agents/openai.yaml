@@ -1,0 +1,4 @@
+interface:
+  display_name: "Доменная модель"
+  short_description: "Сверить изменения с доменной моделью"
+  default_prompt: "Используй $domain-model, чтобы сверить предлагаемое изменение с моделью данных и инвариантами ArtHello OS."

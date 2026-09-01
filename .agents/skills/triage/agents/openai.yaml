@@ -1,0 +1,4 @@
+interface:
+  display_name: "Триаж бэклога"
+  short_description: "Сверить BACKLOG с состоянием репозитория"
+  default_prompt: "Используй $triage, чтобы доказательно сверить статусы BACKLOG.md с текущим состоянием репозитория."

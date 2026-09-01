@@ -1,0 +1,4 @@
+interface:
+  display_name: "TDD ArtHello OS"
+  short_description: "Реализовать изменение циклом red-green-refactor"
+  default_prompt: "Используй $tdd, чтобы реализовать изменение через доказанный цикл red-green-refactor в тестовой инфраструктуре проекта."

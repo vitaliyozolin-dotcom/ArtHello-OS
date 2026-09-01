@@ -1,0 +1,4 @@
+interface:
+  display_name: "Проверка миграций"
+  short_description: "Проверить целостность Drizzle-миграций"
+  default_prompt: "Используй $migration-check, чтобы проверить миграции, rollbacks и инварианты схемы базы данных."
