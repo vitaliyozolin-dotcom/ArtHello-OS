@@ -314,6 +314,16 @@ test("production cutover cannot restore a backup after accepting new writes", ()
     deploySource,
     /expectedProgram = \{[\s\S]*?status: 'active'[\s\S]*?\};/,
   );
+  const releaseImportVerification = deploySource.slice(
+    deploySource.indexOf("const expectedReleaseImportId ="),
+    deploySource.indexOf("const curriculum ="),
+  );
+  assert.match(
+    releaseImportVerification,
+    /program-import-1d6f9925b3d80060ad46323f/,
+  );
+  assert.match(releaseImportVerification, /WHERE id = \? AND program_id = \?/);
+  assert.doesNotMatch(releaseImportVerification, /COUNT\(\*\) AS imports/);
   assert.match(privateComposeSource, /school_candidate:/);
   assert.match(privateComposeSource, /internal: true/);
   assert.doesNotMatch(privateComposeSource, /arthello[_-]public/);

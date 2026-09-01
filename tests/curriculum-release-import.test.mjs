@@ -409,6 +409,18 @@ test("approved 170-hour math KTP is imported once across the full 2026/27 calend
        SET status = 'changes_requested', review_comment = 'Уточнить формулировку темы'`,
     )
     .run();
+  lifecycleDb
+    .prepare(
+      `INSERT INTO program_imports
+        (id, program_id, file_name, sheet_name, imported_by_user_id, row_count,
+          required_hours, available_slots, scheduled_hours, unscheduled_hours,
+          validation_status)
+       VALUES
+        ('program-import-teacher-revision', 'existing-program-2-math',
+          'КТП уточнённое.xlsx', 'КТП', 'teacher-nasyrova', 170,
+          170, 171, 170, 0, 'reserve')`,
+    )
+    .run();
   lifecycleDb.close();
 
   const secondRun = runImporter(databasePath);
@@ -438,7 +450,7 @@ test("approved 170-hour math KTP is imported once across the full 2026/27 calend
     {
       periods: 4,
       programs: 1,
-      imports: 1,
+      imports: 2,
       topics: 170,
       sessions: 170,
       status: "changes_requested",

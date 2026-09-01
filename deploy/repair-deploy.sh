@@ -957,16 +957,17 @@ docker exec school-1-11 node --input-type=module -e "
     process.exit(1);
   }
 
+  const expectedReleaseImportId = 'program-import-1d6f9925b3d80060ad46323f';
   const imported = db.prepare(\`
-    SELECT COUNT(*) AS imports, MIN(imported_by_user_id) AS importedBy,
-      MIN(row_count) AS rows, MIN(required_hours) AS requiredHours,
-      MIN(available_slots) AS availableSlots,
-      MIN(scheduled_hours) AS scheduledHours,
-      MIN(unscheduled_hours) AS unscheduledHours,
-      MIN(validation_status) AS validationStatus
+    SELECT id AS importId, imported_by_user_id AS importedBy,
+      row_count AS rows, required_hours AS requiredHours,
+      available_slots AS availableSlots,
+      scheduled_hours AS scheduledHours,
+      unscheduled_hours AS unscheduledHours,
+      validation_status AS validationStatus
     FROM program_imports
-    WHERE program_id = ?
-  \`).get(program.id);
+    WHERE id = ? AND program_id = ?
+  \`).get(expectedReleaseImportId, program.id);
   const curriculum = db.prepare(\`
     SELECT COUNT(DISTINCT pt.id) AS topics,
       COALESCE(SUM(pt.planned_hours), 0) AS hours,
@@ -995,7 +996,7 @@ docker exec school-1-11 node --input-type=module -e "
       AND scheduled_date = '2027-05-31'
   \`).get(program.id).count;
   const expectedImport = {
-    imports: 1,
+    importId: expectedReleaseImportId,
     importedBy: expectedTeacherId,
     rows: 170,
     requiredHours: 170,
