@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  copyFileSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -95,12 +97,19 @@ function seedCurriculumDependencies(db) {
   ).run();
 }
 
-function runImporter(databasePath) {
+function runImporter(
+  databasePath,
+  {
+    scriptPath = "scripts/import-school-curriculum.mjs",
+    curriculumPath = curriculumFile,
+    cwd = repositoryRoot,
+  } = {},
+) {
   return spawnSync(
     process.execPath,
-    ["scripts/import-school-curriculum.mjs", curriculumFile],
+    [scriptPath, curriculumPath],
     {
-      cwd: repositoryRoot,
+      cwd,
       env: { ...process.env, DATABASE_PATH: databasePath },
       encoding: "utf8",
     },
@@ -117,6 +126,40 @@ function createSeededDatabase(t, prefix) {
   seedCurriculumDependencies(db);
   return { databasePath, db };
 }
+
+test("release importer runs from an isolated runtime without ExcelJS", (t) => {
+  const { databasePath, db } = createSeededDatabase(
+    t,
+    "school-curriculum-no-exceljs-",
+  );
+  db.close();
+
+  const isolatedRoot = mkdtempSync(join(tmpdir(), "school-runtime-isolated-"));
+  t.after(() => rmSync(isolatedRoot, { recursive: true, force: true }));
+  mkdirSync(join(isolatedRoot, "scripts"), { recursive: true });
+  mkdirSync(join(isolatedRoot, "lib"), { recursive: true });
+  copyFileSync(
+    join(repositoryRoot, "scripts", "import-school-curriculum.mjs"),
+    join(isolatedRoot, "scripts", "import-school-curriculum.mjs"),
+  );
+  copyFileSync(
+    join(repositoryRoot, "lib", "curriculum-import.mjs"),
+    join(isolatedRoot, "lib", "curriculum-import.mjs"),
+  );
+
+  const result = runImporter(databasePath, {
+    scriptPath: join(isolatedRoot, "scripts", "import-school-curriculum.mjs"),
+    curriculumPath: join(repositoryRoot, curriculumFile),
+    cwd: isolatedRoot,
+  });
+  assert.equal(
+    result.status,
+    0,
+    `Изолированный импорт завершился с ошибкой:\n${result.stdout}${result.stderr}`,
+  );
+  assert.doesNotMatch(result.stderr, /ERR_MODULE_NOT_FOUND|exceljs/i);
+  assert.match(result.stdout, /SCHOOL_CURRICULUM_IMPORT=SUCCESS/);
+});
 
 test("approved 170-hour math KTP is imported once across the full 2026/27 calendar", (t) => {
   const temporaryDirectory = mkdtempSync(
