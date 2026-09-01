@@ -123,7 +123,9 @@ jobs:
           origin=https://school-188-225-38-55.sslip.io
           healthy=0
           for attempt in $(seq 1 60); do
-            if curl --fail --silent --show-error "$origin/api/health" | grep -F '"status":"ok"' >/dev/null; then
+            health="$(curl --fail --silent --show-error "$origin/api/health" || true)"
+            if grep -F '"status":"ok"' <<<"$health" >/dev/null \
+              && grep -F '"maintenance":false' <<<"$health" >/dev/null; then
               healthy=1
               break
             fi

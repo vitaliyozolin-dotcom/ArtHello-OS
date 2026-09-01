@@ -13,8 +13,9 @@ RUNTIME_SHA256=9125b43319706f4bf3a9a45813b50a0495e61bef5b73f3305a1b97717406b349
 RUNTIME_PART_GLOB=offline-runtime-v3.part-\*
 DELTA_SHA256=a4ef97eb6795cb81c860ab62b0ae7510e693b1fec1e5f6129aea072ce2ca2c9f
 DELTA_PART_GLOB=offline-runtime-v4-delta.part-\*
-RELEASE_DELTA_SHA256=cfeb2cd1ac663a082d7bb2369f2c8490fcd1cfead4436e169a4183d21ff69dce
+RELEASE_DELTA_SHA256=b451004c5d1584546233ba39d6ea37c0701a1653c1fd8f7b5ba2d21bd6b201d2
 RELEASE_DELTA_PART_GLOB=offline-runtime-v5-delta.part-\*
+WRITE_GATE_PATH=/data/.school-deploy-read-only
 DEPLOY_SHELL_PID=$BASHPID
 
 ARCHIVE=$(mktemp /tmp/school-release.XXXXXX.tar.gz)
@@ -23,10 +24,13 @@ RELEASE="$SCHOOL_ROOT/releases/school-$(date -u +%Y%m%dT%H%M%SZ)-${DELIVERY_REF:
 PREVIOUS_RELEASE=""
 SWITCHED=0
 ROLLBACK_ARMED=0
+PRE_ARM_RECOVERY=0
 ENV_UPDATE_TMP=""
 CURRENT_LINK_TMP=""
 PUBLIC_LOGIN_FILE=""
 PUBLIC_CSS_FILE=""
+PUBLIC_WRITE_GATE_FILE=""
+PUBLIC_WRITE_GATE_HEADERS=""
 HOST_BACKUP_DIR=""
 HOST_DATABASE_BACKUP=""
 HOST_ENV_BACKUP=""
@@ -43,6 +47,9 @@ ENV_MODE=""
 HELPER_IMAGE_ID=""
 PREVIOUS_IMAGE_ID=""
 PREVIOUS_IMAGE_NAME=""
+CANDIDATE_IMAGE_ID=""
+OFFLINE_BACKUP_CONTAINER=""
+WRITE_GATE_HELD=0
 
 cleanup() {
   rm -f "$ARCHIVE" "$CURL_CONFIG"
@@ -57,6 +64,15 @@ cleanup() {
   fi
   if [ -n "$PUBLIC_CSS_FILE" ]; then
     rm -f "$PUBLIC_CSS_FILE"
+  fi
+  if [ -n "$PUBLIC_WRITE_GATE_FILE" ]; then
+    rm -f "$PUBLIC_WRITE_GATE_FILE"
+  fi
+  if [ -n "$PUBLIC_WRITE_GATE_HEADERS" ]; then
+    rm -f "$PUBLIC_WRITE_GATE_HEADERS"
+  fi
+  if [ -n "$OFFLINE_BACKUP_CONTAINER" ]; then
+    docker rm -f "$OFFLINE_BACKUP_CONTAINER" >/dev/null 2>&1 || true
   fi
 }
 
@@ -129,6 +145,88 @@ verify_public_release() {
   grep -F 'student-dashboard-hero-v1.webp' "$PUBLIC_CSS_FILE" >/dev/null
   printf 'SCHOOL_PUBLIC_HTTPS=OK\n'
   printf 'SCHOOL_FULLSCREEN_CSS=VERIFIED\n'
+}
+
+verify_public_write_gate() {
+  local origin="https://$SCHOOL_HOST"
+  local status
+  PUBLIC_WRITE_GATE_FILE=$(mktemp /tmp/school-public-write-gate.XXXXXX.json)
+  PUBLIC_WRITE_GATE_HEADERS=$(mktemp /tmp/school-public-write-gate.XXXXXX.headers)
+  status=$(curl --silent --show-error --max-time 30 \
+    --output "$PUBLIC_WRITE_GATE_FILE" \
+    --dump-header "$PUBLIC_WRITE_GATE_HEADERS" \
+    --write-out '%{http_code}' \
+    --request POST \
+    --header "Origin: $origin" \
+    --header 'Content-Type: application/json' \
+    --data '{"action":"deployment.write-gate.probe"}' \
+    "$origin/api/school")
+  test "$status" = 503
+  grep -Eq '"code"[[:space:]]*:[[:space:]]*"deployment_read_only"' \
+    "$PUBLIC_WRITE_GATE_FILE"
+  grep -Eiq '^Retry-After:[[:space:]]*30[[:space:]]*$' "$PUBLIC_WRITE_GATE_HEADERS"
+  grep -Eiq '^Cache-Control:[[:space:]]*no-store[[:space:]]*$' "$PUBLIC_WRITE_GATE_HEADERS"
+  printf 'SCHOOL_PUBLIC_WRITE_GATE=VERIFIED\n'
+}
+
+verify_public_write_gate_released() {
+  local origin="https://$SCHOOL_HOST"
+  local response
+  response=$(curl --fail --silent --show-error --max-time 30 \
+    -H 'Cache-Control: no-cache' \
+    "$origin/api/health")
+  printf '%s\n' "$response" | grep -F '"status":"ok"' >/dev/null
+  printf '%s\n' "$response" | grep -F '"maintenance":false' >/dev/null
+  printf 'SCHOOL_PUBLIC_WRITE_GATE=RELEASED\n'
+}
+
+create_write_gate() {
+  test "$WRITE_GATE_PATH" = /data/.school-deploy-read-only
+  docker run --rm \
+    --network none \
+    --read-only \
+    --user 0:0 \
+    --security-opt no-new-privileges:true \
+    --volume "$DATA_VOLUME_NAME:/data" \
+    --env WRITE_GATE_PATH="$WRITE_GATE_PATH" \
+    --entrypoint /bin/sh \
+    "$HELPER_IMAGE_ID" \
+    -c '
+      set -eu
+      test "$WRITE_GATE_PATH" = /data/.school-deploy-read-only
+      gate_tmp="${WRITE_GATE_PATH}.tmp.$$"
+      rm -f "$gate_tmp"
+      umask 022
+      printf "deployment read-only\n" > "$gate_tmp"
+      chmod 0444 "$gate_tmp"
+      mv -f "$gate_tmp" "$WRITE_GATE_PATH"
+      test -f "$WRITE_GATE_PATH"
+      sync
+    '
+  WRITE_GATE_HELD=1
+  printf 'SCHOOL_WRITE_GATE=ENABLED\n'
+}
+
+clear_write_gate() {
+  test "$WRITE_GATE_PATH" = /data/.school-deploy-read-only
+  docker run --rm \
+    --network none \
+    --read-only \
+    --user 0:0 \
+    --security-opt no-new-privileges:true \
+    --volume "$DATA_VOLUME_NAME:/data" \
+    --env WRITE_GATE_PATH="$WRITE_GATE_PATH" \
+    --entrypoint /bin/sh \
+    "$HELPER_IMAGE_ID" \
+    -c '
+      set -eu
+      test "$WRITE_GATE_PATH" = /data/.school-deploy-read-only
+      rm -f "$WRITE_GATE_PATH"
+      test ! -e "$WRITE_GATE_PATH"
+      sync
+    '
+  WRITE_GATE_HELD=0
+  printf 'SCHOOL_WRITE_GATE=DISABLED\n'
 }
 
 verify_host_sqlite() {
@@ -260,7 +358,7 @@ rollback() {
   set +e
   local rollback_failed=0
   local restore_allowed=1
-  if [ "$ROLLBACK_ARMED" -eq 1 ]; then
+  if [ "$ROLLBACK_ARMED" -eq 1 ] || [ "$PRE_ARM_RECOVERY" -eq 1 ]; then
     printf 'SCHOOL_ROLLBACK=STARTED\n' >&2
     if docker inspect school-1-11 >/dev/null 2>&1; then
       if ! docker stop school-1-11 >/dev/null 2>&1; then
@@ -269,8 +367,17 @@ rollback() {
         printf 'SCHOOL_ROLLBACK_STOP=FAILED\n' >&2
       fi
     fi
+    if [ -n "$OFFLINE_BACKUP_CONTAINER" ]; then
+      if docker rm -f "$OFFLINE_BACKUP_CONTAINER" >/dev/null 2>&1; then
+        OFFLINE_BACKUP_CONTAINER=""
+      else
+        restore_allowed=0
+        rollback_failed=1
+        printf 'SCHOOL_ROLLBACK_BACKUP_HELPER_STOP=FAILED\n' >&2
+      fi
+    fi
 
-    if [ "$restore_allowed" -eq 1 ]; then
+    if [ "$restore_allowed" -eq 1 ] && [ "$ROLLBACK_ARMED" -eq 1 ]; then
       if restore_env_backup; then
         printf 'SCHOOL_ROLLBACK_ENV=RESTORED\n' >&2
       else
@@ -283,6 +390,8 @@ rollback() {
         rollback_failed=1
         printf 'SCHOOL_ROLLBACK_DATABASE=FAILED\n' >&2
       fi
+    elif [ "$restore_allowed" -eq 1 ]; then
+      printf 'SCHOOL_ROLLBACK_DATABASE=UNCHANGED_PRE_BACKUP\n' >&2
     fi
 
     if [ "$rollback_failed" -eq 0 ] \
@@ -301,12 +410,17 @@ rollback() {
       elif ! wait_for_school_health; then
         docker logs --tail 160 school-1-11 >&2 || true
         rollback_failed=1
+      elif [ "$WRITE_GATE_HELD" -eq 1 ] && ! clear_write_gate >&2; then
+        rollback_failed=1
+        printf 'SCHOOL_ROLLBACK_WRITE_GATE=FAILED\n' >&2
       fi
     else
       rollback_failed=1
     fi
 
     if [ "$rollback_failed" -eq 0 ]; then
+      ROLLBACK_ARMED=0
+      PRE_ARM_RECOVERY=0
       printf 'SCHOOL_ROLLBACK=FINISHED\n' >&2
     else
       printf 'SCHOOL_ROLLBACK=FAILED_MANUAL_RECOVERY_REQUIRED\n' >&2
@@ -449,34 +563,52 @@ install -m 0600 "$SCHOOL_ROOT/shared/.env" "$HOST_ENV_BACKUP"
 ENV_BACKUP_SHA256=$(sha256sum "$HOST_ENV_BACKUP" | cut -d ' ' -f 1)
 test -n "$ENV_BACKUP_SHA256"
 
-BACKUP_OUTPUT=$(docker exec school-1-11 node scripts/backup-db.mjs)
+cd "$RELEASE/deploy"
+compose config >/dev/null
+compose build school
+CANDIDATE_IMAGE_ID=$(docker image inspect "$PREVIOUS_IMAGE_NAME" --format '{{.Id}}')
+printf '%s' "$CANDIDATE_IMAGE_ID" | grep -Eq '^sha256:[0-9a-f]{64}$'
+printf 'SCHOOL_CANDIDATE_BUILD=VERIFIED\n'
+
+PRE_ARM_RECOVERY=1
+docker stop --time 30 school-1-11 >/dev/null
+test "$(docker inspect school-1-11 --format '{{.State.Running}}')" = false
+printf 'SCHOOL_WRITES=QUIESCED\n'
+
+WRITE_GATE_HELD=1
+create_write_gate
+
+OFFLINE_BACKUP_CONTAINER="school-offline-backup-${DELIVERY_REF:0:12}-$$"
+BACKUP_OUTPUT=$(docker run \
+  --name "$OFFLINE_BACKUP_CONTAINER" \
+  --network none \
+  --read-only \
+  --user 0:0 \
+  --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+  --volume "$DATA_VOLUME_NAME:/data" \
+  --volume "$HOST_BACKUP_DIR:/host-backup" \
+  --env DATABASE_PATH="$LIVE_DATABASE_PATH" \
+  --env BACKUP_DIR=/host-backup \
+  --entrypoint node \
+  "$CANDIDATE_IMAGE_ID" \
+  scripts/backup-db.mjs)
 printf '%s\n' "$BACKUP_OUTPUT"
 CONTAINER_DATABASE_BACKUP=$(printf '%s\n' "$BACKUP_OUTPUT" \
-  | sed -n '/^\/backups\/school-1-11-.*\.sqlite$/p' \
+  | sed -n '/^\/host-backup\/school-1-11-.*\.sqlite$/p' \
   | tail -n 1)
 test -n "$CONTAINER_DATABASE_BACKUP"
-docker exec school-1-11 test -s "$CONTAINER_DATABASE_BACKUP"
-docker exec \
-  --env BACKUP_PATH="$CONTAINER_DATABASE_BACKUP" \
-  school-1-11 \
-  node --input-type=module -e "
-    import { DatabaseSync } from 'node:sqlite';
-    const db = new DatabaseSync(process.env.BACKUP_PATH, { readOnly: true });
-    db.exec('PRAGMA temp_store=MEMORY');
-    const result = db.prepare('PRAGMA integrity_check').get();
-    db.close();
-    if (result.integrity_check !== 'ok') process.exit(1);
-  "
-CONTAINER_DATABASE_SHA256=$(docker exec school-1-11 \
-  sha256sum "$CONTAINER_DATABASE_BACKUP" | cut -d ' ' -f 1)
-test -n "$CONTAINER_DATABASE_SHA256"
-
-docker cp "school-1-11:$CONTAINER_DATABASE_BACKUP" "$HOST_DATABASE_BACKUP.tmp"
+docker rm "$OFFLINE_BACKUP_CONTAINER" >/dev/null
+OFFLINE_BACKUP_CONTAINER=""
+OFFLINE_BACKUP_BASENAME=${CONTAINER_DATABASE_BACKUP##*/}
+OFFLINE_HOST_DATABASE_BACKUP="$HOST_BACKUP_DIR/$OFFLINE_BACKUP_BASENAME"
+test -s "$OFFLINE_HOST_DATABASE_BACKUP"
+mv "$OFFLINE_HOST_DATABASE_BACKUP" "$HOST_DATABASE_BACKUP.tmp"
 chmod 0600 "$HOST_DATABASE_BACKUP.tmp"
 mv "$HOST_DATABASE_BACKUP.tmp" "$HOST_DATABASE_BACKUP"
 verify_host_sqlite "$HOST_DATABASE_BACKUP"
 DATABASE_BACKUP_SHA256=$(sha256sum "$HOST_DATABASE_BACKUP" | cut -d ' ' -f 1)
-test "$DATABASE_BACKUP_SHA256" = "$CONTAINER_DATABASE_SHA256"
+test -n "$DATABASE_BACKUP_SHA256"
 DATABASE_BACKUP_SIZE=$(stat -c '%s' "$HOST_DATABASE_BACKUP")
 ENV_BACKUP_SIZE=$(stat -c '%s' "$HOST_ENV_BACKUP")
 printf '%s' "$DATABASE_BACKUP_SIZE" | grep -Eq '^[1-9][0-9]*$'
@@ -501,6 +633,8 @@ printf '%s' "$ENV_BACKUP_SIZE" | grep -Eq '^[1-9][0-9]*$'
   printf 'helper_image_id=%s\n' "$HELPER_IMAGE_ID"
   printf 'previous_image_id=%s\n' "$PREVIOUS_IMAGE_ID"
   printf 'previous_image_name=%s\n' "$PREVIOUS_IMAGE_NAME"
+  printf 'candidate_image_id=%s\n' "$CANDIDATE_IMAGE_ID"
+  printf 'write_gate_path=%s\n' "$WRITE_GATE_PATH"
 } > "$HOST_BACKUP_DIR/manifest.tmp"
 chmod 0600 "$HOST_BACKUP_DIR/manifest.tmp"
 mv "$HOST_BACKUP_DIR/manifest.tmp" "$HOST_BACKUP_DIR/manifest"
@@ -515,6 +649,7 @@ printf 'SCHOOL_BACKUP_ENV_SHA256=%s\n' "$ENV_BACKUP_SHA256"
 printf 'SCHOOL_BACKUP_HOST_DIR=%s\n' "$HOST_BACKUP_DIR"
 
 ROLLBACK_ARMED=1
+PRE_ARM_RECOVERY=0
 ENV_UPDATE_TMP=$(mktemp "$SCHOOL_ROOT/shared/.env.next.XXXXXX")
 python3 - "$SCHOOL_ROOT/shared/.env" "$ENV_UPDATE_TMP" "https://$SCHOOL_HOST" <<'PY'
 from pathlib import Path
@@ -545,7 +680,6 @@ atomic_switch_release "$RELEASE"
 SWITCHED=1
 cd "$SCHOOL_ROOT/current/deploy"
 compose config >/dev/null
-compose build school
 compose up -d --no-build --force-recreate school
 
 SCHOOL_STATUS=unknown
@@ -565,6 +699,9 @@ fi
 
 docker exec school-1-11 node -e \
   "fetch('http://127.0.0.1:3000/api/health').then(async r=>{console.log(await r.text());if(!r.ok)process.exit(1)}).catch(e=>{console.error(e);process.exit(1)})"
+
+docker exec school-1-11 test -f "$WRITE_GATE_PATH"
+verify_public_write_gate
 
 SCHEDULE_IMPORT_OUTPUT=$(docker exec school-1-11 \
   node scripts/import-school-schedule.mjs \
@@ -806,6 +943,9 @@ test "$(sha256sum "$HOST_DATABASE_BACKUP" | cut -d ' ' -f 1)" = "$DATABASE_BACKU
 test "$(sha256sum "$HOST_ENV_BACKUP" | cut -d ' ' -f 1)" = "$ENV_BACKUP_SHA256"
 
 ROLLBACK_ARMED=0
+printf 'SCHOOL_DEPLOY_COMMIT=DATABASE_ROLLBACK_DISARMED\n'
+clear_write_gate
+verify_public_write_gate_released
 SWITCHED=0
 printf 'SCHOOL_DEPLOY=SUCCESS\n'
 printf 'SCHOOL_DELIVERY_REF=%s\n' "$DELIVERY_REF"

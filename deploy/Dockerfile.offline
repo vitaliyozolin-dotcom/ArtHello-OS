@@ -21,7 +21,7 @@ RUN cat /tmp/runtime-v3-parts/offline-runtime-v3.part-* > /tmp/school-runtime-v3
     && tar -xzf /tmp/school-runtime-v4-delta.tar.gz -C /school \
     && cat /tmp/runtime-v5-parts/offline-runtime-v5-delta.part-* > /tmp/school-runtime-v5-delta.tar.gz \
     && printf '%s  %s\n' \
-      'cfeb2cd1ac663a082d7bb2369f2c8490fcd1cfead4436e169a4183d21ff69dce' \
+      'b451004c5d1584546233ba39d6ea37c0701a1653c1fd8f7b5ba2d21bd6b201d2' \
       '/tmp/school-runtime-v5-delta.tar.gz' \
       | sha256sum --check --strict \
     && tar -xzf /tmp/school-runtime-v5-delta.tar.gz -C /school \

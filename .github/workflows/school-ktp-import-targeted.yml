@@ -17,6 +17,7 @@ on:
       - .dockerignore
       - package.json
       - package-lock.json
+      - proxy.ts
       - Dockerfile
       - .github/workflows/school-ktp-import-targeted.yml
   pull_request:
@@ -35,6 +36,7 @@ on:
       - .dockerignore
       - package.json
       - package-lock.json
+      - proxy.ts
       - Dockerfile
       - .github/workflows/school-ktp-import-targeted.yml
   workflow_dispatch:
@@ -58,6 +60,43 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
           persist-credentials: false
+
+      - name: Verify exact offline production runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          archive="$RUNNER_TEMP/offline-runtime-v5-delta.tar.gz"
+          expected=b451004c5d1584546233ba39d6ea37c0701a1653c1fd8f7b5ba2d21bd6b201d2
+          test "$(find deploy -maxdepth 1 -type f -name 'offline-runtime-v5-delta.part-*' | wc -l)" -eq 6
+          for index in 000 001 002 003 004 005; do
+            test -s "deploy/offline-runtime-v5-delta.part-$index"
+          done
+          cat deploy/offline-runtime-v5-delta.part-* > "$archive"
+          test "$(sha256sum "$archive" | cut -d ' ' -f 1)" = "$expected"
+          grep -Fx "$expected  offline-runtime-v5-delta.tar.gz" \
+            deploy/offline-runtime-v5-delta.sha256 >/dev/null
+          grep -F "'$expected'" deploy/Dockerfile.offline >/dev/null
+          grep -F "RELEASE_DELTA_SHA256=$expected" deploy/repair-deploy.sh >/dev/null
+          gzip -t "$archive"
+          entries="$(tar -tzf "$archive")"
+          for required in \
+            './.next/server/middleware.js' \
+            './.next/server/functions-config-manifest.json' \
+            './lib/maintenance-gate.mjs' \
+            './lib/curriculum-allocation.mjs' \
+            './scripts/import-school-schedule.mjs' \
+            './scripts/import-school-curriculum.mjs' \
+            './data/schedules/school-1-11-2026-2027.json' \
+            './data/curricula/school-1-11-2-math-2026-2027.json'; do
+            grep -Fx "$required" <<<"$entries" >/dev/null
+          done
+          tar -xOf "$archive" ./.next/server/middleware.js \
+            | grep -aF 'deployment_read_only' >/dev/null
+          tar -xOf "$archive" ./.next/server/middleware.js \
+            | grep -aF 'school-deploy-read-only' >/dev/null
+          tar --wildcards -xOf "$archive" './.next/static/css/*.css' \
+            | grep -aF '.l0-stage{width:100%;height:100svh;overflow:hidden' >/dev/null
+          printf 'SCHOOL_OFFLINE_RUNTIME=PASS\n'
 
       - name: Prepare deterministic School build context
         shell: bash
@@ -115,6 +154,7 @@ jobs:
             tests/identity-broker-contract.test.mjs \
             tests/design-code-contract.test.mjs \
             tests/methodist-role-contract.test.mjs \
+            tests/maintenance-gate.test.mjs \
             tests/curriculum-import.test.mjs \
             tests/curriculum-release-import.test.mjs \
             tests/schedule-import.test.mjs
@@ -171,6 +211,59 @@ jobs:
             docker logs "$container" --tail 160 >&2 || true
             exit 1
           fi
+
+          marker=/data/.school-deploy-read-only
+          docker exec "$container" touch "$marker"
+          docker exec -i "$container" node --input-type=module - <<'VERIFY_MAINTENANCE_GATE'
+          const origin = 'http://127.0.0.1:3000';
+          const writers = [
+            ['GET', '/api/school'],
+            ['POST', '/api/school'],
+            ['POST', '/api/auth/activate'],
+            ['POST', '/api/auth/login'],
+            ['GET', '/api/auth/logout'],
+            ['GET', '/api/auth/passwordless/magic'],
+            ['POST', '/api/auth/passwordless/request'],
+            ['POST', '/api/auth/passwordless/verify'],
+            ['POST', '/api/internal/family-access-sync'],
+            ['POST', '/api/internal/staff-sync'],
+            ['GET', '/auth/central/callback'],
+            ['GET', '/auth/central/start'],
+          ];
+          for (const [method, path] of writers) {
+            const response = await fetch(origin + path, { method, redirect: 'manual' });
+            const payload = await response.json();
+            if (
+              response.status !== 503 ||
+              response.headers.get('cache-control') !== 'no-store' ||
+              response.headers.get('retry-after') !== '30' ||
+              payload.code !== 'deployment_read_only'
+            ) {
+              throw new Error(`Maintenance gate failed for ${method} ${path}: ${response.status}`);
+            }
+          }
+          const health = await fetch(origin + '/api/health');
+          const healthPayload = await health.json();
+          if (!health.ok || healthPayload.status !== 'ok' || healthPayload.maintenance !== true) {
+            throw new Error('Health is not maintenance-aware');
+          }
+          const login = await fetch(origin + '/login');
+          if (!login.ok) throw new Error('Read-only login page was blocked');
+          console.log('SCHOOL_MAINTENANCE_GATE=PASS');
+          VERIFY_MAINTENANCE_GATE
+          docker exec "$container" rm -f "$marker"
+          docker exec -i "$container" node --input-type=module - <<'VERIFY_MAINTENANCE_RELEASE'
+          const health = await fetch('http://127.0.0.1:3000/api/health');
+          const payload = await health.json();
+          if (!health.ok || payload.maintenance !== false) {
+            throw new Error('Maintenance gate did not release');
+          }
+          const school = await fetch('http://127.0.0.1:3000/api/school');
+          if (school.status === 503) {
+            throw new Error('School API remained behind the maintenance gate');
+          }
+          console.log('SCHOOL_MAINTENANCE_RELEASE=PASS');
+          VERIFY_MAINTENANCE_RELEASE
 
           docker exec -i "$container" node --input-type=module - <<'VERIFY_RUNTIME'
           import { DatabaseSync } from 'node:sqlite';

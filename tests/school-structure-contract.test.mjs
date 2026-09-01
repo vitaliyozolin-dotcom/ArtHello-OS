@@ -9,6 +9,10 @@ import {
 const apiSource = await readFile(new URL("../app/api/school/route.ts", import.meta.url), "utf8");
 const appSource = await readFile(new URL("../app/school-app.tsx", import.meta.url), "utf8");
 const schemaSource = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
+const deploySource = await readFile(
+  new URL("../deploy/repair-deploy.sh", import.meta.url),
+  "utf8",
+);
 
 test("school structure contains classes 1 through 6 and the supplied staff", () => {
   for (const className of ["1", "2", "3", "4", "5", "6"]) {
@@ -213,4 +217,79 @@ test("setup readiness is separated from daily workspaces", () => {
   assert.match(appSource, /function ManagementPage/);
   assert.match(appSource, /Данные и готовность/);
   assert.doesNotMatch(appSource, /Контур запуска|Готовность уровня 0/);
+});
+
+test("production cutover cannot restore a backup after accepting new writes", () => {
+  const main = deploySource.slice(deploySource.indexOf("PART_COUNT="));
+  const build = main.indexOf("compose build school");
+  const preArm = main.indexOf("PRE_ARM_RECOVERY=1");
+  const stopOld = main.indexOf("docker stop --time 30 school-1-11");
+  const createGate = main.indexOf("\ncreate_write_gate\n");
+  const offlineBackup = main.indexOf(
+    'OFFLINE_BACKUP_CONTAINER="school-offline-backup-',
+  );
+  const armRollback = main.indexOf("ROLLBACK_ARMED=1");
+  const startCandidate = main.indexOf(
+    "compose up -d --no-build --force-recreate school",
+  );
+  const gateProbe = main.indexOf("\nverify_public_write_gate\n");
+  const scheduleImport = main.indexOf("SCHEDULE_IMPORT_OUTPUT=");
+  const curriculumImport = main.indexOf("CURRICULUM_IMPORT_OUTPUT=");
+  const publicVerify = main.indexOf("\nverify_public_release\n");
+  const disarmRollback = main.lastIndexOf("ROLLBACK_ARMED=0");
+  const clearGate = main.lastIndexOf("\nclear_write_gate\n");
+
+  for (const [label, position] of Object.entries({
+    build,
+    preArm,
+    stopOld,
+    createGate,
+    offlineBackup,
+    armRollback,
+    startCandidate,
+    gateProbe,
+    scheduleImport,
+    curriculumImport,
+    publicVerify,
+    disarmRollback,
+    clearGate,
+  })) {
+    assert.notEqual(position, -1, `missing deploy phase: ${label}`);
+  }
+
+  assert.ok(build < preArm);
+  assert.ok(preArm < stopOld);
+  assert.ok(stopOld < createGate);
+  assert.ok(createGate < offlineBackup);
+  assert.ok(offlineBackup < armRollback);
+  assert.ok(armRollback < startCandidate);
+  assert.ok(startCandidate < gateProbe);
+  assert.ok(gateProbe < scheduleImport);
+  assert.ok(scheduleImport < curriculumImport);
+  assert.ok(curriculumImport < publicVerify);
+  assert.ok(publicVerify < disarmRollback);
+  assert.ok(disarmRollback < clearGate);
+  assert.ok(
+    clearGate < main.lastIndexOf("verify_public_write_gate_released"),
+  );
+
+  assert.match(deploySource, /WRITE_GATE_PATH=\/data\/\.school-deploy-read-only/);
+  assert.match(deploySource, /"code"\[\[:space:\]\]\*:\[\[:space:\]\]\*"deployment_read_only"/);
+  assert.match(deploySource, /Retry-After:\[\[:space:\]\]\*30/);
+  assert.match(deploySource, /Cache-Control:\[\[:space:\]\]\*no-store/);
+  assert.match(deploySource, /"maintenance":false/);
+  assert.match(main, /--network none[\s\S]*?--read-only[\s\S]*?"\$CANDIDATE_IMAGE_ID"[\s\S]*?scripts\/backup-db\.mjs/);
+  assert.doesNotMatch(main, /docker exec school-1-11 node scripts\/backup-db\.mjs/);
+
+  const rollback = deploySource.slice(
+    deploySource.indexOf("rollback() {"),
+    deploySource.indexOf("trap cleanup EXIT"),
+  );
+  assert.match(rollback, /ROLLBACK_ARMED" -eq 1 \] \|\| \[ "\$PRE_ARM_RECOVERY" -eq 1/);
+  assert.match(rollback, /SCHOOL_ROLLBACK_DATABASE=UNCHANGED_PRE_BACKUP/);
+  assert.match(rollback, /docker rm -f "\$OFFLINE_BACKUP_CONTAINER"/);
+  assert.ok(
+    rollback.indexOf("wait_for_school_health") <
+      rollback.indexOf("clear_write_gate"),
+  );
 });
