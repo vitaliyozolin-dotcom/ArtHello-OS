@@ -74,7 +74,7 @@
 | R13 | **Устранено:** 41 одноразовый workflow удалён из активной директории с описью blob SHA | `docs/workflow-archive-2026-09-01.md` | Не восстанавливать frozen candidates как постоянный CD |
 | R14 | После cleanup: 6 активных workflow; `tmp-*` и мёртвые path-фильтры удалены; **CODEOWNERS всё ещё отсутствует** | `.github/workflows/`; `docs/workflow-archive-2026-09-01.md` | Добавить CODEOWNERS минимум для `.github/` и `deploy/` |
 | R15 | `visual-acceptance.mjs` всё ещё зависит от незадекларированного Chrome; workflow с магическим счётчиком 595 удалён | `scripts/visual-acceptance.mjs:18-25`; `docs/workflow-archive-2026-09-01.md` | Пин браузера для постоянного proof gate |
-| R16 | Разъезд тулчейна: pnpm 11.7.0 (quality.yml, deploy/Dockerfile) vs 10.4.1 (proof-gates.yml); npm ci в v52; catalog в основном floating `^` | CI + deploy | Единый пин + `packageManager` |
+| R16 | **Устранено для активного CI:** `quality.yml`, `proof-gates.yml`, `deploy-ru.yml`, `deploy/Dockerfile` и корневой `packageManager` закреплены на pnpm 11.7.0; npm-based v52 candidate архивирован | CI + deploy; `docs/workflow-archive-2026-09-01.md` | Сохранять единый pin; floating dependency ranges разбирать отдельно как dependency hygiene |
 | ZOD | 20 файлов импортируют `zod/v4` при catalog-пине `zod: 3.25.76`; `api-zod` используется в 2 из 83 файлов сервера — 42 route-модуля валидируют вручную | api-server | Унификация; валидация через сгенерированные схемы |
 | ENV-THROW | Module-level `throw` при импорте `lib/db` (`DATABASE_URL`) и `alphaCrmClient` (`ALFACRM_DOMAIN`) — импорт с побочным эффектом, слой нетестируем в изоляции | `lib/db/src/index.ts:5-9`; `.../alphaCrmClient.ts:4-7` | Ленивая инициализация / фабрики |
 
