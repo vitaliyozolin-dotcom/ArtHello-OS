@@ -7,10 +7,14 @@ on:
     paths:
       - app/**
       - db/**
+      - data/**
+      - deploy/**
       - drizzle/**
       - lib/**
+      - scripts/**
       - server/**
       - tests/**
+      - .dockerignore
       - package.json
       - package-lock.json
       - Dockerfile
@@ -21,10 +25,14 @@ on:
     paths:
       - app/**
       - db/**
+      - data/**
+      - deploy/**
       - drizzle/**
       - lib/**
+      - scripts/**
       - server/**
       - tests/**
+      - .dockerignore
       - package.json
       - package-lock.json
       - Dockerfile
@@ -68,6 +76,8 @@ jobs:
           data/*
           !data/schedules
           !data/schedules/**
+          !data/curricula
+          !data/curricula/**
           deploy/offline-runtime-*.part-*
           deploy/offline-runtime-*.tar.gz
           dist
@@ -104,7 +114,9 @@ jobs:
             tests/central-family-directory.test.mjs \
             tests/identity-broker-contract.test.mjs \
             tests/design-code-contract.test.mjs \
+            tests/methodist-role-contract.test.mjs \
             tests/curriculum-import.test.mjs \
+            tests/curriculum-release-import.test.mjs \
             tests/schedule-import.test.mjs
           if ! docker build --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --tag "$runtime" .; then
             printf 'Cached runtime failed; retrying without Docker cache.\n' >&2

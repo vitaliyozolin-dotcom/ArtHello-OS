@@ -17,7 +17,6 @@ jobs:
   deploy:
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 35
-    environment: production-ru
     steps:
       - name: Create production run record
         id: issue
@@ -99,7 +98,7 @@ jobs:
             -o Ciphers=aes128-ctr \
             -o MACs=hmac-sha2-256 \
             "$DEPLOY_USER@$DEPLOY_HOST" \
-            "DELIVERY_REF=$GITHUB_SHA SCHOOL_HOST=school-188-225-38-55.sslip.io VERIFY_PUBLIC=0 bash -s" \
+            "DELIVERY_REF=$GITHUB_SHA SCHOOL_HOST=school-188-225-38-55.sslip.io VERIFY_PUBLIC=1 bash -s" \
             < deploy/repair-deploy.sh 2>&1 | tee "$log_file"
           status=${PIPESTATUS[0]}
           set -e
@@ -124,9 +123,15 @@ jobs:
           login_html="$RUNNER_TEMP/school-login.html"
           css_file="$RUNNER_TEMP/school-globals.css"
           curl --fail --silent --show-error "$origin/login" > "$login_html"
-          css_path="$(grep -oE '/_next/static/css/[^"?]+\.css' "$login_html" | head -1)"
-          test -n "$css_path"
-          curl --fail --silent --show-error "$origin$css_path" > "$css_file"
+          : > "$css_file"
+          css_count=0
+          while IFS= read -r css_path; do
+            test -n "$css_path"
+            curl --fail --silent --show-error "$origin$css_path" >> "$css_file"
+            printf '\n' >> "$css_file"
+            css_count=$((css_count + 1))
+          done < <(grep -oE '/_next/static/css/[^"?]+\.css' "$login_html" | sort -u)
+          test "$css_count" -gt 0
           grep -F '.l0-stage{width:100%;height:100svh;overflow:hidden' "$css_file" >/dev/null
           grep -F 'student-dashboard-hero-v1.webp' "$css_file" >/dev/null
           printf 'SCHOOL_PUBLIC_HTTPS=OK\n'

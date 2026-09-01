@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 const staffRoles = new Set<Role>([
   "director",
   "deputy",
+  "methodist",
   "admin",
   "teacher",
   "tech_admin",

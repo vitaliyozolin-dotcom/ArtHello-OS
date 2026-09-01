@@ -11,6 +11,10 @@ import {
   buildScheduleSlots,
   parseCurriculumWorkbook,
 } from "../../../lib/curriculum-import.mjs";
+import {
+  prepareProgramSessionHomework,
+  programSessionHomeworkId,
+} from "../../../lib/program-homework.mjs";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,6 +22,7 @@ export const runtime = "nodejs";
 const validRoles = new Set<Role>([
   "director",
   "deputy",
+  "methodist",
   "admin",
   "teacher",
   "parent",
@@ -26,13 +31,47 @@ const validRoles = new Set<Role>([
 ]);
 const familyRoles = new Set<Role>(["parent", "student"]);
 const leadershipRoles = new Set<Role>(["director", "deputy"]);
+const curriculumRoles = new Set<Role>(["director", "deputy", "methodist"]);
 const operationalRoles = new Set<Role>(["director", "deputy", "admin"]);
+const leadershipProgramTransitions: Record<string, string[]> = {
+  draft: ["draft", "review"],
+  review: ["review", "changes_requested", "approved"],
+  changes_requested: ["changes_requested", "review"],
+  approved: ["approved", "active", "archived", "changes_requested"],
+  active: ["active", "archived", "changes_requested"],
+  archived: ["archived"],
+};
+const teacherProgramTransitions: Record<string, string[]> = {
+  draft: ["draft", "review"],
+  changes_requested: ["draft", "review"],
+};
+const methodistProgramTransitions: Record<string, string[]> = {
+  draft: ["draft", "review"],
+  review: ["review", "changes_requested"],
+  changes_requested: ["changes_requested", "review"],
+};
+
+function availableProgramStatuses(role: Role, currentStatus?: string | null) {
+  if (!currentStatus) return ["draft"];
+  if (leadershipRoles.has(role))
+    return leadershipProgramTransitions[currentStatus] ?? [];
+  if (role === "methodist")
+    return methodistProgramTransitions[currentStatus] ?? [];
+  if (role === "teacher")
+    return teacherProgramTransitions[currentStatus] ?? [];
+  return [];
+}
 const teacherActions = new Set<ActionKind>([
   "grade.create",
   "homework.create",
   "achievement.create",
   "comment.create",
   "attendance.mark",
+  "program.upsert",
+  "program.import",
+  "program.topic.update",
+]);
+const curriculumActions = new Set<ActionKind>([
   "program.upsert",
   "program.import",
   "program.topic.update",
@@ -640,6 +679,7 @@ async function findActor(request: Request): Promise<UserRow | null> {
 
 async function visibleStudentIds(viewer: UserRow) {
   const db = await database();
+  if (viewer.role === "methodist") return [];
   if (operationalRoles.has(viewer.role)) {
     const rows = await db
       .prepare(
@@ -964,7 +1004,7 @@ async function loadSnapshot(
     l.shared_session_key AS sharedSessionKey, l.room, l.status, l.note
     FROM lessons l JOIN subjects s ON s.id = l.subject_id
     LEFT JOIN users u ON u.id = l.teacher_user_id`;
-  const lessonQuery = operationalRoles.has(viewer.role)
+  const lessonQuery = operationalRoles.has(viewer.role) || viewer.role === "methodist"
     ? ([
         `${lessonSelect} WHERE l.status != 'archived' ORDER BY l.class_name, l.weekday, l.starts_at`,
         [],
@@ -987,31 +1027,38 @@ async function loadSnapshot(
       ...lessonQuery[1],
     ]),
     rows<SchoolSnapshot["menu"][number]>(
-      "SELECT id, day_date AS dayDate, breakfast, lunch, snack, allergens FROM menu_days ORDER BY day_date LIMIT 14",
+      `SELECT id, day_date AS dayDate, breakfast, lunch, snack, allergens
+      FROM menu_days WHERE ${viewer.role === "methodist" ? "1 = 0" : "1 = 1"}
+      ORDER BY day_date LIMIT 14`,
     ),
     rows<SchoolSnapshot["events"][number]>(
       "SELECT id, title, description, starts_at AS startsAt, location, audience, status, capacity FROM events WHERE status != 'archived' ORDER BY starts_at LIMIT 20",
     ),
     rows<SchoolSnapshot["activities"][number]>(
-      "SELECT id, title, schedule, teacher, price, capacity, enrolled, status FROM activities WHERE status != 'archived' ORDER BY title",
+      `SELECT id, title, schedule, teacher, price, capacity, enrolled, status
+      FROM activities WHERE ${viewer.role === "methodist" ? "1 = 0" : "status != 'archived'"}
+      ORDER BY title`,
     ),
   ]);
 
   const recordWhere = allowedStudentIds.length
     ? `IN (${placeholders})`
     : "IN ('')";
-  const homeworkQuery = operationalRoles.has(viewer.role)
+  const homeworkSelect = "SELECT h.id, h.class_name AS className, h.subject_id AS subjectId, s.name AS subjectName, s.color AS subjectColor, h.teacher_user_id AS teacherUserId, u.display_name AS teacherName, h.title, h.description, h.due_at AS dueAt, h.status FROM homework h JOIN subjects s ON s.id = h.subject_id JOIN users u ON u.id = h.teacher_user_id";
+  const homeworkQuery = viewer.role === "methodist"
+    ? ([`${homeworkSelect} WHERE 1 = 0`, []] as const)
+    : operationalRoles.has(viewer.role)
     ? ([
-        "SELECT h.id, h.class_name AS className, h.subject_id AS subjectId, s.name AS subjectName, s.color AS subjectColor, h.teacher_user_id AS teacherUserId, u.display_name AS teacherName, h.title, h.description, h.due_at AS dueAt, h.status FROM homework h JOIN subjects s ON s.id = h.subject_id JOIN users u ON u.id = h.teacher_user_id WHERE h.status != 'archived' ORDER BY h.due_at",
+        `${homeworkSelect} WHERE h.status != 'archived' ORDER BY h.due_at`,
         [],
       ] as const)
     : viewer.role === "teacher"
       ? ([
-          "SELECT h.id, h.class_name AS className, h.subject_id AS subjectId, s.name AS subjectName, s.color AS subjectColor, h.teacher_user_id AS teacherUserId, u.display_name AS teacherName, h.title, h.description, h.due_at AS dueAt, h.status FROM homework h JOIN subjects s ON s.id = h.subject_id JOIN users u ON u.id = h.teacher_user_id WHERE h.teacher_user_id = ? AND h.status != 'archived' ORDER BY h.due_at",
+          `${homeworkSelect} WHERE h.teacher_user_id = ? AND h.status != 'archived' ORDER BY h.due_at`,
           [viewer.id],
         ] as const)
       : ([
-          "SELECT h.id, h.class_name AS className, h.subject_id AS subjectId, s.name AS subjectName, s.color AS subjectColor, h.teacher_user_id AS teacherUserId, u.display_name AS teacherName, h.title, h.description, h.due_at AS dueAt, h.status FROM homework h JOIN subjects s ON s.id = h.subject_id JOIN users u ON u.id = h.teacher_user_id WHERE h.class_name = ? AND h.status != 'archived' ORDER BY h.due_at",
+          `${homeworkSelect} WHERE h.class_name = ? AND h.status != 'archived' ORDER BY h.due_at`,
           [selectedClass],
         ] as const);
   const [grades, homework, achievements, comments, subscriptions] =
@@ -1052,6 +1099,9 @@ async function loadSnapshot(
     threadQuery += " AND t.student_id = ?";
     threadBindings.push(selectedStudentId);
   }
+  if (viewer.role === "methodist" || viewer.role === "tech_admin") {
+    threadQuery += " AND 1 = 0";
+  }
   threadQuery += " ORDER BY t.updated_at DESC";
   const threads = await rows<SchoolSnapshot["threads"][number]>(
     threadQuery,
@@ -1068,17 +1118,31 @@ async function loadSnapshot(
     ? await rows<SchoolSnapshot["users"][number]>(
         "SELECT id, email, phone, display_name AS displayName, role, linked_student_id AS linkedStudentId, status, profile_status AS profileStatus, notes, password_state AS passwordState, central_user_id AS centralUserId, identity_source AS identitySource FROM users ORDER BY role, display_name",
       )
-    : [];
-  const canViewAssignments = operationalRoles.has(viewer.role) || viewer.role === "teacher";
+    : viewer.role === "methodist"
+      ? await rows<SchoolSnapshot["users"][number]>(
+          `SELECT id, '' AS email, display_name AS displayName, role,
+          NULL AS linkedStudentId, status, profile_status AS profileStatus,
+          '' AS notes
+          FROM users WHERE role = 'teacher' AND status = 'active'
+          ORDER BY display_name`,
+        )
+      : [];
+  const canViewAssignments = operationalRoles.has(viewer.role) || viewer.role === "teacher" || viewer.role === "methodist";
+  const assignmentNotesSelect = viewer.role === "methodist" ? "''" : "a.notes";
+  const assignmentWhere = viewer.role === "teacher"
+    ? "WHERE a.teacher_user_id = ?"
+    : viewer.role === "methodist"
+      ? "WHERE a.status = 'confirmed'"
+      : "";
   const teacherAssignments = canViewAssignments
     ? await rows<SchoolSnapshot["teacherAssignments"][number]>(`SELECT a.id,
         a.teacher_user_id AS teacherUserId, u.display_name AS teacherName,
         u.profile_status AS teacherProfileStatus, a.class_name AS className,
         a.subject_id AS subjectId, s.name AS subjectName, s.color AS subjectColor,
-        a.status, a.notes
+        a.status, ${assignmentNotesSelect} AS notes
       FROM teacher_assignments a JOIN users u ON u.id = a.teacher_user_id
       JOIN subjects s ON s.id = a.subject_id
-      ${viewer.role === "teacher" ? "WHERE a.teacher_user_id = ?" : ""}
+      ${assignmentWhere}
       ORDER BY u.display_name, CAST(a.class_name AS INTEGER), s.name`,
       viewer.role === "teacher" ? [viewer.id] : [])
     : [];
@@ -1098,7 +1162,7 @@ async function loadSnapshot(
       )
     : [];
   const canViewPrograms =
-    viewer.role === "teacher" || leadershipRoles.has(viewer.role);
+    viewer.role === "teacher" || curriculumRoles.has(viewer.role);
   const programWhere =
     viewer.role === "teacher" ? "WHERE p.teacher_user_id = ?" : "";
   const programBindings = viewer.role === "teacher" ? [viewer.id] : [];
@@ -1113,7 +1177,8 @@ async function loadSnapshot(
           COALESCE(pi.scheduled_hours, 0) AS scheduledLessons,
           COALESCE(pi.unscheduled_hours, 0) AS unscheduledLessons,
           COALESCE(pi.validation_status, 'manual') AS validationStatus,
-          pi.file_name AS sourceFileName, p.updated_at AS updatedAt
+          pi.file_name AS sourceFileName, p.review_comment AS reviewComment,
+          p.updated_at AS updatedAt
         FROM programs p
         JOIN subjects s ON s.id = p.subject_id
         JOIN users u ON u.id = p.teacher_user_id
@@ -1131,12 +1196,16 @@ async function loadSnapshot(
         `SELECT ps.id, pt.program_id AS programId, pt.source_row AS sourceRow,
           pt.sequence, COALESCE(ps.topic_override, pt.topic) AS topic,
           pt.planned_hours AS plannedHours,
-          COALESCE(ps.homework_override, pt.homework) AS homework,
+          COALESCE(ps.homework_override, '') AS homework,
+          ph.due_at AS homeworkDueAt,
           pt.sort_order AS sortOrder, ps.session_index AS sessionIndex,
           ps.scheduled_date AS scheduledDate, ps.starts_at AS startsAt, ps.status
         FROM program_topics pt
         JOIN program_topic_sessions ps ON ps.topic_id = pt.id
         JOIN programs p ON p.id = pt.program_id
+        LEFT JOIN homework ph
+          ON ph.id = 'program-session-homework:' || ps.id
+          AND ph.status != 'archived'
         WHERE 1 = 1 ${viewer.role === "teacher" ? "AND p.teacher_user_id = ?" : ""}
         ORDER BY p.class_name, p.subject_id, pt.sort_order, ps.session_index`,
         programBindings,
@@ -1311,6 +1380,15 @@ async function assertTeacherClassScope(
   if (viewer.role !== "teacher")
     throw new Error("Нет доступа к учебным данным");
   await assertConfirmedTeacherAssignment(viewer.id, className, subjectId);
+}
+
+async function assertCurriculumClassScope(
+  viewer: UserRow,
+  className: string,
+  subjectId: string,
+) {
+  if (curriculumRoles.has(viewer.role)) return;
+  await assertTeacherClassScope(viewer, className, subjectId);
 }
 
 async function assertConfirmedTeacherAssignment(
@@ -1727,8 +1805,15 @@ export async function POST(request: Request) {
     if (teacherOnlyAction && effectiveRole !== "teacher")
       throw new Error("Это действие доступно назначенному учителю");
     if (
+      curriculumActions.has(action) &&
+      effectiveRole !== "teacher" &&
+      !curriculumRoles.has(effectiveRole)
+    )
+      throw new Error("Работа с КТП доступна учителю, методисту, завучу или директору");
+    if (
       teacherActions.has(action) &&
       !teacherOnlyAction &&
+      !curriculumActions.has(action) &&
       effectiveRole !== "teacher" &&
       !leadershipRoles.has(effectiveRole)
     )
@@ -2464,10 +2549,10 @@ export async function POST(request: Request) {
         throw new Error("Размер XLSX не должен превышать 5 МБ");
       const className = textValue(body.className, 20);
       const subjectId = textValue(body.subjectId, 80);
-      const teacherUserId = leadershipRoles.has(actor.role)
+      const teacherUserId = curriculumRoles.has(actor.role)
         ? textValue(body.teacherUserId, 100)
         : actor.id;
-      if (leadershipRoles.has(actor.role)) {
+      if (curriculumRoles.has(actor.role)) {
         const teacher = await db
           .prepare(
             "SELECT id FROM users WHERE id = ? AND role = 'teacher' AND profile_status NOT IN ('vacant', 'demo')",
@@ -2481,8 +2566,8 @@ export async function POST(request: Request) {
           subjectId,
         );
       }
-      if (!leadershipRoles.has(actor.role))
-        await assertTeacherClassScope(actor, className, subjectId);
+      if (!curriculumRoles.has(actor.role))
+        await assertCurriculumClassScope(actor, className, subjectId);
 
       const existingProgram = await db
         .prepare(
@@ -2492,13 +2577,49 @@ export async function POST(request: Request) {
         .bind(ACADEMIC_YEAR.id, className, subjectId, teacherUserId)
         .first<{ id: string; status: string }>();
       if (
-        actor.role === "teacher" &&
+        !leadershipRoles.has(actor.role) &&
         existingProgram &&
-        ["approved", "active"].includes(existingProgram.status)
+        ["approved", "active", "archived"].includes(existingProgram.status)
       ) {
         throw new Error(
-          "Утверждённую программу возвращает в работу завуч или директор",
+          "Утверждённую программу возвращает в работу завуч или директор; действующая и архивная программы защищены так же",
         );
+      }
+      if (
+        actor.role === "teacher" &&
+        existingProgram &&
+        !["draft", "changes_requested"].includes(existingProgram.status)
+      ) {
+        throw new Error(
+          "Учитель заменяет XLSX только в черновике или после возврата на исправление",
+        );
+      }
+      if (
+        actor.role === "methodist" &&
+        existingProgram &&
+        existingProgram.status !== "draft"
+      ) {
+        throw new Error(
+          "Методист заменяет XLSX только пока программа остаётся черновиком",
+        );
+      }
+      if (existingProgram) {
+        const manualChanges = await db
+          .prepare(
+            `SELECT COUNT(*) AS count
+            FROM program_topic_sessions
+            WHERE program_id = ? AND (
+              NULLIF(TRIM(topic_override), '') IS NOT NULL
+              OR NULLIF(TRIM(homework_override), '') IS NOT NULL
+            )`,
+          )
+          .bind(existingProgram.id)
+          .first<{ count: number }>();
+        if (Number(manualChanges?.count ?? 0) > 0) {
+          throw new Error(
+            "Повторный импорт заблокирован: в программе уже есть ручные темы или домашние задания",
+          );
+        }
       }
 
       let parsed;
@@ -2531,7 +2652,8 @@ export async function POST(request: Request) {
             VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)
             ON CONFLICT(academic_year, class_name, subject_id, teacher_user_id)
             DO UPDATE SET title = excluded.title, status = 'draft',
-              planned_lessons = excluded.planned_lessons, updated_at = CURRENT_TIMESTAMP`,
+              planned_lessons = excluded.planned_lessons, review_comment = '',
+              updated_at = CURRENT_TIMESTAMP`,
           )
           .bind(
             programId,
@@ -2635,13 +2757,21 @@ export async function POST(request: Request) {
       const sessionId = textValue(body.sessionId, 140);
       const topic = textValue(body.topic, 500);
       const homework = textValue(body.homework, 1200, false);
+      const homeworkDueAt = textValue(body.homeworkDueAt, 80, false);
       const session = await db
         .prepare(
           `SELECT ps.id, ps.program_id AS programId,
+            ps.scheduled_date AS scheduledDate,
+            ps.starts_at AS startsAt,
+            ps.homework_override AS homeworkOverride,
             p.class_name AS className, p.subject_id AS subjectId,
-            p.teacher_user_id AS teacherUserId
+            p.teacher_user_id AS teacherUserId, p.status AS programStatus,
+            ph.due_at AS currentHomeworkDueAt
           FROM program_topic_sessions ps
           JOIN programs p ON p.id = ps.program_id
+          LEFT JOIN homework ph
+            ON ph.id = 'program-session-homework:' || ps.id
+            AND ph.status != 'archived'
           WHERE ps.id = ?`,
         )
         .bind(sessionId)
@@ -2651,29 +2781,125 @@ export async function POST(request: Request) {
           className: string;
           subjectId: string;
           teacherUserId: string;
+          scheduledDate: string | null;
+          startsAt: string | null;
+          homeworkOverride: string | null;
+          programStatus: string;
+          currentHomeworkDueAt: string | null;
         }>();
       if (!session) throw new Error("Урок программы не найден");
       if (actor.role === "teacher" && session.teacherUserId !== actor.id)
         throw new Error("Нет доступа к этому уроку");
-      await assertTeacherClassScope(
+      await assertCurriculumClassScope(
         effectiveUser,
         session.className,
         session.subjectId,
       );
-      await db
-        .prepare(
-          `UPDATE program_topic_sessions
-          SET topic_override = ?, homework_override = ?
-          WHERE id = ?`,
-        )
-        .bind(topic, homework, sessionId)
-        .run();
+      const allowedTopicStatuses = actor.role === "teacher"
+        ? ["draft", "changes_requested", "active"]
+        : ["draft", "review", "changes_requested"];
+      if (!allowedTopicStatuses.includes(session.programStatus)) {
+        throw new Error(
+          actor.role === "teacher"
+            ? "Учитель меняет тему только в черновике, после возврата или в действующей программе"
+            : "Методическое содержание меняют только до утверждения программы",
+        );
+      }
+      const currentHomework = session.homeworkOverride?.trim() ?? "";
+      const currentDueAt = session.currentHomeworkDueAt ?? "";
+      if (actor.role !== "teacher") {
+        if (homework !== currentHomework || homeworkDueAt !== currentDueAt) {
+          throw new Error(
+            "Домашнее задание и срок публикует только назначенный учитель",
+          );
+        }
+        await db
+          .prepare(
+            `UPDATE program_topic_sessions
+            SET topic_override = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?`,
+          )
+          .bind(topic, sessionId)
+          .run();
+      } else if (session.programStatus !== "active") {
+        if (homework !== currentHomework || homeworkDueAt !== currentDueAt) {
+          throw new Error(
+            "Домашнее задание публикуется только из действующей программы",
+          );
+        }
+        await db
+          .prepare(
+            `UPDATE program_topic_sessions
+            SET topic_override = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?`,
+          )
+          .bind(topic, sessionId)
+          .run();
+      } else {
+        if (homework.trim() && (!session.scheduledDate || !session.startsAt)) {
+          throw new Error(
+            "Домашнее задание нельзя опубликовать, пока урок не получил дату и время",
+          );
+        }
+        const publication = prepareProgramSessionHomework({
+          sessionId,
+          homework,
+          dueAt: homeworkDueAt,
+          lessonStartsAt: session.scheduledDate && session.startsAt
+            ? `${session.scheduledDate}T${session.startsAt.slice(0, 5)}`
+            : "",
+        });
+        const syncHomework = publication.published
+          ? db
+              .prepare(
+                `INSERT INTO homework
+                (id, class_name, subject_id, teacher_user_id, title, description,
+                  due_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'published')
+                ON CONFLICT(id) DO UPDATE SET
+                  class_name = excluded.class_name,
+                  subject_id = excluded.subject_id,
+                  teacher_user_id = excluded.teacher_user_id,
+                  title = excluded.title,
+                  description = excluded.description,
+                  due_at = excluded.due_at,
+                  status = 'published', updated_at = CURRENT_TIMESTAMP`,
+              )
+              .bind(
+                publication.id,
+                session.className,
+                session.subjectId,
+                session.teacherUserId,
+                topic,
+                publication.description,
+                publication.dueAt,
+              )
+          : db
+              .prepare(
+                `UPDATE homework SET status = 'archived',
+                  updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+              )
+              .bind(programSessionHomeworkId(sessionId));
+        await db.batch([
+          db
+            .prepare(
+              `UPDATE program_topic_sessions
+              SET topic_override = ?, homework_override = ?,
+                updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?`,
+            )
+            .bind(topic, publication.description, sessionId),
+          syncHomework,
+        ]);
+      }
       await audit(
         actor,
         action,
         "program_topic_session",
         sessionId,
-        `${session.className} класс: тема и домашнее задание изменены вручную`,
+        actor.role === "teacher" && session.programStatus === "active"
+          ? `${session.className} класс: тема и домашнее задание изменены вручную`
+          : `${session.className} класс: тема изменена вручную`,
       );
     } else if (action === "program.upsert") {
       const className = textValue(body.className, 20);
@@ -2681,10 +2907,11 @@ export async function POST(request: Request) {
       const title = textValue(body.title, 180);
       const plannedLessons = numberValue(body.plannedLessons ?? 0, 0, 500);
       const requestedStatus = textValue(body.status ?? "draft", 30);
-      const teacherUserId = leadershipRoles.has(actor.role)
+      const requestedReviewComment = textValue(body.reviewComment, 1200, false);
+      const teacherUserId = curriculumRoles.has(actor.role)
         ? textValue(body.teacherUserId, 100)
         : actor.id;
-      if (leadershipRoles.has(actor.role)) {
+      if (curriculumRoles.has(actor.role)) {
         const teacher = await db
           .prepare(
             "SELECT id FROM users WHERE id = ? AND role = 'teacher' AND profile_status NOT IN ('vacant', 'demo')",
@@ -2698,20 +2925,79 @@ export async function POST(request: Request) {
           subjectId,
         );
       }
-      if (!leadershipRoles.has(actor.role))
-        await assertTeacherClassScope(actor, className, subjectId);
-      const allowedStatuses = leadershipRoles.has(actor.role)
-        ? [
-            "draft",
-            "review",
-            "changes_requested",
-            "approved",
-            "active",
-            "archived",
-          ]
-        : ["draft", "review"];
-      if (!allowedStatuses.includes(requestedStatus))
-        throw new Error("Выберите допустимый статус программы");
+      if (!curriculumRoles.has(actor.role))
+        await assertCurriculumClassScope(actor, className, subjectId);
+      const requestedProgramId = textValue(body.programId, 120, false);
+      let existingProgram = requestedProgramId
+        ? await db
+            .prepare(
+              `SELECT id, academic_year AS academicYear, class_name AS className,
+                subject_id AS subjectId, teacher_user_id AS teacherUserId, status,
+                review_comment AS reviewComment
+              FROM programs WHERE id = ?`,
+            )
+            .bind(requestedProgramId)
+            .first<{
+              id: string;
+              academicYear: string;
+              className: string;
+              subjectId: string;
+              teacherUserId: string;
+              status: string;
+              reviewComment: string;
+            }>()
+        : null;
+      if (
+        existingProgram &&
+        (existingProgram.academicYear !== ACADEMIC_YEAR.id ||
+          existingProgram.className !== className ||
+          existingProgram.subjectId !== subjectId ||
+          existingProgram.teacherUserId !== teacherUserId)
+      ) {
+        throw new Error("Нельзя перенести программу в другой класс, предмет или к другому учителю");
+      }
+      if (!existingProgram) {
+        existingProgram = await db
+          .prepare(
+            `SELECT id, academic_year AS academicYear, class_name AS className,
+              subject_id AS subjectId, teacher_user_id AS teacherUserId, status,
+              review_comment AS reviewComment
+            FROM programs
+            WHERE academic_year = ? AND class_name = ? AND subject_id = ?
+              AND teacher_user_id = ?`,
+          )
+          .bind(ACADEMIC_YEAR.id, className, subjectId, teacherUserId)
+          .first<{
+            id: string;
+            academicYear: string;
+            className: string;
+            subjectId: string;
+            teacherUserId: string;
+            status: string;
+            reviewComment: string;
+          }>();
+      }
+      const availableTransitions = availableProgramStatuses(
+        actor.role,
+        existingProgram?.status,
+      );
+      if (!availableTransitions.includes(requestedStatus)) {
+        throw new Error(
+          leadershipRoles.has(actor.role)
+            ? "Сначала завершите текущий этап проверки программы"
+            : actor.role === "methodist"
+              ? "Методист возвращает на исправление только программу со статусом «На проверке»"
+              : "Учитель отправляет на проверку только черновик или программу после исправлений",
+        );
+      }
+      if (requestedStatus === "changes_requested" && !requestedReviewComment) {
+        throw new Error("При возврате программы на исправление укажите замечание");
+      }
+      const nextReviewComment = requestedStatus === "changes_requested"
+        ? requestedReviewComment
+        : ["approved", "active", "archived"].includes(requestedStatus)
+          ? ""
+          : (existingProgram?.reviewComment ?? "");
       const importedValidation = await db
         .prepare(
           `SELECT pi.required_hours AS requiredHours,
@@ -2740,15 +3026,18 @@ export async function POST(request: Request) {
           `Нельзя утвердить программу: ${importedValidation.unscheduledHours} ч. не помещаются в расписание`,
         );
       }
-      const programId = textValue(body.programId, 120, false) || id;
+      const programId = existingProgram?.id || requestedProgramId || id;
       await db
         .prepare(
           `INSERT INTO programs
-        (id, academic_year, class_name, subject_id, teacher_user_id, title, status, planned_lessons)
-        VALUES (?, '2026/27', ?, ?, ?, ?, ?, ?)
+        (id, academic_year, class_name, subject_id, teacher_user_id, title, status,
+          planned_lessons, review_comment)
+        VALUES (?, '2026/27', ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(academic_year, class_name, subject_id, teacher_user_id)
         DO UPDATE SET title = excluded.title, status = excluded.status,
-          planned_lessons = excluded.planned_lessons, updated_at = CURRENT_TIMESTAMP`,
+          planned_lessons = excluded.planned_lessons,
+          review_comment = excluded.review_comment,
+          updated_at = CURRENT_TIMESTAMP`,
         )
         .bind(
           programId,
@@ -2758,6 +3047,7 @@ export async function POST(request: Request) {
           title,
           requestedStatus,
           plannedLessons,
+          nextReviewComment,
         )
         .run();
       await audit(
@@ -2765,7 +3055,7 @@ export async function POST(request: Request) {
         action,
         "program",
         programId,
-        `${className}: ${subjectId}, ${requestedStatus}`,
+        `${className}: ${subjectId}, ${requestedStatus}${nextReviewComment ? `; замечание: ${nextReviewComment}` : ""}`,
       );
     } else if (action === "attendance.mark") {
       const lessonId = textValue(body.lessonId, 120);

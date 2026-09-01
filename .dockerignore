@@ -4,7 +4,11 @@
 .sites-runtime
 .wrangler
 .migration
-data
+data/*
+!data/schedules
+!data/schedules/**
+!data/curricula
+!data/curricula/**
 dist
 node_modules
 npm-debug.log*

@@ -1,8 +1,9 @@
-export type Role = "director" | "deputy" | "admin" | "teacher" | "parent" | "student" | "tech_admin";
+export type Role = "director" | "deputy" | "methodist" | "admin" | "teacher" | "parent" | "student" | "tech_admin";
 
 export const roleLabels: Record<Role, string> = {
   director: "Директор",
   deputy: "Завуч",
+  methodist: "Методист",
   admin: "Администратор школы",
   parent: "Родитель",
   teacher: "Учитель",
@@ -59,6 +60,7 @@ export type ProgramRecord = {
   unscheduledLessons: number;
   validationStatus: "balanced" | "deficit" | "reserve" | "manual" | string;
   sourceFileName: string | null;
+  reviewComment: string;
   updatedAt: string;
 };
 
@@ -70,6 +72,7 @@ export type ProgramTopicSessionRecord = {
   topic: string;
   plannedHours: number;
   homework: string;
+  homeworkDueAt: string | null;
   sortOrder: number;
   sessionIndex: number;
   scheduledDate: string | null;

@@ -10,6 +10,7 @@ export const runtime = "nodejs";
 const staffRoles = new Set([
   "director",
   "deputy",
+  "methodist",
   "admin",
   "teacher",
   "tech_admin",
@@ -21,7 +22,6 @@ function legacyPasswordEnabled() {
     toLowerCase();
   return value !== "false" && value !== "0";
 }
-
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);

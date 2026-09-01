@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import {
+  prepareProgramSessionHomework,
+  programSessionHomeworkId,
+} from "../lib/program-homework.mjs";
 
 const apiSource = await readFile(new URL("../app/api/school/route.ts", import.meta.url), "utf8");
 const appSource = await readFile(new URL("../app/school-app.tsx", import.meta.url), "utf8");
@@ -44,6 +48,7 @@ test("role access is fixed by the authenticated account and cannot be impersonat
   for (const role of [
     "director",
     "deputy",
+    "methodist",
     "admin",
     "teacher",
     "parent",
@@ -103,6 +108,105 @@ test("KTP import is role-scoped, calendar-aware and blocks false approval", () =
   assert.match(appSource, /Даты не сдвигаются автоматически/);
   assert.match(appSource, /Изменить тему и домашнее задание/);
   assert.doesNotMatch(appSource, /Пересчитать даты/);
+});
+
+test("KTP status transitions follow review, approval and activation stages", () => {
+  for (const source of [apiSource, appSource]) {
+    assert.match(source, /draft: \["draft", "review"\]/);
+    assert.match(source, /review: \["review", "changes_requested", "approved"\]/);
+    assert.match(source, /changes_requested: \["changes_requested", "review"\]/);
+    assert.match(source, /approved: \["approved", "active", "archived", "changes_requested"\]/);
+    assert.match(source, /active: \["active", "archived", "changes_requested"\]/);
+    assert.match(source, /archived: \["archived"\]/);
+  }
+  assert.match(apiSource, /if \(!currentStatus\) return \["draft"\]/);
+  assert.match(apiSource, /requestedStatus === "changes_requested" && !requestedReviewComment/);
+  assert.match(appSource, /programStatusOptions\.map\(\(status\) => <option/);
+});
+
+test("manual lesson homework is safely published once into the family diary", () => {
+  assert.equal(
+    programSessionHomeworkId("session-1"),
+    "program-session-homework:session-1",
+  );
+  assert.deepEqual(
+    prepareProgramSessionHomework({
+      sessionId: "session-1",
+      homework: "  № 1–3  ",
+      dueAt: "2026-09-02T09:00",
+      lessonStartsAt: "2026-09-01T09:00",
+    }),
+    {
+      id: "program-session-homework:session-1",
+      description: "№ 1–3",
+      dueAt: "2026-09-02T09:00",
+      published: true,
+    },
+  );
+  assert.deepEqual(
+    prepareProgramSessionHomework({
+      sessionId: "session-1",
+      homework: "",
+      dueAt: "",
+      lessonStartsAt: "",
+    }),
+    {
+      id: "program-session-homework:session-1",
+      description: "",
+      dueAt: null,
+      published: false,
+    },
+  );
+  assert.throws(
+    () => prepareProgramSessionHomework({
+      sessionId: "session-1",
+      homework: "№ 1–3",
+      dueAt: "",
+      lessonStartsAt: "2026-09-01T09:00",
+    }),
+    /Укажите корректный срок/,
+  );
+  assert.throws(
+    () => prepareProgramSessionHomework({
+      sessionId: "session-1",
+      homework: "№ 1–3",
+      dueAt: "2026-09-01T09:00",
+      lessonStartsAt: "2026-09-01T09:00",
+    }),
+    /должен быть позже начала урока/,
+  );
+
+  const topicSnapshot = apiSource.slice(
+    apiSource.indexOf("const programTopics ="),
+    apiSource.indexOf("const academicCalendarPeriods ="),
+  );
+  assert.match(topicSnapshot, /COALESCE\(ps\.homework_override, ''\) AS homework/);
+  assert.match(topicSnapshot, /AS homeworkDueAt/);
+  assert.doesNotMatch(topicSnapshot, /pt\.homework\) AS homework/);
+
+  const manualUpdate = apiSource.slice(
+    apiSource.indexOf('action === "program.topic.update"'),
+    apiSource.indexOf('action === "program.upsert"'),
+  );
+  assert.match(manualUpdate, /session\.teacherUserId !== actor\.id/);
+  assert.match(manualUpdate, /assertCurriculumClassScope/);
+  assert.match(manualUpdate, /actor\.role !== "teacher"/);
+  assert.match(manualUpdate, /Домашнее задание и срок публикует только назначенный учитель/);
+  assert.match(manualUpdate, /\["draft", "changes_requested", "active"\]/);
+  assert.match(manualUpdate, /\["draft", "review", "changes_requested"\]/);
+  assert.match(manualUpdate, /session\.programStatus !== "active"/);
+  assert.match(manualUpdate, /!session\.scheduledDate \|\| !session\.startsAt/);
+  assert.match(manualUpdate, /lessonStartsAt: session\.scheduledDate && session\.startsAt/);
+  assert.match(manualUpdate, /ON CONFLICT\(id\) DO UPDATE SET/);
+  assert.match(manualUpdate, /title = excluded\.title/);
+  assert.match(manualUpdate, /await db\.batch\(\[/);
+  assert.match(manualUpdate, /SET topic_override = \?, homework_override = \?/);
+  assert.doesNotMatch(manualUpdate, /completed|провед[её]н/i);
+
+  assert.match(apiSource, /Повторный импорт заблокирован:[\s\S]*?ручные темы или домашние задания/);
+  assert.match(appSource, /name="homeworkDueAt" type="datetime-local"/);
+  assert.match(appSource, /Сохранить и опубликовать/);
+  assert.doesNotMatch(manualUpdate, /next_ps|следующ/i);
 });
 
 test("setup readiness is separated from daily workspaces", () => {
