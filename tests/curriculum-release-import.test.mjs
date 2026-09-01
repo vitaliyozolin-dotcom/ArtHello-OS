@@ -402,6 +402,15 @@ test("approved 170-hour math KTP is imported once across the full 2026/27 calend
   );
   db.close();
 
+  const lifecycleDb = new DatabaseSync(databasePath);
+  lifecycleDb
+    .prepare(
+      `UPDATE programs
+       SET status = 'changes_requested', review_comment = 'Уточнить формулировку темы'`,
+    )
+    .run();
+  lifecycleDb.close();
+
   const secondRun = runImporter(databasePath);
   assert.equal(
     secondRun.status,
@@ -420,11 +429,21 @@ test("approved 170-hour math KTP is imported once across the full 2026/27 calend
           (SELECT COUNT(*) FROM programs) AS programs,
           (SELECT COUNT(*) FROM program_imports) AS imports,
           (SELECT COUNT(*) FROM program_topics) AS topics,
-          (SELECT COUNT(*) FROM program_topic_sessions) AS sessions`,
+          (SELECT COUNT(*) FROM program_topic_sessions) AS sessions,
+          (SELECT status FROM programs LIMIT 1) AS status,
+          (SELECT review_comment FROM programs LIMIT 1) AS reviewComment`,
       )
       .get(),
     ),
-    { periods: 4, programs: 1, imports: 1, topics: 170, sessions: 170 },
+    {
+      periods: 4,
+      programs: 1,
+      imports: 1,
+      topics: 170,
+      sessions: 170,
+      status: "changes_requested",
+      reviewComment: "Уточнить формулировку темы",
+    },
   );
   verificationDb.close();
 });

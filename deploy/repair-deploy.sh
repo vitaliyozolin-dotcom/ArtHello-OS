@@ -895,16 +895,35 @@ docker exec school-1-11 node --input-type=module -e "
     WHERE academic_year = '2026/27' AND class_name = '2'
       AND subject_id = 'math' AND teacher_user_id = ?
   \`).get(expectedTeacherId);
+  const validProgramStatuses = new Set([
+    'draft',
+    'review',
+    'changes_requested',
+    'approved',
+    'active',
+    'archived',
+  ]);
   const expectedProgram = {
     id: program?.id,
     academicYear: '2026/27',
     className: '2',
     subjectId: 'math',
     teacherUserId: expectedTeacherId,
-    status: 'active',
     plannedLessons: 170,
   };
-  if (!program || JSON.stringify(program) !== JSON.stringify(expectedProgram)) {
+  const immutableProgram = program && {
+    id: program.id,
+    academicYear: program.academicYear,
+    className: program.className,
+    subjectId: program.subjectId,
+    teacherUserId: program.teacherUserId,
+    plannedLessons: program.plannedLessons,
+  };
+  if (
+    !program ||
+    !validProgramStatuses.has(program.status) ||
+    JSON.stringify(immutableProgram) !== JSON.stringify(expectedProgram)
+  ) {
     console.error('SCHOOL_CURRICULUM_PROGRAM_VERIFY=FAILED');
     console.error(JSON.stringify(program));
     process.exit(1);
@@ -1011,6 +1030,7 @@ docker exec school-1-11 node --input-type=module -e "
   console.log('SCHOOL_CALENDAR_PERIODS=4');
   console.log('SCHOOL_CURRICULUM_VERIFY=SUCCESS');
   console.log('SCHOOL_CURRICULUM_TEACHER_USER_ID=' + expectedTeacherId);
+  console.log('SCHOOL_CURRICULUM_STATUS=' + program.status);
   console.log('SCHOOL_CURRICULUM_TOPICS=170');
   console.log('SCHOOL_CURRICULUM_HOURS=170');
   console.log('SCHOOL_CURRICULUM_SESSIONS=170');

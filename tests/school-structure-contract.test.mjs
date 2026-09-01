@@ -305,6 +305,15 @@ test("production cutover cannot restore a backup after accepting new writes", ()
   assert.match(deploySource, /for attempt in \$\(seq 1 20\)/);
   assert.match(deploySource, /SCHOOL_PROBE_ORIGIN=https:\/\/\$SCHOOL_HOST/);
   assert.match(deploySource, /docker network connect[\s\S]*?--alias school-1-11/);
+  assert.match(
+    deploySource,
+    /validProgramStatuses = new Set\(\[[\s\S]*?'draft'[\s\S]*?'review'[\s\S]*?'changes_requested'[\s\S]*?'approved'[\s\S]*?'active'[\s\S]*?'archived'/,
+  );
+  assert.match(deploySource, /SCHOOL_CURRICULUM_STATUS=/);
+  assert.doesNotMatch(
+    deploySource,
+    /expectedProgram = \{[\s\S]*?status: 'active'[\s\S]*?\};/,
+  );
   assert.match(privateComposeSource, /school_candidate:/);
   assert.match(privateComposeSource, /internal: true/);
   assert.doesNotMatch(privateComposeSource, /arthello[_-]public/);
