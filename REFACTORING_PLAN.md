@@ -23,11 +23,14 @@
 
 **Вне workspace:** `sites-control/` (4-й фронтенд → воркер для OpenAI Sites; владеет корневыми `dev`/`build`/`test`), `deploy/` (~22 000 строк TS/TSX/MJS, невидимых для tsc: v44/v52 School-контур на Cloudflare D1, третья реализация auth), `lib/integrations/openai_ai_integrations` (сирота-форк без package.json).
 
-**Пути «commit → production» (4 параллельных):**
+**Пути «commit → production» (3 активных после cleanup 2026-09-01):**
 1. **Sites control** — `pnpm build:sites` → воркер → ручная публикация через Sites CLI.
 2. **Closed RU release** — `deploy-ru.yml` (dispatch, пин ref) → docker-образы → prerelease → **ручной** `pull-release.sh` root'ом на Timeweb VPS (с boundary-гейтами и rollback).
-3. **School SSO cutover** — `deploy-school-staff-sso-production-v3-20260831.yml`: автозапуск по push в main, self-hosted runner на прод-хосте, контроллер и cutover-скрипт реконструируются из base64-чанков.
-4. **Replit autoscale** — платформенный, с `postMerge`-хуком.
+3. **Replit autoscale** — платформенный, с `postMerge`-хуком.
+
+Исторический School SSO cutover и остальные spent workflow удалены из активной
+`.github/workflows`; восстановительная опись с исходными blob SHA находится в
+`docs/workflow-archive-2026-09-01.md`.
 
 На обычные изменения кода работают только два гейта: `quality.yml` (gitleaks fail-closed self-test, полный history-scan, test:full + test:postgres + build:full, immutable provenance artifact) и `proof-gates.yml` (permission-proof, migration-twin, visual-acceptance).
 
@@ -39,10 +42,10 @@
 
 | ID | Уязвимость | Доказательство | Мера устранения |
 |----|-----------|----------------|-----------------|
-| R1 | `pull_request`-триггер исполняет код PR на self-hosted runner **на продакшен-хосте** с доступом к Docker (root-эквивалент): PR-контролируемые `Dockerfile`/`capture.cjs` собираются и запускаются на проде. Дополнительные `pull_request_target`/SSH-пути требуют полной структурной инвентаризации | `.github/workflows/v52-candidate.yml:37-42,115-121,173-174,398-416`; `school-diary-safety-baseline.yml`; `deploy-school-1-11.yml`; `deploy-school-direct-38-55.yml`; `repair-production-ru-lb-backend.yml` | Запретить исполнение недоверенного PR-кода на любом runner с production capability; кандидаты — на GitHub-hosted или изолированной ephemeral VM; постоянный YAML-aware policy-gate |
+| R1 | **Устранено в активных workflow:** исторические `pull_request`/`pull_request_target` пути к production capability удалены cleanup 2026-09-01; постоянный YAML-aware gate оставлен | `docs/workflow-archive-2026-09-01.md`; `scripts/workflow-policy.mjs` | Не возвращать архивные workflow без нового D-решения и негативного policy evidence |
 | R2 | Self-hosted runner установлен на прод-хосте **как root** (`RUNNER_USER=root`, `RUNNER_ALLOW_RUNASROOT=1`); версия runner не зафиксирована. Перевод пользователя в группу `docker` не устраняет root-эквивалентность Docker socket | `deploy/install-school-self-hosted-runner.sh:9,55-58,75,85`; Docker-операции в `v52-candidate.yml` | Убрать недоверенный execution path с production runner; целево — отдельная VM/ephemeral runner без production Docker socket; пин версии. Смена Unix-пользователя без изоляции недостаточна |
-| R3 | Три живых dispatchable варианта одного production-cutover; v1 пишет в путь, который v3-валидатор явно запрещает — ошибочный dispatch v1 = rename+stop живого контейнера и падение | `deploy-school-staff-sso-production-{,v2-,v3-}20260831.yml`; `validate-school-staff-sso-transfer-v3.yml:55` | Удалить v1/v2 (git-история сохраняет); v3 пометить как spent |
-| R4 | Валидация cutover'а не перезапускается на main: деплой доверяет захардкоженному `VALIDATION_RUN_ID: "33415299367"`; правка чанков на main запускает деплой **без** повторной валидации | `validate-...-v3.yml:6-8`; `deploy-...-v3-20260831.yml:26` | Деплой обязан требовать свежий успешный validation run (проверка через GitHub API), не константу |
+| R3 | **Устранено в активных workflow:** три dispatchable School SSO cutover удалены как spent | `docs/workflow-archive-2026-09-01.md` | Git-история сохраняется; повторный запуск требует нового проверенного workflow |
+| R4 | **Устранено удалением spent cutover:** активного deploy с hardcoded `VALIDATION_RUN_ID` больше нет | `docs/workflow-archive-2026-09-01.md` | Любой будущий cutover обязан проверять свежий successful validation run через API |
 | R5 | Стирание прод-данных по push текстового файла в main; recovery легитимно заканчивается `FAILED_PRODUCTION_LEFT_STOPPED/PAUSED` | `production-data-reset.yml:5-8` | `workflow_dispatch` + typed confirmation + protected Environment c required reviewers |
 | R7 | Секреты School-контура (`CENTRAL_ACCESS_SECRET`, `IDENTITY_CORE_SECRET`) существуют **только внутри работающего контейнера** (перенос через `docker inspect Config.Env`). Потеря контейнера = невосстановимый отказ SSO | cutover-payload v3 | Environment secrets + зашифрованный офлайн-бэкап; перенос через env-file; drill восстановления в RUNBOOK |
 | R8 | Прерывание cutover между `docker rename` и `docker run` (kill runner'а, обрыв ssh 3300s-сессии) оставляет прод без контейнера `school-1-11`; восстановление — только bash EXIT-trap, внешнего watchdog нет | cutover-payload v3 | Standalone `deploy/rollback-school-1-11.sh` + watchdog/systemd; rename только после успешного старта нового |
@@ -68,9 +71,9 @@
 | ID | Риск | Доказательство | Мера |
 |----|------|----------------|------|
 | R12 | Инлайнер sites-control: две exact-string `String.replace` — любое переформатирование HTML делает replace молчаливым no-op (воркер отдаст страницу без стилей/JS); ни один гейт этого не ловит | `sites-control/scripts/build.mjs:18-20` | Ассертить отсутствие исходных подстрок / наличие `<style>` в бандле |
-| R13 | Одноразовые workflow под видом CD: все входы — замороженные литералы (повторный dispatch разворачивает кандидата от 2026-08-31); `self-hosted-gateway-smoke.yml` захардкодил image-tag, который будет удалён | ~10 файлов `.github/workflows/` | Архивировать spent-workflow, убрать dispatchability |
-| R14 | 47 workflow / 14 095 строк на ревизии 2026-09-01, ~28 одноразовых; у ~10 path-фильтры на несуществующие каталоги; `tmp-*` на main; 264 remote-ветки по исходному аудиту; **нет CODEOWNERS** | `.github/workflows/` | CODEOWNERS (минимум `.github/`, `deploy/`), чистка; динамические счётчики переснимать перед каждым cleanup-кандидатом |
-| R15 | `visual-acceptance.mjs` зависит от незадекларированного Chrome без пина версии (pixel-точные ассерты); `v52-candidate.yml` требует ровно 595 скриншотов | `scripts/visual-acceptance.mjs:18-25`; `v52-candidate.yml:419` | Пин браузера; убрать магические счётчики |
+| R13 | **Устранено:** 41 одноразовый workflow удалён из активной директории с описью blob SHA | `docs/workflow-archive-2026-09-01.md` | Не восстанавливать frozen candidates как постоянный CD |
+| R14 | После cleanup: 6 активных workflow; `tmp-*` и мёртвые path-фильтры удалены; **CODEOWNERS всё ещё отсутствует** | `.github/workflows/`; `docs/workflow-archive-2026-09-01.md` | Добавить CODEOWNERS минимум для `.github/` и `deploy/` |
+| R15 | `visual-acceptance.mjs` всё ещё зависит от незадекларированного Chrome; workflow с магическим счётчиком 595 удалён | `scripts/visual-acceptance.mjs:18-25`; `docs/workflow-archive-2026-09-01.md` | Пин браузера для постоянного proof gate |
 | R16 | Разъезд тулчейна: pnpm 11.7.0 (quality.yml, deploy/Dockerfile) vs 10.4.1 (proof-gates.yml); npm ci в v52; catalog в основном floating `^` | CI + deploy | Единый пин + `packageManager` |
 | ZOD | 20 файлов импортируют `zod/v4` при catalog-пине `zod: 3.25.76`; `api-zod` используется в 2 из 83 файлов сервера — 42 route-модуля валидируют вручную | api-server | Унификация; валидация через сгенерированные схемы |
 | ENV-THROW | Module-level `throw` при импорте `lib/db` (`DATABASE_URL`) и `alphaCrmClient` (`ALFACRM_DOMAIN`) — импорт с побочным эффектом, слой нетестируем в изоляции | `lib/db/src/index.ts:5-9`; `.../alphaCrmClient.ts:4-7` | Ленивая инициализация / фабрики |
