@@ -1,14 +1,6 @@
 name: ArtHello v52 candidate
 
 on:
-  pull_request:
-    paths:
-      - app/components/**
-      - scripts/**
-      - tests/**
-      - quality-gates/**
-      - deploy/v52/**
-      - .github/workflows/v52-candidate.yml
   workflow_dispatch:
 
 permissions:

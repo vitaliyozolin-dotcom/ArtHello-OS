@@ -1,5 +1,11 @@
 # ArtHello OS — Decisions
 
+## D-040 — Недоверенная автоматизация не получает production capability
+
+Статус: принято владельцем для кандидата Фазы 0A; требует Reviewer/Coordinator gate
+
+Код из `pull_request` или PR-head checkout не исполняется на self-hosted runner, job с production Environment, SSH-доступом к production или ином production capability. Доступ к Docker socket считается root-эквивалентным независимо от Unix-пользователя. Production-destructive workflow запускается только вручную через `workflow_dispatch`, требует точное typed confirmation до checkout/Docker и protected Environment с required reviewer. Replit post-merge не изменяет схему БД. Постоянный YAML-aware gate анализирует все workflow и fail closed блокирует возвращение опасных trigger/job/checkout сочетаний; его machine-readable отчёт входит в proof evidence.
+
 ## D-036 — Raw lineage и snapshot-state не восстанавливать догадкой
 
 Статус: принято в source candidate; независимый финальный gate ожидается

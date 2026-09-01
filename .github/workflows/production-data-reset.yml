@@ -1,11 +1,12 @@
 name: Reset ArtHello production data
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/production-reset-trigger.txt
   workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type RESET arthello production data on 188.225.38.55'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -26,6 +27,11 @@ jobs:
     environment: production-ru
 
     steps:
+      - name: Validate destructive reset confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: test "$CONFIRMATION" = 'RESET arthello production data on 188.225.38.55'
+
       - name: Checkout exact reset release
         uses: actions/checkout@v4
         with:
