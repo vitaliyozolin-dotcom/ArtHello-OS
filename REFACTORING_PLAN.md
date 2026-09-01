@@ -1,0 +1,277 @@
+# ArtHello OS — Архитектурный аудит и план рефакторинга
+
+Дата аудита: 2026-09-01. Ревизия плана: 2026-09-01 после первого Reviewer FAIL. Статус: REVISED DRAFT — до повторного независимого Reviewer PASS.
+Метод: полное исследование кодовой базы (артефакты, библиотеки, deploy-контур, CI, документация, тесты). Каждая находка привязана к файлам-доказательствам. Документ не дублирует открытые пункты `BACKLOG.md` — на них даются ссылки.
+
+---
+
+## 1. Инвентаризация
+
+**Монорепо (pnpm), 10 workspace-членов:**
+
+| Пакет | Назначение | Объём |
+|---|---|---|
+| `artifacts/api-server` | Express 5 REST API, 290 путей / 44 route-модуля | ~38 300 строк |
+| `artifacts/alpha-crm-sync` | React 19 SPA бэк-офиса (финансы, банк, staff, front-office) | ~41 500 строк |
+| `artifacts/mockup-sandbox` | Preview-harness; фактически пуст (generated map пустой) | ~6 300 строк |
+| `lib/db` | Drizzle + 26 схем + 18 миграций + rollbacks + migration-twin | ~3 700 строк |
+| `lib/api-spec` | `openapi.yaml` (171 путь) + orval codegen | 7 516 строк yaml |
+| `lib/api-client-react` | Сгенерированный React Query клиент (80 хуков) + custom-fetch | ~18 400 строк |
+| `lib/api-zod` | Сгенерированные Zod-схемы | ~4 400 строк |
+| `lib/integrations-openai-ai-{server,react}` | OpenAI-хелперы — **0 потребителей** | ~1 260 строк |
+| `scripts` | Sandbox-импортёры AlfaCRM/payroll на PGlite | ~5 700 строк |
+
+**Вне workspace:** `sites-control/` (4-й фронтенд → воркер для OpenAI Sites; владеет корневыми `dev`/`build`/`test`), `deploy/` (~22 000 строк TS/TSX/MJS, невидимых для tsc: v44/v52 School-контур на Cloudflare D1, третья реализация auth), `lib/integrations/openai_ai_integrations` (сирота-форк без package.json).
+
+**Пути «commit → production» (4 параллельных):**
+1. **Sites control** — `pnpm build:sites` → воркер → ручная публикация через Sites CLI.
+2. **Closed RU release** — `deploy-ru.yml` (dispatch, пин ref) → docker-образы → prerelease → **ручной** `pull-release.sh` root'ом на Timeweb VPS (с boundary-гейтами и rollback).
+3. **School SSO cutover** — `deploy-school-staff-sso-production-v3-20260831.yml`: автозапуск по push в main, self-hosted runner на прод-хосте, контроллер и cutover-скрипт реконструируются из base64-чанков.
+4. **Replit autoscale** — платформенный, с `postMerge`-хуком.
+
+На обычные изменения кода работают только два гейта: `quality.yml` (gitleaks fail-closed self-test, полный history-scan, test:full + test:postgres + build:full, immutable provenance artifact) и `proof-gates.yml` (permission-proof, migration-twin, visual-acceptance).
+
+---
+
+## 2. Реестр уязвимостей и рисков
+
+### 2.1 CRITICAL — безопасность и целостность продакшена
+
+| ID | Уязвимость | Доказательство | Мера устранения |
+|----|-----------|----------------|-----------------|
+| R1 | `pull_request`-триггер исполняет код PR на self-hosted runner **на продакшен-хосте** с доступом к Docker (root-эквивалент): PR-контролируемые `Dockerfile`/`capture.cjs` собираются и запускаются на проде. Дополнительные `pull_request_target`/SSH-пути требуют полной структурной инвентаризации | `.github/workflows/v52-candidate.yml:37-42,115-121,173-174,398-416`; `school-diary-safety-baseline.yml`; `deploy-school-1-11.yml`; `deploy-school-direct-38-55.yml`; `repair-production-ru-lb-backend.yml` | Запретить исполнение недоверенного PR-кода на любом runner с production capability; кандидаты — на GitHub-hosted или изолированной ephemeral VM; постоянный YAML-aware policy-gate |
+| R2 | Self-hosted runner установлен на прод-хосте **как root** (`RUNNER_USER=root`, `RUNNER_ALLOW_RUNASROOT=1`); версия runner не зафиксирована. Перевод пользователя в группу `docker` не устраняет root-эквивалентность Docker socket | `deploy/install-school-self-hosted-runner.sh:9,55-58,75,85`; Docker-операции в `v52-candidate.yml` | Убрать недоверенный execution path с production runner; целево — отдельная VM/ephemeral runner без production Docker socket; пин версии. Смена Unix-пользователя без изоляции недостаточна |
+| R3 | Три живых dispatchable варианта одного production-cutover; v1 пишет в путь, который v3-валидатор явно запрещает — ошибочный dispatch v1 = rename+stop живого контейнера и падение | `deploy-school-staff-sso-production-{,v2-,v3-}20260831.yml`; `validate-school-staff-sso-transfer-v3.yml:55` | Удалить v1/v2 (git-история сохраняет); v3 пометить как spent |
+| R4 | Валидация cutover'а не перезапускается на main: деплой доверяет захардкоженному `VALIDATION_RUN_ID: "33415299367"`; правка чанков на main запускает деплой **без** повторной валидации | `validate-...-v3.yml:6-8`; `deploy-...-v3-20260831.yml:26` | Деплой обязан требовать свежий успешный validation run (проверка через GitHub API), не константу |
+| R5 | Стирание прод-данных по push текстового файла в main; recovery легитимно заканчивается `FAILED_PRODUCTION_LEFT_STOPPED/PAUSED` | `production-data-reset.yml:5-8` | `workflow_dispatch` + typed confirmation + protected Environment c required reviewers |
+| R7 | Секреты School-контура (`CENTRAL_ACCESS_SECRET`, `IDENTITY_CORE_SECRET`) существуют **только внутри работающего контейнера** (перенос через `docker inspect Config.Env`). Потеря контейнера = невосстановимый отказ SSO | cutover-payload v3 | Environment secrets + зашифрованный офлайн-бэкап; перенос через env-file; drill восстановления в RUNBOOK |
+| R8 | Прерывание cutover между `docker rename` и `docker run` (kill runner'а, обрыв ssh 3300s-сессии) оставляет прод без контейнера `school-1-11`; восстановление — только bash EXIT-trap, внешнего watchdog нет | cutover-payload v3 | Standalone `deploy/rollback-school-1-11.sh` + watchdog/systemd; rename только после успешного старта нового |
+| R11 | `post-merge.sh`: `pnpm --filter db push` — имя пакета неверно (реальное `@workspace/db`): хук либо молча падает на каждом merge, либо при резолве выполнил бы **неревьюируемый `drizzle-kit push` в живую БД** | `scripts/post-merge.sh:4`; `.replit [postMerge]` | Удалить строку целиком (не «чинить» имя — сама операция и есть опасность) |
+| SEC-CRED | Раскрытые credentials AlfaCRM/Точка **не ротированы** (открытый HIGH-блокер; D-026: увиденное в чате скомпрометировано) | `CURRENT_STATE.md`, BACKLOG A.2/A.4 | Уже в BACKLOG — эскалировать в Фазу 0 с подтверждением отзыва у провайдера |
+
+### 2.2 HIGH
+
+| ID | Уязвимость | Доказательство | Мера |
+|----|-----------|----------------|------|
+| R6 | Исходник v52-приложения — непрозрачный base64-блоб 4.2 МБ + 14 последовательных string-patch-скриптов; работающий в проде код нечитаем из репо, порядок патчей load-bearing и недокументирован | `deploy/v52/Dockerfile:6-33`; `deploy/v52/overrides/scripts/patch-*.mjs` | Материализовать дерево в git, патчи применить один раз и закоммитить |
+| R6b | v44 — тот же блоб-паттерн **без чексуммы** на пересобранном tarball | `deploy/v44/Dockerfile:7-9` | Минимум sha256; целево — как R6 |
+| R9 | Base64-чанки (~920 байт/шт.) как постоянный механизм релиза: прод-логика нерецензируема в PR-диффе; изменение байта = регенерация всех чанков + 4 hex-констант в 2 файлах | `.github/scripts/school-staff-sso-*.sh.gz.b64.part-*` | Обычные файлы (~30 КБ каждый), чексумма по файлу |
+| R10 | SSH host-key pin через TOFU-then-compare; пин зарыт в gzip-блоб и продублирован plain-text во втором workflow (могут разъехаться); третий workflow использует конкурирующую конвенцию с секретом | controller-payload; `verify-school-staff-sso-live-20260831.yml`; `repair-production-ru-lb-backend.yml` | Единая конвенция: known_hosts из GitHub secret |
+| R17 | Бэкапы прод-БД: `while true; sleep 86400` с `set -eu` — первый сбой `pg_dump` навсегда убивает цикл; рестарт контейнера сбрасывает таймер; нет офф-хост копии и алертинга | `deploy/backup.sh` | cron/systemd-timer + алертинг + офф-хост; проверка RPO/RTO (BACKLOG P1) |
+| MIGR | Journal миграций 0000–0017, snapshots только до 0015 → следующий `drizzle-kit generate` даст неверный diff; 0009–0010 не проверены на репрезентативной копии | `lib/db/drizzle/meta/` | Восстановить snapshots 0016–0017; прогон на sandbox-копии (BACKLOG) |
+| MIGR2 | Вторая конкурирующая система миграций: `migrate.ts` (1 135 строк, 237 raw SQL) выполняет **деструктивные DELETE и DROP INDEX при каждом старте сервера** | `artifacts/api-server/src/lib/migrate.ts:29-56`; `src/index.ts:24` | Заморозить, дельты → drizzle, boot-time только read-only schema assertion |
+| FETCH | 43 ручных `fetch("/api/...")` в 14 файлах фронта в обход `custom-fetch` (baseUrl/auth/**CSRF**) | `pages/coverage.tsx` (19), `staff.tsx` (14), `employees.tsx` (12) и др. | Закрыть дрейф контракта, перевести на сгенерированный клиент |
+| PHONE | `normalizePhone` реализован 3–4 раза с разными сигнатурами — identity-matching логика; расхождение = риск неверного сопоставления семей/платежей | `routes/identity.ts:23`; `routes/front-office-smsvizitka.ts:45`; `scripts/src/import-alfacrm-sandbox.ts:139`; `routes/sync.ts:488` | Единая реализация в shared-lib + characterization-тесты |
+
+### 2.3 MEDIUM
+
+| ID | Риск | Доказательство | Мера |
+|----|------|----------------|------|
+| R12 | Инлайнер sites-control: две exact-string `String.replace` — любое переформатирование HTML делает replace молчаливым no-op (воркер отдаст страницу без стилей/JS); ни один гейт этого не ловит | `sites-control/scripts/build.mjs:18-20` | Ассертить отсутствие исходных подстрок / наличие `<style>` в бандле |
+| R13 | Одноразовые workflow под видом CD: все входы — замороженные литералы (повторный dispatch разворачивает кандидата от 2026-08-31); `self-hosted-gateway-smoke.yml` захардкодил image-tag, который будет удалён | ~10 файлов `.github/workflows/` | Архивировать spent-workflow, убрать dispatchability |
+| R14 | 47 workflow / 14 095 строк на ревизии 2026-09-01, ~28 одноразовых; у ~10 path-фильтры на несуществующие каталоги; `tmp-*` на main; 264 remote-ветки по исходному аудиту; **нет CODEOWNERS** | `.github/workflows/` | CODEOWNERS (минимум `.github/`, `deploy/`), чистка; динамические счётчики переснимать перед каждым cleanup-кандидатом |
+| R15 | `visual-acceptance.mjs` зависит от незадекларированного Chrome без пина версии (pixel-точные ассерты); `v52-candidate.yml` требует ровно 595 скриншотов | `scripts/visual-acceptance.mjs:18-25`; `v52-candidate.yml:419` | Пин браузера; убрать магические счётчики |
+| R16 | Разъезд тулчейна: pnpm 11.7.0 (quality.yml, deploy/Dockerfile) vs 10.4.1 (proof-gates.yml); npm ci в v52; catalog в основном floating `^` | CI + deploy | Единый пин + `packageManager` |
+| ZOD | 20 файлов импортируют `zod/v4` при catalog-пине `zod: 3.25.76`; `api-zod` используется в 2 из 83 файлов сервера — 42 route-модуля валидируют вручную | api-server | Унификация; валидация через сгенерированные схемы |
+| ENV-THROW | Module-level `throw` при импорте `lib/db` (`DATABASE_URL`) и `alphaCrmClient` (`ALFACRM_DOMAIN`) — импорт с побочным эффектом, слой нетестируем в изоляции | `lib/db/src/index.ts:5-9`; `.../alphaCrmClient.ts:4-7` | Ленивая инициализация / фабрики |
+
+### 2.4 LOW / гигиена
+
+| ID | Риск | Мера |
+|----|------|------|
+| R18 | Мёртвые payload'ы: 4 patch-скрипта + 8 b64-чанков ни на что не ссылаются; `mobile-qa.html` не собирается; ~5.6 МБ бинарщины в `deploy/` | Удалить |
+| R19 | `preview.allowedHosts: true` в vite-конфиге sites-control (DNS-rebinding класс, dev-only); `build.outDir` — мёртвый конфиг | Ограничить/удалить |
+| R20 | Анти-дрейф тесты ассертят содержимое CI-файлов и прозу («3 689 raw-строк») — работают как рачеты, но рутинные правки копирайта ломают suite | Осознанно сохранить; задокументировать в CLAUDE.md |
+| R21 | Governance `.company-os` (`production_requires_ai_contract: true`) ничем не энфорсится; pytest-тесты grant-subsidy-hunter не запускает ни один CI-job | CI-джоб валидации контрактов или явная пометка «документация» |
+| DEAD | `routes/sync.ts` 4 785 строк недостижим (503-гейт `legacy-sync-gate.ts`), но смонтирован, включая one-off repair-эндпоинты; сирота-форк `lib/integrations/openai_ai_integrations`; 2 openai-библиотеки без потребителей вне typecheck; mockup-sandbox пуст; 40/55 UI-компонентов не используются (в т.ч. `sidebar.tsx` 727 строк ×2); схемы `messages`/`conversations` вне barrel | Удаление (частично уже в BACKLOG: `/sync`) |
+
+### 2.5 Архитектурные находки (не уязвимости, но входят в план)
+
+- **Файлы-гиганты — 32 файла >500 строк**: `coverage.tsx` 5 358, `banking.tsx` 4 358, `audit.ts` 4 753 (17 эндпоинтов, все под `/coverage/*`; под `/audit` не монтирует ничего), `employees.tsx` 2 672, `tochka.ts` 1 728, `migrate.ts` 1 135 и далее.
+- **Дублирование**: 50/55 UI-компонентов побайтово одинаковы в двух пакетах (нет `lib/ui`); 2 клиента AlfaCRM; `sha256` ×5; форматирование валюты inline в 18 файлах; CSRF-логика в 3 местах; `formatDate` ×3; `toNum`/`toMonth`/`normalizeIds`/`logSync` ×2.
+- **Фрагментация роутов**: `/staff/*` в 3 файлах, `/coverage/*` в 2, finance в 6; произвольные суффиксы (`-module`, `-complete`, `-hr`, `-core`, `-qa`); смесь default/named exports в `routes/index.ts`.
+- **Слои**: `routes/auth.ts` экспортирует глобальные middleware (место — `src/lib/security/`, где уже 11 файлов); 4 стиля доступа к БД (drizzle builder — 24 файла, `db.execute(sql)` — 11, raw `pool.query` — 12, PGlite в scripts); 3 файла смешивают ORM и raw в одном модуле.
+- **SPA-роутинг**: wouter установлен, но `App.tsx` регистрирует 2 маршрута; вся навигация — `useState`-switch по 28-членному union в `AppShell.tsx` → нет deep links, back/forward, shareable URL.
+- **Workspace**: `sites-control` не член workspace, но владеет корневыми `dev`/`build`/`test`; `deploy/` 22k строк вне tsc; глоб `lib/integrations/*` резолвится в пустоту; все deps приложений в `devDependencies`; `.js`-расширения в импортах непоследовательны (60 vs 51 — работает только из-за esbuild); orval-codegen пишет через границы пакетов + shell-`printf` в чужой `src/index.ts`.
+- **Тесты**: ~4 100 строк тестов на ~86 000 строк исходников; многие — regex-по-исходникам, а не поведение; `test:full` **не включает** `test:postgres` и suite `scripts` (29 data-import тестов, цитируемых как evidence в CURRENT_STATE, не входят ни в один агрегат); 27/28 тестов `deploy/v52/overrides/tests` — сироты; lint-job нет (prettier установлен, ничем не запускается).
+- **Документация**: `CURRENT_STATE.md` заканчивается 2026-07-25 при истории репо до 2026-08-31; `replit.md` описывает уже удалённое поведение.
+
+### 2.6 Что сделано хорошо (сохранить при любом рефакторинге)
+
+- gitleaks **fail-closed self-test** перед реальным сканом (`quality.yml:46-67`) + скан полной истории.
+- Пин CI на `pull_request.head.sha`, non-shallow, `git fsck`, immutable provenance artifact (head/tree/archive/dist digests).
+- Boundary-гейты `pull-release.sh`: отказ деплоить при живых интеграционных секретах — политика как исполняемый код.
+- Cutover: backup-first → preflight на клоне бэкапа (со вставкой синтетического scrypt-пользователя и проверкой 410/401/нуля сессий) → drift-recheck → swap → независимая публичная пост-проверка.
+- `permission-proof.mjs`: known-incomplete enforcement как first-class ожидание — «молчаливое улучшение» тоже роняет гейт.
+- Валидатор v3 кодирует баг v2 как постоянный негативный ассерт.
+
+---
+
+## 3. План рефакторинга — 7 фаз
+
+Конвенции: **[DEL]** = чистое удаление (git-обратимо), **[BEH]** = меняет поведение, требует собственного proof-артефакта. Долгоживущее `[BEH]`-решение принимается до или в том же кандидате, который меняет поведение. Фаза может иметь umbrella D-решение, но независимые политики (runner isolation, destructive workflow, migration authority, credential recovery) получают отдельные D-решения, чтобы их можно было проверять и заменять независимо. Чистое удаление без изменения политики может закрываться evidence без отдельного D. Фазы 0–2 строго последовательны; 3/4 чередуются; Фаза 5 требует prune из Фазы 1 и fetch-миграцию 3.4; треки Фазы 6 имеют собственные зависимости ниже.
+
+### Фаза 0 — остановить кровотечение (effort M; единственная календарно срочная)
+
+Цель: ни один PR, push файла в main или Replit-merge не приводит к исполнению недоверенного кода / уничтожению данных на прод-хосте; runner с Docker socket считается privileged независимо от Unix-пользователя; ни один секрет не является невосстановимым.
+
+Фаза выполняется отдельными кандидатами, каждый со своим rollback и proof:
+
+**0A — немедленная repo-only блокировка trigger'ов и неявного DDL**
+
+1. **[BEH] R1**: построить полный структурный инвентарь `trigger → job if → checkout ref → runner → permissions/secrets/environment → Docker/SSH/production capability` для всех 47 workflow, включая `pull_request_target`, reusable workflows и GitHub-hosted jobs с SSH-доступом. До завершения инвентаря снять `pull_request` с `v52-candidate.yml` и `school-diary-safety-baseline.yml`; кандидаты выполнять только на GitHub-hosted или изолированной ephemeral VM без production capability. Мгновенная внешняя митигация: require approval + ограниченный runner group.
+2. **[BEH] R5**: удалить `push` из `production-data-reset.yml`; оставить `workflow_dispatch` с обязательным typed confirmation, проверяемым до checkout/Docker, и protected Environment с required reviewer.
+3. **[DEL] R11**: удалить строку `pnpm --filter db push` из `scripts/post-merge.sh` целиком; не исправлять имя пакета.
+4. **[BEH] R1-policy**: добавить постоянный YAML-aware gate, запрещающий недоверенный PR head на runner/job с production capability. `grep` оставить только дополнительным smoke-check, не acceptance.
+
+**0B — единственный доказуемый School cutover**
+
+5. **[DEL] R3**: удалить cutover v1/v2, оставить только один v3-механизм.
+6. **[BEH] R4**: убрать push-trigger и hardcoded candidate/validation constants. `workflow_dispatch` принимает candidate SHA и validation run ID; deploy через GitHub API проверяет точный validation workflow, `conclusion == success`, `head_sha`, ref/event, candidate tree, provenance artifact и payload checksums. Исторический run или mismatch любого поля = fail closed.
+
+**0C — изоляция production runner**
+
+7. **[BEH] R2**: удалить возможность исполнения недоверенного candidate-кода на production runner. Целевое состояние — отдельная VM/ephemeral runner без production Docker socket; production runner выполняет только пинованные controls/artifacts. Версию runner зафиксировать, installer и `RUNBOOK.md` обновить. Непривилегированный пользователь с доступом к Docker socket не считается устранением R2.
+
+**0D — восстановимость и credentials**
+
+8. **[BEH] R7**: секреты School → GitHub Environment secrets + зашифрованный офлайн-бэкап; entrypoint/compose читают из env-file; процедура восстановления в `RUNBOOK.md`.
+9. **[BEH] R8**: standalone `deploy/rollback-school-1-11.sh` + сохранение предыдущего образа до замены; восстановление не зависит от EXIT-trap одной ssh-сессии.
+10. **[BEH] SEC-CRED**: ротация AlfaCRM/Точка с подтверждением отзыва старых у провайдера; секреты и их значения не попадают в Git/evidence.
+
+НЕ трогать: исходники приложений; payload'ы `deploy/v44|v52`; логику `quality.yml`/`proof-gates.yml`; гейты живых интеграций (остаются выключенными).
+
+Acceptance evidence: machine-readable workflow inventory без необъяснённых production-capability путей; зелёный YAML-aware policy-gate с негативными fixtures для `pull_request`, `pull_request_target`, PR-head checkout, reusable workflow и SSH-to-production; reset без confirmation останавливается до checkout/Docker; доказательство отсутствия недоверенного execution path к production Docker (одного `ps user != root` недостаточно); свежий validation run на exact candidate SHA/tree; scratch rollback и secret-recovery drills; подтверждение ротации без значений секретов в `SECURITY_CHECKLIST.md`; отдельные D-решения и run-URL по кандидатам 0A–0D; финальный Reviewer/Coordinator gate всей Фазы 0.
+
+### Фаза 1 — мёртвый код, гигиена репо и workspace (M; в основном удаления)
+
+1. **[DEL после design gate]** Инвентаризировать каждый endpoint `routes/sync.ts` и все call-site'ы/операционные подсказки: для каждого зафиксировать решение `удалить` / `заменить scoped source job` / `перенести в sandbox script`. Сначала спроектировать и доказать необходимые безопасные замены согласно D-029 и `BACKLOG.md`, удалить/заменить ссылки в `audit.ts`, UI и документации; затем удалить `routes/sync.ts` и mount. Представительный 503 доказывает только текущую недоступность, но не достаточен как доказательство отсутствия нужной функциональности.
+2. **[DEL]** `lib/integrations-openai-ai-react`, `-server`, сирота-форк `lib/integrations/openai_ai_integrations` (сначала `grep -rn "integrations-openai" artifacts lib scripts` = пусто).
+3. **[DEL]** `artifacts/mockup-sandbox` + ссылки в workspace.
+4. **[DEL]** ~40 неиспользуемых UI-компонентов в **обеих** копиях (evidence: import-graph по каждому = 0 импортёров). Дедуп используемых — фаза 5.
+5. **[BEH]** `sites-control` → член workspace `@workspace/sites-control`; корневые скрипты переезжают. Его анти-дрейф тесты обязаны пройти без правок — это и есть доказательство механичности переноса.
+6. **[BEH]** Гигиена зависимостей: решить `zod/v4` vs catalog-пин (через D-номер); runtime-deps из `devDependencies`; поле `packageManager` + единый pnpm в `quality.yml`/`proof-gates.yml` (R16); нормализация `.js`-расширений в одну сторону.
+7. **[BEH]** Lint-job в `quality.yml` (первый прогон warn-only, второй blocking) + `CODEOWNERS` (минимум на `.github/` и `deploy/`) (R14).
+8. Обновить `CURRENT_STATE.md` при закрытии фазы.
+
+НЕ трогать: схемы `messages`/`conversations` (их удаление порождает drizzle-diff — ждёт ремонта snapshots в фазе 2); `deploy/`; `migrate.ts`; бизнес-логику route-файлов. Для `/sync` до design gate разрешены только inventory и тесты; удаление mount/файла — отдельный кандидат после замены зависимостей.
+
+Гейты: `proof-gates.yml` сработает (routes/**); `permission-matrix.json` обновить в том же PR, что удаление sync.ts; `visual-acceptance` обязан остаться байт-стабильным (удаление неиспользуемого не меняет рендер — скриншот-diff и есть доказательство).
+
+Evidence: отчёт дельты строк (`git log --diff-filter=D`); `pnpm -r typecheck` теперь покрывает sites-control; неизменный вывод visual-acceptance; permission-proof зелёный с обновлённой матрицей; D-номер.
+
+### Фаза 2 — слой данных и унификация миграций (L; наивысший риск корректности, блокирует все schema-работы)
+
+1. **[BEH]** 2.1 Восстановить `0016_snapshot.json`/`0017_snapshot.json` (интроспекция БД, домигрированной до 0017, либо replay состояния схемы в scratch-checkout). **Доказательство: `drizzle-kit generate` на неизменной схеме даёт пустой diff.** Ничто другое в фазе не стартует раньше.
+2. **[BEH]** 2.2 Доказать 0009–0010 на репрезентативной БД через `migration-twin.mjs`, расширенный посевом репрезентативных данных (закрывает открытый блокер BACKLOG).
+3. **[BEH]** 2.3 Вывести из эксплуатации `migrate.ts`: (a) diff конечного состояния против drizzle-0017 на twin-базах (schema-dump diff = evidence); (b) реальные дельты → новая проверенная Drizzle-миграция `0018_*`; (c) boot-time — только read-only schema assertion c fail-fast; (d) release содержит immutable manifest и только checked-in SQL с зафиксированными SHA-256; deploy применяет эти миграции последовательным migration runner'ом. В production запрещены `drizzle-kit push`, `generate`, introspection-driven mutation и любой незакоммиченный SQL; prod-VPS ничего не генерирует и не собирает. Backup, проверенный rollback, отдельное разрешение и Reviewer/Coordinator gates из D-009 сохраняются.
+4. **[DEL]** 2.4 Теперь удалить сиротские схемы `messages`/`conversations`: файлы + DROP-миграция + twin-proof.
+5. **[BEH]** 2.5 Убрать module-level env-throw в `lib/db` и `alphaCrmClient` (ленивая инициализация / `createDb(env)`).
+6. 2.6 D-номер о политике доступа к БД: drizzle builder по умолчанию; `db.execute(sql)` — допустим для отчётности; `pool.query` запрещён (энфорс lint-правилом фазы 1); PGlite — только в `scripts/`.
+
+НЕ трогать: бизнес-логику роутов, openapi.yaml, фронтенд, `deploy/`.
+
+Evidence: лог пустого diff `drizzle-kit generate` только в CI/scratch; нулевая дельта schema-dump'ов (путь migrate.ts vs путь checked-in SQL) до удаления; manifest с SHA-256; негативный тест, что deploy отказывает при altered/unmanifested SQL и не содержит `push|generate`; boot-лог сервера assertion-only без DDL; D-решение «checked-in Drizzle SQL — единственный авторитет миграций».
+
+### Фаза 3 — унификация контракта и общих корректностно-критичных утилит (L)
+
+1. **[BEH]** Пакет `lib/shared`: первыми — дубли с риском корректности: `normalizePhone` (characterization-тесты, фиксирующие поведение каждого текущего варианта, затем канонический с D-номером семантики), `sha256` (5 копий), CSRF (3 места), money-format (18 inline-мест). Каждый PR консолидации несёт тест канонического поведения против старых call-site'ов.
+2. **[BEH]** Сверка контракта: `openapi.yaml` объявляется источником истины (D-номер). Инвентаризация разрыва 290 путей сервера / 171 в спеке / 80 хуков: каждый server-only путь → задокументировать, пометить deprecated или удалить (kill-list уходит в фазу 4).
+3. **[BEH]** Новый постоянный гейт `scripts/contract-drift.mjs`: поднимает Express-приложение, дампит route table, диффит против openapi.yaml; встраивается в `proof-gates.yml` рядом с `permission-proof.mjs`.
+4. **[BEH]** FETCH: 43 ручных `fetch("/api/...")` → сгенерированные хуки `lib/api-client-react` (восстанавливает единообразие auth+CSRF). По PR на кластер файлов; evidence — grep-счётчик `fetch("/api` → 0 в drift-гейте.
+5. api-zod: внедрять только в файлы, **не** идущие под декомпозицию фазы 4 (гиганты получают zod при разборе, чтобы не трогать дважды).
+
+НЕ трогать: внутреннюю структуру god-файлов, топологию mount'ов, UI-компоненты, `deploy/`.
+
+Evidence: contract-drift отчёт с 0 необъяснённых путей; `grep -rn 'fetch("/api' artifacts/alpha-crm-sync/src` = 0; characterization-suite normalizePhone с provenance каждого legacy-варианта; D-номера.
+
+### Фаза 4 — декомпозиция сервера: гиганты, топология роутов, слои (L; много мелких PR)
+
+Правило: каждый файл = один PR; route-table snapshot до/после байт-идентичен.
+
+1. Разбить `routes/audit.ts` (4 753 строки, 17 эндпоинтов `/coverage/*`) → `routes/coverage/*.ts`, слить со вторым coverage-файлом; вводящее в заблуждение имя `audit.ts` исчезает.
+2. Так же: `tochka.ts` (1 728) и 6 finance-файлов → `routes/finance/`; 3 файла `/staff/*` → `routes/staff/`; остальные >500 строк — в порядке churn (`git log --stat`).
+3. Фронтовые гиганты `coverage.tsx` (5 358), `banking.tsx` (4 358), `employees.tsx` (2 672) → feature-каталоги; visual-acceptance = доказательство эквивалентности.
+4. **[BEH]** Глобальные middleware из `routes/auth.ts` → `src/lib/security/` (proof-gates path-триггерится на `src/lib/security/**` — продолжает срабатывать, это хорошо).
+5. Named exports для route-модулей; энфорс lint-правилом.
+6. api-zod по мере разбора каждого модуля (продолжение фазы 3.5).
+
+НЕ трогать: URL, статус-коды, формы ответов (энфорсится contract-drift гейтом); схему БД; `deploy/`.
+
+Evidence: пустой route-table diff в каждом PR; permission-proof зелёный с неизменной семантикой матрицы; `wc -l` по `routes/` без файлов >500; неизменный visual-acceptance для фронтовых разборов; D-номер на каждую принятую структурную конвенцию.
+
+### Фаза 5 — фронтенд-платформа: общий UI-пакет и настоящий роутинг (M)
+
+1. Пакет `lib/ui` из ~15 выживших компонентов (после prune фазы 1 дедуп механический — копии побайтово равны); оба приложения импортируют `@workspace/ui`. Evidence: байт-стабильность visual-acceptance.
+2. **[BEH]** wouter (уже в catalog) вместо `useState`-switch в `AppShell.tsx`: по маршруту на секцию, состояние секции из URL, redirect legacy-default; инкрементально через mapping-таблицу.
+3. Обновить `visual-canon.json`/`visual-acceptance.mjs` на per-route URL вместо кликов по состоянию — единственная фаза, где этот гейт меняется намеренно (у каждого canon-скриншота появляется URL как provenance); before/after пары в evidence.
+
+НЕ трогать: серверный код; api-client слой (сделан в фазе 3); UI sites-control (отдельный продукт).
+
+Evidence: доказательство deep-link (прямая загрузка `/banking`); back-button в записанном прогоне visual-acceptance; отчёт хэш-дедупликации компонентов между пакетами = пусто; D-номер.
+
+### Фаза 6 — консолидация CI, нормализация School-исходника, тестовая стратегия (L; набор независимых треков)
+
+1. **[DEL]** Архивировать-и-удалить ~30 одноразовых workflow (`tmp-*`, `diagnose-*`, `repair-*`, датированные `*-20260831`, дубли `*-candidate*`); индекс в `docs/ops-archive.md` с run-URL (прогоны остаются provenance).
+2. Постоянный набор: `quality.yml`, `proof-gates.yml`, параметризованный `deploy-ru.yml`, один school-deploy + его validation (в форме после фазы 0); всё деструктивное — за protected Environments.
+3. **[BEH]** Де-тарболизация School (R6/R6b/R9; не переписывание — нормализация version control): (a) в scratch-checkout декодировать чанки v52, применить 14 патчей по порядку → истинное текущее дерево; (b) закоммитить как обычные файлы (например `deploy/v52/src/`), sha256 tarball'а и post-patch дерева — в D-номер; **перед коммитом прогнать gitleaks локально по извлечённому дереву** (tarball может содержать секреты, которые history-scan потом зафиксирует навсегда); (c) пересборка из закоммиченного дерева и hash-эквивалентность артефакта против tarball+patches; (d) **[DEL]** удалить чанки и патч-скрипты; повторить для v44.
+4. `deploy/` под tsc (собственный tsconfig-проект); усыновить 27 сиротских тестов `deploy/v52/overrides/tests` в CI-job.
+5. Единая ssh-конвенция: known_hosts из GitHub secret (R10). Бэкапы: cron/systemd-timer + офф-хост + алертинг (R17).
+6. Тестовая стратегия: regex-по-исходникам заменить поведенческими там, где они охраняли реальное; `test:full` включает `test:postgres` и suite `scripts`; ratcheting coverage floor (стартует с текущего измеренного %, не убывает — ratchet-файл и есть evidence).
+
+НЕ трогать: runtime-поведение School (v3-cutover остаётся механизмом доставки); прод-хосты — только через выжившие параметризованные workflow.
+
+Evidence: счётчик workflow до/после + архивный индекс; отчёт hash-эквивалентности сборки School (tarball vs source); CI-прогон с typecheck `deploy/` и исполнением 27 тестов; закоммиченный ratchet-файл; D-номер, закрывающий находку «теневая кодовая база».
+
+Зависимости внутри Фазы 6:
+- 6.1–6.2 workflow cleanup стартуют после полного закрытия Фазы 0;
+- 6.3 де-тарболизация стартует после Фазы 0 и отдельного secret-scan gate, независимо от Фаз 2–5;
+- 6.4 включение `deploy/` в typecheck требует завершённой материализации затрагиваемого School-дерева из 6.3; остальные deploy-файлы можно подключать раньше отдельным кандидатом;
+- 6.5 SSH/backup hardening стартует после Фазы 0 и не зависит от продуктовых фаз;
+- 6.6 тестовая стратегия может начинаться после Фазы 0, но изменение root scripts/workspace координируется с Фазой 1, чтобы не создавать конфликтующие кандидаты.
+
+### Зависимости
+
+```
+P0 (ops) ──► P1 (мёртвый код) ──► P2 (данные) ──► P3 (контракт) ──► P4 (декомпозиция)
+   │              │
+   │              └──► P5 (фронтенд) [prune UI из P1 + fetch-миграция P3.4 до роутинга]
+   └──► P6.1/2/3/5/6 (CI/School tracks; точные зависимости перечислены выше)
+                     P6.4 после материализации 6.3 для School-дерева
+```
+
+Жёсткие связки: удаление `/sync` ← endpoint/call-site inventory + scoped replacement design по D-029; удаление сиротских схем ← ремонт snapshots (2.1); вывод `migrate.ts` ← доказательство 0009–0010 (2.2) + immutable checked-in SQL deploy-path; разбор god-файлов ← contract-drift гейт (3.3); дедуп UI ← prune (1.4); переделка visual-гейта (5.3) — не раньше fetch-миграции (3.4), иначе падения неоднозначны.
+
+---
+
+## 4. Проектные скилы Claude Code и Codex
+
+На ревизии 2026-09-01 в Git добавлены два согласованных набора: 8 Claude-скилов в `.claude/skills/<name>/SKILL.md` и 8 Codex-скилов в `.agents/skills/<name>/SKILL.md` с `agents/openai.yaml`. Корневой `AGENTS.md` закоммичен; локальный `CLAUDE.md` существует, но до отдельного коммита не считается частью проверяемого tree. Оба набора реализуют одинаковые проектные инварианты с адаптацией под механизм обнаружения соответствующего агента.
+
+**Проектно-специфичные** (отвечают на конкретные находки аудита):
+
+| Скил | Что делает | Закрывает |
+|------|-----------|-----------|
+| `audit-release` | Проверка provenance-цепочки перед деплоем: совпадение SHA/tree, чексуммы чанков/скриптов, boundary-строки манифеста, свежесть validation run | R4, R13 |
+| `migration-check` | Паритет journal/snapshots drizzle, наличие rollback-companion на каждую миграцию, прогон `migration-twin.mjs`, отсутствие конфликта с `migrate.ts` | MIGR, MIGR2 |
+| `reviewer` | Роль Ревизора из MASTER_BOOK: read-only проверка кандидата с вердиктом PASS / CONDITIONAL PASS / FAIL / BLOCKED и цитируемыми доказательствами на одну точную версию | evidence-культура |
+| `workflow-hygiene` | Инвентаризация `.github/workflows/`: одноразовые/просроченные workflow, опасные триггеры (pull_request × self-hosted, push-триггеры деструктивных действий), отчёт «удалить/задизейблить/оставить» | R1, R3, R13, R14 |
+
+**Адаптации с aihero.dev/skills** (настроенные под конвенции проекта):
+
+| Скил | Оригинал | Проектная адаптация |
+|------|----------|---------------------|
+| `grill-me` | /grill-me | Адверсариальная критика предложенного изменения до выполнения — в терминах D-решений, security-инвариантов и запретов MASTER_BOOK (никаких выдуманных чисел, fail-closed по умолчанию) |
+| `triage` | /triage | Разбор `BACKLOG.md`: сверка статусов `[~]`/`[ ]` с реальностью репо, предложение следующего шага с доказательствами |
+| `tdd` | /tdd | Red-green-refactor под конвенции проекта: `node --test`, PGlite для БД-логики; явный запрет regex-по-исходникам как замены поведенческих тестов |
+| `domain-model` | /domain-model | Фиксация доменной модели (семьи/ученики/группы/платежи/юрлица) при изменении схем; сверка с `DATA_COVERAGE.md` и правилом «никакого автослияния семей» (D-принцип) |
+
+`AGENTS.md` уже фиксирует структуру монорепо, команды, инварианты и правила доказательств для Codex. Перед добавлением `CLAUDE.md` в Git его необходимо сверить с этой картой и текущей ревизией плана, чтобы две agent-инструкции не расходились.
+
+---
+
+## 5. Порядок принятия
+
+1. Добавить этот документ в Git отдельным docs-only кандидатом и получить повторный независимый Reviewer PASS на точный commit/tree; несогласия — правками разделов, спорные меры — через D-решения.
+2. Фаза 0 — единственная календарно срочная; выполнять кандидатами 0A–0D с независимыми rollback/proof и финальным Reviewer/Coordinator gate.
+3. Остальные фазы — в каденции проекта «малые шаги с доказательствами». Umbrella D фиксирует цель фазы; отдельные долгоживущие `[BEH]`-политики получают собственные D-решения до или вместе с изменением.
