@@ -1,0 +1,120 @@
+name: Deploy School SSO origin hotfix production
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/deploy-school-sso-origin-hotfix-production-20260902.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: school-1-11-production
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: 165a549d84779e1239dec254e6ac9914b40581c2
+  CANDIDATE_TREE: cd439c06643235ce42892b2191760c44f2484ab5
+  VALIDATED_SHA: cb4b03e6aa90f3f39ce91bcafafb62b702234b8d
+  VALIDATION_RUN_ID: "33667429928"
+  SOURCE_PR: "306"
+  SOURCE_BASE: school/staging-foundation-20260827
+  CUTOVER_SCRIPT_SHA256: 6c8d945addce8644a0bcfbfaff555463042c6b2bbb46d09df06f52820fa93b25
+  CONTROLLER_SCRIPT_SHA256: c164a3a935efdd305b56af3c35f2efd17c63cb7ea885485e80bb23b1fd6c303b
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+  ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
+
+jobs:
+  deploy:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 70
+    environment: production-ru
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+      SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+
+    steps:
+      - name: Check out exact production controls
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: controls
+          persist-credentials: false
+
+      - name: Check out exact accepted School release
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: school-source
+
+      - name: Execute verified backup-first cutover
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          controller="$RUNNER_TEMP/school-sso-origin-controller-$GITHUB_RUN_ID.sh"
+          mapfile -t controller_parts < <(
+            printf '%s\n' controls/.github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64.part-* | sort
+          )
+          test "${#controller_parts[@]}" -eq 5
+          cat "${controller_parts[@]}" | tr -d '\r\n\t ' | base64 -d | gzip -d > "$controller"
+          chmod 0500 "$controller"
+          printf '%s  %s\n' "$CONTROLLER_SCRIPT_SHA256" "$controller" | sha256sum -c -
+          bash -n "$controller"
+          exec "$controller"
+
+      - name: Verify live SSO boundary after cutover
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$(mktemp -d "$RUNNER_TEMP/school-sso-origin-live-XXXXXX")"
+          trap 'rm -rf -- "$work"' EXIT
+
+          curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health" |
+            grep -F '"status":"ok"' >/dev/null
+          curl -fsS --max-time 30 "$ARTHELLO_ORIGIN/api/health" |
+            grep -F '"status":"ok"' >/dev/null
+
+          curl -sS --max-time 30 -D "$work/start.headers" -o /dev/null \
+            "$SCHOOL_ORIGIN/auth/central/start"
+          test "$(awk 'NR==1{print $2}' "$work/start.headers")" = 303
+          location="$(tr -d '\r' < "$work/start.headers" | sed -n 's/^location: //Ip' | tail -n1)"
+          python3 - "$location" <<'PY'
+          import sys
+          import urllib.parse
+          target = urllib.parse.urlparse(sys.argv[1])
+          assert target.scheme == "https"
+          assert target.netloc == "arthello-188-225-38-55.sslip.io"
+          assert target.path == "/api/school-sso/authorize"
+          PY
+
+          code="$(printf 'a%.0s' $(seq 1 43))"
+          verifier="$(printf 'b%.0s' $(seq 1 43))"
+          body="{\"code\":\"$code\",\"codeVerifier\":\"$verifier\"}"
+          no_origin="$(curl -sS --max-time 30 \
+            -o "$work/no-origin.json" -w '%{http_code}' \
+            -X POST "$ARTHELLO_ORIGIN/api/school-sso/exchange" \
+            -H 'content-type: application/json' \
+            --data "$body")"
+          trusted_origin="$(curl -sS --max-time 30 \
+            -o "$work/trusted-origin.json" -w '%{http_code}' \
+            -X POST "$ARTHELLO_ORIGIN/api/school-sso/exchange" \
+            -H 'content-type: application/json' \
+            -H "origin: $ARTHELLO_ORIGIN" \
+            --data "$body")"
+          test "$no_origin" = 403
+          test "$trusted_origin" = 401
+          printf 'SCHOOL_SSO_ORIGIN_HOTFIX_PUBLIC_CHECK=PASS\n'
