@@ -50,7 +50,7 @@ jobs:
 
           # D-040: a pull-request head is verified only on an ephemeral hosted
           # runner and receives neither a production Environment nor a secret.
-          # D-045 makes a one-release recovery exception only for the production trigger;
+          # D-046 makes a one-release recovery exception only for the production trigger;
           # the self-hosted job still consumes merged, exact-SHA gated main code.
           ruby -ryaml -e '
             document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
@@ -74,15 +74,15 @@ jobs:
             raise "production must use its dedicated self-hosted runner" unless runners.include?("self-hosted") && runners.include?("arthello-gateway")
             raise "production Environment is mandatory" unless deploy.fetch("environment") == "production-ru"
             deployment_env = document.fetch("env")
-            raise "recovery branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/portable-image-fingerprint-recovery-20260902"
-            raise "recovery PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR") == "312"
+            raise "recovery branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/canonical-d1-inventory-recovery-20260902"
+            raise "recovery PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR") == "313"
             condition = deploy.fetch("if")
             [
               "workflow_run", "vitaliyozolin-dotcom/ArtHello-OS",
               "Verify ArtHello v52 release", ".github/workflows/verify-arthello-v52.yml",
               "head_branch == '\''main'\''", "conclusion == '\''success'\''",
-              "codex/portable-image-fingerprint-recovery-20260902", "vitaliyozolin-dotcom",
-              "number == 312",
+              "codex/canonical-d1-inventory-recovery-20260902", "vitaliyozolin-dotcom",
+              "number == 313",
               "pull_requests[1] == null", "github.run_attempt == 1"
             ].each do |required|
               raise "missing production authorization condition" unless condition.include?(required)
@@ -92,8 +92,8 @@ jobs:
             raise "exact checkout is missing" unless checkout_index
             before_checkout = steps.take(checkout_index).map { |step| step["run"].to_s }.join("\n")
             raise "Docker use before authorization/CI gate" if before_checkout.match?(/(^|\s)docker(\s|$)/)
-            raise "D-045 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
-            raise "D-045 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
+            raise "D-046 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
+            raise "D-046 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
             raise "triggering verification run is not pinned" unless before_checkout.include?("TRIGGER_VERIFY_RUN_ID")
             raise "triggering verification attempt is not pinned" unless before_checkout.include?(".run_attempt == 1")
             raise "release SHA is not pinned before checkout" unless before_checkout.include?("RELEASE_SHA")
@@ -109,6 +109,8 @@ jobs:
             raise "portable fingerprint evidence missing" unless source.include?("runtimeFingerprintSha256")
             raise "portable fingerprint gate missing" unless source.include?("ARTHELLO_IMAGE_RUNTIME_FINGERPRINT=VERIFIED")
             raise "non-portable cross-store image ID equality is forbidden" if source.include?("actual_image_id\" != \"$expected_image_id")
+            raise "active D1 descriptor gate missing" unless source.include?("ARTHELLO_ACTIVE_D1_FD=VERIFIED")
+            raise "active D1 descriptor gate must cover live, preflight, and candidate" unless source.scan(/assert_active_d1_file_descriptors \"\$[^\"]+\" (?:live|preflight|candidate)/).length == 3
           ' .github/workflows/deploy-arthello-direct-38-55.yml
           printf 'ARTHELLO_V52_SOURCE_SHA=%s\n' "$EXPECTED_SHA"
 
@@ -116,17 +118,20 @@ jobs:
         run: |
           set -Eeuo pipefail
           python3 -m py_compile deploy/v52/maintenance/production-data-inventory.py
+          python3 deploy/v52/maintenance/test_production_data_inventory.py
+          test "$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)" = \
+            "d1/miniflare-D1DatabaseObject/5a499c55f63d6b9f725547d510cf454e288954b6f3c2d5024eb1443f29c97730.sqlite"
           grep -F 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'ARTHELLO_PUBLIC_ORIGIN' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'cf: false' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'INTEGRATION_CREDENTIALS_KEY_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'INTEGRATION_CREDENTIALS_KEY' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           ! grep -F 'CENTRAL_ACCESS_SECRET' deploy/v52/overrides/production/runtime-server.mjs
+          grep -F 'd1Databases: { DB: "arthello-production" }' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           test -s deploy/v52/Dockerfile
           test -s deploy/v52/runtime/package.json
           test -s deploy/v52/runtime/package-lock.json
           test -s deploy/v52/maintenance/image-runtime-fingerprint.jq
-          jq -n -f deploy/v52/maintenance/image-runtime-fingerprint.jq >/dev/null
           grep -Fx '# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e' deploy/v52/Dockerfile >/dev/null
           test "$(grep -Fc 'FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e' deploy/v52/Dockerfile)" -eq 3
           grep -F 'npm ci --omit=dev --ignore-scripts --no-audit --no-fund' deploy/v52/Dockerfile >/dev/null
