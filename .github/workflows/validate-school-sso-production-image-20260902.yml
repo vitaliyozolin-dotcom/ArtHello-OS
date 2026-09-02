@@ -106,7 +106,6 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          docker image inspect arthello-os-api:local >/dev/null
           image="school-sso-production:${GITHUB_SHA}"
           docker build \
             --file deploy/Dockerfile.sso-origin-hotfix \
@@ -119,6 +118,8 @@ jobs:
           test "$(docker image inspect "$image" --format '{{.Config.WorkingDir}}')" = /school
           test "$(docker image inspect "$image" --format '{{json .Config.Entrypoint}}')" = '["./scripts/container-entrypoint.sh"]'
           test "$(docker image inspect "$image" --format '{{json .Config.Cmd}}')" = '["node","server.js"]'
+          test "$(docker run --rm --network none --entrypoint id "$image" -u)" = 1000
+          test "$(docker run --rm --network none --entrypoint id "$image" -g)" = 1000
           printf 'SCHOOL_SSO_COMPATIBILITY_IMAGE=BUILT\n'
 
       - name: Verify isolated production-compatible runtime
