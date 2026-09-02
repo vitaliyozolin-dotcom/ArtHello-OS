@@ -803,6 +803,7 @@ docker exec school-1-11 node --input-type=module -e "
     SELECT class_name AS className, COUNT(*) AS lessonCount
     FROM lessons
     WHERE id LIKE 'schedule-2026-2027-%'
+      AND class_name IN ('1','2','3','4','5','6')
       AND status NOT IN ('archived', 'cancelled')
     GROUP BY class_name ORDER BY CAST(class_name AS INTEGER)
   \`).all();
