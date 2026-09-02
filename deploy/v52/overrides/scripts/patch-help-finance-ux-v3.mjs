@@ -33,10 +33,14 @@ function replaceRegex(source, regex, replacement, label) {
     "stable help scroll",
   );
   const markerBlock = `  const fieldMarkers = useMemo(() => {\n    if (!hints || tour || typeof window === "undefined") return [];\n    const seen = new Set<HTMLElement>();\n    return context.fields.flatMap((field) => {\n      const target = inlineHelpTargetFor(field.element);\n      if (!target || seen.has(target)) return [];\n      seen.add(target);\n      return [{ field, target }];\n    });\n  }, [context.fields, hints, tour]);`;
+  const cleanDashboardMarkerBlock = markerBlock.replace(
+    "    return context.fields.flatMap((field) => {\n",
+    "    return context.fields.flatMap((field) => {\n      if (!inlineHelpAllowed(field.element)) return [];\n",
+  );
   source = replaceOnce(
     source,
     markerBlock,
-    `${markerBlock}\n\n  useEffect(() => {\n    const targets = new Set(fieldMarkers.map(({ target }) => target));\n    targets.forEach((target) => { target.dataset.ahHelpTarget = "true"; });\n    return () => targets.forEach((target) => { delete target.dataset.ahHelpTarget; });\n  }, [fieldMarkers]);`,
+    `${cleanDashboardMarkerBlock}\n\n  useEffect(() => {\n    const targets = new Set(fieldMarkers.map(({ target }) => target));\n    targets.forEach((target) => { target.dataset.ahHelpTarget = "true"; });\n    return () => targets.forEach((target) => { delete target.dataset.ahHelpTarget; });\n  }, [fieldMarkers]);`,
     "mark actual field-help targets",
   );
   write(path, source);
