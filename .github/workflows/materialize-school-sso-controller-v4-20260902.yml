@@ -8,7 +8,7 @@ on:
       - .github/workflows/materialize-school-sso-controller-v4-20260902.yml
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: materialize-school-sso-controller-v4
@@ -28,8 +28,16 @@ jobs:
         with:
           ref: ops/fix-school-sso-controller-dockerignore-20260902
           fetch-depth: 1
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Patch, repack, validate and pin the controller
         shell: bash
         run: python3 .github/scripts/materialize-school-sso-controller-v4.py
+
+      - name: Upload exact corrected controls
+        uses: actions/upload-artifact@v4
+        with:
+          name: school-sso-controller-v4
+          path: generated-school-sso-controller
+          if-no-files-found: error
+          retention-days: 1
