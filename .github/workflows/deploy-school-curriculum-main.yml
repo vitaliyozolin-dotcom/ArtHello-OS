@@ -19,7 +19,7 @@ concurrency:
 env:
   RELEASE_SHA: 4a1476c83fd0245101a8e81ab9edc192b8462dd9
   RELEASE_TREE: f1081a9f6a4017aaab668e463fd7fb992f5f93a1
-  CUTOVER_SHA256: ec687e7d8ea845dc5386156973f179827058b5896e790406dbbba9a8c6406275
+  CUTOVER_SHA256: 2e6f44791506be392a4f772e1dd08d50e01bd50015a87f7558da8e05fdc7fb7b
   VERIFY_SHA256: 91d5d382b7442d146f8ce139afa1f19998001154c62243afe3c82949a66c8c42
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
@@ -470,7 +470,7 @@ jobs:
           remote_job_active=1
           timeout --signal=TERM --kill-after=5s 240s \
             ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "set -Eeuo pipefail; test -d '$job_dir'; test \"\$(stat -c %u '$job_dir')\" = \"\$(id -u)\"; test \"\$(stat -c %a '$job_dir')\" = 700; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/run.sh'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$RELEASE_SHA' RUN_ID='$GITHUB_RUN_ID' WORKFLOW_SHA='$GITHUB_SHA' RELEASE_SHA='$RELEASE_SHA' RELEASE_TREE='$RELEASE_TREE' SOURCE_ARCHIVE='$job_dir/school-release.tar.gz' SOURCE_SHA256='$SOURCE_SHA256' VERIFY_SCRIPT='$job_dir/verify-school-release.mjs' VERIFY_SHA256='$VERIFY_SHA256' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' ARTHELLO_ORIGIN='$ARTHELLO_ORIGIN' JOB_DIR='$job_dir' LAUNCH_NONCE='$launch_nonce' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null &" \
+              "set -Eeuo pipefail; test -d '$job_dir'; test \"\$(stat -c %u '$job_dir')\" = \"\$(id -u)\"; test \"\$(stat -c %a '$job_dir')\" = 700; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/run.sh'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$RELEASE_SHA' RUN_ID='$GITHUB_RUN_ID' RUN_ATTEMPT='$GITHUB_RUN_ATTEMPT' WORKFLOW_SHA='$GITHUB_SHA' RELEASE_SHA='$RELEASE_SHA' RELEASE_TREE='$RELEASE_TREE' SOURCE_ARCHIVE='$job_dir/school-release.tar.gz' SOURCE_SHA256='$SOURCE_SHA256' VERIFY_SCRIPT='$job_dir/verify-school-release.mjs' VERIFY_SHA256='$VERIFY_SHA256' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' ARTHELLO_ORIGIN='$ARTHELLO_ORIGIN' JOB_DIR='$job_dir' LAUNCH_NONCE='$launch_nonce' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null &" \
               </dev/null >/dev/null 2>&1 || launch_rc=$?
           launch_elapsed="$(( $(date +%s) - launch_started_at ))"
           printf 'SCHOOL_REMOTE_LAUNCH_RETURN=%s elapsed=%ss\n' "$launch_rc" "$launch_elapsed" | tee -a "$log_file"
