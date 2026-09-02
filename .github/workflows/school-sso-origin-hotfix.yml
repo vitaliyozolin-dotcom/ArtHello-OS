@@ -32,6 +32,19 @@ env:
 
 jobs:
   validate:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      (
+        github.event_name == 'push' ||
+        (
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.user.login == 'vitaliyozolin-dotcom' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'school/fix-sso-exchange-origin-20260902'
+        )
+      )
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 55
     steps:
