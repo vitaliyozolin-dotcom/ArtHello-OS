@@ -88,6 +88,13 @@ test("owner can show, hide, reorder and resize dashboard widgets", () => {
   assert.match(styles, /\.sizeCompact\s*\{\s*grid-column:\s*span 4/);
   assert.match(styles, /\.sizeWide\s*\{\s*grid-column:\s*span 8/);
   assert.match(styles, /\.sizeFull\s*\{\s*grid-column:\s*1 \/ -1/);
+  assert.match(styles, /\.widgetGrid\s*\{[\s\S]*?grid-auto-flow:\s*row dense/);
+  assert.match(dashboard, /draggable=\{editing\}/);
+  assert.match(dashboard, /onDragStart=\{\(event\) => startWidgetDrag\(event, widget\.id\)\}/);
+  assert.match(dashboard, /onDragOver=\{\(event\) => markWidgetDropTarget\(event, widget\)\}/);
+  assert.match(dashboard, /onDrop=\{\(event\) => dropWidget\(event, widget\)\}/);
+  assert.match(dashboard, /reorderDashboardWidgets\(current, activeId, target\.id, dropPosition\)/);
+  assert.match(dashboard, /Перетаскивайте блоки ниже/);
   assert.equal((dashboard.match(/function persistDashboardLayout\(/g) ?? []).length, 1);
   assert.equal((dashboard.match(/<path d=\{chartGeometry\.receiptsPath\}/g) ?? []).length, 1);
 });
