@@ -8,6 +8,7 @@ import {
   clearDashboardBrowserLayouts,
   dashboardBrowserStorageKey,
   dashboardLayoutStateKey,
+  reorderDashboardWidgets,
   validateDashboardLayout,
 } from "../lib/dashboard-layout.ts";
 
@@ -30,6 +31,27 @@ test("dashboard layouts accept a complete reordered role allowlist", () => {
     candidate.widgets.reverse();
     assert.deepEqual(validateDashboardLayout(candidate, role), { ok: true, layout: candidate });
   }
+});
+
+test("drag-and-drop reorders a widget once without losing layout data", () => {
+  const original = layoutFor("Собственник").widgets;
+
+  const before = reorderDashboardWidgets(original, "operations", "roleFocus", "before");
+  assert.deepEqual(before.map((item) => item.id), [
+    "kpis", "cashflow", "decisions", "signals", "milestones", "operations", "roleFocus",
+  ]);
+  assert.deepEqual(before.find((item) => item.id === "operations"), original.find((item) => item.id === "operations"));
+
+  const after = reorderDashboardWidgets(before, "kpis", "cashflow", "after");
+  assert.deepEqual(after.map((item) => item.id), [
+    "cashflow", "kpis", "decisions", "signals", "milestones", "operations", "roleFocus",
+  ]);
+
+  assert.equal(reorderDashboardWidgets(after, "kpis", "kpis", "before"), after);
+  assert.equal(reorderDashboardWidgets(after, "operations", "missing", "after"), after);
+  assert.deepEqual(original.map((item) => item.id), [
+    "kpis", "cashflow", "decisions", "signals", "milestones", "roleFocus", "operations",
+  ]);
 });
 
 test("dashboard widget allowlists keep finance data away from work roles", () => {
