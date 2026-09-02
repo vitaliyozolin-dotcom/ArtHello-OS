@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CONTROLS_PR: '0'
+  CONTROLS_PR: '304'
   CONTROLS_BASE_SHA: d4ba1b23f77f72668087ef4aedc91c3c3155dfe1
   RELEASE_SHA: f41dfb5de4eeeed4ed26d94009a18388728f42b7
   RELEASE_TREE: 2ecda1a0a872caab7aadbc303c152c1207d3030a

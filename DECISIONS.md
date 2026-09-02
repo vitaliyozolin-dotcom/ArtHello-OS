@@ -1,5 +1,15 @@
 # ArtHello OS — Decisions
 
+## D-042 — Одноразовый School cutover перепривязать к фактическому main
+
+Дата: 2026-09-02  
+Статус: принято владельцем как продолжение ранее порученного product release; изменяет только controls-provenance D-041
+
+PR №300 слит GitHub-подписанным squash commit `d4ba1b23f77f72668087ef4aedc91c3c3155dfe1`, однако перед merge `main` независимо продвинулся от принятого base `c3182d598fd7a7a00a5388003754293219e41096` до `7a511765586d0641d59e9f5fae51cb128f7e19cc`. Поэтому фактический merge имеет parent `7a511765586d0641d59e9f5fae51cb128f7e19cc` и tree `79e7cf87d5f3519be2ca66008d78f1539919f737`, а исходный D-041 gate намеренно отклоняет его до checkout, SSH и Docker. Production не запускался и не изменялся.
+
+Для единственного запуска D-041 controls-provenance перепривязывается только через будущий GitHub-подписанный squash merge PR №304 из exact branch `codex/school-curriculum-controls-repin-20260902` с base `d4ba1b23f77f72668087ef4aedc91c3c3155dfe1`, одним parent и tree, равным проверенному финальному head PR №304. Перед merge фактический `main` обязан всё ещё точно равняться этому base; при любом новом продвижении merge запрещён до новой явной перепривязки и повторных CI/review. Follow-up изменяет только `.github/workflows/deploy-school-curriculum-main.yml` и этот decision record: release SHA/tree, validation evidence, payload hashes, import, rollback/re-gate и продуктовые файлы остаются без изменений. После squash merge PR №304 допустим только dispatch этого exact merge commit; любой последующий commit `main` снова завершается fail closed.
+
+
 ## D-041 — School 2026/2027 публиковать ручным проверяемым cutover
 
 Дата: 2026-09-02  
