@@ -606,3 +606,109 @@ test("failed strict verification rolls back calendar and KTP mutations", (t) => 
   );
   verificationDb.close();
 });
+
+test("release schedule import preserves lessons outside source classes", (t) => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "school-schedule-scope-"),
+  );
+  t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const databasePath = join(temporaryDirectory, "school.sqlite");
+  const schedulePath = join(
+    repositoryRoot,
+    "data/schedules/school-1-11-2026-2027.json",
+  );
+  const payload = JSON.parse(readFileSync(schedulePath, "utf8"));
+  const db = new DatabaseSync(databasePath);
+  applyMigrations(db);
+  db.exec("PRAGMA foreign_keys = ON");
+  const insertSubject = db.prepare(
+    `INSERT INTO subjects
+      (id, name, short_name, color, icon, stage, weekly_hours, status)
+     VALUES (?, ?, ?, '#5f56ee', 'book', '1–11', 1, 'active')`,
+  );
+  const subjectIds = new Set([
+    ...payload.lessons.map((lesson) => lesson.subjectId),
+    ...(payload.specialArrangements ?? []).map((item) => item.subjectId),
+  ]);
+  for (const subjectId of subjectIds)
+    insertSubject.run(subjectId, subjectId, subjectId);
+  db.prepare(
+    `INSERT INTO users
+      (id, email, display_name, role, status, profile_status)
+     VALUES (
+       'teacher-archived-sentinel', 'archived@example.test',
+       'Архивный преподаватель', 'teacher', 'archived', 'confirmed'
+     )`,
+  ).run();
+  db.prepare(
+    `INSERT INTO teacher_assignments
+      (id, teacher_user_id, class_name, subject_id, status)
+     VALUES (
+       'assignment-archived-sentinel', 'teacher-archived-sentinel', ?, ?,
+       'confirmed'
+     )`,
+  ).run(payload.lessons[0].className, payload.lessons[0].subjectId);
+  db.prepare(
+    `INSERT INTO lessons
+      (id, class_name, weekday, starts_at, ends_at, subject_id,
+        teacher_user_id, room, status, note)
+     VALUES (
+       'schedule-2026-2027-7-1-1-1', '7', 1, '08:00', '08:40',
+       ?, NULL, '207', 'scheduled', 'Существующее расписание 7 класса'
+     )`,
+  ).run(payload.lessons[0].subjectId);
+  const before = plainRows(
+    db.prepare(
+      `SELECT id, class_name AS className, weekday, starts_at AS startsAt,
+        ends_at AS endsAt, subject_id AS subjectId,
+        teacher_user_id AS teacherUserId, room, status, note,
+        created_at AS createdAt, updated_at AS updatedAt
+       FROM lessons WHERE id = 'schedule-2026-2027-7-1-1-1'`,
+    ).get(),
+  );
+  db.close();
+
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/import-school-schedule.mjs", schedulePath],
+    {
+      cwd: repositoryRoot,
+      env: { ...process.env, DATABASE_PATH: databasePath },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(
+    result.status,
+    0,
+    `Импорт расписания завершился с ошибкой:\n${result.stdout}${result.stderr}`,
+  );
+  assert.match(result.stdout, /SCHOOL_SCHEDULE_IMPORT=SUCCESS/);
+
+  const verificationDb = new DatabaseSync(databasePath, { readOnly: true });
+  assert.equal(
+    verificationDb.prepare(
+      `SELECT teacher_user_id AS teacherUserId
+       FROM lessons WHERE id = ?`,
+    ).get(payload.lessons[0].id).teacherUserId,
+    null,
+  );
+  const after = plainRows(
+    verificationDb.prepare(
+      `SELECT id, class_name AS className, weekday, starts_at AS startsAt,
+        ends_at AS endsAt, subject_id AS subjectId,
+        teacher_user_id AS teacherUserId, room, status, note,
+        created_at AS createdAt, updated_at AS updatedAt
+       FROM lessons WHERE id = 'schedule-2026-2027-7-1-1-1'`,
+    ).get(),
+  );
+  assert.deepEqual(after, before);
+  assert.equal(
+    verificationDb.prepare(
+      `SELECT COUNT(*) AS count FROM lessons
+       WHERE class_name IN ('1','2','3','4','5','6')
+         AND status = 'scheduled'`,
+    ).get().count,
+    189,
+  );
+  verificationDb.close();
+});
