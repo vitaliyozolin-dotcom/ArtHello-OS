@@ -1,6 +1,6 @@
 name: Deploy ArtHello self-hosted RU
 
-# D-045 is a one-release recovery exception to D-040's workflow_dispatch trigger only.
+# D-046 is a one-release recovery exception to D-040's workflow_dispatch trigger only.
 # Production authorization still requires the protected Environment below. The
 # exception is constrained to the successful hosted verification of the exact
 # merged main SHA from the named release branch and repository.
@@ -22,8 +22,8 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/portable-image-fingerprint-recovery-20260902
-  EXPECTED_RELEASE_PR: "312"
+  EXPECTED_RELEASE_HEAD: codex/canonical-d1-inventory-recovery-20260902
+  EXPECTED_RELEASE_PR: "313"
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -54,8 +54,8 @@ jobs:
       (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/portable-image-fingerprint-recovery-20260902' &&
-          github.event.workflow_run.pull_requests[0].number == 312 &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/canonical-d1-inventory-recovery-20260902' &&
+          github.event.workflow_run.pull_requests[0].number == 313 &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -67,7 +67,7 @@ jobs:
     environment: production-ru
 
     steps:
-      - name: Verify one-release D-045 trigger and protected Environment
+      - name: Verify one-release D-046 trigger and protected Environment
         timeout-minutes: 4
         env:
           GH_TOKEN: ${{ github.token }}
@@ -437,6 +437,9 @@ jobs:
           integration_key_file="$secret_dir/integration-credentials-key"
           bootstrap_file="$secret_dir/bootstrap-password"
           inventory_script="deploy/v52/maintenance/production-data-inventory.py"
+          active_d1_relative_path="$(python3 "$inventory_script" --print-active-database-relative-path)"
+          test "$active_d1_relative_path" = "d1/miniflare-D1DatabaseObject/5a499c55f63d6b9f725547d510cf454e288954b6f3c2d5024eb1443f29c97730.sqlite"
+          active_d1_path="/data/$active_d1_relative_path"
 
           live_id=""
           live_name=""
@@ -490,6 +493,39 @@ jobs:
             grep -Fx 'INTEGRATION_CREDENTIALS_KEY_FILE=/run/secrets/integration-credentials-key' <<<"$configured" >/dev/null
             test "$(docker inspect "$target" --format '{{range .Mounts}}{{if eq .Destination "/run/secrets/bootstrap-password"}}{{.RW}}{{end}}{{end}}')" = false
             test "$(docker inspect "$target" --format '{{range .Mounts}}{{if eq .Destination "/run/secrets/integration-credentials-key"}}{{.RW}}{{end}}{{end}}')" = false
+          }
+
+          assert_active_d1_file_descriptors() {
+            local target="$1" role="$2" report expected_handles unexpected_handles
+            case "$role" in live|preflight|candidate) ;; *) return 1 ;; esac
+            report="$(docker exec --user 0:0 \
+              -e ARTHELLO_EXPECTED_D1_FILE="$active_d1_path" \
+              "$target" /bin/sh -ceu '
+                expected_handles=0
+                unexpected_handles=0
+                for descriptor in /proc/[0-9]*/fd/*; do
+                  [ -e "$descriptor" ] || continue
+                  target_path="$(readlink "$descriptor" 2>/dev/null || true)"
+                  case "$target_path" in
+                    "$ARTHELLO_EXPECTED_D1_FILE"|"$ARTHELLO_EXPECTED_D1_FILE-wal"|"$ARTHELLO_EXPECTED_D1_FILE-shm")
+                      expected_handles=$((expected_handles + 1))
+                      ;;
+                    /data/d1/miniflare-D1DatabaseObject/*.sqlite|/data/d1/miniflare-D1DatabaseObject/*.sqlite-wal|/data/d1/miniflare-D1DatabaseObject/*.sqlite-shm)
+                      case "$target_path" in
+                        */metadata.sqlite|*/metadata.sqlite-wal|*/metadata.sqlite-shm) ;;
+                        *) unexpected_handles=$((unexpected_handles + 1)) ;;
+                      esac
+                      ;;
+                  esac
+                done
+                printf "%s %s\n" "$expected_handles" "$unexpected_handles"
+              ')" || return 1
+            read -r expected_handles unexpected_handles <<<"$report"
+            [[ "$expected_handles" =~ ^[0-9]+$ ]]
+            [[ "$unexpected_handles" =~ ^[0-9]+$ ]]
+            test "$expected_handles" -gt 0
+            test "$unexpected_handles" -eq 0
+            printf 'ARTHELLO_ACTIVE_D1_FD=VERIFIED role=%s handles=%s\n' "$role" "$expected_handles"
           }
 
           cleanup_transient() {
@@ -865,6 +901,7 @@ jobs:
           old_restart_max="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
           [[ "$old_restart_max" =~ ^[0-9]+$ ]]
           restart_argument >/dev/null
+          assert_active_d1_file_descriptors "$live_id" live
 
           docker cp "$CADDY_CONTAINER:/data/external-routes.caddy" "$work/external-routes.before.caddy"
           chmod 0600 "$work/external-routes.before.caddy"
@@ -1025,6 +1062,7 @@ jobs:
             "$image" >/dev/null
           assert_file_only_secret_env "$clone_container"
           wait_local_candidate "$clone_container"
+          assert_active_d1_file_descriptors "$clone_container" preflight
           docker pause "$clone_container" >/dev/null
           snapshot_volume "$clone_volume" "$work/preflight-after"
           docker unpause "$clone_container" >/dev/null
@@ -1083,6 +1121,7 @@ jobs:
             "$image" >/dev/null
           assert_file_only_secret_env "$candidate"
           wait_local_candidate "$candidate"
+          assert_active_d1_file_descriptors "$candidate" candidate
           docker pause "$candidate" >/dev/null
           candidate_paused=1
           snapshot_volume "$DATA_VOLUME" "$work/live-after"
