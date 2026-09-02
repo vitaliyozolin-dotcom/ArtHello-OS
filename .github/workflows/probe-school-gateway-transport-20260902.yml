@@ -1,0 +1,88 @@
+name: Probe School gateway transport
+
+on:
+  push:
+    branches:
+      - ops/probe-school-sso-cutover-20260902
+    paths:
+      - .github/workflows/probe-school-gateway-transport-20260902.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: school-gateway-transport-probe
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 10
+    steps:
+      - name: Inventory trusted local transport without reading secret values
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf 'GATEWAY_TRANSPORT_USER=%s\n' "$(id -un)"
+          printf 'GATEWAY_TRANSPORT_HOME=%s\n' "$HOME"
+          printf 'GATEWAY_TRANSPORT_HOST=%s\n' "$(hostname)"
+
+          printf 'GATEWAY_DOCKER_CONTEXT_BEGIN\n'
+          docker context ls --format 'context={{.Name}},endpoint={{.DockerEndpoint}},current={{.Current}}' || true
+          printf 'GATEWAY_DOCKER_CONTEXT_END\n'
+
+          printf 'GATEWAY_LOCAL_CONTAINERS_BEGIN\n'
+          docker ps --format 'name={{.Names}},image={{.Image}},status={{.Status}},ports={{.Ports}}' \
+            | grep -E '(^|name=)(school|arthello|stroios|caddy)' || true
+          printf 'GATEWAY_LOCAL_CONTAINERS_END\n'
+
+          printf 'GATEWAY_SSH_FILE_INVENTORY_BEGIN\n'
+          for root in "$HOME/.ssh" "$HOME/.config/arthello" /srv/arthello/shared; do
+            [ -e "$root" ] || continue
+            find "$root" -maxdepth 4 -type f -printf '%m %u:%g %s %p\n' 2>/dev/null \
+              | sed -E 's#(token|password|secret|credential)([^/]*)$#\1[REDACTED]#Ig' \
+              | sort
+          done
+          printf 'GATEWAY_SSH_FILE_INVENTORY_END\n'
+
+          printf 'GATEWAY_SSH_PUBLIC_FINGERPRINTS_BEGIN\n'
+          while IFS= read -r candidate; do
+            [ -s "$candidate" ] || continue
+            if pub="$(ssh-keygen -y -f "$candidate" 2>/dev/null)"; then
+              fingerprint="$(printf '%s\n' "$pub" | ssh-keygen -lf - -E sha256 2>/dev/null | awk '{print $2}')"
+              printf 'path=%s,fingerprint=%s\n' "$candidate" "$fingerprint"
+            fi
+          done < <(
+            find "$HOME/.ssh" "$HOME/.config/arthello" /srv/arthello/shared \
+              -maxdepth 5 -type f \
+              \( -name 'id_*' -o -iname '*ssh*key*' -o -iname '*.pem' -o -iname '*.key' \) \
+              2>/dev/null | sort -u
+          )
+          printf 'GATEWAY_SSH_PUBLIC_FINGERPRINTS_END\n'
+
+          printf 'GATEWAY_SSH_CONFIG_BEGIN\n'
+          for config in "$HOME/.ssh/config" /etc/ssh/ssh_config; do
+            [ -f "$config" ] || continue
+            printf 'config=%s\n' "$config"
+            sed -nE '/^[[:space:]]*(Host|HostName|User|Port|IdentityFile|ProxyJump|ProxyCommand)[[:space:]]+/Ip' "$config" \
+              | sed -E 's/[[:space:]]+/ /g'
+          done
+          printf 'GATEWAY_SSH_CONFIG_END\n'
+
+          printf 'GATEWAY_CADDY_ORIGINS_BEGIN\n'
+          caddy="$(docker ps --format '{{.Names}}' | grep -E 'caddy' | head -n1 || true)"
+          if [ -n "$caddy" ]; then
+            docker exec "$caddy" sh -lc \
+              "grep -RhoE '(188\\.225\\.[0-9]+\\.[0-9]+|[A-Za-z0-9.-]+\\.sslip\\.io)(:[0-9]+)?' /data /etc/caddy 2>/dev/null | sort -u" || true
+          fi
+          printf 'GATEWAY_CADDY_ORIGINS_END\n'
+
+          printf 'GATEWAY_ENV_KEY_NAMES_BEGIN\n'
+          env | cut -d= -f1 | grep -Ei '(ssh|deploy|school|arthello|host|port)' | sort -u || true
+          printf 'GATEWAY_ENV_KEY_NAMES_END\n'
+          printf 'GATEWAY_TRANSPORT_PROBE=PASS\n'
