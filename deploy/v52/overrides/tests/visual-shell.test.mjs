@@ -35,15 +35,16 @@ test("desktop typography and KPI cards do not depend on clipped microcopy", () =
   assert.match(css, /fonts\.googleapis\.com\/css2\?family=Onest/);
   assert.match(css, /body\{background:[^\n]+font-family:var\(--font-ui\)/);
   assert.match(css, /:where\(strong,b\)\{font-weight:500!important\}/);
-  assert.match(ownerStyles, /\.kpiCopy strong,.operationHero strong\{font-weight:600!important\}/);
-  assert.match(ownerStyles, /\.tableWrap table\{font-size:12px\}/);
-  assert.match(ownerStyles, /\.kpiCopy small\{font-size:13px\}/);
+  assert.match(ownerStyles, /\.kpiCopy strong\s*\{[\s\S]*?font-weight:\s*600/);
+  assert.match(ownerStyles, /\.operationHero strong\s*\{[\s\S]*?font-weight:\s*600/);
+  assert.match(ownerStyles, /\.tableWrap table\s*\{[\s\S]*?font-size:\s*12px/);
+  assert.match(ownerStyles, /\.kpiCopy small\s*\{[\s\S]*?font-size:\s*13px/);
   assert.match(shellFoundation, /\.nav-item\{min-height:36px;font-size:14px!important\}/);
-  assert.match(css, /:not\(\[data-ah-compact-card\],\s*\[data-ah-compact-card\] \*\)\{font-size:15px!important\}/);
+  assert.match(css, /@media\(min-width:761px\)\{\.content-frame \[class\$="-workspace"\][^\n]+font-size:15px!important/);
 });
 
 test("owner cash flow is a source-backed interactive chart instead of decorative lines", () => {
-  assert.match(ownerDashboard, /finance\?\.monthly \?\? \[\]/);
+  assert.match(ownerDashboard, /finance\.monthly\.filter\(\(item\) => cashPeriods\.has\(item\.period\)\)\.slice\(-12\)/);
   assert.match(ownerDashboard, /chartGeometry\.ticks\.map/);
   assert.match(ownerDashboard, /Фактическая динамика поступлений и списаний из ОДДС/);
   assert.match(ownerDashboard, /onMouseEnter=\{\(\) => setActiveChartIndex\(index\)\}/);
@@ -52,9 +53,9 @@ test("owner cash flow is a source-backed interactive chart instead of decorative
   assert.match(ownerChart, /\.chartTooltip/);
   assert.match(ownerDashboard, /C\$\{midpoint\.toFixed\(1\)\}/);
   assert.match(ownerDashboard, /const width = 720/);
-  assert.match(ownerDashboard, /const left = 38/);
-  assert.match(ownerDashboard, /const right = 8/);
-  assert.match(ownerChart, /height: 184px/);
+  assert.match(ownerDashboard, /const left = 48/);
+  assert.match(ownerDashboard, /const right = 12/);
+  assert.match(ownerChart, /height: 220px/);
 });
 
 test("desktop shell uses one symmetric spacing rhythm and a split navigation rail", () => {
@@ -63,7 +64,10 @@ test("desktop shell uses one symmetric spacing rhythm and a split navigation rai
   assert.match(airyLayout, /--shell-pad:\s*28px/);
   assert.match(airyLayout, /\.sidebar::before/);
   assert.match(airyLayout, /linear-gradient\(180deg, #6661fb 0%, #514cf0 100%\)/);
-  assert.match(ownerStyles, /grid-template-columns:1\.05fr 1\.12fr 1\.62fr 1\.03fr/);
+  assert.match(ownerStyles, /grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\)/);
+  assert.match(ownerStyles, /\.sizeCompact\s*\{\s*grid-column:\s*span 4/);
+  assert.match(ownerDashboard, /owner-home-dashboard/);
+  assert.doesNotMatch(ownerDashboard, /styles\.dashboard\} owner-dashboard`/);
 });
 
 test("content studio shares the modern airy card system", () => {
@@ -106,11 +110,11 @@ test("required personal dashboards have independent role profiles", () => {
 
 test("clients and methods are independent workspaces instead of shared placeholders", () => {
   assert.match(shell, /const FamilyWorkspace = lazy/);
-  assert.match(shell, /active === "clients"/);
+  assert.match(shell, /routedActive === "clients"/);
   assert.match(shell, /<FamilyWorkspace/);
   assert.match(education, /workspace\s*===\s*"methods"\s*\?\s*"Методики"\s*:\s*"Обучение"/);
   assert.match(shell, /<SalesWorkspace workspace="sales"/);
-  assert.match(shell, /<EducationWorkspace key=\{active\} workspace=\{active\}/);
+  assert.match(shell, /<EducationWorkspace key=\{routedActive\} workspace=\{routedActive\}/);
 });
 
 test("integration center exposes mandatory actions and selective import controls", () => {

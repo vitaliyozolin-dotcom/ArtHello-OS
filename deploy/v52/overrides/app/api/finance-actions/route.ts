@@ -1,22 +1,30 @@
 import { and, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
 import { auditEvents, financeCorrections, financeReconciliationIssues, financialOperations, tasks } from "../../../db/schema";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
+import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
 
 const financeRoles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "FINANCE"]);
 const approverRoles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE"]);
 
 export async function POST(request: Request) {
-  const actor = getRequestUser(request);
-  if (!actor) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  const actor = context.actor;
+  const role = context.apiRole;
   if (!financeRoles.has(role)) return Response.json({ error: "Недостаточно прав для финансового действия" }, { status: 403 });
   try {
     await ensureCoreTables();
     const body = (await request.json()) as Record<string, unknown>;
     const action = clean(body.action, 60);
     if (action === "addCorrection") return addCorrection(actor, body);
-    if (action === "createIssueTask") return createIssueTask(actor, body);
+    if (action === "createIssueTask") return createIssueTask(context, body);
     if (action === "resolveIssue") {
       if (!approverRoles.has(role)) return Response.json({ error: "Закрыть расхождение может руководитель или представитель" }, { status: 403 });
       return resolveIssue(actor, body);
@@ -51,27 +59,32 @@ async function addCorrection(actor: string, body: Record<string, unknown>) {
   return Response.json({ correction }, { status: 201 });
 }
 
-async function createIssueTask(actor: string, body: Record<string, unknown>) {
+async function createIssueTask(context: TaskAccessContext, body: Record<string, unknown>) {
+  const actor = context.actor;
   const issueId = clean(body.issueId, 80);
   const db = getDb();
   const [issue] = await db.select().from(financeReconciliationIssues).where(eq(financeReconciliationIssues.id, issueId)).limit(1);
   if (!issue) return Response.json({ error: "Расхождение не найдено" }, { status: 404 });
   const automationKey = `FIN_RECON:${issue.id}`;
-  const [existing] = await db.select().from(tasks).where(eq(tasks.automationKey, automationKey)).limit(1);
-  if (existing) return Response.json({ task: existing, reused: true });
+  const existing = await findScopedAutomationTask(db, context, automationKey);
+  const existingResponse = scopedAutomationTaskResponse(existing);
+  if (existingResponse) return existingResponse;
+  const assignment = resolveTaskAssignment(context, "", actor);
+  if (!assignment.ok) return Response.json({ error: assignment.error }, { status: assignment.status });
   const [task] = await db.insert(tasks).values({
     title: `Разобрать ${issue.id}: ${issue.title}`,
-    owner: actor,
+    owner: assignment.owner,
     dueDate: relativeDate(3),
     priority: issue.severity,
     status: "Входящие",
     sourceType: "Финансовое расхождение",
     sourceId: issue.id,
     description: `Сверить ${issue.sourceA} и ${issue.sourceB}. Исходные файлы не изменять; результат оформить отдельной корректировкой или решением.`,
-    assigneeEntityId: "",
+    assigneeEntityId: assignment.assigneeEntityId,
     kind: "Автозадача",
     automationKey,
     requiresApproval: true,
+    createdByUserId: context.appUserId,
     createdBy: actor,
   }).returning();
   await db.update(financeReconciliationIssues).set({ relatedTaskId: task.id, status: "В работе", updatedAt: new Date().toISOString() }).where(eq(financeReconciliationIssues.id, issue.id));

@@ -1,23 +1,30 @@
 import { eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
 import { auditEvents, contentPlanItems, contentPublications, contentRecommendations, entities, marketingAccounts, tasks } from "../../../db/schema";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { isTaskManager, resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
+import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
 
 const contentRoles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "MARKETING"]);
 const formats = new Set(["Пост", "Карусель", "Короткое видео", "Видео", "Лонгрид"]);
 
 export async function POST(request: Request) {
-  const actor = getRequestUser(request);
-  if (!actor) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
-  if (!contentRoles.has(role)) return Response.json({ error: "Недостаточно прав для изменения контент-плана" }, { status: 403 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  const actor = context.actor;
+  if (!contentRoles.has(context.apiRole)) return Response.json({ error: "Недостаточно прав для изменения контент-плана" }, { status: 403 });
   try {
     await ensureCoreTables();
     const body = await request.json() as Record<string, unknown>;
     const action = clean(body.action, 60);
     if (action === "createPlanItem") return createPlanItem(actor, body);
     if (action === "publishItem") return publishItem(actor, body);
-    if (action === "createRecommendationTask") return createRecommendationTask(actor, body);
+    if (action === "createRecommendationTask") return createRecommendationTask(context, body);
     return Response.json({ error: "Неизвестное действие контента" }, { status: 400 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Действие не выполнено" }, { status: 500 });
@@ -60,23 +67,27 @@ async function publishItem(actor: string, body: Record<string, unknown>) {
   return Response.json({ publication }, { status: 201 });
 }
 
-async function createRecommendationTask(actor: string, body: Record<string, unknown>) {
+async function createRecommendationTask(context: TaskAccessContext, body: Record<string, unknown>) {
+  const actor = context.actor;
   const recommendationId = clean(body.recommendationId, 80);
   const assigneeEntityId = clean(body.assigneeEntityId, 80);
   const db = getDb();
   const [recommendation] = await db.select().from(contentRecommendations).where(eq(contentRecommendations.id, recommendationId)).limit(1);
   if (!recommendation) return Response.json({ error: "Рекомендация не найдена" }, { status: 404 });
-  if (assigneeEntityId) {
-    if (isDemoReference(assigneeEntityId)) return Response.json({ error: "Выберите исполнителя из рабочего справочника" }, { status: 400 });
-    const [assignee] = await db.select({ id: entities.id }).from(entities).where(eq(entities.id, assigneeEntityId)).limit(1);
+  const assignment = resolveTaskAssignment(context, assigneeEntityId, actor);
+  if (!assignment.ok) return Response.json({ error: assignment.error }, { status: assignment.status });
+  if (isTaskManager(context) && assignment.assigneeEntityId) {
+    if (isDemoReference(assignment.assigneeEntityId)) return Response.json({ error: "Выберите исполнителя из рабочего справочника" }, { status: 400 });
+    const [assignee] = await db.select({ id: entities.id }).from(entities).where(eq(entities.id, assignment.assigneeEntityId)).limit(1);
     if (!assignee) return Response.json({ error: "Исполнитель не найден" }, { status: 404 });
   }
   const automationKey = `CONTENT_RECOMMENDATION:${recommendation.id}`;
-  const [existing] = await db.select().from(tasks).where(eq(tasks.automationKey, automationKey)).limit(1);
-  if (existing) return Response.json({ task: existing, reused: true });
-  const [task] = await db.insert(tasks).values({ title: recommendation.recommendation, owner: actor, dueDate: dateAfterDays(7), priority: recommendation.signalType === "Выручка" ? "Средний" : "Высокий", status: "Входящие", sourceType: "Рекомендация контента", sourceId: recommendation.id, description: `${recommendation.evidence}. Проверить гипотезу на следующей публикации и сохранить бизнес-результат.`, assigneeEntityId, kind: "Автозадача", automationKey, createdBy: actor }).returning();
+  const existing = await findScopedAutomationTask(db, context, automationKey);
+  const existingResponse = scopedAutomationTaskResponse(existing);
+  if (existingResponse) return existingResponse;
+  const [task] = await db.insert(tasks).values({ title: recommendation.recommendation, owner: assignment.owner, dueDate: dateAfterDays(7), priority: recommendation.signalType === "Выручка" ? "Средний" : "Высокий", status: "Входящие", sourceType: "Рекомендация контента", sourceId: recommendation.id, description: `${recommendation.evidence}. Проверить гипотезу на следующей публикации и сохранить бизнес-результат.`, assigneeEntityId: assignment.assigneeEntityId, kind: "Автозадача", automationKey, createdByUserId: context.appUserId, createdBy: actor }).returning();
   await db.update(contentRecommendations).set({ status: "В работе", relatedTaskId: task.id, updatedAt: new Date().toISOString() }).where(eq(contentRecommendations.id, recommendationId));
-  await db.insert(auditEvents).values({ actor, action: "content.recommendation_task_created", entityType: "content_recommendation", entityId: recommendationId, payload: JSON.stringify({ taskId: task.id, assigneeEntityId }) });
+  await db.insert(auditEvents).values({ actor, action: "content.recommendation_task_created", entityType: "content_recommendation", entityId: recommendationId, payload: JSON.stringify({ taskId: task.id, assigneeEntityId: assignment.assigneeEntityId }) });
   return Response.json({ task }, { status: 201 });
 }
 

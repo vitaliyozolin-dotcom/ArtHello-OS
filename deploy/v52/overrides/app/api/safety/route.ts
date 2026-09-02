@@ -1,15 +1,21 @@
 import { asc } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
-import { entities, financialOperations, safetyChecks, safetyEquipment, safetyFaults, safetyGuardShifts, safetyIncidents, safetyNextChecks, safetyRepairs, safetySystems, tasks } from "../../../db/schema";
+import { entities, financialOperations, safetyChecks, safetyEquipment, safetyFaults, safetyGuardShifts, safetyIncidents, safetyNextChecks, safetyRepairs, safetySystems } from "../../../db/schema";
 import { canPaySafetyRepair, faultSla, safetyReadiness } from "../../../lib/safety";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
 const roles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "SAFETY", "FINANCE"]);
 
 export async function GET(request: Request) {
-  if (!getRequestUser(request)) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
-  if (!roles.has(role)) return Response.json({ error: "Нет доступа к контуру безопасности" }, { status: 403 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  if (!roles.has(context.apiRole)) return Response.json({ error: "Нет доступа к контуру безопасности" }, { status: 403 });
   try {
     await ensureCoreTables();
     const db = getDb();
@@ -24,7 +30,7 @@ export async function GET(request: Request) {
       db.select().from(safetyGuardShifts),
       db.select({ id: entities.id, displayName: entities.displayName }).from(entities),
       db.select().from(financialOperations),
-      db.select().from(tasks),
+      selectVisibleTasks(db, context),
     ]);
     const now = new Date().toISOString();
     const repair = repairs[0];
@@ -40,7 +46,7 @@ export async function GET(request: Request) {
       systems,
       equipment,
       checks,
-      faults: faults.map((item) => ({ ...item, sla: faultSla(item.severity, item.detectedAt, now, item.status) })),
+      faults: redactHiddenTaskReferences(faults, allTasks).map((item) => ({ ...item, sla: faultSla(item.severity, item.detectedAt, now, item.status) })),
       incidents,
       repairs: repairs.map((item) => ({ ...item, payable: canPaySafetyRepair(item) })),
       nextChecks,

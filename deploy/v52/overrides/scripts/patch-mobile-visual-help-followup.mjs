@@ -1,5 +1,8 @@
 import fs from "node:fs";
 
+const appRoot = process.env.ARTHELLO_PATCH_ROOT || "/app";
+const target = (relativePath) => `${appRoot}${relativePath}`;
+
 function read(path) { return fs.readFileSync(path, "utf8"); }
 function write(path, value) { fs.writeFileSync(path, value); }
 function replaceRequired(source, before, after, label) {
@@ -9,8 +12,11 @@ function replaceRequired(source, before, after, label) {
 
 // Dashboard: real month selector + stable anchors for semantic walkthroughs.
 {
-  const path = "/app/app/components/OwnerDashboard.tsx";
+  const path = target("/app/components/OwnerDashboard.tsx");
   let source = read(path);
+  // Current dashboard owns its period control, help anchors and role-scoped layout.
+  // Keep the legacy transformer only for older deployment sources.
+  if (!source.includes("const DASHBOARD_STORAGE_PREFIX =")) {
   source = replaceRequired(source,
     '  const [direction, setDirection] = useState("Все типы");\n  const [activeChartIndex, setActiveChartIndex] = useState<number | null>(null);',
     '  const [direction, setDirection] = useState("Все типы");\n  const [dashboardPeriod, setDashboardPeriod] = useState("");\n  const [activeChartIndex, setActiveChartIndex] = useState<number | null>(null);', "dashboard period state");
@@ -37,12 +43,13 @@ function replaceRequired(source, before, after, label) {
   source = replaceRequired(source,
     '<button type="button">{finance?.selectedPeriod ? monthLabel(finance.selectedPeriod, "long") : "Период не выбран"}</button>',
     '<label className={styles.periodSelect}><span className="sr-only">Месяц реестра операций</span><select value={dashboardPeriod} onChange={(event) => setDashboardPeriod(event.target.value)} aria-label="Месяц реестра операций">{availableDashboardPeriods.length ? availableDashboardPeriods.map((item) => <option key={item} value={item}>{monthLabel(item, "long")}</option>) : <option value={dashboardPeriod}>{dashboardPeriod ? monthLabel(dashboardPeriod, "long") : "Период не выбран"}</option>}</select></label>', "dashboard period control");
+  }
   write(path, source);
 }
 
 // Semantic, block-by-block guide for the owner dashboard.
 {
-  const path = "/app/app/components/contextualHelpCatalog.ts";
+  const path = target("/app/components/contextualHelpCatalog.ts");
   let source = read(path);
   const marker = 'export function guideFor(profileId: string) {\n  return profileId === "finance" ? FINANCE_GUIDE : null;\n}';
   const replacement = `export const DASHBOARD_GUIDE: HelpGuide = {
@@ -63,13 +70,17 @@ export function guideFor(profileId: string) {
   if (profileId === "dashboard") return DASHBOARD_GUIDE;
   return null;
 }`;
-  source = replaceRequired(source, marker, replacement, "dashboard contextual guide");
+  if (!source.includes("export const DASHBOARD_GUIDE")) {
+    source = replaceRequired(source, marker, replacement, "dashboard contextual guide");
+  } else if (!source.includes('if (profileId === "dashboard") return DASHBOARD_GUIDE;')) {
+    throw new Error("patch-mobile-visual-help-followup: invalid existing dashboard contextual guide");
+  }
   write(path, source);
 }
 
 // Compact visual delta. Keep this deliberately small: global CSS has a hard build budget.
 {
-  const path = "/app/app/components/SystemWideMobilePolish.css";
+  const path = target("/app/components/SystemWideMobilePolish.css");
   let source = read(path);
   const marker = "/* ARTHELLO_MOBILE_VISUAL_HELP_FOLLOWUP */";
   if (!source.includes(marker)) source += `\n${marker}\n.ah-field-icon{width:24px!important;min-width:24px!important;height:24px!important;font-size:13px!important;opacity:.92!important}.family-workspace input[placeholder*="Найти семью"]{height:56px!important;padding-left:50px!important;padding-right:50px!important;border-radius:18px!important;font-size:16px!important}.family-workspace :is(label,div):has(>input[placeholder*="Найти семью"]){position:relative!important}.family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])>:is(svg,[class*="icon"]){width:22px!important;height:22px!important;min-width:22px!important}.family-workspace :is([class*="toolbar"],[class*="filters"],[class*="search-row"]){margin-bottom:16px!important;border:1px solid var(--ah-system-line)!important;border-radius:22px!important;background:#fff!important;overflow:visible!important}.family-workspace :is([class*="list"],[class*="table"],[class*="empty"],[class*="registry"]):not([class*="toolbar"]):not([class*="filters"]){border-radius:22px!important}.crm-board{display:flex!important;gap:16px!important;padding:2px 2px 10px!important;scroll-snap-type:x mandatory}.crm-column{flex:0 0 min(82vw,360px)!important;border:1px solid var(--ah-system-line)!important;border-radius:22px!important;background:#fff!important;overflow:hidden!important;scroll-snap-align:start}.crm-column+.crm-column{margin-left:0!important}.contractor-workspace :is(article,section,[class*="card"],[class*="panel"],[class*="kpi"],[class*="registry"],[class*="toolbar"],[class*="notice"],[class*="boundary"]){border-radius:20px!important}.integration-boundary{margin:18px 0!important;border:1px solid var(--ah-system-line)!important;border-radius:20px!important;background:#fff!important;overflow:hidden!important}@media(max-width:720px){.crm-board{gap:14px!important;padding-right:18px!important}.crm-column{min-width:0!important;flex-basis:min(82vw,340px)!important}}\n`;

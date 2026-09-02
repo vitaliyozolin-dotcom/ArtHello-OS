@@ -1,19 +1,22 @@
 import { asc, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb, getSystemDataMode } from "../../../db";
-import { entities, financialOperations, hrAccesses, hrCandidates, hrDevelopment, hrEmployees, hrInterviews, hrOnboarding, hrRewards, hrVacancies, organizationBranches, tasks, workflowDocuments } from "../../../db/schema";
+import { entities, financialOperations, hrAccesses, hrCandidates, hrDevelopment, hrEmployees, hrInterviews, hrOnboarding, hrRewards, hrVacancies, organizationBranches, workflowDocuments } from "../../../db/schema";
 import { accessAllowed, candidateFunnel } from "../../../lib/hr";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
 const readable = new Set(["OWNER","DIRECTOR","REPRESENTATIVE","HR"]);
 export async function GET(request:Request){
-  if(!getRequestUser(request)) return Response.json({error:"Требуется вход"},{status:401});
-  const role=request.headers.get("x-arthello-role")??"";if(!readable.has(role))return Response.json({error:"Нет доступа к HR-контуру"},{status:403});
+  let context;
+  try{context=await getAuthenticatedRequestContext(request)}catch{return Response.json({error:"Сервис авторизации временно недоступен"},{status:503})}
+  if(!context) return Response.json({error:"Требуется вход"},{status:401});
+  if(!readable.has(context.apiRole))return Response.json({error:"Нет доступа к HR-контуру"},{status:403});
   try{
     await ensureCoreTables();const db=getDb(),mode=await getSystemDataMode();
     const [vacancyRows,candidateRows,interviewRows,employeeRows,onboardingRows,developmentRows,rewardRows,accessRows,rawEntityRows,documentRows,allTasks,operationRows,branchRows]=await Promise.all([
       db.select().from(hrVacancies),db.select().from(hrCandidates).orderBy(asc(hrCandidates.createdAt)),db.select().from(hrInterviews).orderBy(asc(hrInterviews.scheduledAt)),
       db.select().from(hrEmployees),db.select().from(hrOnboarding),db.select().from(hrDevelopment).orderBy(asc(hrDevelopment.eventDate)),db.select().from(hrRewards),db.select().from(hrAccesses),
-      db.select({id:entities.id,displayName:entities.displayName,status:entities.status,metadata:entities.metadata,sourceSystem:entities.sourceSystem,dataQuality:entities.dataQuality}).from(entities),db.select().from(workflowDocuments),db.select().from(tasks),db.select().from(financialOperations),db.select().from(organizationBranches).where(eq(organizationBranches.status,"Активен")).orderBy(asc(organizationBranches.sortOrder)),
+      db.select({id:entities.id,displayName:entities.displayName,status:entities.status,metadata:entities.metadata,sourceSystem:entities.sourceSystem,dataQuality:entities.dataQuality}).from(entities),db.select().from(workflowDocuments),selectVisibleTasks(db,context),db.select().from(financialOperations),db.select().from(organizationBranches).where(eq(organizationBranches.status,"Активен")).orderBy(asc(organizationBranches.sortOrder)),
     ]);
     const visible=(...values:string[])=>mode!=="empty"||values.every(value=>!/(^|[-_])(T|TEST)([-_]|$)/i.test(value));
     const vacancies=vacancyRows.filter(x=>visible(x.id,x.positionId,x.sourceType));
@@ -21,7 +24,7 @@ export async function GET(request:Request){
     const interviews=interviewRows.filter(x=>visible(x.id,x.candidateId,x.interviewerEntityId));
     const employees=employeeRows.filter(x=>visible(x.id,x.candidateId,x.contractId,x.positionId));
     const employeeIds=new Set(employees.map(x=>x.id));
-    const onboarding=onboardingRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId));
+    const onboarding=redactHiddenTaskReferences(onboardingRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId)),allTasks);
     const development=developmentRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId));
     const rewards=rewardRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId));
     const accesses=accessRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId));

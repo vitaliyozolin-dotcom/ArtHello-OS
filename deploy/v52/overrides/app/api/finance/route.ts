@@ -12,17 +12,23 @@ import {
   financialOperations,
 } from "../../../db/schema";
 import { calculateForecast, summarizeCash, summarizePnl } from "../../../lib/finance";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
 import { buildLtvPlan } from "../../../lib/sales";
+import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
 export async function GET(request: Request) {
-  const actor = getRequestUser(request);
-  if (!actor) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
   try {
     await ensureCoreTables();
     const db = getDb();
     const mode = await getSystemDataMode();
-    const [storedOperations, accruals, storedBudgets, storedForecasts, payroll, corrections, issues, entityRows, lifecycles] = await Promise.all([
+    const [storedOperations, accruals, storedBudgets, storedForecasts, payroll, corrections, issues, entityRows, lifecycles, allTasks] = await Promise.all([
       db.select().from(financialOperations).orderBy(desc(financialOperations.operationDate), asc(financialOperations.id)),
       db.select().from(financeAccruals).orderBy(desc(financeAccruals.period), asc(financeAccruals.contour)),
       db.select().from(financeBudgets).orderBy(asc(financeBudgets.period), asc(financeBudgets.line)),
@@ -32,6 +38,7 @@ export async function GET(request: Request) {
       db.select().from(financeReconciliationIssues).orderBy(asc(financeReconciliationIssues.id)),
       db.select({ id: entities.id, displayName: entities.displayName }).from(entities),
       db.select().from(clientLifecycles),
+      selectVisibleTasks(db, context),
     ]);
     const sourceOnly = mode !== "test";
     const operations = sourceOnly
@@ -79,7 +86,7 @@ export async function GET(request: Request) {
       budgets,
       payroll,
       corrections,
-      issues,
+      issues: redactHiddenTaskReferences(issues, allTasks),
       entityNames,
       monthly,
       pnlLines: [...groupedPnl.values()].sort((left, right) => right.amountMinor - left.amountMinor),

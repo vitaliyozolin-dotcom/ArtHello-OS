@@ -248,6 +248,39 @@
   line-height: 14px;
 }
 
+.ahRegistryPage .quality-badge.manual,
+.ahRegistryPage .quality-badge.verified {
+  background: #e8f3ed;
+  color: #2f7258;
+}
+
+.ahRegistryPage .quality-badge.warning {
+  background: #fae9df;
+  color: #9a5a45;
+}
+
+.ahRegistryPage .quality-badge.review {
+  background: #f8edcf;
+  color: #8a6828;
+}
+
+.ahRegistryDataState {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.ahRegistryDataState > span {
+  color: var(--ah-color-text-primary);
+  font-size: 13px;
+}
+
+.ahRegistryDataState > small {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 15px;
+}
+
 @media (max-width: 1024px) {
   .ahRegistryKpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -413,7 +446,7 @@
   .ahRegistryPage .registry-table td:nth-child(2)::before { content: "Тип"; }
   .ahRegistryPage .registry-table td:nth-child(3)::before { content: "Используется"; }
   .ahRegistryPage .registry-table td:nth-child(4)::before { content: "Источник"; }
-  .ahRegistryPage .registry-table td:nth-child(5)::before { content: "Качество"; }
+  .ahRegistryPage .registry-table td:nth-child(5)::before { content: "Данные"; }
   .ahRegistryPage .registry-table td:nth-child(6)::before { content: "Статус"; }
   .ahRegistryPage .registry-table td:nth-child(7) { display: none; }
 }

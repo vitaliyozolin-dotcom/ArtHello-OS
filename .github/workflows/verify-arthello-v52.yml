@@ -1,0 +1,347 @@
+name: Verify ArtHello v52 release
+
+on:
+  pull_request:
+    paths:
+      - deploy/v44/overrides/**
+      - deploy/v52/**
+      - .github/workflows/deploy-arthello-direct-38-55.yml
+      - .github/workflows/verify-arthello-v52.yml
+  push:
+    branches: [main]
+    paths:
+      - deploy/v44/overrides/**
+      - deploy/v52/**
+      - .github/workflows/deploy-arthello-direct-38-55.yml
+      - .github/workflows/verify-arthello-v52.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-arthello-v52-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  verify-v52:
+    name: verify-v52
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out exact unprivileged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          clean: true
+          persist-credentials: false
+
+      - name: Verify exact source and production-policy boundary
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse --is-shallow-repository)" = false
+          git fsck --full --strict
+
+          # D-040: a pull-request head is verified only on an ephemeral hosted
+          # runner and receives neither a production Environment nor a secret.
+          # D-043 makes a one-release exception only for the production trigger;
+          # the self-hosted job still consumes merged, exact-SHA gated main code.
+          ruby -ryaml -e '
+            document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+            jobs = document.fetch("jobs")
+            raise "verification workflow must contain jobs" if jobs.empty?
+            jobs.each_value do |job|
+              raise "verification must use an ephemeral hosted runner" unless job.fetch("runs-on") == "ubuntu-latest"
+              raise "verification must not receive a protected Environment" if job.key?("environment")
+            end
+          ' .github/workflows/verify-arthello-v52.yml
+
+          ruby -ryaml -e '
+            document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+            triggers = document["on"] || document[true]
+            raise "production workflow must be workflow_run only" unless triggers.keys.map(&:to_s) == ["workflow_run"]
+            workflow_run = triggers.fetch("workflow_run")
+            raise "unexpected production trigger workflow" unless workflow_run.fetch("workflows") == ["Verify ArtHello v52 release"]
+            raise "production trigger must wait for completion" unless workflow_run.fetch("types") == ["completed"]
+            deploy = document.fetch("jobs").fetch("deploy")
+            runners = Array(deploy.fetch("runs-on"))
+            raise "production must use its dedicated self-hosted runner" unless runners.include?("self-hosted") && runners.include?("arthello-gateway")
+            raise "production Environment is mandatory" unless deploy.fetch("environment") == "production-ru"
+            condition = deploy.fetch("if")
+            [
+              "workflow_run", "vitaliyozolin-dotcom/ArtHello-OS",
+              "Verify ArtHello v52 release", ".github/workflows/verify-arthello-v52.yml",
+              "head_branch == '\''main'\''", "conclusion == '\''success'\''",
+              "codex/owner-dashboard-tochka-20260902", "vitaliyozolin-dotcom",
+              "pull_requests[1] == null", "github.run_attempt == 1"
+            ].each do |required|
+              raise "missing production authorization condition" unless condition.include?(required)
+            end
+            steps = deploy.fetch("steps")
+            checkout_index = steps.index { |step| step.key?("uses") }
+            raise "exact checkout is missing" unless checkout_index
+            before_checkout = steps.take(checkout_index).map { |step| step["run"].to_s }.join("\n")
+            raise "Docker use before authorization/CI gate" if before_checkout.match?(/(^|\s)docker(\s|$)/)
+            raise "D-043 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
+            raise "D-043 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
+            raise "triggering verification run is not pinned" unless before_checkout.include?("TRIGGER_VERIFY_RUN_ID")
+            raise "triggering verification attempt is not pinned" unless before_checkout.include?(".run_attempt == 1")
+            raise "release SHA is not pinned before checkout" unless before_checkout.include?("RELEASE_SHA")
+            raise "exact Quality gate missing before checkout" unless before_checkout.include?("quality.yml")
+            raise "exact v52 gate missing before checkout" unless before_checkout.include?("verify-arthello-v52.yml")
+            source = File.read(ARGV.fetch(0))
+            raise "workflow_run deployment must not use event GITHUB_SHA" if source.include?("$GITHUB_SHA") || source.include?("github.sha")
+          ' .github/workflows/deploy-arthello-direct-38-55.yml
+          printf 'ARTHELLO_V52_SOURCE_SHA=%s\n' "$EXPECTED_SHA"
+
+      - name: Validate release files without exposing data
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile deploy/v52/maintenance/production-data-inventory.py
+          grep -F 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'ARTHELLO_PUBLIC_ORIGIN' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'cf: false' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'INTEGRATION_CREDENTIALS_KEY_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'INTEGRATION_CREDENTIALS_KEY' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          ! grep -F 'CENTRAL_ACCESS_SECRET' deploy/v52/overrides/production/runtime-server.mjs
+          test -s deploy/v52/Dockerfile
+          test -s deploy/v52/runtime/package.json
+          test -s deploy/v52/runtime/package-lock.json
+          grep -Fx '# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e' deploy/v52/Dockerfile >/dev/null
+          test "$(grep -Fc 'FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e' deploy/v52/Dockerfile)" -eq 3
+          grep -F 'npm ci --omit=dev --ignore-scripts --no-audit --no-fund' deploy/v52/Dockerfile >/dev/null
+          ! grep -E '^FROM node:24-bookworm-slim AS|npm install .*miniflare' deploy/v52/Dockerfile
+          node - <<'NODE'
+          const manifest = require('./deploy/v52/runtime/package.json');
+          const lock = require('./deploy/v52/runtime/package-lock.json');
+          if (manifest.dependencies?.miniflare !== '4.20260515.0') process.exit(1);
+          if (lock.lockfileVersion !== 3) process.exit(1);
+          const resolved = lock.packages?.['node_modules/miniflare'];
+          if (resolved?.version !== '4.20260515.0' || !resolved.integrity) process.exit(1);
+          NODE
+          python3 - <<'PY'
+          import pathlib
+          import re
+
+          database_source = pathlib.Path("deploy/v52/overrides/db/index.ts").read_text(encoding="utf-8")
+          inventory_source = pathlib.Path("deploy/v52/maintenance/production-data-inventory.py").read_text(encoding="utf-8")
+          match = re.search(r'const integrationCredentialPrefix = "([^"]+)";', database_source)
+          if match is None or match.group(1) not in inventory_source:
+              raise SystemExit("Inventory is not synchronized with the encrypted credential namespace")
+          PY
+
+      - name: Build exact v52 candidate on an ephemeral runner
+        id: image
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -Eeuo pipefail
+          image="arthello-v52-verify:$EXPECTED_SHA"
+          docker build \
+            --pull=false \
+            --label "org.opencontainers.image.revision=$EXPECTED_SHA" \
+            --label "org.opencontainers.image.source-tree=$(git rev-parse HEAD^{tree})" \
+            --tag "$image" \
+            --file deploy/v52/Dockerfile \
+            .
+          test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$EXPECTED_SHA"
+          test "$(docker image inspect "$image" --format '{{.Config.User}}')" = node
+          test "$(docker image inspect "$image" --format '{{json .Config.Cmd}}')" = '["node","production/runtime-server.mjs"]'
+          printf 'image=%s\n' "$image" >> "$GITHUB_OUTPUT"
+          printf 'image_id=%s\n' "$(docker image inspect "$image" --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
+
+      - name: Prove fail-closed key startup and isolated runtime readiness
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          set -Eeuo pipefail
+          volume="arthello-v52-verify-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          container="arthello-v52-verify-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          key_file="$(mktemp)"
+          bootstrap_file="$(mktemp)"
+          missing_key_log="$(mktemp)"
+          cleanup() {
+            rc=$?
+            trap - EXIT INT TERM HUP
+            docker rm -f "$container" >/dev/null 2>&1 || true
+            docker volume rm -f "$volume" >/dev/null 2>&1 || true
+            rm -f "$key_file" "$bootstrap_file" "$missing_key_log"
+            exit "$rc"
+          }
+          trap cleanup EXIT INT TERM HUP
+
+          set +e
+          timeout 20s docker run --rm --network none "$IMAGE" >"$missing_key_log" 2>&1
+          missing_key_status=$?
+          set -e
+          test "$missing_key_status" -ne 0
+          grep -F 'INTEGRATION_CREDENTIALS_KEY' "$missing_key_log" >/dev/null
+
+          integration_key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48), end="")')"
+          bootstrap_password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24), end="")')"
+          echo "::add-mask::$integration_key"
+          echo "::add-mask::$bootstrap_password"
+          printf '%s' "$integration_key" > "$key_file"
+          printf '%s' "$bootstrap_password" > "$bootstrap_file"
+          chmod 0444 "$key_file"
+          chmod 0444 "$bootstrap_file"
+          docker volume create --label arthello.scope=ci-v52 "$volume" >/dev/null
+          docker run -d \
+            --name "$container" \
+            --restart no \
+            --read-only \
+            --tmpfs /tmp \
+            --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
+            --network bridge \
+            -e NODE_ENV=production \
+            -e PORT=8081 \
+            -e ARTHELLO_D1_PATH=/data/d1 \
+            -e ARTHELLO_PUBLIC_ORIGIN=https://verify.arthello.invalid \
+            -e ARTHELLO_BOOTSTRAP_LOGIN=owner \
+            -e ARTHELLO_BOOTSTRAP_PASSWORD_FILE=/run/secrets/bootstrap-password \
+            -e INTEGRATION_CREDENTIALS_KEY_FILE=/run/secrets/integration-credentials-key \
+            --mount "type=bind,src=$key_file,dst=/run/secrets/integration-credentials-key,readonly" \
+            --mount "type=bind,src=$bootstrap_file,dst=/run/secrets/bootstrap-password,readonly" \
+            -v "$volume:/data" \
+            "$IMAGE" >/dev/null
+
+          configured="$(docker inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}')"
+          if grep -Eq '^(ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY)=' <<<"$configured"; then
+            echo 'Plaintext runtime secret found in container configuration' >&2
+            exit 1
+          fi
+          grep -Fx 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE=/run/secrets/bootstrap-password' <<<"$configured" >/dev/null
+          grep -Fx 'INTEGRATION_CREDENTIALS_KEY_FILE=/run/secrets/integration-credentials-key' <<<"$configured" >/dev/null
+          test "$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/run/secrets/bootstrap-password"}}{{.RW}}{{end}}{{end}}')" = false
+          test "$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/run/secrets/integration-credentials-key"}}{{.RW}}{{end}}{{end}}')" = false
+
+          ready=0
+          for attempt in $(seq 1 90); do
+            if docker exec -i "$container" node - <<'NODE'
+          const base = 'http://127.0.0.1:8081';
+          const publicOrigin = 'https://verify.arthello.invalid';
+          try {
+            const health = await fetch(base + '/api/health');
+            const healthBody = await health.json();
+            if (!health.ok || healthBody.status !== 'ok' || healthBody.database !== 'available') process.exit(1);
+            const root = await fetch(base + '/');
+            const html = await root.text();
+            const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
+            if (!root.ok || refs.length < 2) process.exit(1);
+            for (const path of [...new Set(refs)]) {
+              if (!(await fetch(base + path)).ok) process.exit(1);
+            }
+            if ((await fetch(base + '/api/auth/me')).status !== 401) process.exit(1);
+            const forged = await fetch(base + '/api/settings', {
+              headers: {
+                'oai-authenticated-user-email': 'forged@example.invalid',
+                'x-arthello-role': 'OWNER',
+              },
+            });
+            if (forged.status !== 401) process.exit(1);
+            const wrongMethod = await fetch(base + '/api/auth/login');
+            if (wrongMethod.status !== 405 || wrongMethod.headers.get('allow') !== 'POST') process.exit(1);
+            if ((await fetch(base + '/api/auth/not-a-route')).status !== 404) process.exit(1);
+            const crossOrigin = await fetch(base + '/api/auth/login', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', origin: 'https://invalid.example' },
+              body: JSON.stringify({ login: 'owner', password: 'invalid' }),
+            });
+            if (crossOrigin.status !== 403) process.exit(1);
+
+            const { readFileSync } = await import('node:fs');
+            const bootstrapPassword = readFileSync('/run/secrets/bootstrap-password', 'utf8').trim();
+            const login = await fetch(base + '/api/auth/login', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', origin: publicOrigin },
+              body: JSON.stringify({ login: 'owner', password: bootstrapPassword }),
+            });
+            const loginBody = await login.json();
+            if (!login.ok || loginBody.isSystemOwner !== true) process.exit(1);
+            const setCookies = typeof login.headers.getSetCookie === 'function'
+              ? login.headers.getSetCookie()
+              : [login.headers.get('set-cookie') || ''];
+            const cookies = setCookies.join(',');
+            const session = cookies.match(/__Host-arthello_session=([^;,\s]+)/);
+            const csrf = cookies.match(/__Host-arthello_csrf=([^;,\s]+)/);
+            if (!session || !csrf) process.exit(1);
+            const cookie = `${session[0]}; ${csrf[0]}`;
+            const authenticated = await fetch(base + '/api/auth/me', { headers: { cookie } });
+            if (!authenticated.ok || !(await authenticated.json()).isSystemOwner) process.exit(1);
+            const logout = await fetch(base + '/api/auth/logout', {
+              method: 'POST',
+              headers: {
+                cookie,
+                origin: publicOrigin,
+                'x-csrf-token': decodeURIComponent(csrf[1]),
+              },
+            });
+            if (!logout.ok) process.exit(1);
+            if ((await fetch(base + '/api/auth/me', { headers: { cookie } })).status !== 401) process.exit(1);
+          } catch {
+            process.exit(1);
+          }
+          NODE
+            then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          printf 'ARTHELLO_V52_ISOLATED_RUNTIME=VERIFIED\n'
+
+      - name: Build immutable verification evidence
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          IMAGE_ID: ${{ steps.image.outputs.image_id }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 ci-provenance
+          tree_sha="$(git rev-parse HEAD^{tree})"
+          dockerfile_sha256="$(sha256sum deploy/v52/Dockerfile | cut -d ' ' -f 1)"
+          runtime_lock_sha256="$(sha256sum deploy/v52/runtime/package-lock.json | cut -d ' ' -f 1)"
+          inventory_sha256="$(sha256sum deploy/v52/maintenance/production-data-inventory.py | cut -d ' ' -f 1)"
+          docker save "$IMAGE" | gzip -1 -n > ci-provenance/arthello-v52-image.tar.gz
+          test -s ci-provenance/arthello-v52-image.tar.gz
+          image_archive_sha256="$(sha256sum ci-provenance/arthello-v52-image.tar.gz | cut -d ' ' -f 1)"
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow_run_id "$GITHUB_RUN_ID" \
+            --arg workflow_run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg head_sha "$EXPECTED_SHA" \
+            --arg tree_sha "$tree_sha" \
+            --arg dockerfile_sha256 "$dockerfile_sha256" \
+            --arg runtime_lock_sha256 "$runtime_lock_sha256" \
+            --arg inventory_sha256 "$inventory_sha256" \
+            --arg image_archive_sha256 "$image_archive_sha256" \
+            --arg image_id "$IMAGE_ID" \
+            '{
+              repository: $repository,
+              workflowRunId: $workflow_run_id,
+              workflowRunAttempt: $workflow_run_attempt,
+              headSha: $head_sha,
+              treeSha: $tree_sha,
+              dockerfileSha256: $dockerfile_sha256,
+              runtimeLockSha256: $runtime_lock_sha256,
+              inventorySha256: $inventory_sha256,
+              imageArchiveSha256: $image_archive_sha256,
+              imageId: $image_id,
+              runnerTrust: "github-hosted-ephemeral",
+              productionCapability: false
+            }' > ci-provenance/arthello-v52.json
+          (cd ci-provenance && sha256sum arthello-v52.json > arthello-v52.json.sha256)
+
+      - name: Upload immutable verification evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: arthello-v52-verification-${{ github.run_id }}
+          path: ci-provenance/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

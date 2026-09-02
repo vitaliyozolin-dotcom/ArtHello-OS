@@ -25,7 +25,7 @@ const OPERATING_CATALOG: CatalogConnection[] = [
   { id: "INT-T-MAIL", system: "Email и рассылки", category: "Коммуникации", targetModule: "Продажи · Клиенты · Контент", ownerEntityId: "ROLE:MARKETING", sourceOfTruth: "Выбранный почтовый сервис", mode: "API · письма, ответы и статусы доставки", impact: "Среднее: письма и ответы не входят в историю клиента", adapterVersion: "mailing@1" },
   { id: "INT-T-ADS", system: "Рекламные кабинеты", category: "Маркетинг", targetModule: "Продажи · Контент", ownerEntityId: "ROLE:MARKETING", sourceOfTruth: "Рекламные платформы", mode: "API · расходы, кампании и креативы", impact: "Среднее: ROMI и стоимость лида не подтверждаются платформами", adapterVersion: "ads@1" },
   { id: "INT-T-SOCIAL", system: "Социальные сети", category: "Контент", targetModule: "Контент · Продажи", ownerEntityId: "ROLE:MARKETING", sourceOfTruth: "Социальные платформы", mode: "API · публикации, метрики и переходы", impact: "Среднее: контент не связывается с кликами, лидами и выручкой", adapterVersion: "social@1" },
-  { id: "INT-T-TOCHKA", system: "Банк Точка", category: "Банк", targetModule: "Финансы", ownerEntityId: "ROLE:FINANCE", sourceOfTruth: "Банк Точка", mode: "API · счета, остатки и операции", impact: "Критичное: банковский факт Точки отсутствует", adapterVersion: "bank-tochka@1" },
+  { id: "INT-T-TOCHKA", system: "Банк Точка", category: "Банк", targetModule: "Финансы", ownerEntityId: "ROLE:FINANCE", sourceOfTruth: "Банк Точка", mode: "API · проверка customerCode и доступных счетов", impact: "Критичное: загрузка банковских операций Точки ещё не реализована", adapterVersion: "bank-tochka@1" },
   { id: "INT-T-ALFABANK", system: "Альфа-Банк", category: "Банк", targetModule: "Финансы", ownerEntityId: "ROLE:FINANCE", sourceOfTruth: "Альфа-Банк", mode: "API · счета, остатки и операции", impact: "Критичное: банковский факт Альфа-Банка отсутствует", adapterVersion: "bank-alfa@1" },
   { id: "INT-T-DIARY", system: "Электронный дневник", category: "Образование", targetModule: "Обучение", ownerEntityId: "ROLE:METHODIST", sourceOfTruth: "ArtHello School 1–11", mode: "API · расписание, оценки и посещаемость", impact: "Высокое: учебные данные не синхронизируются с основной системой", adapterVersion: "diary@1" },
   { id: "INT-T-EDO", system: "ЭДО", category: "Документы", targetModule: "Бухгалтерия · Юрист", ownerEntityId: "ROLE:ACCOUNTING", sourceOfTruth: "Выбранный оператор ЭДО", mode: "API · документы и подписи", impact: "Высокое: подписи и первичные документы подтверждаются вручную", adapterVersion: "edo@1" },
@@ -66,5 +66,11 @@ export async function ensureOperatingIntegrationCatalog() {
   ));
   for (let index = 0; index < statements.length; index += 30) {
     await env.DB.batch(statements.slice(index, index + 30));
+  }
+  const tochka = OPERATING_CATALOG.find((item) => item.id === "INT-T-TOCHKA");
+  if (tochka) {
+    await env.DB.prepare(`UPDATE integration_connections
+      SET mode=?,impact=?,adapter_version=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .bind(tochka.mode, tochka.impact, tochka.adapterVersion, tochka.id).run();
   }
 }

@@ -47,7 +47,11 @@ if (readFileSync(target("app/components/ContentWorkspace.tsx"), "utf8").includes
   return source;
 });
 
-patch("app/components/IntegrationWorkspace.tsx", (input) => {
+const integrationPath = "app/components/IntegrationWorkspace.tsx";
+const integrationInput = readFileSync(target(integrationPath), "utf8");
+if (integrationInput.includes("{current && detailOpen ? createPortal(") && integrationInput.includes("return createPortal(<div className=\"integration-modal-layer\"")) {
+  console.log("IntegrationWorkspace dialog portals already applied");
+} else patch(integrationPath, (input) => {
   let source = input;
   source = replaceText(
     source,
@@ -61,10 +65,11 @@ patch("app/components/IntegrationWorkspace.tsx", (input) => {
     '{current && detailOpen ? createPortal(<div className="integration-modal-layer">',
     "integration detail portal start",
   );
+  const detailEndBefore = '      </section>\n    </div> : null}\n\n    {wizardId';
   source = replaceText(
     source,
-    '      </section>\n    </div> : null}\n\n    {wizardId ?',
-    '      </section>\n    </div>, document.body) : null}\n\n    {wizardId ?',
+    detailEndBefore,
+    detailEndBefore.replace('</div> : null}', '</div>, document.body) : null}'),
     "integration detail portal end",
   );
   source = replaceText(
@@ -73,14 +78,16 @@ patch("app/components/IntegrationWorkspace.tsx", (input) => {
     '  return createPortal(<div className="integration-modal-layer">\n    <button className="drawer-scrim" onClick={close} aria-label="Закрыть настройку" />',
     "integration wizard portal start",
   );
+  const wizardEndLegacy = '    </form>\n  </div>;\n}\n\nfunction Head';
+  const wizardEndWithSummary = '    </form>\n  </div>;\n}\n\nfunction savedSetupSummary';
+  const wizardEndBefore = source.includes(wizardEndWithSummary) ? wizardEndWithSummary : wizardEndLegacy;
   source = replaceText(
     source,
-    '    </form>\n  </div>;\n}\n\nfunction Head',
-    '    </form>\n  </div>, document.body);\n}\n\nfunction Head',
+    wizardEndBefore,
+    wizardEndBefore.replace('</div>;', '</div>, document.body);'),
     "integration wizard portal end",
   );
   return source;
 });
 
 console.log("System-wide dialog portals applied");
-

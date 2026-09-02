@@ -2,6 +2,8 @@
 
 import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { moduleCatalog, type ModuleId } from "../../data/test-snapshot";
+import { APP_ROLE_DEFINITIONS, ASSIGNABLE_APP_ROLES, permissionForRole, type RolePermission } from "../../lib/access-policy";
 import styles from "./AccessWorkspace.module.css";
 import { SoftSelect } from "./SoftSelect";
 import { CompactListCard } from "./design-system";
@@ -49,34 +51,16 @@ type AccessData = {
 const tabs = ["Пользователи", "Семьи и ученики", "Роли и права", "Журнал"] as const;
 type Tab = typeof tabs[number];
 
-const staffRoles = [
-  "Директор", "Администратор", "Завуч", "Финансы", "Бухгалтерия", "HR", "Продажи", "Маркетинг",
-  "Педагог", "Методист", "Кухня", "Закупки", "Безопасность", "Медработник", "Юрист",
-  "Интеграции", "Аналитика", "Проекты", "Сотрудник",
-] as const;
-
-type Permission = "Управление" | "Редактирование" | "Просмотр" | "Нет доступа" | "Особый доступ";
-type RoleTemplate = { name: string; description: string; scope: string; permissions: Record<string, Permission> };
-
-const permissionDomains = [
-  ["dashboard", "Главная"], ["finance", "Финансы"], ["clients", "Клиенты и семьи"], ["education", "Обучение"],
-  ["hr", "Персонал"], ["schedule", "Расписание"], ["food", "Питание"], ["legal", "Документы"],
-  ["tasks", "Задачи"], ["integrations", "Интеграции"], ["medical", "Медицина"], ["access", "Доступы"],
-] as const;
-
-const none = Object.fromEntries(permissionDomains.map(([key]) => [key, "Нет доступа"])) as Record<string, Permission>;
-const roleTemplates: RoleTemplate[] = [
-  { name: "Собственник", description: "Полный управленческий контур и назначение доступов", scope: "Все филиалы", permissions: Object.fromEntries(permissionDomains.map(([key]) => [key, key === "medical" ? "Нет доступа" : "Управление"])) as Record<string, Permission> },
-  { name: "Директор", description: "Управление назначенными площадками и сотрудниками", scope: "Назначенные филиалы", permissions: { ...none, dashboard: "Управление", finance: "Просмотр", clients: "Управление", education: "Управление", hr: "Управление", schedule: "Управление", food: "Просмотр", legal: "Редактирование", tasks: "Управление", access: "Управление" } },
-  { name: "Администратор", description: "Расписание, события, пользователи и текущие изменения", scope: "Назначенные филиалы", permissions: { ...none, dashboard: "Просмотр", clients: "Редактирование", education: "Редактирование", schedule: "Управление", food: "Редактирование", tasks: "Редактирование", access: "Редактирование" } },
-  { name: "Завуч", description: "Учебный процесс, расписание, замены и преподаватели", scope: "Школа и назначенные классы", permissions: { ...none, dashboard: "Просмотр", clients: "Просмотр", education: "Управление", hr: "Просмотр", schedule: "Управление", tasks: "Редактирование" } },
-  { name: "Финансы", description: "Платежи, начисления, отчёты и сверка", scope: "Все разрешённые юрлица", permissions: { ...none, dashboard: "Просмотр", finance: "Управление", clients: "Просмотр", hr: "Просмотр", food: "Просмотр", legal: "Просмотр", tasks: "Редактирование" } },
-  { name: "HR", description: "Персонал, найм, документы и жизненный цикл доступа", scope: "Все назначенные подразделения", permissions: { ...none, dashboard: "Просмотр", hr: "Управление", legal: "Просмотр", tasks: "Редактирование", access: "Редактирование" } },
-  { name: "Педагог", description: "Свои занятия, ученики, оценки и задания", scope: "Назначенные классы и группы", permissions: { ...none, dashboard: "Просмотр", clients: "Просмотр", education: "Редактирование", schedule: "Просмотр", tasks: "Редактирование" } },
-  { name: "Методист", description: "Программы, материалы и качество обучения", scope: "Назначенные программы", permissions: { ...none, dashboard: "Просмотр", education: "Управление", schedule: "Просмотр", tasks: "Редактирование" } },
-  { name: "Медработник", description: "Отдельный защищённый медицинский контур", scope: "Только активный специальный допуск", permissions: { ...none, dashboard: "Просмотр", tasks: "Редактирование", medical: "Особый доступ" } },
-  { name: "Сотрудник", description: "Личный кабинет, задачи и общие события", scope: "Только собственные данные", permissions: { ...none, dashboard: "Просмотр", schedule: "Просмотр", tasks: "Редактирование" } },
-];
+const staffRoles = ASSIGNABLE_APP_ROLES;
+const permissionDomains = moduleCatalog.map(({ id, label }) => [id, label] as const);
+const roleTemplates = APP_ROLE_DEFINITIONS.map((definition) => ({
+  name: definition.appRole,
+  description: definition.description,
+  scope: definition.scope,
+  permissions: Object.fromEntries(
+    permissionDomains.map(([moduleId]) => [moduleId, permissionForRole(definition.apiRole, moduleId)]),
+  ) as Record<ModuleId, RolePermission>,
+}));
 
 const auditLabels: Record<string, string> = {
   "settings.user_access_saved": "Доступ сотрудника сохранён",
@@ -221,7 +205,7 @@ export function AccessWorkspace({ notify }: { role: string; notify: (value: stri
     {tab === "Семьи и ученики" ? <div className={styles.familyGrid}>
       <div className={styles.sectionIntro}><div><p>Личные кабинеты</p><h2>Доступ семьи к дневнику</h2></div><span>Родитель видит только связанных с ним детей. Ученик — только собственный учебный контур.</span></div>
       {data.familyDirectory.length ? data.familyDirectory.map((family) => <article className={styles.familyCard} key={family.id}>
-        <header><div><strong>{family.displayName}</strong><small>{family.id} · {family.scope}</small></div><em>{family.dataQuality}</em></header>
+        <header><div><strong>{family.displayName}</strong><small>{family.id} · {family.scope}</small></div><em>{familyAccessState(family)}</em></header>
         {family.members.map((member) => {
           const grant = data.familyAccessGrants.find((item) => item.principalEntityId === member.id);
           return <div data-ah-compact-card="true" className={styles.familyMember} key={member.id}>
@@ -229,7 +213,7 @@ export function AccessWorkspace({ notify }: { role: string; notify: (value: stri
             <span><strong>{grant?.login || member.phone || member.email || "Контакт не указан"}</strong><small>{grant ? `версия прав ${grant.accessVersion}` : "доступ ещё не выдавался"}</small></span>
             <span><b className={grant?.status === "Активен" ? styles.good : grant ? styles.bad : styles.neutral}>{grant?.status ?? "Не выдан"}</b><small>{grant?.lastSyncStatus ?? "—"}</small></span>
             {data.canManage ? <div className={styles.inlineActions}>
-              <button disabled={family.dataQuality !== "Проверено"} onClick={() => setFamilyDialog({ family, member })}>{family.dataQuality !== "Проверено" ? "Сначала проверить" : grant ? "Изменить" : "Выдать"}</button>
+              <button disabled={familyAccessNeedsReview(family)} onClick={() => setFamilyDialog({ family, member })}>{familyAccessNeedsReview(family) ? "Сначала сверить источник" : grant ? "Изменить" : "Выдать"}</button>
               {grant ? <button onClick={() => void action({ action: grant.status === "Приостановлен" ? "restoreFamilyAccess" : "blockFamilyAccess", grantId: grant.id }, `family-${grant.id}`)} disabled={busy === `family-${grant.id}`}>{grant.status === "Приостановлен" ? "Восстановить" : "Приостановить"}</button> : null}
             </div> : null}
           </div>;
@@ -315,5 +299,7 @@ function Empty({ title, text }: { title: string; text: string }) { return <div c
 function initials(value: string) { return value.split(/\s+/).filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase(); }
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date); }
 function syncLabel(value?:string){return !value?"Не назначен":value==="Ожидает синхронизации"||value==="Ожидает подключения"?"Дневник ещё не подключён — права сохранены только в ArtHello OS":value}
-function permissionHint(key: string) { return ({ dashboard: "Персональный обзор и сигналы", finance: "Платежи, начисления, ДДС и ОПиУ", clients: "Семьи, ученики и коммуникации", education: "Занятия, оценки и программы", hr: "Сотрудники, ставки и кадровые события", schedule: "Расписание, замены и кабинеты", food: "Меню, производство и экономика", legal: "Договоры, версии и обязательства", tasks: "Задачи, процессы и календарь", integrations: "Подключения и журнал обмена", medical: "Чувствительные медицинские сведения", access: "Пользователи, роли и отзыв доступа" } as Record<string, string>)[key] ?? ""; }
-function permissionClass(permission: Permission, css: typeof styles) { return permission === "Управление" ? css.manage : permission === "Редактирование" ? css.edit : permission === "Просмотр" ? css.view : permission === "Особый доступ" ? css.special : css.none; }
+function familyAccessState(family:Pick<Family,"sourceSystem"|"dataQuality">){return family.sourceSystem==="MANUAL"&&family.dataQuality!=="Требует сверки"?"Создано вручную":family.dataQuality}
+function familyAccessNeedsReview(family:Pick<Family,"sourceSystem"|"dataQuality">){return family.dataQuality==="Требует сверки"||family.dataQuality==="На проверке"||(family.sourceSystem!=="MANUAL"&&family.dataQuality!=="Проверено")}
+function permissionHint(key: string) { return ({ home: "Персональный обзор и доступные действия", tasks: "Задачи, процессы и календарь", finance: "Платежи, начисления, ДДС и ОПиУ", accounting: "Бухгалтерские документы и 1С", registry: "Единые карточки и связи", sales: "Воронка и оплаты", clients: "Семьи, ученики и коммуникации", education: "Занятия, оценки и программы", methods: "Методики и учебные материалы", hr: "Сотрудники, ставки и кадровые события", legal: "Договоры, версии и обязательства", procurement: "Закупки и поставщики", food: "Меню, производство и экономика", safety: "Риски и меры безопасности", medical: "Чувствительные медицинские сведения", content: "Контент-план и материалы", events: "Общие рабочие события", projects: "Проекты и KPI", analytics: "Подтверждённые показатели и аналитика", contractors: "Подрядчики и связанные документы", assets: "Имущество и обслуживание", quality: "Готовность и контроль качества", access: "Пользователи, роли и отзыв доступа", integrations: "Подключения и журнал обмена", acceptance: "Приёмочные сценарии и готовность" } as Record<string, string>)[key] ?? ""; }
+function permissionClass(permission: RolePermission, css: typeof styles) { return permission === "Управление" ? css.manage : permission === "Редактирование" ? css.edit : permission === "Просмотр" ? css.view : permission === "Особый доступ" ? css.special : css.none; }

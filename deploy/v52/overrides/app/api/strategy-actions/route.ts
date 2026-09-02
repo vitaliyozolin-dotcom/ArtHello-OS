@@ -2,15 +2,22 @@ import { eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
 import { auditEvents, businessEvents, entities, strategyDeviations, strategyKpis, strategyProjects, strategyResults, tasks } from "../../../db/schema";
 import { canCloseStrategyDeviation, kpiState } from "../../../lib/strategy";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { isTaskManager, resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
+import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
 
 const editors = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "PROJECTS"]);
 
 export async function POST(request: Request) {
-  const actor = getRequestUser(request);
-  if (!actor) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
-  if (!editors.has(role)) return Response.json({ error: "Нет прав на изменение стратегии" }, { status: 403 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  const actor = context.actor;
+  if (!editors.has(context.apiRole)) return Response.json({ error: "Нет прав на изменение стратегии" }, { status: 403 });
   try {
     await ensureCoreTables();
     const body = await request.json() as Record<string, unknown>;
@@ -18,7 +25,7 @@ export async function POST(request: Request) {
     if (action === "createEvent") return createEvent(actor, body);
     if (action === "recordEventResult") return recordEventResult(actor, body);
     if (action === "updateKpiActual") return updateKpi(actor, body);
-    if (action === "createCorrectiveTask") return correctiveTask(actor, body);
+    if (action === "createCorrectiveTask") return correctiveTask(context, body);
     if (action === "closeDeviation") return closeDeviation(actor, body);
     return Response.json({ error: "Неизвестное действие" }, { status: 400 });
   } catch (error) {
@@ -75,7 +82,8 @@ async function updateKpi(actor: string, body: Record<string, unknown>) {
   return Response.json({ kpi: updated });
 }
 
-async function correctiveTask(actor: string, body: Record<string, unknown>) {
+async function correctiveTask(context: TaskAccessContext, body: Record<string, unknown>) {
+  const actor = context.actor;
   const id = clean(body.deviationId, 80);
   const requestedAssignee = clean(body.assigneeEntityId, 80);
   const db = getDb();
@@ -83,13 +91,15 @@ async function correctiveTask(actor: string, body: Record<string, unknown>) {
   const [row] = await db.select().from(strategyDeviations).where(eq(strategyDeviations.id, id)).limit(1);
   if (!row) return Response.json({ error: "Отклонение не найдено" }, { status: 404 });
   const [project] = await db.select().from(strategyProjects).where(eq(strategyProjects.id, row.projectId)).limit(1);
-  const assigneeEntityId = requestedAssignee || project?.ownerEntityId || "";
-  if (!(await isWorkingEntity(assigneeEntityId))) return Response.json({ error: "Назначьте исполнителя из рабочего справочника" }, { status: 400 });
-  const [existing] = await db.select().from(tasks).where(eq(tasks.automationKey, key)).limit(1);
-  if (existing) return Response.json({ task: existing, reused: true });
-  const [task] = await db.insert(tasks).values({ title: `Корректирующее действие · ${row.kpiId}`, owner: actor, dueDate: dateAfterDays(7), priority: "Высокий", status: "Входящие", sourceType: "Отклонение KPI", sourceId: id, description: `${row.explanation}. Решение: ${row.decision}`, assigneeEntityId, kind: "Корректирующее действие", automationKey: key, requiresApproval: true, createdBy: actor }).returning();
+  const assignment = resolveTaskAssignment(context, requestedAssignee || project?.ownerEntityId || "", actor);
+  if (!assignment.ok) return Response.json({ error: assignment.error }, { status: assignment.status });
+  if (isTaskManager(context) && assignment.assigneeEntityId && !(await isWorkingEntity(assignment.assigneeEntityId))) return Response.json({ error: "Назначьте исполнителя из рабочего справочника" }, { status: 400 });
+  const existing = await findScopedAutomationTask(db, context, key);
+  const existingResponse = scopedAutomationTaskResponse(existing);
+  if (existingResponse) return existingResponse;
+  const [task] = await db.insert(tasks).values({ title: `Корректирующее действие · ${row.kpiId}`, owner: assignment.owner, dueDate: dateAfterDays(7), priority: "Высокий", status: "Входящие", sourceType: "Отклонение KPI", sourceId: id, description: `${row.explanation}. Решение: ${row.decision}`, assigneeEntityId: assignment.assigneeEntityId, kind: "Корректирующее действие", automationKey: key, requiresApproval: true, createdByUserId: context.appUserId, createdBy: actor }).returning();
   await db.update(strategyDeviations).set({ relatedTaskId: task.id, status: "В работе" }).where(eq(strategyDeviations.id, id));
-  await audit(actor, "strategy.corrective_task_created", "strategy_deviation", id, { taskId: task.id, assigneeEntityId });
+  await audit(actor, "strategy.corrective_task_created", "strategy_deviation", id, { taskId: task.id, assigneeEntityId: assignment.assigneeEntityId });
   return Response.json({ task }, { status: 201 });
 }
 

@@ -196,11 +196,11 @@ export function SettingsWorkspace({ close, notify, onContextChanged }: { close: 
           </div> : null}
 
           {tab === "Семьи и доступы" ? <div className="settings-grid users-grid family-access-grid">
-            <div className="settings-boundary family-source-boundary"><strong>Только выдача доступа</strong><span>Семьи импортируются или создаются вручную в разделе «Клиенты». Пока карточка не проверена человеком, приглашение отсюда отправить нельзя.</span></div>
+            <div className="settings-boundary family-source-boundary"><strong>Только выдача доступа</strong><span>Ручная карточка уже подтверждена её автором. Для импорта и конфликтов сначала нужна сверка источника. Сам доступ всегда выдаётся здесь отдельным действием.</span></div>
             <article className="settings-card wide">
               <header><div><p>Центральный реестр</p><h3>Карточки семей</h3></div><span>{data.familyDirectory.length}</span></header>
               {data.familyDirectory.length ? <div className="family-access-list">{data.familyDirectory.map((family) => <section key={family.id} className="family-access-card">
-                <header><div><strong>{family.displayName}</strong><small>{family.id} · {family.scope}</small></div><em>{family.sourceSystem === "SYNTHETIC" ? "Тестовая карточка" : `Источник: ${family.sourceSystem}`}</em></header>
+                <header><div><strong>{family.displayName}</strong><small>{family.id} · {family.scope}</small></div><em>{familyAccessState(family)}</em></header>
                 {family.members.length ? <div className="family-member-list">{family.members.map((member) => {
                   const grant = data.familyAccessGrants.find((item) => item.principalEntityId === member.id);
                   const role = member.entityType === "Ребёнок" ? "student" : "parent";
@@ -213,7 +213,7 @@ export function SettingsWorkspace({ close, notify, onContextChanged }: { close: 
                     <label><span>Логин и канал активации</span><input name="login" required defaultValue={defaultLogin} placeholder="+7… или name@example.ru" /><small>Телефон — SMS, email — письмо. Пароль человек создаст сам по одноразовой ссылке.</small></label>
                     <div className="family-access-state"><b className={grant?.status === "Активен" ? "active" : ""}>{grant ? grant.status : "Доступ не выдан"}</b>{grant ? <small>{grant.lastSyncStatus} · {grant.deliveryStatus}</small> : null}</div>
                     <div className="family-access-actions">
-                      <button disabled={busy === `family-${member.id}` || family.dataQuality !== "Проверено"}>{busy === `family-${member.id}` ? "Сохраняем…" : family.dataQuality !== "Проверено" ? "Сначала проверить" : grant ? "Обновить и отправить" : "Выдать и отправить"}</button>
+                      <button disabled={busy === `family-${member.id}` || familyAccessNeedsReview(family)}>{busy === `family-${member.id}` ? "Сохраняем…" : familyAccessNeedsReview(family) ? "Сначала сверить источник" : grant ? "Обновить и отправить" : "Выдать и отправить"}</button>
                       {grant ? <>
                         <button type="button" disabled={busy === `family-password-${grant.id}`} onClick={() => void action({ action: "resetFamilyPassword", grantId: grant.id }, `family-password-${grant.id}`)}>Сбросить пароль</button>
                         {grant.status === "Приостановлен" ? <button type="button" disabled={busy === `family-restore-${grant.id}`} onClick={() => void action({ action: "restoreFamilyAccess", grantId: grant.id }, `family-restore-${grant.id}`)}>Восстановить</button> : <button type="button" disabled={busy === `family-block-${grant.id}`} onClick={() => void action({ action: "blockFamilyAccess", grantId: grant.id }, `family-block-${grant.id}`)}>Заблокировать</button>}
@@ -346,3 +346,5 @@ function AccessAssignmentForm({ user, data, busy, close, submit }: { user: Setti
 }
 
 function syncLabel(value:string){return value==="Ожидает синхронизации"||value==="Ожидает подключения"?"подключение ещё не настроено":value}
+function familyAccessState(family:{sourceSystem:string;dataQuality:string}){return family.sourceSystem==="MANUAL"&&family.dataQuality!=="Требует сверки"?"Создано вручную":family.dataQuality}
+function familyAccessNeedsReview(family:{sourceSystem:string;dataQuality:string}){return family.dataQuality==="Требует сверки"||family.dataQuality==="На проверке"||(family.sourceSystem!=="MANUAL"&&family.dataQuality!=="Проверено")}

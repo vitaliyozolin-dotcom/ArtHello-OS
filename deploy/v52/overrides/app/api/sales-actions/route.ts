@@ -2,7 +2,9 @@ import { eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
 import { auditEvents, entities, salesLeads, salesStageEvents, salesTouchpoints, tasks } from "../../../db/schema";
 import { nextSalesStage } from "../../../lib/sales";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { isTaskManager, resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
+import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
 
 const salesRoles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "SALES"]);
 const touchpointTypes = new Set(["Звонок", "Переписка", "Консультация", "Посещение"]);
@@ -10,10 +12,15 @@ const rejectionReasons = new Set(["Стоимость", "Не подошла п�
 const manualLeadSources = new Set(["Ручной ввод", "Сайт", "Телефон", "WhatsApp", "Telegram", "VK", "Яндекс", "Email", "Рекомендация", "Другое"]);
 
 export async function POST(request: Request) {
-  const actor = getRequestUser(request);
-  if (!actor) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
-  if (!salesRoles.has(role)) return Response.json({ error: "Недостаточно прав для изменения продаж" }, { status: 403 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  const actor = context.actor;
+  if (!salesRoles.has(context.apiRole)) return Response.json({ error: "Недостаточно прав для изменения продаж" }, { status: 403 });
   try {
     await ensureCoreTables();
     const body = (await request.json()) as Record<string, unknown>;
@@ -22,7 +29,7 @@ export async function POST(request: Request) {
     if (action === "advanceStage") return advanceStage(actor, body);
     if (action === "logTouchpoint") return logTouchpoint(actor, body);
     if (action === "recordRejection") return recordRejection(actor, body);
-    if (action === "createFollowupTask") return createFollowupTask(actor, body);
+    if (action === "createFollowupTask") return createFollowupTask(context, body);
     return Response.json({ error: "Неизвестное действие продаж" }, { status: 400 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Действие не выполнено" }, { status: 500 });
@@ -64,7 +71,7 @@ async function createLead(actor: string, body: Record<string, unknown>) {
       status: "На квалификации",
       sourceSystem: "MANUAL_SALES",
       sourceRecordId: leadId,
-      dataQuality: "Ручной ввод",
+      dataQuality: "Проверено",
       scope: branchId || "Продажи",
       metadata: JSON.stringify({ phone, email, interest, branchId, comment, consentAt: now }),
       createdBy: actor,
@@ -120,7 +127,7 @@ async function createLead(actor: string, body: Record<string, unknown>) {
       action: "sales.lead_created",
       entityType: "sales_lead",
       entityId: leadId,
-      payload: JSON.stringify({ contactId, source, branchId, hasPhone: Boolean(phone), hasEmail: Boolean(email), consent: true }),
+      payload: JSON.stringify({ contactId, source, branchId, contactProvenance: "Создано вручную", contactDataQuality: "Проверено", hasPhone: Boolean(phone), hasEmail: Boolean(email), consent: true }),
     });
     return Response.json({ lead: { id: leadId, contactId, name, stage: "Заявка", source } }, { status: 201 });
   } catch (error) {
@@ -187,27 +194,34 @@ async function recordRejection(actor: string, body: Record<string, unknown>) {
   return Response.json({ status: "Закрыт", rejectionReason: reason });
 }
 
-async function createFollowupTask(actor: string, body: Record<string, unknown>) {
+async function createFollowupTask(context: TaskAccessContext, body: Record<string, unknown>) {
+  const actor = context.actor;
   const leadId = clean(body.leadId, 80);
   const lead = await getLead(leadId);
   if (!lead) return Response.json({ error: "Лид не найден" }, { status: 404 });
   const db = getDb();
   const automationKey = `SALES_FOLLOWUP:${lead.id}:${lead.stage}`;
-  const [existing] = await db.select().from(tasks).where(eq(tasks.automationKey, automationKey)).limit(1);
-  if (existing) return Response.json({ task: existing, reused: true });
-  const assigneeEntityId = await verifiedEntityId(lead.managerEntityId);
+  const existing = await findScopedAutomationTask(db, context, automationKey);
+  const existingResponse = scopedAutomationTaskResponse(existing);
+  if (existingResponse) return existingResponse;
+  const assignment = resolveTaskAssignment(context, lead.managerEntityId, actor);
+  if (!assignment.ok) return Response.json({ error: assignment.error }, { status: assignment.status });
+  if (isTaskManager(context) && assignment.assigneeEntityId && !(await verifiedEntityId(assignment.assigneeEntityId))) {
+    return Response.json({ error: "Ответственный не найден" }, { status: 400 });
+  }
   const [task] = await db.insert(tasks).values({
     title: `Следующий шаг по ${lead.id} · ${lead.stage}`,
-    owner: actor,
+    owner: assignment.owner,
     dueDate: relativeDate(2),
     priority: lead.stage === "Заявка" ? "Высокий" : "Средний",
     status: "Входящие",
     sourceType: "Лид продаж",
     sourceId: lead.id,
     description: `Проверить историю контактов, зафиксировать доказательство и перевести лид только на следующий этап. Текущий этап: ${lead.stage}.`,
-    assigneeEntityId,
+    assigneeEntityId: assignment.assigneeEntityId,
     kind: "Автозадача",
     automationKey,
+    createdByUserId: context.appUserId,
     createdBy: actor,
   }).returning();
   await db.insert(auditEvents).values({ actor, action: "sales.followup_task_created", entityType: "sales_lead", entityId: leadId, payload: JSON.stringify({ taskId: task.id }) });

@@ -1,15 +1,21 @@
 import { asc } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
-import { entities, legalChecks, legalContracts, legalDocumentItems, legalResponsibilityZones, tasks } from "../../../db/schema";
+import { entities, legalChecks, legalContracts, legalDocumentItems, legalResponsibilityZones } from "../../../db/schema";
 import { contractUtilization, missingRequired } from "../../../lib/legal";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
 const roles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "LEGAL", "FINANCE"]);
 
 export async function GET(request: Request) {
-  if (!getRequestUser(request)) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
-  if (!roles.has(role)) return Response.json({ error: "Нет доступа к юридическому контуру" }, { status: 403 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  if (!roles.has(context.apiRole)) return Response.json({ error: "Нет доступа к юридическому контуру" }, { status: 403 });
   try {
     await ensureCoreTables();
     const db = getDb();
@@ -19,7 +25,7 @@ export async function GET(request: Request) {
       db.select().from(legalResponsibilityZones),
       db.select().from(legalChecks).orderBy(asc(legalChecks.detectedAt)),
       db.select({ id: entities.id, displayName: entities.displayName }).from(entities),
-      db.select().from(tasks),
+      selectVisibleTasks(db, context),
     ]);
     const entityNames = Object.fromEntries(entityRows.map((item) => [item.id, item.displayName]));
     const contract = contracts[0];
@@ -34,7 +40,7 @@ export async function GET(request: Request) {
       contracts: contracts.map((item) => ({ ...item, utilization: contractUtilization(item.limitMinor, item.spentMinor) })),
       documents,
       zones,
-      checks,
+      checks: redactHiddenTaskReferences(checks, allTasks),
       entityNames,
       tasks: allTasks.filter((item) => item.sourceType === "Юридический сигнал"),
       summary: {

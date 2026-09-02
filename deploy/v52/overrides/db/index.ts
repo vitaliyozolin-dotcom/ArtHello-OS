@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
+import { entityDuplicateKey, manualEntityNormalization } from "../lib/entity-provenance";
 import * as schema from "./schema";
 
 export function getDb() {
@@ -12,10 +13,12 @@ export function getDb() {
   return drizzle(env.DB, { schema });
 }
 
-const CORE_SCHEMA_VERSION = "arthello-os-central-family-access-v1";
+const CORE_SCHEMA_VERSION = "arthello-os-task-ownership-v1";
 const INTEGRATION_DEMO_BOOTSTRAP_VERSION = "integration-demo-v3";
 const FINANCE_ENTITY_LINKS_BOOTSTRAP_VERSION = "finance-entity-links-v1";
 const SYSTEM_DEMO_PURGE_VERSION = "global-demo-purge-v2";
+const MANUAL_ENTITY_PROVENANCE_VERSION = "manual-entity-provenance-v2";
+const TASK_OWNER_BACKFILL_VERSION = "task-created-by-user-v1";
 const REQUIRED_CORE_TABLES = [
   "organization_branches",
   "app_users",
@@ -83,6 +86,11 @@ async function ensureCoreTablesOnce() {
   // outside REQUIRED_CORE_TABLES, while demo rows are created only in an
   // explicitly selected test contour.
   await initializeCoreTables();
+  await normalizeManualEntityProvenance();
+  // A stored bank credential is useful only while the runtime master key can
+  // actually decrypt it. Validate every envelope during readiness so a stale
+  // runner-side key fails before a candidate can touch or replace production.
+  await verifyStoredIntegrationCredentials();
   if (!hasAllCoreTables && mode === "test") await seedInitialDemoData();
 
   if (marker?.state_value !== CORE_SCHEMA_VERSION || !hasAllCoreTables) {
@@ -106,6 +114,71 @@ async function ensureCoreTablesOnce() {
     await ensureAnalyticsDemoBootstrap();
     await ensureFinanceEntityLinksBootstrap();
   }
+}
+
+async function normalizeManualEntityProvenance() {
+  const marker = await env.DB.prepare(
+    "SELECT state_value FROM system_runtime_state WHERE state_key='manual_entity_provenance'"
+  ).first<{ state_value: string }>();
+  if (marker?.state_value === MANUAL_ENTITY_PROVENANCE_VERSION) return;
+
+  type ManualEntityRow = {
+    id: string;
+    entityType: string;
+    displayName: string;
+    sourceSystem: string;
+    dataQuality: string;
+    status: string;
+    hrStatus: string | null;
+  };
+  type IdentityRow = { entityType: string; displayName: string };
+  const [manualResult, identityResult] = await Promise.all([
+    env.DB.prepare(`SELECT entity.id AS id,entity.entity_type AS entityType,entity.display_name AS displayName,
+      entity.source_system AS sourceSystem,entity.data_quality AS dataQuality,entity.status AS status,employee.status AS hrStatus
+      FROM entities AS entity LEFT JOIN hr_employees AS employee ON employee.id=entity.id
+      WHERE (upper(entity.source_system)='MANUAL' OR upper(entity.source_system) GLOB 'MANUAL_*')
+        AND entity.status <> 'Объединена'`).all<ManualEntityRow>(),
+    env.DB.prepare(`SELECT entity_type AS entityType,display_name AS displayName
+      FROM entities WHERE status <> 'Объединена'`).all<IdentityRow>(),
+  ]);
+  const duplicateCounts = new Map<string, number>();
+  for (const row of identityResult.results ?? []) {
+    const key = entityDuplicateKey(row);
+    duplicateCounts.set(key, (duplicateCounts.get(key) ?? 0) + 1);
+  }
+  const eligible = (manualResult.results ?? []).flatMap((row) => {
+    const normalized = manualEntityNormalization(
+      row,
+      (duplicateCounts.get(entityDuplicateKey(row)) ?? 0) > 1,
+      row.hrStatus,
+    );
+    return normalized ? [{ row, normalized }] : [];
+  });
+  for (let offset = 0; offset < eligible.length; offset += 40) {
+    const statements = eligible.slice(offset, offset + 40).flatMap(({ row, normalized }) => {
+      const payload = JSON.stringify({
+        from: row.dataQuality,
+        to: normalized.dataQuality,
+        provenance: "Создано вручную",
+        statusFrom: row.status,
+        statusTo: normalized.status,
+        reason: "manual-source-without-duplicate",
+      });
+      return [
+        env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
+          SELECT 'system-migration','entity.provenance_normalized','entity',id,?
+          FROM entities WHERE id=? AND data_quality=? AND status=?`).bind(payload, row.id, row.dataQuality, row.status),
+        env.DB.prepare(`UPDATE entities SET data_quality=?,status=?,updated_at=CURRENT_TIMESTAMP
+          WHERE id=? AND data_quality=? AND status=?`).bind(normalized.dataQuality, normalized.status, row.id, row.dataQuality, row.status),
+      ];
+    });
+    await env.DB.batch(statements);
+  }
+  await env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+    VALUES ('manual_entity_provenance',?,CURRENT_TIMESTAMP)
+    ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
+    .bind(MANUAL_ENTITY_PROVENANCE_VERSION)
+    .run();
 }
 
 async function ensurePaymentDerivedCounterparties() {
@@ -271,6 +344,7 @@ async function initializeCoreTables() {
       result TEXT NOT NULL DEFAULT '',
       result_evidence TEXT NOT NULL DEFAULT '',
       completed_at TEXT NOT NULL DEFAULT '',
+      created_by_user_id TEXT NOT NULL DEFAULT '',
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -776,6 +850,7 @@ async function initializeCoreTables() {
   }
 
   await ensureTaskColumns();
+  await backfillTaskOwnership();
   await ensureAccessColumns();
 
   await env.DB.batch([
@@ -789,6 +864,8 @@ async function initializeCoreTables() {
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS entity_links_unique ON entity_links (from_entity_id, to_entity_id, relation_type)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS entity_merges_duplicate_unique ON entity_merges (duplicate_id)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS tasks_automation_unique ON tasks (automation_key)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS tasks_created_by_user_idx ON tasks (created_by_user_id)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS tasks_assignee_entity_idx ON tasks (assignee_entity_id)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS task_watchers_unique ON task_watchers (task_id, entity_id)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS task_approvals_unique ON task_approvals (task_id, step_name)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS document_versions_unique ON document_versions (document_id, version)"),
@@ -841,9 +918,54 @@ async function ensureTaskColumns() {
     result: "TEXT NOT NULL DEFAULT ''",
     result_evidence: "TEXT NOT NULL DEFAULT ''",
     completed_at: "TEXT NOT NULL DEFAULT ''",
+    created_by_user_id: "TEXT NOT NULL DEFAULT ''",
   };
   const missing = Object.entries(columns).filter(([name]) => !names.has(name));
-  if (missing.length) await env.DB.batch(missing.map(([name, definition]) => env.DB.prepare(`ALTER TABLE tasks ADD COLUMN ${name} ${definition}`)));
+  for (const [name, definition] of missing) {
+    try {
+      await env.DB.prepare(`ALTER TABLE tasks ADD COLUMN ${name} ${definition}`).run();
+    } catch (error) {
+      // Parallel isolates may observe the same missing column. Accept only a
+      // confirmed concurrent repair; every other migration error must surface.
+      const refreshed = await env.DB.prepare("PRAGMA table_info(tasks)").all<{ name: string }>();
+      if (!(refreshed.results || []).some((column) => column.name === name)) throw error;
+    }
+  }
+}
+
+async function backfillTaskOwnership() {
+  const marker = await env.DB.prepare(
+    "SELECT state_value FROM system_runtime_state WHERE state_key='task_owner_backfill'"
+  ).first<{ state_value: string }>();
+  if (marker?.state_value === TASK_OWNER_BACKFILL_VERSION) return;
+  // Legacy ownership can be recovered only when the display contact maps to
+  // exactly one active app user whose account already existed when the task
+  // was created. Ambiguous, recycled, future or unknown contacts deliberately
+  // keep an empty immutable owner and therefore fail closed for non-managers.
+  // This runs once: a contact registered later must never inherit an old task.
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE tasks
+      SET created_by_user_id = (
+        SELECT MIN(app_users.id)
+        FROM app_users
+        WHERE lower(trim(app_users.contact)) = lower(trim(tasks.created_by))
+          AND app_users.status = 'Активен'
+          AND datetime(app_users.invited_at) <= datetime(tasks.created_at)
+      )
+      WHERE trim(created_by_user_id) = ''
+        AND trim(created_by) <> ''
+        AND (
+          SELECT COUNT(*)
+          FROM app_users
+          WHERE lower(trim(app_users.contact)) = lower(trim(tasks.created_by))
+            AND app_users.status = 'Активен'
+            AND datetime(app_users.invited_at) <= datetime(tasks.created_at)
+        ) = 1`),
+    env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+      VALUES ('task_owner_backfill',?,CURRENT_TIMESTAMP)
+      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
+      .bind(TASK_OWNER_BACKFILL_VERSION),
+  ]);
 }
 
 async function ensureAccessColumns() {
@@ -1662,7 +1784,7 @@ async function seedIntegrations(){
     ["INT-T-ODDS","Атлас ОДДС.xlsx","Файловый импорт","Финансы","EMP-T-ACC-001","Атлас ОДДС 01.01.2023–31.01.2026.xlsx","Контролируемый snapshot","Файл проверен","Ключ не требуется","","2026-08-21T07:40:00Z","",4,4,0,0,2,"Среднее: без обновления устаревает управленческий ДДС","xlsx-odds@1",1,0],
     ["INT-T-PAYROLL","Зарплатная ведомость.xlsx","Файловый импорт","HR · Финансы","EMP-T-ACC-001","Зарплатная ведомость.xlsx","Контролируемый snapshot","На проверке","Ключ не требуется","","2026-08-21T07:45:00Z","",114,112,2,0,2,"Высокое: кадровые агрегаты требуют дедупликации","xlsx-payroll@1",1,0],
     ["INT-T-PAYMENTS","Ежемесячные оплаты.xlsx","Файловый импорт","Финансы · Клиенты","EMP-T-ACC-001","Ежемесячные оплаты.xlsx","Контролируемый snapshot","Устарел","Ключ не требуется","","2026-08-21T07:50:00Z","",4,4,0,0,1,"Высокое: новые оплаты не поступают после июня 2026","xlsx-payments@1",1,0],
-    ["INT-T-TOCHKA","Банк Точка","Банк","Финансы","EMP-T-FIN-001","Банк Точка","API · входящие операции","Ожидает доступ","Не настроена","","","После выдачи доступа",0,0,0,0,0,"Критичное: банковский факт отсутствует","bank-tochka@0",0,0],
+    ["INT-T-TOCHKA","Банк Точка","Банк","Финансы","EMP-T-FIN-001","Банк Точка","API · проверка customerCode и доступных счетов","Ожидает доступ","Не настроена","","","",0,0,0,0,0,"Критичное: загрузка банковских операций ещё не реализована","bank-tochka@1",0,0],
     ["INT-T-ALFABANK","Альфа-Банк","Банк","Финансы","EMP-T-FIN-001","Альфа-Банк","API · входящие операции","Ожидает доступ","Не настроена","","","После выдачи доступа",0,0,0,0,0,"Критичное: банковский факт отсутствует","bank-alfa@0",0,0],
     ["INT-T-ALFACRM","AlfaCRM","CRM","Продажи · Клиенты","EMP-T-SALES-001","AlfaCRM","API · двусторонний","Ожидает доступ","Не настроена","","","После выдачи доступа",0,0,0,1,0,"Высокое: лиды и статусы синхронизируются вручную","alfacrm@0",0,0],
     ["INT-T-DIARY","Электронный дневник","Образование","Обучение","EMP-T-METHOD-001","Утверждённый электронный дневник","API · чтение","Не подключён","Провайдер не утверждён","","","После выбора провайдера",0,0,0,0,0,"Высокое: расписание и посещаемость не обновляются","diary@0",0,0],
@@ -1824,27 +1946,60 @@ export type IntegrationSetup = {
   syncIntervalMinutes: number;
   syncMinute: number;
   endpoint: string;
+  legalEntityId: string;
+  customerCode: string;
   branchId: string;
+  allocationMode: "single_branch" | "classify_transactions";
   accountScope: string;
   channelType: string;
   sourceMapping: string;
   dataScopes: string[];
-  secretStatus: "missing" | "external_required";
+  secretStatus: "missing" | "stored" | "external_required";
   updatedAt: string;
   updatedBy: string;
 };
 
 const integrationSetupPrefix = "integration_setup:";
+const integrationCredentialPrefix = "integration_credential:v2:";
+
+type EncryptedIntegrationCredential = {
+  version: 1;
+  algorithm: "AES-GCM";
+  iv: string;
+  ciphertext: string;
+  updatedAt: string;
+  updatedBy: string;
+};
 
 export async function getIntegrationSetups(): Promise<Record<string, IntegrationSetup>> {
-  const rows = await env.DB.prepare(
-    "SELECT state_key,state_value FROM system_runtime_state WHERE state_key LIKE 'integration_setup:%'"
-  ).all<{ state_key: string; state_value: string }>();
+  const [setupRows, credentialRows] = await Promise.all([
+    env.DB.prepare(
+      "SELECT state_key,state_value FROM system_runtime_state WHERE state_key LIKE 'integration_setup:%'"
+    ).all<{ state_key: string; state_value: string }>(),
+    env.DB.prepare(
+      "SELECT state_key FROM system_runtime_state WHERE state_key LIKE 'integration_credential:v2:%'"
+    ).all<{ state_key: string }>(),
+  ]);
+  const storedCredentialKeys = new Set((credentialRows.results ?? []).map((row: { state_key: string }) => row.state_key));
   const result: Record<string, IntegrationSetup> = {};
-  for (const row of rows.results ?? []) {
+  for (const row of setupRows.results ?? []) {
     try {
       const value = JSON.parse(row.state_value) as IntegrationSetup;
-      result[row.state_key.slice(integrationSetupPrefix.length)] = value;
+      const connectionId = row.state_key.slice(integrationSetupPrefix.length);
+      const legalEntityId = String(value.legalEntityId ?? "").trim().slice(0, 80);
+      const customerCode = String(value.customerCode ?? "").trim().slice(0, 80);
+      const tochkaJwt = connectionId === "INT-T-TOCHKA" && value.authMethod === "JWT";
+      result[connectionId] = {
+        ...value,
+        connectionId,
+        legalEntityId,
+        customerCode,
+        allocationMode: value.allocationMode === "single_branch" ? "single_branch" : "classify_transactions",
+        accountScope: value.accountScope || (connectionId === "INT-T-TOCHKA" ? "all_permitted" : ""),
+        secretStatus: tochkaJwt
+          ? customerCode && storedCredentialKeys.has(integrationCredentialStateKey(connectionId, legalEntityId, customerCode)) ? "stored" : "missing"
+          : value.secretStatus === "stored" ? "stored" : "external_required",
+      };
     } catch {
       // A malformed setup is ignored and remains visible as not configured.
     }
@@ -1852,55 +2007,402 @@ export async function getIntegrationSetups(): Promise<Record<string, Integration
   return result;
 }
 
-export async function saveIntegrationSetup(actor: string, input: Partial<IntegrationSetup>) {
+type PreparedIntegrationSetup = {
+  setup: IntegrationSetup;
+  tochkaConnection: boolean;
+  tochkaJwt: boolean;
+};
+
+export async function validateIntegrationSetupReferences(input: Partial<IntegrationSetup>) {
   const connectionId = String(input.connectionId ?? "").trim().toUpperCase().slice(0, 80);
   if (!connectionId) throw new Error("Не выбрана интеграция");
   const connection = await env.DB.prepare("SELECT id FROM integration_connections WHERE id=?")
     .bind(connectionId).first<{ id: string }>();
   if (!connection) throw new Error("Интеграция не найдена");
-  const startDate = String(input.startDate ?? "").trim().slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new Error("Укажите дату начала загрузки");
-  const interval = [60, 180, 360, 1440].includes(Number(input.syncIntervalMinutes))
+  const bankConnection = connectionId === "INT-T-TOCHKA" || connectionId === "INT-T-ALFABANK";
+  const legalEntityId = String(input.legalEntityId ?? "").trim().slice(0, 80);
+  const allocationMode = input.allocationMode === "single_branch" ? "single_branch" : "classify_transactions";
+  const branchId = String(input.branchId ?? "").trim().slice(0, 80);
+  if (bankConnection && !legalEntityId) throw new Error("Выберите юридическое лицо");
+  if (bankConnection) {
+    const legalEntity = await env.DB.prepare("SELECT id FROM entities WHERE id=? AND entity_type='Юрлицо' LIMIT 1")
+      .bind(legalEntityId).first<{ id: string }>();
+    if (!legalEntity) throw new Error("Выберите существующую карточку юридического лица");
+  }
+  const requiresBranch = !bankConnection || allocationMode === "single_branch";
+  if (requiresBranch && !branchId) {
+    throw new Error("Выберите филиал назначения");
+  }
+  if (requiresBranch && branchId) {
+    const branch = await env.DB.prepare("SELECT id FROM organization_branches WHERE id=? AND status='Активен' LIMIT 1")
+      .bind(branchId).first<{ id: string }>();
+    if (!branch) throw new Error("Выберите действующий филиал");
+  }
+  return { connectionId, bankConnection, legalEntityId, allocationMode, branchId };
+}
+
+async function prepareIntegrationSetup(
+  actor: string,
+  input: Partial<IntegrationSetup>,
+  forceStoredCredential = false,
+): Promise<PreparedIntegrationSetup> {
+  const references = await validateIntegrationSetupReferences(input);
+  const { connectionId, bankConnection, legalEntityId, allocationMode, branchId } = references;
+  const tochkaConnection = connectionId === "INT-T-TOCHKA";
+  const startDate = tochkaConnection ? "" : String(input.startDate ?? "").trim().slice(0, 10);
+  if (!tochkaConnection && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new Error("Укажите дату начала загрузки");
+  const interval = tochkaConnection
+    ? 0
+    : [60, 180, 360, 1440].includes(Number(input.syncIntervalMinutes))
     ? Number(input.syncIntervalMinutes)
     : 60;
-  const minute = Math.min(59, Math.max(0, Number(input.syncMinute) || 0));
+  const minute = tochkaConnection ? 0 : Math.min(59, Math.max(0, Number(input.syncMinute) || 0));
+  const authMethod = String(input.authMethod ?? "").trim().slice(0, 80);
+  const tochkaJwt = connectionId === "INT-T-TOCHKA" && authMethod === "JWT";
+  const customerCode = String(input.customerCode ?? "").trim().slice(0, 80);
+  if (tochkaConnection && customerCode && !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,79}$/.test(customerCode)) {
+    throw new Error("Некорректно указан customerCode");
+  }
   const updatedAt = new Date().toISOString();
   const setup: IntegrationSetup = {
     connectionId,
-    authMethod: String(input.authMethod ?? "").trim().slice(0, 80),
+    authMethod,
     startDate,
     syncIntervalMinutes: interval,
     syncMinute: minute,
     endpoint: String(input.endpoint ?? "").trim().slice(0, 240),
-    branchId: String(input.branchId ?? "").trim().slice(0, 80),
-    accountScope: String(input.accountScope ?? "").trim().slice(0, 160),
+    legalEntityId,
+    customerCode: tochkaConnection ? customerCode : "",
+    branchId: bankConnection && allocationMode === "classify_transactions" ? "" : branchId,
+    allocationMode,
+    accountScope: bankConnection ? "all_permitted" : String(input.accountScope ?? "").trim().slice(0, 160),
     channelType: String(input.channelType ?? "").trim().slice(0, 80),
     sourceMapping: String(input.sourceMapping ?? "").trim().slice(0, 500),
     dataScopes: Array.isArray(input.dataScopes) ? input.dataScopes.filter((item): item is string => typeof item === "string").map((item) => item.trim().slice(0, 80)).filter(Boolean).slice(0, 30) : [],
-    secretStatus: "external_required",
+    secretStatus: tochkaJwt
+      ? forceStoredCredential || customerCode && await hasIntegrationCredential(connectionId, legalEntityId, customerCode) ? "stored" : "missing"
+      : "external_required",
     updatedAt,
     updatedBy: actor,
   };
   if (!setup.dataScopes.length) throw new Error("Выберите, какие данные получать");
-  if (!setup.branchId) throw new Error("Выберите филиал назначения");
+  return { setup, tochkaConnection, tochkaJwt };
+}
+
+async function persistIntegrationSetup(actor: string, prepared: PreparedIntegrationSetup) {
+  const { setup, tochkaConnection, tochkaJwt } = prepared;
+  const saveSetupStatement = env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+    VALUES (?,?,CURRENT_TIMESTAMP)
+    ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
+    .bind(`${integrationSetupPrefix}${setup.connectionId}`, JSON.stringify(setup));
+  const updateConnectionStatement = env.DB.prepare(`UPDATE integration_connections SET
+    auth_status=?,
+    next_sync_at=?,
+    updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(
+      tochkaJwt
+        ? setup.secretStatus === "stored" ? "JWT сохранён · требуется проверка банка" : "Настройка сохранена · JWT требуется"
+        : "Настройка сохранена · секрет требуется",
+      tochkaConnection
+        ? ""
+        : "После безопасной передачи секрета",
+      setup.connectionId,
+    );
+  if (tochkaConnection) {
+    const statements = [saveSetupStatement];
+    if (setup.secretStatus !== "stored") {
+      statements.push(env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key LIKE ?")
+        .bind(integrationCredentialConnectionPattern(setup.connectionId)));
+    }
+    statements.push(updateConnectionStatement);
+    await env.DB.batch(statements);
+  } else {
+    await saveSetupStatement.run();
+    await updateConnectionStatement.run();
+  }
+  await writeIntegrationDatasetAudit(actor, "integration.setup_saved", {
+    connectionId: setup.connectionId,
+    selectedLegalEntityId: setup.legalEntityId,
+    selectedCustomerCode: setup.customerCode,
+    accountScope: setup.accountScope,
+    allocationMode: setup.allocationMode,
+    startDate: setup.startDate,
+    syncIntervalMinutes: setup.syncIntervalMinutes,
+    syncMinute: setup.syncMinute,
+    authMethod: setup.authMethod,
+    dataScopes: setup.dataScopes,
+    secretStored: setup.secretStatus === "stored",
+  });
+}
+
+export async function saveIntegrationSetup(actor: string, input: Partial<IntegrationSetup>) {
+  const prepared = await prepareIntegrationSetup(actor, input);
+  await persistIntegrationSetup(actor, prepared);
+  return prepared.setup;
+}
+
+export async function saveTochkaSetupWithCredential(
+  actor: string,
+  input: Partial<IntegrationSetup>,
+  value: unknown,
+) {
+  const prepared = await prepareIntegrationSetup(actor, input, true);
+  const { setup } = prepared;
+  if (setup.connectionId !== "INT-T-TOCHKA" || setup.authMethod !== "JWT" || !setup.customerCode) {
+    throw new Error("JWT принимается только для подтверждённого подключения банка Точка");
+  }
+  const credential = await encryptIntegrationCredential(
+    actor,
+    setup.connectionId,
+    setup.legalEntityId,
+    setup.customerCode,
+    value,
+  );
+  const setupAudit = JSON.stringify({
+    connectionId: setup.connectionId,
+    selectedLegalEntityId: setup.legalEntityId,
+    selectedCustomerCode: setup.customerCode,
+    accountScope: setup.accountScope,
+    allocationMode: setup.allocationMode,
+    startDate: setup.startDate,
+    syncIntervalMinutes: setup.syncIntervalMinutes,
+    syncMinute: setup.syncMinute,
+    authMethod: setup.authMethod,
+    dataScopes: setup.dataScopes,
+    secretStored: true,
+  });
+  const credentialAudit = JSON.stringify({
+    connectionId: credential.connectionId,
+    selectedLegalEntityId: credential.legalEntityId,
+    selectedCustomerCode: credential.customerCode,
+    version: credential.envelope.version,
+    algorithm: credential.envelope.algorithm,
+  });
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+      VALUES (?,?,CURRENT_TIMESTAMP)
+      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
+      .bind(`${integrationSetupPrefix}${setup.connectionId}`, JSON.stringify(setup)),
+    env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+      VALUES (?,?,CURRENT_TIMESTAMP)
+      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
+      .bind(credential.stateKey, JSON.stringify(credential.envelope)),
+    env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key LIKE ? AND state_key<>?")
+      .bind(integrationCredentialConnectionPattern(setup.connectionId), credential.stateKey),
+    env.DB.prepare(`UPDATE integration_connections SET
+      auth_status='JWT сохранён · требуется проверка банка',next_sync_at='',updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .bind(setup.connectionId),
+    env.DB.prepare("INSERT INTO audit_events (actor,action,entity_type,entity_id,payload) VALUES (?,?,?,?,?)")
+      .bind(actor, "integration.setup_saved", "integration_test_dataset", "INTEGRATION-DEMO", setupAudit),
+    env.DB.prepare("INSERT INTO audit_events (actor,action,entity_type,entity_id,payload) VALUES (?,?,?,?,?)")
+      .bind(actor, "integration.credential_replaced", "integration_test_dataset", "INTEGRATION-DEMO", credentialAudit),
+  ]);
+  return setup;
+}
+
+export async function hasIntegrationCredential(connectionIdValue: string, legalEntityIdValue: string, customerCodeValue: string) {
+  const stateKey = integrationCredentialStateKey(connectionIdValue, legalEntityIdValue, customerCodeValue);
+  const row = await env.DB.prepare("SELECT 1 AS present FROM system_runtime_state WHERE state_key=?")
+    .bind(stateKey).first<{ present: number }>();
+  return row?.present === 1;
+}
+
+export async function saveIntegrationCredential(
+  actor: string,
+  connectionIdValue: string,
+  legalEntityIdValue: string,
+  customerCodeValue: string,
+  value: unknown,
+) {
+  const credential = await encryptIntegrationCredential(
+    actor,
+    connectionIdValue,
+    legalEntityIdValue,
+    customerCodeValue,
+    value,
+  );
   await env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
     VALUES (?,?,CURRENT_TIMESTAMP)
     ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-    .bind(`${integrationSetupPrefix}${connectionId}`, JSON.stringify(setup)).run();
-  await env.DB.prepare(`UPDATE integration_connections SET
-    auth_status='Настройка сохранена · секрет требуется',
-    next_sync_at='После безопасной передачи секрета',
-    updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(connectionId).run();
-  await writeIntegrationDatasetAudit(actor, "integration.setup_saved", {
-    connectionId,
-    startDate,
-    syncIntervalMinutes: interval,
-    syncMinute: minute,
-    authMethod: setup.authMethod,
-    dataScopes: setup.dataScopes,
-    secretStored: false,
+    .bind(credential.stateKey, JSON.stringify(credential.envelope)).run();
+  await writeIntegrationDatasetAudit(actor, "integration.credential_replaced", {
+    connectionId: credential.connectionId,
+    selectedLegalEntityId: credential.legalEntityId,
+    selectedCustomerCode: credential.customerCode,
+    version: credential.envelope.version,
+    algorithm: credential.envelope.algorithm,
   });
-  return setup;
+}
+
+export async function revokeTochkaIntegrationCredential(actor: string) {
+  const connectionId = "INT-T-TOCHKA";
+  const setup = (await getIntegrationSetups())[connectionId];
+  const revokedAt = new Date().toISOString();
+  const revokedSetup = setup ? { ...setup, secretStatus: "missing" as const, updatedAt: revokedAt, updatedBy: actor } : null;
+  const statements = [
+    env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key LIKE ?")
+      .bind(integrationCredentialConnectionPattern(connectionId)),
+  ];
+  if (revokedSetup) {
+    statements.push(env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+      VALUES (?,?,CURRENT_TIMESTAMP)
+      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
+      .bind(`${integrationSetupPrefix}${connectionId}`, JSON.stringify(revokedSetup)));
+  }
+  statements.push(
+    env.DB.prepare(`UPDATE integration_connections SET
+      status='Ожидает доступ',auth_status='JWT отозван владельцем',credential_expires_at='',
+      last_success_at='',next_sync_at='',received_count=0,accepted_count=0,rejected_count=0,
+      verified_transfer=0,is_enabled=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(connectionId),
+    env.DB.prepare("INSERT INTO audit_events (actor,action,entity_type,entity_id,payload) VALUES (?,?,?,?,?)")
+      .bind(actor, "integration.credential_revoked", "integration_connection", connectionId, JSON.stringify({
+        connectionId,
+        selectedLegalEntityId: setup?.legalEntityId ?? "",
+        selectedCustomerCode: setup?.customerCode ?? "",
+      })),
+  );
+  await env.DB.batch(statements);
+  return revokedSetup;
+}
+
+async function encryptIntegrationCredential(
+  actor: string,
+  connectionIdValue: string,
+  legalEntityIdValue: string,
+  customerCodeValue: string,
+  value: unknown,
+) {
+  const connectionId = normalizeIntegrationCredentialScope(connectionIdValue, "интеграция");
+  const legalEntityId = normalizeIntegrationCredentialScope(legalEntityIdValue, "юридическое лицо");
+  const customerCode = normalizeIntegrationCredentialScope(customerCodeValue, "customerCode");
+  const secret = typeof value === "string" ? value.trim() : "";
+  if (secret.length < 40 || secret.length > 16_384 || /\s/.test(secret)) {
+    throw new Error("JWT выглядит неполным или содержит недопустимые символы");
+  }
+  const key = await integrationCredentialEncryptionKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const aad = new TextEncoder().encode(integrationCredentialAad(connectionId, legalEntityId, customerCode));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv, additionalData: aad, tagLength: 128 },
+    key,
+    new TextEncoder().encode(secret),
+  );
+  const envelope: EncryptedIntegrationCredential = {
+    version: 1,
+    algorithm: "AES-GCM",
+    iv: encodeIntegrationCredentialBytes(iv),
+    ciphertext: encodeIntegrationCredentialBytes(new Uint8Array(ciphertext)),
+    updatedAt: new Date().toISOString(),
+    updatedBy: actor,
+  };
+  return {
+    connectionId,
+    legalEntityId,
+    customerCode,
+    stateKey: integrationCredentialStateKey(connectionId, legalEntityId, customerCode),
+    envelope,
+  };
+}
+
+export async function readIntegrationCredential(connectionIdValue: string, legalEntityIdValue: string, customerCodeValue: string) {
+  const connectionId = normalizeIntegrationCredentialScope(connectionIdValue, "интеграция");
+  const legalEntityId = normalizeIntegrationCredentialScope(legalEntityIdValue, "юридическое лицо");
+  const customerCode = normalizeIntegrationCredentialScope(customerCodeValue, "customerCode");
+  const row = await env.DB.prepare("SELECT state_value FROM system_runtime_state WHERE state_key=?")
+    .bind(integrationCredentialStateKey(connectionId, legalEntityId, customerCode)).first<{ state_value: string }>();
+  if (!row) return null;
+  try {
+    const envelope = JSON.parse(row.state_value) as EncryptedIntegrationCredential;
+    if (envelope.version !== 1 || envelope.algorithm !== "AES-GCM" || !envelope.iv || !envelope.ciphertext) {
+      throw new Error("Unsupported credential envelope");
+    }
+    const key = await integrationCredentialEncryptionKey();
+    const plaintext = await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: decodeIntegrationCredentialBytes(envelope.iv),
+        additionalData: new TextEncoder().encode(integrationCredentialAad(connectionId, legalEntityId, customerCode)),
+        tagLength: 128,
+      },
+      key,
+      decodeIntegrationCredentialBytes(envelope.ciphertext),
+    );
+    const secret = new TextDecoder().decode(plaintext);
+    if (secret.length < 40 || secret.length > 16_384 || /\s/.test(secret)) throw new Error("Invalid credential payload");
+    return secret;
+  } catch {
+    // Never expose ciphertext, parsing details or key material to callers.
+    throw new Error("Защищённый JWT недоступен. Введите ключ заново.");
+  }
+}
+
+export async function verifyStoredIntegrationCredentials() {
+  const rows = await env.DB.prepare(
+    "SELECT state_key FROM system_runtime_state WHERE state_key LIKE 'integration_credential:v2:%' ORDER BY state_key"
+  ).all<{ state_key: string }>();
+  for (const row of rows.results ?? []) {
+    try {
+      const parts = row.state_key.slice(integrationCredentialPrefix.length).split(":");
+      if (parts.length !== 3 || parts.some((part) => !part)) throw new Error("Invalid credential scope");
+      const [connectionId, legalEntityId, customerCode] = parts.map((part) => decodeURIComponent(part));
+      if (integrationCredentialStateKey(connectionId, legalEntityId, customerCode) !== row.state_key) {
+        throw new Error("Non-canonical credential scope");
+      }
+      const secret = await readIntegrationCredential(connectionId, legalEntityId, customerCode);
+      if (!secret) throw new Error("Missing credential envelope");
+    } catch {
+      // Readiness must fail without exposing the state key, envelope or secret.
+      throw new Error("Защищённые банковские ключи не прошли проверку хранилища");
+    }
+  }
+}
+
+function integrationCredentialStateKey(connectionIdValue: string, legalEntityIdValue: string, customerCodeValue: string) {
+  const connectionId = normalizeIntegrationCredentialScope(connectionIdValue, "интеграция");
+  const legalEntityId = normalizeIntegrationCredentialScope(legalEntityIdValue, "юридическое лицо");
+  const customerCode = normalizeIntegrationCredentialScope(customerCodeValue, "customerCode");
+  return `${integrationCredentialPrefix}${encodeURIComponent(connectionId)}:${encodeURIComponent(legalEntityId)}:${encodeURIComponent(customerCode)}`;
+}
+
+function integrationCredentialConnectionPattern(connectionIdValue: string) {
+  const connectionId = normalizeIntegrationCredentialScope(connectionIdValue, "интеграция");
+  return `${integrationCredentialPrefix}${encodeURIComponent(connectionId)}:%`;
+}
+
+function normalizeIntegrationCredentialScope(value: string, label: string, allowEmpty = false) {
+  const clean = String(value ?? "").trim().slice(0, 80);
+  if ((!clean && !allowEmpty) || (clean && !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,79}$/.test(clean))) {
+    throw new Error(`Некорректно указано ${label}`);
+  }
+  return clean;
+}
+
+function integrationCredentialAad(connectionId: string, legalEntityId: string, customerCode: string) {
+  return `arthello.integration-credential.v2\n${connectionId}\n${legalEntityId}\n${customerCode}\nJWT`;
+}
+
+async function integrationCredentialEncryptionKey() {
+  const runtime = env as unknown as Record<string, unknown>;
+  const configured = runtime.INTEGRATION_CREDENTIALS_KEY;
+  if (typeof configured !== "string" || configured.length < 32) {
+    throw new Error("Защищённое хранилище не настроено: задайте INTEGRATION_CREDENTIALS_KEY");
+  }
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`arthello.integration-credential.key.v1\n${configured}`),
+  );
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+function encodeIntegrationCredentialBytes(bytes: Uint8Array) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function decodeIntegrationCredentialBytes(value: string) {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(base64);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 export type SystemDataMode = "test" | "source_only" | "empty";

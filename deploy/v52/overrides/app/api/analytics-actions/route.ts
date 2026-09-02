@@ -2,15 +2,22 @@ import { eq } from "drizzle-orm";
 import { ensureAnalyticsDemoBootstrap, ensureCoreTables, getDb, getSystemDataMode } from "../../../db";
 import { aiModelRuns, aiOptOuts, aiProcessContracts, analyticsSignals, auditEvents, tasks } from "../../../db/schema";
 import { canRecordHumanDecision, canRunContract } from "../../../lib/analytics";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
+import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
 
 const editors = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "ANALYTICS"]);
 
 export async function POST(request: Request) {
-  const actor = getRequestUser(request);
-  if (!actor) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
-  if (!editors.has(role)) return Response.json({ error: "Нет прав на запуск и решения" }, { status: 403 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  const actor = context.actor;
+  if (!editors.has(context.apiRole)) return Response.json({ error: "Нет прав на запуск и решения" }, { status: 403 });
   try {
     await ensureCoreTables();
     const dataMode = await getSystemDataMode();
@@ -23,7 +30,7 @@ export async function POST(request: Request) {
       }
       return runScenario(actor, body);
     }
-    if (action === "createSignalTask") return signalTask(actor, body);
+    if (action === "createSignalTask") return signalTask(context, body);
     if (action === "recordDecision") return recordDecision(actor, body);
     if (action === "optOut") return optOut(actor, body);
     if (action === "restoreContract") return restoreContract(actor, body);
@@ -63,27 +70,32 @@ async function runScenario(actor: string, body: Record<string, unknown>) {
   return Response.json({ run }, { status: 201 });
 }
 
-async function signalTask(actor: string, body: Record<string, unknown>) {
+async function signalTask(context: TaskAccessContext, body: Record<string, unknown>) {
+  const actor = context.actor;
   const id = clean(body.signalId, 100);
   const db = getDb();
   const key = `ANALYTICS_SIGNAL:${id}`;
   const [signal] = await db.select().from(analyticsSignals).where(eq(analyticsSignals.id, id)).limit(1);
   if (!signal) return Response.json({ error: "Сигнал не найден" }, { status: 404 });
-  const [existing] = await db.select().from(tasks).where(eq(tasks.automationKey, key)).limit(1);
-  if (existing) return Response.json({ task: existing, reused: true });
+  const existing = await findScopedAutomationTask(db, context, key);
+  const existingResponse = scopedAutomationTaskResponse(existing);
+  if (existingResponse) return existingResponse;
+  const assignment = resolveTaskAssignment(context, "", actor);
+  if (!assignment.ok) return Response.json({ error: assignment.error }, { status: assignment.status });
   const [task] = await db.insert(tasks).values({
     title: `Проверить сигнал · ${signal.title}`,
-    owner: actor,
+    owner: assignment.owner,
     dueDate: relativeDate(3),
     priority: signal.severity,
     status: "Входящие",
     sourceType: "Аналитический сигнал",
     sourceId: id,
     description: `${signal.explanation}. Рекомендация: ${signal.recommendation}`,
-    assigneeEntityId: "",
+    assigneeEntityId: assignment.assigneeEntityId,
     kind: "Human review",
     automationKey: key,
     requiresApproval: true,
+    createdByUserId: context.appUserId,
     createdBy: actor,
   }).returning();
   await db.update(analyticsSignals).set({ relatedTaskId: task.id, status: "В работе" }).where(eq(analyticsSignals.id, id));

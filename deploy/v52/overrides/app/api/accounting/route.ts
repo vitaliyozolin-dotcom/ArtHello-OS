@@ -1,15 +1,21 @@
 import { desc } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
-import { accountingCompletenessChecks, accountingDocumentLinks, accountingDocuments, accountingExports, accountingIntegrations, entities, financialOperations, tasks } from "../../../db/schema";
+import { accountingCompletenessChecks, accountingDocumentLinks, accountingDocuments, accountingExports, accountingIntegrations, entities, financialOperations } from "../../../db/schema";
 import { filterAccountingCounterparties } from "../../../lib/accounting";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
 const roles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "ACCOUNTING", "FINANCE", "LEGAL"]);
 
 export async function GET(request: Request) {
-  if (!getRequestUser(request)) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
-  if (!roles.has(role)) return Response.json({ error: "Нет доступа к бухгалтерскому контуру" }, { status: 403 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  if (!roles.has(context.apiRole)) return Response.json({ error: "Нет доступа к бухгалтерскому контуру" }, { status: 403 });
   try {
     await ensureCoreTables();
     const db = getDb();
@@ -21,7 +27,7 @@ export async function GET(request: Request) {
       db.select().from(accountingIntegrations),
       db.select({ id: entities.id, displayName: entities.displayName, entityType: entities.entityType }).from(entities),
       db.select().from(financialOperations),
-      db.select().from(tasks),
+      selectVisibleTasks(db, context),
     ]);
     const anchor = documents.find((item) => item.paymentOperationId) ?? documents[0];
     const related = anchor?.contractId ? documents.filter((item) => item.contractId === anchor.contractId) : anchor ? [anchor] : [];
@@ -32,7 +38,7 @@ export async function GET(request: Request) {
     return Response.json({
       documents,
       links,
-      checks: checks.map((item) => ({ ...item, requiredTypes: parseArray(item.requiredTypes), missingTypes: parseArray(item.missingTypes) })),
+      checks: redactHiddenTaskReferences(checks, allTasks).map((item) => ({ ...item, requiredTypes: parseArray(item.requiredTypes), missingTypes: parseArray(item.missingTypes) })),
       exports: exportsList,
       integrations,
       entityNames: Object.fromEntries(entityRows.map((item) => [item.id, item.displayName])),
