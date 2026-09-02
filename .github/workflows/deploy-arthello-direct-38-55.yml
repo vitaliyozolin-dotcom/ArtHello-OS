@@ -1,6 +1,6 @@
 name: Deploy ArtHello self-hosted RU
 
-# D-047 is a one-release recovery exception to D-040's workflow_dispatch trigger only.
+# D-048 is a one-release dashboard cleanup exception to D-040's workflow_dispatch trigger only.
 # Production authorization still requires the protected Environment below. The
 # exception is constrained to the successful hosted verification of the exact
 # merged main SHA from the named release branch and repository.
@@ -22,8 +22,8 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/same-user-d1-fd-recovery-20260902
-  EXPECTED_RELEASE_PR: "314"
+  EXPECTED_RELEASE_HEAD: codex/clean-dashboard-help-20260903
+  EXPECTED_RELEASE_PR: "315"
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -54,8 +54,8 @@ jobs:
       (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/same-user-d1-fd-recovery-20260902' &&
-          github.event.workflow_run.pull_requests[0].number == 314 &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/clean-dashboard-help-20260903' &&
+          github.event.workflow_run.pull_requests[0].number == 315 &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -67,7 +67,7 @@ jobs:
     environment: production-ru
 
     steps:
-      - name: Verify one-release D-047 trigger and protected Environment
+      - name: Verify one-release D-048 trigger and protected Environment
         timeout-minutes: 4
         env:
           GH_TOKEN: ${{ github.token }}

@@ -475,3 +475,16 @@ decision:
 - supply chain: базовый Node image и runtime lock зафиксированы; production скачивает артефакт точного hosted Verify run, сверяет SHA-256 архива, repository/run/head/tree/Dockerfile/lock/evidence и Docker image ID, затем делает `docker load` без повторной сборки;
 - доказательство: exact Docker assembly, сборка, lint без ошибок, полный test suite 317/317, runtime owner/employee/RBAC/SSO acceptance, successful hosted Verify и Quality gates, Environment `production-ru`, публичные ArtHello и School health-checks;
 - rollback: прежний контейнер и отдельный rollback volume сохраняются; при любой ошибке данные, маршрут Caddy и прежний контейнер восстанавливаются до выдачи success.
+
+
+## Дополнение 2026-09-03 — чистая Главная без малых знаков вопроса
+
+- статус: `approved-for-release`; владелец явно поручил немедленно убрать непонятные маркеры с Главной и применить исправление в production;
+- release PR/branch: `#315`, `codex/clean-dashboard-help-20260903`; одноразовый trigger принимает только этот PR, первый attempt точной Verify-проверки и текущий merged main SHA;
+- решение: D-048 в `DECISIONS.md`;
+- область: только автоматические малые inline-help маркеры внутри корневой зоны Главной; глобальная кнопка «Помощь», guided tour и формы остальных разделов сохраняются;
+- данные и совместимость: миграций и записей в D1 нет; ролевые раскладки, разрешения, интеграции, финансы и School не изменяются;
+- приёмка: ноль малых `.ah-field-icon` на Главной в обычном и редактируемом виде; доступна `.ah-launch`; сохранены `data-help-block`-якоря; тестовая политика не подавляет помощь вне явной зоны;
+- доказательство до merge: production build, lint без ошибок и полный test suite 319/319 локально; hosted Quality, Proof Gates и Verify на точном head PR;
+- rollout: неизменяемый образ точного merged SHA, Environment `production-ru`, clone-preflight, backup-first cutover и публичные health-checks;
+- rollback: при любой ошибке workflow возвращает прежний контейнер, volume и маршрут; поскольку схема и данные не меняются, отдельного data rollback для D-048 не требуется.
