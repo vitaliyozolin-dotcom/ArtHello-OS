@@ -1,0 +1,302 @@
+name: ArtHello School SSO self-fetch hotfix
+
+on:
+  push:
+    branches:
+      - arthello/fix-school-sso-self-fetch-20260902
+    paths:
+      - deploy/v52/overrides/app/api/school-sso/authorize/route.ts
+      - deploy/v52/overrides/lib/school-sso-access.ts
+      - deploy/v52/overrides/tests/school-sso-contract.test.mjs
+      - .github/workflows/arthello-school-sso-self-fetch-hotfix.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - deploy/v52/overrides/app/api/school-sso/authorize/route.ts
+      - deploy/v52/overrides/lib/school-sso-access.ts
+      - deploy/v52/overrides/tests/school-sso-contract.test.mjs
+      - .github/workflows/arthello-school-sso-self-fetch-hotfix.yml
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: arthello-school-sso-self-fetch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      (
+        github.event_name == 'push' ||
+        (
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.user.login == 'vitaliyozolin-dotcom' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'arthello/fix-school-sso-self-fetch-20260902'
+        )
+      )
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify minimal hotfix source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          route=deploy/v52/overrides/app/api/school-sso/authorize/route.ts
+          access=deploy/v52/overrides/lib/school-sso-access.ts
+          grep -F 'const me = authenticated.access' "$route" >/dev/null
+          grep -F 'loadSchoolSystemGrant(me.app_user_id)' "$route" >/dev/null
+          ! grep -F '/api/settings' "$route" >/dev/null
+          ! grep -E 'fetch[[:space:]]*\(' "$route" >/dev/null
+          grep -F 'FROM user_system_access' "$access" >/dev/null
+          grep -F 'SYS-SCHOOL-1-11' "$access" >/dev/null
+          node --test deploy/v52/overrides/tests/school-sso-contract.test.mjs
+          printf 'ARTHELLO_SSO_NO_SELF_FETCH_SOURCE=PASS\n'
+
+      - name: Build complete ArtHello candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          image="arthello-sso-self-fetch-hotfix:${GITHUB_SHA}"
+          docker build \
+            --file deploy/v52/Dockerfile \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$image" .
+          test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+          docker run --rm --network none --entrypoint node "$image" \
+            --test /app/tests/school-sso-contract.test.mjs
+          printf 'ARTHELLO_SSO_HOTFIX_BUILD=PASS\n'
+
+      - name: Prove authenticated owner SSO against an isolated clone of production D1
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec 9>/var/lock/arthello-sso-validation.lock
+          flock -n 9
+
+          image="arthello-sso-self-fetch-hotfix:${GITHUB_SHA}"
+          live="$(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}' | head -n1)"
+          test -n "$live"
+          test "$(docker inspect "$live" --format '{{.State.Running}}')" = true
+          live_volume="$(docker inspect "$live" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          test "$live_volume" = arthello-direct-v44-data
+          network="$(docker inspect "$live" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1)"
+          test -n "$network"
+
+          suffix="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          clone="arthello_sso_hotfix_${suffix}_data"
+          candidate="arthello-sso-hotfix-check-$suffix"
+          paused=0
+          clone_created=0
+          candidate_created=0
+          cleanup() {
+            rc=$?
+            set +e
+            if [ "$candidate_created" -eq 1 ]; then docker rm -f "$candidate" >/dev/null 2>&1; fi
+            if [ "$paused" -eq 1 ]; then docker unpause "$live" >/dev/null 2>&1; fi
+            if [ "$clone_created" -eq 1 ]; then docker volume rm "$clone" >/dev/null 2>&1; fi
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          docker volume create \
+            --label arthello.environment=sso-hotfix-test \
+            --label arthello.source-run="$GITHUB_RUN_ID" \
+            "$clone" >/dev/null
+          clone_created=1
+
+          docker pause "$live" >/dev/null
+          paused=1
+          docker run --rm --network none --user 0:0 \
+            -v "$live_volume:/from:ro" \
+            -v "$clone:/to" \
+            --entrypoint sh "$image" \
+            -lc 'cp -a /from/. /to/'
+          docker unpause "$live" >/dev/null
+          paused=0
+          curl -fsS --max-time 20 https://arthello-188-225-38-55.sslip.io/api/health \
+            | grep -F '"status":"ok"' >/dev/null
+
+          owner_token="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          owner_csrf="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          test "${#owner_token}" -ge 40
+          export OWNER_TOKEN="$owner_token" OWNER_CSRF="$owner_csrf"
+
+          docker run --rm --network none --user 0:0 \
+            -e OWNER_TOKEN -e OWNER_CSRF \
+            -v "$clone:/data" \
+            --entrypoint node "$image" --input-type=module - <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { readdirSync, statSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+
+          const files=[];
+          function walk(path,depth=0){
+            if(depth>8)return;
+            let entries=[];
+            try{entries=readdirSync(path,{withFileTypes:true});}catch{return;}
+            for(const entry of entries){
+              const next=join(path,entry.name);
+              if(entry.isDirectory()) walk(next,depth+1);
+              else if(entry.isFile() && /\.sqlite(?:3)?$/i.test(entry.name)){
+                try{if(statSync(next).size>8192)files.push(next);}catch{}
+              }
+            }
+          }
+          walk('/data/d1');
+          let db=null;
+          for(const file of files){
+            try{
+              const candidate=new DatabaseSync(file);
+              const table=candidate.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='production_auth_sessions'").get();
+              if(table){db=candidate;break;}
+              candidate.close();
+            }catch{}
+          }
+          if(!db) throw new Error('ArtHello D1 database not found');
+          const owner=db.prepare(`SELECT u.id AS appUserId,u.access_version AS userVersion,g.access_version AS grantVersion
+            FROM app_users u
+            JOIN user_system_access g ON g.user_id=u.id AND g.system_id='SYS-ARTHELLO-OS'
+            WHERE u.id='USR-OWNER' AND u.status='Активен' AND g.status='Активен'`).get();
+          if(!owner || owner.userVersion!==owner.grantVersion) throw new Error('Canonical owner access is not active');
+          const tokenHash=createHash('sha256').update(process.env.OWNER_TOKEN).digest('base64url');
+          const now=Math.floor(Date.now()/1000);
+          db.prepare(`INSERT INTO production_auth_sessions
+            (token_hash,user_id,csrf_token,expires_at,access_version,created_at)
+            VALUES (?,?,?,?,?,?)`).run(tokenHash,'AUTH-OWNER',process.env.OWNER_CSRF,now+900,owner.grantVersion,now);
+          db.close();
+          console.log('ARTHELLO_SSO_CLONED_OWNER_SESSION=READY');
+          NODE
+
+          docker run -d \
+            --name "$candidate" \
+            --read-only \
+            --tmpfs /tmp \
+            --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
+            --network "$network" \
+            -e NODE_ENV=production \
+            -e PORT=8081 \
+            -e ARTHELLO_D1_PATH=/data/d1 \
+            -e ARTHELLO_BOOTSTRAP_LOGIN=owner \
+            -e ARTHELLO_BOOTSTRAP_PASSWORD='unused-in-sso-hotfix-test' \
+            -v "$clone:/data" \
+            "$image" >/dev/null
+          candidate_created=1
+
+          ready=0
+          for attempt in $(seq 1 90); do
+            if docker exec "$candidate" node -e \
+              "fetch('http://127.0.0.1:8081/api/health').then(async r=>{const t=await r.text();if(!r.ok||!t.includes('\\\"status\\\":\\\"ok\\\"'))process.exit(1)}).catch(()=>process.exit(1))"; then
+              ready=1
+              break
+            fi
+            test "$(docker inspect "$candidate" --format '{{.State.Running}}' 2>/dev/null || true)" = true || break
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs "$candidate" --tail 240 >&2 || true
+            exit 1
+          fi
+
+          docker exec -i -e OWNER_TOKEN="$owner_token" "$candidate" node --input-type=module <<'VERIFY'
+          import { createHash, randomBytes } from 'node:crypto';
+          const base='http://127.0.0.1:8081';
+          const publicOrigin='https://arthello-188-225-38-55.sslip.io';
+          const schoolOrigin='https://school-188-225-38-55.sslip.io';
+          const verifier=randomBytes(48).toString('base64url');
+          const challenge=createHash('sha256').update(verifier).digest('base64url');
+          const state=randomBytes(48).toString('base64url');
+          const authorize=new URL('/api/school-sso/authorize',base);
+          authorize.searchParams.set('state',state);
+          authorize.searchParams.set('code_challenge',challenge);
+          authorize.searchParams.set('return_to','/');
+          const cookie=`__Host-arthello_session=${process.env.OWNER_TOKEN}`;
+          const response=await fetch(authorize,{headers:{cookie},redirect:'manual'});
+          const location=response.headers.get('location')||'';
+          if(response.status!==303) throw new Error(`authorize status ${response.status}`);
+          if(location.includes('central_denied')) throw new Error(`authorization denied: ${location}`);
+          const callback=new URL(location);
+          if(callback.origin!==schoolOrigin || callback.pathname!=='/auth/central/callback') throw new Error('invalid School callback');
+          if(callback.searchParams.get('state')!==state) throw new Error('state mismatch');
+          const code=callback.searchParams.get('code')||'';
+          if(!/^[A-Za-z0-9_-]{40,180}$/.test(code)) throw new Error('authorization code missing');
+
+          const exchange=await fetch(base+'/api/school-sso/exchange',{
+            method:'POST',
+            headers:{'content-type':'application/json',origin:publicOrigin},
+            body:JSON.stringify({code,codeVerifier:verifier}),
+          });
+          const payload=await exchange.json();
+          if(!exchange.ok || !payload.ok) throw new Error(`exchange failed: ${JSON.stringify(payload)}`);
+          if(payload.identity?.centralUserId!=='USR-OWNER') throw new Error('owner identity mismatch');
+          if(payload.identity?.role!=='director') throw new Error('owner School role mismatch');
+          if(!Number.isInteger(payload.identity?.accessVersion) || payload.identity.accessVersion<1) throw new Error('access version missing');
+
+          const replay=await fetch(base+'/api/school-sso/exchange',{
+            method:'POST',
+            headers:{'content-type':'application/json',origin:publicOrigin},
+            body:JSON.stringify({code,codeVerifier:verifier}),
+          });
+          if(replay.status!==401) throw new Error(`one-time replay status ${replay.status}`);
+          console.log('ARTHELLO_SSO_AUTHENTICATED_OWNER_E2E=PASS');
+          VERIFY
+
+          if docker logs "$candidate" 2>&1 | grep -F "TLS peer's certificate is not trusted" >/dev/null; then
+            printf 'Candidate performed an unexpected public TLS self-fetch\n' >&2
+            exit 1
+          fi
+          docker exec -i "$candidate" node --input-type=module <<'VERIFY_DB'
+          import { readdirSync, statSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+          const files=[];
+          function walk(path,depth=0){if(depth>8)return;let entries=[];try{entries=readdirSync(path,{withFileTypes:true});}catch{return;}for(const entry of entries){const next=join(path,entry.name);if(entry.isDirectory())walk(next,depth+1);else if(entry.isFile()&&/\.sqlite(?:3)?$/i.test(entry.name)){try{if(statSync(next).size>8192)files.push(next);}catch{}}}}
+          walk('/data/d1');
+          for(const file of files){let db;try{db=new DatabaseSync(file,{readOnly:true});const table=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='school_sso_codes'").get();if(!table){db.close();continue;}const row=db.prepare('SELECT count(*) AS total,sum(CASE WHEN used_at>0 THEN 1 ELSE 0 END) AS used FROM school_sso_codes').get();db.close();if(row.total<1||row.used<1)throw new Error('SSO code was not persisted and consumed');console.log('ARTHELLO_SSO_D1_CODE_LIFECYCLE=PASS');process.exit(0);}catch(error){try{db?.close()}catch{}}}
+          throw new Error('school_sso_codes table not found');
+          VERIFY_DB
+
+          docker rm -f "$candidate" >/dev/null
+          candidate_created=0
+          docker volume rm "$clone" >/dev/null
+          clone_created=0
+          trap - EXIT
+          printf 'ARTHELLO_SSO_PRODUCTION_CLONE_E2E=PASS\n'
+
+      - name: Cleanup validation image
+        if: always()
+        shell: bash
+        run: |
+          docker image rm "arthello-sso-self-fetch-hotfix:${GITHUB_SHA}" >/dev/null 2>&1 || true
+
+      - name: Publish exact commit status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.sha,
+              state: process.env.JOB_STATUS === 'success' ? 'success' : 'failure',
+              context: 'arthello/school-sso-self-fetch-hotfix',
+              description: 'Authenticated School SSO hotfix ' + process.env.JOB_STATUS,
+              target_url: process.env.GITHUB_SERVER_URL + '/' + process.env.GITHUB_REPOSITORY + '/actions/runs/' + process.env.GITHUB_RUN_ID,
+            });
