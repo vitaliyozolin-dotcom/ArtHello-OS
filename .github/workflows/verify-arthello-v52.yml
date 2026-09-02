@@ -116,8 +116,8 @@ jobs:
             raise "active D1 descriptor function missing" unless fd_start && fd_end && fd_end > fd_start
             fd_gate = source[fd_start...fd_end]
             raise "D1 descriptor scanner must not cross runtime UID as root" if fd_gate.include?("--user 0:0")
-            raise "D1 descriptor scanner must stay non-root" unless fd_gate.include?('test "$scanner_uid" -ne 0')
-            raise "D1 descriptor scanner must match PID 1 UID" unless fd_gate.include?('test "$scanner_uid" = "$pid_one_uid"')
+            raise "D1 descriptor scanner must stay non-root" unless fd_gate.include?(%q{test "$scanner_uid" -ne 0})
+            raise "D1 descriptor scanner must match PID 1 UID" unless fd_gate.include?(%q{test "$scanner_uid" = "$pid_one_uid"})
             raise "D1 descriptor rejection diagnostics missing" unless fd_gate.include?("ARTHELLO_ACTIVE_D1_FD=REJECTED")
           ' .github/workflows/deploy-arthello-direct-38-55.yml
           printf 'ARTHELLO_V52_SOURCE_SHA=%s\n' "$EXPECTED_SHA"
