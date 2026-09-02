@@ -569,7 +569,7 @@ if host.get("Memory") not in (None, 0) or host.get("NanoCpus") not in (None, 0):
     raise SystemExit("unsupported resource limit")
 if host.get("PidsLimit") not in (None, 0): raise SystemExit("unsupported pids limit")
 if host.get("AutoRemove") or host.get("PublishAllPorts"): raise SystemExit("unsupported host mode")
-for key in ("Binds","ExtraHosts","GroupAdd","DeviceCgroupRules","DeviceRequests","Ulimits","Sysctls"):
+for key in ("ExtraHosts","GroupAdd","DeviceCgroupRules","DeviceRequests","Ulimits","Sysctls"):
     if host.get(key) not in (None, [], {}): raise SystemExit("unsupported "+key)
 if host.get("Devices") not in (None, []): raise SystemExit("unsupported devices")
 if host.get("Dns") not in (None, []) or host.get("DnsOptions") not in (None, []) or host.get("DnsSearch") not in (None, []):
@@ -586,6 +586,18 @@ actual={(m.get("Destination"),m.get("Type")) for m in mounts}
 if actual!=expected: raise SystemExit("unsupported mounts")
 if any(m.get("RW") is not True or m.get("Propagation") not in (None, "") for m in mounts):
     raise SystemExit("unsupported mount mode")
+binds=host.get("Binds") or []
+if binds:
+    expected_binds={(m.get("Name"),m.get("Destination")) for m in mounts}
+    actual_binds=set()
+    for bind in binds:
+        parts=str(bind).split(":")
+        if len(parts) not in (2,3): raise SystemExit("unsupported bind syntax")
+        source,destination=parts[:2]
+        mode=parts[2] if len(parts)==3 else ""
+        if mode not in ("","rw"): raise SystemExit("unsupported bind mode")
+        actual_binds.add((source,destination))
+    if actual_binds!=expected_binds: raise SystemExit("binds do not match named volumes")
 if any((value or {}).get("DriverOpts") not in (None,{}) for value in networks.values()):
     raise SystemExit("unsupported network driver options")
 print("SCHOOL_STANDALONE_TOPOLOGY=SUPPORTED")
@@ -789,7 +801,7 @@ printf 'SCHOOL_STANDALONE_ROLLBACK_VOLUME=%s\n' "$rollback_volume"
 
 docker rename "$production" "$rollback"
 rollback_named=1
-docker network disconnect "$network_mode" "$rollback"
+docker network disconnect --force "$network_mode" "$rollback"
 test "$(docker inspect "$rollback" --format '{{.State.Running}}')" = false
 
 run_args=(
