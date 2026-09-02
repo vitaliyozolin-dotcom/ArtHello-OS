@@ -20,8 +20,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CONTROLS_PR: '300'
-  CONTROLS_BASE_SHA: c3182d598fd7a7a00a5388003754293219e41096
+  CONTROLS_PR: '0'
+  CONTROLS_BASE_SHA: d4ba1b23f77f72668087ef4aedc91c3c3155dfe1
   RELEASE_SHA: f41dfb5de4eeeed4ed26d94009a18388728f42b7
   RELEASE_TREE: 2ecda1a0a872caab7aadbc303c152c1207d3030a
   RELEASE_PR: '303'
@@ -102,7 +102,7 @@ jobs:
              .merged == true and
              .base.ref == "main" and
              .base.sha == $controls_base_sha and
-             .head.ref == "codex/school-curriculum-production-cutover-20260902" and
+             .head.ref == "codex/school-curriculum-controls-repin-20260902" and
              .head.repo.full_name == $repository and
              .merge_commit_sha == $workflow_sha and
              .user.login == "vitaliyozolin-dotcom" and
