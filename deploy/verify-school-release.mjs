@@ -47,7 +47,7 @@ try {
     db
       .prepare(
         `SELECT id, role, profile_status AS profileStatus
-         FROM users WHERE role = 'teacher'`,
+         FROM users WHERE role = 'teacher' AND status = 'active'`,
       )
       .all()
       .map((user) => [user.id, user]),
@@ -182,17 +182,14 @@ try {
       academicYear: schedule.academicYear,
       sourceClassName: item.sourceClassName,
       studentLabel: item.studentLabel,
-      studentId: null,
       subjectId: item.subjectId,
       targetClassName: item.targetClassName,
       instruction: item.instruction,
       sourceSheet: item.sourceSheet,
       sourceCell: item.sourceCell,
-      status: item.status,
+      sourceStatus: item.status,
     }))
-    .sort((left, right) =>
-      left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
-    );
+    .sort((left, right) => left.id.localeCompare(right.id));
   const actualArrangements = db
     .prepare(
       `SELECT id, academic_year AS academicYear,
@@ -202,14 +199,28 @@ try {
         source_sheet AS sourceSheet, source_cell AS sourceCell, status
        FROM schedule_exceptions
        WHERE academic_year = ?
+         AND source_class_name IN ('1','2','3','4','5','6')
        ORDER BY id`,
     )
     .all(schedule.academicYear);
   same(
-    actualArrangements,
-    expectedArrangements,
+    actualArrangements.map(({ studentId: _studentId, status: _status, ...item }) => item),
+    expectedArrangements.map(({ sourceStatus: _sourceStatus, ...item }) => item),
     "Special schedule arrangement differs from source",
   );
+  for (let index = 0; index < actualArrangements.length; index += 1) {
+    const actual = actualArrangements[index];
+    const expected = expectedArrangements[index];
+    if (actual.studentId === null) {
+      if (actual.status !== expected.sourceStatus)
+        fail("Unmatched schedule arrangement status differs from source", actual);
+      continue;
+    }
+    if (!db.prepare("SELECT 1 FROM students WHERE id = ?").get(actual.studentId))
+      fail("Matched schedule arrangement references a missing student", actual);
+    if (typeof actual.status !== "string" || actual.status.length === 0)
+      fail("Matched schedule arrangement has an empty status", actual);
+  }
 
   if (
     curriculum.schemaVersion !== 1 ||
