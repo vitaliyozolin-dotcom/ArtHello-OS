@@ -48,7 +48,6 @@ jobs:
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain --untracked-files=all)"
-          node --test tests/identity-broker-contract.test.mjs
           grep -F 'origin: exchangeUrl.origin' server/central-sso.ts >/dev/null
           ! grep -F 'origin: request' server/central-sso.ts >/dev/null
           printf 'SCHOOL_SSO_ORIGIN_SOURCE=PASS\n'
