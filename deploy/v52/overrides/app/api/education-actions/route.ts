@@ -2,15 +2,23 @@ import { eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
 import { auditEvents, educationAttendance, educationCommunications, educationFeedback, educationGroups, educationLessons, educationPrograms, educationStudents, entities, tasks } from "../../../db/schema";
 import { nextProgramVersion } from "../../../lib/education";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
+import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
 
 const leaders = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE"]);
 const educationRoles = new Set([...leaders, "TEACHER", "PARENT", "METHODIST"]);
 
 export async function POST(request: Request) {
-  const actor = getRequestUser(request);
-  if (!actor) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  const actor = context.actor;
+  const role = context.apiRole;
   if (!educationRoles.has(role)) return Response.json({ error: "Нет прав на образовательное действие" }, { status: 403 });
   try {
     await ensureCoreTables();
@@ -19,7 +27,7 @@ export async function POST(request: Request) {
     if (action === "recordAttendance") return recordAttendance(actor, role, body);
     if (action === "createProgram") return createProgram(actor, role, body);
     if (action === "createProgramVersion") return createProgramVersion(actor, role, body);
-    if (action === "createFeedbackTask") return createFeedbackTask(actor, role, body);
+    if (action === "createFeedbackTask") return createFeedbackTask(context, role, body);
     if (action === "sendMessage") return sendMessage(actor, role, body);
     if (action === "createGroup") return createGroup(actor, role, body);
     if (action === "createLesson") return createLesson(actor, role, body);
@@ -84,14 +92,18 @@ async function createProgramVersion(actor: string, role: string, body: Record<st
   return Response.json({ program: { ...program, version, status: "На проверке" } });
 }
 
-async function createFeedbackTask(actor: string, role: string, body: Record<string, unknown>) {
+async function createFeedbackTask(context: TaskAccessContext, role: string, body: Record<string, unknown>) {
+  const actor = context.actor;
   if (!(leaders.has(role) || role === "METHODIST" || role === "TEACHER")) return Response.json({ error: "Нет прав создать методическую задачу" }, { status: 403 });
   const id = clean(body.feedbackId, 80), db = getDb(); const [feedback] = await db.select().from(educationFeedback).where(eq(educationFeedback.id, id)).limit(1);
   if (!feedback) return Response.json({ error: "Отзыв не найден" }, { status: 404 });
-  const key = `EDU_FEEDBACK:${id}`; const [existing] = await db.select().from(tasks).where(eq(tasks.automationKey, key)).limit(1);
-  if (existing) return Response.json({ task: existing, reused: true });
+  const key = `EDU_FEEDBACK:${id}`; const existing = await findScopedAutomationTask(db, context, key);
+  const existingResponse = scopedAutomationTaskResponse(existing);
+  if (existingResponse) return existingResponse;
+  const assignment = resolveTaskAssignment(context, "", actor);
+  if (!assignment.ok) return Response.json({ error: assignment.error }, { status: assignment.status });
   const due = new Date(); due.setUTCDate(due.getUTCDate() + 7);
-  const [task] = await db.insert(tasks).values({ title: feedback.recommendation, owner: actor, dueDate: due.toISOString().slice(0, 10), priority: "Средний", status: "Входящие", sourceType: "Отзыв родителя", sourceId: id, description: `${feedback.comment}. Проверить на данных следующего занятия и оформить решение.`, assigneeEntityId: "", kind: "Автозадача", automationKey: key, createdBy: actor }).returning();
+  const [task] = await db.insert(tasks).values({ title: feedback.recommendation, owner: assignment.owner, dueDate: due.toISOString().slice(0, 10), priority: "Средний", status: "Входящие", sourceType: "Отзыв родителя", sourceId: id, description: `${feedback.comment}. Проверить на данных следующего занятия и оформить решение.`, assigneeEntityId: assignment.assigneeEntityId, kind: "Автозадача", automationKey: key, createdByUserId: context.appUserId, createdBy: actor }).returning();
   await db.update(educationFeedback).set({ status: "В работе", relatedTaskId: task.id }).where(eq(educationFeedback.id, id));
   return Response.json({ task }, { status: 201 });
 }

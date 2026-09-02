@@ -68,7 +68,7 @@ test("Wave 9 keeps all integration views, setup boundaries and operations", () =
   assert.match(integrations, /fetch\s*\(\s*["']\/api\/integration-actions["']/);
   for (const tab of ["Контур", "Каталог", "Журнал", "Конфликты", "Авторизация"]) assert.match(integrations, new RegExp(escapeRegExp(tab)));
   for (const action of ["retrySync", "resumeConnection", "pauseConnection", "createConflictTask", "resolveConflict", "saveSetup"]) assert.match(integrations, new RegExp(`["']${action}["']`));
-  for (const boundary of ["БЕЗ СЕКРЕТОВ", "Секрет не запрашивается", "защищённую переменную"]) assert.match(integrations, new RegExp(escapeRegExp(boundary), "i"));
+  for (const boundary of ["ЗАЩИЩЁННЫЙ КОНТУР", "JWT защищён", "больше не показывается"]) assert.match(integrations, new RegExp(escapeRegExp(boundary), "i"));
   assert.equal(integrations.includes("if (!data.connections.length)"), false, "empty integrations must keep the common header, KPI and tabs visible");
   assert.match(integrations, /Подключения появятся после добавления источника/);
 });

@@ -2,6 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { RegistryCapabilities } from "../../lib/access-policy";
+import { ENTITY_DATA_STATES, entityDataState, isManualEntitySource, normalizeEntityIdentityName } from "../../lib/entity-provenance";
 import { entityTypes, relationTypes } from "../../lib/registry";
 import { Button, Card, EmptyState, KpiCard, PageContainer, PageHeader, SearchField, Tabs } from "./design-system";
 import "./RegistryWorkspace.ds.css";
@@ -38,9 +40,9 @@ type DetailPayload = {
 };
 type RegistryAction = "create" | "edit" | "relation" | "document" | "merge";
 
-const qualityOptions = ["Проверено", "Требует сверки", "На проверке"];
+const dataStateOptions = [...ENTITY_DATA_STATES];
 
-export function RegistryWorkspace({ notify }: { notify: (value: string) => void }) {
+export function RegistryWorkspace({ notify, capabilities }: { notify: (value: string) => void; capabilities: RegistryCapabilities }) {
   const [entities, setEntities] = useState<EntityRecord[]>([]);
   const [stats, setStats] = useState<RegistryStats>({ total: 0, needsReview: 0, duplicateGroups: 0, sources: 0 });
   const [typeCounts, setTypeCounts] = useState<Record<string, number>>({});
@@ -91,12 +93,12 @@ export function RegistryWorkspace({ notify }: { notify: (value: string) => void 
       eyebrow="ЛЮДИ · ОРГАНИЗАЦИИ · СВЯЗИ"
       title="Единые карточки"
       description="Сотрудник, ребёнок или организация создаются один раз и связываются со всеми рабочими контурами."
-      actions={<Button variant="primary" onClick={() => setAction("create")}>Новая карточка</Button>}
+      actions={capabilities.create ? <Button variant="primary" onClick={() => setAction("create")}>Новая карточка</Button> : undefined}
     />
 
     <div className="ahRegistryKpis">
       <KpiCard label="Активные карточки" value={String(stats.total)} note="единый центральный реестр" />
-      <KpiCard className={stats.needsReview ? "ahRegistryKpiWarning" : undefined} label="Требуют сверки" value={String(stats.needsReview)} note="не выдаём за проверенные" />
+      <KpiCard className={stats.needsReview ? "ahRegistryKpiWarning" : undefined} label="Нужна сверка" value={String(stats.needsReview)} note="только импорт, интеграция или конфликт" />
       <KpiCard className={stats.duplicateGroups ? "ahRegistryKpiDanger" : undefined} label="Группы дублей" value={String(stats.duplicateGroups)} note="без удаления истории" />
       <KpiCard label="Источники" value={String(stats.sources)} note="ручной ввод · импорт · интеграции" />
     </div>
@@ -105,28 +107,28 @@ export function RegistryWorkspace({ notify }: { notify: (value: string) => void 
       <div className="ahRegistryToolbar">
         <SearchField className="ahRegistrySearch" value={query} onChange={setQuery} placeholder="Найти по ID, названию, источнику или области" label="Поиск по единому реестру" />
         <select value={type} onChange={(event) => setType(event.target.value)} aria-label="Фильтр по типу"><option value="">Все типы</option>{entityTypes.map((item) => <option key={item}>{item}</option>)}</select>
-        <select value={quality} onChange={(event) => setQuality(event.target.value)} aria-label="Фильтр по качеству"><option value="">Любое качество</option>{qualityOptions.map((item) => <option key={item}>{item}</option>)}</select>
+        <select value={quality} onChange={(event) => setQuality(event.target.value)} aria-label="Фильтр по состоянию данных"><option value="">Все состояния данных</option>{dataStateOptions.map((item) => <option key={item}>{item}</option>)}</select>
         {(query || type || quality) ? <Button variant="ghost" className="ahRegistryClear" onClick={() => { setQuery(""); setType(""); setQuality(""); }}>Сбросить</Button> : null}
       </div>
       <div className="ahRegistryTabs"><Tabs items={registryTabs} value={type} onChange={setType} ariaLabel="Типы карточек" /></div>
 
       {state === "loading" ? <RegistryState title="Загружаем реестр" text="Проверяем карточки, источники и устойчивые ID." /> : null}
       {state === "error" ? <RegistryState title="Реестр временно недоступен" text="Данные не заменены заглушкой." action="Повторить" onAction={() => void loadEntities()} /> : null}
-      {state === "ready" && entities.length === 0 ? <RegistryState title="Карточки не найдены" text="Измените фильтры или создайте новую карточку." action="Создать карточку" onAction={() => setAction("create")} /> : null}
-      {state === "ready" && entities.length > 0 ? <div className="ahRegistryTable"><table className="registry-table"><thead><tr><th>Карточка</th><th>Тип</th><th>Используется в</th><th>Источник</th><th>Качество</th><th>Статус</th><th /></tr></thead><tbody>
+      {state === "ready" && entities.length === 0 ? <RegistryState title="Карточки не найдены" text={capabilities.create ? "Измените фильтры или создайте новую карточку." : "Измените фильтры или обратитесь к ответственному за реестр."} action={capabilities.create ? "Создать карточку" : undefined} onAction={capabilities.create ? () => setAction("create") : undefined} /> : null}
+      {state === "ready" && entities.length > 0 ? <div className="ahRegistryTable"><table className="registry-table"><thead><tr><th>Карточка</th><th>Тип</th><th>Используется в</th><th>Источник</th><th>Состояние данных</th><th>Статус</th><th /></tr></thead><tbody>
         {entities.map((entity) => <tr key={entity.id} onClick={() => setSelectedId(entity.id)}>
           <td><strong>{entity.displayName}</strong><small>{entity.id}</small></td>
           <td><span className="entity-type-badge">{entity.entityType}</span></td>
           <td><strong>{entity.scope}</strong><small>единый ID во всех модулях</small></td>
           <td><strong>{sourceLabel(entity.sourceSystem)}</strong><small>{entity.sourceRecordId}</small></td>
-          <td><span className={`quality-badge ${qualityClass(entity.dataQuality)}`}>{entity.dataQuality}</span></td>
+          <td><span className={`quality-badge ${dataStateClass(entity.dataQuality)}`}>{entity.dataQuality}</span></td>
           <td>{entity.status}</td><td><button aria-label={`Открыть ${entity.displayName}`}>→</button></td>
         </tr>)}
       </tbody></table></div> : null}
     </Card>
 
-    {selectedId ? <EntityPanel key={selectedId} entityId={selectedId} close={() => setSelectedId(null)} notify={notify} refreshList={loadEntities} onNavigate={setSelectedId} /> : null}
-    {action === "create" ? <RegistryActionModal action="create" close={() => setAction(null)} onDone={actionDone} notify={notify} /> : null}
+    {selectedId ? <EntityPanel key={selectedId} entityId={selectedId} close={() => setSelectedId(null)} notify={notify} refreshList={loadEntities} onNavigate={setSelectedId} capabilities={capabilities} /> : null}
+    {action === "create" && capabilities.create ? <RegistryActionModal action="create" close={() => setAction(null)} onDone={actionDone} notify={notify} /> : null}
   </PageContainer>;
 }
 
@@ -134,7 +136,7 @@ function RegistryState({ title, text, action, onAction }: { title: string; text:
   return <EmptyState className="ahRegistryEmpty" density="compact" title={title} description={text} action={action ? <Button variant="secondary" onClick={onAction}>{action}</Button> : undefined} />;
 }
 
-export function EntityPanel({ entityId, close, notify, refreshList, onNavigate, readOnly = false, backLabel, initialTab = "overview" }: { entityId: string; close: () => void; notify: (value: string) => void; refreshList?: () => Promise<void>; onNavigate?: (id: string) => void; readOnly?: boolean; backLabel?: string; initialTab?: "overview" | "relations" | "documents" | "history" }) {
+export function EntityPanel({ entityId, close, notify, refreshList, onNavigate, capabilities, readOnly = false, backLabel, initialTab = "overview" }: { entityId: string; close: () => void; notify: (value: string) => void; refreshList?: () => Promise<void>; onNavigate?: (id: string) => void; capabilities?: RegistryCapabilities; readOnly?: boolean; backLabel?: string; initialTab?: "overview" | "relations" | "documents" | "history" }) {
   const [detail, setDetail] = useState<DetailPayload | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [tab, setTab] = useState<"overview" | "relations" | "documents" | "history">(initialTab);
@@ -171,24 +173,26 @@ export function EntityPanel({ entityId, close, notify, refreshList, onNavigate, 
     if (id && id !== entityId) notify(`Основной карточкой стала ${id}`);
   }
 
+  const displayedDataState = detail ? dataStateFor(detail.entity, detail.duplicateCandidates) : "";
+
   return createPortal(<div className="registry-drawer-layer"><button className="drawer-scrim" onClick={close} aria-label="Закрыть карточку" /><aside className="entity-panel" role="dialog" aria-modal="true" aria-labelledby={`entity-title-${entityId}`}>
     {state === "loading" ? <RegistryState title="Открываем карточку" text="Собираем связи, документы и историю." /> : null}
     {state === "error" ? <RegistryState title="Карточка недоступна" text="Повторите загрузку." action="Повторить" onAction={() => void loadDetail()} /> : null}
     {state === "ready" && detail ? <>
       <div className="entity-panel-head"><div><span className="entity-type-badge">{detail.entity.entityType}</span><h2 id={`entity-title-${entityId}`}>{detail.entity.displayName}</h2><p>{detail.entity.id} · {detail.entity.status}</p></div><button ref={closeRef} className={backLabel ? "entity-panel-back" : ""} onClick={close} aria-label={backLabel || "Закрыть"}>{backLabel ? <><span>←</span>{backLabel}</> : "×"}</button></div>
-      <div className="entity-source-line"><span className={qualityClass(detail.entity.dataQuality)} /> <strong>{detail.entity.dataQuality}</strong><small>{sourceLabel(detail.entity.sourceSystem)} · {detail.entity.sourceRecordId}</small></div>
+      <div className="entity-source-line"><span className={dataStateClass(displayedDataState)} /> <strong>{displayedDataState}</strong><small>{sourceLabel(detail.entity.sourceSystem)} · {dataStateExplanation(displayedDataState, detail.entity.dataQuality)}</small></div>
       <nav className="entity-tabs"><button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Обзор</button><button className={tab === "relations" ? "active" : ""} onClick={() => setTab("relations")}>Связи <b>{detail.relations.length}</b></button><button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>{detail.entity.entityType === "Семья" ? "Договоры" : "Документы"} <b>{detail.documents.length}</b></button><button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>История <b>{detail.history.length}</b></button></nav>
       <div className="entity-panel-body">
         {tab === "overview" ? <>
-          <dl className="entity-facts"><div><dt>Область</dt><dd>{detail.entity.scope}</dd></div><div><dt>Источник истины</dt><dd>{sourceLabel(detail.entity.sourceSystem)}</dd></div><div><dt>ID источника</dt><dd>{detail.entity.sourceRecordId}</dd></div><div><dt>Последнее изменение</dt><dd>{detail.entity.updatedAt}</dd></div><div><dt>Создано</dt><dd>{detail.entity.createdAt}</dd></div><div><dt>Автор записи</dt><dd>{detail.entity.createdBy}</dd></div></dl>
+          <dl className="entity-facts"><div><dt>Область</dt><dd>{detail.entity.scope}</dd></div><div><dt>Источник записи</dt><dd>{sourceLabel(detail.entity.sourceSystem)}</dd></div><div><dt>ID источника</dt><dd>{detail.entity.sourceRecordId}</dd></div><div><dt>Последнее изменение</dt><dd>{detail.entity.updatedAt}</dd></div><div><dt>Создано</dt><dd>{detail.entity.createdAt}</dd></div><div><dt>Автор записи</dt><dd>{detail.entity.createdBy}</dd></div></dl>
           {detail.mergedCards.length ? <section className="merged-box"><p>Объединённые карточки</p>{detail.mergedCards.map((merge) => <div key={merge.id}><strong>{merge.duplicateId}</strong><span>{merge.reason}</span></div>)}</section> : null}
-          {!readOnly ? <div className="entity-actions"><button onClick={() => setLocalAction("edit")}>Редактировать</button><button onClick={() => setLocalAction("relation")}>+ Связь</button><button onClick={() => setLocalAction("document")}>+ Документ</button><button className="danger-lite" onClick={() => setLocalAction("merge")}>Объединить дубль</button></div> : null}
+          {!readOnly && capabilities && Object.values(capabilities).some(Boolean) ? <div className="entity-actions">{capabilities.edit ? <button onClick={() => setLocalAction("edit")}>Редактировать</button> : null}{capabilities.relation ? <button onClick={() => setLocalAction("relation")}>+ Связь</button> : null}{capabilities.document ? <button onClick={() => setLocalAction("document")}>+ Документ</button> : null}{capabilities.merge ? <button className="danger-lite" onClick={() => setLocalAction("merge")}>Объединить дубль</button> : null}</div> : null}
         </> : null}
-        {tab === "relations" ? <section className="entity-list-section"><div className="entity-section-head"><div><p>Сквозная модель</p><h3>Связанные сущности</h3></div>{!readOnly ? <button onClick={() => setLocalAction("relation")}>+ Добавить связь</button> : null}</div>{detail.relations.length ? <div className="relation-list">{detail.relations.map((relation) => <button type="button" disabled={!relation.peer} key={relation.id} onClick={() => relation.peer && onNavigate?.(relation.peer.id)}><span>↔</span><div><strong>{relation.peer?.displayName || "Карточка объединена"}</strong><small>{relation.relationType} · {relation.direction}</small></div><em>{relation.peer ? `${relation.peer.id} →` : "—"}</em></button>)}</div> : <EmptyDetail text="Связей пока нет." />}</section> : null}
-        {tab === "documents" ? <section className="entity-list-section"><div className="entity-section-head"><div><p>Метаданные без загрузки файла</p><h3>{detail.entity.entityType === "Семья" ? "Договоры семьи" : "Связанные документы"}</h3></div>{!readOnly ? <button onClick={() => setLocalAction("document")}>{detail.entity.entityType === "Семья" ? "+ Добавить договор" : "+ Связать документ"}</button> : null}</div>{detail.documents.length ? <div className="document-list">{detail.documents.map((document) => <article key={document.id}><div><strong>{document.title}</strong><small>{document.documentType} · {document.source}</small></div><span className={`quality-badge ${document.status === "Актуален" ? "verified" : "review"}`}>{document.status}</span><em>{document.validUntil || "Без срока"}</em></article>)}</div> : <EmptyDetail text={detail.entity.entityType === "Семья" ? "Договоров пока нет. Добавьте номер, срок и статус." : "Документы пока не связаны."} />}</section> : null}
+        {tab === "relations" ? <section className="entity-list-section"><div className="entity-section-head"><div><p>Сквозная модель</p><h3>Связанные сущности</h3></div>{!readOnly && capabilities?.relation ? <button onClick={() => setLocalAction("relation")}>+ Добавить связь</button> : null}</div>{detail.relations.length ? <div className="relation-list">{detail.relations.map((relation) => <button type="button" disabled={!relation.peer} key={relation.id} onClick={() => relation.peer && onNavigate?.(relation.peer.id)}><span>↔</span><div><strong>{relation.peer?.displayName || "Карточка объединена"}</strong><small>{relation.relationType} · {relation.direction}</small></div><em>{relation.peer ? `${relation.peer.id} →` : "—"}</em></button>)}</div> : <EmptyDetail text="Связей пока нет." />}</section> : null}
+        {tab === "documents" ? <section className="entity-list-section"><div className="entity-section-head"><div><p>Метаданные без загрузки файла</p><h3>{detail.entity.entityType === "Семья" ? "Договоры семьи" : "Связанные документы"}</h3></div>{!readOnly && capabilities?.document ? <button onClick={() => setLocalAction("document")}>{detail.entity.entityType === "Семья" ? "+ Добавить договор" : "+ Связать документ"}</button> : null}</div>{detail.documents.length ? <div className="document-list">{detail.documents.map((document) => <article key={document.id}><div><strong>{document.title}</strong><small>{document.documentType} · {document.source}</small></div><span className={`quality-badge ${document.status === "Актуален" ? "verified" : "review"}`}>{document.status}</span><em>{document.validUntil || "Без срока"}</em></article>)}</div> : <EmptyDetail text={detail.entity.entityType === "Семья" ? "Договоров пока нет. Добавьте номер, срок и статус." : "Документы пока не связаны."} />}</section> : null}
         {tab === "history" ? <section className="entity-list-section"><div className="entity-section-head"><div><p>Неизменяемый аудит</p><h3>История карточки</h3></div></div>{detail.history.length ? <div className="entity-history">{detail.history.map((event) => <article key={event.id}><span /><div><strong>{auditTitle(event.action)}</strong><small>{auditDescription(event)}</small><em>{event.actor} · {event.createdAt}</em></div></article>)}</div> : <EmptyDetail text="История начнётся с первого изменения." />}</section> : null}
       </div>
-      {localAction && !readOnly ? <RegistryActionModal action={localAction} detail={detail} close={() => setLocalAction(null)} onDone={done} notify={notify} /> : null}
+      {localAction && !readOnly && capabilities?.[localAction] ? <RegistryActionModal action={localAction} detail={detail} close={() => setLocalAction(null)} onDone={done} notify={notify} /> : null}
     </> : null}
   </aside></div>, document.body);
 }
@@ -198,6 +202,15 @@ function EmptyDetail({ text }: { text: string }) { return <div className="empty-
 function RegistryActionModal({ action, detail, close, onDone, notify }: { action: RegistryAction; detail?: DetailPayload; close: () => void; onDone: (id?: string) => Promise<void>; notify: (value: string) => void }) {
   const [saving, setSaving] = useState(false);
   const entity = detail?.entity;
+  const duplicateConflict = entity ? hasDuplicate(entity, detail?.duplicateCandidates) : false;
+  const fixedManualState = Boolean(entity && isManualEntitySource(entity.sourceSystem));
+  const initialDataState = entity ? dataStateFor(entity, detail?.duplicateCandidates) : "";
+  const [selectedDataState, setSelectedDataState] = useState(initialDataState);
+  const needsReviewEvidence = Boolean(entity
+    && !fixedManualState
+    && !duplicateConflict
+    && initialDataState !== "Проверено"
+    && selectedDataState === "Проверено");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true);
     const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>;
@@ -226,7 +239,11 @@ function RegistryActionModal({ action, detail, close, onDone, notify }: { action
     </> : null}
     {action === "edit" && entity ? <>
       <label><span>Название карточки</span><input name="displayName" required minLength={3} defaultValue={entity.displayName} /></label><label><span>Область использования</span><input name="scope" required defaultValue={entity.scope} /></label>
-      <div className="form-row"><label><span>Качество данных</span><select name="dataQuality" defaultValue={entity.dataQuality}>{qualityOptions.map((item) => <option key={item}>{item}</option>)}</select></label><label><span>Статус</span><select name="status" defaultValue={entity.status}><option>Активна</option><option>На проверке</option><option>Архив</option></select></label></div>
+      <div className="form-row">
+        {fixedManualState || duplicateConflict ? <div className="ahRegistryDataState"><span>Источник и состояние</span><input type="hidden" name="dataQuality" value={initialDataState} /><strong className={`quality-badge ${dataStateClass(initialDataState)}`}>{initialDataState}</strong><small>{initialDataState === "Требует сверки" ? "Конфликт снимается только после объединения или разведения дублей с зафиксированным основанием." : "Указано системой по источнику записи; отдельная самопроверка не нужна."}</small></div> : <label><span>Состояние данных</span><select name="dataQuality" value={selectedDataState} onChange={(event) => setSelectedDataState(event.target.value)}>{editDataStateOptions(entity, detail?.duplicateCandidates).map((item) => <option key={item}>{item}</option>)}</select></label>}
+        <label><span>Статус карточки</span><select name="status" defaultValue={entity.status}>{operationalStatusOptions(entity).map((item) => <option key={item}>{item}</option>)}</select></label>
+      </div>
+      {needsReviewEvidence ? <label><span>Основание сверки с источником</span><textarea name="reviewEvidence" required minLength={8} placeholder="Что и с каким источником сопоставлено" /></label> : null}
     </> : null}
     {action === "relation" && detail ? <><label><span>Связать с карточкой</span><select name="toEntityId" required defaultValue=""><option value="" disabled>Выберите карточку</option>{detail.relationCandidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.displayName} · {candidate.id}</option>)}</select></label><label><span>Тип связи</span><select name="relationType" defaultValue={relationTypes[0]}>{relationTypes.map((item) => <option key={item}>{item}</option>)}</select></label></> : null}
     {action === "document" ? <><div className="form-row"><label><span>Название / номер</span><input name="title" required minLength={3} placeholder="Например: Договор 15/2026" /></label><label><span>Тип документа</span><input name="documentType" required defaultValue={entity?.entityType === "Семья" ? "Договор с семьёй" : ""} placeholder="Договор, акт, согласие" /></label></div><div className="form-row"><label><span>Статус</span><select name="status" defaultValue="На проверке"><option>Актуален</option><option>На проверке</option><option>Истекает</option><option>Нет файла</option></select></label><label><span>Действует до</span><input type="date" name="validUntil" /></label></div><input type="hidden" name="source" value="MANUAL" /></> : null}
@@ -235,9 +252,21 @@ function RegistryActionModal({ action, detail, close, onDone, notify }: { action
   </form></div>, document.body);
 }
 
-function sourceLabel(source: string) { return source === "MANUAL" ? "Ручной ввод" : source.endsWith("_IMPORT") ? "Подтверждённый импорт" : "Интеграция"; }
-function qualityClass(value: string) { return value === "Проверено" ? "verified" : value === "Требует сверки" ? "warning" : "review"; }
+function sourceLabel(source: string) { return isManualEntitySource(source) ? "Ручной ввод" : source.includes("IMPORT") || source.startsWith("XLSX") ? "Импорт" : source.startsWith("SYNTHETIC") ? "Тестовый контур" : "Интеграция"; }
+function hasDuplicate(entity: EntityRecord, candidates: EntityRecord[] = []) { return candidates.some((candidate) => candidate.id !== entity.id && candidate.entityType === entity.entityType && candidate.status !== "Объединена" && normalizeEntityIdentityName(candidate.displayName) === normalizeEntityIdentityName(entity.displayName)); }
+function dataStateFor(entity: EntityRecord, candidates: EntityRecord[] = []) {
+  return entityDataState(entity, hasDuplicate(entity, candidates));
+}
+function editDataStateOptions(entity: EntityRecord, candidates: EntityRecord[] = []) {
+  if (hasDuplicate(entity, candidates)) return ["Требует сверки"];
+  if (isManualEntitySource(entity.sourceSystem)) return [dataStateFor(entity, candidates)];
+  const options = ["Проверено", "Требует сверки", "На проверке"];
+  return options;
+}
+function operationalStatusOptions(entity: EntityRecord) { return [...new Set([entity.status, "Активна", ...(isManualEntitySource(entity.sourceSystem) ? [] : ["На проверке"]), "Архив"])]; }
+function dataStateClass(value: string) { return value === "Создано вручную" ? "manual verified" : value === "Проверено" ? "verified" : value === "Требует сверки" ? "warning" : "review"; }
+function dataStateExplanation(value: string, sourceState: string) { return value === "Создано вручную" ? "источник записи — пользователь; статус карточки и доступ управляются отдельно" : value === "Проверено" ? "источник и запись сопоставлены" : value === "Требует сверки" ? "сверяет владелец карточки или назначенный ответственный с фиксацией основания" : sourceState && sourceState !== "На проверке" ? `ответственный сверяет данные источника · состояние источника: ${sourceState}` : "ответственный ещё сверяет данные источника"; }
 function actionTitle(action: RegistryAction) { return ({ create: "Новая единая карточка", edit: "Редактировать карточку", relation: "Добавить связь", document: "Связать документ", merge: "Объединить дубль" })[action]; }
 function actionSubmit(action: RegistryAction) { return ({ create: "Создать карточку", edit: "Сохранить изменения", relation: "Добавить связь", document: "Связать документ", merge: "Объединить" })[action]; }
-function auditTitle(action: string) { return ({ "entity.created": "Карточка создана", "entity.updated": "Карточка изменена", "entity.relation_added": "Добавлена связь", "entity.document_linked": "Связан документ", "entity.merge_survivor": "Присоединён дубль", "entity.merged": "Карточка объединена" } as Record<string, string>)[action] || action; }
+function auditTitle(action: string) { return ({ "entity.created": "Карточка создана", "entity.updated": "Карточка изменена", "entity.provenance_normalized": "Источник ручной записи уточнён", "entity.relation_added": "Добавлена связь", "entity.document_linked": "Связан документ", "entity.merge_survivor": "Присоединён дубль", "entity.merged": "Карточка объединена" } as Record<string, string>)[action] || action; }
 function auditDescription(event: AuditEvent) { try { const payload = JSON.parse(event.payload) as Record<string, string | number>; return Object.entries(payload).map(([key, value]) => `${key}: ${value}`).join(" · "); } catch { return "Событие записано"; } }

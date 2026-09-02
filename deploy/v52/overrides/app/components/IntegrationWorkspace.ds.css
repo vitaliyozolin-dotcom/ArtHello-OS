@@ -316,6 +316,25 @@
   font-size: 12px;
 }
 
+.ahIntegrationSetupWizard .ahIntegrationRoutingNote,
+.ahIntegrationSetupWizard .ahIntegrationCredentialNotice {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 5px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface-subtle, #f7f7f5);
+  padding: 12px;
+}
+
+.ahIntegrationSetupWizard .ahIntegrationRoutingNote span,
+.ahIntegrationSetupWizard .ahIntegrationCredentialNotice span,
+.ahIntegrationSetupWizard .setup-grid label > small {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
 .ahIntegrationPage .connection-detail dl,
 .ahIntegrationPage .connection-modal dl,
 .ahIntegrationPage .auth-board dl,
@@ -340,6 +359,26 @@
 .ahIntegrationPage .run-stats strong {
   font-size: 11px;
   line-height: 15px;
+}
+
+.ahIntegrationPage .auth-board > article > footer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.ahIntegrationPage .auth-board > article > footer .danger {
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--ah-color-danger, #b42318) 30%, transparent);
+  border-radius: 9px;
+  background: transparent;
+  padding: 0 11px;
+  color: var(--ah-color-danger, #b42318);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
 }
 
 @media (max-width: 1024px) {

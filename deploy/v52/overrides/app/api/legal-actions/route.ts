@@ -2,14 +2,22 @@ import { desc, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
 import { auditEvents, entities, legalChecks, legalContracts, legalDocumentItems, tasks } from "../../../db/schema";
 import { nextLegalVersion } from "../../../lib/legal";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { isTaskManager, resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
+import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
 
 const editors = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "LEGAL"]);
 
 export async function POST(request: Request) {
-  const actor = getRequestUser(request);
-  if (!actor) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  const actor = context.actor;
+  const role = context.apiRole;
   if (!editors.has(role)) return Response.json({ error: "Нет прав на юридическое действие" }, { status: 403 });
   try {
     await ensureCoreTables();
@@ -17,7 +25,7 @@ export async function POST(request: Request) {
     const action = clean(body.action, 50);
     if (action === "createDocumentVersion") return version(actor, body);
     if (action === "addDocument") return addDocument(actor, body);
-    if (action === "createSignalTask") return signalTask(actor, body);
+    if (action === "createSignalTask") return signalTask(context, body);
     if (action === "resolveSignal") return resolve(actor, body);
     return Response.json({ error: "Неизвестное действие" }, { status: 400 });
   } catch (error) {
@@ -55,23 +63,27 @@ async function addDocument(actor: string, body: Record<string, unknown>) {
   return Response.json({ document: row }, { status: 201 });
 }
 
-async function signalTask(actor: string, body: Record<string, unknown>) {
+async function signalTask(context: TaskAccessContext, body: Record<string, unknown>) {
+  const actor = context.actor;
   const id = clean(body.signalId, 80);
   const assigneeEntityId = clean(body.assigneeEntityId, 80);
   const db = getDb();
   const key = `LEGAL_SIGNAL:${id}`;
   const [signal] = await db.select().from(legalChecks).where(eq(legalChecks.id, id)).limit(1);
   if (!signal) return Response.json({ error: "Сигнал не найден" }, { status: 404 });
-  if (assigneeEntityId) {
-    if (isDemoReference(assigneeEntityId)) return Response.json({ error: "Выберите исполнителя из рабочего справочника" }, { status: 400 });
-    const [assignee] = await db.select({ id: entities.id }).from(entities).where(eq(entities.id, assigneeEntityId)).limit(1);
+  const assignment = resolveTaskAssignment(context, assigneeEntityId, actor);
+  if (!assignment.ok) return Response.json({ error: assignment.error }, { status: assignment.status });
+  if (isTaskManager(context) && assignment.assigneeEntityId) {
+    if (isDemoReference(assignment.assigneeEntityId)) return Response.json({ error: "Выберите исполнителя из рабочего справочника" }, { status: 400 });
+    const [assignee] = await db.select({ id: entities.id }).from(entities).where(eq(entities.id, assignment.assigneeEntityId)).limit(1);
     if (!assignee) return Response.json({ error: "Исполнитель не найден" }, { status: 404 });
   }
-  const [existing] = await db.select().from(tasks).where(eq(tasks.automationKey, key)).limit(1);
-  if (existing) return Response.json({ task: existing, reused: true });
-  const [task] = await db.insert(tasks).values({ title: signal.recommendation, owner: actor, dueDate: dateAfterDays(signal.severity === "Критичный" ? 1 : 5), priority: signal.severity === "Критичный" ? "Критичный" : "Высокий", status: "Входящие", sourceType: "Юридический сигнал", sourceId: id, description: `${signal.evidence}. Проверить документы и зафиксировать решение без обвинений.`, assigneeEntityId, kind: "Автозадача", automationKey: key, requiresApproval: true, createdBy: actor }).returning();
+  const existing = await findScopedAutomationTask(db, context, key);
+  const existingResponse = scopedAutomationTaskResponse(existing);
+  if (existingResponse) return existingResponse;
+  const [task] = await db.insert(tasks).values({ title: signal.recommendation, owner: assignment.owner, dueDate: dateAfterDays(signal.severity === "Критичный" ? 1 : 5), priority: signal.severity === "Критичный" ? "Критичный" : "Высокий", status: "Входящие", sourceType: "Юридический сигнал", sourceId: id, description: `${signal.evidence}. Проверить документы и зафиксировать решение без обвинений.`, assigneeEntityId: assignment.assigneeEntityId, kind: "Автозадача", automationKey: key, requiresApproval: true, createdByUserId: context.appUserId, createdBy: actor }).returning();
   await db.update(legalChecks).set({ relatedTaskId: task.id, status: "В работе" }).where(eq(legalChecks.id, id));
-  await audit(actor, "legal.signal_task_created", "legal_check", id, { taskId: task.id, assigneeEntityId });
+  await audit(actor, "legal.signal_task_created", "legal_check", id, { taskId: task.id, assigneeEntityId: assignment.assigneeEntityId });
   return Response.json({ task }, { status: 201 });
 }
 

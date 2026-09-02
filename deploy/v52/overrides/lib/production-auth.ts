@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { API_ROLE_BY_APP_ROLE } from "./access-policy";
 
 type D1Statement = {
   bind: (...values: unknown[]) => D1Statement;
@@ -19,9 +20,15 @@ type ProductionEnv = {
 };
 
 export type AuthUser = {
+  userId: string;
   role: "owner" | "accountant" | "viewer";
   name: string;
   mustChangePassword: boolean;
+  appRole: string;
+  apiRole: string;
+  isAdministrative: boolean;
+  isSystemOwner: boolean;
+  canAccessMedical: boolean;
 };
 
 type CredentialRow = {
@@ -56,6 +63,7 @@ type AppAccessRow = {
   grant_status: string;
   user_access_version: number;
   grant_access_version: number;
+  medical_access_granted: number;
 };
 
 export type AuthenticatedRequestContext = {
@@ -92,29 +100,7 @@ const ARTHELLO_SYSTEM_ID = "SYS-ARTHELLO-OS";
 
 let authTablesPromise: Promise<void> | undefined;
 
-const API_ROLE_BY_GRANT: Record<string, string> = {
-  "Собственник": "OWNER",
-  "Директор": "DIRECTOR",
-  "Администратор": "ADMIN",
-  "Завуч": "DEPUTY",
-  "Финансы": "FINANCE",
-  "Бухгалтерия": "ACCOUNTING",
-  "HR": "HR",
-  "Продажи": "SALES",
-  "Маркетинг": "MARKETING",
-  "Педагог": "TEACHER",
-  "Методист": "METHODIST",
-  "Кухня": "KITCHEN",
-  "Закупки": "PROCUREMENT",
-  "Безопасность": "SAFETY",
-  "Медработник": "MEDICAL",
-  "Юрист": "LEGAL",
-  "Интеграции": "INTEGRATIONS",
-  "Аналитика": "ANALYTICS",
-  "Проекты": "PROJECTS",
-  "Сотрудник": "EMPLOYEE",
-  "Контроль качества": "QUALITY",
-};
+const API_ROLE_BY_GRANT = API_ROLE_BY_APP_ROLE;
 
 function runtimeEnv(): ProductionEnv {
   return env as unknown as ProductionEnv;
@@ -134,6 +120,40 @@ export function ensureAuthTables() {
     });
   }
   return authTablesPromise;
+}
+
+export async function ensureBootstrapOwnerAccess() {
+  const bootstrapPassword = runtimeEnv().ARTHELLO_BOOTSTRAP_PASSWORD ?? "";
+  if (!bootstrapPassword) return;
+  const bootstrapLogin = normalizeLogin(runtimeEnv().ARTHELLO_BOOTSTRAP_LOGIN ?? "owner");
+  if (!bootstrapLogin) throw new Error("Production bootstrap login is unavailable");
+
+  const db = database();
+  await db.batch([
+    db.prepare(`INSERT OR IGNORE INTO app_systems
+      (id,system_key,name,description,status,sort_order)
+      VALUES (?,?,?,?,?,?)`)
+      .bind(ARTHELLO_SYSTEM_ID, "ARTHELLO_OS", "ArtHello OS", "Основная операционная система", "Активна", 10),
+    db.prepare(`INSERT OR IGNORE INTO app_users
+      (id,contact_type,contact,display_name,role,is_administrative,status,invitation_status,access_version,invited_by,activated_at)
+      VALUES (?,?,?,?,?,1,?,?,?,?,CURRENT_TIMESTAMP)`)
+      .bind(
+        "USR-OWNER",
+        bootstrapLogin.includes("@") ? "email" : "login",
+        bootstrapLogin,
+        "Виталий Озолин",
+        "Собственник",
+        "Активен",
+        "Активирован",
+        1,
+        "production-bootstrap",
+      ),
+  ]);
+  await db.prepare(`INSERT OR IGNORE INTO user_system_access
+    (user_id,system_id,role,status,access_version,last_sync_status,granted_by)
+    SELECT id,?,'Собственник','Активен',access_version,'Не требуется','production-bootstrap'
+    FROM app_users WHERE id='USR-OWNER'`)
+    .bind(ARTHELLO_SYSTEM_ID).run();
 }
 
 async function initializeAuthTables() {
@@ -280,11 +300,7 @@ export async function getAuthenticatedSession(request: Request): Promise<{ user:
   }
 
   return {
-    user: {
-      role: coarseAuthRole(apiRoleForGrant(access.grant_role)),
-      name: access.display_name,
-      mustChangePassword: Boolean(row.must_change_password),
-    },
+    user: authUserFromAccess(access.display_name, row.must_change_password, access),
     session: {
       token_hash: row.token_hash,
       user_id: row.user_id,
@@ -315,12 +331,7 @@ export function verifyAuthenticatedRequestCsrf(request: Request, context: Authen
 }
 
 export function isCanonicalOwnerContext(context: AuthenticatedRequestContext) {
-  const access = context.auth.access;
-  return context.appUserId === "USR-OWNER"
-    && Boolean(access.is_administrative)
-    && access.app_role === "Собственник"
-    && access.grant_role === "Собственник"
-    && context.apiRole === "OWNER";
+  return isCanonicalOwnerAccess(context.auth.access) && context.apiRole === "OWNER";
 }
 
 export async function issueTemporaryCredential(
@@ -491,7 +502,14 @@ async function loadAppAccessByAppUserId(appUserId: string) {
   return database().prepare(`SELECT
       u.id AS app_user_id,u.contact,u.display_name,u.role AS app_role,u.status AS app_status,
       u.is_administrative,u.access_version AS user_access_version,
-      g.role AS grant_role,g.status AS grant_status,g.access_version AS grant_access_version
+      g.role AS grant_role,g.status AS grant_status,g.access_version AS grant_access_version,
+      CASE WHEN g.role='Медработник' AND EXISTS (
+        SELECT 1 FROM medical_access_grants medical_grant
+        WHERE medical_grant.principal_ref='ROLE:MEDICAL'
+          AND medical_grant.scope='MEDICAL_FULL_SYNTHETIC'
+          AND medical_grant.status='Активен'
+          AND medical_grant.valid_until>=date('now')
+      ) THEN 1 ELSE 0 END AS medical_access_granted
     FROM app_users u
     JOIN user_system_access g ON g.user_id=u.id AND g.system_id=?
     WHERE u.id=?`)
@@ -508,10 +526,15 @@ function isActiveAccess(access: AppAccessRow | null): access is AppAccessRow {
     || !API_ROLE_BY_GRANT[access.grant_role]) return false;
 
   const isOwner = access.grant_role === "Собственник";
-  if (isOwner) {
-    return access.app_user_id === "USR-OWNER" && Boolean(access.is_administrative);
-  }
+  if (isOwner) return isCanonicalOwnerAccess(access);
   return access.app_user_id !== "USR-OWNER";
+}
+
+function isCanonicalOwnerAccess(access: AppAccessRow) {
+  return access.app_user_id === "USR-OWNER"
+    && Boolean(access.is_administrative)
+    && access.app_role === "Собственник"
+    && access.grant_role === "Собственник";
 }
 
 function credentialLoginMatchesAccess(authUserId: string, credentialLogin: string, access: AppAccessRow) {
@@ -542,10 +565,21 @@ function normalizeUserId(value: unknown) {
 }
 
 function toAuthUser(row: CredentialRow, access: AppAccessRow): AuthUser {
+  return authUserFromAccess(access.display_name || row.display_name, row.must_change_password, access);
+}
+
+function authUserFromAccess(name: string, mustChangePassword: number, access: AppAccessRow): AuthUser {
+  const apiRole = apiRoleForGrant(access.grant_role);
   return {
-    role: coarseAuthRole(apiRoleForGrant(access.grant_role)),
-    name: access.display_name || row.display_name,
-    mustChangePassword: Boolean(row.must_change_password),
+    userId: access.app_user_id,
+    role: coarseAuthRole(apiRole),
+    name,
+    mustChangePassword: Boolean(mustChangePassword),
+    appRole: access.grant_role,
+    apiRole,
+    isAdministrative: Boolean(access.is_administrative),
+    isSystemOwner: isCanonicalOwnerAccess(access) && apiRole === "OWNER",
+    canAccessMedical: apiRole === "MEDICAL" && Boolean(access.medical_access_granted),
   };
 }
 

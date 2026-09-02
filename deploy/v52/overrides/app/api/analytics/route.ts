@@ -21,14 +21,20 @@ import {
   strategyProjects,
 } from "../../../db/schema";
 import { forecastCash, marginPercent, riskRank, safeAverage } from "../../../lib/analytics";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
 const readers = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "ANALYTICS", "FINANCE"]);
 
 export async function GET(request: Request) {
-  if (!getRequestUser(request)) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
-  if (!readers.has(role)) return Response.json({ error: "Нет доступа к управленческой аналитике" }, { status: 403 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  if (!readers.has(context.apiRole)) return Response.json({ error: "Нет доступа к управленческой аналитике" }, { status: 403 });
 
   try {
     await ensureCoreTables();
@@ -37,7 +43,7 @@ export async function GET(request: Request) {
     if (await getSystemDataMode()!=="empty") await ensureAnalyticsDemoBootstrap();
 
     const db = getDb();
-    const [metricDefinitions, signals, contracts, runs, optOuts, operations, forecastItems, reconciliation, lifecycles, progress, employees, faults, shipments, production, shifts, projects, connections, conflicts] = await Promise.all([
+    const [metricDefinitions, signals, contracts, runs, optOuts, operations, forecastItems, reconciliation, lifecycles, progress, employees, faults, shipments, production, shifts, projects, connections, conflicts, allTasks] = await Promise.all([
       db.select().from(analyticsMetricDefinitions).orderBy(asc(analyticsMetricDefinitions.category)),
       db.select().from(analyticsSignals),
       db.select().from(aiProcessContracts).orderBy(asc(aiProcessContracts.name)),
@@ -56,6 +62,7 @@ export async function GET(request: Request) {
       db.select().from(strategyProjects),
       db.select().from(integrationConnections),
       db.select().from(integrationConflicts),
+      selectVisibleTasks(db, context),
     ]);
 
     const monthlyMap = new Map<string, { period: string; receiptsMinor: number; outflowsMinor: number; netMinor: number; factRows: number; syntheticRows: number }>();
@@ -76,7 +83,8 @@ export async function GET(request: Request) {
     const floor = forecast.length ? Math.min(openingBalanceMinor, ...forecast.map((item) => item.balanceMinor)) : openingBalanceMinor;
     const revenue = shipments.reduce((sum, item) => sum + item.revenueMinor, 0);
     const cost = production.reduce((sum, item) => sum + item.materialCostMinor, 0) + shifts.reduce((sum, item) => sum + item.rateMinor, 0);
-    const rankedSignals = [...signals].sort((a, b) => riskRank(b.severity, b.confidence) - riskRank(a.severity, a.confidence));
+    const rankedSignals = redactHiddenTaskReferences(signals, allTasks)
+      .sort((a, b) => riskRank(b.severity, b.confidence) - riskRank(a.severity, a.confidence));
     const domains = [...new Set(signals.map((item) => item.domain))].map((domain) => ({
       domain,
       total: signals.filter((item) => item.domain === domain && item.status !== "Закрыт").length,

@@ -1,0 +1,7 @@
+import test from"node:test";import assert from"node:assert/strict";import{medicalAccess,medicalExpiry,canCloseMedicalCase,minimalMedicalDisclosure}from"../lib/medical.ts";
+const grant={principalRef:"ROLE:MEDICAL",scope:"MEDICAL_FULL_SYNTHETIC",status:"Активен",validUntil:"2027-08-21"};
+test("medical access requires the separate active role grant",()=>{assert.equal(medicalAccess("MEDICAL",grant,"2026-08-21"),true);assert.equal(medicalAccess("OWNER",grant,"2026-08-21"),false);assert.equal(medicalAccess("MEDICAL",{...grant,status:"Отозван"},"2026-08-21"),false)});
+test("medical access rejects a grant that expired yesterday",()=>{const today=new Date().toISOString().slice(0,10);const yesterday=new Date(Date.now()-86400000).toISOString().slice(0,10);assert.equal(medicalAccess("MEDICAL",{...grant,validUntil:yesterday},today),false)});
+test("medical document expiry uses explicit dates",()=>assert.equal(medicalExpiry("2026-09-01","2026-08-21"),"Истекает"));
+test("medical case cannot close before actions and confirmation",()=>{assert.equal(canCloseMedicalCase({pendingActions:1,confirmationRef:"MED-X",result:"Результат подтверждён"}),false);assert.equal(canCloseMedicalCase({pendingActions:0,confirmationRef:"MED-X",result:"Результат подтверждён"}),true)});
+test("minimal disclosure excludes diagnosis and document reference",()=>assert.deepEqual(minimalMedicalDisclosure({limitation:"Щадящий режим",actionScope:"Передать педагогу только режим",diagnosis:"скрыто",documentRef:"скрыто"}),{limitation:"Щадящий режим",actionScope:"Передать педагогу только режим"}));

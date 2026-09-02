@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 function replaceOnce(source, search, replacement, label) {
@@ -10,9 +11,13 @@ function replaceOnce(source, search, replacement, label) {
   return `${source.slice(0, first)}${replacement}${source.slice(first + search.length)}`;
 }
 
-const dashboardTarget = fileURLToPath(new URL("../app/components/OwnerDashboard.tsx", import.meta.url));
+const patchRoot = process.env.ARTHELLO_PATCH_ROOT;
+const dashboardTarget = patchRoot
+  ? resolve(patchRoot, "app/components/OwnerDashboard.tsx")
+  : fileURLToPath(new URL("../app/components/OwnerDashboard.tsx", import.meta.url));
 let dashboard = readFileSync(dashboardTarget, "utf8");
 
+if (!dashboard.includes('const MOSCOW_TIME_ZONE = "Europe/Moscow";')) {
 dashboard = replaceOnce(
   dashboard,
   'const kpiIcons = ["finance", "sales", "legal", "clients", "registry", "hr"] as const;\n',
@@ -54,32 +59,43 @@ dashboard = replaceOnce(
   '',
   "duplicate dashboard create button",
 );
+}
 
 writeFileSync(dashboardTarget, dashboard, "utf8");
 
-const shellTarget = fileURLToPath(new URL("../app/components/ArtHelloShell.tsx", import.meta.url));
+const shellTarget = patchRoot
+  ? resolve(patchRoot, "app/components/ArtHelloShell.tsx")
+  : fileURLToPath(new URL("../app/components/ArtHelloShell.tsx", import.meta.url));
 let shell = readFileSync(shellTarget, "utf8");
 
-shell = replaceOnce(
-  shell,
-  'import { OwnerDashboard } from "./OwnerDashboard";\n',
-  'import { OwnerDashboard } from "./OwnerDashboard";\nimport { useProductionAuthUser } from "./ProductionAuthGate";\n',
-  "authenticated shell import",
-);
+if (!/import \{[^}]*\buseProductionAuthUser\b[^}]*\} from "\.\/ProductionAuthGate";/.test(shell)) {
+  shell = replaceOnce(
+    shell,
+    'import { OwnerDashboard } from "./OwnerDashboard";\n',
+    'import { OwnerDashboard } from "./OwnerDashboard";\nimport { useProductionAuthUser } from "./ProductionAuthGate";\n',
+    "authenticated shell import",
+  );
+}
 
-shell = replaceOnce(
-  shell,
-  'export default function ArtHelloShell({ displayName }: { displayName: string }) {\n',
-  `export default function ArtHelloShell({ displayName: displayNameOverride = "" }: { displayName?: string }) {\n  const authenticatedUser = useProductionAuthUser();\n  const displayName = authenticatedUser?.name?.trim() || displayNameOverride.trim() || "Пользователь";\n`,
-  "authenticated shell identity",
-);
+if (shell.includes('export default function ArtHelloShell({ displayName }: { displayName: string }) {\n')) {
+  shell = replaceOnce(
+    shell,
+    'export default function ArtHelloShell({ displayName }: { displayName: string }) {\n',
+    `export default function ArtHelloShell({ displayName: displayNameOverride = "" }: { displayName?: string }) {\n  const authenticatedUser = useProductionAuthUser();\n  const displayName = authenticatedUser?.name?.trim() || displayNameOverride.trim() || "Пользователь";\n`,
+    "authenticated shell identity",
+  );
+} else if (!shell.includes('export default function ArtHelloShell({ displayName: displayNameOverride = "" }: { displayName?: string }) {')) {
+  throw new Error("Dashboard personalization patch failed at authenticated shell identity");
+}
 
-shell = replaceOnce(
-  shell,
-  '            <button className="create" onClick={() => setTaskOpen(true)} aria-label="Создать задачу"><AppIcon name="plus" /></button>\n',
-  '',
-  "redundant mobile header create button",
-);
+if (shell.includes('            <button className="create" onClick={() => setTaskOpen(true)} aria-label="Создать задачу"><AppIcon name="plus" /></button>\n')) {
+  shell = replaceOnce(
+    shell,
+    '            <button className="create" onClick={() => setTaskOpen(true)} aria-label="Создать задачу"><AppIcon name="plus" /></button>\n',
+    '',
+    "redundant mobile header create button",
+  );
+}
 
 writeFileSync(shellTarget, shell, "utf8");
 console.log("Dashboard personalization patch applied");

@@ -55,7 +55,7 @@ test("temporary staff credentials are disclosed once without replacing access as
   assert.match(styles, /\.temporary-password\{/);
 });
 
-test("families enter through clients, remain editable and require human verification before access", async () => {
+test("families enter through clients, trust manual creation and keep external review separate from access", async () => {
   const [workspace, familyApi, settingsApi] = await Promise.all([
     read("../app/components/FamilyWorkspace.tsx"),
     read("../app/api/families/route.ts"),
@@ -67,10 +67,14 @@ test("families enter through clients, remain editable and require human verifica
   }
   assert.match(workspace, /Импорт из AlfaCRM/);
   assert.match(workspace, /Семья вручную/);
-  assert.match(workspace, /Данные проверены человеком/);
+  assert.match(workspace, /Ручную карточку подтверждает автор при сохранении/);
+  assert.match(workspace, /name="sourceConfirmed"/);
+  assert.doesNotMatch(workspace, /name="confirmed"|После создания — обязательная проверка|Создать на проверку/);
+  assert.match(familyApi, /status:"Активна",sourceSystem:"MANUAL"[\s\S]*?dataQuality:"Проверено"/);
+  assert.match(familyApi, /sourceConfirmed=body\.sourceConfirmed===true/);
   assert.match(familyApi, /family\.finance_links_updated/);
-  assert.match(settingsApi, /family\.dataQuality !== "Проверено"/);
-  assert.match(settingsApi, /Сначала проверьте и подтвердите карточку семьи/);
+  assert.match(settingsApi, /familyNeedsReview\(family\)/);
+  assert.match(settingsApi, /Сначала завершите сверку внешнего источника или конфликта/);
 });
 
 test("employee identity owns contact, multi-branch affiliation and contract navigation", async () => {

@@ -330,8 +330,8 @@ test("Accounting empty state does not hide the operational tabs", () => {
 });
 
 test("ArtHelloShell passes Wave 1 navigation contracts directly", () => {
-  assert.match(shell, /active\s*===\s*["']legal["']/);
-  assert.match(shell, /active\s*===\s*["']accounting["']/);
+  assert.match(shell, /routedActive\s*===\s*["']legal["']/);
+  assert.match(shell, /routedActive\s*===\s*["']accounting["']/);
 
   const legalTag = componentTag(shell, "LegalWorkspace");
   for (const prop of ["role", "notify", "onTasksChanged", "onOpenIntegrations", "focusId"]) {
@@ -357,7 +357,7 @@ test("component-specific build patches are retired without deleting unrelated pa
   assert.equal(patchesFile(contentLegalPatch, "app/api/legal-actions/route.ts"), true);
   assert.match(contentLegalPatch, /createContract/);
   assert.equal(patchesFile(dialogPortalsPatch, "app/components/ContentWorkspace.tsx"), true);
-  assert.equal(patchesFile(dialogPortalsPatch, "app/components/IntegrationWorkspace.tsx"), true);
+  assert.match(dialogPortalsPatch, /const integrationPath = "app\/components\/IntegrationWorkspace\.tsx"/);
   assert.equal(patchesFile(operationalPatch, "app/components/ProcurementWorkspace.tsx"), false);
   assert.equal(patchesFile(operationalPatch, "app/components/FoodWorkspace.tsx"), false);
   assert.equal(patchesFile(operationalPatch, "app/components/SafetyWorkspace.tsx"), false);

@@ -1,15 +1,21 @@
 import { asc } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
-import { entities, financialOperations, foodBatches, foodChecks, foodProduction, foodProducts, foodRecipeIngredients, foodRecipes, foodShipments, foodShifts, tasks } from "../../../db/schema";
+import { entities, financialOperations, foodBatches, foodChecks, foodProduction, foodProducts, foodRecipeIngredients, foodRecipes, foodShipments, foodShifts } from "../../../db/schema";
 import { expiryBand, foodEconomics, shipmentBalance } from "../../../lib/food";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
 const roles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "KITCHEN", "FINANCE"]);
 
 export async function GET(request: Request) {
-  if (!getRequestUser(request)) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
-  if (!roles.has(role)) return Response.json({ error: "Нет доступа к проекту кухни" }, { status: 403 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  if (!roles.has(context.apiRole)) return Response.json({ error: "Нет доступа к проекту кухни" }, { status: 403 });
   try {
     await ensureCoreTables();
     const db = getDb();
@@ -24,7 +30,7 @@ export async function GET(request: Request) {
       db.select().from(foodChecks),
       db.select({ id: entities.id, displayName: entities.displayName }).from(entities),
       db.select().from(financialOperations),
-      db.select().from(tasks),
+      selectVisibleTasks(db, context),
     ]);
     const revenue = shipments.reduce((sum, item) => sum + item.revenueMinor, 0);
     const material = production.reduce((sum, item) => sum + item.materialCostMinor, 0);
@@ -48,7 +54,7 @@ export async function GET(request: Request) {
       production,
       shipments: shipments.map((item) => ({ ...item, balance: shipmentBalance(item) })),
       shifts,
-      checks,
+      checks: redactHiddenTaskReferences(checks, allTasks),
       entityNames: Object.fromEntries(entityRows.map((item) => [item.id, item.displayName])),
       economics: foodEconomics(revenue, material, labor),
       finance,

@@ -2,15 +2,21 @@ import { asc, desc } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
 import { contentAttributions, contentPlanItems, contentPublications, contentRecommendations, entities, financialOperations, marketingAccounts, salesLeads } from "../../../db/schema";
 import { contentSummary, evidenceBasedRanking, publicationRates } from "../../../lib/content";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
 export async function GET(request: Request) {
-  const actor = getRequestUser(request);
-  if (!actor) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
   try {
     await ensureCoreTables();
     const db = getDb();
-    const [accounts, plan, publications, attributions, recommendations, entityRows, leads, operations] = await Promise.all([
+    const [accounts, plan, publications, attributions, recommendations, entityRows, leads, operations, allTasks] = await Promise.all([
       db.select().from(marketingAccounts).orderBy(asc(marketingAccounts.platform)),
       db.select().from(contentPlanItems).orderBy(asc(contentPlanItems.scheduledAt)),
       db.select().from(contentPublications).orderBy(desc(contentPublications.publishedAt)),
@@ -19,6 +25,7 @@ export async function GET(request: Request) {
       db.select({ id: entities.id, displayName: entities.displayName }).from(entities),
       db.select().from(salesLeads),
       db.select().from(financialOperations),
+      selectVisibleTasks(db, context),
     ]);
     const entityNames = Object.fromEntries(entityRows.map((row) => [row.id, row.displayName]));
     const enriched = publications.map((publication) => {
@@ -28,7 +35,8 @@ export async function GET(request: Request) {
     });
     const ranked = evidenceBasedRanking(enriched);
     return Response.json({
-      accounts, plan, publications: ranked, attributions, recommendations, entityNames,
+      accounts, plan, publications: ranked, attributions,
+      recommendations: redactHiddenTaskReferences(recommendations, allTasks), entityNames,
       summary: contentSummary(publications),
       chain: attributions.map((row) => ({
         ...row,

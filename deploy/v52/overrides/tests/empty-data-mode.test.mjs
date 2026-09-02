@@ -91,6 +91,7 @@ async function loadDbModule(database) {
     const code = transpile(dbSource, [
       ['import { env } from "cloudflare:workers";', "const env = globalThis.__ARTHELLO_EMPTY_MODE_ENV__;"],
       ['import { drizzle } from "drizzle-orm/d1";', "const drizzle = () => { throw new Error('drizzle is not used by this test'); };"],
+      ['import { entityDuplicateKey, manualEntityNormalization } from "../lib/entity-provenance";', "const entityDuplicateKey = ({entityType,displayName}) => `${entityType}:${displayName}`; const manualEntityNormalization = () => null;"],
       ['import * as schema from "./schema";', "const schema = {};"],
     ], "db/index.ts");
     return await importCode(code, "db-index");

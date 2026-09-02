@@ -1,18 +1,32 @@
 "use client";
 
 import { createContext, FormEvent, ReactNode, useContext, useEffect, useState } from "react";
+import { clearDashboardBrowserLayouts } from "../../lib/dashboard-layout";
 import "./ProductionAuthGate.css";
 
 export type AuthUser = {
+  userId: string;
   role: string;
   name: string;
   mustChangePassword: boolean;
+  appRole: string;
+  apiRole: string;
+  isAdministrative: boolean;
+  isSystemOwner: boolean;
+  canAccessMedical: boolean;
 };
 
 const ProductionAuthContext = createContext<AuthUser | null>(null);
+const ProductionAuthActionsContext = createContext<{ logout: () => Promise<void>; loggingOut: boolean } | null>(null);
 
 export function useProductionAuthUser() {
   return useContext(ProductionAuthContext);
+}
+
+export function useProductionAuthActions() {
+  const actions = useContext(ProductionAuthActionsContext);
+  if (!actions) throw new Error("Production auth actions are unavailable outside the authenticated application");
+  return actions;
 }
 
 export default function ProductionAuthGate({ children }: { children: ReactNode }) {
@@ -23,7 +37,7 @@ export default function ProductionAuthGate({ children }: { children: ReactNode }
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    void fetchWithTimeout("/api/auth/me", { cache: "no-store" })
+    void fetchWithTimeout("/api/auth/me", { cache: "no-store", credentials: "same-origin" })
       .then(async (response) => {
         if (!response.ok) return null;
         return (await response.json()) as AuthUser;
@@ -42,6 +56,7 @@ export default function ProductionAuthGate({ children }: { children: ReactNode }
     try {
       const response = await fetchWithTimeout("/api/auth/login", {
         method: "POST",
+        credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ login: data.get("login"), password: data.get("password") }),
       });
@@ -73,6 +88,7 @@ export default function ProductionAuthGate({ children }: { children: ReactNode }
     try {
       const response = await fetchWithTimeout("/api/auth/password", {
         method: "POST",
+        credentials: "same-origin",
         headers: {
           "content-type": "application/json",
           "x-csrf-token": readCookie("__Host-arthello_csrf"),
@@ -84,10 +100,35 @@ export default function ProductionAuthGate({ children }: { children: ReactNode }
         setError(body.error || "Не удалось изменить пароль");
         return;
       }
+      clearUserDashboardLayouts(user?.userId);
       setUser(null);
       setNotice("Пароль сохранён. Войдите ещё раз с новым паролем.");
     } catch {
       setError("Сервер не ответил за 15 секунд. Повторите сохранение один раз.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logout() {
+    setBusy(true);
+    try {
+      const response = await fetchWithTimeout("/api/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "x-csrf-token": readCookie("__Host-arthello_csrf") },
+      });
+      const body = await response.json() as { error?: string };
+      if (response.status === 401) {
+        clearUserDashboardLayouts(user?.userId);
+        setUser(null);
+        setNotice("Сессия уже завершена. Войдите снова.");
+        return;
+      }
+      if (!response.ok) throw new Error(body.error || "Не удалось выйти");
+      clearUserDashboardLayouts(user?.userId);
+      setUser(null);
+      setNotice("Вы вышли из ArtHello OS.");
     } finally {
       setBusy(false);
     }
@@ -120,11 +161,20 @@ export default function ProductionAuthGate({ children }: { children: ReactNode }
           {error ? <p className="auth-error">{error}</p> : null}
           <button disabled={busy}>{busy ? "Сохраняем…" : "Сохранить пароль"}</button>
         </form>
+        <button className="auth-switch" type="button" disabled={busy} onClick={() => void logout().catch((reason) => setError(reason instanceof Error ? reason.message : "Не удалось выйти"))}>
+          Выйти и войти другим пользователем
+        </button>
       </AuthScreen>
     );
   }
 
-  return <ProductionAuthContext.Provider value={user}>{children}</ProductionAuthContext.Provider>;
+  return (
+    <ProductionAuthContext.Provider value={user}>
+      <ProductionAuthActionsContext.Provider value={{ logout, loggingOut: busy }}>
+        {children}
+      </ProductionAuthActionsContext.Provider>
+    </ProductionAuthContext.Provider>
+  );
 }
 
 function AuthScreen({ title, children }: { title: string; children: ReactNode }) {
@@ -145,6 +195,15 @@ function readCookie(name: string) {
   const item = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(prefix));
   if (!item) return "";
   try { return decodeURIComponent(item.slice(prefix.length)); } catch { return ""; }
+}
+
+function clearUserDashboardLayouts(userId?: string) {
+  if (!userId) return;
+  try {
+    clearDashboardBrowserLayouts(window.localStorage, userId);
+  } catch {
+    // Logout and password rotation remain authoritative when browser storage is unavailable.
+  }
 }
 
 async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}) {

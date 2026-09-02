@@ -2,8 +2,10 @@
 
 import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ModuleId, moduleCatalog } from "../../data/test-snapshot";
+import { canAccessModule, registryCapabilities, resolveModuleRoute } from "../../lib/access-policy";
 import { AppIcon } from "./AppIcon";
 import { OwnerDashboard } from "./OwnerDashboard";
+import { useProductionAuthActions, useProductionAuthUser } from "./ProductionAuthGate";
 import type { AccessContext } from "./SettingsWorkspace";
 import "./ShellFoundation.css";
 import "./AiryLayout.css";
@@ -73,6 +75,7 @@ const uiStorage = {
 // Every implemented workspace remains reachable when its registry is empty.
 // Primary input is an action inside Settings, not a replacement for a module.
 const manualFirstModules: ReadonlySet<ModuleId> = new Set();
+const knownModuleIds = moduleCatalog.map((module) => module.id);
 
 function readStorage(scope: "local" | "session", key: string, legacyKey?: string) {
   if (typeof window === "undefined") return null;
@@ -101,18 +104,35 @@ const entitySearchIndex: Array<{ id: string; label: string; type: string; meta: 
 const dashboardProfiles: Record<string, { label: string }> = {
   "Собственник": { label: "Собственник" },
   "Директор": { label: "Директор" },
+  "Администратор": { label: "Администратор" },
+  "Завуч": { label: "Завуч" },
   "Финансы": { label: "Финансы" },
+  "Бухгалтерия": { label: "Бухгалтерия" },
   "Продажи": { label: "Продажи" },
+  "Маркетинг": { label: "Маркетинг" },
   "HR": { label: "HR" },
+  "Педагог": { label: "Педагог" },
+  "Методист": { label: "Методист" },
   "Кухня": { label: "Кухня" },
+  "Закупки": { label: "Закупки" },
+  "Безопасность": { label: "Безопасность" },
+  "Медработник": { label: "Медработник" },
+  "Юрист": { label: "Юрист" },
+  "Интеграции": { label: "Интеграции" },
+  "Аналитика": { label: "Аналитика" },
+  "Проекты": { label: "Проекты" },
+  "Контроль качества": { label: "Контроль качества" },
   "Сотрудник": { label: "Сотрудник" },
   "Представитель Виталия": { label: "Представитель Виталия" },
 };
 
-export default function ArtHelloShell({ displayName }: { displayName: string }) {
+export default function ArtHelloShell({ displayName: displayNameOverride = "" }: { displayName?: string }) {
+  const authenticatedUser = useProductionAuthUser();
+  const { logout, loggingOut } = useProductionAuthActions();
+  const displayName = authenticatedUser?.name?.trim() || displayNameOverride.trim() || "Пользователь";
   const [active, setActive] = useState<ModuleId>("home");
   const [query, setQuery] = useState("");
-  const [role, setRole] = useState("Собственник");
+  const [role, setRole] = useState(authenticatedUser?.appRole ?? "");
   const [drawer, setDrawer] = useState<DrawerData | null>(null);
   const [taskOpen, setTaskOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
@@ -124,11 +144,28 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
   const [moduleFocus, setModuleFocus] = useState<{ module: ModuleId; id: string } | null>(null);
   const [, setRecentModules] = useState<ModuleId[]>([]);
   const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
-  const [administrative, setAdministrative] = useState(true);
+  const [administrative, setAdministrative] = useState(Boolean(authenticatedUser?.isAdministrative));
   const [selectedBranch, setSelectedBranch] = useState("ALL");
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollPositions = useRef<Record<string, number>>({});
   const navigationDepth = useRef(0);
+  const accessContext = useMemo(() => ({
+    apiRole: authenticatedUser?.apiRole ?? "",
+    isSystemOwner: Boolean(authenticatedUser?.isSystemOwner),
+    canAccessMedical: Boolean(authenticatedUser?.canAccessMedical),
+  }), [authenticatedUser?.apiRole, authenticatedUser?.canAccessMedical, authenticatedUser?.isSystemOwner]);
+  const isModuleAllowed = useCallback((id: ModuleId) => canAccessModule(accessContext, id), [accessContext]);
+  const allowedModuleIds = useMemo(
+    () => new Set(moduleCatalog.map((module) => module.id).filter(isModuleAllowed)),
+    [isModuleAllowed],
+  );
+  const availableDashboardModules = useMemo(
+    () => moduleCatalog
+      .filter((moduleEntry) => allowedModuleIds.has(moduleEntry.id))
+      .map(({ id, label }) => ({ id, label })),
+    [allowedModuleIds],
+  );
+  const registryAccess = useMemo(() => registryCapabilities(accessContext), [accessContext]);
 
   const applyAccessContext = useCallback((context: AccessContext) => {
     setRole(context.me.role);
@@ -157,7 +194,7 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
       const savedRecent = readStorage("local", uiStorage.recents, "arthello:recent-modules");
       if (savedRecent) {
         try {
-          setRecentModules((JSON.parse(savedRecent) as ModuleId[]).filter((id) => moduleCatalog.some((item) => item.id === id)).slice(0, 3));
+          setRecentModules((JSON.parse(savedRecent) as ModuleId[]).filter((id) => moduleCatalog.some((item) => item.id === id) && isModuleAllowed(id)).slice(0, 3));
         } catch {
           writeStorage("local", uiStorage.recents, "[]");
         }
@@ -165,11 +202,11 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
     }, 0);
 
     const openHashModule = () => {
-      const requested = window.location.hash.slice(1) as ModuleId;
-      if (moduleCatalog.some((module) => module.id === requested)) {
-        setActive(requested);
-        requestAnimationFrame(() => contentRef.current?.scrollTo({ top: scrollPositions.current[requested] ?? 0 }));
-      }
+      const requested = window.location.hash.slice(1);
+      const next = resolveModuleRoute(accessContext, requested, knownModuleIds);
+      setActive(next);
+      if (requested && next !== requested) window.history.replaceState({ module: "home" }, "", "#home");
+      requestAnimationFrame(() => contentRef.current?.scrollTo({ top: scrollPositions.current[next] ?? 0 }));
     };
     const onPopState = () => {
       navigationDepth.current = Math.max(0, navigationDepth.current - 1);
@@ -196,7 +233,7 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
       window.clearTimeout(initialRoute);
       window.clearTimeout(preferenceHydration);
     };
-  }, [applyAccessContext]);
+  }, [accessContext, applyAccessContext, isModuleAllowed]);
 
   function changeBranch(branchId: string) {
     setSelectedBranch(branchId);
@@ -218,25 +255,31 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
   }
 
   function openModule(id: ModuleId, focusId?: string) {
+    const next = isModuleAllowed(id) ? id : "home";
     if (contentRef.current) scrollPositions.current[active] = contentRef.current.scrollTop;
-    setActive(id);
-    setModuleFocus(focusId ? { module: id, id: focusId } : null);
+    setActive(next);
+    setModuleFocus(next === id && focusId ? { module: id, id: focusId } : null);
     setQuery("");
     setNavOpen(false);
-    if (id !== "home") {
+    if (next !== id) setNotice("Этот раздел не входит в права вашей роли");
+    if (next !== "home") {
       setRecentModules((current) => {
-        const next = [id, ...current.filter((item) => item !== id)].slice(0, 3);
-        writeStorage("local", uiStorage.recents, JSON.stringify(next));
-        return next;
+        const recent = [next, ...current.filter((item) => item !== next && isModuleAllowed(item))].slice(0, 3);
+        writeStorage("local", uiStorage.recents, JSON.stringify(recent));
+        return recent;
       });
     }
     if (typeof window !== "undefined") {
-      if (window.location.hash !== `#${id}`) {
-        window.history.pushState({ module: id }, "", `#${id}`);
-        navigationDepth.current += 1;
-        writeStorage("session", uiStorage.navigationDepth, String(navigationDepth.current));
+      if (window.location.hash !== `#${next}`) {
+        if (next === id) {
+          window.history.pushState({ module: next }, "", `#${next}`);
+          navigationDepth.current += 1;
+          writeStorage("session", uiStorage.navigationDepth, String(navigationDepth.current));
+        } else {
+          window.history.replaceState({ module: "home" }, "", "#home");
+        }
       }
-      requestAnimationFrame(() => contentRef.current?.scrollTo({ top: scrollPositions.current[id] ?? 0, behavior: "auto" }));
+      requestAnimationFrame(() => contentRef.current?.scrollTo({ top: scrollPositions.current[next] ?? 0, behavior: "auto" }));
     }
   }
 
@@ -257,23 +300,27 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
     const clean = query.trim().toLowerCase();
     if (clean.length < 2) return [];
     const modules = moduleCatalog
+      .filter((module) => isModuleAllowed(module.id))
       .filter((module) => `${module.label} ${module.group}`.toLowerCase().includes(clean))
       .map((module) => ({ id: module.id, label: module.label, type: "Раздел", meta: module.group, module: module.id as ModuleId }));
-    const entities = entitySearchIndex.filter((item) => `${item.id} ${item.label} ${item.type} ${item.meta}`.toLowerCase().includes(clean));
-    const taskResults = tasks.filter((task) => `${task.id} ${task.title} ${task.owner} ${task.sourceId}`.toLowerCase().includes(clean)).map((task) => ({ id: `TASK-${task.id}`, label: task.title, type: "Задача", meta: `${task.owner} · ${task.status}`, module: "tasks" as ModuleId }));
+    const entities = entitySearchIndex.filter((item) => isModuleAllowed(item.module) && `${item.id} ${item.label} ${item.type} ${item.meta}`.toLowerCase().includes(clean));
+    const taskResults = isModuleAllowed("tasks")
+      ? tasks.filter((task) => `${task.id} ${task.title} ${task.owner} ${task.sourceId}`.toLowerCase().includes(clean)).map((task) => ({ id: `TASK-${task.id}`, label: task.title, type: "Задача", meta: `${task.owner} · ${task.status}`, module: "tasks" as ModuleId }))
+      : [];
     return [...modules, ...entities, ...taskResults].slice(0, 8);
-  }, [query, tasks]);
+  }, [isModuleAllowed, query, tasks]);
 
-  const activeEntry = moduleCatalog.find((item) => item.id === active) ?? moduleCatalog[0];
-  const primaryNav = ["home", "finance", "clients", "education", "hr", "sales", "content", "tasks", "legal", "analytics"] as ModuleId[];
-  const favoriteNav = ["registry", "clients", "legal", "hr", "projects"] as ModuleId[];
-  const extraNav = moduleCatalog.filter((item) => !primaryNav.includes(item.id) && !favoriteNav.includes(item.id));
+  const routedActive = isModuleAllowed(active) ? active : "home";
+  const activeEntry = moduleCatalog.find((item) => item.id === routedActive) ?? moduleCatalog[0];
+  const primaryNav = (["home", "finance", "clients", "education", "hr", "sales", "content", "tasks", "legal", "analytics"] as ModuleId[]).filter(isModuleAllowed);
+  const favoriteNav = (["registry", "clients", "legal", "hr", "projects"] as ModuleId[]).filter(isModuleAllowed);
+  const extraNav = moduleCatalog.filter((item) => isModuleAllowed(item.id) && !primaryNav.includes(item.id) && !favoriteNav.includes(item.id));
   const navLabels: Partial<Record<ModuleId, string>> = { finance: "Деньги", clients: "Клиенты", hr: "Команда", legal: "Документы", projects: "План-факт" };
 
   const renderNavItem = (item: typeof moduleCatalog[number], keyPrefix = "") => (
     <a
       href={`#${item.id}`}
-      className={`nav-item ${active === item.id ? "active" : ""}`}
+      className={`nav-item ${routedActive === item.id ? "active" : ""}`}
       key={`${keyPrefix}${item.id}`}
       title={item.label}
       onClick={(event) => { event.preventDefault(); openModule(item.id); }}
@@ -298,17 +345,18 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
           <button className="sidebar-close" onClick={() => setNavOpen(false)} aria-label="Закрыть меню">×</button>
         </div>
         <nav className="nav-scroll">
-          <div className="nav-group"><p>Основное</p>{primaryNav.map((id) => renderNavItem(moduleCatalog.find((item) => item.id === id)!))}</div>
-          <div className="nav-group"><p>Избранное</p>{favoriteNav.map((id) => renderNavItem(moduleCatalog.find((item) => item.id === id)!, "favorite-"))}</div>
-          <details className="nav-more">
+          {primaryNav.length ? <div className="nav-group"><p>Основное</p>{primaryNav.map((id) => renderNavItem(moduleCatalog.find((item) => item.id === id)!))}</div> : null}
+          {favoriteNav.length ? <div className="nav-group"><p>Избранное</p>{favoriteNav.map((id) => renderNavItem(moduleCatalog.find((item) => item.id === id)!, "favorite-"))}</div> : null}
+          {extraNav.length ? <details className="nav-more">
             <summary><AppIcon name="more" /><span>Все разделы</span></summary>
             <div className="nav-group">{extraNav.map((item) => renderNavItem(item, "extra-"))}</div>
-          </details>
+          </details> : null}
         </nav>
         <div className="sidebar-tools" aria-label="Системные действия">
           <button onClick={() => setCommandOpen(true)} title="Командная палитра"><AppIcon name="command" /><span>Команды</span><kbd>⌘K</kbd></button>
           <button onClick={() => setSettingsOpen(true)} title="Настройки"><AppIcon name="settings" /><span>Настройки</span></button>
           <button onClick={() => setNotice("Откройте командную палитру: там собраны разделы, сущности и быстрые действия")} title="Помощь"><AppIcon name="help" /><span>Помощь</span></button>
+          <button disabled={loggingOut} onClick={() => void logout().catch((error) => setNotice(error instanceof Error ? error.message : "Не удалось выйти"))} title="Выйти из ArtHello OS"><AppIcon name="logout" /><span>{loggingOut ? "Выходим…" : "Выйти"}</span></button>
         </div>
         <div className="sidebar-user">
           <div className="avatar">{initials(displayName)}</div>
@@ -322,14 +370,14 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
         <header className="topbar">
           <button
             className="mobile-menu"
-            onClick={active === "home" ? () => setNavOpen(true) : goBack}
-            aria-label={active === "home" ? "Открыть меню" : "Вернуться назад"}
+            onClick={routedActive === "home" ? () => setNavOpen(true) : goBack}
+            aria-label={routedActive === "home" ? "Открыть меню" : "Вернуться назад"}
           >
-            <AppIcon name={active === "home" ? "menu" : "back"} />
+            <AppIcon name={routedActive === "home" ? "menu" : "back"} />
           </button>
           <div className="mobile-shell-title" aria-live="polite">
-            <strong>{active === "home" ? "ArtHello" : activeEntry.label}</strong>
-            <span>{active === "home" ? "Рабочий контур" : activeEntry.group}</span>
+            <strong>{routedActive === "home" ? "ArtHello" : activeEntry.label}</strong>
+            <span>{routedActive === "home" ? "Рабочий контур" : activeEntry.group}</span>
           </div>
           <div className="search-wrap">
             <AppIcon name="search" />
@@ -353,21 +401,20 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
           </div>
           <div className="mobile-top-actions">
             <button onClick={() => setCommandOpen(true)} aria-label="Открыть поиск"><AppIcon name="search" /></button>
-            <button className="create" onClick={() => setTaskOpen(true)} aria-label="Создать задачу"><AppIcon name="plus" /></button>
           </div>
           <div className="top-actions">
             <div className="scope-switcher" aria-label="Рабочий контекст">
               <label><span className="sr-only">Филиал</span><select aria-label="Выбрать филиал" value={selectedBranch} onChange={(event) => changeBranch(event.target.value)}>{administrative ? <option value="ALL">Все филиалы</option> : null}{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
             </div>
-            <button className="freshness" onClick={() => openModule("integrations")}><span /> Данных пока нет</button>
-            <button className="top-icon-action create" onClick={() => setTaskOpen(true)} aria-label="Быстро создать задачу" title="Быстро создать"><AppIcon name="plus" /></button>
-            <button className="top-icon-action" onClick={() => openModule("tasks")} aria-label={`Открыть задачи: ${tasks.length}`} title="Задачи"><AppIcon name="tasks" />{tasks.length > 0 ? <b>{tasks.length}</b> : null}</button>
+            {isModuleAllowed("integrations") ? <button className="freshness" onClick={() => openModule("integrations")}><span /> Данных пока нет</button> : null}
+            {isModuleAllowed("tasks") ? <button className="top-icon-action create" onClick={() => setTaskOpen(true)} aria-label="Быстро создать задачу" title="Быстро создать"><AppIcon name="plus" /></button> : null}
+            {isModuleAllowed("tasks") ? <button className="top-icon-action" onClick={() => openModule("tasks")} aria-label={`Открыть задачи: ${tasks.length}`} title="Задачи"><AppIcon name="tasks" />{tasks.length > 0 ? <b>{tasks.length}</b> : null}</button> : null}
             <button className="top-icon-action" onClick={() => setNotice("Новых системных уведомлений нет")} aria-label="Уведомления" title="Уведомления"><AppIcon name="bell" /></button>
             <button className="role-switch" onClick={() => setSettingsOpen(true)}><span>{role}</span></button>
           </div>
         </header>
 
-        {active !== "home" ? (
+        {routedActive !== "home" ? (
           <div className="context-bar">
             <button className="back-action" onClick={goBack}><AppIcon name="back" />Назад</button>
             <nav aria-label="Хлебные крошки">
@@ -380,64 +427,66 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
         ) : null}
 
         <div className="content-frame" ref={contentRef}>
-          <div className="route-stage" key={active}>
+          <div className="route-stage" key={routedActive}>
           <Suspense fallback={<section className="workspace-loading" aria-live="polite"><span /><strong>Открываем рабочее пространство…</strong><small>Контекст и навигация уже доступны</small></section>}>
-          {manualFirstModules.has(active) ? (
-            <ManualStartWorkspace module={active} selectedBranch={selectedBranch} branches={branches} openSettings={() => setSettingsOpen(true)} openIntegrations={() => openModule("integrations")} />
-          ) : active === "home" ? (
+          {manualFirstModules.has(routedActive) ? (
+            <ManualStartWorkspace module={routedActive} selectedBranch={selectedBranch} branches={branches} openSettings={() => setSettingsOpen(true)} openIntegrations={() => openModule("integrations")} />
+          ) : routedActive === "home" ? (
             <HomeView
               displayName={displayName}
+              userKey={authenticatedUser?.userId ?? ""}
               role={role}
               setActive={openModule}
               setDrawer={setDrawer}
               createTask={() => setTaskOpen(true)}
               tasks={tasks}
+              availableModules={availableDashboardModules}
               sourceOnly
             />
-          ) : active === "tasks" ? (
+          ) : routedActive === "tasks" ? (
             <WorkflowWorkspace role={role} notify={setNotice} onChanged={loadTasks} />
-          ) : active === "registry" ? (
-            <RegistryWorkspace notify={setNotice} />
-          ) : active === "finance" ? (
+          ) : routedActive === "registry" ? (
+            <RegistryWorkspace notify={setNotice} capabilities={registryAccess} />
+          ) : routedActive === "finance" ? (
             <FinanceWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} focusId={moduleFocus?.module === "finance" ? moduleFocus.id : undefined} />
-          ) : active === "sales" ? (
-            <SalesWorkspace workspace="sales" role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenFinance={() => openModule("finance")} focusId={moduleFocus?.module === "sales" ? moduleFocus.id : undefined} />
-          ) : active === "clients" ? (
+          ) : routedActive === "sales" ? (
+            <SalesWorkspace workspace="sales" role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenFinance={() => openModule("finance")} onOpenIntegrations={() => openModule("integrations")} focusId={moduleFocus?.module === "sales" ? moduleFocus.id : undefined} />
+          ) : routedActive === "clients" ? (
             <FamilyWorkspace notify={setNotice} onOpenIntegrations={() => openModule("integrations")} onNavigate={(module, focusId) => openModule(module, focusId)} />
-          ) : active === "content" ? (
+          ) : routedActive === "content" ? (
             <ContentWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenSales={() => openModule("sales")} onOpenFinance={() => openModule("finance")} />
-          ) : active === "education" || active === "methods" ? (
-            <EducationWorkspace key={active} workspace={active} role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenIntegrations={() => openModule("integrations")} focusId={moduleFocus?.module === "education" ? moduleFocus.id : undefined} />
-          ) : active === "hr" ? (
+          ) : routedActive === "education" || routedActive === "methods" ? (
+            <EducationWorkspace key={routedActive} workspace={routedActive} role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenIntegrations={() => openModule("integrations")} focusId={moduleFocus?.module === "education" ? moduleFocus.id : undefined} />
+          ) : routedActive === "hr" ? (
             <HrWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenDocuments={(focusId) => openModule("legal", focusId)} />
-          ) : active === "legal" ? (
+          ) : routedActive === "legal" ? (
             <LegalWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenIntegrations={() => openModule("integrations")} focusId={moduleFocus?.module === "legal" ? moduleFocus.id : undefined} />
-          ) : active === "procurement" ? (
+          ) : routedActive === "procurement" ? (
             <ProcurementWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenFinance={() => openModule("finance")} />
-          ) : active === "food" ? (
+          ) : routedActive === "food" ? (
             <FoodWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenFinance={() => openModule("finance")} />
-          ) : active === "safety" ? (
+          ) : routedActive === "safety" ? (
             <SafetyWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenFinance={() => openModule("finance")} />
-          ) : active === "medical" ? (
+          ) : routedActive === "medical" ? (
             <MedicalWorkspace role={role} notify={setNotice} />
-          ) : active === "accounting" ? (
+          ) : routedActive === "accounting" ? (
             <AccountingWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenFinance={() => openModule("finance")} />
-          ) : active === "projects" ? (
+          ) : routedActive === "projects" ? (
             <StrategyWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} />
-          ) : active === "contractors" ? (
+          ) : routedActive === "contractors" ? (
             <ContractorWorkspace notify={setNotice} onOpenFinance={() => openModule("finance")} />
-          ) : active === "access" ? (
+          ) : routedActive === "access" ? (
             <AccessWorkspace role={role} notify={setNotice} />
-          ) : active === "events" || active === "assets" || active === "quality" ? (
-            <SystemWorkspace module={active} role={role} notify={setNotice} createTask={() => setTaskOpen(true)} navigate={openModule} />
-          ) : active === "integrations" ? (
+          ) : routedActive === "events" || routedActive === "assets" || routedActive === "quality" ? (
+            <SystemWorkspace module={routedActive} role={role} notify={setNotice} createTask={() => setTaskOpen(true)} navigate={openModule} />
+          ) : routedActive === "integrations" ? (
             <IntegrationWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} />
-          ) : active === "analytics" ? (
+          ) : routedActive === "analytics" ? (
             <AnalyticsWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} />
-          ) : active === "acceptance" ? (
+          ) : routedActive === "acceptance" ? (
             <ReadinessWorkspace role={role} notify={setNotice} />
           ) : (
-            <EmptyModuleWorkspace module={active} openIntegrations={() => openModule("integrations")} />
+            <EmptyModuleWorkspace module={routedActive} openIntegrations={() => openModule("integrations")} />
           )}
           </Suspense>
           </div>
@@ -448,12 +497,12 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
       {taskOpen ? <TaskModal close={() => setTaskOpen(false)} refresh={loadTasks} notify={setNotice} /> : null}
       {notice ? <div className="toast" role="status">{notice}<button onClick={() => setNotice(null)}>×</button></div> : null}
       {navOpen ? <button className="nav-scrim" aria-label="Закрыть меню" onClick={() => setNavOpen(false)} /> : null}
-      {commandOpen ? <CommandPalette tasks={tasks} close={() => setCommandOpen(false)} navigate={(id) => { openModule(id); setCommandOpen(false); }} createTask={() => { setCommandOpen(false); setTaskOpen(true); }} /> : null}
+      {commandOpen ? <CommandPalette tasks={tasks} allowedModules={allowedModuleIds} close={() => setCommandOpen(false)} navigate={(id) => { openModule(id); setCommandOpen(false); }} createTask={() => { setCommandOpen(false); setTaskOpen(true); }} /> : null}
       {settingsOpen ? <Suspense fallback={<div className="settings-layer"><button className="drawer-scrim" onClick={() => setSettingsOpen(false)} aria-label="Закрыть настройки" /><section className="settings-modal" role="dialog" aria-modal="true" aria-label="Настройки"><div className="settings-state"><strong>Открываем настройки…</strong><span>Проверяем роль владельца и доступные филиалы</span></div></section></div>}><SettingsWorkspace close={() => setSettingsOpen(false)} notify={setNotice} onContextChanged={applyAccessContext} /></Suspense> : null}
       <nav className="mobile-dock" aria-label="Мобильная навигация">
-        <button className={active === "home" ? "active" : ""} onClick={() => openModule("home")}><AppIcon name="home" /><span>Главная</span></button>
-        <button className={active === "tasks" ? "active" : ""} onClick={() => openModule("tasks")}><AppIcon name="tasks" /><span>Задачи</span></button>
-        <button className="mobile-create" onClick={() => setTaskOpen(true)}><AppIcon name="plus" /><span>Создать</span></button>
+        <button className={routedActive === "home" ? "active" : ""} onClick={() => openModule("home")}><AppIcon name="home" /><span>Главная</span></button>
+        {isModuleAllowed("tasks") ? <button className={routedActive === "tasks" ? "active" : ""} onClick={() => openModule("tasks")}><AppIcon name="tasks" /><span>Задачи</span></button> : null}
+        {isModuleAllowed("tasks") ? <button className="mobile-create" onClick={() => setTaskOpen(true)}><AppIcon name="plus" /><span>Создать</span></button> : null}
         <button onClick={() => setCommandOpen(true)}><AppIcon name="search" /><span>Поиск</span></button>
         <button onClick={() => setNavOpen(true)}><AppIcon name="registry" /><span>Разделы</span></button>
       </nav>
@@ -463,27 +512,33 @@ export default function ArtHelloShell({ displayName }: { displayName: string }) 
 
 function HomeView({
   displayName,
+  userKey,
   role,
   setActive,
   setDrawer,
   createTask,
   tasks,
+  availableModules,
   sourceOnly,
 }: {
   displayName: string;
+  userKey: string;
   role: string;
   setActive: (id: ModuleId) => void;
   setDrawer: (value: DrawerData) => void;
   createTask: () => void;
   tasks: Task[];
+  availableModules: ReadonlyArray<{ id: ModuleId; label: string }>;
   sourceOnly: boolean;
 }) {
-  const profile = dashboardProfiles[role] ?? dashboardProfiles.Сотрудник;
+  const profile = dashboardProfiles[role] ?? { label: role || dashboardProfiles.Сотрудник.label };
   return (
     <OwnerDashboard
       displayName={displayName}
+      userKey={userKey}
       roleLabel={profile.label}
       tasks={tasks}
+      availableModules={availableModules}
       sourceOnly={sourceOnly}
       navigate={setActive}
       createTask={createTask}
@@ -544,11 +599,13 @@ function EmptyModuleWorkspace({ module, openIntegrations }: { module: ModuleId; 
 
 function CommandPalette({
   tasks,
+  allowedModules,
   close,
   navigate,
   createTask,
 }: {
   tasks: Task[];
+  allowedModules: ReadonlySet<ModuleId>;
   close: () => void;
   navigate: (id: ModuleId) => void;
   createTask: () => void;
@@ -556,9 +613,9 @@ function CommandPalette({
   const [commandQuery, setCommandQuery] = useState("");
   const clean = commandQuery.trim().toLocaleLowerCase("ru-RU");
   const items = [
-    ...moduleCatalog.map((item) => ({ id: `module-${item.id}`, label: item.label, type: "Раздел", meta: item.group, module: item.id as ModuleId })),
-    ...entitySearchIndex,
-    ...tasks.map((task) => ({ id: `task-${task.id}`, label: task.title, type: "Задача", meta: `${task.owner} · ${task.status}`, module: "tasks" as ModuleId })),
+    ...moduleCatalog.filter((item) => allowedModules.has(item.id)).map((item) => ({ id: `module-${item.id}`, label: item.label, type: "Раздел", meta: item.group, module: item.id as ModuleId })),
+    ...entitySearchIndex.filter((item) => allowedModules.has(item.module)),
+    ...(allowedModules.has("tasks") ? tasks.map((task) => ({ id: `task-${task.id}`, label: task.title, type: "Задача", meta: `${task.owner} · ${task.status}`, module: "tasks" as ModuleId })) : []),
   ].filter((item) => !clean || `${item.id} ${item.label} ${item.type} ${item.meta}`.toLocaleLowerCase("ru-RU").includes(clean)).slice(0, 12);
 
   return (
@@ -571,9 +628,9 @@ function CommandPalette({
           <kbd>Esc</kbd>
         </header>
         <div className="command-quick">
-          <button onClick={createTask}><AppIcon name="plus" /><span><strong>Создать задачу</strong><small>Сохранить в рабочем контуре</small></span></button>
-          <button onClick={() => navigate("integrations")}><AppIcon name="integrations" /><span><strong>Проверить источники</strong><small>Авторизация, передача и журнал подключений</small></span></button>
-          <button onClick={() => navigate("analytics")}><AppIcon name="analytics" /><span><strong>Открыть аналитику</strong><small>Метрики, сигналы и AI-контракты</small></span></button>
+          {allowedModules.has("tasks") ? <button onClick={createTask}><AppIcon name="plus" /><span><strong>Создать задачу</strong><small>Сохранить в рабочем контуре</small></span></button> : null}
+          {allowedModules.has("integrations") ? <button onClick={() => navigate("integrations")}><AppIcon name="integrations" /><span><strong>Проверить источники</strong><small>Авторизация, передача и журнал подключений</small></span></button> : null}
+          {allowedModules.has("analytics") ? <button onClick={() => navigate("analytics")}><AppIcon name="analytics" /><span><strong>Открыть аналитику</strong><small>Метрики, сигналы и AI-контракты</small></span></button> : null}
         </div>
         <div className="command-results">
           <p>{clean ? `Результаты по запросу «${commandQuery}»` : "Разделы и недавние объекты"}</p>
@@ -639,4 +696,3 @@ function initials(name: string) {
   const parts = name.split(/[\s@.]+/).filter(Boolean).slice(0, 2);
   return parts.map((part) => part[0]?.toUpperCase()).join("") || "ВО";
 }
-

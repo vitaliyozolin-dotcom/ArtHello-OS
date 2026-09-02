@@ -2,20 +2,27 @@ import { eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
 import { auditEvents, entities, safetyChecks, safetyEquipment, safetyFaults, safetyIncidents, safetyNextChecks, safetyRepairs, safetySystems, tasks } from "../../../db/schema";
 import { nextSafetyCheck } from "../../../lib/safety";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { isTaskManager, resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
+import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
 
 const editors = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "SAFETY"]);
 
 export async function POST(request: Request) {
-  const actor = getRequestUser(request);
-  if (!actor) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
-  if (!editors.has(role)) return Response.json({ error: "Нет прав на действие безопасности" }, { status: 403 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  const actor = context.actor;
+  if (!editors.has(context.apiRole)) return Response.json({ error: "Нет прав на действие безопасности" }, { status: 403 });
   try {
     await ensureCoreTables();
     const body = await request.json() as Record<string, unknown>;
     const action = clean(body.action, 50);
-    if (action === "createFaultTask") return faultTask(actor, body);
+    if (action === "createFaultTask") return faultTask(context, body);
     if (action === "completeRepair") return completeRepair(actor, body);
     if (action === "recordIncident") return incident(actor, body);
     if (action === "scheduleCheck") return scheduleCheck(actor, body);
@@ -25,20 +32,24 @@ export async function POST(request: Request) {
   }
 }
 
-async function faultTask(actor: string, body: Record<string, unknown>) {
+async function faultTask(context: TaskAccessContext, body: Record<string, unknown>) {
+  const actor = context.actor;
   const id = clean(body.faultId, 80);
   const assigneeEntityId = clean(body.assigneeEntityId, 80);
   const db = getDb();
   const key = `SAFETY_FAULT:${id}`;
   const [fault] = await db.select().from(safetyFaults).where(eq(safetyFaults.id, id)).limit(1);
   if (!fault) return Response.json({ error: "Неисправность не найдена" }, { status: 404 });
-  if (assigneeEntityId && !(await isWorkingEntity(assigneeEntityId))) return Response.json({ error: "Исполнитель не найден в рабочем справочнике" }, { status: 400 });
-  const [existing] = await db.select().from(tasks).where(eq(tasks.automationKey, key)).limit(1);
-  if (existing) return Response.json({ task: existing, reused: true });
+  const assignment = resolveTaskAssignment(context, assigneeEntityId, actor);
+  if (!assignment.ok) return Response.json({ error: assignment.error }, { status: assignment.status });
+  if (isTaskManager(context) && assignment.assigneeEntityId && !(await isWorkingEntity(assignment.assigneeEntityId))) return Response.json({ error: "Исполнитель не найден в рабочем справочнике" }, { status: 400 });
+  const existing = await findScopedAutomationTask(db, context, key);
+  const existingResponse = scopedAutomationTaskResponse(existing);
+  if (existingResponse) return existingResponse;
   const dueDate = dateAfterDays(fault.severity === "Критичный" ? 1 : 3);
-  const [task] = await db.insert(tasks).values({ title: `Устранить неисправность · ${fault.equipmentId}`, owner: actor, dueDate, priority: fault.severity, status: "Входящие", sourceType: "Неисправность безопасности", sourceId: id, description: fault.description, assigneeEntityId, kind: "Автозадача", automationKey: key, requiresApproval: true, createdBy: actor }).returning();
+  const [task] = await db.insert(tasks).values({ title: `Устранить неисправность · ${fault.equipmentId}`, owner: assignment.owner, dueDate, priority: fault.severity, status: "Входящие", sourceType: "Неисправность безопасности", sourceId: id, description: fault.description, assigneeEntityId: assignment.assigneeEntityId, kind: "Автозадача", automationKey: key, requiresApproval: true, createdByUserId: context.appUserId, createdBy: actor }).returning();
   await db.update(safetyFaults).set({ relatedTaskId: task.id, status: "В работе" }).where(eq(safetyFaults.id, id));
-  await audit(actor, "safety.fault_task_created", "safety_fault", id, { taskId: task.id, assigneeEntityId });
+  await audit(actor, "safety.fault_task_created", "safety_fault", id, { taskId: task.id, assigneeEntityId: assignment.assigneeEntityId });
   return Response.json({ task }, { status: 201 });
 }
 

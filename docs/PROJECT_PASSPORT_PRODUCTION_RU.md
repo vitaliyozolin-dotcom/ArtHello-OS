@@ -463,3 +463,14 @@ decision:
       status: open
 
 ```
+
+## Дополнение 2026-09-02 — настраиваемая Главная, роли, карточки и Точка
+
+- статус: `approved-for-release`; владелец явно поручил изменения и production-развёртывание, фактическое завершение подтверждается только successful run защищённого workflow;
+- release branch: `codex/owner-dashboard-tochka-20260902`;
+- решение: D-043 в `DECISIONS.md`;
+- область: ролевые и персональные раскладки Главной; единая fail-closed карта навигации и API; ручное происхождение единых карточек без самопроверки; owner-only ввод и AES-GCM хранение JWT Точки на уровне юридического лица/customerCode; построчная классификация смешанных поступлений;
+- совместимость: School SSO остаётся отдельным одноразовым PKCE-контуром; медицинские данные требуют отдельного активного допуска;
+- данные: cutover обязан сохранить существующий D1 volume, выполнить clone-preflight, инвентаризацию, rollback snapshot и проверку неизменности зашифрованных credentials; демонстрационные данные и JWT в репозиторий/CI не добавляются;
+- доказательство: exact Docker assembly, сборка, lint, полный test suite, runtime owner/employee/RBAC/SSO acceptance, successful hosted Verify и Quality gates, protected `production-ru` rollout, публичные ArtHello и School health-checks;
+- rollback: прежний контейнер и отдельный rollback volume сохраняются; при любой ошибке данные, маршрут Caddy и прежний контейнер восстанавливаются до выдачи success.

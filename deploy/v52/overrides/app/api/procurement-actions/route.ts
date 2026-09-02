@@ -2,15 +2,23 @@ import { eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
 import { assetMaintenance, auditEvents, entities, inventoryEvents, inventoryItems, procurementDeliveries, procurementSuppliers, purchaseOrders, purchaseRequests, supplierOffers, tasks } from "../../../db/schema";
 import { stockAfter } from "../../../lib/procurement";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { isTaskManager, resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
+import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
 
 const editors = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "PROCUREMENT"]);
 const leaders = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE"]);
 
 export async function POST(request: Request) {
-  const actor = getRequestUser(request);
-  if (!actor) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  const actor = context.actor;
+  const role = context.apiRole;
   if (!editors.has(role)) return Response.json({ error: "Нет прав на действие закупки" }, { status: 403 });
   try {
     await ensureCoreTables();
@@ -21,7 +29,7 @@ export async function POST(request: Request) {
     if (action === "selectOffer") return selectOffer(actor, body);
     if (action === "receiveDelivery") return receive(actor, body);
     if (action === "inventoryEvent") return inventory(actor, body);
-    if (action === "createMaintenanceTask") return maintenanceTask(actor, body);
+    if (action === "createMaintenanceTask") return maintenanceTask(context, body);
     return Response.json({ error: "Неизвестное действие" }, { status: 400 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Действие не выполнено" }, { status: 500 });
@@ -128,17 +136,21 @@ async function inventory(actor: string, body: Record<string, unknown>) {
   return Response.json({ event, quantity: next }, { status: 201 });
 }
 
-async function maintenanceTask(actor: string, body: Record<string, unknown>) {
+async function maintenanceTask(context: TaskAccessContext, body: Record<string, unknown>) {
+  const actor = context.actor;
   const id = clean(body.maintenanceId, 80);
   const assigneeEntityId = clean(body.assigneeEntityId, 80);
   const db = getDb();
   const key = `ASSET_MAINT:${id}`;
   const [row] = await db.select().from(assetMaintenance).where(eq(assetMaintenance.id, id)).limit(1);
   if (!row) return Response.json({ error: "Обслуживание не найдено" }, { status: 404 });
-  if (assigneeEntityId && (isDemoReference(assigneeEntityId) || !(await entityExists(assigneeEntityId)))) return Response.json({ error: "Исполнитель не найден в рабочем справочнике" }, { status: 400 });
-  const [existing] = await db.select().from(tasks).where(eq(tasks.automationKey, key)).limit(1);
-  if (existing) return Response.json({ task: existing, reused: true });
-  const [task] = await db.insert(tasks).values({ title: `${row.maintenanceType} · ${row.assetId}`, owner: actor, dueDate: row.scheduledAt, priority: "Средний", status: "Входящие", sourceType: "Обслуживание имущества", sourceId: id, description: "Проверить гарантию, подрядчика, результат и закрывающий документ", assigneeEntityId, kind: "Автозадача", automationKey: key, requiresApproval: false, createdBy: actor }).returning();
+  const assignment = resolveTaskAssignment(context, assigneeEntityId, actor);
+  if (!assignment.ok) return Response.json({ error: assignment.error }, { status: assignment.status });
+  if (isTaskManager(context) && assignment.assigneeEntityId && (isDemoReference(assignment.assigneeEntityId) || !(await entityExists(assignment.assigneeEntityId)))) return Response.json({ error: "Исполнитель не найден в рабочем справочнике" }, { status: 400 });
+  const existing = await findScopedAutomationTask(db, context, key);
+  const existingResponse = scopedAutomationTaskResponse(existing);
+  if (existingResponse) return existingResponse;
+  const [task] = await db.insert(tasks).values({ title: `${row.maintenanceType} · ${row.assetId}`, owner: assignment.owner, dueDate: row.scheduledAt, priority: "Средний", status: "Входящие", sourceType: "Обслуживание имущества", sourceId: id, description: "Проверить гарантию, подрядчика, результат и закрывающий документ", assigneeEntityId: assignment.assigneeEntityId, kind: "Автозадача", automationKey: key, requiresApproval: false, createdByUserId: context.appUserId, createdBy: actor }).returning();
   await db.update(assetMaintenance).set({ relatedTaskId: task.id, status: "Задача создана" }).where(eq(assetMaintenance.id, id));
   return Response.json({ task }, { status: 201 });
 }

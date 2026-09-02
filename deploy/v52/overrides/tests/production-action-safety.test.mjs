@@ -36,8 +36,8 @@ test("new operational records use live timestamps, real actors and validated ref
   assert.match(accounting, /entities\.id,counterparty/);
   assert.match(analytics, /modelVersion: "MANUAL-CONTROL-v1"/);
   assert.match(analytics, /inputSnapshotRef: `CONTRACT:/);
-  assert.match(sales, /const assigneeEntityId = await verifiedEntityId/);
-  assert.match(finance, /owner: actor/);
+  assert.match(sales, /resolveTaskAssignment\(context, lead\.managerEntityId, actor\)/);
+  assert.match(finance, /owner: assignment\.owner/);
   assert.match(integration, /isCoreConnection\(connection\)/);
   assert.match(hr, /period:new Date\(\)\.toISOString\(\)\.slice\(0,7\)/);
 });
@@ -48,7 +48,9 @@ function transpileAnalytics(source) {
     ['import { ensureAnalyticsDemoBootstrap, ensureCoreTables, getDb, getSystemDataMode } from "../../../db";', "const {ensureAnalyticsDemoBootstrap,ensureCoreTables,getDb,getSystemDataMode}=globalThis.__ARTHELLO_ANALYTICS_ACTION_TEST__;"],
     ['import { aiModelRuns, aiOptOuts, aiProcessContracts, analyticsSignals, auditEvents, tasks } from "../../../db/schema";', "const aiModelRuns={},aiOptOuts={},aiProcessContracts={id:{}},analyticsSignals={id:{}},auditEvents={},tasks={automationKey:{}};"],
     ['import { canRecordHumanDecision, canRunContract } from "../../../lib/analytics";', "const canRecordHumanDecision=()=>true,canRunContract=()=>true;"],
-    ['import { getRequestUser } from "../../../lib/request-user";', "const {getRequestUser}=globalThis.__ARTHELLO_ANALYTICS_ACTION_TEST__;"],
+    ['import { getAuthenticatedRequestContext } from "../../../lib/production-auth";', "const {getAuthenticatedRequestContext}=globalThis.__ARTHELLO_ANALYTICS_ACTION_TEST__;"],
+    ['import { resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";', "const resolveTaskAssignment=()=>({ok:true,assigneeEntityId:'USR-LIVE',owner:'Live user'});"],
+    ['import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";', "const findScopedAutomationTask=async()=>({state:'missing'}),scopedAutomationTaskResponse=()=>null;"],
   ];
   let transformed = source;
   for (const [from, to] of replacements) {
@@ -78,7 +80,7 @@ test("empty production rejects only the model run before database access", async
       databaseCalls += 1;
       return { select: () => emptySelect };
     },
-    getRequestUser: () => "USR-LIVE",
+    getAuthenticatedRequestContext: async () => ({ actor: "live@example.test", apiRole: "OWNER", appUserId: "USR-LIVE", appUserName: "Live user" }),
   };
   try {
     const code = transpileAnalytics(read("../app/api/analytics-actions/route.ts"));

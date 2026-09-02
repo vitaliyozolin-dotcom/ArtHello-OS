@@ -1,15 +1,21 @@
 import { asc } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
-import { businessEvents, eventParticipants, strategyDeviations, strategyGoals, strategyInitiatives, strategyKpis, strategyProjects, strategyResults, tasks } from "../../../db/schema";
+import { businessEvents, eventParticipants, strategyDeviations, strategyGoals, strategyInitiatives, strategyKpis, strategyProjects, strategyResults } from "../../../db/schema";
 import { eventPortfolio, projectBudget } from "../../../lib/strategy";
-import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
 const roles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "PROJECTS", "FINANCE"]);
 
 export async function GET(request: Request) {
-  if (!getRequestUser(request)) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  const role = request.headers.get("x-arthello-role") ?? "";
-  if (!roles.has(role)) return Response.json({ error: "Нет доступа к стратегии и проектам" }, { status: 403 });
+  let context;
+  try {
+    context = await getAuthenticatedRequestContext(request);
+  } catch {
+    return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
+  }
+  if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  if (!roles.has(context.apiRole)) return Response.json({ error: "Нет доступа к стратегии и проектам" }, { status: 403 });
   try {
     await ensureCoreTables();
     const db = getDb();
@@ -22,7 +28,7 @@ export async function GET(request: Request) {
       db.select().from(eventParticipants),
       db.select().from(strategyResults),
       db.select().from(strategyDeviations),
-      db.select().from(tasks),
+      selectVisibleTasks(db, context),
     ]);
     const project = projects[0];
     const initiative = (project ? initiatives.find((item) => item.id === project.initiativeId) : undefined) ?? initiatives[0];
@@ -39,7 +45,7 @@ export async function GET(request: Request) {
       events,
       participants,
       results,
-      deviations,
+      deviations: redactHiddenTaskReferences(deviations, allTasks),
       tasks: allTasks.filter((item) => item.sourceType === "Проект" || item.sourceType === "Отклонение KPI"),
       summary: {
         goals: goals.length,
