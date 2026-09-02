@@ -1,0 +1,67 @@
+name: Probe School SSO exchange origin policy
+
+on:
+  push:
+    branches:
+      - ops/diagnose-school-staff-sso-20260902
+    paths:
+      - .github/workflows/probe-school-sso-exchange-origin-20260902.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+
+jobs:
+  probe:
+    if: github.actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 5
+    steps:
+      - name: Compare exchange request origins
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$(mktemp -d "$RUNNER_TEMP/sso-origin-XXXXXX")"
+          trap 'rm -rf -- "$work"' EXIT
+          code="$(printf 'a%.0s' $(seq 1 43))"
+          verifier="$(printf 'b%.0s' $(seq 1 43))"
+          body="{\"code\":\"$code\",\"codeVerifier\":\"$verifier\"}"
+
+          probe() {
+            local name="$1"
+            shift
+            local status
+            status="$(curl -sS --max-time 20 \
+              -o "$work/$name.json" -w '%{http_code}' \
+              -X POST "$ARTHELLO_ORIGIN/api/school-sso/exchange" \
+              -H 'content-type: application/json' \
+              "$@" --data "$body")"
+            printf 'ARTHELLO_SSO_%s_STATUS=%s\n' "$name" "$status"
+            python3 - "$work/$name.json" "$name" <<'PY'
+          import json, pathlib, sys
+          raw=pathlib.Path(sys.argv[1]).read_text()
+          name=sys.argv[2]
+          try:
+              payload=json.loads(raw)
+          except Exception:
+              print(f'ARTHELLO_SSO_{name}_JSON=no')
+              raise SystemExit(0)
+          error=str(payload.get('error',''))
+          known={
+              'Запрос отклонён системой безопасности':'origin_rejected',
+              'Одноразовый код входа истёк или уже использован':'application_invalid_code',
+              'Одноразовый код входа недействителен':'application_invalid_code',
+          }
+          print(f'ARTHELLO_SSO_{name}_JSON=yes')
+          print(f'ARTHELLO_SSO_{name}_ERROR_CLASS='+known.get(error,'other_app_error' if error else 'none'))
+          PY
+          }
+
+          probe NO_ORIGIN
+          probe ARTHELLO_ORIGIN -H "origin: $ARTHELLO_ORIGIN"
+          probe SCHOOL_ORIGIN -H "origin: $SCHOOL_ORIGIN"
+          printf 'ARTHELLO_SSO_ORIGIN_PROBE=PASS\n'
