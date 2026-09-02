@@ -19,14 +19,14 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_SHA: 4a1476c83fd0245101a8e81ab9edc192b8462dd9
-  RELEASE_TREE: f1081a9f6a4017aaab668e463fd7fb992f5f93a1
-  RELEASE_PR: '291'
-  VALIDATED_SHA: feddbd90ea51b0b87b0d0aa7d0e58f7d76c2cabf
-  VALIDATION_RUN_ID: '33559677859'
+  RELEASE_SHA: af1f262abdbdfa0db6bf6db2262efe9bb0c029b0
+  RELEASE_TREE: 66e0b81f6a81309f096acf0b61c3451d87e9c804
+  RELEASE_PR: '301'
+  VALIDATED_SHA: 75c01c2c2cc5e371d6cd87b013dcf98026d9bd6b
+  VALIDATION_RUN_ID: '33591551705'
   VALIDATION_WORKFLOW_ID: '346579718'
-  CUTOVER_SHA256: 2e6f44791506be392a4f772e1dd08d50e01bd50015a87f7558da8e05fdc7fb7b
-  VERIFY_SHA256: 91d5d382b7442d146f8ce139afa1f19998001154c62243afe3c82949a66c8c42
+  CUTOVER_SHA256: 8ea55162ccbee073a7682e68ad1d57fc9266988f08ab47be35e89fb1e6425a76
+  VERIFY_SHA256: 9f2839de7fff8e573c3b7a44262eb90fd6bfe79c1fd41d75ed747ca0f75d4727
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
 
@@ -92,9 +92,10 @@ jobs:
 
           pr_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/pulls/$RELEASE_PR")"
           jq -e \
+            --argjson release_pr "$RELEASE_PR" \
             --arg validated_sha "$VALIDATED_SHA" \
             --arg release_sha "$RELEASE_SHA" \
-            '.number == 291 and
+            '.number == $release_pr and
              .state == "closed" and
              .merged == true and
              .head.sha == $validated_sha and
@@ -606,10 +607,17 @@ jobs:
           fetch_remote_log | tee -a "$log_file"
           grep -Fx 'SCHOOL_STANDALONE_SOURCE=VERIFIED' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_PREFLIGHT=PASS' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_PROTECTED_SCHEDULE_PREFLIGHT=PASS' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_FINAL_BACKUP=VERIFIED' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_LIVE_IMPORT=VERIFIED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_PROTECTED_SCHEDULE_LIVE=PASS' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_COMMIT=ROLLBACK_DISABLED' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_RELEASE_DATA=PASS' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_PUBLIC_HTTPS=OK' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_FULLSCREEN_CSS=VERIFIED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_PUBLIC_SSO=VERIFIED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_PUBLIC_FAMILY_LOGIN=VERIFIED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_MAINTENANCE=RELEASED' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_CUTOVER=PASS' "$log_file" >/dev/null
           grep -Fx "SCHOOL_DELIVERY_REF=$RELEASE_SHA" "$log_file" >/dev/null
           grep -Fx 'SCHOOL_RELEASE_SCHEDULE_ROWS=189' "$log_file" >/dev/null
@@ -680,6 +688,107 @@ jobs:
           printf 'SCHOOL_PUBLIC_FAMILY_LOGIN=VERIFIED\n'
           printf 'SCHOOL_MAINTENANCE=RELEASED\n'
 
+      - name: Re-gate after failed external verification
+        id: regate_public_failure
+        if: >-
+          always() &&
+          steps.configure_ssh.outcome == 'success' &&
+          steps.deploy_school.outcome == 'success' &&
+          steps.verify_public.outcome != 'success'
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+          SSH_KEY_PATH: ${{ steps.configure_ssh.outputs.key_path }}
+          SSH_KNOWN_HOSTS_PATH: ${{ steps.configure_ssh.outputs.known_hosts_path }}
+        run: |
+          set -Eeuo pipefail
+          deploy_port="${DEPLOY_PORT:-2222}"
+          ssh_args=(
+            -T
+            -p "$deploy_port"
+            -i "$SSH_KEY_PATH"
+            -o UserKnownHostsFile="$SSH_KNOWN_HOSTS_PATH"
+            -o GlobalKnownHostsFile=/dev/null
+            -o StrictHostKeyChecking=yes
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o ConnectTimeout=140
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=30
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+          remote_payload="$(base64 -w0 <<'REMOTE'
+          set -Eeuo pipefail
+          production=school-1-11
+          origin=https://school-188-225-38-55.sslip.io
+          test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
+          data_volume="$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          image_id="$(docker inspect "$production" --format '{{.Image}}')"
+          [[ "$data_volume" =~ ^[A-Za-z0-9_.-]+$ ]]
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          docker run --rm \
+            --network none \
+            --read-only \
+            --user 0:0 \
+            --security-opt no-new-privileges:true \
+            --volume "$data_volume:/data" \
+            --entrypoint /bin/sh \
+            "$image_id" -c '
+              set -eu
+              target=/data/.school-deploy-read-only
+              tmp="${target}.tmp.$$"
+              rm -f "$tmp"
+              umask 022
+              printf "deployment read-only\n" > "$tmp"
+              chmod 0444 "$tmp"
+              mv -f "$tmp" "$target"
+              test -f "$target"
+              sync
+            '
+          docker exec "$production" test -f /data/.school-deploy-read-only
+          body="$(mktemp)"
+          headers="$(mktemp)"
+          trap 'rm -f -- "$body" "$headers"' EXIT
+          verified=0
+          for attempt in $(seq 1 15); do
+            : > "$body"
+            : > "$headers"
+            status="$(curl --silent --show-error --max-time 20 \
+              --output "$body" --dump-header "$headers" --write-out '%{http_code}' \
+              --request POST "$origin/api/school" \
+              --header "Origin: $origin" \
+              --header 'Content-Type: application/json' \
+              --data '{"action":"deployment.external-verification-failed"}' || true)"
+            if test "$status" = 503 \
+              && grep -Eq '"code"[[:space:]]*:[[:space:]]*"deployment_read_only"' "$body" \
+              && grep -Eiq '^Retry-After:[[:space:]]*30' "$headers"; then
+              verified=1
+              break
+            fi
+            sleep 2
+          done
+          test "$verified" -eq 1
+          health="$(curl --fail --silent --show-error --max-time 30 "$origin/api/health")"
+          grep -F '"status":"ok"' <<<"$health" >/dev/null
+          grep -F '"maintenance":true' <<<"$health" >/dev/null
+          printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=PASS\n'
+          REMOTE
+          )"
+          timeout --signal=TERM --kill-after=30s 480s \
+            ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "printf '%s' '$remote_payload' | base64 -d | bash" \
+            </dev/null
+
       - name: Remove temporary SSH material
         if: always()
         run: |
@@ -694,6 +803,7 @@ jobs:
           CONFIGURE_OUTCOME: ${{ steps.configure_ssh.outcome }}
           DEPLOY_OUTCOME: ${{ steps.deploy_school.outcome }}
           PUBLIC_OUTCOME: ${{ steps.verify_public.outcome }}
+          REGATE_OUTCOME: ${{ steps.regate_public_failure.outcome }}
         run: |
           set -Eeuo pipefail
           log_file="$RUNNER_TEMP/school-curriculum-deploy.log"
@@ -704,6 +814,7 @@ jobs:
             printf -- '- Protected SSH configuration: `%s`\n' "$CONFIGURE_OUTCOME"
             printf -- '- Release deployment: `%s`\n' "$DEPLOY_OUTCOME"
             printf -- '- Public verification: `%s`\n\n' "$PUBLIC_OUTCOME"
+            printf -- '- Failure re-gate: `%s`\n\n' "$REGATE_OUTCOME"
             printf 'Sanitized deployment markers:\n\n```text\n'
             if [ -f "$log_file" ]; then
               grep -E '^(SCHOOL_|Error:|error:|curl:|ssh:|Permission denied|Host key|Connection closed)' "$log_file" \
