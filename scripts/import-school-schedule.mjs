@@ -90,7 +90,7 @@ const users = new Map(
   db
     .prepare(
       `SELECT id, role, profile_status AS profileStatus
-      FROM users WHERE role = 'teacher'`,
+      FROM users WHERE role = 'teacher' AND status = 'active'`,
     )
     .all()
     .map((user) => [user.id, user]),
