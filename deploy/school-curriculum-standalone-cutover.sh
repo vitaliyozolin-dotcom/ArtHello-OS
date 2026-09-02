@@ -30,11 +30,33 @@ test "$VERIFY_SCRIPT" = "$JOB_DIR/verify-school-release.mjs"
 test "$SCHOOL_ORIGIN" = https://school-188-225-38-55.sslip.io
 test "$ARTHELLO_ORIGIN" = https://arthello-188-225-38-55.sslip.io
 
-exec 9>/var/lock/school-1-11-production.lock
+lock_path=/var/lock/school-1-11-production.lock
+exec 9>>"$lock_path"
 flock -n 9 || {
   printf 'SCHOOL_STANDALONE_LOCK=BUSY\n' >&2
   exit 75
 }
+
+cancel_record="cancel:${RELEASE_SHA}:${RUN_ID}:${RUN_ATTEMPT}"
+set +e
+grep -Fx "$cancel_record" "$lock_path" >/dev/null 2>&1
+cancel_record_rc=$?
+set -e
+case "$cancel_record_rc" in
+  0)
+    printf 'SCHOOL_STANDALONE_CANCEL=FENCED\n' >&2
+    exit 143
+    ;;
+  1) ;;
+  *)
+    printf 'SCHOOL_STANDALONE_CANCEL_FENCE=UNREADABLE\n' >&2
+    exit 75
+    ;;
+esac
+if [ -e "$JOB_DIR/cancel-request" ]; then
+  printf 'SCHOOL_STANDALONE_CANCEL=REQUESTED\n' >&2
+  exit 143
+fi
 
 production=school-1-11
 run_key="${RUN_ID}-${RUN_ATTEMPT}"
@@ -1037,9 +1059,9 @@ docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volu
       printf "release_sha=%s\n" "$RELEASE_SHA"
       printf "backup_file=%s\n" "$BACKUP_FILE"
       printf "backup_sha256=%s\n" "$BACKUP_SHA"
-    } > /rollback/manifest.tmp
-    chmod 0400 /rollback/manifest.tmp
-    mv /rollback/manifest.tmp /rollback/manifest
+    } > /rollback/state.tmp
+    chmod 0400 /rollback/state.tmp
+    mv /rollback/state.tmp /rollback/state
     sync
   '
 rollback_snapshot_ready=1
@@ -1106,7 +1128,7 @@ test "$final_proof_after" = "$final_backup_bytes:$final_backup_sha"
 test "$(running_volume_consumers "$data_volume")" = 1
 printf 'SCHOOL_STANDALONE_LIVE_IMPORT=VERIFIED\n'
 
-restore_restart_policy "$production"
+test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}')" = no
 test "$(docker inspect "$rollback" --format '{{.State.Running}}')" = false
 test "$(docker inspect "$rollback" --format '{{.HostConfig.RestartPolicy.Name}}')" = no
 trap 'pending_signal=129' HUP
@@ -1121,9 +1143,9 @@ docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volu
       printf "run_id=%s\n" "$RUN_ID"
       printf "run_attempt=%s\n" "$RUN_ATTEMPT"
       printf "release_sha=%s\n" "$RELEASE_SHA"
-    } > /rollback/commit.tmp
-    chmod 0400 /rollback/commit.tmp
-    mv /rollback/commit.tmp /rollback/commit
+    } > /rollback/state.tmp
+    chmod 0400 /rollback/state.tmp
+    mv -f /rollback/state.tmp /rollback/state
     sync
   '
 test ! -e "$JOB_DIR/commit-state"
@@ -1148,6 +1170,20 @@ if [ -e "$JOB_DIR/cancel-request" ]; then
 fi
 verify_application_contracts "$production" "$SCHOOL_ORIGIN"
 verify_public_release_contracts
+docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volume:/rollback"   --env RUN_ID="$RUN_ID"   --env RUN_ATTEMPT="$RUN_ATTEMPT"   --env RELEASE_SHA="$RELEASE_SHA"   --entrypoint /bin/sh "$image_id" -c '
+    set -eu
+    {
+      printf "phase=RELEASE_VERIFIED\n"
+      printf "run_id=%s\n" "$RUN_ID"
+      printf "run_attempt=%s\n" "$RUN_ATTEMPT"
+      printf "release_sha=%s\n" "$RELEASE_SHA"
+    } > /rollback/state.tmp
+    chmod 0400 /rollback/state.tmp
+    mv -f /rollback/state.tmp /rollback/state
+    sync
+  '
+restore_restart_policy "$production"
+printf 'SCHOOL_STANDALONE_RELEASE=VERIFIED\n'
 success=1
 postcommit=0
 
