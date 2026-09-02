@@ -23,100 +23,66 @@ jobs:
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 12
     steps:
-      - name: Inspect exact live ArtHello SSO implementation and D1 state
+      - name: Inspect live ArtHello D1 tables and SSO aggregates without mutation
         shell: bash
         run: |
           set -Eeuo pipefail
           container="$(docker ps --format '{{.Names}}' | grep -E '^arthello-direct-' | head -n1)"
           test -n "$container"
-
-          sanitize() {
-            python3 -c '
-          import re, sys
-          text=sys.stdin.read()
-          text=re.sub(r"([?&](?:code|state|code_challenge|code_verifier|token|session)=)[^&[:space:]\"\\]+", r"\1[REDACTED]", text, flags=re.I)
-          text=re.sub(r"(?i)(authorization|cookie|set-cookie)([=:][ \t]*)([^\r\n]+)", r"\1\2[REDACTED]", text)
-          text=re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[EMAIL]", text)
-          text=re.sub(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b", "[UUID]", text, flags=re.I)
-          text=re.sub(r"\b[A-Za-z0-9_-]{43,}\b", "[TOKEN]", text)
-          sys.stdout.write(text)
-          '
-          }
-
-          printf 'ARTHELLO_SSO_EXACT_SOURCE_BEGIN\n'
-          docker exec "$container" sh -lc "sed -n '34285,34535p' /app/dist/server/index.js" | sanitize
-          printf 'ARTHELLO_SSO_EXACT_SOURCE_END\n'
-
-          printf 'ARTHELLO_SSO_RUNTIME_BEGIN\n'
-          printf 'container=%s\n' "$container"
-          printf 'image=%s\n' "$(docker inspect "$container" --format '{{.Config.Image}}')"
-          printf 'started=%s\n' "$(docker inspect "$container" --format '{{.State.StartedAt}}')"
-          printf 'mounts='
-          docker inspect "$container" --format '{{range .Mounts}}{{.Type}}:{{.Destination}};{{end}}'
-          printf 'env_keys='
-          docker inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}' \
-            | cut -d= -f1 | grep -Ei 'DB|D1|STATE|PERSIST|SCHOOL|SSO|ORIGIN|AUTH|SESSION' | sort -u | paste -sd, - || true
-          printf 'ARTHELLO_SSO_RUNTIME_END\n'
-
-          printf 'ARTHELLO_SSO_SQLITE_FILES_BEGIN\n'
-          docker exec "$container" sh -lc \
-            "find /app /data /root /tmp -xdev -type f \\( -name '*.sqlite' -o -name '*.sqlite3' -o -name '*.db' \\) -printf '%s %p\n' 2>/dev/null | sort -n | tail -n 60" \
-            | sanitize || true
-          printf 'ARTHELLO_SSO_SQLITE_FILES_END\n'
-
-          printf 'ARTHELLO_SSO_D1_COUNTS_BEGIN\n'
+          printf 'ARTHELLO_D1_TABLE_AUDIT_BEGIN\n'
           docker exec -i "$container" node --input-type=module <<'NODE'
           import { readdirSync, statSync } from 'node:fs';
           import { join } from 'node:path';
           import { DatabaseSync } from 'node:sqlite';
 
-          const roots=['/app','/data','/root','/tmp'];
-          const seen=new Set();
+          const roots=['/data/d1','/data'];
           const files=[];
           function walk(path, depth=0){
-            if(depth>7 || seen.has(path)) return;
-            seen.add(path);
+            if(depth>8) return;
             let entries=[];
-            try{ entries=readdirSync(path,{withFileTypes:true}); }catch{return;}
+            try{entries=readdirSync(path,{withFileTypes:true});}catch{return;}
             for(const entry of entries){
               const next=join(path,entry.name);
-              if(entry.isDirectory()){
-                if(['node_modules','.git'].includes(entry.name)) continue;
-                walk(next,depth+1);
-              }else if(entry.isFile() && /\.(sqlite3?|db)$/i.test(entry.name)){
-                try{ if(statSync(next).size>0) files.push(next); }catch{}
+              if(entry.isDirectory()) walk(next,depth+1);
+              else if(entry.isFile() && /\.(sqlite3?|db)$/i.test(entry.name)){
+                try{if(statSync(next).size>8192) files.push(next);}catch{}
               }
             }
           }
           for(const root of roots) walk(root);
-          let matched=0;
-          for(const file of files){
+          for(const file of [...new Set(files)]){
             let db;
             try{
               db=new DatabaseSync(file,{readOnly:true});
-              const table=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='school_sso_codes'").get();
-              if(!table){ db.close(); continue; }
-              matched++;
-              const codes=db.prepare(`SELECT count(*) AS total,
-                sum(CASE WHEN used_at>0 THEN 1 ELSE 0 END) AS used,
-                sum(CASE WHEN used_at=0 AND expires_at>unixepoch() THEN 1 ELSE 0 END) AS open,
-                max(created_at) AS latestCreated,
-                max(used_at) AS latestUsed,
-                max(expires_at) AS latestExpiry
-                FROM school_sso_codes`).get();
-              const sessions=db.prepare("SELECT count(*) AS total, max(created_at) AS latestCreated FROM production_auth_sessions").get();
-              const users=db.prepare("SELECT count(*) AS total FROM app_users").get();
-              console.log(JSON.stringify({file,codes,sessions,users},null,2));
+              const tables=db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(row=>String(row.name));
+              const relevant=tables.filter(name=>/app_users|user_system_access|production_auth|school_sso|audit/i.test(name));
+              if(!relevant.length){db.close();continue;}
+              const result={file:file.replace(/[^/]+\.sqlite(?:3)?$/i,'[DB].sqlite'),tables:relevant};
+              const counts={};
+              for(const table of relevant){
+                if(!/^[A-Za-z0-9_]+$/.test(table)) continue;
+                try{counts[table]=db.prepare(`SELECT count(*) AS count FROM ${table}`).get().count;}catch{}
+              }
+              if(tables.includes('school_sso_codes')){
+                counts.schoolSsoAggregate=db.prepare(`SELECT count(*) AS total,
+                  sum(CASE WHEN used_at>0 THEN 1 ELSE 0 END) AS used,
+                  sum(CASE WHEN used_at=0 AND expires_at>unixepoch() THEN 1 ELSE 0 END) AS open,
+                  max(created_at) AS latestCreated,max(used_at) AS latestUsed,max(expires_at) AS latestExpiry
+                  FROM school_sso_codes`).get();
+              }
+              if(tables.includes('production_auth_sessions')){
+                counts.sessionAggregate=db.prepare(`SELECT count(*) AS total,max(created_at) AS latestCreated,max(expires_at) AS latestExpiry FROM production_auth_sessions`).get();
+              }
+              if(tables.includes('user_system_access')){
+                counts.schoolGrantAggregate=db.prepare(`SELECT count(*) AS total,
+                  sum(CASE WHEN status='Активен' THEN 1 ELSE 0 END) AS active,
+                  max(access_version) AS maxVersion
+                  FROM user_system_access WHERE system_id='SYS-SCHOOL-1-11'`).get();
+              }
+              console.log(JSON.stringify({...result,counts},null,2));
               db.close();
-            }catch(error){ try{db?.close()}catch{} }
+            }catch(error){try{db?.close()}catch{}}
           }
-          console.log(JSON.stringify({matchedDatabases:matched,scannedSqliteFiles:files.length}));
           NODE
-          printf 'ARTHELLO_SSO_D1_COUNTS_END\n'
-
-          printf 'ARTHELLO_SSO_RECENT_LOGS_BEGIN\n'
-          docker logs --since 6h "$container" 2>&1 \
-            | grep -Ei 'school-sso|authorize|exchange|code|settings|TLS peer|certificate|error|statusCode.:40[013]|statusCode.:50[0-9]' \
-            | tail -n 420 | sanitize || true
-          printf 'ARTHELLO_SSO_RECENT_LOGS_END\n'
-          printf 'ARTHELLO_SSO_EXACT_DIAGNOSIS=PASS\n'
+          printf 'ARTHELLO_D1_TABLE_AUDIT_END\n'
+          printf 'ARTHELLO_D1_SSO_AUDIT=PASS\n'
