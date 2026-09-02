@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: school-1-11-production-probe
-  cancel-in-progress: true
+  group: school-1-11-production
+  cancel-in-progress: false
 
 jobs:
   probe:
