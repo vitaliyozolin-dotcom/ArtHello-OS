@@ -1,13 +1,13 @@
 # ArtHello OS — Архитектурный аудит и план рефакторинга
 
-Дата аудита: 2026-09-01. Ревизия плана: 2026-09-01 после первого Reviewer FAIL. Статус: REVISED DRAFT — до повторного независимого Reviewer PASS.
+Дата аудита: 2026-09-01. Ревизия плана: 2026-09-02 после удаления мёртвых workspace/UI-пакетов. Статус: REVISED DRAFT — до повторного независимого Reviewer PASS.
 Метод: полное исследование кодовой базы (артефакты, библиотеки, deploy-контур, CI, документация, тесты). Каждая находка привязана к файлам-доказательствам. Документ не дублирует открытые пункты `BACKLOG.md` — на них даются ссылки.
 
 ---
 
 ## 1. Инвентаризация
 
-**Монорепо (pnpm), 7 workspace-членов:**
+**Монорепо (pnpm), 8 workspace-членов:**
 
 | Пакет | Назначение | Объём |
 |---|---|---|
@@ -18,8 +18,9 @@
 | `lib/api-client-react` | Сгенерированный React Query клиент (80 хуков) + custom-fetch | ~18 400 строк |
 | `lib/api-zod` | Сгенерированные Zod-схемы | ~4 400 строк |
 | `scripts` | Sandbox-импортёры AlfaCRM/payroll на PGlite | ~5 700 строк |
+| `sites-control` | Owner-only статусная поверхность OpenAI Sites | статический UI + worker build |
 
-**Вне workspace:** `sites-control/` (3-й фронтенд → воркер для OpenAI Sites; владеет корневыми `dev`/`build`/`test`), `deploy/` (~22 000 строк TS/TSX/MJS, невидимых для tsc: v44/v52 School-контур на Cloudflare D1, третья реализация auth).
+**Вне workspace:** `deploy/` (~22 000 строк TS/TSX/MJS, невидимых для tsc: v44/v52 School-контур на Cloudflare D1, третья реализация auth).
 
 **Пути «commit → production» (3 активных после cleanup 2026-09-01):**
 1. **Sites control** — `pnpm build:sites` → воркер → ручная публикация через Sites CLI.
@@ -93,7 +94,7 @@
 - **Фрагментация роутов**: `/staff/*` в 3 файлах, `/coverage/*` в 2, finance в 6; произвольные суффиксы (`-module`, `-complete`, `-hr`, `-core`, `-qa`); смесь default/named exports в `routes/index.ts`.
 - **Слои**: `routes/auth.ts` экспортирует глобальные middleware (место — `src/lib/security/`, где уже 11 файлов); 4 стиля доступа к БД (drizzle builder — 24 файла, `db.execute(sql)` — 11, raw `pool.query` — 12, PGlite в scripts); 3 файла смешивают ORM и raw в одном модуле.
 - **SPA-роутинг**: wouter установлен, но `App.tsx` регистрирует 2 маршрута; вся навигация — `useState`-switch по 28-членному union в `AppShell.tsx` → нет deep links, back/forward, shareable URL.
-- **Workspace**: `sites-control` не член workspace, но владеет корневыми `dev`/`build`/`test`; `deploy/` 22k строк вне tsc; глоб `lib/integrations/*` резолвится в пустоту; все deps приложений в `devDependencies`; `.js`-расширения в импортах непоследовательны (60 vs 51 — работает только из-за esbuild); orval-codegen пишет через границы пакетов + shell-`printf` в чужой `src/index.ts`.
+- **Workspace**: `sites-control` включён как `@workspace/sites-control`, пустой глоб `lib/integrations/*` удалён; `deploy/` 22k строк вне tsc; все deps приложений в `devDependencies`; `.js`-расширения в импортах непоследовательны (60 vs 51 — работает только из-за esbuild); orval-codegen пишет через границы пакетов + shell-`printf` в чужой `src/index.ts`.
 - **Тесты**: ~4 100 строк тестов на ~86 000 строк исходников; многие — regex-по-исходникам, а не поведение; `test:full` **не включает** `test:postgres` и suite `scripts` (29 data-import тестов, цитируемых как evidence в CURRENT_STATE, не входят ни в один агрегат); 27/28 тестов `deploy/v52/overrides/tests` — сироты; lint-job нет (prettier установлен, ничем не запускается).
 - **Документация**: `CURRENT_STATE.md` заканчивается 2026-07-25 при истории репо до 2026-08-31; `replit.md` описывает уже удалённое поведение.
 
@@ -149,8 +150,8 @@ Acceptance evidence: machine-readable workflow inventory без необъясн
 1. **[DEL после design gate]** Инвентаризировать каждый endpoint `routes/sync.ts` и все call-site'ы/операционные подсказки: для каждого зафиксировать решение `удалить` / `заменить scoped source job` / `перенести в sandbox script`. Сначала спроектировать и доказать необходимые безопасные замены согласно D-029 и `BACKLOG.md`, удалить/заменить ссылки в `audit.ts`, UI и документации; затем удалить `routes/sync.ts` и mount. Представительный 503 доказывает только текущую недоступность, но не достаточен как доказательство отсутствия нужной функциональности.
 2. **[DEL, выполнено 2026-09-01]** Удалены `lib/integrations-openai-ai-react`, `-server` и сирота-форк `lib/integrations/openai_ai_integrations`; поиск потребителей перед удалением был пуст.
 3. **[DEL, выполнено 2026-09-01]** Удалён `artifacts/mockup-sandbox`; ссылки workspace и lockfile очищены.
-4. **[DEL]** ~40 неиспользуемых UI-компонентов в **обеих** копиях (evidence: import-graph по каждому = 0 импортёров). Дедуп используемых — фаза 5.
-5. **[BEH]** `sites-control` → член workspace `@workspace/sites-control`; корневые скрипты переезжают. Его анти-дрейф тесты обязаны пройти без правок — это и есть доказательство механичности переноса.
+4. **[DEL, выполнено 2026-09-02]** Удалены 40 недостижимых UI-компонентов из `alpha-crm-sync`; 15 компонентов с runtime-потребителями сохранены. Вторая копия исчезла вместе с `mockup-sandbox` на шаге 3.
+5. **[BEH, выполнено 2026-09-02]** `sites-control` включён как `@workspace/sites-control`; корневые scripts делегируют пакетные команды, а package-manager-neutral hosting `build` сохранён. Анти-дрейф тесты не менялись.
 6. **[BEH]** Гигиена зависимостей: решить `zod/v4` vs catalog-пин (через D-номер); runtime-deps из `devDependencies`; поле `packageManager` + единый pnpm в `quality.yml`/`proof-gates.yml` (R16); нормализация `.js`-расширений в одну сторону.
 7. **[BEH]** Lint-job в `quality.yml` (первый прогон warn-only, второй blocking) + `CODEOWNERS` (минимум на `.github/` и `deploy/`) (R14).
 8. Обновить `CURRENT_STATE.md` при закрытии фазы.
@@ -203,7 +204,7 @@ Evidence: пустой route-table diff в каждом PR; permission-proof з�
 
 ### Фаза 5 — фронтенд-платформа: общий UI-пакет и настоящий роутинг (M)
 
-1. Пакет `lib/ui` из ~15 выживших компонентов (после prune фазы 1 дедуп механический — копии побайтово равны); оба приложения импортируют `@workspace/ui`. Evidence: байт-стабильность visual-acceptance.
+1. **[снято после Фазы 1]** Общий `lib/ui` не создаётся: вторая копия компонентов удалена вместе с `mockup-sandbox`, поэтому межпакетной дедупликации больше нет.
 2. **[BEH]** wouter (уже в catalog) вместо `useState`-switch в `AppShell.tsx`: по маршруту на секцию, состояние секции из URL, redirect legacy-default; инкрементально через mapping-таблицу.
 3. Обновить `visual-canon.json`/`visual-acceptance.mjs` на per-route URL вместо кликов по состоянию — единственная фаза, где этот гейт меняется намеренно (у каждого canon-скриншота появляется URL как provenance); before/after пары в evidence.
 

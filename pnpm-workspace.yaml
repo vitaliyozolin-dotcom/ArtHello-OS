@@ -1,8 +1,8 @@
 packages:
   - artifacts/*
   - lib/*
-  - lib/integrations/*
   - scripts
+  - sites-control
 
 allowBuilds:
   '@swc/core': true

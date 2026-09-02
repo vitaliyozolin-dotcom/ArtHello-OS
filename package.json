@@ -8,17 +8,17 @@
     "build": "node sites-control/scripts/build.mjs && node sites-control/scripts/validate-artifact.mjs",
     "build:full": "pnpm run build:application && pnpm run build:sites",
     "build:application": "pnpm run typecheck && pnpm -r --filter \"./artifacts/**\" --if-present run build",
-    "build:sites": "node sites-control/scripts/build.mjs && node sites-control/scripts/validate-artifact.mjs",
-    "dev": "vite --config sites-control/vite.config.mjs",
+    "build:sites": "pnpm --filter @workspace/sites-control run build",
+    "dev": "pnpm --filter @workspace/sites-control run dev",
     "test": "pnpm run test:sites",
-    "test:sites": "pnpm run build:sites && node --test sites-control/tests/*.test.mjs",
+    "test:sites": "pnpm --filter @workspace/sites-control run test",
     "test:security": "pnpm --filter @workspace/api-server run test:security",
     "test:front-office": "pnpm --filter @workspace/api-server run test:front-office && pnpm --filter @workspace/alpha-crm-sync run test:front-office",
     "test:postgres": "pnpm --filter @workspace/api-server run test:postgres",
     "test:workflow-policy": "node --test scripts/test/workflow-policy.test.mjs && node scripts/workflow-policy.mjs",
     "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:sites",
     "typecheck:libs": "tsc --build --force",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --filter @workspace/sites-control --if-present run typecheck"
   },
   "private": true,
   "devDependencies": {
