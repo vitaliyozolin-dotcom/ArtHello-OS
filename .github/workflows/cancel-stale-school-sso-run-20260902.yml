@@ -1,0 +1,54 @@
+name: Cancel stale School SSO run
+
+on:
+  push:
+    branches:
+      - ops/probe-school-sso-cutover-20260902
+    paths:
+      - .github/workflows/cancel-stale-school-sso-run-20260902.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Cancel exact stale run and verify terminal state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STALE_RUN_ID: '33666517874'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$STALE_RUN_ID"
+          headers=(
+            -H "Authorization: Bearer $GH_TOKEN"
+            -H 'Accept: application/vnd.github+json'
+            -H 'X-GitHub-Api-Version: 2022-11-28'
+          )
+          state="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api" | jq -r '.status')"
+          if [ "$state" != completed ]; then
+            code="$(curl --silent --show-error -o "$RUNNER_TEMP/cancel-body" -w '%{http_code}' \
+              -X POST "${headers[@]}" "$api/cancel")"
+            test "$code" = 202 || test "$code" = 409
+          fi
+          for attempt in $(seq 1 30); do
+            payload="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api")"
+            state="$(jq -r '.status' <<<"$payload")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"$payload")"
+            if [ "$state" = completed ]; then
+              printf 'STALE_SCHOOL_SSO_RUN_STATUS=%s\n' "$state"
+              printf 'STALE_SCHOOL_SSO_RUN_CONCLUSION=%s\n' "$conclusion"
+              printf 'STALE_SCHOOL_SSO_RUN_CANCELLED=PASS\n'
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
