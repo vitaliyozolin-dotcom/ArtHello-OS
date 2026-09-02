@@ -11,6 +11,7 @@ umask 077
 : "${SOURCE_SHA256:?SOURCE_SHA256 is required}"
 : "${VERIFY_SCRIPT:?VERIFY_SCRIPT is required}"
 : "${VERIFY_SHA256:?VERIFY_SHA256 is required}"
+: "${OFFLINE_BASE_REF:?OFFLINE_BASE_REF is required}"
 : "${SCHOOL_ORIGIN:?SCHOOL_ORIGIN is required}"
 : "${ARTHELLO_ORIGIN:?ARTHELLO_ORIGIN is required}"
 : "${JOB_DIR:?JOB_DIR is required}"
@@ -22,6 +23,7 @@ umask 077
 [[ "$RELEASE_TREE" =~ ^[a-f0-9]{40}$ ]]
 [[ "$SOURCE_SHA256" =~ ^[a-f0-9]{64}$ ]]
 [[ "$VERIFY_SHA256" =~ ^[a-f0-9]{64}$ ]]
+test "$OFFLINE_BASE_REF" = node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
 test "$JOB_DIR" = "/tmp/school-curriculum-deploy-jobs/${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
 test "$SOURCE_ARCHIVE" = "$JOB_DIR/school-release.tar.gz"
 test "$VERIFY_SCRIPT" = "$JOB_DIR/verify-school-release.mjs"
@@ -60,11 +62,12 @@ rollback_allowed=1
 gate_held=0
 postcommit=0
 recovery_failed=0
+pending_signal=0
 
 old_container_id=
 old_image_id=
 old_started_at=
-helper_image_id=
+base_image_id=
 image_id=
 data_volume=
 backup_volume=
@@ -689,6 +692,30 @@ tar -xzf "$SOURCE_ARCHIVE" -C "$release_dir"
 test "$(cat "$release_dir/.school-source-sha")" = "$RELEASE_SHA"
 test "$(cat "$release_dir/.school-source-tree")" = "$RELEASE_TREE"
 test -f "$release_dir/deploy/Dockerfile.offline"
+test "$(sha256sum "$release_dir/scripts/import-school-schedule.mjs" | cut -d ' ' -f 1)" = 5fb94f8550c24ceb6a642ea0ad5b0d107b1b52fc3f25df11c3ad1cdad1b8c5fc
+test "$(sha256sum "$release_dir/deploy/Dockerfile.offline" | cut -d ' ' -f 1)" = 0a71ac38c94bbf66094ced04028da32397433cb19663c9dfb935a117933121a4
+
+pinned_dockerfile="$release_dir/deploy/Dockerfile.offline.pinned"
+test ! -e "$pinned_dockerfile"
+python3 - "$release_dir/deploy/Dockerfile.offline" "$pinned_dockerfile" "$OFFLINE_BASE_REF" <<'PY'
+import os
+import sys
+
+source, target, base_ref = sys.argv[1:]
+data = open(source, "rb").read()
+old = b"FROM arthello-os-api:local\n"
+if not data.startswith(old) or data.count(old) != 1:
+    raise SystemExit("unexpected offline Dockerfile base")
+replacement = b"FROM " + base_ref.encode("ascii") + b"\n"
+output = replacement + data[len(old):]
+descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
+with os.fdopen(descriptor, "wb") as stream:
+    stream.write(output)
+    stream.flush()
+    os.fsync(stream.fileno())
+PY
+test "$(sha256sum "$pinned_dockerfile" | cut -d ' ' -f 1)" = 7b1bdbe53b8c40c43b76d0ffd7399bb9c1f52797c83b74679acef15e0bb5b817
+test "$(head -n 1 "$pinned_dockerfile")" = "FROM $OFFLINE_BASE_REF"
 
 for spec in   'offline-runtime-v3.part-*:66:9125b43319706f4bf3a9a45813b50a0495e61bef5b73f3305a1b97717406b349'   'offline-runtime-v4-delta.part-*:2:a4ef97eb6795cb81c860ab62b0ae7510e693b1fec1e5f6129aea072ce2ca2c9f'   'offline-runtime-v5-delta.part-*:6:b451004c5d1584546233ba39d6ea37c0701a1653c1fd8f7b5ba2d21bd6b201d2'; do
   IFS=: read -r pattern expected_count expected_sha <<<"$spec"
@@ -697,7 +724,23 @@ for spec in   'offline-runtime-v3.part-*:66:9125b43319706f4bf3a9a45813b50a0495e6
 done
 printf 'SCHOOL_STANDALONE_SOURCE=VERIFIED\n'
 
-docker image inspect arthello-os-api:local >/dev/null
+if ! docker image inspect "$OFFLINE_BASE_REF" >/dev/null 2>&1; then
+  timeout --signal=TERM --kill-after=30s 600s docker pull "$OFFLINE_BASE_REF" >/dev/null
+fi
+docker image inspect "$OFFLINE_BASE_REF" >/dev/null
+docker image inspect "$OFFLINE_BASE_REF" | python3 -c '
+import json, sys
+item=json.load(sys.stdin)[0]
+if item.get("Os") != "linux" or item.get("Architecture") != "amd64":
+    raise SystemExit("unexpected offline base platform")
+if (item.get("Config") or {}).get("OnBuild") not in (None, []):
+    raise SystemExit("offline base has ONBUILD triggers")
+layers=(item.get("RootFS") or {}).get("Layers") or []
+if not layers:
+    raise SystemExit("offline base has no rootfs layers")
+'
+base_node_version="$(docker run --rm --network none --entrypoint node "$OFFLINE_BASE_REF" --version)"
+[[ "$base_node_version" =~ ^v24\. ]]
 docker_root="$(docker info --format '{{.DockerRootDir}}')"
 for capacity_path in "$JOB_DIR" "$(dirname "$docker_root")"; do
   available_kib="$(df -Pk "$capacity_path" | awk 'NR==2 {print $4}')"
@@ -705,16 +748,27 @@ for capacity_path in "$JOB_DIR" "$(dirname "$docker_root")"; do
   test "$available_kib" -ge 2097152
 done
 printf 'SCHOOL_STANDALONE_CAPACITY=VERIFIED\n'
-helper_image_id="$(docker image inspect arthello-os-api:local --format '{{.Id}}')"
-[[ "$helper_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
-docker build   --network none   --pull=false   --file "$release_dir/deploy/Dockerfile.offline"   --label org.opencontainers.image.revision="$RELEASE_SHA"   --label org.opencontainers.image.source=https://github.com/vitaliyozolin-dotcom/ArtHello-OS   --tag "$image_ref"   "$release_dir"
-test "$(docker image inspect arthello-os-api:local --format '{{.Id}}')" = "$helper_image_id"
+base_image_id="$(docker image inspect "$OFFLINE_BASE_REF" --format '{{.Id}}')"
+[[ "$base_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+docker build   --network none   --pull=false   --no-cache   --file "$pinned_dockerfile"   --label org.opencontainers.image.revision="$RELEASE_SHA"   --label org.opencontainers.image.source=https://github.com/vitaliyozolin-dotcom/ArtHello-OS   --label school.offline-base-ref="$OFFLINE_BASE_REF"   --label school.offline-base-image-id="$base_image_id"   --tag "$image_ref"   "$release_dir"
+test "$(docker image inspect "$OFFLINE_BASE_REF" --format '{{.Id}}')" = "$base_image_id"
 image_id="$(docker image inspect "$image_ref" --format '{{.Id}}')"
 [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "school.offline-base-ref"}}')" = "$OFFLINE_BASE_REF"
+test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "school.offline-base-image-id"}}')" = "$base_image_id"
+docker image inspect "$OFFLINE_BASE_REF" "$image_id" | python3 -c '
+import json, sys
+base, candidate=json.load(sys.stdin)
+base_layers=(base.get("RootFS") or {}).get("Layers") or []
+candidate_layers=(candidate.get("RootFS") or {}).get("Layers") or []
+if not base_layers or candidate_layers[:len(base_layers)] != base_layers:
+    raise SystemExit("candidate does not inherit the accepted offline base")
+'
+printf 'SCHOOL_STANDALONE_OFFLINE_BASE=VERIFIED\n'
 docker run --rm -i --network none --entrypoint node "$image_id" --check --input-type=module - < "$VERIFY_SCRIPT"
 
 image_hashes="$(docker run --rm --network none --entrypoint sha256sum "$image_id"   /school/scripts/import-school-schedule.mjs   /school/scripts/import-school-curriculum.mjs   /school/lib/curriculum-allocation.mjs   /school/lib/maintenance-gate.mjs   /school/.next/server/middleware.js   /school/data/schedules/school-1-11-2026-2027.json   /school/data/curricula/school-1-11-2-math-2026-2027.json)"
-grep -F 'fc0cc4b4efa0bf25871470dccf7c162e165233181330f6c0a0aa0e92735a8fd9  /school/scripts/import-school-schedule.mjs' <<<"$image_hashes" >/dev/null
+grep -F '5fb94f8550c24ceb6a642ea0ad5b0d107b1b52fc3f25df11c3ad1cdad1b8c5fc  /school/scripts/import-school-schedule.mjs' <<<"$image_hashes" >/dev/null
 grep -F 'dfb4cd2a7c58b4b70ec9257796d9f4308f7318daba1cde1073e0d05374383718  /school/scripts/import-school-curriculum.mjs' <<<"$image_hashes" >/dev/null
 grep -F '695c437db8e6bc748983cd09cd17ea09f14c04773ff5b1d857210c13e90ef297  /school/lib/curriculum-allocation.mjs' <<<"$image_hashes" >/dev/null
 grep -F '9b04bfeae74718311569fb19b2b843d0cf5fa503ffe83027e065c60d6ba7fd64  /school/lib/maintenance-gate.mjs' <<<"$image_hashes" >/dev/null
@@ -878,7 +932,7 @@ for key in sorted(values): print(key+"="+values[key])
 ' > "$env_file"
 chmod 0600 "$env_file"
 
-docker inspect "$production" | RELEASE_SHA="$RELEASE_SHA" IMAGE_ID="$image_id" RUN_ID="$RUN_ID" RUN_ATTEMPT="$RUN_ATTEMPT" WORKFLOW_SHA="$WORKFLOW_SHA" ROLLBACK="$rollback" python3 -c '
+docker inspect "$production" | RELEASE_SHA="$RELEASE_SHA" IMAGE_ID="$image_id" BASE_REF="$OFFLINE_BASE_REF" BASE_IMAGE_ID="$base_image_id" RUN_ID="$RUN_ID" RUN_ATTEMPT="$RUN_ATTEMPT" WORKFLOW_SHA="$WORKFLOW_SHA" ROLLBACK="$rollback" python3 -c '
 import json, os, sys
 item=json.load(sys.stdin)[0]
 labels=dict((item.get("Config") or {}).get("Labels") or {})
@@ -887,6 +941,8 @@ labels.update({
   "school.environment":"production",
   "school.curriculum-release":os.environ["RELEASE_SHA"],
   "school.curriculum-image-id":os.environ["IMAGE_ID"],
+  "school.offline-base-ref":os.environ["BASE_REF"],
+  "school.offline-base-image-id":os.environ["BASE_IMAGE_ID"],
   "school.curriculum-run":os.environ["RUN_ID"],
   "school.curriculum-run-attempt":os.environ["RUN_ATTEMPT"],
   "school.curriculum-workflow-sha":os.environ["WORKFLOW_SHA"],
@@ -1022,6 +1078,8 @@ run_args+=("$image_id")
 candidate_created=1
 
 test "$(docker inspect "$production" --format '{{.Image}}')" = "$image_id"
+test "$(docker inspect "$production" --format '{{index .Config.Labels "school.offline-base-ref"}}')" = "$OFFLINE_BASE_REF"
+test "$(docker inspect "$production" --format '{{index .Config.Labels "school.offline-base-image-id"}}')" = "$base_image_id"
 test "$(docker inspect "$production" --format '{{.Config.User}}')" = "$runtime_uid:$runtime_gid"
 test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}')" = no
 test "$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$data_volume"
@@ -1051,6 +1109,11 @@ printf 'SCHOOL_STANDALONE_LIVE_IMPORT=VERIFIED\n'
 restore_restart_policy "$production"
 test "$(docker inspect "$rollback" --format '{{.State.Running}}')" = false
 test "$(docker inspect "$rollback" --format '{{.HostConfig.RestartPolicy.Name}}')" = no
+trap 'pending_signal=129' HUP
+trap 'pending_signal=130' INT
+trap 'pending_signal=143' TERM
+postcommit=1
+rollback_allowed=0
 docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volume:/rollback"   --env RUN_ID="$RUN_ID"   --env RUN_ATTEMPT="$RUN_ATTEMPT"   --env RELEASE_SHA="$RELEASE_SHA"   --entrypoint /bin/sh "$image_id" -c '
     set -eu
     {
@@ -1063,11 +1126,26 @@ docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volu
     mv /rollback/commit.tmp /rollback/commit
     sync
   '
-postcommit=1
-rollback_allowed=0
+test ! -e "$JOB_DIR/commit-state"
+test ! -e "$JOB_DIR/commit-state.tmp"
+printf 'committed:%s:%s:%s\n' "$RELEASE_SHA" "$RUN_ID" "$RUN_ATTEMPT" > "$JOB_DIR/commit-state.tmp"
+chmod 0400 "$JOB_DIR/commit-state.tmp"
+mv "$JOB_DIR/commit-state.tmp" "$JOB_DIR/commit-state"
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if [ "$pending_signal" -ne 0 ]; then
+  exit "$pending_signal"
+fi
+if [ -e "$JOB_DIR/cancel-request" ]; then
+  exit 143
+fi
 printf 'SCHOOL_STANDALONE_COMMIT=ROLLBACK_DISABLED\n'
 
 clear_gate "$data_volume"
+if [ -e "$JOB_DIR/cancel-request" ]; then
+  exit 143
+fi
 verify_application_contracts "$production" "$SCHOOL_ORIGIN"
 verify_public_release_contracts
 success=1
