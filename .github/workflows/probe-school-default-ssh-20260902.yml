@@ -1,0 +1,149 @@
+name: Probe School default SSH transport
+
+on:
+  push:
+    branches:
+      - ops/probe-school-sso-cutover-20260902
+    paths:
+      - .github/workflows/probe-school-default-ssh-20260902.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: school-default-ssh-probe
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 15
+    steps:
+      - name: Resolve and verify runner-local SSH identity
+        id: transport
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          key="$HOME/.ssh/id_ed25519"
+          known="$HOME/.ssh/known_hosts"
+          host=188.225.47.207
+          test -s "$key"
+          test -s "$known"
+          chmod 0600 "$key" "$known"
+          printf 'SCHOOL_DEFAULT_SSH_KNOWN_HOST_TOKENS_BEGIN\n'
+          awk '{print $1}' "$known"
+          printf 'SCHOOL_DEFAULT_SSH_KNOWN_HOST_TOKENS_END\n'
+
+          found_user=
+          found_port=
+          for port in 2222 22; do
+            for user in root deploy ubuntu github-runner arthello; do
+              if timeout --signal=TERM --kill-after=3s 20s \
+                ssh -T \
+                  -p "$port" \
+                  -i "$key" \
+                  -o IdentitiesOnly=yes \
+                  -o PreferredAuthentications=publickey \
+                  -o PasswordAuthentication=no \
+                  -o KbdInteractiveAuthentication=no \
+                  -o BatchMode=yes \
+                  -o StrictHostKeyChecking=yes \
+                  -o UserKnownHostsFile="$known" \
+                  -o GlobalKnownHostsFile=/dev/null \
+                  -o ConnectTimeout=10 \
+                  -o ServerAliveInterval=5 \
+                  -o ServerAliveCountMax=2 \
+                  -o IPQoS=none \
+                  -o Compression=no \
+                  -o HostKeyAlgorithms=ssh-ed25519 \
+                  -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
+                  "$user@$host" true </dev/null >/dev/null 2>&1; then
+                found_user=$user
+                found_port=$port
+                break 2
+              fi
+            done
+          done
+          test -n "$found_user"
+          test -n "$found_port"
+          printf 'user=%s\n' "$found_user" >> "$GITHUB_OUTPUT"
+          printf 'port=%s\n' "$found_port" >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_DEFAULT_SSH_USER=%s\n' "$found_user"
+          printf 'SCHOOL_DEFAULT_SSH_PORT=%s\n' "$found_port"
+          printf 'SCHOOL_DEFAULT_SSH=VERIFIED\n'
+
+      - name: Inspect remote School topology without mutation
+        env:
+          REMOTE_USER: ${{ steps.transport.outputs.user }}
+          REMOTE_PORT: ${{ steps.transport.outputs.port }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          key="$HOME/.ssh/id_ed25519"
+          known="$HOME/.ssh/known_hosts"
+          host=188.225.47.207
+          payload="$(base64 -w0 <<'REMOTE'
+          set -Eeuo pipefail
+          production=school-1-11
+          root=/srv/school-1-11
+          test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$production" --format '{{.State.Health.Status}}')" = healthy
+          printf 'SCHOOL_REMOTE_HOST=%s\n' "$(hostname)"
+          printf 'SCHOOL_REMOTE_USER=%s\n' "$(id -un)"
+          printf 'SCHOOL_REMOTE_IMAGE_REF=%s\n' "$(docker inspect "$production" --format '{{.Config.Image}}')"
+          printf 'SCHOOL_REMOTE_IMAGE_ID=%s\n' "$(docker inspect "$production" --format '{{.Image}}')"
+          printf 'SCHOOL_REMOTE_CONFIG_USER=%s\n' "$(docker inspect "$production" --format '{{.Config.User}}')"
+          printf 'SCHOOL_REMOTE_WORKDIR=%s\n' "$(docker inspect "$production" --format '{{.Config.WorkingDir}}')"
+          printf 'SCHOOL_REMOTE_ENTRYPOINT=%s\n' "$(docker inspect "$production" --format '{{json .Config.Entrypoint}}')"
+          printf 'SCHOOL_REMOTE_CMD=%s\n' "$(docker inspect "$production" --format '{{json .Config.Cmd}}')"
+          printf 'SCHOOL_REMOTE_RESTART=%s\n' "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}')"
+          printf 'SCHOOL_REMOTE_COMPOSE_WORKDIR=%s\n' "$(docker inspect "$production" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')"
+          printf 'SCHOOL_REMOTE_COMPOSE_FILES=%s\n' "$(docker inspect "$production" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}')"
+          printf 'SCHOOL_REMOTE_DATA_VOLUME=%s\n' "$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          printf 'SCHOOL_REMOTE_BACKUP_VOLUME=%s\n' "$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Name}}{{end}}{{end}}')"
+          docker exec "$production" stat -c 'SCHOOL_REMOTE_DATABASE_META=uid:%u,gid:%g,mode:%a,bytes:%s' /data/school-1-11.sqlite
+          docker exec "$production" node --input-type=module -e '
+            import { DatabaseSync } from "node:sqlite";
+            const db=new DatabaseSync(process.env.DATABASE_PATH,{readOnly:true});
+            const integrity=db.prepare("PRAGMA integrity_check").get().integrity_check;
+            const journal=db.prepare("PRAGMA journal_mode").get().journal_mode;
+            db.close();
+            if(integrity!=="ok") process.exit(1);
+            console.log("SCHOOL_REMOTE_DATABASE_INTEGRITY=OK");
+            console.log("SCHOOL_REMOTE_DATABASE_JOURNAL="+journal);
+          '
+          printf 'SCHOOL_REMOTE_CURRENT_RELEASE=%s\n' "$(test -L "$root/current" && readlink -f "$root/current" || printf NO_SYMLINK)"
+          printf 'SCHOOL_REMOTE_ENV=%s\n' "$(test -s "$root/shared/.env" && printf PRESENT || printf ABSENT)"
+          printf 'SCHOOL_REMOTE_WRITE_GATE=%s\n' "$(docker exec "$production" sh -lc 'test -e /data/.school-deploy-read-only && printf present || printf absent')"
+          printf 'SCHOOL_REMOTE_DISK_BEGIN\n'
+          df -Pk /tmp "$root"
+          printf 'SCHOOL_REMOTE_DISK_END\n'
+          printf 'SCHOOL_REMOTE_TOPOLOGY=PASS\n'
+          REMOTE
+          )"
+          timeout --signal=TERM --kill-after=5s 120s \
+            ssh -T \
+              -p "$REMOTE_PORT" \
+              -i "$key" \
+              -o IdentitiesOnly=yes \
+              -o PreferredAuthentications=publickey \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$known" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o ConnectTimeout=10 \
+              -o ServerAliveInterval=10 \
+              -o ServerAliveCountMax=10 \
+              -o IPQoS=none \
+              -o Compression=no \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
+              "$REMOTE_USER@$host" \
+              "printf '%s' '$payload' | base64 -d | bash" \
+              </dev/null
