@@ -35,6 +35,7 @@ RUN cat /tmp/runtime-v3-parts/offline-runtime-v3.part-* > /tmp/school-runtime-v3
 # The prebuilt runtime archive contains the interactive application, while
 # these files are deliberately kept auditable and executable without ExcelJS.
 COPY --chown=node:node lib/curriculum-allocation.mjs /school/lib/curriculum-allocation.mjs
+COPY --chown=node:node scripts/import-school-schedule.mjs /school/scripts/import-school-schedule.mjs
 COPY --chown=node:node scripts/import-school-curriculum.mjs /school/scripts/import-school-curriculum.mjs
 
 ENV NODE_ENV=production
