@@ -305,10 +305,10 @@ Recovery не меняет принятые продуктовые решени�
 ## D-045 — Между Docker image stores сверяется переносимый runtime fingerprint
 
 Дата: 2026-09-02  
-Статус: принято владельцем в рамках явного поручения завершить production-релиз; временно ожидает закрепления номера recovery PR
+Статус: принято владельцем в рамках явного поручения завершить production-релиз; одноразовый recovery PR `#312` закреплён
 
 Recovery-run D-044 `33683416460` подтвердил digest и evidence артефакта, свободное место, успешный `docker image load` и точный загруженный tag, затем остановился до clone preflight и cutover только на равенстве `.Id`. Production Docker 29.1.3 с containerd image store и hosted builder могут представлять идентичный сохранённый образ разными видами ID (config, manifest или index digest), поэтому межхостовое равенство `.Id` не является переносимым доказательством.
 
 Hosted evidence теперь дополнительно содержит SHA-256 канонического runtime fingerprint: платформа, дата образа, значимые поля запуска из Config и полный упорядоченный список RootFS layer digests. После импорта production вычисляет тот же fingerprint через локальный `docker image inspect`; cutover разрешён только при точном совпадении fingerprint, revision/source-tree labels, непривилегированного User и уже проверенного SHA-256 архива. Hosted и production Image ID сохраняются в журнале только как диагностические представления. Ослаблять archive/evidence SHA, точный tag, PR/actor/main SHA, Quality/Verify, protected Environment, clone preflight, backup или rollback запрещено.
 
-Новый одноразовый recovery PR из `vitaliyozolin-dotcom/ArtHello-OS:codex/portable-image-fingerprint-recovery-20260902` обязан жёстко закрепить собственный номер в этом решении и обоих workflow до merge. Повтор старых run запрещён. Исключение прекращается после первого успешного deployment или первой неустранимой ошибки после начала cutover.
+Одноразовое исключение закреплено только за PR `#312` из `vitaliyozolin-dotcom/ArtHello-OS:codex/portable-image-fingerprint-recovery-20260902` и жёстко проверяется обоими workflow. Повтор старых run запрещён. Исключение прекращается после первого успешного deployment или первой неустранимой ошибки после начала cutover.
