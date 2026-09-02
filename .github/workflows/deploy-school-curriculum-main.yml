@@ -1,14 +1,12 @@
 name: Deploy School curriculum production
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/deploy-school-curriculum-main.yml
-      - deploy/school-curriculum-standalone-cutover.sh
-      - deploy/verify-school-release.mjs
   workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type DEPLOY-SCHOOL-2026-2027 to deploy the accepted School release'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,7 +19,7 @@ concurrency:
 env:
   RELEASE_SHA: 4a1476c83fd0245101a8e81ab9edc192b8462dd9
   RELEASE_TREE: f1081a9f6a4017aaab668e463fd7fb992f5f93a1
-  CUTOVER_SHA256: 1332d76bf0e7a99f7217475659502edcd216280e41328a6aca14b325c802ecde
+  CUTOVER_SHA256: ec687e7d8ea845dc5386156973f179827058b5896e790406dbbba9a8c6406275
   VERIFY_SHA256: 91d5d382b7442d146f8ce139afa1f19998001154c62243afe3c82949a66c8c42
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
@@ -29,12 +27,25 @@ env:
 jobs:
   deploy:
     if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.confirmation == 'DEPLOY-SCHOOL-2026-2027' &&
       github.actor == 'vitaliyozolin-dotcom' &&
       github.triggering_actor == 'vitaliyozolin-dotcom'
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 75
     environment: production-ru
     steps:
+      - name: Verify typed production confirmation
+        env:
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "$DEPLOY_CONFIRMATION" = DEPLOY-SCHOOL-2026-2027
+          printf 'SCHOOL_PRODUCTION_CONFIRMATION=VERIFIED\n'
+
       - name: Create production run record
         id: issue
         env:
