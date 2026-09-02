@@ -260,6 +260,132 @@ console.log('SCHOOL_APPLICATION_CONTRACTS=PASS');
 NODE
 }
 
+protected_schedule_digest() {
+  local name=$1
+  docker exec -i "$name" node --input-type=module - <<'NODE'
+import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+const db=new DatabaseSync('/data/school-1-11.sqlite',{readOnly:true});
+const lessons=db.prepare(`
+  SELECT id, class_name AS className, weekday,
+    starts_at AS startsAt, ends_at AS endsAt, subject_id AS subjectId,
+    teacher_user_id AS teacherUserId, display_label AS displayLabel,
+    group_name AS groupName, shared_session_key AS sharedSessionKey,
+    room, status, note, created_at AS createdAt, updated_at AS updatedAt
+  FROM lessons
+  WHERE class_name NOT IN ('1','2','3','4','5','6')
+  ORDER BY id
+`).all();
+const sessions=db.prepare(`
+  SELECT ps.id, ps.program_id AS programId, ps.topic_id AS topicId,
+    ps.session_index AS sessionIndex, ps.scheduled_date AS scheduledDate,
+    ps.template_lesson_id AS templateLessonId, ps.starts_at AS startsAt,
+    ps.status, ps.topic_override AS topicOverride,
+    ps.homework_override AS homeworkOverride,
+    ps.created_at AS createdAt, ps.updated_at AS updatedAt
+  FROM program_topic_sessions ps
+  JOIN lessons l ON l.id = ps.template_lesson_id
+  WHERE l.class_name NOT IN ('1','2','3','4','5','6')
+  ORDER BY ps.id
+`).all();
+const protectedExceptions=db.prepare(`
+  SELECT id, academic_year AS academicYear,
+    source_class_name AS sourceClassName, student_label AS studentLabel,
+    student_id AS studentId, subject_id AS subjectId,
+    target_class_name AS targetClassName, instruction,
+    source_sheet AS sourceSheet, source_cell AS sourceCell, status,
+    created_at AS createdAt, updated_at AS updatedAt
+  FROM schedule_exceptions
+  WHERE source_class_name NOT IN ('1','2','3','4','5','6')
+  ORDER BY id
+`).all();
+const matchedManagedExceptions=db.prepare(`
+  SELECT id, student_id AS studentId, status
+  FROM schedule_exceptions
+  WHERE source_class_name IN ('1','2','3','4','5','6')
+    AND student_id IS NOT NULL
+  ORDER BY id
+`).all();
+db.close();
+const sha=createHash('sha256')
+  .update(JSON.stringify({
+    lessons,
+    sessions,
+    protectedExceptions,
+    matchedManagedExceptions,
+  }))
+  .digest('hex');
+console.log(`${lessons.length}:${sessions.length}:${protectedExceptions.length}:${matchedManagedExceptions.length}:${sha}`);
+NODE
+}
+
+verify_public_release_contracts() {
+  local healthy=0
+  local health=
+  local login_html="$work/public-release-login.html"
+  local css_file="$work/public-release.css"
+  local sso_headers="$work/public-release-sso.headers"
+  local family_body="$work/public-release-family.json"
+  local css_count=0
+  local css_path=
+  local sso_location=
+  local family_status=
+  for attempt in $(seq 1 60); do
+    health="$(curl --fail --silent --show-error --max-time 30 "$SCHOOL_ORIGIN/api/health" || true)"
+    if grep -F '"status":"ok"' <<<"$health" >/dev/null \
+      && grep -F '"maintenance":false' <<<"$health" >/dev/null; then
+      healthy=1
+      break
+    fi
+    sleep 3
+  done
+  test "$healthy" -eq 1 || return 1
+  curl --fail --silent --show-error --max-time 60 \
+    -H 'Cache-Control: no-cache' \
+    "$SCHOOL_ORIGIN/login?release=$RELEASE_SHA" > "$login_html" || return 1
+  : > "$css_file"
+  while IFS= read -r css_path; do
+    test -n "$css_path" || continue
+    curl --fail --silent --show-error --max-time 60 \
+      "$SCHOOL_ORIGIN$css_path" >> "$css_file" || return 1
+    printf '\n' >> "$css_file"
+    css_count=$((css_count + 1))
+  done < <(grep -oE '/_next/static/css/[^"?]+\.css' "$login_html" | sort -u)
+  test "$css_count" -gt 0 || return 1
+  grep -F '.l0-stage{width:100%;height:100svh;overflow:hidden' "$css_file" >/dev/null || return 1
+  grep -F 'student-dashboard-hero-v1.webp' "$css_file" >/dev/null || return 1
+  curl --silent --show-error --max-time 30 \
+    --dump-header "$sso_headers" --output /dev/null \
+    "$SCHOOL_ORIGIN/auth/central/start" || return 1
+  test "$(awk 'NR==1 {print $2}' "$sso_headers")" = 303 || return 1
+  sso_location="$(tr -d '\r' < "$sso_headers" | sed -n 's/^location: //Ip' | tail -n1)"
+  python3 - "$sso_location" "$ARTHELLO_ORIGIN" <<'PY' || return 1
+import sys
+from urllib.parse import parse_qs, urlparse
+location=urlparse(sys.argv[1])
+authority=urlparse(sys.argv[2])
+assert location.scheme == authority.scheme
+assert location.netloc == authority.netloc
+assert location.path == '/api/school-sso/authorize'
+query=parse_qs(location.query)
+assert len(query.get('state',[''])[0]) >= 40
+assert len(query.get('code_challenge',[''])[0]) >= 40
+PY
+  grep -Eiq '^set-cookie:[[:space:]]*school_sso_tx=' "$sso_headers" || return 1
+  family_status="$(curl --silent --show-error --max-time 30 \
+    --output "$family_body" --write-out '%{http_code}' \
+    --request POST "$SCHOOL_ORIGIN/api/auth/login" \
+    --header "Origin: $SCHOOL_ORIGIN" \
+    --header 'Content-Type: application/json' \
+    --data '{"login":"nobody@example.invalid","password":"InvalidPassword1"}')" || return 1
+  test "$family_status" = 401 || return 1
+  printf 'SCHOOL_PUBLIC_HTTPS=OK\n'
+  printf 'SCHOOL_FULLSCREEN_CSS=VERIFIED\n'
+  printf 'SCHOOL_PUBLIC_SSO=VERIFIED\n'
+  printf 'SCHOOL_PUBLIC_FAMILY_LOGIN=VERIFIED\n'
+  printf 'SCHOOL_MAINTENANCE=RELEASED\n'
+}
+
 run_imports() {
   local name=$1
   local output
@@ -553,7 +679,7 @@ image_id="$(docker image inspect "$image_ref" --format '{{.Id}}')"
 docker run --rm -i --network none --entrypoint node "$image_id" --check --input-type=module - < "$VERIFY_SCRIPT"
 
 image_hashes="$(docker run --rm --network none --entrypoint sha256sum "$image_id"   /school/scripts/import-school-schedule.mjs   /school/scripts/import-school-curriculum.mjs   /school/lib/curriculum-allocation.mjs   /school/lib/maintenance-gate.mjs   /school/.next/server/middleware.js   /school/data/schedules/school-1-11-2026-2027.json   /school/data/curricula/school-1-11-2-math-2026-2027.json)"
-grep -F 'ac3da82c1a9c5a506a713b48950d5183f18c9a94ca0d4df3fba9e229f514d6a0  /school/scripts/import-school-schedule.mjs' <<<"$image_hashes" >/dev/null
+grep -F 'fc0cc4b4efa0bf25871470dccf7c162e165233181330f6c0a0aa0e92735a8fd9  /school/scripts/import-school-schedule.mjs' <<<"$image_hashes" >/dev/null
 grep -F 'dfb4cd2a7c58b4b70ec9257796d9f4308f7318daba1cde1073e0d05374383718  /school/scripts/import-school-curriculum.mjs' <<<"$image_hashes" >/dev/null
 grep -F '695c437db8e6bc748983cd09cd17ea09f14c04773ff5b1d857210c13e90ef297  /school/lib/curriculum-allocation.mjs' <<<"$image_hashes" >/dev/null
 grep -F '9b04bfeae74718311569fb19b2b843d0cf5fa503ffe83027e065c60d6ba7fd64  /school/lib/maintenance-gate.mjs' <<<"$image_hashes" >/dev/null
@@ -768,8 +894,13 @@ docker run --rm --network none --user 0:0   --volume "$preflight_backups:/backup
 docker run -d   --name "$preflight"   --restart no   --network none   --user "$runtime_uid:$runtime_gid"   --security-opt no-new-privileges:true   --health-cmd "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""   --health-interval 5s   --health-timeout 4s   --health-retries 20   --health-start-period 10s   --env-file "$env_file"   --env PUBLIC_APP_ORIGIN=http://127.0.0.1:3000   --volume "$preflight_data:/data"   --volume "$preflight_backups:/backups"   "$image_id" >/dev/null
 preflight_created=1
 wait_container_health "$preflight"
+preflight_protected_before="$(protected_schedule_digest "$preflight")"
+[[ "$preflight_protected_before" =~ ^[0-9]+:[0-9]+:[0-9]+:[0-9]+:[a-f0-9]{64}$ ]]
 run_imports "$preflight"
 verify_release_data "$preflight"
+preflight_protected_after="$(protected_schedule_digest "$preflight")"
+test "$preflight_protected_after" = "$preflight_protected_before"
+printf 'SCHOOL_STANDALONE_PROTECTED_SCHEDULE_PREFLIGHT=PASS\n'
 create_gate "$preflight_data"
 verify_internal_gate "$preflight"
 clear_gate "$preflight_data"
@@ -868,8 +999,13 @@ wait_container_health "$production"
 docker exec "$production" test -f "$gate_path"
 verify_internal_gate "$production"
 verify_public_gate
+live_protected_before="$(protected_schedule_digest "$production")"
+[[ "$live_protected_before" =~ ^[0-9]+:[0-9]+:[0-9]+:[0-9]+:[a-f0-9]{64}$ ]]
 run_imports "$production"
 verify_release_data "$production"
+live_protected_after="$(protected_schedule_digest "$production")"
+test "$live_protected_after" = "$live_protected_before"
+printf 'SCHOOL_STANDALONE_PROTECTED_SCHEDULE_LIVE=PASS\n'
 verify_internal_gate "$production"
 verify_public_gate
 final_proof_after="$(verify_backup "$rollback_volume" "$final_backup_file")"
@@ -897,10 +1033,8 @@ rollback_allowed=0
 printf 'SCHOOL_STANDALONE_COMMIT=ROLLBACK_DISABLED\n'
 
 clear_gate "$data_volume"
-health="$(curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health")"
-grep -F '"status":"ok"' <<<"$health" >/dev/null
-grep -F '"maintenance":false' <<<"$health" >/dev/null
 verify_application_contracts "$production" "$SCHOOL_ORIGIN"
+verify_public_release_contracts
 success=1
 postcommit=0
 
