@@ -1,0 +1,57 @@
+ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1=true
+ARG NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED=false
+ARG SCHOOL_RELEASE_SHA=unknown
+
+FROM node:24-bookworm-slim AS dependencies
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+
+FROM node:24-bookworm-slim AS builder
+ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1
+ARG NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_SCHOOL_DESIGN_V1=$NEXT_PUBLIC_SCHOOL_DESIGN_V1
+ENV NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED=$NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+# The live School image and its persistent volumes use the standard `node`
+# account from the existing ArtHello helper base. Keep that operating-system
+# and UID/GID contract, but replace the prebuilt application tree with the
+# exact, freshly compiled release.
+FROM arthello-os-api:local AS runner
+ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1
+ARG NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED
+ARG SCHOOL_RELEASE_SHA
+USER root
+WORKDIR /school
+RUN rm -rf /school \
+    && mkdir -p /school /data /backups
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/public ./public
+COPY --from=builder --chown=node:node /app/drizzle ./drizzle
+COPY --from=builder --chown=node:node /app/deploy/bootstrap ./bootstrap
+COPY --from=builder --chown=node:node /app/lib/curriculum-import.mjs /app/lib/curriculum-allocation.mjs ./lib/
+COPY --from=builder --chown=node:node /app/data/schedules ./data/schedules
+COPY --from=builder --chown=node:node /app/data/curricula ./data/curricula
+COPY --from=builder --chown=node:node /app/scripts/bootstrap-owner.mjs /app/scripts/backup-db.mjs /app/scripts/container-entrypoint.sh /app/scripts/import-school-schedule.mjs /app/scripts/import-school-curriculum.mjs ./scripts/
+RUN chmod 0755 /school/scripts/container-entrypoint.sh \
+    && chown -R node:node /school /data /backups
+ENV NODE_ENV=production
+ENV NEXT_PUBLIC_SCHOOL_DESIGN_V1=$NEXT_PUBLIC_SCHOOL_DESIGN_V1
+ENV NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED=$NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+ENV DATABASE_PATH=/data/school-1-11.sqlite
+LABEL org.opencontainers.image.revision=$SCHOOL_RELEASE_SHA
+LABEL school.release.sha=$SCHOOL_RELEASE_SHA
+LABEL school.release.kind=sso-origin-hotfix
+USER node
+EXPOSE 3000
+ENTRYPOINT ["./scripts/container-entrypoint.sh"]
+CMD ["node", "server.js"]
