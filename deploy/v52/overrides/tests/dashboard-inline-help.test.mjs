@@ -27,9 +27,11 @@ test("inline help is suppressed inside an explicitly clean dashboard zone", () =
 test("the main dashboard opts out of small markers without disabling guided help", () => {
   const dashboard = read("../app/components/OwnerDashboard.tsx");
   const helpSystem = read("../app/components/ContextualHelpSystem.tsx");
+  const helpBuildPatch = read("../scripts/patch-help-finance-ux-v3.mjs");
 
   assert.match(dashboard, /owner-home-dashboard[^>]+data-ah-inline-help="off"/);
   assert.match(helpSystem, /if \(!inlineHelpAllowed\(field\.element\)\) return \[\];/);
+  assert.match(helpBuildPatch, /if \(!inlineHelpAllowed\(field\.element\)\) return \[\];/);
   assert.match(helpSystem, /className="ah-launch"/);
   assert.match(dashboard, /data-help-block="kpis"/);
 });
