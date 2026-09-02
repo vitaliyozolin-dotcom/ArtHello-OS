@@ -1,0 +1,237 @@
+name: Diagnose live School SSO callback
+
+on:
+  push:
+    branches:
+      - ops/diagnose-school-sso-live-20260902
+    paths:
+      - .github/workflows/diagnose-school-sso-live-20260902.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnose-school-sso-live-20260902
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    timeout-minutes: 20
+    env:
+      DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+      SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+
+    steps:
+      - name: Inspect gateway ArtHello SSO path without mutations
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sanitize() {
+            python3 -c '
+          import re, sys
+          text=sys.stdin.read()
+          text=re.sub(r"([?&](?:code|state|code_challenge|code_verifier|token|session)=)[^&[:space:]\"\\]+", r"\1[REDACTED]", text, flags=re.I)
+          text=re.sub(r"(?i)(authorization|cookie|set-cookie)([=:][[:space:]]*)([^\r\n]+)", r"\1\2[REDACTED]", text)
+          text=re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[EMAIL]", text)
+          text=re.sub(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b", "[UUID]", text, flags=re.I)
+          text=re.sub(r"\b[A-Za-z0-9_-]{43,}\b", "[TOKEN]", text)
+          sys.stdout.write(text)
+          '
+          }
+
+          printf 'GATEWAY_SSO_CONTAINER_INVENTORY_BEGIN\n'
+          docker ps -a --format 'name={{.Names}} image={{.Image}} status={{.Status}} ports={{.Ports}}' \
+            | grep -Ei 'arthello|school|caddy' | sanitize
+          printf 'GATEWAY_SSO_CONTAINER_INVENTORY_END\n'
+
+          printf 'GATEWAY_SSO_CADDY_ROUTE_BEGIN\n'
+          caddy="$(docker ps --format '{{.Names}}' | grep -E 'caddy' | head -n1 || true)"
+          if [ -n "$caddy" ]; then
+            docker exec "$caddy" sh -lc \
+              "grep -RInE -C 4 'arthello-188-225-38-55|school-188-225-38-55|reverse_proxy' /etc/caddy /data 2>/dev/null | head -n 240" \
+              | sanitize || true
+          fi
+          printf 'GATEWAY_SSO_CADDY_ROUTE_END\n'
+
+          printf 'GATEWAY_SSO_LOGS_BEGIN\n'
+          while IFS= read -r container; do
+            [ -n "$container" ] || continue
+            printf 'container=%s\n' "$container"
+            docker logs --since 4h "$container" 2>&1 \
+              | grep -Ei 'school-sso|/api/school|authorize|exchange|callback|central| 40[013] | 50[0-9] |error|denied|invalid' \
+              | tail -n 260 \
+              | sanitize || true
+          done < <(docker ps --format '{{.Names}}' | grep -Ei '^arthello|arthello-.*(web|api|direct)' | sort -u)
+          printf 'GATEWAY_SSO_LOGS_END\n'
+
+          printf 'GATEWAY_SSO_CODE_BEGIN\n'
+          while IFS= read -r container; do
+            [ -n "$container" ] || continue
+            printf 'container=%s image=%s workdir=%s\n' \
+              "$container" \
+              "$(docker inspect "$container" --format '{{.Config.Image}}')" \
+              "$(docker inspect "$container" --format '{{.Config.WorkingDir}}')"
+            printf 'env_keys='
+            docker inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+              | cut -d= -f1 | grep -Ei 'SCHOOL|SSO|ORIGIN|AUTH|SESSION|DATABASE' | sort -u | paste -sd, - || true
+            docker exec "$container" sh -lc '
+              for root in /app /workspace /srv /opt/app; do
+                [ -d "$root" ] || continue
+                grep -RIl --include="*.js" --include="*.mjs" --include="*.cjs" --include="*.ts" "school-sso" "$root" 2>/dev/null | head -n 12
+              done
+            ' 2>/dev/null | while IFS= read -r file; do
+              [ -n "$file" ] || continue
+              printf 'route_file=%s\n' "$file"
+              docker exec "$container" sh -lc "grep -nE -m 24 -C 5 'school-sso|codeVerifier|code_challenge|accessVersion|centralUserId' '$file' 2>/dev/null | head -n 220" \
+                | sanitize || true
+            done
+          done < <(docker ps --format '{{.Names}}' | grep -Ei '^arthello|arthello-.*(web|api|direct)' | sort -u)
+          printf 'GATEWAY_SSO_CODE_END\n'
+          printf 'GATEWAY_SSO_INSPECTION=PASS\n'
+
+      - name: Inspect origin School callback and account projection without mutations
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          : "${DEPLOY_HOST:?missing deploy host}"
+          : "${DEPLOY_USER:?missing deploy user}"
+          : "${SSH_PRIVATE_KEY:?missing SSH key}"
+          port="${DEPLOY_PORT:-2222}"
+          ssh_dir="$RUNNER_TEMP/school-sso-diagnose-ssh"
+          install -m 0700 -d "$ssh_dir"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+          chmod 0600 "$ssh_dir/id_ed25519"
+          ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+          scan="$ssh_dir/known_hosts"
+          timeout 60s ssh-keyscan -p "$port" -t ed25519 "$DEPLOY_HOST" > "$scan" 2>/dev/null
+          test -s "$scan"
+          fingerprint="$(ssh-keygen -lf "$scan" -E sha256 | awk '{print $2; exit}')"
+          test "$fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+
+          ssh_args=(
+            -T -p "$port" -i "$ssh_dir/id_ed25519"
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$scan"
+            -o GlobalKnownHostsFile=/dev/null
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=5
+            -o ServerAliveCountMax=3
+            -o IPQoS=none
+          )
+
+          timeout --signal=TERM --kill-after=15s 600s \
+            ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          sanitize() {
+            python3 -c '
+          import re, sys
+          text=sys.stdin.read()
+          text=re.sub(r"([?&](?:code|state|code_challenge|code_verifier|token|session)=)[^&[:space:]\"\\]+", r"\1[REDACTED]", text, flags=re.I)
+          text=re.sub(r"(?i)(authorization|cookie|set-cookie)([=:][[:space:]]*)([^\r\n]+)", r"\1\2[REDACTED]", text)
+          text=re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[EMAIL]", text)
+          text=re.sub(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b", "[UUID]", text, flags=re.I)
+          text=re.sub(r"\b[A-Za-z0-9_-]{43,}\b", "[TOKEN]", text)
+          sys.stdout.write(text)
+          '
+          }
+
+          production=school-1-11
+          test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
+
+          printf 'ORIGIN_SSO_CONTAINER_BEGIN\n'
+          docker ps -a --format 'name={{.Names}} image={{.Image}} status={{.Status}} ports={{.Ports}}' \
+            | grep -Ei 'school|arthello|caddy' | sanitize
+          printf 'school_image=%s\n' "$(docker inspect "$production" --format '{{.Config.Image}}')"
+          printf 'school_image_id=%s\n' "$(docker inspect "$production" --format '{{.Image}}')"
+          printf 'school_started_at=%s\n' "$(docker inspect "$production" --format '{{.State.StartedAt}}')"
+          printf 'school_health=%s\n' "$(docker inspect "$production" --format '{{.State.Health.Status}}')"
+          printf 'school_candidate_sha=%s\n' "$(docker inspect "$production" --format '{{index .Config.Labels "school.candidate-sha"}}')"
+          printf 'school_env_keys='
+          docker inspect "$production" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            | cut -d= -f1 | grep -Ei 'SCHOOL|SSO|ORIGIN|AUTH|SESSION|DATABASE|CENTRAL' | sort -u | paste -sd, - || true
+          printf 'ORIGIN_SSO_CONTAINER_END\n'
+
+          printf 'ORIGIN_SSO_START_CONTRACT_BEGIN\n'
+          headers="$(mktemp)"
+          trap 'rm -f -- "$headers"' EXIT
+          curl -sS --max-time 20 -D "$headers" -o /dev/null http://127.0.0.1:3111/auth/central/start
+          python3 - "$headers" <<'PY'
+          from pathlib import Path
+          import sys, urllib.parse
+          lines=Path(sys.argv[1]).read_text(errors='replace').splitlines()
+          print('status_line=' + (lines[0] if lines else ''))
+          location=''
+          cookie=''
+          for line in lines[1:]:
+              key, sep, value=line.partition(':')
+              if not sep: continue
+              if key.lower()=='location': location=value.strip()
+              if key.lower()=='set-cookie': cookie=value.strip()
+          parsed=urllib.parse.urlsplit(location)
+          qs=urllib.parse.parse_qs(parsed.query)
+          print(f'authorize_origin={parsed.scheme}://{parsed.netloc}')
+          print(f'authorize_path={parsed.path}')
+          print('authorize_params=' + ','.join(sorted(qs)))
+          print('state_present=' + str(bool(qs.get('state'))).lower())
+          print('challenge_present=' + str(bool(qs.get('code_challenge'))).lower())
+          print('return_to=' + (qs.get('return_to') or [''])[0])
+          attrs=[part.strip().lower() for part in cookie.split(';')[1:]]
+          print('transaction_cookie_attrs=' + ','.join(attrs))
+          PY
+          printf 'ORIGIN_SSO_START_CONTRACT_END\n'
+
+          printf 'ORIGIN_SSO_LOGS_BEGIN\n'
+          docker logs --since 4h "$production" 2>&1 \
+            | grep -Ei 'school-sso|authorize|exchange|callback|central| 40[013] | 50[0-9] |error|failed|invalid|expired' \
+            | tail -n 360 | sanitize || true
+          printf 'ORIGIN_SSO_LOGS_END\n'
+
+          printf 'ORIGIN_SSO_DB_BEGIN\n'
+          docker exec -i "$production" node --input-type=module <<'NODE'
+          import { DatabaseSync } from 'node:sqlite';
+          const path=process.env.DATABASE_PATH || '/data/school-1-11.sqlite';
+          const db=new DatabaseSync(path,{readOnly:true});
+          const columns=db.prepare('PRAGMA table_info(users)').all().map((row)=>String(row.name));
+          const required=['central_user_id','central_access_version','identity_source','last_login_at','status','role'];
+          const missing=required.filter((name)=>!columns.includes(name));
+          const byRole=db.prepare(`SELECT role,status,COALESCE(identity_source,'local') AS source,count(*) AS count FROM users GROUP BY role,status,source ORDER BY role,status,source`).all();
+          const central=db.prepare(`SELECT count(*) AS total, sum(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active, max(central_access_version) AS maxVersion, max(last_login_at) AS latestLogin FROM users WHERE central_user_id IS NOT NULL`).get();
+          const sessions=db.prepare(`SELECT count(*) AS total, count(DISTINCT user_id) AS users, max(created_at) AS latestCreated FROM auth_sessions`).get();
+          const audit=db.prepare(`SELECT action,count(*) AS count,max(created_at) AS latest FROM audit_log WHERE action LIKE 'auth.%' GROUP BY action ORDER BY action`).all();
+          const integrity=db.prepare('PRAGMA integrity_check').get().integrity_check;
+          console.log(JSON.stringify({integrity,missingColumns:missing,byRole,centralProjection:central,sessions,audit},null,2));
+          db.close();
+          NODE
+          printf 'ORIGIN_SSO_DB_END\n'
+
+          printf 'ORIGIN_SSO_COMPILED_CODE_BEGIN\n'
+          docker exec "$production" sh -lc '
+            for root in /school /app; do
+              [ -d "$root" ] || continue
+              grep -RIl --include="*.js" --include="*.mjs" --include="*.cjs" "School SSO exchange failed\|ArtHello OS временно недоступна\|school_sso_tx" "$root" 2>/dev/null | head -n 12
+            done
+          ' 2>/dev/null | while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            printf 'school_route_file=%s\n' "$file"
+            docker exec "$production" sh -lc "grep -nE -m 30 -C 5 'school_sso_tx|school-sso/exchange|codeVerifier|accessVersion|centralUserId|central_access' '$file' 2>/dev/null | head -n 260" \
+              | sanitize || true
+          done
+          printf 'ORIGIN_SSO_COMPILED_CODE_END\n'
+          printf 'ORIGIN_SSO_DIAGNOSIS=PASS\n'
+          REMOTE
+
+          rm -rf -- "$ssh_dir"
+          printf 'SCHOOL_SSO_LIVE_DIAGNOSTIC=PASS\n'
