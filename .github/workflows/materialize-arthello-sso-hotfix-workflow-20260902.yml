@@ -1,0 +1,67 @@
+name: Materialize ArtHello SSO hotfix workflow fix
+
+on:
+  push:
+    branches:
+      - arthello/fix-school-sso-self-fetch-20260902
+    paths:
+      - .github/workflows/materialize-arthello-sso-hotfix-workflow-20260902.yml
+
+permissions:
+  contents: read
+
+jobs:
+  materialize:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: arthello/fix-school-sso-self-fetch-20260902
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Replace host Node call with pinned containerized Node
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          source=.github/workflows/arthello-school-sso-self-fetch-hotfix.yml
+          output=generated-arthello-sso-hotfix-workflow/arthello-school-sso-self-fetch-hotfix.yml
+          install -m 0755 -d "$(dirname "$output")"
+          python3 - "$source" "$output" <<'PY'
+          from pathlib import Path
+          import sys
+          source=Path(sys.argv[1]).read_text()
+          old='''          node --test deploy/v52/overrides/tests/school-sso-contract.test.mjs
+'''
+          new='''          docker run --rm --network none \\
+            --volume "$PWD:/repo:ro" \\
+            --workdir /repo \\
+            node:24-bookworm-slim \\
+            node --test deploy/v52/overrides/tests/school-sso-contract.test.mjs
+'''
+          if source.count(old) != 1:
+              raise SystemExit(f'Expected one host Node invocation, found {source.count(old)}')
+          result=source.replace(old,new,1)
+          if result.count('node:24-bookworm-slim') < 1:
+              raise SystemExit('Pinned Node container missing')
+          Path(sys.argv[2]).write_text(result)
+          PY
+          grep -F -- '--workdir /repo' "$output" >/dev/null
+          ! grep -Fx '          node --test deploy/v52/overrides/tests/school-sso-contract.test.mjs' "$output" >/dev/null
+          python3 - <<'PY'
+          import yaml
+          yaml.safe_load(open('generated-arthello-sso-hotfix-workflow/arthello-school-sso-self-fetch-hotfix.yml'))
+          PY
+          printf 'ARTHELLO_SSO_WORKFLOW_MATERIALIZED=PASS\n'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arthello-sso-hotfix-workflow-fixed
+          path: generated-arthello-sso-hotfix-workflow
+          if-no-files-found: error
+          retention-days: 1
