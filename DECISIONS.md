@@ -325,3 +325,16 @@ Production-run D-045 `33685272835` успешно подтвердил точн�
 До снимка live volume и после запуска clone и production-кандидата workflow через read-only `/proc/*/fd` обязан доказать, что процесс держит канонический application database и не держит иной non-metadata D1 SQLite. Тесты воспроизводят каноническую базу плюс семь полно-схемных decoy-копий и отдельно доказывают fail-closed поведение при отсутствующем, повреждённом или symlink target. Все image provenance, exact PR/actor/main SHA, Quality/Verify, protected Environment, backup-first cutover и rollback требования D-043–D-045 сохраняются.
 
 Одноразовое исключение закреплено только за PR `#313` из `vitaliyozolin-dotcom/ArtHello-OS:codex/canonical-d1-inventory-recovery-20260902` и жёстко проверяется обоими workflow. Повтор старых run запрещён; исключение прекращается после первого успешного deployment или первой неустранимой ошибки после начала cutover.
+
+## D-047 — Procfs D1-дескрипторы проверяет тот же непривилегированный runtime user
+
+Дата: 2026-09-02  
+Статус: принято владельцем в рамках явного поручения завершить production-релиз; одноразовый recovery PR `#314` закреплён
+
+Production-run D-046 `33687247475` подтвердил exact main, Quality/Verify, архив, evidence, Docker import и переносимый runtime fingerprint, затем остановился на первом metadata-only FD gate до pause, snapshot, копирования, запуска clone, остановки live, backup или изменения Caddy. Rollback снова подтвердил здоровье неизменённого старого production. Канонический D1 path и inventory D-046 остаются правильными.
+
+Причина — FD scanner запускался через `docker exec --user 0:0`, тогда как PID 1 и workerd работают под `node`. Production-контейнер намеренно не получает `CAP_SYS_PTRACE`; procfs ptrace access может запретить container-root читать ссылки `/proc/<pid>/fd` процесса другого UID. Это дало ложный отказ до появления разрешающего маркера.
+
+Scanner теперь выполняется стандартным пользователем контейнера, до чтения проверяет, что его UID непривилегированный и совпадает с UID PID 1, затем применяет неизменный allowlist канонического D1/WAL/SHM и запрещает иной открытый non-metadata D1. При отказе в журнал выводятся только роль этапа, безопасная причина и агрегатные количества; пути, строки БД, credential и идентификаторы пользователей не выводятся. Hosted gate отдельно запрещает возврат `--user 0:0` в этой функции и требует проверки same-UID, non-root и rejection diagnostics.
+
+Одноразовое исключение закреплено только за PR `#314` из `vitaliyozolin-dotcom/ArtHello-OS:codex/same-user-d1-fd-recovery-20260902`. Все требования D-043–D-046 к exact PR/actor/main SHA, первому attempt, Quality/Verify, protected Environment, provenance образа, canonical inventory, backup-first cutover и rollback сохраняются; повтор старых run запрещён.

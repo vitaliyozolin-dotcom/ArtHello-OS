@@ -1,6 +1,6 @@
 name: Deploy ArtHello self-hosted RU
 
-# D-046 is a one-release recovery exception to D-040's workflow_dispatch trigger only.
+# D-047 is a one-release recovery exception to D-040's workflow_dispatch trigger only.
 # Production authorization still requires the protected Environment below. The
 # exception is constrained to the successful hosted verification of the exact
 # merged main SHA from the named release branch and repository.
@@ -22,8 +22,8 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/canonical-d1-inventory-recovery-20260902
-  EXPECTED_RELEASE_PR: "313"
+  EXPECTED_RELEASE_HEAD: codex/same-user-d1-fd-recovery-20260902
+  EXPECTED_RELEASE_PR: "314"
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -54,8 +54,8 @@ jobs:
       (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/canonical-d1-inventory-recovery-20260902' &&
-          github.event.workflow_run.pull_requests[0].number == 313 &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/same-user-d1-fd-recovery-20260902' &&
+          github.event.workflow_run.pull_requests[0].number == 314 &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -67,7 +67,7 @@ jobs:
     environment: production-ru
 
     steps:
-      - name: Verify one-release D-046 trigger and protected Environment
+      - name: Verify one-release D-047 trigger and protected Environment
         timeout-minutes: 4
         env:
           GH_TOKEN: ${{ github.token }}
@@ -498,9 +498,15 @@ jobs:
           assert_active_d1_file_descriptors() {
             local target="$1" role="$2" report expected_handles unexpected_handles
             case "$role" in live|preflight|candidate) ;; *) return 1 ;; esac
-            report="$(docker exec --user 0:0 \
+            if ! report="$(docker exec \
               -e ARTHELLO_EXPECTED_D1_FILE="$active_d1_path" \
               "$target" /bin/sh -ceu '
+                scanner_uid="$(id -u)"
+                pid_one_uid="$(sed -n "s/^Uid:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p" /proc/1/status)"
+                case "$scanner_uid" in ""|*[!0-9]*) exit 1 ;; esac
+                case "$pid_one_uid" in ""|*[!0-9]*) exit 1 ;; esac
+                test "$scanner_uid" -ne 0
+                test "$scanner_uid" = "$pid_one_uid"
                 expected_handles=0
                 unexpected_handles=0
                 for descriptor in /proc/[0-9]*/fd/*; do
@@ -519,12 +525,20 @@ jobs:
                   esac
                 done
                 printf "%s %s\n" "$expected_handles" "$unexpected_handles"
-              ')" || return 1
+              ')"; then
+              printf 'ARTHELLO_ACTIVE_D1_FD=REJECTED role=%s reason=scanner-failed\n' "$role" >&2
+              return 1
+            fi
             read -r expected_handles unexpected_handles <<<"$report"
-            [[ "$expected_handles" =~ ^[0-9]+$ ]]
-            [[ "$unexpected_handles" =~ ^[0-9]+$ ]]
-            test "$expected_handles" -gt 0
-            test "$unexpected_handles" -eq 0
+            if ! [[ "$expected_handles" =~ ^[0-9]+$ && "$unexpected_handles" =~ ^[0-9]+$ ]]; then
+              printf 'ARTHELLO_ACTIVE_D1_FD=REJECTED role=%s reason=malformed-counts\n' "$role" >&2
+              return 1
+            fi
+            if [ "$expected_handles" -le 0 ] || [ "$unexpected_handles" -ne 0 ]; then
+              printf 'ARTHELLO_ACTIVE_D1_FD=REJECTED role=%s expected_handles=%s unexpected_handles=%s\n' \
+                "$role" "$expected_handles" "$unexpected_handles" >&2
+              return 1
+            fi
             printf 'ARTHELLO_ACTIVE_D1_FD=VERIFIED role=%s handles=%s\n' "$role" "$expected_handles"
           }
 
