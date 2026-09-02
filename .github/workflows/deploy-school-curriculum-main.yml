@@ -1,36 +1,209 @@
 name: Deploy School curriculum production
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/deploy-school-curriculum-main.yml
   workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type DEPLOY-SCHOOL-2026-2027 to deploy the accepted School release'
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: read
+  deployments: read
   issues: write
+  pull-requests: read
 
 concurrency:
   group: school-1-11-production
   cancel-in-progress: false
 
 env:
-  RELEASE_SHA: 4a1476c83fd0245101a8e81ab9edc192b8462dd9
-  REPAIR_SHA256: af02ee458d59e6ea9d3929c7013fd2fd5bcde9141d3c28052ec4214421f7380e
+  CONTROLS_PR: '300'
+  CONTROLS_BASE_SHA: c3182d598fd7a7a00a5388003754293219e41096
+  RELEASE_SHA: f41dfb5de4eeeed4ed26d94009a18388728f42b7
+  RELEASE_TREE: 2ecda1a0a872caab7aadbc303c152c1207d3030a
+  RELEASE_PR: '303'
+  VALIDATED_SHA: 9da48a1d6eb12a257442d72808e770c739b7fcc4
+  VALIDATION_RUN_ID: '33592942510'
+  VALIDATION_WORKFLOW_ID: '346579718'
+  VALIDATION_JOB_ID: '100130562121'
+  OFFLINE_BASE_REF: 'node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e'
+  CUTOVER_SHA256: 3a13aa11b654b80b31f98366154b30ad30675a034e6c3f619b27dadeb0f46c3b
+  VERIFY_SHA256: 9f2839de7fff8e573c3b7a44262eb90fd6bfe79c1fd41d75ed747ca0f75d4727
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+  ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
 
 jobs:
   deploy:
     if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.confirmation == 'DEPLOY-SCHOOL-2026-2027' &&
       github.actor == 'vitaliyozolin-dotcom' &&
       github.triggering_actor == 'vitaliyozolin-dotcom'
     runs-on: [self-hosted, linux, x64, arthello-gateway]
-    timeout-minutes: 75
+    timeout-minutes: 360
     environment: production-ru
     steps:
+      - name: Verify typed production confirmation
+        timeout-minutes: 1
+        env:
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "$DEPLOY_CONFIRMATION" = DEPLOY-SCHOOL-2026-2027
+          printf 'SCHOOL_PRODUCTION_CONFIRMATION=VERIFIED\n'
+
+      - name: Verify protected production environment
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          environment_json="$(curl --fail-with-body --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/environments/production-ru")"
+          jq -e '
+            .name == "production-ru" and
+            .can_admins_bypass == false and
+            ([.protection_rules[]? |
+              select(.type == "required_reviewers" and
+                .prevent_self_review == true and
+                ((.reviewers // []) | length) > 0)] | length) == 1
+          ' <<<"$environment_json" >/dev/null
+          printf 'SCHOOL_PRODUCTION_ENVIRONMENT_REVIEWER=VERIFIED\n'
+
+      - name: Verify immutable deployment controls
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY"
+          headers=(
+            --header "Authorization: Bearer $GH_TOKEN"
+            --header "Accept: application/vnd.github+json"
+            --header "X-GitHub-Api-Version: 2022-11-28"
+          )
+          controls_pr_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/pulls/$CONTROLS_PR")"
+          jq -e \
+            --argjson controls_pr "$CONTROLS_PR" \
+            --arg controls_base_sha "$CONTROLS_BASE_SHA" \
+            --arg workflow_sha "$GITHUB_SHA" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            '.number == $controls_pr and
+             .state == "closed" and
+             .merged == true and
+             .base.ref == "main" and
+             .base.sha == $controls_base_sha and
+             .head.ref == "codex/school-curriculum-production-cutover-20260902" and
+             .head.repo.full_name == $repository and
+             .merge_commit_sha == $workflow_sha and
+             .user.login == "vitaliyozolin-dotcom" and
+             .merged_by.login == "vitaliyozolin-dotcom"' <<<"$controls_pr_json" >/dev/null
+
+          controls_head_sha="$(jq -r '.head.sha' <<<"$controls_pr_json")"
+          [[ "$controls_head_sha" =~ ^[a-f0-9]{40}$ ]]
+          workflow_commit_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/commits/$GITHUB_SHA")"
+          controls_head_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/commits/$controls_head_sha")"
+          jq -e \
+            --arg workflow_sha "$GITHUB_SHA" \
+            --arg controls_base_sha "$CONTROLS_BASE_SHA" \
+            '.sha == $workflow_sha and
+             .commit.verification.verified == true and
+             .author.login == "vitaliyozolin-dotcom" and
+             (.parents | length) == 1 and
+             .parents[0].sha == $controls_base_sha' <<<"$workflow_commit_json" >/dev/null
+          test "$(jq -r '.commit.tree.sha' <<<"$workflow_commit_json")" = \
+            "$(jq -r '.commit.tree.sha' <<<"$controls_head_json")"
+          printf 'SCHOOL_DEPLOYMENT_CONTROLS=VERIFIED\n'
+
+      - name: Verify accepted release provenance
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY"
+          headers=(
+            --header "Authorization: Bearer $GH_TOKEN"
+            --header "Accept: application/vnd.github+json"
+            --header "X-GitHub-Api-Version: 2022-11-28"
+          )
+          run_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/actions/runs/$VALIDATION_RUN_ID")"
+          jq -e \
+            --argjson run_id "$VALIDATION_RUN_ID" \
+            --argjson workflow_id "$VALIDATION_WORKFLOW_ID" \
+            --arg validated_sha "$VALIDATED_SHA" \
+            --arg release_tree "$RELEASE_TREE" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            '.id == $run_id and
+             .workflow_id == $workflow_id and
+             .name == "School KTP import targeted" and
+             .path == ".github/workflows/school-ktp-import-targeted.yml" and
+             .event == "pull_request" and
+             .status == "completed" and
+             .conclusion == "success" and
+             .run_attempt == 1 and
+             .head_sha == $validated_sha and
+             .head_commit.id == $validated_sha and
+             .head_commit.tree_id == $release_tree and
+             .actor.login == "vitaliyozolin-dotcom" and
+             .triggering_actor.login == "vitaliyozolin-dotcom" and
+             .repository.full_name == $repository' <<<"$run_json" >/dev/null
+
+          jobs_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/actions/runs/$VALIDATION_RUN_ID/jobs?per_page=100")"
+          jq -e \
+            --argjson validation_job_id "$VALIDATION_JOB_ID" \
+            --argjson validation_run_id "$VALIDATION_RUN_ID" \
+            '[.jobs[] | select(
+              .id == $validation_job_id and
+              .run_id == $validation_run_id and
+              .name == "validate" and
+              .status == "completed" and
+              .conclusion == "success")] | length == 1' \
+            <<<"$jobs_json" >/dev/null
+
+          validation_log="$RUNNER_TEMP/school-accepted-validation.log"
+          curl --fail-with-body --silent --show-error --location "${headers[@]}" \
+            --output "$validation_log" \
+            "$api/actions/jobs/$VALIDATION_JOB_ID/logs"
+          test -s "$validation_log"
+          base_digest="${OFFLINE_BASE_REF##*@}"
+          [[ "$base_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          grep -aF "Digest: $base_digest" "$validation_log" >/dev/null
+
+          pr_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/pulls/$RELEASE_PR")"
+          jq -e \
+            --argjson release_pr "$RELEASE_PR" \
+            --arg validated_sha "$VALIDATED_SHA" \
+            --arg release_sha "$RELEASE_SHA" \
+            '.number == $release_pr and
+             .state == "closed" and
+             .merged == true and
+             .head.sha == $validated_sha and
+             .merge_commit_sha == $release_sha and
+             .user.login == "vitaliyozolin-dotcom" and
+             .merged_by.login == "vitaliyozolin-dotcom"' <<<"$pr_json" >/dev/null
+
+          commit_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/commits/$RELEASE_SHA")"
+          jq -e \
+            --arg release_sha "$RELEASE_SHA" \
+            --arg release_tree "$RELEASE_TREE" \
+            '.sha == $release_sha and
+             .commit.tree.sha == $release_tree and
+             .commit.verification.verified == true and
+             .author.login == "vitaliyozolin-dotcom"' <<<"$commit_json" >/dev/null
+          printf 'SCHOOL_RELEASE_PROVENANCE=VERIFIED\n'
+
       - name: Create production run record
+        timeout-minutes: 2
         id: issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,23 +224,71 @@ jobs:
           test "$issue_number" != null
           printf 'issue_number=%s\n' "$issue_number" >> "$GITHUB_OUTPUT"
 
+      - name: Check out deployment controls
+        timeout-minutes: 3
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: controls
+
       - name: Check out exact accepted School release
+        timeout-minutes: 3
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ env.RELEASE_SHA }}
           fetch-depth: 1
           persist-credentials: false
+          path: school-source
 
       - name: Verify immutable release source
+        timeout-minutes: 2
         run: |
           set -Eeuo pipefail
-          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-          test -z "$(git status --porcelain --untracked-files=all)"
-          test "$(sha256sum deploy/repair-deploy.sh | cut -d ' ' -f 1)" = "$REPAIR_SHA256"
-          bash -n deploy/repair-deploy.sh
+          test "$(git -C controls rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C controls status --porcelain --untracked-files=all)"
+          test "$(sha256sum controls/deploy/school-curriculum-standalone-cutover.sh | cut -d ' ' -f 1)" = "$CUTOVER_SHA256"
+          test "$(sha256sum controls/deploy/verify-school-release.mjs | cut -d ' ' -f 1)" = "$VERIFY_SHA256"
+          bash -n controls/deploy/school-curriculum-standalone-cutover.sh
+          node --check controls/deploy/verify-school-release.mjs
+          test "$(git -C school-source rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(git -C school-source rev-parse HEAD^{tree})" = "$RELEASE_TREE"
+          test -z "$(git -C school-source status --porcelain --untracked-files=all)"
+          test "$(sha256sum school-source/deploy/Dockerfile.offline | cut -d ' ' -f 1)" = 0a71ac38c94bbf66094ced04028da32397433cb19663c9dfb935a117933121a4
+          test "$(sha256sum school-source/scripts/import-school-schedule.mjs | cut -d ' ' -f 1)" = 5fb94f8550c24ceb6a642ea0ad5b0d107b1b52fc3f25df11c3ad1cdad1b8c5fc
+          test "$(grep -Fxc 'FROM node:24-bookworm-slim AS dependencies' school-source/Dockerfile)" -eq 1
+          test "$(grep -Fxc 'FROM node:24-bookworm-slim AS builder' school-source/Dockerfile)" -eq 1
+          test "$(grep -Fxc 'FROM node:24-bookworm-slim AS runner' school-source/Dockerfile)" -eq 1
           printf 'SCHOOL_RELEASE_SOURCE=VERIFIED\n'
 
+      - name: Package exact School source
+        timeout-minutes: 5
+        id: source
+        run: |
+          set -Eeuo pipefail
+          printf '%s\n' "$RELEASE_SHA" > school-source/.school-source-sha
+          printf '%s\n' "$RELEASE_TREE" > school-source/.school-source-tree
+          archive="$RUNNER_TEMP/school-curriculum-release.tar.gz"
+          tar \
+            --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            --exclude=.git \
+            --exclude=.next \
+            --exclude=node_modules \
+            -C school-source \
+            -cf - . | gzip -n > "$archive"
+          test -s "$archive"
+          source_sha="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+          printf 'sha256=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_RELEASE_ARCHIVE=VERIFIED\n'
+
       - name: Configure protected SSH transport
+        timeout-minutes: 10
         id: configure_ssh
         continue-on-error: true
         env:
@@ -163,13 +384,14 @@ jobs:
               -o Ciphers=aes128-ctr \
               -o MACs=hmac-sha2-256 \
               "$DEPLOY_USER@$DEPLOY_HOST" \
-              "set -Eeuo pipefail; test '$transport_probe' = '$transport_parent/probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'; if test ! -e '$transport_parent'; then mkdir -m 0700 '$transport_parent' 2>/dev/null || true; fi; test -d '$transport_parent'; test ! -L '$transport_parent'; test \"\$(stat -c %u '$transport_parent')\" = \"\$(id -u)\"; test \"\$(stat -c %a '$transport_parent')\" = 700; test ! -e '$transport_probe'; mkdir -m 0700 '$transport_probe'; trap 'rmdir -- $transport_probe >/dev/null 2>&1 || true' EXIT; command -v base64 >/dev/null; command -v setsid >/dev/null; command -v timeout >/dev/null; test -d /srv/school-1-11" \
+              "set -Eeuo pipefail; test '$transport_probe' = '$transport_parent/probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'; if test ! -e '$transport_parent'; then mkdir -m 0700 '$transport_parent' 2>/dev/null || true; fi; test -d '$transport_parent'; test ! -L '$transport_parent'; test \"\$(stat -c %u '$transport_parent')\" = \"\$(id -u)\"; test \"\$(stat -c %a '$transport_parent')\" = 700; test ! -e '$transport_probe'; mkdir -m 0700 '$transport_probe'; trap 'rmdir -- $transport_probe >/dev/null 2>&1 || true' EXIT; command -v base64 >/dev/null; command -v setsid >/dev/null; command -v timeout >/dev/null; command -v docker >/dev/null; command -v python3 >/dev/null; command -v flock >/dev/null; docker info >/dev/null; docker inspect school-1-11 >/dev/null" \
               </dev/null >/dev/null
           printf 'key_path=%s\n' "$ssh_dir/id_ed25519" >> "$GITHUB_OUTPUT"
           printf 'known_hosts_path=%s\n' "$ssh_dir/known_hosts" >> "$GITHUB_OUTPUT"
           printf 'SCHOOL_PROTECTED_SSH=VERIFIED\n'
 
       - name: Deploy immutable School release
+        timeout-minutes: 105
         id: deploy_school
         if: steps.configure_ssh.outcome == 'success'
         continue-on-error: true
@@ -179,6 +401,8 @@ jobs:
           DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
           SSH_KEY_PATH: ${{ steps.configure_ssh.outputs.key_path }}
           SSH_KNOWN_HOSTS_PATH: ${{ steps.configure_ssh.outputs.known_hosts_path }}
+          SOURCE_ARCHIVE: ${{ steps.source.outputs.archive }}
+          SOURCE_SHA256: ${{ steps.source.outputs.sha256 }}
         run: |
           set -Eeuo pipefail
           log_file="$RUNNER_TEMP/school-curriculum-deploy.log"
@@ -207,10 +431,34 @@ jobs:
             -o Ciphers=aes128-ctr
             -o MACs=hmac-sha2-256
           )
+          scp_args=(
+            -O
+            -P "$deploy_port"
+            -i "$SSH_KEY_PATH"
+            -o UserKnownHostsFile="$SSH_KNOWN_HOSTS_PATH"
+            -o GlobalKnownHostsFile=/dev/null
+            -o StrictHostKeyChecking=yes
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o ConnectTimeout=140
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=30
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
 
           launch_nonce="$(openssl rand -hex 16)"
           printf '%s' "$launch_nonce" | grep -Eq '^[0-9a-f]{32}$'
-          repair_payload="$(base64 -w0 deploy/repair-deploy.sh)"
+          test -s "$SOURCE_ARCHIVE"
+          test "$(sha256sum "$SOURCE_ARCHIVE" | cut -d ' ' -f 1)" = "$SOURCE_SHA256"
           runner_payload="$(base64 -w0 <<'REMOTE'
           #!/usr/bin/env bash
           set -Eeuo pipefail
@@ -231,7 +479,7 @@ jobs:
             mv "$JOB_DIR/ack.tmp" "$JOB_DIR/ack"
             test ! -e "$JOB_DIR/cancel-request"
             exec timeout --signal=TERM --kill-after=600s 3000s \
-              bash "$JOB_DIR/repair-deploy.sh"
+              bash "$JOB_DIR/cutover.sh"
           fi
 
           terminate_worker() {
@@ -338,26 +586,88 @@ jobs:
           printf 'cancel-requested:%s\n' "$LAUNCH_NONCE"
           REMOTE_CANCEL
           )"
-          test -n "$repair_payload"
           test -n "$runner_payload"
           test -n "$cancel_payload"
 
           remote_job_active=0
           remote_job_complete=0
+          commit_detected=0
+          probe_remote_commit() {
+            local max_attempts=${1:-6}
+            local probe_timeout=${2:-30}
+            local probe_kill_after=${3:-5}
+            local commit_state=""
+            local probe_rc=0
+            if [ "$commit_detected" -eq 1 ]; then
+              return 0
+            fi
+            for probe_attempt in $(seq 1 "$max_attempts"); do
+              if commit_state="$(
+                timeout --signal=TERM --kill-after="${probe_kill_after}s" "${probe_timeout}s" \
+                  ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                    "set -Eeuo pipefail; if test -f '$job_dir/commit-state'; then test ! -L '$job_dir/commit-state'; test \"\$(stat -c %u '$job_dir/commit-state')\" = \"\$(id -u)\"; test \"\$(stat -c %a '$job_dir/commit-state')\" = 400; cat '$job_dir/commit-state'; fi" \
+                    </dev/null 2>/dev/null
+              )"; then
+                probe_rc=0
+              else
+                probe_rc=$?
+              fi
+              if [ "$probe_rc" -eq 0 ] &&
+                [ "$commit_state" = "committed:$RELEASE_SHA:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" ]; then
+                printf 'committed=true\n' >> "$GITHUB_OUTPUT" || return 1
+                printf 'SCHOOL_REMOTE_COMMIT_MARKER=VERIFIED\n' | tee -a "$log_file" || return 1
+                commit_detected=1
+                return 0
+              fi
+              commit_state=""
+              if [ "$probe_attempt" -lt "$max_attempts" ]; then
+                sleep 2
+              fi
+            done
+            return 1
+          }
+
           reconcile_remote_job() {
             local exit_code=$?
-            trap - EXIT INT TERM
+            trap - EXIT
+            trap '' HUP INT TERM
             if [ "$remote_job_active" -eq 1 ] && [ "$remote_job_complete" -ne 1 ]; then
               set +e
-              timeout --signal=TERM --kill-after=5s 180s \
-                ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-                  "printf '%s' '$cancel_payload' | base64 -d | env JOB_DIR='$job_dir' LAUNCH_NONCE='$launch_nonce' bash" \
-                  </dev/null >/dev/null 2>&1
-              cancel_rc=$?
+              cancel_rc=1
+              for cancel_attempt in 1 2 3; do
+                timeout --signal=TERM --kill-after=1s 5s \
+                  ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                    "printf '%s' '$cancel_payload' | base64 -d | env JOB_DIR='$job_dir' LAUNCH_NONCE='$launch_nonce' bash" \
+                    </dev/null >/dev/null 2>&1
+                cancel_rc=$?
+                [ "$cancel_rc" -eq 0 ] && break
+                [ "$cancel_attempt" -eq 3 ] || sleep 1
+              done
               if [ "$cancel_rc" -eq 0 ]; then
                 printf 'SCHOOL_REMOTE_CANCEL=REQUESTED\n' | tee -a "$log_file"
               else
                 printf 'SCHOOL_REMOTE_CANCEL=NOT_ACTIVE_OR_UNREACHABLE\n' | tee -a "$log_file"
+              fi
+              probe_remote_commit 1 2 1 || true
+              terminal_status=0
+              for reconcile_attempt in $(seq 1 20); do
+                reconciled_status="$(
+                  timeout --signal=TERM --kill-after=2s 15s \
+                    ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                      "test -f '$job_dir/status' && cat '$job_dir/status' || true" \
+                      </dev/null 2>/dev/null
+                )"
+                case "$reconciled_status" in
+                  success:*:"$launch_nonce"|failed:*:"$launch_nonce")
+                    terminal_status=1
+                    break
+                    ;;
+                esac
+                sleep 2
+              done
+              probe_remote_commit || true
+              if [ "$terminal_status" -eq 1 ]; then
+                remote_job_complete=1
               fi
             fi
             exit "$exit_code"
@@ -367,21 +677,40 @@ jobs:
           trap 'exit 143' TERM
 
           printf 'SCHOOL_DEPLOY_TRANSPORT=PROTECTED_SSH\n' | tee "$log_file"
+          timeout --signal=TERM --kill-after=5s 120s \
+            ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -Eeuo pipefail; job_parent=/tmp/school-curriculum-deploy-jobs; if test ! -e \"\$job_parent\"; then mkdir -m 0700 \"\$job_parent\" 2>/dev/null || true; fi; test -d \"\$job_parent\"; test ! -L \"\$job_parent\"; test \"\$(stat -c %u \"\$job_parent\")\" = \"\$(id -u)\"; test \"\$(stat -c %a \"\$job_parent\")\" = 700; test ! -e '$job_dir'; mkdir -m 0700 '$job_dir'" \
+              </dev/null >/dev/null
+          timeout --signal=TERM --kill-after=5s 600s \
+            scp "${scp_args[@]}" "$SOURCE_ARCHIVE" \
+              "$DEPLOY_USER@$DEPLOY_HOST:$job_dir/school-release.tar.gz.upload"
+          timeout --signal=TERM --kill-after=5s 240s \
+            scp "${scp_args[@]}" controls/deploy/school-curriculum-standalone-cutover.sh \
+              "$DEPLOY_USER@$DEPLOY_HOST:$job_dir/cutover.sh.upload"
+          timeout --signal=TERM --kill-after=5s 240s \
+            scp "${scp_args[@]}" controls/deploy/verify-school-release.mjs \
+              "$DEPLOY_USER@$DEPLOY_HOST:$job_dir/verify-school-release.mjs.upload"
+          timeout --signal=TERM --kill-after=5s 120s \
+            ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -Eeuo pipefail; test \"\$(sha256sum '$job_dir/school-release.tar.gz.upload' | cut -d ' ' -f 1)\" = '$SOURCE_SHA256'; test \"\$(sha256sum '$job_dir/cutover.sh.upload' | cut -d ' ' -f 1)\" = '$CUTOVER_SHA256'; test \"\$(sha256sum '$job_dir/verify-school-release.mjs.upload' | cut -d ' ' -f 1)\" = '$VERIFY_SHA256'; mv '$job_dir/school-release.tar.gz.upload' '$job_dir/school-release.tar.gz'; mv '$job_dir/cutover.sh.upload' '$job_dir/cutover.sh'; mv '$job_dir/verify-school-release.mjs.upload' '$job_dir/verify-school-release.mjs'; chmod 0400 '$job_dir/school-release.tar.gz' '$job_dir/verify-school-release.mjs'; chmod 0500 '$job_dir/cutover.sh'" \
+              </dev/null >/dev/null
+          printf 'SCHOOL_REMOTE_PAYLOAD=VERIFIED\n' | tee -a "$log_file"
+
           launch_rc=0
           launch_started_at="$(date +%s)"
           remote_job_active=1
-          timeout --signal=TERM --kill-after=5s 240s \
+          timeout --signal=TERM --kill-after=5s 120s \
             ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "set -Eeuo pipefail; job_parent=/tmp/school-curriculum-deploy-jobs; if test ! -e \"\$job_parent\"; then mkdir -m 0700 \"\$job_parent\" 2>/dev/null || true; fi; test -d \"\$job_parent\"; test ! -L \"\$job_parent\"; test \"\$(stat -c %u \"\$job_parent\")\" = \"\$(id -u)\"; test \"\$(stat -c %a \"\$job_parent\")\" = 700; mkdir -m 0700 '$job_dir'; printf '%s' '$repair_payload' | base64 -d > '$job_dir/repair-deploy.sh'; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/repair-deploy.sh' '$job_dir/run.sh'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$RELEASE_SHA' SCHOOL_HOST='school-188-225-38-55.sslip.io' VERIFY_PUBLIC=1 JOB_DIR='$job_dir' LAUNCH_NONCE='$launch_nonce' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null &" \
+              "set -Eeuo pipefail; test -d '$job_dir'; test \"\$(stat -c %u '$job_dir')\" = \"\$(id -u)\"; test \"\$(stat -c %a '$job_dir')\" = 700; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/run.sh'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$RELEASE_SHA' RUN_ID='$GITHUB_RUN_ID' RUN_ATTEMPT='$GITHUB_RUN_ATTEMPT' WORKFLOW_SHA='$GITHUB_SHA' RELEASE_SHA='$RELEASE_SHA' RELEASE_TREE='$RELEASE_TREE' SOURCE_ARCHIVE='$job_dir/school-release.tar.gz' SOURCE_SHA256='$SOURCE_SHA256' VERIFY_SCRIPT='$job_dir/verify-school-release.mjs' VERIFY_SHA256='$VERIFY_SHA256' OFFLINE_BASE_REF='$OFFLINE_BASE_REF' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' ARTHELLO_ORIGIN='$ARTHELLO_ORIGIN' JOB_DIR='$job_dir' LAUNCH_NONCE='$launch_nonce' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null &" \
               </dev/null >/dev/null 2>&1 || launch_rc=$?
           launch_elapsed="$(( $(date +%s) - launch_started_at ))"
           printf 'SCHOOL_REMOTE_LAUNCH_RETURN=%s elapsed=%ss\n' "$launch_rc" "$launch_elapsed" | tee -a "$log_file"
 
           remote_ack=""
-          for ack_attempt in $(seq 1 12); do
+          for ack_attempt in $(seq 1 6); do
             set +e
             remote_ack="$(
-              timeout --signal=TERM --kill-after=5s 180s \
+              timeout --signal=TERM --kill-after=5s 30s \
                 ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
                   "test -f '$job_dir/ack' && cat '$job_dir/ack' || true" \
                   </dev/null 2>/dev/null
@@ -398,17 +727,28 @@ jobs:
           printf 'SCHOOL_REMOTE_LAUNCH=ACKNOWLEDGED\n' | tee -a "$log_file"
 
           fetch_remote_log() {
-            timeout --signal=TERM --kill-after=5s 180s \
+            timeout --signal=TERM --kill-after=5s 60s \
               ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-                "grep -E '^(SCHOOL_|Error:|error:|curl:|ssh:|Permission denied|Host key|Connection closed)' '$job_dir/deploy.log' 2>/dev/null | tail -n 220 | sed -E 's/(PASSWORD|TOKEN|SECRET|PRIVATE_KEY)=.*/\\1=[REDACTED]/Ig' || true" \
+                "grep -E '^(SCHOOL_|Error:|error:|curl:|ssh:|Permission denied|Host key|Connection closed)' '$job_dir/deploy.log' 2>/dev/null | tail -n 400 | sed -E 's/(PASSWORD|TOKEN|SECRET|PRIVATE_KEY)=.*/\\1=[REDACTED]/Ig' || true" \
                 </dev/null 2>/dev/null || true
           }
 
           remote_status=""
-          for attempt in $(seq 1 390); do
+          # The remote worker may consume its full 3000s TERM budget plus the
+          # 600s KILL grace.  Start the runner deadline before launch, then
+          # reserve another 300s for launch skew and terminal status flush.
+          remote_poll_deadline="$(( launch_started_at + 3900 ))"
+          # 420 attempts are only a clock-anomaly backstop.  With the mandatory
+          # 10s delay, the 3900s absolute deadline is the normal first limit.
+          for attempt in $(seq 1 420); do
+            if [ "$(date +%s)" -ge "$remote_poll_deadline" ]; then
+              fetch_remote_log | tee -a "$log_file"
+              printf 'SCHOOL_REMOTE_STATUS=deadline\n' | tee -a "$log_file"
+              exit 1
+            fi
             set +e
             remote_status="$(
-              timeout --signal=TERM --kill-after=5s 180s \
+              timeout --signal=TERM --kill-after=5s 30s \
                 ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
                   "test -f '$job_dir/status' && cat '$job_dir/status' || true" \
                   </dev/null 2>/dev/null
@@ -417,20 +757,22 @@ jobs:
             set -e
             if [ "$poll_rc" -ne 0 ]; then
               remote_status=""
-              sleep 10
-              continue
+            else
+              case "$remote_status" in
+                "success:$RELEASE_SHA:$launch_nonce")
+                  break
+                  ;;
+                failed:*:"$launch_nonce")
+                  fetch_remote_log | tee -a "$log_file"
+                  printf 'SCHOOL_REMOTE_STATUS=%s\n' "$remote_status" | tee -a "$log_file"
+                  if probe_remote_commit; then
+                    remote_job_complete=1
+                  fi
+                  exit 1
+                  ;;
+              esac
             fi
-            case "$remote_status" in
-              "success:$RELEASE_SHA:$launch_nonce")
-                break
-                ;;
-              failed:*:"$launch_nonce")
-                fetch_remote_log | tee -a "$log_file"
-                printf 'SCHOOL_REMOTE_STATUS=%s\n' "$remote_status" | tee -a "$log_file"
-                exit 1
-                ;;
-            esac
-            if [ "$attempt" -eq 390 ]; then
+            if [ "$attempt" -eq 420 ]; then
               fetch_remote_log | tee -a "$log_file"
               printf 'SCHOOL_REMOTE_STATUS=timeout\n' | tee -a "$log_file"
               exit 1
@@ -439,15 +781,34 @@ jobs:
           done
 
           test "$remote_status" = "success:$RELEASE_SHA:$launch_nonce"
-          fetch_remote_log | tee -a "$log_file"
-          grep -Fx 'SCHOOL_DEPLOY=SUCCESS' "$log_file" >/dev/null
-          grep -Fx "SCHOOL_DELIVERY_REF=$RELEASE_SHA" "$log_file" >/dev/null
+          probe_remote_commit
           remote_job_complete=1
+          fetch_remote_log | tee -a "$log_file"
+          grep -Fx 'SCHOOL_STANDALONE_SOURCE=VERIFIED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_OFFLINE_BASE=VERIFIED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_PREFLIGHT=PASS' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_PROTECTED_SCHEDULE_PREFLIGHT=PASS' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_FINAL_BACKUP=VERIFIED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_LIVE_IMPORT=VERIFIED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_PROTECTED_SCHEDULE_LIVE=PASS' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_COMMIT=ROLLBACK_DISABLED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_RELEASE=VERIFIED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_EXTERNAL_VERIFICATION_GATE=HELD' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_RELEASE_DATA=PASS' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_CUTOVER=PASS' "$log_file" >/dev/null
+          grep -Fx "SCHOOL_DELIVERY_REF=$RELEASE_SHA" "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_RELEASE_SCHEDULE_ROWS=189' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_RELEASE_CALENDAR_PERIODS=4' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_RELEASE_CURRICULUM_TOPICS=170' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_RELEASE_CURRICULUM_SESSIONS=170' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_BACKUP=VERIFIED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_DATA_VOLUME=PRESERVED' "$log_file" >/dev/null
           printf 'SCHOOL_REMOTE_JOB=SUCCESS\n' | tee -a "$log_file"
 
       - name: Verify public School release
+        timeout-minutes: 10
         id: verify_public
-        if: steps.deploy_school.outcome == 'success'
+        if: steps.deploy_school.outputs.committed == 'true'
         continue-on-error: true
         run: |
           set -Eeuo pipefail
@@ -455,7 +816,7 @@ jobs:
           for attempt in $(seq 1 60); do
             health="$(curl --fail --silent --show-error --max-time 30 "$SCHOOL_ORIGIN/api/health" || true)"
             if grep -F '"status":"ok"' <<<"$health" >/dev/null \
-              && grep -F '"maintenance":false' <<<"$health" >/dev/null; then
+              && grep -F '"maintenance":true' <<<"$health" >/dev/null; then
               healthy=1
               break
             fi
@@ -479,11 +840,922 @@ jobs:
           test "$css_count" -gt 0
           grep -F '.l0-stage{width:100%;height:100svh;overflow:hidden' "$css_file" >/dev/null
           grep -F 'student-dashboard-hero-v1.webp' "$css_file" >/dev/null
+          sso_headers="$RUNNER_TEMP/school-curriculum-sso.headers"
+          sso_body="$RUNNER_TEMP/school-curriculum-sso.json"
+          sso_status="$(curl --silent --show-error --max-time 30 --dump-header "$sso_headers" --output "$sso_body" --write-out '%{http_code}' "$SCHOOL_ORIGIN/auth/central/start")"
+          test "$sso_status" = 503
+          grep -Eq '"code"[[:space:]]*:[[:space:]]*"deployment_read_only"' "$sso_body"
+          grep -Eiq '^Retry-After:[[:space:]]*30' "$sso_headers"
+          family_status="$(curl --silent --show-error --max-time 30 --output "$RUNNER_TEMP/school-curriculum-family.json" --write-out '%{http_code}' --request POST "$SCHOOL_ORIGIN/api/auth/login" --header "Origin: $SCHOOL_ORIGIN" --header 'Content-Type: application/json' --data '{"login":"nobody@example.invalid","password":"InvalidPassword1"}')"
+          test "$family_status" = 503
+          grep -Eq '"code"[[:space:]]*:[[:space:]]*"deployment_read_only"' "$RUNNER_TEMP/school-curriculum-family.json"
           printf 'SCHOOL_PUBLIC_HTTPS=OK\n'
           printf 'SCHOOL_FULLSCREEN_CSS=VERIFIED\n'
-          printf 'SCHOOL_MAINTENANCE=RELEASED\n'
+          printf 'SCHOOL_PUBLIC_SSO_GATE=VERIFIED\n'
+          printf 'SCHOOL_PUBLIC_FAMILY_GATE=VERIFIED\n'
+          printf 'SCHOOL_MAINTENANCE=GATED_FOR_ACTIVATION\n'
+
+      - name: Activate verified production restart policy
+        timeout-minutes: 20
+        id: activate_release
+        if: >-
+          steps.deploy_school.outputs.committed == 'true' &&
+          steps.verify_public.outcome == 'success'
+        continue-on-error: true
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+          SSH_KEY_PATH: ${{ steps.configure_ssh.outputs.key_path }}
+          SSH_KNOWN_HOSTS_PATH: ${{ steps.configure_ssh.outputs.known_hosts_path }}
+        run: |
+          set -Eeuo pipefail
+          deploy_port="${DEPLOY_PORT:-2222}"
+          ssh_args=(
+            -T
+            -p "$deploy_port"
+            -i "$SSH_KEY_PATH"
+            -o UserKnownHostsFile="$SSH_KNOWN_HOSTS_PATH"
+            -o GlobalKnownHostsFile=/dev/null
+            -o StrictHostKeyChecking=yes
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o ConnectTimeout=140
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=30
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+          remote_payload="$(base64 -w0 <<'REMOTE'
+          set -Eeuo pipefail
+          : "${RELEASE_SHA:?}"
+          : "${RUN_ID:?}"
+          : "${RUN_ATTEMPT:?}"
+          production=school-1-11
+          origin=https://school-188-225-38-55.sslip.io
+          gate_path=/data/.school-deploy-read-only
+          rollback_volume="school-1-11_curriculum_rollback_${RUN_ID}-${RUN_ATTEMPT}"
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          [[ "$rollback_volume" =~ ^[A-Za-z0-9_.-]+$ ]]
+
+          lock_path=/var/lock/school-1-11-production.lock
+          exec 9>>"$lock_path"
+          flock -w 900 9
+
+          docker_ready=0
+          for docker_attempt in $(seq 1 60); do
+            if docker info >/dev/null 2>&1; then
+              docker_ready=1
+              break
+            fi
+            sleep 5
+          done
+          test "$docker_ready" -eq 1
+
+          docker inspect "$production" >/dev/null
+          docker volume inspect "$rollback_volume" >/dev/null
+          data_volume="$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          image_id="$(docker inspect "$production" --format '{{.Image}}')"
+          [[ "$data_volume" =~ ^[A-Za-z0-9_.-]+$ ]]
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.system"}}')" = school-1-11
+          test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.environment"}}')" = rollback
+          test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.release"}}')" = "$RELEASE_SHA"
+          test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.run"}}')" = "$RUN_ID"
+          test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.run-attempt"}}')" = "$RUN_ATTEMPT"
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.system"}}')" = school-1-11
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.environment"}}')" = production
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.curriculum-release"}}')" = "$RELEASE_SHA"
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.curriculum-run"}}')" = "$RUN_ID"
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.curriculum-run-attempt"}}')" = "$RUN_ATTEMPT"
+          test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
+
+          verified_state="$(docker run --rm \
+            --network none \
+            --read-only \
+            --user 0:0 \
+            --security-opt no-new-privileges:true \
+            --volume "$rollback_volume:/rollback:ro" \
+            --env RUN_ID="$RUN_ID" \
+            --env RUN_ATTEMPT="$RUN_ATTEMPT" \
+            --env RELEASE_SHA="$RELEASE_SHA" \
+            --entrypoint /bin/sh "$image_id" -c '
+              set -eu
+              entries="$(find /rollback -mindepth 1 -maxdepth 1 -printf "%f\n")"
+              if printf "%s\n" "$entries" | grep -Fx state.tmp >/dev/null; then exit 1; fi
+              state=/rollback/state
+              test -f "$state"
+              test ! -L "$state"
+              test "$(stat -c %u "$state")" = 0
+              test "$(stat -c %a "$state")" = 400
+              test "$(wc -l < "$state")" -eq 6
+              phase="$(sed -n "1p" "$state")"
+              case "$phase" in
+                phase=RELEASE_VERIFIED|phase=RELEASE_ACTIVE) ;;
+                *) exit 1 ;;
+              esac
+              test "$(sed -n "2p" "$state")" = "run_id=$RUN_ID"
+              test "$(sed -n "3p" "$state")" = "run_attempt=$RUN_ATTEMPT"
+              test "$(sed -n "4p" "$state")" = "release_sha=$RELEASE_SHA"
+              restart_name="$(sed -n "5s/^restart_name=//p" "$state")"
+              restart_max="$(sed -n "6s/^restart_max=//p" "$state")"
+              case "$restart_name" in always|unless-stopped|on-failure) ;; *) exit 1 ;; esac
+              printf "%s\n" "$restart_max" | grep -Eq "^[0-9]+$"
+              cat "$state"
+            ')"
+          state_phase="$(sed -n '1p' <<<"$verified_state")"
+          restart_name="$(sed -n '5s/^restart_name=//p' <<<"$verified_state")"
+          restart_max="$(sed -n '6s/^restart_max=//p' <<<"$verified_state")"
+          case "$restart_name" in
+            always|unless-stopped) restart_spec="$restart_name" ;;
+            on-failure) restart_spec="on-failure:$restart_max" ;;
+            *) exit 1 ;;
+          esac
+
+          verify_gate() {
+            docker run --rm --network none --read-only --user 0:0 \
+              --security-opt no-new-privileges:true \
+              --volume "$data_volume:/data:ro" \
+              --entrypoint /bin/sh "$image_id" -c '
+                set -eu
+                target=/data/.school-deploy-read-only
+                test -f "$target"
+                test ! -L "$target"
+                test "$(stat -c %u "$target")" = 0
+                test "$(stat -c %a "$target")" = 444
+                test "$(cat "$target")" = "deployment read-only"
+              '
+          }
+          clear_gate() {
+            docker run --rm --network none --read-only --user 0:0 \
+              --security-opt no-new-privileges:true \
+              --volume "$data_volume:/data" \
+              --entrypoint /bin/sh "$image_id" -c '
+                set -eu
+                rm -f /data/.school-deploy-read-only
+                test ! -e /data/.school-deploy-read-only
+                sync
+              '
+          }
+          verify_public_gate() {
+            local gated=0 gate_health
+            for attempt in $(seq 1 15); do
+              gate_health="$(curl --fail --silent --show-error --max-time 20 "$origin/api/health" || true)"
+              if grep -F '"status":"ok"' <<<"$gate_health" >/dev/null &&
+                grep -F '"maintenance":true' <<<"$gate_health" >/dev/null; then
+                gated=1
+                break
+              fi
+              sleep 2
+            done
+            test "$gated" -eq 1
+          }
+          verify_active_health() {
+            local active=0 active_health
+            docker inspect "$production" >/dev/null
+            test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
+            docker exec "$production" test ! -e "$gate_path"
+            for attempt in $(seq 1 30); do
+              active_health="$(curl --fail --silent --show-error --max-time 20 "$origin/api/health" || true)"
+              if grep -F '"status":"ok"' <<<"$active_health" >/dev/null &&
+                grep -F '"maintenance":false' <<<"$active_health" >/dev/null; then
+                active=1
+                break
+              fi
+              sleep 2
+            done
+            test "$active" -eq 1
+          }
+
+          if [ "$state_phase" = phase=RELEASE_ACTIVE ]; then
+            test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}')" = "$restart_name"
+            test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')" = "$restart_max"
+            if docker exec "$production" test -e "$gate_path"; then
+              verify_gate
+              verify_public_gate
+              clear_gate
+            else
+              docker exec "$production" test ! -e "$gate_path"
+            fi
+            verify_active_health
+            printf 'SCHOOL_RELEASE_ACTIVATION=ALREADY_ACTIVE\n'
+            exit 0
+          fi
+
+          test "$state_phase" = phase=RELEASE_VERIFIED
+          verify_gate
+          docker exec "$production" test -f "$gate_path"
+          verify_public_gate
+
+          current_restart_name="$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}')"
+          current_restart_max="$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
+          if [ "$current_restart_name" = no ]; then
+            test "$current_restart_max" = 0
+            docker update --restart "$restart_spec" "$production" >/dev/null
+          else
+            test "$current_restart_name" = "$restart_name"
+            test "$current_restart_max" = "$restart_max"
+          fi
+          test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}')" = "$restart_name"
+          test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')" = "$restart_max"
+          docker run --rm --network none --read-only --user 0:0 \
+            --security-opt no-new-privileges:true \
+            --volume "$rollback_volume:/rollback" \
+            --env RUN_ID="$RUN_ID" \
+            --env RUN_ATTEMPT="$RUN_ATTEMPT" \
+            --env RELEASE_SHA="$RELEASE_SHA" \
+            --env RESTART_NAME="$restart_name" \
+            --env RESTART_MAX="$restart_max" \
+            --entrypoint /bin/sh "$image_id" -c '
+              set -eu
+              {
+                printf "phase=RELEASE_ACTIVE\n"
+                printf "run_id=%s\n" "$RUN_ID"
+                printf "run_attempt=%s\n" "$RUN_ATTEMPT"
+                printf "release_sha=%s\n" "$RELEASE_SHA"
+                printf "restart_name=%s\n" "$RESTART_NAME"
+                printf "restart_max=%s\n" "$RESTART_MAX"
+              } > /rollback/state.tmp
+              chmod 0400 /rollback/state.tmp
+              mv -f /rollback/state.tmp /rollback/state
+              sync
+            '
+          active_state="$(docker run --rm --network none --read-only --user 0:0 \
+            --security-opt no-new-privileges:true \
+            --volume "$rollback_volume:/rollback:ro" \
+            --entrypoint /bin/sh "$image_id" -c '
+              set -eu
+              test -f /rollback/state
+              test ! -L /rollback/state
+              test ! -e /rollback/state.tmp
+              test "$(stat -c %u /rollback/state)" = 0
+              test "$(stat -c %a /rollback/state)" = 400
+              test "$(wc -l < /rollback/state)" -eq 6
+              cat /rollback/state
+            ')"
+          expected_active="$(printf 'phase=RELEASE_ACTIVE\nrun_id=%s\nrun_attempt=%s\nrelease_sha=%s\nrestart_name=%s\nrestart_max=%s' \
+            "$RUN_ID" "$RUN_ATTEMPT" "$RELEASE_SHA" "$restart_name" "$restart_max")"
+          test "$active_state" = "$expected_active"
+          clear_gate
+          verify_active_health
+          printf 'SCHOOL_RELEASE_ACTIVATION=PASS\n'
+          REMOTE
+          )"
+          activation_ok=0
+          for activation_attempt in 1; do
+            if timeout --signal=TERM --kill-after=30s 900s \
+              ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "printf '%s' '$remote_payload' | base64 -d | env RELEASE_SHA='$RELEASE_SHA' RUN_ID='$GITHUB_RUN_ID' RUN_ATTEMPT='$GITHUB_RUN_ATTEMPT' bash" \
+              </dev/null; then
+              activation_ok=1
+              break
+            fi
+            sleep 5
+          done
+          test "$activation_ok" -eq 1
+
+      - name: Re-gate after failed external verification
+        timeout-minutes: 170
+        id: regate_public_failure
+        if: >-
+          always() &&
+          steps.configure_ssh.outcome == 'success' &&
+          (steps.deploy_school.outcome != 'success' ||
+            (steps.deploy_school.outputs.committed == 'true' &&
+              (steps.verify_public.outcome != 'success' ||
+                steps.activate_release.outcome != 'success')))
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+          SSH_KEY_PATH: ${{ steps.configure_ssh.outputs.key_path }}
+          SSH_KNOWN_HOSTS_PATH: ${{ steps.configure_ssh.outputs.known_hosts_path }}
+          COMMIT_OBSERVED: ${{ steps.deploy_school.outputs.committed }}
+        run: |
+          set -Eeuo pipefail
+          deploy_port="${DEPLOY_PORT:-2222}"
+          ssh_args=(
+            -T
+            -p "$deploy_port"
+            -i "$SSH_KEY_PATH"
+            -o UserKnownHostsFile="$SSH_KNOWN_HOSTS_PATH"
+            -o GlobalKnownHostsFile=/dev/null
+            -o StrictHostKeyChecking=yes
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o ConnectTimeout=140
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=30
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+          job_dir="/tmp/school-curriculum-deploy-jobs/${RELEASE_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          remote_payload="$(base64 -w0 <<'REMOTE'
+          set -Eeuo pipefail
+          : "${RELEASE_SHA:?}"
+          : "${RUN_ID:?}"
+          : "${RUN_ATTEMPT:?}"
+          : "${JOB_DIR:?}"
+          : "${COMMIT_OBSERVED:=false}"
+          case "$COMMIT_OBSERVED" in true|false) ;; *) exit 1 ;; esac
+          test "$JOB_DIR" = "/tmp/school-curriculum-deploy-jobs/${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
+          rollback_volume="school-1-11_curriculum_rollback_${RUN_ID}-${RUN_ATTEMPT}"
+          [[ "$rollback_volume" =~ ^[A-Za-z0-9_.-]+$ ]]
+
+          process_matches() {
+            local candidate_pid=$1
+            local launch_nonce=$2
+            [[ "$candidate_pid" =~ ^[0-9]+$ ]] || return 1
+            [[ "$launch_nonce" =~ ^[a-f0-9]{32}$ ]] || return 1
+            test -r "/proc/$candidate_pid/environ" || return 1
+            tr '\0' '\n' < "/proc/$candidate_pid/environ" | grep -Fx "JOB_DIR=$JOB_DIR" >/dev/null || return 1
+            tr '\0' '\n' < "/proc/$candidate_pid/environ" | grep -Fx "LAUNCH_NONCE=$launch_nonce" >/dev/null || return 1
+          }
+
+          if [ -d "$JOB_DIR" ] \
+            && [ ! -L "$JOB_DIR" ] \
+            && [ "$(stat -c %u "$JOB_DIR" 2>/dev/null || true)" = "$(id -u)" ] \
+            && [ "$(stat -c %a "$JOB_DIR" 2>/dev/null || true)" = 700 ]; then
+            (
+              set +e
+              launch_nonce=""
+              if [ -f "$JOB_DIR/ack" ] \
+                && [ ! -L "$JOB_DIR/ack" ] \
+                && [ "$(stat -c %u "$JOB_DIR/ack" 2>/dev/null || true)" = "$(id -u)" ] \
+                && [ "$(stat -c %s "$JOB_DIR/ack" 2>/dev/null || true)" -le 64 ]; then
+                ack="$(cat "$JOB_DIR/ack" 2>/dev/null || true)"
+                case "$ack" in
+                  started:*)
+                    candidate_nonce="${ack#started:}"
+                    if [[ "$candidate_nonce" =~ ^[a-f0-9]{32}$ ]]; then
+                      launch_nonce="$candidate_nonce"
+                    fi
+                    ;;
+                esac
+              fi
+              cancel_value="external-regate"
+              if [ -n "$launch_nonce" ]; then cancel_value="$launch_nonce"; fi
+              cancel_tmp="$JOB_DIR/cancel-request.regate.tmp.$$"
+              if [ ! -e "$cancel_tmp" ] && [ ! -L "$cancel_tmp" ]; then
+                printf 'cancel:%s\n' "$cancel_value" > "$cancel_tmp"
+                chmod 0600 "$cancel_tmp"
+                mv -f "$cancel_tmp" "$JOB_DIR/cancel-request"
+              fi
+              if [ -n "$launch_nonce" ]; then
+                worker_pid="$(cat "$JOB_DIR/worker-pid" 2>/dev/null || true)"
+                if process_matches "$worker_pid" "$launch_nonce" \
+                  && [ "$(ps -o pgid= -p "$worker_pid" | tr -d ' ')" = "$worker_pid" ]; then
+                  kill -TERM -- "-$worker_pid" 2>/dev/null || true
+                else
+                  controller_pid="$(cat "$JOB_DIR/pid" 2>/dev/null || true)"
+                  if process_matches "$controller_pid" "$launch_nonce" \
+                    && [ "$(ps -o sid= -p "$controller_pid" | tr -d ' ')" = "$controller_pid" ]; then
+                    kill -TERM "$controller_pid" 2>/dev/null || true
+                  fi
+                fi
+              fi
+              exit 0
+            ) || true
+          fi
+
+          lock_path=/var/lock/school-1-11-production.lock
+          exec 9>>"$lock_path"
+          flock -w 3700 9
+          cancel_record="cancel:${RELEASE_SHA}:${RUN_ID}:${RUN_ATTEMPT}"
+          printf '%s\n' "$cancel_record" >&9
+          sync "$lock_path"
+          grep -Fx "$cancel_record" "$lock_path" >/dev/null
+
+          docker_ready=0
+          for docker_attempt in $(seq 1 120); do
+            if timeout --signal=TERM --kill-after=5s 10s docker info >/dev/null 2>&1; then
+              docker_ready=1
+              break
+            fi
+            sleep 5
+          done
+          test "$docker_ready" -eq 1
+
+          production=school-1-11
+          origin=https://school-188-225-38-55.sslip.io
+          emergency_volume="school-1-11_curriculum_emergency_${RUN_ID}-${RUN_ATTEMPT}"
+          [[ "$emergency_volume" =~ ^[A-Za-z0-9_.-]+$ ]]
+          docker_short() {
+            timeout --signal=TERM --kill-after=5s 30s docker "$@"
+          }
+          docker_medium() {
+            timeout --signal=TERM --kill-after=5s 90s docker "$@"
+          }
+          production_id=""
+          production_id_valid=0
+          production_absent_proven=0
+          production_target=""
+          production_inspect_json=""
+          production_inspect_valid=0
+          data_volume=""
+          backup_volume=""
+          image_id=""
+          data_volume_valid=0
+          backup_volume_valid=0
+          image_id_valid=0
+          capture_production() {
+            local inspect_ref=$1 inspect_json parsed_inspect
+            local -a inspect_fields=()
+            if ! inspect_json="$(docker_short inspect "$inspect_ref" 2>/dev/null)"; then
+              return 1
+            fi
+            if ! parsed_inspect="$(printf '%s' "$inspect_json" | python3 -c '
+          import json, sys
+          rows = json.load(sys.stdin)
+          assert isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], dict)
+          row = rows[0]
+          def named_volume(destination):
+              mounts = row.get("Mounts", [])
+              if not isinstance(mounts, list):
+                  return ""
+              names = [m.get("Name", "") for m in mounts
+                       if isinstance(m, dict) and m.get("Destination") == destination and isinstance(m.get("Name", ""), str)]
+              return names[0] if len(names) == 1 else ""
+          values = [row.get("Id", ""), row.get("Name", ""), named_volume("/data"), named_volume("/backups"), row.get("Image", "")]
+          for value in values:
+              print(value if isinstance(value, str) else "")
+          ' 2>/dev/null)"; then
+              return 1
+            fi
+            mapfile -t inspect_fields <<<"$parsed_inspect"
+            [[ "${inspect_fields[0]-}" =~ ^[a-f0-9]{64}$ ]] || return 1
+            test "${inspect_fields[1]-}" = "/$production" || return 1
+            production_id="${inspect_fields[0]}"
+            production_id_valid=1
+            production_target="$production_id"
+            production_inspect_json="$inspect_json"
+            production_inspect_valid=1
+            data_volume="${inspect_fields[2]-}"
+            backup_volume="${inspect_fields[3]-}"
+            image_id="${inspect_fields[4]-}"
+          }
+          for capture_attempt in 1 2 3 4; do
+            if capture_production "$production"; then
+              break
+            fi
+            if production_ids="$(docker_short container ls --all --quiet --no-trunc --filter "name=^/${production}$" 2>/dev/null)"; then
+              if [ -z "$production_ids" ]; then
+                production_absent_proven=1
+                break
+              fi
+              if [[ "$production_ids" =~ ^[a-f0-9]{64}$ ]]; then
+                production_id="$production_ids"
+                production_id_valid=1
+                production_target="$production_id"
+                if capture_production "$production_id"; then
+                  break
+                fi
+              fi
+            fi
+            if [ "$capture_attempt" -lt 4 ]; then sleep 2; fi
+          done
+          if [[ "$data_volume" =~ ^[A-Za-z0-9_.-]+$ ]]; then data_volume_valid=1; fi
+          if [[ "$backup_volume" =~ ^[A-Za-z0-9_.-]+$ ]]; then backup_volume_valid=1; fi
+          if [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]; then image_id_valid=1; fi
+
+          stop_production() {
+            local running
+            test "$production_id_valid" -eq 1 || return 1
+            timeout --signal=TERM --kill-after=5s 60s \
+              docker stop --time 45 "$production_target" >/dev/null 2>&1 || true
+            running="$(docker_short inspect "$production_target" --format '{{.State.Running}}' 2>/dev/null)" || running=unknown
+            if [ "$running" = true ]; then
+              timeout --signal=TERM --kill-after=5s 30s \
+                docker kill "$production_target" >/dev/null 2>&1 || true
+            fi
+            test "$(docker_short inspect "$production_target" --format '{{.State.Running}}' 2>/dev/null)" = false
+          }
+
+          emergency_remove() {
+            local manifest_status remaining_exact_id remaining_exact_name
+            if [ "$production_absent_proven" -eq 1 ]; then
+              printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=EMERGENCY_ALREADY_ABSENT\n' >&2
+              return 0
+            fi
+            if [ "$production_id_valid" -ne 1 ]; then
+              printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=EMERGENCY_ID_UNPROVEN\n' >&2
+              return 1
+            fi
+            timeout --signal=TERM --kill-after=5s 90s \
+              docker rm --force "$production_id" >/dev/null 2>&1 || true
+            docker_short info >/dev/null 2>&1 || return 1
+            remaining_exact_id="$(docker_short container ls --all --quiet --no-trunc --filter "id=$production_id")" || return 1
+            remaining_exact_name="$(docker_short container ls --all --quiet --no-trunc --filter "name=^/${production}$")" || return 1
+            test -z "$remaining_exact_id" || return 1
+            test -z "$remaining_exact_name" || return 1
+            if [ "$image_id_valid" -eq 1 ]; then docker_short image inspect "$image_id" >/dev/null 2>&1 || return 1; fi
+            if [ "$data_volume_valid" -eq 1 ]; then docker_short volume inspect "$data_volume" >/dev/null 2>&1 || return 1; fi
+            if [ "$backup_volume_valid" -eq 1 ]; then docker_short volume inspect "$backup_volume" >/dev/null 2>&1 || return 1; fi
+            printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=EMERGENCY_REMOVED\n' >&2
+            manifest_status=unavailable
+            if persist_recovery_manifest; then manifest_status=saved; fi
+            printf 'SCHOOL_EXTERNAL_VERIFICATION_RECOVERY_MANIFEST=%s\n' "$manifest_status" >&2
+          }
+
+          install_gate() {
+            local gate_verified=0
+            local restart_disabled=0
+            if [ "$production_absent_proven" -eq 1 ]; then
+              printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=EMERGENCY_ALREADY_ABSENT\n' >&2
+              return 1
+            fi
+            if [ "$data_volume_valid" -eq 1 ] && [ "$image_id_valid" -eq 1 ] && docker_medium run --rm \
+              --network none \
+              --read-only \
+              --user 0:0 \
+              --security-opt no-new-privileges:true \
+              --volume "$data_volume:/data" \
+              --entrypoint /bin/sh \
+              "$image_id" -c '
+                set -eu
+                target=/data/.school-deploy-read-only
+                tmp="${target}.tmp.$$"
+                rm -f "$tmp"
+                umask 022
+                printf "deployment read-only\n" > "$tmp"
+                chmod 0444 "$tmp"
+                mv -f "$tmp" "$target"
+                test -f "$target"
+                sync
+              ' && verify_gate_file; then
+              gate_verified=1
+            fi
+            if [ "$production_id_valid" -eq 1 ] && docker_short update --restart no "$production_target" >/dev/null 2>&1 &&
+              [ "$(docker_short inspect "$production_target" --format '{{.HostConfig.RestartPolicy.Name}}' 2>/dev/null)" = no ]; then
+              restart_disabled=1
+            fi
+            if [ "$gate_verified" -ne 1 ] || [ "$restart_disabled" -ne 1 ]; then
+              local stopped=0
+              local remove_required=0
+              if stop_production; then
+                stopped=1
+              fi
+              if [ "$stopped" -ne 1 ]; then
+                remove_required=1
+              fi
+              if [ "$gate_verified" -ne 1 ] && [ "$restart_disabled" -ne 1 ]; then
+                remove_required=1
+              fi
+              if [ "$remove_required" -eq 1 ]; then
+                emergency_remove
+                return 1
+              fi
+            fi
+            test "$gate_verified" -eq 1
+            test "$restart_disabled" -eq 1
+          }
+
+          verify_gate_file() {
+            test "$data_volume_valid" -eq 1 || return 1
+            test "$image_id_valid" -eq 1 || return 1
+            docker_medium run --rm \
+              --network none \
+              --read-only \
+              --user 0:0 \
+              --security-opt no-new-privileges:true \
+              --volume "$data_volume:/data:ro" \
+              --entrypoint /bin/sh \
+              "$image_id" -c '
+                set -eu
+                target=/data/.school-deploy-read-only
+                test -f "$target"
+                test ! -L "$target"
+                test "$(stat -c %u "$target")" = 0
+                test "$(stat -c %a "$target")" = 444
+                test "$(cat "$target")" = "deployment read-only"
+              '
+          }
+
+          persist_recovery_manifest() {
+            local manifest_bytes manifest_sha manifest_proof
+            test "$production_inspect_valid" -eq 1 || return 1
+            test "$image_id_valid" -eq 1 || return 1
+            manifest_bytes="$(printf '%s' "$production_inspect_json" | wc -c | tr -d ' ')"
+            manifest_sha="$(printf '%s' "$production_inspect_json" | sha256sum | cut -d ' ' -f 1)"
+            [[ "$manifest_bytes" =~ ^[1-9][0-9]*$ ]] || return 1
+            [[ "$manifest_sha" =~ ^[a-f0-9]{64}$ ]] || return 1
+            if ! docker_short volume inspect "$emergency_volume" >/dev/null 2>&1; then
+              docker_short volume create \
+                --label school.system=school-1-11 \
+                --label school.environment=emergency-recovery \
+                --label "school.release=$RELEASE_SHA" \
+                --label "school.run=$RUN_ID" \
+                --label "school.run-attempt=$RUN_ATTEMPT" \
+                --label "school.production-id=$production_id" \
+                "$emergency_volume" >/dev/null || return 1
+            fi
+            test "$(docker_short volume inspect "$emergency_volume" --format '{{index .Labels "school.system"}}')" = school-1-11 || return 1
+            test "$(docker_short volume inspect "$emergency_volume" --format '{{index .Labels "school.environment"}}')" = emergency-recovery || return 1
+            test "$(docker_short volume inspect "$emergency_volume" --format '{{index .Labels "school.release"}}')" = "$RELEASE_SHA" || return 1
+            test "$(docker_short volume inspect "$emergency_volume" --format '{{index .Labels "school.run"}}')" = "$RUN_ID" || return 1
+            test "$(docker_short volume inspect "$emergency_volume" --format '{{index .Labels "school.run-attempt"}}')" = "$RUN_ATTEMPT" || return 1
+            test "$(docker_short volume inspect "$emergency_volume" --format '{{index .Labels "school.production-id"}}')" = "$production_id" || return 1
+            printf '%s' "$production_inspect_json" | docker_medium run --rm --interactive \
+              --network none \
+              --read-only \
+              --user 0:0 \
+              --security-opt no-new-privileges:true \
+              --volume "$emergency_volume:/evidence" \
+              --env EXPECTED_BYTES="$manifest_bytes" \
+              --env EXPECTED_SHA="$manifest_sha" \
+              --entrypoint /bin/sh \
+              "$image_id" -c '
+                set -eu
+                target=/evidence/production-inspect.json
+                tmp="${target}.tmp.$$"
+                umask 077
+                cat > "$tmp"
+                test "$(wc -c < "$tmp" | tr -d " ")" = "$EXPECTED_BYTES"
+                test "$(sha256sum "$tmp" | cut -d " " -f 1)" = "$EXPECTED_SHA"
+                chmod 0400 "$tmp"
+                mv -f "$tmp" "$target"
+                sync
+              ' || return 1
+            manifest_proof="$(docker_medium run --rm \
+              --network none \
+              --read-only \
+              --user 0:0 \
+              --security-opt no-new-privileges:true \
+              --volume "$emergency_volume:/evidence:ro" \
+              --entrypoint /bin/sh \
+              "$image_id" -c '
+                set -eu
+                target=/evidence/production-inspect.json
+                test -f "$target"
+                test ! -L "$target"
+                test "$(stat -c %u "$target")" = 0
+                test "$(stat -c %a "$target")" = 400
+                printf "%s:%s\n" \
+                  "$(wc -c < "$target" | tr -d " ")" \
+                  "$(sha256sum "$target" | cut -d " " -f 1)"
+              ')" || return 1
+            test "$manifest_proof" = "$manifest_bytes:$manifest_sha"
+          }
+
+          force_quarantine() {
+            local final_state
+            if [ "$production_absent_proven" -eq 1 ]; then
+              printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=EMERGENCY_ALREADY_ABSENT\n' >&2
+              return 0
+            fi
+            if [ "$production_id_valid" -ne 1 ]; then
+              printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=EMERGENCY_ID_UNPROVEN\n' >&2
+              return 1
+            fi
+            docker_short update --restart no "$production_target" >/dev/null 2>&1 || true
+            stop_production || true
+            final_state="$(docker_short inspect "$production_target" --format '{{.State.Running}}:{{.HostConfig.RestartPolicy.Name}}' 2>/dev/null)" || final_state=unknown
+            if [ "$final_state" = false:no ]; then
+              printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=FORCED_STOPPED\n' >&2
+              return 0
+            fi
+            emergency_remove
+          }
+
+          confirm_gate_or_contain() {
+            if verify_gate_file; then
+              return 0
+            fi
+            printf 'Independent maintenance-gate proof failed; repeating containment\n' >&2
+            install_gate
+            return 1
+          }
+
+          verify_precommit_recovered_live() {
+            local recovered_health recorded_restart_name recorded_restart_max recovered_header
+            test "$production_inspect_valid" -eq 1 || return 1
+            recovered_header="$(sed -n '1,4p' <<<"$durable_commit")"
+            test "$recovered_header" = "$expected_recovered_header" || return 1
+            recorded_restart_name="$(sed -n '5s/^restart_name=//p' <<<"$durable_commit")"
+            recorded_restart_max="$(sed -n '6s/^restart_max=//p' <<<"$durable_commit")"
+            test "$(docker_short volume inspect "$rollback_volume" --format '{{index .Labels "school.system"}}')" = school-1-11 || return 1
+            test "$(docker_short volume inspect "$rollback_volume" --format '{{index .Labels "school.environment"}}')" = rollback || return 1
+            test "$(docker_short volume inspect "$rollback_volume" --format '{{index .Labels "school.release"}}')" = "$RELEASE_SHA" || return 1
+            test "$(docker_short volume inspect "$rollback_volume" --format '{{index .Labels "school.run"}}')" = "$RUN_ID" || return 1
+            test "$(docker_short volume inspect "$rollback_volume" --format '{{index .Labels "school.run-attempt"}}')" = "$RUN_ATTEMPT" || return 1
+            test "$(docker_short inspect "$production_target" --format '{{.State.Running}}')" = true || return 1
+            test "$(docker_short inspect "$production_target" --format '{{.HostConfig.RestartPolicy.Name}}')" = "$recorded_restart_name" || return 1
+            test "$(docker_short inspect "$production_target" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')" = "$recorded_restart_max" || return 1
+            docker_short exec "$production_target" test ! -e /data/.school-deploy-read-only || return 1
+            recovered_health="$(curl --fail --silent --show-error --max-time 30 "$origin/api/health")" || return 1
+            grep -F '"status":"ok"' <<<"$recovered_health" >/dev/null || return 1
+            grep -F '"maintenance":false' <<<"$recovered_health" >/dev/null || return 1
+          }
+
+          if ! docker_short volume inspect "$rollback_volume" >/dev/null 2>&1; then
+            set +e
+            volume_names="$(docker_short volume ls --quiet 2>/dev/null)"
+            volume_list_rc=$?
+            set -e
+            if [ "$volume_list_rc" -ne 0 ]; then
+              install_gate
+              confirm_gate_or_contain
+              printf 'Rollback evidence listing failed; production is gated\n' >&2
+              exit 1
+            fi
+            if grep -Fx "$rollback_volume" <<<"$volume_names" >/dev/null; then
+              install_gate
+              confirm_gate_or_contain
+              printf 'Rollback evidence exists but cannot be inspected\n' >&2
+              exit 1
+            elif [ "$COMMIT_OBSERVED" = true ]; then
+              install_gate
+              confirm_gate_or_contain
+              printf 'Committed deployment lost rollback evidence; production is gated\n' >&2
+              exit 1
+            else
+              printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=NO_MUTATION_PROVEN\n'
+              exit 0
+            fi
+          fi
+          set +e
+          durable_commit="$(docker_medium run --rm \
+            --network none \
+            --read-only \
+            --user 0:0 \
+            --security-opt no-new-privileges:true \
+            --volume "$rollback_volume:/rollback:ro" \
+            --env RUN_ID="$RUN_ID" \
+            --env RUN_ATTEMPT="$RUN_ATTEMPT" \
+            --env RELEASE_SHA="$RELEASE_SHA" \
+            --entrypoint /bin/sh \
+            "$image_id" -c '
+              set -eu
+              entries="$(find /rollback -mindepth 1 -maxdepth 1 -printf "%f\n")"
+              if printf "%s\n" "$entries" | grep -Fx state.tmp >/dev/null; then exit 4; fi
+              printf "%s\n" "$entries" | grep -Fx state >/dev/null
+              state=/rollback/state
+              test -f "$state"
+              test ! -L "$state"
+              test "$(stat -c %u "$state")" = 0
+              test "$(stat -c %a "$state")" = 400
+              test "$(stat -c %s "$state")" -le 512
+              phase="$(sed -n "1p" "$state")"
+              case "$phase" in
+                phase=ROLLBACK_READY)
+                  test "$(wc -l < "$state")" -eq 6
+                  test "$(sed -n "2p" "$state")" = "run_id=$RUN_ID"
+                  test "$(sed -n "3p" "$state")" = "run_attempt=$RUN_ATTEMPT"
+                  test "$(sed -n "4p" "$state")" = "release_sha=$RELEASE_SHA"
+                  backup_file="$(sed -n "5s/^backup_file=//p" "$state")"
+                  backup_sha="$(sed -n "6s/^backup_sha256=//p" "$state")"
+                  case "$backup_file" in school-1-11-*.sqlite) ;; *) exit 4 ;; esac
+                  printf "%s\n" "$backup_sha" | grep -Eq "^[a-f0-9]{64}$"
+                  test -f "/rollback/$backup_file"
+                  test ! -L "/rollback/$backup_file"
+                  test -s "/rollback/$backup_file"
+                  test "$(sha256sum "/rollback/$backup_file" | cut -d " " -f 1)" = "$backup_sha"
+                  exit 3
+                  ;;
+                phase=PRECOMMIT_RECOVERED|phase=ROLLBACK_DISABLED|phase=RELEASE_VERIFIED|phase=RELEASE_ACTIVE)
+                  test "$(wc -l < "$state")" -eq 6
+                  test "$(sed -n "2p" "$state")" = "run_id=$RUN_ID"
+                  test "$(sed -n "3p" "$state")" = "run_attempt=$RUN_ATTEMPT"
+                  test "$(sed -n "4p" "$state")" = "release_sha=$RELEASE_SHA"
+                  restart_name="$(sed -n "5s/^restart_name=//p" "$state")"
+                  restart_max="$(sed -n "6s/^restart_max=//p" "$state")"
+                  case "$restart_name" in always|unless-stopped|on-failure) ;; *) exit 4 ;; esac
+                  printf "%s\n" "$restart_max" | grep -Eq "^[0-9]+$"
+                  cat "$state"
+                  ;;
+                phase=PRECOMMIT_STARTED)
+                  test "$(wc -l < "$state")" -eq 4
+                  test "$(sed -n "2p" "$state")" = "run_id=$RUN_ID"
+                  test "$(sed -n "3p" "$state")" = "run_attempt=$RUN_ATTEMPT"
+                  test "$(sed -n "4p" "$state")" = "release_sha=$RELEASE_SHA"
+                  cat "$state"
+                  ;;
+                *) exit 4 ;;
+              esac
+            ')"
+          durable_rc=$?
+          set -e
+          if [ "$durable_rc" -eq 3 ]; then
+            install_gate
+            confirm_gate_or_contain
+            printf 'ROLLBACK_READY without proven recovery; production is gated\n' >&2
+            exit 1
+          fi
+          expected_started="$(printf 'phase=PRECOMMIT_STARTED\nrun_id=%s\nrun_attempt=%s\nrelease_sha=%s' "$RUN_ID" "$RUN_ATTEMPT" "$RELEASE_SHA")"
+          expected_recovered_header="$(printf 'phase=PRECOMMIT_RECOVERED\nrun_id=%s\nrun_attempt=%s\nrelease_sha=%s' "$RUN_ID" "$RUN_ATTEMPT" "$RELEASE_SHA")"
+          durable_phase="$(sed -n '1p' <<<"$durable_commit")"
+          if [ "$durable_rc" -eq 0 ] &&
+            [ "$durable_phase" = phase=PRECOMMIT_RECOVERED ] &&
+            [ "$COMMIT_OBSERVED" = false ] &&
+            verify_precommit_recovered_live; then
+            printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=PRECOMMIT_RECOVERY_PROVEN\n'
+            exit 0
+          fi
+          install_gate
+          if [ "$durable_rc" -ne 0 ]; then
+            confirm_gate_or_contain
+            printf 'Rollback state is unreadable; production is gated\n' >&2
+            exit 1
+          fi
+          if [ "$durable_phase" = phase=PRECOMMIT_RECOVERED ]; then
+            confirm_gate_or_contain
+            printf 'Recovered state contradicts live or commit evidence; production is gated\n' >&2
+            exit 1
+          fi
+          case "$durable_commit" in
+            "$expected_started")
+              confirm_gate_or_contain
+              printf 'Pre-commit state is incomplete or contradicts commit evidence; production is gated\n' >&2
+              exit 1
+              ;;
+          esac
+          case "$durable_phase" in
+            phase=ROLLBACK_DISABLED|phase=RELEASE_VERIFIED|phase=RELEASE_ACTIVE) ;;
+            *)
+              confirm_gate_or_contain
+              printf 'Unexpected rollback state; production is gated\n' >&2
+              exit 1
+              ;;
+          esac
+          test "$(docker_short volume inspect "$rollback_volume" --format '{{index .Labels "school.system"}}')" = school-1-11
+          test "$(docker_short volume inspect "$rollback_volume" --format '{{index .Labels "school.environment"}}')" = rollback
+          test "$(docker_short volume inspect "$rollback_volume" --format '{{index .Labels "school.release"}}')" = "$RELEASE_SHA"
+          test "$(docker_short volume inspect "$rollback_volume" --format '{{index .Labels "school.run"}}')" = "$RUN_ID"
+          test "$(docker_short volume inspect "$rollback_volume" --format '{{index .Labels "school.run-attempt"}}')" = "$RUN_ATTEMPT"
+          confirm_gate_or_contain
+          test "$(docker_short inspect "$production_target" --format '{{index .Config.Labels "school.system"}}')" = school-1-11
+          test "$(docker_short inspect "$production_target" --format '{{index .Config.Labels "school.environment"}}')" = production
+          test "$(docker_short inspect "$production_target" --format '{{index .Config.Labels "school.curriculum-release"}}')" = "$RELEASE_SHA"
+          test "$(docker_short inspect "$production_target" --format '{{index .Config.Labels "school.curriculum-run"}}')" = "$RUN_ID"
+          test "$(docker_short inspect "$production_target" --format '{{index .Config.Labels "school.curriculum-run-attempt"}}')" = "$RUN_ATTEMPT"
+          production_running="$(docker_short inspect "$production_target" --format '{{.State.Running}}')"
+          case "$production_running" in true|false) ;; *) exit 1 ;; esac
+          if [ "$production_running" = true ]; then
+            confirm_gate_or_contain
+            body="$(mktemp)"
+            headers="$(mktemp)"
+            trap 'rm -f -- "$body" "$headers"' EXIT
+            verified=0
+            for attempt in $(seq 1 15); do
+              : > "$body"
+              : > "$headers"
+              status="$(curl --silent --show-error --max-time 20 \
+                --output "$body" --dump-header "$headers" --write-out '%{http_code}' \
+                --request POST "$origin/api/school" \
+                --header "Origin: $origin" \
+                --header 'Content-Type: application/json' \
+                --data '{"action":"deployment.external-verification-failed"}' || true)"
+              if test "$status" = 503 \
+                && grep -Eq '"code"[[:space:]]*:[[:space:]]*"deployment_read_only"' "$body" \
+                && grep -Eiq '^Retry-After:[[:space:]]*30' "$headers"; then
+                verified=1
+                break
+              fi
+              sleep 2
+            done
+            if [ "$verified" -ne 1 ]; then
+              force_quarantine
+              printf 'Public maintenance-gate proof failed; production remains contained\n' >&2
+              exit 1
+            fi
+            if ! health="$(curl --fail --silent --show-error --max-time 30 "$origin/api/health")" \
+              || ! grep -F '"status":"ok"' <<<"$health" >/dev/null \
+              || ! grep -F '"maintenance":true' <<<"$health" >/dev/null; then
+              force_quarantine
+              printf 'Maintenance health proof failed; production remains contained\n' >&2
+              exit 1
+            fi
+            printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=PASS_RUNNING\n'
+          else
+            printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=PASS_STOPPED\n'
+          fi
+          REMOTE
+          )"
+          timeout --signal=TERM --kill-after=30s 10000s \
+            ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "printf '%s' '$remote_payload' | base64 -d | env RELEASE_SHA='$RELEASE_SHA' RUN_ID='$GITHUB_RUN_ID' RUN_ATTEMPT='$GITHUB_RUN_ATTEMPT' JOB_DIR='$job_dir' COMMIT_OBSERVED='$COMMIT_OBSERVED' bash" \
+            </dev/null
 
       - name: Remove temporary SSH material
+        timeout-minutes: 2
         if: always()
         run: |
           rm -f \
@@ -491,12 +1763,15 @@ jobs:
             "$RUNNER_TEMP/school-curriculum-ssh/known_hosts"
 
       - name: Publish sanitized production result
+        timeout-minutes: 5
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           CONFIGURE_OUTCOME: ${{ steps.configure_ssh.outcome }}
           DEPLOY_OUTCOME: ${{ steps.deploy_school.outcome }}
           PUBLIC_OUTCOME: ${{ steps.verify_public.outcome }}
+          ACTIVATION_OUTCOME: ${{ steps.activate_release.outcome }}
+          REGATE_OUTCOME: ${{ steps.regate_public_failure.outcome }}
         run: |
           set -Eeuo pipefail
           log_file="$RUNNER_TEMP/school-curriculum-deploy.log"
@@ -506,7 +1781,9 @@ jobs:
             printf -- '- Immutable release: `%s`\n' "$RELEASE_SHA"
             printf -- '- Protected SSH configuration: `%s`\n' "$CONFIGURE_OUTCOME"
             printf -- '- Release deployment: `%s`\n' "$DEPLOY_OUTCOME"
-            printf -- '- Public verification: `%s`\n\n' "$PUBLIC_OUTCOME"
+            printf -- '- Public verification: `%s`\n' "$PUBLIC_OUTCOME"
+            printf -- '- Restart activation: `%s`\n\n' "$ACTIVATION_OUTCOME"
+            printf -- '- Failure re-gate: `%s`\n\n' "$REGATE_OUTCOME"
             printf 'Sanitized deployment markers:\n\n```text\n'
             if [ -f "$log_file" ]; then
               grep -E '^(SCHOOL_|Error:|error:|curl:|ssh:|Permission denied|Host key|Connection closed)' "$log_file" \
@@ -530,13 +1807,16 @@ jobs:
             >/dev/null
 
       - name: Enforce successful production result
+        timeout-minutes: 1
         if: always()
         env:
           CONFIGURE_OUTCOME: ${{ steps.configure_ssh.outcome }}
           DEPLOY_OUTCOME: ${{ steps.deploy_school.outcome }}
           PUBLIC_OUTCOME: ${{ steps.verify_public.outcome }}
+          ACTIVATION_OUTCOME: ${{ steps.activate_release.outcome }}
         run: |
           set -Eeuo pipefail
           test "$CONFIGURE_OUTCOME" = success
           test "$DEPLOY_OUTCOME" = success
           test "$PUBLIC_OUTCOME" = success
+          test "$ACTIVATION_OUTCOME" = success
