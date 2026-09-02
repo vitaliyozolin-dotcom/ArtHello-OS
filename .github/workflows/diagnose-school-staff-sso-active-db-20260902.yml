@@ -1,0 +1,142 @@
+name: Diagnose School staff SSO active database
+
+on:
+  push:
+    branches:
+      - ops/diagnose-school-staff-sso-20260902
+    paths:
+      - .github/workflows/diagnose-school-staff-sso-active-db-20260902.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
+
+jobs:
+  diagnose:
+    if: github.actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 10
+    steps:
+      - name: Inspect active ArtHello D1 SSO state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t live_containers < <(
+            docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}'
+          )
+          test "${#live_containers[@]}" -eq 1
+          live="${live_containers[0]}"
+          image="$(docker inspect "$live" --format '{{.Config.Image}}')"
+          volume="$(docker inspect "$live" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          printf 'ARTHELLO_LIVE_IMAGE=%s\n' "$image"
+          docker run --rm --network none -i \
+            -v "$volume:/data:ro" \
+            --entrypoint node "$image" --input-type=module - <<'NODE'
+          import { closeSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
+          import { relative, join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+
+          function walk(root) {
+            const result=[];
+            for (const name of readdirSync(root)) {
+              const path=join(root,name);
+              const stat=statSync(path);
+              if (stat.isDirectory()) result.push(...walk(path));
+              else if (
+                stat.isFile() &&
+                !name.endsWith('-wal') &&
+                !name.endsWith('-shm') &&
+                !name.includes('.pre-rollback-') &&
+                !name.includes('.failed-restore-')
+              ) result.push(path);
+            }
+            return result;
+          }
+          function isSqlite(path) {
+            try {
+              const fd=openSync(path,'r');
+              const header=Buffer.alloc(16);
+              readSync(fd,header,0,16,0);
+              closeSync(fd);
+              return header.toString('binary') === 'SQLite format 3\u0000';
+            } catch { return false; }
+          }
+
+          const matches=[];
+          for (const path of walk('/data').filter(isSqlite)) {
+            try {
+              const db=new DatabaseSync(path,{readOnly:true});
+              const tables=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((row)=>String(row.name));
+              if (tables.includes('app_users') && tables.includes('system_runtime_state')) {
+                matches.push({path,db,tables,mtime:statSync(path).mtimeMs,size:statSync(path).size});
+              } else db.close();
+            } catch {}
+          }
+          matches.sort((a,b)=>b.mtime-a.mtime);
+          console.log(`ARTHELLO_ACTIVE_DATABASE_MATCHES=${matches.length}`);
+          matches.forEach((item,index)=>console.log(`ARTHELLO_DB_${index+1}=path:${relative('/data',item.path)},bytes:${item.size},mtime:${Math.trunc(item.mtime)}`));
+          if (!matches.length) process.exit(1);
+          const selected=matches[0];
+          for (const item of matches.slice(1)) item.db.close();
+          const {db,tables}=selected;
+          const relevant=tables.filter((name)=>/(school|grant|system|access|user|auth)/i.test(name));
+          console.log('ARTHELLO_RELEVANT_TABLES='+relevant.join(','));
+          for (const name of relevant) {
+            const escaped=name.replaceAll('"','""');
+            const columns=db.prepare(`PRAGMA table_info("${escaped}")`).all().map((row)=>String(row.name));
+            console.log(`ARTHELLO_TABLE_${name}_COLUMNS=${columns.join(',')}`);
+          }
+          const groups=db.prepare(`SELECT role,status,COUNT(*) AS count FROM app_users GROUP BY role,status ORDER BY role,status`).all();
+          groups.forEach((row)=>console.log(`ARTHELLO_APP_USERS_GROUP=role:${row.role},status:${row.status},count:${row.count}`));
+          if (tables.includes('production_auth_credentials')) {
+            const auth=db.prepare(`SELECT role,COUNT(*) AS count FROM production_auth_credentials GROUP BY role ORDER BY role`).all();
+            auth.forEach((row)=>console.log(`ARTHELLO_AUTH_GROUP=role:${row.role},count:${row.count}`));
+          }
+          console.log(`ARTHELLO_HAS_SSO_CODES_TABLE=${tables.includes('school_sso_codes') ? 'yes' : 'no'}`);
+          if (tables.includes('school_sso_codes')) {
+            const rows=db.prepare(`
+              SELECT school_role,access_version,created_at,expires_at,used_at,
+                     CASE WHEN instr(contact,'@')>0 THEN 'email'
+                          WHEN length(trim(contact))=0 THEN 'empty'
+                          ELSE 'phone' END AS contact_kind
+              FROM school_sso_codes ORDER BY created_at DESC LIMIT 5
+            `).all();
+            console.log(`ARTHELLO_SSO_CODE_ROWS=${rows.length}`);
+            rows.forEach((row,index)=>console.log(`ARTHELLO_SSO_CODE_${index+1}=role:${row.school_role},access:${row.access_version},created:${row.created_at},expires:${row.expires_at},used:${row.used_at>0?'yes':'no'},contact:${row.contact_kind}`));
+          }
+          db.close();
+          console.log('ARTHELLO_ACTIVE_D1_INSPECTION=PASS');
+          NODE
+
+      - name: Verify exchange endpoint reaches application code
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$(mktemp -d "$RUNNER_TEMP/arthello-sso-route-XXXXXX")"
+          trap 'rm -rf -- "$work"' EXIT
+          code="$(printf 'a%.0s' $(seq 1 43))"
+          verifier="$(printf 'b%.0s' $(seq 1 43))"
+          status="$(curl -sS --max-time 20 \
+            -o "$work/body" -w '%{http_code}' \
+            -X POST "$ARTHELLO_ORIGIN/api/school-sso/exchange" \
+            -H 'content-type: application/json' \
+            --data "{\"code\":\"$code\",\"codeVerifier\":\"$verifier\"}")"
+          printf 'ARTHELLO_SSO_EXCHANGE_STATUS=%s\n' "$status"
+          python3 - "$work/body" <<'PY'
+          import json, pathlib, sys
+          raw=pathlib.Path(sys.argv[1]).read_text()
+          try:
+              payload=json.loads(raw)
+          except Exception:
+              print('ARTHELLO_SSO_EXCHANGE_JSON=no')
+              print('ARTHELLO_SSO_EXCHANGE_BODY_CLASS=html_or_text')
+              raise SystemExit(1)
+          print('ARTHELLO_SSO_EXCHANGE_JSON=yes')
+          print('ARTHELLO_SSO_EXCHANGE_APP_ERROR='+('yes' if payload.get('error') else 'no'))
+          PY
+          test "$status" = 401
+          printf 'ARTHELLO_SSO_EXCHANGE_ROUTE=PASS\n'
