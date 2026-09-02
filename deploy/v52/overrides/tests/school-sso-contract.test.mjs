@@ -16,14 +16,36 @@ test("School SSO uses one-time PKCE-bound authorization codes", async () => {
   assert.match(broker, /used_at = 0/);
   assert.match(broker, /UPDATE school_sso_codes[\s\S]+RETURNING/);
   assert.match(authorize, /code_challenge/);
-  assert.match(authorize, /SYS-SCHOOL-1-11/);
   assert.match(authorize, /getAuthenticatedSession/);
   assert.match(authorize, /schoolPublicOrigin\(\)/);
   assert.match(exchange, /exchangeSchoolSsoCode/);
   assert.doesNotMatch(exchange, /getAuthenticatedSession/);
 });
 
-test("School SSO derives identity from current ArtHello access", async () => {
+test("School SSO resolves access in-process and never self-fetches public ArtHello", async () => {
+  const [authorize, access] = await Promise.all([
+    read("../app/api/school-sso/authorize/route.ts"),
+    read("../lib/school-sso-access.ts"),
+  ]);
+
+  assert.match(authorize, /authenticated\.access/);
+  assert.match(authorize, /loadSchoolSystemGrant\(me\.app_user_id\)/);
+  assert.match(authorize, /authenticated\.user\.role === "owner"/);
+  assert.match(authorize, /owner \? "director"/);
+  assert.match(authorize, /Доступ к электронному дневнику не выдан/);
+  assert.match(authorize, /методист/);
+  assert.match(authorize, /methodist/);
+  assert.doesNotMatch(authorize, /fetch\s*\(/);
+  assert.doesNotMatch(authorize, /\/api\/settings/);
+  assert.doesNotMatch(authorize, /SettingsPayload/);
+
+  assert.match(access, /cloudflare:workers/);
+  assert.match(access, /user_system_access/);
+  assert.match(access, /SYS-SCHOOL-1-11/);
+  assert.match(access, /WHERE user_id=\? AND system_id=\?/);
+});
+
+test("School SSO derives the complete identity from authenticated ArtHello access", async () => {
   const authorize = await read("../app/api/school-sso/authorize/route.ts");
   for (const field of [
     "centralUserId",
@@ -31,11 +53,10 @@ test("School SSO derives identity from current ArtHello access", async () => {
     "contact",
     "role",
     "accessVersion",
+    "app_user_id",
+    "display_name",
+    "user_access_version",
   ]) assert.match(authorize, new RegExp(field));
-  assert.match(authorize, /systemGrants/);
-  assert.match(authorize, /activeStatus/);
-  assert.match(authorize, /authenticated\.user\.role === "owner"/);
-  assert.match(authorize, /Доступ к электронному дневнику не выдан/);
 });
 
 test("employee can continue an interrupted School SSO login", async () => {
