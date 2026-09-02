@@ -11,6 +11,7 @@ on:
 permissions:
   actions: read
   contents: read
+  deployments: read
   issues: write
   pull-requests: read
 
@@ -19,13 +20,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_SHA: af1f262abdbdfa0db6bf6db2262efe9bb0c029b0
-  RELEASE_TREE: 66e0b81f6a81309f096acf0b61c3451d87e9c804
-  RELEASE_PR: '301'
-  VALIDATED_SHA: 75c01c2c2cc5e371d6cd87b013dcf98026d9bd6b
-  VALIDATION_RUN_ID: '33591551705'
+  RELEASE_SHA: f41dfb5de4eeeed4ed26d94009a18388728f42b7
+  RELEASE_TREE: 2ecda1a0a872caab7aadbc303c152c1207d3030a
+  RELEASE_PR: '303'
+  VALIDATED_SHA: 9da48a1d6eb12a257442d72808e770c739b7fcc4
+  VALIDATION_RUN_ID: '33592942510'
   VALIDATION_WORKFLOW_ID: '346579718'
-  CUTOVER_SHA256: 8ea55162ccbee073a7682e68ad1d57fc9266988f08ab47be35e89fb1e6425a76
+  CUTOVER_SHA256: eddbfb0e44f6c1f0ae3f2eec468538b9b5cb6f72565dc68f56b1b929e0bf14e2
   VERIFY_SHA256: 9f2839de7fff8e573c3b7a44262eb90fd6bfe79c1fd41d75ed747ca0f75d4727
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
@@ -51,6 +52,26 @@ jobs:
           test "$GITHUB_REF" = refs/heads/main
           test "$DEPLOY_CONFIRMATION" = DEPLOY-SCHOOL-2026-2027
           printf 'SCHOOL_PRODUCTION_CONFIRMATION=VERIFIED\n'
+
+      - name: Verify protected production environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          environment_json="$(curl --fail-with-body --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/environments/production-ru")"
+          jq -e '
+            .name == "production-ru" and
+            .can_admins_bypass == false and
+            ([.protection_rules[]? |
+              select(.type == "required_reviewers" and
+                .prevent_self_review == true and
+                ((.reviewers // []) | length) > 0)] | length) == 1
+          ' <<<"$environment_json" >/dev/null
+          printf 'SCHOOL_PRODUCTION_ENVIRONMENT_REVIEWER=VERIFIED\n'
 
       - name: Verify accepted release provenance
         env:
@@ -604,6 +625,8 @@ jobs:
           done
 
           test "$remote_status" = "success:$RELEASE_SHA:$launch_nonce"
+          remote_job_complete=1
+          printf 'committed=true\n' >> "$GITHUB_OUTPUT"
           fetch_remote_log | tee -a "$log_file"
           grep -Fx 'SCHOOL_STANDALONE_SOURCE=VERIFIED' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_PREFLIGHT=PASS' "$log_file" >/dev/null
@@ -626,12 +649,11 @@ jobs:
           grep -Fx 'SCHOOL_RELEASE_CURRICULUM_SESSIONS=170' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_BACKUP=VERIFIED' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_DATA_VOLUME=PRESERVED' "$log_file" >/dev/null
-          remote_job_complete=1
           printf 'SCHOOL_REMOTE_JOB=SUCCESS\n' | tee -a "$log_file"
 
       - name: Verify public School release
         id: verify_public
-        if: steps.deploy_school.outcome == 'success'
+        if: steps.deploy_school.outputs.committed == 'true'
         continue-on-error: true
         run: |
           set -Eeuo pipefail
@@ -693,8 +715,9 @@ jobs:
         if: >-
           always() &&
           steps.configure_ssh.outcome == 'success' &&
-          steps.deploy_school.outcome == 'success' &&
-          steps.verify_public.outcome != 'success'
+          steps.deploy_school.outputs.committed == 'true' &&
+          (steps.deploy_school.outcome != 'success' ||
+            steps.verify_public.outcome != 'success')
         env:
           DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
