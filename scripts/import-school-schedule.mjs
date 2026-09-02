@@ -240,7 +240,8 @@ db.exec("BEGIN IMMEDIATE");
 try {
   db.prepare(
     `UPDATE lessons SET status = 'archived', updated_at = CURRENT_TIMESTAMP
-    WHERE id LIKE 'schedule-2026-2027-%'`,
+    WHERE id LIKE 'schedule-2026-2027-%'
+      AND class_name IN ('1','2','3','4','5','6')`,
   ).run();
   for (const lesson of lessons) {
     upsertLesson.run(
