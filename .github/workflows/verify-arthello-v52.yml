@@ -73,13 +73,16 @@ jobs:
             runners = Array(deploy.fetch("runs-on"))
             raise "production must use its dedicated self-hosted runner" unless runners.include?("self-hosted") && runners.include?("arthello-gateway")
             raise "production Environment is mandatory" unless deploy.fetch("environment") == "production-ru"
+            deployment_env = deploy.fetch("env")
+            raise "recovery branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/production-loader-recovery-20260902"
+            raise "recovery PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR") == "311"
             condition = deploy.fetch("if")
             [
               "workflow_run", "vitaliyozolin-dotcom/ArtHello-OS",
               "Verify ArtHello v52 release", ".github/workflows/verify-arthello-v52.yml",
               "head_branch == '\''main'\''", "conclusion == '\''success'\''",
               "codex/production-loader-recovery-20260902", "vitaliyozolin-dotcom",
-              "EXPECTED_RELEASE_PR: \"311\"",
+              "number == 311",
               "pull_requests[1] == null", "github.run_attempt == 1"
             ].each do |required|
               raise "missing production authorization condition" unless condition.include?(required)
