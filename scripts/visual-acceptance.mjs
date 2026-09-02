@@ -25,7 +25,7 @@ function chromeBinary() {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function fetchJson(url, attempts = 40) {
+async function fetchJson(url, attempts = 120) {
   let last;
   for (let i = 0; i < attempts; i += 1) {
     try {
