@@ -98,10 +98,10 @@ jobs:
             raise "exact v52 gate missing before checkout" unless before_checkout.include?("verify-arthello-v52.yml")
             source = File.read(ARGV.fetch(0))
             raise "workflow_run deployment must not use event GITHUB_SHA" if source.include?("$GITHUB_SHA") || source.include?("github.sha")
-            raise "recovery must use direct Docker archive input" unless source.include?('docker image load --input "$archive"')
-            raise "opaque gzip/docker pipe is forbidden" if source.include?('gzip -dc "$archive" | docker load')
+            raise "recovery must use direct Docker archive input" unless source.include?("docker image load --input \"$archive\"")
+            raise "opaque gzip/docker pipe is forbidden" if source.include?("gzip -dc \"$archive\" | docker load")
             raise "Docker preflight marker missing" unless source.include?("ARTHELLO_DOCKER_PREFLIGHT=VERIFIED")
-            raise "container-reference guard missing" unless source.include?('docker ps -aq --filter "ancestor=$image_id"')
+            raise "container-reference guard missing" unless source.include?("docker ps -aq --filter \"ancestor=$image_id\"")
             raise "broad Docker pruning is forbidden" if source.match?(/docker\s+(system|builder|image)\s+prune/)
           ' .github/workflows/deploy-arthello-direct-38-55.yml
           printf 'ARTHELLO_V52_SOURCE_SHA=%s\n' "$EXPECTED_SHA"
