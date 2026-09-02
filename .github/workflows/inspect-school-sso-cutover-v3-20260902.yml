@@ -1,0 +1,58 @@
+name: Inspect School SSO cutover v3
+
+on:
+  push:
+    branches:
+      - ops/inspect-school-sso-cutover-v3-20260902
+    paths:
+      - .github/workflows/inspect-school-sso-cutover-v3-20260902.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Reconstruct and inspect deployment controls
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$(mktemp -d)"
+          trap 'rm -rf -- "$work"' EXIT
+          mapfile -t controller_parts < <(printf '%s\n' .github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64.part-* | sort)
+          mapfile -t cutover_parts < <(printf '%s\n' .github/scripts/school-staff-sso-production-cutover-v3.sh.gz.b64.part-* | sort)
+          test "${#controller_parts[@]}" -eq 5
+          test "${#cutover_parts[@]}" -eq 10
+          cat "${controller_parts[@]}" | tr -d '\r\n\t ' | base64 -d | gzip -d > "$work/controller.sh"
+          cat "${cutover_parts[@]}" | tr -d '\r\n\t ' | base64 -d | gzip -d > "$work/cutover.sh"
+          bash -n "$work/controller.sh"
+          bash -n "$work/cutover.sh"
+
+          printf 'SCHOOL_SSO_CONTROLLER_RELEVANT_BEGIN\n'
+          grep -nE -C 8 '(tar |SOURCE_ARCHIVE|docker|cutover|SSH|scp|base64)' "$work/controller.sh" \
+            | sed -n '1,320p'
+          printf 'SCHOOL_SSO_CONTROLLER_RELEVANT_END\n'
+
+          printf 'SCHOOL_SSO_CUTOVER_RELEVANT_BEGIN\n'
+          grep -nE -C 12 '(docker build|Dockerfile|dockerignore|data/schedules|data/curricula|COPY|BUILD_CONTEXT|rm -rf|source_dir|SOURCE_DIR|candidate|backup|rollback|write.gate)' "$work/cutover.sh" \
+            | sed -n '1,700p'
+          printf 'SCHOOL_SSO_CUTOVER_RELEVANT_END\n'
+
+          printf 'SCHOOL_SSO_CUTOVER_DOCKERFILES_BEGIN\n'
+          awk '
+            /cat > .*Dockerfile|cat <<.*Dockerfile|Dockerfile/ {from=NR-20; to=NR+120}
+            NR>=from && NR<=to {print NR ":" $0}
+          ' "$work/cutover.sh" | sed -n '1,500p'
+          printf 'SCHOOL_SSO_CUTOVER_DOCKERFILES_END\n'
+          printf 'SCHOOL_SSO_CUTOVER_INSPECTION=PASS\n'
