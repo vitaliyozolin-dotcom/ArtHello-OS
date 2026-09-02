@@ -23,10 +23,13 @@ jobs:
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 12
     steps:
-      - name: Inspect gateway ArtHello SSO path without mutations
+      - name: Inspect exact live ArtHello SSO implementation and D1 state
         shell: bash
         run: |
           set -Eeuo pipefail
+          container="$(docker ps --format '{{.Names}}' | grep -E '^arthello-direct-' | head -n1)"
+          test -n "$container"
+
           sanitize() {
             python3 -c '
           import re, sys
@@ -40,52 +43,80 @@ jobs:
           '
           }
 
-          printf 'GATEWAY_SSO_CONTAINER_INVENTORY_BEGIN\n'
-          docker ps -a --format 'name={{.Names}} image={{.Image}} status={{.Status}} ports={{.Ports}}' \
-            | grep -Ei 'arthello|school|caddy' | sanitize
-          printf 'GATEWAY_SSO_CONTAINER_INVENTORY_END\n'
+          printf 'ARTHELLO_SSO_EXACT_SOURCE_BEGIN\n'
+          docker exec "$container" sh -lc "sed -n '34285,34535p' /app/dist/server/index.js" | sanitize
+          printf 'ARTHELLO_SSO_EXACT_SOURCE_END\n'
 
-          printf 'GATEWAY_SSO_CADDY_ROUTE_BEGIN\n'
-          caddy="$(docker ps --format '{{.Names}}' | grep -E 'caddy' | head -n1 || true)"
-          if [ -n "$caddy" ]; then
-            docker exec "$caddy" sh -lc \
-              "grep -RInE -C 4 'arthello-188-225-38-55|school-188-225-38-55|reverse_proxy' /etc/caddy /data 2>/dev/null | head -n 260" \
-              | sanitize || true
-          fi
-          printf 'GATEWAY_SSO_CADDY_ROUTE_END\n'
+          printf 'ARTHELLO_SSO_RUNTIME_BEGIN\n'
+          printf 'container=%s\n' "$container"
+          printf 'image=%s\n' "$(docker inspect "$container" --format '{{.Config.Image}}')"
+          printf 'started=%s\n' "$(docker inspect "$container" --format '{{.State.StartedAt}}')"
+          printf 'mounts='
+          docker inspect "$container" --format '{{range .Mounts}}{{.Type}}:{{.Destination}};{{end}}'
+          printf 'env_keys='
+          docker inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            | cut -d= -f1 | grep -Ei 'DB|D1|STATE|PERSIST|SCHOOL|SSO|ORIGIN|AUTH|SESSION' | sort -u | paste -sd, - || true
+          printf 'ARTHELLO_SSO_RUNTIME_END\n'
 
-          printf 'GATEWAY_SSO_LOGS_BEGIN\n'
-          while IFS= read -r container; do
-            [ -n "$container" ] || continue
-            printf 'container=%s\n' "$container"
-            docker logs --since 5h "$container" 2>&1 \
-              | grep -Ei 'school-sso|/api/school|authorize|exchange|callback|central|statusCode.:40[013]|statusCode.:50[0-9]|error|denied|invalid' \
-              | tail -n 320 \
-              | sanitize || true
-          done < <(docker ps --format '{{.Names}}' | grep -Ei 'arthello' | sort -u)
-          printf 'GATEWAY_SSO_LOGS_END\n'
+          printf 'ARTHELLO_SSO_SQLITE_FILES_BEGIN\n'
+          docker exec "$container" sh -lc \
+            "find /app /data /root /tmp -xdev -type f \\( -name '*.sqlite' -o -name '*.sqlite3' -o -name '*.db' \\) -printf '%s %p\n' 2>/dev/null | sort -n | tail -n 60" \
+            | sanitize || true
+          printf 'ARTHELLO_SSO_SQLITE_FILES_END\n'
 
-          printf 'GATEWAY_SSO_CODE_BEGIN\n'
-          while IFS= read -r container; do
-            [ -n "$container" ] || continue
-            printf 'container=%s image=%s workdir=%s\n' \
-              "$container" \
-              "$(docker inspect "$container" --format '{{.Config.Image}}')" \
-              "$(docker inspect "$container" --format '{{.Config.WorkingDir}}')"
-            printf 'env_keys='
-            docker inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}' \
-              | cut -d= -f1 | grep -Ei 'SCHOOL|SSO|ORIGIN|AUTH|SESSION|DATABASE' | sort -u | paste -sd, - || true
-            docker exec "$container" sh -lc '
-              for root in /app /workspace /srv /opt/app; do
-                [ -d "$root" ] || continue
-                grep -RIl --include="*.js" --include="*.mjs" --include="*.cjs" --include="*.ts" "school-sso" "$root" 2>/dev/null | head -n 16
-              done
-            ' 2>/dev/null | while IFS= read -r file; do
-              [ -n "$file" ] || continue
-              printf 'route_file=%s\n' "$file"
-              docker exec "$container" sh -lc "grep -nE -m 32 -C 7 'school-sso|codeVerifier|code_challenge|accessVersion|centralUserId|return_to' '$file' 2>/dev/null | head -n 320" \
-                | sanitize || true
-            done
-          done < <(docker ps --format '{{.Names}}' | grep -Ei 'arthello' | sort -u)
-          printf 'GATEWAY_SSO_CODE_END\n'
-          printf 'GATEWAY_SSO_INSPECTION=PASS\n'
+          printf 'ARTHELLO_SSO_D1_COUNTS_BEGIN\n'
+          docker exec -i "$container" node --input-type=module <<'NODE'
+          import { readdirSync, statSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+
+          const roots=['/app','/data','/root','/tmp'];
+          const seen=new Set();
+          const files=[];
+          function walk(path, depth=0){
+            if(depth>7 || seen.has(path)) return;
+            seen.add(path);
+            let entries=[];
+            try{ entries=readdirSync(path,{withFileTypes:true}); }catch{return;}
+            for(const entry of entries){
+              const next=join(path,entry.name);
+              if(entry.isDirectory()){
+                if(['node_modules','.git'].includes(entry.name)) continue;
+                walk(next,depth+1);
+              }else if(entry.isFile() && /\.(sqlite3?|db)$/i.test(entry.name)){
+                try{ if(statSync(next).size>0) files.push(next); }catch{}
+              }
+            }
+          }
+          for(const root of roots) walk(root);
+          let matched=0;
+          for(const file of files){
+            let db;
+            try{
+              db=new DatabaseSync(file,{readOnly:true});
+              const table=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='school_sso_codes'").get();
+              if(!table){ db.close(); continue; }
+              matched++;
+              const codes=db.prepare(`SELECT count(*) AS total,
+                sum(CASE WHEN used_at>0 THEN 1 ELSE 0 END) AS used,
+                sum(CASE WHEN used_at=0 AND expires_at>unixepoch() THEN 1 ELSE 0 END) AS open,
+                max(created_at) AS latestCreated,
+                max(used_at) AS latestUsed,
+                max(expires_at) AS latestExpiry
+                FROM school_sso_codes`).get();
+              const sessions=db.prepare("SELECT count(*) AS total, max(created_at) AS latestCreated FROM production_auth_sessions").get();
+              const users=db.prepare("SELECT count(*) AS total FROM app_users").get();
+              console.log(JSON.stringify({file,codes,sessions,users},null,2));
+              db.close();
+            }catch(error){ try{db?.close()}catch{} }
+          }
+          console.log(JSON.stringify({matchedDatabases:matched,scannedSqliteFiles:files.length}));
+          NODE
+          printf 'ARTHELLO_SSO_D1_COUNTS_END\n'
+
+          printf 'ARTHELLO_SSO_RECENT_LOGS_BEGIN\n'
+          docker logs --since 6h "$container" 2>&1 \
+            | grep -Ei 'school-sso|authorize|exchange|code|settings|TLS peer|certificate|error|statusCode.:40[013]|statusCode.:50[0-9]' \
+            | tail -n 420 | sanitize || true
+          printf 'ARTHELLO_SSO_RECENT_LOGS_END\n'
+          printf 'ARTHELLO_SSO_EXACT_DIAGNOSIS=PASS\n'
