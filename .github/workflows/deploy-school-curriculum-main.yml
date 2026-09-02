@@ -9,8 +9,10 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
   issues: write
+  pull-requests: read
 
 concurrency:
   group: school-1-11-production
@@ -19,6 +21,10 @@ concurrency:
 env:
   RELEASE_SHA: 4a1476c83fd0245101a8e81ab9edc192b8462dd9
   RELEASE_TREE: f1081a9f6a4017aaab668e463fd7fb992f5f93a1
+  RELEASE_PR: '291'
+  VALIDATED_SHA: feddbd90ea51b0b87b0d0aa7d0e58f7d76c2cabf
+  VALIDATION_RUN_ID: '33559677859'
+  VALIDATION_WORKFLOW_ID: '346579718'
   CUTOVER_SHA256: 2e6f44791506be392a4f772e1dd08d50e01bd50015a87f7558da8e05fdc7fb7b
   VERIFY_SHA256: 91d5d382b7442d146f8ce139afa1f19998001154c62243afe3c82949a66c8c42
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
@@ -45,6 +51,66 @@ jobs:
           test "$GITHUB_REF" = refs/heads/main
           test "$DEPLOY_CONFIRMATION" = DEPLOY-SCHOOL-2026-2027
           printf 'SCHOOL_PRODUCTION_CONFIRMATION=VERIFIED\n'
+
+      - name: Verify accepted release provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY"
+          headers=(
+            --header "Authorization: Bearer $GH_TOKEN"
+            --header "Accept: application/vnd.github+json"
+            --header "X-GitHub-Api-Version: 2022-11-28"
+          )
+          run_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/actions/runs/$VALIDATION_RUN_ID")"
+          jq -e \
+            --argjson run_id "$VALIDATION_RUN_ID" \
+            --argjson workflow_id "$VALIDATION_WORKFLOW_ID" \
+            --arg validated_sha "$VALIDATED_SHA" \
+            --arg release_tree "$RELEASE_TREE" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            '.id == $run_id and
+             .workflow_id == $workflow_id and
+             .name == "School KTP import targeted" and
+             .path == ".github/workflows/school-ktp-import-targeted.yml" and
+             .event == "pull_request" and
+             .status == "completed" and
+             .conclusion == "success" and
+             .run_attempt == 1 and
+             .head_sha == $validated_sha and
+             .head_commit.id == $validated_sha and
+             .head_commit.tree_id == $release_tree and
+             .actor.login == "vitaliyozolin-dotcom" and
+             .triggering_actor.login == "vitaliyozolin-dotcom" and
+             .repository.full_name == $repository' <<<"$run_json" >/dev/null
+
+          jobs_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/actions/runs/$VALIDATION_RUN_ID/jobs?per_page=100")"
+          jq -e \
+            '[.jobs[] | select(.name == "validate" and .status == "completed" and .conclusion == "success")] | length == 1' \
+            <<<"$jobs_json" >/dev/null
+
+          pr_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/pulls/$RELEASE_PR")"
+          jq -e \
+            --arg validated_sha "$VALIDATED_SHA" \
+            --arg release_sha "$RELEASE_SHA" \
+            '.number == 291 and
+             .state == "closed" and
+             .merged == true and
+             .head.sha == $validated_sha and
+             .merge_commit_sha == $release_sha and
+             .user.login == "vitaliyozolin-dotcom" and
+             .merged_by.login == "vitaliyozolin-dotcom"' <<<"$pr_json" >/dev/null
+
+          commit_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/commits/$RELEASE_SHA")"
+          jq -e \
+            --arg release_sha "$RELEASE_SHA" \
+            --arg release_tree "$RELEASE_TREE" \
+            '.sha == $release_sha and
+             .commit.tree.sha == $release_tree and
+             .commit.verification.verified == true and
+             .author.login == "vitaliyozolin-dotcom"' <<<"$commit_json" >/dev/null
+          printf 'SCHOOL_RELEASE_PROVENANCE=VERIFIED\n'
 
       - name: Create production run record
         id: issue
