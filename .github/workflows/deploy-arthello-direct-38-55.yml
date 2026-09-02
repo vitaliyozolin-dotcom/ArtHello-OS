@@ -498,9 +498,15 @@ jobs:
           assert_active_d1_file_descriptors() {
             local target="$1" role="$2" report expected_handles unexpected_handles
             case "$role" in live|preflight|candidate) ;; *) return 1 ;; esac
-            report="$(docker exec --user 0:0 \
+            if ! report="$(docker exec \
               -e ARTHELLO_EXPECTED_D1_FILE="$active_d1_path" \
               "$target" /bin/sh -ceu '
+                scanner_uid="$(id -u)"
+                pid_one_uid="$(sed -n "s/^Uid:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p" /proc/1/status)"
+                case "$scanner_uid" in ""|*[!0-9]*) exit 1 ;; esac
+                case "$pid_one_uid" in ""|*[!0-9]*) exit 1 ;; esac
+                test "$scanner_uid" -ne 0
+                test "$scanner_uid" = "$pid_one_uid"
                 expected_handles=0
                 unexpected_handles=0
                 for descriptor in /proc/[0-9]*/fd/*; do
@@ -519,12 +525,20 @@ jobs:
                   esac
                 done
                 printf "%s %s\n" "$expected_handles" "$unexpected_handles"
-              ')" || return 1
+              ')"; then
+              printf 'ARTHELLO_ACTIVE_D1_FD=REJECTED role=%s reason=scanner-failed\n' "$role" >&2
+              return 1
+            fi
             read -r expected_handles unexpected_handles <<<"$report"
-            [[ "$expected_handles" =~ ^[0-9]+$ ]]
-            [[ "$unexpected_handles" =~ ^[0-9]+$ ]]
-            test "$expected_handles" -gt 0
-            test "$unexpected_handles" -eq 0
+            if ! [[ "$expected_handles" =~ ^[0-9]+$ && "$unexpected_handles" =~ ^[0-9]+$ ]]; then
+              printf 'ARTHELLO_ACTIVE_D1_FD=REJECTED role=%s reason=malformed-counts\n' "$role" >&2
+              return 1
+            fi
+            if [ "$expected_handles" -le 0 ] || [ "$unexpected_handles" -ne 0 ]; then
+              printf 'ARTHELLO_ACTIVE_D1_FD=REJECTED role=%s expected_handles=%s unexpected_handles=%s\n' \
+                "$role" "$expected_handles" "$unexpected_handles" >&2
+              return 1
+            fi
             printf 'ARTHELLO_ACTIVE_D1_FD=VERIFIED role=%s handles=%s\n' "$role" "$expected_handles"
           }
 
