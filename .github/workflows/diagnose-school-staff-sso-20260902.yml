@@ -1,0 +1,361 @@
+name: Diagnose School staff SSO callback
+
+on:
+  push:
+    branches:
+      - ops/diagnose-school-staff-sso-20260902
+    paths:
+      - .github/workflows/diagnose-school-staff-sso-20260902.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: school-staff-sso-diagnostic
+  cancel-in-progress: true
+
+env:
+  ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+
+jobs:
+  diagnose:
+    if: >-
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 20
+    environment: production-ru
+    steps:
+      - name: Inspect ArtHello one-time SSO state without contacts
+        id: arthello
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          salt="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+          echo "::add-mask::$salt"
+
+          mapfile -t live_containers < <(
+            docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}'
+          )
+          test "${#live_containers[@]}" -eq 1
+          live="${live_containers[0]}"
+          image="$(docker inspect "$live" --format '{{.Config.Image}}')"
+          volume="$(docker inspect "$live" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          test -n "$image"
+          test -n "$volume"
+
+          report="$(docker run --rm --network none -i \
+            -e DIAG_SALT="$salt" \
+            -v "$volume:/data:ro" \
+            --entrypoint node "$image" --input-type=module - <<'NODE'
+          import { createHmac } from 'node:crypto';
+          import { closeSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
+          import { basename, join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+
+          function walk(root) {
+            const result = [];
+            for (const name of readdirSync(root)) {
+              const path = join(root, name);
+              const stat = statSync(path);
+              if (stat.isDirectory()) result.push(...walk(path));
+              else if (stat.isFile() && !name.endsWith('-wal') && !name.endsWith('-shm')) result.push(path);
+            }
+            return result;
+          }
+
+          function isSqlite(path) {
+            try {
+              const fd = openSync(path, 'r');
+              const header = Buffer.alloc(16);
+              readSync(fd, header, 0, 16, 0);
+              closeSync(fd);
+              return header.toString('binary') === 'SQLite format 3\u0000';
+            } catch {
+              return false;
+            }
+          }
+
+          function canonicalContact(value) {
+            const raw = String(value || '').trim().toLowerCase();
+            if (!raw) return { kind: 'empty', value: '' };
+            if (raw.includes('@')) return { kind: 'email', value: raw };
+            let digits = raw.replace(/\D/g, '');
+            if (digits.length === 11 && digits.startsWith('8')) digits = `7${digits.slice(1)}`;
+            if (digits.length === 10) digits = `7${digits}`;
+            return { kind: 'phone', value: `+${digits}` };
+          }
+
+          const matches = [];
+          for (const path of walk('/data').filter(isSqlite)) {
+            try {
+              const db = new DatabaseSync(path, { readOnly: true });
+              const table = db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='school_sso_codes'").get();
+              if (table) {
+                const rows = db.prepare(`
+                  SELECT central_user_id, school_role, access_version, contact,
+                         created_at, expires_at, used_at
+                  FROM school_sso_codes
+                  ORDER BY created_at DESC
+                  LIMIT 8
+                `).all();
+                matches.push({ path: basename(path), rows });
+              }
+              db.close();
+            } catch {
+              // Ignore non-application SQLite files.
+            }
+          }
+          if (matches.length !== 1) {
+            console.log(JSON.stringify({ databaseMatches: matches.length, latest: null }));
+            process.exit(matches.length === 0 ? 2 : 3);
+          }
+          const row = matches[0].rows[0] || null;
+          if (!row) {
+            console.log(JSON.stringify({ databaseMatches: 1, latest: null }));
+            process.exit(0);
+          }
+          const contact = canonicalContact(row.contact);
+          const contactHash = createHmac('sha256', process.env.DIAG_SALT)
+            .update(`${contact.kind}:${contact.value}`)
+            .digest('hex');
+          console.log(JSON.stringify({
+            databaseMatches: 1,
+            latest: {
+              centralUserId: String(row.central_user_id || ''),
+              role: String(row.school_role || ''),
+              accessVersion: Number(row.access_version || 0),
+              createdAt: Number(row.created_at || 0),
+              expiresAt: Number(row.expires_at || 0),
+              usedAt: Number(row.used_at || 0),
+              contactKind: contact.kind,
+              contactHash,
+            },
+          }));
+          NODE
+          )"
+
+          printf '%s\n' "$report" > "$RUNNER_TEMP/arthello-sso-diagnostic.json"
+          python3 - "$RUNNER_TEMP/arthello-sso-diagnostic.json" <<'PY'
+          import json, pathlib, sys, time
+          data=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          latest=data.get('latest')
+          print(f"ARTHELLO_SSO_DATABASE_MATCHES={data.get('databaseMatches')}")
+          if not latest:
+              print('ARTHELLO_SSO_LATEST_CODE=NONE')
+              raise SystemExit(0)
+          print('ARTHELLO_SSO_LATEST_CODE=FOUND')
+          print('ARTHELLO_SSO_ROLE='+str(latest['role']))
+          print('ARTHELLO_SSO_ACCESS_VERSION='+str(latest['accessVersion']))
+          print('ARTHELLO_SSO_CODE_USED='+('yes' if int(latest['usedAt']) > 0 else 'no'))
+          print('ARTHELLO_SSO_CODE_EXPIRED='+('yes' if int(latest['expiresAt']) <= int(time.time()) else 'no'))
+          print('ARTHELLO_SSO_CONTACT_KIND='+str(latest['contactKind']))
+          PY
+
+          latest="$(python3 -c 'import json,sys; print("yes" if json.load(open(sys.argv[1])).get("latest") else "no")' "$RUNNER_TEMP/arthello-sso-diagnostic.json")"
+          printf 'latest=%s\n' "$latest" >> "$GITHUB_OUTPUT"
+          if [ "$latest" = yes ]; then
+            central_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["latest"]["centralUserId"])' "$RUNNER_TEMP/arthello-sso-diagnostic.json")"
+            contact_hash="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["latest"]["contactHash"])' "$RUNNER_TEMP/arthello-sso-diagnostic.json")"
+            echo "::add-mask::$central_id"
+            echo "::add-mask::$contact_hash"
+            printf 'central_id_b64=%s\n' "$(printf '%s' "$central_id" | base64 -w0)" >> "$GITHUB_OUTPUT"
+            printf 'contact_hash=%s\n' "$contact_hash" >> "$GITHUB_OUTPUT"
+          fi
+          printf 'salt_b64=%s\n' "$(printf '%s' "$salt" | base64 -w0)" >> "$GITHUB_OUTPUT"
+          printf 'ARTHELLO_SSO_STATE_INSPECTION=PASS\n'
+
+      - name: Probe ArtHello exchange route boundary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$(mktemp -d "$RUNNER_TEMP/arthello-exchange-XXXXXX")"
+          trap 'rm -rf -- "$work"' EXIT
+          code="$(printf 'a%.0s' $(seq 1 43))"
+          verifier="$(printf 'b%.0s' $(seq 1 43))"
+          status="$(curl -sS --max-time 20 \
+            -o "$work/body.json" -w '%{http_code}' \
+            -X POST "$ARTHELLO_ORIGIN/api/school-sso/exchange" \
+            -H 'content-type: application/json' \
+            --data "{\"code\":\"$code\",\"codeVerifier\":\"$verifier\"}")"
+          printf 'ARTHELLO_SSO_EXCHANGE_STATUS=%s\n' "$status"
+          python3 - "$work/body.json" <<'PY'
+          import json, pathlib, sys
+          try:
+              payload=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          except Exception:
+              print('ARTHELLO_SSO_EXCHANGE_JSON=no')
+              raise SystemExit(1)
+          error=str(payload.get('error',''))
+          print('ARTHELLO_SSO_EXCHANGE_JSON=yes')
+          print('ARTHELLO_SSO_EXCHANGE_APP_ERROR='+('yes' if error else 'no'))
+          PY
+          test "$status" = 401
+          printf 'ARTHELLO_SSO_EXCHANGE_ROUTE=PASS\n'
+
+      - name: Configure protected SSH transport
+        id: ssh
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          port="${DEPLOY_PORT:-2222}"
+          ssh_dir="$RUNNER_TEMP/school-sso-diagnostic-ssh"
+          install -m 0700 -d "$ssh_dir"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+          chmod 0600 "$ssh_dir/id_ed25519"
+          ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+          scan="$ssh_dir/known_hosts.scan"
+          : > "$scan"
+          chmod 0600 "$scan"
+          for attempt in 1 2 3; do
+            timeout --signal=TERM --kill-after=5s 150s \
+              ssh -p "$port" \
+                -o StrictHostKeyChecking=accept-new \
+                -o UserKnownHostsFile="$scan" \
+                -o GlobalKnownHostsFile=/dev/null \
+                -o PreferredAuthentications=none \
+                -o PubkeyAuthentication=no \
+                -o PasswordAuthentication=no \
+                -o KbdInteractiveAuthentication=no \
+                -o ConnectTimeout=140 \
+                -o HostKeyAlgorithms=ssh-ed25519 \
+                "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
+            test -s "$scan" && break
+            sleep 5
+          done
+          test -s "$scan"
+          fingerprint="$(ssh-keygen -lf "$scan" -E sha256 | awk '{print $2; exit}')"
+          test "$fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scan" "$ssh_dir/known_hosts"
+          printf 'key=%s\n' "$ssh_dir/id_ed25519" >> "$GITHUB_OUTPUT"
+          printf 'known_hosts=%s\n' "$ssh_dir/known_hosts" >> "$GITHUB_OUTPUT"
+          printf 'port=%s\n' "$port" >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_SSO_DIAGNOSTIC_SSH=VERIFIED\n'
+
+      - name: Inspect School identity reconciliation without PII
+        if: steps.arthello.outputs.latest == 'yes'
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ steps.ssh.outputs.port }}
+          SSH_KEY: ${{ steps.ssh.outputs.key }}
+          SSH_KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          CENTRAL_ID_B64: ${{ steps.arthello.outputs.central_id_b64 }}
+          CONTACT_HASH: ${{ steps.arthello.outputs.contact_hash }}
+          SALT_B64: ${{ steps.arthello.outputs.salt_b64 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          payload="$(base64 -w0 <<'REMOTE'
+          set -Eeuo pipefail
+          central_id="$(printf '%s' "$1" | base64 -d)"
+          contact_hash="$2"
+          salt="$(printf '%s' "$3" | base64 -d)"
+          production=school-1-11
+          test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$production" --format '{{.State.Health.Status}}')" = healthy
+          printf 'SCHOOL_SSO_IMAGE_REF=%s\n' "$(docker inspect "$production" --format '{{.Config.Image}}')"
+          printf 'SCHOOL_SSO_CANDIDATE_SHA=%s\n' "$(docker inspect "$production" --format '{{index .Config.Labels "school.candidate-sha"}}')"
+          docker exec \
+            -e DIAG_CENTRAL_ID="$central_id" \
+            -e DIAG_CONTACT_HASH="$contact_hash" \
+            -e DIAG_SALT="$salt" \
+            "$production" node --input-type=module - <<'NODE'
+          import { createHmac } from 'node:crypto';
+          import { DatabaseSync } from 'node:sqlite';
+
+          function normalizePhone(value) {
+            let digits = String(value || '').trim().replace(/\D/g, '');
+            if (digits.length === 11 && digits.startsWith('8')) digits = `7${digits.slice(1)}`;
+            if (digits.length === 10) digits = `7${digits}`;
+            return digits ? `+${digits}` : '';
+          }
+          function digest(kind, value) {
+            return createHmac('sha256', process.env.DIAG_SALT)
+              .update(`${kind}:${value}`)
+              .digest('hex');
+          }
+
+          const path = process.env.DATABASE_PATH || '/data/school-1-11.sqlite';
+          const db = new DatabaseSync(path, { readOnly: true });
+          const users = db.prepare(`
+            SELECT id, lower(COALESCE(email,'')) AS email,
+                   COALESCE(phone,'') AS phone,
+                   role, status, COALESCE(identity_source,'') AS identity_source,
+                   COALESCE(central_user_id,'') AS central_user_id,
+                   COALESCE(central_access_version,0) AS central_access_version,
+                   COALESCE(auth_version,0) AS auth_version
+            FROM users
+          `).all();
+          const central = users.filter((row) => row.central_user_id === process.env.DIAG_CENTRAL_ID);
+          const contact = users.filter((row) => {
+            const emailMatch = row.email && digest('email', row.email) === process.env.DIAG_CONTACT_HASH;
+            const phone = normalizePhone(row.phone);
+            const phoneMatch = phone && digest('phone', phone) === process.env.DIAG_CONTACT_HASH;
+            return Boolean(emailMatch || phoneMatch);
+          });
+          const familyRoles = new Set(['parent','student']);
+          const sanitize = (row) => ({
+            role: row.role,
+            status: row.status,
+            identitySource: row.identity_source,
+            hasCentralId: Boolean(row.central_user_id),
+            sameCentralId: row.central_user_id === process.env.DIAG_CENTRAL_ID,
+            centralAccessVersion: Number(row.central_access_version || 0),
+            authVersion: Number(row.auth_version || 0),
+            familyRole: familyRoles.has(row.role),
+          });
+          const result = {
+            integrity: db.prepare('PRAGMA integrity_check').get().integrity_check,
+            centralMatches: central.map(sanitize),
+            contactMatches: contact.map(sanitize),
+            userCount: users.length,
+          };
+          db.close();
+          console.log('SCHOOL_SSO_RECONCILIATION_JSON='+JSON.stringify(result));
+          if (result.integrity !== 'ok') process.exit(2);
+          NODE
+          printf 'SCHOOL_SSO_RECONCILIATION_INSPECTION=PASS\n'
+          REMOTE
+          )"
+          timeout --signal=TERM --kill-after=10s 300s \
+            ssh -T \
+              -p "$DEPLOY_PORT" \
+              -i "$SSH_KEY" \
+              -o IdentitiesOnly=yes \
+              -o PreferredAuthentications=publickey \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$SSH_KNOWN_HOSTS" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o ConnectTimeout=140 \
+              -o ServerAliveInterval=10 \
+              -o ServerAliveCountMax=30 \
+              -o IPQoS=none \
+              -o Compression=no \
+              -o KexAlgorithms=curve25519-sha256 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
+              -o Ciphers=aes128-ctr \
+              -o MACs=hmac-sha2-256 \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "printf '%s' '$payload' | base64 -d | bash -s -- '$CENTRAL_ID_B64' '$CONTACT_HASH' '$SALT_B64'" \
+              </dev/null
+
+      - name: Remove temporary SSH material
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/school-sso-diagnostic-ssh" "$RUNNER_TEMP/arthello-sso-diagnostic.json"
