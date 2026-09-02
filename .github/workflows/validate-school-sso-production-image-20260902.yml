@@ -11,6 +11,7 @@ on:
       - package.json
       - package-lock.json
       - deploy/Dockerfile.sso-origin-hotfix
+      - deploy/school-sso-origin-cutover.sh
       - .github/workflows/validate-school-sso-production-image-20260902.yml
 
 permissions:
@@ -52,7 +53,7 @@ jobs:
           test "${#changed[@]}" -ge 1
           for path in "${changed[@]}"; do
             case "$path" in
-              deploy/Dockerfile.sso-origin-hotfix|.github/workflows/validate-school-sso-production-image-20260902.yml)
+              deploy/Dockerfile.sso-origin-hotfix|deploy/school-sso-origin-cutover.sh|.github/workflows/validate-school-sso-production-image-20260902.yml)
                 ;;
               *)
                 printf 'Unexpected deployment-branch change: %s\n' "$path" >&2
@@ -61,7 +62,10 @@ jobs:
             esac
           done
           grep -F 'origin: exchangeUrl.origin' server/central-sso.ts >/dev/null
+          bash -n deploy/school-sso-origin-cutover.sh
+          test -x deploy/school-sso-origin-cutover.sh || chmod +x deploy/school-sso-origin-cutover.sh
           printf 'SCHOOL_SSO_PRODUCT_SOURCE=VERIFIED\n'
+          printf 'SCHOOL_SSO_CUTOVER_SYNTAX=PASS\n'
 
       - name: Prepare deterministic build context
         shell: bash
