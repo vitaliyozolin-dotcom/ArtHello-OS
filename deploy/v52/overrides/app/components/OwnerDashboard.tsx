@@ -762,7 +762,7 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
   }
 
   return (
-    <section className={`${styles.dashboard} owner-home-dashboard`} aria-label={`Персональный дашборд: ${roleLabel}`}>
+    <section className={`${styles.dashboard} owner-home-dashboard`} data-ah-inline-help="off" aria-label={`Персональный дашборд: ${roleLabel}`}>
       <header className={styles.heading}>
         <div>
           <span className={styles.role}>{roleLabel}</span>
