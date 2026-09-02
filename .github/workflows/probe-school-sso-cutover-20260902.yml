@@ -1,0 +1,219 @@
+name: Probe School SSO cutover target
+
+on:
+  push:
+    branches:
+      - ops/probe-school-sso-cutover-20260902
+    paths:
+      - .github/workflows/probe-school-sso-cutover-20260902.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: school-sso-cutover-probe
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    if: >-
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 20
+    steps:
+      - name: Configure pinned SSH transport
+        id: ssh
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          port="${DEPLOY_PORT:-2222}"
+          ssh_dir="$RUNNER_TEMP/school-sso-probe-ssh"
+          install -m 0700 -d "$ssh_dir"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+          chmod 0600 "$ssh_dir/id_ed25519"
+          ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+          scan="$ssh_dir/known_hosts.scan"
+          : > "$scan"
+          chmod 0600 "$scan"
+          for attempt in 1 2 3; do
+            timeout --signal=TERM --kill-after=5s 150s \
+              ssh -p "$port" \
+                -o StrictHostKeyChecking=accept-new \
+                -o UserKnownHostsFile="$scan" \
+                -o GlobalKnownHostsFile=/dev/null \
+                -o PreferredAuthentications=none \
+                -o PubkeyAuthentication=no \
+                -o PasswordAuthentication=no \
+                -o KbdInteractiveAuthentication=no \
+                -o ConnectTimeout=140 \
+                -o HostKeyAlgorithms=ssh-ed25519 \
+                "$DEPLOY_USER@$DEPLOY_HOST" true \
+                </dev/null >/dev/null 2>&1 || true
+            test -s "$scan" && break
+            sleep 5
+          done
+          test -s "$scan"
+          fingerprint="$(ssh-keygen -lf "$scan" -E sha256 | awk '{print $2; exit}')"
+          test "$fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scan" "$ssh_dir/known_hosts"
+          timeout --signal=TERM --kill-after=5s 180s \
+            ssh -T \
+              -p "$port" \
+              -i "$ssh_dir/id_ed25519" \
+              -o IdentitiesOnly=yes \
+              -o PreferredAuthentications=publickey \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o ConnectTimeout=140 \
+              -o ServerAliveInterval=10 \
+              -o ServerAliveCountMax=30 \
+              -o IPQoS=none \
+              -o Compression=no \
+              -o KexAlgorithms=curve25519-sha256 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
+              -o Ciphers=aes128-ctr \
+              -o MACs=hmac-sha2-256 \
+              "$DEPLOY_USER@$DEPLOY_HOST" true \
+              </dev/null >/dev/null
+          printf 'key=%s\n' "$ssh_dir/id_ed25519" >> "$GITHUB_OUTPUT"
+          printf 'known_hosts=%s\n' "$ssh_dir/known_hosts" >> "$GITHUB_OUTPUT"
+          printf 'port=%s\n' "$port" >> "$GITHUB_OUTPUT"
+          printf 'SCHOOL_SSO_PROBE_SSH=VERIFIED\n'
+
+      - name: Inspect live School topology without mutation
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ steps.ssh.outputs.port }}
+          SSH_KEY: ${{ steps.ssh.outputs.key }}
+          SSH_KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          payload="$(base64 -w0 <<'REMOTE'
+          set -Eeuo pipefail
+          production=school-1-11
+          root=/srv/school-1-11
+          test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$production" --format '{{.State.Health.Status}}')" = healthy
+          docker inspect "$production" | python3 -c '
+          import json, sys
+          item=json.load(sys.stdin)[0]
+          config=item.get("Config") or {}
+          host=item.get("HostConfig") or {}
+          state=item.get("State") or {}
+          networks=(item.get("NetworkSettings") or {}).get("Networks") or {}
+          mounts=item.get("Mounts") or []
+          labels=config.get("Labels") or {}
+          safe_label_keys=[
+            "com.docker.compose.project",
+            "com.docker.compose.service",
+            "com.docker.compose.project.working_dir",
+            "com.docker.compose.project.config_files",
+            "school.candidate-sha",
+            "org.opencontainers.image.revision",
+          ]
+          report={
+            "container_id": item.get("Id"),
+            "image_id": item.get("Image"),
+            "image_ref": config.get("Image"),
+            "running": state.get("Running"),
+            "health": ((state.get("Health") or {}).get("Status")),
+            "started_at": state.get("StartedAt"),
+            "config_user": config.get("User"),
+            "working_dir": config.get("WorkingDir"),
+            "entrypoint": config.get("Entrypoint"),
+            "cmd": config.get("Cmd"),
+            "restart": (host.get("RestartPolicy") or {}).get("Name"),
+            "network_mode": host.get("NetworkMode"),
+            "port_bindings": host.get("PortBindings"),
+            "security_opt": host.get("SecurityOpt"),
+            "read_only_rootfs": host.get("ReadonlyRootfs"),
+            "mounts": [
+              {"type":m.get("Type"),"name":m.get("Name"),"source":m.get("Source"),"destination":m.get("Destination"),"rw":m.get("RW")}
+              for m in mounts
+            ],
+            "networks": {
+              name:{"aliases":value.get("Aliases"),"driver_opts":value.get("DriverOpts")}
+              for name,value in networks.items()
+            },
+            "env_keys": sorted({str(value).partition("=")[0] for value in config.get("Env") or []}),
+            "labels": {key:labels.get(key) for key in safe_label_keys if key in labels},
+          }
+          print("SCHOOL_SSO_TOPOLOGY_JSON="+json.dumps(report,sort_keys=True,separators=(",",":")))
+          '
+          database_path="$(docker exec "$production" node -e 'process.stdout.write(process.env.DATABASE_PATH || "/data/school-1-11.sqlite")')"
+          test "$database_path" = /data/school-1-11.sqlite
+          docker exec "$production" test -s "$database_path"
+          docker exec "$production" stat -c 'SCHOOL_SSO_DATABASE_META=uid:%u,gid:%g,mode:%a,bytes:%s' "$database_path"
+          docker exec "$production" node --input-type=module -e '
+            import { DatabaseSync } from "node:sqlite";
+            const db=new DatabaseSync(process.env.DATABASE_PATH,{readOnly:true});
+            const value=db.prepare("PRAGMA integrity_check").get().integrity_check;
+            const journal=db.prepare("PRAGMA journal_mode").get().journal_mode;
+            db.close();
+            if(value!=="ok") process.exit(1);
+            console.log("SCHOOL_SSO_DATABASE_INTEGRITY=OK");
+            console.log("SCHOOL_SSO_DATABASE_JOURNAL="+journal);
+          '
+          test -f "$root/shared/.env"
+          stat -c 'SCHOOL_SSO_ENV_META=uid:%u,gid:%g,mode:%a,bytes:%s' "$root/shared/.env"
+          sed -nE 's/^([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p' "$root/shared/.env" \
+            | sort -u | sed 's/^/SCHOOL_SSO_ENV_KEY=/'
+          if test -L "$root/current"; then
+            printf 'SCHOOL_SSO_CURRENT_RELEASE=%s\n' "$(readlink -f "$root/current")"
+          else
+            printf 'SCHOOL_SSO_CURRENT_RELEASE=NO_SYMLINK\n'
+          fi
+          printf 'SCHOOL_SSO_WRITE_GATE=%s\n' "$(docker exec "$production" sh -lc 'test -e /data/.school-deploy-read-only && printf present || printf absent')"
+          printf 'SCHOOL_SSO_BACKUP_SCRIPT=%s\n' "$(docker exec "$production" sh -lc 'test -f scripts/backup-db.mjs && printf present || printf absent')"
+          df -Pk /tmp "$root" | awk 'NR>1 {printf "SCHOOL_SSO_DISK=%s,total_kb:%s,used_kb:%s,available_kb:%s,use:%s\n",$6,$2,$3,$4,$5}'
+          printf 'SCHOOL_SSO_TOPOLOGY_PROBE=PASS\n'
+          REMOTE
+          )"
+          timeout --signal=TERM --kill-after=5s 300s \
+            ssh -T \
+              -p "$DEPLOY_PORT" \
+              -i "$SSH_KEY" \
+              -o IdentitiesOnly=yes \
+              -o PreferredAuthentications=publickey \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$SSH_KNOWN_HOSTS" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o ConnectTimeout=140 \
+              -o ServerAliveInterval=10 \
+              -o ServerAliveCountMax=30 \
+              -o IPQoS=none \
+              -o Compression=no \
+              -o KexAlgorithms=curve25519-sha256 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              -o PubkeyAcceptedAlgorithms=ssh-ed25519 \
+              -o Ciphers=aes128-ctr \
+              -o MACs=hmac-sha2-256 \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "printf '%s' '$payload' | base64 -d | bash" \
+              </dev/null
+
+      - name: Remove temporary SSH material
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/school-sso-probe-ssh"
