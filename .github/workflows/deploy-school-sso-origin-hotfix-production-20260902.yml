@@ -31,7 +31,7 @@ env:
   SOURCE_PR: "306"
   SOURCE_BASE: school/staging-foundation-20260827
   CUTOVER_SCRIPT_SHA256: 6c8d945addce8644a0bcfbfaff555463042c6b2bbb46d09df06f52820fa93b25
-  CONTROLLER_SCRIPT_SHA256: c164a3a935efdd305b56af3c35f2efd17c63cb7ea885485e80bb23b1fd6c303b
+  CONTROLLER_SCRIPT_SHA256: 69698b83b08e0bb806be6cbf4e1ae38e5373eb6bf0e3ebb56f65d13d0e275dce
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
 
@@ -82,6 +82,13 @@ jobs:
           printf '%s  %s\n' "$CUTOVER_SCRIPT_SHA256" "$work/cutover.sh" | sha256sum -c -
           bash -n "$work/controller.sh"
           bash -n "$work/cutover.sh"
+          grep -Fx 'data/*' "$work/controller.sh" >/dev/null
+          grep -Fx '!data/schedules' "$work/controller.sh" >/dev/null
+          grep -Fx '!data/schedules/**' "$work/controller.sh" >/dev/null
+          grep -Fx '!data/curricula' "$work/controller.sh" >/dev/null
+          grep -Fx '!data/curricula/**' "$work/controller.sh" >/dev/null
+          ! grep -Fx 'data' "$work/controller.sh" >/dev/null
+          printf 'SCHOOL_SSO_CONTROLLER_DOCKER_CONTEXT=PASS\n'
 
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VALIDATION_RUN_ID" > "$work/run.json"
           gh api "repos/$GITHUB_REPOSITORY/commits/$VALIDATED_SHA" > "$work/validated.json"
