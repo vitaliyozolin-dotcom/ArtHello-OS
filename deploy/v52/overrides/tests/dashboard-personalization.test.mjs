@@ -102,6 +102,7 @@ test("owner can show, hide, reorder and resize dashboard widgets", () => {
   assert.doesNotMatch(dashboard, /dataTransfer\.getData/);
   assert.match(styles, /data-drop-position="before"/);
   assert.match(styles, /data-drop-position="after"/);
+  assert.match(styles, /@media \(max-width: 980px\) \{[\s\S]*?\.sizeCompact\.widgetDropTarget::before/);
   assert.match(dashboard, /Перетаскивайте блоки ниже/);
   assert.equal((dashboard.match(/function persistDashboardLayout\(/g) ?? []).length, 1);
   assert.equal((dashboard.match(/<path d=\{chartGeometry\.receiptsPath\}/g) ?? []).length, 1);
