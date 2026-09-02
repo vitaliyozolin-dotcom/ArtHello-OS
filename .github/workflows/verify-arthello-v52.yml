@@ -335,7 +335,7 @@ jobs:
               runnerTrust: "github-hosted-ephemeral",
               productionCapability: false
             }' > ci-provenance/arthello-v52.json
-          sha256sum ci-provenance/arthello-v52.json > ci-provenance/arthello-v52.json.sha256
+          (cd ci-provenance && sha256sum arthello-v52.json > arthello-v52.json.sha256)
 
       - name: Upload immutable verification evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
