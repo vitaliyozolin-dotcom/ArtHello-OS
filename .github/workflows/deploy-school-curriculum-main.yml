@@ -1274,7 +1274,7 @@ jobs:
               [ "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}' 2>/dev/null)" = no ]; then
               restart_disabled=1
             fi
-            if [ "$gate_verified" -ne 1 ]; then
+            if [ "$gate_verified" -ne 1 ] || [ "$restart_disabled" -ne 1 ]; then
               if [ "$(docker inspect "$production" --format '{{.State.Running}}' 2>/dev/null)" = true ]; then
                 timeout --signal=TERM --kill-after=5s 60s \
                   docker stop --time 45 "$production" >/dev/null 2>&1 || true
