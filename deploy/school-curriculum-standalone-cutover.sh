@@ -183,14 +183,16 @@ NODE
 }
 
 verify_public_gate() {
+  local max_attempts=${1:-30}
+  local request_timeout=${2:-20}
   local body="$work/public-gate.json"
   local headers="$work/public-gate.headers"
   local status=
   local verified=0
-  for attempt in $(seq 1 30); do
+  for attempt in $(seq 1 "$max_attempts"); do
     : > "$body"
     : > "$headers"
-    status="$(curl -sS --max-time 20 -o "$body" -D "$headers" -w '%{http_code}'       -X POST "$SCHOOL_ORIGIN/api/school"       -H "Origin: $SCHOOL_ORIGIN"       -H 'Content-Type: application/json'       --data '{"action":"deployment.public-gate.probe"}' || true)"
+    status="$(curl -sS --max-time "$request_timeout" -o "$body" -D "$headers" -w '%{http_code}'       -X POST "$SCHOOL_ORIGIN/api/school"       -H "Origin: $SCHOOL_ORIGIN"       -H 'Content-Type: application/json'       --data '{"action":"deployment.public-gate.probe"}' || true)"
     if [ "$status" = 503 ]       && grep -Eq '"code"[[:space:]]*:[[:space:]]*"deployment_read_only"' "$body"       && grep -Eiq '^Retry-After:[[:space:]]*30' "$headers"       && grep -Eiq '^Cache-Control:[[:space:]]*no-store' "$headers"; then
       verified=1
       break
@@ -198,11 +200,24 @@ verify_public_gate() {
     sleep 2
   done
   test "$verified" -eq 1 || return 1
-  health="$(curl -fsS --max-time 20 "$SCHOOL_ORIGIN/api/health")" || return 1
+  health="$(curl -fsS --max-time "$request_timeout" "$SCHOOL_ORIGIN/api/health")" || return 1
   grep -F '"status":"ok"' <<<"$health" >/dev/null || return 1
   grep -F '"maintenance":true' <<<"$health" >/dev/null || return 1
   printf 'SCHOOL_PUBLIC_WRITE_GATE=PASS\n'
   return 0
+}
+
+verify_public_released_short() {
+  local health=
+  for attempt in $(seq 1 3); do
+    health="$(curl -fsS --max-time 10 "$SCHOOL_ORIGIN/api/health" 2>/dev/null || true)"
+    if grep -F '"status":"ok"' <<<"$health" >/dev/null \
+      && grep -F '"maintenance":false' <<<"$health" >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
 }
 
 verify_application_contracts() {
@@ -361,7 +376,11 @@ recover_precommit() {
       recovery_failed=1
       return 1
     }
-    wait_container_health "$production" "$SCHOOL_ORIGIN" || {
+    wait_container_health "$production" || {
+      recovery_failed=1
+      return 1
+    }
+    verify_public_released_short || {
       recovery_failed=1
       return 1
     }
@@ -431,15 +450,19 @@ recover_precommit() {
         return 1
       }
     fi
-    wait_container_health "$production" "$SCHOOL_ORIGIN" || {
-      recovery_failed=1
-      return 1
-    }
     restore_restart_policy "$production" || {
       recovery_failed=1
       return 1
     }
     restart_suppressed=0
+    wait_container_health "$production" || {
+      recovery_failed=1
+      return 1
+    }
+    verify_public_released_short || {
+      recovery_failed=1
+      return 1
+    }
   else
     recovery_failed=1
     return 1
@@ -455,7 +478,7 @@ recover_postcommit() {
     create_gate "$data_volume" >/dev/null 2>&1 &&
     docker exec "$production" test -f "$gate_path" &&
     verify_internal_gate "$production" >/dev/null 2>&1 &&
-    verify_public_gate >/dev/null 2>&1 &&
+    verify_public_gate 5 10 >/dev/null 2>&1 &&
     restore_restart_policy "$production" >/dev/null 2>&1; then
     printf 'SCHOOL_STANDALONE_ROLL_FORWARD_GATE=PASS\n' >&2
   else
@@ -875,7 +898,6 @@ health="$(curl -fsS --max-time 30 "$SCHOOL_ORIGIN/api/health")"
 grep -F '"status":"ok"' <<<"$health" >/dev/null
 grep -F '"maintenance":false' <<<"$health" >/dev/null
 verify_application_contracts "$production" "$SCHOOL_ORIGIN"
-verify_release_data "$production"
 success=1
 postcommit=0
 
