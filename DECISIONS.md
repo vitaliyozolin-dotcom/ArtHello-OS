@@ -11,6 +11,8 @@
 
 Production cutover разрешён только из `main` отдельным `workflow_dispatch` с точным typed confirmation `DEPLOY-SCHOOL-2026-2027`, от владельца, через Environment `production-ru`. Workflow обязан до checkout и Docker проверить confirmation, затем сверить immutable controls SHA, принятый release `4a1476c83fd0245101a8e81ab9edc192b8462dd9` и tree `f1081a9f6a4017aaab668e463fd7fb992f5f93a1`.
 
+Допуск source подтверждается до checkout через GitHub API: PR №291 должен быть слит exact head `feddbd90ea51b0b87b0d0aa7d0e58f7d76c2cabf` в release SHA, validation run `33559677859` workflow `346579718` должен иметь `conclusion=success` на том же head и tree, а squash commit — быть подписан GitHub и сохранять тот же tree. Любое расхождение fail closed останавливает job до доступа к Docker/SSH.
+
 До открытия записи выполняются offline build, clone-preflight, остановка старого контейнера, maintenance gate, финальный проверенный SQLite snapshot и live import. Любая ошибка до commit boundary восстанавливает snapshot и прежний контейнер. После успешной полной сверки rollback snapshot отключается до снятия gate: последующие ошибки требуют re-gate и roll-forward, чтобы не потерять новые пользовательские записи. Старый контейнер и отдельный rollback volume сохраняются остановленными как операционное доказательство и средство ручного восстановления.
 
 
