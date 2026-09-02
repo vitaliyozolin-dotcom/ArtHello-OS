@@ -42,6 +42,10 @@ test("central employee SSO is stateful, PKCE-bound and fixed-audience", async ()
   assert.match(central, /\/api\/school-sso\/authorize/);
   assert.match(central, /\/api\/school-sso\/exchange/);
   assert.match(central, /arthello-188-225-38-55\.sslip\.io/);
+  assert.match(
+    central,
+    /headers:\s*{\s*"content-type": "application\/json",\s*origin: exchangeUrl\.origin,\s*}/s,
+  );
   assert.match(central, /returnTo: transaction\.returnTo/);
   assert.doesNotMatch(central, /redirect_uri/);
 });
