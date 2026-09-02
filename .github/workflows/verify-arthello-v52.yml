@@ -50,7 +50,7 @@ jobs:
 
           # D-040: a pull-request head is verified only on an ephemeral hosted
           # runner and receives neither a production Environment nor a secret.
-          # D-046 makes a one-release recovery exception only for the production trigger;
+          # D-047 makes a one-release recovery exception only for the production trigger;
           # the self-hosted job still consumes merged, exact-SHA gated main code.
           ruby -ryaml -e '
             document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
@@ -74,15 +74,15 @@ jobs:
             raise "production must use its dedicated self-hosted runner" unless runners.include?("self-hosted") && runners.include?("arthello-gateway")
             raise "production Environment is mandatory" unless deploy.fetch("environment") == "production-ru"
             deployment_env = document.fetch("env")
-            raise "recovery branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/canonical-d1-inventory-recovery-20260902"
-            raise "recovery PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR") == "313"
+            raise "recovery branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/same-user-d1-fd-recovery-20260902"
+            raise "recovery PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR") == "314"
             condition = deploy.fetch("if")
             [
               "workflow_run", "vitaliyozolin-dotcom/ArtHello-OS",
               "Verify ArtHello v52 release", ".github/workflows/verify-arthello-v52.yml",
               "head_branch == '\''main'\''", "conclusion == '\''success'\''",
-              "codex/canonical-d1-inventory-recovery-20260902", "vitaliyozolin-dotcom",
-              "number == 313",
+              "codex/same-user-d1-fd-recovery-20260902", "vitaliyozolin-dotcom",
+              "number == 314",
               "pull_requests[1] == null", "github.run_attempt == 1"
             ].each do |required|
               raise "missing production authorization condition" unless condition.include?(required)
@@ -92,8 +92,8 @@ jobs:
             raise "exact checkout is missing" unless checkout_index
             before_checkout = steps.take(checkout_index).map { |step| step["run"].to_s }.join("\n")
             raise "Docker use before authorization/CI gate" if before_checkout.match?(/(^|\s)docker(\s|$)/)
-            raise "D-046 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
-            raise "D-046 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
+            raise "D-047 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
+            raise "D-047 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
             raise "triggering verification run is not pinned" unless before_checkout.include?("TRIGGER_VERIFY_RUN_ID")
             raise "triggering verification attempt is not pinned" unless before_checkout.include?(".run_attempt == 1")
             raise "release SHA is not pinned before checkout" unless before_checkout.include?("RELEASE_SHA")
@@ -111,6 +111,14 @@ jobs:
             raise "non-portable cross-store image ID equality is forbidden" if source.include?("actual_image_id\" != \"$expected_image_id")
             raise "active D1 descriptor gate missing" unless source.include?("ARTHELLO_ACTIVE_D1_FD=VERIFIED")
             raise "active D1 descriptor gate must cover live, preflight, and candidate" unless source.scan(/assert_active_d1_file_descriptors \"\$[^\"]+\" (?:live|preflight|candidate)/).length == 3
+            fd_start = source.index("assert_active_d1_file_descriptors() {")
+            fd_end = source.index("cleanup_transient() {", fd_start || 0)
+            raise "active D1 descriptor function missing" unless fd_start && fd_end && fd_end > fd_start
+            fd_gate = source[fd_start...fd_end]
+            raise "D1 descriptor scanner must not cross runtime UID as root" if fd_gate.include?("--user 0:0")
+            raise "D1 descriptor scanner must stay non-root" unless fd_gate.include?('test "$scanner_uid" -ne 0')
+            raise "D1 descriptor scanner must match PID 1 UID" unless fd_gate.include?('test "$scanner_uid" = "$pid_one_uid"')
+            raise "D1 descriptor rejection diagnostics missing" unless fd_gate.include?("ARTHELLO_ACTIVE_D1_FD=REJECTED")
           ' .github/workflows/deploy-arthello-direct-38-55.yml
           printf 'ARTHELLO_V52_SOURCE_SHA=%s\n' "$EXPECTED_SHA"
 
