@@ -18,18 +18,16 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-# The live School image and its persistent volumes use the standard `node`
-# account from the existing ArtHello helper base. Keep that operating-system
-# and UID/GID contract, but replace the prebuilt application tree with the
-# exact, freshly compiled release.
-FROM arthello-os-api:local AS runner
+# The live School runtime uses the standard Node image account (`node`, UID/GID
+# 1000) and `/school` as its application root. Build the replacement from the
+# same public base contract instead of depending on a runner-local helper tag.
+FROM node:24-bookworm-slim AS runner
 ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1
 ARG NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED
 ARG SCHOOL_RELEASE_SHA
 USER root
 WORKDIR /school
-RUN rm -rf /school \
-    && mkdir -p /school /data /backups
+RUN mkdir -p /school /data /backups
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
