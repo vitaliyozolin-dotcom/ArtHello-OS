@@ -294,10 +294,10 @@ JWT/API-секрет Точки вводит сам владелец в зама
 ## D-044 — Fail-closed recovery после отказа импорта проверенного образа
 
 Дата: 2026-09-02  
-Статус: принято владельцем в рамках того же явного поручения применить изменения и выпустить их в production; временно ожидает закрепления номера recovery PR
+Статус: принято владельцем в рамках того же явного поручения применить изменения и выпустить их в production; одноразовый recovery PR `#311` закреплён
 
 Первый production-run D-043 `33679820312` остановился до clone preflight, backup, миграции и cutover: GitHub artifact был успешно доставлен, его внешний digest и внутренний evidence checksum совпали, а production-контейнер и volume не создавались. Повторный attempt запрещён самим D-043, поэтому восстановление выполняется новым подписанным squash-коммитом через отдельный PR из ветки `codex/production-loader-recovery-20260902`.
 
 Recovery не меняет принятые продуктовые решения и данные приложения. Он заменяет непрозрачный pipe `gzip | docker load >/dev/null` на штатный `docker image load --input`, сохраняет вывод Docker, добавляет явные маркеры каждого provenance/image шага и до импорта публикует только несекретную диагностику версии Docker и свободного места. Автоматическая широкая очистка образов, контейнеров, build cache или volumes запрещена. Любая ошибка снова завершает процесс до работы с production-данными.
 
-После создания PR его номер обязан быть жёстко закреплён одновременно в этом решении, environment workflow и hosted policy-gate. Исключение одноразовое: точный репозиторий, recovery-ветка, PR, actor/merger, первый attempt Verify, успешные Quality/Verify, текущий подписанный main SHA, protected Environment `production-ru`, clone preflight, backup-first cutover и автоматический rollback остаются обязательными. Исключение прекращается после первого успешного deployment или первой неустранимой ошибки после начала cutover.
+Одноразовое исключение закреплено только за PR `#311` из `vitaliyozolin-dotcom/ArtHello-OS:codex/production-loader-recovery-20260902` и одновременно проверяется environment workflow и hosted policy-gate. Точный репозиторий, recovery-ветка, PR, actor/merger, первый attempt Verify, успешные Quality/Verify, текущий подписанный main SHA, protected Environment `production-ru`, clone preflight, backup-first cutover и автоматический rollback остаются обязательными. Исключение прекращается после первого успешного deployment или первой неустранимой ошибки после начала cutover.
