@@ -391,7 +391,7 @@ jobs:
           printf 'SCHOOL_PROTECTED_SSH=VERIFIED\n'
 
       - name: Deploy immutable School release
-        timeout-minutes: 80
+        timeout-minutes: 105
         id: deploy_school
         if: steps.configure_ssh.outcome == 'success'
         continue-on-error: true
@@ -734,8 +734,13 @@ jobs:
           }
 
           remote_status=""
-          remote_poll_deadline="$(( launch_started_at + 2000 ))"
-          for attempt in $(seq 1 390); do
+          # The remote worker may consume its full 3000s TERM budget plus the
+          # 600s KILL grace.  Start the runner deadline before launch, then
+          # reserve another 300s for launch skew and terminal status flush.
+          remote_poll_deadline="$(( launch_started_at + 3900 ))"
+          # 420 attempts are only a clock-anomaly backstop.  With the mandatory
+          # 10s delay, the 3900s absolute deadline is the normal first limit.
+          for attempt in $(seq 1 420); do
             if [ "$(date +%s)" -ge "$remote_poll_deadline" ]; then
               fetch_remote_log | tee -a "$log_file"
               printf 'SCHOOL_REMOTE_STATUS=deadline\n' | tee -a "$log_file"
@@ -752,23 +757,22 @@ jobs:
             set -e
             if [ "$poll_rc" -ne 0 ]; then
               remote_status=""
-              sleep 10
-              continue
+            else
+              case "$remote_status" in
+                "success:$RELEASE_SHA:$launch_nonce")
+                  break
+                  ;;
+                failed:*:"$launch_nonce")
+                  fetch_remote_log | tee -a "$log_file"
+                  printf 'SCHOOL_REMOTE_STATUS=%s\n' "$remote_status" | tee -a "$log_file"
+                  if probe_remote_commit; then
+                    remote_job_complete=1
+                  fi
+                  exit 1
+                  ;;
+              esac
             fi
-            case "$remote_status" in
-              "success:$RELEASE_SHA:$launch_nonce")
-                break
-                ;;
-              failed:*:"$launch_nonce")
-                fetch_remote_log | tee -a "$log_file"
-                printf 'SCHOOL_REMOTE_STATUS=%s\n' "$remote_status" | tee -a "$log_file"
-                if probe_remote_commit; then
-                  remote_job_complete=1
-                fi
-                exit 1
-                ;;
-            esac
-            if [ "$attempt" -eq 390 ]; then
+            if [ "$attempt" -eq 420 ]; then
               fetch_remote_log | tee -a "$log_file"
               printf 'SCHOOL_REMOTE_STATUS=timeout\n' | tee -a "$log_file"
               exit 1
