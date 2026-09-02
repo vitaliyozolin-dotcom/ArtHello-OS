@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-"""Fail-closed, aggregate-only validation of an ArtHello D1 snapshot.
+"""Fail-closed, aggregate-only validation of the active ArtHello D1 snapshot.
 
 The command deliberately emits no row values, names, identifiers, contacts,
-credential envelopes, or authentication metadata.  Its stdout is safe for a
-deployment log.  A boolean telling the workflow whether encrypted integration
+credential envelopes, or authentication metadata. Its stdout is safe for a
+deployment log. A boolean telling the workflow whether encrypted integration
 credentials exist can additionally be written to ``GITHUB_OUTPUT``.
+
+Miniflare keeps historical Durable Object SQLite files in the persistence
+root. The active ArtHello database is therefore selected by Miniflare's
+deterministic object ID, never by recency, size, row count, or uniqueness.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import sqlite3
@@ -25,6 +30,27 @@ SUPPORTED_CREDENTIAL_PREFIXES = (
     "integration_credential:v2:",
 )
 CREDENTIAL_NAMESPACE_PREFIX = "integration_credential:v"
+
+ACTIVE_D1_DATABASE_ID = "arthello-production"
+D1_DATABASE_OBJECT_UNIQUE_KEY = "miniflare-D1DatabaseObject"
+D1_RELATIVE_ROOT = Path("d1")
+
+
+def durable_object_id(unique_key: str, name: str) -> str:
+    """Mirror Miniflare's stable Durable Object namespace ID derivation."""
+
+    key = hashlib.sha256(unique_key.encode("utf-8")).digest()
+    name_hmac = hmac.new(key, name.encode("utf-8"), hashlib.sha256).digest()[:16]
+    object_hmac = hmac.new(key, name_hmac, hashlib.sha256).digest()[:16]
+    return (name_hmac + object_hmac).hex()
+
+
+def active_database_relative_path() -> Path:
+    object_id = durable_object_id(
+        D1_DATABASE_OBJECT_UNIQUE_KEY,
+        ACTIVE_D1_DATABASE_ID,
+    )
+    return D1_RELATIVE_ROOT / D1_DATABASE_OBJECT_UNIQUE_KEY / f"{object_id}.sqlite"
 
 
 def sqlite_files(root: Path) -> list[Path]:
@@ -56,29 +82,40 @@ def table_names(connection: sqlite3.Connection) -> set[str]:
     return {str(row["name"]) for row in rows}
 
 
-def locate_database(root: Path) -> tuple[Path, sqlite3.Connection, set[str]]:
-    matches: list[tuple[Path, sqlite3.Connection, set[str]]] = []
-    for path in sqlite_files(root):
+def locate_database(root: Path) -> tuple[Path, sqlite3.Connection, set[str], int]:
+    candidates = sqlite_files(root)
+    expected = root / active_database_relative_path()
+    try:
+        resolved_expected = expected.resolve(strict=True)
+    except OSError:
+        raise SystemExit("Expected active ArtHello application database was not found") from None
+
+    if resolved_expected.parent == root or root not in resolved_expected.parents:
+        raise SystemExit("Active ArtHello database escaped the snapshot root")
+    if resolved_expected != expected:
+        raise SystemExit("Active ArtHello database path is not canonical")
+
+    active: tuple[Path, sqlite3.Connection, set[str]] | None = None
+    matching_databases = 0
+    for path in candidates:
         connection: sqlite3.Connection | None = None
         try:
             connection = open_read_only(path)
             tables = table_names(connection)
             if REQUIRED_TABLES.issubset(tables):
-                matches.append((path, connection, tables))
-            else:
-                connection.close()
+                matching_databases += 1
+                if path == expected:
+                    active = (path, connection, tables)
+                    connection = None
         except sqlite3.DatabaseError:
+            pass
+        finally:
             if connection is not None:
                 connection.close()
-            continue
 
-    if len(matches) != 1:
-        for _, connection, _ in matches:
-            connection.close()
-        raise SystemExit(
-            f"Expected exactly one ArtHello application database; found {len(matches)}"
-        )
-    return matches[0]
+    if active is None:
+        raise SystemExit("Expected active ArtHello application database was not found")
+    return (*active, matching_databases)
 
 
 def scalar(connection: sqlite3.Connection, query: str, parameters: tuple[object, ...] = ()) -> object:
@@ -133,15 +170,24 @@ def append_github_output(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("snapshot_root", type=Path)
+    parser.add_argument("snapshot_root", type=Path, nargs="?")
     parser.add_argument("--github-output", type=Path)
+    parser.add_argument("--print-active-database-relative-path", action="store_true")
     args = parser.parse_args()
+
+    if args.print_active_database_relative_path:
+        if args.snapshot_root is not None or args.github_output is not None:
+            raise SystemExit("Path discovery does not accept snapshot arguments")
+        print(active_database_relative_path().as_posix())
+        return
+    if args.snapshot_root is None:
+        parser.error("snapshot_root is required")
 
     root = args.snapshot_root.resolve(strict=True)
     if not root.is_dir():
         raise SystemExit("Snapshot root is not a directory")
 
-    _, connection, tables = locate_database(root)
+    _, connection, tables, matching_databases = locate_database(root)
     try:
         integrity = str(scalar(connection, "PRAGMA integrity_check"))
         if integrity.lower() != "ok":
@@ -164,9 +210,11 @@ def main() -> None:
         ) == 1
 
         report = {
-            "applicationDatabases": 1,
+            "activeApplicationDatabases": 1,
+            "applicationDatabases": matching_databases,
             "encryptedCredentialsPresent": encrypted_credentials_present,
             "foreignKeyViolations": 0,
+            "historicalMatchingDatabases": matching_databases - 1,
             "integrity": "ok",
             "requiredTablesPresent": True,
             "schemaMarkerPresent": schema_marker_present,
