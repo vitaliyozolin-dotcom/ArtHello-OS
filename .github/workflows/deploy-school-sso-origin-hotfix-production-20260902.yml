@@ -1,6 +1,11 @@
 name: Deploy School SSO origin hotfix production
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/deploy-school-sso-origin-hotfix-production-20260902.yml
   push:
     branches:
       - main
@@ -31,8 +36,89 @@ env:
   ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
 
 jobs:
-  deploy:
+  validate:
     if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      (
+        github.event_name != 'pull_request' ||
+        (
+          github.event.pull_request.user.login == 'vitaliyozolin-dotcom' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'ops/deploy-school-sso-origin-fix-production-20260902'
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out exact controls candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Reconstruct controls and verify immutable provenance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$(mktemp -d)"
+          trap 'rm -rf -- "$work"' EXIT
+
+          mapfile -t controller_parts < <(
+            printf '%s\n' .github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64.part-* | sort
+          )
+          mapfile -t cutover_parts < <(
+            printf '%s\n' .github/scripts/school-staff-sso-production-cutover-v3.sh.gz.b64.part-* | sort
+          )
+          test "${#controller_parts[@]}" -eq 5
+          test "${#cutover_parts[@]}" -eq 10
+          cat "${controller_parts[@]}" | tr -d '\r\n\t ' | base64 -d | gzip -d > "$work/controller.sh"
+          cat "${cutover_parts[@]}" | tr -d '\r\n\t ' | base64 -d | gzip -d > "$work/cutover.sh"
+          printf '%s  %s\n' "$CONTROLLER_SCRIPT_SHA256" "$work/controller.sh" | sha256sum -c -
+          printf '%s  %s\n' "$CUTOVER_SCRIPT_SHA256" "$work/cutover.sh" | sha256sum -c -
+          bash -n "$work/controller.sh"
+          bash -n "$work/cutover.sh"
+
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VALIDATION_RUN_ID" > "$work/run.json"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$VALIDATED_SHA" > "$work/validated.json"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$CANDIDATE_SHA" > "$work/candidate.json"
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$SOURCE_PR" > "$work/pr.json"
+          python3 - "$work" "$VALIDATED_SHA" "$CANDIDATE_SHA" "$CANDIDATE_TREE" "$SOURCE_BASE" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          validated_sha, candidate_sha, candidate_tree, source_base = sys.argv[2:]
+          run = json.loads((root / "run.json").read_text())
+          validated = json.loads((root / "validated.json").read_text())
+          candidate = json.loads((root / "candidate.json").read_text())
+          pr = json.loads((root / "pr.json").read_text())
+
+          assert run.get("conclusion") == "success"
+          assert run.get("head_sha") == validated_sha
+          assert validated["commit"]["tree"]["sha"] == candidate_tree
+          assert candidate["commit"]["tree"]["sha"] == candidate_tree
+          assert pr.get("state") == "closed" and pr.get("merged_at")
+          assert pr["head"]["sha"] == validated_sha
+          assert pr["base"]["ref"] == source_base
+          assert pr["merge_commit_sha"] == candidate_sha
+          PY
+
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          grep -F 'CANDIDATE_SHA: 165a549d84779e1239dec254e6ac9914b40581c2' \
+            .github/workflows/deploy-school-sso-origin-hotfix-production-20260902.yml >/dev/null
+          printf 'SCHOOL_SSO_ORIGIN_DEPLOY_CONTROLS=PASS\n'
+
+  deploy:
+    needs: validate
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
       github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
       github.actor == 'vitaliyozolin-dotcom' &&
       github.triggering_actor == 'vitaliyozolin-dotcom'
