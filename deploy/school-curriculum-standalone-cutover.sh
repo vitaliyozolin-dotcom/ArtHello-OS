@@ -492,9 +492,44 @@ recover_precommit() {
   fi
   if [ "$candidate_created" -eq 0 ] &&
     [ "$rollback_named" -eq 0 ] &&
-    docker inspect "$production" >/dev/null 2>&1 &&
-    [ "$(docker inspect "$production" --format '{{.State.Running}}' 2>/dev/null)" = true ]; then
-    docker exec "$production" test ! -e "$gate_path" || {
+    docker inspect "$production" >/dev/null 2>&1; then
+    if ! docker update --restart no "$production" >/dev/null 2>&1 ||
+      [ "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}' 2>/dev/null)" != no ]; then
+      printf 'SCHOOL_STANDALONE_ROLLBACK=ORIGINAL_RESTART_SUPPRESSION_FAILED\n' >&2
+      recovery_failed=1
+      return 1
+    fi
+
+    timeout --signal=TERM --kill-after=5s 60s \
+      docker stop --time 45 "$production" >/dev/null 2>&1 || true
+    for attempt in $(seq 1 60); do
+      [ "$(docker inspect "$production" --format '{{.State.Running}}' 2>/dev/null)" = false ] && break
+      sleep 1
+    done
+    if [ "$(docker inspect "$production" --format '{{.State.Running}}' 2>/dev/null)" != false ]; then
+      timeout --signal=TERM --kill-after=5s 30s \
+        docker kill "$production" >/dev/null 2>&1 || true
+      for attempt in $(seq 1 30); do
+        [ "$(docker inspect "$production" --format '{{.State.Running}}' 2>/dev/null)" = false ] && break
+        sleep 1
+      done
+    fi
+    if [ "$(docker inspect "$production" --format '{{.State.Running}}' 2>/dev/null)" != false ]; then
+      printf 'SCHOOL_STANDALONE_ROLLBACK=ORIGINAL_STOP_CONVERGENCE_FAILED\n' >&2
+      recovery_failed=1
+      return 1
+    fi
+    if [ "$(running_volume_consumers "$data_volume")" != 0 ]; then
+      printf 'SCHOOL_STANDALONE_ROLLBACK=ORIGINAL_DATA_VOLUME_BUSY\n' >&2
+      recovery_failed=1
+      return 1
+    fi
+
+    clear_gate "$data_volume" || {
+      recovery_failed=1
+      return 1
+    }
+    docker start "$production" >/dev/null || {
       recovery_failed=1
       return 1
     }
@@ -502,6 +537,7 @@ recover_precommit() {
       recovery_failed=1
       return 1
     }
+    restart_suppressed=0
     wait_container_health "$production" || {
       recovery_failed=1
       return 1
@@ -510,8 +546,7 @@ recover_precommit() {
       recovery_failed=1
       return 1
     }
-    restart_suppressed=0
-    printf 'SCHOOL_STANDALONE_ROLLBACK=RESTART_POLICY_RESTORED\n' >&2
+    printf 'SCHOOL_STANDALONE_ROLLBACK=ORIGINAL_RESTARTED\n' >&2
     return 0
   fi
   if [ "$candidate_created" -eq 1 ] && docker inspect "$production" >/dev/null 2>&1; then
