@@ -3,6 +3,7 @@ set -Eeuo pipefail
 umask 077
 
 : "${RUN_ID:?RUN_ID is required}"
+: "${RUN_ATTEMPT:?RUN_ATTEMPT is required}"
 : "${WORKFLOW_SHA:?WORKFLOW_SHA is required}"
 : "${RELEASE_SHA:?RELEASE_SHA is required}"
 : "${RELEASE_TREE:?RELEASE_TREE is required}"
@@ -15,15 +16,13 @@ umask 077
 : "${JOB_DIR:?JOB_DIR is required}"
 
 [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+[[ "$RUN_ATTEMPT" =~ ^[0-9]+$ ]]
 [[ "$WORKFLOW_SHA" =~ ^[a-f0-9]{40}$ ]]
 [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
 [[ "$RELEASE_TREE" =~ ^[a-f0-9]{40}$ ]]
 [[ "$SOURCE_SHA256" =~ ^[a-f0-9]{64}$ ]]
 [[ "$VERIFY_SHA256" =~ ^[a-f0-9]{64}$ ]]
-case "$JOB_DIR" in
-  /tmp/school-curriculum-deploy-jobs/"$RELEASE_SHA"-"$RUN_ID"-*) ;;
-  *) printf 'Unsafe job directory\n' >&2; exit 1 ;;
-esac
+test "$JOB_DIR" = "/tmp/school-curriculum-deploy-jobs/${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
 test "$SOURCE_ARCHIVE" = "$JOB_DIR/school-release.tar.gz"
 test "$VERIFY_SCRIPT" = "$JOB_DIR/verify-school-release.mjs"
 test "$SCHOOL_ORIGIN" = https://school-188-225-38-55.sslip.io
@@ -36,11 +35,12 @@ flock -n 9 || {
 }
 
 production=school-1-11
-rollback="school-1-11-curriculum-rollback-$RUN_ID"
-preflight="school-1-11-curriculum-preflight-$RUN_ID"
-preflight_data="school-1-11_curriculum_preflight_${RUN_ID}_data"
-preflight_backups="school-1-11_curriculum_preflight_${RUN_ID}_backups"
-rollback_volume="school-1-11_curriculum_rollback_$RUN_ID"
+run_key="${RUN_ID}-${RUN_ATTEMPT}"
+rollback="school-1-11-curriculum-rollback-$run_key"
+preflight="school-1-11-curriculum-preflight-$run_key"
+preflight_data="school-1-11_curriculum_preflight_${run_key}_data"
+preflight_backups="school-1-11_curriculum_preflight_${run_key}_backups"
+rollback_volume="school-1-11_curriculum_rollback_$run_key"
 release_dir="$JOB_DIR/release"
 work="$JOB_DIR/work"
 env_file="$work/production.env"
@@ -717,7 +717,7 @@ for key in sorted(values): print(key+"="+values[key])
 ' > "$env_file"
 chmod 0600 "$env_file"
 
-docker inspect "$production" | RELEASE_SHA="$RELEASE_SHA" IMAGE_ID="$image_id" RUN_ID="$RUN_ID" WORKFLOW_SHA="$WORKFLOW_SHA" ROLLBACK="$rollback" python3 -c '
+docker inspect "$production" | RELEASE_SHA="$RELEASE_SHA" IMAGE_ID="$image_id" RUN_ID="$RUN_ID" RUN_ATTEMPT="$RUN_ATTEMPT" WORKFLOW_SHA="$WORKFLOW_SHA" ROLLBACK="$rollback" python3 -c '
 import json, os, sys
 item=json.load(sys.stdin)[0]
 labels=dict((item.get("Config") or {}).get("Labels") or {})
@@ -727,6 +727,7 @@ labels.update({
   "school.curriculum-release":os.environ["RELEASE_SHA"],
   "school.curriculum-image-id":os.environ["IMAGE_ID"],
   "school.curriculum-run":os.environ["RUN_ID"],
+  "school.curriculum-run-attempt":os.environ["RUN_ATTEMPT"],
   "school.curriculum-workflow-sha":os.environ["WORKFLOW_SHA"],
   "school.curriculum-rollback-container":os.environ["ROLLBACK"],
 })
@@ -796,7 +797,7 @@ test "$(running_volume_consumers "$data_volume")" = 0
 create_gate "$data_volume"
 printf 'SCHOOL_STANDALONE_WRITES=QUIESCED\n'
 
-docker volume create   --label school.system=school-1-11   --label school.environment=rollback   --label school.release="$RELEASE_SHA"   --label school.run="$RUN_ID"   "$rollback_volume" >/dev/null
+docker volume create   --label school.system=school-1-11   --label school.environment=rollback   --label school.release="$RELEASE_SHA"   --label school.run="$RUN_ID"   --label school.run-attempt="$RUN_ATTEMPT"   "$rollback_volume" >/dev/null
 final_backup_path="$(docker run --rm   --network none   --user 0:0   --security-opt no-new-privileges:true   --volume "$data_volume:/data"   --volume "$rollback_volume:/backups"   --env DATABASE_PATH=/data/school-1-11.sqlite   --env BACKUP_DIR=/backups   --entrypoint node "$image_id" scripts/backup-db.mjs | tail -n1)"
 case "$final_backup_path" in /backups/school-1-11-*.sqlite) ;; *) printf 'Unexpected final backup path\n' >&2; exit 1 ;; esac
 final_backup_file="${final_backup_path#/backups/}"
@@ -805,11 +806,12 @@ final_backup_bytes="${final_proof%%:*}"
 final_backup_sha="${final_proof#*:}"
 [[ "$final_backup_bytes" =~ ^[0-9]+$ ]]
 [[ "$final_backup_sha" =~ ^[a-f0-9]{64}$ ]]
-docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volume:/rollback"   --env RUN_ID="$RUN_ID"   --env RELEASE_SHA="$RELEASE_SHA"   --env BACKUP_FILE="$final_backup_file"   --env BACKUP_SHA="$final_backup_sha"   --entrypoint /bin/sh "$image_id" -c '
+docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volume:/rollback"   --env RUN_ID="$RUN_ID"   --env RUN_ATTEMPT="$RUN_ATTEMPT"   --env RELEASE_SHA="$RELEASE_SHA"   --env BACKUP_FILE="$final_backup_file"   --env BACKUP_SHA="$final_backup_sha"   --entrypoint /bin/sh "$image_id" -c '
     set -eu
     {
       printf "phase=ROLLBACK_READY\n"
       printf "run_id=%s\n" "$RUN_ID"
+      printf "run_attempt=%s\n" "$RUN_ATTEMPT"
       printf "release_sha=%s\n" "$RELEASE_SHA"
       printf "backup_file=%s\n" "$BACKUP_FILE"
       printf "backup_sha256=%s\n" "$BACKUP_SHA"
@@ -878,11 +880,12 @@ printf 'SCHOOL_STANDALONE_LIVE_IMPORT=VERIFIED\n'
 restore_restart_policy "$production"
 test "$(docker inspect "$rollback" --format '{{.State.Running}}')" = false
 test "$(docker inspect "$rollback" --format '{{.HostConfig.RestartPolicy.Name}}')" = no
-docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volume:/rollback"   --env RUN_ID="$RUN_ID"   --env RELEASE_SHA="$RELEASE_SHA"   --entrypoint /bin/sh "$image_id" -c '
+docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volume:/rollback"   --env RUN_ID="$RUN_ID"   --env RUN_ATTEMPT="$RUN_ATTEMPT"   --env RELEASE_SHA="$RELEASE_SHA"   --entrypoint /bin/sh "$image_id" -c '
     set -eu
     {
       printf "phase=ROLLBACK_DISABLED\n"
       printf "run_id=%s\n" "$RUN_ID"
+      printf "run_attempt=%s\n" "$RUN_ATTEMPT"
       printf "release_sha=%s\n" "$RELEASE_SHA"
     } > /rollback/commit.tmp
     chmod 0400 /rollback/commit.tmp
