@@ -488,3 +488,19 @@ decision:
 - доказательство до merge: production build, lint без ошибок и полный test suite 319/319 локально; hosted Quality, Proof Gates и Verify на точном head PR;
 - rollout: неизменяемый образ точного merged SHA, Environment `production-ru`, clone-preflight, backup-first cutover и публичные health-checks;
 - rollback: при любой ошибке workflow возвращает прежний контейнер, volume и маршрут; поскольку схема и данные не меняются, отдельного data rollback для D-048 не требуется.
+
+
+## Дополнение 2026-09-03 — плотная компоновка Главной и ручной порядок
+
+- статус: `approved-for-release`; владелец явно поручил собирать компактные блоки в одной горизонтали и разрешить ручное перетаскивание;
+- этап: refinement персональной Главной; решение D-049 в `DECISIONS.md`;
+- release PR/branch: `#316`, `codex/dashboard-clean-drag-layout-20260902`; одноразовый trigger принимает только этот PR, первый attempt точной Verify-проверки и текущий merged main SHA;
+- текущий шаг: Codex доводит exact Docker candidate до зелёных Quality/Proof/Verify, затем выполняет защищённый rollout; критерий — успешный workflow и authenticated owner smoke-test «перетащить → сохранить → перезагрузить»;
+- область: 12-колоночная dense-сетка, drag handle только в режиме настройки и детерминированная перестановка before/after; стрелки остаются keyboard/mobile fallback;
+- данные и совместимость: формат layout v1, D1 schema, роли, разрешения, финансы, интеграции и School не меняются; порядок по-прежнему изолирован по immutable user id и точной роли;
+- метрики приёмки: на широком экране до трёх compact-блоков в строке, на средней ширине до двух, на мобильной один; новый порядок переживает reload; ни одна перестановка не теряет visibility/size metadata;
+- риски: native drag-and-drop предназначен для desktop, поэтому touch и клавиатура используют сохранённые стрелки; владелец риска и проверки — Codex;
+- доказательство до merge: локальные build и lint без ошибок, полный test suite 320/320; далее обязательны hosted Quality, Proof Gates и Verify на точном head PR;
+- AI-процессы: не добавляются; новые внешние действия, стоимость AI и автоматические решения отсутствуют;
+- rollout/rollback: Environment `production-ru`, immutable image, clone-preflight, backup-first cutover и автоматический возврат прежнего контейнера/маршрута при ошибке;
+- следующий переход: после health и owner smoke-test отметить D-049 выполненным и вернуться к следующему утверждённому этапу паспорта без создания новой внешней задачи.

@@ -273,12 +273,14 @@
 .widgetGrid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-flow: row dense;
   gap: 14px;
   align-items: start;
 }
 
 .widget {
   min-width: 0;
+  position: relative;
 }
 
 .sizeCompact {
@@ -318,6 +320,85 @@
   color: #6862a9;
   font: inherit;
   cursor: pointer;
+}
+
+.widgetBadge .dragHandle {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  cursor: grab;
+  text-align: left;
+  user-select: none;
+}
+
+.widgetBadge .dragHandle:active {
+  cursor: grabbing;
+}
+
+.dragHandle svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.dragHandle span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.widgetDragging {
+  opacity: .46;
+}
+
+.widgetDropTarget::after {
+  content: "";
+  position: absolute;
+  z-index: 3;
+  inset: -3px;
+  border: 2px solid var(--brand-primary, #5b56f5);
+  border-radius: 20px;
+  pointer-events: none;
+}
+
+.widgetDropTarget::before {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  bottom: 10px;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--brand-primary, #5b56f5);
+  box-shadow: 0 0 0 4px rgba(91, 86, 245, .12);
+  pointer-events: none;
+}
+
+.widgetDropTarget[data-drop-position="before"]::before {
+  left: -8px;
+}
+
+.widgetDropTarget[data-drop-position="after"]::before {
+  right: -8px;
+}
+
+.sizeFull.widgetDropTarget::before {
+  right: 12px;
+  left: 12px;
+  width: auto;
+  height: 4px;
+}
+
+.sizeFull.widgetDropTarget[data-drop-position="before"]::before {
+  top: -8px;
+  bottom: auto;
+}
+
+.sizeFull.widgetDropTarget[data-drop-position="after"]::before {
+  top: auto;
+  bottom: -8px;
 }
 
 .kpiPanel,
@@ -993,12 +1074,18 @@
   .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sizeCompact { grid-column: span 6; }
   .sizeWide, .sizeFull { grid-column: 1 / -1; }
+  .sizeWide.widgetDropTarget::before { right: 12px; left: 12px; width: auto; height: 4px; }
+  .sizeWide.widgetDropTarget[data-drop-position="before"]::before { top: -8px; bottom: auto; }
+  .sizeWide.widgetDropTarget[data-drop-position="after"]::before { top: auto; bottom: -8px; }
 }
 
 @media (max-width: 980px) {
   .dashboard { padding: 20px 20px 34px; }
   .widgetGrid { grid-template-columns: 1fr; }
   .sizeCompact, .sizeWide, .sizeFull { grid-column: 1; }
+  .sizeCompact.widgetDropTarget::before { right: 12px; left: 12px; width: auto; height: 4px; }
+  .sizeCompact.widgetDropTarget[data-drop-position="before"]::before { top: -8px; bottom: auto; }
+  .sizeCompact.widgetDropTarget[data-drop-position="after"]::before { top: auto; bottom: -8px; }
   .registryContent { grid-template-columns: 1fr; }
   .preview { border-top: 1px solid var(--border, #e1e3ec); border-left: 0; }
 }

@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent as ReactDragEvent } from "react";
 import type { ModuleId } from "../../data/test-snapshot";
 import {
   DASHBOARD_LAYOUT_VERSION,
   allowedDashboardWidgetIds,
   dashboardBrowserStorageKey,
+  reorderDashboardWidgets,
+  type DashboardDropPosition,
   type DashboardWidgetId,
   type DashboardWidgetPreference,
   type DashboardWidgetSize,
@@ -294,6 +297,7 @@ function persistDashboardLayout(roleLabel: string, userKey: string, widgets: Das
 }
 
 type DashboardSyncStatus = "loading" | "saving" | "synced" | "local";
+type DashboardDropTarget = { id: DashboardWidgetId; position: DashboardDropPosition };
 
 async function syncDashboardLayout(method: "PUT" | "DELETE", widgets?: DashboardWidgetPreference[]) {
   const response = await fetch("/api/dashboard-layout", {
@@ -334,8 +338,11 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
   const [editing, setEditing] = useState(false);
   const [layout, setLayout] = useState<DashboardWidgetPreference[]>(() => defaultDashboardLayout(roleLabel));
   const [layoutSyncStatus, setLayoutSyncStatus] = useState<DashboardSyncStatus>("loading");
+  const [draggedWidgetId, setDraggedWidgetId] = useState<DashboardWidgetId | null>(null);
+  const [dropTarget, setDropTarget] = useState<DashboardDropTarget | null>(null);
   const [now, setNow] = useState(() => new Date());
   const layoutRef = useRef(layout);
+  const draggedWidgetRef = useRef<DashboardWidgetId | null>(null);
   const layoutRevisionRef = useRef(0);
   const syncSequenceRef = useRef(0);
   const syncQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -610,14 +617,53 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
   }
 
   function moveWidget(id: DashboardWidgetId, directionToMove: -1 | 1) {
-    updateLayout((current) => {
-      const index = current.findIndex((item) => item.id === id);
-      const nextIndex = index + directionToMove;
-      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
-      const next = [...current];
-      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
-      return next;
-    });
+    const index = customizableLayout.findIndex((item) => item.id === id);
+    const target = customizableLayout[index + directionToMove];
+    if (index < 0 || !target) return;
+    updateLayout((current) => reorderDashboardWidgets(current, id, target.id, directionToMove === -1 ? "before" : "after"));
+  }
+
+  function widgetDropPosition(event: ReactDragEvent<HTMLDivElement>, target: DashboardWidgetPreference): DashboardDropPosition {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const gridWidth = event.currentTarget.parentElement?.getBoundingClientRect().width;
+    const fillsRow = gridWidth ? bounds.width >= gridWidth - 8 : target.size === "full";
+    if (fillsRow) return event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+    return event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
+  }
+
+  function startWidgetDrag(event: ReactDragEvent<HTMLSpanElement>, id: DashboardWidgetId) {
+    draggedWidgetRef.current = id;
+    setDraggedWidgetId(id);
+    setDropTarget(null);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+  }
+
+  function markWidgetDropTarget(event: ReactDragEvent<HTMLDivElement>, target: DashboardWidgetPreference) {
+    if (!editing || !draggedWidgetRef.current) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (draggedWidgetRef.current === target.id) {
+      setDropTarget(null);
+      return;
+    }
+    const position = widgetDropPosition(event, target);
+    setDropTarget((current) => current?.id === target.id && current.position === position ? current : { id: target.id, position });
+  }
+
+  function finishWidgetDrag() {
+    draggedWidgetRef.current = null;
+    setDraggedWidgetId(null);
+    setDropTarget(null);
+  }
+
+  function dropWidget(event: ReactDragEvent<HTMLDivElement>, target: DashboardWidgetPreference) {
+    if (!editing || !draggedWidgetRef.current) return;
+    event.preventDefault();
+    const activeId = draggedWidgetRef.current;
+    const dropPosition = widgetDropPosition(event, target);
+    updateLayout((current) => reorderDashboardWidgets(current, activeId, target.id, dropPosition));
+    finishWidgetDrag();
   }
 
   function resetLayout() {
@@ -780,7 +826,7 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
       </header>
 
       {editing ? <section className={styles.customizer} aria-label="Настройка главного экрана">
-        <header><div><strong>Ваш главный экран</strong><span>Показывайте только нужное. Порядок и размер сохраняются отдельно для роли «{roleLabel}».</span></div><button type="button" onClick={resetLayout}>Вернуть настройки роли</button></header>
+        <header><div><strong>Ваш главный экран</strong><span>Перетаскивайте блоки ниже за название. Компактные блоки автоматически занимают свободное место в строке. Порядок и размер сохраняются отдельно для роли «{roleLabel}».</span></div><button type="button" onClick={resetLayout}>Вернуть настройки роли</button></header>
         <div className={styles.customizerList}>
           {customizableLayout.map((item, index) => {
             const definition = WIDGETS.find((widget) => widget.id === item.id)!;
@@ -794,10 +840,20 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
       </section> : null}
 
       {visibleWidgets.length ? <div className={styles.widgetGrid}>
-        {visibleWidgets.map((widget) => <div key={widget.id} className={`${styles.widget} ${sizeClass(widget.size)} ${editing ? styles.widgetEditing : ""}`} data-dashboard-widget={widget.id}>
-          {editing ? <div className={styles.widgetBadge}><span>{WIDGETS.find((item) => item.id === widget.id)?.title}</span><button type="button" onClick={() => changeWidget(widget.id, { visible: false })}>Скрыть</button></div> : null}
+        {visibleWidgets.map((widget) => {
+          const title = WIDGETS.find((item) => item.id === widget.id)?.title ?? widget.id;
+          return <div
+            key={widget.id}
+            className={`${styles.widget} ${sizeClass(widget.size)} ${editing ? styles.widgetEditing : ""} ${draggedWidgetId === widget.id ? styles.widgetDragging : ""} ${dropTarget?.id === widget.id ? styles.widgetDropTarget : ""}`}
+            data-dashboard-widget={widget.id}
+            data-drop-position={dropTarget?.id === widget.id ? dropTarget.position : undefined}
+            onDragOver={(event) => markWidgetDropTarget(event, widget)}
+            onDrop={(event) => dropWidget(event, widget)}
+          >
+          {editing ? <div className={styles.widgetBadge}><span className={styles.dragHandle} draggable={editing} onDragStart={(event) => startWidgetDrag(event, widget.id)} onDragEnd={finishWidgetDrag} title={`Перетащить блок «${title}»`}><AppIcon name="menu" /><span>{title}</span></span><button type="button" onClick={() => changeWidget(widget.id, { visible: false })}>Скрыть</button></div> : null}
           {renderWidget(widget)}
-        </div>)}
+        </div>;
+        })}
       </div> : <div data-ah-compact-card="true" className={styles.dashboardEmpty}><strong>Все блоки скрыты</strong><span>Откройте настройку экрана и включите хотя бы один нужный блок.</span><button type="button" onClick={() => setEditing(true)}>Настроить главный экран</button></div>}
     </section>
   );

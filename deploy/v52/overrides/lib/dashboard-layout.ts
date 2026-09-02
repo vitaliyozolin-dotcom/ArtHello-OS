@@ -12,6 +12,7 @@ export const DASHBOARD_WIDGET_IDS = [
 
 export type DashboardWidgetId = (typeof DASHBOARD_WIDGET_IDS)[number];
 export type DashboardWidgetSize = "compact" | "wide" | "full";
+export type DashboardDropPosition = "before" | "after";
 export type DashboardWidgetPreference = {
   id: DashboardWidgetId;
   visible: boolean;
@@ -105,6 +106,25 @@ export function clearDashboardBrowserLayouts(storage: DashboardBrowserStorage, a
     if (key?.startsWith(userPrefix)) keys.push(key);
   }
   for (const key of keys) storage.removeItem(key);
+}
+
+export function reorderDashboardWidgets(
+  widgets: DashboardWidgetPreference[],
+  activeId: string,
+  targetId: string,
+  position: DashboardDropPosition,
+) {
+  const activeIndex = widgets.findIndex((widget) => widget.id === activeId);
+  const targetIndex = widgets.findIndex((widget) => widget.id === targetId);
+  if (activeIndex < 0 || targetIndex < 0 || activeIndex === targetIndex) return widgets;
+
+  const next = [...widgets];
+  const moved = next.splice(activeIndex, 1)[0];
+  if (!moved) return widgets;
+  const remainingTargetIndex = next.findIndex((widget) => widget.id === targetId);
+  const insertionIndex = position === "after" ? remainingTargetIndex + 1 : remainingTargetIndex;
+  next.splice(insertionIndex, 0, moved);
+  return next;
 }
 
 function isWidgetId(value: string): value is DashboardWidgetId {
