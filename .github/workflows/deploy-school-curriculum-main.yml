@@ -30,7 +30,7 @@ env:
   VALIDATION_WORKFLOW_ID: '346579718'
   VALIDATION_JOB_ID: '100130562121'
   OFFLINE_BASE_REF: 'node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e'
-  CUTOVER_SHA256: 710402fdf59b0726411f060dd3d40e3d2b458b0a2c4f39d75306845ae8163a62
+  CUTOVER_SHA256: 3a13aa11b654b80b31f98366154b30ad30675a034e6c3f619b27dadeb0f46c3b
   VERIFY_SHA256: 9f2839de7fff8e573c3b7a44262eb90fd6bfe79c1fd41d75ed747ca0f75d4727
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
@@ -44,7 +44,7 @@ jobs:
       github.actor == 'vitaliyozolin-dotcom' &&
       github.triggering_actor == 'vitaliyozolin-dotcom'
     runs-on: [self-hosted, linux, x64, arthello-gateway]
-    timeout-minutes: 180
+    timeout-minutes: 360
     environment: production-ru
     steps:
       - name: Verify typed production confirmation
@@ -778,12 +778,8 @@ jobs:
           grep -Fx 'SCHOOL_STANDALONE_PROTECTED_SCHEDULE_LIVE=PASS' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_COMMIT=ROLLBACK_DISABLED' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_RELEASE=VERIFIED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_EXTERNAL_VERIFICATION_GATE=HELD' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_RELEASE_DATA=PASS' "$log_file" >/dev/null
-          grep -Fx 'SCHOOL_PUBLIC_HTTPS=OK' "$log_file" >/dev/null
-          grep -Fx 'SCHOOL_FULLSCREEN_CSS=VERIFIED' "$log_file" >/dev/null
-          grep -Fx 'SCHOOL_PUBLIC_SSO=VERIFIED' "$log_file" >/dev/null
-          grep -Fx 'SCHOOL_PUBLIC_FAMILY_LOGIN=VERIFIED' "$log_file" >/dev/null
-          grep -Fx 'SCHOOL_MAINTENANCE=RELEASED' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_CUTOVER=PASS' "$log_file" >/dev/null
           grep -Fx "SCHOOL_DELIVERY_REF=$RELEASE_SHA" "$log_file" >/dev/null
           grep -Fx 'SCHOOL_RELEASE_SCHEDULE_ROWS=189' "$log_file" >/dev/null
@@ -804,7 +800,7 @@ jobs:
           for attempt in $(seq 1 60); do
             health="$(curl --fail --silent --show-error --max-time 30 "$SCHOOL_ORIGIN/api/health" || true)"
             if grep -F '"status":"ok"' <<<"$health" >/dev/null \
-              && grep -F '"maintenance":false' <<<"$health" >/dev/null; then
+              && grep -F '"maintenance":true' <<<"$health" >/dev/null; then
               healthy=1
               break
             fi
@@ -829,29 +825,287 @@ jobs:
           grep -F '.l0-stage{width:100%;height:100svh;overflow:hidden' "$css_file" >/dev/null
           grep -F 'student-dashboard-hero-v1.webp' "$css_file" >/dev/null
           sso_headers="$RUNNER_TEMP/school-curriculum-sso.headers"
-          curl --silent --show-error --max-time 30 --dump-header "$sso_headers" --output /dev/null "$SCHOOL_ORIGIN/auth/central/start"
-          test "$(awk 'NR==1 {print $2}' "$sso_headers")" = 303
-          sso_location="$(tr -d '\r' < "$sso_headers" | sed -n 's/^location: //Ip' | tail -n1)"
-          python3 - "$sso_location" "$ARTHELLO_ORIGIN" <<'PY'
-          import sys
-          from urllib.parse import parse_qs, urlparse
-          location=urlparse(sys.argv[1])
-          authority=urlparse(sys.argv[2])
-          assert location.scheme == authority.scheme
-          assert location.netloc == authority.netloc
-          assert location.path == '/api/school-sso/authorize'
-          query=parse_qs(location.query)
-          assert len(query.get('state',[''])[0]) >= 40
-          assert len(query.get('code_challenge',[''])[0]) >= 40
-          PY
-          grep -Eiq '^set-cookie:[[:space:]]*school_sso_tx=' "$sso_headers"
+          sso_body="$RUNNER_TEMP/school-curriculum-sso.json"
+          sso_status="$(curl --silent --show-error --max-time 30 --dump-header "$sso_headers" --output "$sso_body" --write-out '%{http_code}' "$SCHOOL_ORIGIN/auth/central/start")"
+          test "$sso_status" = 503
+          grep -Eq '"code"[[:space:]]*:[[:space:]]*"deployment_read_only"' "$sso_body"
+          grep -Eiq '^Retry-After:[[:space:]]*30' "$sso_headers"
           family_status="$(curl --silent --show-error --max-time 30 --output "$RUNNER_TEMP/school-curriculum-family.json" --write-out '%{http_code}' --request POST "$SCHOOL_ORIGIN/api/auth/login" --header "Origin: $SCHOOL_ORIGIN" --header 'Content-Type: application/json' --data '{"login":"nobody@example.invalid","password":"InvalidPassword1"}')"
-          test "$family_status" = 401
+          test "$family_status" = 503
+          grep -Eq '"code"[[:space:]]*:[[:space:]]*"deployment_read_only"' "$RUNNER_TEMP/school-curriculum-family.json"
           printf 'SCHOOL_PUBLIC_HTTPS=OK\n'
           printf 'SCHOOL_FULLSCREEN_CSS=VERIFIED\n'
-          printf 'SCHOOL_PUBLIC_SSO=VERIFIED\n'
-          printf 'SCHOOL_PUBLIC_FAMILY_LOGIN=VERIFIED\n'
-          printf 'SCHOOL_MAINTENANCE=RELEASED\n'
+          printf 'SCHOOL_PUBLIC_SSO_GATE=VERIFIED\n'
+          printf 'SCHOOL_PUBLIC_FAMILY_GATE=VERIFIED\n'
+          printf 'SCHOOL_MAINTENANCE=GATED_FOR_ACTIVATION\n'
+
+      - name: Activate verified production restart policy
+        id: activate_release
+        if: >-
+          steps.deploy_school.outputs.committed == 'true' &&
+          steps.verify_public.outcome == 'success'
+        continue-on-error: true
+        env:
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+          SSH_KEY_PATH: ${{ steps.configure_ssh.outputs.key_path }}
+          SSH_KNOWN_HOSTS_PATH: ${{ steps.configure_ssh.outputs.known_hosts_path }}
+        run: |
+          set -Eeuo pipefail
+          deploy_port="${DEPLOY_PORT:-2222}"
+          ssh_args=(
+            -T
+            -p "$deploy_port"
+            -i "$SSH_KEY_PATH"
+            -o UserKnownHostsFile="$SSH_KNOWN_HOSTS_PATH"
+            -o GlobalKnownHostsFile=/dev/null
+            -o StrictHostKeyChecking=yes
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o ConnectTimeout=140
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=30
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+          remote_payload="$(base64 -w0 <<'REMOTE'
+          set -Eeuo pipefail
+          : "${RELEASE_SHA:?}"
+          : "${RUN_ID:?}"
+          : "${RUN_ATTEMPT:?}"
+          production=school-1-11
+          origin=https://school-188-225-38-55.sslip.io
+          gate_path=/data/.school-deploy-read-only
+          rollback_volume="school-1-11_curriculum_rollback_${RUN_ID}-${RUN_ATTEMPT}"
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          [[ "$rollback_volume" =~ ^[A-Za-z0-9_.-]+$ ]]
+
+          lock_path=/var/lock/school-1-11-production.lock
+          exec 9>>"$lock_path"
+          flock -w 900 9
+
+          docker_ready=0
+          for docker_attempt in $(seq 1 180); do
+            if docker info >/dev/null 2>&1; then
+              docker_ready=1
+              break
+            fi
+            sleep 5
+          done
+          test "$docker_ready" -eq 1
+
+          docker inspect "$production" >/dev/null
+          docker volume inspect "$rollback_volume" >/dev/null
+          data_volume="$(docker inspect "$production" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          image_id="$(docker inspect "$production" --format '{{.Image}}')"
+          [[ "$data_volume" =~ ^[A-Za-z0-9_.-]+$ ]]
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.system"}}')" = school-1-11
+          test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.environment"}}')" = rollback
+          test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.release"}}')" = "$RELEASE_SHA"
+          test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.run"}}')" = "$RUN_ID"
+          test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.run-attempt"}}')" = "$RUN_ATTEMPT"
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.system"}}')" = school-1-11
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.environment"}}')" = production
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.curriculum-release"}}')" = "$RELEASE_SHA"
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.curriculum-run"}}')" = "$RUN_ID"
+          test "$(docker inspect "$production" --format '{{index .Config.Labels "school.curriculum-run-attempt"}}')" = "$RUN_ATTEMPT"
+          test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
+
+          verified_state="$(docker run --rm \
+            --network none \
+            --read-only \
+            --user 0:0 \
+            --security-opt no-new-privileges:true \
+            --volume "$rollback_volume:/rollback:ro" \
+            --env RUN_ID="$RUN_ID" \
+            --env RUN_ATTEMPT="$RUN_ATTEMPT" \
+            --env RELEASE_SHA="$RELEASE_SHA" \
+            --entrypoint /bin/sh "$image_id" -c '
+              set -eu
+              entries="$(find /rollback -mindepth 1 -maxdepth 1 -printf "%f\n")"
+              if printf "%s\n" "$entries" | grep -Fx state.tmp >/dev/null; then exit 1; fi
+              state=/rollback/state
+              test -f "$state"
+              test ! -L "$state"
+              test "$(stat -c %u "$state")" = 0
+              test "$(stat -c %a "$state")" = 400
+              test "$(wc -l < "$state")" -eq 6
+              phase="$(sed -n "1p" "$state")"
+              case "$phase" in
+                phase=RELEASE_VERIFIED|phase=RELEASE_ACTIVE) ;;
+                *) exit 1 ;;
+              esac
+              test "$(sed -n "2p" "$state")" = "run_id=$RUN_ID"
+              test "$(sed -n "3p" "$state")" = "run_attempt=$RUN_ATTEMPT"
+              test "$(sed -n "4p" "$state")" = "release_sha=$RELEASE_SHA"
+              restart_name="$(sed -n "5s/^restart_name=//p" "$state")"
+              restart_max="$(sed -n "6s/^restart_max=//p" "$state")"
+              case "$restart_name" in always|unless-stopped|on-failure) ;; *) exit 1 ;; esac
+              printf "%s\n" "$restart_max" | grep -Eq "^[0-9]+$"
+              cat "$state"
+            ')"
+          state_phase="$(sed -n '1p' <<<"$verified_state")"
+          restart_name="$(sed -n '5s/^restart_name=//p' <<<"$verified_state")"
+          restart_max="$(sed -n '6s/^restart_max=//p' <<<"$verified_state")"
+          case "$restart_name" in
+            always|unless-stopped) restart_spec="$restart_name" ;;
+            on-failure) restart_spec="on-failure:$restart_max" ;;
+            *) exit 1 ;;
+          esac
+
+          verify_gate() {
+            docker run --rm --network none --read-only --user 0:0 \
+              --security-opt no-new-privileges:true \
+              --volume "$data_volume:/data:ro" \
+              --entrypoint /bin/sh "$image_id" -c '
+                set -eu
+                target=/data/.school-deploy-read-only
+                test -f "$target"
+                test ! -L "$target"
+                test "$(stat -c %u "$target")" = 0
+                test "$(stat -c %a "$target")" = 444
+                test "$(cat "$target")" = "deployment read-only"
+              '
+          }
+          clear_gate() {
+            docker run --rm --network none --read-only --user 0:0 \
+              --security-opt no-new-privileges:true \
+              --volume "$data_volume:/data" \
+              --entrypoint /bin/sh "$image_id" -c '
+                set -eu
+                rm -f /data/.school-deploy-read-only
+                test ! -e /data/.school-deploy-read-only
+                sync
+              '
+          }
+          verify_public_gate() {
+            local gated=0 gate_health
+            for attempt in $(seq 1 15); do
+              gate_health="$(curl --fail --silent --show-error --max-time 20 "$origin/api/health" || true)"
+              if grep -F '"status":"ok"' <<<"$gate_health" >/dev/null &&
+                grep -F '"maintenance":true' <<<"$gate_health" >/dev/null; then
+                gated=1
+                break
+              fi
+              sleep 2
+            done
+            test "$gated" -eq 1
+          }
+          verify_active_health() {
+            local active=0 active_health
+            docker inspect "$production" >/dev/null
+            test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
+            docker exec "$production" test ! -e "$gate_path"
+            for attempt in $(seq 1 30); do
+              active_health="$(curl --fail --silent --show-error --max-time 20 "$origin/api/health" || true)"
+              if grep -F '"status":"ok"' <<<"$active_health" >/dev/null &&
+                grep -F '"maintenance":false' <<<"$active_health" >/dev/null; then
+                active=1
+                break
+              fi
+              sleep 2
+            done
+            test "$active" -eq 1
+          }
+
+          if [ "$state_phase" = phase=RELEASE_ACTIVE ]; then
+            test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}')" = "$restart_name"
+            test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')" = "$restart_max"
+            if docker exec "$production" test -e "$gate_path"; then
+              verify_gate
+              verify_public_gate
+              clear_gate
+            else
+              docker exec "$production" test ! -e "$gate_path"
+            fi
+            verify_active_health
+            printf 'SCHOOL_RELEASE_ACTIVATION=ALREADY_ACTIVE\n'
+            exit 0
+          fi
+
+          test "$state_phase" = phase=RELEASE_VERIFIED
+          verify_gate
+          docker exec "$production" test -f "$gate_path"
+          verify_public_gate
+
+          current_restart_name="$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}')"
+          current_restart_max="$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
+          if [ "$current_restart_name" = no ]; then
+            test "$current_restart_max" = 0
+            docker update --restart "$restart_spec" "$production" >/dev/null
+          else
+            test "$current_restart_name" = "$restart_name"
+            test "$current_restart_max" = "$restart_max"
+          fi
+          test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}')" = "$restart_name"
+          test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')" = "$restart_max"
+          docker run --rm --network none --read-only --user 0:0 \
+            --security-opt no-new-privileges:true \
+            --volume "$rollback_volume:/rollback" \
+            --env RUN_ID="$RUN_ID" \
+            --env RUN_ATTEMPT="$RUN_ATTEMPT" \
+            --env RELEASE_SHA="$RELEASE_SHA" \
+            --env RESTART_NAME="$restart_name" \
+            --env RESTART_MAX="$restart_max" \
+            --entrypoint /bin/sh "$image_id" -c '
+              set -eu
+              {
+                printf "phase=RELEASE_ACTIVE\n"
+                printf "run_id=%s\n" "$RUN_ID"
+                printf "run_attempt=%s\n" "$RUN_ATTEMPT"
+                printf "release_sha=%s\n" "$RELEASE_SHA"
+                printf "restart_name=%s\n" "$RESTART_NAME"
+                printf "restart_max=%s\n" "$RESTART_MAX"
+              } > /rollback/state.tmp
+              chmod 0400 /rollback/state.tmp
+              mv -f /rollback/state.tmp /rollback/state
+              sync
+            '
+          active_state="$(docker run --rm --network none --read-only --user 0:0 \
+            --security-opt no-new-privileges:true \
+            --volume "$rollback_volume:/rollback:ro" \
+            --entrypoint /bin/sh "$image_id" -c '
+              set -eu
+              test -f /rollback/state
+              test ! -L /rollback/state
+              test ! -e /rollback/state.tmp
+              test "$(stat -c %u /rollback/state)" = 0
+              test "$(stat -c %a /rollback/state)" = 400
+              test "$(wc -l < /rollback/state)" -eq 6
+              cat /rollback/state
+            ')"
+          expected_active="$(printf 'phase=RELEASE_ACTIVE\nrun_id=%s\nrun_attempt=%s\nrelease_sha=%s\nrestart_name=%s\nrestart_max=%s' \
+            "$RUN_ID" "$RUN_ATTEMPT" "$RELEASE_SHA" "$restart_name" "$restart_max")"
+          test "$active_state" = "$expected_active"
+          clear_gate
+          verify_active_health
+          printf 'SCHOOL_RELEASE_ACTIVATION=PASS\n'
+          REMOTE
+          )"
+          activation_ok=0
+          for activation_attempt in 1 2; do
+            if timeout --signal=TERM --kill-after=30s 3600s \
+              ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "printf '%s' '$remote_payload' | base64 -d | env RELEASE_SHA='$RELEASE_SHA' RUN_ID='$GITHUB_RUN_ID' RUN_ATTEMPT='$GITHUB_RUN_ATTEMPT' bash" \
+              </dev/null; then
+              activation_ok=1
+              break
+            fi
+            sleep 5
+          done
+          test "$activation_ok" -eq 1
 
       - name: Re-gate after failed external verification
         id: regate_public_failure
@@ -860,7 +1114,8 @@ jobs:
           steps.configure_ssh.outcome == 'success' &&
           (steps.deploy_school.outcome != 'success' ||
             (steps.deploy_school.outputs.committed == 'true' &&
-              steps.verify_public.outcome != 'success'))
+              (steps.verify_public.outcome != 'success' ||
+                steps.activate_release.outcome != 'success')))
         env:
           DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
@@ -992,7 +1247,9 @@ jobs:
           case "$production_running" in true|false) ;; *) exit 1 ;; esac
 
           install_gate() {
-            docker run --rm \
+            local gate_verified=0
+            local restart_disabled=0
+            if docker run --rm \
               --network none \
               --read-only \
               --user 0:0 \
@@ -1010,7 +1267,26 @@ jobs:
                 mv -f "$tmp" "$target"
                 test -f "$target"
                 sync
-              '
+              ' && verify_gate_file; then
+              gate_verified=1
+            fi
+            if docker update --restart no "$production" >/dev/null 2>&1 &&
+              [ "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}' 2>/dev/null)" = no ]; then
+              restart_disabled=1
+            fi
+            if [ "$gate_verified" -ne 1 ]; then
+              if [ "$(docker inspect "$production" --format '{{.State.Running}}' 2>/dev/null)" = true ]; then
+                timeout --signal=TERM --kill-after=5s 60s \
+                  docker stop --time 45 "$production" >/dev/null 2>&1 || true
+              fi
+              if [ "$(docker inspect "$production" --format '{{.State.Running}}' 2>/dev/null)" = true ]; then
+                timeout --signal=TERM --kill-after=5s 30s \
+                  docker kill "$production" >/dev/null 2>&1 || true
+              fi
+              test "$(docker inspect "$production" --format '{{.State.Running}}' 2>/dev/null)" = false || return 1
+            fi
+            test "$gate_verified" -eq 1
+            test "$restart_disabled" -eq 1
           }
 
           verify_gate_file() {
@@ -1030,6 +1306,26 @@ jobs:
                 test "$(stat -c %a "$target")" = 444
                 test "$(cat "$target")" = "deployment read-only"
               '
+          }
+
+          verify_precommit_recovered_live() {
+            local recovered_health recorded_restart_name recorded_restart_max recovered_header
+            recovered_header="$(sed -n '1,4p' <<<"$durable_commit")"
+            test "$recovered_header" = "$expected_recovered_header" || return 1
+            recorded_restart_name="$(sed -n '5s/^restart_name=//p' <<<"$durable_commit")"
+            recorded_restart_max="$(sed -n '6s/^restart_max=//p' <<<"$durable_commit")"
+            test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.system"}}')" = school-1-11 || return 1
+            test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.environment"}}')" = rollback || return 1
+            test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.release"}}')" = "$RELEASE_SHA" || return 1
+            test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.run"}}')" = "$RUN_ID" || return 1
+            test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.run-attempt"}}')" = "$RUN_ATTEMPT" || return 1
+            test "$(docker inspect "$production" --format '{{.State.Running}}')" = true || return 1
+            test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}')" = "$recorded_restart_name" || return 1
+            test "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')" = "$recorded_restart_max" || return 1
+            docker exec "$production" test ! -e /data/.school-deploy-read-only || return 1
+            recovered_health="$(curl --fail --silent --show-error --max-time 30 "$origin/api/health")" || return 1
+            grep -F '"status":"ok"' <<<"$recovered_health" >/dev/null || return 1
+            grep -F '"maintenance":false' <<<"$recovered_health" >/dev/null || return 1
           }
 
           if ! docker volume inspect "$rollback_volume" >/dev/null 2>&1; then
@@ -1054,7 +1350,7 @@ jobs:
               printf 'Committed deployment lost rollback evidence; production is gated\n' >&2
               exit 1
             else
-              printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=NOT_COMMITTED\n'
+              printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=NO_MUTATION_PROVEN\n'
               exit 0
             fi
           fi
@@ -1097,7 +1393,18 @@ jobs:
                   test "$(sha256sum "/rollback/$backup_file" | cut -d " " -f 1)" = "$backup_sha"
                   exit 3
                   ;;
-                phase=ROLLBACK_DISABLED|phase=RELEASE_VERIFIED)
+                phase=PRECOMMIT_RECOVERED|phase=ROLLBACK_DISABLED|phase=RELEASE_VERIFIED|phase=RELEASE_ACTIVE)
+                  test "$(wc -l < "$state")" -eq 6
+                  test "$(sed -n "2p" "$state")" = "run_id=$RUN_ID"
+                  test "$(sed -n "3p" "$state")" = "run_attempt=$RUN_ATTEMPT"
+                  test "$(sed -n "4p" "$state")" = "release_sha=$RELEASE_SHA"
+                  restart_name="$(sed -n "5s/^restart_name=//p" "$state")"
+                  restart_max="$(sed -n "6s/^restart_max=//p" "$state")"
+                  case "$restart_name" in always|unless-stopped|on-failure) ;; *) exit 4 ;; esac
+                  printf "%s\n" "$restart_max" | grep -Eq "^[0-9]+$"
+                  cat "$state"
+                  ;;
+                phase=PRECOMMIT_STARTED)
                   test "$(wc -l < "$state")" -eq 4
                   test "$(sed -n "2p" "$state")" = "run_id=$RUN_ID"
                   test "$(sed -n "3p" "$state")" = "run_attempt=$RUN_ATTEMPT"
@@ -1110,23 +1417,46 @@ jobs:
           durable_rc=$?
           set -e
           if [ "$durable_rc" -eq 3 ]; then
-            if [ "$COMMIT_OBSERVED" = true ]; then
-              install_gate
-              verify_gate_file
-              printf 'Commit proof contradicts ROLLBACK_READY; production is gated\n' >&2
-              exit 1
-            else
-              printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=NOT_COMMITTED\n'
-              exit 0
-            fi
+            install_gate
+            verify_gate_file
+            printf 'ROLLBACK_READY without proven recovery; production is gated\n' >&2
+            exit 1
+          fi
+          expected_started="$(printf 'phase=PRECOMMIT_STARTED\nrun_id=%s\nrun_attempt=%s\nrelease_sha=%s' "$RUN_ID" "$RUN_ATTEMPT" "$RELEASE_SHA")"
+          expected_recovered_header="$(printf 'phase=PRECOMMIT_RECOVERED\nrun_id=%s\nrun_attempt=%s\nrelease_sha=%s' "$RUN_ID" "$RUN_ATTEMPT" "$RELEASE_SHA")"
+          durable_phase="$(sed -n '1p' <<<"$durable_commit")"
+          if [ "$durable_rc" -eq 0 ] &&
+            [ "$durable_phase" = phase=PRECOMMIT_RECOVERED ] &&
+            [ "$COMMIT_OBSERVED" = false ] &&
+            verify_precommit_recovered_live; then
+            printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=PRECOMMIT_RECOVERY_PROVEN\n'
+            exit 0
           fi
           install_gate
-          test "$durable_rc" -eq 0
-          expected_disabled="$(printf 'phase=ROLLBACK_DISABLED\nrun_id=%s\nrun_attempt=%s\nrelease_sha=%s' "$RUN_ID" "$RUN_ATTEMPT" "$RELEASE_SHA")"
-          expected_released="$(printf 'phase=RELEASE_VERIFIED\nrun_id=%s\nrun_attempt=%s\nrelease_sha=%s' "$RUN_ID" "$RUN_ATTEMPT" "$RELEASE_SHA")"
+          if [ "$durable_rc" -ne 0 ]; then
+            verify_gate_file
+            printf 'Rollback state is unreadable; production is gated\n' >&2
+            exit 1
+          fi
+          if [ "$durable_phase" = phase=PRECOMMIT_RECOVERED ]; then
+            verify_gate_file
+            printf 'Recovered state contradicts live or commit evidence; production is gated\n' >&2
+            exit 1
+          fi
           case "$durable_commit" in
-            "$expected_disabled"|"$expected_released") ;;
-            *) exit 1 ;;
+            "$expected_started")
+              verify_gate_file
+              printf 'Pre-commit state is incomplete or contradicts commit evidence; production is gated\n' >&2
+              exit 1
+              ;;
+          esac
+          case "$durable_phase" in
+            phase=ROLLBACK_DISABLED|phase=RELEASE_VERIFIED|phase=RELEASE_ACTIVE) ;;
+            *)
+              verify_gate_file
+              printf 'Unexpected rollback state; production is gated\n' >&2
+              exit 1
+              ;;
           esac
           test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.system"}}')" = school-1-11
           test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.environment"}}')" = rollback
@@ -1191,6 +1521,7 @@ jobs:
           CONFIGURE_OUTCOME: ${{ steps.configure_ssh.outcome }}
           DEPLOY_OUTCOME: ${{ steps.deploy_school.outcome }}
           PUBLIC_OUTCOME: ${{ steps.verify_public.outcome }}
+          ACTIVATION_OUTCOME: ${{ steps.activate_release.outcome }}
           REGATE_OUTCOME: ${{ steps.regate_public_failure.outcome }}
         run: |
           set -Eeuo pipefail
@@ -1201,7 +1532,8 @@ jobs:
             printf -- '- Immutable release: `%s`\n' "$RELEASE_SHA"
             printf -- '- Protected SSH configuration: `%s`\n' "$CONFIGURE_OUTCOME"
             printf -- '- Release deployment: `%s`\n' "$DEPLOY_OUTCOME"
-            printf -- '- Public verification: `%s`\n\n' "$PUBLIC_OUTCOME"
+            printf -- '- Public verification: `%s`\n' "$PUBLIC_OUTCOME"
+            printf -- '- Restart activation: `%s`\n\n' "$ACTIVATION_OUTCOME"
             printf -- '- Failure re-gate: `%s`\n\n' "$REGATE_OUTCOME"
             printf 'Sanitized deployment markers:\n\n```text\n'
             if [ -f "$log_file" ]; then
@@ -1231,8 +1563,10 @@ jobs:
           CONFIGURE_OUTCOME: ${{ steps.configure_ssh.outcome }}
           DEPLOY_OUTCOME: ${{ steps.deploy_school.outcome }}
           PUBLIC_OUTCOME: ${{ steps.verify_public.outcome }}
+          ACTIVATION_OUTCOME: ${{ steps.activate_release.outcome }}
         run: |
           set -Eeuo pipefail
           test "$CONFIGURE_OUTCOME" = success
           test "$DEPLOY_OUTCOME" = success
           test "$PUBLIC_OUTCOME" = success
+          test "$ACTIVATION_OUTCOME" = success

@@ -483,6 +483,34 @@ restore_restart_policy() {
   test "$(docker inspect "$name" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')" = "$restart_max" || return 1
 }
 
+record_precommit_recovery() {
+  docker run --rm \
+    --network none \
+    --read-only \
+    --user 0:0 \
+    --security-opt no-new-privileges:true \
+    --volume "$rollback_volume:/rollback" \
+    --env RUN_ID="$RUN_ID" \
+    --env RUN_ATTEMPT="$RUN_ATTEMPT" \
+    --env RELEASE_SHA="$RELEASE_SHA" \
+    --env RESTART_NAME="$restart_name" \
+    --env RESTART_MAX="$restart_max" \
+    --entrypoint /bin/sh "$image_id" -c '
+      set -eu
+      {
+        printf "phase=PRECOMMIT_RECOVERED\n"
+        printf "run_id=%s\n" "$RUN_ID"
+        printf "run_attempt=%s\n" "$RUN_ATTEMPT"
+        printf "release_sha=%s\n" "$RELEASE_SHA"
+        printf "restart_name=%s\n" "$RESTART_NAME"
+        printf "restart_max=%s\n" "$RESTART_MAX"
+      } > /rollback/state.tmp
+      chmod 0400 /rollback/state.tmp
+      mv -f /rollback/state.tmp /rollback/state
+      sync
+    ' || return 1
+}
+
 restore_database_snapshot() {
   test "$rollback_snapshot_ready" -eq 1 || return 1
   local proof
@@ -558,11 +586,6 @@ recover_precommit() {
       recovery_failed=1
       return 1
     }
-    restore_restart_policy "$production" || {
-      recovery_failed=1
-      return 1
-    }
-    restart_suppressed=0
     wait_container_health "$production" || {
       recovery_failed=1
       return 1
@@ -571,6 +594,15 @@ recover_precommit() {
       recovery_failed=1
       return 1
     }
+    record_precommit_recovery || {
+      recovery_failed=1
+      return 1
+    }
+    restore_restart_policy "$production" || {
+      recovery_failed=1
+      return 1
+    }
+    restart_suppressed=0
     printf 'SCHOOL_STANDALONE_ROLLBACK=ORIGINAL_RESTARTED\n' >&2
     return 0
   fi
@@ -636,11 +668,6 @@ recover_precommit() {
         return 1
       }
     fi
-    restore_restart_policy "$production" || {
-      recovery_failed=1
-      return 1
-    }
-    restart_suppressed=0
     wait_container_health "$production" || {
       recovery_failed=1
       return 1
@@ -649,6 +676,15 @@ recover_precommit() {
       recovery_failed=1
       return 1
     }
+    record_precommit_recovery || {
+      recovery_failed=1
+      return 1
+    }
+    restore_restart_policy "$production" || {
+      recovery_failed=1
+      return 1
+    }
+    restart_suppressed=0
   else
     recovery_failed=1
     return 1
@@ -659,13 +695,22 @@ recover_precommit() {
 recover_postcommit() {
   set +e
   printf 'SCHOOL_STANDALONE_ROLL_FORWARD=REQUIRED\n' >&2
+  local restart_disabled=0
+  local gate_verified=0
+  if docker inspect "$production" >/dev/null 2>&1 &&
+    docker update --restart no "$production" >/dev/null 2>&1 &&
+    [ "$(docker inspect "$production" --format '{{.HostConfig.RestartPolicy.Name}}' 2>/dev/null)" = no ]; then
+    restart_disabled=1
+  fi
   if [ -n "$data_volume" ] &&
     docker inspect "$production" >/dev/null 2>&1 &&
     create_gate "$data_volume" >/dev/null 2>&1 &&
     docker exec "$production" test -f "$gate_path" &&
     verify_internal_gate "$production" >/dev/null 2>&1 &&
-    verify_public_gate 5 10 >/dev/null 2>&1 &&
-    restore_restart_policy "$production" >/dev/null 2>&1; then
+    verify_public_gate 5 10 >/dev/null 2>&1; then
+    gate_verified=1
+  fi
+  if [ "$restart_disabled" -eq 1 ] && [ "$gate_verified" -eq 1 ]; then
     printf 'SCHOOL_STANDALONE_ROLL_FORWARD_GATE=PASS\n' >&2
   else
     printf 'SCHOOL_STANDALONE_ROLL_FORWARD_GATE=FAILED_MANUAL_RECOVERY_REQUIRED\n' >&2
@@ -690,7 +735,9 @@ cleanup() {
   rm -f -- "$env_file" "$label_file"
   if [ "$success" -ne 1 ]; then
     if [ "$rollback_allowed" -eq 1 ] && { [ "$restart_suppressed" -eq 1 ] || [ "$rollback_named" -eq 1 ] || [ "$candidate_created" -eq 1 ]; }; then
-      recover_precommit || true
+      if recover_precommit; then
+        printf 'SCHOOL_STANDALONE_PRECOMMIT_RECOVERY=PROVEN\n' >&2
+      fi
     elif [ "$postcommit" -eq 1 ]; then
       recover_postcommit
     fi
@@ -1033,6 +1080,42 @@ test "$(docker inspect "$production" --format '{{.State.StartedAt}}')" = "$old_s
 test "$(docker inspect "$production" --format '{{.State.Health.Status}}')" = healthy
 test "$(running_volume_consumers "$data_volume")" = 1
 
+docker volume create \
+  --label school.system=school-1-11 \
+  --label school.environment=rollback \
+  --label school.release="$RELEASE_SHA" \
+  --label school.run="$RUN_ID" \
+  --label school.run-attempt="$RUN_ATTEMPT" \
+  "$rollback_volume" >/dev/null
+docker run --rm --network none --read-only --user 0:0 \
+  --volume "$rollback_volume:/rollback" \
+  --env RUN_ID="$RUN_ID" \
+  --env RUN_ATTEMPT="$RUN_ATTEMPT" \
+  --env RELEASE_SHA="$RELEASE_SHA" \
+  --entrypoint /bin/sh "$image_id" -c '
+    set -eu
+    {
+      printf "phase=PRECOMMIT_STARTED\n"
+      printf "run_id=%s\n" "$RUN_ID"
+      printf "run_attempt=%s\n" "$RUN_ATTEMPT"
+      printf "release_sha=%s\n" "$RELEASE_SHA"
+    } > /rollback/state.tmp
+    chmod 0400 /rollback/state.tmp
+    mv -f /rollback/state.tmp /rollback/state
+    sync
+  '
+test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.system"}}')" = school-1-11
+test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.environment"}}')" = rollback
+test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.release"}}')" = "$RELEASE_SHA"
+test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.run"}}')" = "$RUN_ID"
+test "$(docker volume inspect "$rollback_volume" --format '{{index .Labels "school.run-attempt"}}')" = "$RUN_ATTEMPT"
+precommit_started="$(docker run --rm --network none --read-only --user 0:0 \
+  --volume "$rollback_volume:/rollback:ro" \
+  --entrypoint /bin/sh "$image_id" -c 'cat /rollback/state')"
+expected_precommit_started="$(printf 'phase=PRECOMMIT_STARTED\nrun_id=%s\nrun_attempt=%s\nrelease_sha=%s' "$RUN_ID" "$RUN_ATTEMPT" "$RELEASE_SHA")"
+test "$precommit_started" = "$expected_precommit_started"
+printf 'SCHOOL_STANDALONE_PRECOMMIT=ARMED\n'
+
 restart_suppressed=1
 docker update --restart no "$production" >/dev/null
 docker stop --time 45 "$production" >/dev/null
@@ -1041,7 +1124,6 @@ test "$(running_volume_consumers "$data_volume")" = 0
 create_gate "$data_volume"
 printf 'SCHOOL_STANDALONE_WRITES=QUIESCED\n'
 
-docker volume create   --label school.system=school-1-11   --label school.environment=rollback   --label school.release="$RELEASE_SHA"   --label school.run="$RUN_ID"   --label school.run-attempt="$RUN_ATTEMPT"   "$rollback_volume" >/dev/null
 final_backup_path="$(docker run --rm   --network none   --user 0:0   --security-opt no-new-privileges:true   --volume "$data_volume:/data"   --volume "$rollback_volume:/backups"   --env DATABASE_PATH=/data/school-1-11.sqlite   --env BACKUP_DIR=/backups   --entrypoint node "$image_id" scripts/backup-db.mjs | tail -n1)"
 case "$final_backup_path" in /backups/school-1-11-*.sqlite) ;; *) printf 'Unexpected final backup path\n' >&2; exit 1 ;; esac
 final_backup_file="${final_backup_path#/backups/}"
@@ -1136,13 +1218,15 @@ trap 'pending_signal=130' INT
 trap 'pending_signal=143' TERM
 postcommit=1
 rollback_allowed=0
-docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volume:/rollback"   --env RUN_ID="$RUN_ID"   --env RUN_ATTEMPT="$RUN_ATTEMPT"   --env RELEASE_SHA="$RELEASE_SHA"   --entrypoint /bin/sh "$image_id" -c '
+docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volume:/rollback"   --env RUN_ID="$RUN_ID"   --env RUN_ATTEMPT="$RUN_ATTEMPT"   --env RELEASE_SHA="$RELEASE_SHA"   --env RESTART_NAME="$restart_name"   --env RESTART_MAX="$restart_max"   --entrypoint /bin/sh "$image_id" -c '
     set -eu
     {
       printf "phase=ROLLBACK_DISABLED\n"
       printf "run_id=%s\n" "$RUN_ID"
       printf "run_attempt=%s\n" "$RUN_ATTEMPT"
       printf "release_sha=%s\n" "$RELEASE_SHA"
+      printf "restart_name=%s\n" "$RESTART_NAME"
+      printf "restart_max=%s\n" "$RESTART_MAX"
     } > /rollback/state.tmp
     chmod 0400 /rollback/state.tmp
     mv -f /rollback/state.tmp /rollback/state
@@ -1164,25 +1248,26 @@ if [ -e "$JOB_DIR/cancel-request" ]; then
 fi
 printf 'SCHOOL_STANDALONE_COMMIT=ROLLBACK_DISABLED\n'
 
-clear_gate "$data_volume"
 if [ -e "$JOB_DIR/cancel-request" ]; then
   exit 143
 fi
-verify_application_contracts "$production" "$SCHOOL_ORIGIN"
-verify_public_release_contracts
-docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volume:/rollback"   --env RUN_ID="$RUN_ID"   --env RUN_ATTEMPT="$RUN_ATTEMPT"   --env RELEASE_SHA="$RELEASE_SHA"   --entrypoint /bin/sh "$image_id" -c '
+verify_internal_gate "$production"
+verify_public_gate
+printf 'SCHOOL_STANDALONE_EXTERNAL_VERIFICATION_GATE=HELD\n'
+docker run --rm --network none --read-only --user 0:0   --volume "$rollback_volume:/rollback"   --env RUN_ID="$RUN_ID"   --env RUN_ATTEMPT="$RUN_ATTEMPT"   --env RELEASE_SHA="$RELEASE_SHA"   --env RESTART_NAME="$restart_name"   --env RESTART_MAX="$restart_max"   --entrypoint /bin/sh "$image_id" -c '
     set -eu
     {
       printf "phase=RELEASE_VERIFIED\n"
       printf "run_id=%s\n" "$RUN_ID"
       printf "run_attempt=%s\n" "$RUN_ATTEMPT"
       printf "release_sha=%s\n" "$RELEASE_SHA"
+      printf "restart_name=%s\n" "$RESTART_NAME"
+      printf "restart_max=%s\n" "$RESTART_MAX"
     } > /rollback/state.tmp
     chmod 0400 /rollback/state.tmp
     mv -f /rollback/state.tmp /rollback/state
     sync
   '
-restore_restart_policy "$production"
 printf 'SCHOOL_STANDALONE_RELEASE=VERIFIED\n'
 success=1
 postcommit=0
