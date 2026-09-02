@@ -194,7 +194,7 @@ test("release importer runs from an isolated runtime without ExcelJS", (t) => {
   verificationDb.close();
 });
 
-test("offline image overlays the ExcelJS-free release importer", () => {
+test("offline image overlays the dependency-free release importers", () => {
   const dockerfile = readFileSync(
     join(repositoryRoot, "deploy", "Dockerfile.offline"),
     "utf8",
@@ -205,15 +205,18 @@ test("offline image overlays the ExcelJS-free release importer", () => {
   const helperOverlay = dockerfile.indexOf(
     "COPY --chown=node:node lib/curriculum-allocation.mjs /school/lib/curriculum-allocation.mjs",
   );
-  const importerOverlay = dockerfile.indexOf(
+  const scheduleImporterOverlay = dockerfile.indexOf(
+    "COPY --chown=node:node scripts/import-school-schedule.mjs /school/scripts/import-school-schedule.mjs",
+  );
+  const curriculumImporterOverlay = dockerfile.indexOf(
     "COPY --chown=node:node scripts/import-school-curriculum.mjs /school/scripts/import-school-curriculum.mjs",
   );
   const runtimeUser = dockerfile.indexOf("USER node");
   assert.ok(archiveOverlay >= 0);
   assert.ok(helperOverlay > archiveOverlay);
-  assert.ok(importerOverlay > archiveOverlay);
-  assert.ok(runtimeUser > helperOverlay);
-  assert.ok(runtimeUser > importerOverlay);
+  assert.ok(scheduleImporterOverlay > helperOverlay);
+  assert.ok(curriculumImporterOverlay > scheduleImporterOverlay);
+  assert.ok(runtimeUser > curriculumImporterOverlay);
 });
 
 test("approved 170-hour math KTP is imported once across the full 2026/27 calendar", (t) => {
