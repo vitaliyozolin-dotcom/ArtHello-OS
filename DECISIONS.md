@@ -301,3 +301,14 @@ JWT/API-секрет Точки вводит сам владелец в зама
 Recovery не меняет принятые продуктовые решения и данные приложения. Он заменяет непрозрачный pipe `gzip | docker load >/dev/null` на штатный `docker image load --input`, сохраняет вывод Docker, добавляет явные маркеры каждого provenance/image шага и до импорта публикует только несекретную диагностику версии Docker и свободного места. Автоматическая широкая очистка образов, контейнеров, build cache или volumes запрещена. Любая ошибка снова завершает процесс до работы с production-данными.
 
 Одноразовое исключение закреплено только за PR `#311` из `vitaliyozolin-dotcom/ArtHello-OS:codex/production-loader-recovery-20260902` и одновременно проверяется environment workflow и hosted policy-gate. Точный репозиторий, recovery-ветка, PR, actor/merger, первый attempt Verify, успешные Quality/Verify, текущий подписанный main SHA, protected Environment `production-ru`, clone preflight, backup-first cutover и автоматический rollback остаются обязательными. Исключение прекращается после первого успешного deployment или первой неустранимой ошибки после начала cutover.
+
+## D-045 — Между Docker image stores сверяется переносимый runtime fingerprint
+
+Дата: 2026-09-02  
+Статус: принято владельцем в рамках явного поручения завершить production-релиз; одноразовый recovery PR `#312` закреплён
+
+Recovery-run D-044 `33683416460` подтвердил digest и evidence артефакта, свободное место, успешный `docker image load` и точный загруженный tag, затем остановился до clone preflight и cutover только на равенстве `.Id`. Production Docker 29.1.3 с containerd image store и hosted builder могут представлять идентичный сохранённый образ разными видами ID (config, manifest или index digest), поэтому межхостовое равенство `.Id` не является переносимым доказательством.
+
+Hosted evidence теперь дополнительно содержит SHA-256 канонического runtime fingerprint: платформа, дата образа, значимые поля запуска из Config и полный упорядоченный список RootFS layer digests. После импорта production вычисляет тот же fingerprint через локальный `docker image inspect`; cutover разрешён только при точном совпадении fingerprint, revision/source-tree labels, непривилегированного User и уже проверенного SHA-256 архива. Hosted и production Image ID сохраняются в журнале только как диагностические представления. Ослаблять archive/evidence SHA, точный tag, PR/actor/main SHA, Quality/Verify, protected Environment, clone preflight, backup или rollback запрещено.
+
+Одноразовое исключение закреплено только за PR `#312` из `vitaliyozolin-dotcom/ArtHello-OS:codex/portable-image-fingerprint-recovery-20260902` и жёстко проверяется обоими workflow. Повтор старых run запрещён. Исключение прекращается после первого успешного deployment или первой неустранимой ошибки после начала cutover.
