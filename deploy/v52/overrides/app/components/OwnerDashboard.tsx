@@ -617,23 +617,21 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
   }
 
   function moveWidget(id: DashboardWidgetId, directionToMove: -1 | 1) {
-    updateLayout((current) => {
-      const index = current.findIndex((item) => item.id === id);
-      const nextIndex = index + directionToMove;
-      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
-      const next = [...current];
-      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
-      return next;
-    });
+    const index = customizableLayout.findIndex((item) => item.id === id);
+    const target = customizableLayout[index + directionToMove];
+    if (index < 0 || !target) return;
+    updateLayout((current) => reorderDashboardWidgets(current, id, target.id, directionToMove === -1 ? "before" : "after"));
   }
 
   function widgetDropPosition(event: ReactDragEvent<HTMLDivElement>, target: DashboardWidgetPreference): DashboardDropPosition {
     const bounds = event.currentTarget.getBoundingClientRect();
-    if (target.size === "full") return event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+    const gridWidth = event.currentTarget.parentElement?.getBoundingClientRect().width;
+    const fillsRow = gridWidth ? bounds.width >= gridWidth - 8 : target.size === "full";
+    if (fillsRow) return event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
     return event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
   }
 
-  function startWidgetDrag(event: ReactDragEvent<HTMLButtonElement>, id: DashboardWidgetId) {
+  function startWidgetDrag(event: ReactDragEvent<HTMLSpanElement>, id: DashboardWidgetId) {
     draggedWidgetRef.current = id;
     setDraggedWidgetId(id);
     setDropTarget(null);
@@ -660,8 +658,9 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
   }
 
   function dropWidget(event: ReactDragEvent<HTMLDivElement>, target: DashboardWidgetPreference) {
+    if (!editing || !draggedWidgetRef.current) return;
     event.preventDefault();
-    const activeId = draggedWidgetRef.current ?? event.dataTransfer.getData("text/plain");
+    const activeId = draggedWidgetRef.current;
     const dropPosition = widgetDropPosition(event, target);
     updateLayout((current) => reorderDashboardWidgets(current, activeId, target.id, dropPosition));
     finishWidgetDrag();
@@ -851,7 +850,7 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
             onDragOver={(event) => markWidgetDropTarget(event, widget)}
             onDrop={(event) => dropWidget(event, widget)}
           >
-          {editing ? <div className={styles.widgetBadge}><button className={styles.dragHandle} type="button" draggable={editing} onDragStart={(event) => startWidgetDrag(event, widget.id)} onDragEnd={finishWidgetDrag} aria-label={`Перетащить блок «${title}»`} title="Перетащить блок"><AppIcon name="menu" /><span>{title}</span></button><button type="button" onClick={() => changeWidget(widget.id, { visible: false })}>Скрыть</button></div> : null}
+          {editing ? <div className={styles.widgetBadge}><span className={styles.dragHandle} draggable={editing} onDragStart={(event) => startWidgetDrag(event, widget.id)} onDragEnd={finishWidgetDrag} title={`Перетащить блок «${title}»`}><AppIcon name="menu" /><span>{title}</span></span><button type="button" onClick={() => changeWidget(widget.id, { visible: false })}>Скрыть</button></div> : null}
           {renderWidget(widget)}
         </div>;
         })}
