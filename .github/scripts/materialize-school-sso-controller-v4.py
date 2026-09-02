@@ -4,19 +4,18 @@ from __future__ import annotations
 import base64
 import gzip
 import hashlib
+import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
 TARGET_BRANCH = "ops/fix-school-sso-controller-dockerignore-20260902"
-GENERATOR_PATH = Path(
-    ".github/workflows/materialize-school-sso-controller-v4-20260902.yml"
-)
-HELPER_PATH = Path(".github/scripts/materialize-school-sso-controller-v4.py")
 DEPLOY_WORKFLOW = Path(
     ".github/workflows/deploy-school-sso-origin-hotfix-production-20260902.yml"
 )
 PART_GLOB = ".github/scripts/school-staff-sso-workflow-controller-v3.sh.gz.b64.part-*"
+OUTPUT_ROOT = Path("generated-school-sso-controller")
 
 
 def run(*args: str, capture: bool = False) -> str:
@@ -154,29 +153,31 @@ EOF
     if "SCHOOL_SSO_CONTROLLER_DOCKER_CONTEXT=PASS" not in workflow:
         raise SystemExit("Deployment workflow regression marker is missing")
 
-    run("git", "rm", str(GENERATOR_PATH), str(HELPER_PATH))
-    run("git", "add", str(DEPLOY_WORKFLOW), *(str(part) for part in parts))
-    staged = set(
-        run("git", "diff", "--cached", "--name-only", capture=True).splitlines()
-    )
-    expected = {
-        str(GENERATOR_PATH),
-        str(HELPER_PATH),
-        str(DEPLOY_WORKFLOW),
-        *(str(part) for part in parts),
+    if OUTPUT_ROOT.exists():
+        shutil.rmtree(OUTPUT_ROOT)
+    scripts_dir = OUTPUT_ROOT / "scripts"
+    workflows_dir = OUTPUT_ROOT / "workflows"
+    scripts_dir.mkdir(parents=True)
+    workflows_dir.mkdir(parents=True)
+    for part in parts:
+        shutil.copy2(part, scripts_dir / part.name)
+    shutil.copy2(DEPLOY_WORKFLOW, workflows_dir / DEPLOY_WORKFLOW.name)
+    (OUTPUT_ROOT / "controller-v4.sh").write_text(after)
+    manifest = {
+        "controller_sha256": digest,
+        "controller_parts": [part.name for part in parts],
+        "deployment_workflow": DEPLOY_WORKFLOW.name,
+        "required_markers": list(required),
+        "standalone_data_exclusion": False,
     }
-    if staged != expected:
-        raise SystemExit(
-            "Unexpected staged paths:\n"
-            + "\n".join(sorted(staged ^ expected))
-        )
+    (OUTPUT_ROOT / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    )
 
-    run("git", "config", "user.name", "vitaliyozolin-dotcom")
-    run("git", "config", "user.email", "vitaliyozolin@gmail.com")
-    run("git", "commit", "-m", "Fix School SSO deployment controller Docker context")
-    run("git", "push", "origin", f"HEAD:{TARGET_BRANCH}")
     print(f"SCHOOL_SSO_CONTROLLER_SHA256={digest}")
+    print(f"SCHOOL_SSO_CONTROLLER_PARTS={len(parts)}")
     print("SCHOOL_SSO_CONTROLLER_REPACK=PASS")
+    print("SCHOOL_SSO_CONTROLLER_ARTIFACT=READY")
 
 
 if __name__ == "__main__":
