@@ -633,6 +633,22 @@ test("release schedule import preserves lessons outside source classes", (t) => 
   for (const subjectId of subjectIds)
     insertSubject.run(subjectId, subjectId, subjectId);
   db.prepare(
+    `INSERT INTO users
+      (id, email, display_name, role, status, profile_status)
+     VALUES (
+       'teacher-archived-sentinel', 'archived@example.test',
+       'Архивный преподаватель', 'teacher', 'archived', 'confirmed'
+     )`,
+  ).run();
+  db.prepare(
+    `INSERT INTO teacher_assignments
+      (id, teacher_user_id, class_name, subject_id, status)
+     VALUES (
+       'assignment-archived-sentinel', 'teacher-archived-sentinel', ?, ?,
+       'confirmed'
+     )`,
+  ).run(payload.lessons[0].className, payload.lessons[0].subjectId);
+  db.prepare(
     `INSERT INTO lessons
       (id, class_name, weekday, starts_at, ends_at, subject_id,
         teacher_user_id, room, status, note)
@@ -669,6 +685,13 @@ test("release schedule import preserves lessons outside source classes", (t) => 
   assert.match(result.stdout, /SCHOOL_SCHEDULE_IMPORT=SUCCESS/);
 
   const verificationDb = new DatabaseSync(databasePath, { readOnly: true });
+  assert.equal(
+    verificationDb.prepare(
+      `SELECT teacher_user_id AS teacherUserId
+       FROM lessons WHERE id = ?`,
+    ).get(payload.lessons[0].id).teacherUserId,
+    null,
+  );
   const after = plainRows(
     verificationDb.prepare(
       `SELECT id, class_name AS className, weekday, starts_at AS startsAt,
