@@ -282,6 +282,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
           test -s deploy/v52/Dockerfile
+          test -s deploy/v52/maintenance/image-runtime-fingerprint.jq
+          jq -n -f deploy/v52/maintenance/image-runtime-fingerprint.jq >/dev/null
           python3 -m py_compile deploy/v52/maintenance/production-data-inventory.py
           grep -F 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'ARTHELLO_PUBLIC_ORIGIN' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
@@ -341,6 +343,7 @@ jobs:
               .imageArchiveSha256 == $archive and
               .runnerTrust == "github-hosted-ephemeral" and
               .productionCapability == false and
+              (.runtimeFingerprintSha256 | test("^[a-f0-9]{64}$")) and
               (.imageId | test("^sha256:[a-f0-9]{64}$"))
             ' "$evidence" >/dev/null
 
