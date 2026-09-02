@@ -20,13 +20,17 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  CONTROLS_PR: '300'
+  CONTROLS_BASE_SHA: c3182d598fd7a7a00a5388003754293219e41096
   RELEASE_SHA: f41dfb5de4eeeed4ed26d94009a18388728f42b7
   RELEASE_TREE: 2ecda1a0a872caab7aadbc303c152c1207d3030a
   RELEASE_PR: '303'
   VALIDATED_SHA: 9da48a1d6eb12a257442d72808e770c739b7fcc4
   VALIDATION_RUN_ID: '33592942510'
   VALIDATION_WORKFLOW_ID: '346579718'
-  CUTOVER_SHA256: eddbfb0e44f6c1f0ae3f2eec468538b9b5cb6f72565dc68f56b1b929e0bf14e2
+  VALIDATION_JOB_ID: '100130562121'
+  OFFLINE_BASE_REF: 'node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e'
+  CUTOVER_SHA256: c752965e3f4b41662718690850573aec5e5a6d81dcf164d146af8040337ad571
   VERIFY_SHA256: 9f2839de7fff8e573c3b7a44262eb90fd6bfe79c1fd41d75ed747ca0f75d4727
   SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
   ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
@@ -73,6 +77,50 @@ jobs:
           ' <<<"$environment_json" >/dev/null
           printf 'SCHOOL_PRODUCTION_ENVIRONMENT_REVIEWER=VERIFIED\n'
 
+      - name: Verify immutable deployment controls
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY"
+          headers=(
+            --header "Authorization: Bearer $GH_TOKEN"
+            --header "Accept: application/vnd.github+json"
+            --header "X-GitHub-Api-Version: 2022-11-28"
+          )
+          controls_pr_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/pulls/$CONTROLS_PR")"
+          jq -e \
+            --argjson controls_pr "$CONTROLS_PR" \
+            --arg controls_base_sha "$CONTROLS_BASE_SHA" \
+            --arg workflow_sha "$GITHUB_SHA" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            '.number == $controls_pr and
+             .state == "closed" and
+             .merged == true and
+             .base.ref == "main" and
+             .base.sha == $controls_base_sha and
+             .head.ref == "codex/school-curriculum-production-cutover-20260902" and
+             .head.repo.full_name == $repository and
+             .merge_commit_sha == $workflow_sha and
+             .user.login == "vitaliyozolin-dotcom" and
+             .merged_by.login == "vitaliyozolin-dotcom"' <<<"$controls_pr_json" >/dev/null
+
+          controls_head_sha="$(jq -r '.head.sha' <<<"$controls_pr_json")"
+          [[ "$controls_head_sha" =~ ^[a-f0-9]{40}$ ]]
+          workflow_commit_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/commits/$GITHUB_SHA")"
+          controls_head_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/commits/$controls_head_sha")"
+          jq -e \
+            --arg workflow_sha "$GITHUB_SHA" \
+            --arg controls_base_sha "$CONTROLS_BASE_SHA" \
+            '.sha == $workflow_sha and
+             .commit.verification.verified == true and
+             .author.login == "vitaliyozolin-dotcom" and
+             (.parents | length) == 1 and
+             .parents[0].sha == $controls_base_sha' <<<"$workflow_commit_json" >/dev/null
+          test "$(jq -r '.commit.tree.sha' <<<"$workflow_commit_json")" = \
+            "$(jq -r '.commit.tree.sha' <<<"$controls_head_json")"
+          printf 'SCHOOL_DEPLOYMENT_CONTROLS=VERIFIED\n'
+
       - name: Verify accepted release provenance
         env:
           GH_TOKEN: ${{ github.token }}
@@ -108,8 +156,24 @@ jobs:
 
           jobs_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/actions/runs/$VALIDATION_RUN_ID/jobs?per_page=100")"
           jq -e \
-            '[.jobs[] | select(.name == "validate" and .status == "completed" and .conclusion == "success")] | length == 1' \
+            --argjson validation_job_id "$VALIDATION_JOB_ID" \
+            --argjson validation_run_id "$VALIDATION_RUN_ID" \
+            '[.jobs[] | select(
+              .id == $validation_job_id and
+              .run_id == $validation_run_id and
+              .name == "validate" and
+              .status == "completed" and
+              .conclusion == "success")] | length == 1' \
             <<<"$jobs_json" >/dev/null
+
+          validation_log="$RUNNER_TEMP/school-accepted-validation.log"
+          curl --fail-with-body --silent --show-error --location "${headers[@]}" \
+            --output "$validation_log" \
+            "$api/actions/jobs/$VALIDATION_JOB_ID/logs"
+          test -s "$validation_log"
+          base_digest="${OFFLINE_BASE_REF##*@}"
+          [[ "$base_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          grep -aF "Digest: $base_digest" "$validation_log" >/dev/null
 
           pr_json="$(curl --fail-with-body --silent --show-error "${headers[@]}" "$api/pulls/$RELEASE_PR")"
           jq -e \
@@ -183,6 +247,11 @@ jobs:
           test "$(git -C school-source rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(git -C school-source rev-parse HEAD^{tree})" = "$RELEASE_TREE"
           test -z "$(git -C school-source status --porcelain --untracked-files=all)"
+          test "$(sha256sum school-source/deploy/Dockerfile.offline | cut -d ' ' -f 1)" = 0a71ac38c94bbf66094ced04028da32397433cb19663c9dfb935a117933121a4
+          test "$(sha256sum school-source/scripts/import-school-schedule.mjs | cut -d ' ' -f 1)" = 5fb94f8550c24ceb6a642ea0ad5b0d107b1b52fc3f25df11c3ad1cdad1b8c5fc
+          test "$(grep -Fxc 'FROM node:24-bookworm-slim AS dependencies' school-source/Dockerfile)" -eq 1
+          test "$(grep -Fxc 'FROM node:24-bookworm-slim AS builder' school-source/Dockerfile)" -eq 1
+          test "$(grep -Fxc 'FROM node:24-bookworm-slim AS runner' school-source/Dockerfile)" -eq 1
           printf 'SCHOOL_RELEASE_SOURCE=VERIFIED\n'
 
       - name: Package exact School source
@@ -305,7 +374,7 @@ jobs:
               -o Ciphers=aes128-ctr \
               -o MACs=hmac-sha2-256 \
               "$DEPLOY_USER@$DEPLOY_HOST" \
-              "set -Eeuo pipefail; test '$transport_probe' = '$transport_parent/probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'; if test ! -e '$transport_parent'; then mkdir -m 0700 '$transport_parent' 2>/dev/null || true; fi; test -d '$transport_parent'; test ! -L '$transport_parent'; test \"\$(stat -c %u '$transport_parent')\" = \"\$(id -u)\"; test \"\$(stat -c %a '$transport_parent')\" = 700; test ! -e '$transport_probe'; mkdir -m 0700 '$transport_probe'; trap 'rmdir -- $transport_probe >/dev/null 2>&1 || true' EXIT; command -v base64 >/dev/null; command -v setsid >/dev/null; command -v timeout >/dev/null; command -v docker >/dev/null; command -v python3 >/dev/null; command -v flock >/dev/null; docker inspect school-1-11 >/dev/null; docker image inspect arthello-os-api:local >/dev/null" \
+              "set -Eeuo pipefail; test '$transport_probe' = '$transport_parent/probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'; if test ! -e '$transport_parent'; then mkdir -m 0700 '$transport_parent' 2>/dev/null || true; fi; test -d '$transport_parent'; test ! -L '$transport_parent'; test \"\$(stat -c %u '$transport_parent')\" = \"\$(id -u)\"; test \"\$(stat -c %a '$transport_parent')\" = 700; test ! -e '$transport_probe'; mkdir -m 0700 '$transport_probe'; trap 'rmdir -- $transport_probe >/dev/null 2>&1 || true' EXIT; command -v base64 >/dev/null; command -v setsid >/dev/null; command -v timeout >/dev/null; command -v docker >/dev/null; command -v python3 >/dev/null; command -v flock >/dev/null; docker info >/dev/null; docker inspect school-1-11 >/dev/null" \
               </dev/null >/dev/null
           printf 'key_path=%s\n' "$ssh_dir/id_ed25519" >> "$GITHUB_OUTPUT"
           printf 'known_hosts_path=%s\n' "$ssh_dir/known_hosts" >> "$GITHUB_OUTPUT"
@@ -511,12 +580,49 @@ jobs:
 
           remote_job_active=0
           remote_job_complete=0
+          commit_detected=0
+          probe_remote_commit() {
+            local max_attempts=${1:-6}
+            local probe_timeout=${2:-180}
+            local probe_kill_after=${3:-5}
+            local commit_state=""
+            local probe_rc=0
+            if [ "$commit_detected" -eq 1 ]; then
+              return 0
+            fi
+            for probe_attempt in $(seq 1 "$max_attempts"); do
+              if commit_state="$(
+                timeout --signal=TERM --kill-after="${probe_kill_after}s" "${probe_timeout}s" \
+                  ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                    "set -Eeuo pipefail; if test -f '$job_dir/commit-state'; then test ! -L '$job_dir/commit-state'; test \"\$(stat -c %u '$job_dir/commit-state')\" = \"\$(id -u)\"; test \"\$(stat -c %a '$job_dir/commit-state')\" = 400; cat '$job_dir/commit-state'; fi" \
+                    </dev/null 2>/dev/null
+              )"; then
+                probe_rc=0
+              else
+                probe_rc=$?
+              fi
+              if [ "$probe_rc" -eq 0 ] &&
+                [ "$commit_state" = "committed:$RELEASE_SHA:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" ]; then
+                printf 'committed=true\n' >> "$GITHUB_OUTPUT" || return 1
+                printf 'SCHOOL_REMOTE_COMMIT_MARKER=VERIFIED\n' | tee -a "$log_file" || return 1
+                commit_detected=1
+                return 0
+              fi
+              commit_state=""
+              if [ "$probe_attempt" -lt "$max_attempts" ]; then
+                sleep 2
+              fi
+            done
+            return 1
+          }
+
           reconcile_remote_job() {
             local exit_code=$?
-            trap - EXIT INT TERM
+            trap - EXIT
+            trap '' HUP INT TERM
             if [ "$remote_job_active" -eq 1 ] && [ "$remote_job_complete" -ne 1 ]; then
               set +e
-              timeout --signal=TERM --kill-after=5s 180s \
+              timeout --signal=TERM --kill-after=1s 2s \
                 ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
                   "printf '%s' '$cancel_payload' | base64 -d | env JOB_DIR='$job_dir' LAUNCH_NONCE='$launch_nonce' bash" \
                   </dev/null >/dev/null 2>&1
@@ -525,6 +631,27 @@ jobs:
                 printf 'SCHOOL_REMOTE_CANCEL=REQUESTED\n' | tee -a "$log_file"
               else
                 printf 'SCHOOL_REMOTE_CANCEL=NOT_ACTIVE_OR_UNREACHABLE\n' | tee -a "$log_file"
+              fi
+              probe_remote_commit 1 2 1 || true
+              terminal_status=0
+              for reconcile_attempt in $(seq 1 90); do
+                reconciled_status="$(
+                  timeout --signal=TERM --kill-after=2s 15s \
+                    ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                      "test -f '$job_dir/status' && cat '$job_dir/status' || true" \
+                      </dev/null 2>/dev/null
+                )"
+                case "$reconciled_status" in
+                  success:*:"$launch_nonce"|failed:*:"$launch_nonce")
+                    terminal_status=1
+                    break
+                    ;;
+                esac
+                sleep 2
+              done
+              probe_remote_commit || true
+              if [ "$terminal_status" -eq 1 ]; then
+                remote_job_complete=1
               fi
             fi
             exit "$exit_code"
@@ -558,7 +685,7 @@ jobs:
           remote_job_active=1
           timeout --signal=TERM --kill-after=5s 240s \
             ssh -n "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "set -Eeuo pipefail; test -d '$job_dir'; test \"\$(stat -c %u '$job_dir')\" = \"\$(id -u)\"; test \"\$(stat -c %a '$job_dir')\" = 700; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/run.sh'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$RELEASE_SHA' RUN_ID='$GITHUB_RUN_ID' RUN_ATTEMPT='$GITHUB_RUN_ATTEMPT' WORKFLOW_SHA='$GITHUB_SHA' RELEASE_SHA='$RELEASE_SHA' RELEASE_TREE='$RELEASE_TREE' SOURCE_ARCHIVE='$job_dir/school-release.tar.gz' SOURCE_SHA256='$SOURCE_SHA256' VERIFY_SCRIPT='$job_dir/verify-school-release.mjs' VERIFY_SHA256='$VERIFY_SHA256' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' ARTHELLO_ORIGIN='$ARTHELLO_ORIGIN' JOB_DIR='$job_dir' LAUNCH_NONCE='$launch_nonce' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null &" \
+              "set -Eeuo pipefail; test -d '$job_dir'; test \"\$(stat -c %u '$job_dir')\" = \"\$(id -u)\"; test \"\$(stat -c %a '$job_dir')\" = 700; printf '%s' '$runner_payload' | base64 -d > '$job_dir/run.sh'; chmod 0500 '$job_dir/run.sh'; : > '$job_dir/deploy.log'; nohup setsid env DELIVERY_REF='$RELEASE_SHA' RUN_ID='$GITHUB_RUN_ID' RUN_ATTEMPT='$GITHUB_RUN_ATTEMPT' WORKFLOW_SHA='$GITHUB_SHA' RELEASE_SHA='$RELEASE_SHA' RELEASE_TREE='$RELEASE_TREE' SOURCE_ARCHIVE='$job_dir/school-release.tar.gz' SOURCE_SHA256='$SOURCE_SHA256' VERIFY_SCRIPT='$job_dir/verify-school-release.mjs' VERIFY_SHA256='$VERIFY_SHA256' OFFLINE_BASE_REF='$OFFLINE_BASE_REF' SCHOOL_ORIGIN='$SCHOOL_ORIGIN' ARTHELLO_ORIGIN='$ARTHELLO_ORIGIN' JOB_DIR='$job_dir' LAUNCH_NONCE='$launch_nonce' bash '$job_dir/run.sh' > '$job_dir/deploy.log' 2>&1 < /dev/null &" \
               </dev/null >/dev/null 2>&1 || launch_rc=$?
           launch_elapsed="$(( $(date +%s) - launch_started_at ))"
           printf 'SCHOOL_REMOTE_LAUNCH_RETURN=%s elapsed=%ss\n' "$launch_rc" "$launch_elapsed" | tee -a "$log_file"
@@ -613,6 +740,9 @@ jobs:
               failed:*:"$launch_nonce")
                 fetch_remote_log | tee -a "$log_file"
                 printf 'SCHOOL_REMOTE_STATUS=%s\n' "$remote_status" | tee -a "$log_file"
+                if probe_remote_commit; then
+                  remote_job_complete=1
+                fi
                 exit 1
                 ;;
             esac
@@ -625,10 +755,11 @@ jobs:
           done
 
           test "$remote_status" = "success:$RELEASE_SHA:$launch_nonce"
+          probe_remote_commit
           remote_job_complete=1
-          printf 'committed=true\n' >> "$GITHUB_OUTPUT"
           fetch_remote_log | tee -a "$log_file"
           grep -Fx 'SCHOOL_STANDALONE_SOURCE=VERIFIED' "$log_file" >/dev/null
+          grep -Fx 'SCHOOL_STANDALONE_OFFLINE_BASE=VERIFIED' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_PREFLIGHT=PASS' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_PROTECTED_SCHEDULE_PREFLIGHT=PASS' "$log_file" >/dev/null
           grep -Fx 'SCHOOL_STANDALONE_FINAL_BACKUP=VERIFIED' "$log_file" >/dev/null
@@ -715,9 +846,9 @@ jobs:
         if: >-
           always() &&
           steps.configure_ssh.outcome == 'success' &&
-          steps.deploy_school.outputs.committed == 'true' &&
           (steps.deploy_school.outcome != 'success' ||
-            steps.verify_public.outcome != 'success')
+            (steps.deploy_school.outputs.committed == 'true' &&
+              steps.verify_public.outcome != 'success'))
         env:
           DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
@@ -750,8 +881,31 @@ jobs:
             -o Ciphers=aes128-ctr
             -o MACs=hmac-sha2-256
           )
+          job_dir="/tmp/school-curriculum-deploy-jobs/${RELEASE_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           remote_payload="$(base64 -w0 <<'REMOTE'
           set -Eeuo pipefail
+          : "${RELEASE_SHA:?}"
+          : "${RUN_ID:?}"
+          : "${RUN_ATTEMPT:?}"
+          : "${JOB_DIR:?}"
+          test "$JOB_DIR" = "/tmp/school-curriculum-deploy-jobs/${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
+          if [ ! -e "$JOB_DIR" ]; then
+            printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=NOT_COMMITTED\n'
+            exit 0
+          fi
+          test -d "$JOB_DIR"
+          test ! -L "$JOB_DIR"
+          test "$(stat -c %u "$JOB_DIR")" = "$(id -u)"
+          test "$(stat -c %a "$JOB_DIR")" = 700
+          if [ ! -e "$JOB_DIR/commit-state" ]; then
+            printf 'SCHOOL_EXTERNAL_VERIFICATION_REGATE=NOT_COMMITTED\n'
+            exit 0
+          fi
+          test -f "$JOB_DIR/commit-state"
+          test ! -L "$JOB_DIR/commit-state"
+          test "$(stat -c %u "$JOB_DIR/commit-state")" = "$(id -u)"
+          test "$(stat -c %a "$JOB_DIR/commit-state")" = 400
+          test "$(cat "$JOB_DIR/commit-state")" = "committed:${RELEASE_SHA}:${RUN_ID}:${RUN_ATTEMPT}"
           production=school-1-11
           origin=https://school-188-225-38-55.sslip.io
           test "$(docker inspect "$production" --format '{{.State.Running}}')" = true
@@ -809,7 +963,7 @@ jobs:
           )"
           timeout --signal=TERM --kill-after=30s 480s \
             ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "printf '%s' '$remote_payload' | base64 -d | bash" \
+            "printf '%s' '$remote_payload' | base64 -d | env RELEASE_SHA='$RELEASE_SHA' RUN_ID='$GITHUB_RUN_ID' RUN_ATTEMPT='$GITHUB_RUN_ATTEMPT' JOB_DIR='$job_dir' bash" \
             </dev/null
 
       - name: Remove temporary SSH material
