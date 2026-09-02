@@ -1083,6 +1083,9 @@
   .dashboard { padding: 20px 20px 34px; }
   .widgetGrid { grid-template-columns: 1fr; }
   .sizeCompact, .sizeWide, .sizeFull { grid-column: 1; }
+  .sizeCompact.widgetDropTarget::before { right: 12px; left: 12px; width: auto; height: 4px; }
+  .sizeCompact.widgetDropTarget[data-drop-position="before"]::before { top: -8px; bottom: auto; }
+  .sizeCompact.widgetDropTarget[data-drop-position="after"]::before { top: auto; bottom: -8px; }
   .registryContent { grid-template-columns: 1fr; }
   .preview { border-top: 1px solid var(--border, #e1e3ec); border-left: 0; }
 }
