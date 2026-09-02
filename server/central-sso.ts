@@ -179,7 +179,10 @@ export async function finishCentralSso(
   const exchangeUrl = new URL("/api/school-sso/exchange", arthelloOrigin());
   const response = await fetch(exchangeUrl, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      origin: exchangeUrl.origin,
+    },
     body: JSON.stringify({ code, codeVerifier: transaction.verifier }),
     cache: "no-store",
     signal: AbortSignal.timeout(12_000),
