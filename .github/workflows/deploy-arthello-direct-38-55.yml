@@ -23,6 +23,7 @@ concurrency:
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
   EXPECTED_RELEASE_HEAD: codex/owner-dashboard-tochka-20260902
+  EXPECTED_RELEASE_PR: "310"
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -54,6 +55,7 @@ jobs:
         github.event.workflow_run.pull_requests[0] == null ||
         (
           github.event.workflow_run.pull_requests[0].head.ref == 'codex/owner-dashboard-tochka-20260902' &&
+          github.event.workflow_run.pull_requests[0].number == 310 &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -77,6 +79,7 @@ jobs:
           [[ "$TRIGGER_VERIFY_RUN_ID" =~ ^[0-9]+$ ]]
           [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
           test "$GITHUB_RUN_ATTEMPT" = 1
+          [[ "$EXPECTED_RELEASE_PR" =~ ^[0-9]+$ ]]
 
           api="https://api.github.com/repos/$GITHUB_REPOSITORY"
           headers=(
@@ -97,6 +100,7 @@ jobs:
               .event == "push" and
               .head_branch == "main" and
               .head_sha == $sha and
+              .run_attempt == 1 and
               .status == "completed" and
               .conclusion == "success" and
               .repository.full_name == $repository and
@@ -105,27 +109,29 @@ jobs:
               .triggering_actor.login == "vitaliyozolin-dotcom"
             ' <<<"$trigger_json" >/dev/null
 
-          trigger_prs_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
-            "${headers[@]}" "$api/commits/$RELEASE_SHA/pulls")"
+          release_pr_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+            "${headers[@]}" "$api/pulls/$EXPECTED_RELEASE_PR")"
           jq -e \
             --arg sha "$RELEASE_SHA" \
             --arg repository "$EXPECTED_REPOSITORY" \
-            --arg expected_head "$EXPECTED_RELEASE_HEAD" '
-              (length == 1) and
-              (.[0].state == "closed") and
-              (.[0].merged_at != null) and
-              (.[0].base.ref == "main") and
-              (.[0].base.repo.full_name == $repository) and
-              (.[0].head.ref == $expected_head) and
-              (.[0].head.repo.full_name == $repository) and
-              (.[0].merge_commit_sha == $sha) and
-              (.[0].user.login == "vitaliyozolin-dotcom") and
-              (.[0].merged_by.login == "vitaliyozolin-dotcom")
-            ' <<<"$trigger_prs_json" >/dev/null
+            --arg expected_head "$EXPECTED_RELEASE_HEAD" \
+            --argjson expected_pr "$EXPECTED_RELEASE_PR" '
+              .number == $expected_pr and
+              .state == "closed" and
+              .merged == true and
+              .merged_at != null and
+              .base.ref == "main" and
+              .base.repo.full_name == $repository and
+              .head.ref == $expected_head and
+              .head.repo.full_name == $repository and
+              .merge_commit_sha == $sha and
+              .user.login == "vitaliyozolin-dotcom" and
+              .merged_by.login == "vitaliyozolin-dotcom"
+            ' <<<"$release_pr_json" >/dev/null
 
           deploy_runs_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
             "${headers[@]}" \
-            "$api/actions/workflows/deploy-arthello-direct-38-55.yml/runs?event=workflow_run&per_page=100")"
+            "$api/actions/workflows/deploy-arthello-direct-38-55.yml/runs?event=workflow_run&head_sha=$RELEASE_SHA&status=success&per_page=1")"
           jq -e \
             --argjson current_run_id "$GITHUB_RUN_ID" \
             --arg sha "$RELEASE_SHA" \
@@ -176,22 +182,24 @@ jobs:
           tree_sha="$(jq -r '.commit.tree.sha' <<<"$commit_json")"
           [[ "$tree_sha" =~ ^[a-f0-9]{40}$ ]]
 
-          prs_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
-            "${headers[@]}" "$api/commits/$RELEASE_SHA/pulls")"
+          release_pr_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+            "${headers[@]}" "$api/pulls/$EXPECTED_RELEASE_PR")"
           jq -e \
             --arg sha "$RELEASE_SHA" \
             --arg repository "$EXPECTED_REPOSITORY" \
             --arg expected_head "$EXPECTED_RELEASE_HEAD" \
-            '(length == 1) and
-             (.[0].state == "closed") and
-             (.[0].merged_at != null) and
-             (.[0].base.ref == "main") and
-             (.[0].base.repo.full_name == $repository) and
-             (.[0].head.ref == $expected_head) and
-             (.[0].head.repo.full_name == $repository) and
-             (.[0].merge_commit_sha == $sha) and
-             (.[0].user.login == "vitaliyozolin-dotcom") and
-             (.[0].merged_by.login == "vitaliyozolin-dotcom")' <<<"$prs_json" >/dev/null
+            --argjson expected_pr "$EXPECTED_RELEASE_PR" \
+            '.number == $expected_pr and
+             .state == "closed" and
+             .merged == true and
+             .merged_at != null and
+             .base.ref == "main" and
+             .base.repo.full_name == $repository and
+             .head.ref == $expected_head and
+             .head.repo.full_name == $repository and
+             .merge_commit_sha == $sha and
+             .user.login == "vitaliyozolin-dotcom" and
+             .merged_by.login == "vitaliyozolin-dotcom"' <<<"$release_pr_json" >/dev/null
 
           workflow_success() {
             local workflow_file="$1"
@@ -283,25 +291,66 @@ jobs:
           ! grep -F 'CENTRAL_ACCESS_SECRET' deploy/v52/overrides/production/runtime-server.mjs
           printf 'ARTHELLO_CHECKOUT=%s\nARTHELLO_TREE=%s\n' "$RELEASE_SHA" "$EXPECTED_TREE"
 
-      - name: Build exact candidate locally
-        timeout-minutes: 35
+      - name: Download and load exact hosted-verified image
+        timeout-minutes: 25
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: arthello-v52-verification-${{ env.TRIGGER_VERIFY_RUN_ID }}
+          path: ${{ runner.temp }}/arthello-v52-release-${{ github.run_id }}
+          github-token: ${{ github.token }}
+          run-id: ${{ env.TRIGGER_VERIFY_RUN_ID }}
+
+      - name: Verify and load exact hosted-verified image
+        timeout-minutes: 12
         env:
           EXPECTED_TREE: ${{ steps.provenance.outputs.tree_sha }}
         run: |
           set -Eeuo pipefail
+          artifact="$RUNNER_TEMP/arthello-v52-release-$GITHUB_RUN_ID"
+          evidence="$artifact/arthello-v52.json"
+          archive="$artifact/arthello-v52-image.tar.gz"
+          test -f "$evidence"
+          test -f "$evidence.sha256"
+          test -s "$archive"
+          (cd "$artifact" && sha256sum -c arthello-v52.json.sha256)
+
+          dockerfile_sha256="$(sha256sum deploy/v52/Dockerfile | cut -d ' ' -f 1)"
+          runtime_lock_sha256="$(sha256sum deploy/v52/runtime/package-lock.json | cut -d ' ' -f 1)"
+          inventory_sha256="$(sha256sum deploy/v52/maintenance/production-data-inventory.py | cut -d ' ' -f 1)"
+          archive_sha256="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          jq -e \
+            --arg repository "$EXPECTED_REPOSITORY" \
+            --arg run "$TRIGGER_VERIFY_RUN_ID" \
+            --arg sha "$RELEASE_SHA" \
+            --arg tree "$EXPECTED_TREE" \
+            --arg dockerfile "$dockerfile_sha256" \
+            --arg lock "$runtime_lock_sha256" \
+            --arg inventory "$inventory_sha256" \
+            --arg archive "$archive_sha256" '
+              .repository == $repository and
+              .workflowRunId == $run and
+              .workflowRunAttempt == "1" and
+              .headSha == $sha and
+              .treeSha == $tree and
+              .dockerfileSha256 == $dockerfile and
+              .runtimeLockSha256 == $lock and
+              .inventorySha256 == $inventory and
+              .imageArchiveSha256 == $archive and
+              .runnerTrust == "github-hosted-ephemeral" and
+              .productionCapability == false and
+              (.imageId | test("^sha256:[a-f0-9]{64}$"))
+            ' "$evidence" >/dev/null
+
+          gzip -dc "$archive" | docker load >/dev/null
+          verified_image="arthello-v52-verify:$RELEASE_SHA"
+          expected_image_id="$(jq -r '.imageId' "$evidence")"
+          test "$(docker image inspect "$verified_image" --format '{{.Id}}')" = "$expected_image_id"
           image="arthello-direct:$RELEASE_SHA"
-          docker build \
-            --pull=false \
-            --file deploy/v52/Dockerfile \
-            --label "org.opencontainers.image.revision=$RELEASE_SHA" \
-            --label "org.opencontainers.image.source-tree=$EXPECTED_TREE" \
-            --label "arthello.release.run=$GITHUB_RUN_ID" \
-            --tag "$image" \
-            .
+          docker tag "$verified_image" "$image"
           test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$RELEASE_SHA"
           test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$EXPECTED_TREE"
           test "$(docker image inspect "$image" --format '{{.Config.User}}')" = node
-          printf 'ARTHELLO_BUILD=VERIFIED image=%s\n' "$image"
+          printf 'ARTHELLO_HOSTED_IMAGE=VERIFIED image=%s id=%s\n' "$image" "$expected_image_id"
 
       - name: Clone preflight and guarded production cutover
         id: cutover

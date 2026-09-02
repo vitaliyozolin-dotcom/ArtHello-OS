@@ -87,7 +87,9 @@ jobs:
             before_checkout = steps.take(checkout_index).map { |step| step["run"].to_s }.join("\n")
             raise "Docker use before authorization/CI gate" if before_checkout.match?(/(^|\s)docker(\s|$)/)
             raise "D-043 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
+            raise "D-043 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
             raise "triggering verification run is not pinned" unless before_checkout.include?("TRIGGER_VERIFY_RUN_ID")
+            raise "triggering verification attempt is not pinned" unless before_checkout.include?(".run_attempt == 1")
             raise "release SHA is not pinned before checkout" unless before_checkout.include?("RELEASE_SHA")
             raise "exact Quality gate missing before checkout" unless before_checkout.include?("quality.yml")
             raise "exact v52 gate missing before checkout" unless before_checkout.include?("verify-arthello-v52.yml")
@@ -107,6 +109,20 @@ jobs:
           grep -F 'INTEGRATION_CREDENTIALS_KEY' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           ! grep -F 'CENTRAL_ACCESS_SECRET' deploy/v52/overrides/production/runtime-server.mjs
           test -s deploy/v52/Dockerfile
+          test -s deploy/v52/runtime/package.json
+          test -s deploy/v52/runtime/package-lock.json
+          grep -Fx '# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e' deploy/v52/Dockerfile >/dev/null
+          test "$(grep -Fc 'FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e' deploy/v52/Dockerfile)" -eq 3
+          grep -F 'npm ci --omit=dev --ignore-scripts --no-audit --no-fund' deploy/v52/Dockerfile >/dev/null
+          ! grep -E '^FROM node:24-bookworm-slim AS|npm install .*miniflare' deploy/v52/Dockerfile
+          node - <<'NODE'
+          const manifest = require('./deploy/v52/runtime/package.json');
+          const lock = require('./deploy/v52/runtime/package-lock.json');
+          if (manifest.dependencies?.miniflare !== '4.20260515.0') process.exit(1);
+          if (lock.lockfileVersion !== 3) process.exit(1);
+          const resolved = lock.packages?.['node_modules/miniflare'];
+          if (resolved?.version !== '4.20260515.0' || !resolved.integrity) process.exit(1);
+          NODE
           python3 - <<'PY'
           import pathlib
           import re
@@ -128,6 +144,7 @@ jobs:
           docker build \
             --pull=false \
             --label "org.opencontainers.image.revision=$EXPECTED_SHA" \
+            --label "org.opencontainers.image.source-tree=$(git rev-parse HEAD^{tree})" \
             --tag "$image" \
             --file deploy/v52/Dockerfile \
             .
@@ -280,6 +297,7 @@ jobs:
 
       - name: Build immutable verification evidence
         env:
+          IMAGE: ${{ steps.image.outputs.image }}
           IMAGE_ID: ${{ steps.image.outputs.image_id }}
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
@@ -287,7 +305,11 @@ jobs:
           install -d -m 0700 ci-provenance
           tree_sha="$(git rev-parse HEAD^{tree})"
           dockerfile_sha256="$(sha256sum deploy/v52/Dockerfile | cut -d ' ' -f 1)"
+          runtime_lock_sha256="$(sha256sum deploy/v52/runtime/package-lock.json | cut -d ' ' -f 1)"
           inventory_sha256="$(sha256sum deploy/v52/maintenance/production-data-inventory.py | cut -d ' ' -f 1)"
+          docker save "$IMAGE" | gzip -1 -n > ci-provenance/arthello-v52-image.tar.gz
+          test -s ci-provenance/arthello-v52-image.tar.gz
+          image_archive_sha256="$(sha256sum ci-provenance/arthello-v52-image.tar.gz | cut -d ' ' -f 1)"
           jq -n \
             --arg repository "$GITHUB_REPOSITORY" \
             --arg workflow_run_id "$GITHUB_RUN_ID" \
@@ -295,7 +317,9 @@ jobs:
             --arg head_sha "$EXPECTED_SHA" \
             --arg tree_sha "$tree_sha" \
             --arg dockerfile_sha256 "$dockerfile_sha256" \
+            --arg runtime_lock_sha256 "$runtime_lock_sha256" \
             --arg inventory_sha256 "$inventory_sha256" \
+            --arg image_archive_sha256 "$image_archive_sha256" \
             --arg image_id "$IMAGE_ID" \
             '{
               repository: $repository,
@@ -304,7 +328,9 @@ jobs:
               headSha: $head_sha,
               treeSha: $tree_sha,
               dockerfileSha256: $dockerfile_sha256,
+              runtimeLockSha256: $runtime_lock_sha256,
               inventorySha256: $inventory_sha256,
+              imageArchiveSha256: $image_archive_sha256,
               imageId: $image_id,
               runnerTrust: "github-hosted-ephemeral",
               productionCapability: false
@@ -318,3 +344,4 @@ jobs:
           path: ci-provenance/
           if-no-files-found: error
           retention-days: 30
+          compression-level: 0

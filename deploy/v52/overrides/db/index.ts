@@ -87,6 +87,10 @@ async function ensureCoreTablesOnce() {
   // explicitly selected test contour.
   await initializeCoreTables();
   await normalizeManualEntityProvenance();
+  // A stored bank credential is useful only while the runtime master key can
+  // actually decrypt it. Validate every envelope during readiness so a stale
+  // runner-side key fails before a candidate can touch or replace production.
+  await verifyStoredIntegrationCredentials();
   if (!hasAllCoreTables && mode === "test") await seedInitialDemoData();
 
   if (marker?.state_value !== CORE_SCHEMA_VERSION || !hasAllCoreTables) {
@@ -2328,6 +2332,27 @@ export async function readIntegrationCredential(connectionIdValue: string, legal
   } catch {
     // Never expose ciphertext, parsing details or key material to callers.
     throw new Error("Защищённый JWT недоступен. Введите ключ заново.");
+  }
+}
+
+export async function verifyStoredIntegrationCredentials() {
+  const rows = await env.DB.prepare(
+    "SELECT state_key FROM system_runtime_state WHERE state_key LIKE 'integration_credential:v2:%' ORDER BY state_key"
+  ).all<{ state_key: string }>();
+  for (const row of rows.results ?? []) {
+    try {
+      const parts = row.state_key.slice(integrationCredentialPrefix.length).split(":");
+      if (parts.length !== 3 || parts.some((part) => !part)) throw new Error("Invalid credential scope");
+      const [connectionId, legalEntityId, customerCode] = parts.map((part) => decodeURIComponent(part));
+      if (integrationCredentialStateKey(connectionId, legalEntityId, customerCode) !== row.state_key) {
+        throw new Error("Non-canonical credential scope");
+      }
+      const secret = await readIntegrationCredential(connectionId, legalEntityId, customerCode);
+      if (!secret) throw new Error("Missing credential envelope");
+    } catch {
+      // Readiness must fail without exposing the state key, envelope or secret.
+      throw new Error("Защищённые банковские ключи не прошли проверку хранилища");
+    }
   }
 }
 

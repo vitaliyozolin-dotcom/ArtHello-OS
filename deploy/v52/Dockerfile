@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 # The guarded production reset is orchestrated and post-verified by the pinned workflow release.
-FROM node:24-bookworm-slim AS application
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS application
 ENV CI=1
 WORKDIR /app
 COPY deploy/v52/arthello-sites-v52-source.tar.gz.b64.part-* /tmp/arthello-source-parts/
@@ -25,18 +25,19 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* |
     && node /app/scripts/patch-mobile-canonical-v5.mjs \
     && node /app/scripts/patch-school-sso-entry.mjs \
     && node /app/scripts/verify-system-wide-operational-shells.mjs \
-    && echo "27a169da50603a2e3bacca36ecb3c9e453c384f962c4e7150b8d7a93c0be4850  /app/db/index.ts" | sha256sum -c - \
+    && echo "b6fece4c356f034e99c60926e8e0f9df90a904300c4b026b2f2decdfe0ecfeb1  /app/db/index.ts" | sha256sum -c - \
     && rm -rf /tmp/arthello-overrides /tmp/arthello-v52-overrides \
     && ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
     && grep -q 'invoke_user_worker_ahead_of_assets: false' /app/production/runtime-server.mjs \
     && grep -q 'has_user_worker: true' /app/production/runtime-server.mjs \
     && npm ci && npm run lint && npm test
 
-FROM node:24-bookworm-slim AS runtime-dependencies
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime-dependencies
 WORKDIR /runtime
-RUN npm init -y && npm install --omit=dev --no-audit --no-fund miniflare@4.20260515.0 && npm cache clean --force
+COPY deploy/v52/runtime/package.json deploy/v52/runtime/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
 ENV NODE_ENV=production PORT=8081 ARTHELLO_D1_PATH=/data/d1
 WORKDIR /app
 COPY --from=application /app/dist /app/dist

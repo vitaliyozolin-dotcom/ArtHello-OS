@@ -644,6 +644,46 @@ test("credential rotation and revoke are atomic, scoped and leave no orphan JWT"
   }
 });
 
+test("readiness rejects a stale master key before stored bank credentials can be used", async () => {
+  const database = new CredentialD1Database();
+  createCredentialSchema(database);
+  const dbModule = await loadCredentialDbModule(database);
+  const runtimeEnv = globalThis.__ARTHELLO_TOCHKA_DB_ENV__;
+  try {
+    await dbModule.saveTochkaSetupWithCredential(
+      "OWNER-LIVE",
+      credentialSetup("ORG-LIVE-1", "customer-one"),
+      makeJwt({ iss: "readiness-key-check" }),
+    );
+    await dbModule.saveIntegrationCredential(
+      "OWNER-LIVE",
+      "INT-T-SECOND",
+      "ORG-LIVE-2",
+      "customer-two",
+      makeJwt({ iss: "second-readiness-key-check" }),
+    );
+    await dbModule.verifyStoredIntegrationCredentials();
+
+    runtimeEnv.INTEGRATION_CREDENTIALS_KEY = "different-stale-runtime-key-material-32-bytes-minimum";
+    await assert.rejects(
+      dbModule.verifyStoredIntegrationCredentials(),
+      /Защищённые банковские ключи не прошли проверку хранилища/,
+    );
+
+    runtimeEnv.INTEGRATION_CREDENTIALS_KEY = "focused-test-dedicated-key-material-32-bytes-minimum";
+    database.database.prepare(
+      "UPDATE system_runtime_state SET state_value='{}' WHERE state_key LIKE 'integration_credential:v2:INT-T-SECOND:%'",
+    ).run();
+    await assert.rejects(
+      dbModule.verifyStoredIntegrationCredentials(),
+      /Защищённые банковские ключи не прошли проверку хранилища/,
+    );
+  } finally {
+    delete globalThis.__ARTHELLO_TOCHKA_DB_ENV__;
+    database.close();
+  }
+});
+
 test("a candidate JWT is probed before atomic setup and credential replacement", async () => {
   const actions = await source("app/api/integration-actions/route.ts");
   const database = await source("db/index.ts");
@@ -702,6 +742,8 @@ test("credential storage is encrypted and scoped by provider, legal entity and v
   assert.match(database, /crypto\.subtle\.encrypt/);
   assert.match(database, /INTEGRATION_CREDENTIALS_KEY/);
   assert.match(database, /throw new Error\("Защищённое хранилище не настроено:[^\n]+INTEGRATION_CREDENTIALS_KEY"\)/);
+  assert.match(database, /await verifyStoredIntegrationCredentials\(\)/);
+  assert.match(database, /export async function verifyStoredIntegrationCredentials\(\)/);
 
   const encryptionKeyStart = database.indexOf("async function integrationCredentialEncryptionKey");
   const encryptionKeyEnd = database.indexOf("function encodeIntegrationCredentialBytes", encryptionKeyStart);
