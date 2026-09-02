@@ -197,11 +197,12 @@ verify_public_gate() {
     fi
     sleep 2
   done
-  test "$verified" -eq 1
-  health="$(curl -fsS --max-time 20 "$SCHOOL_ORIGIN/api/health")"
-  grep -F '"status":"ok"' <<<"$health" >/dev/null
-  grep -F '"maintenance":true' <<<"$health" >/dev/null
+  test "$verified" -eq 1 || return 1
+  health="$(curl -fsS --max-time 20 "$SCHOOL_ORIGIN/api/health")" || return 1
+  grep -F '"status":"ok"' <<<"$health" >/dev/null || return 1
+  grep -F '"maintenance":true' <<<"$health" >/dev/null || return 1
   printf 'SCHOOL_PUBLIC_WRITE_GATE=PASS\n'
+  return 0
 }
 
 verify_application_contracts() {
