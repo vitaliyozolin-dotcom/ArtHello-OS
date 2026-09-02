@@ -23,6 +23,7 @@ import {
   rectFor,
   scanHelpContext,
 } from "./contextualHelpDom";
+import { inlineHelpAllowed } from "./contextualHelpPolicy";
 import "./ContextualHelpSystem.css";
 
 const EMPTY_CONTEXT: HelpContext = {
@@ -324,6 +325,7 @@ export function ContextualHelpSystem() {
     const viewportHeight = window.innerHeight;
 
     return context.fields.flatMap((field) => {
+      if (!inlineHelpAllowed(field.element)) return [];
       const anchor = labelRectFor(field.element);
       if (!anchor || anchor.bottom <= 0 || anchor.right <= 0 || anchor.top >= viewportHeight || anchor.left >= viewportWidth) return [];
 
