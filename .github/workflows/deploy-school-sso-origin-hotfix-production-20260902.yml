@@ -46,7 +46,7 @@ jobs:
         (
           github.event.pull_request.user.login == 'vitaliyozolin-dotcom' &&
           github.event.pull_request.head.repo.full_name == github.repository &&
-          github.event.pull_request.head.ref == 'ops/deploy-school-sso-origin-fix-production-20260902'
+          github.event.pull_request.head.ref == 'ops/fix-school-sso-controller-dockerignore-20260902'
         )
       )
     runs-on: ubuntu-latest
