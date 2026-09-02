@@ -58,6 +58,7 @@ jobs:
           set -Eeuo pipefail
           install -m 0755 -d .openai
           printf '%s\n' '{"d1": null, "r2": null}' > .openai/hosting.json
+          sed -i '/^\.openai$/d' .dockerignore
           image="school-sso-origin-hotfix:${GITHUB_SHA}"
           docker build \
             --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true \
