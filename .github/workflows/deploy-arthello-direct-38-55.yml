@@ -311,6 +311,7 @@ jobs:
           run-id: ${{ env.TRIGGER_VERIFY_RUN_ID }}
 
       - name: Verify and load exact hosted-verified image
+        id: image_import
         timeout-minutes: 12
         env:
           EXPECTED_TREE: ${{ steps.provenance.outputs.tree_sha }}
@@ -401,7 +402,7 @@ jobs:
           [[ "$actual_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
           expected_runtime_fingerprint="$(jq -r '.runtimeFingerprintSha256' "$evidence")"
           actual_runtime_fingerprint="$(
-            docker image inspect "$verified_image" \
+            docker image inspect "$actual_image_id" \
               | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq \
               | sha256sum \
               | cut -d ' ' -f 1
@@ -414,11 +415,14 @@ jobs:
             "$expected_image_id" "$actual_image_id"
           printf 'ARTHELLO_IMAGE_RUNTIME_FINGERPRINT=VERIFIED sha256=%s\n' \
             "$actual_runtime_fingerprint"
-          docker tag "$verified_image" "$image"
-          test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$RELEASE_SHA"
-          test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$EXPECTED_TREE"
-          test "$(docker image inspect "$image" --format '{{.Config.User}}')" = node
-          printf 'ARTHELLO_HOSTED_IMAGE=VERIFIED image=%s id=%s\n' "$image" "$expected_image_id"
+          test "$(docker image inspect "$actual_image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$RELEASE_SHA"
+          test "$(docker image inspect "$actual_image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$EXPECTED_TREE"
+          test "$(docker image inspect "$actual_image_id" --format '{{.Config.User}}')" = node
+          docker tag "$actual_image_id" "$image"
+          test "$(docker image inspect "$image" --format '{{.Id}}')" = "$actual_image_id"
+          printf 'image_id=%s\nruntime_fingerprint=%s\n' \
+            "$actual_image_id" "$actual_runtime_fingerprint" >> "$GITHUB_OUTPUT"
+          printf 'ARTHELLO_HOSTED_IMAGE=VERIFIED image=%s id=%s\n' "$image" "$actual_image_id"
 
       - name: Clone preflight and guarded production cutover
         id: cutover
@@ -426,13 +430,31 @@ jobs:
         env:
           EXPECTED_TREE: ${{ steps.provenance.outputs.tree_sha }}
           GH_TOKEN: ${{ github.token }}
+          VALIDATED_IMAGE_ID: ${{ steps.image_import.outputs.image_id }}
+          VALIDATED_RUNTIME_FINGERPRINT: ${{ steps.image_import.outputs.runtime_fingerprint }}
         run: |
           set -Eeuo pipefail
           umask 077
           exec 9>>"/var/lock/school-1-11-production.lock"
           flock -w 900 9
 
-          image="arthello-direct:$RELEASE_SHA"
+          immutable_image_id="$VALIDATED_IMAGE_ID"
+          [[ "$immutable_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$VALIDATED_RUNTIME_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
+          test "$(docker image inspect "$immutable_image_id" --format '{{.Id}}')" = "$immutable_image_id"
+          test "$(docker image inspect "$immutable_image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$RELEASE_SHA"
+          test "$(docker image inspect "$immutable_image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$EXPECTED_TREE"
+          test "$(docker image inspect "$immutable_image_id" --format '{{.Config.User}}')" = node
+          cutover_runtime_fingerprint="$(
+            docker image inspect "$immutable_image_id" \
+              | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq \
+              | sha256sum \
+              | cut -d ' ' -f 1
+          )"
+          test "$cutover_runtime_fingerprint" = "$VALIDATED_RUNTIME_FINGERPRINT"
+          printf 'ARTHELLO_CUTOVER_IMMUTABLE_IMAGE=VERIFIED id=%s fingerprint=%s\n' \
+            "$immutable_image_id" "$cutover_runtime_fingerprint"
+
           run_key="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           work="$RUNNER_TEMP/arthello-deploy-$run_key"
           clone_volume="arthello-preflight-$run_key"
@@ -1264,7 +1286,7 @@ jobs:
             -e ARTHELLO_OPENAI_ENABLED="$openai_enabled" \
             "${runtime_secret_mounts[@]}" \
             --entrypoint /bin/sh \
-            "$image" -ceu '
+            "$immutable_image_id" -ceu '
               test -r /run/secrets/integration-credentials-key
               test "$(wc -c < /run/secrets/integration-credentials-key)" -ge 32
               test -r /run/secrets/bootstrap-password
@@ -1295,7 +1317,7 @@ jobs:
             --env-file "$runtime_env" \
             "${runtime_secret_mounts[@]}" \
             -v "$clone_volume:/data" \
-            "$image" >/dev/null
+            "$immutable_image_id" >/dev/null
           assert_file_only_secret_env "$clone_container"
           wait_local_candidate "$clone_container"
           assert_active_d1_file_descriptors "$clone_container" preflight
@@ -1353,7 +1375,7 @@ jobs:
             --label "arthello.release.tree=$EXPECTED_TREE" \
             --label "arthello.release.run=$GITHUB_RUN_ID" \
             -v "$DATA_VOLUME:/data" \
-            "$image" >/dev/null
+            "$immutable_image_id" >/dev/null
           assert_file_only_secret_env "$candidate"
           wait_local_candidate "$candidate"
           assert_active_d1_file_descriptors "$candidate" candidate

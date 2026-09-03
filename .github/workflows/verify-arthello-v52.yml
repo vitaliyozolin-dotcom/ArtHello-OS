@@ -109,6 +109,28 @@ jobs:
             raise "portable fingerprint evidence missing" unless source.include?("runtimeFingerprintSha256")
             raise "portable fingerprint gate missing" unless source.include?("ARTHELLO_IMAGE_RUNTIME_FINGERPRINT=VERIFIED")
             raise "non-portable cross-store image ID equality is forbidden" if source.include?("actual_image_id\" != \"$expected_image_id")
+            image_import_step = steps.find { |step| step["id"] == "image_import" }
+            raise "validated image import step is missing" unless image_import_step
+            image_import_run = image_import_step.fetch("run")
+            raise "import fingerprint must use the resolved immutable image ID" unless image_import_run.include?(%q{docker image inspect "$actual_image_id"})
+            raise "validated image outputs are missing" unless image_import_run.include?("image_id=%s\\nruntime_fingerprint=%s") && image_import_run.include?("$GITHUB_OUTPUT")
+            cutover_step = steps.find { |step| step["id"] == "cutover" }
+            raise "cutover step is missing" unless cutover_step
+            cutover_env = cutover_step.fetch("env")
+            raise "cutover image ID output pin is missing" unless cutover_env.fetch("VALIDATED_IMAGE_ID").include?("steps.image_import.outputs.image_id")
+            raise "cutover fingerprint output pin is missing" unless cutover_env.fetch("VALIDATED_RUNTIME_FINGERPRINT").include?("steps.image_import.outputs.runtime_fingerprint")
+            cutover_run = cutover_step.fetch("run")
+            lock_position = cutover_run.index("flock -w 900 9")
+            immutable_check_position = cutover_run.index(%q{docker image inspect "$immutable_image_id"})
+            raise "immutable image must be revalidated after acquiring the shared lock" unless lock_position && immutable_check_position && lock_position < immutable_check_position
+            raise "cutover immutable image ID syntax guard missing" unless cutover_run.include?("sha256:[a-f0-9]{64}")
+            raise "cutover immutable revision label guard missing" unless cutover_run.include?("org.opencontainers.image.revision")
+            raise "cutover immutable tree label guard missing" unless cutover_run.include?("org.opencontainers.image.source-tree")
+            raise "cutover immutable runtime fingerprint guard missing" unless cutover_run.include?(%q{docker image inspect "$immutable_image_id"}) && cutover_run.include?("image-runtime-fingerprint.jq") && cutover_run.include?(%q{test "$cutover_runtime_fingerprint" = "$VALIDATED_RUNTIME_FINGERPRINT"})
+            immutable_run_commands = cutover_run.scan(/docker run(?:[^\n]*\\\n)+\s*"\$immutable_image_id"/)
+            raise "all three app-image Docker runs must use the immutable image ID" unless immutable_run_commands.length == 3
+            raise "each immutable app-image run must use the shared secret mounts" unless immutable_run_commands.all? { |command| command.include?("runtime_secret_mounts") }
+            raise "mutable release tag must not be used by cutover" if cutover_run.include?(%q{image="arthello-direct:$RELEASE_SHA"}) || cutover_run.include?(%q{"$image"})
             raise "active D1 descriptor gate missing" unless source.include?("ARTHELLO_ACTIVE_D1_FD=VERIFIED")
             raise "active D1 descriptor gate must cover live, preflight, and candidate" unless source.scan(/assert_active_d1_file_descriptors \"\$[^\"]+\" (?:live|preflight|candidate)/).length == 3
             fd_start = source.index("assert_active_d1_file_descriptors() {")
