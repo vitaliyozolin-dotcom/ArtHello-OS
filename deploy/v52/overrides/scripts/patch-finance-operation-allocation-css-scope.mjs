@@ -12,8 +12,8 @@ export function scopeD069FinanceCss(source) {
   const before = source.slice(0, markerIndex);
   let block = source.slice(markerIndex);
   block = block.replace(
-    /^(\s*)(\.(?:operation-classification|finance-table)[^{\n]*)/gm,
-    (_match, indent, selector) => `${indent}.ahFinancePage ${selector}`,
+    /(^[ \t]*|,[ \t]*)(\.(?:operation-classification|finance-table)[^{,\n]*)/gm,
+    (_match, prefix, selector) => `${prefix}.ahFinancePage ${selector}`,
   );
   block = block.replace(
     `/* ${marker} */`,
