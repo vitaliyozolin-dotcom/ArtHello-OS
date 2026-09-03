@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "status": "proposed",
+  "authority": "D-029",
+  "source": "artifacts/api-server/src/routes/sync.ts",
+  "dispositions": {
+    "remove": "Remove after proving that no supported operator or generated-client call site remains.",
+    "sandbox-script": "Replace with an offline, guarded script using the D-031 sandbox database.",
+    "scoped-job": "Design a least-privilege authenticated backend job and prove its scope, audit and replay behavior before replacement."
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/sync/logs",
+      "line": 57,
+      "disposition": "remove",
+      "replacement": "Use source-specific audited run records exposed by an explicitly scoped read route."
+    },
+    {
+      "method": "GET",
+      "path": "/sync/stats",
+      "line": 80,
+      "disposition": "remove",
+      "replacement": "Use source-specific readiness and run-status routes after their contracts are approved."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/test-connection",
+      "line": 127,
+      "disposition": "sandbox-script",
+      "replacement": "Use the sanitized AlfaCRM probe or importer from scripts/ in a protected environment."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/branches",
+      "line": 151,
+      "disposition": "sandbox-script",
+      "replacement": "Use the read-only AlfaCRM importer branch inventory."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/discover",
+      "line": 257,
+      "disposition": "sandbox-script",
+      "replacement": "Use guarded endpoint discovery from the read-only AlfaCRM importer."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/detect-lessons",
+      "line": 313,
+      "disposition": "sandbox-script",
+      "replacement": "Move endpoint probing to the guarded AlfaCRM sandbox workflow."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/find-atlas",
+      "line": 352,
+      "disposition": "sandbox-script",
+      "replacement": "Resolve branches from imported raw evidence without fuzzy production matching."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/students-atlas",
+      "line": 427,
+      "disposition": "sandbox-script",
+      "replacement": "Use the full AlfaCRM sandbox importer with explicit branch scope."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/normalize-students-from-raw",
+      "line": 500,
+      "disposition": "scoped-job",
+      "replacement": "Design idempotent student materialization from append-only raw evidence with branch scope and audit."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/normalize-historical-students",
+      "line": 682,
+      "disposition": "scoped-job",
+      "replacement": "Design reviewed historical-student materialization that preserves unresolved identities."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/normalize-teachers-from-raw",
+      "line": 971,
+      "disposition": "scoped-job",
+      "replacement": "Design idempotent teacher materialization with branch and legal-entity scope."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/normalize-groups-from-raw",
+      "line": 1109,
+      "disposition": "scoped-job",
+      "replacement": "Design idempotent group materialization with explicit source provenance."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/normalize-lessons-from-raw",
+      "line": 1289,
+      "disposition": "scoped-job",
+      "replacement": "Design idempotent lesson materialization with completed-scope reconciliation."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/extract-attendance-from-raw",
+      "line": 1577,
+      "disposition": "scoped-job",
+      "replacement": "Design attendance materialization linked to raw and batch provenance."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/normalize-payments-from-raw",
+      "line": 1763,
+      "disposition": "scoped-job",
+      "replacement": "Design payment materialization without inventing financial classifications."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/p76-cleanup-payments",
+      "line": 2138,
+      "disposition": "sandbox-script",
+      "replacement": "Preserve as a one-off evidence migration only if a restored-sandbox proof shows it is still required."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/payments-atlas",
+      "line": 2445,
+      "disposition": "sandbox-script",
+      "replacement": "Use the full AlfaCRM sandbox importer with explicit branch scope."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/backfill-payments-normalize",
+      "line": 2519,
+      "disposition": "sandbox-script",
+      "replacement": "Replace with a checked-in, repeatable evidence migration if restored data proves a backfill is required."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/attendance-from-lessons",
+      "line": 2622,
+      "disposition": "scoped-job",
+      "replacement": "Design attendance materialization with raw provenance and idempotency proof."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/subjects",
+      "line": 2674,
+      "disposition": "scoped-job",
+      "replacement": "Design subject materialization with source provenance and explicit scope."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/lessons-atlas",
+      "line": 2721,
+      "disposition": "sandbox-script",
+      "replacement": "Use the full AlfaCRM sandbox importer with explicit branch scope."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/teachers",
+      "line": 2825,
+      "disposition": "sandbox-script",
+      "replacement": "Use the full AlfaCRM sandbox importer rather than a public runtime probe."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/teachers-atlas",
+      "line": 2878,
+      "disposition": "sandbox-script",
+      "replacement": "Use the full AlfaCRM sandbox importer with explicit branch scope."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/full-resync",
+      "line": 2955,
+      "disposition": "scoped-job",
+      "replacement": "Replace only with source-specific jobs; do not restore a broad resync capability."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/pull-students-all-branches",
+      "line": 3135,
+      "disposition": "sandbox-script",
+      "replacement": "Use the full AlfaCRM sandbox importer after protected network access is available."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/build-counterparties-from-bank",
+      "line": 3411,
+      "disposition": "scoped-job",
+      "replacement": "Design an audited reconciliation job after read-only bank OAuth and identity rules are approved."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/reclassify-counterparties-p84a",
+      "line": 3785,
+      "disposition": "scoped-job",
+      "replacement": "Design a versioned classification job only after its financial rules are approved."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/reconcile-bank-alpha-p84b",
+      "line": 3970,
+      "disposition": "scoped-job",
+      "replacement": "Design an explainable reconciliation job after bank and AlfaCRM completeness gates pass."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/groups-atlas",
+      "line": 4507,
+      "disposition": "sandbox-script",
+      "replacement": "Use the full AlfaCRM sandbox importer with explicit branch scope."
+    },
+    {
+      "method": "POST",
+      "path": "/sync/repair-lessons-atlas-columns",
+      "line": 4680,
+      "disposition": "sandbox-script",
+      "replacement": "Replace with a checked-in Drizzle migration if schema evidence proves the repair is required."
+    }
+  ],
+  "knownCallSiteGroups": [
+    { "path": "artifacts/api-server/src/routes/index.ts", "kind": "mount" },
+    {
+      "path": "artifacts/api-server/src/routes/audit.ts",
+      "kind": "operator-guidance"
+    },
+    {
+      "path": "artifacts/alpha-crm-sync/src/pages/coverage.tsx",
+      "kind": "operator-guidance"
+    },
+    { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+    {
+      "path": "lib/api-client-react/src/generated/api.ts",
+      "kind": "generated-client"
+    },
+    {
+      "path": "artifacts/api-server/test/security.test.mjs",
+      "kind": "security-test"
+    }
+  ]
+}

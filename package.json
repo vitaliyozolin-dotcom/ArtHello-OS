@@ -14,9 +14,10 @@
     "test:sites": "pnpm --filter @workspace/sites-control run test",
     "test:security": "pnpm --filter @workspace/api-server run test:security",
     "test:front-office": "pnpm --filter @workspace/api-server run test:front-office && pnpm --filter @workspace/alpha-crm-sync run test:front-office",
+    "test:refactoring": "node --test scripts/test/legacy-sync-inventory.test.mjs",
     "test:postgres": "pnpm --filter @workspace/api-server run test:postgres",
     "test:workflow-policy": "node --test scripts/test/workflow-policy.test.mjs && node scripts/workflow-policy.mjs",
-    "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:sites",
+    "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:refactoring && pnpm run test:sites",
     "typecheck:libs": "tsc --build --force",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --filter @workspace/sites-control --if-present run typecheck"
   },
