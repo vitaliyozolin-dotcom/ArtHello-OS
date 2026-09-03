@@ -1,6 +1,6 @@
 name: Deploy ArtHello self-hosted RU
 
-# D-057 is a one-release delivery of the stateless Tochka TLS egress probe.
+# D-058 is a one-release delivery of the Node Tochka bridge and iOS input repair.
 # Production authorization still requires the protected Environment below. The
 # exception is constrained to the successful hosted verification of the exact
 # merged main SHA from the named release branch and repository.
@@ -22,9 +22,9 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/d057-tochka-stateless-egress-20260903
-  EXPECTED_RELEASE_PR: '326'
-  PREVIOUS_RELEASE_SHA: a48eed30b3a0910c603ff7ad2285a42b3785a507
+  EXPECTED_RELEASE_HEAD: codex/d058-tochka-node-bridge-ios-20260903
+  EXPECTED_RELEASE_PR: '327'
+  PREVIOUS_RELEASE_SHA: 1cdca3fd9cb63f6dd7c8d8ce137e4126b4fc1123
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -55,8 +55,8 @@ jobs:
       (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/d057-tochka-stateless-egress-20260903' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('326') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/d058-tochka-node-bridge-ios-20260903' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('327') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -71,7 +71,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Verify one-release D-057 trigger and protected Environment
+      - name: Verify one-release D-058 trigger and protected Environment
         timeout-minutes: 4
         env:
           GH_TOKEN: ${{ github.token }}
@@ -306,6 +306,9 @@ jobs:
           grep -F 'SCHOOL_DIARY_ALLOWED_ORIGINS' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport() }' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          test -s deploy/v52/overrides/production/tochka-transport.mjs
+          grep -F 'COPY --from=application /app/production/tochka-transport.mjs /app/production/tochka-transport.mjs' deploy/v52/Dockerfile >/dev/null
           grep -F 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem' deploy/v52/Dockerfile >/dev/null
           if grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
             echo 'Plaintext central access secret binding is forbidden' >&2
@@ -875,6 +878,7 @@ jobs:
               "$immutable_image_id" --input-type=module - <<'NODE'
           import { X509Certificate } from "node:crypto";
           import { getCACertificates } from "node:tls";
+          import { probeTochkaTlsEgress } from "./production/tochka-transport.mjs";
 
           const expectedRoot = "D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31";
           const extraRoots = getCACertificates("extra").map((pem) => new X509Certificate(pem));
@@ -882,17 +886,8 @@ jobs:
             throw new Error("Pinned Tochka trust anchor is not active");
           }
 
-          const response = await fetch("https://enter.tochka.com/uapi/open-banking/v1.0/customers", {
-            method: "GET",
-            headers: { accept: "application/json" },
-            redirect: "error",
-            signal: AbortSignal.timeout(20_000),
-          });
-          if (response.status < 400 || response.status >= 500) {
-            throw new Error(`Unexpected Tochka unauthenticated response: ${response.status}`);
-          }
-          await response.body?.cancel();
-          console.log(`ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED status=${response.status}`);
+          const status = await probeTochkaTlsEgress();
+          console.log(`ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED status=${status}`);
           NODE
           }
 

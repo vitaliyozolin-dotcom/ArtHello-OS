@@ -795,6 +795,12 @@
     height: calc(100dvh - 20px);
   }
 
+  .ahIntegrationModalLayer .ahIntegrationSetupWizard input,
+  .ahIntegrationModalLayer .ahIntegrationSetupWizard select,
+  .ahIntegrationModalLayer .ahIntegrationSetupWizard textarea {
+    font-size: 16px;
+  }
+
   .ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-grid,
   .ahIntegrationModalLayer .ahIntegrationConnectionModal > dl {
     grid-template-columns: minmax(0, 1fr);

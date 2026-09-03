@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "Безсекретная TLS-проверка Точки отдельным stateless runtime",
+    "name": "Фактический Node-транспорт Точки и мобильная форма без автозума",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -158,12 +158,15 @@
       "IMG_9987 подтверждает доступ к нижним полям и запуск загрузки; IMG_9988 фиксирует отдельный серверный сбой соединения после отправки ключа",
       "Официальный API Точки использует российскую TLS-цепочку; production Node runtime получает закреплённый Russian Trusted Root CA без отключения проверки сертификатов",
       "D-055 прошёл Quality/Proof/Verify на main; production run 33749916676 fail-closed остановился до image import и live-мутаций, потому что checkout-step вызвал отсутствующий host Node",
-      "D-056 прошёл Quality/Proof/Verify и ранний checkout; production run 33750926328 подтвердил image/School/clone health и rollback, затем Docker запретил подключать private-none clone ко второй сети"
+      "D-056 прошёл Quality/Proof/Verify и ранний checkout; production run 33750926328 подтвердил image/School/clone health и rollback, затем Docker запретил подключать private-none clone ко второй сети",
+      "D-057 прошёл exact-SHA Quality/Proof/Verify и production run 33752514068 с ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED, clone-preflight, backup-first cutover и публичным health-check",
+      "Повторный ввод реального ключа после D-057 всё равно дал общую транспортную ошибку: Node egress был исправен, но фактический fetch приложения оставался внутри workerd без Node trust store",
+      "IMG_9991 и IMG_9992 подтверждают автоприближение Safari при фокусе на 13 px поле банковского ключа"
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
       "Т‑Банк нельзя подключать боевым токеном до независимого подтверждения статического исходящего IP сервера и выпуска владельцем токена с минимальными правами чтения счетов и выписки",
-      "Фактический импорт Точки ожидает успешную публикацию D-057 и безсекретную egress-проверку официального endpoint отдельным stateless immutable runtime"
+      "Фактический импорт Точки ожидает публикацию D-058 с Node service binding; действительность прав готового JWT и банковских данных подтверждает Точка при повторной проверке владельцем"
     ]
   },
   "stages": [
@@ -403,8 +406,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "опубликовать D-057: оставить stateful clone без сети и доказать TLS Точки отдельным read-only immutable контейнером без данных и секретов",
-    "evidence": "D-056 failure и ARTHELLO_ROLLBACK=VERIFIED подтверждают сохранность live; D-057 требует exact-SHA hosted gates, stateless TLS egress 4xx, изолированный clone, защищённую выкладку и повторный импорт владельцем"
+    "result": "опубликовать D-058: направить фактические read-only вызовы worker через ограниченный Node transport и устранить автозум поля ключа на iPhone",
+    "evidence": "7 целевых transport/UI тестов, lint и production build зелёные; Miniflare service-binding smoke proof успешен; релиз требует exact-SHA hosted gates, preflight тем же transport-модулем, изолированный clone, защищённую выкладку и повторную проверку владельцем"
   },
   "decisionLog": [
     {
@@ -1609,6 +1612,81 @@
           "owner": "Виталий Озолин",
           "due": "после production health D-057",
           "evidence_required": "реальные счета, остатки, выписки и проведённые операции без раскрытия ключа и полных номеров счетов",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "decision_id": "DEC-2026-09-03-69",
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "question": "Почему реальный ключ Точки всё ещё даёт транспортную ошибку после успешной Node TLS-проверки и как устранить автоприближение формы на iPhone?",
+      "statement": "Фактические read-only запросы worker передаются в Node через function-valued Miniflare service binding TOCHKA_TRANSPORT, потому что production NODE_EXTRA_CA_CERTS применяется к Node, но не к workerd fetch. Node-мост имеет строгий allowlist официального origin, методов и путей клиентов, счетов и выписок, очищает заголовки и ограничивает тело. На мобильных устройствах поля мастера имеют 16 px, что устраняет автозум Safari без отключения пользовательского масштабирования.",
+      "context": "D-057 production run 33752514068 успешно подтвердил TLS-доступ к Точке из Node и завершил защищённую выкладку, однако повтор владельца с реальным ключом снова получил общую ошибку до HTTP-ответа банка. IMG_9991 и IMG_9992 также показывают увеличение окна после вставки ключа. Трассировка кода установила, что API-маршрут выполнял fetch внутри workerd и не использовал Node trust store; поле мастера имело 13 px.",
+      "rationale": "Service binding соединяет фактический worker-путь с уже проверенным Node TLS-контуром, не расширяя банковские полномочия. Отдельный транспортный модуль можно протестировать как поведение и вызвать в безсекретном production preflight. Размер 16 px соответствует порогу iOS Safari и сохраняет pinch zoom, поэтому исправляет причину, а не маскирует масштаб страницы.",
+      "evidence": [
+        "D-057 production run 33752514068 завершён success с ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED, clone-preflight, резервной копией, cutover и публичным health-check",
+        "IMG_9991 и IMG_9992: реальный запуск достиг банковской проверки, вернул общую ошибку и увеличил мобильную форму после фокуса на поле ключа",
+        "Красные тесты воспроизвели отсутствие production/tochka-transport.mjs и мобильного правила 16 px; после реализации 7 из 7 целевых тестов зелёные",
+        "Локальный Miniflare smoke proof подтвердил вызов function-valued TOCHKA_TRANSPORT из worker ровно один раз",
+        "Линтер и production build завершены успешно"
+      ],
+      "assumptions": [
+        "Введённый владельцем готовый JWT соответствует формату Точки; его действительность, компания и read-only права окончательно подтверждает HTTP-ответ банка после D-058"
+      ],
+      "approved_by": "Виталий Озолин",
+      "approved_at": "2026-09-03",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после production-публикации D-058 и повторной проверки владельцем",
+      "affected_stages": [
+        16,
+        22
+      ],
+      "dependencies": [
+        "D-057",
+        "Miniflare service bindings",
+        "закреплённый Russian Trusted Root CA",
+        "production-конвейер"
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33752514068",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/327",
+        "https://developers.tochka.com/docs/tochka-api/certificate"
+      ],
+      "raw_deliberation_ref": "повторная production-проверка владельца и изображения IMG_9991/IMG_9992, 03.09.2026",
+      "rejected_alternatives": [
+        {
+          "option": "Отключить TLS-проверку или принимать любой сертификат",
+          "reason": "Создаёт недопустимый риск перехвата банковского ключа и не нужен при наличии закреплённого CA",
+          "reopen_condition": "нет"
+        },
+        {
+          "option": "Сделать Node-мост универсальным proxy",
+          "reason": "Расширяет SSRF и банковскую поверхность; продукту нужны только четыре точных read-only вызова",
+          "reopen_condition": "только отдельным решением с новыми тестами и минимальным allowlist"
+        },
+        {
+          "option": "Запретить масштабирование страницы через viewport user-scalable=no",
+          "reason": "Ухудшает доступность и скрывает причину автозума вместо исправления размера поля",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Опубликовать D-058 через PR 327 и получить exact-SHA production evidence",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "first-attempt hosted Quality/Proof/Verify, preflight реальным transport-модулем, изолированный clone, backup-first cutover, rollback guards и public health",
+          "status": "in_progress"
+        },
+        {
+          "action": "После D-058 повторить подключение Точки с реальным ключом",
+          "owner": "Виталий Озолин",
+          "due": "после production health D-058",
+          "evidence_required": "либо реальные счета, остатки, выписки и проведённые операции, либо конкретный HTTP-ответ банка о формате/праве без общей транспортной ошибки",
           "status": "open"
         }
       ]

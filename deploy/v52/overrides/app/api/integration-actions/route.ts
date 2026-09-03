@@ -71,6 +71,15 @@ const connectionScopedActions = new Set([
   "revokeCredential",
 ]);
 type RequestContext = NonNullable<Awaited<ReturnType<typeof getAuthenticatedRequestContext>>>;
+type RuntimeFetcher = {
+  fetch(input: Request | string | URL, init?: RequestInit): Promise<Response>;
+};
+
+async function tochkaTransportFetch(input: Request | string | URL, init?: RequestInit) {
+  const transport = (env as unknown as { TOCHKA_TRANSPORT?: RuntimeFetcher }).TOCHKA_TRANSPORT;
+  if (!transport) throw new Error("TOCHKA_TRANSPORT binding is unavailable");
+  return transport.fetch(input, init);
+}
 
 export async function POST(request: Request) {
   const publicOrigin = (env as unknown as { ARTHELLO_PUBLIC_ORIGIN?: string }).ARTHELLO_PUBLIC_ORIGIN?.trim() ?? "";
@@ -205,7 +214,7 @@ async function saveSetup(actor: string, body: Record<string, unknown>) {
       }
       const candidateProbe = await probeTochkaJwt(
         credential,
-        fetch,
+        tochkaTransportFetch,
         Date.now(),
         selectedCompany?.customerCode ?? "",
       );
@@ -237,6 +246,7 @@ async function saveSetup(actor: string, body: Record<string, unknown>) {
         token: credential,
         customerCode: setup.customerCode,
         startDate: setup.startDate || "2026-01-01",
+        request: tochkaTransportFetch,
       }));
     }
     if (connectionId === tbankConnectionId) {
@@ -322,6 +332,7 @@ async function verifyTochkaConnection(actor: string, setup: IntegrationSetup, tr
     token,
     customerCode: setup.customerCode,
     startDate: setup.startDate || "2026-01-01",
+    request: tochkaTransportFetch,
   }));
 }
 
