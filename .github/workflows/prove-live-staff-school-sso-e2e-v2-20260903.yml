@@ -1,0 +1,208 @@
+name: Prove live staff School SSO end to end v2
+
+on:
+  push:
+    branches:
+      - codex/verify-fix-staff-school-sso-20260903
+    paths:
+      - .github/workflows/prove-live-staff-school-sso-e2e-v2-20260903.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prove-live-staff-school-sso-e2e-v2-20260903
+  cancel-in-progress: false
+
+jobs:
+  prove:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 20
+
+    steps:
+      - name: Prove all active staff journeys and remove ephemeral records
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec 9>/var/lock/arthello-staff-school-sso-live-e2e.lock
+          flock -n 9
+
+          live="$(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}' | head -n1)"
+          test -n "$live"
+          test "$(docker inspect "$live" --format '{{.State.Running}}')" = true
+          image="$(docker inspect "$live" --format '{{.Config.Image}}')"
+          revision="$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true)"
+          printf 'LIVE_E2E_ARTHELLO_REVISION=%s\n' "${revision:-unknown}"
+
+          asset="$(docker exec "$live" sh -lc "grep -RIl --include='*.js' 'auth/central/start' /app/dist/client/assets 2>/dev/null | head -n1")"
+          test -n "$asset"
+          new_window_refs="$(docker exec "$live" sh -lc "grep -Eo 'window\.open|_blank' '$asset' 2>/dev/null | wc -l" | tr -d '[:space:]')"
+          same_tab_refs="$(docker exec "$live" sh -lc "grep -Eo 'location\.assign' '$asset' 2>/dev/null | wc -l" | tr -d '[:space:]')"
+          printf 'LIVE_DIARY_ENTRY_NEW_WINDOW_REFS=%s\n' "${new_window_refs:-0}"
+          printf 'LIVE_DIARY_ENTRY_SAME_TAB_REFS=%s\n' "${same_tab_refs:-0}"
+
+          docker exec -i \
+            -e ARTHELLO_ORIGIN='https://arthello-188-225-38-55.sslip.io' \
+            -e SCHOOL_ORIGIN='https://school-188-225-38-55.sslip.io' \
+            "$live" node --input-type=module - <<'NODE'
+          import { createHash, randomBytes } from 'node:crypto';
+          import { readdirSync, statSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+
+          const arthelloOrigin=process.env.ARTHELLO_ORIGIN;
+          const schoolOrigin=process.env.SCHOOL_ORIGIN;
+          const files=[];
+          function walk(path,depth=0){
+            if(depth>8)return;
+            let entries=[];
+            try{entries=readdirSync(path,{withFileTypes:true});}catch{return;}
+            for(const entry of entries){
+              const next=join(path,entry.name);
+              if(entry.isDirectory())walk(next,depth+1);
+              else if(entry.isFile()&&/\.sqlite(?:3)?$/i.test(entry.name)){
+                try{if(statSync(next).size>8192)files.push(next);}catch{}
+              }
+            }
+          }
+          walk('/data/d1');
+          let databasePath='';
+          for(const file of files){
+            let db;
+            try{
+              db=new DatabaseSync(file,{readOnly:true});
+              const tables=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row)=>String(row.name)));
+              db.close();
+              if(tables.has('app_users')&&tables.has('user_system_access')&&tables.has('production_auth_sessions')&&tables.has('production_auth_credentials')){
+                databasePath=file;
+                break;
+              }
+            }catch{try{db?.close();}catch{}}
+          }
+          if(!databasePath)throw new Error('ArtHello D1 not found');
+
+          const db=new DatabaseSync(databasePath);
+          const accounts=db.prepare(`SELECT u.id AS appUserId,u.display_name AS displayName,
+            school.role AS schoolGrantRole,c.user_id AS authUserId,
+            central.access_version AS accessVersion
+            FROM app_users u
+            JOIN user_system_access central ON central.user_id=u.id AND central.system_id='SYS-ARTHELLO-OS'
+            JOIN user_system_access school ON school.user_id=u.id AND school.system_id='SYS-SCHOOL-1-11'
+            JOIN production_auth_credentials c ON c.user_id=CASE WHEN u.id='USR-OWNER' THEN 'AUTH-OWNER' ELSE u.id END
+            WHERE u.status='Активен' AND central.status='Активен' AND school.status='Активен'
+              AND u.access_version=central.access_version AND u.access_version=school.access_version
+              AND COALESCE(c.must_change_password,0)=0
+            ORDER BY u.display_name,u.id`).all();
+          if(accounts.length<1){db.close();throw new Error('No eligible staff accounts');}
+          const insert=db.prepare(`INSERT INTO production_auth_sessions
+            (token_hash,user_id,csrf_token,expires_at,access_version,created_at)
+            VALUES (?,?,?,?,?,?)`);
+          const now=Math.floor(Date.now()/1000);
+          const sessions=[];
+          for(const account of accounts){
+            const token=randomBytes(32).toString('base64url');
+            const tokenHash=createHash('sha256').update(token).digest('base64url');
+            insert.run(tokenHash,account.authUserId,randomBytes(24).toString('base64url'),now+900,account.accessVersion,now);
+            sessions.push({...account,token,tokenHash});
+          }
+          db.close();
+
+          const codeHashes=[];
+          const results=[];
+          const redirectStatuses=new Set([302,303,307,308]);
+          function setCookies(response){
+            if(typeof response.headers.getSetCookie==='function')return response.headers.getSetCookie();
+            const raw=response.headers.get('set-cookie');
+            return raw?[raw]:[];
+          }
+          function mergeCookies(jar,rawCookies){
+            for(const raw of rawCookies){
+              const pair=raw.split(';',1)[0];
+              const split=pair.indexOf('=');
+              if(split<=0)continue;
+              const name=pair.slice(0,split);
+              const value=pair.slice(split+1);
+              if(value&& !/Max-Age=0/i.test(raw))jar.set(name,value);else jar.delete(name);
+            }
+          }
+          function cookieHeader(jar){return [...jar].map(([key,value])=>`${key}=${value}`).join('; ');}
+          function safeLocation(raw,base){
+            try{const url=new URL(raw,base);return `${url.origin}${url.pathname}${url.searchParams.has('authError')?'?authError='+url.searchParams.get('authError'):''}`;}
+            catch{return String(raw||'').slice(0,100);}
+          }
+
+          try{
+            for(const account of sessions){
+              const stages={};
+              const schoolCookies=new Map();
+              try{
+                const start=await fetch(`${schoolOrigin}/auth/central/start?returnTo=/`,{redirect:'manual',headers:{'cache-control':'no-store'}});
+                stages.start=start.status;
+                mergeCookies(schoolCookies,setCookies(start));
+                if(!redirectStatuses.has(start.status))throw new Error(`start_http_${start.status}`);
+                const authorizeUrl=new URL(start.headers.get('location')||'',schoolOrigin);
+                if(authorizeUrl.origin!==arthelloOrigin||authorizeUrl.pathname!=='/api/school-sso/authorize')throw new Error(`start_location_${safeLocation(authorizeUrl,schoolOrigin)}`);
+                if(!schoolCookies.has('school_sso_tx'))throw new Error('transaction_cookie_missing');
+
+                const authorize=await fetch(authorizeUrl,{redirect:'manual',headers:{cookie:`__Host-arthello_session=${account.token}`,'cache-control':'no-store'}});
+                stages.authorize=authorize.status;
+                if(!redirectStatuses.has(authorize.status))throw new Error(`authorize_http_${authorize.status}`);
+                const callbackUrl=new URL(authorize.headers.get('location')||'',arthelloOrigin);
+                if(callbackUrl.searchParams.get('authError')==='central_denied')throw new Error(`central_denied:${callbackUrl.searchParams.get('reason')||'unknown'}`);
+                if(callbackUrl.origin!==schoolOrigin||callbackUrl.pathname!=='/auth/central/callback')throw new Error(`callback_location_${safeLocation(callbackUrl,arthelloOrigin)}`);
+                const code=callbackUrl.searchParams.get('code')||'';
+                if(!code)throw new Error('authorization_code_missing');
+                codeHashes.push(createHash('sha256').update(code).digest('base64url'));
+
+                const callback=await fetch(callbackUrl,{redirect:'manual',headers:{cookie:cookieHeader(schoolCookies),'cache-control':'no-store'}});
+                stages.callback=callback.status;
+                mergeCookies(schoolCookies,setCookies(callback));
+                if(!redirectStatuses.has(callback.status)){
+                  const text=(await callback.text()).replace(/\s+/g,' ').slice(0,160);
+                  throw new Error(`callback_http_${callback.status}:${text}`);
+                }
+
+                const me=await fetch(`${schoolOrigin}/api/auth/me`,{redirect:'manual',headers:{cookie:cookieHeader(schoolCookies),'cache-control':'no-store'}});
+                stages.me=me.status;
+                const payload=await me.json().catch(()=>({}));
+                if(!me.ok)throw new Error(`school_me_http_${me.status}`);
+                const user=payload.user&&typeof payload.user==='object'?payload.user:payload;
+                const finalRole=String(user.role||payload.role||'');
+                const finalName=String(user.displayName||user.name||payload.displayName||payload.name||'');
+                if(!finalRole)throw new Error('school_role_missing');
+                if(finalName&&finalName!==account.displayName)throw new Error(`school_identity_mismatch:${finalName}`);
+                results.push({appUserId:account.appUserId,displayName:account.displayName,schoolGrantRole:account.schoolGrantRole,finalRole,finalName:finalName||account.displayName,stages,status:'PASS'});
+              }catch(error){
+                results.push({appUserId:account.appUserId,displayName:account.displayName,schoolGrantRole:account.schoolGrantRole,stages,status:'FAIL',reason:error instanceof Error?error.message.slice(0,240):'unknown'});
+              }
+            }
+          }finally{
+            const cleanupDb=new DatabaseSync(databasePath);
+            const removeSession=cleanupDb.prepare('DELETE FROM production_auth_sessions WHERE token_hash=?');
+            for(const session of sessions)removeSession.run(session.tokenHash);
+            const tables=new Set(cleanupDb.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row)=>String(row.name)));
+            if(tables.has('school_sso_codes')){
+              const removeCode=cleanupDb.prepare('DELETE FROM school_sso_codes WHERE code_hash=?');
+              for(const hash of codeHashes)removeCode.run(hash);
+            }
+            cleanupDb.close();
+            console.log('LIVE_STAFF_SSO_EPHEMERAL_DATA_CLEANED=PASS');
+          }
+
+          console.log('LIVE_STAFF_SSO_RESULTS_BEGIN');
+          console.log(JSON.stringify(results,null,2));
+          console.log('LIVE_STAFF_SSO_RESULTS_END');
+          const failed=results.filter((item)=>item.status!=='PASS');
+          console.log(`LIVE_STAFF_SSO_TOTAL=${results.length}`);
+          console.log(`LIVE_STAFF_SSO_PASS=${results.length-failed.length}`);
+          console.log(`LIVE_STAFF_SSO_FAIL=${failed.length}`);
+          if(failed.length)process.exit(2);
+          NODE
+
+          test "${new_window_refs:-0}" -eq 0
+          test "${same_tab_refs:-0}" -ge 1
+          printf 'LIVE_STAFF_SCHOOL_SSO_E2E=PASS\n'
