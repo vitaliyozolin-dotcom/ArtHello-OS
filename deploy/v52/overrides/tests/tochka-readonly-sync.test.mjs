@@ -149,10 +149,12 @@ test("integration wizard has an independently scrollable mobile body and describ
   assert.match(workspace, /\["Счета", "Выписки", "Операции и платежи", "Реестр операций", "Остатки"\]/);
   assert.match(workspace, /Загружать выписки с/);
   assert.doesNotMatch(workspace, /Загрузка выписок, расписание синхронизации и правила распределения операций ещё не запущены/);
-  assert.match(globalStyles, /\.connection-modal,\.setup-wizard\{height:auto!important/);
-  assert.match(mobileStyles, /\.setup-wizard,[\s\S]*?max-height:\s*none\s*!important;[\s\S]*?overflow:\s*visible\s*!important/);
-  assert.match(styles, /\.ahIntegrationModalLayer > \.ahIntegrationSetupWizard\s*\{[\s\S]*?display:\s*grid\s*!important;[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\) auto\s*!important;[\s\S]*?overflow:\s*hidden\s*!important;[\s\S]*?padding:\s*0\s*!important/);
-  assert.match(styles, /\.ahIntegrationModalLayer \.ahIntegrationSetupWizard > \.ahIntegrationSetupBody\s*\{[\s\S]*?min-height:\s*0\s*!important;[\s\S]*?overflow-y:\s*auto\s*!important;[\s\S]*?-webkit-overflow-scrolling:\s*touch\s*!important;[\s\S]*?touch-action:\s*pan-y\s*!important/);
-  assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.ahIntegrationModalLayer > \.ahIntegrationSetupWizard\s*\{[\s\S]*?height:\s*calc\(100dvh - 20px\)\s*!important;[\s\S]*?max-height:\s*calc\(100dvh - 20px\)\s*!important;[\s\S]*?overflow:\s*hidden\s*!important/);
-  assert.match(styles, /body:has\(\.ahIntegrationModalLayer\) \[data-ah-help-root\] \.ah-launch\s*\{[\s\S]*?display:\s*none\s*!important/);
+  assert.doesNotMatch(styles, /!important/i);
+  assert.doesNotMatch(globalStyles, /\.connection-modal,\.setup-wizard\{height:auto!important/);
+  assert.match(globalStyles, /\.connection-modal,\.setup-wizard:not\(\.ahIntegrationSetupWizard\)\{height:auto!important/);
+  assert.match(mobileStyles, /\.setup-wizard:not\(\.ahIntegrationSetupWizard\),[\s\S]*?max-height:\s*none\s*!important;[\s\S]*?overflow:\s*visible\s*!important/);
+  assert.match(styles, /\.ahIntegrationModalLayer > \.ahIntegrationSetupWizard\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\) auto;[\s\S]*?height:\s*min\(820px, calc\(100dvh - 48px\)\);[\s\S]*?max-height:\s*calc\(100dvh - 48px\);[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0/);
+  assert.match(styles, /\.ahIntegrationModalLayer \.ahIntegrationSetupWizard > \.ahIntegrationSetupBody\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow-y:\s*auto;[\s\S]*?-webkit-overflow-scrolling:\s*touch;[\s\S]*?touch-action:\s*pan-y/);
+  assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.ahIntegrationModalLayer > \.ahIntegrationSetupWizard\s*\{[\s\S]*?height:\s*calc\(100dvh - 20px\);[\s\S]*?max-height:\s*calc\(100dvh - 20px\);[\s\S]*?overflow:\s*hidden/);
+  assert.match(styles, /body:has\(\.ahIntegrationModalLayer\) \[data-ah-help-root\] \.ah-launch\s*\{[\s\S]*?display:\s*none/);
 });
