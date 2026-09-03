@@ -1,6 +1,6 @@
 name: Deploy ArtHello self-hosted RU
 
-# D-055 is a one-release delivery of the Tochka API TLS trust correction.
+# D-056 is a one-release recovery of the Tochka TLS deployment preflight.
 # Production authorization still requires the protected Environment below. The
 # exception is constrained to the successful hosted verification of the exact
 # merged main SHA from the named release branch and repository.
@@ -22,9 +22,9 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/d055-tochka-tls-20260903
-  EXPECTED_RELEASE_PR: '324'
-  PREVIOUS_RELEASE_SHA: c93a066dae1e3cb1cee83b17de6b2624a0f73baa
+  EXPECTED_RELEASE_HEAD: codex/d056-tochka-runner-preflight-20260903
+  EXPECTED_RELEASE_PR: '325'
+  PREVIOUS_RELEASE_SHA: 66ca9490d7e765a1338ad0c4ce8cdc2c163c9d36
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -55,8 +55,8 @@ jobs:
       (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/d055-tochka-tls-20260903' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('324') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/d056-tochka-runner-preflight-20260903' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('325') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -71,7 +71,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Verify one-release D-055 trigger and protected Environment
+      - name: Verify one-release D-056 trigger and protected Environment
         timeout-minutes: 4
         env:
           GH_TOKEN: ${{ github.token }}
@@ -307,13 +307,6 @@ jobs:
           grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem' deploy/v52/Dockerfile >/dev/null
-          node - <<'NODE'
-          const { readFileSync } = require('node:fs');
-          const { X509Certificate } = require('node:crypto');
-          const certificate = new X509Certificate(readFileSync('./deploy/v52/certificates/russian-trusted-root-ca.pem'));
-          const fingerprint = 'D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31';
-          if (certificate.fingerprint256 !== fingerprint || !certificate.ca || certificate.subject !== certificate.issuer || !certificate.checkIssued(certificate) || !certificate.verify(certificate.publicKey) || Date.parse(certificate.validTo) <= Date.now()) process.exit(1);
-          NODE
           if grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
             echo 'Plaintext central access secret binding is forbidden' >&2
             exit 1

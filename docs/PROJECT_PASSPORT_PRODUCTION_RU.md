@@ -536,3 +536,13 @@ decision:
 - границы: импортируются счета, остатки, выписки и уже проведённые операции; создание, подписание, отправка и отзыв платежей остаются запрещёнными;
 - следующий переход: после production health владелец повторно вводит ключ и подтверждает банковский снимок без раскрытия ключа и полных номеров счетов.
 
+## D-056 — X.509-проверка без зависимости от Node на production-host
+
+- факт: D-055 merge `66ca9490d7e765a1338ad0c4ce8cdc2c163c9d36` прошёл main Quality/Proof/Verify; production run `33749916676` fail-closed завершился в checkout-contract с exit code 127 до image import, SSH, Docker и live-мутаций;
+- причина: минимальный self-hosted runner не содержит host-команду `node`, а новая ранняя проверка ошибочно зависела от неё;
+- решение: host сверяет точный SHA-256 PEM и Dockerfile стандартными утилитами; X.509 и активный trust store проверяются при hosted build и внутри точного immutable container;
+- защита от повтора: Verify workflow запрещает host-вызов Node в checkout-contract;
+- release PR/branch: `#325`, `codex/d056-tochka-runner-preflight-20260903`; previous main SHA `66ca9490d7e765a1338ad0c4ce8cdc2c163c9d36`;
+- данные и доступность: предыдущий run не скачал image и не остановил live; база, маршрут и действующий контейнер остались без изменений;
+- приёмка: новый first-attempt Quality/Verify, container-based `ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED`, backup-first cutover, rollback и публичный health-check;
+- следующий переход: после успешного D-056 повторить реальный read-only импорт Точки.

@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "Восстановление защищённого TLS-соединения с API Точки",
+    "name": "Production-проверка TLS Точки внутри immutable runtime",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -156,12 +156,13 @@
       "Allowlist не разрешает создание, подписание, отправку или отзыв новых платежей; повторный импорт сохраняет ручную классификацию",
       "Повторная проверка отделила прокручиваемое окно Настроек от обрезанного вложенного окна Точки; каноническая форма исключена из legacy-селекторов height:auto/max-height:none/overflow:visible",
       "IMG_9987 подтверждает доступ к нижним полям и запуск загрузки; IMG_9988 фиксирует отдельный серверный сбой соединения после отправки ключа",
-      "Официальный API Точки использует российскую TLS-цепочку; production Node runtime получает закреплённый Russian Trusted Root CA без отключения проверки сертификатов"
+      "Официальный API Точки использует российскую TLS-цепочку; production Node runtime получает закреплённый Russian Trusted Root CA без отключения проверки сертификатов",
+      "D-055 прошёл Quality/Proof/Verify на main; production run 33749916676 fail-closed остановился до image import и live-мутаций, потому что checkout-step вызвал отсутствующий host Node"
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
       "Т‑Банк нельзя подключать боевым токеном до независимого подтверждения статического исходящего IP сервера и выпуска владельцем токена с минимальными правами чтения счетов и выписки",
-      "Фактический импорт Точки заблокирован отсутствующим TLS trust anchor в текущем production runtime до успешной публикации и egress-проверки D-055"
+      "Фактический импорт Точки ожидает успешную публикацию D-056 и безсекретную egress-проверку официального endpoint из immutable production runtime"
     ]
   },
   "stages": [
@@ -401,8 +402,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "опубликовать D-055 и восстановить защищённое соединение production runtime с официальным read-only API Точки",
-    "evidence": "точный trust anchor проходит fingerprint/self-signature/validity проверки; финальное доказательство — exact-SHA hosted gates, безсекретный production TLS egress preflight, защищённая выкладка и повторный импорт владельцем"
+    "result": "опубликовать D-056, не требуя host Node, и восстановить защищённое соединение immutable production runtime с официальным read-only API Точки",
+    "evidence": "D-055 failure подтверждает сохранность live до image import; D-056 требует exact-SHA hosted gates, запрет host Node, безсекретный container TLS egress preflight, защищённую выкладку и повторный импорт владельцем"
   },
   "decisionLog": [
     {
@@ -1481,6 +1482,66 @@
           "due": "после production health D-055",
           "evidence_required": "успешное сообщение интерфейса и банковский снимок без раскрытия ключа или полных номеров счетов",
           "status": "open"
+        }
+      ]
+    },
+    {
+      "decision_id": "DEC-2026-09-03-67",
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "question": "Как продолжить D-055 после fail-closed остановки production checkout на отсутствующей host-команде Node?",
+      "statement": "Проверка X.509 выполняется только там, где runtime гарантирован: при hosted Docker build и внутри immutable container. Production host до image import сверяет точный SHA-256 PEM и Dockerfile-контракт без зависимости от Node. Verify запрещает возвращать host-вызов Node в checkout-contract.",
+      "context": "D-055 merge 66ca9490d7e765a1338ad0c4ce8cdc2c163c9d36 прошёл main Quality/Proof/Verify. Production run 33749916676 завершился exit code 127 в шаге Verify checkout and release contracts до image import; команда node отсутствует на минимальном self-hosted runner. Docker, SSH, live-контейнер, маршрут и данные не затрагивались.",
+      "rationale": "Проверка должна исполняться в аттестованном окружении, которое она проверяет. Удаление лишней host-зависимости восстанавливает воспроизводимость, не уменьшая криптографические или сетевые доказательства D-055.",
+      "evidence": [
+        "Main Quality 33749691924, Proof 33749691844 и Verify 33749692052 завершены success",
+        "Production run 33749916676: trigger, exact main gates и checkout успешны; checkout contracts завершён exit code 127; image import и cutover skipped",
+        "Hosted Verify проверяет CA-признак, fingerprint, самоподпись и срок при сборке, а runtime readiness проверяет активный extra trust store"
+      ],
+      "assumptions": [
+        "sha256sum, Docker и Python остаются частью закреплённого production-runner контракта; Node на host не требуется"
+      ],
+      "approved_by": "Виталий Озолин",
+      "approved_at": "2026-09-03",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после production-публикации D-056",
+      "affected_stages": [
+        16,
+        22
+      ],
+      "dependencies": [
+        "D-055",
+        "immutable image",
+        "self-hosted production runner",
+        "production-конвейер"
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33749916676",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/325"
+      ],
+      "raw_deliberation_ref": "production evidence ArtHello OS, 03.09.2026",
+      "rejected_alternatives": [
+        {
+          "option": "Установить Node на production host вручную",
+          "reason": "Расширяет доверенную базу и конфигурацию хоста ради проверки, уже выполняемой внутри точного image",
+          "reopen_condition": "только как отдельное утверждённое изменение runner image и его supply-chain"
+        },
+        {
+          "option": "Пропустить проверку сертификата",
+          "reason": "Ослабляет D-055 и не требуется для устранения host-зависимости",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Опубликовать D-056 и получить container-based TLS egress evidence до cutover",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "зелёные exact-SHA gates, отсутствие host Node в checkout, ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED, production health",
+          "status": "in_progress"
         }
       ]
     }
