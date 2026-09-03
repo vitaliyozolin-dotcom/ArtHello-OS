@@ -78,7 +78,10 @@ type RuntimeFetcher = {
 async function tochkaTransportFetch(input: Request | string | URL, init?: RequestInit) {
   const transport = (env as unknown as { TOCHKA_TRANSPORT?: RuntimeFetcher }).TOCHKA_TRANSPORT;
   if (!transport) throw new Error("TOCHKA_TRANSPORT binding is unavailable");
-  return transport.fetch(input, init);
+  // workerd rejects `redirect: "error"` before a service binding is invoked.
+  // The Node transport applies the strict no-redirect policy at the real
+  // upstream boundary, so the internal hop uses workerd's supported mode.
+  return transport.fetch(input, { ...init, redirect: "manual" });
 }
 
 export async function POST(request: Request) {

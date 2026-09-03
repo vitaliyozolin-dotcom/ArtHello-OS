@@ -1,6 +1,6 @@
 name: Deploy ArtHello self-hosted RU
 
-# D-058 is a one-release delivery of the Node Tochka bridge and iOS input repair.
+# D-059 is a one-release repair of the workerd-to-Node Tochka binding boundary.
 # Production authorization still requires the protected Environment below. The
 # exception is constrained to the successful hosted verification of the exact
 # merged main SHA from the named release branch and repository.
@@ -22,9 +22,9 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/d058-tochka-node-bridge-ios-20260903
-  EXPECTED_RELEASE_PR: '327'
-  PREVIOUS_RELEASE_SHA: 1cdca3fd9cb63f6dd7c8d8ce137e4126b4fc1123
+  EXPECTED_RELEASE_HEAD: codex/d059-tochka-binding-redirect-20260903
+  EXPECTED_RELEASE_PR: '328'
+  PREVIOUS_RELEASE_SHA: 7e926f4c29aa7e3c3208a55451db035714861e28
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -55,8 +55,8 @@ jobs:
       (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/d058-tochka-node-bridge-ios-20260903' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('327') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/d059-tochka-binding-redirect-20260903' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('328') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -71,7 +71,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Verify one-release D-058 trigger and protected Environment
+      - name: Verify one-release D-059 trigger and protected Environment
         timeout-minutes: 4
         env:
           GH_TOKEN: ${{ github.token }}
@@ -307,7 +307,10 @@ jobs:
           grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport() }' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'return transport.fetch(input, { ...init, redirect: "manual" });' deploy/v52/overrides/app/api/integration-actions/route.ts >/dev/null
           test -s deploy/v52/overrides/production/tochka-transport.mjs
+          grep -F 'const responseBody = await readBoundedResponseBody(upstream);' deploy/v52/overrides/production/tochka-transport.mjs >/dev/null
+          grep -F 'workerd reaches the Node service binding through its supported internal redirect mode' deploy/v52/overrides/tests/tochka-node-transport.test.mjs >/dev/null
           grep -F 'COPY --from=application /app/production/tochka-transport.mjs /app/production/tochka-transport.mjs' deploy/v52/Dockerfile >/dev/null
           grep -F 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem' deploy/v52/Dockerfile >/dev/null
           if grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then

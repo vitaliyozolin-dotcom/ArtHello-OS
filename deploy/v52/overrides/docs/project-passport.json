@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "Фактический Node-транспорт Точки и мобильная форма без автозума",
+    "name": "Рабочий worker → Node‑транспорт Точки",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -161,12 +161,16 @@
       "D-056 прошёл Quality/Proof/Verify и ранний checkout; production run 33750926328 подтвердил image/School/clone health и rollback, затем Docker запретил подключать private-none clone ко второй сети",
       "D-057 прошёл exact-SHA Quality/Proof/Verify и production run 33752514068 с ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED, clone-preflight, backup-first cutover и публичным health-check",
       "Повторный ввод реального ключа после D-057 всё равно дал общую транспортную ошибку: Node egress был исправен, но фактический fetch приложения оставался внутри workerd без Node trust store",
-      "IMG_9991 и IMG_9992 подтверждают автоприближение Safari при фокусе на 13 px поле банковского ключа"
+      "IMG_9991 и IMG_9992 подтверждают автоприближение Safari при фокусе на 13 px поле банковского ключа",
+      "D-058 опубликован: production run 33762398372 завершён success, активен merge SHA 7e926f4c29aa7e3c3208a55451db035714861e28, Node TLS egress подтверждён ответом 403",
+      "IMG_9996(2)/IMG_9997(2) подтверждают: после D-058 реальный запуск снова завершился общей ошибкой «Не удалось связаться с Точкой»",
+      "Точная версия Miniflare 4.20260515.0 воспроизводит причину: workerd отклоняет redirect:error до вызова function-valued service binding; с redirect:manual внутренний hop достигает Node, где сохраняется redirect:error",
+      "Регрессия D-059 выполняет фактический Miniflare service-binding smoke, проверку таймаута до полного чтения тела и ограничение ответа 2 000 000 байт"
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
       "Т‑Банк нельзя подключать боевым токеном до независимого подтверждения статического исходящего IP сервера и выпуска владельцем токена с минимальными правами чтения счетов и выписки",
-      "Фактический импорт Точки ожидает публикацию D-058 с Node service binding; действительность прав готового JWT и банковских данных подтверждает Точка при повторной проверке владельцем"
+      "Фактический импорт Точки ожидает D-059 с допустимым workerd redirect mode; действительность JWT, компаний и read-only прав подтвердит ответ банка после повторной проверки владельцем"
     ]
   },
   "stages": [
@@ -406,8 +410,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "опубликовать D-058: направить фактические read-only вызовы worker через ограниченный Node transport и устранить автозум поля ключа на iPhone",
-    "evidence": "7 целевых transport/UI тестов, lint и production build зелёные; Miniflare service-binding smoke proof успешен; релиз требует exact-SHA hosted gates, preflight тем же transport-модулем, изолированный clone, защищённую выкладку и повторную проверку владельцем"
+    "result": "опубликовать D-059: использовать redirect:manual только на внутреннем worker → service binding hop, сохранить запрет redirects в Node и закрыть зависание/неограниченное тело ответа",
+    "evidence": "8/8 целевых transport/service-binding тестов, lint и production build; потоковый JSON полностью читается через Miniflare, HTTP 204 сохраняется без ложного 502; exact-SHA hosted gates, Node TLS preflight, изолированный clone, backup-first cutover, rollback guards, public health и повторная проверка владельцем"
   },
   "decisionLog": [
     {
@@ -1619,7 +1623,7 @@
     {
       "decision_id": "DEC-2026-09-03-69",
       "project_id": "ARTHELLO-OS",
-      "status": "active",
+      "status": "superseded",
       "question": "Почему реальный ключ Точки всё ещё даёт транспортную ошибку после успешной Node TLS-проверки и как устранить автоприближение формы на iPhone?",
       "statement": "Фактические read-only запросы worker передаются в Node через function-valued Miniflare service binding TOCHKA_TRANSPORT, потому что production NODE_EXTRA_CA_CERTS применяется к Node, но не к workerd fetch. Node-мост имеет строгий allowlist официального origin, методов и путей клиентов, счетов и выписок, очищает заголовки и ограничивает тело. На мобильных устройствах поля мастера имеют 16 px, что устраняет автозум Safari без отключения пользовательского масштабирования.",
       "context": "D-057 production run 33752514068 успешно подтвердил TLS-доступ к Точке из Node и завершил защищённую выкладку, однако повтор владельца с реальным ключом снова получил общую ошибку до HTTP-ответа банка. IMG_9991 и IMG_9992 также показывают увеличение окна после вставки ключа. Трассировка кода установила, что API-маршрут выполнял fetch внутри workerd и не использовал Node trust store; поле мастера имело 13 px.",
@@ -1650,7 +1654,7 @@
         "production-конвейер"
       ],
       "supersedes": null,
-      "superseded_by": null,
+      "superseded_by": "DEC-2026-09-03-70",
       "source_links": [
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33752514068",
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/327",
@@ -1680,13 +1684,93 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "first-attempt hosted Quality/Proof/Verify, preflight реальным transport-модулем, изолированный clone, backup-first cutover, rollback guards и public health",
-          "status": "in_progress"
+          "status": "completed"
         },
         {
           "action": "После D-058 повторить подключение Точки с реальным ключом",
           "owner": "Виталий Озолин",
           "due": "после production health D-058",
           "evidence_required": "либо реальные счета, остатки, выписки и проведённые операции, либо конкретный HTTP-ответ банка о формате/праве без общей транспортной ошибки",
+          "status": "cancelled"
+        }
+      ]
+    },
+    {
+      "decision_id": "DEC-2026-09-03-70",
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "question": "Почему D-058 всё ещё возвращает общую ошибку Точки, нужно ли переходить на OAuth и как доказать исправление фактического worker → Node пути?",
+      "statement": "Внутренний вызов Miniflare service binding использует поддерживаемый workerd режим redirect:manual; строгий запрет redirects остаётся в Node-мосте на реальной границе с enter.tochka.com. Мост читает не более 2 000 000 байт внутри действующего таймаута и только затем возвращает ответ worker. Переход на OAuth сейчас отклонён: ошибка возникает до аутентификации банка, а OAuth token exchange и последующие API-вызовы зависели бы от того же транспортного пути.",
+      "context": "D-058 production run 33762398372 успешно активировал SHA 7e926f4c29aa7e3c3208a55451db035714861e28 и доказал Node TLS egress ответом 403. Повтор владельца на IMG_9996(2)/IMG_9997(2) снова дал «Не удалось связаться с Точкой». Воспроизведение на закреплённой Miniflare 4.20260515.0 показало точный TypeError: workerd не реализует redirect:error и отклоняет Request до function-valued service binding.",
+      "rationale": "Режим redirect относится только к внутренней передаче Request: manual допустим для workerd, а Node-мост не доверяет ему, сам проверяет origin/path/method и вызывает внешний fetch с redirect:error. Это устраняет найденную причину без новых банковских полномочий и без OAuth-секретов. Ограниченное чтение тела закрывает P1-риск зависания после получения заголовков.",
+      "evidence": [
+        "Production run 33762398372: ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED status=403 и ARTHELLO_RELEASE_ACTIVE=7e926f4c29aa7e3c3208a55451db035714861e28",
+        "IMG_9996(2).png и IMG_9997(2).png: повторный реальный запуск D-058 дошёл до загрузки и вернул общую транспортную ошибку",
+        "Локальное воспроизведение на Miniflare 4.20260515.0: redirect:error вернул TypeError до единого upstream-вызова; redirect:manual выполнил service binding, а Node upstream получил redirect:error",
+        "8/8 целевых тестов D-059 подтверждают allowlist, отсутствие утечки JWT, таймаут и лимит тела, потоковый JSON, сохранение HTTP 204 и фактический Miniflare service-binding hop",
+        "Официальная документация Точки разделяет готовый JWT и OAuth-приложение; OAuth требует client_id/client_secret и не заменяет сетевой транспорт API"
+      ],
+      "assumptions": [
+        "Готовый JWT владельца соответствует локальной структуре; действительность, список компаний, счета и права ReadCustomerData/ReadAccounts/ReadStatements подтверждает только ответ Точки после D-059",
+        "OAuth имеет смысл пересматривать при подключении сторонних компаний от имени их клиентов и после регистрации приложения Точки, но не как обход текущей transport-ошибки"
+      ],
+      "approved_by": "Виталий Озолин — повторная production-проверка и запрос продолжить разбор",
+      "approved_at": "2026-09-03",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после production-публикации D-059 и повторной проверки владельцем",
+      "affected_stages": [
+        4,
+        16,
+        22
+      ],
+      "dependencies": [
+        "D-058",
+        "Miniflare 4.20260515.0",
+        "Node TOCHKA_TRANSPORT",
+        "закреплённый Russian Trusted Root CA",
+        "production-конвейер"
+      ],
+      "supersedes": "DEC-2026-09-03-69",
+      "superseded_by": null,
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33762398372",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/327",
+        "https://developers.tochka.com/docs/tochka-api/algoritm-raboty-s-jwt-tokenom",
+        "https://developers.tochka.com/docs/tochka-api/algoritm-raboty-po-oauth-2.0",
+        "https://arthello-188-225-38-55.sslip.io"
+      ],
+      "raw_deliberation_ref": "повторная production-проверка владельца, IMG_9996(2)/IMG_9997(2)/IMG_9998(1) и воспроизведение Miniflare, 03.09.2026",
+      "rejected_alternatives": [
+        {
+          "option": "Немедленно заменить готовый JWT на OAuth",
+          "reason": "OAuth требует регистрации приложения, client_id/client_secret и redirect URI, но token exchange и API-вызовы всё равно проходят через тот же сломанный worker → Node transport",
+          "reopen_condition": "подключение сторонних клиентов от их имени и наличие зарегистрированного приложения Точки"
+        },
+        {
+          "option": "Разрешить redirects на внешней границе с банком",
+          "reason": "Не требуется для внутренней совместимости workerd и расширяет поверхность утечки Authorization",
+          "reopen_condition": "нет"
+        },
+        {
+          "option": "Возвращать поток ответа после снятия таймаута",
+          "reason": "Зависшее тело может удерживать интеграционный запрос без ограничения после получения заголовков",
+          "reopen_condition": "только при доказанном end-to-end управлении отменой до полного потребления тела"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Опубликовать D-059 через PR 328 и получить exact-SHA production evidence",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "first-attempt hosted Quality/Proof/Verify, 8/8 transport/service-binding тестов, Node TLS egress, изолированный clone, backup-first cutover, rollback guards и public health",
+          "status": "in_progress"
+        },
+        {
+          "action": "После D-059 повторить подключение Точки с реальным ключом",
+          "owner": "Виталий Озолин",
+          "due": "после production health D-059",
+          "evidence_required": "либо реальные компании, счета, остатки, выписки и проведённые операции, либо конкретный HTTP-ответ банка о ключе/правах без общей транспортной ошибки",
           "status": "open"
         }
       ]
