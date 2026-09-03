@@ -1,6 +1,6 @@
 name: Deploy ArtHello self-hosted RU
 
-# D-051 is a one-release recovery of the owner workspace and integrations cutover after a fail-closed School topology mismatch.
+# D-052 is a one-release hotfix for integration-dialog hit testing after the verified D-051 production cutover.
 # Production authorization still requires the protected Environment below. The
 # exception is constrained to the successful hosted verification of the exact
 # merged main SHA from the named release branch and repository.
@@ -22,10 +22,9 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/recover-school-container-discovery-20260903
-  EXPECTED_RELEASE_PR: '318'
-  FAILED_RELEASE_SHA: f14dad5d938de023385b996877a1ec6d1aaca5d6
-  FAILED_DEPLOY_RUN_ID: '33713845429'
+  EXPECTED_RELEASE_HEAD: codex/fix-integration-modal-hit-testing-20260903
+  EXPECTED_RELEASE_PR: '319'
+  PREVIOUS_RELEASE_SHA: 163ff8a6f337b21b7dbb6560a88324ee57e4478f
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -56,8 +55,8 @@ jobs:
       (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/recover-school-container-discovery-20260903' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('318') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/fix-integration-modal-hit-testing-20260903' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('319') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -72,7 +71,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Verify one-release D-051 trigger and protected Environment
+      - name: Verify one-release D-052 trigger and protected Environment
         timeout-minutes: 4
         env:
           GH_TOKEN: ${{ github.token }}
@@ -85,9 +84,8 @@ jobs:
           [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
           test "$GITHUB_RUN_ATTEMPT" = 1
           [[ "$EXPECTED_RELEASE_PR" =~ ^[0-9]+$ ]]
-          [[ "$FAILED_DEPLOY_RUN_ID" =~ ^[0-9]+$ ]]
-          [[ "$FAILED_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
-          test "$RELEASE_SHA" != "$FAILED_RELEASE_SHA"
+          [[ "$PREVIOUS_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$RELEASE_SHA" != "$PREVIOUS_RELEASE_SHA"
 
           api="https://api.github.com/repos/$GITHUB_REPOSITORY"
           headers=(
@@ -137,28 +135,6 @@ jobs:
               .merged_by.login == "vitaliyozolin-dotcom"
             ' <<<"$release_pr_json" >/dev/null
 
-          failed_run_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
-            "${headers[@]}" "$api/actions/runs/$FAILED_DEPLOY_RUN_ID")"
-          jq -e \
-            --argjson run_id "$FAILED_DEPLOY_RUN_ID" \
-            --arg sha "$FAILED_RELEASE_SHA" \
-            --arg repository "$EXPECTED_REPOSITORY" '
-              .id == $run_id and
-              .name == "Deploy ArtHello self-hosted RU" and
-              (.path == ".github/workflows/deploy-arthello-direct-38-55.yml" or
-               .path == ".github/workflows/deploy-arthello-direct-38-55.yml@main") and
-              .event == "workflow_run" and
-              .head_branch == "main" and
-              .head_sha == $sha and
-              .run_attempt == 1 and
-              .status == "completed" and
-              .conclusion == "failure" and
-              .repository.full_name == $repository and
-              .head_repository.full_name == $repository and
-              .actor.login == "vitaliyozolin-dotcom" and
-              .triggering_actor.login == "vitaliyozolin-dotcom"
-            ' <<<"$failed_run_json" >/dev/null
-
           deploy_runs_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
             "${headers[@]}" \
             "$api/actions/workflows/deploy-arthello-direct-38-55.yml/runs?event=workflow_run&head_sha=$RELEASE_SHA&per_page=100")"
@@ -205,11 +181,11 @@ jobs:
             "${headers[@]}" "$api/commits/$RELEASE_SHA")"
           jq -e \
             --arg sha "$RELEASE_SHA" \
-            --arg failed_sha "$FAILED_RELEASE_SHA" \
+            --arg previous_sha "$PREVIOUS_RELEASE_SHA" \
             '.sha == $sha and
              .commit.verification.verified == true and
              (.parents | length) == 1 and
-             .parents[0].sha == $failed_sha' <<<"$commit_json" >/dev/null
+             .parents[0].sha == $previous_sha' <<<"$commit_json" >/dev/null
           tree_sha="$(jq -r '.commit.tree.sha' <<<"$commit_json")"
           [[ "$tree_sha" =~ ^[a-f0-9]{40}$ ]]
 
