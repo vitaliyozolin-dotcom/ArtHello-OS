@@ -1,0 +1,197 @@
+name: D061 production auth diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/d061-auth-production-diagnostic.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-38-55-arthello-auth-diagnostic
+  cancel-in-progress: true
+
+env:
+  EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
+  PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+  DATA_VOLUME: arthello-direct-v44-data
+
+jobs:
+  diagnose-auth:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.run_attempt == 1
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 20
+    environment: production-ru
+
+    steps:
+      - name: Check out exact diagnostic source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Inspect live runtime and authentication state read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          test "$GITHUB_REF" = refs/heads/main
+
+          work="$RUNNER_TEMP/arthello-d061-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          snapshot="$work/snapshot"
+          mkdir -p "$snapshot"
+          chmod 0700 "$work" "$snapshot"
+          trap 'rm -rf -- "$work"' EXIT
+
+          mapfile -t live_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
+          printf 'D061_LIVE_CONTAINER_COUNT=%s\n' "${#live_ids[@]}"
+          test "${#live_ids[@]}" -eq 1
+          live_id="${live_ids[0]}"
+          live_image_id="$(docker inspect "$live_id" --format '{{.Image}}')"
+          [[ "$live_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+
+          running="$(docker inspect "$live_id" --format '{{.State.Running}}')"
+          printf 'D061_LIVE_RUNNING=%s\n' "$running"
+          test "$running" = true
+          data_mount="$(docker inspect "$live_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          printf 'D061_CANONICAL_DATA_MOUNT=%s\n' "$([ "$data_mount" = "$DATA_VOLUME" ] && echo true || echo false)"
+
+          internal_status="$(docker exec "$live_id" node -e "fetch('http://127.0.0.1:8081/api/health',{redirect:'error'}).then(async r=>{process.stdout.write(String(r.status))}).catch(()=>process.stdout.write('000'))" 2>/dev/null || true)"
+          printf 'D061_INTERNAL_HEALTH_STATUS=%s\n' "${internal_status:-000}"
+          public_status="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/" || true)"
+          printf 'D061_PUBLIC_ROOT_STATUS=%s\n' "${public_status:-000}"
+          auth_me_status="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/api/auth/me" || true)"
+          printf 'D061_ANON_AUTH_ME_STATUS=%s\n' "${auth_me_status:-000}"
+
+          env_names="$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed 's/=.*//' | sort -u)"
+          for name in ARTHELLO_BOOTSTRAP_LOGIN ARTHELLO_BOOTSTRAP_PASSWORD_FILE INTEGRATION_CREDENTIALS_KEY_FILE CENTRAL_ACCESS_SECRET_FILE; do
+            if grep -Fxq "$name" <<<"$env_names"; then
+              printf 'D061_ENV_%s=PRESENT\n' "$name"
+            else
+              printf 'D061_ENV_%s=MISSING\n' "$name"
+            fi
+          done
+
+          secret_probe="$(docker exec "$live_id" /bin/sh -ceu '
+            check_file() {
+              name="$1"; path="$2"
+              if [ -z "$path" ]; then printf "%s_PATH=missing\n" "$name"; return; fi
+              if [ -s "$path" ]; then printf "%s_FILE=present\n" "$name"; else printf "%s_FILE=missing_or_empty\n" "$name"; fi
+            }
+            check_file BOOTSTRAP "${ARTHELLO_BOOTSTRAP_PASSWORD_FILE:-}"
+            check_file INTEGRATION "${INTEGRATION_CREDENTIALS_KEY_FILE:-}"
+            check_file CENTRAL "${CENTRAL_ACCESS_SECRET_FILE:-}"
+          ' 2>/dev/null || true)"
+          while IFS= read -r line; do
+            [ -n "$line" ] && printf 'D061_%s\n' "$line"
+          done <<<"$secret_probe"
+
+          # Snapshot the live volume through a root helper. Production is mounted read-only.
+          docker run --rm --user 0:0 --network none \
+            --mount "type=volume,src=$DATA_VOLUME,dst=/from,readonly" \
+            --entrypoint /bin/sh "$live_image_id" -ceu 'cd /from && tar -cf - .' \
+            | tar -xf - -C "$snapshot"
+          printf 'D061_SNAPSHOT=COMPLETE\n'
+
+          inventory_status=0
+          inventory_output="$(python3 deploy/v52/maintenance/production-data-inventory.py "$snapshot" 2>&1)" || inventory_status=$?
+          printf 'D061_INVENTORY_EXIT=%s\n' "$inventory_status"
+          if [ "$inventory_status" -eq 0 ]; then
+            printf '%s\n' "$inventory_output"
+          else
+            printf 'D061_INVENTORY=FAILED\n'
+            printf 'D061_INVENTORY_REASON=%s\n' "$(printf '%s' "$inventory_output" | tr '\n\r' '  ' | cut -c1-240)"
+          fi
+
+          relative_db="$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)"
+          db_path="$snapshot/$relative_db"
+          export D061_DB_PATH="$db_path"
+          python3 - <<'PY'
+          import json
+          import os
+          import sqlite3
+          import time
+          from pathlib import Path
+
+          path = Path(os.environ["D061_DB_PATH"])
+          report = {
+              "databaseExists": path.is_file(),
+              "databaseBytesPositive": path.is_file() and path.stat().st_size > 0,
+          }
+          if path.is_file():
+              con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+              try:
+                  tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                  report["authCredentialsTable"] = "production_auth_credentials" in tables
+                  report["authSessionsTable"] = "production_auth_sessions" in tables
+                  report["appUsersTable"] = "app_users" in tables
+                  report["userSystemAccessTable"] = "user_system_access" in tables
+                  try:
+                      report["integrity"] = con.execute("PRAGMA integrity_check").fetchone()[0]
+                  except Exception:
+                      report["integrity"] = "failed"
+
+                  if report["authCredentialsTable"]:
+                      row = con.execute("""
+                        SELECT COUNT(*),
+                               MAX(CASE WHEN user_id='USR-OWNER' THEN 1 ELSE 0 END),
+                               MAX(CASE WHEN user_id='USR-OWNER' AND length(password_hash)>0 AND length(password_salt)>0 THEN 1 ELSE 0 END),
+                               MAX(CASE WHEN user_id='USR-OWNER' THEN must_change_password ELSE 0 END),
+                               MAX(CASE WHEN user_id='USR-OWNER' AND locked_until>? THEN 1 ELSE 0 END)
+                        FROM production_auth_credentials
+                      """, (int(time.time()),)).fetchone()
+                      report["credentialCount"] = int(row[0] or 0)
+                      report["ownerCredentialExists"] = bool(row[1])
+                      report["ownerPasswordMaterialPresent"] = bool(row[2])
+                      report["ownerMustChangePassword"] = bool(row[3])
+                      report["ownerLockedNow"] = bool(row[4])
+
+                  if report["appUsersTable"]:
+                      row = con.execute("""
+                        SELECT COUNT(*),
+                               MAX(CASE WHEN id='USR-OWNER' THEN 1 ELSE 0 END),
+                               MAX(CASE WHEN id='USR-OWNER' AND status='Активен' THEN 1 ELSE 0 END)
+                        FROM app_users
+                      """).fetchone()
+                      report["appUserCount"] = int(row[0] or 0)
+                      report["ownerAppUserExists"] = bool(row[1])
+                      report["ownerAppUserActive"] = bool(row[2])
+
+                  if report["userSystemAccessTable"]:
+                      row = con.execute("""
+                        SELECT COUNT(*) FROM user_system_access
+                        WHERE user_id='USR-OWNER' AND system_id='SYS-ARTHELLO-OS' AND status='Активен'
+                      """).fetchone()
+                      report["ownerSystemAccessActive"] = int(row[0] or 0) == 1
+
+                  if report.get("authCredentialsTable") and report.get("appUsersTable"):
+                      row = con.execute("""
+                        SELECT COUNT(*) FROM production_auth_credentials c
+                        JOIN app_users u ON u.id=c.user_id
+                        WHERE c.user_id='USR-OWNER' AND lower(trim(c.login))=lower(trim(u.contact))
+                      """).fetchone()
+                      report["ownerCredentialLoginMatchesAppUser"] = int(row[0] or 0) == 1
+              finally:
+                  con.close()
+
+          print("D061_AUTH_AGGREGATE=" + json.dumps(report, ensure_ascii=False, sort_keys=True))
+          PY
+
+      - name: Publish diagnostic summary
+        if: always()
+        run: |
+          {
+            echo '## D-061 production auth diagnostic'
+            echo
+            echo "- source: $GITHUB_SHA"
+            echo "- result: ${{ job.status }}"
+            echo '- no credentials, hashes, contacts or secret values are emitted'
+          } >> "$GITHUB_STEP_SUMMARY"
