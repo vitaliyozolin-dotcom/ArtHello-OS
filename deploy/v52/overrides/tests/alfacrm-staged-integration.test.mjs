@@ -1,13 +1,25 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import test from "node:test";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 const root = process.cwd();
 const route = readFileSync(resolve(root, "app/api/integrations/alfacrm/route.ts"), "utf8");
 const wizard = readFileSync(resolve(root, "app/components/AlfaCrmSetupWizard.tsx"), "utf8");
 const shell = readFileSync(resolve(root, "app/components/IntegrationWorkspace.tsx"), "utf8");
 const css = readFileSync(resolve(root, "app/components/AlfaCrmSetupWizard.styles.txt"), "utf8");
+
+function cssAssets(directory) {
+  const result = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) result.push(...cssAssets(path));
+    else if (entry.isFile() && entry.name.endsWith(".css")) result.push([entry.name, statSync(path).size]);
+  }
+  return result;
+}
+const diagnosticCssAssets = cssAssets(resolve(root, "dist")).sort((a, b) => b[1] - a[1]);
+console.log(`ALFACRM_CSS_DIAGNOSTIC=${JSON.stringify(diagnosticCssAssets)}`);
 
 test("AlfaCRM uses a dedicated staged wizard instead of the generic all-at-once setup", () => {
   assert.match(shell, /lazy\(\(\) => import\("\.\/AlfaCrmSetupWizard"\)/);
