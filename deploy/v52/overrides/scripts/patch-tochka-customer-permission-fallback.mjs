@@ -43,13 +43,13 @@ const probeAfter = `    if (!customersResponse.ok) {
         let selectedCustomerCode = "";
         if (requested) {
           if (!customerCodes.includes(requested)) {
-            return fail("Выбранная компания не доступна этому ключу Точки", customerCodes.map((code, index) => ({ code, name: \\`Компания \\${index + 1}\\` })));
+            return fail("Выбранная компания не доступна этому ключу Точки", customerCodes.map((code, index) => ({ code, name: "Компания " + (index + 1) })));
           }
           selectedCustomerCode = requested;
         } else if (customerCodes.length === 1) {
           selectedCustomerCode = customerCodes[0];
         } else {
-          return fail("Ключ Точки даёт доступ к нескольким компаниям. Выберите одну.", customerCodes.map((code, index) => ({ code, name: \\`Компания \\${index + 1}\\` })));
+          return fail("Ключ Точки даёт доступ к нескольким компаниям. Выберите одну.", customerCodes.map((code, index) => ({ code, name: "Компания " + (index + 1) })));
         }
         const accountCount = accounts.filter((account) => readTochkaCustomerCode(account) === selectedCustomerCode).length;
         if (!accountCount) return fail("Ключ Точки подтверждён, но для выбранной компании доступных счетов нет", [], selectedCustomerCode);
