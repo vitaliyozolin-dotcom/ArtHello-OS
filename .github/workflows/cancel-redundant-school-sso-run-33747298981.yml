@@ -1,0 +1,31 @@
+name: Cancel superseded School SSO validation
+
+on:
+  push:
+    branches:
+      - ops/cancel-redundant-school-sso-run-33747298981
+    paths:
+      - .github/workflows/cancel-redundant-school-sso-run-33747298981.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Cancel already superseded PR validation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          status="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/33747298981 --jq '.status')"
+          if [ "$status" = completed ]; then
+            printf 'REDUNDANT_RUN_ALREADY_COMPLETED=PASS\n'
+            exit 0
+          fi
+          gh api --method POST repos/$GITHUB_REPOSITORY/actions/runs/33747298981/cancel >/dev/null
+          printf 'REDUNDANT_RUN_CANCEL_REQUESTED=PASS\n'
