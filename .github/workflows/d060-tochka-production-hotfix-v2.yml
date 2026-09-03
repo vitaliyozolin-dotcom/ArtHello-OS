@@ -18,6 +18,7 @@ env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
   EXPECTED_D060_MERGE: 75ba98c3cf89f28ebe4214179d3e034154530641
   EXPECTED_FAILED_ROLLOUT: 7e59de144abf5eb6c4ef76888d5ffba58ebbe586
+  EXPECTED_V2_PARENT: ee7c3c21d14af746b45d89364d46109ae94760c7
   EXPECTED_D060_PR: '329'
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   DATA_VOLUME: arthello-direct-v44-data
@@ -42,7 +43,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 4
+          fetch-depth: 5
           persist-credentials: false
 
       - name: Verify D-060 provenance and retry boundary
@@ -57,11 +58,13 @@ jobs:
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$EXPECTED_D060_MERGE" =~ ^[a-f0-9]{40}$ ]]
           [[ "$EXPECTED_FAILED_ROLLOUT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_V2_PARENT" =~ ^[a-f0-9]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^)" = "$EXPECTED_FAILED_ROLLOUT"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_V2_PARENT"
+          git merge-base --is-ancestor "$EXPECTED_FAILED_ROLLOUT" HEAD
           git merge-base --is-ancestor "$EXPECTED_D060_MERGE" HEAD
 
-          mapfile -t retry_changed < <(git diff --name-only "$EXPECTED_FAILED_ROLLOUT" HEAD)
+          mapfile -t retry_changed < <(git diff --name-only "$EXPECTED_V2_PARENT" HEAD)
           test "${#retry_changed[@]}" -eq 1
           test "${retry_changed[0]}" = .github/workflows/d060-tochka-production-hotfix-v2.yml
 
@@ -250,7 +253,7 @@ jobs:
                   out.write(arg.encode("utf-8") + b"\0")
           PY
 
-          chmod 0600 "$work/live.json" "$work/live.args"
+          chmod 0600 "$work/live.json" "$work/run.args"
           test -s "$work/live.env"
           test -s "$work/run.args"
           mapfile -d '' -t run_args < "$work/run.args"
