@@ -4,19 +4,11 @@ import { resolve } from "node:path";
 const target = resolve(process.cwd(), "app/components/IntegrationWorkspace.tsx");
 let source = readFileSync(target, "utf8");
 
-const reactImport = 'import { useCallback, useEffect, useMemo, useRef, useState } from "react";';
-if (source.includes(reactImport)) {
-  source = source.replace(reactImport, 'import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";');
-}
-
-const alfaImport = 'import { AlfaCrmSetupWizard } from "./AlfaCrmSetupWizard";\n';
-if (source.includes(alfaImport)) source = source.replace(alfaImport, "");
-
 const cssAnchor = 'import "./IntegrationWorkspace.ds.css";\n';
-const alfaLazyLoader = 'const AlfaCrmSetupWizard = lazy(() => import("./AlfaCrmSetupWizard").then((module) => ({ default: module.AlfaCrmSetupWizard })));\n';
-if (!source.includes(alfaLazyLoader)) {
+const alfaImport = 'import { AlfaCrmSetupWizard } from "./AlfaCrmSetupWizard";\n';
+if (!source.includes(alfaImport)) {
   if (!source.includes(cssAnchor)) throw new Error("AlfaCRM patch: IntegrationWorkspace CSS anchor not found");
-  source = source.replace(cssAnchor, `${cssAnchor}\n${alfaLazyLoader}`);
+  source = source.replace(cssAnchor, `${alfaImport}${cssAnchor}`);
 }
 
 const wizardAnchor = `    {wizardId && data.capabilities.canManageSetup && currentBankCapability(wizardId, data.capabilities) ? <ConnectionWizard
@@ -36,11 +28,11 @@ const wizardAnchor = `    {wizardId && data.capabilities.canManageSetup && curre
       }}
     /> : null}`;
 
-const stagedWizard = `    {wizardId === "INT-T-ALFACRM" && data.capabilities.canManageSetup ? <Suspense fallback={null}><AlfaCrmSetupWizard
+const stagedWizard = `    {wizardId === "INT-T-ALFACRM" && data.capabilities.canManageSetup ? <AlfaCrmSetupWizard
       roleCode={roleCode}
       close={() => setWizardId("")}
       notify={notify}
-    /></Suspense> : null}
+    /> : null}
     {wizardId && data.capabilities.canManageSetup && currentBankCapability(wizardId, data.capabilities) && wizardId !== "INT-T-ALFACRM" ? <ConnectionWizard
       connection={data.connections.find((item) => item.id === wizardId)}
       existing={data.setups[wizardId]}
@@ -62,10 +54,6 @@ if (!source.includes('wizardId === "INT-T-ALFACRM"')) {
   if (!source.includes(wizardAnchor)) throw new Error("AlfaCRM patch: connection wizard anchor not found");
   source = source.replace(wizardAnchor, stagedWizard);
 } else {
-  source = source.replace(
-    /\{wizardId === "INT-T-ALFACRM" && data\.capabilities\.canManageSetup \? <AlfaCrmSetupWizard([\s\S]*?)\/> : null\}/,
-    '{wizardId === "INT-T-ALFACRM" && data.capabilities.canManageSetup ? <Suspense fallback={null}><AlfaCrmSetupWizard$1/></Suspense> : null}',
-  );
   source = source.replace(
     '{wizardId && wizardId !== "INT-T-ALFACRM" && data.capabilities.canManageSetup && currentBankCapability(wizardId, data.capabilities) ? <ConnectionWizard',
     '{wizardId && data.capabilities.canManageSetup && currentBankCapability(wizardId, data.capabilities) && wizardId !== "INT-T-ALFACRM" ? <ConnectionWizard',
