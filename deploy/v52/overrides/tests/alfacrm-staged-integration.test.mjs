@@ -10,9 +10,11 @@ const shell = readFileSync(resolve(root, "app/components/IntegrationWorkspace.ts
 const css = readFileSync(resolve(root, "app/components/AlfaCrmSetupWizard.css"), "utf8");
 
 test("AlfaCRM uses a dedicated staged wizard instead of the generic all-at-once setup", () => {
-  assert.match(shell, /import \{ AlfaCrmSetupWizard \} from "\.\/AlfaCrmSetupWizard"/);
+  assert.match(shell, /lazy\(\(\) => import\("\.\/AlfaCrmSetupWizard"\)/);
+  assert.match(shell, /<Suspense fallback=\{null\}>/);
   assert.match(shell, /wizardId === "INT-T-ALFACRM"/);
   assert.match(shell, /wizardId !== "INT-T-ALFACRM"/);
+  assert.match(shell, /wizardId && data\.capabilities\.canManageSetup && currentBankCapability\(wizardId, data\.capabilities\)/);
   assert.match(wizard, /Никакой кнопки «слить всё»/);
   assert.match(wizard, /Сначала только проверяем доступ/);
   assert.match(wizard, /Выберите, какие филиалы вообще участвуют/);
@@ -29,6 +31,13 @@ test("AlfaCRM transport follows v2api login, branch discovery, read-only and rat
   assert.match(route, /direction: "read_only_inbound"/);
 });
 
+test("production writes stay fail-closed until the AlfaCRM release gate is explicitly enabled", () => {
+  assert.match(route, /ALFACRM_IMPORT_ENABLED/);
+  assert.match(route, /ALFACRM_IMPORT_ENABLED_VALUES/);
+  assert.match(route, /if \(!alfaCrmImportEnabled\(\)\)/);
+  assert.match(route, /live coverage\/integrity/);
+});
+
 test("branch mapping and module dependencies are enforced before imports", () => {
   assert.match(route, /Сначала сопоставьте филиалы/);
   assert.match(route, /Сначала загрузите сотрудников: группы должны сразу связаться с педагогами/);
@@ -36,6 +45,13 @@ test("branch mapping and module dependencies are enforced before imports", () =>
   assert.match(route, /Сначала загрузите семьи и детей/);
   assert.match(route, /previewToken/);
   assert.match(route, /Параметры изменились после предпросмотра/);
+});
+
+test("family identities stay per AlfaCRM customer and possible matches go to manual review", () => {
+  assert.match(route, /shortHash\(`\$\{remoteBranchId\}:student:\$\{studentId\}`\)/);
+  assert.match(route, /alfacrm_family_merge_candidates/);
+  assert.match(route, /status TEXT NOT NULL DEFAULT 'Ожидает сверки'/);
+  assert.match(route, /matchKey/);
 });
 
 test("historical lesson and finance reads are bounded by explicit dates", () => {
@@ -47,6 +63,12 @@ test("historical lesson and finance reads are bounded by explicit dates", () => 
   assert.doesNotMatch(route, /INSERT INTO financial_operations/);
   assert.match(wizard, /CRM-движения с выбранной даты/);
   assert.match(wizard, /банковского ДДС/);
+});
+
+test("AlfaCRM refund and outflow payment types cannot become receipts just because income is positive", () => {
+  assert.match(route, /ALFACRM_OUTFLOW_PAY_TYPE_IDS = new Set\(\["5", "12"\]\)/);
+  assert.match(route, /pay_type_id/);
+  assert.match(route, /isOutflow \? "Списание" : "Поступление"/);
 });
 
 test("staff import never grants access and mobile inputs avoid browser zoom", () => {
