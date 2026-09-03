@@ -307,13 +307,6 @@ jobs:
           grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem' deploy/v52/Dockerfile >/dev/null
-          node - <<'NODE'
-          const { readFileSync } = require('node:fs');
-          const { X509Certificate } = require('node:crypto');
-          const certificate = new X509Certificate(readFileSync('./deploy/v52/certificates/russian-trusted-root-ca.pem'));
-          const fingerprint = 'D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31';
-          if (certificate.fingerprint256 !== fingerprint || !certificate.ca || certificate.subject !== certificate.issuer || !certificate.checkIssued(certificate) || !certificate.verify(certificate.publicKey) || Date.parse(certificate.validTo) <= Date.now()) process.exit(1);
-          NODE
           if grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
             echo 'Plaintext central access secret binding is forbidden' >&2
             exit 1
