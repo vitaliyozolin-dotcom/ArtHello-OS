@@ -39,9 +39,7 @@ jobs:
           test -n "$volume"
           printf 'AUDIT_LIVE=%s\nAUDIT_IMAGE=%s\nAUDIT_VOLUME=%s\n' "$live" "$image" "$volume"
 
-          docker run --rm -i --network none --user 0:0 \
-            -v "$volume:/data:ro" \
-            --entrypoint node "$image" --input-type=module - <<'NODE'
+          docker exec -i "$live" node --input-type=module - <<'NODE'
           import { readdirSync, statSync } from 'node:fs';
           import { join } from 'node:path';
           import { DatabaseSync } from 'node:sqlite';
@@ -62,6 +60,7 @@ jobs:
           walk('/data/d1');
           let db=null;
           let selected='';
+          const failures=[];
           for (const file of files) {
             try {
               const candidate=new DatabaseSync(file,{readOnly:true});
@@ -71,10 +70,13 @@ jobs:
                 selected=file;
                 break;
               }
+              failures.push({file:file.replace(/[^/]+\.sqlite(?:3)?$/i,'[DB].sqlite'),tables:[...tables].filter((name)=>/app_users|user_system_access|production_auth/i.test(name))});
               candidate.close();
-            } catch {}
+            } catch (error) {
+              failures.push({file:file.replace(/[^/]+\.sqlite(?:3)?$/i,'[DB].sqlite'),error:error instanceof Error?error.message:'unknown'});
+            }
           }
-          if (!db) throw new Error(`ArtHello D1 not found; scanned=${files.length}`);
+          if (!db) throw new Error(`ArtHello D1 not found; scanned=${files.length}; evidence=${JSON.stringify(failures)}`);
           console.log(`AUDIT_DB=${selected.replace(/[^/]+\.sqlite(?:3)?$/i,'[DB].sqlite')}`);
           const sessionColumns=db.prepare('PRAGMA table_info(production_auth_sessions)').all().map((row)=>({name:row.name,type:row.type,notnull:row.notnull,pk:row.pk}));
           console.log('AUTH_SESSION_COLUMNS='+JSON.stringify(sessionColumns));
