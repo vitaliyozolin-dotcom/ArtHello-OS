@@ -1,6 +1,6 @@
 name: Deploy ArtHello self-hosted RU
 
-# D-056 is a one-release recovery of the Tochka TLS deployment preflight.
+# D-057 is a one-release delivery of the stateless Tochka TLS egress probe.
 # Production authorization still requires the protected Environment below. The
 # exception is constrained to the successful hosted verification of the exact
 # merged main SHA from the named release branch and repository.
@@ -22,9 +22,9 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/d056-tochka-runner-preflight-20260903
-  EXPECTED_RELEASE_PR: '325'
-  PREVIOUS_RELEASE_SHA: 66ca9490d7e765a1338ad0c4ce8cdc2c163c9d36
+  EXPECTED_RELEASE_HEAD: codex/d057-tochka-stateless-egress-20260903
+  EXPECTED_RELEASE_PR: '326'
+  PREVIOUS_RELEASE_SHA: a48eed30b3a0910c603ff7ad2285a42b3785a507
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -55,8 +55,8 @@ jobs:
       (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/d056-tochka-runner-preflight-20260903' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('325') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/d057-tochka-stateless-egress-20260903' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('326') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -71,7 +71,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Verify one-release D-056 trigger and protected Environment
+      - name: Verify one-release D-057 trigger and protected Environment
         timeout-minutes: 4
         env:
           GH_TOKEN: ${{ github.token }}
@@ -868,7 +868,7 @@ jobs:
 
           probe_tochka_tls_egress() {
             local probe_network="$1"
-            docker run --rm \
+            docker run --rm -i \
               --network "$probe_network" \
               --read-only \
               --entrypoint node \
