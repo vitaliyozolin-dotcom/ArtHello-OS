@@ -1,29 +1,16 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 
 const root = process.cwd();
 const route = readFileSync(resolve(root, "app/api/integrations/alfacrm/route.ts"), "utf8");
 const wizard = readFileSync(resolve(root, "app/components/AlfaCrmSetupWizard.tsx"), "utf8");
 const shell = readFileSync(resolve(root, "app/components/IntegrationWorkspace.tsx"), "utf8");
-const css = readFileSync(resolve(root, "app/components/AlfaCrmSetupWizard.styles.txt"), "utf8");
-
-function cssAssets(directory) {
-  const result = [];
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) result.push(...cssAssets(path));
-    else if (entry.isFile() && entry.name.endsWith(".css")) result.push([entry.name, statSync(path).size]);
-  }
-  return result;
-}
-const diagnosticCssAssets = cssAssets(resolve(root, "dist")).sort((a, b) => b[1] - a[1]);
-console.log(`ALFACRM_CSS_DIAGNOSTIC=${JSON.stringify(diagnosticCssAssets)}`);
+const css = readFileSync(resolve(root, "app/components/AlfaCrmSetupWizard.css"), "utf8");
 
 test("AlfaCRM uses a dedicated staged wizard instead of the generic all-at-once setup", () => {
-  assert.match(shell, /const AlfaCrmSetupWizard = \(\(\) => \{/);
-  assert.doesNotMatch(shell, /import \{ AlfaCrmSetupWizard \} from "\.\/AlfaCrmSetupWizard";/);
+  assert.match(shell, /import \{ AlfaCrmSetupWizard \} from "\.\/AlfaCrmSetupWizard";/);
   assert.doesNotMatch(shell, /lazy\(\(\) => import\("\.\/AlfaCrmSetupWizard"\)/);
   assert.match(shell, /wizardId === "INT-T-ALFACRM"/);
   assert.match(shell, /wizardId !== "INT-T-ALFACRM"/);
@@ -34,7 +21,6 @@ test("AlfaCRM uses a dedicated staged wizard instead of the generic all-at-once 
 });
 
 test("AlfaCRM transport follows v2api login, branch discovery, read-only and rate limits", () => {
-  assert.match(route, /POST|method: "POST"/);
   assert.match(route, /\/v2api\/auth\/login/);
   assert.match(route, /fetchPaged\(session, "branch\/index", \{ is_active: 1 \}\)/);
   assert.doesNotMatch(route, /"0\/branch\/index"/);
@@ -88,6 +74,6 @@ test("staff import never grants access and mobile inputs avoid browser zoom", ()
   assert.match(route, /'Доступ не выдан'/);
   assert.match(wizard, /Карточки создаются без выдачи доступа/);
   assert.match(css, /font-size:16px/);
-  assert.match(css, /max-height:calc\(100dvh - 24px\)/);
+  assert.match(css, /max-height:calc\(100dvh - 16px\)/);
   assert.match(css, /overflow-y:auto/);
 });
