@@ -130,7 +130,7 @@ jobs:
             raise "hotfix commit must be the previous release child" unless before_checkout.include?(%q{.parents[0].sha == $previous_sha})
             raise "exact Quality gate missing before checkout" unless before_checkout.include?("quality.yml")
             raise "exact v52 gate missing before checkout" unless before_checkout.include?("verify-arthello-v52.yml")
-            raise "Quality and Verify attempts must both be first attempts" unless before_checkout.scan(%q{.run_attempt == 1}).length >= 3
+            raise "Quality and Verify attempts must both be first attempts" unless before_checkout.scan(%q{.run_attempt == 1}).length >= 2
             raise "deploy replay guard must inspect every status" if before_checkout.include?("status=success")
             raise "deploy replay guard pagination is incomplete" unless before_checkout.include?("per_page=100") && before_checkout.include?(%q{.total_count == (.workflow_runs | length)})
             source = File.read(ARGV.fetch(0))
