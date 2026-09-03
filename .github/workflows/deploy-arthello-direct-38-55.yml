@@ -297,8 +297,14 @@ jobs:
           grep -F 'SCHOOL_DIARY_ALLOWED_ORIGINS' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          ! grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs
-          ! grep -E 'OPENAI_API_KEY:[[:space:]]*process\.env\.OPENAI_API_KEY([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs
+          if grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
+            echo 'Plaintext central access secret binding is forbidden' >&2
+            exit 1
+          fi
+          if grep -E 'OPENAI_API_KEY:[[:space:]]*process\.env\.OPENAI_API_KEY([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
+            echo 'Plaintext OpenAI key binding is forbidden' >&2
+            exit 1
+          fi
           printf 'ARTHELLO_CHECKOUT=%s\nARTHELLO_TREE=%s\n' "$RELEASE_SHA" "$EXPECTED_TREE"
 
       - name: Download and load exact hosted-verified image
@@ -1298,12 +1304,18 @@ jobs:
               test -r /run/secrets/central-access-secret
               test "$(wc -c < /run/secrets/central-access-secret)" -ge 32
               test "$(wc -c < /run/secrets/central-access-secret)" -le 4096
-              ! grep -q "[[:space:]]" /run/secrets/central-access-secret
+              if grep -q "[[:space:]]" /run/secrets/central-access-secret; then
+                echo "Central access secret contains whitespace" >&2
+                exit 1
+              fi
               if [ "$ARTHELLO_OPENAI_ENABLED" -eq 1 ]; then
                 test -r /run/secrets/openai-api-key
                 test "$(wc -c < /run/secrets/openai-api-key)" -ge 20
                 test "$(wc -c < /run/secrets/openai-api-key)" -le 4096
-                ! grep -q "[[:space:]]" /run/secrets/openai-api-key
+                if grep -q "[[:space:]]" /run/secrets/openai-api-key; then
+                  echo "OpenAI key contains whitespace" >&2
+                  exit 1
+                fi
               else
                 test ! -e /run/secrets/openai-api-key
               fi

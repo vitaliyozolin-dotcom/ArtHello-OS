@@ -75,6 +75,14 @@ jobs:
             raise "pre-build pristine gate is incomplete" unless pristine.include?("git status --porcelain=v1 --untracked-files=all") && pristine.include?("git clean -ndx")
             build_run = verify_steps.fetch(build_index).fetch("run")
             raise "post-build pristine gate is incomplete" unless build_run.include?("ARTHELLO_POST_BUILD_SOURCE=PRISTINE") && build_run.include?("git status --porcelain=v1 --untracked-files=all") && build_run.include?("git clean -ndx")
+            upload_index = verify_steps.index { |step| step["name"] == "Upload immutable verification evidence" }
+            maintenance_index = verify_steps.index { |step| step["name"] == "Run repository maintenance tests after immutable upload" }
+            raise "repository maintenance tests must run only after immutable upload" unless upload_index && maintenance_index && maintenance_index > upload_index && maintenance_index == verify_steps.length - 1
+            pre_upload_runs = verify_steps.take(upload_index + 1).map { |step| step["run"].to_s }.join("\n")
+            repo_python_before_upload = pre_upload_runs.lines.any? { |line| line.match?(/^\s*python3 (?:deploy\/v52\/maintenance\/|-m py_compile)/) }
+            raise "repository Python executes before immutable upload" if repo_python_before_upload
+            verify_source = File.read(ARGV.fetch(0))
+            raise "standalone negated grep is not fail-closed" if verify_source.lines.any? { |line| line.match?(/^\s*!\s+grep\b/) }
           ' .github/workflows/verify-arthello-v52.yml
 
           ruby -ryaml -e '
@@ -115,6 +123,7 @@ jobs:
             raise "exact Quality gate missing before checkout" unless before_checkout.include?("quality.yml")
             raise "exact v52 gate missing before checkout" unless before_checkout.include?("verify-arthello-v52.yml")
             source = File.read(ARGV.fetch(0))
+            raise "standalone negated grep is not fail-closed" if source.lines.any? { |line| line.match?(/^\s*!\s+grep\b/) }
             raise "workflow_run deployment must not use event GITHUB_SHA" if source.include?("$GITHUB_SHA") || source.include?("github.sha")
             raise "recovery must use direct Docker archive input" unless source.include?("docker image load --input \"$archive\"")
             raise "opaque gzip/docker pipe is forbidden" if source.include?("gzip -dc \"$archive\" | docker load")
@@ -238,10 +247,6 @@ jobs:
       - name: Validate release files without exposing data
         run: |
           set -Eeuo pipefail
-          python3 -m py_compile deploy/v52/maintenance/production-data-inventory.py
-          python3 deploy/v52/maintenance/test_production_data_inventory.py
-          test "$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)" = \
-            "d1/miniflare-D1DatabaseObject/5a499c55f63d6b9f725547d510cf454e288954b6f3c2d5024eb1443f29c97730.sqlite"
           grep -F 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'ARTHELLO_PUBLIC_ORIGIN' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'cf: false' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
@@ -254,8 +259,14 @@ jobs:
           grep -F 'SCHOOL_DIARY_ALLOWED_ORIGINS' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          ! grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs
-          ! grep -E 'OPENAI_API_KEY:[[:space:]]*process\.env\.OPENAI_API_KEY([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs
+          if grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
+            echo 'Plaintext central access secret binding is forbidden' >&2
+            exit 1
+          fi
+          if grep -E 'OPENAI_API_KEY:[[:space:]]*process\.env\.OPENAI_API_KEY([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
+            echo 'Plaintext OpenAI key binding is forbidden' >&2
+            exit 1
+          fi
           grep -F 'd1Databases: { DB: "arthello-production" }' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           test -s deploy/v52/Dockerfile
           test -s deploy/v52/runtime/package.json
@@ -264,7 +275,10 @@ jobs:
           grep -Fx '# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e' deploy/v52/Dockerfile >/dev/null
           test "$(grep -Fc 'FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e' deploy/v52/Dockerfile)" -eq 3
           grep -F 'npm ci --omit=dev --ignore-scripts --no-audit --no-fund' deploy/v52/Dockerfile >/dev/null
-          ! grep -E '^FROM node:24-bookworm-slim AS|npm install .*miniflare' deploy/v52/Dockerfile
+          if grep -E '^FROM node:24-bookworm-slim AS|npm install .*miniflare' deploy/v52/Dockerfile; then
+            echo 'Unpinned runtime dependency installation is forbidden' >&2
+            exit 1
+          fi
           node - <<'NODE'
           const manifest = require('./deploy/v52/runtime/package.json');
           const lock = require('./deploy/v52/runtime/package-lock.json');
@@ -575,3 +589,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
+
+      - name: Run repository maintenance tests after immutable upload
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile deploy/v52/maintenance/production-data-inventory.py
+          python3 deploy/v52/maintenance/test_production_data_inventory.py
+          test "$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)" = \
+            "d1/miniflare-D1DatabaseObject/5a499c55f63d6b9f725547d510cf454e288954b6f3c2d5024eb1443f29c97730.sqlite"
