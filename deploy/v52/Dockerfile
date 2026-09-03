@@ -38,12 +38,16 @@ COPY deploy/v52/runtime/package.json deploy/v52/runtime/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 
 FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
-ENV NODE_ENV=production PORT=8081 ARTHELLO_D1_PATH=/data/d1
+ENV NODE_ENV=production PORT=8081 ARTHELLO_D1_PATH=/data/d1 \
+    NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem
 WORKDIR /app
 COPY --from=application /app/dist /app/dist
 COPY --from=application /app/production/runtime-server.mjs /app/production/runtime-server.mjs
 COPY --from=runtime-dependencies /runtime/node_modules /app/node_modules
-RUN mkdir -p /data/d1 && chown -R node:node /data
+COPY deploy/v52/certificates/russian-trusted-root-ca.pem /app/production/russian-trusted-root-ca.pem
+RUN node --input-type=module -e "import { readFileSync } from 'node:fs'; import { X509Certificate } from 'node:crypto'; const certificate = new X509Certificate(readFileSync(process.env.NODE_EXTRA_CA_CERTS)); const expected = 'D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31'; if (certificate.fingerprint256 !== expected || !certificate.ca || certificate.subject !== certificate.issuer || !certificate.checkIssued(certificate) || !certificate.verify(certificate.publicKey) || Date.parse(certificate.validTo) <= Date.now()) process.exit(1);" \
+    && chmod 0444 /app/production/russian-trusted-root-ca.pem \
+    && mkdir -p /data/d1 && chown -R node:node /data
 USER node
 EXPOSE 8081
 CMD ["node", "production/runtime-server.mjs"]
