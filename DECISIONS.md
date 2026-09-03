@@ -1,5 +1,17 @@
 # ArtHello OS — Decisions
 
+## D-057 — Проверять TLS Точки отдельным stateless-контейнером без секретов
+
+Дата: 2026-09-03  
+Статус: принято как fail-closed продолжение порученного D-055/D-056; одноразовый release PR `#326` закреплён  
+Владелец: Исполнитель ArtHello OS
+
+D-056 merge `a48eed30b3a0910c603ff7ad2285a42b3785a507` прошёл Quality, Proof и Verify. Production run `33750926328` успешно прошёл раннее место отказа D-055, загрузил и сверил hosted image и School secret, запустил read-only clone на копии данных и подтвердил его health/D1. Затем Docker штатно запретил `network connect` для контейнера, созданного в private `none` mode. Workflow запустил и подтвердил rollback; live-контейнер не был остановлен, backup/cutover не начинались.
+
+Stateful clone сохраняет `--network none` на всём жизненном цикле. TLS-проверка переносится в отдельный одноразовый контейнер того же immutable image с `--read-only` и production network, но без data volume, env-file, банковского ключа, Authorization и любых secret mounts. Он проверяет активный закреплённый trust anchor и обращается только к официальному read-only endpoint; после ожидаемого защищённого 4xx контейнер удаляется. Verify закрепляет четыре запуска immutable image: ровно три stateful запуска используют общие secret mounts, единственный сетевой probe не использует ни одного.
+
+Одноразовая выкладка разрешена только из `vitaliyozolin-dotcom/ArtHello-OS:codex/d057-tochka-stateless-egress-20260903` через PR `#326`, являющийся прямым потомком D-056 `a48eed30b3a0910c603ff7ad2285a42b3785a507`. Завершение требует нового first-attempt Quality/Verify, `ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED`, изолированного clone-preflight, backup-first cutover, rollback guards и публичного health-check.
+
 ## D-056 — Проверять X.509 Точки внутри immutable runtime, а не на production-host
 
 Дата: 2026-09-03  

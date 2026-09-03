@@ -50,7 +50,7 @@ jobs:
 
           # D-040: a pull-request head is verified only on an ephemeral hosted
           # runner and receives neither a production Environment nor a secret.
-          # D-056 makes a one-release fail-closed Tochka TLS preflight recovery only for the production trigger;
+          # D-057 makes a one-release fail-closed stateless Tochka TLS probe only for the production trigger;
           # the self-hosted job still consumes merged, exact-SHA gated main code.
           ruby -ryaml -e '
             document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
@@ -102,16 +102,16 @@ jobs:
             school_concurrency = deploy.fetch("concurrency")
             raise "School workflow concurrency is missing" unless school_concurrency.fetch("group") == "school-1-11-production" && school_concurrency.fetch("cancel-in-progress") == false
             deployment_env = document.fetch("env")
-            raise "release branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/d056-tochka-runner-preflight-20260903"
-            raise "release PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR").to_s == "325"
-            raise "previous release SHA pin missing" unless deployment_env.fetch("PREVIOUS_RELEASE_SHA") == "66ca9490d7e765a1338ad0c4ce8cdc2c163c9d36"
+            raise "release branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/d057-tochka-stateless-egress-20260903"
+            raise "release PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR").to_s == "326"
+            raise "previous release SHA pin missing" unless deployment_env.fetch("PREVIOUS_RELEASE_SHA") == "a48eed30b3a0910c603ff7ad2285a42b3785a507"
             condition = deploy.fetch("if")
             [
               "workflow_run", "vitaliyozolin-dotcom/ArtHello-OS",
               "Verify ArtHello v52 release", ".github/workflows/verify-arthello-v52.yml",
               "head_branch == '\''main'\''", "conclusion == '\''success'\''",
-              "codex/d056-tochka-runner-preflight-20260903", "vitaliyozolin-dotcom",
-              "number == fromJSON('\''325'\'')",
+              "codex/d057-tochka-stateless-egress-20260903", "vitaliyozolin-dotcom",
+              "number == fromJSON('\''326'\'')",
               "pull_requests[1] == null", "github.run_attempt == 1"
             ].each do |required|
               raise "missing production authorization condition" unless condition.include?(required)
@@ -126,8 +126,8 @@ jobs:
             raise "exact checkout is missing" unless checkout_index
             before_checkout = steps.take(checkout_index).map { |step| step["run"].to_s }.join("\n")
             raise "Docker use before authorization/CI gate" if before_checkout.match?(/(^|\s)docker(\s|$)/)
-            raise "D-056 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
-            raise "D-056 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
+            raise "D-057 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
+            raise "D-057 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
             raise "triggering verification run is not pinned" unless before_checkout.include?("TRIGGER_VERIFY_RUN_ID")
             raise "triggering verification attempt is not pinned" unless before_checkout.include?(".run_attempt == 1")
             raise "release SHA is not pinned before checkout" unless before_checkout.include?("RELEASE_SHA")
@@ -167,8 +167,8 @@ jobs:
             raise "cutover immutable tree label guard missing" unless cutover_run.include?("org.opencontainers.image.source-tree")
             raise "cutover immutable runtime fingerprint guard missing" unless cutover_run.include?(%q{docker image inspect "$immutable_image_id"}) && cutover_run.include?("image-runtime-fingerprint.jq") && cutover_run.include?(%q{test "$cutover_runtime_fingerprint" = "$VALIDATED_RUNTIME_FINGERPRINT"})
             immutable_run_commands = cutover_run.scan(/docker run(?:[^\n]*\\\n)+\s*"\$immutable_image_id"/)
-            raise "all three app-image Docker runs must use the immutable image ID" unless immutable_run_commands.length == 3
-            raise "each immutable app-image run must use the shared secret mounts" unless immutable_run_commands.all? { |command| command.include?("runtime_secret_mounts") }
+            raise "all four app-image Docker runs must use the immutable image ID" unless immutable_run_commands.length == 4
+            raise "exactly three stateful app-image runs must use the shared secret mounts" unless immutable_run_commands.count { |command| command.include?("runtime_secret_mounts") } == 3
             raise "mutable release tag must not be used by cutover" if cutover_run.include?(%q{image="arthello-direct:$RELEASE_SHA"}) || cutover_run.include?(%q{"$image"})
             live_image_line = cutover_run.lines.find { |line| line.include?("live_image_id=\"$(docker inspect \"$live_id\"") && line.include?("{{.Image}}") }
             live_image_position = live_image_line && cutover_run.index(live_image_line)
@@ -211,11 +211,14 @@ jobs:
               raise "Tochka TLS egress proof is incomplete: #{required}" unless tochka_probe.include?(required)
             end
             raise "Tochka TLS preflight must not carry credentials" if tochka_probe.match?(/authorization|bearer|token|credential|secret/i)
-            raise "Tochka TLS probe must run exactly once" unless cutover_run.scan(/^\s*probe_tochka_tls_egress "\$clone_container"$/).length == 1
-            probe_call = cutover_run.index(%q{probe_tochka_tls_egress "$clone_container"})
+            raise "Tochka TLS probe must run exactly once" unless cutover_run.scan(/^\s*probe_tochka_tls_egress "\$network"$/).length == 1
+            raise "Tochka TLS probe must attach stdin for its inline script" unless tochka_probe.include?("docker run --rm -i")
+            raise "Tochka TLS probe must be an isolated stateless container" unless tochka_probe.include?(%q{--network "$probe_network"}) && tochka_probe.include?("--read-only") && tochka_probe.include?("--entrypoint node") && tochka_probe.include?(%q{"$immutable_image_id" --input-type=module})
+            raise "Tochka TLS probe must not receive state or secret mounts" if tochka_probe.include?("runtime_secret_mounts") || tochka_probe.include?("/data") || tochka_probe.include?("--mount") || tochka_probe.include?(" -v ")
+            probe_call = cutover_run.index(%q{probe_tochka_tls_egress "$network"})
             live_stop = cutover_run.index(%q{docker stop --time 30 "$live_id"})
             raise "Tochka TLS proof must complete before live cutover" unless probe_call && live_stop && probe_call < live_stop
-            raise "Tochka TLS probe network attach is missing" unless cutover_run.include?(%q{docker network connect "$network" "$clone_container"}) && cutover_run.include?(%q{docker network disconnect "$network" "$clone_container"})
+            raise "stateful clone must remain on the private none network" unless cutover_run.include?(%q{--name "$clone_container"}) && cutover_run.include?("--network none")
             school_step_index = steps.index { |step| step["name"] == "Resolve authoritative School sync secret" }
             image_import_index = steps.index(image_import_step)
             cutover_index = steps.index(cutover_step)

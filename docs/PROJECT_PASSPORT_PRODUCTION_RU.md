@@ -546,3 +546,13 @@ decision:
 - данные и доступность: предыдущий run не скачал image и не остановил live; база, маршрут и действующий контейнер остались без изменений;
 - приёмка: новый first-attempt Quality/Verify, container-based `ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED`, backup-first cutover, rollback и публичный health-check;
 - следующий переход: после успешного D-056 повторить реальный read-only импорт Точки.
+
+## D-057 — отдельная безсекретная TLS-проверка Точки
+
+- факт: D-056 merge `a48eed30b3a0910c603ff7ad2285a42b3785a507` прошёл main Quality/Proof/Verify; production run `33750926328` подтвердил image evidence, School secret, live D1 и clone health/D1, затем Docker запретил подключать clone из private `none` ко второй сети;
+- сохранность: workflow завершил `ARTHELLO_ROLLBACK=VERIFIED` до остановки live, backup и cutover; действующий контейнер, данные и маршрут не изменились;
+- решение: stateful clone остаётся `--network none`; отдельный одноразовый контейнер того же immutable image выполняет TLS-проверку в production-сети без data volume, env-file, банковского ключа, Authorization и secret mounts;
+- исполнение: контейнер запускается read-only, получает inline-скрипт только через явно подключённый stdin, проверяет закреплённый trust anchor и ожидаемый защищённый 4xx официального read-only endpoint, затем удаляется;
+- release PR/branch: `#326`, `codex/d057-tochka-stateless-egress-20260903`; previous main SHA `a48eed30b3a0910c603ff7ad2285a42b3785a507`;
+- приёмка: first-attempt hosted Quality/Proof/Verify, `ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED`, изолированный clone-preflight, backup-first cutover, rollback guards и публичный health-check;
+- следующий переход: после production health владелец повторяет реальный read-only импорт счетов, остатков, выписок и проведённых операций Точки.
