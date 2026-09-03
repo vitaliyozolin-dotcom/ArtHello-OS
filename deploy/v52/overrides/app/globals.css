@@ -605,3 +605,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 @media(min-width:761px){.content-frame [class$="-workspace"] :where(p,span,small,em,dt,dd,time,label,button,input,select,textarea,th,td):not([data-ah-compact-card], [data-ah-compact-card] *){font-size:15px!important}}
 
 /* Controlled people and family entry */
+
+/* D-054: the floating help launcher must not cover the nested mobile bank form. */
+@media(max-width:720px){body:has(.ahIntegrationModalLayer) [data-ah-help-root] .ah-launch{display:none!important}}
