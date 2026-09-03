@@ -50,7 +50,7 @@ jobs:
 
           # D-040: a pull-request head is verified only on an ephemeral hosted
           # runner and receives neither a production Environment nor a secret.
-          # D-054 makes a one-release fail-closed nested bank-modal scroll correction only for the production trigger;
+          # D-055 makes a one-release fail-closed Tochka TLS trust correction only for the production trigger;
           # the self-hosted job still consumes merged, exact-SHA gated main code.
           ruby -ryaml -e '
             document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
@@ -102,16 +102,16 @@ jobs:
             school_concurrency = deploy.fetch("concurrency")
             raise "School workflow concurrency is missing" unless school_concurrency.fetch("group") == "school-1-11-production" && school_concurrency.fetch("cancel-in-progress") == false
             deployment_env = document.fetch("env")
-            raise "release branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/d054-tochka-modal-scroll-20260903"
-            raise "release PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR").to_s == "321"
-            raise "previous release SHA pin missing" unless deployment_env.fetch("PREVIOUS_RELEASE_SHA") == "1038a1960aaf62f57a161d8a16c804161a7f6c53"
+            raise "release branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/d055-tochka-tls-20260903"
+            raise "release PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR").to_s == "324"
+            raise "previous release SHA pin missing" unless deployment_env.fetch("PREVIOUS_RELEASE_SHA") == "c93a066dae1e3cb1cee83b17de6b2624a0f73baa"
             condition = deploy.fetch("if")
             [
               "workflow_run", "vitaliyozolin-dotcom/ArtHello-OS",
               "Verify ArtHello v52 release", ".github/workflows/verify-arthello-v52.yml",
               "head_branch == '\''main'\''", "conclusion == '\''success'\''",
-              "codex/d054-tochka-modal-scroll-20260903", "vitaliyozolin-dotcom",
-              "number == fromJSON('\''321'\'')",
+              "codex/d055-tochka-tls-20260903", "vitaliyozolin-dotcom",
+              "number == fromJSON('\''324'\'')",
               "pull_requests[1] == null", "github.run_attempt == 1"
             ].each do |required|
               raise "missing production authorization condition" unless condition.include?(required)
@@ -121,8 +121,8 @@ jobs:
             raise "exact checkout is missing" unless checkout_index
             before_checkout = steps.take(checkout_index).map { |step| step["run"].to_s }.join("\n")
             raise "Docker use before authorization/CI gate" if before_checkout.match?(/(^|\s)docker(\s|$)/)
-            raise "D-054 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
-            raise "D-054 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
+            raise "D-055 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
+            raise "D-055 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
             raise "triggering verification run is not pinned" unless before_checkout.include?("TRIGGER_VERIFY_RUN_ID")
             raise "triggering verification attempt is not pinned" unless before_checkout.include?(".run_attempt == 1")
             raise "release SHA is not pinned before checkout" unless before_checkout.include?("RELEASE_SHA")
@@ -192,6 +192,25 @@ jobs:
             raise "D1 descriptor scanner must stay non-root" unless fd_gate.include?(%q{test "$scanner_uid" -ne 0})
             raise "D1 descriptor scanner must match PID 1 UID" unless fd_gate.include?(%q{test "$scanner_uid" = "$pid_one_uid"})
             raise "D1 descriptor rejection diagnostics missing" unless fd_gate.include?("ARTHELLO_ACTIVE_D1_FD=REJECTED")
+            tochka_probe_start = cutover_run.index("probe_tochka_tls_egress() {")
+            tochka_probe_end = cutover_run.index("cleanup_transient() {", tochka_probe_start || 0)
+            raise "Tochka TLS egress probe is missing" unless tochka_probe_start && tochka_probe_end && tochka_probe_end > tochka_probe_start
+            tochka_probe = cutover_run[tochka_probe_start...tochka_probe_end]
+            [
+              "https://enter.tochka.com/uapi/open-banking/v1.0/customers",
+              "getCACertificates(\"extra\")",
+              "D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31",
+              "redirect: \"error\"", "AbortSignal.timeout(20_000)",
+              "ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED"
+            ].each do |required|
+              raise "Tochka TLS egress proof is incomplete: #{required}" unless tochka_probe.include?(required)
+            end
+            raise "Tochka TLS preflight must not carry credentials" if tochka_probe.match?(/authorization|bearer|token|credential|secret/i)
+            raise "Tochka TLS probe must run exactly once" unless cutover_run.scan(/^\s*probe_tochka_tls_egress "\$clone_container"$/).length == 1
+            probe_call = cutover_run.index(%q{probe_tochka_tls_egress "$clone_container"})
+            live_stop = cutover_run.index(%q{docker stop --time 30 "$live_id"})
+            raise "Tochka TLS proof must complete before live cutover" unless probe_call && live_stop && probe_call < live_stop
+            raise "Tochka TLS probe network attach is missing" unless cutover_run.include?(%q{docker network connect "$network" "$clone_container"}) && cutover_run.include?(%q{docker network disconnect "$network" "$clone_container"})
             school_step_index = steps.index { |step| step["name"] == "Resolve authoritative School sync secret" }
             image_import_index = steps.index(image_import_step)
             cutover_index = steps.index(cutover_step)
@@ -332,14 +351,23 @@ jobs:
           test -s deploy/v52/runtime/package.json
           test -s deploy/v52/runtime/package-lock.json
           test -s deploy/v52/maintenance/image-runtime-fingerprint.jq
+          test -s deploy/v52/certificates/russian-trusted-root-ca.pem
+          echo 'aa800ef345422d6158c6fafe1c06c429dbda21c3df4bb1ccb45a920ec1111399  deploy/v52/certificates/russian-trusted-root-ca.pem' | sha256sum -c -
           grep -Fx '# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e' deploy/v52/Dockerfile >/dev/null
           test "$(grep -Fc 'FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e' deploy/v52/Dockerfile)" -eq 3
           grep -F 'npm ci --omit=dev --ignore-scripts --no-audit --no-fund' deploy/v52/Dockerfile >/dev/null
+          grep -F 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem' deploy/v52/Dockerfile >/dev/null
+          grep -F 'COPY deploy/v52/certificates/russian-trusted-root-ca.pem /app/production/russian-trusted-root-ca.pem' deploy/v52/Dockerfile >/dev/null
           if grep -E '^FROM node:24-bookworm-slim AS|npm install .*miniflare' deploy/v52/Dockerfile; then
             echo 'Unpinned runtime dependency installation is forbidden' >&2
             exit 1
           fi
           node - <<'NODE'
+          const { readFileSync } = require('node:fs');
+          const { X509Certificate } = require('node:crypto');
+          const certificate = new X509Certificate(readFileSync('./deploy/v52/certificates/russian-trusted-root-ca.pem'));
+          const fingerprint = 'D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31';
+          if (certificate.fingerprint256 !== fingerprint || !certificate.ca || certificate.subject !== certificate.issuer || !certificate.checkIssued(certificate) || !certificate.verify(certificate.publicKey) || Date.parse(certificate.validTo) <= Date.now()) process.exit(1);
           const manifest = require('./deploy/v52/runtime/package.json');
           const lock = require('./deploy/v52/runtime/package-lock.json');
           if (manifest.dependencies?.miniflare !== '4.20260515.0') process.exit(1);
@@ -384,6 +412,7 @@ jobs:
           test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$EXPECTED_SHA"
           test "$(docker image inspect "$image" --format '{{.Config.User}}')" = node
           test "$(docker image inspect "$image" --format '{{json .Config.Cmd}}')" = '["node","production/runtime-server.mjs"]'
+          test "$(docker image inspect "$image" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fc 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem')" -eq 1
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           test -z "$(git clean -ndx)"
@@ -483,6 +512,7 @@ jobs:
           assert_exact_ci_env OPENAI_API_KEY_FILE /run/secrets/openai-api-key
           assert_exact_ci_env OPENAI_OCR_MODEL gpt-4.1-mini
           assert_exact_ci_env TBANK_EGRESS_IP 8.8.8.8
+          assert_exact_ci_env NODE_EXTRA_CA_CERTS /app/production/russian-trusted-root-ca.pem
           for secret_destination in \
             /run/secrets/bootstrap-password \
             /run/secrets/integration-credentials-key \
@@ -503,6 +533,11 @@ jobs:
           ready=0
           for attempt in $(seq 1 90); do
             if docker exec -i "$container" node - <<'NODE'
+          const { X509Certificate } = await import('node:crypto');
+          const { getCACertificates } = await import('node:tls');
+          const expectedTochkaRoot = 'D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31';
+          const extraRoots = getCACertificates('extra').map((pem) => new X509Certificate(pem));
+          if (!extraRoots.some((certificate) => certificate.fingerprint256 === expectedTochkaRoot && certificate.ca && certificate.subject === certificate.issuer && certificate.verify(certificate.publicKey))) process.exit(1);
           const base = 'http://127.0.0.1:8081';
           const publicOrigin = 'https://verify.arthello.invalid';
           try {
@@ -588,6 +623,7 @@ jobs:
           dockerfile_sha256="$(sha256sum deploy/v52/Dockerfile | cut -d ' ' -f 1)"
           runtime_lock_sha256="$(sha256sum deploy/v52/runtime/package-lock.json | cut -d ' ' -f 1)"
           inventory_sha256="$(sha256sum deploy/v52/maintenance/production-data-inventory.py | cut -d ' ' -f 1)"
+          tochka_ca_sha256="$(sha256sum deploy/v52/certificates/russian-trusted-root-ca.pem | cut -d ' ' -f 1)"
           docker save "$IMAGE" | gzip -1 -n > ci-provenance/arthello-v52-image.tar.gz
           test -s ci-provenance/arthello-v52-image.tar.gz
           image_archive_sha256="$(sha256sum ci-provenance/arthello-v52-image.tar.gz | cut -d ' ' -f 1)"
@@ -608,6 +644,7 @@ jobs:
             --arg dockerfile_sha256 "$dockerfile_sha256" \
             --arg runtime_lock_sha256 "$runtime_lock_sha256" \
             --arg inventory_sha256 "$inventory_sha256" \
+            --arg tochka_ca_sha256 "$tochka_ca_sha256" \
             --arg fingerprint_filter_sha256 "$fingerprint_filter_sha256" \
             --arg image_archive_sha256 "$image_archive_sha256" \
             --arg image_id "$IMAGE_ID" \
@@ -621,6 +658,7 @@ jobs:
               dockerfileSha256: $dockerfile_sha256,
               runtimeLockSha256: $runtime_lock_sha256,
               inventorySha256: $inventory_sha256,
+              tochkaCaSha256: $tochka_ca_sha256,
               fingerprintFilterSha256: $fingerprint_filter_sha256,
               imageArchiveSha256: $image_archive_sha256,
               imageId: $image_id,
