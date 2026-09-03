@@ -7,7 +7,7 @@ const root = process.cwd();
 const route = readFileSync(resolve(root, "app/api/integrations/alfacrm/route.ts"), "utf8");
 const wizard = readFileSync(resolve(root, "app/components/AlfaCrmSetupWizard.tsx"), "utf8");
 const shell = readFileSync(resolve(root, "app/components/IntegrationWorkspace.tsx"), "utf8");
-const css = readFileSync(resolve(root, "app/components/AlfaCrmSetupWizard.css"), "utf8");
+const css = readFileSync(resolve(root, "app/components/AlfaCrmSetupWizard.styles.txt"), "utf8");
 
 test("AlfaCRM uses a dedicated staged wizard instead of the generic all-at-once setup", () => {
   assert.match(shell, /lazy\(\(\) => import\("\.\/AlfaCrmSetupWizard"\)/);
