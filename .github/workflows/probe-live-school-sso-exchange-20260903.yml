@@ -1,0 +1,119 @@
+name: Probe live School SSO exchange
+
+on:
+  push:
+    branches:
+      - codex/verify-fix-staff-school-sso-20260903
+    paths:
+      - .github/workflows/probe-live-school-sso-exchange-20260903.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-live-school-sso-exchange-20260903
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 12
+
+    steps:
+      - name: Exchange PKCE codes directly for every active employee
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec 9>/var/lock/arthello-school-sso-exchange-probe.lock
+          flock -n 9
+
+          live="$(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}' | head -n1)"
+          test -n "$live"
+          docker exec -i \
+            -e ARTHELLO_ORIGIN='https://arthello-188-225-38-55.sslip.io' \
+            -e SCHOOL_ORIGIN='https://school-188-225-38-55.sslip.io' \
+            "$live" node --input-type=module - <<'NODE'
+          import { createHash, randomBytes } from 'node:crypto';
+          import { readdirSync, statSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+
+          const arthelloOrigin=process.env.ARTHELLO_ORIGIN;
+          const schoolOrigin=process.env.SCHOOL_ORIGIN;
+          const files=[];
+          function walk(path,depth=0){if(depth>8)return;let entries=[];try{entries=readdirSync(path,{withFileTypes:true});}catch{return;}for(const entry of entries){const next=join(path,entry.name);if(entry.isDirectory())walk(next,depth+1);else if(entry.isFile()&&/\.sqlite(?:3)?$/i.test(entry.name)){try{if(statSync(next).size>8192)files.push(next);}catch{}}}}
+          walk('/data/d1');
+          let databasePath='';
+          for(const file of files){let db;try{db=new DatabaseSync(file,{readOnly:true});const tables=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row)=>String(row.name)));db.close();if(tables.has('app_users')&&tables.has('user_system_access')&&tables.has('production_auth_sessions')&&tables.has('production_auth_credentials')){databasePath=file;break;}}catch{try{db?.close();}catch{}}}
+          if(!databasePath)throw new Error('ArtHello D1 not found');
+
+          const db=new DatabaseSync(databasePath);
+          const accounts=db.prepare(`SELECT u.id AS appUserId,u.display_name AS displayName,school.role AS schoolGrantRole,c.user_id AS authUserId,central.access_version AS accessVersion
+            FROM app_users u
+            JOIN user_system_access central ON central.user_id=u.id AND central.system_id='SYS-ARTHELLO-OS'
+            JOIN user_system_access school ON school.user_id=u.id AND school.system_id='SYS-SCHOOL-1-11'
+            JOIN production_auth_credentials c ON c.user_id=CASE WHEN u.id='USR-OWNER' THEN 'AUTH-OWNER' ELSE u.id END
+            WHERE u.status='Активен' AND central.status='Активен' AND school.status='Активен'
+              AND u.access_version=central.access_version AND u.access_version=school.access_version
+              AND COALESCE(c.must_change_password,0)=0
+            ORDER BY u.display_name,u.id`).all();
+          const insert=db.prepare(`INSERT INTO production_auth_sessions (token_hash,user_id,csrf_token,expires_at,access_version,created_at) VALUES (?,?,?,?,?,?)`);
+          const now=Math.floor(Date.now()/1000);
+          const sessions=[];
+          for(const account of accounts){const token=randomBytes(32).toString('base64url');const tokenHash=createHash('sha256').update(token).digest('base64url');insert.run(tokenHash,account.authUserId,randomBytes(24).toString('base64url'),now+900,account.accessVersion,now);sessions.push({...account,token,tokenHash});}
+          db.close();
+
+          const results=[];
+          const codeHashes=[];
+          function getCookie(response,name){const cookies=typeof response.headers.getSetCookie==='function'?response.headers.getSetCookie():[response.headers.get('set-cookie')||''];for(const raw of cookies){const first=raw.split(';',1)[0];if(first.startsWith(`${name}=`))return decodeURIComponent(first.slice(name.length+1));}return '';}
+          function decodeTransaction(raw){const dot=raw.lastIndexOf('.');if(dot<=0)throw new Error('transaction_cookie_invalid');return JSON.parse(Buffer.from(raw.slice(0,dot),'base64url').toString('utf8'));}
+          function safe(value){return String(value??'').replace(/\s+/g,' ').slice(0,180);}
+
+          try{
+            for(const account of sessions){
+              try{
+                const start=await fetch(`${schoolOrigin}/auth/central/start?returnTo=/`,{redirect:'manual',headers:{'cache-control':'no-store'}});
+                if(start.status!==303)throw new Error(`start_http_${start.status}`);
+                const transactionCookie=getCookie(start,'school_sso_tx');
+                const transaction=decodeTransaction(transactionCookie);
+                const authorizeUrl=new URL(start.headers.get('location')||'',schoolOrigin);
+                const authorize=await fetch(authorizeUrl,{redirect:'manual',headers:{cookie:`__Host-arthello_session=${account.token}`,'cache-control':'no-store'}});
+                if(authorize.status!==303)throw new Error(`authorize_http_${authorize.status}`);
+                const callbackUrl=new URL(authorize.headers.get('location')||'',arthelloOrigin);
+                const code=callbackUrl.searchParams.get('code')||'';
+                if(!code)throw new Error(`authorize_denied:${safe(callbackUrl.searchParams.get('reason'))}`);
+                codeHashes.push(createHash('sha256').update(code).digest('base64url'));
+
+                const body=JSON.stringify({code,codeVerifier:transaction.verifier});
+                const exchange=await fetch(`${arthelloOrigin}/api/school-sso/exchange`,{
+                  method:'POST',
+                  headers:{'content-type':'application/json','content-length':String(Buffer.byteLength(body))},
+                  body,
+                  redirect:'manual',
+                });
+                const payload=await exchange.json().catch(()=>({}));
+                results.push({appUserId:account.appUserId,displayName:account.displayName,schoolGrantRole:account.schoolGrantRole,status:exchange.status,ok:Boolean(exchange.ok&&payload.ok),identityRole:payload.identity?.role||null,identityName:payload.identity?.displayName||null,error:payload.error?safe(payload.error):null});
+              }catch(error){results.push({appUserId:account.appUserId,displayName:account.displayName,schoolGrantRole:account.schoolGrantRole,status:0,ok:false,error:error instanceof Error?error.message.slice(0,220):'unknown'});}
+            }
+          }finally{
+            const cleanup=new DatabaseSync(databasePath);
+            const removeSession=cleanup.prepare('DELETE FROM production_auth_sessions WHERE token_hash=?');
+            for(const session of sessions)removeSession.run(session.tokenHash);
+            const tables=new Set(cleanup.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row)=>String(row.name)));
+            if(tables.has('school_sso_codes')){const removeCode=cleanup.prepare('DELETE FROM school_sso_codes WHERE code_hash=?');for(const hash of codeHashes)removeCode.run(hash);}
+            cleanup.close();
+            console.log('LIVE_SSO_EXCHANGE_EPHEMERAL_DATA_CLEANED=PASS');
+          }
+          console.log('LIVE_SSO_EXCHANGE_RESULTS_BEGIN');
+          console.log(JSON.stringify(results,null,2));
+          console.log('LIVE_SSO_EXCHANGE_RESULTS_END');
+          const failed=results.filter((item)=>!item.ok);
+          console.log(`LIVE_SSO_EXCHANGE_TOTAL=${results.length}`);
+          console.log(`LIVE_SSO_EXCHANGE_PASS=${results.length-failed.length}`);
+          console.log(`LIVE_SSO_EXCHANGE_FAIL=${failed.length}`);
+          if(failed.length)process.exit(2);
+          NODE
