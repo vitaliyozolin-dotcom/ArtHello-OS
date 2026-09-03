@@ -4,12 +4,9 @@ import { resolve } from "node:path";
 const target = resolve(process.cwd(), "app/components/IntegrationWorkspace.tsx");
 let source = readFileSync(target, "utf8");
 
-const cssAnchor = 'import "./IntegrationWorkspace.ds.css";\n';
-const alfaImport = 'import { AlfaCrmSetupWizard } from "./AlfaCrmSetupWizard";\n';
-if (!source.includes(alfaImport)) {
-  if (!source.includes(cssAnchor)) throw new Error("AlfaCRM patch: IntegrationWorkspace CSS anchor not found");
-  source = source.replace(cssAnchor, `${alfaImport}${cssAnchor}`);
-}
+source = source.replace('import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";', 'import { useCallback, useEffect, useMemo, useRef, useState } from "react";');
+source = source.replace('import { AlfaCrmSetupWizard } from "./AlfaCrmSetupWizard";\n', "");
+source = source.replace(/const AlfaCrmSetupWizard = lazy\(\(\) => import\("\.\/AlfaCrmSetupWizard"\)[^\n]+\n/, "");
 
 const wizardAnchor = `    {wizardId && data.capabilities.canManageSetup && currentBankCapability(wizardId, data.capabilities) ? <ConnectionWizard
       connection={data.connections.find((item) => item.id === wizardId)}
@@ -66,8 +63,6 @@ if (!source.includes(runReplacement)) {
   if (!source.includes(runAnchor)) throw new Error("AlfaCRM patch: generic retry button anchor not found");
   source = source.replace(runAnchor, runReplacement);
 }
-
-writeFileSync(target, source);
 
 const routeTarget = resolve(process.cwd(), "app/api/integrations/alfacrm/route.ts");
 let routeSource = readFileSync(routeTarget, "utf8");
@@ -149,30 +144,42 @@ routeSource = routeSource.replace(
   '        numeric >= 0 ? "Поступление" : "Списание",',
   '        isOutflow ? "Списание" : "Поступление",',
 );
-
 writeFileSync(routeTarget, routeSource);
 
 const alfaWizardTarget = resolve(process.cwd(), "app/components/AlfaCrmSetupWizard.tsx");
 const alfaWizardCssTarget = resolve(process.cwd(), "app/components/AlfaCrmSetupWizard.styles.txt");
-let alfaWizardSource = readFileSync(alfaWizardTarget, "utf8");
+let standaloneWizardSource = readFileSync(alfaWizardTarget, "utf8");
 const alfaWizardCss = readFileSync(alfaWizardCssTarget, "utf8");
 const wizardCssImport = 'import "./AlfaCrmSetupWizard.css";\n';
 const wizardCssConstant = `const ALFA_CRM_STYLES = ${JSON.stringify(alfaWizardCss)};\n`;
-if (alfaWizardSource.includes(wizardCssImport)) {
-  alfaWizardSource = alfaWizardSource.replace(wizardCssImport, wizardCssConstant);
-}
-const wizardRoot = '    <div className="ahIntegrationModalLayer ahAlfaCrmLayer">\n';
-const wizardRootWithStyle = `${wizardRoot}      <style>{ALFA_CRM_STYLES}</style>\n`;
-if (!alfaWizardSource.includes('<style>{ALFA_CRM_STYLES}</style>')) {
-  if (!alfaWizardSource.includes(wizardRoot)) throw new Error("AlfaCRM patch: wizard root anchor not found");
-  alfaWizardSource = alfaWizardSource.replace(wizardRoot, wizardRootWithStyle);
+if (standaloneWizardSource.includes(wizardCssImport)) {
+  standaloneWizardSource = standaloneWizardSource.replace(wizardCssImport, wizardCssConstant);
 }
 const effectAnchor = "  useEffect(() => { void load(); }, []);";
 const effectReplacement = "  // Initial connector state is intentionally loaded only once when the modal mounts.\n  // eslint-disable-next-line react-hooks/exhaustive-deps\n  useEffect(() => { void load(); }, []);";
-if (!alfaWizardSource.includes(effectReplacement)) {
-  if (!alfaWizardSource.includes(effectAnchor)) throw new Error("AlfaCRM patch: wizard load effect anchor not found");
-  alfaWizardSource = alfaWizardSource.replace(effectAnchor, effectReplacement);
+if (!standaloneWizardSource.includes(effectReplacement)) {
+  if (!standaloneWizardSource.includes(effectAnchor)) throw new Error("AlfaCRM patch: wizard load effect anchor not found");
+  standaloneWizardSource = standaloneWizardSource.replace(effectAnchor, effectReplacement);
 }
-writeFileSync(alfaWizardTarget, alfaWizardSource);
+const wizardRoot = '    <div className="ahIntegrationModalLayer ahAlfaCrmLayer">\n';
+const wizardRootWithStyle = `${wizardRoot}      <style>{ALFA_CRM_STYLES}</style>\n`;
+if (!standaloneWizardSource.includes('<style>{ALFA_CRM_STYLES}</style>')) {
+  if (!standaloneWizardSource.includes(wizardRoot)) throw new Error("AlfaCRM patch: wizard root anchor not found");
+  standaloneWizardSource = standaloneWizardSource.replace(wizardRoot, wizardRootWithStyle);
+}
+writeFileSync(alfaWizardTarget, standaloneWizardSource);
+
+let embeddedWizardSource = standaloneWizardSource
+  .replace(/^"use client";\n\n/, "")
+  .replace('import { useEffect, useMemo, useRef, useState } from "react";\n', "")
+  .replace('import { createPortal } from "react-dom";\n', "")
+  .replace('export function AlfaCrmSetupWizard', 'function Wizard');
+const embeddedWizard = `const AlfaCrmSetupWizard = (() => {\n${embeddedWizardSource}\n\nreturn Wizard;\n})();\n\n`;
+const integrationExportAnchor = "export function IntegrationWorkspace({";
+if (!source.includes("const AlfaCrmSetupWizard = (() => {")) {
+  if (!source.includes(integrationExportAnchor)) throw new Error("AlfaCRM patch: integration export anchor not found");
+  source = source.replace(integrationExportAnchor, `${embeddedWizard}${integrationExportAnchor}`);
+}
+writeFileSync(target, source);
 
 console.log("AlfaCRM staged integration shell patched");
