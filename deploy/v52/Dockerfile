@@ -18,6 +18,7 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* |
     && node /app/scripts/patch-system-content-legal.mjs \
     && node /app/scripts/patch-system-analytics-readiness.mjs \
     && node /app/scripts/patch-system-operational-modules.mjs \
+    && node /app/scripts/patch-alfacrm-staged-integration.mjs \
     && node /app/scripts/patch-tochka-customer-permission-fallback.mjs \
     && node /app/scripts/patch-tochka-multi-company-selection.mjs \
     && node /app/scripts/patch-tochka-statement-array-response.mjs \
