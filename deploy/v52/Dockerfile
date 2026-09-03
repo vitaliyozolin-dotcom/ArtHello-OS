@@ -26,6 +26,7 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* |
     && node /app/scripts/prepare-help-finance-ux-v3.mjs \
     && node /app/scripts/patch-help-finance-ux-v3.mjs \
     && node /app/scripts/patch-mobile-canonical-v5.mjs \
+    && node /app/scripts/patch-tochka-finance-bank-visibility.mjs \
     && node /app/scripts/patch-school-sso-entry.mjs \
     && node /app/scripts/verify-system-wide-operational-shells.mjs \
     && echo "e78978c13431d32a0db2db25da73f24fd6245703aa14d4cb3ec34647324f6f40  /app/db/index.ts" | sha256sum -c - \
