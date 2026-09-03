@@ -5,6 +5,7 @@ const TOCHKA_STATEMENTS_PATH = "/uapi/open-banking/v1.0/statements";
 const TOCHKA_STATEMENT_RESULT_PATH = /^\/uapi\/open-banking\/v1\.0\/accounts\/\d{20}(?:\/\d{9})?\/statements\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const MAX_AUTHORIZATION_LENGTH = 16_391;
 const MAX_STATEMENT_BODY_BYTES = 16_384;
+const MAX_RESPONSE_BODY_BYTES = 2_000_000;
 const UPSTREAM_TIMEOUT_MS = 45_000;
 
 /**
@@ -12,8 +13,11 @@ const UPSTREAM_TIMEOUT_MS = 45_000;
  * extended with the pinned Russian root CA. The worker receives this function
  * as a Miniflare service binding and cannot address any other upstream.
  */
-export function createTochkaTransport({ fetchImpl = globalThis.fetch } = {}) {
+export function createTochkaTransport({ fetchImpl = globalThis.fetch, timeoutMs = UPSTREAM_TIMEOUT_MS } = {}) {
   if (typeof fetchImpl !== "function") throw new TypeError("fetchImpl must be a function");
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > UPSTREAM_TIMEOUT_MS) {
+    throw new TypeError("timeoutMs must be a positive integer within the production timeout");
+  }
 
   return async function tochkaTransport(request) {
     if (!request
@@ -44,7 +48,7 @@ export function createTochkaTransport({ fetchImpl = globalThis.fetch } = {}) {
       ...(body === undefined ? {} : { "content-type": "application/json" }),
     };
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const abortFromCaller = () => controller.abort();
     request.signal?.addEventListener("abort", abortFromCaller, { once: true });
 
@@ -58,11 +62,13 @@ export function createTochkaTransport({ fetchImpl = globalThis.fetch } = {}) {
         redirect: "error",
         signal: controller.signal,
       });
+      const responseBody = await readBoundedResponseBody(upstream);
+      if (responseBody === null) return errorResponse(502, "upstream_response_too_large");
       const responseHeaders = new Headers();
       const contentType = upstream.headers.get("content-type");
       if (contentType) responseHeaders.set("content-type", contentType);
       responseHeaders.set("cache-control", "no-store");
-      return new Response(upstream.body, {
+      return new Response(responseBody, {
         status: upstream.status,
         statusText: upstream.statusText,
         headers: responseHeaders,
@@ -74,6 +80,35 @@ export function createTochkaTransport({ fetchImpl = globalThis.fetch } = {}) {
       request.signal?.removeEventListener("abort", abortFromCaller);
     }
   };
+}
+
+async function readBoundedResponseBody(response) {
+  const declaredLength = Number(response.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BODY_BYTES) {
+    await response.body?.cancel();
+    return null;
+  }
+  if (!response.body) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_RESPONSE_BODY_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }
 
 /** Stateless image preflight: proves this exact Node module can reach Tochka. */

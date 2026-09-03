@@ -566,3 +566,14 @@ decision:
 - release PR/branch: `#327`, `codex/d058-tochka-node-bridge-ios-20260903`; previous production SHA `1cdca3fd9cb63f6dd7c8d8ce137e4126b4fc1123`;
 - приёмка: зелёные transport/UI тесты, first-attempt exact-SHA Quality/Proof/Verify, production preflight через тот же модуль, изолированный clone, backup-first cutover, rollback guards и публичный health-check;
 - следующий переход: владелец повторяет подключение; успешный импорт показывает реальные счета, остатки, выписки и проведённые операции, а банковский 401/403 должен отображаться как конкретная ошибка прав/ключа, не как сбой транспорта.
+
+## D-059 — совместимый worker → Node hop Точки
+
+- подтверждение владельца: D-058 активен, но `IMG_9996(2)`/`IMG_9997(2)` снова показывают загрузку и общую ошибку «Не удалось связаться с Точкой»;
+- точная причина: Miniflare/workerd `4.20260515.0` отклоняет `redirect: "error"` до вызова function-valued service binding; Node upstream при этом не вызывается;
+- решение: только внутренний hop получает поддерживаемый `redirect: "manual"`; Node-мост сохраняет внешний `redirect: "error"`, строгий origin/path/method allowlist и удаление лишних заголовков;
+- надёжность: ответ банка полностью читается внутри 45-секундного abort-контроля и ограничивается 2 000 000 байт; stalled/oversized body возвращает безопасную ошибку без ключа;
+- OAuth: не используется как обход, потому что token exchange и API-вызовы зависят от того же транспорта; пересмотр возможен для сторонних клиентов после регистрации приложения и получения `client_id/client_secret`;
+- release PR/branch: `#328`, `codex/d059-tochka-binding-redirect-20260903`; previous production SHA `7e926f4c29aa7e3c3208a55451db035714861e28`;
+- приёмка: 7/7 целевых transport/service-binding тестов, first-attempt exact-SHA Quality/Proof/Verify, production Node TLS egress, изолированный clone, backup-first cutover, rollback guards и публичный health-check;
+- следующий переход: владелец повторно сохраняет тот же JWT; результатом являются реальные компании/счета/выписки либо конкретная банковская ошибка ключа/прав, но не общий transport failure.
