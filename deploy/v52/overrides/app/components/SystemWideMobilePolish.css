@@ -593,7 +593,7 @@ button.operational-empty-card:disabled {
     .staff-modal,
     .registry-modal,
     .content-modal,
-    .setup-wizard,
+    .setup-wizard:not(.ahIntegrationSetupWizard),
     .connection-modal,
     .lead-create-modal,
     .sales-drawer,
