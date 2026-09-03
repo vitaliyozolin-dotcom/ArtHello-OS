@@ -60,6 +60,21 @@ jobs:
               raise "verification must use an ephemeral hosted runner" unless job.fetch("runs-on") == "ubuntu-latest"
               raise "verification must not receive a protected Environment" if job.key?("environment")
             end
+            verify_steps = jobs.fetch("verify-v52").fetch("steps")
+            build_index = verify_steps.index { |step| step["id"] == "image" }
+            raise "immutable image build step is missing" unless build_index
+            restore_index = verify_steps.index { |step| step["name"] == "Restore exact source immediately before build" }
+            raise "fresh exact checkout must immediately precede the pristine build gate" unless restore_index && restore_index + 2 == build_index
+            restore = verify_steps.fetch(restore_index)
+            raise "pre-build checkout action is not pinned" unless restore.fetch("uses") == "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
+            restore_with = restore.fetch("with")
+            raise "pre-build checkout ref is not exact" unless restore_with.fetch("ref").include?("github.event.pull_request.head.sha || github.sha")
+            raise "pre-build checkout must clean ignored files" unless restore_with.fetch("clean") == true
+            raise "pre-build checkout must not persist credentials" unless restore_with.fetch("persist-credentials") == false
+            pristine = verify_steps.fetch(restore_index + 1).fetch("run")
+            raise "pre-build pristine gate is incomplete" unless pristine.include?("git status --porcelain=v1 --untracked-files=all") && pristine.include?("git clean -ndx")
+            build_run = verify_steps.fetch(build_index).fetch("run")
+            raise "post-build pristine gate is incomplete" unless build_run.include?("ARTHELLO_POST_BUILD_SOURCE=PRISTINE") && build_run.include?("git status --porcelain=v1 --untracked-files=all") && build_run.include?("git clean -ndx")
           ' .github/workflows/verify-arthello-v52.yml
 
           ruby -ryaml -e '
@@ -269,6 +284,26 @@ jobs:
               raise SystemExit("Inventory is not synchronized with the encrypted credential namespace")
           PY
 
+      - name: Restore exact source immediately before build
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          clean: true
+          persist-credentials: false
+
+      - name: Prove pristine exact build context
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse --is-shallow-repository)" = false
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git clean -ndx)"
+          printf 'ARTHELLO_PRE_BUILD_SOURCE=PRISTINE sha=%s tree=%s\n' \
+            "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})"
+
       - name: Build exact v52 candidate on an ephemeral runner
         id: image
         env:
@@ -286,6 +321,11 @@ jobs:
           test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$EXPECTED_SHA"
           test "$(docker image inspect "$image" --format '{{.Config.User}}')" = node
           test "$(docker image inspect "$image" --format '{{json .Config.Cmd}}')" = '["node","production/runtime-server.mjs"]'
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git clean -ndx)"
+          printf 'ARTHELLO_POST_BUILD_SOURCE=PRISTINE sha=%s tree=%s\n' \
+            "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})"
           printf 'image=%s\n' "$image" >> "$GITHUB_OUTPUT"
           printf 'image_id=%s\n' "$(docker image inspect "$image" --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
 
