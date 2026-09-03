@@ -69,6 +69,10 @@ let routeSource = readFileSync(routeTarget, "utf8");
 const nextModuleRuleDisable = "/* eslint-disable @next/next/no-assign-module-variable */\n";
 if (!routeSource.startsWith(nextModuleRuleDisable)) routeSource = `${nextModuleRuleDisable}${routeSource}`;
 routeSource = routeSource.replace(
+  'const items = await fetchPaged(session, "0/branch/index", {});',
+  'const items = await fetchPaged(session, "branch/index", { is_active: 1 });',
+);
+routeSource = routeSource.replace(
   "async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, localBranches: LocalBranch[], actor: string) {",
   "async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, localBranches: LocalBranch[]) {",
 );
