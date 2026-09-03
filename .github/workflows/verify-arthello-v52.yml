@@ -79,7 +79,7 @@ jobs:
             maintenance_index = verify_steps.index { |step| step["name"] == "Run repository maintenance tests after immutable upload" }
             raise "repository maintenance tests must run only after immutable upload" unless upload_index && maintenance_index && maintenance_index > upload_index && maintenance_index == verify_steps.length - 1
             pre_upload_runs = verify_steps.take(upload_index + 1).map { |step| step["run"].to_s }.join("\n")
-            repo_python_before_upload = pre_upload_runs.lines.any? { |line| line.match?(/^\s*python3 (?:deploy\/v52\/maintenance\/|-m py_compile)/) }
+            repo_python_before_upload = pre_upload_runs.lines.any? { |line| line.match?(/python3\s+(?!-I\b)/) }
             raise "repository Python executes before immutable upload" if repo_python_before_upload
             verify_source = File.read(ARGV.fetch(0))
             raise "standalone negated grep is not fail-closed" if verify_source.lines.any? { |line| line.match?(/^\s*!\s+grep\b/) }
@@ -287,17 +287,6 @@ jobs:
           const resolved = lock.packages?.['node_modules/miniflare'];
           if (resolved?.version !== '4.20260515.0' || !resolved.integrity) process.exit(1);
           NODE
-          python3 - <<'PY'
-          import pathlib
-          import re
-
-          database_source = pathlib.Path("deploy/v52/overrides/db/index.ts").read_text(encoding="utf-8")
-          inventory_source = pathlib.Path("deploy/v52/maintenance/production-data-inventory.py").read_text(encoding="utf-8")
-          match = re.search(r'const integrationCredentialPrefix = "([^"]+)";', database_source)
-          if match is None or match.group(1) not in inventory_source:
-              raise SystemExit("Inventory is not synchronized with the encrypted credential namespace")
-          PY
-
       - name: Restore exact source immediately before build
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -372,10 +361,10 @@ jobs:
           test "$missing_key_status" -ne 0
           grep -F 'INTEGRATION_CREDENTIALS_KEY' "$missing_key_log" >/dev/null
 
-          integration_key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48), end="")')"
-          bootstrap_password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24), end="")')"
-          central_access_secret="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48), end="")')"
-          openai_api_key="sk-ci-$(python3 -c 'import secrets; print(secrets.token_urlsafe(36), end="")')"
+          integration_key="$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(48), end="")')"
+          bootstrap_password="$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(24), end="")')"
+          central_access_secret="$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(48), end="")')"
+          openai_api_key="sk-ci-$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(36), end="")')"
           echo "::add-mask::$integration_key"
           echo "::add-mask::$bootstrap_password"
           echo "::add-mask::$central_access_secret"
@@ -597,3 +586,13 @@ jobs:
           python3 deploy/v52/maintenance/test_production_data_inventory.py
           test "$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)" = \
             "d1/miniflare-D1DatabaseObject/5a499c55f63d6b9f725547d510cf454e288954b6f3c2d5024eb1443f29c97730.sqlite"
+          python3 -I - <<'PY'
+          import pathlib
+          import re
+
+          database_source = pathlib.Path("deploy/v52/overrides/db/index.ts").read_text(encoding="utf-8")
+          inventory_source = pathlib.Path("deploy/v52/maintenance/production-data-inventory.py").read_text(encoding="utf-8")
+          match = re.search(r'const integrationCredentialPrefix = "([^"]+)";', database_source)
+          if match is None or match.group(1) not in inventory_source:
+              raise SystemExit("Inventory is not synchronized with the encrypted credential namespace")
+          PY
