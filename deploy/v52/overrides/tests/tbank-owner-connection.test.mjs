@@ -195,6 +195,7 @@ test("integration dialogs are portaled, keyboard-contained and fully interactive
   assert.match(workspace, /previousFocus\?\.focus\(\)/);
   assert.match(workspace, /document\.body\.style\.overflow = "hidden"/);
   assert.match(workspace, /type="submit"/);
+  assert.doesNotMatch(workspace, /<form[^>]*data-ah-help-root/);
   assert.match(styles, /\.ahIntegrationModalLayer\s*\{[\s\S]*?position:\s*fixed[\s\S]*?z-index:\s*2140/);
   assert.match(styles, /\.ahIntegrationModalLayer > \.drawer-scrim/);
   assert.match(styles, /pointer-events:\s*auto/);
