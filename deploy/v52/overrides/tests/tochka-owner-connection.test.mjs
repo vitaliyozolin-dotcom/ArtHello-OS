@@ -517,7 +517,7 @@ test("owner credential UI is masked, transient and sends the production CSRF tok
   assert.match(workspace, /event\.key === "Escape"/);
   assert.match(workspace, /previousFocus\?\.focus\(\)/);
   assert.doesNotMatch(workspace, /\.chatgpt\.site/i);
-  assert.match(workspace, /className="setup-wizard ahIntegrationSetupWizard" data-ah-help-root="true"/);
+  assert.doesNotMatch(workspace, /<form[^>]*data-ah-help-root/);
   assert.match(helpDom, /if \(element\.closest\("\[data-ah-help-root\]/);
   assert.doesNotMatch(helpSystem, /fieldMarkers|data-ah-help-inline|ah-field-icon/);
 });

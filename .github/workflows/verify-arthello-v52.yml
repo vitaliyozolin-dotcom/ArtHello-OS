@@ -50,7 +50,7 @@ jobs:
 
           # D-040: a pull-request head is verified only on an ephemeral hosted
           # runner and receives neither a production Environment nor a secret.
-          # D-051 makes a one-release fail-closed recovery exception only for the production trigger;
+          # D-052 makes a one-release fail-closed hotfix exception only for the production trigger;
           # the self-hosted job still consumes merged, exact-SHA gated main code.
           ruby -ryaml -e '
             document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
@@ -102,17 +102,16 @@ jobs:
             school_concurrency = deploy.fetch("concurrency")
             raise "School workflow concurrency is missing" unless school_concurrency.fetch("group") == "school-1-11-production" && school_concurrency.fetch("cancel-in-progress") == false
             deployment_env = document.fetch("env")
-            raise "release branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/recover-school-container-discovery-20260903"
-            raise "release PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR").to_s == "318"
-            raise "failed release SHA pin missing" unless deployment_env.fetch("FAILED_RELEASE_SHA") == "f14dad5d938de023385b996877a1ec6d1aaca5d6"
-            raise "failed deploy run pin missing" unless deployment_env.fetch("FAILED_DEPLOY_RUN_ID").to_s == "33713845429"
+            raise "release branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/fix-integration-modal-hit-testing-20260903"
+            raise "release PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR").to_s == "319"
+            raise "previous release SHA pin missing" unless deployment_env.fetch("PREVIOUS_RELEASE_SHA") == "163ff8a6f337b21b7dbb6560a88324ee57e4478f"
             condition = deploy.fetch("if")
             [
               "workflow_run", "vitaliyozolin-dotcom/ArtHello-OS",
               "Verify ArtHello v52 release", ".github/workflows/verify-arthello-v52.yml",
               "head_branch == '\''main'\''", "conclusion == '\''success'\''",
-              "codex/recover-school-container-discovery-20260903", "vitaliyozolin-dotcom",
-              "number == fromJSON('\''318'\'')",
+              "codex/fix-integration-modal-hit-testing-20260903", "vitaliyozolin-dotcom",
+              "number == fromJSON('\''319'\'')",
               "pull_requests[1] == null", "github.run_attempt == 1"
             ].each do |required|
               raise "missing production authorization condition" unless condition.include?(required)
@@ -122,17 +121,16 @@ jobs:
             raise "exact checkout is missing" unless checkout_index
             before_checkout = steps.take(checkout_index).map { |step| step["run"].to_s }.join("\n")
             raise "Docker use before authorization/CI gate" if before_checkout.match?(/(^|\s)docker(\s|$)/)
-            raise "D-051 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
-            raise "D-051 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
+            raise "D-052 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
+            raise "D-052 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
             raise "triggering verification run is not pinned" unless before_checkout.include?("TRIGGER_VERIFY_RUN_ID")
             raise "triggering verification attempt is not pinned" unless before_checkout.include?(".run_attempt == 1")
             raise "release SHA is not pinned before checkout" unless before_checkout.include?("RELEASE_SHA")
-            raise "failed deployment incident is not pinned" unless before_checkout.include?("FAILED_DEPLOY_RUN_ID") && before_checkout.include?("FAILED_RELEASE_SHA") && before_checkout.include?(%q{.conclusion == "failure"})
-            raise "failed release SHA is not rejected" unless before_checkout.include?(%q{test "$RELEASE_SHA" != "$FAILED_RELEASE_SHA"})
-            raise "recovery commit must be the failed release child" unless before_checkout.include?(%q{.parents[0].sha == $failed_sha})
+            raise "previous release SHA is not rejected" unless before_checkout.include?(%q{test "$RELEASE_SHA" != "$PREVIOUS_RELEASE_SHA"})
+            raise "hotfix commit must be the previous release child" unless before_checkout.include?(%q{.parents[0].sha == $previous_sha})
             raise "exact Quality gate missing before checkout" unless before_checkout.include?("quality.yml")
             raise "exact v52 gate missing before checkout" unless before_checkout.include?("verify-arthello-v52.yml")
-            raise "Quality and Verify attempts must both be first attempts" unless before_checkout.scan(%q{.run_attempt == 1}).length >= 3
+            raise "Quality and Verify attempts must both be first attempts" unless before_checkout.scan(%q{.run_attempt == 1}).length >= 2
             raise "deploy replay guard must inspect every status" if before_checkout.include?("status=success")
             raise "deploy replay guard pagination is incomplete" unless before_checkout.include?("per_page=100") && before_checkout.include?(%q{.total_count == (.workflow_runs | length)})
             source = File.read(ARGV.fetch(0))

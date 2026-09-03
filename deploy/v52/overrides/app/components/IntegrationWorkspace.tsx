@@ -684,7 +684,7 @@ function ConnectionWizard({ connection, existing, legalEntities, branches, busy,
   }
   return createPortal(<div className="ahIntegrationModalLayer">
     <button type="button" className="drawer-scrim" onClick={close} aria-label="Закрыть настройку" />
-    <form ref={dialogRef} className="setup-wizard ahIntegrationSetupWizard" data-ah-help-root="true" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="setup-title" tabIndex={-1}>
+    <form ref={dialogRef} className="setup-wizard ahIntegrationSetupWizard" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="setup-title" tabIndex={-1}>
       <header><div><p>Безопасное подключение</p><h2 id="setup-title">{humanSystemName(connection.system)}</h2></div><button type="button" onClick={close} aria-label="Закрыть">×</button></header>
       <div className="setup-intro">
         <strong>{tochka ? "Один ключ Точки для выбранной карточки юрлица — не отдельный ключ на каждый счёт или филиал" : tbank ? "ArtHello OS использует только два метода чтения Т‑Банка" : openai ? "Генерация включится после безопасной настройки ключа OpenAI" : "Настройте источник и расписание загрузки"}</strong>
