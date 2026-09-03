@@ -42,12 +42,25 @@ test("central employee SSO is stateful, PKCE-bound and fixed-audience", async ()
   assert.match(central, /\/api\/school-sso\/authorize/);
   assert.match(central, /\/api\/school-sso\/exchange/);
   assert.match(central, /arthello-188-225-38-55\.sslip\.io/);
+  assert.match(central, /school-188-225-38-55\.sslip\.io/);
+  assert.match(central, /PUBLIC_APP_ORIGIN/);
   assert.match(
     central,
-    /headers:\s*{\s*"content-type": "application\/json",\s*origin: exchangeUrl\.origin,\s*}/s,
+    /headers:\s*{[\s\S]*?"content-type": "application\/json",[\s\S]*?"content-length": String\(Buffer\.byteLength\(exchangeBody\)\),[\s\S]*?origin: schoolPublicOrigin\(\),[\s\S]*?}/,
   );
+  assert.doesNotMatch(central, /origin: exchangeUrl\.origin/);
   assert.match(central, /returnTo: transaction\.returnTo/);
   assert.doesNotMatch(central, /redirect_uri/);
+});
+
+test("central employee callback never redirects to an internal bind address", async () => {
+  const callback = await read("../app/auth/central/callback/route.ts");
+  assert.match(callback, /schoolPublicOrigin/);
+  assert.match(callback, /const publicOrigin = schoolPublicOrigin\(\)/);
+  assert.match(callback, /new URL\(completed\.returnTo, publicOrigin\)/);
+  assert.match(callback, /new URL\("\/login", publicOrigin\)/);
+  assert.doesNotMatch(callback, /new URL\(completed\.returnTo, url\.origin\)/);
+  assert.doesNotMatch(callback, /new URL\("\/login", url\.origin\)/);
 });
 
 test("staff passwords are retired while family fallback remains controllable", async () => {
