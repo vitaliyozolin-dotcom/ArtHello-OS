@@ -46,6 +46,36 @@ jobs:
           chmod 0700 "$work"
           trap 'rm -rf -- "$work"' EXIT
 
+          cat > "$work/authcheck.py" <<'PY'
+          import json, sqlite3, sys, time
+          p=sys.argv[1]
+          con=sqlite3.connect(f'file:{p}?mode=ro', uri=True)
+          try:
+              tables={r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+              r={"integrity": con.execute('PRAGMA integrity_check').fetchone()[0]}
+              if 'production_auth_credentials' in tables:
+                  row=con.execute("""SELECT COUNT(*),
+                    MAX(CASE WHEN user_id='USR-OWNER' THEN 1 ELSE 0 END),
+                    MAX(CASE WHEN user_id='USR-OWNER' AND length(password_hash)>0 AND length(password_salt)>0 THEN 1 ELSE 0 END),
+                    MAX(CASE WHEN user_id='USR-OWNER' AND locked_until>? THEN 1 ELSE 0 END)
+                    FROM production_auth_credentials""",(int(time.time()),)).fetchone()
+                  r['credentialCount']=int(row[0] or 0)
+                  r['ownerCredentialExists']=bool(row[1])
+                  r['ownerPasswordMaterialPresent']=bool(row[2])
+                  r['ownerLockedNow']=bool(row[3])
+              else:
+                  r['credentialCount']=0; r['ownerCredentialExists']=False; r['ownerPasswordMaterialPresent']=False; r['ownerLockedNow']=False
+              if 'app_users' in tables:
+                  row=con.execute("SELECT COUNT(*),MAX(CASE WHEN id='USR-OWNER' AND status='Активен' THEN 1 ELSE 0 END) FROM app_users").fetchone()
+                  r['appUserCount']=int(row[0] or 0); r['ownerAppUserActive']=bool(row[1])
+              if 'user_system_access' in tables:
+                  row=con.execute("SELECT COUNT(*) FROM user_system_access WHERE user_id='USR-OWNER' AND system_id='SYS-ARTHELLO-OS' AND status='Активен'").fetchone()
+                  r['ownerSystemAccessActive']=int(row[0] or 0)==1
+              print('D062_CANDIDATE_AUTH='+json.dumps(r,sort_keys=True))
+          finally:
+              con.close()
+          PY
+
           mapfile -t live_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
           test "${#live_ids[@]}" -eq 1
           live_image_id="$(docker inspect "${live_ids[0]}" --format '{{.Image}}')"
@@ -61,21 +91,13 @@ jobs:
           rows=[]
           for name in names:
               data=json.loads(subprocess.check_output(["docker","volume","inspect",name], text=True))[0]
-              rows.append({
-                  "name": name,
-                  "created": data.get("CreatedAt") or "",
-                  "labels": data.get("Labels") or {},
-              })
-          rows.sort(key=lambda x: x["created"], reverse=True)
-          json.dump(rows, open(output,"w",encoding="utf-8"), ensure_ascii=False)
+              rows.append({"name":name,"created":data.get("CreatedAt") or ""})
+          rows.sort(key=lambda x:x["created"], reverse=True)
+          json.dump(rows, open(output,"w",encoding="utf-8"))
           PY
 
-          mapfile -t ordered < <(python3 - "$work/volumes.json" <<'PY'
-          import json,sys
-          rows=json.load(open(sys.argv[1],encoding='utf-8'))
-          for row in rows[:25]: print(row['name'])
-          PY
-          )
+          mapfile -t ordered < <(python3 -c 'import json,sys; rows=json.load(open(sys.argv[1])); [print(r["name"]) for r in rows[:25]]' "$work/volumes.json")
+          relative_db="$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)"
 
           index=0
           for volume in "${ordered[@]}"; do
@@ -85,8 +107,7 @@ jobs:
             created="$(docker volume inspect "$volume" --format '{{.CreatedAt}}')"
             release_sha="$(docker volume inspect "$volume" --format '{{index .Labels "arthello.release.sha"}}' 2>/dev/null || true)"
             release_run="$(docker volume inspect "$volume" --format '{{index .Labels "arthello.release.run"}}' 2>/dev/null || true)"
-            printf 'D062_CANDIDATE_BEGIN index=%s name=%s created=%s release_sha=%s release_run=%s\n' \
-              "$index" "$volume" "$created" "${release_sha:-none}" "${release_run:-none}"
+            printf 'D062_CANDIDATE_BEGIN index=%s name=%s created=%s release_sha=%s release_run=%s\n' "$index" "$volume" "$created" "${release_sha:-none}" "${release_run:-none}"
 
             copy_status=0
             docker run --rm --user 0:0 --network none \
@@ -94,49 +115,15 @@ jobs:
               --entrypoint /bin/sh "$live_image_id" -ceu 'cd /from && tar -cf - .' \
               | tar -xf - -C "$candidate" || copy_status=$?
             printf 'D062_CANDIDATE_COPY index=%s status=%s\n' "$index" "$copy_status"
-            if [ "$copy_status" -ne 0 ]; then
-              rm -rf -- "$candidate"
-              continue
-            fi
+            if [ "$copy_status" -ne 0 ]; then rm -rf -- "$candidate"; continue; fi
 
             inventory_status=0
             inventory="$(python3 deploy/v52/maintenance/production-data-inventory.py "$candidate" 2>&1)" || inventory_status=$?
             printf 'D062_CANDIDATE_INVENTORY index=%s status=%s\n' "$index" "$inventory_status"
             if [ "$inventory_status" -eq 0 ]; then
-              printf 'D062_CANDIDATE_VALID index=%s name=%s created=%s release_sha=%s\n' \
-                "$index" "$volume" "$created" "${release_sha:-none}"
+              printf 'D062_CANDIDATE_VALID index=%s name=%s created=%s release_sha=%s\n' "$index" "$volume" "$created" "${release_sha:-none}"
               printf '%s\n' "$inventory"
-
-              relative_db="$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)"
-              export D062_DB="$candidate/$relative_db"
-              python3 - <<'PY'
-              import json, os, sqlite3, time
-              p=os.environ['D062_DB']
-              con=sqlite3.connect(f'file:{p}?mode=ro', uri=True)
-              try:
-                  tables={r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                  r={"integrity": con.execute('PRAGMA integrity_check').fetchone()[0]}
-                  if 'production_auth_credentials' in tables:
-                      row=con.execute("""SELECT COUNT(*),
-                        MAX(CASE WHEN user_id='USR-OWNER' THEN 1 ELSE 0 END),
-                        MAX(CASE WHEN user_id='USR-OWNER' AND length(password_hash)>0 AND length(password_salt)>0 THEN 1 ELSE 0 END),
-                        MAX(CASE WHEN user_id='USR-OWNER' AND locked_until>? THEN 1 ELSE 0 END)
-                        FROM production_auth_credentials""",(int(time.time()),)).fetchone()
-                      r['credentialCount']=int(row[0] or 0)
-                      r['ownerCredentialExists']=bool(row[1])
-                      r['ownerPasswordMaterialPresent']=bool(row[2])
-                      r['ownerLockedNow']=bool(row[3])
-                  else:
-                      r['credentialCount']=0; r['ownerCredentialExists']=False; r['ownerPasswordMaterialPresent']=False; r['ownerLockedNow']=False
-                  if 'app_users' in tables:
-                      row=con.execute("SELECT COUNT(*),MAX(CASE WHEN id='USR-OWNER' AND status='Активен' THEN 1 ELSE 0 END) FROM app_users").fetchone()
-                      r['appUserCount']=int(row[0] or 0); r['ownerAppUserActive']=bool(row[1])
-                  if 'user_system_access' in tables:
-                      row=con.execute("SELECT COUNT(*) FROM user_system_access WHERE user_id='USR-OWNER' AND system_id='SYS-ARTHELLO-OS' AND status='Активен'").fetchone()
-                      r['ownerSystemAccessActive']=int(row[0] or 0)==1
-                  print('D062_CANDIDATE_AUTH='+json.dumps(r,sort_keys=True))
-              finally: con.close()
-              PY
+              python3 "$work/authcheck.py" "$candidate/$relative_db"
             else
               reason="$(printf '%s' "$inventory" | tr '\n\r' '  ' | cut -c1-180)"
               printf 'D062_CANDIDATE_INVALID index=%s reason=%s\n' "$index" "$reason"
