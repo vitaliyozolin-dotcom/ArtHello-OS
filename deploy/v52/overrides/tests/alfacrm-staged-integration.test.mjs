@@ -22,7 +22,8 @@ const diagnosticCssAssets = cssAssets(resolve(root, "dist")).sort((a, b) => b[1]
 console.log(`ALFACRM_CSS_DIAGNOSTIC=${JSON.stringify(diagnosticCssAssets)}`);
 
 test("AlfaCRM uses a dedicated staged wizard instead of the generic all-at-once setup", () => {
-  assert.match(shell, /import \{ AlfaCrmSetupWizard \} from "\.\/AlfaCrmSetupWizard";/);
+  assert.match(shell, /const AlfaCrmSetupWizard = \(\(\) => \{/);
+  assert.doesNotMatch(shell, /import \{ AlfaCrmSetupWizard \} from "\.\/AlfaCrmSetupWizard";/);
   assert.doesNotMatch(shell, /lazy\(\(\) => import\("\.\/AlfaCrmSetupWizard"\)/);
   assert.match(shell, /wizardId === "INT-T-ALFACRM"/);
   assert.match(shell, /wizardId !== "INT-T-ALFACRM"/);
