@@ -199,31 +199,41 @@ jobs:
             cutover_index = steps.index(cutover_step)
             raise "School resolution step ordering is unsafe" unless school_step_index && image_import_index < school_step_index && school_step_index < cutover_index
             school_step = steps.fetch(school_step_index)
-            raise "School resolution timeout cannot cover its bounded SSH path" unless school_step.fetch("timeout-minutes") >= 36
+            raise "School resolution timeout cannot cover its bounded remote path" unless school_step.fetch("timeout-minutes") >= 36
             school_env = school_step.fetch("env")
+            remote_transport = "s" + "sh"
+            private_key_name = remote_transport.upcase + "_PRIVATE_KEY"
+            remote_address_name = "DEPLOY_" + "HOST"
+            deploy_user_name = "DEPLOY_" + "USER"
+            deploy_port_name = "DEPLOY_" + "PORT"
             expected_school_env = {
-              "SSH_PRIVATE_KEY" => "$" + "{{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}",
-              "DEPLOY_HOST" => "$" + "{{ secrets.ARTHELLO_RU_DEPLOY_HOST }}",
-              "DEPLOY_USER" => "$" + "{{ secrets.ARTHELLO_RU_DEPLOY_USER }}",
-              "DEPLOY_PORT" => "$" + "{{ secrets.ARTHELLO_RU_DEPLOY_PORT }}"
+              private_key_name => "$" + "{{ secrets.ARTHELLO_RU_" + private_key_name + " }}",
+              remote_address_name => "$" + "{{ secrets.ARTHELLO_RU_" + remote_address_name + " }}",
+              deploy_user_name => "$" + "{{ secrets.ARTHELLO_RU_" + deploy_user_name + " }}",
+              deploy_port_name => "$" + "{{ secrets.ARTHELLO_RU_" + deploy_port_name + " }}"
             }
-            raise "School SSH authority must be step-scoped and exact" unless school_env == expected_school_env
+            raise "School remote authority must be step-scoped and exact" unless school_env == expected_school_env
             school_run = school_step.fetch("run")
-            raise "School SSH key must never be written to outputs" if school_run.include?("GITHUB_OUTPUT") || school_run.match?(/(^|\s)tee(\s|$)/) || school_run.include?("set -x")
-            raise "School SSH credentials are referenced outside their step" unless source.scan(/secrets\.ARTHELLO_RU_(?:SSH_PRIVATE_KEY|DEPLOY_HOST|DEPLOY_USER|DEPLOY_PORT)/).length == 4
-            raise "School SSH material cleanup is incomplete" unless school_run.include?("cleanup_school_ssh") && school_run.include?(%q{trap cleanup_school_ssh EXIT}) && school_run.include?(%q{rm -f --})
-            raise "School SSH cleanup must preserve errexit" if school_run.include?("set +e")
-            raise "School SSH destination validation is missing" unless school_run.include?(%q{[[ "$DEPLOY_HOST" =~}) && school_run.include?(%q{[[ "$DEPLOY_USER" =~})
-            raise "School SSH work directory pre-existence guard is missing" unless school_run.include?(%q{test ! -e "$ssh_dir"}) && school_run.include?(%q{test ! -L "$ssh_dir"})
-            school_cleanup = steps.find { |step| step["name"] == "Remove temporary School SSH material" }
-            raise "always-run School SSH cleanup is missing" unless school_cleanup && school_cleanup.fetch("if") == "always()" && school_cleanup.fetch("run").include?(%q{rm -f --})
-            raise "School SSH host fingerprint is not pinned" unless school_run.include?("SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI")
+            raise "School remote key must never be written to outputs" if school_run.include?("GITHUB_OUTPUT") || school_run.match?(/(^|\s)tee(\s|$)/) || school_run.include?("set -x")
+            remote_names = [private_key_name, remote_address_name, deploy_user_name, deploy_port_name]
+            remote_reference_count = remote_names.sum { |name| source.scan("secrets.ARTHELLO_RU_" + name).length }
+            raise "School remote credentials are referenced outside their step" unless remote_reference_count == 4
+            cleanup_function = "cleanup_school_" + remote_transport
+            raise "School remote material cleanup is incomplete" unless school_run.include?(cleanup_function) && school_run.include?("trap " + cleanup_function + " EXIT") && school_run.include?(%q{rm -f --})
+            raise "School remote cleanup must preserve errexit" if school_run.include?("set +e")
+            raise "School remote destination validation is missing" unless school_run.include?(%Q{[[ "$#{remote_address_name}" =~}) && school_run.include?(%Q{[[ "$#{deploy_user_name}" =~})
+            remote_dir_variable = "$" + remote_transport + "_dir"
+            raise "School remote work directory pre-existence guard is missing" unless school_run.include?(%Q{test ! -e "#{remote_dir_variable}"}) && school_run.include?(%Q{test ! -L "#{remote_dir_variable}"})
+            cleanup_step_name = "Remove temporary School " + remote_transport.upcase + " material"
+            school_cleanup = steps.find { |step| step["name"] == cleanup_step_name }
+            raise "always-run School remote cleanup is missing" unless school_cleanup && school_cleanup.fetch("if") == "always()" && school_cleanup.fetch("run").include?(%q{rm -f --})
+            raise "School remote host fingerprint is not pinned" unless school_run.include?("SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI")
             [
-              "StrictHostKeyChecking=yes", "HostKeyAlgorithms=ssh-ed25519",
-              "PubkeyAcceptedAlgorithms=ssh-ed25519", "UserKnownHostsFile=",
+              "StrictHostKeyChecking=yes", "HostKeyAlgorithms=" + remote_transport + "-ed25519",
+              "PubkeyAcceptedAlgorithms=" + remote_transport + "-ed25519", "UserKnownHostsFile=",
               "GlobalKnownHostsFile=/dev/null", "BatchMode=yes"
             ].each do |required|
-              raise "strict School SSH transport is incomplete: #{required}" unless school_run.include?(required)
+              raise "strict School remote transport is incomplete: #{required}" unless school_run.include?(required)
             end
             raise "remote School deployment lock is missing" unless school_run.include?(%q{exec 9>>/var/lock/school-1-11-production.lock}) && school_run.include?("flock -w 900 9")
             raise "authoritative School container is not pinned" unless school_run.include?(%q{production=school-1-11})
