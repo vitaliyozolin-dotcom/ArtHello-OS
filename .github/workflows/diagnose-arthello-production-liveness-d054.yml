@@ -109,3 +109,40 @@ jobs:
           else
             printf 'ARTHELLO_EXPECTED_CONTAINER_PRESENT=false\n'
           fi
+
+
+  external-check:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe public ArtHello from hosted runner
+        shell: bash
+        env:
+          PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+          EXPECTED_RELEASE: 1038a1960aaf62f57a161d8a16c804161a7f6c53
+        run: |
+          set -Eeuo pipefail
+          headers="$(mktemp)"
+          body="$(mktemp)"
+          trap 'rm -f -- "$headers" "$body"' EXIT
+          status="$(curl --silent --show-error --location --retry 3 --retry-all-errors \
+            --connect-timeout 20 --max-time 60 \
+            --dump-header "$headers" --output "$body" --write-out '%{http_code}' \
+            "$PUBLIC_URL/api/health")"
+          printf 'ARTHELLO_EXTERNAL_STATUS=%s\n' "$status"
+          printf 'ARTHELLO_EXTERNAL_HEADERS_BEGIN\n'
+          sed -E '/^(set-cookie|authorization):/Id' "$headers"
+          printf 'ARTHELLO_EXTERNAL_HEADERS_END\n'
+          printf 'ARTHELLO_EXTERNAL_BODY=%s\n' "$(head -c 1000 "$body" | tr '\n' ' ')"
+          test "$status" = 200
+          python3 - "$body" <<'PY'
+          import json, pathlib, sys
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert payload.get("status") == "ok"
+          assert payload.get("database") == "available"
+          print("ARTHELLO_EXTERNAL_HEALTH=VERIFIED")
+          PY
