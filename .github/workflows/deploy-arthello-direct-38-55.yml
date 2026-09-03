@@ -1,6 +1,6 @@
 name: Deploy ArtHello self-hosted RU
 
-# D-050 is a one-release owner workspace and integrations exception to D-040's workflow_dispatch trigger only.
+# D-051 is a one-release recovery of the owner workspace and integrations cutover after a fail-closed School topology mismatch.
 # Production authorization still requires the protected Environment below. The
 # exception is constrained to the successful hosted verification of the exact
 # merged main SHA from the named release branch and repository.
@@ -22,8 +22,10 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/owner-workspace-integrations-20260903
-  EXPECTED_RELEASE_PR: "317"
+  EXPECTED_RELEASE_HEAD: codex/recover-school-container-discovery-20260903
+  EXPECTED_RELEASE_PR: '318'
+  FAILED_RELEASE_SHA: f14dad5d938de023385b996877a1ec6d1aaca5d6
+  FAILED_DEPLOY_RUN_ID: '33713845429'
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -54,8 +56,8 @@ jobs:
       (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/owner-workspace-integrations-20260903' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('317') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/recover-school-container-discovery-20260903' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('318') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -63,11 +65,14 @@ jobs:
         )
       )
     runs-on: [self-hosted, linux, x64, arthello-gateway]
-    timeout-minutes: 180
+    timeout-minutes: 240
     environment: production-ru
+    concurrency:
+      group: school-1-11-production
+      cancel-in-progress: false
 
     steps:
-      - name: Verify one-release D-050 trigger and protected Environment
+      - name: Verify one-release D-051 trigger and protected Environment
         timeout-minutes: 4
         env:
           GH_TOKEN: ${{ github.token }}
@@ -80,6 +85,9 @@ jobs:
           [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
           test "$GITHUB_RUN_ATTEMPT" = 1
           [[ "$EXPECTED_RELEASE_PR" =~ ^[0-9]+$ ]]
+          [[ "$FAILED_DEPLOY_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$FAILED_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$RELEASE_SHA" != "$FAILED_RELEASE_SHA"
 
           api="https://api.github.com/repos/$GITHUB_REPOSITORY"
           headers=(
@@ -129,23 +137,44 @@ jobs:
               .merged_by.login == "vitaliyozolin-dotcom"
             ' <<<"$release_pr_json" >/dev/null
 
+          failed_run_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+            "${headers[@]}" "$api/actions/runs/$FAILED_DEPLOY_RUN_ID")"
+          jq -e \
+            --argjson run_id "$FAILED_DEPLOY_RUN_ID" \
+            --arg sha "$FAILED_RELEASE_SHA" \
+            --arg repository "$EXPECTED_REPOSITORY" '
+              .id == $run_id and
+              .name == "Deploy ArtHello self-hosted RU" and
+              (.path == ".github/workflows/deploy-arthello-direct-38-55.yml" or
+               .path == ".github/workflows/deploy-arthello-direct-38-55.yml@main") and
+              .event == "workflow_run" and
+              .head_branch == "main" and
+              .head_sha == $sha and
+              .run_attempt == 1 and
+              .status == "completed" and
+              .conclusion == "failure" and
+              .repository.full_name == $repository and
+              .head_repository.full_name == $repository and
+              .actor.login == "vitaliyozolin-dotcom" and
+              .triggering_actor.login == "vitaliyozolin-dotcom"
+            ' <<<"$failed_run_json" >/dev/null
+
           deploy_runs_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
             "${headers[@]}" \
-            "$api/actions/workflows/deploy-arthello-direct-38-55.yml/runs?event=workflow_run&head_sha=$RELEASE_SHA&status=success&per_page=1")"
+            "$api/actions/workflows/deploy-arthello-direct-38-55.yml/runs?event=workflow_run&head_sha=$RELEASE_SHA&per_page=100")"
           jq -e \
             --argjson current_run_id "$GITHUB_RUN_ID" \
             --arg sha "$RELEASE_SHA" \
             --arg repository "$EXPECTED_REPOSITORY" '
-              [.workflow_runs[] | select(
-                .id != $current_run_id and
-                .head_sha == $sha and
-                .event == "workflow_run" and
-                .status == "completed" and
-                .conclusion == "success" and
-                .repository.full_name == $repository and
-                (.path == ".github/workflows/deploy-arthello-direct-38-55.yml" or
-                 .path == ".github/workflows/deploy-arthello-direct-38-55.yml@main")
-              )] | length == 0
+              .total_count == (.workflow_runs | length) and
+              ([.workflow_runs[] | select(
+                  .id != $current_run_id and
+                  .head_sha == $sha and
+                  .event == "workflow_run" and
+                  .repository.full_name == $repository and
+                  (.path == ".github/workflows/deploy-arthello-direct-38-55.yml" or
+                   .path == ".github/workflows/deploy-arthello-direct-38-55.yml@main")
+                )] | length == 0)
             ' <<<"$deploy_runs_json" >/dev/null
 
           # GitHub evaluates the protected Environment before starting this job.
@@ -176,9 +205,11 @@ jobs:
             "${headers[@]}" "$api/commits/$RELEASE_SHA")"
           jq -e \
             --arg sha "$RELEASE_SHA" \
+            --arg failed_sha "$FAILED_RELEASE_SHA" \
             '.sha == $sha and
              .commit.verification.verified == true and
-             (.parents | length) == 1' <<<"$commit_json" >/dev/null
+             (.parents | length) == 1 and
+             .parents[0].sha == $failed_sha' <<<"$commit_json" >/dev/null
           tree_sha="$(jq -r '.commit.tree.sha' <<<"$commit_json")"
           [[ "$tree_sha" =~ ^[a-f0-9]{40}$ ]]
 
@@ -224,7 +255,7 @@ jobs:
                 .repository.full_name == $repository
               )] | sort_by(.id) | last // empty' <<<"$runs_json")"
             test -n "$run_json" || return 1
-            jq -e '.status == "completed" and .conclusion == "success"' <<<"$run_json" >/dev/null || return 1
+            jq -e '.run_attempt == 1 and .status == "completed" and .conclusion == "success"' <<<"$run_json" >/dev/null || return 1
             run_id="$(jq -r '.id' <<<"$run_json")"
             [[ "$run_id" =~ ^[0-9]+$ ]] || return 1
             if [ -n "$expected_run_id" ]; then test "$run_id" = "$expected_run_id" || return 1; fi
@@ -430,6 +461,230 @@ jobs:
             "$actual_image_id" "$actual_runtime_fingerprint" >> "$GITHUB_OUTPUT"
           printf 'ARTHELLO_HOSTED_IMAGE=VERIFIED image=%s id=%s\n' "$image" "$actual_image_id"
 
+      - name: Resolve authoritative School sync secret
+        timeout-minutes: 40
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          : "${SSH_PRIVATE_KEY:?missing protected School SSH key}"
+          : "${DEPLOY_HOST:?missing protected School deploy host}"
+          : "${DEPLOY_USER:?missing protected School deploy user}"
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          deploy_port="${DEPLOY_PORT:-2222}"
+          [[ "$deploy_port" =~ ^[0-9]{1,5}$ ]]
+          test "$deploy_port" -ge 1
+          test "$deploy_port" -le 65535
+
+          ssh_dir="$RUNNER_TEMP/arthello-school-sync-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          case "$ssh_dir" in
+            "$RUNNER_TEMP"/arthello-school-sync-*) ;;
+            *) echo 'Unsafe School SSH work path' >&2; exit 1 ;;
+          esac
+          cleanup_school_ssh() {
+            rm -f -- \
+              "$ssh_dir/id_ed25519" \
+              "$ssh_dir/known_hosts" \
+              "$ssh_dir/known_hosts.scan" \
+              "$ssh_dir/school-sync-probe-wrong.json" \
+              "$ssh_dir/school-sync-probe-wrong.headers" \
+              "$ssh_dir/school-sync-probe.json" \
+              "$ssh_dir/school-sync-probe.headers" \
+              >/dev/null 2>&1 || true
+            rmdir -- "$ssh_dir" >/dev/null 2>&1 || true
+          }
+          trap cleanup_school_ssh EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          trap 'exit 129' HUP
+          test ! -e "$ssh_dir"
+          test ! -L "$ssh_dir"
+          install -m 0700 -d "$ssh_dir"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+          unset SSH_PRIVATE_KEY
+          chmod 0600 "$ssh_dir/id_ed25519"
+          ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+
+          scan="$ssh_dir/known_hosts.scan"
+          : > "$scan"
+          chmod 0600 "$scan"
+          for attempt in 1 2 3; do
+            timeout --signal=TERM --kill-after=5s 150s \
+              ssh -p "$deploy_port" \
+                -o StrictHostKeyChecking=accept-new \
+                -o UserKnownHostsFile="$scan" \
+                -o GlobalKnownHostsFile=/dev/null \
+                -o PreferredAuthentications=none \
+                -o PubkeyAuthentication=no \
+                -o PasswordAuthentication=no \
+                -o KbdInteractiveAuthentication=no \
+                -o ConnectTimeout=140 \
+                -o HostKeyAlgorithms=ssh-ed25519 \
+                "$DEPLOY_USER@$DEPLOY_HOST" true \
+                </dev/null >/dev/null 2>&1 || true
+            test -s "$scan" && break
+            sleep 5
+          done
+          test -s "$scan"
+          fingerprint="$(ssh-keygen -lf "$scan" -E sha256 | awk '{print $2; exit}')"
+          test "$fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scan" "$ssh_dir/known_hosts"
+
+          ssh_options=(
+            -T
+            -p "$deploy_port"
+            -i "$ssh_dir/id_ed25519"
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$ssh_dir/known_hosts"
+            -o GlobalKnownHostsFile=/dev/null
+            -o ConnectTimeout=140
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=30
+            -o IPQoS=none
+            -o Compression=no
+            -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr
+            -o MACs=hmac-sha2-256
+          )
+          timeout --signal=TERM --kill-after=5s 180s \
+            ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" true \
+            </dev/null >/dev/null
+
+          payload="$(base64 -w0 <<'REMOTE'
+          set -Eeuo pipefail
+          production=school-1-11
+          exec 9>>/var/lock/school-1-11-production.lock
+          flock -w 900 9
+          school_container_id="$(docker container inspect "$production" --format '{{.Id}}')"
+          [[ "$school_container_id" =~ ^[a-f0-9]{64}$ ]]
+          test "$(docker container inspect "$school_container_id" --format '{{.State.Running}}')" = true
+          test "$(docker container inspect "$school_container_id" --format '{{.State.Health.Status}}')" = healthy
+          test "$(docker container inspect "$school_container_id" --format '{{index .Config.Labels "school.system"}}')" = school-1-11
+          test "$(docker container inspect "$school_container_id" --format '{{index .Config.Labels "school.environment"}}')" = production
+          docker container inspect "$school_container_id" | python3 -I -c '
+          import json
+          import sys
+
+          item = json.load(sys.stdin)[0]
+          matches = [
+              value.removeprefix("CENTRAL_ACCESS_SECRET=")
+              for value in (item.get("Config") or {}).get("Env") or []
+              if value.startswith("CENTRAL_ACCESS_SECRET=")
+          ]
+          if len(matches) != 1:
+              raise SystemExit("School must expose exactly one central access secret")
+          secret = matches[0]
+          if not 32 <= len(secret) <= 4096 or any(character.isspace() for character in secret):
+              raise SystemExit("School central access secret has an unsafe format")
+          sys.stdout.write(secret)
+          '
+          REMOTE
+          )"
+          central_access_secret="$(
+            timeout --signal=TERM --kill-after=5s 1200s \
+              ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "printf '%s' '$payload' | base64 -d | bash" \
+              </dev/null
+          )"
+          test "${#central_access_secret}" -ge 32
+          test "${#central_access_secret}" -le 4096
+          [[ "$central_access_secret" != *[[:space:]]* ]]
+          escaped_secret="${central_access_secret//'%'/'%25'}"
+          printf '::add-mask::%s\n' "$escaped_secret"
+
+          secret_dir="$HOME/.config/arthello"
+          central_access_secret_file="$secret_dir/central-access-secret"
+          test ! -L "$secret_dir"
+          install -d -m 0700 "$secret_dir"
+          test "$(stat -c '%a' "$secret_dir")" = 700
+          if [ -L "$central_access_secret_file" ]; then
+            echo 'Central access secret file must not be a symlink' >&2
+            exit 1
+          elif [ -e "$central_access_secret_file" ]; then
+            test -f "$central_access_secret_file"
+            test -r "$central_access_secret_file"
+            current_secret="$(python3 -I -c 'import pathlib, sys; sys.stdout.write(pathlib.Path(sys.argv[1]).read_text(encoding="ascii"))' "$central_access_secret_file")"
+            test "${#current_secret}" -ge 32
+            test "${#current_secret}" -le 4096
+            [[ "$current_secret" != *[[:space:]]* ]]
+            escaped_current="${current_secret//'%'/'%25'}"
+            printf '::add-mask::%s\n' "$escaped_current"
+            test "$current_secret" = "$central_access_secret"
+            chmod 0444 "$central_access_secret_file"
+          else
+            temporary="$(mktemp "$secret_dir/.central-access-secret.XXXXXX")"
+            printf '%s' "$central_access_secret" > "$temporary"
+            sync -f "$temporary"
+            chmod 0444 "$temporary"
+            mv -f -- "$temporary" "$central_access_secret_file"
+            chmod 0444 "$central_access_secret_file"
+            sync -d "$secret_dir"
+          fi
+          test -f "$central_access_secret_file"
+          test ! -L "$central_access_secret_file"
+          test "$(stat -c '%a' "$central_access_secret_file")" = 444
+
+          timestamp="$(date +%s)"
+          wrong_response_body="$ssh_dir/school-sync-probe-wrong.json"
+          wrong_response_headers="$ssh_dir/school-sync-probe-wrong.headers"
+          wrong_status="$(curl --silent --show-error --max-time 30 \
+            --request POST \
+            --header 'content-type: application/json' \
+            --header "x-arthello-timestamp: $timestamp" \
+            --header 'x-arthello-signature: 0000000000000000000000000000000000000000000000000000000000000000' \
+            --data-binary '{}' \
+            --dump-header "$wrong_response_headers" \
+            --output "$wrong_response_body" \
+            --write-out '%{http_code}' \
+            "$SCHOOL_URL/api/internal/staff-sync")"
+          test "$wrong_status" = 401
+          grep -Eiq '^content-type:[[:space:]]*application/json([[:space:]]*;|[[:space:]]*$)' "$wrong_response_headers"
+          jq -e 'type == "object" and keys == ["error"] and .error == "Неверная подпись синхронизации"' \
+            "$wrong_response_body" >/dev/null
+
+          signature="$(python3 -I - "$central_access_secret_file" "$timestamp" <<'PY'
+          import hashlib
+          import hmac
+          import pathlib
+          import sys
+
+          secret = pathlib.Path(sys.argv[1]).read_bytes()
+          message = f"{sys.argv[2]}.{{}}".encode("utf-8")
+          sys.stdout.write(hmac.new(secret, message, hashlib.sha256).hexdigest())
+          PY
+          )"
+          [[ "$signature" =~ ^[a-f0-9]{64}$ ]]
+          response_body="$ssh_dir/school-sync-probe.json"
+          response_headers="$ssh_dir/school-sync-probe.headers"
+          status="$(curl --silent --show-error --max-time 30 \
+            --request POST \
+            --header 'content-type: application/json' \
+            --header "x-arthello-timestamp: $timestamp" \
+            --header "x-arthello-signature: $signature" \
+            --data-binary '{}' \
+            --dump-header "$response_headers" \
+            --output "$response_body" \
+            --write-out '%{http_code}' \
+            "$SCHOOL_URL/api/internal/staff-sync")"
+          test "$status" = 400
+          grep -Eiq '^content-type:[[:space:]]*application/json([[:space:]]*;|[[:space:]]*$)' "$response_headers"
+          jq -e 'type == "object" and keys == ["error"] and .error == "Неизвестное действие синхронизации"' \
+            "$response_body" >/dev/null
+          printf 'ARTHELLO_SCHOOL_SYNC_SECRET=VERIFIED source=protected-remote\n'
+
       - name: Clone preflight and guarded production cutover
         id: cutover
         timeout-minutes: 75
@@ -441,8 +696,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           umask 077
-          exec 9>>"/var/lock/school-1-11-production.lock"
-          flock -w 900 9
 
           immutable_image_id="$VALIDATED_IMAGE_ID"
           [[ "$immutable_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
@@ -477,7 +730,6 @@ jobs:
           central_access_secret_file="$secret_dir/central-access-secret"
           openai_api_key_file="$secret_dir/openai-api-key"
           tbank_egress_ip_file="$secret_dir/tbank-egress-ip"
-          school_container="school-1-11"
           inventory_script="deploy/v52/maintenance/production-data-inventory.py"
           active_d1_relative_path="$(python3 "$inventory_script" --print-active-database-relative-path)"
           test "$active_d1_relative_path" = "d1/miniflare-D1DatabaseObject/5a499c55f63d6b9f725547d510cf454e288954b6f3c2d5024eb1443f29c97730.sqlite"
@@ -865,6 +1117,63 @@ jobs:
             printf '::add-mask::%s\n' "$escaped"
           }
 
+          verify_school_sync_secret() {
+            local label="$1" timestamp signature
+            local wrong_response_body wrong_response_headers wrong_status
+            local response_body response_headers status
+            [[ "$label" =~ ^[a-z0-9-]+$ ]]
+            test -f "$central_access_secret_file"
+            test ! -L "$central_access_secret_file"
+            test "$(stat -c '%a' "$central_access_secret_file")" = 444
+            timestamp="$(date +%s)"
+            wrong_response_body="$work/school-sync-probe-$label-wrong.json"
+            wrong_response_headers="$work/school-sync-probe-$label-wrong.headers"
+            wrong_status="$(curl --silent --show-error --max-time 30 \
+              --request POST \
+              --header 'content-type: application/json' \
+              --header "x-arthello-timestamp: $timestamp" \
+              --header 'x-arthello-signature: 0000000000000000000000000000000000000000000000000000000000000000' \
+              --data-binary '{}' \
+              --dump-header "$wrong_response_headers" \
+              --output "$wrong_response_body" \
+              --write-out '%{http_code}' \
+              "$SCHOOL_URL/api/internal/staff-sync")"
+            test "$wrong_status" = 401
+            grep -Eiq '^content-type:[[:space:]]*application/json([[:space:]]*;|[[:space:]]*$)' "$wrong_response_headers"
+            jq -e 'type == "object" and keys == ["error"] and .error == "Неверная подпись синхронизации"' \
+              "$wrong_response_body" >/dev/null
+
+            signature="$(python3 -I - "$central_access_secret_file" "$timestamp" <<'PY'
+          import hashlib
+          import hmac
+          import pathlib
+          import sys
+
+          secret = pathlib.Path(sys.argv[1]).read_bytes()
+          message = f"{sys.argv[2]}.{{}}".encode("utf-8")
+          sys.stdout.write(hmac.new(secret, message, hashlib.sha256).hexdigest())
+          PY
+            )"
+            [[ "$signature" =~ ^[a-f0-9]{64}$ ]]
+            response_body="$work/school-sync-probe-$label.json"
+            response_headers="$work/school-sync-probe-$label.headers"
+            status="$(curl --silent --show-error --max-time 30 \
+              --request POST \
+              --header 'content-type: application/json' \
+              --header "x-arthello-timestamp: $timestamp" \
+              --header "x-arthello-signature: $signature" \
+              --data-binary '{}' \
+              --dump-header "$response_headers" \
+              --output "$response_body" \
+              --write-out '%{http_code}' \
+              "$SCHOOL_URL/api/internal/staff-sync")"
+            test "$status" = 400
+            grep -Eiq '^content-type:[[:space:]]*application/json([[:space:]]*;|[[:space:]]*$)' "$response_headers"
+            jq -e 'type == "object" and keys == ["error"] and .error == "Неизвестное действие синхронизации"' \
+              "$response_body" >/dev/null
+            printf 'ARTHELLO_SCHOOL_SYNC_HMAC=VERIFIED phase=%s\n' "$label"
+          }
+
           restore_caddy_route() {
             local rollback_route="$route_new.rollback" rollback_config="$config_new.rollback"
             local current_route_sha
@@ -991,28 +1300,17 @@ jobs:
           curl -fsS --max-time 20 "$SCHOOL_URL/api/health" | jq -e '.status == "ok"' >/dev/null
           curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | jq -e '.status == "ok" and .database == "available"' >/dev/null
 
-          test "$(docker inspect "$school_container" --format '{{.State.Running}}')" = true
-          central_access_secret="$(
-            docker inspect "$school_container" | jq -erj '
-              [.[0].Config.Env[] | select(startswith("CENTRAL_ACCESS_SECRET="))]
-              | if length == 1
-                then (.[0] | ltrimstr("CENTRAL_ACCESS_SECRET="))
-                else error("school container must expose exactly one CENTRAL_ACCESS_SECRET")
-                end
-              | select(
-                  (length >= 32 and length <= 4096) and
-                  (test("[[:space:]]") | not)
-                )
-            '
-          )"
+          test -f "$central_access_secret_file"
+          test ! -L "$central_access_secret_file"
+          test -r "$central_access_secret_file"
+          test -s "$central_access_secret_file"
+          test "$(stat -c '%a' "$central_access_secret_file")" = 444
+          central_access_secret="$(python3 -I -c 'import pathlib, sys; sys.stdout.write(pathlib.Path(sys.argv[1]).read_text(encoding="ascii"))' "$central_access_secret_file")"
           mask_secret "$central_access_secret"
           test "${#central_access_secret}" -ge 32
           test "${#central_access_secret}" -le 4096
           [[ "$central_access_secret" != *[[:space:]]* ]]
-          atomic_secret_write "$central_access_secret_file" "$central_access_secret"
-          test -f "$central_access_secret_file"
-          test ! -L "$central_access_secret_file"
-          test "$(stat -c '%a' "$central_access_secret_file")" = 444
+          verify_school_sync_secret before-preflight
 
           openai_enabled=0
           openai_api_key=""
@@ -1350,6 +1648,7 @@ jobs:
           printf 'ARTHELLO_CLONE_PREFLIGHT=VERIFIED\n'
 
           require_current_main_release
+          verify_school_sync_secret before-live-mutation
           old_restart_disabled=1
           docker update --restart=no "$live_id" >/dev/null
           test "$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')" = no
@@ -1425,6 +1724,7 @@ jobs:
           docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 
           verify_public "$run_key"
+          verify_school_sync_secret after-route-activation
           require_current_main_release
           apply_previous_restart_policy "$candidate"
           test "$(docker inspect "$candidate" --format '{{.State.Running}}')" = true
@@ -1446,6 +1746,26 @@ jobs:
           release_active=1
           trap - EXIT INT TERM HUP
           cleanup_transient
+
+      - name: Remove temporary School SSH material
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh_dir="$RUNNER_TEMP/arthello-school-sync-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          case "$ssh_dir" in
+            "$RUNNER_TEMP"/arthello-school-sync-*) ;;
+            *) echo 'Unsafe School SSH cleanup path' >&2; exit 1 ;;
+          esac
+          rm -f -- \
+            "$ssh_dir/id_ed25519" \
+            "$ssh_dir/known_hosts" \
+            "$ssh_dir/known_hosts.scan" \
+            "$ssh_dir/school-sync-probe-wrong.json" \
+            "$ssh_dir/school-sync-probe-wrong.headers" \
+            "$ssh_dir/school-sync-probe.json" \
+            "$ssh_dir/school-sync-probe.headers"
+          rmdir -- "$ssh_dir" >/dev/null 2>&1 || true
 
       - name: Production summary
         if: always()

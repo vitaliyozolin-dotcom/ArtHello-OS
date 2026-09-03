@@ -1,14 +1,17 @@
 # ArtHello OS — Decisions
 
-## D-051 — Восстановить ArtHello cutover через проверяемое обнаружение School-контейнера
+## D-051 — Восстановить ArtHello cutover через авторитетный School SSH-контур
 
 Дата: 2026-09-03  
 Статус: принято как fail-closed восстановление порученного production release
 
-GitHub-подписанный squash merge D-050 `f14dad5d938de023385b996877a1ec6d1aaca5d6` прошёл Quality, Proof и v52 Verify на `main`. Production run 33713845429 остановился до активации нового ArtHello-контейнера: внешний School health был зелёным, но guard ожидал Docker object `school-1-11`, тогда как production School запущен Compose с другим container name. Workflow подтвердил `ARTHELLO_ROLLBACK=VERIFIED`; публичные ArtHello и School остались здоровы, новый release не активирован.
+GitHub-подписанный squash merge D-050 `f14dad5d938de023385b996877a1ec6d1aaca5d6` прошёл Quality, Proof и v52 Verify на `main`. Production run `33713845429` остановился до активации нового ArtHello-контейнера: внешний School health был зелёным, но ArtHello runner выполнил локальный `docker inspect school-1-11`, тогда как канонический School-контейнер `school-1-11` находится на защищённом удалённом Docker-хосте. Workflow подтвердил `ARTHELLO_ROLLBACK=VERIFIED`; текущий ArtHello не останавливался, данные и маршрут не менялись.
 
-Follow-up ограничен decision record и двумя release workflows. Вместо угаданного имени он обязан выбрать ровно один запущенный контейнер, содержащий ровно одну непустую `CENTRAL_ACCESS_SECRET`, подтвердить общий Docker network с Caddy и извлечь секрет без вывода значения. Ноль или несколько кандидатов завершают cutover до остановки текущего ArtHello. Новый one-release trigger привязывается к exact branch `codex/recover-school-container-discovery-20260903` и фактическому номеру этого PR после его создания; допустим только GitHub-подписанный squash merge с одним parent, повторные hosted gates и новый attempt-1 production run.
+Follow-up ограничен decision record и двумя release workflows. Он сохраняет ArtHello concurrency и добавляет repository-wide School concurrency, повторно использует только существующие step-scoped `production-ru` SSH credentials, закреплённый ED25519 fingerprint и удалённый `/var/lock/school-1-11-production.lock`. До чтения секрета проверяются полный ID, running/healthy и labels `school.system=school-1-11`, `school.environment=production`; принимается ровно один `CENTRAL_ACCESS_SECRET` длиной 32–4096 без whitespace. Значение не попадает в argv, env, logs или GitHub outputs, сразу маскируется и атомарно сохраняется только при отсутствии локального файла; существующий файл обязан совпасть.
 
+Совпадение ключа доказывается без изменения данных School: запрос с заведомо неверной подписью для `{}` обязан вернуть exact 401 `{"error":"Неверная подпись синхронизации"}`, а HMAC из защищённого файла — exact 400 `{"error":"Неизвестное действие синхронизации"}`. Проверки выполняются после получения ключа, перед preflight/live-мутацией и после переключения маршрута; любое отклонение завершает cutover fail-closed либо запускает проверяемый rollback.
+
+One-release trigger закреплён за exact branch `codex/recover-school-container-discovery-20260903` и PR #318. Workflow отдельно подтверждает failed run `33713845429`, запрещает повтор SHA D-050, требует новый GitHub-подписанный squash merge с единственным parent D-050, attempt 1 для Quality/Verify/deploy и отсутствие любого предыдущего deploy run нового SHA.
 
 ## D-042 — Одноразовый School cutover перепривязать к фактическому main
 

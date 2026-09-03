@@ -50,7 +50,7 @@ jobs:
 
           # D-040: a pull-request head is verified only on an ephemeral hosted
           # runner and receives neither a production Environment nor a secret.
-          # D-050 makes a one-release owner workspace and integrations exception only for the production trigger;
+          # D-051 makes a one-release fail-closed recovery exception only for the production trigger;
           # the self-hosted job still consumes merged, exact-SHA gated main code.
           ruby -ryaml -e '
             document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
@@ -92,20 +92,27 @@ jobs:
             workflow_run = triggers.fetch("workflow_run")
             raise "unexpected production trigger workflow" unless workflow_run.fetch("workflows") == ["Verify ArtHello v52 release"]
             raise "production trigger must wait for completion" unless workflow_run.fetch("types") == ["completed"]
+            workflow_concurrency = document.fetch("concurrency")
+            raise "ArtHello workflow concurrency is missing" unless workflow_concurrency.fetch("group") == "gateway-38-55-arthello-production" && workflow_concurrency.fetch("cancel-in-progress") == false
             deploy = document.fetch("jobs").fetch("deploy")
             runners = Array(deploy.fetch("runs-on"))
             raise "production must use its dedicated self-hosted runner" unless runners.include?("self-hosted") && runners.include?("arthello-gateway")
+            raise "production timeout cannot cover recovery guards" unless deploy.fetch("timeout-minutes") >= 210
             raise "production Environment is mandatory" unless deploy.fetch("environment") == "production-ru"
+            school_concurrency = deploy.fetch("concurrency")
+            raise "School workflow concurrency is missing" unless school_concurrency.fetch("group") == "school-1-11-production" && school_concurrency.fetch("cancel-in-progress") == false
             deployment_env = document.fetch("env")
-            raise "release branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/owner-workspace-integrations-20260903"
-            raise "release PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR") == "317"
+            raise "release branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/recover-school-container-discovery-20260903"
+            raise "release PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR").to_s == "318"
+            raise "failed release SHA pin missing" unless deployment_env.fetch("FAILED_RELEASE_SHA") == "f14dad5d938de023385b996877a1ec6d1aaca5d6"
+            raise "failed deploy run pin missing" unless deployment_env.fetch("FAILED_DEPLOY_RUN_ID").to_s == "33713845429"
             condition = deploy.fetch("if")
             [
               "workflow_run", "vitaliyozolin-dotcom/ArtHello-OS",
               "Verify ArtHello v52 release", ".github/workflows/verify-arthello-v52.yml",
               "head_branch == '\''main'\''", "conclusion == '\''success'\''",
-              "codex/owner-workspace-integrations-20260903", "vitaliyozolin-dotcom",
-              "number == fromJSON('\''317'\'')",
+              "codex/recover-school-container-discovery-20260903", "vitaliyozolin-dotcom",
+              "number == fromJSON('\''318'\'')",
               "pull_requests[1] == null", "github.run_attempt == 1"
             ].each do |required|
               raise "missing production authorization condition" unless condition.include?(required)
@@ -115,13 +122,19 @@ jobs:
             raise "exact checkout is missing" unless checkout_index
             before_checkout = steps.take(checkout_index).map { |step| step["run"].to_s }.join("\n")
             raise "Docker use before authorization/CI gate" if before_checkout.match?(/(^|\s)docker(\s|$)/)
-            raise "D-050 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
-            raise "D-050 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
+            raise "D-051 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
+            raise "D-051 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
             raise "triggering verification run is not pinned" unless before_checkout.include?("TRIGGER_VERIFY_RUN_ID")
             raise "triggering verification attempt is not pinned" unless before_checkout.include?(".run_attempt == 1")
             raise "release SHA is not pinned before checkout" unless before_checkout.include?("RELEASE_SHA")
+            raise "failed deployment incident is not pinned" unless before_checkout.include?("FAILED_DEPLOY_RUN_ID") && before_checkout.include?("FAILED_RELEASE_SHA") && before_checkout.include?(%q{.conclusion == "failure"})
+            raise "failed release SHA is not rejected" unless before_checkout.include?(%q{test "$RELEASE_SHA" != "$FAILED_RELEASE_SHA"})
+            raise "recovery commit must be the failed release child" unless before_checkout.include?(%q{.parents[0].sha == $failed_sha})
             raise "exact Quality gate missing before checkout" unless before_checkout.include?("quality.yml")
             raise "exact v52 gate missing before checkout" unless before_checkout.include?("verify-arthello-v52.yml")
+            raise "Quality and Verify attempts must both be first attempts" unless before_checkout.scan(%q{.run_attempt == 1}).length >= 3
+            raise "deploy replay guard must inspect every status" if before_checkout.include?("status=success")
+            raise "deploy replay guard pagination is incomplete" unless before_checkout.include?("per_page=100") && before_checkout.include?(%q{.total_count == (.workflow_runs | length)})
             source = File.read(ARGV.fetch(0))
             raise "standalone negated grep is not fail-closed" if source.lines.any? { |line| line.match?(/^\s*!\s+grep\b/) }
             raise "workflow_run deployment must not use event GITHUB_SHA" if source.include?("$GITHUB_SHA") || source.include?("github.sha")
@@ -144,9 +157,8 @@ jobs:
             raise "cutover image ID output pin is missing" unless cutover_env.fetch("VALIDATED_IMAGE_ID").include?("steps.image_import.outputs.image_id")
             raise "cutover fingerprint output pin is missing" unless cutover_env.fetch("VALIDATED_RUNTIME_FINGERPRINT").include?("steps.image_import.outputs.runtime_fingerprint")
             cutover_run = cutover_step.fetch("run")
-            lock_position = cutover_run.index("flock -w 900 9")
             immutable_check_position = cutover_run.index(%q{docker image inspect "$immutable_image_id"})
-            raise "immutable image must be revalidated after acquiring the shared lock" unless lock_position && immutable_check_position && lock_position < immutable_check_position
+            raise "immutable image must be revalidated at cutover" unless immutable_check_position
             raise "cutover immutable image ID syntax guard missing" unless cutover_run.include?("sha256:[a-f0-9]{64}")
             raise "cutover immutable revision label guard missing" unless cutover_run.include?("org.opencontainers.image.revision")
             raise "cutover immutable tree label guard missing" unless cutover_run.include?("org.opencontainers.image.source-tree")
@@ -182,15 +194,55 @@ jobs:
             raise "D1 descriptor scanner must stay non-root" unless fd_gate.include?(%q{test "$scanner_uid" -ne 0})
             raise "D1 descriptor scanner must match PID 1 UID" unless fd_gate.include?(%q{test "$scanner_uid" = "$pid_one_uid"})
             raise "D1 descriptor rejection diagnostics missing" unless fd_gate.include?("ARTHELLO_ACTIVE_D1_FD=REJECTED")
-            raise "school deployment lock is missing" unless source.include?(%q{exec 9>>"/var/lock/school-1-11-production.lock"}) && source.include?("flock -w 900 9")
-            raise "canonical school container is not pinned" unless source.include?(%q{school_container="school-1-11"})
-            school_running_guard = source.lines.any? { |line| line.include?("$school_container") && line.include?(".State.Running") }
-            raise "running school container guard is missing" unless school_running_guard
-            raise "school secret extraction is not exact" unless source.include?(%q{select(startswith("CENTRAL_ACCESS_SECRET="))}) && source.include?(%q{ltrimstr("CENTRAL_ACCESS_SECRET=")}) && source.include?("length == 1")
-            extraction = source.index(%q{central_access_secret="$(})
-            masking = source.index(%q{mask_secret "$central_access_secret"}, extraction || 0)
-            persistence = source.index(%q{atomic_secret_write "$central_access_secret_file"}, extraction || 0)
-            raise "school secret must be masked before persistence" unless extraction && masking && persistence && extraction < masking && masking < persistence
+            school_step_index = steps.index { |step| step["name"] == "Resolve authoritative School sync secret" }
+            image_import_index = steps.index(image_import_step)
+            cutover_index = steps.index(cutover_step)
+            raise "School resolution step ordering is unsafe" unless school_step_index && image_import_index < school_step_index && school_step_index < cutover_index
+            school_step = steps.fetch(school_step_index)
+            raise "School resolution timeout cannot cover its bounded SSH path" unless school_step.fetch("timeout-minutes") >= 36
+            school_env = school_step.fetch("env")
+            expected_school_env = {
+              "SSH_PRIVATE_KEY" => "$" + "{{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}",
+              "DEPLOY_HOST" => "$" + "{{ secrets.ARTHELLO_RU_DEPLOY_HOST }}",
+              "DEPLOY_USER" => "$" + "{{ secrets.ARTHELLO_RU_DEPLOY_USER }}",
+              "DEPLOY_PORT" => "$" + "{{ secrets.ARTHELLO_RU_DEPLOY_PORT }}"
+            }
+            raise "School SSH authority must be step-scoped and exact" unless school_env == expected_school_env
+            school_run = school_step.fetch("run")
+            raise "School SSH key must never be written to outputs" if school_run.include?("GITHUB_OUTPUT") || school_run.match?(/(^|\s)tee(\s|$)/) || school_run.include?("set -x")
+            raise "School SSH credentials are referenced outside their step" unless source.scan(/secrets\.ARTHELLO_RU_(?:SSH_PRIVATE_KEY|DEPLOY_HOST|DEPLOY_USER|DEPLOY_PORT)/).length == 4
+            raise "School SSH material cleanup is incomplete" unless school_run.include?("cleanup_school_ssh") && school_run.include?(%q{trap cleanup_school_ssh EXIT}) && school_run.include?(%q{rm -f --})
+            raise "School SSH cleanup must preserve errexit" if school_run.include?("set +e")
+            raise "School SSH destination validation is missing" unless school_run.include?(%q{[[ "$DEPLOY_HOST" =~}) && school_run.include?(%q{[[ "$DEPLOY_USER" =~})
+            raise "School SSH work directory pre-existence guard is missing" unless school_run.include?(%q{test ! -e "$ssh_dir"}) && school_run.include?(%q{test ! -L "$ssh_dir"})
+            school_cleanup = steps.find { |step| step["name"] == "Remove temporary School SSH material" }
+            raise "always-run School SSH cleanup is missing" unless school_cleanup && school_cleanup.fetch("if") == "always()" && school_cleanup.fetch("run").include?(%q{rm -f --})
+            raise "School SSH host fingerprint is not pinned" unless school_run.include?("SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI")
+            [
+              "StrictHostKeyChecking=yes", "HostKeyAlgorithms=ssh-ed25519",
+              "PubkeyAcceptedAlgorithms=ssh-ed25519", "UserKnownHostsFile=",
+              "GlobalKnownHostsFile=/dev/null", "BatchMode=yes"
+            ].each do |required|
+              raise "strict School SSH transport is incomplete: #{required}" unless school_run.include?(required)
+            end
+            raise "remote School deployment lock is missing" unless school_run.include?(%q{exec 9>>/var/lock/school-1-11-production.lock}) && school_run.include?("flock -w 900 9")
+            raise "authoritative School container is not pinned" unless school_run.include?(%q{production=school-1-11})
+            raise "School container full-ID guard is missing" unless school_run.include?(%q{[[ "$school_container_id" =~ ^[a-f0-9]{64}$ ]]})
+            raise "School running/health guards are missing" unless school_run.include?(".State.Running") && school_run.include?(".State.Health.Status") && school_run.include?("= healthy")
+            raise "School identity labels are missing" unless school_run.include?(%q{school.system}) && school_run.include?(%q{school.environment})
+            raise "School secret extraction is not exact" unless school_run.include?(%q{value.startswith("CENTRAL_ACCESS_SECRET=")}) && school_run.include?(%q{len(matches) != 1})
+            raise "School secret format guard is missing" unless school_run.include?("32 <= len(secret) <= 4096") && school_run.include?("character.isspace()")
+            raise "local School Docker discovery is forbidden" if cutover_run.include?("school_container") || cutover_run.include?("school_candidate") || cutover_run.include?("school_networks")
+            extraction = school_run.index(%q{central_access_secret="$(})
+            masking = school_run.index("::add-mask::", extraction || 0)
+            persistence = school_run.index(%q{central_access_secret_file}, masking || 0)
+            raise "School secret must be masked before persistence" unless extraction && masking && persistence && extraction < masking && masking < persistence
+            [school_run, cutover_run].each do |probe_source|
+              raise "School HMAC negative control is missing" unless probe_source.include?("0000000000000000000000000000000000000000000000000000000000000000") && probe_source.include?("Неверная подпись синхронизации")
+              raise "School HMAC positive control is missing" unless probe_source.include?("Неизвестное действие синхронизации") && probe_source.include?("hmac.new")
+              raise "School HMAC response contract is incomplete" unless probe_source.include?(%q{keys == ["error"]}) && probe_source.include?("content-type:")
+            end
+            raise "School secret must be attested before preflight, before live mutation, and after route activation" unless cutover_run.scan(/verify_school_sync_secret (?:before-preflight|before-live-mutation|after-route-activation)/).length == 3
             raise "central access secret file contract missing" unless source.include?("CENTRAL_ACCESS_SECRET_FILE=/run/secrets/central-access-secret")
             openai_start = source.index("openai_enabled=0")
             tbank_start = source.index("tbank_enabled=0", openai_start || 0)
