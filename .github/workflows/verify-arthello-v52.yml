@@ -50,7 +50,7 @@ jobs:
 
           # D-040: a pull-request head is verified only on an ephemeral hosted
           # runner and receives neither a production Environment nor a secret.
-          # D-053 makes a one-release fail-closed read-only bank import exception only for the production trigger;
+          # D-054 makes a one-release fail-closed nested bank-modal scroll correction only for the production trigger;
           # the self-hosted job still consumes merged, exact-SHA gated main code.
           ruby -ryaml -e '
             document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
@@ -102,16 +102,16 @@ jobs:
             school_concurrency = deploy.fetch("concurrency")
             raise "School workflow concurrency is missing" unless school_concurrency.fetch("group") == "school-1-11-production" && school_concurrency.fetch("cancel-in-progress") == false
             deployment_env = document.fetch("env")
-            raise "release branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/tochka-readonly-sync-20260903"
-            raise "release PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR").to_s == "320"
-            raise "previous release SHA pin missing" unless deployment_env.fetch("PREVIOUS_RELEASE_SHA") == "70f767723ca2de151d80782a6cea236a9f651ed0"
+            raise "release branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/d054-tochka-modal-scroll-20260903"
+            raise "release PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR").to_s == "321"
+            raise "previous release SHA pin missing" unless deployment_env.fetch("PREVIOUS_RELEASE_SHA") == "1038a1960aaf62f57a161d8a16c804161a7f6c53"
             condition = deploy.fetch("if")
             [
               "workflow_run", "vitaliyozolin-dotcom/ArtHello-OS",
               "Verify ArtHello v52 release", ".github/workflows/verify-arthello-v52.yml",
               "head_branch == '\''main'\''", "conclusion == '\''success'\''",
-              "codex/tochka-readonly-sync-20260903", "vitaliyozolin-dotcom",
-              "number == fromJSON('\''320'\'')",
+              "codex/d054-tochka-modal-scroll-20260903", "vitaliyozolin-dotcom",
+              "number == fromJSON('\''321'\'')",
               "pull_requests[1] == null", "github.run_attempt == 1"
             ].each do |required|
               raise "missing production authorization condition" unless condition.include?(required)
@@ -121,8 +121,8 @@ jobs:
             raise "exact checkout is missing" unless checkout_index
             before_checkout = steps.take(checkout_index).map { |step| step["run"].to_s }.join("\n")
             raise "Docker use before authorization/CI gate" if before_checkout.match?(/(^|\s)docker(\s|$)/)
-            raise "D-053 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
-            raise "D-053 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
+            raise "D-054 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
+            raise "D-054 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
             raise "triggering verification run is not pinned" unless before_checkout.include?("TRIGGER_VERIFY_RUN_ID")
             raise "triggering verification attempt is not pinned" unless before_checkout.include?(".run_attempt == 1")
             raise "release SHA is not pinned before checkout" unless before_checkout.include?("RELEASE_SHA")
