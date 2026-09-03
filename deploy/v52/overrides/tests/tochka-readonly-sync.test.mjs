@@ -156,5 +156,5 @@ test("integration wizard has an independently scrollable mobile body and describ
   assert.match(styles, /\.ahIntegrationModalLayer > \.ahIntegrationSetupWizard\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\) auto;[\s\S]*?height:\s*min\(820px, calc\(100dvh - 48px\)\);[\s\S]*?max-height:\s*calc\(100dvh - 48px\);[\s\S]*?overflow:\s*hidden;[\s\S]*?padding:\s*0/);
   assert.match(styles, /\.ahIntegrationModalLayer \.ahIntegrationSetupWizard > \.ahIntegrationSetupBody\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow-y:\s*auto;[\s\S]*?-webkit-overflow-scrolling:\s*touch;[\s\S]*?touch-action:\s*pan-y/);
   assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.ahIntegrationModalLayer > \.ahIntegrationSetupWizard\s*\{[\s\S]*?height:\s*calc\(100dvh - 20px\);[\s\S]*?max-height:\s*calc\(100dvh - 20px\);[\s\S]*?overflow:\s*hidden/);
-  assert.match(styles, /body:has\(\.ahIntegrationModalLayer\) \[data-ah-help-root\] \.ah-launch\s*\{[\s\S]*?display:\s*none/);
+  assert.match(globalStyles, /body:has\(\.ahIntegrationModalLayer\) \[data-ah-help-root\] \.ah-launch\{display:none!important\}/);
 });
