@@ -14,6 +14,8 @@ const TRANSACTION_COOKIE = "school_sso_tx";
 const TRANSACTION_TTL_SECONDS = 5 * 60;
 const ARTHELLO_FALLBACK_ORIGIN =
   "https://arthello-188-225-38-55.sslip.io";
+const SCHOOL_FALLBACK_ORIGIN =
+  "https://school-188-225-38-55.sslip.io";
 
 type SsoTransaction = {
   state: string;
@@ -65,6 +67,30 @@ function arthelloOrigin() {
     url.hash
   )
     throw new Error("Центр авторизации ArtHello OS настроен некорректно");
+  return url.origin;
+}
+
+export function schoolPublicOrigin() {
+  const value =
+    process.env.PUBLIC_APP_ORIGIN?.trim() || SCHOOL_FALLBACK_ORIGIN;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Публичный адрес дневника настроен некорректно");
+  }
+  const isolatedLocalOrigin =
+    url.protocol === "http:" &&
+    (url.hostname === "127.0.0.1" || url.hostname === "localhost");
+  if (
+    (url.protocol !== "https:" && !isolatedLocalOrigin) ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  )
+    throw new Error("Публичный адрес дневника настроен некорректно");
   return url.origin;
 }
 
@@ -177,13 +203,18 @@ export async function finishCentralSso(
     throw new Error("ArtHello OS вернула недействительный сеанс входа");
 
   const exchangeUrl = new URL("/api/school-sso/exchange", arthelloOrigin());
+  const exchangeBody = JSON.stringify({
+    code,
+    codeVerifier: transaction.verifier,
+  });
   const response = await fetch(exchangeUrl, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      origin: exchangeUrl.origin,
+      "content-length": String(Buffer.byteLength(exchangeBody)),
+      origin: schoolPublicOrigin(),
     },
-    body: JSON.stringify({ code, codeVerifier: transaction.verifier }),
+    body: exchangeBody,
     cache: "no-store",
     signal: AbortSignal.timeout(12_000),
   });
