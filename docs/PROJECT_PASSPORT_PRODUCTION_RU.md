@@ -525,3 +525,14 @@ decision:
 - приёмка: целевой тест 3/3, lint и production build локально; обязательны hosted Quality/Verify, immutable image, clone-preflight, backup-first cutover, rollback и публичный health-check;
 - следующий переход: после production health повторно открыть Точку на телефоне и прокрутить именно белую вложенную форму до поля ключа и кнопки «Сохранить параметры».
 
+## D-055 — защищённое TLS-соединение с API Точки
+
+- подтверждение владельца: скролл D-054 работает, ввод ключа и запуск загрузки доступны; IMG_9987 показывает запуск, IMG_9988 — отдельную серверную ошибку «Не удалось связаться с Точкой»;
+- причина: официальный `https://enter.tochka.com/uapi` использует российскую TLS-цепочку, а production Node image не содержит её корневой сертификат;
+- решение: immutable runtime включает только закреплённый `Russian Trusted Root CA`; сборка и запуск сверяют CA-признак, самоподпись, срок, SHA-256 fingerprint `D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31` и PEM SHA-256 `aa800ef345422d6158c6fafe1c06c429dbda21c3df4bb1ccb45a920ec1111399`;
+- запрет: TLS verification не отключается; production preflight не получает ключ, Authorization или иные банковские секреты;
+- release PR/branch: `#324`, `codex/d055-tochka-tls-20260903`; previous main SHA `c93a066dae1e3cb1cee83b17de6b2624a0f73baa`;
+- приёмка: hosted Quality/Verify, активный `NODE_EXTRA_CA_CERTS` внутри точного image, безсекретный 4xx от официального read-only endpoint из production-сети до остановки live, backup-first cutover, rollback и публичный health-check;
+- границы: импортируются счета, остатки, выписки и уже проведённые операции; создание, подписание, отправка и отзыв платежей остаются запрещёнными;
+- следующий переход: после production health владелец повторно вводит ключ и подтверждает банковский снимок без раскрытия ключа и полных номеров счетов.
+
