@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const systemRuntimeState = sqliteTable("system_runtime_state", {
   stateKey: text("state_key").primaryKey(),
@@ -331,6 +331,67 @@ export const financialOperations = sqliteTable("financial_operations", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const bankAccounts = sqliteTable("bank_accounts", {
+  id: text("id").primaryKey(),
+  connectionId: text("connection_id").notNull(),
+  legalEntityId: text("legal_entity_id").notNull(),
+  providerAccountId: text("provider_account_id").notNull(),
+  maskedAccount: text("masked_account").notNull(),
+  name: text("name").notNull(),
+  currency: text("currency").notNull(),
+  status: text("status").notNull(),
+  balanceMinor: integer("balance_minor"),
+  balanceAsOf: text("balance_as_of").notNull().default(""),
+  syncedAt: text("synced_at").notNull(),
+}, (table) => [
+  uniqueIndex("bank_accounts_provider_unique").on(table.connectionId, table.legalEntityId, table.providerAccountId),
+]);
+
+export const bankStatementImports = sqliteTable("bank_statement_imports", {
+  id: text("id").primaryKey(),
+  connectionId: text("connection_id").notNull(),
+  legalEntityId: text("legal_entity_id").notNull(),
+  providerStatementId: text("provider_statement_id").notNull(),
+  providerAccountId: text("provider_account_id").notNull(),
+  startDate: text("start_date").notNull(),
+  endDate: text("end_date").notNull(),
+  status: text("status").notNull(),
+  startBalanceMinor: integer("start_balance_minor").notNull(),
+  endBalanceMinor: integer("end_balance_minor").notNull(),
+  currency: text("currency").notNull(),
+  transactionCount: integer("transaction_count").notNull(),
+  fetchedAt: text("fetched_at").notNull(),
+}, (table) => [
+  uniqueIndex("bank_statement_provider_unique").on(table.connectionId, table.providerStatementId),
+]);
+
+export const bankTransactions = sqliteTable("bank_transactions", {
+  id: text("id").primaryKey(),
+  connectionId: text("connection_id").notNull(),
+  legalEntityId: text("legal_entity_id").notNull(),
+  providerAccountId: text("provider_account_id").notNull(),
+  providerStatementId: text("provider_statement_id").notNull(),
+  providerTransactionId: text("provider_transaction_id").notNull(),
+  paymentId: text("payment_id").notNull().default(""),
+  operationDate: text("operation_date").notNull(),
+  direction: text("direction").notNull(),
+  amountMinor: integer("amount_minor").notNull(),
+  currency: text("currency").notNull(),
+  status: text("status").notNull(),
+  documentNumber: text("document_number").notNull().default(""),
+  transactionType: text("transaction_type").notNull().default(""),
+  description: text("description").notNull().default(""),
+  counterpartyName: text("counterparty_name").notNull().default(""),
+  counterpartyInn: text("counterparty_inn").notNull().default(""),
+  counterpartyKpp: text("counterparty_kpp").notNull().default(""),
+  sourcePayloadHash: text("source_payload_hash").notNull(),
+  financialOperationId: text("financial_operation_id").notNull().default(""),
+  importedAt: text("imported_at").notNull(),
+}, (table) => [
+  uniqueIndex("bank_transactions_provider_unique").on(table.connectionId, table.providerTransactionId),
+  index("bank_transactions_date_idx").on(table.operationDate),
+]);
 
 export const financeAccruals = sqliteTable("finance_accruals", {
   id: text("id").primaryKey(),

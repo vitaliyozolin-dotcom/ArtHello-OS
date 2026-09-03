@@ -400,6 +400,48 @@
   line-height: 15px;
 }
 
+.ahIntegrationBankSnapshot {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  border-top: 1px solid var(--ah-color-border);
+  padding-top: 12px;
+}
+
+.ahIntegrationBankSnapshot > div,
+.ahIntegrationBankSnapshot > article {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ahIntegrationBankSnapshot > div span,
+.ahIntegrationBankSnapshot small {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ahIntegrationBankSnapshot > article {
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  padding: 9px 10px;
+}
+
+.ahIntegrationBankSnapshot > article > span,
+.ahIntegrationBankSnapshot > article > em {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ahIntegrationBankSnapshot > article > em {
+  font-style: normal;
+  font-weight: 650;
+  text-align: right;
+}
+
 .ahIntegrationPage .auth-board > article > footer {
   display: flex;
   gap: 10px;
@@ -477,6 +519,21 @@
 .ahIntegrationModalLayer > .ahIntegrationConnectionModal,
 .ahIntegrationModalLayer > .ahIntegrationConflictDialog {
   width: min(680px, calc(100vw - 48px));
+}
+
+.ahIntegrationModalLayer > .ahIntegrationSetupWizard {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.ahIntegrationSetupBody {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .ahIntegrationModalLayer .ahIntegrationSetupWizard > header,
@@ -669,6 +726,11 @@
   padding: 15px 20px 18px;
 }
 
+.ahIntegrationModalLayer .ahIntegrationSetupWizard > footer {
+  position: relative;
+  margin-top: 0;
+}
+
 .ahIntegrationModalLayer .ahIntegrationSetupWizard > footer > div,
 .ahIntegrationModalLayer .ahIntegrationConnectionModal > footer > div,
 .ahIntegrationModalLayer .ahIntegrationConflictDialog > footer > div,
@@ -727,6 +789,10 @@
     width: 100%;
     max-height: calc(100dvh - 20px);
     border-radius: 18px 18px 12px 12px;
+  }
+
+  .ahIntegrationModalLayer > .ahIntegrationSetupWizard {
+    height: calc(100dvh - 20px);
   }
 
   .ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-grid,

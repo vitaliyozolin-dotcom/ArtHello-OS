@@ -2,6 +2,8 @@ import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { entityDuplicateKey, manualEntityNormalization } from "../lib/entity-provenance";
 import { ensureOperatingIntegrationCatalog } from "../lib/operating-integration-catalog";
+import { toTochkaFinancialOperation } from "../lib/integrations";
+import type { TochkaReadOnlySyncResult } from "../lib/integrations";
 import * as schema from "./schema";
 
 export function getDb() {
@@ -34,6 +36,9 @@ const REQUIRED_CORE_TABLES = [
   "tasks",
   "entities",
   "financial_operations",
+  "bank_accounts",
+  "bank_statement_imports",
+  "bank_transactions",
   "client_lifecycles",
   "content_plan_items",
   "education_programs",
@@ -597,6 +602,57 @@ async function initializeCoreTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS bank_accounts (
+      id TEXT PRIMARY KEY NOT NULL,
+      connection_id TEXT NOT NULL,
+      legal_entity_id TEXT NOT NULL,
+      provider_account_id TEXT NOT NULL,
+      masked_account TEXT NOT NULL,
+      name TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      status TEXT NOT NULL,
+      balance_minor INTEGER,
+      balance_as_of TEXT NOT NULL DEFAULT '',
+      synced_at TEXT NOT NULL
+    )`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS bank_statement_imports (
+      id TEXT PRIMARY KEY NOT NULL,
+      connection_id TEXT NOT NULL,
+      legal_entity_id TEXT NOT NULL,
+      provider_statement_id TEXT NOT NULL,
+      provider_account_id TEXT NOT NULL,
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      status TEXT NOT NULL,
+      start_balance_minor INTEGER NOT NULL,
+      end_balance_minor INTEGER NOT NULL,
+      currency TEXT NOT NULL,
+      transaction_count INTEGER NOT NULL,
+      fetched_at TEXT NOT NULL
+    )`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS bank_transactions (
+      id TEXT PRIMARY KEY NOT NULL,
+      connection_id TEXT NOT NULL,
+      legal_entity_id TEXT NOT NULL,
+      provider_account_id TEXT NOT NULL,
+      provider_statement_id TEXT NOT NULL,
+      provider_transaction_id TEXT NOT NULL,
+      payment_id TEXT NOT NULL DEFAULT '',
+      operation_date TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      amount_minor INTEGER NOT NULL,
+      currency TEXT NOT NULL,
+      status TEXT NOT NULL,
+      document_number TEXT NOT NULL DEFAULT '',
+      transaction_type TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      counterparty_name TEXT NOT NULL DEFAULT '',
+      counterparty_inn TEXT NOT NULL DEFAULT '',
+      counterparty_kpp TEXT NOT NULL DEFAULT '',
+      source_payload_hash TEXT NOT NULL,
+      financial_operation_id TEXT NOT NULL DEFAULT '',
+      imported_at TEXT NOT NULL
+    )`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS finance_accruals (
       id TEXT PRIMARY KEY NOT NULL,
       period TEXT NOT NULL,
@@ -948,6 +1004,10 @@ async function initializeCoreTables() {
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS hr_access_employee_system_unique ON hr_accesses (employee_id, system)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS legal_document_stable_version_unique ON legal_document_items (stable_id, version)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS legal_contract_text_stable_version_unique ON legal_contract_text_versions (stable_id, version)"),
+    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS bank_accounts_provider_unique ON bank_accounts (connection_id, legal_entity_id, provider_account_id)"),
+    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS bank_statement_provider_unique ON bank_statement_imports (connection_id, provider_statement_id)"),
+    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS bank_transactions_provider_unique ON bank_transactions (connection_id, provider_transaction_id)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS bank_transactions_date_idx ON bank_transactions (operation_date)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS integration_runs_correlation_unique ON integration_sync_runs (correlation_id)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS readiness_step_order_unique ON readiness_scenario_steps (scenario_id, step_order)"),
   ]);
@@ -2167,7 +2227,7 @@ export async function validateIntegrationSetupReferences(input: Partial<Integrat
   if (!connection) throw new Error("Интеграция не найдена");
   const bankConnection = connectionId === tochkaConnectionId || connectionId === tbankConnectionId;
   const legalEntityId = String(input.legalEntityId ?? "").trim().slice(0, 80);
-  const allocationMode = input.allocationMode === "single_branch" ? "single_branch" : "classify_transactions";
+  const allocationMode: IntegrationSetup["allocationMode"] = input.allocationMode === "single_branch" ? "single_branch" : "classify_transactions";
   const branchId = String(input.branchId ?? "").trim().slice(0, 80);
   if (bankConnection && !legalEntityId) throw new Error("Выберите юридическое лицо");
   if (bankConnection) {
@@ -2195,14 +2255,15 @@ async function prepareIntegrationSetup(
   const references = await validateIntegrationSetupReferences(input);
   const { connectionId, bankConnection, legalEntityId, allocationMode, branchId } = references;
   const protectedBankConnection = connectionId === tochkaConnectionId || connectionId === tbankConnectionId;
-  const startDate = protectedBankConnection ? "" : String(input.startDate ?? "").trim().slice(0, 10);
-  if (!protectedBankConnection && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new Error("Укажите дату начала загрузки");
-  const interval = protectedBankConnection
+  const tochkaReadOnlyImport = connectionId === tochkaConnectionId;
+  const startDate = protectedBankConnection && !tochkaReadOnlyImport ? "" : String(input.startDate ?? "").trim().slice(0, 10);
+  if ((!protectedBankConnection || tochkaReadOnlyImport) && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new Error("Укажите дату начала загрузки");
+  const interval = protectedBankConnection && !tochkaReadOnlyImport
     ? 0
     : [60, 180, 360, 1440].includes(Number(input.syncIntervalMinutes))
     ? Number(input.syncIntervalMinutes)
     : 60;
-  const minute = protectedBankConnection ? 0 : Math.min(59, Math.max(0, Number(input.syncMinute) || 0));
+  const minute = protectedBankConnection && !tochkaReadOnlyImport ? 0 : Math.min(59, Math.max(0, Number(input.syncMinute) || 0));
   const authMethod = String(input.authMethod ?? "").trim().slice(0, 80);
   const tochkaJwt = connectionId === tochkaConnectionId && authMethod === "JWT";
   const tbankToken = connectionId === tbankConnectionId && authMethod === "Bearer token";
@@ -2230,7 +2291,9 @@ async function prepareIntegrationSetup(
     accountScope: bankConnection ? "all_permitted" : String(input.accountScope ?? "").trim().slice(0, 160),
     channelType: String(input.channelType ?? "").trim().slice(0, 80),
     sourceMapping: String(input.sourceMapping ?? "").trim().slice(0, 500),
-    dataScopes: Array.isArray(input.dataScopes) ? input.dataScopes.filter((item): item is string => typeof item === "string").map((item) => item.trim().slice(0, 80)).filter(Boolean).slice(0, 30) : [],
+    dataScopes: connectionId === tochkaConnectionId
+      ? ["Счета", "Выписки", "Операции и платежи", "Реестр операций", "Остатки"]
+      : Array.isArray(input.dataScopes) ? input.dataScopes.filter((item): item is string => typeof item === "string").map((item) => item.trim().slice(0, 80)).filter(Boolean).slice(0, 30) : [],
     readOnlyScopeConfirmed: connectionId === tbankConnectionId && input.readOnlyScopeConfirmed === true,
     credentialGeneration: protectedBankConnection ? crypto.randomUUID() : "",
     secretStatus: protectedBankCredential ? credentialStored ? "stored" : "missing" : "external_required",
@@ -2692,6 +2755,248 @@ export async function commitIntegrationBankProbe(
   ]);
   const connectionResult = results[2] as { meta?: { changes?: number } } | undefined;
   return Number(connectionResult?.meta?.changes ?? 0) > 0;
+}
+
+export async function commitTochkaReadOnlySync(
+  actor: string,
+  setup: IntegrationSetup,
+  sync: TochkaReadOnlySyncResult,
+  trigger: string,
+) {
+  const generation = normalizeCredentialGeneration(setup.credentialGeneration);
+  if (!generation || setup.connectionId !== tochkaConnectionId || setup.secretStatus !== "stored") {
+    return { committed: false, runId: "", financialOperationCount: 0 };
+  }
+  const credentialStateKey = integrationCredentialStateKey(setup.connectionId, setup.legalEntityId, setup.customerCode);
+  const setupStateKey = `${integrationSetupPrefix}${setup.connectionId}`;
+  const guard = `EXISTS (
+    SELECT 1 FROM system_runtime_state AS saved_setup
+    JOIN system_runtime_state AS saved_credential ON saved_credential.state_key=?
+    WHERE saved_setup.state_key=?
+      AND json_extract(saved_setup.state_value,'$.credentialGeneration')=?
+  ) AND EXISTS (SELECT 1 FROM integration_connections WHERE id=?)`;
+  const guardBindings = [credentialStateKey, setupStateKey, generation, setup.connectionId];
+  const currentSetup = await env.DB.prepare(`SELECT 1 AS current WHERE ${guard}`)
+    .bind(...guardBindings).first<{ current: number }>();
+  if (!currentSetup) return { committed: false, runId: "", financialOperationCount: 0 };
+
+  const occurredAt = new Date().toISOString();
+  const runId = `INT-RUN-${crypto.randomUUID().toUpperCase()}`;
+  const correlationId = `CORR-${crypto.randomUUID()}`;
+  const projectedByTransaction = new Map<string, NonNullable<Awaited<ReturnType<typeof toTochkaFinancialOperation>>>>();
+  for (const transaction of sync.transactions) {
+    const operation = await toTochkaFinancialOperation(transaction, setup.legalEntityId);
+    if (operation) projectedByTransaction.set(transaction.id, {
+      ...operation,
+      objectEntityId: setup.allocationMode === "single_branch" ? setup.branchId : "",
+    });
+  }
+
+  const latestStatementByAccount = new Map(sync.statements.map((statement) => [statement.accountId, statement]));
+  const accountStatements = sync.accounts.map((account) => {
+    const statement = latestStatementByAccount.get(account.accountId);
+    return env.DB.prepare(`INSERT INTO bank_accounts
+      (id,connection_id,legal_entity_id,provider_account_id,masked_account,name,currency,status,balance_minor,balance_as_of,synced_at)
+      SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
+      ON CONFLICT(id) DO UPDATE SET
+        masked_account=excluded.masked_account,name=excluded.name,currency=excluded.currency,status=excluded.status,
+        balance_minor=excluded.balance_minor,balance_as_of=excluded.balance_as_of,synced_at=excluded.synced_at`)
+      .bind(
+        account.id,
+        setup.connectionId,
+        setup.legalEntityId,
+        account.accountId,
+        account.maskedAccount,
+        account.name,
+        account.currency,
+        account.status,
+        statement?.endBalanceMinor ?? null,
+        statement?.endDate ?? "",
+        occurredAt,
+        ...guardBindings,
+      );
+  });
+  const statementStatements = sync.statements.map((statement) => env.DB.prepare(`INSERT INTO bank_statement_imports
+    (id,connection_id,legal_entity_id,provider_statement_id,provider_account_id,start_date,end_date,status,start_balance_minor,end_balance_minor,currency,transaction_count,fetched_at)
+    SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
+    ON CONFLICT(id) DO UPDATE SET
+      status=excluded.status,start_balance_minor=excluded.start_balance_minor,end_balance_minor=excluded.end_balance_minor,
+      currency=excluded.currency,transaction_count=excluded.transaction_count,fetched_at=excluded.fetched_at`)
+    .bind(
+      statement.id,
+      setup.connectionId,
+      setup.legalEntityId,
+      statement.statementId,
+      statement.accountId,
+      statement.startDate,
+      statement.endDate,
+      statement.status,
+      statement.startBalanceMinor,
+      statement.endBalanceMinor,
+      statement.currency,
+      statement.transactionCount,
+      occurredAt,
+      ...guardBindings,
+    ));
+  const transactionStatements = sync.transactions.map((transaction) => env.DB.prepare(`INSERT INTO bank_transactions
+    (id,connection_id,legal_entity_id,provider_account_id,provider_statement_id,provider_transaction_id,payment_id,operation_date,direction,amount_minor,currency,status,document_number,transaction_type,description,counterparty_name,counterparty_inn,counterparty_kpp,source_payload_hash,financial_operation_id,imported_at)
+    SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
+    ON CONFLICT(id) DO NOTHING`)
+    .bind(
+      transaction.id,
+      setup.connectionId,
+      setup.legalEntityId,
+      transaction.accountId,
+      transaction.statementId,
+      transaction.providerTransactionId,
+      transaction.paymentId,
+      transaction.operationDate,
+      transaction.direction,
+      transaction.amountMinor,
+      transaction.currency,
+      transaction.status,
+      transaction.documentNumber,
+      transaction.transactionType,
+      transaction.description,
+      transaction.counterpartyName,
+      transaction.counterpartyInn,
+      transaction.counterpartyKpp,
+      transaction.sourcePayloadHash,
+      projectedByTransaction.get(transaction.id)?.id ?? "",
+      occurredAt,
+      ...guardBindings,
+    ));
+  const financialStatements = [...projectedByTransaction.values()].map((operation) => env.DB.prepare(`INSERT INTO financial_operations
+    (id,operation_date,period,direction,amount_minor,category,report_class,counterparty_entity_id,contract_id,document_id,project_entity_id,legal_entity_id,object_entity_id,cfr_entity_id,bank_operation_ref,operation_kind,source_system,source_file,source_sheet,source_ref,data_quality,status,created_by)
+    SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
+    ON CONFLICT(id) DO NOTHING`)
+    .bind(
+      operation.id,
+      operation.operationDate,
+      operation.period,
+      operation.direction,
+      operation.amountMinor,
+      operation.category,
+      operation.reportClass,
+      operation.counterpartyEntityId,
+      operation.contractId,
+      operation.documentId,
+      operation.projectEntityId,
+      operation.legalEntityId,
+      operation.objectEntityId,
+      operation.cfrEntityId,
+      operation.bankOperationRef,
+      operation.operationKind,
+      operation.sourceSystem,
+      operation.sourceFile,
+      operation.sourceSheet,
+      operation.sourceRef,
+      operation.dataQuality,
+      operation.status,
+      operation.createdBy,
+      ...guardBindings,
+    ));
+
+  for (const statements of [accountStatements, statementStatements, transactionStatements]) {
+    for (let index = 0; index < statements.length; index += 40) {
+      await env.DB.batch(statements.slice(index, index + 40));
+    }
+  }
+  let financialOperationCount = 0;
+  for (let index = 0; index < financialStatements.length; index += 40) {
+    const results = await env.DB.batch(financialStatements.slice(index, index + 40));
+    financialOperationCount += results.reduce(
+      (total, result) => total + Number((result as { meta?: { changes?: number } })?.meta?.changes ?? 0),
+      0,
+    );
+  }
+
+  const receivedCount = sync.accounts.length + sync.statements.length + sync.transactions.length;
+  const acceptedCount = Math.max(0, receivedCount - sync.rejectedCount);
+  const nextSyncAt = new Date(Date.now() + Math.max(60, setup.syncIntervalMinutes || 60) * 60_000).toISOString();
+  const runStatus = sync.valid && sync.complete ? "Успешно" : sync.valid ? "Ожидание банка" : "Ошибка";
+  const checkpoint = `accounts:${sync.accounts.length};statements:${sync.statements.length};transactions:${sync.transactions.length}`;
+  const finalResults = await env.DB.batch([
+    env.DB.prepare(`INSERT INTO integration_sync_runs
+      (id,connection_id,started_at,finished_at,trigger,status,received_count,accepted_count,rejected_count,error_count,conflict_count,checkpoint,error_message,initiated_by,correlation_id,dry_run)
+      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}`)
+      .bind(
+        runId,
+        setup.connectionId,
+        occurredAt,
+        occurredAt,
+        trigger,
+        runStatus,
+        receivedCount,
+        acceptedCount,
+        sync.rejectedCount,
+        sync.valid ? 0 : 1,
+        0,
+        checkpoint,
+        sync.valid ? "" : sync.reason,
+        actor,
+        correlationId,
+        0,
+        ...guardBindings,
+      ),
+    env.DB.prepare(`INSERT INTO integration_log_entries
+      (run_id,connection_id,level,event,message,record_ref)
+      SELECT ?,?,?,?,?,? WHERE ${guard}`)
+      .bind(
+        runId,
+        setup.connectionId,
+        sync.valid ? "INFO" : "ERROR",
+        sync.complete ? "tochka.statements_imported" : "tochka.statements_pending",
+        sync.reason,
+        checkpoint,
+        ...guardBindings,
+      ),
+    env.DB.prepare(`UPDATE integration_connections SET
+      status=?,auth_status=?,credential_expires_at=?,last_success_at=?,next_sync_at=?,
+      received_count=?,accepted_count=?,rejected_count=?,error_count=?,conflict_count=0,
+      verified_transfer=?,is_enabled=?,updated_at=?
+      WHERE id=? AND ${guard}`)
+      .bind(
+        !sync.valid ? "Ошибка подключения" : sync.complete ? "Работает" : "Формируются выписки",
+        !sync.valid ? "Ключ сохранён · загрузка из Точки не выполнена" : sync.complete ? "Ключ принят · счета, выписки и операции загружены" : "Ключ принят · Точка формирует выписки",
+        sync.expiresAt,
+        sync.valid ? occurredAt : "",
+        nextSyncAt,
+        receivedCount,
+        acceptedCount,
+        sync.rejectedCount,
+        sync.valid ? 0 : 1,
+        sync.valid && sync.statements.length > 0 ? 1 : 0,
+        sync.valid ? 1 : 0,
+        occurredAt,
+        setup.connectionId,
+        ...guardBindings,
+      ),
+    env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
+      SELECT ?,'integration.tochka_readonly_sync_completed','integration_connection',?,? WHERE ${guard}`)
+      .bind(
+        actor,
+        setup.connectionId,
+        JSON.stringify({
+          runId,
+          selectedLegalEntityId: setup.legalEntityId,
+          accountCount: sync.accounts.length,
+          statementCount: sync.statements.length,
+          transactionCount: sync.transactions.length,
+          financialOperationCount,
+          rejectedCount: sync.rejectedCount,
+          complete: sync.complete,
+          paymentCreationAllowed: false,
+        }),
+        ...guardBindings,
+      ),
+  ]);
+  const connectionResult = finalResults[2] as { meta?: { changes?: number } } | undefined;
+  return {
+    committed: Number(connectionResult?.meta?.changes ?? 0) > 0,
+    runId,
+    financialOperationCount,
+  };
 }
 
 export async function hasIntegrationCredential(connectionIdValue: string, legalEntityIdValue: string, customerCodeValue: string) {

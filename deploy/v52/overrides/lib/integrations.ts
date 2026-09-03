@@ -93,6 +93,57 @@ export type TochkaProbeResult = TochkaJwtValidation & {
   customerChoices: TochkaCustomerChoice[];
 };
 
+export type TochkaAccountSnapshot = {
+  id: string;
+  accountId: string;
+  maskedAccount: string;
+  name: string;
+  currency: string;
+  status: string;
+};
+
+export type TochkaStatementSnapshot = {
+  id: string;
+  statementId: string;
+  accountId: string;
+  status: string;
+  startDate: string;
+  endDate: string;
+  startBalanceMinor: number;
+  endBalanceMinor: number;
+  currency: string;
+  transactionCount: number;
+};
+
+export type TochkaTransactionSnapshot = {
+  id: string;
+  providerTransactionId: string;
+  paymentId: string;
+  statementId: string;
+  accountId: string;
+  operationDate: string;
+  direction: "Поступление" | "Списание";
+  amountMinor: number;
+  currency: string;
+  status: string;
+  documentNumber: string;
+  transactionType: string;
+  description: string;
+  counterpartyName: string;
+  counterpartyInn: string;
+  counterpartyKpp: string;
+  sourcePayloadHash: string;
+};
+
+export type TochkaReadOnlySyncResult = TochkaJwtValidation & {
+  complete: boolean;
+  customerCode: string;
+  accounts: TochkaAccountSnapshot[];
+  statements: TochkaStatementSnapshot[];
+  transactions: TochkaTransactionSnapshot[];
+  rejectedCount: number;
+};
+
 export type TBankTokenValidation = {
   valid: boolean;
   reason: string;
@@ -146,6 +197,7 @@ export function normalizePublicIntegrationIp(value: unknown) {
 
 const TOCHKA_CUSTOMERS_URL = "https://enter.tochka.com/uapi/open-banking/v1.0/customers";
 const TOCHKA_ACCOUNTS_URL = "https://enter.tochka.com/uapi/open-banking/v1.0/accounts";
+const TOCHKA_STATEMENTS_URL = "https://enter.tochka.com/uapi/open-banking/v1.0/statements";
 const TBANK_ACCOUNTS_URL = "https://business.tbank.ru/openapi/api/v4/bank-accounts?withInvest=false";
 const TBANK_STATEMENT_URL = "https://business.tbank.ru/openapi/api/v1/statement";
 const TBANK_STATEMENT_WINDOW_DAYS = 7;
@@ -166,21 +218,236 @@ export function validateTochkaJwt(value: unknown, nowMs = Date.now()): TochkaJwt
   }
   try {
     const payload = JSON.parse(decodeBase64Url(parts[1])) as { exp?: unknown; nbf?: unknown };
-    const expiresAtSeconds = Number(payload.exp);
-    if (!Number.isFinite(expiresAtSeconds) || expiresAtSeconds <= 0) {
-      return { valid: false, reason: "В ключе Точки нет корректного срока действия", expiresAt: "" };
+    const hasEmbeddedExpiry = payload.exp !== undefined && payload.exp !== null && payload.exp !== "";
+    const expiresAtSeconds = hasEmbeddedExpiry ? Number(payload.exp) : 0;
+    if (hasEmbeddedExpiry && (!Number.isFinite(expiresAtSeconds) || expiresAtSeconds <= 0)) {
+      return { valid: false, reason: "В ключе Точки указан некорректный срок действия", expiresAt: "" };
     }
-    if (expiresAtSeconds * 1000 <= nowMs + 30_000) {
+    if (hasEmbeddedExpiry && expiresAtSeconds * 1000 <= nowMs + 30_000) {
       return { valid: false, reason: "Срок действия ключа Точки истёк", expiresAt: new Date(expiresAtSeconds * 1000).toISOString() };
     }
     const notBeforeSeconds = payload.nbf === undefined ? 0 : Number(payload.nbf);
     if (Number.isFinite(notBeforeSeconds) && notBeforeSeconds * 1000 > nowMs + 30_000) {
-      return { valid: false, reason: "Ключ Точки ещё не начал действовать", expiresAt: new Date(expiresAtSeconds * 1000).toISOString() };
+      return { valid: false, reason: "Ключ Точки ещё не начал действовать", expiresAt: hasEmbeddedExpiry ? new Date(expiresAtSeconds * 1000).toISOString() : "" };
     }
-    return { valid: true, reason: "Формат и срок ключа Точки корректны", expiresAt: new Date(expiresAtSeconds * 1000).toISOString() };
+    return hasEmbeddedExpiry
+      ? { valid: true, reason: "Формат и срок ключа Точки корректны", expiresAt: new Date(expiresAtSeconds * 1000).toISOString() }
+      : { valid: true, reason: "Формат ключа корректен; фактический срок проверит Точка", expiresAt: "" };
   } catch {
     return { valid: false, reason: "Не удалось прочитать служебную часть ключа Точки", expiresAt: "" };
   }
+}
+
+/**
+ * Hard boundary for the statement transport. Payment creation and signing live
+ * under different Tochka paths and can never pass this predicate.
+ */
+export function isAllowedTochkaStatementRequest(input: string, method = "GET") {
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" || url.hostname !== "enter.tochka.com" || url.username || url.password || url.hash || url.search) {
+    return false;
+  }
+  const normalizedMethod = method.toUpperCase();
+  if (url.pathname === "/uapi/open-banking/v1.0/statements") return normalizedMethod === "POST";
+  if (normalizedMethod !== "GET") return false;
+  return /^\/uapi\/open-banking\/v1\.0\/accounts\/\d{20}(?:\/\d{9})?\/statements\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(url.pathname);
+}
+
+/**
+ * Imports the read-only bank facts needed by the product: accounts, statement
+ * balances and the booked/pending operation register. It never calls Tochka's
+ * payment creation, signing or sending endpoints.
+ */
+export async function syncTochkaReadOnly(input: {
+  token: unknown;
+  customerCode: string;
+  startDate: string;
+  request?: typeof fetch;
+  wait?: (milliseconds: number) => Promise<void>;
+  nowMs?: number;
+}): Promise<TochkaReadOnlySyncResult> {
+  const request = input.request ?? fetch;
+  const wait = input.wait ?? ((milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  const nowMs = input.nowMs ?? Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45_000);
+  const token = typeof input.token === "string" ? input.token.trim() : "";
+  const validation = validateTochkaJwt(token, nowMs);
+  const empty = (reason: string, complete = false): TochkaReadOnlySyncResult => ({
+    valid: false,
+    complete,
+    reason,
+    expiresAt: validation.expiresAt,
+    customerCode: "",
+    accounts: [],
+    statements: [],
+    transactions: [],
+    rejectedCount: 0,
+  });
+  if (!validation.valid) return empty(validation.reason);
+
+  const customerCode = cleanTochkaCode(input.customerCode);
+  if (!customerCode) return empty("Не выбрана компания Точки");
+  const startDate = cleanIsoDate(input.startDate);
+  const endDate = new Date(nowMs).toISOString().slice(0, 10);
+  if (!startDate || startDate > endDate) return empty("Укажите корректную дату начала загрузки выписок");
+
+  const requestInit = (method: "GET" | "POST", body?: string): RequestInit => ({
+    method,
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${token}`,
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
+    body,
+    cache: "no-store",
+    redirect: "error",
+    signal: controller.signal,
+  });
+
+  try {
+    const customersResponse = await request(TOCHKA_CUSTOMERS_URL, requestInit("GET"));
+    if (!customersResponse.ok) return empty(tochkaReadFailure(customersResponse.status, "компаниям"));
+    const customersPayload = await readLimitedJson(customersResponse);
+    const customers = customersPayload === null ? [] : extractTochkaCustomers(customersPayload);
+    if (!customers.some((customer) => customer.code === customerCode)) return empty("Выбранная компания не доступна этому ключу Точки");
+
+    const accountsResponse = await request(TOCHKA_ACCOUNTS_URL, requestInit("GET"));
+    if (!accountsResponse.ok) return empty(tochkaReadFailure(accountsResponse.status, "счетам"));
+    const accountsPayload = await readLimitedJson(accountsResponse);
+    if (accountsPayload === null) return empty("Точка вернула некорректный список счетов");
+    const rawAccounts = extractTochkaAccounts(accountsPayload);
+    const hasOwnerCodes = rawAccounts.length > 0 && rawAccounts.every((account) => Boolean(readTochkaCustomerCode(account)));
+    if (!hasOwnerCodes && customers.length > 1) {
+      return empty("Точка не указала владельца счетов. Для безопасной загрузки используйте ключ одной компании");
+    }
+    const selectedAccounts = hasOwnerCodes
+      ? rawAccounts.filter((account) => readTochkaCustomerCode(account) === customerCode)
+      : rawAccounts;
+    const accounts = (await Promise.all(selectedAccounts.slice(0, 200).map(normalizeTochkaAccount))).filter((account): account is TochkaAccountSnapshot => Boolean(account));
+    if (!accounts.length) return empty("Для выбранной компании нет доступных расчётных счетов");
+
+    const statements: TochkaStatementSnapshot[] = [];
+    const transactions: TochkaTransactionSnapshot[] = [];
+    let rejectedCount = selectedAccounts.length - accounts.length;
+    let complete = true;
+    for (const account of accounts) {
+      const statementBody = JSON.stringify({ Data: { Statement: { accountId: account.accountId, startDateTime: startDate, endDateTime: endDate } } });
+      if (!isAllowedTochkaStatementRequest(TOCHKA_STATEMENTS_URL, "POST")) return empty("Загрузка заблокирована внутренним ограничением методов");
+      const initResponse = await request(TOCHKA_STATEMENTS_URL, requestInit("POST", statementBody));
+      if (!initResponse.ok) return empty(tochkaReadFailure(initResponse.status, "выпискам"));
+      const initPayload = await readLimitedJson(initResponse);
+      const initiated = readTochkaStatement(initPayload);
+      const initiatedAccountId = cleanTochkaAccountId(initiated?.accountId ?? initiated?.AccountId);
+      const initiatedStatementId = cleanProviderId(String(initiated?.statementId ?? initiated?.StatementId ?? ""));
+      if (!initiated || initiatedAccountId !== account.accountId || !initiatedStatementId) {
+        return empty("Точка не вернула номер созданной выписки");
+      }
+
+      const statementUrl = `${TOCHKA_ACCOUNTS_URL}/${account.accountId}/statements/${initiatedStatementId}`;
+      if (!isAllowedTochkaStatementRequest(statementUrl, "GET")) return empty("Чтение выписки заблокировано внутренним ограничением методов");
+      let finalStatement: Record<string, unknown> | null = null;
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const response = await request(statementUrl, requestInit("GET"));
+        if (!response.ok) return empty(tochkaReadFailure(response.status, "готовой выписке"));
+        if (response.status === 202 || response.status === 204) {
+          if (attempt < 3) await wait(400 * (attempt + 1));
+          continue;
+        }
+        const payload = await readLimitedJson(response, 10_000_000);
+        const statement = readTochkaStatement(payload);
+        if (!statement) return empty("Точка вернула некорректную выписку");
+        const status = cleanText(statement.status, 40);
+        if (/^(ready|completed)$/i.test(status) || (!status && isCompleteTochkaStatement(statement))) {
+          finalStatement = statement;
+          break;
+        }
+        if (/^(error|failed|rejected)$/i.test(status)) return empty("Точка не смогла сформировать выписку");
+        if (attempt < 3) await wait(400 * (attempt + 1));
+      }
+      if (!finalStatement) {
+        complete = false;
+        continue;
+      }
+
+      const normalizedTransactions = (await Promise.all(
+        extractTochkaStatementTransactions(finalStatement).slice(0, 20_000).map((transaction) => normalizeTochkaTransaction(transaction, account.accountId, initiatedStatementId)),
+      )).filter((transaction): transaction is TochkaTransactionSnapshot => Boolean(transaction));
+      rejectedCount += extractTochkaStatementTransactions(finalStatement).length - normalizedTransactions.length;
+      transactions.push(...normalizedTransactions);
+      const startBalanceMinor = toMinorUnits(finalStatement.startDateBalance ?? finalStatement.StartDateBalance) ?? 0;
+      const endBalanceMinor = toMinorUnits(finalStatement.endDateBalance ?? finalStatement.EndDateBalance) ?? 0;
+      const currency = cleanCurrency(readNestedCurrency(finalStatement)) || account.currency;
+      const statementId = cleanProviderId(String(finalStatement.statementId ?? finalStatement.StatementId ?? initiatedStatementId));
+      statements.push({
+        id: `TOCHKA-STMT-${(await sha256Text(`${account.accountId}|${statementId}`)).slice(0, 32).toUpperCase()}`,
+        statementId,
+        accountId: account.accountId,
+        status: cleanText(finalStatement.status ?? finalStatement.Status, 40) || "Ready",
+        startDate: cleanIsoDate(finalStatement.startDateTime ?? finalStatement.StartDateTime) || startDate,
+        endDate: cleanIsoDate(finalStatement.endDateTime ?? finalStatement.EndDateTime) || endDate,
+        startBalanceMinor,
+        endBalanceMinor,
+        currency,
+        transactionCount: normalizedTransactions.length,
+      });
+    }
+
+    return {
+      valid: true,
+      complete,
+      reason: complete ? "Счета, остатки, выписки и операции загружены из Точки" : "Точка ещё формирует часть выписок — повторите синхронизацию",
+      expiresAt: validation.expiresAt,
+      customerCode,
+      accounts,
+      statements,
+      transactions,
+      rejectedCount,
+    };
+  } catch {
+    return empty("Не удалось связаться с Точкой");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function toTochkaFinancialOperation(transaction: TochkaTransactionSnapshot, legalEntityId: string) {
+  if (transaction.currency !== "RUB" || transaction.status.toLowerCase() !== "booked") return null;
+  const normalizedLegalEntityId = cleanText(legalEntityId, 80);
+  if (!normalizedLegalEntityId) return null;
+  const idHash = await sha256Text(`${normalizedLegalEntityId}|${transaction.accountId}|${transaction.providerTransactionId}`);
+  const counterparty = [transaction.counterpartyName, transaction.counterpartyInn ? `ИНН ${transaction.counterpartyInn}` : ""].filter(Boolean).join(" · ");
+  const sourceRef = [counterparty, transaction.description, transaction.documentNumber ? `документ № ${transaction.documentNumber}` : ""].filter(Boolean).join(" · ").slice(0, 500);
+  return {
+    id: `FIN-TOCHKA-${idHash.slice(0, 32).toUpperCase()}`,
+    operationDate: transaction.operationDate,
+    period: transaction.operationDate.slice(0, 7),
+    direction: transaction.direction,
+    amountMinor: transaction.amountMinor,
+    category: "Не классифицировано",
+    reportClass: "Не включено в ОПиУ",
+    counterpartyEntityId: "",
+    contractId: "",
+    documentId: "",
+    projectEntityId: "",
+    legalEntityId: normalizedLegalEntityId,
+    objectEntityId: "",
+    cfrEntityId: "",
+    bankOperationRef: transaction.providerTransactionId,
+    operationKind: "BANK_STATEMENT",
+    sourceSystem: "BANK_TOCHKA_API",
+    sourceFile: "API Точки",
+    sourceSheet: "Выписка",
+    sourceRef,
+    dataQuality: "Проведённая операция банковской выписки",
+    status: "Требует разбора",
+    createdBy: "INTEGRATION:TOCHKA",
+  };
 }
 
 /**
@@ -403,8 +670,7 @@ function tBankFailure(status: number, capability: string) {
   return `Т‑Банк не подтвердил доступ к ${capability}`;
 }
 
-async function readLimitedJson(response: Response): Promise<unknown | null> {
-  const maximumBytes = 2_000_000;
+async function readLimitedJson(response: Response, maximumBytes = 2_000_000): Promise<unknown | null> {
   const declaredSize = Number(response.headers.get("content-length") ?? 0);
   if (Number.isFinite(declaredSize) && declaredSize > maximumBytes) return null;
   try {
@@ -517,6 +783,166 @@ function cleanTochkaCode(value: unknown) {
   if (typeof value !== "string" && typeof value !== "number") return "";
   const code = String(value).trim().slice(0, 80);
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{1,79}$/.test(code) ? code : "";
+}
+
+function tochkaReadFailure(status: number, capability: string) {
+  if (status === 401) return "Точка отклонила ключ";
+  if (status === 403) return `Ключ Точки не даёт права читать ${capability}`;
+  if (status === 429) return "Точка временно ограничила число запросов";
+  return `Точка не подтвердила доступ к ${capability}`;
+}
+
+async function normalizeTochkaAccount(value: unknown): Promise<TochkaAccountSnapshot | null> {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const details = Array.isArray(row.accountDetails ?? row.AccountDetails)
+    ? (row.accountDetails ?? row.AccountDetails) as unknown[]
+    : [];
+  const firstDetail = details.find((detail) => detail && typeof detail === "object") as Record<string, unknown> | undefined;
+  const accountId = cleanTochkaAccountId(row.accountId ?? row.AccountId ?? firstDetail?.identification ?? firstDetail?.Identification);
+  if (!accountId) return null;
+  const hash = await sha256Text(accountId);
+  return {
+    id: `TOCHKA-ACC-${hash.slice(0, 32).toUpperCase()}`,
+    accountId,
+    maskedAccount: `•• ${accountId.slice(0, 20).slice(-4)}`,
+    name: cleanText(firstDetail?.name ?? firstDetail?.Name ?? row.name ?? row.Name, 120) || "Расчётный счёт",
+    currency: cleanCurrency(row.currency ?? row.Currency ?? firstDetail?.currency ?? firstDetail?.Currency) || "RUB",
+    status: cleanText(row.status ?? row.Status, 40) || "Enabled",
+  };
+}
+
+function readTochkaStatement(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as Record<string, unknown>;
+  const data = (root.Data ?? root.data) as Record<string, unknown> | undefined;
+  const statement = data?.Statement ?? data?.statement ?? root.Statement ?? root.statement;
+  return statement && typeof statement === "object" && !Array.isArray(statement)
+    ? statement as Record<string, unknown>
+    : null;
+}
+
+function extractTochkaStatementTransactions(statement: Record<string, unknown>) {
+  const candidate = statement.Transaction ?? statement.transaction ?? statement.Transactions ?? statement.transactions;
+  if (Array.isArray(candidate)) return candidate;
+  return candidate && typeof candidate === "object" ? [candidate] : [];
+}
+
+function isCompleteTochkaStatement(statement: Record<string, unknown>) {
+  return [
+    "creationDateTime", "CreationDateTime",
+    "startDateBalance", "StartDateBalance",
+    "endDateBalance", "EndDateBalance",
+    "Transaction", "transaction", "Transactions", "transactions",
+  ].some((field) => Object.prototype.hasOwnProperty.call(statement, field));
+}
+
+async function normalizeTochkaTransaction(
+  value: unknown,
+  accountId: string,
+  statementId: string,
+): Promise<TochkaTransactionSnapshot | null> {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const providerTransactionId = cleanProviderId(String(row.transactionId ?? row.TransactionId ?? ""));
+  const paymentId = cleanProviderId(String(row.paymentId ?? row.PaymentId ?? ""));
+  const indicator = cleanText(row.creditDebitIndicator ?? row.CreditDebitIndicator, 20).toLowerCase();
+  const direction = indicator === "credit" ? "Поступление" : indicator === "debit" ? "Списание" : "";
+  const amountRow = (row.Amount ?? row.amount) as Record<string, unknown> | undefined;
+  const amountMinor = toMinorUnits(amountRow?.amount ?? amountRow?.Amount);
+  const currency = cleanCurrency(amountRow?.currency ?? amountRow?.Currency);
+  const operationDate = cleanIsoDate(row.documentProcessDate ?? row.DocumentProcessDate ?? row.bookingDate ?? row.BookingDate);
+  const status = cleanText(row.status ?? row.Status, 40);
+  if (!providerTransactionId || !direction || amountMinor === null || amountMinor <= 0 || !currency || !operationDate || !status) return null;
+  const party = (direction === "Поступление"
+    ? row.DebtorParty ?? row.debtorParty
+    : row.CreditorParty ?? row.creditorParty) as Record<string, unknown> | undefined;
+  const sourcePayloadHash = await sha256Text(JSON.stringify(row));
+  const idHash = await sha256Text(`${accountId}|${providerTransactionId}`);
+  return {
+    id: `TOCHKA-TX-${idHash.slice(0, 32).toUpperCase()}`,
+    providerTransactionId,
+    paymentId,
+    statementId,
+    accountId,
+    operationDate,
+    direction,
+    amountMinor,
+    currency,
+    status,
+    documentNumber: cleanText(row.documentNumber ?? row.DocumentNumber, 80),
+    transactionType: cleanText(row.transactionTypeCode ?? row.TransactionTypeCode, 120),
+    description: cleanText(row.description ?? row.Description, 500),
+    counterpartyName: cleanText(party?.name ?? party?.Name, 200),
+    counterpartyInn: cleanDigits(party?.inn ?? party?.Inn, 12),
+    counterpartyKpp: cleanDigits(party?.kpp ?? party?.Kpp, 9),
+    sourcePayloadHash,
+  };
+}
+
+function cleanTochkaAccountId(value: unknown) {
+  if (typeof value !== "string") return "";
+  const accountId = value.trim();
+  return /^\d{20}(?:\/\d{9})?$/.test(accountId) ? accountId : "";
+}
+
+function cleanProviderId(value: string) {
+  const id = value.trim().slice(0, 128);
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id) ? id : "";
+}
+
+function cleanIsoDate(value: unknown) {
+  if (typeof value !== "string") return "";
+  const date = value.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "";
+  const parsed = Date.parse(`${date}T00:00:00.000Z`);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === date ? date : "";
+}
+
+function cleanCurrency(value: unknown) {
+  if (typeof value !== "string") return "";
+  const currency = value.trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(currency) ? currency : "";
+}
+
+function cleanText(value: unknown, maximumLength: number) {
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  return String(value).replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, maximumLength);
+}
+
+function cleanDigits(value: unknown, maximumLength: number) {
+  const text = cleanText(value, maximumLength);
+  return new RegExp(`^\\d{1,${maximumLength}}$`).test(text) ? text : "";
+}
+
+function toMinorUnits(value: unknown): number | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const row = value as Record<string, unknown>;
+    return toMinorUnits(row.amount ?? row.Amount);
+  }
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const source = String(value).trim().replace(",", ".");
+  const match = source.match(/^(-?)(\d{1,15})(?:\.(\d{1,2}))?$/);
+  if (!match) return null;
+  const minor = Number(match[2]) * 100 + Number((match[3] ?? "").padEnd(2, "0"));
+  const result = match[1] ? -minor : minor;
+  return Number.isSafeInteger(result) ? result : null;
+}
+
+function readNestedCurrency(statement: Record<string, unknown>) {
+  for (const balance of [statement.endDateBalance, statement.EndDateBalance, statement.startDateBalance, statement.StartDateBalance]) {
+    if (balance && typeof balance === "object" && !Array.isArray(balance)) {
+      const row = balance as Record<string, unknown>;
+      const currency = cleanCurrency(row.currency ?? row.Currency);
+      if (currency) return currency;
+    }
+  }
+  return "";
+}
+
+async function sha256Text(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function normalizePublicIpv4(value: string) {

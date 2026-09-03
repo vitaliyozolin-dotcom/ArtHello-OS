@@ -142,7 +142,8 @@ test("owner integration acceptance: bank key entry is direct, protected and neve
   assert.match(wizard, /Один ключ Точки для выбранной карточки юрлица — не отдельный ключ на каждый счёт или филиал/);
   assert.match(wizard, /Все счета, разрешённые ключом Точки/);
   assert.match(wizard, /accountScope:\s*bank \? "all_permitted"/);
-  assert.doesNotMatch(wizard, /<form[^>]*data-ah-help-root/);
+  assert.doesNotMatch(wizard, /data-ah-help-root="true"/, "the help layer must not intercept clicks inside the bank dialog");
+  assert.match(wizard, /className="ahIntegrationSetupBody"/);
   assert.match(helpDom, /if \(element\.closest\("\[data-ah-help-root\]"\)\) return false/);
   assert.doesNotMatch(helpSystem, /fieldMarkers|data-ah-help-inline|ah-field-icon/);
 });

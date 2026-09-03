@@ -46,6 +46,7 @@ export async function GET(request: Request) {
       : storedOperations;
     const budgets = sourceOnly ? [] : storedBudgets;
     const forecasts = sourceOnly ? [] : storedForecasts;
+    const bankOperationCount = operations.filter((operation) => operation.sourceSystem === "BANK_TOCHKA_API").length;
     const entityNames = Object.fromEntries(entityRows.map((entity) => [entity.id, entity.displayName]));
     const requestedPeriod = new URL(request.url).searchParams.get("period");
     const periods = [...new Set([
@@ -98,7 +99,9 @@ export async function GET(request: Request) {
         odds: operations.length ? "Операции загружены из подтверждённого источника" : "Источник ОДДС не подключён",
         payments: accruals.length ? "Начисления загружены" : "Источник начислений не подключён",
         payroll: payroll.length ? "Свод начислений загружен" : "Источник зарплат не подключён",
-        bank: "Банковский источник не подключён",
+        bank: bankOperationCount
+          ? `Точка подключена · ${bankOperationCount} проведённых операций в реестре`
+          : "Банковский источник не подключён",
         pnl: operations.length ? "Рабочая проекция из классифицированных операций" : "Нет данных для расчёта ОПиУ",
         budget: budgets.length ? "Бюджетный сценарий загружен" : "Утверждённый бюджет не подключён",
       },

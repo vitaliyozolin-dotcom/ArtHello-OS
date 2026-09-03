@@ -76,9 +76,9 @@ test("D-050 migration and Drizzle metadata describe only the current schema delt
   const journal = JSON.parse(readFileSync(new URL("../drizzle/meta/_journal.json", import.meta.url), "utf8"));
   const previousSnapshot = JSON.parse(readFileSync(new URL("../drizzle/meta/0022_snapshot.json", import.meta.url), "utf8"));
   const snapshot = JSON.parse(readFileSync(new URL("../drizzle/meta/0023_snapshot.json", import.meta.url), "utf8"));
-  const latest = journal.entries.at(-1);
+  const migrationEntry = journal.entries.find((entry) => entry.idx === 23);
 
-  assert.deepEqual(latest, {
+  assert.deepEqual(migrationEntry, {
     idx: 23,
     version: "6",
     when: 1788402753435,
