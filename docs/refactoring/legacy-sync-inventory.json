@@ -220,6 +220,228 @@
       "replacement": "Replace with a checked-in Drizzle migration if schema evidence proves the repair is required."
     }
   ],
+  "routeCallSites": {
+    "/sync/logs": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/stats": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/test-connection": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/branches": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/discover": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      },
+      {
+        "path": "artifacts/api-server/test/security.test.mjs",
+        "kind": "security-test"
+      }
+    ],
+    "/sync/detect-lessons": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/find-atlas": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/students-atlas": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/normalize-students-from-raw": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/normalize-historical-students": [
+      {
+        "path": "artifacts/api-server/src/routes/audit.ts",
+        "kind": "operator-guidance"
+      },
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/normalize-teachers-from-raw": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/normalize-groups-from-raw": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/normalize-lessons-from-raw": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/extract-attendance-from-raw": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/normalize-payments-from-raw": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/p76-cleanup-payments": [
+      {
+        "path": "artifacts/api-server/src/routes/audit.ts",
+        "kind": "operator-guidance"
+      },
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/payments-atlas": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/backfill-payments-normalize": [],
+    "/sync/attendance-from-lessons": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/subjects": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/lessons-atlas": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/teachers": [],
+    "/sync/teachers-atlas": [],
+    "/sync/full-resync": [
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/pull-students-all-branches": [
+      {
+        "path": "artifacts/api-server/src/routes/audit.ts",
+        "kind": "operator-guidance"
+      },
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/build-counterparties-from-bank": [
+      {
+        "path": "artifacts/api-server/src/routes/audit.ts",
+        "kind": "operator-guidance"
+      },
+      {
+        "path": "artifacts/alpha-crm-sync/src/pages/coverage.tsx",
+        "kind": "operator-guidance"
+      },
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/reclassify-counterparties-p84a": [
+      {
+        "path": "artifacts/api-server/src/routes/audit.ts",
+        "kind": "operator-guidance"
+      },
+      {
+        "path": "artifacts/alpha-crm-sync/src/pages/coverage.tsx",
+        "kind": "operator-guidance"
+      },
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/reconcile-bank-alpha-p84b": [
+      {
+        "path": "artifacts/api-server/src/routes/audit.ts",
+        "kind": "operator-guidance"
+      },
+      {
+        "path": "artifacts/alpha-crm-sync/src/pages/coverage.tsx",
+        "kind": "operator-guidance"
+      },
+      { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },
+      {
+        "path": "lib/api-client-react/src/generated/api.ts",
+        "kind": "generated-client"
+      }
+    ],
+    "/sync/groups-atlas": [],
+    "/sync/repair-lessons-atlas-columns": []
+  },
   "knownCallSiteGroups": [
     { "path": "artifacts/api-server/src/routes/index.ts", "kind": "mount" },
     {

@@ -66,3 +66,29 @@ test("known call-site groups still exist and reference the legacy surface", () =
     );
   }
 });
+
+test("every route records its exact literal call-site files", () => {
+  const searchableCallSites = inventory.knownCallSiteGroups.filter(
+    ({ kind }) => kind !== "mount",
+  );
+
+  for (const route of inventory.routes) {
+    const expected = searchableCallSites
+      .filter(({ path }) =>
+        readFileSync(new URL(path, root), "utf8").includes(route.path),
+      )
+      .map(({ path, kind }) => ({ path, kind }));
+
+    assert.deepEqual(
+      inventory.routeCallSites[route.path],
+      expected,
+      `${routeKey(route)} call-site evidence is incomplete`,
+    );
+  }
+
+  assert.deepEqual(
+    Object.keys(inventory.routeCallSites).sort(),
+    inventory.routes.map(({ path }) => path).sort(),
+    "call-site map must not omit or invent routes",
+  );
+});
