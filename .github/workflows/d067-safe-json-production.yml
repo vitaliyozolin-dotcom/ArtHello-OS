@@ -17,7 +17,7 @@ concurrency:
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
   EXPECTED_D067_MERGE: 0f4b53be7f8af865729a0f69684102d3405fd4f6
-  EXPECTED_ROLLOUT_PR: 'PLACEHOLDER'
+  EXPECTED_ROLLOUT_PR: '337'
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   DATA_VOLUME: arthello-direct-v44-data
 
