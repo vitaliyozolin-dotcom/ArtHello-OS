@@ -41,7 +41,7 @@ jobs:
 
           docker run --rm --network none --user 0:0 \
             -v "$volume:/data:ro" \
-            --entrypoint node "$image" --input-type=module <<'NODE'
+            --entrypoint node "$image" --input-type=module - <<'NODE'
           import { readdirSync, statSync } from 'node:fs';
           import { join } from 'node:path';
           import { DatabaseSync } from 'node:sqlite';
