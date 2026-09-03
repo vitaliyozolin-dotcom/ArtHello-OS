@@ -14,6 +14,9 @@ export type AuthUser = {
   isAdministrative: boolean;
   isSystemOwner: boolean;
   canAccessMedical: boolean;
+  jobTitle: string;
+  allowedModules?: string[];
+  favoriteModules: string[];
 };
 
 const ProductionAuthContext = createContext<AuthUser | null>(null);

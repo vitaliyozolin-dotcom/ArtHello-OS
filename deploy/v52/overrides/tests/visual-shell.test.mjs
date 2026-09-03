@@ -46,7 +46,7 @@ test("desktop typography and KPI cards do not depend on clipped microcopy", () =
 test("owner cash flow is a source-backed interactive chart instead of decorative lines", () => {
   assert.match(ownerDashboard, /finance\.monthly\.filter\(\(item\) => cashPeriods\.has\(item\.period\)\)\.slice\(-12\)/);
   assert.match(ownerDashboard, /chartGeometry\.ticks\.map/);
-  assert.match(ownerDashboard, /Фактическая динамика поступлений и списаний из ОДДС/);
+  assert.match(ownerDashboard, /Фактическая динамика поступлений и списаний из отчёта о движении денег/);
   assert.match(ownerDashboard, /onMouseEnter=\{\(\) => setActiveChartIndex\(index\)\}/);
   assert.match(ownerDashboard, /navigate\("finance"\)/);
   assert.match(ownerChart, /\.gridLine/);
@@ -98,8 +98,8 @@ test("family search has one search affordance without detached inline help", () 
   assert.doesNotMatch(mobilePatch, /content:"⌕"/);
   assert.match(mobilePatch, /input\[placeholder\*="Найти семью"\][^\n]*padding-right:16px!important/);
   assert.match(mobilePatch, /::before\{content:none!important;display:none!important\}/);
-  assert.match(mobilePatch, /label:has\(>input\[placeholder\*="Найти семью"\]\)>span:first-child\{[^\n]*font-size:0!important/);
-  assert.match(mobilePatch, /span:first-child>button\[data-ah-help-inline=true\]\.ah-field-icon\{display:none!important\}/);
+  assert.match(mobilePatch, /label:has\(>input\[placeholder\*="Найти семью"\]\)>span:first-child svg\{[^\n]*width:20px!important/);
+  assert.doesNotMatch(mobilePatch, /data-ah-help-inline|ah-field-icon|content:"\?"/);
 });
 
 test("required personal dashboards have independent role profiles", () => {

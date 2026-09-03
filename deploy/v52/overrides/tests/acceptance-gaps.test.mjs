@@ -53,14 +53,15 @@ test("RBAC acceptance: every shell discovery surface uses the same allow-list be
 
   assert.match(shell, /const next = resolveModuleRoute\(accessContext, requested, knownModuleIds\)/);
   assert.match(shell, /if \(requested && next !== requested\) window\.history\.replaceState\([^\n]+"#home"\)/);
-  assert.match(shell, /function openModule\([^)]*\) \{\s*const next = isModuleAllowed\(id\) \? id : "home"/);
+  assert.match(shell, /function openModule\([^)]*\) \{\s*const settingsTab = settingsTabForModule\(id\)/);
+  assert.match(shell, /const next = isModuleAllowed\(id\) \? id : "home"/);
   assert.match(shell, /if \(next !== id\) setNotice\("Этот раздел не входит в права вашей роли"\)/);
   assert.match(shell, /const routedActive = isModuleAllowed\(active\) \? active : "home"/);
   assert.match(routeStage, /key=\{routedActive\}/);
   assert.doesNotMatch(routeStage, /\bactive\s*===/, "a stale forbidden state must never mount a workspace");
 
-  assert.match(navigation, /const primaryNav = [^\n]+\.filter\(isModuleAllowed\)/);
-  assert.match(navigation, /const favoriteNav = [^\n]+\.filter\(isModuleAllowed\)/);
+  assert.match(navigation, /const primaryNav = [^\n]+\.filter\(\(id\) => isModuleAllowed\(id\) && !settingsModuleIds\.has\(id\)\)/);
+  assert.match(navigation, /const favoriteNav = favoriteModules\.filter\(\(id\) => isModuleAllowed\(id\) && !settingsModuleIds\.has\(id\)\)/);
   assert.match(navigation, /const extraNav = moduleCatalog\.filter\(\(item\) => isModuleAllowed\(item\.id\)/);
   assert.match(search, /moduleCatalog\s*\.filter\(\(module\) => isModuleAllowed\(module\.id\)\)/);
   assert.match(search, /entitySearchIndex\.filter\(\(item\) => isModuleAllowed\(item\.module\)/);
@@ -111,7 +112,7 @@ test("dashboard acceptance: the exact authenticated role reaches isolated role d
   assert.match(dashboard, /if \(!needsFinance\) return;[\s\S]*?fetch\(`\/api\/finance/);
 });
 
-test("owner integration acceptance: JWT entry is direct, protected and never delegated to an administrator", async () => {
+test("owner integration acceptance: bank key entry is direct, protected and never delegated to an administrator", async () => {
   const [workspace, helpDom, helpSystem, integrationsApi, actions] = await Promise.all([
     read("app/components/IntegrationWorkspace.tsx"),
     read("app/components/contextualHelpDom.ts"),
@@ -125,24 +126,25 @@ test("owner integration acceptance: JWT entry is direct, protected and never del
   assert.match(integrationsApi, /if \(!readers\.has\(requester\.apiRole\)\)/);
   assert.match(integrationsApi, /const canManageCredentials = isCanonicalOwnerContext\(requester\)/);
   assert.doesNotMatch(integrationsApi, /getRequestUser|request\.headers\.get\("x-arthello-role"\)/);
-  assert.match(integrationsApi, /Для Точки владелец вводит JWT прямо в защищённой форме/);
-  assert.match(wizard, /canManageCredentials \? <label className="wide"><span>JWT-ключ Точки<\/span><input type="password"/);
-  assert.doesNotMatch(wizard, /JWT добавляет собственник/);
-  assert.match(workspace, /wizardId !== TOCHKA_CONNECTION_ID \|\| data\.capabilities\.canManageTochka/);
-  assert.match(workspace, /filter\(\(\[id\]\) => id !== TOCHKA_CONNECTION_ID \|\| data\.capabilities\.canManageTochka\)/);
+  assert.match(integrationsApi, /Банковские ключи вводит только собственник/);
+  assert.match(wizard, /canManageCredentials \? <label className="wide"><span>\{tochka \? "Ключ Точки" : "Токен Т‑Банка"\}<\/span><input type="password"/);
+  assert.doesNotMatch(wizard, /ключ добавляет собственник/i);
+  assert.match(workspace, /wizardId && data\.capabilities\.canManageSetup && currentBankCapability\(wizardId, data\.capabilities\)/);
+  assert.match(workspace, /id === TOCHKA_CONNECTION_ID \? data\.capabilities\.canManageTochka/);
   assert.match(actions, /if \(!isCanonicalOwnerContext\(requester\)\)/);
   assert.match(actions, /Настройка и проверка Точки доступны только собственнику/);
-  assert.match(actions, /verifyAuthenticatedRequestCsrf\(request, requester\)/);
+  assert.match(actions, /verifyAuthenticatedRequestCsrf\(request, context\)/);
   assert.match(actions, /"revokeCredential"/);
-  assert.match(workspace, />Отозвать JWT<\/button>/);
+  assert.match(workspace, />Удалить из ArtHello OS<\/button>/);
+  assert.match(workspace, /Для прекращения его действия потребуется отдельно отозвать ключ в банке/);
   assert.doesNotMatch(`${wizard}\n${integrationsApi}\n${actions}`, /добав(?:ит|ляет|ить) администратор|переда(?:йте|ть)[^\n]{0,60}администратор/i);
 
-  assert.match(wizard, /Один JWT для выбранной карточки юрлица — не отдельный ключ на каждый счёт или филиал/);
-  assert.match(wizard, /value="Все счета, разрешённые JWT"/);
+  assert.match(wizard, /Один ключ Точки для выбранной карточки юрлица — не отдельный ключ на каждый счёт или филиал/);
+  assert.match(wizard, /Все счета, разрешённые ключом Точки/);
   assert.match(wizard, /accountScope:\s*bank \? "all_permitted"/);
   assert.match(wizard, /data-ah-help-root="true"/);
-  assert.match(helpDom, /if \(element\.closest\("\[data-ah-help-root\](?:,\[data-ah-help-inline\])?"\)\) return false/);
-  assert.match(helpSystem, /fieldMarkers\.map/);
+  assert.match(helpDom, /if \(element\.closest\("\[data-ah-help-root\]"\)\) return false/);
+  assert.doesNotMatch(helpSystem, /fieldMarkers|data-ah-help-inline|ah-field-icon/);
 });
 
 test("registry acceptance: self-entered cards show provenance, while only imports and conflicts need review", async () => {

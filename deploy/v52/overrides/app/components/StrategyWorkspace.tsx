@@ -11,6 +11,7 @@ import {
   PageHeader,
   Tabs,
 } from "./design-system";
+import { humanReferenceLabel, humanTechnicalText, recordLabel, taskRecordLabel } from "../../lib/record-labels";
 import "./StrategyWorkspace.ds.css";
 
 type Data = {
@@ -323,7 +324,7 @@ function Calendar({ data, busy, action }: { data: Data; busy: string; action: (b
             <span>{event.status}</span>
           </header>
           <h2>{event.title}</h2>
-          <p>{event.location} · {event.responsibleEntityId}</p>
+          <p>{event.location} · {humanReferenceLabel(event.responsibleEntityId, "Ответственный")}</p>
           <dl>
             <div><dt>Бюджет</dt><dd>{rub(event.budgetMinor)}</dd></div>
             <div><dt>Факт</dt><dd>{rub(event.actualMinor)}</dd></div>
@@ -367,7 +368,7 @@ function Projects({ data }: { data: Data }) {
     <div className="ahStrategyProjectGrid">
       {data.projects.map((project) => (
         <Card key={project.id} className="ahStrategyProject">
-          <PanelHead eyebrow={`${project.id} · ${project.status}`} title={project.title} note={project.dueAt} />
+          <PanelHead eyebrow={`${recordLabel("Проект", project.id)} · ${project.status}`} title={project.title} note={project.dueAt} />
           <p>{project.outcome || "Результат появится после контрольного события"}</p>
           <div className="ahStrategyBudget">
             <header><span>Бюджет</span><strong>{project.budget.utilizationPercent}%</strong></header>
@@ -375,9 +376,9 @@ function Projects({ data }: { data: Data }) {
             <footer><span>{rub(project.budgetActualMinor)} факт</span><span>{rub(project.budget.remainingMinor)} остаток</span></footer>
           </div>
           <dl>
-            <div><dt>Инициатива</dt><dd>{project.initiativeId}</dd></div>
-            <div><dt>Бюджетная строка</dt><dd>{project.budgetId}</dd></div>
-            <div><dt>Владелец</dt><dd>{project.ownerEntityId}</dd></div>
+            <div><dt>Инициатива</dt><dd>{recordLabel("Инициатива", project.initiativeId)}</dd></div>
+            <div><dt>Бюджетная строка</dt><dd>{recordLabel("Бюджетная строка", project.budgetId)}</dd></div>
+            <div><dt>Владелец</dt><dd>{humanReferenceLabel(project.ownerEntityId, "Ответственный")}</dd></div>
             <div><dt>Период</dt><dd>{project.startedAt}—{project.dueAt}</dd></div>
           </dl>
         </Card>
@@ -402,7 +403,7 @@ function Goals({ data }: { data: Data }) {
                 key={initiative.id}
                 index={String(index + 1).padStart(2, "0")}
                 title={initiative.title}
-                description={`${initiative.hypothesis} · ${initiative.ownerEntityId} · ${initiative.plannedStart}—${initiative.plannedEnd}`}
+                description={`${initiative.hypothesis} · ${humanReferenceLabel(initiative.ownerEntityId, "Ответственный")} · ${initiative.plannedStart}—${initiative.plannedEnd}`}
               />
             ))}
           </div>
@@ -420,7 +421,7 @@ function KpiBoard({ data, busy, action }: { data: Data; busy: string; action: (b
     <div className="ahStrategyMetricGrid">
       {data.kpis.map((kpi) => (
         <Card key={kpi.id} className="ahStrategyMetric">
-          <header><span>{kpi.id}</span><em>{kpi.status}</em></header>
+          <header><span>{recordLabel("Показатель", kpi.id)}</span><em>{kpi.status}</em></header>
           <h2>{kpi.name}</h2>
           <div className="ahStrategyMetricValues">
             <span><small>Цель</small><strong>{kpi.targetValue}{kpi.unit}</strong></span>
@@ -428,7 +429,7 @@ function KpiBoard({ data, busy, action }: { data: Data; busy: string; action: (b
             <span><small>Прогноз</small><strong>{kpi.forecastValue}{kpi.unit}</strong></span>
             <span className={kpi.varianceValue < 0 ? "ahStrategyNegative" : "ahStrategyPositive"}><small>Отклонение</small><strong>{kpi.varianceValue}{kpi.unit}</strong></span>
           </div>
-          <p>Источник: {kpi.sourceRef}</p>
+          <p>Источник: {humanTechnicalText(kpi.sourceRef)}</p>
           <Button variant="secondary" disabled={busy === kpi.id} onClick={() => void action({ action: "updateKpiActual", kpiId: kpi.id, actualValue: kpi.actualValue + 1, forecastValue: kpi.forecastValue + 1 }, kpi.id)}>
             +1 к факту после проверки
           </Button>
@@ -446,12 +447,12 @@ function Deviations({ data, busy, action }: { data: Data; busy: string; action: 
     <div className="ahStrategyDeviationGrid">
       {data.deviations.map((deviation) => (
         <Card key={deviation.id} className="ahStrategyDeviation">
-          <PanelHead eyebrow={`${deviation.kpiId} · ${deviation.deviationType}`} title={`${deviation.varianceValue} п.п.`} note={deviation.status} />
+          <PanelHead eyebrow={`${recordLabel("Показатель", deviation.kpiId)} · ${deviation.deviationType}`} title={`${deviation.varianceValue} п.п.`} note={deviation.status} />
           <p>{deviation.explanation}</p>
           <div className="ahStrategyDecision"><small>Решение</small><strong>{deviation.decision}</strong></div>
           <footer>
             {deviation.relatedTaskId ? (
-              <span>TSK-{deviation.relatedTaskId}</span>
+              <span>{taskRecordLabel(deviation.relatedTaskId)}</span>
             ) : (
               <Button variant="secondary" disabled={busy === deviation.id} onClick={() => void action({ action: "createCorrectiveTask", deviationId: deviation.id }, deviation.id)}>
                 Создать действие

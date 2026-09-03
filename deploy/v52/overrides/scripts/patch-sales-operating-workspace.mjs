@@ -41,6 +41,14 @@ const catalogAfterAccountsOnlyOwnerAware = catalogAfterAccountsOnly.replace(
   '].map(([id, name, note]) => <button key={id} onClick={() => setWizardId(id)}>',
   ownerAwareMap,
 );
+const canonicalTBankWorkspace = integration.includes('const TBANK_CONNECTION_ID = "INT-T-TBANK";')
+  && integration.includes("canManageTBank: boolean;")
+  && integration.includes("const tbank = connection.id === TBANK_CONNECTION_ID;")
+  && !integration.includes("INT-T-ALFABANK")
+  && !integration.includes("Альфа-Банк");
+if (canonicalTBankWorkspace) {
+  console.log("Canonical T-Bank integration workspace is already installed; preserving it");
+} else {
 if (!integration.includes(catalogAfterAccountsOnly) && !integration.includes(catalogAfterAccountsOnlyOwnerAware)) {
   if (integration.includes(catalogAfter)) {
     integration = replaceOnce(integration, catalogAfter, catalogAfterAccountsOnly, "honest Tochka starter copy");
@@ -84,6 +92,7 @@ for (const legacyCallback of [
   if (integration.includes(legacyCallback)) {
     integration = replaceOnce(integration, legacyCallback, "", "remove fixed Tochka callback");
   }
+}
 }
 if (integration.includes("arthello-os.ozolin.chatgpt.site")) {
   throw new Error("Sales operating patch left a preview Tochka callback in production source");

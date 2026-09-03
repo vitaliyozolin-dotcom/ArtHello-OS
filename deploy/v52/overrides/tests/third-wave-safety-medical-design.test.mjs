@@ -116,7 +116,8 @@ test("Wave 3 preserves medical actions and fails closed without special access",
   assertActionContract(medical, ["confirmDocument", "completeAction", "closeCase"], "MedicalWorkspace");
   assert.match(medical, /Медицинский контур закрыт/);
   assert.match(medical, /Нет счётчиков, списков, документов, диагнозов или косвенных признаков/);
-  assert.match(medical, /MED-CONF:\$\{/);
+  assert.match(medical, /confirmationRef:\s*`Подтверждено медработником \$\{new Date\(\)\.toLocaleDateString\("ru-RU"\)\}`/);
+  assert.doesNotMatch(medical, /MED-CONF:\$\{/);
   assert.match(medical, /await\s+load\s*\(\s*\)/);
 });
 

@@ -49,7 +49,25 @@ if (readFileSync(target("app/components/ContentWorkspace.tsx"), "utf8").includes
 
 const integrationPath = "app/components/IntegrationWorkspace.tsx";
 const integrationInput = readFileSync(target(integrationPath), "utf8");
-if (integrationInput.includes("{current && detailOpen ? createPortal(") && integrationInput.includes("return createPortal(<div className=\"integration-modal-layer\"")) {
+const legacyIntegrationPortals = integrationInput.includes("{current && detailOpen ? createPortal(")
+  && integrationInput.includes("return createPortal(<div className=\"integration-modal-layer\"");
+const canonicalIntegrationPortalFunctions = [
+  "function ConnectionDetailDialog(",
+  "function ConflictResolutionDialog(",
+  "function ConnectionWizard(",
+];
+const canonicalIntegrationPortalCount = integrationInput.match(/return createPortal\(<div className="ahIntegrationModalLayer">/g)?.length ?? 0;
+const canonicalIntegrationPortals = canonicalIntegrationPortalCount === canonicalIntegrationPortalFunctions.length
+  && canonicalIntegrationPortalFunctions.every((signature) => integrationInput.includes(signature));
+const partialCanonicalIntegrationPortals = canonicalIntegrationPortalCount > 0
+  || canonicalIntegrationPortalFunctions.slice(0, 2).some((signature) => integrationInput.includes(signature))
+  || integrationInput.includes("ahIntegrationModalLayer");
+
+if (canonicalIntegrationPortals) {
+  console.log("IntegrationWorkspace canonical detail, conflict and setup portals already applied");
+} else if (partialCanonicalIntegrationPortals) {
+  throw new Error("Dialog portal patch found a partial canonical IntegrationWorkspace portal implementation");
+} else if (legacyIntegrationPortals) {
   console.log("IntegrationWorkspace dialog portals already applied");
 } else patch(integrationPath, (input) => {
   let source = input;

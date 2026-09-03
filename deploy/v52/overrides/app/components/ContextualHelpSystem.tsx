@@ -6,7 +6,6 @@ import {
   guideFor,
   roleFor,
   type HelpContext,
-  type HelpField,
   type HelpGuide,
   type HelpGuideStep,
   type HelpRect,
@@ -19,11 +18,9 @@ import {
   findInHelpScope,
   isInsideHelp,
   isRendered,
-  labelRectFor,
   rectFor,
   scanHelpContext,
 } from "./contextualHelpDom";
-import { inlineHelpAllowed } from "./contextualHelpPolicy";
 import "./ContextualHelpSystem.css";
 
 const EMPTY_CONTEXT: HelpContext = {
@@ -80,7 +77,7 @@ function genericGuide(context: HelpContext): HelpGuide {
     id: `${context.profile.id}-workspace`,
     selector: "form,article,[class*='panel'],[class*='workspace']",
     title: "Рабочая область",
-    text: "Здесь находятся данные, поля и действия текущей страницы. Маленькие значки рядом с названиями открывают точную подсказку по конкретному полю.",
+      text: "Здесь находятся данные, поля и действия текущей страницы. Подробное объяснение раздела всегда доступно через кнопку «Помощь».",
     can: "Заполнять видимые поля и использовать доступные кнопки после проверки данных.",
     cannot: "Сохранять случайные значения или обходить ограничения роли и обязательные проверки.",
   });
@@ -96,7 +93,6 @@ function genericGuide(context: HelpContext): HelpGuide {
 export function ContextualHelpSystem() {
   const [user, setUser] = useState<HelpUser | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [hints, setHints] = useState(true);
   const [context, setContext] = useState<HelpContext>(EMPTY_CONTEXT);
   const [tour, setTour] = useState<TourState | null>(null);
   const [tourRect, setTourRect] = useState<HelpRect | null>(null);
@@ -137,20 +133,11 @@ export function ContextualHelpSystem() {
   }, [scan]);
 
   useEffect(() => {
-    let hintTimer: number | undefined;
-    try {
-      if (localStorage.getItem("arthello.inline-help") === "0") {
-        hintTimer = window.setTimeout(() => setHints(false), 0);
-      }
-    } catch {
-      // The preference remains session-only when storage is unavailable.
-    }
     fetch("/api/auth/me", { credentials: "include", cache: "no-store" })
       .then(async (response) => response.ok ? await response.json() as HelpUser : null)
       .then(setUser)
       .catch(() => setUser(null));
     return () => {
-      if (hintTimer !== undefined) window.clearTimeout(hintTimer);
     };
   }, []);
 
@@ -221,7 +208,7 @@ export function ContextualHelpSystem() {
     return () => document.removeEventListener("keydown", close);
   }, [closeTour, tour]);
 
-  const guide = useMemo(() => guideFor(context.profile.id) ?? genericGuide(context), [context.path, context.profile.id, context.profile.purpose, context.profile.title, context.profile.first, context.section, context.title]);
+  const guide = useMemo(() => guideFor(context.profile.id) ?? genericGuide(context), [context]);
 
   const startGuide = useCallback((mode: "current" | "full") => {
     const activeTab = selectedTabLabel();
@@ -234,30 +221,6 @@ export function ContextualHelpSystem() {
     setMenuOpen(false);
     setTour({ title: guide.title, steps, index: 0, restoreTabLabel: activeTab, single: mode === "current" && steps.length === 1 });
   }, [guide]);
-
-  const startFieldHelp = useCallback((field: HelpField) => {
-    const activeTab = selectedTabLabel();
-    const step: RuntimeStep = {
-      id: `field-${field.id}`,
-      selector: "",
-      element: field.element,
-      title: field.label,
-      text: field.hint,
-      can: `${field.required ? "Заполните обязательное поле" : "Заполните поле при необходимости"}. ${field.effect}`,
-      cannot: field.disabled ? "Поле сейчас недоступно из-за состояния записи или прав вашей роли." : "Не вводите случайное значение: оно попадёт в связанную карточку и отчёты.",
-    };
-    setMenuOpen(false);
-    setTour({ title: context.profile.title, steps: [step], index: 0, restoreTabLabel: activeTab, single: true });
-  }, [context.profile.title]);
-
-  const setHintPreference = useCallback((value: boolean) => {
-    setHints(value);
-    try {
-      localStorage.setItem("arthello.inline-help", value ? "1" : "0");
-    } catch {
-      // The preference remains active until the page is closed.
-    }
-  }, []);
 
   const moveTour = useCallback((index: number) => {
     setTour((current) => current ? { ...current, index: clamp(index, 0, Math.max(0, current.steps.length - 1)) } : current);
@@ -294,9 +257,12 @@ export function ContextualHelpSystem() {
         return;
       }
 
-      const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-      element.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center", inline: "nearest" });
-      timers.push(window.setTimeout(measure, reduced ? 30 : 300));
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const rect = element.getBoundingClientRect();
+      if (rect.top < 96 || rect.bottom > viewportHeight - 150) {
+        element.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" });
+      }
+      timers.push(window.setTimeout(measure, 80));
     };
 
     const begin = () => {
@@ -316,36 +282,6 @@ export function ContextualHelpSystem() {
     };
   }, [clickTab, step]);
 
-  const fieldMarkers = useMemo(() => {
-    if (!hints || tour || typeof window === "undefined") return [];
-    const seen = new Set<string>();
-    const size = 16;
-    const gap = 5;
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-
-    return context.fields.flatMap((field) => {
-      if (!inlineHelpAllowed(field.element)) return [];
-      const anchor = labelRectFor(field.element);
-      if (!anchor || anchor.bottom <= 0 || anchor.right <= 0 || anchor.top >= viewportHeight || anchor.left >= viewportWidth) return [];
-
-      const key = `${anchor.top}:${anchor.left}:${anchor.width}:${anchor.height}`;
-      if (seen.has(key)) return [];
-      seen.add(key);
-
-      const rightSide = anchor.right + gap;
-      const leftSide = anchor.left - gap - size;
-      const left = rightSide + size <= viewportWidth - 6
-        ? rightSide
-        : leftSide >= 6
-          ? leftSide
-          : clamp(anchor.right - size, 6, Math.max(6, viewportWidth - size - 6));
-      const top = clamp(anchor.top + (anchor.height - size) / 2, 6, Math.max(6, viewportHeight - size - 6));
-
-      return [{ field, left, top }];
-    });
-  }, [context.fields, hints, tour]);
-
   const calloutStyle = useMemo(() => {
     if (typeof window === "undefined") return { width: 360, left: 16, top: 120 };
     const width = Math.min(370, window.innerWidth - 24);
@@ -363,7 +299,7 @@ export function ContextualHelpSystem() {
     const top = belowFits ? below : above >= 12 ? above : Math.max(12, window.innerHeight - estimatedHeight - safeBottom);
     const left = clamp(tourRect.left, 12, Math.max(12, window.innerWidth - width - 12));
     return { width, left, top };
-  }, [tourRect, tour?.index]);
+  }, [tourRect]);
 
   const holeStyle = useMemo(() => {
     if (!tourRect || typeof window === "undefined") return null;
@@ -377,17 +313,6 @@ export function ContextualHelpSystem() {
 
   return (
     <div data-ah-help-root="true">
-      {fieldMarkers.map(({ field, left, top }) => (
-        <button
-          className="ah-field-icon"
-          key={field.id}
-          type="button"
-          style={{ left, top }}
-          aria-label={`Помощь по полю «${field.label}»`}
-          onClick={() => startFieldHelp(field)}
-        >?</button>
-      ))}
-
       {menuOpen && !tour ? (
         <aside className="ah-menu" role="dialog" aria-modal="false" aria-label="Помощь по текущей странице">
           <header>
@@ -403,10 +328,6 @@ export function ContextualHelpSystem() {
             <button className="primary" type="button" onClick={() => startGuide("current")}>Объяснить текущую вкладку</button>
             <button type="button" onClick={() => startGuide("full")}>Пройти обучение по разделу</button>
           </div>
-          <label className="ah-menu-toggle">
-            <input type="checkbox" checked={hints} onChange={(event) => setHintPreference(event.currentTarget.checked)} />
-            Маленькие значки помощи у названий
-          </label>
         </aside>
       ) : null}
 
@@ -446,7 +367,7 @@ export function ContextualHelpSystem() {
           aria-label={menuOpen ? "Закрыть помощь" : `Открыть помощь по разделу «${context.profile.title}»`}
           onClick={() => setMenuOpen((value) => !value)}
         >
-          <b aria-hidden="true">?</b><span>Помощь</span>
+          <b aria-hidden="true">i</b><span>Помощь</span>
         </button>
       ) : null}
     </div>

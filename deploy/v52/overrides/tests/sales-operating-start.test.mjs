@@ -20,6 +20,7 @@ test("manual sales lead requires identity, contact and consent", () => {
 test("integration catalog covers every primary sales acquisition channel without fake runs", () => {
   const catalog = read("../lib/operating-integration-catalog.ts");
   const api = read("../app/api/integrations/route.ts");
+  const database = read("../db/index.ts");
 
   for (const id of [
     "INT-T-ALFACRM", "INT-T-FORMS", "INT-T-PHONE", "INT-T-WHATSAPP", "INT-T-TG",
@@ -28,6 +29,7 @@ test("integration catalog covers every primary sales acquisition channel without
 
   assert.match(catalog, /INSERT OR IGNORE INTO integration_connections/);
   assert.doesNotMatch(catalog, /integration_sync_runs|integration_log_entries|integration_conflicts/);
-  assert.match(api, /ensureOperatingIntegrationCatalog/);
-  assert.match(api, /Параметры и расписание можно сохранить/);
+  assert.doesNotMatch(api, /ensureOperatingIntegrationCatalog/);
+  assert.match(database, /ensureOperatingIntegrationCatalogState/);
+  assert.match(api, /Банковские ключи вводит только собственник/);
 });

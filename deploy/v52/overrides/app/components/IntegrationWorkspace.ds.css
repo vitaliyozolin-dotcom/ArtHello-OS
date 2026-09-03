@@ -335,6 +335,45 @@
   line-height: 16px;
 }
 
+.ahIntegrationSetupWizard .ahIntegrationReadScopeAttestation {
+  gap: 7px;
+  border-color: color-mix(in srgb, var(--ah-color-primary, #5b5df0) 28%, var(--ah-color-border));
+  background: color-mix(in srgb, var(--ah-color-primary, #5b5df0) 5%, var(--ah-color-surface));
+}
+
+.ahIntegrationSetupWizard .ahIntegrationReadScopeAttestation > span {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  font-weight: 650;
+  line-height: 18px;
+}
+
+.ahIntegrationSetupWizard .ahIntegrationReadScopeAttestation input {
+  width: 17px;
+  min-width: 17px;
+  height: 17px;
+  margin-top: 1px;
+}
+
+.ahIntegrationSetupWizard .ahIntegrationCopyField {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.ahIntegrationSetupWizard .ahIntegrationCopyField > button {
+  min-height: 42px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  padding: 0 12px;
+  color: var(--ah-color-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .ahIntegrationPage .connection-detail dl,
 .ahIntegrationPage .connection-modal dl,
 .ahIntegrationPage .auth-board dl,
@@ -381,6 +420,291 @@
   cursor: pointer;
 }
 
+.ahIntegrationPage .ahIntegrationCredentialRemovalNote {
+  display: grid;
+  gap: 3px;
+  max-width: 70%;
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahIntegrationPage .ahIntegrationCredentialRemovalNote a {
+  color: var(--ah-color-primary, #5558e8);
+  font-weight: 650;
+}
+
+.ahIntegrationModalLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 2140;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+  overflow: hidden;
+  padding: 24px;
+  pointer-events: auto;
+}
+
+.ahIntegrationModalLayer > .drawer-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: rgba(24, 24, 42, .5);
+  backdrop-filter: blur(3px);
+  cursor: default;
+}
+
+.ahIntegrationModalLayer > .ahIntegrationSetupWizard,
+.ahIntegrationModalLayer > .ahIntegrationConnectionModal,
+.ahIntegrationModalLayer > .ahIntegrationConflictDialog {
+  position: relative;
+  z-index: 1;
+  width: min(820px, calc(100vw - 48px));
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 18px;
+  background: var(--ah-color-surface);
+  box-shadow: 0 28px 90px rgba(21, 23, 48, .28);
+  color: var(--ah-color-text-primary);
+}
+
+.ahIntegrationModalLayer > .ahIntegrationConnectionModal,
+.ahIntegrationModalLayer > .ahIntegrationConflictDialog {
+  width: min(680px, calc(100vw - 48px));
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard > header,
+.ahIntegrationModalLayer .ahIntegrationConnectionModal > header,
+.ahIntegrationModalLayer .ahIntegrationConflictDialog > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--ah-color-border);
+  background: var(--ah-color-surface);
+  padding: 18px 20px;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard > header p,
+.ahIntegrationModalLayer .ahIntegrationConnectionModal > header p,
+.ahIntegrationModalLayer .ahIntegrationConflictDialog > header p {
+  margin: 0 0 4px;
+  color: var(--ah-color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard > header h2,
+.ahIntegrationModalLayer .ahIntegrationConnectionModal > header h2,
+.ahIntegrationModalLayer .ahIntegrationConflictDialog > header h2 {
+  margin: 0;
+  font-size: 21px;
+  line-height: 27px;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard > header > button,
+.ahIntegrationModalLayer .ahIntegrationConnectionModal > header > button,
+.ahIntegrationModalLayer .ahIntegrationConflictDialog > header > button {
+  display: grid;
+  flex: 0 0 38px;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-intro,
+.ahIntegrationModalLayer .ahIntegrationSetupWizard .secret-boundary,
+.ahIntegrationModalLayer .ahIntegrationConnectionModal .saved-setup {
+  display: grid;
+  gap: 5px;
+  margin: 16px 20px 0;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 11px;
+  background: var(--ah-color-surface-subtle, #f7f7f5);
+  padding: 12px 13px;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-intro span,
+.ahIntegrationModalLayer .ahIntegrationSetupWizard .secret-boundary span,
+.ahIntegrationModalLayer .ahIntegrationConnectionModal .saved-setup span {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+  padding: 16px 20px 0;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-grid > .wide {
+  grid-column: 1 / -1;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard label,
+.ahIntegrationModalLayer .ahIntegrationSetupWizard fieldset,
+.ahIntegrationModalLayer .ahIntegrationConflictFields label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard label > span,
+.ahIntegrationModalLayer .ahIntegrationSetupWizard fieldset > legend,
+.ahIntegrationModalLayer .ahIntegrationConflictFields label > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 15px;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard input,
+.ahIntegrationModalLayer .ahIntegrationSetupWizard select,
+.ahIntegrationModalLayer .ahIntegrationSetupWizard textarea,
+.ahIntegrationModalLayer .ahIntegrationConflictFields textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  padding: 9px 11px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard textarea,
+.ahIntegrationModalLayer .ahIntegrationConflictFields textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard input:focus,
+.ahIntegrationModalLayer .ahIntegrationSetupWizard select:focus,
+.ahIntegrationModalLayer .ahIntegrationSetupWizard textarea:focus,
+.ahIntegrationModalLayer .ahIntegrationConflictFields textarea:focus {
+  border-color: var(--ah-color-primary);
+  outline: 3px solid color-mix(in srgb, var(--ah-color-primary) 15%, transparent);
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-scopes {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--ah-color-border);
+  border-radius: 11px;
+  padding: 12px;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-scopes label {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-scopes input {
+  width: 16px;
+  min-height: 16px;
+}
+
+.ahIntegrationModalLayer .ahIntegrationConnectionModal > .connection-impact,
+.ahIntegrationModalLayer .ahIntegrationConnectionModal > dl {
+  margin: 16px 20px 0;
+}
+
+.ahIntegrationModalLayer .ahIntegrationConnectionModal > dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ahIntegrationModalLayer .ahIntegrationConnectionModal dt {
+  color: var(--ah-color-text-secondary);
+  font-size: 10px;
+}
+
+.ahIntegrationModalLayer .ahIntegrationConnectionModal dd {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.ahIntegrationModalLayer .ahIntegrationConflictFields {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px 0;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard > footer,
+.ahIntegrationModalLayer .ahIntegrationConnectionModal > footer,
+.ahIntegrationModalLayer .ahIntegrationConflictDialog > footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 18px;
+  border-top: 1px solid var(--ah-color-border);
+  background: var(--ah-color-surface);
+  padding: 15px 20px 18px;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard > footer > div,
+.ahIntegrationModalLayer .ahIntegrationConnectionModal > footer > div,
+.ahIntegrationModalLayer .ahIntegrationConflictDialog > footer > div,
+.ahIntegrationModalLayer .ahIntegrationConnectionModal > footer {
+  flex-wrap: wrap;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard > footer button,
+.ahIntegrationModalLayer .ahIntegrationConnectionModal > footer button,
+.ahIntegrationModalLayer .ahIntegrationConflictDialog > footer button {
+  min-height: 38px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  padding: 0 13px;
+  color: var(--ah-color-text-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard > footer button[type="submit"],
+.ahIntegrationModalLayer .ahIntegrationConflictDialog > footer button[type="submit"],
+.ahIntegrationModalLayer .ahIntegrationConnectionModal > footer button:first-child {
+  border-color: var(--ah-color-primary);
+  background: var(--ah-color-primary);
+  color: white;
+}
+
+.ahIntegrationModalLayer .ahIntegrationSetupWizard button:disabled,
+.ahIntegrationModalLayer .ahIntegrationConnectionModal button:disabled,
+.ahIntegrationModalLayer .ahIntegrationConflictDialog button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
 @media (max-width: 1024px) {
   .ahIntegrationKpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -392,6 +716,42 @@
 }
 
 @media (max-width: 720px) {
+  .ahIntegrationModalLayer {
+    place-items: end center;
+    padding: 10px;
+  }
+
+  .ahIntegrationModalLayer > .ahIntegrationSetupWizard,
+  .ahIntegrationModalLayer > .ahIntegrationConnectionModal,
+  .ahIntegrationModalLayer > .ahIntegrationConflictDialog {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+    border-radius: 18px 18px 12px 12px;
+  }
+
+  .ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-grid,
+  .ahIntegrationModalLayer .ahIntegrationConnectionModal > dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-scopes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ahIntegrationModalLayer .ahIntegrationSetupWizard > footer,
+  .ahIntegrationModalLayer .ahIntegrationConnectionModal > footer,
+  .ahIntegrationModalLayer .ahIntegrationConflictDialog > footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ahIntegrationModalLayer .ahIntegrationSetupWizard > footer > div,
+  .ahIntegrationModalLayer .ahIntegrationConnectionModal > footer > div,
+  .ahIntegrationModalLayer .ahIntegrationConflictDialog > footer > div {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .ahIntegrationPage {
     gap: var(--ah-mobile-section-gap);
     padding-top: 0;

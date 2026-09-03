@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { entityDuplicateKey, manualEntityNormalization } from "../lib/entity-provenance";
+import { ensureOperatingIntegrationCatalog } from "../lib/operating-integration-catalog";
 import * as schema from "./schema";
 
 export function getDb() {
@@ -19,6 +20,8 @@ const FINANCE_ENTITY_LINKS_BOOTSTRAP_VERSION = "finance-entity-links-v1";
 const SYSTEM_DEMO_PURGE_VERSION = "global-demo-purge-v2";
 const MANUAL_ENTITY_PROVENANCE_VERSION = "manual-entity-provenance-v2";
 const TASK_OWNER_BACKFILL_VERSION = "task-created-by-user-v1";
+const HUMAN_READABLE_RECORDS_VERSION = "human-readable-records-v1";
+const LEGACY_ALFA_BANK_MIGRATION_VERSION = "legacy-alfa-bank-to-tbank-v1";
 const REQUIRED_CORE_TABLES = [
   "organization_branches",
   "app_users",
@@ -36,6 +39,7 @@ const REQUIRED_CORE_TABLES = [
   "education_programs",
   "hr_employees",
   "legal_contracts",
+  "legal_contract_text_versions",
   "procurement_suppliers",
   "food_products",
   "safety_systems",
@@ -86,12 +90,14 @@ async function ensureCoreTablesOnce() {
   // outside REQUIRED_CORE_TABLES, while demo rows are created only in an
   // explicitly selected test contour.
   await initializeCoreTables();
+  await migrateLegacyAlfaBankIntegration();
   await normalizeManualEntityProvenance();
   // A stored bank credential is useful only while the runtime master key can
   // actually decrypt it. Validate every envelope during readiness so a stale
   // runner-side key fails before a candidate can touch or replace production.
   await verifyStoredIntegrationCredentials();
   if (!hasAllCoreTables && mode === "test") await seedInitialDemoData();
+  if (mode === "test") await normalizeHumanReadableDemoRecords();
 
   if (marker?.state_value !== CORE_SCHEMA_VERSION || !hasAllCoreTables) {
     await env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
@@ -103,7 +109,10 @@ async function ensureCoreTablesOnce() {
 
   // Empty production data is durable: health checks may repair DDL, but they must
   // never recreate demo, imported or derived business records.
-  if (mode === "empty") return;
+  if (mode === "empty") {
+    await ensureOperatingIntegrationCatalogState();
+    return;
+  }
 
   await ensurePaymentDerivedCounterparties();
 
@@ -114,6 +123,62 @@ async function ensureCoreTablesOnce() {
     await ensureAnalyticsDemoBootstrap();
     await ensureFinanceEntityLinksBootstrap();
   }
+  await ensureOperatingIntegrationCatalogState();
+}
+
+async function ensureOperatingIntegrationCatalogState() {
+  await ensureOperatingIntegrationCatalog();
+}
+
+async function migrateLegacyAlfaBankIntegration() {
+  const marker = await env.DB.prepare(
+    "SELECT state_value FROM system_runtime_state WHERE state_key='legacy_alfa_bank_migration'",
+  ).first<{ state_value: string }>();
+  if (marker?.state_value !== LEGACY_ALFA_BANK_MIGRATION_VERSION) {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key='integration_setup:INT-T-ALFABANK'"),
+      env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key LIKE 'integration_credential:v2:INT-T-ALFABANK:%'"),
+      env.DB.prepare("DELETE FROM tasks WHERE source_type='Конфликт интеграции' AND source_id IN (SELECT id FROM integration_conflicts WHERE connection_id='INT-T-ALFABANK')"),
+      env.DB.prepare("DELETE FROM integration_log_entries WHERE connection_id='INT-T-ALFABANK'"),
+      env.DB.prepare("DELETE FROM integration_conflicts WHERE connection_id='INT-T-ALFABANK'"),
+      env.DB.prepare("DELETE FROM integration_sync_runs WHERE connection_id='INT-T-ALFABANK'"),
+      env.DB.prepare("DELETE FROM integration_connections WHERE id='INT-T-ALFABANK'"),
+      env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+        VALUES ('legacy_alfa_bank_migration',?,CURRENT_TIMESTAMP)
+        ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
+        .bind(LEGACY_ALFA_BANK_MIGRATION_VERSION),
+    ]);
+  }
+}
+
+async function normalizeHumanReadableDemoRecords() {
+  const marker = await env.DB.prepare(
+    "SELECT state_value FROM system_runtime_state WHERE state_key = 'human_readable_records'",
+  ).first<{ state_value: string }>();
+  if (marker?.state_value === HUMAN_READABLE_RECORDS_VERSION) return;
+
+  await env.DB.batch([
+    env.DB.prepare("UPDATE accounting_documents SET number='0031' WHERE id='ACC-INV-T-031' AND source_type='SYNTHETIC_ACCOUNTING_TEST'"),
+    env.DB.prepare("UPDATE accounting_documents SET number='0088' WHERE id='ACC-UPD-T-088' AND source_type='SYNTHETIC_ACCOUNTING_TEST'"),
+    env.DB.prepare("UPDATE accounting_documents SET number='0821' WHERE id='ACC-RECEIPT-T-FOOD' AND source_type='SYNTHETIC_ACCOUNTING_TEST'"),
+    env.DB.prepare("UPDATE education_progress SET period='3 квартал 2026',evidence='Посещаемость и проверочная работа №0004' WHERE id IN ('PROG-T-014','PROG-T-015')"),
+    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Поступления за месяц минус списания',source_quality='Факт исходной таблицы и отдельно помеченные тестовые записи' WHERE id='MET-T-CASH'"),
+    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Начальный остаток плюс поступления и минус списания с учётом вероятности' WHERE id='MET-T-CASH-GAP'"),
+    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Сумма подтверждённых оплат семьи' WHERE id='MET-T-LTV'"),
+    env.DB.prepare("UPDATE analytics_metric_definitions SET definition='Число активных семей с высоким риском',formula='Число активных семей с высоким риском' WHERE id='MET-T-CHURN'"),
+    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Среднее значение прогресса',freshness='3 квартал 2026' WHERE id='MET-T-EDU'"),
+    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Число работающих сотрудников' WHERE id='MET-T-STAFF'"),
+    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Число незакрытых неисправностей' WHERE id='MET-T-SAFETY'"),
+    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Доля прибыли после стоимости продуктов и смен' WHERE id='MET-T-FOOD'"),
+    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Число проектов под риском' WHERE id='MET-T-PROJECT'"),
+    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Число открытых расхождений в финансах и интеграциях' WHERE id='MET-T-DQ'"),
+    env.DB.prepare("UPDATE ai_process_contracts SET version='Правила с ручным подтверждением' WHERE id LIKE 'AI-CONTRACT-%'"),
+    env.DB.prepare("UPDATE ai_model_runs SET model_version='Правила с ручным подтверждением',input_snapshot_ref='Контрольный снимок аналитики' WHERE id LIKE 'AI-RUN-T-%'"),
+    env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+      VALUES ('human_readable_records',?,CURRENT_TIMESTAMP)
+      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
+      .bind(HUMAN_READABLE_RECORDS_VERSION),
+  ]);
 }
 
 async function normalizeManualEntityProvenance() {
@@ -240,6 +305,9 @@ async function initializeCoreTables() {
       contact TEXT NOT NULL,
       display_name TEXT NOT NULL,
       role TEXT NOT NULL,
+      job_title TEXT NOT NULL DEFAULT '',
+      allowed_modules TEXT NOT NULL DEFAULT '',
+      favorite_modules TEXT NOT NULL DEFAULT '',
       is_administrative INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'Приглашён',
       invitation_status TEXT NOT NULL DEFAULT 'Ожидает активации',
@@ -781,6 +849,7 @@ async function initializeCoreTables() {
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS hr_accesses (id TEXT PRIMARY KEY NOT NULL,employee_id TEXT NOT NULL,system TEXT NOT NULL,role TEXT NOT NULL,status TEXT NOT NULL,granted_at TEXT NOT NULL,revoked_at TEXT NOT NULL DEFAULT '',revocation_reason TEXT NOT NULL DEFAULT '')`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS legal_contracts (id TEXT PRIMARY KEY NOT NULL,reference_document_id TEXT NOT NULL,contract_type TEXT NOT NULL,party_type TEXT NOT NULL,party_entity_id TEXT NOT NULL,number TEXT NOT NULL,signed_status TEXT NOT NULL,valid_from TEXT NOT NULL,valid_until TEXT NOT NULL,limit_minor INTEGER NOT NULL,spent_minor INTEGER NOT NULL,status TEXT NOT NULL,electronic_signature_status TEXT NOT NULL,requisite_status TEXT NOT NULL,owner_entity_id TEXT NOT NULL,closing_required INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS legal_document_items (id TEXT PRIMARY KEY NOT NULL,stable_id TEXT NOT NULL,contract_id TEXT NOT NULL,item_type TEXT NOT NULL,title TEXT NOT NULL,version INTEGER NOT NULL,required INTEGER NOT NULL DEFAULT 0,signed_status TEXT NOT NULL,status TEXT NOT NULL,due_date TEXT NOT NULL DEFAULT '',reference TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS legal_contract_text_versions (id TEXT PRIMARY KEY NOT NULL,stable_id TEXT NOT NULL,contract_id TEXT NOT NULL,document_item_id TEXT NOT NULL,version INTEGER NOT NULL,body_text TEXT NOT NULL,source_mode TEXT NOT NULL,model_version TEXT NOT NULL,policy_version TEXT NOT NULL,protection_class TEXT NOT NULL,confirmed_by TEXT NOT NULL,confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS legal_responsibility_zones (id TEXT PRIMARY KEY NOT NULL,contract_id TEXT NOT NULL,zone TEXT NOT NULL,responsible_entity_id TEXT NOT NULL,scope TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS legal_checks (id TEXT PRIMARY KEY NOT NULL,contract_id TEXT NOT NULL,signal_type TEXT NOT NULL,severity TEXT NOT NULL,evidence TEXT NOT NULL,recommendation TEXT NOT NULL,status TEXT NOT NULL,related_task_id INTEGER,detected_at TEXT NOT NULL,resolved_at TEXT NOT NULL DEFAULT '',resolution TEXT NOT NULL DEFAULT '')`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS procurement_suppliers (id TEXT PRIMARY KEY NOT NULL,entity_id TEXT NOT NULL,specialization TEXT NOT NULL,contract_id TEXT NOT NULL,base_price_minor INTEGER NOT NULL,quality_score INTEGER NOT NULL,rating INTEGER NOT NULL,market_index INTEGER NOT NULL,status TEXT NOT NULL,data_quality TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
@@ -878,6 +947,7 @@ async function initializeCoreTables() {
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS education_attendance_lesson_student_unique ON education_attendance (lesson_id, student_id)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS hr_access_employee_system_unique ON hr_accesses (employee_id, system)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS legal_document_stable_version_unique ON legal_document_items (stable_id, version)"),
+    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS legal_contract_text_stable_version_unique ON legal_contract_text_versions (stable_id, version)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS integration_runs_correlation_unique ON integration_sync_runs (correlation_id)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS readiness_step_order_unique ON readiness_scenario_steps (scenario_id, step_order)"),
   ]);
@@ -971,8 +1041,20 @@ async function backfillTaskOwnership() {
 async function ensureAccessColumns() {
   const current = await env.DB.prepare("PRAGMA table_info(app_users)").all<{ name: string }>();
   const names = new Set((current.results || []).map((column) => column.name));
-  if (!names.has("access_version")) {
-    await env.DB.prepare("ALTER TABLE app_users ADD COLUMN access_version INTEGER NOT NULL DEFAULT 1").run();
+  const columns: Record<string, string> = {
+    access_version: "INTEGER NOT NULL DEFAULT 1",
+    job_title: "TEXT NOT NULL DEFAULT ''",
+    allowed_modules: "TEXT NOT NULL DEFAULT ''",
+    favorite_modules: "TEXT NOT NULL DEFAULT ''",
+  };
+  for (const [name, definition] of Object.entries(columns)) {
+    if (names.has(name)) continue;
+    try {
+      await env.DB.prepare(`ALTER TABLE app_users ADD COLUMN ${name} ${definition}`).run();
+    } catch (error) {
+      const refreshed = await env.DB.prepare("PRAGMA table_info(app_users)").all<{ name: string }>();
+      if (!(refreshed.results || []).some((column) => column.name === name)) throw error;
+    }
   }
 }
 
@@ -984,10 +1066,10 @@ async function seedRegistry() {
     ["PRJ-T-001", "Проект", "ArtHello OS", "SYNTHETIC", "PRJ-SRC-T-001", "Управляющая компания", "Проверено"],
     ["DIR-T-001", "Направление", "Общее образование · тест", "SYNTHETIC", "DIR-SRC-T-001", "Школа 1–11", "Проверено"],
     ["SVC-T-001", "Услуга", "Обучение 1–11 · тест", "SYNTHETIC", "SVC-SRC-T-001", "Школа 1–11", "Проверено"],
-    ["FAM-T-014", "Семья", "Семья T-014", "SYNTHETIC", "FAM-SRC-T-014", "Школа 1–11", "Проверено"],
+    ["FAM-T-014", "Семья", "Семья №0014", "SYNTHETIC", "FAM-SRC-T-014", "Школа 1–11", "Проверено"],
     ["CLI-T-014", "Клиент", "Клиент T-014", "SYNTHETIC", "CLI-SRC-T-014", "Школа 1–11", "Проверено"],
-    ["CHD-T-014", "Ребёнок", "Ребёнок T-014", "SYNTHETIC", "CHD-SRC-T-014", "3А · тестовая группа", "Проверено"],
-    ["EMP-T-032", "Сотрудник", "Сотрудник T-032 · педагог", "XLSX_MASKED", "PAYROLL-ROW-T-032", "Школа 1–11", "Требует сверки"],
+    ["CHD-T-014", "Ребёнок", "Ребёнок №0014", "SYNTHETIC", "CHD-SRC-T-014", "3А · тестовая группа", "Проверено"],
+    ["EMP-T-032", "Сотрудник", "Педагог №0032", "XLSX_MASKED", "PAYROLL-ROW-T-032", "Школа 1–11", "Требует сверки"],
     ["CAN-T-001", "Кандидат", "Кандидат T-001", "SYNTHETIC", "CAN-SRC-T-001", "Школа 1–11", "На проверке"],
     ["CON-T-001", "Подрядчик", "Подрядчик T-001", "SYNTHETIC", "CON-SRC-T-001", "Эксплуатация", "Проверено"],
     ["SUP-T-001", "Поставщик", "Поставщик T-001", "SYNTHETIC", "SUP-SRC-T-001", "Питание", "Проверено"],
@@ -1019,8 +1101,8 @@ async function seedRegistry() {
   ).bind(...row)));
   await env.DB.batch([
     env.DB.prepare("UPDATE entities SET entity_type = 'Юрлицо', display_name = 'ООО «АртХелло» · тест', data_quality = 'Проверено' WHERE id = 'ORG-T-001' AND created_by = 'system-seed'"),
-    env.DB.prepare("UPDATE entities SET display_name = 'Семья T-014', data_quality = 'Проверено' WHERE id = 'FAM-T-014' AND created_by = 'system-seed'"),
-    env.DB.prepare("UPDATE entities SET display_name = 'Сотрудник T-032 · педагог', source_system = 'XLSX_MASKED', source_record_id = 'PAYROLL-ROW-T-032', data_quality = 'Требует сверки' WHERE id = 'EMP-T-032' AND created_by = 'system-seed'"),
+    env.DB.prepare("UPDATE entities SET display_name = 'Семья №0014', data_quality = 'Проверено' WHERE id = 'FAM-T-014' AND created_by = 'system-seed' AND display_name = 'Семья T-014'"),
+    env.DB.prepare("UPDATE entities SET display_name = 'Педагог №0032', source_system = 'XLSX_MASKED', source_record_id = 'PAYROLL-ROW-T-032', data_quality = 'Требует сверки' WHERE id = 'EMP-T-032' AND created_by = 'system-seed' AND display_name = 'Сотрудник T-032 · педагог'"),
   ]);
 
   const linkSeeds = [
@@ -1049,11 +1131,11 @@ async function seedRegistry() {
 }
 
 async function seedWorkflow() {
-  await env.DB.prepare("INSERT OR IGNORE INTO entities (id, entity_type, display_name, source_system, source_record_id, scope, data_quality, created_by) VALUES ('EMP-T-004', 'Сотрудник', 'Администратор T-004', 'SYNTHETIC', 'EMP-SRC-T-004', 'Управляющая компания', 'Проверено', 'system-seed')").run();
+  await env.DB.prepare("INSERT OR IGNORE INTO entities (id, entity_type, display_name, source_system, source_record_id, scope, data_quality, created_by) VALUES ('EMP-T-004', 'Сотрудник', 'Администратор системы №4', 'SYNTHETIC', 'EMP-SRC-T-004', 'Управляющая компания', 'Проверено', 'system-seed')").run();
   await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO workflow_documents (id, title, document_type, current_version, status, valid_until, owner_entity_id, source, created_by) VALUES ('DOG-T-2026-044', 'Договор с подрядчиком · тест', 'Договор', 2, 'Истекает', '2026-09-02', 'EMP-T-004', 'SYNTHETIC', 'system-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO document_versions (document_id, version, note, reference, created_by) VALUES ('DOG-T-2026-044', 1, 'Исходная версия договора', 'SYNTHETIC:DOG-T-2026-044:v1', 'system-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO document_versions (document_id, version, note, reference, created_by) VALUES ('DOG-T-2026-044', 2, 'Дополнительное соглашение · тест', 'SYNTHETIC:DOG-T-2026-044:v2', 'system-seed')"),
+    env.DB.prepare("INSERT OR IGNORE INTO workflow_documents (id, title, document_type, current_version, status, valid_until, owner_entity_id, source, created_by) VALUES ('DOG-T-2026-044', 'Договор с подрядчиком', 'Договор', 2, 'Истекает', '2026-09-02', 'EMP-T-004', 'SYNTHETIC', 'system-seed')"),
+    env.DB.prepare("INSERT OR IGNORE INTO document_versions (document_id, version, note, reference, created_by) VALUES ('DOG-T-2026-044', 1, 'Исходная версия договора', 'Карточка договора · версия 1', 'system-seed')"),
+    env.DB.prepare("INSERT OR IGNORE INTO document_versions (document_id, version, note, reference, created_by) VALUES ('DOG-T-2026-044', 2, 'Дополнительное соглашение · тест', 'Дополнительное соглашение · версия 2', 'system-seed')"),
     env.DB.prepare("INSERT OR IGNORE INTO obligations (document_id, title, due_date, owner_entity_id, status, warning_days, created_by) VALUES ('DOG-T-2026-044', 'Продлить или закрыть договор', '2026-09-02', 'EMP-T-004', 'Открыто', 30, 'system-seed')"),
   ]);
 
@@ -1061,7 +1143,7 @@ async function seedWorkflow() {
     title, owner, due_date, priority, status, source_type, source_id, description,
     assignee_entity_id, kind, automation_key, requires_approval, created_by
   ) VALUES (
-    'Продлить или закрыть договор DOG-T-2026-044', 'Администратор T-004', '2026-08-28',
+    'Продлить или закрыть договор №0044', 'Администратор системы', '2026-08-28',
     'Высокий', 'Входящие', 'Обязательство договора', 'DOG-T-2026-044',
     'Срок договора истекает 02.09.2026. Проверить обязательства, согласовать решение и сохранить результат.',
     'EMP-T-004', 'Автозадача', 'CONTRACT_EXPIRY:DOG-T-2026-044', 1, 'system-automation'
@@ -1076,9 +1158,19 @@ async function seedWorkflow() {
     env.DB.prepare("INSERT INTO task_checklist (task_id, title, created_by) SELECT ?, 'Согласовать решение с руководителем', 'system-automation' WHERE NOT EXISTS (SELECT 1 FROM task_checklist WHERE task_id = ? AND title = 'Согласовать решение с руководителем')").bind(autoTask.id, autoTask.id),
     env.DB.prepare("INSERT INTO task_checklist (task_id, title, created_by) SELECT ?, 'Зафиксировать новую версию документа', 'system-automation' WHERE NOT EXISTS (SELECT 1 FROM task_checklist WHERE task_id = ? AND title = 'Зафиксировать новую версию документа')").bind(autoTask.id, autoTask.id),
     env.DB.prepare("INSERT OR IGNORE INTO task_documents (task_id, document_id, created_by) VALUES (?, 'DOG-T-2026-044', 'system-automation')").bind(autoTask.id),
-    env.DB.prepare("INSERT OR IGNORE INTO notifications (recipient_entity_id, notification_type, title, body, source_type, source_id, status, dedup_key) VALUES ('ROLE:DIRECTOR', 'Срок обязательства', 'Договор истекает через 12 дней', 'DOG-T-2026-044: требуется решение о продлении или закрытии.', 'document', 'DOG-T-2026-044', 'Новое', 'CONTRACT_EXPIRY:DOG-T-2026-044:DIRECTOR')"),
+    env.DB.prepare("INSERT OR IGNORE INTO notifications (recipient_entity_id, notification_type, title, body, source_type, source_id, status, dedup_key) VALUES ('ROLE:DIRECTOR', 'Срок обязательства', 'Договор №0044 истекает через 12 дней', 'Требуется решение о продлении или закрытии договора №0044.', 'document', 'DOG-T-2026-044', 'Новое', 'CONTRACT_EXPIRY:DOG-T-2026-044:DIRECTOR')"),
     env.DB.prepare("INSERT OR IGNORE INTO escalations (task_id, level, reason, status, recipient_entity_id) VALUES (?, 1, 'До срока договора меньше 14 дней', 'Открыта', 'ROLE:DIRECTOR')").bind(autoTask.id),
     env.DB.prepare("INSERT INTO audit_events (actor, action, entity_type, entity_id, payload) SELECT 'system-automation', 'task.auto_created', 'task', CAST(? AS TEXT), '{\"sourceId\":\"DOG-T-2026-044\",\"rule\":\"contract_expiry\"}' WHERE NOT EXISTS (SELECT 1 FROM audit_events WHERE action = 'task.auto_created' AND entity_type = 'task' AND entity_id = CAST(? AS TEXT))").bind(autoTask.id, autoTask.id),
+  ]);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE entities SET display_name='Администратор системы №4' WHERE id='EMP-T-004' AND created_by='system-seed' AND display_name='Администратор T-004'"),
+    env.DB.prepare("UPDATE workflow_documents SET title='Договор с подрядчиком' WHERE id='DOG-T-2026-044' AND created_by='system-seed' AND title='Договор с подрядчиком · тест'"),
+    env.DB.prepare("UPDATE document_versions SET reference='Карточка договора · версия 1' WHERE document_id='DOG-T-2026-044' AND version=1 AND created_by='system-seed' AND reference='SYNTHETIC:DOG-T-2026-044:v1'"),
+    env.DB.prepare("UPDATE document_versions SET reference='Дополнительное соглашение · версия 2' WHERE document_id='DOG-T-2026-044' AND version=2 AND created_by='system-seed' AND reference='SYNTHETIC:DOG-T-2026-044:v2'"),
+    env.DB.prepare("UPDATE tasks SET title='Продлить или закрыть договор №0044' WHERE automation_key='CONTRACT_EXPIRY:DOG-T-2026-044' AND created_by='system-automation' AND title='Продлить или закрыть договор DOG-T-2026-044'"),
+    env.DB.prepare("UPDATE tasks SET owner='Администратор системы' WHERE automation_key='CONTRACT_EXPIRY:DOG-T-2026-044' AND created_by='system-automation' AND owner='Администратор T-004'"),
+    env.DB.prepare("UPDATE notifications SET title='Договор №0044 истекает через 12 дней' WHERE dedup_key='CONTRACT_EXPIRY:DOG-T-2026-044:DIRECTOR' AND title='Договор истекает через 12 дней'"),
+    env.DB.prepare("UPDATE notifications SET body='Требуется решение о продлении или закрытии договора №0044.' WHERE dedup_key='CONTRACT_EXPIRY:DOG-T-2026-044:DIRECTOR' AND body='DOG-T-2026-044: требуется решение о продлении или закрытии.'"),
   ]);
 }
 
@@ -1215,22 +1307,23 @@ async function seedFinance() {
     ["FIN-DQ-001", "Реестр оплат отстаёт от текущей даты", "Высокий", "Ежемесячные оплаты.xlsx · июнь 2026", "Текущая дата · август 2026", 0, "ROLE:FINANCE", "Открыто"],
     ["FIN-DQ-002", "Статья ОДДС с ошибочным форматом даты", "Средний", "Атлас ОДДС · лист 2025", "Правило типа данных", 0, "ROLE:FINANCE", "Открыто"],
     ["FIN-REC-003", "Утверждённый источник ОПиУ не предоставлен", "Высокий", "ОДДС · денежный факт", "ОПиУ · источник отсутствует", 0, "ROLE:FINANCE", "Ожидает источник"],
-    ["FIN-REC-004", "Банковская выписка не подключена", "Высокий", "ОДДС · апрель 2026", "Точка / Альфа-Банк · нет данных", 1138045000, "ROLE:FINANCE", "Ожидает источник"],
+    ["FIN-REC-004", "Банковская выписка не подключена", "Высокий", "ОДДС · апрель 2026", "Точка / Т‑Банк · нет данных", 1138045000, "ROLE:FINANCE", "Ожидает источник"],
     ["FIN-REC-005", "Детальные строки содержания не включены в итог апреля", "Высокий", "ОДДС · 2026 · E79:E85", "ОДДС · 2026 · E78 и E34", 60919538, "ROLE:FINANCE", "Открыто"],
     ["FIN-REC-006", "Чистый поток января не равен поступлениям минус списания", "Высокий", "ОДДС · 2026 · B2 и B34", "ОДДС · 2026 · B111", -13474438, "ROLE:FINANCE", "Открыто"],
     ["FIN-RISK-001", "Прогнозный кассовый разрыв 5 сентября", "Высокий", "Платёжный календарь · тест", "Прогнозный баланс", -47000000, "ROLE:FINANCE", "Открыто"],
   ];
   await env.DB.batch(issueSeeds.map((row) => env.DB.prepare("INSERT OR IGNORE INTO finance_reconciliation_issues (id, title, severity, source_a, source_b, difference_minor, owner_entity_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(...row)));
+  await env.DB.prepare("UPDATE finance_reconciliation_issues SET source_b='Точка / Т‑Банк · нет данных' WHERE id='FIN-REC-004' AND source_b='Точка / Альфа-Банк · нет данных'").run();
 }
 
 async function seedSales() {
   const entitySeeds = [
-    ["EMP-T-SALES-001", "Сотрудник", "Менеджер T-01 · продажи", "Продажи"],
-    ["EMP-T-SALES-002", "Сотрудник", "Менеджер T-02 · продажи", "Продажи"],
-    ["FAM-T-021", "Семья", "Семья T-021", "Детский сад"],
-    ["CHD-T-021", "Ребёнок", "Ребёнок T-021", "Детский сад"],
-    ["FAM-T-071", "Семья", "Семья T-071", "Дополнительное образование"],
-    ["CHD-T-071", "Ребёнок", "Ребёнок T-071", "Дополнительное образование"],
+    ["EMP-T-SALES-001", "Сотрудник", "Менеджер по продажам №1", "Продажи"],
+    ["EMP-T-SALES-002", "Сотрудник", "Менеджер по продажам №2", "Продажи"],
+    ["FAM-T-021", "Семья", "Семья №0021", "Детский сад"],
+    ["CHD-T-021", "Ребёнок", "Ребёнок №0021", "Детский сад"],
+    ["FAM-T-071", "Семья", "Семья №0071", "Дополнительное образование"],
+    ["CHD-T-071", "Ребёнок", "Ребёнок №0071", "Дополнительное образование"],
     ["SVC-T-021", "Услуга", "Детский сад · полный день", "Детский сад"],
     ["SVC-T-071", "Услуга", "Театральная студия", "Дополнительное образование"],
   ];
@@ -1256,7 +1349,7 @@ async function seedSales() {
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Синтетические тестовые данные; персональные данные не используются')`).bind(...row)));
 
   const touchpoints = [
-    ["TP-T-014-01", "LEAD-T-014", "Первый клик", "2026-04-02T09:12:00Z", "Яндекс Поиск", "Входящий", "Переход по объявлению math_future", "Лендинг открыт", "CLICK-T-014"],
+    ["TP-T-014-01", "LEAD-T-014", "Первый клик", "2026-04-02T09:12:00Z", "Яндекс Поиск", "Входящий", "Переход по объявлению «Будущее математики»", "Страница открыта", "CLICK-T-014"],
     ["TP-T-014-02", "LEAD-T-014", "Форма", "2026-04-02T09:16:00Z", "Сайт", "Входящий", "Форма школы отправлена", "Заявка создана", "FORM-T-SCHOOL:SUB-T-014"],
     ["TP-T-014-03", "LEAD-T-014", "Звонок", "2026-04-02T10:02:00Z", "Телефония · тест", "Исходящий", "Менеджер уточнил запрос семьи", "Консультация назначена", "CALL-T-014"],
     ["TP-T-014-04", "LEAD-T-014", "Переписка", "2026-04-02T10:11:00Z", "Telegram · тест", "Исходящий", "Отправлены программа и маршрут", "Сообщение прочитано", "CHAT-T-014"],
@@ -1274,7 +1367,7 @@ async function seedSales() {
   const chainStages = ["Первый клик", "Заявка", "Консультация", "Посещение", "Договор", "Начисление", "Платёж"];
   await env.DB.batch(chainStages.slice(1).map((stage, index) => env.DB.prepare(`INSERT INTO sales_stage_events (
     lead_id, from_stage, to_stage, outcome, reason, actor, occurred_at
-  ) SELECT 'LEAD-T-014', ?, ?, 'Успешно', 'Тестовый сквозной маршрут этапа 5', 'system-sales-seed', ?
+  ) SELECT 'LEAD-T-014', ?, ?, 'Успешно', 'Этап подтверждён демонстрационным событием', 'system-sales-seed', ?
     WHERE NOT EXISTS (SELECT 1 FROM sales_stage_events WHERE lead_id = 'LEAD-T-014' AND to_stage = ?)`)
     .bind(chainStages[index], stage, `2026-04-${String(2 + index * 2).padStart(2, "0")}T12:00:00Z`, stage)));
 
@@ -1286,7 +1379,7 @@ async function seedSales() {
     'FIN-TEST-CLIENT-014', '2026-08-05', '2026-08', 'Поступление', 8500000,
     'Обучение 1–11 · тестовая клиентская цепочка', 'Доходы ОПиУ', 'FAM-T-014', 'DOG-T-2026-014',
     'PAY-T-014-001', 'PRJ-T-004', 'ORG-T-001', 'OBJ-T-002', 'CFR-T-001', 'BANK-TEST-CLIENT-014',
-    'SYNTHETIC_TRACE', 'SYNTHETIC_SALES_TEST', '—', '—', 'LEAD-T-014 → ACR-CLIENT-T-014',
+    'SYNTHETIC_TRACE', 'SYNTHETIC_SALES_TEST', '—', '—', 'Лид №0014 → начисление №0014',
     'Синтетическая операция только для проверки сквозного маршрута; не банковский факт', 'Разнесено', 'system-sales-seed'
   )`).run();
 
@@ -1319,6 +1412,22 @@ async function seedSales() {
   await env.DB.batch(bonuses.map((row) => env.DB.prepare(`INSERT OR IGNORE INTO client_bonuses (
     id, family_entity_id, event_type, points, reason, related_contract_id, occurred_at, created_by
   ) VALUES (?, ?, ?, ?, ?, ?, ?, 'system-sales-seed')`).bind(...row)));
+  await env.DB.batch([
+    env.DB.prepare("UPDATE entities SET display_name='Менеджер по продажам №1' WHERE id='EMP-T-SALES-001' AND created_by='system-sales-seed' AND display_name='Менеджер T-01 · продажи'"),
+    env.DB.prepare("UPDATE entities SET display_name='Менеджер по продажам №2' WHERE id='EMP-T-SALES-002' AND created_by='system-sales-seed' AND display_name='Менеджер T-02 · продажи'"),
+    env.DB.prepare("UPDATE entities SET display_name='Семья №0021' WHERE id='FAM-T-021' AND created_by='system-sales-seed' AND display_name='Семья T-021'"),
+    env.DB.prepare("UPDATE entities SET display_name='Ребёнок №0021' WHERE id='CHD-T-021' AND created_by='system-sales-seed' AND display_name='Ребёнок T-021'"),
+    env.DB.prepare("UPDATE entities SET display_name='Семья №0071' WHERE id='FAM-T-071' AND created_by='system-sales-seed' AND display_name='Семья T-071'"),
+    env.DB.prepare("UPDATE entities SET display_name='Ребёнок №0071' WHERE id='CHD-T-071' AND created_by='system-sales-seed' AND display_name='Ребёнок T-071'"),
+    env.DB.prepare("UPDATE entities SET display_name='Семья №0014' WHERE id='FAM-T-014' AND created_by='system-seed' AND display_name='Семья T-014'"),
+    env.DB.prepare("UPDATE entities SET display_name='Ребёнок №0014' WHERE id='CHD-T-014' AND created_by='system-seed' AND display_name='Ребёнок T-014'"),
+    env.DB.prepare("UPDATE entities SET display_name='Педагог №0032' WHERE id='EMP-T-032' AND created_by='system-seed' AND display_name='Сотрудник T-032 · педагог'"),
+    env.DB.prepare("UPDATE entities SET display_name='Обучение 1–11' WHERE id='SVC-T-001' AND created_by='system-seed' AND display_name='Обучение 1–11 · тест'"),
+    env.DB.prepare("UPDATE sales_touchpoints SET summary='Переход по объявлению «Будущее математики»' WHERE id='TP-T-014-01' AND created_by='system-sales-seed' AND summary='Переход по объявлению math_future'"),
+    env.DB.prepare("UPDATE sales_touchpoints SET outcome='Страница открыта' WHERE id='TP-T-014-01' AND created_by='system-sales-seed' AND outcome='Лендинг открыт'"),
+    env.DB.prepare("UPDATE sales_stage_events SET reason='Этап подтверждён демонстрационным событием' WHERE lead_id='LEAD-T-014' AND actor='system-sales-seed' AND reason='Тестовый сквозной маршрут этапа 5'"),
+    env.DB.prepare("UPDATE financial_operations SET source_ref='Лид №0014 → начисление №0014' WHERE id='FIN-TEST-CLIENT-014' AND created_by='system-sales-seed' AND source_ref='LEAD-T-014 → ACR-CLIENT-T-014'"),
+  ]);
 }
 
 async function seedContent() {
@@ -1422,7 +1531,7 @@ async function seedEducation() {
     ["ATT-T-016","LES-T-3A-0821","STU-T-016","Отсутствовал","","Результат не фиксировался","EMP-T-032"],
   ];
   await env.DB.batch(attendance.map(row=>env.DB.prepare("INSERT OR IGNORE INTO education_attendance (id,lesson_id,student_id,attendance_status,grade,result,recorded_by) VALUES (?,?,?,?,?,?,?)").bind(...row)));
-  const progress=[["PROG-T-014","STU-T-014","PRG-T-012","2026-Q3","Решение составных задач",86,"Рост","ATT-T-014 + проверочная работа T-04"],["PROG-T-015","STU-T-015","PRG-T-012","2026-Q3","Решение составных задач",68,"Стабильно","ATT-T-015 + проверочная работа T-04"],["PROG-T-016","STU-T-016","PRG-T-012","2026-Q3","Решение составных задач",52,"Требует данных","Одно занятие пропущено; недостаточно наблюдений"]];
+  const progress=[["PROG-T-014","STU-T-014","PRG-T-012","3 квартал 2026","Решение составных задач",86,"Рост","Посещаемость и проверочная работа №0004"],["PROG-T-015","STU-T-015","PRG-T-012","3 квартал 2026","Решение составных задач",68,"Стабильно","Посещаемость и проверочная работа №0004"],["PROG-T-016","STU-T-016","PRG-T-012","3 квартал 2026","Решение составных задач",52,"Требует данных","Одно занятие пропущено; недостаточно наблюдений"]];
   await env.DB.batch(progress.map(row=>env.DB.prepare("INSERT OR IGNORE INTO education_progress (id,student_id,program_id,period,metric,score,trend,evidence) VALUES (?,?,?,?,?,?,?,?)").bind(...row)));
   const feedback=[["FDB-T-014","STU-T-014","FAM-T-014","PRG-T-012",5,"Ребёнок стал спокойнее объяснять решение","Добавить парное объяснение в следующую версию","Новая"],["FDB-T-015","STU-T-015","FAM-T-015","PRG-T-012",3,"Домашнее задание заняло больше часа","Разделить задание на обязательную и дополнительную части","Требует проверки"]];
   await env.DB.batch(feedback.map(row=>env.DB.prepare("INSERT OR IGNORE INTO education_feedback (id,student_id,family_entity_id,program_id,rating,comment,recommendation,status) VALUES (?,?,?,?,?,?,?,?)").bind(...row)));
@@ -1635,9 +1744,9 @@ async function seedFood(){
 
 async function seedSafety(){
   const entitiesToAdd=[
-    ["EMP-T-SAFE-001","Сотрудник","Ответственный по безопасности T-S01","Активна","EMPLOYEE-SAFETY-001","Безопасность"],
-    ["EMP-T-GUARD-001","Сотрудник","Сотрудник охраны T-G01","Активна","EMPLOYEE-GUARD-001","Безопасность"],
-    ["SUP-T-SAFE-001","Организация","Подрядчик инженерных систем T-S01","Активна","SUPPLIER-SAFETY-001","Безопасность"],
+    ["EMP-T-SAFE-001","Сотрудник","Ответственный по безопасности","Активна","EMPLOYEE-SAFETY-001","Безопасность"],
+    ["EMP-T-GUARD-001","Сотрудник","Сотрудник охраны №1","Активна","EMPLOYEE-GUARD-001","Безопасность"],
+    ["SUP-T-SAFE-001","Организация","Подрядчик инженерных систем №1","Активна","SUPPLIER-SAFETY-001","Безопасность"],
   ];
   await env.DB.batch(entitiesToAdd.map(row=>env.DB.prepare("INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES (?,?,?,?,'SYNTHETIC_SAFETY_TEST',?,'Синтетическая карточка',?,'{}','system-safety-seed')").bind(...row)));
   const systems=[
@@ -1656,8 +1765,8 @@ async function seedSafety(){
   ];
   await env.DB.batch(equipment.map(row=>env.DB.prepare("INSERT OR IGNORE INTO safety_equipment (id,system_id,name,inventory_number,location,contractor_id,criticality,next_check_at,status) VALUES (?,?,?,?,?,?,?,?,?)").bind(...row)));
   const checks=[
-    ["SAFE-CHK-T-090","SAFE-EQ-T-001","OBJ-T-001","Плановая","2026-08-20","2026-08-20T08:30:00Z","Неисправность","Акт проверки SAFE-CHECK-ACT-T-090: обрыв шлейфа 4","EMP-T-SAFE-001","Завершена"],
-    ["SAFE-CHK-T-091","SAFE-EQ-T-003","OBJ-T-002","Ежемесячная","2026-08-21","2026-08-21T07:00:00Z","Соответствует","Кадр теста T-CCTV-0821 и запись журнала","EMP-T-SAFE-001","Завершена"],
+    ["SAFE-CHK-T-090","SAFE-EQ-T-001","OBJ-T-001","Плановая","2026-08-20","2026-08-20T08:30:00Z","Неисправность","Акт проверки №0090: обрыв шлейфа 4","EMP-T-SAFE-001","Завершена"],
+    ["SAFE-CHK-T-091","SAFE-EQ-T-003","OBJ-T-002","Ежемесячная","2026-08-21","2026-08-21T07:00:00Z","Соответствует","Контрольный кадр и запись журнала","EMP-T-SAFE-001","Завершена"],
     ["SAFE-CHK-T-092","SAFE-EQ-T-004","OBJ-T-001","Плановая","2026-08-26","","Ожидает","Проверка уровня и разборчивости оповещения","EMP-T-SAFE-001","Запланирована"],
   ];
   await env.DB.batch(checks.map(row=>env.DB.prepare("INSERT OR IGNORE INTO safety_checks (id,equipment_id,object_entity_id,check_type,scheduled_at,checked_at,result,evidence,responsible_entity_id,status) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(...row)));
@@ -1667,7 +1776,7 @@ async function seedSafety(){
   ];
   await env.DB.batch(faults.map(row=>env.DB.prepare("INSERT OR IGNORE INTO safety_faults (id,check_id,equipment_id,severity,description,detected_at,status) VALUES (?,?,?,?,?,?,?)").bind(...row)));
   await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO tasks (title,owner,due_date,priority,status,source_type,source_id,description,assignee_entity_id,kind,automation_key,requires_approval,result,result_evidence,completed_at,created_by) VALUES ('Устранить неисправность пожарного шлейфа','Ответственный по безопасности','2026-08-20','Высокий','Завершена','Неисправность безопасности','SAFE-FLT-T-031','Обрыв шлейфа 4 по акту SAFE-CHECK-ACT-T-090','EMP-T-SAFE-001','Автозадача','SAFETY_FAULT:SAFE-FLT-T-031',1,'Шлейф восстановлен, контрольный тест пройден','ACT-SAFE-T-031','2026-08-20T15:40:00Z','system-safety-seed')"),
+    env.DB.prepare("INSERT OR IGNORE INTO tasks (title,owner,due_date,priority,status,source_type,source_id,description,assignee_entity_id,kind,automation_key,requires_approval,result,result_evidence,completed_at,created_by) VALUES ('Устранить неисправность пожарного шлейфа','Ответственный по безопасности','2026-08-20','Высокий','Завершена','Неисправность безопасности','SAFE-FLT-T-031','Обрыв шлейфа 4 по акту проверки №0090','EMP-T-SAFE-001','Автозадача','SAFETY_FAULT:SAFE-FLT-T-031',1,'Шлейф восстановлен, контрольный тест пройден','Акт выполненных работ №0031','2026-08-20T15:40:00Z','system-safety-seed')"),
     env.DB.prepare("INSERT OR IGNORE INTO tasks (title,owner,due_date,priority,status,source_type,source_id,description,assignee_entity_id,kind,automation_key,requires_approval,created_by) VALUES ('Диагностировать контроллер СКУД','Ответственный по безопасности','2026-08-22','Средний','В работе','Неисправность безопасности','SAFE-FLT-T-032','Нестабильное чтение карты доступа; проверить журнал и контроллер','EMP-T-SAFE-001','Автозадача','SAFETY_FAULT:SAFE-FLT-T-032',1,'system-safety-seed')"),
   ]);
   await env.DB.batch([
@@ -1680,7 +1789,18 @@ async function seedSafety(){
     env.DB.prepare("INSERT OR IGNORE INTO safety_repairs (id,fault_id,contractor_id,action_type,started_at,completed_at,result,act_document_id,cost_minor,payment_operation_id,status) VALUES ('SAFE-REP-T-032','SAFE-FLT-T-032','SUP-T-SAFE-001','Диагностика','2026-08-21T09:00:00Z','','Работа начата','',650000,'','В работе')"),
     env.DB.prepare("INSERT OR IGNORE INTO safety_next_checks (id,equipment_id,source_repair_id,scheduled_at,check_type,responsible_entity_id,status) VALUES ('SAFE-NEXT-T-031','SAFE-EQ-T-001','SAFE-REP-T-031','2026-09-20','После ремонта','EMP-T-SAFE-001','Запланирована')"),
     env.DB.prepare("INSERT OR IGNORE INTO safety_guard_shifts (id,object_entity_id,employee_entity_id,post,started_at,ended_at,journal_ref,status) VALUES ('SAFE-GUARD-T-0821','OBJ-T-002','EMP-T-GUARD-001','Главный вход','2026-08-21T06:45:00Z','2026-08-21T19:00:00Z','JOURNAL-T-GUARD-0826','На посту')"),
-    env.DB.prepare("INSERT OR IGNORE INTO financial_operations (id,operation_date,period,direction,amount_minor,category,report_class,counterparty_entity_id,contract_id,document_id,project_entity_id,legal_entity_id,object_entity_id,cfr_entity_id,bank_operation_ref,operation_kind,source_system,source_file,source_sheet,source_ref,data_quality,status,created_by) VALUES ('FIN-TEST-SAFE-031','2026-08-20','2026-08','Списание',1850000,'Ремонт систем безопасности · тест','Расходы ОПиУ','SUP-T-SAFE-001','DOG-SUP-T-SAFE-001','ACT-SAFE-T-031','PRJ-T-004','ORG-T-001','OBJ-T-001','CFR-T-001','BANK-TEST-SAFE-031','SYNTHETIC_TRACE','SYNTHETIC_SAFETY_TEST','—','—','SAFE-FLT-T-031 → SAFE-REP-T-031','Синтетическая оплата; не банковский факт','Разнесено','system-safety-seed')"),
+    env.DB.prepare("INSERT OR IGNORE INTO financial_operations (id,operation_date,period,direction,amount_minor,category,report_class,counterparty_entity_id,contract_id,document_id,project_entity_id,legal_entity_id,object_entity_id,cfr_entity_id,bank_operation_ref,operation_kind,source_system,source_file,source_sheet,source_ref,data_quality,status,created_by) VALUES ('FIN-TEST-SAFE-031','2026-08-20','2026-08','Списание',1850000,'Ремонт систем безопасности · тест','Расходы ОПиУ','SUP-T-SAFE-001','DOG-SUP-T-SAFE-001','ACT-SAFE-T-031','PRJ-T-004','ORG-T-001','OBJ-T-001','CFR-T-001','BANK-TEST-SAFE-031','SYNTHETIC_TRACE','SYNTHETIC_SAFETY_TEST','—','—','Неисправность №0031 → ремонт №0031','Синтетическая оплата; не банковский факт','Разнесено','system-safety-seed')"),
+  ]);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE entities SET display_name='Ответственный по безопасности' WHERE id='EMP-T-SAFE-001' AND created_by='system-safety-seed' AND display_name='Ответственный по безопасности T-S01'"),
+    env.DB.prepare("UPDATE entities SET display_name='Сотрудник охраны №1' WHERE id='EMP-T-GUARD-001' AND created_by='system-safety-seed' AND display_name='Сотрудник охраны T-G01'"),
+    env.DB.prepare("UPDATE entities SET display_name='Подрядчик инженерных систем №1' WHERE id='SUP-T-SAFE-001' AND created_by='system-safety-seed' AND display_name='Подрядчик инженерных систем T-S01'"),
+    env.DB.prepare("UPDATE safety_checks SET evidence='Акт проверки №0090: обрыв шлейфа 4' WHERE id='SAFE-CHK-T-090' AND evidence='Акт проверки SAFE-CHECK-ACT-T-090: обрыв шлейфа 4'"),
+    env.DB.prepare("UPDATE safety_checks SET evidence='Контрольный кадр и запись журнала' WHERE id='SAFE-CHK-T-091' AND evidence='Кадр теста T-CCTV-0821 и запись журнала'"),
+    env.DB.prepare("UPDATE tasks SET title='Устранить неисправность пожарного шлейфа' WHERE automation_key='SAFETY_FAULT:SAFE-FLT-T-031' AND created_by='system-safety-seed' AND title='Устранить неисправность · SAFE-EQ-T-001'"),
+    env.DB.prepare("UPDATE tasks SET description='Обрыв шлейфа 4 по акту проверки №0090' WHERE automation_key='SAFETY_FAULT:SAFE-FLT-T-031' AND created_by='system-safety-seed' AND description='Обрыв шлейфа 4 по акту SAFE-CHECK-ACT-T-090'"),
+    env.DB.prepare("UPDATE tasks SET result_evidence='Акт выполненных работ №0031' WHERE automation_key='SAFETY_FAULT:SAFE-FLT-T-031' AND created_by='system-safety-seed' AND result_evidence='ACT-SAFE-T-031'"),
+    env.DB.prepare("UPDATE financial_operations SET source_ref='Неисправность №0031 → ремонт №0031' WHERE id='FIN-TEST-SAFE-031' AND created_by='system-safety-seed' AND source_ref='SAFE-FLT-T-031 → SAFE-REP-T-031'"),
   ]);
 }
 
@@ -1712,10 +1832,10 @@ async function seedMedical(){
 async function seedAccounting(){
   await env.DB.prepare("INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES ('EMP-T-ACC-001','Сотрудник','Бухгалтер T-ACC-01','Активна','SYNTHETIC_ACCOUNTING_TEST','EMPLOYEE-ACCOUNTING-001','Синтетическая карточка','Бухгалтерия','{}','system-accounting-seed')").run();
   const documents=[
-    ["ACC-INV-T-031","Счёт","SAFE-031/26","2026-08-20","SUP-T-SAFE-001","DOG-SUP-T-SAFE-001",1850000,308333,"FIN-TEST-SAFE-031","PROTECTED:SYNTHETIC:ACC-INV-T-031","Подтверждено вручную","ЭДО не подключён","SYNTHETIC_ACCOUNTING_TEST","Связан"],
+    ["ACC-INV-T-031","Счёт","0031","2026-08-20","SUP-T-SAFE-001","DOG-SUP-T-SAFE-001",1850000,308333,"FIN-TEST-SAFE-031","PROTECTED:SYNTHETIC:ACC-INV-T-031","Подтверждено вручную","ЭДО не подключён","SYNTHETIC_ACCOUNTING_TEST","Связан"],
     ["ACC-ACT-T-031","Акт","ACT-SAFE-T-031","2026-08-20","SUP-T-SAFE-001","DOG-SUP-T-SAFE-001",1850000,308333,"FIN-TEST-SAFE-031","PROTECTED:SYNTHETIC:ACT-SAFE-T-031","Подтверждено вручную","ЭДО не подключён","SYNTHETIC_ACCOUNTING_TEST","Связан"],
-    ["ACC-UPD-T-088","УПД","UPD-088/26","2026-08-09","SUP-T-022","DOG-SUP-T-022",48000000,8000000,"FIN-TEST-PROC-088","PROTECTED:SYNTHETIC:ACC-UPD-T-088","На проверке","ЭДО не подключён","SYNTHETIC_ACCOUNTING_TEST","Связан"],
-    ["ACC-RECEIPT-T-FOOD","Чек","FOOD-0821","2026-08-20","SUP-T-FOOD-001","DOG-SUP-T-FOOD-001",1200000,200000,"FIN-TEST-FOOD-COST-0821","PROTECTED:SYNTHETIC:ACC-RECEIPT-T-FOOD","Подтверждено вручную","Не применимо","SYNTHETIC_ACCOUNTING_TEST","Связан"],
+    ["ACC-UPD-T-088","УПД","0088","2026-08-09","SUP-T-022","DOG-SUP-T-022",48000000,8000000,"FIN-TEST-PROC-088","PROTECTED:SYNTHETIC:ACC-UPD-T-088","На проверке","ЭДО не подключён","SYNTHETIC_ACCOUNTING_TEST","Связан"],
+    ["ACC-RECEIPT-T-FOOD","Чек","0821","2026-08-20","SUP-T-FOOD-001","DOG-SUP-T-FOOD-001",1200000,200000,"FIN-TEST-FOOD-COST-0821","PROTECTED:SYNTHETIC:ACC-RECEIPT-T-FOOD","Подтверждено вручную","Не применимо","SYNTHETIC_ACCOUNTING_TEST","Связан"],
     ["ACC-WAY-T-FOOD","Накладная","FOOD-WAY-021","2026-08-20","SUP-T-FOOD-001","DOG-SUP-T-FOOD-001",3200000,533333,"","PROTECTED:SYNTHETIC:ACC-WAY-T-FOOD","На проверке","ЭДО не подключён","SYNTHETIC_ACCOUNTING_TEST","Не хватает счёта"],
   ];
   await env.DB.batch(documents.map(row=>env.DB.prepare("INSERT OR IGNORE INTO accounting_documents (id,document_type,number,document_date,counterparty_entity_id,contract_id,amount_minor,vat_minor,payment_operation_id,file_ref,signature_status,edo_status,source_type,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
@@ -1784,8 +1904,8 @@ async function seedIntegrations(){
     ["INT-T-ODDS","Атлас ОДДС.xlsx","Файловый импорт","Финансы","EMP-T-ACC-001","Атлас ОДДС 01.01.2023–31.01.2026.xlsx","Контролируемый snapshot","Файл проверен","Ключ не требуется","","2026-08-21T07:40:00Z","",4,4,0,0,2,"Среднее: без обновления устаревает управленческий ДДС","xlsx-odds@1",1,0],
     ["INT-T-PAYROLL","Зарплатная ведомость.xlsx","Файловый импорт","HR · Финансы","EMP-T-ACC-001","Зарплатная ведомость.xlsx","Контролируемый snapshot","На проверке","Ключ не требуется","","2026-08-21T07:45:00Z","",114,112,2,0,2,"Высокое: кадровые агрегаты требуют дедупликации","xlsx-payroll@1",1,0],
     ["INT-T-PAYMENTS","Ежемесячные оплаты.xlsx","Файловый импорт","Финансы · Клиенты","EMP-T-ACC-001","Ежемесячные оплаты.xlsx","Контролируемый snapshot","Устарел","Ключ не требуется","","2026-08-21T07:50:00Z","",4,4,0,0,1,"Высокое: новые оплаты не поступают после июня 2026","xlsx-payments@1",1,0],
-    ["INT-T-TOCHKA","Банк Точка","Банк","Финансы","EMP-T-FIN-001","Банк Точка","API · проверка customerCode и доступных счетов","Ожидает доступ","Не настроена","","","",0,0,0,0,0,"Критичное: загрузка банковских операций ещё не реализована","bank-tochka@1",0,0],
-    ["INT-T-ALFABANK","Альфа-Банк","Банк","Финансы","EMP-T-FIN-001","Альфа-Банк","API · входящие операции","Ожидает доступ","Не настроена","","","После выдачи доступа",0,0,0,0,0,"Критичное: банковский факт отсутствует","bank-alfa@0",0,0],
+    ["INT-T-TOCHKA","Банк Точка","Банк","Финансы","ROLE:OWNER","Банк Точка","Защищённое подключение · проверка компании и доступных счетов","Ожидает доступ","Не настроена","","","",0,0,0,0,0,"Критичное: загрузка банковских операций Точки ещё не реализована","bank-tochka@1",0,0],
+    ["INT-T-TBANK","Т‑Банк","Банк","Финансы","ROLE:OWNER","Официальный интерфейс Т‑Банка для бизнеса","Прямое подключение · только чтение счетов и короткой выписки","Ожидает доступ","Не настроена","","","",0,0,0,0,0,"Критичное: доступ можно проверить, но операции не импортируются и платежи не создаются","tbank-h2h-readonly@1",0,0],
     ["INT-T-ALFACRM","AlfaCRM","CRM","Продажи · Клиенты","EMP-T-SALES-001","AlfaCRM","API · двусторонний","Ожидает доступ","Не настроена","","","После выдачи доступа",0,0,0,1,0,"Высокое: лиды и статусы синхронизируются вручную","alfacrm@0",0,0],
     ["INT-T-DIARY","Электронный дневник","Образование","Обучение","EMP-T-METHOD-001","Утверждённый электронный дневник","API · чтение","Не подключён","Провайдер не утверждён","","","После выбора провайдера",0,0,0,0,0,"Высокое: расписание и посещаемость не обновляются","diary@0",0,0],
     ["INT-T-FORMS","Формы сайта","Маркетинг","Продажи","EMP-T-MKT-001","Формы сайта ArtHello","Webhook · входящие заявки","Ожидает доступ","Webhook не настроен","","","После настройки webhook",0,0,0,0,0,"Высокое: first-click и заявки не поступают автоматически","web-forms@0",0,0],
@@ -1954,6 +2074,8 @@ export type IntegrationSetup = {
   channelType: string;
   sourceMapping: string;
   dataScopes: string[];
+  readOnlyScopeConfirmed: boolean;
+  credentialGeneration: string;
   secretStatus: "missing" | "stored" | "external_required";
   updatedAt: string;
   updatedBy: string;
@@ -1961,6 +2083,25 @@ export type IntegrationSetup = {
 
 const integrationSetupPrefix = "integration_setup:";
 const integrationCredentialPrefix = "integration_credential:v2:";
+const tochkaCompanySelectionPrefix = "integration_company_selection:v1:";
+const tochkaConnectionId = "INT-T-TOCHKA";
+const tbankConnectionId = "INT-T-TBANK";
+const tbankCredentialScope = "bank-read-v1";
+const tochkaCompanySelectionTtlMs = 5 * 60_000;
+
+type TochkaCompanySelectionPayload = {
+  version: 1;
+  legalEntityId: string;
+  customerCode: string;
+  credentialDigest: string;
+  issuedTo: string;
+  expiresAtMs: number;
+};
+
+export type TochkaCompanySelectionHandle = { id: string; name: string };
+export type TochkaCompanySelectionResult =
+  | { ok: true; customerCode: string }
+  | { ok: false; reason: string };
 
 type EncryptedIntegrationCredential = {
   version: 1;
@@ -1988,16 +2129,21 @@ export async function getIntegrationSetups(): Promise<Record<string, Integration
       const connectionId = row.state_key.slice(integrationSetupPrefix.length);
       const legalEntityId = String(value.legalEntityId ?? "").trim().slice(0, 80);
       const customerCode = String(value.customerCode ?? "").trim().slice(0, 80);
-      const tochkaJwt = connectionId === "INT-T-TOCHKA" && value.authMethod === "JWT";
+      const tochkaJwt = connectionId === tochkaConnectionId && value.authMethod === "JWT";
+      const tbankToken = connectionId === tbankConnectionId && value.authMethod === "Bearer token";
+      const credentialScope = tbankToken ? tbankCredentialScope : customerCode;
       result[connectionId] = {
         ...value,
         connectionId,
+        endpoint: normalizeStoredIntegrationEndpoint(value.endpoint),
         legalEntityId,
         customerCode,
         allocationMode: value.allocationMode === "single_branch" ? "single_branch" : "classify_transactions",
-        accountScope: value.accountScope || (connectionId === "INT-T-TOCHKA" ? "all_permitted" : ""),
-        secretStatus: tochkaJwt
-          ? customerCode && storedCredentialKeys.has(integrationCredentialStateKey(connectionId, legalEntityId, customerCode)) ? "stored" : "missing"
+        accountScope: value.accountScope || (tochkaJwt || tbankToken ? "all_permitted" : ""),
+        readOnlyScopeConfirmed: connectionId === tbankConnectionId && value.readOnlyScopeConfirmed === true,
+        credentialGeneration: normalizeCredentialGeneration(value.credentialGeneration),
+        secretStatus: tochkaJwt || tbankToken
+          ? credentialScope && storedCredentialKeys.has(integrationCredentialStateKey(connectionId, legalEntityId, credentialScope)) ? "stored" : "missing"
           : value.secretStatus === "stored" ? "stored" : "external_required",
       };
     } catch {
@@ -2009,8 +2155,8 @@ export async function getIntegrationSetups(): Promise<Record<string, Integration
 
 type PreparedIntegrationSetup = {
   setup: IntegrationSetup;
-  tochkaConnection: boolean;
-  tochkaJwt: boolean;
+  protectedBankConnection: boolean;
+  protectedBankCredential: boolean;
 };
 
 export async function validateIntegrationSetupReferences(input: Partial<IntegrationSetup>) {
@@ -2019,7 +2165,7 @@ export async function validateIntegrationSetupReferences(input: Partial<Integrat
   const connection = await env.DB.prepare("SELECT id FROM integration_connections WHERE id=?")
     .bind(connectionId).first<{ id: string }>();
   if (!connection) throw new Error("Интеграция не найдена");
-  const bankConnection = connectionId === "INT-T-TOCHKA" || connectionId === "INT-T-ALFABANK";
+  const bankConnection = connectionId === tochkaConnectionId || connectionId === tbankConnectionId;
   const legalEntityId = String(input.legalEntityId ?? "").trim().slice(0, 80);
   const allocationMode = input.allocationMode === "single_branch" ? "single_branch" : "classify_transactions";
   const branchId = String(input.branchId ?? "").trim().slice(0, 80);
@@ -2048,21 +2194,27 @@ async function prepareIntegrationSetup(
 ): Promise<PreparedIntegrationSetup> {
   const references = await validateIntegrationSetupReferences(input);
   const { connectionId, bankConnection, legalEntityId, allocationMode, branchId } = references;
-  const tochkaConnection = connectionId === "INT-T-TOCHKA";
-  const startDate = tochkaConnection ? "" : String(input.startDate ?? "").trim().slice(0, 10);
-  if (!tochkaConnection && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new Error("Укажите дату начала загрузки");
-  const interval = tochkaConnection
+  const protectedBankConnection = connectionId === tochkaConnectionId || connectionId === tbankConnectionId;
+  const startDate = protectedBankConnection ? "" : String(input.startDate ?? "").trim().slice(0, 10);
+  if (!protectedBankConnection && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new Error("Укажите дату начала загрузки");
+  const interval = protectedBankConnection
     ? 0
     : [60, 180, 360, 1440].includes(Number(input.syncIntervalMinutes))
     ? Number(input.syncIntervalMinutes)
     : 60;
-  const minute = tochkaConnection ? 0 : Math.min(59, Math.max(0, Number(input.syncMinute) || 0));
+  const minute = protectedBankConnection ? 0 : Math.min(59, Math.max(0, Number(input.syncMinute) || 0));
   const authMethod = String(input.authMethod ?? "").trim().slice(0, 80);
-  const tochkaJwt = connectionId === "INT-T-TOCHKA" && authMethod === "JWT";
+  const tochkaJwt = connectionId === tochkaConnectionId && authMethod === "JWT";
+  const tbankToken = connectionId === tbankConnectionId && authMethod === "Bearer token";
+  const protectedBankCredential = tochkaJwt || tbankToken;
   const customerCode = String(input.customerCode ?? "").trim().slice(0, 80);
-  if (tochkaConnection && customerCode && !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,79}$/.test(customerCode)) {
-    throw new Error("Некорректно указан customerCode");
+  const credentialScope = tbankToken ? tbankCredentialScope : customerCode;
+  if (connectionId === tochkaConnectionId && customerCode && !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,79}$/.test(customerCode)) {
+    throw new Error("Некорректно указана компания Точки");
   }
+  const credentialStored = protectedBankCredential && (
+    forceStoredCredential || Boolean(credentialScope && await hasIntegrationCredential(connectionId, legalEntityId, credentialScope))
+  );
   const updatedAt = new Date().toISOString();
   const setup: IntegrationSetup = {
     connectionId,
@@ -2070,27 +2222,31 @@ async function prepareIntegrationSetup(
     startDate,
     syncIntervalMinutes: interval,
     syncMinute: minute,
-    endpoint: String(input.endpoint ?? "").trim().slice(0, 240),
+    endpoint: protectedBankConnection ? "" : normalizeSubmittedIntegrationEndpoint(input.endpoint),
     legalEntityId,
-    customerCode: tochkaConnection ? customerCode : "",
+    customerCode: connectionId === tochkaConnectionId ? customerCode : "",
     branchId: bankConnection && allocationMode === "classify_transactions" ? "" : branchId,
     allocationMode,
     accountScope: bankConnection ? "all_permitted" : String(input.accountScope ?? "").trim().slice(0, 160),
     channelType: String(input.channelType ?? "").trim().slice(0, 80),
     sourceMapping: String(input.sourceMapping ?? "").trim().slice(0, 500),
     dataScopes: Array.isArray(input.dataScopes) ? input.dataScopes.filter((item): item is string => typeof item === "string").map((item) => item.trim().slice(0, 80)).filter(Boolean).slice(0, 30) : [],
-    secretStatus: tochkaJwt
-      ? forceStoredCredential || customerCode && await hasIntegrationCredential(connectionId, legalEntityId, customerCode) ? "stored" : "missing"
-      : "external_required",
+    readOnlyScopeConfirmed: connectionId === tbankConnectionId && input.readOnlyScopeConfirmed === true,
+    credentialGeneration: protectedBankConnection ? crypto.randomUUID() : "",
+    secretStatus: protectedBankCredential ? credentialStored ? "stored" : "missing" : "external_required",
     updatedAt,
     updatedBy: actor,
   };
   if (!setup.dataScopes.length) throw new Error("Выберите, какие данные получать");
-  return { setup, tochkaConnection, tochkaJwt };
+  return { setup, protectedBankConnection, protectedBankCredential };
 }
 
-async function persistIntegrationSetup(actor: string, prepared: PreparedIntegrationSetup) {
-  const { setup, tochkaConnection, tochkaJwt } = prepared;
+async function persistIntegrationSetup(
+  actor: string,
+  prepared: PreparedIntegrationSetup,
+  baseline: Pick<IntegrationSetup, "credentialGeneration" | "updatedAt"> | null = null,
+) {
+  const { setup, protectedBankConnection, protectedBankCredential } = prepared;
   const saveSetupStatement = env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
     VALUES (?,?,CURRENT_TIMESTAMP)
     ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
@@ -2099,44 +2255,92 @@ async function persistIntegrationSetup(actor: string, prepared: PreparedIntegrat
     auth_status=?,
     next_sync_at=?,
     updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(
-      tochkaJwt
-        ? setup.secretStatus === "stored" ? "JWT сохранён · требуется проверка банка" : "Настройка сохранена · JWT требуется"
+      protectedBankCredential
+        ? setup.secretStatus === "stored" ? "Ключ сохранён · требуется проверка банка" : "Настройка сохранена · ключ требуется"
         : "Настройка сохранена · секрет требуется",
-      tochkaConnection
+      protectedBankConnection
         ? ""
         : "После безопасной передачи секрета",
       setup.connectionId,
     );
-  if (tochkaConnection) {
-    const statements = [saveSetupStatement];
-    if (setup.secretStatus !== "stored") {
-      statements.push(env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key LIKE ?")
-        .bind(integrationCredentialConnectionPattern(setup.connectionId)));
-    }
-    statements.push(updateConnectionStatement);
-    await env.DB.batch(statements);
-  } else {
-    await saveSetupStatement.run();
-    await updateConnectionStatement.run();
-  }
-  await writeIntegrationDatasetAudit(actor, "integration.setup_saved", {
+  const auditPayload = JSON.stringify({
     connectionId: setup.connectionId,
     selectedLegalEntityId: setup.legalEntityId,
-    selectedCustomerCode: setup.customerCode,
+    companySelectionConfirmed: Boolean(setup.customerCode),
     accountScope: setup.accountScope,
     allocationMode: setup.allocationMode,
     startDate: setup.startDate,
     syncIntervalMinutes: setup.syncIntervalMinutes,
     syncMinute: setup.syncMinute,
-    authMethod: setup.authMethod,
+    accessMethod: setup.connectionId === tochkaConnectionId
+      ? "Ключ Точки"
+      : setup.connectionId === tbankConnectionId
+        ? "Токен Т‑Банка"
+        : setup.authMethod,
     dataScopes: setup.dataScopes,
+    limitedPermissionsConfirmedByOwner: setup.connectionId === tbankConnectionId
+      ? setup.readOnlyScopeConfirmed
+      : undefined,
     secretStored: setup.secretStatus === "stored",
   });
+  if (protectedBankConnection) {
+    const setupStateKey = `${integrationSetupPrefix}${setup.connectionId}`;
+    const guard = baseline
+      ? `EXISTS (SELECT 1 FROM system_runtime_state
+          WHERE state_key=?
+            AND COALESCE(json_extract(state_value,'$.credentialGeneration'),'')=?
+            AND COALESCE(json_extract(state_value,'$.updatedAt'),'')=?)`
+      : "NOT EXISTS (SELECT 1 FROM system_runtime_state WHERE state_key=?)";
+    const guardBindings = baseline
+      ? [setupStateKey, normalizeCredentialGeneration(baseline.credentialGeneration), baseline.updatedAt]
+      : [setupStateKey];
+    const statements = [];
+    if (setup.secretStatus !== "stored") {
+      statements.push(env.DB.prepare(`DELETE FROM system_runtime_state
+        WHERE state_key LIKE ? AND ${guard}`)
+        .bind(integrationCredentialConnectionPattern(setup.connectionId), ...guardBindings));
+    }
+    statements.push(
+      env.DB.prepare(`UPDATE integration_connections SET
+        auth_status=?,next_sync_at='',updated_at=CURRENT_TIMESTAMP WHERE id=? AND ${guard}`)
+        .bind(
+          protectedBankCredential
+            ? setup.secretStatus === "stored" ? "Ключ сохранён · требуется проверка банка" : "Настройка сохранена · ключ требуется"
+            : "Настройка сохранена · секрет требуется",
+          setup.connectionId,
+          ...guardBindings,
+        ),
+      env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
+        SELECT ?,'integration.setup_saved','integration_test_dataset','INTEGRATION-DEMO',? WHERE ${guard}`)
+        .bind(actor, auditPayload, ...guardBindings),
+      env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+        SELECT ?,?,CURRENT_TIMESTAMP WHERE ${guard}
+        ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
+        .bind(setupStateKey, JSON.stringify(setup), ...guardBindings),
+    );
+    const results = await env.DB.batch(statements);
+    const setupResult = results.at(-1) as { meta?: { changes?: number } } | undefined;
+    return Number(setupResult?.meta?.changes ?? 0) > 0;
+  } else {
+    await env.DB.batch([
+      saveSetupStatement,
+      updateConnectionStatement,
+      env.DB.prepare("INSERT INTO audit_events (actor,action,entity_type,entity_id,payload) VALUES (?,?,?,?,?)")
+        .bind(actor, "integration.setup_saved", "integration_test_dataset", "INTEGRATION-DEMO", auditPayload),
+    ]);
+    return true;
+  }
 }
 
 export async function saveIntegrationSetup(actor: string, input: Partial<IntegrationSetup>) {
+  const connectionId = String(input.connectionId ?? "").trim().toUpperCase().slice(0, 80);
+  const protectedBankConnection = connectionId === tochkaConnectionId || connectionId === tbankConnectionId;
+  const baseline = protectedBankConnection
+    ? (await getIntegrationSetups())[connectionId] ?? null
+    : null;
   const prepared = await prepareIntegrationSetup(actor, input);
-  await persistIntegrationSetup(actor, prepared);
+  const saved = await persistIntegrationSetup(actor, prepared, baseline);
+  if (!saved) throw new Error("Настройка банка изменилась во время сохранения. Повторите действие.");
   return prepared.setup;
 }
 
@@ -2144,11 +2348,12 @@ export async function saveTochkaSetupWithCredential(
   actor: string,
   input: Partial<IntegrationSetup>,
   value: unknown,
+  baseline: Pick<IntegrationSetup, "credentialGeneration" | "updatedAt"> | null,
 ) {
   const prepared = await prepareIntegrationSetup(actor, input, true);
   const { setup } = prepared;
-  if (setup.connectionId !== "INT-T-TOCHKA" || setup.authMethod !== "JWT" || !setup.customerCode) {
-    throw new Error("JWT принимается только для подтверждённого подключения банка Точка");
+  if (setup.connectionId !== tochkaConnectionId || setup.authMethod !== "JWT" || !setup.customerCode) {
+    throw new Error("Ключ принимается только для подтверждённого подключения банка Точка");
   }
   const credential = await encryptIntegrationCredential(
     actor,
@@ -2160,43 +2365,333 @@ export async function saveTochkaSetupWithCredential(
   const setupAudit = JSON.stringify({
     connectionId: setup.connectionId,
     selectedLegalEntityId: setup.legalEntityId,
-    selectedCustomerCode: setup.customerCode,
+    companySelectionConfirmed: true,
     accountScope: setup.accountScope,
     allocationMode: setup.allocationMode,
     startDate: setup.startDate,
     syncIntervalMinutes: setup.syncIntervalMinutes,
     syncMinute: setup.syncMinute,
-    authMethod: setup.authMethod,
+    accessMethod: "Ключ Точки",
     dataScopes: setup.dataScopes,
     secretStored: true,
   });
   const credentialAudit = JSON.stringify({
     connectionId: credential.connectionId,
     selectedLegalEntityId: credential.legalEntityId,
-    selectedCustomerCode: credential.customerCode,
+    credentialEnvelopeStored: true,
     version: credential.envelope.version,
     algorithm: credential.envelope.algorithm,
   });
+  const saved = await persistBankSetupWithCredentialCas(
+    actor,
+    setup,
+    credential,
+    baseline,
+    setupAudit,
+    credentialAudit,
+    "Ключ Точки сохранён · требуется проверка банка",
+  );
+  return saved ? setup : null;
+}
+
+export async function createTochkaCompanySelectionHandles(
+  actorValue: string,
+  legalEntityIdValue: string,
+  credentialValue: unknown,
+  choicesValue: Array<{ code: string; name: string }>,
+  nowMs = Date.now(),
+): Promise<TochkaCompanySelectionHandle[]> {
+  const actor = String(actorValue ?? "").trim().slice(0, 120);
+  if (!actor) throw new Error("Не определён пользователь выбора компании");
+  const legalEntityId = normalizeIntegrationCredentialScope(legalEntityIdValue, "юридическое лицо");
+  const credentialDigest = await integrationCredentialDigest(credentialValue);
+  const expiresAtMs = nowMs + tochkaCompanySelectionTtlMs;
+  const rows = choicesValue.slice(0, 100).flatMap((choice, index) => {
+    const customerCode = String(choice.code ?? "").trim().slice(0, 80);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{1,79}$/.test(customerCode)) return [];
+    const id = `${crypto.randomUUID().replace(/-/g, "")}${crypto.randomUUID().replace(/-/g, "")}`;
+    const name = String(choice.name ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 120)
+      || `Компания ${index + 1}`;
+    const payload: TochkaCompanySelectionPayload = {
+      version: 1,
+      legalEntityId,
+      customerCode,
+      credentialDigest,
+      issuedTo: actor,
+      expiresAtMs,
+    };
+    return [{ id, name, payload }];
+  });
+  if (!rows.length) return [];
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-      VALUES (?,?,CURRENT_TIMESTAMP)
-      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-      .bind(`${integrationSetupPrefix}${setup.connectionId}`, JSON.stringify(setup)),
-    env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-      VALUES (?,?,CURRENT_TIMESTAMP)
-      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-      .bind(credential.stateKey, JSON.stringify(credential.envelope)),
-    env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key LIKE ? AND state_key<>?")
-      .bind(integrationCredentialConnectionPattern(setup.connectionId), credential.stateKey),
-    env.DB.prepare(`UPDATE integration_connections SET
-      auth_status='JWT сохранён · требуется проверка банка',next_sync_at='',updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-      .bind(setup.connectionId),
-    env.DB.prepare("INSERT INTO audit_events (actor,action,entity_type,entity_id,payload) VALUES (?,?,?,?,?)")
-      .bind(actor, "integration.setup_saved", "integration_test_dataset", "INTEGRATION-DEMO", setupAudit),
-    env.DB.prepare("INSERT INTO audit_events (actor,action,entity_type,entity_id,payload) VALUES (?,?,?,?,?)")
-      .bind(actor, "integration.credential_replaced", "integration_test_dataset", "INTEGRATION-DEMO", credentialAudit),
+    env.DB.prepare(`DELETE FROM system_runtime_state
+      WHERE state_key LIKE ? AND CAST(json_extract(state_value,'$.expiresAtMs') AS INTEGER)<?`)
+      .bind(`${tochkaCompanySelectionPrefix}%`, nowMs),
+    ...rows.map((row) => env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+      VALUES (?,?,CURRENT_TIMESTAMP) ON CONFLICT(state_key) DO NOTHING`)
+      .bind(`${tochkaCompanySelectionPrefix}${row.id}`, JSON.stringify(row.payload))),
   ]);
-  return setup;
+  return rows.map(({ id, name }) => ({ id, name }));
+}
+
+export async function consumeTochkaCompanySelectionHandle(
+  actorValue: string,
+  handleValue: unknown,
+  legalEntityIdValue: string,
+  credentialValue: unknown,
+  nowMs = Date.now(),
+): Promise<TochkaCompanySelectionResult> {
+  const handle = typeof handleValue === "string" ? handleValue.trim() : "";
+  if (!/^[a-f0-9]{64}$/.test(handle)) {
+    return { ok: false, reason: "Выбор компании недействителен. Начните выбор заново." };
+  }
+  const stateKey = `${tochkaCompanySelectionPrefix}${handle}`;
+  const row = await env.DB.prepare("SELECT state_value FROM system_runtime_state WHERE state_key=?")
+    .bind(stateKey).first<{ state_value: string }>();
+  if (!row) return { ok: false, reason: "Выбор компании уже использован или устарел. Начните выбор заново." };
+
+  let payload: TochkaCompanySelectionPayload;
+  try {
+    payload = JSON.parse(row.state_value) as TochkaCompanySelectionPayload;
+  } catch {
+    await env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key=? AND state_value=?")
+      .bind(stateKey, row.state_value).run();
+    return { ok: false, reason: "Выбор компании недействителен. Начните выбор заново." };
+  }
+  if (payload.version !== 1 || !Number.isFinite(payload.expiresAtMs) || payload.expiresAtMs <= nowMs) {
+    await env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key=? AND state_value=?")
+      .bind(stateKey, row.state_value).run();
+    return { ok: false, reason: "Время выбора компании истекло. Начните выбор заново." };
+  }
+
+  const actor = String(actorValue ?? "").trim().slice(0, 120);
+  let legalEntityId = "";
+  let credentialDigest = "";
+  try {
+    legalEntityId = normalizeIntegrationCredentialScope(legalEntityIdValue, "юридическое лицо");
+    credentialDigest = await integrationCredentialDigest(credentialValue);
+  } catch {
+    return { ok: false, reason: "Выбор компании не относится к этому ключу. Начните выбор заново." };
+  }
+  const expectedCode = String(payload.customerCode ?? "").trim().slice(0, 80);
+  const bindingMatches = constantTimeEqual(payload.issuedTo, actor)
+    && constantTimeEqual(payload.legalEntityId, legalEntityId)
+    && constantTimeEqual(payload.credentialDigest, credentialDigest)
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]{1,79}$/.test(expectedCode);
+  if (!bindingMatches) {
+    return { ok: false, reason: "Выбор компании не относится к этому ключу. Начните выбор заново." };
+  }
+
+  const consumed = await env.DB.prepare(
+    "DELETE FROM system_runtime_state WHERE state_key=? AND state_value=? RETURNING state_value"
+  ).bind(stateKey, row.state_value).first<{ state_value: string }>();
+  if (!consumed) return { ok: false, reason: "Выбор компании уже использован или устарел. Начните выбор заново." };
+  return { ok: true, customerCode: expectedCode };
+}
+
+export async function saveTBankSetupWithCredential(
+  actor: string,
+  input: Partial<IntegrationSetup>,
+  value: unknown,
+  baseline: Pick<IntegrationSetup, "credentialGeneration" | "updatedAt"> | null,
+) {
+  const prepared = await prepareIntegrationSetup(actor, input, true);
+  const { setup } = prepared;
+  if (setup.connectionId !== tbankConnectionId || setup.authMethod !== "Bearer token" || !setup.readOnlyScopeConfirmed) {
+    throw new Error("Подтвердите ограниченные права токена Т‑Банка");
+  }
+  const credential = await encryptIntegrationCredential(
+    actor,
+    setup.connectionId,
+    setup.legalEntityId,
+    tbankCredentialScope,
+    value,
+  );
+  const setupAudit = JSON.stringify({
+    connectionId: setup.connectionId,
+    selectedLegalEntityId: setup.legalEntityId,
+    accountScope: setup.accountScope,
+    allocationMode: setup.allocationMode,
+    accessMethod: "Токен Т‑Банка",
+    limitedPermissionsConfirmedByOwner: true,
+    dataScopes: setup.dataScopes,
+    secretStored: true,
+  });
+  const credentialAudit = JSON.stringify({
+    connectionId: credential.connectionId,
+    selectedLegalEntityId: credential.legalEntityId,
+    credentialEnvelopeStored: true,
+    version: credential.envelope.version,
+    algorithm: credential.envelope.algorithm,
+  });
+  const saved = await persistBankSetupWithCredentialCas(
+    actor,
+    setup,
+    credential,
+    baseline,
+    setupAudit,
+    credentialAudit,
+    "Токен Т‑Банка сохранён · требуется проверка банка",
+  );
+  return saved ? setup : null;
+}
+
+async function persistBankSetupWithCredentialCas(
+  actor: string,
+  setup: IntegrationSetup,
+  credential: Awaited<ReturnType<typeof encryptIntegrationCredential>>,
+  baseline: Pick<IntegrationSetup, "credentialGeneration" | "updatedAt"> | null,
+  setupAudit: string,
+  credentialAudit: string,
+  authStatus: string,
+) {
+  const setupStateKey = `${integrationSetupPrefix}${setup.connectionId}`;
+  const guard = baseline
+    ? `EXISTS (SELECT 1 FROM system_runtime_state
+        WHERE state_key=?
+          AND COALESCE(json_extract(state_value,'$.credentialGeneration'),'')=?
+          AND COALESCE(json_extract(state_value,'$.updatedAt'),'')=?)`
+    : "NOT EXISTS (SELECT 1 FROM system_runtime_state WHERE state_key=?)";
+  const guardBindings = baseline
+    ? [setupStateKey, normalizeCredentialGeneration(baseline.credentialGeneration), baseline.updatedAt]
+    : [setupStateKey];
+  const results = await env.DB.batch([
+    env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+      SELECT ?,?,CURRENT_TIMESTAMP WHERE ${guard}
+      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
+      .bind(credential.stateKey, JSON.stringify(credential.envelope), ...guardBindings),
+    env.DB.prepare(`DELETE FROM system_runtime_state
+      WHERE state_key LIKE ? AND state_key<>? AND ${guard}`)
+      .bind(integrationCredentialConnectionPattern(setup.connectionId), credential.stateKey, ...guardBindings),
+    env.DB.prepare(`UPDATE integration_connections SET
+      auth_status=?,next_sync_at='',updated_at=CURRENT_TIMESTAMP WHERE id=? AND ${guard}`)
+      .bind(authStatus, setup.connectionId, ...guardBindings),
+    env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
+      SELECT ?,'integration.setup_saved','integration_test_dataset','INTEGRATION-DEMO',? WHERE ${guard}`)
+      .bind(actor, setupAudit, ...guardBindings),
+    env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
+      SELECT ?,'integration.credential_replaced','integration_test_dataset','INTEGRATION-DEMO',? WHERE ${guard}`)
+      .bind(actor, credentialAudit, ...guardBindings),
+    env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+      SELECT ?,?,CURRENT_TIMESTAMP WHERE ${guard}
+      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
+      .bind(setupStateKey, JSON.stringify(setup), ...guardBindings),
+  ]);
+  const setupResult = results[5] as { meta?: { changes?: number } } | undefined;
+  return Number(setupResult?.meta?.changes ?? 0) > 0;
+}
+
+export type IntegrationBankProbeCommit = {
+  valid: boolean;
+  runId: string;
+  correlationId: string;
+  occurredAt: string;
+  trigger: string;
+  reason: string;
+  receivedCount: number;
+  checkpoint: string;
+  logEvent: string;
+  logMessage: string;
+  logRecordRef: string;
+  successStatus: string;
+  successAuthStatus: string;
+  failureAuthStatus: string;
+  credentialExpiresAt: string;
+  auditAction: string;
+  auditPayload: Record<string, unknown>;
+};
+
+export async function commitIntegrationBankProbe(
+  actor: string,
+  setup: IntegrationSetup,
+  commit: IntegrationBankProbeCommit,
+) {
+  const generation = normalizeCredentialGeneration(setup.credentialGeneration);
+  if (!generation || setup.secretStatus !== "stored") return false;
+  const credentialScope = setup.connectionId === tbankConnectionId ? tbankCredentialScope : setup.customerCode;
+  const credentialStateKey = integrationCredentialStateKey(setup.connectionId, setup.legalEntityId, credentialScope);
+  const setupStateKey = `${integrationSetupPrefix}${setup.connectionId}`;
+  const guard = `EXISTS (
+    SELECT 1 FROM system_runtime_state AS saved_setup
+    JOIN system_runtime_state AS saved_credential ON saved_credential.state_key=?
+    WHERE saved_setup.state_key=?
+      AND json_extract(saved_setup.state_value,'$.credentialGeneration')=?
+  ) AND EXISTS (SELECT 1 FROM integration_connections WHERE id=?)`;
+  const guardBindings = [credentialStateKey, setupStateKey, generation, setup.connectionId];
+  const runStatus = commit.valid ? "Проверка пройдена" : "Заблокировано";
+  const connectionStatement = commit.valid
+    ? env.DB.prepare(`UPDATE integration_connections SET
+        status=?,auth_status=?,credential_expires_at=?,last_success_at='',next_sync_at='',
+        received_count=0,accepted_count=0,rejected_count=0,error_count=0,
+        verified_transfer=0,is_enabled=0,updated_at=?
+      WHERE id=? AND ${guard}`)
+      .bind(
+        commit.successStatus,
+        commit.successAuthStatus,
+        commit.credentialExpiresAt,
+        commit.occurredAt,
+        setup.connectionId,
+        ...guardBindings,
+      )
+    : env.DB.prepare(`UPDATE integration_connections SET
+        status='Ожидает проверку',auth_status=?,credential_expires_at=?,
+        verified_transfer=0,is_enabled=0,error_count=error_count+1,updated_at=?
+      WHERE id=? AND ${guard}`)
+      .bind(
+        commit.failureAuthStatus,
+        commit.credentialExpiresAt,
+        commit.occurredAt,
+        setup.connectionId,
+        ...guardBindings,
+      );
+  const results = await env.DB.batch([
+    env.DB.prepare(`INSERT INTO integration_sync_runs
+      (id,connection_id,started_at,finished_at,trigger,status,received_count,accepted_count,rejected_count,error_count,conflict_count,checkpoint,error_message,initiated_by,correlation_id,dry_run)
+      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}`)
+      .bind(
+        commit.runId,
+        setup.connectionId,
+        commit.occurredAt,
+        commit.occurredAt,
+        commit.trigger,
+        runStatus,
+        commit.valid ? commit.receivedCount : 0,
+        0,
+        0,
+        commit.valid ? 0 : 1,
+        0,
+        commit.valid ? commit.checkpoint : "",
+        commit.valid ? "" : commit.reason,
+        actor,
+        commit.correlationId,
+        1,
+        ...guardBindings,
+      ),
+    env.DB.prepare(`INSERT INTO integration_log_entries
+      (run_id,connection_id,level,event,message,record_ref)
+      SELECT ?,?,?,?,?,? WHERE ${guard}`)
+      .bind(
+        commit.runId,
+        setup.connectionId,
+        commit.valid ? "INFO" : "ERROR",
+        commit.logEvent,
+        commit.valid ? commit.logMessage : commit.reason,
+        commit.logRecordRef,
+        ...guardBindings,
+      ),
+    connectionStatement,
+    env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
+      SELECT ?,?,'integration_connection',?,? WHERE ${guard}`)
+      .bind(
+        actor,
+        commit.auditAction,
+        setup.connectionId,
+        JSON.stringify({ runId: commit.runId, ...commit.auditPayload }),
+        ...guardBindings,
+      ),
+  ]);
+  const connectionResult = results[2] as { meta?: { changes?: number } } | undefined;
+  return Number(connectionResult?.meta?.changes ?? 0) > 0;
 }
 
 export async function hasIntegrationCredential(connectionIdValue: string, legalEntityIdValue: string, customerCodeValue: string) {
@@ -2227,17 +2722,30 @@ export async function saveIntegrationCredential(
   await writeIntegrationDatasetAudit(actor, "integration.credential_replaced", {
     connectionId: credential.connectionId,
     selectedLegalEntityId: credential.legalEntityId,
-    selectedCustomerCode: credential.customerCode,
+    credentialEnvelopeStored: true,
     version: credential.envelope.version,
     algorithm: credential.envelope.algorithm,
   });
 }
 
 export async function revokeTochkaIntegrationCredential(actor: string) {
-  const connectionId = "INT-T-TOCHKA";
+  return revokeBankIntegrationCredential(actor, tochkaConnectionId);
+}
+
+export async function revokeBankIntegrationCredential(actor: string, connectionIdValue: string) {
+  const connectionId = String(connectionIdValue ?? "").trim().toUpperCase();
+  if (connectionId !== tochkaConnectionId && connectionId !== tbankConnectionId) {
+    throw new Error("Удаление ключа для этой интеграции не поддерживается");
+  }
   const setup = (await getIntegrationSetups())[connectionId];
   const revokedAt = new Date().toISOString();
-  const revokedSetup = setup ? { ...setup, secretStatus: "missing" as const, updatedAt: revokedAt, updatedBy: actor } : null;
+  const revokedSetup = setup ? {
+    ...setup,
+    credentialGeneration: crypto.randomUUID(),
+    secretStatus: "missing" as const,
+    updatedAt: revokedAt,
+    updatedBy: actor,
+  } : null;
   const statements = [
     env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key LIKE ?")
       .bind(integrationCredentialConnectionPattern(connectionId)),
@@ -2250,14 +2758,15 @@ export async function revokeTochkaIntegrationCredential(actor: string) {
   }
   statements.push(
     env.DB.prepare(`UPDATE integration_connections SET
-      status='Ожидает доступ',auth_status='JWT отозван владельцем',credential_expires_at='',
+      status='Ожидает доступ',auth_status=?,credential_expires_at='',
       last_success_at='',next_sync_at='',received_count=0,accepted_count=0,rejected_count=0,
-      verified_transfer=0,is_enabled=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(connectionId),
+      verified_transfer=0,is_enabled=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .bind(connectionId === tochkaConnectionId ? "Ключ Точки удалён из ArtHello OS владельцем" : "Токен Т‑Банка удалён из ArtHello OS владельцем", connectionId),
     env.DB.prepare("INSERT INTO audit_events (actor,action,entity_type,entity_id,payload) VALUES (?,?,?,?,?)")
-      .bind(actor, "integration.credential_revoked", "integration_connection", connectionId, JSON.stringify({
+      .bind(actor, "integration.credential_deleted_locally", "integration_connection", connectionId, JSON.stringify({
         connectionId,
         selectedLegalEntityId: setup?.legalEntityId ?? "",
-        selectedCustomerCode: setup?.customerCode ?? "",
+        companySelectionConfirmed: Boolean(setup?.customerCode),
       })),
   );
   await env.DB.batch(statements);
@@ -2275,8 +2784,9 @@ async function encryptIntegrationCredential(
   const legalEntityId = normalizeIntegrationCredentialScope(legalEntityIdValue, "юридическое лицо");
   const customerCode = normalizeIntegrationCredentialScope(customerCodeValue, "customerCode");
   const secret = typeof value === "string" ? value.trim() : "";
-  if (secret.length < 40 || secret.length > 16_384 || /\s/.test(secret)) {
-    throw new Error("JWT выглядит неполным или содержит недопустимые символы");
+  const minimumLength = connectionId === tbankConnectionId ? 24 : 40;
+  if (secret.length < minimumLength || secret.length > 16_384 || /\s/.test(secret)) {
+    throw new Error("Ключ доступа выглядит неполным или содержит недопустимые символы");
   }
   const key = await integrationCredentialEncryptionKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -2327,12 +2837,19 @@ export async function readIntegrationCredential(connectionIdValue: string, legal
       decodeIntegrationCredentialBytes(envelope.ciphertext),
     );
     const secret = new TextDecoder().decode(plaintext);
-    if (secret.length < 40 || secret.length > 16_384 || /\s/.test(secret)) throw new Error("Invalid credential payload");
+    const minimumLength = connectionId === tbankConnectionId ? 24 : 40;
+    if (secret.length < minimumLength || secret.length > 16_384 || /\s/.test(secret)) throw new Error("Invalid credential payload");
     return secret;
   } catch {
     // Never expose ciphertext, parsing details or key material to callers.
-    throw new Error("Защищённый JWT недоступен. Введите ключ заново.");
+    throw new Error(connectionId === tochkaConnectionId
+      ? "Защищённый ключ Точки недоступен. Введите ключ заново."
+      : "Защищённый токен Т‑Банка недоступен. Введите ключ заново.");
   }
+}
+
+export async function readTBankIntegrationCredential(legalEntityId: string) {
+  return readIntegrationCredential(tbankConnectionId, legalEntityId, tbankCredentialScope);
 }
 
 export async function verifyStoredIntegrationCredentials() {
@@ -2376,8 +2893,61 @@ function normalizeIntegrationCredentialScope(value: string, label: string, allow
   return clean;
 }
 
+function normalizeCredentialGeneration(value: unknown) {
+  const generation = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(generation)
+    ? generation
+    : "";
+}
+
+function normalizeSubmittedIntegrationEndpoint(value: unknown) {
+  const endpoint = typeof value === "string" ? value.trim().slice(0, 240) : "";
+  if (!endpoint) return "";
+  const normalized = normalizeStoredIntegrationEndpoint(endpoint);
+  if (!normalized) {
+    throw new Error("Адрес подключения должен быть HTTPS-ссылкой без логина, пароля, параметров или служебной части");
+  }
+  return normalized;
+}
+
+function normalizeStoredIntegrationEndpoint(value: unknown) {
+  const endpoint = typeof value === "string" ? value.trim().slice(0, 240) : "";
+  if (!endpoint) return "";
+  try {
+    const url = new URL(endpoint);
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || !url.hostname) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 function integrationCredentialAad(connectionId: string, legalEntityId: string, customerCode: string) {
-  return `arthello.integration-credential.v2\n${connectionId}\n${legalEntityId}\n${customerCode}\nJWT`;
+  const credentialType = connectionId === tbankConnectionId ? "TBANK_BANK_READ_V1" : "TOCHKA_ACCOUNTS_READ_V1";
+  return `arthello.integration-credential.v2\n${connectionId}\n${legalEntityId}\n${customerCode}\n${credentialType}`;
+}
+
+async function integrationCredentialDigest(value: unknown) {
+  const secret = typeof value === "string" ? value.trim() : "";
+  if (secret.length < 40 || secret.length > 16_384 || /\s/.test(secret)) {
+    throw new Error("Ключ доступа выглядит неполным или содержит недопустимые символы");
+  }
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`arthello.tochka-company-selection.v1\n${secret}`),
+  );
+  return encodeIntegrationCredentialBytes(new Uint8Array(digest));
+}
+
+function constantTimeEqual(leftValue: unknown, rightValue: unknown) {
+  const left = typeof leftValue === "string" ? leftValue : "";
+  const right = typeof rightValue === "string" ? rightValue : "";
+  const length = Math.max(left.length, right.length);
+  let difference = left.length ^ right.length;
+  for (let index = 0; index < length; index += 1) {
+    difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
+  }
+  return difference === 0;
 }
 
 async function integrationCredentialEncryptionKey() {
@@ -2442,7 +3012,7 @@ const demoOnlyTables = [
   "content_attributions", "content_recommendations", "content_publications", "content_plan_items", "marketing_accounts",
   "education_attendance", "education_progress", "education_feedback", "education_communications", "education_students", "education_lessons", "education_groups", "education_programs",
   "hr_onboarding", "hr_development", "hr_rewards", "hr_accesses", "hr_interviews", "hr_candidates", "hr_employees", "hr_vacancies",
-  "legal_document_items", "legal_responsibility_zones", "legal_checks", "legal_contracts",
+  "legal_contract_text_versions", "legal_document_items", "legal_responsibility_zones", "legal_checks", "legal_contracts",
   "supplier_offers", "purchase_orders", "procurement_deliveries", "purchase_requests", "procurement_suppliers", "inventory_events", "inventory_items",
   "asset_maintenance", "assets", "food_recipe_ingredients", "food_recipes", "food_production", "food_shipments", "food_shifts", "food_checks", "food_batches", "food_products",
   "safety_next_checks", "safety_repairs", "safety_incidents", "safety_faults", "safety_checks", "safety_equipment", "safety_systems", "safety_guard_shifts",
@@ -2577,33 +3147,33 @@ function analyticsDemoComplete(status: AnalyticsDemoStatus) {
 
 async function seedAnalytics(){
   const metrics=[
-    ["MET-T-CASH","Чистый денежный поток","Финансы","Поступления минус списания за календарный месяц","SUM(Поступление)-SUM(Списание)","₽","Месяц","financial_operations","Факт XLSX + отдельные synthetic traces","ОДДС: апрель 2026; тестовые следы: август","EMP-T-FIN-001",0,1],
-    ["MET-T-CASH-GAP","Минимальный прогнозный остаток","Финансы","Минимум накопительного вероятностного остатка на горизонте","opening + Σ signed(amount × probability)","₽","День","finance_forecast_items","Синтетическая модель","Горизонт 1–8 сентября 2026","EMP-T-FIN-001",0,1],
-    ["MET-T-LTV","LTV семьи","Клиенты","Подтверждённая выручка семьи за срок жизни","SUM(payment amount) по family_id","₽","Семья","client_lifecycles,financial_operations","Синтетические карточки","Тестовый снимок 21 августа","EMP-T-SALES-001",null,1],
-    ["MET-T-CHURN","Высокий риск ухода","Клиенты","Число активных семей с risk_band=Высокий","COUNT(active family WHERE band=Высокий)","семей","Снимок","client_lifecycles","Синтетические карточки","Тестовый снимок 21 августа","EMP-T-SALES-001",0,1],
-    ["MET-T-EDU","Средний учебный прогресс","Обучение","Среднее значение последних тестовых метрик прогресса","AVG(score)","%","Ученик × программа × период","education_progress","Синтетические обезличенные карточки","2026-Q3","EMP-T-METHOD-001",75,1],
-    ["MET-T-STAFF","Активные сотрудники","HR","Сотрудники со статусом Работает в HR-контуре","COUNT(status=Работает)","чел.","Снимок","hr_employees","Синтетические карточки","Тестовый снимок 21 августа","EMP-T-HR-001",null,1],
-    ["MET-T-SAFETY","Открытые неисправности","Безопасность","Неисправности, статус которых не Закрыт","COUNT(status!=Закрыт)","шт.","Снимок","safety_faults","Синтетические проверки","Тестовый снимок 21 августа","EMP-T-SAFE-001",0,1],
-    ["MET-T-FOOD","Маржинальность кухни","Питание","Выручка минус материальные и сменные затраты, делённые на выручку","(revenue-material-labor)/revenue","%","Тестовый период","food_shipments,food_production,food_shifts","Синтетическая экономика кухни","Тестовый снимок 21 августа","EMP-T-KITCHEN-001",20,1],
-    ["MET-T-PROJECT","Проекты под риском","Проекты","Проекты со статусом Под риском","COUNT(status=Под риском)","шт.","Снимок","strategy_projects","Синтетическая стратегия","Тестовый снимок 21 августа","EMP-T-PROJ-001",0,1],
-    ["MET-T-DQ","Открытые сигналы качества","Данные","Финансовые и интеграционные конфликты, не имеющие решения","COUNT(open finance issues)+COUNT(open integration conflicts)","шт.","Снимок","finance_reconciliation_issues,integration_conflicts","Смешанная: XLSX факт + системный контроль","Тестовый снимок 21 августа","EMP-T-INT-001",0,1]
+    ["MET-T-CASH","Чистый денежный поток","Финансы","Поступления минус списания за календарный месяц","Поступления за месяц минус списания","₽","Месяц","financial_operations","Факт исходной таблицы и отдельно помеченные тестовые записи","ОДДС: апрель 2026; тестовые следы: август","EMP-T-FIN-001",0,1],
+    ["MET-T-CASH-GAP","Минимальный прогнозный остаток","Финансы","Минимум накопительного вероятностного остатка на горизонте","Начальный остаток плюс поступления и минус списания с учётом вероятности","₽","День","finance_forecast_items","Синтетическая модель","Горизонт 1–8 сентября 2026","EMP-T-FIN-001",0,1],
+    ["MET-T-LTV","LTV семьи","Клиенты","Подтверждённая выручка семьи за срок жизни","Сумма подтверждённых оплат семьи","₽","Семья","client_lifecycles,financial_operations","Синтетические карточки","Тестовый снимок 21 августа","EMP-T-SALES-001",null,1],
+    ["MET-T-CHURN","Высокий риск ухода","Клиенты","Число активных семей с высоким риском","Число активных семей с высоким риском","семей","Снимок","client_lifecycles","Синтетические карточки","Тестовый снимок 21 августа","EMP-T-SALES-001",0,1],
+    ["MET-T-EDU","Средний учебный прогресс","Обучение","Среднее значение последних тестовых метрик прогресса","Среднее значение прогресса","%","Ученик × программа × период","education_progress","Синтетические обезличенные карточки","3 квартал 2026","EMP-T-METHOD-001",75,1],
+    ["MET-T-STAFF","Активные сотрудники","HR","Сотрудники со статусом Работает в HR-контуре","Число работающих сотрудников","чел.","Снимок","hr_employees","Синтетические карточки","Тестовый снимок 21 августа","EMP-T-HR-001",null,1],
+    ["MET-T-SAFETY","Открытые неисправности","Безопасность","Неисправности, статус которых не Закрыт","Число незакрытых неисправностей","шт.","Снимок","safety_faults","Синтетические проверки","Тестовый снимок 21 августа","EMP-T-SAFE-001",0,1],
+    ["MET-T-FOOD","Маржинальность кухни","Питание","Выручка минус материальные и сменные затраты, делённые на выручку","Доля прибыли после стоимости продуктов и смен","%","Тестовый период","food_shipments,food_production,food_shifts","Синтетическая экономика кухни","Тестовый снимок 21 августа","EMP-T-KITCHEN-001",20,1],
+    ["MET-T-PROJECT","Проекты под риском","Проекты","Проекты со статусом Под риском","Число проектов под риском","шт.","Снимок","strategy_projects","Синтетическая стратегия","Тестовый снимок 21 августа","EMP-T-PROJ-001",0,1],
+    ["MET-T-DQ","Открытые сигналы качества","Данные","Финансовые и интеграционные конфликты, не имеющие решения","Число открытых расхождений в финансах и интеграциях","шт.","Снимок","finance_reconciliation_issues,integration_conflicts","Смешанная: XLSX факт + системный контроль","Тестовый снимок 21 августа","EMP-T-INT-001",0,1]
   ];
   await env.DB.batch(metrics.map(row=>env.DB.prepare("INSERT OR IGNORE INTO analytics_metric_definitions (id,name,category,definition,formula,unit,grain,source_tables,source_quality,freshness,owner_entity_id,target_value,sensitive) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
   const commonForbidden="Не изменять финансовый факт; не подписывать договоры; не увольнять, не наказывать и не обвинять людей; не ставить диагнозы; не удалять первичные данные; не выдавать критичные права";
   const contracts=[
-    ["AI-CONTRACT-PAYMENTS","Прогноз платежей","Обезличенные начисления, сроки и подтверждённые оплаты","Вероятностный график поступлений с факторами и диапазоном","Читать агрегаты; сформировать объяснимый прогноз; предложить задачу",commonForbidden,"Финансовый контролёр",0,"Точность суммы и даты на горизонте 30 дней","Отключить после 3 периодов с ошибкой более 30%",1,"В карточке контракта выбрать Отказаться и указать основание","Платёжный календарь и ручной прогноз продолжают работать","Новые признаки платежного поведения не передаются модели","Ранее использованные тестовые агрегаты остаются в аудите; первичные данные не удаляются","Прогноз обновляется медленнее и вручную","Активен","rules-v0.1","finance_accruals,client_lifecycles"],
-    ["AI-CONTRACT-LTV","Прогноз LTV","Обезличенные платежи, срок жизни, услуга и частота","Диапазон ожидаемой ценности семьи с факторами","Считать агрегаты; ранжировать для анализа; предложить контакт",commonForbidden,"Директор по продажам",0,"Ошибка прогноза LTV на контрольной выборке","Отключить при drift >25% или coverage <60%",1,"Отказ в карточке контракта по семье или всему сценарию","Фактический LTV и карточка семьи остаются","Новые поведенческие признаки не используются для LTV","Исторический аудит сохраняется по политике тестового контура","Исчезает прогноз, фактическая выручка остаётся","Активен","rules-v0.1","client_lifecycles,financial_operations"],
-    ["AI-CONTRACT-CHURN","Риск ухода","Просрочка, коммуникации, посещаемость и срок жизни","Объяснимый риск-сигнал без автоматического решения","Выделить факторы; предложить человеческий контакт; создать задачу",commonForbidden,"Директор клиентского сервиса",0,"Доля полезных ранних контактов","Отключить при false-positive >40% два периода",1,"Отказ семьи или владельца через карточку контракта","Ручная работа куратора и история обращений продолжаются","Новые поведенческие признаки семьи не оцениваются","Ранее использованные агрегаты не удаляются из аудита","Сигнал появляется позже после ручного просмотра","Активен","rules-v0.1","client_lifecycles,education_attendance"],
-    ["AI-CONTRACT-CASH-GAP","Риск кассового разрыва","Остаток, плановые поступления/списания, вероятности","Дата и глубина возможного разрыва с допущениями","Рассчитать сценарий; показать вклад операций; создать задачу",commonForbidden,"Финансовый директор",0,"Дни предупреждения до подтверждённого разрыва","Отключить при неактуальном источнике более 7 дней",1,"Отключить модельный слой в карточке; указать причину","ДДС, платежный календарь и ручной план-факт работают","Прогнозные признаки перестают пересчитываться","История запусков остаётся для аудита","Остаётся ручной расчёт без раннего сигнала","Активен","rules-v0.1","finance_forecast_items,financial_operations"],
-    ["AI-CONTRACT-ANOMALY","Поиск аномалий","Агрегаты, контрольные суммы, повторяемость и источник","Список расхождений с формулой и ссылкой на строки","Сравнивать; объяснять; создать задачу сверки",commonForbidden,"Владелец данных",0,"Подтверждённые расхождения на 100 проверок","Отключить при 50% ложных сигналов",1,"Отказаться от автоматической проверки выбранного набора","Ручные сверки и контрольные суммы работают","Новые наборы не сканируются правилами","История подтверждённых расхождений сохраняется","Проверка занимает больше времени","Активен","rules-v0.1","finance_reconciliation_issues,integration_conflicts"],
-    ["AI-CONTRACT-BONUS","Рекомендации по бонусам","Подтверждённые результаты, правила мотивации и бюджет","Черновик рекомендации с факторами для человека","Сформировать справку; сравнить с правилами; запросить решение",commonForbidden,"HR-директор",0,"Доля рекомендаций, полезных при ручном review","Немедленно отключить при признаке дискриминации или неполном источнике",1,"Отключить сценарий или исключить сотрудника через контракт","Фактические результаты и ручное решение HR остаются","Новые кадровые признаки не анализируются","История принятых человеком решений сохраняется","Расчёт выполняется вручную","Активен","rules-v0.1","hr_development,hr_rewards,finance_budgets"],
-    ["AI-CONTRACT-CONTENT","Рекомендации по контенту","Публикации, просмотры, клики, лиды, договоры и выручка","Рекомендация темы/формата с полной атрибуцией","Сравнивать форматы; предлагать тест; создать задачу",commonForbidden,"Руководитель маркетинга",0,"Дополнительные подтверждённые заявки на тест","Отключить при отсутствии реальных метрик или 3 бесполезных тестах",1,"Отказ в контракте контентного сценария","Контент-план и ручная аналитика работают","Новые метрики публикаций не обрабатываются моделью","История тестовых рекомендаций сохраняется","Выбор тем становится ручным","Активен","rules-v0.1","content_publications,content_attributions"],
-    ["AI-CONTRACT-TRENDS","Тренды","Временные ряды KPI с качеством и свежестью","Направление и значимое изменение без причинного утверждения","Рассчитать тренд; показать сравнение и покрытие",commonForbidden,"Бизнес-аналитик",0,"Доля трендов, подтвердившихся следующим периодом","Отключить при coverage <3 периода",1,"Отключить для выбранной метрики","Фактические графики остаются","Новые ряды не получают модельную интерпретацию","История рядов не удаляется","Пользователь интерпретирует график самостоятельно","Активен","rules-v0.1","analytics_metric_definitions"],
-    ["AI-CONTRACT-METHODS","Рекомендации по методикам","Версия программы, прогресс, посещаемость и обезличенная обратная связь","Проверяемая гипотеза улучшения программы","Предложить эксперимент; связать с версией; создать задачу методисту",commonForbidden,"Главный методист",0,"Изменение учебного результата после утверждённого теста","Отключить при малой выборке или негативном guardrail",1,"Отказ семьи/педагога или всего сценария через контракт","Программы, журнал и ручная работа методиста остаются","Исключённые учебные признаки не анализируются","История версий и решений сохраняется","Гипотезы формируются вручную","Активен","rules-v0.1","education_progress,education_feedback,education_programs"],
-    ["AI-CONTRACT-HR-RISK","Прогноз кадровых рисков","Вакансии, сроки адаптации, доступы и подтверждённые оценки","Ранний организационный сигнал без оценки личности","Показать операционные факторы; предложить review HR",commonForbidden,"HR-директор",0,"Доля предотвращённых операционных срывов","Отключить при признаке предвзятости или жалобе субъекта",1,"Сотрудник или HR оформляет отказ в контракте","HR-процессы и отчёты работают без прогноза","Новые кадровые признаки субъекта не анализируются","Исторический кадровый факт сохраняется по регламенту","Риск оценивается только вручную","Активен","rules-v0.1","hr_vacancies,hr_onboarding,hr_accesses"],
-    ["AI-CONTRACT-SUPPLIER","Сравнение подрядчиков","Цена, срок, качество, рейтинг, гарантия и договор","Объяснимый рейтинг предложений без автозакупки","Сравнить; показать формулу; предложить shortlist",commonForbidden,"Руководитель закупок",0,"Экономия при сохранении quality guardrail","Отключить при неполных коммерческих предложениях",1,"Отключить сценарий сравнения в контракте","Таблица предложений и ручной выбор работают","Новые предложения не ранжируются моделью","История закупок сохраняется","Сравнение выполняется вручную","Активен","rules-v0.1","procurement_suppliers,supplier_offers"],
-    ["AI-CONTRACT-MISSING-DOCS","Отсутствующие документы","Операция, договор и обязательный комплект первички","Список недостающих типов и владелец","Проверить комплект; создать одну задачу",commonForbidden,"Главный бухгалтер",0,"Доля комплектов, закрытых до отчётной даты","Отключить при неверной матрице обязательных документов",1,"Отключить автопроверку в карточке контракта","Реестр первички и ручная комплектность работают","Новые операции не проверяются сценарием","Документы и история задач сохраняются","Контроль выполняется вручную","Активен","rules-v0.1","accounting_completeness_checks,accounting_documents"],
-    ["AI-CONTRACT-EARLY-SIGNALS","Ранние сигналы проблем","Просрочки, неисправности, отклонения KPI и качество источников","Приоритизированная очередь с доказательствами","Объединить сигналы; объяснить приоритет; предложить задачу",commonForbidden,"Операционный директор",0,"Среднее время от сигнала до ответственного","Отключить при пропуске критичного события или перегрузке очереди",1,"Отключить конкретный домен или весь сценарий","Доменные журналы и задачи продолжают работать","Новые межмодульные признаки не агрегируются","Доменные факты не удаляются","Сигналы просматриваются по модулям вручную","Активен","rules-v0.1","tasks,safety_faults,strategy_deviations,integration_conflicts"]
+    ["AI-CONTRACT-PAYMENTS","Прогноз платежей","Обезличенные начисления, сроки и подтверждённые оплаты","Вероятностный график поступлений с факторами и диапазоном","Читать агрегаты; сформировать объяснимый прогноз; предложить задачу",commonForbidden,"Финансовый контролёр",0,"Точность суммы и даты на горизонте 30 дней","Отключить после 3 периодов с ошибкой более 30%",1,"В карточке контракта выбрать Отказаться и указать основание","Платёжный календарь и ручной прогноз продолжают работать","Новые признаки платежного поведения не передаются модели","Ранее использованные тестовые агрегаты остаются в аудите; первичные данные не удаляются","Прогноз обновляется медленнее и вручную","Активен","Правила с ручным подтверждением","finance_accruals,client_lifecycles"],
+    ["AI-CONTRACT-LTV","Прогноз LTV","Обезличенные платежи, срок жизни, услуга и частота","Диапазон ожидаемой ценности семьи с факторами","Считать агрегаты; ранжировать для анализа; предложить контакт",commonForbidden,"Директор по продажам",0,"Ошибка прогноза LTV на контрольной выборке","Отключить при drift >25% или coverage <60%",1,"Отказ в карточке контракта по семье или всему сценарию","Фактический LTV и карточка семьи остаются","Новые поведенческие признаки не используются для LTV","Исторический аудит сохраняется по политике тестового контура","Исчезает прогноз, фактическая выручка остаётся","Активен","Правила с ручным подтверждением","client_lifecycles,financial_operations"],
+    ["AI-CONTRACT-CHURN","Риск ухода","Просрочка, коммуникации, посещаемость и срок жизни","Объяснимый риск-сигнал без автоматического решения","Выделить факторы; предложить человеческий контакт; создать задачу",commonForbidden,"Директор клиентского сервиса",0,"Доля полезных ранних контактов","Отключить при false-positive >40% два периода",1,"Отказ семьи или владельца через карточку контракта","Ручная работа куратора и история обращений продолжаются","Новые поведенческие признаки семьи не оцениваются","Ранее использованные агрегаты не удаляются из аудита","Сигнал появляется позже после ручного просмотра","Активен","Правила с ручным подтверждением","client_lifecycles,education_attendance"],
+    ["AI-CONTRACT-CASH-GAP","Риск кассового разрыва","Остаток, плановые поступления/списания, вероятности","Дата и глубина возможного разрыва с допущениями","Рассчитать сценарий; показать вклад операций; создать задачу",commonForbidden,"Финансовый директор",0,"Дни предупреждения до подтверждённого разрыва","Отключить при неактуальном источнике более 7 дней",1,"Отключить модельный слой в карточке; указать причину","ДДС, платежный календарь и ручной план-факт работают","Прогнозные признаки перестают пересчитываться","История запусков остаётся для аудита","Остаётся ручной расчёт без раннего сигнала","Активен","Правила с ручным подтверждением","finance_forecast_items,financial_operations"],
+    ["AI-CONTRACT-ANOMALY","Поиск аномалий","Агрегаты, контрольные суммы, повторяемость и источник","Список расхождений с формулой и ссылкой на строки","Сравнивать; объяснять; создать задачу сверки",commonForbidden,"Владелец данных",0,"Подтверждённые расхождения на 100 проверок","Отключить при 50% ложных сигналов",1,"Отказаться от автоматической проверки выбранного набора","Ручные сверки и контрольные суммы работают","Новые наборы не сканируются правилами","История подтверждённых расхождений сохраняется","Проверка занимает больше времени","Активен","Правила с ручным подтверждением","finance_reconciliation_issues,integration_conflicts"],
+    ["AI-CONTRACT-BONUS","Рекомендации по бонусам","Подтверждённые результаты, правила мотивации и бюджет","Черновик рекомендации с факторами для человека","Сформировать справку; сравнить с правилами; запросить решение",commonForbidden,"HR-директор",0,"Доля рекомендаций, полезных при ручном review","Немедленно отключить при признаке дискриминации или неполном источнике",1,"Отключить сценарий или исключить сотрудника через контракт","Фактические результаты и ручное решение HR остаются","Новые кадровые признаки не анализируются","История принятых человеком решений сохраняется","Расчёт выполняется вручную","Активен","Правила с ручным подтверждением","hr_development,hr_rewards,finance_budgets"],
+    ["AI-CONTRACT-CONTENT","Рекомендации по контенту","Публикации, просмотры, клики, лиды, договоры и выручка","Рекомендация темы/формата с полной атрибуцией","Сравнивать форматы; предлагать тест; создать задачу",commonForbidden,"Руководитель маркетинга",0,"Дополнительные подтверждённые заявки на тест","Отключить при отсутствии реальных метрик или 3 бесполезных тестах",1,"Отказ в контракте контентного сценария","Контент-план и ручная аналитика работают","Новые метрики публикаций не обрабатываются моделью","История тестовых рекомендаций сохраняется","Выбор тем становится ручным","Активен","Правила с ручным подтверждением","content_publications,content_attributions"],
+    ["AI-CONTRACT-TRENDS","Тренды","Временные ряды KPI с качеством и свежестью","Направление и значимое изменение без причинного утверждения","Рассчитать тренд; показать сравнение и покрытие",commonForbidden,"Бизнес-аналитик",0,"Доля трендов, подтвердившихся следующим периодом","Отключить при coverage <3 периода",1,"Отключить для выбранной метрики","Фактические графики остаются","Новые ряды не получают модельную интерпретацию","История рядов не удаляется","Пользователь интерпретирует график самостоятельно","Активен","Правила с ручным подтверждением","analytics_metric_definitions"],
+    ["AI-CONTRACT-METHODS","Рекомендации по методикам","Версия программы, прогресс, посещаемость и обезличенная обратная связь","Проверяемая гипотеза улучшения программы","Предложить эксперимент; связать с версией; создать задачу методисту",commonForbidden,"Главный методист",0,"Изменение учебного результата после утверждённого теста","Отключить при малой выборке или негативном guardrail",1,"Отказ семьи/педагога или всего сценария через контракт","Программы, журнал и ручная работа методиста остаются","Исключённые учебные признаки не анализируются","История версий и решений сохраняется","Гипотезы формируются вручную","Активен","Правила с ручным подтверждением","education_progress,education_feedback,education_programs"],
+    ["AI-CONTRACT-HR-RISK","Прогноз кадровых рисков","Вакансии, сроки адаптации, доступы и подтверждённые оценки","Ранний организационный сигнал без оценки личности","Показать операционные факторы; предложить review HR",commonForbidden,"HR-директор",0,"Доля предотвращённых операционных срывов","Отключить при признаке предвзятости или жалобе субъекта",1,"Сотрудник или HR оформляет отказ в контракте","HR-процессы и отчёты работают без прогноза","Новые кадровые признаки субъекта не анализируются","Исторический кадровый факт сохраняется по регламенту","Риск оценивается только вручную","Активен","Правила с ручным подтверждением","hr_vacancies,hr_onboarding,hr_accesses"],
+    ["AI-CONTRACT-SUPPLIER","Сравнение подрядчиков","Цена, срок, качество, рейтинг, гарантия и договор","Объяснимый рейтинг предложений без автозакупки","Сравнить; показать формулу; предложить shortlist",commonForbidden,"Руководитель закупок",0,"Экономия при сохранении quality guardrail","Отключить при неполных коммерческих предложениях",1,"Отключить сценарий сравнения в контракте","Таблица предложений и ручной выбор работают","Новые предложения не ранжируются моделью","История закупок сохраняется","Сравнение выполняется вручную","Активен","Правила с ручным подтверждением","procurement_suppliers,supplier_offers"],
+    ["AI-CONTRACT-MISSING-DOCS","Отсутствующие документы","Операция, договор и обязательный комплект первички","Список недостающих типов и владелец","Проверить комплект; создать одну задачу",commonForbidden,"Главный бухгалтер",0,"Доля комплектов, закрытых до отчётной даты","Отключить при неверной матрице обязательных документов",1,"Отключить автопроверку в карточке контракта","Реестр первички и ручная комплектность работают","Новые операции не проверяются сценарием","Документы и история задач сохраняются","Контроль выполняется вручную","Активен","Правила с ручным подтверждением","accounting_completeness_checks,accounting_documents"],
+    ["AI-CONTRACT-EARLY-SIGNALS","Ранние сигналы проблем","Просрочки, неисправности, отклонения KPI и качество источников","Приоритизированная очередь с доказательствами","Объединить сигналы; объяснить приоритет; предложить задачу",commonForbidden,"Операционный директор",0,"Среднее время от сигнала до ответственного","Отключить при пропуске критичного события или перегрузке очереди",1,"Отключить конкретный домен или весь сценарий","Доменные журналы и задачи продолжают работать","Новые межмодульные признаки не агрегируются","Доменные факты не удаляются","Сигналы просматриваются по модулям вручную","Активен","Правила с ручным подтверждением","tasks,safety_faults,strategy_deviations,integration_conflicts"]
   ];
   await env.DB.batch(contracts.map(row=>env.DB.prepare("INSERT OR IGNORE INTO ai_process_contracts (id,name,input_data,expected_result,allowed_actions,forbidden_actions,human_owner,cost_minor,benefit_metric,auto_stop_condition,opt_out_allowed,opt_out_procedure,fallback_functionality,stopped_data_processing,historical_data_policy,opt_out_impact,status,version,source_refs) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
   const signals=[
@@ -2629,19 +3199,22 @@ async function seedAnalytics(){
     ["AI-RUN-T-DOC-01","AI-CONTRACT-MISSING-DOCS","Задача","Не хватает счёта для ACC-COMP-T-FOOD","100","Явная матрица обязательных типов; задача уже создана идемпотентно"],
     ["AI-RUN-T-EARLY-01","AI-CONTRACT-EARLY-SIGNALS","Сигнал","Открытая неисправность требует контроля результата и акта","93","Приоритет основан на SLA, статусе ремонта и наличии документа"]
   ];
-  await env.DB.batch(runs.map(row=>env.DB.prepare("INSERT OR IGNORE INTO ai_model_runs (id,contract_id,ran_at,model_version,status,input_snapshot_ref,output_type,output_summary,confidence,cost_minor,explanation,is_synthetic) VALUES (?,?,'2026-08-21T10:10:00Z','TEST-RULES-v0.1','Завершён','ANALYTICS-SNAPSHOT-T-0821',?,?,?,0,?,1)").bind(row[0],row[1],row[2],row[3],Number(row[4]),row[5])));
+  await env.DB.batch(runs.map(row=>env.DB.prepare("INSERT OR IGNORE INTO ai_model_runs (id,contract_id,ran_at,model_version,status,input_snapshot_ref,output_type,output_summary,confidence,cost_minor,explanation,is_synthetic) VALUES (?,?,'2026-08-21T10:10:00Z','Правила с ручным подтверждением','Завершён','Контрольный снимок аналитики',?,?,?,0,?,1)").bind(row[0],row[1],row[2],row[3],Number(row[4]),row[5])));
 }
 
 async function seedReadiness(){
   await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO education_lessons (id,group_id,program_id,scheduled_at,topic,teacher_entity_id,substitute_entity_id,room,status,homework) VALUES ('LES-T-EMP052-0610','GRP-T-3A','PRG-T-012','2026-06-10T09:00:00Z','Историческое занятие сотрудника T-052','EMP-T-052','','Кабинет 12','Завершено','Историческая запись для проверки кадровой цепочки')"),
-    env.DB.prepare("INSERT OR IGNORE INTO document_versions (document_id,version,note,reference,created_by) VALUES ('DOG-T-2026-044',3,'Контрольное решение о продлении · тест','SYNTHETIC:DOG-T-2026-044:v3','system-readiness-seed')"),
+    env.DB.prepare("INSERT OR IGNORE INTO education_lessons (id,group_id,program_id,scheduled_at,topic,teacher_entity_id,substitute_entity_id,room,status,homework) VALUES ('LES-T-EMP052-0610','GRP-T-3A','PRG-T-012','2026-06-10T09:00:00Z','Историческое занятие сотрудника №0052','EMP-T-052','','Кабинет 12','Завершено','Историческая запись для проверки кадровой цепочки')"),
+    env.DB.prepare("INSERT OR IGNORE INTO document_versions (document_id,version,note,reference,created_by) VALUES ('DOG-T-2026-044',3,'Контрольное решение о продлении','Карточка договора · версия 3','system-readiness-seed')"),
     env.DB.prepare("UPDATE workflow_documents SET current_version=MAX(current_version,3),status='Продлён',valid_until='2027-09-02',updated_at=CURRENT_TIMESTAMP WHERE id='DOG-T-2026-044' AND source='SYNTHETIC'"),
     env.DB.prepare("UPDATE obligations SET status='Закрыто' WHERE document_id='DOG-T-2026-044' AND title='Продлить или закрыть договор'"),
-    env.DB.prepare("UPDATE tasks SET status='Завершена',result='Договор продлён в тестовом контуре',result_evidence='SYNTHETIC:DOG-T-2026-044:v3',completed_at='2026-08-21T10:45:00Z',updated_at=CURRENT_TIMESTAMP WHERE automation_key='CONTRACT_EXPIRY:DOG-T-2026-044' AND created_by='system-automation'"),
+    env.DB.prepare("UPDATE tasks SET status='Завершена',result='Договор продлён в тестовом контуре',result_evidence='Карточка договора · версия 3',completed_at='2026-08-21T10:45:00Z',updated_at=CURRENT_TIMESTAMP WHERE automation_key='CONTRACT_EXPIRY:DOG-T-2026-044' AND created_by='system-automation'"),
     env.DB.prepare("INSERT INTO audit_events (actor,action,entity_type,entity_id,payload) SELECT 'system-readiness-seed','medical.case_closed','medical_case','MED-CASE-T-019','{\"confirmationRef\":\"MED-CONF-T-019\",\"contentExcluded\":true}' WHERE NOT EXISTS (SELECT 1 FROM audit_events WHERE action='medical.case_closed' AND entity_id='MED-CASE-T-019')"),
-    env.DB.prepare("INSERT OR IGNORE INTO strategy_results (id,project_id,event_id,result_type,metric_name,metric_value,unit,evidence,recorded_at) VALUES ('STR-RES-T-KPI-01','STR-PRJ-T-014','','Повторное измерение','Индекс удовлетворённости семей',81,'%','SYNTHETIC_SURVEY_TEST: повторный тест после корректирующего действия','2026-08-21T10:50:00Z')"),
-    env.DB.prepare("INSERT OR IGNORE INTO tasks (title,owner,due_date,priority,status,source_type,source_id,description,assignee_entity_id,kind,automation_key,requires_approval,result,result_evidence,completed_at,created_by) VALUES ('Разобрать обращение семьи T-014','Куратор семьи','2026-08-21','Высокий','Завершена','Жалоба клиента','COMPL-T-014','Проверить обратную связь, провести корректирующее действие и получить оценку результата','EMP-T-032','Корректирующее действие','COMPLAINT:COMPL-T-014',1,'Расписание обратной связи изменено; семья подтвердила результат','FDB-COMPLAINT-T-014','2026-08-21T10:20:00Z','system-readiness-seed')"),
+    env.DB.prepare("INSERT OR IGNORE INTO strategy_results (id,project_id,event_id,result_type,metric_name,metric_value,unit,evidence,recorded_at) VALUES ('STR-RES-T-KPI-01','STR-PRJ-T-014','','Повторное измерение','Индекс удовлетворённости семей',81,'%','Повторная проверка после корректирующего действия','2026-08-21T10:50:00Z')"),
+    env.DB.prepare("INSERT OR IGNORE INTO tasks (title,owner,due_date,priority,status,source_type,source_id,description,assignee_entity_id,kind,automation_key,requires_approval,result,result_evidence,completed_at,created_by) VALUES ('Разобрать обращение семьи №0014','Куратор семьи','2026-08-21','Высокий','Завершена','Жалоба клиента','COMPL-T-014','Проверить обратную связь, провести корректирующее действие и получить оценку результата','EMP-T-032','Корректирующее действие','COMPLAINT:COMPL-T-014',1,'Расписание обратной связи изменено; семья подтвердила результат','Подтверждение семьи после обратной связи','2026-08-21T10:20:00Z','system-readiness-seed')"),
+    env.DB.prepare("UPDATE document_versions SET note='Контрольное решение о продлении',reference='Карточка договора · версия 3' WHERE document_id='DOG-T-2026-044' AND version=3 AND created_by='system-readiness-seed' AND reference='SYNTHETIC:DOG-T-2026-044:v3'"),
+    env.DB.prepare("UPDATE tasks SET result_evidence='Карточка договора · версия 3' WHERE automation_key='CONTRACT_EXPIRY:DOG-T-2026-044' AND created_by='system-automation' AND result_evidence='SYNTHETIC:DOG-T-2026-044:v3'"),
+    env.DB.prepare("UPDATE tasks SET title='Разобрать обращение семьи №0014',result_evidence='Подтверждение семьи после обратной связи' WHERE automation_key='COMPLAINT:COMPL-T-014' AND created_by='system-readiness-seed' AND title='Разобрать обращение семьи T-014'"),
   ]);
   const complaintTask=await env.DB.prepare("SELECT id FROM tasks WHERE automation_key='COMPLAINT:COMPL-T-014'").first<{id:number}>();
   if(!complaintTask)throw new Error("Readiness complaint task was not created");
@@ -2651,30 +3224,30 @@ async function seedReadiness(){
   ]);
 
   const scenarios:[string,number,string,string,string,string][]=[
-    ["SCN-T-01",1,"От объявления до прибыли","Объявление → первый клик → лид → менеджер → посещение → договор → ребёнок → начисление → оплата → ДДС → ОПиУ → прибыль","EMP-T-SALES-001","Синтетическая цепочка; банковская операция и рекламная статистика не являются фактом"],
-    ["SCN-T-02",2,"Полный жизненный цикл сотрудника","Вакансия → кандидат → онбординг → договор → должность → доступы → расписание → задачи → начисление → выплата → увольнение → отзыв доступов","EMP-T-HR-001","Синтетические HR-записи; персональные данные исходной ведомости не используются"],
+    ["SCN-T-01",1,"От объявления до прибыли","Объявление → первый клик → заявка → менеджер → посещение → договор → ребёнок → начисление → оплата → движение денег → отчёт о прибылях и убытках → прибыль","EMP-T-SALES-001","Синтетическая цепочка; банковская операция и рекламная статистика не являются фактом"],
+    ["SCN-T-02",2,"Полный жизненный цикл сотрудника","Вакансия → кандидат → адаптация → договор → должность → доступы → расписание → задачи → начисление → выплата → увольнение → отзыв доступов","EMP-T-HR-001","Синтетические кадровые записи; персональные данные исходной ведомости не используются"],
     ["SCN-T-03",3,"Учебный результат и методика","Программа → педагог → группа → занятие → посещаемость → домашнее задание → результат → отзыв родителя → рекомендация методисту","EMP-T-METHOD-001","Синтетические обезличенные учебные карточки"],
-    ["SCN-T-04",4,"Закупка от заявки до ОПиУ","Заявка → согласование → сравнение поставщиков → заказ → поставка → приёмка → склад → документ → оплата → ОПиУ","EMP-T-PROC-001","Синтетическая закупка; ЭДО и банковский факт не подключены"],
-    ["SCN-T-05",5,"Неисправность до следующей проверки","Проверка → неисправность → задача → подрядчик → ремонт → акт → оплата → следующая проверка","EMP-T-SAFE-001","Синтетический контур безопасности без интеграции СКУД"],
-    ["SCN-T-06",6,"Питание как центр прибыли","Продукт → партия → ТТК → производство → отгрузка → потребление → списание → себестоимость → рентабельность","EMP-T-KITCHEN-001","Синтетический производственный и финансовый контур кухни"],
+    ["SCN-T-04",4,"Закупка от заявки до финансового результата","Заявка → согласование → сравнение поставщиков → заказ → поставка → приём поставки → склад → документ → оплата → отчёт о прибылях и убытках","EMP-T-PROC-001","Синтетическая закупка; электронный документооборот и банковский факт не подключены"],
+    ["SCN-T-05",5,"Неисправность до следующей проверки","Проверка → неисправность → задача → подрядчик → ремонт → акт → оплата → следующая проверка","EMP-T-SAFE-001","Синтетический контур безопасности без интеграции системы контроля доступа"],
+    ["SCN-T-06",6,"Питание как центр прибыли","Продукт → партия → технологическая карта → производство → отгрузка → потребление → списание → себестоимость → рентабельность","EMP-T-KITCHEN-001","Синтетический производственный и финансовый контур кухни"],
     ["SCN-T-07",7,"Договорное обязательство","Договор → обязательство → срок → предупреждение → задача → продление/закрытие → история","EMP-T-LEGAL-001","Синтетический договор; электронная подпись не подключена"],
     ["SCN-T-08",8,"Жалоба семьи до удовлетворённости","Жалоба → семья → ребёнок → услуга → ответственный → задача → корректирующее действие → результат → удовлетворённость","EMP-T-032","Синтетическое обращение без персональных данных"],
-    ["SCN-T-09",9,"Защищённый медицинский случай","Случай → субъект → уполномоченный пользователь → действие → документ → закрытие → защищённый аудит","EMP-T-MED-001","PROTECTED_SYNTHETIC; медицинское содержание исключено из readiness API"],
-    ["SCN-T-10",10,"KPI до нового результата","KPI → отклонение → источник → причина → задача → ответственный → действие → новый результат","EMP-T-PROJ-001","Синтетические KPI и повторное измерение"],
+    ["SCN-T-09",9,"Защищённый медицинский случай","Случай → субъект → уполномоченный пользователь → действие → документ → закрытие → защищённый аудит","EMP-T-MED-001","Синтетическая защищённая проверка; медицинское содержание исключено из ответа проверки"],
+    ["SCN-T-10",10,"Показатель до нового результата","Показатель → отклонение → источник → причина → задача → ответственный → действие → новый результат","EMP-T-PROJ-001","Синтетические показатели и повторное измерение"],
   ];
   await env.DB.batch(scenarios.map(row=>env.DB.prepare("INSERT OR IGNORE INTO readiness_scenarios (id,number,name,chain,owner_entity_id,status,data_boundary) VALUES (?,?,?,?,?,'Ожидает запуск',?)").bind(...row)));
 
   const steps:Record<string,[string,string,string,string][]>={
-    "SCN-T-01":[["Объявление","Публикация","PUB-T-071","REFERENCE"],["Первый клик","Атрибуция","CLICK-T-071","REFERENCE"],["Лид","Лид","LEAD-T-071","REFERENCE"],["Менеджер","Сотрудник","EMP-T-SALES-001","REFERENCE"],["Посещение","Контакт","VISIT-T-014","REFERENCE"],["Договор","Документ","DOG-T-2026-071","REFERENCE"],["Ребёнок","Сущность","CHD-T-071","REFERENCE"],["Начисление","Начисление","ACR-CLIENT-T-071","REFERENCE"],["Оплата","Операция","FIN-TEST-CONTENT-071","REFERENCE"],["ДДС","Операция","FIN-TEST-CONTENT-071","DERIVED"],["ОПиУ","Операция","FIN-TEST-CONTENT-071","DERIVED"],["Прибыль","Операция","FIN-TEST-CONTENT-071","DERIVED"]],
-    "SCN-T-02":[["Вакансия","Вакансия","VAC-T-008","REFERENCE"],["Кандидат","Кандидат","CANDREC-T-008","REFERENCE"],["Онбординг","Задача","HR_ONBOARD:EMP-T-052","REFERENCE"],["Договор","Документ","DOG-EMP-T-052","REFERENCE"],["Должность","Должность","POS-T-TEACHER","REFERENCE"],["Доступы","Доступ","ACC-TASKS-052","REFERENCE"],["Расписание","Занятие","LES-T-EMP052-0610","REFERENCE"],["Задачи","Задача","HR_ONBOARD:EMP-T-052","REFERENCE"],["Начисление","Сотрудник","EMP-T-052","DERIVED"],["Выплата","Операция","FIN-TEST-PAYROLL-052","REFERENCE"],["Увольнение","Сотрудник","EMP-T-052","DERIVED"],["Отзыв доступов","Доступ","ACC-EDU-052","DERIVED"]],
+    "SCN-T-01":[["Объявление","Публикация","PUB-T-071","REFERENCE"],["Первый клик","Атрибуция","CLICK-T-071","REFERENCE"],["Заявка","Заявка","LEAD-T-071","REFERENCE"],["Менеджер","Сотрудник","EMP-T-SALES-001","REFERENCE"],["Посещение","Контакт","VISIT-T-014","REFERENCE"],["Договор","Документ","DOG-T-2026-071","REFERENCE"],["Ребёнок","Сущность","CHD-T-071","REFERENCE"],["Начисление","Начисление","ACR-CLIENT-T-071","REFERENCE"],["Оплата","Операция","FIN-TEST-CONTENT-071","REFERENCE"],["Движение денег","Операция","FIN-TEST-CONTENT-071","DERIVED"],["Отчёт о прибылях и убытках","Операция","FIN-TEST-CONTENT-071","DERIVED"],["Прибыль","Операция","FIN-TEST-CONTENT-071","DERIVED"]],
+    "SCN-T-02":[["Вакансия","Вакансия","VAC-T-008","REFERENCE"],["Кандидат","Кандидат","CANDREC-T-008","REFERENCE"],["Адаптация","Задача","HR_ONBOARD:EMP-T-052","REFERENCE"],["Договор","Документ","DOG-EMP-T-052","REFERENCE"],["Должность","Должность","POS-T-TEACHER","REFERENCE"],["Доступы","Доступ","ACC-TASKS-052","REFERENCE"],["Расписание","Занятие","LES-T-EMP052-0610","REFERENCE"],["Задачи","Задача","HR_ONBOARD:EMP-T-052","REFERENCE"],["Начисление","Сотрудник","EMP-T-052","DERIVED"],["Выплата","Операция","FIN-TEST-PAYROLL-052","REFERENCE"],["Увольнение","Сотрудник","EMP-T-052","DERIVED"],["Отзыв доступов","Доступ","ACC-EDU-052","DERIVED"]],
     "SCN-T-03":[["Программа","Программа","PRG-T-012","REFERENCE"],["Педагог","Сотрудник","EMP-T-032","REFERENCE"],["Группа","Группа","GRP-T-3A","REFERENCE"],["Занятие","Занятие","LES-T-3A-0821","REFERENCE"],["Посещаемость","Посещение","ATT-T-014","REFERENCE"],["Домашнее задание","Занятие","LES-T-3A-0821","DERIVED"],["Результат","Прогресс","PROG-T-014","REFERENCE"],["Отзыв родителя","Обратная связь","FDB-T-014","REFERENCE"],["Рекомендация методисту","AI-сигнал","AI-SIG-T-METHOD","REFERENCE"]],
-    "SCN-T-04":[["Заявка","Заявка","REQ-T-088","REFERENCE"],["Согласование","Заявка","REQ-T-088","DERIVED"],["Сравнение","Предложение","OFFR-T-088-22","REFERENCE"],["Заказ","Заказ","ORD-T-088","REFERENCE"],["Поставка","Поставка","DLV-T-088","REFERENCE"],["Приёмка","Поставка","DLV-T-088","DERIVED"],["Склад","Движение","INV-T-088-01","REFERENCE"],["Документ","Документ","ACT-REQ-T-088","REFERENCE"],["Оплата","Операция","FIN-TEST-PROC-088","REFERENCE"],["ОПиУ","Операция","FIN-TEST-PROC-088","DERIVED"]],
+    "SCN-T-04":[["Заявка","Заявка","REQ-T-088","REFERENCE"],["Согласование","Заявка","REQ-T-088","DERIVED"],["Сравнение","Предложение","OFFR-T-088-22","REFERENCE"],["Заказ","Заказ","ORD-T-088","REFERENCE"],["Поставка","Поставка","DLV-T-088","REFERENCE"],["Приём поставки","Поставка","DLV-T-088","DERIVED"],["Склад","Движение","INV-T-088-01","REFERENCE"],["Документ","Документ","ACT-REQ-T-088","REFERENCE"],["Оплата","Операция","FIN-TEST-PROC-088","REFERENCE"],["Отчёт о прибылях и убытках","Операция","FIN-TEST-PROC-088","DERIVED"]],
     "SCN-T-05":[["Проверка","Проверка","SAFE-CHK-T-090","REFERENCE"],["Неисправность","Неисправность","SAFE-FLT-T-031","REFERENCE"],["Задача","Задача","SAFETY_FAULT:SAFE-FLT-T-031","REFERENCE"],["Подрядчик","Контрагент","SUP-T-SAFE-001","REFERENCE"],["Ремонт","Ремонт","SAFE-REP-T-031","REFERENCE"],["Акт","Документ","ACT-SAFE-T-031","REFERENCE"],["Оплата","Операция","FIN-TEST-SAFE-031","REFERENCE"],["Следующая проверка","Проверка","SAFE-NEXT-T-031","REFERENCE"]],
-    "SCN-T-06":[["Продукт","Продукт","FOOD-PROD-T-002","REFERENCE"],["Партия","Партия","BATCH-T-021-02","REFERENCE"],["ТТК","Рецепт","TTK-T-014","REFERENCE"],["Производство","Производство","PROD-T-0821","REFERENCE"],["Отгрузка","Отгрузка","SHIP-T-0821-01","REFERENCE"],["Потребление","Отгрузка","SHIP-T-0821-01","DERIVED"],["Списание","Отгрузка","SHIP-T-0821-01","DERIVED"],["Себестоимость","Операция","FIN-TEST-FOOD-COST-0821","REFERENCE"],["Рентабельность","Операция","FIN-TEST-FOOD-REV-0821","DERIVED"]],
-    "SCN-T-07":[["Договор","Документ","DOG-T-2026-044","REFERENCE"],["Обязательство","Документ","DOG-T-2026-044","DERIVED"],["Срок","Документ","DOG-T-2026-044","DERIVED"],["Предупреждение","Уведомление","CONTRACT_EXPIRY:DOG-T-2026-044:DIRECTOR","REFERENCE"],["Задача","Задача","CONTRACT_EXPIRY:DOG-T-2026-044","REFERENCE"],["Продление","Версия","SYNTHETIC:DOG-T-2026-044:v3","REFERENCE"],["История","Версия","SYNTHETIC:DOG-T-2026-044:v2","REFERENCE"]],
+    "SCN-T-06":[["Продукт","Продукт","FOOD-PROD-T-002","REFERENCE"],["Партия","Партия","BATCH-T-021-02","REFERENCE"],["Технологическая карта","Рецепт","TTK-T-014","REFERENCE"],["Производство","Производство","PROD-T-0821","REFERENCE"],["Отгрузка","Отгрузка","SHIP-T-0821-01","REFERENCE"],["Потребление","Отгрузка","SHIP-T-0821-01","DERIVED"],["Списание","Отгрузка","SHIP-T-0821-01","DERIVED"],["Себестоимость","Операция","FIN-TEST-FOOD-COST-0821","REFERENCE"],["Рентабельность","Операция","FIN-TEST-FOOD-REV-0821","DERIVED"]],
+    "SCN-T-07":[["Договор","Документ","DOG-T-2026-044","REFERENCE"],["Обязательство","Документ","DOG-T-2026-044","DERIVED"],["Срок","Документ","DOG-T-2026-044","DERIVED"],["Предупреждение","Уведомление","CONTRACT_EXPIRY:DOG-T-2026-044:DIRECTOR","REFERENCE"],["Задача","Задача","CONTRACT_EXPIRY:DOG-T-2026-044","REFERENCE"],["Продление","Версия","Карточка договора · версия 3","REFERENCE"],["История","Версия","Дополнительное соглашение · версия 2","REFERENCE"]],
     "SCN-T-08":[["Жалоба","Жалоба","COMPL-T-014","REFERENCE"],["Семья","Сущность","FAM-T-014","REFERENCE"],["Ребёнок","Сущность","CHD-T-014","REFERENCE"],["Услуга","Сущность","SVC-T-001","REFERENCE"],["Ответственный","Сотрудник","EMP-T-032","REFERENCE"],["Задача","Задача","COMPLAINT:COMPL-T-014","REFERENCE"],["Корректирующее действие","Действие","CMP-ACT-T-014","REFERENCE"],["Результат","Доказательство","FDB-COMPLAINT-T-014","REFERENCE"],["Удовлетворённость","Жалоба","COMPL-T-014","DERIVED"]],
     "SCN-T-09":[["Случай","Медицинский случай","MED-CASE-T-019","PROTECTED"],["Субъект","Сущность","EMP-T-063","PROTECTED"],["Уполномоченный пользователь","Grant","MED-GRANT-T-ROLE-01","PROTECTED"],["Действие","Медицинское действие","MED-ACT-T-019-01","PROTECTED"],["Документ","Медицинский документ","MED-DOC-T-EMP-063","PROTECTED"],["Закрытие","Подтверждение","MED-CONF-T-019","PROTECTED"],["Защищённый аудит","Audit","MED-CASE-T-019","PROTECTED"]],
-    "SCN-T-10":[["KPI","KPI","KPI-T-FAMILY-01","REFERENCE"],["Отклонение","Отклонение","DEV-T-KPI-01","REFERENCE"],["Источник","Обратная связь","FDB-T-014","REFERENCE"],["Причина","Отклонение","DEV-T-KPI-01","DERIVED"],["Задача","Задача","STRATEGY_DEVIATION:DEV-T-KPI-01","REFERENCE"],["Ответственный","Сотрудник","EMP-T-PROJ-001","REFERENCE"],["Действие","Задача","STRATEGY_DEVIATION:DEV-T-KPI-01","DERIVED"],["Новый результат","Результат","STR-RES-T-KPI-01","REFERENCE"]],
+    "SCN-T-10":[["Показатель","Показатель","KPI-T-FAMILY-01","REFERENCE"],["Отклонение","Отклонение","DEV-T-KPI-01","REFERENCE"],["Источник","Обратная связь","FDB-T-014","REFERENCE"],["Причина","Отклонение","DEV-T-KPI-01","DERIVED"],["Задача","Задача","STRATEGY_DEVIATION:DEV-T-KPI-01","REFERENCE"],["Ответственный","Сотрудник","EMP-T-PROJ-001","REFERENCE"],["Действие","Задача","STRATEGY_DEVIATION:DEV-T-KPI-01","DERIVED"],["Новый результат","Результат","STR-RES-T-KPI-01","REFERENCE"]],
   };
   const stepStatements=[];
   for(const scenario of scenarios){
@@ -2685,21 +3258,53 @@ async function seedReadiness(){
     }
   }
   for(let index=0;index<stepStatements.length;index+=80)await env.DB.batch(stepStatements.slice(index,index+80));
+  await env.DB.batch([
+    env.DB.prepare("UPDATE readiness_scenarios SET chain='Объявление → первый клик → заявка → менеджер → посещение → договор → ребёнок → начисление → оплата → движение денег → отчёт о прибылях и убытках → прибыль' WHERE id='SCN-T-01' AND chain='Объявление → первый клик → лид → менеджер → посещение → договор → ребёнок → начисление → оплата → ДДС → ОПиУ → прибыль'"),
+    env.DB.prepare("UPDATE readiness_scenarios SET chain='Вакансия → кандидат → адаптация → договор → должность → доступы → расписание → задачи → начисление → выплата → увольнение → отзыв доступов',data_boundary='Синтетические кадровые записи; персональные данные исходной ведомости не используются' WHERE id='SCN-T-02' AND chain='Вакансия → кандидат → онбординг → договор → должность → доступы → расписание → задачи → начисление → выплата → увольнение → отзыв доступов'"),
+    env.DB.prepare("UPDATE readiness_scenarios SET name='Закупка от заявки до финансового результата',chain='Заявка → согласование → сравнение поставщиков → заказ → поставка → приём поставки → склад → документ → оплата → отчёт о прибылях и убытках',data_boundary='Синтетическая закупка; электронный документооборот и банковский факт не подключены' WHERE id='SCN-T-04' AND name='Закупка от заявки до ОПиУ'"),
+    env.DB.prepare("UPDATE readiness_scenarios SET data_boundary='Синтетический контур безопасности без интеграции системы контроля доступа' WHERE id='SCN-T-05' AND data_boundary='Синтетический контур безопасности без интеграции СКУД'"),
+    env.DB.prepare("UPDATE readiness_scenarios SET chain='Продукт → партия → технологическая карта → производство → отгрузка → потребление → списание → себестоимость → рентабельность' WHERE id='SCN-T-06' AND chain='Продукт → партия → ТТК → производство → отгрузка → потребление → списание → себестоимость → рентабельность'"),
+    env.DB.prepare("UPDATE readiness_scenarios SET name='Показатель до нового результата',chain='Показатель → отклонение → источник → причина → задача → ответственный → действие → новый результат',data_boundary='Синтетические показатели и повторное измерение' WHERE id='SCN-T-10' AND name='KPI до нового результата'"),
+    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='Заявка',entity_type='Заявка' WHERE scenario_id='SCN-T-01' AND step_order=3 AND step_name='Лид'"),
+    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='Движение денег' WHERE scenario_id='SCN-T-01' AND step_order=10 AND step_name='ДДС'"),
+    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='Отчёт о прибылях и убытках' WHERE scenario_id='SCN-T-01' AND step_order=11 AND step_name='ОПиУ'"),
+    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='Адаптация' WHERE scenario_id='SCN-T-02' AND step_order=3 AND step_name='Онбординг'"),
+    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='Приём поставки' WHERE scenario_id='SCN-T-04' AND step_order=6 AND step_name='Приёмка'"),
+    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='Отчёт о прибылях и убытках' WHERE scenario_id='SCN-T-04' AND step_order=10 AND step_name='ОПиУ'"),
+    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='Технологическая карта' WHERE scenario_id='SCN-T-06' AND step_order=3 AND step_name='ТТК'"),
+    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='Показатель',entity_type='Показатель' WHERE scenario_id='SCN-T-10' AND step_order=1 AND step_name='KPI'"),
+    env.DB.prepare("UPDATE readiness_scenario_steps SET entity_id='Карточка договора · версия 3' WHERE scenario_id='SCN-T-07' AND step_order=6 AND entity_id='SYNTHETIC:DOG-T-2026-044:v3'"),
+    env.DB.prepare("UPDATE readiness_scenario_steps SET entity_id='Дополнительное соглашение · версия 2' WHERE scenario_id='SCN-T-07' AND step_order=7 AND entity_id='SYNTHETIC:DOG-T-2026-044:v2'"),
+    env.DB.prepare("UPDATE readiness_scenarios SET data_boundary='Синтетическая защищённая проверка; медицинское содержание исключено из ответа проверки' WHERE id='SCN-T-09' AND data_boundary='PROTECTED_SYNTHETIC; медицинское содержание исключено из readiness API'"),
+  ]);
 
   const gates=[
-    ["GATE-T-SCENARIOS","10 сквозных сценариев","Ожидает запуск",1,"Все обязательные шаги должны пройти повторяемую проверку D1","EMP-T-QA-001"],
-    ["GATE-T-P0P1","P0/P1 = 0","Пройдено",1,"Автоматическая сборка, lint и 62 теста этапов 1–17 без P0/P1","EMP-T-QA-001"],
-    ["GATE-T-RBAC","Права и медицинская изоляция","Пройдено",1,"Role guards, отдельный grant и запрет медицинских агрегатов покрыты тестами","EMP-T-QA-001"],
-    ["GATE-T-MIGRATIONS","Аддитивные миграции","Пройдено",1,"Схема расширяется без destructive migration; seed идемпотентен","EMP-T-QA-001"],
-    ["GATE-T-INTEGRATIONS","Реальные интеграции","Заблокировано",1,"Банки, CRM, дневник, ЭДО/1С, СКУД и рекламные API не подключены","EMP-T-INT-001"],
-    ["GATE-T-BACKUP","Восстановление D1","Заблокировано",1,"Live backup/restore drill не выполнялся; одной проверки артефакта недостаточно","EMP-T-QA-001"],
-    ["GATE-T-ROLLBACK","Откат приложения","Пройдено",1,"Каждый Sites checkpoint неизменяем и допускает возврат версии; миграции аддитивны","EMP-T-QA-001"],
-    ["GATE-T-BROWSER","Браузеры, visual и performance","Ограничено",1,"Сборка проверена; облачный preview недоступен, полноценная browser matrix не подтверждена","EMP-T-QA-001"],
-    ["GATE-T-APPROVAL","Отдельное разрешение production","Заблокировано",1,"Приёмка тестового контура не является разрешением на production","ROLE:REPRESENTATIVE"],
+    ["GATE-T-SCENARIOS","10 сквозных сценариев","Ожидает запуск",1,"Все обязательные шаги должны пройти повторяемую проверку рабочей базы","EMP-T-QA-001"],
+    ["GATE-T-P0P1","Критические дефекты","Пройдено",1,"Сборка, проверка качества кода и автоматические тесты завершены без критических дефектов","EMP-T-QA-001"],
+    ["GATE-T-RBAC","Права и медицинская изоляция","Пройдено",1,"Ограничения ролей, отдельный медицинский допуск и запрет медицинских агрегатов покрыты тестами","EMP-T-QA-001"],
+    ["GATE-T-MIGRATIONS","Безопасные изменения базы","Пройдено",1,"Схема расширяется без разрушительных изменений; повторная инициализация безопасна","EMP-T-QA-001"],
+    ["GATE-T-INTEGRATIONS","Реальные интеграции","Заблокировано",1,"Банки, система продаж, дневник, электронный документооборот, учёт и рекламные кабинеты подключены не полностью","EMP-T-INT-001"],
+    ["GATE-T-BACKUP","Восстановление рабочей базы","Заблокировано",1,"Практическое восстановление резервной копии не выполнялось; проверки артефакта недостаточно","EMP-T-QA-001"],
+    ["GATE-T-ROLLBACK","Откат приложения","Пройдено",1,"Опубликованную версию можно вернуть без разрушительного изменения данных","EMP-T-QA-001"],
+    ["GATE-T-BROWSER","Браузеры, внешний вид и скорость","Ограничено",1,"Сборка проверена; полная проверка поддерживаемых браузеров и производительности ещё не подтверждена","EMP-T-QA-001"],
+    ["GATE-T-APPROVAL","Отдельное разрешение на выпуск","Заблокировано",1,"Проверка системы не заменяет отдельного решения собственника","Собственник"],
   ];
   await env.DB.batch(gates.map(row=>env.DB.prepare("INSERT OR IGNORE INTO release_gates (id,name,status,required,evidence,owner_entity_id,updated_at) VALUES (?,?,?,?,?,?,'2026-08-21T11:00:00Z')").bind(...row)));
   await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO recovery_drills (id,drill_type,scope,started_at,finished_at,status,rpo_minutes,rto_minutes,checksum_before,checksum_after,evidence,limitation) VALUES ('DRILL-T-ARTIFACT-01','Проверка артефакта','Исходный код + build manifest','2026-08-21T10:55:00Z','2026-08-21T11:00:00Z','Пройдено',0,5,'SOURCE-TREE-STAGE17','BUILD-STAGE18','npm build формирует проверяемый immutable artifact','Не подтверждает восстановление live D1')"),
-    env.DB.prepare("INSERT OR IGNORE INTO recovery_drills (id,drill_type,scope,started_at,finished_at,status,rpo_minutes,rto_minutes,checksum_before,checksum_after,evidence,limitation) VALUES ('DRILL-T-D1-RESTORE-01','Восстановление из резервной копии','Live D1 test database','','','Не выполнено',0,0,'','','Нет выделенной копии и разрешённого restore workflow','До drill production запрещён')"),
+    env.DB.prepare("UPDATE release_gates SET evidence='Все обязательные шаги должны пройти повторяемую проверку рабочей базы' WHERE id='GATE-T-SCENARIOS' AND evidence='Все обязательные шаги должны пройти повторяемую проверку D1'"),
+    env.DB.prepare("UPDATE release_gates SET name='Критические дефекты',evidence='Сборка, проверка качества кода и автоматические тесты завершены без критических дефектов' WHERE id='GATE-T-P0P1' AND name='P0/P1 = 0'"),
+    env.DB.prepare("UPDATE release_gates SET evidence='Ограничения ролей, отдельный медицинский допуск и запрет медицинских агрегатов покрыты тестами' WHERE id='GATE-T-RBAC' AND evidence='Role guards, отдельный grant и запрет медицинских агрегатов покрыты тестами'"),
+    env.DB.prepare("UPDATE release_gates SET name='Безопасные изменения базы',evidence='Схема расширяется без разрушительных изменений; повторная инициализация безопасна' WHERE id='GATE-T-MIGRATIONS' AND name='Аддитивные миграции'"),
+    env.DB.prepare("UPDATE release_gates SET evidence='Банки, система продаж, дневник, электронный документооборот, учёт и рекламные кабинеты подключены не полностью' WHERE id='GATE-T-INTEGRATIONS' AND evidence='Банки, CRM, дневник, ЭДО/1С, СКУД и рекламные API не подключены'"),
+    env.DB.prepare("UPDATE release_gates SET name='Восстановление рабочей базы',evidence='Практическое восстановление резервной копии не выполнялось; проверки артефакта недостаточно' WHERE id='GATE-T-BACKUP' AND name='Восстановление D1'"),
+    env.DB.prepare("UPDATE release_gates SET evidence='Опубликованную версию можно вернуть без разрушительного изменения данных' WHERE id='GATE-T-ROLLBACK' AND evidence='Каждый Sites checkpoint неизменяем и допускает возврат версии; миграции аддитивны'"),
+    env.DB.prepare("UPDATE release_gates SET name='Браузеры, внешний вид и скорость',evidence='Сборка проверена; полная проверка поддерживаемых браузеров и производительности ещё не подтверждена' WHERE id='GATE-T-BROWSER' AND name='Браузеры, visual и performance'"),
+    env.DB.prepare("UPDATE release_gates SET name='Отдельное разрешение на выпуск',evidence='Проверка системы не заменяет отдельного решения собственника',owner_entity_id='Собственник' WHERE id='GATE-T-APPROVAL' AND owner_entity_id='ROLE:REPRESENTATIVE'"),
+  ]);
+  await env.DB.batch([
+    env.DB.prepare("INSERT OR IGNORE INTO recovery_drills (id,drill_type,scope,started_at,finished_at,status,rpo_minutes,rto_minutes,checksum_before,checksum_after,evidence,limitation) VALUES ('DRILL-T-ARTIFACT-01','Проверка артефакта','Исходный код и состав сборки','2026-08-21T10:55:00Z','2026-08-21T11:00:00Z','Пройдено',0,5,'SOURCE-TREE-STAGE17','BUILD-STAGE18','Сборка формирует проверяемый неизменяемый артефакт','Не подтверждает восстановление рабочей базы')"),
+    env.DB.prepare("INSERT OR IGNORE INTO recovery_drills (id,drill_type,scope,started_at,finished_at,status,rpo_minutes,rto_minutes,checksum_before,checksum_after,evidence,limitation) VALUES ('DRILL-T-D1-RESTORE-01','Восстановление из резервной копии','Тестовая копия рабочей базы','','','Не выполнено',0,0,'','','Нет выделенной копии и разрешённой процедуры восстановления','До практической проверки выпуск запрещён')"),
+    env.DB.prepare("UPDATE recovery_drills SET scope='Исходный код и состав сборки',evidence='Сборка формирует проверяемый неизменяемый артефакт',limitation='Не подтверждает восстановление рабочей базы' WHERE id='DRILL-T-ARTIFACT-01' AND scope='Исходный код + build manifest'"),
+    env.DB.prepare("UPDATE recovery_drills SET scope='Тестовая копия рабочей базы',evidence='Нет выделенной копии и разрешённой процедуры восстановления',limitation='До практической проверки выпуск запрещён' WHERE id='DRILL-T-D1-RESTORE-01' AND scope='Live D1 test database'"),
   ]);
 }

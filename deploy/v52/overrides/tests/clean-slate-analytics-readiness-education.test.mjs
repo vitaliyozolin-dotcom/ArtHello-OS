@@ -24,7 +24,7 @@ test("readiness empty mode returns no demo scenarios or fixed test matrix", () =
   const api = read("../app/api/readiness/route.ts");
   const ui = read("../app/components/ReadinessWorkspace.tsx");
   const emptyGuard = api.indexOf('if (dataMode === "empty")');
-  const firstScenarioQuery = api.indexOf('SELECT * FROM readiness_scenarios');
+  const firstScenarioQuery = api.indexOf('FROM readiness_scenarios ORDER BY number');
   const emptyResponse = api.slice(emptyGuard, firstScenarioQuery);
 
   assert.ok(emptyGuard > -1, "readiness empty-mode guard is missing");

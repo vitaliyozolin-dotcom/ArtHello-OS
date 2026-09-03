@@ -68,7 +68,7 @@ test("Wave 10 keeps every generic system module, tab and action", () => {
 
 test("Wave 10 keeps settings reads, grants and security boundaries", () => {
   assert.match(settings, /fetch\s*\(\s*["']\/api\/settings["']/);
-  for (const tab of ["Филиалы", "Пользователи", "Семьи и доступы"]) assert.match(settings, new RegExp(escapeRegExp(tab)));
+  for (const tab of ["Филиалы", "Доступы", "Семьи", "Избранное", "Интеграции", "Проверка системы"]) assert.match(settings, new RegExp(escapeRegExp(tab)));
   for (const action of ["createBranch", "grantFamilyAccess", "resetPassword", "blockUser", "restoreUser", "resetFamilyPassword", "restoreFamilyAccess", "blockFamilyAccess"]) assert.match(settings, new RegExp(`["']${action}["']`));
   for (const field of ["name", "kind", "familyEntityId", "principalEntityId", "role", "login", "contact", "branchIds", "systemIds", "diaryRole"]) assert.match(settings, new RegExp(`name=["']${field}["']`));
   for (const boundary of ["Сотрудники здесь не создаются", "Одноразовая ссылка готова", "Граница систем"]) assert.match(settings, new RegExp(escapeRegExp(boundary), "i"));

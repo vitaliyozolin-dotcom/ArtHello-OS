@@ -45,10 +45,8 @@ const polish = read("app/components/SystemWideMobilePolish.css");
 
 requireText(shell, 'import "./SystemWideMobilePolish.css";', "global polish stylesheet is not loaded");
 requireText(shell, "onOpenIntegrations={() => openModule(\"integrations\")}", "operational modules cannot open integrations");
-requireText(help, "data-ah-help-inline=\"true\"", "field help markers are not anchored inline");
-requireText(help, "createPortal", "inline field help is not portaled into labels");
-requireText(helpDom, "inlineHelpTargetFor", "inline field help target discovery is missing");
-forbid(help, /fieldMarkers\.map\(\(\{\s*field,\s*left,\s*top\s*\}\)/, "legacy floating field markers remain");
+forbid(help, /data-ah-help-inline|fieldMarkers|ah-field-icon/, "small field-help markers were restored");
+forbid(helpDom, /data-ah-help-inline|inlineHelpTargetFor/, "inline field-help discovery was restored");
 
 for (const [name, source] of [["Access", access],["Education", education],["Workflow", workflow],["HR", hr],["Sales", sales],["Content", content],["Legal", legal],["Integrations", integration]]) {
   requireText(source, "createPortal", `${name} dialogs are not rendered above the mobile shell`);
@@ -59,7 +57,7 @@ requireText(hr, "<PageContainer", "HR page container is missing");
 requireText(hr, "<PageHeader", "HR page header is missing");
 requireText(hr, "<Tabs", "HR tabs are hidden by an empty-state branch");
 requireText(hr, "<KpiCard", "HR registry KPI cards are missing");
-requireText(hr, "Связанных кадровых этапов пока нет", "HR empty lifecycle is not honest");
+requireText(hr, "Сотрудник не выбирается автоматически", "HR lifecycle lacks an explicit employee choice");
 forbid(hr, /\bhr-workspace\b/, "legacy HR workspace wrapper remains");
 forbid(hr, /if\s*\(\s*!\s*(?:data\.employees\.length|hasHrData)\s*\)\s*(?:\{[\s\S]{0,160}?\breturn\b|return\b)/, "HR workspace still collapses when empty");
 requireText(content, "ahContentPage", "content workspace is not mounted on the design-system shell");
@@ -161,12 +159,21 @@ requireText(entityApi, "needsExternalReviewEvidence", "external verification can
 requireText(hrActions, 'sourceSystem:"MANUAL",sourceRecordId:`MANUAL:${id}`,dataQuality:"Проверено"', "manual HR cards are still unverified");
 requireText(salesActions, 'sourceSystem: "MANUAL_SALES"', "manual sales provenance is missing");
 requireText(salesActions, 'dataQuality: "Проверено"', "manual sales cards are still unverified");
-requireText(legalActions, 'dataQuality: "Проверено"', "production legal patch recreates unverified manual cards");
+const legalManualCardIsVerified = legalActions.includes('dataQuality: "Проверено"')
+  || /INSERT INTO entities[\s\S]{0,700}\.bind\([\s\S]{0,350}"MANUAL"[\s\S]{0,250}"Проверено"/.test(legalActions);
+if (!legalManualCardIsVerified) {
+  throw new Error("System-wide verification failed: production legal patch recreates unverified manual cards");
+}
+forbid(legalActions, /dataQuality:\s*"Не проверено"/, "legacy legal creation can mark a manual card as unverified");
+forbid(
+  legalActions,
+  /INSERT INTO entities[\s\S]{0,700}\.bind\([\s\S]{0,350}"MANUAL"[\s\S]{0,250}"Не проверено"/,
+  "atomic legal creation can mark a manual card as unverified",
+);
 requireText(database, 'manual-entity-provenance-v2', "manual provenance migration v2 is missing");
 
 requireText(polish, 'input[placeholder*="Найти семью"]', "family search readability rule is missing");
-requireText(polish, 'button[data-ah-help-inline="true"]', "static field help styling is missing");
-requireText(polish, '.ahWorkflowDialog .checklist-list button[data-ah-help-inline="true"].ah-field-icon', "workflow checklist help suppression is missing");
+forbid(polish, /data-ah-help-inline|ah-field-icon/, "small field-help marker styles were restored");
 requireText(polish, 'body:has(.ahWorkflowDialog) [data-ah-help-root] .ah-launch', "mobile workflow help launcher suppression is missing");
 requireText(polish, ".crm-toolbar > div:last-child > button:first-child", "sales mobile action layout is missing");
 requireText(polish, ".modal-layer.staff-modal-layer", "employee dialog safe-area styling is missing");
@@ -178,6 +185,7 @@ requireText(polish, "/* ARTHELLO_MOBILE_CANONICAL_V5 */", "canonical mobile desi
 requireText(helpCss, "/* ARTHELLO_HELP_CANONICAL_V5 */", "canonical help styling is missing");
 forbid(polish, /ARTHELLO_MOBILE_VISUAL_HELP_FOLLOWUP|ARTHELLO_OPERATIONAL_UX_V3|ARTHELLO_MOBILE_DESIGN_SYSTEM_V4|ARTHELLO_HELP_MARKER_RIGHT_EDGE/, "legacy mobile CSS layers remain after canonical cleanup");
 forbid(helpCss, /ARTHELLO_HELP_UX_V3|ARTHELLO_HELP_VISIBILITY_V4/, "legacy help CSS layers remain after canonical cleanup");
+forbid(helpCss, /data-ah-help-inline|ah-field-icon/, "small field-help marker styles remain");
 
 const productionSources = [finance, sales, procurement, food, safety, medical, strategy, analytics, readiness, hr, content].join("\n");
 forbid(productionSources, /Тестовый комплект для класса/, "hard-coded procurement test request remains");

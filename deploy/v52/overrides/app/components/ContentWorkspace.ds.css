@@ -249,6 +249,201 @@
   min-width: 0;
 }
 
+/* Image studio uses the same protected-operation surfaces, spacing and controls
+   as the rest of the shared Design System. Keep these structural rules scoped
+   here so the studio does not depend on the retired legacy shell. */
+.ahContentPage .content-studio {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(360px, .95fr);
+  align-items: stretch;
+}
+
+.ahContentPage .studio-form,
+.ahContentPage .studio-result {
+  min-height: 600px;
+  padding: 0;
+}
+
+.ahContentPage .studio-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.ahContentPage .studio-form > .content-panel-head,
+.ahContentPage .studio-result > .content-panel-head {
+  margin: 0 0 4px;
+}
+
+.ahContentPage .studio-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 20px 0;
+}
+
+.ahContentPage .studio-form > label > span,
+.ahContentPage .studio-form > div label > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.ahContentPage .studio-form textarea,
+.ahContentPage .studio-form select,
+.ahContentPage .studio-form input {
+  min-height: 46px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 11px;
+  padding: 12px 13px;
+  font: inherit;
+}
+
+.ahContentPage .studio-form textarea {
+  min-height: 184px;
+  resize: vertical;
+}
+
+.ahContentPage .studio-form textarea:focus-visible,
+.ahContentPage .studio-form select:focus-visible,
+.ahContentPage .studio-form input:focus-visible {
+  border-color: var(--ah-color-primary);
+  outline: 3px solid color-mix(in srgb, var(--ah-color-primary) 18%, transparent);
+  outline-offset: 1px;
+}
+
+.ahContentPage .studio-form > div:not(.content-panel-head):not(.studio-privacy):not(.studio-error) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 20px 0;
+}
+
+.ahContentPage .studio-form > div label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ahContentPage .reference-upload {
+  border: 1px dashed var(--ah-color-border-strong, var(--ah-color-border));
+  border-radius: 12px;
+  background: var(--ah-color-surface-soft);
+  padding: 14px;
+}
+
+.ahContentPage .reference-upload input {
+  min-height: auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.ahContentPage .reference-upload small,
+.ahContentPage .studio-privacy span,
+.ahContentPage .studio-error span,
+.ahContentPage .studio-error small {
+  color: var(--ah-color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ahContentPage .studio-privacy,
+.ahContentPage .studio-error {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 16px 20px 0;
+  border: 1px solid var(--ah-color-border);
+  padding: 13px 14px;
+}
+
+.ahContentPage .studio-form > .ahButton {
+  min-height: 48px;
+  width: calc(100% - 40px);
+  margin: auto 20px 20px;
+  border-radius: 11px;
+  font-size: 14px;
+}
+
+.ahContentPage .studio-result {
+  display: flex;
+  flex-direction: column;
+}
+
+.ahContentPage .studio-result > .content-panel-head {
+  margin-bottom: 0;
+}
+
+.ahContentPage .studio-placeholder {
+  display: grid;
+  flex: 1;
+  min-height: 480px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  margin-top: 16px;
+  border: 1px dashed var(--ah-color-border-strong, var(--ah-color-border));
+  background: radial-gradient(circle at 50% 36%, var(--ah-color-primary-soft) 0, var(--ah-color-surface-soft) 31%, var(--ah-color-surface) 70%);
+  padding: 24px;
+  text-align: center;
+}
+
+.ahContentPage .studio-placeholder > span {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border-radius: 16px;
+  background: var(--ah-color-primary-soft);
+  color: var(--ah-color-primary);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.ahContentPage .studio-placeholder strong {
+  margin-top: 6px;
+  color: var(--ah-color-text-primary);
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.ahContentPage .studio-placeholder small {
+  max-width: 390px;
+  color: var(--ah-color-text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.ahContentPage .studio-result img {
+  flex: 1;
+  width: calc(100% - 40px);
+  min-height: 420px;
+  margin: 16px 20px 0;
+  border-radius: 14px;
+  background: var(--ah-color-surface-soft);
+  object-fit: contain;
+}
+
+.ahContentPage .studio-result > div:last-child {
+  display: flex;
+  gap: 10px;
+  margin: 12px 20px 20px;
+}
+
+.ahContentPage .studio-result > div:last-child > a,
+.ahContentPage .studio-result > div:last-child > button {
+  display: grid;
+  flex: 1;
+  min-height: 44px;
+  place-items: center;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  color: var(--ah-color-text-primary);
+  font-size: 13px;
+  text-decoration: none;
+}
+
 .ahContentPage .content-ranking > button,
 .ahContentPage .account-list > article,
 .ahContentPage .content-calendar article,
@@ -366,6 +561,19 @@
   .ahContentBoundary em {
     grid-column: 2;
     white-space: normal;
+  }
+
+  .ahContentPage .content-studio {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahContentPage .studio-form,
+  .ahContentPage .studio-result {
+    min-height: auto;
+  }
+
+  .ahContentPage .studio-form > .ahButton {
+    margin-top: 16px;
   }
 }
 
@@ -500,6 +708,34 @@
   .ahContentPage .content-panel form textarea,
   .ahContentPage .content-panel form select {
     font-size: 16px;
+  }
+
+  .ahContentPage .studio-form > label {
+    margin-inline: 14px;
+  }
+
+  .ahContentPage .studio-form > div:not(.content-panel-head):not(.studio-privacy):not(.studio-error),
+  .ahContentPage .studio-privacy,
+  .ahContentPage .studio-error {
+    margin-inline: 14px;
+  }
+
+  .ahContentPage .studio-form > div:not(.content-panel-head):not(.studio-privacy):not(.studio-error) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ahContentPage .studio-placeholder {
+    min-height: 320px;
+  }
+
+  .ahContentPage .studio-form > .ahButton,
+  .ahContentPage .studio-result img {
+    width: calc(100% - 28px);
+    margin-inline: 14px;
+  }
+
+  .ahContentPage .studio-result > div:last-child {
+    margin-inline: 14px;
   }
 }
 

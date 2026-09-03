@@ -95,6 +95,28 @@
   overflow-wrap: anywhere;
 }
 
+.ahReadinessPurpose {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  border-radius: 14px;
+  background: var(--ah-color-surface-soft);
+  padding: 12px 14px;
+}
+
+.ahReadinessPurpose strong {
+  color: var(--ah-color-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ahReadinessPurpose span {
+  color: var(--ah-color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .ahReadinessKpis {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

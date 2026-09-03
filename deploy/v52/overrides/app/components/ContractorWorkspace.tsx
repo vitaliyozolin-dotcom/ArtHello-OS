@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { humanReferenceLabel, recordLabel } from "../../lib/record-labels";
 import { EntityPanel } from "./RegistryWorkspace";
 import { Button, Card, EmptyState, KpiCard, PageContainer, PageHeader, SearchField } from "./design-system";
 import "./ContractorWorkspace.ds.css";
@@ -33,6 +34,14 @@ const rub = new Intl.NumberFormat("ru-RU", {
 
 function formatDate(value: string) {
   return new Date(`${value}T00:00:00Z`).toLocaleDateString("ru-RU");
+}
+
+function contractorName(row: Contractor) {
+  return row.displayName === row.id ? recordLabel("Контрагент", row.id) : row.displayName;
+}
+
+function contractLabels(values: string[]) {
+  return values.map((value) => humanReferenceLabel(value, "Договор")).join(", ");
 }
 
 export function ContractorWorkspace({ notify, onOpenFinance }: {
@@ -114,7 +123,7 @@ export function ContractorWorkspace({ notify, onOpenFinance }: {
           label="Поиск подрядчика"
           value={query}
           onChange={setQuery}
-          placeholder="Найти по ID, статье или договору"
+          placeholder="Найти по названию, статье или договору"
         />
         <span className="ahContractorCount" aria-live="polite">{visible.length} {visible.length === 1 ? "запись" : "записей"}</span>
       </div>
@@ -124,11 +133,11 @@ export function ContractorWorkspace({ notify, onOpenFinance }: {
           <table className="ahContractorTable">
             <thead><tr><th>Контрагент</th><th>Категории</th><th>Платежи</th><th>Последний</th><th>Договоры</th><th>Сумма</th></tr></thead>
             <tbody>{visible.map((row) => <tr key={row.id} tabIndex={0} onClick={() => setSelectedId(row.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedId(row.id); }}>
-              <td><strong>{row.displayName}</strong><small>{row.id} · {row.dataQuality}</small></td>
+              <td><strong>{contractorName(row)}</strong><small>{recordLabel("Контрагент", row.id)} · {row.dataQuality}</small></td>
               <td>{row.categories.slice(0, 2).join(" · ") || "Не указаны"}</td>
               <td>{row.paymentCount}</td>
               <td>{formatDate(row.lastPaymentAt)}</td>
-              <td>{row.contracts.length ? row.contracts.join(", ") : "Не указан"}</td>
+              <td>{row.contracts.length ? contractLabels(row.contracts) : "Не указан"}</td>
               <td><strong>{rub.format(row.totalMinor / 100)}</strong></td>
             </tr>)}</tbody>
           </table>
@@ -136,10 +145,10 @@ export function ContractorWorkspace({ notify, onOpenFinance }: {
 
         <div className="ahContractorMobileList" aria-label="Подрядчики">
           {visible.map((row) => <button type="button" className="ahContractorMobileCard" data-ah-compact-card="true" key={row.id} onClick={() => setSelectedId(row.id)}>
-            <span className="ahContractorMobileHead"><strong>{row.displayName}</strong><b>{rub.format(row.totalMinor / 100)}</b></span>
-            <span className="ahContractorMobileMeta">{row.id} · {row.dataQuality}</span>
+            <span className="ahContractorMobileHead"><strong>{contractorName(row)}</strong><b>{rub.format(row.totalMinor / 100)}</b></span>
+            <span className="ahContractorMobileMeta">{recordLabel("Контрагент", row.id)} · {row.dataQuality}</span>
             <span className="ahContractorMobileGrid"><span><small>Операций</small><strong>{row.paymentCount}</strong></span><span><small>Последний платёж</small><strong>{formatDate(row.lastPaymentAt)}</strong></span></span>
-            <span className="ahContractorMobileMeta">{row.contracts.length ? `Договоры: ${row.contracts.join(", ")}` : "Договор не указан"}</span>
+            <span className="ahContractorMobileMeta">{row.contracts.length ? `Договоры: ${contractLabels(row.contracts)}` : "Договор не указан"}</span>
           </button>)}
         </div>
       </> : <EmptyState

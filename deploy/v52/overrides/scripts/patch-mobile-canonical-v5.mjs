@@ -1,23 +1,29 @@
 import fs from "node:fs";
 
+const appRoot = (process.env.ARTHELLO_PATCH_ROOT || "/app").replace(/\/$/, "");
+const appPath = (relativePath) => `${appRoot}/${relativePath}`;
+
 function stripLegacyBlocks(source, markers) {
   for (const marker of markers) {
     const token = `/* ${marker} */`;
-    const start = source.indexOf(token);
-    if (start === -1) continue;
-    const next = source.indexOf("/* ARTHELLO_", start + token.length);
-    source = source.slice(0, start).trimEnd() + "\n" + (next === -1 ? "" : source.slice(next));
+    let start = source.indexOf(token);
+    while (start !== -1) {
+      const next = source.indexOf("/* ARTHELLO_", start + token.length);
+      source = source.slice(0, start).trimEnd() + "\n" + (next === -1 ? "" : source.slice(next));
+      start = source.indexOf(token);
+    }
   }
   return source.trimEnd() + "\n";
 }
 
-const polishPath = "/app/app/components/SystemWideMobilePolish.css";
+const polishPath = appPath("app/components/SystemWideMobilePolish.css");
 let polish = fs.readFileSync(polishPath, "utf8");
 polish = stripLegacyBlocks(polish, [
   "ARTHELLO_MOBILE_VISUAL_HELP_FOLLOWUP",
   "ARTHELLO_OPERATIONAL_UX_V3",
   "ARTHELLO_MOBILE_DESIGN_SYSTEM_V4",
   "ARTHELLO_HELP_MARKER_RIGHT_EDGE",
+  "ARTHELLO_MOBILE_CANONICAL_V5",
 ]);
 
 polish += `
@@ -46,13 +52,8 @@ polish += `
 .family-workspace :is(label,div):has(>input[placeholder*="Найти семью"]){position:relative!important;display:block!important;width:100%!important}
 .family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])::before{content:none!important;display:none!important}
 .family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])>svg{position:absolute!important;left:16px!important;top:50%!important;transform:translateY(-50%)!important;width:22px!important;height:22px!important;opacity:1!important;pointer-events:none!important}
-.family-workspace label:has(>input[placeholder*="Найти семью"])>span:first-child{position:absolute!important;left:16px!important;top:50%!important;transform:translateY(-50%)!important;width:22px!important;height:22px!important;display:block!important;font-size:0!important;line-height:0!important;color:#171a2b!important;z-index:2!important;pointer-events:none!important}
-.family-workspace label:has(>input[placeholder*="Найти семью"])>span:first-child::before{content:""!important;display:block!important;position:absolute!important;left:2px!important;top:2px!important;width:12px!important;height:12px!important;border:2px solid currentColor!important;border-radius:50%!important;box-sizing:border-box!important}
-.family-workspace label:has(>input[placeholder*="Найти семью"])>span:first-child::after{content:""!important;display:block!important;position:absolute!important;left:12px!important;top:13px!important;width:7px!important;height:2px!important;border-radius:999px!important;background:currentColor!important;transform:rotate(45deg)!important;transform-origin:left center!important}
-.family-workspace label:has(>input[placeholder*="Найти семью"])>span:first-child>button[data-ah-help-inline=true].ah-field-icon{display:none!important}
-.family-workspace [data-ah-help-target=true]>button[data-ah-help-inline=true].ah-field-icon{position:absolute!important;left:auto!important;right:14px!important;top:50%!important;bottom:auto!important;transform:translateY(-50%)!important;width:28px!important;min-width:28px!important;height:28px!important;margin:0!important;padding:0!important;z-index:30!important;opacity:1!important;visibility:visible!important;background:#fff!important}
-.family-workspace [data-ah-help-target=true]:has(input[placeholder*="Найти семью"])>input[placeholder*="Найти семью"]{padding-right:16px!important}
-.family-workspace [data-ah-help-target=true]:has(input[placeholder*="Найти семью"])>button[data-ah-help-inline=true].ah-field-icon{display:none!important}
+.family-workspace label:has(>input[placeholder*="Найти семью"])>span:first-child{position:absolute!important;left:16px!important;top:50%!important;transform:translateY(-50%)!important;width:22px!important;height:22px!important;display:grid!important;place-items:center!important;color:#171a2b!important;z-index:2!important;pointer-events:none!important}
+.family-workspace label:has(>input[placeholder*="Найти семью"])>span:first-child svg{width:20px!important;height:20px!important}
 .family-workspace .page>:last-child{margin-top:var(--ah-mobile-gap)!important;padding:22px!important;min-height:280px!important;border:1px solid var(--ah-system-line)!important;background:#fff!important;overflow:hidden!important}
 .contractor-workspace .page>:last-child{margin-top:var(--ah-mobile-gap)!important;padding:20px!important;border:1px solid var(--ah-system-line)!important;background:#fff!important;overflow:hidden!important}
 .contractor-workspace .page>:last-child>*{border:0!important;outline:0!important;box-shadow:none!important;background:transparent!important;border-radius:0!important}
@@ -73,16 +74,29 @@ polish += `
 `;
 fs.writeFileSync(polishPath, polish, "utf8");
 
-const helpPath = "/app/app/components/ContextualHelpSystem.css";
+const helpPath = appPath("app/components/ContextualHelpSystem.css");
 let help = fs.readFileSync(helpPath, "utf8");
-help = stripLegacyBlocks(help, ["ARTHELLO_HELP_UX_V3","ARTHELLO_HELP_VISIBILITY_V4"]);
+help = stripLegacyBlocks(help, ["ARTHELLO_HELP_UX_V3","ARTHELLO_HELP_VISIBILITY_V4","ARTHELLO_HELP_CANONICAL_V5"]);
 help += `
 /* ARTHELLO_HELP_CANONICAL_V5 */
-[data-ah-help-target=true]{position:relative!important;overflow:visible!important}
-[data-ah-help-target=true]>button[data-ah-help-inline=true].ah-field-icon{position:absolute!important;left:auto!important;right:12px!important;top:50%!important;bottom:auto!important;width:26px!important;min-width:26px!important;height:26px!important;margin:0!important;padding:0!important;transform:translateY(-50%)!important;z-index:40!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important}
-.ahFinancePeriodMobile>span>button[data-ah-help-inline=true].ah-field-icon{display:none!important}
-[data-ah-help-target=true]>:is(input:not([type=checkbox]):not([type=radio]),select,textarea,[role=combobox]){padding-right:50px!important}
 @media(max-width:720px){.ah-tour-callout{position:fixed!important;left:12px!important;right:12px!important;top:auto!important;bottom:calc(92px + env(safe-area-inset-bottom))!important;width:auto!important;max-width:none!important;max-height:min(56dvh,520px)!important;overflow:auto!important;transform:none!important}.ah-tour-hole{pointer-events:none!important;border-radius:18px!important}}
 `;
 fs.writeFileSync(helpPath, help, "utf8");
+
+const forbiddenFragments = [
+  ["data", "ah", "help", "inline"].join("-"),
+  ["ah", "field", "icon"].join("-"),
+  ["field", "Markers"].join(""),
+];
+const canonicalSources = [
+  polish,
+  help,
+  fs.readFileSync(appPath("app/components/ContextualHelpSystem.tsx"), "utf8"),
+  fs.readFileSync(appPath("app/components/contextualHelpDom.ts"), "utf8"),
+];
+for (const fragment of forbiddenFragments) {
+  if (canonicalSources.some((source) => source.includes(fragment))) {
+    throw new Error(`patch-mobile-canonical-v5: obsolete inline-help fragment remains: ${fragment}`);
+  }
+}
 console.log("patch-mobile-canonical-v5: legacy mobile layers removed; canonical system applied");

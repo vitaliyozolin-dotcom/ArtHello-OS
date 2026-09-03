@@ -92,8 +92,8 @@ test("shell applies the same role filter to menus, search, commands and hash nav
   assert.match(shell, /canAccessModule/);
   assert.match(shell, /resolveModuleRoute/);
   assert.match(shell, /allowedModuleIds/);
-  assert.match(shell, /const primaryNav = [^\n]+\.filter\(isModuleAllowed\)/);
-  assert.match(shell, /const favoriteNav = [^\n]+\.filter\(isModuleAllowed\)/);
+  assert.match(shell, /const primaryNav = [^\n]+\.filter\(\(id\) => isModuleAllowed\(id\) && !settingsModuleIds\.has\(id\)\)/);
+  assert.match(shell, /const favoriteNav = favoriteModules\.filter\(\(id\) => isModuleAllowed\(id\) && !settingsModuleIds\.has\(id\)\)/);
   assert.match(shell, /moduleCatalog[\s\S]*?\.filter\(\(module\) => isModuleAllowed\(module\.id\)\)/);
   assert.match(shell, /allowedModules=\{allowedModuleIds\}/);
   assert.match(shell, /availableModules=\{availableDashboardModules\}/);

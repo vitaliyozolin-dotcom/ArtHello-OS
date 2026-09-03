@@ -26,7 +26,6 @@ ${marker}
 .family-workspace :is(label,div):has(>input[placeholder*="Найти семью"]){position:relative!important;display:block!important}
 .family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])::before{content:none!important;display:none!important}
 .family-workspace :is(label,div):has(>input[placeholder*="Найти семью"])>svg{position:absolute!important;left:16px!important;top:50%!important;transform:translateY(-50%)!important;width:22px!important;height:22px!important;opacity:1!important;pointer-events:none!important}
-.family-workspace [data-ah-help-target=true]:has(input[placeholder*="Найти семью"])>button[data-ah-help-inline=true].ah-field-icon{display:none!important}
 .family-workspace .page>:last-child{padding:22px!important;min-height:300px!important}
 .contractor-workspace .page :is(section,article,[class*=card],[class*=panel],[class*=kpi],[class*=stat],[class*=summary],[class*=registry],[class*=register],[class*=toolbar],[class*=empty],[class*=boundary],[class*=notice]){border-radius:var(--ah-mobile-card-radius)!important;box-sizing:border-box!important}
 .contractor-workspace .page :is([class*=kpi],[class*=stat],[class*=summary])>*{border-radius:var(--ah-mobile-card-radius)!important}
@@ -47,9 +46,6 @@ let helpCss = fs.readFileSync(helpCssPath, "utf8");
 const helpMarker = "/* ARTHELLO_HELP_VISIBILITY_V4 */";
 if (!helpCss.includes(helpMarker)) helpCss += `
 ${helpMarker}
-button[data-ah-help-inline=true].ah-field-icon{visibility:visible!important;clip:auto!important;clip-path:none!important;pointer-events:auto!important}
-[data-ah-help-target=true]{position:relative!important;overflow:visible!important}
-[data-ah-help-target=true]>button[data-ah-help-inline=true].ah-field-icon{position:absolute!important;left:auto!important;right:12px!important;top:50%!important;bottom:auto!important;transform:translateY(-50%)!important;z-index:40!important;width:26px!important;min-width:26px!important;height:26px!important;opacity:1!important}
 @media(max-width:720px){.ah-tour-callout{position:fixed!important;left:12px!important;right:12px!important;bottom:calc(92px + env(safe-area-inset-bottom))!important;top:auto!important;transform:none!important;max-width:none!important}.ah-tour-hole{pointer-events:none!important}}
 `;
 fs.writeFileSync(helpCssPath, helpCss, "utf8");

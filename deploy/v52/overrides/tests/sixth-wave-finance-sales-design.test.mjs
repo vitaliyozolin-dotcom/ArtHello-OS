@@ -79,7 +79,7 @@ test("Wave 6 keeps an explicit month selector above mobile finance KPIs", () => 
   assert.doesNotMatch(financeStyles, /\.ahFinancePeriod\s*\{\s*display:\s*none/);
   assert.match(financeStyles, /@media \(max-width: 767px\)[\s\S]*\.ahFinancePeriodMobile \{\s*display: grid;/);
   assert.match(financeStyles, /\.ahFinancePeriodDesktop \{\s*display: none;/);
-  assert.match(financeStyles, /\.ahFinancePeriodMobile > span > button\[data-ah-help-inline="true"\]\.ah-field-icon \{\s*display: none;/);
+  assert.doesNotMatch(financeStyles, /data-ah-help-inline|ah-field-icon/);
 });
 
 test("Wave 6 exposes every core sales section before the first lead", () => {

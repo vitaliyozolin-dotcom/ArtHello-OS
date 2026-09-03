@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { humanTechnicalText, recordLabel, taskRecordLabel } from "../../lib/record-labels";
 import {
   Button,
   Card,
@@ -18,6 +19,7 @@ import "./LegalWorkspace.ds.css";
 type Data = {
   contracts: Array<{ id: string; referenceDocumentId: string; contractType: string; partyType: string; partyEntityId: string; number: string; signedStatus: string; validFrom: string; validUntil: string; limitMinor: number; spentMinor: number; status: string; electronicSignatureStatus: string; requisiteStatus: string; ownerEntityId: string; closingRequired: boolean; utilization: number }>;
   documents: Array<{ id: string; stableId: string; contractId: string; itemType: string; title: string; version: number; required: boolean; signedStatus: string; status: string; dueDate: string; reference: string }>;
+  electronicVersions?: Array<{ id: string; stableId: string; contractId: string; documentItemId: string; version: number; bodyText: string; sourceMode: string; confirmedBy: string; confirmedAt: string }>;
   zones: Array<{ id: string; contractId: string; zone: string; responsibleEntityId: string; scope: string; status: string }>;
   checks: Array<{ id: string; contractId: string; signalType: string; severity: string; evidence: string; recommendation: string; status: string; relatedTaskId: number | null; resolution: string }>;
   entityNames: Record<string, string>;
@@ -105,7 +107,11 @@ export function LegalWorkspace({
     try {
       const response = await fetch("/api/legal-actions", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-arthello-role": codes[role] ?? "" },
+        headers: {
+          "content-type": "application/json",
+          "x-arthello-role": codes[role] ?? "",
+          "x-csrf-token": readClientCookie("__Host-arthello_csrf"),
+        },
         body: JSON.stringify(body),
       });
       const payload = await response.json() as { error?: string; reused?: boolean };
@@ -154,15 +160,16 @@ export function LegalWorkspace({
   const hasData = Boolean(data.contracts.length || data.documents.length || data.checks.length || data.zones.length);
 
   const chainContract = data.contracts.find((contract) => contract.id === data.chain.contractId);
+  const chainTask = data.tasks.find((task) => task.sourceId === data.chain.signalId);
   const chainSteps: Array<[string, string, string | undefined]> = [
     ["Сторона", data.chain.partyId, data.entityNames[data.chain.partyId]],
     ["Договор", data.chain.contractId, chainContract?.number],
-    ["Документ", data.chain.documentId, "v2 · истекает"],
+    ["Документ", data.chain.documentId, "версия 2 · истекает"],
     ["Приложение", data.chain.appendixId, "подписано"],
-    ["Зона ответственности", data.chain.zoneId, "приёмка работ"],
+    ["Зона ответственности", data.chain.zoneId, "проверка результата работ"],
     ["Обязательство", data.chain.actId, "акт до 31 августа"],
     ["Сигнал", data.chain.signalId, "акт отсутствует"],
-    ["Действие", "LEGAL_SIGNAL:SIG-LGL-T-002", "идемпотентная задача"],
+    ["Действие", chainTask ? String(chainTask.id) : "", chainTask ? `${taskRecordLabel(chainTask.id)} · ${chainTask.status}` : "задача ещё не создана"],
   ];
 
   return <PageContainer className="ahLegalPage">
@@ -195,15 +202,15 @@ export function LegalWorkspace({
     {tab === "Реестр" ? <LegalRegistry contracts={data.contracts} names={data.entityNames} focusId={focusId} openDocuments={() => setTab("Документы")} /> : null}
 
     {tab === "Документы" ? <Card className="ahLegalPanel ahLegalDocuments">
-      <LegalPanelHead eyebrow="Комплектность" title="Приложения, акты, согласия, инструкции и журналы" meta="append-only версии" />
+      <LegalPanelHead eyebrow="Комплектность" title="Приложения, акты, согласия, инструкции и журналы" meta="неизменяемая история версий" />
       {data.documents.length ? <div className="ahLegalDocumentTableWrap">
         <table className="ahLegalDocumentTable">
-          <thead><tr><th>ID</th><th>Тип</th><th>Документ</th><th>Версия</th><th>Подпись</th><th>Статус</th><th>Срок</th><th /></tr></thead>
+          <thead><tr><th>Номер</th><th>Тип</th><th>Документ</th><th>Версия</th><th>Подпись</th><th>Статус</th><th>Срок</th><th /></tr></thead>
           <tbody>{data.documents.map((document) => <tr key={document.id} data-ah-compact-card="true">
-            <td data-label="ID">{document.stableId}</td>
+            <td data-label="Номер">{recordLabel("Документ", document.stableId)}</td>
             <td data-label="Тип">{document.itemType}</td>
-            <td data-label="Документ"><strong>{document.title}</strong><small>{document.contractId}</small></td>
-            <td data-label="Версия">v{document.version}</td>
+            <td data-label="Документ"><strong>{humanTechnicalText(document.title)}</strong><small>{recordLabel("Договор", document.contractId)}</small></td>
+            <td data-label="Версия">Версия {document.version}</td>
             <td data-label="Подпись">{document.signedStatus}</td>
             <td data-label="Статус"><span className={document.status === "Отсутствует" ? "isMissing" : ""}>{document.status}</span></td>
             <td data-label="Срок">{document.dueDate || "—"}</td>
@@ -211,29 +218,40 @@ export function LegalWorkspace({
           </tr>)}</tbody>
         </table>
       </div> : <EmptyState density="compact" title="Документов пока нет" description="Приложения и закрывающие документы появятся после добавления договора." />}
+      {(data.electronicVersions ?? []).length ? <section className="ahLegalElectronicVersions" aria-label="Защищённые электронные версии договоров">
+        <h3>Полный электронный текст</h3>
+        <p>Доступен только собственнику и юристу. Это подтверждённая человеком версия; исходный скан здесь не хранится.</p>
+        {(data.electronicVersions ?? []).map((version) => {
+          const document = data.documents.find((item) => item.id === version.documentItemId);
+          return <details key={version.id}>
+            <summary><strong>{document?.title ? humanTechnicalText(document.title) : recordLabel("Документ", version.stableId)}</strong><span>Версия {version.version}</span></summary>
+            <div><small>{version.sourceMode} · подтвердил: {version.confirmedBy} · {version.confirmedAt.slice(0, 10)}</small><pre>{version.bodyText}</pre></div>
+          </details>;
+        })}
+      </section> : null}
     </Card> : null}
 
     {tab === "Контроль" ? data.checks.length ? <div className="ahLegalSignalGrid">
       {data.checks.map((check) => <Card key={check.id} className="ahLegalSignal">
         <header className="ahLegalSignalHeader"><span>{check.signalType}</span><em data-severity={check.severity}>{check.severity}</em></header>
-        <h2>{check.id}</h2>
-        <p>{check.evidence}</p>
-        <div className="ahLegalRecommendation"><strong>Рекомендуемое действие</strong><span>{check.recommendation}</span></div>
+        <h2>{recordLabel("Сигнал", check.id)}</h2>
+        <p>{humanTechnicalText(check.evidence)}</p>
+        <div className="ahLegalRecommendation"><strong>Рекомендуемое действие</strong><span>{humanTechnicalText(check.recommendation)}</span></div>
         <footer className="ahLegalSignalFooter">
           <em>{check.status}</em>
-          {check.status === "Закрыт" ? <small>{check.resolution}</small> : check.relatedTaskId ? <span>Задача TSK-{check.relatedTaskId}</span> : <Button className="ahLegalSmallButton" variant="secondary" disabled={busy === check.id} onClick={() => void action({ action: "createSignalTask", signalId: check.id }, check.id)}>+ Задача на проверку</Button>}
+          {check.status === "Закрыт" ? <small>{humanTechnicalText(check.resolution)}</small> : check.relatedTaskId ? <span>{taskRecordLabel(check.relatedTaskId)}</span> : <Button className="ahLegalSmallButton" variant="secondary" disabled={busy === check.id} onClick={() => void action({ action: "createSignalTask", signalId: check.id }, check.id)}>+ Задача на проверку</Button>}
         </footer>
       </Card>)}
     </div> : <Card className="ahLegalStateCard"><EmptyState density="compact" title="Сигналов пока нет" description="Контрольные сигналы появятся после проверки документов и сроков." /></Card> : null}
 
     {tab === "Ответственность" ? data.zones.length ? <div className="ahLegalZoneGrid">
       {data.zones.map((zone) => <Card key={zone.id} className="ahLegalZone">
-        <span className="ahLegalZoneId">{zone.id}</span>
-        <h2>{zone.zone}</h2>
-        <p>{zone.scope}</p>
+        <span className="ahLegalZoneId">{recordLabel("Зона", zone.id)}</span>
+        <h2>{humanTechnicalText(zone.zone)}</h2>
+        <p>{humanTechnicalText(zone.scope)}</p>
         <dl>
-          <div><dt>Договор</dt><dd>{zone.contractId}</dd></div>
-          <div><dt>Ответственный</dt><dd>{data.entityNames[zone.responsibleEntityId] ?? zone.responsibleEntityId}</dd></div>
+          <div><dt>Договор</dt><dd>{recordLabel("Договор", zone.contractId)}</dd></div>
+          <div><dt>Ответственный</dt><dd>{data.entityNames[zone.responsibleEntityId] ?? recordLabel("Ответственный", zone.responsibleEntityId)}</dd></div>
           <div><dt>Статус</dt><dd>{zone.status}</dd></div>
         </dl>
       </Card>)}
@@ -241,14 +259,14 @@ export function LegalWorkspace({
 
     {tab === "Сквозная цепочка" ? hasData ? <div className="ahLegalChainLayout">
       <Card className="ahLegalPanel ahLegalChain">
-        <LegalPanelHead eyebrow="Приёмочный маршрут" title="От стороны до управляемого сигнала" meta="CHAIN STATUS · PASS" />
+        <LegalPanelHead eyebrow="Маршрут проверки" title="От стороны до управляемого сигнала" meta="связи по сохранённым данным" />
         <div className="ahLegalChainSteps">
           {chainSteps.map(([label, id, detail], index) => <CompactListCard
             key={`${label}-${id}`}
             className="ahLegalChainStep"
             index={String(index + 1).padStart(2, "0")}
-            title={id || "—"}
-            description={`${label}${detail ? ` · ${detail}` : ""}`}
+            title={id ? label === "Действие" ? taskRecordLabel(id) : recordLabel(label, id) : "—"}
+            description={`${label}${detail ? ` · ${humanTechnicalText(detail)}` : ""}`}
           />)}
         </div>
       </Card>
@@ -266,6 +284,7 @@ export function LegalWorkspace({
 
     {createOpen ? <ContractModal
       busy={busy === "create-contract"}
+      canScan={role === "Собственник" || role === "Юрист"}
       close={() => setCreateOpen(false)}
       save={async (body) => {
         const saved = await action({ ...body, action: "createContract" }, "create-contract");
@@ -280,34 +299,114 @@ export function LegalWorkspace({
 
 function ContractModal({
   busy,
+  canScan,
   close,
   save,
 }: {
   busy: boolean;
+  canScan: boolean;
   close: () => void;
   save: (body: Record<string, unknown>) => Promise<void>;
 }) {
+  const [draft, setDraft] = useState({
+    partyName: "",
+    partyType: "Контрагент",
+    contractType: "Договор",
+    number: "",
+    validFrom: "",
+    validUntil: "",
+    limitRubles: "0",
+    signedStatus: "Не подписан",
+    closingRequired: false,
+    fullText: "",
+  });
+  const [scanFile, setScanFile] = useState<File | null>(null);
+  const [scanConsent, setScanConsent] = useState(false);
+  const [scanDraftId, setScanDraftId] = useState("");
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanMessage, setScanMessage] = useState("");
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void save(Object.fromEntries(new FormData(event.currentTarget).entries()));
+    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    delete body.document;
+    delete body.consent;
+    void save(body);
   }
+
+  function field(name: keyof typeof draft, value: string | boolean) {
+    setDraft((current) => ({ ...current, [name]: value }));
+  }
+
+  async function recognize() {
+    if (!scanFile || !scanConsent) {
+      setScanMessage("Выберите файл и подтвердите согласие на распознавание.");
+      return;
+    }
+    setScanBusy(true);
+    setScanMessage("");
+    try {
+      const body = new FormData();
+      body.set("document", scanFile);
+      body.set("consent", "yes");
+      const response = await fetch("/api/legal-actions/scan", {
+        method: "POST",
+        headers: { "x-csrf-token": readClientCookie("__Host-arthello_csrf") },
+        body,
+      });
+      const payload = await response.json() as {
+        error?: string;
+        draftId?: string;
+        draft?: typeof draft;
+        message?: string;
+      };
+      if (!response.ok) throw new Error(payload.error ?? "Скан не распознан");
+      if (payload.draft) setDraft(payload.draft);
+      setScanDraftId(payload.draftId ?? "");
+      setScanMessage(payload.message ?? "Черновик подготовлен.");
+    } catch (caught) {
+      setScanMessage(caught instanceof Error ? caught.message : "Скан не распознан");
+    } finally {
+      setScanBusy(false);
+    }
+  }
+
+  function selectScanFile(file: File | null) {
+    setScanFile(file);
+    setScanConsent(false);
+    setScanDraftId("");
+    setScanMessage("");
+  }
+
+  const requiresElectronicConfirmation = Boolean(scanDraftId || draft.fullText.trim());
 
   return createPortal(<div className="modal-layer ahLegalCreateLayer">
     <button className="drawer-scrim" type="button" onClick={close} aria-label="Закрыть форму" />
     <form className="task-modal ahLegalCreateModal" onSubmit={submit}>
       <div className="drawer-head"><div><p>Юридический контур</p><h2>Добавить договор</h2></div><button type="button" onClick={close}>×</button></div>
+      {canScan ? <section className="ahLegalScanPanel" aria-label="Распознавание скана договора">
+        <div><strong>Скан договора → электронный черновик</strong><span>PDF, JPG или PNG до 8 МБ. До вашего подтверждения файл и распознанный текст нигде не сохраняются.</span></div>
+        <label><span>Файл договора</span><input type="file" name="document" accept=".pdf,application/pdf,image/jpeg,image/png" onChange={(event) => selectScanFile(event.target.files?.[0] ?? null)} /></label>
+        <label className="ahLegalScanConsent"><input type="checkbox" name="consent" checked={scanConsent} onChange={(event) => setScanConsent(event.target.checked)} /><span>Я разрешаю передать содержимое скана в OpenAI только для подготовки этого черновика.</span></label>
+        <Button type="button" variant="secondary" disabled={scanBusy || !scanFile || !scanConsent} onClick={() => void recognize()}>{scanBusy ? "Распознаём…" : "Распознать скан"}</Button>
+        {scanMessage ? <p role="status">{scanMessage}</p> : null}
+      </section> : null}
+      {scanDraftId ? <div className="ahLegalScanReview"><strong>Проверьте реквизиты и полный текст</strong><span>Распознавание может ошибаться. Электронная версия будет сохранена только после вашего подтверждения.</span></div> : null}
       <div className="ahLegalCreateGrid">
-        <label><span>Сторона договора *</span><input name="partyName" required minLength={3} placeholder="Наименование организации или ФИО" /></label>
-        <label><span>Тип стороны</span><select name="partyType" defaultValue="Контрагент"><option>Контрагент</option><option>Клиент</option><option>Сотрудник</option><option>Подрядчик</option><option>Поставщик</option><option>Арендодатель</option></select></label>
-        <label><span>Тип договора</span><select name="contractType" defaultValue="Договор"><option>Договор</option><option>Клиентский договор</option><option>Трудовой договор</option><option>Договор поставки</option><option>Договор подряда</option><option>Договор аренды</option></select></label>
-        <label><span>Номер *</span><input name="number" required minLength={2} placeholder="Например, 14/26" /></label>
-        <label><span>Действует с *</span><input type="date" name="validFrom" required /></label>
-        <label><span>Действует до *</span><input type="date" name="validUntil" required /></label>
-        <label><span>Сумма или лимит, ₽</span><input type="number" min="0" step="0.01" name="limitRubles" defaultValue="0" /></label>
-        <label><span>Подпись</span><select name="signedStatus" defaultValue="Не подписан"><option>Не подписан</option><option>Подписан</option><option>На согласовании</option></select></label>
+        <label><span>Сторона договора *</span><input name="partyName" required minLength={3} placeholder="Наименование организации или ФИО" value={draft.partyName} onChange={(event) => field("partyName", event.target.value)} /></label>
+        <label><span>Тип стороны</span><select name="partyType" value={draft.partyType} onChange={(event) => field("partyType", event.target.value)}><option>Контрагент</option><option>Клиент</option><option>Сотрудник</option><option>Подрядчик</option><option>Поставщик</option><option>Арендодатель</option></select></label>
+        <label><span>Тип договора</span><select name="contractType" value={draft.contractType} onChange={(event) => field("contractType", event.target.value)}><option>Договор</option><option>Клиентский договор</option><option>Трудовой договор</option><option>Договор поставки</option><option>Договор подряда</option><option>Договор аренды</option></select></label>
+        <label><span>Номер *</span><input name="number" required minLength={2} placeholder="Например, 14/26" value={draft.number} onChange={(event) => field("number", event.target.value)} /></label>
+        <label><span>Действует с *</span><input type="date" name="validFrom" required value={draft.validFrom} onChange={(event) => field("validFrom", event.target.value)} /></label>
+        <label><span>Действует до *</span><input type="date" name="validUntil" required value={draft.validUntil} onChange={(event) => field("validUntil", event.target.value)} /></label>
+        <label><span>Сумма или лимит, ₽</span><input type="number" min="0" step="0.01" name="limitRubles" value={draft.limitRubles} onChange={(event) => field("limitRubles", event.target.value)} /></label>
+        <label><span>Подпись</span><select name="signedStatus" value={draft.signedStatus} onChange={(event) => field("signedStatus", event.target.value)}><option>Не подписан</option><option>Подписан</option><option>На согласовании</option></select></label>
       </div>
-      <label className="ahLegalClosingCheck"><input type="checkbox" name="closingRequired" /><span>Требуются закрывающие документы</span></label>
-      <div className="access-separation"><strong>Ручной ввод требует проверки</strong><span>Система создаст сторону, договор и версию v1. Электронная подпись и реквизиты не считаются подтверждёнными до отдельной сверки.</span></div>
+      {canScan ? <label className="ahLegalFullText"><span>Полный текст электронной версии *</span><textarea name="fullText" required={Boolean(scanDraftId)} minLength={scanDraftId ? 20 : undefined} maxLength={50000} rows={12} placeholder="Вставьте полный текст договора вручную или распознайте скан" value={draft.fullText} onChange={(event) => field("fullText", event.target.value)} /><small>{draft.fullText.length.toLocaleString("ru-RU")} из 50 000 символов. Текст можно исправить до подтверждения.</small></label> : null}
+      <label className="ahLegalClosingCheck"><input type="checkbox" name="closingRequired" checked={draft.closingRequired} onChange={(event) => field("closingRequired", event.target.checked)} /><span>Требуются закрывающие документы</span></label>
+      {scanDraftId ? <input type="hidden" name="scanDraftId" value={scanDraftId} /> : null}
+      {requiresElectronicConfirmation ? <label className="ahLegalClosingCheck"><input type="checkbox" name="humanConfirmed" required /><span>Подтверждаю, что проверил реквизиты и полный текст. Сохранить их как первую защищённую электронную версию договора.</span></label> : null}
+      <div className="access-separation"><strong>Ручной ввод требует проверки</strong><span>Система создаст сторону, договор и первую версию. Электронная подпись и реквизиты не считаются подтверждёнными до отдельной сверки.</span></div>
       <div className="modal-actions"><button type="button" onClick={close}>Отмена</button><button disabled={busy}>{busy ? "Сохраняем…" : "Сохранить договор"}</button></div>
     </form>
   </div>, document.body);
@@ -369,7 +468,7 @@ function LegalRegistry({
         data-ah-compact-card="true"
         className={`ahLegalRegistryRow${focusId && [contract.id, contract.referenceDocumentId, contract.partyEntityId].includes(focusId) ? " isFocused" : ""}`}
       >
-        <span className="ahLegalRegistryCell ahLegalRegistryPrimary" data-label="Сторона / документ"><strong>{names[contract.partyEntityId] ?? contract.partyEntityId}</strong><small>{contract.contractType} № {contract.number} · {contract.referenceDocumentId}</small></span>
+        <span className="ahLegalRegistryCell ahLegalRegistryPrimary" data-label="Сторона / документ"><strong>{names[contract.partyEntityId] ?? recordLabel("Сторона", contract.partyEntityId)}</strong><small>{contract.contractType} № {contract.number} · {recordLabel("Документ", contract.referenceDocumentId)}</small></span>
         <span className="ahLegalRegistryCell" data-label="Категория"><strong>{partyGroup(contract.partyType, contract.contractType)}</strong><small>{contract.partyType}</small></span>
         <span className="ahLegalRegistryCell" data-label="Срок"><strong>{contract.validUntil}</strong><small>с {contract.validFrom}</small></span>
         <span className="ahLegalRegistryCell" data-label="Сумма / лимит"><strong>{contract.limitMinor ? rub(contract.limitMinor) : "Без лимита"}</strong><small className={contract.utilization > 100 ? "isOver" : ""}>{contract.limitMinor ? `использовано ${contract.utilization}%` : "сумма в документе"}</small></span>
@@ -387,4 +486,12 @@ function partyGroup(partyType: string, contractType: string) {
   if (value.includes("подряд") || value.includes("постав")) return "Подрядчики и поставщики";
   if (value.includes("аренд") || value.includes("партн")) return "Аренда и партнёры";
   return "Прочие";
+}
+
+function readClientCookie(name: string) {
+  if (typeof document === "undefined") return "";
+  const prefix = `${name}=`;
+  const item = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(prefix));
+  if (!item) return "";
+  try { return decodeURIComponent(item.slice(prefix.length)); } catch { return ""; }
 }

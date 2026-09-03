@@ -60,14 +60,14 @@ test("Wave 5 analytics and readiness use the shared Design System shell", () => 
 test("Wave 5 exposes all six analytics sections before the first record", () => {
   assert.match(analytics, /\bhasAnalyticsData\b/);
   assert.doesNotMatch(analytics, /if\s*\(\s*!\s*hasAnalyticsData\s*\)\s*return\b/);
-  for (const tab of ["Обзор", "Деньги", "Сигналы", "AI-контракты", "Решения и отказ", "Метрики"]) {
+  for (const tab of ["Обзор", "Деньги", "Сигналы", "Сценарии ИИ", "Решения и отказ", "Метрики"]) {
     assert.match(analytics, new RegExp(escapeRegExp(tab)));
   }
   for (const title of [
     "Данных для обзора пока нет",
     "Финансовых операций пока нет",
     "Сигналов пока нет",
-    "AI-контракты не созданы",
+    "Сценарии ИИ не созданы",
     "Запусков пока нет",
     "Словарь метрик пуст",
   ]) {
@@ -78,14 +78,14 @@ test("Wave 5 exposes all six analytics sections before the first record", () => 
 test("Wave 5 exposes all six readiness sections before the first result", () => {
   assert.match(readiness, /\bhasReadinessData\b/);
   assert.doesNotMatch(readiness, /if\s*\(\s*!\s*hasReadinessData\s*\)\s*return\b/);
-  for (const tab of ["Визуальная оболочка", "10 сценариев", "Матрица проверок", "Release gates", "Recovery и rollback", "Решение представителя"]) {
+  for (const tab of ["Визуальная оболочка", "10 сценариев", "Матрица проверок", "Условия выпуска", "Восстановление", "Решение собственника"]) {
     assert.match(readiness, new RegExp(escapeRegExp(tab)));
   }
   for (const title of [
     "Результаты визуальной проверки не добавлены",
     "Сквозные сценарии не настроены",
     "Матрица проверок пуста",
-    "Ворота выпуска не определены",
+    "Обязательные проверки не определены",
     "Учения восстановления не проводились",
     "Решение не зафиксировано",
   ]) {
@@ -108,15 +108,15 @@ test("Wave 5 preserves analytics reads, mutations and task refresh", () => {
   assert.match(analytics, /onOpenIntegrations/);
 });
 
-test("Wave 5 preserves readiness runs and representative decisions", () => {
+test("Wave 5 preserves readiness runs and owner decisions", () => {
   assert.match(readiness, /fetch\s*\(\s*["']\/api\/readiness["']/);
   assert.match(readiness, /fetch\s*\(\s*["']\/api\/readiness-actions["']/);
   assert.match(readiness, /fetch\s*\(\s*["']\/api\/acceptance["']/);
   assert.match(readiness, /["']x-arthello-role["']\s*:/);
   assert.match(readiness, /cache\s*:\s*["']no-store["']/);
   assert.match(readiness, /action\s*:\s*["']runAllScenarios["']/);
-  assert.match(readiness, /ПРИНЯТО ПРЕДСТАВИТЕЛЕМ/);
-  assert.match(readiness, /ОТКЛОНЕНО ПРЕДСТАВИТЕЛЕМ/);
+  assert.match(readiness, /ПОДТВЕРЖДЕНО СОБСТВЕННИКОМ/);
+  assert.match(readiness, /ТРЕБУЕТ ДОРАБОТКИ/);
   assert.match(readiness, /comment\.trim\(\)\.length\s*<\s*8/);
   assert.match(readiness, /await\s+load\s*\(\s*\)/);
 });

@@ -24,7 +24,8 @@ test("auth and unauthenticated system routes use an exact path and method allowl
   assert.deepEqual(authRouteDecision("/api/auth/login", "GET"), { kind: "reject", status: 405, allow: "POST" });
   assert.deepEqual(authRouteDecision("/api/auth/login/extra", "POST"), { kind: "reject", status: 404 });
   assert.deepEqual(publicApiRouteDecision("/api/health", "POST"), { kind: "reject", status: 405, allow: "GET" });
-  assert.deepEqual(publicApiRouteDecision("/api/integrations/tochka/callback", "POST"), { kind: "reject", status: 405, allow: "GET" });
+  assert.equal(publicApiRouteDecision("/api/integrations/tochka/callback", "GET"), null);
+  assert.equal(publicApiRouteDecision("/api/integrations/tochka/callback", "POST"), null);
   assert.deepEqual(publicApiRouteDecision("/api/school-sso/authorize", "GET"), { kind: "allow", access: "public" });
   assert.deepEqual(publicApiRouteDecision("/api/school-sso/authorize", "POST"), { kind: "reject", status: 405, allow: "GET" });
   assert.deepEqual(publicApiRouteDecision("/api/school-sso/exchange", "POST"), { kind: "allow", access: "public" });
@@ -102,7 +103,8 @@ test("production worker completes login, password rotation and logout with sessi
 
     assert.equal((await request("/api/auth/login")).status, 405);
     assert.equal((await postJson("/api/health", {})).status, 405);
-    assert.equal((await postJson("/api/integrations/tochka/callback", {})).status, 405);
+    assert.equal((await request("/api/integrations/tochka/callback?code=untrusted")).status, 401);
+    assert.equal((await postJson("/api/integrations/tochka/callback", {})).status, 401);
     assert.equal((await request("/api/school-sso/exchange")).status, 405);
     assert.equal((await postJson("/api/auth/not-a-route", {})).status, 404);
 
@@ -114,16 +116,25 @@ test("production worker completes login, password rotation and logout with sessi
         "x-arthello-system-owner": "1",
       },
     });
-    assert.equal(anonymousSchoolStart.status, 303);
-    assert.match(anonymousSchoolStart.headers.get("location") ?? "", /\/school-sso\/login\?continue=/);
+    assert.equal(anonymousSchoolStart.status, 503);
+    assert.equal(anonymousSchoolStart.headers.get("location"), null);
+    assert.match((await anonymousSchoolStart.json()).error, /ещё не настроен/);
 
+    const anonymousSchoolExchangeBody = JSON.stringify({
+      code: "x".repeat(43),
+      codeVerifier: "y".repeat(43),
+    });
     const anonymousSchoolExchange = await request("/api/school-sso/exchange", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code: "x".repeat(43), codeVerifier: "y".repeat(43) }),
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(Buffer.byteLength(anonymousSchoolExchangeBody)),
+      },
+      body: anonymousSchoolExchangeBody,
     });
-    assert.equal(anonymousSchoolExchange.status, 401);
-    assert.match((await anonymousSchoolExchange.json()).error, /Одноразовый код входа/);
+    assert.equal(anonymousSchoolExchange.status, 503);
+    assert.equal(anonymousSchoolExchange.headers.get("location"), null);
+    assert.match((await anonymousSchoolExchange.json()).error, /ещё не настроен/);
 
     const login = await postJson("/api/auth/login", { login: BOOTSTRAP_LOGIN, password: BOOTSTRAP_PASSWORD });
     assert.equal(login.status, 200);
@@ -133,7 +144,7 @@ test("production worker completes login, password rotation and logout with sessi
     assert.equal(firstUser.mustChangePassword, true);
     const issuedCookies = login.headers.getSetCookie();
     assert.equal(issuedCookies.length, 2);
-    assert.match(issuedCookies.find((value) => value.startsWith("__Host-arthello_session=")) ?? "", /Path=\/; Max-Age=28800; HttpOnly; Secure; SameSite=Strict/);
+    assert.match(issuedCookies.find((value) => value.startsWith("__Host-arthello_session=")) ?? "", /Path=\/; Max-Age=28800; HttpOnly; Secure; SameSite=Lax/);
     assert.match(issuedCookies.find((value) => value.startsWith("__Host-arthello_csrf=")) ?? "", /Path=\/; Max-Age=28800; Secure; SameSite=Strict/);
     assert.equal(issuedCookies.some((value) => /\bDomain=/i.test(value)), false);
     const firstCookies = responseCookieJar(login);
@@ -186,6 +197,11 @@ test("production worker completes login, password rotation and logout with sessi
     assert.equal((await relogin.clone().json()).mustChangePassword, false);
     const secondCookies = responseCookieJar(relogin);
     const secondCsrf = cookieValue(secondCookies, "__Host-arthello_csrf");
+    const retiredTochkaCallback = await request("/api/integrations/tochka/callback?code=untrusted", {
+      headers: { cookie: secondCookies },
+    });
+    assert.equal(retiredTochkaCallback.status, 410);
+    assert.doesNotMatch(await retiredTochkaCallback.text(), /TOCHKA_CLIENT_(?:ID|SECRET)/);
 
     const settings = await request("/api/settings", { headers: { cookie: secondCookies } });
     assert.equal(settings.status, 200);
@@ -233,6 +249,20 @@ test("production worker completes login, password rotation and logout with sessi
     assert.equal((await ownerAfterProfile.json()).name, "Владелец ArtHello");
 
     const d1 = await runtime.getD1Database("DB");
+    const configuredWithoutSchoolOrigin = await postJson("/api/settings", {
+      action: "saveOwnerDiaryAccess",
+      enabled: true,
+      diaryRole: "director",
+    }, { cookie: secondCookies, "x-csrf-token": secondCsrf });
+    assert.equal(configuredWithoutSchoolOrigin.status, 200);
+    const failClosedSchoolStart = await request(`/api/school-sso/authorize?state=${"z".repeat(40)}&code_challenge=${"q".repeat(43)}&return_to=%2Fjournal`, {
+      redirect: "manual",
+      headers: { cookie: secondCookies },
+    });
+    assert.equal(failClosedSchoolStart.status, 503);
+    assert.equal(failClosedSchoolStart.headers.get("location"), null);
+    assert.equal(await d1.prepare(`SELECT name FROM sqlite_master
+      WHERE type='table' AND name='school_sso_codes'`).first(), null);
     await d1.batch([
       d1.prepare(`INSERT INTO hr_employees
         (id,candidate_id,contract_id,position_id,unit,rate_minor,hire_date,status,access_status)

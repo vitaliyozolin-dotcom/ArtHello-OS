@@ -1,11 +1,17 @@
+import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import {
+  consumeTochkaCompanySelectionHandle,
+  commitIntegrationBankProbe,
+  createTochkaCompanySelectionHandles,
   ensureCoreTables,
   getDb,
   getIntegrationSetups,
   readIntegrationCredential,
-  revokeTochkaIntegrationCredential,
+  readTBankIntegrationCredential,
+  revokeBankIntegrationCredential,
   saveIntegrationSetup,
+  saveTBankSetupWithCredential,
   saveTochkaSetupWithCredential,
   validateIntegrationSetupReferences,
 } from "../../../db";
@@ -20,19 +26,41 @@ import {
   integrationSyncRuns,
   tasks,
 } from "../../../db/schema";
-import { canResolveConflict, probeTochkaJwt, retryDecision, validateTochkaJwt } from "../../../lib/integrations";
-import type { TochkaProbeResult } from "../../../lib/integrations";
+import {
+  canAccessAssignedIntegration,
+  canResolveConflict,
+  normalizePublicIntegrationIp,
+  probeTBankToken,
+  probeTochkaJwt,
+  retryDecision,
+  validateTBankToken,
+  validateTochkaJwt,
+} from "../../../lib/integrations";
+import type { TBankProbeResult, TochkaProbeResult } from "../../../lib/integrations";
 import {
   getAuthenticatedRequestContext,
   isCanonicalOwnerContext,
   verifyAuthenticatedRequestCsrf,
 } from "../../../lib/production-auth";
+import { canAccessModule } from "../../../lib/access-policy";
+import { hasTrustedMutationOrigin } from "../../../lib/request-security";
 import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
 import { resolveTaskAssignment } from "../../../lib/task-access";
 
 const editors = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "INTEGRATIONS"]);
 const tochkaConnectionId = "INT-T-TOCHKA";
-const tochkaOwnerActions = new Set([
+const tbankConnectionId = "INT-T-TBANK";
+const protectedBankConnectionIds = new Set([tochkaConnectionId, tbankConnectionId]);
+const protectedBankOwnerActions = new Set([
+  "saveSetup",
+  "testConnection",
+  "retrySync",
+  "pauseConnection",
+  "resumeConnection",
+  "revokeCredential",
+]);
+const tbankEgressRequiredActions = new Set(["saveSetup", "testConnection", "retrySync"]);
+const connectionScopedActions = new Set([
   "saveSetup",
   "testConnection",
   "retrySync",
@@ -43,6 +71,10 @@ const tochkaOwnerActions = new Set([
 type RequestContext = NonNullable<Awaited<ReturnType<typeof getAuthenticatedRequestContext>>>;
 
 export async function POST(request: Request) {
+  const publicOrigin = (env as unknown as { ARTHELLO_PUBLIC_ORIGIN?: string }).ARTHELLO_PUBLIC_ORIGIN?.trim() ?? "";
+  if (!hasTrustedMutationOrigin(request, publicOrigin)) {
+    return privateJson({ error: "Запрос отклонён: источник страницы не совпадает" }, 403);
+  }
   let context: RequestContext | null;
   try {
     context = await getAuthenticatedRequestContext(request);
@@ -50,7 +82,18 @@ export async function POST(request: Request) {
     return privateJson({ error: "Сервис авторизации временно недоступен" }, 503);
   }
   if (!context) return privateJson({ error: "Требуется вход" }, 401);
+  if (!canAccessModule({
+    apiRole: context.apiRole,
+    isSystemOwner: context.auth.user.isSystemOwner,
+    canAccessMedical: context.auth.user.canAccessMedical,
+    allowedModules: context.auth.user.allowedModules,
+  }, "integrations")) return privateJson({ error: "Раздел интеграций не назначен этому пользователю" }, 403);
   if (!editors.has(context.apiRole)) return privateJson({ error: "Нет прав на управление интеграциями" }, 403);
+  try {
+    verifyAuthenticatedRequestCsrf(request, context);
+  } catch {
+    return privateJson({ error: "Защитная сессия устарела. Войдите заново." }, 403);
+  }
   let actor = context.actor;
   try {
     const body = await request.json() as Record<string, unknown>;
@@ -58,13 +101,27 @@ export async function POST(request: Request) {
     const connectionId = action === "saveSetup" && body.setup && typeof body.setup === "object"
       ? clean((body.setup as Partial<IntegrationSetup>).connectionId, 80).toUpperCase()
       : clean(body.connectionId, 80).toUpperCase();
-    if (connectionId === tochkaConnectionId && tochkaOwnerActions.has(action)) {
-      const authorization = authorizeTochkaOwnerMutation(request, context);
+    if (protectedBankConnectionIds.has(connectionId) && protectedBankOwnerActions.has(action)) {
+      const authorization = authorizeBankOwnerMutation(context, connectionId);
       if (authorization instanceof Response) return authorization;
       actor = authorization.actor;
     }
+    if (connectionId === tbankConnectionId && tbankEgressRequiredActions.has(action)) {
+      const configuredEgressIp = normalizePublicIntegrationIp(
+        (env as unknown as { TBANK_EGRESS_IP?: string }).TBANK_EGRESS_IP,
+      );
+      if (!configuredEgressIp) {
+        return privateJson({
+          error: "Исходящий IP не подтверждён администратором сервера. Настройка и проверка Т‑Банка заблокированы.",
+        }, 409);
+      }
+    }
     await ensureCoreTables();
     await ensureOperatingIntegrationCatalog();
+    if (connectionScopedActions.has(action)) {
+      const scopeDenial = await assignedIntegrationDenial(context, connectionId);
+      if (scopeDenial) return scopeDenial;
+    }
     if (action === "saveSetup") {
       return saveSetup(actor, body);
     }
@@ -73,8 +130,8 @@ export async function POST(request: Request) {
     if (action === "pauseConnection") return pauseConnection(actor, body);
     if (action === "resumeConnection") return resumeConnection(actor, body);
     if (action === "revokeCredential") return revokeCredential(actor, body);
-    if (action === "createConflictTask") return conflictTask(request, context, body);
-    if (action === "resolveConflict") return resolveConflict(request, context, body);
+    if (action === "createConflictTask") return conflictTask(context, body);
+    if (action === "resolveConflict") return resolveConflict(context, body);
     return Response.json({ error: "Неизвестное действие" }, { status: 400 });
   } catch (error) {
     console.error("integration.action_failed");
@@ -82,16 +139,32 @@ export async function POST(request: Request) {
   }
 }
 
-function authorizeTochkaOwnerMutation(request: Request, requester: RequestContext): { actor: string } | Response {
+function authorizeBankOwnerMutation(requester: RequestContext, connectionId: string): { actor: string } | Response {
   if (!isCanonicalOwnerContext(requester)) {
-    return privateJson({ error: "Настройка и проверка Точки доступны только собственнику" }, 403);
-  }
-  try {
-    verifyAuthenticatedRequestCsrf(request, requester);
-  } catch {
-    return privateJson({ error: "Защитная сессия устарела. Войдите заново." }, 403);
+    return privateJson({
+      error: connectionId === tochkaConnectionId
+        ? "Настройка и проверка Точки доступны только собственнику"
+        : "Настройка и проверка Т‑Банка доступны только собственнику",
+    }, 403);
   }
   return { actor: requester.actor };
+}
+
+async function assignedIntegrationDenial(requester: RequestContext, connectionId: string) {
+  if (!connectionId) return privateJson({ error: "Не выбрана интеграция" }, 400);
+  if (isCanonicalOwnerContext(requester)) return null;
+  const db = getDb();
+  const [connection] = await db.select({ ownerEntityId: integrationConnections.ownerEntityId })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  if (!connection) return privateJson({ error: "Интеграция не найдена" }, 404);
+  const assigned = canAccessAssignedIntegration({
+    apiRole: requester.apiRole,
+    appUserId: requester.appUserId,
+    isSystemOwner: requester.auth.user.isSystemOwner,
+  }, connection.ownerEntityId);
+  return assigned ? null : privateJson({ error: "Эта интеграция не назначена пользователю" }, 403);
 }
 
 async function saveSetup(actor: string, body: Record<string, unknown>) {
@@ -100,202 +173,261 @@ async function saveSetup(actor: string, body: Record<string, unknown>) {
     : {};
   const connectionId = clean(setupInput.connectionId, 80).toUpperCase();
   const credential = typeof body.credential === "string" ? body.credential.trim() : "";
-  let candidateProbe: TochkaProbeResult | null = null;
+  if (connectionId === tochkaConnectionId) setupInput.customerCode = "";
   if (connectionId === tochkaConnectionId && setupInput.authMethod !== "JWT") {
-    return privateJson({ error: "Для Точки в этом релизе доступно только подключение готового JWT" }, 400);
+    return privateJson({ error: "Для Точки в этом релизе доступно только подключение готового ключа" }, 400);
   }
-  if (connectionId === tochkaConnectionId) await validateIntegrationSetupReferences(setupInput);
+  if (connectionId === tbankConnectionId && setupInput.authMethod !== "Bearer token") {
+    return privateJson({ error: "Для Т‑Банка доступно прямое подключение с токеном из раздела интеграций Т‑Бизнеса" }, 400);
+  }
+  if (connectionId === tbankConnectionId && setupInput.readOnlyScopeConfirmed !== true) {
+    return privateJson({
+      error: "Подтвердите, что токен Т‑Банка выпущен только с правами чтения счетов и операций без доступа к платежам.",
+    }, 400);
+  }
+  if (protectedBankConnectionIds.has(connectionId)) await validateIntegrationSetupReferences(setupInput);
+  const credentialBaseline = credential && protectedBankConnectionIds.has(connectionId)
+    ? (await getIntegrationSetups())[connectionId] ?? null
+    : null;
 
   if (credential) {
-    if (connectionId !== tochkaConnectionId) {
-      return privateJson({ error: "JWT принимается только для подключения банка Точка" }, 400);
+    if (connectionId === tochkaConnectionId) {
+      const validation = validateTochkaJwt(credential);
+      if (!validation.valid) return privateJson({ error: validation.reason }, 400);
+      const choiceId = clean(body.customerChoiceId, 80);
+      const selectedCompany = choiceId
+        ? await consumeTochkaCompanySelectionHandle(actor, choiceId, clean(setupInput.legalEntityId, 80), credential)
+        : null;
+      if (selectedCompany && !selectedCompany.ok) {
+        return privateJson({ error: selectedCompany.reason }, 409);
+      }
+      const candidateProbe = await probeTochkaJwt(
+        credential,
+        fetch,
+        Date.now(),
+        selectedCompany?.customerCode ?? "",
+      );
+      if (!candidateProbe.valid) {
+        const customerChoices = candidateProbe.customerChoices.length
+          ? await createTochkaCompanySelectionHandles(
+            actor,
+            clean(setupInput.legalEntityId, 80),
+            credential,
+            candidateProbe.customerChoices,
+          )
+          : [];
+        await audit(actor, "integration.tochka_candidate_rejected", "integration_connection", connectionId, {
+          selectedLegalEntityId: clean(setupInput.legalEntityId, 80),
+          availableCompanyCount: customerChoices.length,
+          reason: candidateProbe.reason,
+        });
+        return privateJson({
+          error: candidateProbe.reason,
+          customerChoices,
+        }, customerChoices.length ? 409 : 422);
+      }
+      setupInput.customerCode = candidateProbe.customerCode;
+      const setup = await saveTochkaSetupWithCredential(actor, setupInput, credential, credentialBaseline);
+      if (!setup) {
+        return privateJson({ error: "Настройка банка изменилась во время проверки. Начните сохранение заново." }, 409);
+      }
+      return recordTochkaProbe(actor, setup, "Настройка владельцем", candidateProbe);
     }
-    const validation = validateTochkaJwt(credential);
-    if (!validation.valid) return privateJson({ error: validation.reason }, 400);
-    candidateProbe = await probeTochkaJwt(
-      credential,
-      fetch,
-      Date.now(),
-      clean(setupInput.customerCode, 80),
-    );
-    if (!candidateProbe.valid) {
-      await audit(actor, "integration.tochka_candidate_rejected", "integration_connection", connectionId, {
-        selectedLegalEntityId: clean(setupInput.legalEntityId, 80),
-        requestedCustomerCode: clean(setupInput.customerCode, 80),
-        bankResolvedCustomerCode: candidateProbe.customerCode,
-        availableCustomerCodes: candidateProbe.customerChoices.map((customer) => customer.code),
-        reason: candidateProbe.reason,
-      });
-      return privateJson({
-        error: candidateProbe.reason,
-        customerChoices: candidateProbe.customerChoices,
-      }, candidateProbe.customerChoices.length ? 409 : 422);
+    if (connectionId === tbankConnectionId) {
+      const validation = validateTBankToken(credential);
+      if (!validation.valid) return privateJson({ error: validation.reason }, 400);
+      const candidateProbe = await probeTBankToken(credential);
+      if (!candidateProbe.valid) {
+        await audit(actor, "integration.tbank_candidate_rejected", "integration_connection", connectionId, {
+          selectedLegalEntityId: clean(setupInput.legalEntityId, 80),
+          reason: candidateProbe.reason,
+        });
+        return privateJson({ error: candidateProbe.reason }, 422);
+      }
+      const setup = await saveTBankSetupWithCredential(actor, setupInput, credential, credentialBaseline);
+      if (!setup) {
+        return privateJson({ error: "Настройка банка изменилась во время проверки. Начните сохранение заново." }, 409);
+      }
+      return recordTBankProbe(actor, setup, "Настройка владельцем", candidateProbe);
     }
-    setupInput.customerCode = candidateProbe.customerCode;
-    const setup = await saveTochkaSetupWithCredential(actor, setupInput, credential);
-    return recordTochkaProbe(actor, setup, "Настройка владельцем", candidateProbe);
+    return privateJson({ error: "Ключ через эту форму принимается только для Точки и Т‑Банка" }, 400);
   }
 
   const existing = (await getIntegrationSetups())[connectionId];
-  if (connectionId === tochkaConnectionId && existing?.secretStatus === "stored") {
+  if (protectedBankConnectionIds.has(connectionId) && existing?.secretStatus === "stored") {
     const nextLegalEntityId = clean(setupInput.legalEntityId, 80);
-    const nextCustomerCode = clean(setupInput.customerCode, 80);
-    if (existing.legalEntityId !== nextLegalEntityId || existing.customerCode !== nextCustomerCode) {
+    if (existing.legalEntityId !== nextLegalEntityId) {
       return privateJson({
-        error: "Для смены юрлица или customerCode введите JWT: новая привязка сначала проверяется банком, затем заменяет прежнюю атомарно.",
+        error: "Для смены юрлица введите банковский ключ: новая привязка сначала проверяется банком, затем заменяет прежнюю атомарно.",
       }, 409);
     }
+    if (connectionId === tochkaConnectionId) setupInput.customerCode = existing.customerCode;
   }
   const setup = await saveIntegrationSetup(actor, setupInput);
 
   if (setup.connectionId === tochkaConnectionId && setup.authMethod === "JWT") {
     return privateJson({
-      setup,
+      setup: publicSetup(setup),
       message: setup.secretStatus === "stored"
-        ? "Черновик распределения сохранён. JWT не использовался; отдельную проверку счетов запускает собственник."
-        : setup.customerCode
-          ? "Черновик сохранён. Для проверки customerCode и счетов введите JWT."
-          : "Черновик сохранён. Введите JWT: система получит customerCode из банка и попросит выбрать, если доступно несколько.",
+        ? "Черновик распределения сохранён. Ключ не использовался; отдельную проверку счетов запускает собственник."
+        : "Черновик сохранён. Введите ключ Точки: система определит доступные компании и попросит выбрать, если их несколько.",
+    });
+  }
+  if (setup.connectionId === tbankConnectionId) {
+    return privateJson({
+      setup: publicSetup(setup),
+      message: setup.secretStatus === "stored"
+        ? "Параметры сохранены. Отдельную проверку доступа только для чтения запускает собственник."
+        : "Параметры сохранены. Введите токен Т‑Банка для проверки счетов и короткой выписки.",
     });
   }
 
-  return privateJson({ setup, message: "Параметры и расписание сохранены." });
+  return privateJson({ setup: publicSetup(setup), message: "Параметры и расписание сохранены." });
 }
 
 async function revokeCredential(actor: string, body: Record<string, unknown>) {
   const connectionId = clean(body.connectionId, 80).toUpperCase();
-  if (connectionId !== tochkaConnectionId) {
-    return privateJson({ error: "Отзыв ключа через интерфейс доступен только для Точки" }, 400);
+  if (!protectedBankConnectionIds.has(connectionId)) {
+    return privateJson({ error: "Удаление сохранённого ключа доступно только для подключённых банков" }, 400);
   }
-  const setup = await revokeTochkaIntegrationCredential(actor);
+  const setup = await revokeBankIntegrationCredential(actor, connectionId);
   return privateJson({
-    setup,
-    message: "JWT Точки отозван и удалён из защищённого хранилища. Для новой проверки потребуется ввести ключ заново.",
+    setup: setup ? publicSetup(setup) : null,
+    message: `${connectionId === tochkaConnectionId ? "Ключ Точки" : "Токен Т‑Банка"} удалён только из ArtHello OS. Чтобы ключ перестал действовать, отдельно отзовите его ${connectionId === tochkaConnectionId ? "в личном кабинете Точки" : "в Т‑Бизнесе"}.`,
   });
 }
 
 async function testConnection(actor: string, body: Record<string, unknown>) {
   const connectionId = clean(body.connectionId, 80).toUpperCase();
-  if (connectionId !== "INT-T-TOCHKA") return retrySync(actor, body);
+  if (!protectedBankConnectionIds.has(connectionId)) return retrySync(actor, body);
   const setups = await getIntegrationSetups();
   const setup = setups[connectionId];
   if (!setup) return privateJson({ error: "Сначала сохраните параметры подключения" }, 409);
-  return verifyTochkaConnection(actor, setup, "Ручная проверка");
+  return connectionId === tochkaConnectionId
+    ? verifyTochkaConnection(actor, setup, "Ручная проверка")
+    : verifyTBankConnection(actor, setup, "Ручная read-only проверка");
 }
 
 async function verifyTochkaConnection(actor: string, setup: IntegrationSetup, trigger: string) {
-  if (!setup.customerCode) return privateJson({ error: "Сначала подтвердите customerCode с помощью JWT" }, 409);
+  if (!setup.customerCode) return privateJson({ error: "Сначала подтвердите компанию с помощью ключа Точки" }, 409);
   const token = await readIntegrationCredential(setup.connectionId, setup.legalEntityId, setup.customerCode);
-  if (!token) return privateJson({ error: "Введите JWT для выбранной карточки и customerCode" }, 409);
+  if (!token) return privateJson({ error: "Введите ключ Точки для выбранной карточки и компании" }, 409);
   return recordTochkaProbe(actor, setup, trigger, await probeTochkaJwt(token, fetch, Date.now(), setup.customerCode));
 }
 
 async function recordTochkaProbe(actor: string, setup: IntegrationSetup, trigger: string, probe: TochkaProbeResult) {
   const current = new Date().toISOString();
-  const runId = `INT-RUN-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+  const runId = `INT-RUN-${crypto.randomUUID().toUpperCase()}`;
   const correlationId = `CORR-${crypto.randomUUID()}`;
-  const db = getDb();
-  const [connection] = await db.select().from(integrationConnections)
-    .where(eq(integrationConnections.id, setup.connectionId)).limit(1);
-  if (!connection) return privateJson({ error: "Интеграция не найдена" }, 404);
-
-  if (!probe.valid) {
-    await db.insert(integrationSyncRuns).values({
-      id: runId,
-      connectionId: setup.connectionId,
-      startedAt: current,
-      finishedAt: current,
-      trigger,
-      status: "Заблокировано",
-      errorCount: 1,
-      errorMessage: probe.reason,
-      initiatedBy: actor,
-      correlationId,
-      dryRun: true,
-    });
-    await db.insert(integrationLogEntries).values({
-      runId,
-      connectionId: setup.connectionId,
-      level: "ERROR",
-      event: "tochka.credential_rejected",
-      message: probe.reason,
-      recordRef: "accounts:probe",
-    });
-    await db.update(integrationConnections).set({
-      status: "Ожидает проверку",
-      authStatus: "JWT сохранён · проверка банка не пройдена",
-      credentialExpiresAt: probe.expiresAt,
-      verifiedTransfer: false,
-      isEnabled: false,
-      errorCount: connection.errorCount + 1,
-      updatedAt: current,
-    }).where(eq(integrationConnections.id, setup.connectionId));
-    await audit(actor, "integration.tochka_probe_failed", "integration_connection", setup.connectionId, {
-      runId,
-      selectedLegalEntityId: setup.legalEntityId,
-      selectedCustomerCode: setup.customerCode,
-      reason: probe.reason,
-    });
-    return privateJson({ error: probe.reason }, 422);
-  }
-
-  await db.insert(integrationSyncRuns).values({
-    id: runId,
-    connectionId: setup.connectionId,
-    startedAt: current,
-    finishedAt: current,
-    trigger,
-    status: "Проверка пройдена",
-    receivedCount: probe.accountCount,
-    acceptedCount: 0,
-    checkpoint: `accounts:${probe.accountCount}`,
-    initiatedBy: actor,
+  const successMessage = probe.accountCountScope === "selected_customer"
+    ? `Банк подтвердил ключ и выбранную компанию; счетов: ${probe.accountCount}`
+    : `Банк подтвердил ключ и выбранную компанию; всего доступно счетов: ${probe.accountCount}`;
+  const committed = await commitIntegrationBankProbe(actor, setup, {
+    valid: probe.valid,
+    runId,
     correlationId,
-    dryRun: true,
-  });
-  await db.insert(integrationLogEntries).values({
-    runId,
-    connectionId: setup.connectionId,
-    level: "INFO",
-    event: "tochka.accounts_verified",
-    message: probe.accountCountScope === "selected_customer"
-      ? `Банк подтвердил JWT и customerCode; счетов для кода: ${probe.accountCount}`
-      : `Банк подтвердил JWT и customerCode; всего доступно счетов: ${probe.accountCount}`,
-    recordRef: probe.accountCountScope === "selected_customer" ? "accounts:selected-customer" : "accounts:all-permitted",
-  });
-  await db.update(integrationConnections).set({
-    status: "Доступ к счетам подтверждён",
-    authStatus: "JWT и customerCode подтверждены · доступ к счетам проверен",
+    occurredAt: current,
+    trigger,
+    reason: probe.reason,
+    receivedCount: probe.accountCount,
+    checkpoint: `accounts:${probe.accountCount}`,
+    logEvent: probe.valid ? "tochka.accounts_verified" : "tochka.credential_rejected",
+    logMessage: successMessage,
+    logRecordRef: probe.valid
+      ? probe.accountCountScope === "selected_customer" ? "accounts:selected-customer" : "accounts:all-permitted"
+      : "accounts:probe",
+    successStatus: "Доступ к счетам подтверждён",
+    successAuthStatus: "Ключ и компания подтверждены · доступ к счетам проверен",
+    failureAuthStatus: "Ключ Точки сохранён · проверка банка не пройдена",
     credentialExpiresAt: probe.expiresAt,
-    lastSuccessAt: "",
-    nextSyncAt: "",
-    receivedCount: 0,
-    acceptedCount: 0,
-    errorCount: 0,
-    verifiedTransfer: false,
-    isEnabled: false,
-    updatedAt: current,
-  }).where(eq(integrationConnections.id, setup.connectionId));
-  await audit(actor, "integration.tochka_accounts_verified", "integration_connection", setup.connectionId, {
-    runId,
-    selectedLegalEntityId: setup.legalEntityId,
-    selectedCustomerCode: setup.customerCode,
-    accountScope: probe.accountCountScope,
-    accountCount: probe.accountCount,
-    allocationMode: setup.allocationMode,
+    auditAction: probe.valid ? "integration.tochka_accounts_verified" : "integration.tochka_probe_failed",
+    auditPayload: probe.valid ? {
+      selectedLegalEntityId: setup.legalEntityId,
+      companySelectionConfirmed: true,
+      accountScope: probe.accountCountScope,
+      accountCount: probe.accountCount,
+      allocationMode: setup.allocationMode,
+    } : {
+      selectedLegalEntityId: setup.legalEntityId,
+      companySelectionConfirmed: true,
+      reason: probe.reason,
+    },
   });
+  if (!committed) {
+    return privateJson({ error: "Банковский ключ или настройка изменились во время проверки. Запустите проверку заново." }, 409);
+  }
+  if (!probe.valid) return privateJson({ error: probe.reason }, 422);
   return privateJson({
-    setup: { ...setup, secretStatus: "stored" },
+    setup: publicSetup({ ...setup, secretStatus: "stored" }),
     test: {
       ok: true,
-      customerCode: setup.customerCode,
+      companySelectionConfirmed: true,
       accountCount: probe.accountCount,
       accountCountScope: probe.accountCountScope,
       expiresAt: probe.expiresAt,
     },
     message: probe.accountCountScope === "selected_customer"
-      ? `Банк подтвердил customerCode ${setup.customerCode} и доступ JWT к ${probe.accountCount} счетам этого кода. Связь с выбранной внутренней карточкой зафиксировал владелец; импорт операций ещё не запускался.`
-      : `Банк подтвердил customerCode ${setup.customerCode} и доступ JWT к счетам: ${probe.accountCount} всего. Ответ по счетам не содержит customerCode для каждого счёта, поэтому принадлежность выбранной карточке сверяет владелец; импорт операций ещё не запускался.`,
+      ? `Точка подтвердила выбранную компанию и доступ ключа к ${probe.accountCount} счетам. Связь с внутренней карточкой зафиксировал владелец; импорт операций ещё не запускался.`
+      : `Точка подтвердила выбранную компанию и доступ ключа к счетам: ${probe.accountCount} всего. Принадлежность внутренней карточке сверяет владелец; импорт операций ещё не запускался.`,
+  });
+}
+
+async function verifyTBankConnection(actor: string, setup: IntegrationSetup, trigger: string) {
+  if (!setup.readOnlyScopeConfirmed) {
+    return privateJson({
+      error: "Сначала подтвердите, что токен выдан только для чтения счетов и операций без доступа к платежам.",
+    }, 409);
+  }
+  const token = await readTBankIntegrationCredential(setup.legalEntityId);
+  if (!token) return privateJson({ error: "Введите токен Т‑Банка для выбранной карточки юрлица" }, 409);
+  return recordTBankProbe(actor, setup, trigger, await probeTBankToken(token));
+}
+
+async function recordTBankProbe(actor: string, setup: IntegrationSetup, trigger: string, probe: TBankProbeResult) {
+  const current = new Date().toISOString();
+  const runId = `INT-RUN-${crypto.randomUUID().toUpperCase()}`;
+  const correlationId = `CORR-${crypto.randomUUID()}`;
+  const committed = await commitIntegrationBankProbe(actor, setup, {
+    valid: probe.valid,
+    runId,
+    correlationId,
+    occurredAt: current,
+    trigger,
+    reason: probe.reason,
+    receivedCount: probe.accountCount + probe.operationCount,
+    checkpoint: `read-only:${probe.accountCount}:${probe.operationCount}`,
+    logEvent: probe.valid ? "tbank.readonly_access_verified" : "tbank.readonly_probe_rejected",
+    logMessage: `Прочитано счетов: ${probe.accountCount}; операций в короткой выписке: ${probe.operationCount}`,
+    logRecordRef: probe.valid ? "accounts-and-short-statement" : "read-only-check",
+    successStatus: "Проверка чтения выполнена",
+    successAuthStatus: "Токен принят · ArtHello OS успешно прочитал счета и короткую выписку",
+    failureAuthStatus: "Токен Т‑Банка сохранён · проверка чтения не пройдена",
+    credentialExpiresAt: "",
+    auditAction: probe.valid ? "integration.tbank_read_probe_succeeded" : "integration.tbank_read_probe_failed",
+    auditPayload: probe.valid ? {
+      selectedLegalEntityId: setup.legalEntityId,
+      accountCount: probe.accountCount,
+      operationCount: probe.operationCount,
+      statementWindowDays: probe.statementWindowDays,
+      limitedPermissionsConfirmedByOwner: setup.readOnlyScopeConfirmed,
+    } : {
+      selectedLegalEntityId: setup.legalEntityId,
+      reason: probe.reason,
+    },
+  });
+  if (!committed) {
+    return privateJson({ error: "Банковский ключ или настройка изменились во время проверки. Запустите проверку заново." }, 409);
+  }
+  if (!probe.valid) return privateJson({ error: probe.reason }, 422);
+  return privateJson({
+    setup: publicSetup({ ...setup, secretStatus: "stored" }),
+    test: {
+      ok: true,
+      accountCount: probe.accountCount,
+      operationCount: probe.operationCount,
+      statementWindowDays: probe.statementWindowDays,
+    },
+    message: `ArtHello OS выполнил только чтение данных Т‑Банка: ${probe.accountCount} счетов и ${probe.operationCount} операций в короткой выписке за ${probe.statementWindowDays} дней. Это не доказывает отсутствие у токена иных прав; их ограничение подтвердил собственник. Номера счетов и операции не сохранены, платежные методы не вызывались.`,
   });
 }
 
@@ -306,11 +438,16 @@ async function retrySync(actor: string, body: Record<string, unknown>) {
     if (!setup) return privateJson({ error: "Сначала сохраните параметры подключения" }, 409);
     return verifyTochkaConnection(actor, setup, "Ручное обновление списка счетов");
   }
+  if (id === tbankConnectionId) {
+    const setup = (await getIntegrationSetups())[id];
+    if (!setup) return privateJson({ error: "Сначала сохраните параметры подключения" }, 409);
+    return verifyTBankConnection(actor, setup, "Ручная проверка счетов и короткой выписки");
+  }
   const db = getDb();
   const [connection] = await db.select().from(integrationConnections).where(eq(integrationConnections.id, id)).limit(1);
   if (!connection) return Response.json({ error: "Интеграция не найдена" }, { status: 404 });
   const current = new Date().toISOString();
-  const runId = `INT-RUN-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+  const runId = `INT-RUN-${crypto.randomUUID().toUpperCase()}`;
   const correlationId = `CORR-${crypto.randomUUID()}`;
   const decision = retryDecision(connection);
   const coreConnection = isCoreConnection(connection);
@@ -378,7 +515,7 @@ async function pauseConnection(actor: string, body: Record<string, unknown>) {
   const db = getDb();
   const [connection] = await db.select().from(integrationConnections).where(eq(integrationConnections.id, id)).limit(1);
   if (!connection) return Response.json({ error: "Интеграция не найдена" }, { status: 404 });
-  if (isCoreConnection(connection)) return Response.json({ error: "Ядро D1 нельзя остановить из интерфейса" }, { status: 409 });
+  if (isCoreConnection(connection)) return Response.json({ error: "Встроенное хранилище нельзя остановить из интерфейса" }, { status: 409 });
   const [row] = await db.update(integrationConnections).set({ status: "На паузе", isEnabled: false, updatedAt: new Date().toISOString() }).where(eq(integrationConnections.id, id)).returning();
   await audit(actor, "integration.paused", "integration_connection", id, {});
   return Response.json({ connection: row });
@@ -395,15 +532,17 @@ async function resumeConnection(actor: string, body: Record<string, unknown>) {
   return Response.json({ connection: updated, needsAccess: !ready });
 }
 
-async function conflictTask(request: Request, context: RequestContext, body: Record<string, unknown>) {
+async function conflictTask(context: RequestContext, body: Record<string, unknown>) {
   let actor = context.actor;
   const id = clean(body.conflictId, 80);
   const db = getDb();
   const key = `INTEGRATION_CONFLICT:${id}`;
   const [row] = await db.select().from(integrationConflicts).where(eq(integrationConflicts.id, id)).limit(1);
   if (!row) return Response.json({ error: "Конфликт не найден" }, { status: 404 });
-  if (row.connectionId === tochkaConnectionId) {
-    const authorization = authorizeTochkaOwnerMutation(request, context);
+  const scopeDenial = await assignedIntegrationDenial(context, row.connectionId);
+  if (scopeDenial) return scopeDenial;
+  if (protectedBankConnectionIds.has(row.connectionId)) {
+    const authorization = authorizeBankOwnerMutation(context, row.connectionId);
     if (authorization instanceof Response) return authorization;
     actor = authorization.actor;
   }
@@ -433,7 +572,7 @@ async function conflictTask(request: Request, context: RequestContext, body: Rec
   return Response.json({ task }, { status: 201 });
 }
 
-async function resolveConflict(request: Request, context: RequestContext, body: Record<string, unknown>) {
+async function resolveConflict(context: RequestContext, body: Record<string, unknown>) {
   let actor = context.actor;
   const id = clean(body.conflictId, 80);
   const resolution = clean(body.resolution, 400);
@@ -442,8 +581,10 @@ async function resolveConflict(request: Request, context: RequestContext, body: 
   if (!canResolveConflict(resolution, evidence)) return Response.json({ error: "Нужны решение и проверяемое доказательство" }, { status: 400 });
   const [existing] = await db.select().from(integrationConflicts).where(eq(integrationConflicts.id, id)).limit(1);
   if (!existing) return Response.json({ error: "Конфликт не найден" }, { status: 404 });
-  if (existing.connectionId === tochkaConnectionId) {
-    const authorization = authorizeTochkaOwnerMutation(request, context);
+  const scopeDenial = await assignedIntegrationDenial(context, existing.connectionId);
+  if (scopeDenial) return scopeDenial;
+  if (protectedBankConnectionIds.has(existing.connectionId)) {
+    const authorization = authorizeBankOwnerMutation(context, existing.connectionId);
     if (authorization instanceof Response) return authorization;
     actor = authorization.actor;
   }
@@ -473,6 +614,28 @@ function clean(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+function publicSetup(setup: IntegrationSetup) {
+  return {
+    connectionId: setup.connectionId,
+    authMethod: setup.authMethod,
+    startDate: setup.startDate,
+    syncIntervalMinutes: setup.syncIntervalMinutes,
+    syncMinute: setup.syncMinute,
+    endpoint: setup.endpoint,
+    legalEntityId: setup.legalEntityId,
+    branchId: setup.branchId,
+    allocationMode: setup.allocationMode,
+    accountScope: setup.accountScope,
+    channelType: setup.channelType,
+    sourceMapping: setup.sourceMapping,
+    dataScopes: setup.dataScopes,
+    readOnlyScopeConfirmed: setup.readOnlyScopeConfirmed,
+    secretStatus: setup.secretStatus,
+    companySelectionConfirmed: Boolean(setup.customerCode),
+    updatedAt: setup.updatedAt,
+  };
+}
+
 function privateJson(body: Record<string, unknown>, status = 200) {
   return Response.json(body, {
     status,
@@ -494,7 +657,13 @@ function safeIntegrationError(error: unknown) {
     "Выберите филиал назначения",
     "Выберите, какие данные получать",
     "Защищённое хранилище не настроено: задайте INTEGRATION_CREDENTIALS_KEY",
-    "Защищённый JWT недоступен. Введите ключ заново.",
+    "Защищённый ключ Точки недоступен. Введите ключ заново.",
+    "Защищённый токен Т‑Банка недоступен. Введите ключ заново.",
+    "Выберите существующую карточку юридического лица",
+    "Выберите действующий филиал",
+    "Адрес подключения должен быть HTTPS-ссылкой без логина, пароля, параметров или служебной части",
+    "Подтвердите ограниченные права токена Т‑Банка",
+    "Настройка банка изменилась во время сохранения. Повторите действие.",
   ]);
   return controlled.has(message) ? message : "Действие не выполнено";
 }

@@ -25,7 +25,7 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* |
     && node /app/scripts/patch-mobile-canonical-v5.mjs \
     && node /app/scripts/patch-school-sso-entry.mjs \
     && node /app/scripts/verify-system-wide-operational-shells.mjs \
-    && echo "b6fece4c356f034e99c60926e8e0f9df90a904300c4b026b2f2decdfe0ecfeb1  /app/db/index.ts" | sha256sum -c - \
+    && echo "1051f8b7469260e080404d76faa15cc1f04e04e01e8c76d105969dfda4fed03d  /app/db/index.ts" | sha256sum -c - \
     && rm -rf /tmp/arthello-overrides /tmp/arthello-v52-overrides \
     && ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
     && grep -q 'invoke_user_worker_ahead_of_assets: false' /app/production/runtime-server.mjs \

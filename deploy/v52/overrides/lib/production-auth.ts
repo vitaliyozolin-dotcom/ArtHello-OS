@@ -29,6 +29,9 @@ export type AuthUser = {
   isAdministrative: boolean;
   isSystemOwner: boolean;
   canAccessMedical: boolean;
+  jobTitle: string;
+  allowedModules?: string[];
+  favoriteModules: string[];
 };
 
 type CredentialRow = {
@@ -57,6 +60,9 @@ type AppAccessRow = {
   contact: string;
   display_name: string;
   app_role: string;
+  job_title: string;
+  allowed_modules: string;
+  favorite_modules: string;
   app_status: string;
   is_administrative: number;
   grant_role: string;
@@ -189,8 +195,30 @@ async function initializeAuthTables() {
     "access_version",
     "ALTER TABLE production_auth_sessions ADD COLUMN access_version INTEGER NOT NULL DEFAULT 0",
   );
+  await ensureAppUserPreferenceColumns();
   await db.prepare("DELETE FROM production_auth_sessions WHERE expires_at <= ?")
     .bind(nowSeconds()).run();
+}
+
+async function ensureAppUserPreferenceColumns() {
+  const db = database();
+  const current = await db.prepare("PRAGMA table_info(app_users)").all<{ name: string }>();
+  if (!current.results.length) return;
+  const names = new Set(current.results.map((column) => column.name));
+  const columns = {
+    job_title: "TEXT NOT NULL DEFAULT ''",
+    allowed_modules: "TEXT NOT NULL DEFAULT ''",
+    favorite_modules: "TEXT NOT NULL DEFAULT ''",
+  } as const;
+  for (const [name, definition] of Object.entries(columns)) {
+    if (names.has(name)) continue;
+    try {
+      await db.prepare(`ALTER TABLE app_users ADD COLUMN ${name} ${definition}`).run();
+    } catch (error) {
+      const refreshed = await db.prepare("PRAGMA table_info(app_users)").all<{ name: string }>();
+      if (!refreshed.results.some((column) => column.name === name)) throw error;
+    }
+  }
 }
 
 async function ensureColumn(table: "production_auth_credentials" | "production_auth_sessions", column: string, alterSql: string) {
@@ -463,12 +491,12 @@ export async function logout(request: Request) {
 }
 
 export function appendAuthCookies(headers: Headers, token: string, csrf: string) {
-  headers.append("set-cookie", `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${SESSION_TTL_SECONDS}; HttpOnly; Secure; SameSite=Strict`);
+  headers.append("set-cookie", `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${SESSION_TTL_SECONDS}; HttpOnly; Secure; SameSite=Lax`);
   headers.append("set-cookie", `${CSRF_COOKIE}=${encodeURIComponent(csrf)}; Path=/; Max-Age=${SESSION_TTL_SECONDS}; Secure; SameSite=Strict`);
 }
 
 export function appendClearedAuthCookies(headers: Headers) {
-  headers.append("set-cookie", `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`);
+  headers.append("set-cookie", `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
   headers.append("set-cookie", `${CSRF_COOKIE}=; Path=/; Max-Age=0; Secure; SameSite=Strict`);
 }
 
@@ -501,6 +529,7 @@ async function loadAppAccessByAuthUserId(authUserId: string) {
 async function loadAppAccessByAppUserId(appUserId: string) {
   return database().prepare(`SELECT
       u.id AS app_user_id,u.contact,u.display_name,u.role AS app_role,u.status AS app_status,
+      u.job_title,u.allowed_modules,u.favorite_modules,
       u.is_administrative,u.access_version AS user_access_version,
       g.role AS grant_role,g.status AS grant_status,g.access_version AS grant_access_version,
       CASE WHEN g.role='Медработник' AND EXISTS (
@@ -570,6 +599,8 @@ function toAuthUser(row: CredentialRow, access: AppAccessRow): AuthUser {
 
 function authUserFromAccess(name: string, mustChangePassword: number, access: AppAccessRow): AuthUser {
   const apiRole = apiRoleForGrant(access.grant_role);
+  const allowedModules = parseModuleList(access.allowed_modules);
+  const favoriteModules = parseModuleList(access.favorite_modules) ?? ["registry", "clients", "legal", "hr", "projects"];
   return {
     userId: access.app_user_id,
     role: coarseAuthRole(apiRole),
@@ -580,7 +611,21 @@ function authUserFromAccess(name: string, mustChangePassword: number, access: Ap
     isAdministrative: Boolean(access.is_administrative),
     isSystemOwner: isCanonicalOwnerAccess(access) && apiRole === "OWNER",
     canAccessMedical: apiRole === "MEDICAL" && Boolean(access.medical_access_granted),
+    jobTitle: access.job_title,
+    allowedModules: allowedModules ?? undefined,
+    favoriteModules,
   };
+}
+
+function parseModuleList(value: string) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter((item): item is string => typeof item === "string" && /^[a-z][a-z0-9-]{1,39}$/.test(item));
+  } catch {
+    return null;
+  }
 }
 
 function verifyCsrf(request: Request, expected: string) {
