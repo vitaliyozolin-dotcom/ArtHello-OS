@@ -1,0 +1,229 @@
+name: D063 restore production auth
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/d063-restore-production-auth.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+
+env:
+  EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
+  DATA_VOLUME: arthello-direct-v44-data
+  SOURCE_VOLUME: arthello-rollback-33770637015-1
+  SOURCE_RELEASE_SHA: 843ab97d770a8cc2384522dc1de63b361199ebb6
+  PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+
+jobs:
+  restore:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.run_attempt == 1
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 40
+    environment: production-ru
+
+    steps:
+      - name: Check out exact recovery source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate source and restore canonical production volume
+        id: restore
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          test "$DATA_VOLUME" != "$SOURCE_VOLUME"
+          work="$RUNNER_TEMP/arthello-d063-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          source_snapshot="$work/source"
+          restored_snapshot="$work/restored"
+          mkdir -p "$source_snapshot" "$restored_snapshot"
+          chmod 0700 "$work" "$source_snapshot" "$restored_snapshot"
+          incident_volume="arthello-d063-incident-backup-$GITHUB_RUN_ID"
+          live_id=""
+          live_name=""
+          live_image_id=""
+          old_restart_name=""
+          old_restart_max=0
+          stopped=0
+          restored=0
+
+          cleanup() {
+            status=$?
+            set +e
+            if [ "$status" -ne 0 ]; then
+              printf '::error::D-063 recovery failed\n'
+              if [ "$stopped" -eq 1 ] && [ "$restored" -eq 1 ] && docker volume inspect "$incident_volume" >/dev/null 2>&1; then
+                docker run --rm --user 0:0 --network none \
+                  --mount "type=volume,src=$DATA_VOLUME,dst=/to" \
+                  --mount "type=volume,src=$incident_volume,dst=/from,readonly" \
+                  --entrypoint /bin/sh "$live_image_id" -ceu '
+                    find /to -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+                    cd /from
+                    tar -cpf - . | tar -xpf - -C /to
+                  ' >/dev/null 2>&1 || true
+              fi
+              if [ "$stopped" -eq 1 ] && [ -n "$live_id" ]; then docker start "$live_id" >/dev/null 2>&1 || true; fi
+              if [ -n "$live_id" ] && [ -n "$old_restart_name" ]; then
+                if [ "$old_restart_name" = on-failure ]; then
+                  docker update --restart="on-failure:$old_restart_max" "$live_id" >/dev/null 2>&1 || true
+                else
+                  docker update --restart="$old_restart_name" "$live_id" >/dev/null 2>&1 || true
+                fi
+              fi
+            fi
+            rm -rf -- "$work"
+            exit "$status"
+          }
+          trap cleanup EXIT INT TERM HUP
+
+          mapfile -t live_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
+          test "${#live_ids[@]}" -eq 1
+          live_id="${live_ids[0]}"
+          live_name="$(docker inspect "$live_id" --format '{{.Name}}' | sed 's#^/##')"
+          live_image_id="$(docker inspect "$live_id" --format '{{.Image}}')"
+          [[ "$live_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$live_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+          old_restart_name="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')"
+          old_restart_max="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
+
+          # Prove current incident state before any mutation: public shell is up but app DB health is degraded.
+          current_internal="$(docker exec "$live_id" node -e "fetch('http://127.0.0.1:8081/api/health',{redirect:'error'}).then(r=>process.stdout.write(String(r.status))).catch(()=>process.stdout.write('000'))" || true)"
+          printf 'D063_CURRENT_INTERNAL_HEALTH=%s\n' "${current_internal:-000}"
+          test "${current_internal:-000}" = 503
+
+          test "$(docker volume inspect "$SOURCE_VOLUME" --format '{{index .Labels "arthello.release.sha"}}')" = "$SOURCE_RELEASE_SHA"
+          source_created="$(docker volume inspect "$SOURCE_VOLUME" --format '{{.CreatedAt}}')"
+          printf 'D063_SOURCE_CREATED=%s\n' "$source_created"
+
+          docker run --rm --user 0:0 --network none \
+            --mount "type=volume,src=$SOURCE_VOLUME,dst=/from,readonly" \
+            --entrypoint /bin/sh "$live_image_id" -ceu 'cd /from && tar -cpf - .' \
+            | tar -xpf - -C "$source_snapshot"
+
+          python3 deploy/v52/maintenance/production-data-inventory.py "$source_snapshot"
+          relative_db="$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)"
+          export D063_SOURCE_DB="$source_snapshot/$relative_db"
+          python3 - <<'PY'
+          import sqlite3, os, sys
+          p=os.environ['D063_SOURCE_DB']
+          con=sqlite3.connect(f'file:{p}?mode=ro', uri=True)
+          try:
+              integrity=con.execute('PRAGMA integrity_check').fetchone()[0]
+              if integrity != 'ok': raise SystemExit('source integrity failed')
+              tables={r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+              required={'production_auth_credentials','app_users','user_system_access'}
+              if not required.issubset(tables): raise SystemExit('source auth tables missing')
+              credential=con.execute("""SELECT COUNT(*) FROM production_auth_credentials
+                WHERE user_id='AUTH-OWNER' AND length(password_hash)>0 AND length(password_salt)>0""").fetchone()[0]
+              if credential != 1: raise SystemExit('source owner credential missing')
+              owner=con.execute("""SELECT COUNT(*) FROM app_users u
+                JOIN user_system_access g ON g.user_id=u.id AND g.system_id='SYS-ARTHELLO-OS'
+                WHERE u.id='USR-OWNER' AND u.status='Активен' AND u.role='Собственник'
+                  AND u.is_administrative=1 AND g.status='Активен' AND g.role='Собственник'
+                  AND u.access_version=g.access_version""").fetchone()[0]
+              if owner != 1: raise SystemExit('source owner access missing')
+              print('D063_SOURCE_OWNER_AUTH=VERIFIED')
+          finally:
+              con.close()
+          PY
+
+          # Preserve the damaged live volume as incident evidence before replacement.
+          docker volume create \
+            --label arthello.scope=incident-backup \
+            --label "arthello.incident=d063-auth-recovery" \
+            --label "arthello.source.run=$GITHUB_RUN_ID" \
+            "$incident_volume" >/dev/null
+          docker run --rm --user 0:0 --network none \
+            --mount "type=volume,src=$DATA_VOLUME,dst=/from,readonly" \
+            --mount "type=volume,src=$incident_volume,dst=/to" \
+            --entrypoint /bin/sh "$live_image_id" -ceu 'cd /from && tar -cpf - . | tar -xpf - -C /to'
+          printf 'D063_INCIDENT_BACKUP=%s\n' "$incident_volume"
+
+          docker update --restart=no "$live_id" >/dev/null
+          docker stop --time 30 "$live_id" >/dev/null
+          stopped=1
+
+          docker run --rm --user 0:0 --network none \
+            --mount "type=volume,src=$DATA_VOLUME,dst=/to" \
+            --mount "type=volume,src=$SOURCE_VOLUME,dst=/from,readonly" \
+            --entrypoint /bin/sh "$live_image_id" -ceu '
+              find /to -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+              cd /from
+              tar -cpf - . | tar -xpf - -C /to
+            '
+          restored=1
+
+          # Verify exact restored bytes as a valid production data set before restart.
+          docker run --rm --user 0:0 --network none \
+            --mount "type=volume,src=$DATA_VOLUME,dst=/from,readonly" \
+            --entrypoint /bin/sh "$live_image_id" -ceu 'cd /from && tar -cpf - .' \
+            | tar -xpf - -C "$restored_snapshot"
+          python3 deploy/v52/maintenance/production-data-inventory.py "$restored_snapshot"
+
+          export D063_RESTORED_DB="$restored_snapshot/$relative_db"
+          python3 - <<'PY'
+          import sqlite3, os
+          p=os.environ['D063_RESTORED_DB']
+          con=sqlite3.connect(f'file:{p}?mode=ro', uri=True)
+          try:
+              if con.execute('PRAGMA integrity_check').fetchone()[0] != 'ok': raise SystemExit(1)
+              if con.execute("SELECT COUNT(*) FROM production_auth_credentials WHERE user_id='AUTH-OWNER' AND length(password_hash)>0 AND length(password_salt)>0").fetchone()[0] != 1: raise SystemExit(1)
+              print('D063_RESTORED_OWNER_AUTH=VERIFIED')
+          finally: con.close()
+          PY
+
+          docker start "$live_id" >/dev/null
+          stopped=0
+
+          ready=0
+          for _ in $(seq 1 60); do
+            status="$(docker exec "$live_id" node -e "fetch('http://127.0.0.1:8081/api/health',{redirect:'error'}).then(r=>process.stdout.write(String(r.status))).catch(()=>process.stdout.write('000'))" 2>/dev/null || true)"
+            if [ "$status" = 200 ]; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          public_status="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/")"
+          test "$public_status" = 200
+          anon_status="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/api/auth/me")"
+          test "$anon_status" = 401
+
+          if [ "$old_restart_name" = on-failure ]; then
+            docker update --restart="on-failure:$old_restart_max" "$live_id" >/dev/null
+          else
+            docker update --restart="$old_restart_name" "$live_id" >/dev/null
+          fi
+
+          printf 'D063_RECOVERY=SUCCESS\n'
+          printf 'D063_INTERNAL_HEALTH=200\n'
+          printf 'D063_PUBLIC_ROOT=200\n'
+          printf 'D063_ANON_AUTH_ME=401\n'
+          printf 'incident_volume=%s\n' "$incident_volume" >> "$GITHUB_OUTPUT"
+          trap - EXIT INT TERM HUP
+          rm -rf -- "$work"
+
+      - name: Publish recovery summary
+        if: always()
+        run: |
+          {
+            echo '## D-063 ArtHello production auth recovery'
+            echo
+            echo "- result: ${{ job.status }}"
+            echo "- verified source: $SOURCE_VOLUME"
+            echo "- production: $PUBLIC_URL"
+            echo '- passwords and credential material were never printed or replaced'
+          } >> "$GITHUB_STEP_SUMMARY"
