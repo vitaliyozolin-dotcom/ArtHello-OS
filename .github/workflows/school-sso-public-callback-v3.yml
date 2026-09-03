@@ -1,0 +1,362 @@
+name: School staff SSO public callback hotfix v3
+
+on:
+  push:
+    branches:
+      - school/fix-staff-sso-public-callback-20260903
+    paths:
+      - server/central-sso.ts
+      - app/auth/central/callback/route.ts
+      - tests/identity-broker-contract.test.mjs
+      - .github/workflows/school-sso-origin-hotfix.yml
+      - .github/workflows/school-sso-public-callback-v2.yml
+      - .github/workflows/school-sso-public-callback-v3.yml
+      - Dockerfile
+      - package.json
+      - package-lock.json
+  pull_request:
+    branches:
+      - school/staging-foundation-20260827
+    paths:
+      - server/central-sso.ts
+      - app/auth/central/callback/route.ts
+      - tests/identity-broker-contract.test.mjs
+      - .github/workflows/school-sso-origin-hotfix.yml
+      - .github/workflows/school-sso-public-callback-v2.yml
+      - .github/workflows/school-sso-public-callback-v3.yml
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: school-staff-sso-public-callback-v3-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ARTHELLO_ORIGIN: https://arthello-188-225-38-55.sslip.io
+  SCHOOL_ORIGIN: https://school-188-225-38-55.sslip.io
+
+jobs:
+  validate:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      (
+        github.event_name == 'push' ||
+        (
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.user.login == 'vitaliyozolin-dotcom' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'school/fix-staff-sso-public-callback-20260903'
+        )
+      )
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 75
+
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify source contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          grep -F 'origin: schoolPublicOrigin()' server/central-sso.ts >/dev/null
+          grep -F '"content-length": String(Buffer.byteLength(exchangeBody))' server/central-sso.ts >/dev/null
+          ! grep -F 'origin: exchangeUrl.origin' server/central-sso.ts >/dev/null
+          grep -F 'const publicOrigin = schoolPublicOrigin()' app/auth/central/callback/route.ts >/dev/null
+          grep -F 'new URL(completed.returnTo, publicOrigin)' app/auth/central/callback/route.ts >/dev/null
+          grep -F 'new URL("/login", publicOrigin)' app/auth/central/callback/route.ts >/dev/null
+          ! grep -F 'new URL(completed.returnTo, url.origin)' app/auth/central/callback/route.ts >/dev/null
+          ! grep -F 'new URL("/login", url.origin)' app/auth/central/callback/route.ts >/dev/null
+          docker run --rm --network none \
+            -v "$PWD:/repo:ro" -w /repo \
+            node:24-bookworm-slim \
+            node --test tests/identity-broker-contract.test.mjs
+          printf 'SCHOOL_SSO_PUBLIC_CALLBACK_SOURCE_V3=PASS\n'
+
+      - name: Build and test exact School candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -m 0755 -d .openai
+          printf '%s\n' '{"d1": null, "r2": null}' > .openai/hosting.json
+          sed -i '/^\.openai$/d' .dockerignore
+          builder="school-staff-sso-public-callback-builder:${GITHUB_SHA}"
+          runtime="school-staff-sso-public-callback:${GITHUB_SHA}"
+          docker build \
+            --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true \
+            --build-arg NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED=false \
+            --target builder \
+            --tag "$builder" .
+          docker run --rm --network none --entrypoint node "$builder" \
+            --test \
+            tests/phone-auth-contract.test.mjs \
+            tests/central-access-contract.test.mjs \
+            tests/central-family-directory.test.mjs \
+            tests/identity-broker-contract.test.mjs \
+            tests/design-code-contract.test.mjs \
+            tests/school-structure-contract.test.mjs \
+            tests/methodist-role-contract.test.mjs
+          docker build \
+            --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true \
+            --build-arg NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED=false \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$runtime" .
+          test "$(docker image inspect "$runtime" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+          printf 'SCHOOL_SSO_PUBLIC_CALLBACK_BUILD_V3=PASS\n'
+
+      - name: Verify current ArtHello exchange audience
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$(mktemp -d "$RUNNER_TEMP/school-sso-audience-XXXXXX")"
+          trap 'rm -rf -- "$work"' EXIT
+          code="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          verifier="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          body="$(jq -nc --arg code "$code" --arg verifier "$verifier" '{code:$code,codeVerifier:$verifier}')"
+          wrong_origin="$(curl -sS --max-time 20 -o "$work/wrong.json" -w '%{http_code}' \
+            -X POST "$ARTHELLO_ORIGIN/api/school-sso/exchange" \
+            -H 'content-type: application/json' -H "origin: $ARTHELLO_ORIGIN" --data "$body")"
+          school_origin="$(curl -sS --max-time 20 -o "$work/school.json" -w '%{http_code}' \
+            -X POST "$ARTHELLO_ORIGIN/api/school-sso/exchange" \
+            -H 'content-type: application/json' -H "origin: $SCHOOL_ORIGIN" --data "$body")"
+          test "$wrong_origin" = 403
+          test "$school_origin" = 401
+          grep -F 'Источник запроса не разрешён' "$work/wrong.json" >/dev/null
+          printf 'ARTHELLO_SCHOOL_ORIGIN_AUDIENCE_V3=PASS\n'
+
+      - name: Prove every active employee reaches a School session and UI snapshot
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec 9>/var/lock/school-staff-sso-candidate.lock
+          flock -n 9
+
+          image="school-staff-sso-public-callback:${GITHUB_SHA}"
+          arthello="$(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}' | head -n1)"
+          test -n "$arthello"
+          test "$(docker inspect "$arthello" --format '{{.State.Running}}')" = true
+          network="$(docker inspect "$arthello" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1)"
+          test -n "$network"
+
+          suffix="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          candidate="school-sso-callback-v3-$suffix"
+          data_volume="school_sso_callback_v3_${suffix}_data"
+          sessions_file="$RUNNER_TEMP/school-sso-sessions-v3-$suffix.json"
+          results_file="$RUNNER_TEMP/school-sso-results-v3-$suffix.json"
+          candidate_created=0
+          volume_created=0
+          sessions_injected=0
+
+          cleanup_arthello() {
+            test "$sessions_injected" -eq 1 || return 0
+            test -s "$sessions_file" || return 0
+            sessions_b64="$(base64 -w0 "$sessions_file" 2>/dev/null || true)"
+            results_b64=""
+            if [ -s "$results_file" ]; then results_b64="$(base64 -w0 "$results_file" 2>/dev/null || true)"; fi
+            docker exec -i -e STAFF_SESSIONS_B64="$sessions_b64" -e STAFF_RESULTS_B64="$results_b64" \
+              "$arthello" node --input-type=module - <<'CLEAN' >/dev/null 2>&1 || true
+          import { readdirSync, statSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+          const sessions=JSON.parse(Buffer.from(process.env.STAFF_SESSIONS_B64||'W10=','base64').toString('utf8'));
+          const result=JSON.parse(Buffer.from(process.env.STAFF_RESULTS_B64||'e30=','base64').toString('utf8'));
+          const files=[];
+          function walk(path,depth=0){if(depth>8)return;let entries=[];try{entries=readdirSync(path,{withFileTypes:true});}catch{return;}for(const entry of entries){const next=join(path,entry.name);if(entry.isDirectory())walk(next,depth+1);else if(entry.isFile()&&/\.sqlite(?:3)?$/i.test(entry.name)){try{if(statSync(next).size>8192)files.push(next);}catch{}}}}
+          walk('/data/d1');
+          for(const file of files){let db;try{db=new DatabaseSync(file);const tables=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row)=>String(row.name)));if(!tables.has('production_auth_sessions')){db.close();continue;}const removeSession=db.prepare('DELETE FROM production_auth_sessions WHERE token_hash=?');for(const item of sessions){if(item.tokenHash)removeSession.run(item.tokenHash);}if(tables.has('school_sso_codes')){const removeCode=db.prepare('DELETE FROM school_sso_codes WHERE code_hash=?');for(const hash of result.codeHashes||[]){if(hash)removeCode.run(hash);}}db.close();process.exit(0);}catch{try{db?.close();}catch{}}}
+          CLEAN
+          }
+
+          cleanup() {
+            rc=$?
+            set +e
+            cleanup_arthello
+            if [ "$candidate_created" -eq 1 ]; then docker rm -f "$candidate" >/dev/null 2>&1; fi
+            if [ "$volume_created" -eq 1 ]; then docker volume rm "$data_volume" >/dev/null 2>&1; fi
+            rm -f "$sessions_file" "$results_file"
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          docker exec -i "$arthello" node --input-type=module - > "$sessions_file" <<'INJECT'
+          import { createHash, randomBytes } from 'node:crypto';
+          import { readdirSync, statSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+          const files=[];
+          function walk(path,depth=0){if(depth>8)return;let entries=[];try{entries=readdirSync(path,{withFileTypes:true});}catch{return;}for(const entry of entries){const next=join(path,entry.name);if(entry.isDirectory())walk(next,depth+1);else if(entry.isFile()&&/\.sqlite(?:3)?$/i.test(entry.name)){try{if(statSync(next).size>8192)files.push(next);}catch{}}}}
+          walk('/data/d1');
+          let db=null;
+          for(const file of files){try{const candidate=new DatabaseSync(file);const tables=new Set(candidate.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row)=>String(row.name)));if(tables.has('app_users')&&tables.has('user_system_access')&&tables.has('production_auth_sessions')&&tables.has('production_auth_credentials')){db=candidate;break;}candidate.close();}catch{}}
+          if(!db)throw new Error('ArtHello D1 not found');
+          const accounts=db.prepare(`SELECT u.id AS appUserId,u.display_name AS displayName,school.role AS schoolGrantRole,c.user_id AS authUserId,central.access_version AS accessVersion
+            FROM app_users u
+            JOIN user_system_access central ON central.user_id=u.id AND central.system_id='SYS-ARTHELLO-OS'
+            JOIN user_system_access school ON school.user_id=u.id AND school.system_id='SYS-SCHOOL-1-11'
+            JOIN production_auth_credentials c ON c.user_id=CASE WHEN u.id='USR-OWNER' THEN 'AUTH-OWNER' ELSE u.id END
+            WHERE u.status='Активен' AND central.status='Активен' AND school.status='Активен'
+              AND u.access_version=central.access_version AND u.access_version=school.access_version
+              AND COALESCE(c.must_change_password,0)=0
+            ORDER BY u.display_name,u.id`).all();
+          if(accounts.length<1)throw new Error('No active staff accounts');
+          const insert=db.prepare('INSERT INTO production_auth_sessions (token_hash,user_id,csrf_token,expires_at,access_version,created_at) VALUES (?,?,?,?,?,?)');
+          const now=Math.floor(Date.now()/1000);
+          const sessions=[];
+          for(const account of accounts){const token=randomBytes(32).toString('base64url');const tokenHash=createHash('sha256').update(token).digest('base64url');insert.run(tokenHash,account.authUserId,randomBytes(24).toString('base64url'),now+900,account.accessVersion,now);sessions.push({...account,token,tokenHash});}
+          db.close();
+          process.stdout.write(JSON.stringify(sessions));
+          INJECT
+          test -s "$sessions_file"
+          chmod 600 "$sessions_file"
+          sessions_injected=1
+
+          sessions_b64="$(base64 -w0 "$sessions_file")"
+          test "${#sessions_b64}" -lt 65536
+
+          docker volume create "$data_volume" >/dev/null
+          volume_created=1
+          central_secret="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          test "${#central_secret}" -ge 32
+          echo "::add-mask::$central_secret"
+          docker run -d --name "$candidate" --read-only \
+            --tmpfs /tmp:rw,uid=1001,gid=1001,mode=0700 \
+            --network "$network" \
+            -e NODE_ENV=production -e PORT=3000 -e HOSTNAME=0.0.0.0 \
+            -e DATABASE_PATH=/data/school-1-11.sqlite \
+            -e PUBLIC_APP_ORIGIN="$SCHOOL_ORIGIN" \
+            -e ARTHELLO_PUBLIC_ORIGIN="$ARTHELLO_ORIGIN" \
+            -e CENTRAL_ACCESS_SECRET="$central_secret" \
+            -e ENABLE_LEGACY_PASSWORD_LOGIN=true \
+            -v "$data_volume:/data" "$image" >/dev/null
+          candidate_created=1
+
+          ready=0
+          for attempt in $(seq 1 90); do
+            if docker exec "$candidate" node -e "fetch('http://127.0.0.1:3000/api/health').then(async r=>{const p=await r.json();if(!r.ok||p.status!=='ok')process.exit(1)}).catch(()=>process.exit(1))"; then ready=1; break; fi
+            test "$(docker inspect "$candidate" --format '{{.State.Running}}' 2>/dev/null || true)" = true || break
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then docker logs "$candidate" --tail 240 >&2 || true; exit 1; fi
+
+          docker exec -i \
+            -e STAFF_SESSIONS_B64="$sessions_b64" \
+            -e ARTHELLO_ORIGIN="$ARTHELLO_ORIGIN" \
+            -e SCHOOL_ORIGIN="$SCHOOL_ORIGIN" \
+            "$candidate" node --input-type=module - > "$results_file" <<'VERIFY'
+          import { createHash } from 'node:crypto';
+          const sessions=JSON.parse(Buffer.from(process.env.STAFF_SESSIONS_B64,'base64').toString('utf8'));
+          const base='http://127.0.0.1:3000';
+          const arthelloOrigin=process.env.ARTHELLO_ORIGIN;
+          const schoolOrigin=process.env.SCHOOL_ORIGIN;
+          const results=[];
+          const codeHashes=[];
+          function setCookies(response){return typeof response.headers.getSetCookie==='function'?response.headers.getSetCookie():[response.headers.get('set-cookie')||''];}
+          function findCookie(response,name){for(const raw of setCookies(response)){const pair=raw.split(';',1)[0];if(pair.startsWith(`${name}=`))return pair.slice(name.length+1);}return '';}
+          function safe(value){return String(value??'').replace(/\s+/g,' ').slice(0,220);}
+          for(const account of sessions){
+            const stages={};
+            try{
+              const start=await fetch(base+'/auth/central/start?returnTo=/',{redirect:'manual'});
+              stages.start=start.status;
+              if(start.status!==303)throw new Error(`start_http_${start.status}`);
+              const tx=findCookie(start,'school_sso_tx');
+              if(!tx)throw new Error('transaction_cookie_missing');
+              const authorizeUrl=new URL(start.headers.get('location')||'',base);
+              if(authorizeUrl.origin!==arthelloOrigin||authorizeUrl.pathname!=='/api/school-sso/authorize')throw new Error('authorize_location_invalid');
+              const authorize=await fetch(authorizeUrl,{redirect:'manual',headers:{cookie:`__Host-arthello_session=${account.token}`}});
+              stages.authorize=authorize.status;
+              if(authorize.status!==303)throw new Error(`authorize_http_${authorize.status}`);
+              const publicCallback=new URL(authorize.headers.get('location')||'',arthelloOrigin);
+              if(publicCallback.searchParams.get('authError')==='central_denied')throw new Error(`authorize_denied:${safe(publicCallback.searchParams.get('reason'))}`);
+              if(publicCallback.origin!==schoolOrigin||publicCallback.pathname!=='/auth/central/callback')throw new Error('public_callback_invalid');
+              const code=publicCallback.searchParams.get('code')||'';
+              if(!code)throw new Error('authorization_code_missing');
+              codeHashes.push(createHash('sha256').update(code).digest('base64url'));
+              const callbackUrl=new URL(publicCallback.pathname+publicCallback.search,base);
+              const callback=await fetch(callbackUrl,{redirect:'manual',headers:{cookie:`school_sso_tx=${tx}`}});
+              stages.callback=callback.status;
+              if(callback.status!==303)throw new Error(`callback_http_${callback.status}:${safe(await callback.text())}`);
+              const finalLocation=new URL(callback.headers.get('location')||'',base);
+              if(finalLocation.origin!==schoolOrigin||finalLocation.pathname!=='/')throw new Error(`final_location_${finalLocation.origin}${finalLocation.pathname}`);
+              if(['0.0.0.0','127.0.0.1','localhost'].includes(finalLocation.hostname))throw new Error('internal_callback_origin_exposed');
+              const session=findCookie(callback,'school_session');
+              if(!session)throw new Error('school_session_cookie_missing');
+              const snapshotResponse=await fetch(base+'/api/school',{headers:{cookie:`school_session=${session}`,accept:'application/json'}});
+              stages.snapshot=snapshotResponse.status;
+              const snapshot=await snapshotResponse.json().catch(()=>({}));
+              if(!snapshotResponse.ok)throw new Error(`snapshot_http_${snapshotResponse.status}:${safe(snapshot.error)}`);
+              const viewer=snapshot.viewer;
+              if(!viewer||viewer.displayName!==account.displayName)throw new Error(`viewer_identity_${safe(viewer?.displayName)}`);
+              if(!viewer.role)throw new Error('viewer_role_missing');
+              const page=await fetch(base+'/',{headers:{cookie:`school_session=${session}`,accept:'text/html'}});
+              stages.page=page.status;
+              const html=await page.text();
+              if(!page.ok||html.length<1000)throw new Error(`page_invalid_${page.status}_${html.length}`);
+              const assets=[...new Set([...html.matchAll(/(?:src|href)=["'](\/_next\/[^"']+)["']/g)].map((match)=>match[1]))];
+              if(!assets.length)throw new Error('page_assets_missing');
+              for(const asset of assets.slice(0,24)){const response=await fetch(base+asset);if(!response.ok)throw new Error(`asset_http_${response.status}`);await response.arrayBuffer();}
+              results.push({appUserId:account.appUserId,displayName:account.displayName,schoolGrantRole:account.schoolGrantRole,resolvedRole:viewer.role,stages,pageBytes:html.length,assetCount:assets.length,status:'PASS'});
+            }catch(error){results.push({appUserId:account.appUserId,displayName:account.displayName,schoolGrantRole:account.schoolGrantRole,stages,status:'FAIL',reason:error instanceof Error?error.message.slice(0,260):'unknown'});}
+          }
+          process.stdout.write(JSON.stringify({results,codeHashes}));
+          VERIFY
+          test -s "$results_file"
+          chmod 600 "$results_file"
+          python3 - "$results_file" <<'PY'
+          import json,sys
+          with open(sys.argv[1],encoding='utf-8') as handle:data=json.load(handle)
+          results=data.get('results',[])
+          print('SCHOOL_STAFF_SSO_RESULTS_V3_BEGIN')
+          print(json.dumps(results,ensure_ascii=False,indent=2))
+          print('SCHOOL_STAFF_SSO_RESULTS_V3_END')
+          failed=[item for item in results if item.get('status')!='PASS']
+          natalias=[item for item in results if str(item.get('displayName','')).startswith('Наталья ')]
+          print(f'SCHOOL_STAFF_SSO_TOTAL={len(results)}')
+          print(f'SCHOOL_STAFF_SSO_PASS={len(results)-len(failed)}')
+          print(f'SCHOOL_STAFF_SSO_FAIL={len(failed)}')
+          print(f'SCHOOL_STAFF_SSO_NATALIA_PASS={sum(1 for item in natalias if item.get("status")=="PASS")}')
+          if len(natalias)!=2 or failed: raise SystemExit(2)
+          PY
+
+          cleanup_arthello
+          sessions_injected=0
+          docker rm -f "$candidate" >/dev/null
+          candidate_created=0
+          docker volume rm "$data_volume" >/dev/null
+          volume_created=0
+          rm -f "$sessions_file" "$results_file"
+          trap - EXIT
+          printf 'SCHOOL_STAFF_SSO_PRODUCTION_AUTHORITY_E2E_V3=PASS\n'
+
+      - name: Cleanup candidate images
+        if: always()
+        shell: bash
+        run: |
+          docker image rm "school-staff-sso-public-callback:${GITHUB_SHA}" >/dev/null 2>&1 || true
+          docker image rm "school-staff-sso-public-callback-builder:${GITHUB_SHA}" >/dev/null 2>&1 || true
+
+      - name: Publish exact commit status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.sha,
+              state: process.env.JOB_STATUS === 'success' ? 'success' : 'failure',
+              context: 'school/staff-sso-public-callback-v3',
+              description: 'School employee SSO public callback v3 ' + process.env.JOB_STATUS,
+              target_url: process.env.GITHUB_SERVER_URL + '/' + process.env.GITHUB_REPOSITORY + '/actions/runs/' + process.env.GITHUB_RUN_ID,
+            });
