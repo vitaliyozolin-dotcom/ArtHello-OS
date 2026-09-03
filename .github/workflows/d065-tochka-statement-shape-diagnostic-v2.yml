@@ -1,0 +1,148 @@
+name: D065 Tochka statement shape diagnostic v2
+
+on:
+  push:
+    branches: [codex/d065-tochka-statement-diagnostic-20260903]
+    paths:
+      - .github/workflows/d065-tochka-statement-shape-diagnostic-v2.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-38-55-arthello-d065-diagnostic
+  cancel-in-progress: false
+
+env:
+  DATA_VOLUME: arthello-direct-v44-data
+
+jobs:
+  diagnose:
+    if: github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact diagnostic source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Inspect live Tochka response schema in isolated read-only container
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$RUNNER_TEMP/arthello-d065-v2-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          snapshot="$work/snapshot"
+          context="$work/context.json"
+          envfile="$work/live.env"
+          mkdir -p "$snapshot"
+          chmod 0700 "$work" "$snapshot"
+          trap 'rm -rf -- "$work"' EXIT INT TERM HUP
+
+          mapfile -t live_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
+          test "${#live_ids[@]}" -eq 1
+          live_id="${live_ids[0]}"
+          test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+          image_id="$(docker inspect "$live_id" --format '{{.Image}}')"
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          network="$(docker inspect "$live_id" --format '{{range $name,$cfg := .NetworkSettings.Networks}}{{$name}}{{end}}')"
+          test -n "$network"
+          docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' > "$envfile"
+          chmod 0600 "$envfile"
+          test -s "$envfile"
+
+          docker run --rm --network none --user 0:0 \
+            --mount "type=volume,src=$DATA_VOLUME,dst=/from,readonly" \
+            --entrypoint /bin/sh "$image_id" -ceu 'cd /from && tar -cpf - .' \
+            | tar -xpf - -C "$snapshot"
+
+          relative_db="$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)"
+          db="$snapshot/$relative_db"
+          test -f "$db"
+
+          D065_DB="$db" D065_CONTEXT="$context" python3 - <<'PY'
+          import json, os, sqlite3, urllib.parse
+          con=sqlite3.connect(f"file:{os.environ['D065_DB']}?mode=ro", uri=True)
+          try:
+              row=con.execute("SELECT state_value FROM system_runtime_state WHERE state_key='integration_setup:INT-T-TOCHKA'").fetchone()
+              if not row: raise SystemExit('D065_SETUP_MISSING')
+              setup=json.loads(row[0])
+              legal=str(setup.get('legalEntityId') or '').strip()
+              customer=str(setup.get('customerCode') or '').strip()
+              start=str(setup.get('startDate') or '').strip()
+              if not legal or not customer or not start: raise SystemExit('D065_SETUP_INCOMPLETE')
+              key='integration_credential:v2:' + ':'.join(urllib.parse.quote(v,safe='') for v in ('INT-T-TOCHKA',legal,customer))
+              cred=con.execute('SELECT state_value FROM system_runtime_state WHERE state_key=?',(key,)).fetchone()
+              if not cred: raise SystemExit('D065_CREDENTIAL_MISSING')
+              envelope=json.loads(cred[0])
+              if envelope.get('version') != 1 or envelope.get('algorithm') != 'AES-GCM': raise SystemExit('D065_ENVELOPE_INVALID')
+              with open(os.environ['D065_CONTEXT'],'w',encoding='utf-8') as f:
+                  json.dump({'legalEntityId':legal,'customerCode':customer,'startDate':start,'envelope':envelope},f,separators=(',',':'))
+              os.chmod(os.environ['D065_CONTEXT'],0o600)
+              print('D065_STORED_CONTEXT=READY')
+          finally:
+              con.close()
+          PY
+
+          docker run --rm --read-only --network "$network" \
+            --env-file "$envfile" \
+            --mount "type=bind,src=$context,dst=/run/arthello-d065-context.json,readonly" \
+            --entrypoint node "$image_id" --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          import { webcrypto } from 'node:crypto';
+          const { subtle } = webcrypto;
+          const ctx=JSON.parse(fs.readFileSync('/run/arthello-d065-context.json','utf8'));
+          const configured=process.env.INTEGRATION_CREDENTIALS_KEY;
+          if (typeof configured!=='string' || configured.length<32) throw new Error('D065_MASTER_KEY_UNAVAILABLE');
+          const te=new TextEncoder(); const td=new TextDecoder();
+          const decode=(value)=>Buffer.from(String(value).replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(String(value).length/4)*4,'='),'base64');
+          const keyBytes=await subtle.digest('SHA-256',te.encode(`arthello.integration-credential.key.v1\n${configured}`));
+          const key=await subtle.importKey('raw',keyBytes,'AES-GCM',false,['decrypt']);
+          const aad=te.encode(`arthello.integration-credential.v2\nINT-T-TOCHKA\n${ctx.legalEntityId}\n${ctx.customerCode}\nTOCHKA_ACCOUNTS_READ_V1`);
+          const plain=await subtle.decrypt({name:'AES-GCM',iv:decode(ctx.envelope.iv),additionalData:aad,tagLength:128},key,decode(ctx.envelope.ciphertext));
+          const token=td.decode(plain);
+          if (token.length<40 || /\s/.test(token)) throw new Error('D065_DECRYPTED_CREDENTIAL_INVALID');
+
+          const headers={accept:'application/json',authorization:`Bearer ${token}`};
+          const readJson=async(response)=>{const text=await response.text(); if(text.length>10000000)throw new Error('D065_RESPONSE_TOO_LARGE'); try{return JSON.parse(text)}catch{return null}};
+          const obj=(v)=>v&&typeof v==='object'&&!Array.isArray(v)?v:null;
+          const collection=(payload,names)=>{const root=obj(payload);if(!root)return[];const data=obj(root.Data)||obj(root.data);for(const c of[root,data]){if(!c)continue;for(const n of names){const v=c[n];if(Array.isArray(v))return v;if(obj(v))return[v]}}return[]};
+          const customerCode=(v)=>String(v?.CustomerCode??v?.customerCode??v?.customer_code??'').trim();
+          const accountId=(v)=>{if(!obj(v))return'';const details=Array.isArray(v.accountDetails??v.AccountDetails)?(v.accountDetails??v.AccountDetails):[];const d=details.find(obj);return String(v.accountId??v.AccountId??d?.identification??d?.Identification??'').trim()};
+          const statements=(payload)=>collection(payload,['Statement','statement','Statements','statements']);
+          const sid=(v)=>String(v?.statementId??v?.StatementId??'').trim();
+          const safeKeys=(v)=>obj(v)?Object.keys(v).sort().slice(0,80):[];
+          const shape=(payload)=>{const root=obj(payload);const data=root?(obj(root.Data)||obj(root.data)):null;const raw=data?.Statement??data?.statement??data?.Statements??data?.statements;const list=statements(payload);const first=list[0];const status=String(first?.status??first?.Status??'').trim();const tx=first?.Transaction??first?.transaction??first?.Transactions??first?.transactions;return{rootType:Array.isArray(payload)?`array(${payload.length})`:root?'object':typeof payload,rootKeys:safeKeys(root),dataKeys:safeKeys(data),statementCount:list.length,statementContainer:Array.isArray(raw)?`array(${raw.length})`:obj(raw)?'object':raw==null?'absent':typeof raw,statementKeys:safeKeys(first),status:/^(Created|Processing|Ready|Completed|Failed|Error|Rejected)$/i.test(status)?status:status?'OTHER':'EMPTY',transactionShape:Array.isArray(tx)?`array(${tx.length})`:obj(tx)?'object':tx==null?'absent':typeof tx}};
+
+          const accountsResponse=await fetch('https://enter.tochka.com/uapi/open-banking/v1.0/accounts',{method:'GET',headers,redirect:'error',cache:'no-store'});
+          console.log('D065_ACCOUNTS_HTTP='+accountsResponse.status);
+          if(!accountsResponse.ok)throw new Error('D065_ACCOUNTS_REQUEST_FAILED');
+          const accountsPayload=await readJson(accountsResponse);
+          const account=collection(accountsPayload,['Account','account','Accounts','accounts']).filter((a)=>customerCode(a)===ctx.customerCode).map((a)=>accountId(a)).find((id)=>/^\d{20}(?:\/\d{9})?$/.test(id));
+          if(!account)throw new Error('D065_SELECTED_ACCOUNT_MISSING');
+
+          const endDate=new Date().toISOString().slice(0,10);
+          const initResponse=await fetch('https://enter.tochka.com/uapi/open-banking/v1.0/statements',{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({Data:{Statement:{accountId:account,startDateTime:ctx.startDate,endDateTime:endDate}}}),redirect:'error',cache:'no-store'});
+          const initPayload=await readJson(initResponse);
+          console.log('D065_INIT_HTTP='+initResponse.status);
+          console.log('D065_INIT_SHAPE='+JSON.stringify(shape(initPayload)));
+          if(!initResponse.ok)throw new Error('D065_INIT_FAILED');
+          const statementId=sid(statements(initPayload)[0]);
+          if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(statementId))throw new Error('D065_STATEMENT_ID_MISSING');
+
+          const url=`https://enter.tochka.com/uapi/open-banking/v1.0/accounts/${account}/statements/${encodeURIComponent(statementId)}`;
+          for(let attempt=1;attempt<=8;attempt++){
+            const response=await fetch(url,{method:'GET',headers,redirect:'error',cache:'no-store'});
+            const payload=await readJson(response);
+            console.log(`D065_GET_${attempt}_HTTP=${response.status}`);
+            console.log(`D065_GET_${attempt}_SHAPE=${JSON.stringify(shape(payload))}`);
+            if(!response.ok)break;
+            const first=statements(payload)[0];
+            const status=String(first?.status??first?.Status??'').trim();
+            if(/^(Ready|Completed)$/i.test(status))break;
+            await new Promise((resolve)=>setTimeout(resolve,1500));
+          }
+          console.log('D065_DIAGNOSTIC=SUCCESS');
+          NODE
