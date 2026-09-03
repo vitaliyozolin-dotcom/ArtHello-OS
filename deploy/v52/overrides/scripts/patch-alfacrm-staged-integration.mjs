@@ -165,7 +165,7 @@ routeSource = routeSource.replace(
 writeFileSync(routeTarget, routeSource);
 
 const alfaWizardTarget = resolve(process.cwd(), "app/components/AlfaCrmSetupWizard.tsx");
-const alfaWizardCssTarget = resolve(process.cwd(), "app/components/AlfaCrmSetupWizard.css");
+const alfaWizardCssTarget = resolve(process.cwd(), "app/components/AlfaCrmSetupWizard.styles.txt");
 let alfaWizardSource = readFileSync(alfaWizardTarget, "utf8");
 const alfaWizardCss = readFileSync(alfaWizardCssTarget, "utf8");
 const wizardCssImport = 'import "./AlfaCrmSetupWizard.css";\n';
