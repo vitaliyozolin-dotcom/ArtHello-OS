@@ -575,5 +575,5 @@ decision:
 - надёжность: ответ банка полностью читается внутри 45-секундного abort-контроля и ограничивается 2 000 000 байт; stalled/oversized body возвращает безопасную ошибку без ключа;
 - OAuth: не используется как обход, потому что token exchange и API-вызовы зависят от того же транспорта; пересмотр возможен для сторонних клиентов после регистрации приложения и получения `client_id/client_secret`;
 - release PR/branch: `#328`, `codex/d059-tochka-binding-redirect-20260903`; previous production SHA `7e926f4c29aa7e3c3208a55451db035714861e28`;
-- приёмка: 7/7 целевых transport/service-binding тестов, first-attempt exact-SHA Quality/Proof/Verify, production Node TLS egress, изолированный clone, backup-first cutover, rollback guards и публичный health-check;
+- приёмка: 8/8 целевых transport/service-binding тестов, включая потоковый JSON и HTTP 204; first-attempt exact-SHA Quality/Proof/Verify, production Node TLS egress, изолированный clone, backup-first cutover, rollback guards и публичный health-check;
 - следующий переход: владелец повторно сохраняет тот же JWT; результатом являются реальные компании/счета/выписки либо конкретная банковская ошибка ключа/прав, но не общий transport failure.

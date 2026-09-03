@@ -12,7 +12,7 @@ D-058 опубликован production run `33762398372`: точный SHA `7e9
 
 Переход на OAuth сейчас не выполняется. Ошибка возникает до банковской аутентификации, поэтому OAuth token exchange и последующие API-вызовы встретили бы тот же дефект транспорта. Кроме того, OAuth требует зарегистрированного приложения, `client_id`, `client_secret` и redirect URI; его следует пересмотреть при подключении сторонних компаний от имени клиентов, а не как обход этого сбоя.
 
-Одноразовая выкладка разрешена только из `vitaliyozolin-dotcom/ArtHello-OS:codex/d059-tochka-binding-redirect-20260903` через PR `#328`, прямого потомка D-058 `7e926f4c29aa7e3c3208a55451db035714861e28`. Приёмка требует 7/7 transport/service-binding тестов, first-attempt exact-SHA Quality/Proof/Verify, production Node TLS egress, изолированный clone-preflight, backup-first cutover, rollback guards и публичный health-check. После релиза владелец повторяет подключение: допустимы либо реальные данные, либо конкретный HTTP-ответ банка о ключе/правах; общая транспортная ошибка недопустима.
+Одноразовая выкладка разрешена только из `vitaliyozolin-dotcom/ArtHello-OS:codex/d059-tochka-binding-redirect-20260903` через PR `#328`, прямого потомка D-058 `7e926f4c29aa7e3c3208a55451db035714861e28`. Приёмка требует 8/8 transport/service-binding тестов, first-attempt exact-SHA Quality/Proof/Verify, production Node TLS egress, изолированный clone-preflight, backup-first cutover, rollback guards и публичный health-check. После релиза владелец повторяет подключение: допустимы либо реальные данные, либо конкретный HTTP-ответ банка о ключе/правах; общая транспортная ошибка недопустима.
 
 ## D-058 — Выполнять read-only запросы Точки через ограниченный Node service binding и не увеличивать форму на iPhone
 

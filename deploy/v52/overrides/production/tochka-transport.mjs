@@ -68,7 +68,8 @@ export function createTochkaTransport({ fetchImpl = globalThis.fetch, timeoutMs 
       const contentType = upstream.headers.get("content-type");
       if (contentType) responseHeaders.set("content-type", contentType);
       responseHeaders.set("cache-control", "no-store");
-      return new Response(responseBody, {
+      const downstreamBody = isNullBodyStatus(upstream.status) ? null : responseBody;
+      return new Response(downstreamBody, {
         status: upstream.status,
         statusText: upstream.statusText,
         headers: responseHeaders,
@@ -109,6 +110,10 @@ async function readBoundedResponseBody(response) {
     offset += chunk.byteLength;
   }
   return bytes;
+}
+
+function isNullBodyStatus(status) {
+  return status === 204 || status === 205 || status === 304;
 }
 
 /** Stateless image preflight: proves this exact Node module can reach Tochka. */

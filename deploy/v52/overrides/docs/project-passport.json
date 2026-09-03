@@ -411,7 +411,7 @@
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
     "result": "опубликовать D-059: использовать redirect:manual только на внутреннем worker → service binding hop, сохранить запрет redirects в Node и закрыть зависание/неограниченное тело ответа",
-    "evidence": "7/7 целевых transport/service-binding тестов, lint и production build; exact-SHA hosted gates, Node TLS preflight, изолированный clone, backup-first cutover, rollback guards, public health и повторная проверка владельцем"
+    "evidence": "8/8 целевых transport/service-binding тестов, lint и production build; потоковый JSON полностью читается через Miniflare, HTTP 204 сохраняется без ложного 502; exact-SHA hosted gates, Node TLS preflight, изолированный clone, backup-first cutover, rollback guards, public health и повторная проверка владельцем"
   },
   "decisionLog": [
     {
@@ -1707,7 +1707,7 @@
         "Production run 33762398372: ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED status=403 и ARTHELLO_RELEASE_ACTIVE=7e926f4c29aa7e3c3208a55451db035714861e28",
         "IMG_9996(2).png и IMG_9997(2).png: повторный реальный запуск D-058 дошёл до загрузки и вернул общую транспортную ошибку",
         "Локальное воспроизведение на Miniflare 4.20260515.0: redirect:error вернул TypeError до единого upstream-вызова; redirect:manual выполнил service binding, а Node upstream получил redirect:error",
-        "7/7 целевых тестов D-059 подтверждают allowlist, отсутствие утечки JWT, таймаут тела, лимит ответа и фактический Miniflare service-binding hop",
+        "8/8 целевых тестов D-059 подтверждают allowlist, отсутствие утечки JWT, таймаут и лимит тела, потоковый JSON, сохранение HTTP 204 и фактический Miniflare service-binding hop",
         "Официальная документация Точки разделяет готовый JWT и OAuth-приложение; OAuth требует client_id/client_secret и не заменяет сетевой транспорт API"
       ],
       "assumptions": [
@@ -1763,7 +1763,7 @@
           "action": "Опубликовать D-059 через PR 328 и получить exact-SHA production evidence",
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
-          "evidence_required": "first-attempt hosted Quality/Proof/Verify, 7/7 transport/service-binding тестов, Node TLS egress, изолированный clone, backup-first cutover, rollback guards и public health",
+          "evidence_required": "first-attempt hosted Quality/Proof/Verify, 8/8 transport/service-binding тестов, Node TLS egress, изолированный clone, backup-first cutover, rollback guards и public health",
           "status": "in_progress"
         },
         {

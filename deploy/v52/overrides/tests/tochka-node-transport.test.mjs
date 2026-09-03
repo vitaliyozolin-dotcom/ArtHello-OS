@@ -171,6 +171,19 @@ test("Node transport rejects an oversized upstream response without buffering it
   assert.match(await response.text(), /upstream_response_too_large/);
 });
 
+test("Node transport preserves a bodyless upstream status", async () => {
+  const transport = createTochkaTransport({
+    fetchImpl: async () => new Response(null, { status: 204 }),
+  });
+
+  const response = await transport(new Request("https://enter.tochka.com/uapi/open-banking/v1.0/accounts", {
+    headers: { authorization: `Bearer ${syntheticJwt}` },
+  }));
+
+  assert.equal(response.status, 204);
+  assert.equal(response.body, null);
+});
+
 test("workerd reaches the Node service binding through its supported internal redirect mode", { timeout: 20_000 }, async () => {
   const route = readFileSync(new URL("../app/api/integration-actions/route.ts", import.meta.url), "utf8");
   assert.match(route, /transport\.fetch\(input, \{ \.\.\.init, redirect: "manual" \}\)/);
@@ -179,7 +192,22 @@ test("workerd reaches the Node service binding through its supported internal re
   const transport = createTochkaTransport({
     fetchImpl: async (input, init) => {
       upstreamCalls.push({ url: String(input), redirect: init.redirect });
-      return new Response(JSON.stringify({ Data: { Customer: [] } }), {
+      const chunks = [
+        '{"Data":{"Customer":[',
+        '{"customerCode":"streamed-company"}',
+        ']}}',
+      ];
+      return new Response(new ReadableStream({
+        async pull(controller) {
+          const chunk = chunks.shift();
+          if (chunk === undefined) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(new TextEncoder().encode(chunk));
+          await new Promise((resolve) => setTimeout(resolve, 2));
+        },
+      }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
@@ -193,14 +221,21 @@ test("workerd reaches the Node service binding through its supported internal re
     compatibilityFlags: ["nodejs_compat"],
     modules: true,
     script: `export default { async fetch(_request, env) {
-      return env.TOCHKA_TRANSPORT.fetch(
+      const controller = new AbortController();
+      const response = await env.TOCHKA_TRANSPORT.fetch(
         "https://enter.tochka.com/uapi/open-banking/v1.0/customers",
         {
           method: "GET",
           headers: { authorization: "Bearer ${syntheticJwt}" },
-          redirect: "manual"
+          redirect: "manual",
+          signal: controller.signal
         }
       );
+      const payload = await response.json();
+      return Response.json({
+        upstreamStatus: response.status,
+        customerCode: payload.Data.Customer[0].customerCode
+      });
     } }`,
     serviceBindings: { TOCHKA_TRANSPORT: transport },
   });
@@ -208,6 +243,10 @@ test("workerd reaches the Node service binding through its supported internal re
   try {
     const response = await runtime.dispatchFetch("https://arthello.test/service-binding-proof");
     assert.equal(response.status, 200, await response.clone().text());
+    assert.deepEqual(await response.json(), {
+      upstreamStatus: 200,
+      customerCode: "streamed-company",
+    });
     assert.equal(upstreamCalls.length, 1);
     assert.deepEqual(upstreamCalls[0], {
       url: "https://enter.tochka.com/uapi/open-banking/v1.0/customers",
