@@ -1,0 +1,244 @@
+name: Prove live staff School SSO end to end
+
+on:
+  push:
+    branches:
+      - codex/verify-fix-staff-school-sso-20260903
+    paths:
+      - .github/workflows/prove-live-staff-school-sso-e2e-20260903.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prove-live-staff-school-sso-e2e-20260903
+  cancel-in-progress: false
+
+jobs:
+  prove:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    timeout-minutes: 20
+
+    steps:
+      - name: Execute and clean real browser-equivalent staff SSO journeys
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec 9>/var/lock/arthello-staff-school-sso-live-e2e.lock
+          flock -n 9
+
+          ARTHELLO_ORIGIN='https://arthello-188-225-38-55.sslip.io'
+          SCHOOL_ORIGIN='https://school-188-225-38-55.sslip.io'
+          live="$(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}' | head -n1)"
+          test -n "$live"
+          test "$(docker inspect "$live" --format '{{.State.Running}}')" = true
+          revision="$(docker image inspect "$(docker inspect "$live" --format '{{.Config.Image}}')" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true)"
+          printf 'LIVE_E2E_ARTHELLO_REVISION=%s\n' "${revision:-unknown}"
+
+          asset="$(docker exec "$live" sh -lc "grep -RIl --include='*.js' 'auth/central/start' /app/dist/client/assets 2>/dev/null | head -n1")"
+          test -n "$asset"
+          popup_refs="$(docker exec "$live" sh -lc "grep -Eo 'window\.open|target:[[:space:]]*[\"'\"']_blank[\"'\"']|target=\\\"_blank\\\"' '$asset' 2>/dev/null | wc -l" | tr -d '[:space:]')"
+          same_tab_refs="$(docker exec "$live" sh -lc "grep -Eo 'location\.assign\([^)]*auth/central/start' '$asset' 2>/dev/null | wc -l" | tr -d '[:space:]')"
+          printf 'LIVE_DIARY_ENTRY_NEW_WINDOW_REFS=%s\n' "${popup_refs:-0}"
+          printf 'LIVE_DIARY_ENTRY_SAME_TAB_REFS=%s\n' "${same_tab_refs:-0}"
+
+          suffix="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sessions_file="$RUNNER_TEMP/staff-school-sso-sessions-$suffix.json"
+          private_result="$RUNNER_TEMP/staff-school-sso-private-$suffix.json"
+          injected=0
+
+          locate_and_cleanup=''
+          cleanup() {
+            rc=$?
+            set +e
+            if [ "$injected" -eq 1 ] && [ -s "$sessions_file" ]; then
+              sessions_b64="$(base64 -w0 "$sessions_file" 2>/dev/null || true)"
+              result_b64=""
+              if [ -s "$private_result" ]; then result_b64="$(base64 -w0 "$private_result" 2>/dev/null || true)"; fi
+              docker exec -i \
+                -e STAFF_SESSIONS_B64="$sessions_b64" \
+                -e STAFF_RESULTS_B64="$result_b64" \
+                "$live" node --input-type=module - <<'CLEAN' >/dev/null 2>&1 || true
+          import { readdirSync, statSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+          const decode=(value)=>value?JSON.parse(Buffer.from(value,'base64').toString('utf8')):null;
+          const sessions=decode(process.env.STAFF_SESSIONS_B64)||[];
+          const result=decode(process.env.STAFF_RESULTS_B64)||{};
+          const files=[];
+          function walk(path,depth=0){if(depth>8)return;let entries=[];try{entries=readdirSync(path,{withFileTypes:true});}catch{return;}for(const entry of entries){const next=join(path,entry.name);if(entry.isDirectory())walk(next,depth+1);else if(entry.isFile()&&/\.sqlite(?:3)?$/i.test(entry.name)){try{if(statSync(next).size>8192)files.push(next);}catch{}}}}
+          walk('/data/d1');
+          for(const file of files){let db;try{db=new DatabaseSync(file);const tables=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row)=>String(row.name)));if(!tables.has('production_auth_sessions')){db.close();continue;}const removeSession=db.prepare('DELETE FROM production_auth_sessions WHERE token_hash=?');for(const item of sessions){if(item.tokenHash)removeSession.run(item.tokenHash);}if(tables.has('school_sso_codes')){const removeCode=db.prepare('DELETE FROM school_sso_codes WHERE code_hash=?');for(const hash of result.codeHashes||[]){if(hash)removeCode.run(hash);}}db.close();process.exit(0);}catch{try{db?.close();}catch{}}}
+          CLEAN
+            fi
+            rm -f "$sessions_file" "$private_result"
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          docker exec -i "$live" node --input-type=module - > "$sessions_file" <<'INJECT'
+          import { createHash, randomBytes } from 'node:crypto';
+          import { readdirSync, statSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+
+          const files=[];
+          function walk(path,depth=0){if(depth>8)return;let entries=[];try{entries=readdirSync(path,{withFileTypes:true});}catch{return;}for(const entry of entries){const next=join(path,entry.name);if(entry.isDirectory())walk(next,depth+1);else if(entry.isFile()&&/\.sqlite(?:3)?$/i.test(entry.name)){try{if(statSync(next).size>8192)files.push(next);}catch{}}}}
+          walk('/data/d1');
+          let db=null;
+          for(const file of files){try{const candidate=new DatabaseSync(file);const tables=new Set(candidate.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row)=>String(row.name)));if(tables.has('app_users')&&tables.has('user_system_access')&&tables.has('production_auth_sessions')&&tables.has('production_auth_credentials')){db=candidate;break;}candidate.close();}catch{}}
+          if(!db)throw new Error('ArtHello D1 not found');
+          const rows=db.prepare(`SELECT u.id AS appUserId,u.display_name AS displayName,
+            school.role AS schoolGrantRole,c.user_id AS authUserId,
+            central.access_version AS accessVersion
+            FROM app_users u
+            JOIN user_system_access central ON central.user_id=u.id AND central.system_id='SYS-ARTHELLO-OS'
+            JOIN user_system_access school ON school.user_id=u.id AND school.system_id='SYS-SCHOOL-1-11'
+            JOIN production_auth_credentials c ON c.user_id=CASE WHEN u.id='USR-OWNER' THEN 'AUTH-OWNER' ELSE u.id END
+            WHERE u.status='Активен' AND central.status='Активен' AND school.status='Активен'
+              AND u.access_version=central.access_version AND u.access_version=school.access_version
+              AND COALESCE(c.must_change_password,0)=0
+            ORDER BY u.display_name,u.id`).all();
+          if(rows.length<1)throw new Error('No eligible staff accounts');
+          const insert=db.prepare(`INSERT INTO production_auth_sessions
+            (token_hash,user_id,csrf_token,expires_at,access_version,created_at)
+            VALUES (?,?,?,?,?,?)`);
+          const now=Math.floor(Date.now()/1000);
+          const sessions=[];
+          for(const row of rows){const token=randomBytes(32).toString('base64url');const tokenHash=createHash('sha256').update(token).digest('base64url');insert.run(tokenHash,row.authUserId,randomBytes(24).toString('base64url'),now+900,row.accessVersion,now);sessions.push({...row,token,tokenHash});}
+          db.close();
+          process.stdout.write(JSON.stringify(sessions));
+          INJECT
+          test -s "$sessions_file"
+          chmod 600 "$sessions_file"
+          injected=1
+
+          sessions_b64="$(base64 -w0 "$sessions_file")"
+          docker exec -i \
+            -e STAFF_SESSIONS_B64="$sessions_b64" \
+            -e ARTHELLO_ORIGIN="$ARTHELLO_ORIGIN" \
+            -e SCHOOL_ORIGIN="$SCHOOL_ORIGIN" \
+            "$live" node --input-type=module - > "$private_result" <<'E2E'
+          import { createHash } from 'node:crypto';
+
+          const sessions=JSON.parse(Buffer.from(process.env.STAFF_SESSIONS_B64,'base64').toString('utf8'));
+          const arthelloOrigin=process.env.ARTHELLO_ORIGIN;
+          const schoolOrigin=process.env.SCHOOL_ORIGIN;
+          const results=[];
+          const codeHashes=[];
+
+          function getSetCookies(response){
+            if(typeof response.headers.getSetCookie==='function')return response.headers.getSetCookie();
+            const single=response.headers.get('set-cookie');
+            return single?[single]:[];
+          }
+          function mergeCookies(jar,setCookies){
+            for(const raw of setCookies){const pair=raw.split(';',1)[0];const index=pair.indexOf('=');if(index<=0)continue;const name=pair.slice(0,index);const value=pair.slice(index+1);if(/Max-Age=0/i.test(raw)||value==='')jar.delete(name);else jar.set(name,value);}
+          }
+          function cookieHeader(jar){return [...jar.entries()].map(([name,value])=>`${name}=${value}`).join('; ');}
+          function safeLocation(raw){try{const url=new URL(raw,schoolOrigin);return `${url.origin}${url.pathname}${url.searchParams.has('authError')?'?authError='+url.searchParams.get('authError'):''}`;}catch{return String(raw||'').slice(0,120);}}
+
+          for(const account of sessions){
+            const schoolCookies=new Map();
+            const stages={};
+            try{
+              const start=await fetch(`${schoolOrigin}/auth/central/start?returnTo=/`,{redirect:'manual',headers:{'cache-control':'no-store'}});
+              stages.start=start.status;
+              mergeCookies(schoolCookies,getSetCookies(start));
+              const authorizeLocation=start.headers.get('location')||'';
+              if(![302,303,307,308].includes(start.status))throw new Error(`start_http_${start.status}`);
+              const authorizeUrl=new URL(authorizeLocation,schoolOrigin);
+              if(authorizeUrl.origin!==arthelloOrigin||authorizeUrl.pathname!=='/api/school-sso/authorize')throw new Error(`start_location_${safeLocation(authorizeLocation)}`);
+              if(!schoolCookies.has('school_sso_tx'))throw new Error('transaction_cookie_missing');
+
+              const authorize=await fetch(authorizeUrl,{redirect:'manual',headers:{cookie:`__Host-arthello_session=${account.token}`,'cache-control':'no-store'}});
+              stages.authorize=authorize.status;
+              const callbackLocation=authorize.headers.get('location')||'';
+              if(![302,303,307,308].includes(authorize.status))throw new Error(`authorize_http_${authorize.status}`);
+              const callbackUrl=new URL(callbackLocation,arthelloOrigin);
+              if(callbackUrl.searchParams.get('authError')==='central_denied')throw new Error(`central_denied:${callbackUrl.searchParams.get('reason')||'unknown'}`);
+              if(callbackUrl.origin!==schoolOrigin||callbackUrl.pathname!=='/auth/central/callback')throw new Error(`callback_location_${safeLocation(callbackLocation)}`);
+              const code=callbackUrl.searchParams.get('code')||'';
+              if(!code)throw new Error('authorization_code_missing');
+              codeHashes.push(createHash('sha256').update(code).digest('base64url'));
+
+              const callback=await fetch(callbackUrl,{redirect:'manual',headers:{cookie:cookieHeader(schoolCookies),'cache-control':'no-store'}});
+              stages.callback=callback.status;
+              mergeCookies(schoolCookies,getSetCookies(callback));
+              const finishLocation=callback.headers.get('location')||'';
+              if(![302,303,307,308].includes(callback.status)){
+                const body=(await callback.text()).slice(0,180).replace(/\s+/g,' ');
+                throw new Error(`callback_http_${callback.status}:${body}`);
+              }
+              if(!schoolCookies.size)throw new Error('school_session_cookie_missing');
+
+              const me=await fetch(`${schoolOrigin}/api/auth/me`,{redirect:'manual',headers:{cookie:cookieHeader(schoolCookies),'cache-control':'no-store'}});
+              stages.me=me.status;
+              const payload=await me.json().catch(()=>({}));
+              if(!me.ok)throw new Error(`school_me_http_${me.status}`);
+              const user=payload.user&&typeof payload.user==='object'?payload.user:payload;
+              const finalRole=String(user.role||payload.role||'');
+              const finalName=String(user.displayName||user.name||payload.displayName||payload.name||'');
+              if(!finalRole)throw new Error('school_role_missing');
+              if(finalName&&finalName!==account.displayName)throw new Error(`school_identity_mismatch:${finalName}`);
+
+              results.push({appUserId:account.appUserId,displayName:account.displayName,schoolGrantRole:account.schoolGrantRole,finalRole,finalName:finalName||account.displayName,finishLocation:safeLocation(finishLocation),stages,status:'PASS'});
+            }catch(error){
+              results.push({appUserId:account.appUserId,displayName:account.displayName,schoolGrantRole:account.schoolGrantRole,stages,status:'FAIL',reason:error instanceof Error?error.message.slice(0,260):'unknown'});
+            }
+          }
+          process.stdout.write(JSON.stringify({results,codeHashes}));
+          E2E
+          test -s "$private_result"
+          chmod 600 "$private_result"
+
+          python3 - "$private_result" <<'PY'
+          import json,sys
+          with open(sys.argv[1],encoding='utf-8') as handle:
+              data=json.load(handle)
+          results=data.get('results',[])
+          print('LIVE_STAFF_SSO_RESULTS_BEGIN')
+          print(json.dumps(results,ensure_ascii=False,indent=2))
+          print('LIVE_STAFF_SSO_RESULTS_END')
+          failed=[item for item in results if item.get('status')!='PASS']
+          print(f'LIVE_STAFF_SSO_TOTAL={len(results)}')
+          print(f'LIVE_STAFF_SSO_PASS={len(results)-len(failed)}')
+          print(f'LIVE_STAFF_SSO_FAIL={len(failed)}')
+          PY
+
+          sessions_cleanup_b64="$(base64 -w0 "$sessions_file")"
+          result_cleanup_b64="$(base64 -w0 "$private_result")"
+          docker exec -i \
+            -e STAFF_SESSIONS_B64="$sessions_cleanup_b64" \
+            -e STAFF_RESULTS_B64="$result_cleanup_b64" \
+            "$live" node --input-type=module - <<'CLEAN'
+          import { readdirSync, statSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+          const sessions=JSON.parse(Buffer.from(process.env.STAFF_SESSIONS_B64,'base64').toString('utf8'));
+          const result=JSON.parse(Buffer.from(process.env.STAFF_RESULTS_B64,'base64').toString('utf8'));
+          const files=[];
+          function walk(path,depth=0){if(depth>8)return;let entries=[];try{entries=readdirSync(path,{withFileTypes:true});}catch{return;}for(const entry of entries){const next=join(path,entry.name);if(entry.isDirectory())walk(next,depth+1);else if(entry.isFile()&&/\.sqlite(?:3)?$/i.test(entry.name)){try{if(statSync(next).size>8192)files.push(next);}catch{}}}}
+          walk('/data/d1');
+          for(const file of files){let db;try{db=new DatabaseSync(file);const tables=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row)=>String(row.name)));if(!tables.has('production_auth_sessions')){db.close();continue;}const removeSession=db.prepare('DELETE FROM production_auth_sessions WHERE token_hash=?');for(const item of sessions)removeSession.run(item.tokenHash);if(tables.has('school_sso_codes')){const removeCode=db.prepare('DELETE FROM school_sso_codes WHERE code_hash=?');for(const hash of result.codeHashes||[])removeCode.run(hash);}db.close();console.log('LIVE_STAFF_SSO_EPHEMERAL_DATA_CLEANED=PASS');process.exit(0);}catch{try{db?.close();}catch{}}}
+          throw new Error('Cleanup database not found');
+          CLEAN
+          injected=0
+
+          failures="$(python3 - "$private_result" <<'PY'
+          import json,sys
+          with open(sys.argv[1],encoding='utf-8') as handle:data=json.load(handle)
+          print(sum(1 for item in data.get('results',[]) if item.get('status')!='PASS'))
+          PY
+          )"
+          rm -f "$sessions_file" "$private_result"
+          trap - EXIT
+          test "$failures" -eq 0
+          test "${popup_refs:-0}" -eq 0
+          test "${same_tab_refs:-0}" -ge 1
+          printf 'LIVE_STAFF_SCHOOL_SSO_E2E=PASS\n'
