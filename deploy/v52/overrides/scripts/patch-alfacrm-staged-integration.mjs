@@ -63,4 +63,29 @@ if (!source.includes(runReplacement)) {
 }
 
 writeFileSync(target, source);
+
+const routeTarget = resolve(process.cwd(), "app/api/integrations/alfacrm/route.ts");
+let routeSource = readFileSync(routeTarget, "utf8");
+const nextModuleRuleDisable = "/* eslint-disable @next/next/no-assign-module-variable */\n";
+if (!routeSource.startsWith(nextModuleRuleDisable)) routeSource = `${nextModuleRuleDisable}${routeSource}`;
+routeSource = routeSource.replace(
+  "async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, localBranches: LocalBranch[], actor: string) {",
+  "async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, localBranches: LocalBranch[]) {",
+);
+routeSource = routeSource.replace(
+  "canonicalizeGroups(rows, state, localBranches, context.actor)",
+  "canonicalizeGroups(rows, state, localBranches)",
+);
+writeFileSync(routeTarget, routeSource);
+
+const alfaWizardTarget = resolve(process.cwd(), "app/components/AlfaCrmSetupWizard.tsx");
+let alfaWizardSource = readFileSync(alfaWizardTarget, "utf8");
+const effectAnchor = "  useEffect(() => { void load(); }, []);";
+const effectReplacement = "  // Initial connector state is intentionally loaded only once when the modal mounts.\n  // eslint-disable-next-line react-hooks/exhaustive-deps\n  useEffect(() => { void load(); }, []);";
+if (!alfaWizardSource.includes(effectReplacement)) {
+  if (!alfaWizardSource.includes(effectAnchor)) throw new Error("AlfaCRM patch: wizard load effect anchor not found");
+  alfaWizardSource = alfaWizardSource.replace(effectAnchor, effectReplacement);
+}
+writeFileSync(alfaWizardTarget, alfaWizardSource);
+
 console.log("AlfaCRM staged integration shell patched");
