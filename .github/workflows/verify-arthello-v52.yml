@@ -131,6 +131,22 @@ jobs:
             raise "all three app-image Docker runs must use the immutable image ID" unless immutable_run_commands.length == 3
             raise "each immutable app-image run must use the shared secret mounts" unless immutable_run_commands.all? { |command| command.include?("runtime_secret_mounts") }
             raise "mutable release tag must not be used by cutover" if cutover_run.include?(%q{image="arthello-direct:$RELEASE_SHA"}) || cutover_run.include?(%q{"$image"})
+            live_image_resolution = %q{live_image_id="$(docker inspect "$live_id" --format '{{.Image}}')"}
+            live_image_position = cutover_run.index(live_image_resolution)
+            first_live_copy_position = cutover_run.index(%q{copy_volume "$DATA_VOLUME" "$clone_volume"})
+            raise "live helper image must resolve from the running container before volume access" unless live_image_position && first_live_copy_position && live_image_position < first_live_copy_position
+            raise "mutable live image reference is forbidden" if cutover_run.include?(".Config.Image") || cutover_run.match?(/\$live_image(?!_id)/)
+            raise "live helper image ID syntax guard missing" unless cutover_run.include?(%q{[[ "$live_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]})
+            raise "live helper image ID equality guard missing" unless cutover_run.include?(%q{test "$(docker image inspect "$live_image_id" --format '{{.Id}}')" = "$live_image_id"})
+            raise "live helper runtime user guard missing" unless cutover_run.include?(%q{test "$(docker image inspect "$live_image_id" --format '{{.Config.User}}')" = node})
+            raise "live helper runtime command guard missing" unless cutover_run.include?(%q{test "$(docker image inspect "$live_image_id" --format '{{json .Config.Cmd}}')" = '["node","production/runtime-server.mjs"]'})
+            helper_start = cutover_run.index("copy_volume() {")
+            helper_end = cutover_run.index("content_manifest() {", helper_start || 0)
+            raise "volume helper functions are missing" unless helper_start && helper_end && helper_end > helper_start
+            helper_source = cutover_run[helper_start...helper_end]
+            helper_commands = helper_source.scan(/docker (?:run|create)(?:[^\n]*\\\n)+\s*"\$live_image_id"/)
+            raise "all volume helpers must use the immutable live image ID" unless helper_commands.length == 2
+            raise "volume helpers must stay isolated and read-only" unless helper_commands.all? { |command| command.include?("--network none") && command.include?("--read-only") && command.include?("--user 0:0") }
             raise "active D1 descriptor gate missing" unless source.include?("ARTHELLO_ACTIVE_D1_FD=VERIFIED")
             raise "active D1 descriptor gate must cover live, preflight, and candidate" unless source.scan(/assert_active_d1_file_descriptors \"\$[^\"]+\" (?:live|preflight|candidate)/).length == 3
             fd_start = source.index("assert_active_d1_file_descriptors() {")

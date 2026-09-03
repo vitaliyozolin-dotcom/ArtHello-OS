@@ -479,7 +479,7 @@ jobs:
 
           live_id=""
           live_name=""
-          live_image=""
+          live_image_id=""
           old_restart_name=""
           old_restart_max="0"
           live_paused=0
@@ -671,7 +671,7 @@ jobs:
               --entrypoint /bin/sh \
               -v "$source_volume:/source:ro" \
               -v "$target_volume:/target" \
-              "$live_image" -ceu '
+              "$live_image_id" -ceu '
                 find /target -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
                 cp -a /source/. /target/
                 sync
@@ -684,10 +684,11 @@ jobs:
             docker rm -f "$snapshot_helper" >/dev/null 2>&1 || true
             docker create \
               --name "$snapshot_helper" \
+              --network none \
               --read-only \
               --user 0:0 \
               -v "$source_volume:/data:ro" \
-              "$live_image" true >/dev/null || return 1
+              "$live_image_id" true >/dev/null || return 1
             if ! docker cp "$snapshot_helper:/data/." "$destination"; then
               docker rm -f "$snapshot_helper" >/dev/null 2>&1 || true
               return 1
@@ -1097,8 +1098,11 @@ jobs:
           [[ "$live_id" =~ ^[a-f0-9]{64}$ ]]
           live_name="$(docker inspect "$live_id" --format '{{.Name}}' | sed 's#^/##')"
           [[ "$live_name" =~ ^arthello-direct-[A-Za-z0-9._-]+$ ]]
-          live_image="$(docker inspect "$live_id" --format '{{.Config.Image}}')"
-          test -n "$live_image"
+          live_image_id="$(docker inspect "$live_id" --format '{{.Image}}')"
+          [[ "$live_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$(docker image inspect "$live_image_id" --format '{{.Id}}')" = "$live_image_id"
+          test "$(docker image inspect "$live_image_id" --format '{{.Config.User}}')" = node
+          test "$(docker image inspect "$live_image_id" --format '{{json .Config.Cmd}}')" = '["node","production/runtime-server.mjs"]'
           test "$(docker inspect "$live_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
           old_restart_name="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')"
           old_restart_max="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
