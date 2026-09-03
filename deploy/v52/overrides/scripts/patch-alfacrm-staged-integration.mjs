@@ -4,11 +4,19 @@ import { resolve } from "node:path";
 const target = resolve(process.cwd(), "app/components/IntegrationWorkspace.tsx");
 let source = readFileSync(target, "utf8");
 
-const importAnchor = 'import { Button, Card, EmptyState, KpiCard, PageContainer, PageHeader, SearchField, Tabs } from "./design-system";\n';
+const reactImport = 'import { useCallback, useEffect, useMemo, useRef, useState } from "react";';
+if (source.includes(reactImport)) {
+  source = source.replace(reactImport, 'import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";');
+}
+
 const alfaImport = 'import { AlfaCrmSetupWizard } from "./AlfaCrmSetupWizard";\n';
-if (!source.includes(alfaImport)) {
-  if (!source.includes(importAnchor)) throw new Error("AlfaCRM patch: design-system import anchor not found");
-  source = source.replace(importAnchor, `${importAnchor}${alfaImport}`);
+if (source.includes(alfaImport)) source = source.replace(alfaImport, "");
+
+const cssAnchor = 'import "./IntegrationWorkspace.ds.css";\n';
+const alfaLazyLoader = 'const AlfaCrmSetupWizard = lazy(() => import("./AlfaCrmSetupWizard").then((module) => ({ default: module.AlfaCrmSetupWizard })));\n';
+if (!source.includes(alfaLazyLoader)) {
+  if (!source.includes(cssAnchor)) throw new Error("AlfaCRM patch: IntegrationWorkspace CSS anchor not found");
+  source = source.replace(cssAnchor, `${cssAnchor}\n${alfaLazyLoader}`);
 }
 
 const wizardAnchor = `    {wizardId && data.capabilities.canManageSetup && currentBankCapability(wizardId, data.capabilities) ? <ConnectionWizard
@@ -28,12 +36,12 @@ const wizardAnchor = `    {wizardId && data.capabilities.canManageSetup && curre
       }}
     /> : null}`;
 
-const stagedWizard = `    {wizardId === "INT-T-ALFACRM" && data.capabilities.canManageSetup ? <AlfaCrmSetupWizard
+const stagedWizard = `    {wizardId === "INT-T-ALFACRM" && data.capabilities.canManageSetup ? <Suspense fallback={null}><AlfaCrmSetupWizard
       roleCode={roleCode}
       close={() => setWizardId("")}
       notify={notify}
-    /> : null}
-    {wizardId && wizardId !== "INT-T-ALFACRM" && data.capabilities.canManageSetup && currentBankCapability(wizardId, data.capabilities) ? <ConnectionWizard
+    /></Suspense> : null}
+    {wizardId && data.capabilities.canManageSetup && currentBankCapability(wizardId, data.capabilities) && wizardId !== "INT-T-ALFACRM" ? <ConnectionWizard
       connection={data.connections.find((item) => item.id === wizardId)}
       existing={data.setups[wizardId]}
       legalEntities={data.legalEntities}
@@ -53,6 +61,15 @@ const stagedWizard = `    {wizardId === "INT-T-ALFACRM" && data.capabilities.can
 if (!source.includes('wizardId === "INT-T-ALFACRM"')) {
   if (!source.includes(wizardAnchor)) throw new Error("AlfaCRM patch: connection wizard anchor not found");
   source = source.replace(wizardAnchor, stagedWizard);
+} else {
+  source = source.replace(
+    /\{wizardId === "INT-T-ALFACRM" && data\.capabilities\.canManageSetup \? <AlfaCrmSetupWizard([\s\S]*?)\/> : null\}/,
+    '{wizardId === "INT-T-ALFACRM" && data.capabilities.canManageSetup ? <Suspense fallback={null}><AlfaCrmSetupWizard$1/></Suspense> : null}',
+  );
+  source = source.replace(
+    '{wizardId && wizardId !== "INT-T-ALFACRM" && data.capabilities.canManageSetup && currentBankCapability(wizardId, data.capabilities) ? <ConnectionWizard',
+    '{wizardId && data.capabilities.canManageSetup && currentBankCapability(wizardId, data.capabilities) && wizardId !== "INT-T-ALFACRM" ? <ConnectionWizard',
+  );
 }
 
 const runAnchor = '{canRun ? <button type="button" disabled={busy === `sync-${connection.id}`} onClick={() => void action({ action: "retrySync", connectionId: connection.id }, `sync-${connection.id}`)}>{connection.id === TOCHKA_CONNECTION_ID ? "Загрузить выписки и операции" : connection.id === TBANK_CONNECTION_ID ? "Проверить счета и выписку" : "Запустить синхронизацию"}</button> : null}';
@@ -80,6 +97,71 @@ routeSource = routeSource.replace(
   "canonicalizeGroups(rows, state, localBranches, context.actor)",
   "canonicalizeGroups(rows, state, localBranches)",
 );
+
+const importGateAnchor = 'const editors = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "INTEGRATIONS"]);';
+if (!routeSource.includes("ALFACRM_IMPORT_ENABLED")) {
+  routeSource = routeSource.replace(
+    importGateAnchor,
+    `${importGateAnchor}\nconst ALFACRM_IMPORT_ENABLED_VALUES = new Set(["1", "true", "yes"]);\nconst ALFACRM_OUTFLOW_PAY_TYPE_IDS = new Set(["5", "12"]);`,
+  );
+}
+routeSource = routeSource.replace(
+  'if (action === "importModule") return importModule(context, body);',
+  'if (action === "importModule") {\n      if (!alfaCrmImportEnabled()) return privateJson({ error: "Импорт в рабочую базу пока закрыт: сначала завершите live coverage/integrity и подтвердите перевыпуск ключа AlfaCRM." }, 409);\n      return importModule(context, body);\n    }',
+);
+
+if (!routeSource.includes("function alfaCrmImportEnabled()")) {
+  routeSource = routeSource.replace(
+    "function moduleCompletionNote(module: ModuleKey) {",
+    `function alfaCrmImportEnabled() {\n  const value = (env as unknown as { ALFACRM_IMPORT_ENABLED?: string }).ALFACRM_IMPORT_ENABLED?.trim().toLowerCase() ?? "";\n  return ALFACRM_IMPORT_ENABLED_VALUES.has(value);\n}\n\nfunction moduleCompletionNote(module: ModuleKey) {`,
+  );
+}
+
+if (!routeSource.includes("alfacrm_family_merge_candidates")) {
+  const financeTableClose = `    env.DB.prepare(\`CREATE TABLE IF NOT EXISTS alfacrm_finance_snapshots (
+      remote_branch_id TEXT NOT NULL,
+      payment_id TEXT NOT NULL,
+      customer_id TEXT NOT NULL DEFAULT '',
+      family_entity_id TEXT NOT NULL DEFAULT '',
+      operation_date TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      amount_minor INTEGER NOT NULL,
+      category TEXT NOT NULL DEFAULT '',
+      payload_hash TEXT NOT NULL,
+      imported_at TEXT NOT NULL,
+      PRIMARY KEY(remote_branch_id,payment_id)
+    )\`),`;
+  const candidateTable = `${financeTableClose}\n    env.DB.prepare(\`CREATE TABLE IF NOT EXISTS alfacrm_family_merge_candidates (\n      remote_branch_id TEXT NOT NULL,\n      customer_id TEXT NOT NULL,\n      family_entity_id TEXT NOT NULL,\n      match_key TEXT NOT NULL,\n      guardian_name TEXT NOT NULL DEFAULT '',\n      phone TEXT NOT NULL DEFAULT '',\n      status TEXT NOT NULL DEFAULT 'Ожидает сверки',\n      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY(remote_branch_id,customer_id)\n    )\`),`;
+  if (!routeSource.includes(financeTableClose)) throw new Error("AlfaCRM patch: finance table anchor not found");
+  routeSource = routeSource.replace(financeTableClose, candidateTable);
+}
+
+routeSource = routeSource.replace(
+  '    const familyIdentity = guardianName || phone ? `${normalizeName(guardianName)}|${phone}` : `student:${studentId}`;\n    const familyHash = await shortHash(`${remoteBranchId}:${familyIdentity}`);',
+  '    const matchKey = guardianName || phone ? `${normalizeName(guardianName)}|${phone}` : "";\n    const familyHash = await shortHash(`${remoteBranchId}:student:${studentId}`);',
+);
+routeSource = routeSource.replace(
+  '    statements.push(\n      entityUpsert(familyId, "Семья", familyName, `family:${remoteBranchId}:${familyHash}`, quality, scope, { ...common, guardianName, phone }, actor),',
+  '    if (matchKey) statements.push(env.DB.prepare(`INSERT INTO alfacrm_family_merge_candidates\n      (remote_branch_id,customer_id,family_entity_id,match_key,guardian_name,phone,status,created_at,updated_at)\n      VALUES (?,?,?,?,?,?,\'Ожидает сверки\',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)\n      ON CONFLICT(remote_branch_id,customer_id) DO UPDATE SET family_entity_id=excluded.family_entity_id,match_key=excluded.match_key,guardian_name=excluded.guardian_name,phone=excluded.phone,status=\'Ожидает сверки\',updated_at=CURRENT_TIMESTAMP`)\n      .bind(remoteBranchId, studentId, familyId, matchKey, guardianName, phone));\n    statements.push(\n      entityUpsert(familyId, "Семья", familyName, `family:${remoteBranchId}:${familyHash}`, quality, scope, { ...common, guardianName, phone }, actor),',
+);
+routeSource = routeSource.replace(
+  '    const phone = normalizePhone(item.phone);\n    const guardianName = scalar(item.legal_name ?? item.payer_name ?? item.parent_name);\n    const familyIdentity = guardianName || phone ? `${normalizeName(guardianName)}|${phone}` : `student:${studentId}`;\n    const familyId = `FAM-A-${await shortHash(`${row.remote_branch_id}:${familyIdentity}`)}`;',
+  '    const familyId = `FAM-A-${await shortHash(`${row.remote_branch_id}:student:${studentId}`)}`;',
+);
+routeSource = routeSource.replace(
+  '    const phone = normalizePhone(item.phone);\n    const guardianName = scalar(item.legal_name ?? item.payer_name ?? item.parent_name);\n    const identity = guardianName || phone ? `${normalizeName(guardianName)}|${phone}` : `student:${customerId}`;\n    map.set(`${row.remote_branch_id}:${customerId}`, `FAM-A-${await shortHash(`${row.remote_branch_id}:${identity}`)}`);',
+  '    map.set(`${row.remote_branch_id}:${customerId}`, `FAM-A-${await shortHash(`${row.remote_branch_id}:student:${customerId}`)}`);',
+);
+
+routeSource = routeSource.replace(
+  '    const numeric = direct !== null ? direct : income !== null ? income : outcome !== null ? -Math.abs(outcome) : null;\n    if (!id || !operationDate || numeric === null || operationDate < params.dateFrom || operationDate > params.dateTo) { rejected += 1; continue; }',
+  '    const numeric = direct !== null ? direct : income !== null ? income : outcome !== null ? -Math.abs(outcome) : null;\n    const payTypeId = scalar(item.pay_type_id ?? item.payment_type_id);\n    const isOutflow = ALFACRM_OUTFLOW_PAY_TYPE_IDS.has(payTypeId) || (numeric !== null && numeric < 0);\n    if (!id || !operationDate || numeric === null || operationDate < params.dateFrom || operationDate > params.dateTo) { rejected += 1; continue; }',
+);
+routeSource = routeSource.replace(
+  '        numeric >= 0 ? "Поступление" : "Списание",',
+  '        isOutflow ? "Списание" : "Поступление",',
+);
+
 writeFileSync(routeTarget, routeSource);
 
 const alfaWizardTarget = resolve(process.cwd(), "app/components/AlfaCrmSetupWizard.tsx");
