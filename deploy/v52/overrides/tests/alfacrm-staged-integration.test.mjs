@@ -18,9 +18,11 @@ test("AlfaCRM uses a dedicated staged wizard instead of the generic all-at-once 
   assert.match(wizard, /Выберите, какие филиалы вообще участвуют/);
 });
 
-test("AlfaCRM transport is inbound read-only and rate-limited", () => {
+test("AlfaCRM transport follows v2api login, branch discovery, read-only and rate limits", () => {
   assert.match(route, /POST|method: "POST"/);
   assert.match(route, /\/v2api\/auth\/login/);
+  assert.match(route, /fetchPaged\(session, "branch\/index", \{ is_active: 1 \}\)/);
+  assert.doesNotMatch(route, /"0\/branch\/index"/);
   assert.match(route, /X-ALFACRM-TOKEN/);
   assert.match(route, /MIN_REQUEST_INTERVAL_MS = 240/);
   assert.doesNotMatch(route, /\/customer\/create|\/customer\/update|\/customer\/delete|\/pay\/create|\/pay\/update|\/pay\/delete/);
