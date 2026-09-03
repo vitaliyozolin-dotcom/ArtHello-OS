@@ -1,7 +1,10 @@
 import { env } from "cloudflare:workers";
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, count, desc, eq, max } from "drizzle-orm";
 import { ensureCoreTables, getDb, getIntegrationSetups } from "../../../db";
 import {
+  bankAccounts,
+  bankStatementImports,
+  bankTransactions,
   integrationConflicts,
   integrationConnections,
   integrationLogEntries,
@@ -40,7 +43,7 @@ export async function GET(request: Request) {
       (env as unknown as { TBANK_EGRESS_IP?: string }).TBANK_EGRESS_IP,
     );
     const db = getDb();
-    const [connectionRows, allRuns, allLogs, allConflicts, setups, legalEntityRows, branchRows, allTasks] = await Promise.all([
+    const [connectionRows, allRuns, allLogs, allConflicts, setups, legalEntityRows, branchRows, allTasks, allBankAccounts, allBankStatements, allBankTransactions] = await Promise.all([
       db.select().from(integrationConnections).orderBy(asc(integrationConnections.category), asc(integrationConnections.system)),
       db.select().from(integrationSyncRuns).orderBy(desc(integrationSyncRuns.startedAt)).limit(100),
       db.select().from(integrationLogEntries).orderBy(desc(integrationLogEntries.createdAt)).limit(300),
@@ -51,6 +54,14 @@ export async function GET(request: Request) {
       db.select({ id: organizationBranches.id, name: organizationBranches.name }).from(organizationBranches)
         .where(eq(organizationBranches.status, "Активен")).orderBy(asc(organizationBranches.sortOrder), asc(organizationBranches.name)),
       selectVisibleTasks(db, requester),
+      db.select().from(bankAccounts).orderBy(asc(bankAccounts.name)),
+      db.select({
+        connectionId: bankStatementImports.connectionId,
+        total: count(),
+        latestAt: max(bankStatementImports.fetchedAt),
+      }).from(bankStatementImports).groupBy(bankStatementImports.connectionId),
+      db.select({ connectionId: bankTransactions.connectionId, total: count() })
+        .from(bankTransactions).groupBy(bankTransactions.connectionId),
     ]);
 
     const scopeContext = {
@@ -65,6 +76,12 @@ export async function GET(request: Request) {
     const runs = allRuns.filter((row) => scopedConnectionIds.has(row.connectionId));
     const logs = allLogs.filter((row) => scopedConnectionIds.has(row.connectionId));
     const conflicts = allConflicts.filter((row) => scopedConnectionIds.has(row.connectionId));
+    const scopedBankAccounts = allBankAccounts.filter((row) => scopedConnectionIds.has(row.connectionId));
+    const scopedBankStatements = allBankStatements.filter((row) => scopedConnectionIds.has(row.connectionId));
+    const scopedBankTransactions = allBankTransactions.filter((row) => scopedConnectionIds.has(row.connectionId));
+    const latestBankStatementAt = scopedBankStatements
+      .map((row) => row.latestAt ?? "")
+      .sort((left, right) => right.localeCompare(left))[0] ?? "";
 
     const connections = scopedConnectionRows.map((row) => {
       const connected = Boolean(row.verifiedTransfer) && Boolean(row.isEnabled) && row.status === "Работает";
@@ -146,6 +163,23 @@ export async function GET(request: Request) {
         bankEgressIp: scopedConnectionIds.has("INT-T-TBANK") ? configuredBankEgressIp : "",
         bankEgressIpConfirmed: scopedConnectionIds.has("INT-T-TBANK") && Boolean(configuredBankEgressIp),
       },
+      bankSnapshot: {
+        accounts: scopedBankAccounts.map((account) => ({
+          id: account.id,
+          connectionId: account.connectionId,
+          legalEntityId: account.legalEntityId,
+          maskedAccount: account.maskedAccount,
+          name: account.name,
+          currency: account.currency,
+          status: account.status,
+          balanceMinor: account.balanceMinor,
+          balanceAsOf: account.balanceAsOf,
+          syncedAt: account.syncedAt,
+        })),
+        statementCount: scopedBankStatements.reduce((total, row) => total + Number(row.total), 0),
+        transactionCount: scopedBankTransactions.reduce((total, row) => total + Number(row.total), 0),
+        latestStatementAt: latestBankStatementAt,
+      },
       scopeMessage: connections.length ? "" : "Интеграции не назначены этому пользователю",
       summary: {
         total: connections.length,
@@ -156,7 +190,7 @@ export async function GET(request: Request) {
         errors: connections.reduce((sum, item) => sum + item.errorCount, 0),
         accepted: connections.reduce((sum, item) => sum + item.acceptedCount, 0),
       },
-      boundary: "Банковские ключи вводит только собственник: они проверяются запросами только на чтение, надёжно шифруются и больше не возвращаются в интерфейс или ответы системы. Для Точки доступен безопасный выбор компании, для Т‑Банка — проверка счетов и короткой выписки. Служебный код выбранной компании Точки хранится только на сервере для привязки ключа и не возвращается пользователям; номера счетов и операции не сохраняются. Импорт проводок и создание платежей не запускаются.",
+      boundary: "Банковские ключи вводит только собственник: они используются запросами только на чтение, надёжно шифруются и больше не возвращаются в интерфейс или ответы системы. Точка загружает счета, остатки, выписки и проведённые операции; рублёвые операции попадают в финансовый реестр без автоматической классификации. Создание, подписание и отправка новых платежей не разрешены.",
     });
   } catch {
     return privateJson({ error: "Не удалось загрузить центр интеграций" }, 503);

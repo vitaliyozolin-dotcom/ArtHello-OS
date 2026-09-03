@@ -93,6 +93,8 @@ async function loadDbModule(database) {
       ['import { drizzle } from "drizzle-orm/d1";', "const drizzle = () => { throw new Error('drizzle is not used by this test'); };"],
       ['import { entityDuplicateKey, manualEntityNormalization } from "../lib/entity-provenance";', "const entityDuplicateKey = ({entityType,displayName}) => `${entityType}:${displayName}`; const manualEntityNormalization = () => null;"],
       ['import { ensureOperatingIntegrationCatalog } from "../lib/operating-integration-catalog";', "const ensureOperatingIntegrationCatalog = async () => {};"],
+      ['import { toTochkaFinancialOperation } from "../lib/integrations";', "const toTochkaFinancialOperation = async () => null;"],
+      ['import type { TochkaReadOnlySyncResult } from "../lib/integrations";', ""],
       ['import * as schema from "./schema";', "const schema = {};"],
     ], "db/index.ts");
     return await importCode(code, "db-index");

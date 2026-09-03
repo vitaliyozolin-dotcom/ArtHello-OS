@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import * as ts from "typescript";
-import { canAccessAssignedIntegration, normalizePublicIntegrationIp, probeTochkaJwt, validateTochkaJwt } from "../lib/integrations.ts";
+import { canAccessAssignedIntegration, normalizePublicIntegrationIp, probeTochkaJwt, toTochkaFinancialOperation, validateTochkaJwt } from "../lib/integrations.ts";
 
 const fixedNow = Date.UTC(2026, 8, 2, 12, 0, 0);
 const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -19,11 +19,11 @@ async function loadIntegrationActionsRoute(stubs) {
   const body = routeSource.slice(lastImportAt + lastImport.length);
   const preamble = `
     const {
-      consumeTochkaCompanySelectionHandle,commitIntegrationBankProbe,createTochkaCompanySelectionHandles,
+      consumeTochkaCompanySelectionHandle,commitIntegrationBankProbe,commitTochkaReadOnlySync,createTochkaCompanySelectionHandles,
       ensureCoreTables,getDb,getIntegrationSetups,readIntegrationCredential,readTBankIntegrationCredential,
       ensureOperatingIntegrationCatalog,
       revokeBankIntegrationCredential,saveIntegrationSetup,saveTBankSetupWithCredential,saveTochkaSetupWithCredential,
-      validateIntegrationSetupReferences,canAccessAssignedIntegration,canResolveConflict,normalizePublicIntegrationIp,probeTBankToken,probeTochkaJwt,retryDecision,
+      validateIntegrationSetupReferences,canAccessAssignedIntegration,canResolveConflict,normalizePublicIntegrationIp,probeTBankToken,probeTochkaJwt,retryDecision,syncTochkaReadOnly,
       validateTBankToken,validateTochkaJwt,getAuthenticatedRequestContext,isCanonicalOwnerContext,
       verifyAuthenticatedRequestCsrf,canAccessModule,hasTrustedMutationOrigin,getRequestUser,findScopedAutomationTask,scopedAutomationTaskResponse,
       resolveTaskAssignment
@@ -48,6 +48,7 @@ function actionRouteStubs(overrides = {}) {
     env: {},
     consumeTochkaCompanySelectionHandle: async () => ({ ok: false, reason: "invalid selection" }),
     commitIntegrationBankProbe: async () => false,
+    commitTochkaReadOnlySync: async () => ({ committed: false, runId: "", financialOperationCount: 0 }),
     createTochkaCompanySelectionHandles: async () => [],
     ensureCoreTables: async () => {},
     ensureOperatingIntegrationCatalog: async () => {},
@@ -66,6 +67,7 @@ function actionRouteStubs(overrides = {}) {
     probeTBankToken: async () => { throw new Error("bank discovery must not run"); },
     probeTochkaJwt: async () => { throw new Error("bank discovery must not run"); },
     retryDecision: () => ({ allowed: false, reason: "blocked" }),
+    syncTochkaReadOnly: async () => { throw new Error("bank sync must not run"); },
     validateTBankToken: () => ({ valid: false, reason: "invalid" }),
     validateTochkaJwt: () => ({ valid: false, reason: "invalid" }),
     getAuthenticatedRequestContext: async () => null,
@@ -153,6 +155,7 @@ async function loadCredentialDbModule(database) {
     ['import { drizzle } from "drizzle-orm/d1";', "const drizzle = () => { throw new Error('drizzle not used'); };"],
     ['import { entityDuplicateKey, manualEntityNormalization } from "../lib/entity-provenance";', "const entityDuplicateKey = () => ''; const manualEntityNormalization = () => null;"],
     ['import { ensureOperatingIntegrationCatalog } from "../lib/operating-integration-catalog";', "const ensureOperatingIntegrationCatalog = async () => {};"],
+    ['import { toTochkaFinancialOperation } from "../lib/integrations";', "const toTochkaFinancialOperation = globalThis.__ARTHELLO_TOCHKA_DB_PROJECT__;"],
     ['import * as schema from "./schema";', "const schema = {};"],
   ];
   for (const [search, replacement] of replacements) {
@@ -163,6 +166,7 @@ async function loadCredentialDbModule(database) {
     DB: database,
     INTEGRATION_CREDENTIALS_KEY: "focused-test-dedicated-key-material-32-bytes-minimum",
   };
+  globalThis.__ARTHELLO_TOCHKA_DB_PROJECT__ = toTochkaFinancialOperation;
   const output = ts.transpileModule(databaseSource, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
     fileName: "db/index.ts",
@@ -224,13 +228,58 @@ function createCredentialSchema(database) {
   `);
 }
 
+function createBankSyncSchema(database) {
+  database.database.exec(`
+    CREATE TABLE financial_operations (
+      id TEXT PRIMARY KEY NOT NULL, operation_date TEXT NOT NULL, period TEXT NOT NULL,
+      direction TEXT NOT NULL, amount_minor INTEGER NOT NULL, category TEXT NOT NULL,
+      report_class TEXT NOT NULL, counterparty_entity_id TEXT NOT NULL DEFAULT '',
+      contract_id TEXT NOT NULL DEFAULT '', document_id TEXT NOT NULL DEFAULT '',
+      project_entity_id TEXT NOT NULL DEFAULT '', legal_entity_id TEXT NOT NULL DEFAULT '',
+      object_entity_id TEXT NOT NULL DEFAULT '', cfr_entity_id TEXT NOT NULL DEFAULT '',
+      bank_operation_ref TEXT NOT NULL DEFAULT '', operation_kind TEXT NOT NULL DEFAULT 'XLSX_AGGREGATE',
+      source_system TEXT NOT NULL, source_file TEXT NOT NULL, source_sheet TEXT NOT NULL,
+      source_ref TEXT NOT NULL, data_quality TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Разнесено',
+      created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE bank_accounts (
+      id TEXT PRIMARY KEY NOT NULL, connection_id TEXT NOT NULL, legal_entity_id TEXT NOT NULL,
+      provider_account_id TEXT NOT NULL, masked_account TEXT NOT NULL, name TEXT NOT NULL,
+      currency TEXT NOT NULL, status TEXT NOT NULL, balance_minor INTEGER,
+      balance_as_of TEXT NOT NULL DEFAULT '', synced_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX bank_accounts_provider_unique ON bank_accounts (connection_id,legal_entity_id,provider_account_id);
+    CREATE TABLE bank_statement_imports (
+      id TEXT PRIMARY KEY NOT NULL, connection_id TEXT NOT NULL, legal_entity_id TEXT NOT NULL,
+      provider_statement_id TEXT NOT NULL, provider_account_id TEXT NOT NULL,
+      start_date TEXT NOT NULL, end_date TEXT NOT NULL, status TEXT NOT NULL,
+      start_balance_minor INTEGER NOT NULL, end_balance_minor INTEGER NOT NULL,
+      currency TEXT NOT NULL, transaction_count INTEGER NOT NULL, fetched_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX bank_statement_provider_unique ON bank_statement_imports (connection_id,provider_statement_id);
+    CREATE TABLE bank_transactions (
+      id TEXT PRIMARY KEY NOT NULL, connection_id TEXT NOT NULL, legal_entity_id TEXT NOT NULL,
+      provider_account_id TEXT NOT NULL, provider_statement_id TEXT NOT NULL,
+      provider_transaction_id TEXT NOT NULL, payment_id TEXT NOT NULL DEFAULT '',
+      operation_date TEXT NOT NULL, direction TEXT NOT NULL, amount_minor INTEGER NOT NULL,
+      currency TEXT NOT NULL, status TEXT NOT NULL, document_number TEXT NOT NULL DEFAULT '',
+      transaction_type TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+      counterparty_name TEXT NOT NULL DEFAULT '', counterparty_inn TEXT NOT NULL DEFAULT '',
+      counterparty_kpp TEXT NOT NULL DEFAULT '', source_payload_hash TEXT NOT NULL,
+      financial_operation_id TEXT NOT NULL DEFAULT '', imported_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX bank_transactions_provider_unique ON bank_transactions (connection_id,provider_transaction_id);
+  `);
+}
+
 function credentialSetup(legalEntityId, customerCode) {
   return {
     connectionId: "INT-T-TOCHKA",
     authMethod: "JWT",
-    startDate: "",
-    syncIntervalMinutes: 0,
-    syncMinute: 0,
+    startDate: "2026-01-01",
+    syncIntervalMinutes: 60,
+    syncMinute: 5,
     endpoint: "",
     legalEntityId,
     customerCode,
@@ -239,7 +288,7 @@ function credentialSetup(legalEntityId, customerCode) {
     accountScope: "all_permitted",
     channelType: "",
     sourceMapping: "",
-    dataScopes: ["Счета"],
+    dataScopes: ["Счета", "Выписки", "Операции и платежи", "Реестр операций", "Остатки"],
   };
 }
 
@@ -266,6 +315,11 @@ test("Tochka JWT validation enforces structure and lifetime without exposing the
   assert.equal(expired.valid, false);
   assert.match(expired.reason, /ист[её]к/i);
   assert.doesNotMatch(JSON.stringify(expired), new RegExp(expiredToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+  const bankManagedExpiry = validateTochkaJwt(makeJwt({ exp: undefined }), fixedNow);
+  assert.equal(bankManagedExpiry.valid, true);
+  assert.equal(bankManagedExpiry.expiresAt, "");
+  assert.match(bankManagedExpiry.reason, /Точк/i);
 
   const malformed = validateTochkaJwt("not-a-jwt", fixedNow);
   assert.equal(malformed.valid, false);
@@ -517,7 +571,8 @@ test("owner credential UI is masked, transient and sends the production CSRF tok
   assert.match(workspace, /event\.key === "Escape"/);
   assert.match(workspace, /previousFocus\?\.focus\(\)/);
   assert.doesNotMatch(workspace, /\.chatgpt\.site/i);
-  assert.doesNotMatch(workspace, /<form[^>]*data-ah-help-root/);
+  assert.match(workspace, /className="setup-wizard ahIntegrationSetupWizard"/);
+  assert.doesNotMatch(workspace, /data-ah-help-root="true"/);
   assert.match(helpDom, /if \(element\.closest\("\[data-ah-help-root\]/);
   assert.doesNotMatch(helpSystem, /fieldMarkers|data-ah-help-inline|ah-field-icon/);
 });
@@ -955,6 +1010,87 @@ test("a current bank probe commits its run, log, connection state and audit toge
   }
 });
 
+test("Tochka statement commit is idempotent and preserves manual finance classification", async () => {
+  const database = new CredentialD1Database();
+  createCredentialSchema(database);
+  createBankSyncSchema(database);
+  const dbModule = await loadCredentialDbModule(database);
+  const token = makeJwt({ iss: "statement-import" });
+  try {
+    const setup = await dbModule.saveTochkaSetupWithCredential(
+      "OWNER-LIVE", credentialSetup("ORG-LIVE-1", "customer-one"), token, null,
+    );
+    assert.ok(setup);
+    const accountId = "40817810802000000008/044525104";
+    const transactions = [
+      { providerTransactionId: "tx-credit-1", direction: "Поступление", amountMinor: 12055, counterpartyName: "ООО Родитель" },
+      { providerTransactionId: "tx-debit-1", direction: "Списание", amountMinor: 5000, counterpartyName: "ООО Арендодатель" },
+    ].map((transaction, index) => ({
+      id: `TOCHKA-TX-${index + 1}`,
+      paymentId: `payment-${index + 1}`,
+      statementId: "statement-001",
+      accountId,
+      operationDate: `2026-09-0${index + 2}`,
+      currency: "RUB",
+      status: "Booked",
+      documentNumber: String(101 + index),
+      transactionType: "Платежное поручение",
+      description: index ? "Оплата аренды" : "Оплата по договору 12",
+      counterpartyInn: index ? "7701000002" : "7701000001",
+      counterpartyKpp: index ? "" : "770101001",
+      sourcePayloadHash: `hash-${index + 1}`,
+      ...transaction,
+    }));
+    const sync = {
+      valid: true,
+      complete: true,
+      reason: "Счета, остатки, выписки и операции загружены из Точки",
+      expiresAt: new Date(fixedNow + 3_600_000).toISOString(),
+      customerCode: "customer-one",
+      accounts: [{ id: "TOCHKA-ACC-1", accountId, maskedAccount: "•• 0008", name: "Основной счёт", currency: "RUB", status: "Enabled" }],
+      statements: [{
+        id: "TOCHKA-STMT-1", statementId: "statement-001", accountId, status: "Ready",
+        startDate: "2026-09-01", endDate: "2026-09-03", startBalanceMinor: 10000,
+        endBalanceMinor: 17055, currency: "RUB", transactionCount: transactions.length,
+      }],
+      transactions,
+      rejectedCount: 0,
+    };
+
+    const first = await dbModule.commitTochkaReadOnlySync("OWNER-LIVE", setup, sync, "Первичная загрузка");
+    assert.equal(first.committed, true);
+    assert.equal(first.financialOperationCount, 2);
+    assert.equal(database.database.prepare("SELECT COUNT(*) AS total FROM bank_accounts").get().total, 1);
+    assert.equal(database.database.prepare("SELECT COUNT(*) AS total FROM bank_statement_imports").get().total, 1);
+    assert.equal(database.database.prepare("SELECT COUNT(*) AS total FROM bank_transactions").get().total, 2);
+    assert.equal(database.database.prepare("SELECT COUNT(*) AS total FROM financial_operations").get().total, 2);
+    database.database.prepare("UPDATE financial_operations SET category='Аренда',status='Разнесено'").run();
+
+    const repeated = await dbModule.commitTochkaReadOnlySync("OWNER-LIVE", setup, sync, "Повторная загрузка");
+    assert.equal(repeated.committed, true);
+    assert.equal(repeated.financialOperationCount, 0, "a repeated statement must not be reported as newly added finance facts");
+    assert.equal(database.database.prepare("SELECT COUNT(*) AS total FROM bank_transactions").get().total, 2);
+    assert.equal(database.database.prepare("SELECT COUNT(*) AS total FROM financial_operations").get().total, 2);
+    assert.deepEqual(database.database.prepare("SELECT DISTINCT category,status FROM financial_operations").all().map((row) => ({ ...row })), [
+      { category: "Аренда", status: "Разнесено" },
+    ]);
+    const connection = database.database.prepare(
+      "SELECT status,verified_transfer,is_enabled,received_count,accepted_count FROM integration_connections WHERE id='INT-T-TOCHKA'",
+    ).get();
+    assert.deepEqual({ ...connection }, {
+      status: "Работает",
+      verified_transfer: 1,
+      is_enabled: 1,
+      received_count: 4,
+      accepted_count: 4,
+    });
+  } finally {
+    delete globalThis.__ARTHELLO_TOCHKA_DB_ENV__;
+    delete globalThis.__ARTHELLO_TOCHKA_DB_PROJECT__;
+    database.close();
+  }
+});
+
 test("a stale bank probe cannot overwrite a newer credential deletion", async () => {
   const database = new CredentialD1Database();
   createCredentialSchema(database);
@@ -1345,13 +1481,12 @@ test("integration GET returns only credential state and cannot read or return cr
   assert.doesNotMatch(integrationsApi, /\b(?:plaintext|ciphertext|secretValue|jwtValue)\b/i);
 });
 
-test("Tochka copy removes administrator hand-off and honestly scopes all JWT-visible accounts", async () => {
+test("Tochka copy describes the full read-only import and keeps payment creation outside the boundary", async () => {
   const [workspace, integrationsApi] = await Promise.all([
     source("app/components/IntegrationWorkspace.tsx"),
     source("app/api/integrations/route.ts"),
   ]);
   const copy = `${workspace}\n${integrationsApi}`;
-  assert.doesNotMatch(copy, /\b(?:администратор|админ)(?:а|у|ом|е|ы|ов|ами|ах)?\b/i);
   assert.match(workspace, /Один ключ Точки для выбранной карточки юрлица/);
   assert.match(workspace, /Все счета, разрешённые ключом Точки/);
   assert.match(workspace, /accountScope:\s*bank\s*\?\s*"all_permitted"/);
@@ -1361,12 +1496,14 @@ test("Tochka copy removes administrator hand-off and honestly scopes all JWT-vis
   assert.match(workspace, /branches\.map/);
   assert.doesNotMatch(workspace, /ORG-ARTHELLO|ORG-IP-TYURIN|ORG-UK-DET-OBR/);
   assert.match(workspace, /Соответствие банковского доступа этой карточке фиксирует собственник/);
-  assert.match(workspace, /Защищённый ключ, выбор компании и доступные счета/);
-  assert.match(workspace, /startDate: bank \? "" : startDate/);
-  assert.match(workspace, /syncIntervalMinutes: bank \? 0 : interval/);
-  assert.match(workspace, /dataScopes: tochka \? \["Счета"\]/);
-  assert.match(workspace, /Загрузка выписок, расписание синхронизации и правила распределения операций ещё не запущены/);
-  assert.match(workspace, /Проверить ключ и сохранить/);
+  assert.match(workspace, /Счета, остатки, выписки и реестр проведённых операций/);
+  assert.match(workspace, /startDate: tochka \? startDate/);
+  assert.match(workspace, /syncIntervalMinutes: tochka \? interval/);
+  assert.match(workspace, /dataScopes: tochka \? \["Счета", "Выписки", "Операции и платежи", "Реестр операций", "Остатки"\]/);
+  assert.match(workspace, /Создание, подписание и отправка новых платежей не выполняются/);
+  assert.match(workspace, /Подключить и загрузить данные/);
+  assert.match(integrationsApi, /Точка загружает счета, остатки, выписки и проведённые операции/);
+  assert.match(copy, /Создание, подписание и отправка новых платежей не разрешены|не выполняются/);
 });
 
 test("classification mode has no connector-level branch requirement and keeps ambiguous operations for review", async () => {
@@ -1383,7 +1520,7 @@ test("classification mode has no connector-level branch requirement and keeps am
   assert.match(workspace, /Один счёт может принимать деньги школы и садика/);
 });
 
-test("account discovery does not claim that transaction import is connected", async () => {
+test("Tochka verification commits actual statements and financial operations", async () => {
   const [actions, integrationsApi] = await Promise.all([
     source("app/api/integration-actions/route.ts"),
     source("app/api/integrations/route.ts"),
@@ -1391,12 +1528,12 @@ test("account discovery does not claim that transaction import is connected", as
   const discoveryStart = actions.indexOf("async function verifyTochkaConnection");
   const discoveryEnd = actions.indexOf("async function retrySync", discoveryStart);
   const discovery = actions.slice(discoveryStart, discoveryEnd);
-  assert.match(discovery, /successStatus:\s*"Доступ к счетам подтверждён"/);
-  assert.match(discovery, /commitIntegrationBankProbe/);
+  assert.match(discovery, /syncTochkaReadOnly/);
+  assert.match(discovery, /commitTochkaReadOnlySync/);
   const database = await source("db/index.ts");
-  assert.match(database, /verified_transfer=0,is_enabled=0/);
-  assert.match(database, /accepted_count=0/);
-  assert.match(database, /last_success_at='',next_sync_at=''/);
-  assert.match(discovery, /импорт операций ещё не запускался/i);
-  assert.match(integrationsApi, /Ключ Точки и доступ к счетам подтверждены/);
+  assert.match(database, /INSERT INTO bank_statement_imports/);
+  assert.match(database, /INSERT INTO bank_transactions/);
+  assert.match(database, /INSERT INTO financial_operations/);
+  assert.match(discovery, /добавлено в финансовый реестр/i);
+  assert.match(integrationsApi, /bankSnapshot/);
 });

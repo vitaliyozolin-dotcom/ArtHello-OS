@@ -111,6 +111,12 @@ type Data = {
     bankEgressIp: string;
     bankEgressIpConfirmed: boolean;
   };
+  bankSnapshot: {
+    accounts: Array<{ id: string; connectionId: string; legalEntityId: string; maskedAccount: string; name: string; currency: string; status: string; balanceMinor: number | null; balanceAsOf: string; syncedAt: string }>;
+    statementCount: number;
+    transactionCount: number;
+    latestStatementAt: string;
+  };
   scopeMessage: string;
 };
 
@@ -301,7 +307,7 @@ export function IntegrationWorkspace({
           ["INT-T-MAIL", "Email", "Письма, ответы и статусы доставки"],
           ["INT-T-ADS", "Рекламные кабинеты", "Расходы, кампании и креативы"],
           ["INT-T-SOCIAL", "Социальные сети", "Публикации, метрики и переходы"],
-          ["INT-T-TOCHKA", "Точка", "Защищённый ключ, выбор компании и доступные счета"],
+          ["INT-T-TOCHKA", "Точка", "Счета, остатки, выписки и реестр проведённых операций"],
           ["INT-T-TBANK", "Т‑Банк", "Счета и короткая выписка только для чтения"],
           ["INT-T-OPENAI-IMAGES", "Создание изображений OpenAI", "Генерация по описанию и примеру"],
         ].filter(([id]) => (
@@ -375,8 +381,13 @@ export function IntegrationWorkspace({
             <Fact k="Последний успех" v={current.lastSuccessAt || "Никогда"} /><Fact k="Следующая синхронизация" v={current.nextSyncAt || "Не запланирована"} />
             <Fact k="Получено / принято" v={`${current.receivedCount} / ${current.acceptedCount}`} /><Fact k="Отклонено / ошибок / конфликтов" v={`${current.rejectedCount} / ${current.errorCount} / ${current.conflictCount}`} />
           </dl>
+          {current.id === TOCHKA_CONNECTION_ID ? <section className="ahIntegrationBankSnapshot">
+            <div><strong>Данные из Точки</strong><span>{data.bankSnapshot.statementCount} выписок · {data.bankSnapshot.transactionCount} операций в реестре</span></div>
+            {data.bankSnapshot.accounts.filter((account) => account.connectionId === current.id).map((account) => <article key={account.id}><span><strong>{account.name}</strong><small>{account.maskedAccount} · {account.currency}</small></span><em>{account.balanceMinor === null ? "Остаток ещё не получен" : bankMoney(account.balanceMinor, account.currency)}<small>{account.balanceAsOf ? `на ${new Date(`${account.balanceAsOf}T00:00:00Z`).toLocaleDateString("ru-RU")}` : account.status}</small></em></article>)}
+            {!data.bankSnapshot.accounts.some((account) => account.connectionId === current.id) ? <small>Счета и остатки появятся после первой загрузки.</small> : null}
+          </section> : null}
           <div className="connection-actions">
-            {canRunCurrent ? <><button disabled={busy === `test-${current.id}`} onClick={() => void action({ action: "testConnection", connectionId: current.id }, `test-${current.id}`)}>{PROTECTED_BANK_CONNECTION_IDS.has(current.id) ? "Проверить доступ только для чтения" : "Проверить соединение"}</button><button disabled={busy === `sync-${current.id}`} onClick={() => void action({ action: "retrySync", connectionId: current.id }, `sync-${current.id}`)}>{current.id === TOCHKA_CONNECTION_ID ? "Обновить список счетов" : current.id === TBANK_CONNECTION_ID ? "Проверить счета и короткую выписку" : "Запустить синхронизацию"}</button></> : null}
+            {canRunCurrent ? <><button disabled={busy === `test-${current.id}`} onClick={() => void action({ action: "testConnection", connectionId: current.id }, `test-${current.id}`)}>{current.id === TOCHKA_CONNECTION_ID ? "Проверить и загрузить данные" : PROTECTED_BANK_CONNECTION_IDS.has(current.id) ? "Проверить доступ только для чтения" : "Проверить соединение"}</button><button disabled={busy === `sync-${current.id}`} onClick={() => void action({ action: "retrySync", connectionId: current.id }, `sync-${current.id}`)}>{current.id === TOCHKA_CONNECTION_ID ? "Загрузить новые выписки и операции" : current.id === TBANK_CONNECTION_ID ? "Проверить счета и короткую выписку" : "Запустить синхронизацию"}</button></> : null}
             <button onClick={() => setTab("Журнал")}>Посмотреть журнал</button>
             <button onClick={() => setTab("Журнал")}>Посмотреть ошибки</button>
             {canChangeCurrentState ? <><button disabled={busy === `reconnect-${current.id}` || current.id === "INT-T-D1"} onClick={() => void action({ action: "resumeConnection", connectionId: current.id }, `reconnect-${current.id}`)}>Переподключить</button><button className="danger" disabled={busy === `state-${current.id}` || current.id === "INT-T-D1" || current.status === "На паузе"} onClick={() => void action({ action: "pauseConnection", connectionId: current.id }, `state-${current.id}`)}>Отключить</button></> : null}
@@ -499,7 +510,7 @@ function ConnectionDetailDialog({ connection, setup, canManageSetup, canRun, can
       <footer>
         {canManageSetup ? <button type="button" onClick={configure}>Настроить подключение</button> : null}
         <button type="button" onClick={openLog}>Журнал</button>
-        {canRun ? <button type="button" disabled={busy === `sync-${connection.id}`} onClick={() => void action({ action: "retrySync", connectionId: connection.id }, `sync-${connection.id}`)}>{connection.id === TOCHKA_CONNECTION_ID ? "Обновить список счетов" : connection.id === TBANK_CONNECTION_ID ? "Проверить счета и выписку" : "Запустить синхронизацию"}</button> : null}
+        {canRun ? <button type="button" disabled={busy === `sync-${connection.id}`} onClick={() => void action({ action: "retrySync", connectionId: connection.id }, `sync-${connection.id}`)}>{connection.id === TOCHKA_CONNECTION_ID ? "Загрузить выписки и операции" : connection.id === TBANK_CONNECTION_ID ? "Проверить счета и выписку" : "Запустить синхронизацию"}</button> : null}
         {canChangeState ? <button type="button" className="danger" disabled={connection.id === "INT-T-D1"} onClick={() => void action({ action: "pauseConnection", connectionId: connection.id }, `state-${connection.id}`)}>Отключить</button> : null}
       </footer>
     </section>
@@ -587,7 +598,7 @@ function ConnectionWizard({ connection, existing, legalEntities, branches, busy,
   close: () => void;
   save: (setup: Record<string, unknown>, credential: string, customerChoiceId: string) => Promise<ActionResult>;
 }) {
-  const [startDate, setStartDate] = useState(existing?.startDate ?? "2026-01-01");
+  const [startDate, setStartDate] = useState(existing?.startDate || "2026-01-01");
   const [interval, setInterval] = useState(existing?.syncIntervalMinutes ?? 60);
   const [minute, setMinute] = useState(existing?.syncMinute ?? 5);
   const [authMethod, setAuthMethod] = useState(existing?.authMethod ?? (
@@ -615,8 +626,12 @@ function ConnectionWizard({ connection, existing, legalEntities, branches, busy,
   const crm = connection.id === "INT-T-ALFACRM";
   const openai = connection.id === "INT-T-OPENAI-IMAGES";
   const salesChannel = ["INT-T-FORMS", "INT-T-PHONE", "INT-T-WHATSAPP", "INT-T-TG", "INT-T-VK", "INT-T-YANDEX", "INT-T-MAIL", "INT-T-ADS", "INT-T-SOCIAL"].includes(connection.id);
-  const scopeOptions = bank
-    ? ["Операции по счетам", "Остатки", "Счета", "Контрагенты", "Назначения платежей"]
+  const tochka = connection.id === "INT-T-TOCHKA";
+  const tbank = connection.id === TBANK_CONNECTION_ID;
+  const scopeOptions = tochka
+    ? ["Счета", "Выписки", "Операции и платежи", "Реестр операций", "Остатки"]
+    : bank
+      ? ["Операции по счетам", "Остатки", "Счета", "Контрагенты", "Назначения платежей"]
     : crm
       ? ["Семьи", "Дети", "Сотрудники", "Классы и группы", "Расписание", "Занятия", "Абонементы и договоры", "Начисления и оплаты", "Лиды и статусы"]
       : openai
@@ -624,8 +639,6 @@ function ConnectionWizard({ connection, existing, legalEntities, branches, busy,
         : salesChannel
           ? ["Лиды", "Контакты", "Сообщения и звонки", "Согласия", "Рекламные метки и источник", "Статусы", "Менеджер", "Филиал", "Кампании и материалы"]
           : ["Обращения", "Контакты", "Согласия", "Рекламные метки и источник", "Публикации", "Метрики контента"];
-  const tochka = connection.id === "INT-T-TOCHKA";
-  const tbank = connection.id === TBANK_CONNECTION_ID;
   const credentialStoredForSelection = existing?.secretStatus === "stored"
     && existing.legalEntityId === legalEntityId;
   const credentialRequired = bank && canManageCredentials && !credentialStoredForSelection;
@@ -663,9 +676,9 @@ function ConnectionWizard({ connection, existing, legalEntities, branches, busy,
     event.preventDefault();
     const result = await save({
       connectionId,
-      startDate: bank ? "" : startDate,
-      syncIntervalMinutes: bank ? 0 : interval,
-      syncMinute: bank ? 0 : minute,
+      startDate: tochka ? startDate : bank ? "" : startDate,
+      syncIntervalMinutes: tochka ? interval : bank ? 0 : interval,
+      syncMinute: tochka ? minute : bank ? 0 : minute,
       authMethod,
       endpoint,
       legalEntityId,
@@ -674,7 +687,7 @@ function ConnectionWizard({ connection, existing, legalEntities, branches, busy,
       accountScope: bank ? "all_permitted" : accountScope,
       channelType,
       sourceMapping,
-      dataScopes: tochka ? ["Счета"] : tbank ? ["Счета", "Короткая выписка"] : dataScopes,
+      dataScopes: tochka ? ["Счета", "Выписки", "Операции и платежи", "Реестр операций", "Остатки"] : tbank ? ["Счета", "Короткая выписка"] : dataScopes,
       readOnlyScopeConfirmed: tbank && readOnlyScopeConfirmed,
     }, credential, customerChoiceId);
     if (!result.ok && result.payload.customerChoices?.length) {
@@ -686,12 +699,13 @@ function ConnectionWizard({ connection, existing, legalEntities, branches, busy,
     <button type="button" className="drawer-scrim" onClick={close} aria-label="Закрыть настройку" />
     <form ref={dialogRef} className="setup-wizard ahIntegrationSetupWizard" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="setup-title" tabIndex={-1}>
       <header><div><p>Безопасное подключение</p><h2 id="setup-title">{humanSystemName(connection.system)}</h2></div><button type="button" onClick={close} aria-label="Закрыть">×</button></header>
+      <div className="ahIntegrationSetupBody">
       <div className="setup-intro">
         <strong>{tochka ? "Один ключ Точки для выбранной карточки юрлица — не отдельный ключ на каждый счёт или филиал" : tbank ? "ArtHello OS использует только два метода чтения Т‑Банка" : openai ? "Генерация включится после безопасной настройки ключа OpenAI" : "Настройте источник и расписание загрузки"}</strong>
-        <span>{crm ? "Создайте в AlfaCRM отдельного пользователя для подключения. Ключ используется только во время защищённых запросов, не чаще 5 в секунду." : tochka ? "Проверка определит доступные компании, при необходимости попросит выбрать одну и проверит счета. Код компании и номера счетов наружу не выводятся; выписки и операции не загружаются." : tbank ? "В Т‑Бизнесе выпустите отдельный токен только с доступами «Информация о счетах компании» и «Информация об операциях компании». ArtHello OS запросит список счетов и до 10 операций за 7 дней; система не может по ответу банка доказать отсутствие у токена лишних прав, поэтому это подтверждает собственник. Платёжные методы не вызываются." : openai ? "Ключ не вводится в эту форму и не сохраняется в базе приложения. Примеры отправляются только при нажатии «Создать»." : channelGuide}</span>
+        <span>{crm ? "Создайте в AlfaCRM отдельного пользователя для подключения. Ключ используется только во время защищённых запросов, не чаще 5 в секунду." : tochka ? "После сохранения ArtHello OS загрузит разрешённые счета, остатки, выписки и реестр проведённых операций. Создание, подписание и отправка новых платежей не выполняются." : tbank ? "В Т‑Бизнесе выпустите отдельный токен только с доступами «Информация о счетах компании» и «Информация об операциях компании». ArtHello OS запросит список счетов и до 10 операций за 7 дней; система не может по ответу банка доказать отсутствие у токена лишних прав, поэтому это подтверждает собственник. Платёжные методы не вызываются." : openai ? "Ключ не вводится в эту форму и не сохраняется в базе приложения. Примеры отправляются только при нажатии «Создать»." : channelGuide}</span>
       </div>
       <div className="setup-grid">
-        {bank ? <div className="wide ahIntegrationRoutingNote" role="note"><strong>{tochka ? "Проверяется только доступ к счетам" : "Проверяются только счета и короткая выписка"}</strong><span>{tochka ? "Загрузка выписок, расписание синхронизации и правила распределения операций ещё не запущены." : "Один запрос получает список счетов, второй — до 10 операций за 7 дней. Ответ используется только для проверки доступа и не становится банковским фактом в системе."} Режим распределения ниже сохраняется как черновик.</span></div> : <fieldset className="wide setup-scopes"><legend>Какие данные получать</legend>{scopeOptions.map((scope) => <label key={scope}><input type="checkbox" checked={dataScopes.includes(scope)} onChange={(event) => setDataScopes((current) => event.target.checked ? [...current, scope] : current.filter((item) => item !== scope))} /><span>{scope}</span></label>)}</fieldset>}
+        {tochka ? <fieldset className="wide setup-scopes"><legend>Что загрузится из Точки</legend>{scopeOptions.map((scope) => <label key={scope}><input type="checkbox" checked readOnly aria-readonly="true" /><span>{scope}</span></label>)}</fieldset> : bank ? <div className="wide ahIntegrationRoutingNote" role="note"><strong>Проверяются только счета и короткая выписка</strong><span>Один запрос получает список счетов, второй — до 10 операций за 7 дней. Ответ используется только для проверки доступа и не становится банковским фактом в системе. Режим распределения ниже сохраняется как черновик.</span></div> : <fieldset className="wide setup-scopes"><legend>Какие данные получать</legend>{scopeOptions.map((scope) => <label key={scope}><input type="checkbox" checked={dataScopes.includes(scope)} onChange={(event) => setDataScopes((current) => event.target.checked ? [...current, scope] : current.filter((item) => item !== scope))} /><span>{scope}</span></label>)}</fieldset>}
         {tbank ? <div className="wide ahIntegrationCredentialNotice" role="note">
           <strong>Разрешите исходящий адрес сервера</strong>
           <span>При выпуске токена укажите статический исходящий IP основного сервера, на котором работает ArtHello OS, — не адрес вашего компьютера или браузера. Т‑Банк разрешает указать до 9 адресов.</span>
@@ -713,7 +727,7 @@ function ConnectionWizard({ connection, existing, legalEntities, branches, busy,
         {bank ? <label className="wide"><span>Распределение по филиалам</span><select value={allocationMode} onChange={(event) => setAllocationMode(event.target.value === "single_branch" ? "single_branch" : "classify_transactions")}><option value="classify_transactions">Несколько филиалов — классифицировать операции</option><option value="single_branch">Один филиал по умолчанию</option></select><small>{allocationMode === "classify_transactions" ? "После настройки правил операции можно будет классифицировать по назначению платежа и контрагенту; неопределённые должны оставаться в очереди «Требует разбора»." : "После запуска импорта новые операции можно будет сначала относить к одному выбранному филиалу."}</small></label> : null}
         {bank && allocationMode === "single_branch" ? <label><span>Филиал по умолчанию</span><select value={branchId} onChange={(event) => setBranchId(event.target.value)} required disabled={!branches.length}><option value="">{branches.length ? "Выберите филиал" : "Нет действующих филиалов"}</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label> : null}
         {bank && allocationMode === "classify_transactions" ? <div className="wide ahIntegrationRoutingNote" role="note"><strong>Смешанные поступления допустимы</strong><span>Один счёт может принимать деньги школы и садика. Настройка не закрепляет такой счёт за одним филиалом; до появления проверенных правил сомнительные операции нельзя разносить автоматически.</span></div> : null}
-        {!bank ? <><label><span>Загружать данные с</span><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required /></label><label><span>Автосинхронизация</span><select value={interval} onChange={(event) => setInterval(Number(event.target.value))}><option value={60}>Каждый час</option><option value={180}>Каждые 3 часа</option><option value={360}>Каждые 6 часов</option><option value={1440}>Раз в сутки</option></select></label><label><span>На какой минуте</span><input type="number" min="0" max="59" value={minute} onChange={(event) => setMinute(Number(event.target.value))} /></label></> : null}
+        {!bank || tochka ? <><label><span>{tochka ? "Загружать выписки с" : "Загружать данные с"}</span><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required /></label><label><span>Автосинхронизация</span><select value={interval} onChange={(event) => setInterval(Number(event.target.value))}><option value={60}>Каждый час</option><option value={180}>Каждые 3 часа</option><option value={360}>Каждые 6 часов</option><option value={1440}>Раз в сутки</option></select></label><label><span>На какой минуте</span><input type="number" min="0" max="59" value={minute} onChange={(event) => setMinute(Number(event.target.value))} /></label></> : null}
         <label><span>Способ авторизации</span><select value={authMethod} onChange={(event) => setAuthMethod(event.target.value)}>{tochka ? <option value="JWT">Защищённый ключ Точки</option> : tbank ? <option value="Bearer token">Токен Т‑Банка</option> : <><option value="API">Ключ подключения</option><option value="OAuth 2.0">Вход через сервис</option><option value="Webhook">Защищённый адрес приёма событий</option></>}</select></label>
         {crm ? <label><span>Адрес AlfaCRM</span><input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="https://имя.alfacrm.pro" /></label> : null}
         {crm ? <label><span>Номер филиала в AlfaCRM</span><input value={accountScope} onChange={(event) => setAccountScope(event.target.value)} placeholder="Номер из настроек AlfaCRM" /></label> : null}
@@ -722,8 +736,9 @@ function ConnectionWizard({ connection, existing, legalEntities, branches, busy,
         {!openai && !bank ? <label className="wide"><span>Поля и атрибуция</span><textarea value={sourceMapping} onChange={(event) => setSourceMapping(event.target.value)} /></label> : null}
       </div>
       <div className="secret-boundary"><strong>{tochka ? "Ключ Точки защищён" : tbank ? "Токен Т‑Банка защищён" : "Секреты защищены"}</strong><span>{bank ? `В интерфейс и ответы системы ${tochka ? "ключ и код компании" : "токен, номера счетов и операции"} не возвращаются. Зашифрованный ключ привязан к выбранной карточке юрлица, а соответствие подтверждает собственник.` : "Секретные значения передаются отдельно от обычных параметров и никогда не отображаются после сохранения."}</span></div>
+      </div>
       <footer>{docs ? <a href={docs} target="_blank" rel="noreferrer">Официальная инструкция ↗</a> : <span />}
-        <div><button type="button" onClick={close}>Отмена</button><button type="submit" disabled={busy || (tochka && authMethod !== "JWT") || (tbank && (authMethod !== "Bearer token" || !bankEgressIpConfirmed || !bankEgressIp || !readOnlyScopeConfirmed)) || (!bank && !dataScopes.length) || (bank && (!legalEntityId || !legalEntities.length)) || (bank && allocationMode === "single_branch" && (!branchId || !branches.length)) || (credentialRequired && !credential) || (customerChoices.length > 0 && !customerChoiceId)}>{busy ? "Проверяем…" : credential ? tochka ? "Проверить ключ и сохранить" : tbank ? "Проверить чтение и сохранить" : "Сохранить" : bank ? "Сохранить параметры" : "Сохранить выбор и расписание"}</button></div>
+        <div><button type="button" onClick={close}>Отмена</button><button type="submit" disabled={busy || (tochka && authMethod !== "JWT") || (tbank && (authMethod !== "Bearer token" || !bankEgressIpConfirmed || !bankEgressIp || !readOnlyScopeConfirmed)) || (!bank && !dataScopes.length) || (bank && (!legalEntityId || !legalEntities.length)) || (bank && allocationMode === "single_branch" && (!branchId || !branches.length)) || (credentialRequired && !credential) || (customerChoices.length > 0 && !customerChoiceId)}>{busy ? tochka ? "Загружаем данные…" : "Проверяем…" : credential ? tochka ? "Подключить и загрузить данные" : tbank ? "Проверить чтение и сохранить" : "Сохранить" : bank ? "Сохранить параметры" : "Сохранить выбор и расписание"}</button></div>
       </footer>
     </form>
   </div>, document.body);
@@ -734,7 +749,7 @@ function savedSetupSummary(connectionId: string, setup: IntegrationSetup) {
     const allocation = setup.allocationMode === "classify_transactions"
       ? "черновик классификации по филиалам с ручным разбором"
       : `черновик одного филиала: ${setup.branchId || "не выбран"}`;
-    return `карточка юрлица выбрана · компания ${setup.companySelectionConfirmed ? "подтверждена" : "ещё не подтверждена"} · все счета, доступные ключу Точки · ${allocation} · ключ ${setup.secretStatus === "stored" ? "сохранён защищённо" : "не введён"} · выписки и операции не загружаются`;
+    return `карточка юрлица выбрана · компания ${setup.companySelectionConfirmed ? "подтверждена" : "ещё не подтверждена"} · счета, остатки, выписки и операции с ${setup.startDate || "выбранной даты"} · ${allocation} · ключ ${setup.secretStatus === "stored" ? "сохранён защищённо" : "не введён"}`;
   }
   if (connectionId === TBANK_CONNECTION_ID) {
     return `карточка юрлица выбрана · ArtHello OS проверяет только чтение счетов и короткой выписки · ограниченные права токена ${setup.readOnlyScopeConfirmed ? "подтверждены собственником" : "ещё не подтверждены"} · токен ${setup.secretStatus === "stored" ? "сохранён защищённо" : "не введён"} · данные и платежи не импортируются`;
@@ -815,6 +830,8 @@ function humanOwnerLabel(value: string) {
 
 function humanCheckpoint(value: string) {
   if (!value) return "контрольная точка не зафиксирована";
+  const imported = /^accounts:(\d+);statements:(\d+);transactions:(\d+)$/i.exec(value);
+  if (imported) return `счетов: ${imported[1]} · выписок: ${imported[2]} · операций: ${imported[3]}`;
   const accounts = /^accounts:(\d+)$/i.exec(value);
   if (accounts) return `проверено счетов: ${accounts[1]}`;
   const readonly = /^read-only:(\d+):(\d+)$/i.exec(value);
@@ -846,6 +863,8 @@ function humanLogEvent(value: string) {
     "retry.blocked": "Повторная проверка остановлена",
     "tochka.credential_rejected": "Точка отклонила ключ",
     "tochka.accounts_verified": "Доступ к счетам Точки подтверждён",
+    "tochka.statements_imported": "Выписки и операции Точки загружены",
+    "tochka.statements_pending": "Точка формирует выписки",
     "tbank.readonly_probe_rejected": "Т‑Банк отклонил проверку",
     "tbank.readonly_access_verified": "Доступ к данным Т‑Банка подтверждён",
   };
@@ -867,6 +886,14 @@ function Fact({ k, v }: { k: string; v: string }) {
 
 function Empty({ title }: { title: string }) {
   return <EmptyState className="ahIntegrationEmpty" density="compact" title={title} description="Данные появятся после подтверждённой настройки или синхронизации." />;
+}
+
+function bankMoney(amountMinor: number, currency: string) {
+  try {
+    return new Intl.NumberFormat("ru-RU", { style: "currency", currency, maximumFractionDigits: 2 }).format(amountMinor / 100);
+  } catch {
+    return `${(amountMinor / 100).toLocaleString("ru-RU")} ${currency}`;
+  }
 }
 
 function readClientCookie(name: string) {

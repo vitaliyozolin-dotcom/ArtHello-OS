@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import {
   consumeTochkaCompanySelectionHandle,
+  commitTochkaReadOnlySync,
   commitIntegrationBankProbe,
   createTochkaCompanySelectionHandles,
   ensureCoreTables,
@@ -33,10 +34,11 @@ import {
   probeTBankToken,
   probeTochkaJwt,
   retryDecision,
+  syncTochkaReadOnly,
   validateTBankToken,
   validateTochkaJwt,
 } from "../../../lib/integrations";
-import type { TBankProbeResult, TochkaProbeResult } from "../../../lib/integrations";
+import type { TBankProbeResult, TochkaReadOnlySyncResult } from "../../../lib/integrations";
 import {
   getAuthenticatedRequestContext,
   isCanonicalOwnerContext,
@@ -231,7 +233,11 @@ async function saveSetup(actor: string, body: Record<string, unknown>) {
       if (!setup) {
         return privateJson({ error: "Настройка банка изменилась во время проверки. Начните сохранение заново." }, 409);
       }
-      return recordTochkaProbe(actor, setup, "Настройка владельцем", candidateProbe);
+      return recordTochkaSync(actor, setup, "Первичная загрузка владельцем", await syncTochkaReadOnly({
+        token: credential,
+        customerCode: setup.customerCode,
+        startDate: setup.startDate || "2026-01-01",
+      }));
     }
     if (connectionId === tbankConnectionId) {
       const validation = validateTBankToken(credential);
@@ -312,63 +318,34 @@ async function verifyTochkaConnection(actor: string, setup: IntegrationSetup, tr
   if (!setup.customerCode) return privateJson({ error: "Сначала подтвердите компанию с помощью ключа Точки" }, 409);
   const token = await readIntegrationCredential(setup.connectionId, setup.legalEntityId, setup.customerCode);
   if (!token) return privateJson({ error: "Введите ключ Точки для выбранной карточки и компании" }, 409);
-  return recordTochkaProbe(actor, setup, trigger, await probeTochkaJwt(token, fetch, Date.now(), setup.customerCode));
+  return recordTochkaSync(actor, setup, trigger, await syncTochkaReadOnly({
+    token,
+    customerCode: setup.customerCode,
+    startDate: setup.startDate || "2026-01-01",
+  }));
 }
 
-async function recordTochkaProbe(actor: string, setup: IntegrationSetup, trigger: string, probe: TochkaProbeResult) {
-  const current = new Date().toISOString();
-  const runId = `INT-RUN-${crypto.randomUUID().toUpperCase()}`;
-  const correlationId = `CORR-${crypto.randomUUID()}`;
-  const successMessage = probe.accountCountScope === "selected_customer"
-    ? `Банк подтвердил ключ и выбранную компанию; счетов: ${probe.accountCount}`
-    : `Банк подтвердил ключ и выбранную компанию; всего доступно счетов: ${probe.accountCount}`;
-  const committed = await commitIntegrationBankProbe(actor, setup, {
-    valid: probe.valid,
-    runId,
-    correlationId,
-    occurredAt: current,
-    trigger,
-    reason: probe.reason,
-    receivedCount: probe.accountCount,
-    checkpoint: `accounts:${probe.accountCount}`,
-    logEvent: probe.valid ? "tochka.accounts_verified" : "tochka.credential_rejected",
-    logMessage: successMessage,
-    logRecordRef: probe.valid
-      ? probe.accountCountScope === "selected_customer" ? "accounts:selected-customer" : "accounts:all-permitted"
-      : "accounts:probe",
-    successStatus: "Доступ к счетам подтверждён",
-    successAuthStatus: "Ключ и компания подтверждены · доступ к счетам проверен",
-    failureAuthStatus: "Ключ Точки сохранён · проверка банка не пройдена",
-    credentialExpiresAt: probe.expiresAt,
-    auditAction: probe.valid ? "integration.tochka_accounts_verified" : "integration.tochka_probe_failed",
-    auditPayload: probe.valid ? {
-      selectedLegalEntityId: setup.legalEntityId,
-      companySelectionConfirmed: true,
-      accountScope: probe.accountCountScope,
-      accountCount: probe.accountCount,
-      allocationMode: setup.allocationMode,
-    } : {
-      selectedLegalEntityId: setup.legalEntityId,
-      companySelectionConfirmed: true,
-      reason: probe.reason,
-    },
-  });
-  if (!committed) {
+async function recordTochkaSync(actor: string, setup: IntegrationSetup, trigger: string, sync: TochkaReadOnlySyncResult) {
+  const commit = await commitTochkaReadOnlySync(actor, setup, sync, trigger);
+  if (!commit.committed) {
     return privateJson({ error: "Банковский ключ или настройка изменились во время проверки. Запустите проверку заново." }, 409);
   }
-  if (!probe.valid) return privateJson({ error: probe.reason }, 422);
+  if (!sync.valid) return privateJson({ error: sync.reason }, 422);
   return privateJson({
     setup: publicSetup({ ...setup, secretStatus: "stored" }),
     test: {
       ok: true,
       companySelectionConfirmed: true,
-      accountCount: probe.accountCount,
-      accountCountScope: probe.accountCountScope,
-      expiresAt: probe.expiresAt,
+      accountCount: sync.accounts.length,
+      statementCount: sync.statements.length,
+      transactionCount: sync.transactions.length,
+      financialOperationCount: commit.financialOperationCount,
+      expiresAt: sync.expiresAt,
+      complete: sync.complete,
     },
-    message: probe.accountCountScope === "selected_customer"
-      ? `Точка подтвердила выбранную компанию и доступ ключа к ${probe.accountCount} счетам. Связь с внутренней карточкой зафиксировал владелец; импорт операций ещё не запускался.`
-      : `Точка подтвердила выбранную компанию и доступ ключа к счетам: ${probe.accountCount} всего. Принадлежность внутренней карточке сверяет владелец; импорт операций ещё не запускался.`,
+    message: sync.complete
+      ? `Точка подключена: загружено счетов — ${sync.accounts.length}, выписок — ${sync.statements.length}, операций — ${sync.transactions.length}. ${commit.financialOperationCount} проведённых рублёвых операций добавлено в финансовый реестр.`
+      : `Ключ и счета подтверждены. Точка ещё формирует часть выписок; повторите синхронизацию через несколько минут.`,
   });
 }
 
@@ -436,7 +413,7 @@ async function retrySync(actor: string, body: Record<string, unknown>) {
   if (id === "INT-T-TOCHKA") {
     const setup = (await getIntegrationSetups())[id];
     if (!setup) return privateJson({ error: "Сначала сохраните параметры подключения" }, 409);
-    return verifyTochkaConnection(actor, setup, "Ручное обновление списка счетов");
+    return verifyTochkaConnection(actor, setup, "Ручная загрузка выписок и операций");
   }
   if (id === tbankConnectionId) {
     const setup = (await getIntegrationSetups())[id];
