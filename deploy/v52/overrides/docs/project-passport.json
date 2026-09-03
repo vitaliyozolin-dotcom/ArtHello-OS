@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "Production-проверка TLS Точки внутри immutable runtime",
+    "name": "Безсекретная TLS-проверка Точки отдельным stateless runtime",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -157,12 +157,13 @@
       "Повторная проверка отделила прокручиваемое окно Настроек от обрезанного вложенного окна Точки; каноническая форма исключена из legacy-селекторов height:auto/max-height:none/overflow:visible",
       "IMG_9987 подтверждает доступ к нижним полям и запуск загрузки; IMG_9988 фиксирует отдельный серверный сбой соединения после отправки ключа",
       "Официальный API Точки использует российскую TLS-цепочку; production Node runtime получает закреплённый Russian Trusted Root CA без отключения проверки сертификатов",
-      "D-055 прошёл Quality/Proof/Verify на main; production run 33749916676 fail-closed остановился до image import и live-мутаций, потому что checkout-step вызвал отсутствующий host Node"
+      "D-055 прошёл Quality/Proof/Verify на main; production run 33749916676 fail-closed остановился до image import и live-мутаций, потому что checkout-step вызвал отсутствующий host Node",
+      "D-056 прошёл Quality/Proof/Verify и ранний checkout; production run 33750926328 подтвердил image/School/clone health и rollback, затем Docker запретил подключать private-none clone ко второй сети"
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
       "Т‑Банк нельзя подключать боевым токеном до независимого подтверждения статического исходящего IP сервера и выпуска владельцем токена с минимальными правами чтения счетов и выписки",
-      "Фактический импорт Точки ожидает успешную публикацию D-056 и безсекретную egress-проверку официального endpoint из immutable production runtime"
+      "Фактический импорт Точки ожидает успешную публикацию D-057 и безсекретную egress-проверку официального endpoint отдельным stateless immutable runtime"
     ]
   },
   "stages": [
@@ -402,8 +403,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "опубликовать D-056, не требуя host Node, и восстановить защищённое соединение immutable production runtime с официальным read-only API Точки",
-    "evidence": "D-055 failure подтверждает сохранность live до image import; D-056 требует exact-SHA hosted gates, запрет host Node, безсекретный container TLS egress preflight, защищённую выкладку и повторный импорт владельцем"
+    "result": "опубликовать D-057: оставить stateful clone без сети и доказать TLS Точки отдельным read-only immutable контейнером без данных и секретов",
+    "evidence": "D-056 failure и ARTHELLO_ROLLBACK=VERIFIED подтверждают сохранность live; D-057 требует exact-SHA hosted gates, stateless TLS egress 4xx, изолированный clone, защищённую выкладку и повторный импорт владельцем"
   },
   "decisionLog": [
     {
@@ -1542,6 +1543,73 @@
           "due": "текущий цикл",
           "evidence_required": "зелёные exact-SHA gates, отсутствие host Node в checkout, ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED, production health",
           "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "decision_id": "DEC-2026-09-03-68",
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "question": "Как доказать TLS-доступ к Точке после того, как Docker запретил подключать private-none clone ко второй сети?",
+      "statement": "Stateful clone остаётся в сети none на всём жизненном цикле. TLS-доступ проверяет отдельный одноразовый read-only контейнер того же immutable image в production-сети, без data volume, env-file, банковского ключа, Authorization и secret mounts. Inline-скрипт передаётся через явно подключённый stdin; после ожидаемого защищённого HTTP 4xx контейнер удаляется.",
+      "context": "D-056 merge a48eed30b3a0910c603ff7ad2285a42b3785a507 прошёл main Quality/Proof/Verify. Production run 33750926328 успешно прошёл checkout, image evidence, School secret, live D1 и clone health/D1, затем Docker отклонил network connect для контейнера в private none mode. Workflow подтвердил rollback до остановки live, backup и cutover.",
+      "rationale": "Разделение stateful clone и stateless egress probe даёт каждому контейнеру минимально необходимые полномочия: копия production-данных не получает сеть, а сетевой процесс не получает данные и секреты. Это устраняет Docker-конфликт и сохраняет fail-closed доказательство до cutover.",
+      "evidence": [
+        "D-056 main Quality, Proof и Verify завершены success на точном SHA a48eed30b3a0910c603ff7ad2285a42b3785a507",
+        "Production run 33750926328 подтвердил immutable image, School secret, live D1 и clone health/D1 до Docker network rejection",
+        "Production run 33750926328 завершился ARTHELLO_ROLLBACK=VERIFIED до остановки live, backup и cutover"
+      ],
+      "assumptions": [
+        "Production network контейнера Caddy предоставляет одноразовому immutable runtime тот же исходящий маршрут к официальному endpoint Точки, который будет использовать live runtime"
+      ],
+      "approved_by": "Виталий Озолин",
+      "approved_at": "2026-09-03",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после production-публикации D-057",
+      "affected_stages": [
+        16,
+        22
+      ],
+      "dependencies": [
+        "D-056",
+        "immutable image",
+        "production Docker network",
+        "production-конвейер"
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33750926328",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/326"
+      ],
+      "raw_deliberation_ref": "production evidence ArtHello OS, 03.09.2026",
+      "rejected_alternatives": [
+        {
+          "option": "Подключить stateful clone с копией данных к production-сети",
+          "reason": "Нарушает минимальные полномочия и Docker запрещает сочетать private none с другой сетью",
+          "reopen_condition": "нет"
+        },
+        {
+          "option": "Передать сетевому probe runtime secrets или банковский ключ",
+          "reason": "Для проверки DNS/TLS и защищённого 4xx секреты не нужны и только увеличивают риск",
+          "reopen_condition": "только для отдельной пользовательской проверки после успешной выкладки"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Опубликовать D-057 и получить stateless TLS egress evidence до cutover",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "зелёные exact-SHA gates, ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED из контейнера без данных и секретов, изолированный clone и production health",
+          "status": "in_progress"
+        },
+        {
+          "action": "После выкладки повторить read-only импорт Точки",
+          "owner": "Виталий Озолин",
+          "due": "после production health D-057",
+          "evidence_required": "реальные счета, остатки, выписки и проведённые операции без раскрытия ключа и полных номеров счетов",
+          "status": "open"
         }
       ]
     }
