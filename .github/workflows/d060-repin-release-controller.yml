@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   repin:
-    if: github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.actor == 'vitaliyozolin-dotcom'
+    if: github.repository == 'vitaliyozolin-dotcom/ArtHello-OS'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
