@@ -4,6 +4,7 @@ import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } 
 import { createPortal } from "react-dom";
 import { moduleCatalog, type ModuleId } from "../../data/test-snapshot";
 import { APP_ROLE_DEFINITIONS, ASSIGNABLE_APP_ROLES, permissionForRole, type RolePermission } from "../../lib/access-policy";
+import { recordLabel } from "../../lib/record-labels";
 import styles from "./AccessWorkspace.module.css";
 import { SoftSelect } from "./SoftSelect";
 import { CompactListCard } from "./design-system";
@@ -16,6 +17,8 @@ type User = {
   contact: string;
   contactType: string;
   role: string;
+  jobTitle?: string;
+  allowedModules?: ModuleId[];
   isAdministrative: boolean;
   status: string;
   invitationStatus: string;
@@ -31,10 +34,10 @@ type FamilyMember = { id: string; displayName: string; entityType: string; relat
 type Family = { id: string; displayName: string; status: string; sourceSystem: string; dataQuality: string; scope: string; members: FamilyMember[] };
 type FamilyGrant = { id: string; familyEntityId: string; principalEntityId: string; role: string; login: string; deliveryStatus: string; status: string; accessVersion: number; lastSyncStatus: string; lastSyncedAt: string };
 type AuditEvent = { id: number; actor: string; action: string; entityType: string; entityId: string; payload: string; createdAt: string };
-type SyncEvent = { id: string; eventType: string; userId: string; systemId: string; status: string; lastError: string; createdAt: string };
+type SyncEvent = { id: string; eventType: string; userId: string; systemId: string; status: string; attempts: number; createdAt: string; updatedAt: string };
 
 type AccessData = {
-  me: { id: string; displayName: string; role: string; isAdministrative: boolean; contact: string };
+  me: { id: string; displayName: string; role: string; isAdministrative: boolean; contact: string; accessVersion: number; updatedAt: string };
   branches: Branch[];
   users: User[];
   grants: Array<{ userId: string; branchId: string; accessLevel: string }>;
@@ -53,6 +56,7 @@ type Tab = typeof tabs[number];
 
 const staffRoles = ASSIGNABLE_APP_ROLES;
 const permissionDomains = moduleCatalog.map(({ id, label }) => [id, label] as const);
+const assignableModules = moduleCatalog.filter((module) => module.id !== "home" && module.id !== "access");
 const roleTemplates = APP_ROLE_DEFINITIONS.map((definition) => ({
   name: definition.appRole,
   description: definition.description,
@@ -117,7 +121,7 @@ export function AccessWorkspace({ notify }: { role: string; notify: (value: stri
   async function action(body: Record<string, unknown>, key: string) {
     setBusy(key);
     try {
-      const response = await fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const response = await fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json", "x-csrf-token": readClientCookie("__Host-arthello_csrf") }, body: JSON.stringify(body) });
       const payload = await response.json() as { error?: string; message?: string; activationLink?: string };
       if (!response.ok) throw new Error(payload.error ?? "Действие не выполнено");
       if (payload.activationLink) setCredentialLink(payload.activationLink);
@@ -193,9 +197,9 @@ export function AccessWorkspace({ notify }: { role: string; notify: (value: stri
           const systems = data.systemGrants.filter((grant) => grant.userId === user.id);
           return <button data-ah-compact-card="true" className={styles.userRow} key={user.id} onClick={() => setSelectedUser(user)}>
             <span className={styles.identity}><i>{initials(user.displayName)}</i><span><strong>{user.displayName}</strong><small>{user.contact}</small></span></span>
-            <span><strong>{user.position || user.role}</strong><small>{user.unit || (user.isAdministrative ? "Административный контур" : "Рабочая роль")}</small></span>
+            <span><strong>{humanPosition(user.jobTitle || user.position, user.role)}</strong><small>{user.unit || (user.isAdministrative ? "Административный контур" : "Рабочая роль")}</small></span>
             <span><strong>{branches.slice(0, 2).join(", ") || "Не назначены"}</strong><small>{branches.length > 2 ? `ещё ${branches.length - 2}` : "область работы"}</small></span>
-            <span><strong>{systems.map((grant) => systemNames[grant.systemId] ?? grant.systemId).join(", ") || "Не назначены"}</strong><small>{systems.map((grant) => grant.role).join(" · ")}</small></span>
+            <span><strong>{systems.map((grant) => systemNames[grant.systemId] ?? "Система").join(", ") || "Не назначены"}</strong><small>{systems.map((grant) => systemRoleLabel(data.systemRoleOptions, grant.systemId, grant.role)).join(" · ")}</small></span>
             <span><b className={user.hasAccess && user.status === "Активен" ? styles.good : user.hasAccess ? styles.bad : styles.neutral}>{user.hasAccess ? user.status === "Активен" ? user.invitationStatus : "Заблокирован" : "Доступ не выдан"}</b><small>{user.hasAccess ? `версия прав ${user.accessVersion}` : "из раздела «Команда»"}</small></span>
           </button>;
         })}
@@ -205,16 +209,16 @@ export function AccessWorkspace({ notify }: { role: string; notify: (value: stri
     {tab === "Семьи и ученики" ? <div className={styles.familyGrid}>
       <div className={styles.sectionIntro}><div><p>Личные кабинеты</p><h2>Доступ семьи к дневнику</h2></div><span>Родитель видит только связанных с ним детей. Ученик — только собственный учебный контур.</span></div>
       {data.familyDirectory.length ? data.familyDirectory.map((family) => <article className={styles.familyCard} key={family.id}>
-        <header><div><strong>{family.displayName}</strong><small>{family.id} · {family.scope}</small></div><em>{familyAccessState(family)}</em></header>
+        <header><div><strong>{family.displayName}</strong><small>{recordLabel("Карточка семьи", family.id)} · {family.scope}</small></div><em>{familyAccessState(family)}</em></header>
         {family.members.map((member) => {
           const grant = data.familyAccessGrants.find((item) => item.principalEntityId === member.id);
           return <div data-ah-compact-card="true" className={styles.familyMember} key={member.id}>
-            <span className={styles.identity}><i>{initials(member.displayName)}</i><span><strong>{member.displayName}</strong><small>{member.entityType === "Ребёнок" ? "Ученик" : "Родитель"} · {member.relation}</small></span></span>
+            <span className={styles.identity}><i>{initials(member.displayName)}</i><span><strong>{member.displayName}</strong><small>{member.entityType === "Ребёнок" ? "Ученик" : "Родитель"} · {member.relation} · {recordLabel("Карточка", member.id)}</small></span></span>
             <span><strong>{grant?.login || member.phone || member.email || "Контакт не указан"}</strong><small>{grant ? `версия прав ${grant.accessVersion}` : "доступ ещё не выдавался"}</small></span>
             <span><b className={grant?.status === "Активен" ? styles.good : grant ? styles.bad : styles.neutral}>{grant?.status ?? "Не выдан"}</b><small>{grant?.lastSyncStatus ?? "—"}</small></span>
             {data.canManage ? <div className={styles.inlineActions}>
               <button disabled={familyAccessNeedsReview(family)} onClick={() => setFamilyDialog({ family, member })}>{familyAccessNeedsReview(family) ? "Сначала сверить источник" : grant ? "Изменить" : "Выдать"}</button>
-              {grant ? <button onClick={() => void action({ action: grant.status === "Приостановлен" ? "restoreFamilyAccess" : "blockFamilyAccess", grantId: grant.id }, `family-${grant.id}`)} disabled={busy === `family-${grant.id}`}>{grant.status === "Приостановлен" ? "Восстановить" : "Приостановить"}</button> : null}
+              {grant ? <button onClick={() => void action({ action: grant.status === "Приостановлен" ? "restoreFamilyAccess" : "blockFamilyAccess", grantId: grant.id, expectedAccessVersion: grant.accessVersion }, `family-${grant.id}`)} disabled={busy === `family-${grant.id}`}>{grant.status === "Приостановлен" ? "Восстановить" : "Приостановить"}</button> : null}
             </div> : null}
           </div>;
         })}
@@ -231,13 +235,13 @@ export function AccessWorkspace({ notify }: { role: string; notify: (value: stri
     </div> : null}
 
     {tab === "Журнал" ? <div className={styles.historyLayout}>
-      <article className={styles.historyCard}><header><div><p>Действия</p><h2>История доступов</h2></div><span>{data.accessHistory.length}</span></header>{data.accessHistory.length ? <div data-ah-compact-card="true" className={styles.timeline}>{data.accessHistory.map((event) => <div key={event.id}><i /><span><strong>{auditLabels[event.action] ?? event.action}</strong><small>{event.entityId} · {event.actor}</small></span><time>{formatDate(event.createdAt)}</time></div>)}</div> : <Empty title="История пока пуста" text="Выдача, изменение, блокировка и восстановление появятся здесь автоматически." />}</article>
-      <article className={styles.historyCard}><header><div><p>Системы</p><h2>Синхронизация</h2></div><span>{data.syncEvents.length}</span></header>{data.syncEvents.length ? <div data-ah-compact-card="true" className={styles.timeline}>{data.syncEvents.map((event) => <div key={event.id}><i className={event.status.includes("Ошибка") ? styles.errorDot : ""} /><span><strong>{event.eventType} · {systemNames[event.systemId] ?? event.systemId}</strong><small>{event.userId}{event.lastError ? ` · ${event.lastError}` : ""}</small></span><time>{formatDate(event.createdAt)}</time></div>)}</div> : <Empty title="Событий синхронизации нет" text="Подключённые системы ещё не получали изменений доступа." />}</article>
+      <article className={styles.historyCard}><header><div><p>Действия</p><h2>История доступов</h2></div><span>{data.accessHistory.length}</span></header>{data.accessHistory.length ? <div data-ah-compact-card="true" className={styles.timeline}>{data.accessHistory.map((event) => <div key={event.id}><i /><span><strong>{auditLabels[event.action] ?? "Изменение доступа"}</strong><small>{recordLabel("Запись", event.entityId)} · {event.actor}</small></span><time>{formatDate(event.createdAt)}</time></div>)}</div> : <Empty title="История пока пуста" text="Выдача, изменение, блокировка и восстановление появятся здесь автоматически." />}</article>
+      <article className={styles.historyCard}><header><div><p>Системы</p><h2>Синхронизация</h2></div><span>{data.syncEvents.length}</span></header>{data.syncEvents.length ? <div data-ah-compact-card="true" className={styles.timeline}>{data.syncEvents.map((event) => <div key={event.id}><i className={event.status.includes("Ошибка") ? styles.errorDot : ""} /><span><strong>{syncEventLabel(event.eventType)} · {systemNames[event.systemId] ?? "Система"}</strong><small>{event.status}{event.attempts > 1 ? ` · попыток: ${event.attempts}` : ""}</small></span><time>{formatDate(event.createdAt)}</time></div>)}</div> : <Empty title="Событий синхронизации нет" text="Подключённые системы ещё не получали изменений доступа." />}</article>
     </div> : null}
 
     {selectedUser ? <Modal title="Карточка доступа" subtitle={selectedUser.displayName} close={() => setSelectedUser(null)}>
       <div className={styles.profileHead}><i>{initials(selectedUser.displayName)}</i><div><h3>{selectedUser.displayName}</h3><p>{selectedUser.contact}</p></div><b className={selectedUser.status === "Активен" ? styles.good : styles.bad}>{selectedUser.status}</b></div>
-      <dl className={styles.profileFacts}><div><dt>Роль</dt><dd>{selectedUser.role}</dd></div><div><dt>Филиалы</dt><dd>{selectedUser.isAdministrative ? "Все филиалы" : data.grants.filter((grant) => grant.userId === selectedUser.id).map((grant) => branchNames[grant.branchId]).join(", ") || "Не назначены"}</dd></div><div><dt>Системы</dt><dd>{data.systemGrants.filter((grant) => grant.userId === selectedUser.id).map((grant) => `${systemNames[grant.systemId] ?? grant.systemId} · ${grant.role}`).join(", ") || "Не назначены"}</dd></div><div><dt>Состояние входа</dt><dd>{selectedUser.invitationStatus}</dd></div><div><dt>Дневник</dt><dd>{syncLabel(data.systemGrants.find((grant)=>grant.userId===selectedUser.id&&grant.systemId==="SYS-SCHOOL-1-11")?.lastSyncStatus)}</dd></div></dl>
+      <dl className={styles.profileFacts}><div><dt>Должность</dt><dd>{humanPosition(selectedUser.jobTitle || selectedUser.position, selectedUser.role)}</dd></div><div><dt>Шаблон роли</dt><dd>{selectedUser.role}</dd></div><div><dt>Филиалы</dt><dd>{selectedUser.isAdministrative ? "Все филиалы" : data.grants.filter((grant) => grant.userId === selectedUser.id).map((grant) => branchNames[grant.branchId]).join(", ") || "Не назначены"}</dd></div><div><dt>Системы</dt><dd>{data.systemGrants.filter((grant) => grant.userId === selectedUser.id).map((grant) => `${systemNames[grant.systemId] ?? "Система"} · ${systemRoleLabel(data.systemRoleOptions, grant.systemId, grant.role)}`).join(", ") || "Не назначены"}</dd></div><div><dt>Состояние входа</dt><dd>{selectedUser.invitationStatus}</dd></div><div><dt>Дневник</dt><dd>{syncLabel(data.systemGrants.find((grant)=>grant.userId===selectedUser.id&&grant.systemId==="SYS-SCHOOL-1-11")?.lastSyncStatus)}</dd></div></dl>
       {data.canManage && selectedUser.id !== data.me.id ? <div className={styles.modalActions}><button className={styles.primary} onClick={() => { setUserForm(selectedUser); setSelectedUser(null); }}>{selectedUser.hasAccess ? "Изменить доступ" : "Выдать доступ"}</button>{selectedUser.hasAccess ? <><button onClick={() => setConfirm({ kind: "reset", user: selectedUser })}>Сбросить пароль</button><button className={selectedUser.status === "Активен" ? styles.danger : ""} onClick={() => setConfirm({ kind: selectedUser.status === "Активен" ? "block" : "restore", user: selectedUser })}>{selectedUser.status === "Активен" ? "Заблокировать" : "Восстановить"}</button></> : null}</div> : null}
     </Modal> : null}
 
@@ -247,7 +251,7 @@ export function AccessWorkspace({ notify }: { role: string; notify: (value: stri
 
     {confirm ? <Modal title={confirm.kind === "block" ? "Заблокировать доступ?" : confirm.kind === "restore" ? "Восстановить доступ?" : "Сбросить пароль?"} subtitle={confirm.user.displayName} close={() => setConfirm(null)}>
       <p className={styles.confirmText}>{confirm.kind === "block" ? "Пользователь сразу потеряет доступ ко всем назначенным системам. История и связанные записи сохранятся." : confirm.kind === "restore" ? "Пользователь снова сможет войти в назначенные системы с прежним набором прав." : "Текущая ссылка активации перестанет действовать. Будет создана новая одноразовая ссылка."}</p>
-      <div className={styles.modalActions}><button onClick={() => setConfirm(null)}>Отмена</button><button className={confirm.kind === "block" ? styles.danger : styles.primary} disabled={busy === "confirm"} onClick={async () => { const actionName = confirm.kind === "block" ? "blockUser" : confirm.kind === "restore" ? "restoreUser" : "resetPassword"; const ok = await action({ action: actionName, userId: confirm.user.id, employeeId: confirm.user.employeeId }, "confirm"); if (ok) { setConfirm(null); setSelectedUser(null); } }}>{busy === "confirm" ? "Выполняем…" : "Подтвердить"}</button></div>
+      <div className={styles.modalActions}><button onClick={() => setConfirm(null)}>Отмена</button><button className={confirm.kind === "block" ? styles.danger : styles.primary} disabled={busy === "confirm"} onClick={async () => { const actionName = confirm.kind === "block" ? "blockUser" : confirm.kind === "restore" ? "restoreUser" : "resetPassword"; const ok = await action({ action: actionName, userId: confirm.user.id, employeeId: confirm.user.employeeId, expectedAccessVersion: confirm.user.accessVersion }, "confirm"); if (ok) { setConfirm(null); setSelectedUser(null); } }}>{busy === "confirm" ? "Выполняем…" : "Подтвердить"}</button></div>
     </Modal> : null}
 
     {credentialLink ? <Modal title="Одноразовая ссылка готова" subtitle="Первый вход или создание нового пароля" close={() => setCredentialLink("")}><p className={styles.confirmText}>Передайте ссылку человеку безопасным каналом. Новый сброс аннулирует предыдущую ссылку.</p><label className={styles.linkField}><span>Ссылка активации</span><input readOnly value={credentialLink} onFocus={(event) => event.currentTarget.select()} /></label><div className={styles.modalActions}><button onClick={() => setCredentialLink("")}>Закрыть</button><button className={styles.primary} onClick={() => void navigator.clipboard.writeText(credentialLink)}>Скопировать</button></div></Modal> : null}
@@ -262,17 +266,20 @@ function UserAccessModal({ data, user, busy, close, submit }: { data: AccessData
   const diaryGrant = systemGrants.find((grant) => grant.systemId === "SYS-SCHOOL-1-11");
   const [administrative, setAdministrative] = useState(user.isAdministrative);
   const [diary, setDiary] = useState(systemIds.has("SYS-SCHOOL-1-11"));
+  const [selectedRole, setSelectedRole] = useState(user.role || "Сотрудник");
+  const [allowedModules, setAllowedModules] = useState<ModuleId[]>(user.allowedModules ?? modulesForRole(user.role || "Сотрудник"));
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    void submit({ action: "inviteUser", employeeId: user.employeeId, displayName: user.displayName, contact: form.get("contact"), role: form.get("role"), isAdministrative: form.get("isAdministrative") === "on", branchIds: form.getAll("branchIds"), systemIds: form.getAll("systemIds"), diaryRole: form.get("diaryRole") });
+    void submit({ action: "inviteUser", employeeId: user.employeeId, displayName: user.displayName, contact: form.get("contact"), position: form.get("position"), role: form.get("role"), allowedModules: form.getAll("allowedModules"), isAdministrative: form.get("isAdministrative") === "on", branchIds: form.getAll("branchIds"), systemIds: form.getAll("systemIds"), diaryRole: form.get("diaryRole"), expectedAccessVersion: user.accessVersion });
   }
   return <Modal title={user.hasAccess ? "Изменить доступ" : "Выдать доступ"} subtitle={user.displayName} close={close} wide>
     <form className={styles.accessForm} onSubmit={save}>
       <div className={styles.formGrid}><label><span>Сотрудник из «Команды»</span><input value={user.displayName} readOnly /></label><label><span>Логин из карточки сотрудника</span><input name="contact" value={user.contact} readOnly required /><small>Телефон или email изменяется только в «Команда → Сотрудники».</small></label></div>
-      <label><span>Основная роль</span><SoftSelect name="role" ariaLabel="Основная роль" defaultValue={user.role ?? "Сотрудник"} options={staffRoles.map((role) => ({ value: role, label: role }))} /><small>Роль задаёт базовый набор разделов. Филиалы и системы уточняют область доступа.</small></label>
+      <div className={styles.formGrid}><label><span>Должность</span><input name="position" required maxLength={120} defaultValue={humanPosition(user.jobTitle || user.position, user.role)} placeholder="Например, руководитель филиала" /><small>Свободное название для карточки пользователя.</small></label><label><span>Шаблон роли</span><SoftSelect name="role" ariaLabel="Шаблон роли" value={selectedRole} onChange={(role) => { setSelectedRole(role); setAllowedModules(modulesForRole(role)); }} options={staffRoles.map((role) => ({ value: role, label: role }))} /><small>Шаблон отмечает типовой набор; галочки ниже можно изменить.</small></label></div>
       <label className={styles.checkLine}><input type="checkbox" name="isAdministrative" checked={administrative} onChange={(event) => setAdministrative(event.target.checked)} /><span><strong>Административный контур</strong><small>Доступ ко всем действующим филиалам. Использовать только для руководителей.</small></span></label>
       <fieldset disabled={administrative}><legend>Филиалы из карточки сотрудника</legend><div className={styles.choiceGrid}>{data.branches.map((branch) => {const belongs=employeeBranchIds.has(branch.id);return <label key={branch.id}><input type="checkbox" name="branchIds" value={branch.id} disabled={!belongs} defaultChecked={user.hasAccess?branchIds.has(branch.id):belongs} /><span><strong>{branch.name}</strong><small>{belongs?branch.kind:"Не назначен сотруднику"}</small></span></label>})}</div><small>Доступ можно сузить. Новый филиал сначала добавляется в основной карточке сотрудника.</small></fieldset>
+      <fieldset><legend>Ручная настройка разделов</legend><div className={styles.moduleChoiceGrid}>{assignableModules.map((module) => { const specialMedical = module.id === "medical" && selectedRole !== "Медработник"; return <label key={module.id} className={specialMedical ? styles.disabledChoice : ""}><input type="checkbox" name="allowedModules" value={module.id} checked={allowedModules.includes(module.id)} disabled={specialMedical} onChange={(event) => setAllowedModules((current) => event.target.checked ? [...new Set([...current, module.id])] : current.filter((id) => id !== module.id))} /><span><strong>{module.label}</strong><small>{module.group}{specialMedical ? " · отдельный медицинский допуск" : ""}</small></span></label>})}</div><small>Снятая галочка закрывает экран и действия раздела. Добавленный сверх шаблона раздел доступен только для чтения.</small></fieldset>
       <fieldset><legend>Системы</legend><div className={styles.choiceGrid}>{data.systems.map((system) => <label key={system.id}><input type="checkbox" name="systemIds" value={system.id} defaultChecked={user.hasAccess ? systemIds.has(system.id) : system.id === "SYS-ARTHELLO-OS"} onChange={system.id === "SYS-SCHOOL-1-11" ? (event) => setDiary(event.target.checked) : undefined} /><span><strong>{system.name}</strong><small>{system.description}</small></span></label>)}</div></fieldset>
       {diary ? <label><span>Роль в дневнике 1–11</span><SoftSelect name="diaryRole" ariaLabel="Роль в дневнике 1–11" defaultValue={diaryGrant?.role ?? "teacher"} options={data.systemRoleOptions["SYS-SCHOOL-1-11"] ?? []} /><small>Классы, группы и предметы назначаются отдельно в учебном контуре.</small></label> : <input type="hidden" name="diaryRole" value="teacher" />}
       <div className={styles.modalActions}><button type="button" onClick={close}>Отмена</button><button className={styles.primary} disabled={busy === "save-user"}>{busy === "save-user" ? "Сохраняем…" : user.hasAccess ? "Сохранить изменения" : "Подтвердить и выдать доступ"}</button></div>
@@ -284,7 +291,7 @@ function FamilyAccessModal({ family, member, grant, busy, close, submit }: { fam
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    void submit({ action: "grantFamilyAccess", familyEntityId: family.id, principalEntityId: member.id, role: member.entityType === "Ребёнок" ? "student" : "parent", login: form.get("login") });
+    void submit({ action: "grantFamilyAccess", familyEntityId: family.id, principalEntityId: member.id, role: member.entityType === "Ребёнок" ? "student" : "parent", login: form.get("login"), expectedAccessVersion: grant?.accessVersion ?? 0 });
   }
   return <Modal title={grant ? "Изменить доступ" : "Выдать доступ"} subtitle={`${family.displayName} · ${member.displayName}`} close={close}>
     <form className={styles.accessForm} onSubmit={save}><div className={styles.profileHead}><i>{initials(member.displayName)}</i><div><h3>{member.displayName}</h3><p>{member.entityType === "Ребёнок" ? "Ученик" : "Родитель / представитель"}</p></div></div><label><span>Логин и канал активации</span><input name="login" required defaultValue={grant?.login || member.phone || member.email} placeholder="+7… или name@example.ru" /><small>На телефон отправляется SMS, на email — письмо. Пароль пользователь создаёт сам.</small></label><div className={styles.modalActions}><button type="button" onClick={close}>Отмена</button><button className={styles.primary} disabled={busy === "save-family"}>{busy === "save-family" ? "Сохраняем…" : "Сохранить и отправить"}</button></div></form>
@@ -299,7 +306,12 @@ function Empty({ title, text }: { title: string; text: string }) { return <div c
 function initials(value: string) { return value.split(/\s+/).filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase(); }
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date); }
 function syncLabel(value?:string){return !value?"Не назначен":value==="Ожидает синхронизации"||value==="Ожидает подключения"?"Дневник ещё не подключён — права сохранены только в ArtHello OS":value}
+function syncEventLabel(value:string){return ({upsert:"Права обновлены",block:"Доступ приостановлен",restore:"Доступ восстановлен",reset_password:"Запрошен новый пароль",revoke:"Доступ отозван",grant_access:"Доступ семьи выдан",block_access:"Доступ семьи приостановлен",restore_access:"Доступ семьи восстановлен",revoke_access:"Доступ семьи отозван"} as Record<string,string>)[value]??"Изменение доступа"}
 function familyAccessState(family:Pick<Family,"sourceSystem"|"dataQuality">){return family.sourceSystem==="MANUAL"&&family.dataQuality!=="Требует сверки"?"Создано вручную":family.dataQuality}
 function familyAccessNeedsReview(family:Pick<Family,"sourceSystem"|"dataQuality">){return family.dataQuality==="Требует сверки"||family.dataQuality==="На проверке"||(family.sourceSystem!=="MANUAL"&&family.dataQuality!=="Проверено")}
-function permissionHint(key: string) { return ({ home: "Персональный обзор и доступные действия", tasks: "Задачи, процессы и календарь", finance: "Платежи, начисления, ДДС и ОПиУ", accounting: "Бухгалтерские документы и 1С", registry: "Единые карточки и связи", sales: "Воронка и оплаты", clients: "Семьи, ученики и коммуникации", education: "Занятия, оценки и программы", methods: "Методики и учебные материалы", hr: "Сотрудники, ставки и кадровые события", legal: "Договоры, версии и обязательства", procurement: "Закупки и поставщики", food: "Меню, производство и экономика", safety: "Риски и меры безопасности", medical: "Чувствительные медицинские сведения", content: "Контент-план и материалы", events: "Общие рабочие события", projects: "Проекты и KPI", analytics: "Подтверждённые показатели и аналитика", contractors: "Подрядчики и связанные документы", assets: "Имущество и обслуживание", quality: "Готовность и контроль качества", access: "Пользователи, роли и отзыв доступа", integrations: "Подключения и журнал обмена", acceptance: "Приёмочные сценарии и готовность" } as Record<string, string>)[key] ?? ""; }
+function permissionHint(key: string) { return ({ home: "Персональный обзор и доступные действия", tasks: "Задачи, процессы и календарь", finance: "Платежи, начисления, ДДС и ОПиУ", accounting: "Бухгалтерские документы и 1С", registry: "Единые карточки и связи", sales: "Воронка и оплаты", clients: "Семьи, ученики и коммуникации", education: "Занятия, оценки и программы", methods: "Методики и учебные материалы", hr: "Сотрудники, ставки и кадровые события", legal: "Договоры, версии и обязательства", procurement: "Закупки и поставщики", food: "Меню, производство и экономика", safety: "Риски и меры безопасности", medical: "Чувствительные медицинские сведения", content: "Контент-план и материалы", events: "Общие рабочие события", projects: "Проекты и KPI", analytics: "Подтверждённые показатели и аналитика", contractors: "Подрядчики и связанные документы", assets: "Имущество и обслуживание", quality: "Готовность и контроль качества", access: "Пользователи, роли и отзыв доступа", integrations: "Подключения и журнал обмена", acceptance: "Техническая проверка системы перед выпуском" } as Record<string, string>)[key] ?? ""; }
 function permissionClass(permission: RolePermission, css: typeof styles) { return permission === "Управление" ? css.manage : permission === "Редактирование" ? css.edit : permission === "Просмотр" ? css.view : permission === "Особый доступ" ? css.special : css.none; }
+function modulesForRole(role: string) { const template = roleTemplates.find((item) => item.name === role); return assignableModules.filter((module) => template?.permissions[module.id] && template.permissions[module.id] !== "Нет доступа").map((module) => module.id); }
+function humanPosition(value: string | undefined, fallback: string) { const position = value?.trim() ?? ""; return !position || /^POS[-_:]/i.test(position) || /^[A-Z_]{3,}$/i.test(position) ? fallback || "Должность не указана" : position; }
+function systemRoleLabel(options: AccessData["systemRoleOptions"], systemId: string, role: string) { return options[systemId]?.find((option) => option.value === role)?.label ?? ({ director: "Директор", deputy: "Завуч", admin: "Администратор школы", teacher: "Учитель", tech_admin: "Технический администратор" } as Record<string, string>)[role] ?? "Назначенная роль"; }
+function readClientCookie(name: string) { const prefix = `${name}=`; const item = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(prefix)); if (!item) return ""; try { return decodeURIComponent(item.slice(prefix.length)); } catch { return ""; } }

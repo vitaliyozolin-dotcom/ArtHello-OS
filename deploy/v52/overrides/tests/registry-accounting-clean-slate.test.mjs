@@ -11,7 +11,8 @@ const accountingActionsUrl = new URL("../app/api/accounting-actions/route.ts", i
 test("manual registry cards receive a production ID from the API", async () => {
   const [registry, api] = await Promise.all([readFile(registryUrl, "utf8"), readFile(entitiesApiUrl, "utf8")]);
   assert.match(registry, /name="sourceSystem" value="MANUAL"/);
-  assert.match(registry, /ID назначит система/);
+  assert.match(registry, /Номер назначит система/);
+  assert.doesNotMatch(registry, /ID назначит|рабочий идентификатор/);
   assert.doesNotMatch(registry, /name="id"/);
   assert.doesNotMatch(registry, /XLSX_MASKED|Проект T-|pattern="[^"]*-T-/);
   assert.match(api, /requestedId \|\| createEntityId\(entityType\)/);

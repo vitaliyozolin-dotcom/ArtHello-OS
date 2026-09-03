@@ -22,7 +22,9 @@ test("empty production UI does not expose synthetic fallback entities", () => {
     "../data/test-snapshot.ts",
   ].map(read).join("\n");
 
-  assert.doesNotMatch(sources, /FAM-T-|EMP-T-|DOG-T-|LEAD-T-|EVENT-T-|SUP-T-|SAFE-EQ-T-|Q-T-|SYNTHETIC/);
+  assert.doesNotMatch(sources, /FAM-T-|EMP-T-|DOG-T-|LEAD-T-|EVENT-T-|SUP-T-|SAFE-EQ-T-|Q-T-/);
+  assert.match(sources, /SYNTHETIC_TRACE[\s\S]+Тестовая связанная запись/);
+  assert.match(sources, /includes\("SYNTHETIC"\)[\s\S]+Тестовое допущение/);
   assert.match(sources, /Данных пока нет/);
   assert.match(sources, /Реестр пуст/);
 });

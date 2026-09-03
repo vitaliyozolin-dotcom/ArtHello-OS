@@ -1,39 +1,28 @@
 import { getAuthenticatedSession } from "../../../../lib/production-auth";
 import {
+  artHelloPublicOrigin,
   issueSchoolSsoCode,
+  requireCurrentSchoolSsoIdentity,
   schoolPublicOrigin,
-  type SchoolRole,
 } from "../../../../lib/school-sso";
 
 export const dynamic = "force-dynamic";
 
-const SCHOOL_SYSTEM_ID = "SYS-SCHOOL-1-11";
-
-type SettingsPayload = {
-  me?: {
-    id?: string;
-    displayName?: string;
-    role?: string;
-    isAdministrative?: boolean;
-    contact?: string;
-  };
-  users?: Array<{
-    id?: string;
-    accessVersion?: number;
-  }>;
-  systemGrants?: Array<{
-    userId?: string;
-    systemId?: string;
-    role?: string;
-    status?: string;
-    lastSyncStatus?: string;
-  }>;
-  error?: string;
-};
+const expectedAccessErrors = new Set([
+  "Учётная запись ArtHello OS не найдена",
+  "Доступ к электронному дневнику не выдан",
+  "Роль в электронном дневнике не настроена",
+  "Права доступа изменились. Начните вход в дневник заново",
+]);
 
 function safeReturnTo(value: string | null) {
   const route = value?.trim() || "/";
-  return route.startsWith("/") && !route.startsWith("//") ? route : "/";
+  return route.startsWith("/") &&
+    !route.startsWith("//") &&
+    !route.includes("\\") &&
+    !/[\u0000-\u001f\u007f]/.test(route)
+    ? route
+    : "/";
 }
 
 function validOpaque(value: string | null, min: number, max: number) {
@@ -45,60 +34,14 @@ function validOpaque(value: string | null, min: number, max: number) {
   );
 }
 
-function activeStatus(value: unknown) {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  return (
-    normalized === "active" ||
-    normalized === "enabled" ||
-    normalized.includes("актив") ||
-    normalized.includes("выдан")
-  );
-}
-
-function schoolRole(value: unknown): SchoolRole | null {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (normalized.includes("техничес") || normalized.includes("tech"))
-    return "tech_admin";
-  if (normalized.includes("директор") || normalized === "director")
-    return "director";
-  if (normalized.includes("завуч") || normalized.includes("deputy"))
-    return "deputy";
-  if (normalized.includes("администратор") || normalized === "admin")
-    return "admin";
-  if (
-    normalized.includes("учитель") ||
-    normalized.includes("педагог") ||
-    normalized === "teacher"
-  )
-    return "teacher";
-  return null;
-}
-
 function continuePath(url: URL) {
   return `${url.pathname}${url.search}`;
 }
 
-function loginRedirect(url: URL) {
-  const login = new URL("/school-sso/login", url.origin);
+function loginRedirect(url: URL, centralOrigin: string) {
+  const login = new URL("/school-sso/login", centralOrigin);
   login.searchParams.set("continue", continuePath(url));
   return login;
-}
-
-async function loadSettings(request: Request) {
-  const url = new URL(request.url);
-  const response = await fetch(new URL("/api/settings", url.origin), {
-    method: "GET",
-    headers: {
-      cookie: request.headers.get("cookie") || "",
-      accept: "application/json",
-      "x-arthello-sso-read": "school",
-    },
-    cache: "no-store",
-  });
-  const payload = (await response.json().catch(() => ({}))) as SettingsPayload;
-  if (!response.ok)
-    throw new Error(payload.error || "Не удалось проверить доступ к дневнику");
-  return payload;
 }
 
 export async function GET(request: Request) {
@@ -113,50 +56,50 @@ export async function GET(request: Request) {
       { status: 400, headers: { "cache-control": "no-store" } },
     );
 
+  let centralOrigin: string;
+  let schoolOrigin: string;
+  try {
+    centralOrigin = artHelloPublicOrigin();
+    schoolOrigin = schoolPublicOrigin();
+  } catch {
+    return Response.json(
+      { error: "Вход в электронный дневник ещё не настроен" },
+      { status: 503, headers: { "cache-control": "no-store" } },
+    );
+  }
+
   const authenticated = await getAuthenticatedSession(request);
   if (!authenticated)
     return new Response(null, {
       status: 303,
       headers: {
-        location: loginRedirect(url).toString(),
+        location: loginRedirect(url, centralOrigin).toString(),
         "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+      },
+    });
+
+  if (authenticated.user.mustChangePassword)
+    return new Response(null, {
+      status: 303,
+      headers: {
+        location: loginRedirect(url, centralOrigin).toString(),
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
       },
     });
 
   try {
-    const settings = await loadSettings(request);
-    const me = settings.me;
-    if (!me?.id || !me.displayName)
-      throw new Error("Учётная запись ArtHello OS не найдена");
-
-    const owner = authenticated.user.role === "owner";
-    const grant = settings.systemGrants?.find(
-      (item) => item.userId === me.id && item.systemId === SCHOOL_SYSTEM_ID,
+    const identity = await requireCurrentSchoolSsoIdentity(
+      authenticated.user.userId,
     );
-    if (!owner && (!grant || !activeStatus(grant.status)))
-      throw new Error("Доступ к электронному дневнику не выдан");
-
-    const role = owner ? "director" : schoolRole(grant?.role);
-    if (!role)
-      throw new Error("Роль в электронном дневнике не настроена");
-
-    const directoryUser = settings.users?.find((item) => item.id === me.id);
-    const accessVersion = Number.isInteger(directoryUser?.accessVersion)
-      ? Math.max(1, Number(directoryUser?.accessVersion))
-      : 1;
     const authorization = await issueSchoolSsoCode(
-      {
-        centralUserId: me.id,
-        displayName: me.displayName,
-        contact: me.contact || "",
-        role,
-        accessVersion,
-      },
+      identity,
       codeChallenge as string,
       returnTo,
     );
 
-    const callback = new URL("/auth/central/callback", schoolPublicOrigin());
+    const callback = new URL("/auth/central/callback", schoolOrigin);
     callback.searchParams.set("code", authorization.code);
     callback.searchParams.set("state", state as string);
     return new Response(null, {
@@ -168,10 +111,14 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    const denied = new URL("/login", schoolPublicOrigin());
+    const denied = new URL("/login", schoolOrigin);
     denied.searchParams.set("authError", "central_denied");
     const message = error instanceof Error ? error.message : "Доступ не подтверждён";
-    denied.searchParams.set("reason", message.slice(0, 160));
+    if (!expectedAccessErrors.has(message)) console.error("school_sso.authorize_failed");
+    denied.searchParams.set(
+      "reason",
+      expectedAccessErrors.has(message) ? message : "Доступ не подтверждён",
+    );
     return new Response(null, {
       status: 303,
       headers: {

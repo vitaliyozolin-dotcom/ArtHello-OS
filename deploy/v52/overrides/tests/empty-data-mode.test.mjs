@@ -92,6 +92,7 @@ async function loadDbModule(database) {
       ['import { env } from "cloudflare:workers";', "const env = globalThis.__ARTHELLO_EMPTY_MODE_ENV__;"],
       ['import { drizzle } from "drizzle-orm/d1";', "const drizzle = () => { throw new Error('drizzle is not used by this test'); };"],
       ['import { entityDuplicateKey, manualEntityNormalization } from "../lib/entity-provenance";', "const entityDuplicateKey = ({entityType,displayName}) => `${entityType}:${displayName}`; const manualEntityNormalization = () => null;"],
+      ['import { ensureOperatingIntegrationCatalog } from "../lib/operating-integration-catalog";', "const ensureOperatingIntegrationCatalog = async () => {};"],
       ['import * as schema from "./schema";', "const schema = {};"],
     ], "db/index.ts");
     return await importCode(code, "db-index");
@@ -212,14 +213,15 @@ test("readiness action returns 409 in empty mode before touching scenario data",
     getSystemDataMode: async () => "empty",
     scenarioPassed: () => false,
     summarizeValidation: () => ({ status: "Не пройдено", passed: 0, failed: 0, skipped: 0 }),
-    getRequestUser: () => "USR-VITALY",
+    getAuthenticatedRequestContext: async () => ({ actor: "owner@example.test", apiRole: "OWNER" }),
+    verifyAuthenticatedRequestCsrf: () => {},
   };
   try {
     const code = transpile(readinessActionsSource, [
       ['import{env}from"cloudflare:workers";', "const {env}=globalThis.__ARTHELLO_READINESS_TEST__;"],
       ['import{ensureCoreTables,getSystemDataMode}from"../../../db";', "const {ensureCoreTables,getSystemDataMode}=globalThis.__ARTHELLO_READINESS_TEST__;"],
       ['import{scenarioPassed,summarizeValidation}from"../../../lib/readiness";', "const {scenarioPassed,summarizeValidation}=globalThis.__ARTHELLO_READINESS_TEST__;"],
-      ['import{getRequestUser}from"../../../lib/request-user";', "const {getRequestUser}=globalThis.__ARTHELLO_READINESS_TEST__;"],
+      ['import{getAuthenticatedRequestContext,verifyAuthenticatedRequestCsrf}from"../../../lib/production-auth";', "const {getAuthenticatedRequestContext,verifyAuthenticatedRequestCsrf}=globalThis.__ARTHELLO_READINESS_TEST__;"],
     ], "readiness-actions/route.ts");
     const route = await importCode(code, "readiness-actions");
     const response = await route.POST(new Request("https://example.test/api/readiness-actions", {

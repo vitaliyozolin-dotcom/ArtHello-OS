@@ -23,6 +23,9 @@ export const appUsers = sqliteTable("app_users", {
   contact: text("contact").notNull(),
   displayName: text("display_name").notNull(),
   role: text("role").notNull(),
+  jobTitle: text("job_title").notNull().default(""),
+  allowedModules: text("allowed_modules").notNull().default(""),
+  favoriteModules: text("favorite_modules").notNull().default(""),
   isAdministrative: integer("is_administrative", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("Приглашён"),
   invitationStatus: text("invitation_status").notNull().default("Ожидает активации"),
@@ -672,6 +675,12 @@ export const legalDocumentItems = sqliteTable("legal_document_items", {
   status: text("status").notNull(), dueDate: text("due_date").notNull().default(""), reference: text("reference").notNull().default(""),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 },(table)=>[uniqueIndex("legal_document_stable_version_unique").on(table.stableId,table.version)]);
+export const legalContractTextVersions = sqliteTable("legal_contract_text_versions", {
+  id: text("id").primaryKey(), stableId: text("stable_id").notNull(), contractId: text("contract_id").notNull(), documentItemId: text("document_item_id").notNull(),
+  version: integer("version").notNull(), bodyText: text("body_text").notNull(), sourceMode: text("source_mode").notNull(), modelVersion: text("model_version").notNull(),
+  policyVersion: text("policy_version").notNull(), protectionClass: text("protection_class").notNull(), confirmedBy: text("confirmed_by").notNull(),
+  confirmedAt: text("confirmed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+},(table)=>[uniqueIndex("legal_contract_text_stable_version_unique").on(table.stableId,table.version)]);
 export const legalResponsibilityZones = sqliteTable("legal_responsibility_zones", {
   id: text("id").primaryKey(), contractId: text("contract_id").notNull(), zone: text("zone").notNull(), responsibleEntityId: text("responsible_entity_id").notNull(),
   scope: text("scope").notNull(), status: text("status").notNull(), createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),

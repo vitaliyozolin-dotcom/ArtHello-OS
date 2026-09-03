@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
 import { auditEvents, entities, salesLeads, salesStageEvents, salesTouchpoints, tasks } from "../../../db/schema";
 import { nextSalesStage } from "../../../lib/sales";
+import { recordLabel } from "../../../lib/record-labels";
 import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
 import { isTaskManager, resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
 import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
@@ -210,7 +211,7 @@ async function createFollowupTask(context: TaskAccessContext, body: Record<strin
     return Response.json({ error: "Ответственный не найден" }, { status: 400 });
   }
   const [task] = await db.insert(tasks).values({
-    title: `Следующий шаг по ${lead.id} · ${lead.stage}`,
+    title: `Следующий шаг: ${recordLabel("лид", lead.id).toLocaleLowerCase("ru")} · ${lead.stage}`,
     owner: assignment.owner,
     dueDate: relativeDate(2),
     priority: lead.stage === "Заявка" ? "Высокий" : "Средний",

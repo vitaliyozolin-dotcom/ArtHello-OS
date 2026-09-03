@@ -10,6 +10,15 @@ const integrationCredentialsKey = readRuntimeSecret(
   "INTEGRATION_CREDENTIALS_KEY",
   "INTEGRATION_CREDENTIALS_KEY_FILE",
 );
+const centralAccessSecret = readRuntimeSecret(
+  "CENTRAL_ACCESS_SECRET",
+  "CENTRAL_ACCESS_SECRET_FILE",
+);
+const openAiApiKey = readRuntimeSecret(
+  "OPENAI_API_KEY",
+  "OPENAI_API_KEY_FILE",
+);
+const openAiOcrModel = allowedOpenAiOcrModel(process.env.OPENAI_OCR_MODEL);
 
 if (integrationCredentialsKey.length < 32) {
   throw new Error("INTEGRATION_CREDENTIALS_KEY must contain at least 32 characters");
@@ -39,7 +48,14 @@ const runtime = new Miniflare({
       "ARTHELLO_BOOTSTRAP_PASSWORD",
       "ARTHELLO_BOOTSTRAP_PASSWORD_FILE",
     ),
+    SCHOOL_PUBLIC_ORIGIN: process.env.SCHOOL_PUBLIC_ORIGIN || "",
+    SCHOOL_DIARY_SYNC_URL: process.env.SCHOOL_DIARY_SYNC_URL || "",
+    SCHOOL_DIARY_ALLOWED_ORIGINS: process.env.SCHOOL_DIARY_ALLOWED_ORIGINS || "",
+    CENTRAL_ACCESS_SECRET: centralAccessSecret,
+    OPENAI_API_KEY: openAiApiKey,
+    OPENAI_OCR_MODEL: openAiOcrModel,
     INTEGRATION_CREDENTIALS_KEY: integrationCredentialsKey,
+    TBANK_EGRESS_IP: process.env.TBANK_EGRESS_IP || "",
   },
   d1Databases: { DB: "arthello-production" },
   d1Persist: dataRoot,
@@ -67,6 +83,13 @@ function readRuntimeSecret(valueName, fileName) {
     throw new Error(`${valueName} conflicts with ${fileName}`);
   }
   return fromFile;
+}
+
+function allowedOpenAiOcrModel(value) {
+  const requested = (value || "").trim();
+  return new Set(["gpt-4.1-mini"]).has(requested)
+    ? requested
+    : "gpt-4.1-mini";
 }
 
 const url = await runtime.ready;

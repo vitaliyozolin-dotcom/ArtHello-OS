@@ -48,7 +48,6 @@
 .ah-launch:focus-visible,
 .ah-menu button:focus-visible,
 .ah-menu input:focus-visible,
-.ah-field-icon:focus-visible,
 .ah-tour-callout button:focus-visible {
   outline: 3px solid rgba(112, 87, 232, 0.24);
   outline-offset: 2px;
@@ -150,48 +149,6 @@
   border-color: var(--ah-accent);
   background: var(--ah-accent);
   color: #fff;
-}
-
-.ah-menu-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 13px;
-  color: var(--ah-muted);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.ah-menu-toggle input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--ah-accent);
-}
-
-.ah-field-icon {
-  position: fixed;
-  z-index: 5;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 1px solid rgba(100, 116, 139, 0.38);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.96);
-  color: #5d45d4;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
-  display: grid;
-  place-items: center;
-  font: 800 10px/1 inherit;
-  opacity: 0.72;
-  cursor: pointer;
-  pointer-events: auto;
-}
-
-.ah-field-icon:hover,
-.ah-field-icon:focus-visible {
-  border-color: rgba(93, 69, 212, 0.68);
-  background: #f6f4ff;
-  opacity: 1;
 }
 
 .ah-tour-blocker {
@@ -344,12 +301,6 @@
     font-size: 13px;
   }
 
-  .ah-field-icon {
-    width: 16px;
-    height: 16px;
-    font-size: 10px;
-  }
-
   .ah-tour-callout {
     max-height: min(390px, 44dvh);
     padding: 14px;
@@ -391,3 +342,6 @@
     transition: none;
   }
 }
+
+/* ARTHELLO_HELP_CANONICAL_V5 */
+@media(max-width:720px){.ah-tour-callout{position:fixed!important;left:12px!important;right:12px!important;top:auto!important;bottom:calc(92px + env(safe-area-inset-bottom))!important;width:auto!important;max-width:none!important;max-height:min(56dvh,520px)!important;overflow:auto!important;transform:none!important}.ah-tour-hole{pointer-events:none!important;border-radius:18px!important}}

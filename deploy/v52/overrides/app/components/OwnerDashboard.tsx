@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
 import type { ModuleId } from "../../data/test-snapshot";
+import { humanTechnicalText, recordLabel, taskRecordLabel } from "../../lib/record-labels";
 import {
   DASHBOARD_LAYOUT_VERSION,
   allowedDashboardWidgetIds,
@@ -93,7 +94,7 @@ const MOSCOW_TIME_ZONE = "Europe/Moscow";
 
 const WIDGETS: ReadonlyArray<{ id: DashboardWidgetId; title: string; description: string; defaultSize: DashboardWidgetSize }> = [
   { id: "kpis", title: "Ключевые показатели", description: "Факт по финансам и открытым задачам", defaultSize: "full" },
-  { id: "cashflow", title: "Денежный поток", description: "Поступления и списания по данным ОДДС", defaultSize: "wide" },
+  { id: "cashflow", title: "Денежный поток", description: "Поступления и списания по отчёту о движении денег", defaultSize: "wide" },
   { id: "decisions", title: "Мои решения", description: "Открытые задачи, требующие действия", defaultSize: "compact" },
   { id: "signals", title: "Сигналы и риски", description: "Только подтверждённые сигналы из аналитики", defaultSize: "compact" },
   { id: "milestones", title: "Контрольные точки", description: "Ближайшие сроки из задач", defaultSize: "compact" },
@@ -128,8 +129,8 @@ const ROLE_HOME_PROFILES: Record<string, RoleHomeProfile> = {
   "Юрист": { title: "Юридический контур", description: "Документы, подрядчики и юридические задачи", preferredModules: ["legal", "contractors", "accounting", "registry", "tasks"], widgets: ["roleFocus", "kpis", "decisions", "milestones"] },
   "Интеграции": { title: "Контур интеграций", description: "Подключения, качество данных и задачи обмена", preferredModules: ["integrations", "quality", "tasks", "events"], widgets: ["kpis", "roleFocus", "decisions", "milestones"] },
   "Аналитика": { title: "Контур аналитики", description: "Аналитика, финансы и проекты", preferredModules: ["analytics", "finance", "sales", "content", "tasks"], widgets: ["roleFocus", "kpis", "milestones", "decisions"] },
-  "Проекты": { title: "Проектный контур", description: "Проекты, KPI и ближайшие контрольные точки", preferredModules: ["projects", "tasks", "events"], widgets: ["kpis", "roleFocus", "milestones", "decisions"] },
-  "Контроль качества": { title: "Контур качества", description: "Обращения, приёмка и задачи контроля", preferredModules: ["quality", "acceptance", "tasks", "events"], widgets: ["roleFocus", "kpis", "decisions", "milestones"] },
+  "Проекты": { title: "Проектный контур", description: "Проекты, показатели и ближайшие контрольные точки", preferredModules: ["projects", "tasks", "events"], widgets: ["kpis", "roleFocus", "milestones", "decisions"] },
+  "Контроль качества": { title: "Контур качества", description: "Обращения, проверка системы и задачи контроля", preferredModules: ["quality", "acceptance", "tasks", "events"], widgets: ["roleFocus", "kpis", "decisions", "milestones"] },
   "Сотрудник": { title: "Рабочий контур", description: "Личные задачи и календарные события", preferredModules: ["tasks", "events"], widgets: ["kpis", "roleFocus", "decisions", "milestones"] },
 };
 
@@ -170,6 +171,21 @@ function monthLabel(period: string, format: "short" | "long" = "short") {
 function chartTick(value: number) {
   if (value === 0) return "0";
   return `${Number((value / 100_000_000).toFixed(1)).toLocaleString("ru-RU")} млн`;
+}
+
+function humanTaskTitle(value: string) {
+  const withoutCodes = value
+    .replace(/\b[A-ZА-Я]{2,}(?:-[A-ZА-Я0-9]{2,}){1,}\b/giu, "")
+    .replace(/\s+/g, " ")
+    .replace(/[\s·:–—-]+$/u, "")
+    .trim();
+  return withoutCodes || "Без названия";
+}
+
+function humanFinanceClass(value: string) {
+  return humanTechnicalText(value)
+    .replace(/ОПиУ/g, "отчёт о прибылях и убытках")
+    .replace(/ОДДС/g, "отчёт о движении денег");
 }
 
 function moscowHour(value: Date) {
@@ -602,12 +618,12 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
     openOperation({
       title: operation.category,
       value: `${operation.direction === "Поступление" ? "+" : "−"}${rubles(operation.amountMinor)}`,
-      summary: `${operation.id} · ${finance?.entityNames[operation.counterpartyEntityId] ?? operation.counterpartyEntityId}`,
-      source: `${operation.sourceFile} · ${operation.sourceSheet} · ${operation.sourceRef}`,
-      calculation: `${operation.direction}; статья ${operation.reportClass}; исходная сумма операции без перезаписи`,
+      summary: `${recordLabel("Операция",operation.id)} · ${finance?.entityNames[operation.counterpartyEntityId] ?? recordLabel("Контрагент",operation.counterpartyEntityId)}`,
+      source: operation.sourceFile ? `${humanTechnicalText(operation.sourceFile)} · строка исходного документа` : "Банковская выписка",
+      calculation: `${operation.direction}; статья ${humanFinanceClass(operation.reportClass)}; исходная сумма операции без перезаписи`,
       updated: formatDate(operation.operationDate),
       owner: "Финансовый контролёр",
-      quality: operation.dataQuality || operation.status,
+      quality: humanTechnicalText(operation.dataQuality || operation.status),
       lineage: ["Источник", "Банковская операция", "Контрагент", "Договор", "Статья ДДС", "Документ"],
     });
   }
@@ -707,7 +723,7 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
         {decisions.length ? decisions.map((task) => (
           <button key={task.id} onClick={() => navigate("tasks")}>
             <AppIcon name="tasks" />
-            <span><strong>{task.title}</strong><small>{task.sourceId || "Ручная задача"}</small></span>
+            <span><strong>{humanTaskTitle(task.title)}</strong><small>{taskRecordLabel(task.id)} · {task.priority || "Обычный приоритет"}</small></span>
             <em>{task.dueDate ? formatDate(task.dueDate) : task.status}</em>
           </button>
         )) : <div data-ah-compact-card="true" className={styles.inlineEmpty}><strong>Открытых решений нет</strong><span>Здесь появятся только реальные задачи, которым нужно ваше действие.</span><button onClick={createTask}>Создать задачу</button></div>}
@@ -730,7 +746,7 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
       <div data-ah-compact-card="true" className={styles.eventList}>
         {milestones.length ? milestones.map((task) => <button key={task.id} onClick={() => navigate("tasks")}>
           <time dateTime={task.dueDate}>{formatDate(task.dueDate).slice(0, 5)}</time>
-          <span><strong>{task.title}</strong><small>{task.priority || task.status}</small></span>
+          <span><strong>{taskRecordLabel(task.id)} · {humanTaskTitle(task.title)}</strong><small>{task.priority || task.status}</small></span>
         </button>) : <div data-ah-compact-card="true" className={styles.inlineEmpty}>
           <strong>Контрольных точек пока нет</strong>
           <span>Добавьте срок в задачу — дата автоматически появится здесь.</span>
@@ -740,14 +756,14 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
     </article>;
 
     if (widget.id === "cashflow") return <article className={`${styles.panel} ${chartStyles.chartPanel}`} data-help-block="cashflow">
-      <header><span><strong>Денежный поток</strong><small>{chartData.length ? `${monthLabel(chartData[0].period)} — ${monthLabel(chartData.at(-1)?.period ?? chartData[0].period, "long")}` : "Фактические данные ОДДС"}</small></span><button onClick={() => navigate("finance")}>Открыть отчёт</button></header>
+      <header><span><strong>Денежный поток</strong><small>{chartData.length ? `${monthLabel(chartData[0].period)} — ${monthLabel(chartData.at(-1)?.period ?? chartData[0].period, "long")}` : "Фактические данные отчёта о движении денег"}</small></span><button onClick={() => navigate("finance")}>Открыть отчёт</button></header>
       {shownChartItem ? <div className={chartStyles.chartLegend} aria-live="polite">
         <span><i className={chartStyles.inDot} /><small>Поступления</small><strong>{compactMoney(shownChartItem.receiptsMinor / 100)}</strong></span>
         <span><i className={chartStyles.outDot} /><small>Списания</small><strong>{compactMoney(shownChartItem.outflowsMinor / 100)}</strong></span>
         <span className={shownChartItem.netMinor >= 0 ? chartStyles.netPositive : chartStyles.netNegative}><small>Сальдо</small><strong>{shownChartItem.netMinor >= 0 ? "+" : "−"}{compactMoney(Math.abs(shownChartItem.netMinor) / 100)}</strong></span>
       </div> : null}
       {loading && !chartData.length ? <div data-ah-compact-card="true" className={styles.inlineEmpty}><span className={styles.loader} /><strong>Загружаем денежный поток…</strong></div> : error && !chartData.length ? <div data-ah-compact-card="true" className={styles.inlineEmpty}><strong>Данные временно недоступны</strong><span>{error}</span><button onClick={() => navigate("finance")}>Открыть финансы</button></div> : chartData.length ? <div className={chartStyles.lineChart} onMouseLeave={() => setActiveChartIndex(null)} role="group" aria-label="График поступлений и списаний по месяцам">
-        <svg viewBox={`0 0 ${chartGeometry.width} ${chartGeometry.height}`} role="img" aria-label="Фактическая динамика поступлений и списаний из ОДДС">
+        <svg viewBox={`0 0 ${chartGeometry.width} ${chartGeometry.height}`} role="img" aria-label="Фактическая динамика поступлений и списаний из отчёта о движении денег">
           <defs><linearGradient id="cashflow-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#5b56f5" stopOpacity=".17" /><stop offset="100%" stopColor="#5b56f5" stopOpacity="0" /></linearGradient></defs>
           {chartGeometry.ticks.map((tick, index) => {
             const y = chartGeometry.top + index * (chartGeometry.plotHeight / 4);
@@ -772,7 +788,7 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
         <div className={chartStyles.chartHitGrid} style={{ left: `${(chartGeometry.left / chartGeometry.width) * 100}%`, right: `${(chartGeometry.right / chartGeometry.width) * 100}%`, gridTemplateColumns: `repeat(${Math.max(chartData.length, 1)}, 1fr)` }}>
           {chartData.map((item, index) => <button key={item.period} type="button" aria-label={`${monthLabel(item.period, "long")}: открыть операции`} onMouseEnter={() => setActiveChartIndex(index)} onFocus={() => setActiveChartIndex(index)} onClick={() => navigate("finance")} />)}
         </div>
-        {activeChartIndex !== null && shownChartItem && shownChartPoint ? <div className={chartStyles.chartTooltip} style={{ left: `${(shownChartPoint.x / chartGeometry.width) * 100}%` }}><strong>{monthLabel(shownChartItem.period, "long")}</strong><span>Факт ОДДС · нажмите для детализации</span></div> : null}
+        {activeChartIndex !== null && shownChartItem && shownChartPoint ? <div className={chartStyles.chartTooltip} style={{ left: `${(shownChartPoint.x / chartGeometry.width) * 100}%` }}><strong>{monthLabel(shownChartItem.period, "long")}</strong><span>Факт отчёта о движении денег · нажмите для детализации</span></div> : null}
       </div> : <div data-ah-compact-card="true" className={styles.inlineEmpty}><strong>Движений денег пока нет</strong><span>График появится после первой операции из подключённого банка или подтверждённого импорта.</span><button onClick={() => navigate("integrations")}>Подключить источник</button></div>}
     </article>;
 
@@ -790,7 +806,7 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
           {loading ? <div data-ah-compact-card="true" className={styles.registryState}><span className={styles.loader} /><strong>Загружаем реестр…</strong></div> : error ? <div data-ah-compact-card="true" className={styles.registryState}><strong>Реестр временно недоступен</strong><span>{error}</span><button onClick={() => navigate("finance")}>Открыть финансовый раздел</button></div> : operations.length ? (
             <div className={styles.tableWrap}><table><thead><tr><th>Дата</th><th>Контрагент</th><th>Назначение</th><th>Сумма</th><th>Статус</th></tr></thead><tbody>{operations.map((operation) => (
               <tr key={operation.id} className={selected?.id === operation.id ? styles.selectedRow : ""} onClick={() => setSelectedId(operation.id)} onDoubleClick={() => showOperation(operation)} tabIndex={0} role="button" aria-pressed={selected?.id === operation.id} aria-label={`${operation.direction}: ${operation.category}, ${rubles(operation.amountMinor)}`} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); showOperation(operation); } }}>
-                <td>{formatDate(operation.operationDate)}</td><td><strong>{finance?.entityNames[operation.counterpartyEntityId] ?? operation.counterpartyEntityId}</strong><small>{operation.contractId || "Без договора"}</small></td><td><strong>{operation.category}</strong><small>{operation.reportClass}</small></td><td className={operation.direction === "Поступление" ? styles.income : styles.expense}>{operation.direction === "Поступление" ? "+" : "−"}{rubles(operation.amountMinor)}</td><td><span className={styles.status}>{operation.status}</span></td>
+                <td>{formatDate(operation.operationDate)}</td><td><strong>{finance?.entityNames[operation.counterpartyEntityId] ?? recordLabel("Контрагент",operation.counterpartyEntityId)}</strong><small>{operation.contractId ? recordLabel("Договор",operation.contractId) : "Без договора"}</small></td><td><strong>{operation.category}</strong><small>{humanFinanceClass(operation.reportClass)}</small></td><td className={operation.direction === "Поступление" ? styles.income : styles.expense}>{operation.direction === "Поступление" ? "+" : "−"}{rubles(operation.amountMinor)}</td><td><span className={styles.status}>{operation.status}</span></td>
               </tr>
             ))}</tbody></table></div>
           ) : <div data-ah-compact-card="true" className={styles.registryState}><strong>Операций пока нет</strong><span>{sourceOnly ? "Демонстрационных записей нет. Реестр заполнится после подключения банка." : "В выбранном периоде нет операций."}</span><button onClick={() => navigate("integrations")}>Подключить банк</button></div>}
@@ -798,7 +814,7 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
         {selected ? <aside className={styles.preview} aria-live="polite" data-help-block="operation-preview">
           <header><span><strong>{selected.direction}</strong><small>{formatDate(selected.operationDate)}</small></span><button aria-label="Открыть полную карточку" onClick={() => showOperation(selected)}><AppIcon name="more" /></button></header>
           <div className={styles.operationHero}><strong>{selected.direction === "Поступление" ? "+" : "−"}{rubles(selected.amountMinor)}</strong><small>{selected.status} · {selected.dataQuality}</small></div>
-          <dl><div><dt>Контрагент</dt><dd>{finance?.entityNames[selected.counterpartyEntityId] ?? selected.counterpartyEntityId}</dd></div><div><dt>Назначение</dt><dd>{selected.category}</dd></div><div><dt>Источник</dt><dd>{selected.sourceFile}</dd></div></dl>
+          <dl><div><dt>Контрагент</dt><dd>{finance?.entityNames[selected.counterpartyEntityId] ?? recordLabel("Контрагент",selected.counterpartyEntityId)}</dd></div><div><dt>Назначение</dt><dd>{selected.category}</dd></div><div><dt>Источник</dt><dd>{selected.sourceFile || "Банковская выписка"}</dd></div></dl>
           <footer><button onClick={() => showOperation(selected)}>Открыть карточку</button></footer>
         </aside> : null}
       </div>

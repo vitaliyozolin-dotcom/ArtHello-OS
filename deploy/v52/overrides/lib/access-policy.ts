@@ -12,6 +12,8 @@ export type AccessPolicyContext = {
   apiRole: string;
   isSystemOwner: boolean;
   canAccessMedical?: boolean;
+  /** Undefined keeps the legacy role template; an array is the owner's explicit section assignment. */
+  allowedModules?: readonly string[];
 };
 
 export type AppRoleDefinition = {
@@ -63,7 +65,9 @@ const allRoles = [...API_ROLES];
 export const API_RULES: readonly ApiRule[] = [
   { prefix: "/api/dashboard-layout", read: allRoles, write: allRoles },
   { prefix: "/api/settings/temporary-credential", read: [], write: withOwner() },
-  { prefix: "/api/settings", read: allRoles, write: withOwner() },
+  // Every signed-in user may save only their own navigation preferences. All
+  // administrative actions in this route still call requireOwner server-side.
+  { prefix: "/api/settings", read: allRoles, write: allRoles },
   { prefix: "/api/finance-actions", read: [], write: withOwner("DIRECTOR", "FINANCE") },
   { prefix: "/api/finance", read: withOwner("DIRECTOR", "FINANCE", "ACCOUNTING", "ANALYTICS"), write: [] },
   { prefix: "/api/accounting-actions", read: [], write: withOwner("DIRECTOR", "ACCOUNTING") },
@@ -112,6 +116,59 @@ export const API_RULES: readonly ApiRule[] = [
   { prefix: "/api/notifications", read: allRoles, write: allRoles },
 ].sort((left, right) => right.prefix.length - left.prefix.length);
 
+/**
+ * API paths owned by product sections. Explicit section assignment is enforced
+ * here as well as in navigation. A manually added section can expand GET/HEAD
+ * visibility, while mutations remain bounded by the selected role template.
+ */
+const API_MODULE_REQUIREMENTS: ReadonlyArray<{ prefix: string; modules: readonly ModuleId[] }> = [
+  { prefix: "/api/content-generate", modules: ["content"] },
+  { prefix: "/api/content-actions", modules: ["content"] },
+  { prefix: "/api/accounting-actions", modules: ["accounting"] },
+  { prefix: "/api/integration-actions", modules: ["integrations"] },
+  { prefix: "/api/education-actions", modules: ["education", "methods"] },
+  { prefix: "/api/procurement-actions", modules: ["procurement", "assets"] },
+  { prefix: "/api/readiness-actions", modules: ["quality", "acceptance"] },
+  { prefix: "/api/finance-actions", modules: ["finance"] },
+  { prefix: "/api/sales-actions", modules: ["sales"] },
+  { prefix: "/api/hr-actions", modules: ["hr"] },
+  { prefix: "/api/legal-actions", modules: ["legal"] },
+  { prefix: "/api/medical-actions", modules: ["medical"] },
+  { prefix: "/api/analytics-actions", modules: ["analytics"] },
+  { prefix: "/api/food-actions", modules: ["food"] },
+  { prefix: "/api/safety-actions", modules: ["safety"] },
+  { prefix: "/api/strategy-actions", modules: ["projects"] },
+  { prefix: "/api/entity-relations", modules: ["registry", "clients"] },
+  { prefix: "/api/entity-documents", modules: ["registry", "clients", "hr", "legal", "accounting", "procurement"] },
+  { prefix: "/api/entity-detail", modules: ["registry", "clients"] },
+  { prefix: "/api/entity-merge", modules: ["registry"] },
+  { prefix: "/api/workflow-documents", modules: ["legal", "accounting", "hr", "procurement"] },
+  { prefix: "/api/integrations", modules: ["integrations"] },
+  { prefix: "/api/accounting", modules: ["accounting"] },
+  { prefix: "/api/education", modules: ["education", "methods"] },
+  { prefix: "/api/procurement", modules: ["procurement", "assets"] },
+  { prefix: "/api/readiness", modules: ["quality", "acceptance"] },
+  { prefix: "/api/acceptance", modules: ["acceptance"] },
+  { prefix: "/api/contractors", modules: ["contractors"] },
+  { prefix: "/api/families", modules: ["clients"] },
+  { prefix: "/api/entities", modules: ["registry", "clients"] },
+  { prefix: "/api/finance", modules: ["finance"] },
+  { prefix: "/api/sales", modules: ["sales"] },
+  { prefix: "/api/content", modules: ["content"] },
+  { prefix: "/api/medical", modules: ["medical"] },
+  { prefix: "/api/analytics", modules: ["analytics"] },
+  { prefix: "/api/food", modules: ["food"] },
+  { prefix: "/api/safety", modules: ["safety"] },
+  { prefix: "/api/strategy", modules: ["projects"] },
+  { prefix: "/api/hr", modules: ["hr"] },
+  { prefix: "/api/legal", modules: ["legal"] },
+  { prefix: "/api/task-actions", modules: ["tasks", "events"] },
+  { prefix: "/api/work-items", modules: ["tasks", "events"] },
+  { prefix: "/api/notifications", modules: ["tasks", "events"] },
+  { prefix: "/api/tasks", modules: ["tasks", "events"] },
+  { prefix: "/api/audit", modules: ["quality"] },
+].sort((left, right) => right.prefix.length - left.prefix.length);
+
 const MODULE_API_REQUIREMENTS: Record<ModuleId, readonly string[]> = {
   home: [], tasks: ["/api/tasks"], finance: ["/api/finance"], accounting: ["/api/accounting"],
   registry: ["/api/entities", "/api/entity-detail"], sales: ["/api/sales"], clients: ["/api/entities", "/api/families"],
@@ -143,20 +200,35 @@ export function isKnownApiRole(role: string): role is ApiRole {
 
 export function canAccessApi(context: AccessPolicyContext, pathname: string, method: string) {
   if (!isKnownApiRole(context.apiRole)) return false;
+  const assignedModules = context.allowedModules === undefined ? null : new Set(context.allowedModules);
+  const moduleRequirement = API_MODULE_REQUIREMENTS.find((item) => pathname === item.prefix || pathname.startsWith(`${item.prefix}/`));
+  const sectionAssigned = !moduleRequirement || assignedModules === null
+    ? true
+    : moduleRequirement.modules.some((moduleId) => assignedModules.has(moduleId));
   const medicalRoute = pathname === "/api/medical"
     || pathname.startsWith("/api/medical/")
     || pathname === "/api/medical-actions"
     || pathname.startsWith("/api/medical-actions/");
-  if (medicalRoute) return context.apiRole === "MEDICAL" && context.canAccessMedical === true;
+  if (medicalRoute) return sectionAssigned && context.apiRole === "MEDICAL" && context.canAccessMedical === true;
+  if (!sectionAssigned) return false;
   if (context.apiRole === "OWNER") return context.isSystemOwner;
   const rule = API_RULES.find((item) => pathname === item.prefix || pathname.startsWith(`${item.prefix}/`));
   if (!rule) return false;
-  const allowed = SAFE_API_METHODS.has(method.toUpperCase()) ? rule.read : rule.write;
-  return allowed.includes(context.apiRole);
+  const safeRead = SAFE_API_METHODS.has(method.toUpperCase());
+  const allowed = safeRead ? rule.read : rule.write;
+  const roleAllows = allowed.includes(context.apiRole);
+  // A manually checked section may expose its read model. It never grants a
+  // mutation that the user's role does not already authorize.
+  return roleAllows || Boolean(safeRead && moduleRequirement && assignedModules);
 }
 
 export function canAccessModule(context: AccessPolicyContext, moduleId: ModuleId) {
   if (moduleId === "home") return true;
+  if (context.allowedModules !== undefined && !context.allowedModules.includes(moduleId)) return false;
+  // The settings endpoint also accepts a narrowly scoped self-service favorites
+  // mutation. That must never make the access-management screen available to a
+  // non-owner role.
+  if (moduleId === "access") return canManageAccess(context);
   return MODULE_API_REQUIREMENTS[moduleId].every((requirement) => {
     const write = requirement.endsWith("#write");
     return canAccessApi(context, write ? requirement.slice(0, -6) : requirement, write ? "POST" : "GET");
@@ -183,7 +255,7 @@ export function registryCapabilities(context: AccessPolicyContext): RegistryCapa
 }
 
 export function canManageAccess(context: AccessPolicyContext) {
-  return canAccessApi(context, "/api/settings", "POST");
+  return context.apiRole === "OWNER" && context.isSystemOwner;
 }
 
 export function permissionForRole(apiRole: ApiRole, moduleId: ModuleId): RolePermission {

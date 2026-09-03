@@ -62,7 +62,8 @@ test("Wave 7 keeps HR navigation and honest empty states visible", () => {
     assert.match(hr, new RegExp(escapeRegExp(tab)));
   }
   assert.doesNotMatch(hr, /if\s*\(\s*!\s*(?:data\.employees\.length|hasHrData)\s*\)\s*return\b/);
-  assert.match(hr, /Связанных кадровых этапов пока нет/);
+  assert.match(hr, /Выберите сотрудника/);
+  assert.match(hr, /Сотрудник не выбирается автоматически/);
   assert.match(hr, /Вакансий и кандидатов пока нет/);
 });
 

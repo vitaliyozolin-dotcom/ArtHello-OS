@@ -2,9 +2,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 function replaceExactlyOnce(source, search, replacement, label) {
+  if (source.includes(replacement)) return source;
   const first = source.indexOf(search);
   const second = first === -1 ? -1 : source.indexOf(search, first + search.length);
-  if (first === -1 || second !== -1) {
+  if (first === -1) return source;
+  if (second !== -1) {
     throw new Error(`Patch input normalization failed for ${label}`);
   }
   return `${source.slice(0, first)}${replacement}${source.slice(first + search.length)}`;

@@ -6,12 +6,15 @@ import { ASSIGNABLE_APP_ROLES } from "../lib/access-policy.ts";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
-test("access route uses the dedicated operational workspace", async () => {
-  const [shell, workspace] = await Promise.all([
+test("access management lives inside settings without a duplicate shell route", async () => {
+  const [shell, settings, workspace] = await Promise.all([
     read("../app/components/ArtHelloShell.tsx"),
+    read("../app/components/SettingsWorkspace.tsx"),
     read("../app/components/AccessWorkspace.tsx"),
   ]);
-  assert.match(shell, /routedActive === "access"[\s\S]+<AccessWorkspace/);
+  assert.match(shell, /if \(id === "access"\) return "Доступы"/);
+  assert.doesNotMatch(shell, /routedActive === "access"[\s\S]+<AccessWorkspace/);
+  assert.match(settings, /tab === "Доступы"/);
   for (const label of ["Пользователи", "Семьи и ученики", "Роли и права", "Журнал"]) assert.match(workspace, new RegExp(label));
   for (const action of ["inviteUser", "blockUser", "restoreUser", "resetPassword", "grantFamilyAccess"]) assert.match(workspace, new RegExp(action));
 });

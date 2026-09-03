@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { humanTechnicalText, recordLabel, recordNumber, taskRecordLabel } from "../../lib/record-labels";
 import {
   Button,
   Card,
@@ -174,7 +175,7 @@ export function ProcurementWorkspace({ role, notify, onTasksChanged, onOpenFinan
       <Card className="ahProcurementPanel">
         <PanelHead eyebrow="Заявки" title="Потребность и согласование" meta={`${data.requests.length} записей`} />
         {data.requests.length ? <div className="ahProcurementRequestList">{data.requests.map((request) => <article key={request.id} data-ah-compact-card="true">
-          <header><span>{request.id}</span><em>{request.status}</em></header>
+          <header><span>{recordLabel("Заявка", request.id)}</span><em>{request.status}</em></header>
           <h2>{request.itemName} · {request.quantity} шт.</h2><p>{request.justification}</p>
           <footer><span>{request.unit} · нужно до {request.needBy}</span><strong>{rub(request.budgetMinor)}</strong></footer>
           {request.status === "На согласовании" ? <Button className="ahProcurementInlineButton" variant="secondary" disabled={busy === request.id} onClick={() => setApprovalRequestId(request.id)}>Согласовать</Button> : null}
@@ -182,42 +183,42 @@ export function ProcurementWorkspace({ role, notify, onTasksChanged, onOpenFinan
       </Card>
       <Card className="ahProcurementPanel">
         <PanelHead eyebrow="Сравнение" title="Предложения поставщиков" meta="единая формула" />
-        {data.offers.length ? <div className="ahProcurementOfferList">{data.offers.map((offer, index) => <CompactListCard key={offer.id} index={String(index + 1).padStart(2, "0")} title={data.entityNames[data.suppliers.find((supplier) => supplier.id === offer.supplierId)?.entityId ?? ""] ?? offer.supplierId} description={`${rub(offer.priceMinor)} · ${offer.deliveryDays} дн. · гарантия ${offer.warrantyMonths} мес. · балл ${offer.score} · ${offer.status}`} />)}</div> : <EmptyState density="compact" title="Предложений пока нет" description="Сравнение появится после добавления поставщиков, предложений и договоров." />}
+        {data.offers.length ? <div className="ahProcurementOfferList">{data.offers.map((offer) => <CompactListCard key={offer.id} index={recordNumber(offer.id)} title={data.entityNames[data.suppliers.find((supplier) => supplier.id === offer.supplierId)?.entityId ?? ""] ?? recordLabel("Поставщик", offer.supplierId)} description={`${rub(offer.priceMinor)} · ${offer.deliveryDays} дн. · гарантия ${offer.warrantyMonths} мес. · оценка ${offer.score} · ${offer.status}`} />)}</div> : <EmptyState density="compact" title="Предложений пока нет" description="Сравнение появится после добавления поставщиков, предложений и договоров." />}
       </Card>
     </div> : null}
 
     {tab === "Поставщики" ? data.suppliers.length ? <div className="ahProcurementSupplierGrid">{data.suppliers.map((supplier) => <Card key={supplier.id} className="ahProcurementSupplier">
-      <header><div><span>{supplier.id}</span><h2>{data.entityNames[supplier.entityId] ?? supplier.entityId}</h2></div><em>{supplier.status}</em></header>
+      <header><div><span>{recordLabel("Поставщик", supplier.id)}</span><h2>{data.entityNames[supplier.entityId] ?? recordLabel("Контрагент", supplier.entityId)}</h2></div><em>{supplier.status}</em></header>
       <p>{supplier.specialization}</p>
       <div className="ahProcurementScores"><span><small>Качество</small><strong>{supplier.qualityScore}</strong></span><span><small>Рейтинг</small><strong>{supplier.rating}</strong></span><span><small>Индекс рынка</small><strong>{supplier.marketIndex}</strong></span></div>
-      <dl><div><dt>Базовая цена</dt><dd>{rub(supplier.basePriceMinor)}</dd></div><div><dt>Договор</dt><dd>{supplier.contractId || "Нет договора"}</dd></div></dl><footer>{supplier.dataQuality}</footer>
+      <dl><div><dt>Базовая цена</dt><dd>{rub(supplier.basePriceMinor)}</dd></div><div><dt>Договор</dt><dd>{supplier.contractId ? recordLabel("Договор", supplier.contractId) : "Нет договора"}</dd></div></dl><footer>{humanTechnicalText(supplier.dataQuality)}</footer>
     </Card>)}</div> : <Card className="ahProcurementStateCard"><EmptyState density="compact" title="Поставщиков пока нет" description="Карточки поставщиков должны быть связаны с реальными контрагентами и договорами." /></Card> : null}
 
     {tab === "Склад" ? <div className="ahProcurementLayout">
       <Card className="ahProcurementPanel">
         <PanelHead eyebrow="Остатки" title="Склад и номенклатура" meta="приёмка · выдача · движение" />
-        {data.items.length ? <div className="ahProcurementStockList">{data.items.map((item) => <article key={item.id} data-ah-compact-card="true"><span>{item.quantity}</span><div><strong>{item.name}</strong><small>{item.sku} · {item.category} · {item.warehouse}</small></div><em>{rub(item.unitCostMinor)}</em><Button className="ahProcurementInlineButton" variant="secondary" disabled={busy === item.id || item.quantity < 1} onClick={() => void action({ action: "inventoryEvent", itemId: item.id, eventType: "Выдача", quantity: 1, toLocation: "Ответственный получатель", documentId: `ISSUE-${item.id}` }, item.id)}>Выдать 1</Button></article>)}</div> : <EmptyState density="compact" title="Склад не заполнен" description="Приёмка, выдача, перемещение, списание и инвентаризация появятся после первой номенклатуры." />}
+        {data.items.length ? <div className="ahProcurementStockList">{data.items.map((item) => <article key={item.id} data-ah-compact-card="true"><span>{item.quantity}</span><div><strong>{item.name}</strong><small>{recordLabel("Номенклатура", item.id)} · {item.category} · {item.warehouse}</small></div><em>{rub(item.unitCostMinor)}</em><Button className="ahProcurementInlineButton" variant="secondary" disabled={busy === item.id || item.quantity < 1} onClick={() => void action({ action: "inventoryEvent", itemId: item.id, eventType: "Выдача", quantity: 1, toLocation: "Ответственный получатель", documentId: `ISSUE-${item.id}` }, item.id)}>Выдать 1</Button></article>)}</div> : <EmptyState density="compact" title="Склад не заполнен" description="Приёмка, выдача, перемещение, списание и инвентаризация появятся после первой номенклатуры." />}
       </Card>
       <Card className="ahProcurementPanel">
         <PanelHead eyebrow="Журнал" title="Движение и инвентаризация" meta={`${data.events.length} событий`} />
-        {data.events.length ? <div className="ahProcurementTimeline">{data.events.map((event) => <CompactListCard key={event.id} index={event.occurredAt.slice(5, 10)} title={`${event.eventType} · ${event.quantity}`} description={`${event.fromLocation} → ${event.toLocation} · ${event.documentId}`} />)}</div> : <EmptyState density="compact" title="Движений пока нет" description="Журнал появится после первой подтверждённой складской операции." />}
+        {data.events.length ? <div className="ahProcurementTimeline">{data.events.map((event) => <CompactListCard key={event.id} index={event.occurredAt.slice(5, 10)} title={`${event.eventType} · ${event.quantity}`} description={`${event.fromLocation} → ${event.toLocation} · ${recordLabel("Документ", event.documentId)}`} />)}</div> : <EmptyState density="compact" title="Движений пока нет" description="Журнал появится после первой подтверждённой складской операции." />}
       </Card>
     </div> : null}
 
     {tab === "Имущество" ? <div className="ahProcurementLayout">
       <div className="ahProcurementAssetGrid">{data.assets.length ? data.assets.map((asset) => <Card key={asset.id} className="ahProcurementAsset">
-        <header><span>{asset.id}</span><em>{asset.status}</em></header><h2>{asset.serialNumber}</h2>
-        <dl><div><dt>Объект</dt><dd>{asset.objectEntityId}</dd></div><div><dt>Ответственный</dt><dd>{data.entityNames[asset.assignedToEntityId] ?? asset.assignedToEntityId}</dd></div><div><dt>Гарантия</dt><dd>{asset.warrantyUntil} · {asset.warrantyState}</dd></div><div><dt>Обслуживание</dt><dd>{asset.serviceDue}</dd></div><div><dt>Стоимость</dt><dd>{rub(asset.costMinor)}</dd></div><div><dt>Амортизация/мес.</dt><dd>{rub(asset.monthlyDepreciationMinor)}</dd></div></dl>
+        <header><span>{recordLabel("Имущество", asset.id)}</span><em>{asset.status}</em></header><h2>Серийный номер сохранён</h2>
+        <dl><div><dt>Объект</dt><dd>{data.entityNames[asset.objectEntityId] ?? "Не указан"}</dd></div><div><dt>Ответственный</dt><dd>{data.entityNames[asset.assignedToEntityId] ?? "Не назначен"}</dd></div><div><dt>Гарантия</dt><dd>{asset.warrantyUntil} · {asset.warrantyState}</dd></div><div><dt>Обслуживание</dt><dd>{asset.serviceDue}</dd></div><div><dt>Стоимость</dt><dd>{rub(asset.costMinor)}</dd></div><div><dt>Амортизация/мес.</dt><dd>{rub(asset.monthlyDepreciationMinor)}</dd></div></dl>
       </Card>) : <Card className="ahProcurementStateCard"><EmptyState density="compact" title="Карточек имущества пока нет" description="Серийный номер, объект, ответственный, гарантия и обслуживание будут храниться в одной карточке." /></Card>}</div>
       <Card className="ahProcurementPanel">
         <PanelHead eyebrow="Обслуживание и ремонт" title="План работ" meta="до задачи и акта" />
-        {data.maintenance.length ? <div className="ahProcurementMaintenance">{data.maintenance.map((item) => <article key={item.id} data-ah-compact-card="true"><div><strong>{item.maintenanceType}</strong><small>{item.assetId} · {item.scheduledAt}</small></div><em>{item.status}</em>{item.relatedTaskId ? <span>TSK-{item.relatedTaskId}</span> : <Button className="ahProcurementInlineButton" variant="secondary" disabled={busy === item.id} onClick={() => void action({ action: "createMaintenanceTask", maintenanceId: item.id }, item.id)}>+ Задача</Button>}</article>)}</div> : <EmptyState density="compact" title="Работ пока нет" description="Обслуживание появится после назначения события для карточки имущества." />}
+        {data.maintenance.length ? <div className="ahProcurementMaintenance">{data.maintenance.map((item) => <article key={item.id} data-ah-compact-card="true"><div><strong>{item.maintenanceType}</strong><small>{recordLabel("Имущество", item.assetId)} · {item.scheduledAt}</small></div><em>{item.status}</em>{item.relatedTaskId ? <span>{taskRecordLabel(item.relatedTaskId)}</span> : <Button className="ahProcurementInlineButton" variant="secondary" disabled={busy === item.id} onClick={() => void action({ action: "createMaintenanceTask", maintenanceId: item.id }, item.id)}>+ Задача</Button>}</article>)}</div> : <EmptyState density="compact" title="Работ пока нет" description="Обслуживание появится после назначения события для карточки имущества." />}
       </Card>
     </div> : null}
 
     {tab === "Сквозная цепочка" ? hasProcurementData ? <div className="ahProcurementLayout">
-      <Card className="ahProcurementPanel"><PanelHead eyebrow="Приёмочный маршрут" title="От заявки до ОПиУ" meta="сквозная связь" /><div className="ahProcurementChain">{chainSteps.map(([label, id, detail], index) => <CompactListCard key={`${label}-${id}`} index={String(index + 1).padStart(2, "0")} title={id || "—"} description={`${label} · ${detail}`} />)}</div></Card>
-      <Card className="ahProcurementPanel ahProcurementMoney"><PanelHead eyebrow="Денежная связь" title="Оплата и классификация" meta="подтверждённый источник" /><strong>{rub(data.payment?.amountMinor ?? 0)}</strong><p>{data.payment?.dataQuality || "Оплата появится после подтверждённой финансовой операции."}</p><Button variant="secondary" onClick={onOpenFinance}>Открыть в финансах</Button></Card>
+      <Card className="ahProcurementPanel"><PanelHead eyebrow="Приёмочный маршрут" title="От заявки до ОПиУ" meta="сквозная связь" /><div className="ahProcurementChain">{chainSteps.map(([label, id, detail], index) => <CompactListCard key={`${label}-${id}`} index={String(index + 1).padStart(2, "0")} title={id ? label === "ОПиУ" ? id : recordLabel(label, id) : "—"} description={detail} />)}</div></Card>
+      <Card className="ahProcurementPanel ahProcurementMoney"><PanelHead eyebrow="Денежная связь" title="Оплата и классификация" meta="подтверждённый источник" /><strong>{rub(data.payment?.amountMinor ?? 0)}</strong><p>{data.payment?.dataQuality ? humanTechnicalText(data.payment.dataQuality) : "Оплата появится после подтверждённой финансовой операции."}</p><Button variant="secondary" onClick={onOpenFinance}>Открыть в финансах</Button></Card>
     </div> : <Card className="ahProcurementStateCard"><EmptyState density="compact" title="Цепочка ещё не собрана" description="Заявка → согласование → предложение → заказ → поставка → склад → имущество → документ → оплата." /></Card> : null}
 
     {requestOpen ? <PurchaseRequestModal entities={entities} busy={busy === "new-request"} close={() => setRequestOpen(false)} save={async (body) => { const saved = await action({ action: "createRequest", ...body }, "new-request"); if (saved) { setRequestOpen(false); setTab("Закупка"); } }} /> : null}
@@ -278,7 +279,7 @@ function PurchaseApprovalModal({ requestId, entities, busy, close, save }: {
   return createPortal(<div className="ahProcurementModalLayer">
     <button className="ahProcurementModalScrim" type="button" onClick={close} aria-label="Закрыть согласование" />
     <form className="ahProcurementModal ahProcurementModalCompact" onSubmit={(event) => { event.preventDefault(); void save(value); }}>
-      <header><div><p>{requestId}</p><h2>Согласовать заявку</h2></div><button type="button" onClick={close} aria-label="Закрыть">×</button></header>
+      <header><div><p>{recordLabel("Заявка", requestId)}</p><h2>Согласовать заявку</h2></div><button type="button" onClick={close} aria-label="Закрыть">×</button></header>
       <label><span>Согласующий *</span><select value={value} onChange={(event) => setValue(event.target.value)} required><option value="">Выберите руководителя</option>{entities.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
       <p className="ahProcurementModalNote">Согласование фиксируется в истории с выбранным сотрудником и текущим пользователем.</p>
       <footer><Button variant="secondary" onClick={close}>Отмена</Button><Button type="submit" variant="primary" disabled={busy || !value}>{busy ? "Сохраняем…" : "Подтвердить согласование"}</Button></footer>

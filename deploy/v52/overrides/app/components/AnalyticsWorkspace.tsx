@@ -2,6 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  humanFormulaLabel,
+  humanPeriodLabel,
+  humanReferenceLabel,
+  humanSourceList,
+  humanTechnicalText,
+  humanVersionLabel,
+  recordLabel,
+} from "../../lib/record-labels";
+import {
   Button,
   Card,
   CompactListCard,
@@ -166,7 +175,7 @@ const roles: Record<string, string> = {
   Родитель: "PARENT",
 };
 
-const tabs = ["Обзор", "Деньги", "Сигналы", "AI-контракты", "Решения и отказ", "Метрики"] as const;
+const tabs = ["Обзор", "Деньги", "Сигналы", "Сценарии ИИ", "Решения и отказ", "Метрики"] as const;
 type Tab = (typeof tabs)[number];
 
 const rub = (value: number) =>
@@ -301,12 +310,12 @@ export function AnalyticsWorkspace({
 
       <div className="ahAnalyticsBoundary">
         <strong>{hasAnalyticsData ? "СОХРАНЁННЫЕ ДАННЫЕ" : "НЕТ ИСХОДНЫХ ДАННЫХ"}</strong>
-        <span>{data.boundary}</span>
+        <span>{humanTechnicalText(data.boundary)}</span>
       </div>
 
       <div className="ahAnalyticsKpis">
         <KpiCard
-          label={data.owner.cashPeriod ? `Чистый поток · ${data.owner.cashPeriod}` : "Чистый поток"}
+          label={data.owner.cashPeriod ? `Чистый поток · ${humanPeriodLabel(data.owner.cashPeriod)}` : "Чистый поток"}
           value={rub(data.owner.cashFlowMinor)}
           note={data.charts.cash.length ? "по сохранённым операциям" : "операций пока нет"}
         />
@@ -323,7 +332,7 @@ export function AnalyticsWorkspace({
           className={data.owner.openDataIssues ? "ahAnalyticsKpiWarning" : undefined}
         />
         <KpiCard
-          label="Live-источники"
+          label="Подключённые источники"
           value={data.owner.verifiedLiveSources}
           note={data.owner.verifiedLiveSources ? "подтверждённая передача" : "источники не подключены"}
         />
@@ -375,8 +384,8 @@ export function AnalyticsWorkspace({
                   >
                     <b>{String(index + 1).padStart(2, "0")}</b>
                     <span>
-                      <small>{item.domain} · {item.signalType}</small>
-                      <strong>{item.title}</strong>
+                      <small>{humanTechnicalText(item.domain)} · {item.signalType}</small>
+                      <strong>{humanTechnicalText(item.title)}</strong>
                       <em>{item.status}</em>
                     </span>
                     <i>{item.confidence}%</i>
@@ -386,16 +395,16 @@ export function AnalyticsWorkspace({
               {signal ? (
                 <aside className="ahAnalyticsSignalDetail">
                   <header>
-                    <div><p>{signal.id} · {signal.severity}</p><h2>{signal.title}</h2></div>
+                    <div><p>{recordLabel("Сигнал", signal.id)} · {signal.severity}</p><h2>{humanTechnicalText(signal.title)}</h2></div>
                     <strong>{signal.confidence}%</strong>
                   </header>
-                  <Fact label="Доказательство" value={signal.evidence} />
-                  <Fact label="Объяснение" value={signal.explanation} />
-                  <Fact label="Рекомендация" value={signal.recommendation} />
+                  <Fact label="Доказательство" value={humanTechnicalText(signal.evidence)} />
+                  <Fact label="Объяснение" value={humanTechnicalText(signal.explanation)} />
+                  <Fact label="Рекомендация" value={humanTechnicalText(signal.recommendation)} />
                   <dl>
-                    <div><dt>Источники</dt><dd>{signal.sourceRefs}</dd></div>
-                    <div><dt>AI-контракт</dt><dd>{signal.contractId}</dd></div>
-                    <div><dt>Решение человека</dt><dd>{signal.humanDecision || "Ожидается"}</dd></div>
+                    <div><dt>Связанные записи</dt><dd>{signal.sourceRefs.split(",").map((item) => humanReferenceLabel(item)).join(" · ")}</dd></div>
+                    <div><dt>Сценарий ИИ</dt><dd>{recordLabel("Сценарий", signal.contractId)}</dd></div>
+                    <div><dt>Решение человека</dt><dd>{signal.humanDecision ? humanTechnicalText(signal.humanDecision) : "Ожидается"}</dd></div>
                   </dl>
                   <footer>
                     <Button
@@ -411,7 +420,7 @@ export function AnalyticsWorkspace({
                         action: "recordDecision",
                         signalId: signal.id,
                         decision: "Проверить владельцем процесса и выполнить контролируемое действие",
-                        evidence: `HUMAN-REVIEW:${signal.id}`,
+                        evidence: `Решение человека по ${recordLabel("сигналу", signal.id).toLocaleLowerCase("ru")}`,
                       }, `decision-${signal.id}`)}
                     >
                       Зафиксировать решение
@@ -430,9 +439,9 @@ export function AnalyticsWorkspace({
         </Card>
       ) : null}
 
-      {tab === "AI-контракты" ? (
+      {tab === "Сценарии ИИ" ? (
         <Card className="ahAnalyticsPanel">
-          <PanelHead eyebrow="Управляемый ИИ" title="AI-контракты" meta={String(data.contracts.length)} />
+          <PanelHead eyebrow="Управляемый ИИ" title="Сценарии и правила" meta={String(data.contracts.length)} />
           {data.contracts.length ? (
             <div className="ahAnalyticsContractLayout">
               <div className="ahAnalyticsContractList">
@@ -444,7 +453,7 @@ export function AnalyticsWorkspace({
                     onClick={() => setSelectedContract(item.id)}
                   >
                     <b>{String(index + 1).padStart(2, "0")}</b>
-                    <span><strong>{item.name}</strong><small>{item.id} · {item.version}</small></span>
+                    <span><strong>{humanTechnicalText(item.name)}</strong><small>{recordLabel("Сценарий", item.id)} · {humanVersionLabel(item.version)}</small></span>
                     <em>{item.status}</em>
                   </button>
                 ))}
@@ -452,7 +461,7 @@ export function AnalyticsWorkspace({
               {contract ? (
                 <aside className="ahAnalyticsContractDetail">
                   <header>
-                    <div><p>{contract.id}</p><h2>{contract.name}</h2></div>
+                    <div><p>{recordLabel("Сценарий", contract.id)}</p><h2>{humanTechnicalText(contract.name)}</h2></div>
                     <span>{contract.status}</span>
                   </header>
                   <div className="ahAnalyticsFactGrid">
@@ -469,7 +478,7 @@ export function AnalyticsWorkspace({
                     <Fact label="Перестанет обрабатываться" value={contract.stoppedDataProcessing} />
                     <Fact label="Исторические данные" value={contract.historicalDataPolicy} />
                     <Fact label="Влияние отказа" value={contract.optOutImpact} />
-                    <Fact label="Источники" value={contract.sourceRefs} />
+                    <Fact label="Источники" value={humanSourceList(contract.sourceRefs)} />
                   </div>
                   <footer>
                     <Button
@@ -496,7 +505,7 @@ export function AnalyticsWorkspace({
             </div>
           ) : (
             <EmptyState
-              title="AI-контракты не созданы"
+              title="Сценарии ИИ не созданы"
               description="Сначала определите входные данные, разрешённые действия, стоимость, метрику пользы, отказ и автоотключение."
               density="compact"
               action={<Button onClick={onOpenIntegrations}>Подключить источники</Button>}
@@ -508,15 +517,15 @@ export function AnalyticsWorkspace({
       {tab === "Решения и отказ" ? (
         <div className="ahAnalyticsDecisionGrid">
           <Card className="ahAnalyticsPanel">
-            <PanelHead eyebrow="Append-only" title="Запуски моделей" meta={String(data.runs.length)} />
+            <PanelHead eyebrow="Неизменяемая история" title="Запуски моделей" meta={String(data.runs.length)} />
             {data.runs.length ? (
               <div className="ahAnalyticsRunList">
                 {data.runs.map((item, index) => (
                   <CompactListCard
                     key={item.id}
                     index={String(index + 1).padStart(2, "0")}
-                    title={`${data.contracts.find((entry) => entry.id === item.contractId)?.name ?? item.contractId} · ${item.status}`}
-                    description={`${item.outputSummary} · ${item.confidence}% · ${rub(item.costMinor)}`}
+                    title={`${humanTechnicalText(data.contracts.find((entry) => entry.id === item.contractId)?.name ?? recordLabel("Сценарий", item.contractId))} · ${item.status}`}
+                    description={`${humanTechnicalText(item.outputSummary)} · уверенность ${item.confidence}% · ${rub(item.costMinor)}`}
                   />
                 ))}
               </div>
@@ -536,13 +545,13 @@ export function AnalyticsWorkspace({
                   <CompactListCard
                     key={item.id}
                     index={String(index + 1).padStart(2, "0")}
-                    title={`${data.contracts.find((entry) => entry.id === item.contractId)?.name ?? item.contractId} · ${item.status}`}
-                    description={`${item.reason} · ${item.scopeType}: ${item.scopeRef}`}
+                    title={`${humanTechnicalText(data.contracts.find((entry) => entry.id === item.contractId)?.name ?? recordLabel("Сценарий", item.contractId))} · ${item.status}`}
+                    description={`${humanTechnicalText(item.reason)} · ${humanTechnicalText(item.scopeType)}: ${item.scopeRef === "ALL" ? "весь сценарий" : humanReferenceLabel(item.scopeRef)}`}
                   />
                 ))}
               </div>
             ) : (
-              <EmptyState title="Отказов пока нет" description="Любой разрешённый сценарий можно отключить в его AI-контракте." density="compact" />
+              <EmptyState title="Отказов пока нет" description="Любой разрешённый сценарий можно отключить в его карточке правил." density="compact" />
             )}
           </Card>
         </div>
@@ -553,13 +562,13 @@ export function AnalyticsWorkspace({
           <PanelHead eyebrow="Словарь показателей" title="Метрики, формулы и источники" meta={String(data.metricDefinitions.length)} />
           {data.metricDefinitions.length ? (
             <div className="ahAnalyticsMetricTable">
-              <header><span>Метрика</span><span>Определение и формула</span><span>Источник</span><span>Свежесть / качество</span></header>
+              <header><span>Показатель</span><span>Определение и расчёт</span><span>Источник</span><span>Свежесть / качество</span></header>
               {data.metricDefinitions.map((item) => (
                 <article key={item.id}>
-                  <span><strong>{item.name}</strong><small>{item.id} · {item.category} · {item.unit}</small></span>
-                  <span><strong>{item.definition}</strong><small>{item.formula} · grain: {item.grain}</small></span>
-                  <span><strong>{item.sourceTables}</strong><small>{item.ownerEntityId}</small></span>
-                  <span><strong>{item.freshness}</strong><small>{item.sourceQuality}</small></span>
+                  <span><strong>{humanTechnicalText(item.name)}</strong><small>{recordLabel("Показатель", item.id)} · {humanTechnicalText(item.category)} · {item.unit}</small></span>
+                  <span><strong>{humanTechnicalText(item.definition)}</strong><small>{humanFormulaLabel(item.formula)} · детализация: {humanTechnicalText(item.grain)}</small></span>
+                  <span><strong>{humanSourceList(item.sourceTables)}</strong><small>Ответственный за показатель назначен</small></span>
+                  <span><strong>{humanPeriodLabel(item.freshness)}</strong><small>{humanTechnicalText(item.sourceQuality)}</small></span>
                 </article>
               ))}
             </div>
@@ -602,7 +611,7 @@ function OverviewPanel({
             <div className="ahAnalyticsRiskList">
               {data.charts.risks.map((item) => (
                 <button type="button" key={item.domain} onClick={() => onOpenSignals(item.domain)}>
-                  <span><strong>{item.domain}</strong><small>{item.high} высокой важности</small></span>
+                  <span><strong>{humanTechnicalText(item.domain)}</strong><small>{item.high} высокой важности</small></span>
                   <i style={{ width: `${Math.min(100, Math.max(8, item.total * 16))}%` }} />
                   <em>{item.total}</em>
                 </button>
@@ -639,7 +648,7 @@ function MoneyPanel({ data, maxCash }: { data: Data; maxCash: number }) {
                   <i className="ahAnalyticsCashIn" style={{ height: `${Math.max(3, item.receiptsMinor / maxCash * 100)}%` }} />
                   <i className="ahAnalyticsCashOut" style={{ height: `${Math.max(3, item.outflowsMinor / maxCash * 100)}%` }} />
                 </div>
-                <strong>{item.period.slice(5)}</strong>
+                <strong>{humanPeriodLabel(item.period).split(" ")[0].slice(0, 3)}</strong>
                 <small>{short(item.netMinor)}</small>
               </div>
             ))}
@@ -659,7 +668,7 @@ function MoneyPanel({ data, maxCash }: { data: Data; maxCash: number }) {
                 <em>{rub(item.balanceMinor)}</em>
               </article>
             ))}
-            <footer>{data.modelBoundary}</footer>
+            <footer>{humanTechnicalText(data.modelBoundary)}</footer>
           </div>
         ) : (
           <EmptyState title="Прогноз пока не рассчитан" description="Вероятностный сценарий строится только по сохранённому платёжному календарю." density="compact" />
@@ -686,11 +695,11 @@ function Coverage({ title, items }: { title: string; items: string[] }) {
   return (
     <article className="ahAnalyticsCoverageCard">
       <strong>{title}</strong>
-      {items.length ? items.map((item) => <span key={item}>{item}</span>) : <small>Нет записей</small>}
+      {items.length ? items.map((item) => <span key={item}>{humanTechnicalText(item)}</span>) : <small>Нет записей</small>}
     </article>
   );
 }
 
 function Fact({ label, value }: { label: string; value: string }) {
-  return <article className="ahAnalyticsFact"><small>{label}</small><p>{value || "Не указано"}</p></article>;
+  return <article className="ahAnalyticsFact"><small>{label}</small><p>{value ? humanTechnicalText(value) : "Не указано"}</p></article>;
 }

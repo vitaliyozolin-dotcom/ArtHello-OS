@@ -49,7 +49,7 @@ test("every product role has a distinct source-backed home profile", () => {
   assert.match(dashboard, /if \(!moduleEntry\) return \[\]/);
   assert.match(dashboard, /onClick=\{\(\) => navigate\(moduleEntry\.id\)\}/);
   assert.match(shell, /availableModules=\{availableDashboardModules\}/);
-  assert.match(shell, /\.filter\(\(moduleEntry\) => allowedModuleIds\.has\(moduleEntry\.id\)\)/);
+  assert.match(shell, /\.filter\(\(moduleEntry\) => allowedModuleIds\.has\(moduleEntry\.id\)[^\n]*\)/);
 });
 
 test("non-finance roles do not request finance and KPI-only finance layouts still do", () => {

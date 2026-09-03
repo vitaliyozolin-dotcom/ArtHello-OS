@@ -11,9 +11,8 @@ const AUTH_ROUTES: Readonly<Record<string, { method: "GET" | "POST"; access: Aut
   "/api/auth/logout": { method: "POST", access: "session" },
 };
 
-const PUBLIC_API_ROUTES: Readonly<Record<string, "GET">> = {
+const PUBLIC_API_ROUTES: Readonly<Record<string, "GET" | "POST">> = {
   "/api/health": "GET",
-  "/api/integrations/tochka/callback": "GET",
   "/api/school-sso/authorize": "GET",
   "/api/school-sso/exchange": "POST",
 };

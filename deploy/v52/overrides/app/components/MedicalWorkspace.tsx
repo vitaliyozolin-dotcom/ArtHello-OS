@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { recordLabel, recordNumber } from "../../lib/record-labels";
 import { Button, Card, CompactListCard, EmptyState, KpiCard, PageContainer, PageHeader, Tabs } from "./design-system";
 import "./MedicalWorkspace.ds.css";
 
@@ -113,31 +114,46 @@ function MedicalControl({ data, hasData }: { data: MedicalData; hasData: boolean
       <CompactListCard index="02" title="Аудит каждого просмотра" description="Фиксируются пользователь, время, область и цель." />
       <CompactListCard index="03" title="Минимум раскрытия" description="В другие контуры передаётся только разрешённый режим действия." />
     </div></Card>
-    <Card className="ahMedicalPanel"><PanelHead eyebrow="Сроки" title="Ближайшие действия" note={`${data.summary.pendingActions} ожидает`} /><div className="ahMedicalDue">{data.actions.filter((item) => item.status !== "Выполнено").map((item, index) => <CompactListCard key={item.id} index={String(index + 1).padStart(2, "0")} title={item.actionType} description={`${item.caseId} · ${item.dueAt} · ${item.status}`} />)}</div></Card>
+    <Card className="ahMedicalPanel"><PanelHead eyebrow="Сроки" title="Ближайшие действия" note={`${data.summary.pendingActions} ожидает`} /><div className="ahMedicalDue">{data.actions.filter((item) => item.status !== "Выполнено").map((item) => <CompactListCard key={item.id} index={recordNumber(item.id)} title={item.actionType} description={`${recordLabel("Случай", item.caseId)} · ${item.dueAt} · ${item.status}`} />)}</div></Card>
   </div>;
 }
 
 function MedicalDocuments({ data, busy, confirm }: { data: MedicalData; busy: string; confirm: (documentId: string) => void }) {
   if (!data.documents.length) return <Card className="ahMedicalPanel"><EmptyState title="Медицинских документов пока нет" description="Новые сведения появляются только после защищённого ввода и подтверждения." density="compact" /></Card>;
-  return <div className="ahMedicalCardGrid">{data.documents.map((document) => <Card key={document.id} className="ahMedicalDocument"><header><span>{document.subjectType}</span><em>{document.expiryBand}</em></header><h2>{document.documentType}</h2><p>{document.minimumSummary}</p><dl><div><dt>Субъект</dt><dd>{document.subjectEntityId}</dd></div><div><dt>Действует</dt><dd>{document.validFrom}—{document.validUntil}</dd></div><div><dt>Хранение</dt><dd>{document.storageClass}</dd></div><div><dt>Ссылка</dt><dd>{document.documentRef}</dd></div></dl><footer><span>{document.confirmedAt ? `Подтверждено ${document.confirmedAt.slice(0, 10)}` : "Нужно подтверждение"}</span><Button variant="secondary" disabled={busy === document.id} onClick={() => confirm(document.id)}>Подтвердить</Button></footer></Card>)}</div>;
+  return <div className="ahMedicalCardGrid">{data.documents.map((document) => <Card key={document.id} className="ahMedicalDocument"><header><span>{document.subjectType} · {recordLabel("Документ", document.id)}</span><em>{document.expiryBand}</em></header><h2>{document.documentType}</h2><p>{document.minimumSummary}</p><dl><div><dt>Карточка</dt><dd>{recordLabel(document.subjectType, document.subjectEntityId)}</dd></div><div><dt>Действует</dt><dd>{document.validFrom}—{document.validUntil}</dd></div><div><dt>Хранение</dt><dd>Защищённый медицинский контур</dd></div><div><dt>Оригинал</dt><dd>Ссылка доступна только медработнику</dd></div></dl><footer><span>{document.confirmedAt ? `Подтверждено ${document.confirmedAt.slice(0, 10)}` : "Нужно подтверждение"}</span><Button variant="secondary" disabled={busy === document.id} onClick={() => confirm(document.id)}>Подтвердить</Button></footer></Card>)}</div>;
 }
 
 function MedicalRestrictions({ data }: { data: MedicalData }) {
   if (!data.restrictions.length) return <Card className="ahMedicalPanel"><EmptyState title="Ограничений пока нет" description="Раздел хранит только необходимый режим и срок, а не избыточный диагноз." density="compact" /></Card>;
-  return <div className="ahMedicalCardGrid">{data.restrictions.map((restriction) => <Card key={restriction.id} className="ahMedicalRestriction"><header><span>Только необходимое</span><em>{restriction.status}</em></header><h2>{restriction.category}</h2><strong>{restriction.limitation}</strong><p>{restriction.actionScope}</p><footer><span>{restriction.subjectEntityId}</span><time>до {restriction.validUntil}</time></footer></Card>)}</div>;
+  return <div className="ahMedicalCardGrid">{data.restrictions.map((restriction) => <Card key={restriction.id} className="ahMedicalRestriction"><header><span>{recordLabel("Ограничение", restriction.id)} · только необходимое</span><em>{restriction.status}</em></header><h2>{restriction.category}</h2><strong>{restriction.limitation}</strong><p>{restriction.actionScope}</p><footer><span>{recordLabel("Карточка", restriction.subjectEntityId)}</span><time>до {restriction.validUntil}</time></footer></Card>)}</div>;
 }
 
 function MedicalCases({ data, busy, action }: { data: MedicalData; busy: string; action: (body: Record<string, unknown>, key: string) => Promise<void> }) {
   if (!data.cases.length && !data.actions.length) return <Card className="ahMedicalPanel"><EmptyState title="Случаев и действий пока нет" description="Каждое действие имеет срок, ответственного, результат и подтверждение." density="compact" /></Card>;
-  return <div className="ahMedicalCaseGrid">{data.cases.map((medicalCase) => <Card key={medicalCase.id} className="ahMedicalCase"><PanelHead eyebrow={`${medicalCase.subjectEntityId} · ${medicalCase.severity}`} title={medicalCase.caseType} note={medicalCase.status} /><p>{medicalCase.minimumSummary}</p><div className="ahMedicalTimeline">
-    {data.incidents.filter((item) => item.caseId === medicalCase.id).map((incident) => <CompactListCard key={incident.id} index="ИНЦ" title={incident.incidentType} description={`${incident.minimumFacts} · ${incident.responseRequired}`} />)}
-    {data.actions.filter((item) => item.caseId === medicalCase.id).map((medicalAction) => <article key={medicalAction.id}><CompactListCard index="ДЕЙ" title={medicalAction.actionType} description={medicalAction.result || `Срок ${medicalAction.dueAt}`} />{medicalAction.status !== "Выполнено" ? <Button variant="secondary" disabled={busy === medicalAction.id} onClick={() => void action({ action: "completeAction", actionId: medicalAction.id, result: "Контроль выполнен, дальнейшие действия — по действующему протоколу", confirmationRef: `MED-CONF:${medicalAction.id}:${new Date().toISOString()}` }, medicalAction.id)}>Выполнить</Button> : null}</article>)}
-  </div><footer><span>Ответственный {medicalCase.responsibleEntityId}</span>{medicalCase.status !== "Закрыт" ? <Button variant="secondary" disabled={busy === medicalCase.id || data.actions.some((item) => item.caseId === medicalCase.id && item.status !== "Выполнено")} onClick={() => void action({ action: "closeCase", caseId: medicalCase.id, result: "Случай закрыт после выполнения действий и контроля", confirmationRef: `MED-CONF:${medicalCase.id}:${new Date().toISOString()}` }, medicalCase.id)}>Закрыть с подтверждением</Button> : <strong>{medicalCase.confirmationRef}</strong>}</footer></Card>)}</div>;
+  return <div className="ahMedicalCaseGrid">{data.cases.map((medicalCase) => <Card key={medicalCase.id} className="ahMedicalCase"><PanelHead eyebrow={`${recordLabel("Случай", medicalCase.id)} · ${medicalCase.severity}`} title={medicalCase.caseType} note={medicalCase.status} /><p>{medicalCase.minimumSummary}</p><div className="ahMedicalTimeline">
+    {data.incidents.filter((item) => item.caseId === medicalCase.id).map((incident) => <CompactListCard key={incident.id} index={recordNumber(incident.id)} title={incident.incidentType} description={`${incident.minimumFacts} · ${incident.responseRequired}`} />)}
+    {data.actions.filter((item) => item.caseId === medicalCase.id).map((medicalAction) => <article key={medicalAction.id}><CompactListCard index={recordNumber(medicalAction.id)} title={medicalAction.actionType} description={medicalAction.result || `Срок ${medicalAction.dueAt}`} />{medicalAction.status !== "Выполнено" ? <Button variant="secondary" disabled={busy === medicalAction.id} onClick={() => void action({ action: "completeAction", actionId: medicalAction.id, result: "Контроль выполнен, дальнейшие действия — по действующему протоколу", confirmationRef: `Подтверждено медработником ${new Date().toLocaleDateString("ru-RU")}` }, medicalAction.id)}>Выполнить</Button> : null}</article>)}
+  </div><footer><span>Ответственный медработник назначен</span>{medicalCase.status !== "Закрыт" ? <Button variant="secondary" disabled={busy === medicalCase.id || data.actions.some((item) => item.caseId === medicalCase.id && item.status !== "Выполнено")} onClick={() => void action({ action: "closeCase", caseId: medicalCase.id, result: "Случай закрыт после выполнения действий и контроля", confirmationRef: `Подтверждено медработником ${new Date().toLocaleDateString("ru-RU")}` }, medicalCase.id)}>Закрыть с подтверждением</Button> : <strong>Закрытие подтверждено</strong>}</footer></Card>)}</div>;
 }
 
 function MedicalAudit({ data }: { data: MedicalData }) {
   if (!data.audit.length) return <Card className="ahMedicalPanel"><EmptyState title="История действий пока пуста" description="Этот и последующие просмотры фиксируются в защищённом аудите." density="compact" /></Card>;
-  return <Card className="ahMedicalPanel"><PanelHead eyebrow="Неизменяемая история" title="Просмотры и действия" note={`${data.audit.length} событий`} /><div className="ahMedicalAuditTable"><table><thead><tr><th>Время</th><th>Действие</th><th>Область</th><th>Запись</th></tr></thead><tbody>{data.audit.map((item) => <tr key={item.id}><td data-label="Время">{item.createdAt}</td><td data-label="Действие">{item.action}</td><td data-label="Область">{item.entityType}</td><td data-label="Запись">{item.entityId}</td></tr>)}</tbody></table></div></Card>;
+  return <Card className="ahMedicalPanel"><PanelHead eyebrow="Неизменяемая история" title="Просмотры и действия" note={`${data.audit.length} событий`} /><div className="ahMedicalAuditTable"><table><thead><tr><th>Время</th><th>Действие</th><th>Область</th><th>Запись</th></tr></thead><tbody>{data.audit.map((item) => <tr key={item.id}><td data-label="Время">{item.createdAt}</td><td data-label="Действие">{medicalAuditAction(item.action)}</td><td data-label="Область">{medicalAuditArea(item.entityType)}</td><td data-label="Запись">{recordLabel("Запись", item.entityId)}</td></tr>)}</tbody></table></div></Card>;
+}
+
+function medicalAuditAction(value: string) {
+  if (value.includes("view")) return "Просмотр защищённой записи";
+  if (value.includes("confirm")) return "Подтверждение документа";
+  if (value.includes("close")) return "Закрытие случая";
+  if (value.includes("complete")) return "Выполнение действия";
+  return "Действие в медицинском контуре";
+}
+
+function medicalAuditArea(value: string) {
+  if (value.includes("document")) return "Документы";
+  if (value.includes("case")) return "Медицинские случаи";
+  if (value.includes("action")) return "Действия";
+  return "Медицинское сопровождение";
 }
 
 function PanelHead({ eyebrow, title, note }: { eyebrow: string; title: string; note: string }) {

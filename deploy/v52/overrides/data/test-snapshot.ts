@@ -52,14 +52,14 @@ export const moduleCatalog = [
   { id: "medical", label: "Медицина", group: "Контроль", status: "restricted" },
   { id: "content", label: "Контент", group: "Рост", status: "test" },
   { id: "events", label: "События", group: "Рост", status: "test" },
-  { id: "projects", label: "Проекты и KPI", group: "Рост", status: "test" },
+  { id: "projects", label: "Проекты и показатели", group: "Рост", status: "test" },
   { id: "analytics", label: "Аналитика и ИИ", group: "Рост", status: "test" },
   { id: "contractors", label: "Подрядчики", group: "Операции", status: "test" },
   { id: "assets", label: "Имущество", group: "Операции", status: "test" },
   { id: "quality", label: "Качество и обращения", group: "Контроль", status: "test" },
   { id: "access", label: "Доступы", group: "Система", status: "restricted" },
   { id: "integrations", label: "Интеграции", group: "Система", status: "ready" },
-  { id: "acceptance", label: "Приёмка", group: "Система", status: "ready" },
+  { id: "acceptance", label: "Проверка системы", group: "Система", status: "ready" },
 ] as const;
 
 export type ModuleId = (typeof moduleCatalog)[number]["id"];

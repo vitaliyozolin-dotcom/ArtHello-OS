@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { ModuleId } from "../../data/test-snapshot";
+import { recordLabel } from "../../lib/record-labels";
 import { AppIcon } from "./AppIcon";
 import { Button, Card, EmptyState, KpiCard, PageContainer, PageHeader, SearchField, Tabs } from "./design-system";
 import "./SystemWorkspace.ds.css";
@@ -54,6 +55,7 @@ const configs: Record<SystemModule, ModuleConfig> = {
 };
 
 const accessRoles = new Set(["Собственник", "Директор", "Представитель Виталия", "HR", "Интеграции"]);
+const recordKinds: Record<SystemModule, string> = { events: "Событие", contractors: "Подрядчик", access: "Доступ", assets: "Имущество", quality: "Обращение" };
 
 export function SystemWorkspace({
   module,
@@ -100,13 +102,13 @@ export function SystemWorkspace({
         <Card className="ahSystemListPanel">
           <header>
             <div><p>{tab}</p><h2>Рабочий реестр</h2></div>
-            <SearchField value={query} onChange={setQuery} placeholder="ID, объект, статус или ответственный" label={`Поиск в разделе ${config.title}`} />
+            <SearchField value={query} onChange={setQuery} placeholder="Номер, объект, статус или ответственный" label={`Поиск в разделе ${config.title}`} />
           </header>
           <div data-ah-compact-card="true" className="ahSystemList" role="list">
             {visible.map((item) => (
               <button role="listitem" className={selected?.id === item.id ? "active" : ""} key={item.id} onClick={() => setSelectedId(item.id)}>
                 <span className="system-record-icon"><AppIcon name={module} /></span>
-                <span><small>{item.id}</small><strong>{item.title}</strong><em>{item.context}</em></span>
+                <span><small>{recordLabel(recordKinds[module], item.id)}</small><strong>{item.title}</strong><em>{item.context}</em></span>
                 <span><b>{item.status}</b><small>{item.owner}</small></span>
                 <AppIcon name="chevron" />
               </button>
@@ -116,7 +118,7 @@ export function SystemWorkspace({
         </Card>
 
         {selected ? <Card className="ahSystemDetail">
-          <header><div><p>{selected.id}</p><h2>{selected.title}</h2><span>{selected.context}</span></div><b>{selected.status}</b></header>
+          <header><div><p>{recordLabel(recordKinds[module], selected.id)}</p><h2>{selected.title}</h2><span>{selected.context}</span></div><b>{selected.status}</b></header>
           <dl>
             <div><dt>Ответственный</dt><dd>{selected.owner}</dd></div>
             <div><dt>Следующий шаг</dt><dd>{selected.next}</dd></div>
@@ -124,7 +126,7 @@ export function SystemWorkspace({
             <div><dt>Качество данных</dt><dd>Определяется источником записи</dd></div>
           </dl>
           <section className="system-lineage"><p>Связи</p><button onClick={() => navigate(selected.relation.module)}><span>{selected.relation.label}</span><AppIcon name="chevron" /></button><button onClick={() => navigate("tasks")}><span>Связанные задачи</span><AppIcon name="chevron" /></button></section>
-          <footer><button className="primary-action" onClick={createTask}>Создать задачу</button><button className="secondary-action" onClick={() => notify(`История ${selected.id}: изменений пока нет`)}>История изменений</button></footer>
+          <footer><button className="primary-action" onClick={createTask}>Создать задачу</button><button className="secondary-action" onClick={() => notify(`История ${recordLabel(recordKinds[module], selected.id)}: изменений пока нет`)}>История изменений</button></footer>
         </Card> : <Card className="ahSystemDetail"><EmptyState className="ahSystemEmpty" density="compact" title="Карточка не выбрана" description="В реестре пока нет записей. Структура раздела готова к работе." /></Card>}
       </div>
     </PageContainer>

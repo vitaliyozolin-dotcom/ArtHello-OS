@@ -47,7 +47,8 @@ async function faultTask(context: TaskAccessContext, body: Record<string, unknow
   const existingResponse = scopedAutomationTaskResponse(existing);
   if (existingResponse) return existingResponse;
   const dueDate = dateAfterDays(fault.severity === "Критичный" ? 1 : 3);
-  const [task] = await db.insert(tasks).values({ title: `Устранить неисправность · ${fault.equipmentId}`, owner: assignment.owner, dueDate, priority: fault.severity, status: "Входящие", sourceType: "Неисправность безопасности", sourceId: id, description: fault.description, assigneeEntityId: assignment.assigneeEntityId, kind: "Автозадача", automationKey: key, requiresApproval: true, createdByUserId: context.appUserId, createdBy: actor }).returning();
+  const taskTitle = `Устранить неисправность: ${fault.description}`.slice(0, 180);
+  const [task] = await db.insert(tasks).values({ title: taskTitle, owner: assignment.owner, dueDate, priority: fault.severity, status: "Входящие", sourceType: "Неисправность безопасности", sourceId: id, description: fault.description, assigneeEntityId: assignment.assigneeEntityId, kind: "Автозадача", automationKey: key, requiresApproval: true, createdByUserId: context.appUserId, createdBy: actor }).returning();
   await db.update(safetyFaults).set({ relatedTaskId: task.id, status: "В работе" }).where(eq(safetyFaults.id, id));
   await audit(actor, "safety.fault_task_created", "safety_fault", id, { taskId: task.id, assigneeEntityId: assignment.assigneeEntityId });
   return Response.json({ task }, { status: 201 });
