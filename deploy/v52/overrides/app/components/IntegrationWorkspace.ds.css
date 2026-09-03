@@ -522,18 +522,22 @@
 }
 
 .ahIntegrationModalLayer > .ahIntegrationSetupWizard {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  overflow: hidden;
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+  width: min(820px, calc(100vw - 48px)) !important;
+  height: min(820px, calc(100dvh - 48px)) !important;
+  max-height: calc(100dvh - 48px) !important;
+  overflow: hidden !important;
+  padding: 0 !important;
 }
 
-.ahIntegrationSetupBody {
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
+.ahIntegrationModalLayer .ahIntegrationSetupWizard > .ahIntegrationSetupBody {
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
   overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: pan-y !important;
 }
 
 .ahIntegrationModalLayer .ahIntegrationSetupWizard > header,
@@ -778,6 +782,10 @@
 }
 
 @media (max-width: 720px) {
+  body:has(.ahIntegrationModalLayer) [data-ah-help-root] .ah-launch {
+    display: none !important;
+  }
+
   .ahIntegrationModalLayer {
     place-items: end center;
     padding: 10px;
@@ -792,7 +800,11 @@
   }
 
   .ahIntegrationModalLayer > .ahIntegrationSetupWizard {
-    height: calc(100dvh - 20px);
+    width: 100% !important;
+    max-width: 100% !important;
+    height: calc(100dvh - 20px) !important;
+    max-height: calc(100dvh - 20px) !important;
+    overflow: hidden !important;
   }
 
   .ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-grid,
