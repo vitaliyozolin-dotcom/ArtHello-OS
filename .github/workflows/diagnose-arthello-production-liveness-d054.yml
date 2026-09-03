@@ -1,0 +1,112 @@
+name: Diagnose ArtHello production liveness D-054
+
+on:
+  push:
+    branches:
+      - codex/d054-production-liveness-diagnostic-20260903
+    paths:
+      - .github/workflows/diagnose-arthello-production-liveness-d054.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 10
+    environment: production-ru
+    steps:
+      - name: Inspect ArtHello production without mutation
+        shell: bash
+        env:
+          EXPECTED_RELEASE: 1038a1960aaf62f57a161d8a16c804161a7f6c53
+          EXPECTED_CONTAINER: arthello-direct-33741926972-1
+          PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+          CADDY_CONTAINER: stroios-caddy-1
+        run: |
+          set -Eeuo pipefail
+          mapfile -t ids < <(docker ps -aq --filter 'name=^/arthello-direct-')
+          test "${#ids[@]}" -gt 0
+
+          for id in "${ids[@]}"; do
+            docker inspect "$id" | python3 -c '
+          import json, sys
+          item = json.load(sys.stdin)[0]
+          state = item.get("State") or {}
+          config = item.get("Config") or {}
+          host = item.get("HostConfig") or {}
+          labels = config.get("Labels") or {}
+          networks = (item.get("NetworkSettings") or {}).get("Networks") or {}
+          selected = {
+              "name": str(item.get("Name") or "").lstrip("/"),
+              "id": item.get("Id"),
+              "image_id": item.get("Image"),
+              "release_sha": labels.get("arthello.release.sha"),
+              "release_run": labels.get("arthello.release.run"),
+              "status": state.get("Status"),
+              "running": state.get("Running"),
+              "paused": state.get("Paused"),
+              "restarting": state.get("Restarting"),
+              "oom_killed": state.get("OOMKilled"),
+              "dead": state.get("Dead"),
+              "pid": state.get("Pid"),
+              "exit_code": state.get("ExitCode"),
+              "error": state.get("Error"),
+              "started_at": state.get("StartedAt"),
+              "finished_at": state.get("FinishedAt"),
+              "restart_policy": (host.get("RestartPolicy") or {}).get("Name"),
+              "restart_maximum_retry_count": (host.get("RestartPolicy") or {}).get("MaximumRetryCount"),
+              "network_mode": host.get("NetworkMode"),
+              "networks": sorted(networks),
+          }
+          print("ARTHELLO_CONTAINER_STATE=" + json.dumps(selected, sort_keys=True, separators=(",", ":")))
+          '
+
+            name="$(docker inspect "$id" --format '{{.Name}}' | sed 's#^/##')"
+            running="$(docker inspect "$id" --format '{{.State.Running}}')"
+            if [ "$running" = true ]; then
+              docker exec -i "$id" node - <<'NODE'
+          const response = await fetch('http://127.0.0.1:8081/api/health', {
+            headers: { 'cache-control': 'no-cache' },
+          });
+          const body = await response.text();
+          console.log('ARTHELLO_INTERNAL_HEALTH=' + JSON.stringify({
+            status: response.status,
+            body: body.slice(0, 1000),
+          }));
+          NODE
+            else
+              printf 'ARTHELLO_INTERNAL_HEALTH={"container":"%s","status":"not-running"}\n' "$name"
+            fi
+          done
+
+          docker exec "$CADDY_CONTAINER" sh -ceu '
+            printf "ARTHELLO_CADDY_ROUTE_BEGIN\n"
+            grep -n -E "arthello-188-225-38-55|arthello-direct-" /data/external-routes.caddy
+            printf "ARTHELLO_CADDY_ROUTE_END\n"
+          '
+
+          public_body="$(mktemp)"
+          trap 'rm -f -- "$public_body"' EXIT
+          public_status="$(curl --silent --show-error --max-time 20 \
+            --output "$public_body" --write-out '%{http_code}' \
+            "$PUBLIC_URL/api/health" || true)"
+          printf 'ARTHELLO_PUBLIC_STATUS=%s\n' "$public_status"
+          printf 'ARTHELLO_PUBLIC_BODY=%s\n' "$(head -c 1000 "$public_body" | tr '\n' ' ')"
+
+          if docker inspect "$EXPECTED_CONTAINER" >/dev/null 2>&1; then
+            actual_release="$(docker inspect "$EXPECTED_CONTAINER" --format '{{index .Config.Labels "arthello.release.sha"}}')"
+            printf 'ARTHELLO_EXPECTED_CONTAINER_PRESENT=true\n'
+            printf 'ARTHELLO_EXPECTED_RELEASE_MATCH=%s\n' "$([ "$actual_release" = "$EXPECTED_RELEASE" ] && printf true || printf false)"
+          else
+            printf 'ARTHELLO_EXPECTED_CONTAINER_PRESENT=false\n'
+          fi
