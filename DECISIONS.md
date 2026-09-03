@@ -1,5 +1,15 @@
 # ArtHello OS — Decisions
 
+## D-051 — Восстановить ArtHello cutover через проверяемое обнаружение School-контейнера
+
+Дата: 2026-09-03  
+Статус: принято как fail-closed восстановление порученного production release
+
+GitHub-подписанный squash merge D-050 `f14dad5d938de023385b996877a1ec6d1aaca5d6` прошёл Quality, Proof и v52 Verify на `main`. Production run 33713845429 остановился до активации нового ArtHello-контейнера: внешний School health был зелёным, но guard ожидал Docker object `school-1-11`, тогда как production School запущен Compose с другим container name. Workflow подтвердил `ARTHELLO_ROLLBACK=VERIFIED`; публичные ArtHello и School остались здоровы, новый release не активирован.
+
+Follow-up ограничен decision record и двумя release workflows. Вместо угаданного имени он обязан выбрать ровно один запущенный контейнер, содержащий ровно одну непустую `CENTRAL_ACCESS_SECRET`, подтвердить общий Docker network с Caddy и извлечь секрет без вывода значения. Ноль или несколько кандидатов завершают cutover до остановки текущего ArtHello. Новый one-release trigger привязывается к exact branch `codex/recover-school-container-discovery-20260903` и фактическому номеру этого PR после его создания; допустим только GitHub-подписанный squash merge с одним parent, повторные hosted gates и новый attempt-1 production run.
+
+
 ## D-042 — Одноразовый School cutover перепривязать к фактическому main
 
 Дата: 2026-09-02  
