@@ -158,4 +158,5 @@ test("integration wizard has an independently scrollable mobile body and describ
   assert.match(styles, /\.ahIntegrationModalLayer > \.ahIntegrationSetupWizard[\s\S]*?display:\s*grid[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\) auto[\s\S]*?overflow:\s*hidden/);
   assert.match(styles, /\.ahIntegrationSetupBody\s*\{[\s\S]*?min-height:\s*0[\s\S]*?overflow-y:\s*auto[\s\S]*?-webkit-overflow-scrolling:\s*touch[\s\S]*?touch-action:\s*pan-y/);
   assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.ahIntegrationModalLayer > \.ahIntegrationSetupWizard[\s\S]*?height:\s*calc\(100dvh - 20px\)/);
+  assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.ahIntegrationModalLayer \.ahIntegrationSetupWizard input,[\s\S]*?\.ahIntegrationModalLayer \.ahIntegrationSetupWizard select,[\s\S]*?\.ahIntegrationModalLayer \.ahIntegrationSetupWizard textarea\s*\{[\s\S]*?font-size:\s*16px/);
 });

@@ -556,3 +556,13 @@ decision:
 - release PR/branch: `#326`, `codex/d057-tochka-stateless-egress-20260903`; previous main SHA `a48eed30b3a0910c603ff7ad2285a42b3785a507`;
 - приёмка: first-attempt hosted Quality/Proof/Verify, `ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED`, изолированный clone-preflight, backup-first cutover, rollback guards и публичный health-check;
 - следующий переход: после production health владелец повторяет реальный read-only импорт счетов, остатков, выписок и проведённых операций Точки.
+
+## D-058 — фактический Node‑транспорт Точки и запрет автозума iOS
+
+- факт: D-057 production run `33752514068` успешно подтвердил TLS в Node‑контейнере, но повторный ввод реального ключа владельцем по-прежнему завершился общей транспортной ошибкой; `IMG_9991`/`IMG_9992` дополнительно фиксируют автоприближение формы после фокуса на 13 px поле ключа;
+- причина: банковский `fetch` API-маршрута выполнялся внутри workerd, а `NODE_EXTRA_CA_CERTS` действует на Node; прежний preflight проверял соседний Node‑процесс, но не фактический сетевой путь worker;
+- решение: Miniflare получает function-valued `TOCHKA_TRANSPORT`; Node-модуль разрешает только официальный origin и read-only методы клиентов, счетов и выписок, очищает заголовки, ограничивает тело и никогда не допускает API создания/подписания/отправки платежей;
+- мобильная форма: поля мастера подключения имеют минимум 16 px на ширине до 720 px, поэтому Safari не включает автозум; pinch zoom и доступность страницы не ограничиваются;
+- release PR/branch: `#327`, `codex/d058-tochka-node-bridge-ios-20260903`; previous production SHA `1cdca3fd9cb63f6dd7c8d8ce137e4126b4fc1123`;
+- приёмка: зелёные transport/UI тесты, first-attempt exact-SHA Quality/Proof/Verify, production preflight через тот же модуль, изолированный clone, backup-first cutover, rollback guards и публичный health-check;
+- следующий переход: владелец повторяет подключение; успешный импорт показывает реальные счета, остатки, выписки и проведённые операции, а банковский 401/403 должен отображаться как конкретная ошибка прав/ключа, не как сбой транспорта.

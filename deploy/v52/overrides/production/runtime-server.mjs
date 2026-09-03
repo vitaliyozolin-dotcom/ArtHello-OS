@@ -1,6 +1,7 @@
 import { Miniflare, Log, LogLevel } from "miniflare";
 import { readFileSync } from "node:fs";
 import process from "node:process";
+import { createTochkaTransport } from "./tochka-transport.mjs";
 
 const applicationRoot = process.cwd();
 const dataRoot = process.env.ARTHELLO_D1_PATH || "/data/d1";
@@ -57,6 +58,7 @@ const runtime = new Miniflare({
     INTEGRATION_CREDENTIALS_KEY: integrationCredentialsKey,
     TBANK_EGRESS_IP: process.env.TBANK_EGRESS_IP || "",
   },
+  serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport() },
   d1Databases: { DB: "arthello-production" },
   d1Persist: dataRoot,
   assets: {
