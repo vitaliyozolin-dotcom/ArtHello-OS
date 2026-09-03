@@ -220,6 +220,198 @@
       "replacement": "Replace with a checked-in Drizzle migration if schema evidence proves the repair is required."
     }
   ],
+  "sandboxReplacementEvidence": {
+    "/sync/test-connection": {
+      "status": "covered",
+      "reason": "The sandbox importer authenticates and performs AlfaCRM index requests without exposing a public probe route.",
+      "references": [
+        {
+          "path": "scripts/src/import-alfacrm-sandbox.ts",
+          "needles": [
+            "class SerializedReadOnlyAlfaClient",
+            "postIndex(endpoint: string"
+          ]
+        }
+      ]
+    },
+    "/sync/branches": {
+      "status": "covered",
+      "reason": "The full sandbox import starts with the global branch inventory and persists its provenance.",
+      "references": [
+        {
+          "path": "scripts/src/import-alfacrm-sandbox.ts",
+          "needles": [
+            "endpoint: \"0/branch/index\"",
+            "recordType: \"branches\""
+          ]
+        }
+      ]
+    },
+    "/sync/discover": {
+      "status": "blocked",
+      "reason": "Broad runtime endpoint discovery has no approved equivalent; required endpoints are explicit in the guarded importer.",
+      "references": [
+        {
+          "path": "DECISIONS.md",
+          "needles": [
+            "D-029 — Legacy sync",
+            "пока не заменена scoped source jobs"
+          ]
+        }
+      ]
+    },
+    "/sync/detect-lessons": {
+      "status": "blocked",
+      "reason": "Heuristic lesson endpoint detection is not an approved capability replacement and must remain disabled.",
+      "references": [
+        {
+          "path": "scripts/src/import-alfacrm-sandbox.ts",
+          "needles": [
+            "endpoint: `${branchId}/lesson/index`",
+            "recordType: \"lessons\""
+          ]
+        }
+      ]
+    },
+    "/sync/find-atlas": {
+      "status": "blocked",
+      "reason": "Fuzzy Atlas matching is not evidence-grade branch identity resolution and has no approved replacement.",
+      "references": [
+        {
+          "path": "BACKLOG.md",
+          "needles": [
+            "Перечислить все филиалы и сопоставить их с внутренними сущностями"
+          ]
+        }
+      ]
+    },
+    "/sync/students-atlas": {
+      "status": "covered",
+      "reason": "The full sandbox importer loads students for every discovered branch rather than relying on an Atlas-only shortcut.",
+      "references": [
+        {
+          "path": "scripts/src/import-alfacrm-sandbox.ts",
+          "needles": [
+            "endpoint: `${branchId}/customer/index`",
+            "recordType: \"students\""
+          ]
+        }
+      ]
+    },
+    "/sync/p76-cleanup-payments": {
+      "status": "blocked",
+      "reason": "No cleanup may be treated as approved until financial classification rules and restored-sandbox evidence exist.",
+      "references": [
+        {
+          "path": "BACKLOG.md",
+          "needles": ["Утвердить статьи ДДС и ОПиУ"]
+        }
+      ]
+    },
+    "/sync/payments-atlas": {
+      "status": "covered",
+      "reason": "The full sandbox importer loads payments for every discovered branch with raw and batch provenance.",
+      "references": [
+        {
+          "path": "scripts/src/import-alfacrm-sandbox.ts",
+          "needles": [
+            "endpoint: `${branchId}/pay/index`",
+            "recordType: \"payments\""
+          ]
+        }
+      ]
+    },
+    "/sync/backfill-payments-normalize": {
+      "status": "blocked",
+      "reason": "A one-off payment backfill requires restored-sandbox evidence and a checked-in migration design.",
+      "references": [
+        {
+          "path": "REFACTORING_PLAN.md",
+          "needles": [
+            "checked-in Drizzle SQL — единственный авторитет миграций"
+          ]
+        }
+      ]
+    },
+    "/sync/lessons-atlas": {
+      "status": "covered",
+      "reason": "The full sandbox importer loads lessons by explicit status scope for every discovered branch.",
+      "references": [
+        {
+          "path": "scripts/src/import-alfacrm-sandbox.ts",
+          "needles": [
+            "endpoint: `${branchId}/lesson/index`",
+            "scopeKey: `${branchId}:lessons:status:${status}`"
+          ]
+        }
+      ]
+    },
+    "/sync/teachers": {
+      "status": "covered",
+      "reason": "The full sandbox importer reads the teacher index for every discovered branch.",
+      "references": [
+        {
+          "path": "scripts/src/import-alfacrm-sandbox.ts",
+          "needles": [
+            "endpoint: `${branchId}/teacher/index`",
+            "recordType: \"teachers\""
+          ]
+        }
+      ]
+    },
+    "/sync/teachers-atlas": {
+      "status": "covered",
+      "reason": "The all-branch teacher import supersedes the Atlas-only shortcut without enabling a public runtime route.",
+      "references": [
+        {
+          "path": "scripts/src/import-alfacrm-sandbox.ts",
+          "needles": [
+            "endpoint: `${branchId}/teacher/index`",
+            "recordType: \"teachers\""
+          ]
+        }
+      ]
+    },
+    "/sync/pull-students-all-branches": {
+      "status": "covered",
+      "reason": "The full sandbox importer iterates discovered branches and imports their student indexes.",
+      "references": [
+        {
+          "path": "scripts/src/import-alfacrm-sandbox.ts",
+          "needles": [
+            "for (const branch of branches.rows)",
+            "recordType: \"students\""
+          ]
+        }
+      ]
+    },
+    "/sync/groups-atlas": {
+      "status": "covered",
+      "reason": "The full sandbox importer loads groups for every discovered branch instead of an Atlas-only subset.",
+      "references": [
+        {
+          "path": "scripts/src/import-alfacrm-sandbox.ts",
+          "needles": [
+            "endpoint: `${branchId}/group/index`",
+            "recordType: \"groups\""
+          ]
+        }
+      ]
+    },
+    "/sync/repair-lessons-atlas-columns": {
+      "status": "blocked",
+      "reason": "Schema repair cannot move to a script before snapshot repair and a checked-in Drizzle migration with twin proof.",
+      "references": [
+        {
+          "path": "REFACTORING_PLAN.md",
+          "needles": [
+            "Восстановить `0016_snapshot.json`/`0017_snapshot.json`",
+            "пустой diff"
+          ]
+        }
+      ]
+    }
+  },
   "routeCallSites": {
     "/sync/logs": [
       { "path": "lib/api-spec/openapi.yaml", "kind": "contract" },

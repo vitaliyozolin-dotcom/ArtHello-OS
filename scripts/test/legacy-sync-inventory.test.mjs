@@ -92,3 +92,36 @@ test("every route records its exact literal call-site files", () => {
     "call-site map must not omit or invent routes",
   );
 });
+
+test("every sandbox disposition has verifiable replacement evidence", () => {
+  const sandboxRoutes = inventory.routes.filter(
+    ({ disposition }) => disposition === "sandbox-script",
+  );
+
+  assert.deepEqual(
+    Object.keys(inventory.sandboxReplacementEvidence).sort(),
+    sandboxRoutes.map(({ path }) => path).sort(),
+    "sandbox replacement map must cover exactly the sandbox dispositions",
+  );
+
+  for (const route of sandboxRoutes) {
+    const evidence = inventory.sandboxReplacementEvidence[route.path];
+    assert.ok(
+      ["covered", "blocked"].includes(evidence.status),
+      `${routeKey(route)} has an invalid replacement status`,
+    );
+    assert.ok(
+      evidence.reason.length >= 20,
+      `${routeKey(route)} lacks rationale`,
+    );
+    for (const reference of evidence.references) {
+      const contents = readFileSync(new URL(reference.path, root), "utf8");
+      for (const needle of reference.needles) {
+        assert.ok(
+          contents.includes(needle),
+          `${routeKey(route)} evidence ${reference.path} lacks ${needle}`,
+        );
+      }
+    }
+  }
+});

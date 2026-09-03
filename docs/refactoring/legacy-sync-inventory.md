@@ -8,6 +8,8 @@ The canonical inventory is [`legacy-sync-inventory.json`](./legacy-sync-inventor
 - `sandbox-script` — keep source probing, bulk import and one-off repair outside the public runtime;
 - `scoped-job` — design a source-specific authenticated job with least-privilege scope, audit, idempotency and failure evidence.
 
+`sandboxReplacementEvidence` distinguishes existing guarded importer coverage from blocked legacy capabilities. `covered` means only that the required source-reading capability exists outside the public runtime; it does not authorize route removal. `blocked` records the missing decision or evidence explicitly.
+
 ## Safety boundary
 
 D-029 remains authoritative. The central `LEGACY_SYNC_DISABLED` gate stays in place. A representative 503 proves only that the surface is unavailable; it does not prove that the underlying capability is unnecessary.
