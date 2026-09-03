@@ -1,0 +1,78 @@
+name: D065 Tochka statement shape diagnostic v3
+
+on:
+  push:
+    branches: [codex/d065-tochka-statement-diagnostic-20260903]
+    paths:
+      - .github/workflows/d065-tochka-statement-shape-diagnostic-v3.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-38-55-arthello-d065-diagnostic
+  cancel-in-progress: false
+
+env:
+  DATA_VOLUME: arthello-direct-v44-data
+
+jobs:
+  diagnose:
+    if: github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Probe real statement schema without exposing values
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$RUNNER_TEMP/arthello-d065-v3-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          snapshot="$work/snapshot"; context="$work/context.json"; envfile="$work/live.env"
+          mkdir -p "$snapshot"; chmod 0700 "$work" "$snapshot"
+          trap 'rm -rf -- "$work"' EXIT INT TERM HUP
+
+          mapfile -t live_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
+          test "${#live_ids[@]}" -eq 1
+          live_id="${live_ids[0]}"
+          image_id="$(docker inspect "$live_id" --format '{{.Image}}')"
+          network="$(docker inspect "$live_id" --format '{{range $name,$cfg := .NetworkSettings.Networks}}{{$name}}{{end}}')"
+          test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]; test -n "$network"
+          docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' > "$envfile"
+          chmod 0600 "$envfile"
+
+          docker run --rm --network none --user 0:0 \
+            --mount "type=volume,src=$DATA_VOLUME,dst=/from,readonly" \
+            --entrypoint /bin/sh "$image_id" -ceu 'cd /from && tar -cpf - .' \
+            | tar -xpf - -C "$snapshot"
+          relative_db="$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)"
+          db="$snapshot/$relative_db"; test -f "$db"
+
+          D065_DB="$db" D065_CONTEXT="$context" python3 - <<'PY'
+          import json, os, sqlite3, urllib.parse
+          con=sqlite3.connect(f"file:{os.environ['D065_DB']}?mode=ro", uri=True)
+          try:
+              setup_row=con.execute("SELECT state_value FROM system_runtime_state WHERE state_key='integration_setup:INT-T-TOCHKA'").fetchone()
+              if not setup_row: raise SystemExit('D065_SETUP_MISSING')
+              setup=json.loads(setup_row[0]); legal=str(setup.get('legalEntityId') or '').strip(); customer=str(setup.get('customerCode') or '').strip(); start=str(setup.get('startDate') or '').strip()
+              if not legal or not customer or not start: raise SystemExit('D065_SETUP_INCOMPLETE')
+              key='integration_credential:v2:' + ':'.join(urllib.parse.quote(v,safe='') for v in ('INT-T-TOCHKA',legal,customer))
+              cred=con.execute('SELECT state_value FROM system_runtime_state WHERE state_key=?',(key,)).fetchone()
+              if not cred: raise SystemExit('D065_CREDENTIAL_MISSING')
+              envelope=json.loads(cred[0])
+              with open(os.environ['D065_CONTEXT'],'w',encoding='utf-8') as f: json.dump({'legalEntityId':legal,'customerCode':customer,'startDate':start,'envelope':envelope},f,separators=(',',':'))
+              os.chmod(os.environ['D065_CONTEXT'],0o600)
+              print('D065_CONTEXT=READY')
+          finally: con.close()
+          PY
+
+          docker run --rm --read-only --network "$network" \
+            --env-file "$envfile" \
+            --mount "type=bind,src=$context,dst=/run/context.json,readonly" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/deploy/v52/maintenance/d065-tochka-statement-shape-diagnostic.mjs,dst=/run/diagnostic.mjs,readonly" \
+            --entrypoint node "$image_id" /run/diagnostic.mjs
