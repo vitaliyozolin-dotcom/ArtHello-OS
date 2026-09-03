@@ -524,14 +524,10 @@
 .ahIntegrationModalLayer > .ahIntegrationSetupWizard {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(820px, calc(100vw - 48px));
-  height: min(820px, calc(100dvh - 48px));
-  max-height: calc(100dvh - 48px);
   overflow: hidden;
-  padding: 0;
 }
 
-.ahIntegrationModalLayer .ahIntegrationSetupWizard > .ahIntegrationSetupBody {
+.ahIntegrationSetupBody {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -796,11 +792,7 @@
   }
 
   .ahIntegrationModalLayer > .ahIntegrationSetupWizard {
-    width: 100%;
-    max-width: 100%;
     height: calc(100dvh - 20px);
-    max-height: calc(100dvh - 20px);
-    overflow: hidden;
   }
 
   .ahIntegrationModalLayer .ahIntegrationSetupWizard .setup-grid,
