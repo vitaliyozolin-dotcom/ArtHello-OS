@@ -1,6 +1,6 @@
 name: Deploy ArtHello self-hosted RU
 
-# D-053 is a one-release delivery of the read-only Tochka statement import and mobile dialog scroll fix.
+# D-054 is a one-release delivery of the nested Tochka mobile dialog scroll correction.
 # Production authorization still requires the protected Environment below. The
 # exception is constrained to the successful hosted verification of the exact
 # merged main SHA from the named release branch and repository.
@@ -22,9 +22,9 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/tochka-readonly-sync-20260903
-  EXPECTED_RELEASE_PR: '320'
-  PREVIOUS_RELEASE_SHA: 70f767723ca2de151d80782a6cea236a9f651ed0
+  EXPECTED_RELEASE_HEAD: codex/d054-tochka-modal-scroll-20260903
+  EXPECTED_RELEASE_PR: '321'
+  PREVIOUS_RELEASE_SHA: 1038a1960aaf62f57a161d8a16c804161a7f6c53
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -55,8 +55,8 @@ jobs:
       (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/tochka-readonly-sync-20260903' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('320') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/d054-tochka-modal-scroll-20260903' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('321') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -71,7 +71,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Verify one-release D-053 trigger and protected Environment
+      - name: Verify one-release D-054 trigger and protected Environment
         timeout-minutes: 4
         env:
           GH_TOKEN: ${{ github.token }}

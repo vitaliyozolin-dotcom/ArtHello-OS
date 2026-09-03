@@ -143,11 +143,19 @@ test("Tochka statement allowlist permits only the documented read flow and finan
 test("integration wizard has an independently scrollable mobile body and describes the real read-only import", () => {
   const workspace = readFileSync(new URL("../app/components/IntegrationWorkspace.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../app/components/IntegrationWorkspace.ds.css", import.meta.url), "utf8");
+  const globalStyles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  const mobileStyles = readFileSync(new URL("../app/components/SystemWideMobilePolish.css", import.meta.url), "utf8");
+  const legacyMobileGeometry = mobileStyles.match(/:is\(([\s\S]*?)\)\s*\{[\s\S]*?max-height:\s*none\s*!important;[\s\S]*?overflow:\s*visible\s*!important/)?.[1] ?? "";
+  assert.match(workspace, /className="setup-wizard ahIntegrationSetupWizard"/);
   assert.match(workspace, /className="ahIntegrationSetupBody"/);
   assert.match(workspace, /\["Счета", "Выписки", "Операции и платежи", "Реестр операций", "Остатки"\]/);
   assert.match(workspace, /Загружать выписки с/);
   assert.doesNotMatch(workspace, /Загрузка выписок, расписание синхронизации и правила распределения операций ещё не запущены/);
+  assert.doesNotMatch(globalStyles, /\.connection-modal,\.setup-wizard\{height:auto!important/);
+  assert.doesNotMatch(globalStyles, /\.connection-modal,\.setup-wizard\{width:calc\(100vw - 16px\)!important/);
+  assert.ok(legacyMobileGeometry, "legacy mobile geometry rule must remain for old dialogs");
+  assert.doesNotMatch(legacyMobileGeometry, /\.setup-wizard/);
   assert.match(styles, /\.ahIntegrationModalLayer > \.ahIntegrationSetupWizard[\s\S]*?display:\s*grid[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\) auto[\s\S]*?overflow:\s*hidden/);
-  assert.match(styles, /\.ahIntegrationSetupBody\s*\{[\s\S]*?overflow-y:\s*auto[\s\S]*?-webkit-overflow-scrolling:\s*touch[\s\S]*?touch-action:\s*pan-y/);
+  assert.match(styles, /\.ahIntegrationSetupBody\s*\{[\s\S]*?min-height:\s*0[\s\S]*?overflow-y:\s*auto[\s\S]*?-webkit-overflow-scrolling:\s*touch[\s\S]*?touch-action:\s*pan-y/);
   assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.ahIntegrationModalLayer > \.ahIntegrationSetupWizard[\s\S]*?height:\s*calc\(100dvh - 20px\)/);
 });
