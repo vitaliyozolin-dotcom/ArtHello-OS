@@ -782,10 +782,6 @@
 }
 
 @media (max-width: 720px) {
-  body:has(.ahIntegrationModalLayer) [data-ah-help-root] .ah-launch {
-    display: none;
-  }
-
   .ahIntegrationModalLayer {
     place-items: end center;
     padding: 10px;
