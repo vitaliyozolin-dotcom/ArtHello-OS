@@ -7,6 +7,7 @@ test("D-069 scopes every added finance selector under the canonical finance page
 /* D069_FINANCE_OPERATION_ALLOCATION */
 .operation-classification { display:grid; }
 .operation-classification-head > div { display:grid; }
+.operation-classification-form input, .operation-classification-form select { min-height:40px; }
 .finance-table td:first-child small { display:block; }
 @media (max-width: 767px) {
   .operation-classification-form { grid-template-columns: 1fr; }
@@ -15,8 +16,9 @@ test("D-069 scopes every added finance selector under the canonical finance page
   assert.match(out, /D069_FINANCE_OPERATION_ALLOCATION_SCOPED/);
   assert.match(out, /^\.ahFinancePage \.operation-classification \{/m);
   assert.match(out, /^\.ahFinancePage \.operation-classification-head > div \{/m);
+  assert.match(out, /^\.ahFinancePage \.operation-classification-form input, \.ahFinancePage \.operation-classification-form select \{/m);
   assert.match(out, /^\.ahFinancePage \.finance-table td:first-child small \{/m);
   assert.match(out, /^\s*\.ahFinancePage \.operation-classification-form \{/m);
-  assert.doesNotMatch(out, /^\.operation-classification/m);
+  assert.doesNotMatch(out, /(^|,[ \t]*)\.operation-classification/m);
   assert.equal(scopeD069FinanceCss(out), out);
 });
