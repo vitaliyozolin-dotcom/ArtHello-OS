@@ -1,0 +1,331 @@
+name: D066 Tochka finance production rollout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/d066-tochka-finance-production.yml
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+
+env:
+  EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
+  EXPECTED_D066_MERGE: 5ca05ff3627132b0f3cd9f75c29bfe7c34478d31
+  EXPECTED_ROLLOUT_PR: '334'
+  PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+  DATA_VOLUME: arthello-direct-v44-data
+
+jobs:
+  deploy-d066:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.run_attempt == 1
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 180
+    environment: production-ru
+    concurrency:
+      group: school-1-11-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Check out exact rollout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 6
+          persist-credentials: false
+
+      - name: Verify D-066 provenance and rollout boundary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_D066_MERGE" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_ROLLOUT_PR" =~ ^[0-9]+$ ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$EXPECTED_D066_MERGE" HEAD
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_D066_MERGE" HEAD)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = .github/workflows/d066-tochka-finance-production.yml
+
+          test -f deploy/v52/overrides/scripts/patch-tochka-finance-bank-visibility.mjs
+          test -f deploy/v52/overrides/scripts/patch-tochka-finance-bank-visibility-v3.mjs
+          test -f deploy/v52/overrides/tests/tochka-finance-bank-visibility-v3.test.mjs
+          grep -q 'patch-tochka-finance-bank-visibility.mjs' deploy/v52/Dockerfile
+          grep -q 'D066_TOCHKA_FINANCE_BANK_VISIBILITY' deploy/v52/overrides/scripts/patch-tochka-finance-bank-visibility-v3.mjs
+
+          pr_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/$EXPECTED_ROLLOUT_PR")"
+          jq -e \
+            --arg sha "$GITHUB_SHA" \
+            --argjson number "$EXPECTED_ROLLOUT_PR" '
+              .number == $number and
+              .state == "closed" and
+              .merged == true and
+              .merge_commit_sha == $sha and
+              .base.ref == "main" and
+              .head.ref == "codex/d066-production-rollout-20260903" and
+              .head.repo.full_name == "vitaliyozolin-dotcom/ArtHello-OS" and
+              .user.login == "vitaliyozolin-dotcom"
+            ' <<<"$pr_json" >/dev/null
+          printf 'D066_PROVENANCE=VERIFIED\n'
+
+      - name: Prove healthy production before mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t live_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
+          test "${#live_ids[@]}" -eq 1
+          live_id="${live_ids[0]}"
+          test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$live_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+          docker exec "$live_id" node -e "fetch('http://127.0.0.1:8081/api/health',{redirect:'error'}).then(r=>{if(r.status!==200)process.exit(1)}).catch(()=>process.exit(1))"
+          test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/")" = 200
+          test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/api/auth/me")" = 401
+          printf 'D066_PREVIOUS_PRODUCTION=HEALTHY\n'
+
+      - name: Build immutable D-066 candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          image="arthello-d066-finance-bank:$GITHUB_SHA"
+          docker build \
+            --pull=false \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "arthello.release.sha=$GITHUB_SHA" \
+            -f deploy/v52/Dockerfile \
+            -t "$image" \
+            .
+          image_id="$(docker image inspect "$image" --format '{{.Id}}')"
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+          printf 'D066_IMAGE_ID=%s\n' "$image_id" >> "$GITHUB_ENV"
+
+      - name: Verify backup and activate D-066 candidate
+        id: activate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$RUNNER_TEMP/arthello-d066-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          backup_snapshot="$work/backup"
+          mkdir -p "$backup_snapshot"
+          chmod 0700 "$work" "$backup_snapshot"
+          rollback_volume="arthello-d066-rollback-$GITHUB_RUN_ID"
+          rollback_container=""
+          candidate_id=""
+          live_name=""
+          old_image_id=""
+          old_restart_name=""
+          old_restart_max=0
+          candidate_may_mutate=0
+
+          cleanup_on_failure() {
+            status=$?
+            if [ "$status" -eq 0 ]; then return 0; fi
+            set +e
+            printf '::error::D-066 rollout failed; restoring previous production\n'
+            if [ -n "$candidate_id" ]; then docker rm -f "$candidate_id" >/dev/null 2>&1 || true; fi
+            if [ "$candidate_may_mutate" -eq 1 ] && [ -n "$old_image_id" ] && docker volume inspect "$rollback_volume" >/dev/null 2>&1; then
+              docker run --rm --network none --user 0:0 \
+                --mount "type=volume,src=$DATA_VOLUME,dst=/to" \
+                --mount "type=volume,src=$rollback_volume,dst=/from,readonly" \
+                --entrypoint /bin/sh "$old_image_id" -ceu '
+                  find /to -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+                  cd /from
+                  tar -cpf - . | tar -xpf - -C /to
+                ' >/dev/null 2>&1 || true
+            fi
+            if [ -n "$rollback_container" ] && docker inspect "$rollback_container" >/dev/null 2>&1; then
+              if [ -n "$live_name" ]; then docker rename "$rollback_container" "$live_name" >/dev/null 2>&1 || true; fi
+              if [ -n "$live_name" ]; then docker start "$live_name" >/dev/null 2>&1 || true; fi
+              if [ -n "$live_name" ] && [ -n "$old_restart_name" ]; then
+                if [ "$old_restart_name" = on-failure ]; then
+                  docker update --restart="on-failure:$old_restart_max" "$live_name" >/dev/null 2>&1 || true
+                else
+                  docker update --restart="$old_restart_name" "$live_name" >/dev/null 2>&1 || true
+                fi
+              fi
+            fi
+            rm -rf -- "$work"
+            exit "$status"
+          }
+          trap cleanup_on_failure EXIT INT TERM HUP
+
+          mapfile -t live_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
+          test "${#live_ids[@]}" -eq 1
+          live_id="${live_ids[0]}"
+          live_name="$(docker inspect "$live_id" --format '{{.Name}}' | sed 's#^/##')"
+          old_image_id="$(docker inspect "$live_id" --format '{{.Image}}')"
+          old_restart_name="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')"
+          old_restart_max="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
+          test -n "$live_name"
+          [[ "$old_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$live_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+
+          docker inspect "$live_id" > "$work/live.json"
+          python3 - "$work/live.json" "$work/live.env" "$work/run.args" <<'PY'
+          import json, os, sys
+          inspect_path, env_path, args_path = sys.argv[1:]
+          data = json.load(open(inspect_path, encoding="utf-8"))[0]
+          env = data.get("Config", {}).get("Env") or []
+          with open(env_path, "w", encoding="utf-8", newline="\n") as out:
+              for item in env:
+                  if not isinstance(item, str) or "\n" in item or "\r" in item:
+                      raise SystemExit("unsafe environment entry")
+                  out.write(item + "\n")
+          os.chmod(env_path, 0o600)
+          args=[]
+          for mount in data.get("Mounts") or []:
+              typ=mount.get("Type"); dst=mount.get("Destination")
+              if typ not in {"volume","bind"} or not isinstance(dst,str) or not dst or "," in dst or "\n" in dst:
+                  raise SystemExit("unsupported mount")
+              src=mount.get("Name") if typ=="volume" else mount.get("Source")
+              if not isinstance(src,str) or not src or "," in src or "\n" in src:
+                  raise SystemExit("unsafe mount source")
+              spec=f"type={typ},src={src},dst={dst}"
+              if not mount.get("RW",False): spec += ",readonly"
+              args += ["--mount",spec]
+          host=data.get("HostConfig") or {}
+          if host.get("ReadonlyRootfs"): args.append("--read-only")
+          for dst,opts in (host.get("Tmpfs") or {}).items(): args += ["--tmpfs",f"{dst}:{opts}" if opts else dst]
+          user=data.get("Config",{}).get("User") or ""
+          if user: args += ["--user",user]
+          workdir=data.get("Config",{}).get("WorkingDir") or ""
+          if workdir: args += ["--workdir",workdir]
+          networks=list((data.get("NetworkSettings",{}).get("Networks") or {}).keys())
+          if len(networks)!=1 or not networks[0] or "\n" in networks[0]: raise SystemExit("expected one Docker network")
+          args += ["--network",networks[0]]
+          with open(args_path,"wb") as out:
+              for arg in args: out.write(arg.encode("utf-8")+b"\0")
+          PY
+          chmod 0600 "$work/live.json" "$work/run.args"
+          test -s "$work/live.env"
+          test -s "$work/run.args"
+          mapfile -d '' -t run_args < "$work/run.args"
+
+          docker volume create \
+            --label arthello.scope=production-rollback \
+            --label "arthello.release.sha=$GITHUB_SHA" \
+            --label "arthello.rollback.source=$live_name" \
+            "$rollback_volume" >/dev/null
+
+          docker pause "$live_id" >/dev/null
+          backup_ok=0
+          if docker run --rm --network none --user 0:0 \
+            --mount "type=volume,src=$DATA_VOLUME,dst=/from,readonly" \
+            --mount "type=volume,src=$rollback_volume,dst=/to" \
+            --entrypoint /bin/sh "$old_image_id" -ceu 'cd /from && tar -cpf - . | tar -xpf - -C /to'; then
+            backup_ok=1
+          fi
+          docker unpause "$live_id" >/dev/null
+          test "$backup_ok" -eq 1
+
+          docker run --rm --network none --user 0:0 \
+            --mount "type=volume,src=$rollback_volume,dst=/from,readonly" \
+            --entrypoint /bin/sh "$old_image_id" -ceu 'cd /from && tar -cpf - .' \
+            | tar -xpf - -C "$backup_snapshot"
+          python3 deploy/v52/maintenance/production-data-inventory.py "$backup_snapshot"
+          relative_db="$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)"
+          export D066_BACKUP_DB="$backup_snapshot/$relative_db"
+          python3 - <<'PY'
+          import os, sqlite3
+          con=sqlite3.connect(f"file:{os.environ['D066_BACKUP_DB']}?mode=ro", uri=True)
+          try:
+              if con.execute('PRAGMA integrity_check').fetchone()[0] != 'ok': raise SystemExit('backup integrity failed')
+              if con.execute("SELECT COUNT(*) FROM production_auth_credentials WHERE user_id='AUTH-OWNER' AND length(password_hash)>0 AND length(password_salt)>0").fetchone()[0] != 1: raise SystemExit('owner credential missing')
+              owner=con.execute("""SELECT COUNT(*) FROM app_users u JOIN user_system_access g ON g.user_id=u.id AND g.system_id='SYS-ARTHELLO-OS' WHERE u.id='USR-OWNER' AND u.status='Активен' AND u.role='Собственник' AND u.is_administrative=1 AND g.status='Активен' AND g.role='Собственник' AND u.access_version=g.access_version""").fetchone()[0]
+              if owner != 1: raise SystemExit('canonical owner access missing')
+          finally: con.close()
+          print('D066_BACKUP_OWNER_AUTH=VERIFIED')
+          PY
+          printf 'D066_BACKUP=VERIFIED volume=%s\n' "$rollback_volume"
+
+          rollback_container="${live_name}-rollback-d066-${GITHUB_RUN_ID}"
+          docker update --restart=no "$live_id" >/dev/null
+          docker stop --time 30 "$live_id" >/dev/null
+          docker rename "$live_id" "$rollback_container"
+
+          candidate_may_mutate=1
+          docker run -d \
+            --name "$live_name" \
+            --restart=no \
+            --env-file "$work/live.env" \
+            "${run_args[@]}" \
+            --label "arthello.release.sha=$GITHUB_SHA" \
+            --label "arthello.release.kind=d066-tochka-finance-bank" \
+            "$D066_IMAGE_ID" >/dev/null
+          candidate_id="$(docker inspect "$live_name" --format '{{.Id}}')"
+          test -n "$candidate_id"
+          test "$(docker inspect "$live_name" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+
+          ready=0
+          for _ in $(seq 1 60); do
+            status="$(docker exec "$live_name" node -e "fetch('http://127.0.0.1:8081/api/health',{redirect:'error'}).then(r=>process.stdout.write(String(r.status))).catch(()=>process.stdout.write('000'))" 2>/dev/null || true)"
+            if [ "$status" = 200 ]; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+
+          public_ok=0
+          for _ in $(seq 1 30); do
+            root_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/" || true)"
+            auth_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/api/auth/me" || true)"
+            if [ "$root_status" = 200 ] && [ "$auth_status" = 401 ]; then public_ok=1; break; fi
+            sleep 2
+          done
+          test "$public_ok" -eq 1
+
+          if [ "$old_restart_name" = on-failure ]; then
+            docker update --restart="on-failure:$old_restart_max" "$live_name" >/dev/null
+          else
+            docker update --restart="$old_restart_name" "$live_name" >/dev/null
+          fi
+          test "$(docker inspect "$live_name" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$GITHUB_SHA"
+          printf 'D066_RELEASE_ACTIVE=%s\n' "$GITHUB_SHA"
+          printf 'live_name=%s\nrollback_container=%s\nrollback_volume=%s\n' "$live_name" "$rollback_container" "$rollback_volume" >> "$GITHUB_OUTPUT"
+          trap - EXIT INT TERM HUP
+          rm -rf -- "$work"
+
+      - name: Verify production after activation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          live_name='${{ steps.activate.outputs.live_name }}'
+          test -n "$live_name"
+          test "$(docker inspect "$live_name" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$live_name" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$GITHUB_SHA"
+          docker exec "$live_name" node -e "fetch('http://127.0.0.1:8081/api/health',{redirect:'error'}).then(r=>{if(r.status!==200)process.exit(1)}).catch(()=>process.exit(1))"
+          test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/")" = 200
+          test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/api/auth/me")" = 401
+          printf 'D066_PRODUCTION=VERIFIED sha=%s\n' "$GITHUB_SHA"
+
+      - name: Publish rollout summary
+        if: always()
+        run: |
+          {
+            echo '## D-066 Tochka finance production rollout'
+            echo
+            echo "- source: $GITHUB_SHA"
+            echo "- D-066 merge: $EXPECTED_D066_MERGE"
+            echo "- result: ${{ job.status }}"
+            echo "- production: $PUBLIC_URL"
+          } >> "$GITHUB_STEP_SUMMARY"
