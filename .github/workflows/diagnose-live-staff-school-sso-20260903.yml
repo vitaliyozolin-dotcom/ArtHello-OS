@@ -1,0 +1,295 @@
+name: Diagnose live staff School SSO
+
+on:
+  push:
+    branches:
+      - codex/verify-fix-staff-school-sso-20260903
+    paths:
+      - .github/workflows/diagnose-live-staff-school-sso-20260903.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnose-live-staff-school-sso-20260903
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 25
+
+    steps:
+      - name: Audit exact live employee SSO paths on an isolated production-data clone
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec 9>/var/lock/arthello-staff-school-sso-diagnose.lock
+          flock -n 9
+
+          live="$(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}' | head -n1)"
+          test -n "$live"
+          test "$(docker inspect "$live" --format '{{.State.Running}}')" = true
+          image="$(docker inspect "$live" --format '{{.Config.Image}}')"
+          volume="$(docker inspect "$live" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          network="$(docker inspect "$live" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1)"
+          test -n "$image"
+          test -n "$volume"
+          test -n "$network"
+
+          revision="$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true)"
+          printf 'LIVE_ARTHELLO_CONTAINER=%s\n' "$live"
+          printf 'LIVE_ARTHELLO_IMAGE=%s\n' "$image"
+          printf 'LIVE_ARTHELLO_REVISION=%s\n' "${revision:-unknown}"
+
+          popup_count="$(docker exec "$live" sh -lc "grep -RIl --include='*.js' 'window.open' /app/dist/client/assets 2>/dev/null | wc -l" | tr -d '[:space:]')"
+          same_tab_count="$(docker exec "$live" sh -lc "grep -RIl --include='*.js' 'auth/central/start' /app/dist/client/assets 2>/dev/null | xargs -r grep -Il 'location.assign' 2>/dev/null | wc -l" | tr -d '[:space:]')"
+          methodist_count="$(docker exec "$live" sh -lc "grep -RIl --include='*.js' --include='*.mjs' 'methodist' /app/dist/server /app/production 2>/dev/null | wc -l" | tr -d '[:space:]')"
+          printf 'LIVE_DIARY_ENTRY_POPUP_ASSETS=%s\n' "${popup_count:-0}"
+          printf 'LIVE_DIARY_ENTRY_SAME_TAB_ASSETS=%s\n' "${same_tab_count:-0}"
+          printf 'LIVE_SSO_METHODIST_SERVER_FILES=%s\n' "${methodist_count:-0}"
+
+          suffix="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          clone="arthello_staff_sso_diag_${suffix}_data"
+          candidate="arthello-staff-sso-diag-$suffix"
+          sessions_file="$RUNNER_TEMP/arthello-staff-sso-sessions-$suffix.json"
+          clone_created=0
+          candidate_created=0
+          paused=0
+
+          cleanup() {
+            rc=$?
+            set +e
+            rm -f "$sessions_file"
+            if [ "$candidate_created" -eq 1 ]; then docker rm -f "$candidate" >/dev/null 2>&1; fi
+            if [ "$paused" -eq 1 ]; then docker unpause "$live" >/dev/null 2>&1; fi
+            if [ "$clone_created" -eq 1 ]; then docker volume rm "$clone" >/dev/null 2>&1; fi
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          docker volume create \
+            --label arthello.environment=staff-sso-diagnostic \
+            --label arthello.source-run="$GITHUB_RUN_ID" \
+            "$clone" >/dev/null
+          clone_created=1
+
+          docker pause "$live" >/dev/null
+          paused=1
+          docker run --rm --network none --user 0:0 \
+            -v "$volume:/from:ro" \
+            -v "$clone:/to" \
+            --entrypoint sh "$image" \
+            -lc 'cp -a /from/. /to/'
+          docker unpause "$live" >/dev/null
+          paused=0
+
+          docker run --rm --network none --user 0:0 \
+            -v "$clone:/data" \
+            --entrypoint node "$image" --input-type=module > "$sessions_file" <<'NODE'
+          import { createHash, randomBytes } from 'node:crypto';
+          import { readdirSync, statSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+
+          const files=[];
+          function walk(path, depth=0) {
+            if (depth > 8) return;
+            let entries=[];
+            try { entries=readdirSync(path,{withFileTypes:true}); } catch { return; }
+            for (const entry of entries) {
+              const next=join(path,entry.name);
+              if (entry.isDirectory()) walk(next,depth+1);
+              else if (entry.isFile() && /\.sqlite(?:3)?$/i.test(entry.name)) {
+                try { if (statSync(next).size > 8192) files.push(next); } catch {}
+              }
+            }
+          }
+          walk('/data/d1');
+          let db=null;
+          for (const file of files) {
+            try {
+              const candidate=new DatabaseSync(file);
+              const tables=new Set(candidate.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row)=>String(row.name)));
+              if (tables.has('app_users') && tables.has('user_system_access') && tables.has('production_auth_credentials') && tables.has('production_auth_sessions')) {
+                db=candidate;
+                break;
+              }
+              candidate.close();
+            } catch {}
+          }
+          if (!db) throw new Error('ArtHello production D1 not found');
+
+          const rows=db.prepare(`
+            SELECT
+              u.id AS appUserId,
+              u.display_name AS displayName,
+              u.role AS directoryRole,
+              u.status AS userStatus,
+              u.access_version AS userVersion,
+              os.role AS arthelloRole,
+              os.status AS arthelloStatus,
+              os.access_version AS arthelloVersion,
+              school.role AS schoolRole,
+              school.status AS schoolStatus,
+              school.access_version AS schoolVersion,
+              c.user_id AS authUserId
+            FROM app_users u
+            JOIN user_system_access os
+              ON os.user_id=u.id AND os.system_id='SYS-ARTHELLO-OS'
+            JOIN user_system_access school
+              ON school.user_id=u.id AND school.system_id='SYS-SCHOOL-1-11'
+            JOIN production_auth_credentials c
+              ON c.user_id=CASE WHEN u.id='USR-OWNER' THEN 'AUTH-OWNER' ELSE u.id END
+            WHERE u.status='Активен'
+              AND os.status='Активен'
+              AND school.status='Активен'
+            ORDER BY u.display_name, u.id
+          `).all();
+
+          const now=Math.floor(Date.now()/1000);
+          const insert=db.prepare(`INSERT INTO production_auth_sessions
+            (token_hash,user_id,csrf_token,expires_at,access_version,created_at)
+            VALUES (?,?,?,?,?,?)`);
+          const records=[];
+          for (const row of rows) {
+            const token=randomBytes(32).toString('base64url');
+            const csrf=randomBytes(24).toString('base64url');
+            const tokenHash=createHash('sha256').update(token).digest('base64url');
+            insert.run(tokenHash,row.authUserId,csrf,now+900,row.arthelloVersion,now);
+            records.push({...row,token,tokenHash});
+          }
+          db.close();
+          process.stdout.write(JSON.stringify(records));
+          NODE
+
+          test -s "$sessions_file"
+          chmod 600 "$sessions_file"
+
+          docker run -d \
+            --name "$candidate" \
+            --read-only \
+            --tmpfs /tmp \
+            --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
+            --network "$network" \
+            -e NODE_ENV=production \
+            -e PORT=8081 \
+            -e ARTHELLO_D1_PATH=/data/d1 \
+            -e ARTHELLO_BOOTSTRAP_LOGIN=owner \
+            -e ARTHELLO_BOOTSTRAP_PASSWORD='unused-staff-sso-diagnostic' \
+            -v "$clone:/data" \
+            "$image" >/dev/null
+          candidate_created=1
+
+          ready=0
+          for attempt in $(seq 1 60); do
+            if docker exec "$candidate" node -e \
+              "fetch('http://127.0.0.1:8081/api/health').then(async r=>{const t=await r.text();if(!r.ok||!t.includes('\\\"status\\\":\\\"ok\\\"'))process.exit(1)}).catch(()=>process.exit(1))"; then
+              ready=1
+              break
+            fi
+            test "$(docker inspect "$candidate" --format '{{.State.Running}}' 2>/dev/null || true)" = true || break
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs "$candidate" --tail 200 >&2 || true
+            exit 1
+          fi
+
+          docker cp "$sessions_file" "$candidate:/tmp/staff-sessions.json"
+          docker exec -i "$candidate" node --input-type=module <<'VERIFY'
+          import { createHash, randomBytes } from 'node:crypto';
+          import { readFile } from 'node:fs/promises';
+
+          const base='http://127.0.0.1:8081';
+          const schoolOrigin='https://school-188-225-38-55.sslip.io';
+          const records=JSON.parse(await readFile('/tmp/staff-sessions.json','utf8'));
+          const results=[];
+
+          for (const record of records) {
+            const verifier=randomBytes(48).toString('base64url');
+            const challenge=createHash('sha256').update(verifier).digest('base64url');
+            const state=randomBytes(48).toString('base64url');
+            const authorize=new URL('/api/school-sso/authorize',base);
+            authorize.searchParams.set('state',state);
+            authorize.searchParams.set('code_challenge',challenge);
+            authorize.searchParams.set('return_to','/');
+
+            try {
+              const response=await fetch(authorize,{
+                headers:{cookie:`__Host-arthello_session=${record.token}`},
+                redirect:'manual',
+              });
+              const location=response.headers.get('location') || '';
+              if (response.status !== 303) throw new Error(`authorize_http_${response.status}`);
+              if (!location) throw new Error('authorize_location_missing');
+              const redirect=new URL(location);
+              if (redirect.searchParams.get('authError') === 'central_denied') {
+                throw new Error(`central_denied:${redirect.searchParams.get('reason') || 'unknown'}`);
+              }
+              if (redirect.origin !== schoolOrigin || redirect.pathname !== '/auth/central/callback') {
+                throw new Error(`unexpected_callback:${redirect.origin}${redirect.pathname}`);
+              }
+              if (redirect.searchParams.get('state') !== state) throw new Error('state_mismatch');
+              const code=redirect.searchParams.get('code') || '';
+              if (!/^[A-Za-z0-9_-]{40,180}$/.test(code)) throw new Error('authorization_code_missing');
+
+              const exchange=await fetch(base+'/api/school-sso/exchange',{
+                method:'POST',
+                headers:{'content-type':'application/json'},
+                body:JSON.stringify({code,codeVerifier:verifier}),
+              });
+              const payload=await exchange.json().catch(()=>({}));
+              if (!exchange.ok || !payload.ok) throw new Error(`exchange_failed:${payload.error || exchange.status}`);
+              if (payload.identity?.centralUserId !== record.appUserId) throw new Error('identity_mismatch');
+              if (!payload.identity?.role) throw new Error('school_role_missing');
+              if (!Number.isInteger(payload.identity?.accessVersion) || payload.identity.accessVersion < 1) throw new Error('access_version_missing');
+
+              const replay=await fetch(base+'/api/school-sso/exchange',{
+                method:'POST',
+                headers:{'content-type':'application/json'},
+                body:JSON.stringify({code,codeVerifier:verifier}),
+              });
+              if (replay.status !== 401) throw new Error(`replay_http_${replay.status}`);
+
+              results.push({
+                appUserId:record.appUserId,
+                displayName:record.displayName,
+                directoryRole:record.directoryRole,
+                schoolGrantRole:record.schoolRole,
+                resolvedSchoolRole:payload.identity.role,
+                status:'PASS',
+              });
+            } catch (error) {
+              results.push({
+                appUserId:record.appUserId,
+                displayName:record.displayName,
+                directoryRole:record.directoryRole,
+                schoolGrantRole:record.schoolRole,
+                status:'FAIL',
+                reason:error instanceof Error ? error.message.slice(0,220) : 'unknown',
+              });
+            }
+          }
+
+          console.log('STAFF_SSO_RESULTS_BEGIN');
+          console.log(JSON.stringify(results,null,2));
+          console.log('STAFF_SSO_RESULTS_END');
+          const failed=results.filter((item)=>item.status!=='PASS');
+          console.log(`STAFF_SSO_TOTAL=${results.length}`);
+          console.log(`STAFF_SSO_PASS=${results.length-failed.length}`);
+          console.log(`STAFF_SSO_FAIL=${failed.length}`);
+          if (failed.length) process.exit(2);
+          VERIFY
+
+          docker rm -f "$candidate" >/dev/null
+          candidate_created=0
+          docker volume rm "$clone" >/dev/null
+          clone_created=0
+          rm -f "$sessions_file"
+          trap - EXIT
+          printf 'LIVE_STAFF_SCHOOL_SSO_DIAGNOSIS=PASS\n'
