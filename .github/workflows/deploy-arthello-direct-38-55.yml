@@ -1,6 +1,6 @@
 name: Deploy ArtHello self-hosted RU
 
-# D-054 is a one-release delivery of the nested Tochka mobile dialog scroll correction.
+# D-055 is a one-release delivery of the Tochka API TLS trust correction.
 # Production authorization still requires the protected Environment below. The
 # exception is constrained to the successful hosted verification of the exact
 # merged main SHA from the named release branch and repository.
@@ -22,9 +22,9 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/d054-tochka-modal-scroll-20260903
-  EXPECTED_RELEASE_PR: '321'
-  PREVIOUS_RELEASE_SHA: 1038a1960aaf62f57a161d8a16c804161a7f6c53
+  EXPECTED_RELEASE_HEAD: codex/d055-tochka-tls-20260903
+  EXPECTED_RELEASE_PR: '324'
+  PREVIOUS_RELEASE_SHA: c93a066dae1e3cb1cee83b17de6b2624a0f73baa
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -55,8 +55,8 @@ jobs:
       (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/d054-tochka-modal-scroll-20260903' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('321') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/d055-tochka-tls-20260903' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('324') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -71,7 +71,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Verify one-release D-054 trigger and protected Environment
+      - name: Verify one-release D-055 trigger and protected Environment
         timeout-minutes: 4
         env:
           GH_TOKEN: ${{ github.token }}
@@ -290,6 +290,8 @@ jobs:
           test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
           test -s deploy/v52/Dockerfile
           test -s deploy/v52/maintenance/image-runtime-fingerprint.jq
+          test -s deploy/v52/certificates/russian-trusted-root-ca.pem
+          echo 'aa800ef345422d6158c6fafe1c06c429dbda21c3df4bb1ccb45a920ec1111399  deploy/v52/certificates/russian-trusted-root-ca.pem' | sha256sum -c -
           jq -n -f deploy/v52/maintenance/image-runtime-fingerprint.jq >/dev/null
           python3 -m py_compile deploy/v52/maintenance/production-data-inventory.py
           grep -F 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
@@ -304,6 +306,14 @@ jobs:
           grep -F 'SCHOOL_DIARY_ALLOWED_ORIGINS' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem' deploy/v52/Dockerfile >/dev/null
+          node - <<'NODE'
+          const { readFileSync } = require('node:fs');
+          const { X509Certificate } = require('node:crypto');
+          const certificate = new X509Certificate(readFileSync('./deploy/v52/certificates/russian-trusted-root-ca.pem'));
+          const fingerprint = 'D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31';
+          if (certificate.fingerprint256 !== fingerprint || !certificate.ca || certificate.subject !== certificate.issuer || !certificate.checkIssued(certificate) || !certificate.verify(certificate.publicKey) || Date.parse(certificate.validTo) <= Date.now()) process.exit(1);
+          NODE
           if grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
             echo 'Plaintext central access secret binding is forbidden' >&2
             exit 1
@@ -341,6 +351,7 @@ jobs:
           dockerfile_sha256="$(sha256sum deploy/v52/Dockerfile | cut -d ' ' -f 1)"
           runtime_lock_sha256="$(sha256sum deploy/v52/runtime/package-lock.json | cut -d ' ' -f 1)"
           inventory_sha256="$(sha256sum deploy/v52/maintenance/production-data-inventory.py | cut -d ' ' -f 1)"
+          tochka_ca_sha256="$(sha256sum deploy/v52/certificates/russian-trusted-root-ca.pem | cut -d ' ' -f 1)"
           fingerprint_filter_sha256="$(sha256sum deploy/v52/maintenance/image-runtime-fingerprint.jq | cut -d ' ' -f 1)"
           archive_sha256="$(sha256sum "$archive" | cut -d ' ' -f 1)"
           jq -e \
@@ -351,6 +362,7 @@ jobs:
             --arg dockerfile "$dockerfile_sha256" \
             --arg lock "$runtime_lock_sha256" \
             --arg inventory "$inventory_sha256" \
+            --arg tochka_ca "$tochka_ca_sha256" \
             --arg fingerprint_filter "$fingerprint_filter_sha256" \
             --arg archive "$archive_sha256" '
               .repository == $repository and
@@ -361,6 +373,7 @@ jobs:
               .dockerfileSha256 == $dockerfile and
               .runtimeLockSha256 == $lock and
               .inventorySha256 == $inventory and
+              .tochkaCaSha256 == $tochka_ca and
               .fingerprintFilterSha256 == $fingerprint_filter and
               .imageArchiveSha256 == $archive and
               .runnerTrust == "github-hosted-ephemeral" and
@@ -431,6 +444,7 @@ jobs:
           test "$(docker image inspect "$actual_image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$RELEASE_SHA"
           test "$(docker image inspect "$actual_image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$EXPECTED_TREE"
           test "$(docker image inspect "$actual_image_id" --format '{{.Config.User}}')" = node
+          test "$(docker image inspect "$actual_image_id" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fc 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem')" -eq 1
           docker tag "$actual_image_id" "$image"
           test "$(docker image inspect "$image" --format '{{.Id}}')" = "$actual_image_id"
           printf 'image_id=%s\nruntime_fingerprint=%s\n' \
@@ -786,6 +800,7 @@ jobs:
             assert_exact_runtime_env "$configured" SCHOOL_DIARY_SYNC_URL "$SCHOOL_URL"
             assert_exact_runtime_env "$configured" SCHOOL_DIARY_ALLOWED_ORIGINS "$SCHOOL_URL"
             assert_exact_runtime_env "$configured" OPENAI_OCR_MODEL gpt-4.1-mini
+            assert_exact_runtime_env "$configured" NODE_EXTRA_CA_CERTS /app/production/russian-trusted-root-ca.pem
             assert_readonly_secret_mount "$target" /run/secrets/bootstrap-password
             assert_readonly_secret_mount "$target" /run/secrets/integration-credentials-key
             assert_readonly_secret_mount "$target" /run/secrets/central-access-secret
@@ -856,6 +871,32 @@ jobs:
               return 1
             fi
             printf 'ARTHELLO_ACTIVE_D1_FD=VERIFIED role=%s handles=%s\n' "$role" "$expected_handles"
+          }
+
+          probe_tochka_tls_egress() {
+            local target="$1"
+            docker exec -i "$target" node --input-type=module - <<'NODE'
+          import { X509Certificate } from "node:crypto";
+          import { getCACertificates } from "node:tls";
+
+          const expectedRoot = "D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31";
+          const extraRoots = getCACertificates("extra").map((pem) => new X509Certificate(pem));
+          if (!extraRoots.some((certificate) => certificate.fingerprint256 === expectedRoot && certificate.ca && certificate.subject === certificate.issuer && certificate.verify(certificate.publicKey))) {
+            throw new Error("Pinned Tochka trust anchor is not active");
+          }
+
+          const response = await fetch("https://enter.tochka.com/uapi/open-banking/v1.0/customers", {
+            method: "GET",
+            headers: { accept: "application/json" },
+            redirect: "error",
+            signal: AbortSignal.timeout(20_000),
+          });
+          if (response.status < 400 || response.status >= 500) {
+            throw new Error(`Unexpected Tochka unauthenticated response: ${response.status}`);
+          }
+          await response.body?.cancel();
+          console.log(`ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED status=${response.status}`);
+          NODE
           }
 
           cleanup_transient() {
@@ -1611,6 +1652,9 @@ jobs:
           assert_file_only_secret_env "$clone_container"
           wait_local_candidate "$clone_container"
           assert_active_d1_file_descriptors "$clone_container" preflight
+          docker network connect "$network" "$clone_container"
+          probe_tochka_tls_egress "$clone_container"
+          docker network disconnect "$network" "$clone_container"
           docker pause "$clone_container" >/dev/null
           snapshot_volume "$clone_volume" "$work/preflight-after"
           docker unpause "$clone_container" >/dev/null
