@@ -1,6 +1,6 @@
 name: Deploy ArtHello self-hosted RU
 
-# D-049 is a one-release dashboard layout exception to D-040's workflow_dispatch trigger only.
+# D-050 is a one-release owner workspace and integrations exception to D-040's workflow_dispatch trigger only.
 # Production authorization still requires the protected Environment below. The
 # exception is constrained to the successful hosted verification of the exact
 # merged main SHA from the named release branch and repository.
@@ -22,8 +22,8 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/dashboard-clean-drag-layout-20260902
-  EXPECTED_RELEASE_PR: "316"
+  EXPECTED_RELEASE_HEAD: codex/owner-workspace-integrations-20260903
+  EXPECTED_RELEASE_PR: "317"
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -54,8 +54,8 @@ jobs:
       (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/dashboard-clean-drag-layout-20260902' &&
-          github.event.workflow_run.pull_requests[0].number == 316 &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/owner-workspace-integrations-20260903' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('317') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -67,7 +67,7 @@ jobs:
     environment: production-ru
 
     steps:
-      - name: Verify one-release D-049 trigger and protected Environment
+      - name: Verify one-release D-050 trigger and protected Environment
         timeout-minutes: 4
         env:
           GH_TOKEN: ${{ github.token }}
@@ -290,7 +290,15 @@ jobs:
           grep -F 'cf: false' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'INTEGRATION_CREDENTIALS_KEY_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'INTEGRATION_CREDENTIALS_KEY' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          ! grep -F 'CENTRAL_ACCESS_SECRET' deploy/v52/overrides/production/runtime-server.mjs
+          grep -F 'CENTRAL_ACCESS_SECRET_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'OPENAI_API_KEY_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'SCHOOL_PUBLIC_ORIGIN' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'SCHOOL_DIARY_SYNC_URL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'SCHOOL_DIARY_ALLOWED_ORIGINS' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          ! grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs
+          ! grep -E 'OPENAI_API_KEY:[[:space:]]*process\.env\.OPENAI_API_KEY([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs
           printf 'ARTHELLO_CHECKOUT=%s\nARTHELLO_TREE=%s\n' "$RELEASE_SHA" "$EXPECTED_TREE"
 
       - name: Download and load exact hosted-verified image
@@ -421,6 +429,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           umask 077
+          exec 9>>"/var/lock/school-1-11-production.lock"
+          flock -w 900 9
 
           image="arthello-direct:$RELEASE_SHA"
           run_key="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
@@ -436,6 +446,10 @@ jobs:
           secret_dir="$HOME/.config/arthello"
           integration_key_file="$secret_dir/integration-credentials-key"
           bootstrap_file="$secret_dir/bootstrap-password"
+          central_access_secret_file="$secret_dir/central-access-secret"
+          openai_api_key_file="$secret_dir/openai-api-key"
+          tbank_egress_ip_file="$secret_dir/tbank-egress-ip"
+          school_container="school-1-11"
           inventory_script="deploy/v52/maintenance/production-data-inventory.py"
           active_d1_relative_path="$(python3 "$inventory_script" --print-active-database-relative-path)"
           test "$active_d1_relative_path" = "d1/miniflare-D1DatabaseObject/5a499c55f63d6b9f725547d510cf454e288954b6f3c2d5024eb1443f29c97730.sqlite"
@@ -482,17 +496,63 @@ jobs:
             test "$current_main" = "$RELEASE_SHA"
           }
 
+          assert_readonly_secret_mount() {
+            local target="$1" destination="$2"
+            docker inspect "$target" | jq -e --arg destination "$destination" '
+              [.[0].Mounts[]
+                | select(
+                    .Type == "bind" and
+                    .Destination == $destination and
+                    .RW == false
+                  )
+              ] | length == 1
+            ' >/dev/null
+          }
+
+          assert_exact_runtime_env() {
+            local configured="$1" variable="$2" expected="$3" count
+            count="$(awk -F= -v variable="$variable" '$1 == variable { matches += 1 } END { print matches + 0 }' <<<"$configured")"
+            test "$count" -eq 1
+            grep -Fx "$variable=$expected" <<<"$configured" >/dev/null
+          }
+
           assert_file_only_secret_env() {
             local target="$1" configured
             configured="$(docker inspect "$target" --format '{{range .Config.Env}}{{println .}}{{end}}')" || return 1
-            if grep -Eq '^(ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY)=' <<<"$configured"; then
+            if grep -Eq '^(ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY|CENTRAL_ACCESS_SECRET|OPENAI_API_KEY)=' <<<"$configured"; then
               echo 'Plaintext runtime secret found in container configuration' >&2
               return 1
             fi
-            grep -Fx 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE=/run/secrets/bootstrap-password' <<<"$configured" >/dev/null
-            grep -Fx 'INTEGRATION_CREDENTIALS_KEY_FILE=/run/secrets/integration-credentials-key' <<<"$configured" >/dev/null
-            test "$(docker inspect "$target" --format '{{range .Mounts}}{{if eq .Destination "/run/secrets/bootstrap-password"}}{{.RW}}{{end}}{{end}}')" = false
-            test "$(docker inspect "$target" --format '{{range .Mounts}}{{if eq .Destination "/run/secrets/integration-credentials-key"}}{{.RW}}{{end}}{{end}}')" = false
+            assert_exact_runtime_env "$configured" ARTHELLO_BOOTSTRAP_PASSWORD_FILE /run/secrets/bootstrap-password
+            assert_exact_runtime_env "$configured" INTEGRATION_CREDENTIALS_KEY_FILE /run/secrets/integration-credentials-key
+            assert_exact_runtime_env "$configured" CENTRAL_ACCESS_SECRET_FILE /run/secrets/central-access-secret
+            assert_exact_runtime_env "$configured" SCHOOL_PUBLIC_ORIGIN "$SCHOOL_URL"
+            assert_exact_runtime_env "$configured" SCHOOL_DIARY_SYNC_URL "$SCHOOL_URL"
+            assert_exact_runtime_env "$configured" SCHOOL_DIARY_ALLOWED_ORIGINS "$SCHOOL_URL"
+            assert_exact_runtime_env "$configured" OPENAI_OCR_MODEL gpt-4.1-mini
+            assert_readonly_secret_mount "$target" /run/secrets/bootstrap-password
+            assert_readonly_secret_mount "$target" /run/secrets/integration-credentials-key
+            assert_readonly_secret_mount "$target" /run/secrets/central-access-secret
+
+            if [ "$openai_enabled" -eq 1 ]; then
+              assert_exact_runtime_env "$configured" OPENAI_API_KEY_FILE /run/secrets/openai-api-key
+              assert_readonly_secret_mount "$target" /run/secrets/openai-api-key
+            else
+              if grep -Eq '^OPENAI_API_KEY(_FILE)?=' <<<"$configured"; then
+                echo 'OpenAI runtime configuration is present without the protected key file' >&2
+                return 1
+              fi
+              docker inspect "$target" | jq -e '
+                [.[0].Mounts[] | select(.Destination == "/run/secrets/openai-api-key")] | length == 0
+              ' >/dev/null
+            fi
+
+            if [ "$tbank_enabled" -eq 1 ]; then
+              assert_exact_runtime_env "$configured" TBANK_EGRESS_IP "$tbank_egress_ip"
+            elif grep -q '^TBANK_EGRESS_IP=' <<<"$configured"; then
+              echo 'T-Bank runtime configuration is present without the validated egress control file' >&2
+              return 1
+            fi
           }
 
           assert_active_d1_file_descriptors() {
@@ -902,6 +962,113 @@ jobs:
           curl -fsS --max-time 20 "$SCHOOL_URL/api/health" | jq -e '.status == "ok"' >/dev/null
           curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | jq -e '.status == "ok" and .database == "available"' >/dev/null
 
+          test "$(docker inspect "$school_container" --format '{{.State.Running}}')" = true
+          central_access_secret="$(
+            docker inspect "$school_container" | jq -erj '
+              [.[0].Config.Env[] | select(startswith("CENTRAL_ACCESS_SECRET="))]
+              | if length == 1
+                then (.[0] | ltrimstr("CENTRAL_ACCESS_SECRET="))
+                else error("school container must expose exactly one CENTRAL_ACCESS_SECRET")
+                end
+              | select(
+                  (length >= 32 and length <= 4096) and
+                  (test("[[:space:]]") | not)
+                )
+            '
+          )"
+          mask_secret "$central_access_secret"
+          test "${#central_access_secret}" -ge 32
+          test "${#central_access_secret}" -le 4096
+          [[ "$central_access_secret" != *[[:space:]]* ]]
+          atomic_secret_write "$central_access_secret_file" "$central_access_secret"
+          test -f "$central_access_secret_file"
+          test ! -L "$central_access_secret_file"
+          test "$(stat -c '%a' "$central_access_secret_file")" = 444
+
+          openai_enabled=0
+          openai_api_key=""
+          if [ -L "$openai_api_key_file" ]; then
+            echo 'OpenAI key file must not be a symlink' >&2
+            exit 1
+          elif [ -e "$openai_api_key_file" ]; then
+            test -f "$openai_api_key_file"
+            test -r "$openai_api_key_file"
+            test -s "$openai_api_key_file"
+            test "$(stat -c '%s' "$openai_api_key_file")" -ge 20
+            test "$(stat -c '%s' "$openai_api_key_file")" -le 4096
+            openai_api_key="$(
+              python3 - "$openai_api_key_file" <<'PY'
+          import pathlib
+          import sys
+
+          raw = pathlib.Path(sys.argv[1]).read_bytes()
+          if not 20 <= len(raw) <= 4096:
+              raise SystemExit("OpenAI key file has an unsafe length")
+          try:
+              value = raw.decode("ascii")
+          except UnicodeDecodeError as error:
+              raise SystemExit("OpenAI key file must contain ASCII") from error
+          if any(character.isspace() for character in value):
+              raise SystemExit("OpenAI key file must not contain whitespace")
+          if any(ord(character) < 33 or ord(character) > 126 for character in value):
+              raise SystemExit("OpenAI key file contains an unsupported character")
+          print(value, end="")
+          PY
+            )"
+            mask_secret "$openai_api_key"
+            chmod 0444 "$openai_api_key_file"
+            test "$(stat -c '%a' "$openai_api_key_file")" = 444
+            openai_enabled=1
+          fi
+
+          # The public inbound host address is not an egress attestation. T-Bank
+          # receives a value only from this operator-provisioned control file.
+          tbank_enabled=0
+          tbank_egress_ip=""
+          if [ -L "$tbank_egress_ip_file" ]; then
+            echo 'T-Bank egress control file must not be a symlink' >&2
+            exit 1
+          elif [ -e "$tbank_egress_ip_file" ]; then
+            test -f "$tbank_egress_ip_file"
+            test -r "$tbank_egress_ip_file"
+            test -s "$tbank_egress_ip_file"
+            test "$(stat -c '%s' "$tbank_egress_ip_file")" -ge 3
+            test "$(stat -c '%s' "$tbank_egress_ip_file")" -le 45
+            tbank_egress_ip="$(
+              python3 - "$tbank_egress_ip_file" <<'PY'
+          import ipaddress
+          import pathlib
+          import sys
+
+          raw = pathlib.Path(sys.argv[1]).read_bytes()
+          if not 3 <= len(raw) <= 45:
+              raise SystemExit("T-Bank egress IP has an unsafe length")
+          try:
+              value = raw.decode("ascii")
+          except UnicodeDecodeError as error:
+              raise SystemExit("T-Bank egress IP must contain ASCII") from error
+          if not value or any(character.isspace() for character in value):
+              raise SystemExit("T-Bank egress IP must be one literal without whitespace")
+          try:
+              address = ipaddress.ip_address(value)
+          except ValueError as error:
+              raise SystemExit("T-Bank egress IP is invalid") from error
+          if (
+              not address.is_global
+              or address.is_multicast
+              or address.is_unspecified
+              or address.is_loopback
+              or address.is_link_local
+              or address.is_reserved
+              or str(address) != value
+          ):
+              raise SystemExit("T-Bank egress IP must be a canonical global literal")
+          print(value, end="")
+          PY
+            )"
+            tbank_enabled=1
+          fi
+
           mapfile -t live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
           test "${#live_ids[@]}" -eq 1
           live_id="$(docker inspect "${live_ids[0]}" --format '{{.Id}}')"
@@ -1044,20 +1211,76 @@ jobs:
             printf 'ARTHELLO_BOOTSTRAP_LOGIN=owner\n'
             printf 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE=/run/secrets/bootstrap-password\n'
             printf 'INTEGRATION_CREDENTIALS_KEY_FILE=/run/secrets/integration-credentials-key\n'
+            printf 'SCHOOL_PUBLIC_ORIGIN=%s\n' "$SCHOOL_URL"
+            printf 'SCHOOL_DIARY_SYNC_URL=%s\n' "$SCHOOL_URL"
+            printf 'SCHOOL_DIARY_ALLOWED_ORIGINS=%s\n' "$SCHOOL_URL"
+            printf 'CENTRAL_ACCESS_SECRET_FILE=/run/secrets/central-access-secret\n'
+            printf 'OPENAI_OCR_MODEL=gpt-4.1-mini\n'
+            if [ "$openai_enabled" -eq 1 ]; then
+              printf 'OPENAI_API_KEY_FILE=/run/secrets/openai-api-key\n'
+            fi
+            if [ "$tbank_enabled" -eq 1 ]; then
+              printf 'TBANK_EGRESS_IP=%s\n' "$tbank_egress_ip"
+            fi
           } > "$runtime_env"
           chmod 0600 "$runtime_env"
+          runtime_configuration="$(cat "$runtime_env")"
+          if grep -Eq '^(ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY|CENTRAL_ACCESS_SECRET|OPENAI_API_KEY)=' <<<"$runtime_configuration"; then
+            echo 'Plaintext secret found in runtime.env' >&2
+            exit 1
+          fi
+          assert_exact_runtime_env "$runtime_configuration" ARTHELLO_BOOTSTRAP_PASSWORD_FILE /run/secrets/bootstrap-password
+          assert_exact_runtime_env "$runtime_configuration" INTEGRATION_CREDENTIALS_KEY_FILE /run/secrets/integration-credentials-key
+          assert_exact_runtime_env "$runtime_configuration" CENTRAL_ACCESS_SECRET_FILE /run/secrets/central-access-secret
+          assert_exact_runtime_env "$runtime_configuration" SCHOOL_PUBLIC_ORIGIN "$SCHOOL_URL"
+          assert_exact_runtime_env "$runtime_configuration" SCHOOL_DIARY_SYNC_URL "$SCHOOL_URL"
+          assert_exact_runtime_env "$runtime_configuration" SCHOOL_DIARY_ALLOWED_ORIGINS "$SCHOOL_URL"
+          assert_exact_runtime_env "$runtime_configuration" OPENAI_OCR_MODEL gpt-4.1-mini
+          if [ "$openai_enabled" -eq 1 ]; then
+            assert_exact_runtime_env "$runtime_configuration" OPENAI_API_KEY_FILE /run/secrets/openai-api-key
+          elif grep -q '^OPENAI_API_KEY_FILE=' <<<"$runtime_configuration"; then
+            exit 1
+          fi
+          if [ "$tbank_enabled" -eq 1 ]; then
+            assert_exact_runtime_env "$runtime_configuration" TBANK_EGRESS_IP "$tbank_egress_ip"
+          elif grep -q '^TBANK_EGRESS_IP=' <<<"$runtime_configuration"; then
+            exit 1
+          fi
+
+          runtime_secret_mounts=(
+            --mount "type=bind,src=$integration_key_file,dst=/run/secrets/integration-credentials-key,readonly"
+            --mount "type=bind,src=$bootstrap_file,dst=/run/secrets/bootstrap-password,readonly"
+            --mount "type=bind,src=$central_access_secret_file,dst=/run/secrets/central-access-secret,readonly"
+          )
+          if [ "$openai_enabled" -eq 1 ]; then
+            runtime_secret_mounts+=(
+              --mount "type=bind,src=$openai_api_key_file,dst=/run/secrets/openai-api-key,readonly"
+            )
+          fi
 
           docker run --rm \
             --network none \
             --read-only \
-            --mount "type=bind,src=$integration_key_file,dst=/run/secrets/integration-credentials-key,readonly" \
-            --mount "type=bind,src=$bootstrap_file,dst=/run/secrets/bootstrap-password,readonly" \
+            -e ARTHELLO_OPENAI_ENABLED="$openai_enabled" \
+            "${runtime_secret_mounts[@]}" \
             --entrypoint /bin/sh \
             "$image" -ceu '
               test -r /run/secrets/integration-credentials-key
               test "$(wc -c < /run/secrets/integration-credentials-key)" -ge 32
               test -r /run/secrets/bootstrap-password
               test -s /run/secrets/bootstrap-password
+              test -r /run/secrets/central-access-secret
+              test "$(wc -c < /run/secrets/central-access-secret)" -ge 32
+              test "$(wc -c < /run/secrets/central-access-secret)" -le 4096
+              ! grep -q "[[:space:]]" /run/secrets/central-access-secret
+              if [ "$ARTHELLO_OPENAI_ENABLED" -eq 1 ]; then
+                test -r /run/secrets/openai-api-key
+                test "$(wc -c < /run/secrets/openai-api-key)" -ge 20
+                test "$(wc -c < /run/secrets/openai-api-key)" -le 4096
+                ! grep -q "[[:space:]]" /run/secrets/openai-api-key
+              else
+                test ! -e /run/secrets/openai-api-key
+              fi
             '
 
           network="$(docker inspect "$CADDY_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1)"
@@ -1070,8 +1293,7 @@ jobs:
             --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
             --network none \
             --env-file "$runtime_env" \
-            --mount "type=bind,src=$integration_key_file,dst=/run/secrets/integration-credentials-key,readonly" \
-            --mount "type=bind,src=$bootstrap_file,dst=/run/secrets/bootstrap-password,readonly" \
+            "${runtime_secret_mounts[@]}" \
             -v "$clone_volume:/data" \
             "$image" >/dev/null
           assert_file_only_secret_env "$clone_container"
@@ -1126,8 +1348,7 @@ jobs:
             --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
             --network "$network" \
             --env-file "$runtime_env" \
-            --mount "type=bind,src=$integration_key_file,dst=/run/secrets/integration-credentials-key,readonly" \
-            --mount "type=bind,src=$bootstrap_file,dst=/run/secrets/bootstrap-password,readonly" \
+            "${runtime_secret_mounts[@]}" \
             --label "arthello.release.sha=$RELEASE_SHA" \
             --label "arthello.release.tree=$EXPECTED_TREE" \
             --label "arthello.release.run=$GITHUB_RUN_ID" \

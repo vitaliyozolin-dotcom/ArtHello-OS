@@ -50,7 +50,7 @@ jobs:
 
           # D-040: a pull-request head is verified only on an ephemeral hosted
           # runner and receives neither a production Environment nor a secret.
-          # D-049 makes a one-release dashboard layout exception only for the production trigger;
+          # D-050 makes a one-release owner workspace and integrations exception only for the production trigger;
           # the self-hosted job still consumes merged, exact-SHA gated main code.
           ruby -ryaml -e '
             document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
@@ -74,15 +74,15 @@ jobs:
             raise "production must use its dedicated self-hosted runner" unless runners.include?("self-hosted") && runners.include?("arthello-gateway")
             raise "production Environment is mandatory" unless deploy.fetch("environment") == "production-ru"
             deployment_env = document.fetch("env")
-            raise "release branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/dashboard-clean-drag-layout-20260902"
-            raise "release PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR") == "316"
+            raise "release branch env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_HEAD") == "codex/owner-workspace-integrations-20260903"
+            raise "release PR env pin missing" unless deployment_env.fetch("EXPECTED_RELEASE_PR") == "317"
             condition = deploy.fetch("if")
             [
               "workflow_run", "vitaliyozolin-dotcom/ArtHello-OS",
               "Verify ArtHello v52 release", ".github/workflows/verify-arthello-v52.yml",
               "head_branch == '\''main'\''", "conclusion == '\''success'\''",
-              "codex/dashboard-clean-drag-layout-20260902", "vitaliyozolin-dotcom",
-              "number == 316",
+              "codex/owner-workspace-integrations-20260903", "vitaliyozolin-dotcom",
+              "number == fromJSON('\''317'\'')",
               "pull_requests[1] == null", "github.run_attempt == 1"
             ].each do |required|
               raise "missing production authorization condition" unless condition.include?(required)
@@ -92,8 +92,8 @@ jobs:
             raise "exact checkout is missing" unless checkout_index
             before_checkout = steps.take(checkout_index).map { |step| step["run"].to_s }.join("\n")
             raise "Docker use before authorization/CI gate" if before_checkout.match?(/(^|\s)docker(\s|$)/)
-            raise "D-049 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
-            raise "D-049 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
+            raise "D-050 release branch gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_HEAD")
+            raise "D-050 release PR gate missing before checkout" unless before_checkout.include?("EXPECTED_RELEASE_PR") && before_checkout.include?(".number == $expected_pr")
             raise "triggering verification run is not pinned" unless before_checkout.include?("TRIGGER_VERIFY_RUN_ID")
             raise "triggering verification attempt is not pinned" unless before_checkout.include?(".run_attempt == 1")
             raise "release SHA is not pinned before checkout" unless before_checkout.include?("RELEASE_SHA")
@@ -119,6 +119,65 @@ jobs:
             raise "D1 descriptor scanner must stay non-root" unless fd_gate.include?(%q{test "$scanner_uid" -ne 0})
             raise "D1 descriptor scanner must match PID 1 UID" unless fd_gate.include?(%q{test "$scanner_uid" = "$pid_one_uid"})
             raise "D1 descriptor rejection diagnostics missing" unless fd_gate.include?("ARTHELLO_ACTIVE_D1_FD=REJECTED")
+            raise "school deployment lock is missing" unless source.include?(%q{exec 9>>"/var/lock/school-1-11-production.lock"}) && source.include?("flock -w 900 9")
+            raise "canonical school container is not pinned" unless source.include?(%q{school_container="school-1-11"})
+            school_running_guard = source.lines.any? { |line| line.include?("$school_container") && line.include?(".State.Running") }
+            raise "running school container guard is missing" unless school_running_guard
+            raise "school secret extraction is not exact" unless source.include?(%q{select(startswith("CENTRAL_ACCESS_SECRET="))}) && source.include?(%q{ltrimstr("CENTRAL_ACCESS_SECRET=")}) && source.include?("length == 1")
+            extraction = source.index(%q{central_access_secret="$(})
+            masking = source.index(%q{mask_secret "$central_access_secret"}, extraction || 0)
+            persistence = source.index(%q{atomic_secret_write "$central_access_secret_file"}, extraction || 0)
+            raise "school secret must be masked before persistence" unless extraction && masking && persistence && extraction < masking && masking < persistence
+            raise "central access secret file contract missing" unless source.include?("CENTRAL_ACCESS_SECRET_FILE=/run/secrets/central-access-secret")
+            openai_start = source.index("openai_enabled=0")
+            tbank_start = source.index("tbank_enabled=0", openai_start || 0)
+            raise "optional OpenAI policy block missing" unless openai_start && tbank_start && tbank_start > openai_start
+            openai_policy = source[openai_start...tbank_start]
+            [
+              %q{if [ -L "$openai_api_key_file" ]}, %q{elif [ -e "$openai_api_key_file" ]},
+              %q{test -f "$openai_api_key_file"}, %q{test -r "$openai_api_key_file"},
+              %q{test -s "$openai_api_key_file"}, "stat -c",
+              "20 <= len(raw) <= 4096",
+              "character.isspace()", "openai_enabled=1"
+            ].each do |required|
+              raise "optional OpenAI key validation missing: #{required}" unless openai_policy.include?(required)
+            end
+            raise "OpenAI key must be pre-provisioned, not created by deployment" if source.include?(%q{atomic_secret_write "$openai_api_key_file"})
+            raise "OpenAI key must not come from GitHub secrets" if source.include?("secrets.OPENAI")
+            raise "OpenAI file binding is missing" unless source.include?("OPENAI_API_KEY_FILE=/run/secrets/openai-api-key")
+            raise "OpenAI model allowlist pin missing" unless source.include?("OPENAI_OCR_MODEL=gpt-4.1-mini")
+            runtime_env_start = source.index(%q{runtime_env="$work/runtime.env"}, tbank_start || 0)
+            raise "optional T-Bank policy block missing" unless tbank_start && runtime_env_start && runtime_env_start > tbank_start
+            tbank_policy = source[tbank_start...runtime_env_start]
+            [
+              %q{if [ -L "$tbank_egress_ip_file" ]}, %q{elif [ -e "$tbank_egress_ip_file" ]},
+              %q{test -f "$tbank_egress_ip_file"}, %q{test -r "$tbank_egress_ip_file"},
+              %q{test -s "$tbank_egress_ip_file"}, "stat -c",
+              "3 <= len(raw) <= 45", "ipaddress.ip_address(value)",
+              "address.is_global", "address.is_multicast", %q{str(address) != value}, "tbank_enabled=1"
+            ].each do |required|
+              raise "optional T-Bank egress validation missing: #{required}" unless tbank_policy.include?(required)
+            end
+            raise "T-Bank egress must not be inferred from the inbound host" if tbank_policy.include?("hostname -I") || tbank_policy.include?("188.225.38.55")
+            raise "T-Bank egress control file must be pre-provisioned" if source.include?(%q{atomic_secret_write "$tbank_egress_ip_file"})
+            raise "T-Bank egress must come only from its control file" unless source.include?(%q{tbank_egress_ip_file="$secret_dir/tbank-egress-ip"}) && source.include?("TBANK_EGRESS_IP=%s")
+            mount_lines = source.lines.grep(/--mount/)
+            raise "T-Bank egress control file must never be mounted" if mount_lines.any? { |line| line.include?("tbank_egress_ip_file") }
+            raise "shared secret mount array must be used by exactly three Docker starts" unless source.scan(%q{"${runtime_secret_mounts[@]}"}).length == 3
+            raise "strict plaintext secret assertion missing" unless source.include?("ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY|CENTRAL_ACCESS_SECRET|OPENAI_API_KEY")
+            [
+              "SCHOOL_PUBLIC_ORIGIN=%s", "SCHOOL_DIARY_SYNC_URL=%s",
+              "SCHOOL_DIARY_ALLOWED_ORIGINS=%s"
+            ].each do |variable|
+              line = source.lines.find { |candidate| candidate.include?(variable) && candidate.include?("printf") }
+              raise "school runtime origin policy missing: #{variable}" unless line && line.include?("$SCHOOL_URL")
+            end
+            [
+              "CENTRAL_ACCESS_SECRET_FILE=/run/secrets/central-access-secret",
+              "OPENAI_OCR_MODEL=gpt-4.1-mini"
+            ].each do |required|
+              raise "required runtime environment policy missing: #{required}" unless source.include?(required)
+            end
           ' .github/workflows/deploy-arthello-direct-38-55.yml
           printf 'ARTHELLO_V52_SOURCE_SHA=%s\n' "$EXPECTED_SHA"
 
@@ -134,7 +193,15 @@ jobs:
           grep -F 'cf: false' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'INTEGRATION_CREDENTIALS_KEY_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'INTEGRATION_CREDENTIALS_KEY' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          ! grep -F 'CENTRAL_ACCESS_SECRET' deploy/v52/overrides/production/runtime-server.mjs
+          grep -F 'CENTRAL_ACCESS_SECRET_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'OPENAI_API_KEY_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'SCHOOL_PUBLIC_ORIGIN' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'SCHOOL_DIARY_SYNC_URL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'SCHOOL_DIARY_ALLOWED_ORIGINS' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          ! grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs
+          ! grep -E 'OPENAI_API_KEY:[[:space:]]*process\.env\.OPENAI_API_KEY([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs
           grep -F 'd1Databases: { DB: "arthello-production" }' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           test -s deploy/v52/Dockerfile
           test -s deploy/v52/runtime/package.json
@@ -192,13 +259,15 @@ jobs:
           container="arthello-v52-verify-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           key_file="$(mktemp)"
           bootstrap_file="$(mktemp)"
+          central_file="$(mktemp)"
+          openai_file="$(mktemp)"
           missing_key_log="$(mktemp)"
           cleanup() {
             rc=$?
             trap - EXIT INT TERM HUP
             docker rm -f "$container" >/dev/null 2>&1 || true
             docker volume rm -f "$volume" >/dev/null 2>&1 || true
-            rm -f "$key_file" "$bootstrap_file" "$missing_key_log"
+            rm -f "$key_file" "$bootstrap_file" "$central_file" "$openai_file" "$missing_key_log"
             exit "$rc"
           }
           trap cleanup EXIT INT TERM HUP
@@ -212,12 +281,17 @@ jobs:
 
           integration_key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48), end="")')"
           bootstrap_password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24), end="")')"
+          central_access_secret="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48), end="")')"
+          openai_api_key="sk-ci-$(python3 -c 'import secrets; print(secrets.token_urlsafe(36), end="")')"
           echo "::add-mask::$integration_key"
           echo "::add-mask::$bootstrap_password"
+          echo "::add-mask::$central_access_secret"
+          echo "::add-mask::$openai_api_key"
           printf '%s' "$integration_key" > "$key_file"
           printf '%s' "$bootstrap_password" > "$bootstrap_file"
-          chmod 0444 "$key_file"
-          chmod 0444 "$bootstrap_file"
+          printf '%s' "$central_access_secret" > "$central_file"
+          printf '%s' "$openai_api_key" > "$openai_file"
+          chmod 0444 "$key_file" "$bootstrap_file" "$central_file" "$openai_file"
           docker volume create --label arthello.scope=ci-v52 "$volume" >/dev/null
           docker run -d \
             --name "$container" \
@@ -233,20 +307,56 @@ jobs:
             -e ARTHELLO_BOOTSTRAP_LOGIN=owner \
             -e ARTHELLO_BOOTSTRAP_PASSWORD_FILE=/run/secrets/bootstrap-password \
             -e INTEGRATION_CREDENTIALS_KEY_FILE=/run/secrets/integration-credentials-key \
+            -e SCHOOL_PUBLIC_ORIGIN=https://school.verify.arthello.invalid \
+            -e SCHOOL_DIARY_SYNC_URL=https://school.verify.arthello.invalid \
+            -e SCHOOL_DIARY_ALLOWED_ORIGINS=https://school.verify.arthello.invalid \
+            -e CENTRAL_ACCESS_SECRET_FILE=/run/secrets/central-access-secret \
+            -e OPENAI_API_KEY_FILE=/run/secrets/openai-api-key \
+            -e OPENAI_OCR_MODEL=gpt-4.1-mini \
+            -e TBANK_EGRESS_IP=8.8.8.8 \
             --mount "type=bind,src=$key_file,dst=/run/secrets/integration-credentials-key,readonly" \
             --mount "type=bind,src=$bootstrap_file,dst=/run/secrets/bootstrap-password,readonly" \
+            --mount "type=bind,src=$central_file,dst=/run/secrets/central-access-secret,readonly" \
+            --mount "type=bind,src=$openai_file,dst=/run/secrets/openai-api-key,readonly" \
             -v "$volume:/data" \
             "$IMAGE" >/dev/null
 
           configured="$(docker inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}')"
-          if grep -Eq '^(ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY)=' <<<"$configured"; then
+          if grep -Eq '^(ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY|CENTRAL_ACCESS_SECRET|OPENAI_API_KEY)=' <<<"$configured"; then
             echo 'Plaintext runtime secret found in container configuration' >&2
             exit 1
           fi
-          grep -Fx 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE=/run/secrets/bootstrap-password' <<<"$configured" >/dev/null
-          grep -Fx 'INTEGRATION_CREDENTIALS_KEY_FILE=/run/secrets/integration-credentials-key' <<<"$configured" >/dev/null
-          test "$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/run/secrets/bootstrap-password"}}{{.RW}}{{end}}{{end}}')" = false
-          test "$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/run/secrets/integration-credentials-key"}}{{.RW}}{{end}}{{end}}')" = false
+          assert_exact_ci_env() {
+            local variable="$1" expected="$2" count
+            count="$(awk -F= -v variable="$variable" '$1 == variable { matches += 1 } END { print matches + 0 }' <<<"$configured")"
+            test "$count" -eq 1
+            grep -Fx "$variable=$expected" <<<"$configured" >/dev/null
+          }
+          assert_exact_ci_env ARTHELLO_BOOTSTRAP_PASSWORD_FILE /run/secrets/bootstrap-password
+          assert_exact_ci_env INTEGRATION_CREDENTIALS_KEY_FILE /run/secrets/integration-credentials-key
+          assert_exact_ci_env SCHOOL_PUBLIC_ORIGIN https://school.verify.arthello.invalid
+          assert_exact_ci_env SCHOOL_DIARY_SYNC_URL https://school.verify.arthello.invalid
+          assert_exact_ci_env SCHOOL_DIARY_ALLOWED_ORIGINS https://school.verify.arthello.invalid
+          assert_exact_ci_env CENTRAL_ACCESS_SECRET_FILE /run/secrets/central-access-secret
+          assert_exact_ci_env OPENAI_API_KEY_FILE /run/secrets/openai-api-key
+          assert_exact_ci_env OPENAI_OCR_MODEL gpt-4.1-mini
+          assert_exact_ci_env TBANK_EGRESS_IP 8.8.8.8
+          for secret_destination in \
+            /run/secrets/bootstrap-password \
+            /run/secrets/integration-credentials-key \
+            /run/secrets/central-access-secret \
+            /run/secrets/openai-api-key
+          do
+            docker inspect "$container" | jq -e --arg destination "$secret_destination" '
+              [.[0].Mounts[]
+                | select(
+                    .Type == "bind" and
+                    .Destination == $destination and
+                    .RW == false
+                  )
+              ] | length == 1
+            ' >/dev/null
+          done
 
           ready=0
           for attempt in $(seq 1 90); do
