@@ -23,7 +23,6 @@ jobs:
       github.triggering_actor == 'vitaliyozolin-dotcom'
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 10
-    environment: production-ru
     steps:
       - name: Inspect ArtHello production without mutation
         shell: bash
