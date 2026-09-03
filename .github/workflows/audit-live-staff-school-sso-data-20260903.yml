@@ -1,0 +1,115 @@
+name: Audit live staff School SSO data
+
+on:
+  push:
+    branches:
+      - codex/verify-fix-staff-school-sso-20260903
+    paths:
+      - .github/workflows/audit-live-staff-school-sso-data-20260903.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-live-staff-school-sso-data-20260903
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 12
+
+    steps:
+      - name: Read live staff grants and SSO-compatible credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec 9>/var/lock/arthello-staff-school-sso-audit.lock
+          flock -n 9
+
+          live="$(docker ps --filter 'name=^/arthello-direct-' --format '{{.Names}}' | head -n1)"
+          test -n "$live"
+          image="$(docker inspect "$live" --format '{{.Config.Image}}')"
+          volume="$(docker inspect "$live" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')"
+          test -n "$image"
+          test -n "$volume"
+          printf 'AUDIT_LIVE=%s\nAUDIT_IMAGE=%s\nAUDIT_VOLUME=%s\n' "$live" "$image" "$volume"
+
+          docker run --rm --network none --user 0:0 \
+            -v "$volume:/data:ro" \
+            --entrypoint node "$image" --input-type=module <<'NODE'
+          import { readdirSync, statSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+
+          const files=[];
+          function walk(path, depth=0) {
+            if (depth > 8) return;
+            let entries=[];
+            try { entries=readdirSync(path,{withFileTypes:true}); } catch { return; }
+            for (const entry of entries) {
+              const next=join(path,entry.name);
+              if (entry.isDirectory()) walk(next,depth+1);
+              else if (entry.isFile() && /\.sqlite(?:3)?$/i.test(entry.name)) {
+                try { if (statSync(next).size > 8192) files.push(next); } catch {}
+              }
+            }
+          }
+          walk('/data/d1');
+          let db=null;
+          let selected='';
+          for (const file of files) {
+            try {
+              const candidate=new DatabaseSync(file,{readOnly:true});
+              const tables=new Set(candidate.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row)=>String(row.name)));
+              if (tables.has('app_users') && tables.has('user_system_access') && tables.has('production_auth_credentials')) {
+                db=candidate;
+                selected=file;
+                break;
+              }
+              candidate.close();
+            } catch {}
+          }
+          if (!db) throw new Error(`ArtHello D1 not found; scanned=${files.length}`);
+          console.log(`AUDIT_DB=${selected.replace(/[^/]+\.sqlite(?:3)?$/i,'[DB].sqlite')}`);
+          const sessionColumns=db.prepare('PRAGMA table_info(production_auth_sessions)').all().map((row)=>({name:row.name,type:row.type,notnull:row.notnull,pk:row.pk}));
+          console.log('AUTH_SESSION_COLUMNS='+JSON.stringify(sessionColumns));
+          const rows=db.prepare(`
+            SELECT
+              u.id AS appUserId,
+              u.display_name AS displayName,
+              u.role AS directoryRole,
+              u.status AS userStatus,
+              u.access_version AS userVersion,
+              os.role AS arthelloRole,
+              os.status AS arthelloStatus,
+              os.access_version AS arthelloVersion,
+              school.role AS schoolRole,
+              school.status AS schoolStatus,
+              school.access_version AS schoolVersion,
+              CASE WHEN c.user_id IS NULL THEN 0 ELSE 1 END AS hasCredential,
+              COALESCE(c.must_change_password,0) AS mustChangePassword
+            FROM app_users u
+            LEFT JOIN user_system_access os
+              ON os.user_id=u.id AND os.system_id='SYS-ARTHELLO-OS'
+            LEFT JOIN user_system_access school
+              ON school.user_id=u.id AND school.system_id='SYS-SCHOOL-1-11'
+            LEFT JOIN production_auth_credentials c
+              ON c.user_id=CASE WHEN u.id='USR-OWNER' THEN 'AUTH-OWNER' ELSE u.id END
+            ORDER BY u.display_name, u.id
+          `).all();
+          console.log('STAFF_ACCESS_ROWS_BEGIN');
+          console.log(JSON.stringify(rows,null,2));
+          console.log('STAFF_ACCESS_ROWS_END');
+          const eligible=rows.filter((row)=>row.userStatus==='Активен'&&row.arthelloStatus==='Активен'&&row.schoolStatus==='Активен'&&row.hasCredential===1);
+          console.log(`STAFF_ACCESS_TOTAL=${rows.length}`);
+          console.log(`STAFF_ACCESS_ELIGIBLE=${eligible.length}`);
+          console.log(`STAFF_ACCESS_NATALIA=${rows.filter((row)=>/натал/i.test(String(row.displayName))).length}`);
+          db.close();
+          NODE
+
+          printf 'LIVE_STAFF_SCHOOL_SSO_DATA_AUDIT=PASS\n'
