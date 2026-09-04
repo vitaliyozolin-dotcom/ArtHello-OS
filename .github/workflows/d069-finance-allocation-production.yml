@@ -17,7 +17,7 @@ concurrency:
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
   EXPECTED_HOTFIX_MERGE: 1acf9564981343c527e56a18ef337f823f50fab2
-  EXPECTED_ROLLOUT_PR: '343'
+  EXPECTED_ROLLOUT_PR: '344'
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   DATA_VOLUME: arthello-direct-v44-data
 
@@ -74,9 +74,18 @@ jobs:
           grep -q 'cashflow_article' deploy/v52/overrides/scripts/patch-finance-operation-allocation.mjs
           grep -q 'accrual_period' deploy/v52/overrides/scripts/patch-finance-operation-allocation.mjs
           grep -Fq 'if (operation) openOperation(operation);' deploy/v52/overrides/scripts/patch-finance-operation-allocation.mjs
-          node --check deploy/v52/overrides/scripts/patch-finance-operation-allocation.mjs
-          node --check deploy/v52/overrides/tests/finance-operation-allocation.test.mjs
-          node --test deploy/v52/overrides/tests/finance-operation-allocation.test.mjs
+          test -d "$GITHUB_WORKSPACE"
+          [[ "$GITHUB_WORKSPACE" != *','* ]]
+          mapfile -t runtime_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
+          test "${#runtime_ids[@]}" -eq 1
+          runtime_image="$(docker inspect "${runtime_ids[0]}" --format '{{.Image}}')"
+          [[ "$runtime_image" =~ ^sha256:[a-f0-9]{64}$ ]]
+          node_in_runtime=(docker run --rm --network none --user 0:0
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/source,readonly"
+            --workdir /source --entrypoint node "$runtime_image")
+          "${node_in_runtime[@]}" --check deploy/v52/overrides/scripts/patch-finance-operation-allocation.mjs
+          "${node_in_runtime[@]}" --check deploy/v52/overrides/tests/finance-operation-allocation.test.mjs
+          "${node_in_runtime[@]}" --test deploy/v52/overrides/tests/finance-operation-allocation.test.mjs
           bash -n .github/scripts/d069-hotfix-rollout.sh
 
           pr_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
@@ -92,7 +101,7 @@ jobs:
               .merged == true and
               .merge_commit_sha == $sha and
               .base.ref == "main" and
-              .head.ref == "codex/d069-hotfix-production-rollout-20260904" and
+              .head.ref == "codex/d069-rollout-runner-node-20260904" and
               .head.repo.full_name == "vitaliyozolin-dotcom/ArtHello-OS" and
               .user.login == "vitaliyozolin-dotcom"
             ' <<<"$pr_json" >/dev/null
