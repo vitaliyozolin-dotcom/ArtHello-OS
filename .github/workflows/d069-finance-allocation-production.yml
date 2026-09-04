@@ -1,4 +1,4 @@
-name: D069 finance allocation production rollout
+name: D069 allocation hotfix production rollout
 
 on:
   push:
@@ -16,13 +16,13 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_D069_MERGE: 3135fd181610b838b0abb120ff191e3156edb5f0
-  EXPECTED_ROLLOUT_PR: '341'
+  EXPECTED_HOTFIX_MERGE: 1acf9564981343c527e56a18ef337f823f50fab2
+  EXPECTED_ROLLOUT_PR: '343'
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   DATA_VOLUME: arthello-direct-v44-data
 
 jobs:
-  deploy-d069:
+  deploy-d069-hotfix:
     if: >-
       github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
       github.ref == 'refs/heads/main' &&
@@ -44,7 +44,7 @@ jobs:
           fetch-depth: 6
           persist-credentials: false
 
-      - name: Verify D-069 provenance and rollout boundary
+      - name: Verify D-069 hotfix provenance and rollout boundary
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -55,13 +55,14 @@ jobs:
           test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
           test "$GITHUB_RUN_ATTEMPT" = 1
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$EXPECTED_D069_MERGE" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_HOTFIX_MERGE" =~ ^[a-f0-9]{40}$ ]]
           [[ "$EXPECTED_ROLLOUT_PR" =~ ^[0-9]+$ ]]
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          git merge-base --is-ancestor "$EXPECTED_D069_MERGE" HEAD
-          mapfile -t changed < <(git diff --name-only "$EXPECTED_D069_MERGE" HEAD)
-          test "${#changed[@]}" -eq 1
-          test "${changed[0]}" = .github/workflows/d069-finance-allocation-production.yml
+          git merge-base --is-ancestor "$EXPECTED_HOTFIX_MERGE" HEAD
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_HOTFIX_MERGE" HEAD)
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = .github/scripts/d069-hotfix-rollout.sh
+          test "${changed[1]}" = .github/workflows/d069-finance-allocation-production.yml
 
           test -f deploy/v52/overrides/scripts/patch-finance-operation-allocation.mjs
           test -f deploy/v52/overrides/scripts/patch-finance-operation-allocation-css-scope.mjs
@@ -72,6 +73,11 @@ jobs:
           grep -q 'classifyOperation' deploy/v52/overrides/scripts/patch-finance-operation-allocation.mjs
           grep -q 'cashflow_article' deploy/v52/overrides/scripts/patch-finance-operation-allocation.mjs
           grep -q 'accrual_period' deploy/v52/overrides/scripts/patch-finance-operation-allocation.mjs
+          grep -Fq 'if (operation) openOperation(operation);' deploy/v52/overrides/scripts/patch-finance-operation-allocation.mjs
+          node --check deploy/v52/overrides/scripts/patch-finance-operation-allocation.mjs
+          node --check deploy/v52/overrides/tests/finance-operation-allocation.test.mjs
+          node --test deploy/v52/overrides/tests/finance-operation-allocation.test.mjs
+          bash -n .github/scripts/d069-hotfix-rollout.sh
 
           pr_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
             --header "Authorization: Bearer $GH_TOKEN" \
@@ -86,11 +92,11 @@ jobs:
               .merged == true and
               .merge_commit_sha == $sha and
               .base.ref == "main" and
-              .head.ref == "codex/d069-production-rollout-20260904" and
+              .head.ref == "codex/d069-hotfix-production-rollout-20260904" and
               .head.repo.full_name == "vitaliyozolin-dotcom/ArtHello-OS" and
               .user.login == "vitaliyozolin-dotcom"
             ' <<<"$pr_json" >/dev/null
-          printf 'D069_PROVENANCE=VERIFIED\n'
+          printf 'D069_HOTFIX_PROVENANCE=VERIFIED\n'
 
       - name: Prove healthy production before mutation
         shell: bash
@@ -106,11 +112,11 @@ jobs:
           test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/api/auth/me")" = 401
           printf 'D069_PREVIOUS_PRODUCTION=HEALTHY\n'
 
-      - name: Build immutable D-069 candidate
+      - name: Build immutable D-069 hotfix candidate
         shell: bash
         run: |
           set -Eeuo pipefail
-          image="arthello-d069-finance-allocation:$GITHUB_SHA"
+          image="arthello-d069-allocation-hotfix:$GITHUB_SHA"
           docker build \
             --pull=false \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
@@ -123,294 +129,19 @@ jobs:
           test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
           printf 'D069_IMAGE_ID=%s\n' "$image_id" >> "$GITHUB_ENV"
 
-      - name: Verify backup and activate D-069 candidate
+      - name: Verify backup and activate D-069 hotfix candidate
         id: activate
         shell: bash
-        run: |
-          set -Eeuo pipefail
-          work="$RUNNER_TEMP/arthello-d069-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          backup_snapshot="$work/backup"
-          mkdir -p "$backup_snapshot"
-          chmod 0700 "$work" "$backup_snapshot"
-          rollback_volume="arthello-d069-rollback-$GITHUB_RUN_ID"
-          rollback_container=""
-          candidate_id=""
-          live_name=""
-          old_image_id=""
-          old_restart_name=""
-          old_restart_max=0
-          candidate_may_mutate=0
-
-          cleanup_on_failure() {
-            status=$?
-            if [ "$status" -eq 0 ]; then return 0; fi
-            set +e
-            printf '::error::D-069 rollout failed; restoring previous production\n'
-            if [ -n "$candidate_id" ]; then docker rm -f "$candidate_id" >/dev/null 2>&1 || true; fi
-            if [ "$candidate_may_mutate" -eq 1 ] && [ -n "$old_image_id" ] && docker volume inspect "$rollback_volume" >/dev/null 2>&1; then
-              docker run --rm --network none --user 0:0 \
-                --mount "type=volume,src=$DATA_VOLUME,dst=/to" \
-                --mount "type=volume,src=$rollback_volume,dst=/from,readonly" \
-                --entrypoint /bin/sh "$old_image_id" -ceu '
-                  find /to -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-                  cd /from
-                  tar -cpf - . | tar -xpf - -C /to
-                ' >/dev/null 2>&1 || true
-            fi
-            if [ -n "$rollback_container" ] && docker inspect "$rollback_container" >/dev/null 2>&1; then
-              if [ -n "$live_name" ]; then docker rename "$rollback_container" "$live_name" >/dev/null 2>&1 || true; fi
-              if [ -n "$live_name" ]; then docker start "$live_name" >/dev/null 2>&1 || true; fi
-              if [ -n "$live_name" ] && [ -n "$old_restart_name" ]; then
-                if [ "$old_restart_name" = on-failure ]; then
-                  docker update --restart="on-failure:$old_restart_max" "$live_name" >/dev/null 2>&1 || true
-                else
-                  docker update --restart="$old_restart_name" "$live_name" >/dev/null 2>&1 || true
-                fi
-              fi
-            fi
-            rm -rf -- "$work"
-            exit "$status"
-          }
-          trap cleanup_on_failure EXIT INT TERM HUP
-
-          mapfile -t live_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
-          test "${#live_ids[@]}" -eq 1
-          live_id="${live_ids[0]}"
-          live_name="$(docker inspect "$live_id" --format '{{.Name}}' | sed 's#^/##')"
-          old_image_id="$(docker inspect "$live_id" --format '{{.Image}}')"
-          old_restart_name="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')"
-          old_restart_max="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
-          test -n "$live_name"
-          [[ "$old_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
-          test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
-          test "$(docker inspect "$live_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
-
-          docker inspect "$live_id" > "$work/live.json"
-          python3 - "$work/live.json" "$work/live.env" "$work/run.args" <<'PY'
-          import json, os, sys
-          inspect_path, env_path, args_path = sys.argv[1:]
-          data = json.load(open(inspect_path, encoding="utf-8"))[0]
-          env = data.get("Config", {}).get("Env") or []
-          with open(env_path, "w", encoding="utf-8", newline="\n") as out:
-              for item in env:
-                  if not isinstance(item, str) or "\n" in item or "\r" in item:
-                      raise SystemExit("unsafe environment entry")
-                  out.write(item + "\n")
-          os.chmod(env_path, 0o600)
-          args=[]
-          for mount in data.get("Mounts") or []:
-              typ=mount.get("Type"); dst=mount.get("Destination")
-              if typ not in {"volume","bind"} or not isinstance(dst,str) or not dst or "," in dst or "\n" in dst:
-                  raise SystemExit("unsupported mount")
-              src=mount.get("Name") if typ=="volume" else mount.get("Source")
-              if not isinstance(src,str) or not src or "," in src or "\n" in src:
-                  raise SystemExit("unsafe mount source")
-              spec=f"type={typ},src={src},dst={dst}"
-              if not mount.get("RW",False): spec += ",readonly"
-              args += ["--mount",spec]
-          host=data.get("HostConfig") or {}
-          if host.get("ReadonlyRootfs"): args.append("--read-only")
-          for dst,opts in (host.get("Tmpfs") or {}).items(): args += ["--tmpfs",f"{dst}:{opts}" if opts else dst]
-          user=data.get("Config",{}).get("User") or ""
-          if user: args += ["--user",user]
-          workdir=data.get("Config",{}).get("WorkingDir") or ""
-          if workdir: args += ["--workdir",workdir]
-          networks=list((data.get("NetworkSettings",{}).get("Networks") or {}).keys())
-          if len(networks)!=1 or not networks[0] or "\n" in networks[0]: raise SystemExit("expected one Docker network")
-          args += ["--network",networks[0]]
-          with open(args_path,"wb") as out:
-              for arg in args: out.write(arg.encode("utf-8")+b"\0")
-          PY
-          chmod 0600 "$work/live.json" "$work/run.args"
-          test -s "$work/live.env"
-          test -s "$work/run.args"
-          mapfile -d '' -t run_args < "$work/run.args"
-
-          docker volume create \
-            --label arthello.scope=production-rollback \
-            --label "arthello.release.sha=$GITHUB_SHA" \
-            --label "arthello.rollback.source=$live_name" \
-            "$rollback_volume" >/dev/null
-
-          docker pause "$live_id" >/dev/null
-          backup_ok=0
-          if docker run --rm --network none --user 0:0 \
-            --mount "type=volume,src=$DATA_VOLUME,dst=/from,readonly" \
-            --mount "type=volume,src=$rollback_volume,dst=/to" \
-            --entrypoint /bin/sh "$old_image_id" -ceu 'cd /from && tar -cpf - . | tar -xpf - -C /to'; then
-            backup_ok=1
-          fi
-          docker unpause "$live_id" >/dev/null
-          test "$backup_ok" -eq 1
-
-          docker run --rm --network none --user 0:0 \
-            --mount "type=volume,src=$rollback_volume,dst=/from,readonly" \
-            --entrypoint /bin/sh "$old_image_id" -ceu 'cd /from && tar -cpf - .' \
-            | tar -xpf - -C "$backup_snapshot"
-          python3 deploy/v52/maintenance/production-data-inventory.py "$backup_snapshot"
-          relative_db="$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)"
-          export D069_BACKUP_DB="$backup_snapshot/$relative_db"
-          data_fingerprint="$(python3 - <<'PY'
-          import hashlib, os, sqlite3
-          con=sqlite3.connect(f"file:{os.environ['D069_BACKUP_DB']}?mode=ro", uri=True)
-          tables=[
-              "production_auth_credentials",
-              "bank_accounts",
-              "bank_statement_imports",
-              "bank_transactions",
-              "financial_operations",
-          ]
-          try:
-              if con.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                  raise SystemExit("backup integrity failed")
-              if con.execute("SELECT COUNT(*) FROM production_auth_credentials WHERE user_id='AUTH-OWNER' AND length(password_hash)>0 AND length(password_salt)>0").fetchone()[0] != 1:
-                  raise SystemExit("owner credential missing")
-              owner=con.execute("""SELECT COUNT(*) FROM app_users u JOIN user_system_access g ON g.user_id=u.id AND g.system_id='SYS-ARTHELLO-OS' WHERE u.id='USR-OWNER' AND u.status='Активен' AND u.role='Собственник' AND u.is_administrative=1 AND g.status='Активен' AND g.role='Собственник' AND u.access_version=g.access_version""").fetchone()[0]
-              if owner != 1:
-                  raise SystemExit("canonical owner access missing")
-              counts=[]
-              for table in tables:
-                  present=con.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()[0]
-                  if present != 1:
-                      raise SystemExit(f"required table missing: {table}")
-                  counts.append(f"{table}:{con.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]}")
-              credential_count=con.execute("SELECT COUNT(*) FROM system_runtime_state WHERE state_key LIKE 'integration_credential:v2:%'").fetchone()[0]
-              counts.append(f"integration_credentials:{credential_count}")
-              print(hashlib.sha256("|".join(counts).encode()).hexdigest())
-          finally:
-              con.close()
-          PY
-          )"
-          [[ "$data_fingerprint" =~ ^[a-f0-9]{64}$ ]]
-          printf 'D069_BACKUP_OWNER_AUTH=VERIFIED\n'
-          printf 'D069_BACKUP=VERIFIED volume=%s\n' "$rollback_volume"
-
-          rollback_container="${live_name}-rollback-d069-${GITHUB_RUN_ID}"
-          docker update --restart=no "$live_id" >/dev/null
-          docker stop --time 30 "$live_id" >/dev/null
-          docker rename "$live_id" "$rollback_container"
-
-          candidate_may_mutate=1
-          docker run -d \
-            --name "$live_name" \
-            --restart=no \
-            --env-file "$work/live.env" \
-            "${run_args[@]}" \
-            --label "arthello.release.sha=$GITHUB_SHA" \
-            --label "arthello.release.kind=d069-finance-allocation" \
-            "$D069_IMAGE_ID" >/dev/null
-          candidate_id="$(docker inspect "$live_name" --format '{{.Id}}')"
-          test -n "$candidate_id"
-          test "$(docker inspect "$live_name" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
-
-          ready=0
-          for _ in $(seq 1 60); do
-            status="$(docker exec "$live_name" node -e "fetch('http://127.0.0.1:8081/api/health',{redirect:'error'}).then(r=>process.stdout.write(String(r.status))).catch(()=>process.stdout.write('000'))" 2>/dev/null || true)"
-            if [ "$status" = 200 ]; then ready=1; break; fi
-            sleep 2
-          done
-          test "$ready" -eq 1
-
-          public_ok=0
-          for _ in $(seq 1 30); do
-            root_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/" || true)"
-            auth_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/api/auth/me" || true)"
-            if [ "$root_status" = 200 ] && [ "$auth_status" = 401 ]; then public_ok=1; break; fi
-            sleep 2
-          done
-          test "$public_ok" -eq 1
-
-          post_snapshot="$work/post"
-          mkdir -p "$post_snapshot"
-          chmod 0700 "$post_snapshot"
-          docker pause "$live_name" >/dev/null
-          post_copy_ok=0
-          if docker run --rm --network none --user 0:0 \
-            --mount "type=volume,src=$DATA_VOLUME,dst=/from,readonly" \
-            --entrypoint /bin/sh "$D069_IMAGE_ID" -ceu 'cd /from && tar -cpf - .' \
-            | tar -xpf - -C "$post_snapshot"; then
-            post_copy_ok=1
-          fi
-          docker unpause "$live_name" >/dev/null
-          test "$post_copy_ok" -eq 1
-          python3 deploy/v52/maintenance/production-data-inventory.py "$post_snapshot"
-          relative_post_db="$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)"
-          export D069_POST_DB="$post_snapshot/$relative_post_db"
-          post_fingerprint="$(python3 - <<'PY'
-          import hashlib, os, sqlite3
-          con=sqlite3.connect(f"file:{os.environ['D069_POST_DB']}?mode=ro", uri=True)
-          tables=[
-              "production_auth_credentials",
-              "bank_accounts",
-              "bank_statement_imports",
-              "bank_transactions",
-              "financial_operations",
-          ]
-          required_columns={
-              "cashflow_article",
-              "pnl_article",
-              "accrual_period",
-              "counterparty_label",
-              "management_purpose",
-          }
-          try:
-              if con.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                  raise SystemExit("post-release integrity failed")
-              columns={row[1] for row in con.execute("PRAGMA table_info(financial_operations)")}
-              missing=required_columns-columns
-              if missing:
-                  raise SystemExit("D-069 columns missing: " + ",".join(sorted(missing)))
-              if con.execute("SELECT COUNT(*) FROM production_auth_credentials WHERE user_id='AUTH-OWNER' AND length(password_hash)>0 AND length(password_salt)>0").fetchone()[0] != 1:
-                  raise SystemExit("owner credential missing after release")
-              owner=con.execute("""SELECT COUNT(*) FROM app_users u JOIN user_system_access g ON g.user_id=u.id AND g.system_id='SYS-ARTHELLO-OS' WHERE u.id='USR-OWNER' AND u.status='Активен' AND u.role='Собственник' AND u.is_administrative=1 AND g.status='Активен' AND g.role='Собственник' AND u.access_version=g.access_version""").fetchone()[0]
-              if owner != 1:
-                  raise SystemExit("canonical owner access missing after release")
-              counts=[]
-              for table in tables:
-                  counts.append(f"{table}:{con.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]}")
-              credential_count=con.execute("SELECT COUNT(*) FROM system_runtime_state WHERE state_key LIKE 'integration_credential:v2:%'").fetchone()[0]
-              counts.append(f"integration_credentials:{credential_count}")
-              print(hashlib.sha256("|".join(counts).encode()).hexdigest())
-          finally:
-              con.close()
-          PY
-          )"
-          test "$post_fingerprint" = "$data_fingerprint"
-          printf 'D069_SCHEMA_AND_DATA=VERIFIED\n'
-
-          if [ "$old_restart_name" = on-failure ]; then
-            docker update --restart="on-failure:$old_restart_max" "$live_name" >/dev/null
-          else
-            docker update --restart="$old_restart_name" "$live_name" >/dev/null
-          fi
-          test "$(docker inspect "$live_name" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$GITHUB_SHA"
-          printf 'D069_RELEASE_ACTIVE=%s\n' "$GITHUB_SHA"
-          printf 'live_name=%s\nrollback_container=%s\nrollback_volume=%s\ndata_fingerprint=%s\n' \
-            "$live_name" "$rollback_container" "$rollback_volume" "$data_fingerprint" >> "$GITHUB_OUTPUT"
-          trap - EXIT INT TERM HUP
-          rm -rf -- "$work"
-
-      - name: Verify production after activation
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          live_name='${{ steps.activate.outputs.live_name }}'
-          test -n "$live_name"
-          test "$(docker inspect "$live_name" --format '{{.State.Running}}')" = true
-          test "$(docker inspect "$live_name" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$GITHUB_SHA"
-          docker exec "$live_name" node -e "fetch('http://127.0.0.1:8081/api/health',{redirect:'error'}).then(r=>{if(r.status!==200)process.exit(1)}).catch(()=>process.exit(1))"
-          test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/")" = 200
-          test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/api/auth/me")" = 401
-          printf 'D069_PRODUCTION=VERIFIED sha=%s\n' "$GITHUB_SHA"
+        run: bash .github/scripts/d069-hotfix-rollout.sh
 
       - name: Publish rollout summary
         if: always()
         run: |
           {
-            echo '## D-069 finance allocation production rollout'
+            echo '## D-069 allocation hotfix production rollout'
             echo
             echo "- source: $GITHUB_SHA"
-            echo "- D-069 merge: $EXPECTED_D069_MERGE"
+            echo "- hotfix merge: $EXPECTED_HOTFIX_MERGE"
             echo "- result: ${{ job.status }}"
             echo "- production: $PUBLIC_URL"
           } >> "$GITHUB_STEP_SUMMARY"
