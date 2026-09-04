@@ -15,8 +15,10 @@ backup_snapshot="$work/backup"
 rollback_volume="arthello-d069-hotfix-rollback-$GITHUB_RUN_ID"
 rollback_container=""
 candidate_id=""
+candidate_name=""
 live_id=""
 live_name=""
+network_name=""
 old_image_id=""
 old_restart_name=""
 old_restart_max=0
@@ -24,6 +26,7 @@ live_paused=0
 old_stopped=0
 old_renamed=0
 candidate_may_mutate=0
+restore_data_on_failure=1
 backup_verified=0
 data_fingerprint=""
 
@@ -129,19 +132,41 @@ try:
     if setup.get("secretStatus") != "stored" or not setup.get("customerCode"):
         raise SystemExit("stored Tochka credential binding missing")
 
-    for table in (
+    required_tables = {
         "production_auth_credentials",
         "integration_connections",
+        "system_runtime_state",
         "bank_accounts",
         "bank_statement_imports",
         "bank_transactions",
         "financial_operations",
+        "finance_accruals",
+        "finance_budgets",
+        "finance_forecast_items",
+        "finance_payroll_summary",
+        "finance_corrections",
+        "finance_reconciliation_issues",
+    }
+    user_tables = [row[0] for row in connection.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    )]
+    missing_tables = required_tables - set(user_tables)
+    if missing_tables:
+        raise SystemExit("required data tables missing: " + ",".join(sorted(missing_tables)))
+    for schema_row in connection.execute(
+        "SELECT type,name,tbl_name,COALESCE(sql,'') FROM sqlite_master "
+        "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
     ):
+        for value in schema_row:
+            add(value)
+    for table in user_tables:
         hash_rows(table)
-    credential_rows = hash_rows(
-        "system_runtime_state",
-        "state_key='integration_setup:INT-T-TOCHKA' OR state_key LIKE 'integration_credential:v2:INT-T-TOCHKA:%'",
-    )
+    credential_rows = connection.execute(
+        "SELECT COUNT(*) FROM system_runtime_state "
+        "WHERE state_key='integration_setup:INT-T-TOCHKA' "
+        "OR state_key LIKE 'integration_credential:v2:INT-T-TOCHKA:%'"
+    ).fetchone()[0]
     if credential_rows < 2:
         raise SystemExit("Tochka setup or encrypted credential envelope missing")
     print(digest.hexdigest())
@@ -195,7 +220,7 @@ public_ready() {
 }
 
 cleanup_on_failure() {
-  local original_status=$?
+  local original_status="${1:-1}"
   if [ "$original_status" -eq 0 ]; then return 0; fi
   trap - EXIT INT TERM HUP
   set +e
@@ -214,19 +239,19 @@ cleanup_on_failure() {
     old_renamed=1
   fi
 
-  if [ "$old_renamed" -eq 1 ] && [ -n "$live_name" ] && docker inspect "$live_name" >/dev/null 2>&1; then
-    if ! docker rm -f "$live_name" >/dev/null 2>&1; then
+  if [ -n "$candidate_id" ] && docker inspect "$candidate_id" >/dev/null 2>&1; then
+    if ! docker rm -f "$candidate_id" >/dev/null 2>&1; then
       candidate_quiesced=0
       rollback_failed=1
     fi
-  elif [ -n "$candidate_id" ] && docker inspect "$candidate_id" >/dev/null 2>&1; then
-    if ! docker rm -f "$candidate_id" >/dev/null 2>&1; then
+  elif [ -n "$candidate_name" ] && docker inspect "$candidate_name" >/dev/null 2>&1; then
+    if ! docker rm -f "$candidate_name" >/dev/null 2>&1; then
       candidate_quiesced=0
       rollback_failed=1
     fi
   fi
 
-  if [ "$candidate_may_mutate" -eq 1 ]; then
+  if [ "$candidate_may_mutate" -eq 1 ] && [ "$restore_data_on_failure" -eq 1 ]; then
     data_safe_to_start=0
     if [ "$backup_verified" -ne 1 ] || [ "$candidate_quiesced" -ne 1 ]; then
       rollback_failed=1
@@ -268,6 +293,11 @@ cleanup_on_failure() {
       if [ "$restored_image_id" != "$old_image_id" ]; then
         rollback_failed=1
       else
+        if [ -n "$network_name" ] \
+          && ! docker inspect "$live_name" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' 2>/dev/null \
+            | grep -Fxq "$network_name"; then
+          docker network connect "$network_name" "$live_name" >/dev/null 2>&1 || rollback_failed=1
+        fi
         if [ "$(docker inspect "$live_name" --format '{{.State.Running}}' 2>/dev/null)" != true ]; then
           docker start "$live_name" >/dev/null 2>&1 || rollback_failed=1
         fi
@@ -294,7 +324,15 @@ cleanup_on_failure() {
   if [ "$rollback_failed" -ne 0 ]; then exit 97; fi
   exit "$original_status"
 }
-trap cleanup_on_failure EXIT INT TERM HUP
+
+handle_signal() {
+  exit "$1"
+}
+
+trap 'cleanup_on_failure $?' EXIT
+trap 'handle_signal 130' INT
+trap 'handle_signal 143' TERM
+trap 'handle_signal 129' HUP
 
 mapfile -t live_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
 test "${#live_ids[@]}" -eq 1
@@ -309,12 +347,12 @@ test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
 test "$(docker inspect "$live_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
 
 docker inspect "$live_id" > "$work/live.json"
-python3 - "$work/live.json" "$work/live.env" "$work/run.args" <<'PY'
+python3 - "$work/live.json" "$work/live.env" "$work/run.args" "$work/network.name" <<'PY'
 import json
 import os
 import sys
 
-inspect_path, env_path, args_path = sys.argv[1:]
+inspect_path, env_path, args_path, network_path = sys.argv[1:]
 data = json.load(open(inspect_path, encoding="utf-8"))[0]
 environment = data.get("Config", {}).get("Env") or []
 with open(env_path, "w", encoding="utf-8", newline="\n") as output:
@@ -353,14 +391,20 @@ networks = list((data.get("NetworkSettings", {}).get("Networks") or {}).keys())
 if len(networks) != 1 or not networks[0] or "\n" in networks[0]:
     raise SystemExit("expected one Docker network")
 arguments += ["--network", networks[0]]
+with open(network_path, "w", encoding="utf-8", newline="\n") as output:
+    output.write(networks[0] + "\n")
+os.chmod(network_path, 0o600)
 with open(args_path, "wb") as output:
     for argument in arguments:
         output.write(argument.encode("utf-8") + b"\0")
 PY
-chmod 0600 "$work/live.json" "$work/run.args"
+chmod 0600 "$work/live.json" "$work/run.args" "$work/network.name"
 test -s "$work/live.env"
 test -s "$work/run.args"
+test -s "$work/network.name"
 mapfile -d '' -t run_args < "$work/run.args"
+IFS= read -r network_name < "$work/network.name"
+test -n "$network_name"
 
 docker volume create \
   --label arthello.scope=production-rollback \
@@ -368,6 +412,11 @@ docker volume create \
   --label "arthello.rollback.source=$live_name" \
   "$rollback_volume" >/dev/null
 
+docker update --restart=no "$live_id" >/dev/null
+docker network disconnect "$network_name" "$live_id"
+# Drain any mutation that was already in flight before the network write fence.
+# The longest application-side bank request is capped at 45 seconds.
+sleep 55
 docker pause "$live_id" >/dev/null
 live_paused=1
 backup_ok=0
@@ -377,8 +426,6 @@ if docker run --rm --network none --user 0:0 \
   --entrypoint /bin/sh "$old_image_id" -ceu 'cd /from && tar -cpf - . | tar -xpf - -C /to'; then
   backup_ok=1
 fi
-docker unpause "$live_id" >/dev/null
-live_paused=0
 test "$backup_ok" -eq 1
 
 snapshot_volume "$old_image_id" "$rollback_volume" "$backup_snapshot"
@@ -389,15 +436,17 @@ backup_verified=1
 printf 'D069_HOTFIX_BACKUP=VERIFIED volume=%s\n' "$rollback_volume"
 
 rollback_container="${live_name}-rollback-d069-hotfix-${GITHUB_RUN_ID}"
-docker update --restart=no "$live_id" >/dev/null
-docker stop --time 30 "$live_id" >/dev/null
-old_stopped=1
 docker rename "$live_id" "$rollback_container"
 old_renamed=1
+docker unpause "$live_id" >/dev/null
+live_paused=0
+docker stop --time 30 "$live_id" >/dev/null
+old_stopped=1
 
 candidate_may_mutate=1
+candidate_name="${live_name}-candidate-d069-hotfix-${GITHUB_RUN_ID}"
 candidate_id="$(docker run -d \
-  --name "$live_name" \
+  --name "$candidate_name" \
   --restart=no \
   --env-file "$work/live.env" \
   "${run_args[@]}" \
@@ -405,24 +454,29 @@ candidate_id="$(docker run -d \
   --label "arthello.release.kind=d069-allocation-hotfix" \
   "$D069_IMAGE_ID")"
 test -n "$candidate_id"
-test "$(docker inspect "$live_name" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
-internal_ready "$live_name"
-public_ready
+test "$(docker inspect "$candidate_name" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+internal_ready "$candidate_name"
 
 post_snapshot="$work/post"
-docker pause "$live_name" >/dev/null
+docker pause "$candidate_name" >/dev/null
 post_copy_ok=0
 if snapshot_volume "$D069_IMAGE_ID" "$DATA_VOLUME" "$post_snapshot"; then
   post_copy_ok=1
 fi
-docker unpause "$live_name" >/dev/null
+docker unpause "$candidate_name" >/dev/null
 test "$post_copy_ok" -eq 1
 relative_post_db="$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)"
 post_fingerprint="$(fingerprint_database "$post_snapshot/$relative_post_db")"
 test "$post_fingerprint" = "$data_fingerprint"
 printf 'D069_HOTFIX_SCHEMA_DATA_CREDENTIAL=VERIFIED\n'
 
-restore_restart_policy "$live_name"
+restore_data_on_failure=0
+restore_restart_policy "$candidate_name"
+test "$(docker inspect "$candidate_name" --format '{{.State.Running}}')" = true
+test "$(docker inspect "$candidate_name" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$GITHUB_SHA"
+internal_ready "$candidate_name"
+docker rename "$candidate_name" "$live_name"
+candidate_name="$live_name"
 test "$(docker inspect "$live_name" --format '{{.State.Running}}')" = true
 test "$(docker inspect "$live_name" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$GITHUB_SHA"
 internal_ready "$live_name"
