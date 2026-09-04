@@ -153,6 +153,125 @@ SCOPED_MUTABLE_COLUMNS = {
     "system_runtime_state": {"state_value", "updated_at"},
 }
 
+# ``ensureOperatingIntegrationCatalog`` in the pinned production release
+# refreshes these catalog-owned fields on every integration action, for every
+# known connection. A refresh is legitimate only when the resulting values are
+# the release's canonical constants; all other columns remain protected by the
+# before/after comparison below.
+CATALOG_COLUMNS = (
+    "system",
+    "category",
+    "target_module",
+    "owner_entity_id",
+    "source_of_truth",
+    "mode",
+    "impact",
+    "adapter_version",
+)
+CATALOG_REFRESH_COLUMNS = {*CATALOG_COLUMNS, "updated_at"}
+PINNED_INTEGRATION_CATALOG = {
+    "INT-T-D1": (
+        "ArtHello OS D1", "Внутренняя платформа", "Все модули", "ROLE:OWNER",
+        "ArtHello OS D1", "Binding · read/write",
+        "Критичное: без D1 недоступны рабочие записи", "d1-core@1",
+    ),
+    "INT-T-ALFACRM": (
+        "AlfaCRM", "CRM", "Продажи · Клиенты · Обучение", "ROLE:SALES",
+        "AlfaCRM", "API · входящие и исходящие изменения",
+        "Высокое: лиды, семьи, договоры и статусы не синхронизируются автоматически",
+        "alfacrm@1",
+    ),
+    "INT-T-FORMS": (
+        "Формы сайта", "Маркетинг", "Продажи", "ROLE:MARKETING",
+        "Формы сайта ArtHello", "Webhook · входящие заявки",
+        "Высокое: заявки сайта не попадают в воронку автоматически", "web-forms@1",
+    ),
+    "INT-T-PHONE": (
+        "Телефония", "Коммуникации", "Продажи", "ROLE:SALES",
+        "Выбранный оператор телефонии", "Webhook · звонки и записи контактов",
+        "Среднее: звонки приходится фиксировать вручную", "telephony@1",
+    ),
+    "INT-T-WHATSAPP": (
+        "WhatsApp", "Коммуникации", "Продажи · Клиенты", "ROLE:SALES",
+        "WhatsApp Business API", "Webhook · обращения и статусы сообщений",
+        "Высокое: обращения WhatsApp не создают лиды автоматически", "whatsapp@1",
+    ),
+    "INT-T-TG": (
+        "Telegram", "Коммуникации", "Продажи · Клиенты · Задачи", "ROLE:SALES",
+        "Telegram Bot API", "Webhook · обращения и уведомления",
+        "Среднее: обращения Telegram остаются вне единой истории", "telegram@1",
+    ),
+    "INT-T-VK": (
+        "VK", "Маркетинг", "Продажи · Контент", "ROLE:MARKETING",
+        "VK API · Lead Ads и сообщения", "API / webhook · лиды, сообщения и UTM",
+        "Среднее: лиды VK и сообщения не связаны с воронкой", "vk@1",
+    ),
+    "INT-T-YANDEX": (
+        "Яндекс", "Маркетинг", "Продажи · Контент", "ROLE:MARKETING",
+        "Яндекс Директ · Метрика · Формы", "API · кампании, формы, расходы и UTM",
+        "Среднее: стоимость лида и first-click не подтверждаются Яндексом", "yandex@1",
+    ),
+    "INT-T-MAIL": (
+        "Email и рассылки", "Коммуникации", "Продажи · Клиенты · Контент", "ROLE:MARKETING",
+        "Выбранный почтовый сервис", "API · письма, ответы и статусы доставки",
+        "Среднее: письма и ответы не входят в историю клиента", "mailing@1",
+    ),
+    "INT-T-ADS": (
+        "Рекламные кабинеты", "Маркетинг", "Продажи · Контент", "ROLE:MARKETING",
+        "Рекламные платформы", "API · расходы, кампании и креативы",
+        "Среднее: ROMI и стоимость лида не подтверждаются платформами", "ads@1",
+    ),
+    "INT-T-SOCIAL": (
+        "Социальные сети", "Контент", "Контент · Продажи", "ROLE:MARKETING",
+        "Социальные платформы", "API · публикации, метрики и переходы",
+        "Среднее: контент не связывается с кликами, лидами и выручкой", "social@1",
+    ),
+    "INT-T-TOCHKA": (
+        "Банк Точка", "Банк", "Финансы", "ROLE:OWNER",
+        "Официальный интерфейс Банка Точка",
+        "Только чтение · счета, остатки, выписки и проведённые операции",
+        "Критичное: без синхронизации новые банковские операции не попадут в реестр финансов",
+        "bank-tochka-readonly@2",
+    ),
+    "INT-T-TBANK": (
+        "Т‑Банк", "Банк", "Финансы", "ROLE:OWNER",
+        "Официальный интерфейс Т‑Банка для бизнеса",
+        "Прямое подключение · только чтение счетов и короткой выписки",
+        "Критичное: доступ можно проверить, но операции не импортируются и платежи не создаются",
+        "tbank-h2h-readonly@1",
+    ),
+    "INT-T-DIARY": (
+        "Электронный дневник", "Образование", "Обучение", "ROLE:METHODIST",
+        "ArtHello School 1–11", "API · расписание, оценки и посещаемость",
+        "Высокое: учебные данные не синхронизируются с основной системой", "diary@1",
+    ),
+    "INT-T-EDO": (
+        "ЭДО", "Документы", "Бухгалтерия · Юрист", "ROLE:ACCOUNTING",
+        "Выбранный оператор ЭДО", "API · документы и подписи",
+        "Высокое: подписи и первичные документы подтверждаются вручную", "edo@1",
+    ),
+    "INT-T-1C": (
+        "1С", "Учёт", "Бухгалтерия", "ROLE:ACCOUNTING", "1С",
+        "Контролируемый импорт и экспорт",
+        "Высокое: данные не передаются в 1С автоматически", "1c@1",
+    ),
+    "INT-T-ACS": (
+        "СКУД", "Безопасность", "Безопасность", "ROLE:SAFETY",
+        "Контроллеры СКУД", "API · события доступа",
+        "Критичное: события доступа не поступают в систему", "acs@1",
+    ),
+    "INT-T-CAM": (
+        "Камеры", "Безопасность", "Безопасность", "ROLE:SAFETY", "VMS объектов",
+        "События без хранения видеопотока",
+        "Среднее: события камер не поступают в систему", "cameras@1",
+    ),
+    "INT-T-OPENAI-IMAGES": (
+        "OpenAI Images", "Контент", "Контент · Студия", "ROLE:MARKETING",
+        "OpenAI Images API", "API · генерация и редактирование",
+        "Среднее: генерация изображений недоступна без отдельного ключа", "openai-images@1",
+    ),
+}
+
 CHECK_NAMES = (
     "after_integrity",
     "after_foreign_keys",
@@ -392,8 +511,6 @@ def mutable_scope(
 ) -> tuple[str, tuple[Any, ...]] | None:
     if table == "production_auth_credentials" and "user_id" in columns:
         return 'b."user_id" IS ?', ("AUTH-OWNER",)
-    if table == "integration_connections" and "id" in columns:
-        return 'b."id" IS ?', (connection_id,)
     if table == "bank_accounts" and "connection_id" in columns:
         return 'b."connection_id" IS ?', (connection_id,)
     if table == "bank_statement_imports" and {
@@ -406,6 +523,49 @@ def mutable_scope(
     if table == "system_runtime_state" and "state_key" in columns:
         return 'b."state_key" IS ?', (f"integration_setup:{connection_id}",)
     return None
+
+
+def integration_connection_content_changes(
+    connection: sqlite3.Connection,
+    primary_key: list[str],
+    connection_id: str,
+) -> int:
+    """Validate the catalog-wide refresh performed by every integration action."""
+
+    columns = [str(row[1]) for row in table_info(connection, "baseline", "integration_connections")]
+    required = {"id", *CATALOG_COLUMNS}
+    if primary_key != ["id"] or not required.issubset(columns):
+        return 1
+
+    selected = ",".join(quote_identifier(column) for column in columns)
+    before_rows = list(connection.execute(f"SELECT {selected} FROM baseline.integration_connections"))
+    after_rows = {
+        str(row["id"]): row
+        for row in connection.execute(f"SELECT {selected} FROM main.integration_connections")
+    }
+    changed = 0
+    import_mutable = SCOPED_MUTABLE_COLUMNS["integration_connections"]
+    for before in before_rows:
+        row_id = str(before["id"])
+        after = after_rows.get(row_id)
+        if after is None:
+            continue  # Missing rows are reported by the primary-key preservation check.
+        mutable: set[str] = set()
+        if row_id in PINNED_INTEGRATION_CATALOG:
+            mutable.update(CATALOG_REFRESH_COLUMNS)
+        if row_id == connection_id:
+            mutable.update(import_mutable)
+        immutable_changed = any(
+            before[column] != after[column] for column in columns if column not in mutable
+        )
+        canonical = PINNED_INTEGRATION_CATALOG.get(row_id)
+        canonical_mismatch = canonical is not None and any(
+            after[column] != expected
+            for column, expected in zip(CATALOG_COLUMNS, canonical)
+        )
+        if immutable_changed or canonical_mismatch:
+            changed += 1
+    return changed
 
 
 def setup_state_content_changed(
@@ -501,6 +661,9 @@ def baseline_row_content_changes(
     end_date: str,
     min_sync_at: datetime,
 ) -> int:
+    if table == "integration_connections":
+        return integration_connection_content_changes(connection, primary_key, connection_id)
+
     quoted = quote_identifier(table)
     columns = [str(row[1]) for row in table_info(connection, "baseline", table)]
     full_equality = value_equality(columns)
