@@ -119,6 +119,7 @@ test("D-069 UI exposes who, purpose, DDS article, P&L article and accrual period
     '  return <>',
     '<div className="finance-toolbar"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Номер, статья, договор, документ…" aria-label="Поиск финансовых операций" /><select value={direction} onChange={(event) => setDirection(event.target.value)}><option>Все направления</option><option>Поступление</option><option>Списание</option></select><span>Суммы хранятся в копейках · исходник неизменяем</span></div>',
     '{filteredOperations.map((operation) => <tr key={operation.id} tabIndex={0} aria-label={`Открыть ${recordLabel("операцию", operation.id)}`} onClick={() => openOperation(operation)} onKeyDown={(event) => handleOperationKey(event, operation)}><td><strong>{recordLabel("Операция", operation.id)}</strong><small>{operation.sourceFile || "Финансовый реестр"}</small></td><td>{new Date(`${operation.operationDate}T00:00:00Z`).toLocaleDateString("ru-RU")}</td><td><span className={`direction-chip ${operation.direction === "Поступление" ? "in" : "out"}`}>{operation.direction}</span></td><td><strong>{operation.category}</strong><small>{operation.reportClass}</small></td><td><strong>{data.entityNames[operation.counterpartyEntityId] ?? recordLabel(counterpartyLabel(operation.counterpartyEntityId), operation.counterpartyEntityId)}</strong><small>{operation.contractId ? recordLabel("Договор", operation.contractId) : "Без договора"}</small></td><td className="money-cell">{operation.direction === "Поступление" ? "+" : "−"}{rubles(operation.amountMinor)}</td><td><span className={operation.status === "Разнесено" ? "quality-ok" : "quality-warn"}>{operation.status}</span></td></tr>)}',
+    '<article className="finance-panel pnl-lines"><div>{data.pnlLines.map((line) => <button onClick={() => { const operation = data.operations.find((item) => item.id === line.operationIds[0]); if (operation) setSelected(operation); }}>Открыть</button>)}</div></article>',
     '<section className="operation-corrections"></section>',
     '</>;',
     '}',
@@ -132,6 +133,8 @@ test("D-069 UI exposes who, purpose, DDS article, P&L article and accrual period
   assert.match(out, /bankDetails\?\.description/);
   assert.match(out, /classifyOperation/);
   assert.match(out, /Банковский факт неизменяем/);
+  assert.match(out, /if \(operation\) openOperation\(operation\);/);
+  assert.doesNotMatch(out, /if \(operation\) setSelected\(operation\);/);
 });
 
 test("D-069 CSS keeps classification form mobile-safe", () => {
