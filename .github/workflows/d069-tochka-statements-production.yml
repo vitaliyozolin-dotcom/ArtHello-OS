@@ -33,12 +33,6 @@ env:
 
 jobs:
   import-tochka-statements:
-    if: >-
-      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
-      github.ref == 'refs/heads/main' &&
-      github.event_name == 'push' &&
-      github.actor == 'vitaliyozolin-dotcom' &&
-      github.run_attempt == 1
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     timeout-minutes: 180
     environment: production-ru
@@ -48,6 +42,17 @@ jobs:
       queue: max
 
     steps:
+      - name: Verify authorized workflow invocation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REPOSITORY" = "vitaliyozolin-dotcom/ArtHello-OS"
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+
       - name: Check out exact import source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
