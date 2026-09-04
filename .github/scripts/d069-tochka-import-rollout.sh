@@ -39,6 +39,7 @@ live_id=""
 live_name=""
 hidden_name=""
 network_name=""
+network_id=""
 import_network="arthello-d069-tochka-egress-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 import_network_created=0
 live_image_id=""
@@ -199,6 +200,18 @@ container_has_named_network() {
   grep -Fxq "$expected_network" <<<"$attached_networks"
 }
 
+container_lacks_named_network() {
+  local container="$1"
+  local unexpected_network="$2"
+  local inspection_status=0
+  if container_has_named_network "$container" "$unexpected_network"; then
+    return 1
+  else
+    inspection_status=$?
+    test "$inspection_status" -eq 1
+  fi
+}
+
 disconnect_named_network_if_present() {
   local container="$1"
   local expected_network="$2"
@@ -208,6 +221,124 @@ disconnect_named_network_if_present() {
   else
     inspection_status=$?
     if [ "$inspection_status" -eq 2 ]; then return 1; fi
+  fi
+  return 0
+}
+
+validate_canonical_public_topology() {
+  local container="$1"
+  local expected_container_name="$2"
+  local expected_network="$3"
+  local expected_network_id="$4"
+  local port_bindings_json=""
+  local publish_all_json=""
+  local network_mode_json=""
+  local hostname_json=""
+  local networks_json=""
+
+  port_bindings_json="$(docker inspect "$container" --format '{{json .HostConfig.PortBindings}}')" \
+    || return 1
+  publish_all_json="$(docker inspect "$container" --format '{{json .HostConfig.PublishAllPorts}}')" \
+    || return 1
+  network_mode_json="$(docker inspect "$container" --format '{{json .HostConfig.NetworkMode}}')" \
+    || return 1
+  hostname_json="$(docker inspect "$container" --format '{{json .Config.Hostname}}')" \
+    || return 1
+  networks_json="$(docker inspect "$container" --format '{{json .NetworkSettings.Networks}}')" \
+    || return 1
+
+  python3 - \
+    "$container" \
+    "$expected_container_name" \
+    "$expected_network" \
+    "$expected_network_id" \
+    "$port_bindings_json" \
+    "$publish_all_json" \
+    "$network_mode_json" \
+    "$hostname_json" \
+    "$networks_json" <<'PY'
+import json
+import sys
+
+(
+    container_id,
+    container_name,
+    network_name,
+    network_id,
+    port_bindings_text,
+    publish_all_text,
+    network_mode_text,
+    hostname_text,
+    networks_text,
+) = sys.argv[1:]
+
+def fail(reason: str) -> None:
+    raise SystemExit(f"unsupported production public topology: {reason}")
+
+try:
+    port_bindings = json.loads(port_bindings_text)
+    publish_all = json.loads(publish_all_text)
+    network_mode = json.loads(network_mode_text)
+    hostname = json.loads(hostname_text)
+    networks = json.loads(networks_text)
+except (TypeError, ValueError):
+    fail("invalid Docker inspection data")
+
+if port_bindings not in (None, {}):
+    fail("published host ports are forbidden")
+if publish_all is not False:
+    fail("PublishAllPorts must be false")
+if network_mode != network_name:
+    fail("the canonical network must be HostConfig.NetworkMode")
+if hostname not in {container_id[:12], container_name}:
+    fail("custom container hostname cannot be reconstructed")
+if not isinstance(networks, dict) or list(networks) != [network_name]:
+    fail("exactly the canonical public network must be attached")
+
+endpoint = networks[network_name]
+if not isinstance(endpoint, dict) or endpoint.get("NetworkID") != network_id:
+    fail("canonical network identity changed")
+
+allowed_names = {container_id, container_id[:12], container_name}
+for field in ("Aliases", "DNSNames"):
+    values = endpoint.get(field)
+    if values is None:
+        continue
+    if (
+        not isinstance(values, list)
+        or any(not isinstance(value, str) or value not in allowed_names for value in values)
+    ):
+        fail(f"custom endpoint {field.lower()} cannot be reconstructed")
+
+for field in ("IPAMConfig", "Links", "DriverOpts"):
+    value = endpoint.get(field)
+    if value not in (None, {}, []):
+        fail(f"custom endpoint {field.lower()} cannot be reconstructed")
+if endpoint.get("GwPriority") not in (None, 0):
+    fail("custom endpoint gateway priority cannot be reconstructed")
+PY
+}
+
+connect_canonical_public_network() {
+  local container="$1"
+  test "$(docker network inspect "$network_name" --format '{{.Id}}')" = "$network_id" \
+    || return 1
+  docker network connect "$network_name" "$container" || return 1
+  validate_canonical_public_topology "$container" "$live_name" "$network_name" "$network_id" \
+    || return 1
+  return 0
+}
+
+ensure_canonical_public_network() {
+  local container="$1"
+  local inspection_status=0
+  if container_has_named_network "$container" "$network_name"; then
+    validate_canonical_public_topology "$container" "$live_name" "$network_name" "$network_id" \
+      || return 1
+  else
+    inspection_status=$?
+    test "$inspection_status" -eq 1 || return 1
+    connect_canonical_public_network "$container" || return 1
   fi
   return 0
 }
@@ -236,6 +367,36 @@ public_ready() {
     sleep 2
   done
   return 1
+}
+
+detached_public_status() {
+  case "$1" in
+    000|502|503|504) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+public_fenced() {
+  local root_status=""
+  local auth_status=""
+  local attempt=0
+  local nonce=""
+  for attempt in 1 2 3; do
+    nonce="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$attempt"
+    root_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' \
+      --header 'Cache-Control: no-cache' --header 'Pragma: no-cache' \
+      "${PUBLIC_URL%/}/?d069_fence=$nonce" 2>/dev/null || true)"
+    auth_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' \
+      --header 'Cache-Control: no-cache' --header 'Pragma: no-cache' \
+      "${PUBLIC_URL%/}/api/auth/me?d069_fence=$nonce" 2>/dev/null || true)"
+    if ! detached_public_status "$root_status" || ! detached_public_status "$auth_status"; then
+      printf '::error::public write fence is not closed (root=%s auth=%s)\n' \
+        "$root_status" "$auth_status"
+      return 1
+    fi
+    if [ "$attempt" -lt 3 ]; then sleep 2; fi
+  done
+  return 0
 }
 
 verify_bootstrap_owner_password() {
@@ -393,9 +554,7 @@ cleanup_on_failure() {
       fi
       internal_ready "$live_id" >/dev/null 2>&1 || rollback_failed=1
       restore_restart_policy "$live_id" >/dev/null 2>&1 || rollback_failed=1
-      if ! container_has_named_network "$live_id" "$network_name" >/dev/null 2>&1; then
-        docker network connect "$network_name" "$live_id" >/dev/null 2>&1 || rollback_failed=1
-      fi
+      ensure_canonical_public_network "$live_id" >/dev/null 2>&1 || rollback_failed=1
       public_ready >/dev/null 2>&1 || rollback_failed=1
       docker exec --user 0:0 "$live_id" rm -f -- "$client_container_path" >/dev/null 2>&1 || rollback_failed=1
     fi
@@ -502,6 +661,14 @@ mapfile -t networks < <(docker inspect "$live_id" --format '{{range $network, $_
 test "${#networks[@]}" -eq 1
 network_name="${networks[0]}"
 test -n "$network_name"
+network_id="$(docker network inspect "$network_name" --format '{{.Id}}')"
+[[ "$network_id" =~ ^[a-f0-9]{64}$ ]]
+test "$(docker network inspect "$network_name" --format '{{.Name}}')" = "$network_name"
+test "$(docker network inspect "$network_name" --format '{{.Driver}}')" = bridge
+test "$(docker network inspect "$network_name" --format '{{.Scope}}')" = local
+test "$(docker network inspect "$network_name" --format '{{.Internal}}')" = false
+test "$(docker network inspect "$network_name" --format '{{.Ingress}}')" = false
+validate_canonical_public_topology "$live_id" "$live_name" "$network_name" "$network_id"
 hidden_name="arthello-d069-tochka-hidden-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 if docker inspect "$hidden_name" >/dev/null 2>&1; then
   printf '::error::hidden import container name already exists\n'
@@ -547,11 +714,16 @@ production_touched=1
 docker update --restart=no "$live_id" >/dev/null
 test "$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')" = no
 docker network disconnect "$network_name" "$live_id"
+container_lacks_named_network "$live_id" "$network_name"
 # Drain requests admitted before the public write fence. The longest bank-side
 # application request is capped at 45 seconds.
 sleep 55
+public_fenced
+container_lacks_named_network "$live_id" "$network_name"
 docker pause "$live_id" >/dev/null
 container_paused=1
+test "$(docker inspect "$live_id" --format '{{.State.Paused}}')" = true
+container_lacks_named_network "$live_id" "$network_name"
 
 docker run --rm --network none --user 0:0 \
   --mount "type=volume,src=$DATA_VOLUME,dst=/from,readonly" \
@@ -588,6 +760,8 @@ printf 'D069_TOCHKA_BACKUP=VERIFIED volume=%s digest=%s\n' "$rollback_volume" "$
 # performs authenticated internal API calls against the mounted production data.
 docker rename "$live_id" "$hidden_name"
 docker network connect "$import_network" "$live_id"
+container_has_named_network "$live_id" "$import_network"
+container_lacks_named_network "$live_id" "$network_name"
 mutation_started=1
 docker unpause "$live_id" >/dev/null
 container_paused=0
@@ -653,6 +827,8 @@ test "$expected_transaction_count" -gt 0
 
 docker exec --user 0:0 "$live_id" rm -f -- "$client_container_path"
 docker network disconnect "$import_network" "$live_id"
+container_lacks_named_network "$live_id" "$import_network"
+container_lacks_named_network "$live_id" "$network_name"
 docker pause "$live_id" >/dev/null
 container_paused=1
 docker network rm "$import_network" >/dev/null
@@ -756,6 +932,7 @@ PY
 test "$(docker inspect "$live_id" --format '{{.State.Paused}}')" = true
 test "$(docker inspect "$live_id" --format '{{.Image}}')" = "$live_image_id"
 test "$(docker inspect "$live_id" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$EXPECTED_RELEASE_SHA"
+container_lacks_named_network "$live_id" "$network_name"
 
 # Re-publish only after a paused, read-only snapshot has passed reconciliation.
 docker rename "$live_id" "$live_name"
@@ -777,7 +954,7 @@ test "$(docker volume inspect "$rollback_volume" --format '{{.Name}}')" = "$roll
 # Network attachment is the irreversible commit boundary: once the public
 # proxy may have accepted a write, failure recovery preserves imported data.
 public_exposed=1
-docker network connect "$network_name" "$live_id"
+connect_canonical_public_network "$live_id"
 public_ready
 
 printf 'D069_TOCHKA_PRODUCTION=VERIFIED release=%s window=%s..%s\n' \
