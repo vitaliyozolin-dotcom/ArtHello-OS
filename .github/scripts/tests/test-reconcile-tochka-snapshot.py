@@ -602,6 +602,43 @@ class ReconcileTochkaSnapshotTest(unittest.TestCase):
         self.assertEqual(process.returncode, 1)
         self.assertFalse(result["checks"]["transaction_shape"])
 
+    def test_pending_transaction_cannot_be_excluded_from_reconciliation(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "UPDATE bank_transactions SET status='Pending',financial_operation_id='' "
+                "WHERE id='TX1'"
+            )
+            connection.execute("DELETE FROM financial_operations WHERE id='FIN1'")
+            connection.execute(
+                "UPDATE bank_statement_imports SET end_balance_minor=1000 WHERE id='STMT-ACC1'"
+            )
+            connection.execute(
+                "UPDATE bank_accounts SET balance_minor=1000 WHERE provider_account_id='ACC1'"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["checks"]["transaction_shape"])
+        self.assertEqual(result["counts"]["pending_or_other_transactions"], 1)
+
+    def test_non_rub_account_cannot_be_excluded_from_reconciliation(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "UPDATE bank_accounts SET currency='USD' WHERE provider_account_id='ACC4'"
+            )
+            connection.execute(
+                "UPDATE bank_statement_imports SET currency='USD' WHERE provider_account_id='ACC4'"
+            )
+            connection.execute(
+                "UPDATE bank_transactions SET currency='USD',financial_operation_id='' "
+                "WHERE provider_account_id='ACC4'"
+            )
+            connection.execute("DELETE FROM financial_operations WHERE id IN ('FIN5','FIN6')")
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["checks"]["account_set"])
+
     def test_account_balance_snapshot_must_match_latest_statement(self) -> None:
         with sqlite3.connect(self.fixture.after) as connection:
             connection.execute(
