@@ -1086,6 +1086,7 @@ def reconcile(connection: sqlite3.Connection, args: argparse.Namespace, min_sync
         and len(account_keys) == args.expected_accounts
         and len(legal_entities) == 1
         and all(str(row["provider_account_id"]) and str(row["legal_entity_id"]) for row in accounts)
+        and all(str(row["currency"]) == "RUB" for row in accounts)
     )
     record(result, "account_set", account_set_ok, "unexpected_account_set")
     if not account_set_ok:
@@ -1207,6 +1208,7 @@ def reconcile(connection: sqlite3.Connection, args: argparse.Namespace, min_sync
             and str(row["end_date"]) == args.end_date
             and str(row["status"]).strip().lower() in {"ready", "completed"}
             and int(row["transaction_count"]) >= 0
+            and str(row["currency"]) == "RUB"
             and str(row["currency"])
                 == str(account_by_key[(str(row["legal_entity_id"]), str(row["provider_account_id"]))]["currency"])
             and account_by_key[(str(row["legal_entity_id"]), str(row["provider_account_id"]))]["balance_minor"] is not None
@@ -1278,6 +1280,11 @@ def reconcile(connection: sqlite3.Connection, args: argparse.Namespace, min_sync
             (str(row["provider_account_id"]), str(row["provider_statement_id"])) in statement_refs,
             should_have_registry_operation or not str(row["financial_operation_id"]),
         ))
+    transaction_shape_ok = (
+        transaction_shape_ok
+        and pending_or_other == 0
+        and booked_non_rub == 0
+    )
     result["counts"]["pending_or_other_transactions"] = pending_or_other
     result["counts"]["booked_non_rub_transactions"] = booked_non_rub
     record(result, "transaction_shape", transaction_shape_ok, "unsupported_or_malformed_bank_transactions")
