@@ -39,8 +39,10 @@ fingerprint_database() {
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import struct
+from urllib.parse import quote
 
 database_path = os.environ["D069_FINGERPRINT_DB"]
 connection = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
@@ -67,6 +69,8 @@ def hash_rows(table, where="", parameters=()):
     info = table_info(table)
     if not info:
         raise SystemExit(f"required table missing: {table}")
+    columns = [row[1] for row in info]
+    column_index = {column: index for index, column in enumerate(columns)}
     primary_key = [row[1] for row in sorted(info, key=lambda row: row[5]) if row[5]]
     order_by = ",".join(f'"{column}"' for column in primary_key) if primary_key else "rowid"
     query = f'SELECT * FROM "{table}"'
@@ -87,7 +91,25 @@ def hash_rows(table, where="", parameters=()):
     count = 0
     for row in connection.execute(query, parameters):
         count += 1
-        for value in row:
+        normalized_row = list(row)
+        if (
+            table == "entities"
+            and normalized_row[column_index["id"]] == "SUP-T-001"
+            and str(normalized_row[column_index["created_by"]]).startswith("system-")
+        ):
+            normalized_row[column_index["updated_at"]] = "<normalized:startup-maintenance>"
+        if (
+            table == "integration_connections"
+            and normalized_row[column_index["id"]] in {
+                "INT-T-D1", "INT-T-ALFACRM", "INT-T-FORMS", "INT-T-PHONE",
+                "INT-T-WHATSAPP", "INT-T-TG", "INT-T-VK", "INT-T-YANDEX",
+                "INT-T-MAIL", "INT-T-ADS", "INT-T-SOCIAL", "INT-T-TOCHKA",
+                "INT-T-TBANK", "INT-T-DIARY", "INT-T-EDO", "INT-T-1C",
+                "INT-T-ACS", "INT-T-CAM", "INT-T-OPENAI-IMAGES",
+            }
+        ):
+            normalized_row[column_index["updated_at"]] = "<normalized:catalog-maintenance>"
+        for value in normalized_row:
             add(value)
     add(count)
     return count
@@ -138,11 +160,44 @@ try:
         raise SystemExit("Tochka setup is invalid") from error
     if setup.get("secretStatus") != "stored" or not setup.get("customerCode"):
         raise SystemExit("stored Tochka credential binding missing")
+    credential_scopes = ["INT-T-TOCHKA", setup.get("legalEntityId"), setup.get("customerCode")]
+    if any(not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{1,79}", value) for value in credential_scopes):
+        raise SystemExit("active Tochka credential scope is invalid")
+    encode_component = lambda value: quote(value, safe="-_.!~*'()")
+    active_credential_key = "integration_credential:v2:" + ":".join(
+        encode_component(value) for value in credential_scopes
+    )
+    active_credential_row = connection.execute(
+        "SELECT state_value FROM system_runtime_state WHERE state_key=?",
+        (active_credential_key,),
+    ).fetchone()
+    if not active_credential_row:
+        raise SystemExit("active Tochka credential envelope missing")
+    try:
+        active_envelope = json.loads(active_credential_row[0])
+    except Exception as error:
+        raise SystemExit("active Tochka credential envelope is invalid") from error
+    if (
+        active_envelope.get("version") != 1
+        or active_envelope.get("algorithm") != "AES-GCM"
+        or not active_envelope.get("iv")
+        or not active_envelope.get("ciphertext")
+    ):
+        raise SystemExit("active Tochka credential envelope is incomplete")
+
+    pending_cashflow_backfill = connection.execute(
+        "SELECT COUNT(*) FROM financial_operations "
+        "WHERE cashflow_article='' AND category<>'' AND category<>'Не классифицировано'"
+    ).fetchone()[0]
+    if pending_cashflow_backfill:
+        raise SystemExit("financial operation cashflow backfill is not settled")
 
     protected_tables = {
         "production_auth_credentials",
         "app_users",
         "user_system_access",
+        "entities",
+        "integration_connections",
         "bank_accounts",
         "bank_statement_imports",
         "bank_transactions",
@@ -155,6 +210,7 @@ try:
         "finance_reconciliation_issues",
         "client_accruals",
         "client_bonuses",
+        "client_lifecycles",
         "accounting_documents",
         "accounting_document_links",
         "accounting_completeness_checks",
