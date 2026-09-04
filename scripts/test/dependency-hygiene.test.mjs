@@ -46,3 +46,9 @@ test("alpha CRM runtime imports are not development-only dependencies", () => {
 
   assert.deepEqual(findMisclassifiedRuntimeDependencies(packageDirectory), []);
 });
+
+test("sandbox scripts runtime imports are not development-only dependencies", () => {
+  const packageDirectory = new URL("../", import.meta.url);
+
+  assert.deepEqual(findMisclassifiedRuntimeDependencies(packageDirectory), []);
+});

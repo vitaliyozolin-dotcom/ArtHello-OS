@@ -15,10 +15,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@electric-sql/pglite": "0.3.14",
     "pg": "^8.20.0"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.3.14",
     "@types/node": "catalog:",
     "@types/pg": "^8.20.0",
     "tsx": "catalog:"
