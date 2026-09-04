@@ -18,7 +18,6 @@ GENERIC_PROTECTED = (
     "app_users",
     "user_system_access",
     "entities",
-    "integration_connections",
     "finance_accruals",
     "finance_budgets",
     "finance_forecast_items",
@@ -111,6 +110,30 @@ def create_schema(connection: sqlite3.Connection) -> None:
           counterparty_label TEXT,
           management_purpose TEXT
         );
+        CREATE TABLE integration_connections (
+          id TEXT PRIMARY KEY,
+          system TEXT NOT NULL,
+          category TEXT NOT NULL,
+          target_module TEXT NOT NULL,
+          owner_entity_id TEXT NOT NULL,
+          source_of_truth TEXT NOT NULL,
+          mode TEXT NOT NULL,
+          status TEXT NOT NULL,
+          auth_status TEXT NOT NULL,
+          credential_expires_at TEXT NOT NULL DEFAULT '',
+          last_success_at TEXT NOT NULL DEFAULT '',
+          next_sync_at TEXT NOT NULL DEFAULT '',
+          received_count INTEGER NOT NULL DEFAULT 0,
+          accepted_count INTEGER NOT NULL DEFAULT 0,
+          rejected_count INTEGER NOT NULL DEFAULT 0,
+          error_count INTEGER NOT NULL DEFAULT 0,
+          conflict_count INTEGER NOT NULL DEFAULT 0,
+          impact TEXT NOT NULL,
+          adapter_version TEXT NOT NULL,
+          verified_transfer INTEGER NOT NULL DEFAULT 0,
+          is_enabled INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL
+        );
         """
     )
     for table in GENERIC_PROTECTED:
@@ -118,6 +141,51 @@ def create_schema(connection: sqlite3.Connection) -> None:
 
 
 def seed_baseline(connection: sqlite3.Connection) -> None:
+    connection.executemany(
+        "INSERT INTO integration_connections VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            (
+                "INT-T-D1",
+                "ArtHello OS D1",
+                "Внутренняя платформа",
+                "Все модули",
+                "ROLE:OWNER",
+                "ArtHello OS D1",
+                "Binding · read/write",
+                "Работает",
+                "Сервисная привязка активна",
+                "",
+                "2026-08-31T00:00:00.000Z",
+                "Постоянно",
+                0, 0, 0, 0, 0,
+                "Критичное: без D1 недоступны рабочие записи",
+                "d1-core@1",
+                1,
+                1,
+                "2026-08-31 00:00:00",
+            ),
+            (
+                "INT-T-TOCHKA",
+                "Банк Точка",
+                "Банк",
+                "Финансы",
+                "ROLE:OWNER",
+                "Официальный интерфейс Банка Точка",
+                "Только чтение · счета, остатки, выписки и проведённые операции",
+                "Работает",
+                "Ключ принят · счета, выписки и операции загружены",
+                "",
+                "2026-08-31T00:00:00.000Z",
+                "2026-09-01T00:00:00.000Z",
+                0, 0, 0, 0, 0,
+                "Критичное: без синхронизации новые банковские операции не попадут в реестр финансов",
+                "bank-tochka-readonly@2",
+                1,
+                1,
+                "2026-08-31 00:00:00",
+            ),
+        ),
+    )
     for index in range(1, 5):
         connection.execute(
             "INSERT INTO bank_accounts VALUES (?,?,?,?,?,?,?,?)",
@@ -308,6 +376,36 @@ class ReconcileTochkaSnapshotTest(unittest.TestCase):
         self.assertNotIn("ACC1", process.stdout)
         self.assertNotIn("ORG", process.stdout)
         self.assertNotIn("TX1", process.stdout)
+
+    def test_catalog_wide_canonical_refresh_is_allowed(self) -> None:
+        # The production action refreshes every known catalog row, not only the
+        # Tochka row. It may canonicalize old metadata and always advances the
+        # catalog row timestamp.
+        with sqlite3.connect(self.fixture.before) as connection:
+            connection.execute(
+                "UPDATE integration_connections SET system='Legacy D1 label' "
+                "WHERE id='INT-T-D1'"
+            )
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "UPDATE integration_connections SET updated_at='2026-09-04 13:20:00'"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 0)
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["checks"]["baseline_row_contents_preserved"])
+        self.assertEqual(result["counts"]["changed_baseline_rows"], 0)
+
+    def test_catalog_refresh_requires_canonical_ownership(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "UPDATE integration_connections SET owner_entity_id='ROLE:ATTACKER',"
+                "updated_at='2026-09-04 13:20:00' WHERE id='INT-T-D1'"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["baseline_row_contents_preserved"])
+        self.assertEqual(result["counts"]["changed_baseline_rows"], 1)
 
     def test_deleted_baseline_financial_row_is_detected_by_primary_key(self) -> None:
         with sqlite3.connect(self.fixture.after) as connection:
