@@ -317,6 +317,62 @@ class ReconcileTochkaSnapshotTest(unittest.TestCase):
         self.assertFalse(result["checks"]["baseline_primary_keys_preserved"])
         self.assertEqual(result["counts"]["missing_baseline_rows"], 1)
 
+    def test_same_key_owner_credential_corruption_is_rejected(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "UPDATE production_auth_credentials SET value='CORRUPTED' "
+                "WHERE id='OLD-production_auth_credentials'"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertTrue(result["checks"]["baseline_primary_keys_preserved"])
+        self.assertFalse(result["checks"]["baseline_row_contents_preserved"])
+        self.assertEqual(result["counts"]["changed_baseline_rows"], 1)
+        self.assertNotIn("CORRUPTED", process.stdout)
+
+    def test_same_key_baseline_financial_corruption_is_rejected(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute("UPDATE financial_operations SET amount_minor=999 WHERE id='OLD'")
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertTrue(result["checks"]["baseline_primary_keys_preserved"])
+        self.assertFalse(result["checks"]["baseline_row_contents_preserved"])
+        self.assertEqual(result["counts"]["changed_baseline_rows"], 1)
+
+    def test_unexpected_owner_credential_row_is_rejected(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "INSERT INTO production_auth_credentials VALUES ('BACKDOOR', 'new')"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["protected_table_growth_scoped"])
+        self.assertEqual(result["counts"]["unexpected_new_protected_rows"], 1)
+        self.assertNotIn("BACKDOOR", process.stdout)
+
+    def test_unrelated_new_financial_operation_is_rejected(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "INSERT INTO financial_operations "
+                "(id,operation_date,direction,amount_minor,legal_entity_id,bank_operation_ref,"
+                "operation_kind,source_system) VALUES "
+                "('UNRELATED','2026-09-02','Поступление',10,'ORG','','MANUAL','MANUAL')"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["protected_table_growth_scoped"])
+        self.assertEqual(result["counts"]["unexpected_new_protected_rows"], 1)
+
+    def test_tochka_account_identity_is_immutable_during_balance_refresh(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "UPDATE bank_accounts SET legal_entity_id='OTHER' WHERE provider_account_id='ACC1'"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["baseline_row_contents_preserved"])
+        self.assertEqual(result["counts"]["changed_baseline_rows"], 1)
+
     def test_registry_amount_mismatch_fails_row_and_gross_checks(self) -> None:
         with sqlite3.connect(self.fixture.after) as connection:
             connection.execute("UPDATE financial_operations SET amount_minor=501 WHERE id='FIN1'")
