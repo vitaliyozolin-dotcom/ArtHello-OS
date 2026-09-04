@@ -17,7 +17,7 @@ concurrency:
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
   EXPECTED_D069_MERGE: 3135fd181610b838b0abb120ff191e3156edb5f0
-  EXPECTED_ROLLOUT_PR: '0'
+  EXPECTED_ROLLOUT_PR: '341'
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   DATA_VOLUME: arthello-direct-v44-data
 
@@ -255,7 +255,6 @@ jobs:
           con=sqlite3.connect(f"file:{os.environ['D069_BACKUP_DB']}?mode=ro", uri=True)
           tables=[
               "production_auth_credentials",
-              "integration_credentials",
               "bank_accounts",
               "bank_statement_imports",
               "bank_transactions",
@@ -275,6 +274,8 @@ jobs:
                   if present != 1:
                       raise SystemExit(f"required table missing: {table}")
                   counts.append(f"{table}:{con.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]}")
+              credential_count=con.execute("SELECT COUNT(*) FROM system_runtime_state WHERE state_key LIKE 'integration_credential:v2:%'").fetchone()[0]
+              counts.append(f"integration_credentials:{credential_count}")
               print(hashlib.sha256("|".join(counts).encode()).hexdigest())
           finally:
               con.close()
@@ -340,7 +341,6 @@ jobs:
           con=sqlite3.connect(f"file:{os.environ['D069_POST_DB']}?mode=ro", uri=True)
           tables=[
               "production_auth_credentials",
-              "integration_credentials",
               "bank_accounts",
               "bank_statement_imports",
               "bank_transactions",
@@ -368,6 +368,8 @@ jobs:
               counts=[]
               for table in tables:
                   counts.append(f"{table}:{con.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]}")
+              credential_count=con.execute("SELECT COUNT(*) FROM system_runtime_state WHERE state_key LIKE 'integration_credential:v2:%'").fetchone()[0]
+              counts.append(f"integration_credentials:{credential_count}")
               print(hashlib.sha256("|".join(counts).encode()).hexdigest())
           finally:
               con.close()
