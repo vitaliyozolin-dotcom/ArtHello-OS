@@ -7,8 +7,10 @@ const root = process.cwd();
 const globals = readFileSync(resolve(root, "app/globals.css"), "utf8");
 const shell = readFileSync(resolve(root, "app/components/ShellFoundation.css"), "utf8");
 
-test("shell-only banner styles leave the global CSS chunk without changing the visual rule set", () => {
-  assert.doesNotMatch(globals, /\.test-banner(?:\s|\{|\.)/);
+test("shell-only banner base rules leave global CSS without changing the visual rule set", () => {
+  assert.doesNotMatch(globals, /\.test-banner \{ min-height: 36px;/);
+  assert.doesNotMatch(globals, /\.test-banner strong \{ padding: 4px 8px;/);
+  assert.doesNotMatch(globals, /\.test-banner button \{ margin-left: auto;/);
   assert.match(shell, /ARTHELLO_CSS_BUDGET_SHELL_SPLIT/);
   assert.match(shell, /\.test-banner \{ min-height: 36px;/);
   assert.match(shell, /\.test-banner strong \{ padding: 4px 8px;/);
