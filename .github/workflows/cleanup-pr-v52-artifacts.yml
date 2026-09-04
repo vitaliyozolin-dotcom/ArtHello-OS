@@ -1,6 +1,6 @@
 name: Cleanup non-production v52 artifacts
 
-# One-shot quota recovery: delete only non-main v52 verification evidence.
+# One-shot quota recovery: preserve main and the active D-069 rollout branch.
 on:
   push:
     branches:
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Delete only non-main v52 verification artifacts
+      - name: Delete stale non-main workflow artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -40,9 +40,11 @@ jobs:
 
             jq -r '.artifacts[]
               | select(.expired == false)
-              | select(.name | startswith("arthello-v52-verification-"))
+              | select(.workflow_run.head_branch != null)
               | select(.workflow_run.head_branch != "main")
-              | [.id, .size_in_bytes, .name, (.workflow_run.head_branch // "unknown")]
+              | select(.workflow_run.head_branch != "codex/d069-production-rollout-20260904")
+              | select(.workflow_run.head_branch != "ops/cleanup-pr-v52-artifacts-20260904")
+              | [.id, .size_in_bytes, .name, .workflow_run.head_branch]
               | @tsv' <<<"$response" >> "$ids"
             page=$((page + 1))
           done
@@ -59,7 +61,7 @@ jobs:
               "${api}/${id}"
             deleted=$((deleted + 1))
             bytes=$((bytes + size))
-            printf 'Deleted non-production artifact id=%s branch=%s size=%s name=%s\n' "$id" "$branch" "$size" "$name"
+            printf 'Deleted stale artifact id=%s branch=%s size=%s name=%s\n' "$id" "$branch" "$size" "$name"
           done < "$ids"
 
           printf 'ARTHELLO_ARTIFACT_CLEANUP=VERIFIED deleted=%s bytes=%s\n' "$deleted" "$bytes"
