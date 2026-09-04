@@ -355,6 +355,12 @@ export function patchFinanceWorkspace(source) {
   );
   next = replaceOnce(
     next,
+    "const operation = data.operations.find((item) => item.id === line.operationIds[0]); if (operation) setSelected(operation);",
+    "const operation = data.operations.find((item) => item.id === line.operationIds[0]); if (operation) openOperation(operation);",
+    "P&L operation draft init",
+  );
+  next = replaceOnce(
+    next,
     "  async function submitCorrection(event: FormEvent) {",
     `  async function submitClassification(event: FormEvent) {
     event.preventDefault();
