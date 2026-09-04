@@ -1,5 +1,6 @@
 name: Cleanup non-production v52 artifacts
 
+# One-shot quota recovery: delete only non-main v52 verification evidence.
 on:
   push:
     branches:
