@@ -38,17 +38,19 @@ test("accepts runtime imports declared as dependencies or peer dependencies", ()
   assert.deepEqual(findMisclassifiedRuntimeDependencies(directory), []);
 });
 
-test("alpha CRM runtime imports are not development-only dependencies", () => {
-  const packageDirectory = new URL(
-    "../../artifacts/alpha-crm-sync/",
-    import.meta.url,
-  );
+const runtimePackages = [
+  "../../artifacts/api-server/",
+  "../../artifacts/alpha-crm-sync/",
+  "../../lib/api-client-react/",
+  "../../lib/api-zod/",
+  "../../lib/db/",
+  "../",
+];
 
-  assert.deepEqual(findMisclassifiedRuntimeDependencies(packageDirectory), []);
-});
+for (const relativePackagePath of runtimePackages) {
+  test(`${relativePackagePath} runtime imports are not development-only dependencies`, () => {
+    const packageDirectory = new URL(relativePackagePath, import.meta.url);
 
-test("sandbox scripts runtime imports are not development-only dependencies", () => {
-  const packageDirectory = new URL("../", import.meta.url);
-
-  assert.deepEqual(findMisclassifiedRuntimeDependencies(packageDirectory), []);
-});
+    assert.deepEqual(findMisclassifiedRuntimeDependencies(packageDirectory), []);
+  });
+}
