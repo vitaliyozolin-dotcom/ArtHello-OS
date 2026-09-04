@@ -96,6 +96,63 @@ PROTECTED_TABLES = (
     "audit_events",
 )
 
+APPEND_ONLY_TABLES = {
+    "financial_operations",
+    "bank_statement_imports",
+    "bank_transactions",
+    "integration_sync_runs",
+    "integration_log_entries",
+    "audit_events",
+}
+
+# The Tochka import appends to most protected tables, so every baseline row in
+# those tables must remain value-for-value equivalent.
+# Only these rows/columns are updated by the production import contract. Rows
+# outside the named scope are still compared across every baseline column.
+SCOPED_MUTABLE_COLUMNS = {
+    # A successful owner login may reset only lockout bookkeeping.
+    "production_auth_credentials": {
+        "failed_attempts",
+        "locked_until",
+        "last_login_at",
+        "last_authenticated_at",
+        "updated_at",
+    },
+    "integration_connections": {
+        "status",
+        "auth_status",
+        "credential_expires_at",
+        "last_success_at",
+        "next_sync_at",
+        "received_count",
+        "accepted_count",
+        "rejected_count",
+        "error_count",
+        "conflict_count",
+        "verified_transfer",
+        "is_enabled",
+        "updated_at",
+    },
+    "bank_accounts": {
+        "masked_account",
+        "name",
+        "currency",
+        "status",
+        "balance_minor",
+        "balance_as_of",
+        "synced_at",
+    },
+    "bank_statement_imports": {
+        "status",
+        "start_balance_minor",
+        "end_balance_minor",
+        "currency",
+        "transaction_count",
+        "fetched_at",
+    },
+    "system_runtime_state": {"state_value", "updated_at"},
+}
+
 CHECK_NAMES = (
     "after_integrity",
     "after_foreign_keys",
@@ -104,6 +161,8 @@ CHECK_NAMES = (
     "additive_schema",
     "required_schema",
     "baseline_primary_keys_preserved",
+    "baseline_row_contents_preserved",
+    "protected_table_growth_scoped",
     "latest_sync",
     "account_set",
     "latest_statements",
@@ -167,6 +226,8 @@ def empty_result(start_date: str = DEFAULT_START_DATE, end_date: str = DEFAULT_E
             "baseline_protected_rows": None,
             "post_import_protected_rows": None,
             "missing_baseline_rows": None,
+            "changed_baseline_rows": None,
+            "unexpected_new_protected_rows": None,
             "foreign_key_violations": None,
             "declared_foreign_keys": None,
         },
@@ -197,7 +258,8 @@ def empty_result(start_date: str = DEFAULT_START_DATE, end_date: str = DEFAULT_E
         "limitations": [
             "gross_totals_are_reconciled_from_persisted_bank_facts_not_an_independent_raw_provider_total",
             "balance_equations_use_booked_transactions_only",
-            "key_preservation_means_zero_baseline_primary_keys_missing_not_no_transient_delete_reinsert",
+            "baseline_rows_are_compared_by_sqlite_values_not_transient_write_history",
+            "only_contract_scoped_columns_may_change_on_existing_import_rows",
             "sqlite_foreign_key_check_only_covers_declared_constraints_and_is_supplemented_by_logical_reference_checks",
             "a_single_before_after_pair_does_not_prove_two_consecutive_imports_are_idempotent",
         ],
@@ -315,6 +377,219 @@ def scalar(connection: sqlite3.Connection, sql: str, bindings: Iterable[Any] = (
     return int(row[0] if row and row[0] is not None else 0)
 
 
+def value_equality(columns: Iterable[str]) -> str:
+    return " AND ".join(
+        f"a.{quote_identifier(column)} IS b.{quote_identifier(column)}" for column in columns
+    )
+
+
+def mutable_scope(
+    table: str,
+    columns: set[str],
+    connection_id: str,
+    start_date: str,
+    end_date: str,
+) -> tuple[str, tuple[Any, ...]] | None:
+    if table == "production_auth_credentials" and "user_id" in columns:
+        return 'b."user_id" IS ?', ("AUTH-OWNER",)
+    if table == "integration_connections" and "id" in columns:
+        return 'b."id" IS ?', (connection_id,)
+    if table == "bank_accounts" and "connection_id" in columns:
+        return 'b."connection_id" IS ?', (connection_id,)
+    if table == "bank_statement_imports" and {
+        "connection_id", "start_date", "end_date",
+    }.issubset(columns):
+        return (
+            'b."connection_id" IS ? AND b."start_date" IS ? AND b."end_date" IS ?',
+            (connection_id, start_date, end_date),
+        )
+    if table == "system_runtime_state" and "state_key" in columns:
+        return 'b."state_key" IS ?', (f"integration_setup:{connection_id}",)
+    return None
+
+
+def setup_state_content_changed(
+    connection: sqlite3.Connection,
+    connection_id: str,
+    start_date: str,
+    min_sync_at: datetime,
+) -> int:
+    required = {"state_key", "state_value"}
+    if not required.issubset(table_columns(connection, "baseline", "system_runtime_state")):
+        return 0
+    state_key = f"integration_setup:{connection_id}"
+    before = connection.execute(
+        "SELECT state_value FROM baseline.system_runtime_state WHERE state_key=?",
+        (state_key,),
+    ).fetchone()
+    after = connection.execute(
+        "SELECT state_value FROM main.system_runtime_state WHERE state_key=?",
+        (state_key,),
+    ).fetchone()
+    if before is None or after is None:
+        return 0  # Missing rows are reported by the primary-key preservation check.
+    try:
+        before_value = json.loads(str(before[0]))
+        after_value = json.loads(str(after[0]))
+    except (TypeError, ValueError):
+        return 1
+    if not isinstance(before_value, dict) or not isinstance(after_value, dict):
+        return 1
+    mutable_keys = {"startDate", "credentialGeneration", "updatedAt", "updatedBy"}
+    before_stable = {key: value for key, value in before_value.items() if key not in mutable_keys}
+    after_stable = {key: value for key, value in after_value.items() if key not in mutable_keys}
+    generation = after_value.get("credentialGeneration")
+    previous_generation = before_value.get("credentialGeneration")
+    generation_ok = isinstance(generation, str) and re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        generation.strip().lower(),
+    )
+    try:
+        updated_at = parse_timestamp(str(after_value.get("updatedAt", "")))
+    except (TypeError, ValueError):
+        updated_at_ok = False
+    else:
+        updated_at_ok = updated_at >= min_sync_at
+    updated_by = after_value.get("updatedBy")
+    updated_by_ok = (
+        isinstance(updated_by, str)
+        and bool(updated_by.strip())
+        and len(updated_by) <= 256
+    )
+    return int(
+        before_stable != after_stable
+        or after_value.get("startDate") != start_date
+        or not generation_ok
+        or generation == previous_generation
+        or not updated_at_ok
+        or not updated_by_ok
+    )
+
+
+def owner_auth_state_changed(connection: sqlite3.Connection) -> int:
+    columns = table_columns(connection, "main", "production_auth_credentials")
+    if "user_id" not in columns:
+        return 0
+    selected = [column for column in ("failed_attempts", "locked_until") if column in columns]
+    if not selected:
+        return 0
+    row = connection.execute(
+        f"SELECT {','.join(quote_identifier(column) for column in selected)} "
+        "FROM main.production_auth_credentials WHERE user_id=?",
+        ("AUTH-OWNER",),
+    ).fetchone()
+    if row is None:
+        return 0  # Missing rows are reported by the primary-key preservation check.
+    values = dict(zip(selected, row))
+    try:
+        attempts_ok = "failed_attempts" not in values or int(values["failed_attempts"]) == 0
+        lock_ok = (
+            "locked_until" not in values
+            or int(values["locked_until"]) <= int(datetime.now(timezone.utc).timestamp())
+        )
+    except (TypeError, ValueError, OverflowError):
+        return 1
+    return int(not attempts_ok or not lock_ok)
+
+
+def baseline_row_content_changes(
+    connection: sqlite3.Connection,
+    table: str,
+    primary_key: list[str],
+    connection_id: str,
+    start_date: str,
+    end_date: str,
+    min_sync_at: datetime,
+) -> int:
+    quoted = quote_identifier(table)
+    columns = [str(row[1]) for row in table_info(connection, "baseline", table)]
+    full_equality = value_equality(columns)
+    join = value_equality(primary_key)
+    scope = mutable_scope(table, set(columns), connection_id, start_date, end_date)
+    if scope is None:
+        changed = scalar(
+            connection,
+            f"SELECT COUNT(*) FROM baseline.{quoted} AS b "
+            f"JOIN main.{quoted} AS a ON {join} WHERE NOT ({full_equality})",
+        )
+    else:
+        scope_sql, bindings = scope
+        mutable = SCOPED_MUTABLE_COLUMNS[table]
+        immutable_columns = [column for column in columns if column not in mutable]
+        immutable_equality = value_equality(immutable_columns)
+        changed = scalar(
+            connection,
+            f"SELECT COUNT(*) FROM baseline.{quoted} AS b "
+            f"JOIN main.{quoted} AS a ON {join} "
+            f"WHERE CASE WHEN {scope_sql} THEN NOT ({immutable_equality}) "
+            f"ELSE NOT ({full_equality}) END",
+            bindings,
+        )
+    if table == "production_auth_credentials":
+        changed += owner_auth_state_changed(connection)
+    elif table == "system_runtime_state":
+        changed += setup_state_content_changed(connection, connection_id, start_date, min_sync_at)
+    return changed
+
+
+def unexpected_new_rows(
+    connection: sqlite3.Connection,
+    table: str,
+    primary_key: list[str],
+    connection_id: str,
+    start_date: str,
+    end_date: str,
+) -> int:
+    quoted = quote_identifier(table)
+    missing_from_baseline = " AND ".join(
+        f"b.{quote_identifier(column)} IS a.{quote_identifier(column)}" for column in primary_key
+    )
+    new_row = f"NOT EXISTS (SELECT 1 FROM baseline.{quoted} AS b WHERE {missing_from_baseline})"
+    if table not in APPEND_ONLY_TABLES:
+        return scalar(connection, f"SELECT COUNT(*) FROM main.{quoted} AS a WHERE {new_row}")
+
+    allowed_sql = "1"
+    bindings: tuple[Any, ...] = ()
+    if table == "financial_operations":
+        allowed_sql = (
+            "a.source_system='BANK_TOCHKA_API' AND a.operation_date BETWEEN ? AND ? "
+            "AND EXISTS (SELECT 1 FROM main.bank_transactions AS t "
+            "WHERE t.financial_operation_id=a.id AND t.connection_id=? "
+            "AND t.operation_date BETWEEN ? AND ?)"
+        )
+        bindings = (start_date, end_date, connection_id, start_date, end_date)
+    elif table == "bank_statement_imports":
+        allowed_sql = (
+            "a.connection_id=? AND a.start_date=? AND a.end_date=? "
+            "AND EXISTS (SELECT 1 FROM main.bank_accounts AS account "
+            "WHERE account.connection_id=a.connection_id "
+            "AND account.legal_entity_id=a.legal_entity_id "
+            "AND account.provider_account_id=a.provider_account_id)"
+        )
+        bindings = (connection_id, start_date, end_date)
+    elif table == "bank_transactions":
+        allowed_sql = (
+            "a.connection_id=? AND a.operation_date BETWEEN ? AND ? "
+            "AND EXISTS (SELECT 1 FROM main.bank_accounts AS account "
+            "WHERE account.connection_id=a.connection_id "
+            "AND account.legal_entity_id=a.legal_entity_id "
+            "AND account.provider_account_id=a.provider_account_id)"
+        )
+        bindings = (connection_id, start_date, end_date)
+    elif table in {"integration_sync_runs", "integration_log_entries"}:
+        columns = table_columns(connection, "main", table)
+        if "connection_id" not in columns:
+            allowed_sql = "0"
+        else:
+            allowed_sql = "a.connection_id=?"
+            bindings = (connection_id,)
+    return scalar(
+        connection,
+        f"SELECT COUNT(*) FROM main.{quoted} AS a WHERE {new_row} AND NOT ({allowed_sql})",
+        bindings,
+    )
+
+
 def check_integrity(connection: sqlite3.Connection, schema: str) -> bool:
     rows = list(connection.execute(f"PRAGMA {quote_identifier(schema)}.integrity_check"))
     return len(rows) == 1 and str(rows[0][0]).lower() == "ok"
@@ -333,7 +608,14 @@ def declared_foreign_key_count(connection: sqlite3.Connection, schema: str) -> i
     )
 
 
-def check_schema_and_baseline(connection: sqlite3.Connection, result: dict[str, Any]) -> bool:
+def check_schema_and_baseline(
+    connection: sqlite3.Connection,
+    result: dict[str, Any],
+    connection_id: str,
+    start_date: str,
+    end_date: str,
+    min_sync_at: datetime,
+) -> bool:
     main_tables = user_tables(connection, "main")
     baseline_tables = user_tables(connection, "baseline")
 
@@ -366,7 +648,10 @@ def check_schema_and_baseline(connection: sqlite3.Connection, result: dict[str, 
     baseline_total = 0
     post_total = 0
     missing_total = 0
+    changed_total = 0
+    unexpected_new_total = 0
     pk_contract_ok = True
+    content_contract_ok = True
     for table in PROTECTED_TABLES:
         quoted = quote_identifier(table)
         before_count = scalar(connection, f"SELECT COUNT(*) FROM baseline.{quoted}")
@@ -377,6 +662,7 @@ def check_schema_and_baseline(connection: sqlite3.Connection, result: dict[str, 
         after_pk = primary_key_columns(connection, "main", table)
         if not before_pk or before_pk != after_pk:
             pk_contract_ok = False
+            content_contract_ok = False
             continue
         predicate = " AND ".join(
             f"a.{quote_identifier(column)} IS b.{quote_identifier(column)}" for column in before_pk
@@ -386,17 +672,48 @@ def check_schema_and_baseline(connection: sqlite3.Connection, result: dict[str, 
             f"SELECT COUNT(*) FROM baseline.{quoted} AS b "
             f"WHERE NOT EXISTS (SELECT 1 FROM main.{quoted} AS a WHERE {predicate})",
         )
+        changed_total += baseline_row_content_changes(
+            connection,
+            table,
+            before_pk,
+            connection_id,
+            start_date,
+            end_date,
+            min_sync_at,
+        )
+        unexpected_new_total += unexpected_new_rows(
+            connection,
+            table,
+            before_pk,
+            connection_id,
+            start_date,
+            end_date,
+        )
     result["counts"].update({
         "protected_tables": len(PROTECTED_TABLES),
         "baseline_protected_rows": baseline_total,
         "post_import_protected_rows": post_total,
         "missing_baseline_rows": missing_total,
+        "changed_baseline_rows": changed_total,
+        "unexpected_new_protected_rows": unexpected_new_total,
     })
     record(
         result,
         "baseline_primary_keys_preserved",
         pk_contract_ok and missing_total == 0 and post_total >= baseline_total,
         "baseline_financial_rows_missing",
+    )
+    record(
+        result,
+        "baseline_row_contents_preserved",
+        content_contract_ok and changed_total == 0,
+        "baseline_protected_rows_changed",
+    )
+    record(
+        result,
+        "protected_table_growth_scoped",
+        unexpected_new_total == 0,
+        "unexpected_protected_rows_added",
     )
     return True
 
@@ -585,7 +902,14 @@ def reconcile(connection: sqlite3.Connection, args: argparse.Namespace, min_sync
     record(result, "after_foreign_keys", after_fk == 0, "after_snapshot_foreign_key_violations")
     record(result, "before_foreign_keys", before_fk == 0, "before_snapshot_foreign_key_violations")
 
-    if not check_schema_and_baseline(connection, result):
+    if not check_schema_and_baseline(
+        connection,
+        result,
+        args.connection_id,
+        args.start_date,
+        args.end_date,
+        min_sync_at,
+    ):
         return result
 
     accounts = fetch_accounts(connection, args.connection_id)
