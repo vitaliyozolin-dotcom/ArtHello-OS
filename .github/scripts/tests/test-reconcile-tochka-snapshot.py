@@ -1,0 +1,485 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+HERE = Path(__file__).resolve().parent
+CHECKER = HERE.parent / "reconcile-tochka-snapshot.py"
+SYNC_AT = "2026-09-04T13:20:00.000Z"
+
+GENERIC_PROTECTED = (
+    "production_auth_credentials",
+    "app_users",
+    "user_system_access",
+    "entities",
+    "integration_connections",
+    "finance_accruals",
+    "finance_budgets",
+    "finance_forecast_items",
+    "finance_payroll_summary",
+    "finance_corrections",
+    "finance_reconciliation_issues",
+    "client_accruals",
+    "client_bonuses",
+    "client_lifecycles",
+    "accounting_documents",
+    "accounting_document_links",
+    "accounting_completeness_checks",
+    "accounting_exports",
+    "accounting_integrations",
+    "system_runtime_state",
+    "integration_log_entries",
+    "audit_events",
+)
+
+
+def create_schema(connection: sqlite3.Connection) -> None:
+    connection.executescript(
+        """
+        CREATE TABLE integration_sync_runs (
+          id TEXT PRIMARY KEY,
+          connection_id TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          finished_at TEXT NOT NULL,
+          status TEXT NOT NULL,
+          received_count INTEGER NOT NULL,
+          accepted_count INTEGER NOT NULL,
+          rejected_count INTEGER NOT NULL,
+          error_count INTEGER NOT NULL,
+          conflict_count INTEGER NOT NULL,
+          checkpoint TEXT NOT NULL,
+          dry_run INTEGER NOT NULL
+        );
+        CREATE TABLE bank_accounts (
+          id TEXT PRIMARY KEY,
+          connection_id TEXT NOT NULL,
+          legal_entity_id TEXT NOT NULL,
+          provider_account_id TEXT NOT NULL,
+          currency TEXT NOT NULL,
+          balance_minor INTEGER,
+          balance_as_of TEXT NOT NULL,
+          synced_at TEXT NOT NULL
+        );
+        CREATE TABLE bank_statement_imports (
+          id TEXT PRIMARY KEY,
+          connection_id TEXT NOT NULL,
+          legal_entity_id TEXT NOT NULL,
+          provider_statement_id TEXT NOT NULL,
+          provider_account_id TEXT NOT NULL,
+          start_date TEXT NOT NULL,
+          end_date TEXT NOT NULL,
+          status TEXT NOT NULL,
+          start_balance_minor INTEGER NOT NULL,
+          end_balance_minor INTEGER NOT NULL,
+          currency TEXT NOT NULL,
+          transaction_count INTEGER NOT NULL,
+          fetched_at TEXT NOT NULL
+        );
+        CREATE TABLE bank_transactions (
+          id TEXT PRIMARY KEY,
+          connection_id TEXT NOT NULL,
+          legal_entity_id TEXT NOT NULL,
+          provider_account_id TEXT NOT NULL,
+          provider_statement_id TEXT NOT NULL,
+          provider_transaction_id TEXT NOT NULL,
+          operation_date TEXT NOT NULL,
+          direction TEXT NOT NULL,
+          amount_minor INTEGER NOT NULL,
+          currency TEXT NOT NULL,
+          status TEXT NOT NULL,
+          financial_operation_id TEXT NOT NULL,
+          imported_at TEXT NOT NULL
+        );
+        CREATE TABLE financial_operations (
+          id TEXT PRIMARY KEY,
+          operation_date TEXT NOT NULL,
+          direction TEXT NOT NULL,
+          amount_minor INTEGER NOT NULL,
+          legal_entity_id TEXT NOT NULL,
+          bank_operation_ref TEXT NOT NULL,
+          operation_kind TEXT NOT NULL,
+          source_system TEXT NOT NULL,
+          cashflow_article TEXT,
+          pnl_article TEXT,
+          accrual_period TEXT,
+          counterparty_label TEXT,
+          management_purpose TEXT
+        );
+        """
+    )
+    for table in GENERIC_PROTECTED:
+        connection.execute(f'CREATE TABLE "{table}" (id TEXT PRIMARY KEY, value TEXT)')
+
+
+def seed_baseline(connection: sqlite3.Connection) -> None:
+    for index in range(1, 5):
+        connection.execute(
+            "INSERT INTO bank_accounts VALUES (?,?,?,?,?,?,?,?)",
+            (
+                f"A{index}",
+                "INT-T-TOCHKA",
+                "ORG",
+                f"ACC{index}",
+                "RUB",
+                index * 1000,
+                "2026-08-31",
+                "2026-08-31T00:00:00.000Z",
+            ),
+        )
+    connection.execute(
+        "INSERT INTO financial_operations "
+        "(id,operation_date,direction,amount_minor,legal_entity_id,bank_operation_ref,operation_kind,source_system) "
+        "VALUES ('OLD','2026-08-31','Поступление',1,'ORG','','MANUAL','MANUAL')"
+    )
+    for table in GENERIC_PROTECTED:
+        connection.execute(f'INSERT INTO "{table}" VALUES (?,?)', (f"OLD-{table}", "kept"))
+    connection.execute(
+        "INSERT INTO integration_sync_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "OLD-RUN",
+            "INT-T-TOCHKA",
+            "2026-08-31T10:00:00.000Z",
+            "2026-08-31T10:00:00.000Z",
+            "Успешно",
+            4,
+            4,
+            0,
+            0,
+            0,
+            "accounts:4;statements:0;transactions:0",
+            0,
+        ),
+    )
+
+
+def seed_import(connection: sqlite3.Connection) -> None:
+    specs = {
+        "ACC1": (1000, 1500, [("Поступление", 500)]),
+        "ACC2": (2000, 1800, [("Списание", 200)]),
+        "ACC3": (3000, 3600, [("Поступление", 700), ("Списание", 100)]),
+        "ACC4": (4000, 3900, [("Поступление", 300), ("Списание", 400)]),
+    }
+    transaction_index = 0
+    for account_id, (start_balance, end_balance, transactions) in specs.items():
+        statement_id = f"STMT-{account_id}"
+        connection.execute(
+            "UPDATE bank_accounts SET balance_minor=?,balance_as_of='2026-09-04',synced_at=? "
+            "WHERE connection_id='INT-T-TOCHKA' AND provider_account_id=?",
+            (end_balance, SYNC_AT, account_id),
+        )
+        connection.execute(
+            "INSERT INTO bank_statement_imports VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                statement_id,
+                "INT-T-TOCHKA",
+                "ORG",
+                statement_id,
+                account_id,
+                "2026-09-01",
+                "2026-09-04",
+                "Ready",
+                start_balance,
+                end_balance,
+                "RUB",
+                len(transactions),
+                SYNC_AT,
+            ),
+        )
+        for direction, amount in transactions:
+            transaction_index += 1
+            transaction_id = f"TX{transaction_index}"
+            operation_id = f"FIN{transaction_index}"
+            connection.execute(
+                "INSERT INTO bank_transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    transaction_id,
+                    "INT-T-TOCHKA",
+                    "ORG",
+                    account_id,
+                    statement_id,
+                    transaction_id,
+                    "2026-09-02",
+                    direction,
+                    amount,
+                    "RUB",
+                    "Booked",
+                    operation_id,
+                    SYNC_AT,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO financial_operations "
+                "(id,operation_date,direction,amount_minor,legal_entity_id,bank_operation_ref,operation_kind,source_system) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    operation_id,
+                    "2026-09-02",
+                    direction,
+                    amount,
+                    "ORG",
+                    transaction_id,
+                    "BANK_STATEMENT",
+                    "BANK_TOCHKA_API",
+                ),
+            )
+    connection.execute(
+        "INSERT INTO integration_sync_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "RUN1",
+            "INT-T-TOCHKA",
+            SYNC_AT,
+            SYNC_AT,
+            "Успешно",
+            14,
+            14,
+            0,
+            0,
+            0,
+            "accounts:4;statements:4;transactions:6",
+            0,
+        ),
+    )
+
+
+class CheckerFixture:
+    def __init__(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        root = Path(self.temp.name)
+        self.before = root / "before.sqlite"
+        self.after = root / "after.sqlite"
+        for path in (self.before, self.after):
+            with sqlite3.connect(path) as connection:
+                create_schema(connection)
+                seed_baseline(connection)
+        with sqlite3.connect(self.after) as connection:
+            seed_import(connection)
+
+    def close(self) -> None:
+        self.temp.cleanup()
+
+    def run(self, *extra: str) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+        process = subprocess.run(
+            [
+                sys.executable,
+                str(CHECKER),
+                "--before-db",
+                str(self.before),
+                "--after-db",
+                str(self.after),
+                "--min-sync-at",
+                "2026-09-04T13:00:00Z",
+                "--expected-source-transaction-count",
+                "6",
+                *extra,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        lines = process.stdout.splitlines()
+        if len(lines) != 1:
+            raise AssertionError(f"expected exactly one stdout line, received {len(lines)}")
+        return process, json.loads(lines[0])
+
+
+class ReconcileTochkaSnapshotTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fixture = CheckerFixture()
+
+    def tearDown(self) -> None:
+        self.fixture.close()
+
+    def test_clean_import_passes_all_checks_and_emits_aggregates_only(self) -> None:
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 0)
+        self.assertEqual(process.stderr, "")
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(all(result["checks"].values()))
+        self.assertEqual(result["amounts_minor"]["bank_receipts"], 1500)
+        self.assertEqual(result["amounts_minor"]["bank_outflows"], 700)
+        self.assertEqual(result["amounts_minor"]["receipt_difference"], 0)
+        self.assertEqual(result["amounts_minor"]["outflow_difference"], 0)
+        self.assertNotIn("ACC1", process.stdout)
+        self.assertNotIn("ORG", process.stdout)
+        self.assertNotIn("TX1", process.stdout)
+
+    def test_deleted_baseline_financial_row_is_detected_by_primary_key(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute("DELETE FROM financial_operations WHERE id='OLD'")
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["baseline_primary_keys_preserved"])
+        self.assertEqual(result["counts"]["missing_baseline_rows"], 1)
+
+    def test_registry_amount_mismatch_fails_row_and_gross_checks(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute("UPDATE financial_operations SET amount_minor=501 WHERE id='FIN1'")
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["bank_registry_one_to_one"])
+        self.assertFalse(result["checks"]["gross_receipts"])
+        self.assertEqual(result["amounts_minor"]["receipt_difference"], 1)
+
+    def test_stale_successful_sync_is_rejected(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "UPDATE integration_sync_runs SET started_at='2026-09-03T12:00:00.000Z',"
+                "finished_at='2026-09-03T12:00:00.000Z' WHERE id='RUN1'"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["latest_sync"])
+
+    def test_idempotent_rerun_may_keep_an_older_statement_reference(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "INSERT INTO bank_statement_imports VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "OLDER-STMT-ACC1",
+                    "INT-T-TOCHKA",
+                    "ORG",
+                    "OLDER-STMT-ACC1",
+                    "ACC1",
+                    "2026-09-01",
+                    "2026-09-04",
+                    "Ready",
+                    1000,
+                    1500,
+                    "RUB",
+                    1,
+                    "2026-09-04T12:00:00.000Z",
+                ),
+            )
+            connection.execute(
+                "UPDATE bank_transactions SET provider_statement_id='OLDER-STMT-ACC1' WHERE id='TX1'"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 0)
+        self.assertEqual(result["status"], "ok")
+
+    def test_global_transaction_count_cannot_hide_per_account_mismatch(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute("UPDATE bank_statement_imports SET transaction_count=2 WHERE id='STMT-ACC1'")
+            connection.execute("UPDATE bank_statement_imports SET transaction_count=0 WHERE id='STMT-ACC2'")
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["transaction_counts"])
+
+    def test_transaction_reference_to_wrong_window_is_rejected(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "INSERT INTO bank_statement_imports VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "AUG-STMT-ACC1",
+                    "INT-T-TOCHKA",
+                    "ORG",
+                    "AUG-STMT-ACC1",
+                    "ACC1",
+                    "2026-08-01",
+                    "2026-08-31",
+                    "Ready",
+                    0,
+                    1000,
+                    "RUB",
+                    1,
+                    "2026-08-31T12:00:00.000Z",
+                ),
+            )
+            connection.execute(
+                "UPDATE bank_transactions SET provider_statement_id='AUG-STMT-ACC1' WHERE id='TX1'"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["transaction_shape"])
+
+    def test_extra_statement_at_current_run_timestamp_is_rejected(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "INSERT INTO bank_statement_imports VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "EXTRA-STMT-ACC1",
+                    "INT-T-TOCHKA",
+                    "ORG",
+                    "EXTRA-STMT-ACC1",
+                    "ACC1",
+                    "2026-09-01",
+                    "2026-09-04",
+                    "Ready",
+                    1000,
+                    1500,
+                    "RUB",
+                    1,
+                    SYNC_AT,
+                ),
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["latest_statements"])
+
+    def test_malformed_extra_tochka_registry_row_is_not_hidden(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "INSERT INTO financial_operations "
+                "(id,operation_date,direction,amount_minor,legal_entity_id,bank_operation_ref,operation_kind,source_system) "
+                "VALUES ('EXTRA','2026-09-02','Поступление',10,'ORG','EXTRA','MANUAL','BANK_TOCHKA_API')"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["bank_registry_one_to_one"])
+        self.assertFalse(result["checks"]["gross_receipts"])
+
+    def test_ineligible_pending_transaction_cannot_keep_financial_link(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute("UPDATE bank_transactions SET status='Pending' WHERE id='TX1'")
+            connection.execute("UPDATE financial_operations SET source_system='MANUAL' WHERE id='FIN1'")
+            connection.execute(
+                "UPDATE bank_statement_imports SET end_balance_minor=1000 WHERE id='STMT-ACC1'"
+            )
+            connection.execute(
+                "UPDATE bank_accounts SET balance_minor=1000 WHERE provider_account_id='ACC1'"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["transaction_shape"])
+
+    def test_account_balance_snapshot_must_match_latest_statement(self) -> None:
+        with sqlite3.connect(self.fixture.after) as connection:
+            connection.execute(
+                "UPDATE bank_accounts SET balance_minor=1499 WHERE provider_account_id='ACC1'"
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["latest_statements"])
+
+    def test_latest_run_must_not_already_exist_in_baseline(self) -> None:
+        with sqlite3.connect(self.fixture.before) as connection:
+            connection.execute(
+                "INSERT INTO integration_sync_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "RUN1",
+                    "INT-T-TOCHKA",
+                    SYNC_AT,
+                    SYNC_AT,
+                    "Успешно",
+                    14,
+                    14,
+                    0,
+                    0,
+                    0,
+                    "accounts:4;statements:4;transactions:6",
+                    0,
+                ),
+            )
+        process, result = self.fixture.run()
+        self.assertEqual(process.returncode, 1)
+        self.assertFalse(result["checks"]["latest_sync"])
+
+
+if __name__ == "__main__":
+    unittest.main()
