@@ -67,7 +67,6 @@ def hash_rows(table, where="", parameters=()):
     info = table_info(table)
     if not info:
         raise SystemExit(f"required table missing: {table}")
-    columns = [row[1] for row in info]
     primary_key = [row[1] for row in sorted(info, key=lambda row: row[5]) if row[5]]
     order_by = ",".join(f'"{column}"' for column in primary_key) if primary_key else "rowid"
     query = f'SELECT * FROM "{table}"'
@@ -75,8 +74,16 @@ def hash_rows(table, where="", parameters=()):
         query += f" WHERE {where}"
     query += f" ORDER BY {order_by}"
     add(table)
-    for column in columns:
-        add(column)
+    for schema_value in connection.execute(
+        "SELECT type,name,tbl_name,COALESCE(sql,'') FROM sqlite_master "
+        "WHERE tbl_name=? ORDER BY type,name",
+        (table,),
+    ):
+        for value in schema_value:
+            add(value)
+    for info_row in info:
+        for value in info_row:
+            add(value)
     count = 0
     for row in connection.execute(query, parameters):
         count += 1
@@ -132,10 +139,10 @@ try:
     if setup.get("secretStatus") != "stored" or not setup.get("customerCode"):
         raise SystemExit("stored Tochka credential binding missing")
 
-    required_tables = {
+    protected_tables = {
         "production_auth_credentials",
-        "integration_connections",
-        "system_runtime_state",
+        "app_users",
+        "user_system_access",
         "bank_accounts",
         "bank_statement_imports",
         "bank_transactions",
@@ -146,27 +153,27 @@ try:
         "finance_payroll_summary",
         "finance_corrections",
         "finance_reconciliation_issues",
+        "client_accruals",
+        "client_bonuses",
+        "accounting_documents",
+        "accounting_document_links",
+        "accounting_completeness_checks",
+        "accounting_exports",
+        "accounting_integrations",
     }
-    user_tables = [row[0] for row in connection.execute(
-        "SELECT name FROM sqlite_master "
-        "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-    )]
-    missing_tables = required_tables - set(user_tables)
+    existing_tables = {row[0] for row in connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    )}
+    missing_tables = protected_tables - existing_tables
     if missing_tables:
         raise SystemExit("required data tables missing: " + ",".join(sorted(missing_tables)))
-    for schema_row in connection.execute(
-        "SELECT type,name,tbl_name,COALESCE(sql,'') FROM sqlite_master "
-        "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
-    ):
-        for value in schema_row:
-            add(value)
-    for table in user_tables:
+    for table in sorted(protected_tables):
         hash_rows(table)
-    credential_rows = connection.execute(
-        "SELECT COUNT(*) FROM system_runtime_state "
-        "WHERE state_key='integration_setup:INT-T-TOCHKA' "
-        "OR state_key LIKE 'integration_credential:v2:INT-T-TOCHKA:%'"
-    ).fetchone()[0]
+    credential_rows = hash_rows(
+        "system_runtime_state",
+        "state_key='integration_setup:INT-T-TOCHKA' "
+        "OR state_key LIKE 'integration_credential:v2:INT-T-TOCHKA:%'",
+    )
     if credential_rows < 2:
         raise SystemExit("Tochka setup or encrypted credential envelope missing")
     print(digest.hexdigest())
