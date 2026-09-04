@@ -222,7 +222,10 @@ public_ready() {
 cleanup_on_failure() {
   local original_status="${1:-1}"
   if [ "$original_status" -eq 0 ]; then return 0; fi
-  trap - EXIT INT TERM HUP
+  trap - EXIT
+  # Once rollback starts, defer repeated catchable cancellation signals so the
+  # verified restore cannot be interrupted between clearing and repopulating /data.
+  trap '' INT TERM HUP
   set +e
   local rollback_failed=0
   local candidate_quiesced=1
