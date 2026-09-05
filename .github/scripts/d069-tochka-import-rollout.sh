@@ -36,6 +36,24 @@ PRODUCTION_DATA_INVENTORY="${PRODUCTION_DATA_INVENTORY:-deploy/v52/maintenance/p
 TOCHKA_EXPECTED_ACCOUNTS="${TOCHKA_EXPECTED_ACCOUNTS:-4}"
 TOCHKA_IMPORT_MAX_ATTEMPTS="${TOCHKA_IMPORT_MAX_ATTEMPTS:-12}"
 TOCHKA_IMPORT_RETRY_DELAY_MS="${TOCHKA_IMPORT_RETRY_DELAY_MS:-15000}"
+rollout_phase=bootstrap
+
+report_rollout_failure() {
+  local failure_status="$1"
+  local failure_line="$2"
+  trap - ERR
+  if ! [[ "$failure_status" =~ ^[1-9][0-9]*$ ]] || [ "$failure_status" -gt 255 ]; then
+    failure_status=1
+  fi
+  [[ "$failure_line" =~ ^[1-9][0-9]*$ ]] || failure_line=1
+  case "$rollout_phase" in
+    child-context|workspace|host-lock|input-validation|live-container|inactive-containers|public-topology|pre-mutation-health|resource-creation|production-fence|backup|import-start|tochka-api|post-import-quiesce|reconciliation|private-restart|public-commit|self-test) ;;
+    *) rollout_phase=unknown ;;
+  esac
+  printf '::error::D069_TOCHKA_FAILURE phase=%s line=%s status=%s\n' \
+    "$rollout_phase" "$failure_line" "$failure_status" >&2 || :
+  exit "$failure_status"
+}
 
 supervisor_process_matches() {
   local process_id="$1"
@@ -309,6 +327,24 @@ supervise_rollout() {
       nohup setsid --fork bash -c '
         set -Eeuo pipefail
         umask 077
+        supervisor_phase=supervisor-identity
+        report_supervisor_failure() {
+          failure_status="$1"
+          failure_line="$2"
+          trap - ERR
+          if ! [[ "$failure_status" =~ ^[1-9][0-9]*$ ]] || [ "$failure_status" -gt 255 ]; then
+            failure_status=1
+          fi
+          [[ "$failure_line" =~ ^[1-9][0-9]*$ ]] || failure_line=1
+          case "$supervisor_phase" in
+            supervisor-identity|supervisor-rollout|supervisor-status) ;;
+            *) supervisor_phase=unknown ;;
+          esac
+          printf "::error::D069_TOCHKA_FAILURE phase=%s line=%s status=%s\n" \
+            "$supervisor_phase" "$failure_line" "$failure_status" >&2 || :
+          exit "$failure_status"
+        }
+        trap "report_supervisor_failure \"\$?\" \"\$LINENO\"" ERR
         bundle_root="$1"
         rollout_path="$2"
         start_record="$3"
@@ -359,12 +395,16 @@ PY
         chmod 0600 "$start_temporary"
         mv -f -- "$start_temporary" "$start_record"
         cd "$bundle_root"
-        set +e
         # This watchdog lives inside the detached session. Its one TERM reaches
         # the rollout and any blocked foreground command; the rollout trap then
         # performs recovery without a later forced kill interrupting rollback.
-        timeout --preserve-status --signal=TERM "$max_runtime" bash "$rollout_path"
-        rollout_status=$?
+        supervisor_phase=supervisor-rollout
+        if timeout --preserve-status --signal=TERM "$max_runtime" bash "$rollout_path"; then
+          rollout_status=0
+        else
+          rollout_status=$?
+        fi
+        supervisor_phase=supervisor-status
         status_temporary="$status_record.tmp.$process_id"
         {
           printf "version=1\n"
@@ -457,6 +497,8 @@ if [ "$self_test" -eq 0 ] && [ "${D069_SUPERVISED_CHILD:-}" != 1 ]; then
 fi
 
 if [ "$self_test" -eq 0 ]; then
+  rollout_phase=child-context
+  trap 'report_rollout_failure "$?" "$LINENO"' ERR
   : "${D069_SUPERVISOR_ROOT:?D069_SUPERVISOR_ROOT is required for detached child}"
   test "$(pwd -P)" = "$D069_SUPERVISOR_ROOT/bundle"
   test "$(realpath -e "$RUNNER_TEMP")" = "$D069_SUPERVISOR_ROOT/runtime"
@@ -495,6 +537,7 @@ if [ -e "$work" ] || [ -L "$work" ]; then
   printf '::error::temporary work directory already exists\n'
   exit 2
 fi
+rollout_phase=workspace
 mkdir -p "$work" "$before_live_snapshot" "$before_backup_snapshot" "$after_snapshot"
 chmod 0700 "$work" "$before_live_snapshot" "$before_backup_snapshot" "$after_snapshot"
 
@@ -802,11 +845,25 @@ run_rollout_self_tests() {
   local protocol_output="$protocol_root/child.github-output"
   local protocol_normalized="$protocol_root/normalized.github-output"
   local protocol_identity="$protocol_root/live-identity"
+  local failure_report="$work/failure-report"
   local protocol_namespace_pid="$BASHPID"
   local protocol_child_pid=""
   local protocol_start_ticks=""
   local protocol_exit_code=""
+  local rollout_failure_output=""
+  local rollout_failure_status=0
   local expected_backup="arthello-d069-tochka-rollback-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
+  if rollout_failure_output="$(rollout_phase=self-test report_rollout_failure 7 123 2>&1)"; then
+    printf 'failure reporter fixture unexpectedly succeeded\n' >&2
+    return 1
+  else
+    rollout_failure_status=$?
+  fi
+  test "$rollout_failure_status" -eq 7
+  printf '%s\n' "$rollout_failure_output" > "$failure_report"
+  test "$(cat "$failure_report")" = \
+    '::error::D069_TOCHKA_FAILURE phase=self-test line=123 status=7'
 
   validate_canonical_public_topology_payload \
     "$container_id" arthello-live arthello-public network-id \
@@ -906,6 +963,14 @@ import sys
 from pathlib import Path
 
 source = Path(sys.argv[1]).read_text(encoding="utf-8")
+failure_start = source.index("report_rollout_failure() {")
+failure_end = source.index("\n}\n", failure_start) + 3
+failure_reporter = source[failure_start:failure_end]
+for token in ("phase=%s line=%s status=%s", '"$rollout_phase"', '"$failure_line"'):
+    if token not in failure_reporter:
+        raise SystemExit(f"missing safe failure-report token: {token}")
+if "BASH_COMMAND" in failure_reporter:
+    raise SystemExit("failure reporter must not expose shell commands")
 supervisor_start = source.index("supervise_rollout() {")
 supervisor_end = source.index("\nif [ \"$self_test\" -eq 0 ]", supervisor_start)
 supervisor = source[supervisor_start:supervisor_end]
@@ -916,6 +981,12 @@ for token in (
     "timeout --preserve-status --signal=TERM",
     "supervisor_max_runtime=120m",
     "set -Eeuo pipefail",
+    "supervisor_phase=supervisor-identity",
+    "report_supervisor_failure() {",
+    'trap "report_supervisor_failure \\"\\$?\\" \\"\\$LINENO\\"" ERR',
+    "supervisor_phase=supervisor-rollout",
+    'if timeout --preserve-status --signal=TERM "$max_runtime" bash "$rollout_path"; then',
+    "supervisor_phase=supervisor-status",
     'namespace_process_id="$BASHPID"',
     'python3 - "$namespace_process_id" > "$identity_temporary"',
     'pathlib.Path("/proc/self/stat")',
@@ -935,6 +1006,8 @@ for forbidden in (
     'process_identity="$(python3',
     '\n        process_id="$BASHPID"',
     'test "$process_id" = "$BASHPID"',
+    "BASH_COMMAND",
+    "\n        set +e\n",
     'child_output="$child_runtime/',
     'child_log="$child_runtime/',
     'start_record="$child_runtime/',
@@ -942,6 +1015,27 @@ for forbidden in (
 ):
     if forbidden in supervisor:
         raise SystemExit(f"supervisor control file entered child runtime: {forbidden}")
+for token in (
+    "rollout_phase=child-context",
+    "rollout_phase=input-validation",
+    "rollout_phase=live-container",
+    "rollout_phase=inactive-containers",
+    "rollout_phase=public-topology",
+    "rollout_phase=pre-mutation-health",
+    "rollout_phase=resource-creation",
+    "rollout_phase=production-fence",
+    "rollout_phase=backup",
+    "rollout_phase=import-start",
+    "rollout_phase=tochka-api",
+    "rollout_phase=post-import-quiesce",
+    "rollout_phase=reconciliation",
+    "rollout_phase=private-restart",
+    "rollout_phase=public-commit",
+    "trap 'report_rollout_failure \"$?\" \"$LINENO\"' ERR",
+    "trap - ERR EXIT",
+):
+    if token not in source:
+        raise SystemExit(f"missing rollout failure-observability token: {token}")
 listener_start = source.rindex("internal_listener_ready() {")
 listener_end = source.index("\n}\n\npublic_ready()", listener_start)
 listener = source[listener_start:listener_end]
@@ -1192,7 +1286,7 @@ restore_exact_backup() {
 cleanup_on_failure() {
   local original_status="${1:-1}"
   if [ "$original_status" -eq 0 ]; then return 0; fi
-  trap - EXIT
+  trap - ERR EXIT
   trap '' INT TERM HUP
   set +e
   local rollback_failed=0
@@ -1299,7 +1393,7 @@ handle_signal() {
 
 preflight_cleanup() {
   local original_status="${1:-1}"
-  trap - EXIT
+  trap - ERR EXIT
   trap '' INT TERM HUP
   rm -rf -- "$work"
   exit "$original_status"
@@ -1310,6 +1404,7 @@ trap 'handle_signal 130' INT
 trap 'handle_signal 143' TERM
 trap 'handle_signal 129' HUP
 
+rollout_phase=host-lock
 command -v flock >/dev/null
 if [ -L "$PRODUCTION_LOCK_FILE" ]; then
   printf '::error::production lock path must not be a symlink\n'
@@ -1322,8 +1417,10 @@ if ! flock -n 9; then
   exit 1
 fi
 
+rollout_phase=input-validation
 validate_inputs
 
+rollout_phase=live-container
 live_ids_output="$(docker ps --no-trunc -q --filter "volume=$DATA_VOLUME")"
 mapfile -t live_ids <<<"$live_ids_output"
 test "${#live_ids[@]}" -eq 1
@@ -1346,6 +1443,7 @@ test "$(docker inspect "$live_id" --format '{{index .Config.Labels "arthello.rel
 test "$(docker image inspect "$live_image_id" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$EXPECTED_RELEASE_SHA"
 test "$(docker image inspect "$live_image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$EXPECTED_RELEASE_SHA"
 
+rollout_phase=inactive-containers
 all_ids_output="$(docker ps --no-trunc -aq --filter "volume=$DATA_VOLUME")"
 mapfile -t all_container_ids <<<"$all_ids_output"
 test "${#all_container_ids[@]}" -ge 1
@@ -1362,6 +1460,7 @@ for attached_id in "${all_container_ids[@]}"; do
 done
 test "$live_seen" -eq 1
 
+rollout_phase=public-topology
 mapfile -t networks < <(docker inspect "$live_id" --format '{{range $network, $_ := .NetworkSettings.Networks}}{{println $network}}{{end}}')
 test "${#networks[@]}" -eq 1
 network_name="${networks[0]}"
@@ -1384,6 +1483,7 @@ if docker network inspect "$import_network" >/dev/null 2>&1; then
   exit 1
 fi
 
+rollout_phase=pre-mutation-health
 internal_listener_ready "$live_id"
 public_ready
 printf 'D069_TOCHKA_PREVIOUS_PRODUCTION=HEALTHY release=%s\n' "$EXPECTED_RELEASE_SHA"
@@ -1395,6 +1495,7 @@ fi
 
 # From here onward failures must recover any newly-created resources, then the
 # restart policy, network/name and (once writable) the exact data directory.
+rollout_phase=resource-creation
 trap 'cleanup_on_failure $?' EXIT
 docker volume create \
   --label arthello.scope=production-rollback \
@@ -1416,6 +1517,7 @@ import_network_created=1
 [[ "$import_network_id" =~ ^[a-f0-9]{64}$ ]]
 test "$(docker network inspect "$import_network" --format '{{.Name}}')" = "$import_network"
 production_touched=1
+rollout_phase=production-fence
 docker update --restart=no "$live_id" >/dev/null
 test "$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')" = no
 docker network disconnect "$network_name" "$live_id"
@@ -1430,6 +1532,7 @@ test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = false
 test "$(docker inspect "$live_id" --format '{{.State.Paused}}')" = false
 container_lacks_named_network "$live_id" "$network_name"
 
+rollout_phase=backup
 docker run --rm --network none --user 0:0 \
   --mount "type=volume,src=$DATA_VOLUME,dst=/from,readonly" \
   --mount "type=volume,src=$rollback_volume,dst=/to" \
@@ -1463,6 +1566,7 @@ printf 'D069_TOCHKA_BACKUP=VERIFIED volume=%s digest=%s\n' "$rollback_volume" "$
 
 # Keep the production DNS target absent while the same, exact release container
 # performs authenticated internal API calls against the mounted production data.
+rollout_phase=import-start
 docker rename "$live_id" "$hidden_name"
 docker network connect "$import_network" "$live_id"
 container_has_named_network "$live_id" "$import_network"
@@ -1478,6 +1582,7 @@ verify_bootstrap_owner_password "$before_backup_snapshot/$relative_db"
 docker cp "$TOCHKA_IMPORT_CLIENT" "$live_id:$client_container_path"
 docker exec --user 0:0 "$live_id" chmod 0444 "$client_container_path"
 import_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+rollout_phase=tochka-api
 if ! docker exec \
   --env TOCHKA_IMPORT_AUTH_PREFLIGHT=VERIFIED \
   --env "TOCHKA_IMPORT_START_DATE=$TOCHKA_START_DATE" \
@@ -1531,6 +1636,7 @@ IFS= read -r expected_transaction_count < "$work/client.result"
 [[ "$expected_transaction_count" =~ ^[0-9]+$ ]]
 test "$expected_transaction_count" -gt 0
 
+rollout_phase=post-import-quiesce
 docker exec --user 0:0 "$live_id" rm -f -- "$client_container_path"
 docker network disconnect "$import_network" "$live_id"
 container_lacks_named_network "$live_id" "$import_network"
@@ -1548,6 +1654,7 @@ container_has_no_networks "$live_id"
 docker network rm "$import_network" >/dev/null
 import_network_created=0
 
+rollout_phase=reconciliation
 snapshot_volume "$DATA_VOLUME" "$after_snapshot"
 after_digest="$(directory_digest "$after_snapshot")"
 [[ "$after_digest" =~ ^[a-f0-9]{64}$ ]]
@@ -1653,6 +1760,7 @@ container_has_no_networks "$live_id"
 
 # Start and health-check with every network still detached. Re-publish only
 # after a stopped, immutable snapshot has passed reconciliation.
+rollout_phase=private-restart
 docker rename "$live_id" "$live_name"
 docker start "$live_id" >/dev/null
 test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
@@ -1675,6 +1783,7 @@ test "$(docker volume inspect "$rollback_volume" --format '{{.Name}}')" = "$roll
 
 # Network attachment is the irreversible commit boundary: once the public
 # proxy may have accepted a write, failure recovery preserves imported data.
+rollout_phase=public-commit
 public_exposed=1
 connect_canonical_public_network "$live_id"
 public_ready
@@ -1682,4 +1791,4 @@ public_ready
 printf 'D069_TOCHKA_PRODUCTION=VERIFIED release=%s window=%s..%s\n' \
   "$EXPECTED_RELEASE_SHA" "$TOCHKA_START_DATE" "$TOCHKA_END_DATE"
 rm -rf -- "$work"
-trap - EXIT INT TERM HUP
+trap - ERR EXIT INT TERM HUP
