@@ -11,7 +11,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 CHECKER = HERE.parent / "reconcile-tochka-snapshot.py"
-SYNC_AT = "2026-09-04T13:20:00.000Z"
+SYNC_AT = "2026-09-05T13:20:00.000Z"
 
 GENERIC_PROTECTED = (
     "production_auth_credentials",
@@ -237,7 +237,7 @@ def seed_import(connection: sqlite3.Connection) -> None:
     for account_id, (start_balance, end_balance, transactions) in specs.items():
         statement_id = f"STMT-{account_id}"
         connection.execute(
-            "UPDATE bank_accounts SET balance_minor=?,balance_as_of='2026-09-04',synced_at=? "
+            "UPDATE bank_accounts SET balance_minor=?,balance_as_of='2026-09-05',synced_at=? "
             "WHERE connection_id='INT-T-TOCHKA' AND provider_account_id=?",
             (end_balance, SYNC_AT, account_id),
         )
@@ -250,7 +250,7 @@ def seed_import(connection: sqlite3.Connection) -> None:
                 statement_id,
                 account_id,
                 "2026-09-01",
-                "2026-09-04",
+                "2026-09-05",
                 "Ready",
                 start_balance,
                 end_balance,
@@ -341,7 +341,7 @@ class CheckerFixture:
                 "--after-db",
                 str(self.after),
                 "--min-sync-at",
-                "2026-09-04T13:00:00Z",
+                "2026-09-05T13:00:00Z",
                 "--expected-source-transaction-count",
                 "6",
                 *extra,
@@ -388,7 +388,7 @@ class ReconcileTochkaSnapshotTest(unittest.TestCase):
             )
         with sqlite3.connect(self.fixture.after) as connection:
             connection.execute(
-                "UPDATE integration_connections SET updated_at='2026-09-04 13:20:00'"
+                "UPDATE integration_connections SET updated_at='2026-09-05 13:20:00'"
             )
         process, result = self.fixture.run()
         self.assertEqual(process.returncode, 0)
@@ -400,7 +400,7 @@ class ReconcileTochkaSnapshotTest(unittest.TestCase):
         with sqlite3.connect(self.fixture.after) as connection:
             connection.execute(
                 "UPDATE integration_connections SET owner_entity_id='ROLE:ATTACKER',"
-                "updated_at='2026-09-04 13:20:00' WHERE id='INT-T-D1'"
+                "updated_at='2026-09-05 13:20:00' WHERE id='INT-T-D1'"
             )
         process, result = self.fixture.run()
         self.assertEqual(process.returncode, 1)
@@ -501,13 +501,13 @@ class ReconcileTochkaSnapshotTest(unittest.TestCase):
                     "OLDER-STMT-ACC1",
                     "ACC1",
                     "2026-09-01",
-                    "2026-09-04",
+                    "2026-09-05",
                     "Ready",
                     1000,
                     1500,
                     "RUB",
                     1,
-                    "2026-09-04T12:00:00.000Z",
+                    "2026-09-05T12:00:00.000Z",
                 ),
             )
             connection.execute(
@@ -563,7 +563,7 @@ class ReconcileTochkaSnapshotTest(unittest.TestCase):
                     "EXTRA-STMT-ACC1",
                     "ACC1",
                     "2026-09-01",
-                    "2026-09-04",
+                    "2026-09-05",
                     "Ready",
                     1000,
                     1500,
