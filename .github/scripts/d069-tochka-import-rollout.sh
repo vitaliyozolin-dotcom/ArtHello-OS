@@ -317,18 +317,36 @@ supervise_rollout() {
         run_attempt="$6"
         max_runtime="$7"
         test "$max_runtime" = 120m
-        process_id="$BASHPID"
-        [[ "$process_id" =~ ^[1-9][0-9]*$ ]]
-        test "$process_id" -gt 1
-        process_start_ticks="$(python3 - "$process_id" <<'"'"'PY'"'"'
+        namespace_process_id="$BASHPID"
+        [[ "$namespace_process_id" =~ ^[1-9][0-9]*$ ]]
+        identity_temporary="$start_record.identity.$namespace_process_id"
+        test ! -e "$identity_temporary"
+        # Run Python as a direct foreground child. Its host-visible PPid is the
+        # detached Bash process; NSpid proves that this is our Bash namespace PID.
+        python3 - "$namespace_process_id" > "$identity_temporary" <<'"'"'PY'"'"'
 import pathlib
+import re
 import sys
 
-process_id = sys.argv[1]
-fields = pathlib.Path(f"/proc/{process_id}/stat").read_text(encoding="ascii").rsplit(")", 1)[1].split()
-print(fields[19])
+namespace_pid = sys.argv[1]
+self_after_name = pathlib.Path("/proc/self/stat").read_text(encoding="ascii").rsplit(")", 1)[1].split()
+host_parent = self_after_name[1]
+if not re.fullmatch(r"[1-9][0-9]*", host_parent) or int(host_parent) <= 1:
+    raise SystemExit(1)
+status_lines = pathlib.Path(f"/proc/{host_parent}/status").read_text(encoding="ascii").splitlines()
+namespace_ids = [line.split()[1:] for line in status_lines if line.startswith("NSpid:")]
+if len(namespace_ids) != 1 or not namespace_ids[0] or namespace_ids[0][-1] != namespace_pid:
+    raise SystemExit(1)
+parent_after_name = pathlib.Path(f"/proc/{host_parent}/stat").read_text(encoding="ascii").rsplit(")", 1)[1].split()
+start_ticks = parent_after_name[19]
+if not re.fullmatch(r"[1-9][0-9]*", start_ticks):
+    raise SystemExit(1)
+print(host_parent, start_ticks)
 PY
-        )"
+        read -r process_id process_start_ticks < "$identity_temporary"
+        rm -f -- "$identity_temporary"
+        [[ "$process_id" =~ ^[1-9][0-9]*$ ]]
+        test "$process_id" -gt 1
         [[ "$process_start_ticks" =~ ^[1-9][0-9]*$ ]]
         start_temporary="$start_record.tmp.$process_id"
         {
@@ -783,6 +801,8 @@ run_rollout_self_tests() {
   local protocol_status="$protocol_root/terminal-status"
   local protocol_output="$protocol_root/child.github-output"
   local protocol_normalized="$protocol_root/normalized.github-output"
+  local protocol_identity="$protocol_root/live-identity"
+  local protocol_namespace_pid="$BASHPID"
   local protocol_child_pid=""
   local protocol_start_ticks=""
   local protocol_exit_code=""
@@ -813,11 +833,33 @@ run_rollout_self_tests() {
   timeout --preserve-status --signal=TERM 1s true
   mkdir -p "$protocol_root"
   chmod 0700 "$protocol_root"
-  # This executor gives each spawned process a private /proc view, so a live
-  # positive PID fixture is not portable. Exercise strict record parsing with
-  # deterministic values and the process matcher through its fail-closed path.
-  protocol_child_pid=4242
-  protocol_start_ticks=777
+  [[ "$protocol_namespace_pid" =~ ^[1-9][0-9]*$ ]]
+  python3 - "$protocol_namespace_pid" > "$protocol_identity" <<'PY'
+import pathlib
+import re
+import sys
+
+namespace_pid = sys.argv[1]
+self_after_name = pathlib.Path("/proc/self/stat").read_text(encoding="ascii").rsplit(")", 1)[1].split()
+host_parent = self_after_name[1]
+if not re.fullmatch(r"[1-9][0-9]*", host_parent) or int(host_parent) <= 1:
+    raise SystemExit(1)
+status_lines = pathlib.Path(f"/proc/{host_parent}/status").read_text(encoding="ascii").splitlines()
+namespace_ids = [line.split()[1:] for line in status_lines if line.startswith("NSpid:")]
+if len(namespace_ids) != 1 or not namespace_ids[0] or namespace_ids[0][-1] != namespace_pid:
+    raise SystemExit(1)
+parent_after_name = pathlib.Path(f"/proc/{host_parent}/stat").read_text(encoding="ascii").rsplit(")", 1)[1].split()
+start_ticks = parent_after_name[19]
+if not re.fullmatch(r"[1-9][0-9]*", start_ticks):
+    raise SystemExit(1)
+print(host_parent, start_ticks)
+PY
+  read -r protocol_child_pid protocol_start_ticks < "$protocol_identity"
+  rm -f -- "$protocol_identity"
+  if ! supervisor_process_matches "$protocol_child_pid" "$protocol_start_ticks"; then
+    printf 'live supervisor identity fixture did not match its Bash parent\n' >&2
+    return 1
+  fi
   {
     printf 'version=1\n'
     printf 'run_id=%s\n' "$GITHUB_RUN_ID"
@@ -874,9 +916,12 @@ for token in (
     "timeout --preserve-status --signal=TERM",
     "supervisor_max_runtime=120m",
     "set -Eeuo pipefail",
-    'process_id="$BASHPID"',
-    'python3 - "$process_id"',
-    'pathlib.Path(f"/proc/{process_id}/stat")',
+    'namespace_process_id="$BASHPID"',
+    'python3 - "$namespace_process_id" > "$identity_temporary"',
+    'pathlib.Path("/proc/self/stat")',
+    'line.startswith("NSpid:")',
+    'pathlib.Path(f"/proc/{host_parent}/stat")',
+    'read -r process_id process_start_ticks < "$identity_temporary"',
     'child_runtime="$supervisor_root/runtime"',
     'child_output="$supervisor_root/child.github-output"',
     'child_log="$supervisor_root/child.log"',
@@ -885,9 +930,11 @@ for token in (
 ):
     if token not in supervisor:
         raise SystemExit(f"missing detached-supervisor token: {token}")
-if '/proc/self/stat' in supervisor:
-    raise SystemExit("supervisor identity must inspect the captured Bash PID directly")
 for forbidden in (
+    'process_start_ticks="$(python3',
+    'process_identity="$(python3',
+    '\n        process_id="$BASHPID"',
+    'test "$process_id" = "$BASHPID"',
     'child_output="$child_runtime/',
     'child_log="$child_runtime/',
     'start_record="$child_runtime/',
