@@ -892,6 +892,15 @@ for forbidden in (
 ):
     if forbidden in supervisor:
         raise SystemExit(f"supervisor control file entered child runtime: {forbidden}")
+listener_start = source.rindex("internal_listener_ready() {")
+listener_end = source.index("\n}\n\npublic_ready()", listener_start)
+listener = source[listener_start:listener_end]
+for token in ('require("node:net")', "net.createConnection", 'host: "127.0.0.1"', "port: 8081"):
+    if token not in listener:
+        raise SystemExit(f"missing non-mutating listener probe token: {token}")
+for forbidden in ("fetch(", "/api/", "/api/health"):
+    if forbidden in listener:
+        raise SystemExit(f"listener probe invokes an HTTP handler: {forbidden}")
 main_start = source.index("production_touched=1\n", source.index("# From here onward failures must recover"))
 main_end = source.index("verify_bootstrap_owner_password", main_start)
 main = source[main_start:main_end]
@@ -926,7 +935,7 @@ post_sequence = [
     'python3 "$TOCHKA_RECONCILE_CHECKER"',
     'docker rename "$live_id" "$live_name"',
     'docker start "$live_id"',
-    'internal_ready "$live_id"',
+    'internal_listener_ready "$live_id"',
     "public_exposed=1",
 ]
 position = -1
@@ -944,7 +953,7 @@ for token in (
     'container_lacks_named_network "$live_id" "$network_name"',
     'container_lacks_named_network "$live_id" "$import_network"',
     'container_has_no_networks "$live_id"',
-    'internal_ready "$live_id"',
+    'internal_listener_ready "$live_id"',
 ):
     if token not in detached_health:
         raise SystemExit(f"missing detached-health token: {token}")
@@ -982,14 +991,19 @@ ensure_canonical_public_network() {
   return 0
 }
 
-internal_ready() {
+internal_listener_ready() {
   local container="$1"
-  local status
   for _ in $(seq 1 60); do
-    status="$(docker exec "$container" node -e \
-      "fetch('http://127.0.0.1:8081/api/health',{redirect:'error',signal:AbortSignal.timeout(10000)}).then(r=>process.stdout.write(String(r.status))).catch(()=>process.stdout.write('000'))" \
-      2>/dev/null || true)"
-    if [ "$status" = 200 ]; then return 0; fi
+    if docker exec "$container" node -e '
+      const net = require("node:net");
+      const socket = net.createConnection({ host: "127.0.0.1", port: 8081 });
+      socket.setTimeout(10_000);
+      socket.once("connect", () => { socket.destroy(); process.exit(0); });
+      socket.once("timeout", () => { socket.destroy(); process.exit(1); });
+      socket.once("error", () => process.exit(1));
+    ' >/dev/null 2>&1; then
+      return 0
+    fi
     sleep 2
   done
   return 1
@@ -1190,7 +1204,7 @@ cleanup_on_failure() {
       if [ "$(docker inspect "$live_id" --format '{{.State.Running}}' 2>/dev/null)" != true ]; then
         docker start "$live_id" >/dev/null 2>&1 || rollback_failed=1
       fi
-      internal_ready "$live_id" >/dev/null 2>&1 || rollback_failed=1
+      internal_listener_ready "$live_id" >/dev/null 2>&1 || rollback_failed=1
       restore_restart_policy "$live_id" >/dev/null 2>&1 || rollback_failed=1
       ensure_canonical_public_network "$live_id" >/dev/null 2>&1 || rollback_failed=1
       public_ready >/dev/null 2>&1 || rollback_failed=1
@@ -1317,7 +1331,7 @@ if docker network inspect "$import_network" >/dev/null 2>&1; then
   exit 1
 fi
 
-internal_ready "$live_id"
+internal_listener_ready "$live_id"
 public_ready
 printf 'D069_TOCHKA_PREVIOUS_PRODUCTION=HEALTHY release=%s\n' "$EXPECTED_RELEASE_SHA"
 
@@ -1404,7 +1418,7 @@ mutation_started=1
 docker start "$live_id" >/dev/null
 test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
 test "$(docker inspect "$live_id" --format '{{.State.Paused}}')" = false
-internal_ready "$live_id"
+internal_listener_ready "$live_id"
 
 verify_bootstrap_owner_password "$before_backup_snapshot/$relative_db"
 
@@ -1593,7 +1607,7 @@ test "$(docker inspect "$live_id" --format '{{.State.Paused}}')" = false
 container_lacks_named_network "$live_id" "$network_name"
 container_lacks_named_network "$live_id" "$import_network"
 container_has_no_networks "$live_id"
-internal_ready "$live_id"
+internal_listener_ready "$live_id"
 restore_restart_policy "$live_id"
 
 test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
