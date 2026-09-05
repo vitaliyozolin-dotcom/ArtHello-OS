@@ -23,7 +23,7 @@ env:
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   DATA_VOLUME: arthello-direct-v44-data
   TOCHKA_START_DATE: '2026-09-01'
-  TOCHKA_END_DATE: '2026-09-04'
+  TOCHKA_END_DATE: '2026-09-05'
   TOCHKA_EXPECTED_ACCOUNTS: '4'
   TOCHKA_IMPORT_MAX_ATTEMPTS: '12'
   TOCHKA_IMPORT_RETRY_DELAY_MS: '15000'
@@ -153,6 +153,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           bash -n .github/scripts/d069-tochka-import-rollout.sh
+          bash .github/scripts/d069-tochka-import-rollout.sh --self-test
           python3 - <<'PY'
           import ast
           from pathlib import Path
