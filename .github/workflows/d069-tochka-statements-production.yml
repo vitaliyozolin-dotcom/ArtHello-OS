@@ -18,8 +18,11 @@ concurrency:
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
   EXPECTED_RELEASE_SHA: 6596f69390ad539577ec2640e8ef40c7e12c22dc
-  EXPECTED_IMPORT_PR: '345'
-  EXPECTED_IMPORT_BRANCH: codex/d069-tochka-statements-20260904
+  EXPECTED_IMPORT_PARENT: c73f5c1039d02fc343a6e7e19078833087297c29
+  EXPECTED_ROLLOUT_BLOB: 8bfd66da4e34642edc8c2b5ddb9eeec9b155008f
+  EXPECTED_FAILED_RUN_ID: '33958325749'
+  EXPECTED_IMPORT_PR: '346'
+  EXPECTED_IMPORT_BRANCH: codex/d069-tochka-supervisor-pid-20260905
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   DATA_VOLUME: arthello-direct-v44-data
   TOCHKA_START_DATE: '2026-09-01'
@@ -60,7 +63,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify exact merged import PR and six-file boundary
+      - name: Verify exact merged retry PR and two-file boundary
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -73,26 +76,33 @@ jobs:
           test "$GITHUB_RUN_ATTEMPT" = 1
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$EXPECTED_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_IMPORT_PARENT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_ROLLOUT_BLOB" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_FAILED_RUN_ID" =~ ^[0-9]+$ ]]
           [[ "$EXPECTED_IMPORT_PR" =~ ^[0-9]+$ ]]
+          test "$GITHUB_RUN_ID" != "$EXPECTED_FAILED_RUN_ID"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-list --count "$EXPECTED_RELEASE_SHA..$GITHUB_SHA")" -eq 1
+          test "$(git rev-list --count "$EXPECTED_IMPORT_PARENT..$GITHUB_SHA")" -eq 1
+          mapfile -t parent_line < <(git rev-list --parents -n 1 "$EXPECTED_IMPORT_PARENT")
+          read -r -a parent_parts <<<"${parent_line[0]}"
+          test "${#parent_parts[@]}" -eq 2
+          test "${parent_parts[0]}" = "$EXPECTED_IMPORT_PARENT"
+          test "${parent_parts[1]}" = "$EXPECTED_RELEASE_SHA"
           mapfile -t commit_line < <(git rev-list --parents -n 1 "$GITHUB_SHA")
           read -r -a commit_parts <<<"${commit_line[0]}"
           test "${#commit_parts[@]}" -eq 2
           test "${commit_parts[0]}" = "$GITHUB_SHA"
-          test "${commit_parts[1]}" = "$EXPECTED_RELEASE_SHA"
+          test "${commit_parts[1]}" = "$EXPECTED_IMPORT_PARENT"
+          test "$(git rev-parse "$GITHUB_SHA:.github/scripts/d069-tochka-import-rollout.sh")" = \
+            "$EXPECTED_ROLLOUT_BLOB"
           test "$(date -u +%F)" = "$TOCHKA_END_DATE"
 
           expected_paths=(
             .github/scripts/d069-tochka-import-rollout.sh
-            .github/scripts/d069-tochka-import.mjs
-            .github/scripts/reconcile-tochka-snapshot.py
-            .github/scripts/tests/d069-tochka-import.test.mjs
-            .github/scripts/tests/test-reconcile-tochka-snapshot.py
             .github/workflows/d069-tochka-statements-production.yml
           )
           mapfile -t changed_paths < <(
-            git diff --name-only --no-renames "$EXPECTED_RELEASE_SHA" "$GITHUB_SHA" | LC_ALL=C sort
+            git diff --name-only --no-renames "$EXPECTED_IMPORT_PARENT" "$GITHUB_SHA" | LC_ALL=C sort
           )
           test "${#changed_paths[@]}" -eq "${#expected_paths[@]}"
           for index in "${!expected_paths[@]}"; do
@@ -100,9 +110,9 @@ jobs:
           done
           status_count=0
           while IFS=$'\t' read -r status path; do
-            test "$status" = A
+            test "$status" = M
             status_count=$((status_count + 1))
-          done < <(git diff --name-status --no-renames "$EXPECTED_RELEASE_SHA" "$GITHUB_SHA")
+          done < <(git diff --name-status --no-renames "$EXPECTED_IMPORT_PARENT" "$GITHUB_SHA")
           test "$status_count" -eq "${#expected_paths[@]}"
           for path in "${expected_paths[@]}"; do
             test -f "$path"
@@ -136,7 +146,7 @@ jobs:
               .merged == true and
               .merged_at != null and
               .merge_commit_sha == $sha and
-              .changed_files == 6 and
+              .changed_files == 2 and
               .base.ref == "main" and
               .base.repo.full_name == $repository and
               .head.ref == $branch and
