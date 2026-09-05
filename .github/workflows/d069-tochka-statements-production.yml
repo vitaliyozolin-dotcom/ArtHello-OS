@@ -1,10 +1,12 @@
 name: D069 Tochka statements production import
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/d069-tochka-statements-production.yml
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type IMPORT-TOCHKA-4-ACCOUNTS-2026-09-01-2026-09-05
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -25,6 +27,7 @@ env:
   EXPECTED_FAILED_SUPERVISOR_ROOT: /var/tmp/arthello-d069-tochka-supervisor-33959034159-1.NXovvf
   EXPECTED_IMPORT_PR: '347'
   EXPECTED_IMPORT_BRANCH: codex/d069-tochka-preflight-diagnostic-20260905
+  EXPECTED_CONFIRMATION: IMPORT-TOCHKA-4-ACCOUNTS-2026-09-01-2026-09-05
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   DATA_VOLUME: arthello-direct-v44-data
   TOCHKA_START_DATE: '2026-09-01'
@@ -48,14 +51,17 @@ jobs:
 
     steps:
       - name: Verify authorized workflow invocation
+        env:
+          DISPATCH_CONFIRMATION: ${{ inputs.confirmation }}
         shell: bash
         run: |
           set -Eeuo pipefail
           test "$GITHUB_REPOSITORY" = "vitaliyozolin-dotcom/ArtHello-OS"
           test "$GITHUB_REF" = refs/heads/main
-          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
           test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$DISPATCH_CONFIRMATION" = "$EXPECTED_CONFIRMATION"
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
 
       - name: Check out exact import source
@@ -67,15 +73,17 @@ jobs:
 
       - name: Verify exact merged diagnostic retry PR and two-file boundary
         env:
+          DISPATCH_CONFIRMATION: ${{ inputs.confirmation }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -Eeuo pipefail
           test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
           test "$GITHUB_REF" = refs/heads/main
-          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
           test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$DISPATCH_CONFIRMATION" = "$EXPECTED_CONFIRMATION"
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$EXPECTED_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$EXPECTED_IMPORT_ROOT" =~ ^[a-f0-9]{40}$ ]]
@@ -364,6 +372,7 @@ jobs:
 
       - name: Verify production postcondition
         if: ${{ always() && steps.production_before.outcome == 'success' }}
+        timeout-minutes: 130
         shell: bash
         env:
           EXPECTED_LIVE_ID: ${{ steps.production_before.outputs.live_id }}
@@ -375,6 +384,10 @@ jobs:
           EXPECTED_NETWORK_ID: ${{ steps.production_before.outputs.network_id }}
         run: |
           set -Eeuo pipefail
+          lock_path=/tmp/arthello-direct-v44-data.production.lock
+          test ! -L "$lock_path"
+          exec 8>>"$lock_path"
+          flock --wait 7500 8
           [[ "$EXPECTED_LIVE_ID" =~ ^[a-f0-9]{64}$ ]]
           [[ "$EXPECTED_LIVE_IMAGE" =~ ^sha256:[a-f0-9]{64}$ ]]
           [[ "$EXPECTED_NETWORK_ID" =~ ^[a-f0-9]{64}$ ]]
@@ -398,10 +411,6 @@ jobs:
           docker exec "$EXPECTED_LIVE_ID" node -e "fetch('http://127.0.0.1:8081/api/health',{redirect:'error',signal:AbortSignal.timeout(10000)}).then(r=>{if(r.status!==200)process.exit(1)}).catch(()=>process.exit(1))"
           test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/")" = 200
           test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/api/auth/me")" = 401
-          lock_path=/tmp/arthello-direct-v44-data.production.lock
-          test ! -L "$lock_path"
-          exec 8>>"$lock_path"
-          flock -n 8
           printf 'D069_TOCHKA_PRODUCTION_POSTCONDITION=VERIFIED\n'
 
       - name: Publish protected import summary
