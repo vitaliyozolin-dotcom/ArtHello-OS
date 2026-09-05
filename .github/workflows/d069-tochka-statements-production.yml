@@ -41,8 +41,9 @@ env:
 
 jobs:
   import-tochka-statements:
+    if: ${{ always() }}
     runs-on: [self-hosted, linux, x64, arthello-gateway]
-    timeout-minutes: 180
+    timeout-minutes: 330
     environment: production-ru
     concurrency:
       group: school-1-11-production
@@ -51,6 +52,7 @@ jobs:
 
     steps:
       - name: Verify authorized workflow invocation
+        timeout-minutes: 2
         env:
           DISPATCH_CONFIRMATION: ${{ inputs.confirmation }}
         shell: bash
@@ -65,6 +67,7 @@ jobs:
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
 
       - name: Check out exact import source
+        timeout-minutes: 5
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.sha }}
@@ -72,6 +75,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify exact merged diagnostic retry PR and two-file boundary
+        timeout-minutes: 5
         env:
           DISPATCH_CONFIRMATION: ${{ inputs.confirmation }}
           GH_TOKEN: ${{ github.token }}
@@ -175,6 +179,7 @@ jobs:
           printf 'D069_TOCHKA_IMPORT_PROVENANCE=VERIFIED\n'
 
       - name: Validate host-side Bash and Python programs
+        timeout-minutes: 5
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -204,6 +209,7 @@ jobs:
           printf 'D069_TOCHKA_IMPORT_HOST_PROGRAMS=VERIFIED\n'
 
       - name: Validate Node client in the production runtime image
+        timeout-minutes: 10
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -230,6 +236,7 @@ jobs:
 
       - name: Prove expected production is healthy before mutation
         id: production_before
+        timeout-minutes: 5
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -270,6 +277,7 @@ jobs:
           printf 'D069_TOCHKA_PREVIOUS_PRODUCTION=HEALTHY\n'
 
       - name: Prove previous retry stopped before production mutation
+        timeout-minutes: 5
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -339,6 +347,7 @@ jobs:
 
       - name: Back up, import and reconcile four Tochka statements
         id: import
+        timeout-minutes: 125
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -415,6 +424,7 @@ jobs:
 
       - name: Publish protected import summary
         if: always()
+        timeout-minutes: 2
         shell: bash
         env:
           IMPORT_BACKUP_VOLUME: ${{ steps.import.outputs.backup_volume }}
