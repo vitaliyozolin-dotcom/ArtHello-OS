@@ -36,6 +36,7 @@ PRODUCTION_DATA_INVENTORY="${PRODUCTION_DATA_INVENTORY:-deploy/v52/maintenance/p
 TOCHKA_EXPECTED_ACCOUNTS="${TOCHKA_EXPECTED_ACCOUNTS:-4}"
 TOCHKA_IMPORT_MAX_ATTEMPTS="${TOCHKA_IMPORT_MAX_ATTEMPTS:-12}"
 TOCHKA_IMPORT_RETRY_DELAY_MS="${TOCHKA_IMPORT_RETRY_DELAY_MS:-15000}"
+SUPERVISOR_LIFECYCLE_LOCK_FILE="/tmp/arthello-d069-tochka-supervisor-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.lock"
 rollout_phase=bootstrap
 
 report_rollout_failure() {
@@ -235,6 +236,7 @@ supervise_rollout() {
   local expected_blob=""
   local copied_blob=""
   local destination=""
+  local lifecycle_lock_path=""
   local path=""
   local var_tmp_mode=""
   local wait_iteration=0
@@ -249,6 +251,7 @@ supervise_rollout() {
   )
 
   command -v git >/dev/null
+  command -v flock >/dev/null
   command -v mktemp >/dev/null
   command -v nohup >/dev/null
   command -v setsid >/dev/null
@@ -262,6 +265,18 @@ supervise_rollout() {
   var_tmp_mode="$(stat -c %a /var/tmp)"
   [[ "$var_tmp_mode" =~ ^[0-7]{3,4}$ ]]
   test $(( (8#$var_tmp_mode & 18) == 0 || (8#$var_tmp_mode & 512) != 0 )) -eq 1
+
+  lifecycle_lock_path="/tmp/arthello-d069-tochka-supervisor-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.lock"
+  test "$SUPERVISOR_LIFECYCLE_LOCK_FILE" = "$lifecycle_lock_path"
+  test ! -L "$lifecycle_lock_path"
+  exec 7>>"$lifecycle_lock_path"
+  test -f "$lifecycle_lock_path"
+  test "$(stat -c %u "$lifecycle_lock_path")" -eq "$(id -u)"
+  test "$(stat -c %a "$lifecycle_lock_path")" = 600
+  test -f "/proc/self/fd/7"
+  test "$(stat -Lc '%d:%i' "/proc/self/fd/7")" = \
+    "$(stat -c '%d:%i' "$lifecycle_lock_path")"
+  flock -n 7
 
   : "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
   source_root="$(pwd -P)"
@@ -352,7 +367,17 @@ supervise_rollout() {
         run_id="$5"
         run_attempt="$6"
         max_runtime="$7"
+        lifecycle_lock_path="$8"
         test "$max_runtime" = 120m
+        test "$lifecycle_lock_path" = "/tmp/arthello-d069-tochka-supervisor-$run_id-$run_attempt.lock"
+        test ! -L "$lifecycle_lock_path"
+        test -f "$lifecycle_lock_path"
+        test "$(stat -c %u "$lifecycle_lock_path")" -eq "$(id -u)"
+        test "$(stat -c %a "$lifecycle_lock_path")" = 600
+        test -f "/proc/self/fd/7"
+        test "$(stat -Lc "%d:%i" "/proc/self/fd/7")" = \
+          "$(stat -c "%d:%i" "$lifecycle_lock_path")"
+        flock -n 7
         namespace_process_id="$BASHPID"
         [[ "$namespace_process_id" =~ ^[1-9][0-9]*$ ]]
         identity_temporary="$start_record.identity.$namespace_process_id"
@@ -424,7 +449,8 @@ PY
       "$status_record" \
       "$GITHUB_RUN_ID" \
       "$GITHUB_RUN_ATTEMPT" \
-      "$supervisor_max_runtime"
+      "$supervisor_max_runtime" \
+      "$SUPERVISOR_LIFECYCLE_LOCK_FILE"
   ) </dev/null >> "$child_log" 2>&1 &
   launcher_pid="$!"
   if ! wait "$launcher_pid"; then
@@ -845,6 +871,10 @@ run_rollout_self_tests() {
   local protocol_output="$protocol_root/child.github-output"
   local protocol_normalized="$protocol_root/normalized.github-output"
   local protocol_identity="$protocol_root/live-identity"
+  local lifecycle_root="$work/lifecycle-inheritance"
+  local lifecycle_lock="$lifecycle_root/lifecycle.lock"
+  local lifecycle_started="$lifecycle_root/started"
+  local lifecycle_terminal="$lifecycle_root/terminal"
   local failure_report="$work/failure-report"
   local protocol_namespace_pid="$BASHPID"
   local protocol_child_pid=""
@@ -890,6 +920,47 @@ run_rollout_self_tests() {
   timeout --preserve-status --signal=TERM 1s true
   mkdir -p "$protocol_root"
   chmod 0700 "$protocol_root"
+
+  mkdir -p "$lifecycle_root"
+  chmod 0700 "$lifecycle_root"
+  (
+    exec 7>>"$lifecycle_lock"
+    chmod 0600 "$lifecycle_lock"
+    flock -n 7
+    nohup setsid --fork bash -c '
+      set -Eeuo pipefail
+      lock_path="$1"
+      started_path="$2"
+      terminal_path="$3"
+      test ! -L "$lock_path"
+      test -f "/proc/self/fd/7"
+      test "$(stat -Lc "%d:%i" "/proc/self/fd/7")" = \
+        "$(stat -c "%d:%i" "$lock_path")"
+      flock -n 7
+      printf "started\n" > "$started_path"
+      chmod 0600 "$started_path"
+      sleep 2
+      printf "terminal\n" > "$terminal_path"
+      chmod 0600 "$terminal_path"
+    ' bash "$lifecycle_lock" "$lifecycle_started" "$lifecycle_terminal"
+  ) </dev/null >/dev/null 2>&1
+  for wait_iteration in $(seq 1 100); do
+    if [ -f "$lifecycle_started" ]; then break; fi
+    sleep 0.05
+  done
+  test -f "$lifecycle_started"
+  exec 8>>"$lifecycle_lock"
+  if flock -n 8; then
+    printf 'detached lifecycle fixture released its inherited lock early\n' >&2
+    return 1
+  fi
+  for wait_iteration in $(seq 1 100); do
+    if [ -f "$lifecycle_terminal" ]; then break; fi
+    sleep 0.05
+  done
+  test -f "$lifecycle_terminal"
+  flock --wait 5 8
+
   [[ "$protocol_namespace_pid" =~ ^[1-9][0-9]*$ ]]
   python3 - "$protocol_namespace_pid" > "$protocol_identity" <<'PY'
 import pathlib
@@ -987,6 +1058,10 @@ for token in (
     "supervisor_phase=supervisor-rollout",
     'if timeout --preserve-status --signal=TERM "$max_runtime" bash "$rollout_path"; then',
     "supervisor_phase=supervisor-status",
+    'exec 7>>"$lifecycle_lock_path"',
+    'flock -n 7',
+    'lifecycle_lock_path="$8"',
+    'test -f "/proc/self/fd/7"',
     'namespace_process_id="$BASHPID"',
     'python3 - "$namespace_process_id" > "$identity_temporary"',
     'pathlib.Path("/proc/self/stat")',
@@ -1001,6 +1076,12 @@ for token in (
 ):
     if token not in supervisor:
         raise SystemExit(f"missing detached-supervisor token: {token}")
+parent_lifecycle = supervisor.index('exec 7>>"$lifecycle_lock_path"')
+launcher = supervisor.index("nohup setsid --fork bash -c")
+child_lifecycle = supervisor.index('lifecycle_lock_path="$8"', launcher)
+terminal_status = supervisor.index('status_temporary="$status_record.tmp.$process_id"', child_lifecycle)
+if not parent_lifecycle < launcher < child_lifecycle < terminal_status:
+    raise SystemExit("detached lifecycle lock ordering changed")
 for forbidden in (
     'process_start_ticks="$(python3',
     'process_identity="$(python3',
@@ -1012,6 +1093,9 @@ for forbidden in (
     'child_log="$child_runtime/',
     'start_record="$child_runtime/',
     'status_record="$child_runtime/',
+    'flock -u 7',
+    'exec 7>&-',
+    'rm -f -- "$lifecycle_lock_path"',
 ):
     if forbidden in supervisor:
         raise SystemExit(f"supervisor control file entered child runtime: {forbidden}")
