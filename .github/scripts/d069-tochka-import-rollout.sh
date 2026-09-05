@@ -957,6 +957,9 @@ for token in (
 ):
     if token not in detached_health:
         raise SystemExit(f"missing detached-health token: {token}")
+for forbidden in ("public_ready", "curl ", "fetch(", "/api/", "/api/health"):
+    if forbidden in detached_health:
+        raise SystemExit(f"pre-exposure readiness can invoke an HTTP handler: {forbidden}")
 PY
   printf 'D069_TOCHKA_ROLLOUT_SELF_TESTS=VERIFIED\n'
 }
