@@ -18,6 +18,8 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* |
     && node /app/scripts/patch-system-content-legal.mjs \
     && node /app/scripts/patch-system-analytics-readiness.mjs \
     && node /app/scripts/patch-system-operational-modules.mjs \
+    && node /app/scripts/patch-alfacrm-staged-integration.mjs \
+    && node /app/scripts/patch-alfacrm-style-import.mjs \
     && node /app/scripts/patch-tochka-customer-permission-fallback.mjs \
     && node /app/scripts/patch-tochka-multi-company-selection.mjs \
     && node /app/scripts/patch-tochka-statement-array-response.mjs \
@@ -29,6 +31,7 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* |
     && node /app/scripts/patch-tochka-finance-bank-visibility.mjs \
     && node /app/scripts/patch-safe-json-responses.mjs \
     && node /app/scripts/patch-school-sso-entry.mjs \
+    && node /app/scripts/patch-css-budget-shell-split.mjs \
     && node /app/scripts/verify-system-wide-operational-shells.mjs \
     && echo "e78978c13431d32a0db2db25da73f24fd6245703aa14d4cb3ec34647324f6f40  /app/db/index.ts" | sha256sum -c - \
     && node /app/scripts/patch-finance-operation-allocation.mjs \
