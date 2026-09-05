@@ -317,19 +317,18 @@ supervise_rollout() {
         run_attempt="$6"
         max_runtime="$7"
         test "$max_runtime" = 120m
-        process_identity="$(python3 - <<'"'"'PY'"'"'
-import pathlib
-
-self_fields = pathlib.Path("/proc/self/stat").read_text(encoding="ascii").rsplit(")", 1)[1].split()
-parent_id = self_fields[1]
-parent_fields = pathlib.Path(f"/proc/{parent_id}/stat").read_text(encoding="ascii").rsplit(")", 1)[1].split()
-print(parent_id, parent_fields[19])
-PY
-        )"
-        read -r process_id process_start_ticks <<< "$process_identity"
+        process_id="$BASHPID"
         [[ "$process_id" =~ ^[1-9][0-9]*$ ]]
         test "$process_id" -gt 1
-        test "$process_id" = "$BASHPID"
+        process_start_ticks="$(python3 - "$process_id" <<'"'"'PY'"'"'
+import pathlib
+import sys
+
+process_id = sys.argv[1]
+fields = pathlib.Path(f"/proc/{process_id}/stat").read_text(encoding="ascii").rsplit(")", 1)[1].split()
+print(fields[19])
+PY
+        )"
         [[ "$process_start_ticks" =~ ^[1-9][0-9]*$ ]]
         start_temporary="$start_record.tmp.$process_id"
         {
@@ -875,7 +874,9 @@ for token in (
     "timeout --preserve-status --signal=TERM",
     "supervisor_max_runtime=120m",
     "set -Eeuo pipefail",
-    'test "$process_id" = "$BASHPID"',
+    'process_id="$BASHPID"',
+    'python3 - "$process_id"',
+    'pathlib.Path(f"/proc/{process_id}/stat")',
     'child_runtime="$supervisor_root/runtime"',
     'child_output="$supervisor_root/child.github-output"',
     'child_log="$supervisor_root/child.log"',
@@ -884,6 +885,8 @@ for token in (
 ):
     if token not in supervisor:
         raise SystemExit(f"missing detached-supervisor token: {token}")
+if '/proc/self/stat' in supervisor:
+    raise SystemExit("supervisor identity must inspect the captured Bash PID directly")
 for forbidden in (
     'child_output="$child_runtime/',
     'child_log="$child_runtime/',
