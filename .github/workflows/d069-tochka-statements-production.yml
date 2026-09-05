@@ -1,0 +1,288 @@
+name: D069 Tochka statements production import
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/d069-tochka-statements-production.yml
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+  queue: max
+
+env:
+  EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
+  EXPECTED_RELEASE_SHA: 6596f69390ad539577ec2640e8ef40c7e12c22dc
+  EXPECTED_IMPORT_PR: '345'
+  EXPECTED_IMPORT_BRANCH: codex/d069-tochka-statements-20260904
+  PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+  DATA_VOLUME: arthello-direct-v44-data
+  TOCHKA_START_DATE: '2026-09-01'
+  TOCHKA_END_DATE: '2026-09-05'
+  TOCHKA_EXPECTED_ACCOUNTS: '4'
+  TOCHKA_IMPORT_MAX_ATTEMPTS: '12'
+  TOCHKA_IMPORT_RETRY_DELAY_MS: '15000'
+  TOCHKA_IMPORT_CLIENT: .github/scripts/d069-tochka-import.mjs
+  TOCHKA_RECONCILE_CHECKER: .github/scripts/reconcile-tochka-snapshot.py
+  PRODUCTION_DATA_INVENTORY: deploy/v52/maintenance/production-data-inventory.py
+
+jobs:
+  import-tochka-statements:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 180
+    environment: production-ru
+    concurrency:
+      group: school-1-11-production
+      cancel-in-progress: false
+      queue: max
+
+    steps:
+      - name: Verify authorized workflow invocation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REPOSITORY" = "vitaliyozolin-dotcom/ArtHello-OS"
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+
+      - name: Check out exact import source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact merged import PR and six-file boundary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_IMPORT_PR" =~ ^[0-9]+$ ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-list --count "$EXPECTED_RELEASE_SHA..$GITHUB_SHA")" -eq 1
+          mapfile -t commit_line < <(git rev-list --parents -n 1 "$GITHUB_SHA")
+          read -r -a commit_parts <<<"${commit_line[0]}"
+          test "${#commit_parts[@]}" -eq 2
+          test "${commit_parts[0]}" = "$GITHUB_SHA"
+          test "${commit_parts[1]}" = "$EXPECTED_RELEASE_SHA"
+          test "$(date -u +%F)" = "$TOCHKA_END_DATE"
+
+          expected_paths=(
+            .github/scripts/d069-tochka-import-rollout.sh
+            .github/scripts/d069-tochka-import.mjs
+            .github/scripts/reconcile-tochka-snapshot.py
+            .github/scripts/tests/d069-tochka-import.test.mjs
+            .github/scripts/tests/test-reconcile-tochka-snapshot.py
+            .github/workflows/d069-tochka-statements-production.yml
+          )
+          mapfile -t changed_paths < <(
+            git diff --name-only --no-renames "$EXPECTED_RELEASE_SHA" "$GITHUB_SHA" | LC_ALL=C sort
+          )
+          test "${#changed_paths[@]}" -eq "${#expected_paths[@]}"
+          for index in "${!expected_paths[@]}"; do
+            test "${changed_paths[$index]}" = "${expected_paths[$index]}"
+          done
+          status_count=0
+          while IFS=$'\t' read -r status path; do
+            test "$status" = A
+            status_count=$((status_count + 1))
+          done < <(git diff --name-status --no-renames "$EXPECTED_RELEASE_SHA" "$GITHUB_SHA")
+          test "$status_count" -eq "${#expected_paths[@]}"
+          for path in "${expected_paths[@]}"; do
+            test -f "$path"
+            test ! -L "$path"
+          done
+
+          umask 077
+          test -n "$GH_TOKEN"
+          test "${#GH_TOKEN}" -le 2048
+          [[ "$GH_TOKEN" != *$'\n'* ]]
+          [[ "$GH_TOKEN" != *$'\r'* ]]
+          pr_file="$(mktemp "$RUNNER_TEMP/d069-import-pr.XXXXXX")"
+          auth_header="$(mktemp "$RUNNER_TEMP/d069-import-auth.XXXXXX")"
+          printf 'Authorization: Bearer %s\n' "$GH_TOKEN" > "$auth_header"
+          trap 'rm -f -- "$pr_file" "$auth_header"' EXIT
+          curl --fail-with-body --silent --show-error --max-time 30 \
+            --header "@$auth_header" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --output "$pr_file" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/$EXPECTED_IMPORT_PR"
+          chmod 0600 "$pr_file"
+          jq -e \
+            --arg sha "$GITHUB_SHA" \
+            --arg branch "$EXPECTED_IMPORT_BRANCH" \
+            --arg repository "$EXPECTED_REPOSITORY" \
+            --argjson number "$EXPECTED_IMPORT_PR" '
+              .number == $number and
+              .state == "closed" and
+              .draft == false and
+              .merged == true and
+              .merged_at != null and
+              .merge_commit_sha == $sha and
+              .changed_files == 6 and
+              .base.ref == "main" and
+              .base.repo.full_name == $repository and
+              .head.ref == $branch and
+              .head.repo.full_name == $repository and
+              .user.login == "vitaliyozolin-dotcom" and
+              .merged_by.login == "vitaliyozolin-dotcom"
+            ' "$pr_file" >/dev/null
+          rm -f -- "$pr_file" "$auth_header"
+          trap - EXIT
+          printf 'D069_TOCHKA_IMPORT_PROVENANCE=VERIFIED\n'
+
+      - name: Validate host-side Bash and Python programs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash -n .github/scripts/d069-tochka-import-rollout.sh
+          bash .github/scripts/d069-tochka-import-rollout.sh --self-test
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+
+          for source in (
+              ".github/scripts/reconcile-tochka-snapshot.py",
+              ".github/scripts/tests/test-reconcile-tochka-snapshot.py",
+              "deploy/v52/maintenance/production-data-inventory.py",
+          ):
+              ast.parse(Path(source).read_text(encoding="utf-8"), filename=source)
+          PY
+          python_test_tmp="$(mktemp -d "$RUNNER_TEMP/d069-tochka-python-test.XXXXXX")"
+          trap 'rm -rf -- "$python_test_tmp"' EXIT
+          env -i \
+            LANG=C.UTF-8 \
+            PATH="$PATH" \
+            PYTHONUTF8=1 \
+            TMPDIR="$python_test_tmp" \
+            python3 .github/scripts/tests/test-reconcile-tochka-snapshot.py
+          rm -rf -- "$python_test_tmp"
+          trap - EXIT
+          printf 'D069_TOCHKA_IMPORT_HOST_PROGRAMS=VERIFIED\n'
+
+      - name: Validate Node client in the production runtime image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t runtime_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
+          test "${#runtime_ids[@]}" -eq 1
+          runtime_id="${runtime_ids[0]}"
+          test "$(docker inspect "$runtime_id" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$EXPECTED_RELEASE_SHA"
+          runtime_image="$(docker inspect "$runtime_id" --format '{{.Image}}')"
+          [[ "$runtime_image" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test -d "$GITHUB_WORKSPACE"
+          [[ "$GITHUB_WORKSPACE" = /* ]]
+          [[ "$GITHUB_WORKSPACE" != *','* ]]
+          [[ "$GITHUB_WORKSPACE" != *$'\n'* ]]
+          [[ "$GITHUB_WORKSPACE" != *$'\r'* ]]
+          test "$(docker inspect "$runtime_id" --format '{{.Config.User}}')" = \
+            "$(docker image inspect "$runtime_image" --format '{{.Config.User}}')"
+          node_in_runtime=(docker run --rm --network none
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/source,readonly"
+            --workdir /source --entrypoint node "$runtime_image")
+          "${node_in_runtime[@]}" --check .github/scripts/d069-tochka-import.mjs
+          "${node_in_runtime[@]}" --check .github/scripts/tests/d069-tochka-import.test.mjs
+          "${node_in_runtime[@]}" --test .github/scripts/tests/d069-tochka-import.test.mjs
+          printf 'D069_TOCHKA_IMPORT_PROGRAMS=VERIFIED\n'
+
+      - name: Prove expected production is healthy before mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t live_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
+          test "${#live_ids[@]}" -eq 1
+          live_id="${live_ids[0]}"
+          test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$live_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+          test "$(docker inspect "$live_id" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$EXPECTED_RELEASE_SHA"
+          docker exec "$live_id" node -e "fetch('http://127.0.0.1:8081/api/health',{redirect:'error',signal:AbortSignal.timeout(10000)}).then(r=>{if(r.status!==200)process.exit(1)}).catch(()=>process.exit(1))"
+          test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/")" = 200
+          test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/api/auth/me")" = 401
+          printf 'D069_TOCHKA_PREVIOUS_PRODUCTION=HEALTHY\n'
+
+      - name: Back up, import and reconcile four Tochka statements
+        id: import
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$TOCHKA_IMPORT_CLIENT" = .github/scripts/d069-tochka-import.mjs
+          test "$TOCHKA_RECONCILE_CHECKER" = .github/scripts/reconcile-tochka-snapshot.py
+          test "$PRODUCTION_DATA_INVENTORY" = deploy/v52/maintenance/production-data-inventory.py
+          git diff --quiet "$GITHUB_SHA" -- .
+          git diff --cached --quiet "$GITHUB_SHA" -- .
+          worktree_status="$(git status --porcelain=v1 --untracked-files=all)"
+          test -z "$worktree_status"
+          executed_paths=(
+            .github/scripts/d069-tochka-import-rollout.sh
+            .github/scripts/d069-tochka-import.mjs
+            .github/scripts/reconcile-tochka-snapshot.py
+            deploy/v52/maintenance/production-data-inventory.py
+          )
+          for path in "${executed_paths[@]}"; do
+            test -f "$path"
+            test ! -L "$path"
+            expected_blob="$(git rev-parse "$GITHUB_SHA:$path")"
+            actual_blob="$(git hash-object --path="$path" "$path")"
+            test "$actual_blob" = "$expected_blob"
+            mode="$(git ls-tree "$GITHUB_SHA" -- "$path" | awk 'NR == 1 { print $1 }')"
+            case "$mode" in
+              100644|100755) ;;
+              *) exit 1 ;;
+            esac
+          done
+          bash .github/scripts/d069-tochka-import-rollout.sh
+
+      - name: Publish protected import summary
+        if: always()
+        shell: bash
+        env:
+          IMPORT_BACKUP_VOLUME: ${{ steps.import.outputs.backup_volume }}
+          IMPORT_BEFORE_DIGEST: ${{ steps.import.outputs.before_digest }}
+          IMPORT_AFTER_DIGEST: ${{ steps.import.outputs.after_digest }}
+          IMPORT_ACCOUNT_COUNT: ${{ steps.import.outputs.account_count }}
+          IMPORT_STATEMENT_COUNT: ${{ steps.import.outputs.statement_count }}
+          IMPORT_TRANSACTION_COUNT: ${{ steps.import.outputs.transaction_count }}
+          IMPORT_RECEIPT_COUNT: ${{ steps.import.outputs.receipt_count }}
+          IMPORT_OUTFLOW_COUNT: ${{ steps.import.outputs.outflow_count }}
+          IMPORT_BANK_RECEIPTS_MINOR: ${{ steps.import.outputs.bank_receipts_minor }}
+          IMPORT_REGISTRY_RECEIPTS_MINOR: ${{ steps.import.outputs.registry_receipts_minor }}
+          IMPORT_RECEIPT_DIFFERENCE_MINOR: ${{ steps.import.outputs.receipt_difference_minor }}
+          IMPORT_BANK_OUTFLOWS_MINOR: ${{ steps.import.outputs.bank_outflows_minor }}
+          IMPORT_REGISTRY_OUTFLOWS_MINOR: ${{ steps.import.outputs.registry_outflows_minor }}
+          IMPORT_OUTFLOW_DIFFERENCE_MINOR: ${{ steps.import.outputs.outflow_difference_minor }}
+          IMPORT_JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo '## D-069 protected Tochka statement import'
+            echo
+            echo "- source: $GITHUB_SHA"
+            echo "- expected production release: $EXPECTED_RELEASE_SHA"
+            echo "- statement window: $TOCHKA_START_DATE through $TOCHKA_END_DATE (UTC)"
+            echo '- expected accounts: 4'
+            echo "- backup volume: $IMPORT_BACKUP_VOLUME"
+            echo "- before snapshot digest: $IMPORT_BEFORE_DIGEST"
+            echo "- after snapshot digest: $IMPORT_AFTER_DIGEST"
+            echo "- accounts / statements / transactions: $IMPORT_ACCOUNT_COUNT / $IMPORT_STATEMENT_COUNT / $IMPORT_TRANSACTION_COUNT"
+            echo "- receipts: $IMPORT_RECEIPT_COUNT rows; bank $IMPORT_BANK_RECEIPTS_MINOR minor units; registry $IMPORT_REGISTRY_RECEIPTS_MINOR; difference $IMPORT_RECEIPT_DIFFERENCE_MINOR"
+            echo "- outflows: $IMPORT_OUTFLOW_COUNT rows; bank $IMPORT_BANK_OUTFLOWS_MINOR minor units; registry $IMPORT_REGISTRY_OUTFLOWS_MINOR; difference $IMPORT_OUTFLOW_DIFFERENCE_MINOR"
+            echo "- result: $IMPORT_JOB_STATUS"
+            echo "- production: $PUBLIC_URL"
+          } >> "$GITHUB_STEP_SUMMARY"
