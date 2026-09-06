@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: Type IMPORT-TOCHKA-4-ACCOUNTS-2026-09-01-2026-09-05
+        description: Type IMPORT-TOCHKA-4-ACCOUNTS-2026-09-01-2026-09-06
         required: true
         type: string
 
@@ -28,11 +28,11 @@ env:
   EXPECTED_FAILED_SUPERVISOR_ROOT: /var/tmp/arthello-d069-tochka-supervisor-33959034159-1.NXovvf
   EXPECTED_IMPORT_PR: '347'
   EXPECTED_IMPORT_BRANCH: codex/d069-tochka-preflight-diagnostic-20260905
-  EXPECTED_CONFIRMATION: IMPORT-TOCHKA-4-ACCOUNTS-2026-09-01-2026-09-05
+  EXPECTED_CONFIRMATION: IMPORT-TOCHKA-4-ACCOUNTS-2026-09-01-2026-09-06
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   DATA_VOLUME: arthello-direct-v44-data
   TOCHKA_START_DATE: '2026-09-01'
-  TOCHKA_END_DATE: '2026-09-05'
+  TOCHKA_END_DATE: '2026-09-06'
   TOCHKA_EXPECTED_ACCOUNTS: '4'
   TOCHKA_IMPORT_MAX_ATTEMPTS: '12'
   TOCHKA_IMPORT_RETRY_DELAY_MS: '15000'
@@ -46,7 +46,7 @@ jobs:
       always() &&
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
-      inputs.confirmation == 'IMPORT-TOCHKA-4-ACCOUNTS-2026-09-01-2026-09-05' &&
+      inputs.confirmation == 'IMPORT-TOCHKA-4-ACCOUNTS-2026-09-01-2026-09-06' &&
       github.actor == 'vitaliyozolin-dotcom' &&
       github.triggering_actor == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1
