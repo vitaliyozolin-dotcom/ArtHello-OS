@@ -1,13 +1,17 @@
 name: D069 Tochka statements production import
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/d069-tochka-statements-production.yml
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type IMPORT-TOCHKA-4-ACCOUNTS-2026-09-01-2026-09-06
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: read
+  deployments: read
   pull-requests: read
 
 concurrency:
@@ -18,15 +22,18 @@ concurrency:
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
   EXPECTED_RELEASE_SHA: 6596f69390ad539577ec2640e8ef40c7e12c22dc
-  EXPECTED_IMPORT_PARENT: c73f5c1039d02fc343a6e7e19078833087297c29
-  EXPECTED_ROLLOUT_BLOB: 8bfd66da4e34642edc8c2b5ddb9eeec9b155008f
-  EXPECTED_FAILED_RUN_ID: '33958325749'
-  EXPECTED_IMPORT_PR: '346'
-  EXPECTED_IMPORT_BRANCH: codex/d069-tochka-supervisor-pid-20260905
+  EXPECTED_IMPORT_ROOT: c73f5c1039d02fc343a6e7e19078833087297c29
+  EXPECTED_IMPORT_PARENT: 9e4c49161e643997fe821a91b84c60c6e38ede33
+  EXPECTED_ROLLOUT_BLOB: 6faba104f217d86d594c15a949de09f8ee1c39cc
+  EXPECTED_FAILED_RUN_ID: '33959034159'
+  EXPECTED_FAILED_SUPERVISOR_ROOT: /var/tmp/arthello-d069-tochka-supervisor-33959034159-1.NXovvf
+  EXPECTED_IMPORT_PR: '347'
+  EXPECTED_IMPORT_BRANCH: codex/d069-tochka-preflight-diagnostic-20260905
+  EXPECTED_CONFIRMATION: IMPORT-TOCHKA-4-ACCOUNTS-2026-09-01-2026-09-06
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   DATA_VOLUME: arthello-direct-v44-data
   TOCHKA_START_DATE: '2026-09-01'
-  TOCHKA_END_DATE: '2026-09-05'
+  TOCHKA_END_DATE: '2026-09-06'
   TOCHKA_EXPECTED_ACCOUNTS: '4'
   TOCHKA_IMPORT_MAX_ATTEMPTS: '12'
   TOCHKA_IMPORT_RETRY_DELAY_MS: '15000'
@@ -36,8 +43,16 @@ env:
 
 jobs:
   import-tochka-statements:
+    if: >-
+      always() &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.confirmation == 'IMPORT-TOCHKA-4-ACCOUNTS-2026-09-01-2026-09-06' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      github.run_attempt == 1
     runs-on: [self-hosted, linux, x64, arthello-gateway]
-    timeout-minutes: 180
+    timeout-minutes: 330
     environment: production-ru
     concurrency:
       group: school-1-11-production
@@ -46,36 +61,70 @@ jobs:
 
     steps:
       - name: Verify authorized workflow invocation
+        timeout-minutes: 2
+        env:
+          DISPATCH_CONFIRMATION: ${{ inputs.confirmation }}
         shell: bash
         run: |
           set -Eeuo pipefail
           test "$GITHUB_REPOSITORY" = "vitaliyozolin-dotcom/ArtHello-OS"
           test "$GITHUB_REF" = refs/heads/main
-          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
+          test "$GITHUB_TRIGGERING_ACTOR" = vitaliyozolin-dotcom
           test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$DISPATCH_CONFIRMATION" = "$EXPECTED_CONFIRMATION"
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
 
+      - name: Verify protected production environment
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$GH_TOKEN"
+          environment_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/environments/production-ru")"
+          jq -e '
+            .name == "production-ru" and
+            .can_admins_bypass == false and
+            ([.protection_rules[]? |
+              select(.type == "required_reviewers" and
+                .prevent_self_review == true and
+                ((.reviewers // []) | length) > 0)] | length) == 1
+          ' <<<"$environment_json" >/dev/null
+          printf 'D069_TOCHKA_PRODUCTION_ENVIRONMENT_REVIEWER=VERIFIED\n'
+
       - name: Check out exact import source
+        timeout-minutes: 5
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify exact merged retry PR and two-file boundary
+      - name: Verify exact merged diagnostic retry PR and two-file boundary
+        timeout-minutes: 5
         env:
+          DISPATCH_CONFIRMATION: ${{ inputs.confirmation }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -Eeuo pipefail
           test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
           test "$GITHUB_REF" = refs/heads/main
-          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
+          test "$GITHUB_TRIGGERING_ACTOR" = vitaliyozolin-dotcom
           test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$DISPATCH_CONFIRMATION" = "$EXPECTED_CONFIRMATION"
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$EXPECTED_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_IMPORT_ROOT" =~ ^[a-f0-9]{40}$ ]]
           [[ "$EXPECTED_IMPORT_PARENT" =~ ^[a-f0-9]{40}$ ]]
           [[ "$EXPECTED_ROLLOUT_BLOB" =~ ^[a-f0-9]{40}$ ]]
           [[ "$EXPECTED_FAILED_RUN_ID" =~ ^[0-9]+$ ]]
@@ -87,7 +136,12 @@ jobs:
           read -r -a parent_parts <<<"${parent_line[0]}"
           test "${#parent_parts[@]}" -eq 2
           test "${parent_parts[0]}" = "$EXPECTED_IMPORT_PARENT"
-          test "${parent_parts[1]}" = "$EXPECTED_RELEASE_SHA"
+          test "${parent_parts[1]}" = "$EXPECTED_IMPORT_ROOT"
+          mapfile -t root_line < <(git rev-list --parents -n 1 "$EXPECTED_IMPORT_ROOT")
+          read -r -a root_parts <<<"${root_line[0]}"
+          test "${#root_parts[@]}" -eq 2
+          test "${root_parts[0]}" = "$EXPECTED_IMPORT_ROOT"
+          test "${root_parts[1]}" = "$EXPECTED_RELEASE_SHA"
           mapfile -t commit_line < <(git rev-list --parents -n 1 "$GITHUB_SHA")
           read -r -a commit_parts <<<"${commit_line[0]}"
           test "${#commit_parts[@]}" -eq 2
@@ -159,6 +213,7 @@ jobs:
           printf 'D069_TOCHKA_IMPORT_PROVENANCE=VERIFIED\n'
 
       - name: Validate host-side Bash and Python programs
+        timeout-minutes: 5
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -188,6 +243,7 @@ jobs:
           printf 'D069_TOCHKA_IMPORT_HOST_PROGRAMS=VERIFIED\n'
 
       - name: Validate Node client in the production runtime image
+        timeout-minutes: 10
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -213,22 +269,120 @@ jobs:
           printf 'D069_TOCHKA_IMPORT_PROGRAMS=VERIFIED\n'
 
       - name: Prove expected production is healthy before mutation
+        id: production_before
+        timeout-minutes: 5
         shell: bash
         run: |
           set -Eeuo pipefail
-          mapfile -t live_ids < <(docker ps -q --filter "volume=$DATA_VOLUME")
+          mapfile -t live_ids < <(docker ps --no-trunc -q --filter "volume=$DATA_VOLUME")
           test "${#live_ids[@]}" -eq 1
           live_id="${live_ids[0]}"
+          [[ "$live_id" =~ ^[a-f0-9]{64}$ ]]
+          live_name="$(docker inspect "$live_id" --format '{{.Name}}' | sed 's#^/##')"
+          live_image="$(docker inspect "$live_id" --format '{{.Image}}')"
+          restart_name="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')"
+          restart_max="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
+          mapfile -t live_networks < <(docker inspect "$live_id" --format '{{range $network, $_ := .NetworkSettings.Networks}}{{println $network}}{{end}}')
+          test "${#live_networks[@]}" -eq 1
+          network_name="${live_networks[0]}"
+          network_id="$(docker network inspect "$network_name" --format '{{.Id}}')"
+          [[ "$live_name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]
+          [[ "$live_image" =~ ^sha256:[a-f0-9]{64}$ ]]
+          case "$restart_name" in no|always|unless-stopped|on-failure) ;; *) exit 1 ;; esac
+          [[ "$restart_max" =~ ^[0-9]+$ ]]
+          [[ "$network_name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]
+          [[ "$network_id" =~ ^[a-f0-9]{64}$ ]]
           test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$live_id" --format '{{.State.Paused}}')" = false
           test "$(docker inspect "$live_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
           test "$(docker inspect "$live_id" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$EXPECTED_RELEASE_SHA"
           docker exec "$live_id" node -e "fetch('http://127.0.0.1:8081/api/health',{redirect:'error',signal:AbortSignal.timeout(10000)}).then(r=>{if(r.status!==200)process.exit(1)}).catch(()=>process.exit(1))"
           test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/")" = 200
           test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/api/auth/me")" = 401
+          {
+            printf 'live_id=%s\n' "$live_id"
+            printf 'live_name=%s\n' "$live_name"
+            printf 'live_image=%s\n' "$live_image"
+            printf 'restart_name=%s\n' "$restart_name"
+            printf 'restart_max=%s\n' "$restart_max"
+            printf 'network_name=%s\n' "$network_name"
+            printf 'network_id=%s\n' "$network_id"
+          } >> "$GITHUB_OUTPUT"
           printf 'D069_TOCHKA_PREVIOUS_PRODUCTION=HEALTHY\n'
+
+      - name: Prove previous retry stopped before production mutation
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$EXPECTED_FAILED_RUN_ID" = 33959034159
+          test "$EXPECTED_FAILED_SUPERVISOR_ROOT" = \
+            /var/tmp/arthello-d069-tochka-supervisor-33959034159-1.NXovvf
+          test -d "$EXPECTED_FAILED_SUPERVISOR_ROOT"
+          test ! -L "$EXPECTED_FAILED_SUPERVISOR_ROOT"
+          test "$(stat -c %u "$EXPECTED_FAILED_SUPERVISOR_ROOT")" -eq "$(id -u)"
+          test "$(stat -c %a "$EXPECTED_FAILED_SUPERVISOR_ROOT")" = 700
+          for path in child.log child.github-output started terminal-status; do
+            test -f "$EXPECTED_FAILED_SUPERVISOR_ROOT/$path"
+            test ! -L "$EXPECTED_FAILED_SUPERVISOR_ROOT/$path"
+            test "$(stat -c %a "$EXPECTED_FAILED_SUPERVISOR_ROOT/$path")" = 600
+          done
+          test ! -s "$EXPECTED_FAILED_SUPERVISOR_ROOT/child.log"
+          test ! -s "$EXPECTED_FAILED_SUPERVISOR_ROOT/child.github-output"
+          python3 - "$EXPECTED_FAILED_SUPERVISOR_ROOT" "$EXPECTED_FAILED_RUN_ID" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          run_id = sys.argv[2]
+
+          def read_record(name, expected_keys):
+              values = {}
+              for line in (root / name).read_text(encoding="ascii").splitlines():
+                  key, separator, value = line.partition("=")
+                  if not separator or not key or key in values:
+                      raise SystemExit(1)
+                  values[key] = value
+              if set(values) != set(expected_keys):
+                  raise SystemExit(1)
+              return values
+
+          started = read_record("started", ("version", "run_id", "run_attempt", "pid", "start_ticks"))
+          status = read_record(
+              "terminal-status",
+              ("version", "run_id", "run_attempt", "pid", "start_ticks", "exit_code"),
+          )
+          if started != {key: status[key] for key in started}:
+              raise SystemExit(1)
+          if started["version"] != "1" or started["run_id"] != run_id or started["run_attempt"] != "1":
+              raise SystemExit(1)
+          if status["exit_code"] != "1":
+              raise SystemExit(1)
+          if not re.fullmatch(r"[1-9][0-9]*", started["pid"]):
+              raise SystemExit(1)
+          if not re.fullmatch(r"[1-9][0-9]*", started["start_ticks"]):
+              raise SystemExit(1)
+          try:
+              fields = pathlib.Path(f"/proc/{started['pid']}/stat").read_text(encoding="ascii").rsplit(")", 1)[1].split()
+          except (IndexError, OSError, ValueError):
+              raise SystemExit(0)
+          if fields[19] == started["start_ticks"]:
+              raise SystemExit("previous detached supervisor is still running")
+          PY
+          if docker volume inspect "arthello-d069-tochka-rollback-$EXPECTED_FAILED_RUN_ID-1" >/dev/null 2>&1; then exit 1; fi
+          if docker network inspect "arthello-d069-tochka-egress-$EXPECTED_FAILED_RUN_ID-1" >/dev/null 2>&1; then exit 1; fi
+          if docker inspect "arthello-d069-tochka-hidden-$EXPECTED_FAILED_RUN_ID-1" >/dev/null 2>&1; then exit 1; fi
+          lock_path=/tmp/arthello-direct-v44-data.production.lock
+          test ! -L "$lock_path"
+          exec 8>>"$lock_path"
+          flock -n 8
+          printf 'D069_TOCHKA_PREVIOUS_RETRY=VERIFIED_PRE_MUTATION\n'
 
       - name: Back up, import and reconcile four Tochka statements
         id: import
+        if: ${{ success() && !cancelled() }}
+        timeout-minutes: 125
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -260,8 +414,62 @@ jobs:
           done
           bash .github/scripts/d069-tochka-import-rollout.sh
 
+      - name: Verify production postcondition
+        if: ${{ always() && steps.production_before.outcome == 'success' }}
+        timeout-minutes: 130
+        shell: bash
+        env:
+          EXPECTED_LIVE_ID: ${{ steps.production_before.outputs.live_id }}
+          EXPECTED_LIVE_NAME: ${{ steps.production_before.outputs.live_name }}
+          EXPECTED_LIVE_IMAGE: ${{ steps.production_before.outputs.live_image }}
+          EXPECTED_RESTART_NAME: ${{ steps.production_before.outputs.restart_name }}
+          EXPECTED_RESTART_MAX: ${{ steps.production_before.outputs.restart_max }}
+          EXPECTED_NETWORK_NAME: ${{ steps.production_before.outputs.network_name }}
+          EXPECTED_NETWORK_ID: ${{ steps.production_before.outputs.network_id }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          lifecycle_lock_path="/tmp/arthello-d069-tochka-supervisor-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.lock"
+          test ! -L "$lifecycle_lock_path"
+          exec 7>>"$lifecycle_lock_path"
+          test -f "$lifecycle_lock_path"
+          test "$(stat -c %u "$lifecycle_lock_path")" -eq "$(id -u)"
+          test "$(stat -c %a "$lifecycle_lock_path")" = 600
+          flock --wait 7500 7
+          lock_path=/tmp/arthello-direct-v44-data.production.lock
+          test ! -L "$lock_path"
+          exec 8>>"$lock_path"
+          flock -n 8
+          [[ "$EXPECTED_LIVE_ID" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$EXPECTED_LIVE_IMAGE" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$EXPECTED_NETWORK_ID" =~ ^[a-f0-9]{64}$ ]]
+          mapfile -t live_ids < <(docker ps --no-trunc -q --filter "volume=$DATA_VOLUME")
+          test "${#live_ids[@]}" -eq 1
+          test "${live_ids[0]}" = "$EXPECTED_LIVE_ID"
+          test "$(docker inspect "$EXPECTED_LIVE_ID" --format '{{.Name}}' | sed 's#^/##')" = "$EXPECTED_LIVE_NAME"
+          test "$(docker inspect "$EXPECTED_LIVE_ID" --format '{{.Image}}')" = "$EXPECTED_LIVE_IMAGE"
+          test "$(docker inspect "$EXPECTED_LIVE_ID" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$EXPECTED_LIVE_ID" --format '{{.State.Paused}}')" = false
+          test "$(docker inspect "$EXPECTED_LIVE_ID" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+          test "$(docker inspect "$EXPECTED_LIVE_ID" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$EXPECTED_RELEASE_SHA"
+          test "$(docker inspect "$EXPECTED_LIVE_ID" --format '{{.HostConfig.RestartPolicy.Name}}')" = "$EXPECTED_RESTART_NAME"
+          test "$(docker inspect "$EXPECTED_LIVE_ID" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')" = "$EXPECTED_RESTART_MAX"
+          mapfile -t live_networks < <(docker inspect "$EXPECTED_LIVE_ID" --format '{{range $network, $_ := .NetworkSettings.Networks}}{{println $network}}{{end}}')
+          test "${#live_networks[@]}" -eq 1
+          test "${live_networks[0]}" = "$EXPECTED_NETWORK_NAME"
+          test "$(docker network inspect "$EXPECTED_NETWORK_NAME" --format '{{.Id}}')" = "$EXPECTED_NETWORK_ID"
+          if docker inspect "arthello-d069-tochka-hidden-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >/dev/null 2>&1; then exit 1; fi
+          if docker network inspect "arthello-d069-tochka-egress-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >/dev/null 2>&1; then exit 1; fi
+          docker exec "$EXPECTED_LIVE_ID" node -e "fetch('http://127.0.0.1:8081/api/health',{redirect:'error',signal:AbortSignal.timeout(10000)}).then(r=>{if(r.status!==200)process.exit(1)}).catch(()=>process.exit(1))"
+          test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/")" = 200
+          test "$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "$PUBLIC_URL/api/auth/me")" = 401
+          printf 'D069_TOCHKA_PRODUCTION_POSTCONDITION=VERIFIED\n'
+
       - name: Publish protected import summary
         if: always()
+        timeout-minutes: 2
         shell: bash
         env:
           IMPORT_BACKUP_VOLUME: ${{ steps.import.outputs.backup_volume }}
