@@ -1,0 +1,9 @@
+SOURCE_BLOBS_MATCH_UPSTREAM=6/6
+INVENTORY quality.yml:secret-scan runner=ubuntu-latest timeout_minutes=10 steps=3
+INVENTORY quality.yml:test runner=ubuntu-latest timeout_minutes=25 steps=13
+INVENTORY proof-gates.yml:prove runner=ubuntu-latest timeout_minutes=15 steps=11
+INVENTORY verify-arthello-v52.yml:verify-v52 runner=ubuntu-latest timeout_minutes=60 steps=10
+SOURCE_STRUCTURE_INSPECTION=PASS
+GITVERSE_WORKFLOW_EXECUTION=NOT_RUN
+DOCKER_IMAGE_BUILD_AND_RUNTIME=NOT_RUN
+PRODUCTION_DEPLOYMENT=NOT_RUN

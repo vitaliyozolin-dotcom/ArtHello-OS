@@ -1,0 +1,43 @@
+{
+  "upstreamRepository": "vitaliyozolin-dotcom/ArtHello-OS",
+  "upstreamCommit": "9e4c49161e643997fe821a91b84c60c6e38ede33",
+  "upstreamTree": "7cd0fe0bd2a643fd79c35878e4406db7ce5d54de",
+  "files": [
+    {
+      "path": ".github/workflows/proof-gates.yml",
+      "bytes": 2885,
+      "sha256": "b3bb8eeb5f6a84337078ab25a647e3b8a00a1bfa7baacaee7f4847c921be25e1",
+      "gitBlobSha": "440a1cc1656c6c1bc48aef071a9a8445c871d27f"
+    },
+    {
+      "path": ".github/workflows/quality.yml",
+      "bytes": 6918,
+      "sha256": "8f2afd93db436955c3850949bc8e6086dd5712329cdb54267f76e13464ceea1d",
+      "gitBlobSha": "3f28ffff3c9f6b0b40b80c203cf33503a192e93c"
+    },
+    {
+      "path": ".github/workflows/verify-arthello-v52.yml",
+      "bytes": 53196,
+      "sha256": "4e69774f79dcd0b1fa5e2b79f536475bbaeb75751006459cbcd0267307260d66",
+      "gitBlobSha": "1570986be241f57b935924a20b473742e672725c"
+    },
+    {
+      "path": "AGENTS.md",
+      "bytes": 4964,
+      "sha256": "f5bc9ac22207c948dd9cdf860c02bfa613c38a27f34b0890d9681d92fbbace99",
+      "gitBlobSha": "da476204f2d50832c7ee547a3f2b7d664c629180"
+    },
+    {
+      "path": "deploy/v52/Dockerfile",
+      "bytes": 4570,
+      "sha256": "5d29a6d4f03d34e1e7d91de48542b7a76444c6af917852e653474d69170ee83a",
+      "gitBlobSha": "0d2d82ab491574d48cb06538e7c62e5a332df1ed"
+    },
+    {
+      "path": "scripts/workflow-policy.mjs",
+      "bytes": 8877,
+      "sha256": "a62bc9d121ddd3ef704e66b3f7d94cac14acf60c186b1d89eb0d0ed8a7de79a3",
+      "gitBlobSha": "ebe7779aaebc227e0593cf2d30d9253e53058f06"
+    }
+  ]
+}
