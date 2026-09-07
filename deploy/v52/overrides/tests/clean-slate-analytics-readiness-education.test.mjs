@@ -42,7 +42,10 @@ test("education can create the first real program before the first group", () =>
   const actions = read("../app/api/education-actions/route.ts");
   const ui = read("../app/components/EducationWorkspace.tsx");
 
-  assert.match(api, /scope\.kind\s*===\s*"all"\s*\?\s*programs/);
+  // Catalogue access is separate from personal/branch scope: existing managers
+  // need unassigned programs in order to create their first group.
+  assert.match(api, /const canReadProgramCatalogue = unrestrictedOwner \|\| \["DIRECTOR", "METHODIST"\]\.includes\(context\.apiRole\)/);
+  assert.match(api, /const visiblePrograms = canReadProgramCatalogue \? programs : scopedPrograms/);
   assert.match(actions, /action === "createProgram"/);
   assert.match(actions, /async function createProgram/);
   assert.match(actions, /sourceType: "MANUAL"/);
