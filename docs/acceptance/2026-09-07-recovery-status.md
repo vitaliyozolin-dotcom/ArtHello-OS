@@ -18,11 +18,11 @@
 | Preflight импорта Точки | [PR349](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/349), 9 тестов, исходный дефект воспроизведён | Проверенный выпуск с сохранением pins/protections; старый одноразовый workflow не перевооружён |
 | Ожидание выписок | [PR351](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/351), сохранение statementId, lease/fence, рестарт, смена суток, исключение ложного успеха | Выпуск, реальные выписки и сверка; автоматический планировщик ещё отсутствует |
 | Бэкапы | [PR350](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/350), manual host command и ежедневный timer, retention14дней, 10 тестов с actual fixture restore | Установка на сервер, проверка namespace/WAL, UI-кнопка, offsite и полный runtime restore |
-| Обратная связь | Кандидат формы и owner backlog, SQLite/audit/CSRF, 14 целевых тестов | Совместный gate, браузерная проверка, восстановленная production-копия, выпуск |
+| Обратная связь | [Draft PR352](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/352), форма и owner backlog, SQLite/audit/CSRF, 14 целевых тестов | Браузерная проверка, восстановленная production-копия, выпуск |
 | AlfaCRM | [PR340](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/340) проверен независимо; обнаружены 4P1 и2P2 | Исправить runtime gate, mutation-policy, append-only raw, snapshot reconciliation, preview lifecycle и порядок membership; затем реальная выборочная загрузка |
 | Дневник | Точный живой сбой подтверждён; безопасный диагностический скрипт подготовлен | Получить `school_sso.callback_failed` с текущего School-хоста, выбрать доказанный узкий fix, повторить реальные входы |
 
-Совместная локальная v52 сборка доступов и исправления Точки прошла production build и 493/493 теста. Это не подтверждение production и не проверка текущего AlfaCRM PR. Общий `tsc --noEmit` содержит существующие ошибки Cloudflare declarations и ряда других модулей; зелёный общий typecheck не заявляется.
+Совместная локальная v52 сборка доступов, исправления Точки и обратной связи прошла production build, полный ESLint и 507/507 тестов. До добавления обратной связи сборка доступов и Точки отдельно прошла 493/493 теста. Это не подтверждение production и не проверка текущего AlfaCRM PR. Общий `tsc --noEmit` содержит существующие ошибки Cloudflare declarations и ряда других модулей; зелёный общий typecheck не заявляется.
 
 ## Фактические препятствия выпуска
 
