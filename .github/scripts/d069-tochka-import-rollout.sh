@@ -1362,7 +1362,10 @@ for attached_id in "${all_container_ids[@]}"; do
 done
 test "$live_seen" -eq 1
 
-mapfile -t networks < <(docker inspect "$live_id" --format '{{range $network, $_ := .NetworkSettings.Networks}}{{println $network}}{{end}}')
+# Docker appends a newline after the template's println. Capture first to strip
+# trailing newlines and propagate inspect failures before parsing network names.
+network_names_output="$(docker inspect "$live_id" --format '{{range $network, $_ := .NetworkSettings.Networks}}{{println $network}}{{end}}')"
+mapfile -t networks <<<"$network_names_output"
 test "${#networks[@]}" -eq 1
 network_name="${networks[0]}"
 test -n "$network_name"
