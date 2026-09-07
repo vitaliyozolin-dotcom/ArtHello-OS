@@ -52,3 +52,9 @@ GitHub для исходников и PR доступен. Актуальный 
 - GitVerse CI FAQ: https://gitverse.ru/docs/cicd/faq
 - GitLab compute: https://docs.gitlab.com/ci/pipelines/compute_minutes/
 - Forgejo Actions: https://forgejo.org/docs/latest/user/actions/reference/
+
+## Проверка готового диагностического маршрута
+
+Найден предыдущий успешный запуск topology probe: [33575409573](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/33575409573), job 100078175427, 2 сентября 2026 00:27 UTC, SHA c3182d598fd7a7a00a5388003754293219e41096. Текст workflow на этом SHA совпадает с текущим main. Подходящих failed/cancelled jobs для доступного rerun-инструмента не найдено. Проверены последние 300 общих запусков, 878 push-запусков 21 августа–3 сентября и 43 workflow_dispatch. Сам факт старого success не доказывает работоспособность runner при текущей billing-блокировке.
+
+Конкретная безопасная проверка: открыть [Probe School production topology](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/workflows/probe-school-production-topology.yml), Run workflow → main; дополнительных inputs нет. Используются существующий runner и production-ru. На сервере только Docker inspect/readOnly SQLite integrity, без изменения контейнеров, данных или сервисов. Может потребоваться штатное environment approval; защита не снимается. Запуск в этом сеансе не выполнен, потому что fresh dispatch не предоставлен текущим подключением. Результат определит, доступен ли собственный runner; причиной отказа также может быть устаревший helper image, а не billing.
