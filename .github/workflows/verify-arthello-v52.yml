@@ -802,7 +802,7 @@ jobs:
             --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges:true \
             --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777,size=32m \
             --mount "type=bind,src=$PWD/deploy/v52/backup/test_activation_volume.py,dst=/opt/arthello-backup/test_activation_volume.py,readonly" \
-            --entrypoint python3 "$IMMUTABLE_IMAGE_ID" -I -B /opt/arthello-backup/test_activation_volume.py -v
+            --entrypoint='python3' "$IMMUTABLE_IMAGE_ID" -I -B /opt/arthello-backup/test_activation_volume.py -v
           PYTHONDONTWRITEBYTECODE=1 bash scripts/test/arthello-backup-container-docker-smoke.sh "$IMMUTABLE_IMAGE_ID"
           PYTHONDONTWRITEBYTECODE=1 bash scripts/test/arthello-backup-runtime-docker-smoke.sh "$IMMUTABLE_IMAGE_ID"
 
@@ -889,4 +889,3 @@ jobs:
           if match is None or match.group(1) not in inventory_source:
               raise SystemExit("Inventory is not synchronized with the encrypted credential namespace")
           PY
-
