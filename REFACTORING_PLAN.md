@@ -164,8 +164,8 @@ Evidence: отчёт дельты строк (`git log --diff-filter=D`); `pnpm 
 
 ### Фаза 2 — слой данных и унификация миграций (L; наивысший риск корректности, блокирует все schema-работы)
 
-1. **[BEH]** 2.1 Восстановить `0016_snapshot.json`/`0017_snapshot.json` (интроспекция БД, домигрированной до 0017, либо replay состояния схемы в scratch-checkout). **Доказательство: `drizzle-kit generate` на неизменной схеме даёт пустой diff.** Ничто другое в фазе не стартует раньше.
-2. **[BEH]** 2.2 Доказать 0009–0010 на репрезентативной БД через `migration-twin.mjs`, расширенный посевом репрезентативных данных (закрывает открытый блокер BACKLOG).
+1. **[выполнено 2026-09-08] [BEH]** 2.1 `0016_snapshot.json`/`0017_snapshot.json` восстановлены из точных исторических schema trees; `drizzle-kit generate` на неизменной текущей схеме дал пустой diff.
+2. **[выполнено 2026-09-08 для disposable PostgreSQL 16; restored-sandbox gate BACKLOG остаётся] [BEH]** 2.2 `migration-twin.mjs` проверяет 0009–0010 на owner/accountant/viewer sessions, login attempts и audit evidence, включая rollback/reapply и необратимый отзыв non-owner sessions.
 3. **[BEH]** 2.3 Вывести из эксплуатации `migrate.ts`: (a) diff конечного состояния против drizzle-0017 на twin-базах (schema-dump diff = evidence); (b) реальные дельты → новая проверенная Drizzle-миграция `0018_*`; (c) boot-time — только read-only schema assertion c fail-fast; (d) release содержит immutable manifest и только checked-in SQL с зафиксированными SHA-256; deploy применяет эти миграции последовательным migration runner'ом. В production запрещены `drizzle-kit push`, `generate`, introspection-driven mutation и любой незакоммиченный SQL; prod-VPS ничего не генерирует и не собирает. Backup, проверенный rollback, отдельное разрешение и Reviewer/Coordinator gates из D-009 сохраняются.
 4. **[DEL]** 2.4 Теперь удалить сиротские схемы `messages`/`conversations`: файлы + DROP-миграция + twin-proof.
 5. **[BEH]** 2.5 Убрать module-level env-throw в `lib/db` и `alphaCrmClient` (ленивая инициализация / `createDb(env)`).

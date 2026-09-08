@@ -1,5 +1,11 @@
 # ArtHello OS — Current State
 
+## Рефакторинг, Фаза 2 — локальный checkpoint 2026-09-08
+
+- Snapshots `0016` и `0017` воспроизведены из точных исторических schema trees; текущий неизменный schema tree даёт `No schema changes, nothing to migrate`.
+- Migration Twin на одноразовом PostgreSQL 16 доказал все 18 миграций и отдельный representative round-trip 0009–0010: owner scope, отзыв accountant/viewer, audit insert, сохранение sessions через rollback 0010 и явно деструктивный rollback 0009.
+- Это disposable synthetic evidence, а не прогон на восстановленной sandbox-копии. Соответствующий BACKLOG gate и production migrations остаются открыты.
+
 ## Рефакторинг, Фаза 1 — checkpoint 2026-09-08
 
 - Локальный Zod/OpenAPI candidate восстановлен поверх актуального `origin/main` с решениями D-061–D-065; Zod policy получила следующий свободный номер D-066.

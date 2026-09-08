@@ -16,6 +16,7 @@ on:
       - 'scripts/test/workflow-policy.test.mjs'
       - 'scripts/visual-acceptance.mjs'
       - 'lib/db/scripts/migration-twin.mjs'
+      - 'scripts/test/migration-twin-report.test.mjs'
       - '.github/workflows/**'
 
 permissions:
@@ -65,7 +66,9 @@ jobs:
         run: node scripts/permission-proof.mjs --report .artifacts/permission-proof.json
 
       - name: Database Migration Twin
-        run: pnpm --filter @workspace/db exec node scripts/migration-twin.mjs --report ../../.artifacts/migration-twin.json
+        run: |
+          pnpm --filter @workspace/db exec node scripts/migration-twin.mjs --report ../../.artifacts/migration-twin.json
+          MIGRATION_TWIN_REPORT=.artifacts/migration-twin.json node --test scripts/test/migration-twin-report.test.mjs
 
       - name: Build front office for visual proof
         run: pnpm --filter @workspace/alpha-crm-sync build
