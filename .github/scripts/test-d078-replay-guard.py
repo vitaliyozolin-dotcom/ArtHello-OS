@@ -61,6 +61,20 @@ class ReplayTests(unittest.TestCase):
             job['steps'][-1]['conclusion'] = conclusion
             self.assertFalse(replay.safe_previous_job(job))
 
+    def test_r8_hosted_bundle_and_unstarted_cutover_can_resume(self):
+        bundle = dict(name='bundle', status='completed', conclusion='success', run_attempt=1, labels=['ubuntu-latest'])
+        jobs = dict(total_count=2, jobs=[bundle, self.job])
+        replay.validate_previous_attempt(jobs, 1)
+        for patch in [dict(name='unknown'), dict(status='in_progress'), dict(labels=['self-hosted']), dict(run_attempt=2)]:
+            with self.subTest(patch=patch), self.assertRaises(AssertionError):
+                replay.validate_previous_attempt(dict(total_count=2, jobs=[{**bundle, **patch}, self.job]), 1)
+        changed = copy.deepcopy(self.job)
+        changed['steps'][-1]['conclusion'] = 'failure'
+        with self.assertRaises(AssertionError):
+            replay.validate_previous_attempt(dict(total_count=2, jobs=[bundle, changed]), 1)
+        with self.assertRaises(AssertionError):
+            replay.validate_previous_attempt(dict(total_count=2, jobs=[bundle, bundle]), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

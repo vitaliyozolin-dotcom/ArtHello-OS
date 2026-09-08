@@ -40,6 +40,20 @@ def validate_installation(run, jobs, repository):
         matching = [step for step in job['steps'] if step.get('name') == name]
         assert len(matching) == 1 and matching[0].get('conclusion') == conclusion
 
+def validate_previous_attempt(jobs, attempt):
+    assert jobs['total_count'] == len(jobs['jobs']), 'Attempt jobs pagination incomplete'
+    names = [job['name'] for job in jobs['jobs']]
+    assert len(names) <= 2 and len(names) == len(set(names))
+    assert set(names) <= {'bundle', 'deploy'}, 'Unknown release capability job'
+    for job in jobs['jobs']:
+        assert job['run_attempt'] == attempt
+        if job['name'] == 'bundle':
+            assert job['status'] == 'completed'
+            assert job['conclusion'] in ('success', 'failure', 'cancelled', 'skipped')
+            assert 'ubuntu-latest' in job.get('labels', []) and 'self-hosted' not in job['labels']
+        else:
+            assert safe_previous_job(job), 'A previous cutover started or its absence cannot be proven'
+
 def run():
     repository = os.environ['EXPECTED_REPOSITORY']
     release = os.environ['RELEASE_SHA']
@@ -78,11 +92,7 @@ def run():
             attempts = range(1, attempt_count + 1)
         for attempt in attempts:
             jobs = get('/actions/runs/' + str(previous['id']) + '/attempts/' + str(attempt) + '/jobs?per_page=100')
-            assert jobs['total_count'] == len(jobs['jobs']), 'Attempt jobs pagination incomplete'
-            assert len(jobs['jobs']) <= 1
-            for job in jobs['jobs']:
-                assert job['name'] == 'deploy' and job['run_attempt'] == attempt
-                assert safe_previous_job(job), 'A previous cutover started or its absence cannot be proven'
+            validate_previous_attempt(jobs, attempt)
     print('ARTHELLO_D078_PRESERVED_R5_AND_R7_ABORT_REPLAY_BOUNDARY=VERIFIED')
 
 def validate_r6_abort(run, jobs, repository):
