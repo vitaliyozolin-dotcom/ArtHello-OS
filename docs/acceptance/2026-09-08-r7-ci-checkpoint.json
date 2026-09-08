@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "stage": "candidate-ci-in-progress",
+  "pr": 362,
+  "baseMainSha": "eb47c1360fbd701876a3c49efe029194707304db",
+  "candidateHeadSha": "2a82ab433c06a9841b45ac78833aed987adc5d2f",
+  "candidateTreeSha": "183babfe77884ae6375b50e19488b02bb0a2d461",
+  "changedFilesVerifiedByGitBlob": 25,
+  "localChecks": {
+    "release": 27,
+    "controller": 14,
+    "worker": 13,
+    "independentReview": "pass-no-remaining-P1-P2",
+    "actualDocker": "pending-hosted"
+  },
+  "ci": [
+    {
+      "id": 34226854762,
+      "name": "Verify ArtHello v52 release",
+      "status": "in_progress",
+      "conclusion": null,
+      "attempt": 1,
+      "headSha": "2a82ab433c06a9841b45ac78833aed987adc5d2f"
+    },
+    {
+      "id": 34226855058,
+      "name": "ArtHello Proof Gates",
+      "status": "completed",
+      "conclusion": "success",
+      "attempt": 1,
+      "headSha": "2a82ab433c06a9841b45ac78833aed987adc5d2f"
+    },
+    {
+      "id": 34226854773,
+      "name": "Quality gates",
+      "status": "completed",
+      "conclusion": "success",
+      "attempt": 1,
+      "headSha": "2a82ab433c06a9841b45ac78833aed987adc5d2f"
+    }
+  ],
+  "earlierCandidateFailure": {
+    "headSha": "deb6618c1a12cb979cbd3f6088238556372aa5da",
+    "run": 34226608424,
+    "job": 102062160767,
+    "reason": "Existing lexical isolated-Python check falsely matched Docker entrypoint; corrected literal quoting with identical argv, policy retained."
+  },
+  "production": {
+    "published": false,
+    "lastObservedLiveSha": "6596f69390ad539577ec2640e8ef40c7e12c22dc",
+    "lastObservedByRun": 34221458013,
+    "schoolRepairPreserved": true,
+    "naturalBrowserAcceptance": "missing-cloud-browser-502-before-login",
+    "sixScenarioAcceptance": "not-complete"
+  },
+  "openAlfaFinanceContract": "PayType endpoint documented; stable operation semantics and signed client-balance/cash effects remain unverified. No tenant calls or imports were performed."
+}
