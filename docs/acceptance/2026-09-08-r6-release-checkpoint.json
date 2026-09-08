@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "observedAtUtc": "2026-09-08T11:35:43Z",
+  "repository": "vitaliyozolin-dotcom/ArtHello-OS",
+  "pr": 361,
+  "candidateSha": "eb47c1360fbd701876a3c49efe029194707304db",
+  "candidateTree": "7e7b14ecbfbfb29e1268edaae7e620e4a62eda1c",
+  "prHeadSha": "1c00c9f26637efdb4693488028c2b8a42f52f5c4",
+  "applicationTests": {
+    "passed": 756,
+    "failed": 0,
+    "source": "PR Verify 34220809301 job 102043217231"
+  },
+  "ci": {
+    "pr": {
+      "quality": 34220809308,
+      "proof": 34220809322,
+      "verify": 34220809301,
+      "status": "success"
+    },
+    "main": {
+      "quality": 34221192037,
+      "proof": 34221192010,
+      "verify": 34221192077,
+      "status": "success"
+    }
+  },
+  "artifact": {
+    "id": 10053891902,
+    "runId": 34221192077,
+    "name": "arthello-v52-verification-34221192077",
+    "bytes": 156182006,
+    "digest": "sha256:49dec25831de36cd10547a2c9475c3f6f12f780ba16d52145259345f567e9e05"
+  },
+  "deployment": {
+    "runId": 34221458013,
+    "attempt": 1,
+    "jobId": 102045375780,
+    "conclusion": "failure",
+    "readonlyInstalledRelayVerification": "success",
+    "backupInstallCapability": {
+      "gatewayUid": 995,
+      "available": false,
+      "method": "unavailable"
+    },
+    "imageLoad": "skipped",
+    "cloneAndCutover": "skipped",
+    "observedLiveSha": "6596f69390ad539577ec2640e8ef40c7e12c22dc"
+  },
+  "naturalBrowserAcceptance": {
+    "status": "unverified",
+    "observation": "Cloud browser root returned 502 / connection refused; no authenticated Education-to-diary navigation completed. This is not evidence of public origin outage."
+  },
+  "sixScenarioAcceptance": "incomplete",
+  "nextAction": "Design and independently review a backup deployment requiring only already-authorized Docker resources, without host root. Do not rerun R6 before resolving actual capability blocker. Do not fabricate natural SSO evidence."
+}

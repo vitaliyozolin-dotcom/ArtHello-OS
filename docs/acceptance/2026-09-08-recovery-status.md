@@ -1,3 +1,17 @@
+# R6 source verified; installed School relay verified read-only; gateway backup installation capability unavailable — 2026-09-08T11:35:43Z
+
+PR361 merged as eb47c1360fbd701876a3c49efe029194707304db, tree 7e7b14ecbfbfb29e1268edaae7e620e4a62eda1c. All exact first-attempt PR and main Quality, Proof and Verify runs succeeded. PR hosted Verify executed 756/756 application tests; the R6 Ruby contract, 23 gate and 29 read-only relay tests also passed. Full identifiers and immutable artifact digest are in `2026-09-08-r6-release-checkpoint.json`.
+
+Actual R6 run34221458013 / attempt1 / job102045375780 successfully verified the already-installed R5 School relay at11:35:42Z. Its original activation09:16:10Z, config, container and School source identities remain unchanged; no School reinstall or mutation was performed. Fresh read-only receipt is in `2026-09-08-r6-existing-relay-receipt.json`.
+
+The next step measured gateway UID995 and found neither root nor existing passwordless sudo capability. The unchanged host backup installer requires that capability. The run stopped there: natural SSO diagnostic, image loading, secret resolution, clone, backup installation and ArtHello cutover were skipped. The live ArtHello SHA was freshly observed as6596f69390ad539577ec2640e8ef40c7e12c22dc.
+
+A new installation design using only dedicated Docker resources and ordinary UIDs is under review. No host-root capability was obtained or granted. The existing root-owned Tochka activation marker is a separate dependency that must retain an equivalent independent writer boundary; removing the backup installer alone is insufficient.
+
+Natural Education-to-diary browser acceptance remains unverified: the cloud browser returned502 / connection refused before login, while the server-side relay probe succeeded. These are distinct observations. No passing SSO evidence was created. All-six production acceptance is incomplete; Alfa financial movement projection remains explicitly blocked pending verified PayType direction semantics.
+
+---
+
 # R5 School repair verified; ArtHello cutover blocked on natural browser acceptance — 2026-09-08T09:25:29Z
 
 PR360 is merged as ee8f3080d941a12be357eec0fd1d902acd01a2f9, tree ad4a288b52e053ca778b956e2d45e5266893ed9b, parent ce7c50ba367fca14d71669305bf4e82b791ce4f7. A fresh branch read still confirms this main SHA. Architectural decision D-071, technical consumer D067. Concurrent refactoring history is preserved.
