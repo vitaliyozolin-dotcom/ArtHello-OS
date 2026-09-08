@@ -1,6 +1,19 @@
 export const ARTHELLO = 'https://arthello-188-225-38-55.sslip.io';
 export const SCHOOL = 'https://school-188-225-38-55.sslip.io';
 
+const employeeFailureReasons = new Set([
+  'login_rejected', 'dedicated_employee_required', 'permanent_password_required', 'education_grant_missing',
+  'denied_probe_missing', 'denied_navigation_visible', 'denied_api_not_forbidden',
+  'unreadable_login_response', 'employee_navigation_unavailable',
+]);
+
+export function safeFailureReason(stage, error) {
+  if (stage !== 'employee_access') return 'browser_check_failed';
+  // Exact tags only: never interpolate an exception, response, contact or URL.
+  const message = error instanceof Error ? error.message : '';
+  return employeeFailureReasons.has(message) ? message : 'employee_access_failed';
+}
+
 export function inspectSandbox(rows) {
   return { namespaces: rows['Layer 1 Sandbox'] === 'Namespace', pidNamespaces: rows['PID namespaces'] === 'Yes', networkNamespaces: rows['Network namespaces'] === 'Yes', seccomp: rows['Seccomp-BPF sandbox'] === 'Yes' };
 }
@@ -88,10 +101,13 @@ export async function naturalFlow(page, input, stage = () => {}) {
   ]);
   stage('employee_access');
   if (loginResponse.status() !== 200) throw Error('login_rejected');
-  const user = await loginResponse.json();
+  let user;
+  try { user = await loginResponse.json(); } catch { throw Error('unreadable_login_response'); }
   validateEmployee(user);
   credentials.password = '';
-  await page.locator('aside[aria-label="Основная навигация"] a[href="#education"]').first().waitFor({ state: 'visible' });
+  try {
+    await page.locator('aside[aria-label="Основная навигация"] a[href="#education"]').first().waitFor({ state: 'visible' });
+  } catch { throw Error('employee_navigation_unavailable'); }
   const feedbackVisible = await page.getByRole('button', { name: /Разработчикам/ }).first().isVisible();
   const denied = selectDeniedProbe(user);
   if (await page.locator('aside a[href="#' + denied.module + '"]').count()) throw Error('denied_navigation_visible');
