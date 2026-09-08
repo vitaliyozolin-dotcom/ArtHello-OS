@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "Выпуск шести исправлений через отдельную машину сборки",
+    "name": "Восстановление School SSO и production-выпуск объединённых исправлений",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -170,12 +170,15 @@
       "2026-09-08: main 9e4c49161e643997fe821a91b84c60c6e38ede33 и пять PR348–352 сохранены; новая production-версия не опубликована",
       "2026-09-08: свежий вход владельца в ArtHello и Education успешен; School вернул central_denied без reason; требуется readonly callback диагностика",
       "2026-09-08: отдельно подготовлены кандидат планировщика Точки, backup UI/bridge, общая политика модулей, AlfaCRM corrections и isolated builder; проверка общего кандидата продолжается",
-      "2026-09-08: свежий PR353 прошёл hosted Verify34189642144 и Quality34189642189; приватный image artifact10041764058 156071423bytes создан. Прежнюю quota/storage блокировку нельзя считать текущей; Proof34189642216 требует исправления visual/evidence. Текущий выпуск продолжается через доступные проверки, отдельный builder сохранён в PR353."
+      "2026-09-08: свежий PR353 прошёл hosted Verify34189642144 и Quality34189642189; приватный image artifact10041764058 156071423bytes создан. Прежнюю quota/storage блокировку нельзя считать текущей; Proof34189642216 требует исправления visual/evidence. Текущий выпуск продолжается через доступные проверки, отдельный builder сохранён в PR353.",
+      "D063 run34193103822/job101955030295: точная runtime диагностика и все cutover steps skipped",
+      "Main Quality34192976544, Proof34192976483, Verify34192976402 SUCCESS"
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
       "Т‑Банк нельзя подключать боевым токеном до независимого подтверждения статического исходящего IP сервера и выпуска владельцем токена с минимальными правами чтения счетов и выписки",
-      "Фактический импорт Точки ожидает D-059 с допустимым workerd redirect mode; действительность JWT, компаний и read-only прав подтвердит ответ банка после повторной проверки владельцем"
+      "School DNS/HTTPS к ArtHello возвращает EAI_AGAIN во внутренней Docker сети; network repair и живой SSO ещё не приняты",
+      "Объединённый код слит и проверен, но production cutover и реальная банковская/Alfa приёмка ещё не выполнены"
     ]
   },
   "stages": [
@@ -415,7 +418,7 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "Завершить объединённый кандидат codex/recovery-release-20260908, пройти доступные hosted gates, получить безопасную School callback диагностику и выпустить через новый защищённый consumer; подготовка собственного builder остаётся в PR353",
+    "result": "Выполнить reviewed School network repair через R2, подтвердить естественный SSO и выпустить точный M2 с последующей живой приёмкой всех шести сценариев",
     "evidence": "Exact SHA/tree, продуктовые tests/lint/build, Quality/Proof/Verify, приватный immutable image/provenance, изолированный clone и проверенный backup до cutover, rollback и свежая живая приёмка шести сценариев"
   },
   "decisionLog": [
@@ -1948,6 +1951,69 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "release receipt, сохранность данных, естественный SSO и подтверждённые шесть сценариев",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — явное поручение в текущем чате",
+      "approved_at": "2026-09-08",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска и живой приёмки",
+      "affected_stages": [
+        4,
+        7,
+        16,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Поручение владельца от 2026-09-08 вернуться к GitHub + собственной машине сборки и выложить все исправления в prod",
+      "decision_id": "DEC-2026-09-08-74",
+      "question": "Как исправить подтверждённый DNS/egress отказ School и продолжить новый точный выпуск?",
+      "statement": "D-064: узкий fixed-upstream relay сохраняет School в internal сети; отдельный R2 принимает fresh exact M2 gates и реальные browser SSO evidence до ArtHello cutover.",
+      "context": "D063 run34193103822 подтвердил Internal=true, EAI_AGAIN и fetch_failed; UID1001, schema и quick_check исправны. M1=68a159dc647f35cdd30ce586fc6d5beb93b89a51 проходит три hosted gates.",
+      "rationale": "Восстанавливает необходимую связь без открытия общей сети, изменения пользователей/секретов или speculative auth patch; новый main получает новую независимую release identity.",
+      "evidence": [
+        "D063 run34193103822/job101955030295: точная runtime диагностика и все cutover steps skipped",
+        "Main Quality34192976544, Proof34192976483, Verify34192976402 SUCCESS"
+      ],
+      "assumptions": [
+        "После исправления первого сетевого blocker могут проявиться иные ошибки SSO; естественная browser acceptance обязательна"
+      ],
+      "dependencies": [
+        "D-063",
+        "D-064",
+        "Pinned School image54242340 baseline",
+        "Bounded TLS passthrough relay",
+        "Exact M2 artifact",
+        "Natural SSO evidence"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/354",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34193103822"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Открыть всю общую internal network",
+          "reason": "Расширяет доступ остальных контейнеров, не требуется для одного центрального HTTPS origin",
+          "reopen_condition": "нет"
+        },
+        {
+          "option": "Повторно перепривязать старый D059 или D063 controller",
+          "reason": "Новый main и новый repair требуют собственной source identity; старые одноразовые контракты сохраняются",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Проверить и применить узкий relay, подтвердить естественный SSO, затем выпустить exact M2 ArtHello и принять шесть сценариев",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "Network repair receipt, actual SSO, exact image receipt и live acceptance",
           "status": "in_progress"
         }
       ]

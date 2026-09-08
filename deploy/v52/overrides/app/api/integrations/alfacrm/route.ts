@@ -24,6 +24,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const SUBSCRIPTION_CHUNK_SIZE = 15;
 const editors = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "INTEGRATIONS"]);
 const ALFACRM_IMPORT_ENABLED_VALUES = new Set(["1", "true", "yes"]);
+const IMPORT_BLOCKED_MESSAGE = "Импорт ожидает завершения проверки данных и подтверждения замены ранее раскрытого ключа AlfaCRM. Подключение и предпросмотр доступны.";
 const ALFACRM_OUTFLOW_PAY_TYPE_IDS = new Set(["5", "12"]);
 const moduleOrder = ["families", "staff", "groups", "lessons", "subscriptions", "finance"] as const;
 type ModuleKey = typeof moduleOrder[number];
@@ -31,6 +32,7 @@ type JsonRecord = Record<string, unknown>;
 
 type RemoteBranch = { id: string; name: string };
 type LocalBranch = { id: string; name: string };
+type LegacyDraft = { remoteBranchId: string; localBranchId: string; startDate: string; dataScopes: string[] };
 type ModuleState = {
   status: "not_started" | "previewed" | "importing" | "imported" | "error";
   previewCount: number;
@@ -56,6 +58,7 @@ type AlfaState = {
   remoteBranches: RemoteBranch[];
   branchMappings: Record<string, string>;
   modules: Record<ModuleKey, ModuleState>;
+  legacyDraft?: LegacyDraft;
 };
 type Credentials = { email: string; apiKey: string; appKey: string };
 type AlfaSession = Credentials & { endpoint: string; token: string };
@@ -83,6 +86,8 @@ export async function GET(request: Request) {
       state: publicState({ ...state, connected: state.connected && credentialStored }),
       localBranches: branches,
       credentialStored,
+      importEnabled: alfaCrmImportEnabled(),
+      importBlockedReason: alfaCrmImportEnabled() ? "" : IMPORT_BLOCKED_MESSAGE,
       canManage: editors.has(context.apiRole),
       canManageCredentials: canonicalOwner(context),
       direction: "AlfaCRM → ArtHello OS",
@@ -111,7 +116,7 @@ export async function POST(request: Request) {
     if (action === "saveBranchMappings") return saveBranchMappings(context, body);
     if (action === "previewModule") return previewModule(context, body);
     if (action === "importModule") {
-      if (!alfaCrmImportEnabled()) return privateJson({ error: "Импорт в рабочую базу пока закрыт: сначала завершите live coverage/integrity и подтвердите перевыпуск ключа AlfaCRM." }, 409);
+      if (!alfaCrmImportEnabled()) return privateJson({ error: IMPORT_BLOCKED_MESSAGE }, 409);
       return importModule(context, body);
     }
     if (action === "disconnect") return disconnect(context);
@@ -188,21 +193,32 @@ async function connect(context: RequestContext, body: Record<string, unknown>) {
   const remoteBranches = await loadRemoteBranches(session);
   if (!remoteBranches.length) return privateJson({ error: "AlfaCRM авторизована, но не вернула ни одного филиала" }, 422);
 
-  await saveIntegrationCredential(context.actor, CONNECTION_ID, CREDENTIAL_SCOPE, CREDENTIAL_KIND, JSON.stringify(credentials));
   const remoteIds = new Set(remoteBranches.map((branch) => branch.id));
-  const nextMappings = Object.fromEntries(Object.entries(previous.branchMappings).filter(([remoteId]) => remoteIds.has(remoteId)));
+  // The old form stored preferences only. Restore its one explicit pair only
+  // after real authentication of the same tenant and both branch checks.
+  const restoringLegacy = Boolean(previous.legacyDraft && !previous.connectedAt);
+  const base = restoringLegacy && previous.endpoint !== endpoint ? defaultState() : previous;
+  const nextMappings = Object.fromEntries(Object.entries(base.branchMappings).filter(([remoteId]) => remoteIds.has(remoteId)));
+  if (restoringLegacy && base.legacyDraft && !Object.keys(nextMappings).length) {
+    const { remoteBranchId, localBranchId } = base.legacyDraft;
+    const localBranches = await readLocalBranches();
+    if (remoteIds.has(remoteBranchId) && localBranches.some((branch) => branch.id === localBranchId)) {
+      nextMappings[remoteBranchId] = localBranchId;
+    }
+  }
+  await saveIntegrationCredential(context.actor, CONNECTION_ID, CREDENTIAL_SCOPE, CREDENTIAL_KIND, JSON.stringify(credentials));
   const current = new Date().toISOString();
   const state: AlfaState = {
-    ...previous,
+    ...base,
     connected: true,
     endpoint,
     emailMasked: maskEmail(email),
     hasAppKey: Boolean(appKey),
-    connectedAt: previous.connectedAt || current,
+    connectedAt: base.connectedAt || current,
     lastCheckedAt: current,
     remoteBranches,
     branchMappings: nextMappings,
-    modules: invalidatePreviews(previous.modules),
+    modules: invalidatePreviews(base.modules),
   };
   await persistState(state);
   await env.DB.batch([
@@ -500,6 +516,7 @@ async function authenticate(endpoint: string, credentials: Credentials) {
 async function loadRemoteBranches(session: AlfaSession): Promise<RemoteBranch[]> {
   const items = await fetchPaged(session, "branch/index", { is_active: 1 });
   const result = items.flatMap((item) => {
+    if (item.is_active !== undefined && item.is_active !== 1 && item.is_active !== "1" && item.is_active !== true) return [];
     const id = scalar(item.id ?? item.branch_id);
     if (!id) return [];
     const name = scalar(item.name ?? item.title ?? item.branch_name) || `Филиал ${id}`;
@@ -589,7 +606,14 @@ async function alfaFetch(input: string, init: RequestInit) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      return await fetch(input, { ...init, signal: controller.signal, cache: "no-store", redirect: "error" });
+      // workerd supports only follow/manual. Never follow a redirect with the
+      // API key or token, including redirects to another allowlisted tenant.
+      const response = await fetch(input, { ...init, signal: controller.signal, cache: "no-store", redirect: "manual" });
+      if (response.status >= 300 && response.status < 400) {
+        await response.body?.cancel();
+        throw new AlfaApiError("AlfaCRM перенаправила запрос. Проверьте адрес аккаунта; данные доступа на другой адрес не отправлялись.");
+      }
+      return response;
     } finally {
       clearTimeout(timeout);
     }
@@ -1059,7 +1083,7 @@ function entityUpsert(id: string, entityType: string, displayName: string, sourc
 async function readState(): Promise<AlfaState> {
   const row = await env.DB.prepare("SELECT state_value FROM system_runtime_state WHERE state_key=?")
     .bind(STATE_KEY).first<{ state_value: string }>();
-  if (!row) return defaultState();
+  if (!row) return readLegacyDraft();
   try {
     const parsed = JSON.parse(row.state_value) as Partial<AlfaState>;
     const defaults = defaultState();
@@ -1076,6 +1100,34 @@ async function readState(): Promise<AlfaState> {
       branchMappings: parsed.branchMappings && typeof parsed.branchMappings === "object" ? parsed.branchMappings as Record<string, string> : {},
       modules,
     };
+  } catch {
+    return defaultState();
+  }
+}
+
+async function readLegacyDraft(): Promise<AlfaState> {
+  const state = defaultState();
+  const row = await env.DB.prepare("SELECT state_value FROM system_runtime_state WHERE state_key=?")
+    .bind(`integration_setup:${CONNECTION_ID}`).first<{ state_value: string }>();
+  if (!row) return state;
+  try {
+    const setup = JSON.parse(row.state_value) as Record<string, unknown>;
+    state.endpoint = normalizeEndpoint(setup.endpoint);
+    const startDate = clean(setup.startDate, 10);
+    state.legacyDraft = {
+      remoteBranchId: clean(setup.accountScope, 80),
+      localBranchId: clean(setup.branchId, 80),
+      startDate: isoDate(startDate) ? startDate : "",
+      dataScopes: Array.isArray(setup.dataScopes)
+        ? setup.dataScopes.filter((scope): scope is string => typeof scope === "string")
+          .map((scope) => clean(scope, 80)).filter(Boolean).slice(0, 30)
+        : [],
+    };
+    state.modules.lessons.dateFrom = state.legacyDraft.startDate;
+    state.modules.finance.dateFrom = state.legacyDraft.startDate;
+    // No auth status, credential flags, previews, or import status from the old
+    // setup are evidence of a v2api session. GET never decrypts a credential.
+    return state;
   } catch {
     return defaultState();
   }

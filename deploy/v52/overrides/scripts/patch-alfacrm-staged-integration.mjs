@@ -128,10 +128,12 @@ routeSource = routeSource.replace(
   '    const familyIdentity = guardianName || phone ? `${normalizeName(guardianName)}|${phone}` : `student:${studentId}`;\n    const familyHash = await shortHash(`${remoteBranchId}:${familyIdentity}`);',
   '    const matchKey = guardianName || phone ? `${normalizeName(guardianName)}|${phone}` : "";\n    const familyHash = await shortHash(`${remoteBranchId}:student:${studentId}`);',
 );
+if (!/env\.DB\.prepare\(\s*`INSERT INTO alfacrm_family_merge_candidates\b/.test(routeSource)) {
 routeSource = routeSource.replace(
   '    statements.push(\n      entityUpsert(familyId, "Семья", familyName, `family:${remoteBranchId}:${familyHash}`, quality, scope, { ...common, guardianName, phone }, actor),',
   '    if (matchKey) statements.push(env.DB.prepare(`INSERT INTO alfacrm_family_merge_candidates\n      (remote_branch_id,customer_id,family_entity_id,match_key,guardian_name,phone,status,created_at,updated_at)\n      VALUES (?,?,?,?,?,?,\'Ожидает сверки\',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)\n      ON CONFLICT(remote_branch_id,customer_id) DO UPDATE SET family_entity_id=excluded.family_entity_id,match_key=excluded.match_key,guardian_name=excluded.guardian_name,phone=excluded.phone,status=\'Ожидает сверки\',updated_at=CURRENT_TIMESTAMP`)\n      .bind(remoteBranchId, studentId, familyId, matchKey, guardianName, phone));\n    statements.push(\n      entityUpsert(familyId, "Семья", familyName, `family:${remoteBranchId}:${familyHash}`, quality, scope, { ...common, guardianName, phone }, actor),',
 );
+}
 routeSource = routeSource.replace(
   '    const phone = normalizePhone(item.phone);\n    const guardianName = scalar(item.legal_name ?? item.payer_name ?? item.parent_name);\n    const familyIdentity = guardianName || phone ? `${normalizeName(guardianName)}|${phone}` : `student:${studentId}`;\n    const familyId = `FAM-A-${await shortHash(`${row.remote_branch_id}:${familyIdentity}`)}`;',
   '    const familyId = `FAM-A-${await shortHash(`${row.remote_branch_id}:student:${studentId}`)}`;',
