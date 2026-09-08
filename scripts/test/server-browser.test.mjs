@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateCredentials, validateEmployee, sameSchoolIdentity, requestAllowed, navigationStep, inspectSandbox } from '../../deploy/browser/flow.mjs';
+import { validateCredentials, validateEmployee, sameSchoolIdentity, requestAllowed, navigationStep, inspectSandbox, selectDeniedProbe } from '../../deploy/browser/flow.mjs';
 
 const employee = { userId: 'fixture-id', isSystemOwner: false, apiRole: 'EMPLOYEE', role: 'viewer', mustChangePassword: false, allowedModules: ['education'] };
+test('every passing account must have a concrete denied API probe', () => {
+  assert.equal(selectDeniedProbe(employee).module, 'finance');
+  assert.equal(selectDeniedProbe({ ...employee, allowedModules: ['education', 'finance'], canAccessMedical: false }).module, 'medical');
+  assert.throws(() => selectDeniedProbe({ ...employee, allowedModules: ['education', 'finance', 'medical'], canAccessMedical: true }), /denied_probe_missing/);
+});
 test('pinned Chromium status requires namespace, PID, network and seccomp layers', () => {
   const rows = { 'Layer 1 Sandbox': 'Namespace', 'PID namespaces': 'Yes', 'Network namespaces': 'Yes', 'Seccomp-BPF sandbox': 'Yes' };
   assert.equal(Object.values(inspectSandbox(rows)).every(Boolean), true);

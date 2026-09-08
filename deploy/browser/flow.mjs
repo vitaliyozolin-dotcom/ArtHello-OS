@@ -18,6 +18,12 @@ export function validateEmployee(user) {
   if (!Array.isArray(user.allowedModules) || !user.allowedModules.includes('education')) throw Error('education_grant_missing');
 }
 
+export function selectDeniedProbe(user) {
+  if (!user.allowedModules.includes('finance')) return { module: 'finance', path: '/api/finance' };
+  if (!user.allowedModules.includes('medical') || user.canAccessMedical === false) return { module: 'medical', path: '/api/medical' };
+  throw Error('denied_probe_missing');
+}
+
 function phone(value) {
   if (typeof value !== 'string' || !/^[+()\s\d-]+$/.test(value)) return '';
   const digits = value.replace(/\D/g, '');
@@ -87,13 +93,10 @@ export async function naturalFlow(page, input, stage = () => {}) {
   credentials.password = '';
   await page.locator('aside[aria-label="Основная навигация"] a[href="#education"]').first().waitFor({ state: 'visible' });
   const feedbackVisible = await page.getByRole('button', { name: /Разработчикам/ }).first().isVisible();
-  let deniedFinance = 'not_applicable';
-  if (!user.allowedModules.includes('finance')) {
-    if (await page.locator('aside a[href="#finance"]').count()) throw Error('denied_navigation_visible');
-    const status = await page.evaluate(async () => (await fetch('/api/finance', { cache: 'no-store' })).status);
-    if (status !== 403) throw Error('denied_api_not_forbidden');
-    deniedFinance = 'verified';
-  }
+  const denied = selectDeniedProbe(user);
+  if (await page.locator('aside a[href="#' + denied.module + '"]').count()) throw Error('denied_navigation_visible');
+  const deniedStatus = await page.evaluate(async endpoint => (await fetch(endpoint, { cache: 'no-store' })).status, denied.path);
+  if (deniedStatus !== 403) throw Error('denied_api_not_forbidden');
   stage('education');
   const [educationResponse] = await Promise.all([
     page.waitForResponse(response => new URL(response.url()).origin === ARTHELLO && new URL(response.url()).pathname === '/api/education' && response.request().method() === 'GET'),
@@ -117,7 +120,7 @@ export async function naturalFlow(page, input, stage = () => {}) {
   stage('complete');
   return {
     result: 'pass', method: 'natural-browser-navigation', sessionInjected: false, callbackUrlConstructed: false,
-    employeeAccount: 'verified', educationAccess: 'verified', schoolIdentity: 'verified', deniedFinance,
+    employeeAccount: 'verified', educationAccess: 'verified', schoolIdentity: 'verified', deniedApi: 'verified', deniedModule: denied.module,
     feedbackVisible,
     verifiedSteps: ['open_education_in_authenticated_arthello', 'click_diary_entry', 'follow_natural_sso_redirects', 'authenticated_school_diary_visible'],
   };

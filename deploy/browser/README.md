@@ -22,6 +22,9 @@ provisioning; an arbitrary Environment confirmation string is not fabricated.
 It follows the actual Education button and observes fixed names of natural SSO
 redirect steps. School contact must match the test login and have a staff role.
 When Finance is not assigned, its navigation must be absent and GET API return403.
+If Finance is assigned, the test instead requires denied Medical navigation/API.
+An account with neither available denial probe cannot produce PASS. Thus every
+successful run includes one actual forbidden API, never a skipped permission proof.
 The feedback button's presence is reported without creating a feedback record.
 
 Production network requests are restricted to the two HTTPS origins; only GET,

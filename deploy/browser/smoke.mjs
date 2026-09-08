@@ -16,6 +16,7 @@ export async function smoke(browser) {
   try {
     execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=browser-fixture.invalid', '-keyout', directory + '/key.pem', '-out', directory + '/cert.pem'], { stdio: 'ignore' });
     let owner = false;
+    let finance = false;
     let loginCount = 0;
     server = https.createServer({ key: readFileSync(directory + '/key.pem'), cert: readFileSync(directory + '/cert.pem') }, (request, response) => {
       request.resume();
@@ -26,9 +27,10 @@ export async function smoke(browser) {
       if (url.origin === ARTHELLO && url.pathname === '/') return html(`<form><input name="login"><input name="password" type="password"><button>Войти</button></form><script>document.querySelector('form').onsubmit=async(e)=>{e.preventDefault();await fetch('/api/auth/login',{method:'POST'});document.body.innerHTML='<aside aria-label="Основная навигация"><a href="#education">Обучение</a></aside>';document.querySelector('a').onclick=async(e)=>{e.preventDefault();await fetch('/api/education');document.body.insertAdjacentHTML('beforeend','<button id="diary">Открыть дневник</button>');document.querySelector('#diary').onclick=()=>location.assign('${SCHOOL}/auth/central/start');};};</script>`);
       if (url.origin === ARTHELLO && url.pathname === '/api/auth/login') {
         loginCount++;
-        return json({ userId: 'fixture', isSystemOwner: owner, apiRole: owner ? 'OWNER' : 'EMPLOYEE', role: owner ? 'owner' : 'viewer', mustChangePassword: false, allowedModules: ['education'] });
+        return json({ userId: 'fixture', isSystemOwner: owner, apiRole: owner ? 'OWNER' : 'EMPLOYEE', role: owner ? 'owner' : 'viewer', mustChangePassword: false, canAccessMedical: false, allowedModules: finance ? ['education', 'finance'] : ['education'] });
       }
       if (url.origin === ARTHELLO && url.pathname === '/api/finance') return json({ error: 'fixture' }, 403);
+      if (url.origin === ARTHELLO && url.pathname === '/api/medical') return json({ error: 'fixture' }, 403);
       if (url.origin === ARTHELLO && url.pathname === '/api/education') return json({});
       if (url.origin === SCHOOL && url.pathname === '/auth/central/start') return redirect(ARTHELLO + '/api/school-sso/authorize?state=fixture');
       if (url.origin === ARTHELLO && url.pathname === '/api/school-sso/authorize') return redirect(SCHOOL + '/auth/central/callback?code=fixture&state=fixture');
@@ -39,7 +41,9 @@ export async function smoke(browser) {
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     proxy = await startProxy(() => net.connect({ host: '127.0.0.1', port: server.address().port }));
-    for (owner of [false, true]) {
+    for (const scenario of [{ owner: false, finance: false }, { owner: false, finance: true }, { owner: true, finance: false }]) {
+      owner = scenario.owner;
+      finance = scenario.finance;
       loginCount = 0;
       // Only the local, self-signed fixture accepts its throwaway TLS cert.
       // The real entrypoint always sets ignoreHTTPSErrors:false.
@@ -50,7 +54,12 @@ export async function smoke(browser) {
         page.setDefaultTimeout(10000);
         const task = naturalFlow(page, { login: 'fixture@example.invalid', password: 'fixture-password-only' }, stage => process.stderr.write('FIXTURE_STAGE=' + stage + '\n'));
         if (owner) await assert.rejects(task, /dedicated_employee_required/);
-        else assert.equal((await task).result, 'pass');
+        else {
+          const result = await task;
+          assert.equal(result.result, 'pass');
+          assert.equal(result.deniedApi, 'verified');
+          assert.equal(result.deniedModule, finance ? 'medical' : 'finance');
+        }
         assert.equal(loginCount, 1);
         // A foreign destination reached through a 303 is blocked by CONNECT,
         // including redirects that Playwright routing itself does not inspect.
