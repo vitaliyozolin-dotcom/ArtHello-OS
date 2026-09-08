@@ -1,5 +1,21 @@
 # ArtHello OS — Decisions
 
+## D-064 — Восстановить точечную связь School с ArtHello и продолжить выпуск R2
+
+Дата: 2026-09-08  
+Статус: принято как необходимое исправление подтверждённого runtime-дефекта в рамках исходного поручения владельца  
+Владелец: Исполнитель ArtHello OS
+
+PR #354 слит как 68a159dc647f35cdd30ce586fc6d5beb93b89a51. Точные main Quality, Proof и Verify успешны. D063 run 34193103822 дошёл до read-only School diagnostic и остановился до image/clone/cutover: School на внутренней Docker bridge arthello-os_backend имеет EAI_AGAIN для DNS и HTTPS ArtHello, а callback сообщает fetch_failed. Файловые права UID1001, quick_check и требуемая схема исправны. Этот результат доказывает первый сетевой blocker, но не исключает последующей ошибки SSO после его устранения.
+
+Исправляется только связь School с фиксированным ArtHello origin. Общая internal network не открывается. Отдельный ограниченный TCP relay получает единственный внутренний DNS alias arthello-188-225-38-55.sslip.io и пересылает соединения только на 188.225.38.55:443. TLS остаётся сквозным: School проверяет настоящий сертификат ArtHello; секрет, origin и callback protocol не меняются. Relay использует уже проверенный и загруженный School image только как Node runtime с явным entrypoint, без приложения, School volumes, environment credentials и секретов. Требуются непривилегированный user, read-only root/script, ограниченные соединения/время/объём, отсутствие опубликованного host port и отдельная egress network. Сетевой smoke обязателен на hosted runner. После подключения точечного alias проверяются конфигурация relay, TLS upstream и запрос из School; при неудаче удаляются только созданные этой попыткой relay и отдельная сеть.
+
+До мутации сверяются точные School image/revision/container/network и отсутствие конфликтующего alias. Идемпотентный повтор допускается только для полностью совпадающей проверенной конфигурации по durable receipt; неоднозначное состояние блокируется. Не выполняются изменения School базы, пользователей, сессий, ключей, образа или общей сети. Rollback удаляет лишь созданные в этой попытке relay/network, не восстанавливая старую School БД поверх новых записей.
+
+Новый отдельный R2 workflow закреплён за PR #355, веткой codex/school-arthello-recovery-r2-20260908 и parent main 68a159dc647f35cdd30ce586fc6d5beb93b89a51. Он повторно требует exact first-attempt Quality/Proof/Verify уже нового merge SHA и соответствующий immutable ArtHello image. Ни D059, ни D063 не перепривязываются. После School network repair выполняются диагностика и настоящий естественный browser SSO; только свежее matching acceptance допускает ArtHello cutover. M1 image не выдаётся за новый M2 source.
+
+Все data/backup/clone/public-write boundary и activation marker требования D063 сохраняются. До начала ArtHello cutover разрешён ограниченный повтор лишь при доказанном пропуске этого шага и read-only подтверждении прежнего School repair; начатый или неоднозначный ArtHello cutover запрещает replay SHA. Отчёт о сетевой доступности не считается успешным входом и не закрывает исходные шесть пользовательских сценариев.
+
 ## D-063 — Выпустить объединённые исправления через доступный hosted builder и защищённую доставку
 
 Дата: 2026-09-08  

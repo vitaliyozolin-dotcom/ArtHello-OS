@@ -484,5 +484,5 @@ test('AlfaCRM endpoint allowlist and redirect rejection preserve transport bound
   let observed;
   globalThis.fetch = async (_url, init) => { observed = init; return Response.json({ items: [] }); };
   await route.alfaFetch('https://tenant.s20.online/v2api/branch/index', { headers: { 'X-ALFACRM-TOKEN': 'fixture-token' } });
-  assert.equal(observed.redirect, 'error');
+  assert.equal(observed.redirect, 'manual');
 });

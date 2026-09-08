@@ -1,0 +1,36 @@
+{
+  "decisionId": "D064",
+  "diagnosis": {
+    "category": "internal_bridge_dns_unavailable",
+    "dnsError": "EAI_AGAIN",
+    "jobId": 101955030295,
+    "runId": 34193103822
+  },
+  "files": {
+    "healthcheck.mjs": "ed88c4f592293871b113b9f7a2e1826864882f31933b3742b8a211ceccf61c83",
+    "relay.mjs": "90296643b2fe7226a13c4a366c2fd924591b115ea0a8e0b2cf8e2cc93eb27613",
+    "repair.py": "c3a4bb788975d64d15aed0e2f058d939cd344ebbb789fece6542d49d2c270f9c"
+  },
+  "relay": {
+    "container": "school-arthello-sso-relay",
+    "egressNetwork": "school-arthello-sso-egress",
+    "gid": 1001,
+    "hostname": "arthello-188-225-38-55.sslip.io",
+    "uid": 1001,
+    "upstream": "188.225.38.55:443"
+  },
+  "schemaVersion": 1,
+  "school": {
+    "container": "school-1-11",
+    "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+    "network": "arthello-os_backend",
+    "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c"
+  },
+  "scope": {
+    "applicationBuildOnProduction": false,
+    "schoolDataChanges": false,
+    "schoolRuntimeChanges": false,
+    "sharedNetworkInternalChanges": false,
+    "tlsTermination": false
+  }
+}

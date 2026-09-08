@@ -29,11 +29,14 @@ type AlfaState = {
   remoteBranches: Array<{ id: string; name: string }>;
   branchMappings: Record<string, string>;
   modules: Record<ModuleKey, ModuleState>;
+  legacyDraft?: { remoteBranchId: string; localBranchId: string; startDate: string; dataScopes: string[] };
 };
 type AlfaPayload = {
   state: AlfaState;
   localBranches: Array<{ id: string; name: string }>;
   credentialStored: boolean;
+  importEnabled: boolean;
+  importBlockedReason: string;
   canManage: boolean;
   canManageCredentials: boolean;
   direction: string;
@@ -99,6 +102,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
   const dialogRef = useRef<HTMLElement>(null);
   const [payload, setPayload] = useState<AlfaPayload>({
     state: emptyState(), localBranches: [], credentialStored: false, canManage: false, canManageCredentials: false,
+    importEnabled: false, importBlockedReason: "",
     direction: "AlfaCRM → ArtHello OS", boundary: "Только чтение",
   });
   const [loading, setLoading] = useState(true);
@@ -218,6 +222,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
 
         <div className="ahAlfaCrmBody">
           {loading ? <div className="ahAlfaCrmLoading">Загружаю настройки подключения…</div> : null}
+          {!loading && !payload.importEnabled && payload.importBlockedReason ? <div className="ahAlfaCrmWarning">{payload.importBlockedReason}</div> : null}
 
           {!loading ? <section className="ahAlfaCrmPanel">
             <div className="ahAlfaCrmPanelHeading">
@@ -228,6 +233,12 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
               </div>
               {state.connected ? <StatusBadge status="connected" text="Подключено" /> : <StatusBadge status="waiting" text="Не подключено" />}
             </div>
+
+            {state.legacyDraft ? <div className="ahAlfaCrmReadOnlyNote">
+              <strong>Ранее сохранённый выбор</strong>
+              <span>Филиал AlfaCRM: {state.legacyDraft.remoteBranchId || "не выбран"} → {payload.localBranches.find((branch) => branch.id === state.legacyDraft?.localBranchId)?.name || "филиал ArtHello OS недоступен"}. Данные с {state.legacyDraft.startDate || "неуказанной даты"}. {state.legacyDraft.dataScopes.join(", ")}.</span>
+              {!state.connected ? <span>Старая форма сохраняла параметры подключения. Доступ проверяется ниже; сопоставление восстановится, если оба филиала доступны.</span> : <span>Каждый нужный модуль запускается отдельно после предпросмотра.</span>}
+            </div> : null}
 
             {state.connected && !connectionEdit ? <div className="ahAlfaCrmConnectionSummary">
               <div><small>Адрес AlfaCRM</small><strong>{state.endpoint}</strong></div>
@@ -294,6 +305,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
                 setPeriod={(period) => setPeriods({ ...periods, [definition.key]: period })}
                 busy={busy}
                 canManage={payload.canManage}
+                importEnabled={payload.importEnabled}
                 preview={() => post(moduleRequest("previewModule", definition, periods[definition.key]), `preview-${definition.key}`)}
                 importData={() => post({ ...moduleRequest("importModule", definition, periods[definition.key]), previewToken: state.modules[definition.key].previewToken }, `import-${definition.key}`)}
               />)}
@@ -316,13 +328,14 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
   );
 }
 
-function ModuleCard({ definition, state, period, setPeriod, busy, canManage, preview, importData }: {
+function ModuleCard({ definition, state, period, setPeriod, busy, canManage, importEnabled, preview, importData }: {
   definition: ModuleDefinition;
   state: AlfaState;
   period: { dateFrom: string; dateTo: string; transitionDate: string };
   setPeriod: (value: { dateFrom: string; dateTo: string; transitionDate: string }) => void;
   busy: string;
   canManage: boolean;
+  importEnabled: boolean;
   preview: () => Promise<ActionResponse>;
   importData: () => Promise<ActionResponse>;
 }) {
@@ -330,7 +343,7 @@ function ModuleCard({ definition, state, period, setPeriod, busy, canManage, pre
   const dependencyMissing = definition.dependsOn.find((key) => state.modules[key].status !== "imported");
   const previewBusy = busy === `preview-${definition.key}`;
   const importBusy = busy === `import-${definition.key}`;
-  const canImport = canManage && Boolean(moduleState.previewToken) && !dependencyMissing;
+  const canImport = importEnabled && canManage && Boolean(moduleState.previewToken) && !dependencyMissing;
   const imported = moduleState.status === "imported";
   return <article className={`ahAlfaCrmModule ${imported ? "complete" : ""}`}>
     <div className="ahAlfaCrmModuleTop">

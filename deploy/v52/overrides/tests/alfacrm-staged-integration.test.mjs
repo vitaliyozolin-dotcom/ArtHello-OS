@@ -34,7 +34,8 @@ test("production writes stay fail-closed until the AlfaCRM release gate is expli
   assert.match(route, /ALFACRM_IMPORT_ENABLED/);
   assert.match(route, /ALFACRM_IMPORT_ENABLED_VALUES/);
   assert.match(route, /if \(!alfaCrmImportEnabled\(\)\)/);
-  assert.match(route, /live coverage\/integrity/);
+  assert.match(route, /if \(!alfaCrmImportEnabled\(\)\) return privateJson\(\{ error: IMPORT_BLOCKED_MESSAGE \}, 409\)/);
+  assert.match(wizard, /const canImport = importEnabled && canManage/);
 });
 
 test("branch mapping and module dependencies are enforced before imports", () => {
