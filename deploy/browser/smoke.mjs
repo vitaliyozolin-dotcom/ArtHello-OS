@@ -16,8 +16,11 @@ export async function smoke(browser) {
       if (url.origin === ARTHELLO && url.pathname === '/api/auth/login') { loginCount++; return json(user); }
       if (url.origin === ARTHELLO && url.pathname === '/api/finance') return json({ error: 'fixture' }, 403);
       if (url.origin === ARTHELLO && url.pathname === '/api/education') return json({});
-      if (url.origin === SCHOOL && url.pathname === '/auth/central/start') return route.fulfill({ status: 303, headers: { location: ARTHELLO + '/api/school-sso/authorize?state=fixture' } });
-      if (url.origin === ARTHELLO && url.pathname === '/api/school-sso/authorize') return route.fulfill({ status: 303, headers: { location: SCHOOL + '/auth/central/callback?code=fixture&state=fixture' } });
+      // A mocked HTTP redirect is followed by Chromium outside route handlers.
+      // Use fixture-only document navigation so the network:none test remains
+      // fully synthetic. The live flow still follows real server redirects.
+      if (url.origin === SCHOOL && url.pathname === '/auth/central/start') return html(`<script>location.assign('${ARTHELLO}/api/school-sso/authorize?state=fixture')</script>`);
+      if (url.origin === ARTHELLO && url.pathname === '/api/school-sso/authorize') return html(`<script>location.assign('${SCHOOL}/auth/central/callback?code=fixture&state=fixture')</script>`);
       if (url.origin === SCHOOL && url.pathname === '/auth/central/callback') return html(`<nav aria-label="Основная навигация">Дневник</nav><script>fetch('/api/school')</script>`);
       if (url.origin === SCHOOL && url.pathname === '/api/school') return json({ viewer: { email: 'fixture@example.invalid', role: 'teacher' } });
       return route.abort();
