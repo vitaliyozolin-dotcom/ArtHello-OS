@@ -1,5 +1,23 @@
 # ArtHello OS — Decisions
 
+## D-069 — Исправить права собственного School lock и сохранить очередь выпуска
+
+Дата: 2026-09-08  
+Статус: необходимое техническое исправление в рамках поручения владельца восстановить систему и опубликовать обновления  
+Владелец: Исполнитель ArtHello OS
+
+PR356 слит как M3 `8a0bf989e0c271b009d8f14f0f3d21b3ab47966c`; exact Quality34198562442, Proof34198562451 и Verify34198562465 прошли, включая 724 теста приложения. D065 run34198718003 был сначала отменён до создания jobs общей очередью, затем владелец запустил attempt2. Job101982122878 прошёл source gates, но bootstrap отказал; image/clone/cutover пропущены. Отказавший repair не перезапускается.
+
+Отдельная read-only диагностика PR357, main `52770ad3f10b0ed874263c28e932eb532d77e461`, run34203383943/job101987156275 от 08:14:10Z доказала: реальные/effective UID/GID1000; passwd-home0750 собственного владельца и безопасные предки; существующий School lock regular, uid1000/gid1000, mode0664, nlink1, стабильный inode и доступ на чтение. Нарушено именно отсутствие group-write. State-root R3 и relay container отсутствуют; School image/source/StartedAt/network совпадают с проверенным baseline и healthy. Для egress network диагностический статус unknown сохраняется unknown, а не объявляется отсутствием.
+
+R4 может только сузить права ЭТОГО существующего собственного lock с exact0664 до0644. До изменения обязательны проверка защищённой release identity и frozen bundle, совпадение реального/effective UID/GID1000, fixed path, regular file, owner/group1000, nlink1, стабильность path/fd inode. Открытие только existing descriptor O_RDONLY|O_NOFOLLOW|O_NONBLOCK, bounded exclusive flock; под lock выполняются повторная проверка, fchmod(fd,0644), fsync и подтверждение того же inode/владельца/режима. Exact0644 — идемпотентное чтение без повторной мутации. Другие modes/owners/types, отсутствующий файл и неоднозначность блокируют. Запрещены create/truncate/replace/chown/root/sudo и изменения чужих файлов. Права owner-write и общий path/inode сохраняются; исторические remote consumers используют того же DEPLOY_USER. Нормализация фиксируется как реальная конфигурационная мутация; последующий отказ не скрывает её и не возвращает0664. Перед запуском controller lock освобождается, controller заново берёт ту же общую блокировку.
+
+Для исправления доказанной отмены ожидающего выпуска используется поддерживаемая GitHub очередь `queue: max` при `cancel-in-progress: false`. Ключи общей gateway workflow concurrency и School job concurrency не меняются. Только активные D059/D063/D064/D065 consumers того же Verify workflow_run получают параметр queue; все их source/PR/parent/replay/Environment/step guards остаются побайтово прежними. Исторические manual/push workflows не меняются и не запускаются. Старые snapshot attempts не считаются обновлёнными и не перезапускаются. Новая семантика очереди опубликована GitHub 2026-05-07: https://github.blog/changelog/2026-05-07-github-actions-concurrency-groups-now-allow-larger-queues/ .
+
+Новый consumer закреплён за PR358, `codex/school-arthello-recovery-r4-20260908` и parent3cc30b6ad2790bfe15d43ab38adebb9cdf6a1f26. R3 relay bundle/config остаётся неизменным. R4 требует собственные exact first-attempt PR/main checks и immutable image, защищённую доставку, durable repair receipt, свежую естественную Education→Diary приёмку, clone/verified backup и D063 public-write boundary. Прежний неуспешный D065 не перепривязывается. Изменение очереди или прав lock не является завершённым SSO/публикацией/приёмкой шести сценариев.
+
+После подготовки обнаружен новый main `3cc30b6ad2790bfe15d43ab38adebb9cdf6a1f26` с отдельным рефакторингом Фазы 1. Все его изменения сохраняются. Его Quality34204053510, Proof34204053460 и Verify34204053516 успешны; R4 всё равно требует новых exact PR/main проверок. D-066/D-067/D-068 заняты решениями рефакторинга; это решение имеет номер D-069, а D066 в именах release-файлов остаётся технической меткой задачи.
+
 ## D-065 — Устанавливать School relay с имеющимися правами служебного пользователя
 
 Дата: 2026-09-08  

@@ -16,6 +16,7 @@ permissions:
 concurrency:
   group: gateway-38-55-arthello-production
   cancel-in-progress: false
+  queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
   EXPECTED_RELEASE_HEAD: codex/school-arthello-recovery-r3-20260908
@@ -55,6 +56,7 @@ jobs:
     concurrency:
       group: school-1-11-production
       cancel-in-progress: false
+      queue: max
     steps:
     - name: Verify D065 R3 identity and safe verified-School resume
       timeout-minutes: 4
