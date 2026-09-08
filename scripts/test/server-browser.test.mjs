@@ -1,8 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateCredentials, validateEmployee, sameSchoolIdentity, requestAllowed, navigationStep } from '../../deploy/browser/flow.mjs';
+import { validateCredentials, validateEmployee, sameSchoolIdentity, requestAllowed, navigationStep, inspectSandbox } from '../../deploy/browser/flow.mjs';
 
 const employee = { userId: 'fixture-id', isSystemOwner: false, apiRole: 'EMPLOYEE', role: 'viewer', mustChangePassword: false, allowedModules: ['education'] };
+test('pinned Chromium status requires namespace, PID, network and seccomp layers', () => {
+  const rows = { 'Layer 1 Sandbox': 'Namespace', 'PID namespaces': 'Yes', 'Network namespaces': 'Yes', 'Seccomp-BPF sandbox': 'Yes' };
+  assert.equal(Object.values(inspectSandbox(rows)).every(Boolean), true);
+  for (const key of Object.keys(rows)) assert.equal(Object.values(inspectSandbox({ ...rows, [key]: 'No' })).every(Boolean), false);
+  assert.equal(Object.values(inspectSandbox({})).every(Boolean), false);
+});
 test('dedicated input fails closed without printing secrets', () => {
   const password = 'fixture-private-password';
   assert.deepEqual(validateCredentials({ login: 'fixture@example.invalid', password }), { login: 'fixture@example.invalid', password });

@@ -1,6 +1,10 @@
 export const ARTHELLO = 'https://arthello-188-225-38-55.sslip.io';
 export const SCHOOL = 'https://school-188-225-38-55.sslip.io';
 
+export function inspectSandbox(rows) {
+  return { namespaces: rows['Layer 1 Sandbox'] === 'Namespace', pidNamespaces: rows['PID namespaces'] === 'Yes', networkNamespaces: rows['Network namespaces'] === 'Yes', seccomp: rows['Seccomp-BPF sandbox'] === 'Yes' };
+}
+
 export function validateCredentials(input) {
   const login = typeof input?.login === 'string' ? input.login.trim() : '';
   const password = input?.password;

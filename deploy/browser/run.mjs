@@ -1,6 +1,6 @@
 import { chromium } from 'playwright-core';
 import { readFileSync } from 'node:fs';
-import { installNetworkBoundary, naturalFlow } from './flow.mjs';
+import { installNetworkBoundary, naturalFlow, inspectSandbox } from './flow.mjs';
 
 let browser;
 let stage = 'sandbox';
@@ -19,9 +19,9 @@ try {
   const sandboxPage = await sandboxContext.newPage();
   stage = 'sandbox_page';
   await sandboxPage.goto('chrome://sandbox');
-  const sandbox = await sandboxPage.locator('body').innerText();
+  const sandboxRows = await sandboxPage.locator('#sandbox-status tr').evaluateAll(rows => Object.fromEntries(rows.map(row => Array.from(row.querySelectorAll('td')).map(cell => cell.textContent.trim()))));
   stage = 'sandbox_policy';
-  sandboxStatus = { namespaces: /Namespace sandbox\s+Yes/.test(sandbox), pidNamespaces: /PID namespaces\s+Yes/.test(sandbox), seccomp: /Seccomp-BPF sandbox\s+Yes/.test(sandbox) };
+  sandboxStatus = inspectSandbox(sandboxRows);
   if (!Object.values(sandboxStatus).every(Boolean)) throw Error();
   await sandboxContext.close();
   if (process.argv[2] === '--smoke') {
