@@ -1,0 +1,968 @@
+{
+  "runId": 34207628005,
+  "jobId": 102000795971,
+  "observations": [
+    {
+      "observedAtUtc": "2026-09-08T09:00:57.415175+00:00",
+      "observer": "existing-gateway-runner",
+      "requests": [
+        {
+          "database": "available",
+          "httpStatus": 200,
+          "releaseSha": null,
+          "service": "arthello",
+          "status": "ok"
+        },
+        {
+          "database": null,
+          "httpStatus": 200,
+          "releaseSha": null,
+          "service": "school",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "caller": {
+        "effectiveGid": 1000,
+        "effectiveUid": 1000,
+        "ordinaryIdentityValid": true,
+        "realGid": 1000,
+        "realUid": 1000
+      },
+      "completedAtUtc": "2026-09-08T09:01:04Z",
+      "diagnostic": "D066-fingerprint-read-only",
+      "docker": {
+        "backend": {
+          "bridgeDriver": true,
+          "containsRelay": null,
+          "containsSchool": true,
+          "error": null,
+          "exists": true,
+          "id": "7db7d29f27b1c2f3a46354ffeebfddc15d3aaaa1cd357fbce4cc7b2137eb1006",
+          "internal": true,
+          "ipv6Enabled": false,
+          "memberCount": 5,
+          "nameMatches": true,
+          "repairLabels": {
+            "activatedAtUtc": null,
+            "configurationMatches": false,
+            "configurationSha256": null,
+            "executionUid": null,
+            "owner": "missing",
+            "releaseSha": null,
+            "stateDirectorySha256": null
+          }
+        },
+        "daemonObserved": true,
+        "egress": {
+          "error": "object_missing",
+          "exists": false
+        },
+        "relay": {
+          "error": "object_missing",
+          "exists": false
+        },
+        "school": {
+          "baselineChecks": {
+            "imageMatches": true,
+            "networkModeMatches": true,
+            "onlyBackendNetwork": true,
+            "productionLabelMatches": true,
+            "sourceMatches": true,
+            "startedAtMatches": true,
+            "systemLabelMatches": true
+          },
+          "configuredUser": "other",
+          "error": null,
+          "exists": true,
+          "health": "healthy",
+          "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+          "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+          "nameMatches": true,
+          "networkCount": 1,
+          "networkMode": "arthello-os_backend",
+          "onBackend": true,
+          "onEgress": false,
+          "running": true,
+          "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+          "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+        }
+      },
+      "fingerprintSeries": {
+        "complete": true,
+        "limitation": "Observations describe this diagnostic interval; original failed-setup object values were not retained",
+        "normalization": "Only Mounts array order; complete mount records and duplicate counts preserved",
+        "requestedSamples": 12,
+        "samples": [
+          {
+            "backendComponentSha256": {
+              "Driver": "5b3f874c3d2c344d9a45aec64a3c65ea31800a7eefa4b22d072d9f3e7b613beb",
+              "EnableIPv6": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
+              "IPAM": "6adaaa6b1b3599c547e5faed9dcb4b5a4584b3668348b64063ae19f8468382bf",
+              "Id": "5520f118f6f42be6aa5f8ea6fb203b3b44b22eadb9c0299705e621c4d1f09276",
+              "Internal": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+              "Labels": "0a81f5bab7db9cff6e3a940f44be694c60b4bf518457bf503968ca39aedf940e",
+              "Name": "13b1e0a7794d4530b9a11ce0dbed68be437ad37763c04f791060853d8c208c71",
+              "Options": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "backendExactSha256": "86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be",
+            "mountCount": 2,
+            "mountOrderNormalizedSha256": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+            "observedAtUtc": "2026-09-08T09:01:00Z",
+            "sampleIndex": 0,
+            "schoolComponentSha256": {
+              "Config": "ad18dabfe200efc81056057780d400300e6dfdd6da5ae424779644fcf6aac4f8",
+              "HostConfig": "70515e5cb58d344f117f916ae3240ffe2975d71b3a604d7e5b2d798c9a8f80e7",
+              "Id": "6fc820660efed66d04a34653c4161a09a084fb84b440d86f9f8c6c964f904781",
+              "Image": "48b7328c40b55f0e36d752fd1ae435fd5366c69da8e6f591f81834e698576ce3",
+              "Mounts": "2ed15aeda49ffeaf731e00b3765dba5e39e3b4befb859a5c76a25632f108edff",
+              "networks": "44b3da4c3b7c4242efefe65530275926348def42b130d5a2a6549273a6600cc6"
+            },
+            "schoolExactSha256": "5c97fc38c341ae6ffce44d5f137053e664f065b58898b50e51dc8dc9b53f954a",
+            "schoolIdentity": {
+              "baselineChecks": {
+                "imageMatches": true,
+                "networkModeMatches": true,
+                "onlyBackendNetwork": true,
+                "productionLabelMatches": true,
+                "sourceMatches": true,
+                "startedAtMatches": true,
+                "systemLabelMatches": true
+              },
+              "configuredUser": "other",
+              "error": null,
+              "exists": true,
+              "health": "healthy",
+              "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+              "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+              "nameMatches": true,
+              "networkCount": 1,
+              "networkMode": "arthello-os_backend",
+              "onBackend": true,
+              "onEgress": false,
+              "running": true,
+              "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+              "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+            },
+            "schoolMountOrderNormalizedSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "state": "observed"
+          },
+          {
+            "backendComponentSha256": {
+              "Driver": "5b3f874c3d2c344d9a45aec64a3c65ea31800a7eefa4b22d072d9f3e7b613beb",
+              "EnableIPv6": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
+              "IPAM": "6adaaa6b1b3599c547e5faed9dcb4b5a4584b3668348b64063ae19f8468382bf",
+              "Id": "5520f118f6f42be6aa5f8ea6fb203b3b44b22eadb9c0299705e621c4d1f09276",
+              "Internal": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+              "Labels": "0a81f5bab7db9cff6e3a940f44be694c60b4bf518457bf503968ca39aedf940e",
+              "Name": "13b1e0a7794d4530b9a11ce0dbed68be437ad37763c04f791060853d8c208c71",
+              "Options": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "backendExactSha256": "86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be",
+            "changeFromPrevious": {
+              "backendExactChanged": false,
+              "changedFieldPaths": [],
+              "mountsOrderOnlyChanged": false,
+              "normalizedSchoolChanged": false,
+              "schoolChangeExplainedOnlyByMountOrder": false,
+              "schoolExactChanged": false
+            },
+            "mountCount": 2,
+            "mountOrderNormalizedSha256": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+            "observedAtUtc": "2026-09-08T09:01:00Z",
+            "sampleIndex": 1,
+            "schoolComponentSha256": {
+              "Config": "ad18dabfe200efc81056057780d400300e6dfdd6da5ae424779644fcf6aac4f8",
+              "HostConfig": "70515e5cb58d344f117f916ae3240ffe2975d71b3a604d7e5b2d798c9a8f80e7",
+              "Id": "6fc820660efed66d04a34653c4161a09a084fb84b440d86f9f8c6c964f904781",
+              "Image": "48b7328c40b55f0e36d752fd1ae435fd5366c69da8e6f591f81834e698576ce3",
+              "Mounts": "2ed15aeda49ffeaf731e00b3765dba5e39e3b4befb859a5c76a25632f108edff",
+              "networks": "44b3da4c3b7c4242efefe65530275926348def42b130d5a2a6549273a6600cc6"
+            },
+            "schoolExactSha256": "5c97fc38c341ae6ffce44d5f137053e664f065b58898b50e51dc8dc9b53f954a",
+            "schoolIdentity": {
+              "baselineChecks": {
+                "imageMatches": true,
+                "networkModeMatches": true,
+                "onlyBackendNetwork": true,
+                "productionLabelMatches": true,
+                "sourceMatches": true,
+                "startedAtMatches": true,
+                "systemLabelMatches": true
+              },
+              "configuredUser": "other",
+              "error": null,
+              "exists": true,
+              "health": "healthy",
+              "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+              "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+              "nameMatches": true,
+              "networkCount": 1,
+              "networkMode": "arthello-os_backend",
+              "onBackend": true,
+              "onEgress": false,
+              "running": true,
+              "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+              "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+            },
+            "schoolMountOrderNormalizedSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "state": "observed"
+          },
+          {
+            "backendComponentSha256": {
+              "Driver": "5b3f874c3d2c344d9a45aec64a3c65ea31800a7eefa4b22d072d9f3e7b613beb",
+              "EnableIPv6": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
+              "IPAM": "6adaaa6b1b3599c547e5faed9dcb4b5a4584b3668348b64063ae19f8468382bf",
+              "Id": "5520f118f6f42be6aa5f8ea6fb203b3b44b22eadb9c0299705e621c4d1f09276",
+              "Internal": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+              "Labels": "0a81f5bab7db9cff6e3a940f44be694c60b4bf518457bf503968ca39aedf940e",
+              "Name": "13b1e0a7794d4530b9a11ce0dbed68be437ad37763c04f791060853d8c208c71",
+              "Options": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "backendExactSha256": "86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be",
+            "changeFromPrevious": {
+              "backendExactChanged": false,
+              "changedFieldPaths": [
+                "School.Mounts.order"
+              ],
+              "mountsOrderOnlyChanged": true,
+              "normalizedSchoolChanged": false,
+              "schoolChangeExplainedOnlyByMountOrder": true,
+              "schoolExactChanged": true
+            },
+            "mountCount": 2,
+            "mountOrderNormalizedSha256": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+            "observedAtUtc": "2026-09-08T09:01:01Z",
+            "sampleIndex": 2,
+            "schoolComponentSha256": {
+              "Config": "ad18dabfe200efc81056057780d400300e6dfdd6da5ae424779644fcf6aac4f8",
+              "HostConfig": "70515e5cb58d344f117f916ae3240ffe2975d71b3a604d7e5b2d798c9a8f80e7",
+              "Id": "6fc820660efed66d04a34653c4161a09a084fb84b440d86f9f8c6c964f904781",
+              "Image": "48b7328c40b55f0e36d752fd1ae435fd5366c69da8e6f591f81834e698576ce3",
+              "Mounts": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+              "networks": "44b3da4c3b7c4242efefe65530275926348def42b130d5a2a6549273a6600cc6"
+            },
+            "schoolExactSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "schoolIdentity": {
+              "baselineChecks": {
+                "imageMatches": true,
+                "networkModeMatches": true,
+                "onlyBackendNetwork": true,
+                "productionLabelMatches": true,
+                "sourceMatches": true,
+                "startedAtMatches": true,
+                "systemLabelMatches": true
+              },
+              "configuredUser": "other",
+              "error": null,
+              "exists": true,
+              "health": "healthy",
+              "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+              "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+              "nameMatches": true,
+              "networkCount": 1,
+              "networkMode": "arthello-os_backend",
+              "onBackend": true,
+              "onEgress": false,
+              "running": true,
+              "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+              "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+            },
+            "schoolMountOrderNormalizedSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "state": "observed"
+          },
+          {
+            "backendComponentSha256": {
+              "Driver": "5b3f874c3d2c344d9a45aec64a3c65ea31800a7eefa4b22d072d9f3e7b613beb",
+              "EnableIPv6": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
+              "IPAM": "6adaaa6b1b3599c547e5faed9dcb4b5a4584b3668348b64063ae19f8468382bf",
+              "Id": "5520f118f6f42be6aa5f8ea6fb203b3b44b22eadb9c0299705e621c4d1f09276",
+              "Internal": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+              "Labels": "0a81f5bab7db9cff6e3a940f44be694c60b4bf518457bf503968ca39aedf940e",
+              "Name": "13b1e0a7794d4530b9a11ce0dbed68be437ad37763c04f791060853d8c208c71",
+              "Options": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "backendExactSha256": "86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be",
+            "changeFromPrevious": {
+              "backendExactChanged": false,
+              "changedFieldPaths": [
+                "School.Mounts.order"
+              ],
+              "mountsOrderOnlyChanged": true,
+              "normalizedSchoolChanged": false,
+              "schoolChangeExplainedOnlyByMountOrder": true,
+              "schoolExactChanged": true
+            },
+            "mountCount": 2,
+            "mountOrderNormalizedSha256": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+            "observedAtUtc": "2026-09-08T09:01:01Z",
+            "sampleIndex": 3,
+            "schoolComponentSha256": {
+              "Config": "ad18dabfe200efc81056057780d400300e6dfdd6da5ae424779644fcf6aac4f8",
+              "HostConfig": "70515e5cb58d344f117f916ae3240ffe2975d71b3a604d7e5b2d798c9a8f80e7",
+              "Id": "6fc820660efed66d04a34653c4161a09a084fb84b440d86f9f8c6c964f904781",
+              "Image": "48b7328c40b55f0e36d752fd1ae435fd5366c69da8e6f591f81834e698576ce3",
+              "Mounts": "2ed15aeda49ffeaf731e00b3765dba5e39e3b4befb859a5c76a25632f108edff",
+              "networks": "44b3da4c3b7c4242efefe65530275926348def42b130d5a2a6549273a6600cc6"
+            },
+            "schoolExactSha256": "5c97fc38c341ae6ffce44d5f137053e664f065b58898b50e51dc8dc9b53f954a",
+            "schoolIdentity": {
+              "baselineChecks": {
+                "imageMatches": true,
+                "networkModeMatches": true,
+                "onlyBackendNetwork": true,
+                "productionLabelMatches": true,
+                "sourceMatches": true,
+                "startedAtMatches": true,
+                "systemLabelMatches": true
+              },
+              "configuredUser": "other",
+              "error": null,
+              "exists": true,
+              "health": "healthy",
+              "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+              "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+              "nameMatches": true,
+              "networkCount": 1,
+              "networkMode": "arthello-os_backend",
+              "onBackend": true,
+              "onEgress": false,
+              "running": true,
+              "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+              "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+            },
+            "schoolMountOrderNormalizedSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "state": "observed"
+          },
+          {
+            "backendComponentSha256": {
+              "Driver": "5b3f874c3d2c344d9a45aec64a3c65ea31800a7eefa4b22d072d9f3e7b613beb",
+              "EnableIPv6": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
+              "IPAM": "6adaaa6b1b3599c547e5faed9dcb4b5a4584b3668348b64063ae19f8468382bf",
+              "Id": "5520f118f6f42be6aa5f8ea6fb203b3b44b22eadb9c0299705e621c4d1f09276",
+              "Internal": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+              "Labels": "0a81f5bab7db9cff6e3a940f44be694c60b4bf518457bf503968ca39aedf940e",
+              "Name": "13b1e0a7794d4530b9a11ce0dbed68be437ad37763c04f791060853d8c208c71",
+              "Options": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "backendExactSha256": "86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be",
+            "changeFromPrevious": {
+              "backendExactChanged": false,
+              "changedFieldPaths": [],
+              "mountsOrderOnlyChanged": false,
+              "normalizedSchoolChanged": false,
+              "schoolChangeExplainedOnlyByMountOrder": false,
+              "schoolExactChanged": false
+            },
+            "mountCount": 2,
+            "mountOrderNormalizedSha256": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+            "observedAtUtc": "2026-09-08T09:01:01Z",
+            "sampleIndex": 4,
+            "schoolComponentSha256": {
+              "Config": "ad18dabfe200efc81056057780d400300e6dfdd6da5ae424779644fcf6aac4f8",
+              "HostConfig": "70515e5cb58d344f117f916ae3240ffe2975d71b3a604d7e5b2d798c9a8f80e7",
+              "Id": "6fc820660efed66d04a34653c4161a09a084fb84b440d86f9f8c6c964f904781",
+              "Image": "48b7328c40b55f0e36d752fd1ae435fd5366c69da8e6f591f81834e698576ce3",
+              "Mounts": "2ed15aeda49ffeaf731e00b3765dba5e39e3b4befb859a5c76a25632f108edff",
+              "networks": "44b3da4c3b7c4242efefe65530275926348def42b130d5a2a6549273a6600cc6"
+            },
+            "schoolExactSha256": "5c97fc38c341ae6ffce44d5f137053e664f065b58898b50e51dc8dc9b53f954a",
+            "schoolIdentity": {
+              "baselineChecks": {
+                "imageMatches": true,
+                "networkModeMatches": true,
+                "onlyBackendNetwork": true,
+                "productionLabelMatches": true,
+                "sourceMatches": true,
+                "startedAtMatches": true,
+                "systemLabelMatches": true
+              },
+              "configuredUser": "other",
+              "error": null,
+              "exists": true,
+              "health": "healthy",
+              "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+              "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+              "nameMatches": true,
+              "networkCount": 1,
+              "networkMode": "arthello-os_backend",
+              "onBackend": true,
+              "onEgress": false,
+              "running": true,
+              "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+              "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+            },
+            "schoolMountOrderNormalizedSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "state": "observed"
+          },
+          {
+            "backendComponentSha256": {
+              "Driver": "5b3f874c3d2c344d9a45aec64a3c65ea31800a7eefa4b22d072d9f3e7b613beb",
+              "EnableIPv6": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
+              "IPAM": "6adaaa6b1b3599c547e5faed9dcb4b5a4584b3668348b64063ae19f8468382bf",
+              "Id": "5520f118f6f42be6aa5f8ea6fb203b3b44b22eadb9c0299705e621c4d1f09276",
+              "Internal": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+              "Labels": "0a81f5bab7db9cff6e3a940f44be694c60b4bf518457bf503968ca39aedf940e",
+              "Name": "13b1e0a7794d4530b9a11ce0dbed68be437ad37763c04f791060853d8c208c71",
+              "Options": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "backendExactSha256": "86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be",
+            "changeFromPrevious": {
+              "backendExactChanged": false,
+              "changedFieldPaths": [],
+              "mountsOrderOnlyChanged": false,
+              "normalizedSchoolChanged": false,
+              "schoolChangeExplainedOnlyByMountOrder": false,
+              "schoolExactChanged": false
+            },
+            "mountCount": 2,
+            "mountOrderNormalizedSha256": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+            "observedAtUtc": "2026-09-08T09:01:02Z",
+            "sampleIndex": 5,
+            "schoolComponentSha256": {
+              "Config": "ad18dabfe200efc81056057780d400300e6dfdd6da5ae424779644fcf6aac4f8",
+              "HostConfig": "70515e5cb58d344f117f916ae3240ffe2975d71b3a604d7e5b2d798c9a8f80e7",
+              "Id": "6fc820660efed66d04a34653c4161a09a084fb84b440d86f9f8c6c964f904781",
+              "Image": "48b7328c40b55f0e36d752fd1ae435fd5366c69da8e6f591f81834e698576ce3",
+              "Mounts": "2ed15aeda49ffeaf731e00b3765dba5e39e3b4befb859a5c76a25632f108edff",
+              "networks": "44b3da4c3b7c4242efefe65530275926348def42b130d5a2a6549273a6600cc6"
+            },
+            "schoolExactSha256": "5c97fc38c341ae6ffce44d5f137053e664f065b58898b50e51dc8dc9b53f954a",
+            "schoolIdentity": {
+              "baselineChecks": {
+                "imageMatches": true,
+                "networkModeMatches": true,
+                "onlyBackendNetwork": true,
+                "productionLabelMatches": true,
+                "sourceMatches": true,
+                "startedAtMatches": true,
+                "systemLabelMatches": true
+              },
+              "configuredUser": "other",
+              "error": null,
+              "exists": true,
+              "health": "healthy",
+              "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+              "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+              "nameMatches": true,
+              "networkCount": 1,
+              "networkMode": "arthello-os_backend",
+              "onBackend": true,
+              "onEgress": false,
+              "running": true,
+              "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+              "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+            },
+            "schoolMountOrderNormalizedSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "state": "observed"
+          },
+          {
+            "backendComponentSha256": {
+              "Driver": "5b3f874c3d2c344d9a45aec64a3c65ea31800a7eefa4b22d072d9f3e7b613beb",
+              "EnableIPv6": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
+              "IPAM": "6adaaa6b1b3599c547e5faed9dcb4b5a4584b3668348b64063ae19f8468382bf",
+              "Id": "5520f118f6f42be6aa5f8ea6fb203b3b44b22eadb9c0299705e621c4d1f09276",
+              "Internal": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+              "Labels": "0a81f5bab7db9cff6e3a940f44be694c60b4bf518457bf503968ca39aedf940e",
+              "Name": "13b1e0a7794d4530b9a11ce0dbed68be437ad37763c04f791060853d8c208c71",
+              "Options": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "backendExactSha256": "86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be",
+            "changeFromPrevious": {
+              "backendExactChanged": false,
+              "changedFieldPaths": [],
+              "mountsOrderOnlyChanged": false,
+              "normalizedSchoolChanged": false,
+              "schoolChangeExplainedOnlyByMountOrder": false,
+              "schoolExactChanged": false
+            },
+            "mountCount": 2,
+            "mountOrderNormalizedSha256": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+            "observedAtUtc": "2026-09-08T09:01:02Z",
+            "sampleIndex": 6,
+            "schoolComponentSha256": {
+              "Config": "ad18dabfe200efc81056057780d400300e6dfdd6da5ae424779644fcf6aac4f8",
+              "HostConfig": "70515e5cb58d344f117f916ae3240ffe2975d71b3a604d7e5b2d798c9a8f80e7",
+              "Id": "6fc820660efed66d04a34653c4161a09a084fb84b440d86f9f8c6c964f904781",
+              "Image": "48b7328c40b55f0e36d752fd1ae435fd5366c69da8e6f591f81834e698576ce3",
+              "Mounts": "2ed15aeda49ffeaf731e00b3765dba5e39e3b4befb859a5c76a25632f108edff",
+              "networks": "44b3da4c3b7c4242efefe65530275926348def42b130d5a2a6549273a6600cc6"
+            },
+            "schoolExactSha256": "5c97fc38c341ae6ffce44d5f137053e664f065b58898b50e51dc8dc9b53f954a",
+            "schoolIdentity": {
+              "baselineChecks": {
+                "imageMatches": true,
+                "networkModeMatches": true,
+                "onlyBackendNetwork": true,
+                "productionLabelMatches": true,
+                "sourceMatches": true,
+                "startedAtMatches": true,
+                "systemLabelMatches": true
+              },
+              "configuredUser": "other",
+              "error": null,
+              "exists": true,
+              "health": "healthy",
+              "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+              "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+              "nameMatches": true,
+              "networkCount": 1,
+              "networkMode": "arthello-os_backend",
+              "onBackend": true,
+              "onEgress": false,
+              "running": true,
+              "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+              "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+            },
+            "schoolMountOrderNormalizedSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "state": "observed"
+          },
+          {
+            "backendComponentSha256": {
+              "Driver": "5b3f874c3d2c344d9a45aec64a3c65ea31800a7eefa4b22d072d9f3e7b613beb",
+              "EnableIPv6": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
+              "IPAM": "6adaaa6b1b3599c547e5faed9dcb4b5a4584b3668348b64063ae19f8468382bf",
+              "Id": "5520f118f6f42be6aa5f8ea6fb203b3b44b22eadb9c0299705e621c4d1f09276",
+              "Internal": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+              "Labels": "0a81f5bab7db9cff6e3a940f44be694c60b4bf518457bf503968ca39aedf940e",
+              "Name": "13b1e0a7794d4530b9a11ce0dbed68be437ad37763c04f791060853d8c208c71",
+              "Options": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "backendExactSha256": "86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be",
+            "changeFromPrevious": {
+              "backendExactChanged": false,
+              "changedFieldPaths": [],
+              "mountsOrderOnlyChanged": false,
+              "normalizedSchoolChanged": false,
+              "schoolChangeExplainedOnlyByMountOrder": false,
+              "schoolExactChanged": false
+            },
+            "mountCount": 2,
+            "mountOrderNormalizedSha256": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+            "observedAtUtc": "2026-09-08T09:01:02Z",
+            "sampleIndex": 7,
+            "schoolComponentSha256": {
+              "Config": "ad18dabfe200efc81056057780d400300e6dfdd6da5ae424779644fcf6aac4f8",
+              "HostConfig": "70515e5cb58d344f117f916ae3240ffe2975d71b3a604d7e5b2d798c9a8f80e7",
+              "Id": "6fc820660efed66d04a34653c4161a09a084fb84b440d86f9f8c6c964f904781",
+              "Image": "48b7328c40b55f0e36d752fd1ae435fd5366c69da8e6f591f81834e698576ce3",
+              "Mounts": "2ed15aeda49ffeaf731e00b3765dba5e39e3b4befb859a5c76a25632f108edff",
+              "networks": "44b3da4c3b7c4242efefe65530275926348def42b130d5a2a6549273a6600cc6"
+            },
+            "schoolExactSha256": "5c97fc38c341ae6ffce44d5f137053e664f065b58898b50e51dc8dc9b53f954a",
+            "schoolIdentity": {
+              "baselineChecks": {
+                "imageMatches": true,
+                "networkModeMatches": true,
+                "onlyBackendNetwork": true,
+                "productionLabelMatches": true,
+                "sourceMatches": true,
+                "startedAtMatches": true,
+                "systemLabelMatches": true
+              },
+              "configuredUser": "other",
+              "error": null,
+              "exists": true,
+              "health": "healthy",
+              "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+              "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+              "nameMatches": true,
+              "networkCount": 1,
+              "networkMode": "arthello-os_backend",
+              "onBackend": true,
+              "onEgress": false,
+              "running": true,
+              "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+              "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+            },
+            "schoolMountOrderNormalizedSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "state": "observed"
+          },
+          {
+            "backendComponentSha256": {
+              "Driver": "5b3f874c3d2c344d9a45aec64a3c65ea31800a7eefa4b22d072d9f3e7b613beb",
+              "EnableIPv6": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
+              "IPAM": "6adaaa6b1b3599c547e5faed9dcb4b5a4584b3668348b64063ae19f8468382bf",
+              "Id": "5520f118f6f42be6aa5f8ea6fb203b3b44b22eadb9c0299705e621c4d1f09276",
+              "Internal": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+              "Labels": "0a81f5bab7db9cff6e3a940f44be694c60b4bf518457bf503968ca39aedf940e",
+              "Name": "13b1e0a7794d4530b9a11ce0dbed68be437ad37763c04f791060853d8c208c71",
+              "Options": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "backendExactSha256": "86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be",
+            "changeFromPrevious": {
+              "backendExactChanged": false,
+              "changedFieldPaths": [],
+              "mountsOrderOnlyChanged": false,
+              "normalizedSchoolChanged": false,
+              "schoolChangeExplainedOnlyByMountOrder": false,
+              "schoolExactChanged": false
+            },
+            "mountCount": 2,
+            "mountOrderNormalizedSha256": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+            "observedAtUtc": "2026-09-08T09:01:03Z",
+            "sampleIndex": 8,
+            "schoolComponentSha256": {
+              "Config": "ad18dabfe200efc81056057780d400300e6dfdd6da5ae424779644fcf6aac4f8",
+              "HostConfig": "70515e5cb58d344f117f916ae3240ffe2975d71b3a604d7e5b2d798c9a8f80e7",
+              "Id": "6fc820660efed66d04a34653c4161a09a084fb84b440d86f9f8c6c964f904781",
+              "Image": "48b7328c40b55f0e36d752fd1ae435fd5366c69da8e6f591f81834e698576ce3",
+              "Mounts": "2ed15aeda49ffeaf731e00b3765dba5e39e3b4befb859a5c76a25632f108edff",
+              "networks": "44b3da4c3b7c4242efefe65530275926348def42b130d5a2a6549273a6600cc6"
+            },
+            "schoolExactSha256": "5c97fc38c341ae6ffce44d5f137053e664f065b58898b50e51dc8dc9b53f954a",
+            "schoolIdentity": {
+              "baselineChecks": {
+                "imageMatches": true,
+                "networkModeMatches": true,
+                "onlyBackendNetwork": true,
+                "productionLabelMatches": true,
+                "sourceMatches": true,
+                "startedAtMatches": true,
+                "systemLabelMatches": true
+              },
+              "configuredUser": "other",
+              "error": null,
+              "exists": true,
+              "health": "healthy",
+              "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+              "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+              "nameMatches": true,
+              "networkCount": 1,
+              "networkMode": "arthello-os_backend",
+              "onBackend": true,
+              "onEgress": false,
+              "running": true,
+              "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+              "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+            },
+            "schoolMountOrderNormalizedSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "state": "observed"
+          },
+          {
+            "backendComponentSha256": {
+              "Driver": "5b3f874c3d2c344d9a45aec64a3c65ea31800a7eefa4b22d072d9f3e7b613beb",
+              "EnableIPv6": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
+              "IPAM": "6adaaa6b1b3599c547e5faed9dcb4b5a4584b3668348b64063ae19f8468382bf",
+              "Id": "5520f118f6f42be6aa5f8ea6fb203b3b44b22eadb9c0299705e621c4d1f09276",
+              "Internal": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+              "Labels": "0a81f5bab7db9cff6e3a940f44be694c60b4bf518457bf503968ca39aedf940e",
+              "Name": "13b1e0a7794d4530b9a11ce0dbed68be437ad37763c04f791060853d8c208c71",
+              "Options": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "backendExactSha256": "86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be",
+            "changeFromPrevious": {
+              "backendExactChanged": false,
+              "changedFieldPaths": [],
+              "mountsOrderOnlyChanged": false,
+              "normalizedSchoolChanged": false,
+              "schoolChangeExplainedOnlyByMountOrder": false,
+              "schoolExactChanged": false
+            },
+            "mountCount": 2,
+            "mountOrderNormalizedSha256": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+            "observedAtUtc": "2026-09-08T09:01:03Z",
+            "sampleIndex": 9,
+            "schoolComponentSha256": {
+              "Config": "ad18dabfe200efc81056057780d400300e6dfdd6da5ae424779644fcf6aac4f8",
+              "HostConfig": "70515e5cb58d344f117f916ae3240ffe2975d71b3a604d7e5b2d798c9a8f80e7",
+              "Id": "6fc820660efed66d04a34653c4161a09a084fb84b440d86f9f8c6c964f904781",
+              "Image": "48b7328c40b55f0e36d752fd1ae435fd5366c69da8e6f591f81834e698576ce3",
+              "Mounts": "2ed15aeda49ffeaf731e00b3765dba5e39e3b4befb859a5c76a25632f108edff",
+              "networks": "44b3da4c3b7c4242efefe65530275926348def42b130d5a2a6549273a6600cc6"
+            },
+            "schoolExactSha256": "5c97fc38c341ae6ffce44d5f137053e664f065b58898b50e51dc8dc9b53f954a",
+            "schoolIdentity": {
+              "baselineChecks": {
+                "imageMatches": true,
+                "networkModeMatches": true,
+                "onlyBackendNetwork": true,
+                "productionLabelMatches": true,
+                "sourceMatches": true,
+                "startedAtMatches": true,
+                "systemLabelMatches": true
+              },
+              "configuredUser": "other",
+              "error": null,
+              "exists": true,
+              "health": "healthy",
+              "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+              "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+              "nameMatches": true,
+              "networkCount": 1,
+              "networkMode": "arthello-os_backend",
+              "onBackend": true,
+              "onEgress": false,
+              "running": true,
+              "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+              "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+            },
+            "schoolMountOrderNormalizedSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "state": "observed"
+          },
+          {
+            "backendComponentSha256": {
+              "Driver": "5b3f874c3d2c344d9a45aec64a3c65ea31800a7eefa4b22d072d9f3e7b613beb",
+              "EnableIPv6": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
+              "IPAM": "6adaaa6b1b3599c547e5faed9dcb4b5a4584b3668348b64063ae19f8468382bf",
+              "Id": "5520f118f6f42be6aa5f8ea6fb203b3b44b22eadb9c0299705e621c4d1f09276",
+              "Internal": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+              "Labels": "0a81f5bab7db9cff6e3a940f44be694c60b4bf518457bf503968ca39aedf940e",
+              "Name": "13b1e0a7794d4530b9a11ce0dbed68be437ad37763c04f791060853d8c208c71",
+              "Options": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "backendExactSha256": "86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be",
+            "changeFromPrevious": {
+              "backendExactChanged": false,
+              "changedFieldPaths": [],
+              "mountsOrderOnlyChanged": false,
+              "normalizedSchoolChanged": false,
+              "schoolChangeExplainedOnlyByMountOrder": false,
+              "schoolExactChanged": false
+            },
+            "mountCount": 2,
+            "mountOrderNormalizedSha256": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+            "observedAtUtc": "2026-09-08T09:01:03Z",
+            "sampleIndex": 10,
+            "schoolComponentSha256": {
+              "Config": "ad18dabfe200efc81056057780d400300e6dfdd6da5ae424779644fcf6aac4f8",
+              "HostConfig": "70515e5cb58d344f117f916ae3240ffe2975d71b3a604d7e5b2d798c9a8f80e7",
+              "Id": "6fc820660efed66d04a34653c4161a09a084fb84b440d86f9f8c6c964f904781",
+              "Image": "48b7328c40b55f0e36d752fd1ae435fd5366c69da8e6f591f81834e698576ce3",
+              "Mounts": "2ed15aeda49ffeaf731e00b3765dba5e39e3b4befb859a5c76a25632f108edff",
+              "networks": "44b3da4c3b7c4242efefe65530275926348def42b130d5a2a6549273a6600cc6"
+            },
+            "schoolExactSha256": "5c97fc38c341ae6ffce44d5f137053e664f065b58898b50e51dc8dc9b53f954a",
+            "schoolIdentity": {
+              "baselineChecks": {
+                "imageMatches": true,
+                "networkModeMatches": true,
+                "onlyBackendNetwork": true,
+                "productionLabelMatches": true,
+                "sourceMatches": true,
+                "startedAtMatches": true,
+                "systemLabelMatches": true
+              },
+              "configuredUser": "other",
+              "error": null,
+              "exists": true,
+              "health": "healthy",
+              "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+              "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+              "nameMatches": true,
+              "networkCount": 1,
+              "networkMode": "arthello-os_backend",
+              "onBackend": true,
+              "onEgress": false,
+              "running": true,
+              "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+              "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+            },
+            "schoolMountOrderNormalizedSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "state": "observed"
+          },
+          {
+            "backendComponentSha256": {
+              "Driver": "5b3f874c3d2c344d9a45aec64a3c65ea31800a7eefa4b22d072d9f3e7b613beb",
+              "EnableIPv6": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
+              "IPAM": "6adaaa6b1b3599c547e5faed9dcb4b5a4584b3668348b64063ae19f8468382bf",
+              "Id": "5520f118f6f42be6aa5f8ea6fb203b3b44b22eadb9c0299705e621c4d1f09276",
+              "Internal": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+              "Labels": "0a81f5bab7db9cff6e3a940f44be694c60b4bf518457bf503968ca39aedf940e",
+              "Name": "13b1e0a7794d4530b9a11ce0dbed68be437ad37763c04f791060853d8c208c71",
+              "Options": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "backendExactSha256": "86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be",
+            "changeFromPrevious": {
+              "backendExactChanged": false,
+              "changedFieldPaths": [],
+              "mountsOrderOnlyChanged": false,
+              "normalizedSchoolChanged": false,
+              "schoolChangeExplainedOnlyByMountOrder": false,
+              "schoolExactChanged": false
+            },
+            "mountCount": 2,
+            "mountOrderNormalizedSha256": "15666638429743078646a8d7e86a3448b5b749a8cd6829232ca812fb967c2326",
+            "observedAtUtc": "2026-09-08T09:01:04Z",
+            "sampleIndex": 11,
+            "schoolComponentSha256": {
+              "Config": "ad18dabfe200efc81056057780d400300e6dfdd6da5ae424779644fcf6aac4f8",
+              "HostConfig": "70515e5cb58d344f117f916ae3240ffe2975d71b3a604d7e5b2d798c9a8f80e7",
+              "Id": "6fc820660efed66d04a34653c4161a09a084fb84b440d86f9f8c6c964f904781",
+              "Image": "48b7328c40b55f0e36d752fd1ae435fd5366c69da8e6f591f81834e698576ce3",
+              "Mounts": "2ed15aeda49ffeaf731e00b3765dba5e39e3b4befb859a5c76a25632f108edff",
+              "networks": "44b3da4c3b7c4242efefe65530275926348def42b130d5a2a6549273a6600cc6"
+            },
+            "schoolExactSha256": "5c97fc38c341ae6ffce44d5f137053e664f065b58898b50e51dc8dc9b53f954a",
+            "schoolIdentity": {
+              "baselineChecks": {
+                "imageMatches": true,
+                "networkModeMatches": true,
+                "onlyBackendNetwork": true,
+                "productionLabelMatches": true,
+                "sourceMatches": true,
+                "startedAtMatches": true,
+                "systemLabelMatches": true
+              },
+              "configuredUser": "other",
+              "error": null,
+              "exists": true,
+              "health": "healthy",
+              "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+              "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+              "nameMatches": true,
+              "networkCount": 1,
+              "networkMode": "arthello-os_backend",
+              "onBackend": true,
+              "onEgress": false,
+              "running": true,
+              "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+              "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+            },
+            "schoolMountOrderNormalizedSha256": "e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa",
+            "state": "observed"
+          }
+        ]
+      },
+      "firstFailedComparablePrecondition": null,
+      "home": {
+        "ancestors": [
+          {
+            "checks": {
+              "callerOwned": false,
+              "directory": true,
+              "notGroupOrWorldWritable": true,
+              "notSymlink": true,
+              "rootOrCallerOwned": true,
+              "valid": true
+            },
+            "error": null,
+            "exists": true,
+            "gid": 0,
+            "groupOrWorldWritable": false,
+            "index": 0,
+            "isHome": false,
+            "links": 21,
+            "mode": "0755",
+            "type": "directory",
+            "uid": 0
+          },
+          {
+            "checks": {
+              "callerOwned": false,
+              "directory": true,
+              "notGroupOrWorldWritable": true,
+              "notSymlink": true,
+              "rootOrCallerOwned": true,
+              "valid": true
+            },
+            "error": null,
+            "exists": true,
+            "gid": 0,
+            "groupOrWorldWritable": false,
+            "index": 1,
+            "isHome": false,
+            "links": 4,
+            "mode": "0755",
+            "type": "directory",
+            "uid": 0
+          },
+          {
+            "checks": {
+              "callerOwned": true,
+              "directory": true,
+              "notGroupOrWorldWritable": true,
+              "notSymlink": true,
+              "rootOrCallerOwned": true,
+              "valid": true
+            },
+            "error": null,
+            "exists": true,
+            "gid": 1000,
+            "groupOrWorldWritable": false,
+            "index": 2,
+            "isHome": true,
+            "links": 6,
+            "mode": "0750",
+            "type": "directory",
+            "uid": 1000
+          }
+        ],
+        "checks": {
+          "absolute": true,
+          "canonical": true,
+          "notRoot": true,
+          "safeCharacters": true
+        },
+        "pathSha256": "2c5e5d2f254145b2cdcc57d829afdf3c7ceee2055e05307b9a20164505cbcd6c",
+        "valid": true
+      },
+      "lock": {
+        "checks": {
+          "notGroupOrWorldWritable": true,
+          "openedNotGroupOrWorldWritable": true,
+          "openedRegular": true,
+          "openedRootOrCallerOwned": true,
+          "openedSingleLink": true,
+          "regular": true,
+          "rootOrCallerOwned": true,
+          "singleLink": true,
+          "stableInode": true
+        },
+        "error": null,
+        "exists": true,
+        "gid": 1000,
+        "groupOrWorldWritable": false,
+        "links": 1,
+        "mode": "0644",
+        "openError": null,
+        "readable": true,
+        "type": "regular",
+        "uid": 1000,
+        "valid": true
+      },
+      "notObserved": [
+        "original_transport_environment",
+        "original_bundle_bytes",
+        "original_exception_stage",
+        "original_cleanup_result",
+        "lock_acquisition"
+      ],
+      "schemaVersion": 1,
+      "startedAtUtc": "2026-09-08T09:01:00Z",
+      "state": {
+        "configuration": {
+          "checks": {
+            "valid": null
+          },
+          "error": "missing",
+          "exists": false
+        },
+        "configurationPathSha256": "6871cdd3d0e74434f346e4a08a76de5e10ab58a1bc8de7607e1f389911a35c6a",
+        "configurationSha256": "7a358ba8a8c69d67d5dffcd3f2047967f43c33292b4c4767a9a20a1e02d36278",
+        "observed": true,
+        "root": {
+          "checks": {
+            "callerOwned": true,
+            "directory": true,
+            "mode0700": true,
+            "notGroupOrWorldWritable": true,
+            "notSymlink": true,
+            "rootOrCallerOwned": true,
+            "valid": true
+          },
+          "error": null,
+          "exists": true,
+          "gid": 1000,
+          "groupOrWorldWritable": false,
+          "links": 2,
+          "mode": "0700",
+          "type": "directory",
+          "uid": 1000
+        },
+        "rootPathSha256": "f042c64b0c026b2de202ba7fdf9a04f1d8e924b38d4b687d633d683f491e662d"
+      }
+    }
+  ]
+}
