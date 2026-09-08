@@ -23,7 +23,13 @@ function triggerNames(workflow) {
 }
 
 function runnerUsesSelfHosted(runner) {
-  return asArray(runner).some((label) => String(label).toLowerCase().includes("self-hosted"));
+  // The build-only runner omits GitHub's default labels so old generic
+  // self-hosted production jobs cannot be scheduled onto a build VM.
+  // It remains self-hosted for D-040: this is classification, not an exemption.
+  return asArray(runner).some((label) => {
+    const name = String(label).toLowerCase();
+    return name.includes("self-hosted") || name === "arthello-build-only-linux-x64";
+  });
 }
 
 function environmentName(environment) {
