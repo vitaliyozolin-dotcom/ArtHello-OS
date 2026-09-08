@@ -1,3 +1,17 @@
+# R4 merged; exact main verification pending — 2026-09-08
+
+The owner reran D065. Attempt2/job101982122878 failed in School bootstrap and skipped image/clone/cutover. The failed repair was not retried. Read-only diagnostic PR357 main52770ad3f10b0ed874263c28e932eb532d77e461, run34203383943/job101987156275, proved the existing UID/GID1000-owned shared lock had mode0664. Home and School baseline checks passed; R3 state and relay were absent. Egress network remained diagnostically unknown.
+
+PR358 adds bounded normalization of that exact existing inode to0644 under exclusive flock, a fresh R4/D066 consumer, and queue:max in the unchanged shared groups of all active consumers. Architectural decision is D-069; technical release label remains D066. Concurrent refactoring main3cc30b6ad2790bfe15d43ab38adebb9cdf6a1f26 is preserved.
+
+Exact first-attempt PR checks passed: Quality34205724098, Proof34205724153 and Verify34205724170 at head d72c768e1bbd0738d2e109817172adbfb0017606. Verify included actual ordinary-UID R4 bootstrap9/9, lock9/9, R4contract and17 boundary tests, plus real Docker relay checks. Reviewed 21-file tree12138dbef4d19c561003fee4b31e0b14a6c1342b was verified against every uploaded Git blob.
+
+PR358 merged as d872842e1dd99f1ec90790af54c00e9ff964b61c with exactly that tree and parent3cc30b6ad2790bfe15d43ab38adebb9cdf6a1f26. Main Quality34206003379, Proof34206003315 and Verify34206003343 are pending/in progress at this checkpoint. Production mutation by R4 has not occurred. Last server-observed live ArtHello remains6596f69390ad539577ec2640e8ef40c7e12c22dc.
+
+The fresh cloud browser currently returns502/Connection refused for both application origins. This is a browser observation, not proof of a server outage. Actual server diagnostic and real authenticated Education→Diary navigation remain mandatory. No live-acceptance PASS record has been manufactured. All six user scenarios remain unaccepted pending production checks.
+
+---
+
 # M3 verified; D065 cancelled before job creation — 2026-09-08T07:22:13+00:00
 
 PR356 merged as `8a0bf989e0c271b009d8f14f0f3d21b3ab47966c` (M3), tree `5bc6c1bf49e7e609ec7a5e8193a60723c736f92f`.
