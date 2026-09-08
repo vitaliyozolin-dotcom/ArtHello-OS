@@ -1,5 +1,11 @@
 # ArtHello OS — Current State
 
+## Refactoring Phase 2.5 — DB initialization checkpoint (2026-09-08)
+
+- `lib/db` теперь можно импортировать без `DATABASE_URL`; подключение создаётся лениво через `createDb(env)` или при первом использовании совместимых exports `db`/`pool`.
+- Отсутствующий `DATABASE_URL` по-прежнему обрабатывается fail closed при первой попытке создать или использовать подключение; поведение закреплено в агрегатном `test:refactoring`.
+- Это закрывает только DB-половину пункта 2.5. Module-level конфигурация `alphaCrmClient` не изменена и остаётся открытой.
+
 ## Рефакторинг, Фаза 2 — локальный checkpoint 2026-09-08
 
 - Snapshots `0016` и `0017` воспроизведены из точных исторических schema trees; текущий неизменный schema tree даёт `No schema changes, nothing to migrate`.

@@ -16,7 +16,7 @@
     "test:sites": "pnpm --filter @workspace/sites-control run test",
     "test:security": "pnpm --filter @workspace/api-server run test:security",
     "test:front-office": "pnpm --filter @workspace/api-server run test:front-office && pnpm --filter @workspace/alpha-crm-sync run test:front-office",
-    "test:refactoring": "node --import ./artifacts/api-server/node_modules/tsx/dist/loader.mjs --test scripts/test/legacy-sync-inventory.test.mjs scripts/test/dependency-hygiene.test.mjs scripts/test/import-extension-policy.test.mjs scripts/test/migration-metadata.test.mjs scripts/test/openapi-codegen-contract.test.mjs scripts/test/phase-one-governance.test.mjs scripts/test/zod-import-boundary.test.mjs scripts/test/zod-semantics-characterization.test.mjs",
+    "test:refactoring": "node --import ./artifacts/api-server/node_modules/tsx/dist/loader.mjs --test scripts/test/db-lazy-initialization.test.mjs scripts/test/legacy-sync-inventory.test.mjs scripts/test/dependency-hygiene.test.mjs scripts/test/import-extension-policy.test.mjs scripts/test/migration-metadata.test.mjs scripts/test/openapi-codegen-contract.test.mjs scripts/test/phase-one-governance.test.mjs scripts/test/zod-import-boundary.test.mjs scripts/test/zod-semantics-characterization.test.mjs",
     "test:postgres": "pnpm --filter @workspace/api-server run test:postgres",
     "test:workflow-policy": "node --test scripts/test/workflow-policy.test.mjs && node scripts/workflow-policy.mjs",
     "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:refactoring && pnpm run test:sites",
