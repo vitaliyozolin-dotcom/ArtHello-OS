@@ -1,3 +1,29 @@
+# R5 School repair verified; ArtHello cutover blocked on natural browser acceptance — 2026-09-08T09:25:29Z
+
+PR360 is merged as ee8f3080d941a12be357eec0fd1d902acd01a2f9, tree ad4a288b52e053ca778b956e2d45e5266893ed9b, parent ce7c50ba367fca14d71669305bf4e82b791ce4f7. A fresh branch read still confirms this main SHA. Architectural decision D-071, technical consumer D067. Concurrent refactoring history is preserved.
+
+Exact first-attempt PR gates succeeded: Quality34208420904, Proof34208420947, Verify34208420873. Exact main gates succeeded: Quality34208709041, Proof34208709085, Verify34208709057. Hosted verification includes 733/733 application tests, ordinary UID bootstrap/lock tests, actual Docker DNS/TLS/UID443/ACL and before-peer/after-peer/after-peer-removal mount fingerprint fixtures. Immutable image artifact10048949895 is 156181847 bytes, digest sha256:9d3b9f68cf27bd7cde30b956067267ba8d884dbb3d3852521f437a21796071b3.
+
+Actual D067 run34208952716, attempt1, job102005327418:
+- School repair step SUCCESS. Existing same-owner lock0644 was verified without another chmod.
+- R5 relay was created at09:16:10Z and independently verified at09:16:12Z, execution UID1000.
+- Repair config SHA256 2ba0ad1ce530db9c9abb622e5727e6345ab74a85699e121b718d9a0405b1f40a; runtime config SHA256 1bdef8cee0ed6e5b69e4aeaa24ae4a7441487dc5e69b9c4f48d9a125a47204a9.
+- School source54242340f2d9b6a9887d69ecc03520ddf9f7982c, image, StartedAt and internal backend configuration stayed unchanged.
+- Read-only School diagnostics confirm ArtHello DNS resolves and HTTPS returns200 with healthy=true and databaseAvailable=true. expectedGatewayPresent=false is expected with the new relay address, separately verified by the controller. SQLite quick_check, required schema and UID1001 filesystem access pass.
+- Natural browser acceptance step FAILURE: fresh, real matching acceptance is absent. Image loading, secret resolver, clone and ArtHello cutover all SKIPPED.
+
+The cloud browser returned502 Bad Gateway / Connection refused for both application origins, including an ArtHello reload after successful relay activation. No authentication form was reached in that fresh browser. Server-side HTTP200 does not establish natural browser SSO, and the cloud-browser502 does not establish a public server outage. No passing acceptance file has been manufactured.
+
+Last previously observed live ArtHello remains6596f69390ad539577ec2640e8ef40c7e12c22dc; this is a historical observation, not a newly measured SHA. No ArtHello cutover occurred in R5. There is no claim of completed six-scenario acceptance or a newly published ArtHello product version.
+
+The original R4 false-positive mechanism was reproduced by read-only diagnostic34207628005: twelve real samples showed only Mounts order changes; complete canonical mount values, all other School fields and backend fingerprint stayed identical. R4 cleanup was confirmed. R5 canonicalizes only complete Mounts entries and preserves duplicate entries, values and all other configuration checks.
+
+Safe continuation: obtain real authenticated ArtHello -> Education -> Open diary -> authenticated School diary evidence after09:16:10Z, record its true observation time and provenance, and write exact schema3 evidence at docs/acceptance/2026-09-08-school-live-acceptance-r5.json on this evidence branch. The validator requires evidence no older45minutes and checks the actual live/candidate/School/repair identities. Only then retry the failed jobs of existing run34208952716; successful repair plus skipped cutover is explicitly resumable. Do not rerun failed historical D065/D066 repair, fabricate acceptance, inject sessions or remove release gates.
+
+R5 also contains reviewed AlfaCRM unknown-balance rejection, incomplete-import failure and preview-expiry corrections. Real tenant import is not yet accepted. Official API research additionally identified an unresolved monetary-source issue: Customer.balance is documented as money, whereas CustomerTariff.balance units are unspecified. See the separate source-contract research note. False current-arthello environment presence flags do not prove absence of encrypted database credentials.
+
+---
+
 # D066 stopped after successful lock normalization — 2026-09-08T08:46:31Z
 
 R4 main d872842e1dd99f1ec90790af54c00e9ff964b61c passed first-attempt Quality34206003379, Proof34206003315 and Verify34206003343 (724/724 application tests). Immutable artifact10047830480, digest sha256:e4ab821369560112942629598b76c01f7059a553f96045acaf762feb40f20832.

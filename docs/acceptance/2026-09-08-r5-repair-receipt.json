@@ -1,0 +1,15 @@
+{
+  "activatedAtUtc": "2026-09-08T09:16:10Z",
+  "executionUid": 1000,
+  "mode": "created",
+  "relayContainerId": "b6939c754019bfa4c873b2b1b3bc7fb3fcf2542cd72be3981fdbcec6335794b3",
+  "repairConfigSha256": "2ba0ad1ce530db9c9abb622e5727e6345ab74a85699e121b718d9a0405b1f40a",
+  "runtimeConfigSha256": "1bdef8cee0ed6e5b69e4aeaa24ae4a7441487dc5e69b9c4f48d9a125a47204a9",
+  "schemaVersion": 2,
+  "schoolContainerId": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+  "schoolImageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+  "schoolSourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+  "state": "verified",
+  "stateDirectorySha256": "cedd256dabc1dc6ff105887d31b5893bb384cdfe751b532e0c115d69ff6bfeee",
+  "verifiedAtUtc": "2026-09-08T09:16:12Z"
+}
