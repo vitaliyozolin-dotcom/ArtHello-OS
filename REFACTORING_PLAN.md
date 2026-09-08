@@ -147,14 +147,14 @@ Acceptance evidence: machine-readable workflow inventory без необъясн
 
 ### Фаза 1 — мёртвый код, гигиена репо и workspace (M; в основном удаления)
 
-1. **[DEL после design gate]** Инвентаризировать каждый endpoint `routes/sync.ts` и все call-site'ы/операционные подсказки: для каждого зафиксировать решение `удалить` / `заменить scoped source job` / `перенести в sandbox script`. Сначала спроектировать и доказать необходимые безопасные замены согласно D-029 и `BACKLOG.md`, удалить/заменить ссылки в `audit.ts`, UI и документации; затем удалить `routes/sync.ts` и mount. Представительный 503 доказывает только текущую недоступность, но не достаточен как доказательство отсутствия нужной функциональности.
+1. **[выполнено 2026-09-08] [DEL]** D-067 утвердило dispositions 30 endpoints. Универсальный `routes/sync.ts`, mount, legacy OpenAPI/generated operations и операторские call-sites удалены; sandbox capabilities сохранены, а неподтверждённые scoped jobs остались заблокированными.
 2. **[DEL, выполнено 2026-09-01]** Удалены `lib/integrations-openai-ai-react`, `-server` и сирота-форк `lib/integrations/openai_ai_integrations`; поиск потребителей перед удалением был пуст.
 3. **[DEL, выполнено 2026-09-01]** Удалён `artifacts/mockup-sandbox`; ссылки workspace и lockfile очищены.
 4. **[DEL, выполнено 2026-09-02]** Удалены 40 недостижимых UI-компонентов из `alpha-crm-sync`; 15 компонентов с runtime-потребителями сохранены. Вторая копия исчезла вместе с `mockup-sandbox` на шаге 3.
 5. **[BEH, выполнено 2026-09-02]** `sites-control` включён как `@workspace/sites-control`; корневые scripts делегируют пакетные команды, а package-manager-neutral hosting `build` сохранён. Анти-дрейф тесты не менялись.
-6. **[BEH]** Гигиена зависимостей: решить `zod/v4` vs catalog-пин (через D-номер); runtime-deps из `devDependencies`; поле `packageManager` + единый pnpm в `quality.yml`/`proof-gates.yml` (R16); нормализация `.js`-расширений в одну сторону.
-7. **[BEH]** Lint-job в `quality.yml` (первый прогон warn-only, второй blocking) + `CODEOWNERS` (минимум на `.github/` и `deploy/`) (R14).
-8. Обновить `CURRENT_STATE.md` при закрытии фазы.
+6. **[выполнено 2026-09-08] [BEH]** D-066 фиксирует `zod/v4`; D-068 разделяет import policy: явные `.js` в Node-executed/db контурах, extensionless в bundler/generated. Оба правила защищены постоянными тестами.
+7. **[выполнено 2026-09-08] [BEH]** Добавлены `CODEOWNERS`, blocking Prettier сопровождаемых файлов и legacy application formatting ratchet: baseline может сокращаться, новые нарушения блокируются.
+8. **[выполнено 2026-09-08]** `CURRENT_STATE.md` обновлён честным checkpoint без объявления Фазы 1 закрытой.
 
 НЕ трогать: схемы `messages`/`conversations` (их удаление порождает drizzle-diff — ждёт ремонта snapshots в фазе 2); `deploy/`; `migrate.ts`; бизнес-логику route-файлов. Для `/sync` до design gate разрешены только inventory и тесты; удаление mount/файла — отдельный кандидат после замены зависимостей.
 

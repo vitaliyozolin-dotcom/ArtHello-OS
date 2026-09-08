@@ -4,9 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import {
-  findMisclassifiedRuntimeDependencies,
-} from "../lib/dependency-hygiene.mjs";
+import { findMisclassifiedRuntimeDependencies } from "../lib/dependency-hygiene.mjs";
 
 function fixture({ dependencies = {}, devDependencies = {}, source }) {
   const directory = mkdtempSync(join(tmpdir(), "arthello-dependency-hygiene-"));
@@ -51,6 +49,9 @@ for (const relativePackagePath of runtimePackages) {
   test(`${relativePackagePath} runtime imports are not development-only dependencies`, () => {
     const packageDirectory = new URL(relativePackagePath, import.meta.url);
 
-    assert.deepEqual(findMisclassifiedRuntimeDependencies(packageDirectory), []);
+    assert.deepEqual(
+      findMisclassifiedRuntimeDependencies(packageDirectory),
+      [],
+    );
   });
 }

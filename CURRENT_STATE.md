@@ -1,5 +1,14 @@
 # ArtHello OS — Current State
 
+## Рефакторинг, Фаза 1 — checkpoint 2026-09-08
+
+- Локальный Zod/OpenAPI candidate восстановлен поверх актуального `origin/main` с решениями D-061–D-065; Zod policy получила следующий свободный номер D-066.
+- Cleanup workspace/UI, включение `sites-control`, единый pnpm pin и удаление опасного Replit schema push сохраняются. Runtime dependency placement теперь защищён поведенческим inventory-тестом.
+- Zod runtime imports унифицированы на `zod/v4`; generated schemas имеют characterization tests, Orval явно генерирует v4, а два последовательных codegen дали одинаковые SHA-256 generated outputs. Это локальное evidence рабочего дерева, не immutable CI provenance.
+- Добавлены `CODEOWNERS` для `.github/` и `deploy/` и blocking lint-step в `quality.yml` для сопровождаемых файлов Фазы 1. Полное форматирование legacy application tree намеренно не заявлено выполненным.
+- Для legacy `/sync` зафиксирован полный proposed inventory 30 routes, literal call-sites и replacement evidence. Удаление остаётся заблокировано D-029: scoped source jobs, утверждение dispositions и часть sandbox evidence отсутствуют. 503 gate сохраняется; route, mount, OpenAPI и generated client не удалялись.
+- Три оставшихся implementation-пункта Фазы 1 выполнены под D-067/D-068: legacy router удалён без переноса неподтверждённых jobs, Node/bundler import policies разделены и lint-ratchet расширен на application tree. До объявления Фазы 1 закрытой остаются полный `pnpm run typecheck/test:full/build:full` под Node ≥22.13 и независимый Reviewer PASS exact commit/tree.
+
 ## Обновление A.4 — 2026-07-25
 
 - Создана отдельная PostgreSQL-совместимая sandbox-БД вне source checkout; перед `0014` сохранена отдельная копия, затем применены 15 миграций. Аудит видит 113 таблиц с учётом sandbox migration ledger. Production БД не читалась и не изменялась.

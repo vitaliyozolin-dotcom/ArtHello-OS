@@ -153,6 +153,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - run: pnpm run lint
+
       - run: pnpm run test:full
 
       - run: pnpm run test:postgres

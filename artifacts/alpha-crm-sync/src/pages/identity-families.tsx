@@ -8,7 +8,6 @@ import {
   useCalcHealth,
   useGetFamiliesAtRisk,
   useGetFamilyHealth,
-  useFullResync,
   getGetIdentityFamiliesQueryKey,
   getGetIdentityStatsQueryKey,
   getGetFamiliesAtRiskQueryKey,
@@ -819,14 +818,11 @@ export function FamiliesTab() {
   });
 
   const [fullResyncResult, setFullResyncResult] = useState<{ message?: string } | null>(null);
-  const { mutate: triggerFullResync, isPending: isFullResync } = useFullResync({
-    mutation: {
-      onSuccess: (res) => {
-        setFullResyncResult(res ? { message: res.message } : null);
-        qc.invalidateQueries({ queryKey: getGetIdentityFamiliesQueryKey() });
-      },
-    },
-  });
+  const isFullResync = false;
+  const triggerFullResync = (..._args: unknown[]) =>
+    setFullResyncResult({
+      message: "Legacy full resync удалён; используйте утверждённый sandbox workflow.",
+    });
 
   const { data: atRiskData } = useGetFamiliesAtRisk(
     { limit: 200 },

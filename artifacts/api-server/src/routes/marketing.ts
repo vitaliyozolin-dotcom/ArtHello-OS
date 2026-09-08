@@ -9,8 +9,8 @@ import {
   settingsTable,
 } from "@workspace/db";
 import { sql, desc, count, eq, and, or } from "drizzle-orm";
-import { logger } from "../lib/logger";
-import { readSheetRows, normalisePhone, parseDate } from "../lib/googleSheets";
+import { logger } from "../lib/logger.js";
+import { readSheetRows, normalisePhone, parseDate } from "../lib/googleSheets.js";
 
 const router: IRouter = Router();
 

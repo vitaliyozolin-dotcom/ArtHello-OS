@@ -2,15 +2,15 @@ import express, { type Express } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
-import router from "./routes";
-import { logger } from "./lib/logger";
+import router from "./routes/index.js";
+import { logger } from "./lib/logger.js";
 import {
   requireAuth,
   requireCsrf,
   requireRouteAccess,
-} from "./routes/auth";
-import { publicErrorBoundary } from "./lib/security/public-error-boundary";
-import { blockLegacySyncSurface } from "./lib/security/legacy-sync-gate";
+} from "./routes/auth.js";
+import { publicErrorBoundary } from "./lib/security/public-error-boundary.js";
+import { blockLegacySyncSurface } from "./lib/security/legacy-sync-gate.js";
 
 const app: Express = express();
 app.disable("x-powered-by");

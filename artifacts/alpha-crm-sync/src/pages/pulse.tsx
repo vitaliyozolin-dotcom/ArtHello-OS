@@ -1,8 +1,8 @@
 import {
-  useGetSyncStats, useGetMarketingStats,
+  useGetMarketingStats,
   useGetBankingCashflow, useGetBankingAlerts, useGetBankingForecast,
   useGetFamiliesAtRisk, useGetIdentityFamilies,
-  getGetSyncStatsQueryKey, getGetMarketingStatsQueryKey,
+  getGetMarketingStatsQueryKey,
   getGetBankingCashflowQueryKey, getGetBankingAlertsQueryKey,
   getGetBankingForecastQueryKey, getGetFamiliesAtRiskQueryKey,
   getGetIdentityFamiliesQueryKey,
@@ -63,6 +63,21 @@ function toNum(v: string | number | null | undefined): number {
   if (v == null) return 0;
   const n = typeof v === 'string' ? parseFloat(v) : v;
   return isNaN(n) ? 0 : n;
+}
+
+type RetiredSyncStats = {
+  students?: number;
+  payments?: number;
+  branches?: number;
+  lastSyncAt?: string | null;
+};
+
+function useRetiredSyncStats(_options?: unknown) {
+  return { data: undefined as RetiredSyncStats | undefined, isLoading: false };
+}
+
+function getRetiredSyncStatsQueryKey() {
+  return ["retired-sync-stats"] as const;
 }
 
 // ─── Micro components ──────────────────────────────────────────────────────────
@@ -148,8 +163,8 @@ function HeroStatusCard() {
   const { data: mktStats, isLoading: mktLoading } = useGetMarketingStats({
     query: { queryKey: getGetMarketingStatsQueryKey(), refetchInterval: 30_000 },
   });
-  const { data: syncStats } = useGetSyncStats({
-    query: { queryKey: getGetSyncStatsQueryKey(), refetchInterval: 30_000 },
+  const { data: syncStats } = useRetiredSyncStats({
+    query: { queryKey: getRetiredSyncStatsQueryKey(), refetchInterval: 30_000 },
   });
 
   const loading = cashLoading || riskLoading || mktLoading;
@@ -342,8 +357,8 @@ function PulseKPISection() {
   const { data: cashflow, isLoading: cashLoading } = useGetBankingCashflow({
     query: { queryKey: getGetBankingCashflowQueryKey(), refetchInterval: 60_000 },
   });
-  const { data: syncStats, isLoading: syncLoading } = useGetSyncStats({
-    query: { queryKey: getGetSyncStatsQueryKey(), refetchInterval: 30_000 },
+  const { data: syncStats, isLoading: syncLoading } = useRetiredSyncStats({
+    query: { queryKey: getRetiredSyncStatsQueryKey(), refetchInterval: 30_000 },
   });
   const { data: mktStats, isLoading: mktLoading } = useGetMarketingStats({
     query: { queryKey: getGetMarketingStatsQueryKey(), refetchInterval: 30_000 },
@@ -650,7 +665,7 @@ function PlanFactRow({ label, fact, plan, isRub }: {
 }
 
 function PulsePlanFactSection() {
-  const { data: syncStats } = useGetSyncStats({ query: { queryKey: getGetSyncStatsQueryKey() } });
+  const { data: syncStats } = useRetiredSyncStats({ query: { queryKey: getRetiredSyncStatsQueryKey() } });
   const { data: mktStats } = useGetMarketingStats({ query: { queryKey: getGetMarketingStatsQueryKey() } });
 
   const hasAnyPlan = false;
@@ -1071,7 +1086,7 @@ function PulseActionsSection() {
     { query: { queryKey: getGetFamiliesAtRiskQueryKey({ limit: 10 }) } },
   );
   const { data: forecast } = useGetBankingForecast({ query: { queryKey: getGetBankingForecastQueryKey() } });
-  const { data: syncStats } = useGetSyncStats({ query: { queryKey: getGetSyncStatsQueryKey() } });
+  const { data: syncStats } = useRetiredSyncStats({ query: { queryKey: getRetiredSyncStatsQueryKey() } });
   const { data: cashflow } = useGetBankingCashflow({ query: { queryKey: getGetBankingCashflowQueryKey() } });
 
   const actions: TodayAction[] = [];
@@ -1157,7 +1172,7 @@ function PulseActionsSection() {
 // ─── QUICK STATS STRIP ────────────────────────────────────────────────────────
 
 function QuickStatsStrip() {
-  const { data: syncStats } = useGetSyncStats({ query: { queryKey: getGetSyncStatsQueryKey() } });
+  const { data: syncStats } = useRetiredSyncStats({ query: { queryKey: getRetiredSyncStatsQueryKey() } });
   const now = new Date();
   const dateStr = now.toLocaleDateString('ru', { day: 'numeric', month: 'short', year: 'numeric' });
 

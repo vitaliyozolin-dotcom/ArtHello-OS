@@ -16,9 +16,9 @@ import { pool } from "@workspace/db";
 import {
   authenticate,
   crmProbe,
-} from "../lib/alphaCrmClient";
+} from "../lib/alphaCrmClient.js";
 import { createHash } from "crypto";
-import { logger } from "../lib/logger";
+import { logger } from "../lib/logger.js";
 
 export const coverageRouter = Router();
 

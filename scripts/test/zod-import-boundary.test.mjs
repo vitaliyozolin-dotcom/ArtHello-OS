@@ -35,24 +35,22 @@ function inventory() {
   return imports.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-test("Zod root imports remain limited to known v3 compatibility boundaries", () => {
-  const rootImports = inventory().filter(({ specifier }) => specifier === "zod");
+test("Zod root imports are forbidden after D-061", () => {
+  const rootImports = inventory().filter(
+    ({ specifier }) => specifier === "zod",
+  );
 
-  assert.deepEqual(rootImports, [
-    {
-      path: "artifacts/api-server/src/routes/banking.ts",
-      specifier: "zod",
-    },
-    {
-      path: "lib/api-zod/src/generated/api.ts",
-      specifier: "zod",
-    },
-  ]);
+  assert.deepEqual(rootImports, []);
 });
 
-test("the catalog pin remains explicit while mixed Zod semantics are unresolved", () => {
+test("the catalog pin and deterministic Zod v4 codegen remain explicit", () => {
   const workspace = readFileSync(resolve(root, "pnpm-workspace.yaml"), "utf8");
+  const orvalConfig = readFileSync(
+    resolve(root, "lib/api-spec/orval.config.ts"),
+    "utf8",
+  );
 
   assert.match(workspace, /^  zod: 3\.25\.76$/m);
+  assert.match(orvalConfig, /zod:\s*\{[\s\S]*?version:\s*4[,\s]/);
   assert.ok(inventory().some(({ specifier }) => specifier === "zod/v4"));
 });

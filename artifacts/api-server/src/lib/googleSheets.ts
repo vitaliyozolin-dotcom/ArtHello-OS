@@ -1,5 +1,5 @@
 import { google, type sheets_v4 } from "googleapis";
-import { logger } from "./logger";
+import { logger } from "./logger.js";
 
 let sheetsClient: sheets_v4.Sheets | null = null;
 

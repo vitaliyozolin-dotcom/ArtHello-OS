@@ -3,7 +3,7 @@ import { db } from "@workspace/db";
 import { crmBranchesTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { SetAtlasBranchBody } from "@workspace/api-zod";
-import { logger } from "../lib/logger";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 

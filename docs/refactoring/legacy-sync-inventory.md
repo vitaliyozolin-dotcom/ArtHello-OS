@@ -1,6 +1,6 @@
 # Legacy `/sync` inventory
 
-Status: **proposed design inventory; not an authorization to enable or remove routes**.
+Status: **retired under D-067**.
 
 The canonical inventory is [`legacy-sync-inventory.json`](./legacy-sync-inventory.json). It covers every route declared in `artifacts/api-server/src/routes/sync.ts`, records one proposed disposition and maps exact literal call-site files per endpoint:
 
@@ -12,16 +12,10 @@ The canonical inventory is [`legacy-sync-inventory.json`](./legacy-sync-inventor
 
 ## Safety boundary
 
-D-029 remains authoritative. The central `LEGACY_SYNC_DISABLED` gate stays in place. A representative 503 proves only that the surface is unavailable; it does not prove that the underlying capability is unnecessary.
+D-029 remains authoritative. D-067 approves the recorded dispositions and removes the universal router without enabling any replacement. The central `LEGACY_SYNC_DISABLED` gate stays in place for the remaining historical Google-leads path and any accidentally reintroduced legacy path.
 
-No route, mount, OpenAPI operation or generated client is removed by this candidate. Before a later removal candidate:
-
-1. approve or revise every proposed disposition;
-2. implement and prove every required replacement;
-3. replace operator guidance in `routes/audit.ts` and the coverage UI;
-4. update the OpenAPI source, regenerate the client and update the permission matrix together;
-5. prove the route-table change, permission policy and visual acceptance on the exact candidate.
+The retired capabilities were not silently reimplemented. Covered read-only source access remains in guarded sandbox scripts; scoped jobs and blocked repair/classification capabilities remain unavailable until separately approved and proven.
 
 ## Drift check
 
-`node --test scripts/test/legacy-sync-inventory.test.mjs` compares the manifest with route declarations and scans the known consumer files for each exact route literal. Empty arrays explicitly mean that no literal reference was found in the searched groups. Any route or call-site change must therefore update this inventory deliberately.
+`node --test scripts/test/legacy-sync-inventory.test.mjs` proves that the source router and mount are absent and that every retired literal disappeared from the API contract, generated client and operator surfaces.

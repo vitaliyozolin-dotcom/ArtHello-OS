@@ -9,7 +9,7 @@ import {
   contractsObligationsTable,
 } from "@workspace/db";
 import { eq, desc, sql, and, gte, lte, sum, count, ilike, or } from "drizzle-orm";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { syncConnector, buildConnector } from "../lib/banking/registry.js";
 import { TochkaConnector, getDefaultRedirectUri } from "../lib/banking/connectors/tochka.js";
 import { sanitizeConnectorHealthResponse } from "../lib/banking/sanitize-health.js";
@@ -76,7 +76,7 @@ const CreateConnectorSchema = z.object({
   bankName: z.enum(["tochka", "tinkoff", "vtb"]),
   displayName: z.string().optional(),
   authType: z.enum(["oauth", "api_key", "manual"]).optional(),
-  config: z.record(z.unknown()).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
   syncFrequencyMinutes: z.number().int().min(1).max(1440).optional(),
 });
 
@@ -117,7 +117,7 @@ bankingRouter.post("/banking/connectors", async (req, res) => {
 
 const UpdateConnectorSchema = z.object({
   displayName: z.string().optional(),
-  config: z.record(z.unknown()).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
   connectorStatus: z.enum(["active", "inactive"]).optional(),
   syncFrequencyMinutes: z.number().int().min(1).max(1440).optional(),
 });

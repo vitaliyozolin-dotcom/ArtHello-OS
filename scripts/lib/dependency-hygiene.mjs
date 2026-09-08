@@ -7,7 +7,11 @@ const RUNTIME_SPECIFIER =
   /(?:^|\n)\s*(?!import\s+type\b)(?:import(?:[\s\S]*?\sfrom\s*)?|export\s+(?!type\b)[\s\S]*?\sfrom\s*)["']([^"']+)["']/g;
 
 function packageName(specifier) {
-  if (specifier.startsWith(".") || specifier.startsWith("/") || specifier.startsWith("#")) {
+  if (
+    specifier.startsWith(".") ||
+    specifier.startsWith("/") ||
+    specifier.startsWith("#")
+  ) {
     return null;
   }
   if (specifier.startsWith("node:")) {
@@ -31,15 +35,20 @@ function sourceFiles(directory) {
 }
 
 export function findMisclassifiedRuntimeDependencies(packageDirectory) {
-  const directory = packageDirectory instanceof URL
-    ? fileURLToPath(packageDirectory)
-    : packageDirectory;
-  const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+  const directory =
+    packageDirectory instanceof URL
+      ? fileURLToPath(packageDirectory)
+      : packageDirectory;
+  const manifest = JSON.parse(
+    readFileSync(join(directory, "package.json"), "utf8"),
+  );
   const runtimeDeclarations = new Set([
     ...Object.keys(manifest.dependencies ?? {}),
     ...Object.keys(manifest.peerDependencies ?? {}),
   ]);
-  const developmentDeclarations = new Set(Object.keys(manifest.devDependencies ?? {}));
+  const developmentDeclarations = new Set(
+    Object.keys(manifest.devDependencies ?? {}),
+  );
   const runtimeImports = new Set();
 
   for (const file of sourceFiles(join(directory, "src"))) {

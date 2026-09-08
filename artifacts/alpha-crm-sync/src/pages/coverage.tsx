@@ -22,13 +22,9 @@ import {
   useGetCoverageDuplicates,
   useGetCoverageAttendanceStudentIdentity,
   useGetCoverageCustomerRawBranchCoverage,
-  usePullStudentsAllBranches,
   usePostCoverageResolveGhostCustomers,
-  usePostSyncNormalizeHistoricalStudents,
   useRunDuplicateDetection,
-  useNormalizePaymentsFromRaw,
   useGetCoveragePaymentTruthAudit,
-  useP76CleanupPayments,
   useGetCoveragePaymentCleanupAudit,
   useGetCoverageFinalAlphaAuditReport,
   useGetCoverageBankAccountsAudit,
@@ -37,11 +33,8 @@ import {
   getGetCoverageBankTransactionsAuditQueryKey,
   useGetCoverageCounterpartiesAudit,
   getGetCoverageCounterpartiesAuditQueryKey,
-  useBuildCounterpartiesFromBank,
   useGetCoverageCounterpartyReclassificationAudit,
   getGetCoverageCounterpartyReclassificationAuditQueryKey,
-  useReclassifyCounterpartiesP84a,
-  useReconcileBankAlphaP84b,
   useGetCoverageBankAlphaReconciliationAudit,
   getGetCoverageBankAlphaReconciliationAuditQueryKey,
   useSaveEvotorPublisherToken,
@@ -88,6 +81,14 @@ import {
 function fmtTs(s: string | null | undefined): string {
   if (!s) return '—';
   return new Date(s).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function useRetiredLegacyAction() {
+  return {
+    data: undefined,
+    isPending: false,
+    mutate: (..._args: unknown[]) => toast.error('Legacy-действие удалено. Используйте утверждённый sandbox или scoped workflow.'),
+  };
 }
 
 function fmtDur(ms: number | null | undefined): string {
@@ -1838,20 +1839,7 @@ function PaymentAuditPanel({ branchId }: { branchId: string }) {
   );
   const [showMonthly, setShowMonthly] = useState(false);
 
-  const normMut = useNormalizePaymentsFromRaw({
-    mutation: {
-      onSuccess: (res) => {
-        const r = res as unknown as Record<string, unknown>;
-        toast.success(
-          `P7.5 завершён. Всего: ${Number(r.total ?? 0)}, созд: ${Number(r.created ?? 0)}, обн: ${Number(r.updated ?? 0)}. ` +
-          `Студенты: ${Number(r.linkedToStudent ?? 0)}, идентичности: ${Number(r.linkedToIdentity ?? 0)}, семьи: ${Number(r.linkedToFamily ?? 0)}.`,
-        );
-        void refetch();
-        void qc.invalidateQueries({ queryKey: getGetCoverageEntityReconciliationQueryKey({ branchId }) });
-      },
-      onError: (err: unknown) => { toast.error(`Ошибка normalize-payments-from-raw: ${String(err)}`); },
-    },
-  });
+  const normMut = useRetiredLegacyAction();
 
   const audit = data as unknown as Record<string, unknown> | undefined;
   const norm  = audit?.normalization as Record<string, unknown> | undefined;
@@ -2072,19 +2060,7 @@ function PaymentCleanupPanel({ branchId }: { branchId: string }) {
   const [showCollection, setShowCollection] = useState(false);
   const [showIssues, setShowIssues] = useState(false);
 
-  const cleanupMut = useP76CleanupPayments({
-    mutation: {
-      onSuccess: (res) => {
-        const r = res as unknown as Record<string, unknown>;
-        toast.success(
-          `P7.6 завершён. Risk: ${Number(r.riskFlagged ?? 0)}, перепривязано: ${Number(r.relinkStudents ?? 0)}+${Number(r.relinkIdentities ?? 0)}, issues: ${Number(r.issuesCreated ?? 0)}. Unlinked: ${Number(r.unlinkedBefore ?? 0)}→${Number(r.unlinkedAfter ?? 0)}.`,
-        );
-        void refetch();
-        void qc.invalidateQueries({ queryKey: getGetCoveragePaymentTruthAuditQueryKey({ branchId }) });
-      },
-      onError: (err: unknown) => { toast.error(`Ошибка p76-cleanup: ${String(err)}`); },
-    },
-  });
+  const cleanupMut = useRetiredLegacyAction();
 
   const d    = data as unknown as Record<string, unknown> | undefined;
   const cnt  = d?.counts as Record<string, unknown> | undefined;
@@ -2314,18 +2290,7 @@ function AttendanceIdentityPanel({ branchId }: { branchId: string }) {
       { query: { queryKey: getGetCoverageCustomerRawBranchCoverageQueryKey(), staleTime: 60_000 } },
     );
 
-  const pullMut = usePullStudentsAllBranches({
-    mutation: {
-      onSuccess: (res) => {
-        const r = res as unknown as Record<string, unknown>;
-        toast.success(`Raw pull завершён: ${Number(r.totalFetched ?? 0)} записей из ${Number(r.branchesPulled ?? 0)} веток (${Number(r.totalInserted ?? 0)} новых, ${Number(r.totalUpdated ?? 0)} обновлённых)`);
-        void refetch();
-        void refetchBranchCov();
-        void qc.invalidateQueries({ queryKey: getGetCoverageCustomerRawBranchCoverageQueryKey() });
-      },
-      onError: (err: unknown) => { toast.error(`Ошибка pull: ${String(err)}`); },
-    },
-  });
+  const pullMut = useRetiredLegacyAction();
 
   const resolveGhostMut = usePostCoverageResolveGhostCustomers({
     mutation: {
@@ -2342,21 +2307,7 @@ function AttendanceIdentityPanel({ branchId }: { branchId: string }) {
 
   const ghostResult = resolveGhostMut.data as unknown as Record<string, unknown> | undefined;
 
-  const normalizeHistMut = usePostSyncNormalizeHistoricalStudents({
-    mutation: {
-      onSuccess: (res) => {
-        const r = res as unknown as Record<string, unknown>;
-        const cA = r.caseA as Record<string, unknown> | undefined;
-        const cB = r.caseB as Record<string, unknown> | undefined;
-        toast.success(
-          `P7.4.3c завершён. Case A: ${Number(cA?.created ?? 0)} созд. + ${Number(cA?.updated ?? 0)} обн., ${Number(cA?.relinked ?? 0)} посещений привязано. ` +
-          `Case B: ${Number(cB?.created ?? 0)} плейсхолдеров созд., ${Number(cB?.relinked ?? 0)} посещений identity-привязано.`,
-        );
-        void refetch();
-      },
-      onError: (err: unknown) => { toast.error(`Ошибка normalize-historical-students: ${String(err)}`); },
-    },
-  });
+  const normalizeHistMut = useRetiredLegacyAction();
   const normHistResult = normalizeHistMut.data as unknown as Record<string, unknown> | undefined;
 
   if (isLoading) return <div className="flex items-center gap-2 text-[12px] text-gray-400 py-4"><Loader2 className="w-4 h-4 animate-spin" />Загрузка покрытия идентичности…</div>;
@@ -3949,15 +3900,7 @@ function BankTransactionsPanel() {
 function CounterpartiesPanel() {
   const qc = useQueryClient();
   const { data, isLoading, isError, refetch, isFetching } = useGetCoverageCounterpartiesAudit();
-  const buildMutation = useBuildCounterpartiesFromBank({
-    mutation: {
-      onSuccess: () => {
-        qc.invalidateQueries({ queryKey: getGetCoverageCounterpartiesAuditQueryKey() });
-        toast.success('Контрагенты построены! Аудит обновляется…');
-      },
-      onError: (err: unknown) => { toast.error(`Ошибка build-counterparties: ${String(err)}`); },
-    },
-  });
+  const buildMutation = useRetiredLegacyAction();
 
   if (isLoading) return <div className="flex items-center gap-2 text-[13px] text-gray-500 py-8 px-4"><Loader2 className="animate-spin w-4 h-4" /> Загрузка аудита контрагентов…</div>;
   if (isError || !data) return (
@@ -3966,7 +3909,7 @@ function CounterpartiesPanel() {
       <button onClick={() => buildMutation.mutate()} disabled={buildMutation.isPending}
         className="px-3 py-1.5 bg-blue-600 text-white text-[12px] rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
         {buildMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-        POST /sync/build-counterparties-from-bank
+        legacy action retired
       </button>
     </div>
   );
@@ -4224,15 +4167,7 @@ function CounterpartiesPanel() {
 function P84aReclassificationPanel() {
   const qc = useQueryClient();
   const { data, isLoading, isError, refetch, isFetching } = useGetCoverageCounterpartyReclassificationAudit();
-  const reclassMut = useReclassifyCounterpartiesP84a({
-    mutation: {
-      onSuccess: () => {
-        qc.invalidateQueries({ queryKey: getGetCoverageCounterpartyReclassificationAuditQueryKey() });
-        toast.success('Реклассификация выполнена! Аудит обновляется…');
-      },
-      onError: (err: unknown) => { toast.error(`Ошибка reclassify: ${String(err)}`); },
-    },
-  });
+  const reclassMut = useRetiredLegacyAction();
 
   if (isLoading) return <div className="flex items-center gap-2 text-[13px] text-gray-500 py-8 px-4"><Loader2 className="animate-spin w-4 h-4" /> Загрузка аудита реклассификации…</div>;
 
@@ -4299,7 +4234,7 @@ function P84aReclassificationPanel() {
           <button onClick={() => reclassMut.mutate()} disabled={reclassMut.isPending}
             className="px-3 py-1.5 bg-violet-600 text-white text-[12px] rounded hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1.5">
             {reclassMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-            POST /sync/reclassify-counterparties-p84a
+            legacy action retired
           </button>
         </div>
       </div>
@@ -4479,15 +4414,7 @@ function BankAlphaReconciliationPanel() {
   const qc = useQueryClient();
   const { data, isLoading, isError, refetch, isFetching } =
     useGetCoverageBankAlphaReconciliationAudit();
-  const reconcileMut = useReconcileBankAlphaP84b({
-    mutation: {
-      onSuccess: () => {
-        qc.invalidateQueries({ queryKey: getGetCoverageBankAlphaReconciliationAuditQueryKey() });
-        toast.success('Reconciliation запущен! Аудит обновляется…');
-      },
-      onError: (err: unknown) => { toast.error(`Ошибка reconcile: ${String(err)}`); },
-    },
-  });
+  const reconcileMut = useRetiredLegacyAction();
 
   if (isLoading) return (
     <div className="flex items-center gap-2 text-[13px] text-gray-500 py-8 px-4">
@@ -4564,7 +4491,7 @@ function BankAlphaReconciliationPanel() {
           <button onClick={() => reconcileMut.mutate()} disabled={reconcileMut.isPending}
             className="px-3 py-1.5 bg-violet-600 text-white text-[12px] rounded hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1.5">
             {reconcileMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-            POST /sync/reconcile-bank-alpha-p84b
+            legacy action retired
           </button>
         </div>
       </div>
@@ -4573,7 +4500,7 @@ function BankAlphaReconciliationPanel() {
       {readiness === 'NOT_RUN' && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-[12px] text-blue-800">
           <div className="font-semibold mb-1">ℹ️ Первый запуск</div>
-          <div>Нажми кнопку «POST /sync/reconcile-bank-alpha-p84b» для первого прохода сверки Bank ↔ AlphaCRM.</div>
+          <div>Нажми кнопку «legacy action retired» для первого прохода сверки Bank ↔ AlphaCRM.</div>
           <div className="mt-1 text-[11px] text-blue-600">Предусловия: P8.4a COMPLETE ✓ | 854 bank transactions ✓ | 100% counterparty links ✓</div>
         </div>
       )}

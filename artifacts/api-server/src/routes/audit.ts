@@ -1190,7 +1190,7 @@ auditRouter.get("/coverage/attendance-student-identity", async (req, res) => {
         ? `Ghost resolution has run. ${archivedFoundCount + inactiveFoundCount} customers found (${archivedFoundCount} archived, ${inactiveFoundCount} inactive). ${stillNotFoundCount} still unresolved.`
         : `Ghost resolution not yet run. Run POST /api/coverage/resolve-ghost-customers to query AlphaCRM archived/inactive endpoints.`,
       recommendedAction: archivedFoundCount + inactiveFoundCount > 0
-        ? "Run P7.4.3c (POST /api/sync/normalize-historical-students) to normalize found customers with lifecycleStatus=archived/inactive."
+        ? "Run P7.4.3c (approved offline or scoped workflow) to normalize found customers with lifecycleStatus=archived/inactive."
         : stillNotFoundCount > 0 && !ghostResolutionRan
           ? "Run POST /api/coverage/resolve-ghost-customers first."
           : stillNotFoundCount > 0
@@ -1240,7 +1240,7 @@ auditRouter.get("/coverage/attendance-student-identity", async (req, res) => {
         note: historicalIdentityCids > 0
           ? `Historical-only identities are not full student profiles. They exist only to preserve attendance history for ${historicalIdentityCids} customers no longer exposed by AlphaCRM API.`
           : stillUnresolvedCids > 0
-            ? `${stillUnresolvedCids} customer_ids still unresolved. Run POST /api/sync/normalize-historical-students to create identity placeholders.`
+            ? `${stillUnresolvedCids} customer_ids still unresolved. Run approved offline or scoped workflow to create identity placeholders.`
             : "All customer_ids have been resolved (active, inactive, or historical identity).",
       },
 
@@ -1255,7 +1255,7 @@ auditRouter.get("/coverage/attendance-student-identity", async (req, res) => {
         rawBranchCounts,
         totalRawStudentRecords,
         note: rawBranchesAvailable.length <= 1
-          ? `alpha_raw_records.students data exists only for branchId=${rawBranchesAvailable[0] ?? "none"} (${atlasRawStudentCount} unique ids, ${totalRawStudentRecords} records). Run POST /api/sync/pull-students-all-branches to pull all 8 branches.`
+          ? `alpha_raw_records.students data exists only for branchId=${rawBranchesAvailable[0] ?? "none"} (${atlasRawStudentCount} unique ids, ${totalRawStudentRecords} records). Run approved offline or scoped workflow to pull all 8 branches.`
           : `alpha_raw_records.students data available for ${rawBranchesAvailable.length} branches: [${rawBranchesAvailable.join(", ")}]. Total ${totalRawStudentRecords} raw records, ${Object.values(rawBranchCounts).reduce((a: number, v) => a + (v as number), 0)} unique ids.`,
       },
 
@@ -2140,7 +2140,7 @@ auditRouter.get("/coverage/payment-cleanup-audit", async (req, res) => {
 
     if (!cleanupRan || riskUnset > 0) {
       readiness = "NOT_READY";
-      readinessReasons.push("Run POST /api/sync/p76-cleanup-payments first to classify all payments.");
+      readinessReasons.push("Run approved offline or scoped workflow first to classify all payments.");
     } else if (unknownCnt === 0 && unlinkedCnt < 250) {
       readiness = "READY";
       readinessReasons.push("All payments classified. Collection separated. Ready for bank reconciliation step.");
@@ -3964,7 +3964,7 @@ auditRouter.get("/coverage/counterparties-audit", async (req, res) => {
         issueType: "no_counterparties",
         severity: "CRITICAL",
         count: 0,
-        description: "No counterparties found. Run POST /api/sync/build-counterparties-from-bank first.",
+        description: "No counterparties found. Run approved offline or scoped workflow first.",
         recommendedAction: "Run the build-counterparties-from-bank sync endpoint.",
       });
     }
@@ -3975,7 +3975,7 @@ auditRouter.get("/coverage/counterparties-audit", async (req, res) => {
         severity: unlinkedTx > 50 ? "HIGH" : "MEDIUM",
         count: unlinkedTx,
         description: `${unlinkedTx} bank transactions have no counterparty link.`,
-        recommendedAction: "Re-run POST /api/sync/build-counterparties-from-bank to link all transactions.",
+        recommendedAction: "Re-run approved offline or scoped workflow to link all transactions.",
       });
     }
 
@@ -4056,7 +4056,7 @@ auditRouter.get("/coverage/counterparties-audit", async (req, res) => {
     if (totalCounterparties === 0 || criticalIssues > 0) {
       counterpartyFoundationReadiness = "NOT_READY";
       readinessReason = "No counterparties have been extracted. Run the sync first.";
-      nextRecommendedStep = "POST /api/sync/build-counterparties-from-bank";
+      nextRecommendedStep = "approved offline or scoped workflow";
     } else if (highIssues > 0 || linkCoverage < 0.95) {
       counterpartyFoundationReadiness = "PARTIAL";
       readinessReason = `${totalCounterparties} counterparties created, ${linkedTx}/${totalTx} transactions linked (${Math.round(linkCoverage * 100)}%). Some issues require attention.`;
@@ -4074,7 +4074,7 @@ auditRouter.get("/coverage/counterparties-audit", async (req, res) => {
     const sourceMatchesP82   = totalTx === P82_EXPECTED_TX;
     const sourceMismatch     = totalTx !== P82_EXPECTED_TX;
     const sourceMismatchNote = totalTx === 0
-      ? "bank_transactions table is empty in this environment. Run POST /api/sync/build-counterparties-from-bank — it requires 854 production transactions verified in P8.2."
+      ? "bank_transactions table is empty in this environment. Run approved offline or scoped workflow — it requires 854 production transactions verified in P8.2."
       : sourceMismatch
         ? `bank_transactions count is ${totalTx}, P8.2 proved ${P82_EXPECTED_TX}. Possible data change since P8.2.`
         : null;
@@ -4303,7 +4303,7 @@ auditRouter.get("/coverage/counterparty-reclassification-audit", async (req, res
     if (unversionedCount > 0) {
       issues.push({ issueType: 'reclassification_not_run', severity: 'HIGH', count: unversionedCount,
         description: `${unversionedCount} counterparties still at P8.3 original classification (no classification_version).`,
-        recommendedAction: 'Run POST /api/sync/reclassify-counterparties-p84a to apply P8.4a rules.' });
+        recommendedAction: 'Run approved offline or scoped workflow to apply P8.4a rules.' });
     }
     if (needsMrCount > 0) {
       issues.push({ issueType: 'needs_manual_review', severity: needsMrCount > 10 ? 'MEDIUM' : 'LOW',
@@ -4337,7 +4337,7 @@ auditRouter.get("/coverage/counterparty-reclassification-audit", async (req, res
 
     if (!hasRunReclassify) {
       counterpartyReclassificationReadiness = "NOT_READY";
-      readinessReason = `P8.4a reclassification not yet run. ${reclassifiedCp}/${totalCp} at p84a_v1. Run POST /api/sync/reclassify-counterparties-p84a.`;
+      readinessReason = `P8.4a reclassification not yet run. ${reclassifiedCp}/${totalCp} at p84a_v1. Run approved offline or scoped workflow.`;
     } else if (internalOk && bankOk && needsMrCount <= 15) {
       counterpartyReclassificationReadiness = needsMrCount > 0 ? "READY_WITH_REVIEW" : "READY_FOR_RECONCILIATION";
       readinessReason = needsMrCount > 0
@@ -4438,9 +4438,9 @@ auditRouter.get("/coverage/bank-alpha-reconciliation-audit", async (_req, res) =
         generatedAt: new Date().toISOString(),
         environment: { dbKind: "production", isProduction: true, dbName, nodeEnv },
         bankAlphaReconciliationReadiness: "NOT_RUN",
-        readinessReason: "No reconciliation runs found. Run POST /api/sync/reconcile-bank-alpha-p84b to start.",
+        readinessReason: "No reconciliation runs found. Run approved offline or scoped workflow to start.",
         p85CanStart: false,
-        warnings: ["Run POST /api/sync/reconcile-bank-alpha-p84b to build the reconciliation layer."],
+        warnings: ["Run approved offline or scoped workflow to build the reconciliation layer."],
       });
     }
 

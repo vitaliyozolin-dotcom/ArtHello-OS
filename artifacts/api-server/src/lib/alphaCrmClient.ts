@@ -1,4 +1,4 @@
-import { logger } from "./logger";
+import { logger } from "./logger.js";
 import { SerializedRequestQueue } from "./serialized-request-queue.js";
 
 const DOMAIN = process.env.ALFACRM_DOMAIN?.trim();
