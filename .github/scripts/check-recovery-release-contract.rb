@@ -13,8 +13,8 @@ raise 'Release must not send issue comments' if workflow.fetch('permissions').ke
 job = workflow.fetch('jobs').fetch('deploy')
 raise 'Wrong production runner' unless job.fetch('runs-on') == ['self-hosted','linux','x64','arthello-gateway']
 raise 'Production Environment missing' unless job.fetch('environment') == 'production-ru'
-raise 'Shared production workflow lock missing' unless workflow.fetch('concurrency') == {'group'=>'gateway-38-55-arthello-production','cancel-in-progress'=>false}
-raise 'Shared School lock missing' unless job.fetch('concurrency') == {'group'=>'school-1-11-production','cancel-in-progress'=>false}
+raise 'Shared production workflow lock missing' unless workflow.fetch('concurrency') == {'group'=>'gateway-38-55-arthello-production','cancel-in-progress'=>false,'queue'=>'max'}
+raise 'Shared School lock missing' unless job.fetch('concurrency') == {'group'=>'school-1-11-production','cancel-in-progress'=>false,'queue'=>'max'}
 condition = job.fetch('if')
 ["github.event_name == 'workflow_run'", "head_branch == 'main'", "conclusion == 'success'", "actor.login == 'vitaliyozolin-dotcom'", "triggering_actor.login == 'vitaliyozolin-dotcom'", "number == fromJSON('354')", "codex/recovery-release-20260908"].each {|token| raise 'Missing D063 trigger condition' unless condition.include?(token)}
 steps = job.fetch('steps')

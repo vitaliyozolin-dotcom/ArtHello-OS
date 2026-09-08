@@ -6,7 +6,7 @@
     "scope": "Единая операционная система образовательной группы ArtHello",
     "owner": "Виталий Озолин",
     "status": "approved",
-    "asOf": "2026-09-03"
+    "asOf": "2026-09-08"
   },
   "problem": "Деньги, люди, дети, клиенты, обучение, документы и риски находятся в разных источниках и не образуют доказуемую управленческую цепочку.",
   "goal": "Все сотрудники административного комплекса работают в персональных кабинетах на единой модели данных; каждый риск становится задачей, а каждый показатель раскрывается до источника.",
@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "Непривилегированное восстановление School SSO и production-выпуск R3",
+    "name": "Точечное исправление School lock и проверяемый production-выпуск R4",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -173,14 +173,18 @@
       "2026-09-08: свежий PR353 прошёл hosted Verify34189642144 и Quality34189642189; приватный image artifact10041764058 156071423bytes создан. Прежнюю quota/storage блокировку нельзя считать текущей; Proof34189642216 требует исправления visual/evidence. Текущий выпуск продолжается через доступные проверки, отдельный builder сохранён в PR353.",
       "D063 run34193103822/job101955030295: точная runtime диагностика и все cutover steps skipped",
       "Main Quality34192976544, Proof34192976483, Verify34192976402 SUCCESS",
-      "PR355/M2 8d4fc1cb589db8550cc4e7857e1a7537ac771ae5 прошёл exact main Quality/Proof/Verify и 724 теста. D064 repair остановился до мутаций на отсутствии sudo password; R3 уменьшает требуемые права и использует существующий Docker deployment access."
+      "PR355/M2 8d4fc1cb589db8550cc4e7857e1a7537ac771ae5 прошёл exact main Quality/Proof/Verify и 724 теста. D064 repair остановился до мутаций на отсутствии sudo password; R3 уменьшает требуемые права и использует существующий Docker deployment access.",
+      "M3 8a0bf989e0c271b009d8f14f0f3d21b3ab47966c: Quality34198562442, Proof34198562451, Verify34198562465 SUCCESS; 724 app tests; immutable artifact10044909919.",
+      "D06534198718003 attempt2/job101982122878: bootstrap failed, image and cutover skipped. Failed repair is not rerun.",
+      "Read-only diagnostic34203383943/job101987156275 2026-09-08T08:14:10Z: own UID/GID1000 lock0664 is the first failed condition; home valid, R3state-root/relay absent, School baseline healthy and unchanged.",
+      "Новый main3cc30b6ad2790bfe15d43ab38adebb9cdf6a1f26 сохраняется целиком; его Quality34204053510/Proof34204053460/Verify34204053516 успешны, R4 требует новых exact checks."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
       "Т‑Банк нельзя подключать боевым токеном до независимого подтверждения статического исходящего IP сервера и выпуска владельцем токена с минимальными правами чтения счетов и выписки",
       "School DNS/HTTPS к ArtHello возвращает EAI_AGAIN во внутренней Docker сети; network repair и живой SSO ещё не приняты",
       "Объединённый код слит и проверен, но production cutover и реальная банковская/Alfa приёмка ещё не выполнены",
-      "D064 не выполнил установку: SSH-пользователю недоступен общий sudo. Проверяется R3 с имеющимися Docker-правами и собственными файлами, без повышения привилегий."
+      "D065 остановлен на group-write собственного lock0664. Готовится точечная нормализация0644 владельцем, новый R4 с exact CI/image и живой приёмкой; в prod остаётся прежняя ArtHello."
     ]
   },
   "stages": [
@@ -420,7 +424,7 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "Завершить проверенный R3 с меньшими привилегиями, восстановить School SSO, опубликовать новую ArtHello и проверить пользовательские сценарии",
+    "result": "Исправить права собственного School lock через проверенный R4, подтвердить естественный вход в дневник, опубликовать immutable ArtHello и проверить шесть пользовательских сценариев",
     "evidence": "Exact SHA/tree, продуктовые tests/lint/build, Quality/Proof/Verify, приватный immutable image/provenance, изолированный clone и проверенный backup до cutover, rollback и свежая живая приёмка шести сценариев"
   },
   "decisionLog": [
@@ -2081,6 +2085,72 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Exact CI, caller-owned durable receipt, real SSO and live release receipt",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Исходное поручение Виталия; необходимое техническое исправление подтверждённого серверного условия выбрано исполнителем",
+      "approved_at": "2026-09-08",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска и живой приёмки",
+      "affected_stages": [
+        4,
+        7,
+        16,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Поручение владельца от 2026-09-08 вернуться к GitHub + собственной машине сборки и выложить все исправления в prod",
+      "decision_id": "DEC-2026-09-08-76",
+      "question": "Как устранить доказанный отказ собственного lock0664 и отмену очереди, сохраняя права и release gates?",
+      "statement": "D-069: сузить права exact собственного lock0664→0644 через validated descriptor и shared flock; включить очередь max в неизменных общих группах активных consumers; выпустить отдельный R4 без повтора failed D065.",
+      "context": "Фактическая read-only диагностика34203383943 подтверждает владельца1000, mode0664, стабильный inode, безопасный home и отсутствие state-root/relay. GitHub отменил первую D065 попытку до jobs.",
+      "rationale": "Устраняется конкретный server precondition собственным владельцем без root/новых прав, а штатная очередь сохраняет сериализацию без отмены pending current release.",
+      "evidence": [
+        "M3 8a0bf989e0c271b009d8f14f0f3d21b3ab47966c: Quality34198562442, Proof34198562451, Verify34198562465 SUCCESS; 724 app tests; immutable artifact10044909919.",
+        "D06534198718003 attempt2/job101982122878: bootstrap failed, image and cutover skipped. Failed repair is not rerun.",
+        "Read-only diagnostic34203383943/job101987156275 2026-09-08T08:14:10Z: own UID/GID1000 lock0664 is the first failed condition; home valid, R3state-root/relay absent, School baseline healthy and unchanged."
+      ],
+      "assumptions": [
+        "Неизвестный egress network не объявляется отсутствующим; controller проверяет фактическое состояние перед мутацией",
+        "Поддержка queue:max подтверждена официальной документацией; старые attempts не перезапускаются"
+      ],
+      "dependencies": [
+        "D-063",
+        "D-064",
+        "D-065",
+        "Exact UID/GID1000-owned existing lock",
+        "Fresh R4 checks/image",
+        "Natural SSO acceptance"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/357",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34203383943",
+        "https://github.blog/changelog/2026-05-07-github-actions-concurrency-groups-now-allow-larger-queues/"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Root/sudo/chown/новая частная блокировка",
+          "reason": "Собственный владелец уже может сузить права того же inode; расширение полномочий не требуется",
+          "reopen_condition": "нет"
+        },
+        {
+          "option": "Удалить общую concurrency или повторить failed D065",
+          "reason": "Нарушает сериализацию либо fail-closed release boundary",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Проверить R4/queue/lock, выполнить защищённую установку, естественный SSO и guarded ArtHello publication с живой приёмкой",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "Exact CI, normalization + repair receipts, immutable release and live acceptance",
           "status": "in_progress"
         }
       ]

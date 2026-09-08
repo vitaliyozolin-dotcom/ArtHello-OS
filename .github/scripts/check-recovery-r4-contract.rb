@@ -1,12 +1,12 @@
 require 'yaml'
 
-source = File.read('.github/workflows/deploy-arthello-recovery-r3-20260908.yml')
+source = File.read('.github/workflows/deploy-arthello-recovery-r4-20260908.yml')
 workflow = YAML.safe_load(source, aliases: true)
 trigger = workflow['on'] || workflow[true]
-raise 'D065 trigger must be workflow_run only' unless trigger.keys == ['workflow_run']
-raise 'D065 must consume only successful canonical Verify completion' unless trigger.fetch('workflow_run') == {'workflows'=>['Verify ArtHello v52 release'], 'types'=>['completed']}
+raise 'D066 trigger must be workflow_run only' unless trigger.keys == ['workflow_run']
+raise 'D066 must consume only successful canonical Verify completion' unless trigger.fetch('workflow_run') == {'workflows'=>['Verify ArtHello v52 release'], 'types'=>['completed'], 'branches'=>['main']}
 env = workflow.fetch('env')
-raise 'D065 release identity changed' unless env.fetch('EXPECTED_REPOSITORY') == 'vitaliyozolin-dotcom/ArtHello-OS' && env.fetch('EXPECTED_RELEASE_HEAD') == 'codex/school-arthello-recovery-r3-20260908' && env.fetch('EXPECTED_RELEASE_PR').to_s == '356' && env.fetch('PREVIOUS_RELEASE_SHA') == '8d4fc1cb589db8550cc4e7857e1a7537ac771ae5'
+raise 'D066 release identity changed' unless env.fetch('EXPECTED_REPOSITORY') == 'vitaliyozolin-dotcom/ArtHello-OS' && env.fetch('EXPECTED_RELEASE_HEAD') == 'codex/school-arthello-recovery-r4-20260908' && env.fetch('EXPECTED_RELEASE_PR').to_s == '358' && env.fetch('PREVIOUS_RELEASE_SHA') == '3cc30b6ad2790bfe15d43ab38adebb9cdf6a1f26'
 raise 'Release identity must come from upstream verified head' unless env.fetch('RELEASE_SHA') == '${{ github.event.workflow_run.head_sha }}'
 raise 'Current event SHA is not release identity' if source.include?('$GITHUB_SHA') || source.include?('github.sha')
 raise 'Release must not send issue comments' if workflow.fetch('permissions').key?('issues') || source.include?('/comments')
@@ -16,7 +16,7 @@ raise 'Production Environment missing' unless job.fetch('environment') == 'produ
 raise 'Shared production workflow lock missing' unless workflow.fetch('concurrency') == {'group'=>'gateway-38-55-arthello-production','cancel-in-progress'=>false,'queue'=>'max'}
 raise 'Shared School lock missing' unless job.fetch('concurrency') == {'group'=>'school-1-11-production','cancel-in-progress'=>false,'queue'=>'max'}
 condition = job.fetch('if')
-["github.event_name == 'workflow_run'", "head_branch == 'main'", "conclusion == 'success'", "actor.login == 'vitaliyozolin-dotcom'", "triggering_actor.login == 'vitaliyozolin-dotcom'", "number == fromJSON('356')", "codex/school-arthello-recovery-r3-20260908"].each {|token| raise 'Missing D065 trigger condition' unless condition.include?(token)}
+["github.event_name == 'workflow_run'", "head_branch == 'main'", "conclusion == 'success'", "actor.login == 'vitaliyozolin-dotcom'", "triggering_actor.login == 'vitaliyozolin-dotcom'", "number == fromJSON('358')", "codex/school-arthello-recovery-r4-20260908"].each {|token| raise 'Missing D066 trigger condition' unless condition.include?(token)}
 steps = job.fetch('steps')
 bindings = 'serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport(), BACKUP_TRANSPORT: createBackupTransport() }'
 checkout_contract = steps.find {|step| step['name'] == 'Verify checkout and release contracts'}.fetch('run')
@@ -31,7 +31,7 @@ image_index = steps.index {|step| step['id'] == 'image_import'}
 cutover_index = steps.index {|step| step['id'] == 'cutover'}
 raise 'Diagnostic must precede image mutation and cutover' unless diagnostic_index && image_index && cutover_index && diagnostic_index < image_index && image_index < cutover_index
 diagnostic = steps.fetch(diagnostic_index).fetch('run')
-['school-sso-readonly-diagnostic.sh', 'check-school-live-acceptance-r3.py', 'OBSERVED_LIVE_ARTHELLO_SHA', 'StrictHostKeyChecking=yes', 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'].each {|token| raise 'Missing diagnostic or real acceptance gate' unless diagnostic.include?(token)}
+['school-sso-readonly-diagnostic.sh', 'check-school-live-acceptance-r4.py', 'OBSERVED_LIVE_ARTHELLO_SHA', 'StrictHostKeyChecking=yes', 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'].each {|token| raise 'Missing diagnostic or real acceptance gate' unless diagnostic.include?(token)}
 raise 'Diagnostic stage must not mutate production' if diagnostic.match?(/docker\s+(?:stop|rm|restart|update|run)|systemctl\s+(?:start|restart|enable)|install(?:-bridge)?\.sh/)
 image = steps.fetch(image_index).fetch('run')
 ['.runnerTrust == "github-hosted-ephemeral"', '.productionCapability == false', '.headSha == $sha', '.treeSha == $tree', '.imageArchiveSha256 == $archive', 'runtimeFingerprintSha256'].each {|token| raise 'Missing hosted artifact trust check' unless image.include?(token)}
@@ -63,7 +63,7 @@ require 'digest'
 repair_index = steps.index {|step| step['id'] == 'school_repair'}
 raise 'School repair must follow checkout and precede diagnosis/ArtHello image import' unless repair_index && checkout_index < repair_index && repair_index < diagnostic_index
 repair = steps.fetch(repair_index).fetch('run')
-['deploy/school/sso-relay-r3', 'r3-school-repair-remote.py', 'EXPECTED_REPAIR_CONFIG_SHA256', 'EXPECTED_REPAIR_BUNDLE_SHA256', 'check-school-repair-receipt-r3.py', 'StrictHostKeyChecking=yes', "SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI"].each {|token| raise 'Missing exact protected School repair transport' unless repair.include?(token)}
+['deploy/school/sso-relay-r3', 'r4-school-repair-remote.py', 'EXPECTED_REPAIR_CONFIG_SHA256', 'EXPECTED_REPAIR_BUNDLE_SHA256', 'check-school-repair-receipt-r3.py', 'StrictHostKeyChecking=yes', "SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI"].each {|token| raise 'Missing exact protected School repair transport' unless repair.include?(token)}
 raise 'Current main must be rechecked immediately before School mutation' unless repair.index('test "$current_main" = "$RELEASE_SHA"') < repair.index('timeout --signal=TERM --kill-after=15s 720s') && repair.include?('/git/ref/heads/main')
 raise 'Repair cannot build or pull production images' if repair.match?(/docker\s+(?:build|pull)|npm\s+install|pnpm\s+install/)
 raise 'Repair replay must reject failed/ambiguous repairs' unless before_checkout.include?("repairs[0].get('conclusion') in ('success', 'skipped')")
@@ -81,11 +81,33 @@ manifest.fetch('files').each do |filename, sha|
   raise 'Relay bundle source escaped review' unless File.file?(path) && !File.symlink?(path) && File.size(path).between?(1,262144) && Digest::SHA256.file(path).hexdigest == sha
 end
 verify_source = File.read('.github/workflows/verify-arthello-v52.yml')
-['ruby .github/scripts/check-recovery-r3-contract.rb','python3 -I .github/scripts/test-recovery-r3-gates.py','node --test scripts/test/school-sso-relay-r3.test.mjs','python3 -I scripts/test/school-sso-repair-r3.test.py','bash scripts/test/school-sso-relay-r3-docker-smoke.sh'].each {|token| raise 'Hosted R3 gate missing' unless verify_source.include?(token)}
+['ruby .github/scripts/check-recovery-r4-contract.rb','python3 -I .github/scripts/test-recovery-r4-gates.py','node --test scripts/test/school-sso-relay-r3.test.mjs','python3 -I scripts/test/school-sso-repair-r3.test.py','bash scripts/test/school-sso-relay-r3-docker-smoke.sh'].each {|token| raise 'Hosted R3 gate missing' unless verify_source.include?(token)}
 raise 'R3 ordinary-user execution scope changed' unless manifest['execution'] == {'elevation'=>false,'requireOrdinaryUid'=>true,'sharedLock'=>'/var/lock/school-1-11-production.lock','sharedLockAccess'=>'existing-readonly-no-follow-nonblock','stateLeaf'=>'.arthello-school-sso-relay','stateOwner'=>'passwd-home-caller'}
 bootstrap = File.read('.github/scripts/r3-school-repair-remote.py')
 raise 'R3 bootstrap must not elevate or accept a state path' if bootstrap.include?("['sudo'") || bootstrap.include?('os.execvp') || bootstrap.include?("os.environ['HOME']") || bootstrap.include?('STATE_ROOT=')
 ['pwd.getpwuid(uid).pw_dir', "root = home / '.arthello-school-sso-relay'", 'checked_shared_lock(uid)', 'os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK', 'os.getgid() != os.getegid()', "prefix='.incoming-', dir=root"].each {|token| raise 'R3 caller/lock/staging boundary missing' unless bootstrap.include?(token)}
-acceptance_source = File.read('.github/scripts/check-school-live-acceptance-r3.py')
+acceptance_source = File.read('.github/scripts/check-school-live-acceptance-r4.py')
 ['observedSchoolRepairExecutionUid', 'observedSchoolRepairStateDirectorySha256', "record.get('schemaVersion') == 3", 'minutes=45'].each {|token| raise 'R3 browser evidence identity missing' unless acceptance_source.include?(token)}
-puts 'ARTHELLO_D065_CONTRACT=VERIFIED'
+
+# D066 adds capacity to the existing shared queues; old authorization and
+# deployment code are byte-identical to the inspected main parent.
+legacy_queue_sources = {'deploy-arthello-direct-38-55.yml'=>'f3e7759119cc717835c607275fc227219ae6de6dced40c71e44097b4e5f06ac9','deploy-arthello-recovery-20260908.yml'=>'246bf0cd6c19e98fceb96ae608fb6fd2b11272baf98be5abfcf116f663cef53b','deploy-arthello-recovery-r2-20260908.yml'=>'8653741f0974eb837d19a524de384ab8b16b3e3b2dd82e719bffe96e2658f28e','deploy-arthello-recovery-r3-20260908.yml'=>'f03324b9e580c9ff58e2a5299160e95cc5859266f52a4fe9044a0c4951872a42'}
+legacy_queue_sources.each do |filename, expected|
+  legacy_source = File.read('.github/workflows/' + filename)
+  raise 'Only the two existing shared queues may change' unless legacy_source.lines.count { |line| line.match?(/^\s*queue: max$/) } == 2
+  baseline_source = legacy_source.gsub(/^\s*queue: max\n/, '')
+  raise 'An old release controller changed beyond queue capacity' unless Digest::SHA256.hexdigest(baseline_source) == expected
+  document = YAML.safe_load(legacy_source, aliases: true)
+  raise 'Existing gateway serialization changed' unless document.fetch('concurrency') == {'group'=>'gateway-38-55-arthello-production','cancel-in-progress'=>false,'queue'=>'max'}
+  raise 'Existing School serialization changed' unless document.fetch('jobs').fetch('deploy').fetch('concurrency') == {'group'=>'school-1-11-production','cancel-in-progress'=>false,'queue'=>'max'}
+end
+
+r4_bootstrap = File.read('.github/scripts/r4-school-repair-remote.py')
+raise 'R4 bootstrap must preserve ordinary execution boundary' if r4_bootstrap.include?("['sudo'") || r4_bootstrap.include?('os.execvp') || r4_bootstrap.include?("os.environ['HOME']") || r4_bootstrap.include?('STATE_ROOT=')
+['EXPECTED_UID = 1000', 'EXPECTED_GID = 1000', 'SOURCE_MODE = 0o664', 'TARGET_MODE = 0o644', 'os.fchmod(fd, TARGET_MODE)', 'fcntl.LOCK_EX | fcntl.LOCK_NB', 'modeChangeAttempted', "file=sys.stderr", 'sanitized_failure(error)'].each {|token| raise 'R4 bounded owner-lock normalization missing' unless r4_bootstrap.include?(token)}
+r4_main = r4_bootstrap[r4_bootstrap.index('def main():')...r4_bootstrap.index('ERROR_CODES =')]
+raise 'R4 permission mutation must follow identity, home/state and exact bundle validation' unless r4_main.index('validated_environment()') < r4_main.index('decoded = decode_bundle(') && r4_main.index('checked_home(') < r4_main.index('decoded = decode_bundle(') && r4_main.index("STAGE = 'existing_private_state'") < r4_main.index('decoded = decode_bundle(') && r4_main.index('decoded = decode_bundle(') < r4_main.index('normalization = normalize()')
+raise 'R4 normalization must precede strict R3 lock and private staging' unless r4_main.index('normalization = normalize()') < r4_main.index('checked_shared_lock(uid)') && r4_main.index('checked_shared_lock(uid)') < r4_main.index('root.mkdir(mode=0o700)')
+['python3 -I .github/scripts/test-school-shared-lock-d066.py', 'python3 -I .github/scripts/test-recovery-r4-bootstrap.py'].each {|token| raise 'Hosted D066 normalization/bootstrap gate missing' unless verify_source.include?(token)}
+raise 'D066 must use its fresh natural-browser evidence path' unless acceptance_source.include?('2026-09-08-school-live-acceptance-r4.json?ref=codex/recovery-evidence-20260907')
+puts 'ARTHELLO_D066_CONTRACT=VERIFIED'

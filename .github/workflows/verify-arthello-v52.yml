@@ -34,6 +34,15 @@ on:
       - .github/scripts/r3-school-repair-remote.py
       - .github/scripts/test-recovery-r3-gates.py
       - deploy/school/sso-relay-r3/**
+      - .github/workflows/deploy-arthello-recovery-r4-20260908.yml
+      - .github/scripts/check-recovery-r4-contract.rb
+      - .github/scripts/check-school-live-acceptance-r4.py
+      - .github/scripts/d066-replay-guard.py
+      - .github/scripts/test-recovery-r4-gates.py
+      - .github/scripts/r4-school-repair-remote.py
+      - .github/scripts/normalize-school-shared-lock-d066.py
+      - .github/scripts/test-school-shared-lock-d066.py
+      - .github/scripts/test-recovery-r4-bootstrap.py
   push:
     branches: [main]
     paths:
@@ -68,6 +77,15 @@ on:
       - .github/scripts/r3-school-repair-remote.py
       - .github/scripts/test-recovery-r3-gates.py
       - deploy/school/sso-relay-r3/**
+      - .github/workflows/deploy-arthello-recovery-r4-20260908.yml
+      - .github/scripts/check-recovery-r4-contract.rb
+      - .github/scripts/check-school-live-acceptance-r4.py
+      - .github/scripts/d066-replay-guard.py
+      - .github/scripts/test-recovery-r4-gates.py
+      - .github/scripts/r4-school-repair-remote.py
+      - .github/scripts/normalize-school-shared-lock-d066.py
+      - .github/scripts/test-school-shared-lock-d066.py
+      - .github/scripts/test-recovery-r4-bootstrap.py
 
 permissions:
   contents: read
@@ -390,8 +408,12 @@ jobs:
           python3 -I .github/scripts/test-d063-release-gates.py
           ruby .github/scripts/check-recovery-r2-contract.rb
           ruby .github/scripts/check-recovery-r3-contract.rb
+          ruby .github/scripts/check-recovery-r4-contract.rb
           python3 -I .github/scripts/test-recovery-r2-gates.py
           python3 -I .github/scripts/test-recovery-r3-gates.py
+          python3 -I .github/scripts/test-recovery-r4-gates.py
+          python3 -I .github/scripts/test-school-shared-lock-d066.py
+          python3 -I .github/scripts/test-recovery-r4-bootstrap.py
           node --test scripts/test/school-sso-relay.test.mjs
           python3 -I scripts/test/school-sso-repair.test.py
           node --test scripts/test/school-sso-relay-r3.test.mjs

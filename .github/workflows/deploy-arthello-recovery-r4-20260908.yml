@@ -1,13 +1,15 @@
-# D-064: fresh R2 release for PR355 after verified School egress diagnosis.
-# D059 and D063 remain unchanged. Production consumes only exact hosted M2 image.
+# D-066: fresh R4 release for PR358 after verified School egress diagnosis.
+# D059/D063/D064/D065 identities remain pinned; shared queues gain capacity only.
 # School config repair precedes fresh natural browser acceptance; no School rebuild.
-name: Deploy ArtHello recovery R2 D064
+name: Deploy ArtHello recovery R4 D066
 'on':
   workflow_run:
     workflows:
     - Verify ArtHello v52 release
     types:
     - completed
+    branches:
+    - main
 permissions:
   actions: read
   contents: read
@@ -19,9 +21,9 @@ concurrency:
   queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/school-arthello-recovery-r2-20260908
-  EXPECTED_RELEASE_PR: '355'
-  PREVIOUS_RELEASE_SHA: 68a159dc647f35cdd30ce586fc6d5beb93b89a51
+  EXPECTED_RELEASE_HEAD: codex/school-arthello-recovery-r4-20260908
+  EXPECTED_RELEASE_PR: '358'
+  PREVIOUS_RELEASE_SHA: 3cc30b6ad2790bfe15d43ab38adebb9cdf6a1f26
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -38,8 +40,8 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt >= 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/school-arthello-recovery-r2-20260908' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('355') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/school-arthello-recovery-r4-20260908' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('358') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -58,7 +60,7 @@ jobs:
       cancel-in-progress: false
       queue: max
     steps:
-    - name: Verify D064 R2 identity and safe verified-School resume
+    - name: Verify D066 R4 identity and safe verified-School resume
       timeout-minutes: 4
       env:
         GH_TOKEN: ${{ github.token }}
@@ -122,7 +124,7 @@ jobs:
             .merged_by.login == "vitaliyozolin-dotcom"
           ' <<<"$release_pr_json" >/dev/null
 
-        python3 -I - <<'D064_REPLAY'
+        python3 -I - <<'D066_REPLAY'
         import json, os, urllib.request
 
         def safe_previous_job(job):
@@ -148,12 +150,12 @@ jobs:
                 request = urllib.request.Request(api + path, headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'})
                 with urllib.request.urlopen(request, timeout=30) as response:
                     return json.load(response)
-            runs = get('/actions/workflows/deploy-arthello-recovery-r2-20260908.yml/runs?event=workflow_run&head_sha=' + release + '&per_page=100')
+            runs = get('/actions/workflows/deploy-arthello-recovery-r4-20260908.yml/runs?event=workflow_run&head_sha=' + release + '&per_page=100')
             assert runs['total_count'] == len(runs['workflow_runs']), 'Replay history pagination incomplete'
             assert 1 <= current_attempt <= 50
             for previous in runs['workflow_runs']:
                 assert previous['head_sha'] == release and previous['repository']['full_name'] == repository
-                assert previous['path'].split('@')[0] == '.github/workflows/deploy-arthello-recovery-r2-20260908.yml'
+                assert previous['path'].split('@')[0] == '.github/workflows/deploy-arthello-recovery-r4-20260908.yml'
                 attempt_count = int(previous['run_attempt'])
                 assert 1 <= attempt_count <= 50
                 if previous['id'] == current_run:
@@ -170,12 +172,12 @@ jobs:
                     for job in jobs['jobs']:
                         assert job['name'] == 'deploy' and job['run_attempt'] == attempt
                         assert safe_previous_job(job), 'A previous cutover started or its absence cannot be proven'
-            print('ARTHELLO_D064_REPLAY_BOUNDARY=VERIFIED')
+            print('ARTHELLO_D066_REPLAY_BOUNDARY=VERIFIED')
 
         if __name__ == '__main__':
             run()
 
-        D064_REPLAY
+        D066_REPLAY
 
         # GitHub evaluates the protected Environment before starting this job.
         # Its configuration is enforced by the platform and statically pinned
@@ -459,9 +461,10 @@ jobs:
 
         # This is reviewed configuration repair only. There is no application build,
         # School recreation, database mount or secret propagation into the relay.
-        repair_bundle_file="$RUNNER_TEMP/school-r2-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
-        repair_receipt_file="$RUNNER_TEMP/school-r2-receipt-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
-        repair_bundle_meta="$RUNNER_TEMP/school-r2-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.meta"
+        umask 077
+        repair_bundle_file="$RUNNER_TEMP/school-r3-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+        repair_receipt_file="$RUNNER_TEMP/school-r3-receipt-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+        repair_bundle_meta="$RUNNER_TEMP/school-r3-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.meta"
         REPAIR_BUNDLE_FILE="$repair_bundle_file" python3 -I - <<'PY_BUNDLE' > "$repair_bundle_meta"
         import base64
         import hashlib
@@ -470,7 +473,7 @@ jobs:
         from pathlib import Path
         import stat
 
-        root=Path('deploy/school/sso-relay')
+        root=Path('deploy/school/sso-relay-r3')
         files={}
         for name in ('manifest.json','repair.py','relay.mjs','healthcheck.mjs'):
             path=root/name
@@ -500,7 +503,7 @@ jobs:
         [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
         [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
         [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,2}$ ]]
-        bootstrap_base64="$(base64 -w0 .github/scripts/r2-school-repair-remote.py)"
+        bootstrap_base64="$(base64 -w0 .github/scripts/r4-school-repair-remote.py)"
         [[ "$bootstrap_base64" =~ ^[A-Za-z0-9+/=]+$ ]]
         # Public identities and a reviewed bootstrap are the only remote environment.
         # Bundle bytes use stdin, stay below the fixed size cap, and are hash checked
@@ -514,11 +517,11 @@ jobs:
         test "$current_main" = "$RELEASE_SHA"
         timeout --signal=TERM --kill-after=15s 720s \
           ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-          "RELEASE_SHA='$RELEASE_SHA' RELEASE_RUN_ID='$GITHUB_RUN_ID' RELEASE_ATTEMPT='$GITHUB_RUN_ATTEMPT' EXPECTED_REPAIR_CONFIG_SHA256='$repair_config_sha256' EXPECTED_REPAIR_BUNDLE_SHA256='$repair_bundle_sha256' R2_BOOTSTRAP_BASE64='$bootstrap_base64' python3 -I -c 'import base64,os; exec(base64.b64decode(os.environ[\"R2_BOOTSTRAP_BASE64\"]))'" \
+          "RELEASE_SHA='$RELEASE_SHA' RELEASE_RUN_ID='$GITHUB_RUN_ID' RELEASE_ATTEMPT='$GITHUB_RUN_ATTEMPT' EXPECTED_REPAIR_CONFIG_SHA256='$repair_config_sha256' EXPECTED_REPAIR_BUNDLE_SHA256='$repair_bundle_sha256' R4_BOOTSTRAP_BASE64='$bootstrap_base64' python3 -I -c 'import base64,os; exec(base64.b64decode(os.environ[\"R4_BOOTSTRAP_BASE64\"]))'" \
           < "$repair_bundle_file" | tee "$repair_receipt_file"
         SCHOOL_REPAIR_CONFIG_SHA256="$repair_config_sha256" \
-          python3 -I .github/scripts/check-school-repair-receipt-r2.py \
-            --manifest deploy/school/sso-relay/manifest.json \
+          python3 -I .github/scripts/check-school-repair-receipt-r3.py \
+            --manifest deploy/school/sso-relay-r3/manifest.json \
             --receipt "$repair_receipt_file"
         printf 'config_sha256=%s\n' "$repair_config_sha256" >> "$GITHUB_OUTPUT"
         rm -f -- "$repair_bundle_file" "$repair_bundle_meta"
@@ -533,7 +536,7 @@ jobs:
         DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
         GH_TOKEN: ${{ github.token }}
         SCHOOL_REPAIR_CONFIG_SHA256: ${{ steps.school_repair.outputs.config_sha256 }}
-        SCHOOL_REPAIR_RECEIPT_FILE: ${{ runner.temp }}/school-r2-receipt-${{ github.run_id }}-${{ github.run_attempt }}.json
+        SCHOOL_REPAIR_RECEIPT_FILE: ${{ runner.temp }}/school-r3-receipt-${{ github.run_id }}-${{ github.run_attempt }}.json
       run: |+
         set -Eeuo pipefail
         umask 077
@@ -645,7 +648,7 @@ jobs:
         bash .github/scripts/r2-alfacrm-env-presence.sh --current-arthello "${acceptance_live_ids[0]}"
 
         SCHOOL_DIAGNOSTIC_FILE="$diagnostic_file" OBSERVED_LIVE_ARTHELLO_SHA="$observed_arthello_sha" \
-          python3 -I .github/scripts/check-school-live-acceptance-r2.py
+          python3 -I .github/scripts/check-school-live-acceptance-r4.py
 
     - name: Download and load exact hosted-verified image
       timeout-minutes: 25
@@ -2184,7 +2187,7 @@ jobs:
         SCHOOL_REPAIR_CONFIG: ${{ steps.school_repair.outputs.config_sha256 }}
       run: |
         if ! {
-          echo '## ArtHello R2 production deployment'
+          echo '## ArtHello R4 production deployment'
           echo
           echo "- Commit: $RELEASE_SHA"
           echo "- Quality run: $QUALITY_RUN"

@@ -1,0 +1,191 @@
+{
+  "caller": {
+    "effectiveGid": 1000,
+    "effectiveUid": 1000,
+    "ordinaryIdentityValid": true,
+    "realGid": 1000,
+    "realUid": 1000
+  },
+  "completedAtUtc": "2026-09-08T08:14:10Z",
+  "diagnostic": "D065-bootstrap-read-only",
+  "docker": {
+    "backend": {
+      "bridgeDriver": true,
+      "containsRelay": null,
+      "containsSchool": true,
+      "error": null,
+      "exists": true,
+      "id": "7db7d29f27b1c2f3a46354ffeebfddc15d3aaaa1cd357fbce4cc7b2137eb1006",
+      "internal": true,
+      "ipv6Enabled": false,
+      "memberCount": 5,
+      "nameMatches": true,
+      "repairLabels": {
+        "activatedAtUtc": null,
+        "configurationMatches": false,
+        "configurationSha256": null,
+        "executionUid": null,
+        "owner": "missing",
+        "releaseSha": null,
+        "stateDirectorySha256": null
+      }
+    },
+    "daemonObserved": true,
+    "egress": {
+      "error": "docker_read_unavailable",
+      "exists": null
+    },
+    "relay": {
+      "error": "object_missing",
+      "exists": false
+    },
+    "school": {
+      "baselineChecks": {
+        "imageMatches": true,
+        "networkModeMatches": true,
+        "onlyBackendNetwork": true,
+        "productionLabelMatches": true,
+        "sourceMatches": true,
+        "startedAtMatches": true,
+        "systemLabelMatches": true
+      },
+      "configuredUser": "other",
+      "error": null,
+      "exists": true,
+      "health": "healthy",
+      "id": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+      "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+      "nameMatches": true,
+      "networkCount": 1,
+      "networkMode": "arthello-os_backend",
+      "onBackend": true,
+      "onEgress": false,
+      "running": true,
+      "sourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+      "startedAtUtc": "2026-09-03T11:13:44.872449964Z"
+    }
+  },
+  "firstFailedComparablePrecondition": "existing_shared_lock",
+  "home": {
+    "ancestors": [
+      {
+        "checks": {
+          "callerOwned": false,
+          "directory": true,
+          "notGroupOrWorldWritable": true,
+          "notSymlink": true,
+          "rootOrCallerOwned": true,
+          "valid": true
+        },
+        "error": null,
+        "exists": true,
+        "gid": 0,
+        "groupOrWorldWritable": false,
+        "index": 0,
+        "isHome": false,
+        "links": 21,
+        "mode": "0755",
+        "type": "directory",
+        "uid": 0
+      },
+      {
+        "checks": {
+          "callerOwned": false,
+          "directory": true,
+          "notGroupOrWorldWritable": true,
+          "notSymlink": true,
+          "rootOrCallerOwned": true,
+          "valid": true
+        },
+        "error": null,
+        "exists": true,
+        "gid": 0,
+        "groupOrWorldWritable": false,
+        "index": 1,
+        "isHome": false,
+        "links": 4,
+        "mode": "0755",
+        "type": "directory",
+        "uid": 0
+      },
+      {
+        "checks": {
+          "callerOwned": true,
+          "directory": true,
+          "notGroupOrWorldWritable": true,
+          "notSymlink": true,
+          "rootOrCallerOwned": true,
+          "valid": true
+        },
+        "error": null,
+        "exists": true,
+        "gid": 1000,
+        "groupOrWorldWritable": false,
+        "index": 2,
+        "isHome": true,
+        "links": 5,
+        "mode": "0750",
+        "type": "directory",
+        "uid": 1000
+      }
+    ],
+    "checks": {
+      "absolute": true,
+      "canonical": true,
+      "notRoot": true,
+      "safeCharacters": true
+    },
+    "pathSha256": "2c5e5d2f254145b2cdcc57d829afdf3c7ceee2055e05307b9a20164505cbcd6c",
+    "valid": true
+  },
+  "lock": {
+    "checks": {
+      "notGroupOrWorldWritable": false,
+      "openedNotGroupOrWorldWritable": false,
+      "openedRegular": true,
+      "openedRootOrCallerOwned": true,
+      "openedSingleLink": true,
+      "regular": true,
+      "rootOrCallerOwned": true,
+      "singleLink": true,
+      "stableInode": true
+    },
+    "error": null,
+    "exists": true,
+    "gid": 1000,
+    "groupOrWorldWritable": true,
+    "links": 1,
+    "mode": "0664",
+    "openError": null,
+    "readable": true,
+    "type": "regular",
+    "uid": 1000,
+    "valid": false
+  },
+  "notObserved": [
+    "original_transport_environment",
+    "original_bundle_bytes",
+    "original_exception_stage",
+    "original_cleanup_result",
+    "lock_acquisition"
+  ],
+  "schemaVersion": 1,
+  "startedAtUtc": "2026-09-08T08:14:09Z",
+  "state": {
+    "configuration": {
+      "observed": false,
+      "reason": "root_missing_or_not_safe_to_traverse"
+    },
+    "configurationPathSha256": "6871cdd3d0e74434f346e4a08a76de5e10ab58a1bc8de7607e1f389911a35c6a",
+    "configurationSha256": "7a358ba8a8c69d67d5dffcd3f2047967f43c33292b4c4767a9a20a1e02d36278",
+    "observed": true,
+    "root": {
+      "checks": {
+        "valid": null
+      },
+      "error": "missing",
+      "exists": false
+    },
+    "rootPathSha256": "f042c64b0c026b2de202ba7fdf9a04f1d8e924b38d4b687d633d683f491e662d"
+  }
+}
