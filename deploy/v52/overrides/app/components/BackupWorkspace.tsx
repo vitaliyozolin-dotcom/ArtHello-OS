@@ -71,7 +71,7 @@ export function BackupWorkspace({ notify }: { notify: (message: string) => void 
       {data.unreadableCopies > 0 ? <p role="alert">Есть копии с неполными или повреждёнными файлами: {data.unreadableCopies}. Они не включены в список доступных копий.</p> : null}
       {data.history.length ? <div className="branch-list">{data.history.map((item) => <div key={item.id}><div><strong>{formatDate(item.completedAt)}</strong><small>{formatBytes(item.bytes)} · Проверена при создании</small></div></div>)}</div> : <p>После первой успешной проверки здесь появится резервная копия.</p>}
     </article>
-    <div className="settings-boundary"><strong>Что входит в копию</strong><span>Копии хранятся на том же сервере. Дневник, внешние документы и ключи подключений сохраняются отдельно. Для восстановления рабочей системы обратитесь к разработчикам: сначала проверяется копия и совместимость версии.</span></div>
+    <div className="settings-boundary"><strong>Что входит в копию</strong><span>Копия содержит базу данных ArtHello и хранится на том же сервере. Данные и файлы дневника, внешние документы и серверные ключи в эту копию не входят. Для восстановления рабочей системы обратитесь к разработчикам: сначала проверяется копия и совместимость версии.</span></div>
   </div>;
 }
 

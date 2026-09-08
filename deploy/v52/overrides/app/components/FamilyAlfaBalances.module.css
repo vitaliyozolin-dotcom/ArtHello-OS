@@ -1,0 +1,7 @@
+.card { grid-column: 1 / -1; color: var(--text-primary); }
+.card.card header span { font-size: 16px; }
+.card p { margin: 12px; font-size: 16px; line-height: 1.5; color: var(--text-muted); }
+.card article { display: grid; gap: 6px; padding: 12px; border-top: 1px solid var(--border); font-size: 16px; overflow-wrap: anywhere; }
+.card article strong { font-weight: 600; }
+.card article time { color: var(--text-muted); }
+.amount { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
