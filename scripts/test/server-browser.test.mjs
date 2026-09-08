@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { capacity, RESERVE_KIB } from '../../deploy/browser/capacity.mjs';
 import { validateCredentials, validateEmployee, sameSchoolIdentity, requestAllowed, navigationStep, inspectSandbox, selectDeniedProbe } from '../../deploy/browser/flow.mjs';
 import * as browserFlow from '../../deploy/browser/flow.mjs';
+import { retirePreviousBrowserImage, retireCurrentBrowserImage } from '../../deploy/browser/retire-image.mjs';
 
 const employee = { userId: 'fixture-id', isSystemOwner: false, apiRole: 'EMPLOYEE', role: 'viewer', mustChangePassword: false, allowedModules: ['education'] };
 test('capacity reserves expanded import copies, both download copies and host headroom', () => {
@@ -142,4 +145,198 @@ test('natural flow distinguishes employee failures without a second login or sen
     return true;
   });
   assert.equal(fixture.loginAttempts(), 1);
+});
+
+const retiredImage = {
+  id: 'sha256:0763e7e6404c4ecf19b81bdcc236dd815a0210e9bb6b087adec279692cc7701c',
+  source: '5385090d48f4dae29c314dff7ae974d854560940',
+  tag: 'arthello-e2e:5385090d48f4dae29c314dff7ae974d854560940',
+  fingerprint: '5970abba2518f5fc1f3bb27ef2624570e8050cbc606a3cb300f596031c26564e',
+};
+
+function retirementFixture(options = {}) {
+  const calls = [];
+  const githubCalls = [];
+  let removed = false, inspections = 0, referenceChecks = 0, mainChecks = 0;
+  const source = 'b52a5326f650060036d7ccd66a87e8d2d6a5a292';
+  const target = options.current ? { id: 'sha256:' + 'c'.repeat(64), source, tag: 'arthello-e2e:' + source, fingerprint: 'a'.repeat(64) } : retiredImage;
+  const runId = options.current ? 34285119759 : 34283447507;
+  const snapshot = [{ Id: target.id, RepoTags: [target.tag], RepoDigests: [], Config: { User: '1000:1000', Labels: { 'org.arthello.role': 'e2e-browser', 'org.opencontainers.image.revision': target.source } } }];
+  const archive = {
+    id: 10078598718,
+    name: `server-browser-${target.source}-${runId}-1`,
+    size_in_bytes: 640791883,
+    digest: 'sha256:e7a77316e647ba17a8e232d1b060d2c02f73ef2cfbdfe769b99cc01e841fc140',
+    expired: false,
+    expires_at: '2026-09-10T22:00:54Z',
+    workflow_run: { id: runId, repository_id: 1311964413, head_repository_id: 1311964413, head_branch: 'main', head_sha: target.source },
+  };
+  return {
+    calls, githubCalls, target,
+    dependencies: {
+      checkedSource: source,
+      environment: { CHECKED_SOURCE_SHA: source, BROWSER_IMAGE_ID: target.id, EXPECTED_BROWSER_FINGERPRINT: target.fingerprint, BROWSER_ARCHIVE_NAME: archive.name, GITHUB_RUN_ID: String(runId), GITHUB_RUN_ATTEMPT: '1', ...options.environment },
+      now: () => Date.parse('2026-09-09T00:00:00Z'),
+      fingerprint: () => options.fingerprint ?? target.fingerprint,
+      readGitHub: async path => {
+        githubCalls.push(path);
+        if (options.githubFailure) throw new Error('PRIVATE_GITHUB_TOKEN');
+        if (path === '/git/ref/heads/main') {
+          mainChecks++;
+          return { object: { sha: options.mainChanged && mainChecks > 1 ? 'f'.repeat(40) : source } };
+        }
+        assert.equal(path, options.current ? '/actions/runs/34285119759/artifacts?per_page=100' : '/actions/artifacts/10078598718');
+        const value = structuredClone(archive);
+        options.alterArchive?.(value);
+        const response = options.current ? { total_count: 1, artifacts: [value] } : value;
+        options.alterArchiveResponse?.(response);
+        return response;
+      },
+      docker: args => {
+        calls.push(args);
+        if (options.daemonFailure) throw new Error('PRIVATE_DAEMON_ERROR');
+        if (args[0] === 'image' && args[1] === 'ls') {
+          const tagged = args.includes('--filter');
+          if (options.inventoryMalformed) return 'PRIVATE_INVALID_INVENTORY';
+          if (removed || options.absent) return tagged && options.foreignTag ? 'sha256:' + 'f'.repeat(64) + '\n' : '';
+          return target.id + '\n';
+        }
+        if (args[0] === 'image' && args[1] === 'inspect') {
+          if (options.inspectFailure) throw Object.defineProperty(new Error(), 'message', { get() { throw new Error('PRIVATE_EXCEPTION_DETAIL'); } });
+          assert.ok([target.id, target.tag].includes(args[2]));
+          inspections++;
+          const value = structuredClone(snapshot);
+          options.alterImage?.(value, inspections);
+          return JSON.stringify(value);
+        }
+        if (args[0] === 'ps') {
+          assert.deepEqual(args, ['ps', '-a', '-q', '--no-trunc', '--filter', 'ancestor=' + target.id]);
+          referenceChecks++;
+          return options.containerReference || (options.racedContainer && referenceChecks > 1) ? 'c'.repeat(64) + '\n' : '';
+        }
+        assert.deepEqual(args, ['image', 'rm', '--no-prune', target.id]);
+        if (options.removalRefused) throw new Error('PRIVATE_CONFLICT_DETAIL');
+        removed = !options.removalNoEffect;
+        return 'PRIVATE_DAEMON_REMOVAL_OUTPUT';
+      },
+    },
+  };
+}
+
+test('retirement removes only the exact unused reproducible image after fresh identity, artifact and main checks', async () => {
+  const fixture = retirementFixture();
+  assert.deepEqual(await retirePreviousBrowserImage(fixture.dependencies), { kind: 'server-browser-image-retirement', result: 'retired' });
+  assert.deepEqual(fixture.calls.filter(args => args[1] === 'rm'), [['image', 'rm', '--no-prune', retiredImage.id]]);
+  assert.equal(fixture.calls.filter(args => args[1] === 'inspect').length, 4);
+  assert.equal(fixture.calls.filter(args => args[0] === 'ps').length, 2);
+  assert.deepEqual(fixture.githubCalls, ['/git/ref/heads/main', '/actions/artifacts/10078598718', '/git/ref/heads/main']);
+  assert.ok(fixture.calls.slice(-2).every(args => args[1] === 'ls'));
+});
+
+test('retirement is idempotent only after successful ID and tag absence observations', async () => {
+  const fixture = retirementFixture({ absent: true });
+  assert.deepEqual(await retirePreviousBrowserImage(fixture.dependencies), { kind: 'server-browser-image-retirement', result: 'absent' });
+  assert.equal(fixture.calls.length, 2);
+  for (const options of [{ daemonFailure: true }, { inventoryMalformed: true }, { absent: true, foreignTag: true }]) {
+    const denied = retirementFixture(options);
+    const result = await retirePreviousBrowserImage(denied.dependencies);
+    assert.equal(result.result, 'blocked');
+    assert.equal(result.reason, 'retirement_inventory_failed');
+    assert.equal(denied.calls.some(args => args[1] === 'rm'), false);
+  }
+});
+
+test('retirement rejects mismatched images, stopped references, missing recovery evidence and races without broadening deletion', async () => {
+  const cases = [
+    { alterImage: value => { value[0].Id = 'sha256:' + 'f'.repeat(64); } },
+    { alterImage: value => { value[0].RepoTags.push('unrelated:latest'); } },
+    { alterImage: value => { value[0].RepoTags = []; } },
+    { alterImage: value => { value[0].RepoDigests = ['unrelated@sha256:' + 'f'.repeat(64)]; } },
+    { alterImage: value => { value[0].Config.User = '0:0'; } },
+    { alterImage: value => { value[0].Config.Labels['org.arthello.role'] = 'application'; } },
+    { alterImage: value => { value[0].Config.Labels['org.opencontainers.image.revision'] = 'f'.repeat(40); } },
+    { fingerprint: 'f'.repeat(64) },
+    { inspectFailure: true },
+    { containerReference: true },
+    { racedContainer: true },
+    { alterImage: (value, count) => { if (count > 2) value[0].RepoTags.push('new-reference:latest'); } },
+    { mainChanged: true },
+    { githubFailure: true },
+    { alterArchive: value => { value.expired = true; } },
+    { alterArchive: value => { value.expires_at = '2026-09-08T00:00:00Z'; } },
+    { alterArchive: value => { value.expires_at = 'not-a-date'; } },
+    { alterArchive: value => { value.name = 'different-artifact'; } },
+    { alterArchive: value => { value.digest = 'sha256:' + 'f'.repeat(64); } },
+    { alterArchive: value => { value.size_in_bytes = 1; } },
+    { alterArchive: value => { value.workflow_run.id = 1; } },
+    { alterArchive: value => { value.workflow_run.head_sha = 'f'.repeat(40); } },
+  ];
+  for (const options of cases) {
+    const fixture = retirementFixture(options);
+    const result = await retirePreviousBrowserImage(fixture.dependencies);
+    assert.equal(result.result, 'blocked');
+    assert.match(result.reason, /^retirement_[a-z_]+_failed$/);
+    assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+    assert.equal(fixture.calls.some(args => args[1] === 'rm'), false);
+  }
+  const refused = retirementFixture({ removalRefused: true });
+  assert.deepEqual(await retirePreviousBrowserImage(refused.dependencies), { kind: 'server-browser-image-retirement', result: 'blocked', reason: 'retirement_removal_failed' });
+  assert.deepEqual(refused.calls.filter(args => args[1] === 'rm'), [['image', 'rm', '--no-prune', retiredImage.id]]);
+  const ineffective = retirementFixture({ removalNoEffect: true });
+  assert.deepEqual(await retirePreviousBrowserImage(ineffective.dependencies), { kind: 'server-browser-image-retirement', result: 'blocked', reason: 'retirement_removal_verification_failed' });
+  assert.equal(ineffective.calls.filter(args => args[1] === 'rm').length, 1);
+});
+
+test('current retirement requires this verified job output and its recoverable producing artifact', async () => {
+  const fixture = retirementFixture({ current: true });
+  assert.deepEqual(await retireCurrentBrowserImage(fixture.dependencies), { kind: 'server-browser-image-retirement', result: 'retired' });
+  assert.deepEqual(fixture.calls.filter(args => args[1] === 'rm'), [['image', 'rm', '--no-prune', fixture.target.id]]);
+  assert.deepEqual(fixture.githubCalls, ['/git/ref/heads/main', '/actions/runs/34285119759/artifacts?per_page=100', '/git/ref/heads/main']);
+  const partialRerun = retirementFixture({ current: true, environment: { GITHUB_RUN_ATTEMPT: '2' } });
+  assert.equal((await retireCurrentBrowserImage(partialRerun.dependencies)).result, 'retired');
+});
+
+test('current retirement never selects a fallback image after missing verification, foreign identity or unproven artifact', async () => {
+  const cases = [
+    { environment: { BROWSER_IMAGE_ID: '' } },
+    { environment: { BROWSER_IMAGE_ID: retiredImage.id } },
+    { environment: { BROWSER_IMAGE_ID: 'sha256:' + 'd'.repeat(64) } },
+    { environment: { EXPECTED_BROWSER_FINGERPRINT: '' } },
+    { environment: { GITHUB_RUN_ID: '34285119759/../../other' } },
+    { environment: { BROWSER_ARCHIVE_NAME: 'server-browser-' + retiredImage.source + '-34285119759-1' } },
+    { environment: { BROWSER_ARCHIVE_NAME: 'server-browser-b52a5326f650060036d7ccd66a87e8d2d6a5a292-34285119759-2' } },
+    { alterImage: value => { value[0].RepoTags.push('unrelated:latest'); } },
+    { alterImage: value => { value[0].Config.Labels['org.opencontainers.image.revision'] = retiredImage.source; } },
+    { fingerprint: 'f'.repeat(64) },
+    { containerReference: true },
+    { racedContainer: true },
+    { mainChanged: true },
+    { alterArchive: value => { value.workflow_run.head_sha = retiredImage.source; } },
+    { alterArchive: value => { value.workflow_run.id = 34283447507; } },
+    { alterArchive: value => { value.expired = true; } },
+    { alterArchiveResponse: value => { value.total_count = 101; } },
+    { alterArchiveResponse: value => { value.total_count = 2; value.artifacts.push(structuredClone(value.artifacts[0])); } },
+    { alterArchiveResponse: value => { value.total_count = 0; value.artifacts = []; } },
+  ];
+  for (const options of cases) {
+    const fixture = retirementFixture({ current: true, ...options });
+    const result = await retireCurrentBrowserImage(fixture.dependencies);
+    assert.equal(result.result, 'blocked');
+    assert.match(result.reason, /^retirement_[a-z_]+_failed$/);
+    assert.equal(fixture.calls.some(args => args[1] === 'rm'), false);
+  }
+});
+
+test('retirement CLI rejects unknown modes and unverified current output without credentials or Docker', () => {
+  const script = fileURLToPath(new URL('../../deploy/browser/retire-image.mjs', import.meta.url));
+  for (const [args, reason] of [
+    [['--target', 'PRIVATE_TARGET'], 'retirement_arguments_failed'],
+    [['--current', 'PRIVATE_ARGUMENT'], 'retirement_arguments_failed'],
+    [['--current'], 'retirement_current_inputs_failed'],
+  ]) {
+    const result = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: {}, timeout: 5000 });
+    assert.equal(result.status, 2);
+    assert.equal(result.stderr, '');
+    assert.deepEqual(JSON.parse(result.stdout), { kind: 'server-browser-image-retirement', result: 'blocked', reason });
+  }
 });

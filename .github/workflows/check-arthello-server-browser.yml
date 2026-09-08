@@ -145,6 +145,14 @@ jobs:
           persist-credentials: false
           submodules: false
           lfs: false
+      - name: Retire only the exact unused R8 browser image under D079
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          "$PRECHECK_NODE" deploy/browser/retire-image.mjs
       - name: Measure import capacity before downloading the verified archive
         env:
           ARCHIVE_BYTES: ${{ needs.bundle.outputs.archive_bytes }}
@@ -226,3 +234,14 @@ jobs:
           set -Eeuo pipefail
           archive="$RUNNER_TEMP/browser-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/browser.tar.gz"
           rm -f -- "$archive"
+      - name: Retire only this job's verified browser image under D079
+        if: always() && env.BROWSER_IMAGE_ID != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_BROWSER_FINGERPRINT: ${{ needs.bundle.outputs.fingerprint }}
+          BROWSER_ARCHIVE_NAME: ${{ needs.bundle.outputs.archive_name }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          "$PRECHECK_NODE" deploy/browser/retire-image.mjs --current
