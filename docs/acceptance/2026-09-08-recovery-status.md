@@ -1,3 +1,15 @@
+# R2 deployment result and reduced-privilege R3 — 2026-09-08T06:58:21+00:00
+
+All exact M2 main gates passed: Quality `34196009060`, Proof `34196008965`, Verify `34196009029` (724 application tests plus actual relay Docker/Ruby gates).
+
+D064 consumer `34196169336`, job `101964316036`, failed during School repair with `sudo: a password is required` at 2026-09-08T06:47:15Z. The bootstrap calls sudo before reading stdin, creating files or invoking the controller. No School relay/network/state was created by this attempt. Diagnostic, image download/load, secret resolver and ArtHello cutover were skipped. This is a real missing host-root capability, not a build/test failure. R2 is not retried.
+
+The existing School transport previously executed ordinary Docker deployment operations and shared School locking. The successful D058 run `33762398372`, job `100671690779`, used `/var/lock/school-1-11-production.lock` and confirmed remote School sync at 2026-09-03T13:40:58.486Z.
+
+R3 is being prepared with reduced required privileges: existing Docker deployment API, passwd-derived own private state, the existing shared lock opened readonly, a UID1001 read-only relay and no host-root writes/privileged-container bypass. Independent design review accepts this bounded approach; live prerequisites remain checked before mutations. D065/root documents are prepared for planned PR356; no new R3 run or successful SSO is claimed yet.
+
+---
+
 # R2 merged — 2026-09-08 06:46 UTC
 
 PR355 merged as `8d4fc1cb589db8550cc4e7857e1a7537ac771ae5` (M2).
