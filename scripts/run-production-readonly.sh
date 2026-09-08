@@ -24,23 +24,14 @@ source="$(docker inspect "$live" --format '{{index .Config.Labels "arthello.rele
 [[ "$image" =~ ^sha256:[a-f0-9]{64}$ && "$source" =~ ^[a-f0-9]{40}$ ]]
 relative="$("$PRECHECK_NODE" --input-type=module -e 'import {activeRelativePath} from "./scripts/production-readonly.mjs"; console.log(activeRelativePath())')"
 [[ "$relative" =~ ^d1/miniflare-D1DatabaseObject/[a-f0-9]{64}\.sqlite$ ]]
-# Same ordinary UID and exact live open-file identity used by the release gate.
-if ! timeout 15 docker exec -e EXPECTED_FILE="/data/$relative" "$live" sh -ceu '
-  test "$(id -u)" = 1000
-  test "$(sed -n "s/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p" /proc/1/status)" = 1000
-  expected=0; unexpected=0
-  for descriptor in /proc/[0-9]*/fd/*; do
-    [ -e "$descriptor" ] || continue
-    target="$(readlink "$descriptor" 2>/dev/null || true)"
-    case "$target" in
-      "$EXPECTED_FILE"|"$EXPECTED_FILE-wal"|"$EXPECTED_FILE-shm") expected=$((expected+1));;
-      */metadata.sqlite|*/metadata.sqlite-wal|*/metadata.sqlite-shm) ;;
-      /data/d1/miniflare-D1DatabaseObject/*.sqlite*) unexpected=$((unexpected+1));;
-    esac
-  done
-  test "$expected" -gt 0
-  test "$unexpected" -eq 0
-' >/dev/null 2>&1; then echo 'READONLY_BLOCKED=live_file_identity'; exit 2; fi
+# One bounded non-root process; fixed counters/reasons only, never FD targets.
+set +e
+timeout 15 docker exec -i -e EXPECTED_FILE="/data/$relative" "$live" \
+  node --input-type=module - --live-d1-scan < scripts/live-d1-identity.mjs 2>/dev/null
+scan_status=$?
+set -e
+if [[ "$scan_status" -eq 124 ]]; then echo 'READONLY_BLOCKED=identity_scan_timeout'; exit 2; fi
+if [[ "$scan_status" -ne 0 ]]; then echo 'READONLY_BLOCKED=live_file_identity'; exit 2; fi
 printf 'READONLY_LIVE_SOURCE=%s\nREADONLY_IMAGE=%s\n' "$source" "$image"
 backup_mount="$(docker inspect "$live" --format '{{range .Mounts}}{{if eq .Destination "/var/lib/arthello-v52-backup-control"}}present{{end}}{{end}}')"
 if [[ "$backup_mount" = present ]]; then
