@@ -24,7 +24,7 @@ type Data = {
   shifts: Array<{ id: string; employeeEntityId: string; startedAt: string; endedAt: string; rateMinor: number; status: string; role: string }>;
   checks: Array<{ id: string; checkType: string; objectEntityId: string; checkedAt: string; result: string; violation: string; evidence: string; status: string; relatedTaskId: number | null }>;
   entityNames: Record<string, string>;
-  economics: { revenueMinor: number; materialMinor: number; laborMinor: number; profitMinor: number; marginPercent: number };
+  economics: { revenueMinor: number; materialMinor: number | null; laborMinor: number | null; profitMinor: number | null; marginPercent: number | null };
   summary: { products: number; batches: number; urgentBatches: number; planned: number; actual: number; consumed: number; waste: number };
   chain: { purchaseId: string; batchId: string; recipeId: string; productionId: string; shipmentId: string; costId: string; revenueId: string };
   boundary: string;
@@ -49,7 +49,7 @@ const codes: Record<string, string> = {
 const tabs = ["Сегодня", "Партии и склад", "ТТК и меню", "Отгрузки", "Экономика и проверки"] as const;
 type Tab = (typeof tabs)[number];
 const tabItems = tabs.map((id) => ({ id, label: id }));
-const rub = (value: number) => new Intl.NumberFormat("ru-RU", {
+const rub = (value: number | null) => value === null ? "Недостаточно данных" : new Intl.NumberFormat("ru-RU", {
   style: "currency",
   currency: "RUB",
   maximumFractionDigits: 0,
@@ -154,7 +154,7 @@ export function FoodWorkspace({ role, notify, onTasksChanged, onOpenFinance }: {
       <KpiCard label="Произведено" value={data.summary.actual} note={`из ${data.summary.planned} порций`} onClick={() => setTab("Сегодня")} />
       <KpiCard label="Потреблено" value={data.summary.consumed} note={`${data.summary.waste} порций списано`} onClick={() => setTab("Отгрузки")} />
       <KpiCard className="ahFoodKpiWarning" label="Срочные партии" value={data.summary.urgentBatches} note="по сроку годности" onClick={() => setTab("Партии и склад")} />
-      <KpiCard className="ahFoodKpiPositive" label="Прибыль" value={rub(data.economics.profitMinor)} note={`маржа ${data.economics.marginPercent}%`} onClick={() => setTab("Экономика и проверки")} />
+      <KpiCard className="ahFoodKpiPositive" label="Прибыль" value={rub(data.economics.profitMinor)} note={data.economics.marginPercent === null ? "маржа не определена" : `маржа ${data.economics.marginPercent}%`} onClick={() => setTab("Экономика и проверки")} />
     </section>
 
     <div className="ahFoodTabs"><Tabs items={tabItems} value={tab} onChange={setTab} ariaLabel="Разделы питания и производства" /></div>
@@ -197,7 +197,7 @@ export function FoodWorkspace({ role, notify, onTasksChanged, onOpenFinance }: {
     {tab === "Экономика и проверки" ? <div className="ahFoodLayout">
       <Card className="ahFoodPanel ahFoodEconomics">
         <PanelHead eyebrow="Центр результата" title="Прибыльность кухни" meta="отдельный проект" />
-        <div><span><small>Выручка</small><strong>{rub(data.economics.revenueMinor)}</strong></span><span><small>Продукты</small><strong>− {rub(data.economics.materialMinor)}</strong></span><span><small>Смены</small><strong>− {rub(data.economics.laborMinor)}</strong></span><span className="ahFoodProfit"><small>Прибыль</small><strong>{rub(data.economics.profitMinor)}</strong><em>{data.economics.marginPercent}%</em></span></div>
+        <div><span><small>Выручка</small><strong>{rub(data.economics.revenueMinor)}</strong></span><span><small>Продукты</small><strong>− {rub(data.economics.materialMinor)}</strong></span><span><small>Смены</small><strong>− {rub(data.economics.laborMinor)}</strong></span><span className="ahFoodProfit"><small>Прибыль</small><strong>{rub(data.economics.profitMinor)}</strong><em>{data.economics.marginPercent === null ? "не определена" : `${data.economics.marginPercent}%`}</em></span></div>
         <Button variant="secondary" onClick={onOpenFinance}>Открыть операции в финансах</Button>
       </Card>
       <Card className="ahFoodPanel">

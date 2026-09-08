@@ -192,6 +192,9 @@ report.summary = {
 };
 await fs.writeFile(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2) + '\n');
 if (report.failures.length) {
+  for (const { viewport, failure } of report.failures) {
+    console.error(`Visual Acceptance failure: viewport=${viewport} rule=${failure}`);
+  }
   console.error(`Visual Acceptance: FAILED (${report.failures.length}). Evidence: ${OUT}`);
   process.exit(1);
 }

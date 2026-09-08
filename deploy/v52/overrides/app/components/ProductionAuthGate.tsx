@@ -2,6 +2,7 @@
 
 import { createContext, FormEvent, ReactNode, useContext, useEffect, useState } from "react";
 import { clearDashboardBrowserLayouts } from "../../lib/dashboard-layout";
+import { startSessionRefresh } from "../../lib/session-refresh";
 import "./ProductionAuthGate.css";
 
 export type AuthUser = {
@@ -49,6 +50,26 @@ export default function ProductionAuthGate({ children }: { children: ReactNode }
       .catch(() => setUser(null))
       .finally(() => setLoading(false));
   }, []);
+
+  const activeUserId = user?.userId;
+  useEffect(() => {
+    if (!activeUserId) return;
+    return startSessionRefresh<AuthUser>({
+      request: () => fetchWithTimeout("/api/auth/me", { cache: "no-store", credentials: "same-origin" }),
+      onAuthenticated: (next) => setUser((current) => current?.userId === activeUserId
+        ? (JSON.stringify(current) === JSON.stringify(next) ? current : next)
+        : current),
+      onExpired: () => {
+        clearUserDashboardLayouts(activeUserId);
+        setUser(null);
+        setNotice("Права доступа или сессия изменились. Войдите снова.");
+      },
+      windowTarget: window,
+      documentTarget: document,
+      schedule: (callback, delay) => window.setInterval(callback, delay),
+      cancel: (timer) => window.clearInterval(timer as number),
+    });
+  }, [activeUserId]);
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

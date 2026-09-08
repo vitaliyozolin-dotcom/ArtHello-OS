@@ -1,0 +1,27 @@
+.ahFeedbackTrigger{position:fixed;right:20px;bottom:84px;z-index:35;border:1px solid #bac7d4;border-radius:24px;padding:11px 17px;background:#fff;color:#23455b;box-shadow:0 4px 18px #18384f1a;font-family:inherit;font-size:13px;font-weight:600;line-height:1.2;cursor:pointer}
+.ahFeedbackDialog{box-sizing:border-box;width:min(640px,calc(100vw - 32px));max-height:calc(100dvh - 48px);margin:auto;padding:24px;border:1px solid #dce4e8;border-radius:20px;color:#193749;background:#fff;box-shadow:0 18px 80px #13273440;overflow:auto}
+.ahFeedbackDialog::backdrop{background:#102b3b66}
+.ahFeedbackDialog *{box-sizing:border-box}
+.ahFeedbackDialog header,.ahFeedbackDialog nav,.ahFeedbackDialog footer,.ahFeedbackMeta{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ahFeedbackDialog header p{font-size:12px;color:#617482;margin:0 0 4px}
+.ahFeedbackDialog h2{font-size:24px;margin:0}
+.ahFeedbackDialog header>button{font-size:24px}
+.ahFeedbackDialog nav{justify-content:flex-start;flex-wrap:wrap;margin:24px 0 20px}
+.ahFeedbackDialog button{border:1px solid #cbd9e1;border-radius:10px;padding:10px 13px;background:#fff;color:inherit;cursor:pointer;font:inherit}
+.ahFeedbackDialog button[aria-pressed=true],.ahFeedbackDialog button[type=submit]{background:#234d64;color:#fff;border-color:#234d64}
+.ahFeedbackDialog button:disabled{opacity:.55;cursor:default}
+.ahFeedbackDialog label{display:grid;gap:7px;font-size:14px;margin:16px 0}
+.ahFeedbackDialog input,.ahFeedbackDialog textarea,.ahFeedbackDialog select{width:100%;padding:11px;border:1px solid #bacbd7;border-radius:9px;background:#fff;color:inherit;font:inherit}
+.ahFeedbackDialog textarea{resize:vertical;min-height:120px}
+.ahFeedbackDialog :focus-visible,.ahFeedbackTrigger:focus-visible{outline:3px solid #467ba5;outline-offset:3px}
+.ahFeedbackHint,.ahFeedbackEmpty{font-size:13px;line-height:1.5;color:#617482}
+.ahFeedbackDialog footer{justify-content:flex-end;margin-top:24px}
+.ahFeedbackError{color:#8d2525;background:#fff1f0;border-radius:10px;padding:12px;line-height:1.5}
+.ahFeedbackNotice{color:#205942;background:#edf8f1;border-radius:10px;padding:12px;line-height:1.5}
+.ahFeedbackListActions{display:flex;justify-content:flex-end}
+.ahFeedbackCard{padding:20px 0;border-bottom:1px solid #e0e8ed}
+.ahFeedbackCard h3{font-size:17px;margin:12px 0 8px;overflow-wrap:anywhere}
+.ahFeedbackMeta,.ahFeedbackAuthor{font-size:12px;color:#617482}
+.ahFeedbackBody{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.6}
+.ahFeedbackStatus{font-size:13px;font-weight:600}
+@media(max-width:760px){.ahFeedbackTrigger{right:12px;bottom:calc(144px + env(safe-area-inset-bottom));padding:10px 14px}.ahFeedbackDialog{width:calc(100vw - 20px);padding:18px;max-height:calc(100dvh - 24px)}.ahFeedbackDialog nav{gap:6px}.ahFeedbackDialog nav button{font-size:12px;padding:9px}.ahFeedbackMeta{align-items:flex-start;flex-direction:column;gap:4px}}

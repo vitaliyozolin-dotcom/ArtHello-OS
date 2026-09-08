@@ -2,6 +2,7 @@ import { Miniflare, Log, LogLevel } from "miniflare";
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { createTochkaTransport } from "./tochka-transport.mjs";
+import { createBackupTransport } from "./backup-transport.mjs";
 
 const applicationRoot = process.cwd();
 const dataRoot = process.env.ARTHELLO_D1_PATH || "/data/d1";
@@ -57,8 +58,9 @@ const runtime = new Miniflare({
     OPENAI_OCR_MODEL: openAiOcrModel,
     INTEGRATION_CREDENTIALS_KEY: integrationCredentialsKey,
     TBANK_EGRESS_IP: process.env.TBANK_EGRESS_IP || "",
+    ALFACRM_IMPORT_ENABLED: process.env.ALFACRM_IMPORT_ENABLED || "",
   },
-  serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport() },
+  serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport(), BACKUP_TRANSPORT: createBackupTransport() },
   d1Databases: { DB: "arthello-production" },
   d1Persist: dataRoot,
   assets: {

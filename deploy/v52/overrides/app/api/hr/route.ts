@@ -1,23 +1,34 @@
-import { asc, eq } from "drizzle-orm";
+import { scopeHrReadTables } from "../../../lib/hr-read-scope";
+import { canAccessApi } from "../../../lib/access-policy";
+import { and, asc, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb, getSystemDataMode } from "../../../db";
-import { entities, financialOperations, hrAccesses, hrCandidates, hrDevelopment, hrEmployees, hrInterviews, hrOnboarding, hrRewards, hrVacancies, organizationBranches, workflowDocuments } from "../../../db/schema";
+import { entities, financialOperations, hrAccesses, hrCandidates, hrDevelopment, hrEmployees, hrInterviews, hrOnboarding, hrRewards, hrVacancies, organizationBranches, userBranchAccess, workflowDocuments } from "../../../db/schema";
 import { accessAllowed, candidateFunnel } from "../../../lib/hr";
 import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
 import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
-const readable = new Set(["OWNER","DIRECTOR","REPRESENTATIVE","HR"]);
 export async function GET(request:Request){
   let context;
   try{context=await getAuthenticatedRequestContext(request)}catch{return Response.json({error:"Сервис авторизации временно недоступен"},{status:503})}
   if(!context) return Response.json({error:"Требуется вход"},{status:401});
-  if(!readable.has(context.apiRole))return Response.json({error:"Нет доступа к HR-контуру"},{status:403});
+  if(!canAccessApi(context.auth.user, "/api/hr", "GET"))return Response.json({error:"Нет доступа к HR-контуру"},{status:403});
   try{
     await ensureCoreTables();const db=getDb(),mode=await getSystemDataMode();
-    const [vacancyRows,candidateRows,interviewRows,employeeRows,onboardingRows,developmentRows,rewardRows,accessRows,rawEntityRows,documentRows,allTasks,operationRows,branchRows]=await Promise.all([
+    let [vacancyRows,candidateRows,interviewRows,employeeRows,onboardingRows,developmentRows,rewardRows,accessRows,rawEntityRows,documentRows,allTasks,operationRows,branchRows]=await Promise.all([
       db.select().from(hrVacancies),db.select().from(hrCandidates).orderBy(asc(hrCandidates.createdAt)),db.select().from(hrInterviews).orderBy(asc(hrInterviews.scheduledAt)),
       db.select().from(hrEmployees),db.select().from(hrOnboarding),db.select().from(hrDevelopment).orderBy(asc(hrDevelopment.eventDate)),db.select().from(hrRewards),db.select().from(hrAccesses),
       db.select({id:entities.id,displayName:entities.displayName,status:entities.status,metadata:entities.metadata,sourceSystem:entities.sourceSystem,dataQuality:entities.dataQuality}).from(entities),db.select().from(workflowDocuments),selectVisibleTasks(db,context),db.select().from(financialOperations),db.select().from(organizationBranches).where(eq(organizationBranches.status,"Активен")).orderBy(asc(organizationBranches.sortOrder)),
     ]);
+    const unrestrictedOwner=context.apiRole==="OWNER"&&context.auth.user.isSystemOwner;
+    const branchGrants=unrestrictedOwner?[]:context.auth.user.isAdministrative
+      ? branchRows.map(row=>({branchId:row.id}))
+      : await db.select({branchId:userBranchAccess.branchId}).from(userBranchAccess)
+        .innerJoin(organizationBranches,eq(organizationBranches.id,userBranchAccess.branchId))
+        .where(and(eq(userBranchAccess.userId,context.appUserId),eq(organizationBranches.status,"Активен")));
+    ({vacancyRows,candidateRows,interviewRows,employeeRows,onboardingRows,developmentRows,rewardRows,accessRows,rawEntityRows,documentRows,operationRows,branchRows}=scopeHrReadTables(
+      {vacancyRows,candidateRows,interviewRows,employeeRows,onboardingRows,developmentRows,rewardRows,accessRows,rawEntityRows,documentRows,operationRows,branchRows},
+      {unrestrictedOwner,allowedBranchIds:branchGrants.map(row=>row.branchId)}));
+    if(!unrestrictedOwner)allTasks=allTasks.filter(task=>employeeRows.some(employee=>employee.id===task.sourceId));
     const visible=(...values:string[])=>mode!=="empty"||values.every(value=>!/(^|[-_])(T|TEST)([-_]|$)/i.test(value));
     const vacancies=vacancyRows.filter(x=>visible(x.id,x.positionId,x.sourceType));
     const candidates=candidateRows.filter(x=>visible(x.id,x.entityId,x.vacancyId));
@@ -48,6 +59,7 @@ export async function GET(request:Request){
       documents,tasks:tasksForEmployees,payroll,funnel:candidateFunnel(candidates),
       summary:{openVacancies:vacancies.filter(x=>x.status==="В работе").length,candidates:candidates.length,activeEmployees:employees.filter(x=>x.status==="Работает").length,revokedAccesses:accesses.filter(x=>!accessAllowed(employees.find(e=>e.id===x.employeeId)?.status??"",x.status)).length},
       chain:{vacancyId:chainVacancy?.id??"",candidateId:chainCandidate?.id??"",interviewId:chainInterview?.id??"",employeeId:linkedEmployee?.id??"",contractId:linkedEmployee?.contractId??"",positionId:linkedEmployee?.positionId??"",accessId:chainAccess?.id??"",onboardingId:chainOnboarding?.id??"",payrollId:chainPayroll?.id??"",evaluationId:chainEvaluation?.id??""},
-      boundary:"Карточка сотрудника создаётся только в «Команде» — вручную или контролируемым импортом. Импорт не выдаёт доступы: сотрудник появляется в «Настройки → Пользователи» со статусом «Доступ не выдан»."});
+      scopeBoundary:unrestrictedOwner?"":"Показаны сотрудники только разрешённых действующих филиалов. Финансовые операции и документы скрыты: их отдельная область доступа ещё не подтверждена.",
+      boundary:!unrestrictedOwner?"Показаны сотрудники разрешённых действующих филиалов. Финансовые операции и документы скрыты: отдельная область доступа ещё не подтверждена.":"Карточка сотрудника создаётся только в «Команде» — вручную или контролируемым импортом. Импорт не выдаёт доступы: сотрудник появляется в «Настройки → Пользователи» со статусом «Доступ не выдан»."});
   }catch(error){return Response.json({error:error instanceof Error&&error.message.includes("D1 binding")?"HR-база ещё не подключена":"Не удалось загрузить HR"},{status:503})}
 }

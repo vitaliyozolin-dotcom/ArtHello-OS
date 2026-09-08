@@ -1,11 +1,13 @@
-import { asc } from "drizzle-orm";
+import { assignedActiveBranchScope, requiresAssignedReadScope } from "../../../lib/section-read-scope";
+import { scopeStrategyRows } from "../../../lib/strategy-read-scope";
+import { canAccessApi } from "../../../lib/access-policy";
+import { asc, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
-import { businessEvents, eventParticipants, strategyDeviations, strategyGoals, strategyInitiatives, strategyKpis, strategyProjects, strategyResults } from "../../../db/schema";
+import { organizationBranches, userBranchAccess, businessEvents, eventParticipants, strategyDeviations, strategyGoals, strategyInitiatives, strategyKpis, strategyProjects, strategyResults } from "../../../db/schema";
 import { eventPortfolio, projectBudget } from "../../../lib/strategy";
 import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
 import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
-const roles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "PROJECTS", "FINANCE"]);
 
 export async function GET(request: Request) {
   let context;
@@ -15,11 +17,11 @@ export async function GET(request: Request) {
     return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
   }
   if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  if (!roles.has(context.apiRole)) return Response.json({ error: "Нет доступа к стратегии и проектам" }, { status: 403 });
+  if (!canAccessApi(context.auth.user, "/api/strategy", "GET")) return Response.json({ error: "Нет доступа к стратегии и проектам" }, { status: 403 });
   try {
     await ensureCoreTables();
     const db = getDb();
-    const [goals, kpis, initiatives, projects, events, participants, results, deviations, allTasks] = await Promise.all([
+    let [goals, kpis, initiatives, projects, events, participants, results, deviations, allTasks] = await Promise.all([
       db.select().from(strategyGoals),
       db.select().from(strategyKpis),
       db.select().from(strategyInitiatives),
@@ -30,6 +32,16 @@ export async function GET(request: Request) {
       db.select().from(strategyDeviations),
       selectVisibleTasks(db, context),
     ]);
+    const scopedRead=requiresAssignedReadScope(context.auth.user,"/api/strategy");
+    if(scopedRead){
+      const [branchRows,grants]=await Promise.all([
+        db.select().from(organizationBranches),
+        db.select({branchId:userBranchAccess.branchId}).from(userBranchAccess).where(eq(userBranchAccess.userId,context.appUserId)),
+      ]);
+      const scope=assignedActiveBranchScope(context.auth.user,branchRows,grants);
+      ({goals,kpis,initiatives,projects,events,participants,results,deviations,allTasks}=scopeStrategyRows(
+        {goals,kpis,initiatives,projects,events,participants,results,deviations,allTasks},scope.branchIds));
+    }
     const project = projects[0];
     const initiative = (project ? initiatives.find((item) => item.id === project.initiativeId) : undefined) ?? initiatives[0];
     const goal = (project ? goals.find((item) => item.id === project.goalId) : undefined) ?? (initiative ? goals.find((item) => item.id === initiative.goalId) : undefined) ?? goals[0];
@@ -38,6 +50,7 @@ export async function GET(request: Request) {
     const deviation = (project ? deviations.find((item) => item.projectId === project.id) : undefined) ?? (kpi ? deviations.find((item) => item.kpiId === kpi.id) : undefined) ?? deviations[0];
 
     return Response.json({
+      scopeBoundary:scopedRead?"Показаны только проекты с подтверждённой принадлежностью разрешённым действующим филиалам. Записи без такой привязки скрыты.":"",
       goals,
       kpis,
       initiatives,
@@ -67,7 +80,7 @@ export async function GET(request: Request) {
         deviationId: deviation?.id ?? "",
         decision: deviation?.decision ?? "",
       },
-      boundary: "Цели, KPI, инициативы, проекты, события и результаты показываются только после сохранения или подтверждённого импорта.",
+      boundary: scopedRead ? "Показаны только проекты, связанные с разрешёнными действующими филиалами. Записи без подтверждённой привязки скрыты." : "Цели, KPI, инициативы, проекты, события и результаты показываются только после сохранения или подтверждённого импорта.",
     });
   } catch (error) {
     return Response.json({ error: error instanceof Error && error.message.includes("D1 binding") ? "База проектов ещё не подключена" : "Не удалось загрузить стратегию" }, { status: 503 });

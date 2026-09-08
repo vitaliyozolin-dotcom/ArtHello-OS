@@ -8,6 +8,13 @@ on:
       - DECISIONS.md
       - .github/workflows/deploy-arthello-direct-38-55.yml
       - .github/workflows/verify-arthello-v52.yml
+      - .github/workflows/deploy-arthello-recovery-20260908.yml
+      - .github/scripts/check-recovery-release-contract.rb
+      - .github/scripts/check-school-live-acceptance.py
+      - .github/scripts/d063-replay-guard.py
+      - .github/scripts/test-d063-release-gates.py
+      - .github/scripts/school-sso-readonly-diagnostic.sh
+      - .github/scripts/d063-activation-state.py
   push:
     branches: [main]
     paths:
@@ -16,6 +23,13 @@ on:
       - DECISIONS.md
       - .github/workflows/deploy-arthello-direct-38-55.yml
       - .github/workflows/verify-arthello-v52.yml
+      - .github/workflows/deploy-arthello-recovery-20260908.yml
+      - .github/scripts/check-recovery-release-contract.rb
+      - .github/scripts/check-school-live-acceptance.py
+      - .github/scripts/d063-replay-guard.py
+      - .github/scripts/test-d063-release-gates.py
+      - .github/scripts/school-sso-readonly-diagnostic.sh
+      - .github/scripts/d063-activation-state.py
 
 permissions:
   contents: read
@@ -331,6 +345,12 @@ jobs:
           ' .github/workflows/deploy-arthello-direct-38-55.yml
           printf 'ARTHELLO_V52_SOURCE_SHA=%s\n' "$EXPECTED_SHA"
 
+      - name: Verify D063 recovery release boundary
+        run: |
+          set -Eeuo pipefail
+          ruby .github/scripts/check-recovery-release-contract.rb
+          python3 -I .github/scripts/test-d063-release-gates.py
+
       - name: Validate release files without exposing data
         run: |
           set -Eeuo pipefail
@@ -346,7 +366,7 @@ jobs:
           grep -F 'SCHOOL_DIARY_ALLOWED_ORIGINS' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport() }' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport(), BACKUP_TRANSPORT: createBackupTransport() }' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
           grep -F 'return transport.fetch(input, { ...init, redirect: "manual" });' deploy/v52/overrides/app/api/integration-actions/route.ts >/dev/null
           test -s deploy/v52/overrides/production/tochka-transport.mjs
           grep -F 'const responseBody = await readBoundedResponseBody(upstream);' deploy/v52/overrides/production/tochka-transport.mjs >/dev/null

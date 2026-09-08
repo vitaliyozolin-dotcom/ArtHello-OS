@@ -63,6 +63,8 @@ const withOwner = (...roles: Exclude<ApiRole, "OWNER">[]) => ["OWNER", ...roles]
 const allRoles = [...API_ROLES];
 
 export const API_RULES: readonly ApiRule[] = [
+  { prefix: "/api/integrations/alfacrm", read: withOwner("DIRECTOR", "INTEGRATIONS", "FINANCE", "ACCOUNTING"), write: withOwner("DIRECTOR", "INTEGRATIONS") },
+  { prefix: "/api/settings/backups", read: withOwner(), write: withOwner() },
   { prefix: "/api/dashboard-layout", read: allRoles, write: allRoles },
   { prefix: "/api/settings/temporary-credential", read: [], write: withOwner() },
   // Every signed-in user may save only their own navigation preferences. All

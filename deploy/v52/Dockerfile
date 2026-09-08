@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 # The guarded production reset is orchestrated and post-verified by the pinned workflow release.
 FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS application
-ENV CI=1
+ENV CI=1 ARTHELLO_BACKUP_REQUIRE_UNIX=1
 WORKDIR /app
 COPY deploy/v52/arthello-sites-v52-source.tar.gz.b64.part-* /tmp/arthello-source-parts/
 COPY deploy/v44/overrides/ /tmp/arthello-overrides/
@@ -18,6 +18,8 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* |
     && node /app/scripts/patch-system-content-legal.mjs \
     && node /app/scripts/patch-system-analytics-readiness.mjs \
     && node /app/scripts/patch-system-operational-modules.mjs \
+    && node /app/scripts/patch-alfacrm-staged-integration.mjs \
+    && node /app/scripts/patch-alfacrm-style-import.mjs \
     && node /app/scripts/patch-tochka-customer-permission-fallback.mjs \
     && node /app/scripts/patch-tochka-multi-company-selection.mjs \
     && node /app/scripts/patch-tochka-statement-array-response.mjs \
@@ -29,10 +31,14 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* |
     && node /app/scripts/patch-tochka-finance-bank-visibility.mjs \
     && node /app/scripts/patch-safe-json-responses.mjs \
     && node /app/scripts/patch-school-sso-entry.mjs \
+    && node /app/scripts/patch-css-budget-shell-split.mjs \
     && node /app/scripts/verify-system-wide-operational-shells.mjs \
     && echo "e78978c13431d32a0db2db25da73f24fd6245703aa14d4cb3ec34647324f6f40  /app/db/index.ts" | sha256sum -c - \
     && node /app/scripts/patch-finance-operation-allocation.mjs \
     && node /app/scripts/patch-finance-operation-allocation-css-scope.mjs \
+    && node /app/scripts/patch-tochka-pending-lifecycle.mjs \
+    && node /app/scripts/patch-tochka-autosync.mjs \
+    && node /app/scripts/patch-developer-feedback.mjs \
     && rm -rf /tmp/arthello-overrides /tmp/arthello-v52-overrides \
     && ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
     && grep -q 'invoke_user_worker_ahead_of_assets: false' /app/production/runtime-server.mjs \
@@ -51,6 +57,8 @@ WORKDIR /app
 COPY --from=application /app/dist /app/dist
 COPY --from=application /app/production/runtime-server.mjs /app/production/runtime-server.mjs
 COPY --from=application /app/production/tochka-transport.mjs /app/production/tochka-transport.mjs
+COPY --from=application /app/production/backup-transport.mjs /app/production/backup-transport.mjs
+COPY --from=application /app/production/tochka-autosync-timer.mjs /app/production/tochka-autosync-timer.mjs
 COPY --from=runtime-dependencies /runtime/node_modules /app/node_modules
 COPY deploy/v52/certificates/russian-trusted-root-ca.pem /app/production/russian-trusted-root-ca.pem
 RUN node --input-type=module -e "import { readFileSync } from 'node:fs'; import { X509Certificate } from 'node:crypto'; const certificate = new X509Certificate(readFileSync(process.env.NODE_EXTRA_CA_CERTS)); const expected = 'D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31'; if (certificate.fingerprint256 !== expected || !certificate.ca || certificate.subject !== certificate.issuer || !certificate.checkIssued(certificate) || !certificate.verify(certificate.publicKey) || Date.parse(certificate.validTo) <= Date.now()) process.exit(1);" \

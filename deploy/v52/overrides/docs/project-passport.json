@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "Рабочий worker → Node‑транспорт Точки",
+    "name": "Выпуск шести исправлений через отдельную машину сборки",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -165,7 +165,12 @@
       "D-058 опубликован: production run 33762398372 завершён success, активен merge SHA 7e926f4c29aa7e3c3208a55451db035714861e28, Node TLS egress подтверждён ответом 403",
       "IMG_9996(2)/IMG_9997(2) подтверждают: после D-058 реальный запуск снова завершился общей ошибкой «Не удалось связаться с Точкой»",
       "Точная версия Miniflare 4.20260515.0 воспроизводит причину: workerd отклоняет redirect:error до вызова function-valued service binding; с redirect:manual внутренний hop достигает Node, где сохраняется redirect:error",
-      "Регрессия D-059 выполняет фактический Miniflare service-binding smoke, проверку таймаута до полного чтения тела и ограничение ответа 2 000 000 байт"
+      "Регрессия D-059 выполняет фактический Miniflare service-binding smoke, проверку таймаута до полного чтения тела и ограничение ответа 2 000 000 байт",
+      "2026-09-08: владелец явно выбрал GitHub + собственную машину сборки; миграция в GitVerse приостановлена",
+      "2026-09-08: main 9e4c49161e643997fe821a91b84c60c6e38ede33 и пять PR348–352 сохранены; новая production-версия не опубликована",
+      "2026-09-08: свежий вход владельца в ArtHello и Education успешен; School вернул central_denied без reason; требуется readonly callback диагностика",
+      "2026-09-08: отдельно подготовлены кандидат планировщика Точки, backup UI/bridge, общая политика модулей, AlfaCRM corrections и isolated builder; проверка общего кандидата продолжается",
+      "2026-09-08: свежий PR353 прошёл hosted Verify34189642144 и Quality34189642189; приватный image artifact10041764058 156071423bytes создан. Прежнюю quota/storage блокировку нельзя считать текущей; Proof34189642216 требует исправления visual/evidence. Текущий выпуск продолжается через доступные проверки, отдельный builder сохранён в PR353."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
@@ -410,8 +415,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "опубликовать D-059: использовать redirect:manual только на внутреннем worker → service binding hop, сохранить запрет redirects в Node и закрыть зависание/неограниченное тело ответа",
-    "evidence": "8/8 целевых transport/service-binding тестов, lint и production build; потоковый JSON полностью читается через Miniflare, HTTP 204 сохраняется без ложного 502; exact-SHA hosted gates, Node TLS preflight, изолированный clone, backup-first cutover, rollback guards, public health и повторная проверка владельцем"
+    "result": "Завершить объединённый кандидат codex/recovery-release-20260908, пройти доступные hosted gates, получить безопасную School callback диагностику и выпустить через новый защищённый consumer; подготовка собственного builder остаётся в PR353",
+    "evidence": "Exact SHA/tree, продуктовые tests/lint/build, Quality/Proof/Verify, приватный immutable image/provenance, изолированный clone и проверенный backup до cutover, rollback и свежая живая приёмка шести сценариев"
   },
   "decisionLog": [
     {
@@ -1772,6 +1777,178 @@
           "due": "после production health D-059",
           "evidence_required": "либо реальные компании, счета, остатки, выписки и проведённые операции, либо конкретный HTTP-ответ банка о ключе/правах без общей транспортной ошибки",
           "status": "open"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — явное поручение в текущем чате",
+      "approved_at": "2026-09-08",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска и живой приёмки",
+      "affected_stages": [
+        4,
+        7,
+        16,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Поручение владельца от 2026-09-08 вернуться к GitHub + собственной машине сборки и выложить все исправления в prod",
+      "decision_id": "DEC-2026-09-08-71",
+      "question": "Как выпустить подготовленные исправления после исчерпания GitHub hosted минут?",
+      "statement": "D-061: сохранить GitHub и проверять точный release-кандидат на отдельной одноразовой машине без production полномочий; передавать только проверенный immutable image по приватному каналу.",
+      "context": "Hosted jobs были заблокированы квотой; существующий self-hosted исполнитель находится на production. Пользователь выбрал собственную сборочную машину.",
+      "rationale": "Сохраняет историю и исходные проверки, отделяет сборку от production и не требует миграции GitVerse.",
+      "evidence": [
+        "Явный выбор владельца",
+        "Подготовлен manual workflow и bootstrap; фактический runner ещё не подключён"
+      ],
+      "assumptions": [
+        "Доступная отдельная VM и artifact transport пока не подтверждены"
+      ],
+      "dependencies": [
+        "D-040",
+        "D-061",
+        "Внешняя изоляция VM",
+        "Runner registration",
+        "Private image delivery"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Запустить PR-код на production runner",
+          "reason": "Docker socket даёт production capability; это не отдельная машина сборки",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Подключить внешне изолированный builder и проверенную приватную доставку",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "до production cutover",
+          "evidence_required": "provider identity, network/TTL proof, exact SHA gate run и проверенный image",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — явное поручение в текущем чате",
+      "approved_at": "2026-09-08",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска и живой приёмки",
+      "affected_stages": [
+        4,
+        7,
+        16,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Поручение владельца от 2026-09-08 вернуться к GitHub + собственной машине сборки и выложить все исправления в prod",
+      "decision_id": "DEC-2026-09-08-72",
+      "question": "Как продолжать выписки Точки самостоятельно без открытой страницы?",
+      "statement": "D-062: ограниченный внутренний runtime-планировщик INT-T-TOCHKA использует только сохранённые подтверждённые настройки, lease, credentialGeneration и устойчивые IDs; включается только у production.",
+      "context": "Владелец требует реальные счета и реестр для ДДС; ожидание формирования выписок не должно зависеть от ручной повторной кнопки.",
+      "rationale": "Сохраняет банковский факт и безопасно продолжает pending после задержки/перезапуска без дублей.",
+      "evidence": [
+        "89 целевых тестов кандидата Точки прошли; живая приёмка ещё не выполнена"
+      ],
+      "assumptions": [
+        "Сохранённые ключ/компания действительны; это подтверждается только банком"
+      ],
+      "dependencies": [
+        "D-060",
+        "D-062",
+        "PR351",
+        "Production-only scheduler flag"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/351"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Включить scheduler у clone с копией production БД",
+          "reason": "Копия не должна совершать реальные банковские вызовы",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Сверить автоматический импорт и повтор без дублей с ответом банка",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "после разрешённого cutover",
+          "evidence_required": "counts/sums совпадают, pending продолжен, bank fact и ручная классификация сохранены",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — явное поручение в текущем чате",
+      "approved_at": "2026-09-08",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска и живой приёмки",
+      "affected_stages": [
+        4,
+        7,
+        16,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Поручение владельца от 2026-09-08 вернуться к GitHub + собственной машине сборки и выложить все исправления в prod",
+      "decision_id": "DEC-2026-09-08-73",
+      "question": "Как использовать фактически доступный hosted build для текущего выпуска, сохранив границы production?",
+      "statement": "D-063: отдельный exact-PR354 consumer принимает только проверенный hosted immutable image; перед изменениями получает read-only School diagnostic и настоящее свежее browser SSO evidence. Старый D-059 не переиспользуется.",
+      "context": "Свежие Verify и Quality PR353 и private artifact upload прошли; прежняя квота больше не является текущим доказанным blocker. PR354 открыт для объединённых исправлений.",
+      "rationale": "Продолжает прямо разрешённый владельцем выпуск через доступную сборку без PR-кода на production; сохраняет backup-first, clone и доказательства реальных сценариев.",
+      "evidence": [
+        "PR353 Verify34189642144 и Quality34189642189 SUCCESS; private artifact10041764058 сохранён",
+        "PR354 initial head49d17d65d1b39d50b9d4d1a8ae9eb24a511c9cbf; local698PASS/2explicitSKIP, build/lintPASS",
+        "Proof34192125115 SUCCESS, включая visual acceptance; evidence artifact10042587534",
+        "Production deployment и School SSO ещё не выполнены/не приняты"
+      ],
+      "assumptions": [
+        "School callback category ещё требует production read-only diagnostic",
+        "Окончательный consumer и activation marker проходят независимый review"
+      ],
+      "dependencies": [
+        "D-040",
+        "D-061",
+        "D-062",
+        "D-063",
+        "Exact source Quality/Proof/Verify",
+        "Private immutable artifact",
+        "Natural School SSO acceptance"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/354",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34192125115"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Объявить выпуск завершённым после успешного build/health",
+          "reason": "Это не доказывает School SSO, реальные банк/Alfa синхронизации и доступы",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Завершить independent review, exact gates, диагностику School и guarded cutover с последующей живой приёмкой",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "release receipt, сохранность данных, естественный SSO и подтверждённые шесть сценариев",
+          "status": "in_progress"
         }
       ]
     }

@@ -1,11 +1,12 @@
-import { asc } from "drizzle-orm";
+import { assignedActiveBranchScope, requiresAssignedReadScope } from "../../../lib/section-read-scope";
+import { canAccessApi } from "../../../lib/access-policy";
+import { asc, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
-import { entities, legalChecks, legalContracts, legalContractTextVersions, legalDocumentItems, legalResponsibilityZones } from "../../../db/schema";
+import { organizationBranches, userBranchAccess, entities, legalChecks, legalContracts, legalContractTextVersions, legalDocumentItems, legalResponsibilityZones } from "../../../db/schema";
 import { contractUtilization, missingRequired } from "../../../lib/legal";
 import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
 import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
-const roles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "LEGAL", "FINANCE"]);
 const electronicVersionReaders = new Set(["OWNER", "LEGAL"]);
 const privateHeaders = {
   "cache-control": "private, no-store, max-age=0",
@@ -21,11 +22,11 @@ export async function GET(request: Request) {
     return json({ error: "Сервис авторизации временно недоступен" }, 503);
   }
   if (!context) return json({ error: "Требуется вход" }, 401);
-  if (!roles.has(context.apiRole)) return json({ error: "Нет доступа к юридическому контуру" }, 403);
+  if (!canAccessApi(context.auth.user, "/api/legal", "GET")) return json({ error: "Нет доступа к юридическому контуру" }, 403);
   try {
     await ensureCoreTables();
     const db = getDb();
-    const [contracts, documents, electronicVersions, zones, checks, entityRows, allTasks] = await Promise.all([
+    let [contracts, documents, electronicVersions, zones, checks, entityRows, allTasks] = await Promise.all([
       db.select().from(legalContracts).orderBy(asc(legalContracts.validUntil)),
       db.select().from(legalDocumentItems).orderBy(asc(legalDocumentItems.stableId)),
       electronicVersionReaders.has(context.apiRole)
@@ -46,6 +47,19 @@ export async function GET(request: Request) {
       db.select({ id: entities.id, displayName: entities.displayName }).from(entities),
       selectVisibleTasks(db, context),
     ]);
+    const scopedRead=requiresAssignedReadScope(context.auth.user,"/api/legal");
+    if(scopedRead){
+      const [branchRows,grants]=await Promise.all([
+        db.select().from(organizationBranches),
+        db.select({branchId:userBranchAccess.branchId}).from(userBranchAccess).where(eq(userBranchAccess.userId,context.appUserId)),
+      ]);
+      const scope=assignedActiveBranchScope(context.auth.user,branchRows,grants);
+      // Contract ownership and legal-entity scope cannot be inferred from a responsibility zone.
+      zones=zones.filter(row=>scope.allowsBranch(row.scope)).map(row=>({...row,contractId:""}));
+      const responsibleIds=new Set(zones.map(row=>row.responsibleEntityId));
+      entityRows=entityRows.filter(row=>responsibleIds.has(row.id));
+      contracts=[];documents=[];electronicVersions=[];checks=[];allTasks=[];
+    }
     const entityNames = Object.fromEntries(entityRows.map((item) => [item.id, item.displayName]));
     const contract = contracts[0];
     const contractDocuments = contract ? documents.filter((item) => item.contractId === contract.id) : [];
@@ -56,6 +70,7 @@ export async function GET(request: Request) {
     const signal = contract ? checks.find((item) => item.contractId === contract.id) : undefined;
 
     return json({
+      scopeBoundary:scopedRead?"Показаны зоны ответственности разрешённых действующих филиалов. Договоры, тексты и финансовые сведения скрыты: их отдельная область доступа ещё не подтверждена.":"",
       contracts: contracts.map((item) => ({ ...item, utilization: contractUtilization(item.limitMinor, item.spentMinor) })),
       documents,
       electronicVersions,
@@ -79,7 +94,7 @@ export async function GET(request: Request) {
         zoneId: zone?.id ?? "",
         signalId: signal?.id ?? "",
       },
-      boundary: "Электронная подпись и ЭДО пока не подключены. Показываются только сохранённые договоры, документы и результаты проверок.",
+      boundary: scopedRead ? "Показаны зоны ответственности разрешённых действующих филиалов. Договоры и тексты скрыты до подтверждения их отдельной области доступа." : "Электронная подпись и ЭДО пока не подключены. Показываются только сохранённые договоры, документы и результаты проверок.",
     });
   } catch (error) {
     console.error("Legal data load failed", error);

@@ -1,11 +1,13 @@
-import { asc } from "drizzle-orm";
+import { canAccessApi } from "../../../lib/access-policy";
+import { asc, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
-import { entities, financialOperations, safetyChecks, safetyEquipment, safetyFaults, safetyGuardShifts, safetyIncidents, safetyNextChecks, safetyRepairs, safetySystems } from "../../../db/schema";
+import { entities, financialOperations, organizationBranches, userBranchAccess, safetyChecks, safetyEquipment, safetyFaults, safetyGuardShifts, safetyIncidents, safetyNextChecks, safetyRepairs, safetySystems } from "../../../db/schema";
 import { canPaySafetyRepair, faultSla, safetyReadiness } from "../../../lib/safety";
 import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
 import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
+import { assignedActiveBranchScope, requiresAssignedReadScope } from "../../../lib/section-read-scope";
+import { filterAssignedSafetyRows } from "../../../lib/safety-read-scope";
 
-const roles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "SAFETY", "FINANCE"]);
 
 export async function GET(request: Request) {
   let context;
@@ -15,11 +17,16 @@ export async function GET(request: Request) {
     return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
   }
   if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  if (!roles.has(context.apiRole)) return Response.json({ error: "Нет доступа к контуру безопасности" }, { status: 403 });
+  if (!canAccessApi(context.auth.user, "/api/safety", "GET")) return Response.json({ error: "Нет доступа к контуру безопасности" }, { status: 403 });
   try {
     await ensureCoreTables();
     const db = getDb();
-    const [systems, equipment, checks, faults, incidents, repairs, nextChecks, guardShifts, entityRows, operations, allTasks] = await Promise.all([
+    const assignedRead = requiresAssignedReadScope(context.auth.user, "/api/safety");
+    const branchRows = assignedRead ? await db.select().from(organizationBranches) : [];
+    const branchGrants = assignedRead ? await db.select({ branchId: userBranchAccess.branchId }).from(userBranchAccess)
+      .where(eq(userBranchAccess.userId, context.appUserId)) : [];
+    const scope = assignedRead ? assignedActiveBranchScope(context.auth.user, branchRows, branchGrants) : null;
+    const [allSystems, allEquipment, allChecks, allFaults, allIncidents, allRepairs, allNextChecks, allGuardShifts, allEntityRows, allOperations, visibleTasks] = await Promise.all([
       db.select().from(safetySystems),
       db.select().from(safetyEquipment).orderBy(asc(safetyEquipment.nextCheckAt)),
       db.select().from(safetyChecks).orderBy(asc(safetyChecks.scheduledAt)),
@@ -29,9 +36,14 @@ export async function GET(request: Request) {
       db.select().from(safetyNextChecks).orderBy(asc(safetyNextChecks.scheduledAt)),
       db.select().from(safetyGuardShifts),
       db.select({ id: entities.id, displayName: entities.displayName }).from(entities),
-      db.select().from(financialOperations),
+      assignedRead ? Promise.resolve([]) : db.select().from(financialOperations),
       selectVisibleTasks(db, context),
     ]);
+    const { systems, equipment, checks, faults, incidents, repairs, nextChecks, guardShifts, entityRows, operations, allTasks } = filterAssignedSafetyRows(scope?.branchIds ?? null, {
+      systems: allSystems, equipment: allEquipment, checks: allChecks, faults: allFaults, incidents: allIncidents,
+      repairs: allRepairs, nextChecks: allNextChecks, guardShifts: allGuardShifts, entityRows: allEntityRows,
+      operations: allOperations, allTasks: visibleTasks,
+    });
     const now = new Date().toISOString();
     const repair = repairs[0];
     const fault = (repair ? faults.find((item) => item.id === repair.faultId) : undefined) ?? faults[0];
