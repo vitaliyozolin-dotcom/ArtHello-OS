@@ -11,6 +11,12 @@
 
 Full R6 receipt and gate identifiers are retained on branch `codex/recovery-evidence-20260907` in `docs/acceptance/2026-09-08-r6-release-checkpoint.json`. New runtime operation is documented in `deploy/v52/backup/README.md`.
 
+## Refactoring Phase 2.6 — database access policy checkpoint (2026-09-09)
+
+- D-077 закрепляет Drizzle builder как основной путь, допускает `db.execute(sql)` для отчётных запросов и запрещает новые `pool.query` точным сокращаемым baseline.
+- PGlite ограничен `scripts/`; policy-check включён в `lint` и агрегатный `test:refactoring` с поведенческими allow/deny/stale-baseline тестами.
+- Существующие запросы и бизнес-поведение не изменены. Фаза 2 не закрыта: остаются вывод `migrate.ts` из эксплуатации (2.3) и удаление сиротских схем с migration twin-proof (2.4).
+
 ## Refactoring Phase 2.5 — lazy configuration checkpoint (2026-09-08)
 
 - `lib/db` теперь можно импортировать без `DATABASE_URL`; подключение создаётся лениво через `createDb(env)` или при первом использовании совместимых exports `db`/`pool`.

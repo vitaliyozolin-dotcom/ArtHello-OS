@@ -46,6 +46,13 @@ on:
       - .github/workflows/deploy-arthello-recovery-r5-20260908.yml
       - .github/workflows/deploy-arthello-recovery-r6-20260908.yml
       - .github/workflows/deploy-arthello-recovery-r7-20260908.yml
+      - .github/workflows/deploy-arthello-recovery-r8-20260908.yml
+      - .github/scripts/check-recovery-r8-contract.rb
+      - .github/scripts/d078-replay-guard.py
+      - .github/scripts/test-d078-replay-guard.py
+      - .github/scripts/r8-live-browser-acceptance.py
+      - .github/scripts/test-r8-live-browser-acceptance.py
+      - .github/scripts/run-r8-live-browser.sh
       - .github/scripts/check-recovery-r7-contract.rb
       - .github/scripts/check-school-live-acceptance-r7.py
       - .github/scripts/d069-replay-guard.py
@@ -119,6 +126,13 @@ on:
       - .github/workflows/deploy-arthello-recovery-r5-20260908.yml
       - .github/workflows/deploy-arthello-recovery-r6-20260908.yml
       - .github/workflows/deploy-arthello-recovery-r7-20260908.yml
+      - .github/workflows/deploy-arthello-recovery-r8-20260908.yml
+      - .github/scripts/check-recovery-r8-contract.rb
+      - .github/scripts/d078-replay-guard.py
+      - .github/scripts/test-d078-replay-guard.py
+      - .github/scripts/r8-live-browser-acceptance.py
+      - .github/scripts/test-r8-live-browser-acceptance.py
+      - .github/scripts/run-r8-live-browser.sh
       - .github/scripts/check-recovery-r7-contract.rb
       - .github/scripts/check-school-live-acceptance-r7.py
       - .github/scripts/d069-replay-guard.py
@@ -472,6 +486,10 @@ jobs:
           ruby .github/scripts/check-recovery-r5-contract.rb
           ruby .github/scripts/check-recovery-r6-contract.rb
           ruby .github/scripts/check-recovery-r7-contract.rb
+          ruby .github/scripts/check-recovery-r8-contract.rb
+          python3 -I .github/scripts/test-d078-replay-guard.py
+          python3 -I .github/scripts/test-r8-live-browser-acceptance.py
+          bash -n .github/scripts/run-r8-live-browser.sh
           python3 -I .github/scripts/test-recovery-r7-gates.py
           python3 -I .github/scripts/test-r7-backup-runtime.py
           python3 -I -B deploy/v52/backup/test_worker.py
