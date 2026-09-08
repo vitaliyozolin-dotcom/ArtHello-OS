@@ -173,7 +173,7 @@ test('production timer is opt-in, serial, stoppable, and logs no returned payloa
   const timers = []; const logs = []; const calls = []; let cleared = false;
   const setTimer = (fn, ms) => { const timer = { fn, ms, unref() {} }; timers.push(timer); return timer; };
   const input = { runtime: { async dispatchFetch(url, request) { calls.push({ url, request }); return Response.json({ outcome: 'pending', ran: true, sensitive: 'never-log' }); } },
-    secret, publicOrigin: 'https://example.test', setTimer, clearTimer: () => { cleared = true; }, log: value => logs.push(value) };
+    secret, publicOrigin: 'https://example.test', isActivated: async () => true, setTimer, clearTimer: () => { cleared = true; }, log: value => logs.push(value) };
   startTochkaAutosyncTimer({ ...input, enabled: false }); assert.equal(timers.length, 0);
   const timer = startTochkaAutosyncTimer({ ...input, enabled: true }); assert.equal(timers[0].ms, 30_000);
   await timers[0].fn(); assert.equal(calls.length, 1); assert.equal(timers[1].ms, 60_000);

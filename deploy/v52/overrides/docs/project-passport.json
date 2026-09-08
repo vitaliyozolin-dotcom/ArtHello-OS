@@ -1889,6 +1889,68 @@
           "status": "open"
         }
       ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — явное поручение в текущем чате",
+      "approved_at": "2026-09-08",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска и живой приёмки",
+      "affected_stages": [
+        4,
+        7,
+        16,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Поручение владельца от 2026-09-08 вернуться к GitHub + собственной машине сборки и выложить все исправления в prod",
+      "decision_id": "DEC-2026-09-08-73",
+      "question": "Как использовать фактически доступный hosted build для текущего выпуска, сохранив границы production?",
+      "statement": "D-063: отдельный exact-PR354 consumer принимает только проверенный hosted immutable image; перед изменениями получает read-only School diagnostic и настоящее свежее browser SSO evidence. Старый D-059 не переиспользуется.",
+      "context": "Свежие Verify и Quality PR353 и private artifact upload прошли; прежняя квота больше не является текущим доказанным blocker. PR354 открыт для объединённых исправлений.",
+      "rationale": "Продолжает прямо разрешённый владельцем выпуск через доступную сборку без PR-кода на production; сохраняет backup-first, clone и доказательства реальных сценариев.",
+      "evidence": [
+        "PR353 Verify34189642144 и Quality34189642189 SUCCESS; private artifact10041764058 сохранён",
+        "PR354 initial head49d17d65d1b39d50b9d4d1a8ae9eb24a511c9cbf; local698PASS/2explicitSKIP, build/lintPASS",
+        "Proof34192125115 SUCCESS, включая visual acceptance; evidence artifact10042587534",
+        "Production deployment и School SSO ещё не выполнены/не приняты"
+      ],
+      "assumptions": [
+        "School callback category ещё требует production read-only diagnostic",
+        "Окончательный consumer и activation marker проходят независимый review"
+      ],
+      "dependencies": [
+        "D-040",
+        "D-061",
+        "D-062",
+        "D-063",
+        "Exact source Quality/Proof/Verify",
+        "Private immutable artifact",
+        "Natural School SSO acceptance"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/354",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34192125115"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Объявить выпуск завершённым после успешного build/health",
+          "reason": "Это не доказывает School SSO, реальные банк/Alfa синхронизации и доступы",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Завершить independent review, exact gates, диагностику School и guarded cutover с последующей живой приёмкой",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "release receipt, сохранность данных, естественный SSO и подтверждённые шесть сценариев",
+          "status": "in_progress"
+        }
+      ]
     }
   ],
   "aiContracts": [

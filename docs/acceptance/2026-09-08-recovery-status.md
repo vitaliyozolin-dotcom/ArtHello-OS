@@ -40,3 +40,14 @@ Proof run `34189642216` reached visual acceptance and failed there. Its upload s
 Finish and preserve the combined candidate and review findings. Use the verified available hosted checks and private artifact delivery while retaining the separate builder candidate. Run the prepared read-only School diagnostic through the reviewed production preflight, fix the proven callback defect, and retest. Run all exact-source gates, test a restored copy with real integrations disabled, install and verify backup services, then publish the immutable image with rollback available. Finally verify SSO, employee access, saved feedback/history, actual bank counts/sums and idempotent repeated imports, selective AlfaCRM import and manual/automatic backup results.
 
 The user-facing statement “new version published, everything works” is not supported at this checkpoint.
+
+## Combined product PR354 — initial hosted checks
+
+The frozen 105-file candidate is preserved in PR354, branch `codex/recovery-release-20260908`, head `49d17d65d1b39d50b9d4d1a8ae9eb24a511c9cbf`, tree `861b974747eb14c12df64f0af36149b42d8d402d`. Main remains `9e4c49161e643997fe821a91b84c60c6e38ede33`. No production deployment has occurred.
+
+- Fresh assembly: all27 hooks and original database-source checksum PASS. Production build and ESLint PASS. Serial700 tests:698PASS,0FAIL,2 explicit Unix skips due to local bind restrictions; Docker application stage requires those checks to run. Host/network30 tests PASS.
+- Quality34192125105: test and secret-scan jobs SUCCESS.
+- Proof34192125115: permission, migration, workflow-policy and visual gates SUCCESS. Private evidence artifact10042587534 exists,67034 bytes, digest `sha256:fc5257c3426f98447d5224854e03047867c9316d6e16fbbf37962074e19c0cfd`. These checks do not replace live v52 acceptance.
+- Verify34192125095 stopped before build on the old exact single-TOCHKA service-binding assertion. Combined runtime legitimately adds the restricted backup transport; the strict expected binding set is being updated and independently reviewed.
+- Consumer review found two real pre-release risks: snapshot rollback after public writes and Tochka timer activation before verified cutover. The next revision must close both with a durable public-write boundary and SHA/attempt-bound activation marker. Production is unchanged while these are fixed.
+- Fresh natural School SSO still returns `central_denied`. No passing acceptance JSON has been created. Real bank and AlfaCRM synchronization, personnel acceptance, feedback persistence and backup installation/restore still require live checks.

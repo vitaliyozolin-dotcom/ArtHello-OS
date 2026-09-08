@@ -1,0 +1,34 @@
+✔ real host marker activates only its exact release and fresh deployment ID (10.72397ms)
+✔ invalid identities reject before opening any host path (0.361852ms)
+✔ malformed, overlong, partial and JSON markers never activate (5.985859ms)
+✔ real symlinks, directories and unsafe modes fail closed (5.274053ms)
+✔ non-root descriptor metadata rejects before content read and always closes the handle (0.348071ms)
+✔ atomic activation replacement and marker removal are observed on subsequent reads (2.976054ms)
+✔ candidate env enabled produces zero dispatches before marker publication, then honors removal (5.596356ms)
+✔ disabled clone does not inspect markers and stop during an async gate prevents dispatch (0.561731ms)
+✔ runtime patch passes only exact process release and activation identities to the host timer (0.403403ms)
+✔ service authentication admits only exact POST target with current random runtime key (3.15351ms)
+✔ only a saved scoped company and valid selected date/interval can run; pause is authoritative (1.426475ms)
+✔ saved minute aligns hourly, three-hourly and daily automatic schedules (0.179939ms)
+✔ parallel workers and restarts run a due generation once and preserve next automatic slot (4.120737ms)
+✔ unfinished bank statements get bounded retry without claiming a complete sync (1.301078ms)
+✔ bank failures retain retry schedule after restart and use exponential capped backoff (1.475999ms)
+✔ busy manual import gets delayed retry and transport exceptions never count as success (1.10956ms)
+✔ malformed success response cannot set complete or bypass error backoff (0.900668ms)
+✔ rejected bank rows are errors with backoff even when HTTP status is successful (0.900087ms)
+✔ first server tick resumes a manually pending statement despite the legacy one-hour nextSyncAt (0.88909ms)
+✔ paused SQL state fences stale snapshots before provider access and during completion (0.896461ms)
+✔ credential rotation fences old completion and admits a fresh generation without old error delay (1.100027ms)
+✔ stale active lease is not stolen and an expired one is recoverable (0.609011ms)
+✔ automatic statement lease stops reads and writes immediately on explicit pause or revoked credential (6.998855ms)
+✔ production timer is opt-in, serial, stoppable, and logs no returned payload or credentials (1.298022ms)
+✔ real integration route service capability ignores supplied actions and never impersonates an owner (96.634559ms)
+✔ real integration route rejects forged service key through normal session authentication (36.503103ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 590.620209

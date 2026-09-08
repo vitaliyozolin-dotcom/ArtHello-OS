@@ -98,7 +98,7 @@ export function patchTochkaAutosyncRuntime(source) {
   source = replace(source, '    TBANK_EGRESS_IP: process.env.TBANK_EGRESS_IP || "",',
     '    TBANK_EGRESS_IP: process.env.TBANK_EGRESS_IP || "",\n    TOCHKA_AUTOSYNC_SECRET: tochkaAutosyncSecret,', 'ephemeral secret binding');
   source = replace(source, 'async function shutdown() {',
-    'const tochkaAutosyncTimer = startTochkaAutosyncTimer({ runtime, secret: tochkaAutosyncSecret, publicOrigin, enabled: tochkaAutosyncEnabled });\n\nasync function shutdown() {\n  tochkaAutosyncTimer.stop();', 'runtime timer lifecycle');
+    'const tochkaAutosyncTimer = startTochkaAutosyncTimer({ runtime, secret: tochkaAutosyncSecret, publicOrigin, enabled: tochkaAutosyncEnabled, releaseSha: process.env.RELEASE_SHA || "", activationId: process.env.TOCHKA_AUTOSYNC_ACTIVATION_ID || "" });\n\nasync function shutdown() {\n  tochkaAutosyncTimer.stop();', 'runtime timer lifecycle');
   return source;
 }
 
