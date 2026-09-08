@@ -44,6 +44,9 @@ try {
     await context.close();
   }
 } catch (error) {
+  // Only the network:none hosted fixture has no real credentials or pages.
+  // Its browser launch diagnostics are safe and needed to repair the bundle.
+  if (process.argv[2] === '--smoke' && stage === 'browser_launch') process.stderr.write(String(error?.message).slice(0,12000) + '\n');
   result = { kind: process.argv[2] === '--smoke' ? 'hosted-browser-fixture' : 'server-natural-sso', result: 'blocked', stage, liveAcceptance: 'not_passed' };
   if (sandboxStatus) result.sandboxStatus = sandboxStatus;
   if (stage === 'browser_launch') result.reason = /Operation not permitted|No usable sandbox|Failed to move to new namespace/.test(String(error?.message)) ? 'sandbox_namespace_denied' : 'browser_launch_failed';
