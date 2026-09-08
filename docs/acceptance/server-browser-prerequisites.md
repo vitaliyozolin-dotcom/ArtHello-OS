@@ -67,3 +67,12 @@ There is no automatic deployment or alteration of the R7 receipt, age or identit
 
 Local unit checks use synthetic input and fake transports only. They do not validate
 server connectivity, image availability, credentials or any of the six live scenarios.
+
+## CI readiness correction discovered during preparation
+
+PR #363's initial Proof run `34249055516` measured an empty desktop root, while its
+desktop screenshot already contained the login form and the mobile audit passed.
+The visual harness measured DOM once after a fixed 1.8-second delay. It now additionally
+polls for a complete document with a rendered root (10-second polling budget), preserving
+all visual assertions and failing on readiness timeout. Seven synthetic readiness tests
+cover delayed/never-ready documents and errors. This is CI fixture evidence, not live SSO.
