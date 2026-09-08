@@ -1,9 +1,10 @@
+import { requiresAssignedReadScope } from "../../../lib/section-read-scope";
+import { canAccessApi } from "../../../lib/access-policy";
 import { env } from "cloudflare:workers";
 import { ensureCoreTables, getSystemDataMode } from "../../../db";
 import { canPromoteToProduction, prerequisiteGatesPassed } from "../../../lib/readiness";
 import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
 
-const readers = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "QUALITY", "ANALYTICS", "INTEGRATIONS"]);
 type Row = Record<string, unknown>;
 
 export async function GET(request: Request) {
@@ -14,12 +15,13 @@ export async function GET(request: Request) {
     return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
   }
   if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  if (!readers.has(context.apiRole)) return Response.json({ error: "Нет доступа к контуру готовности" }, { status: 403 });
+  if (!canAccessApi(context.auth.user, "/api/readiness", "GET")) return Response.json({ error: "Нет доступа к контуру готовности" }, { status: 403 });
 
   try {
     await ensureCoreTables();
+    const scopedRead=requiresAssignedReadScope(context.auth.user,"/api/readiness");
     const dataMode = await getSystemDataMode();
-    if (dataMode === "empty") {
+    if (dataMode === "empty" || scopedRead) {
       return Response.json({
         dataMode,
         scenarios: [],
@@ -37,9 +39,9 @@ export async function GET(request: Request) {
           blockedGateIds: [],
         },
         testLayers: [],
-        boundary: "Сценарии готовности ещё не настроены.",
+        boundary: scopedRead ? "Раздел открыт. Общие сценарии, журналы и решения скрыты: у этих записей ещё нет подтверждённой области доступа по филиалам." : "Сценарии готовности ещё не настроены.",
         medicalBoundary: "Медицинские сведения не используются в проверках готовности.",
-        productionDecision: "Решение о выпуске ещё не сформировано.",
+        productionDecision: scopedRead ? "Общие проверки и решения скрыты: область доступа к этим записям ещё не назначена." : "Решение о выпуске ещё не сформировано.",
       });
     }
 

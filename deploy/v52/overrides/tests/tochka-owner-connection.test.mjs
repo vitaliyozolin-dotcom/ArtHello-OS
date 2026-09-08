@@ -1407,7 +1407,8 @@ test("reader roles receive a factual view without management actions", async () 
     source("app/api/integrations/route.ts"),
   ]);
   assert.match(integrationsApi, /const requester = await getAuthenticatedRequestContext\(request\)/);
-  assert.match(integrationsApi, /if \(!readers\.has\(requester\.apiRole\)\)/);
+  assert.match(integrationsApi, /if \(!canAccessModule\(\{[\s\S]*?allowedModules: requester\.auth\.user\.allowedModules[\s\S]*?\}, "integrations"\)\)/);
+  assert.doesNotMatch(integrationsApi, /readers\.has\(requester\.apiRole\)/);
   assert.match(integrationsApi, /const requesterRole = requester\.apiRole/);
   assert.match(integrationsApi, /const canManageCredentials = isCanonicalOwnerContext\(requester\)/);
   assert.doesNotMatch(integrationsApi, /getRequestUser|request\.headers\.get\("x-arthello-role"\)/);

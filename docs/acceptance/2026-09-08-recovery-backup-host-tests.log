@@ -1,0 +1,20 @@
+test_committed_wal_survives_backup_and_actual_restore_without_live_source (__main__.BackupTests.test_committed_wal_survives_backup_and_actual_restore_without_live_source) ... ok
+test_corrupt_source_never_publishes_or_prunes_good_backup (__main__.BackupTests.test_corrupt_source_never_publishes_or_prunes_good_backup) ... ok
+test_exclusive_lock_prevents_overlapping_manual_and_timer_backups (__main__.BackupTests.test_exclusive_lock_prevents_overlapping_manual_and_timer_backups) ... ok
+test_live_concurrent_transfers_produce_consistent_snapshot (__main__.BackupTests.test_live_concurrent_transfers_produce_consistent_snapshot) ... ok
+test_operator_cli_runs_backup_then_restore_and_rejects_open_config_permissions (__main__.BackupTests.test_operator_cli_runs_backup_then_restore_and_rejects_open_config_permissions) ... ok
+test_restore_rejects_tampering (__main__.BackupTests.test_restore_rejects_tampering) ... ok
+test_retention_only_removes_completed_tool_backups_older_than_14_days (__main__.BackupTests.test_retention_only_removes_completed_tool_backups_older_than_14_days) ... ok
+test_source_readonly_connection_refuses_writes (__main__.BackupTests.test_source_readonly_connection_refuses_writes) ... ok
+test_symlinks_and_public_backup_directories_are_rejected (__main__.BackupTests.test_symlinks_and_public_backup_directories_are_rejected) ... ok
+test_unrelated_sqlite_database_is_rejected (__main__.BackupTests.test_unrelated_sqlite_database_is_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.142s
+
+OK
+...........
+----------------------------------------------------------------------
+Ran 11 tests in 0.012s
+
+OK

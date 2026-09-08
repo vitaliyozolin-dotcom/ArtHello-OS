@@ -1,0 +1,19 @@
+{
+  "runtime": "arthello-v52-workerd",
+  "route": "/api/settings/backups",
+  "methods": ["GET", "POST"],
+  "sourceOfTruth": "deploy/v52/overrides/lib/access-policy.ts",
+  "additionalRouteEnforcement": "getAuthenticatedRequestContext + isCanonicalOwnerContext",
+  "cases": [
+    {"context": "canonical active owner session", "GET": 200, "POST": 202},
+    {"context": "anonymous or spoofed owner headers", "GET": 401, "POST": 401},
+    {"context": "any non-owner role including admin and director", "GET": 403, "POST": 403},
+    {"context": "temporary password not changed", "GET": 403, "POST": 403},
+    {"context": "owner with missing or wrong CSRF", "POST": 403},
+    {"context": "owner with foreign Origin", "POST": 403},
+    {"context": "owner with arbitrary action/path/unit", "POST": 400},
+    {"context": "backup already active or accepted", "POST": 409},
+    {"context": "host bridge unavailable", "GET": 503, "POST": 503}
+  ],
+  "successPrerequisites": "host bridge installed; GET metadata available; POST accepted is not completed backup"
+}

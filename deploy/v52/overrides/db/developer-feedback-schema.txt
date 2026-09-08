@@ -1,0 +1,35 @@
+
+// Developer feedback is independent of employee task visibility.
+export const developerFeedback = sqliteTable("developer_feedback", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  submissionId: text("submission_id").notNull(),
+  authorUserId: text("author_user_id").notNull().references(() => appUsers.id, { onDelete: "restrict" }),
+  authorName: text("author_name").notNull(),
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  moduleId: text("module_id").notNull().default(""),
+  status: text("status").notNull().default("new"),
+  revision: integer("revision").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("developer_feedback_author_submission").on(table.authorUserId, table.submissionId),
+  feedbackIndex("developer_feedback_author_id").on(table.authorUserId, table.id),
+  feedbackCheck("developer_feedback_kind", sql`${table.kind} IN ('bug','suggestion')`),
+  feedbackCheck("developer_feedback_title_length", sql`length(${table.title}) BETWEEN 1 AND 160`),
+  feedbackCheck("developer_feedback_body_length", sql`length(${table.body}) BETWEEN 1 AND 6000`),
+  feedbackCheck("developer_feedback_status", sql`${table.status} IN ('new','reviewing','planned','done','declined')`),
+  feedbackCheck("developer_feedback_revision", sql`${table.revision} >= 1`),
+]);
+export const developerFeedbackEvents = sqliteTable("developer_feedback_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  feedbackId: integer("feedback_id").notNull().references(() => developerFeedback.id, { onDelete: "restrict" }),
+  revision: integer("revision").notNull(),
+  actorUserId: text("actor_user_id").notNull().references(() => appUsers.id, { onDelete: "restrict" }),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("developer_feedback_event_revision").on(table.feedbackId, table.revision),
+  feedbackCheck("developer_feedback_event_status", sql`${table.status} IN ('new','reviewing','planned','done','declined')`),
+]);

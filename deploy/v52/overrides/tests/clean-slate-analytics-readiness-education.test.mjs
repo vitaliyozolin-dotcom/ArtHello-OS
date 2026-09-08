@@ -8,7 +8,7 @@ test("analytics empty mode has no phantom cash, snapshot or model source claims"
   const api = read("../app/api/analytics/route.ts");
   const ui = read("../app/components/AnalyticsWorkspace.tsx");
 
-  assert.match(api, /const isEmptyMode = dataMode === "empty"/);
+  assert.match(api, /const isEmptyMode = (?:scopedRead \|\| )?dataMode === "empty";/);
   assert.match(api, /const openingBalanceMinor = isEmptyMode \? currentNetMinor : 120000000/);
   assert.doesNotMatch(api, /forecastCash\(forecastItems,\s*120000000\)/);
   assert.match(api, /sourceCoverage: isEmptyMode \? \{ fact: \[\], synthetic: \[\], unavailable: \[\] \}/);
@@ -23,7 +23,7 @@ test("analytics empty mode has no phantom cash, snapshot or model source claims"
 test("readiness empty mode returns no demo scenarios or fixed test matrix", () => {
   const api = read("../app/api/readiness/route.ts");
   const ui = read("../app/components/ReadinessWorkspace.tsx");
-  const emptyGuard = api.indexOf('if (dataMode === "empty")');
+  const emptyGuard = api.search(/if \(dataMode === "empty"(?: \|\| scopedRead)?\) \{/);
   const firstScenarioQuery = api.indexOf('FROM readiness_scenarios ORDER BY number');
   const emptyResponse = api.slice(emptyGuard, firstScenarioQuery);
 
@@ -42,7 +42,10 @@ test("education can create the first real program before the first group", () =>
   const actions = read("../app/api/education-actions/route.ts");
   const ui = read("../app/components/EducationWorkspace.tsx");
 
-  assert.match(api, /scope\.kind\s*===\s*"all"\s*\?\s*programs/);
+  // Catalogue access is separate from personal/branch scope: existing managers
+  // need unassigned programs in order to create their first group.
+  assert.match(api, /const canReadProgramCatalogue = unrestrictedOwner \|\| \["DIRECTOR", "METHODIST"\]\.includes\(context\.apiRole\)/);
+  assert.match(api, /const visiblePrograms = canReadProgramCatalogue \? programs : scopedPrograms/);
   assert.match(actions, /action === "createProgram"/);
   assert.match(actions, /async function createProgram/);
   assert.match(actions, /sourceType: "MANUAL"/);

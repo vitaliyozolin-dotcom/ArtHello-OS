@@ -152,7 +152,6 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
   const [commandOpen, setCommandOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("Филиалы");
-  const [assignedModules, setAssignedModules] = useState<string[] | undefined>(authenticatedUser?.allowedModules);
   const [favoriteModules, setFavoriteModules] = useState<ModuleId[]>(() => (authenticatedUser?.favoriteModules ?? defaultFavoriteModules).filter((id): id is ModuleId => knownModuleIds.includes(id as ModuleId)));
   const [moduleFocus, setModuleFocus] = useState<{ module: ModuleId; id: string } | null>(null);
   const [, setRecentModules] = useState<ModuleId[]>([]);
@@ -166,8 +165,8 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
     apiRole: authenticatedUser?.apiRole ?? "",
     isSystemOwner: Boolean(authenticatedUser?.isSystemOwner),
     canAccessMedical: Boolean(authenticatedUser?.canAccessMedical),
-    allowedModules: assignedModules,
-  }), [assignedModules, authenticatedUser?.apiRole, authenticatedUser?.canAccessMedical, authenticatedUser?.isSystemOwner]);
+    allowedModules: authenticatedUser?.allowedModules,
+  }), [authenticatedUser?.allowedModules, authenticatedUser?.apiRole, authenticatedUser?.canAccessMedical, authenticatedUser?.isSystemOwner]);
   const isModuleAllowed = useCallback((id: ModuleId) => canAccessModule(accessContext, id), [accessContext]);
   const allowedModuleIds = useMemo(
     () => new Set(moduleCatalog.map((module) => module.id).filter(isModuleAllowed)),
@@ -183,7 +182,6 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
 
   const applyAccessContext = useCallback((context: AccessContext) => {
     setRole(context.me.role);
-    setAssignedModules((current) => sameOrderedValues(current, context.me.allowedModules) ? current : context.me.allowedModules);
     const nextFavorites = (context.me.favoriteModules ?? defaultFavoriteModules).filter((id): id is ModuleId => knownModuleIds.includes(id as ModuleId));
     setFavoriteModules((current) => sameOrderedValues(current, nextFavorites) ? current : nextFavorites);
     setBranches(context.branches);

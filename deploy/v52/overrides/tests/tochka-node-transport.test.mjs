@@ -262,7 +262,9 @@ test("production runtime binds the worker to the Node Tochka transport", () => {
   const route = readFileSync(new URL("../app/api/integration-actions/route.ts", import.meta.url), "utf8");
 
   assert.match(runtime, /import \{ createTochkaTransport \} from "\.\/tochka-transport\.mjs"/);
-  assert.match(runtime, /serviceBindings:\s*\{\s*TOCHKA_TRANSPORT:\s*createTochkaTransport\(\)\s*\}/);
+  assert.match(runtime, /serviceBindings:\s*\{[^}]*\bTOCHKA_TRANSPORT:\s*createTochkaTransport\(\)(?:,|\s*\})/);
+  assert.equal((runtime.match(/TOCHKA_TRANSPORT:\s*createTochkaTransport\(\)/g) ?? []).length, 1);
+  assert.match(runtime, /BACKUP_TRANSPORT:\s*createBackupTransport\(\)/);
   assert.match(route, /TOCHKA_TRANSPORT/);
   assert.match(route, /probeTochkaJwt\([\s\S]*?tochkaTransportFetch/);
   assert.match(route, /syncTochkaReadOnly\(\{[\s\S]*?request:\s*tochkaTransportFetch/);

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily ArtHello v52 verified SQLite backup
+
+[Timer]
+OnCalendar=*-*-* 00:15:00 UTC
+Persistent=true
+AccuracySec=1min
+Unit=arthello-v52-backup.service
+
+[Install]
+WantedBy=timers.target

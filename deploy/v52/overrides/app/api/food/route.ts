@@ -1,11 +1,13 @@
-import { asc } from "drizzle-orm";
+import { canAccessApi } from "../../../lib/access-policy";
+import { asc, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
-import { entities, financialOperations, foodBatches, foodChecks, foodProduction, foodProducts, foodRecipeIngredients, foodRecipes, foodShipments, foodShifts } from "../../../db/schema";
+import { entities, financialOperations, foodBatches, foodChecks, foodProduction, foodProducts, foodRecipeIngredients, foodRecipes, foodShipments, foodShifts, purchaseRequests, organizationBranches, userBranchAccess } from "../../../db/schema";
+import { assignedActiveBranchScope, requiresAssignedReadScope } from "../../../lib/section-read-scope";
+import { scopeFoodRows } from "../../../lib/scoped-operational-reads";
 import { expiryBand, foodEconomics, shipmentBalance } from "../../../lib/food";
 import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
 import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
-const roles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "KITCHEN", "FINANCE"]);
 
 export async function GET(request: Request) {
   let context;
@@ -15,11 +17,16 @@ export async function GET(request: Request) {
     return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
   }
   if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  if (!roles.has(context.apiRole)) return Response.json({ error: "Нет доступа к проекту кухни" }, { status: 403 });
+  if (!canAccessApi(context.auth.user, "/api/food", "GET")) return Response.json({ error: "Нет доступа к проекту кухни" }, { status: 403 });
   try {
     await ensureCoreTables();
     const db = getDb();
-    const [products, batches, recipes, ingredients, production, shipments, shifts, checks, entityRows, operations, allTasks] = await Promise.all([
+    const assignedRead = requiresAssignedReadScope(context.auth.user, "/api/food");
+    const scope = assignedRead ? assignedActiveBranchScope(context.auth.user,
+      await db.select().from(organizationBranches),
+      await db.select({ branchId: userBranchAccess.branchId }).from(userBranchAccess).where(eq(userBranchAccess.userId, context.appUserId)),
+    ) : null;
+    const [allProducts, allBatches, allRecipes, allIngredients, allProduction, allShipments, allShifts, allChecks, allEntityRows, operations, taskRows, purchaseRows] = await Promise.all([
       db.select().from(foodProducts),
       db.select().from(foodBatches).orderBy(asc(foodBatches.expiresAt)),
       db.select().from(foodRecipes),
@@ -29,9 +36,14 @@ export async function GET(request: Request) {
       db.select().from(foodShifts),
       db.select().from(foodChecks),
       db.select({ id: entities.id, displayName: entities.displayName }).from(entities),
-      db.select().from(financialOperations),
+      assignedRead ? Promise.resolve([]) : db.select().from(financialOperations),
       selectVisibleTasks(db, context),
+      assignedRead ? db.select({ id: purchaseRequests.id, unit: purchaseRequests.unit }).from(purchaseRequests) : Promise.resolve([]),
     ]);
+    const input = { products: allProducts, batches: allBatches, recipes: allRecipes, ingredients: allIngredients,
+      production: allProduction, shipments: allShipments, shifts: allShifts, checks: allChecks, entityRows: allEntityRows, allTasks: taskRows };
+    const scoped = scope ? scopeFoodRows(input, scope, purchaseRows) : { ...input, economicsComplete: true };
+    const { products, batches, recipes, ingredients, production, shipments, shifts, checks, entityRows, allTasks } = scoped;
     const revenue = shipments.reduce((sum, item) => sum + item.revenueMinor, 0);
     const material = production.reduce((sum, item) => sum + item.materialCostMinor, 0);
     const labor = shifts.reduce((sum, item) => sum + item.rateMinor, 0);
@@ -56,7 +68,8 @@ export async function GET(request: Request) {
       shifts,
       checks: redactHiddenTaskReferences(checks, allTasks),
       entityNames: Object.fromEntries(entityRows.map((item) => [item.id, item.displayName])),
-      economics: foodEconomics(revenue, material, labor),
+      economics: scoped.economicsComplete ? foodEconomics(revenue, material, labor)
+        : { revenueMinor: revenue, materialMinor: null, laborMinor: null, profitMinor: null, marginPercent: null },
       finance,
       tasks: allTasks.filter((item) => item.sourceType === "Проверка кухни"),
       summary: {
@@ -77,7 +90,7 @@ export async function GET(request: Request) {
         costId: cost?.id ?? "",
         revenueId: income?.id ?? "",
       },
-      boundary: "Поставщики, партии, производство и финансовые операции показываются только после сохранения или подтверждённого импорта.",
+      boundary: scope ? "Показаны записи назначенных активных филиалов. Общие производственные партии и смены раскрываются только при подтверждённом доступе ко всем связанным отгрузкам; неполная себестоимость не превращается в нулевую." : "Поставщики, партии, производство и финансовые операции показываются только после сохранения или подтверждённого импорта.",
     });
   } catch (error) {
     return Response.json({ error: error instanceof Error && error.message.includes("D1 binding") ? "База кухни ещё не подключена" : "Не удалось загрузить кухню" }, { status: 503 });

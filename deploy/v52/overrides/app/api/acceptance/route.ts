@@ -1,3 +1,5 @@
+import { requiresAssignedReadScope } from "../../../lib/section-read-scope";
+import { canAccessApi } from "../../../lib/access-policy";
 import { env } from "cloudflare:workers";
 import { ensureCoreTables } from "../../../db";
 import { manualEvidence, requiredGatesPassed } from "../../../lib/readiness";
@@ -27,7 +29,6 @@ const APPROVAL_GATE = "GATE-T-APPROVAL";
 const CONFIRMED = "ПОДТВЕРЖДЕНО СОБСТВЕННИКОМ";
 const NEEDS_WORK = "ТРЕБУЕТ ДОРАБОТКИ";
 const allowedVerdicts = new Set([CONFIRMED, NEEDS_WORK]);
-const readers = new Set(["OWNER", "DIRECTOR", "QUALITY"]);
 const privateHeaders = {
   "cache-control": "private, no-store, max-age=0",
   pragma: "no-cache",
@@ -39,7 +40,10 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const context = await authenticate(request);
   if (context instanceof Response) return context;
-  if (!readers.has(context.apiRole)) return json({ error: "Нет доступа к проверке системы" }, 403);
+  if (!canAccessApi(context.auth.user, "/api/acceptance", "GET")) return json({ error: "Нет доступа к проверке системы" }, 403);
+  if(requiresAssignedReadScope(context.auth.user,"/api/acceptance")) {
+    return json({decisions:[],scopeBoundary:"Раздел открыт. Общие решения собственника скрыты: область доступа к этим записям не назначена."});
+  }
   try {
     await ensureCoreTables();
     const result = await database().prepare(`SELECT id,stage,verdict,comment,actor,created_at

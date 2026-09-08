@@ -1,0 +1,65 @@
+{
+  "baseMain": "9e4c49161e643997fe821a91b84c60c6e38ede33",
+  "checkedAtDate": "2026-09-08",
+  "sourceAssembly": {
+    "status": "pass",
+    "hooks": 27,
+    "archiveSha256": "e76fb44dca272825fda4486e7584290b14969c1fd054a8c955eae738899b7c12",
+    "dbSourceChecksumBeforeCandidatePatches": "e78978c13431d32a0db2db25da73f24fd6245703aa14d4cb3ec34647324f6f40"
+  },
+  "applicationTests": {
+    "command": "npm test -- --test-concurrency=1",
+    "status": "pass",
+    "productionBuild": "pass",
+    "total": 700,
+    "passed": 698,
+    "failed": 0,
+    "skipped": 2,
+    "skipReason": "Local environment refuses AF_UNIX creation with EPERM; application Docker stage enforces ARTHELLO_BACKUP_REQUIRE_UNIX=1."
+  },
+  "eslint": "pass",
+  "hostBackupPython": {
+    "passed": 10
+  },
+  "hostBridgePython": {
+    "passed": 11
+  },
+  "networkPreflightPython": {
+    "passed": 9
+  },
+  "globalCssBytes": 247242,
+  "globalCssBudgetBytes": 250000,
+  "productionPublicationByIntegrator": false,
+  "liveBankSynchronizationAccepted": false,
+  "liveAlfaSynchronizationAccepted": false,
+  "schoolSsoAccepted": false,
+  "restoredProductionDbAccepted": false,
+  "realContainerBackupBridgeAccepted": false,
+  "logs": [
+    {
+      "path": "docs/acceptance/2026-09-08-recovery-source-assembly.log",
+      "sha256": "1351e2605acdb67ddcb4dd088f1e41e8bf61a66add15f0698e3b182c2897f9bf",
+      "bytes": 3581
+    },
+    {
+      "path": "docs/acceptance/2026-09-08-recovery-full-test.log",
+      "sha256": "850978753492f625f8acf0da07ddcd52dafd36e957612b3b80034070fafd2e74",
+      "bytes": 70200
+    },
+    {
+      "path": "docs/acceptance/2026-09-08-recovery-full-eslint.log",
+      "sha256": "bbef620633cb57399ff6da3475b2ae6245f48cd149a2cf450de9a1cd09651dcd",
+      "bytes": 216
+    },
+    {
+      "path": "docs/acceptance/2026-09-08-recovery-backup-host-tests.log",
+      "sha256": "096f54bb5dbe51ce96abc5e2351fbad1c58a76205ee7198aade25921cb1bd59d",
+      "bytes": 1677
+    },
+    {
+      "path": "docs/acceptance/2026-09-08-recovery-network-tests.log",
+      "sha256": "7d21a407289990089a56b09a902b923514e40ba0582069895b9cd2268275e0ff",
+      "bytes": 107
+    }
+  ]
+}

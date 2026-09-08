@@ -1,3 +1,5 @@
+import { requiresAssignedReadScope } from "../../../lib/section-read-scope";
+import { canAccessApi } from "../../../lib/access-policy";
 import { asc, desc } from "drizzle-orm";
 import { ensureAnalyticsDemoBootstrap, ensureCoreTables, getDb, getSystemDataMode } from "../../../db";
 import {
@@ -24,7 +26,6 @@ import { forecastCash, marginPercent, riskRank, safeAverage } from "../../../lib
 import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
 import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
-const readers = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "ANALYTICS", "FINANCE"]);
 
 export async function GET(request: Request) {
   let context;
@@ -34,16 +35,17 @@ export async function GET(request: Request) {
     return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
   }
   if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
-  if (!readers.has(context.apiRole)) return Response.json({ error: "Нет доступа к управленческой аналитике" }, { status: 403 });
+  if (!canAccessApi(context.auth.user, "/api/analytics", "GET")) return Response.json({ error: "Нет доступа к управленческой аналитике" }, { status: 403 });
 
   try {
     await ensureCoreTables();
+    const scopedRead=requiresAssignedReadScope(context.auth.user,"/api/analytics");
     const dataMode = await getSystemDataMode();
-    const isEmptyMode = dataMode === "empty";
-    if (await getSystemDataMode()!=="empty") await ensureAnalyticsDemoBootstrap();
+    const isEmptyMode = scopedRead || dataMode === "empty";
+    if (!scopedRead && await getSystemDataMode()!=="empty") await ensureAnalyticsDemoBootstrap();
 
     const db = getDb();
-    const [metricDefinitions, signals, contracts, runs, optOuts, operations, forecastItems, reconciliation, lifecycles, progress, employees, faults, shipments, production, shifts, projects, connections, conflicts, allTasks] = await Promise.all([
+    let [metricDefinitions, signals, contracts, runs, optOuts, operations, forecastItems, reconciliation, lifecycles, progress, employees, faults, shipments, production, shifts, projects, connections, conflicts, allTasks] = await Promise.all([
       db.select().from(analyticsMetricDefinitions).orderBy(asc(analyticsMetricDefinitions.category)),
       db.select().from(analyticsSignals),
       db.select().from(aiProcessContracts).orderBy(asc(aiProcessContracts.name)),
@@ -65,6 +67,7 @@ export async function GET(request: Request) {
       selectVisibleTasks(db, context),
     ]);
 
+    if(scopedRead){metricDefinitions=[];signals=[];contracts=[];runs=[];optOuts=[];operations=[];forecastItems=[];reconciliation=[];lifecycles=[];progress=[];employees=[];faults=[];shipments=[];production=[];shifts=[];projects=[];connections=[];conflicts=[];allTasks=[];}
     const monthlyMap = new Map<string, { period: string; receiptsMinor: number; outflowsMinor: number; netMinor: number; factRows: number; syntheticRows: number }>();
     for (const item of operations) {
       const row = monthlyMap.get(item.period) ?? { period: item.period, receiptsMinor: 0, outflowsMinor: 0, netMinor: 0, factRows: 0, syntheticRows: 0 };
@@ -93,6 +96,7 @@ export async function GET(request: Request) {
     const currentCashPeriod = cash.at(-1)?.period ?? "";
 
     return Response.json({
+      scopeBoundary:scopedRead?"Раздел открыт для чтения. Записи без подтверждённой области филиала и юридического лица скрыты; общие показатели по ним не раскрываются.":"",
       dataMode,
       metricDefinitions,
       signals: rankedSignals,
@@ -120,7 +124,7 @@ export async function GET(request: Request) {
         synthetic: ["Продажи и семьи", "Обучение", "HR", "Питание", "Безопасность", "Проекты"],
         unavailable: ["Банки", "CRM", "электронный дневник", "рекламные платформы", "ЭДО/1С", "СКУД/камеры"],
       },
-      boundary: isEmptyMode
+      boundary: scopedRead ? "Раздел открыт. Общие финансовые и кадровые показатели скрыты: область доступа по филиалам и юридическим лицам ещё не подтверждена." : isEmptyMode
         ? "Аналитика строится только по сохранённым рабочим записям. Источники и показатели ещё не подключены."
         : "Панель является опубликованным тестовым снимком на 21 августа 2026. Только ОДДС и контроль исходных XLSX основаны на предоставленных файлах; остальные прогнозы и сигналы синтетические. Медицинские данные полностью исключены.",
       modelBoundary: isEmptyMode

@@ -1,0 +1,72 @@
+Fresh immutable base archive SHA256=e76fb44dca272825fda4486e7584290b14969c1fd054a8c955eae738899b7c12
+RUN patch-dashboard-personalization.mjs
+Dashboard personalization patch applied
+RUN patch-sales-operating-workspace.mjs
+SalesWorkspace Design System override is already installed; preserving operating integrations
+Canonical T-Bank integration workspace is already installed; preserving it
+Sales operating workspace patch applied
+RUN patch-system-foundation.mjs
+System-wide UI patch already applied for app/components/ArtHelloShell.tsx
+HrWorkspace Design System override already owns its dialog portals
+System-wide UI patch already applied for app/components/SalesWorkspace.tsx
+System-wide UI patch already applied for app/globals.css
+System-wide patch foundation applied
+RUN normalize-system-patch-inputs.mjs
+System patch inputs normalized
+RUN patch-system-content-legal.mjs
+ContentWorkspace Design System override already owns the complete content shell
+Legal actions already use the confirmed single-use scan workflow
+System-wide patch content_legal applied
+RUN patch-system-analytics-readiness.mjs
+System-wide analytics and readiness patch applied
+RUN patch-system-operational-modules.mjs
+System-wide operational modules patch applied
+RUN patch-alfacrm-staged-integration.mjs
+AlfaCRM staged integration shell patched
+RUN patch-alfacrm-style-import.mjs
+AlfaCRM production stylesheet restored; transient Tailwind scan source removed
+RUN patch-tochka-customer-permission-fallback.mjs
+D-060 Tochka customer permission fallback applied
+RUN patch-tochka-multi-company-selection.mjs
+D-064 Tochka multi-company selection applied
+RUN patch-tochka-statement-array-response.mjs
+D-065 Tochka statement array response applied
+RUN patch-system-dialog-portals.mjs
+ContentWorkspace Design System override already owns its dialog portal
+IntegrationWorkspace canonical detail, conflict and setup portals already applied
+System-wide dialog portals applied
+RUN patch-mobile-visual-help-followup.mjs
+patch-mobile-visual-help-followup: applied
+RUN prepare-help-finance-ux-v3.mjs
+prepare-help-finance-ux-v3: Finance Design System override needs no source interpolation
+RUN patch-help-finance-ux-v3.mjs
+FinanceWorkspace Design System override is already installed; legacy period patch skipped
+patch-help-finance-ux-v3: applied
+RUN patch-mobile-canonical-v5.mjs
+patch-mobile-canonical-v5: legacy mobile layers removed; canonical system applied
+RUN patch-tochka-finance-bank-visibility.mjs
+D-066 bank finance visibility applied
+RUN patch-safe-json-responses.mjs
+D-067 safe JSON responses applied
+RUN patch-school-sso-entry.mjs
+SCHOOL_SSO_UI_INSTALLS=0
+SCHOOL_SSO_PASSWORD_ACTIONS_RETIRED=0
+SCHOOL_SSO_TEMPORARY_ACCESS_CLARIFIED=0
+SCHOOL_SSO_TEST_WORDING_MIGRATED=0
+SCHOOL_SSO_CENTRAL_STAFF_CONTRACT=PASSWORDLESS
+SCHOOL_SSO_UI_PATCH=OK
+RUN patch-css-budget-shell-split.mjs
+CSS budget shell split applied: test banner styles moved out of the global chunk
+RUN verify-system-wide-operational-shells.mjs
+System-wide operational shell verification passed
+Pinned db/index.ts SHA256=e78978c13431d32a0db2db25da73f24fd6245703aa14d4cb3ec34647324f6f40
+RUN patch-finance-operation-allocation.mjs
+D-069 finance operation allocation applied
+RUN patch-finance-operation-allocation-css-scope.mjs
+D-069 finance CSS scoped
+RUN patch-tochka-pending-lifecycle.mjs
+Tochka pending statement lifecycle applied
+RUN patch-tochka-autosync.mjs
+RUN patch-developer-feedback.mjs
+Developer feedback shell and authenticated API policy installed
+SOURCE_ASSEMBLY=PASS; 27 Dockerfile patch commands; live gates remain disabled by default

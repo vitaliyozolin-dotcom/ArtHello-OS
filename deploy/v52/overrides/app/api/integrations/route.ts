@@ -17,10 +17,6 @@ import { getAuthenticatedRequestContext, isCanonicalOwnerContext } from "../../.
 import { canAccessModule } from "../../../lib/access-policy";
 import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
 
-const readers = new Set([
-  "OWNER", "DIRECTOR", "REPRESENTATIVE", "INTEGRATIONS", "FINANCE", "ACCOUNTING",
-  "SALES", "MARKETING", "METHODIST", "SAFETY", "LEGAL", "PROJECTS",
-]);
 const managers = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "INTEGRATIONS"]);
 
 export const dynamic = "force-dynamic";
@@ -35,7 +31,6 @@ export async function GET(request: Request) {
       canAccessMedical: requester.auth.user.canAccessMedical,
       allowedModules: requester.auth.user.allowedModules,
     }, "integrations")) return privateJson({ error: "Раздел интеграций не назначен этому пользователю" }, 403);
-    if (!readers.has(requester.apiRole)) return privateJson({ error: "Нет доступа к центру интеграций" }, 403);
     await ensureCoreTables();
     const requesterRole = requester.apiRole;
     const canManageCredentials = isCanonicalOwnerContext(requester);

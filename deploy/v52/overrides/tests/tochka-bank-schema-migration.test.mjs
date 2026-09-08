@@ -48,10 +48,25 @@ test("Drizzle journal and snapshot form a continuous schema chain", () => {
   const journal = JSON.parse(readFileSync(new URL("../drizzle/meta/_journal.json", import.meta.url), "utf8"));
   const previous = JSON.parse(readFileSync(new URL("../drizzle/meta/0023_snapshot.json", import.meta.url), "utf8"));
   const snapshot = JSON.parse(readFileSync(new URL("../drizzle/meta/0024_snapshot.json", import.meta.url), "utf8"));
-  const latest = journal.entries.at(-1);
+  const bankEntries = journal.entries.filter((entry) => entry.idx === 24);
 
-  assert.equal(latest.idx, 24);
-  assert.equal(latest.tag, migrationName);
+  // The bank migration remains pinned at 24 even after additive migrations are
+  // appended. Check the entire journal/snapshot chain, including its new tail.
+  assert.equal(bankEntries.length, 1);
+  assert.equal(bankEntries[0].tag, migrationName);
+  assert.deepEqual(journal.entries.map((entry) => entry.idx), journal.entries.map((_, index) => index));
+  const snapshots = journal.entries.map((entry) => {
+    const prefix = String(entry.idx).padStart(4, "0");
+    assert.equal(entry.tag.startsWith(`${prefix}_`), true);
+    assert.equal(readFileSync(new URL(`${entry.tag}.sql`, migrationDirectory), "utf8").trim().length > 0, true);
+    return JSON.parse(readFileSync(new URL(`meta/${prefix}_snapshot.json`, migrationDirectory), "utf8"));
+  });
+  const snapshotFiles = readdirSync(new URL("meta/", migrationDirectory)).filter((name) => /^\d{4}_snapshot\.json$/.test(name));
+  assert.equal(snapshotFiles.length, journal.entries.length);
+  assert.equal(new Set(snapshots.map((entry) => entry.id)).size, snapshots.length);
+  for (let index = 1; index < snapshots.length; index++) {
+    assert.equal(snapshots[index].prevId, snapshots[index - 1].id, `Broken snapshot link at migration ${index}`);
+  }
   assert.equal(snapshot.prevId, previous.id);
   assert.deepEqual(
     Object.keys(snapshot.tables).filter((name) => !previous.tables[name]).sort(),

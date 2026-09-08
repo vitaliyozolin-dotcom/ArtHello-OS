@@ -6,6 +6,7 @@ import { API_ROLE_BY_APP_ROLE, APP_ROLE_DEFINITIONS, canAccessModule, permission
 import { recordLabel } from "../../lib/record-labels";
 import { IntegrationWorkspace } from "./IntegrationWorkspace";
 import { ReadinessWorkspace } from "./ReadinessWorkspace";
+import { BackupWorkspace } from "./BackupWorkspace";
 import { SoftSelect } from "./SoftSelect";
 import { Button, EmptyState, Tabs } from "./design-system";
 import "./SettingsWorkspace.ds.css";
@@ -39,7 +40,7 @@ type SettingsData = AccessContext & {
   authBoundary: string;
 };
 
-export const settingsTabs = ["Филиалы", "Доступы", "Семьи", "Избранное", "Интеграции", "Проверка системы"] as const;
+export const settingsTabs = ["Филиалы", "Доступы", "Семьи", "Избранное", "Интеграции", "Проверка системы", "Резервные копии"] as const;
 export type SettingsTab = typeof settingsTabs[number];
 const roles = APP_ROLE_DEFINITIONS.filter((definition) => definition.apiRole !== "OWNER").map((definition) => definition.appRole);
 const assignableModules = moduleCatalog.filter((module) => module.id !== "home" && module.id !== "access");
@@ -167,8 +168,9 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
     <section className="ahSettingsModal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header className="settings-head"><div><p>Управление системой</p><h2 id="settings-title">Настройки</h2><span>Филиалы, доступы, личное меню, интеграции и проверка системы</span></div><button onClick={close} aria-label="Закрыть">×</button></header>
       {loading ? <EmptyState className="ahSettingsState" density="compact" title="Загружаем настройки" description="Проверяем права, филиалы и доступные системы." /> : error || !data ? <EmptyState className="ahSettingsState" density="compact" title={error || "Настройки недоступны"} description="Рабочие права и филиалы не заменены заглушкой." action={<Button variant="secondary" onClick={() => void load()}>Повторить</Button>} /> : <>
-        <div className="ahSettingsTabs"><Tabs items={settingsTabs.map((item) => ({ id: item, label: item }))} value={tab} onChange={setTab} ariaLabel="Разделы настроек" /></div>
+        <div className="ahSettingsTabs"><Tabs items={settingsTabs.filter((item) => item !== "Резервные копии" || (data.me.id === "USR-OWNER" && data.me.role === "Собственник" && data.me.isAdministrative)).map((item) => ({ id: item, label: item }))} value={tab} onChange={setTab} ariaLabel="Разделы настроек" /></div>
         <div className="settings-body">
+          {tab === "Резервные копии" && data.me.id === "USR-OWNER" && data.me.role === "Собственник" && data.me.isAdministrative ? <BackupWorkspace notify={notify} /> : null}
           {tab === "Филиалы" ? <div className="settings-grid">
             <article className="settings-card wide"><header><div><p>Рабочие контуры</p><h3>Филиалы</h3></div><span>{data.branches.length}</span></header><div className="branch-list">{data.branches.map((branch) => <div key={branch.id}><span aria-hidden="true">⌂</span><div><strong>{branch.name}</strong><small>{branch.kind} · {branch.status}</small></div><em>{data.me.isAdministrative ? "Доступен" : data.access.some((item) => item.branchId === branch.id) ? "Назначен" : "Нет доступа"}</em></div>)}</div></article>
             <article className="settings-card"><header><div><p>Текущий пользователь</p><h3>{data.me.displayName}</h3></div></header><dl><div><dt>Роль</dt><dd>{data.me.role}</dd></div><div><dt>Контур</dt><dd>{data.me.isAdministrative ? "Административный корпус · все филиалы" : `${data.access.length} филиал(а)`}</dd></div><div><dt>Вход</dt><dd>{data.me.contact}</dd></div></dl></article>
