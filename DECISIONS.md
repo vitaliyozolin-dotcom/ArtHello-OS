@@ -1,5 +1,22 @@
 # ArtHello OS — Decisions
 
+## D-071 — Сравнивать School mounts по содержимому и не заявлять неполный Alfa импорт успешным
+
+Дата: 2026-09-08  
+Статус: необходимое исправление подтверждённых дефектов в рамках поручения владельца исправить систему и опубликовать обновления  
+Владелец: Исполнитель ArtHello OS
+
+D066 run34206196494/job101996459827 прошёл exact gates, сузил права собственного lock0664→0644 и остановился на school_changed_during_setup до запуска relay. Image/cutover ArtHello пропущены; failed repair не перезапускается. Read-only PR359 maince7c50ba367fca14d71669305bf4e82b791ce4f7, run34207628005/job102000795971 от09:00:57Z воспроизвёл дефект на реальном Docker: в12 наблюдениях только порядок двух Mounts менялся, полный канонический School fingerprint e1f9dbfd5172ad224b97dfd215c81b914b1be6872e322128e05477b71ea417aa и backend fingerprint86218fb5096b6225e4e45d23d396b44498553e57a9fe9ddb5cd4b11fdf3489be оставались неизменными. Исходная пара failed-run inspect не сохранялась и не реконструируется. School healthy, image/source/StartedAt прежние; созданные relay/egress/config-dir действительно отсутствуют после очистки, own state-root0700 и lock0644 валидны. Оба публичных health endpoint с gateway ответили200; отдельная cloud-browser502 не объявляется падением сервиса.
+
+Новый bundle R5 нормализует только порядок полного массива Mounts при расчёте fingerprint. Каждый ключ/значение, неизвестные поля и число дубликатов сохраняются. Config, HostConfig и сетевые массивы не сортируются и не ослабляются. Изменение Source/Destination/RW, добавление/удаление/дублирование mount по-прежнему блокирует. Старый R3 bundle и все failed consumers остаются прежними. Новый технический release D067/PR360 имеет свои OWNER/config/source pins; D067 в имени задачи не заменяет архитектурное D-067 из рефакторинга.
+
+R5 повторно использует неизменённые R4 transport/нормализатор lock и schema2 receipt validator. Дальнейшая установка требует exact PR/main Quality/Proof/Verify и immutable image; mandatory Docker smoke дополнен настоящими многократными inspect контейнера с двумя readonly mounts и соседним контейнером в изолированной сети. Shared queues, protected Environment/SSH identity, fixed TLS upstream/source ACL, сохранение School и запрет root/sudo сохраняются.
+
+Узкая Alfa correctness правка устраняет три доказанных ошибки до разрешения live-импорта: отсутствующий/нечисловой balance отклоняется вместо ложного нуля и сохраняет прежнюю проекцию; import last_success_at обновляется лишь при полном результате без rejected; ошибочный пакет аннулирует preview/cursor, чтобы последующий пакет не скрывал ошибку; preview действует30мин и проверяется до credentials/upstream/write. Подтверждённый ноль остаётся допустимым. Новая денежная интерпретация balance, перенос CRM-сумм в банковский ДДС, расписание autosync и включение live gate этим решением не вводятся. Реальные credentials/coverage/единицы API и вывод CRM-снимков в карточке семьи остаются непринятыми.
+
+Перед ArtHello cutover сохраняются реальные свежие Education→Diary browser evidence, clone-preflight, проверенный backup, защита новых записей после публичного открытия и отложенная активация Точки. Успешный код/CI/relay не заменяет живую приёмку шести сценариев. Изменения параллельного рефакторинга D-066/D-067/D-068/D-070 сохраняются целиком.
+
+
 ## D-069 — Исправить права собственного School lock и сохранить очередь выпуска
 
 Дата: 2026-09-08  

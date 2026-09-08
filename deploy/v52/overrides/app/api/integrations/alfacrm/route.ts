@@ -22,6 +22,7 @@ const PAGE_SIZE = 500;
 const MIN_REQUEST_INTERVAL_MS = 240;
 const REQUEST_TIMEOUT_MS = 30_000;
 const SUBSCRIPTION_CHUNK_SIZE = 15;
+const PREVIEW_TTL_MS = 30 * 60 * 1000;
 const editors = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "INTEGRATIONS"]);
 const ALFACRM_IMPORT_ENABLED_VALUES = new Set(["1", "true", "yes"]);
 const IMPORT_BLOCKED_MESSAGE = "Импорт ожидает завершения проверки данных и подтверждения замены ранее раскрытого ключа AlfaCRM. Подключение и предпросмотр доступны.";
@@ -298,7 +299,6 @@ async function previewModule(context: RequestContext, body: Record<string, unkno
   await assertMappedBranchAccess(context, state);
   const params = moduleParams(module, body);
   const session = await storedSession(state);
-  const startedAt = new Date().toISOString();
   let count = 0;
   let countUnit = "записей";
   let customerSignature = "";
@@ -317,7 +317,7 @@ async function previewModule(context: RequestContext, body: Record<string, unkno
     ...state.modules[module],
     status: "previewed",
     previewCount: count,
-    lastPreviewAt: startedAt,
+    lastPreviewAt: new Date().toISOString(),
     previewToken,
     previewSignature,
     dateFrom: params.dateFrom,
@@ -325,7 +325,7 @@ async function previewModule(context: RequestContext, body: Record<string, unkno
     cursor: 0,
     customerSignature,
     note: module === "subscriptions"
-      ? "Абонементы читаются по карточкам клиентов пакетами, чтобы не перегружать AlfaCRM."
+      ? "Абонементы читаются по карточкам клиентов пакетами. Остатки проверяются при импорте: отсутствующее или нечисловое значение не заменяется нулём, такая запись будет отклонена."
       : module === "finance"
         ? "Это движения CRM с выбранной даты. Они не дублируются в банковский ДДС автоматически."
         : "Предпросмотр ничего не записал в ArtHello OS.",
@@ -347,7 +347,7 @@ async function previewModule(context: RequestContext, body: Record<string, unkno
     count,
     countUnit,
     previewToken,
-    message: `Предпросмотр готов: ${count} ${countUnit}. В ArtHello OS пока ничего не изменено.`,
+    message: `Предпросмотр готов: ${count} ${countUnit}. В ArtHello OS пока ничего не изменено.${module === "subscriptions" ? " Остатки будут проверены при импорте; отсутствующие и нечисловые значения не заменяются нулём." : ""}`,
   });
 }
 
@@ -367,6 +367,11 @@ async function importModule(context: RequestContext, body: Record<string, unknow
   const signature = await previewSignatureFor(module, state, params);
   if (!previewToken || previewToken !== storedModule.previewToken || signature !== storedModule.previewSignature) {
     return privateJson({ error: "Параметры изменились после предпросмотра. Выполните предпросмотр ещё раз." }, 409);
+  }
+  const previewAt = Date.parse(storedModule.lastPreviewAt);
+  const previewAge = Date.now() - previewAt;
+  if (!Number.isFinite(previewAt) || previewAge < 0 || previewAge >= PREVIEW_TTL_MS) {
+    return privateJson({ error: "Предпросмотр устарел или его время не подтверждено. Выполните предпросмотр ещё раз; он действует 30 минут." }, 409);
   }
   const session = await storedSession(state);
   const localBranches = await readLocalBranches();
@@ -396,11 +401,12 @@ async function importModule(context: RequestContext, body: Record<string, unknow
   const rawCount = await upsertRawRecords(module, rows, batchId);
   let accepted = 0;
   let rejected = 0;
+  let invalidBalanceCount = 0;
   if (module === "families") ({ accepted, rejected } = await canonicalizeFamilies(rows, state, localBranches, context.actor));
   if (module === "staff") ({ accepted, rejected } = await canonicalizeStaff(rows, state, localBranches, context.actor));
   if (module === "groups") ({ accepted, rejected } = await canonicalizeGroups(rows, state, localBranches));
   if (module === "lessons") ({ accepted, rejected } = await canonicalizeLessons(rows, state, context.actor));
-  if (module === "subscriptions") ({ accepted, rejected } = await canonicalizeSubscriptions(rows, state));
+  if (module === "subscriptions") ({ accepted, rejected, invalidBalanceCount } = await canonicalizeSubscriptions(rows, state));
   if (module === "finance") ({ accepted, rejected } = await canonicalizeFinance(rows, state, params));
 
   // Only a fully fetched and fully accepted snapshot proves that missing records departed.
@@ -418,14 +424,14 @@ async function importModule(context: RequestContext, body: Record<string, unknow
   const moduleState: ModuleState = {
     ...storedModule,
     status: rejected ? "error" : complete ? "imported" : "importing",
-    previewToken: complete ? "" : storedModule.previewToken,
-    previewSignature: complete ? "" : storedModule.previewSignature,
+    previewToken: complete || rejected > 0 ? "" : storedModule.previewToken,
+    previewSignature: complete || rejected > 0 ? "" : storedModule.previewSignature,
     importedCount,
     lastImportAt: current,
-    cursor: complete ? 0 : nextCursor,
+    cursor: complete || rejected > 0 ? 0 : nextCursor,
     dateFrom: params.dateFrom,
     dateTo: params.dateTo,
-    note: rejected ? `Пропущено записей: ${rejected}. Выбывшие карточки не архивировались; исправьте данные и повторите предпросмотр.` : complete
+    note: rejected ? `Пропущено записей: ${rejected}.${invalidBalanceCount ? ` Остаток отсутствует или не является корректным числом: ${invalidBalanceCount}; прежние подтверждённые остатки сохранены.` : ""} Выбывшие карточки не архивировались; исправьте данные и повторите предпросмотр.` : complete
       ? moduleCompletionNote(module)
       : `Загружено пакетами: обработано клиентов ${nextCursor}. Нажмите «Продолжить загрузку».`,
   };
@@ -433,15 +439,16 @@ async function importModule(context: RequestContext, body: Record<string, unknow
   await persistState(next);
   await env.DB.batch([
     env.DB.prepare(`UPDATE integration_connections SET
-      last_success_at=?,received_count=received_count+?,accepted_count=accepted_count+?,
+      last_success_at=CASE WHEN ?=1 THEN ? ELSE last_success_at END,received_count=received_count+?,accepted_count=accepted_count+?,
       rejected_count=rejected_count+?,error_count=0,updated_at=? WHERE id=?`)
-      .bind(current, rows.length, accepted, rejected, current, CONNECTION_ID),
+      .bind(complete && rejected === 0 ? 1 : 0, current, rows.length, accepted, rejected, current, CONNECTION_ID),
     auditStatement(context.actor, "integration.alfacrm_module_imported", {
       module,
       fetched: rows.length,
       rawStored: rawCount,
       accepted,
       rejected,
+      invalidBalanceCount,
       complete,
       cursor: nextCursor,
       selectedRemoteBranches: selectedBranches,
@@ -455,9 +462,12 @@ async function importModule(context: RequestContext, body: Record<string, unknow
     fetched: rows.length,
     accepted,
     rejected,
+    invalidBalanceCount,
     complete,
     nextCursor,
-    message: complete
+    message: rejected
+      ? moduleState.note
+      : complete
       ? `Модуль «${moduleTitle(module)}» загружен. Принято: ${accepted}, пропущено: ${rejected}.`
       : `Пакет абонементов загружен. Обработано клиентов: ${nextCursor}. Продолжите загрузку.`,
   });
@@ -980,22 +990,25 @@ async function canonicalizeSubscriptions(rows: FetchedRecord[], state: AlfaState
   const current = new Date().toISOString();
   let accepted = 0;
   let rejected = 0;
+  let invalidBalanceCount = 0;
   for (const { remoteBranchId, item } of rows) {
     const id = scalar(item.id);
     const customerId = scalar(item.customer_id);
     if (!id || !customerId) { rejected += 1; continue; }
+    const balanceMinor = subscriptionBalanceMinor(item.balance);
+    if (balanceMinor === null) { rejected += 1; invalidBalanceCount += 1; continue; }
     const payloadHash = await hashText(JSON.stringify(item));
     statements.push(env.DB.prepare(`INSERT INTO alfacrm_customer_tariffs
       (remote_branch_id,customer_id,tariff_record_id,tariff_id,balance_minor,valid_from,valid_to,status,family_entity_id,payload_hash,imported_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(remote_branch_id,customer_id,tariff_record_id) DO UPDATE SET
         tariff_id=excluded.tariff_id,balance_minor=excluded.balance_minor,valid_from=excluded.valid_from,valid_to=excluded.valid_to,status=excluded.status,family_entity_id=excluded.family_entity_id,payload_hash=excluded.payload_hash,imported_at=excluded.imported_at`)
-      .bind(remoteBranchId, customerId, id, scalar(item.tariff_id), moneyMinor(item.balance), isoDate(item.b_date), isoDate(item.e_date), "Текущий снимок AlfaCRM", familyMap.get(`${remoteBranchId}:${customerId}`) ?? "", payloadHash, current));
+      .bind(remoteBranchId, customerId, id, scalar(item.tariff_id), balanceMinor, isoDate(item.b_date), isoDate(item.e_date), "Текущий снимок AlfaCRM", familyMap.get(`${remoteBranchId}:${customerId}`) ?? "", payloadHash, current));
     statements.push(lineageStatement("alfacrm_customer_tariffs", JSON.stringify([remoteBranchId, customerId, id]), "subscriptions", remoteBranchId, id));
     accepted += 1;
   }
   await runBatches(statements);
-  return { accepted, rejected };
+  return { accepted, rejected, invalidBalanceCount };
 }
 
 async function canonicalizeFinance(rows: FetchedRecord[], state: AlfaState, params: { dateFrom: string; dateTo: string }) {
@@ -1328,9 +1341,21 @@ function numberValue(value: unknown): number | null {
   return Number.isFinite(valueNumber) ? valueNumber : null;
 }
 
-function moneyMinor(value: unknown) {
-  const number = numberValue(value);
-  return number === null ? 0 : Math.round(number * 100);
+function subscriptionBalanceMinor(value: unknown): number | null {
+  let amount: number;
+  if (typeof value === "number") {
+    amount = value;
+  } else if (typeof value === "string") {
+    const text = value.trim();
+    // Preserve the existing numeric scale; reject missing or malformed values
+    // instead of inventing a confirmed zero or stripping arbitrary text.
+    if (!/^[+-]?(?:\d+|\d{1,3}(?:[ \u00a0\u202f]\d{3})+)(?:[.,]\d+)?$/.test(text)) return null;
+    amount = Number(text.replace(/[ \u00a0\u202f]/g, "").replace(",", "."));
+  } else {
+    return null;
+  }
+  const minor = Math.round(amount * 100);
+  return Number.isFinite(amount) && Number.isSafeInteger(minor) ? minor : null;
 }
 
 function normalizePhone(value: unknown) {

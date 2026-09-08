@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "Точечное исправление School lock и проверяемый production-выпуск R4",
+    "name": "Исправление ложного School fingerprint и проверяемый production-выпуск R5",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -177,14 +177,20 @@
       "M3 8a0bf989e0c271b009d8f14f0f3d21b3ab47966c: Quality34198562442, Proof34198562451, Verify34198562465 SUCCESS; 724 app tests; immutable artifact10044909919.",
       "D06534198718003 attempt2/job101982122878: bootstrap failed, image and cutover skipped. Failed repair is not rerun.",
       "Read-only diagnostic34203383943/job101987156275 2026-09-08T08:14:10Z: own UID/GID1000 lock0664 is the first failed condition; home valid, R3state-root/relay absent, School baseline healthy and unchanged.",
-      "Новый main3cc30b6ad2790bfe15d43ab38adebb9cdf6a1f26 сохраняется целиком; его Quality34204053510/Proof34204053460/Verify34204053516 успешны, R4 требует новых exact checks."
+      "Новый main3cc30b6ad2790bfe15d43ab38adebb9cdf6a1f26 сохраняется целиком; его Quality34204053510/Proof34204053460/Verify34204053516 успешны, R4 требует новых exact checks.",
+      "R4 main d872842e1dd99f1ec90790af54c00e9ff964b61c: Quality34206003379/Proof34206003315/Verify34206003343 SUCCESS,724/724 tests,artifact10047830480.",
+      "D06634206196494/job101996459827: actual lock0664→0644 verified08:46:30Z; controller refused school_changed_during_setup; image/cutover skipped.",
+      "Actual read-only34207628005/job102000795971:12samples reproduce Mounts.order-only variation, canonicalSchool/backend stable; School healthy unchanged; relay/egress/config-dir absent; ownstate-root0700/lock0644 valid; bothgatewaypublichealth200.",
+      "Isolated Alfa correctness:40/40 route/SQLite tests and ESLint PASS, independent review noP1/P2; no live gate/credentials/import change."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
       "Т‑Банк нельзя подключать боевым токеном до независимого подтверждения статического исходящего IP сервера и выпуска владельцем токена с минимальными правами чтения счетов и выписки",
       "School DNS/HTTPS к ArtHello возвращает EAI_AGAIN во внутренней Docker сети; network repair и живой SSO ещё не приняты",
       "Объединённый код слит и проверен, но production cutover и реальная банковская/Alfa приёмка ещё не выполнены",
-      "D065 остановлен на group-write собственного lock0664. Готовится точечная нормализация0644 владельцем, новый R4 с exact CI/image и живой приёмкой; в prod остаётся прежняя ArtHello."
+      "R5 исправляет воспроизведённую нестабильность порядка Mounts; фактическая установка relay/SSO и ArtHello cutover ещё не пройдены.",
+      "Cloud browser получает502 при здоровых публичных health с gateway; естественная авторизованная browser приёмка пока не выполнена.",
+      "Alfa live credentials/coverage и единицы balance не проверены; вывод CRM-снимков семье и фактическая выборочная загрузка ещё не приняты."
     ]
   },
   "stages": [
@@ -424,7 +430,7 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "Исправить права собственного School lock через проверенный R4, подтвердить естественный вход в дневник, опубликовать immutable ArtHello и проверить шесть пользовательских сценариев",
+    "result": "Пройти exact R5 gates, установить ограниченный relay, подтвердить естественный вход в дневник, опубликовать ArtHello и проверить шесть сценариев",
     "evidence": "Exact SHA/tree, продуктовые tests/lint/build, Quality/Proof/Verify, приватный immutable image/provenance, изолированный clone и проверенный backup до cutover, rollback и свежая живая приёмка шести сценариев"
   },
   "decisionLog": [
@@ -2151,6 +2157,67 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Exact CI, normalization + repair receipts, immutable release and live acceptance",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Исходное поручение Виталия; необходимое техническое исправление подтверждённого серверного условия выбрано исполнителем",
+      "approved_at": "2026-09-08",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска и живой приёмки",
+      "affected_stages": [
+        4,
+        7,
+        16,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Поручение владельца от 2026-09-08 вернуться к GitHub + собственной машине сборки и выложить все исправления в prod",
+      "decision_id": "DEC-2026-09-08-77",
+      "question": "Как устранить ложный fingerprint отказ без ослабления контроля School и закрыть подтверждённые ошибки Alfa импорта?",
+      "statement": "D-071: сортировать только полные Mounts при fingerprint, сохранить все значения и остальные exact guards; отдельный R5/D067; исправить unknown balance, incomplete success и preview TTL до live Alfa import.",
+      "context": "Actual read-only diagnostic34207628005 reproduced order-only Mounts variation and confirmed cleanup; original failing pair was not retained.",
+      "rationale": "Сравнение учитывает реальные изменения конфигурации, а финансовая интеграция не создаёт ложные нули и успех.",
+      "evidence": [
+        "R4 main d872842e1dd99f1ec90790af54c00e9ff964b61c: Quality34206003379/Proof34206003315/Verify34206003343 SUCCESS,724/724 tests,artifact10047830480.",
+        "D06634206196494/job101996459827: actual lock0664→0644 verified08:46:30Z; controller refused school_changed_during_setup; image/cutover skipped.",
+        "Actual read-only34207628005/job102000795971:12samples reproduce Mounts.order-only variation, canonicalSchool/backend stable; School healthy unchanged; relay/egress/config-dir absent; ownstate-root0700/lock0644 valid; bothgatewaypublichealth200.",
+        "Isolated Alfa correctness:40/40 route/SQLite tests and ESLint PASS, independent review noP1/P2; no live gate/credentials/import change."
+      ],
+      "assumptions": [
+        "Исходная failed-run пара inspect не реконструируется; defect воспроизведён отдельным реальным чтением",
+        "Public health200 не доказывает успешный SSO или шесть бизнес-сценариев"
+      ],
+      "dependencies": [
+        "D-063",
+        "D-064",
+        "D-065",
+        "D-069",
+        "Exact R5 CI/image",
+        "Natural SSO acceptance"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/359",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34207628005"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Убрать fingerprint guard или сортировать все массивы",
+          "reason": "Скрывает реальные изменения конфигурации/семантики; меняется только несмысловой порядок Mounts",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Проверить R5 и Alfa correctness, выполнить защищённую установку, естественный SSO и guarded publication с живой приёмкой",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "Exact CI, actual repair receipt, natural SSO, immutable cutover and six-scenario acceptance",
           "status": "in_progress"
         }
       ]

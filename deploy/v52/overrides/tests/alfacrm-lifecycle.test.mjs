@@ -106,6 +106,7 @@ async function importSnapshot(module, records, { mappings, token, body = {} } = 
   state.modules[module].previewToken = token ?? `preview-${crypto.randomUUID()}`;
   state.modules[module].previewSignature = await route.previewSignatureFor(module, state, params);
   state.modules[module].status = 'previewed';
+  state.modules[module].lastPreviewAt = new Date().toISOString();
   await route.persistState(state);
   const paths = { families: 'customer/index', staff: 'teacher/index', groups: 'group/index' };
   if (records !== null) mockRecords(Object.fromEntries(Object.entries(records).map(([branch, value]) => [`${branch}/${paths[module]}`, value])));
