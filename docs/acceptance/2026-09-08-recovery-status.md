@@ -1,3 +1,23 @@
+# M3 verified; D065 cancelled before job creation — 2026-09-08T07:22:13+00:00
+
+PR356 merged as `8a0bf989e0c271b009d8f14f0f3d21b3ab47966c` (M3), tree `5bc6c1bf49e7e609ec7a5e8193a60723c736f92f`.
+
+Exact first-attempt main checks all succeeded:
+- Quality `34198562442`.
+- Proof `34198562451`.
+- Verify `34198562465`, job `101971825380`: D065 Ruby contract, real non-root bootstrap (22/22 framework, no skips), R3 Docker DNS/TLS/UID443/ACL, and 724/724 application tests passed.
+- Immutable artifact `10044909919`, `arthello-v52-verification-34198562465`, 156173450 bytes, digest `sha256:7a966fa76f13d5397c77dcbe123b4812e4b76e8e1312e38f6eb9459846b537da`.
+
+D065 run `34198718003` was cancelled by pending concurrency before job creation at 2026-09-08T07:19:00Z. The jobs API returns `total_count=0, jobs=[]`. No School repair or ArtHello cutover started. Other consumers from the same event finished: D063 `34198717970` and D059 `34198718027` failed their exact historical identity gates before checkout/mutation; D064 `34198717913` was cancelled.
+
+The exposed failed-jobs retry action was attempted only after verifying the empty job list and completion of the competing runs. GitHub returned HTTP403 `This workflow run cannot be retried`, because there are no failed jobs. The connection exposes neither full-workflow rerun nor workflow_dispatch. No alternate token, browser fallback, or production transport was used to bypass that capability limit.
+
+Required next action is **Re-run all jobs on existing D065 run34198718003**. This reuses exact M3 evidence and does not trigger competing consumers from a fresh Verify event. The replay guard accepts a fully enumerated empty prior attempt; it still rejects any ambiguous repair or started ArtHello cutover.
+
+After that action: observe actual School repair receipt, perform real authenticated ArtHello Education-to-Diary navigation, record fresh schema3 acceptance only on success, safely resume the consumer, then verify production and all business workflows. No passing browser evidence JSON exists yet. ArtHello remains the previously observed live release `6596f69390ad539577ec2640e8ef40c7e12c22dc`; School has not been changed by D065. The six-item task is not claimed complete and the new product version is not claimed published.
+
+---
+
 # R2 deployment result and reduced-privilege R3 — 2026-09-08T06:58:21+00:00
 
 All exact M2 main gates passed: Quality `34196009060`, Proof `34196008965`, Verify `34196009029` (724 application tests plus actual relay Docker/Ruby gates).
