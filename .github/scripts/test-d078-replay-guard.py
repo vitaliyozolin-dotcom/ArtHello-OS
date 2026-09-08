@@ -61,6 +61,12 @@ class ReplayTests(unittest.TestCase):
             job['steps'][-1]['conclusion'] = conclusion
             self.assertFalse(replay.safe_previous_job(job))
 
+    def test_r8_incomplete_job_graph_cannot_authorize_replay(self):
+        bundle = dict(name='bundle', status='completed', conclusion='success', run_attempt=1, labels=['ubuntu-latest'])
+        for previous_jobs in ([], [bundle], [self.job]):
+            with self.subTest(names=[job['name'] for job in previous_jobs]), self.assertRaises(AssertionError):
+                replay.validate_previous_attempt(dict(total_count=len(previous_jobs), jobs=previous_jobs), 1)
+
     def test_r8_hosted_bundle_and_unstarted_cutover_can_resume(self):
         bundle = dict(name='bundle', status='completed', conclusion='success', run_attempt=1, labels=['ubuntu-latest'])
         jobs = dict(total_count=2, jobs=[bundle, self.job])

@@ -249,8 +249,8 @@ jobs:
         def validate_previous_attempt(jobs, attempt):
             assert jobs['total_count'] == len(jobs['jobs']), 'Attempt jobs pagination incomplete'
             names = [job['name'] for job in jobs['jobs']]
-            assert len(names) <= 2 and len(names) == len(set(names))
-            assert set(names) <= {'bundle', 'deploy'}, 'Unknown release capability job'
+            assert len(names) == 2 and len(names) == len(set(names)), 'Incomplete or duplicate release jobs'
+            assert set(names) == {'bundle', 'deploy'}, 'Missing or unknown release capability job'
             for job in jobs['jobs']:
                 assert job['run_attempt'] == attempt
                 if job['name'] == 'bundle':
