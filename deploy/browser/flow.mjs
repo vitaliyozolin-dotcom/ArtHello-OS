@@ -25,7 +25,7 @@ function phone(value) {
 }
 
 export function sameSchoolIdentity(viewer, login) {
-  if (!['teacher', 'methodist', 'deputy', 'director', 'admin', 'technical'].includes(viewer?.role)) return false;
+  if (!['teacher', 'methodist', 'deputy', 'director', 'admin', 'tech_admin'].includes(viewer?.role)) return false;
   if (login.includes('@')) return typeof viewer.email === 'string' && viewer.email.toLowerCase() === login.toLowerCase();
   const normalized = phone(login);
   return normalized.length >= 10 && normalized === phone(viewer.phone);

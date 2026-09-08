@@ -60,5 +60,9 @@ capabilities. This profile permits the syscall without granting any capability.
 Linux still requires SYS_CHROOT in the calling namespace. The entrypoint verifies
 outer CapEff=0, NoNewPrivs=1 and Seccomp=2 before browser launch; the browser must
 then prove its own namespace/PID/seccomp sandbox. No SYS_ADMIN, SYS_CHROOT or host
-privilege is added to the container. Only secret-free hosted pre-login launch
-failures may include browser launch diagnostics; production errors stay sanitized.
+privilege is added to the container. Secret-free hosted fixture failures may
+include synthetic-only browser diagnostics; production errors stay sanitized.
+The pinned Chromium reports `Layer 1 Sandbox: Namespace`; its actual table is
+checked along with PID/network namespaces and seccomp, not an obsolete UI label.
+Russian fixture HTML explicitly declares UTF-8 so accessible button names match
+the real UI. School's canonical `tech_admin` role is included (PR368 review).
