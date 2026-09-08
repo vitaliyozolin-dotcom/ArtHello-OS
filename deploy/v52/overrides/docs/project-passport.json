@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "Продолжение выпуска после проверенного восстановления School; корректные денежные остатки AlfaCRM",
+    "name": "Публикация с сохранённым School R5 и установкой бэкапов без host sudo",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -186,16 +186,20 @@
       "Actual R5 run34208952716/job102005327418 at2026-09-08T09:16:12Z: School repair SUCCESS, config2ba0ad1ce530db9c9abb622e5727e6345ab74a85699e121b718d9a0405b1f40a, UID1000, School source54242340f2d9b6a9887d69ecc03520ddf9f7982c unchanged; actual School-to-ArtHello HTTPS200/databaseAvailable true.",
       "R5 natural browser acceptance missing; image/clone/ArtHello cutover SKIPPED. Current cloud browser still502/Connection refused on2026-09-08 continuation. No real natural SSO PASS manufactured.",
       "Main advanced to c9e7da06f7d3637c0032af542085f28acb02816a with two concurrent lazy initialization refactors; Quality34212381727 failed stale source guard assertion. Preserve refactor; update meaningful regression coverage.",
-      "Official AlfaCRM API defines Customer.balance as money and paid_lesson_count as lessons; CustomerTariff.balance units and PayType numeric mapping5/12 are not established. Monetary projection correction and truthful blocked finance semantics are required before actual tenant acceptance."
+      "Official AlfaCRM API defines Customer.balance as money and paid_lesson_count as lessons; CustomerTariff.balance units and PayType numeric mapping5/12 are not established. Monetary projection correction and truthful blocked finance semantics are required before actual tenant acceptance.",
+      "R6 PR361 merged eb47c1360fbd701876a3c49efe029194707304db/tree7e7b14ecbfbfb29e1268edaae7e620e4a62eda1c; exact PR/main Quality/Proof/Verify SUCCESS;756/756 application tests; artifact10053891902 digestsha256:49dec25831de36cd10547a2c9475c3f6f12f780ba16d52145259345f567e9e05.",
+      "Actual R6 run34221458013/job102045375780 at11:35:42Z verified existing R5 relay read-only; original activation09:16:10Z, School source/config/container unchanged. Live ArtHello freshly observed6596f69390ad539577ec2640e8ef40c7e12c22dc.",
+      "Actual R6 gatewayUID995 has no root/passwordless sudo required by current host backup installer. Backup capability step failed; image/secret/clone/cutover skipped. No new host administration privilege obtained.",
+      "R7 backup/activation design independently reviewed: own named volumes, existing D1 RO forUID1000 worker, separate1002-only activation writer after public gates. Actual copy-up/read-only/WAL/restore/restart/marker isolation remain mandatory executable gates."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
       "Т‑Банк нельзя подключать боевым токеном до независимого подтверждения статического исходящего IP сервера и выпуска владельцем токена с минимальными правами чтения счетов и выписки",
-      "School DNS/HTTPS к ArtHello возвращает EAI_AGAIN во внутренней Docker сети; network repair и живой SSO ещё не приняты",
       "Объединённый код слит и проверен, но production cutover и реальная банковская/Alfa приёмка ещё не выполнены",
-      "R5 исправляет воспроизведённую нестабильность порядка Mounts; фактическая установка relay/SSO и ArtHello cutover ещё не пройдены.",
-      "Cloud browser получает502 при здоровых публичных health с gateway; естественная авторизованная browser приёмка пока не выполнена.",
-      "Alfa live credentials/coverage и единицы balance не проверены; вывод CRM-снимков семье и фактическая выборочная загрузка ещё не приняты."
+      "Фактический R6 gatewayUID995 не имеет sudo для host-установщика бэкапов; выбран R7 с меньшими требованиями к правам, требуется реализовать и проверить новый образ/worker/activation authority.",
+      "School transport восстановлен и read-only проверен; естественный авторизованный Education→дневник SSO не подтверждён, облачный браузер возвращает502 до формы входа.",
+      "Customer.balance подтверждён официальным API как денежное поле и исправления слиты; актуальные tenant credentials/coverage/выборочная синхронизация и реальная приёмка ещё не подтверждены. Alfa financial movements явно blocked до проверенного контракта PayType direction.",
+      "Новая ArtHello версия ещё не переключена: нужны первая backup+restore, exact immutable release и пользовательская приёмка шести сценариев."
     ]
   },
   "stages": [
@@ -435,7 +439,7 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "Исправить контракт денежных остатков AlfaCRM и регрессионную проверку, сохранить установленный School R5 через отдельную read-only проверку, пройти exact gates и естественный SSO, затем guarded ArtHello publication и живую приёмку шести сценариев",
+    "result": "Реализовать R7 backup worker и отдельный activation writer без host sudo, проверить actual Docker права/restore/расписание и exact CI, сохранить School R5, пройти natural SSO и guarded publication с живой приёмкой",
     "evidence": "Exact SHA/tree, продуктовые tests/lint/build, Quality/Proof/Verify, приватный immutable image/provenance, изолированный clone и проверенный backup до cutover, rollback и свежая живая приёмка шести сценариев"
   },
   "decisionLog": [
@@ -2291,6 +2295,78 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Exact CI, actual read-only relay/capability receipts, natural SSO, immutable production receipt and six-scenario acceptance",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Исходное поручение Виталия; необходимые исправления и сохранение уже установленной конфигурации выбраны исполнителем",
+      "approved_at": "2026-09-08",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска и живой приёмки",
+      "affected_stages": [
+        4,
+        7,
+        16,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Поручение владельца исправить шесть сценариев и опубликовать работающий продукт; повторное «Продолжай» 2026-09-08",
+      "decision_id": "DEC-2026-09-08-79",
+      "question": "Как завершить публикацию при фактически недоступном gateway sudo, сохраняя backup и независимую активацию банковской синхронизации?",
+      "statement": "D-073: заменить host installer отдельным UID1000 backup worker с существующей D1 RO и собственными volumes; отдельный UID1002 writer на отдельном activation volume после прежних public gates. Новый R7/D069, без hostroot/systemd/sudoers/permission fallback.",
+      "context": "R6 actual server run verified installed School but failed gateway backup installation capability; all cutover steps skipped.",
+      "rationale": "Уменьшает требуемые полномочия вместо получения отказавших; изолированный writer сохраняет невозможность активации банком из приложения/backup worker.",
+      "evidence": [
+        "R6 PR361 merged eb47c1360fbd701876a3c49efe029194707304db/tree7e7b14ecbfbfb29e1268edaae7e620e4a62eda1c; exact PR/main Quality/Proof/Verify SUCCESS;756/756 application tests; artifact10053891902 digestsha256:49dec25831de36cd10547a2c9475c3f6f12f780ba16d52145259345f567e9e05.",
+        "Actual R6 run34221458013/job102045375780 at11:35:42Z verified existing R5 relay read-only; original activation09:16:10Z, School source/config/container unchanged. Live ArtHello freshly observed6596f69390ad539577ec2640e8ef40c7e12c22dc.",
+        "Actual R6 gatewayUID995 has no root/passwordless sudo required by current host backup installer. Backup capability step failed; image/secret/clone/cutover skipped. No new host administration privilege obtained.",
+        "R7 backup/activation design independently reviewed: own named volumes, existing D1 RO forUID1000 worker, separate1002-only activation writer after public gates. Actual copy-up/read-only/WAL/restore/restart/marker isolation remain mandatory executable gates."
+      ],
+      "assumptions": [
+        "Image build задаёт ownership; actual hosted/gateway inspection подтверждают, иначе отказ без chown",
+        "Новый worker не получает secret/activation volume и не пишет рабочую БД",
+        "Natural SSO и real Alfa/банковская приёмка остаются непроверенными"
+      ],
+      "dependencies": [
+        "D-072",
+        "Existing authorized Docker deployment API",
+        "Actual RO WAL backup/restore and copy-up isolation proof",
+        "Exact R7 CI/image",
+        "Natural SSO and public-write boundary"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/361",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34221458013",
+        "https://docs.docker.com/engine/storage/volumes/"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Получить host root через privileged Docker, sudoers или root wrapper",
+          "reason": "Расширяет/обходит отсутствующие полномочия и не требуется для собственных Docker ресурсов",
+          "reopen_condition": "нет"
+        },
+        {
+          "option": "Убрать marker owner check или разрешить владельца backup-control",
+          "reason": "Backup worker либо приложение смогли бы сами разрешить банковскую синхронизацию",
+          "reopen_condition": "нет"
+        },
+        {
+          "option": "Повторить R6 без изменений либо объявить readiness по HTTP200",
+          "reason": "Фактический отказ прав повторится; health не доказывает SSO/backup/бизнес-сценарии",
+          "reopen_condition": "проверенные фактические изменения prerequisites"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Проверить отдельные backup/activation ресурсы нового точного образа, выполнить natural SSO, первую копию/restore и guarded ArtHello cutover с живой приёмкой",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "Actual Docker UID/mount/RO/WAL/restore/schedule tests, exact CI/artifact, real SSO and production acceptance",
           "status": "in_progress"
         }
       ]

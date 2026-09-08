@@ -1,27 +1,38 @@
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
-export const TOCHKA_AUTOSYNC_ACTIVATION_PATH = '/var/lib/arthello-v52-backup-control/tochka-autosync.activation';
+export const TOCHKA_AUTOSYNC_ACTIVATION_PATH = '/var/lib/arthello-v52-tochka-activation/tochka-autosync.activation';
 
-// The host publishes this bounded marker only after public release verification.
-// A fresh activation ID prevents a new container of the same SHA from accepting
-// a previous deployment's marker. The application mounts the directory readonly.
+// Only the post-verification one-shot writer UID1002 publishes in this dedicated
+// volume. App UID1000 mounts it read-only; the backup worker has no such mount.
+// V2 and a fresh nonce reject root-owned/V1 markers from all previous releases.
 export async function hasTochkaAutosyncActivation({ releaseSha, activationId,
-  markerPath = TOCHKA_AUTOSYNC_ACTIVATION_PATH, openMarker = open }) {
-  if (!/^[0-9a-f]{40}$/.test(releaseSha ?? '') || !/^[0-9a-f]{32}$/.test(activationId ?? '')) return false;
-  const expected = Buffer.from(`ARTHELLO_TOCHKA_AUTOSYNC_V1 ${releaseSha} ${activationId}\n`);
+  markerPath = TOCHKA_AUTOSYNC_ACTIVATION_PATH, openMarker = open, openDirectory = open }) {
+  if (!/^[0-9a-f]{40}$/.test(releaseSha ?? '') || !/^[0-9a-f]{64}$/.test(activationId ?? '')) return false;
+  const expected = Buffer.from(`ARTHELLO_TOCHKA_AUTOSYNC_V2 ${releaseSha} ${activationId}\n`);
+  let directory;
   let handle;
   try {
+    directory = await openDirectory(dirname(markerPath), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const parent = await directory.stat();
+    if (!parent.isDirectory() || parent.uid !== 1002 || parent.gid !== 1000 || (parent.mode & 0o7777) !== 0o750) return false;
     handle = await openMarker(markerPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    const stat = await handle.stat();
-    if (!stat.isFile() || stat.uid !== 0 || (stat.mode & 0o7777) !== 0o640 || stat.size !== expected.length || stat.size > 160) return false;
+    const safe = stat => stat.isFile() && stat.uid === 1002 && stat.gid === 1000 && stat.nlink === 1
+      && (stat.mode & 0o7777) === 0o640 && stat.size === expected.length && stat.size <= 160;
+    const before = await handle.stat();
+    if (!safe(before)) return false;
     const bytes = Buffer.alloc(161);
     const result = await handle.read(bytes, 0, bytes.length, 0);
-    return result.bytesRead === expected.length && bytes.subarray(0, result.bytesRead).equals(expected);
+    const after = await handle.stat();
+    return safe(after) && before.dev === after.dev && before.ino === after.ino
+      && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs
+      && result.bytesRead === expected.length && bytes.subarray(0, result.bytesRead).equals(expected);
   } catch {
     return false;
   } finally {
     await handle?.close().catch(() => {});
+    await directory?.close().catch(() => {});
   }
 }
 
