@@ -10,17 +10,25 @@ export function activeRelativePath() {
 }
 
 // Fixed identifiers only. No credentials, state values, message bodies or row exports.
-const tables = ['app_users', 'user_system_access', 'user_branch_access',
+const tables = ['app_users', 'app_systems', 'organization_branches', 'user_system_access', 'user_branch_access',
   'bank_accounts', 'bank_statement_imports', 'bank_transactions', 'financial_operations',
   'developer_feedback', 'developer_feedback_events', 'integration_connections',
   'integration_sync_runs', 'alfacrm_finance_snapshots', 'alfacrm_family_merge_candidates'];
 const checks = {
   bankLinks: { required: ['bank_transactions', 'financial_operations'], sql: "SELECT count(*) n FROM bank_transactions b LEFT JOIN financial_operations f ON f.id=b.financial_operation_id WHERE b.financial_operation_id<>'' AND f.id IS NULL" },
   accessUsers: { required: ['user_system_access', 'app_users'], sql: 'SELECT count(*) n FROM user_system_access a LEFT JOIN app_users u ON u.id=a.user_id WHERE u.id IS NULL' },
+  accessSystems: { required: ['user_system_access', 'app_systems'], sql: 'SELECT count(*) n FROM user_system_access a LEFT JOIN app_systems s ON s.id=a.system_id WHERE s.id IS NULL' },
+  branchUsers: { required: ['user_branch_access', 'app_users'], sql: 'SELECT count(*) n FROM user_branch_access a LEFT JOIN app_users u ON u.id=a.user_id WHERE u.id IS NULL' },
+  branchTargets: { required: ['user_branch_access', 'organization_branches'], sql: 'SELECT count(*) n FROM user_branch_access a LEFT JOIN organization_branches b ON b.id=a.branch_id WHERE b.id IS NULL' },
   feedbackAuthors: { required: ['developer_feedback', 'app_users'], sql: 'SELECT count(*) n FROM developer_feedback f LEFT JOIN app_users u ON u.id=f.author_user_id WHERE u.id IS NULL' },
   feedbackEvents: { required: ['developer_feedback_events', 'developer_feedback'], sql: 'SELECT count(*) n FROM developer_feedback_events e LEFT JOIN developer_feedback f ON f.id=e.feedback_id WHERE f.id IS NULL' },
   importConnections: { required: ['integration_sync_runs', 'integration_connections'], sql: 'SELECT count(*) n FROM integration_sync_runs r LEFT JOIN integration_connections c ON c.id=r.connection_id WHERE c.id IS NULL' },
 };
+
+export function diagnosticExitCode(result) {
+  return Object.values(result.tables).every(item => item.state === 'observed') &&
+    Object.values(result.checks).every(item => item.state === 'observed' && item.violations === 0) ? 0 : 2;
+}
 
 export function inspectDatabase(db) {
   db.exec('PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; PRAGMA busy_timeout=1000;');
@@ -61,7 +69,8 @@ if (process.argv.includes('--production-readonly')) {
     if (!info.isFile() || info.uid !== 1000 || (info.mode & 0o022)) throw new Error();
     db = new DatabaseSync(path, { readOnly: true, allowExtension: false });
     const result = inspectDatabase(db);
-    console.log(JSON.stringify({ ...result, observedAtUtc: new Date().toISOString(), productionMutations: false }));
+    process.exitCode = diagnosticExitCode(result);
+    console.log(JSON.stringify({ ...result, status: process.exitCode === 0 ? 'bounded_checks_complete' : 'incomplete_or_issues', observedAtUtc: new Date().toISOString(), productionMutations: false }));
   } catch {
     console.log(JSON.stringify({ schemaVersion: 1, status: 'blocked', reason: 'readonly_source_unavailable', liveAcceptance: 'not_run', productionMutations: false }));
     process.exitCode = 2;
