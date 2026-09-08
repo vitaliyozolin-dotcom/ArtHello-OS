@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "Восстановление School SSO и production-выпуск объединённых исправлений",
+    "name": "Непривилегированное восстановление School SSO и production-выпуск R3",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -172,13 +172,15 @@
       "2026-09-08: отдельно подготовлены кандидат планировщика Точки, backup UI/bridge, общая политика модулей, AlfaCRM corrections и isolated builder; проверка общего кандидата продолжается",
       "2026-09-08: свежий PR353 прошёл hosted Verify34189642144 и Quality34189642189; приватный image artifact10041764058 156071423bytes создан. Прежнюю quota/storage блокировку нельзя считать текущей; Proof34189642216 требует исправления visual/evidence. Текущий выпуск продолжается через доступные проверки, отдельный builder сохранён в PR353.",
       "D063 run34193103822/job101955030295: точная runtime диагностика и все cutover steps skipped",
-      "Main Quality34192976544, Proof34192976483, Verify34192976402 SUCCESS"
+      "Main Quality34192976544, Proof34192976483, Verify34192976402 SUCCESS",
+      "PR355/M2 8d4fc1cb589db8550cc4e7857e1a7537ac771ae5 прошёл exact main Quality/Proof/Verify и 724 теста. D064 repair остановился до мутаций на отсутствии sudo password; R3 уменьшает требуемые права и использует существующий Docker deployment access."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
       "Т‑Банк нельзя подключать боевым токеном до независимого подтверждения статического исходящего IP сервера и выпуска владельцем токена с минимальными правами чтения счетов и выписки",
       "School DNS/HTTPS к ArtHello возвращает EAI_AGAIN во внутренней Docker сети; network repair и живой SSO ещё не приняты",
-      "Объединённый код слит и проверен, но production cutover и реальная банковская/Alfa приёмка ещё не выполнены"
+      "Объединённый код слит и проверен, но production cutover и реальная банковская/Alfa приёмка ещё не выполнены",
+      "D064 не выполнил установку: SSH-пользователю недоступен общий sudo. Проверяется R3 с имеющимися Docker-правами и собственными файлами, без повышения привилегий."
     ]
   },
   "stages": [
@@ -418,7 +420,7 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "Выполнить reviewed School network repair через R2, подтвердить естественный SSO и выпустить точный M2 с последующей живой приёмкой всех шести сценариев",
+    "result": "Завершить проверенный R3 с меньшими привилегиями, восстановить School SSO, опубликовать новую ArtHello и проверить пользовательские сценарии",
     "evidence": "Exact SHA/tree, продуктовые tests/lint/build, Quality/Proof/Verify, приватный immutable image/provenance, изолированный clone и проверенный backup до cutover, rollback и свежая живая приёмка шести сценариев"
   },
   "decisionLog": [
@@ -2014,6 +2016,71 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Network repair receipt, actual SSO, exact image receipt и live acceptance",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Исходное поручение Виталия; технический способ с меньшими привилегиями выбран исполнителем",
+      "approved_at": "2026-09-08",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска и живой приёмки",
+      "affected_stages": [
+        4,
+        7,
+        16,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Поручение владельца от 2026-09-08 вернуться к GitHub + собственной машине сборки и выложить все исправления в prod",
+      "decision_id": "DEC-2026-09-08-75",
+      "question": "Как продолжить установку School relay, когда у SSH-пользователя нет общего sudo?",
+      "statement": "D-065: отдельный R3 использует имеющийся Docker deployment API и собственный приватный state непривилегированного SSH-пользователя, сохраняя межпроцессную координацию, exact-source gates и естественный SSO.",
+      "context": "M2 прошёл все main gates; D064 run34196169336/job101964316036 отказал на sudo до stdin/files/controller. Изменений School/ArtHello не было.",
+      "rationale": "Relay не требует host-root операций; исключение sudo и /var/lib снижает необходимые права без обхода отказа и без предоставления новых полномочий.",
+      "evidence": [
+        "M2 8d4fc1cb589db8550cc4e7857e1a7537ac771ae5: Quality34196009060, Proof34196008965, Verify34196009029 SUCCESS",
+        "D06434196169336/job101964316036: sudo password required before any remote controller mutation; image and cutover skipped",
+        "Independent no-sudo design assessment: existing Docker API + own files, no host-root writes or privilege escalation"
+      ],
+      "assumptions": [
+        "Все обязательные существующие права и School lock проверяются до мутаций; их отсутствие остаётся blocker"
+      ],
+      "dependencies": [
+        "D-063",
+        "D-064",
+        "D-065",
+        "Existing authorized Docker deployment access",
+        "Shared School lock",
+        "Exact R3 gates/image",
+        "Natural SSO evidence"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/355",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34196169336"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Получить host-root через Docker или изменить sudoers",
+          "reason": "Не требуется для relay, расширяет полномочия и обходит границу доступа",
+          "reopen_condition": "нет"
+        },
+        {
+          "option": "Ослабить replay guard старого R2",
+          "reason": "Failed repair сохраняет запрет повтора; новый controller получает новую source identity",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Проверить непривилегированный controller, применить через R3, выполнить естественный SSO, guarded ArtHello cutover и live acceptance",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "Exact CI, caller-owned durable receipt, real SSO and live release receipt",
           "status": "in_progress"
         }
       ]

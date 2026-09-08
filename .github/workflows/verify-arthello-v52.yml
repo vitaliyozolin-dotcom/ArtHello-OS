@@ -26,6 +26,14 @@ on:
       - .github/scripts/r2-school-repair-remote.py
       - .github/scripts/r2-alfacrm-env-presence.sh
       - .github/scripts/check-school-repair-receipt-r2.py
+      - .github/workflows/deploy-arthello-recovery-r3-20260908.yml
+      - .github/scripts/check-recovery-r3-contract.rb
+      - .github/scripts/check-school-live-acceptance-r3.py
+      - .github/scripts/check-school-repair-receipt-r3.py
+      - .github/scripts/d065-replay-guard.py
+      - .github/scripts/r3-school-repair-remote.py
+      - .github/scripts/test-recovery-r3-gates.py
+      - deploy/school/sso-relay-r3/**
   push:
     branches: [main]
     paths:
@@ -52,6 +60,14 @@ on:
       - .github/scripts/r2-school-repair-remote.py
       - .github/scripts/r2-alfacrm-env-presence.sh
       - .github/scripts/check-school-repair-receipt-r2.py
+      - .github/workflows/deploy-arthello-recovery-r3-20260908.yml
+      - .github/scripts/check-recovery-r3-contract.rb
+      - .github/scripts/check-school-live-acceptance-r3.py
+      - .github/scripts/check-school-repair-receipt-r3.py
+      - .github/scripts/d065-replay-guard.py
+      - .github/scripts/r3-school-repair-remote.py
+      - .github/scripts/test-recovery-r3-gates.py
+      - deploy/school/sso-relay-r3/**
 
 permissions:
   contents: read
@@ -373,10 +389,15 @@ jobs:
           ruby .github/scripts/check-recovery-release-contract.rb
           python3 -I .github/scripts/test-d063-release-gates.py
           ruby .github/scripts/check-recovery-r2-contract.rb
+          ruby .github/scripts/check-recovery-r3-contract.rb
           python3 -I .github/scripts/test-recovery-r2-gates.py
+          python3 -I .github/scripts/test-recovery-r3-gates.py
           node --test scripts/test/school-sso-relay.test.mjs
           python3 -I scripts/test/school-sso-repair.test.py
+          node --test scripts/test/school-sso-relay-r3.test.mjs
+          python3 -I scripts/test/school-sso-repair-r3.test.py
           bash scripts/test/school-sso-relay-docker-smoke.sh
+          bash scripts/test/school-sso-relay-r3-docker-smoke.sh
 
       - name: Validate release files without exposing data
         run: |
