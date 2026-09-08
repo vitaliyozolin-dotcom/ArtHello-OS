@@ -51,3 +51,11 @@ The frozen 105-file candidate is preserved in PR354, branch `codex/recovery-rele
 - Verify34192125095 stopped before build on the old exact single-TOCHKA service-binding assertion. Combined runtime legitimately adds the restricted backup transport; the strict expected binding set is being updated and independently reviewed.
 - Consumer review found two real pre-release risks: snapshot rollback after public writes and Tochka timer activation before verified cutover. The next revision must close both with a durable public-write boundary and SHA/attempt-bound activation marker. Production is unchanged while these are fixed.
 - Fresh natural School SSO still returns `central_denied`. No passing acceptance JSON has been created. Real bank and AlfaCRM synchronization, personnel acceptance, feedback persistence and backup installation/restore still require live checks.
+
+## Merged main and confirmed live School blocker
+
+PR354 was merged as `68a159dc647f35cdd30ce586fc6d5beb93b89a51` (tree `d43506688384741d70ad98066417d68e55e02387`). First-attempt main Quality34192976544, Proof34192976483 and Verify34192976402 all succeeded. D063run34193103822 verified exact source and reached its read-only School diagnostic, then stopped before all image/clone/cutover steps because genuine School acceptance was absent.
+
+The actual runtime reports Docker `arthello-os_backend` with `Internal=true`; ArtHello DNS and HTTPS both return EAI_AGAIN, matching the fresh callback's fetch_failed category. SQLite quick_check, required schema and UID1001 filesystem access pass. This identifies the first live blocker without claiming later SSO acceptance. See `2026-09-08-school-runtime-diagnostic.md`. The next change is a reviewed, narrow communication repair; the shared network must not be globally opened.
+
+ArtHello production has not yet changed. The old D059 run34193103820 correctly rejected the different release at its first gate, before checkout or cutover; it was not rearmed.

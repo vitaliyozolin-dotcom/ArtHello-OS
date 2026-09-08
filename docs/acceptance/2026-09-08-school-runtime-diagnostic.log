@@ -1,0 +1,15 @@
+2026-09-08T06:04:31.1426862Z ARTHELLO_D063_REPLAY_BOUNDARY=VERIFIED
+2026-09-08T06:04:31.1544377Z ARTHELLO_PRODUCTION_AUTHORIZATION=PLATFORM_ENVIRONMENT
+2026-09-08T06:04:52.7096570Z ARTHELLO_EXACT_SHA_GATES=VERIFIED
+2026-09-08T06:04:54.3539767Z ARTHELLO_CHECKOUT=68a159dc647f35cdd30ce586fc6d5beb93b89a51
+2026-09-08T06:04:54.3541497Z ARTHELLO_TREE=d43506688384741d70ad98066417d68e55e02387
+2026-09-08T06:04:56.3649830Z {"imageId":"sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df","release":"54242340f2d9b6a9887d69ecc03520ddf9f7982c","startedAt":"2026-09-03T11:13:44.872449964Z","health":"healthy","networkMode":"arthello-os_backend","readOnlyRootfs":false}
+2026-09-08T06:04:56.4034981Z {"schoolNetwork":{"driver":"bridge","internal":true}}
+2026-09-08T06:04:56.4330829Z {"callbackErrorCounts": {"fetch_failed": 1}, "lastSeenUtc": {"fetch_failed": "2026-09-08T05:04:58.482488724Z"}}
+2026-09-08T06:04:56.5553373Z {"origins":{"schoolMatches":true,"arthelloMatches":true},"runtime":{"node":"v24.20.0","centralSecretConfigured":true,"passwordlessPepperConfigured":false}}
+2026-09-08T06:04:56.5632557Z {"arthelloDns":{"ok":false,"errorCode":"EAI_AGAIN"}}
+2026-09-08T06:04:56.6238279Z {"arthelloHttps":{"ok":false,"errorCode":"EAI_AGAIN"}}
+2026-09-08T06:04:56.6246370Z {"databaseFilesystem":{"effectiveUid":1001,"effectiveGid":1001,"directory":{"exists":true,"uid":1001,"gid":1001,"mode":"750","readable":true,"writable":true},"database":{"exists":true,"uid":1001,"gid":1001,"mode":"640","readable":true,"writable":true},"wal":{"exists":true,"uid":1001,"gid":1001,"mode":"640","readable":true,"writable":true},"shm":{"exists":true,"uid":1001,"gid":1001,"mode":"640","readable":true,"writable":true}}}
+2026-09-08T06:04:56.6272392Z {"schema":{"missing":[],"quickCheckOk":true}}
+2026-09-08T06:04:56.6294589Z {"databaseStats":{"userCount":13,"centrallyLinked":0,"invalidCentralVersions":0},"successfulReconciliations":{"count":0,"latestAt":null}}
+2026-09-08T06:04:57.1306631Z ARTHELLO_SCHOOL_SSO_ACCEPTANCE=BLOCKED: real fresh browser acceptance is absent, stale or mismatched; no cutover attempted
