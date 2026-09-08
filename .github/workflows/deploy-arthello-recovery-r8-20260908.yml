@@ -53,6 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
+      archive_name: ${{ steps.bundle.outputs.archive_name }}
       archive_sha: ${{ steps.bundle.outputs.archive_sha }}
       fingerprint: ${{ steps.bundle.outputs.fingerprint }}
       archive_bytes: ${{ steps.bundle.outputs.archive_bytes }}
@@ -96,13 +97,14 @@ jobs:
           archive_sha="$(sha256sum "$RUNNER_TEMP/browser-bundle/browser.tar.gz" | cut -d ' ' -f 1)"
           fingerprint="$(docker image inspect "$image_id" | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq | sha256sum | cut -d ' ' -f 1)"
           printf 'archive_sha=%s\nfingerprint=%s\n' "$archive_sha" "$fingerprint" >> "$GITHUB_OUTPUT"
+          printf 'archive_name=server-browser-%s-%s-%s\n' "$CHECKED_SOURCE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           archive_bytes="$(stat -c %s "$RUNNER_TEMP/browser-bundle/browser.tar.gz")"
           expanded_bytes="$(gzip -cd "$RUNNER_TEMP/browser-bundle/browser.tar.gz" | wc -c)"
           printf 'archive_bytes=%s\nexpanded_bytes=%s\n' "$archive_bytes" "$expanded_bytes" >> "$GITHUB_OUTPUT"
           printf 'BROWSER_BUNDLE_BYTES archive=%s expanded=%s\n' "$archive_bytes" "$expanded_bytes"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: server-browser-${{ env.CHECKED_SOURCE_SHA }}
+          name: ${{ steps.bundle.outputs.archive_name }}
           path: ${{ runner.temp }}/browser-bundle/browser.tar.gz
           compression-level: 0
           retention-days: 2
@@ -772,7 +774,7 @@ jobs:
         printf 'IMPORT_DOCKER_MIN_KIB=%s\n' "$(( (3 * EXPANDED_BYTES + 1023) / 1024 + 2097152 ))" >> "$GITHUB_ENV"
     - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
       with:
-        name: server-browser-${{ env.CHECKED_SOURCE_SHA }}
+        name: ${{ needs.bundle.outputs.archive_name }}
         path: ${{ runner.temp }}/browser-bundle-${{ github.run_id }}-${{ github.run_attempt }}
     - name: Verify archive, import off-host bundle and verify portable identity
       env:
