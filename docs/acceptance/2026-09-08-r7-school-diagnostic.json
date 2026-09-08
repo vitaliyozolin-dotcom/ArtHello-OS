@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "run": 34227595623,
+  "job": 102065872459,
+  "attempt": 1,
+  "source": "actual-completed-job-log",
+  "objects": [
+    {
+      "activatedAtUtc": "2026-09-08T09:16:10Z",
+      "executionUid": 1000,
+      "mode": "verified-existing",
+      "relayContainerId": "b6939c754019bfa4c873b2b1b3bc7fb3fcf2542cd72be3981fdbcec6335794b3",
+      "repairConfigSha256": "2ba0ad1ce530db9c9abb622e5727e6345ab74a85699e121b718d9a0405b1f40a",
+      "runtimeConfigSha256": "1bdef8cee0ed6e5b69e4aeaa24ae4a7441487dc5e69b9c4f48d9a125a47204a9",
+      "schemaVersion": 2,
+      "schoolContainerId": "bab402851b23dc6e34f1c8d273f97535d2a2e0f6485d821f3f9420c228dd29b7",
+      "schoolImageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+      "schoolSourceSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+      "state": "verified",
+      "stateDirectorySha256": "cedd256dabc1dc6ff105887d31b5893bb384cdfe751b532e0c115d69ff6bfeee",
+      "verifiedAtUtc": "2026-09-08T12:44:12Z"
+    },
+    {
+      "schemaVersion": 1,
+      "sourceGid": 1000,
+      "sourceMode": "0600",
+      "sourceOwnershipVerified": true,
+      "sourceReadable": true,
+      "sourceUid": 1000
+    },
+    {
+      "backupWorkerReady": false,
+      "dockerApiRead": true,
+      "gatewayUid": 995,
+      "scope": "existing-deployment-authority"
+    },
+    {
+      "health": "healthy",
+      "imageId": "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df",
+      "networkMode": "arthello-os_backend",
+      "readOnlyRootfs": false,
+      "release": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+      "startedAt": "2026-09-03T11:13:44.872449964Z"
+    },
+    {
+      "schoolNetwork": {
+        "driver": "bridge",
+        "internal": true
+      }
+    },
+    {
+      "callbackErrorCounts": {},
+      "lastSeenUtc": {}
+    },
+    {
+      "origins": {
+        "arthelloMatches": true,
+        "schoolMatches": true
+      },
+      "runtime": {
+        "centralSecretConfigured": true,
+        "node": "v24.20.0",
+        "passwordlessPepperConfigured": false
+      }
+    },
+    {
+      "arthelloDns": {
+        "addressCount": 1,
+        "expectedGatewayPresent": false,
+        "ok": true
+      }
+    },
+    {
+      "arthelloHttps": {
+        "databaseAvailable": true,
+        "healthy": true,
+        "httpStatus": 200
+      }
+    },
+    {
+      "databaseFilesystem": {
+        "database": {
+          "exists": true,
+          "gid": 1001,
+          "mode": "640",
+          "readable": true,
+          "uid": 1001,
+          "writable": true
+        },
+        "directory": {
+          "exists": true,
+          "gid": 1001,
+          "mode": "750",
+          "readable": true,
+          "uid": 1001,
+          "writable": true
+        },
+        "effectiveGid": 1001,
+        "effectiveUid": 1001,
+        "shm": {
+          "exists": true,
+          "gid": 1001,
+          "mode": "640",
+          "readable": true,
+          "uid": 1001,
+          "writable": true
+        },
+        "wal": {
+          "exists": true,
+          "gid": 1001,
+          "mode": "640",
+          "readable": true,
+          "uid": 1001,
+          "writable": true
+        }
+      }
+    },
+    {
+      "schema": {
+        "missing": [],
+        "quickCheckOk": true
+      }
+    },
+    {
+      "databaseStats": {
+        "centrallyLinked": 0,
+        "invalidCentralVersions": 0,
+        "userCount": 13
+      },
+      "successfulReconciliations": {
+        "count": 0,
+        "latestAt": null
+      }
+    },
+    {
+      "scope": "legacy-arthello-os-api-on-school-host",
+      "targetPresent": false
+    },
+    {
+      "ALFACRM_API_KEY": false,
+      "ALFACRM_DOMAIN": false,
+      "ALFACRM_EMAIL": false,
+      "scope": "current-arthello",
+      "targetPresent": true
+    }
+  ]
+}

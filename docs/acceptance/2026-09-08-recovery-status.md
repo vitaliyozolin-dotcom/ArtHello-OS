@@ -1,3 +1,19 @@
+# R7 source and hosted image verified; actual server stopped before cutover on missing natural diary acceptance — 2026-09-08T12:44:15Z
+
+PR362 is merged at `dbe630145a3828643fcfb9f202b1239e8cc54826`, exact tree `183babfe77884ae6375b50e19488b02bb0a2d461`. Exact PR and main Quality/Proof/Verify passed. Main Verify34227255309/job102064300592 executed760 application tests,20 real UID authority tests and actual Docker backup/restore/manual/restart/activation/controller fixtures successfully. Immutable artifact10056362266 is recorded in the R7 release checkpoint.
+
+Actual protected R7 consumer34227595623/job102065872459 attempt1 passed identity, replay, exact-main gates, installed R5 read-only verification and gateway/source prerequisites. D1 was actually readable by UID1000, UID/GID1000, mode0600; gateway995 has the existing Docker deployment authority. The R6 unavailable root-installer blocker no longer stops this continuation.
+
+At12:44:12Z ArtHello was still `6596f69390ad539577ec2640e8ef40c7e12c22dc`. School R5 identity/source/image/StartedAt remained preserved. Actual School-side HTTPS received ArtHello200 with healthy database. However, the cloud browser again returned502 before login; no natural authenticated Education-to-diary pass was observed. The mandatory fresh browser gate failed at12:44:15Z. Image loading, secret resolution, backup installation and cutover were all skipped. No production publication or all-six acceptance is claimed.
+
+Resume from this exact main and consumer only after genuine current navigation evidence satisfying `.github/scripts/check-school-live-acceptance-r7.py` exists. Do not fabricate evidence, infer SSO from HTTP200, blindly rerun, or advance main just to update status. A real owner navigation/screenshot/time can supply the missing observation if this browser remains inaccessible; that is a functional observation, not another deployment approval. Repeat natural login after cutover and complete the other five live acceptance scenarios.
+
+Alfa is still substantively incomplete: `Customer.balance` and scoped family display are implemented; payment direction/currency effects and accepted selective tenant imports remain unverified, and R7 does not add its background import schedule. The documented PayType read endpoint may be used for a later authorized read-only diagnostic, but names/IDs cannot be guessed into money movements. Missing env variables do not establish absence of encrypted DB credentials.
+
+See `2026-09-08-r7-release-checkpoint.json`, `2026-09-08-r7-existing-relay-receipt.json` and `2026-09-08-r7-school-diagnostic.json` for actual evidence. Earlier R6/R5 history follows unchanged.
+
+---
+
 # R6 source verified; installed School relay verified read-only; gateway backup installation capability unavailable — 2026-09-08T11:35:43Z
 
 PR361 merged as eb47c1360fbd701876a3c49efe029194707304db, tree 7e7b14ecbfbfb29e1268edaae7e620e4a62eda1c. All exact first-attempt PR and main Quality, Proof and Verify runs succeeded. PR hosted Verify executed 756/756 application tests; the R6 Ruby contract, 23 gate and 29 read-only relay tests also passed. Full identifiers and immutable artifact digest are in `2026-09-08-r6-release-checkpoint.json`.
