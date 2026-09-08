@@ -19,7 +19,8 @@
     "test:refactoring": "node --import ./artifacts/api-server/node_modules/tsx/dist/loader.mjs --test scripts/test/alfacrm-client-lazy-config.test.mjs scripts/test/db-lazy-initialization.test.mjs scripts/test/legacy-sync-inventory.test.mjs scripts/test/dependency-hygiene.test.mjs scripts/test/import-extension-policy.test.mjs scripts/test/migration-metadata.test.mjs scripts/test/openapi-codegen-contract.test.mjs scripts/test/phase-one-governance.test.mjs scripts/test/zod-import-boundary.test.mjs scripts/test/zod-semantics-characterization.test.mjs",
     "test:postgres": "pnpm --filter @workspace/api-server run test:postgres",
     "test:workflow-policy": "node --test scripts/test/workflow-policy.test.mjs && node scripts/workflow-policy.mjs",
-    "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:refactoring && pnpm run test:sites",
+    "test:e2e-preflight": "node --test scripts/test/server-e2e-preflight.test.mjs",
+    "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:refactoring && pnpm run test:sites && pnpm run test:e2e-preflight",
     "typecheck:libs": "tsc --build --force",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --filter @workspace/sites-control --if-present run typecheck"
   },
