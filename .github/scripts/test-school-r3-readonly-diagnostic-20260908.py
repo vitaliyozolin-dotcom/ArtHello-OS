@@ -10,7 +10,7 @@ import types
 import unittest
 from unittest import mock
 
-spec = importlib.util.spec_from_file_location('diagnose', Path(__file__).with_name('school-r3-readonly-diagnostic.py'))
+spec = importlib.util.spec_from_file_location('diagnose', Path(__file__).with_name('school-r3-readonly-diagnostic-20260908.py'))
 d = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(d)
 

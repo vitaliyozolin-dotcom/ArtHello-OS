@@ -2,7 +2,9 @@ name: Read-only School R3 bootstrap diagnosis
 'on':
   push:
     branches:
-    - codex/r3-bootstrap-diagnostic-20260908
+    - main
+    paths:
+    - .github/workflows/school-r3-bootstrap-diagnostic-20260908.yml
 permissions:
   contents: read
   actions: read
@@ -11,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   probe:
-    if: github.event_name == 'push' && github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.ref == 'refs/heads/codex/r3-bootstrap-diagnostic-20260908'
+    if: github.event_name == 'push' && github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.ref == 'refs/heads/main'
       && github.actor == 'vitaliyozolin-dotcom' && github.triggering_actor == 'vitaliyozolin-dotcom'
     runs-on:
     - self-hosted
@@ -30,7 +32,9 @@ jobs:
         api=https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS
         headers=(--header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'X-GitHub-Api-Version: 2022-11-28')
         main="$(curl --fail --silent --show-error --max-time 30 "${headers[@]}" "$api/git/ref/heads/main" | jq -er '.object.sha')"
-        test "$main" = 8a0bf989e0c271b009d8f14f0f3d21b3ab47966c
+        test "$main" = "$GITHUB_SHA"
+        commit="$(curl --fail --silent --show-error --max-time 30 "${headers[@]}" "$api/commits/$GITHUB_SHA")"
+        jq -e --arg sha "$GITHUB_SHA" '.sha == $sha and .commit.verification.verified == true and (.parents | length) == 1 and .parents[0].sha == "8a0bf989e0c271b009d8f14f0f3d21b3ab47966c"' <<<"$commit" >/dev/null
         run="$(curl --fail --silent --show-error --max-time 30 "${headers[@]}" "$api/actions/runs/34198718003")"
         jq -e '.run_attempt == 2 and .status == "completed" and .conclusion == "failure" and .head_sha == "8a0bf989e0c271b009d8f14f0f3d21b3ab47966c"' <<<"$run" >/dev/null
         jobs="$(curl --fail --silent --show-error --max-time 30 "${headers[@]}" "$api/actions/runs/34198718003/attempts/2/jobs?per_page=100")"
