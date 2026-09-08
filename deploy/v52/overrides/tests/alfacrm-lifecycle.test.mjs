@@ -411,7 +411,7 @@ test('complete multiple-page response preserves every record and stops at the de
 test('subscription continuation retains preview only until completion and rejects exhausted replay', async t => {
   const { sql } = await setup(t);
   await importSnapshot('families', { '1': Array.from({ length: 16 }, (_, i) => ({ id: i + 1, name: `Pupil ${i + 1}` })) }, { mappings: { '1': 'BR-SCHOOL' } });
-  mockRecords({ '1/customer-tariff/index': (_body, url) => {
+  mockRecords({ '1/customer/index': body => Response.json({ items: [{ id: body.id, balance: 321 }], total: 1 }), '1/customer-tariff/index': (_body, url) => {
     const customerId = new URL(String(url)).searchParams.get('customer_id');
     return Response.json({ items: [{ id: Number(customerId), customer_id: customerId, balance: 1 }], total: 1 });
   } });
@@ -432,7 +432,7 @@ test('subscription continuation retains preview only until completion and reject
   assert.equal(final.state.modules.subscriptions.previewToken, '');
   assert.equal(final.state.modules.subscriptions.previewSignature, '');
   assert.equal(final.state.modules.subscriptions.cursor, 0);
-  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_customer_tariffs').get().n, 16);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_customer_balances').get().n, 16);
   let fetches = 0; mockRecords({}, () => { fetches += 1; });
   assert.equal((await route.importModule(actor(), { module: 'subscriptions', previewToken: token })).status, 409);
   assert.equal(fetches, 0);
@@ -448,7 +448,7 @@ test('changing the family roster invalidates an existing subscription preview', 
   const response = await route.importModule(actor(), { module: 'subscriptions', previewToken: preview.previewToken });
   assert.equal(response.status, 409);
   assert.equal(tariffReads, 0);
-  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_customer_tariffs').get().n, 0);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_customer_balances').get().n, 0);
 });
 
 test('concurrent POST imports consume one preview exactly once', async t => {
@@ -468,13 +468,14 @@ test('concurrent POST imports consume one preview exactly once', async t => {
   assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM entities WHERE entity_type='Ребёнок'").get().n, 1);
 });
 
-test('CRM finance remains isolated from bank DDS and refund type remains an outflow', async t => {
+test('CRM finance remains isolated from bank DDS until payment direction is verified', async t => {
   const { sql, state } = await setup(t);
   const rows = [{ remoteBranchId: '1', item: { id: 1, date: '2026-09-01', income: 100, pay_type_id: 5 } }];
   await route.upsertRawRecords('finance', rows);
-  await route.canonicalizeFinance(rows, state, { dateFrom: '2026-09-01', dateTo: '2026-09-07' });
-  const row = sql.prepare('SELECT direction,amount_minor FROM alfacrm_finance_snapshots').get();
-  assert.equal(row.direction, 'Списание'); assert.equal(row.amount_minor, 10000);
+  const result = await route.canonicalizeFinance(rows, state, { dateFrom: '2026-09-01', dateTo: '2026-09-07' });
+  assert.deepEqual(result, { accepted: 0, rejected: 1, projectionBlocked: true });
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_finance_snapshots').get().n, 0);
+  assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM alfacrm_raw_observations WHERE module='finance'").get().n, 1);
   assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='financial_operations'").get().n, 0);
 });
 

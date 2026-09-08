@@ -66,9 +66,9 @@ test("historical lesson and finance reads are bounded by explicit dates", () => 
 });
 
 test("AlfaCRM refund and outflow payment types cannot become receipts just because income is positive", () => {
-  assert.match(route, /ALFACRM_OUTFLOW_PAY_TYPE_IDS = new Set\(\["5", "12"\]\)/);
-  assert.match(route, /pay_type_id/);
-  assert.match(route, /isOutflow \? "Списание" : "Поступление"/);
+  assert.doesNotMatch(route, /ALFACRM_OUTFLOW_PAY_TYPE_IDS|isOutflow/);
+  assert.match(route, /FINANCE_DIRECTION_UNVERIFIED_MESSAGE/);
+  assert.match(route, /return \{ accepted: 0, rejected: rows.length, projectionBlocked: true \}/);
 });
 
 test("staff import never grants access and mobile inputs avoid browser zoom", () => {

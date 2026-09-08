@@ -26,7 +26,9 @@ const PREVIEW_TTL_MS = 30 * 60 * 1000;
 const editors = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "INTEGRATIONS"]);
 const ALFACRM_IMPORT_ENABLED_VALUES = new Set(["1", "true", "yes"]);
 const IMPORT_BLOCKED_MESSAGE = "Импорт ожидает завершения проверки данных и подтверждения замены ранее раскрытого ключа AlfaCRM. Подключение и предпросмотр доступны.";
-const ALFACRM_OUTFLOW_PAY_TYPE_IDS = new Set(["5", "12"]);
+// The documented monetary source is Customer.balance, not CustomerTariff.balance.
+const SUBSCRIPTION_SOURCE_CONTRACT = "customer-balance-v2";
+const FINANCE_DIRECTION_UNVERIFIED_MESSAGE = "Сырые движения AlfaCRM сохранены. Для денежных проводок требуется подтверждённое сопоставление типов платежей с поступлением и списанием; ID типа и знак суммы сами по себе направление не подтверждают.";
 const moduleOrder = ["families", "staff", "groups", "lessons", "subscriptions", "finance"] as const;
 type ModuleKey = typeof moduleOrder[number];
 type JsonRecord = Record<string, unknown>;
@@ -325,9 +327,9 @@ async function previewModule(context: RequestContext, body: Record<string, unkno
     cursor: 0,
     customerSignature,
     note: module === "subscriptions"
-      ? "Абонементы читаются по карточкам клиентов пакетами. Остатки проверяются при импорте: отсутствующее или нечисловое значение не заменяется нулём, такая запись будет отклонена."
+      ? "Текущие денежные остатки читаются заново из карточек импортированных клиентов. Количество занятий и баланс абонемента не считаются деньгами. Отсутствующий денежный остаток не заменяется нулём."
       : module === "finance"
-        ? "Это движения CRM с выбранной даты. Они не дублируются в банковский ДДС автоматически."
+        ? "Это движения CRM с выбранной даты. После чтения они сохраняются как исходные данные; денежные проводки ожидают подтверждённого сопоставления типов платежей."
         : "Предпросмотр ничего не записал в ArtHello OS.",
   };
   const next = { ...state, modules: { ...state.modules, [module]: moduleState } };
@@ -386,8 +388,25 @@ async function importModule(context: RequestContext, body: Record<string, unknow
     const start = Math.min(storedModule.cursor, customers.length);
     const portion = customers.slice(start, start + SUBSCRIPTION_CHUNK_SIZE);
     for (const customer of portion) {
+      // Refresh only this already imported customer; never reuse the family import's
+      // potentially stale balance or accept an upstream response that ignored its ID.
+      const freshCustomers = await fetchPaged(session, `${customer.remoteBranchId}/customer/index`, { id: customer.customerId, is_study: 1, removed: 0 });
+      if (freshCustomers.length > 1 || freshCustomers.some((item) => scalar(item.id) !== customer.customerId)) {
+        throw new Error("AlfaCRM вернула другой состав клиентов вместо выбранной карточки. Остатки не импортированы.");
+      }
       const tariffs = await fetchPaged(session, `${customer.remoteBranchId}/customer-tariff/index?customer_id=${encodeURIComponent(customer.customerId)}`, { dead: false });
-      rows.push(...tariffs.map((item) => ({ remoteBranchId: customer.remoteBranchId, item: { ...item, customer_id: scalar(item.customer_id) || customer.customerId } })));
+      if (tariffs.some((item) => scalar(item.customer_id) && scalar(item.customer_id) !== customer.customerId)) {
+        throw new Error("AlfaCRM вернула абонемент другого клиента. Остатки не импортированы.");
+      }
+      // Namespace v2 records so old tariff IDs cannot collide with customer IDs.
+      // Preserve both original payloads verbatim inside the immutable observation.
+      rows.push({ remoteBranchId: customer.remoteBranchId, item: {
+        id: `${SUBSCRIPTION_SOURCE_CONTRACT}:${customer.customerId}`,
+        customer_id: customer.customerId,
+        source_contract: SUBSCRIPTION_SOURCE_CONTRACT,
+        customer: freshCustomers[0] ?? null,
+        tariffs,
+      } });
     }
     nextCursor = start + portion.length;
     complete = nextCursor >= customers.length;
@@ -402,12 +421,13 @@ async function importModule(context: RequestContext, body: Record<string, unknow
   let accepted = 0;
   let rejected = 0;
   let invalidBalanceCount = 0;
+  let projectionBlocked = false;
   if (module === "families") ({ accepted, rejected } = await canonicalizeFamilies(rows, state, localBranches, context.actor));
   if (module === "staff") ({ accepted, rejected } = await canonicalizeStaff(rows, state, localBranches, context.actor));
   if (module === "groups") ({ accepted, rejected } = await canonicalizeGroups(rows, state, localBranches));
   if (module === "lessons") ({ accepted, rejected } = await canonicalizeLessons(rows, state, context.actor));
   if (module === "subscriptions") ({ accepted, rejected, invalidBalanceCount } = await canonicalizeSubscriptions(rows, state));
-  if (module === "finance") ({ accepted, rejected } = await canonicalizeFinance(rows, state, params));
+  if (module === "finance") ({ accepted, rejected, projectionBlocked } = await canonicalizeFinance(rows));
 
   // Only a fully fetched and fully accepted snapshot proves that missing records departed.
   // Raw observations stay immutable; only the selected current projection is reconciled.
@@ -416,14 +436,14 @@ async function importModule(context: RequestContext, body: Record<string, unknow
   }
   if ((module === "groups" || module === "families") && rejected === 0) await syncMembershipsFromFamilyRaw(state, context.actor);
   await env.DB.prepare("UPDATE alfacrm_import_batches SET status=? WHERE id=?")
-    .bind(rejected ? "partial" : "complete", batchId).run();
+    .bind(projectionBlocked ? "blocked" : rejected ? "partial" : "complete", batchId).run();
   const current = new Date().toISOString();
   const importedCount = module === "subscriptions"
     ? (storedModule.status === "importing" ? storedModule.importedCount : 0) + accepted
     : accepted;
   const moduleState: ModuleState = {
     ...storedModule,
-    status: rejected ? "error" : complete ? "imported" : "importing",
+    status: rejected || projectionBlocked ? "error" : complete ? "imported" : "importing",
     previewToken: complete || rejected > 0 ? "" : storedModule.previewToken,
     previewSignature: complete || rejected > 0 ? "" : storedModule.previewSignature,
     importedCount,
@@ -431,7 +451,7 @@ async function importModule(context: RequestContext, body: Record<string, unknow
     cursor: complete || rejected > 0 ? 0 : nextCursor,
     dateFrom: params.dateFrom,
     dateTo: params.dateTo,
-    note: rejected ? `Пропущено записей: ${rejected}.${invalidBalanceCount ? ` Остаток отсутствует или не является корректным числом: ${invalidBalanceCount}; прежние подтверждённые остатки сохранены.` : ""} Выбывшие карточки не архивировались; исправьте данные и повторите предпросмотр.` : complete
+    note: projectionBlocked ? FINANCE_DIRECTION_UNVERIFIED_MESSAGE : rejected ? `Пропущено записей: ${rejected}.${invalidBalanceCount ? ` Остаток отсутствует или не является корректным числом: ${invalidBalanceCount}; прежние подтверждённые остатки сохранены.` : ""} Выбывшие карточки не архивировались; исправьте данные и повторите предпросмотр.` : complete
       ? moduleCompletionNote(module)
       : `Загружено пакетами: обработано клиентов ${nextCursor}. Нажмите «Продолжить загрузку».`,
   };
@@ -441,7 +461,7 @@ async function importModule(context: RequestContext, body: Record<string, unknow
     env.DB.prepare(`UPDATE integration_connections SET
       last_success_at=CASE WHEN ?=1 THEN ? ELSE last_success_at END,received_count=received_count+?,accepted_count=accepted_count+?,
       rejected_count=rejected_count+?,error_count=0,updated_at=? WHERE id=?`)
-      .bind(complete && rejected === 0 ? 1 : 0, current, rows.length, accepted, rejected, current, CONNECTION_ID),
+      .bind(complete && rejected === 0 && !projectionBlocked ? 1 : 0, current, rows.length, accepted, rejected, current, CONNECTION_ID),
     auditStatement(context.actor, "integration.alfacrm_module_imported", {
       module,
       fetched: rows.length,
@@ -449,7 +469,8 @@ async function importModule(context: RequestContext, body: Record<string, unknow
       accepted,
       rejected,
       invalidBalanceCount,
-      complete,
+      projectionBlocked,
+      complete: complete && !projectionBlocked,
       cursor: nextCursor,
       selectedRemoteBranches: selectedBranches,
       dateFrom: params.dateFrom,
@@ -463,9 +484,10 @@ async function importModule(context: RequestContext, body: Record<string, unknow
     accepted,
     rejected,
     invalidBalanceCount,
-    complete,
+    projectionBlocked,
+    complete: complete && !projectionBlocked,
     nextCursor,
-    message: rejected
+    message: rejected || projectionBlocked
       ? moduleState.note
       : complete
       ? `Модуль «${moduleTitle(module)}» загружен. Принято: ${accepted}, пропущено: ${rejected}.`
@@ -685,6 +707,20 @@ async function ensureAlfaTables() {
       imported_at TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY(remote_branch_id,module,record_id)
+    )`),
+    // Additive v2 projection. The legacy tariff table is retained for evidence,
+    // but no longer written or used as a monetary source.
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS alfacrm_customer_balances (
+      remote_branch_id TEXT NOT NULL,
+      local_branch_id TEXT NOT NULL,
+      customer_id TEXT NOT NULL,
+      family_entity_id TEXT NOT NULL,
+      balance_minor INTEGER NOT NULL,
+      paid_lesson_count INTEGER,
+      source_field TEXT NOT NULL CHECK(source_field='Customer.balance'),
+      payload_hash TEXT NOT NULL,
+      imported_at TEXT NOT NULL,
+      PRIMARY KEY(remote_branch_id,customer_id)
     )`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS alfacrm_customer_tariffs (
       remote_branch_id TEXT NOT NULL,
@@ -992,65 +1028,38 @@ async function canonicalizeSubscriptions(rows: FetchedRecord[], state: AlfaState
   let rejected = 0;
   let invalidBalanceCount = 0;
   for (const { remoteBranchId, item } of rows) {
-    const id = scalar(item.id);
     const customerId = scalar(item.customer_id);
-    if (!id || !customerId) { rejected += 1; continue; }
-    const balanceMinor = subscriptionBalanceMinor(item.balance);
+    const customer = record(item.customer);
+    const familyId = familyMap.get(`${remoteBranchId}:${customerId}`);
+    if (!customerId || !familyId || item.source_contract !== SUBSCRIPTION_SOURCE_CONTRACT
+      || item.id !== `${SUBSCRIPTION_SOURCE_CONTRACT}:${customerId}`
+      || (customer && scalar(customer.id) !== customerId)) { rejected += 1; continue; }
+    const balanceMinor = customerBalanceMinor(customer?.balance);
     if (balanceMinor === null) { rejected += 1; invalidBalanceCount += 1; continue; }
+    // Lessons are an optional, separate integer fact. Missing/invalid is unknown.
+    const rawLessons = customer?.paid_lesson_count;
+    const lessons = typeof rawLessons === "number" && Number.isSafeInteger(rawLessons) ? rawLessons : null;
     const payloadHash = await hashText(JSON.stringify(item));
-    statements.push(env.DB.prepare(`INSERT INTO alfacrm_customer_tariffs
-      (remote_branch_id,customer_id,tariff_record_id,tariff_id,balance_minor,valid_from,valid_to,status,family_entity_id,payload_hash,imported_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(remote_branch_id,customer_id,tariff_record_id) DO UPDATE SET
-        tariff_id=excluded.tariff_id,balance_minor=excluded.balance_minor,valid_from=excluded.valid_from,valid_to=excluded.valid_to,status=excluded.status,family_entity_id=excluded.family_entity_id,payload_hash=excluded.payload_hash,imported_at=excluded.imported_at`)
-      .bind(remoteBranchId, customerId, id, scalar(item.tariff_id), balanceMinor, isoDate(item.b_date), isoDate(item.e_date), "Текущий снимок AlfaCRM", familyMap.get(`${remoteBranchId}:${customerId}`) ?? "", payloadHash, current));
-    statements.push(lineageStatement("alfacrm_customer_tariffs", JSON.stringify([remoteBranchId, customerId, id]), "subscriptions", remoteBranchId, id));
+    statements.push(env.DB.prepare(`INSERT INTO alfacrm_customer_balances
+      (remote_branch_id,local_branch_id,customer_id,family_entity_id,balance_minor,paid_lesson_count,source_field,payload_hash,imported_at)
+      VALUES (?,?,?,?,?,?,'Customer.balance',?,?)
+      ON CONFLICT(remote_branch_id,customer_id) DO UPDATE SET
+        local_branch_id=excluded.local_branch_id,family_entity_id=excluded.family_entity_id,balance_minor=excluded.balance_minor,paid_lesson_count=excluded.paid_lesson_count,
+        source_field=excluded.source_field,payload_hash=excluded.payload_hash,imported_at=excluded.imported_at`)
+      .bind(remoteBranchId, state.branchMappings[remoteBranchId], customerId, familyId, balanceMinor, lessons, payloadHash, current));
+    statements.push(lineageStatement("alfacrm_customer_balances", JSON.stringify([remoteBranchId, customerId]), "subscriptions", remoteBranchId, scalar(item.id)));
     accepted += 1;
   }
   await runBatches(statements);
   return { accepted, rejected, invalidBalanceCount };
 }
 
-async function canonicalizeFinance(rows: FetchedRecord[], state: AlfaState, params: { dateFrom: string; dateTo: string }) {
-  const familyMap = await familyEntityMap(state);
-  const statements = [];
-  const current = new Date().toISOString();
-  let accepted = 0;
-  let rejected = 0;
-  for (const { remoteBranchId, item } of rows) {
-    const id = scalar(item.id);
-    const operationDate = isoDate(item.document_date ?? item.date);
-    const customerId = scalar(item.customer_id ?? item.student_id);
-    const income = numberValue(item.income);
-    const outcome = numberValue(item.outcome);
-    const direct = numberValue(item.amount);
-    const numeric = direct !== null ? direct : income !== null ? income : outcome !== null ? -Math.abs(outcome) : null;
-    const payTypeId = scalar(item.pay_type_id ?? item.payment_type_id);
-    const isOutflow = ALFACRM_OUTFLOW_PAY_TYPE_IDS.has(payTypeId) || (numeric !== null && numeric < 0);
-    if (!id || !operationDate || numeric === null || operationDate < params.dateFrom || operationDate > params.dateTo) { rejected += 1; continue; }
-    const payloadHash = await hashText(JSON.stringify(item));
-    statements.push(env.DB.prepare(`INSERT INTO alfacrm_finance_snapshots
-      (remote_branch_id,payment_id,customer_id,family_entity_id,operation_date,direction,amount_minor,category,payload_hash,imported_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(remote_branch_id,payment_id) DO UPDATE SET
-        customer_id=excluded.customer_id,family_entity_id=excluded.family_entity_id,operation_date=excluded.operation_date,direction=excluded.direction,amount_minor=excluded.amount_minor,category=excluded.category,payload_hash=excluded.payload_hash,imported_at=excluded.imported_at`)
-      .bind(
-        remoteBranchId,
-        id,
-        customerId,
-        familyMap.get(`${remoteBranchId}:${customerId}`) ?? "",
-        operationDate,
-        isOutflow ? "Списание" : "Поступление",
-        Math.round(Math.abs(numeric) * 100),
-        scalar(item.pay_item_name ?? item.payment_type_name ?? item.pay_type_name ?? item.note) || "Движение AlfaCRM",
-        payloadHash,
-        current,
-      ));
-    statements.push(lineageStatement("alfacrm_finance_snapshots", JSON.stringify([remoteBranchId, id]), "finance", remoteBranchId, id));
-    accepted += 1;
-  }
-  await runBatches(statements);
-  return { accepted, rejected };
+async function canonicalizeFinance(rows: FetchedRecord[]) {
+  // Pay.income is the documented amount. PayType ID 5/12, a positive/negative
+  // amount, and undocumented amount/outcome aliases do not prove its direction.
+  // Keep the bounded raw observations, but do not overwrite a prior projection
+  // or claim successful money import without a verified PayType dictionary map.
+  return { accepted: 0, rejected: rows.length, projectionBlocked: true };
 }
 
 async function familyEntityMap(state: AlfaState) {
@@ -1228,7 +1237,8 @@ function moduleParams(module: ModuleKey, body: Record<string, unknown>) {
 
 async function previewSignatureFor(module: ModuleKey, state: AlfaState, params: { dateFrom: string; dateTo: string }) {
   const mappings = Object.entries(state.branchMappings).sort(([left], [right]) => left.localeCompare(right));
-  return hashText(JSON.stringify({ endpoint: state.endpoint, connectedAt: state.connectedAt, module, mappings, params }));
+  const sourceContract = module === "subscriptions" ? SUBSCRIPTION_SOURCE_CONTRACT : module === "finance" ? "pay-direction-unverified-v2" : undefined;
+  return hashText(JSON.stringify({ endpoint: state.endpoint, connectedAt: state.connectedAt, module, mappings, params, sourceContract }));
 }
 
 function alfaCrmImportEnabled() {
@@ -1241,7 +1251,7 @@ function moduleCompletionNote(module: ModuleKey) {
   if (module === "staff") return "Сотрудники созданы без выдачи доступов. Доступы остаются отдельным действием владельца.";
   if (module === "groups") return "Группы связаны с импортированными педагогами; членство детей восстановлено по данным AlfaCRM.";
   if (module === "lessons") return "Загружены только занятия выбранного периода.";
-  if (module === "subscriptions") return "Сохранены текущие снимки абонементов и их балансов по импортированным клиентам.";
+  if (module === "subscriptions") return "Сохранены текущие денежные остатки из карточек клиентов. Остатки занятий хранятся отдельно; исходные абонементы сохранены без пересчёта в деньги.";
   return "Сохранены только движения AlfaCRM с даты перехода. Они не добавлены в банковский ДДС, чтобы не задвоить деньги.";
 }
 
@@ -1333,29 +1343,19 @@ function record(value: unknown): JsonRecord | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : null;
 }
 
-function numberValue(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  const text = scalar(value).replace(/\s+/g, "").replace(",", ".").replace(/[^\d.+-]/g, "");
-  if (!text) return null;
-  const valueNumber = Number(text);
-  return Number.isFinite(valueNumber) ? valueNumber : null;
-}
-
-function subscriptionBalanceMinor(value: unknown): number | null {
-  let amount: number;
-  if (typeof value === "number") {
-    amount = value;
-  } else if (typeof value === "string") {
-    const text = value.trim();
-    // Preserve the existing numeric scale; reject missing or malformed values
-    // instead of inventing a confirmed zero or stripping arbitrary text.
-    if (!/^[+-]?(?:\d+|\d{1,3}(?:[ \u00a0\u202f]\d{3})+)(?:[.,]\d+)?$/.test(text)) return null;
-    amount = Number(text.replace(/[ \u00a0\u202f]/g, "").replace(",", "."));
-  } else {
-    return null;
-  }
-  const minor = Math.round(amount * 100);
-  return Number.isFinite(amount) && Number.isSafeInteger(minor) ? minor : null;
+function customerBalanceMinor(value: unknown): number | null {
+  // Preserve exact hundredths of the provider's money unit. Never infer currency,
+  // round extra precision, strip text, or coerce missing/invalid values to zero.
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "number" && !Number.isFinite(value)) return null;
+  const text = String(value).trim();
+  if (!/^[+-]?(?:\d+|\d{1,3}(?:[ \u00a0\u202f]\d{3})+)(?:[.,]\d{1,2})?$/.test(text)) return null;
+  const normalized = text.replace(/[ \u00a0\u202f]/g, "").replace(",", ".");
+  const negative = normalized.startsWith("-");
+  const [whole, fraction = ""] = normalized.replace(/^[+-]/, "").split(".");
+  const minor = (BigInt(whole) * BigInt(100) + BigInt(fraction.padEnd(2, "0"))) * (negative ? BigInt(-1) : BigInt(1));
+  const result = Number(minor);
+  return Number.isSafeInteger(result) ? result : null;
 }
 
 function normalizePhone(value: unknown) {

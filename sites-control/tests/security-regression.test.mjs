@@ -41,7 +41,7 @@ test("API defaults to an authenticated, origin-restricted surface", async () => 
   assert.doesNotMatch(client, /localStorage|auth_token|Authorization:\s*`Bearer/);
   assert.match(client, /credentials:\s*'same-origin'/);
   assert.doesNotMatch(`${alfa}\n${coverage}\n${integrations}`, /arthellonew\.s20\.online/i);
-  assert.match(alfa, /if \(!DOMAIN\)[\s\S]*throw new Error\("ALFACRM_DOMAIN is required/);
+  assert.match(alfa, /export function createAlphaCrmConfig\([\s\S]*if \(!domain\)[\s\S]*throw new Error\("ALFACRM_DOMAIN is required/);
   assert.match(alfa, /SerializedRequestQueue/);
   assert.match(alfa, /minIntervalMs:\s*260/);
   assert.match(alfa, /authInFlight/);
