@@ -1,3 +1,12 @@
+# R2 merged — 2026-09-08 06:46 UTC
+
+PR355 merged as `8d4fc1cb589db8550cc4e7857e1a7537ac771ae5` (M2).
+Exact PR head `cb1f917c7ab4aa879be2f83f4fbec3252a8b685b` passed first-attempt Quality `34195727761`, Proof `34195727725`, Verify `34195727733`. Actual hosted Ruby contract, Docker DNS/TLS/non-root443/ACL, and 724 application tests passed. Verified private artifact ID `10043854782`, 156167124 bytes, digest `sha256:e83b8b18fc499085563c20467616085a1211c3558139460b563b6a9e0c897666`.
+
+Exact M2 main checks are running. No production mutation yet. The D064 consumer will repair School only after all exact main gates, then stop before ArtHello cutover until genuine fresh schema2 browser evidence exists.
+
+---
+
 # Current R2 candidate — 2026-09-08 06:41 UTC
 
 PR355: https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/355
