@@ -340,3 +340,56 @@ test('retirement CLI rejects unknown modes and unverified current output without
     assert.deepEqual(JSON.parse(result.stdout), { kind: 'server-browser-image-retirement', result: 'blocked', reason });
   }
 });
+
+test('retirement accepts the observed single own-repository self digest for each bounded target', async () => {
+  for (const current of [false, true]) {
+    const fixture = retirementFixture({ current, alterImage: value => {
+      value[0].RepoDigests = ['arthello-e2e@' + value[0].Id];
+    } });
+    const retire = current ? retireCurrentBrowserImage : retirePreviousBrowserImage;
+    assert.deepEqual(await retire(fixture.dependencies), { kind: 'server-browser-image-retirement', result: 'retired' });
+    assert.deepEqual(fixture.calls.filter(args => args[1] === 'rm'), [['image', 'rm', '--no-prune', fixture.target.id]]);
+    assert.equal(fixture.calls.filter(args => args[1] === 'inspect').length, 4);
+    assert.equal(fixture.calls.filter(args => args[0] === 'ps').length, 2);
+    assert.equal(fixture.githubCalls.filter(path => path === '/git/ref/heads/main').length, 2);
+    assert.ok(fixture.calls.slice(-2).every(args => args[1] === 'ls'));
+  }
+});
+
+test('retirement still rejects null, arbitrary digests, foreign repositories and every extra reference', async () => {
+  const shapes = [
+    () => null,
+    () => undefined,
+    id => 'arthello-e2e@' + id,
+    () => ['arthello-e2e@sha256:' + 'f'.repeat(64)],
+    id => ['PRIVATE_REPOSITORY@' + id],
+    id => ['arthello-e2e@' + id, 'arthello-e2e@' + id],
+    id => ['arthello-e2e@' + id, 'PRIVATE_REPOSITORY@' + id],
+    id => ['arthello-e2e@' + id + '\n'],
+    () => [{ private: 'PRIVATE_DIGEST_VALUE' }],
+  ];
+  for (const current of [false, true]) {
+    for (const shape of shapes) {
+      const fixture = retirementFixture({ current, alterImage: value => { value[0].RepoDigests = shape(value[0].Id); } });
+      const retire = current ? retireCurrentBrowserImage : retirePreviousBrowserImage;
+      assert.deepEqual(await retire(fixture.dependencies), {
+        kind: 'server-browser-image-retirement', result: 'blocked', reason: 'retirement_image_identity_failed',
+      });
+      assert.equal(fixture.calls.some(args => args[1] === 'rm'), false);
+    }
+  }
+});
+
+test('self-digest representation is rechecked immediately before retirement and cannot admit a changed reference', async () => {
+  for (const current of [false, true]) {
+    const fixture = retirementFixture({ current, alterImage: (value, count) => {
+      value[0].RepoDigests = ['arthello-e2e@' + value[0].Id];
+      if (count > 2) value[0].RepoDigests.push('PRIVATE_REFERENCE@' + value[0].Id);
+    } });
+    const retire = current ? retireCurrentBrowserImage : retirePreviousBrowserImage;
+    assert.deepEqual(await retire(fixture.dependencies), {
+      kind: 'server-browser-image-retirement', result: 'blocked', reason: 'retirement_final_image_identity_failed',
+    });
+    assert.equal(fixture.calls.some(args => args[1] === 'rm'), false);
+  }
+});

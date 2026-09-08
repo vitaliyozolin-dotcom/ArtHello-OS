@@ -130,3 +130,11 @@ removal. Missing verification never enables a tag fallback. Cleanup failures
 stay visible; the original downloaded-archive cleanup is unchanged. This final
 step must not be placed between a release controller's pre/post browser checks.
 
+
+D074 run34288036300 observed that the gateway stores the fixed R8 image with one
+RepoDigests self-reference, `arthello-e2e@` followed by its exact full image ID.
+All identity and fingerprint checks matched. The D079 representation check now
+accepts either an empty array or exactly that one same-ID reference. Null,
+foreign repositories, different digests and multiple references remain blocked.
+All target, recovery-artifact, current-main, container-consumer and capacity
+guards remain unchanged. The observation itself performed no deletion or login.

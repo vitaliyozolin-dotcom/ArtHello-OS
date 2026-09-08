@@ -38,7 +38,8 @@ function retirementImageMatches(snapshot, target) {
   const image = snapshot[0];
   return image?.Id === target.id
     && Array.isArray(image.RepoTags) && image.RepoTags.length === 1 && image.RepoTags[0] === target.tag
-    && Array.isArray(image.RepoDigests) && image.RepoDigests.length === 0
+    && Array.isArray(image.RepoDigests) && (image.RepoDigests.length === 0
+      || (image.RepoDigests.length === 1 && image.RepoDigests[0] === 'arthello-e2e@' + target.id))
     && image.Config?.User === '1000:1000'
     && image.Config.Labels?.['org.arthello.role'] === 'e2e-browser'
     && image.Config.Labels?.['org.opencontainers.image.revision'] === target.source;
