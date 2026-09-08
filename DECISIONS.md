@@ -1,5 +1,21 @@
 # ArtHello OS — Decisions
 
+## D-065 — Устанавливать School relay с имеющимися правами служебного пользователя
+
+Дата: 2026-09-08  
+Статус: принято как уменьшение требуемых привилегий в рамках поручения владельца восстановить систему и опубликовать исправления  
+Владелец: Исполнитель ArtHello OS
+
+PR355 слит как 8d4fc1cb589db8550cc4e7857e1a7537ac771ae5 (M2). Exact first-attempt main Quality 34196009060, Proof 34196008965 и Verify 34196009029 успешны; в настоящем hosted Docker проверены DNS, TLS, UID1001 port443, source ACL и 724 теста приложения. D064 run 34196169336 / job 101964316036 остановился на sudo: a password is required. Bootstrap вызывает sudo до чтения stdin, создания файлов и выполнения repair.py: School relay/network/state не создавались; ArtHello image/clone/cutover пропущены.
+
+Полные права root требовались выбранному размещению state в /var/lib, а не самому relay. Новый R3 использует существующий разрешённый Docker deployment API служебного SSH-пользователя и только его собственные файлы. Запрещено получать root через Docker, привилегированные контейнеры, host-root mounts, изменение sudoers, chown чужих host-файлов или повышение прав доступа. Если имеющихся прав недостаточно, это остаётся явным blocker.
+
+Каталог state выводится из passwd-home фактического непривилегированного euid, а не из произвольного HOME/XDG input. Проверяются uid/getuid, безопасные владельцы и права каталогов, отсутствие symlink, exact owner файла, ограниченный размер; private state/receipt сохраняются атомарно с no-replace и fsync. Relay получает только readonly bind собственных публичных scripts/runtime.json, без state receipts, секретов, Docker socket и School данных. Receipt и labels явно фиксируют реального владельца state; root ownership не заявляется. Чужие/root-owned объекты не усыновляются и не меняются.
+
+Сохраняются межпроцессная блокировка School, общий workflow concurrency, точная проверка current main перед мутацией, образа/контейнера/сетей/ACL, обычный DNS/TLS probe из School и проверка неизменности School. Недоступная обязательная блокировка не заменяется молча частной блокировкой. Existing verified relay допускает только read-only resume; неоднозначные или чужие состояния блокируются.
+
+Новый отдельный consumer закреплён за PR356, веткой codex/school-arthello-recovery-r3-20260908 и parent M2. D059/D063/D064 и их failed-repair replay guards не перепривязываются. R3 требует своих exact Quality/Proof/Verify, своего immutable image, свежего естественного Education→Diary browser evidence после проверенной конфигурации relay. Все D063 backup/clone/public-write boundary и отложенная активация банковской синхронизации сохраняются. Смена метода установки не считается успешным SSO или приёмкой шести пользовательских сценариев.
+
 ## D-064 — Восстановить точечную связь School с ArtHello и продолжить выпуск R2
 
 Дата: 2026-09-08  
