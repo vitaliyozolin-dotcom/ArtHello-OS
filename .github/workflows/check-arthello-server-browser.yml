@@ -50,6 +50,8 @@ jobs:
     outputs:
       archive_sha: ${{ steps.bundle.outputs.archive_sha }}
       fingerprint: ${{ steps.bundle.outputs.fingerprint }}
+      archive_bytes: ${{ steps.bundle.outputs.archive_bytes }}
+      expanded_bytes: ${{ steps.bundle.outputs.expanded_bytes }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -89,6 +91,10 @@ jobs:
           archive_sha="$(sha256sum "$RUNNER_TEMP/browser-bundle/browser.tar.gz" | cut -d ' ' -f 1)"
           fingerprint="$(docker image inspect "$image_id" | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq | sha256sum | cut -d ' ' -f 1)"
           printf 'archive_sha=%s\nfingerprint=%s\n' "$archive_sha" "$fingerprint" >> "$GITHUB_OUTPUT"
+          archive_bytes="$(stat -c %s "$RUNNER_TEMP/browser-bundle/browser.tar.gz")"
+          expanded_bytes="$(gzip -cd "$RUNNER_TEMP/browser-bundle/browser.tar.gz" | wc -c)"
+          printf 'archive_bytes=%s\nexpanded_bytes=%s\n' "$archive_bytes" "$expanded_bytes" >> "$GITHUB_OUTPUT"
+          printf 'BROWSER_BUNDLE_BYTES archive=%s expanded=%s\n' "$archive_bytes" "$expanded_bytes"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: server-browser-${{ env.CHECKED_SOURCE_SHA }}
@@ -137,6 +143,29 @@ jobs:
           persist-credentials: false
           submodules: false
           lfs: false
+      - name: Measure import capacity before downloading the verified archive
+        env:
+          ARCHIVE_BYTES: ${{ needs.bundle.outputs.archive_bytes }}
+          EXPANDED_BYTES: ${{ needs.bundle.outputs.expanded_bytes }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          read -r required_scratch required_docker < <("$PRECHECK_NODE" --input-type=module -e '
+            import { capacity } from "./deploy/browser/capacity.mjs";
+            const required = capacity(Number(process.env.ARCHIVE_BYTES), Number(process.env.EXPANDED_BYTES));
+            process.stdout.write(required.scratchKiB + " " + required.dockerKiB + "\n");
+          ')
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          scratch_available="$(df -Pk -- "$RUNNER_TEMP" | awk 'NR==2 {print $4}')"
+          docker_available="$(df -Pk -- "$docker_root" | awk 'NR==2 {print $4}')"
+          [[ "$scratch_available" =~ ^[0-9]+$ && "$docker_available" =~ ^[0-9]+$ ]]
+          printf 'BROWSER_IMPORT_CAPACITY_KIB scratch_available=%s scratch_required=%s docker_available=%s docker_required=%s\n' \
+            "$scratch_available" "$required_scratch" "$docker_available" "$required_docker"
+          if (( scratch_available < required_scratch || docker_available < required_docker )); then
+            echo 'SERVER_BROWSER_BLOCKED=insufficient_import_space'
+            exit 2
+          fi
+          printf 'IMPORT_DOCKER_MIN_KIB=%s\n' "$(( (3 * EXPANDED_BYTES + 1023) / 1024 + 2097152 ))" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: server-browser-${{ env.CHECKED_SOURCE_SHA }}
@@ -148,13 +177,25 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          import_stage=archive_identity
+          trap 'printf "SERVER_BROWSER_BLOCKED=import_%s\n" "$import_stage"' ERR
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
           [[ "$EXPECTED_ARCHIVE_SHA" =~ ^[a-f0-9]{64}$ && "$EXPECTED_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
           archive="$RUNNER_TEMP/browser-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/browser.tar.gz"
           test "$(sha256sum "$archive" | cut -d ' ' -f 1)" = "$EXPECTED_ARCHIVE_SHA"
+          echo 'SERVER_BROWSER_ARCHIVE=verified'
           # Import only; never pull/build/install on the production server.
-          test "$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print $4}')" -gt 8388608
+          # Capacity was checked on the actual Docker store with measured sizes.
+          import_stage=capacity_recheck
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          docker_available="$(df -Pk -- "$docker_root" | awk 'NR==2 {print $4}')"
+          scratch_available="$(df -Pk -- "$RUNNER_TEMP" | awk 'NR==2 {print $4}')"
+          [[ "$IMPORT_DOCKER_MIN_KIB" =~ ^[0-9]+$ && "$docker_available" =~ ^[0-9]+$ && "$scratch_available" =~ ^[0-9]+$ ]]
+          printf 'BROWSER_IMPORT_RECHECK_KIB docker_available=%s docker_required=%s scratch_available=%s\n' "$docker_available" "$IMPORT_DOCKER_MIN_KIB" "$scratch_available"
+          (( docker_available >= IMPORT_DOCKER_MIN_KIB && scratch_available >= 2097152 ))
+          import_stage=image_load
           docker image load --input "$archive"
+          import_stage=image_identity
           image_id="$(docker image inspect "arthello-e2e:$CHECKED_SOURCE_SHA" --format '{{.Id}}')"
           fingerprint="$(docker image inspect "$image_id" | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq | sha256sum | cut -d ' ' -f 1)"
           test "$fingerprint" = "$EXPECTED_FINGERPRINT"

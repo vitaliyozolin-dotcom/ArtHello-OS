@@ -78,3 +78,21 @@ or caller-selected destinations. The hosted fixture uses local HTTPS sockets and
 real303 responses inside network:none, with a throwaway self-signed certificate;
 only that synthetic context ignores its test certificate. It tests foreign303
 denial as well as the natural UI flow. Production TLS verification stays enabled.
+
+The first protected main run34276706523/job102231975465 stopped at the archive/
+import prerequisite on2026-09-08T20:49:44Z, before image load output and before
+login. Its log did not identify the failed assertion, so a disk shortage is not
+yet a confirmed diagnosis. The downloaded archive was removed; no application
+cutover or credential-bearing browser run occurred.
+
+The next bundle flattens the same pinned base filesystem after removing unused
+Firefox, WebKit, headless-shell and video binaries off-host. It retains full
+Chromium, all OS dependencies and TLS roots, and must pass the same sandbox and
+real HTTPS fixture. This avoids transferring deleted base-image layers.
+Capacity is measured before download on both the workspace and Docker store,
+using the actual gzip and expanded archive sizes from the producing job. The
+budget covers three expanded copies, two download copies, and2GiB host headroom;
+it is rechecked immediately before import. Missing space gives actual/required
+counts and fails closed. Import failures name their fixed stage; checksums,
+portable fingerprint, source identity and credential restrictions remain required.
+No images, application resources, backups or volumes are pruned to make room.

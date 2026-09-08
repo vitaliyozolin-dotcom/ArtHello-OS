@@ -1,8 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { capacity, RESERVE_KIB } from '../../deploy/browser/capacity.mjs';
 import { validateCredentials, validateEmployee, sameSchoolIdentity, requestAllowed, navigationStep, inspectSandbox, selectDeniedProbe } from '../../deploy/browser/flow.mjs';
 
 const employee = { userId: 'fixture-id', isSystemOwner: false, apiRole: 'EMPLOYEE', role: 'viewer', mustChangePassword: false, allowedModules: ['education'] };
+test('capacity reserves expanded import copies, both download copies and host headroom', () => {
+  assert.deepEqual(capacity(1024, 4096), { scratchKiB: RESERVE_KIB + 2, dockerKiB: RESERVE_KIB + 14 });
+  for (const values of [[0, 1], [1, 0], [-1, 4], [2, 1], [NaN, 4], [1.5, 4], [1, 101 * 1024 ** 3]]) {
+    assert.throws(() => capacity(...values), /archive_size_invalid/);
+  }
+});
 test('every passing account must have a concrete denied API probe', () => {
   assert.equal(selectDeniedProbe(employee).module, 'finance');
   assert.equal(selectDeniedProbe({ ...employee, allowedModules: ['education', 'finance'], canAccessMedical: false }).module, 'medical');
