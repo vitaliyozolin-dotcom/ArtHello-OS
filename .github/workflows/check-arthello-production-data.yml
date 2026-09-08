@@ -1,0 +1,84 @@
+name: D075 ArtHello read-only production data
+
+on:
+  workflow_run:
+    workflows: [Quality gates]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  observe:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      github.run_attempt == 1 &&
+      github.event.workflow_run.run_attempt == 1 &&
+      github.event.workflow_run.name == 'Quality gates' &&
+      github.event.workflow_run.path == '.github/workflows/quality.yml' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.repository.id == github.event.repository.id &&
+      github.event.workflow_run.head_repository.id == github.event.repository.id &&
+      startsWith(github.event.workflow_run.head_commit.message, 'D075: read-only production data')
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    timeout-minutes: 5
+    concurrency:
+      group: school-1-11-production
+      cancel-in-progress: false
+      queue: max
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Verify current main before repository execution
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$CHECKED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          current_main="$(curl --fail --silent --show-error --max-time 20 \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+          test "$current_main" = "$CHECKED_SOURCE_SHA"
+          precheck_node="$(command -v node || true)"
+          if [[ -z "$precheck_node" ]]; then
+            runner_root="$(realpath "$RUNNER_TEMP/../..")"
+            precheck_node="$runner_root/externals/node24/bin/node"
+          fi
+          test -x "$precheck_node"
+          "$precheck_node" --input-type=module -e 'if (Number(process.versions.node.split(".")[0]) < 24) process.exit(2)'
+          printf 'PRECHECK_NODE=%s\n' "$precheck_node" >> "$GITHUB_ENV"
+
+      - name: Check out exact trusted source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CHECKED_SOURCE_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+
+      - name: Verify diagnostic tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          "$PRECHECK_NODE" --test scripts/test/production-readonly.test.mjs
+          bash -n scripts/run-production-readonly.sh
+
+      - name: Observe bounded aggregates from read-only volume
+        shell: bash
+        run: bash scripts/run-production-readonly.sh
