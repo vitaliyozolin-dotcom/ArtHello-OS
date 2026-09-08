@@ -24,14 +24,15 @@ Full R6 receipt and gate identifiers are retained on branch `codex/recovery-evid
 - Migration Twin на одноразовом PostgreSQL 16 доказал все 18 миграций и отдельный representative round-trip 0009–0010: owner scope, отзыв accountant/viewer, audit insert, сохранение sessions через rollback 0010 и явно деструктивный rollback 0009.
 - Это disposable synthetic evidence, а не прогон на восстановленной sandbox-копии. Соответствующий BACKLOG gate и production migrations остаются открыты.
 
-## Рефакторинг, Фаза 1 — checkpoint 2026-09-08
+## Рефакторинг, Фаза 1 — закрыта 2026-09-08
 
 - Локальный Zod/OpenAPI candidate восстановлен поверх актуального `origin/main` с решениями D-061–D-065; Zod policy получила следующий свободный номер D-066.
 - Cleanup workspace/UI, включение `sites-control`, единый pnpm pin и удаление опасного Replit schema push сохраняются. Runtime dependency placement теперь защищён поведенческим inventory-тестом.
 - Zod runtime imports унифицированы на `zod/v4`; generated schemas имеют characterization tests, Orval явно генерирует v4, а два последовательных codegen дали одинаковые SHA-256 generated outputs. Это локальное evidence рабочего дерева, не immutable CI provenance.
 - Добавлены `CODEOWNERS` для `.github/` и `deploy/` и blocking lint-step в `quality.yml` для сопровождаемых файлов Фазы 1. Полное форматирование legacy application tree намеренно не заявлено выполненным.
-- Для legacy `/sync` зафиксирован полный proposed inventory 30 routes, literal call-sites и replacement evidence. Удаление остаётся заблокировано D-029: scoped source jobs, утверждение dispositions и часть sandbox evidence отсутствуют. 503 gate сохраняется; route, mount, OpenAPI и generated client не удалялись.
-- Три оставшихся implementation-пункта Фазы 1 выполнены под D-067/D-068: legacy router удалён без переноса неподтверждённых jobs, Node/bundler import policies разделены и lint-ratchet расширен на application tree. До объявления Фазы 1 закрытой остаются полный `pnpm run typecheck/test:full/build:full` под Node ≥22.13 и независимый Reviewer PASS exact commit/tree.
+- Для legacy `/sync` зафиксирован полный inventory 30 routes и literal call-sites; D-067 утвердило dispositions. Legacy router, mount, OpenAPI/generated operations и операторские call-sites удалены без переноса неподтверждённых jobs; sandbox capabilities сохранены.
+- Остальные implementation-пункты Фазы 1 выполнены под D-068: Node/bundler import policies разделены и lint-ratchet расширен на application tree.
+- Финальные локальные ворота выполнены под Node 22.13.0 и pnpm 11.7.0: `pnpm run typecheck`, `pnpm run test:full`, `pnpm run build:full`, `pnpm run lint`, `node scripts/permission-proof.mjs` и visual acceptance на desktop/mobile завершились успешно. Фаза 1 закрыта; это локальное evidence, не immutable CI provenance и не разрешение production-выпуска.
 
 ## Обновление A.4 — 2026-07-25
 

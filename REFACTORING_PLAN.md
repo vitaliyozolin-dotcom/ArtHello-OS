@@ -145,7 +145,7 @@
 
 Acceptance evidence: machine-readable workflow inventory без необъяснённых production-capability путей; зелёный YAML-aware policy-gate с негативными fixtures для `pull_request`, `pull_request_target`, PR-head checkout, reusable workflow и SSH-to-production; reset без confirmation останавливается до checkout/Docker; доказательство отсутствия недоверенного execution path к production Docker (одного `ps user != root` недостаточно); свежий validation run на exact candidate SHA/tree; scratch rollback и secret-recovery drills; подтверждение ротации без значений секретов в `SECURITY_CHECKLIST.md`; отдельные D-решения и run-URL по кандидатам 0A–0D; финальный Reviewer/Coordinator gate всей Фазы 0.
 
-### Фаза 1 — мёртвый код, гигиена репо и workspace (M; в основном удаления)
+### Фаза 1 — закрыта 2026-09-08: мёртвый код, гигиена репо и workspace
 
 1. **[выполнено 2026-09-08] [DEL]** D-067 утвердило dispositions 30 endpoints. Универсальный `routes/sync.ts`, mount, legacy OpenAPI/generated operations и операторские call-sites удалены; sandbox capabilities сохранены, а неподтверждённые scoped jobs остались заблокированными.
 2. **[DEL, выполнено 2026-09-01]** Удалены `lib/integrations-openai-ai-react`, `-server` и сирота-форк `lib/integrations/openai_ai_integrations`; поиск потребителей перед удалением был пуст.
