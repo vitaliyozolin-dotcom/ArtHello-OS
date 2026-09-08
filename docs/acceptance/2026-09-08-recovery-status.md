@@ -1,3 +1,20 @@
+# Current R2 candidate — 2026-09-08 06:41 UTC
+
+PR355: https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/355
+
+- Branch: `codex/school-arthello-recovery-r2-20260908`.
+- Head: `cb1f917c7ab4aa879be2f83f4fbec3252a8b685b`.
+- Tree: `a0a8b1f507bb7a2112f849da8d49db9c18b15ecc`.
+- Parent main: `68a159dc647f35cdd30ce586fc6d5beb93b89a51`.
+- 30 changed files: constrained School HTTPS repair, separate D064 consumer, final Alfa raw-source fixes, decision/passport and review records.
+- Relay config digest: `ede8c38cc4bf5d7bf3aabc4fa9161ed9d00293532708d3bdd3f995199ffd4176`.
+- Local verification: 54 Alfa + 18 consumer + 14 repair + 8 transport tests passed, lint/build and YAML/shell syntax passed. Independent bounded review: no open P1/P2; real hosted Docker/Ruby gates pending.
+- Main and ArtHello production remain unchanged at this point. No School mutation has executed. No live SSO acceptance is claimed or manufactured.
+
+The next required sequence is exact PR/main CI, School configuration repair, natural authenticated Education-to-Diary browser navigation, exact schema2 evidence, safe consumer resume, guarded ArtHello cutover and live business-workflow acceptance.
+
+---
+
 # ArtHello recovery release — 2026-09-08
 
 Status: IN PROGRESS / NOT DEPLOYED. The owner explicitly selected GitHub plus a separate build machine and authorized publishing all six corrections. No additional approval of code changes or deployment is being requested.
