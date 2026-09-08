@@ -1,8 +1,10 @@
 import { chromium } from 'playwright-core';
 import { readFileSync } from 'node:fs';
 import { installNetworkBoundary, naturalFlow, inspectSandbox } from './flow.mjs';
+import { startProxy } from './proxy.mjs';
 
 let browser;
+let proxy;
 let stage = 'sandbox';
 let result;
 let sandboxStatus;
@@ -38,7 +40,8 @@ try {
     }
     const credentials = JSON.parse(input);
     input = '';
-    const context = await browser.newContext({ ignoreHTTPSErrors: false, serviceWorkers: 'block', acceptDownloads: false, viewport: { width: 1440, height: 1000 } });
+    proxy = await startProxy();
+    const context = await browser.newContext({ proxy: proxy.settings, ignoreHTTPSErrors: false, serviceWorkers: 'block', acceptDownloads: false, viewport: { width: 1440, height: 1000 } });
     await installNetworkBoundary(context);
     const page = await context.newPage();
     page.setDefaultTimeout(20000);
@@ -56,6 +59,7 @@ try {
   process.exitCode = 2;
 } finally {
   await browser?.close().catch(() => {});
+  await proxy?.close().catch(() => {});
 }
 // Do not log exception messages, response bodies, contacts, cookies or URLs.
 process.stdout.write(JSON.stringify({ ...result, observedAtUtc: new Date().toISOString() }) + '\n');

@@ -6,6 +6,7 @@ on:
       - deploy/browser/**
       - scripts/run-server-browser.sh
       - scripts/test/server-browser.test.mjs
+      - scripts/test/browser-proxy.test.mjs
       - .github/workflows/check-arthello-server-browser.yml
   workflow_dispatch:
   workflow_run:
@@ -64,7 +65,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
-          node --test scripts/test/server-browser.test.mjs
+          node --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs
           bash -n scripts/run-server-browser.sh
           corepack enable
           corepack pnpm@11.7.0 --dir deploy/browser install --ignore-workspace --frozen-lockfile
@@ -169,7 +170,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          "$PRECHECK_NODE" --test scripts/test/server-browser.test.mjs
+          "$PRECHECK_NODE" --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs
           bash scripts/run-server-browser.sh
       - name: Remove only this downloaded temporary archive
         if: always()

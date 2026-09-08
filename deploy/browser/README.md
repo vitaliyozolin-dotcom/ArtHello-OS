@@ -66,3 +66,12 @@ The pinned Chromium reports `Layer 1 Sandbox: Namespace`; its actual table is
 checked along with PID/network namespaces and seccomp, not an obsolete UI label.
 Russian fixture HTML explicitly declares UTF-8 so accessible button names match
 the real UI. School's canonical `tech_admin` role is included (PR368 review).
+
+The real fixture exposed a second issue: Chromium follows a303 without another
+Playwright route callback. A fixed-authority local CONNECT proxy now also limits
+destinations to the two HTTPS hostnames on port443 at the known gateway IP. It
+tunnels end-to-end TLS without decrypting/logging requests and does not trust DNS
+or caller-selected destinations. The hosted fixture uses local HTTPS sockets and
+real303 responses inside network:none, with a throwaway self-signed certificate;
+only that synthetic context ignores its test certificate. It tests foreign303
+denial as well as the natural UI flow. Production TLS verification stays enabled.

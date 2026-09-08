@@ -1,41 +1,65 @@
 import assert from 'node:assert/strict';
+import https from 'node:https';
+import net from 'node:net';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { ARTHELLO, SCHOOL, installNetworkBoundary, naturalFlow } from './flow.mjs';
+import { startProxy } from './proxy.mjs';
 
-// Hosted-only synthetic fixture. Separate from production; cannot produce a
-// release receipt. Exercises the real browser, login form, click and redirects.
+// Hosted-only local HTTPS fixture, inside network:none. It exercises real 303
+// redirects and the same proxy/network/UI flow; it cannot create live evidence.
 export async function smoke(browser) {
-  for (const owner of [false, true]) {
-    const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1440, height: 1000 } });
-    const user = { userId: 'fixture', isSystemOwner: owner, apiRole: owner ? 'OWNER' : 'EMPLOYEE', role: owner ? 'owner' : 'viewer', mustChangePassword: false, allowedModules: ['education'] };
+  const directory = mkdtempSync(path.join(tmpdir(), 'browser-fixture-'));
+  let server, proxy;
+  try {
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=browser-fixture.invalid', '-keyout', directory + '/key.pem', '-out', directory + '/cert.pem'], { stdio: 'ignore' });
+    let owner = false;
     let loginCount = 0;
-    await context.route('**/*', async route => {
-      const url = new URL(route.request().url());
-      const html = body => route.fulfill({ contentType: 'text/html; charset=utf-8', body });
-      const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    server = https.createServer({ key: readFileSync(directory + '/key.pem'), cert: readFileSync(directory + '/cert.pem') }, (request, response) => {
+      request.resume();
+      const url = new URL(request.url, 'https://' + request.headers.host);
+      const html = body => { response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end(body); };
+      const json = (body, status = 200) => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(JSON.stringify(body)); };
+      const redirect = target => { response.writeHead(303, { location: target }); response.end(); };
       if (url.origin === ARTHELLO && url.pathname === '/') return html(`<form><input name="login"><input name="password" type="password"><button>Войти</button></form><script>document.querySelector('form').onsubmit=async(e)=>{e.preventDefault();await fetch('/api/auth/login',{method:'POST'});document.body.innerHTML='<aside aria-label="Основная навигация"><a href="#education">Обучение</a></aside>';document.querySelector('a').onclick=async(e)=>{e.preventDefault();await fetch('/api/education');document.body.insertAdjacentHTML('beforeend','<button id="diary">Открыть дневник</button>');document.querySelector('#diary').onclick=()=>location.assign('${SCHOOL}/auth/central/start');};};</script>`);
-      if (url.origin === ARTHELLO && url.pathname === '/api/auth/login') { loginCount++; return json(user); }
+      if (url.origin === ARTHELLO && url.pathname === '/api/auth/login') {
+        loginCount++;
+        return json({ userId: 'fixture', isSystemOwner: owner, apiRole: owner ? 'OWNER' : 'EMPLOYEE', role: owner ? 'owner' : 'viewer', mustChangePassword: false, allowedModules: ['education'] });
+      }
       if (url.origin === ARTHELLO && url.pathname === '/api/finance') return json({ error: 'fixture' }, 403);
       if (url.origin === ARTHELLO && url.pathname === '/api/education') return json({});
-      if (url.origin === SCHOOL && url.pathname === '/auth/central/start') return route.fulfill({ status: 303, headers: { location: ARTHELLO + '/api/school-sso/authorize?state=fixture' } });
-      if (url.origin === ARTHELLO && url.pathname === '/api/school-sso/authorize') return route.fulfill({ status: 303, headers: { location: SCHOOL + '/auth/central/callback?code=fixture&state=fixture' } });
+      if (url.origin === SCHOOL && url.pathname === '/auth/central/start') return redirect(ARTHELLO + '/api/school-sso/authorize?state=fixture');
+      if (url.origin === ARTHELLO && url.pathname === '/api/school-sso/authorize') return redirect(SCHOOL + '/auth/central/callback?code=fixture&state=fixture');
       if (url.origin === SCHOOL && url.pathname === '/auth/central/callback') return html(`<nav aria-label="Основная навигация">Дневник</nav><script>fetch('/api/school')</script>`);
       if (url.origin === SCHOOL && url.pathname === '/api/school') return json({ viewer: { email: 'fixture@example.invalid', role: 'teacher' } });
-      return route.abort();
+      if (url.pathname === '/fixture-foreign-redirect') return redirect('https://example.invalid/');
+      return json({ error: 'fixture_not_found' }, 404);
     });
-    const page = await context.newPage();
-    page.on('pageerror', error => process.stderr.write('FIXTURE_PAGE_ERROR=' + String(error.message).slice(0,2000) + '\n'));
-    page.on('requestfailed', request => process.stderr.write('FIXTURE_REQUEST_FAILED=' + new URL(request.url()).pathname + '\n'));
-    page.on('response', response => process.stderr.write('FIXTURE_RESPONSE=' + new URL(response.url()).pathname + ':' + response.status() + '\n'));
-    page.setDefaultTimeout(10000);
-    const task = naturalFlow(page, { login: 'fixture@example.invalid', password: 'fixture-password-only' }, stage => process.stderr.write('FIXTURE_STAGE=' + stage + '\n'));
-    if (owner) await assert.rejects(task, /dedicated_employee_required/);
-    else assert.equal((await task).result, 'pass');
-    assert.equal(loginCount, 1);
-    await context.close();
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    proxy = await startProxy(() => net.connect({ host: '127.0.0.1', port: server.address().port }));
+    for (owner of [false, true]) {
+      loginCount = 0;
+      // Only the local, self-signed fixture accepts its throwaway TLS cert.
+      // The real entrypoint always sets ignoreHTTPSErrors:false.
+      const context = await browser.newContext({ proxy: proxy.settings, ignoreHTTPSErrors: true, serviceWorkers: 'block', viewport: { width: 1440, height: 1000 } });
+      try {
+        await installNetworkBoundary(context);
+        const page = await context.newPage();
+        page.setDefaultTimeout(10000);
+        const task = naturalFlow(page, { login: 'fixture@example.invalid', password: 'fixture-password-only' }, stage => process.stderr.write('FIXTURE_STAGE=' + stage + '\n'));
+        if (owner) await assert.rejects(task, /dedicated_employee_required/);
+        else assert.equal((await task).result, 'pass');
+        assert.equal(loginCount, 1);
+        // A foreign destination reached through a 303 is blocked by CONNECT,
+        // including redirects that Playwright routing itself does not inspect.
+        await assert.rejects(page.goto(ARTHELLO + '/fixture-foreign-redirect'));
+      } finally { await context.close(); }
+    }
+  } finally {
+    await proxy?.close();
+    if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+    rmSync(directory, { recursive: true, force: true });
   }
-  const restricted = await browser.newContext();
-  await installNetworkBoundary(restricted);
-  const page = await restricted.newPage();
-  await assert.rejects(page.goto('https://example.invalid/'));
-  await restricted.close();
 }
