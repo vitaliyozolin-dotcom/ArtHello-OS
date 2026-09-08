@@ -26,8 +26,11 @@ export async function smoke(browser) {
       return route.abort();
     });
     const page = await context.newPage();
+    page.on('pageerror', error => process.stderr.write('FIXTURE_PAGE_ERROR=' + String(error.message).slice(0,2000) + '\n'));
+    page.on('requestfailed', request => process.stderr.write('FIXTURE_REQUEST_FAILED=' + new URL(request.url()).pathname + '\n'));
+    page.on('response', response => process.stderr.write('FIXTURE_RESPONSE=' + new URL(response.url()).pathname + ':' + response.status() + '\n'));
     page.setDefaultTimeout(10000);
-    const task = naturalFlow(page, { login: 'fixture@example.invalid', password: 'fixture-password-only' });
+    const task = naturalFlow(page, { login: 'fixture@example.invalid', password: 'fixture-password-only' }, stage => process.stderr.write('FIXTURE_STAGE=' + stage + '\n'));
     if (owner) await assert.rejects(task, /dedicated_employee_required/);
     else assert.equal((await task).result, 'pass');
     assert.equal(loginCount, 1);
