@@ -1,3 +1,17 @@
+# D066 stopped after successful lock normalization — 2026-09-08T08:46:31Z
+
+R4 main d872842e1dd99f1ec90790af54c00e9ff964b61c passed first-attempt Quality34206003379, Proof34206003315 and Verify34206003343 (724/724 application tests). Immutable artifact10047830480, digest sha256:e4ab821369560112942629598b76c01f7059a553f96045acaf762feb40f20832.
+
+D066 run34206196494/job101996459827 passed exact release gates. The actual normalization receipt at08:46:30Z confirms existing UID/GID1000 lock device27/inode12 changed0664→0644 with same-owner verified result. This was a real production configuration mutation.
+
+At08:46:31Z R3 controller refused school_changed_during_setup before docker start of the new relay. The code attempts cleanup of its own created IDs in finally, but actual post-failure cleanup still needs read-only confirmation. The diagnostic, image loading, secret resolver and ArtHello cutover were all skipped. Do not rerun D066 failed repair.
+
+Static regression reproduces a possible false fingerprint change when Docker returns the identical full Mounts entries in another order. This mechanism is proven by local tests; the original failing pair was not retained, so the exact incident cause is not yet declared proven. A new bounded read-only diagnostic will compare12 real observations, component hashes, full-mount canonical hashes and cleanup metadata without raw secret/config values.
+
+Current main separately advanced to055773c73f214b43caddb643cbccbe4b3d3d1755 with concurrent migration-evidence refactoring; it preserves R4 and has successful Quality34206517347/Proof34206517342/Verify34206517352. No successful School repair, SSO, ArtHello publication or six-scenario acceptance is claimed.
+
+---
+
 # R4 merged; exact main verification pending — 2026-09-08
 
 The owner reran D065. Attempt2/job101982122878 failed in School bootstrap and skipped image/clone/cutover. The failed repair was not retried. Read-only diagnostic PR357 main52770ad3f10b0ed874263c28e932eb532d77e461, run34203383943/job101987156275, proved the existing UID/GID1000-owned shared lock had mode0664. Home and School baseline checks passed; R3 state and relay were absent. Egress network remained diagnostically unknown.

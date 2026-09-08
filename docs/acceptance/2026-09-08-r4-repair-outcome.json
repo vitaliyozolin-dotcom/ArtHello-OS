@@ -1,0 +1,28 @@
+{
+  "runId": 34206196494,
+  "jobId": 101996459827,
+  "releaseSha": "d872842e1dd99f1ec90790af54c00e9ff964b61c",
+  "repairStep": "failure",
+  "cutover": "skipped",
+  "records": [
+    {
+      "currentMode": "0644",
+      "decisionId": "D066",
+      "executionGid": 1000,
+      "executionUid": 1000,
+      "lockDevice": 27,
+      "lockInode": 12,
+      "mode": "normalized",
+      "modeChangeAttempted": true,
+      "previousMode": "0664",
+      "schemaVersion": 1,
+      "state": "verified",
+      "verifiedAtUtc": "2026-09-08T08:46:30Z"
+    },
+    {
+      "reason": "school_changed_during_setup",
+      "schemaVersion": 2,
+      "state": "refused"
+    }
+  ]
+}
