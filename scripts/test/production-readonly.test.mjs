@@ -36,3 +36,15 @@ test('row cap is explicit and does not turn partial inspection into verification
     assert.equal(result.tables.bank_accounts.rows, undefined);
   } finally { db.close(); }
 });
+
+test('schema drift returns only a fixed unavailable state', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec('CREATE TABLE bank_transactions(private_column TEXT); CREATE TABLE financial_operations(id TEXT PRIMARY KEY);');
+    const result = inspectDatabase(db);
+    assert.deepEqual(result.checks.bankLinks, { state: 'unavailable' });
+    assert.equal(JSON.stringify(result).includes('private_column'), false);
+    // The read transaction has ended; another inspection is permitted.
+    assert.deepEqual(inspectDatabase(db).checks.bankLinks, { state: 'unavailable' });
+  } finally { db.close(); }
+});

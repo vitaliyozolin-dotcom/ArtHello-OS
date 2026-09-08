@@ -24,6 +24,7 @@ const checks = {
 
 export function inspectDatabase(db) {
   db.exec('PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; PRAGMA busy_timeout=1000;');
+  db.exec('BEGIN');
   const result = { schemaVersion: 1, liveAcceptance: 'not_run', tables: {}, checks: {} };
   for (const table of tables) {
     try {
@@ -45,6 +46,7 @@ export function inspectDatabase(db) {
       result.checks[name] = { state: 'observed', violations: db.prepare(check.sql).get().n };
     } catch { result.checks[name] = { state: 'unavailable' }; }
   }
+  db.exec('ROLLBACK');
   return result;
 }
 
