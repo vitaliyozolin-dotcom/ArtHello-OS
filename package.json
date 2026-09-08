@@ -21,7 +21,8 @@
     "test:workflow-policy": "node --test scripts/test/workflow-policy.test.mjs && node scripts/workflow-policy.mjs",
     "test:e2e-preflight": "node --test scripts/test/server-e2e-preflight.test.mjs",
     "test:visual-readiness": "node --test scripts/test/visual-readiness.test.mjs",
-    "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:refactoring && pnpm run test:sites && pnpm run test:e2e-preflight && pnpm run test:visual-readiness",
+    "test:production-readonly": "node --test scripts/test/production-readonly.test.mjs",
+    "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:refactoring && pnpm run test:sites && pnpm run test:e2e-preflight && pnpm run test:visual-readiness && pnpm run test:production-readonly",
     "typecheck:libs": "tsc --build --force",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --filter @workspace/sites-control --if-present run typecheck"
   },
