@@ -20,9 +20,10 @@
     "test:postgres": "pnpm --filter @workspace/api-server run test:postgres",
     "test:workflow-policy": "node --test scripts/test/workflow-policy.test.mjs && node scripts/workflow-policy.mjs",
     "test:e2e-preflight": "node --test scripts/test/server-e2e-preflight.test.mjs",
+    "test:server-browser": "node --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs",
     "test:visual-readiness": "node --test scripts/test/visual-readiness.test.mjs",
     "test:production-readonly": "node --test scripts/test/production-readonly.test.mjs scripts/test/live-d1-identity.test.mjs",
-    "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:refactoring && pnpm run test:sites && pnpm run test:e2e-preflight && pnpm run test:visual-readiness && pnpm run test:production-readonly",
+    "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:refactoring && pnpm run test:sites && pnpm run test:e2e-preflight && pnpm run test:server-browser && pnpm run test:visual-readiness && pnpm run test:production-readonly",
     "typecheck:libs": "tsc --build --force",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --filter @workspace/sites-control --if-present run typecheck"
   },

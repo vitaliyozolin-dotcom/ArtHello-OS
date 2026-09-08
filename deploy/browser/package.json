@@ -1,0 +1,7 @@
+{
+  "name": "arthello-server-browser",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "dependencies": { "playwright-core": "1.62.1" }
+}

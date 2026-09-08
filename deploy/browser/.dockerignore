@@ -1,0 +1,9 @@
+*
+!package.json
+!pnpm-lock.yaml
+!run.mjs
+!flow.mjs
+!smoke.mjs
+!proxy.mjs
+!node_modules
+!node_modules/**
