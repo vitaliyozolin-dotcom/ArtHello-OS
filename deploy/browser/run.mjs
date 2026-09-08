@@ -4,19 +4,25 @@ import { installNetworkBoundary, naturalFlow } from './flow.mjs';
 let browser;
 let stage = 'sandbox';
 let result;
+let sandboxStatus;
 try {
   if (process.getuid() !== 1000 || process.getgid() !== 1000 || process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') throw Error();
   // chromiumSandbox is deliberately enabled. No --no-sandbox, SYS_ADMIN,
   // privileged mode, host IPC, Docker socket or application volume is needed.
-  browser = await chromium.launch({ headless: true, chromiumSandbox: true, timeout: 20000,
+  stage = 'browser_launch';
+  browser = await chromium.launch({ channel: 'chromium', headless: true, chromiumSandbox: true, timeout: 20000,
     args: ['--disable-background-networking', '--disable-quic', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] });
   const sandboxContext = await browser.newContext();
   const sandboxPage = await sandboxContext.newPage();
+  stage = 'sandbox_page';
   await sandboxPage.goto('chrome://sandbox');
   const sandbox = await sandboxPage.locator('body').innerText();
-  if (!/Namespace sandbox\s+Yes/.test(sandbox) || !/PID namespaces\s+Yes/.test(sandbox) || !/Seccomp-BPF sandbox\s+Yes/.test(sandbox)) throw Error();
+  stage = 'sandbox_policy';
+  sandboxStatus = { namespaces: /Namespace sandbox\s+Yes/.test(sandbox), pidNamespaces: /PID namespaces\s+Yes/.test(sandbox), seccomp: /Seccomp-BPF sandbox\s+Yes/.test(sandbox) };
+  if (!Object.values(sandboxStatus).every(Boolean)) throw Error();
   await sandboxContext.close();
   if (process.argv[2] === '--smoke') {
+    stage = 'hosted_fixture';
     const { smoke } = await import('./smoke.mjs');
     await smoke(browser);
     result = { kind: 'hosted-browser-fixture', result: 'pass', chromiumSandbox: 'verified', liveAcceptance: 'not_run' };
@@ -37,8 +43,10 @@ try {
     result = { kind: 'server-natural-sso', chromiumSandbox: 'verified', ...await naturalFlow(page, credentials, value => { stage = value; }) };
     await context.close();
   }
-} catch {
+} catch (error) {
   result = { kind: process.argv[2] === '--smoke' ? 'hosted-browser-fixture' : 'server-natural-sso', result: 'blocked', stage, liveAcceptance: 'not_passed' };
+  if (sandboxStatus) result.sandboxStatus = sandboxStatus;
+  if (stage === 'browser_launch') result.reason = /Operation not permitted|No usable sandbox|Failed to move to new namespace/.test(String(error?.message)) ? 'sandbox_namespace_denied' : 'browser_launch_failed';
   process.exitCode = 2;
 } finally {
   await browser?.close().catch(() => {});
