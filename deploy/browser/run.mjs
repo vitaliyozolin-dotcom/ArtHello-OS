@@ -1,4 +1,5 @@
 import { chromium } from 'playwright-core';
+import { readFileSync } from 'node:fs';
 import { installNetworkBoundary, naturalFlow } from './flow.mjs';
 
 let browser;
@@ -7,6 +8,8 @@ let result;
 let sandboxStatus;
 try {
   if (process.getuid() !== 1000 || process.getgid() !== 1000 || process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') throw Error();
+  const processStatus = readFileSync('/proc/self/status', 'utf8');
+  if (!/^CapEff:\s+0+$/m.test(processStatus) || !/^NoNewPrivs:\s+1$/m.test(processStatus) || !/^Seccomp:\s+2$/m.test(processStatus)) throw Error();
   // chromiumSandbox is deliberately enabled. No --no-sandbox, SYS_ADMIN,
   // privileged mode, host IPC, Docker socket or application volume is needed.
   stage = 'browser_launch';

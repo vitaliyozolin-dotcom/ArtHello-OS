@@ -51,5 +51,14 @@ Those checks and exact School-repair/release identities remain separate gates.
 `.github/CODEOWNERS` covers `.github/` and `deploy/` with the owner. No old
 workflow, runner permission, sudo policy, School route or volume is changed.
 Playwright Docker guidance: https://playwright.dev/docs/docker.
-Vendored seccomp profile is unchanged from microsoft/playwright commit
+The seccomp profile starts from microsoft/playwright commit
 `26a9e470a7b3c7822084b09fb7f13902c5f37b51`, `utils/docker/seccomp_profile.json`.
+The hosted attempt102215375681 exposed `sys_chroot` rejection: the upstream
+profile permits chroot only when the *outer container* has SYS_CHROOT, whereas
+Chromium needs it inside its own user namespace and this launcher drops all outer
+capabilities. This profile permits the syscall without granting any capability.
+Linux still requires SYS_CHROOT in the calling namespace. The entrypoint verifies
+outer CapEff=0, NoNewPrivs=1 and Seccomp=2 before browser launch; the browser must
+then prove its own namespace/PID/seccomp sandbox. No SYS_ADMIN, SYS_CHROOT or host
+privilege is added to the container. Only secret-free hosted pre-login launch
+failures may include browser launch diagnostics; production errors stay sanitized.
