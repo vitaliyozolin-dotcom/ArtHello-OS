@@ -1,6 +1,6 @@
 import { chromium } from 'playwright-core';
 import { readFileSync } from 'node:fs';
-import { installNetworkBoundary, naturalFlow, inspectSandbox } from './flow.mjs';
+import { installNetworkBoundary, naturalFlow, inspectSandbox, safeFailureReason } from './flow.mjs';
 import { startProxy } from './proxy.mjs';
 
 let browser;
@@ -53,7 +53,7 @@ try {
   // Only the network:none hosted fixture has no real credentials or pages.
   // Its browser launch diagnostics are safe and needed to repair the bundle.
   if (process.argv[2] === '--smoke') process.stderr.write(String(error?.message).slice(0,12000) + '\n');
-  result = { kind: process.argv[2] === '--smoke' ? 'hosted-browser-fixture' : 'server-natural-sso', result: 'blocked', stage, liveAcceptance: 'not_passed' };
+  result = { kind: process.argv[2] === '--smoke' ? 'hosted-browser-fixture' : 'server-natural-sso', result: 'blocked', stage, reason: safeFailureReason(stage, error), liveAcceptance: 'not_passed' };
   if (sandboxStatus) result.sandboxStatus = sandboxStatus;
   if (stage === 'browser_launch') result.reason = /Operation not permitted|No usable sandbox|Failed to move to new namespace/.test(String(error?.message)) ? 'sandbox_namespace_denied' : 'browser_launch_failed';
   process.exitCode = 2;
