@@ -73,6 +73,20 @@ test('employee failure diagnostics emit only exact allowlisted tags', () => {
   }
 });
 
+test('hostile exception access cannot escape the privacy-safe diagnostic fallback', () => {
+  const throwingMessage = Object.defineProperty(new Error(), 'message', {
+    get() { throw new Error('PRIVATE_DIAGNOSTIC_SENTINEL'); },
+  });
+  const throwingPrototype = new Proxy(new Error(), {
+    getPrototypeOf() { throw new Error('PRIVATE_PROTOTYPE_SENTINEL'); },
+  });
+  const revoked = Proxy.revocable(new Error(), {});
+  revoked.revoke();
+  for (const error of [throwingMessage, throwingPrototype, revoked.proxy]) {
+    assert.equal(browserFlow.safeFailureReason('employee_access', error), 'employee_access_failed');
+  }
+});
+
 function employeePage(options = {}) {
   let loginAttempts = 0;
   const locator = {

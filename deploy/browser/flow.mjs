@@ -10,8 +10,10 @@ const employeeFailureReasons = new Set([
 export function safeFailureReason(stage, error) {
   if (stage !== 'employee_access') return 'browser_check_failed';
   // Exact tags only: never interpolate an exception, response, contact or URL.
-  const message = error instanceof Error ? error.message : '';
-  return employeeFailureReasons.has(message) ? message : 'employee_access_failed';
+  try {
+    const message = error instanceof Error ? error.message : '';
+    return employeeFailureReasons.has(message) ? message : 'employee_access_failed';
+  } catch { return 'employee_access_failed'; }
 }
 
 export function inspectSandbox(rows) {
