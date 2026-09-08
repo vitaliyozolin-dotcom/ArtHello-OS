@@ -11,6 +11,11 @@ categories = [
  ("transaction_invalid", "Сеанс входа повреждён"),
  ("transaction_state_invalid", "ArtHello OS вернула недействительный сеанс входа"),
  ("exchange_origin_rejected", "Источник запроса не разрешён"),
+ ("exchange_content_length_missing", "Требуется Content-Length"),
+ ("exchange_content_length_invalid", "Некорректный Content-Length"),
+ ("exchange_body_invalid", "Некорректный JSON запроса"),
+ ("exchange_media_type_invalid", "Требуется Content-Type application/json"),
+ ("exchange_response_unavailable", "ArtHello OS временно недоступна"),
  ("exchange_unavailable", "Обмен кода временно недоступен"),
  ("exchange_code_invalid", "Одноразовый код входа недействителен"),
  ("exchange_code_expired", "Одноразовый код входа истёк или уже использован"),
@@ -30,6 +35,10 @@ categories = [
  ("sqlite_readonly", "readonly database"),
  ("sqlite_locked", "database is locked"),
  ("sqlite_foreign_key", "FOREIGN KEY constraint failed"),
+ ("filesystem_permission", "EACCES"),
+ ("filesystem_readonly", "EROFS"),
+ ("filesystem_missing", "ENOENT"),
+ ("cookie_malformed", "URI malformed"),
  ("fetch_failed", "fetch failed"),
  ("fetch_timeout", "aborted due to timeout"),
 ]
@@ -50,14 +59,17 @@ if [[ "${1:-}" == --self-test ]]; then
     '2026-09-07T10:00:00Z school_sso.callback_failed fetch failed secret=DO_NOT_PRINT' \
     '2026-09-07T10:00:01Z school_sso.callback_failed UNIQUE constraint failed: users.email user=PRIVATE' \
     '2026-09-07T10:00:02Z school_sso.callback_failed arbitrary sensitive user@example.invalid' \
+    '2026-09-07T10:00:03Z school_sso.callback_failed Требуется Content-Length' \
+    '2026-09-07T10:00:04Z school_sso.callback_failed EACCES: /private/path' \
     'unrelated request token=DO_NOT_PRINT' | classify_callback_logs)"
   REPORT="$report" python3 -c '
 import json,os
 r=json.loads(os.environ["REPORT"])
-assert r["callbackErrorCounts"] == {"fetch_failed":1,"sqlite_unique":1,"other_callback_error":1}
+assert r["callbackErrorCounts"] == {"fetch_failed":1,"sqlite_unique":1,"other_callback_error":1,"exchange_content_length_missing":1,"filesystem_permission":1}
 assert "DO_NOT_PRINT" not in os.environ["REPORT"]
 assert "PRIVATE" not in os.environ["REPORT"]
 assert "example.invalid" not in os.environ["REPORT"]
+assert "/private/path" not in os.environ["REPORT"]
 assert r["lastSeenUtc"]["fetch_failed"] == "2026-09-07T10:00:00Z"
 print("SCHOOL_SSO_DIAGNOSTIC_LOG_REDACTION=PASS")
 '
@@ -72,12 +84,19 @@ printf 'SCHOOL_SSO_DIAGNOSTIC_BEGIN\n'
 docker inspect "$production" --format \
   '{"imageId":{{json .Image}},"release":{{json (index .Config.Labels "school.candidate-sha")}},"startedAt":{{json .State.StartedAt}},"health":{{json .State.Health.Status}},"networkMode":{{json .HostConfig.NetworkMode}},"readOnlyRootfs":{{json .HostConfig.ReadonlyRootfs}}}'
 
+# Read network flags without printing addresses or the complete inspect object.
+network_mode="$(docker inspect "$production" --format '{{.HostConfig.NetworkMode}}')"
+[[ "$network_mode" =~ ^[A-Za-z0-9_.-]+$ ]]
+docker network inspect "$network_mode" --format \
+  '{"schoolNetwork":{"driver":{{json .Driver}},"internal":{{json .Internal}}}}'
+
 # Raw log lines never go to stdout; only fixed categories and UTC timestamps.
 docker logs --since 2h --tail 2000 --timestamps "$production" 2>&1 | classify_callback_logs
 
 docker exec -i "$production" node --input-type=module - <<'NODE'
 import { DatabaseSync } from 'node:sqlite';
 import { lookup } from 'node:dns/promises';
+import { accessSync, constants, statSync } from 'node:fs';
 
 const schoolOrigin = 'https://school-188-225-38-55.sslip.io';
 const centralOrigin = 'https://arthello-188-225-38-55.sslip.io';
@@ -112,9 +131,25 @@ try {
 
 const databasePath=process.env.DATABASE_PATH;
 if(databasePath!=='/data/school-1-11.sqlite') throw new Error('Unexpected database path; no database opened');
+const canAccess = (path, mode) => {
+  try { accessSync(path, mode); return true; }
+  catch { return false; }
+};
+const accessMetadata = path => {
+  try {
+    const info=statSync(path);
+    return {exists:true,uid:info.uid,gid:info.gid,mode:(info.mode & 0o777).toString(8),
+      readable:canAccess(path,constants.R_OK),writable:canAccess(path,constants.W_OK)};
+  } catch { return {exists:false}; }
+};
+console.log(JSON.stringify({databaseFilesystem:{
+  effectiveUid:process.geteuid?.(),effectiveGid:process.getegid?.(),
+  directory:accessMetadata('/data'),database:accessMetadata(databasePath),
+  wal:accessMetadata(`${databasePath}-wal`),shm:accessMetadata(`${databasePath}-shm`),
+}}));
 const db=new DatabaseSync(databasePath,{readOnly:true});
 try {
-  const required={users:['id','email','phone','display_name','role','status','auth_version','central_user_id','central_access_version'],auth_sessions:['id','user_id','token_hash','auth_version','expires_at'],audit_log:['id','actor_user_id','action','entity_type','entity_id','details']};
+  const required={users:['id','email','phone','display_name','role','status','auth_version','central_user_id','central_access_version'],auth_sessions:['id','user_id','token_hash','auth_version','expires_at'],audit_log:['id','actor_user_id','action','entity_type','entity_id','details','created_at']};
   const missing=[];
   for(const [table,columns] of Object.entries(required)) {
     const actual=new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(row=>row.name));
