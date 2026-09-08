@@ -1,5 +1,16 @@
 # ArtHello OS — Current State
 
+## Production continuation R7 — 2026-09-08
+
+- R6 source PR361 is merged as eb47c1360fbd701876a3c49efe029194707304db; exact PR and main Quality, Proof, Verify passed, including 756 application tests.
+- Actual R6 run34221458013/job102045375780 verified the installed School R5 read-only at11:35:42Z. Original relay activation09:16:10Z and School source/config/container identities are preserved.
+- The same run measured gateway UID995 without root or passwordless sudo for the existing host backup installer. Image import, clone and ArtHello cutover were skipped. Live ArtHello was freshly observed as6596f69390ad539577ec2640e8ef40c7e12c22dc.
+- D-073 selects R7 with a separate ordinary-UID backup worker on exact D1 read-only and dedicated backup/control volumes; a separate UID1002 activation writer owns another volume. This removes host installer dependencies without granting host administration. Actual Docker isolation/restore checks and exact CI remain required.
+- Natural authenticated Education-to-diary navigation remains unverified; the cloud browser returns502 before login. Server-side transport success is separate evidence.
+- Alfa deposits now use confirmed Customer.balance semantics; real tenant coverage/import acceptance and verified PayType direction for CRM payments remain open. No completed six-scenario production acceptance is claimed.
+
+Full R6 receipt and gate identifiers are retained on branch `codex/recovery-evidence-20260907` in `docs/acceptance/2026-09-08-r6-release-checkpoint.json`. New runtime operation is documented in `deploy/v52/backup/README.md`.
+
 ## Refactoring Phase 2.5 — lazy configuration checkpoint (2026-09-08)
 
 - `lib/db` теперь можно импортировать без `DATABASE_URL`; подключение создаётся лениво через `createDb(env)` или при первом использовании совместимых exports `db`/`pool`.

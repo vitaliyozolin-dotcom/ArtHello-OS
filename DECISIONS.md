@@ -1,5 +1,28 @@
 # ArtHello OS — Decisions
 
+## D-073 — Бэкапы через отдельный Docker worker без host sudo; отдельный непривилегированный авторитет активации Точки
+
+Дата: 2026-09-08  
+Статус: необходимое устранение подтверждённого препятствия публикации в рамках явного поручения владельца  
+Владелец: Исполнитель ArtHello OS
+
+PR361 слит как eb47c1360fbd701876a3c49efe029194707304db. Exact PR/main Quality, Proof, Verify прошли; приложение756/756. R6 run34221458013/job102045375780 в11:35:42Z заново подтвердил существующий School R5 read-only с первоначальной активацией09:16:10Z. Затем проверка обнаружила gateway UID995 без root и без уже доступного passwordless sudo. Host-установщик бэкапов не запускался, image/clone/cutover пропущены. Живой ArtHello SHA6596f69390ad539577ec2640e8ef40c7e12c22dc прочитан непосредственно в этом run. Это отказ требуемого способа установки, а не ошибка backup.py и не разрешение получать host root.
+
+Выбран новый R7/D069 из нового точного проверенного образа. Backup worker работает UID1000:1000, которому уже принадлежит приложение; получает только точный существующий D1 volume read-only с volume-nocopy и canonical path, подтверждённым открытыми файловыми дескрипторами рабочего приложения. Чужие права не изменяются. Backups и backup-control — новые именованные volumes с точными release labels. Владельцы и modes0700/0750 задаются при hosted image build, затем проверяются после стандартного Docker copy-up. При несовпадении — отказ без production chown. Неизвестные существующие ресурсы не принимаются за собственные.
+
+Сохраняются SQLite Online Backup, отдельное восстановление с проверкой содержимого, flock, fsync и атомарный manifest. Первая проверенная копия обязательна до включения ежедневного расписания00:15UTC и до остановки старого ArtHello. Manual и scheduler имеют общий admission;202 означает запуск, а не завершение. Состояние расписания устойчиво к перезапуску, пропущенный запуск догоняется без ложной записи об успехе. UI и owner/Origin/CSRF права сохраняются. Приложение получает только backup-control read-only; сокет выполняет только фиксированный status/create контракт. Backups остаются на том же сервере и охватывают только ArtHello SQLite, без School, внешних файлов и ключей.
+
+Автоактивация Точки переносится в отдельный volume, недоступный backup worker. Каталог принадлежит UID1002:GID1000, mode0750; marker0640. ПриложениеUID1000 монтирует этот volume только read-only. Единственный writer запускается protected deployment job под UID1002 из того же immutable image только после существующих public/current-main/secret gates. Новый фиксированный V2 протокол требует exact release SHA и свежий nonce; чтение на каждом tick сохраняет UID/GID/mode/regular-file/size/no-follow/nonblocking проверки. Старый V1 marker не активирует новый выпуск. UID1002 — ограниченный владелец собственного контейнерного ресурса, не новая host-admin учётная запись. Просто разрешить UID1000 или любого владельца в прежнем общем backup-control запрещено.
+
+Все новые вспомогательные контейнеры — network:none, read-only rootfs, cap-drop ALL, no-new-privileges, ограниченные ресурсы, без secrets и Docker/systemd socket. Writer не получает D1, backups или backup-control. Новых host-root mounts, sudoers, privileged/root helpers, host package installation и изменения чужих файлов нет. Прежние уже разрешённые scoped Docker clone/snapshot helpers и Caddy route operations сохраняются; весь consumer не объявляется выполняющимся без container UID0.
+
+Независимый design/rights review признал это уменьшением требуемых полномочий с сохранением независимого разрешения активации. Перед публикацией обязательны реальные hosted Docker проверки copy-up UID/mode, RO WAL backup при записи, restore, socket/manual/restart/catch-up и невозможности записи activation приложением/worker. Отдельно проверяются производственные exact mounts и первая копия. Durable public-write boundary и запрет восстановления старой БД поверх новых записей не меняются; при неоднозначном public результате сохраняются текущая БД, кандидат и вспомогательные ресурсы.
+
+School R5 остаётся неизменным, проверяется существующим R6 read-only verifier. Настоящий Education→дневник SSO, exact PR/main CI/image и живая приёмка шести сценариев остаются обязательными. Недоступность облачного браузера и неподтверждённый финансовый PayType AlfaCRM не превращаются в PASS.
+
+Источник поведения volumes: https://docs.docker.com/engine/storage/volumes/ (стандартный copy-up и отдельные RO/RW mounts; точные UID/modes доказываются исполняемыми тестами, не предполагаются).
+
+
 ## D-072 — Сохранить установленный School R5 и читать денежный депозит из подтверждённого поля AlfaCRM
 
 Дата: 2026-09-08  

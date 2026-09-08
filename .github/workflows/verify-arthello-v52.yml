@@ -45,6 +45,15 @@ on:
       - .github/scripts/test-recovery-r4-bootstrap.py
       - .github/workflows/deploy-arthello-recovery-r5-20260908.yml
       - .github/workflows/deploy-arthello-recovery-r6-20260908.yml
+      - .github/workflows/deploy-arthello-recovery-r7-20260908.yml
+      - .github/scripts/check-recovery-r7-contract.rb
+      - .github/scripts/check-school-live-acceptance-r7.py
+      - .github/scripts/d069-replay-guard.py
+      - .github/scripts/test-recovery-r7-gates.py
+      - .github/scripts/r7-backup-runtime.py
+      - .github/scripts/test-r7-backup-runtime.py
+      - scripts/test/arthello-backup-container*
+      - scripts/test/arthello-backup-runtime-docker-smoke.sh
       - .github/scripts/check-recovery-r6-contract.rb
       - .github/scripts/check-school-live-acceptance-r6.py
       - .github/scripts/d068-replay-guard.py
@@ -109,6 +118,15 @@ on:
       - .github/scripts/test-recovery-r4-bootstrap.py
       - .github/workflows/deploy-arthello-recovery-r5-20260908.yml
       - .github/workflows/deploy-arthello-recovery-r6-20260908.yml
+      - .github/workflows/deploy-arthello-recovery-r7-20260908.yml
+      - .github/scripts/check-recovery-r7-contract.rb
+      - .github/scripts/check-school-live-acceptance-r7.py
+      - .github/scripts/d069-replay-guard.py
+      - .github/scripts/test-recovery-r7-gates.py
+      - .github/scripts/r7-backup-runtime.py
+      - .github/scripts/test-r7-backup-runtime.py
+      - scripts/test/arthello-backup-container*
+      - scripts/test/arthello-backup-runtime-docker-smoke.sh
       - .github/scripts/check-recovery-r6-contract.rb
       - .github/scripts/check-school-live-acceptance-r6.py
       - .github/scripts/d068-replay-guard.py
@@ -453,6 +471,10 @@ jobs:
           ruby .github/scripts/check-recovery-r4-contract.rb
           ruby .github/scripts/check-recovery-r5-contract.rb
           ruby .github/scripts/check-recovery-r6-contract.rb
+          ruby .github/scripts/check-recovery-r7-contract.rb
+          python3 -I .github/scripts/test-recovery-r7-gates.py
+          python3 -I .github/scripts/test-r7-backup-runtime.py
+          python3 -I -B deploy/v52/backup/test_worker.py
           python3 -I .github/scripts/test-recovery-r6-gates.py
           python3 -I .github/scripts/test-installed-school-relay-r6.py
           python3 -I .github/scripts/test-recovery-r2-gates.py
@@ -765,6 +787,24 @@ jobs:
           done
           test "$ready" -eq 1
           printf 'ARTHELLO_V52_ISOLATED_RUNTIME=VERIFIED\n'
+
+      - name: Verify isolated backup and activation volumes on the exact image
+        env:
+          IMMUTABLE_IMAGE_ID: ${{ steps.image.outputs.image_id }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$IMMUTABLE_IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]]
+          # Root capabilities are limited to disposable CI fixtures in /tmp.
+          # Production backup and activation processes use UID1000/UID1002.
+          docker run --rm --network none --read-only --user 0:0 \
+            --env ARTHELLO_ACTIVATION_REQUIRE_REAL_IDS=1 \
+            --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add DAC_OVERRIDE \
+            --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges:true \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777,size=32m \
+            --mount "type=bind,src=$PWD/deploy/v52/backup/test_activation_volume.py,dst=/opt/arthello-backup/test_activation_volume.py,readonly" \
+            --entrypoint python3 "$IMMUTABLE_IMAGE_ID" -I -B /opt/arthello-backup/test_activation_volume.py -v
+          PYTHONDONTWRITEBYTECODE=1 bash scripts/test/arthello-backup-container-docker-smoke.sh "$IMMUTABLE_IMAGE_ID"
+          PYTHONDONTWRITEBYTECODE=1 bash scripts/test/arthello-backup-runtime-docker-smoke.sh "$IMMUTABLE_IMAGE_ID"
 
       - name: Build immutable verification evidence
         env:
