@@ -1,10 +1,11 @@
 # ArtHello OS — Current State
 
-## Refactoring Phase 2.5 — DB initialization checkpoint (2026-09-08)
+## Refactoring Phase 2.5 — lazy configuration checkpoint (2026-09-08)
 
 - `lib/db` теперь можно импортировать без `DATABASE_URL`; подключение создаётся лениво через `createDb(env)` или при первом использовании совместимых exports `db`/`pool`.
 - Отсутствующий `DATABASE_URL` по-прежнему обрабатывается fail closed при первой попытке создать или использовать подключение; поведение закреплено в агрегатном `test:refactoring`.
-- Это закрывает только DB-половину пункта 2.5. Module-level конфигурация `alphaCrmClient` не изменена и остаётся открытой.
+- `alphaCrmClient` также импортируется без tenant env; `createAlphaCrmConfig(env)` проверяет явный `ALFACRM_DOMAIN` только перед сетевой операцией и сохраняет fail-closed поведение до `fetch`.
+- Пункт 2.5 выполнен; схемы, API-контракт и production-конфигурация не изменялись.
 
 ## Рефакторинг, Фаза 2 — локальный checkpoint 2026-09-08
 

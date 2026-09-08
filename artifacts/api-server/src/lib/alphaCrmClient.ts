@@ -1,13 +1,18 @@
 import { logger } from "./logger.js";
 import { SerializedRequestQueue } from "./serialized-request-queue.js";
 
-const DOMAIN = process.env.ALFACRM_DOMAIN?.trim();
-if (!DOMAIN) {
-  throw new Error("ALFACRM_DOMAIN is required; AlphaCRM must fail closed without an explicit tenant");
+export function createAlphaCrmConfig(env: NodeJS.ProcessEnv = process.env) {
+  const domain = env.ALFACRM_DOMAIN?.trim();
+  if (!domain) {
+    throw new Error("ALFACRM_DOMAIN is required; AlphaCRM must fail closed without an explicit tenant");
+  }
+  return {
+    domain,
+    email: env.ALFACRM_EMAIL ?? "",
+    apiKey: env.ALFACRM_API_KEY ?? "",
+    baseUrl: `https://${domain}/v2api`,
+  };
 }
-const EMAIL = process.env.ALFACRM_EMAIL ?? "";
-const API_KEY = process.env.ALFACRM_API_KEY ?? "";
-export const BASE_URL = `https://${DOMAIN}/v2api`;
 
 let authToken: string | null = null;
 let authTokenExpiry: number = 0;
@@ -26,18 +31,19 @@ function queuedFetch(
 }
 
 export async function authenticate(): Promise<string> {
+  const config = createAlphaCrmConfig();
   if (authToken && Date.now() < authTokenExpiry) {
     return authToken;
   }
   if (authInFlight) return authInFlight;
 
   authInFlight = (async () => {
-    logger.info({ domain: DOMAIN }, "Authenticating with AlphaCRM");
+    logger.info({ domain: config.domain }, "Authenticating with AlphaCRM");
 
-    const resp = await queuedFetch(`${BASE_URL}/auth/login`, {
+    const resp = await queuedFetch(`${config.baseUrl}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: EMAIL, api_key: API_KEY }),
+      body: JSON.stringify({ email: config.email, api_key: config.apiKey }),
     });
 
     if (!resp.ok) {
@@ -87,7 +93,7 @@ export async function crmProbe(
   body?: Record<string, unknown>,
   token?: string,
 ): Promise<ProbeResult> {
-  const url = path.startsWith("http") ? path : `${BASE_URL}/${path}`;
+  const url = path.startsWith("http") ? path : `${createAlphaCrmConfig().baseUrl}/${path}`;
   const t = token ?? authToken ?? "";
   const start = Date.now();
 
@@ -320,7 +326,7 @@ export async function crmPost<T = unknown>(
   body: Record<string, unknown> = {},
 ): Promise<T> {
   const token = await authenticate();
-  const url = `${BASE_URL}/${path}`;
+  const url = `${createAlphaCrmConfig().baseUrl}/${path}`;
   logger.info({ url }, "CRM POST request");
 
   const resp = await queuedFetch(url, {
