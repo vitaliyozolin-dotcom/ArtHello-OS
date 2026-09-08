@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { inspectDatabase, activeRelativePath } from '../production-readonly.mjs';
+import { inspectDatabase, activeRelativePath, diagnosticExitCode } from '../production-readonly.mjs';
 
 test('canonical D1 identity is deterministic, not discovered by row count', () => {
   assert.match(activeRelativePath(), /^d1\/miniflare-D1DatabaseObject\/[a-f0-9]{64}\.sqlite$/);
@@ -46,5 +46,28 @@ test('schema drift returns only a fixed unavailable state', () => {
     assert.equal(JSON.stringify(result).includes('private_column'), false);
     // The read transaction has ended; another inspection is permitted.
     assert.deepEqual(inspectDatabase(db).checks.bankLinks, { state: 'unavailable' });
+  } finally { db.close(); }
+});
+
+test('missing, errored, partial or violated checks never produce a successful process status', () => {
+  for (const state of ['not_installed', 'over_limit', 'unavailable']) {
+    assert.equal(diagnosticExitCode({ tables: { x: { state } }, checks: {} }), 2);
+  }
+  for (const state of ['schema_missing', 'not_checked', 'unavailable']) {
+    assert.equal(diagnosticExitCode({ tables: {}, checks: { x: { state } } }), 2);
+  }
+  assert.equal(diagnosticExitCode({ tables: {}, checks: { x: { state: 'observed', violations: 1 } } }), 2);
+  assert.equal(diagnosticExitCode({ tables: { x: { state: 'observed', rows: 0 } }, checks: { x: { state: 'observed', violations: 0 } } }), 0);
+});
+
+test('system and branch grants validate both reference endpoints', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec("CREATE TABLE app_users(id TEXT PRIMARY KEY); CREATE TABLE app_systems(id TEXT PRIMARY KEY); CREATE TABLE organization_branches(id TEXT PRIMARY KEY); CREATE TABLE user_system_access(user_id TEXT, system_id TEXT); CREATE TABLE user_branch_access(user_id TEXT, branch_id TEXT); INSERT INTO user_system_access VALUES('missing-user','missing-system'); INSERT INTO user_branch_access VALUES('missing-user','missing-branch');");
+    const result = inspectDatabase(db);
+    for (const key of ['accessUsers', 'accessSystems', 'branchUsers', 'branchTargets']) {
+      assert.deepEqual(result.checks[key], { state: 'observed', violations: 1 });
+    }
+    assert.equal(JSON.stringify(result).includes('missing-user'), false);
   } finally { db.close(); }
 });
