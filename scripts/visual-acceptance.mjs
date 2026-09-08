@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { waitForRenderedRoot } from './lib/visual-readiness.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const canon = JSON.parse(await fs.readFile(path.join(ROOT, 'quality-gates', 'visual-canon.json'), 'utf8'));
@@ -92,6 +93,7 @@ function auditExpression() {
     return {
       url: location.href,
       title: document.title,
+      documentReady: document.readyState === 'complete',
       rootRendered: Boolean(root && root.childElementCount > 0 && (root.textContent || '').trim().length > 0),
       viewport: { width: innerWidth, height: innerHeight },
       documentSize: { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, scrollHeight: document.documentElement.scrollHeight },
@@ -140,12 +142,19 @@ try {
     });
     await cdp.call('Page.navigate', { url: APP_URL });
     await sleep(1800);
-    const evaluated = await cdp.call('Runtime.evaluate', {
-      expression: auditExpression(),
-      returnByValue: true
+    const readiness = await waitForRenderedRoot(async () => {
+      const evaluated = await cdp.call('Runtime.evaluate', {
+        expression: auditExpression(),
+        returnByValue: true
+      });
+      if (evaluated.exceptionDetails || !evaluated.result?.value) {
+        throw new Error('Visual audit evaluation failed.');
+      }
+      return evaluated.result.value;
     });
-    const audit = evaluated.result.value;
+    const audit = readiness.audit;
     const failures = [];
+    if (!readiness.ready) failures.push('DOCUMENT_READINESS_TIMEOUT');
     if (audit.viewport.width !== viewport.width || audit.viewport.height !== viewport.height) {
       failures.push(`VIEWPORT_MISMATCH:${audit.viewport.width}x${audit.viewport.height}`);
     }
@@ -168,6 +177,7 @@ try {
       id: viewport.id,
       width: viewport.width,
       height: viewport.height,
+      readiness_attempts: readiness.attempts,
       overflow_px: overflow,
       interactive_count: audit.interactive.length,
       dialog_count: audit.dialogs.length,
