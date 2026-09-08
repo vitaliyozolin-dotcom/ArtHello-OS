@@ -1,0 +1,1064 @@
+# Manual reviewed-candidate verification only; controller workflow must run from main.
+# No deployment trigger or production access. D-061 external VM isolation is required.
+name: ArtHello isolated candidate gates
+'on':
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed codex/recovery-release-20260908 SHA
+        required: true
+        type: string
+      source_tree:
+        description: Exact reviewed candidate tree SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: arthello-isolated-candidate-${{ inputs.source_sha }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  secret-scan:
+    name: secret-scan
+    runs-on:
+    - arthello-build-only-linux-x64
+    timeout-minutes: 10
+    steps:
+    - name: Verify build-only machine and reviewed candidate before checkout
+      env:
+        GH_TOKEN: ${{ github.token }}
+        EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
+        EXPECTED_SOURCE_TREE: ${{ inputs.source_tree }}
+      run: |
+        set -Eeuo pipefail
+        test "$GITHUB_EVENT_NAME" = workflow_dispatch
+        test "$GITHUB_REPOSITORY" = vitaliyozolin-dotcom/ArtHello-OS
+        test "$GITHUB_REF" = refs/heads/main
+        test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
+        [[ "$EXPECTED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+        [[ "$EXPECTED_SOURCE_TREE" =~ ^[a-f0-9]{40}$ ]]
+        test -z "${DOCKER_HOST:-}"
+        test -z "${DOCKER_CONTEXT:-}"
+        test -z "${SSH_AUTH_SOCK:-}"
+        # This provisioner-owned marker records a fresh VM; it does not replace the
+        # hypervisor network boundary or permit production credentials on this host.
+        python3 -I /opt/arthello-builder/check-ready.py
+        current_main="$(curl --fail --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main \
+          | jq -er '.object.sha')"
+        test "$current_main" = "$GITHUB_SHA"
+        candidate_head="$(curl --fail --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/codex/recovery-release-20260908 \
+          | jq -er '.object.sha')"
+        if [ "$EXPECTED_SOURCE_SHA" != "$current_main" ]; then
+          test "$candidate_head" = "$EXPECTED_SOURCE_SHA"
+        fi
+        candidate_tree="$(curl --fail --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          "https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/commits/$EXPECTED_SOURCE_SHA" \
+          | jq -er '.tree.sha')"
+        test "$candidate_tree" = "$EXPECTED_SOURCE_TREE"
+        printf 'ARTHELLO_ISOLATED_CANDIDATE_BOUNDARY=VERIFIED sha=%s tree=%s\n' "$EXPECTED_SOURCE_SHA" "$EXPECTED_SOURCE_TREE"
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ inputs.source_sha }}
+        fetch-depth: 0
+        clean: true
+        persist-credentials: false
+    - name: Verify exact source head and complete history
+      env:
+        EXPECTED_HEAD_SHA: ${{ inputs.source_sha }}
+      run: |
+        set -Eeuo pipefail
+        actual_head="$(git rev-parse HEAD)"
+        test "$actual_head" = "$EXPECTED_HEAD_SHA"
+        test "$(git rev-parse --is-shallow-repository)" = "false"
+        test "$(git rev-list --count HEAD)" -gt 0
+        git fsck --full --strict
+        git log -p --no-ext-diff --full-history HEAD >/dev/null
+    - name: Scan current tree and reachable Git history
+      env:
+        GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9
+      run: |
+        set -Eeuo pipefail
+
+        smoke_dir="$(mktemp -d)"
+        trap 'rm -rf "$smoke_dir"' EXIT
+        cat > "$smoke_dir/gitleaks.toml" <<'EOF'
+        title = "CI secret scanner self-test"
+
+        [[rules]]
+        id = "ci-synthetic-leak"
+        description = "CI-only synthetic finding"
+        regex = '''SYNTHETIC_LEAK_[A-Z0-9]{16}'''
+        EOF
+        printf '%s%s\n' 'SYNTHETIC_' 'LEAK_A1B2C3D4E5F6G7H8' > "$smoke_dir/synthetic-leak.txt"
+
+        set +e
+        docker run --rm --user "$(id -u):$(id -g)" \
+          -v "$smoke_dir:/scan:ro" \
+          "$GITLEAKS_IMAGE" dir --config /scan/gitleaks.toml --no-banner --redact --exit-code 23 /scan
+        smoke_status=$?
+        set -e
+        if [[ "$smoke_status" -ne 23 ]]; then
+          echo "Gitleaks fail-closed self-test failed with status $smoke_status" >&2
+          exit 1
+        fi
+
+        docker run --rm --user "$(id -u):$(id -g)" \
+          -v "$PWD:/repo:ro" \
+          "$GITLEAKS_IMAGE" dir --no-banner --redact --verbose /repo
+
+        docker run --rm --user "$(id -u):$(id -g)" \
+          -v "$PWD:/repo:ro" \
+          -w /repo \
+          "$GITLEAKS_IMAGE" git --no-banner --redact --verbose --log-opts="--full-history HEAD" /repo
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.ref
+      == 'refs/heads/main' && github.actor == 'vitaliyozolin-dotcom'
+  quality:
+    runs-on:
+    - arthello-build-only-linux-x64
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: arthello_test
+          POSTGRES_USER: arthello_test
+          POSTGRES_PASSWORD: sandbox-only-password
+        ports:
+        - 5432:5432
+        options: --health-cmd "pg_isready -U arthello_test -d arthello_test" --health-interval 5s --health-timeout
+          5s --health-retries 12
+    env:
+      DATABASE_URL: postgresql://arthello_test:sandbox-only-password@127.0.0.1:5432/arthello_test
+      TEST_DATABASE_URL: postgresql://arthello_test:sandbox-only-password@127.0.0.1:5432/arthello_test
+      NODE_ENV: test
+    steps:
+    - name: Verify build-only machine and reviewed candidate before checkout
+      env:
+        GH_TOKEN: ${{ github.token }}
+        EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
+        EXPECTED_SOURCE_TREE: ${{ inputs.source_tree }}
+      run: |
+        set -Eeuo pipefail
+        test "$GITHUB_EVENT_NAME" = workflow_dispatch
+        test "$GITHUB_REPOSITORY" = vitaliyozolin-dotcom/ArtHello-OS
+        test "$GITHUB_REF" = refs/heads/main
+        test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
+        [[ "$EXPECTED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+        [[ "$EXPECTED_SOURCE_TREE" =~ ^[a-f0-9]{40}$ ]]
+        test -z "${DOCKER_HOST:-}"
+        test -z "${DOCKER_CONTEXT:-}"
+        test -z "${SSH_AUTH_SOCK:-}"
+        # This provisioner-owned marker records a fresh VM; it does not replace the
+        # hypervisor network boundary or permit production credentials on this host.
+        python3 -I /opt/arthello-builder/check-ready.py
+        current_main="$(curl --fail --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main \
+          | jq -er '.object.sha')"
+        test "$current_main" = "$GITHUB_SHA"
+        candidate_head="$(curl --fail --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/codex/recovery-release-20260908 \
+          | jq -er '.object.sha')"
+        if [ "$EXPECTED_SOURCE_SHA" != "$current_main" ]; then
+          test "$candidate_head" = "$EXPECTED_SOURCE_SHA"
+        fi
+        candidate_tree="$(curl --fail --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          "https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/commits/$EXPECTED_SOURCE_SHA" \
+          | jq -er '.tree.sha')"
+        test "$candidate_tree" = "$EXPECTED_SOURCE_TREE"
+        printf 'ARTHELLO_ISOLATED_CANDIDATE_BOUNDARY=VERIFIED sha=%s tree=%s\n' "$EXPECTED_SOURCE_SHA" "$EXPECTED_SOURCE_TREE"
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ inputs.source_sha }}
+        fetch-depth: 0
+        clean: true
+        persist-credentials: false
+    - name: Verify exact source head
+      env:
+        EXPECTED_HEAD_SHA: ${{ inputs.source_sha }}
+      run: |
+        actual_head="$(git rev-parse HEAD)"
+        test "$actual_head" = "$EXPECTED_HEAD_SHA"
+    - name: Validate production pull-deployment script
+      run: bash -n deploy/pull-release.sh
+    - name: Validate offline API runtime contract
+      run: |
+        set -Eeuo pipefail
+        bash -n deploy/activate-git-transport.sh
+        sh -n deploy/api-entrypoint.sh
+        grep -F 'db_workspace=/app/lib/db' deploy/api-entrypoint.sh
+        grep -F 'cd "$db_workspace"' deploy/api-entrypoint.sh
+        grep -F '"$drizzle_bin" migrate --config ./drizzle.config.ts' deploy/api-entrypoint.sh
+        grep -F 'ARTHELLO_API_STARTUP_ERROR=alfacrm_domain_missing_with_credentials' deploy/api-entrypoint.sh
+        grep -F 'export ALFACRM_DOMAIN=disabled.invalid' deploy/api-entrypoint.sh
+        if grep -Eq '(^|[[:space:]])pnpm([[:space:]]|$)|corepack|registry\.npmjs\.org' \
+          deploy/api-entrypoint.sh; then
+          echo 'Production API entrypoint must not invoke a package manager or registry.' >&2
+          exit 1
+        fi
+        api_stage="$(awk '
+          /^FROM .* AS api$/ { in_api=1 }
+          /^FROM .* AS web$/ { in_api=0 }
+          in_api { print }
+        ' deploy/Dockerfile)"
+        if grep -Eq 'corepack|pnpm|registry\.npmjs\.org' <<<"$api_stage"; then
+          echo 'Final API image stage must remain package-manager-free.' >&2
+          exit 1
+        fi
+        grep -F 'test -x /app/lib/db/node_modules/.bin/drizzle-kit' \
+          deploy/Dockerfile
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+    - run: corepack enable
+    - run: corepack prepare pnpm@11.7.0 --activate
+    - run: pnpm install --frozen-lockfile
+    - run: pnpm run test:full
+    - run: pnpm run test:postgres
+    - run: pnpm run build:full
+    - name: Build immutable provenance evidence
+      run: |
+        mkdir -p ci-provenance
+        head_sha="$(git rev-parse HEAD)"
+        tree_sha="$(git rev-parse HEAD^{tree})"
+        source_archive_sha256="$(git archive --format=tar HEAD | sha256sum | cut -d ' ' -f 1)"
+        sites_artifact_sha256="$(tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf - dist | sha256sum | cut -d ' ' -f 1)"
+        {
+          echo "runner_trust=self-hosted-isolated-ephemeral"
+          echo "production_capability=false"
+          echo "repository=${GITHUB_REPOSITORY}"
+          echo "workflow_run_id=${GITHUB_RUN_ID}"
+          echo "workflow_run_attempt=${GITHUB_RUN_ATTEMPT}"
+          echo "head_sha=${head_sha}"
+          echo "tree_sha=${tree_sha}"
+          echo "source_archive_sha256=${source_archive_sha256}"
+          echo "sites_artifact_sha256=${sites_artifact_sha256}"
+        } | tee ci-provenance/provenance.txt
+        sha256sum ci-provenance/provenance.txt > ci-provenance/provenance.txt.sha256
+    - name: Upload immutable provenance evidence
+      uses: actions/upload-artifact@v4
+      with:
+        name: arthello-provenance-${{ github.run_id }}
+        path: ci-provenance/
+        if-no-files-found: error
+        retention-days: 3
+    name: quality
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.ref
+      == 'refs/heads/main' && github.actor == 'vitaliyozolin-dotcom'
+  proof:
+    runs-on:
+    - arthello-build-only-linux-x64
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: arthello_test
+        ports:
+        - 5432:5432
+        options: --health-cmd="pg_isready -U postgres -d arthello_test" --health-interval=5s --health-timeout=5s
+          --health-retries=12
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/arthello_test
+    steps:
+    - name: Verify build-only machine and reviewed candidate before checkout
+      env:
+        GH_TOKEN: ${{ github.token }}
+        EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
+        EXPECTED_SOURCE_TREE: ${{ inputs.source_tree }}
+      run: |
+        set -Eeuo pipefail
+        test "$GITHUB_EVENT_NAME" = workflow_dispatch
+        test "$GITHUB_REPOSITORY" = vitaliyozolin-dotcom/ArtHello-OS
+        test "$GITHUB_REF" = refs/heads/main
+        test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
+        [[ "$EXPECTED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+        [[ "$EXPECTED_SOURCE_TREE" =~ ^[a-f0-9]{40}$ ]]
+        test -z "${DOCKER_HOST:-}"
+        test -z "${DOCKER_CONTEXT:-}"
+        test -z "${SSH_AUTH_SOCK:-}"
+        # This provisioner-owned marker records a fresh VM; it does not replace the
+        # hypervisor network boundary or permit production credentials on this host.
+        python3 -I /opt/arthello-builder/check-ready.py
+        current_main="$(curl --fail --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main \
+          | jq -er '.object.sha')"
+        test "$current_main" = "$GITHUB_SHA"
+        candidate_head="$(curl --fail --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/codex/recovery-release-20260908 \
+          | jq -er '.object.sha')"
+        if [ "$EXPECTED_SOURCE_SHA" != "$current_main" ]; then
+          test "$candidate_head" = "$EXPECTED_SOURCE_SHA"
+        fi
+        candidate_tree="$(curl --fail --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          "https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/commits/$EXPECTED_SOURCE_SHA" \
+          | jq -er '.tree.sha')"
+        test "$candidate_tree" = "$EXPECTED_SOURCE_TREE"
+        printf 'ARTHELLO_ISOLATED_CANDIDATE_BOUNDARY=VERIFIED sha=%s tree=%s\n' "$EXPECTED_SOURCE_SHA" "$EXPECTED_SOURCE_TREE"
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ inputs.source_sha }}
+        fetch-depth: 0
+        clean: true
+        persist-credentials: false
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 11.7.0
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: pnpm
+    - run: pnpm install --frozen-lockfile
+    - name: Workflow Production Capability Policy
+      run: |
+        node --test scripts/test/workflow-policy.test.mjs
+        node scripts/workflow-policy.mjs --report .artifacts/workflow-policy.json
+    - name: Permission Proof Engine
+      run: node scripts/permission-proof.mjs --report .artifacts/permission-proof.json
+    - name: Database Migration Twin
+      run: pnpm --filter @workspace/db exec node scripts/migration-twin.mjs --report ../../.artifacts/migration-twin.json
+    - name: Build front office for visual proof
+      run: pnpm --filter @workspace/alpha-crm-sync build
+    - name: Start front office preview
+      run: |
+        pnpm --filter @workspace/alpha-crm-sync exec vite preview --config vite.config.ts --host 127.0.0.1 --port 4173 > /tmp/arthello-vite.log 2>&1 &
+        echo $! > /tmp/arthello-vite.pid
+        curl --fail --retry 30 --retry-delay 1 --retry-connrefused http://127.0.0.1:4173/ >/dev/null
+    - name: Design Memory + Visual Acceptance Gate
+      run: node scripts/visual-acceptance.mjs --url http://127.0.0.1:4173/ --out .artifacts/visual-acceptance
+    - name: Upload proof evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: arthello-proof-evidence-${{ github.run_id }}
+        path: .artifacts/
+        if-no-files-found: warn
+        retention-days: 3
+    name: proof
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.ref
+      == 'refs/heads/main' && github.actor == 'vitaliyozolin-dotcom'
+    needs:
+    - quality
+    - secret-scan
+  verify-v52:
+    name: verify-v52
+    runs-on:
+    - arthello-build-only-linux-x64
+    timeout-minutes: 60
+    steps:
+    - name: Verify build-only machine and reviewed candidate before checkout
+      env:
+        GH_TOKEN: ${{ github.token }}
+        EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
+        EXPECTED_SOURCE_TREE: ${{ inputs.source_tree }}
+      run: |
+        set -Eeuo pipefail
+        test "$GITHUB_EVENT_NAME" = workflow_dispatch
+        test "$GITHUB_REPOSITORY" = vitaliyozolin-dotcom/ArtHello-OS
+        test "$GITHUB_REF" = refs/heads/main
+        test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
+        [[ "$EXPECTED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+        [[ "$EXPECTED_SOURCE_TREE" =~ ^[a-f0-9]{40}$ ]]
+        test -z "${DOCKER_HOST:-}"
+        test -z "${DOCKER_CONTEXT:-}"
+        test -z "${SSH_AUTH_SOCK:-}"
+        # This provisioner-owned marker records a fresh VM; it does not replace the
+        # hypervisor network boundary or permit production credentials on this host.
+        python3 -I /opt/arthello-builder/check-ready.py
+        current_main="$(curl --fail --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main \
+          | jq -er '.object.sha')"
+        test "$current_main" = "$GITHUB_SHA"
+        candidate_head="$(curl --fail --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/codex/recovery-release-20260908 \
+          | jq -er '.object.sha')"
+        if [ "$EXPECTED_SOURCE_SHA" != "$current_main" ]; then
+          test "$candidate_head" = "$EXPECTED_SOURCE_SHA"
+        fi
+        candidate_tree="$(curl --fail --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          "https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/commits/$EXPECTED_SOURCE_SHA" \
+          | jq -er '.tree.sha')"
+        test "$candidate_tree" = "$EXPECTED_SOURCE_TREE"
+        printf 'ARTHELLO_ISOLATED_CANDIDATE_BOUNDARY=VERIFIED sha=%s tree=%s\n' "$EXPECTED_SOURCE_SHA" "$EXPECTED_SOURCE_TREE"
+    - name: Check out exact unprivileged source
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ inputs.source_sha }}
+        fetch-depth: 0
+        clean: true
+        persist-credentials: false
+    - name: Verify exact source and production-policy boundary
+      env:
+        EXPECTED_SHA: ${{ inputs.source_sha }}
+      run: "set -Eeuo pipefail\ntest \"$(git rev-parse HEAD)\" = \"$EXPECTED_SHA\"\ntest \"$(git rev-parse --is-shallow-repository)\"\
+        \ = false\ngit fsck --full --strict\n\n# D-040: a pull-request head is verified only on an ephemeral hosted\n\
+        # runner and receives neither a production Environment nor a secret.\n# D-059 makes a one-release fail-closed\
+        \ workerd-to-Node binding repair only for the production trigger;\n# the self-hosted job still consumes\
+        \ merged, exact-SHA gated main code.\nruby -ryaml -e '\n  document = YAML.safe_load(File.read(ARGV.fetch(0)),\
+        \ aliases: true)\n  jobs = document.fetch(\"jobs\")\n  raise \"verification workflow must contain jobs\"\
+        \ if jobs.empty?\n  jobs.each_value do |job|\n    raise \"verification must use an ephemeral hosted runner\"\
+        \ unless job.fetch(\"runs-on\") == \"ubuntu-latest\"\n    raise \"verification must not receive a protected\
+        \ Environment\" if job.key?(\"environment\")\n  end\n  verify_steps = jobs.fetch(\"verify-v52\").fetch(\"\
+        steps\")\n  build_index = verify_steps.index { |step| step[\"id\"] == \"image\" }\n  raise \"immutable image\
+        \ build step is missing\" unless build_index\n  restore_index = verify_steps.index { |step| step[\"name\"\
+        ] == \"Restore exact source immediately before build\" }\n  raise \"fresh exact checkout must immediately\
+        \ precede the pristine build gate\" unless restore_index && restore_index + 2 == build_index\n  restore\
+        \ = verify_steps.fetch(restore_index)\n  raise \"pre-build checkout action is not pinned\" unless restore.fetch(\"\
+        uses\") == \"actions/checkout@11d5960a326750d5838078e36cf38b85af677262\"\n  restore_with = restore.fetch(\"\
+        with\")\n  raise \"pre-build checkout ref is not exact\" unless restore_with.fetch(\"ref\").include?(\"\
+        github.event.pull_request.head.sha || github.sha\")\n  raise \"pre-build checkout must clean ignored files\"\
+        \ unless restore_with.fetch(\"clean\") == true\n  raise \"pre-build checkout must not persist credentials\"\
+        \ unless restore_with.fetch(\"persist-credentials\") == false\n  pristine = verify_steps.fetch(restore_index\
+        \ + 1).fetch(\"run\")\n  raise \"pre-build pristine gate is incomplete\" unless pristine.include?(\"git\
+        \ status --porcelain=v1 --untracked-files=all\") && pristine.include?(\"git clean -ndx\")\n  build_run =\
+        \ verify_steps.fetch(build_index).fetch(\"run\")\n  raise \"post-build pristine gate is incomplete\" unless\
+        \ build_run.include?(\"ARTHELLO_POST_BUILD_SOURCE=PRISTINE\") && build_run.include?(\"git status --porcelain=v1\
+        \ --untracked-files=all\") && build_run.include?(\"git clean -ndx\")\n  upload_index = verify_steps.index\
+        \ { |step| step[\"name\"] == \"Upload immutable verification evidence\" }\n  maintenance_index = verify_steps.index\
+        \ { |step| step[\"name\"] == \"Run repository maintenance tests after immutable upload\" }\n  raise \"repository\
+        \ maintenance tests must run only after immutable upload\" unless upload_index && maintenance_index && maintenance_index\
+        \ > upload_index && maintenance_index == verify_steps.length - 1\n  pre_upload_runs = verify_steps.take(upload_index\
+        \ + 1).map { |step| step[\"run\"].to_s }.join(\"\\n\")\n  repo_python_before_upload = pre_upload_runs.lines.any?\
+        \ { |line| line.match?(/python3\\s+(?!-I\\b)/) }\n  raise \"repository Python executes before immutable\
+        \ upload\" if repo_python_before_upload\n  verify_source = File.read(ARGV.fetch(0))\n  raise \"standalone\
+        \ negated grep is not fail-closed\" if verify_source.lines.any? { |line| line.match?(/^\\s*!\\s+grep\\b/)\
+        \ }\n' .github/workflows/verify-arthello-v52.yml\n\nruby -ryaml -e '\n  document = YAML.safe_load(File.read(ARGV.fetch(0)),\
+        \ aliases: true)\n  triggers = document[\"on\"] || document[true]\n  raise \"production workflow must be\
+        \ workflow_run only\" unless triggers.keys.map(&:to_s) == [\"workflow_run\"]\n  workflow_run = triggers.fetch(\"\
+        workflow_run\")\n  raise \"unexpected production trigger workflow\" unless workflow_run.fetch(\"workflows\"\
+        ) == [\"Verify ArtHello v52 release\"]\n  raise \"production trigger must wait for completion\" unless workflow_run.fetch(\"\
+        types\") == [\"completed\"]\n  workflow_concurrency = document.fetch(\"concurrency\")\n  raise \"ArtHello\
+        \ workflow concurrency is missing\" unless workflow_concurrency.fetch(\"group\") == \"gateway-38-55-arthello-production\"\
+        \ && workflow_concurrency.fetch(\"cancel-in-progress\") == false\n  deploy = document.fetch(\"jobs\").fetch(\"\
+        deploy\")\n  runners = Array(deploy.fetch(\"runs-on\"))\n  raise \"production must use its dedicated self-hosted\
+        \ runner\" unless runners.include?(\"self-hosted\") && runners.include?(\"arthello-gateway\")\n  raise \"\
+        production timeout cannot cover recovery guards\" unless deploy.fetch(\"timeout-minutes\") >= 210\n  raise\
+        \ \"production Environment is mandatory\" unless deploy.fetch(\"environment\") == \"production-ru\"\n  school_concurrency\
+        \ = deploy.fetch(\"concurrency\")\n  raise \"School workflow concurrency is missing\" unless school_concurrency.fetch(\"\
+        group\") == \"school-1-11-production\" && school_concurrency.fetch(\"cancel-in-progress\") == false\n  deployment_env\
+        \ = document.fetch(\"env\")\n  raise \"release branch env pin missing\" unless deployment_env.fetch(\"EXPECTED_RELEASE_HEAD\"\
+        ) == \"codex/d059-tochka-binding-redirect-20260903\"\n  raise \"release PR env pin missing\" unless deployment_env.fetch(\"\
+        EXPECTED_RELEASE_PR\").to_s == \"328\"\n  raise \"previous release SHA pin missing\" unless deployment_env.fetch(\"\
+        PREVIOUS_RELEASE_SHA\") == \"7e926f4c29aa7e3c3208a55451db035714861e28\"\n  condition = deploy.fetch(\"if\"\
+        )\n  [\n    \"workflow_run\", \"vitaliyozolin-dotcom/ArtHello-OS\",\n    \"Verify ArtHello v52 release\"\
+        , \".github/workflows/verify-arthello-v52.yml\",\n    \"head_branch == '\\''main'\\''\", \"conclusion ==\
+        \ '\\''success'\\''\",\n    \"codex/d059-tochka-binding-redirect-20260903\", \"vitaliyozolin-dotcom\",\n\
+        \    \"number == fromJSON('\\''328'\\'')\",\n    \"pull_requests[1] == null\", \"github.run_attempt == 1\"\
+        \n  ].each do |required|\n    raise \"missing production authorization condition\" unless condition.include?(required)\n\
+        \  end\n  steps = deploy.fetch(\"steps\")\n  checkout_contract = steps.find { |step| step[\"name\"] == \"\
+        Verify checkout and release contracts\" }\n  raise \"checkout contract step is missing\" unless checkout_contract\n\
+        \  checkout_contract_run = checkout_contract.fetch(\"run\")\n  raise \"checkout trust-anchor hash gate is\
+        \ missing\" unless checkout_contract_run.include?(\"aa800ef345422d6158c6fafe1c06c429dbda21c3df4bb1ccb45a920ec1111399\"\
+        )\n  raise \"host Node must not be required before immutable image import\" if checkout_contract_run.lines.any?\
+        \ { |line| line.match?(/^\\s*node(?:\\s|$)/) }\n  checkout_index = steps.index { |step| step.key?(\"uses\"\
+        ) }\n  raise \"exact checkout is missing\" unless checkout_index\n  before_checkout = steps.take(checkout_index).map\
+        \ { |step| step[\"run\"].to_s }.join(\"\\n\")\n  raise \"Docker use before authorization/CI gate\" if before_checkout.match?(/(^|\\\
+        s)docker(\\s|$)/)\n  raise \"D-059 release branch gate missing before checkout\" unless before_checkout.include?(\"\
+        EXPECTED_RELEASE_HEAD\")\n  raise \"D-059 release PR gate missing before checkout\" unless before_checkout.include?(\"\
+        EXPECTED_RELEASE_PR\") && before_checkout.include?(\".number == $expected_pr\")\n  raise \"triggering verification\
+        \ run is not pinned\" unless before_checkout.include?(\"TRIGGER_VERIFY_RUN_ID\")\n  raise \"triggering verification\
+        \ attempt is not pinned\" unless before_checkout.include?(\".run_attempt == 1\")\n  raise \"release SHA\
+        \ is not pinned before checkout\" unless before_checkout.include?(\"RELEASE_SHA\")\n  raise \"previous release\
+        \ SHA is not rejected\" unless before_checkout.include?(%q{test \"$RELEASE_SHA\" != \"$PREVIOUS_RELEASE_SHA\"\
+        })\n  raise \"release commit must be the previous release child\" unless before_checkout.include?(%q{.parents[0].sha\
+        \ == $previous_sha})\n  raise \"exact Quality gate missing before checkout\" unless before_checkout.include?(\"\
+        quality.yml\")\n  raise \"exact v52 gate missing before checkout\" unless before_checkout.include?(\"verify-arthello-v52.yml\"\
+        )\n  raise \"Quality and Verify attempts must both be first attempts\" unless before_checkout.scan(%q{.run_attempt\
+        \ == 1}).length >= 2\n  raise \"deploy replay guard must inspect every status\" if before_checkout.include?(\"\
+        status=success\")\n  raise \"deploy replay guard pagination is incomplete\" unless before_checkout.include?(\"\
+        per_page=100\") && before_checkout.include?(%q{.total_count == (.workflow_runs | length)})\n  source = File.read(ARGV.fetch(0))\n\
+        \  raise \"standalone negated grep is not fail-closed\" if source.lines.any? { |line| line.match?(/^\\s*!\\\
+        s+grep\\b/) }\n  raise \"workflow_run deployment must not use event GITHUB_SHA\" if source.include?(\"$GITHUB_SHA\"\
+        ) || source.include?(\"github.sha\")\n  raise \"recovery must use direct Docker archive input\" unless source.include?(\"\
+        docker image load --input \\\"$archive\\\"\")\n  raise \"opaque gzip/docker pipe is forbidden\" if source.include?(\"\
+        gzip -dc \\\"$archive\\\" | docker load\")\n  raise \"Docker preflight marker missing\" unless source.include?(\"\
+        ARTHELLO_DOCKER_PREFLIGHT=VERIFIED\")\n  raise \"container-reference guard missing\" unless source.include?(\"\
+        docker ps -aq --filter \\\"ancestor=$image_id\\\"\")\n  raise \"broad Docker pruning is forbidden\" if source.match?(/docker\\\
+        s+(system|builder|image)\\s+prune/)\n  raise \"portable fingerprint evidence missing\" unless source.include?(\"\
+        runtimeFingerprintSha256\")\n  raise \"portable fingerprint gate missing\" unless source.include?(\"ARTHELLO_IMAGE_RUNTIME_FINGERPRINT=VERIFIED\"\
+        )\n  raise \"non-portable cross-store image ID equality is forbidden\" if source.include?(\"actual_image_id\\\
+        \" != \\\"$expected_image_id\")\n  image_import_step = steps.find { |step| step[\"id\"] == \"image_import\"\
+        \ }\n  raise \"validated image import step is missing\" unless image_import_step\n  image_import_run = image_import_step.fetch(\"\
+        run\")\n  raise \"import fingerprint must use the resolved immutable image ID\" unless image_import_run.include?(%q{docker\
+        \ image inspect \"$actual_image_id\"})\n  raise \"validated image outputs are missing\" unless image_import_run.include?(\"\
+        image_id=%s\\\\nruntime_fingerprint=%s\") && image_import_run.include?(\"$GITHUB_OUTPUT\")\n  cutover_step\
+        \ = steps.find { |step| step[\"id\"] == \"cutover\" }\n  raise \"cutover step is missing\" unless cutover_step\n\
+        \  cutover_env = cutover_step.fetch(\"env\")\n  raise \"cutover image ID output pin is missing\" unless\
+        \ cutover_env.fetch(\"VALIDATED_IMAGE_ID\").include?(\"steps.image_import.outputs.image_id\")\n  raise \"\
+        cutover fingerprint output pin is missing\" unless cutover_env.fetch(\"VALIDATED_RUNTIME_FINGERPRINT\").include?(\"\
+        steps.image_import.outputs.runtime_fingerprint\")\n  cutover_run = cutover_step.fetch(\"run\")\n  immutable_check_position\
+        \ = cutover_run.index(%q{docker image inspect \"$immutable_image_id\"})\n  raise \"immutable image must\
+        \ be revalidated at cutover\" unless immutable_check_position\n  raise \"cutover immutable image ID syntax\
+        \ guard missing\" unless cutover_run.include?(\"sha256:[a-f0-9]{64}\")\n  raise \"cutover immutable revision\
+        \ label guard missing\" unless cutover_run.include?(\"org.opencontainers.image.revision\")\n  raise \"cutover\
+        \ immutable tree label guard missing\" unless cutover_run.include?(\"org.opencontainers.image.source-tree\"\
+        )\n  raise \"cutover immutable runtime fingerprint guard missing\" unless cutover_run.include?(%q{docker\
+        \ image inspect \"$immutable_image_id\"}) && cutover_run.include?(\"image-runtime-fingerprint.jq\") && cutover_run.include?(%q{test\
+        \ \"$cutover_runtime_fingerprint\" = \"$VALIDATED_RUNTIME_FINGERPRINT\"})\n  immutable_run_commands = cutover_run.scan(/docker\
+        \ run(?:[^\\n]*\\\\\\n)+\\s*\"\\$immutable_image_id\"/)\n  raise \"all four app-image Docker runs must use\
+        \ the immutable image ID\" unless immutable_run_commands.length == 4\n  raise \"exactly three stateful app-image\
+        \ runs must use the shared secret mounts\" unless immutable_run_commands.count { |command| command.include?(\"\
+        runtime_secret_mounts\") } == 3\n  raise \"mutable release tag must not be used by cutover\" if cutover_run.include?(%q{image=\"\
+        arthello-direct:$RELEASE_SHA\"}) || cutover_run.include?(%q{\"$image\"})\n  live_image_line = cutover_run.lines.find\
+        \ { |line| line.include?(\"live_image_id=\\\"$(docker inspect \\\"$live_id\\\"\") && line.include?(\"{{.Image}}\"\
+        ) }\n  live_image_position = live_image_line && cutover_run.index(live_image_line)\n  first_live_copy_position\
+        \ = cutover_run.index(%q{copy_volume \"$DATA_VOLUME\" \"$clone_volume\"})\n  raise \"live helper image must\
+        \ resolve from the running container before volume access\" unless live_image_position && first_live_copy_position\
+        \ && live_image_position < first_live_copy_position\n  raise \"mutable live image reference is forbidden\"\
+        \ if cutover_run.include?(\".Config.Image\") || cutover_run.match?(/\\$live_image(?!_id)/)\n  raise \"live\
+        \ helper image ID syntax guard missing\" unless cutover_run.include?(%q{[[ \"$live_image_id\" =~ ^sha256:[a-f0-9]{64}$\
+        \ ]]})\n  live_image_guards = cutover_run.lines.select { |line| line.include?(\"docker image inspect \\\"\
+        $live_image_id\\\"\") }\n  raise \"live helper image ID equality guard missing\" unless live_image_guards.any?\
+        \ { |line| line.include?(\"{{.Id}}\") && line.include?(\"= \\\"$live_image_id\\\"\") }\n  raise \"live helper\
+        \ runtime user guard missing\" unless live_image_guards.any? { |line| line.include?(\"{{.Config.User}}\"\
+        ) && line.include?(\"= node\") }\n  raise \"live helper runtime command guard missing\" unless live_image_guards.any?\
+        \ { |line| line.include?(\"{{json .Config.Cmd}}\") && line.include?(\"production/runtime-server.mjs\") }\n\
+        \  helper_start = cutover_run.index(\"copy_volume() {\")\n  helper_end = cutover_run.index(\"content_manifest()\
+        \ {\", helper_start || 0)\n  raise \"volume helper functions are missing\" unless helper_start && helper_end\
+        \ && helper_end > helper_start\n  helper_source = cutover_run[helper_start...helper_end]\n  helper_commands\
+        \ = helper_source.scan(/docker (?:run|create)(?:[^\\n]*\\\\\\n)+\\s*\"\\$live_image_id\"/)\n  raise \"all\
+        \ volume helpers must use the immutable live image ID\" unless helper_commands.length == 2\n  raise \"volume\
+        \ helpers must stay isolated and read-only\" unless helper_commands.all? { |command| command.include?(\"\
+        --network none\") && command.include?(\"--read-only\") && command.include?(\"--user 0:0\") }\n  raise \"\
+        active D1 descriptor gate missing\" unless source.include?(\"ARTHELLO_ACTIVE_D1_FD=VERIFIED\")\n  raise\
+        \ \"active D1 descriptor gate must cover live, preflight, and candidate\" unless source.scan(/assert_active_d1_file_descriptors\
+        \ \\\"\\$[^\\\"]+\\\" (?:live|preflight|candidate)/).length == 3\n  fd_start = source.index(\"assert_active_d1_file_descriptors()\
+        \ {\")\n  fd_end = source.index(\"cleanup_transient() {\", fd_start || 0)\n  raise \"active D1 descriptor\
+        \ function missing\" unless fd_start && fd_end && fd_end > fd_start\n  fd_gate = source[fd_start...fd_end]\n\
+        \  raise \"D1 descriptor scanner must not cross runtime UID as root\" if fd_gate.include?(\"--user 0:0\"\
+        )\n  raise \"D1 descriptor scanner must stay non-root\" unless fd_gate.include?(%q{test \"$scanner_uid\"\
+        \ -ne 0})\n  raise \"D1 descriptor scanner must match PID 1 UID\" unless fd_gate.include?(%q{test \"$scanner_uid\"\
+        \ = \"$pid_one_uid\"})\n  raise \"D1 descriptor rejection diagnostics missing\" unless fd_gate.include?(\"\
+        ARTHELLO_ACTIVE_D1_FD=REJECTED\")\n  tochka_probe_start = cutover_run.index(\"probe_tochka_tls_egress()\
+        \ {\")\n  tochka_probe_end = cutover_run.index(\"cleanup_transient() {\", tochka_probe_start || 0)\n  raise\
+        \ \"Tochka TLS egress probe is missing\" unless tochka_probe_start && tochka_probe_end && tochka_probe_end\
+        \ > tochka_probe_start\n  tochka_probe = cutover_run[tochka_probe_start...tochka_probe_end]\n  [\n    \"\
+        import { probeTochkaTlsEgress } from \\\"./production/tochka-transport.mjs\\\"\",\n    \"getCACertificates(\\\
+        \"extra\\\")\",\n    \"D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31\"\
+        ,\n    \"const status = await probeTochkaTlsEgress();\",\n    \"ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED\"\n\
+        \  ].each do |required|\n    raise \"Tochka TLS egress proof is incomplete: #{required}\" unless tochka_probe.include?(required)\n\
+        \  end\n  raise \"Tochka TLS preflight must not carry credentials\" if tochka_probe.match?(/authorization|bearer|token|credential|secret/i)\n\
+        \  raise \"Tochka TLS probe must run exactly once\" unless cutover_run.scan(/^\\s*probe_tochka_tls_egress\
+        \ \"\\$network\"$/).length == 1\n  raise \"Tochka TLS probe must attach stdin for its inline script\" unless\
+        \ tochka_probe.include?(\"docker run --rm -i\")\n  raise \"Tochka TLS probe must be an isolated stateless\
+        \ container\" unless tochka_probe.include?(%q{--network \"$probe_network\"}) && tochka_probe.include?(\"\
+        --read-only\") && tochka_probe.include?(\"--entrypoint node\") && tochka_probe.include?(%q{\"$immutable_image_id\"\
+        \ --input-type=module})\n  raise \"Tochka TLS probe must not receive state or secret mounts\" if tochka_probe.include?(\"\
+        runtime_secret_mounts\") || tochka_probe.include?(\"/data\") || tochka_probe.include?(\"--mount\") || tochka_probe.include?(\"\
+        \ -v \")\n  probe_call = cutover_run.index(%q{probe_tochka_tls_egress \"$network\"})\n  live_stop = cutover_run.index(%q{docker\
+        \ stop --time 30 \"$live_id\"})\n  raise \"Tochka TLS proof must complete before live cutover\" unless probe_call\
+        \ && live_stop && probe_call < live_stop\n  raise \"stateful clone must remain on the private none network\"\
+        \ unless cutover_run.include?(%q{--name \"$clone_container\"}) && cutover_run.include?(\"--network none\"\
+        )\n  school_step_index = steps.index { |step| step[\"name\"] == \"Resolve authoritative School sync secret\"\
+        \ }\n  image_import_index = steps.index(image_import_step)\n  cutover_index = steps.index(cutover_step)\n\
+        \  raise \"School resolution step ordering is unsafe\" unless school_step_index && image_import_index <\
+        \ school_step_index && school_step_index < cutover_index\n  school_step = steps.fetch(school_step_index)\n\
+        \  raise \"School resolution timeout cannot cover its bounded remote path\" unless school_step.fetch(\"\
+        timeout-minutes\") >= 36\n  school_env = school_step.fetch(\"env\")\n  remote_transport = \"s\" + \"sh\"\
+        \n  private_key_name = remote_transport.upcase + \"_PRIVATE_KEY\"\n  remote_address_name = \"DEPLOY_\" +\
+        \ \"HOST\"\n  deploy_user_name = \"DEPLOY_\" + \"USER\"\n  deploy_port_name = \"DEPLOY_\" + \"PORT\"\n \
+        \ expected_school_env = {\n    private_key_name => \"$\" + \"{{ secrets.ARTHELLO_RU_\" + private_key_name\
+        \ + \" }}\",\n    remote_address_name => \"$\" + \"{{ secrets.ARTHELLO_RU_\" + remote_address_name + \"\
+        \ }}\",\n    deploy_user_name => \"$\" + \"{{ secrets.ARTHELLO_RU_\" + deploy_user_name + \" }}\",\n   \
+        \ deploy_port_name => \"$\" + \"{{ secrets.ARTHELLO_RU_\" + deploy_port_name + \" }}\"\n  }\n  raise \"\
+        School remote authority must be step-scoped and exact\" unless school_env == expected_school_env\n  school_run\
+        \ = school_step.fetch(\"run\")\n  raise \"School remote key must never be written to outputs\" if school_run.include?(\"\
+        GITHUB_OUTPUT\") || school_run.match?(/(^|\\s)tee(\\s|$)/) || school_run.include?(\"set -x\")\n  remote_names\
+        \ = [private_key_name, remote_address_name, deploy_user_name, deploy_port_name]\n  remote_reference_count\
+        \ = remote_names.sum { |name| source.scan(\"secrets.ARTHELLO_RU_\" + name).length }\n  raise \"School remote\
+        \ credentials are referenced outside their step\" unless remote_reference_count == 4\n  cleanup_function\
+        \ = \"cleanup_school_\" + remote_transport\n  raise \"School remote material cleanup is incomplete\" unless\
+        \ school_run.include?(cleanup_function) && school_run.include?(\"trap \" + cleanup_function + \" EXIT\"\
+        ) && school_run.include?(%q{rm -f --})\n  raise \"School remote cleanup must preserve errexit\" if school_run.include?(\"\
+        set +e\")\n  raise \"School remote destination validation is missing\" unless school_run.include?(%Q{[[\
+        \ \"$#{remote_address_name}\" =~}) && school_run.include?(%Q{[[ \"$#{deploy_user_name}\" =~})\n  remote_dir_variable\
+        \ = \"$\" + remote_transport + \"_dir\"\n  raise \"School remote work directory pre-existence guard is missing\"\
+        \ unless school_run.include?(%Q{test ! -e \"#{remote_dir_variable}\"}) && school_run.include?(%Q{test !\
+        \ -L \"#{remote_dir_variable}\"})\n  cleanup_step_name = \"Remove temporary School \" + remote_transport.upcase\
+        \ + \" material\"\n  school_cleanup = steps.find { |step| step[\"name\"] == cleanup_step_name }\n  raise\
+        \ \"always-run School remote cleanup is missing\" unless school_cleanup && school_cleanup.fetch(\"if\")\
+        \ == \"always()\" && school_cleanup.fetch(\"run\").include?(%q{rm -f --})\n  raise \"School remote host\
+        \ fingerprint is not pinned\" unless school_run.include?(\"SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI\"\
+        )\n  [\n    \"StrictHostKeyChecking=yes\", \"HostKeyAlgorithms=\" + remote_transport + \"-ed25519\",\n \
+        \   \"PubkeyAcceptedAlgorithms=\" + remote_transport + \"-ed25519\", \"UserKnownHostsFile=\",\n    \"GlobalKnownHostsFile=/dev/null\"\
+        , \"BatchMode=yes\"\n  ].each do |required|\n    raise \"strict School remote transport is incomplete: #{required}\"\
+        \ unless school_run.include?(required)\n  end\n  raise \"remote School deployment lock is missing\" unless\
+        \ school_run.include?(%q{exec 9>>/var/lock/school-1-11-production.lock}) && school_run.include?(\"flock\
+        \ -w 900 9\")\n  raise \"authoritative School container is not pinned\" unless school_run.include?(%q{production=school-1-11})\n\
+        \  raise \"School container full-ID guard is missing\" unless school_run.include?(%q{[[ \"$school_container_id\"\
+        \ =~ ^[a-f0-9]{64}$ ]]})\n  raise \"School running/health guards are missing\" unless school_run.include?(\"\
+        .State.Running\") && school_run.include?(\".State.Health.Status\") && school_run.include?(\"= healthy\"\
+        )\n  raise \"School identity labels are missing\" unless school_run.include?(%q{school.system}) && school_run.include?(%q{school.environment})\n\
+        \  raise \"School secret extraction is not exact\" unless school_run.include?(%q{value.startswith(\"CENTRAL_ACCESS_SECRET=\"\
+        )}) && school_run.include?(%q{len(matches) != 1})\n  raise \"School secret format guard is missing\" unless\
+        \ school_run.include?(\"32 <= len(secret) <= 4096\") && school_run.include?(\"character.isspace()\")\n \
+        \ raise \"local School Docker discovery is forbidden\" if cutover_run.include?(\"school_container\") ||\
+        \ cutover_run.include?(\"school_candidate\") || cutover_run.include?(\"school_networks\")\n  extraction\
+        \ = school_run.index(%q{central_access_secret=\"$(})\n  masking = school_run.index(\"::add-mask::\", extraction\
+        \ || 0)\n  persistence = school_run.index(%q{central_access_secret_file}, masking || 0)\n  raise \"School\
+        \ secret must be masked before persistence\" unless extraction && masking && persistence && extraction <\
+        \ masking && masking < persistence\n  [school_run, cutover_run].each do |probe_source|\n    raise \"School\
+        \ HMAC negative control is missing\" unless probe_source.include?(\"0000000000000000000000000000000000000000000000000000000000000000\"\
+        ) && probe_source.include?(\"\u041D\u0435\u0432\u0435\u0440\u043D\u0430\u044F \u043F\u043E\u0434\u043F\u0438\
+        \u0441\u044C \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438\")\n    raise\
+        \ \"School HMAC positive control is missing\" unless probe_source.include?(\"\u041D\u0435\u0438\u0437\u0432\
+        \u0435\u0441\u0442\u043D\u043E\u0435 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u0441\u0438\u043D\
+        \u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438\") && probe_source.include?(\"hmac.new\")\n\
+        \    raise \"School HMAC response contract is incomplete\" unless probe_source.include?(%q{keys == [\"error\"\
+        ]}) && probe_source.include?(\"content-type:\")\n  end\n  raise \"School secret must be attested before\
+        \ preflight, before live mutation, and after route activation\" unless cutover_run.scan(/verify_school_sync_secret\
+        \ (?:before-preflight|before-live-mutation|after-route-activation)/).length == 3\n  raise \"central access\
+        \ secret file contract missing\" unless source.include?(\"CENTRAL_ACCESS_SECRET_FILE=/run/secrets/central-access-secret\"\
+        )\n  openai_start = source.index(\"openai_enabled=0\")\n  tbank_start = source.index(\"tbank_enabled=0\"\
+        , openai_start || 0)\n  raise \"optional OpenAI policy block missing\" unless openai_start && tbank_start\
+        \ && tbank_start > openai_start\n  openai_policy = source[openai_start...tbank_start]\n  [\n    %q{if [\
+        \ -L \"$openai_api_key_file\" ]}, %q{elif [ -e \"$openai_api_key_file\" ]},\n    %q{test -f \"$openai_api_key_file\"\
+        }, %q{test -r \"$openai_api_key_file\"},\n    %q{test -s \"$openai_api_key_file\"}, \"stat -c\",\n    \"\
+        20 <= len(raw) <= 4096\",\n    \"character.isspace()\", \"openai_enabled=1\"\n  ].each do |required|\n \
+        \   raise \"optional OpenAI key validation missing: #{required}\" unless openai_policy.include?(required)\n\
+        \  end\n  raise \"OpenAI key must be pre-provisioned, not created by deployment\" if source.include?(%q{atomic_secret_write\
+        \ \"$openai_api_key_file\"})\n  raise \"OpenAI key must not come from GitHub secrets\" if source.include?(\"\
+        secrets.OPENAI\")\n  raise \"OpenAI file binding is missing\" unless source.include?(\"OPENAI_API_KEY_FILE=/run/secrets/openai-api-key\"\
+        )\n  raise \"OpenAI model allowlist pin missing\" unless source.include?(\"OPENAI_OCR_MODEL=gpt-4.1-mini\"\
+        )\n  runtime_env_start = source.index(%q{runtime_env=\"$work/runtime.env\"}, tbank_start || 0)\n  raise\
+        \ \"optional T-Bank policy block missing\" unless tbank_start && runtime_env_start && runtime_env_start\
+        \ > tbank_start\n  tbank_policy = source[tbank_start...runtime_env_start]\n  [\n    %q{if [ -L \"$tbank_egress_ip_file\"\
+        \ ]}, %q{elif [ -e \"$tbank_egress_ip_file\" ]},\n    %q{test -f \"$tbank_egress_ip_file\"}, %q{test -r\
+        \ \"$tbank_egress_ip_file\"},\n    %q{test -s \"$tbank_egress_ip_file\"}, \"stat -c\",\n    \"3 <= len(raw)\
+        \ <= 45\", \"ipaddress.ip_address(value)\",\n    \"address.is_global\", \"address.is_multicast\", %q{str(address)\
+        \ != value}, \"tbank_enabled=1\"\n  ].each do |required|\n    raise \"optional T-Bank egress validation\
+        \ missing: #{required}\" unless tbank_policy.include?(required)\n  end\n  raise \"T-Bank egress must not\
+        \ be inferred from the inbound host\" if tbank_policy.include?(\"hostname -I\") || tbank_policy.include?(\"\
+        188.225.38.55\")\n  raise \"T-Bank egress control file must be pre-provisioned\" if source.include?(%q{atomic_secret_write\
+        \ \"$tbank_egress_ip_file\"})\n  raise \"T-Bank egress must come only from its control file\" unless source.include?(%q{tbank_egress_ip_file=\"\
+        $secret_dir/tbank-egress-ip\"}) && source.include?(\"TBANK_EGRESS_IP=%s\")\n  mount_lines = source.lines.grep(/--mount/)\n\
+        \  raise \"T-Bank egress control file must never be mounted\" if mount_lines.any? { |line| line.include?(\"\
+        tbank_egress_ip_file\") }\n  raise \"shared secret mount array must be used by exactly three Docker starts\"\
+        \ unless source.scan(%q{\"${runtime_secret_mounts[@]}\"}).length == 3\n  raise \"strict plaintext secret\
+        \ assertion missing\" unless source.include?(\"ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY|CENTRAL_ACCESS_SECRET|OPENAI_API_KEY\"\
+        )\n  [\n    \"SCHOOL_PUBLIC_ORIGIN=%s\", \"SCHOOL_DIARY_SYNC_URL=%s\",\n    \"SCHOOL_DIARY_ALLOWED_ORIGINS=%s\"\
+        \n  ].each do |variable|\n    line = source.lines.find { |candidate| candidate.include?(variable) && candidate.include?(\"\
+        printf\") }\n    raise \"school runtime origin policy missing: #{variable}\" unless line && line.include?(\"\
+        $SCHOOL_URL\")\n  end\n  [\n    \"CENTRAL_ACCESS_SECRET_FILE=/run/secrets/central-access-secret\",\n   \
+        \ \"OPENAI_OCR_MODEL=gpt-4.1-mini\"\n  ].each do |required|\n    raise \"required runtime environment policy\
+        \ missing: #{required}\" unless source.include?(required)\n  end\n' .github/workflows/deploy-arthello-direct-38-55.yml\n\
+        printf 'ARTHELLO_V52_SOURCE_SHA=%s\\n' \"$EXPECTED_SHA\"\n"
+    - name: Validate release files without exposing data
+      run: |
+        set -Eeuo pipefail
+        grep -F 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'ARTHELLO_PUBLIC_ORIGIN' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'cf: false' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'INTEGRATION_CREDENTIALS_KEY_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'INTEGRATION_CREDENTIALS_KEY' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'CENTRAL_ACCESS_SECRET_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'OPENAI_API_KEY_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'SCHOOL_PUBLIC_ORIGIN' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'SCHOOL_DIARY_SYNC_URL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'SCHOOL_DIARY_ALLOWED_ORIGINS' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport() }' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'return transport.fetch(input, { ...init, redirect: "manual" });' deploy/v52/overrides/app/api/integration-actions/route.ts >/dev/null
+        test -s deploy/v52/overrides/production/tochka-transport.mjs
+        grep -F 'const responseBody = await readBoundedResponseBody(upstream);' deploy/v52/overrides/production/tochka-transport.mjs >/dev/null
+        grep -F 'workerd reaches the Node service binding through its supported internal redirect mode' deploy/v52/overrides/tests/tochka-node-transport.test.mjs >/dev/null
+        if grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
+          echo 'Plaintext central access secret binding is forbidden' >&2
+          exit 1
+        fi
+        if grep -E 'OPENAI_API_KEY:[[:space:]]*process\.env\.OPENAI_API_KEY([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
+          echo 'Plaintext OpenAI key binding is forbidden' >&2
+          exit 1
+        fi
+        grep -F 'd1Databases: { DB: "arthello-production" }' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        test -s deploy/v52/Dockerfile
+        test -s deploy/v52/runtime/package.json
+        test -s deploy/v52/runtime/package-lock.json
+        test -s deploy/v52/maintenance/image-runtime-fingerprint.jq
+        test -s deploy/v52/certificates/russian-trusted-root-ca.pem
+        echo 'aa800ef345422d6158c6fafe1c06c429dbda21c3df4bb1ccb45a920ec1111399  deploy/v52/certificates/russian-trusted-root-ca.pem' | sha256sum -c -
+        grep -Fx '# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e' deploy/v52/Dockerfile >/dev/null
+        test "$(grep -Fc 'FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e' deploy/v52/Dockerfile)" -eq 3
+        grep -F 'npm ci --omit=dev --ignore-scripts --no-audit --no-fund' deploy/v52/Dockerfile >/dev/null
+        grep -F 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem' deploy/v52/Dockerfile >/dev/null
+        grep -F 'COPY deploy/v52/certificates/russian-trusted-root-ca.pem /app/production/russian-trusted-root-ca.pem' deploy/v52/Dockerfile >/dev/null
+        grep -F 'COPY --from=application /app/production/tochka-transport.mjs /app/production/tochka-transport.mjs' deploy/v52/Dockerfile >/dev/null
+        if grep -E '^FROM node:24-bookworm-slim AS|npm install .*miniflare' deploy/v52/Dockerfile; then
+          echo 'Unpinned runtime dependency installation is forbidden' >&2
+          exit 1
+        fi
+        node - <<'NODE'
+        const { readFileSync } = require('node:fs');
+        const { X509Certificate } = require('node:crypto');
+        const certificate = new X509Certificate(readFileSync('./deploy/v52/certificates/russian-trusted-root-ca.pem'));
+        const fingerprint = 'D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31';
+        if (certificate.fingerprint256 !== fingerprint || !certificate.ca || certificate.subject !== certificate.issuer || !certificate.checkIssued(certificate) || !certificate.verify(certificate.publicKey) || Date.parse(certificate.validTo) <= Date.now()) process.exit(1);
+        const manifest = require('./deploy/v52/runtime/package.json');
+        const lock = require('./deploy/v52/runtime/package-lock.json');
+        if (manifest.dependencies?.miniflare !== '4.20260515.0') process.exit(1);
+        if (lock.lockfileVersion !== 3) process.exit(1);
+        const resolved = lock.packages?.['node_modules/miniflare'];
+        if (resolved?.version !== '4.20260515.0' || !resolved.integrity) process.exit(1);
+        NODE
+    - name: Restore exact source immediately before build
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ inputs.source_sha }}
+        fetch-depth: 0
+        clean: true
+        persist-credentials: false
+    - name: Prove pristine exact build context
+      env:
+        EXPECTED_SHA: ${{ inputs.source_sha }}
+      run: |
+        set -Eeuo pipefail
+        test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+        test "$(git rev-parse --is-shallow-repository)" = false
+        test -z "$(git status --porcelain=v1 --untracked-files=all)"
+        test -z "$(git clean -ndx)"
+        printf 'ARTHELLO_PRE_BUILD_SOURCE=PRISTINE sha=%s tree=%s\n' \
+          "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})"
+    - name: Build exact v52 candidate on an ephemeral runner
+      id: image
+      env:
+        EXPECTED_SHA: ${{ inputs.source_sha }}
+      run: |
+        set -Eeuo pipefail
+        image="arthello-v52-verify:$EXPECTED_SHA"
+        docker build \
+          --pull=false \
+          --label "org.opencontainers.image.revision=$EXPECTED_SHA" \
+          --label "org.opencontainers.image.source-tree=$(git rev-parse HEAD^{tree})" \
+          --tag "$image" \
+          --file deploy/v52/Dockerfile \
+          .
+        test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$EXPECTED_SHA"
+        test "$(docker image inspect "$image" --format '{{.Config.User}}')" = node
+        test "$(docker image inspect "$image" --format '{{json .Config.Cmd}}')" = '["node","production/runtime-server.mjs"]'
+        test "$(docker image inspect "$image" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fc 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem')" -eq 1
+        test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+        test -z "$(git status --porcelain=v1 --untracked-files=all)"
+        test -z "$(git clean -ndx)"
+        printf 'ARTHELLO_POST_BUILD_SOURCE=PRISTINE sha=%s tree=%s\n' \
+          "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})"
+        printf 'image=%s\n' "$image" >> "$GITHUB_OUTPUT"
+        printf 'image_id=%s\n' "$(docker image inspect "$image" --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
+    - name: Prove fail-closed key startup and isolated runtime readiness
+      env:
+        IMAGE: ${{ steps.image.outputs.image }}
+      run: |
+        set -Eeuo pipefail
+        volume="arthello-v52-verify-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        container="arthello-v52-verify-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        key_file="$(mktemp)"
+        bootstrap_file="$(mktemp)"
+        central_file="$(mktemp)"
+        openai_file="$(mktemp)"
+        missing_key_log="$(mktemp)"
+        cleanup() {
+          rc=$?
+          trap - EXIT INT TERM HUP
+          docker rm -f "$container" >/dev/null 2>&1 || true
+          docker volume rm -f "$volume" >/dev/null 2>&1 || true
+          rm -f "$key_file" "$bootstrap_file" "$central_file" "$openai_file" "$missing_key_log"
+          exit "$rc"
+        }
+        trap cleanup EXIT INT TERM HUP
+
+        set +e
+        timeout 20s docker run --rm --network none "$IMAGE" >"$missing_key_log" 2>&1
+        missing_key_status=$?
+        set -e
+        test "$missing_key_status" -ne 0
+        grep -F 'INTEGRATION_CREDENTIALS_KEY' "$missing_key_log" >/dev/null
+
+        integration_key="$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(48), end="")')"
+        bootstrap_password="$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(24), end="")')"
+        central_access_secret="$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(48), end="")')"
+        openai_api_key="sk-ci-$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(36), end="")')"
+        echo "::add-mask::$integration_key"
+        echo "::add-mask::$bootstrap_password"
+        echo "::add-mask::$central_access_secret"
+        echo "::add-mask::$openai_api_key"
+        printf '%s' "$integration_key" > "$key_file"
+        printf '%s' "$bootstrap_password" > "$bootstrap_file"
+        printf '%s' "$central_access_secret" > "$central_file"
+        printf '%s' "$openai_api_key" > "$openai_file"
+        chmod 0444 "$key_file" "$bootstrap_file" "$central_file" "$openai_file"
+        docker volume create --label arthello.scope=ci-v52 "$volume" >/dev/null
+        docker run -d \
+          --name "$container" \
+          --restart no \
+          --read-only \
+          --tmpfs /tmp \
+          --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
+          --network bridge \
+          -e NODE_ENV=production \
+          -e PORT=8081 \
+          -e ARTHELLO_D1_PATH=/data/d1 \
+          -e ARTHELLO_PUBLIC_ORIGIN=https://verify.arthello.invalid \
+          -e ARTHELLO_BOOTSTRAP_LOGIN=owner \
+          -e ARTHELLO_BOOTSTRAP_PASSWORD_FILE=/run/secrets/bootstrap-password \
+          -e INTEGRATION_CREDENTIALS_KEY_FILE=/run/secrets/integration-credentials-key \
+          -e SCHOOL_PUBLIC_ORIGIN=https://school.verify.arthello.invalid \
+          -e SCHOOL_DIARY_SYNC_URL=https://school.verify.arthello.invalid \
+          -e SCHOOL_DIARY_ALLOWED_ORIGINS=https://school.verify.arthello.invalid \
+          -e CENTRAL_ACCESS_SECRET_FILE=/run/secrets/central-access-secret \
+          -e OPENAI_API_KEY_FILE=/run/secrets/openai-api-key \
+          -e OPENAI_OCR_MODEL=gpt-4.1-mini \
+          -e TBANK_EGRESS_IP=8.8.8.8 \
+          --mount "type=bind,src=$key_file,dst=/run/secrets/integration-credentials-key,readonly" \
+          --mount "type=bind,src=$bootstrap_file,dst=/run/secrets/bootstrap-password,readonly" \
+          --mount "type=bind,src=$central_file,dst=/run/secrets/central-access-secret,readonly" \
+          --mount "type=bind,src=$openai_file,dst=/run/secrets/openai-api-key,readonly" \
+          -v "$volume:/data" \
+          "$IMAGE" >/dev/null
+
+        configured="$(docker inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}')"
+        if grep -Eq '^(ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY|CENTRAL_ACCESS_SECRET|OPENAI_API_KEY)=' <<<"$configured"; then
+          echo 'Plaintext runtime secret found in container configuration' >&2
+          exit 1
+        fi
+        assert_exact_ci_env() {
+          local variable="$1" expected="$2" count
+          count="$(awk -F= -v variable="$variable" '$1 == variable { matches += 1 } END { print matches + 0 }' <<<"$configured")"
+          test "$count" -eq 1
+          grep -Fx "$variable=$expected" <<<"$configured" >/dev/null
+        }
+        assert_exact_ci_env ARTHELLO_BOOTSTRAP_PASSWORD_FILE /run/secrets/bootstrap-password
+        assert_exact_ci_env INTEGRATION_CREDENTIALS_KEY_FILE /run/secrets/integration-credentials-key
+        assert_exact_ci_env SCHOOL_PUBLIC_ORIGIN https://school.verify.arthello.invalid
+        assert_exact_ci_env SCHOOL_DIARY_SYNC_URL https://school.verify.arthello.invalid
+        assert_exact_ci_env SCHOOL_DIARY_ALLOWED_ORIGINS https://school.verify.arthello.invalid
+        assert_exact_ci_env CENTRAL_ACCESS_SECRET_FILE /run/secrets/central-access-secret
+        assert_exact_ci_env OPENAI_API_KEY_FILE /run/secrets/openai-api-key
+        assert_exact_ci_env OPENAI_OCR_MODEL gpt-4.1-mini
+        assert_exact_ci_env TBANK_EGRESS_IP 8.8.8.8
+        assert_exact_ci_env NODE_EXTRA_CA_CERTS /app/production/russian-trusted-root-ca.pem
+        for secret_destination in \
+          /run/secrets/bootstrap-password \
+          /run/secrets/integration-credentials-key \
+          /run/secrets/central-access-secret \
+          /run/secrets/openai-api-key
+        do
+          docker inspect "$container" | jq -e --arg destination "$secret_destination" '
+            [.[0].Mounts[]
+              | select(
+                  .Type == "bind" and
+                  .Destination == $destination and
+                  .RW == false
+                )
+            ] | length == 1
+          ' >/dev/null
+        done
+
+        ready=0
+        for attempt in $(seq 1 90); do
+          if docker exec -i "$container" node - <<'NODE'
+        const { X509Certificate } = await import('node:crypto');
+        const { getCACertificates } = await import('node:tls');
+        const expectedTochkaRoot = 'D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31';
+        const extraRoots = getCACertificates('extra').map((pem) => new X509Certificate(pem));
+        if (!extraRoots.some((certificate) => certificate.fingerprint256 === expectedTochkaRoot && certificate.ca && certificate.subject === certificate.issuer && certificate.verify(certificate.publicKey))) process.exit(1);
+        const base = 'http://127.0.0.1:8081';
+        const publicOrigin = 'https://verify.arthello.invalid';
+        try {
+          const health = await fetch(base + '/api/health');
+          const healthBody = await health.json();
+          if (!health.ok || healthBody.status !== 'ok' || healthBody.database !== 'available') process.exit(1);
+          const root = await fetch(base + '/');
+          const html = await root.text();
+          const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
+          if (!root.ok || refs.length < 2) process.exit(1);
+          for (const path of [...new Set(refs)]) {
+            if (!(await fetch(base + path)).ok) process.exit(1);
+          }
+          if ((await fetch(base + '/api/auth/me')).status !== 401) process.exit(1);
+          const forged = await fetch(base + '/api/settings', {
+            headers: {
+              'oai-authenticated-user-email': 'forged@example.invalid',
+              'x-arthello-role': 'OWNER',
+            },
+          });
+          if (forged.status !== 401) process.exit(1);
+          const wrongMethod = await fetch(base + '/api/auth/login');
+          if (wrongMethod.status !== 405 || wrongMethod.headers.get('allow') !== 'POST') process.exit(1);
+          if ((await fetch(base + '/api/auth/not-a-route')).status !== 404) process.exit(1);
+          const crossOrigin = await fetch(base + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: 'https://invalid.example' },
+            body: JSON.stringify({ login: 'owner', password: 'invalid' }),
+          });
+          if (crossOrigin.status !== 403) process.exit(1);
+
+          const { readFileSync } = await import('node:fs');
+          const bootstrapPassword = readFileSync('/run/secrets/bootstrap-password', 'utf8').trim();
+          const login = await fetch(base + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: publicOrigin },
+            body: JSON.stringify({ login: 'owner', password: bootstrapPassword }),
+          });
+          const loginBody = await login.json();
+          if (!login.ok || loginBody.isSystemOwner !== true) process.exit(1);
+          const setCookies = typeof login.headers.getSetCookie === 'function'
+            ? login.headers.getSetCookie()
+            : [login.headers.get('set-cookie') || ''];
+          const cookies = setCookies.join(',');
+          const session = cookies.match(/__Host-arthello_session=([^;,\s]+)/);
+          const csrf = cookies.match(/__Host-arthello_csrf=([^;,\s]+)/);
+          if (!session || !csrf) process.exit(1);
+          const cookie = `${session[0]}; ${csrf[0]}`;
+          const authenticated = await fetch(base + '/api/auth/me', { headers: { cookie } });
+          if (!authenticated.ok || !(await authenticated.json()).isSystemOwner) process.exit(1);
+          const logout = await fetch(base + '/api/auth/logout', {
+            method: 'POST',
+            headers: {
+              cookie,
+              origin: publicOrigin,
+              'x-csrf-token': decodeURIComponent(csrf[1]),
+            },
+          });
+          if (!logout.ok) process.exit(1);
+          if ((await fetch(base + '/api/auth/me', { headers: { cookie } })).status !== 401) process.exit(1);
+        } catch {
+          process.exit(1);
+        }
+        NODE
+          then
+            ready=1
+            break
+          fi
+          sleep 2
+        done
+        test "$ready" -eq 1
+        printf 'ARTHELLO_V52_ISOLATED_RUNTIME=VERIFIED\n'
+    - name: Build immutable verification evidence
+      env:
+        IMAGE: ${{ steps.image.outputs.image }}
+        IMAGE_ID: ${{ steps.image.outputs.image_id }}
+        EXPECTED_SHA: ${{ inputs.source_sha }}
+      run: |
+        set -Eeuo pipefail
+        install -d -m 0700 ci-provenance
+        tree_sha="$(git rev-parse HEAD^{tree})"
+        dockerfile_sha256="$(sha256sum deploy/v52/Dockerfile | cut -d ' ' -f 1)"
+        runtime_lock_sha256="$(sha256sum deploy/v52/runtime/package-lock.json | cut -d ' ' -f 1)"
+        inventory_sha256="$(sha256sum deploy/v52/maintenance/production-data-inventory.py | cut -d ' ' -f 1)"
+        tochka_ca_sha256="$(sha256sum deploy/v52/certificates/russian-trusted-root-ca.pem | cut -d ' ' -f 1)"
+        docker save "$IMAGE" | gzip -1 -n > ci-provenance/arthello-v52-image.tar.gz
+        test -s ci-provenance/arthello-v52-image.tar.gz
+        image_archive_sha256="$(sha256sum ci-provenance/arthello-v52-image.tar.gz | cut -d ' ' -f 1)"
+        fingerprint_filter_sha256="$(sha256sum deploy/v52/maintenance/image-runtime-fingerprint.jq | cut -d ' ' -f 1)"
+        runtime_fingerprint_sha256="$(
+          docker image inspect "$IMAGE" \
+            | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq \
+            | sha256sum \
+            | cut -d ' ' -f 1
+        )"
+        [[ "$runtime_fingerprint_sha256" =~ ^[a-f0-9]{64}$ ]]
+        jq -n \
+          --arg repository "$GITHUB_REPOSITORY" \
+          --arg workflow_run_id "$GITHUB_RUN_ID" \
+          --arg workflow_run_attempt "$GITHUB_RUN_ATTEMPT" \
+          --arg head_sha "$EXPECTED_SHA" \
+          --arg tree_sha "$tree_sha" \
+          --arg dockerfile_sha256 "$dockerfile_sha256" \
+          --arg runtime_lock_sha256 "$runtime_lock_sha256" \
+          --arg inventory_sha256 "$inventory_sha256" \
+          --arg tochka_ca_sha256 "$tochka_ca_sha256" \
+          --arg fingerprint_filter_sha256 "$fingerprint_filter_sha256" \
+          --arg image_archive_sha256 "$image_archive_sha256" \
+          --arg image_id "$IMAGE_ID" \
+          --arg runtime_fingerprint_sha256 "$runtime_fingerprint_sha256" \
+          '{
+            repository: $repository,
+            workflowRunId: $workflow_run_id,
+            workflowRunAttempt: $workflow_run_attempt,
+            headSha: $head_sha,
+            treeSha: $tree_sha,
+            dockerfileSha256: $dockerfile_sha256,
+            runtimeLockSha256: $runtime_lock_sha256,
+            inventorySha256: $inventory_sha256,
+            tochkaCaSha256: $tochka_ca_sha256,
+            fingerprintFilterSha256: $fingerprint_filter_sha256,
+            imageArchiveSha256: $image_archive_sha256,
+            imageId: $image_id,
+            runtimeFingerprintSha256: $runtime_fingerprint_sha256,
+            runnerTrust: "self-hosted-isolated-ephemeral",
+            productionCapability: false
+          }' > ci-provenance/arthello-v52.json
+        (cd ci-provenance && sha256sum arthello-v52.json > arthello-v52.json.sha256)
+    - name: Upload immutable verification evidence
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: arthello-v52-verification-${{ github.run_id }}
+        path: ci-provenance/
+        if-no-files-found: error
+        retention-days: 3
+        compression-level: 0
+    - name: Run repository maintenance tests after immutable upload
+      run: |
+        set -Eeuo pipefail
+        python3 -m py_compile deploy/v52/maintenance/production-data-inventory.py
+        python3 deploy/v52/maintenance/test_production_data_inventory.py
+        test "$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)" = \
+          "d1/miniflare-D1DatabaseObject/5a499c55f63d6b9f725547d510cf454e288954b6f3c2d5024eb1443f29c97730.sqlite"
+        python3 -I - <<'PY'
+        import pathlib
+        import re
+
+        database_source = pathlib.Path("deploy/v52/overrides/db/index.ts").read_text(encoding="utf-8")
+        inventory_source = pathlib.Path("deploy/v52/maintenance/production-data-inventory.py").read_text(encoding="utf-8")
+        match = re.search(r'const integrationCredentialPrefix = "([^"]+)";', database_source)
+        if match is None or match.group(1) not in inventory_source:
+            raise SystemExit("Inventory is not synchronized with the encrypted credential namespace")
+        PY
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.ref
+      == 'refs/heads/main' && github.actor == 'vitaliyozolin-dotcom'
+    needs:
+    - quality
+    - secret-scan
+    - proof

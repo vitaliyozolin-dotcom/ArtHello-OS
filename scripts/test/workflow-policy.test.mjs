@@ -6,6 +6,46 @@ import test from "node:test";
 
 import { analyzeWorkflowDirectory, analyzeWorkflowSource } from "../workflow-policy.mjs";
 
+test("build-only label still rejects automatic PR execution without default self-hosted label", () => {
+  const result = analyzeWorkflowSource("build-pr.yml", `
+on: pull_request
+jobs:
+  build:
+    runs-on: [arthello-build-only-linux-x64]
+    steps:
+      - run: ./candidate.sh
+`);
+  assert.deepEqual(result.violations.map(({ rule }) => rule), ["untrusted-pr-on-production-capability"]);
+});
+
+test("build-only label rejects PR-target head checkout", () => {
+  const result = analyzeWorkflowSource("build-pr-target.yml", `
+on: pull_request_target
+jobs:
+  build:
+    runs-on: [arthello-build-only-linux-x64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: \${{ github.event.pull_request.head.sha }}
+`);
+  assert.deepEqual(result.violations.map(({ rule }) => rule), ["pr-target-head-on-production-capability"]);
+});
+
+test("manual build-only remains conservatively capability-bearing in policy output", () => {
+  const result = analyzeWorkflowSource("build-dispatch.yml", `
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: [arthello-build-only-linux-x64]
+    steps:
+      - run: docker build .
+`);
+  assert.deepEqual(result.violations, []);
+  assert.equal(result.jobs[0].productionCapability, true);
+  assert.deepEqual(result.jobs[0].capabilities, ["self-hosted", "docker"]);
+});
+
 test("rejects pull_request code on a self-hosted runner", () => {
   const result = analyzeWorkflowSource(
     "unsafe-pr.yml",
