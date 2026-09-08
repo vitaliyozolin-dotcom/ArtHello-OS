@@ -165,12 +165,16 @@ jobs:
           printf 'BROWSER_IMAGE_VERIFIED source=%s fingerprint=%s\n' "$CHECKED_SOURCE_SHA" "$fingerprint"
       - name: Run dedicated employee natural login and diary navigation
         env:
+          GH_TOKEN: ${{ github.token }}
           ARTHELLO_E2E_LOGIN: ${{ secrets.ARTHELLO_E2E_LOGIN }}
           ARTHELLO_E2E_PASSWORD: ${{ secrets.ARTHELLO_E2E_PASSWORD }}
         shell: bash
         run: |
           set -Eeuo pipefail
           "$PRECHECK_NODE" --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs
+          current_main="$(curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+          test "$current_main" = "$CHECKED_SOURCE_SHA"
           bash scripts/run-server-browser.sh
       - name: Remove only this downloaded temporary archive
         if: always()

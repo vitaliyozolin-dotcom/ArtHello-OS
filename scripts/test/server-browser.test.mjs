@@ -21,7 +21,8 @@ test('owner, temporary password and absent explicit Education grant fail closed'
   }
 });
 test('School contact and staff role must match the dedicated login', () => {
-  for (const role of ['director', 'deputy', 'methodist', 'admin', 'teacher', 'tech_admin']) assert.equal(sameSchoolIdentity({ email: 'fixture@example.invalid', role }, 'fixture@example.invalid'), true);
+  for (const role of ['director', 'deputy', 'admin', 'teacher', 'tech_admin']) assert.equal(sameSchoolIdentity({ email: 'fixture@example.invalid', role }, 'fixture@example.invalid'), true);
+  assert.equal(sameSchoolIdentity({ email: 'fixture@example.invalid', role: 'methodist' }, 'fixture@example.invalid'), false);
   assert.equal(sameSchoolIdentity({ email: 'fixture@example.invalid', role: 'technical' }, 'fixture@example.invalid'), false);
   assert.equal(sameSchoolIdentity({ email: 'Fixture@example.invalid', role: 'teacher' }, 'fixture@example.invalid'), true);
   assert.equal(sameSchoolIdentity({ phone: '+7 (900) 111-22-33', role: 'teacher' }, '89001112233'), true);
