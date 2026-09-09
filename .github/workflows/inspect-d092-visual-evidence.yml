@@ -1,0 +1,81 @@
+name: Inspect existing D092 visual evidence
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/inspect-d092-visual-evidence.yml
+      - scripts/read-content-tasks-evidence.py
+      - scripts/inspect-d092-visual-evidence.py
+      - scripts/test/read-content-tasks-evidence.test.py
+      - scripts/test/inspect-d092-visual-evidence.test.py
+      - scripts/test/inspect-d092-visual-trigger.test.cjs
+      - READ_EXISTING_EVIDENCE.md
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/inspect-d092-visual-evidence.yml
+      - scripts/read-content-tasks-evidence.py
+      - scripts/inspect-d092-visual-evidence.py
+      - scripts/test/read-content-tasks-evidence.test.py
+      - scripts/test/inspect-d092-visual-evidence.test.py
+      - scripts/test/inspect-d092-visual-trigger.test.cjs
+      - READ_EXISTING_EVIDENCE.md
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: arthello-inspect-d092-visual-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CHECKED_SOURCE_SHA }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Test evidence identity, refusal and trigger boundaries
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$CHECKED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          python3 -O scripts/test/read-content-tasks-evidence.test.py
+          python3 -O scripts/test/inspect-d092-visual-evidence.test.py
+          node --test scripts/test/inspect-d092-visual-trigger.test.cjs
+  inspect:
+    needs: source
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' && github.run_attempt == 1 &&
+      startsWith(github.event.head_commit.message, 'D092: inspect existing visual evidence')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Read the fixed existing artifact after identity checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/inspect-d092-visual-evidence.py

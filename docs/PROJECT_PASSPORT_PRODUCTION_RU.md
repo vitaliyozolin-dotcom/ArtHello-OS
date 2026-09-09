@@ -828,3 +828,10 @@ AI готовит восемь точечных application/diagnostic/test over
 Владелец — Виталий; исполнитель — Codex. Цель — выполнить требование четырёх цифр во всех существующих taskRecordLabel callers. Вход — подтверждённый общий formatter без padding; выход — одна строка runtime и соответствующие formatter regressions. Четыре tests PASS, независимый review PASS; метрика завершения — новый verified release и одинаковые подписи при сохранении raw IDs/связей.
 
 AI меняет только отображение и его тесты, не вводит новую ID-схему и не заменяет принятый visual runtime pin. Прежние ограничения modulo10000/уникальности подписей и поиска по raw ID остаются явно открытыми. Ресурс — текущие CI/release, новых услуг нет; стоимость неизвестна. Срок — ближайший выпуск; пересмотр после actual UI result. Стоп — изменение IDs, регрессия общего форматтера, source drift или отказ владельца.
+
+
+### D092 — Дочитать результат scoped visual run (2026-09-09)
+
+Владелец — Виталий; Codex продолжает разрешённую проверку интерфейса. Новый факт: Chromium smoke прошёл в run34333105787, empty fixture создан, scoped runner BLOCKED; artifact10096640452 существует, actual receipt/PNG пока не прочитаны из-за transfer failures. Цель этого этапа — получить фиксированный этап отказа из уже созданного artifact, без повторного запуска UI. Выход — проверенный read-only receipt summary; метрика завершения — реальные bounded stage/counters, а не visual PASS.
+
+Маршрут: source tests/review → owner exact-main hosted GET после fixed metadata gates → digest/ZIP/receipt validation → выбрать конкретное дальнейшее исправление. Семь новых source/doc paths, три append-only updates; existing runtime/adapter неизменны. Локально 5+6+4 tests и независимый review PASS; actual execution pending. AI не обращается к production, secrets или browser, не извлекает PNG и не обходит access controls. Ресурс — текущий GitHub-hosted CI, новых услуг нет; стоимость неизвестна. Срок — текущая итерация, пересмотр после receipt. Стоп — identity/schema/digest/expiry/main drift или отказ владельца. Визуальный просмотр и остальные критерии остаются отдельной работой.
