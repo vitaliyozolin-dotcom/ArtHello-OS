@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { capacity, RESERVE_KIB } from '../../deploy/browser/capacity.mjs';
-import { validateCredentials, validateEmployee, sameSchoolIdentity, requestAllowed, navigationStep, inspectSandbox, selectDeniedProbe } from '../../deploy/browser/flow.mjs';
-import * as browserFlow from '../../deploy/browser/flow.mjs';
+import { validateCredentials, validateEmployee, sameSchoolIdentity, requestAllowed, navigationStep, inspectSandbox, selectDeniedProbe } from '../../deploy/browser/flow-employee-controls.mjs';
+import * as browserFlow from '../../deploy/browser/flow-employee-controls.mjs';
 import { retirePreviousBrowserImage, retireCurrentBrowserImage } from '../../deploy/browser/retire-image.mjs';
 
 const employee = { userId: 'fixture-id', isSystemOwner: false, apiRole: 'EMPLOYEE', role: 'viewer', mustChangePassword: false, allowedModules: ['education'] };
@@ -206,6 +206,9 @@ test('natural flow distinguishes employee failures without a second login or sen
 
 
 const laterStageReasons = {
+  feedback: ['feedback_open_failed', 'feedback_response_missing', 'feedback_list_forbidden', 'feedback_list_rejected',
+    'feedback_dialog_missing', 'feedback_own_list_failed', 'feedback_all_control_visible', 'feedback_close_failed'],
+  backup_access: ['backup_probe_failed', 'backup_api_not_forbidden'],
   education: ['education_response_missing', 'education_navigation_failed', 'education_forbidden', 'education_rejected', 'diary_entry_not_visible'],
   diary_navigation: ['school_response_missing', 'diary_entry_click_failed', 'school_forbidden', 'school_rejected'],
   school_identity: ['unreadable_school_response', 'school_identity_mismatch', 'natural_redirect_chain_missing', 'school_navigation_unavailable', 'school_diary_not_visible'],
@@ -233,9 +236,128 @@ test('later-stage diagnostics are exact, scoped tags and redact unknown or hosti
   }
 });
 
+function controlsPage(options = {}, actions = []) {
+  let responses = 0;
+  const fail = boundary => { if (options.fail === boundary) throw Error('PRIVATE_FEEDBACK_OR_BACKUP_BODY'); };
+  const listResponse = (url = browserFlow.ARTHELLO + '/api/developer-feedback?scope=mine', method = 'GET') => ({
+    url: () => url, request: () => ({ method: () => method }),
+    status: () => responses === 1 ? options.openStatus ?? 200 : options.listStatus ?? 200,
+    json: async () => assert.fail('Response bodies must not be inspected'),
+  });
+  const dialog = {
+    async waitFor({ state }) { fail(state === 'visible' ? 'dialog_visible' : 'dialog_hidden'); },
+    locator(selector) {
+      assert.equal(selector, 'section[aria-label="Мои обращения"][aria-busy="false"]');
+      return { waitFor: async () => { fail('list_visible'); } };
+    },
+    getByRole(role, query) {
+      if (role === 'alert') return { count: async () => options.alert ? 1 : 0 };
+      assert.equal(role, 'button');
+      assert.equal(query.exact, true);
+      if (query.name === 'Все обращения') return { count: async () => options.allVisible ? 1 : 0 };
+      assert.ok(['Мои обращения', 'Закрыть обращения'].includes(query.name));
+      return { click: async () => {
+        const own = query.name === 'Мои обращения';
+        actions.push(own ? 'feedback_mine' : 'feedback_close');
+        fail(own ? 'mine_click' : 'close_click');
+      } };
+    },
+  };
+  return {
+    actions, responseCount: () => responses, listResponse,
+    page: {
+      getByRole(role, query) {
+        assert.equal(query.name, 'Разработчикам');
+        assert.equal(query.exact, true);
+        if (role === 'dialog') return dialog;
+        assert.equal(role, 'button');
+        return { first() { return this; }, click: async () => { actions.push('feedback_open'); fail('open_click'); } };
+      },
+      waitForResponse: async predicate => {
+        responses++;
+        fail('list_response');
+        assert.equal(predicate(listResponse()), true);
+        for (const [url, method] of [
+          [browserFlow.ARTHELLO + '/api/developer-feedback?scope=all', 'GET'],
+          [browserFlow.ARTHELLO + '/api/developer-feedback?scope=mine&before=1', 'GET'],
+          [browserFlow.SCHOOL + '/api/developer-feedback?scope=mine', 'GET'],
+          [browserFlow.ARTHELLO + '/api/developer-feedback?scope=mine', 'POST'],
+        ]) assert.equal(predicate(listResponse(url, method)), false);
+        return listResponse();
+      },
+      evaluate: async (callback, endpoint) => {
+        assert.equal(endpoint, '/api/settings/backups');
+        actions.push('backup_denied_api');
+        fail('backup_request');
+        return options.backupStatus ?? 403;
+      },
+    },
+  };
+}
+
+test('employee controls open only the own list, close the dialog and require backup denial without reading bodies', async () => {
+  const fixture = controlsPage();
+  const stages = [];
+  assert.deepEqual(await browserFlow.employeeReadControls(fixture.page, stage => stages.push(stage)), {
+    feedbackVisible: true, feedbackDialog: 'verified', feedbackOwnList: 'verified', feedbackAllHidden: 'verified', backupApiDenied: 'verified',
+  });
+  assert.deepEqual(stages, ['feedback', 'backup_access']);
+  assert.deepEqual(fixture.actions, ['feedback_open', 'feedback_mine', 'feedback_close', 'backup_denied_api']);
+  assert.equal(fixture.responseCount(), 2);
+});
+
+test('employee controls fail closed for unavailable own lists, visible management and unexpected backup access', async () => {
+  for (const [options, expectedStage, reason] of [
+    [{ fail: 'open_click' }, 'feedback', 'feedback_open_failed'],
+    [{ fail: 'list_response' }, 'feedback', 'feedback_response_missing'],
+    [{ openStatus: 403 }, 'feedback', 'feedback_list_forbidden'],
+    [{ openStatus: 503 }, 'feedback', 'feedback_list_rejected'],
+    [{ listStatus: 403 }, 'feedback', 'feedback_list_forbidden'],
+    [{ listStatus: 500 }, 'feedback', 'feedback_list_rejected'],
+    [{ fail: 'dialog_visible' }, 'feedback', 'feedback_dialog_missing'],
+    [{ fail: 'mine_click' }, 'feedback', 'feedback_own_list_failed'],
+    [{ fail: 'list_visible' }, 'feedback', 'feedback_own_list_failed'],
+    [{ alert: true }, 'feedback', 'feedback_own_list_failed'],
+    [{ allVisible: true }, 'feedback', 'feedback_all_control_visible'],
+    [{ fail: 'close_click' }, 'feedback', 'feedback_close_failed'],
+    [{ fail: 'dialog_hidden' }, 'feedback', 'feedback_close_failed'],
+    [{ fail: 'backup_request' }, 'backup_access', 'backup_probe_failed'],
+    ...[200, 401, 500].map(backupStatus => [{ backupStatus }, 'backup_access', 'backup_api_not_forbidden']),
+  ]) {
+    const fixture = controlsPage(options);
+    const stages = [];
+    await assert.rejects(browserFlow.employeeReadControls(fixture.page, stage => stages.push(stage)), error => {
+      assert.equal(stages.at(-1), expectedStage);
+      assert.equal(error.message, reason);
+      assert.equal(browserFlow.safeFailureReason(expectedStage, error), reason);
+      assert.equal(error.message.includes('PRIVATE'), false);
+      return true;
+    });
+    if (expectedStage === 'feedback') assert.equal(fixture.actions.includes('backup_denied_api'), false);
+  }
+});
+
+test('employee backup probe rejects redirects instead of accepting another endpoint denial', async () => {
+  const originalFetch = globalThis.fetch;
+  const fixture = controlsPage();
+  fixture.page.evaluate = (callback, endpoint) => callback(endpoint);
+  let calls = 0;
+  globalThis.fetch = async (endpoint, options) => {
+    calls++;
+    assert.equal(endpoint, '/api/settings/backups');
+    assert.deepEqual(options, { cache: 'no-store', redirect: 'error' });
+    throw new TypeError('PRIVATE_REDIRECT_LOCATION');
+  };
+  try {
+    await assert.rejects(browserFlow.employeeReadControls(fixture.page), /^Error: backup_probe_failed$/);
+    assert.equal(calls, 1);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 function laterStagePage(options = {}) {
   let requestListener, responseNumber = 0;
   const actions = [];
+  const controls = controlsPage({}, actions);
   const fail = boundary => { if (boundary && options.fail === boundary) throw new Error('PRIVATE_EXCEPTION_URL?code=PRIVATE_CALLBACK'); };
   const response = (url, method, status, value, boundary) => ({
     url: () => url, request: () => ({ method: () => method }), status: () => status,
@@ -272,13 +394,14 @@ function laterStagePage(options = {}) {
         return { count: async () => options.passwordVisible ? 1 : 0 };
       },
       getByRole(role, query) {
+        if (query.name === 'Разработчикам') return controls.page.getByRole(role, query);
         assert.equal(role, 'button');
         if (query.name === 'Войти') return { click: async () => { actions.push('login_click'); } };
-        if (query.name.source === 'Разработчикам') return { first() { return this; }, isVisible: async () => false };
         assert.equal(query.name.source, '^(Открыть дневник|Перейти в дневник)$');
         return diary;
       },
       waitForResponse: async predicate => {
+        if (predicate(controls.listResponse())) return controls.page.waitForResponse(predicate);
         responseNumber++;
         let result;
         if (responseNumber === 1) {
@@ -295,7 +418,10 @@ function laterStagePage(options = {}) {
         assert.equal(predicate(result), true);
         return result;
       },
-      evaluate: async (callback, endpoint) => { assert.equal(endpoint, '/api/finance'); actions.push('denied_api'); return 403; },
+      evaluate: async (callback, endpoint) => {
+        if (endpoint === '/api/settings/backups') return controls.page.evaluate(callback, endpoint);
+        assert.equal(endpoint, '/api/finance'); actions.push('denied_api'); return 403;
+      },
       url: () => options.wrongSchoolOrigin ? browserFlow.ARTHELLO : browserFlow.SCHOOL,
     },
   };
@@ -344,12 +470,12 @@ test('successful natural flow retains one login, one denied probe, both navigati
   const result = await browserFlow.naturalFlow(fixture.page, {
     login: 'fixture@example.invalid', password: 'fixture-private-password',
   }, stage => stages.push(stage));
-  assert.deepEqual(stages, ['login_form', 'employee_access', 'education', 'diary_navigation', 'school_identity', 'complete']);
-  assert.deepEqual(fixture.actions, ['open_login', 'login_click', 'denied_api', 'education_click', 'diary_click']);
+  assert.deepEqual(stages, ['login_form', 'employee_access', 'feedback', 'backup_access', 'education', 'diary_navigation', 'school_identity', 'complete']);
+  assert.deepEqual(fixture.actions, ['open_login', 'login_click', 'denied_api', 'feedback_open', 'feedback_mine', 'feedback_close', 'backup_denied_api', 'education_click', 'diary_click']);
   assert.deepEqual(result, {
     result: 'pass', method: 'natural-browser-navigation', sessionInjected: false, callbackUrlConstructed: false,
     employeeAccount: 'verified', educationAccess: 'verified', schoolIdentity: 'verified', deniedApi: 'verified', deniedModule: 'finance',
-    feedbackVisible: false,
+    feedbackVisible: true, feedbackDialog: 'verified', feedbackOwnList: 'verified', feedbackAllHidden: 'verified', backupApiDenied: 'verified',
     verifiedSteps: ['open_education_in_authenticated_arthello', 'click_diary_entry', 'follow_natural_sso_redirects', 'authenticated_school_diary_visible'],
   });
 });

@@ -1,14 +1,15 @@
-name: Verify and run ArtHello server browser
+name: Verify and run ArtHello employee controls
 
 on:
   pull_request:
     paths:
       - deploy/browser/**
       - scripts/run-server-browser.sh
-      - scripts/test/server-browser.test.mjs
+      - scripts/test/employee-controls.test.mjs
       - scripts/test/browser-proxy.test.mjs
-      - .github/workflows/check-arthello-server-browser.yml
-  workflow_dispatch:
+      - scripts/test/retire-r12-browser.test.mjs
+      - .github/scripts/check-employee-controls-contract.rb
+      - .github/workflows/check-arthello-employee-controls.yml
   workflow_run:
     workflows: [Quality gates]
     types: [completed]
@@ -19,12 +20,12 @@ permissions:
   actions: read
 
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('browser-pr-{0}', github.event.pull_request.number) || 'gateway-38-55-arthello-production' }}
+  group: ${{ github.event_name == 'pull_request' && format('employee-controls-pr-{0}', github.event.pull_request.number) || 'gateway-38-55-arthello-production' }}
   cancel-in-progress: false
   queue: max
 
 env:
-  CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
+  CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
 
 jobs:
   bundle:
@@ -33,16 +34,16 @@ jobs:
         github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
         github.actor == 'vitaliyozolin-dotcom' &&
         github.triggering_actor == 'vitaliyozolin-dotcom' && (
-          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
           (github.event_name == 'workflow_run' &&
            github.event.workflow_run.name == 'Quality gates' &&
            github.event.workflow_run.path == '.github/workflows/quality.yml' &&
            github.event.workflow_run.event == 'push' &&
            github.event.workflow_run.head_branch == 'main' &&
            github.event.workflow_run.conclusion == 'success' &&
+           github.event.workflow_run.run_attempt == 1 &&
            github.event.workflow_run.repository.id == github.event.repository.id &&
            github.event.workflow_run.head_repository.id == github.event.repository.id &&
-           startsWith(github.event.workflow_run.head_commit.message, 'D076: natural server browser'))
+           startsWith(github.event.workflow_run.head_commit.message, 'D093: employee controls'))
         )
       )
     runs-on: ubuntu-latest
@@ -68,7 +69,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
-          node --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs
+          ruby .github/scripts/check-employee-controls-contract.rb
+          node --test scripts/test/employee-controls.test.mjs scripts/test/browser-proxy.test.mjs scripts/test/retire-r12-browser.test.mjs
           bash -n scripts/run-server-browser.sh
           corepack enable
           corepack pnpm@11.7.0 --dir deploy/browser install --ignore-workspace --frozen-lockfile
@@ -78,7 +80,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           tag="arthello-e2e:$CHECKED_SOURCE_SHA"
-          docker build --platform linux/amd64 --build-arg "SOURCE_SHA=$CHECKED_SOURCE_SHA" -t "$tag" deploy/browser
+          docker build --platform linux/amd64 --build-arg "SOURCE_SHA=$CHECKED_SOURCE_SHA" -f deploy/browser/Dockerfile.employee-controls -t "$tag" deploy/browser
           image_id="$(docker image inspect "$tag" --format '{{.Id}}')"
           timeout --signal=TERM --kill-after=10 90 docker run --rm --init \
             --pull never --user 1000:1000 --network none --read-only \
@@ -112,7 +114,7 @@ jobs:
       github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
       github.actor == 'vitaliyozolin-dotcom' &&
       github.triggering_actor == 'vitaliyozolin-dotcom' &&
-      (github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch')
+      github.event_name == 'workflow_run'
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru
     timeout-minutes: 15
@@ -145,14 +147,16 @@ jobs:
           persist-credentials: false
           submodules: false
           lfs: false
-      - name: Retire only the exact unused R8 browser image under D079
+      - name: Retire only the exact unused accepted R12 browser image
         env:
           GH_TOKEN: ${{ github.token }}
+          ARCHIVE_BYTES: ${{ needs.bundle.outputs.archive_bytes }}
+          EXPANDED_BYTES: ${{ needs.bundle.outputs.expanded_bytes }}
         shell: bash
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
-          "$PRECHECK_NODE" deploy/browser/retire-image.mjs
+          "$PRECHECK_NODE" deploy/browser/retire-r12-browser.mjs
       - name: Measure import capacity before downloading the verified archive
         env:
           ARCHIVE_BYTES: ${{ needs.bundle.outputs.archive_bytes }}
@@ -214,7 +218,7 @@ jobs:
           test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.arthello.role"}}')" = e2e-browser
           printf 'BROWSER_IMAGE_ID=%s\n' "$image_id" >> "$GITHUB_ENV"
           printf 'BROWSER_IMAGE_VERIFIED source=%s fingerprint=%s\n' "$CHECKED_SOURCE_SHA" "$fingerprint"
-      - name: Run dedicated employee natural login and diary navigation
+      - name: Run employee feedback and backup-denial controls with natural School navigation
         env:
           GH_TOKEN: ${{ github.token }}
           ARTHELLO_E2E_LOGIN: ${{ secrets.ARTHELLO_E2E_LOGIN }}
@@ -222,7 +226,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          "$PRECHECK_NODE" --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs
+          "$PRECHECK_NODE" --test scripts/test/employee-controls.test.mjs scripts/test/browser-proxy.test.mjs
           current_main="$(curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $GH_TOKEN" \
             https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
           test "$current_main" = "$CHECKED_SOURCE_SHA"

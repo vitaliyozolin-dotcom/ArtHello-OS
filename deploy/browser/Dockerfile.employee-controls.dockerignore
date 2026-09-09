@@ -1,0 +1,9 @@
+*
+!package.json
+!pnpm-lock.yaml
+!run.mjs
+!flow-employee-controls.mjs
+!smoke-employee-controls.mjs
+!proxy.mjs
+!node_modules
+!node_modules/**

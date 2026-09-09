@@ -1,0 +1,18 @@
+FROM mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e AS browser_files
+# Off-host only: retain the full Chromium used by the sandbox-tested flow.
+# Flatten the remaining filesystem so deleted, unused browser layers are not
+# transferred to the gateway. All OS libraries and TLS roots stay intact.
+RUN rm -rf /ms-playwright/firefox-* /ms-playwright/webkit-* /ms-playwright/chromium_headless_shell-* /ms-playwright/ffmpeg-*
+
+FROM scratch
+COPY --from=browser_files / /
+ARG SOURCE_SHA
+LABEL org.arthello.role="e2e-browser" org.opencontainers.image.revision=$SOURCE_SHA
+WORKDIR /opt/arthello-e2e
+COPY package.json pnpm-lock.yaml run.mjs proxy.mjs ./
+COPY flow-employee-controls.mjs ./flow.mjs
+COPY smoke-employee-controls.mjs ./smoke.mjs
+COPY node_modules ./node_modules
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright LANG=C.UTF-8 LC_ALL=C.UTF-8 XDG_CONFIG_HOME=/tmp/config XDG_CACHE_HOME=/tmp/cache
+USER 1000:1000
+ENTRYPOINT ["node", "/opt/arthello-e2e/run.mjs"]
