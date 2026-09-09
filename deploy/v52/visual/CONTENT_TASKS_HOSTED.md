@@ -1,6 +1,10 @@
 # Content and Tasks: hosted synthetic visual check
 
-This is a local proposal. It has not run a browser or produced screenshots yet.
+D089 hosted run `34331175805`, job `102399900660`, failed in the browser smoke
+entrypoint with `ERR_MODULE_NOT_FOUND` for `playwright-core`. The accepted image
+checks/import and dependency installation passed; the fixture was not reached
+and no screenshot artifact was produced. D092 prepares the assembly correction
+below. Actual Docker/Chromium execution of that correction remains outstanding.
 `accepted-runtime.json` now identifies the actually accepted R12 runtime:
 source `77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed`, tree
 `ac3fcaac06acf33bf9ee32e438d0c040adb38fd7`, producing v52 run `34326274447`,
@@ -32,7 +36,7 @@ artifact; neither rebuilds the application.
 
 ## Executable path
 
-The future workflow is `.github/workflows/verify-content-tasks-visual.yml`.
+The workflow is `.github/workflows/verify-content-tasks-visual.yml`.
 Its ordered operations are:
 
 1. Check the accepted run, exact source/tree and successful main v52 workflow via
@@ -41,8 +45,13 @@ Its ordered operations are:
    fingerprint and imported immutable image configuration. Use the resolved full
    image ID for every application/fixture container. Cross-store image ID equality
    is not assumed.
-3. Build the existing browser Dockerfile on the hosted runner using its pinned
-   base and `playwright-core@1.62.1` lock. Run its existing real sandbox smoke test.
+3. Copy the eight fixed public browser inputs into a new context inside this
+   invocation's private working directory. Install the frozen
+   `playwright-core@1.62.1` lock with pnpm `11.7.0`, scoped umask `022` and copy
+   import. Reject missing/unexpected entries, dangling/escaping links and shared
+   hardlinks before making only this public context readable/traversable after
+   root-owned Docker COPY. Build the unchanged browser Dockerfile and run its
+   existing real sandbox smoke test. The launcher's private umask remains `077`.
 4. Create a new private volume and internal Docker network. Confirm the volume
    contains only the image's empty `d1` directory. Initialize application schema,
    stop the application, then run the existing `prepare-visual-fixture.mjs` against
@@ -120,8 +129,9 @@ behavior, is unchanged. The merge must touch a configured workflow, visual or
 browser path to create the push run. D089 changes only this synthetic test
 trigger; it grants no production capability.
 
-The seven proposed files must be reviewed together before the owner merge whose
-commit message starts with the D089 prefix. A later documentation or diagnostic
+D092 keeps the existing D089 technical trigger prefix. Review its assembly
+helper, regression and launcher/workflow changes together before the owner merge
+whose commit message starts with that prefix. A later documentation or diagnostic
 merge may change the runner commit; the application checkout and image remain
 pinned to the accepted R12 source above. The artifact must still be unexpired
 when the visual job starts. This local preparation does not publish files or
@@ -130,12 +140,21 @@ start a workflow.
 ```sh
 node --test deploy/v52/visual/content-tasks-trigger.test.cjs
 node --test deploy/v52/visual/content-tasks-scoped.test.cjs
+node --test deploy/v52/visual/assemble-browser-context.test.cjs
 bash -n deploy/v52/visual/run-content-tasks-hosted.sh
 ```
 
 These checks validate the actual trigger truth table, adapter/source guards and
 shell syntax. The separate trigger regression covers PR/fork/non-owner/wrong-ref/
-wrong-prefix/push-retry exclusions without changing the twelve adapter tests. Docker and
+wrong-prefix/push-retry exclusions without changing the twelve adapter tests.
+Four D092 assembly regressions use the real locked package, verify import after
+relocation, reject inaccessible copied modes, escaping/dangling links and shared
+cache hardlinks, and preserve private-file permissions. A local pnpm reproduction
+under `077` created directories `0700` and package files `0600`; a later `022`
+install reused cached `0600` files. Its dependency links remained inside the
+context. This supports the permission cause; the failed job did not retain its
+build context for direct inspection. No actual UID1000/Docker execution was
+available locally, so the hosted sandbox smoke remains required. Docker and
 Chromium execution are still required on the hosted runner before visual PASS or
 screenshots can be claimed. The original harness, scoped adapter, test source and
 application implementation remain unchanged. If a different release is needed,
