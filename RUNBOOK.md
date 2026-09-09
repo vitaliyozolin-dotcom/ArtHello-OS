@@ -222,3 +222,12 @@ Production backup пока не выполнялся: доступ отсутс�
 Результат считать готовым только после actual candidate PASS, публичного повторного прохода и исходной бизнес-приёмки. Успешный локальный тест/CI или ручной вход владельца не являются таким результатом.
 
 Уточнение идентичности 2026-09-09: пока кандидат PR377 проходил проверки, main обновился с 582edaf1a66a953edb2d61e03040d1a13e70a0ad до 59372b139fb0b2345cf3e41fc23c8223099b187f (checked PostgreSQL migrations), заняв D-080. Решению этого выпуска присвоен следующий свободный номер D-081. Технические имена файлов d080-*, схемы и маркеры ARTHELLO_D080 сохранены как неизменённые идентификаторы проверенного протокола; они относятся к D-081 и не запускают миграции PostgreSQL. Префикс активации нового выпуска — D081: guarded R9. Все изменения другого участника сохранены; R9 собирает отдельный v52 runtime с D1 и не выполняет deploy/api-entrypoint.sh или SQL0018.
+
+
+## D084 — R10 и штатный домен общего шлюза
+
+R10/PR379 продолжает D081 только после доказанного pre-auth abort R9 и D083 read-only причины. Frozen R9 не перевзводить. Перед маршрутизацией получить private gateway evidence из конкретного Caddy; не подставлять домен в реальный Caddyfile. Этот файл привязан к durable context/receipt, его нельзя пересоздавать для обхода отказа. При смене gateway ID/image/domain/main config продолжение блокируется.
+
+До нового import допускается только точный unused recoverable R9 browser image из DECISIONS D084, без force/prune и без application image/volume удаления. Capacity проверяется после этого штатно.
+
+Сохранены полный runtime/route/hash/backup/current-main gates и порядок maintenance → real candidate browser → public → повторный browser. Если same-source R10 остановился после auth с проверенным maintenance hold и до public/bank activation, разрешён только предусмотренный controller rerun failed jobs с новой проверкой всех evidence. Неизвестный исход или public boundary требуют отдельного проверенного forward-fix с текущей БД; snapshot restore и подмена receipt запрещены. Результат не считать готовым до всей исходной бизнес-приёмки.

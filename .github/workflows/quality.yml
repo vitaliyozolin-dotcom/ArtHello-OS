@@ -190,3 +190,40 @@ jobs:
           path: ci-provenance/
           if-no-files-found: error
           retention-days: 30
+
+  d084-candidate-tests:
+    name: d084-candidate-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      R10_CONTRACT_SHA256: '74a486b0e533d9d982bc24a1d5b308cf31b44339640e80a6bca4d44ef45d18e8'
+    steps:
+      - name: Check out exact unprivileged R10 verification source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CHECKED_SOURCE_SHA }}
+          fetch-depth: 0
+          clean: true
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Verify R10 preservation and candidate gateway boundaries
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          test "$(sha256sum deploy/v52/recovery-r10/check-contract.rb | cut -d ' ' -f 1)" = "$R10_CONTRACT_SHA256"
+          ruby deploy/v52/recovery-r10/check-contract.rb
+          python3 -I .github/scripts/test-d083-replay-guard.py
+          python3 -I .github/scripts/test-d083-candidate-state.py
+          python3 -I .github/scripts/test-d083-resume-candidate.py
+          python3 -I .github/scripts/test-d083-public-audit.py
+          python3 -I .github/scripts/test-d083-controller-boundary.py
+          python3 -I .github/scripts/test-r10-live-browser-acceptance.py
+          python3 -I .github/scripts/test-d083-maintenance-route.py
+          node --test scripts/test/retire-r9-browser.test.mjs
+          bash -n .github/scripts/run-r10-live-browser.sh
+          bash -n .github/scripts/run-d083-hosted-caddy.sh
+          bash -n .github/scripts/run-d083-target-caddy.sh
+          bash .github/scripts/run-d083-hosted-caddy.sh
