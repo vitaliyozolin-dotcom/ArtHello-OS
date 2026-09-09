@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import returnStyles from "./arthello-return.module.css";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -450,7 +451,10 @@ function AppShell({ snapshot, activeView, onView, onStudent, helpAction, helpOve
             <StatusPill tone="blue">{roleLabels[snapshot.viewer.role]}</StatusPill>
             <button className="top-avatar" onClick={() => onView("profile")} aria-label="Открыть профиль"><Avatar name={snapshot.viewer.displayName} size="sm" /></button>
           </header>
-          <main className="l0-main">{children}</main>
+          <main className="l0-main">
+            {!familyContext ? <nav className={returnStyles.navigation} aria-label="Возврат в рабочую систему"><a className={returnStyles.link} href="/auth/central/return">Вернуться в ArtHello OS</a></nav> : null}
+            {children}
+          </main>
         </section>
 
         <nav className="l0-bottom-nav" aria-label="Основная навигация">
