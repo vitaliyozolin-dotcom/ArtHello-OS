@@ -4,7 +4,22 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { analyzeWorkflowDirectory, analyzeWorkflowSource } from "../workflow-policy.mjs";
+import {
+  analyzeWorkflowDirectory,
+  analyzeWorkflowSource,
+  evaluateWorkflowCountRatchet,
+} from "../workflow-policy.mjs";
+
+test("workflow count ratchet allows cleanup and rejects unreviewed growth", () => {
+  assert.deepEqual(evaluateWorkflowCountRatchet(14, { maximumWorkflowCount: 14 }), []);
+  assert.deepEqual(evaluateWorkflowCountRatchet(12, { maximumWorkflowCount: 14 }), []);
+  assert.deepEqual(evaluateWorkflowCountRatchet(15, { maximumWorkflowCount: 14 }), [
+    {
+      rule: "workflow-count-ratchet-exceeded",
+      detail: "Active workflow count 15 exceeds reviewed maximum 14",
+    },
+  ]);
+});
 
 test("rejects pull_request code on a self-hosted runner", () => {
   const result = analyzeWorkflowSource(

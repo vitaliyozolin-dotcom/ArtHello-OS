@@ -5,6 +5,7 @@
 - Три доказанных cleanup-блока удалили из активной `.github/workflows` 33 завершённых one-shot: production hotfix D060–D069, recovery R2–R12, ранние School recovery diagnostics, frozen SSO/curriculum cutover, topology probe, legacy RU D059, R12 verifier и завершённый D092 artifact inspector.
 - Активный набор сокращён с 47 до 14 workflow, число `workflow_run` consumers — с 17 до 5. Исходные blob SHA и восстановление из точных parent commits записаны в `docs/workflow-archive-2026-09-09.md`.
 - Workflow policy gate проверяет оставшийся набор. R13, текущие browser/data checks, `quality.yml` и `proof-gates.yml` не затронуты до проверки фактических GitHub run provenance.
+- Checked-in ratchet `quality-gates/workflow-policy-ratchet.json` ограничивает активный каталог текущим максимумом 14: дальнейшее уменьшение разрешено, незаявленный рост блокирует workflow policy gate.
 - `test:full` теперь включает актуальный importer/sandbox suite workspace `scripts` и PostgreSQL 16 gate; дублирующий отдельный `test:postgres` после агрегата удалён из `quality.yml`. Полный legacy glob `scripts/test/*.test.mjs` пока не считается зелёным CI-suite: в нём остаются spent release contracts и sandbox-sensitive server tests.
 - Фаза 6 остаётся открытой: нужны второй workflow cleanup-блок, консолидация deploy, материализация School source, подключение deploy tests/typecheck, SSH/backup hardening, замена хрупких source-regex тестов и coverage ratchet.
 

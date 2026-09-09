@@ -221,12 +221,34 @@ export async function analyzeWorkflowDirectory(directory) {
   };
 }
 
+export function evaluateWorkflowCountRatchet(workflowCount, ratchet) {
+  const maximum = ratchet?.maximumWorkflowCount;
+  if (!Number.isInteger(maximum) || maximum < 0) {
+    return [
+      {
+        rule: "invalid-workflow-count-ratchet",
+        detail: "maximumWorkflowCount must be a non-negative integer",
+      },
+    ];
+  }
+  if (workflowCount <= maximum) return [];
+  return [
+    {
+      rule: "workflow-count-ratchet-exceeded",
+      detail: `Active workflow count ${workflowCount} exceeds reviewed maximum ${maximum}`,
+    },
+  ];
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const reportIndex = args.indexOf("--report");
   const reportPath = reportIndex >= 0 ? args[reportIndex + 1] : null;
   const root = process.cwd();
   const result = await analyzeWorkflowDirectory(path.join(root, ".github", "workflows"));
+  const ratchetPath = path.join(root, "quality-gates", "workflow-policy-ratchet.json");
+  const ratchet = JSON.parse(await readFile(ratchetPath, "utf8"));
+  const ratchetViolations = evaluateWorkflowCountRatchet(result.workflowCount, ratchet);
 
   if (reportPath) {
     const absoluteReport = path.resolve(root, reportPath);
@@ -235,7 +257,7 @@ async function main() {
   }
 
   console.log(
-    `WORKFLOW_POLICY workflows=${result.workflowCount} violations=${result.violationCount} risks=${result.riskCount}`,
+    `WORKFLOW_POLICY workflows=${result.workflowCount} violations=${result.violationCount + ratchetViolations.length} risks=${result.riskCount}`,
   );
   for (const violation of result.violations) {
     console.error(`${violation.file}:${violation.job ?? "workflow"}: ${violation.rule}: ${violation.detail}`);
@@ -243,8 +265,11 @@ async function main() {
   for (const risk of result.risks) {
     console.log(`${risk.file}:${risk.job}: ${risk.risk}`);
   }
+  for (const violation of ratchetViolations) {
+    console.error(`workflow-policy-ratchet.json:workflow: ${violation.rule}: ${violation.detail}`);
+  }
 
-  if (result.violationCount > 0) process.exitCode = 1;
+  if (result.violationCount > 0 || ratchetViolations.length > 0) process.exitCode = 1;
 }
 
 const isEntryPoint = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
