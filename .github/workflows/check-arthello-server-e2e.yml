@@ -80,6 +80,56 @@ jobs:
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
           "$PRECHECK_NODE" --test scripts/test/server-e2e-preflight.test.mjs
+          python3 -I .github/scripts/test-d082-route-diagnostic.py
+
+      - name: Diagnose rejected R9 route without changing gateway
+        if: >-
+          github.event_name == 'workflow_run' &&
+          startsWith(github.event.workflow_run.head_commit.message, 'D083: read-only route diagnostic')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          current_main="$(curl --fail --silent --show-error --max-time 20 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+          test "$current_main" = "$CHECKED_SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = 188.225.38.55
+          mapfile -t live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
+          test "${#live_ids[@]}" -eq 1
+          live_id="$(docker inspect "${live_ids[0]}" --format '{{.Id}}')"
+          [[ "$live_id" =~ ^[a-f0-9]{64}$ ]]
+          test "$(docker inspect "$live_id" --format '{{index .Config.Labels "arthello.release.sha"}}')" = 6596f69390ad539577ec2640e8ef40c7e12c22dc
+          live_name="$(docker inspect "$live_id" --format '{{.Name}}')"
+          live_name="${live_name#/}"
+          [[ "$live_name" =~ ^arthello-direct-[A-Za-z0-9._-]+$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          caddy_id="$(docker inspect stroios-caddy-1 --format '{{.Id}}')"
+          [[ "$caddy_id" =~ ^[a-f0-9]{64}$ ]]
+          test "$(docker inspect "$caddy_id" --format '{{.State.Running}}')" = true
+          diagnostic_work="$(mktemp -d "$RUNNER_TEMP/arthello-route-diagnostic.XXXXXXXX")"
+          cleanup() {
+            rm -f -- "$diagnostic_work/routes.caddy" "$diagnostic_work/main.caddy"
+            rmdir -- "$diagnostic_work"
+          }
+          trap cleanup EXIT
+          docker cp "$caddy_id:/data/external-routes.caddy" "$diagnostic_work/routes.caddy" >/dev/null
+          docker cp "$caddy_id:/etc/caddy/Caddyfile" "$diagnostic_work/main.caddy" >/dev/null
+          chmod 0600 "$diagnostic_work/routes.caddy" "$diagnostic_work/main.caddy"
+          set +e
+          python3 -I .github/scripts/d082-route-diagnostic.py \
+            --input "$diagnostic_work/routes.caddy" --main-config "$diagnostic_work/main.caddy" \
+            --old-upstream "$live_name:8081" \
+            --candidate-upstream "arthello-direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT:8081"
+          result=$?
+          set -e
+          test "$(docker inspect stroios-caddy-1 --format '{{.Id}}')" = "$caddy_id"
+          test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+          exit "$result"
 
       - name: Inventory browser image and dedicated test access without logging in
         env:
