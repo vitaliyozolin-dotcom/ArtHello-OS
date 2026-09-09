@@ -48,8 +48,23 @@ export function scanLiveD1(expected, io = { ...fs, getuid: () => process.getuid(
   } catch { return stop('scanner_failed'); }
 }
 
+// An idle D1 object may close its SQLite handles between ordinary scheduler
+// reads. Observe at most one 60-second timer interval plus ten seconds of margin.
+// Never open the database, wake the application, call the bank, or relax a scan.
+export async function waitForLiveD1(expected, {
+  scan = scanLiveD1,
+  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
+} = {}) {
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const report = scan(expected);
+    if (report.status !== 'blocked' || report.reason !== 'expected_handle_absent'
+      || report.expectedHandles !== 0 || report.unexpectedHandles !== 0 || attempt === 14) return report;
+    await wait(5000);
+  }
+}
+
 if (process.argv.includes('--live-d1-scan')) {
-  const report = scanLiveD1(process.env.EXPECTED_FILE);
+  const report = await waitForLiveD1(process.env.EXPECTED_FILE);
   console.log(JSON.stringify(report));
   process.exitCode = report.status === 'verified' ? 0 : 2;
 }

@@ -2,6 +2,40 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { inspectDatabase, activeRelativePath, diagnosticExitCode } from '../production-readonly.mjs';
+import { waitForLiveD1 } from '../live-d1-identity.mjs';
+const absentHandle = { status:'blocked',reason:'expected_handle_absent',expectedHandles:0,unexpectedHandles:0 };
+test('live identity wait: observes a later ordinary open without combining scans or making requests', async () => {
+  let scans = 0, waits = 0;
+  const verified = {status:'verified',reason:'exact_live_handles',expectedHandles:3,unexpectedHandles:0};
+  const result = await waitForLiveD1('synthetic', {
+    scan: value => { assert.equal(value, 'synthetic'); return ++scans === 3 ? verified : absentHandle; },
+    wait: async ms => { assert.equal(ms, 5000); waits++; },
+  });
+  assert.equal(result, verified);
+  assert.equal(scans, 3); assert.equal(waits, 2);
+});
+test('live identity wait: other identity refusals and inconsistent absence terminate immediately', async () => {
+  for (const refusal of [
+    {status:'blocked',reason:'unexpected_database_handle',expectedHandles:3,unexpectedHandles:1},
+    {status:'blocked',reason:'descriptor_unreadable',expectedHandles:0,unexpectedHandles:0},
+    {...absentHandle, unexpectedHandles:1}, {...absentHandle, expectedHandles:1},
+  ]) {
+    let scans=0, waits=0;
+    const result=await waitForLiveD1('synthetic', {
+      scan: () => ++scans===1 ? absentHandle : refusal,
+      wait: async () => { waits++; },
+    });
+    assert.equal(result, refusal); assert.equal(scans,2); assert.equal(waits,1);
+  }
+});
+test('live identity wait: persistent absence is bounded and still blocks', async () => {
+  let scans=0, waits=0;
+  const result=await waitForLiveD1('synthetic', {
+    scan: () => {scans++; return absentHandle;}, wait: async () => {waits++;},
+  });
+  assert.equal(result, absentHandle); assert.equal(scans,15); assert.equal(waits,14);
+});
+
 
 test('bank commit schema: missing write columns are identified without reading business rows', () => {
   const db = new DatabaseSync(':memory:');
