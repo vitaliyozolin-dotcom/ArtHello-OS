@@ -1,6 +1,6 @@
 import { formatRubles } from "@workspace/shared/money";
 import { apiFetch } from "@workspace/api-client-react";
-import { useState, lazy, Suspense } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { NavigationProvider } from '@/context/NavigationContext';
 import { useAuth } from '@/context/AuthContext';
 import LoginPage from '@/pages/login';
@@ -8,7 +8,8 @@ import ChangePasswordPage from '@/pages/change-password';
 import { useQuery } from '@tanstack/react-query';
 import { useAppMode } from '@/context/AppModeContext';
 import { canViewFrontOfficePreview } from '@/features/front-office/preview-contract';
-import type { OwnerSection } from '@/features/navigation/section-routes';
+import { pathForSection, SECTION_PATHS, sectionForPath, type OwnerSection } from '@/features/navigation/section-routes';
+import { useLocation } from 'wouter';
 import {
   Zap, Banknote, TrendingUp, BarChart2, Users,
   UserCheck, FileText, Settings, Bell, CheckSquare,
@@ -479,8 +480,19 @@ function OwnerContent({ section }: { section: OwnerSection }) {
 export function AppShell() {
   const { isOwner, isTechnical } = useAppMode();
   const { user, loading } = useAuth();
-  const [section, setSection] = useState<OwnerSection>('pulse');
+  const [location, navigate] = useLocation();
+  const section = sectionForPath(location) ?? 'pulse';
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const setSection = (nextSection: OwnerSection) => navigate(pathForSection(nextSection));
+  const navigateFromFeature = (nextSection: string) => {
+    const path = SECTION_PATHS[nextSection as OwnerSection];
+    if (path) navigate(path);
+  };
+
+  useEffect(() => {
+    if (!sectionForPath(location)) navigate('/', { replace: true });
+  }, [location, navigate]);
 
   // Auth gate
   if (loading) {
@@ -515,7 +527,7 @@ export function AppShell() {
             <div className="w-6 h-6 border-2 border-violet-600 border-t-transparent rounded-full animate-spin" />
           </div>
         }>
-          <NavigationProvider onNavigate={(s) => setSection(s as OwnerSection)}>
+          <NavigationProvider onNavigate={navigateFromFeature}>
             {isTechnical ? (
               <div className="px-4 py-4 max-w-[1440px] mx-auto">
                 <div className="mb-4 flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">

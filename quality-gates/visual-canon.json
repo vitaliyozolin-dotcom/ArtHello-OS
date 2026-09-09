@@ -1,6 +1,12 @@
 {
   "schema_version": 3,
   "source_of_truth": "ArtHello OS Design Code 1.2",
+  "routes": [
+    { "id": "pulse", "path": "/" },
+    { "id": "banking", "path": "/banking" },
+    { "id": "employees", "path": "/employees" },
+    { "id": "crm-coverage", "path": "/integrations/alfacrm/coverage" }
+  ],
   "viewports": [
     {
       "id": "desktop",

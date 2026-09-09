@@ -32,3 +32,18 @@ test("unknown paths fail closed instead of selecting an arbitrary section", () =
   assert.equal(sectionForPath(""), null);
   assert.equal(sectionForPath("/banking?tab=payments"), null);
 });
+
+test("application navigation is URL-backed and keeps browser history semantics", () => {
+  const shell = readFileSync(
+    new URL("../src/AppShell.tsx", import.meta.url),
+    "utf8",
+  );
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+
+  assert.match(shell, /const \[location, navigate\] = useLocation\(\)/);
+  assert.match(shell, /navigate\(pathForSection\(nextSection\)\)/);
+  assert.match(shell, /navigate\(["']\/['"], \{ replace: true \}\)/);
+  assert.doesNotMatch(shell, /useState<OwnerSection>/);
+  assert.match(app, /<WouterRouter[\s\S]*<AppShell \/>/);
+  assert.doesNotMatch(app, /<Route path="\/"/);
+});

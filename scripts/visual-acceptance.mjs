@@ -116,7 +116,7 @@ const chrome = spawn(chromeBinary(), [
 ], { stdio: 'ignore' });
 
 const report = {
-  schema_version: 1,
+  schema_version: 2,
   generated_at: new Date().toISOString(),
   engine: 'ArtHello Visual Acceptance Gate',
   url: APP_URL,
@@ -133,14 +133,16 @@ try {
   await cdp.call('Page.enable');
   await cdp.call('Runtime.enable');
 
-  for (const viewport of canon.viewports) {
+  for (const route of canon.routes) {
+    for (const viewport of canon.viewports) {
+    const routeUrl = new URL(route.path, APP_URL).href;
     await cdp.call('Emulation.setDeviceMetricsOverride', {
       width: viewport.width,
       height: viewport.height,
       deviceScaleFactor: viewport.deviceScaleFactor ?? 1,
       mobile: viewport.id === 'mobile'
     });
-    await cdp.call('Page.navigate', { url: APP_URL });
+    await cdp.call('Page.navigate', { url: routeUrl });
     await sleep(1800);
     const readiness = await waitForRenderedRoot(async () => {
       const evaluated = await cdp.call('Runtime.evaluate', {
@@ -155,6 +157,7 @@ try {
     const audit = readiness.audit;
     const failures = [];
     if (!readiness.ready) failures.push('DOCUMENT_READINESS_TIMEOUT');
+    if (new URL(audit.url).pathname !== route.path) failures.push(`ROUTE_MISMATCH:${new URL(audit.url).pathname}`);
     if (audit.viewport.width !== viewport.width || audit.viewport.height !== viewport.height) {
       failures.push(`VIEWPORT_MISMATCH:${audit.viewport.width}x${audit.viewport.height}`);
     }
@@ -171,10 +174,13 @@ try {
     if (badDialogs.length) failures.push(`DIALOG_NOT_CENTERED:${badDialogs.length}`);
 
     const shot = await cdp.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-    const screenshot = path.join(OUT, `${viewport.id}.png`);
+    const screenshot = path.join(OUT, `${route.id}-${viewport.id}.png`);
     await fs.writeFile(screenshot, Buffer.from(shot.data, 'base64'));
     report.viewports.push({
       id: viewport.id,
+      route_id: route.id,
+      route_path: route.path,
+      url: audit.url,
       width: viewport.width,
       height: viewport.height,
       readiness_attempts: readiness.attempts,
@@ -186,7 +192,8 @@ try {
       screenshot: path.basename(screenshot),
       failures
     });
-    report.failures.push(...failures.map((failure) => ({ viewport: viewport.id, failure })));
+    report.failures.push(...failures.map((failure) => ({ route: route.id, viewport: viewport.id, failure })));
+    }
   }
   cdp.close();
 } finally {
@@ -202,8 +209,8 @@ report.summary = {
 };
 await fs.writeFile(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2) + '\n');
 if (report.failures.length) {
-  for (const { viewport, failure } of report.failures) {
-    console.error(`Visual Acceptance failure: viewport=${viewport} rule=${failure}`);
+  for (const { route, viewport, failure } of report.failures) {
+    console.error(`Visual Acceptance failure: route=${route} viewport=${viewport} rule=${failure}`);
   }
   console.error(`Visual Acceptance: FAILED (${report.failures.length}). Evidence: ${OUT}`);
   process.exit(1);

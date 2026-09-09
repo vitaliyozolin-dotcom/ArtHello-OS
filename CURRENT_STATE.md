@@ -1,5 +1,12 @@
 # ArtHello OS — Current State
 
+## Refactoring Phase 5 — closed (2026-09-09)
+
+- D-086 делает URL источником выбранного раздела back-office: 28 owner sections имеют уникальные канонические пути, а внутренние переходы используют browser history через `wouter`.
+- Прямые загрузки и обновление страницы сохраняют раздел; Back/Forward меняют section вместе с history. Неизвестный путь заменяется на `/` без эвристического выбора экрана.
+- Visual canon теперь содержит route provenance. Локальный acceptance проверил `/`, `/banking`, `/employees` и `/integrations/alfacrm/coverage` в desktop/mobile: 8/8 проверок приняты.
+- Сервер, API client и Sites control не изменялись. Frontend typecheck, 7 frontend/visual regression tests и production build прошли.
+
 ## Refactoring Phase 4 — closed (2026-09-09)
 
 - D-085 фиксирует структурную декомпозицию без изменения HTTP-контракта и permission semantics; номер обновлён после появления параллельных D-083/D-084 в `origin/main`.

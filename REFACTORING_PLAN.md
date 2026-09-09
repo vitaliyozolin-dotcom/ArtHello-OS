@@ -203,11 +203,11 @@ Evidence: contract-drift отчёт с 0 необъяснённых путей; 
 
 Evidence: пустой route-table diff в каждом PR; permission-proof зелёный с неизменной семантикой матрицы; `wc -l` по `routes/` без файлов >500; неизменный visual-acceptance для фронтовых разборов; D-номер на каждую принятую структурную конвенцию.
 
-### Фаза 5 — фронтенд-платформа: общий UI-пакет и настоящий роутинг (M)
+### Фаза 5 — закрыта 2026-09-09: frontend-платформа и настоящий роутинг
 
 1. **[снято после Фазы 1]** Общий `lib/ui` не создаётся: вторая копия компонентов удалена вместе с `mockup-sandbox`, поэтому межпакетной дедупликации больше нет.
-2. **[BEH]** wouter (уже в catalog) вместо `useState`-switch в `AppShell.tsx`: по маршруту на секцию, состояние секции из URL, redirect legacy-default; инкрементально через mapping-таблицу.
-3. Обновить `visual-canon.json`/`visual-acceptance.mjs` на per-route URL вместо кликов по состоянию — единственная фаза, где этот гейт меняется намеренно (у каждого canon-скриншота появляется URL как provenance); before/after пары в evidence.
+2. **[выполнено] [BEH]** `wouter` заменил `useState`-switch в `AppShell.tsx`: section выводится из URL, внутренние переходы используют history, неизвестный путь заменяется на `/`.
+3. **[выполнено]** `visual-canon.json` и `visual-acceptance.mjs` проверяют per-route URL; каждый screenshot содержит route/URL provenance, а mismatch блокирует gate.
 
 НЕ трогать: серверный код; api-client слой (сделан в фазе 3); UI sites-control (отдельный продукт).
 
