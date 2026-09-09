@@ -7,13 +7,22 @@ const employeeFailureReasons = new Set([
   'unreadable_login_response', 'employee_navigation_unavailable',
 ]);
 
+const failureReasonsByStage = new Map([
+  ['employee_access', employeeFailureReasons],
+  ['education', new Set(['education_response_missing', 'education_navigation_failed', 'education_forbidden', 'education_rejected', 'diary_entry_not_visible'])],
+  ['diary_navigation', new Set(['school_response_missing', 'diary_entry_click_failed', 'school_forbidden', 'school_rejected'])],
+  ['school_identity', new Set(['unreadable_school_response', 'school_identity_mismatch', 'natural_redirect_chain_missing', 'school_navigation_unavailable', 'school_diary_not_visible'])],
+]);
+
 export function safeFailureReason(stage, error) {
-  if (stage !== 'employee_access') return 'browser_check_failed';
+  const reasons = failureReasonsByStage.get(stage);
+  const fallback = stage === 'employee_access' ? 'employee_access_failed' : 'browser_check_failed';
+  if (!reasons) return fallback;
   // Exact tags only: never interpolate an exception, response, contact or URL.
   try {
     const message = error instanceof Error ? error.message : '';
-    return employeeFailureReasons.has(message) ? message : 'employee_access_failed';
-  } catch { return 'employee_access_failed'; }
+    return reasons.has(message) ? message : fallback;
+  } catch { return fallback; }
 }
 
 export function inspectSandbox(rows) {
@@ -117,23 +126,31 @@ export async function naturalFlow(page, input, stage = () => {}) {
   if (deniedStatus !== 403) throw Error('denied_api_not_forbidden');
   stage('education');
   const [educationResponse] = await Promise.all([
-    page.waitForResponse(response => new URL(response.url()).origin === ARTHELLO && new URL(response.url()).pathname === '/api/education' && response.request().method() === 'GET'),
-    page.locator('aside[aria-label="Основная навигация"] a[href="#education"]').first().click(),
+    page.waitForResponse(response => new URL(response.url()).origin === ARTHELLO && new URL(response.url()).pathname === '/api/education' && response.request().method() === 'GET')
+      .catch(() => { throw Error('education_response_missing'); }),
+    page.locator('aside[aria-label="Основная навигация"] a[href="#education"]').first().click()
+      .catch(() => { throw Error('education_navigation_failed'); }),
   ]);
+  if (educationResponse.status() === 403) throw Error('education_forbidden');
   if (educationResponse.status() !== 200) throw Error('education_rejected');
   const diary = page.getByRole('button', { name: /^(Открыть дневник|Перейти в дневник)$/ });
-  await diary.waitFor({ state: 'visible' });
+  try { await diary.waitFor({ state: 'visible' }); } catch { throw Error('diary_entry_not_visible'); }
   stage('diary_navigation');
   const [schoolResponse] = await Promise.all([
-    page.waitForResponse(response => new URL(response.url()).origin === SCHOOL && new URL(response.url()).pathname === '/api/school' && response.request().method() === 'GET'),
-    diary.click(),
+    page.waitForResponse(response => new URL(response.url()).origin === SCHOOL && new URL(response.url()).pathname === '/api/school' && response.request().method() === 'GET')
+      .catch(() => { throw Error('school_response_missing'); }),
+    diary.click().catch(() => { throw Error('diary_entry_click_failed'); }),
   ]);
+  if (schoolResponse.status() === 403) throw Error('school_forbidden');
   if (schoolResponse.status() !== 200) throw Error('school_rejected');
   stage('school_identity');
-  const snapshot = await schoolResponse.json();
+  let snapshot;
+  try { snapshot = await schoolResponse.json(); } catch { throw Error('unreadable_school_response'); }
   if (!sameSchoolIdentity(snapshot.viewer, credentials.login)) throw Error('school_identity_mismatch');
   if (JSON.stringify(observed) !== JSON.stringify(['school_start', 'arthello_authorize', 'school_callback'])) throw Error('natural_redirect_chain_missing');
-  await page.locator('nav[aria-label="Основная навигация"]').first().waitFor({ state: 'visible' });
+  try {
+    await page.locator('nav[aria-label="Основная навигация"]').first().waitFor({ state: 'visible' });
+  } catch { throw Error('school_navigation_unavailable'); }
   if (new URL(page.url()).origin !== SCHOOL || await page.locator('input[type="password"]').count()) throw Error('school_diary_not_visible');
   stage('complete');
   return {

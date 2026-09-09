@@ -147,6 +147,157 @@ test('natural flow distinguishes employee failures without a second login or sen
   assert.equal(fixture.loginAttempts(), 1);
 });
 
+
+const laterStageReasons = {
+  education: ['education_response_missing', 'education_navigation_failed', 'education_forbidden', 'education_rejected', 'diary_entry_not_visible'],
+  diary_navigation: ['school_response_missing', 'diary_entry_click_failed', 'school_forbidden', 'school_rejected'],
+  school_identity: ['unreadable_school_response', 'school_identity_mismatch', 'natural_redirect_chain_missing', 'school_navigation_unavailable', 'school_diary_not_visible'],
+};
+
+test('later-stage diagnostics are exact, scoped tags and redact unknown or hostile errors', () => {
+  const throwingMessage = Object.defineProperty(new Error(), 'message', { get() { throw new Error('PRIVATE_MESSAGE'); } });
+  const throwingPrototype = new Proxy(new Error(), { getPrototypeOf() { throw new Error('PRIVATE_PROTOTYPE'); } });
+  const revoked = Proxy.revocable(new Error(), {});
+  revoked.revoke();
+  for (const [stage, reasons] of Object.entries(laterStageReasons)) {
+    for (const reason of reasons) {
+      const error = Object.assign(new Error(reason), { contact: 'fixture@example.invalid', stack: 'PRIVATE_STACK' });
+      assert.equal(browserFlow.safeFailureReason(stage, error), reason);
+      for (const other of Object.keys(laterStageReasons).filter(value => value !== stage)) {
+        assert.equal(browserFlow.safeFailureReason(other, error), 'browser_check_failed');
+      }
+      assert.equal(browserFlow.safeFailureReason('employee_access', error), 'employee_access_failed');
+    }
+    for (const error of [throwingMessage, throwingPrototype, revoked.proxy, null, undefined,
+      { message: reasons[0] }, reasons[0], new Error(reasons[0] + ' PRIVATE_PASSWORD'),
+      new Error('https://school.example.invalid/callback?code=PRIVATE_CALLBACK')]) {
+      assert.equal(browserFlow.safeFailureReason(stage, error), 'browser_check_failed');
+    }
+  }
+});
+
+function laterStagePage(options = {}) {
+  let requestListener, responseNumber = 0;
+  const actions = [];
+  const fail = boundary => { if (boundary && options.fail === boundary) throw new Error('PRIVATE_EXCEPTION_URL?code=PRIVATE_CALLBACK'); };
+  const response = (url, method, status, value, boundary) => ({
+    url: () => url, request: () => ({ method: () => method }), status: () => status,
+    json: async () => { fail(boundary); return value; },
+  });
+  const educationLocator = {
+    first() { return this; }, waitFor: async () => {}, click: async () => { actions.push('education_click'); fail('education_click'); },
+  };
+  const diary = {
+    waitFor: async () => { fail('diary_visible'); },
+    click: async () => {
+      actions.push('diary_click');
+      fail('diary_click');
+      for (const url of [
+        browserFlow.SCHOOL + '/auth/central/start',
+        browserFlow.ARTHELLO + '/api/school-sso/authorize?state=PRIVATE_STATE',
+        ...(options.missingChain ? [] : [browserFlow.SCHOOL + '/auth/central/callback?code=PRIVATE_CALLBACK']),
+      ]) requestListener({ isNavigationRequest: () => true, url: () => url });
+    },
+  };
+  return {
+    actions,
+    page: {
+      on(event, listener) { assert.equal(event, 'request'); requestListener = listener; },
+      goto: async () => { actions.push('open_login'); },
+      locator(selector) {
+        if (selector.startsWith('input[name=')) return { fill: async () => {} };
+        if (selector === 'aside[aria-label="Основная навигация"] a[href="#education"]') return educationLocator;
+        if (selector === 'aside a[href="#finance"]') return { count: async () => 0 };
+        if (selector === 'nav[aria-label="Основная навигация"]') return {
+          first() { return this; }, waitFor: async () => { fail('school_navigation'); },
+        };
+        assert.equal(selector, 'input[type="password"]');
+        return { count: async () => options.passwordVisible ? 1 : 0 };
+      },
+      getByRole(role, query) {
+        assert.equal(role, 'button');
+        if (query.name === 'Войти') return { click: async () => { actions.push('login_click'); } };
+        if (query.name.source === 'Разработчикам') return { first() { return this; }, isVisible: async () => false };
+        assert.equal(query.name.source, '^(Открыть дневник|Перейти в дневник)$');
+        return diary;
+      },
+      waitForResponse: async predicate => {
+        responseNumber++;
+        let result;
+        if (responseNumber === 1) {
+          result = response(browserFlow.ARTHELLO + '/api/auth/login', 'POST', 200, employee);
+        } else if (responseNumber === 2) {
+          fail('education_response');
+          result = response(browserFlow.ARTHELLO + '/api/education', 'GET', options.educationStatus ?? 200);
+        } else {
+          assert.equal(responseNumber, 3);
+          fail('school_response');
+          result = response(browserFlow.SCHOOL + '/api/school', 'GET', options.schoolStatus ?? 200,
+            { viewer: { role: 'teacher', email: options.wrongIdentity ? 'other@example.invalid' : 'fixture@example.invalid' } }, 'school_json');
+        }
+        assert.equal(predicate(result), true);
+        return result;
+      },
+      evaluate: async (callback, endpoint) => { assert.equal(endpoint, '/api/finance'); actions.push('denied_api'); return 403; },
+      url: () => options.wrongSchoolOrigin ? browserFlow.ARTHELLO : browserFlow.SCHOOL,
+    },
+  };
+}
+
+test('natural flow distinguishes Education, diary navigation and School identity boundaries without changing acceptance', async () => {
+  const cases = [
+    [{ fail: 'education_response' }, 'education', 'education_response_missing'],
+    [{ fail: 'education_click' }, 'education', 'education_navigation_failed'],
+    [{ educationStatus: 403 }, 'education', 'education_forbidden'],
+    [{ educationStatus: 500 }, 'education', 'education_rejected'],
+    [{ fail: 'diary_visible' }, 'education', 'diary_entry_not_visible'],
+    [{ fail: 'school_response' }, 'diary_navigation', 'school_response_missing'],
+    [{ fail: 'diary_click' }, 'diary_navigation', 'diary_entry_click_failed'],
+    [{ schoolStatus: 403 }, 'diary_navigation', 'school_forbidden'],
+    [{ schoolStatus: 500 }, 'diary_navigation', 'school_rejected'],
+    [{ fail: 'school_json' }, 'school_identity', 'unreadable_school_response'],
+    [{ wrongIdentity: true }, 'school_identity', 'school_identity_mismatch'],
+    [{ missingChain: true }, 'school_identity', 'natural_redirect_chain_missing'],
+    [{ fail: 'school_navigation' }, 'school_identity', 'school_navigation_unavailable'],
+    [{ wrongSchoolOrigin: true }, 'school_identity', 'school_diary_not_visible'],
+    [{ passwordVisible: true }, 'school_identity', 'school_diary_not_visible'],
+  ];
+  for (const [options, expectedStage, expected] of cases) {
+    const fixture = laterStagePage(options);
+    const stages = [];
+    await assert.rejects(browserFlow.naturalFlow(fixture.page, {
+      login: 'fixture@example.invalid', password: 'fixture-private-password',
+    }, stage => stages.push(stage)), error => {
+      assert.equal(stages.at(-1), expectedStage);
+      assert.equal(error.message, expected);
+      assert.equal(browserFlow.safeFailureReason(expectedStage, error), expected);
+      assert.equal(error.message.includes('PRIVATE'), false);
+      return true;
+    });
+    assert.equal(fixture.actions.filter(action => action === 'login_click').length, 1);
+    assert.equal(fixture.actions.filter(action => action === 'education_click').length, 1);
+    assert.equal(fixture.actions.filter(action => action === 'diary_click').length, expectedStage === 'education' ? 0 : 1);
+    assert.equal(stages.includes('complete'), false);
+  }
+});
+
+test('successful natural flow retains one login, one denied probe, both navigation clicks and all original proofs', async () => {
+  const fixture = laterStagePage();
+  const stages = [];
+  const result = await browserFlow.naturalFlow(fixture.page, {
+    login: 'fixture@example.invalid', password: 'fixture-private-password',
+  }, stage => stages.push(stage));
+  assert.deepEqual(stages, ['login_form', 'employee_access', 'education', 'diary_navigation', 'school_identity', 'complete']);
+  assert.deepEqual(fixture.actions, ['open_login', 'login_click', 'denied_api', 'education_click', 'diary_click']);
+  assert.deepEqual(result, {
+    result: 'pass', method: 'natural-browser-navigation', sessionInjected: false, callbackUrlConstructed: false,
+    employeeAccount: 'verified', educationAccess: 'verified', schoolIdentity: 'verified', deniedApi: 'verified', deniedModule: 'finance',
+    feedbackVisible: false,
+    verifiedSteps: ['open_education_in_authenticated_arthello', 'click_diary_entry', 'follow_natural_sso_redirects', 'authenticated_school_diary_visible'],
+  });
+});
+
+
 const retiredImage = {
   id: 'sha256:0763e7e6404c4ecf19b81bdcc236dd815a0210e9bb6b087adec279692cc7701c',
   source: '5385090d48f4dae29c314dff7ae974d854560940',
