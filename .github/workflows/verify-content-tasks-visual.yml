@@ -1,0 +1,144 @@
+name: Verify synthetic Content and Tasks visual
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/verify-content-tasks-visual.yml
+      - deploy/v52/visual/**
+      - deploy/browser/**
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/verify-content-tasks-visual.yml
+      - deploy/v52/visual/**
+      - deploy/browser/**
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: arthello-hosted-content-tasks-visual-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CHECKED_SOURCE_SHA }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Check scoped runner and hosted launcher
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$CHECKED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          node --test deploy/v52/visual/content-tasks-trigger.test.cjs
+          node --test deploy/v52/visual/content-tasks-scoped.test.cjs
+          bash -n deploy/v52/visual/run-content-tasks-hosted.sh
+  visual:
+    needs: source
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' && github.run_attempt == 1 &&
+        startsWith(github.event.head_commit.message, 'D089: hosted Content Tasks visual')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+          path: runner
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Verify accepted runtime pin and producing workflow
+        id: producer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C runner rev-parse HEAD)" = "$GITHUB_SHA"
+          pin=runner/deploy/v52/visual/accepted-runtime.json
+          jq -e 'keys == ["runtimeFingerprintSha256","sourceSha","status","treeSha","verificationRunId"] and
+            .status == "accepted" and
+            .sourceSha == "77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed" and
+            .treeSha == "ac3fcaac06acf33bf9ee32e438d0c040adb38fd7" and
+            (.verificationRunId | type == "string" and test("^[1-9][0-9]*$")) and
+            (.runtimeFingerprintSha256 | type == "string" and test("^[a-f0-9]{64}$"))' "$pin" >/dev/null
+          source_sha="$(jq -er .sourceSha "$pin")"
+          tree_sha="$(jq -er .treeSha "$pin")"
+          verification_run_id="$(jq -er .verificationRunId "$pin")"
+          fingerprint="$(jq -er .runtimeFingerprintSha256 "$pin")"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$verification_run_id" > "$RUNNER_TEMP/visual-producer.json"
+          jq -e --arg source "$source_sha" --arg run "$verification_run_id" --arg repo "$GITHUB_REPOSITORY" \
+            '.id == ($run | tonumber) and .head_sha == $source and .status == "completed" and
+             .conclusion == "success" and .event == "push" and .head_branch == "main" and
+             .path == ".github/workflows/verify-arthello-v52.yml" and
+             .repository.full_name == $repo and .head_repository.full_name == $repo and
+             (.run_attempt | type == "number" and . >= 1)' "$RUNNER_TEMP/visual-producer.json" >/dev/null
+          attempt="$(jq -er .run_attempt "$RUNNER_TEMP/visual-producer.json")"
+          gh api "repos/$GITHUB_REPOSITORY/git/commits/$source_sha" \
+            | jq -e --arg source "$source_sha" --arg tree "$tree_sha" '.sha == $source and .tree.sha == $tree' >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$verification_run_id/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/visual-artifacts.json"
+          artifact_id="$(jq -er --arg name "arthello-v52-verification-$verification_run_id" --arg source "$source_sha" \
+            '[.artifacts[] | select(.name == $name)] | select(length == 1) | .[0] |
+             select(.expired == false and .size_in_bytes > 0 and .workflow_run.head_sha == $source) | .id' \
+            "$RUNNER_TEMP/visual-artifacts.json")"
+          printf 'source_sha=%s\nartifact_id=%s\nverification_run_id=%s\n' "$source_sha" "$artifact_id" "$verification_run_id" >> "$GITHUB_OUTPUT"
+          printf 'TARGET_SOURCE_SHA=%s\nTARGET_TREE_SHA=%s\nVERIFICATION_RUN_ID=%s\nVERIFICATION_RUN_ATTEMPT=%s\nEXPECTED_RUNTIME_FINGERPRINT=%s\n' \
+            "$source_sha" "$tree_sha" "$verification_run_id" "$attempt" "$fingerprint" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ steps.producer.outputs.source_sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+          path: source
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ steps.producer.outputs.artifact_id }}
+          run-id: ${{ steps.producer.outputs.verification_run_id }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/visual-image-artifact
+      - name: Run selected existing browser checks against a new synthetic database
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          corepack enable
+          mkdir "$RUNNER_TEMP/visual-output"
+          bash runner/deploy/v52/visual/run-content-tasks-hosted.sh \
+            "$GITHUB_WORKSPACE/source" "$RUNNER_TEMP/visual-image-artifact" "$RUNNER_TEMP/visual-output"
+      - name: Retain only synthetic screenshots and bounded evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: arthello-synthetic-content-tasks-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/visual-output/screens/*.png
+            ${{ runner.temp }}/visual-output/screens/manifest.json
+            ${{ runner.temp }}/visual-output/screens/scoped-result.json
+            ${{ runner.temp }}/visual-output/evidence.json
+          retention-days: 14
+          if-no-files-found: warn

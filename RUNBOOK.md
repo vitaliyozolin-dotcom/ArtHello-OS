@@ -267,3 +267,12 @@ D087run34328837388/job102392362747 получил valid incomplete_or_issues sna
 Новый schedule/retained-job metadata section читается только из сохранённого canonical D1; dates/status/counts не содержат IDs/credentials/денежных значений. Различать actual bank_statement_imports status и retained-job providerStatus:not_stored; scopeMatch:unverified не трактовать как current-scope. Setup/nextAt/lease и latestsync timestamp помогают определить, чего ждёт уже установленный scheduler. Не выполнять банковские запросы или resync в этом read-only job.
 
 Запуск — прежний owner-controlled merge с D075: read-only production data prefix после exactCI; source checkout диагностики отличается от acceptedlive77f. Environment/locks/mounts/deadlines/Quality остаются прежними. После terminal outcome сохранить весь валидный ограниченный отчёт, фиксированный READONLY_RESULT, marker финальной сверки и exitcode. Приincomplete продолжать по фактам, приblocked сначала выяснять конкретное ограничение. Main не менять во время protected observation. См.DECISIONS D088; visuals вынесены в отдельное D089 и не смешаны с этим изменением.
+
+
+## D089 — Визуальная проверка Content/Tasks принятого образа
+
+После завершения D088 protected observation обновить main reference. Review/merge новых семи source/workflow файлов и append-only записей; merge title начинается D089: hosted Content Tasks visual. Тогда existing source job и first-attempt owner/main push запускают hosted visual job. Ручной workflow_dispatch остаётся доступен owner наmain. Не менять main во время банковского protected job.
+
+Runtime отдельно закреплён за accepted R12 source77f26ec9/treeac3fcaac/run34326274447; runner checkout может быть более новым. Workflow перепроверяет producer/artifact, launcher — inner archive/source hashes/fingerprint. Исполнять только на GitHub-hosted runner с новым пустым volume и синтетической учёткой. prepare-visual-fixture.mjs удаляет auth records и никогда не применяется к рабочим данным. Ожидаются14 PNG+manifest+scoped-result+evidence. Частичные картинки при failure не являются PASS.
+
+Проверить реальное отображение, отсутствие обрезки/переполнения и Task «Задача №801» в двух размерах. Результат относится к принятому image snapshot и синтетическим данным. Form persistence, backend content generation, delivery/права и банковская приёмка остаются отдельными доказательствами. Подробные пути, artifact checksum и ограничения — deploy/v52/visual/CONTENT_TASKS_HOSTED.md и DECISIONS D089.

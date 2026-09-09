@@ -767,3 +767,12 @@ Quality не изменяется; новый отдельный exact-source ho
 Маршрут: reviewed exact-source PR/CI → прежний D075 protected owner/main workflow → canonical D1 snapshot + fixed schedule/retained-job metadata → валидация boundedJSON → повторное сравнение consumers → точный complete/incomplete/blocked outcome. Сохранитьexit2 при замечаниях, не путать его с timeout. Метрика успеха этого этапа — проверяемый законченный отчёт; бизнес-метрика четырёх счетов/операций/реестра/ДДС требует дальнейших доказательств.
 
 AI не читает/расшифровывает credentials, не выводит account/provider IDs, суммы или произвольныеJSON, не вызывает банк/resync/SQLwrites. Metadataunknown остаютсяunknown. Стоп — drift, невалидный или oversized output, timeout либо неполная итоговая сверка. Отсутствующие или неизвестные таблицы остаются замечаниями в валидном отчёте. Прежние masks, UID/read-only/none-network/locks и own-helpercleanup сохраняются. Source review, реальныетесты иactualprotectedreport обязательны. Детальныйscope/AI/stopcontract:DECISIONS D088. Визуальнаяприёмка D089 и оставшиесябизнес-пункты отдельны.
+
+
+## D089 — Проверка интерфейса Content/Tasks (2026-09-09)
+
+Цель исходного поручения — проверить дизайн контента и задач, включая видимый номер задачи. Вход: фактически принятый R12 source77f26ec9/treeac3fcaac, immutable producer artifact и прежние синтетические fixtures. Владелец — Виталий, исполнитель — AI по действующему поручению. Выход —14 реальных hosted PNG, manifest и ограниченное evidence по двум viewport, с отдельным статусом завершения.
+
+Маршрут: owner-approved exact-source PR → source tests → первый owner/main push с D089 prefix → GitHub-hosted isolated runtime → sandboxed Chromium → проверка полного результата. Ручной owner/main dispatch сохраняется. Права только contents/actions read, новые собственные данные и ресурсы; в production не исполняется. Frozen runtime/harness/Quality/банковская диагностика сохраняются. Current main не менять до terminal D088.
+
+AI проверяет provenance, границы fixture и результаты, не подменяет ошибки рабочими данными или иным образом. Стоп: drift, неподтверждённая пустота volume, sandbox/cleanup failure, неполные evidence. Критерий — actual14PNG иPASS ограниченного сценария;12adapter+4trigger tests подтверждают подготовку. Задачи/контент сохранять и доставлять этот сценарий не проверяет; исходные банковские, интеграционные, permission и backup пункты учитываются отдельно. Полные scope/AI/stop conditions — DECISIONS D089.
