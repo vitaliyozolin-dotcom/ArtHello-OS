@@ -1,0 +1,388 @@
+{
+  "format": 1,
+  "basePath": ".github/workflows/deploy-arthello-recovery-r12-20260909.yml",
+  "baseSha256": "70466a2199d72611f5b3ee10f580163c02695496370db5159defdb2740db7798",
+  "groups": [
+    {
+      "name": "common",
+      "operations": [
+        {
+          "kind": "replace",
+          "label": "common-proposal_header",
+          "count": 1,
+          "before": "# D-086: fresh R12 identity; preserved acceptance and bounded recoverable R10 image retirement.\n# Internal d080 helper names and state markers are the preserved candidate protocol.\n# D059/D063/D064/D065/D066/D067 controllers remain unchanged; failed repairs are not replayed.\n# Read-only School verification and pinned old-live 403 precede candidate acceptance; no School changes.\n",
+          "after": "# NONPUBLISHABLE_R13_COMMON_ONLY: release pins and separate integrations are unresolved.\n# Tentative D096 identity; canonical D076 browser bundle remains unchanged.\n# History, accepted-live/School, and backup/controller fragments are not integrated.\n# The local preview disables both deployment jobs and cannot prove release readiness.\n"
+        },
+        {
+          "kind": "replace",
+          "label": "common-workflow_identity",
+          "count": 1,
+          "before": "name: Deploy ArtHello recovery R12 D086\n",
+          "after": "name: Deploy ArtHello recovery R13 D096\n"
+        },
+        {
+          "kind": "replace",
+          "label": "common-unassigned_head",
+          "count": 3,
+          "before": "codex/school-arthello-recovery-r12-20260909",
+          "after": "__R13_RELEASE_HEAD_NONPUBLISHABLE_UNASSIGNED__"
+        },
+        {
+          "kind": "replace",
+          "label": "common-unassigned_pr_env",
+          "count": 1,
+          "before": "  EXPECTED_RELEASE_PR: '381'\n",
+          "after": "  EXPECTED_RELEASE_PR: '__R13_RELEASE_PR_NONPUBLISHABLE_UNASSIGNED__'\n"
+        },
+        {
+          "kind": "replace",
+          "label": "common-unassigned_pr_conditions",
+          "count": 2,
+          "before": "fromJSON('381')",
+          "after": "fromJSON('__R13_RELEASE_PR_NONPUBLISHABLE_UNASSIGNED__')"
+        },
+        {
+          "kind": "replace",
+          "label": "common-unassigned_parent",
+          "count": 1,
+          "before": "  PREVIOUS_RELEASE_SHA: 'e579a20a2a1a40fab489340511f8c35dc6929081'\n",
+          "after": "  PREVIOUS_RELEASE_SHA: '__R13_PARENT_SHA_NONPUBLISHABLE_UNASSIGNED__'\n"
+        },
+        {
+          "kind": "replace",
+          "label": "common-tentative_prefix",
+          "count": 1,
+          "before": "startsWith(github.event.workflow_run.head_commit.message, 'D086: guarded R12')",
+          "after": "startsWith(github.event.workflow_run.head_commit.message, 'D096: guarded R13')"
+        },
+        {
+          "kind": "replace",
+          "label": "common-replace_r9_r10_retirement_steps",
+          "count": 1,
+          "before": "    - name: Retire only the exact unused R9 browser image under D084\n      if: env.R9_RESUME_CANDIDATE != '1'\n      env:\n        GH_TOKEN: ${{ github.token }}\n      shell: bash\n      run: |\n        set -Eeuo pipefail\n        test \"$(git rev-parse HEAD)\" = \"$CHECKED_SOURCE_SHA\"\n        \"$PRECHECK_NODE\" deploy/browser/retire-r9-image.mjs\n    - name: Retire only unused recoverable R10 images for import capacity under D086\n      if: env.R9_RESUME_CANDIDATE != '1'\n      env:\n        GH_TOKEN: ${{ github.token }}\n        ARCHIVE_BYTES: ${{ needs.bundle.outputs.archive_bytes }}\n        EXPANDED_BYTES: ${{ needs.bundle.outputs.expanded_bytes }}\n      shell: bash\n      run: |\n        set -Eeuo pipefail\n        test \"$(git rev-parse HEAD)\" = \"$CHECKED_SOURCE_SHA\"\n        \"$PRECHECK_NODE\" deploy/browser/retire-r10-images.mjs\n",
+          "after": "    - name: Retire only the exact unused accepted R12 browser image\n      if: env.R9_RESUME_CANDIDATE != '1'\n      env:\n        GH_TOKEN: ${{ github.token }}\n        ARCHIVE_BYTES: ${{ needs.bundle.outputs.archive_bytes }}\n        EXPANDED_BYTES: ${{ needs.bundle.outputs.expanded_bytes }}\n      shell: bash\n      run: |\n        set -Eeuo pipefail\n        test \"$(git rev-parse HEAD)\" = \"$CHECKED_SOURCE_SHA\"\n        \"$PRECHECK_NODE\" deploy/browser/retire-r12-browser.mjs\n"
+        },
+        {
+          "kind": "replace",
+          "label": "common-remove_opportunistic_app_tag_sweep_2073_2089",
+          "count": 1,
+          "before": "        while IFS='|' read -r repository tag image_id; do\n          case \"$repository\" in\n            arthello-direct|arthello-v52-verify) ;;\n            *) continue ;;\n          esac\n          test \"$tag\" != '<none>' || continue\n          ref=\"$repository:$tag\"\n          case \"$ref\" in\n            \"$verified_image\"|\"$image\") continue ;;\n          esac\n          if [ -n \"$(docker ps -aq --filter \"ancestor=$image_id\")\" ]; then\n            printf 'ARTHELLO_IMAGE_PRESERVED ref=%s reason=container-reference\\n' \"$ref\"\n            continue\n          fi\n          docker image rm \"$ref\"\n          printf 'ARTHELLO_STALE_IMAGE_REMOVED ref=%s\\n' \"$ref\"\n        done < <(docker image ls --no-trunc --format '{{.Repository}}|{{.Tag}}|{{.ID}}')\n",
+          "after": ""
+        },
+        {
+          "kind": "replace",
+          "label": "common-remove_opportunistic_stale_container_sweep_3844_3850",
+          "count": 1,
+          "before": "        while IFS= read -r stale_id; do\n          [ -n \"$stale_id\" ] || continue\n          [ \"$stale_id\" = \"$live_id\" ] && continue\n          [ \"$stale_id\" = \"$candidate_id\" ] && continue\n          docker rm \"$stale_id\" >/dev/null 2>&1 || true\n        done < <(docker ps -aq --filter 'name=^/arthello-direct-' --filter status=exited)\n\n",
+          "after": ""
+        },
+        {
+          "kind": "replace",
+          "label": "common-r13_gate_variable",
+          "count": 1,
+          "before": "        r12_run=\"\"\n",
+          "after": "        r12_run=\"\"\n        r13_run=\"\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "common-r13_gate_wait",
+          "count": 1,
+          "before": "          if [ -n \"$quality_run\" ] && [ -n \"$verify_run\" ] && [ -n \"$proof_run\" ] && [ -n \"$r12_run\" ]; then\n",
+          "after": "          if [ -z \"$r13_run\" ]; then\n            r13_run=\"$(workflow_success verify-arthello-r13.yml 'Verify ArtHello R13 continuation' 'r13-candidate-tests' || true)\"\n          fi\n          if [ -n \"$quality_run\" ] && [ -n \"$verify_run\" ] && [ -n \"$proof_run\" ] && [ -n \"$r12_run\" ] && [ -n \"$r13_run\" ]; then\n"
+        },
+        {
+          "kind": "replace",
+          "label": "common-r13_gate_required",
+          "count": 1,
+          "before": "        test -n \"$r12_run\"\n",
+          "after": "        test -n \"$r12_run\"\n        test -n \"$r13_run\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "common-r13_gate_output",
+          "count": 1,
+          "before": "        printf 'r12_run=%s\\n' \"$r12_run\" >> \"$GITHUB_OUTPUT\"\n",
+          "after": "        printf 'r12_run=%s\\n' \"$r12_run\" >> \"$GITHUB_OUTPUT\"\n        printf 'r13_run=%s\\n' \"$r13_run\" >> \"$GITHUB_OUTPUT\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "common-r13_summary_environment",
+          "count": 1,
+          "before": "        R12_RUN: ${{ steps.provenance.outputs.r12_run }}\n",
+          "after": "        R12_RUN: ${{ steps.provenance.outputs.r12_run }}\n        R13_RUN: ${{ steps.provenance.outputs.r13_run }}\n"
+        },
+        {
+          "kind": "replace",
+          "label": "common-r13_summary_title",
+          "count": 1,
+          "before": "          echo '## ArtHello R12 production deployment'\n",
+          "after": "          echo '## ArtHello R13 production deployment'\n"
+        },
+        {
+          "kind": "replace",
+          "label": "common-r13_summary_gate",
+          "count": 1,
+          "before": "          echo \"- R12 regression run: $R12_RUN\"\n",
+          "after": "          echo \"- R12 regression run: $R12_RUN\"\n          echo \"- R13 regression run: $R13_RUN\"\n"
+        }
+      ]
+    },
+    {
+      "name": "backup",
+      "operations": [
+        {
+          "kind": "replace",
+          "label": "backup-new-adapter-d083-candidate-state.py",
+          "count": 3,
+          "before": "d083-candidate-state.py",
+          "after": "r13-candidate-state.py"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-new-adapter-d083-resume-candidate.py",
+          "count": 5,
+          "before": "d083-resume-candidate.py",
+          "after": "r13-resume-candidate.py"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-new-adapter-d083-public-audit.py",
+          "count": 1,
+          "before": "d083-public-audit.py",
+          "after": "r13-public-audit.py"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-fixed-adopted-names",
+          "count": 1,
+          "before": "        backup_worker=\"arthello-v52-backup-worker-$run_key\"\n        backup_volume=\"arthello-v52-backups-$run_key\"\n        backup_control_volume=\"arthello-v52-backup-control-$run_key\"\n",
+          "after": "        backup_resource_attempt=\"$GITHUB_RUN_ATTEMPT\"\n        backup_worker=\"arthello-v52-backup-worker-34326582961-1\"\n        backup_volume=\"arthello-v52-backups-34326582961-1\"\n        backup_control_volume=\"arthello-v52-backup-control-34326582961-1\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-new-adoption-state-path",
+          "count": 1,
+          "before": "        backup_runtime_state_dir=\"$secret_dir/release-state/backup-runtime-$run_key\"\n",
+          "after": "        backup_runtime_state_dir=\"$secret_dir/release-state/backup-adoption-r13-$run_key\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-seal-and-reader-intent-flags",
+          "count": 1,
+          "before": "        backup_runtime_cleanup_failed=0\n",
+          "after": "        backup_runtime_cleanup_failed=0\n        backup_adoption_seal_attempted=0\n        backup_reader_quiesce_started=0\n        backup_adoption_digest=\"\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-fixed-adoption-functions-and-conservative-boundary",
+          "count": 1,
+          "before": "        initialize_backup_runtime_state() {\n          python3 -I - \"$secret_dir\" \"$run_key\" <<'D069_BACKUP_STATE_DIRECTORY'\n        import json, os, re, stat, sys\n        descriptors = []\n        try:\n            secret_path, run_key = sys.argv[1:]\n            if not os.path.isabs(secret_path) or not re.fullmatch(r'[1-9][0-9]{0,19}-[1-9][0-9]{0,5}', run_key):\n                raise ValueError('identity')\n            parts = secret_path.split('/')[1:]\n            if not parts or any(part in ('', '.', '..') for part in parts):\n                raise ValueError('path')\n            uid = os.geteuid()\n            flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC\n            parent = os.open('/', flags)\n            descriptors.append(parent)\n            for part in parts:\n                child = os.open(part, flags, dir_fd=parent)\n                descriptors.append(child)\n                info = os.fstat(child)\n                if info.st_uid not in (0, uid) or stat.S_IMODE(info.st_mode) & 0o022:\n                    raise ValueError('ancestor')\n                parent = child\n            info = os.fstat(parent)\n            if info.st_uid != uid or stat.S_IMODE(info.st_mode) != 0o700:\n                raise ValueError('secret-directory')\n            try:\n                os.mkdir('release-state', 0o700, dir_fd=parent)\n                os.fsync(parent)\n            except FileExistsError:\n                pass\n            release = os.open('release-state', flags, dir_fd=parent)\n            descriptors.append(release)\n            info = os.fstat(release)\n            if info.st_uid != uid or stat.S_IMODE(info.st_mode) != 0o700:\n                raise ValueError('release-directory')\n            name = 'backup-runtime-' + run_key\n            os.mkdir(name, 0o700, dir_fd=release)\n            os.fsync(release)\n            state = os.open(name, flags, dir_fd=release)\n            descriptors.append(state)\n            info = os.fstat(state)\n            if info.st_uid != uid or stat.S_IMODE(info.st_mode) != 0o700:\n                raise ValueError('state-directory')\n            os.fsync(state)\n            print(json.dumps({'schemaVersion': 1, 'state': 'created', 'executionUid': uid, 'mode': '0700'}))\n        except (OSError, ValueError):\n            print(json.dumps({'state': 'refused', 'code': 'BACKUP_STATE_DIRECTORY_UNTRUSTED_OR_ALREADY_EXISTS'}), file=sys.stderr)\n            raise SystemExit(1)\n        finally:\n            for descriptor in reversed(descriptors):\n                os.close(descriptor)\n        D069_BACKUP_STATE_DIRECTORY\n        }\n\n        backup_runtime() {\n          python3 -I .github/scripts/r7-backup-runtime.py \"$1\" \\\n            --image-id \"$immutable_image_id\" --release-sha \"$RELEASE_SHA\" --tree-sha \"$EXPECTED_TREE\" \\\n            --run-id \"$GITHUB_RUN_ID\" --attempt \"$GITHUB_RUN_ATTEMPT\" \\\n            --source-relative \"$active_d1_relative_path\" --state-file \"$backup_runtime_state\"\n        }\n\n        cleanup_backup_runtime() {\n          if [ \"$backup_runtime_started\" -eq 1 ]; then\n            if backup_runtime cleanup; then\n              backup_runtime_started=0\n            else\n              backup_runtime_cleanup_failed=1\n              printf 'ARTHELLO_BACKUP_RUNTIME_CLEANUP=BLOCKED: preserve owned-resource evidence for recovery\\n' >&2\n              return 1\n            fi\n          fi\n        }\n\n",
+          "after": "        backup_runtime() {\n          python3 -I .github/scripts/r13-backup-adoption.py \"$1\" \\\n            --image-id \"$immutable_image_id\" --release-sha \"$RELEASE_SHA\" --tree-sha \"$EXPECTED_TREE\" \\\n            --run-id \"$GITHUB_RUN_ID\" --attempt \"$backup_resource_attempt\"\n        }\n\n        backup_controller() {\n          python3 -I .github/scripts/r13-backup-controller.py \"$@\" \\\n            --image-id \"$immutable_image_id\" --release-sha \"$RELEASE_SHA\" --tree-sha \"$EXPECTED_TREE\" \\\n            --run-id \"$GITHUB_RUN_ID\" --attempt \"$backup_resource_attempt\"\n        }\n\n        backup_preservation_boundary() {\n          local boundary\n          # Intent precedes seal: a failed reply can follow a committed durable seal.\n          if [ \"$backup_adoption_seal_attempted\" -eq 1 ]; then return 0; fi\n          if ! boundary=\"$(backup_controller boundary)\"; then return 0; fi\n          if jq -e '.state == \"open\"' <<<\"$boundary\" >/dev/null 2>&1; then return 1; fi\n          return 0\n        }\n\n        assert_backup_consumers() {\n          backup_controller consumers --phase \"$1\" >/dev/null\n        }\n\n        cleanup_backup_runtime() {\n          if [ \"$backup_runtime_started\" -eq 1 ]; then\n            if backup_preservation_boundary; then\n              printf 'ARTHELLO_R13_BACKUP_CLEANUP=PRESERVED_AFTER_SEAL_OR_AMBIGUITY\\n' >&2\n              return 1\n            fi\n            if backup_runtime cleanup; then\n              backup_runtime_started=0\n            else\n              backup_runtime_cleanup_failed=1\n              printf 'ARTHELLO_BACKUP_RUNTIME_CLEANUP=BLOCKED: preserve owned-resource evidence for recovery\\n' >&2\n              return 1\n            fi\n          fi\n        }\n\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-preserve-work-after-seal",
+          "count": 1,
+          "before": "          if [ \"$candidate_auth_started\" -eq 0 ] && require_safe_work_path; then rm -rf -- \"$work\"; fi\n",
+          "after": "          if [ \"$candidate_auth_started\" -eq 0 ] && [ \"$backup_runtime_cleanup_failed\" -eq 0 ] && [ \"${rollback_failed:-0}\" -eq 0 ] && ! backup_preservation_boundary && require_safe_work_path; then rm -rf -- \"$work\"; fi\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-durable-or-potential-seal-stops-rollback",
+          "count": 1,
+          "before": "          if [ \"$public_commit_started\" -eq 1 ] || [ \"$candidate_auth_started\" -eq 1 ]; then\n",
+          "after": "          if [ \"$public_commit_started\" -eq 1 ] || [ \"$candidate_auth_started\" -eq 1 ] || backup_preservation_boundary; then\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-repair-only-after-candidate-boundary",
+          "count": 1,
+          "before": "            if [ \"$public_commit_started\" -eq 0 ]; then\n              python3 -I .github/scripts/r13-resume-candidate.py --repair-maintenance \\\n",
+          "after": "            if [ \"$public_commit_started\" -eq 0 ] && [ \"$candidate_auth_started\" -eq 1 ]; then\n              python3 -I .github/scripts/r13-resume-candidate.py --repair-maintenance \\\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-truthful-preservation-reason",
+          "count": 1,
+          "before": "            printf 'ARTHELLO_POST_AUTH_RECOVERY_REQUIRED=1 state=%s diagnostics=%s\\n' \\\n              \"$candidate_state_file\" \"$work\" >&2\n",
+          "after": "            if [ \"$public_commit_started\" -eq 1 ] || [ \"$candidate_auth_started\" -eq 1 ]; then\n              printf 'ARTHELLO_POST_AUTH_RECOVERY_REQUIRED=1 state=%s diagnostics=%s\\n' \\\n                \"$candidate_state_file\" \"$work\" >&2\n            else\n              printf 'ARTHELLO_R13_BACKUP_BOUNDARY_RECOVERY_REQUIRED=1 state=%s diagnostics=%s\\n' \\\n                \"$backup_runtime_state\" \"$work\" >&2\n            fi\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-quiesce-verify-copyback-restore",
+          "count": 1,
+          "before": "            # Stop the read-only backup consumer before any pre-public database restore.\n            # A failed containment proof keeps the current database and evidence intact.\n            if ! cleanup_backup_runtime; then\n              candidate_contained=0\n              rollback_failed=1\n            fi\n\n            if [ \"$live_data_modified\" -eq 1 ]; then\n              if [ \"$candidate_contained\" -ne 1 ] || [ \"$backup_ready\" -ne 1 ] || ! volume_exists \"$rollback_volume\"; then\n                rollback_failed=1\n              else\n                copy_volume \"$rollback_volume\" \"$DATA_VOLUME\" || rollback_failed=1\n                restored_dir=\"$work/restored\"\n                snapshot_volume \"$DATA_VOLUME\" \"$restored_dir\" || rollback_failed=1\n                if [ \"$rollback_failed\" -eq 0 ]; then\n                  content_manifest \"$restored_dir\" \"$work/restored.sha256\" || rollback_failed=1\n                  cmp -s \"$work/rollback.sha256\" \"$work/restored.sha256\" || rollback_failed=1\n                  python3 \"$inventory_script\" \"$restored_dir\" >/dev/null || rollback_failed=1\n                fi\n              fi\n            fi\n\n",
+          "after": "            # The accepted reader/history is adopted, never a cleanup target.\n            # Only a fresh pre-auth snapshot may be copied back, with all consumers stopped.\n            if [ \"$live_data_modified\" -eq 1 ]; then\n              if [ \"$candidate_contained\" -ne 1 ] || [ \"$backup_ready\" -ne 1 ] || ! volume_exists \"$rollback_volume\"; then\n                rollback_failed=1\n              else\n                backup_reader_quiesce_started=1\n                if ! assert_backup_consumers stopped; then\n                  rollback_failed=1\n                elif ! backup_runtime quiesce; then\n                  rollback_failed=1\n                elif ! backup_runtime verify-copyback; then\n                  rollback_failed=1\n                elif ! assert_backup_consumers copyback; then\n                  rollback_failed=1\n                elif ! copy_volume \"$rollback_volume\" \"$DATA_VOLUME\"; then\n                  rollback_failed=1\n                else\n                  restored_dir=\"$work/restored\"\n                  snapshot_volume \"$DATA_VOLUME\" \"$restored_dir\" || rollback_failed=1\n                  if [ \"$rollback_failed\" -eq 0 ]; then\n                    content_manifest \"$restored_dir\" \"$work/restored.sha256\" || rollback_failed=1\n                    cmp -s \"$work/rollback.sha256\" \"$work/restored.sha256\" || rollback_failed=1\n                    python3 \"$inventory_script\" \"$restored_dir\" >/dev/null || rollback_failed=1\n                  fi\n                fi\n              fi\n            fi\n            # Replay a durable quiesce intent even when stop/copy verification failed.\n            # Restore proves the original restart policy and actual accepted-worker health.\n            if [ \"$backup_reader_quiesce_started\" -eq 1 ]; then\n              if backup_runtime restore; then\n                backup_reader_quiesce_started=0\n              else\n                rollback_failed=1\n              fi\n            fi\n\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-retained-resource-attempt",
+          "count": 1,
+          "before": "          original_attempt=\"$(jq -er '.context.runAttempt' \"$candidate_state_file\")\"\n          run_key=\"$GITHUB_RUN_ID-$original_attempt\"\n",
+          "after": "          original_attempt=\"$(jq -er '.context.runAttempt' \"$candidate_state_file\")\"\n          backup_resource_attempt=\"$original_attempt\"\n          backup_runtime_state_dir=\"$(dirname \"$backup_runtime_state\")\"\n          backup_adoption_seal_attempted=1\n          run_key=\"$GITHUB_RUN_ID-$original_attempt\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-canonical-consumers-before-any-copy",
+          "count": 1,
+          "before": "        assert_active_d1_file_descriptors \"$live_id\" live\n",
+          "after": "        assert_active_d1_file_descriptors \"$live_id\" live\n        assert_backup_consumers live\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-paused-live-copy-consumer-proof",
+          "count": 1,
+          "before": "        require_current_main_release\n        docker pause \"$live_id\" >/dev/null\n        live_paused=1\n        copy_volume \"$DATA_VOLUME\" \"$clone_volume\"\n",
+          "after": "        require_current_main_release\n        assert_backup_consumers live\n        docker pause \"$live_id\" >/dev/null\n        live_paused=1\n        assert_backup_consumers live-paused\n        copy_volume \"$DATA_VOLUME\" \"$clone_volume\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-adoption-prepare-receipt",
+          "count": 1,
+          "before": "        initialize_backup_runtime_state\n        backup_runtime_started=1\n        backup_runtime prepare | tee \"$work/backup-runtime-ready.json\"\n        jq -e --arg release \"$RELEASE_SHA\" --arg image \"$immutable_image_id\" --arg tree \"$EXPECTED_TREE\" \\\n          --arg run \"$GITHUB_RUN_ID\" --arg attempt \"$GITHUB_RUN_ATTEMPT\" --arg source \"$DATA_VOLUME\" \\\n          --arg source_hash \"$(printf '%s' \"$active_d1_relative_path\" | sha256sum | cut -d ' ' -f 1)\" \\\n          --arg worker \"$backup_worker\" --arg backups \"$backup_volume\" \\\n          --arg control \"$backup_control_volume\" --arg activation \"$bank_activation_volume\" '\n          .schemaVersion == 1 and .state == \"verified\" and .releaseSha == $release and .imageId == $image and\n          .treeSha == $tree and .runId == $run and .attempt == $attempt and .sourceVolume == $source and\n          .sourceRelativeSha256 == $source_hash and\n          .worker.name == $worker and (.worker.id | test(\"^[a-f0-9]{64}$\")) and\n          .volumes.backups.name == $backups and .volumes.control.name == $control and\n          .volumes.activation.name == $activation\n        ' \"$work/backup-runtime-ready.json\" >/dev/null\n",
+          "after": "        # The helper creates only its fresh activation state/volume and transient seed.\n        backup_runtime_started=1\n        backup_runtime prepare | tee \"$work/backup-runtime-ready.json\"\n        jq -e --arg release \"$RELEASE_SHA\" --arg worker \"$backup_worker\" \\\n          --arg worker_id \"570d3fb2f96dfa7a08d0a98fbeda0d208f08c0805efcc444bc958fbabf515052\" \\\n          --arg backups \"$backup_volume\" --arg control \"$backup_control_volume\" \\\n          --arg activation \"$bank_activation_volume\" '\n          .schemaVersion == 13 and .state == \"adopted\" and .releaseSha == $release and\n          .worker.name == $worker and .worker.id == $worker_id and .worker.ownership == \"adopted\" and\n          .volumes.backups.name == $backups and .volumes.backups.ownership == \"adopted\" and\n          .volumes.control.name == $control and .volumes.control.ownership == \"adopted\" and\n          .volumes.activation.name == $activation and .volumes.activation.ownership == \"owned\" and\n          (.backup.historyCount | type == \"number\") and .backup.historyCount >= 1\n        ' \"$work/backup-runtime-ready.json\" >/dev/null\n        assert_backup_consumers live\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-stopped-live-fresh-snapshot-consumer-proof",
+          "count": 1,
+          "before": "        copy_volume \"$DATA_VOLUME\" \"$rollback_volume\"\n",
+          "after": "        assert_backup_consumers stopped\n        copy_volume \"$DATA_VOLUME\" \"$rollback_volume\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-candidate-paused-snapshot-consumer-proof",
+          "count": 1,
+          "before": "        assert_active_d1_file_descriptors \"$candidate\" candidate\n        docker pause \"$candidate\" >/dev/null\n        candidate_paused=1\n        snapshot_volume \"$DATA_VOLUME\" \"$work/live-after\"\n",
+          "after": "        assert_active_d1_file_descriptors \"$candidate\" candidate\n        assert_backup_consumers candidate\n        docker pause \"$candidate\" >/dev/null\n        candidate_paused=1\n        assert_backup_consumers candidate-paused\n        snapshot_volume \"$DATA_VOLUME\" \"$work/live-after\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-seal-before-candidate-context-and-auth",
+          "count": 1,
+          "before": "        D080_RETAIN_REPAIR\n        python3 -I - \"$work/candidate-context.json\" \\\n",
+          "after": "        D080_RETAIN_REPAIR\n        require_current_main_release\n        assert_backup_consumers candidate\n        backup_adoption_seal_attempted=1\n        backup_runtime seal | tee \"$work/backup-adoption-sealed.json\"\n        sealed_adoption=\"$(backup_controller digest)\"\n        backup_adoption_digest=\"$(jq -er 'select(.state == \"sealed\") | .backupAdoptionStateSha256' <<<\"$sealed_adoption\")\"\n        [[ \"$backup_adoption_digest\" =~ ^[a-f0-9]{64}$ ]]\n        python3 -I - \"$work/candidate-context.json\" \\\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-context-adoption-digest-argument",
+          "count": 1,
+          "before": "          \"$backup_runtime_state\" <<'D080_PRIVATE_CONTEXT'\n",
+          "after": "          \"$backup_runtime_state\" \\\n          \"$backup_adoption_digest\" <<'D080_PRIVATE_CONTEXT'\n"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-context-adoption-digest-field",
+          "count": 1,
+          "before": "'schoolRepairConfigSha256', 'schoolSha', 'backupRuntimeStateFile']",
+          "after": "'schoolRepairConfigSha256', 'schoolSha', 'backupRuntimeStateFile', 'backupAdoptionStateSha256']"
+        },
+        {
+          "kind": "replace",
+          "label": "backup-explicit-canonical-state-root",
+          "count": 1,
+          "before": "        candidate_state_file=\"$secret_dir/release-state/candidate-acceptance-$RELEASE_SHA.json\"\n",
+          "after": "        candidate_state_file=\"$secret_dir/release-state/candidate-acceptance-$RELEASE_SHA.json\"\n        test \"$secret_dir/release-state\" = \"$HOME/.config/arthello/release-state\"\n        test \"$durable_work_root\" = \"$HOME/.config/arthello/release-state/candidate-work\"\n"
+        }
+      ]
+    },
+    {
+      "name": "history-live",
+      "operations": [
+        {
+          "kind": "history",
+          "label": "history-live-trusted_precheckout_r13_history",
+          "start": "        python3 -I - <<'D086_REPLAY'\n",
+          "end": "        D086_REPLAY\n",
+          "beforeSha256": "f12c4134c6564b8a87be87d14cae61c790fb57eb9ac6e21bbf0407f911e54512",
+          "afterTemplate": "        current_main_json=\"$(curl --fail-with-body --silent --show-error --max-time 30 \\\n          \"${headers[@]}\" \"$api/git/ref/heads/main\")\"\n        jq -e --arg sha \"$RELEASE_SHA\" '.ref == \"refs/heads/main\" and .object.type == \"commit\" and .object.sha == $sha' \\\n          <<<\"$current_main_json\" >/dev/null\n        history_receipt=\"$(python3 -I - <<'R13_HISTORY'\n        import hashlib\n        HELPER_LITERAL = __R13_HISTORY_BYTES_REPR__\n        FROZEN_LITERAL = __D080_FUNCTION_BYTES_REPR__\n        if hashlib.sha256(HELPER_LITERAL).hexdigest() != \"e86b8183ac8a32e56fc8335bd5fd2bd47b5573bbd71c8956576dbb28178d9e8c\":\n            raise SystemExit(\"ARTHELLO_R13_INLINE_SOURCE=BLOCKED\")\n        if hashlib.sha256(FROZEN_LITERAL).hexdigest() != \"0d579abf075cbf84c9ca92e4f39e1855843bfcad24aa14edfe6ad09287250ca9\":\n            raise SystemExit(\"ARTHELLO_R13_INLINE_SOURCE=BLOCKED\")\n        namespace = {\"__name__\": \"r13_inline\"}\n        exec(compile(HELPER_LITERAL, \"<trusted-workflow-inline>\", \"exec\"), namespace)\n        raise SystemExit(namespace[\"main\"](frozen_functions=FROZEN_LITERAL))\n        R13_HISTORY\n        )\"\n        HISTORY_RECEIPT=\"$history_receipt\" python3 -I - <<'R13_HISTORY_RECEIPT'\n        import json, os\n        def require(value):\n            if not value:\n                raise ValueError()\n        def unique(pairs):\n            value = {}\n            for key, item in pairs:\n                require(key not in value)\n                value[key] = item\n            return value\n        try:\n            raw = os.environ['HISTORY_RECEIPT']\n            require(0 < len(raw.encode('utf-8')) <= 8192)\n            value = json.loads(raw, object_pairs_hook=unique)\n            require(isinstance(value, dict) and set(value) == {\n                'schemaVersion', 'history', 'mode', 'acceptedSource', 'acceptedTree',\n                'acceptedRun', 'dataRestoreAuthorized', 'retainedRuntimeVerificationRequired'})\n            require(type(value['schemaVersion']) is int and value['schemaVersion'] == 13)\n            require(value['history'] == 'verified' and value['mode'] in ('fresh', 'resume_candidate'))\n            require(value['acceptedSource'] == '77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed')\n            require(value['acceptedTree'] == 'ac3fcaac06acf33bf9ee32e438d0c040adb38fd7')\n            require(type(value['acceptedRun']) is int and value['acceptedRun'] == 34326582961)\n            require(value['dataRestoreAuthorized'] is False)\n            resume = value['mode'] == 'resume_candidate'\n            require(value['retainedRuntimeVerificationRequired'] is resume)\n            with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as stream:\n                stream.write('R9_RESUME_CANDIDATE=' + ('1' if resume else '0') + '\\n')\n        except Exception:\n            raise SystemExit('ARTHELLO_R13_HISTORY_RECEIPT=BLOCKED') from None\n        print('ARTHELLO_R13_SUCCESS_HISTORY=VERIFIED mode=' + value['mode'])\n        R13_HISTORY_RECEIPT\n",
+          "afterSha256": "0433ab4e25c33090e41e2a0841618d66142020f187e651f801bd6312ace69ef7"
+        },
+        {
+          "kind": "replace",
+          "label": "history-live-step_name_1",
+          "count": 1,
+          "before": "    - name: Verify D086 R12 identity and preserved R5 R8 R9 R10 R11 abort boundary\n",
+          "after": "    - name: Verify R13 identity and accepted R12 success history\n"
+        },
+        {
+          "kind": "replace",
+          "label": "history-live-step_name_2",
+          "count": 1,
+          "before": "    - name: Verify checkout and release contracts\n",
+          "after": "    - name: Verify R13 checkout and release contracts\n"
+        },
+        {
+          "kind": "replace",
+          "label": "history-live-step_name_3",
+          "count": 1,
+          "before": "    - name: Verify retained candidate before any replay skip\n",
+          "after": "    - name: Verify retained R13 candidate before any replay skip\n"
+        },
+        {
+          "kind": "replace",
+          "label": "history-live-step_name_4",
+          "count": 1,
+          "before": "    - name: Verify installed R5 School relay with fresh receipt\n",
+          "after": "    - name: Verify accepted R12 baseline and preserved School relay\n"
+        },
+        {
+          "kind": "replace",
+          "label": "history-live-step_name_5",
+          "count": 1,
+          "before": "    - name: Clone preflight and guarded production cutover\n",
+          "after": "    - name: Clone fresh snapshot and guarded R13 production cutover\n"
+        },
+        {
+          "kind": "replace",
+          "label": "history-live-step_name_6",
+          "count": 1,
+          "before": "    - name: School diagnostic and real browser acceptance after cutover\n",
+          "after": "    - name: School diagnostic and real browser acceptance after R13 cutover\n"
+        },
+        {
+          "kind": "replace",
+          "label": "history-live-fresh_baseline_after_verified_school_relay",
+          "count": 1,
+          "before": "        rm -f -- \"$repair_bundle_file\" \"$repair_bundle_meta\"\n      id: school_repair\n",
+          "after": "        rm -f -- \"$repair_bundle_file\" \"$repair_bundle_meta\"\n        if [ \"$R9_RESUME_CANDIDATE\" = 1 ]; then\n          test \"$R9_RUNTIME_VERIFIED\" = 1\n        else\n          python3 -I .github/scripts/r13-live-baseline.py live\n        fi\n      id: school_repair\n"
+        },
+        {
+          "kind": "replace",
+          "label": "history-live-remove_old_failed_browser_baseline",
+          "count": 1,
+          "before": "        python3 -I .github/scripts/d080-baseline-evidence.py\n",
+          "after": ""
+        },
+        {
+          "kind": "replace",
+          "label": "history-live-check_each_fresh_school_diagnostic",
+          "count": 2,
+          "before": "          </dev/null | tee \"$diagnostic_file\"\n",
+          "after": "          </dev/null | tee \"$diagnostic_file\"\n        python3 -I .github/scripts/r13-live-baseline.py school \"$diagnostic_file\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "history-live-pin_fresh_live_before_clone_and_copy",
+          "count": 1,
+          "before": "        mapfile -t live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')\n        test \"${#live_ids[@]}\" -eq 1\n        live_id=\"$(docker inspect \"${live_ids[0]}\" --format '{{.Id}}')\"\n        [[ \"$live_id\" =~ ^[a-f0-9]{64}$ ]]\n",
+          "after": "        python3 -I .github/scripts/r13-live-baseline.py live\n        mapfile -t live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')\n        test \"${#live_ids[@]}\" -eq 1\n        live_id=\"$(docker inspect \"${live_ids[0]}\" --format '{{.Id}}')\"\n        [[ \"$live_id\" =~ ^[a-f0-9]{64}$ ]]\n        test \"$live_id\" = \"956bc25a8e4eab6a2e14021100abd7adac42130c20e53321aeafaa01f12a6614\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "history-live-candidate_browser_context_binding",
+          "count": 1,
+          "before": "            bash .github/scripts/run-r10-live-browser.sh < \"$gate_nonce_file\"\n",
+          "after": "            python3 -I .github/scripts/run-r13-live-browser.py < \"$gate_nonce_file\"\n"
+        },
+        {
+          "kind": "replace",
+          "label": "history-live-after_browser_context_binding",
+          "count": 1,
+          "before": "          bash .github/scripts/run-r10-live-browser.sh\n",
+          "after": "          python3 -I .github/scripts/run-r13-live-browser.py\n"
+        }
+      ]
+    }
+  ]
+}
