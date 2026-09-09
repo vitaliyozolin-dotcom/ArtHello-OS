@@ -1,0 +1,207 @@
+{
+  "diagnosticSource": "b1e8fbbd93466b4add33c43cc09ce4f2b99b6dfb",
+  "runId": 34380956523,
+  "jobId": 102565389641,
+  "liveSource": "f5fa3e46e3510e6fc98ae4455f4b499c0ba30695",
+  "result": {
+    "schemaVersion": 1,
+    "liveAcceptance": "not_run",
+    "tables": {
+      "app_users": {
+        "state": "observed",
+        "rows": 7
+      },
+      "app_systems": {
+        "state": "observed",
+        "rows": 2
+      },
+      "organization_branches": {
+        "state": "observed",
+        "rows": 5
+      },
+      "user_system_access": {
+        "state": "observed",
+        "rows": 14
+      },
+      "user_branch_access": {
+        "state": "observed",
+        "rows": 2
+      },
+      "bank_accounts": {
+        "state": "observed",
+        "rows": 4
+      },
+      "bank_statement_imports": {
+        "state": "observed",
+        "rows": 12
+      },
+      "bank_transactions": {
+        "state": "observed",
+        "rows": 0
+      },
+      "financial_operations": {
+        "state": "observed",
+        "rows": 0
+      },
+      "developer_feedback": {
+        "state": "observed",
+        "rows": 1
+      },
+      "developer_feedback_events": {
+        "state": "observed",
+        "rows": 1
+      },
+      "integration_connections": {
+        "state": "observed",
+        "rows": 19
+      },
+      "integration_sync_runs": {
+        "state": "observed",
+        "rows": 7
+      },
+      "alfacrm_finance_snapshots": {
+        "state": "not_installed"
+      },
+      "alfacrm_family_merge_candidates": {
+        "state": "not_installed"
+      }
+    },
+    "checks": {
+      "bankLinks": {
+        "state": "observed",
+        "violations": 0
+      },
+      "accessUsers": {
+        "state": "observed",
+        "violations": 0
+      },
+      "accessSystems": {
+        "state": "observed",
+        "violations": 0
+      },
+      "branchUsers": {
+        "state": "observed",
+        "violations": 0
+      },
+      "branchTargets": {
+        "state": "observed",
+        "violations": 0
+      },
+      "feedbackAuthors": {
+        "state": "observed",
+        "violations": 0
+      },
+      "feedbackEvents": {
+        "state": "observed",
+        "violations": 0
+      },
+      "importConnections": {
+        "state": "observed",
+        "violations": 0
+      }
+    },
+    "bankWindow": {
+      "state": "observed",
+      "period": {
+        "startDate": "2026-09-01",
+        "endDate": "2026-09-09"
+      },
+      "sync": {
+        "state": "pending",
+        "freshness": "not_requested",
+        "rejectedRows": 0,
+        "errorRows": 0,
+        "conflictRows": 0
+      },
+      "coverage": {
+        "accountRows": 4,
+        "distinctAccountKeys": 4,
+        "legalEntities": 1,
+        "invalidAccountKeys": 0,
+        "accountsWithStatement": 4,
+        "coveredInLatestRun": 0,
+        "accountsWithContainingStatementInLatestRun": 0,
+        "accountsWithMatchingTransactionCount": 1
+      },
+      "transactions": {
+        "rows": 0,
+        "eligibleRows": 0,
+        "incomeRows": 0,
+        "expenseRows": 0,
+        "eligibleMissingLinks": 0,
+        "danglingLinks": 0,
+        "pendingOrNonRub": 0,
+        "unexpectedAccountRows": 0
+      },
+      "duplicates": {
+        "groups": 0,
+        "excessRows": 0,
+        "missingIdentityRows": 0
+      },
+      "activity": "not_observed",
+      "checksComplete": false
+    },
+    "bankRuntime": {
+      "state": "observed",
+      "observedAtUtc": "2026-09-09T17:08:01.666Z",
+      "setup": {
+        "state": "observed",
+        "startDate": "2026-09-01",
+        "syncIntervalMinutes": 60,
+        "syncMinute": 5
+      },
+      "connection": {
+        "state": "observed",
+        "status": "connection_error",
+        "enabled": true,
+        "nextSyncAtUtc": "2026-09-09T22:01:53.357Z"
+      },
+      "autosync": {
+        "state": "observed",
+        "outcome": "error",
+        "generationMatchesSetup": true,
+        "nextAtUtc": "2026-09-09T22:01:53.357Z",
+        "leasedUntilUtc": null,
+        "leaseState": "released",
+        "failures": 6,
+        "updatedAgeSeconds": 3968,
+        "httpStatus": 500,
+        "httpStatusState": "observed",
+        "updatedAtUtc": "2026-09-09T16:01:53.000Z",
+        "failureStage": "sync_commit",
+        "failureStageState": "observed"
+      },
+      "statementLease": {
+        "state": "not_observed",
+        "expiresAtUtc": null,
+        "leaseState": "unknown"
+      },
+      "retainedJobs": {
+        "state": "observed",
+        "scopeMatch": "unverified",
+        "providerStatus": "not_stored",
+        "total": 4,
+        "invalidRows": 0,
+        "exactWindowRows": 4,
+        "olderEndRows": 0,
+        "otherWindowRows": 0,
+        "oldestAgeSeconds": 32219
+      },
+      "statementImports": {
+        "state": "observed",
+        "readyRows": 12,
+        "pendingRows": 0,
+        "failedRows": 0,
+        "unknownRows": 0
+      },
+      "latestRun": {
+        "state": "observed",
+        "startedAtUtc": "2026-09-09T08:11:14.266Z",
+        "finishedAtUtc": "2026-09-09T08:11:14.266Z"
+      }
+    },
+    "status": "incomplete_or_issues",
+    "observedAtUtc": "2026-09-09T17:08:01.666Z",
+    "productionMutations": false
+  }
+}

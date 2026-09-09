@@ -526,6 +526,31 @@ else:
                 value['bankRuntime']['autosync'].update(outcome=outcome, failureStage=stage, failureStageState=state)
                 self.assert_blocked(self.run_launcher(value=value, probe_exit=2), 'invalid_probe_report')
 
+    def test_commit_schema_passes_only_known_column_names_and_bounded_metadata(self):
+        schema = dict(state='partial', tables={name: dict(state='schema_missing') for name in
+            ('bank_accounts', 'bank_statement_imports', 'bank_transactions', 'financial_operations',
+             'integration_sync_runs', 'integration_log_entries', 'audit_events')})
+        schema['tables']['bank_transactions'] = dict(state='observed', missingColumns=['payment_id'],
+            primaryKeyMatches=True, providerIndex='matched', unexpectedRequiredColumns=0,
+            foreignKeyRows=0, triggerRows=0, uniqueIndexCount=2)
+        value = report(False)
+        value['bankCommitSchema'] = schema
+        result = self.run_launcher(value=value, probe_exit=2)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('READONLY_FINISHED=', result.stdout)
+        self.assertEqual([json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')], [value])
+        for key, raw in [('missingColumns', ['PRIVATE_COLUMN']), ('missingColumns', ['id', 'id']),
+                         ('missingColumns', [True]), ('primaryKeyMatches', 'true'),
+                         ('foreignKeyRows', 129), ('uniqueIndexCount', True),
+                         ('providerIndex', 'PRIVATE_INDEX'), ('rawError', 'PRIVATE_ERROR')]:
+            invalid = copy.deepcopy(value)
+            invalid['bankCommitSchema']['tables']['bank_transactions'][key] = raw
+            self.assert_blocked(self.run_launcher(value=invalid, probe_exit=2), 'invalid_probe_report')
+        invalid = copy.deepcopy(value)
+        invalid['bankCommitSchema']['state'] = 'observed'
+        self.assert_blocked(self.run_launcher(value=invalid, probe_exit=2), 'invalid_probe_report')
+
+
     def test_unverified_source_never_runs_identity_scan_or_database_probe(self):
         result = self.run_launcher('initial-refusal')
         self.assertNotEqual(result.returncode, 0)
