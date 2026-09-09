@@ -8,6 +8,7 @@ import ChangePasswordPage from '@/pages/change-password';
 import { useQuery } from '@tanstack/react-query';
 import { useAppMode } from '@/context/AppModeContext';
 import { canViewFrontOfficePreview } from '@/features/front-office/preview-contract';
+import type { OwnerSection } from '@/features/navigation/section-routes';
 import {
   Zap, Banknote, TrendingUp, BarChart2, Users,
   UserCheck, FileText, Settings, Bell, CheckSquare,
@@ -43,15 +44,6 @@ const EmployeesPageComponent      = lazy(() => import('@/pages/employees').then(
 const FrontOfficePageComponent     = lazy(() => import('@/pages/front-office').then((m) => ({ default: m.FrontOfficePage })));
 
 // ─── Nav definition ───────────────────────────────────────────────────────────
-
-type OwnerSection =
-  | 'pulse' | 'money' | 'pnl' | 'ledger' | 'reconciliation'
-  | 'finance-matching' | 'finance-cashflow' | 'finance-payment-plan' | 'finance-payables'
-  | 'contractors' | 'staff' | 'taxes' | 'families' | 'employees'
-  | 'cfo' | 'trust-score' | 'month-closing' | 'finance-qa'
-  | 'articles' | 'documents' | 'test-data' | 'settings'
-  | 'front-office' | 'contracts' | 'educational' | 'schedule'
-  | 'bank-integrations' | 'crm-coverage';
 
 type NavItem = { key: OwnerSection; label: string; Icon: React.FC<{ className?: string }> };
 
