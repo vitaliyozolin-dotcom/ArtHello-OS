@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
+set +x
 set -Eeuo pipefail
+mode=normal
+if (( $# )); then
+  if (( $# != 1 )) || [[ "$1" != --candidate-gate ]]; then echo 'SERVER_BROWSER_BLOCKED=arguments_invalid'; exit 2; fi
+  mode=--candidate-gate
+fi
 [[ "$CHECKED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
 [[ "$BROWSER_IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]]
 [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
@@ -14,13 +20,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Credentials travel over stdin only, never Docker configuration, command-line
+# Credentials and the optional maintenance nonce travel over stdin only, never Docker configuration, command-line
 # arguments, mounts, artifacts, browser logs or saved browser state.
 "$PRECHECK_NODE" --input-type=module -e '
-  import { validateCredentials } from "./deploy/browser/flow.mjs";
-  try { process.stdout.write(JSON.stringify(validateCredentials({login:process.env.ARTHELLO_E2E_LOGIN,password:process.env.ARTHELLO_E2E_PASSWORD}))); }
+  import { validateBrowserInput } from "./deploy/browser/flow.mjs";
+  try {
+    const input = {login:process.env.ARTHELLO_E2E_LOGIN,password:process.env.ARTHELLO_E2E_PASSWORD};
+    if (process.argv[1] === "--candidate-gate") {
+      let nonce = "";
+      for await (const chunk of process.stdin) { nonce += chunk; if (nonce.length > 65) throw Error(); }
+      if (nonce.endsWith("\n")) nonce = nonce.slice(0, -1);
+      input.maintenanceNonce = nonce;
+    }
+    process.stdout.write(JSON.stringify(validateBrowserInput(input)));
+  }
   catch { process.exitCode=2; }
-' | timeout --signal=TERM --kill-after=10 150 docker run --rm --init -i \
+' -- "$mode" | timeout --signal=TERM --kill-after=10 150 docker run --rm --init -i \
   --name "$name" --label "org.arthello.e2e.invocation=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
   --pull never --user 1000:1000 --network bridge --read-only --log-driver none \
   --cap-drop ALL --security-opt no-new-privileges \

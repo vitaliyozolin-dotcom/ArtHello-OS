@@ -1,6 +1,6 @@
 import { chromium } from 'playwright-core';
 import { readFileSync } from 'node:fs';
-import { installNetworkBoundary, naturalFlow, inspectSandbox, safeFailureReason } from './flow.mjs';
+import { installNetworkBoundary, installCandidateGate, validateBrowserInput, naturalFlow, inspectSandbox, safeFailureReason } from './flow.mjs';
 import { startProxy } from './proxy.mjs';
 
 let browser;
@@ -38,15 +38,18 @@ try {
       input += chunk;
       if (input.length > 8192) throw Error();
     }
-    const credentials = JSON.parse(input);
+    const credentials = validateBrowserInput(JSON.parse(input));
     input = '';
     proxy = await startProxy();
     const context = await browser.newContext({ proxy: proxy.settings, ignoreHTTPSErrors: false, serviceWorkers: 'block', acceptDownloads: false, viewport: { width: 1440, height: 1000 } });
     await installNetworkBoundary(context);
     const page = await context.newPage();
+    const candidateGate = credentials.maintenanceNonce === undefined ? undefined : await installCandidateGate(context, page, credentials.maintenanceNonce);
+    delete credentials.maintenanceNonce;
     page.setDefaultTimeout(20000);
     page.setDefaultNavigationTimeout(20000);
     result = { kind: 'server-natural-sso', chromiumSandbox: 'verified', ...await naturalFlow(page, credentials, value => { stage = value; }) };
+    candidateGate?.assertHealthy();
     await context.close();
   }
 } catch (error) {
