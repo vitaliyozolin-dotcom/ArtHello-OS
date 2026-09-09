@@ -10,7 +10,10 @@ export const taxesModuleRouter = Router();
 
 taxesModuleRouter.get("/taxes/obligations", async (req, res) => {
   try {
-    const { month, status, taxType } = req.query as Record<string, string | undefined>;
+    const { month, status, taxType } = req.query as Record<
+      string,
+      string | undefined
+    >;
 
     const conditions = [];
     if (month) conditions.push(eq(taxObligationsTable.periodMonth, month));
@@ -21,7 +24,10 @@ taxesModuleRouter.get("/taxes/obligations", async (req, res) => {
       .select()
       .from(taxObligationsTable)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(taxObligationsTable.periodMonth), taxObligationsTable.dueDate);
+      .orderBy(
+        desc(taxObligationsTable.periodMonth),
+        taxObligationsTable.dueDate,
+      );
 
     res.json(rows);
   } catch (err) {
@@ -44,20 +50,27 @@ taxesModuleRouter.get("/taxes/summary", async (req, res) => {
       .from(taxObligationsTable);
 
     const [overdue] = await db
-      .select({ cnt: count(taxObligationsTable.id), amount: sum(taxObligationsTable.accruedAmount) })
+      .select({
+        cnt: count(taxObligationsTable.id),
+        amount: sum(taxObligationsTable.accruedAmount),
+      })
       .from(taxObligationsTable)
-      .where(and(
-        sql`status != 'paid' AND status != 'cancelled'`,
-        lte(taxObligationsTable.dueDate, today),
-      ));
+      .where(
+        and(
+          sql`status != 'paid' AND status != 'cancelled'`,
+          lte(taxObligationsTable.dueDate, today),
+        ),
+      );
 
     const upcoming = await db
       .select()
       .from(taxObligationsTable)
-      .where(and(
-        sql`status != 'paid' AND status != 'cancelled'`,
-        gte(taxObligationsTable.dueDate, today),
-      ))
+      .where(
+        and(
+          sql`status != 'paid' AND status != 'cancelled'`,
+          gte(taxObligationsTable.dueDate, today),
+        ),
+      )
       .orderBy(taxObligationsTable.dueDate)
       .limit(5);
 
@@ -107,7 +120,10 @@ const obligationSchema = z.object({
   taxType: z.enum(["usn", "ndfl", "nds", "pfr", "fss", "other"]),
   taxName: z.string().optional(),
   periodMonth: z.string().regex(/^\d{4}-\d{2}$/),
-  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
   taxBase: z.number().optional(),
   taxRate: z.number().optional(),
   accruedAmount: z.number().positive(),
@@ -116,7 +132,10 @@ const obligationSchema = z.object({
 
 taxesModuleRouter.post("/taxes/obligations", async (req, res) => {
   const parsed = obligationSchema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: z.prettifyError(parsed.error) }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: z.prettifyError(parsed.error) });
+    return;
+  }
 
   try {
     const [row] = await db
@@ -124,8 +143,10 @@ taxesModuleRouter.post("/taxes/obligations", async (req, res) => {
       .values({
         ...parsed.data,
         accruedAmount: String(parsed.data.accruedAmount),
-        taxBase: parsed.data.taxBase != null ? String(parsed.data.taxBase) : null,
-        taxRate: parsed.data.taxRate != null ? String(parsed.data.taxRate) : null,
+        taxBase:
+          parsed.data.taxBase != null ? String(parsed.data.taxBase) : null,
+        taxRate:
+          parsed.data.taxRate != null ? String(parsed.data.taxRate) : null,
       })
       .returning();
     res.json(row);
@@ -140,14 +161,20 @@ taxesModuleRouter.post("/taxes/obligations", async (req, res) => {
 taxesModuleRouter.patch("/taxes/obligations/:id", async (req, res) => {
   try {
     const { paidAmount, status, notes, operationId } = req.body as {
-      paidAmount?: number; status?: string; notes?: string; operationId?: string;
+      paidAmount?: number;
+      status?: string;
+      notes?: string;
+      operationId?: string;
     };
 
     const set: Record<string, unknown> = { updatedAt: new Date() };
     if (paidAmount !== undefined) {
       set["paidAmount"] = String(paidAmount);
       // Auto-update status
-      const [cur] = await db.select().from(taxObligationsTable).where(eq(taxObligationsTable.id, req.params.id));
+      const [cur] = await db
+        .select()
+        .from(taxObligationsTable)
+        .where(eq(taxObligationsTable.id, req.params.id));
       if (cur) {
         const accrued = parseFloat(String(cur.accruedAmount));
         if (paidAmount >= accrued) set["status"] = "paid";
@@ -175,40 +202,72 @@ taxesModuleRouter.patch("/taxes/obligations/:id", async (req, res) => {
 
 taxesModuleRouter.get("/taxes/calendar", async (req, res) => {
   try {
-    const rows = await db.select({
-      periodMonth: taxObligationsTable.periodMonth,
-      taxType: taxObligationsTable.taxType,
-      taxName: taxObligationsTable.taxName,
-      status: taxObligationsTable.status,
-      accrued: taxObligationsTable.accruedAmount,
-      paid: taxObligationsTable.paidAmount,
-      dueDate: taxObligationsTable.dueDate,
-    }).from(taxObligationsTable).orderBy(desc(taxObligationsTable.periodMonth));
+    const rows = await db
+      .select({
+        periodMonth: taxObligationsTable.periodMonth,
+        taxType: taxObligationsTable.taxType,
+        taxName: taxObligationsTable.taxName,
+        status: taxObligationsTable.status,
+        accrued: taxObligationsTable.accruedAmount,
+        paid: taxObligationsTable.paidAmount,
+        dueDate: taxObligationsTable.dueDate,
+      })
+      .from(taxObligationsTable)
+      .orderBy(desc(taxObligationsTable.periodMonth));
 
     // Group by month
-    const byMonth: Record<string, {
-      month: string;
-      taxes: Array<{ taxType: string; taxName: string | null; status: string | null; accrued: string | null; paid: string | null; dueDate: string | null }>;
-      totalAccrued: number;
-      totalPaid: number;
-      hasOverdue: boolean;
-      allPaid: boolean;
-    }> = {};
+    const byMonth: Record<
+      string,
+      {
+        month: string;
+        taxes: Array<{
+          taxType: string;
+          taxName: string | null;
+          status: string | null;
+          accrued: string | null;
+          paid: string | null;
+          dueDate: string | null;
+        }>;
+        totalAccrued: number;
+        totalPaid: number;
+        hasOverdue: boolean;
+        allPaid: boolean;
+      }
+    > = {};
 
     for (const r of rows) {
       const m = r.periodMonth ?? "unknown";
-      if (!byMonth[m]) byMonth[m] = { month: m, taxes: [], totalAccrued: 0, totalPaid: 0, hasOverdue: false, allPaid: false };
-      byMonth[m].taxes.push({ taxType: r.taxType, taxName: r.taxName, status: r.status, accrued: r.accrued, paid: r.paid, dueDate: r.dueDate });
+      if (!byMonth[m])
+        byMonth[m] = {
+          month: m,
+          taxes: [],
+          totalAccrued: 0,
+          totalPaid: 0,
+          hasOverdue: false,
+          allPaid: false,
+        };
+      byMonth[m].taxes.push({
+        taxType: r.taxType,
+        taxName: r.taxName,
+        status: r.status,
+        accrued: r.accrued,
+        paid: r.paid,
+        dueDate: r.dueDate,
+      });
       byMonth[m].totalAccrued += parseFloat(String(r.accrued ?? 0));
       byMonth[m].totalPaid += parseFloat(String(r.paid ?? 0));
       if (r.status === "overdue") byMonth[m].hasOverdue = true;
     }
 
     for (const m of Object.values(byMonth)) {
-      m.allPaid = m.taxes.length > 0 && m.taxes.every((t) => t.status === "paid" || t.status === "cancelled");
+      m.allPaid =
+        m.taxes.length > 0 &&
+        m.taxes.every((t) => t.status === "paid" || t.status === "cancelled");
     }
 
-    res.json(Object.values(byMonth).sort((a, b) => b.month.localeCompare(a.month)));
+    res.json(
+      Object.values(byMonth).sort((a, b) => b.month.localeCompare(a.month)),
+    );
   } catch (err) {
     req.log.error({ err }, "GET /taxes/calendar failed");
     res.status(500).json({ error: "Internal error" });
@@ -229,12 +288,28 @@ taxesModuleRouter.get("/taxes/advisor", async (req, res) => {
     })();
 
     const obligations = await db.select().from(taxObligationsTable);
-    const reserve = await db.select().from(taxReserveTable).orderBy(desc(taxReserveTable.periodMonth)).limit(3);
+    const reserve = await db
+      .select()
+      .from(taxReserveTable)
+      .orderBy(desc(taxReserveTable.periodMonth))
+      .limit(3);
 
-    const recommendations: Array<{ type: "danger" | "warning" | "info" | "ok"; title: string; body: string; action?: string }> = [];
+    const recommendations: Array<{
+      type: "danger" | "warning" | "info" | "ok";
+      title: string;
+      body: string;
+      action?: string;
+    }> = [];
 
     // 1. Overdue taxes
-    const overdue = obligations.filter((o) => o.status === "overdue" || (o.dueDate && o.dueDate < today && o.status !== "paid" && o.status !== "cancelled"));
+    const overdue = obligations.filter(
+      (o) =>
+        o.status === "overdue" ||
+        (o.dueDate &&
+          o.dueDate < today &&
+          o.status !== "paid" &&
+          o.status !== "cancelled"),
+    );
     if (overdue.length > 0) {
       recommendations.push({
         type: "danger",
@@ -248,7 +323,9 @@ taxesModuleRouter.get("/taxes/advisor", async (req, res) => {
     const soon = obligations.filter((o) => {
       if (o.status === "paid" || o.status === "cancelled") return false;
       if (!o.dueDate) return false;
-      const days = (new Date(o.dueDate).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24);
+      const days =
+        (new Date(o.dueDate).getTime() - new Date(today).getTime()) /
+        (1000 * 60 * 60 * 24);
       return days >= 0 && days <= 7;
     });
     if (soon.length > 0) {
@@ -270,8 +347,12 @@ taxesModuleRouter.get("/taxes/advisor", async (req, res) => {
         action: "Завести резерв",
       });
     } else {
-      const reserveAmount = parseFloat(String(latestReserve.reserveAmount ?? 0));
-      const totalAccrued = obligations.filter((o) => o.periodMonth === thisMonth).reduce((s, o) => s + parseFloat(String(o.accruedAmount ?? 0)), 0);
+      const reserveAmount = parseFloat(
+        String(latestReserve.reserveAmount ?? 0),
+      );
+      const totalAccrued = obligations
+        .filter((o) => o.periodMonth === thisMonth)
+        .reduce((s, o) => s + parseFloat(String(o.accruedAmount ?? 0)), 0);
       if (reserveAmount < totalAccrued * 0.5) {
         recommendations.push({
           type: "warning",
@@ -282,7 +363,9 @@ taxesModuleRouter.get("/taxes/advisor", async (req, res) => {
     }
 
     // 4. USN income limit warning (assuming 60M per year limit simplified)
-    const thisYearTotal = obligations.filter((o) => o.periodMonth?.startsWith(thisMonth.slice(0, 4))).reduce((s, o) => s + parseFloat(String(o.accruedAmount ?? 0)), 0);
+    const thisYearTotal = obligations
+      .filter((o) => o.periodMonth?.startsWith(thisMonth.slice(0, 4)))
+      .reduce((s, o) => s + parseFloat(String(o.accruedAmount ?? 0)), 0);
     if (thisYearTotal > 1_500_000) {
       recommendations.push({
         type: "warning",
@@ -292,7 +375,9 @@ taxesModuleRouter.get("/taxes/advisor", async (req, res) => {
     }
 
     // 5. No taxes for current month
-    const thisMoObligations = obligations.filter((o) => o.periodMonth === thisMonth);
+    const thisMoObligations = obligations.filter(
+      (o) => o.periodMonth === thisMonth,
+    );
     if (thisMoObligations.length === 0) {
       recommendations.push({
         type: "info",
@@ -313,7 +398,10 @@ taxesModuleRouter.get("/taxes/advisor", async (req, res) => {
 
     // Summary stats
     const paidCount = obligations.filter((o) => o.status === "paid").length;
-    const compliance = obligations.length > 0 ? Math.round((paidCount / obligations.length) * 100) : 100;
+    const compliance =
+      obligations.length > 0
+        ? Math.round((paidCount / obligations.length) * 100)
+        : 100;
 
     res.json({
       recommendations,
@@ -323,7 +411,9 @@ taxesModuleRouter.get("/taxes/advisor", async (req, res) => {
         overdue: overdue.length,
         upcoming: soon.length,
         compliance,
-        totalReserve: latestReserve ? parseFloat(String(latestReserve.reserveAmount)) : 0,
+        totalReserve: latestReserve
+          ? parseFloat(String(latestReserve.reserveAmount))
+          : 0,
       },
     });
   } catch (err) {
@@ -336,18 +426,31 @@ taxesModuleRouter.get("/taxes/advisor", async (req, res) => {
 
 taxesModuleRouter.post("/taxes/reserve", async (req, res) => {
   const { periodMonth, reserveAmount, notes } = req.body as {
-    periodMonth: string; reserveAmount: number; notes?: string;
+    periodMonth: string;
+    reserveAmount: number;
+    notes?: string;
   };
 
-  if (!periodMonth || !reserveAmount) { res.status(400).json({ error: "periodMonth and reserveAmount required" }); return; }
+  if (!periodMonth || !reserveAmount) {
+    res.status(400).json({ error: "periodMonth and reserveAmount required" });
+    return;
+  }
 
   try {
     const [row] = await db
       .insert(taxReserveTable)
-      .values({ periodMonth, reserveAmount: String(reserveAmount), notes: notes ?? null })
+      .values({
+        periodMonth,
+        reserveAmount: String(reserveAmount),
+        notes: notes ?? null,
+      })
       .onConflictDoUpdate({
         target: taxReserveTable.periodMonth,
-        set: { reserveAmount: String(reserveAmount), notes: notes ?? null, updatedAt: new Date() },
+        set: {
+          reserveAmount: String(reserveAmount),
+          notes: notes ?? null,
+          updatedAt: new Date(),
+        },
       })
       .returning();
     res.json(row);

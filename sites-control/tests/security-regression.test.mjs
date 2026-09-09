@@ -7,10 +7,22 @@ const projectRoot = resolve(import.meta.dirname, "../..");
 
 test("public credential and indexing regressions stay removed", async () => {
   const [login, auth, html, robots] = await Promise.all([
-    readFile(resolve(projectRoot, "artifacts/alpha-crm-sync/src/pages/login.tsx"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/routes/auth.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/alpha-crm-sync/index.html"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/alpha-crm-sync/public/robots.txt"), "utf8"),
+    readFile(
+      resolve(projectRoot, "artifacts/alpha-crm-sync/src/pages/login.tsx"),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "artifacts/api-server/src/features/auth/router.ts"),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "artifacts/alpha-crm-sync/index.html"),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "artifacts/alpha-crm-sync/public/robots.txt"),
+      "utf8",
+    ),
   ]);
 
   const combined = `${login}\n${auth}`;
@@ -18,7 +30,10 @@ test("public credential and indexing regressions stay removed", async () => {
   assert.doesNotMatch(login, /<option value="(?:owner|accountant|viewer)"/i);
   assert.match(login, /autoComplete="username"/);
   assert.match(auth, /getActiveUserByLogin/);
-  assert.doesNotMatch(auth, /process\.env\.(?:DASHBOARD|ACCOUNTANT|VIEWER)_PASSWORD/);
+  assert.doesNotMatch(
+    auth,
+    /process\.env\.(?:DASHBOARD|ACCOUNTANT|VIEWER)_PASSWORD/,
+  );
   assert.match(html, /noindex, nofollow, noarchive, nosnippet/);
   assert.match(robots, /Disallow: \//);
 });
@@ -26,10 +41,31 @@ test("public credential and indexing regressions stay removed", async () => {
 test("API defaults to an authenticated, origin-restricted surface", async () => {
   const [app, client, alfa, coverage, integrations] = await Promise.all([
     readFile(resolve(projectRoot, "artifacts/api-server/src/app.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/alpha-crm-sync/src/context/AuthContext.tsx"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/alphaCrmClient.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/routes/coverage.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/alpha-crm-sync/src/pages/integrations.tsx"), "utf8"),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/alpha-crm-sync/src/context/AuthContext.tsx",
+      ),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "artifacts/api-server/src/lib/alphaCrmClient.ts"),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/api-server/src/features/coverage/router.ts",
+      ),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/alpha-crm-sync/src/pages/integrations.tsx",
+      ),
+      "utf8",
+    ),
   ]);
 
   assert.match(app, /requireAuth\(req, res, next\)/);
@@ -38,10 +74,19 @@ test("API defaults to an authenticated, origin-restricted surface", async () => 
   assert.match(app, /process\.env\.APP_ORIGINS/);
   assert.doesNotMatch(app, /app\.use\(cors\(\)\)/);
   assert.doesNotMatch(app, /publicRoute[\s\S]*website-lead/);
-  assert.doesNotMatch(client, /localStorage|auth_token|Authorization:\s*`Bearer/);
+  assert.doesNotMatch(
+    client,
+    /localStorage|auth_token|Authorization:\s*`Bearer/,
+  );
   assert.match(client, /credentials:\s*'same-origin'/);
-  assert.doesNotMatch(`${alfa}\n${coverage}\n${integrations}`, /arthellonew\.s20\.online/i);
-  assert.match(alfa, /export function createAlphaCrmConfig\([\s\S]*if \(!domain\)[\s\S]*throw new Error\("ALFACRM_DOMAIN is required/);
+  assert.doesNotMatch(
+    `${alfa}\n${coverage}\n${integrations}`,
+    /arthellonew\.s20\.online/i,
+  );
+  assert.match(
+    alfa,
+    /export function createAlphaCrmConfig\([\s\S]*if \(!domain\)[\s\S]*throw new Error\("ALFACRM_DOMAIN is required/,
+  );
   assert.match(alfa, /SerializedRequestQueue/);
   assert.match(alfa, /minIntervalMs:\s*260/);
   assert.match(alfa, /authInFlight/);
@@ -70,25 +115,106 @@ test("A.1 security controls are explicit without claiming production readiness",
     schemaInventory,
     auditPolicy,
   ] = await Promise.all([
-    readFile(resolve(projectRoot, "artifacts/api-server/src/routes/auth.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/security/access-policy.ts"), "utf8"),
-    readFile(resolve(projectRoot, "lib/db/drizzle/0009_famous_ma_gnuci.sql"), "utf8"),
-    readFile(resolve(projectRoot, "lib/db/drizzle/0010_outstanding_cargill.sql"), "utf8"),
-    readFile(resolve(projectRoot, "lib/db/rollbacks/0009_auth_security.down.sql"), "utf8"),
-    readFile(resolve(projectRoot, "lib/db/rollbacks/0010_auth_scope_audit.down.sql"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/security/access-audit.ts"), "utf8"),
-    readFile(resolve(projectRoot, "lib/db/scripts/checked-migration-runner.mjs"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/migration-state-gate.ts"), "utf8"),
+    readFile(
+      resolve(projectRoot, "artifacts/api-server/src/features/auth/router.ts"),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/api-server/src/lib/security/access-policy.ts",
+      ),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "lib/db/drizzle/0009_famous_ma_gnuci.sql"),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "lib/db/drizzle/0010_outstanding_cargill.sql"),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "lib/db/rollbacks/0009_auth_security.down.sql"),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "lib/db/rollbacks/0010_auth_scope_audit.down.sql"),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/api-server/src/lib/security/access-audit.ts",
+      ),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "lib/db/scripts/checked-migration-runner.mjs"),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/api-server/src/lib/migration-state-gate.ts",
+      ),
+      "utf8",
+    ),
     readFile(resolve(projectRoot, "artifacts/api-server/src/index.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/logger.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/routes/evotor.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/routes/webhooks.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/webhooks/website-lead-service.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/routes/banking.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/banking/sanitize-health.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/security/security-schema-gate.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/security/security-schema-inventory.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/security/access-audit-policy.ts"), "utf8"),
+    readFile(
+      resolve(projectRoot, "artifacts/api-server/src/lib/logger.ts"),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "artifacts/api-server/src/routes/evotor.ts"),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "artifacts/api-server/src/routes/webhooks.ts"),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/api-server/src/lib/webhooks/website-lead-service.ts",
+      ),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/api-server/src/features/banking/router.ts",
+      ),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/api-server/src/lib/banking/sanitize-health.ts",
+      ),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/api-server/src/lib/security/security-schema-gate.ts",
+      ),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/api-server/src/lib/security/security-schema-inventory.ts",
+      ),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/api-server/src/lib/security/access-audit-policy.ts",
+      ),
+      "utf8",
+    ),
   ]);
 
   assert.match(auth, /httpOnly:\s*true/);
@@ -125,7 +251,9 @@ test("A.1 security controls are explicit without claiming production readiness",
 });
 
 test("Sites build contract stays package-manager-neutral", async () => {
-  const packageJson = JSON.parse(await readFile(resolve(projectRoot, "package.json"), "utf8"));
+  const packageJson = JSON.parse(
+    await readFile(resolve(projectRoot, "package.json"), "utf8"),
+  );
 
   assert.doesNotMatch(packageJson.scripts.build, /\bpnpm\b/);
   assert.match(packageJson.scripts.build, /sites-control\/scripts\/build\.mjs/);
@@ -150,15 +278,38 @@ test("GitHub quality evidence is pinned to the PR head and exported immutably", 
   assert.match(workflow, /arthello-provenance-\$\{\{\s*github\.run_id\s*\}\}/);
 });
 
-
 test("production auth uses personal PostgreSQL users and mandatory password change", async () => {
   const [auth, store, password, migration, context, shell] = await Promise.all([
-    readFile(resolve(projectRoot, "artifacts/api-server/src/routes/auth.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/security/auth-store.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/security/password.ts"), "utf8"),
-    readFile(resolve(projectRoot, "lib/db/drizzle/0016_personal_auth.sql"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/alpha-crm-sync/src/context/AuthContext.tsx"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/alpha-crm-sync/src/AppShell.tsx"), "utf8"),
+    readFile(
+      resolve(projectRoot, "artifacts/api-server/src/features/auth/router.ts"),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/api-server/src/lib/security/auth-store.ts",
+      ),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "artifacts/api-server/src/lib/security/password.ts"),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "lib/db/drizzle/0016_personal_auth.sql"),
+      "utf8",
+    ),
+    readFile(
+      resolve(
+        projectRoot,
+        "artifacts/alpha-crm-sync/src/context/AuthContext.tsx",
+      ),
+      "utf8",
+    ),
+    readFile(
+      resolve(projectRoot, "artifacts/alpha-crm-sync/src/AppShell.tsx"),
+      "utf8",
+    ),
   ]);
   assert.match(migration, /CREATE TABLE "auth_users"/);
   assert.match(store, /FROM auth_users/);
@@ -167,5 +318,8 @@ test("production auth uses personal PostgreSQL users and mandatory password chan
   assert.match(auth, /revokeSessionsForUser/);
   assert.match(context, /changePassword/);
   assert.match(shell, /ChangePasswordPage/);
-  assert.doesNotMatch(auth, /DASHBOARD_PASSWORD|ACCOUNTANT_PASSWORD|VIEWER_PASSWORD/);
+  assert.doesNotMatch(
+    auth,
+    /DASHBOARD_PASSWORD|ACCOUNTANT_PASSWORD|VIEWER_PASSWORD/,
+  );
 });

@@ -1,0 +1,32 @@
+import { Router } from "express";
+import { normalizationAuditRouter } from "./normalization-audit.js";
+import { entityReconciliationRouter } from "./entity-reconciliation.js";
+import { familyTruthAuditRouter } from "./family-truth-audit.js";
+import { attendanceStudentIdentityRouter } from "./attendance-student-identity.js";
+import { customerBranchCoverageRouter } from "./customer-branch-coverage.js";
+import { duplicatesRouter } from "./duplicates.js";
+import { paymentAuditsRouter } from "./payment-audits.js";
+import { finalAlphaAuditRouter } from "./final-alpha-audit.js";
+import { bankAccountsAuditRouter } from "./bank-accounts-audit.js";
+import { bankTransactionsAuditRouter } from "./bank-transactions-audit.js";
+import { counterpartiesAuditRouter } from "./counterparties-audit.js";
+import { counterpartyReclassificationAuditRouter } from "./counterparty-reclassification-audit.js";
+import { bankAlphaReconciliationAuditRouter } from "./bank-alpha-reconciliation-audit.js";
+import { lessonEuDiagnosticRouter } from "./lesson-eu-diagnostic.js";
+
+export const coverageAuditRouter = Router();
+
+coverageAuditRouter.use(normalizationAuditRouter);
+coverageAuditRouter.use(entityReconciliationRouter);
+coverageAuditRouter.use(familyTruthAuditRouter);
+coverageAuditRouter.use(attendanceStudentIdentityRouter);
+coverageAuditRouter.use(customerBranchCoverageRouter);
+coverageAuditRouter.use(duplicatesRouter);
+coverageAuditRouter.use(paymentAuditsRouter);
+coverageAuditRouter.use(finalAlphaAuditRouter);
+coverageAuditRouter.use(bankAccountsAuditRouter);
+coverageAuditRouter.use(bankTransactionsAuditRouter);
+coverageAuditRouter.use(counterpartiesAuditRouter);
+coverageAuditRouter.use(counterpartyReclassificationAuditRouter);
+coverageAuditRouter.use(bankAlphaReconciliationAuditRouter);
+coverageAuditRouter.use(lessonEuDiagnosticRouter);

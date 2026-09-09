@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 
 const routeSource = readFileSync(
-  new URL("../src/routes/front-office.ts", import.meta.url),
+  new URL("../src/features/front-office/router.ts", import.meta.url),
   "utf8",
 );
 const schemaSource = readFileSync(

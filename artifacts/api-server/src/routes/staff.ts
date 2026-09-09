@@ -29,7 +29,10 @@ staffRouter.get("/staff/teachers", async (req, res) => {
     const { month } = req.query as { month?: string };
 
     // Get all teachers
-    const teachers = await db.select().from(crmTeachersTable).orderBy(crmTeachersTable.fullName);
+    const teachers = await db
+      .select()
+      .from(crmTeachersTable)
+      .orderBy(crmTeachersTable.fullName);
 
     if (teachers.length === 0) {
       res.json({ teachers: [], month: month ?? null });
@@ -42,7 +45,7 @@ staffRouter.get("/staff/teachers", async (req, res) => {
 
     if (month) {
       const { from, to } = monthRange(month);
-      lessonRows = await db
+      lessonRows = (await db
         .select({
           teacherCrmId: crmLessonsTable.teacherCrmId,
           cnt: count(crmLessonsTable.id),
@@ -54,15 +57,15 @@ staffRouter.get("/staff/teachers", async (req, res) => {
             lte(sql`date(lesson_date)`, to),
           ),
         )
-        .groupBy(crmLessonsTable.teacherCrmId) as LessonRow[];
+        .groupBy(crmLessonsTable.teacherCrmId)) as LessonRow[];
     } else {
-      lessonRows = await db
+      lessonRows = (await db
         .select({
           teacherCrmId: crmLessonsTable.teacherCrmId,
           cnt: count(crmLessonsTable.id),
         })
         .from(crmLessonsTable)
-        .groupBy(crmLessonsTable.teacherCrmId) as LessonRow[];
+        .groupBy(crmLessonsTable.teacherCrmId)) as LessonRow[];
     }
 
     const lessonMap = new Map(lessonRows.map((r) => [r.teacherCrmId, r.cnt]));
@@ -79,7 +82,7 @@ staffRouter.get("/staff/teachers", async (req, res) => {
         ),
       );
 
-    const rateMap = new Map<string, typeof activeRates[0]>();
+    const rateMap = new Map<string, (typeof activeRates)[0]>();
     for (const r of activeRates) {
       if (!rateMap.has(r.teacherCrmId)) rateMap.set(r.teacherCrmId, r);
     }
@@ -168,7 +171,7 @@ staffRouter.get("/staff/stats", async (req, res) => {
         ),
       );
 
-    const rateMap = new Map<string, typeof activeRates[0]>();
+    const rateMap = new Map<string, (typeof activeRates)[0]>();
     for (const r of activeRates) {
       if (!rateMap.has(r.teacherCrmId)) rateMap.set(r.teacherCrmId, r);
     }
@@ -194,7 +197,8 @@ staffRouter.get("/staff/stats", async (req, res) => {
         const rate = rateMap.get(row.teacherCrmId);
         if (!rate) continue;
         const amt = parseFloat(rate.rateAmount);
-        if (rate.rateType === "per_lesson") payrollEstimate += amt * Number(row.cnt);
+        if (rate.rateType === "per_lesson")
+          payrollEstimate += amt * Number(row.cnt);
         else if (rate.rateType === "fixed_monthly") payrollEstimate += amt;
       }
     }
@@ -203,7 +207,8 @@ staffRouter.get("/staff/stats", async (req, res) => {
       totalTeachers: Number(total),
       activeTeachers,
       lessonsThisMonth,
-      avgLessonsPerTeacher: activeTeachers > 0 ? Math.round(lessonsThisMonth / activeTeachers) : 0,
+      avgLessonsPerTeacher:
+        activeTeachers > 0 ? Math.round(lessonsThisMonth / activeTeachers) : 0,
       payrollEstimate,
       ratesConfigured: rateMap.size,
     });
@@ -256,18 +261,26 @@ staffRouter.get("/staff/teachers/:crmId/lessons", async (req, res) => {
     const lessonIds = lessons.map((l) => l.crmId);
     let attRows: AttRow[] = [];
     if (lessonIds.length > 0) {
-      attRows = await db
+      attRows = (await db
         .select({
           lessonCrmId: crmAttendanceTable.lessonCrmId,
           cnt: count(crmAttendanceTable.id),
         })
         .from(crmAttendanceTable)
-        .where(sql`lesson_crm_id = ANY(ARRAY[${sql.join(lessonIds.map((id) => sql`${id}`), sql`, `)}])`)
-        .groupBy(crmAttendanceTable.lessonCrmId) as AttRow[];
+        .where(
+          sql`lesson_crm_id = ANY(ARRAY[${sql.join(
+            lessonIds.map((id) => sql`${id}`),
+            sql`, `,
+          )}])`,
+        )
+        .groupBy(crmAttendanceTable.lessonCrmId)) as AttRow[];
     }
 
     const attMap = new Map(attRows.map((r) => [r.lessonCrmId, r.cnt]));
-    const enriched = lessons.map((l) => ({ ...l, studentsCount: attMap.get(l.crmId) ?? 0 }));
+    const enriched = lessons.map((l) => ({
+      ...l,
+      studentsCount: attMap.get(l.crmId) ?? 0,
+    }));
 
     res.json({ lessons: enriched, total: lessons.length });
   } catch (err) {
@@ -283,13 +296,19 @@ const rateBodySchema = z.object({
   rateType: z.enum(["per_lesson", "fixed_monthly", "per_hour"]),
   rateAmount: z.number().positive(),
   effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  effectiveTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  effectiveTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
   notes: z.string().optional(),
 });
 
 staffRouter.post("/staff/rates", async (req, res) => {
   const parsed = rateBodySchema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: z.prettifyError(parsed.error) }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: z.prettifyError(parsed.error) });
+    return;
+  }
 
   try {
     const [rate] = await db
@@ -315,7 +334,9 @@ staffRouter.post("/staff/rates", async (req, res) => {
 
 staffRouter.delete("/staff/rates/:id", async (req, res) => {
   try {
-    await db.delete(staffRatesTable).where(eq(staffRatesTable.id, req.params.id));
+    await db
+      .delete(staffRatesTable)
+      .where(eq(staffRatesTable.id, req.params.id));
     res.json({ ok: true });
   } catch (err) {
     req.log.error({ err }, "DELETE /staff/rates/:id failed");
@@ -344,10 +365,7 @@ staffRouter.post("/staff/payouts/recalc", async (req, res) => {
       })
       .from(crmLessonsTable)
       .where(
-        and(
-          gte(sql`date(lesson_date)`, from),
-          lte(sql`date(lesson_date)`, to),
-        ),
+        and(gte(sql`date(lesson_date)`, from), lte(sql`date(lesson_date)`, to)),
       )
       .groupBy(crmLessonsTable.teacherCrmId);
 
@@ -362,7 +380,7 @@ staffRouter.post("/staff/payouts/recalc", async (req, res) => {
         ),
       );
 
-    const rateMap = new Map<string, typeof activeRates[0]>();
+    const rateMap = new Map<string, (typeof activeRates)[0]>();
     for (const r of activeRates) {
       if (!rateMap.has(r.teacherCrmId)) rateMap.set(r.teacherCrmId, r);
     }
@@ -374,7 +392,8 @@ staffRouter.post("/staff/payouts/recalc", async (req, res) => {
       let calcAmount: string | null = null;
       if (rate) {
         const amt = parseFloat(rate.rateAmount);
-        if (rate.rateType === "per_lesson") calcAmount = String(amt * Number(row.cnt));
+        if (rate.rateType === "per_lesson")
+          calcAmount = String(amt * Number(row.cnt));
         else if (rate.rateType === "fixed_monthly") calcAmount = String(amt);
       }
 
@@ -392,7 +411,11 @@ staffRouter.post("/staff/payouts/recalc", async (req, res) => {
       // Update lesson/calc fields even if row exists
       await db
         .update(staffPayoutsTable)
-        .set({ lessonsCount: Number(row.cnt), calculatedAmount: calcAmount, updatedAt: new Date() })
+        .set({
+          lessonsCount: Number(row.cnt),
+          calculatedAmount: calcAmount,
+          updatedAt: new Date(),
+        })
         .where(
           and(
             eq(staffPayoutsTable.teacherCrmId, row.teacherCrmId),
@@ -421,7 +444,8 @@ staffRouter.patch("/staff/payouts/:id", async (req, res) => {
 
   try {
     const set: Record<string, unknown> = { updatedAt: new Date() };
-    if (confirmedAmount !== undefined) set["confirmedAmount"] = String(confirmedAmount);
+    if (confirmedAmount !== undefined)
+      set["confirmedAmount"] = String(confirmedAmount);
     if (status !== undefined) set["status"] = status;
     if (notes !== undefined) set["notes"] = notes;
     if (status === "paid") set["paidAt"] = new Date();

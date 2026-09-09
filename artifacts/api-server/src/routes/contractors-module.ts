@@ -15,10 +15,14 @@ export const contractorsModuleRouter = Router();
 
 contractorsModuleRouter.get("/contractors", async (req, res) => {
   try {
-    const { search, type, risk, active } = req.query as Record<string, string | undefined>;
+    const { search, type, risk, active } = req.query as Record<
+      string,
+      string | undefined
+    >;
 
     const conditions = [];
-    if (active !== "false") conditions.push(eq(contractorsTable.isActive, true));
+    if (active !== "false")
+      conditions.push(eq(contractorsTable.isActive, true));
     if (type) conditions.push(eq(contractorsTable.type, type));
     if (risk) conditions.push(eq(contractorsTable.riskLevel, risk));
     if (search) {
@@ -52,8 +56,18 @@ contractorsModuleRouter.get("/contractors", async (req, res) => {
       .from(contractorPaymentsTable)
       .groupBy(contractorPaymentsTable.contractorId);
 
-    const accrualMap = new Map(accrualTotals.map((r) => [r.contractorId, parseFloat(String(r.total ?? "0"))]));
-    const paymentMap = new Map(paymentTotals.map((r) => [r.contractorId, parseFloat(String(r.total ?? "0"))]));
+    const accrualMap = new Map(
+      accrualTotals.map((r) => [
+        r.contractorId,
+        parseFloat(String(r.total ?? "0")),
+      ]),
+    );
+    const paymentMap = new Map(
+      paymentTotals.map((r) => [
+        r.contractorId,
+        parseFloat(String(r.total ?? "0")),
+      ]),
+    );
 
     const enriched = rows.map((c) => {
       const accrued = accrualMap.get(c.id) ?? 0;
@@ -63,7 +77,7 @@ contractorsModuleRouter.get("/contractors", async (req, res) => {
         ...c,
         totalAccrued: accrued,
         totalPaid: paid,
-        balance,  // positive = we owe them, negative = overpaid
+        balance, // positive = we owe them, negative = overpaid
         hasDebt: balance > 0.01,
         hasOverpay: balance < -0.01,
       };
@@ -93,10 +107,16 @@ const contractorBodySchema = z.object({
 
 contractorsModuleRouter.post("/contractors", async (req, res) => {
   const parsed = contractorBodySchema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: z.prettifyError(parsed.error) }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: z.prettifyError(parsed.error) });
+    return;
+  }
 
   try {
-    const [contractor] = await db.insert(contractorsTable).values(parsed.data).returning();
+    const [contractor] = await db
+      .insert(contractorsTable)
+      .values(parsed.data)
+      .returning();
     res.json(contractor);
   } catch (err) {
     req.log.error({ err }, "POST /contractors failed");
@@ -113,7 +133,10 @@ contractorsModuleRouter.get("/contractors/:id", async (req, res) => {
       .from(contractorsTable)
       .where(eq(contractorsTable.id, req.params.id));
 
-    if (!contractor) { res.status(404).json({ error: "Not found" }); return; }
+    if (!contractor) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
 
     const accruals = await db
       .select()
@@ -133,8 +156,14 @@ contractorsModuleRouter.get("/contractors/:id", async (req, res) => {
       .where(eq(contractorDocumentsTable.contractorId, req.params.id))
       .orderBy(desc(contractorDocumentsTable.docDate));
 
-    const totalAccrued = accruals.reduce((s, a) => s + parseFloat(String(a.amount)), 0);
-    const totalPaid = payments.reduce((s, p) => s + parseFloat(String(p.amount)), 0);
+    const totalAccrued = accruals.reduce(
+      (s, a) => s + parseFloat(String(a.amount)),
+      0,
+    );
+    const totalPaid = payments.reduce(
+      (s, p) => s + parseFloat(String(p.amount)),
+      0,
+    );
     const docsExpected = accruals.length;
     const docsReceived = documents.length;
 
@@ -164,7 +193,10 @@ contractorsModuleRouter.patch("/contractors/:id", async (req, res) => {
   try {
     const [updated] = await db
       .update(contractorsTable)
-      .set({ ...req.body as Partial<typeof contractorsTable.$inferInsert>, updatedAt: new Date() })
+      .set({
+        ...(req.body as Partial<typeof contractorsTable.$inferInsert>),
+        updatedAt: new Date(),
+      })
       .where(eq(contractorsTable.id, req.params.id))
       .returning();
     res.json(updated);
@@ -186,12 +218,19 @@ const accrualSchema = z.object({
 
 contractorsModuleRouter.post("/contractors/:id/accruals", async (req, res) => {
   const parsed = accrualSchema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: z.prettifyError(parsed.error) }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: z.prettifyError(parsed.error) });
+    return;
+  }
 
   try {
     const [accrual] = await db
       .insert(contractorAccrualsTable)
-      .values({ contractorId: req.params.id, ...parsed.data, amount: String(parsed.data.amount) })
+      .values({
+        contractorId: req.params.id,
+        ...parsed.data,
+        amount: String(parsed.data.amount),
+      })
       .returning();
     res.json(accrual);
   } catch (err) {
@@ -213,12 +252,19 @@ const paymentSchema = z.object({
 
 contractorsModuleRouter.post("/contractors/:id/payments", async (req, res) => {
   const parsed = paymentSchema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: z.prettifyError(parsed.error) }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: z.prettifyError(parsed.error) });
+    return;
+  }
 
   try {
     const [payment] = await db
       .insert(contractorPaymentsTable)
-      .values({ contractorId: req.params.id, ...parsed.data, amount: String(parsed.data.amount) })
+      .values({
+        contractorId: req.params.id,
+        ...parsed.data,
+        amount: String(parsed.data.amount),
+      })
       .returning();
     res.json(payment);
   } catch (err) {
@@ -230,9 +276,19 @@ contractorsModuleRouter.post("/contractors/:id/payments", async (req, res) => {
 // ─── POST /contractors/:id/documents ──────────────────────────────────────────
 
 const docSchema = z.object({
-  docType: z.enum(["contract", "act", "invoice", "upd", "reconciliation", "other"]),
+  docType: z.enum([
+    "contract",
+    "act",
+    "invoice",
+    "upd",
+    "reconciliation",
+    "other",
+  ]),
   docNumber: z.string().optional(),
-  docDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  docDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
   amount: z.number().optional(),
   status: z.enum(["expected", "received", "signed", "overdue"]).optional(),
   accrualId: z.string().uuid().optional(),
@@ -241,7 +297,10 @@ const docSchema = z.object({
 
 contractorsModuleRouter.post("/contractors/:id/documents", async (req, res) => {
   const parsed = docSchema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: z.prettifyError(parsed.error) }); return; }
+  if (!parsed.success) {
+    res.status(400).json({ error: z.prettifyError(parsed.error) });
+    return;
+  }
 
   try {
     const [doc] = await db
@@ -263,13 +322,32 @@ contractorsModuleRouter.post("/contractors/:id/documents", async (req, res) => {
 
 contractorsModuleRouter.get("/contractors/stats/summary", async (req, res) => {
   try {
-    const [{ total }] = await db.select({ total: count(contractorsTable.id) }).from(contractorsTable).where(eq(contractorsTable.isActive, true));
-    const [{ highRisk }] = await db.select({ highRisk: count(contractorsTable.id) }).from(contractorsTable).where(and(eq(contractorsTable.isActive, true), eq(contractorsTable.riskLevel, "high")));
+    const [{ total }] = await db
+      .select({ total: count(contractorsTable.id) })
+      .from(contractorsTable)
+      .where(eq(contractorsTable.isActive, true));
+    const [{ highRisk }] = await db
+      .select({ highRisk: count(contractorsTable.id) })
+      .from(contractorsTable)
+      .where(
+        and(
+          eq(contractorsTable.isActive, true),
+          eq(contractorsTable.riskLevel, "high"),
+        ),
+      );
 
-    const accruals = await db.select({ total: sum(contractorAccrualsTable.amount) }).from(contractorAccrualsTable);
-    const payments = await db.select({ total: sum(contractorPaymentsTable.amount) }).from(contractorPaymentsTable);
-    const docsExpected = await db.select({ cnt: count(contractorAccrualsTable.id) }).from(contractorAccrualsTable);
-    const docsReceived = await db.select({ cnt: count(contractorDocumentsTable.id) }).from(contractorDocumentsTable);
+    const accruals = await db
+      .select({ total: sum(contractorAccrualsTable.amount) })
+      .from(contractorAccrualsTable);
+    const payments = await db
+      .select({ total: sum(contractorPaymentsTable.amount) })
+      .from(contractorPaymentsTable);
+    const docsExpected = await db
+      .select({ cnt: count(contractorAccrualsTable.id) })
+      .from(contractorAccrualsTable);
+    const docsReceived = await db
+      .select({ cnt: count(contractorDocumentsTable.id) })
+      .from(contractorDocumentsTable);
 
     const totalAccrued = parseFloat(String(accruals[0]?.total ?? "0"));
     const totalPaid = parseFloat(String(payments[0]?.total ?? "0"));

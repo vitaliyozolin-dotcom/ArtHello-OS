@@ -10,9 +10,13 @@ import {
 } from "@workspace/db";
 import { sql, desc, count, eq, and, or } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
-import { readSheetRows, normalisePhone, parseDate } from "../lib/googleSheets.js";
+import {
+  readSheetRows,
+  normalisePhone,
+  parseDate,
+} from "../lib/googleSheets.js";
 
-const router: IRouter = Router();
+export const marketingRouter: IRouter = Router();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -42,17 +46,26 @@ function detectColumnMap(headers: string[]): Record<string, number> {
   const lower = headers.map((h) => h.toLowerCase());
 
   const matchers: Array<{ field: string; keywords: string[] }> = [
-    { field: "lead_date",   keywords: ["дата", "date"] },
-    { field: "branch_name", keywords: ["филиал", "branch", "студия", "studio"] },
-    { field: "channel",     keywords: ["канал", "channel"] },
-    { field: "source",      keywords: ["источник", "source", "utm_source"] },
-    { field: "campaign",    keywords: ["кампания", "campaign", "utm_campaign"] },
-    { field: "lead_name",   keywords: ["имя", "name", "клиент", "client", "фио"] },
-    { field: "phone",       keywords: ["телефон", "phone", "tel", "номер"] },
-    { field: "message",     keywords: ["сообщение", "message", "запрос", "comment"] },
-    { field: "status",      keywords: ["статус", "status"] },
-    { field: "manager",     keywords: ["менеджер", "manager", "ответственный"] },
-    { field: "comment",     keywords: ["комментарий", "примечание", "note"] },
+    { field: "lead_date", keywords: ["дата", "date"] },
+    {
+      field: "branch_name",
+      keywords: ["филиал", "branch", "студия", "studio"],
+    },
+    { field: "channel", keywords: ["канал", "channel"] },
+    { field: "source", keywords: ["источник", "source", "utm_source"] },
+    { field: "campaign", keywords: ["кампания", "campaign", "utm_campaign"] },
+    {
+      field: "lead_name",
+      keywords: ["имя", "name", "клиент", "client", "фио"],
+    },
+    { field: "phone", keywords: ["телефон", "phone", "tel", "номер"] },
+    {
+      field: "message",
+      keywords: ["сообщение", "message", "запрос", "comment"],
+    },
+    { field: "status", keywords: ["статус", "status"] },
+    { field: "manager", keywords: ["менеджер", "manager", "ответственный"] },
+    { field: "comment", keywords: ["комментарий", "примечание", "note"] },
   ];
 
   for (const { field, keywords } of matchers) {
@@ -76,7 +89,7 @@ function phoneKey(raw: string): string {
 
 // ─── POST /api/sync/google-leads ──────────────────────────────────────────────
 
-router.post("/sync/google-leads", async (req, res): Promise<void> => {
+marketingRouter.post("/sync/google-leads", async (req, res): Promise<void> => {
   const startedAt = new Date();
   req.log.info("Syncing leads from Google Sheets");
 
@@ -87,7 +100,8 @@ router.post("/sync/google-leads", async (req, res): Promise<void> => {
   if (!spreadsheetId) {
     res.status(400).json({
       success: false,
-      message: "No Google Sheet ID provided. Set GOOGLE_SHEET_ID_PROMOTION env var or pass sheetId in body.",
+      message:
+        "No Google Sheet ID provided. Set GOOGLE_SHEET_ID_PROMOTION env var or pass sheetId in body.",
       stats: null,
     });
     return;
@@ -109,7 +123,9 @@ router.post("/sync/google-leads", async (req, res): Promise<void> => {
     logger.info({ headers, colMap }, "Column mapping detected");
 
     // Load existing students for phone matching
-    const students = await db.select({ crmId: crmStudentsTable.crmId, phone: crmStudentsTable.phone }).from(crmStudentsTable);
+    const students = await db
+      .select({ crmId: crmStudentsTable.crmId, phone: crmStudentsTable.phone })
+      .from(crmStudentsTable);
     const studentsByPhone = new Map<string, string>();
     for (const s of students) {
       if (s.phone) {
@@ -120,10 +136,17 @@ router.post("/sync/google-leads", async (req, res): Promise<void> => {
 
     // Load existing marketing leads for duplicate detection
     const existingLeads = await db
-      .select({ phone: marketingLeadsTable.phone, leadDate: marketingLeadsTable.leadDate, source: marketingLeadsTable.source })
+      .select({
+        phone: marketingLeadsTable.phone,
+        leadDate: marketingLeadsTable.leadDate,
+        source: marketingLeadsTable.source,
+      })
       .from(marketingLeadsTable);
     const existingKeys = new Set(
-      existingLeads.map((l) => `${phoneKey(l.phone ?? "")}|${l.leadDate ?? ""}|${(l.source ?? "").toLowerCase()}`),
+      existingLeads.map(
+        (l) =>
+          `${phoneKey(l.phone ?? "")}|${l.leadDate ?? ""}|${(l.source ?? "").toLowerCase()}`,
+      ),
     );
 
     let inserted = 0;
@@ -172,7 +195,8 @@ router.post("/sync/google-leads", async (req, res): Promise<void> => {
 
       // Phone-match to student
       const pk = phoneKey(phone);
-      const matchedStudentCrmId = pk.length >= 7 ? studentsByPhone.get(pk) ?? null : null;
+      const matchedStudentCrmId =
+        pk.length >= 7 ? (studentsByPhone.get(pk) ?? null) : null;
 
       // Insert into lead_events first, get the id
       const [leEvent] = await db
@@ -224,7 +248,14 @@ router.post("/sync/google-leads", async (req, res): Promise<void> => {
     }
 
     const msg = `Google Sheets sync: ${inserted} leads imported, ${duplicates} duplicates flagged, ${skipped} skipped, ${unrecognised.length} unrecognised rows`;
-    await logSync("google-leads", "success", msg, inserted, undefined, startedAt);
+    await logSync(
+      "google-leads",
+      "success",
+      msg,
+      inserted,
+      undefined,
+      startedAt,
+    );
 
     res.json({
       success: true,
@@ -249,7 +280,7 @@ router.post("/sync/google-leads", async (req, res): Promise<void> => {
 
 // ─── GET /api/marketing/leads ─────────────────────────────────────────────────
 
-router.get("/marketing/leads", async (req, res): Promise<void> => {
+marketingRouter.get("/marketing/leads", async (req, res): Promise<void> => {
   const limit = Math.min(Number(req.query["limit"] ?? 50), 200);
   const status = req.query["status"] as string | undefined;
   const channel = req.query["channel"] as string | undefined;
@@ -260,54 +291,63 @@ router.get("/marketing/leads", async (req, res): Promise<void> => {
     .orderBy(desc(marketingLeadsTable.syncedAt))
     .limit(limit);
 
-  res.json(rows.map((r) => ({
-    id: r.id,
-    leadDate: r.leadDate,
-    branchName: r.branchName,
-    channel: r.channel,
-    source: r.source,
-    campaign: r.campaign,
-    leadName: r.leadName,
-    phone: r.phone ? r.phone.slice(0, 4) + "****" + r.phone.slice(-2) : null,
-    status: r.status,
-    manager: r.manager,
-    duplicateCandidate: r.duplicateCandidate,
-    syncedAt: r.syncedAt?.toISOString() ?? null,
-  })));
+  res.json(
+    rows.map((r) => ({
+      id: r.id,
+      leadDate: r.leadDate,
+      branchName: r.branchName,
+      channel: r.channel,
+      source: r.source,
+      campaign: r.campaign,
+      leadName: r.leadName,
+      phone: r.phone ? r.phone.slice(0, 4) + "****" + r.phone.slice(-2) : null,
+      status: r.status,
+      manager: r.manager,
+      duplicateCandidate: r.duplicateCandidate,
+      syncedAt: r.syncedAt?.toISOString() ?? null,
+    })),
+  );
 });
 
 // ─── GET /api/marketing/lead-events ──────────────────────────────────────────
 
-router.get("/marketing/lead-events", async (req, res): Promise<void> => {
-  const limit = Math.min(Number(req.query["limit"] ?? 50), 200);
+marketingRouter.get(
+  "/marketing/lead-events",
+  async (req, res): Promise<void> => {
+    const limit = Math.min(Number(req.query["limit"] ?? 50), 200);
 
-  const rows = await db
-    .select()
-    .from(leadEventsTable)
-    .orderBy(desc(leadEventsTable.createdAt))
-    .limit(limit);
+    const rows = await db
+      .select()
+      .from(leadEventsTable)
+      .orderBy(desc(leadEventsTable.createdAt))
+      .limit(limit);
 
-  res.json(rows.map((r) => ({
-    id: r.id,
-    sourceSystem: r.sourceSystem,
-    eventTime: r.eventTime?.toISOString() ?? null,
-    branchName: r.branchName,
-    channel: r.channel,
-    source: r.source,
-    campaign: r.campaign,
-    clientName: r.clientName,
-    phone: r.phone ? r.phone.slice(0, 4) + "****" + r.phone.slice(-2) : null,
-    status: r.status,
-    manager: r.manager,
-    matchedStudentCrmId: r.matchedStudentCrmId,
-    duplicateCandidate: r.duplicateCandidate,
-    createdAt: r.createdAt?.toISOString() ?? null,
-  })));
-});
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        sourceSystem: r.sourceSystem,
+        eventTime: r.eventTime?.toISOString() ?? null,
+        branchName: r.branchName,
+        channel: r.channel,
+        source: r.source,
+        campaign: r.campaign,
+        clientName: r.clientName,
+        phone: r.phone
+          ? r.phone.slice(0, 4) + "****" + r.phone.slice(-2)
+          : null,
+        status: r.status,
+        manager: r.manager,
+        matchedStudentCrmId: r.matchedStudentCrmId,
+        duplicateCandidate: r.duplicateCandidate,
+        createdAt: r.createdAt?.toISOString() ?? null,
+      })),
+    );
+  },
+);
 
 // ─── GET /api/marketing/sources ──────────────────────────────────────────────
 
-router.get("/marketing/sources", async (req, res): Promise<void> => {
+marketingRouter.get("/marketing/sources", async (req, res): Promise<void> => {
   const rows = await db
     .select()
     .from(marketingSourcesTable)
@@ -317,59 +357,79 @@ router.get("/marketing/sources", async (req, res): Promise<void> => {
 
 // ─── GET /api/marketing/stats ─────────────────────────────────────────────────
 
-router.get("/marketing/stats", async (req, res): Promise<void> => {
-  const [
-    totalLeads,
-    duplicates,
-    matched,
-    byChannel,
-    byStatus,
-    recentLeads,
-  ] = await Promise.all([
-    db.select({ count: count() }).from(leadEventsTable).then((r) => Number(r[0]?.count ?? 0)),
-    db.select({ count: count() }).from(leadEventsTable).where(eq(leadEventsTable.duplicateCandidate, true)).then((r) => Number(r[0]?.count ?? 0)),
-    db.select({ count: count() }).from(leadEventsTable).where(sql`${leadEventsTable.matchedStudentCrmId} IS NOT NULL`).then((r) => Number(r[0]?.count ?? 0)),
-    db.execute(sql`
+marketingRouter.get("/marketing/stats", async (req, res): Promise<void> => {
+  const [totalLeads, duplicates, matched, byChannel, byStatus, recentLeads] =
+    await Promise.all([
+      db
+        .select({ count: count() })
+        .from(leadEventsTable)
+        .then((r) => Number(r[0]?.count ?? 0)),
+      db
+        .select({ count: count() })
+        .from(leadEventsTable)
+        .where(eq(leadEventsTable.duplicateCandidate, true))
+        .then((r) => Number(r[0]?.count ?? 0)),
+      db
+        .select({ count: count() })
+        .from(leadEventsTable)
+        .where(sql`${leadEventsTable.matchedStudentCrmId} IS NOT NULL`)
+        .then((r) => Number(r[0]?.count ?? 0)),
+      db
+        .execute(
+          sql`
       SELECT channel, count(*)::int AS cnt
       FROM lead_events
       WHERE channel IS NOT NULL
       GROUP BY channel
       ORDER BY cnt DESC
       LIMIT 10
-    `).then((r) => r.rows),
-    db.execute(sql`
+    `,
+        )
+        .then((r) => r.rows),
+      db
+        .execute(
+          sql`
       SELECT status, count(*)::int AS cnt
       FROM lead_events
       WHERE status IS NOT NULL
       GROUP BY status
       ORDER BY cnt DESC
-    `).then((r) => r.rows),
-    db.select({
-      id: leadEventsTable.id,
-      eventTime: leadEventsTable.eventTime,
-      channel: leadEventsTable.channel,
-      source: leadEventsTable.source,
-      clientName: leadEventsTable.clientName,
-      phone: leadEventsTable.phone,
-      status: leadEventsTable.status,
-      manager: leadEventsTable.manager,
-      branchName: leadEventsTable.branchName,
-      duplicateCandidate: leadEventsTable.duplicateCandidate,
-      matchedStudentCrmId: leadEventsTable.matchedStudentCrmId,
-      createdAt: leadEventsTable.createdAt,
-    }).from(leadEventsTable).orderBy(desc(leadEventsTable.createdAt)).limit(20),
-  ]);
+    `,
+        )
+        .then((r) => r.rows),
+      db
+        .select({
+          id: leadEventsTable.id,
+          eventTime: leadEventsTable.eventTime,
+          channel: leadEventsTable.channel,
+          source: leadEventsTable.source,
+          clientName: leadEventsTable.clientName,
+          phone: leadEventsTable.phone,
+          status: leadEventsTable.status,
+          manager: leadEventsTable.manager,
+          branchName: leadEventsTable.branchName,
+          duplicateCandidate: leadEventsTable.duplicateCandidate,
+          matchedStudentCrmId: leadEventsTable.matchedStudentCrmId,
+          createdAt: leadEventsTable.createdAt,
+        })
+        .from(leadEventsTable)
+        .orderBy(desc(leadEventsTable.createdAt))
+        .limit(20),
+    ]);
 
   res.json({
     totalLeads,
     duplicates,
     matched,
-    conversionRate: totalLeads > 0 ? Math.round((matched / totalLeads) * 100) : 0,
+    conversionRate:
+      totalLeads > 0 ? Math.round((matched / totalLeads) * 100) : 0,
     byChannel,
     byStatus,
     recentLeads: recentLeads.map((l) => ({
       ...l,
-      phone: l.phone ? String(l.phone).slice(0, 4) + "****" + String(l.phone).slice(-2) : null,
+      phone: l.phone
+        ? String(l.phone).slice(0, 4) + "****" + String(l.phone).slice(-2)
+        : null,
       eventTime: l.eventTime?.toISOString() ?? null,
       createdAt: l.createdAt?.toISOString() ?? null,
     })),
@@ -378,27 +438,34 @@ router.get("/marketing/stats", async (req, res): Promise<void> => {
 
 // ─── POST /api/marketing/sources/normalize ────────────────────────────────────
 
-router.post("/marketing/sources/normalize", async (req, res): Promise<void> => {
-  const body = req.body as { rawSource?: string; canonicalSource?: string; canonicalChannel?: string };
-  if (!body.rawSource) {
-    res.status(400).json({ success: false, message: "rawSource is required" });
-    return;
-  }
-  await db
-    .insert(marketingSourcesTable)
-    .values({
-      rawSource: body.rawSource,
-      canonicalSource: body.canonicalSource ?? null,
-      canonicalChannel: body.canonicalChannel ?? null,
-    })
-    .onConflictDoUpdate({
-      target: marketingSourcesTable.rawSource,
-      set: {
+marketingRouter.post(
+  "/marketing/sources/normalize",
+  async (req, res): Promise<void> => {
+    const body = req.body as {
+      rawSource?: string;
+      canonicalSource?: string;
+      canonicalChannel?: string;
+    };
+    if (!body.rawSource) {
+      res
+        .status(400)
+        .json({ success: false, message: "rawSource is required" });
+      return;
+    }
+    await db
+      .insert(marketingSourcesTable)
+      .values({
+        rawSource: body.rawSource,
         canonicalSource: body.canonicalSource ?? null,
         canonicalChannel: body.canonicalChannel ?? null,
-      },
-    });
-  res.json({ success: true, message: "Source mapping saved" });
-});
-
-export default router;
+      })
+      .onConflictDoUpdate({
+        target: marketingSourcesTable.rawSource,
+        set: {
+          canonicalSource: body.canonicalSource ?? null,
+          canonicalChannel: body.canonicalChannel ?? null,
+        },
+      });
+    res.json({ success: true, message: "Source mapping saved" });
+  },
+);

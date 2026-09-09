@@ -5,10 +5,10 @@ import { eq } from "drizzle-orm";
 import { SetAtlasBranchBody } from "@workspace/api-zod";
 import { logger } from "../lib/logger.js";
 
-const router: IRouter = Router();
+export const branchesRouter: IRouter = Router();
 
 // GET /api/branches — list all synced branches with raw JSON
-router.get("/branches", async (_req, res): Promise<void> => {
+branchesRouter.get("/branches", async (_req, res): Promise<void> => {
   const branches = await db
     .select()
     .from(crmBranchesTable)
@@ -25,7 +25,7 @@ router.get("/branches", async (_req, res): Promise<void> => {
 });
 
 // POST /api/branches/set-atlas — manually set the Atlas branch
-router.post("/branches/set-atlas", async (req, res): Promise<void> => {
+branchesRouter.post("/branches/set-atlas", async (req, res): Promise<void> => {
   const parsed = SetAtlasBranchBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ success: false, message: parsed.error.message });
@@ -67,5 +67,3 @@ router.post("/branches/set-atlas", async (req, res): Promise<void> => {
     data: null,
   });
 });
-
-export default router;

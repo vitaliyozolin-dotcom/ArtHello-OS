@@ -3,8 +3,11 @@ import { z } from "zod/v4";
 import { and, desc, eq, sql, sum, count } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
-  staffVacationsTable, staffDeductionsTable,
-  staffProfilesTable, staffPayoutsTable, staffBonusesTable,
+  staffVacationsTable,
+  staffDeductionsTable,
+  staffProfilesTable,
+  staffPayoutsTable,
+  staffBonusesTable,
 } from "@workspace/db";
 
 export const staffHrRouter = Router();
@@ -13,14 +16,21 @@ export const staffHrRouter = Router();
 
 staffHrRouter.get("/staff/vacations", async (req, res) => {
   try {
-    const { teacherCrmId, vacationType, status } = req.query as Record<string, string | undefined>;
+    const { teacherCrmId, vacationType, status } = req.query as Record<
+      string,
+      string | undefined
+    >;
 
     const conds = [];
-    if (teacherCrmId) conds.push(eq(staffVacationsTable.teacherCrmId, teacherCrmId));
-    if (vacationType) conds.push(eq(staffVacationsTable.vacationType, vacationType));
+    if (teacherCrmId)
+      conds.push(eq(staffVacationsTable.teacherCrmId, teacherCrmId));
+    if (vacationType)
+      conds.push(eq(staffVacationsTable.vacationType, vacationType));
     if (status) conds.push(eq(staffVacationsTable.status, status));
 
-    const rows = await db.select().from(staffVacationsTable)
+    const rows = await db
+      .select()
+      .from(staffVacationsTable)
       .where(conds.length > 0 ? and(...conds) : undefined)
       .orderBy(desc(staffVacationsTable.startDate));
 
@@ -52,7 +62,11 @@ staffHrRouter.post("/staff/vacations", async (req, res) => {
     if (!body.daysCount) {
       const start = new Date(body.startDate);
       const end = new Date(body.endDate);
-      const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+      const days = Math.max(
+        1,
+        Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) +
+          1,
+      );
       (body as Record<string, unknown>).daysCount = days;
     }
 
@@ -75,8 +89,15 @@ staffHrRouter.patch("/staff/vacations/:id", async (req, res) => {
       notes: z.string().optional(),
     });
     const body = schema.parse(req.body);
-    const [updated] = await db.update(staffVacationsTable).set(body)
-      .where(eq(staffVacationsTable.id, id as `${string}-${string}-${string}-${string}-${string}`))
+    const [updated] = await db
+      .update(staffVacationsTable)
+      .set(body)
+      .where(
+        eq(
+          staffVacationsTable.id,
+          id as `${string}-${string}-${string}-${string}-${string}`,
+        ),
+      )
       .returning();
     res.json(updated);
   } catch (err) {
@@ -89,14 +110,21 @@ staffHrRouter.patch("/staff/vacations/:id", async (req, res) => {
 
 staffHrRouter.get("/staff/deductions", async (req, res) => {
   try {
-    const { teacherCrmId, periodMonth, status } = req.query as Record<string, string | undefined>;
+    const { teacherCrmId, periodMonth, status } = req.query as Record<
+      string,
+      string | undefined
+    >;
 
     const conds = [];
-    if (teacherCrmId) conds.push(eq(staffDeductionsTable.teacherCrmId, teacherCrmId));
-    if (periodMonth) conds.push(eq(staffDeductionsTable.periodMonth, periodMonth));
+    if (teacherCrmId)
+      conds.push(eq(staffDeductionsTable.teacherCrmId, teacherCrmId));
+    if (periodMonth)
+      conds.push(eq(staffDeductionsTable.periodMonth, periodMonth));
     if (status) conds.push(eq(staffDeductionsTable.status, status));
 
-    const rows = await db.select().from(staffDeductionsTable)
+    const rows = await db
+      .select()
+      .from(staffDeductionsTable)
       .where(conds.length > 0 ? and(...conds) : undefined)
       .orderBy(desc(staffDeductionsTable.createdAt));
 
@@ -120,7 +148,10 @@ staffHrRouter.post("/staff/deductions", async (req, res) => {
       status: z.string().default("applied"),
     });
     const body = schema.parse(req.body);
-    const [row] = await db.insert(staffDeductionsTable).values(body).returning();
+    const [row] = await db
+      .insert(staffDeductionsTable)
+      .values(body)
+      .returning();
     res.json(row);
   } catch (err) {
     req.log.error({ err }, "POST /staff/deductions failed");
@@ -133,10 +164,20 @@ staffHrRouter.post("/staff/deductions", async (req, res) => {
 staffHrRouter.patch("/staff/deductions/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const schema = z.object({ status: z.string().optional(), reason: z.string().optional() });
+    const schema = z.object({
+      status: z.string().optional(),
+      reason: z.string().optional(),
+    });
     const body = schema.parse(req.body);
-    const [updated] = await db.update(staffDeductionsTable).set(body)
-      .where(eq(staffDeductionsTable.id, id as `${string}-${string}-${string}-${string}-${string}`))
+    const [updated] = await db
+      .update(staffDeductionsTable)
+      .set(body)
+      .where(
+        eq(
+          staffDeductionsTable.id,
+          id as `${string}-${string}-${string}-${string}-${string}`,
+        ),
+      )
       .returning();
     res.json(updated);
   } catch (err) {
@@ -154,23 +195,35 @@ staffHrRouter.get("/staff/payroll-reserve", async (req, res) => {
     const months: string[] = [];
     for (let i = 1; i <= 3; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+      months.push(
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+      );
     }
 
-    const [avgPayout] = await db.select({
-      avg: sql<number>`round(avg(confirmed_amount::numeric))::int`,
-      total: sql<number>`round(sum(confirmed_amount::numeric))::int`,
-    }).from(staffPayoutsTable)
-      .where(sql`period_month = ANY(ARRAY[${sql.raw(months.map((m) => `'${m}'`).join(","))}])`);
+    const [avgPayout] = await db
+      .select({
+        avg: sql<number>`round(avg(confirmed_amount::numeric))::int`,
+        total: sql<number>`round(sum(confirmed_amount::numeric))::int`,
+      })
+      .from(staffPayoutsTable)
+      .where(
+        sql`period_month = ANY(ARRAY[${sql.raw(months.map((m) => `'${m}'`).join(","))}])`,
+      );
 
-    const [bonusTotal] = await db.select({
-      avg: sql<number>`round(avg(amount::numeric))::int`,
-    }).from(staffBonusesTable)
-      .where(sql`period_month = ANY(ARRAY[${sql.raw(months.map((m) => `'${m}'`).join(","))}])`);
+    const [bonusTotal] = await db
+      .select({
+        avg: sql<number>`round(avg(amount::numeric))::int`,
+      })
+      .from(staffBonusesTable)
+      .where(
+        sql`period_month = ANY(ARRAY[${sql.raw(months.map((m) => `'${m}'`).join(","))}])`,
+      );
 
-    const [vacationTotal] = await db.select({
-      total: sql<number>`round(sum(accrued_amount::numeric))::int`,
-    }).from(staffVacationsTable)
+    const [vacationTotal] = await db
+      .select({
+        total: sql<number>`round(sum(accrued_amount::numeric))::int`,
+      })
+      .from(staffVacationsTable)
       .where(sql`created_at >= now() - interval '3 months'`);
 
     const avgPayroll = Number(avgPayout?.avg ?? 0);
@@ -198,18 +251,22 @@ staffHrRouter.get("/staff/payroll-reserve", async (req, res) => {
 
 staffHrRouter.get("/staff/hr-summary", async (req, res) => {
   try {
-    const [vacStats] = await db.select({
-      total: count(staffVacationsTable.id),
-      onVacation: sql<number>`count(*) filter (where status = 'approved' and start_date <= current_date and end_date >= current_date)::int`,
-      planned: sql<number>`count(*) filter (where status = 'planned')::int`,
-      totalDays: sql<number>`coalesce(sum(days_count), 0)::int`,
-    }).from(staffVacationsTable);
+    const [vacStats] = await db
+      .select({
+        total: count(staffVacationsTable.id),
+        onVacation: sql<number>`count(*) filter (where status = 'approved' and start_date <= current_date and end_date >= current_date)::int`,
+        planned: sql<number>`count(*) filter (where status = 'planned')::int`,
+        totalDays: sql<number>`coalesce(sum(days_count), 0)::int`,
+      })
+      .from(staffVacationsTable);
 
-    const [dedStats] = await db.select({
-      total: count(staffDeductionsTable.id),
-      totalAmount: sql<number>`coalesce(sum(amount::numeric), 0)::float`,
-      pending: sql<number>`count(*) filter (where status = 'pending')::int`,
-    }).from(staffDeductionsTable);
+    const [dedStats] = await db
+      .select({
+        total: count(staffDeductionsTable.id),
+        totalAmount: sql<number>`coalesce(sum(amount::numeric), 0)::float`,
+        pending: sql<number>`count(*) filter (where status = 'pending')::int`,
+      })
+      .from(staffDeductionsTable);
 
     res.json({
       vacations: {

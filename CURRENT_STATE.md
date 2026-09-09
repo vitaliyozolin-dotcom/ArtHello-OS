@@ -1,5 +1,14 @@
 # ArtHello OS — Current State
 
+## Refactoring Phase 4 — closed (2026-09-09)
+
+- D-085 фиксирует структурную декомпозицию без изменения HTTP-контракта и permission semantics; номер обновлён после появления параллельных D-083/D-084 в `origin/main`.
+- Исторический `routes/audit.ts` удалён: его 17 `/coverage/*` обработчиков перенесены в тематические именованные Router-модули под `routes/coverage/`, а порядок подключения сохранён агрегатором.
+- После переноса contract-drift сохранил 302 runtime method/path, 156 OpenAPI method/path и 146 явно инвентаризированных server-only method/path без необъяснённых или stale записей; permission proof сохранил результат 14/14.
+- Все публичные `routes/**/*.ts` теперь не превышают 500 строк и используют именованные exports; крупные реализации изолированы за тонкими feature entrypoints. Auth middleware импортируется приложением через `lib/security/auth-middleware.ts`.
+- `coverage`, `banking` и `employees` перемещены в frontend feature-каталоги со стабильными compatibility wrappers в `pages/`; production build и desktop/mobile visual acceptance прошли без изменения принятого интерфейса.
+- Постоянный `phase-four-architecture` ratchet запрещает возврат oversized route API, default route exports, `audit.ts` и giant-page implementations в `pages/`.
+
 ## Refactoring Phase 3 — contract and correctness boundary (2026-09-09)
 
 - D-082 закрепляет OpenAPI как источник публичного типизированного контракта. Исполняемый contract-drift gate видит 302 runtime method/path, 156 OpenAPI method/path и 146 существующих server-only method/path с явным disposition; необъяснённых и stale записей нет. Это технический inventory, не продуктовые количества.
@@ -99,33 +108,33 @@ PR body сам по себе не является доказательство�
 
 ## Историческое provenance A.3 checkpoint v10
 
-| Узел доказательства | Точное значение |
-|---|---|
-| Local source commit | `8735824a214e980ff9cb492fa7253959ab6c2123` |
-| Local Git tree | `b3ede5bc05cd8685b64031f80db8fc9bbd6ad799` |
-| Private Draft PR | `vitaliyozolin-dotcom/ArtHello-OS#1`, open, draft, unmerged |
-| Remote PR head | `7f175fa7f14a55b0f329b95a6f63d326682ec113` |
-| Claimed remote Git tree | `b3ede5bc05cd8685b64031f80db8fc9bbd6ad799`; не было независимого `tree.sha` evidence |
-| GitHub Actions | run #8, `30163177884`, conclusion `success` |
-| Sites version | `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_71ff653bbc548191b1b138dec8eaa332` |
-| Sites deployment | `appgdep_6a64d3b5e134819193ba100f503db92d`, status `succeeded` |
-| Reviewer | `CONDITIONAL PASS` только owner-only sanitized checkpoint |
-| Coordinator | `CONDITIONAL GO` только owner-only; цикл 3 разрешён; Phase A/production/next phase `BLOCKED` |
+| Узел доказательства     | Точное значение                                                                              |
+| ----------------------- | -------------------------------------------------------------------------------------------- |
+| Local source commit     | `8735824a214e980ff9cb492fa7253959ab6c2123`                                                   |
+| Local Git tree          | `b3ede5bc05cd8685b64031f80db8fc9bbd6ad799`                                                   |
+| Private Draft PR        | `vitaliyozolin-dotcom/ArtHello-OS#1`, open, draft, unmerged                                  |
+| Remote PR head          | `7f175fa7f14a55b0f329b95a6f63d326682ec113`                                                   |
+| Claimed remote Git tree | `b3ede5bc05cd8685b64031f80db8fc9bbd6ad799`; не было независимого `tree.sha` evidence         |
+| GitHub Actions          | run #8, `30163177884`, conclusion `success`                                                  |
+| Sites version           | `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_71ff653bbc548191b1b138dec8eaa332`          |
+| Sites deployment        | `appgdep_6a64d3b5e134819193ba100f503db92d`, status `succeeded`                               |
+| Reviewer                | `CONDITIONAL PASS` только owner-only sanitized checkpoint                                    |
+| Coordinator             | `CONDITIONAL GO` только owner-only; цикл 3 разрешён; Phase A/production/next phase `BLOCKED` |
 
 ## Историческое provenance A.3 checkpoint v9
 
-| Узел доказательства | Точное значение |
-|---|---|
-| Local source commit | `0900b9cff88e330afd095bcc8ac17da11a6ce50c` |
-| Local Git tree | `609e64852c47808c0447f247976d6dd4513bb038` |
-| Private branch | `codex/a3-live-read-only` |
-| Private Draft PR | `vitaliyozolin-dotcom/ArtHello-OS#1`, open, draft, unmerged |
-| Remote PR head | `3ab2cfe4310f5d22a42e0c874180428894dae788` |
-| Remote Git tree | `609e64852c47808c0447f247976d6dd4513bb038` |
-| GitHub Actions | run #7, `30161981773`, conclusion `success` |
-| Sites version | `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_37098405ed048191ab3943dfea63c76c` |
-| Sites deployment | `appgdep_6a64cae273e881919dc83dbf2f8645e0`, status `succeeded` |
-| Sites access | owner-only/custom, только владелец |
+| Узел доказательства | Точное значение                                                                     |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| Local source commit | `0900b9cff88e330afd095bcc8ac17da11a6ce50c`                                          |
+| Local Git tree      | `609e64852c47808c0447f247976d6dd4513bb038`                                          |
+| Private branch      | `codex/a3-live-read-only`                                                           |
+| Private Draft PR    | `vitaliyozolin-dotcom/ArtHello-OS#1`, open, draft, unmerged                         |
+| Remote PR head      | `3ab2cfe4310f5d22a42e0c874180428894dae788`                                          |
+| Remote Git tree     | `609e64852c47808c0447f247976d6dd4513bb038`                                          |
+| GitHub Actions      | run #7, `30161981773`, conclusion `success`                                         |
+| Sites version       | `appgprj_6a626e9e441481919bb30eee8ba97165~appgver_37098405ed048191ab3943dfea63c76c` |
+| Sites deployment    | `appgdep_6a64cae273e881919dc83dbf2f8645e0`, status `succeeded`                      |
+| Sites access        | owner-only/custom, только владелец                                                  |
 
 Local и remote commit SHA различались, потому что приватная ветка собрана через Git Data API поверх отдельной remote history. Sites v9 создан из local commit после desktop/mobile agent preview; опубликованный URL не открывался во внутреннем cloud browser.
 
@@ -185,14 +194,14 @@ Unit/source regression suite проверяет эти ветки без product
 
 ## Репозиторий
 
-| Область | Фактическое состояние |
-|---|---|
-| Package manager | pnpm workspace, lock-файл восстановлен |
-| Frontend | React 19, Vite, Tailwind, wouter, React Query |
-| API | Express 5, TypeScript |
-| БД | PostgreSQL, Drizzle, большой набор схем и встроенный migration runner |
-| Runtime Replit | Node 24, PostgreSQL 16 по `.replit` |
-| Sites | отдельная безопасная control surface внутри того же репозитория |
+| Область         | Фактическое состояние                                                 |
+| --------------- | --------------------------------------------------------------------- |
+| Package manager | pnpm workspace, lock-файл восстановлен                                |
+| Frontend        | React 19, Vite, Tailwind, wouter, React Query                         |
+| API             | Express 5, TypeScript                                                 |
+| БД              | PostgreSQL, Drizzle, большой набор схем и встроенный migration runner |
+| Runtime Replit  | Node 24, PostgreSQL 16 по `.replit`                                   |
+| Sites           | отдельная безопасная control surface внутри того же репозитория       |
 
 В исходной конфигурации TypeScript incremental metadata считал отсутствующие declaration-файлы актуальными. Команда `typecheck:libs` переведена на принудительную пересборку, после чего baseline typecheck проходит.
 

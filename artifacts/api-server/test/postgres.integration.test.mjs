@@ -51,9 +51,7 @@ function waitForExit(child, timeoutMs = 30_000) {
     let output = "";
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      rejectExit(
-        new Error(`startup failure process timed out\n${output}`),
-      );
+      rejectExit(new Error(`startup failure process timed out\n${output}`));
     }, timeoutMs);
     child.stdout?.on("data", (chunk) => {
       output += chunk.toString();
@@ -97,12 +95,7 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
     await migrate(db, { migrationsFolder });
 
     const { hashPassword } = await import(
-      pathToFileURL(
-        resolve(
-          artifactDir,
-          "src/lib/security/password.ts",
-        ),
-      ).href
+      pathToFileURL(resolve(artifactDir, "src/lib/security/password.ts")).href
     );
     await pool.query(
       `INSERT INTO auth_users (
@@ -118,18 +111,13 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
 
     const { assertSecuritySchemaReady } = await import(
       pathToFileURL(
-        resolve(
-          artifactDir,
-          "src/lib/security/security-schema-gate.ts",
-        ),
+        resolve(artifactDir, "src/lib/security/security-schema-gate.ts"),
       ).href
     );
     await assertSecuritySchemaReady(pool);
 
     const app = (
-      await import(
-        pathToFileURL(resolve(artifactDir, "src/app.ts")).href
-      )
+      await import(pathToFileURL(resolve(artifactDir, "src/app.ts")).href)
     ).default;
     server = await new Promise((resolveServer, rejectServer) => {
       const candidate = app.listen(0, "127.0.0.1", () =>
@@ -156,60 +144,49 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
       mustChangePassword: true,
     });
     const firstCookieHeader = cookiesFrom(firstLogin);
-    const firstCsrfToken = cookieValue(
-      firstCookieHeader,
-      "arthello_csrf",
-    );
+    const firstCsrfToken = cookieValue(firstCookieHeader, "arthello_csrf");
     assert.ok(firstCsrfToken);
 
-    const passwordGate = await fetch(
-      `${baseUrl}/api/banking/connectors`,
-      { headers: { cookie: firstCookieHeader } },
-    );
+    const passwordGate = await fetch(`${baseUrl}/api/banking/connectors`, {
+      headers: { cookie: firstCookieHeader },
+    });
     assert.equal(passwordGate.status, 403);
     assert.deepEqual(await passwordGate.json(), {
       error: "Требуется смена временного пароля",
       code: "PASSWORD_CHANGE_REQUIRED",
     });
 
-    const passwordChange = await fetch(
-      `${baseUrl}/api/auth/password`,
-      {
-        method: "POST",
-        headers: {
-          cookie: firstCookieHeader,
-          "content-type": "application/json",
-          "x-csrf-token": firstCsrfToken,
-        },
-        body: JSON.stringify({
-          currentPassword: initialOwnerPassword,
-          newPassword: changedOwnerPassword,
-        }),
+    const passwordChange = await fetch(`${baseUrl}/api/auth/password`, {
+      method: "POST",
+      headers: {
+        cookie: firstCookieHeader,
+        "content-type": "application/json",
+        "x-csrf-token": firstCsrfToken,
       },
-    );
+      body: JSON.stringify({
+        currentPassword: initialOwnerPassword,
+        newPassword: changedOwnerPassword,
+      }),
+    });
     assert.equal(passwordChange.status, 200);
     assert.deepEqual(await passwordChange.json(), {
       ok: true,
       reauthenticate: true,
     });
 
-    const revokedSession = await fetch(
-      `${baseUrl}/api/auth/me`,
-      { headers: { cookie: firstCookieHeader } },
-    );
+    const revokedSession = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { cookie: firstCookieHeader },
+    });
     assert.equal(revokedSession.status, 401);
 
-    const oldPasswordLogin = await fetch(
-      `${baseUrl}/api/auth/login`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          login: "owner",
-          password: initialOwnerPassword,
-        }),
-      },
-    );
+    const oldPasswordLogin = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        login: "owner",
+        password: initialOwnerPassword,
+      }),
+    });
     assert.equal(oldPasswordLogin.status, 401);
 
     const login = await fetch(`${baseUrl}/api/auth/login`, {
@@ -227,10 +204,7 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
       mustChangePassword: false,
     });
     const cookieHeader = cookiesFrom(login);
-    const csrfToken = cookieValue(
-      cookieHeader,
-      "arthello_csrf",
-    );
+    const csrfToken = cookieValue(cookieHeader, "arthello_csrf");
     assert.ok(csrfToken);
 
     const session = await fetch(`${baseUrl}/api/auth/me`, {
@@ -248,10 +222,9 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
       mustChangePassword: false,
     });
 
-    const banking = await fetch(
-      `${baseUrl}/api/banking/connectors`,
-      { headers: { cookie: cookieHeader } },
-    );
+    const banking = await fetch(`${baseUrl}/api/banking/connectors`, {
+      headers: { cookie: cookieHeader },
+    });
     assert.equal(banking.status, 200);
     const audits = await pool.query(
       `SELECT decision, policy, path
@@ -288,16 +261,11 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
       websiteLeadEventHash,
     } = await import(
       pathToFileURL(
-        resolve(
-          artifactDir,
-          "src/lib/webhooks/website-lead-service.ts",
-        ),
+        resolve(artifactDir, "src/lib/webhooks/website-lead-service.ts"),
       ).href
     );
     const { websiteLeadStore } = await import(
-      pathToFileURL(
-        resolve(artifactDir, "src/routes/webhooks.ts"),
-      ).href
+      pathToFileURL(resolve(artifactDir, "src/routes/webhooks.ts")).href
     );
 
     let injectFailure = true;
@@ -413,25 +381,17 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
     await assertSecuritySchemaReady(pool);
 
     await new Promise((resolveClose, rejectClose) => {
-      server.close((error) =>
-        error ? rejectClose(error) : resolveClose(),
-      );
+      server.close((error) => (error ? rejectClose(error) : resolveClose()));
     });
     server = undefined;
 
     await executeSqlFile(
       pool,
-      resolve(
-        workspaceDir,
-        "lib/db/rollbacks/0010_auth_scope_audit.down.sql",
-      ),
+      resolve(workspaceDir, "lib/db/rollbacks/0010_auth_scope_audit.down.sql"),
     );
     await executeSqlFile(
       pool,
-      resolve(
-        workspaceDir,
-        "lib/db/rollbacks/0009_auth_security.down.sql",
-      ),
+      resolve(workspaceDir, "lib/db/rollbacks/0009_auth_security.down.sql"),
     );
     await assert.rejects(
       assertSecuritySchemaReady(pool),
@@ -459,9 +419,7 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
     );
   } finally {
     if (server) {
-      await new Promise((resolveClose) =>
-        server.close(() => resolveClose()),
-      );
+      await new Promise((resolveClose) => server.close(() => resolveClose()));
     }
     await pool.end();
   }

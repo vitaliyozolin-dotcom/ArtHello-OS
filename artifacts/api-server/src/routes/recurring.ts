@@ -8,48 +8,95 @@ export const recurringRouter = Router();
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function detectType(c: string, p: string): string {
-  c = c.toLowerCase(); p = p.toLowerCase();
+  c = c.toLowerCase();
+  p = p.toLowerCase();
   if (c.includes("тюрин") || p.includes("аренду части здания")) return "rent";
-  if (c.includes("ер груп") && p.includes("аренд"))             return "rent";
-  if (c.includes("тэк спб") || c.includes("петербургская сбытовая")) return "utilities";
-  if (c.includes("газпромбанк автолизинг") || p.includes("финансовой аренды")) return "leasing";
-  if (c.includes("казначейства") || p.includes("единый налоговый платеж")) return "taxes";
-  if (c.includes("осфр") || p.includes("обязательное страхован"))           return "taxes";
-  if (p.includes("реестру зачислений") || p.includes("зарплат") || p.includes("аванс по трудовому")) return "payroll";
-  if (p.includes("самозанят"))           return "payroll";
-  if (c.includes("весна") || c.includes("исмоилов") || p.includes("продукт") || p.includes("питани") || p.includes("мяс")) return "food";
-  if (c.includes("манго телеком"))       return "telecom";
+  if (c.includes("ер груп") && p.includes("аренд")) return "rent";
+  if (c.includes("тэк спб") || c.includes("петербургская сбытовая"))
+    return "utilities";
+  if (c.includes("газпромбанк автолизинг") || p.includes("финансовой аренды"))
+    return "leasing";
+  if (c.includes("казначейства") || p.includes("единый налоговый платеж"))
+    return "taxes";
+  if (c.includes("осфр") || p.includes("обязательное страхован"))
+    return "taxes";
+  if (
+    p.includes("реестру зачислений") ||
+    p.includes("зарплат") ||
+    p.includes("аванс по трудовому")
+  )
+    return "payroll";
+  if (p.includes("самозанят")) return "payroll";
+  if (
+    c.includes("весна") ||
+    c.includes("исмоилов") ||
+    p.includes("продукт") ||
+    p.includes("питани") ||
+    p.includes("мяс")
+  )
+    return "food";
+  if (c.includes("манго телеком")) return "telecom";
   if (c.includes("1с") || c.includes("рарус")) return "software";
-  if (c.includes("охранная") || c.includes("секьюрити") || c.includes("безопасност") || c.includes("дезин")) return "security";
-  if (c.includes("энет") || c.includes("вертикальный транспорт")) return "infrastructure";
-  if (c.includes("инфотех") || c.includes("мальцев") || c.includes("технотек") || c.includes("смб-сервис") || c.includes("восток инновации")) return "infrastructure";
-  if (c.includes("хэдхантер") || c.includes("агеева") || c.includes("демакин") || c.includes("лащ") || p.includes("реклам") || p.includes("таргет") || p.includes("контекст")) return "marketing";
+  if (
+    c.includes("охранная") ||
+    c.includes("секьюрити") ||
+    c.includes("безопасност") ||
+    c.includes("дезин")
+  )
+    return "security";
+  if (c.includes("энет") || c.includes("вертикальный транспорт"))
+    return "infrastructure";
+  if (
+    c.includes("инфотех") ||
+    c.includes("мальцев") ||
+    c.includes("технотек") ||
+    c.includes("смб-сервис") ||
+    c.includes("восток инновации")
+  )
+    return "infrastructure";
+  if (
+    c.includes("хэдхантер") ||
+    c.includes("агеева") ||
+    c.includes("демакин") ||
+    c.includes("лащ") ||
+    p.includes("реклам") ||
+    p.includes("таргет") ||
+    p.includes("контекст")
+  )
+    return "marketing";
   return "custom";
 }
 
 function shouldExclude(c: string, p: string): boolean {
-  c = c.toLowerCase(); p = p.toLowerCase();
-  if (c.includes("артхелло"))                return true; // own entity (main)
-  if (c.includes("артхеллоостров"))          return true; // own entity (island branch)
-  if (c.includes("детское образование"))     return true; // intercompany management co
-  if (c.includes("ук детское"))              return true; // intercompany management co alt spelling
-  if (c.includes("банк точка") || c.includes("банк \"точка\"")) return true; // own bank — mixed fee/transfer noise
-  if (p.includes("фонд налоги"))             return true; // auto 6% tax fund micro-transfers
-  if (p.includes("между своими счетами"))    return true; // own-account sweep
+  c = c.toLowerCase();
+  p = p.toLowerCase();
+  if (c.includes("артхелло")) return true; // own entity (main)
+  if (c.includes("артхеллоостров")) return true; // own entity (island branch)
+  if (c.includes("детское образование")) return true; // intercompany management co
+  if (c.includes("ук детское")) return true; // intercompany management co alt spelling
+  if (c.includes("банк точка") || c.includes('банк "точка"')) return true; // own bank — mixed fee/transfer noise
+  if (p.includes("фонд налоги")) return true; // auto 6% tax fund micro-transfers
+  if (p.includes("между своими счетами")) return true; // own-account sweep
   if (p.includes("подотчет") || p.includes("подотчёт")) return true;
-  if (p.includes("возмещени") && p.includes("лицу"))    return true; // petty cash reimbursements
-  if (p.includes("покупка товара"))          return true; // card POS
-  if (p.includes("спектакл") || p.includes("театр") || p.includes("гелий")) return true;
+  if (p.includes("возмещени") && p.includes("лицу")) return true; // petty cash reimbursements
+  if (p.includes("покупка товара")) return true; // card POS
+  if (p.includes("спектакл") || p.includes("театр") || p.includes("гелий"))
+    return true;
   return false;
 }
 
-function computeConfidence(months: number, avg: number, min: number, max: number): number {
+function computeConfidence(
+  months: number,
+  avg: number,
+  min: number,
+  max: number,
+): number {
   const variance = avg > 0 ? Math.abs(max - min) / avg : 0;
   if (months >= 3 && variance < 0.05) return 97;
-  if (months >= 3 && variance < 0.20) return 88;
-  if (months >= 3)                    return 75;
+  if (months >= 3 && variance < 0.2) return 88;
+  if (months >= 3) return 75;
   if (months >= 2 && variance < 0.05) return 85;
-  if (months >= 2 && variance < 0.20) return 72;
+  if (months >= 2 && variance < 0.2) return 72;
   return 65;
 }
 
@@ -77,11 +124,7 @@ recurringRouter.get("/banking/recurring", async (req, res) => {
     const rows = await db
       .select()
       .from(recurringObligationsTable)
-      .where(
-        status
-          ? eq(recurringObligationsTable.status, status)
-          : undefined
-      )
+      .where(status ? eq(recurringObligationsTable.status, status) : undefined)
       .orderBy(recurringObligationsTable.confidenceScore);
 
     res.json({ obligations: rows.reverse() });
@@ -105,17 +148,21 @@ recurringRouter.get("/banking/recurring/upcoming", async (req, res) => {
         and(
           eq(recurringObligationsTable.isActive, true),
           lte(recurringObligationsTable.nextExpectedDate, inThirty),
-          gte(recurringObligationsTable.nextExpectedDate, today)
-        )
+          gte(recurringObligationsTable.nextExpectedDate, today),
+        ),
       )
       .orderBy(recurringObligationsTable.nextExpectedDate);
 
     const totalExpected = rows.reduce(
       (sum, r) => sum + parseFloat(r.expectedAmount ?? "0"),
-      0
+      0,
     );
 
-    res.json({ upcoming: rows, totalExpected: totalExpected.toFixed(2), asOf: today });
+    res.json({
+      upcoming: rows,
+      totalExpected: totalExpected.toFixed(2),
+      asOf: today,
+    });
   } catch (err) {
     req.log.error(err, "recurring upcoming error");
     res.status(500).json({ error: "internal error" });
@@ -161,63 +208,87 @@ recurringRouter.post("/banking/recurring/detect", async (req, res) => {
     `);
 
     let inserted = 0;
-    let updated  = 0;
-    let skipped  = 0;
+    let updated = 0;
+    let skipped = 0;
 
     for (const row of candidates.rows) {
-      const cName   = row.counterparty_name ?? "";
-      const purpose = row.sample_purpose   ?? "";
-      const dir     = row.direction        ?? "expense";
+      const cName = row.counterparty_name ?? "";
+      const purpose = row.sample_purpose ?? "";
+      const dir = row.direction ?? "expense";
 
       // Skip income (QR noise) unless it looks like a real B2B client
-      if (dir === "income" && !purpose.toLowerCase().includes("оплата") && !cName.toLowerCase().includes("управляющая")) {
+      if (
+        dir === "income" &&
+        !purpose.toLowerCase().includes("оплата") &&
+        !cName.toLowerCase().includes("управляющая")
+      ) {
         skipped++;
         continue;
       }
 
-      if (shouldExclude(cName, purpose)) { skipped++; continue; }
+      if (shouldExclude(cName, purpose)) {
+        skipped++;
+        continue;
+      }
 
-      const months  = parseInt(row.months_active, 10);
-      const avg     = parseFloat(row.avg_amount);
-      const min     = parseFloat(row.min_amount);
-      const max     = parseFloat(row.max_amount);
+      const months = parseInt(row.months_active, 10);
+      const avg = parseFloat(row.avg_amount);
+      const min = parseFloat(row.min_amount);
+      const max = parseFloat(row.max_amount);
 
       const confidence = computeConfidence(months, avg, min, max);
-      if (confidence < 60) { skipped++; continue; }
+      if (confidence < 60) {
+        skipped++;
+        continue;
+      }
 
-      const type       = detectType(cName, purpose);
-      const frequency  = "monthly";
-      const lastPaid   = row.last_paid_date;
-      const nextDate   = nextExpected(lastPaid, frequency);
-      const title      = cName.replace(/^(ООО|ИП|АО|ОАО|ПАО|АНО|ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ|ИНДИВИДУАЛЬНЫЙ ПРЕДПРИНИМАТЕЛЬ)\s*"?/i, "").replace(/"/g, "").trim().slice(0, 80) || cName.slice(0, 80);
+      const type = detectType(cName, purpose);
+      const frequency = "monthly";
+      const lastPaid = row.last_paid_date;
+      const nextDate = nextExpected(lastPaid, frequency);
+      const title =
+        cName
+          .replace(
+            /^(ООО|ИП|АО|ОАО|ПАО|АНО|ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ|ИНДИВИДУАЛЬНЫЙ ПРЕДПРИНИМАТЕЛЬ)\s*"?/i,
+            "",
+          )
+          .replace(/"/g, "")
+          .trim()
+          .slice(0, 80) || cName.slice(0, 80);
 
       // Upsert: match on counterparty_name + direction
       const existing = await db
-        .select({ id: recurringObligationsTable.id, status: recurringObligationsTable.status })
+        .select({
+          id: recurringObligationsTable.id,
+          status: recurringObligationsTable.status,
+        })
         .from(recurringObligationsTable)
         .where(
           and(
             eq(recurringObligationsTable.counterpartyName, cName),
-            eq(recurringObligationsTable.frequency, frequency)
-          )
+            eq(recurringObligationsTable.frequency, frequency),
+          ),
         )
         .limit(1);
 
       if (existing.length > 0) {
         const ex = existing[0]!;
         // Don't overwrite user-approved/rejected
-        if (ex.status === "approved" || ex.status === "rejected") { skipped++; continue; }
+        if (ex.status === "approved" || ex.status === "rejected") {
+          skipped++;
+          continue;
+        }
         await db
           .update(recurringObligationsTable)
           .set({
-            expectedAmount:  avg.toFixed(2),
-            minAmount:       min.toFixed(2),
-            maxAmount:       max.toFixed(2),
+            expectedAmount: avg.toFixed(2),
+            minAmount: min.toFixed(2),
+            maxAmount: max.toFixed(2),
             confidenceScore: confidence,
-            lastPaidAt:      lastPaid,
+            lastPaidAt: lastPaid,
             nextExpectedDate: nextDate,
-            lastDetectedAt:  new Date(),
-            updatedAt:       new Date(),
+            lastDetectedAt: new Date(),
+            updatedAt: new Date(),
           })
           .where(eq(recurringObligationsTable.id, ex.id));
         updated++;
@@ -227,25 +298,31 @@ recurringRouter.post("/banking/recurring/detect", async (req, res) => {
           counterpartyName: cName,
           type,
           frequency,
-          expectedAmount:   avg.toFixed(2),
-          minAmount:        min.toFixed(2),
-          maxAmount:        max.toFixed(2),
-          currency:         "RUB",
-          confidenceScore:  confidence,
-          status:           "suggested",
-          detectionSource:  "ai_pattern",
-          lastPaidAt:       lastPaid,
+          expectedAmount: avg.toFixed(2),
+          minAmount: min.toFixed(2),
+          maxAmount: max.toFixed(2),
+          currency: "RUB",
+          confidenceScore: confidence,
+          status: "suggested",
+          detectionSource: "ai_pattern",
+          lastPaidAt: lastPaid,
           nextExpectedDate: nextDate,
-          lastDetectedAt:   new Date(),
-          isActive:         true,
-          relatedParty:     false,
+          lastDetectedAt: new Date(),
+          isActive: true,
+          relatedParty: false,
         });
         inserted++;
       }
     }
 
     logger.info({ inserted, updated, skipped }, "recurring detection complete");
-    res.json({ ok: true, inserted, updated, skipped, total: inserted + updated });
+    res.json({
+      ok: true,
+      inserted,
+      updated,
+      skipped,
+      total: inserted + updated,
+    });
   } catch (err) {
     req.log.error(err, "recurring detect error");
     res.status(500).json({ error: "internal error" });
@@ -272,11 +349,11 @@ recurringRouter.patch("/banking/recurring/:id", async (req, res) => {
     }
 
     const patch: Record<string, unknown> = { updatedAt: new Date() };
-    if (status        !== undefined) patch.status        = status;
-    if (notes         !== undefined) patch.notes         = notes;
+    if (status !== undefined) patch.status = status;
+    if (notes !== undefined) patch.notes = notes;
     if (expectedAmount !== undefined) patch.expectedAmount = expectedAmount;
-    if (dayOfMonth    !== undefined) patch.dayOfMonth    = dayOfMonth;
-    if (isActive      !== undefined) patch.isActive      = isActive;
+    if (dayOfMonth !== undefined) patch.dayOfMonth = dayOfMonth;
+    if (isActive !== undefined) patch.isActive = isActive;
 
     const rows = await db
       .update(recurringObligationsTable)

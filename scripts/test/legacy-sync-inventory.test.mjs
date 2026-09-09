@@ -24,8 +24,8 @@ test("approved legacy sync inventory is retired from the public runtime", () => 
 
 test("retired legacy routes have no contract, generated client, or operator call-sites", () => {
   const searchableFiles = [
-    "artifacts/api-server/src/routes/audit.ts",
-    "artifacts/alpha-crm-sync/src/pages/coverage.tsx",
+    "artifacts/api-server/src/features/coverage/router.ts",
+    "artifacts/alpha-crm-sync/src/features/coverage/page.tsx",
     "lib/api-spec/openapi.yaml",
     "lib/api-client-react/src/generated/api.ts",
   ];

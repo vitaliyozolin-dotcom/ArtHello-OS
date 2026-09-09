@@ -10,15 +10,26 @@ export const documentsModuleRouter = Router();
 
 documentsModuleRouter.get("/documents", async (req, res) => {
   try {
-    const { period, docType, status, contractorId } = req.query as Record<string, string | undefined>;
+    const { period, docType, status, contractorId } = req.query as Record<
+      string,
+      string | undefined
+    >;
 
     const conditions = [];
     if (period) conditions.push(eq(documentsTable.linkedPeriod, period));
     if (docType) conditions.push(eq(documentsTable.docType, docType));
     if (status) conditions.push(eq(documentsTable.status, status));
-    if (contractorId) conditions.push(eq(documentsTable.linkedContractorId, contractorId as `${string}-${string}-${string}-${string}-${string}`));
+    if (contractorId)
+      conditions.push(
+        eq(
+          documentsTable.linkedContractorId,
+          contractorId as `${string}-${string}-${string}-${string}-${string}`,
+        ),
+      );
 
-    const rows = await db.select().from(documentsTable)
+    const rows = await db
+      .select()
+      .from(documentsTable)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(documentsTable.createdAt));
 
@@ -33,28 +44,51 @@ documentsModuleRouter.get("/documents", async (req, res) => {
 
 documentsModuleRouter.get("/documents/summary", async (req, res) => {
   try {
-    const byType = await db.select({
-      docType: documentsTable.docType,
-      count: count(documentsTable.id),
-    }).from(documentsTable).groupBy(documentsTable.docType);
+    const byType = await db
+      .select({
+        docType: documentsTable.docType,
+        count: count(documentsTable.id),
+      })
+      .from(documentsTable)
+      .groupBy(documentsTable.docType);
 
-    const byStatus = await db.select({
-      status: documentsTable.status,
-      count: count(documentsTable.id),
-    }).from(documentsTable).groupBy(documentsTable.status);
+    const byStatus = await db
+      .select({
+        status: documentsTable.status,
+        count: count(documentsTable.id),
+      })
+      .from(documentsTable)
+      .groupBy(documentsTable.status);
 
-    const [totals] = await db.select({ total: count(documentsTable.id) }).from(documentsTable);
-    const [expected] = await db.select({ cnt: count(documentsTable.id) }).from(documentsTable).where(eq(documentsTable.status, "expected"));
-    const [noLink] = await db.select({ cnt: count(documentsTable.id) }).from(documentsTable).where(
-      and(isNull(documentsTable.linkedOperationId), isNull(documentsTable.linkedContractorId)),
-    );
+    const [totals] = await db
+      .select({ total: count(documentsTable.id) })
+      .from(documentsTable);
+    const [expected] = await db
+      .select({ cnt: count(documentsTable.id) })
+      .from(documentsTable)
+      .where(eq(documentsTable.status, "expected"));
+    const [noLink] = await db
+      .select({ cnt: count(documentsTable.id) })
+      .from(documentsTable)
+      .where(
+        and(
+          isNull(documentsTable.linkedOperationId),
+          isNull(documentsTable.linkedContractorId),
+        ),
+      );
 
     res.json({
       total: Number(totals?.total ?? 0),
       expected: Number(expected?.cnt ?? 0),
       unlinked: Number(noLink?.cnt ?? 0),
-      byType: byType.map((r) => ({ docType: r.docType, count: Number(r.count) })),
-      byStatus: byStatus.map((r) => ({ status: r.status, count: Number(r.count) })),
+      byType: byType.map((r) => ({
+        docType: r.docType,
+        count: Number(r.count),
+      })),
+      byStatus: byStatus.map((r) => ({
+        status: r.status,
+        count: Number(r.count),
+      })),
     });
   } catch (err) {
     req.log.error({ err }, "GET /documents/summary failed");
@@ -83,13 +117,18 @@ const createDocSchema = z.object({
 documentsModuleRouter.post("/documents", async (req, res) => {
   try {
     const body = createDocSchema.parse(req.body);
-    const [doc] = await db.insert(documentsTable).values({
-      ...body,
-      docDate: body.docDate ?? null,
-      linkedOperationId: body.linkedOperationId as `${string}-${string}-${string}-${string}-${string}` | undefined,
-      linkedContractorId: body.linkedContractorId as `${string}-${string}-${string}-${string}-${string}` | undefined,
-      aiStatus: "pending",
-    }).returning();
+    const [doc] = await db
+      .insert(documentsTable)
+      .values({
+        ...body,
+        docDate: body.docDate ?? null,
+        linkedOperationId: body.linkedOperationId as
+          `${string}-${string}-${string}-${string}-${string}` | undefined,
+        linkedContractorId: body.linkedContractorId as
+          `${string}-${string}-${string}-${string}-${string}` | undefined,
+        aiStatus: "pending",
+      })
+      .returning();
     res.json(doc);
   } catch (err) {
     req.log.error({ err }, "POST /documents failed");
@@ -116,9 +155,15 @@ documentsModuleRouter.patch("/documents/:id", async (req, res) => {
       aiNotes: z.string().optional(),
     });
     const body = schema.parse(req.body);
-    const [updated] = await db.update(documentsTable)
+    const [updated] = await db
+      .update(documentsTable)
       .set({ ...body, updatedAt: new Date() })
-      .where(eq(documentsTable.id, id as `${string}-${string}-${string}-${string}-${string}`))
+      .where(
+        eq(
+          documentsTable.id,
+          id as `${string}-${string}-${string}-${string}-${string}`,
+        ),
+      )
       .returning();
     res.json(updated);
   } catch (err) {
@@ -132,8 +177,14 @@ documentsModuleRouter.patch("/documents/:id", async (req, res) => {
 documentsModuleRouter.delete("/documents/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    await db.delete(documentsTable)
-      .where(eq(documentsTable.id, id as `${string}-${string}-${string}-${string}-${string}`));
+    await db
+      .delete(documentsTable)
+      .where(
+        eq(
+          documentsTable.id,
+          id as `${string}-${string}-${string}-${string}-${string}`,
+        ),
+      );
     res.json({ ok: true });
   } catch (err) {
     req.log.error({ err }, "DELETE /documents/:id failed");
@@ -146,8 +197,15 @@ documentsModuleRouter.delete("/documents/:id", async (req, res) => {
 documentsModuleRouter.post("/documents/:id/ai-check", async (req, res) => {
   try {
     const { id } = req.params;
-    const [doc] = await db.select().from(documentsTable)
-      .where(eq(documentsTable.id, id as `${string}-${string}-${string}-${string}-${string}`));
+    const [doc] = await db
+      .select()
+      .from(documentsTable)
+      .where(
+        eq(
+          documentsTable.id,
+          id as `${string}-${string}-${string}-${string}-${string}`,
+        ),
+      );
 
     if (!doc) {
       res.status(404).json({ error: "Not found" });
@@ -160,17 +218,28 @@ documentsModuleRouter.post("/documents/:id/ai-check", async (req, res) => {
     if (!doc.docNumber) issues.push("Нет номера документа");
     if (!doc.amount) issues.push("Не указана сумма");
     if (!doc.counterpartyName) issues.push("Не указан контрагент");
-    if (!doc.linkedOperationId && !doc.linkedContractorId) issues.push("Документ не привязан к операции или подрядчику");
+    if (!doc.linkedOperationId && !doc.linkedContractorId)
+      issues.push("Документ не привязан к операции или подрядчику");
     if (!doc.linkedPeriod) issues.push("Не указан период");
     if (doc.docType === "other") issues.push("Уточните тип документа");
-    if (doc.status === "expected") issues.push("Документ ожидается, но не получен");
+    if (doc.status === "expected")
+      issues.push("Документ ожидается, но не получен");
 
     const aiStatus = issues.length === 0 ? "ok" : "issues_found";
-    const aiNotes = issues.length > 0 ? issues.join("; ") : "Документ проверен — проблем не найдено";
+    const aiNotes =
+      issues.length > 0
+        ? issues.join("; ")
+        : "Документ проверен — проблем не найдено";
 
-    const [updated] = await db.update(documentsTable)
+    const [updated] = await db
+      .update(documentsTable)
       .set({ aiStatus, aiNotes, updatedAt: new Date() })
-      .where(eq(documentsTable.id, id as `${string}-${string}-${string}-${string}-${string}`))
+      .where(
+        eq(
+          documentsTable.id,
+          id as `${string}-${string}-${string}-${string}-${string}`,
+        ),
+      )
       .returning();
 
     res.json({ aiStatus, aiNotes, issues, document: updated });
@@ -184,7 +253,10 @@ documentsModuleRouter.post("/documents/:id/ai-check", async (req, res) => {
 
 documentsModuleRouter.post("/documents/ai-check-all", async (req, res) => {
   try {
-    const docs = await db.select().from(documentsTable).where(eq(documentsTable.aiStatus, "pending"));
+    const docs = await db
+      .select()
+      .from(documentsTable)
+      .where(eq(documentsTable.aiStatus, "pending"));
 
     let checked = 0;
     for (const doc of docs) {
@@ -193,14 +265,18 @@ documentsModuleRouter.post("/documents/ai-check-all", async (req, res) => {
       if (!doc.docNumber) issues.push("Нет номера");
       if (!doc.amount) issues.push("Нет суммы");
       if (!doc.counterpartyName) issues.push("Нет контрагента");
-      if (!doc.linkedOperationId && !doc.linkedContractorId) issues.push("Не привязан");
+      if (!doc.linkedOperationId && !doc.linkedContractorId)
+        issues.push("Не привязан");
       if (doc.status === "expected") issues.push("Ожидается");
 
-      await db.update(documentsTable).set({
-        aiStatus: issues.length === 0 ? "ok" : "issues_found",
-        aiNotes: issues.length > 0 ? issues.join("; ") : "OK",
-        updatedAt: new Date(),
-      }).where(eq(documentsTable.id, doc.id));
+      await db
+        .update(documentsTable)
+        .set({
+          aiStatus: issues.length === 0 ? "ok" : "issues_found",
+          aiNotes: issues.length > 0 ? issues.join("; ") : "OK",
+          updatedAt: new Date(),
+        })
+        .where(eq(documentsTable.id, doc.id));
       checked++;
     }
 

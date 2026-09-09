@@ -9,20 +9,21 @@
 
 **Монорепо (pnpm), 8 workspace-членов:**
 
-| Пакет | Назначение | Объём |
-|---|---|---|
-| `artifacts/api-server` | Express 5 REST API, 290 путей / 44 route-модуля | ~38 300 строк |
-| `artifacts/alpha-crm-sync` | React 19 SPA бэк-офиса (финансы, банк, staff, front-office) | ~41 500 строк |
-| `lib/db` | Drizzle + 26 схем + 18 миграций + rollbacks + migration-twin | ~3 700 строк |
-| `lib/api-spec` | `openapi.yaml` (171 путь) + orval codegen | 7 516 строк yaml |
-| `lib/api-client-react` | Сгенерированный React Query клиент (80 хуков) + custom-fetch | ~18 400 строк |
-| `lib/api-zod` | Сгенерированные Zod-схемы | ~4 400 строк |
-| `scripts` | Sandbox-импортёры AlfaCRM/payroll на PGlite | ~5 700 строк |
-| `sites-control` | Owner-only статусная поверхность OpenAI Sites | статический UI + worker build |
+| Пакет                      | Назначение                                                   | Объём                         |
+| -------------------------- | ------------------------------------------------------------ | ----------------------------- |
+| `artifacts/api-server`     | Express 5 REST API, 290 путей / 44 route-модуля              | ~38 300 строк                 |
+| `artifacts/alpha-crm-sync` | React 19 SPA бэк-офиса (финансы, банк, staff, front-office)  | ~41 500 строк                 |
+| `lib/db`                   | Drizzle + 26 схем + 18 миграций + rollbacks + migration-twin | ~3 700 строк                  |
+| `lib/api-spec`             | `openapi.yaml` (171 путь) + orval codegen                    | 7 516 строк yaml              |
+| `lib/api-client-react`     | Сгенерированный React Query клиент (80 хуков) + custom-fetch | ~18 400 строк                 |
+| `lib/api-zod`              | Сгенерированные Zod-схемы                                    | ~4 400 строк                  |
+| `scripts`                  | Sandbox-импортёры AlfaCRM/payroll на PGlite                  | ~5 700 строк                  |
+| `sites-control`            | Owner-only статусная поверхность OpenAI Sites                | статический UI + worker build |
 
 **Вне workspace:** `deploy/` (~22 000 строк TS/TSX/MJS, невидимых для tsc: v44/v52 School-контур на Cloudflare D1, третья реализация auth).
 
 **Пути «commit → production» (3 активных после cleanup 2026-09-01):**
+
 1. **Sites control** — `pnpm build:sites` → воркер → ручная публикация через Sites CLI.
 2. **Closed RU release** — `deploy-ru.yml` (dispatch, пин ref) → docker-образы → prerelease → **ручной** `pull-release.sh` root'ом на Timeweb VPS (с boundary-гейтами и rollback).
 3. **Replit autoscale** — платформенный, с `postMerge`-хуком.
@@ -39,53 +40,53 @@
 
 ### 2.1 CRITICAL — безопасность и целостность продакшена
 
-| ID | Уязвимость | Доказательство | Мера устранения |
-|----|-----------|----------------|-----------------|
-| R1 | **Устранено в активных workflow:** исторические `pull_request`/`pull_request_target` пути к production capability удалены cleanup 2026-09-01; постоянный YAML-aware gate оставлен | `docs/workflow-archive-2026-09-01.md`; `scripts/workflow-policy.mjs` | Не возвращать архивные workflow без нового D-решения и негативного policy evidence |
-| R2 | Self-hosted runner установлен на прод-хосте **как root** (`RUNNER_USER=root`, `RUNNER_ALLOW_RUNASROOT=1`); версия runner не зафиксирована. Перевод пользователя в группу `docker` не устраняет root-эквивалентность Docker socket | `deploy/install-school-self-hosted-runner.sh:9,55-58,75,85`; Docker-операции в `v52-candidate.yml` | Убрать недоверенный execution path с production runner; целево — отдельная VM/ephemeral runner без production Docker socket; пин версии. Смена Unix-пользователя без изоляции недостаточна |
-| R3 | **Устранено в активных workflow:** три dispatchable School SSO cutover удалены как spent | `docs/workflow-archive-2026-09-01.md` | Git-история сохраняется; повторный запуск требует нового проверенного workflow |
-| R4 | **Устранено удалением spent cutover:** активного deploy с hardcoded `VALIDATION_RUN_ID` больше нет | `docs/workflow-archive-2026-09-01.md` | Любой будущий cutover обязан проверять свежий successful validation run через API |
-| R5 | Стирание прод-данных по push текстового файла в main; recovery легитимно заканчивается `FAILED_PRODUCTION_LEFT_STOPPED/PAUSED` | `production-data-reset.yml:5-8` | `workflow_dispatch` + typed confirmation + protected Environment c required reviewers |
-| R7 | Секреты School-контура (`CENTRAL_ACCESS_SECRET`, `IDENTITY_CORE_SECRET`) существуют **только внутри работающего контейнера** (перенос через `docker inspect Config.Env`). Потеря контейнера = невосстановимый отказ SSO | cutover-payload v3 | Environment secrets + зашифрованный офлайн-бэкап; перенос через env-file; drill восстановления в RUNBOOK |
-| R8 | Прерывание cutover между `docker rename` и `docker run` (kill runner'а, обрыв ssh 3300s-сессии) оставляет прод без контейнера `school-1-11`; восстановление — только bash EXIT-trap, внешнего watchdog нет | cutover-payload v3 | Standalone `deploy/rollback-school-1-11.sh` + watchdog/systemd; rename только после успешного старта нового |
-| R11 | `post-merge.sh`: `pnpm --filter db push` — имя пакета неверно (реальное `@workspace/db`): хук либо молча падает на каждом merge, либо при резолве выполнил бы **неревьюируемый `drizzle-kit push` в живую БД** | `scripts/post-merge.sh:4`; `.replit [postMerge]` | Удалить строку целиком (не «чинить» имя — сама операция и есть опасность) |
-| SEC-CRED | Раскрытые credentials AlfaCRM/Точка **не ротированы** (открытый HIGH-блокер; D-026: увиденное в чате скомпрометировано) | `CURRENT_STATE.md`, BACKLOG A.2/A.4 | Уже в BACKLOG — эскалировать в Фазу 0 с подтверждением отзыва у провайдера |
+| ID       | Уязвимость                                                                                                                                                                                                                        | Доказательство                                                                                     | Мера устранения                                                                                                                                                                            |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R1       | **Устранено в активных workflow:** исторические `pull_request`/`pull_request_target` пути к production capability удалены cleanup 2026-09-01; постоянный YAML-aware gate оставлен                                                 | `docs/workflow-archive-2026-09-01.md`; `scripts/workflow-policy.mjs`                               | Не возвращать архивные workflow без нового D-решения и негативного policy evidence                                                                                                         |
+| R2       | Self-hosted runner установлен на прод-хосте **как root** (`RUNNER_USER=root`, `RUNNER_ALLOW_RUNASROOT=1`); версия runner не зафиксирована. Перевод пользователя в группу `docker` не устраняет root-эквивалентность Docker socket | `deploy/install-school-self-hosted-runner.sh:9,55-58,75,85`; Docker-операции в `v52-candidate.yml` | Убрать недоверенный execution path с production runner; целево — отдельная VM/ephemeral runner без production Docker socket; пин версии. Смена Unix-пользователя без изоляции недостаточна |
+| R3       | **Устранено в активных workflow:** три dispatchable School SSO cutover удалены как spent                                                                                                                                          | `docs/workflow-archive-2026-09-01.md`                                                              | Git-история сохраняется; повторный запуск требует нового проверенного workflow                                                                                                             |
+| R4       | **Устранено удалением spent cutover:** активного deploy с hardcoded `VALIDATION_RUN_ID` больше нет                                                                                                                                | `docs/workflow-archive-2026-09-01.md`                                                              | Любой будущий cutover обязан проверять свежий successful validation run через API                                                                                                          |
+| R5       | Стирание прод-данных по push текстового файла в main; recovery легитимно заканчивается `FAILED_PRODUCTION_LEFT_STOPPED/PAUSED`                                                                                                    | `production-data-reset.yml:5-8`                                                                    | `workflow_dispatch` + typed confirmation + protected Environment c required reviewers                                                                                                      |
+| R7       | Секреты School-контура (`CENTRAL_ACCESS_SECRET`, `IDENTITY_CORE_SECRET`) существуют **только внутри работающего контейнера** (перенос через `docker inspect Config.Env`). Потеря контейнера = невосстановимый отказ SSO           | cutover-payload v3                                                                                 | Environment secrets + зашифрованный офлайн-бэкап; перенос через env-file; drill восстановления в RUNBOOK                                                                                   |
+| R8       | Прерывание cutover между `docker rename` и `docker run` (kill runner'а, обрыв ssh 3300s-сессии) оставляет прод без контейнера `school-1-11`; восстановление — только bash EXIT-trap, внешнего watchdog нет                        | cutover-payload v3                                                                                 | Standalone `deploy/rollback-school-1-11.sh` + watchdog/systemd; rename только после успешного старта нового                                                                                |
+| R11      | `post-merge.sh`: `pnpm --filter db push` — имя пакета неверно (реальное `@workspace/db`): хук либо молча падает на каждом merge, либо при резолве выполнил бы **неревьюируемый `drizzle-kit push` в живую БД**                    | `scripts/post-merge.sh:4`; `.replit [postMerge]`                                                   | Удалить строку целиком (не «чинить» имя — сама операция и есть опасность)                                                                                                                  |
+| SEC-CRED | Раскрытые credentials AlfaCRM/Точка **не ротированы** (открытый HIGH-блокер; D-026: увиденное в чате скомпрометировано)                                                                                                           | `CURRENT_STATE.md`, BACKLOG A.2/A.4                                                                | Уже в BACKLOG — эскалировать в Фазу 0 с подтверждением отзыва у провайдера                                                                                                                 |
 
 ### 2.2 HIGH
 
-| ID | Уязвимость | Доказательство | Мера |
-|----|-----------|----------------|------|
-| R6 | Исходник v52-приложения — непрозрачный base64-блоб 4.2 МБ + 14 последовательных string-patch-скриптов; работающий в проде код нечитаем из репо, порядок патчей load-bearing и недокументирован | `deploy/v52/Dockerfile:6-33`; `deploy/v52/overrides/scripts/patch-*.mjs` | Материализовать дерево в git, патчи применить один раз и закоммитить |
-| R6b | v44 — тот же блоб-паттерн **без чексуммы** на пересобранном tarball | `deploy/v44/Dockerfile:7-9` | Минимум sha256; целево — как R6 |
-| R9 | Base64-чанки (~920 байт/шт.) как постоянный механизм релиза: прод-логика нерецензируема в PR-диффе; изменение байта = регенерация всех чанков + 4 hex-констант в 2 файлах | `.github/scripts/school-staff-sso-*.sh.gz.b64.part-*` | Обычные файлы (~30 КБ каждый), чексумма по файлу |
-| R10 | SSH host-key pin через TOFU-then-compare; пин зарыт в gzip-блоб и продублирован plain-text во втором workflow (могут разъехаться); третий workflow использует конкурирующую конвенцию с секретом | controller-payload; `verify-school-staff-sso-live-20260831.yml`; `repair-production-ru-lb-backend.yml` | Единая конвенция: known_hosts из GitHub secret |
-| R17 | Бэкапы прод-БД: `while true; sleep 86400` с `set -eu` — первый сбой `pg_dump` навсегда убивает цикл; рестарт контейнера сбрасывает таймер; нет офф-хост копии и алертинга | `deploy/backup.sh` | cron/systemd-timer + алертинг + офф-хост; проверка RPO/RTO (BACKLOG P1) |
-| MIGR | Journal миграций 0000–0017, snapshots только до 0015 → следующий `drizzle-kit generate` даст неверный diff; 0009–0010 не проверены на репрезентативной копии | `lib/db/drizzle/meta/` | Восстановить snapshots 0016–0017; прогон на sandbox-копии (BACKLOG) |
-| MIGR2 | Вторая конкурирующая система миграций: `migrate.ts` (1 135 строк, 237 raw SQL) выполняет **деструктивные DELETE и DROP INDEX при каждом старте сервера** | `artifacts/api-server/src/lib/migrate.ts:29-56`; `src/index.ts:24` | Заморозить, дельты → drizzle, boot-time только read-only schema assertion |
-| FETCH | 43 ручных `fetch("/api/...")` в 14 файлах фронта в обход `custom-fetch` (baseUrl/auth/**CSRF**) | `pages/coverage.tsx` (19), `staff.tsx` (14), `employees.tsx` (12) и др. | Закрыть дрейф контракта, перевести на сгенерированный клиент |
-| PHONE | `normalizePhone` реализован 3–4 раза с разными сигнатурами — identity-matching логика; расхождение = риск неверного сопоставления семей/платежей | `routes/identity.ts:23`; `routes/front-office-smsvizitka.ts:45`; `scripts/src/import-alfacrm-sandbox.ts:139`; `routes/sync.ts:488` | Единая реализация в shared-lib + characterization-тесты |
+| ID    | Уязвимость                                                                                                                                                                                       | Доказательство                                                                                                                     | Мера                                                                      |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| R6    | Исходник v52-приложения — непрозрачный base64-блоб 4.2 МБ + 14 последовательных string-patch-скриптов; работающий в проде код нечитаем из репо, порядок патчей load-bearing и недокументирован   | `deploy/v52/Dockerfile:6-33`; `deploy/v52/overrides/scripts/patch-*.mjs`                                                           | Материализовать дерево в git, патчи применить один раз и закоммитить      |
+| R6b   | v44 — тот же блоб-паттерн **без чексуммы** на пересобранном tarball                                                                                                                              | `deploy/v44/Dockerfile:7-9`                                                                                                        | Минимум sha256; целево — как R6                                           |
+| R9    | Base64-чанки (~920 байт/шт.) как постоянный механизм релиза: прод-логика нерецензируема в PR-диффе; изменение байта = регенерация всех чанков + 4 hex-констант в 2 файлах                        | `.github/scripts/school-staff-sso-*.sh.gz.b64.part-*`                                                                              | Обычные файлы (~30 КБ каждый), чексумма по файлу                          |
+| R10   | SSH host-key pin через TOFU-then-compare; пин зарыт в gzip-блоб и продублирован plain-text во втором workflow (могут разъехаться); третий workflow использует конкурирующую конвенцию с секретом | controller-payload; `verify-school-staff-sso-live-20260831.yml`; `repair-production-ru-lb-backend.yml`                             | Единая конвенция: known_hosts из GitHub secret                            |
+| R17   | Бэкапы прод-БД: `while true; sleep 86400` с `set -eu` — первый сбой `pg_dump` навсегда убивает цикл; рестарт контейнера сбрасывает таймер; нет офф-хост копии и алертинга                        | `deploy/backup.sh`                                                                                                                 | cron/systemd-timer + алертинг + офф-хост; проверка RPO/RTO (BACKLOG P1)   |
+| MIGR  | Journal миграций 0000–0017, snapshots только до 0015 → следующий `drizzle-kit generate` даст неверный diff; 0009–0010 не проверены на репрезентативной копии                                     | `lib/db/drizzle/meta/`                                                                                                             | Восстановить snapshots 0016–0017; прогон на sandbox-копии (BACKLOG)       |
+| MIGR2 | Вторая конкурирующая система миграций: `migrate.ts` (1 135 строк, 237 raw SQL) выполняет **деструктивные DELETE и DROP INDEX при каждом старте сервера**                                         | `artifacts/api-server/src/lib/migrate.ts:29-56`; `src/index.ts:24`                                                                 | Заморозить, дельты → drizzle, boot-time только read-only schema assertion |
+| FETCH | 43 ручных `fetch("/api/...")` в 14 файлах фронта в обход `custom-fetch` (baseUrl/auth/**CSRF**)                                                                                                  | `pages/coverage.tsx` (19), `staff.tsx` (14), `employees.tsx` (12) и др.                                                            | Закрыть дрейф контракта, перевести на сгенерированный клиент              |
+| PHONE | `normalizePhone` реализован 3–4 раза с разными сигнатурами — identity-matching логика; расхождение = риск неверного сопоставления семей/платежей                                                 | `routes/identity.ts:23`; `routes/front-office-smsvizitka.ts:45`; `scripts/src/import-alfacrm-sandbox.ts:139`; `routes/sync.ts:488` | Единая реализация в shared-lib + characterization-тесты                   |
 
 ### 2.3 MEDIUM
 
-| ID | Риск | Доказательство | Мера |
-|----|------|----------------|------|
-| R12 | Инлайнер sites-control: две exact-string `String.replace` — любое переформатирование HTML делает replace молчаливым no-op (воркер отдаст страницу без стилей/JS); ни один гейт этого не ловит | `sites-control/scripts/build.mjs:18-20` | Ассертить отсутствие исходных подстрок / наличие `<style>` в бандле |
-| R13 | **Устранено:** 41 одноразовый workflow удалён из активной директории с описью blob SHA | `docs/workflow-archive-2026-09-01.md` | Не восстанавливать frozen candidates как постоянный CD |
-| R14 | После cleanup: 6 активных workflow; `tmp-*` и мёртвые path-фильтры удалены; **CODEOWNERS всё ещё отсутствует** | `.github/workflows/`; `docs/workflow-archive-2026-09-01.md` | Добавить CODEOWNERS минимум для `.github/` и `deploy/` |
-| R15 | `visual-acceptance.mjs` всё ещё зависит от незадекларированного Chrome; workflow с магическим счётчиком 595 удалён | `scripts/visual-acceptance.mjs:18-25`; `docs/workflow-archive-2026-09-01.md` | Пин браузера для постоянного proof gate |
-| R16 | **Устранено для активного CI:** `quality.yml`, `proof-gates.yml`, `deploy-ru.yml`, `deploy/Dockerfile` и корневой `packageManager` закреплены на pnpm 11.7.0; npm-based v52 candidate архивирован | CI + deploy; `docs/workflow-archive-2026-09-01.md` | Сохранять единый pin; floating dependency ranges разбирать отдельно как dependency hygiene |
-| ZOD | 20 файлов импортируют `zod/v4` при catalog-пине `zod: 3.25.76`; `api-zod` используется в 2 из 83 файлов сервера — 42 route-модуля валидируют вручную | api-server | Унификация; валидация через сгенерированные схемы |
-| ENV-THROW | Module-level `throw` при импорте `lib/db` (`DATABASE_URL`) и `alphaCrmClient` (`ALFACRM_DOMAIN`) — импорт с побочным эффектом, слой нетестируем в изоляции | `lib/db/src/index.ts:5-9`; `.../alphaCrmClient.ts:4-7` | Ленивая инициализация / фабрики |
+| ID        | Риск                                                                                                                                                                                              | Доказательство                                                               | Мера                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| R12       | Инлайнер sites-control: две exact-string `String.replace` — любое переформатирование HTML делает replace молчаливым no-op (воркер отдаст страницу без стилей/JS); ни один гейт этого не ловит     | `sites-control/scripts/build.mjs:18-20`                                      | Ассертить отсутствие исходных подстрок / наличие `<style>` в бандле                        |
+| R13       | **Устранено:** 41 одноразовый workflow удалён из активной директории с описью blob SHA                                                                                                            | `docs/workflow-archive-2026-09-01.md`                                        | Не восстанавливать frozen candidates как постоянный CD                                     |
+| R14       | После cleanup: 6 активных workflow; `tmp-*` и мёртвые path-фильтры удалены; **CODEOWNERS всё ещё отсутствует**                                                                                    | `.github/workflows/`; `docs/workflow-archive-2026-09-01.md`                  | Добавить CODEOWNERS минимум для `.github/` и `deploy/`                                     |
+| R15       | `visual-acceptance.mjs` всё ещё зависит от незадекларированного Chrome; workflow с магическим счётчиком 595 удалён                                                                                | `scripts/visual-acceptance.mjs:18-25`; `docs/workflow-archive-2026-09-01.md` | Пин браузера для постоянного proof gate                                                    |
+| R16       | **Устранено для активного CI:** `quality.yml`, `proof-gates.yml`, `deploy-ru.yml`, `deploy/Dockerfile` и корневой `packageManager` закреплены на pnpm 11.7.0; npm-based v52 candidate архивирован | CI + deploy; `docs/workflow-archive-2026-09-01.md`                           | Сохранять единый pin; floating dependency ranges разбирать отдельно как dependency hygiene |
+| ZOD       | 20 файлов импортируют `zod/v4` при catalog-пине `zod: 3.25.76`; `api-zod` используется в 2 из 83 файлов сервера — 42 route-модуля валидируют вручную                                              | api-server                                                                   | Унификация; валидация через сгенерированные схемы                                          |
+| ENV-THROW | Module-level `throw` при импорте `lib/db` (`DATABASE_URL`) и `alphaCrmClient` (`ALFACRM_DOMAIN`) — импорт с побочным эффектом, слой нетестируем в изоляции                                        | `lib/db/src/index.ts:5-9`; `.../alphaCrmClient.ts:4-7`                       | Ленивая инициализация / фабрики                                                            |
 
 ### 2.4 LOW / гигиена
 
-| ID | Риск | Мера |
-|----|------|------|
-| R18 | Мёртвые payload'ы: 4 patch-скрипта + 8 b64-чанков ни на что не ссылаются; `mobile-qa.html` не собирается; ~5.6 МБ бинарщины в `deploy/` | Удалить |
-| R19 | `preview.allowedHosts: true` в vite-конфиге sites-control (DNS-rebinding класс, dev-only); `build.outDir` — мёртвый конфиг | Ограничить/удалить |
-| R20 | Анти-дрейф тесты ассертят содержимое CI-файлов и прозу («3 689 raw-строк») — работают как рачеты, но рутинные правки копирайта ломают suite | Осознанно сохранить; задокументировать в CLAUDE.md |
-| R21 | Governance `.company-os` (`production_requires_ai_contract: true`) ничем не энфорсится; pytest-тесты grant-subsidy-hunter не запускает ни один CI-job | CI-джоб валидации контрактов или явная пометка «документация» |
-| DEAD | `routes/sync.ts` 4 785 строк недостижим (503-гейт `legacy-sync-gate.ts`), но смонтирован, включая one-off repair-эндпоинты; 40/55 UI-компонентов не используются (в т.ч. `sidebar.tsx` 727 строк ×2); схемы `messages`/`conversations` вне barrel | Удаление (частично уже в BACKLOG: `/sync`) |
+| ID   | Риск                                                                                                                                                                                                                                              | Мера                                                          |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| R18  | Мёртвые payload'ы: 4 patch-скрипта + 8 b64-чанков ни на что не ссылаются; `mobile-qa.html` не собирается; ~5.6 МБ бинарщины в `deploy/`                                                                                                           | Удалить                                                       |
+| R19  | `preview.allowedHosts: true` в vite-конфиге sites-control (DNS-rebinding класс, dev-only); `build.outDir` — мёртвый конфиг                                                                                                                        | Ограничить/удалить                                            |
+| R20  | Анти-дрейф тесты ассертят содержимое CI-файлов и прозу («3 689 raw-строк») — работают как рачеты, но рутинные правки копирайта ломают suite                                                                                                       | Осознанно сохранить; задокументировать в CLAUDE.md            |
+| R21  | Governance `.company-os` (`production_requires_ai_contract: true`) ничем не энфорсится; pytest-тесты grant-subsidy-hunter не запускает ни один CI-job                                                                                             | CI-джоб валидации контрактов или явная пометка «документация» |
+| DEAD | `routes/sync.ts` 4 785 строк недостижим (503-гейт `legacy-sync-gate.ts`), но смонтирован, включая one-off repair-эндпоинты; 40/55 UI-компонентов не используются (в т.ч. `sidebar.tsx` 727 строк ×2); схемы `messages`/`conversations` вне barrel | Удаление (частично уже в BACKLOG: `/sync`)                    |
 
 ### 2.5 Архитектурные находки (не уязвимости, но входят в план)
 
@@ -187,16 +188,16 @@ Evidence: лог пустого diff `drizzle-kit generate` только в CI/s
 
 Evidence: contract-drift отчёт с 0 необъяснённых путей; `grep -rn 'fetch("/api' artifacts/alpha-crm-sync/src` = 0; characterization-suite normalizePhone с provenance каждого legacy-варианта; D-номера.
 
-### Фаза 4 — декомпозиция сервера: гиганты, топология роутов, слои (L; много мелких PR)
+### Фаза 4 — закрыта 2026-09-09: декомпозиция сервера, топология роутов и слои
 
-Правило: каждый файл = один PR; route-table snapshot до/после байт-идентичен.
+По прямому решению владельца фаза выполнена одним кандидатом вместо серии PR; route-table snapshot до/после идентичен.
 
-1. Разбить `routes/audit.ts` (4 753 строки, 17 эндпоинтов `/coverage/*`) → `routes/coverage/*.ts`, слить со вторым coverage-файлом; вводящее в заблуждение имя `audit.ts` исчезает.
-2. Так же: `tochka.ts` (1 728) и 6 finance-файлов → `routes/finance/`; 3 файла `/staff/*` → `routes/staff/`; остальные >500 строк — в порядке churn (`git log --stat`).
-3. Фронтовые гиганты `coverage.tsx` (5 358), `banking.tsx` (4 358), `employees.tsx` (2 672) → feature-каталоги; visual-acceptance = доказательство эквивалентности.
-4. **[BEH]** Глобальные middleware из `routes/auth.ts` → `src/lib/security/` (proof-gates path-триггерится на `src/lib/security/**` — продолжает срабатывать, это хорошо).
-5. Named exports для route-модулей; энфорс lint-правилом.
-6. api-zod по мере разбора каждого модуля (продолжение фазы 3.5).
+1. **[выполнено]** `routes/audit.ts` удалён; 17 `/coverage/*` обработчиков разнесены по тематическим модулям с именованным агрегатором.
+2. **[выполнено]** Большие route implementations изолированы по feature-каталогам за тонким стабильным public API; в `routes/**/*.ts` нет файлов свыше 500 строк.
+3. **[выполнено]** `coverage.tsx`, `banking.tsx`, `employees.tsx` перенесены в feature-каталоги; compatibility wrappers сохраняют импорты и lazy-loading contract.
+4. **[выполнено]** Приложение получает глобальные auth middleware через `src/lib/security/auth-middleware.ts`.
+5. **[выполнено]** Route public API переведён на named exports и защищён исполняемым architecture ratchet.
+6. **[выполнено]** Существующие api-zod границы сохранены; промежуточного изменения validation semantics не выполнялось.
 
 НЕ трогать: URL, статус-коды, формы ответов (энфорсится contract-drift гейтом); схему БД; `deploy/`.
 
@@ -226,6 +227,7 @@ Evidence: доказательство deep-link (прямая загрузка 
 Evidence: счётчик workflow до/после + архивный индекс; отчёт hash-эквивалентности сборки School (tarball vs source); CI-прогон с typecheck `deploy/` и исполнением 27 тестов; закоммиченный ratchet-файл; D-номер, закрывающий находку «теневая кодовая база».
 
 Зависимости внутри Фазы 6:
+
 - 6.1–6.2 workflow cleanup стартуют после полного закрытия Фазы 0;
 - 6.3 де-тарболизация стартует после Фазы 0 и отдельного secret-scan gate, независимо от Фаз 2–5;
 - 6.4 включение `deploy/` в typecheck требует завершённой материализации затрагиваемого School-дерева из 6.3; остальные deploy-файлы можно подключать раньше отдельным кандидатом;
@@ -252,21 +254,21 @@ P0 (ops) ──► P1 (мёртвый код) ──► P2 (данные) ──
 
 **Проектно-специфичные** (отвечают на конкретные находки аудита):
 
-| Скил | Что делает | Закрывает |
-|------|-----------|-----------|
-| `audit-release` | Проверка provenance-цепочки перед деплоем: совпадение SHA/tree, чексуммы чанков/скриптов, boundary-строки манифеста, свежесть validation run | R4, R13 |
-| `migration-check` | Паритет journal/snapshots drizzle, наличие rollback-companion на каждую миграцию, прогон `migration-twin.mjs`, отсутствие конфликта с `migrate.ts` | MIGR, MIGR2 |
-| `reviewer` | Роль Ревизора из MASTER_BOOK: read-only проверка кандидата с вердиктом PASS / CONDITIONAL PASS / FAIL / BLOCKED и цитируемыми доказательствами на одну точную версию | evidence-культура |
-| `workflow-hygiene` | Инвентаризация `.github/workflows/`: одноразовые/просроченные workflow, опасные триггеры (pull_request × self-hosted, push-триггеры деструктивных действий), отчёт «удалить/задизейблить/оставить» | R1, R3, R13, R14 |
+| Скил               | Что делает                                                                                                                                                                                         | Закрывает         |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `audit-release`    | Проверка provenance-цепочки перед деплоем: совпадение SHA/tree, чексуммы чанков/скриптов, boundary-строки манифеста, свежесть validation run                                                       | R4, R13           |
+| `migration-check`  | Паритет journal/snapshots drizzle, наличие rollback-companion на каждую миграцию, прогон `migration-twin.mjs`, отсутствие конфликта с `migrate.ts`                                                 | MIGR, MIGR2       |
+| `reviewer`         | Роль Ревизора из MASTER_BOOK: read-only проверка кандидата с вердиктом PASS / CONDITIONAL PASS / FAIL / BLOCKED и цитируемыми доказательствами на одну точную версию                               | evidence-культура |
+| `workflow-hygiene` | Инвентаризация `.github/workflows/`: одноразовые/просроченные workflow, опасные триггеры (pull_request × self-hosted, push-триггеры деструктивных действий), отчёт «удалить/задизейблить/оставить» | R1, R3, R13, R14  |
 
 **Адаптации с aihero.dev/skills** (настроенные под конвенции проекта):
 
-| Скил | Оригинал | Проектная адаптация |
-|------|----------|---------------------|
-| `grill-me` | /grill-me | Адверсариальная критика предложенного изменения до выполнения — в терминах D-решений, security-инвариантов и запретов MASTER_BOOK (никаких выдуманных чисел, fail-closed по умолчанию) |
-| `triage` | /triage | Разбор `BACKLOG.md`: сверка статусов `[~]`/`[ ]` с реальностью репо, предложение следующего шага с доказательствами |
-| `tdd` | /tdd | Red-green-refactor под конвенции проекта: `node --test`, PGlite для БД-логики; явный запрет regex-по-исходникам как замены поведенческих тестов |
-| `domain-model` | /domain-model | Фиксация доменной модели (семьи/ученики/группы/платежи/юрлица) при изменении схем; сверка с `DATA_COVERAGE.md` и правилом «никакого автослияния семей» (D-принцип) |
+| Скил           | Оригинал      | Проектная адаптация                                                                                                                                                                    |
+| -------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `grill-me`     | /grill-me     | Адверсариальная критика предложенного изменения до выполнения — в терминах D-решений, security-инвариантов и запретов MASTER_BOOK (никаких выдуманных чисел, fail-closed по умолчанию) |
+| `triage`       | /triage       | Разбор `BACKLOG.md`: сверка статусов `[~]`/`[ ]` с реальностью репо, предложение следующего шага с доказательствами                                                                    |
+| `tdd`          | /tdd          | Red-green-refactor под конвенции проекта: `node --test`, PGlite для БД-логики; явный запрет regex-по-исходникам как замены поведенческих тестов                                        |
+| `domain-model` | /domain-model | Фиксация доменной модели (семьи/ученики/группы/платежи/юрлица) при изменении схем; сверка с `DATA_COVERAGE.md` и правилом «никакого автослияния семей» (D-принцип)                     |
 
 `AGENTS.md` уже фиксирует структуру монорепо, команды, инварианты и правила доказательств для Codex. Перед добавлением `CLAUDE.md` в Git его необходимо сверить с этой картой и текущей ревизией плана, чтобы две agent-инструкции не расходились.
 

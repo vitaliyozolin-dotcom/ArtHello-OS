@@ -19,7 +19,7 @@ financialCoreRouter.get("/ledger/cashflow-report", async (req, res) => {
     const { from, to } = req.query as Record<string, string | undefined>;
     const conditions = [eq(operations.isDeleted, false)];
     if (from) conditions.push(gte(operations.cashflowMonth, from));
-    if (to)   conditions.push(lte(operations.cashflowMonth, to));
+    if (to) conditions.push(lte(operations.cashflowMonth, to));
 
     // By article
     const byArticle = await db
@@ -29,7 +29,7 @@ financialCoreRouter.get("/ledger/cashflow-report", async (req, res) => {
         articleId: operations.articleId,
         articleName: operations.articleName,
         articleCode: operations.articleCode,
-        total:  sql<string>`SUM(${operations.amount})`,
+        total: sql<string>`SUM(${operations.amount})`,
         txCount: sql<string>`COUNT(*)`,
       })
       .from(operations)
@@ -48,7 +48,7 @@ financialCoreRouter.get("/ledger/cashflow-report", async (req, res) => {
       .select({
         cashflowMonth: operations.cashflowMonth,
         direction: operations.direction,
-        total:  sql<string>`SUM(${operations.amount})`,
+        total: sql<string>`SUM(${operations.amount})`,
         txCount: sql<string>`COUNT(*)`,
       })
       .from(operations)
@@ -71,7 +71,11 @@ financialCoreRouter.get("/ledger/dds-categories", async (_req, res) => {
       .select()
       .from(ddsCategoriesTable)
       .where(eq(ddsCategoriesTable.isActive, true))
-      .orderBy(ddsCategoriesTable.direction, ddsCategoriesTable.groupName, ddsCategoriesTable.category);
+      .orderBy(
+        ddsCategoriesTable.direction,
+        ddsCategoriesTable.groupName,
+        ddsCategoriesTable.category,
+      );
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -86,7 +90,11 @@ financialCoreRouter.get("/ledger/pl-categories", async (_req, res) => {
       .select()
       .from(opiuCategoriesTable)
       .where(eq(opiuCategoriesTable.isActive, true))
-      .orderBy(opiuCategoriesTable.type, opiuCategoriesTable.groupName, opiuCategoriesTable.category);
+      .orderBy(
+        opiuCategoriesTable.type,
+        opiuCategoriesTable.groupName,
+        opiuCategoriesTable.category,
+      );
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -118,9 +126,9 @@ financialCoreRouter.get("/ledger/financial-stats", async (req, res) => {
 
     const [totals] = await db
       .select({
-        totalIncome:   sql<string>`COALESCE(SUM(CASE WHEN ${operations.direction} = 'in'  THEN ${operations.amount} ELSE 0 END), 0)`,
-        totalExpense:  sql<string>`COALESCE(SUM(CASE WHEN ${operations.direction} = 'out' THEN ${operations.amount} ELSE 0 END), 0)`,
-        totalCount:    count(),
+        totalIncome: sql<string>`COALESCE(SUM(CASE WHEN ${operations.direction} = 'in'  THEN ${operations.amount} ELSE 0 END), 0)`,
+        totalExpense: sql<string>`COALESCE(SUM(CASE WHEN ${operations.direction} = 'out' THEN ${operations.amount} ELSE 0 END), 0)`,
+        totalCount: count(),
         verifiedCount: sql<string>`COALESCE(SUM(CASE WHEN ${operations.verificationStatus} = 'verified' THEN 1 ELSE 0 END), 0)`,
         unmatchedCount: sql<string>`COALESCE(SUM(CASE WHEN ${operations.source} = 'bank_api' AND ${operations.verificationStatus} = 'unverified' THEN 1 ELSE 0 END), 0)`,
       })
@@ -128,12 +136,14 @@ financialCoreRouter.get("/ledger/financial-stats", async (req, res) => {
       .where(and(...conditions));
 
     res.json({
-      totalIncome:    parseFloat(totals?.totalIncome   ?? "0"),
-      totalExpense:   parseFloat(totals?.totalExpense  ?? "0"),
-      netCashflow:    parseFloat(totals?.totalIncome   ?? "0") - parseFloat(totals?.totalExpense ?? "0"),
-      totalCount:     Number(totals?.totalCount ?? 0),
-      verifiedCount:  parseInt(String(totals?.verifiedCount   ?? "0"), 10),
-      unmatchedCount: parseInt(String(totals?.unmatchedCount  ?? "0"), 10),
+      totalIncome: parseFloat(totals?.totalIncome ?? "0"),
+      totalExpense: parseFloat(totals?.totalExpense ?? "0"),
+      netCashflow:
+        parseFloat(totals?.totalIncome ?? "0") -
+        parseFloat(totals?.totalExpense ?? "0"),
+      totalCount: Number(totals?.totalCount ?? 0),
+      verifiedCount: parseInt(String(totals?.verifiedCount ?? "0"), 10),
+      unmatchedCount: parseInt(String(totals?.unmatchedCount ?? "0"), 10),
     });
   } catch (err) {
     req.log.error({ err }, "GET /ledger/financial-stats failed");
@@ -145,26 +155,38 @@ financialCoreRouter.get("/ledger/financial-stats", async (req, res) => {
 // Manually project a bank_transaction into the ledger (operations).
 // Also called automatically when a match action is applied.
 
-financialCoreRouter.post("/ledger/project-from-bank/:txId", async (req, res) => {
-  try {
-    const { txId } = req.params;
-    const result = await db.execute(
-      sql`SELECT * FROM bank_transactions WHERE id = ${txId}::uuid LIMIT 1`
-    );
-    const tx = result.rows[0] as Record<string, unknown> | undefined;
-    if (!tx) { res.status(404).json({ error: "Transaction not found" }); return; }
+financialCoreRouter.post(
+  "/ledger/project-from-bank/:txId",
+  async (req, res) => {
+    try {
+      const { txId } = req.params;
+      const result = await db.execute(
+        sql`SELECT * FROM bank_transactions WHERE id = ${txId}::uuid LIMIT 1`,
+      );
+      const tx = result.rows[0] as Record<string, unknown> | undefined;
+      if (!tx) {
+        res.status(404).json({ error: "Transaction not found" });
+        return;
+      }
 
-    const existing = await db.execute(
-      sql`SELECT id FROM operations WHERE bank_transaction_id = ${txId} LIMIT 1`
-    );
+      const existing = await db.execute(
+        sql`SELECT id FROM operations WHERE bank_transaction_id = ${txId} LIMIT 1`,
+      );
 
-    const direction = tx.direction === "income" ? "in" : tx.direction === "expense" ? "out" : "internal";
-    const opDate = tx.operation_date ? new Date(tx.operation_date as string) : new Date();
-    const cashflowMonth = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, "0")}`;
+      const direction =
+        tx.direction === "income"
+          ? "in"
+          : tx.direction === "expense"
+            ? "out"
+            : "internal";
+      const opDate = tx.operation_date
+        ? new Date(tx.operation_date as string)
+        : new Date();
+      const cashflowMonth = `${opDate.getFullYear()}-${String(opDate.getMonth() + 1).padStart(2, "0")}`;
 
-    if ((existing.rows?.length ?? 0) > 0) {
-      const opId = (existing.rows[0] as Record<string, unknown>)?.id;
-      await db.execute(sql`
+      if ((existing.rows?.length ?? 0) > 0) {
+        const opId = (existing.rows[0] as Record<string, unknown>)?.id;
+        await db.execute(sql`
         UPDATE operations SET
           amount           = ${String(tx.amount ?? "0")},
           direction        = ${direction},
@@ -175,9 +197,9 @@ financialCoreRouter.post("/ledger/project-from-bank/:txId", async (req, res) => 
           updated_at       = NOW()
         WHERE id = ${opId}::uuid
       `);
-      res.json({ action: "updated", id: opId });
-    } else {
-      const insertResult = await db.execute(sql`
+        res.json({ action: "updated", id: opId });
+      } else {
+        const insertResult = await db.execute(sql`
         INSERT INTO operations (
           id, operation_type, source, direction, amount, currency,
           description, cashflow_date, cashflow_month, pl_month,
@@ -194,11 +216,12 @@ financialCoreRouter.post("/ledger/project-from-bank/:txId", async (req, res) => 
         )
         RETURNING id
       `);
-      const newId = (insertResult.rows?.[0] as Record<string, unknown>)?.id;
-      res.json({ action: "created", id: newId });
+        const newId = (insertResult.rows?.[0] as Record<string, unknown>)?.id;
+        res.json({ action: "created", id: newId });
+      }
+    } catch (err) {
+      req.log.error({ err }, "POST /ledger/project-from-bank failed");
+      res.status(500).json({ error: String(err) });
     }
-  } catch (err) {
-    req.log.error({ err }, "POST /ledger/project-from-bank failed");
-    res.status(500).json({ error: String(err) });
-  }
-});
+  },
+);

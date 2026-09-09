@@ -9,7 +9,9 @@ export const articlesModuleRouter = Router();
 // GET /articles
 articlesModuleRouter.get("/articles", async (req, res) => {
   try {
-    const list = await db.select().from(articles)
+    const list = await db
+      .select()
+      .from(articles)
       .orderBy(asc(articles.type), asc(articles.sortOrder), asc(articles.code));
     res.json(list);
   } catch (err) {
@@ -62,7 +64,8 @@ articlesModuleRouter.patch("/articles/:id", async (req, res) => {
       sortOrder: z.number().int().optional(),
     });
     const body = schema.parse(req.body);
-    const [updated] = await db.update(articles)
+    const [updated] = await db
+      .update(articles)
       .set({ ...body, updatedAt: new Date() })
       .where(eq(articles.id, id))
       .returning();
@@ -77,7 +80,8 @@ articlesModuleRouter.patch("/articles/:id", async (req, res) => {
 articlesModuleRouter.delete("/articles/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    await db.update(articles)
+    await db
+      .update(articles)
       .set({ isActive: false, updatedAt: new Date() })
       .where(eq(articles.id, id));
     res.json({ ok: true });

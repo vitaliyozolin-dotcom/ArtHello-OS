@@ -73,15 +73,19 @@ pnlRouter.get("/pnl/summary", async (req, res) => {
       .from(operations)
       .where(where);
 
-    const noArticleConditions = [...conditions, sql`${operations.articleId} IS NULL`];
+    const noArticleConditions = [
+      ...conditions,
+      sql`${operations.articleId} IS NULL`,
+    ];
     const [{ withoutArticle }] = await db
       .select({ withoutArticle: count(operations.id) })
       .from(operations)
       .where(and(...noArticleConditions));
 
-    const trustScore = totalOps > 0
-      ? Math.round(100 - (Number(withoutArticle) / Number(totalOps)) * 100)
-      : 100;
+    const trustScore =
+      totalOps > 0
+        ? Math.round(100 - (Number(withoutArticle) / Number(totalOps)) * 100)
+        : 100;
 
     res.json({
       month: month ?? null,
@@ -133,12 +137,21 @@ pnlRouter.get("/pnl/breakdown", async (req, res) => {
         operations.articleCode,
         operations.articleName,
       )
-      .orderBy(operations.direction, articles.groupName, operations.articleName);
+      .orderBy(
+        operations.direction,
+        articles.groupName,
+        operations.articleName,
+      );
 
     // (unused rows variable removed)
 
     // Group by direction → groupName → articles
-    type ArticleRow = { code: string; name: string; amount: number; count: number };
+    type ArticleRow = {
+      code: string;
+      name: string;
+      amount: number;
+      count: number;
+    };
     type Group = { groupName: string; total: number; articles: ArticleRow[] };
 
     const income: Record<string, Group> = {};
@@ -149,7 +162,8 @@ pnlRouter.get("/pnl/breakdown", async (req, res) => {
       const amt = parseFloat(String(r.total ?? "0"));
       const target = r.direction === "in" ? income : expense;
 
-      if (!target[groupKey]) target[groupKey] = { groupName: groupKey, total: 0, articles: [] };
+      if (!target[groupKey])
+        target[groupKey] = { groupName: groupKey, total: 0, articles: [] };
       target[groupKey].total += amt;
       target[groupKey].articles.push({
         code: r.articleCode ?? "",
@@ -184,11 +198,16 @@ pnlRouter.get("/pnl/trend", async (req, res) => {
         total: sum(operations.amount),
       })
       .from(operations)
-      .where(sql`${operations.direction} IN ('in','out') AND pl_month IS NOT NULL AND pl_month != ''`)
+      .where(
+        sql`${operations.direction} IN ('in','out') AND pl_month IS NOT NULL AND pl_month != ''`,
+      )
       .groupBy(operations.plMonth, operations.direction)
       .orderBy(desc(operations.plMonth));
 
-    const byMonth: Record<string, { month: string; revenue: number; expenses: number }> = {};
+    const byMonth: Record<
+      string,
+      { month: string; revenue: number; expenses: number }
+    > = {};
     for (const r of rows) {
       const m = r.month ?? "";
       if (!byMonth[m]) byMonth[m] = { month: m, revenue: 0, expenses: 0 };

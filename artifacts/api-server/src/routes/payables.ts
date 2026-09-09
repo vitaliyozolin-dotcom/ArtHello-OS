@@ -6,8 +6,10 @@ export const payablesRouter = Router();
 const today = () => new Date().toISOString().slice(0, 10);
 
 function effectiveStatus(row: Record<string, unknown>): string {
-  if (row.status === "paid" || row.status === "cancelled") return row.status as string;
-  if (row.due_date && String(row.due_date).slice(0, 10) < today()) return "overdue";
+  if (row.status === "paid" || row.status === "cancelled")
+    return row.status as string;
+  if (row.due_date && String(row.due_date).slice(0, 10) < today())
+    return "overdue";
   return row.status as string;
 }
 
@@ -16,7 +18,8 @@ function effectiveStatus(row: Record<string, unknown>): string {
 payablesRouter.get("/payables/obligations", async (req, res) => {
   const client = await pool.connect();
   try {
-    const { status, counterparty, dueFrom, dueTo, sourceType } = req.query as Record<string, string>;
+    const { status, counterparty, dueFrom, dueTo, sourceType } =
+      req.query as Record<string, string>;
     const conditions: string[] = [];
     const params: unknown[] = [];
     let idx = 1;
@@ -48,10 +51,15 @@ payablesRouter.get("/payables/obligations", async (req, res) => {
       params,
     );
 
-    const obligations = rows.map((r) => ({ ...r, effectiveStatus: effectiveStatus(r) }));
+    const obligations = rows.map((r) => ({
+      ...r,
+      effectiveStatus: effectiveStatus(r),
+    }));
 
     if (status === "overdue") {
-      res.json({ obligations: obligations.filter((o) => o.effectiveStatus === "overdue") });
+      res.json({
+        obligations: obligations.filter((o) => o.effectiveStatus === "overdue"),
+      });
     } else {
       res.json({ obligations });
     }
@@ -69,16 +77,30 @@ payablesRouter.post("/payables/obligations", async (req, res) => {
   const client = await pool.connect();
   try {
     const {
-      sourceType, counterpartyName, documentNumber, documentDate,
-      dueDate, servicePeriodFrom, servicePeriodTo,
-      amountTotal, amountVat, currency,
-      ddsArticleId, opiuArticleId, relatedRecurringId,
-      branchId, description, notes,
-      isRecurringCandidate, isIntercompany,
+      sourceType,
+      counterpartyName,
+      documentNumber,
+      documentDate,
+      dueDate,
+      servicePeriodFrom,
+      servicePeriodTo,
+      amountTotal,
+      amountVat,
+      currency,
+      ddsArticleId,
+      opiuArticleId,
+      relatedRecurringId,
+      branchId,
+      description,
+      notes,
+      isRecurringCandidate,
+      isIntercompany,
     } = req.body as Record<string, unknown>;
 
     if (!sourceType || !counterpartyName || amountTotal === undefined) {
-      res.status(400).json({ error: "sourceType, counterpartyName, amountTotal are required" });
+      res.status(400).json({
+        error: "sourceType, counterpartyName, amountTotal are required",
+      });
       return;
     }
 
@@ -90,7 +112,10 @@ payablesRouter.post("/payables/obligations", async (req, res) => {
         [relatedRecurringId],
       );
       if (rows[0]) {
-        finalCounterparty = (counterpartyName as string) || rows[0].counterparty_name || finalCounterparty;
+        finalCounterparty =
+          (counterpartyName as string) ||
+          rows[0].counterparty_name ||
+          finalCounterparty;
         if (!amountTotal) finalAmount = rows[0].expected_amount;
       }
     }
@@ -116,17 +141,30 @@ payablesRouter.post("/payables/obligations", async (req, res) => {
         NOW(), NOW()
       ) RETURNING *`,
       [
-        sourceType, finalCounterparty,
-        documentNumber ?? null, documentDate ?? null, dueDate ?? null,
-        servicePeriodFrom ?? null, servicePeriodTo ?? null,
-        finalAmount, amountVat ?? null, (currency as string) || "RUB",
-        ddsArticleId ?? null, opiuArticleId ?? null, relatedRecurringId ?? null,
-        branchId ?? null, description ?? null, notes ?? null,
-        isRecurringCandidate ?? false, isIntercompany ?? false,
+        sourceType,
+        finalCounterparty,
+        documentNumber ?? null,
+        documentDate ?? null,
+        dueDate ?? null,
+        servicePeriodFrom ?? null,
+        servicePeriodTo ?? null,
+        finalAmount,
+        amountVat ?? null,
+        (currency as string) || "RUB",
+        ddsArticleId ?? null,
+        opiuArticleId ?? null,
+        relatedRecurringId ?? null,
+        branchId ?? null,
+        description ?? null,
+        notes ?? null,
+        isRecurringCandidate ?? false,
+        isIntercompany ?? false,
       ],
     );
 
-    res.status(201).json({ obligation: { ...rows[0], effectiveStatus: effectiveStatus(rows[0]) } });
+    res.status(201).json({
+      obligation: { ...rows[0], effectiveStatus: effectiveStatus(rows[0]) },
+    });
   } catch (err) {
     req.log.error({ err }, "payables: create failed");
     res.status(500).json({ error: "internal" });
@@ -142,11 +180,24 @@ payablesRouter.patch("/payables/obligations/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const allowed = [
-      "counterparty_name", "document_number", "document_date", "due_date",
-      "service_period_from", "service_period_to", "amount_total", "amount_vat",
-      "currency", "dds_article_id", "opiu_article_id", "related_recurring_id",
-      "branch_id", "description", "notes", "status",
-      "is_recurring_candidate", "is_intercompany",
+      "counterparty_name",
+      "document_number",
+      "document_date",
+      "due_date",
+      "service_period_from",
+      "service_period_to",
+      "amount_total",
+      "amount_vat",
+      "currency",
+      "dds_article_id",
+      "opiu_article_id",
+      "related_recurring_id",
+      "branch_id",
+      "description",
+      "notes",
+      "status",
+      "is_recurring_candidate",
+      "is_intercompany",
     ];
 
     const body = req.body as Record<string, unknown>;
@@ -154,7 +205,8 @@ payablesRouter.patch("/payables/obligations/:id", async (req, res) => {
     const params: unknown[] = [];
     let idx = 1;
 
-    const camelToSnake = (s: string) => s.replace(/([A-Z])/g, "_$1").toLowerCase();
+    const camelToSnake = (s: string) =>
+      s.replace(/([A-Z])/g, "_$1").toLowerCase();
     for (const [key, val] of Object.entries(body)) {
       const col = camelToSnake(key);
       if (allowed.includes(col)) {
@@ -179,7 +231,9 @@ payablesRouter.patch("/payables/obligations/:id", async (req, res) => {
       res.status(404).json({ error: "not found" });
       return;
     }
-    res.json({ obligation: { ...rows[0], effectiveStatus: effectiveStatus(rows[0]) } });
+    res.json({
+      obligation: { ...rows[0], effectiveStatus: effectiveStatus(rows[0]) },
+    });
   } catch (err) {
     req.log.error({ err }, "payables: update failed");
     res.status(500).json({ error: "internal" });
@@ -203,7 +257,9 @@ payablesRouter.post("/payables/obligations/:id/approve", async (req, res) => {
       res.status(404).json({ error: "not found or cannot approve" });
       return;
     }
-    res.json({ obligation: { ...rows[0], effectiveStatus: effectiveStatus(rows[0]) } });
+    res.json({
+      obligation: { ...rows[0], effectiveStatus: effectiveStatus(rows[0]) },
+    });
   } catch (err) {
     req.log.error({ err }, "payables: approve failed");
     res.status(500).json({ error: "internal" });
@@ -227,7 +283,9 @@ payablesRouter.post("/payables/obligations/:id/cancel", async (req, res) => {
       res.status(404).json({ error: "not found or already finalized" });
       return;
     }
-    res.json({ obligation: { ...rows[0], effectiveStatus: effectiveStatus(rows[0]) } });
+    res.json({
+      obligation: { ...rows[0], effectiveStatus: effectiveStatus(rows[0]) },
+    });
   } catch (err) {
     req.log.error({ err }, "payables: cancel failed");
     res.status(500).json({ error: "internal" });
@@ -266,7 +324,9 @@ payablesRouter.get("/payables/upcoming", async (req, res) => {
   const client = await pool.connect();
   try {
     const t = today();
-    const in30 = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const in30 = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
 
     const { rows } = await client.query(
       `SELECT * FROM payable_obligations
@@ -276,7 +336,10 @@ payablesRouter.get("/payables/upcoming", async (req, res) => {
       [in30],
     );
 
-    const obligations = rows.map((r) => ({ ...r, effectiveStatus: effectiveStatus(r) }));
+    const obligations = rows.map((r) => ({
+      ...r,
+      effectiveStatus: effectiveStatus(r),
+    }));
 
     const totalExpectedOutflow = obligations.reduce(
       (sum, o) => sum + parseFloat(String(o.amount_total ?? 0)),
@@ -286,9 +349,16 @@ payablesRouter.get("/payables/upcoming", async (req, res) => {
       .filter((o) => o.effectiveStatus === "overdue")
       .reduce((sum, o) => sum + parseFloat(String(o.amount_total ?? 0)), 0);
 
-    const weekEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const weekEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
     const dueThisWeek = obligations
-      .filter((o) => o.due_date && String(o.due_date).slice(0, 10) >= t && String(o.due_date).slice(0, 10) <= weekEnd)
+      .filter(
+        (o) =>
+          o.due_date &&
+          String(o.due_date).slice(0, 10) >= t &&
+          String(o.due_date).slice(0, 10) <= weekEnd,
+      )
       .reduce((sum, o) => sum + parseFloat(String(o.amount_total ?? 0)), 0);
 
     res.json({
@@ -312,7 +382,9 @@ payablesRouter.get("/payables/summary", async (req, res) => {
   const client = await pool.connect();
   try {
     const t = today();
-    const in30 = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const in30 = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
 
     const { rows } = await client.query(
       `SELECT
@@ -329,11 +401,11 @@ payablesRouter.get("/payables/summary", async (req, res) => {
     const r = rows[0];
     res.json({
       pendingReviewCount: Number(r.pending_review_count),
-      approvedCount:      Number(r.approved_count),
-      overdueCount:       Number(r.overdue_count),
-      paidCount:          Number(r.paid_count),
+      approvedCount: Number(r.approved_count),
+      overdueCount: Number(r.overdue_count),
+      paidCount: Number(r.paid_count),
       totalDueNext30Days: parseFloat(r.total_due_next_30_days).toFixed(2),
-      overdueTotal:       parseFloat(r.overdue_total).toFixed(2),
+      overdueTotal: parseFloat(r.overdue_total).toFixed(2),
     });
   } catch (err) {
     req.log.error({ err }, "payables: summary failed");

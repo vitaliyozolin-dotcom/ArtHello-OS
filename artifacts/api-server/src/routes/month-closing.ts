@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { eq, sql, count, and } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { monthClosingsTable, operations, taxObligationsTable, staffPayoutsTable } from "@workspace/db";
+import {
+  monthClosingsTable,
+  operations,
+  taxObligationsTable,
+  staffPayoutsTable,
+} from "@workspace/db";
 
 export const monthClosingRouter = Router();
 
@@ -20,17 +25,30 @@ monthClosingRouter.get("/months/:month/status", async (req, res) => {
     const [opsTotal] = await db
       .select({ cnt: count(operations.id) })
       .from(operations)
-      .where(and(eq(operations.plMonth, month), sql`direction IN ('in','out')`));
+      .where(
+        and(eq(operations.plMonth, month), sql`direction IN ('in','out')`),
+      );
 
     const [opsUnverified] = await db
       .select({ cnt: count(operations.id) })
       .from(operations)
-      .where(and(eq(operations.plMonth, month), eq(operations.verificationStatus, "unverified"), sql`direction IN ('in','out')`));
+      .where(
+        and(
+          eq(operations.plMonth, month),
+          eq(operations.verificationStatus, "unverified"),
+          sql`direction IN ('in','out')`,
+        ),
+      );
 
     const [opsNoArticle] = await db
       .select({ cnt: count(operations.id) })
       .from(operations)
-      .where(and(eq(operations.plMonth, month), sql`article_id IS NULL AND direction IN ('in','out')`));
+      .where(
+        and(
+          eq(operations.plMonth, month),
+          sql`article_id IS NULL AND direction IN ('in','out')`,
+        ),
+      );
 
     const [taxCount] = await db
       .select({ cnt: count(taxObligationsTable.id) })
@@ -47,13 +65,28 @@ monthClosingRouter.get("/months/:month/status", async (req, res) => {
     const noArticle = Number(opsNoArticle?.cnt ?? 0);
 
     const checklist = {
-      allOpsVerified: { ok: unverified === 0, count: totalOps, issues: unverified },
-      articlesCovered: { ok: noArticle === 0, count: totalOps, issues: noArticle },
-      taxesAccrued: { ok: Number(taxCount?.cnt ?? 0) > 0, count: Number(taxCount?.cnt ?? 0) },
-      payrollPaid: { ok: Number(payrollCount?.cnt ?? 0) > 0, count: Number(payrollCount?.cnt ?? 0) },
+      allOpsVerified: {
+        ok: unverified === 0,
+        count: totalOps,
+        issues: unverified,
+      },
+      articlesCovered: {
+        ok: noArticle === 0,
+        count: totalOps,
+        issues: noArticle,
+      },
+      taxesAccrued: {
+        ok: Number(taxCount?.cnt ?? 0) > 0,
+        count: Number(taxCount?.cnt ?? 0),
+      },
+      payrollPaid: {
+        ok: Number(payrollCount?.cnt ?? 0) > 0,
+        count: Number(payrollCount?.cnt ?? 0),
+      },
     };
 
-    const canClose = checklist.allOpsVerified.ok && checklist.articlesCovered.ok;
+    const canClose =
+      checklist.allOpsVerified.ok && checklist.articlesCovered.ok;
 
     res.json({
       month,
@@ -89,35 +122,57 @@ monthClosingRouter.get("/months", async (req, res) => {
 monthClosingRouter.post("/months/:month/close", async (req, res) => {
   try {
     const { month } = req.params;
-    const { closedBy = "owner", notes, force = false } = req.body as {
-      closedBy?: string; notes?: string; force?: boolean;
+    const {
+      closedBy = "owner",
+      notes,
+      force = false,
+    } = req.body as {
+      closedBy?: string;
+      notes?: string;
+      force?: boolean;
     };
 
     // Snapshot P&L values at close time
     const [incomeRow] = await db
       .select({ total: sql<string>`coalesce(sum(amount::numeric), 0)` })
       .from(operations)
-      .where(and(eq(operations.plMonth, month), eq(operations.direction, "in")));
+      .where(
+        and(eq(operations.plMonth, month), eq(operations.direction, "in")),
+      );
 
     const [expenseRow] = await db
       .select({ total: sql<string>`coalesce(sum(amount::numeric), 0)` })
       .from(operations)
-      .where(and(eq(operations.plMonth, month), eq(operations.direction, "out")));
+      .where(
+        and(eq(operations.plMonth, month), eq(operations.direction, "out")),
+      );
 
     const [totalOpsRow] = await db
       .select({ cnt: count(operations.id) })
       .from(operations)
-      .where(and(eq(operations.plMonth, month), sql`direction IN ('in','out')`));
+      .where(
+        and(eq(operations.plMonth, month), sql`direction IN ('in','out')`),
+      );
 
     const [unverifiedRow] = await db
       .select({ cnt: count(operations.id) })
       .from(operations)
-      .where(and(eq(operations.plMonth, month), eq(operations.verificationStatus, "unverified")));
+      .where(
+        and(
+          eq(operations.plMonth, month),
+          eq(operations.verificationStatus, "unverified"),
+        ),
+      );
 
     const [noArticleRow] = await db
       .select({ cnt: count(operations.id) })
       .from(operations)
-      .where(and(eq(operations.plMonth, month), sql`article_id IS NULL AND direction IN ('in','out')`));
+      .where(
+        and(
+          eq(operations.plMonth, month),
+          sql`article_id IS NULL AND direction IN ('in','out')`,
+        ),
+      );
 
     const revenue = parseFloat(String(incomeRow?.total ?? "0"));
     const expenses = parseFloat(String(expenseRow?.total ?? "0"));
@@ -126,9 +181,15 @@ monthClosingRouter.post("/months/:month/close", async (req, res) => {
     const totalOps = Number(totalOpsRow?.cnt ?? 0);
     const unverified = Number(unverifiedRow?.cnt ?? 0);
     const noArticle = Number(noArticleRow?.cnt ?? 0);
-    const trustScore = totalOps > 0
-      ? Math.max(0, Math.round(100 - (unverified / totalOps) * 40 - (noArticle / totalOps) * 40))
-      : 100;
+    const trustScore =
+      totalOps > 0
+        ? Math.max(
+            0,
+            Math.round(
+              100 - (unverified / totalOps) * 40 - (noArticle / totalOps) * 40,
+            ),
+          )
+        : 100;
 
     const data = {
       periodMonth: month,
@@ -169,11 +230,19 @@ monthClosingRouter.post("/months/:month/reopen", async (req, res) => {
 
     const [row] = await db
       .update(monthClosingsTable)
-      .set({ status: "open", reopenedBy, reopenedAt: new Date(), updatedAt: new Date() })
+      .set({
+        status: "open",
+        reopenedBy,
+        reopenedAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(monthClosingsTable.periodMonth, month))
       .returning();
 
-    if (!row) { res.status(404).json({ error: "Month record not found" }); return; }
+    if (!row) {
+      res.status(404).json({ error: "Month record not found" });
+      return;
+    }
     res.json(row);
   } catch (err) {
     req.log.error({ err }, "POST /months/:month/reopen failed");

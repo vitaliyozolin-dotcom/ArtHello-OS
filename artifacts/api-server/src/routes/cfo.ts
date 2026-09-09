@@ -2,9 +2,14 @@ import { Router } from "express";
 import { eq, desc, sql, sum, count, and, lte } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
-  operations, articles,
-  contractorsTable, contractorAccrualsTable, contractorPaymentsTable,
-  taxObligationsTable, bankAccountsTable, staffPayoutsTable,
+  operations,
+  articles,
+  contractorsTable,
+  contractorAccrualsTable,
+  contractorPaymentsTable,
+  taxObligationsTable,
+  bankAccountsTable,
+  staffPayoutsTable,
 } from "@workspace/db";
 import OpenAI from "openai";
 
@@ -46,12 +51,16 @@ async function buildFinancialContext(month: string) {
   const [prevIncome] = await db
     .select({ total: sql<string>`coalesce(sum(amount::numeric),0)` })
     .from(operations)
-    .where(and(eq(operations.plMonth, prevMonth), eq(operations.direction, "in")));
+    .where(
+      and(eq(operations.plMonth, prevMonth), eq(operations.direction, "in")),
+    );
 
   const [prevExpense] = await db
     .select({ total: sql<string>`coalesce(sum(amount::numeric),0)` })
     .from(operations)
-    .where(and(eq(operations.plMonth, prevMonth), eq(operations.direction, "out")));
+    .where(
+      and(eq(operations.plMonth, prevMonth), eq(operations.direction, "out")),
+    );
 
   // Bank balance
   const [bankBalance] = await db
@@ -83,23 +92,47 @@ async function buildFinancialContext(month: string) {
   const [unverified] = await db
     .select({ cnt: count(operations.id) })
     .from(operations)
-    .where(and(eq(operations.plMonth, month), eq(operations.verificationStatus, "unverified"), sql`direction IN ('in','out')`));
+    .where(
+      and(
+        eq(operations.plMonth, month),
+        eq(operations.verificationStatus, "unverified"),
+        sql`direction IN ('in','out')`,
+      ),
+    );
 
   const [noArticle] = await db
     .select({ cnt: count(operations.id) })
     .from(operations)
-    .where(and(eq(operations.plMonth, month), sql`article_id IS NULL AND direction IN ('in','out')`));
+    .where(
+      and(
+        eq(operations.plMonth, month),
+        sql`article_id IS NULL AND direction IN ('in','out')`,
+      ),
+    );
 
   const rev = parseFloat(String(income?.total ?? "0"));
   const exp = parseFloat(String(expense?.total ?? "0"));
   const prevRev = parseFloat(String(prevIncome?.total ?? "0"));
   const prevExp = parseFloat(String(prevExpense?.total ?? "0"));
   const totalOpsN = Number(totalOps?.cnt ?? 0);
-  const trustScore = totalOpsN > 0
-    ? Math.max(0, Math.round(100 - (Number(unverified?.cnt ?? 0) / totalOpsN) * 40 - (Number(noArticle?.cnt ?? 0) / totalOpsN) * 40))
-    : 100;
+  const trustScore =
+    totalOpsN > 0
+      ? Math.max(
+          0,
+          Math.round(
+            100 -
+              (Number(unverified?.cnt ?? 0) / totalOpsN) * 40 -
+              (Number(noArticle?.cnt ?? 0) / totalOpsN) * 40,
+          ),
+        )
+      : 100;
 
-  const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(n);
+  const fmt = (n: number) =>
+    new Intl.NumberFormat("ru-RU", {
+      style: "currency",
+      currency: "RUB",
+      maximumFractionDigits: 0,
+    }).format(n);
 
   return {
     month,
@@ -108,15 +141,25 @@ async function buildFinancialContext(month: string) {
     expenses: exp,
     grossProfit: rev - exp,
     margin: rev > 0 ? rev - exp : 0,
-    marginPct: rev > 0 ? ((rev - exp) / rev * 100).toFixed(1) + "%" : "n/a",
+    marginPct: rev > 0 ? (((rev - exp) / rev) * 100).toFixed(1) + "%" : "n/a",
     prevRevenue: prevRev,
     prevExpenses: prevExp,
     prevGrossProfit: prevRev - prevExp,
-    revenueGrowth: prevRev > 0 ? ((rev - prevRev) / prevRev * 100).toFixed(1) + "%" : "n/a",
+    revenueGrowth:
+      prevRev > 0
+        ? (((rev - prevRev) / prevRev) * 100).toFixed(1) + "%"
+        : "n/a",
     bankBalance: parseFloat(String(bankBalance?.total ?? "0")),
-    contractorsDebt: Math.max(0, parseFloat(String(accruals?.total ?? "0")) - parseFloat(String(paid?.total ?? "0"))),
+    contractorsDebt: Math.max(
+      0,
+      parseFloat(String(accruals?.total ?? "0")) -
+        parseFloat(String(paid?.total ?? "0")),
+    ),
     overdueTaxes: overdueTaxes.length,
-    overdueAmount: overdueTaxes.reduce((s, t) => s + parseFloat(String(t.accruedAmount)), 0),
+    overdueAmount: overdueTaxes.reduce(
+      (s, t) => s + parseFloat(String(t.accruedAmount)),
+      0,
+    ),
     trustScore,
     unverifiedOps: Number(unverified?.cnt ?? 0),
     noArticleOps: Number(noArticle?.cnt ?? 0),
@@ -136,7 +179,9 @@ cfoRouter.get("/cfo/context", async (req, res) => {
   try {
     const today = new Date();
     const month = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
-    const ctx = await buildFinancialContext((req.query.month as string) ?? month);
+    const ctx = await buildFinancialContext(
+      (req.query.month as string) ?? month,
+    );
     res.json(ctx);
   } catch (err) {
     req.log.error({ err }, "GET /cfo/context failed");
@@ -186,7 +231,11 @@ cfoRouter.post("/cfo/insights", async (req, res) => {
 
     const raw = completion.choices[0]?.message?.content ?? "{}";
     let parsed: Record<string, unknown>;
-    try { parsed = JSON.parse(raw); } catch { parsed = { insights: [], alerts: [], recommendations: [] }; }
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = { insights: [], alerts: [], recommendations: [] };
+    }
 
     res.json({ month, context: ctx, ...parsed });
   } catch (err) {
@@ -200,13 +249,20 @@ cfoRouter.post("/cfo/insights", async (req, res) => {
 
 cfoRouter.post("/cfo/chat", async (req, res) => {
   try {
-    const { message, month, history = [] } = req.body as {
+    const {
+      message,
+      month,
+      history = [],
+    } = req.body as {
       message: string;
       month?: string;
       history?: Array<{ role: "user" | "assistant"; content: string }>;
     };
 
-    if (!message?.trim()) { res.status(400).json({ error: "message required" }); return; }
+    if (!message?.trim()) {
+      res.status(400).json({ error: "message required" });
+      return;
+    }
 
     const today = new Date();
     const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
@@ -240,7 +296,8 @@ cfoRouter.post("/cfo/chat", async (req, res) => {
       max_tokens: 800,
     });
 
-    const reply = completion.choices[0]?.message?.content ?? "Не могу ответить сейчас.";
+    const reply =
+      completion.choices[0]?.message?.content ?? "Не могу ответить сейчас.";
     res.json({ reply, month: ctxMonth });
   } catch (err) {
     req.log.error({ err }, "POST /cfo/chat failed");
@@ -257,7 +314,12 @@ cfoRouter.get("/cfo/alerts", async (req, res) => {
     const month = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
     const ctx = await buildFinancialContext(month);
 
-    const alerts: { severity: string; title: string; text: string; icon: string }[] = [];
+    const alerts: {
+      severity: string;
+      title: string;
+      text: string;
+      icon: string;
+    }[] = [];
 
     if (ctx.overdueAmount > 0) {
       alerts.push({
@@ -304,7 +366,15 @@ cfoRouter.get("/cfo/alerts", async (req, res) => {
       });
     }
 
-    res.json({ month, alerts, context: { trustScore: ctx.trustScore, grossProfit: ctx.grossProfit, bankBalance: ctx.bankBalance } });
+    res.json({
+      month,
+      alerts,
+      context: {
+        trustScore: ctx.trustScore,
+        grossProfit: ctx.grossProfit,
+        bankBalance: ctx.bankBalance,
+      },
+    });
   } catch (err) {
     req.log.error({ err }, "GET /cfo/alerts failed");
     res.status(500).json({ error: "Internal error" });

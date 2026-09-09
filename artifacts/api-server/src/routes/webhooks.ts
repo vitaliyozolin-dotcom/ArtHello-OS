@@ -66,9 +66,7 @@ export const websiteLeadStore: WebsiteLeadStore = {
           await tx
             .update(sourceConnectorsTable)
             .set({ lastSyncAt: checkedAt, status: "active" })
-            .where(
-              eq(sourceConnectorsTable.sourceType, "website"),
-            );
+            .where(eq(sourceConnectorsTable.sourceType, "website"));
         },
       }),
     );
@@ -81,60 +79,65 @@ export const websiteLeadStore: WebsiteLeadStore = {
 // Fields: name, phone, email, message, source, campaign, branch, form_url,
 //         utm_source, utm_medium, utm_campaign, utm_content, utm_term
 
-webhooksRouter.post("/webhooks/website-lead", async (req, res): Promise<void> => {
-  const idempotencyKey = req.header("idempotency-key")?.trim();
-  if (
-    !idempotencyKey ||
-    idempotencyKey.length < 16 ||
-    idempotencyKey.length > 128 ||
-    !/^[A-Za-z0-9._:-]+$/.test(idempotencyKey)
-  ) {
-    res.status(400).json({
-      error: "A valid Idempotency-Key header is required",
-    });
-    return;
-  }
-
-  const canonicalPayload = canonicalWebsiteLeadPayload(
-    req.body as Record<string, unknown>,
-  );
-  const { name, phone, email } = canonicalPayload;
-
-  if (!phone && !email && !name) {
-    res.status(400).json({ error: "At least one of phone, email, or name is required" });
-    return;
-  }
-
-  const now = new Date();
-
-  try {
-    const result = await processWebsiteLead(websiteLeadStore, {
-      idempotencyKey,
-      payload: canonicalPayload,
-      receivedAt: now,
-      ip: req.ip ?? null,
-    });
-
-    req.log.info(
-      {
-        channel: result.channel,
-        duplicate: result.duplicate,
-        recovered: result.recovered,
-      },
-      "Website lead received",
-    );
-    res.json(result);
-  } catch (err) {
-    if (err instanceof IdempotencyPayloadConflict) {
-      res.status(409).json({
-        error: "Idempotency-Key was already used for another payload",
+webhooksRouter.post(
+  "/webhooks/website-lead",
+  async (req, res): Promise<void> => {
+    const idempotencyKey = req.header("idempotency-key")?.trim();
+    if (
+      !idempotencyKey ||
+      idempotencyKey.length < 16 ||
+      idempotencyKey.length > 128 ||
+      !/^[A-Za-z0-9._:-]+$/.test(idempotencyKey)
+    ) {
+      res.status(400).json({
+        error: "A valid Idempotency-Key header is required",
       });
       return;
     }
-    logger.error({ err }, "Website webhook failed");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
+
+    const canonicalPayload = canonicalWebsiteLeadPayload(
+      req.body as Record<string, unknown>,
+    );
+    const { name, phone, email } = canonicalPayload;
+
+    if (!phone && !email && !name) {
+      res
+        .status(400)
+        .json({ error: "At least one of phone, email, or name is required" });
+      return;
+    }
+
+    const now = new Date();
+
+    try {
+      const result = await processWebsiteLead(websiteLeadStore, {
+        idempotencyKey,
+        payload: canonicalPayload,
+        receivedAt: now,
+        ip: req.ip ?? null,
+      });
+
+      req.log.info(
+        {
+          channel: result.channel,
+          duplicate: result.duplicate,
+          recovered: result.recovered,
+        },
+        "Website lead received",
+      );
+      res.json(result);
+    } catch (err) {
+      if (err instanceof IdempotencyPayloadConflict) {
+        res.status(409).json({
+          error: "Idempotency-Key was already used for another payload",
+        });
+        return;
+      }
+      logger.error({ err }, "Website webhook failed");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
 
 // ─── GET /api/webhooks/website-lead (test endpoint info) ─────────────────────
 
@@ -143,8 +146,19 @@ webhooksRouter.get("/webhooks/website-lead", (_req, res): void => {
     endpoint: "POST /api/webhooks/website-lead",
     description: "Website form lead intake webhook",
     fields: [
-      "name", "phone", "email", "message", "source", "campaign", "branch", "form_url",
-      "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+      "name",
+      "phone",
+      "email",
+      "message",
+      "source",
+      "campaign",
+      "branch",
+      "form_url",
+      "utm_source",
+      "utm_medium",
+      "utm_campaign",
+      "utm_content",
+      "utm_term",
     ],
   });
 });

@@ -9,99 +9,55 @@ const artifactDir = path.resolve(testDir, "..");
 const workspaceDir = path.resolve(artifactDir, "../..");
 
 const accessPolicy = await import(
-  pathToFileURL(
-    path.join(
-      artifactDir,
-      "src/lib/security/access-policy.ts",
-    ),
-  ).href
+  pathToFileURL(path.join(artifactDir, "src/lib/security/access-policy.ts"))
+    .href
 );
 const logSanitizer = await import(
-  pathToFileURL(
-    path.join(
-      artifactDir,
-      "src/lib/security/log-sanitizer.ts",
-    ),
-  ).href
+  pathToFileURL(path.join(artifactDir, "src/lib/security/log-sanitizer.ts"))
+    .href
 );
 const accessAudit = await import(
   pathToFileURL(
-    path.join(
-      artifactDir,
-      "src/lib/security/access-audit-policy.ts",
-    ),
+    path.join(artifactDir, "src/lib/security/access-audit-policy.ts"),
   ).href
 );
 const websiteLeadService = await import(
   pathToFileURL(
-    path.join(
-      artifactDir,
-      "src/lib/webhooks/website-lead-service.ts",
-    ),
+    path.join(artifactDir, "src/lib/webhooks/website-lead-service.ts"),
   ).href
 );
 const connectorHealthSanitizer = await import(
-  pathToFileURL(
-    path.join(
-      artifactDir,
-      "src/lib/banking/sanitize-health.ts",
-    ),
-  ).href
+  pathToFileURL(path.join(artifactDir, "src/lib/banking/sanitize-health.ts"))
+    .href
 );
 const bankConfigVault = await import(
-  pathToFileURL(
-    path.join(
-      artifactDir,
-      "src/lib/banking/config-vault.ts",
-    ),
-  ).href
+  pathToFileURL(path.join(artifactDir, "src/lib/banking/config-vault.ts")).href
 );
 const bankingOAuthRedirect = await import(
-  pathToFileURL(
-    path.join(
-      artifactDir,
-      "src/lib/banking/oauth-redirect.ts",
-    ),
-  ).href
+  pathToFileURL(path.join(artifactDir, "src/lib/banking/oauth-redirect.ts"))
+    .href
 );
 const requestQueueModule = await import(
-  pathToFileURL(
-    path.join(
-      artifactDir,
-      "src/lib/serialized-request-queue.ts",
-    ),
-  ).href
+  pathToFileURL(path.join(artifactDir, "src/lib/serialized-request-queue.ts"))
+    .href
 );
 const securitySchemaInventory = await import(
   pathToFileURL(
-    path.join(
-      artifactDir,
-      "src/lib/security/security-schema-inventory.ts",
-    ),
+    path.join(artifactDir, "src/lib/security/security-schema-inventory.ts"),
   ).href
 );
 const publicErrorBoundaryModule = await import(
   pathToFileURL(
-    path.join(
-      artifactDir,
-      "src/lib/security/public-error-boundary.ts",
-    ),
+    path.join(artifactDir, "src/lib/security/public-error-boundary.ts"),
   ).href
 );
 const legacySyncGateModule = await import(
-  pathToFileURL(
-    path.join(
-      artifactDir,
-      "src/lib/security/legacy-sync-gate.ts",
-    ),
-  ).href
+  pathToFileURL(path.join(artifactDir, "src/lib/security/legacy-sync-gate.ts"))
+    .href
 );
 const financialInvariants = await import(
   pathToFileURL(
-    path.join(
-      artifactDir,
-      "src/lib/finance/financial-invariants.ts",
-    ),
+    path.join(artifactDir, "src/lib/finance/financial-invariants.ts"),
   ).href
 );
 
@@ -113,20 +69,15 @@ const restrictedScope = {
 
 test("owner keeps full authenticated access", () => {
   assert.equal(
-    accessPolicy.decideRouteAccess("owner", "POST", "/sync/students")
-      .allowed,
+    accessPolicy.decideRouteAccess("owner", "POST", "/sync/students").allowed,
     true,
   );
 });
 
 test("non-owner business access fails closed until handlers enforce both scopes", () => {
   assert.equal(
-    accessPolicy.decideRouteAccess(
-      "viewer",
-      "GET",
-      "/finance",
-      restrictedScope,
-    ).allowed,
+    accessPolicy.decideRouteAccess("viewer", "GET", "/finance", restrictedScope)
+      .allowed,
     false,
   );
   assert.equal(
@@ -139,25 +90,16 @@ test("non-owner business access fails closed until handlers enforce both scopes"
     "scope-route-not-enforced",
   );
   assert.equal(
-    accessPolicy.decideRouteAccess(
-      "viewer",
-      "GET",
-      "/finance",
-      {
-        unrestricted: false,
-        branchIds: ["branch-6"],
-        legalEntityIds: [],
-      },
-    ).policy,
+    accessPolicy.decideRouteAccess("viewer", "GET", "/finance", {
+      unrestricted: false,
+      branchIds: ["branch-6"],
+      legalEntityIds: [],
+    }).policy,
     "scope-required",
   );
   assert.equal(
-    accessPolicy.decideRouteAccess(
-      "viewer",
-      "GET",
-      "/auth/me",
-      restrictedScope,
-    ).allowed,
+    accessPolicy.decideRouteAccess("viewer", "GET", "/auth/me", restrictedScope)
+      .allowed,
     true,
   );
   assert.equal(
@@ -277,11 +219,7 @@ test("legacy sync and provider callbacks stay fail closed", async () => {
       return this;
     },
   };
-  publicErrorBoundaryModule.publicErrorBoundary(
-    {},
-    response,
-    () => {},
-  );
+  publicErrorBoundaryModule.publicErrorBoundary({}, response, () => {});
   legacySyncGateModule.blockLegacySyncSurface(
     { path: "/sync/discover" },
     response,
@@ -330,39 +268,33 @@ test("sensitive access audit canonicalizes identifiers and skips only account li
     "/banking/connectors",
   );
   assert.equal(
-    accessAudit.canonicalAuditPath(
-      "/not-registered/alice@example.com",
-    ),
+    accessAudit.canonicalAuditPath("/not-registered/alice@example.com"),
     "/unregistered/:path",
   );
   assert.equal(accessAudit.shouldAuditAccess("GET", "/auth/me"), false);
-  assert.equal(
-    accessAudit.shouldAuditAccess("GET", "/employees/123"),
-    true,
-  );
+  assert.equal(accessAudit.shouldAuditAccess("GET", "/employees/123"), true);
 });
 
 test("connector health response uses a strict allowlist", () => {
-  const sanitized =
-    connectorHealthSanitizer.sanitizeConnectorHealthResponse({
-      status: "active",
-      checkedAt: "2026-07-24T00:00:00.000Z",
-      authOk: true,
-      scopesGranted: ["accounts", "transactions"],
-      hasAccountsScope: true,
-      hasTransactionsScope: true,
-      accountsAccessOk: true,
-      transactionsAccessOk: true,
-      diagnosticCode: "ok",
-      environment: "sandbox",
-      accountCount: 2,
-      accessToken: "must-never-leak",
-      futureSecret: "unknown-fields-must-be-dropped",
-      message: "upstream response may contain a secret",
-      debug: {
-        customerCode: "private-customer",
-      },
-    });
+  const sanitized = connectorHealthSanitizer.sanitizeConnectorHealthResponse({
+    status: "active",
+    checkedAt: "2026-07-24T00:00:00.000Z",
+    authOk: true,
+    scopesGranted: ["accounts", "transactions"],
+    hasAccountsScope: true,
+    hasTransactionsScope: true,
+    accountsAccessOk: true,
+    transactionsAccessOk: true,
+    diagnosticCode: "ok",
+    environment: "sandbox",
+    accountCount: 2,
+    accessToken: "must-never-leak",
+    futureSecret: "unknown-fields-must-be-dropped",
+    message: "upstream response may contain a secret",
+    debug: {
+      customerCode: "private-customer",
+    },
+  });
 
   assert.equal(sanitized.status, "active");
   assert.equal(sanitized.authOk, true);
@@ -372,7 +304,10 @@ test("connector health response uses a strict allowlist", () => {
   assert.equal(Object.hasOwn(sanitized, "accessToken"), false);
   assert.equal(Object.hasOwn(sanitized, "futureSecret"), false);
   assert.equal(Object.hasOwn(sanitized, "debug"), false);
-  assert.doesNotMatch(JSON.stringify(sanitized), /must-never-leak|private-customer|upstream response/);
+  assert.doesNotMatch(
+    JSON.stringify(sanitized),
+    /must-never-leak|private-customer|upstream response/,
+  );
 });
 
 function createTransactionalWebsiteLeadStore(failOnceAt) {
@@ -436,8 +371,7 @@ function createTransactionalWebsiteLeadStore(failOnceAt) {
       } catch (error) {
         state.rawEvents = snapshot.rawEvents;
         state.leadEvents = snapshot.leadEvents;
-        state.websiteSourceTouches =
-          snapshot.websiteSourceTouches;
+        state.websiteSourceTouches = snapshot.websiteSourceTouches;
         nextRawId = nextRawIdSnapshot;
         throw error;
       }
@@ -466,17 +400,11 @@ test("website lead canonical hash is stable and binds key to payload", () => {
     Object.entries(websiteLeadPayload).reverse(),
   );
   assert.equal(
-    websiteLeadService.websiteLeadPayloadHash(
-      websiteLeadPayload,
-    ),
-    websiteLeadService.websiteLeadPayloadHash(
-      reorderedPayload,
-    ),
+    websiteLeadService.websiteLeadPayloadHash(websiteLeadPayload),
+    websiteLeadService.websiteLeadPayloadHash(reorderedPayload),
   );
   assert.notEqual(
-    websiteLeadService.websiteLeadPayloadHash(
-      websiteLeadPayload,
-    ),
+    websiteLeadService.websiteLeadPayloadHash(websiteLeadPayload),
     websiteLeadService.websiteLeadPayloadHash({
       ...websiteLeadPayload,
       email: "changed@example.invalid",
@@ -485,9 +413,7 @@ test("website lead canonical hash is stable and binds key to payload", () => {
 });
 
 test("website lead transaction rolls back a mid-write failure and retry creates exactly one pair", async () => {
-  const store = createTransactionalWebsiteLeadStore(
-    "insertLead",
-  );
+  const store = createTransactionalWebsiteLeadStore("insertLead");
   const input = {
     idempotencyKey: "website-test-key-0001",
     payload: websiteLeadPayload,
@@ -502,16 +428,14 @@ test("website lead transaction rolls back a mid-write failure and retry creates 
   assert.equal(store.state.rawEvents.length, 0);
   assert.equal(store.state.leadEvents.length, 0);
 
-  const created =
-    await websiteLeadService.processWebsiteLead(store, input);
+  const created = await websiteLeadService.processWebsiteLead(store, input);
   assert.equal(created.duplicate, false);
   assert.equal(created.recovered, false);
   assert.equal(store.state.rawEvents.length, 1);
   assert.equal(store.state.leadEvents.length, 1);
   assert.equal(store.state.rawEvents[0].processed, true);
 
-  const duplicate =
-    await websiteLeadService.processWebsiteLead(store, input);
+  const duplicate = await websiteLeadService.processWebsiteLead(store, input);
   assert.equal(duplicate.duplicate, true);
   assert.equal(store.state.rawEvents.length, 1);
   assert.equal(store.state.leadEvents.length, 1);
@@ -545,14 +469,10 @@ test("website lead retry repairs a legacy raw-only partial write without creatin
   const store = createTransactionalWebsiteLeadStore();
   const idempotencyKey = "website-test-key-legacy-0003";
   const payloadHash =
-    websiteLeadService.websiteLeadPayloadHash(
-      websiteLeadPayload,
-    );
+    websiteLeadService.websiteLeadPayloadHash(websiteLeadPayload);
   store.state.rawEvents.push({
     id: "legacy-raw-1",
-    hash: websiteLeadService.websiteLeadEventHash(
-      idempotencyKey,
-    ),
+    hash: websiteLeadService.websiteLeadEventHash(idempotencyKey),
     raw: {
       ...websiteLeadPayload,
       idempotency_payload_hash: payloadHash,
@@ -560,23 +480,19 @@ test("website lead retry repairs a legacy raw-only partial write without creatin
     processed: false,
   });
 
-  const repaired =
-    await websiteLeadService.processWebsiteLead(store, {
-      idempotencyKey,
-      payload: websiteLeadPayload,
-      receivedAt: new Date("2026-07-24T12:00:00.000Z"),
-      ip: null,
-    });
+  const repaired = await websiteLeadService.processWebsiteLead(store, {
+    idempotencyKey,
+    payload: websiteLeadPayload,
+    receivedAt: new Date("2026-07-24T12:00:00.000Z"),
+    ip: null,
+  });
 
   assert.equal(repaired.duplicate, false);
   assert.equal(repaired.recovered, true);
   assert.equal(store.state.rawEvents.length, 1);
   assert.equal(store.state.rawEvents[0].processed, true);
   assert.equal(store.state.leadEvents.length, 1);
-  assert.equal(
-    store.state.leadEvents[0].rawEventId,
-    "legacy-raw-1",
-  );
+  assert.equal(store.state.leadEvents[0].rawEventId, "legacy-raw-1");
 });
 
 test("website lead route binds the tested service to one Postgres transaction and advisory lock", async () => {
@@ -602,22 +518,17 @@ function completeSecuritySchemaInventory() {
         columnName,
       })),
     ),
-    indexes: [
-      ...securitySchemaInventory.REQUIRED_SECURITY_INDEXES,
-    ],
-    migrations:
-      securitySchemaInventory.REQUIRED_SECURITY_MIGRATIONS.map(
-        (entry) => ({ ...entry }),
-      ),
+    indexes: [...securitySchemaInventory.REQUIRED_SECURITY_INDEXES],
+    migrations: securitySchemaInventory.REQUIRED_SECURITY_MIGRATIONS.map(
+      (entry) => ({ ...entry }),
+    ),
   };
 }
 
 test("security schema inventory gate requires every column, index, migration timestamp and hash", () => {
   const complete = completeSecuritySchemaInventory();
   assert.doesNotThrow(() =>
-    securitySchemaInventory.validateSecuritySchemaInventory(
-      complete,
-    ),
+    securitySchemaInventory.validateSecuritySchemaInventory(complete),
   );
 
   assert.throws(
@@ -626,10 +537,7 @@ test("security schema inventory gate requires every column, index, migration tim
         ...complete,
         columns: complete.columns.filter(
           ({ tableName, columnName }) =>
-            !(
-              tableName === "auth_sessions" &&
-              columnName === "scope_mode"
-            ),
+            !(tableName === "auth_sessions" && columnName === "scope_mode"),
         ),
       }),
     /column is missing: auth_sessions\.scope_mode/,
@@ -639,8 +547,7 @@ test("security schema inventory gate requires every column, index, migration tim
       securitySchemaInventory.validateSecuritySchemaInventory({
         ...complete,
         indexes: complete.indexes.filter(
-          (name) =>
-            name !== "security_access_audit_session_idx",
+          (name) => name !== "security_access_audit_session_idx",
         ),
       }),
     /index is missing: security_access_audit_session_idx/,
@@ -650,9 +557,7 @@ test("security schema inventory gate requires every column, index, migration tim
       securitySchemaInventory.validateSecuritySchemaInventory({
         ...complete,
         migrations: complete.migrations.map((entry, index) =>
-          index === 1
-            ? { ...entry, hash: "wrong-hash" }
-            : entry,
+          index === 1 ? { ...entry, hash: "wrong-hash" } : entry,
         ),
       }),
     /expected hash: 1784858251868/,
@@ -705,8 +610,7 @@ test("Tochka OAuth redirect is exact, backend-only, and required in production",
     () =>
       bankingOAuthRedirect.resolveTochkaOAuthRedirectUri({
         NODE_ENV: "production",
-        TOCHKA_OAUTH_REDIRECT_URI:
-          "https://api.example.invalid/",
+        TOCHKA_OAUTH_REDIRECT_URI: "https://api.example.invalid/",
       }),
     /exact path/,
   );
@@ -723,14 +627,11 @@ test("Tochka OAuth redirect is exact, backend-only, and required in production",
 
 test("Tochka OAuth source is read-only, scope-consistent, and state-strict", async () => {
   const connectorSource = await readFile(
-    path.join(
-      artifactDir,
-      "src/lib/banking/connectors/tochka.ts",
-    ),
+    path.join(artifactDir, "src/lib/banking/connectors/tochka.ts"),
     "utf8",
   );
   const bankingRoute = await readFile(
-    path.join(artifactDir, "src/routes/banking.ts"),
+    path.join(artifactDir, "src/features/banking/router.ts"),
     "utf8",
   );
 
@@ -766,21 +667,15 @@ test("Tochka OAuth source is read-only, scope-consistent, and state-strict", asy
     bankingRoute,
     /OAuthStateSchema[\s\S]{0,160}safeParse\(req\.body\)/,
   );
-  assert.match(
-    bankingRoute,
-    /typeof config\["oauthState"\] !== "string"/,
-  );
-  assert.doesNotMatch(
-    bankingRoute,
-    /req\.log\.info\(\{\s*bank,\s*body\s*\}/,
-  );
+  assert.match(bankingRoute, /typeof config\["oauthState"\] !== "string"/);
+  assert.doesNotMatch(bankingRoute, /req\.log\.info\(\{\s*bank,\s*body\s*\}/);
 });
 
 test("logged Error objects never expose their message or stack", () => {
-  const error = Object.assign(
-    new Error("token=secret and customer payload"),
-    { code: "UPSTREAM_FAILURE", status: 502 },
-  );
+  const error = Object.assign(new Error("token=secret and customer payload"), {
+    code: "UPSTREAM_FAILURE",
+    status: 502,
+  });
   const sanitized = logSanitizer.sanitizeLogRecord({ err: error });
 
   assert.deepEqual(sanitized, {
@@ -802,11 +697,7 @@ test("5xx response boundary removes exception, upstream, and PII details", () =>
     },
   };
 
-  publicErrorBoundaryModule.publicErrorBoundary(
-    {},
-    response,
-    () => {},
-  );
+  publicErrorBoundaryModule.publicErrorBoundary({}, response, () => {});
   response.json({
     error: "token=secret",
     message: "owner@example.com",
@@ -825,10 +716,7 @@ test("5xx response boundary removes exception, upstream, and PII details", () =>
 
 test("banking match handlers expose fixed error codes, never String(err)", async () => {
   const source = await readFile(
-    path.join(
-      artifactDir,
-      "src/routes/banking-match.ts",
-    ),
+    path.join(artifactDir, "src/features/banking-match/router.ts"),
     "utf8",
   );
 
@@ -843,10 +731,7 @@ test("banking match handlers expose fixed error codes, never String(err)", async
 
 test("Tochka connector never logs or throws raw upstream bodies", async () => {
   const source = await readFile(
-    path.join(
-      artifactDir,
-      "src/lib/banking/connectors/tochka.ts",
-    ),
+    path.join(artifactDir, "src/lib/banking/connectors/tochka.ts"),
     "utf8",
   );
 
@@ -874,10 +759,7 @@ test("Tochka connector never logs or throws raw upstream bodies", async () => {
 
 test("live integration probe emits only sanitized aggregate evidence", async () => {
   const source = await readFile(
-    path.join(
-      artifactDir,
-      "src/scripts/probe-live-integrations.ts",
-    ),
+    path.join(artifactDir, "src/scripts/probe-live-integrations.ts"),
     "utf8",
   );
 
@@ -904,10 +786,7 @@ test("web authentication no longer persists bearer tokens in browser storage", a
     "utf8",
   );
   const authRoute = await readFile(
-    path.join(
-      artifactDir,
-      "src/routes/auth.ts",
-    ),
+    path.join(artifactDir, "src/features/auth/router.ts"),
     "utf8",
   );
 
@@ -921,10 +800,7 @@ test("web authentication no longer persists bearer tokens in browser storage", a
 
 test("security migration is explicit and API startup contains no migration DDL", async () => {
   const sessionMigration = await readFile(
-    path.join(
-      workspaceDir,
-      "lib/db/drizzle/0009_famous_ma_gnuci.sql",
-    ),
+    path.join(workspaceDir, "lib/db/drizzle/0009_famous_ma_gnuci.sql"),
     "utf8",
   );
   const serverEntry = await readFile(
@@ -932,10 +808,7 @@ test("security migration is explicit and API startup contains no migration DDL",
     "utf8",
   );
   const scopeMigration = await readFile(
-    path.join(
-      workspaceDir,
-      "lib/db/drizzle/0010_outstanding_cargill.sql",
-    ),
+    path.join(workspaceDir, "lib/db/drizzle/0010_outstanding_cargill.sql"),
     "utf8",
   );
 
@@ -943,7 +816,10 @@ test("security migration is explicit and API startup contains no migration DDL",
   assert.match(sessionMigration, /CREATE TABLE "auth_login_attempts"/);
   assert.match(scopeMigration, /CREATE TABLE "security_access_audit"/);
   assert.match(scopeMigration, /ADD COLUMN "scope_mode"/);
-  assert.doesNotMatch(serverEntry, /runMigrations|CREATE TABLE|ALTER TABLE|DROP TABLE/);
+  assert.doesNotMatch(
+    serverEntry,
+    /runMigrations|CREATE TABLE|ALTER TABLE|DROP TABLE/,
+  );
 });
 
 test("migration assertion failure aborts startup before listener and polling", async () => {
@@ -967,10 +843,7 @@ test("migration assertion failure aborts startup before listener and polling", a
 
 test("security schema gate checks catalog columns, indexes, and Drizzle migration records before listen", async () => {
   const schemaGate = await readFile(
-    path.join(
-      artifactDir,
-      "src/lib/security/security-schema-gate.ts",
-    ),
+    path.join(artifactDir, "src/lib/security/security-schema-gate.ts"),
     "utf8",
   );
 
@@ -1001,7 +874,10 @@ test("bank connector config is authenticated encryption bound to one connector",
     environment,
   );
   const serialized = JSON.stringify(envelope);
-  assert.doesNotMatch(serialized, /secret-must-never|access-token|refresh-token/);
+  assert.doesNotMatch(
+    serialized,
+    /secret-must-never|access-token|refresh-token/,
+  );
   assert.deepEqual(
     bankConfigVault.decryptBankConnectorConfig(
       "connector-a",
@@ -1058,11 +934,7 @@ test("bank config vault fails closed for plaintext secrets, tampering, and unava
   );
   assert.throws(
     () =>
-      bankConfigVault.decryptBankConnectorConfig(
-        "connector-a",
-        envelope,
-        {},
-      ),
+      bankConfigVault.decryptBankConnectorConfig("connector-a", envelope, {}),
     /BANK_CONFIG_ENCRYPTION_KEYS is required/,
   );
 });
@@ -1101,10 +973,7 @@ test("serialized request queue preserves spacing and recovers after a failed tas
     settled.filter((result) => result.status === "rejected").length,
     1,
   );
-  assert.deepEqual(
-    starts,
-    [0, 260, 520, 780, 1040, 1300, 1560, 1820],
-  );
+  assert.deepEqual(starts, [0, 260, 520, 780, 1040, 1300, 1560, 1820]);
 });
 
 test("financial bank invariant and consolidated internal transfers use integer minor units", () => {
@@ -1142,9 +1011,7 @@ test("financial bank invariant and consolidated internal transfers use integer m
     },
   ];
   assert.equal(
-    financialInvariants.consolidatedCashflowMinor(
-      consolidatedMovements,
-    ),
+    financialInvariants.consolidatedCashflowMinor(consolidatedMovements),
     15_000n,
   );
 });
@@ -1176,10 +1043,8 @@ test("financial periods, payroll rule versions, reversals, and rounding are dete
     },
   ];
   assert.equal(
-    financialInvariants.selectPayrollRuleVersion(
-      rules,
-      "2026-05-10T16:30:00Z",
-    ).version,
+    financialInvariants.selectPayrollRuleVersion(rules, "2026-05-10T16:30:00Z")
+      .version,
     "v2",
   );
   assert.throws(
@@ -1211,10 +1076,7 @@ test("financial periods, payroll rule versions, reversals, and rounding are dete
   assert.doesNotThrow(() =>
     financialInvariants.validateReversalPairs(movements),
   );
-  assert.equal(
-    financialInvariants.consolidatedCashflowMinor(movements),
-    0n,
-  );
+  assert.equal(financialInvariants.consolidatedCashflowMinor(movements), 0n);
   assert.throws(
     () =>
       financialInvariants.reportingPeriods({
@@ -1258,7 +1120,6 @@ test("Evotor encryption has no tracked fallback key", async () => {
   assert.match(evotorRoute, /SESSION_SECRET must be configured/);
 });
 
-
 test("personal password hashes are salted, verifiable, and reject malformed input", async () => {
   const passwordModule = await import(
     pathToFileURL(path.join(artifactDir, "src/lib/security/password.ts")).href
@@ -1268,7 +1129,13 @@ test("personal password hashes are salted, verifiable, and reject malformed inpu
   const second = await passwordModule.hashPassword(password);
   assert.notEqual(first, second);
   assert.equal(await passwordModule.verifyPassword(password, first), true);
-  assert.equal(await passwordModule.verifyPassword("wrong-password-2026", first), false);
-  assert.equal(await passwordModule.verifyPassword(password, "not-a-valid-hash"), false);
+  assert.equal(
+    await passwordModule.verifyPassword("wrong-password-2026", first),
+    false,
+  );
+  assert.equal(
+    await passwordModule.verifyPassword(password, "not-a-valid-hash"),
+    false,
+  );
   assert.match(first, /^scrypt\$N=32768,r=8,p=1\$/);
 });
