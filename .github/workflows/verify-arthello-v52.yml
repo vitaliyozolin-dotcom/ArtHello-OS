@@ -837,7 +837,7 @@ jobs:
             --mount "type=bind,src=$PWD/deploy/v52/backup/test_activation_volume.py,dst=/opt/arthello-backup/test_activation_volume.py,readonly" \
             --entrypoint='python3' "$IMMUTABLE_IMAGE_ID" -I -B /opt/arthello-backup/test_activation_volume.py -v
           PYTHONDONTWRITEBYTECODE=1 bash scripts/test/arthello-backup-container-docker-smoke.sh "$IMMUTABLE_IMAGE_ID"
-          PYTHONDONTWRITEBYTECODE=1 bash scripts/test/arthello-backup-runtime-docker-smoke.sh "$IMMUTABLE_IMAGE_ID"
+          python3 -I scripts/run-frozen-release-contract.py v52-backup-runtime
 
       - name: Build immutable verification evidence
         env:
@@ -945,4 +945,3 @@ jobs:
           python3 -I .github/scripts/test-d080-candidate-state.py
           python3 -I .github/scripts/test-d080-maintenance-route.py
           bash .github/scripts/run-d080-hosted-caddy.sh
-
