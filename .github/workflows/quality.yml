@@ -212,19 +212,8 @@ jobs:
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
           test "$(sha256sum deploy/v52/recovery-r10/check-contract.rb | cut -d ' ' -f 1)" = "$R10_CONTRACT_SHA256"
-          ruby deploy/v52/recovery-r10/check-contract.rb
-          python3 -I .github/scripts/test-d083-replay-guard.py
-          python3 -I .github/scripts/test-d083-candidate-state.py
-          python3 -I .github/scripts/test-d083-resume-candidate.py
-          python3 -I .github/scripts/test-d083-public-audit.py
-          python3 -I .github/scripts/test-d083-controller-boundary.py
-          python3 -I .github/scripts/test-r10-live-browser-acceptance.py
-          python3 -I .github/scripts/test-d083-maintenance-route.py
-          node --test scripts/test/retire-r9-browser.test.mjs
-          bash -n .github/scripts/run-r10-live-browser.sh
-          bash -n .github/scripts/run-d083-hosted-caddy.sh
-          bash -n .github/scripts/run-d083-target-caddy.sh
-          bash .github/scripts/run-d083-hosted-caddy.sh
+          python3 -I scripts/test/frozen-release-fixture.test.py
+          python3 -I scripts/run-frozen-release-contract.py r10
 
   d085-candidate-tests:
     name: d085-candidate-tests
@@ -250,7 +239,5 @@ jobs:
           test "$(id -u)" -ne 0
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
           test "$(sha256sum deploy/v52/recovery-r11/check-contract.rb | cut -d ' ' -f 1)" = "$R11_CONTRACT_SHA256"
-          ruby deploy/v52/recovery-r11/check-contract.rb
-          python3 -I .github/scripts/test-r11-replay-guard.py
-          node --test .github/scripts/test-r11-target-caddy.test.mjs
-          bash -n .github/scripts/run-r11-target-caddy.sh
+          python3 -I scripts/test/frozen-release-fixture.test.py
+          python3 -I scripts/run-frozen-release-contract.py r11

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { branchId, logger, pool, sql, sqlOne } from "./shared.js";
+import { DEFAULT_BRANCH, branchId, logger, pool, sql, sqlOne } from "./shared.js";
 
 export const duplicatesRouter = Router();
 
@@ -317,7 +317,7 @@ duplicatesRouter.get("/coverage/duplicates", async (req, res) => {
 // POST /api/coverage/duplicates/detect
 // ══════════════════════════════════════════════════════════════════════════════
 duplicatesRouter.post("/coverage/duplicates/detect", async (req, res) => {
-  const bid = (req.body?.branchId as string | undefined) ?? ATLAS_BRANCH;
+  const bid = (req.body?.branchId as string | undefined) ?? DEFAULT_BRANCH;
   try {
     const inserted = await runDuplicateDetection(bid);
     res.json({
