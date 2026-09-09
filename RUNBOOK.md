@@ -329,3 +329,10 @@ D075 fixed report дополнительно читает autosync.failureStage/
 ### D092 — Диагностика уже сохранённого visual artifact
 
 После D092 smoke PASS / scoped BLOCKED читать existing artifact10096640452 через новый owner push-main workflow с prefix `D092: inspect existing visual evidence`. Сначала exact current head и fixed unexpired producer/artifact metadata, затем ordinary GET и frozen ZIP reader. PR только проверяет исходники; никаких production permissions или UI rerun. Результат даёт ограниченный stage/result/completedCaptures/archive PNG count; произвольная ошибка и содержимое PNG не выводятся. Проверка receipt не равна визуальному просмотру или полной UI приёмке. Полный контракт — READ_EXISTING_EVIDENCE.md. При отказе identity/digest/схемы оставить stage неизвестным и не ослаблять границы.
+
+
+### D092 — Исправить неполную модель прав в synthetic workflow fixtures
+
+Existing receipt прочитан в run34337932856: tasks-empty-390x844,2 capture records,4 PNG entries; изображения не просмотрены. Scoped adapter дополняет verified frozen overview/detail fixtures точным permission shape synthetic OWNER. Полный harness, UI assertions, old R12 runtime pin и №801 остаются прежними.
+
+После exact-source CI и независимого review использовать существующий технический prefix `D089: hosted Content Tasks visual` для одного обусловленного исправлением hosted запуска. Не менять main до результата. Фиксировать реальный completed stage/PNG inventory/task-number assertion; screenshot inspection и save persistence отмечать отдельно. Если вновь BLOCKED, читать конкретный новый receipt и не ослаблять проверку. Полный контракт и ограничения — docs/acceptance/2026-09-09-d092-workflow-fixture.md.
