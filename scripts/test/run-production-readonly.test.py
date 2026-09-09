@@ -19,6 +19,204 @@ TABLES = ('app_users app_systems organization_branches user_system_access user_b
 CHECKS = ('bankLinks accessUsers accessSystems branchUsers branchTargets feedbackAuthors '
           'feedbackEvents importConnections').split()
 
+# Already-sanitized D088 observation, run 34330892606/job 102398954685.
+# The new D091 status/update fields in the regression are synthetic test inputs.
+D088_REPORT = json.loads(r'''
+{
+  "bankRuntime": {
+    "autosync": {
+      "failures": 2,
+      "generationMatchesSetup": true,
+      "leaseState": "released",
+      "leasedUntilUtc": null,
+      "nextAtUtc": "2026-09-09T09:01:16.902Z",
+      "outcome": "error",
+      "state": "observed",
+      "updatedAgeSeconds": 888
+    },
+    "connection": {
+      "enabled": true,
+      "nextSyncAtUtc": "2026-09-09T09:01:16.902Z",
+      "state": "observed",
+      "status": "connection_error"
+    },
+    "latestRun": {
+      "finishedAtUtc": "2026-09-09T08:11:14.266Z",
+      "startedAtUtc": "2026-09-09T08:11:14.266Z",
+      "state": "observed"
+    },
+    "observedAtUtc": "2026-09-09T08:46:04.026Z",
+    "retainedJobs": {
+      "exactWindowRows": 4,
+      "invalidRows": 0,
+      "olderEndRows": 0,
+      "oldestAgeSeconds": 2102,
+      "otherWindowRows": 0,
+      "providerStatus": "not_stored",
+      "scopeMatch": "unverified",
+      "state": "observed",
+      "total": 4
+    },
+    "setup": {
+      "startDate": "2026-09-01",
+      "state": "observed",
+      "syncIntervalMinutes": 60,
+      "syncMinute": 5
+    },
+    "state": "observed",
+    "statementImports": {
+      "failedRows": 0,
+      "pendingRows": 0,
+      "readyRows": 12,
+      "state": "observed",
+      "unknownRows": 0
+    },
+    "statementLease": {
+      "expiresAtUtc": null,
+      "leaseState": "unknown",
+      "state": "not_observed"
+    }
+  },
+  "bankWindow": {
+    "activity": "not_observed",
+    "checksComplete": false,
+    "coverage": {
+      "accountRows": 4,
+      "accountsWithContainingStatementInLatestRun": 0,
+      "accountsWithMatchingTransactionCount": 1,
+      "accountsWithStatement": 4,
+      "coveredInLatestRun": 0,
+      "distinctAccountKeys": 4,
+      "invalidAccountKeys": 0,
+      "legalEntities": 1
+    },
+    "duplicates": {
+      "excessRows": 0,
+      "groups": 0,
+      "missingIdentityRows": 0
+    },
+    "period": {
+      "endDate": "2026-09-09",
+      "startDate": "2026-09-01"
+    },
+    "state": "observed",
+    "sync": {
+      "conflictRows": 0,
+      "errorRows": 0,
+      "freshness": "not_requested",
+      "rejectedRows": 0,
+      "state": "pending"
+    },
+    "transactions": {
+      "danglingLinks": 0,
+      "eligibleMissingLinks": 0,
+      "eligibleRows": 0,
+      "expenseRows": 0,
+      "incomeRows": 0,
+      "pendingOrNonRub": 0,
+      "rows": 0,
+      "unexpectedAccountRows": 0
+    }
+  },
+  "checks": {
+    "accessSystems": {
+      "state": "observed",
+      "violations": 0
+    },
+    "accessUsers": {
+      "state": "observed",
+      "violations": 0
+    },
+    "bankLinks": {
+      "state": "observed",
+      "violations": 0
+    },
+    "branchTargets": {
+      "state": "observed",
+      "violations": 0
+    },
+    "branchUsers": {
+      "state": "observed",
+      "violations": 0
+    },
+    "feedbackAuthors": {
+      "state": "schema_missing"
+    },
+    "feedbackEvents": {
+      "state": "schema_missing"
+    },
+    "importConnections": {
+      "state": "observed",
+      "violations": 0
+    }
+  },
+  "liveAcceptance": "not_run",
+  "observedAtUtc": "2026-09-09T08:46:04.026Z",
+  "productionMutations": false,
+  "schemaVersion": 1,
+  "status": "incomplete_or_issues",
+  "tables": {
+    "alfacrm_family_merge_candidates": {
+      "state": "not_installed"
+    },
+    "alfacrm_finance_snapshots": {
+      "state": "not_installed"
+    },
+    "app_systems": {
+      "rows": 2,
+      "state": "observed"
+    },
+    "app_users": {
+      "rows": 7,
+      "state": "observed"
+    },
+    "bank_accounts": {
+      "rows": 4,
+      "state": "observed"
+    },
+    "bank_statement_imports": {
+      "rows": 12,
+      "state": "observed"
+    },
+    "bank_transactions": {
+      "rows": 0,
+      "state": "observed"
+    },
+    "developer_feedback": {
+      "state": "not_installed"
+    },
+    "developer_feedback_events": {
+      "state": "not_installed"
+    },
+    "financial_operations": {
+      "rows": 0,
+      "state": "observed"
+    },
+    "integration_connections": {
+      "rows": 19,
+      "state": "observed"
+    },
+    "integration_sync_runs": {
+      "rows": 7,
+      "state": "observed"
+    },
+    "organization_branches": {
+      "rows": 5,
+      "state": "observed"
+    },
+    "user_branch_access": {
+      "rows": 2,
+      "state": "observed"
+    },
+    "user_system_access": {
+      "rows": 14,
+      "state": "observed"
+    }
+  }
+}
+''')
+
+
 
 def report(complete=True):
     """Representative aggregate outputs; this harness never opens a database."""
@@ -52,7 +250,8 @@ def report(complete=True):
                         nextSyncAtUtc='2026-09-09T09:30:00.000Z'),
         autosync=dict(state='observed', outcome='pending', generationMatchesSetup=True,
                       nextAtUtc='2026-09-09T09:30:00.000Z', leasedUntilUtc=None,
-                      leaseState='released', failures=0, updatedAgeSeconds=120),
+                      leaseState='released', failures=0, updatedAgeSeconds=120,
+                      httpStatus=200, httpStatusState='observed', updatedAtUtc='2026-09-09T08:58:00.000Z'),
         statementLease=dict(state='not_observed', expiresAtUtc=None, leaseState='unknown'),
         retainedJobs=dict(state='observed', scopeMatch='unverified', providerStatus='not_stored',
                           total=4, invalidRows=0, exactWindowRows=0, olderEndRows=4,
@@ -253,6 +452,51 @@ else:
                 invalid = report()
                 invalid['bankRuntime'][component][key] = raw
                 self.assert_blocked(self.run_launcher(value=invalid), 'invalid_probe_report')
+
+    def test_callback_http_status_quality_is_explicit_without_changing_issue_exit(self):
+        for state, status in (('observed', 100), ('observed', 500), ('observed', 599),
+                              ('missing', None), ('invalid', None)):
+            with self.subTest(state=state, status=status):
+                value = report(False)
+                value['bankRuntime']['autosync'].update(httpStatus=status, httpStatusState=state)
+                result = self.run_launcher(value=value, probe_exit=2)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('READONLY_RESULT=incomplete_or_issues', result.stdout)
+                self.assertIn('READONLY_FINISHED=', result.stdout)
+                self.assertEqual([json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')], [value])
+
+    def test_callback_status_schema_rejects_inconsistent_or_unsafe_pairs(self):
+        cases = [('observed', None), ('missing', 500), ('invalid', 500),
+                 (None, None), ('UNSAFE_STATUS', None)]
+        cases += [('observed', value) for value in (True, '500', 'UNSAFE_HTTP_STATUS', 500.0, 500.5, 99, 600)]
+        for state, status in cases:
+            with self.subTest(state=state, status=status):
+                value = report(False)
+                value['bankRuntime']['autosync'].update(httpStatus=status, httpStatusState=state)
+                self.assert_blocked(self.run_launcher(value=value, probe_exit=2), 'invalid_probe_report')
+        value = report(False)
+        value['bankRuntime']['autosync']['updatedAtUtc'] = 'UNSAFE_TIMESTAMP'
+        self.assert_blocked(self.run_launcher(value=value, probe_exit=2), 'invalid_probe_report')
+
+    def test_actual_d088_observation_accepts_only_the_new_status_fields_and_stays_incomplete(self):
+        for state, status in (('observed', 500), ('missing', None), ('invalid', None)):
+            with self.subTest(state=state):
+                if self.log.exists():
+                    self.log.unlink()
+                value = copy.deepcopy(D088_REPORT)
+                # Synthetic values exercise D091 transport; D088 did not observe these fields.
+                value['bankRuntime']['autosync'].update(httpStatus=status, httpStatusState=state,
+                                                       updatedAtUtc='2026-09-09T08:31:16.000Z')
+                result = self.run_launcher(value=value, probe_exit=2)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(len(self.observations()), 2)
+                self.assertIn('READONLY_RESULT=incomplete_or_issues', result.stdout)
+                self.assertIn('READONLY_FINISHED=', result.stdout)
+                observed = [json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')]
+                self.assertEqual(observed, [value])
+                for key in ('httpStatus', 'httpStatusState', 'updatedAtUtc'):
+                    del observed[0]['bankRuntime']['autosync'][key]
+                self.assertEqual(observed[0], D088_REPORT)
 
     def test_unverified_source_never_runs_identity_scan_or_database_probe(self):
         result = self.run_launcher('initial-refusal')

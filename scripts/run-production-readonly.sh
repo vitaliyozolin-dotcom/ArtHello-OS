@@ -95,7 +95,7 @@ def runtime(value, stamp):
     require(connection["enabled"] is None or type(connection["enabled"]) is bool)
     nullable_timestamp(connection["nextSyncAtUtc"])
     autosync = value["autosync"]
-    fields(autosync, "state outcome generationMatchesSetup nextAtUtc leasedUntilUtc leaseState failures updatedAgeSeconds")
+    fields(autosync, "state outcome generationMatchesSetup nextAtUtc leasedUntilUtc leaseState failures updatedAgeSeconds httpStatus httpStatusState updatedAtUtc")
     choice(autosync["outcome"], "running complete pending busy error unknown not_observed")
     require(autosync["generationMatchesSetup"] is None or type(autosync["generationMatchesSetup"]) is bool)
     nullable_timestamp(autosync["nextAtUtc"])
@@ -103,6 +103,12 @@ def runtime(value, stamp):
     choice(autosync["leaseState"], "active expired released unknown")
     nullable_count(autosync["failures"])
     nullable_count(autosync["updatedAgeSeconds"])
+    require(autosync["httpStatusState"] in ("observed", "missing", "invalid"))
+    if autosync["httpStatusState"] == "observed":
+        require(type(autosync["httpStatus"]) is int and 100 <= autosync["httpStatus"] <= 599)
+    else:
+        require(autosync["httpStatus"] is None)
+    nullable_timestamp(autosync["updatedAtUtc"])
     lease = value["statementLease"]
     fields(lease, "state expiresAtUtc leaseState")
     nullable_timestamp(lease["expiresAtUtc"])

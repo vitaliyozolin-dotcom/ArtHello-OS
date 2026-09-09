@@ -220,7 +220,8 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
     setup: { state: 'not_observed', startDate: null, syncIntervalMinutes: null, syncMinute: null },
     connection: { state: 'not_observed', status: 'not_observed', enabled: null, nextSyncAtUtc: null },
     autosync: { state: 'not_observed', outcome: 'not_observed', generationMatchesSetup: null,
-      nextAtUtc: null, leasedUntilUtc: null, leaseState: 'unknown', failures: null, updatedAgeSeconds: null },
+      nextAtUtc: null, leasedUntilUtc: null, leaseState: 'unknown', failures: null, updatedAgeSeconds: null,
+      httpStatus: null, httpStatusState: 'missing', updatedAtUtc: null },
     statementLease: { state: 'not_observed', expiresAtUtc: null, leaseState: 'unknown' },
     retainedJobs: { state: 'not_observed', scopeMatch: 'unverified', providerStatus: 'not_stored',
       total: null, invalidRows: null, exactWindowRows: null, olderEndRows: null, otherWindowRows: null, oldestAgeSeconds: null },
@@ -274,6 +275,12 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
  WHEN 'pending' THEN 'pending' WHEN 'busy' THEN 'busy' WHEN 'error' THEN 'error' ELSE 'unknown' END AS outcome,
  ${jsonNumberSql('$.nextAt')} AS next_at,${jsonNumberSql('$.leasedUntil')} AS leased_until,
  ${jsonNumberSql('$.failures', 10)} AS failures,${utcSql('updated_at')} AS updated_at_utc,
+ CASE WHEN json_type(value,'$.httpStatus')='integer' AND json_extract(value,'$.httpStatus') BETWEEN 100 AND 599
+ THEN json_extract(value,'$.httpStatus') END AS http_status,
+ CASE WHEN valid_json<>1 THEN 'invalid'
+ WHEN json_type(value,'$.httpStatus') IS NULL OR json_type(value,'$.httpStatus')='null' THEN 'missing'
+ WHEN json_type(value,'$.httpStatus')='integer' AND json_extract(value,'$.httpStatus') BETWEEN 100 AND 599 THEN 'observed'
+ ELSE 'invalid' END AS http_status_state,
  CASE WHEN ${uuidSql("json_extract(value,'$.generation')")}
  THEN (SELECT CASE WHEN json_valid(s.state_value) THEN CASE
  WHEN ${uuidSql("json_extract(s.state_value,'$.credentialGeneration')")}
@@ -287,6 +294,11 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
     out.leaseState = runtimeLease(row.leased_until, now);
     out.failures = row.failures;
     out.updatedAgeSeconds = runtimeAge(row.updated_at_utc, now);
+    // This is the scheduler callback status; 500 may be its default for a thrown callback.
+    // It is not an upstream bank error code and does not affect completion criteria.
+    out.httpStatus = row.http_status;
+    out.httpStatusState = row.http_status_state;
+    out.updatedAtUtc = row.updated_at_utc;
     out.generationMatchesSetup = row.generation_matches === null ? null : row.generation_matches === 1;
     out.state = row.valid_json === 1 && row.valid_version === 1 && out.outcome !== 'unknown'
       && out.nextAtUtc !== null && out.leaseState !== 'unknown' && out.failures !== null

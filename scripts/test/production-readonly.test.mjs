@@ -110,7 +110,8 @@ test('bank runtime: metadata distinguishes future pending retry, expired lease a
     assert.equal(runtime.state, 'observed');
     assert.deepEqual(runtime.setup, { state: 'observed', startDate: '2026-09-01', syncIntervalMinutes: 60, syncMinute: 5 });
     assert.deepEqual(runtime.autosync, { state: 'observed', outcome: 'pending', generationMatchesSetup: true,
-      nextAtUtc: '2026-09-09T12:05:00.000Z', leasedUntilUtc: null, leaseState: 'released', failures: 0, updatedAgeSeconds: 300 });
+      nextAtUtc: '2026-09-09T12:05:00.000Z', leasedUntilUtc: null, leaseState: 'released', failures: 0, updatedAgeSeconds: 300,
+      httpStatus: 200, httpStatusState: 'observed', updatedAtUtc: '2026-09-09T11:55:00.000Z' });
     assert.deepEqual(runtime.statementLease, { state: 'observed', expiresAtUtc: '2026-09-09T11:59:00.000Z', leaseState: 'expired' });
     assert.deepEqual(runtime.retainedJobs, { state: 'observed', scopeMatch: 'unverified', providerStatus: 'not_stored',
       total: 4, invalidRows: 0, exactWindowRows: 2, olderEndRows: 2, otherWindowRows: 0, oldestAgeSeconds: 300 });
@@ -120,7 +121,7 @@ test('bank runtime: metadata distinguishes future pending retry, expired lease a
     assert.equal(diagnosticExitCode(result), 2);
     assert.equal(db.prepare('SELECT count(*) AS n FROM system_runtime_state').get().n, before);
     const output = JSON.stringify(result);
-    for (const forbidden of ['PRIVATE', runtimeGeneration, 'scopeHash', 'statementId', 'customerCode', 'credentialGeneration', 'httpStatus']) {
+    for (const forbidden of ['PRIVATE', runtimeGeneration, 'scopeHash', 'statementId', 'customerCode', 'credentialGeneration']) {
       assert.equal(output.includes(forbidden), false, forbidden);
     }
     assert.throws(() => db.exec('DELETE FROM system_runtime_state'));
@@ -160,6 +161,9 @@ test('bank runtime: missing metadata and schema are explicit and do not change b
     const result = inspectDatabase(db, bankOptions);
     assert.equal(result.bankRuntime.setup.state, 'schema_missing');
     assert.equal(result.bankRuntime.autosync.state, 'schema_missing');
+    assert.equal(result.bankRuntime.autosync.httpStatus, null);
+    assert.equal(result.bankRuntime.autosync.httpStatusState, 'missing');
+    assert.equal(result.bankRuntime.autosync.updatedAtUtc, null);
     assert.equal(result.bankRuntime.connection.state, 'unavailable');
     assert.equal(result.bankRuntime.state, 'partial');
     assert.equal(result.bankWindow.checksComplete, true);
@@ -171,6 +175,7 @@ test('bank runtime: missing metadata and schema are explicit and do not change b
     const result = inspectDatabase(empty, bankOptions);
     for (const component of ['setup', 'autosync', 'statementLease', 'connection', 'latestRun']) assert.equal(result.bankRuntime[component].state, 'not_observed');
     assert.equal(result.bankRuntime.autosync.generationMatchesSetup, null);
+    assert.equal(result.bankRuntime.autosync.httpStatusState, 'missing');
     assert.equal(result.bankRuntime.retainedJobs.total, 0);
     assert.equal(result.bankRuntime.retainedJobs.oldestAgeSeconds, null);
     assert.equal(result.bankWindow.checksComplete, false);
@@ -192,7 +197,65 @@ test('bank runtime: malformed JSON and invalid schedule fields fail without refl
       assert.equal(result.bankRuntime.autosync.nextAtUtc, null);
       assert.equal(result.bankRuntime.autosync.leaseState, 'unknown');
       assert.equal(result.bankRuntime.autosync.failures, null);
+      assert.equal(result.bankRuntime.autosync.httpStatus, null);
+      assert.equal(result.bankRuntime.autosync.httpStatusState, stateValue.startsWith('{') ? 'missing' : 'invalid');
       assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+    } finally { db.close(); }
+  }
+});
+
+test('bank runtime: stored callback status distinguishes missing and invalid without changing existing evidence', () => {
+  const withoutNewFields = value => {
+    const copy = structuredClone(value);
+    for (const key of ['httpStatus', 'httpStatusState', 'updatedAtUtc']) delete copy.bankRuntime.autosync[key];
+    return copy;
+  };
+  const { db: baselineDb } = runtimeFixture();
+  const baseline = inspectDatabase(baselineDb, bankOptions);
+  baselineDb.close();
+  const cases = [
+    ...[100, 200, 409, 422, 500, 599].map(value => [String(value), 'observed', value]),
+    [undefined, 'missing', null], ['null', 'missing', null],
+    ...['"500"', '"PRIVATE-HTTP-STATUS"', '500.0', '500.5', 'true', 'false', '[]', '{}', '99', '600', '-1']
+      .map(value => [value, 'invalid', null]),
+  ];
+  for (const [raw, state, expected] of cases) {
+    const { db } = runtimeFixture();
+    const key = 'tochka-autosync:v1:INT-T-TOCHKA';
+    const saved = JSON.parse(db.prepare('SELECT state_value FROM system_runtime_state WHERE state_key=?').get(key).state_value);
+    delete saved.httpStatus;
+    const source = JSON.stringify(saved);
+    const next = raw === undefined ? source : source.slice(0, -1) + ',"httpStatus":' + raw + '}';
+    db.prepare('UPDATE system_runtime_state SET state_value=? WHERE state_key=?').run(next, key);
+    try {
+      const result = inspectDatabase(db, bankOptions);
+      assert.equal(result.bankRuntime.autosync.httpStatus, expected, String(raw));
+      assert.equal(result.bankRuntime.autosync.httpStatusState, state, String(raw));
+      assert.deepEqual(withoutNewFields(result), withoutNewFields(baseline), String(raw));
+      assert.equal(diagnosticExitCode(result), diagnosticExitCode(baseline));
+      assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+    } finally { db.close(); }
+  }
+});
+
+test('bank runtime: scheduler update time is normalized or null without raw timestamp reflection', () => {
+  for (const [source, expected] of [
+    ['2026-09-09 11:55:00', '2026-09-09T11:55:00.000Z'],
+    ['2026-09-09T11:55:00.123Z', '2026-09-09T11:55:00.123Z'],
+    ['2026-09-09T12:00:01.000Z', '2026-09-09T12:00:01.000Z'],
+    ['PRIVATE-TIMESTAMP', null], ['2026-02-30T00:00:00.000Z', null], ['0000-01-01T00:00:00.000Z', null],
+  ]) {
+    const { db } = runtimeFixture();
+    db.prepare("UPDATE system_runtime_state SET updated_at=? WHERE state_key='tochka-autosync:v1:INT-T-TOCHKA'").run(source);
+    try {
+      const result = inspectDatabase(db, bankOptions);
+      assert.equal(result.bankRuntime.autosync.updatedAtUtc, expected);
+      if (expected === null || expected > result.bankRuntime.observedAtUtc) {
+        assert.equal(result.bankRuntime.autosync.updatedAgeSeconds, null);
+        assert.equal(result.bankRuntime.autosync.state, 'invalid');
+      }
+      assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+      assert.equal(diagnosticExitCode(result), 2);
     } finally { db.close(); }
   }
 });
