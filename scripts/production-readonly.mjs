@@ -380,6 +380,67 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
   return result;
 }
 
+// Fixed R13 INSERT column contract. This is schema observation, not a write rehearsal.
+// Only code-owned column names and bounded counts are returned; schema SQL and unknown
+// identifiers are never emitted. No bank payload or credential is read by this function.
+const bankWriteColumns = {
+  bank_accounts: 'id connection_id legal_entity_id provider_account_id masked_account name currency status balance_minor balance_as_of synced_at'.split(' '),
+  bank_statement_imports: 'id connection_id legal_entity_id provider_statement_id provider_account_id start_date end_date status start_balance_minor end_balance_minor currency transaction_count fetched_at'.split(' '),
+  bank_transactions: 'id connection_id legal_entity_id provider_account_id provider_statement_id provider_transaction_id payment_id operation_date direction amount_minor currency status document_number transaction_type description counterparty_name counterparty_inn counterparty_kpp source_payload_hash financial_operation_id imported_at'.split(' '),
+  financial_operations: 'id operation_date period direction amount_minor category report_class counterparty_entity_id contract_id document_id project_entity_id legal_entity_id object_entity_id cfr_entity_id bank_operation_ref operation_kind source_system source_file source_sheet source_ref data_quality status created_by'.split(' '),
+  integration_sync_runs: 'id connection_id started_at finished_at trigger status received_count accepted_count rejected_count error_count conflict_count checkpoint error_message initiated_by correlation_id dry_run'.split(' '),
+  integration_log_entries: 'run_id connection_id level event message record_ref'.split(' '),
+  audit_events: 'actor action entity_type entity_id payload'.split(' '),
+};
+const bankProviderIndexes = {
+  bank_accounts: ['connection_id', 'legal_entity_id', 'provider_account_id'],
+  bank_statement_imports: ['connection_id', 'provider_statement_id'],
+  bank_transactions: ['connection_id', 'provider_transaction_id'],
+};
+function inspectBankCommitSchema(db) {
+  const result = { state: 'partial', tables: {} };
+  for (const [table, expected] of Object.entries(bankWriteColumns)) {
+    try {
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
+        result.tables[table] = { state: 'schema_missing' };
+        continue;
+      }
+      const columns = db.prepare('SELECT name,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(?) LIMIT 129').all(table);
+      const indexes = db.prepare('SELECT name,"unique",partial FROM pragma_index_list(?) LIMIT 129').all(table);
+      if (columns.length > 128 || indexes.length > 128) {
+        result.tables[table] = { state: 'over_limit' };
+        continue;
+      }
+      const known = new Set(columns.map(column => column.name));
+      const primary = columns.filter(column => column.pk > 0).sort((a,b) => a.pk-b.pk).map(column => column.name);
+      const desiredIndex = bankProviderIndexes[table];
+      let providerIndex = desiredIndex ? 'missing' : 'not_required';
+      for (const index of indexes.filter(index => index.unique === 1 && index.partial === 0)) {
+        const keys = db.prepare('SELECT name FROM pragma_index_info(?) ORDER BY seqno LIMIT 129').all(index.name);
+        if (keys.length > 128) throw new Error();
+        if (desiredIndex && keys.map(key => key.name).join('|') === desiredIndex.join('|')) providerIndex = 'matched';
+      }
+      const extra = columns.filter(column => column.hidden === 0 && column.notnull === 1
+        && column.dflt_value === null && column.pk === 0 && !expected.includes(column.name)).length;
+      const counts = fixedCounts({
+        unexpected_required_columns: extra,
+        foreign_key_rows: db.prepare('SELECT count(*) n FROM (SELECT 1 FROM pragma_foreign_key_list(?) LIMIT 129)').get(table).n,
+        trigger_rows: db.prepare("SELECT count(*) n FROM (SELECT 1 FROM sqlite_master WHERE type='trigger' AND tbl_name=? LIMIT 129)").get(table).n,
+        unique_index_count: indexes.filter(index => index.unique === 1).length,
+      }, ['unexpected_required_columns', 'foreign_key_rows', 'trigger_rows', 'unique_index_count']);
+      if (counts.foreignKeyRows > 128 || counts.triggerRows > 128) throw new Error();
+      result.tables[table] = {
+        state: 'observed', missingColumns: expected.filter(column => !known.has(column)),
+        primaryKeyMatches: primary.length === 1 && primary[0] === 'id',
+        providerIndex, ...counts,
+      };
+    } catch { result.tables[table] = { state: 'unavailable' }; }
+  }
+  result.state = Object.values(result.tables).every(table => table.state === 'observed') ? 'observed' : 'partial';
+  return result;
+}
+
+
 export function diagnosticExitCode(result) {
   return Object.values(result.tables).every(item => item.state === 'observed') &&
     Object.values(result.checks).every(item => item.state === 'observed' && item.violations === 0) &&
@@ -412,6 +473,7 @@ export function inspectDatabase(db, bankOptions) {
   }
   result.bankWindow = inspectBankWindow(db, result.tables, bankOptions);
   result.bankRuntime = inspectBankRuntime(db, bankOptions);
+  result.bankCommitSchema = inspectBankCommitSchema(db);
   db.exec('ROLLBACK');
   return result;
 }

@@ -148,6 +148,37 @@ def states(value, observed, others):
     else:
         fields(value, "state")
         require(value["state"] in others.split())
+def commit_schema(value):
+    fields(value, "state tables")
+    require(value["state"] in ("observed", "partial"))
+    expected = {
+        "audit_events": "actor action entity_type entity_id payload".split(),
+        "bank_accounts": "id connection_id legal_entity_id provider_account_id masked_account name currency status balance_minor balance_as_of synced_at".split(),
+        "bank_statement_imports": "id connection_id legal_entity_id provider_statement_id provider_account_id start_date end_date status start_balance_minor end_balance_minor currency transaction_count fetched_at".split(),
+        "bank_transactions": "id connection_id legal_entity_id provider_account_id provider_statement_id provider_transaction_id payment_id operation_date direction amount_minor currency status document_number transaction_type description counterparty_name counterparty_inn counterparty_kpp source_payload_hash financial_operation_id imported_at".split(),
+        "financial_operations": "id operation_date period direction amount_minor category report_class counterparty_entity_id contract_id document_id project_entity_id legal_entity_id object_entity_id cfr_entity_id bank_operation_ref operation_kind source_system source_file source_sheet source_ref data_quality status created_by".split(),
+        "integration_log_entries": "run_id connection_id level event message record_ref".split(),
+        "integration_sync_runs": "id connection_id started_at finished_at trigger status received_count accepted_count rejected_count error_count conflict_count checkpoint error_message initiated_by correlation_id dry_run".split(),
+    }
+    fields(value["tables"], " ".join(expected))
+    for name, allowed in expected.items():
+        table = value["tables"][name]
+        if table.get("state") != "observed":
+            fields(table, "state")
+            require(table["state"] in ("schema_missing", "unavailable", "over_limit"))
+            continue
+        fields(table, "state missingColumns primaryKeyMatches providerIndex unexpectedRequiredColumns foreignKeyRows triggerRows uniqueIndexCount")
+        missing = table["missingColumns"]
+        require(type(missing) is list and all(type(item) is str and item in allowed for item in missing))
+        require(len(set(missing)) == len(missing))
+        require(type(table["primaryKeyMatches"]) is bool)
+        require(table["providerIndex"] in (("matched", "missing") if name.startswith("bank_") else ("not_required",)))
+        for key in ("unexpectedRequiredColumns", "foreignKeyRows", "triggerRows", "uniqueIndexCount"):
+            count(table[key])
+            require(table[key] <= 128)
+    observed = all(table["state"] == "observed" for table in value["tables"].values())
+    require((value["state"] == "observed") == observed)
+
 def validate(value, code):
     require(type(value) is dict and type(value.get("schemaVersion")) is int
             and value["schemaVersion"] == 1 and value.get("liveAcceptance") == "not_run"
@@ -157,7 +188,10 @@ def validate(value, code):
         fields(value, "schemaVersion status reason liveAcceptance productionMutations")
         require(code == 2 and value["reason"] == "readonly_source_unavailable")
         return status
-    fields(value, "schemaVersion liveAcceptance tables checks bankWindow bankRuntime status observedAtUtc productionMutations")
+    fields(value, "schemaVersion liveAcceptance tables checks bankWindow bankRuntime status observedAtUtc productionMutations"
+           + (" bankCommitSchema" if "bankCommitSchema" in value else ""))
+    if "bankCommitSchema" in value:
+        commit_schema(value["bankCommitSchema"])
     require((code, status) in ((0, "bounded_checks_complete"), (2, "incomplete_or_issues")))
     stamp = value["observedAtUtc"]
     timestamp(stamp)

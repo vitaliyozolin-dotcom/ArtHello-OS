@@ -3,6 +3,60 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { inspectDatabase, activeRelativePath, diagnosticExitCode } from '../production-readonly.mjs';
 
+test('bank commit schema: missing write columns are identified without reading business rows', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec("CREATE TABLE bank_transactions(id TEXT PRIMARY KEY, PRIVATE_REQUIRED TEXT NOT NULL);");
+  try {
+    const result = inspectDatabase(db, bankOptions);
+    const schema = result.bankCommitSchema.tables.bank_transactions;
+    assert.equal(schema.state, 'observed');
+    assert.ok(schema.missingColumns.includes('payment_id'));
+    assert.ok(schema.missingColumns.includes('source_payload_hash'));
+    assert.equal(schema.unexpectedRequiredColumns, 1);
+    assert.equal(schema.primaryKeyMatches, true);
+    assert.equal(schema.providerIndex, 'missing');
+    assert.equal(JSON.stringify(result).includes('PRIVATE_REQUIRED'), false);
+    assert.equal(db.prepare('SELECT count(*) n FROM bank_transactions').get().n, 0);
+    assert.throws(() => db.exec("INSERT INTO bank_transactions VALUES('x','y')"));
+  } finally { db.close(); }
+});
+
+test('bank commit schema: index scope, extra constraints and absent tables remain distinct', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE bank_accounts(id TEXT PRIMARY KEY,connection_id TEXT,legal_entity_id TEXT,
+      provider_account_id TEXT, extra TEXT REFERENCES app_users(id));
+    CREATE UNIQUE INDEX PRIVATE_WRONG_INDEX ON bank_accounts(connection_id,provider_account_id);
+    CREATE TRIGGER PRIVATE_TRIGGER AFTER INSERT ON bank_accounts BEGIN SELECT 1; END;`);
+  try {
+    let result = inspectDatabase(db, bankOptions).bankCommitSchema;
+    assert.equal(result.tables.bank_accounts.providerIndex, 'missing');
+    assert.equal(result.tables.bank_accounts.foreignKeyRows, 1);
+    assert.equal(result.tables.bank_accounts.triggerRows, 1);
+    assert.equal(result.tables.bank_accounts.uniqueIndexCount, 2);
+    assert.equal(result.tables.bank_statement_imports.state, 'schema_missing');
+    assert.equal(result.state, 'partial');
+    assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+  } finally { db.close(); }
+  const matching = new DatabaseSync(':memory:');
+  matching.exec(`CREATE TABLE bank_transactions(id TEXT,connection_id TEXT,provider_transaction_id TEXT);
+    CREATE UNIQUE INDEX PRIVATE_EQUIVALENT ON bank_transactions(connection_id,provider_transaction_id);`);
+  try {
+    const result = inspectDatabase(matching, bankOptions).bankCommitSchema.tables.bank_transactions;
+    assert.equal(result.providerIndex, 'matched');
+    assert.equal(result.primaryKeyMatches, false);
+  } finally { matching.close(); }
+});
+
+test('bank commit schema: column cap and SQL errors return fixed states', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE bank_transactions(' + Array.from({length:129}, (_,i)=>'private_'+i+' TEXT').join(',') + ')');
+  try {
+    const result = inspectDatabase(db, bankOptions).bankCommitSchema.tables.bank_transactions;
+    assert.deepEqual(result, { state: 'over_limit' });
+  } finally { db.close(); }
+});
+
+
 test('canonical D1 identity is deterministic, not discovered by row count', () => {
   assert.match(activeRelativePath(), /^d1\/miniflare-D1DatabaseObject\/[a-f0-9]{64}\.sqlite$/);
 });
