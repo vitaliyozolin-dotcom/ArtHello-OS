@@ -111,7 +111,8 @@ test('bank runtime: metadata distinguishes future pending retry, expired lease a
     assert.deepEqual(runtime.setup, { state: 'observed', startDate: '2026-09-01', syncIntervalMinutes: 60, syncMinute: 5 });
     assert.deepEqual(runtime.autosync, { state: 'observed', outcome: 'pending', generationMatchesSetup: true,
       nextAtUtc: '2026-09-09T12:05:00.000Z', leasedUntilUtc: null, leaseState: 'released', failures: 0, updatedAgeSeconds: 300,
-      httpStatus: 200, httpStatusState: 'observed', updatedAtUtc: '2026-09-09T11:55:00.000Z' });
+      httpStatus: 200, httpStatusState: 'observed', updatedAtUtc: '2026-09-09T11:55:00.000Z',
+      failureStage: null, failureStageState: 'missing' });
     assert.deepEqual(runtime.statementLease, { state: 'observed', expiresAtUtc: '2026-09-09T11:59:00.000Z', leaseState: 'expired' });
     assert.deepEqual(runtime.retainedJobs, { state: 'observed', scopeMatch: 'unverified', providerStatus: 'not_stored',
       total: 4, invalidRows: 0, exactWindowRows: 2, olderEndRows: 2, otherWindowRows: 0, oldestAgeSeconds: 300 });
@@ -234,6 +235,36 @@ test('bank runtime: stored callback status distinguishes missing and invalid wit
       assert.deepEqual(withoutNewFields(result), withoutNewFields(baseline), String(raw));
       assert.equal(diagnosticExitCode(result), diagnosticExitCode(baseline));
       assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+    } finally { db.close(); }
+  }
+});
+
+test('bank runtime: lexical failure stages are bounded and cannot change bank acceptance or disclose raw errors', () => {
+  const stages = ['setup_references', 'credential_read', 'statement_state_open', 'bank_sync',
+    'statement_fence', 'sync_commit', 'statement_acknowledge', 'statement_release',
+    'sync_callback', 'response_decode', 'response_result'];
+  const cases = [
+    ...stages.map(stage => [JSON.stringify(stage), 'error', stage, 'observed']),
+    [undefined, 'error', null, 'missing'], ['null', 'error', null, 'missing'],
+    ...['"PRIVATE-FAILURE-SECRET"', '"bank_sync\\nPRIVATE-ERROR"', '500', 'true', '[]', '{}']
+      .map(raw => [raw, 'error', null, 'invalid']),
+    ...['pending', 'complete', 'busy', 'running'].map(outcome => ['"bank_sync"', outcome, null, 'invalid']),
+  ];
+  for (const [raw, outcome, expected, quality] of cases) {
+    const { db } = runtimeFixture({ outcome });
+    const key = 'tochka-autosync:v1:INT-T-TOCHKA';
+    const source = db.prepare('SELECT state_value FROM system_runtime_state WHERE state_key=?').get(key).state_value;
+    const before = raw === undefined ? source : source.slice(0, -1) + ',"failureStage":' + raw + '}';
+    db.prepare('UPDATE system_runtime_state SET state_value=? WHERE state_key=?').run(before, key);
+    try {
+      const result = inspectDatabase(db, bankOptions);
+      assert.equal(result.bankRuntime.autosync.failureStage, expected, String(raw));
+      assert.equal(result.bankRuntime.autosync.failureStageState, quality, String(raw));
+      assert.equal(result.bankWindow.checksComplete, false);
+      assert.equal(diagnosticExitCode(result), 2);
+      assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+      assert.equal(db.prepare('SELECT state_value FROM system_runtime_state WHERE state_key=?').get(key).state_value, before);
+      assert.throws(() => db.exec('DELETE FROM system_runtime_state'));
     } finally { db.close(); }
   }
 });

@@ -189,7 +189,7 @@ test('rejected rows cannot report a complete import or acknowledge a pending sta
   assert.equal(sync.rejectedCount,4);assert.equal(sync.transactions.length,0);assert.match(sync.reason,/не обработана/);
   assert.equal(await state.store.get(job),'statement-1');
   const route=readFileSync(new URL('../app/api/integration-actions/route.ts',import.meta.url),'utf8');
-  assert.match(route,/if \(sync\.rejectedCount === 0\) await statementState\.complete\(sync\.statements\)/);
+  assert.match(route,/if \(sync\.rejectedCount === 0\) await runTochkaSyncStage\('statement_acknowledge', \(\) => statementState\.complete\(sync\.statements\), observe\)/);
   await state.release();f.sqlite.close();
 });
 
@@ -198,7 +198,9 @@ test('build patch is idempotent and keeps committed writes fenced and pending ac
     const source=readFileSync(new URL('../'+path,import.meta.url),'utf8');assert.equal(patch(source),source);
   }
   const route=readFileSync(new URL('../app/api/integration-actions/route.ts',import.meta.url),'utf8');
-  assert.ok(route.indexOf('await statementState.complete(sync.statements)')>route.indexOf('await commitTochkaReadOnlySync(actor, setup, sync, trigger, statementState.fence)'));
+  const acknowledge=route.indexOf("await runTochkaSyncStage('statement_acknowledge', () => statementState.complete(sync.statements), observe)");
+  const commit=route.indexOf("await runTochkaSyncStage('sync_commit', () => commitTochkaReadOnlySync(actor, setup, sync, trigger, statementState.fence), observe)");
+  assert.ok(commit>=0 && acknowledge>commit);
   const db=readFileSync(new URL('../db/index.ts',import.meta.url),'utf8');
   assert.match(db,/statementLease \? ` AND \$\{tochkaStatementLeaseGuardSql\}`/);
 });
