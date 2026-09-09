@@ -76,6 +76,212 @@ const bankNow = Date.parse('2026-09-09T12:00:00.000Z');
 const bankSyncTime = '2026-09-09T11:00:00.000Z';
 const bankOptions = { now: bankNow, syncNotBefore: '2026-09-09T10:00:00.000Z' };
 
+const runtimeGeneration = '12345678-1234-4123-8123-123456789abc';
+function runtimeFixture({ outcome = 'pending', nextAt = bankNow + 300_000, leasedUntil = 0 } = {}) {
+  const db = bankFixture({ complete: true, status: 'Ожидание банка' });
+  db.exec(`CREATE TABLE system_runtime_state(state_key TEXT PRIMARY KEY,state_value TEXT NOT NULL,updated_at TEXT NOT NULL);
+    ALTER TABLE integration_connections ADD COLUMN status TEXT;
+    ALTER TABLE integration_connections ADD COLUMN is_enabled INTEGER;
+    ALTER TABLE integration_connections ADD COLUMN next_sync_at TEXT;
+    UPDATE integration_connections SET status='Формируются выписки',is_enabled=1,next_sync_at='2026-09-09T12:05:00.000Z';`);
+  const save = (key, value, updatedAt = '2026-09-09 11:55:00') => db.prepare('INSERT INTO system_runtime_state VALUES(?,?,?)')
+    .run(key, typeof value === 'string' ? value : JSON.stringify(value), updatedAt);
+  save('integration_setup:INT-T-TOCHKA', { connectionId: 'INT-T-TOCHKA', authMethod: 'JWT',
+    secretStatus: 'stored', legalEntityId: 'PRIVATE-ENTITY', customerCode: 'PRIVATE-CUSTOMER',
+    credentialGeneration: runtimeGeneration, startDate: '2026-09-01', syncIntervalMinutes: 60, syncMinute: 5,
+    forbiddenPayload: 'PRIVATE-SETUP-PAYLOAD' });
+  save('tochka-autosync:v1:INT-T-TOCHKA', { version: 1, generation: runtimeGeneration,
+    owner: 'PRIVATE-SCHEDULER-OWNER', leasedUntil, nextAt, failures: 0, outcome, httpStatus: 200 });
+  save('tochka-statement-lease:v1:INT-T-TOCHKA', { version: 1, owner: 'PRIVATE-LEASE-OWNER', expiresAtMs: bankNow - 60_000 });
+  save('integration_credential:PRIVATE-ENVELOPE', 'PRIVATE-CIPHERTEXT-NOT-METADATA');
+  for (let i = 0; i < 4; i++) save('tochka-statement-pending:v1:PRIVATE-JOB-' + i, {
+    version: 1, scopeHash: 'PRIVATE-SCOPE-HASH', accountId: 'PRIVATE-ACCOUNT-' + i,
+    startDate: '2026-09-01', endDate: i < 2 ? '2026-09-08' : '2026-09-09', statementId: 'PRIVATE-STATEMENT-' + i,
+  });
+  return { db, save };
+}
+
+test('bank runtime: metadata distinguishes future pending retry, expired lease and retained old windows without secrets', () => {
+  const { db } = runtimeFixture();
+  const before = db.prepare('SELECT count(*) AS n FROM system_runtime_state').get().n;
+  try {
+    const result = inspectDatabase(db, bankOptions);
+    const runtime = result.bankRuntime;
+    assert.equal(runtime.state, 'observed');
+    assert.deepEqual(runtime.setup, { state: 'observed', startDate: '2026-09-01', syncIntervalMinutes: 60, syncMinute: 5 });
+    assert.deepEqual(runtime.autosync, { state: 'observed', outcome: 'pending', generationMatchesSetup: true,
+      nextAtUtc: '2026-09-09T12:05:00.000Z', leasedUntilUtc: null, leaseState: 'released', failures: 0, updatedAgeSeconds: 300 });
+    assert.deepEqual(runtime.statementLease, { state: 'observed', expiresAtUtc: '2026-09-09T11:59:00.000Z', leaseState: 'expired' });
+    assert.deepEqual(runtime.retainedJobs, { state: 'observed', scopeMatch: 'unverified', providerStatus: 'not_stored',
+      total: 4, invalidRows: 0, exactWindowRows: 2, olderEndRows: 2, otherWindowRows: 0, oldestAgeSeconds: 300 });
+    assert.deepEqual(runtime.latestRun, { state: 'observed', startedAtUtc: bankSyncTime, finishedAtUtc: bankSyncTime });
+    assert.equal(result.bankWindow.sync.state, 'pending');
+    assert.equal(result.bankWindow.checksComplete, false);
+    assert.equal(diagnosticExitCode(result), 2);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM system_runtime_state').get().n, before);
+    const output = JSON.stringify(result);
+    for (const forbidden of ['PRIVATE', runtimeGeneration, 'scopeHash', 'statementId', 'customerCode', 'credentialGeneration', 'httpStatus']) {
+      assert.equal(output.includes(forbidden), false, forbidden);
+    }
+    assert.throws(() => db.exec('DELETE FROM system_runtime_state'));
+  } finally { db.close(); }
+});
+
+test('bank runtime: current PENDING and historical READY import rows are fixed counts, not retained provider status', () => {
+  const { db } = runtimeFixture();
+  db.exec(`UPDATE bank_statement_imports SET status=CASE id
+    WHEN 'PRIVATE-STMT-0' THEN 'PENDING' WHEN 'PRIVATE-STMT-1' THEN 'READY'
+    WHEN 'PRIVATE-STMT-2' THEN 'Failed' ELSE 'PRIVATE-UNKNOWN-STATUS' END`);
+  try {
+    const result = inspectDatabase(db, bankOptions);
+    assert.deepEqual(result.bankRuntime.statementImports, { state: 'observed', readyRows: 1, pendingRows: 1, failedRows: 1, unknownRows: 1 });
+    assert.equal(result.bankRuntime.retainedJobs.providerStatus, 'not_stored');
+    assert.equal(result.bankWindow.checksComplete, false);
+    assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+  } finally { db.close(); }
+});
+
+test('bank runtime: active, expired and released scheduler leases preserve schedule dates', () => {
+  for (const [leasedUntil, expected] of [[bankNow + 900_000, 'active'], [bankNow - 1, 'expired'], [0, 'released']]) {
+    const { db } = runtimeFixture({ outcome: 'running', nextAt: bankNow - 60_000, leasedUntil });
+    try {
+      const result = inspectDatabase(db, bankOptions);
+      assert.equal(result.bankRuntime.autosync.leaseState, expected);
+      assert.equal(result.bankRuntime.autosync.nextAtUtc, '2026-09-09T11:59:00.000Z');
+      assert.equal(result.bankWindow.checksComplete, false);
+      assert.equal(diagnosticExitCode(result), 2);
+    } finally { db.close(); }
+  }
+});
+
+test('bank runtime: missing metadata and schema are explicit and do not change bank acceptance', () => {
+  const db = bankFixture({ complete: true });
+  try {
+    const result = inspectDatabase(db, bankOptions);
+    assert.equal(result.bankRuntime.setup.state, 'schema_missing');
+    assert.equal(result.bankRuntime.autosync.state, 'schema_missing');
+    assert.equal(result.bankRuntime.connection.state, 'unavailable');
+    assert.equal(result.bankRuntime.state, 'partial');
+    assert.equal(result.bankWindow.checksComplete, true);
+    assert.equal(diagnosticExitCode(result), 0);
+  } finally { db.close(); }
+  const { db: empty } = runtimeFixture();
+  empty.exec('DELETE FROM system_runtime_state; DELETE FROM integration_sync_runs; DELETE FROM integration_connections;');
+  try {
+    const result = inspectDatabase(empty, bankOptions);
+    for (const component of ['setup', 'autosync', 'statementLease', 'connection', 'latestRun']) assert.equal(result.bankRuntime[component].state, 'not_observed');
+    assert.equal(result.bankRuntime.autosync.generationMatchesSetup, null);
+    assert.equal(result.bankRuntime.retainedJobs.total, 0);
+    assert.equal(result.bankRuntime.retainedJobs.oldestAgeSeconds, null);
+    assert.equal(result.bankWindow.checksComplete, false);
+  } finally { empty.close(); }
+});
+
+test('bank runtime: malformed JSON and invalid schedule fields fail without reflecting arbitrary values', () => {
+  for (const stateValue of ['PRIVATE-NOT-JSON', '[]', 'null', JSON.stringify({
+    version: 1, generation: 'PRIVATE-GENERATION', outcome: 'PRIVATE-OUTCOME',
+    nextAt: 'PRIVATE-DATE', leasedUntil: -1, failures: 500,
+  })]) {
+    const { db } = runtimeFixture();
+    db.prepare("UPDATE system_runtime_state SET state_value=? WHERE state_key='tochka-autosync:v1:INT-T-TOCHKA'").run(stateValue);
+    try {
+      const result = inspectDatabase(db, bankOptions);
+      assert.equal(result.bankRuntime.autosync.state, 'invalid');
+      assert.equal(result.bankRuntime.autosync.outcome, 'unknown');
+      assert.equal(result.bankRuntime.autosync.generationMatchesSetup, null);
+      assert.equal(result.bankRuntime.autosync.nextAtUtc, null);
+      assert.equal(result.bankRuntime.autosync.leaseState, 'unknown');
+      assert.equal(result.bankRuntime.autosync.failures, null);
+      assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+    } finally { db.close(); }
+  }
+});
+
+test('bank runtime: invalid calendar dates, wrong windows and old credential generation remain distinct', () => {
+  const { db, save } = runtimeFixture();
+  db.prepare("UPDATE system_runtime_state SET state_value=json_set(state_value,'$.generation',?) WHERE state_key='tochka-autosync:v1:INT-T-TOCHKA'")
+    .run('22345678-1234-4123-8123-123456789abc');
+  save('tochka-statement-pending:v1:PRIVATE-OTHER', { version: 1, startDate: '2026-08-01', endDate: '2026-09-09' });
+  save('tochka-statement-pending:v1:PRIVATE-INVALID', { version: 1, startDate: '2026-02-30', endDate: '2026-09-09' });
+  db.exec("UPDATE integration_connections SET next_sync_at='2026-09-31T12:00:00.000Z'");
+  try {
+    const result = inspectDatabase(db, bankOptions);
+    assert.equal(result.bankRuntime.autosync.generationMatchesSetup, false);
+    assert.equal(result.bankRuntime.retainedJobs.state, 'invalid');
+    assert.equal(result.bankRuntime.retainedJobs.total, 6);
+    assert.equal(result.bankRuntime.retainedJobs.invalidRows, 1);
+    assert.equal(result.bankRuntime.retainedJobs.otherWindowRows, 1);
+    assert.equal(result.bankRuntime.connection.nextSyncAtUtc, null);
+    assert.equal(result.bankRuntime.connection.state, 'invalid');
+    assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+  } finally { db.close(); }
+});
+
+test('bank runtime: observation clock and retained job cap cannot silently produce complete observations', () => {
+  const { db } = runtimeFixture();
+  try {
+    const invalid = inspectDatabase(db, { now: NaN });
+    assert.equal(invalid.bankRuntime.state, 'invalid_window');
+    assert.equal(invalid.bankRuntime.observedAtUtc, null);
+    assert.equal(invalid.bankWindow.checksComplete, false);
+  } finally { db.close(); }
+  const { db: capped } = runtimeFixture();
+  capped.exec(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10001)
+    INSERT INTO system_runtime_state SELECT 'tochka-statement-pending:v1:extra-' || x,'{}','2026-09-09 11:55:00' FROM n`);
+  try {
+    const result = inspectDatabase(capped, bankOptions);
+    assert.equal(result.bankRuntime.retainedJobs.state, 'over_limit');
+    assert.equal(result.bankRuntime.retainedJobs.total, null);
+    assert.equal(result.bankWindow.checksComplete, false);
+  } finally { capped.close(); }
+});
+
+test('bank runtime: year zero and arbitrary generation strings are never emitted as validated metadata', () => {
+  const { db } = runtimeFixture();
+  db.exec(`UPDATE integration_connections SET next_sync_at='0000-01-01T00:00:00.000Z';
+    UPDATE integration_sync_runs SET started_at='0000-01-01T00:00:00.000Z',finished_at='0000-01-01T00:00:00.000Z';
+    UPDATE system_runtime_state SET state_value=json_set(state_value,'$.startDate','0000-01-01','$.credentialGeneration','PRIVATE-INVALID-GENERATION-00000000000')
+    WHERE state_key='integration_setup:INT-T-TOCHKA';
+    UPDATE system_runtime_state SET state_value=json_set(state_value,'$.generation','PRIVATE-INVALID-GENERATION-00000000000')
+    WHERE state_key='tochka-autosync:v1:INT-T-TOCHKA';`);
+  try {
+    const result = inspectDatabase(db, bankOptions);
+    assert.equal(result.bankRuntime.setup.startDate, null);
+    assert.equal(result.bankRuntime.connection.nextSyncAtUtc, null);
+    assert.equal(result.bankRuntime.latestRun.startedAtUtc, null);
+    assert.equal(result.bankRuntime.latestRun.finishedAtUtc, null);
+    assert.equal(result.bankRuntime.autosync.generationMatchesSetup, null);
+    assert.equal(JSON.stringify(result).includes('0000-01'), false);
+    assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+  } finally { db.close(); }
+});
+
+test('bank runtime: malformed or future retained timestamps leave oldest age unverified', () => {
+  for (const timestamp of ['PRIVATE-INVALID-TIMESTAMP', '2026-09-09T12:00:01.000Z']) {
+    const { db } = runtimeFixture();
+    db.prepare("UPDATE system_runtime_state SET updated_at=? WHERE state_key='tochka-statement-pending:v1:PRIVATE-JOB-0'").run(timestamp);
+    try {
+      const result = inspectDatabase(db, bankOptions);
+      assert.equal(result.bankRuntime.retainedJobs.state, 'invalid');
+      assert.equal(result.bankRuntime.retainedJobs.total, 4);
+      assert.equal(result.bankRuntime.retainedJobs.oldestAgeSeconds, null);
+      assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+    } finally { db.close(); }
+  }
+});
+
+test('bank runtime: generation equality rejects an extra dash in an otherwise UUID-shaped value', () => {
+  const { db } = runtimeFixture();
+  const invalid = '-2345678-1234-4123-8123-123456789abc';
+  db.prepare("UPDATE system_runtime_state SET state_value=json_set(state_value,'$.generation',?,'$.credentialGeneration',?) WHERE state_key IN ('integration_setup:INT-T-TOCHKA','tochka-autosync:v1:INT-T-TOCHKA')")
+    .run(invalid, invalid);
+  try {
+    const result = inspectDatabase(db, bankOptions);
+    assert.equal(result.bankRuntime.autosync.generationMatchesSetup, null);
+    assert.equal(JSON.stringify(result).includes(invalid), false);
+  } finally { db.close(); }
+});
+
 function bankFixture({ complete = false, status = 'Успешно', runTime = bankSyncTime } = {}) {
   const db = new DatabaseSync(':memory:');
   db.exec(`

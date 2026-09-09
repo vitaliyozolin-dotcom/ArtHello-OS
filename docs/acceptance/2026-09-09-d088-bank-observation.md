@@ -1,0 +1,7 @@
+# D088 bank observation preparation
+
+Accepted application remains R12 source77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed. D087 diagnostic source9b6c7069b5163d99385ccc4a48066bf760235bf4 / run34328837388 / job102392362747 produced a valid incomplete_or_issues snapshot at2026-09-09T08:23:37.152Z:4accounts/4unique keys/1legal entity,12statement records,0bank transactions and0financial operations, latestsaved syncpending with0rejected/error/conflict rows. Exact/containing latest-run coverage ofSep1–Sep9 was0. The canonical source was verified before query; finalconsumer re-observation was skipped afterhelperexit2. No database mutations or bank calls occurred.
+
+D088 repairs result classification and final re-observation for valid reports, and adds bounded schedule/setup/retained-window metadata. It preserves the original completion predicate and exit2 for dataissues; it does not prove a bankfailure orfreshresync. Fourmissinglazy module tables alone do not prove unavailable functionality.
+
+Status: preparation. Exacthead/tree/review/CI/run/results will be recorded in the newPR evidence index. No new production observation, monetary reconciliation, forcedsync orfullbusinessPASS claimed. Preserve priorD075authority/locks, actualacceptedlivepin, no credentials/IDs/amounts/rawJSON output, and no upstreamrequests/writes. Use actualresult toselectthe nextneededbankstep. Visualtests remain separateD089.

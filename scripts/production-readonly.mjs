@@ -178,6 +178,179 @@ function inspectBankWindow(db, tableStates, { now = Date.now(), syncNotBefore } 
   } catch { return incomplete('unavailable'); }
 }
 
+// These fragments receive only fixed expressions below. Arbitrary stored JSON, identifiers,
+// credentials and provider payloads never leave SQLite. Runtime observations do not change
+// the separate exact-window acceptance predicate or the diagnostic exit code.
+const dateSql = value => `CASE WHEN typeof(${value})='text'
+ AND ${value} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+ AND substr(${value},1,4)>='0001'
+ AND date(${value},'+0 days')=${value} THEN ${value} END`;
+const utcSql = value => `CASE WHEN typeof(${value})='text' AND length(${value}) IN (19,20,24)
+ AND substr(${value},1,4)>='0001'
+ AND strftime('%Y-%m-%dT%H:%M:%fZ',${value},'+0 days')=
+ replace(substr(${value},1,19),' ','T') || CASE WHEN length(${value})=24 THEN substr(${value},20,4) ELSE '.000' END || 'Z'
+ THEN strftime('%Y-%m-%dT%H:%M:%fZ',${value},'+0 days') END`;
+const jsonNumberSql = (path, maximum = 253402300799999) => `CASE
+ WHEN json_type(value,'${path}')='integer' AND json_extract(value,'${path}') BETWEEN 0 AND ${maximum}
+ THEN json_extract(value,'${path}') END`;
+const uuidSql = value => `typeof(${value})='text' AND length(${value})=36
+ AND substr(${value},9,1)='-' AND substr(${value},14,1)='-' AND substr(${value},19,1)='-' AND substr(${value},24,1)='-'
+ AND substr(${value},15,1)='4' AND substr(${value},20,1) IN ('8','9','a','b')
+ AND length(replace(${value},'-',''))=32
+ AND replace(${value},'-','') NOT GLOB '*[^0-9a-f]*'`;
+const runtimeRowSql = `WITH r AS (SELECT
+ CASE WHEN json_valid(state_value) THEN CASE WHEN json_type(state_value)='object' THEN 1 ELSE 0 END ELSE 0 END AS valid_json,
+ CASE WHEN json_valid(state_value) THEN CASE WHEN json_type(state_value)='object' THEN state_value ELSE '{}' END ELSE '{}' END AS value,
+ updated_at FROM system_runtime_state WHERE state_key=:state_key)
+ SELECT valid_json,json_extract(value,'$.version')=1 AS valid_version,`;
+function epochUtc(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= 253402300799999
+    ? new Date(value).toISOString() : null;
+}
+function runtimeLease(value, now) {
+  return value === null ? 'unknown' : value === 0 ? 'released' : value > now ? 'active' : 'expired';
+}
+function runtimeAge(value, now) {
+  const time = typeof value === 'string' ? Date.parse(value) : NaN;
+  return Number.isFinite(time) && time <= now ? Math.floor((now - time) / 1000) : null;
+}
+function inspectBankRuntime(db, { now = Date.now() } = {}) {
+  const result = {
+    state: 'partial', observedAtUtc: null,
+    setup: { state: 'not_observed', startDate: null, syncIntervalMinutes: null, syncMinute: null },
+    connection: { state: 'not_observed', status: 'not_observed', enabled: null, nextSyncAtUtc: null },
+    autosync: { state: 'not_observed', outcome: 'not_observed', generationMatchesSetup: null,
+      nextAtUtc: null, leasedUntilUtc: null, leaseState: 'unknown', failures: null, updatedAgeSeconds: null },
+    statementLease: { state: 'not_observed', expiresAtUtc: null, leaseState: 'unknown' },
+    retainedJobs: { state: 'not_observed', scopeMatch: 'unverified', providerStatus: 'not_stored',
+      total: null, invalidRows: null, exactWindowRows: null, olderEndRows: null, otherWindowRows: null, oldestAgeSeconds: null },
+    statementImports: { state: 'not_observed', readyRows: null, pendingRows: null, failedRows: null, unknownRows: null },
+    latestRun: { state: 'not_observed', startedAtUtc: null, finishedAtUtc: null },
+  };
+  if (!Number.isSafeInteger(now) || now < Date.parse('2026-09-01T00:00:00.000Z') || !epochUtc(now)) {
+    result.state = 'invalid_window';
+    return result;
+  }
+  result.observedAtUtc = epochUtc(now);
+  const read = (name, table, action) => {
+    try {
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
+        result[name].state = 'schema_missing';
+        return;
+      }
+      action(result[name]);
+    } catch { result[name].state = 'unavailable'; }
+  };
+  read('setup', 'system_runtime_state', out => {
+    const row = db.prepare(`${runtimeRowSql}
+ ${dateSql("json_extract(value,'$.startDate')")} AS start_date,
+ CASE WHEN json_type(value,'$.syncIntervalMinutes')='integer'
+ AND json_extract(value,'$.syncIntervalMinutes') IN (60,180,360,1440) THEN json_extract(value,'$.syncIntervalMinutes') END AS interval_minutes,
+ ${jsonNumberSql('$.syncMinute', 59)} AS sync_minute FROM r`).get({ state_key: 'integration_setup:INT-T-TOCHKA' });
+    if (!row) return;
+    out.startDate = row.start_date;
+    out.syncIntervalMinutes = row.interval_minutes;
+    out.syncMinute = row.sync_minute;
+    // IntegrationSetup has no version field; only its fixed schedule metadata is observed.
+    out.state = row.valid_json === 1 && out.startDate !== null && out.startDate <= result.observedAtUtc.slice(0, 10)
+      && out.syncIntervalMinutes !== null && out.syncMinute !== null ? 'observed' : 'invalid';
+  });
+  read('connection', 'integration_connections', out => {
+    const row = db.prepare(`SELECT CASE status WHEN 'Работает' THEN 'running'
+ WHEN 'Формируются выписки' THEN 'forming_statements' WHEN 'Ошибка подключения' THEN 'connection_error'
+ WHEN 'На паузе' THEN 'paused' WHEN 'Ожидает синхронизации' THEN 'awaiting_sync'
+ WHEN 'Требует проверки' THEN 'review_required' ELSE 'unknown' END AS status,
+ CASE WHEN typeof(is_enabled)='integer' AND is_enabled IN (0,1) THEN is_enabled END AS enabled,
+ ${utcSql('next_sync_at')} AS next_at FROM integration_connections WHERE id='INT-T-TOCHKA'`).get();
+    if (!row) return;
+    out.status = row.status;
+    out.enabled = row.enabled === null ? null : row.enabled === 1;
+    out.nextSyncAtUtc = row.next_at;
+    out.state = out.status !== 'unknown' && out.enabled !== null && out.nextSyncAtUtc !== null ? 'observed' : 'invalid';
+  });
+  read('autosync', 'system_runtime_state', out => {
+    const row = db.prepare(`${runtimeRowSql}
+ CASE json_extract(value,'$.outcome') WHEN 'running' THEN 'running' WHEN 'complete' THEN 'complete'
+ WHEN 'pending' THEN 'pending' WHEN 'busy' THEN 'busy' WHEN 'error' THEN 'error' ELSE 'unknown' END AS outcome,
+ ${jsonNumberSql('$.nextAt')} AS next_at,${jsonNumberSql('$.leasedUntil')} AS leased_until,
+ ${jsonNumberSql('$.failures', 10)} AS failures,${utcSql('updated_at')} AS updated_at_utc,
+ CASE WHEN ${uuidSql("json_extract(value,'$.generation')")}
+ THEN (SELECT CASE WHEN json_valid(s.state_value) THEN CASE
+ WHEN ${uuidSql("json_extract(s.state_value,'$.credentialGeneration')")}
+ THEN json_extract(value,'$.generation')=json_extract(s.state_value,'$.credentialGeneration') END END
+ FROM system_runtime_state s WHERE s.state_key='integration_setup:INT-T-TOCHKA') END AS generation_matches
+ FROM r`).get({ state_key: 'tochka-autosync:v1:INT-T-TOCHKA' });
+    if (!row) return;
+    out.outcome = row.outcome;
+    out.nextAtUtc = epochUtc(row.next_at);
+    out.leasedUntilUtc = row.leased_until === 0 ? null : epochUtc(row.leased_until);
+    out.leaseState = runtimeLease(row.leased_until, now);
+    out.failures = row.failures;
+    out.updatedAgeSeconds = runtimeAge(row.updated_at_utc, now);
+    out.generationMatchesSetup = row.generation_matches === null ? null : row.generation_matches === 1;
+    out.state = row.valid_json === 1 && row.valid_version === 1 && out.outcome !== 'unknown'
+      && out.nextAtUtc !== null && out.leaseState !== 'unknown' && out.failures !== null
+      && out.updatedAgeSeconds !== null ? 'observed' : 'invalid';
+  });
+  read('statementLease', 'system_runtime_state', out => {
+    const row = db.prepare(`${runtimeRowSql} ${jsonNumberSql('$.expiresAtMs')} AS expires_at FROM r`)
+      .get({ state_key: 'tochka-statement-lease:v1:INT-T-TOCHKA' });
+    if (!row) return;
+    out.expiresAtUtc = epochUtc(row.expires_at);
+    out.leaseState = runtimeLease(row.expires_at, now);
+    out.state = row.valid_json === 1 && row.valid_version === 1 && out.expiresAtUtc !== null ? 'observed' : 'invalid';
+  });
+  read('retainedJobs', 'system_runtime_state', out => {
+    // Scope hashes cannot be mapped to the active credential without additional private
+    // scope inputs. Count all retained jobs explicitly; never call them current bank status.
+    const row = db.prepare(`WITH r AS (SELECT
+ CASE WHEN json_valid(state_value) THEN CASE WHEN json_type(state_value)='object' THEN state_value ELSE '{}' END ELSE '{}' END AS value,
+ updated_at FROM system_runtime_state WHERE state_key LIKE 'tochka-statement-pending:v1:%' LIMIT 10001),
+ windows AS (SELECT json_extract(value,'$.version')=1 AS valid_version,
+ ${dateSql("json_extract(value,'$.startDate')")} AS start_date,
+ ${dateSql("json_extract(value,'$.endDate')")} AS end_date,
+ ${utcSql('updated_at')} AS updated_at_utc FROM r), classified AS (
+ SELECT *,CASE WHEN valid_version=1 AND start_date IS NOT NULL AND end_date IS NOT NULL
+ AND start_date<=end_date AND end_date<=:end THEN 1 ELSE 0 END AS valid_window FROM windows)
+ SELECT count(*) AS total,
+ COALESCE(sum(CASE WHEN valid_window=0 THEN 1 ELSE 0 END),0) AS invalid_rows,
+ COALESCE(sum(CASE WHEN valid_window=1 AND start_date=:start AND end_date=:end THEN 1 ELSE 0 END),0) AS exact_window_rows,
+ COALESCE(sum(CASE WHEN valid_window=1 AND end_date<:end THEN 1 ELSE 0 END),0) AS older_end_rows,
+ COALESCE(sum(CASE WHEN valid_window=1 AND end_date=:end AND start_date<>:start THEN 1 ELSE 0 END),0) AS other_window_rows,
+ COALESCE(sum(CASE WHEN updated_at_utc IS NULL OR updated_at_utc>:observed_at THEN 1 ELSE 0 END),0) AS unknown_age_rows,
+ CASE WHEN count(*)=count(updated_at_utc) AND MAX(updated_at_utc)<=:observed_at THEN MIN(updated_at_utc) END AS oldest_at
+ FROM classified`).get({ start: '2026-09-01', end: result.observedAtUtc.slice(0, 10), observed_at: result.observedAtUtc });
+    if (row.total > 10000) { out.state = 'over_limit'; return; }
+    Object.assign(out, fixedCounts(row, ['total', 'invalid_rows', 'exact_window_rows', 'older_end_rows', 'other_window_rows']));
+    out.oldestAgeSeconds = runtimeAge(row.oldest_at, now);
+    out.state = out.invalidRows === 0 && row.unknown_age_rows === 0 ? 'observed' : 'invalid';
+  });
+  read('statementImports', 'bank_statement_imports', out => {
+    const row = db.prepare(`WITH s AS (SELECT lower(trim(status)) AS status FROM bank_statement_imports
+ WHERE connection_id='INT-T-TOCHKA' LIMIT 10001)
+ SELECT count(*) AS total,
+ COALESCE(sum(CASE WHEN status IN ('ready','completed') THEN 1 ELSE 0 END),0) AS ready_rows,
+ COALESCE(sum(CASE WHEN status IN ('pending','processing') THEN 1 ELSE 0 END),0) AS pending_rows,
+ COALESCE(sum(CASE WHEN status IN ('error','failed','rejected') THEN 1 ELSE 0 END),0) AS failed_rows,
+ COALESCE(sum(CASE WHEN status IS NULL OR status NOT IN ('ready','completed','pending','processing','error','failed','rejected') THEN 1 ELSE 0 END),0) AS unknown_rows FROM s`).get();
+    if (row.total > 10000) { out.state = 'over_limit'; return; }
+    Object.assign(out, fixedCounts(row, ['ready_rows', 'pending_rows', 'failed_rows', 'unknown_rows']));
+    out.state = 'observed';
+  });
+  read('latestRun', 'integration_sync_runs', out => {
+    const row = db.prepare(`SELECT ${utcSql('started_at')} AS started_at_utc,${utcSql('finished_at')} AS finished_at_utc
+ FROM integration_sync_runs WHERE connection_id='INT-T-TOCHKA' AND dry_run=0 ORDER BY started_at DESC,id DESC LIMIT 1`).get();
+    if (!row) return;
+    out.startedAtUtc = row.started_at_utc;
+    out.finishedAtUtc = row.finished_at_utc;
+    out.state = out.startedAtUtc !== null && out.finishedAtUtc !== null
+      && out.startedAtUtc <= out.finishedAtUtc && out.finishedAtUtc <= result.observedAtUtc ? 'observed' : 'invalid';
+  });
+  result.state = Object.values(result).filter(value => value && typeof value === 'object')
+    .every(value => ['observed', 'not_observed'].includes(value.state)) ? 'observed' : 'partial';
+  return result;
+}
+
 export function diagnosticExitCode(result) {
   return Object.values(result.tables).every(item => item.state === 'observed') &&
     Object.values(result.checks).every(item => item.state === 'observed' && item.violations === 0) &&
@@ -209,6 +382,7 @@ export function inspectDatabase(db, bankOptions) {
     } catch { result.checks[name] = { state: 'unavailable' }; }
   }
   result.bankWindow = inspectBankWindow(db, result.tables, bankOptions);
+  result.bankRuntime = inspectBankRuntime(db, bankOptions);
   db.exec('ROLLBACK');
   return result;
 }
