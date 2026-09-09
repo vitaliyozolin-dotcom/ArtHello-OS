@@ -276,3 +276,12 @@ D087run34328837388/job102392362747 получил valid incomplete_or_issues sna
 Runtime отдельно закреплён за accepted R12 source77f26ec9/treeac3fcaac/run34326274447; runner checkout может быть более новым. Workflow перепроверяет producer/artifact, launcher — inner archive/source hashes/fingerprint. Исполнять только на GitHub-hosted runner с новым пустым volume и синтетической учёткой. prepare-visual-fixture.mjs удаляет auth records и никогда не применяется к рабочим данным. Ожидаются14 PNG+manifest+scoped-result+evidence. Частичные картинки при failure не являются PASS.
 
 Проверить реальное отображение, отсутствие обрезки/переполнения и Task «Задача №801» в двух размерах. Результат относится к принятому image snapshot и синтетическим данным. Form persistence, backend content generation, delivery/права и банковская приёмка остаются отдельными доказательствами. Подробные пути, artifact checksum и ограничения — deploy/v52/visual/CONTENT_TASKS_HOSTED.md и DECISIONS D089.
+
+
+## D090 — CSRF-запросы мастера AlfaCRM
+
+Переносить после D089 на актуальный main, сохраняя полную историю D088/D089. Code/test scope — одна строка `deploy/v52/overrides/app/components/AlfaCrmSetupWizard.tsx` и новый `deploy/v52/overrides/tests/alfacrm-csrf-contract.test.mjs`. Серверный auth не изменять; не добавлять приём legacy header/cookie и не включать импорт.
+
+Локальная команда: `node --test deploy/v52/overrides/tests/alfacrm-csrf-contract.test.mjs`. Зафиксировано RED 1 failure / 5 tests (`csrf_denied` на валидной canonical cookie), GREEN 5/5 и независимый review. Fixture выполняет реальный sender/cookie reader и неизменённые серверные cookie writer, CSRF verifier и origin guard; DB, upstream и production не вызываются. Повторять targeted tests при изменении кода или зависимости. Hosted полный build/test aggregate и exact-source CI пока pending; новый тест входит в прежний application `tests/*.test.mjs`.
+
+После проверенного выпуска наблюдать обычный запрос мастера через настоящую сессию, не подменяя UI ручным добавлением токена. Проверить принятие корректной CSRF-пары и сохранение остальных отказов. Отдельно учитывать connected/importEnabled и разрешения; открытие wizard может создавать lazy schema, preview пишет state/audit, import пишет данные. Эти действия не являются read-only диагностикой и не выполнялись в D090 preparation. Направление финансовых операций и import-enable gate не меняются; успешный CSRF не объявлять приёмкой upstream или импорта. Evidence — acceptance note `docs/acceptance/2026-09-09-d090-alfacrm-csrf.md`.
