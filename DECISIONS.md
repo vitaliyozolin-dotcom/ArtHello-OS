@@ -1075,3 +1075,13 @@ Hosted inspection run `34337932856` / job `102421685466` на source `0e8e75ffd7
 Банковские auth/selected scope/dates/leases/backoff/activation protocol не расширяются; forced retry остаётся вне выпуска. Данные, payment operations, роли и сообщения сотрудникам не создаются вручную. Стоп — source/provenance/identity/capacity/history/consumer/backup proof mismatch или отказ владельца. После публичной границы восстановление выполняется отдельной оценкой текущих данных, не старым snapshot. Полные owner-backup, daily future execution, Alfa scoped import, Content и financial coverage остаются открытыми до своих реальных доказательств.
 
 Закрепление нового выпуска: PR392, branch `codex/arthello-r13-20260909`, parent `7f398e3180fb341754c267760463dec968fc6420` / tree `bd803a153bdadfb2fced0890190a22769042c40e`. Родитель включает D092 fixture compatibility из PR391; его отдельный hosted visual результат при подготовке ещё ожидается. Новая release identity не равна опубликованному R13; фактический результат дописывается после protected run.
+
+
+## D-097 — Уникальность банковской операции в пределах счёта
+
+Статус: подготовлено в исходниках; production-выпуск и банковская приёмка ожидаются.
+
+Для действующего SQLite/D1 v52 уникальный ключ операции Точки — `(connection_id, provider_account_id, provider_transaction_id)`, согласованный с уже существующим account-scoped ID. Старый индекс без account допускается только как распознаваемый источник транзакционной миграции; неизвестное определение останавливает bootstrap. Миграция не меняет строки банка, суммы, provenance, связи и ручную классификацию. После импорта нельзя автоматически сужать индекс при откате кода.
+
+При ошибке sync_commit планировщик сохраняет только фиксированный `commitFailureKind`, никогда сообщение исключения. Lease, доступ, credential generation, пауза и backoff остаются прежними. Локально воспроизведённая коллизия не объявляется установленной причиной live-сбоя без отдельного доказательства. Приёмка требует реальных операций по четырём счетам и сверки ДДС. Mini-spec и проверка миграции: `docs/acceptance/2026-09-09-tochka-account-identity.md`.
+

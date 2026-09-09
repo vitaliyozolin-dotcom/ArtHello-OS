@@ -389,7 +389,7 @@ export const bankTransactions = sqliteTable("bank_transactions", {
   financialOperationId: text("financial_operation_id").notNull().default(""),
   importedAt: text("imported_at").notNull(),
 }, (table) => [
-  uniqueIndex("bank_transactions_provider_unique").on(table.connectionId, table.providerTransactionId),
+  uniqueIndex("bank_transactions_provider_unique").on(table.connectionId, table.providerAccountId, table.providerTransactionId),
   index("bank_transactions_date_idx").on(table.operationDate),
 ]);
 

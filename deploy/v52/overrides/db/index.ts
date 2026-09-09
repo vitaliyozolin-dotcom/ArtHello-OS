@@ -977,6 +977,7 @@ async function initializeCoreTables() {
   await ensureTaskColumns();
   await backfillTaskOwnership();
   await ensureAccessColumns();
+  await ensureTochkaTransactionIdentityIndex();
 
   await env.DB.batch([
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS entities_source_unique ON entities (entity_type, source_system, source_record_id)"),
@@ -1006,7 +1007,7 @@ async function initializeCoreTables() {
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS legal_contract_text_stable_version_unique ON legal_contract_text_versions (stable_id, version)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS bank_accounts_provider_unique ON bank_accounts (connection_id, legal_entity_id, provider_account_id)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS bank_statement_provider_unique ON bank_statement_imports (connection_id, provider_statement_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS bank_transactions_provider_unique ON bank_transactions (connection_id, provider_transaction_id)"),
+    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS bank_transactions_provider_unique ON bank_transactions (connection_id, provider_account_id, provider_transaction_id)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS bank_transactions_date_idx ON bank_transactions (operation_date)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS integration_runs_correlation_unique ON integration_sync_runs (correlation_id)"),
     env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS readiness_step_order_unique ON readiness_scenario_steps (scenario_id, step_order)"),
@@ -1033,6 +1034,49 @@ async function seedInitialDemoData() {
   await seedAnalytics();
   await seedReadiness();
 }
+
+// Bank row IDs and financial projection IDs already include the account.
+// Keep the database uniqueness constraint in the same account scope.
+async function ensureTochkaTransactionIdentityIndex() {
+  const expected = ["connection_id", "provider_account_id", "provider_transaction_id"];
+  const legacy = ["connection_id", "provider_transaction_id"];
+  const readKeys = async () => {
+    const list = await env.DB.prepare("PRAGMA index_list(bank_transactions)")
+      .all<{ name: string; unique: number; partial: number; origin: string }>();
+    const index = (list.results ?? []).find((row) => row.name === "bank_transactions_provider_unique");
+    if (!index) return null;
+    if (index.unique !== 1 || index.partial !== 0 || index.origin !== "c") {
+      throw new Error("TOCHKA_IDENTITY_INDEX_UNEXPECTED");
+    }
+    const detail = await env.DB.prepare("PRAGMA index_xinfo(bank_transactions_provider_unique)")
+      .all<{ seqno: number; name: string | null; desc: number; coll: string; key: number }>();
+    const keys = (detail.results ?? []).filter((row) => row.key === 1).sort((a, b) => a.seqno - b.seqno);
+    if (keys.some((row) => !row.name || row.desc !== 0 || row.coll !== "BINARY")) {
+      throw new Error("TOCHKA_IDENTITY_INDEX_UNEXPECTED");
+    }
+    return keys.map((row) => row.name);
+  };
+  const before = await readKeys();
+  if (before?.join("|") === expected.join("|")) return;
+  if (before !== null && before.join("|") !== legacy.join("|")) {
+    throw new Error("TOCHKA_IDENTITY_INDEX_UNEXPECTED");
+  }
+  const create = env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS bank_transactions_provider_unique ON bank_transactions (connection_id, provider_account_id, provider_transaction_id)");
+  if (before === null) {
+    await create.run();
+  } else {
+    // D1 batch is transactional: a failed rebuild keeps the former constraint.
+    // No bank row, projection, or manual classification is rewritten.
+    await env.DB.batch([
+      env.DB.prepare("DROP INDEX IF EXISTS bank_transactions_provider_unique"),
+      create,
+    ]);
+  }
+  if ((await readKeys())?.join("|") !== expected.join("|")) {
+    throw new Error("TOCHKA_IDENTITY_INDEX_UNEXPECTED");
+  }
+}
+
 
 async function ensureTaskColumns() {
   const current = await env.DB.prepare("PRAGMA table_info(tasks)").all<{ name: string }>();
