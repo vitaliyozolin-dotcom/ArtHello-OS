@@ -238,3 +238,12 @@ R10/PR379 продолжает D081 только после доказанног
 Run34322039891/job102371510204 остановился после Caddy134 PASS и ARTHELLO_TARGET_CADDY_FIXTURE=VERIFIED на удалении test-fixtures. Не повторять R10 как новый кандидат и не считать fixture PASS выпуском. В R11 используется новый helper, который перед удалением возвращает право записи только собственным обычным каталогам текущего fixture; частичная подготовка допускается, подмена/symlink запрещены.
 
 R11 PR380/префикс `D085: guarded R11`/parent2e57dd22 запускается после exact CI с дополнительным d085-candidate-tests. Frozen R10/R9/V52 и D083 state/browser/backup/public протоколы не редактируются. Новый guard доказывает полный R10 pre-auth abort; fresh capacity и прежний точный R9 retirement остаются, удаление иных образов не добавляется. Изменять main во время protected run нельзя. При held-candidate resume действуют все прежние identity/runtime/route/backup проверки; после auth/public rollback snapshot не допускается. Результат принимать только по реальным evidence шагов; все исходные бизнес-проверки вести отдельно.
+
+
+## D086 / R12: ёмкость после R11 pre-import abort
+
+R11 run34324235442/job102378379405 завершился insufficient_import_space/exit2 до download/import, при5807140KiB свободно против7995084KiB необходимо. Его replay доказательство закрепляет весь граф и отсутствие поздних шагов. R12 PR381/префикс D086: guarded R12/parent e579a20a сохраняет старые workflows и Quality; отдельный Verify ArtHello R12 continuation с d086-candidate-tests обязателен по exact main вместе с прежними gates.
+
+Новый helper deploy/browser/retire-r10-images.mjs не принимает CLI targets и может удалить только immutable unused R10 browser44ef654e после повторных source/tag/role/UID/fingerprint/no-consumer/current-main/recovery-artifact проверок. Application image не является целью. Подмена/ошибка/consumer/истёкший artifact — blocked. После удаления или доказанного отсутствия новый замер обязан удовлетворить прежнюю capacity с резервом2GiB; иначе остановка до archive download. Дальнейший исходный capacity step также остаётся обязательным. Main во время protected run не менять. Full authority/target/evidence: DECISIONS D086.
+
+Не возвращать отклонённую mutable-tag очистку application image, не понижать reserve, не подменять новый browser старым. Не выдавать освобождённое место за принятый выпуск. Требуются фактические candidate и post-public browser outcomes, backup evidence и отдельная исходная бизнес-приёмка. До actual accepted live source банковский PR371 и visual runtime pin остаются закрытыми.
