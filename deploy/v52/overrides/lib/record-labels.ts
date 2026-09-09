@@ -56,7 +56,7 @@ export function recordLabel(kind: string, value: unknown): string {
 }
 
 export function taskRecordLabel(value: unknown): string {
-  return `Задача №${recordSequence(value)}`;
+  return recordLabel("Задача", value);
 }
 
 export function humanPeriodLabel(value: string): string {
