@@ -316,6 +316,6 @@ Runtime отдельно закреплён за accepted R12 source77f26ec9/tre
 
 ## D094 — Наблюдать этап банковского сбоя
 
-После включения трёх D094 application overlays в новый verified release дождаться обычного scheduler tick по сохранённому расписанию. Не обходить backoff, не менять selected scope/даты, не вызывать service capability вручную и не выдавать наблюдение за resync. D094 в main сам по себе не меняет live R12.
+После включения четырёх D094 application/test overlays в новый verified release дождаться обычного scheduler tick по сохранённому расписанию. Не обходить backoff, не менять selected scope/даты, не вызывать service capability вручную и не выдавать наблюдение за resync. D094 в main сам по себе не меняет live R12.
 
 D075 fixed report дополнительно читает autosync.failureStage/failureStageState. При missing этап неизвестен (в том числе старый runtime); при invalid значение не выводится; observed допустим только для outcome=error и одного из 11 закреплённых имён. Сопоставлять его с accepted app source/image, updatedAtUtc и завершённым read-only отчётом. HTTP500 означает сохранённый callback status, а не доказанный ответ банка. Сохранять прежние checksComplete, exit2, оба consumer observations, canonical D1 identity и отсутствие raw financial/credential data. Причину исправлять после фактического результата; ноль operations и исторические READY imports не объявлять полноценной загрузкой.

@@ -263,7 +263,7 @@ test('scheduler distinguishes callback, response decoding and result failures us
   }
 });
 
-async function observedRouteFixture({ fail = '', releaseFails = false, busy = false, pending = false } = {}) {
+async function observedRouteFixture({ fail = '', releaseFails = false, busy = false, pending = false, rejectedCount = 0 } = {}) {
   const f = fixture(); const calls = [];
   const step = async (stage, value) => {
     calls.push(stage);
@@ -281,7 +281,7 @@ async function observedRouteFixture({ fail = '', releaseFails = false, busy = fa
     ensureCoreTables: async () => {}, getIntegrationSetups: async () => ({ 'INT-T-TOCHKA': f.setup }), getDb: () => chain,
     validateIntegrationSetupReferences: () => step('setup_references'), readIntegrationCredential: () => step('credential_read', 'synthetic-private-key'),
     openTochkaStatementState: async (_setup, automatic) => { assert.equal(automatic, true); return step('statement_state_open', state); },
-    syncTochkaReadOnly: () => step('bank_sync', { valid: true, complete: !pending, accounts: [], statements: [], transactions: [], rejectedCount: 0, expiresAt: '', reason: 'synthetic' }),
+    syncTochkaReadOnly: () => step('bank_sync', { valid: true, complete: !pending && rejectedCount === 0, accounts: [], statements: [], transactions: [], rejectedCount, expiresAt: '', reason: 'synthetic' }),
     commitTochkaReadOnlySync: async (actor, _setup, _sync, _trigger, fence) => {
       assert.equal(actor, 'SYSTEM:TOCHKA_READONLY_SCHEDULER'); assert.equal(fence, state.fence);
       return step('sync_commit', { committed: true, financialOperationCount: 0 });
@@ -293,6 +293,22 @@ async function observedRouteFixture({ fail = '', releaseFails = false, busy = fa
     body: JSON.stringify({ action: 'revokeCredential', connectionId: 'INT-T-TBANK', failureStage: 'arbitrary' }) }));
   return { ...f, calls, response, result: await response.json() };
 }
+
+test('actual route acknowledges only unrejected committed statements and always releases the lease', async () => {
+  for (const options of [{}, { rejectedCount: 1 }, { fail: 'sync_commit' }]) {
+    const f = await observedRouteFixture(options);
+    try {
+      const accepted = !options.rejectedCount && !options.fail;
+      assert.equal(f.calls.filter(stage => stage === 'sync_commit').length, 1);
+      assert.equal(f.calls.filter(stage => stage === 'statement_acknowledge').length, accepted ? 1 : 0);
+      if (accepted) assert.ok(f.calls.indexOf('statement_acknowledge') > f.calls.indexOf('sync_commit'));
+      assert.equal(f.calls.at(-1), 'statement_release');
+      assert.equal(f.calls.filter(stage => stage === 'statement_release').length, 1);
+      assert.equal(f.result.outcome, accepted ? 'complete' : 'error');
+      assert.equal(f.state().leasedUntil, 0);
+    } finally { f.sqlite.close(); }
+  }
+});
 
 test('actual assembled route identifies each escaping sync stage without leaking exceptions or changing retry behavior', async () => {
   for (const stage of ['setup_references', 'credential_read', 'statement_state_open', 'bank_sync', 'statement_fence',
