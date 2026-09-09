@@ -45,7 +45,7 @@ function safeReturnTo(value: unknown) {
   return route.startsWith("/") && !route.startsWith("//") ? route : "/";
 }
 
-function arthelloOrigin() {
+export function arthelloOrigin() {
   const value =
     process.env.ARTHELLO_PUBLIC_ORIGIN?.trim() || ARTHELLO_FALLBACK_ORIGIN;
   let url: URL;

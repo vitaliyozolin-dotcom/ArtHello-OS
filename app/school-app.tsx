@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import returnStyles from "./arthello-return.module.css";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -440,6 +441,7 @@ function AppShell({ snapshot, activeView, onView, onStudent, helpAction, helpOve
         </aside>
 
         <section className="l0-workspace">
+          {!familyContext ? <nav className={returnStyles.navigation} aria-label="Возврат в рабочую систему"><a className={returnStyles.link} href="/auth/central/return">Вернуться в ArtHello OS</a></nav> : null}
           <header className="l0-topbar">
             <div className="mobile-brand"><Image src="/school-logo.svg" alt="" width={36} height={36} /><strong>1–11</strong></div>
             <div className="topbar-spacer" />
