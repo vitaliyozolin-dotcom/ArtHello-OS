@@ -324,3 +324,8 @@ D075 fixed report дополнительно читает autosync.failureStage/
 ## D095 — Проверить формат номера задачи
 
 После нового выпуска проверить единый `Задача №0001`/`№0801` в очереди, карточке и drawer, сохранив открытие того же raw ID. До нового runtime фиксировать статус prepared, не live PASS. Старый D089 visual adapter работает с accepted R12 source77f и literal№801; новый padded visual expectation требует нового закреплённого artifact/runtime. Модуль10000 и поиск по raw ID не меняются и не объявляются исправленными.
+
+
+### D092 — Диагностика уже сохранённого visual artifact
+
+После D092 smoke PASS / scoped BLOCKED читать existing artifact10096640452 через новый owner push-main workflow с prefix `D092: inspect existing visual evidence`. Сначала exact current head и fixed unexpired producer/artifact metadata, затем ordinary GET и frozen ZIP reader. PR только проверяет исходники; никаких production permissions или UI rerun. Результат даёт ограниченный stage/result/completedCaptures/archive PNG count; произвольная ошибка и содержимое PNG не выводятся. Проверка receipt не равна визуальному просмотру или полной UI приёмке. Полный контракт — READ_EXISTING_EVIDENCE.md. При отказе identity/digest/схемы оставить stage неизвестным и не ослаблять границы.
