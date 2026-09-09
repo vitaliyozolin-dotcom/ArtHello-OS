@@ -15,9 +15,15 @@ cleanup() {
 if docker inspect "$probe" >/dev/null 2>&1; then echo 'READONLY_BLOCKED=helper_already_exists'; exit 2; fi
 trap cleanup EXIT INT TERM HUP
 observe_consumers() {
-  timeout 60 python3 -I scripts/production-data-consumers.py \
-    --expected-release "$EXPECTED_LIVE_SOURCE_SHA" \
-    --release-state-dir "$HOME/.config/arthello/release-state"
+  if [[ "$EXPECTED_LIVE_SOURCE_SHA" == f5fa3e46e3510e6fc98ae4455f4b499c0ba30695 ]]; then
+    timeout 60 python3 -I scripts/production-data-consumers-r13.py \
+      --expected-release "$EXPECTED_LIVE_SOURCE_SHA" \
+      --release-state-dir "$HOME/.config/arthello/release-state"
+  else
+    timeout 60 python3 -I scripts/production-data-consumers.py \
+      --expected-release "$EXPECTED_LIVE_SOURCE_SHA" \
+      --release-state-dir "$HOME/.config/arthello/release-state"
+  fi
 }
 # Accepted release identity is pinned separately from this diagnostic's source.
 # Only its exact R7 backup worker may share /data; every other consumer blocks.
