@@ -1,5 +1,12 @@
 import { Router } from "express";
-import { DEFAULT_BRANCH, branchId, logger, pool, sql, sqlOne } from "./shared.js";
+import {
+  DEFAULT_BRANCH,
+  branchId,
+  logger,
+  pool,
+  sql,
+  sqlOne,
+} from "./shared.js";
 
 export const duplicatesRouter = Router();
 
