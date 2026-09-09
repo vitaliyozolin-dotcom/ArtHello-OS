@@ -441,7 +441,6 @@ function AppShell({ snapshot, activeView, onView, onStudent, helpAction, helpOve
         </aside>
 
         <section className="l0-workspace">
-          {!familyContext ? <nav className={returnStyles.navigation} aria-label="Возврат в рабочую систему"><a className={returnStyles.link} href="/auth/central/return">Вернуться в ArtHello OS</a></nav> : null}
           <header className="l0-topbar">
             <div className="mobile-brand"><Image src="/school-logo.svg" alt="" width={36} height={36} /><strong>1–11</strong></div>
             <div className="topbar-spacer" />
@@ -452,7 +451,10 @@ function AppShell({ snapshot, activeView, onView, onStudent, helpAction, helpOve
             <StatusPill tone="blue">{roleLabels[snapshot.viewer.role]}</StatusPill>
             <button className="top-avatar" onClick={() => onView("profile")} aria-label="Открыть профиль"><Avatar name={snapshot.viewer.displayName} size="sm" /></button>
           </header>
-          <main className="l0-main">{children}</main>
+          <main className="l0-main">
+            {!familyContext ? <nav className={returnStyles.navigation} aria-label="Возврат в рабочую систему"><a className={returnStyles.link} href="/auth/central/return">Вернуться в ArtHello OS</a></nav> : null}
+            {children}
+          </main>
         </section>
 
         <nav className="l0-bottom-nav" aria-label="Основная навигация">
