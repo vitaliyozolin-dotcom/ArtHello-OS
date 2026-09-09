@@ -1,5 +1,6 @@
 """Synthetic subprocess harness for the D075 launcher; no real Docker or database."""
 import json
+import copy
 import os
 from pathlib import Path
 import subprocess
@@ -11,6 +12,55 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = 'a' * 40
 LIVE = 'b' * 64
 IMAGE = 'sha256:' + 'c' * 64
+TABLES = ('app_users app_systems organization_branches user_system_access user_branch_access '
+          'bank_accounts bank_statement_imports bank_transactions financial_operations '
+          'developer_feedback developer_feedback_events integration_connections integration_sync_runs '
+          'alfacrm_finance_snapshots alfacrm_family_merge_candidates').split()
+CHECKS = ('bankLinks accessUsers accessSystems branchUsers branchTargets feedbackAuthors '
+          'feedbackEvents importConnections').split()
+
+
+def report(complete=True):
+    """Representative aggregate outputs; this harness never opens a database."""
+    value = dict(schemaVersion=1, liveAcceptance='not_run', productionMutations=False,
+                 observedAtUtc='2026-09-09T09:00:00.000Z',
+                 status='bounded_checks_complete' if complete else 'incomplete_or_issues',
+                 tables={name: dict(state='observed', rows=0) for name in TABLES},
+                 checks={name: dict(state='observed', violations=0) for name in CHECKS})
+    value['tables']['bank_accounts']['rows'] = 4
+    value['tables']['bank_statement_imports']['rows'] = 12
+    value['tables']['bank_transactions']['rows'] = 2 if complete else 0
+    value['tables']['financial_operations']['rows'] = 2 if complete else 0
+    value['bankWindow'] = dict(
+        state='observed', period=dict(startDate='2026-09-01', endDate='2026-09-09'),
+        sync=dict(state='complete' if complete else 'pending', freshness='not_requested',
+                  rejectedRows=0, errorRows=0, conflictRows=0),
+        coverage=dict(accountRows=4, distinctAccountKeys=4, legalEntities=1, invalidAccountKeys=0,
+                      accountsWithStatement=4, coveredInLatestRun=4 if complete else 0,
+                      accountsWithContainingStatementInLatestRun=4 if complete else 0,
+                      accountsWithMatchingTransactionCount=4 if complete else 0),
+        transactions=dict(rows=2 if complete else 0, eligibleRows=2 if complete else 0,
+                          incomeRows=1 if complete else 0, expenseRows=1 if complete else 0,
+                          eligibleMissingLinks=0, danglingLinks=0, pendingOrNonRub=0,
+                          unexpectedAccountRows=0),
+        duplicates=dict(groups=0, excessRows=0, missingIdentityRows=0),
+        activity='observed' if complete else 'not_observed', checksComplete=complete)
+    value['bankRuntime'] = dict(
+        state='observed', observedAtUtc=value['observedAtUtc'],
+        setup=dict(state='observed', startDate='2026-09-01', syncIntervalMinutes=60, syncMinute=0),
+        connection=dict(state='observed', status='forming_statements', enabled=True,
+                        nextSyncAtUtc='2026-09-09T09:30:00.000Z'),
+        autosync=dict(state='observed', outcome='pending', generationMatchesSetup=True,
+                      nextAtUtc='2026-09-09T09:30:00.000Z', leasedUntilUtc=None,
+                      leaseState='released', failures=0, updatedAgeSeconds=120),
+        statementLease=dict(state='not_observed', expiresAtUtc=None, leaseState='unknown'),
+        retainedJobs=dict(state='observed', scopeMatch='unverified', providerStatus='not_stored',
+                          total=4, invalidRows=0, exactWindowRows=0, olderEndRows=4,
+                          otherWindowRows=0, oldestAgeSeconds=3600),
+        statementImports=dict(state='observed', readyRows=0, pendingRows=12, failedRows=0, unknownRows=0),
+        latestRun=dict(state='observed', startedAtUtc='2026-09-09T08:58:00.000Z',
+                       finishedAtUtc='2026-09-09T08:58:01.000Z'))
+    return value
 
 
 class LauncherTests(unittest.TestCase):
@@ -27,13 +77,16 @@ log = pathlib.Path(os.environ['D075_TEST_LOG'])
 with log.open('a') as stream:
     stream.write(json.dumps([name, args]) + '\n')
 if name == 'python3':
+    if args[:2] == ['-I', '-c']:
+        os.execv(sys.executable, [sys.executable, *args])
     previous = [json.loads(line) for line in log.read_text().splitlines()]
-    count = sum(item[0] == 'python3' for item in previous)
+    count = sum(item[0] == 'python3' and 'scripts/production-data-consumers.py' in item[1] for item in previous)
     mode = os.environ.get('D075_TEST_MODE', '')
     if mode == 'initial-refusal' or mode == 'final-refusal' and count == 2:
         print('READONLY_BLOCKED=accepted_runtime_identity', file=sys.stderr)
         raise SystemExit(2)
-    print(json.dumps(dict(liveId='b'*64,imageId='sha256:'+'c'*64,sourceSha='a'*40,backupId='d'*64), separators=(',', ':')))
+    print(json.dumps(dict(liveId='b'*64,imageId='sha256:'+'c'*64,sourceSha='a'*40,
+                         backupId=('f' if mode == 'final-drift' and count == 2 else 'd')*64), separators=(',', ':')))
 elif name == 'precheck-node':
     print('d1/miniflare-D1DatabaseObject/' + 'e'*64 + '.sqlite')
 elif name == 'docker':
@@ -43,7 +96,11 @@ elif name == 'docker':
         sys.stdin.read()
     elif args[0] == 'run':
         sys.stdin.read()
-        print('{"schemaVersion":1,"synthetic":true,"productionMutations":false}')
+        if os.environ.get('D075_TEST_MODE') == 'nul':
+            sys.stdout.buffer.write(b'\0')
+        sys.stdout.buffer.write(os.environ['D075_TEST_REPORT'].encode())
+        print('UNSAFE_STDERR_SENTINEL', file=sys.stderr)
+        raise SystemExit(int(os.environ['D075_TEST_PROBE_EXIT']))
     else:
         raise SystemExit('unexpected Docker capability')
 else:
@@ -60,19 +117,33 @@ else:
             'D075_TEST_LOG': str(self.log),
         }
 
-    def run_launcher(self, mode=''):
+    def run_launcher(self, mode='', value=None, probe_exit=0):
+        value = report() if value is None else value
         return subprocess.run(['bash', 'scripts/run-production-readonly.sh'], cwd=ROOT,
-                              env={**self.environment, 'D075_TEST_MODE': mode},
+                              env={**self.environment, 'D075_TEST_MODE': mode,
+                                   'D075_TEST_REPORT': json.dumps(value) if isinstance(value, dict) else value,
+                                   'D075_TEST_PROBE_EXIT': str(probe_exit)},
                               capture_output=True, text=True, timeout=10)
 
     def commands(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
 
+    def observations(self):
+        return [index for index, (name, args) in enumerate(self.commands())
+                if name == 'python3' and 'scripts/production-data-consumers.py' in args]
+
+    def assert_blocked(self, result, reason):
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('READONLY_BLOCKED=' + reason, result.stdout)
+        self.assertNotIn('READONLY_FINISHED=', result.stdout)
+        self.assertNotIn('READONLY_RESULT=', result.stdout)
+        self.assertNotIn('UNSAFE_', result.stdout + result.stderr)
+
     def test_verified_pair_is_checked_before_and_after_only_readonly_probe(self):
         result = self.run_launcher()
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = self.commands()
-        observations = [index for index, (name, _) in enumerate(calls) if name == 'python3']
+        observations = self.observations()
         probes = [(index, args) for index, (name, args) in enumerate(calls) if name == 'docker' and args[0] == 'run']
         self.assertEqual(len(observations), 2)
         self.assertEqual(len(probes), 1)
@@ -83,13 +154,105 @@ else:
         self.assertEqual(args[args.index('--network') + 1], 'none')
         self.assertEqual(args[args.index('--cap-drop') + 1], 'ALL')
         self.assertEqual(args[args.index('--security-opt') + 1], 'no-new-privileges:true')
+        for flag, expected in (('--pids-limit', '32'), ('--memory', '192m'), ('--cpus', '0.25'), ('--pull', 'never')):
+            self.assertEqual(args[args.index(flag) + 1], expected)
         self.assertIn('--read-only', args)
         mounts = [args[i + 1] for i, value in enumerate(args) if value == '--mount']
         self.assertEqual(mounts, ['type=volume,src=arthello-direct-v44-data,dst=/data,readonly,volume-nocopy'])
         self.assertEqual(args[args.index('--entrypoint') + 2], IMAGE)
         self.assertFalse(any(value in args for value in ('--env-file', '--privileged', '--volume', '-v', '--pid', '--ipc')))
         self.assertIn('READONLY_FINISHED=aggregate_observation_not_live_acceptance', result.stdout)
+        self.assertIn('READONLY_RESULT=bounded_checks_complete', result.stdout)
         self.assertIn('exact_readonly_consumer_history_not_verified', result.stdout)
+        self.assertEqual([json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')], [report()])
+        self.assertNotIn('UNSAFE_', result.stdout + result.stderr)
+
+    def test_actual_pending_empty_bank_report_finishes_observation_but_preserves_issue_exit(self):
+        value = report(False)
+        result = self.run_launcher(value=value, probe_exit=2)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(len(self.observations()), 2)
+        self.assertIn('READONLY_RESULT=incomplete_or_issues', result.stdout)
+        self.assertIn('READONLY_FINISHED=aggregate_observation_not_live_acceptance', result.stdout)
+        self.assertNotIn('READONLY_BLOCKED=', result.stdout)
+        self.assertEqual([json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')], [value])
+
+    def test_incomplete_schema_report_also_rechecks_consumers(self):
+        value = report(False)
+        value['tables']['bank_accounts'] = dict(state='not_installed')
+        value['bankWindow'] = dict(state='schema_missing', checksComplete=False)
+        result = self.run_launcher(value=value, probe_exit=2)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(len(self.observations()), 2)
+        self.assertIn('READONLY_RESULT=incomplete_or_issues', result.stdout)
+        self.assertIn('READONLY_FINISHED=', result.stdout)
+
+    def test_source_blocked_report_is_distinct_from_execution_failure(self):
+        value = dict(schemaVersion=1, status='blocked', reason='readonly_source_unavailable',
+                     liveAcceptance='not_run', productionMutations=False)
+        result = self.run_launcher(value=value, probe_exit=2)
+        self.assert_blocked(result, 'readonly_source_unavailable')
+        self.assertEqual(len(self.observations()), 1)
+        self.assertIn('"status":"blocked"', result.stdout)
+
+    def test_timeout_and_execution_failure_never_accept_even_complete_json(self):
+        for code, reason in ((124, 'probe_timed_out'), (7, 'probe_failed'), (137, 'probe_failed')):
+            with self.subTest(code=code):
+                result = self.run_launcher(probe_exit=code)
+                self.assert_blocked(result, reason)
+                self.assertNotIn('{', result.stdout)
+
+    def test_exit_and_report_status_must_agree(self):
+        for value, code in ((report(), 2), (report(False), 0)):
+            with self.subTest(code=code):
+                self.assert_blocked(self.run_launcher(value=value, probe_exit=code), 'invalid_probe_report')
+
+    def test_malformed_or_unexpected_content_cannot_reach_logs(self):
+        valid = json.dumps(report())
+        wrong_count = copy.deepcopy(report())
+        wrong_count['tables']['bank_accounts']['rows'] = 'UNSAFE_ACCOUNT_ID'
+        unknown = copy.deepcopy(report())
+        unknown['bankWindow']['rawAccount'] = 'UNSAFE_ACCOUNT_ID'
+        duplicate = valid.replace('"schemaVersion": 1', '"schemaVersion": 1, "schemaVersion": 1')
+        for value in ('UNSAFE_RAW_NOT_JSON', valid + '\n' + valid, valid[:-2], duplicate,
+                      wrong_count, unknown, valid + '\nD075_PROBE_EXIT=0\nUNSAFE_TRAILER'):
+            with self.subTest(value=str(value)[:40]):
+                result = self.run_launcher(value=value)
+                self.assert_blocked(result, 'invalid_probe_report')
+                self.assertNotIn('{', result.stdout)
+
+    def test_nul_bytes_are_rejected_before_bash_can_drop_them(self):
+        self.assert_blocked(self.run_launcher('nul'), 'invalid_probe_report')
+
+    def test_oversize_output_is_bounded_and_never_published(self):
+        result = self.run_launcher(value=json.dumps(report()) + ' ' * 33000 + 'UNSAFE_SUFFIX')
+        self.assert_blocked(result, 'probe_output_limit')
+        self.assertLess(len(result.stdout), 500)
+
+    def test_non_numeric_or_unsafe_numeric_counts_are_rejected(self):
+        for count in (True, -1, 1.5, 9007199254740992, float('nan'), float('inf')):
+            with self.subTest(count=count):
+                value = report()
+                value['bankWindow']['coverage']['accountRows'] = count
+                self.assert_blocked(self.run_launcher(value=value), 'invalid_probe_report')
+
+    def test_runtime_metadata_is_fixed_and_sanitized_without_changing_completion(self):
+        value = report()
+        value['bankRuntime']['state'] = 'partial'
+        value['bankRuntime']['setup'] = dict(state='schema_missing', startDate=None,
+                                             syncIntervalMinutes=None, syncMinute=None)
+        result = self.run_launcher(value=value)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('READONLY_RESULT=bounded_checks_complete', result.stdout)
+        self.assertEqual([json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')], [value])
+        for component, key, raw in (('retainedJobs', 'providerJobId', 'UNSAFE_JOB_ID'),
+                                    ('autosync', 'outcome', 'UNSAFE_OUTCOME'),
+                                    ('connection', 'nextSyncAtUtc', 'UNSAFE_TIMESTAMP'),
+                                    ('retainedJobs', 'total', True)):
+            with self.subTest(component=component, key=key):
+                invalid = report()
+                invalid['bankRuntime'][component][key] = raw
+                self.assert_blocked(self.run_launcher(value=invalid), 'invalid_probe_report')
 
     def test_unverified_source_never_runs_identity_scan_or_database_probe(self):
         result = self.run_launcher('initial-refusal')
@@ -99,9 +262,22 @@ else:
 
     def test_final_identity_refusal_cannot_emit_finished(self):
         result = self.run_launcher('final-refusal')
-        self.assertNotEqual(result.returncode, 0)
+        self.assert_blocked(result, 'final_runtime_identity')
         self.assertEqual(sum(name == 'docker' and args[0] == 'run' for name, args in self.commands()), 1)
-        self.assertNotIn('READONLY_FINISHED=', result.stdout)
+        self.assertNotIn('{', result.stdout)
+
+    def test_incomplete_report_requires_unchanged_final_consumers(self):
+        for mode in ('final-refusal', 'final-drift'):
+            with self.subTest(mode=mode):
+                if self.log.exists():
+                    self.log.unlink()
+                result = self.run_launcher(mode, value=report(False), probe_exit=2)
+                self.assert_blocked(result, 'final_runtime_identity')
+                self.assertEqual(len(self.observations()), 2)
+                self.assertNotIn('{', result.stdout)
+
+    def test_complete_report_cannot_finish_after_consumer_drift(self):
+        self.assert_blocked(self.run_launcher('final-drift'), 'final_runtime_identity')
 
     def test_no_expected_accepted_release_never_calls_docker(self):
         del self.environment['EXPECTED_LIVE_SOURCE_SHA']

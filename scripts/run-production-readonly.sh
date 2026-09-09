@@ -40,16 +40,198 @@ if [[ "$scan_status" -eq 124 ]]; then echo 'READONLY_BLOCKED=identity_scan_timeo
 if [[ "$scan_status" -ne 0 ]]; then echo 'READONLY_BLOCKED=live_file_identity'; exit 2; fi
 printf 'READONLY_LIVE_SOURCE=%s\nREADONLY_IMAGE=%s\n' "$source" "$image"
 echo 'READONLY_BACKUP=exact_readonly_consumer_history_not_verified'
+# Validate a bounded single report before anything from the probe reaches logs.
+# The final trailer is written by this shell, separately from the Docker stdout.
+validate_report() {
+  python3 -I -c '
+import datetime, json, re, sys
+LIMIT = 32768
+def require(value):
+    if not value:
+        raise ValueError()
+def unique(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result)
+        result[key] = value
+    return result
+def fields(value, names):
+    require(type(value) is dict and set(value) == set(names.split()))
+def count(value):
+    require(type(value) is int and 0 <= value <= 9007199254740991)
+def counts(value, names):
+    fields(value, names)
+    for item in value.values():
+        count(item)
+def nullable_count(value):
+    if value is not None:
+        count(value)
+def timestamp(value):
+    require(type(value) is str and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z", value))
+    datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+def nullable_timestamp(value):
+    if value is not None:
+        timestamp(value)
+def choice(value, choices):
+    require(value is None or value in choices.split())
+def runtime(value, stamp):
+    fields(value, "state observedAtUtc setup connection autosync statementLease retainedJobs statementImports latestRun")
+    require(value["state"] in ("observed", "partial", "invalid_window"))
+    require(value["observedAtUtc"] == stamp or value["observedAtUtc"] is None and value["state"] == "invalid_window")
+    for name in ("setup", "connection", "autosync", "statementLease", "retainedJobs", "statementImports", "latestRun"):
+        component = value[name]
+        require(type(component) is dict and component.get("state") in
+                ("observed", "not_observed", "invalid", "schema_missing", "unavailable", "over_limit"))
+    setup = value["setup"]
+    fields(setup, "state startDate syncIntervalMinutes syncMinute")
+    if setup["startDate"] is not None:
+        require(type(setup["startDate"]) is str and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", setup["startDate"]))
+        datetime.date.fromisoformat(setup["startDate"])
+    nullable_count(setup["syncIntervalMinutes"])
+    nullable_count(setup["syncMinute"])
+    connection = value["connection"]
+    fields(connection, "state status enabled nextSyncAtUtc")
+    choice(connection["status"], "running forming_statements connection_error paused awaiting_sync review_required unknown not_observed")
+    require(connection["enabled"] is None or type(connection["enabled"]) is bool)
+    nullable_timestamp(connection["nextSyncAtUtc"])
+    autosync = value["autosync"]
+    fields(autosync, "state outcome generationMatchesSetup nextAtUtc leasedUntilUtc leaseState failures updatedAgeSeconds")
+    choice(autosync["outcome"], "running complete pending busy error unknown not_observed")
+    require(autosync["generationMatchesSetup"] is None or type(autosync["generationMatchesSetup"]) is bool)
+    nullable_timestamp(autosync["nextAtUtc"])
+    nullable_timestamp(autosync["leasedUntilUtc"])
+    choice(autosync["leaseState"], "active expired released unknown")
+    nullable_count(autosync["failures"])
+    nullable_count(autosync["updatedAgeSeconds"])
+    lease = value["statementLease"]
+    fields(lease, "state expiresAtUtc leaseState")
+    nullable_timestamp(lease["expiresAtUtc"])
+    choice(lease["leaseState"], "active expired released unknown")
+    jobs = value["retainedJobs"]
+    fields(jobs, "state scopeMatch providerStatus total invalidRows exactWindowRows olderEndRows otherWindowRows oldestAgeSeconds")
+    require(jobs["scopeMatch"] == "unverified" and jobs["providerStatus"] == "not_stored")
+    for key in ("total", "invalidRows", "exactWindowRows", "olderEndRows", "otherWindowRows", "oldestAgeSeconds"):
+        nullable_count(jobs[key])
+    imports = value["statementImports"]
+    fields(imports, "state readyRows pendingRows failedRows unknownRows")
+    for key in ("readyRows", "pendingRows", "failedRows", "unknownRows"):
+        nullable_count(imports[key])
+    latest = value["latestRun"]
+    fields(latest, "state startedAtUtc finishedAtUtc")
+    nullable_timestamp(latest["startedAtUtc"])
+    nullable_timestamp(latest["finishedAtUtc"])
+def states(value, observed, others):
+    require(type(value) is dict)
+    if value.get("state") == "observed":
+        fields(value, "state " + observed)
+        count(value[observed])
+    else:
+        fields(value, "state")
+        require(value["state"] in others.split())
+def validate(value, code):
+    require(type(value) is dict and type(value.get("schemaVersion")) is int
+            and value["schemaVersion"] == 1 and value.get("liveAcceptance") == "not_run"
+            and value.get("productionMutations") is False)
+    status = value.get("status")
+    if status == "blocked":
+        fields(value, "schemaVersion status reason liveAcceptance productionMutations")
+        require(code == 2 and value["reason"] == "readonly_source_unavailable")
+        return status
+    fields(value, "schemaVersion liveAcceptance tables checks bankWindow bankRuntime status observedAtUtc productionMutations")
+    require((code, status) in ((0, "bounded_checks_complete"), (2, "incomplete_or_issues")))
+    stamp = value["observedAtUtc"]
+    timestamp(stamp)
+    runtime(value["bankRuntime"], stamp)
+    fields(value["tables"], "app_users app_systems organization_branches user_system_access user_branch_access bank_accounts bank_statement_imports bank_transactions financial_operations developer_feedback developer_feedback_events integration_connections integration_sync_runs alfacrm_finance_snapshots alfacrm_family_merge_candidates")
+    for table in value["tables"].values():
+        states(table, "rows", "not_installed over_limit unavailable")
+        if table["state"] == "observed":
+            require(table["rows"] <= 10000)
+    fields(value["checks"], "bankLinks accessUsers accessSystems branchUsers branchTargets feedbackAuthors feedbackEvents importConnections")
+    for check in value["checks"].values():
+        states(check, "violations", "schema_missing not_checked unavailable")
+    bank = value["bankWindow"]
+    require(type(bank) is dict and type(bank.get("checksComplete")) is bool)
+    if bank.get("state") == "observed":
+        fields(bank, "state period sync coverage transactions duplicates activity checksComplete")
+        fields(bank["period"], "startDate endDate")
+        require(bank["period"] == {"startDate": "2026-09-01", "endDate": stamp[:10]}
+                and stamp[:10] >= "2026-09-01")
+        sync = bank["sync"]
+        fields(sync, "state freshness rejectedRows errorRows conflictRows")
+        require(sync["state"] in ("complete", "pending", "failed", "review_required", "unknown", "not_observed")
+                and sync["freshness"] in ("verified", "not_requested", "stale_or_unobserved"))
+        for key in ("rejectedRows", "errorRows", "conflictRows"):
+            count(sync[key])
+        counts(bank["coverage"], "accountRows distinctAccountKeys legalEntities invalidAccountKeys accountsWithStatement coveredInLatestRun accountsWithContainingStatementInLatestRun accountsWithMatchingTransactionCount")
+        counts(bank["transactions"], "rows eligibleRows incomeRows expenseRows eligibleMissingLinks danglingLinks pendingOrNonRub unexpectedAccountRows")
+        counts(bank["duplicates"], "groups excessRows missingIdentityRows")
+        require(bank["activity"] in ("observed", "not_observed"))
+    else:
+        fields(bank, "state checksComplete")
+        require(bank["state"] in ("schema_missing", "not_checked", "invalid_window", "unavailable")
+                and bank["checksComplete"] is False)
+    complete = (all(item["state"] == "observed" for item in value["tables"].values())
+                and all(item["state"] == "observed" and item["violations"] == 0 for item in value["checks"].values())
+                and bank["checksComplete"])
+    require(complete == (status == "bounded_checks_complete"))
+    return status
+try:
+    raw = sys.stdin.buffer.read(LIMIT + 1)
+    if len(raw) > LIMIT:
+        print("output_limit")
+        raise SystemExit()
+    payload, trailer = raw.rstrip(b"\n").rsplit(b"\n", 1)
+    require(re.fullmatch(rb"D075_PROBE_EXIT=[0-9]{1,3}", trailer))
+    code = int(trailer.split(b"=")[1])
+    if code == 124:
+        print("timeout")
+    elif code not in (0, 2):
+        print("failed")
+    else:
+        value = json.loads(payload.decode("utf-8"), object_pairs_hook=unique)
+        status = validate(value, code)
+        sanitized = json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+        print(status)
+        print(sanitized)
+except Exception:
+    print("invalid_report")
+'
+}
 # No pull/build, inherited production env, secrets, network, Docker socket or RW mount.
 # The external deadline also bounds synchronous SQLite queries. Cleanup owns only probe.
-if ! timeout 60 docker run --name "$probe" --pull never --rm -i \
+set +e
+probe_report="$(
+  {
+    timeout 60 docker run --name "$probe" --pull never --rm -i \
   --label "arthello.readonly.probe=$label" --user 1000:1000 \
   --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   --pids-limit 32 --memory 192m --cpus 0.25 \
   --mount "type=volume,src=$volume,dst=/data,readonly,volume-nocopy" \
   --entrypoint node "$image" --input-type=module - --production-readonly \
-  < scripts/production-readonly.mjs 2>/dev/null; then
-  echo 'READONLY_BLOCKED=probe_failed_or_timed_out'; exit 2
+      < scripts/production-readonly.mjs 2>/dev/null
+    printf '\nD075_PROBE_EXIT=%s\n' "$?"
+  } | validate_report 2>/dev/null
+)"
+transport_status=$?
+set -e
+result="${probe_report%%$'\n'*}"
+case "$result" in
+  output_limit) echo 'READONLY_BLOCKED=probe_output_limit'; exit 2 ;;
+  timeout) echo 'READONLY_BLOCKED=probe_timed_out'; exit 2 ;;
+  failed) echo 'READONLY_BLOCKED=probe_failed'; exit 2 ;;
+  invalid_report) echo 'READONLY_BLOCKED=invalid_probe_report'; exit 2 ;;
+  bounded_checks_complete|incomplete_or_issues|blocked) ;;
+  *) echo 'READONLY_BLOCKED=invalid_probe_report'; exit 2 ;;
+esac
+if [[ "$transport_status" -ne 0 ]]; then echo 'READONLY_BLOCKED=probe_transport_failed'; exit 2; fi
+if [[ "$result" = blocked ]]; then
+  printf '%s\n' "${probe_report#*$'\n'}"
+  echo 'READONLY_BLOCKED=readonly_source_unavailable'; exit 2
 fi
-test "$(observe_consumers)" = "$selection"
+if ! final_selection="$(observe_consumers 2>/dev/null)" || [[ "$final_selection" != "$selection" ]]; then
+  echo 'READONLY_BLOCKED=final_runtime_identity'; exit 2
+fi
+printf '%s\nREADONLY_RESULT=%s\n' "${probe_report#*$'\n'}" "$result"
 echo 'READONLY_FINISHED=aggregate_observation_not_live_acceptance'
+if [[ "$result" = incomplete_or_issues ]]; then exit 2; fi
