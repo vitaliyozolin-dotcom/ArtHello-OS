@@ -6,6 +6,8 @@ name: Verify ArtHello R13 continuation
       - '.github/scripts/**'
       - 'deploy/**'
       - 'scripts/test/retire-r12-browser.test.mjs'
+      - 'scripts/run-frozen-release-contract.py'
+      - 'scripts/test/frozen-release-fixture.test.py'
   push:
     branches: [main]
     paths:
@@ -13,6 +15,8 @@ name: Verify ArtHello R13 continuation
       - '.github/scripts/**'
       - 'deploy/**'
       - 'scripts/test/retire-r12-browser.test.mjs'
+      - 'scripts/run-frozen-release-contract.py'
+      - 'scripts/test/frozen-release-fixture.test.py'
 permissions:
   contents: read
 concurrency:
@@ -48,13 +52,5 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
           [[ "$R13_CONTRACT_SHA256" =~ ^[a-f0-9]{64}$ ]]
           test "$(sha256sum deploy/v52/recovery-r13/check-contract.rb | cut -d ' ' -f 1)" = "$R13_CONTRACT_SHA256"
-          ruby deploy/v52/recovery-r13/check-contract.rb
-          python3 -I -B .github/scripts/test-r13-contract.py
-          python3 -I -B .github/scripts/test-r13-history-gate.py
-          python3 -I -B .github/scripts/test-r13-backup-adoption.py
-          python3 -I -B .github/scripts/test-r13-backup-controller.py
-          python3 -I -B .github/scripts/test-r13-continuation-adapters.py
-          python3 -I -B .github/scripts/test-r13-live-baseline.py
-          python3 -I -B .github/scripts/test-run-r13-live-browser.py
-          node --test scripts/test/retire-r12-browser.test.mjs
-          node --check deploy/browser/retire-r12-browser.mjs
+          python3 -I scripts/test/frozen-release-fixture.test.py
+          python3 -I scripts/run-frozen-release-contract.py r13

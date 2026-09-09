@@ -2,7 +2,7 @@ import type { Request } from "express";
 import { pool } from "@workspace/db";
 import { logger } from "../../lib/logger.js";
 
-const DEFAULT_BRANCH = "6";
+export const DEFAULT_BRANCH = "6";
 
 export { logger, pool };
 
