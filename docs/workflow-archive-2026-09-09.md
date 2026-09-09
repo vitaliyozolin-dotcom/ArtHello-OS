@@ -17,6 +17,12 @@ logs — в Actions. Текущие R12/R13 и постоянные провер
 recovery R12, датированные School SSO/curriculum cutover и topology probe.
 R13 и текущие D075/D092/D093 checks остаются активными.
 
+Третий cleanup-блок архивирует superseded R12 continuation и одноразовый
+D092 artifact inspector. Для инспектора подтверждён terminal hosted run
+`34337932856` / job `102421685466`; результат сохранён в `DECISIONS.md`.
+Content/Tasks acceptance остаётся активной, поскольку фактическая visual
+приёмка не завершена.
+
 | Blob SHA | Путь |
 |---|---|
 | `46ce4c5ed22c88a692f565e91dc8112e400bdff6` | `.github/workflows/d060-tochka-production-hotfix-v2.yml` |
@@ -50,6 +56,8 @@ R13 и текущие D075/D092/D093 checks остаются активными.
 | `77838609ebecc1a55ed124c3a3ca7585137ef51a` | `.github/workflows/deploy-school-sso-origin-hotfix-production-v2-20260902.yml` |
 | `3c771a3d77b33ef7884dae2e02d87a071791d5d6` | `.github/workflows/deploy-school-staff-sso-public-callback-production-20260903.yml` |
 | `04c39023ccc3465eaf69134cf96ed4e379cae0ed` | `.github/workflows/probe-school-production-topology.yml` |
+| `1287afc05fa15236ca435364dbe9c3706d466619` | `.github/workflows/verify-arthello-r12.yml` |
+| `0bf974f9b99c79850b4f4caa27da2000cb4ece94` | `.github/workflows/inspect-d092-visual-evidence.yml` |
 
 Восстановление отдельного файла:
 
