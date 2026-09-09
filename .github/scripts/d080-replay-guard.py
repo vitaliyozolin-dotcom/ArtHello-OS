@@ -250,6 +250,7 @@ CANDIDATE_PRESTEPS = [
     'Read-only School diagnostic before candidate acceptance',
     'Download and load exact hosted-verified image',
     'Verify and load exact hosted-verified image',
+    'Verify actual gateway Caddy with isolated candidate fixture',
     'Resolve authoritative School sync secret',
 ]
 CANDIDATE_IMPORTS = {

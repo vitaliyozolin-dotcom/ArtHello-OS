@@ -22,7 +22,7 @@ concurrency:
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
   EXPECTED_RELEASE_HEAD: codex/school-arthello-recovery-r9-20260909
-  EXPECTED_RELEASE_PR: '0'
+  EXPECTED_RELEASE_PR: '377'
   PREVIOUS_RELEASE_SHA: 582edaf1a66a953edb2d61e03040d1a13e70a0ad
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
@@ -43,7 +43,7 @@ jobs:
         github.event.workflow_run.pull_requests[0] == null ||
         (
           github.event.workflow_run.pull_requests[0].head.ref == 'codex/school-arthello-recovery-r9-20260909' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('0') &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('377') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -122,7 +122,7 @@ jobs:
         github.event.workflow_run.pull_requests[0] == null ||
         (
           github.event.workflow_run.pull_requests[0].head.ref == 'codex/school-arthello-recovery-r9-20260909' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('0') &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('377') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -206,8 +206,8 @@ jobs:
           ' <<<"$release_pr_json" >/dev/null
 
         python3 -I - <<'D080_REPLAY'
-        import json, os, urllib.request
-        
+        import json, os, re, urllib.error, urllib.parse, urllib.request
+
         INSTALL_SHA = 'ee8f3080d941a12be357eec0fd1d902acd01a2f9'
         INSTALL_RUN = 34208952716
         INSTALL_JOB = 102005327418
@@ -217,7 +217,7 @@ jobs:
         PREVIOUS_RUN = 34221458013
         PREVIOUS_JOB = 102045375780
         PREVIOUS_PATH = '.github/workflows/deploy-arthello-recovery-r6-20260908.yml'
-        
+
         def safe_previous_job(job):
             if job.get('status') != 'completed':
                 return False
@@ -227,7 +227,7 @@ jobs:
             verifications = [step for step in job.get('steps', []) if step.get('name') == 'Verify installed R5 School relay with fresh receipt']
             return (len(cutovers) == 1 and cutovers[0].get('conclusion') == 'skipped' and
                     len(verifications) == 1 and verifications[0].get('conclusion') in ('success', 'skipped'))
-        
+
         def validate_installation(run, jobs, repository):
             assert run['id'] == INSTALL_RUN and run['head_sha'] == INSTALL_SHA
             assert run['path'].split('@')[0] == INSTALL_PATH
@@ -247,7 +247,7 @@ jobs:
             for name, conclusion in expectations.items():
                 matching = [step for step in job['steps'] if step.get('name') == name]
                 assert len(matching) == 1 and matching[0].get('conclusion') == conclusion
-        
+
         def validate_previous_attempt(jobs, attempt):
             assert jobs['total_count'] == len(jobs['jobs']), 'Attempt jobs pagination incomplete'
             names = [job['name'] for job in jobs['jobs']]
@@ -261,7 +261,7 @@ jobs:
                     assert 'ubuntu-latest' in job.get('labels', []) and 'self-hosted' not in job['labels']
                 else:
                     assert safe_previous_job(job), 'A previous cutover started or its absence cannot be proven'
-        
+
         def run():
             repository = os.environ['EXPECTED_REPOSITORY']
             release = os.environ['RELEASE_SHA']
@@ -283,9 +283,11 @@ jobs:
             validate_r8_abort(get('/actions/runs/' + str(R8_RUN)),
                               get('/actions/runs/' + str(R8_RUN) + '/attempts/1/jobs?per_page=100'), repository)
             runs = get('/actions/workflows/' + CONSUMER_PATH.split('/')[-1] + '/runs?event=workflow_run&head_sha=' + release + '&per_page=100')
-            validate_history(runs, get, repository, release, current_run, current_attempt)
+            resume = validate_history(runs, get, repository, release, current_run, current_attempt, get_logs=read_job_logs)
+            with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as stream:
+                stream.write('R9_RESUME_CANDIDATE=' + ('1' if resume else '0') + '\n')
             print('ARTHELLO_D080_PRESERVED_R5_AND_R8_ABORT_REPLAY_BOUNDARY=VERIFIED')
-        
+
         def validate_r6_abort(run, jobs, repository):
             assert run['id'] == PREVIOUS_RUN and run['head_sha'] == PREVIOUS_SHA
             assert run['path'].split('@')[0] == PREVIOUS_PATH
@@ -304,8 +306,8 @@ jobs:
             for name, conclusion in expected.items():
                 matching = [step for step in job['steps'] if step.get('name') == name]
                 assert len(matching) == 1 and matching[0].get('conclusion') == conclusion
-        
-        
+
+
         def validate_r7_abort(run, jobs, repository):
             assert run['id'] == 34227595623 and run['head_sha'] == 'dbe630145a3828643fcfb9f202b1239e8cc54826'
             assert run['path'].split('@')[0] == '.github/workflows/deploy-arthello-recovery-r7-20260908.yml'
@@ -327,8 +329,8 @@ jobs:
             for name, conclusion in expected.items():
                 matching = [step for step in job['steps'] if step.get('name') == name]
                 assert len(matching) == 1 and matching[0].get('conclusion') == conclusion
-        
-        
+
+
         R8_RUN = 34283447507
         R8_SHA = '5385090d48f4dae29c314dff7ae974d854560940'
         R8_PATH = '.github/workflows/deploy-arthello-recovery-r8-20260908.yml'
@@ -371,8 +373,8 @@ jobs:
                 ("Complete job", 41, "success"),
             ],
         }
-        
-        
+
+
         def validate_r8_abort(run, jobs, repository):
             assert run['id'] == R8_RUN and run['head_sha'] == R8_SHA
             assert run['path'].split('@')[0] == R8_PATH
@@ -395,9 +397,10 @@ jobs:
                 assert all(step['status'] == 'completed' for step in steps)
                 observed = [(step['name'], step['number'], step['conclusion']) for step in steps]
                 assert observed == R8_STEPS[job['name']], 'R8 complete abort step graph mismatch'
-        
-        
-        def validate_history(runs, get, repository, release, current_run, current_attempt):
+
+
+        def validate_history(runs, get, repository, release, current_run, current_attempt, get_logs=None):
+            resume = False
             assert runs['total_count'] == len(runs['workflow_runs']), 'Replay history pagination incomplete'
             identities = [previous['id'] for previous in runs['workflow_runs']]
             assert all(type(identity) is int and identity > 0 for identity in identities)
@@ -421,7 +424,12 @@ jobs:
                     attempts = range(1, attempt_count + 1)
                 for attempt in attempts:
                     jobs = get('/actions/runs/' + str(previous['id']) + '/attempts/' + str(attempt) + '/jobs?per_page=100')
-                    validate_previous_attempt(jobs, attempt)
+                    try:
+                        validate_previous_attempt(jobs, attempt)
+                    except AssertionError:
+                        assert previous['id'] == current_run and get_logs is not None, 'A held candidate belongs to another run or lacks evidence'
+                        validate_candidate_attempt(jobs, attempt, get_logs)
+                        resume = True
                     job_ids = [job['id'] for job in jobs['jobs']]
                     assert all(type(identity) is int and identity > 0 for identity in job_ids)
                     assert len(job_ids) == len(set(job_ids)), 'Replay jobs contain duplicate identities'
@@ -431,8 +439,103 @@ jobs:
                         if job['name'] == 'deploy' and job.get('steps'):
                             after = [step for step in job.get('steps', []) if step.get('name') == 'School diagnostic and real browser acceptance after cutover']
                             assert len(after) == 1 and after[0].get('conclusion') == 'skipped', 'Post-cutover execution or missing evidence prohibits replay'
-        
-        
+            return resume
+
+
+        CANDIDATE_PRESTEPS = [
+            'Set up job',
+            'Verify D080 R9 identity and preserved R5 R8 abort boundary',
+            'Wait for exact main Quality Proof and v52 verification',
+            'Check out exact verified release',
+            'Verify checkout and release contracts',
+            'Verify retained candidate before any replay skip',
+            'Verify installed R5 School relay with fresh receipt',
+            'Check existing gateway Docker authority',
+            'Check current release and existing browser runtime',
+            'Measure import capacity before downloading the verified archive',
+            'Run actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093',
+            'Verify archive, import off-host bundle and verify portable identity',
+            'Read-only School diagnostic before candidate acceptance',
+            'Download and load exact hosted-verified image',
+            'Verify and load exact hosted-verified image',
+            'Verify actual gateway Caddy with isolated candidate fixture',
+            'Resolve authoritative School sync secret',
+        ]
+        CANDIDATE_IMPORTS = {
+            'Measure import capacity before downloading the verified archive',
+            'Run actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093',
+            'Verify archive, import off-host bundle and verify portable identity',
+            'Download and load exact hosted-verified image',
+            'Verify and load exact hosted-verified image',
+            'Resolve authoritative School sync secret',
+        }
+        CANDIDATE_POSTSTEPS = [
+            'School diagnostic and real browser acceptance after cutover',
+            'Remove only this downloaded temporary archive', 'Remove temporary School SSH material',
+            'Production summary', 'Post Check out exact verified release', 'Complete job',
+        ]
+
+
+        def validate_candidate_attempt(jobs, attempt, get_logs):
+            assert jobs['total_count'] == len(jobs['jobs']) == 2
+            names = [job['name'] for job in jobs['jobs']]
+            assert len(set(names)) == 2 and set(names) == {'bundle', 'deploy'}
+            bundle, job = ([item for item in jobs['jobs'] if item['name'] == name][0] for name in ('bundle', 'deploy'))
+            assert bundle['run_attempt'] == attempt and bundle['status'] == 'completed' and bundle['conclusion'] == 'success'
+            assert bundle.get('labels') == ['ubuntu-latest']
+            assert job['run_attempt'] == attempt and job['status'] == 'completed' and job['conclusion'] == 'failure'
+            assert job.get('labels') == ['self-hosted', 'linux', 'x64', 'arthello-gateway']
+            steps = job.get('steps', [])
+            cutover = 'Clone preflight and guarded production cutover'
+            assert [step['name'] for step in steps] == CANDIDATE_PRESTEPS + [cutover] + CANDIDATE_POSTSTEPS
+            assert all(step['status'] == 'completed' for step in steps)
+            by_name = {step['name']: step for step in steps}
+            resumed = by_name['Verify retained candidate before any replay skip']['conclusion'] == 'success'
+            assert not resumed or attempt > 1
+            for name in CANDIDATE_PRESTEPS:
+                expected = 'success'
+                if name == 'Verify retained candidate before any replay skip' and not resumed:
+                    expected = 'skipped'
+                if name in CANDIDATE_IMPORTS and resumed:
+                    expected = 'skipped'
+                assert by_name[name]['conclusion'] == expected
+            assert by_name[cutover]['conclusion'] == 'failure'
+            assert by_name[CANDIDATE_POSTSTEPS[0]]['conclusion'] == 'skipped'
+            assert all(by_name[name]['conclusion'] == 'success' for name in CANDIDATE_POSTSTEPS[1:])
+            log = get_logs(job['id'])
+            assert isinstance(log, str) and len(log.encode()) <= 1048576
+            lines = [re.sub(r'^\d{4}-\d\d-\d\dT\S+Z ', '', line) for line in log.splitlines()]
+            assert lines.count('ARTHELLO_D080_CANDIDATE_MAINTENANCE_HELD=1') == 1, 'No verified maintenance hold'
+            assert not any(line.startswith(('ARTHELLO_RELEASE_ACTIVE=', 'ARTHELLO_TOCHKA_AUTOSYNC_ACTIVATION_V2=VERIFIED',
+                                            'ARTHELLO_D080_CANDIDATE_STATE=PUBLIC_START')) for line in lines), 'Public activation cannot be replayed'
+
+
+        class NoLogRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, request, response, code, message, headers, new_url):
+                return None
+
+
+        def read_job_logs(job_id):
+            assert type(job_id) is int and job_id > 0
+            url = 'https://api.github.com/repos/' + os.environ['EXPECTED_REPOSITORY'] + '/actions/jobs/' + str(job_id) + '/logs'
+            opener = urllib.request.build_opener(NoLogRedirect())
+            request = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                                                           'Accept': 'application/vnd.github+json'})
+            try:
+                response = opener.open(request, timeout=20)
+            except urllib.error.HTTPError as error:
+                assert error.code in (302, 307)
+                location = error.headers.get('Location', '')
+                parsed = urllib.parse.urlsplit(location)
+                assert parsed.scheme == 'https' and parsed.hostname and parsed.hostname.endswith('.blob.core.windows.net')
+                assert parsed.port in (None, 443) and parsed.username is None and parsed.password is None
+                response = opener.open(urllib.request.Request(location), timeout=20)
+            with response:
+                raw = response.read(1048577)
+            assert len(raw) <= 1048576
+            return raw.decode('utf-8')
+
+
         if __name__ == '__main__':
             run()
         D080_REPLAY
@@ -614,6 +717,22 @@ jobs:
           exit 1
         fi
         printf 'ARTHELLO_CHECKOUT=%s\nARTHELLO_TREE=%s\n' "$RELEASE_SHA" "$EXPECTED_TREE"
+    - name: Verify retained candidate before any replay skip
+      if: env.R9_RESUME_CANDIDATE == '1'
+      timeout-minutes: 8
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        EXPECTED_TREE: ${{ steps.provenance.outputs.tree_sha }}
+      run: |
+        set -Eeuo pipefail
+        candidate_state_file="$HOME/.config/arthello/release-state/candidate-acceptance-$RELEASE_SHA.json"
+        python3 -I .github/scripts/d080-resume-candidate.py \
+          --state "$candidate_state_file" --release "$RELEASE_SHA" --tree "$EXPECTED_TREE" \
+          --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --durable-root "$HOME/.config/arthello/release-state/candidate-work"
+        fingerprint="$(jq -er '.context.browserFingerprint' "$candidate_state_file")"
+        [[ "$fingerprint" =~ ^[a-f0-9]{64}$ ]]
+        printf 'R9_RUNTIME_VERIFIED=1\nBROWSER_FINGERPRINT=%s\n' "$fingerprint" >> "$GITHUB_ENV"
     - name: Verify installed R5 School relay with fresh receipt
       timeout-minutes: 20
       shell: bash
@@ -838,6 +957,7 @@ jobs:
         "$precheck_node" -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(2)'
         printf 'PRECHECK_NODE=%s\n' "$precheck_node" >> "$GITHUB_ENV"
     - name: Measure import capacity before downloading the verified archive
+      if: env.R9_RESUME_CANDIDATE != '1'
       env:
         ARCHIVE_BYTES: ${{ needs.bundle.outputs.archive_bytes }}
         EXPANDED_BYTES: ${{ needs.bundle.outputs.expanded_bytes }}
@@ -861,10 +981,12 @@ jobs:
         fi
         printf 'IMPORT_DOCKER_MIN_KIB=%s\n' "$(( (3 * EXPANDED_BYTES + 1023) / 1024 + 2097152 ))" >> "$GITHUB_ENV"
     - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      if: env.R9_RESUME_CANDIDATE != '1'
       with:
         name: ${{ needs.bundle.outputs.archive_name }}
         path: ${{ runner.temp }}/browser-bundle-${{ github.run_id }}-${{ github.run_attempt }}
     - name: Verify archive, import off-host bundle and verify portable identity
+      if: env.R9_RESUME_CANDIDATE != '1'
       env:
         EXPECTED_ARCHIVE_SHA: ${{ needs.bundle.outputs.archive_sha }}
         EXPECTED_FINGERPRINT: ${{ needs.bundle.outputs.fingerprint }}
@@ -1041,6 +1163,7 @@ jobs:
         printf 'ARTHELLO_R9_SCHOOL_DIAGNOSTIC=READ_ONLY_COMPLETE\n'
 
     - name: Download and load exact hosted-verified image
+      if: env.R9_RESUME_CANDIDATE != '1'
       timeout-minutes: 25
       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
       with:
@@ -1049,6 +1172,7 @@ jobs:
         github-token: ${{ github.token }}
         run-id: ${{ env.TRIGGER_VERIFY_RUN_ID }}
     - name: Verify and load exact hosted-verified image
+      if: env.R9_RESUME_CANDIDATE != '1'
       id: image_import
       timeout-minutes: 12
       env:
@@ -1165,7 +1289,20 @@ jobs:
         printf 'image_id=%s\nruntime_fingerprint=%s\n' \
           "$actual_image_id" "$actual_runtime_fingerprint" >> "$GITHUB_OUTPUT"
         printf 'ARTHELLO_HOSTED_IMAGE=VERIFIED image=%s id=%s\n' "$image" "$actual_image_id"
+    - name: Verify actual gateway Caddy with isolated candidate fixture
+      timeout-minutes: 5
+      env:
+        VALIDATED_IMAGE_ID: ${{ steps.image_import.outputs.image_id }}
+      run: |
+        set -Eeuo pipefail
+        if [ "$R9_RESUME_CANDIDATE" = 1 ]; then
+          test "$R9_RUNTIME_VERIFIED" = 1
+          VALIDATED_IMAGE_ID="$(jq -er '.context.imageId' "$HOME/.config/arthello/release-state/candidate-acceptance-$RELEASE_SHA.json")"
+          export VALIDATED_IMAGE_ID
+        fi
+        bash .github/scripts/run-d080-target-caddy.sh
     - name: Resolve authoritative School sync secret
+      if: env.R9_RESUME_CANDIDATE != '1'
       timeout-minutes: 40
       shell: bash
       env:
@@ -1404,6 +1541,18 @@ jobs:
         set -Eeuo pipefail
         umask 077
 
+        # D080_RESUME_IMAGE_BEGIN
+        if [ "$R9_RESUME_CANDIDATE" = 1 ]; then
+          test "$R9_RUNTIME_VERIFIED" = 1
+          retained_state="$HOME/.config/arthello/release-state/candidate-acceptance-$RELEASE_SHA.json"
+          python3 -I .github/scripts/d080-resume-candidate.py \
+            --state "$retained_state" --release "$RELEASE_SHA" --tree "$EXPECTED_TREE" \
+            --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --durable-root "$HOME/.config/arthello/release-state/candidate-work"
+          VALIDATED_IMAGE_ID="$(jq -er '.context.imageId' "$retained_state")"
+          VALIDATED_RUNTIME_FINGERPRINT="$(jq -er '.context.runtimeFingerprint' "$retained_state")"
+        fi
+        # D080_RESUME_IMAGE_END
+
         immutable_image_id="$VALIDATED_IMAGE_ID"
         [[ "$immutable_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
         [[ "$VALIDATED_RUNTIME_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
@@ -1422,7 +1571,8 @@ jobs:
           "$immutable_image_id" "$cutover_runtime_fingerprint"
 
         run_key="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-        work="$RUNNER_TEMP/arthello-deploy-$run_key"
+        durable_work_root="$HOME/.config/arthello/release-state/candidate-work"
+        work="$durable_work_root/arthello-deploy-$run_key"
         clone_volume="arthello-preflight-$run_key"
         rollback_volume="arthello-rollback-$run_key"
         clone_container="arthello-preflight-$run_key"
@@ -1476,7 +1626,7 @@ jobs:
 
         require_safe_work_path() {
           case "$work" in
-            "$RUNNER_TEMP"/arthello-deploy-*) ;;
+            "$durable_work_root"/arthello-deploy-*) ;;
             *) echo 'Unsafe deployment work path' >&2; return 1 ;;
           esac
         }
@@ -1713,7 +1863,7 @@ jobs:
             "$route_new" "$config_new" "$route_new.rollback" "$config_new.rollback" \
             "$maintenance_route_new" "$maintenance_config_new" \
             >/dev/null 2>&1 || true
-          if require_safe_work_path; then rm -rf -- "$work"; fi
+          if [ "$candidate_auth_started" -eq 0 ] && require_safe_work_path; then rm -rf -- "$work"; fi
           set -e
         }
 
@@ -2026,10 +2176,14 @@ jobs:
         # D080_CANDIDATE_COMPLETION_BEGIN
         complete_candidate_release() {
           candidate_acceptance_file="$work/r9-acceptance-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+          test "$OBSERVED_READONLY_SCHOOL_SHA" = "$(jq -er '.context.schoolSha' "$candidate_state_file")"
+          test "$SCHOOL_REPAIR_CONFIG_SHA256" = "$(jq -er '.context.schoolRepairConfigSha256' "$candidate_state_file")"
+          verify_school_sync_secret before-candidate-browser
           require_current_main_release
           test "$(docker exec "$CADDY_CONTAINER" sh -ceu 'sha256sum /data/external-routes.caddy | cut -d " " -f 1')" = "$maintenance_route_sha"
           python3 -I .github/scripts/d080-maintenance-route.py probe --nonce-file "$gate_nonce_file"
           D080_CANDIDATE_CONTEXT_SHA256="$(jq -er '.contextSha256' "$candidate_state_file")" \
+          D080_ACCEPTANCE_ROOT="$durable_work_root" \
           BROWSER_PHASE=candidate BROWSER_CANDIDATE_ID="$candidate_id" \
             OBSERVED_LIVE_ARTHELLO_SHA="$RELEASE_SHA" D080_ACCEPTANCE_FILE="$candidate_acceptance_file" \
             bash .github/scripts/run-r9-live-browser.sh < "$gate_nonce_file"
@@ -2056,10 +2210,12 @@ jobs:
         candidate_id="$(docker inspect "$candidate" --format '{{.Id}}')"
         previous_id="$(docker inspect "$live_id" --format '{{.Id}}')"
         require_current_main_release
+        public_audit_work="$(python3 -I .github/scripts/d080-public-audit.py \
+          --state "$candidate_state_file" --receipt "$candidate_acceptance_file" --attempt "$GITHUB_RUN_ATTEMPT")"
         python3 -I .github/scripts/d063-activation-state.py activation-start \
           "$activation_state_file" "$RELEASE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
           "$candidate_id" "$previous_id" "$rollback_volume" \
-          "$original_route_sha" "$candidate_route_sha" "$work"
+          "$original_route_sha" "$candidate_route_sha" "$public_audit_work"
         python3 -I .github/scripts/d080-candidate-state.py public-start \
           --state "$candidate_state_file" --receipt "$candidate_acceptance_file" --attempt "$GITHUB_RUN_ATTEMPT"
         public_commit_started=1
@@ -2109,6 +2265,11 @@ jobs:
             # Real candidate authentication or public writes may already have committed.
             # Keep maintenance/current routes, the same candidate DB and all evidence.
             # No snapshot restore, candidate removal or bank activation is permitted.
+            if [ "$public_commit_started" -eq 0 ]; then
+              python3 -I .github/scripts/d080-resume-candidate.py --hold-check \
+                --state "$candidate_state_file" --release "$RELEASE_SHA" --tree "$EXPECTED_TREE" \
+                --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --durable-root "$HOME/.config/arthello/release-state/candidate-work" || true
+            fi
             printf 'ARTHELLO_POST_AUTH_RECOVERY_REQUIRED=1 state=%s diagnostics=%s\n' \
               "$candidate_state_file" "$work" >&2
             exit "$original_rc"
@@ -2202,7 +2363,58 @@ jobs:
         trap 'rollback 143' TERM
         trap 'rollback 129' HUP
 
+        # D080_RESUME_COMPLETION_BEGIN
+        if [ "$R9_RESUME_CANDIDATE" = 1 ]; then
+          candidate_auth_started=1
+          work="$(jq -er '.context.workDirectory' "$candidate_state_file")"
+          candidate="$(jq -er '.context.candidateName' "$candidate_state_file")"
+          candidate_id="$(jq -er '.context.candidateContainerId' "$candidate_state_file")"
+          live_id="$(jq -er '.context.previousContainerId' "$candidate_state_file")"
+          live_name="$(jq -er '.context.previousName' "$candidate_state_file")"
+          rollback_volume="$(jq -er '.context.rollbackVolume' "$candidate_state_file")"
+          backup_worker="$(jq -er '.context.backupWorker' "$candidate_state_file")"
+          backup_volume="$(jq -er '.context.backupVolume' "$candidate_state_file")"
+          backup_control_volume="$(jq -er '.context.backupControlVolume' "$candidate_state_file")"
+          bank_activation_volume="$(jq -er '.context.bankActivationVolume' "$candidate_state_file")"
+          autosync_activation_id="$(jq -er '.context.bankActivationId' "$candidate_state_file")"
+          gate_nonce_file="$(jq -er '.context.gateNonceFile' "$candidate_state_file")"
+          backup_runtime_state="$(jq -er '.context.backupRuntimeStateFile' "$candidate_state_file")"
+          original_route_sha="$(jq -er '.context.originalRouteSha256' "$candidate_state_file")"
+          maintenance_route_sha="$(jq -er '.context.maintenanceRouteSha256' "$candidate_state_file")"
+          candidate_route_sha="$(jq -er '.context.publicRouteSha256' "$candidate_state_file")"
+          BROWSER_FINGERPRINT="$(jq -er '.context.browserFingerprint' "$candidate_state_file")"
+          original_attempt="$(jq -er '.context.runAttempt' "$candidate_state_file")"
+          run_key="$GITHUB_RUN_ID-$original_attempt"
+          clone_volume="arthello-preflight-$run_key"
+          clone_container="arthello-preflight-$run_key"
+          copy_helper="arthello-copy-$run_key"
+          snapshot_helper="arthello-snapshot-$run_key"
+          route_new="/data/external-routes.caddy.arthello-$run_key"
+          config_new="/tmp/Caddyfile.arthello-$run_key"
+          maintenance_route_new="$route_new.maintenance"
+          maintenance_config_new="$config_new.maintenance"
+          require_safe_work_path
+          require_current_main_release
+          complete_candidate_release
+          release_active=1
+          trap - EXIT INT TERM HUP
+          cleanup_transient
+          exit 0
+        fi
+        # D080_RESUME_COMPLETION_END
+
         require_safe_work_path
+        python3 -I - "$durable_work_root" "$work" <<'D080_DURABLE_WORK'
+        import os, pathlib, stat, sys
+        root, work = map(pathlib.Path, sys.argv[1:])
+        assert root.is_absolute() and root.resolve() == root and work.parent == root
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        assert stat.S_IMODE(root.stat().st_mode) == 0o700 and root.stat().st_uid == os.getuid()
+        work.mkdir(mode=0o700)
+        descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        os.fsync(descriptor)
+        os.close(descriptor)
+        D080_DURABLE_WORK
         install -d -m 0700 "$work"
         test ! -L "$secret_dir"
         install -d -m 0700 "$secret_dir"
@@ -2684,6 +2896,21 @@ jobs:
         candidate_id="$(docker inspect "$candidate" --format '{{.Id}}')"
         candidate_browser_id="$(docker image inspect "arthello-e2e:$BROWSER_SOURCE_SHA" --format '{{.Id}}')"
         install -d -m 0700 "$secret_dir/release-state"
+        python3 -I - "$SCHOOL_REPAIR_RECEIPT_FILE" "$work/school-repair-receipt.json" <<'D080_RETAIN_REPAIR'
+        import os, pathlib, stat, sys
+        source, target = map(pathlib.Path, sys.argv[1:])
+        assert source.resolve() == source
+        fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        info = os.fstat(fd)
+        assert stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o600 and info.st_size <= 65536
+        with os.fdopen(fd, 'rb') as stream: body = stream.read(65537)
+        assert len(body) == info.st_size
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(body)
+            stream.flush()
+            os.fsync(stream.fileno())
+        D080_RETAIN_REPAIR
         python3 -I - "$work/candidate-context.json" \
           "$RELEASE_SHA" \
           "$EXPECTED_TREE" \
@@ -2713,7 +2940,7 @@ jobs:
           "$work/external-routes.maintenance.caddy" \
           "$work/external-routes.candidate.caddy" \
           "$gate_nonce_file" \
-          "$SCHOOL_REPAIR_RECEIPT_FILE" \
+          "$work/school-repair-receipt.json" \
           "$SCHOOL_REPAIR_CONFIG_SHA256" \
           "$OBSERVED_READONLY_SCHOOL_SHA" \
           "$backup_runtime_state" <<'D080_PRIVATE_CONTEXT'

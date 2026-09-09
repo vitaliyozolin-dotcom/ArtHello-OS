@@ -60,6 +60,19 @@ on:
       - .github/scripts/r9-live-browser-acceptance.py
       - .github/scripts/test-r9-live-browser-acceptance.py
       - .github/scripts/run-r9-live-browser.sh
+      - .github/scripts/d080-baseline-evidence.py
+      - .github/scripts/test-d080-baseline-evidence.py
+      - .github/scripts/d080-resume-candidate.py
+      - .github/scripts/test-d080-resume-candidate.py
+      - .github/scripts/d080-public-audit.py
+      - .github/scripts/test-d080-public-audit.py
+      - .github/scripts/d080-candidate-state.py
+      - .github/scripts/test-d080-candidate-state.py
+      - .github/scripts/d080-maintenance-route.py
+      - .github/scripts/test-d080-maintenance-route.py
+      - .github/scripts/test-d080-maintenance-caddy.py
+      - .github/scripts/run-d080-hosted-caddy.sh
+      - .github/scripts/run-d080-target-caddy.sh
       - .github/scripts/check-recovery-r7-contract.rb
       - .github/scripts/check-school-live-acceptance-r7.py
       - .github/scripts/d069-replay-guard.py
@@ -147,6 +160,19 @@ on:
       - .github/scripts/r9-live-browser-acceptance.py
       - .github/scripts/test-r9-live-browser-acceptance.py
       - .github/scripts/run-r9-live-browser.sh
+      - .github/scripts/d080-baseline-evidence.py
+      - .github/scripts/test-d080-baseline-evidence.py
+      - .github/scripts/d080-resume-candidate.py
+      - .github/scripts/test-d080-resume-candidate.py
+      - .github/scripts/d080-public-audit.py
+      - .github/scripts/test-d080-public-audit.py
+      - .github/scripts/d080-candidate-state.py
+      - .github/scripts/test-d080-candidate-state.py
+      - .github/scripts/d080-maintenance-route.py
+      - .github/scripts/test-d080-maintenance-route.py
+      - .github/scripts/test-d080-maintenance-caddy.py
+      - .github/scripts/run-d080-hosted-caddy.sh
+      - .github/scripts/run-d080-target-caddy.sh
       - .github/scripts/check-recovery-r7-contract.rb
       - .github/scripts/check-school-live-acceptance-r7.py
       - .github/scripts/d069-replay-guard.py
@@ -508,6 +534,11 @@ jobs:
           python3 -I .github/scripts/test-d080-replay-guard.py
           python3 -I .github/scripts/test-r9-live-browser-acceptance.py
           bash -n .github/scripts/run-r9-live-browser.sh
+          python3 -I .github/scripts/test-d080-baseline-evidence.py
+          python3 -I .github/scripts/test-d080-resume-candidate.py
+          python3 -I .github/scripts/test-d080-public-audit.py
+          bash -n .github/scripts/run-d080-hosted-caddy.sh
+          bash -n .github/scripts/run-d080-target-caddy.sh
           python3 -I .github/scripts/test-recovery-r7-gates.py
           python3 -I .github/scripts/test-r7-backup-runtime.py
           python3 -I -B deploy/v52/backup/test_worker.py
@@ -925,3 +956,25 @@ jobs:
           if match is None or match.group(1) not in inventory_source:
               raise SystemExit("Inventory is not synchronized with the encrypted credential namespace")
           PY
+
+  d080-candidate-tests:
+    name: d080-candidate-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Check out exact unprivileged candidate test source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CHECKED_SOURCE_SHA }}
+          fetch-depth: 0
+          clean: true
+          persist-credentials: false
+      - name: Verify durable candidate state and actual Caddy routing fixture
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          python3 -I .github/scripts/test-d080-candidate-state.py
+          python3 -I .github/scripts/test-d080-maintenance-route.py
+          bash .github/scripts/run-d080-hosted-caddy.sh

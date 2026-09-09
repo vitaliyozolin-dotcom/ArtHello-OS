@@ -82,11 +82,11 @@ class ReceiptTests(unittest.TestCase):
             work.mkdir(mode=0o700)
             target = work / 'r9-acceptance-123-2.json'
             record = receipt.build(self.browser, self.repair, **self.args)
-            receipt.write_acceptance(record, str(target), run='123', attempt='2', runner_temp=str(root))
+            receipt.write_acceptance(record, str(target), run='123', attempt='2', durable_root=str(root))
             self.assertEqual(receipt.json.loads(target.read_text()), record)
             self.assertEqual(target.stat().st_mode & 0o777, 0o600)
             with self.assertRaises((AssertionError, FileExistsError)):
-                receipt.write_acceptance(record, str(target), run='123', attempt='2', runner_temp=str(root))
+                receipt.write_acceptance(record, str(target), run='123', attempt='2', durable_root=str(root))
 
     def test_receipt_refuses_symlink_wrong_attempt_and_public_directory(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -96,13 +96,13 @@ class ReceiptTests(unittest.TestCase):
             target = work / 'r9-acceptance-123-2.json'
             target.symlink_to(work / 'absent')
             with self.assertRaises(AssertionError):
-                receipt.write_acceptance({}, str(target), run='123', attempt='2', runner_temp=str(root))
+                receipt.write_acceptance({}, str(target), run='123', attempt='2', durable_root=str(root))
             target.unlink()
             with self.assertRaises(AssertionError):
-                receipt.write_acceptance({}, str(target), run='123', attempt='3', runner_temp=str(root))
+                receipt.write_acceptance({}, str(target), run='123', attempt='3', durable_root=str(root))
             work.chmod(0o755)
             with self.assertRaises(AssertionError):
-                receipt.write_acceptance({}, str(target), run='123', attempt='2', runner_temp=str(root))
+                receipt.write_acceptance({}, str(target), run='123', attempt='2', durable_root=str(root))
 
 
 if __name__ == '__main__':

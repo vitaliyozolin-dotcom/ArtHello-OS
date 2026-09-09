@@ -53,9 +53,9 @@ def read_bounded(name):
     return content
 
 
-def write_acceptance(record, target, *, run, attempt, runner_temp):
+def write_acceptance(record, target, *, run, attempt, durable_root):
     path = Path(target)
-    root = Path(runner_temp)
+    root = Path(durable_root)
     assert path.is_absolute() and root.is_absolute()
     assert path == path.resolve() and root == root.resolve()
     assert path.parent.parent == root
@@ -113,7 +113,7 @@ def main():
         target = os.environ.get('D080_ACCEPTANCE_FILE')
         if target is not None:
             assert os.environ['BROWSER_PHASE'] == 'candidate'
-            write_acceptance(record, target, run=run_id, attempt=attempt, runner_temp=os.environ['RUNNER_TEMP'])
+            write_acceptance(record, target, run=run_id, attempt=attempt, durable_root=os.environ['D080_ACCEPTANCE_ROOT'])
     except Exception:
         raise SystemExit('ARTHELLO_R9_SSO_ACCEPTANCE=BLOCKED: browser, source or repair evidence is absent, stale or mismatched')
     print(json.dumps(record, separators=(',', ':')))
