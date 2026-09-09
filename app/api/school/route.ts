@@ -1,4 +1,5 @@
 import type { ActionKind, Role, SchoolSnapshot } from "../../level-zero-types";
+import { mayPreviewParent, projectParentPreview } from "../../../lib/parent-preview.mjs";
 import {
   assertSameOrigin,
   createCredentialToken,
@@ -1766,6 +1767,18 @@ export async function GET(request: Request) {
         { status: 403 },
       );
     }
+    const preview = new URL(request.url).searchParams.get("preview");
+    if (preview !== null) {
+      if (preview !== "parent" || !mayPreviewParent(actor.role))
+        return Response.json({ error: "Предпросмотр недоступен" }, { status: 403 });
+      const studentId = new URL(request.url).searchParams.get("student");
+      if (!studentId || !(await visibleStudentIds(actor)).includes(studentId))
+        return Response.json({ error: "Предпросмотр недоступен" }, { status: 403 });
+      const snapshot = await loadSnapshot(actor, request);
+      return Response.json(projectParentPreview(snapshot, studentId), {
+        headers: { "cache-control": "private, no-store" },
+      });
+    }
     return Response.json(await loadSnapshot(actor, request));
   } catch (error) {
     const message =
@@ -1776,6 +1789,8 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    if (new URL(request.url).searchParams.has("preview"))
+      return Response.json({ error: "Предпросмотр доступен только для чтения" }, { status: 403 });
     await ensureSchoolStructure();
     assertSameOrigin(request);
     const isMultipart = request.headers
