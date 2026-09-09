@@ -227,3 +227,32 @@ jobs:
           bash -n .github/scripts/run-d083-hosted-caddy.sh
           bash -n .github/scripts/run-d083-target-caddy.sh
           bash .github/scripts/run-d083-hosted-caddy.sh
+
+  d085-candidate-tests:
+    name: d085-candidate-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      R11_CONTRACT_SHA256: '67c2f3165e8275c2610dee6619e67fc943cfb14e300b232a61e0d889e6da2ede'
+    steps:
+      - name: Check out exact unprivileged R11 verification source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CHECKED_SOURCE_SHA }}
+          fetch-depth: 0
+          clean: true
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Verify preserved R10 boundary and owned fixture cleanup
+        run: |
+          set -Eeuo pipefail
+          test "$(id -u)" -ne 0
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          test "$(sha256sum deploy/v52/recovery-r11/check-contract.rb | cut -d ' ' -f 1)" = "$R11_CONTRACT_SHA256"
+          ruby deploy/v52/recovery-r11/check-contract.rb
+          python3 -I .github/scripts/test-r11-replay-guard.py
+          node --test .github/scripts/test-r11-target-caddy.test.mjs
+          bash -n .github/scripts/run-r11-target-caddy.sh

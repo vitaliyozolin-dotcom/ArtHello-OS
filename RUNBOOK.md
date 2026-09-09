@@ -231,3 +231,10 @@ R10/PR379 продолжает D081 только после доказанног
 До нового import допускается только точный unused recoverable R9 browser image из DECISIONS D084, без force/prune и без application image/volume удаления. Capacity проверяется после этого штатно.
 
 Сохранены полный runtime/route/hash/backup/current-main gates и порядок maintenance → real candidate browser → public → повторный browser. Если same-source R10 остановился после auth с проверенным maintenance hold и до public/bank activation, разрешён только предусмотренный controller rerun failed jobs с новой проверкой всех evidence. Неизвестный исход или public boundary требуют отдельного проверенного forward-fix с текущей БД; snapshot restore и подмена receipt запрещены. Результат не считать готовым до всей исходной бизнес-приёмки.
+
+
+## D085 / R11: продолжение после pre-auth cleanup failure R10
+
+Run34322039891/job102371510204 остановился после Caddy134 PASS и ARTHELLO_TARGET_CADDY_FIXTURE=VERIFIED на удалении test-fixtures. Не повторять R10 как новый кандидат и не считать fixture PASS выпуском. В R11 используется новый helper, который перед удалением возвращает право записи только собственным обычным каталогам текущего fixture; частичная подготовка допускается, подмена/symlink запрещены.
+
+R11 PR380/префикс `D085: guarded R11`/parent2e57dd22 запускается после exact CI с дополнительным d085-candidate-tests. Frozen R10/R9/V52 и D083 state/browser/backup/public протоколы не редактируются. Новый guard доказывает полный R10 pre-auth abort; fresh capacity и прежний точный R9 retirement остаются, удаление иных образов не добавляется. Изменять main во время protected run нельзя. При held-candidate resume действуют все прежние identity/runtime/route/backup проверки; после auth/public rollback snapshot не допускается. Результат принимать только по реальным evidence шагов; все исходные бизнес-проверки вести отдельно.

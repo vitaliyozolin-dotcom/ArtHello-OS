@@ -727,3 +727,10 @@ decision:
 - Создан инертный draft PR379 из codex/school-arthello-recovery-r10-20260909; R10/D084 будет иметь собственные identity/replay checks. R9 и его candidate-only continuation не меняются. Подготовлены новые gateway evidence/domain helper, context binding и resume checks; одиночная exact R9 browser retirement ограничена целью и recovery artifact, указанными в DECISIONS D084.
 - Новый runtime не меняет роли и не обходит Education/School. До public остаётся полный natural browser с выделенной учёткой; после public повторяются проверки. Предыдущие данные, секреты и источники не подменяются. Исходные банковские/AlfaCRM/доступы/обращения/контент/backups сценарии остаются непринятыми до фактической проверки.
 - Статус preparation. Независимый helper review и20 локальных tests PASS; controller integration и134 actual Caddy checks должны получить собственные подтверждения. Полный scope, source/cleanup/AI-контракт и условия остановки: DECISIONS D084. Exact remote review, hosted gates и protected run ещё не объявлены успешными.
+
+
+## D085 — R11 после ошибки очистки временного fixture (2026-09-09)
+
+Цель прежняя: принятый выпуск и полная исходная бизнес-приёмка. R10 source2e57dd22/run34322039891 прошёл installed-Caddy134, но deploy102371510204 остановился при удалении вложенного mode0555 fixture; clone/auth/public не начинались. Рабочая версия6596f693 остаётся прежней. Новая граница — только принадлежащая заданию временная очистка плюс доказанное исключение повторного исполнения завершившегося R10.
+
+R11 PR380 получает новый source/tree и сохраняет всю действующую матрицу authority, candidate browser, backup, gateway binding и public/bank запретов. Владелец — пользователь; исполнитель — AI в пределах ранее разрешённого выпуска. Следующий контроль: независимый exact-source review, hosted regressions без root, все exact CI и защищённая проверка. Полный контракт/stop conditions: DECISIONS D085. Банковская и остальная бизнес-приёмка остаются открытыми; новый секрет или повторный вход собственника не запрашивается.
