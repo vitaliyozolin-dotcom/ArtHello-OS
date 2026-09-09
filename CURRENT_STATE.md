@@ -1,5 +1,12 @@
 # ArtHello OS — Current State
 
+## Refactoring Phase 3 — contract and correctness boundary (2026-09-09)
+
+- D-082 закрепляет OpenAPI как источник публичного типизированного контракта. Исполняемый contract-drift gate видит 302 runtime method/path, 156 OpenAPI method/path и 146 существующих server-only method/path с явным disposition; необъяснённых и stale записей нет. Это технический inventory, не продуктовые количества.
+- `@workspace/shared` консолидирует phone normalization, SHA-256, CSRF-cookie parsing и форматирование рублей. Нормализация не выполняет автоматического identity/family merge.
+- Прямые исполняемые frontend-вызовы глобального `fetch` удалены: OpenAPI-операции используют generated client, а ещё не документированные legacy операции проходят через совместимый `apiFetch` того же пакета с едиными credentials/base URL/CSRF. Демонстрационный текст интеграции не является вызовом.
+- `api-zod` продолжает применяться в стабильных route-модулях; god-файлы Фазы 4 не переписывались ради промежуточной схемы.
+
 ## Refactoring Phase 2.3–2.4 — checked migrations and orphan schema retirement (2026-09-09)
 
 - D-080 делает manifest-verified checked-in Drizzle SQL единственным runtime-авторитетом миграций; `migrate.ts` и runtime `drizzle-kit` удалены из startup path.

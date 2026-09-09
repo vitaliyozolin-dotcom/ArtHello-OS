@@ -1,3 +1,5 @@
+import { formatRubles } from "@workspace/shared/money";
+import { apiFetch } from "@workspace/api-client-react";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { LucideIcon } from "lucide-react";
@@ -32,7 +34,7 @@ interface TrendRow { month: string; revenue: number; expenses: number; grossProf
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(n);
+  return formatRubles(n);
 }
 
 function pct(n: number) {
@@ -145,22 +147,22 @@ export default function PnlPage({ embedded = false }: { embedded?: boolean } = {
 
   const { data: months = [] } = useQuery<string[]>({
     queryKey: ["pnl-months"],
-    queryFn: () => fetch("/api/pnl/months").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/pnl/months").then((r) => r.json()),
   });
 
   const { data: summary, isLoading: sumLoading } = useQuery<Summary>({
     queryKey: ["pnl-summary", month],
-    queryFn: () => fetch(`/api/pnl/summary?month=${month}`).then((r) => r.json()),
+    queryFn: () => apiFetch(`/api/pnl/summary?month=${month}`).then((r) => r.json()),
   });
 
   const { data: breakdown, isLoading: bdLoading } = useQuery<Breakdown>({
     queryKey: ["pnl-breakdown", month],
-    queryFn: () => fetch(`/api/pnl/breakdown?month=${month}`).then((r) => r.json()),
+    queryFn: () => apiFetch(`/api/pnl/breakdown?month=${month}`).then((r) => r.json()),
   });
 
   const { data: trend = [] } = useQuery<TrendRow[]>({
     queryKey: ["pnl-trend"],
-    queryFn: () => fetch("/api/pnl/trend?months=12").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/pnl/trend?months=12").then((r) => r.json()),
   });
 
   const monthOptions = useMemo(() => {

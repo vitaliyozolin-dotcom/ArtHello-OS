@@ -1,3 +1,5 @@
+import { apiFetch } from "@workspace/api-client-react";
+import { formatRubleNumber } from "@workspace/shared/money";
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calendar, Plus, X, BarChart3, Users, Clock, TrendingDown } from 'lucide-react';
@@ -51,7 +53,7 @@ interface Direction { id: string; name: string; color: string | null; }
 
 function fmt(n: number | string | null | undefined) {
   if (!n) return '—';
-  return new Intl.NumberFormat('ru-RU').format(parseFloat(String(n))) + ' ₽';
+  return formatRubleNumber(parseFloat(String(n))) + ' ₽';
 }
 
 const CURRENT_MONTH = new Date().toISOString().slice(0, 7);
@@ -75,7 +77,7 @@ export default function SchedulePage() {
       const p = new URLSearchParams();
       if (filterMonth)   p.set('periodMonth', filterMonth);
       if (filterTeacher) p.set('teacherCrmId', filterTeacher);
-      return fetch(`${BASE}/schedule/assignments?${p}`).then(r => r.json());
+      return apiFetch(`${BASE}/schedule/assignments?${p}`).then(r => r.json());
     },
   });
 
@@ -84,7 +86,7 @@ export default function SchedulePage() {
     queryFn: () => {
       const p = new URLSearchParams();
       if (filterMonth) p.set('periodMonth', filterMonth);
-      return fetch(`${BASE}/schedule/pl-by-direction?${p}`).then(r => r.json());
+      return apiFetch(`${BASE}/schedule/pl-by-direction?${p}`).then(r => r.json());
     },
     enabled: viewTab === 'pl-by-direction',
   });
@@ -94,19 +96,19 @@ export default function SchedulePage() {
     queryFn: () => {
       const p = new URLSearchParams();
       if (filterMonth) p.set('periodMonth', filterMonth);
-      return fetch(`${BASE}/schedule/teacher-workload?${p}`).then(r => r.json());
+      return apiFetch(`${BASE}/schedule/teacher-workload?${p}`).then(r => r.json());
     },
     enabled: viewTab === 'teacher-workload',
   });
 
   const { data: directions = [] } = useQuery<Direction[]>({
     queryKey: ['directions'],
-    queryFn: () => fetch(`${BASE}/educational/directions`).then(r => r.json()),
+    queryFn: () => apiFetch(`${BASE}/educational/directions`).then(r => r.json()),
   });
 
   const create = useMutation({
     mutationFn: (body: typeof form) =>
-      fetch(`${BASE}/schedule/assignments`, {
+      apiFetch(`${BASE}/schedule/assignments`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...body,
@@ -125,7 +127,7 @@ export default function SchedulePage() {
   });
 
   const del = useMutation({
-    mutationFn: (id: string) => fetch(`${BASE}/schedule/assignments/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => apiFetch(`${BASE}/schedule/assignments/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['schedule-assignments'] });
       qc.invalidateQueries({ queryKey: ['schedule-pl-by-direction'] });

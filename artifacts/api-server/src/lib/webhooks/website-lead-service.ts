@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Hex } from "@workspace/shared/sha256";
 
 export const WEBSITE_LEAD_FIELDS = [
   "name",
@@ -21,9 +21,7 @@ export type WebsiteLeadPayload = Record<
   string
 >;
 
-function sha256(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
+const sha256 = sha256Hex;
 
 export function canonicalWebsiteLeadPayload(
   value: Record<string, unknown>,

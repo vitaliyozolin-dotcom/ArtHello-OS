@@ -1,3 +1,5 @@
+import { formatRubles } from "@workspace/shared/money";
+import { apiFetch } from "@workspace/api-client-react";
 import { useState, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -45,7 +47,7 @@ const fmt = (n: number | string | null | undefined, currency = true) => {
   const num = typeof n === 'string' ? parseFloat(n) : (n ?? 0);
   if (isNaN(num)) return '—';
   return currency
-    ? new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(num)
+    ? formatRubles(num)
     : num.toLocaleString('ru-RU');
 };
 
@@ -110,7 +112,7 @@ function BankImport({ onImported }: { onImported: () => void }) {
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const r = await fetch(`${BASE}/api/finance/bank/preview`, { method: 'POST', body: fd });
+      const r = await apiFetch(`${BASE}/api/finance/bank/preview`, { method: 'POST', body: fd });
       if (!r.ok) { const e = await r.json(); throw new Error(e.error || r.statusText); }
       const data: PreviewResult = await r.json();
       setPreview(data);
@@ -134,7 +136,7 @@ function BankImport({ onImported }: { onImported: () => void }) {
       fd.append('branchName', meta.branchName);
       fd.append('branchCrmId', meta.branchCrmId);
       fd.append('mapping', JSON.stringify(mapping));
-      const r = await fetch(`${BASE}/api/finance/bank/import`, { method: 'POST', body: fd });
+      const r = await apiFetch(`${BASE}/api/finance/bank/import`, { method: 'POST', body: fd });
       if (!r.ok) { const e = await r.json(); throw new Error(e.error || r.statusText); }
       const data = await r.json();
       setImportResult(data);

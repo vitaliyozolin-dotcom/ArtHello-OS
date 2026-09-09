@@ -1,5 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { sha256Hex } from "@workspace/shared/sha256";
 import { z } from "zod/v4";
 import { logger } from "../lib/logger.js";
 import {
@@ -65,7 +66,7 @@ function clearAuthCookies(res: Response): void {
   res.clearCookie(csrfCookieName(), { ...cookieBaseOptions(), httpOnly: false });
 }
 
-function sha256(value: string): string { return createHash("sha256").update(value).digest("hex"); }
+const sha256 = sha256Hex;
 function normalizeLogin(value: string): string { return value.trim().toLowerCase(); }
 function normalizeIds(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0 && value.length <= 128))];

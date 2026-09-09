@@ -1,3 +1,5 @@
+import { formatRubles } from "@workspace/shared/money";
+import { apiFetch } from "@workspace/api-client-react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -24,7 +26,7 @@ interface QaSummary {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const fmt = (n: number) =>
-  new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(n);
+  formatRubles(n);
 
 const fmtK = (n: number) => {
   if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} М`;
@@ -105,7 +107,7 @@ function TrustBar({ score }: { score: number }) {
 export default function FinanceQaPage() {
   const { data, isLoading } = useQuery<QaSummary>({
     queryKey: ["qa-summary"],
-    queryFn: () => fetch("/api/qa/summary").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/qa/summary").then((r) => r.json()),
     refetchInterval: 30000,
   });
 

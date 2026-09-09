@@ -1,3 +1,4 @@
+import { apiFetch } from "@workspace/api-client-react";
 export interface ChannelInboxMessage {
   id: string;
   conversation_id: string;
@@ -59,7 +60,7 @@ export interface ChannelInboxData {
 }
 
 async function request<T>(path: string): Promise<T> {
-  const response = await fetch(path, {
+  const response = await apiFetch(path, {
     headers: { Accept: "application/json" },
     credentials: "same-origin",
   });

@@ -1,3 +1,5 @@
+import { formatRubleNumber, formatRubles } from "@workspace/shared/money";
+import { apiFetch } from "@workspace/api-client-react";
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
@@ -148,12 +150,12 @@ function applyRules(tx: TxItem, rules: CategorizationRuleItem[]): SuggestionResu
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n: number | null | undefined) => {
   if (n === null || n === undefined) return '—';
-  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(n);
+  return formatRubles(n);
 };
 
 const fmtNum = (n: number | null | undefined) => {
   if (n === null || n === undefined) return '—';
-  return new Intl.NumberFormat('ru-RU').format(n);
+  return formatRubleNumber(n);
 };
 
 const fmtDate = (v: string | null | undefined) => {
@@ -2861,7 +2863,7 @@ function DbSourcePanel() {
 
   useEffect(() => {
     setLoading(true);
-    fetch('/api/system/db-audit')
+    apiFetch('/api/system/db-audit')
       .then(r => r.json())
       .then((d: DbAuditResponse) => { setAudit(d); setFetchError(null); })
       .catch(e => setFetchError(String(e)))
