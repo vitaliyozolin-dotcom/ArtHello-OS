@@ -1,0 +1,251 @@
+name: Verify and run ArtHello employee controls
+
+on:
+  pull_request:
+    paths:
+      - deploy/browser/**
+      - scripts/run-server-browser.sh
+      - scripts/test/employee-controls.test.mjs
+      - scripts/test/browser-proxy.test.mjs
+      - scripts/test/retire-r12-browser.test.mjs
+      - .github/scripts/check-employee-controls-contract.rb
+      - .github/workflows/check-arthello-employee-controls.yml
+  workflow_run:
+    workflows: [Quality gates]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('employee-controls-pr-{0}', github.event.pull_request.number) || 'gateway-38-55-arthello-production' }}
+  cancel-in-progress: false
+  queue: max
+
+env:
+  CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+
+jobs:
+  bundle:
+    if: >-
+      github.event_name == 'pull_request' || (
+        github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+        github.actor == 'vitaliyozolin-dotcom' &&
+        github.triggering_actor == 'vitaliyozolin-dotcom' && (
+          (github.event_name == 'workflow_run' &&
+           github.event.workflow_run.name == 'Quality gates' &&
+           github.event.workflow_run.path == '.github/workflows/quality.yml' &&
+           github.event.workflow_run.event == 'push' &&
+           github.event.workflow_run.head_branch == 'main' &&
+           github.event.workflow_run.conclusion == 'success' &&
+           github.event.workflow_run.run_attempt == 1 &&
+           github.event.workflow_run.repository.id == github.event.repository.id &&
+           github.event.workflow_run.head_repository.id == github.event.repository.id &&
+           startsWith(github.event.workflow_run.head_commit.message, 'D093: employee controls'))
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      archive_name: ${{ steps.bundle.outputs.archive_name }}
+      archive_sha: ${{ steps.bundle.outputs.archive_sha }}
+      fingerprint: ${{ steps.bundle.outputs.fingerprint }}
+      archive_bytes: ${{ steps.bundle.outputs.archive_bytes }}
+      expanded_bytes: ${{ steps.bundle.outputs.expanded_bytes }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CHECKED_SOURCE_SHA }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Test browser policy and install locked package off the VPS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          ruby .github/scripts/check-employee-controls-contract.rb
+          node --test scripts/test/employee-controls.test.mjs scripts/test/browser-proxy.test.mjs scripts/test/retire-r12-browser.test.mjs
+          bash -n scripts/run-server-browser.sh
+          corepack enable
+          corepack pnpm@11.7.0 --dir deploy/browser install --ignore-workspace --frozen-lockfile
+      - name: Build immutable bundle and exercise Chromium sandbox and natural flow fixture
+        id: bundle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tag="arthello-e2e:$CHECKED_SOURCE_SHA"
+          docker build --platform linux/amd64 --build-arg "SOURCE_SHA=$CHECKED_SOURCE_SHA" -f deploy/browser/Dockerfile.employee-controls -t "$tag" deploy/browser
+          image_id="$(docker image inspect "$tag" --format '{{.Id}}')"
+          timeout --signal=TERM --kill-after=10 90 docker run --rm --init \
+            --pull never --user 1000:1000 --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --security-opt "seccomp=$PWD/deploy/browser/seccomp.json" \
+            --memory 1g --memory-swap 1g --cpus 1 --pids-limit 256 --shm-size 128m \
+            --tmpfs /tmp:rw,nosuid,nodev,size=512m,uid=1000,gid=1000,mode=700 \
+            "$image_id" --smoke
+          mkdir -p "$RUNNER_TEMP/browser-bundle"
+          docker save "$tag" | gzip -1 -n > "$RUNNER_TEMP/browser-bundle/browser.tar.gz"
+          archive_sha="$(sha256sum "$RUNNER_TEMP/browser-bundle/browser.tar.gz" | cut -d ' ' -f 1)"
+          fingerprint="$(docker image inspect "$image_id" | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq | sha256sum | cut -d ' ' -f 1)"
+          printf 'archive_sha=%s\nfingerprint=%s\n' "$archive_sha" "$fingerprint" >> "$GITHUB_OUTPUT"
+          printf 'archive_name=server-browser-%s-%s-%s\n' "$CHECKED_SOURCE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          archive_bytes="$(stat -c %s "$RUNNER_TEMP/browser-bundle/browser.tar.gz")"
+          expanded_bytes="$(gzip -cd "$RUNNER_TEMP/browser-bundle/browser.tar.gz" | wc -c)"
+          printf 'archive_bytes=%s\nexpanded_bytes=%s\n' "$archive_bytes" "$expanded_bytes" >> "$GITHUB_OUTPUT"
+          printf 'BROWSER_BUNDLE_BYTES archive=%s expanded=%s\n' "$archive_bytes" "$expanded_bytes"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.bundle.outputs.archive_name }}
+          path: ${{ runner.temp }}/browser-bundle/browser.tar.gz
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error
+
+  natural-browser:
+    needs: bundle
+    if: >-
+      needs.bundle.result == 'success' &&
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      github.event_name == 'workflow_run'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    timeout-minutes: 15
+    concurrency:
+      group: school-1-11-production
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - name: Check current trusted main and existing runner runtime before checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$CHECKED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          current_main="$(curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+          test "$current_main" = "$CHECKED_SOURCE_SHA"
+          precheck_node="$(command -v node || true)"
+          if [[ -z "$precheck_node" ]]; then
+            runner_root="$(realpath "$RUNNER_TEMP/../..")"
+            precheck_node="$runner_root/externals/node24/bin/node"
+          fi
+          test -x "$precheck_node"
+          "$precheck_node" -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(2)'
+          printf 'PRECHECK_NODE=%s\n' "$precheck_node" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CHECKED_SOURCE_SHA }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Retire only the exact unused accepted R12 browser image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_BYTES: ${{ needs.bundle.outputs.archive_bytes }}
+          EXPANDED_BYTES: ${{ needs.bundle.outputs.expanded_bytes }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          "$PRECHECK_NODE" deploy/browser/retire-r12-browser.mjs
+      - name: Measure import capacity before downloading the verified archive
+        env:
+          ARCHIVE_BYTES: ${{ needs.bundle.outputs.archive_bytes }}
+          EXPANDED_BYTES: ${{ needs.bundle.outputs.expanded_bytes }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          read -r required_scratch required_docker < <("$PRECHECK_NODE" --input-type=module -e '
+            import { capacity } from "./deploy/browser/capacity.mjs";
+            const required = capacity(Number(process.env.ARCHIVE_BYTES), Number(process.env.EXPANDED_BYTES));
+            process.stdout.write(required.scratchKiB + " " + required.dockerKiB + "\n");
+          ')
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          scratch_available="$(df -Pk -- "$RUNNER_TEMP" | awk 'NR==2 {print $4}')"
+          docker_available="$(df -Pk -- "$docker_root" | awk 'NR==2 {print $4}')"
+          [[ "$scratch_available" =~ ^[0-9]+$ && "$docker_available" =~ ^[0-9]+$ ]]
+          printf 'BROWSER_IMPORT_CAPACITY_KIB scratch_available=%s scratch_required=%s docker_available=%s docker_required=%s\n' \
+            "$scratch_available" "$required_scratch" "$docker_available" "$required_docker"
+          if (( scratch_available < required_scratch || docker_available < required_docker )); then
+            echo 'SERVER_BROWSER_BLOCKED=insufficient_import_space'
+            exit 2
+          fi
+          printf 'IMPORT_DOCKER_MIN_KIB=%s\n' "$(( (3 * EXPANDED_BYTES + 1023) / 1024 + 2097152 ))" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.bundle.outputs.archive_name }}
+          path: ${{ runner.temp }}/browser-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify archive, import off-host bundle and verify portable identity
+        env:
+          EXPECTED_ARCHIVE_SHA: ${{ needs.bundle.outputs.archive_sha }}
+          EXPECTED_FINGERPRINT: ${{ needs.bundle.outputs.fingerprint }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          import_stage=archive_identity
+          trap 'printf "SERVER_BROWSER_BLOCKED=import_%s\n" "$import_stage"' ERR
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          [[ "$EXPECTED_ARCHIVE_SHA" =~ ^[a-f0-9]{64}$ && "$EXPECTED_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
+          archive="$RUNNER_TEMP/browser-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/browser.tar.gz"
+          test "$(sha256sum "$archive" | cut -d ' ' -f 1)" = "$EXPECTED_ARCHIVE_SHA"
+          echo 'SERVER_BROWSER_ARCHIVE=verified'
+          # Import only; never pull/build/install on the production server.
+          # Capacity was checked on the actual Docker store with measured sizes.
+          import_stage=capacity_recheck
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          docker_available="$(df -Pk -- "$docker_root" | awk 'NR==2 {print $4}')"
+          scratch_available="$(df -Pk -- "$RUNNER_TEMP" | awk 'NR==2 {print $4}')"
+          [[ "$IMPORT_DOCKER_MIN_KIB" =~ ^[0-9]+$ && "$docker_available" =~ ^[0-9]+$ && "$scratch_available" =~ ^[0-9]+$ ]]
+          printf 'BROWSER_IMPORT_RECHECK_KIB docker_available=%s docker_required=%s scratch_available=%s\n' "$docker_available" "$IMPORT_DOCKER_MIN_KIB" "$scratch_available"
+          (( docker_available >= IMPORT_DOCKER_MIN_KIB && scratch_available >= 2097152 ))
+          import_stage=image_load
+          docker image load --input "$archive"
+          import_stage=image_identity
+          image_id="$(docker image inspect "arthello-e2e:$CHECKED_SOURCE_SHA" --format '{{.Id}}')"
+          fingerprint="$(docker image inspect "$image_id" | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq | sha256sum | cut -d ' ' -f 1)"
+          test "$fingerprint" = "$EXPECTED_FINGERPRINT"
+          test "$(docker image inspect "$image_id" --format '{{.Config.User}}')" = 1000:1000
+          test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$CHECKED_SOURCE_SHA"
+          test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.arthello.role"}}')" = e2e-browser
+          printf 'BROWSER_IMAGE_ID=%s\n' "$image_id" >> "$GITHUB_ENV"
+          printf 'BROWSER_IMAGE_VERIFIED source=%s fingerprint=%s\n' "$CHECKED_SOURCE_SHA" "$fingerprint"
+      - name: Run employee feedback and backup-denial controls with natural School navigation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTHELLO_E2E_LOGIN: ${{ secrets.ARTHELLO_E2E_LOGIN }}
+          ARTHELLO_E2E_PASSWORD: ${{ secrets.ARTHELLO_E2E_PASSWORD }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          "$PRECHECK_NODE" --test scripts/test/employee-controls.test.mjs scripts/test/browser-proxy.test.mjs
+          current_main="$(curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+          test "$current_main" = "$CHECKED_SOURCE_SHA"
+          bash scripts/run-server-browser.sh
+      - name: Remove only this downloaded temporary archive
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          archive="$RUNNER_TEMP/browser-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/browser.tar.gz"
+          rm -f -- "$archive"
+      - name: Retire only this job's verified browser image under D079
+        if: always() && env.BROWSER_IMAGE_ID != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_BROWSER_FINGERPRINT: ${{ needs.bundle.outputs.fingerprint }}
+          BROWSER_ARCHIVE_NAME: ${{ needs.bundle.outputs.archive_name }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          "$PRECHECK_NODE" deploy/browser/retire-image.mjs --current
