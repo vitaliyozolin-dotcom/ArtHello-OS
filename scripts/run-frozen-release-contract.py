@@ -77,10 +77,18 @@ def main():
     with tempfile.TemporaryDirectory(prefix="arthello-frozen-contract-") as directory:
         head = prepare_fixture(root, directory)
         print(f"FROZEN_CONTRACT current_code={head} workflow_inputs={BASELINE} suite={args.contract}", flush=True)
+        environment = dict(os.environ)
+        if args.contract == "v52-backup-runtime":
+            # This unchanged smoke reads HEAD and HEAD^{tree} to bind its image.
+            # Use the actual checked repository's objects with the owned fixture
+            # as work tree; never create a synthetic commit or replace HEAD.
+            if git(root, "rev-parse", "HEAD").decode().strip() != head:
+                raise ValueError("checked source moved before backup smoke")
+            environment["GIT_DIR"] = git(root, "rev-parse", "--absolute-git-dir").decode().strip()
+            environment["GIT_WORK_TREE"] = directory
         result = subprocess.run(["bash", "-e", "-u", "-o", "pipefail", "-c", COMMANDS[args.contract]],
-                                cwd=directory, timeout=720)
+                                cwd=directory, env=environment, timeout=720)
         return result.returncode
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
