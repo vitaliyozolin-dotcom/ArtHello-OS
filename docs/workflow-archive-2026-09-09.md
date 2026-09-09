@@ -13,6 +13,10 @@ GitHub сохраняет историю запусков независимо �
 logs — в Actions. Текущие R12/R13 и постоянные проверки этим блоком не
 затронуты.
 
+Второй cleanup-блок после commit `262c16d` архивирует superseded RU D059,
+recovery R12, датированные School SSO/curriculum cutover и topology probe.
+R13 и текущие D075/D092/D093 checks остаются активными.
+
 | Blob SHA | Путь |
 |---|---|
 | `46ce4c5ed22c88a692f565e91dc8112e400bdff6` | `.github/workflows/d060-tochka-production-hotfix-v2.yml` |
@@ -39,6 +43,13 @@ logs — в Actions. Текущие R12/R13 и постоянные провер
 | `8581398cf32f337e4a3e172bfc6818d4e95f95b5` | `.github/workflows/deploy-arthello-recovery-r11-20260909.yml` |
 | `973c563ed8a41c88b4126c075b7bafa4a1ff1c88` | `.github/workflows/school-r3-bootstrap-diagnostic-20260908.yml` |
 | `e43a931c2e890b9e27e14bf75e399e28ef52618b` | `.github/workflows/school-r4-fingerprint-diagnostic-20260908.yml` |
+| `e23b41ca123a87c60cc8332acc4c9edc3183f870` | `.github/workflows/deploy-arthello-direct-38-55.yml` |
+| `18481b57852c07c4a266fee51dd40249b1e6587d` | `.github/workflows/deploy-arthello-recovery-r12-20260909.yml` |
+| `68a05a291635a5dcfb273307e860734e33bea7b1` | `.github/workflows/deploy-school-curriculum-main.yml` |
+| `0c9a59fb3dc618146ca787c5bcc291bf2c918ae8` | `.github/workflows/deploy-school-sso-origin-hotfix-production-20260902.yml` |
+| `77838609ebecc1a55ed124c3a3ca7585137ef51a` | `.github/workflows/deploy-school-sso-origin-hotfix-production-v2-20260902.yml` |
+| `3c771a3d77b33ef7884dae2e02d87a071791d5d6` | `.github/workflows/deploy-school-staff-sso-public-callback-production-20260903.yml` |
+| `04c39023ccc3465eaf69134cf96ed4e379cae0ed` | `.github/workflows/probe-school-production-topology.yml` |
 
 Восстановление отдельного файла:
 

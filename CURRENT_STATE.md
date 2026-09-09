@@ -2,9 +2,9 @@
 
 ## Refactoring Phase 6 — workflow cleanup checkpoint (2026-09-09)
 
-- Первый доказанный cleanup-блок удалил из активной `.github/workflows` 24 завершённых one-shot: production hotfix D060–D069, recovery R2–R11 и ранние School recovery diagnostics.
-- Активный набор сокращён с 47 до 23 workflow, число `workflow_run` consumers — с 17 до 7. Исходные blob SHA и восстановление из точного parent commit записаны в `docs/workflow-archive-2026-09-09.md`.
-- Локальный workflow policy gate прошёл: 23 workflow, 0 violations, 3 прежних risk-сигнатуры. R12/R13, текущие browser/data checks, `quality.yml` и `proof-gates.yml` не затронуты до проверки фактических GitHub run provenance.
+- Два доказанных cleanup-блока удалили из активной `.github/workflows` 31 завершённый one-shot: production hotfix D060–D069, recovery R2–R12, ранние School recovery diagnostics, frozen SSO/curriculum cutover, topology probe и legacy RU D059.
+- Активный набор сокращён с 47 до 16 workflow, число `workflow_run` consumers — с 17 до 5. Исходные blob SHA и восстановление из точных parent commits записаны в `docs/workflow-archive-2026-09-09.md`.
+- Workflow policy gate проверяет оставшийся набор. R13, текущие browser/data checks, `quality.yml` и `proof-gates.yml` не затронуты до проверки фактических GitHub run provenance.
 - `test:full` теперь включает актуальный importer/sandbox suite workspace `scripts` и PostgreSQL 16 gate; дублирующий отдельный `test:postgres` после агрегата удалён из `quality.yml`. Полный legacy glob `scripts/test/*.test.mjs` пока не считается зелёным CI-suite: в нём остаются spent release contracts и sandbox-sensitive server tests.
 - Фаза 6 остаётся открытой: нужны второй workflow cleanup-блок, консолидация deploy, материализация School source, подключение deploy tests/typecheck, SSH/backup hardening, замена хрупких source-regex тестов и coverage ratchet.
 
