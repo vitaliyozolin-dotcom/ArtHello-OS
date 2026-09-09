@@ -36,9 +36,10 @@ source="$(jq -er '.sourceSha' <<<"$selection")"
 test "$source" = "$EXPECTED_LIVE_SOURCE_SHA"
 relative="$("$PRECHECK_NODE" --input-type=module -e 'import {activeRelativePath} from "./scripts/production-readonly.mjs"; console.log(activeRelativePath())')"
 [[ "$relative" =~ ^d1/miniflare-D1DatabaseObject/[a-f0-9]{64}\.sqlite$ ]]
-# One bounded non-root process; fixed counters/reasons only, never FD targets.
+# One bounded non-root process; it only waits for an ordinary open when no D1
+# handle exists. Unexpected handles or any other identity failure still stop it.
 set +e
-timeout 15 docker exec -i -e EXPECTED_FILE="/data/$relative" "$live" \
+timeout 90 docker exec -i -e EXPECTED_FILE="/data/$relative" "$live" \
   node --input-type=module - --live-d1-scan < scripts/live-d1-identity.mjs 2>/dev/null
 scan_status=$?
 set -e
