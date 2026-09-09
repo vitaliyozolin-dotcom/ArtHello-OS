@@ -178,7 +178,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
         headers: {
           "content-type": "application/json",
           "x-arthello-role": roleCode,
-          "x-arthello-csrf": readCookie("arthello_csrf"),
+          "x-csrf-token": readCookie("__Host-arthello_csrf"),
         },
         body: JSON.stringify(body),
       });
