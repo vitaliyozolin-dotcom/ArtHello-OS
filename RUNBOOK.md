@@ -336,3 +336,12 @@ D075 fixed report дополнительно читает autosync.failureStage/
 Existing receipt прочитан в run34337932856: tasks-empty-390x844,2 capture records,4 PNG entries; изображения не просмотрены. Scoped adapter дополняет verified frozen overview/detail fixtures точным permission shape synthetic OWNER. Полный harness, UI assertions, old R12 runtime pin и №801 остаются прежними.
 
 После exact-source CI и независимого review использовать существующий технический prefix `D089: hosted Content Tasks visual` для одного обусловленного исправлением hosted запуска. Не менять main до результата. Фиксировать реальный completed stage/PNG inventory/task-number assertion; screenshot inspection и save persistence отмечать отдельно. Если вновь BLOCKED, читать конкретный новый receipt и не ослаблять проверку. Полный контракт и ограничения — docs/acceptance/2026-09-09-d092-workflow-fixture.md.
+
+
+## D096 — Продолжение после работающего R12
+
+Запускать новый R13 только с закреплённым merged PR/current main и успешными exact-source Quality, Proof, V52, R12 и R13 gates. Успешный R12 run34326582961 — исторический baseline; actual fresh live identity проверяется отдельно. Пока protected run активен, main не менять. Не перезапускать старый R12 и не использовать его rollback snapshot как свежий.
+
+Сохранять accepted backup worker/history/control. Проверять полный phase-specific canonical consumer inventory, включая только доказанного остановленного historical predecessor. До cutover — свежий snapshot. До copyback — containment, worker quiesce, actual verify-copyback, точные stopped/restart-no consumers; затем доказанное восстановление reader. Перед candidate-state begin sealed adoption digest связывается с private context; ошибка или потенциально записанный seal запрещает очистку/restore. После authentication/public-start любые старые data restores запрещены.
+
+Candidate и after browser проходят через новый expected-ID wrapper вокруг неизменённого natural browser harness. New RELEASE_SHA остаётся новым source; accepted77f используется только в fresh baseline. Actual result и image/source/container identity сохранять как bounded receipts, без diary content, password, callback URL или raw financial errors. После R13 дождаться обычного банковского запуска и читать D094 stage только при новом observed error; не форсировать backoff/leases. Отчёт о выпуске отдельно указывает опубликованную версию и незавершённые бизнес-критерии.
