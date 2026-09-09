@@ -11,6 +11,7 @@
     "sandbox:audit:alfacrm": "node --import tsx ./src/audit-alfacrm-sandbox.ts",
     "sandbox:import:payroll": "node --import tsx ./src/import-payroll-sheet-sandbox.ts",
     "sandbox:audit:payroll": "node --import tsx ./src/audit-payroll-sandbox.ts",
+    "test:ci": "node --import tsx --test ./test/alfacrm-import-guardrails.test.mjs ./test/alfacrm-normalization-pglite.test.mjs ./test/alfacrm-safe.test.mjs ./test/alfacrm-snapshot-pglite.test.mjs ./test/alfacrm-sync-plan.test.mjs ./test/sandbox-db-guardrails.test.mjs",
     "test": "node --import tsx --test ./test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

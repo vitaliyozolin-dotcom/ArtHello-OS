@@ -213,14 +213,14 @@ Evidence: пустой route-table diff в каждом PR; permission-proof з�
 
 Evidence: доказательство deep-link (прямая загрузка `/banking`); back-button в записанном прогоне visual-acceptance; отчёт хэш-дедупликации компонентов между пакетами = пусто; D-номер.
 
-### Фаза 6 — консолидация CI, нормализация School-исходника, тестовая стратегия (L; набор независимых треков)
+### Фаза 6 — в работе с 2026-09-09: консолидация CI, нормализация School-исходника, тестовая стратегия (L; набор независимых треков)
 
-1. **[DEL]** Архивировать-и-удалить ~30 одноразовых workflow (`tmp-*`, `diagnose-*`, `repair-*`, датированные `*-20260831`, дубли `*-candidate*`); индекс в `docs/ops-archive.md` с run-URL (прогоны остаются provenance).
+1. **[частично] [DEL]** Первый cleanup-блок архивировал и удалил 24 завершённых D060–D069, recovery R2–R11 и ранних School diagnostic workflow; активный набор сокращён с 47 до 23, а `workflow_run` consumers — с 17 до 7. Blob provenance сохранён в `docs/workflow-archive-2026-09-09.md`; R12/R13 и текущие checks оставлены до сверки фактических Actions runs и run URL.
 2. Постоянный набор: `quality.yml`, `proof-gates.yml`, параметризованный `deploy-ru.yml`, один school-deploy + его validation (в форме после фазы 0); всё деструктивное — за protected Environments.
 3. **[BEH]** Де-тарболизация School (R6/R6b/R9; не переписывание — нормализация version control): (a) в scratch-checkout декодировать чанки v52, применить 14 патчей по порядку → истинное текущее дерево; (b) закоммитить как обычные файлы (например `deploy/v52/src/`), sha256 tarball'а и post-patch дерева — в D-номер; **перед коммитом прогнать gitleaks локально по извлечённому дереву** (tarball может содержать секреты, которые history-scan потом зафиксирует навсегда); (c) пересборка из закоммиченного дерева и hash-эквивалентность артефакта против tarball+patches; (d) **[DEL]** удалить чанки и патч-скрипты; повторить для v44.
 4. `deploy/` под tsc (собственный tsconfig-проект); усыновить 27 сиротских тестов `deploy/v52/overrides/tests` в CI-job.
 5. Единая ssh-конвенция: known_hosts из GitHub secret (R10). Бэкапы: cron/systemd-timer + офф-хост + алертинг (R17).
-6. Тестовая стратегия: regex-по-исходникам заменить поведенческими там, где они охраняли реальное; `test:full` включает `test:postgres` и suite `scripts`; ratcheting coverage floor (стартует с текущего измеренного %, не убывает — ratchet-файл и есть evidence).
+6. **[частично]** Тестовая стратегия: `test:full` включает `test:postgres` и актуальный importer/sandbox suite workspace `scripts`, а `quality.yml` больше не дублирует PostgreSQL gate отдельным запуском. Полный legacy glob `scripts/test/*.test.mjs` ещё содержит spent release-contract tests и требует отдельного усыновления/архивирования; также остаются замена source-regex поведенческими тестами и ratcheting coverage floor (стартует с текущего измеренного %, не убывает — ratchet-файл и есть evidence).
 
 НЕ трогать: runtime-поведение School (v3-cutover остаётся механизмом доставки); прод-хосты — только через выжившие параметризованные workflow.
 
