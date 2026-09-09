@@ -21,6 +21,19 @@ type Connection = { status: string; isEnabled: boolean; nextSyncAt: string };
 type State = { version: 1; generation: string; owner: string; leasedUntil: number; nextAt: number; failures: number; outcome: string };
 type Outcome = 'complete' | 'pending' | 'busy' | 'error';
 
+const failureStages = ['setup_references', 'credential_read', 'statement_state_open', 'bank_sync',
+  'statement_fence', 'sync_commit', 'statement_acknowledge', 'statement_release',
+  'sync_callback', 'response_decode', 'response_result'] as const;
+type TochkaSyncFailureStage = typeof failureStages[number];
+export type TochkaSyncObserver = (stage: TochkaSyncFailureStage) => void;
+
+// Observe only lexical operation names; preserve the original exception and bank behavior.
+export async function runTochkaSyncStage<T>(stage: TochkaSyncFailureStage,
+  operation: () => Promise<T>, observe?: TochkaSyncObserver): Promise<T> {
+  try { return await operation(); }
+  catch (error) { observe?.(stage); throw error; }
+}
+
 export async function isTochkaAutosyncRequest(request: Request, secret: unknown) {
   if (request.method !== 'POST' || new URL(request.url).pathname !== '/api/integration-actions'
     || typeof secret !== 'string' || !/^[0-9a-f]{64}$/.test(secret)) return false;
@@ -55,7 +68,7 @@ export function canAutomaticallySyncTochka(setup: Setup | undefined, connection:
 
 export async function runScheduledTochkaSync(input: {
   db: Database; setup: Setup | undefined; connection: Connection | undefined;
-  run(): Promise<Response>; now?: () => number;
+  run(observe: TochkaSyncObserver): Promise<Response>; now?: () => number;
 }) {
   const clock = input.now ?? Date.now;
   const now = clock();
@@ -97,12 +110,20 @@ export async function runScheduledTochkaSync(input: {
 
   let outcome: Outcome = 'error';
   let httpStatus = 500;
+  let failureStage: TochkaSyncFailureStage | null = null;
+  let fallbackStage: TochkaSyncFailureStage = 'sync_callback';
+  const observe: TochkaSyncObserver = stage => {
+    failureStage = failureStages.includes(stage) ? stage : 'sync_callback';
+  };
   try {
-    const response = await input.run();
+    const response = await input.run(observe);
+    fallbackStage = 'response_result';
     httpStatus = response.status;
     if (response.status === 409) outcome = 'busy';
     else if (response.ok) {
+      fallbackStage = 'response_decode';
       const result = await response.json() as { test?: { ok?: boolean; complete?: boolean; rejectedCount?: number } };
+      fallbackStage = 'response_result';
       if (result.test?.ok === true && Number(result.test.rejectedCount ?? 0) === 0) {
         outcome = result.test.complete === true ? 'complete' : 'pending';
       }
@@ -110,13 +131,15 @@ export async function runScheduledTochkaSync(input: {
   } catch {
     // Provider errors and credentials are deliberately excluded from runtime logs/state.
     outcome = 'error';
+    failureStage ??= fallbackStage;
   }
+  failureStage = outcome === 'error' ? failureStage ?? 'response_result' : null;
   const finishedAt = clock();
   const failures = outcome === 'error' ? Math.min(next.failures + 1, 10) : 0;
   const nextAt = outcome === 'complete' ? nextTochkaAutomaticSlot(finishedAt, setup.syncIntervalMinutes, setup.syncMinute)
     : finishedAt + (outcome === 'pending' ? 5 * 60_000 : outcome === 'busy' ? 60_000
       : Math.min(6 * 60 * 60_000, 15 * 60_000 * 2 ** Math.min(failures - 1, 5)));
-  const completed = { ...next, leasedUntil: 0, nextAt, failures, outcome, httpStatus };
+  const completed = { ...next, leasedUntil: 0, nextAt, failures, outcome, httpStatus, failureStage };
   const ownedGuard = `EXISTS (SELECT 1 FROM system_runtime_state WHERE state_key=?
     AND json_extract(state_value,'$.owner')=? AND json_extract(state_value,'$.generation')=?)`;
   const ownedBindings = [stateKey, next.owner, setup.credentialGeneration];
@@ -128,5 +151,5 @@ export async function runScheduledTochkaSync(input: {
     status=CASE WHEN ?='error' THEN 'Ошибка подключения' ELSE status END,updated_at=CURRENT_TIMESTAMP
     WHERE id=? AND ${ownedGuard} AND ${configurationGuard}`)
     .bind(new Date(nextAt).toISOString(), outcome, connectionId, ...ownedBindings, ...configurationBindings).run();
-  return { outcome, ran: true, nextSyncAt: new Date(nextAt).toISOString() };
+  return { outcome, ran: true, nextSyncAt: new Date(nextAt).toISOString(), failureStage };
 }

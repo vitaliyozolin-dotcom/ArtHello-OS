@@ -251,7 +251,8 @@ def report(complete=True):
         autosync=dict(state='observed', outcome='pending', generationMatchesSetup=True,
                       nextAtUtc='2026-09-09T09:30:00.000Z', leasedUntilUtc=None,
                       leaseState='released', failures=0, updatedAgeSeconds=120,
-                      httpStatus=200, httpStatusState='observed', updatedAtUtc='2026-09-09T08:58:00.000Z'),
+                      httpStatus=200, httpStatusState='observed', updatedAtUtc='2026-09-09T08:58:00.000Z',
+                      failureStage=None, failureStageState='missing'),
         statementLease=dict(state='not_observed', expiresAtUtc=None, leaseState='unknown'),
         retainedJobs=dict(state='observed', scopeMatch='unverified', providerStatus='not_stored',
                           total=4, invalidRows=0, exactWindowRows=0, olderEndRows=4,
@@ -486,7 +487,7 @@ else:
                 value = copy.deepcopy(D088_REPORT)
                 # Synthetic values exercise D091 transport; D088 did not observe these fields.
                 value['bankRuntime']['autosync'].update(httpStatus=status, httpStatusState=state,
-                                                       updatedAtUtc='2026-09-09T08:31:16.000Z')
+                                                       updatedAtUtc='2026-09-09T08:31:16.000Z', failureStage=None, failureStageState='missing')
                 result = self.run_launcher(value=value, probe_exit=2)
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertEqual(len(self.observations()), 2)
@@ -494,9 +495,36 @@ else:
                 self.assertIn('READONLY_FINISHED=', result.stdout)
                 observed = [json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')]
                 self.assertEqual(observed, [value])
-                for key in ('httpStatus', 'httpStatusState', 'updatedAtUtc'):
+                for key in ('httpStatus', 'httpStatusState', 'updatedAtUtc', 'failureStage', 'failureStageState'):
                     del observed[0]['bankRuntime']['autosync'][key]
                 self.assertEqual(observed[0], D088_REPORT)
+
+    def test_lexical_failure_stage_passes_only_the_fixed_enum_and_final_identity_check(self):
+        stages = ('setup_references', 'credential_read', 'statement_state_open', 'bank_sync',
+                  'statement_fence', 'sync_commit', 'statement_acknowledge', 'statement_release',
+                  'sync_callback', 'response_decode', 'response_result')
+        for stage, state in [(item, 'observed') for item in stages] + [(None, 'missing'), (None, 'invalid')]:
+            with self.subTest(stage=stage, state=state):
+                if self.log.exists():
+                    self.log.unlink()
+                value = report(False)
+                value['bankRuntime']['autosync'].update(outcome='error', failureStage=stage, failureStageState=state)
+                result = self.run_launcher(value=value, probe_exit=2)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(len(self.observations()), 2)
+                self.assertIn('READONLY_FINISHED=', result.stdout)
+                self.assertEqual([json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')], [value])
+
+    def test_failure_stage_schema_refuses_raw_error_data_and_inconsistent_observations(self):
+        cases = [('observed', stage, 'error') for stage in (None, True, 500, [], {}, 'PRIVATE-ERROR', 'bank_sync\nPRIVATE-ERROR')]
+        cases += [('missing', 'bank_sync', 'error'), ('invalid', 'bank_sync', 'error'),
+                  ('PRIVATE-STATE', None, 'error'), (None, None, 'error')]
+        cases += [('observed', 'bank_sync', outcome) for outcome in ('pending', 'complete', 'busy', 'running')]
+        for state, stage, outcome in cases:
+            with self.subTest(state=state, stage=stage, outcome=outcome):
+                value = report(False)
+                value['bankRuntime']['autosync'].update(outcome=outcome, failureStage=stage, failureStageState=state)
+                self.assert_blocked(self.run_launcher(value=value, probe_exit=2), 'invalid_probe_report')
 
     def test_unverified_source_never_runs_identity_scan_or_database_probe(self):
         result = self.run_launcher('initial-refusal')

@@ -10,7 +10,7 @@ function replace(source, before, after, label) {
 }
 export function patchTochkaAutosyncRoute(source) {
   if (source.includes(marker)) return source;
-  source = `import { isTochkaAutosyncRequest, runScheduledTochkaSync } from '../../../lib/tochka-autosync';\n// ${marker}\n` + source;
+  source = `import { isTochkaAutosyncRequest, runScheduledTochkaSync, runTochkaSyncStage, type TochkaSyncObserver } from '../../../lib/tochka-autosync';\n// ${marker}\n` + source;
   source = replace(source, 'export async function POST(request: Request) {', `export async function POST(request: Request) {
   const schedulerSecret = (env as unknown as { TOCHKA_AUTOSYNC_SECRET?: string }).TOCHKA_AUTOSYNC_SECRET;
   if (schedulerSecret && await isTochkaAutosyncRequest(request, schedulerSecret)) {
@@ -18,12 +18,12 @@ export function patchTochkaAutosyncRoute(source) {
       await ensureCoreTables();
       const setup = (await getIntegrationSetups())[tochkaConnectionId];
       const [connection] = await getDb().select().from(integrationConnections).where(eq(integrationConnections.id, tochkaConnectionId)).limit(1);
-      const result = await runScheduledTochkaSync({ db: env.DB, setup, connection, run: async () => {
+      const result = await runScheduledTochkaSync({ db: env.DB, setup, connection, run: async (observe) => {
         if (!setup) return privateJson({ error: 'Подключение не настроено' }, 409);
-        await validateIntegrationSetupReferences(setup);
-        const token = await readIntegrationCredential(setup.connectionId, setup.legalEntityId, setup.customerCode);
+        await runTochkaSyncStage('setup_references', () => validateIntegrationSetupReferences(setup), observe);
+        const token = await runTochkaSyncStage('credential_read', () => readIntegrationCredential(setup.connectionId, setup.legalEntityId, setup.customerCode), observe);
         if (!token) return privateJson({ error: 'Ключ отсутствует' }, 409);
-        return runTochkaStatementSync('SYSTEM:TOCHKA_READONLY_SCHEDULER', setup, 'Автоматическая загрузка по расписанию', token, true);
+        return runTochkaStatementSync('SYSTEM:TOCHKA_READONLY_SCHEDULER', setup, 'Автоматическая загрузка по расписанию', token, true, observe);
       } });
       return privateJson(result);
     } catch {
@@ -33,7 +33,25 @@ export function patchTochkaAutosyncRoute(source) {
   }`, 'service-only entry');
   source = replace(source,
     'async function runTochkaStatementSync(actor: string, setup: IntegrationSetup, trigger: string, token: string) {\n  const statementState = await openTochkaStatementState(setup);',
-    'async function runTochkaStatementSync(actor: string, setup: IntegrationSetup, trigger: string, token: string, automatic = false) {\n  const statementState = await openTochkaStatementState(setup, automatic);', 'automatic statement fence');
+    'async function runTochkaStatementSync(actor: string, setup: IntegrationSetup, trigger: string, token: string, automatic = false, observe?: TochkaSyncObserver) {\n  const statementState = await runTochkaSyncStage(\'statement_state_open\', () => openTochkaStatementState(setup, automatic), observe);', 'automatic statement fence');
+  const syncStart = source.indexOf('async function runTochkaStatementSync(');
+  const syncEnd = source.indexOf('\nasync function recordTochkaSync(', syncStart);
+  if (syncStart < 0 || syncEnd < syncStart) throw new Error('Tochka observation sync boundary missing');
+  let sync = source.slice(syncStart, syncEnd);
+  sync = replace(sync, '    const sync = await syncTochkaReadOnly({',
+    "    const sync = await runTochkaSyncStage('bank_sync', () => syncTochkaReadOnly({", 'observe bank sync');
+  sync = replace(sync, '    });\n    await statementState.assertCurrent();',
+    "    }), observe);\n    await runTochkaSyncStage('statement_fence', () => statementState.assertCurrent(), observe);", 'observe final fence');
+  sync = replace(sync, '    return await recordTochkaSync(actor, setup, trigger, sync, statementState);',
+    '    return await recordTochkaSync(actor, setup, trigger, sync, statementState, observe);', 'pass lexical observer');
+  sync = replace(sync, '    await statementState.release();',
+    "    await runTochkaSyncStage('statement_release', () => statementState.release(), observe);", 'observe release');
+  source = source.slice(0, syncStart) + sync + source.slice(syncEnd);
+  source = replace(source,
+    '  statementState: NonNullable<Awaited<ReturnType<typeof openTochkaStatementState>>>) {\n  const commit = await commitTochkaReadOnlySync(actor, setup, sync, trigger, statementState.fence);',
+    "  statementState: NonNullable<Awaited<ReturnType<typeof openTochkaStatementState>>>, observe?: TochkaSyncObserver) {\n  const commit = await runTochkaSyncStage('sync_commit', () => commitTochkaReadOnlySync(actor, setup, sync, trigger, statementState.fence), observe);", 'observe commit');
+  source = replace(source, '  if (sync.rejectedCount === 0) await statementState.complete(sync.statements);',
+    "  if (sync.rejectedCount === 0) await runTochkaSyncStage('statement_acknowledge', () => statementState.complete(sync.statements), observe);", 'observe acknowledgement');
   source = replace(source, '      complete: sync.complete,', '      complete: sync.complete,\n      rejectedCount: sync.rejectedCount,', 'expose rejected count for retry backoff');
   source = replace(source,
     '"Черновик распределения сохранён. Ключ не использовался; отдельную проверку счетов запускает собственник."',

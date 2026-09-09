@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { readFile } from 'node:fs/promises';
-import * as ts from 'typescript';
-import { isTochkaAutosyncRequest, canAutomaticallySyncTochka, nextTochkaAutomaticSlot, runScheduledTochkaSync } from '../lib/tochka-autosync.ts';
+import { stripTypeScriptTypes } from 'node:module';
+import { isTochkaAutosyncRequest, canAutomaticallySyncTochka, nextTochkaAutomaticSlot, runScheduledTochkaSync, runTochkaSyncStage } from '../lib/tochka-autosync.ts';
 import { acquireTochkaStatementState, TochkaStatementStateChanged } from '../lib/tochka-statement-state.ts';
 import { startTochkaAutosyncTimer } from '../production/tochka-autosync-timer.mjs';
 
@@ -188,13 +188,12 @@ async function loadRoute(stubs) {
   const marker = 'import { resolveTaskAssignment } from "../../../lib/task-access";';
   const body = source.slice(source.indexOf(marker) + marker.length);
   globalThis.__TOCHKA_AUTOSYNC_ROUTE_TEST__ = stubs;
-  const preamble = `const { env, isTochkaAutosyncRequest, runScheduledTochkaSync, ensureCoreTables,
+  const preamble = `const { env, isTochkaAutosyncRequest, runScheduledTochkaSync, runTochkaSyncStage, ensureCoreTables,
     getIntegrationSetups, getDb, validateIntegrationSetupReferences, readIntegrationCredential,
     openTochkaStatementState, syncTochkaReadOnly, commitTochkaReadOnlySync, TochkaStatementStateChanged,
     hasTrustedMutationOrigin, getAuthenticatedRequestContext } = globalThis.__TOCHKA_AUTOSYNC_ROUTE_TEST__;
     const eq=()=>({}), integrationConnections={id:{}};`;
-  const compiled = ts.transpileModule(preamble + '\n' + body, { compilerOptions: { module: ts.ModuleKind.ESNext,
-    target: ts.ScriptTarget.ES2022 } }).outputText;
+  const compiled = stripTypeScriptTypes(preamble + '\n' + body, { mode: 'transform' });
   return import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64') + '#' + crypto.randomUUID());
 }
 
@@ -204,7 +203,7 @@ test('real integration route service capability ignores supplied actions and nev
   f.sqlite.prepare('INSERT INTO system_runtime_state(state_key,state_value) VALUES(?,?)').run('synthetic-credential', '{}');
   const chain = { select() { return this; }, from() { return this; }, where() { return this; }, async limit() { return [f.connection]; } };
   const route = await loadRoute({
-    env: { DB: f.db, TOCHKA_AUTOSYNC_SECRET: secret }, isTochkaAutosyncRequest, runScheduledTochkaSync,
+    env: { DB: f.db, TOCHKA_AUTOSYNC_SECRET: secret }, isTochkaAutosyncRequest, runScheduledTochkaSync, runTochkaSyncStage,
     ensureCoreTables: async () => {}, getIntegrationSetups: async () => ({ 'INT-T-TOCHKA': f.setup }), getDb: () => chain,
     validateIntegrationSetupReferences: async () => { references++; }, readIntegrationCredential: async () => 'synthetic-private-key',
     openTochkaStatementState: (setup, automatic) => acquireTochkaStatementState(f.db, { ...setup, requireAutomatic: automatic,
@@ -232,4 +231,95 @@ test('real integration route rejects forged service key through normal session a
   const response = await route.POST(new Request('https://example.test/api/integration-actions', { method: 'POST',
     headers: { 'x-arthello-tochka-autosync': 'b'.repeat(64) } }));
   assert.equal(response.status, 401);
+});
+
+test('stage observation rethrows the identical error and retains successful values', async () => {
+  const original = new Error('synthetic-private-exception'); const observed = [];
+  await assert.rejects(runTochkaSyncStage('credential_read', async () => { throw original; }, stage => observed.push(stage)),
+    error => error === original);
+  assert.deepEqual(observed, ['credential_read']);
+  const result = {};
+  assert.equal(await runTochkaSyncStage('credential_read', async () => result, stage => observed.push(stage)), result);
+  assert.deepEqual(observed, ['credential_read']);
+});
+
+test('scheduler distinguishes callback, response decoding and result failures using fixed names only', async () => {
+  const cases = [
+    ['sync_callback', async () => { throw Object.assign(new Error('synthetic-private-exception'), { stage: 'credential_read', status: 418 }); }],
+    ['response_decode', async () => new Response('synthetic-private-invalid-json')],
+    ['response_result', async () => Response.json({ error: 'synthetic-private-provider-payload' }, { status: 422 })],
+    ['response_result', async () => Response.json({ test: { ok: true, rejectedCount: 1 } })],
+    ['sync_callback', async observe => { observe('synthetic-private-injected-stage'); throw new Error('private'); }],
+  ];
+  for (const [stage, run] of cases) {
+    const f = fixture();
+    try {
+      const result = await runScheduledTochkaSync({ ...f.input, run });
+      assert.equal(result.outcome, 'error'); assert.equal(result.failureStage, stage);
+      assert.equal(f.state().failureStage, stage); assert.equal(f.state().failures, 1);
+      assert.equal(f.state().nextAt, fixedNow + 900_000); assert.equal(f.state().leasedUntil, 0);
+      assert.doesNotMatch(JSON.stringify([result, f.state()]), /synthetic-private|provider-payload|418/);
+    } finally { f.sqlite.close(); }
+  }
+});
+
+async function observedRouteFixture({ fail = '', releaseFails = false, busy = false, pending = false } = {}) {
+  const f = fixture(); const calls = [];
+  const step = async (stage, value) => {
+    calls.push(stage);
+    if (stage === fail || (releaseFails && stage === 'statement_release')) throw new Error('synthetic-private-' + stage);
+    if (busy && stage === 'statement_fence') throw new TochkaStatementStateChanged();
+    return value;
+  };
+  const chain = { select() { return this; }, from() { return this; }, where() { return this; }, async limit() { return [f.connection]; } };
+  const state = { store: {}, fence: { key: 'synthetic-fence', owner: 'synthetic-owner', requireAutomatic: true },
+    assertCurrent: () => step('statement_fence'), release: () => step('statement_release'),
+    complete: () => step('statement_acknowledge') };
+  const route = await loadRoute({
+    env: { DB: f.db, TOCHKA_AUTOSYNC_SECRET: secret }, isTochkaAutosyncRequest, runTochkaSyncStage,
+    runScheduledTochkaSync: input => runScheduledTochkaSync({ ...input, now: f.input.now }),
+    ensureCoreTables: async () => {}, getIntegrationSetups: async () => ({ 'INT-T-TOCHKA': f.setup }), getDb: () => chain,
+    validateIntegrationSetupReferences: () => step('setup_references'), readIntegrationCredential: () => step('credential_read', 'synthetic-private-key'),
+    openTochkaStatementState: async (_setup, automatic) => { assert.equal(automatic, true); return step('statement_state_open', state); },
+    syncTochkaReadOnly: () => step('bank_sync', { valid: true, complete: !pending, accounts: [], statements: [], transactions: [], rejectedCount: 0, expiresAt: '', reason: 'synthetic' }),
+    commitTochkaReadOnlySync: async (actor, _setup, _sync, _trigger, fence) => {
+      assert.equal(actor, 'SYSTEM:TOCHKA_READONLY_SCHEDULER'); assert.equal(fence, state.fence);
+      return step('sync_commit', { committed: true, financialOperationCount: 0 });
+    }, TochkaStatementStateChanged, hasTrustedMutationOrigin: () => true,
+    getAuthenticatedRequestContext: async () => assert.fail('service must not impersonate an owner'),
+  });
+  const response = await route.POST(new Request('https://example.test/api/integration-actions', { method: 'POST',
+    headers: { 'x-arthello-tochka-autosync': secret, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'revokeCredential', connectionId: 'INT-T-TBANK', failureStage: 'arbitrary' }) }));
+  return { ...f, calls, response, result: await response.json() };
+}
+
+test('actual assembled route identifies each escaping sync stage without leaking exceptions or changing retry behavior', async () => {
+  for (const stage of ['setup_references', 'credential_read', 'statement_state_open', 'bank_sync', 'statement_fence',
+    'sync_commit', 'statement_acknowledge', 'statement_release']) {
+    const f = await observedRouteFixture({ fail: stage });
+    try {
+      assert.equal(f.response.status, 200); assert.equal(f.result.outcome, 'error'); assert.equal(f.result.failureStage, stage);
+      assert.equal(f.state().failureStage, stage); assert.equal(f.state().httpStatus, 500);
+      assert.equal(f.state().failures, 1); assert.equal(f.state().nextAt, fixedNow + 900_000);
+      assert.equal(f.state().leasedUntil, 0);
+      assert.equal(f.sqlite.prepare('SELECT status FROM integration_connections').get().status, 'Ошибка подключения');
+      assert.equal(f.calls.includes('statement_release'), !['setup_references', 'credential_read', 'statement_state_open'].includes(stage));
+      assert.doesNotMatch(JSON.stringify([f.result, f.state()]), /synthetic-private|ORG-1|300000092|arbitrary/);
+    } finally { f.sqlite.close(); }
+  }
+});
+
+test('actual route preserves release-error precedence and clears handled fence failures for busy results', async () => {
+  for (const options of [{ fail: 'sync_commit', releaseFails: true }, { busy: true }, { pending: true }, {}]) {
+    const f = await observedRouteFixture(options);
+    try {
+      const expected = options.releaseFails ? 'error' : options.busy ? 'busy' : options.pending ? 'pending' : 'complete';
+      assert.equal(f.result.outcome, expected);
+      assert.equal(f.result.failureStage, options.releaseFails ? 'statement_release' : null);
+      assert.equal(f.state().failureStage, f.result.failureStage);
+      assert.equal(f.state().failures, options.releaseFails ? 1 : 0);
+      assert.equal(f.calls.filter(stage => stage === 'statement_release').length, 1);
+    } finally { f.sqlite.close(); }
+  }
 });

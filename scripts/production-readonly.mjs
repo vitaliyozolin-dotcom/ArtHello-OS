@@ -221,7 +221,8 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
     connection: { state: 'not_observed', status: 'not_observed', enabled: null, nextSyncAtUtc: null },
     autosync: { state: 'not_observed', outcome: 'not_observed', generationMatchesSetup: null,
       nextAtUtc: null, leasedUntilUtc: null, leaseState: 'unknown', failures: null, updatedAgeSeconds: null,
-      httpStatus: null, httpStatusState: 'missing', updatedAtUtc: null },
+      httpStatus: null, httpStatusState: 'missing', updatedAtUtc: null,
+      failureStage: null, failureStageState: 'missing' },
     statementLease: { state: 'not_observed', expiresAtUtc: null, leaseState: 'unknown' },
     retainedJobs: { state: 'not_observed', scopeMatch: 'unverified', providerStatus: 'not_stored',
       total: null, invalidRows: null, exactWindowRows: null, olderEndRows: null, otherWindowRows: null, oldestAgeSeconds: null },
@@ -281,6 +282,19 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
  WHEN json_type(value,'$.httpStatus') IS NULL OR json_type(value,'$.httpStatus')='null' THEN 'missing'
  WHEN json_type(value,'$.httpStatus')='integer' AND json_extract(value,'$.httpStatus') BETWEEN 100 AND 599 THEN 'observed'
  ELSE 'invalid' END AS http_status_state,
+ CASE WHEN json_extract(value,'$.outcome')='error' THEN CASE json_extract(value,'$.failureStage')
+ WHEN 'setup_references' THEN 'setup_references' WHEN 'credential_read' THEN 'credential_read'
+ WHEN 'statement_state_open' THEN 'statement_state_open' WHEN 'bank_sync' THEN 'bank_sync'
+ WHEN 'statement_fence' THEN 'statement_fence' WHEN 'sync_commit' THEN 'sync_commit'
+ WHEN 'statement_acknowledge' THEN 'statement_acknowledge' WHEN 'statement_release' THEN 'statement_release'
+ WHEN 'sync_callback' THEN 'sync_callback' WHEN 'response_decode' THEN 'response_decode'
+ WHEN 'response_result' THEN 'response_result' END END AS failure_stage,
+ CASE WHEN valid_json<>1 THEN 'invalid'
+ WHEN json_type(value,'$.failureStage') IS NULL OR json_type(value,'$.failureStage')='null' THEN 'missing'
+ WHEN json_extract(value,'$.outcome')='error' AND json_type(value,'$.failureStage')='text'
+ AND json_extract(value,'$.failureStage') IN ('setup_references','credential_read','statement_state_open','bank_sync',
+ 'statement_fence','sync_commit','statement_acknowledge','statement_release','sync_callback','response_decode','response_result')
+ THEN 'observed' ELSE 'invalid' END AS failure_stage_state,
  CASE WHEN ${uuidSql("json_extract(value,'$.generation')")}
  THEN (SELECT CASE WHEN json_valid(s.state_value) THEN CASE
  WHEN ${uuidSql("json_extract(s.state_value,'$.credentialGeneration')")}
@@ -299,6 +313,9 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
     out.httpStatus = row.http_status;
     out.httpStatusState = row.http_status_state;
     out.updatedAtUtc = row.updated_at_utc;
+    // Fixed local operation names only; none establishes an upstream provider failure.
+    out.failureStage = row.failure_stage;
+    out.failureStageState = row.failure_stage_state;
     out.generationMatchesSetup = row.generation_matches === null ? null : row.generation_matches === 1;
     out.state = row.valid_json === 1 && row.valid_version === 1 && out.outcome !== 'unknown'
       && out.nextAtUtc !== null && out.leaseState !== 'unknown' && out.failures !== null
