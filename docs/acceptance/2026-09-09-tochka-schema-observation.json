@@ -1,0 +1,277 @@
+{
+  "bankCommitSchema": {
+    "state": "observed",
+    "tables": {
+      "audit_events": {
+        "foreignKeyRows": 0,
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "not_required",
+        "state": "observed",
+        "triggerRows": 0,
+        "unexpectedRequiredColumns": 0,
+        "uniqueIndexCount": 0
+      },
+      "bank_accounts": {
+        "foreignKeyRows": 0,
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "matched",
+        "state": "observed",
+        "triggerRows": 0,
+        "unexpectedRequiredColumns": 0,
+        "uniqueIndexCount": 2
+      },
+      "bank_statement_imports": {
+        "foreignKeyRows": 0,
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "matched",
+        "state": "observed",
+        "triggerRows": 0,
+        "unexpectedRequiredColumns": 0,
+        "uniqueIndexCount": 2
+      },
+      "bank_transactions": {
+        "foreignKeyRows": 0,
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "matched",
+        "state": "observed",
+        "triggerRows": 0,
+        "unexpectedRequiredColumns": 0,
+        "uniqueIndexCount": 2
+      },
+      "financial_operations": {
+        "foreignKeyRows": 0,
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "not_required",
+        "state": "observed",
+        "triggerRows": 0,
+        "unexpectedRequiredColumns": 0,
+        "uniqueIndexCount": 1
+      },
+      "integration_log_entries": {
+        "foreignKeyRows": 0,
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "not_required",
+        "state": "observed",
+        "triggerRows": 0,
+        "unexpectedRequiredColumns": 0,
+        "uniqueIndexCount": 0
+      },
+      "integration_sync_runs": {
+        "foreignKeyRows": 0,
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "not_required",
+        "state": "observed",
+        "triggerRows": 0,
+        "unexpectedRequiredColumns": 0,
+        "uniqueIndexCount": 2
+      }
+    }
+  },
+  "bankRuntime": {
+    "autosync": {
+      "failureStage": "sync_commit",
+      "failureStageState": "observed",
+      "failures": 6,
+      "generationMatchesSetup": true,
+      "httpStatus": 500,
+      "httpStatusState": "observed",
+      "leaseState": "released",
+      "leasedUntilUtc": null,
+      "nextAtUtc": "2026-09-09T22:01:53.357Z",
+      "outcome": "error",
+      "state": "observed",
+      "updatedAgeSeconds": 5292,
+      "updatedAtUtc": "2026-09-09T16:01:53.000Z"
+    },
+    "connection": {
+      "enabled": true,
+      "nextSyncAtUtc": "2026-09-09T22:01:53.357Z",
+      "state": "observed",
+      "status": "connection_error"
+    },
+    "latestRun": {
+      "finishedAtUtc": "2026-09-09T08:11:14.266Z",
+      "startedAtUtc": "2026-09-09T08:11:14.266Z",
+      "state": "observed"
+    },
+    "observedAtUtc": "2026-09-09T17:30:05.531Z",
+    "retainedJobs": {
+      "exactWindowRows": 4,
+      "invalidRows": 0,
+      "olderEndRows": 0,
+      "oldestAgeSeconds": 33543,
+      "otherWindowRows": 0,
+      "providerStatus": "not_stored",
+      "scopeMatch": "unverified",
+      "state": "observed",
+      "total": 4
+    },
+    "setup": {
+      "startDate": "2026-09-01",
+      "state": "observed",
+      "syncIntervalMinutes": 60,
+      "syncMinute": 5
+    },
+    "state": "observed",
+    "statementImports": {
+      "failedRows": 0,
+      "pendingRows": 0,
+      "readyRows": 12,
+      "state": "observed",
+      "unknownRows": 0
+    },
+    "statementLease": {
+      "expiresAtUtc": null,
+      "leaseState": "unknown",
+      "state": "not_observed"
+    }
+  },
+  "bankWindow": {
+    "activity": "not_observed",
+    "checksComplete": false,
+    "coverage": {
+      "accountRows": 4,
+      "accountsWithContainingStatementInLatestRun": 0,
+      "accountsWithMatchingTransactionCount": 1,
+      "accountsWithStatement": 4,
+      "coveredInLatestRun": 0,
+      "distinctAccountKeys": 4,
+      "invalidAccountKeys": 0,
+      "legalEntities": 1
+    },
+    "duplicates": {
+      "excessRows": 0,
+      "groups": 0,
+      "missingIdentityRows": 0
+    },
+    "period": {
+      "endDate": "2026-09-09",
+      "startDate": "2026-09-01"
+    },
+    "state": "observed",
+    "sync": {
+      "conflictRows": 0,
+      "errorRows": 0,
+      "freshness": "not_requested",
+      "rejectedRows": 0,
+      "state": "pending"
+    },
+    "transactions": {
+      "danglingLinks": 0,
+      "eligibleMissingLinks": 0,
+      "eligibleRows": 0,
+      "expenseRows": 0,
+      "incomeRows": 0,
+      "pendingOrNonRub": 0,
+      "rows": 0,
+      "unexpectedAccountRows": 0
+    }
+  },
+  "checks": {
+    "accessSystems": {
+      "state": "observed",
+      "violations": 0
+    },
+    "accessUsers": {
+      "state": "observed",
+      "violations": 0
+    },
+    "bankLinks": {
+      "state": "observed",
+      "violations": 0
+    },
+    "branchTargets": {
+      "state": "observed",
+      "violations": 0
+    },
+    "branchUsers": {
+      "state": "observed",
+      "violations": 0
+    },
+    "feedbackAuthors": {
+      "state": "observed",
+      "violations": 0
+    },
+    "feedbackEvents": {
+      "state": "observed",
+      "violations": 0
+    },
+    "importConnections": {
+      "state": "observed",
+      "violations": 0
+    }
+  },
+  "liveAcceptance": "not_run",
+  "observedAtUtc": "2026-09-09T17:30:05.531Z",
+  "productionMutations": false,
+  "schemaVersion": 1,
+  "status": "incomplete_or_issues",
+  "tables": {
+    "alfacrm_family_merge_candidates": {
+      "state": "not_installed"
+    },
+    "alfacrm_finance_snapshots": {
+      "state": "not_installed"
+    },
+    "app_systems": {
+      "rows": 2,
+      "state": "observed"
+    },
+    "app_users": {
+      "rows": 7,
+      "state": "observed"
+    },
+    "bank_accounts": {
+      "rows": 4,
+      "state": "observed"
+    },
+    "bank_statement_imports": {
+      "rows": 12,
+      "state": "observed"
+    },
+    "bank_transactions": {
+      "rows": 0,
+      "state": "observed"
+    },
+    "developer_feedback": {
+      "rows": 1,
+      "state": "observed"
+    },
+    "developer_feedback_events": {
+      "rows": 1,
+      "state": "observed"
+    },
+    "financial_operations": {
+      "rows": 0,
+      "state": "observed"
+    },
+    "integration_connections": {
+      "rows": 19,
+      "state": "observed"
+    },
+    "integration_sync_runs": {
+      "rows": 7,
+      "state": "observed"
+    },
+    "organization_branches": {
+      "rows": 5,
+      "state": "observed"
+    },
+    "user_branch_access": {
+      "rows": 2,
+      "state": "observed"
+    },
+    "user_system_access": {
+      "rows": 14,
+      "state": "observed"
+    }
+  }
+}
+

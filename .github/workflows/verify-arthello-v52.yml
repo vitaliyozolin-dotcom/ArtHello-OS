@@ -271,6 +271,10 @@ jobs:
             raise "standalone negated grep is not fail-closed" if verify_source.lines.any? { |line| line.match?(/^\s*!\s+grep\b/) }
           ' .github/workflows/verify-arthello-v52.yml
 
+          # Retired D059 YAML is a comparison input, never an active workflow.
+          policy_fixture="$(mktemp -d "$RUNNER_TEMP/arthello-v52-policy.XXXXXXXX")"
+          trap 'rm -rf -- "$policy_fixture"' EXIT
+          git show f5fa3e46e3510e6fc98ae4455f4b499c0ba30695:.github/workflows/deploy-arthello-direct-38-55.yml > "$policy_fixture/direct.yml"
           ruby -ryaml -e '
             document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
             triggers = document["on"] || document[true]
@@ -514,55 +518,14 @@ jobs:
             ].each do |required|
               raise "required runtime environment policy missing: #{required}" unless source.include?(required)
             end
-          ' .github/workflows/deploy-arthello-direct-38-55.yml
+          ' "$policy_fixture/direct.yml"
           printf 'ARTHELLO_V52_SOURCE_SHA=%s\n' "$EXPECTED_SHA"
 
       - name: Verify D063 recovery release boundary
         run: |
           set -Eeuo pipefail
-          ruby .github/scripts/check-recovery-release-contract.rb
-          python3 -I .github/scripts/test-d063-release-gates.py
-          ruby .github/scripts/check-recovery-r2-contract.rb
-          ruby .github/scripts/check-recovery-r3-contract.rb
-          ruby .github/scripts/check-recovery-r4-contract.rb
-          ruby .github/scripts/check-recovery-r5-contract.rb
-          ruby .github/scripts/check-recovery-r6-contract.rb
-          ruby .github/scripts/check-recovery-r7-contract.rb
-          ruby .github/scripts/check-recovery-r8-contract.rb
-          python3 -I .github/scripts/test-d078-replay-guard.py
-          python3 -I .github/scripts/test-r8-live-browser-acceptance.py
-          bash -n .github/scripts/run-r8-live-browser.sh
-          ruby .github/scripts/check-recovery-r9-contract.rb
-          python3 -I .github/scripts/test-d080-replay-guard.py
-          python3 -I .github/scripts/test-r9-live-browser-acceptance.py
-          bash -n .github/scripts/run-r9-live-browser.sh
-          python3 -I .github/scripts/test-d080-baseline-evidence.py
-          python3 -I .github/scripts/test-d080-resume-candidate.py
-          python3 -I .github/scripts/test-d080-public-audit.py
-          python3 -I .github/scripts/test-d080-controller-boundary.py
-          bash -n .github/scripts/run-d080-hosted-caddy.sh
-          bash -n .github/scripts/run-d080-target-caddy.sh
-          python3 -I .github/scripts/test-recovery-r7-gates.py
-          python3 -I .github/scripts/test-r7-backup-runtime.py
-          python3 -I -B deploy/v52/backup/test_worker.py
-          python3 -I .github/scripts/test-recovery-r6-gates.py
-          python3 -I .github/scripts/test-installed-school-relay-r6.py
-          python3 -I .github/scripts/test-recovery-r2-gates.py
-          python3 -I .github/scripts/test-recovery-r3-gates.py
-          python3 -I .github/scripts/test-recovery-r4-gates.py
-          python3 -I .github/scripts/test-recovery-r5-gates.py
-          python3 -I .github/scripts/test-school-shared-lock-d066.py
-          python3 -I .github/scripts/test-recovery-r4-bootstrap.py
-          node --test scripts/test/school-sso-relay.test.mjs
-          python3 -I scripts/test/school-sso-repair.test.py
-          node --test scripts/test/school-sso-relay-r3.test.mjs
-          python3 -I scripts/test/school-sso-repair-r3.test.py
-          bash scripts/test/school-sso-relay-docker-smoke.sh
-          bash scripts/test/school-sso-relay-r3-docker-smoke.sh
-          node --test scripts/test/school-sso-relay-r5.test.mjs
-          python3 -I scripts/test/school-sso-repair-r5.test.py
-          bash scripts/test/school-sso-relay-r5-docker-smoke.sh
-          bash scripts/test/school-sso-fingerprint-r5-docker-smoke.sh
+          python3 -I scripts/test/frozen-release-fixture.test.py
+          python3 -I scripts/run-frozen-release-contract.py v52
 
       - name: Validate release files without exposing data
         run: |
@@ -874,7 +837,7 @@ jobs:
             --mount "type=bind,src=$PWD/deploy/v52/backup/test_activation_volume.py,dst=/opt/arthello-backup/test_activation_volume.py,readonly" \
             --entrypoint='python3' "$IMMUTABLE_IMAGE_ID" -I -B /opt/arthello-backup/test_activation_volume.py -v
           PYTHONDONTWRITEBYTECODE=1 bash scripts/test/arthello-backup-container-docker-smoke.sh "$IMMUTABLE_IMAGE_ID"
-          PYTHONDONTWRITEBYTECODE=1 bash scripts/test/arthello-backup-runtime-docker-smoke.sh "$IMMUTABLE_IMAGE_ID"
+          python3 -I scripts/run-frozen-release-contract.py v52-backup-runtime
 
       - name: Build immutable verification evidence
         env:
@@ -945,6 +908,7 @@ jobs:
       - name: Run repository maintenance tests after immutable upload
         run: |
           set -Eeuo pipefail
+          node --test scripts/test/tochka-account-identity.test.mjs
           python3 -m py_compile deploy/v52/maintenance/production-data-inventory.py
           python3 deploy/v52/maintenance/test_production_data_inventory.py
           test "$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)" = \

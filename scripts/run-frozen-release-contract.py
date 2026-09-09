@@ -16,6 +16,8 @@ import tempfile
 
 BASELINE = "f5fa3e46e3510e6fc98ae4455f4b499c0ba30695"
 COMMANDS = {
+    "v52-backup-runtime": 'PYTHONDONTWRITEBYTECODE=1 bash scripts/test/arthello-backup-runtime-docker-smoke.sh "$IMMUTABLE_IMAGE_ID"\n',
+    "v52": "ruby .github/scripts/check-recovery-release-contract.rb\npython3 -I .github/scripts/test-d063-release-gates.py\nruby .github/scripts/check-recovery-r2-contract.rb\nruby .github/scripts/check-recovery-r3-contract.rb\nruby .github/scripts/check-recovery-r4-contract.rb\nruby .github/scripts/check-recovery-r5-contract.rb\nruby .github/scripts/check-recovery-r6-contract.rb\nruby .github/scripts/check-recovery-r7-contract.rb\nruby .github/scripts/check-recovery-r8-contract.rb\npython3 -I .github/scripts/test-d078-replay-guard.py\npython3 -I .github/scripts/test-r8-live-browser-acceptance.py\nbash -n .github/scripts/run-r8-live-browser.sh\nruby .github/scripts/check-recovery-r9-contract.rb\npython3 -I .github/scripts/test-d080-replay-guard.py\npython3 -I .github/scripts/test-r9-live-browser-acceptance.py\nbash -n .github/scripts/run-r9-live-browser.sh\npython3 -I .github/scripts/test-d080-baseline-evidence.py\npython3 -I .github/scripts/test-d080-resume-candidate.py\npython3 -I .github/scripts/test-d080-public-audit.py\npython3 -I .github/scripts/test-d080-controller-boundary.py\nbash -n .github/scripts/run-d080-hosted-caddy.sh\nbash -n .github/scripts/run-d080-target-caddy.sh\npython3 -I .github/scripts/test-recovery-r7-gates.py\npython3 -I .github/scripts/test-r7-backup-runtime.py\npython3 -I -B deploy/v52/backup/test_worker.py\npython3 -I .github/scripts/test-recovery-r6-gates.py\npython3 -I .github/scripts/test-installed-school-relay-r6.py\npython3 -I .github/scripts/test-recovery-r2-gates.py\npython3 -I .github/scripts/test-recovery-r3-gates.py\npython3 -I .github/scripts/test-recovery-r4-gates.py\npython3 -I .github/scripts/test-recovery-r5-gates.py\npython3 -I .github/scripts/test-school-shared-lock-d066.py\npython3 -I .github/scripts/test-recovery-r4-bootstrap.py\nnode --test scripts/test/school-sso-relay.test.mjs\npython3 -I scripts/test/school-sso-repair.test.py\nnode --test scripts/test/school-sso-relay-r3.test.mjs\npython3 -I scripts/test/school-sso-repair-r3.test.py\nbash scripts/test/school-sso-relay-docker-smoke.sh\nbash scripts/test/school-sso-relay-r3-docker-smoke.sh\nnode --test scripts/test/school-sso-relay-r5.test.mjs\npython3 -I scripts/test/school-sso-repair-r5.test.py\nbash scripts/test/school-sso-relay-r5-docker-smoke.sh\nbash scripts/test/school-sso-fingerprint-r5-docker-smoke.sh\n\n",
     "r10": "ruby deploy/v52/recovery-r10/check-contract.rb\npython3 -I .github/scripts/test-d083-replay-guard.py\npython3 -I .github/scripts/test-d083-candidate-state.py\npython3 -I .github/scripts/test-d083-resume-candidate.py\npython3 -I .github/scripts/test-d083-public-audit.py\npython3 -I .github/scripts/test-d083-controller-boundary.py\npython3 -I .github/scripts/test-r10-live-browser-acceptance.py\npython3 -I .github/scripts/test-d083-maintenance-route.py\nnode --test scripts/test/retire-r9-browser.test.mjs\nbash -n .github/scripts/run-r10-live-browser.sh\nbash -n .github/scripts/run-d083-hosted-caddy.sh\nbash -n .github/scripts/run-d083-target-caddy.sh\nbash .github/scripts/run-d083-hosted-caddy.sh\n",
     "r11": "ruby deploy/v52/recovery-r11/check-contract.rb\npython3 -I .github/scripts/test-r11-replay-guard.py\nnode --test .github/scripts/test-r11-target-caddy.test.mjs\nbash -n .github/scripts/run-r11-target-caddy.sh\n",
     "r13": "ruby deploy/v52/recovery-r13/check-contract.rb\npython3 -I -B .github/scripts/test-r13-contract.py\npython3 -I -B .github/scripts/test-r13-history-gate.py\npython3 -I -B .github/scripts/test-r13-backup-adoption.py\npython3 -I -B .github/scripts/test-r13-backup-controller.py\npython3 -I -B .github/scripts/test-r13-continuation-adapters.py\npython3 -I -B .github/scripts/test-r13-live-baseline.py\npython3 -I -B .github/scripts/test-run-r13-live-browser.py\nnode --test scripts/test/retire-r12-browser.test.mjs\nnode --check deploy/browser/retire-r12-browser.mjs\n"
@@ -75,8 +77,17 @@ def main():
     with tempfile.TemporaryDirectory(prefix="arthello-frozen-contract-") as directory:
         head = prepare_fixture(root, directory)
         print(f"FROZEN_CONTRACT current_code={head} workflow_inputs={BASELINE} suite={args.contract}", flush=True)
+        environment = dict(os.environ)
+        if args.contract == "v52-backup-runtime":
+            # This unchanged smoke reads HEAD and HEAD^{tree} to bind its image.
+            # Use the actual checked repository's objects with the owned fixture
+            # as work tree; never create a synthetic commit or replace HEAD.
+            if git(root, "rev-parse", "HEAD").decode().strip() != head:
+                raise ValueError("checked source moved before backup smoke")
+            environment["GIT_DIR"] = git(root, "rev-parse", "--absolute-git-dir").decode().strip()
+            environment["GIT_WORK_TREE"] = directory
         result = subprocess.run(["bash", "-e", "-u", "-o", "pipefail", "-c", COMMANDS[args.contract]],
-                                cwd=directory, timeout=720)
+                                cwd=directory, env=environment, timeout=720)
         return result.returncode
 
 if __name__ == "__main__":

@@ -25,13 +25,44 @@ const failureStages = ['setup_references', 'credential_read', 'statement_state_o
   'statement_fence', 'sync_commit', 'statement_acknowledge', 'statement_release',
   'sync_callback', 'response_decode', 'response_result'] as const;
 type TochkaSyncFailureStage = typeof failureStages[number];
-export type TochkaSyncObserver = (stage: TochkaSyncFailureStage) => void;
+export type TochkaSyncObserver = (stage: TochkaSyncFailureStage, error?: unknown) => void;
 
-// Observe only lexical operation names; preserve the original exception and bank behavior.
+// Pass the failing operation and local error to the observer; rethrow the same error.
+// The scheduler retains fixed stage/reason enums only, never exception text.
 export async function runTochkaSyncStage<T>(stage: TochkaSyncFailureStage,
   operation: () => Promise<T>, observe?: TochkaSyncObserver): Promise<T> {
   try { return await operation(); }
-  catch (error) { observe?.(stage); throw error; }
+  catch (error) { observe?.(stage, error); throw error; }
+}
+
+// Inspect only bounded local database exceptions; never retain their messages.
+export function classifyTochkaCommitError(error: unknown) {
+  const patterns = [
+    ['provider_identity', /UNIQUE constraint failed: bank_transactions\.connection_id, bank_transactions\.provider_transaction_id(?:$|:)/],
+    ['transaction_identity', /UNIQUE constraint failed: bank_transactions\.id(?:$|:)/],
+    ['unique_constraint', /UNIQUE constraint failed/],
+    ['required_value', /NOT NULL constraint failed/],
+    ['foreign_key', /FOREIGN KEY constraint failed/],
+    ['check_constraint', /CHECK constraint failed/],
+    ['schema', /no such (?:table|column)|has no column named/],
+    ['binding_type', /D1_TYPE_ERROR/],
+    ['query_limit', /too many SQL variables|too many columns|SQLITE_TOOBIG/],
+    ['database_busy', /database is (?:locked|busy)|SQLITE_BUSY|SQLITE_LOCKED/],
+    ['storage_full', /database or disk is full|SQLITE_FULL/],
+    ['database_readonly', /attempt to write a readonly database|SQLITE_READONLY/],
+    ['storage_error', /SQLITE_CORRUPT|SQLITE_NOTADB|SQLITE_IOERR/],
+  ] as const;
+  try {
+    let current = error;
+    for (let depth = 0; depth < 3 && current instanceof Error; depth++) {
+      const message = current.message;
+      if (typeof message === 'string' && message.length <= 4096) {
+        for (const [kind, pattern] of patterns) if (pattern.test(message)) return kind;
+      }
+      current = current.cause;
+    }
+  } catch { /* Unknown exception shapes yield the same fixed fallback. */ }
+  return 'other' as const;
 }
 
 export async function isTochkaAutosyncRequest(request: Request, secret: unknown) {
@@ -111,9 +142,11 @@ export async function runScheduledTochkaSync(input: {
   let outcome: Outcome = 'error';
   let httpStatus = 500;
   let failureStage: TochkaSyncFailureStage | null = null;
+  let commitFailureKind: ReturnType<typeof classifyTochkaCommitError> | null = null;
   let fallbackStage: TochkaSyncFailureStage = 'sync_callback';
-  const observe: TochkaSyncObserver = stage => {
+  const observe: TochkaSyncObserver = (stage, error) => {
     failureStage = failureStages.includes(stage) ? stage : 'sync_callback';
+    commitFailureKind = stage === 'sync_commit' ? classifyTochkaCommitError(error) : null;
   };
   try {
     const response = await input.run(observe);
@@ -139,7 +172,8 @@ export async function runScheduledTochkaSync(input: {
   const nextAt = outcome === 'complete' ? nextTochkaAutomaticSlot(finishedAt, setup.syncIntervalMinutes, setup.syncMinute)
     : finishedAt + (outcome === 'pending' ? 5 * 60_000 : outcome === 'busy' ? 60_000
       : Math.min(6 * 60 * 60_000, 15 * 60_000 * 2 ** Math.min(failures - 1, 5)));
-  const completed = { ...next, leasedUntil: 0, nextAt, failures, outcome, httpStatus, failureStage };
+  const completed = { ...next, leasedUntil: 0, nextAt, failures, outcome, httpStatus, failureStage,
+    commitFailureKind: outcome === 'error' && failureStage === 'sync_commit' ? commitFailureKind : null };
   const ownedGuard = `EXISTS (SELECT 1 FROM system_runtime_state WHERE state_key=?
     AND json_extract(state_value,'$.owner')=? AND json_extract(state_value,'$.generation')=?)`;
   const ownedBindings = [stateKey, next.owner, setup.credentialGeneration];
