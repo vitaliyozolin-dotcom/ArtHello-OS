@@ -2,9 +2,30 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { humanFormulaLabel, humanPeriodLabel, humanReferenceLabel, humanSourceList, humanTechnicalText, humanVersionLabel, recordLabel, recordNumber, recordSequence, taskRecordLabel } from "../lib/record-labels.ts";
 
+test("task labels show at least four digits for task IDs and legacy references", () => {
+  for (const [id, expected] of [
+    [1, "Задача №0001"],
+    [9, "Задача №0009"],
+    [10, "Задача №0010"],
+    [42, "Задача №0042"],
+    [801, "Задача №0801"],
+    [999, "Задача №0999"],
+    [1000, "Задача №1000"],
+    [9999, "Задача №9999"],
+    ["TSK-0042", "Задача №0042"],
+    ["TASK-801", "Задача №0801"],
+  ]) {
+    assert.equal(taskRecordLabel(id), expected);
+  }
+});
+
+test("linked task references keep the same padded label in readable text", () => {
+  assert.equal(humanReferenceLabel("TSK-0042"), "Задача №0042");
+  assert.equal(humanReferenceLabel("TASK-801"), "Задача №0801");
+  assert.equal(humanTechnicalText("Создана TSK-0042"), "Создана Задача №0042");
+});
+
 test("operational records receive stable human labels without exposing storage keys", () => {
-  assert.equal(taskRecordLabel(1), "Задача №1");
-  assert.equal(taskRecordLabel("TSK-0042"), "Задача №42");
   assert.equal(recordLabel("Договор", "DOG-T-2026-044"), "Договор №0044");
   assert.equal(recordNumber("SAFE-031/26"), "№0031");
   assert.equal(recordNumber("FOOD-0821"), "№0821");
