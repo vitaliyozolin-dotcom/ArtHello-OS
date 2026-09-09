@@ -1,3 +1,5 @@
+import { formatRubles } from "@workspace/shared/money";
+import { apiFetch } from "@workspace/api-client-react";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -47,7 +49,7 @@ interface MonthClosingRecord {
 
 function fmt(n: number | string) {
   const num = typeof n === "string" ? parseFloat(n) : n;
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(num);
+  return formatRubles(num);
 }
 
 function monthLabel(m: string) {
@@ -100,18 +102,18 @@ export default function MonthClosingPage() {
 
   const { data: status, isLoading } = useQuery<MonthStatus>({
     queryKey: ["month-status", month],
-    queryFn: () => fetch(`/api/months/${month}/status`).then((r) => r.json()),
+    queryFn: () => apiFetch(`/api/months/${month}/status`).then((r) => r.json()),
     refetchInterval: 10000,
   });
 
   const { data: allClosings = [] } = useQuery<MonthClosingRecord[]>({
     queryKey: ["month-closings"],
-    queryFn: () => fetch("/api/months").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/months").then((r) => r.json()),
   });
 
   const closeMutation = useMutation({
     mutationFn: () =>
-      fetch(`/api/months/${month}/close`, {
+      apiFetch(`/api/months/${month}/close`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ closedBy: "owner", notes: closeNotes }),
@@ -126,7 +128,7 @@ export default function MonthClosingPage() {
 
   const reopenMutation = useMutation({
     mutationFn: () =>
-      fetch(`/api/months/${month}/reopen`, {
+      apiFetch(`/api/months/${month}/reopen`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reopenedBy: "owner" }),

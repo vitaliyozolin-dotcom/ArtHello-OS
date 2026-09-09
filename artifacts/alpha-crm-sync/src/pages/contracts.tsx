@@ -1,3 +1,5 @@
+import { apiFetch } from "@workspace/api-client-react";
+import { formatRubleNumber } from "@workspace/shared/money";
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FileSignature, Plus, Search, X, ChevronDown, CheckCircle2, Clock, AlertTriangle, XCircle, Calendar, TrendingUp } from 'lucide-react';
@@ -31,7 +33,7 @@ const STATUS_META: Record<string, { label: string; Icon: React.FC<{ className?: 
 
 function fmt(n: string | null | undefined) {
   if (!n) return '—';
-  return new Intl.NumberFormat('ru-RU').format(parseFloat(n)) + ' ₽';
+  return formatRubleNumber(parseFloat(n)) + ' ₽';
 }
 function fmtDate(s: string | null | undefined) {
   if (!s) return '—';
@@ -83,7 +85,7 @@ export default function ContractsPage() {
 
   const { data: stats } = useQuery<Stats>({
     queryKey: ['contracts-stats'],
-    queryFn: () => fetch(`${BASE}/contracts/stats`).then(r => r.json()),
+    queryFn: () => apiFetch(`${BASE}/contracts/stats`).then(r => r.json()),
   });
 
   const { data: contracts = [], isLoading } = useQuery<Contract[]>({
@@ -93,18 +95,18 @@ export default function ContractsPage() {
       if (typeFilter)   p.set('type',   typeFilter);
       if (statusFilter) p.set('status', statusFilter);
       if (search)       p.set('search', search);
-      return fetch(`${BASE}/contracts?${p}`).then(r => r.json());
+      return apiFetch(`${BASE}/contracts?${p}`).then(r => r.json());
     },
   });
 
   const create = useMutation({
     mutationFn: (body: typeof EMPTY_FORM) =>
-      fetch(`${BASE}/contracts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()),
+      apiFetch(`${BASE}/contracts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['contracts'] }); qc.invalidateQueries({ queryKey: ['contracts-stats'] }); setShowDialog(false); setForm(EMPTY_FORM); },
   });
 
   const del = useMutation({
-    mutationFn: (id: string) => fetch(`${BASE}/contracts/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => apiFetch(`${BASE}/contracts/${id}`, { method: 'DELETE' }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['contracts'] }); qc.invalidateQueries({ queryKey: ['contracts-stats'] }); },
   });
 

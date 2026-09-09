@@ -85,7 +85,7 @@ jobs:
       - name: Diagnose rejected R9 route without changing gateway
         if: >-
           github.event_name == 'workflow_run' &&
-          startsWith(github.event.workflow_run.head_commit.message, 'D082: read-only route diagnostic')
+          startsWith(github.event.workflow_run.head_commit.message, 'D083: read-only route diagnostic')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -155,4 +155,3 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$result"
-

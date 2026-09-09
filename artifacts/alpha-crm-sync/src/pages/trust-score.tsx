@@ -1,3 +1,5 @@
+import { formatRubles } from "@workspace/shared/money";
+import { apiFetch } from "@workspace/api-client-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -33,7 +35,7 @@ interface IssuesData { month: string | null; total: number; issues: Issue[] }
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(n);
+  return formatRubles(n);
 }
 
 function monthLabel(m: string) {
@@ -103,12 +105,12 @@ export default function TrustScorePage() {
 
   const { data: monthly = [], isLoading: monthlyLoading } = useQuery<MonthScore[]>({
     queryKey: ["trust-monthly"],
-    queryFn: () => fetch("/api/trust-score/monthly?months=12").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/trust-score/monthly?months=12").then((r) => r.json()),
   });
 
   const { data: issuesData, isLoading: issuesLoading } = useQuery<IssuesData>({
     queryKey: ["trust-issues", selectedMonth],
-    queryFn: () => fetch(`/api/trust-score/issues?month=${selectedMonth}`).then((r) => r.json()),
+    queryFn: () => apiFetch(`/api/trust-score/issues?month=${selectedMonth}`).then((r) => r.json()),
   });
 
   const currentMonth = monthly.find((m) => m.month === selectedMonth);

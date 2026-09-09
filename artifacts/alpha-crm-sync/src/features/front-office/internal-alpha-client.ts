@@ -1,3 +1,6 @@
+import { apiFetch } from "@workspace/api-client-react";
+import { readCsrfCookie } from "@workspace/shared/csrf";
+
 export type LeadStage =
   | "NEW"
   | "QUALIFIED"
@@ -158,19 +161,6 @@ export interface UpdateInternalLeadInput {
   lossReason?: string | null;
 }
 
-function readCsrfCookie(): string | null {
-  if (typeof document === "undefined") return null;
-  for (const name of ["__Host-arthello_csrf", "arthello_csrf"]) {
-    const prefix = `${name}=`;
-    const match = document.cookie
-      .split(";")
-      .map((entry) => entry.trim())
-      .find((entry) => entry.startsWith(prefix));
-    if (match) return decodeURIComponent(match.slice(prefix.length));
-  }
-  return null;
-}
-
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(init.headers);
@@ -183,7 +173,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (csrf) headers.set("X-CSRF-Token", csrf);
   }
 
-  const response = await fetch(path, {
+  const response = await apiFetch(path, {
     ...init,
     method,
     headers,

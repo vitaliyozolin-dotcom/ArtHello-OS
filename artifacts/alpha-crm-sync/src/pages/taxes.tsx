@@ -1,3 +1,5 @@
+import { formatRubles } from "@workspace/shared/money";
+import { apiFetch } from "@workspace/api-client-react";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -36,7 +38,7 @@ interface TaxSummary {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(n);
+  return formatRubles(n);
 }
 
 function monthLabel(m: string) {
@@ -150,11 +152,11 @@ interface CalendarMonth {
 function TaxCalendarView() {
   const { data: months = [], isLoading } = useQuery<CalendarMonth[]>({
     queryKey: ["taxes-calendar"],
-    queryFn: () => fetch("/api/taxes/calendar").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/taxes/calendar").then((r) => r.json()),
   });
 
   const fmtShort = (n: number) => new Intl.NumberFormat("ru-RU", { notation: "compact", maximumFractionDigits: 0 }).format(n);
-  const fmtFull = (n: number) => new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(n);
+  const fmtFull = (n: number) => formatRubles(n);
 
   function mlabel(m: string) {
     const [y, mo] = m.split("-");
@@ -250,7 +252,7 @@ interface AdvisorData {
 function TaxAdvisorView() {
   const { data, isLoading } = useQuery<AdvisorData>({
     queryKey: ["taxes-advisor"],
-    queryFn: () => fetch("/api/taxes/advisor").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/taxes/advisor").then((r) => r.json()),
   });
 
   const recConfig: Record<string, { bg: string; border: string; icon: React.ReactNode }> = {
@@ -322,12 +324,12 @@ export default function TaxesPage() {
 
   const { data: months = [] } = useQuery<string[]>({
     queryKey: ["taxes-months"],
-    queryFn: () => fetch("/api/taxes/months").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/taxes/months").then((r) => r.json()),
   });
 
   const { data: summary } = useQuery<TaxSummary>({
     queryKey: ["taxes-summary"],
-    queryFn: () => fetch("/api/taxes/summary").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/taxes/summary").then((r) => r.json()),
   });
 
   const { data: obligations = [], isLoading } = useQuery<TaxObligation[]>({
@@ -336,13 +338,13 @@ export default function TaxesPage() {
       const p = new URLSearchParams();
       if (month) p.set("month", month);
       if (statusFilter) p.set("status", statusFilter);
-      return fetch(`/api/taxes/obligations?${p}`).then((r) => r.json());
+      return apiFetch(`/api/taxes/obligations?${p}`).then((r) => r.json());
     },
   });
 
   const payMutation = useMutation({
     mutationFn: async ({ id, amount }: { id: string; amount: number }) => {
-      const res = await fetch(`/api/taxes/obligations/${id}`, {
+      const res = await apiFetch(`/api/taxes/obligations/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paidAmount: amount, status: "paid" }),

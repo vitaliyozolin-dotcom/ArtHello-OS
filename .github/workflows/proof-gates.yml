@@ -5,19 +5,21 @@ on:
   push:
     branches: [main]
     paths:
-      - 'artifacts/api-server/src/lib/security/**'
-      - 'artifacts/api-server/src/routes/**'
-      - 'artifacts/alpha-crm-sync/**'
-      - 'lib/db/drizzle/**'
-      - 'lib/db/rollbacks/**'
-      - 'quality-gates/**'
-      - 'scripts/permission-proof.mjs'
-      - 'scripts/workflow-policy.mjs'
-      - 'scripts/test/workflow-policy.test.mjs'
-      - 'scripts/visual-acceptance.mjs'
-      - 'lib/db/scripts/migration-twin.mjs'
-      - 'scripts/test/migration-twin-report.test.mjs'
-      - '.github/workflows/**'
+      - "artifacts/api-server/src/lib/security/**"
+      - "artifacts/api-server/src/routes/**"
+      - "artifacts/alpha-crm-sync/**"
+      - "lib/db/drizzle/**"
+      - "lib/db/rollbacks/**"
+      - "quality-gates/**"
+      - "lib/api-spec/**"
+      - "scripts/contract-drift.mjs"
+      - "scripts/permission-proof.mjs"
+      - "scripts/workflow-policy.mjs"
+      - "scripts/test/workflow-policy.test.mjs"
+      - "scripts/visual-acceptance.mjs"
+      - "lib/db/scripts/migration-twin.mjs"
+      - "scripts/test/migration-twin-report.test.mjs"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
@@ -64,6 +66,9 @@ jobs:
 
       - name: Permission Proof Engine
         run: node scripts/permission-proof.mjs --report .artifacts/permission-proof.json
+
+      - name: API Contract Drift
+        run: node --import ./artifacts/api-server/node_modules/tsx/dist/loader.mjs scripts/contract-drift.mjs --report .artifacts/contract-drift.json
 
       - name: Database Migration Twin
         run: |

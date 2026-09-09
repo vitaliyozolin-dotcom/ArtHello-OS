@@ -1,3 +1,5 @@
+import { formatRubles } from "@workspace/shared/money";
+import { apiFetch } from "@workspace/api-client-react";
 import { useState, lazy, Suspense } from 'react';
 import { NavigationProvider } from '@/context/NavigationContext';
 import { useAuth } from '@/context/AuthContext';
@@ -136,12 +138,12 @@ interface BankAnalytics {
 function BankingAnalyticsPanel() {
   const { data, isLoading } = useQuery<BankAnalytics>({
     queryKey: ['banking-analytics'],
-    queryFn: () => fetch('/api/banking/analytics').then((r) => r.json()),
+    queryFn: () => apiFetch('/api/banking/analytics').then((r) => r.json()),
     refetchInterval: 120000,
   });
 
   const fmt = (n: number) =>
-    new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(n);
+    formatRubles(n);
 
   if (isLoading || !data) return null;
 

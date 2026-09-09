@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Hex } from "@workspace/shared/sha256";
 import type { PGlite } from "@electric-sql/pglite";
 import { seedOwnerConfirmedMasterData } from "./arthello-master-data.js";
 import { openSandboxDatabase } from "./sandbox-db.js";
@@ -82,9 +82,7 @@ function stableJson(value: unknown): string {
   return JSON.stringify(stableValue(value));
 }
 
-function sha256(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
+const sha256 = sha256Hex;
 
 function textValue(value: CellValue | undefined): string {
   return value === null || value === undefined ? "" : String(value).trim();

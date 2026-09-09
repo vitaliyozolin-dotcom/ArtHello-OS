@@ -1,3 +1,5 @@
+import { apiFetch } from "@workspace/api-client-react";
+import { formatRubleNumber } from "@workspace/shared/money";
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -41,22 +43,22 @@ export default function EducationalPage() {
 
   const { data: directions = [] } = useQuery<Direction[]>({
     queryKey: ['directions'],
-    queryFn: () => fetch(`${BASE}/educational/directions`).then(r => r.json()),
+    queryFn: () => apiFetch(`${BASE}/educational/directions`).then(r => r.json()),
   });
 
   const { data: stats } = useQuery<Stats>({
     queryKey: ['educational-stats'],
-    queryFn: () => fetch(`${BASE}/educational/stats`).then(r => r.json()),
+    queryFn: () => apiFetch(`${BASE}/educational/stats`).then(r => r.json()),
   });
 
   const createDir = useMutation({
     mutationFn: (body: typeof dirForm) =>
-      fetch(`${BASE}/educational/directions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()),
+      apiFetch(`${BASE}/educational/directions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['directions'] }); qc.invalidateQueries({ queryKey: ['educational-stats'] }); setShowDirDialog(false); setDirForm({ name: '', code: '', color: DIRECTION_COLORS[0], description: '' }); },
   });
 
   const deleteDir = useMutation({
-    mutationFn: (id: string) => fetch(`${BASE}/educational/directions/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => apiFetch(`${BASE}/educational/directions/${id}`, { method: 'DELETE' }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['directions'] }); qc.invalidateQueries({ queryKey: ['educational-stats'] }); },
   });
 
@@ -66,12 +68,12 @@ export default function EducationalPage() {
 
   const { data: groups = [] } = useQuery<ClassGroup[]>({
     queryKey: ['class-groups'],
-    queryFn: () => fetch(`${BASE}/educational/groups`).then(r => r.json()),
+    queryFn: () => apiFetch(`${BASE}/educational/groups`).then(r => r.json()),
   });
 
   const createGroup = useMutation({
     mutationFn: (body: typeof groupForm) =>
-      fetch(`${BASE}/educational/groups`, {
+      apiFetch(`${BASE}/educational/groups`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...body, maxStudents: parseInt(body.maxStudents) || 12, directionId: body.directionId || undefined }),
       }).then(r => r.json()),
@@ -79,7 +81,7 @@ export default function EducationalPage() {
   });
 
   const deleteGroup = useMutation({
-    mutationFn: (id: string) => fetch(`${BASE}/educational/groups/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => apiFetch(`${BASE}/educational/groups/${id}`, { method: 'DELETE' }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['class-groups'] }); qc.invalidateQueries({ queryKey: ['educational-stats'] }); },
   });
 
@@ -89,12 +91,12 @@ export default function EducationalPage() {
 
   const { data: programs = [] } = useQuery<Program[]>({
     queryKey: ['programs'],
-    queryFn: () => fetch(`${BASE}/educational/programs`).then(r => r.json()),
+    queryFn: () => apiFetch(`${BASE}/educational/programs`).then(r => r.json()),
   });
 
   const createProg = useMutation({
     mutationFn: (body: typeof progForm) =>
-      fetch(`${BASE}/educational/programs`, {
+      apiFetch(`${BASE}/educational/programs`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...body,
@@ -108,7 +110,7 @@ export default function EducationalPage() {
   });
 
   const deleteProg = useMutation({
-    mutationFn: (id: string) => fetch(`${BASE}/educational/programs/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => apiFetch(`${BASE}/educational/programs/${id}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['programs'] }),
   });
 
@@ -239,7 +241,7 @@ export default function EducationalPage() {
                     </div>
                     {g.monthlyRevenue && (
                       <div className="text-right shrink-0">
-                        <div className="font-semibold text-gray-900">{new Intl.NumberFormat('ru-RU').format(parseFloat(g.monthlyRevenue))} ₽</div>
+                        <div className="font-semibold text-gray-900">{formatRubleNumber(parseFloat(g.monthlyRevenue))} ₽</div>
                         <div className="text-xs text-gray-400">в месяц</div>
                       </div>
                     )}
@@ -282,7 +284,7 @@ export default function EducationalPage() {
                     </button>
                   </div>
                   <div className="flex gap-4 mt-3 text-sm">
-                    {p.pricePerMonth   && <div><span className="text-gray-400">Стоимость:</span> <span className="font-medium">{new Intl.NumberFormat('ru-RU').format(parseFloat(p.pricePerMonth))} ₽/мес</span></div>}
+                    {p.pricePerMonth   && <div><span className="text-gray-400">Стоимость:</span> <span className="font-medium">{formatRubleNumber(parseFloat(p.pricePerMonth))} ₽/мес</span></div>}
                     {p.durationMonths  && <div><span className="text-gray-400">Длительность:</span> <span className="font-medium">{p.durationMonths} мес.</span></div>}
                     {(p.ageFrom || p.ageTo) && <div><span className="text-gray-400">Возраст:</span> <span className="font-medium">{p.ageFrom}–{p.ageTo} лет</span></div>}
                   </div>

@@ -1,3 +1,5 @@
+import { formatRubles } from "@workspace/shared/money";
+import { apiFetch } from "@workspace/api-client-react";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -49,7 +51,7 @@ interface Stats {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(n);
+  return formatRubles(n);
 }
 
 function fmtCompact(n: number): string {
@@ -130,7 +132,7 @@ function DetailSheet({ contractorId, onClose }: { contractorId: string; onClose:
 
   const { data, isLoading } = useQuery<ContractorDetail>({
     queryKey: ["contractor-detail", contractorId],
-    queryFn: () => fetch(`/api/contractors/${contractorId}`).then((r) => r.json()),
+    queryFn: () => apiFetch(`/api/contractors/${contractorId}`).then((r) => r.json()),
   });
 
   const c = data?.contractor;
@@ -282,7 +284,7 @@ export default function ContractorsPage() {
 
   const { data: stats } = useQuery<Stats>({
     queryKey: ["contractors-stats"],
-    queryFn: () => fetch("/api/contractors/stats/summary").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/contractors/stats/summary").then((r) => r.json()),
   });
 
   const { data: contractors = [], isLoading } = useQuery<Contractor[]>({
@@ -291,7 +293,7 @@ export default function ContractorsPage() {
       const p = new URLSearchParams();
       if (search) p.set("search", search);
       if (riskFilter) p.set("risk", riskFilter);
-      return fetch(`/api/contractors?${p}`).then((r) => r.json());
+      return apiFetch(`/api/contractors?${p}`).then((r) => r.json());
     },
   });
 

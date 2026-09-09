@@ -1,3 +1,4 @@
+import { apiFetch } from "@workspace/api-client-react";
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -149,7 +150,7 @@ export default function CfoPage() {
   const { data: insightsData, isLoading: insightsLoading, refetch, isFetching } = useQuery<InsightsData>({
     queryKey: ["cfo-insights", month],
     queryFn: () =>
-      fetch("/api/cfo/insights", {
+      apiFetch("/api/cfo/insights", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ month }),
@@ -160,18 +161,18 @@ export default function CfoPage() {
 
   const { data: alerts } = useQuery<{ alerts: Alert[]; month: string }>({
     queryKey: ["cfo-alerts"],
-    queryFn: () => fetch("/api/cfo/alerts").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/cfo/alerts").then((r) => r.json()),
     refetchInterval: 60000,
   });
 
   const { data: ctx } = useQuery<FinCtx>({
     queryKey: ["cfo-context", month],
-    queryFn: () => fetch(`/api/cfo/context?month=${month}`).then((r) => r.json()),
+    queryFn: () => apiFetch(`/api/cfo/context?month=${month}`).then((r) => r.json()),
   });
 
   const chatMutation = useMutation({
     mutationFn: async (message: string) => {
-      const res = await fetch("/api/cfo/chat", {
+      const res = await apiFetch("/api/cfo/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

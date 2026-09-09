@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
+import { normalizePhone } from "@workspace/shared/normalize-phone";
 import {
   personsTable,
   personContactsTable,
@@ -17,21 +18,6 @@ import { eq, sql, desc, and, count, isNull } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 
 export const identityRouter = Router();
-
-// ─── Phone normalisation ──────────────────────────────────────────────────────
-
-function normalizePhone(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const digits = raw.replace(/[^\d+]/g, "");
-  const stripped = digits.replace(/^\+/, "");
-  if (stripped.length === 11 && (stripped.startsWith("7") || stripped.startsWith("8"))) {
-    return `+7${stripped.slice(1)}`;
-  }
-  if (stripped.length === 10) {
-    return `+7${stripped}`;
-  }
-  return digits.startsWith("+") ? digits : `+${stripped}`;
-}
 
 function normalizeEmail(raw: string | null | undefined): string | null {
   if (!raw) return null;

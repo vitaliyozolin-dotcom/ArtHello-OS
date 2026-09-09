@@ -190,4 +190,3 @@ jobs:
           path: ci-provenance/
           if-no-files-found: error
           retention-days: 30
-

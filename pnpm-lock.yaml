@@ -262,6 +262,9 @@ importers:
       '@workspace/api-client-react':
         specifier: workspace:*
         version: link:../../lib/api-client-react
+      '@workspace/shared':
+        specifier: workspace:*
+        version: link:../../lib/shared
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -371,6 +374,9 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
+      '@workspace/shared':
+        specifier: workspace:*
+        version: link:../../lib/shared
       cookie-parser:
         specifier: ^1.4.7
         version: 1.4.7
@@ -441,6 +447,9 @@ importers:
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.101.4(react@19.1.0)
+      '@workspace/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   lib/api-spec:
     devDependencies:
@@ -479,11 +488,20 @@ importers:
         specifier: ^0.31.10
         version: 0.31.10
 
+  lib/shared:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.9.5
+
   scripts:
     dependencies:
       '@electric-sql/pglite':
         specifier: 0.3.14
         version: 0.3.14
+      '@workspace/shared':
+        specifier: workspace:*
+        version: link:../lib/shared
       pg:
         specifier: ^8.20.0
         version: 8.22.0
