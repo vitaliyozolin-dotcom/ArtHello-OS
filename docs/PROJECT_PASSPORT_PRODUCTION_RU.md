@@ -734,3 +734,12 @@ decision:
 Цель прежняя: принятый выпуск и полная исходная бизнес-приёмка. R10 source2e57dd22/run34322039891 прошёл installed-Caddy134, но deploy102371510204 остановился при удалении вложенного mode0555 fixture; clone/auth/public не начинались. Рабочая версия6596f693 остаётся прежней. Новая граница — только принадлежащая заданию временная очистка плюс доказанное исключение повторного исполнения завершившегося R10.
 
 R11 PR380 получает новый source/tree и сохраняет всю действующую матрицу authority, candidate browser, backup, gateway binding и public/bank запретов. Владелец — пользователь; исполнитель — AI в пределах ранее разрешённого выпуска. Следующий контроль: независимый exact-source review, hosted regressions без root, все exact CI и защищённая проверка. Полный контракт/stop conditions: DECISIONS D085. Банковская и остальная бизнес-приёмка остаются открытыми; новый секрет или повторный вход собственника не запрашивается.
+
+
+## D086 — R12 после остановки R11 на ёмкости импорта (2026-09-09)
+
+R11 e579a20a/tree d8830019 прошёл все main CI, но protected34324235442/deploy102378379405 остановился до download/import при5807140KiB свободно против7995084KiB необходимо. Старый R9 browser отсутствует. Clone/auth/public не начинались; live6596f693 остаётся прежним. Эти факты не доказывают выпуск или бизнес-приёмку.
+
+R12 PR381 сохраняет цель, владельца, ранее выданное разрешение и весь frozen runtime/acceptance. Новое действие строго ограничено exact unused recoverable R10 browser44ef654e: полная immutable identity, отсутствие любых container consumers, fresh main и recovery artifact перед non-force/full-ID removal. Затем прежняя capacity с2GiB reserve. Изначально предложенное удаление двухтегового application image отклонено review из-за mutable-tag race и исключено. Контракт/targets/AI/stop conditions — DECISIONS D086.
+
+Quality не изменяется; новый отдельный exact-source hosted R12 gate добавляется к protected provenance. Следующий контроль — независимый окончательный source/tree review, hosted gates и фактический защищённый запуск. При недостатке места/identity drift — остановка до импорта без расширения очистки. Банковская и остальная исходная бизнес-приёмка остаются открытыми; owner login и новые секреты не запрашиваются. Результат production не заменять локальными тестами.

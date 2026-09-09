@@ -1,0 +1,50 @@
+name: Verify ArtHello R12 continuation
+'on':
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/scripts/**'
+      - 'deploy/**'
+      - 'scripts/test/retire-r10-images.test.mjs'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/scripts/**'
+      - 'deploy/**'
+      - 'scripts/test/retire-r10-images.test.mjs'
+permissions:
+  contents: read
+concurrency:
+  group: verify-arthello-r12-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  d086-candidate-tests:
+    name: d086-candidate-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      R12_CONTRACT_SHA256: 594e30bc2adfd993e61d87aead3c1564d363c517122b8f70a63b47d276eb4b9b
+    steps:
+      - name: Check out exact unprivileged R12 verification source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CHECKED_SOURCE_SHA }}
+          fetch-depth: 0
+          clean: true
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Verify preserved R11 boundary and bounded R10 image retirement
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(id -u)" -ne 0
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          test "$(sha256sum deploy/v52/recovery-r12/check-contract.rb | cut -d ' ' -f 1)" = "$R12_CONTRACT_SHA256"
+          ruby deploy/v52/recovery-r12/check-contract.rb
+          python3 -I .github/scripts/test-r12-replay-guard.py
+          node --test scripts/test/retire-r10-images.test.mjs
+          node --check deploy/browser/retire-r10-images.mjs
