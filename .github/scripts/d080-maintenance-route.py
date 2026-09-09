@@ -154,6 +154,7 @@ def render_routes(source, old_upstream, candidate_upstream, nonce):
         '    }',
         '    handle {',
         '        request_header -Authorization',
+        '        header Cache-Control "no-store"',
         '        respond "Service temporarily unavailable" 503',
         '    }',
         '}',

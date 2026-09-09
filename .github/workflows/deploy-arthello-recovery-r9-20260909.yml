@@ -2175,6 +2175,9 @@ jobs:
 
         # D080_CANDIDATE_COMPLETION_BEGIN
         complete_candidate_release() {
+          python3 -I .github/scripts/d080-resume-candidate.py --verify-maintenance \
+            --state "$candidate_state_file" --release "$RELEASE_SHA" --tree "$EXPECTED_TREE" \
+            --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --durable-root "$durable_work_root"
           candidate_acceptance_file="$work/r9-acceptance-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
           test "$OBSERVED_READONLY_SCHOOL_SHA" = "$(jq -er '.context.schoolSha' "$candidate_state_file")"
           test "$SCHOOL_REPAIR_CONFIG_SHA256" = "$(jq -er '.context.schoolRepairConfigSha256' "$candidate_state_file")"
@@ -2189,6 +2192,9 @@ jobs:
             bash .github/scripts/run-r9-live-browser.sh < "$gate_nonce_file"
           python3 -I .github/scripts/d080-candidate-state.py verified \
             --state "$candidate_state_file" --receipt "$candidate_acceptance_file" --attempt "$GITHUB_RUN_ATTEMPT"
+          python3 -I .github/scripts/d080-resume-candidate.py --verify-maintenance \
+            --state "$candidate_state_file" --release "$RELEASE_SHA" --tree "$EXPECTED_TREE" \
+            --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --durable-root "$durable_work_root"
           require_current_main_release
           python3 -I .github/scripts/d080-maintenance-route.py probe --nonce-file "$gate_nonce_file"
         require_current_main_release
@@ -2266,7 +2272,7 @@ jobs:
             # Keep maintenance/current routes, the same candidate DB and all evidence.
             # No snapshot restore, candidate removal or bank activation is permitted.
             if [ "$public_commit_started" -eq 0 ]; then
-              python3 -I .github/scripts/d080-resume-candidate.py --hold-check \
+              python3 -I .github/scripts/d080-resume-candidate.py --repair-maintenance \
                 --state "$candidate_state_file" --release "$RELEASE_SHA" --tree "$EXPECTED_TREE" \
                 --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --durable-root "$HOME/.config/arthello/release-state/candidate-work" || true
             fi
@@ -2958,10 +2964,10 @@ jobs:
             stream.flush()
             os.fsync(stream.fileno())
         D080_PRIVATE_CONTEXT
-        # From this point even an ambiguous failure must retain current authentication writes.
-        candidate_auth_started=1
         python3 -I .github/scripts/d080-candidate-state.py begin \
           --context "$work/candidate-context.json" --state "$candidate_state_file"
+        # The durable boundary is complete before any route can permit real authentication.
+        candidate_auth_started=1
         require_current_main_release
         route_changed=1
         docker exec \

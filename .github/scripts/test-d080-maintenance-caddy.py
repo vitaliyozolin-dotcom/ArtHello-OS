@@ -218,6 +218,8 @@ class CaddyFixture:
             response.read()
             require(response.status == expected)
             require(response.getheader('X-D080-Fixture') == backend)
+            if expected == 503:
+                require(response.getheader('Cache-Control') == 'no-store')
             require(response.getheader('X-D080-Preserved' if host == HOST else 'X-D080-School-Preserved') == 'yes')
         finally:
             connection.close()

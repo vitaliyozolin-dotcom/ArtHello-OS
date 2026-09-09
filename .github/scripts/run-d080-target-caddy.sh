@@ -24,7 +24,9 @@ cleanup() {
   case "$work" in "$RUNNER_TEMP"/d080-target-caddy.*) chmod 0700 "$work"; rm -rf -- "$work" ;; *) return 1 ;; esac
 }
 trap cleanup EXIT
-docker cp "$gateway_id:/usr/bin/caddy" "$work/caddy"
+# Copy bytes into a newly created file so no file capability or owner metadata
+# from the gateway can affect the unprivileged cap-drop-ALL fixture process.
+docker exec "$gateway_id" cat /usr/bin/caddy > "$work/caddy"
 test -f "$work/caddy" && test ! -L "$work/caddy"
 test "$(sha256sum "$work/caddy" | cut -d ' ' -f 1)" = "$before_sha"
 chmod 0555 "$work/caddy"

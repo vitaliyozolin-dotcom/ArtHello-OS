@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -122,6 +123,7 @@ class HeldCandidate:
         self.record = resume.state.begin(self.state_path, c)
         self.main_sha = self.release
         self.probe_ok = True
+        self.reload_ok = True
         self.backup_ok = True
         self.bank_empty = True
         self.writer = ''
@@ -192,6 +194,14 @@ class HeldCandidate:
             return json_bytes(json.loads(input)).decode()
         if args == ['docker', 'container', 'exec', 'stroios-caddy-1', 'cat', '/data/external-routes.caddy']:
             return self.route
+        if args == ['docker', 'container', 'exec', 'stroios-caddy-1', 'caddy', 'validate',
+                    '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']:
+            return ''
+        if args == ['docker', 'container', 'exec', 'stroios-caddy-1', 'caddy', 'reload',
+                    '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']:
+            resume.require(self.reload_ok)
+            self.probe_ok = True
+            return ''
         if args == ['python3', '-I', str(Path(resume.__file__).with_name('d080-maintenance-route.py')),
                     'probe', '--nonce-file', self.context['gateNonceFile']]:
             resume.require(self.probe_ok)
@@ -211,6 +221,17 @@ class HeldCandidate:
         with patch.object(resume, 'command', self.process), patch.object(resume.urllib.request, 'urlopen', self.github), \
              patch.dict(os.environ, {'GH_TOKEN': 'synthetic-github-token'}):
             return resume.verify(self.state_path, **args)
+
+    def repair(self, *, cli=False, mode="--repair-maintenance"):
+        identity = dict(release=self.release, tree=self.tree, run='41', attempt='1',
+                        durable_root=str(self.durable_root))
+        argv = ['d080-resume-candidate.py', '--state', str(self.state_path), mode]
+        for key, value in identity.items():
+            argv += ['--' + key.replace('_', '-'), value]
+        with patch.object(resume, 'command', self.process), patch.object(resume.urllib.request, 'urlopen', self.github), \
+             patch.object(resume, 'Docker', return_value=self), patch.dict(os.environ, {'GH_TOKEN': 'synthetic-github-token'}), \
+             patch.object(sys, 'argv', argv):
+            return resume.main() if cli else resume.repair_maintenance(self.state_path, **identity)
 
 
 class ResumeCandidateTests(unittest.TestCase):
@@ -233,6 +254,68 @@ class ResumeCandidateTests(unittest.TestCase):
         self.assertEqual(self.fixture.verify()['phase'], 'maintenance-started')
         self.assertTrue(Path(self.fixture.context['schoolRepairReceiptFile']).is_file())
         self.assertTrue(Path(self.fixture.context['gateNonceFile']).is_file())
+
+    def test_maintenance_repair_reloads_only_verified_disk_route_then_probes_effective_route(self):
+        self.fixture.probe_ok = False
+        before = self.fixture.state_path.read_bytes()
+        self.assertEqual(self.fixture.repair()['phase'], 'maintenance-started')
+        self.assertEqual(self.fixture.state_path.read_bytes(), before)
+        calls = self.fixture.calls
+        reloads = [i for i, call in enumerate(calls) if call[0] == 'process' and 'reload' in call[1]]
+        validations = [i for i, call in enumerate(calls) if call[0] == 'process' and 'validate' in call[1]]
+        current_main = [i for i, call in enumerate(calls) if call[0] == 'current-main']
+        probes = [i for i, call in enumerate(calls) if call[0] == 'process' and 'probe' in call[1]]
+        self.assertEqual(len(reloads), 1)
+        self.assertEqual(len(validations), 1)
+        self.assertEqual(len(current_main), 2)
+        self.assertEqual(len(probes), 1)
+        self.assertLess(current_main[0], validations[0])
+        self.assertLess(validations[0], reloads[0])
+        self.assertLess(reloads[0], probes[0])
+        self.assertLess(probes[0], current_main[1])
+
+    def test_maintenance_repair_rejects_changed_disk_main_or_public_state_before_reload(self):
+        original_route = self.fixture.route
+        original_state = self.fixture.state_path.read_bytes()
+        for changed in ('disk-route', 'main', 'public-state'):
+            self.fixture.calls.clear()
+            if changed == 'disk-route': self.fixture.route = 'different public route\n'
+            if changed == 'main': self.fixture.main_sha = '0' * 40
+            if changed == 'public-state':
+                record = json.loads(original_state)
+                record['phase'] = 'public-started'
+                private(self.fixture.state_path, json_bytes(record))
+            with self.subTest(changed=changed), self.assertRaises(ValueError): self.fixture.repair()
+            self.assertFalse(any(call[0] == 'process' and ('reload' in call[1] or 'validate' in call[1])
+                                 for call in self.fixture.calls))
+            self.fixture.route = original_route
+            self.fixture.main_sha = self.fixture.release
+            private(self.fixture.state_path, original_state)
+
+    def test_readonly_current_attempt_verification_never_emits_a_replay_hold_or_reloads(self):
+        output = io.StringIO()
+        before = self.fixture.state_path.read_bytes()
+        with patch('sys.stdout', output):
+            self.fixture.repair(cli=True, mode='--verify-maintenance')
+        self.assertEqual(output.getvalue(), 'ARTHELLO_D080_MAINTENANCE_RUNTIME=VERIFIED\n')
+        self.assertEqual(self.fixture.state_path.read_bytes(), before)
+        self.assertFalse(any(call[0] == 'process' and ('reload' in call[1] or 'validate' in call[1])
+                             for call in self.fixture.calls))
+
+    def test_failed_maintenance_reload_emits_no_held_marker_and_preserves_state(self):
+        self.fixture.probe_ok = False
+        self.fixture.reload_ok = False
+        before = self.fixture.state_path.read_bytes()
+        output = io.StringIO()
+        with patch('sys.stdout', output), self.assertRaises(SystemExit) as failure:
+            self.fixture.repair(cli=True)
+        self.assertEqual(str(failure.exception), 'ARTHELLO_D080_RESUME_RUNTIME=BLOCKED')
+        self.assertNotIn('MAINTENANCE_HELD', output.getvalue())
+        self.assertEqual(self.fixture.state_path.read_bytes(), before)
+        self.assertFalse(self.fixture.probe_ok)
+        self.assertTrue(self.fixture.bank_empty)
+        self.assertFalse(self.fixture.state_path.with_name('activation-' + self.fixture.release + '.json').exists())
+        self.assertEqual(sum(call[0] == 'process' and 'reload' in call[1] for call in self.fixture.calls), 1)
 
     def test_public_marker_or_public_state_never_resumes(self):
         marker = self.fixture.state_path.with_name('activation-' + self.fixture.release + '.json')

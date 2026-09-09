@@ -280,6 +280,7 @@ def main():
     parser.add_argument('--durable-root', required=True)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--hold-check', action='store_true')
+    mode.add_argument('--verify-maintenance', action='store_true')
     mode.add_argument('--repair-maintenance', action='store_true')
     args = parser.parse_args()
     try:
@@ -287,10 +288,11 @@ def main():
         if args.repair_maintenance:
             repair_maintenance(args.state, **identity)
         else:
-            verify(args.state, **identity, hold=args.hold_check)
+            verify(args.state, **identity, hold=args.hold_check or args.verify_maintenance)
     except Exception:
         raise SystemExit('ARTHELLO_D080_RESUME_RUNTIME=BLOCKED')
-    print('ARTHELLO_D080_CANDIDATE_MAINTENANCE_HELD=1' if args.hold_check or args.repair_maintenance else 'ARTHELLO_D080_RESUME_RUNTIME=VERIFIED')
+    print('ARTHELLO_D080_CANDIDATE_MAINTENANCE_HELD=1' if args.hold_check or args.repair_maintenance else
+          'ARTHELLO_D080_MAINTENANCE_RUNTIME=VERIFIED' if args.verify_maintenance else 'ARTHELLO_D080_RESUME_RUNTIME=VERIFIED')
 
 
 if __name__ == '__main__':
