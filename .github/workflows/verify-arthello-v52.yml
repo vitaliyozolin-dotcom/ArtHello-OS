@@ -3,7 +3,7 @@ name: Verify ArtHello v52 release
 on:
   pull_request:
     paths:
-      - deploy/v44/overrides/**
+      - deploy/v44/src/**
       - deploy/v52/**
       - DECISIONS.md
       - .github/workflows/deploy-arthello-direct-38-55.yml
@@ -104,7 +104,7 @@ on:
   push:
     branches: [main]
     paths:
-      - deploy/v44/overrides/**
+      - deploy/v44/src/**
       - deploy/v52/**
       - DECISIONS.md
       - .github/workflows/deploy-arthello-direct-38-55.yml
@@ -530,32 +530,32 @@ jobs:
       - name: Validate release files without exposing data
         run: |
           set -Eeuo pipefail
-          grep -F 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'ARTHELLO_PUBLIC_ORIGIN' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'cf: false' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'INTEGRATION_CREDENTIALS_KEY_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'INTEGRATION_CREDENTIALS_KEY' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'CENTRAL_ACCESS_SECRET_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'OPENAI_API_KEY_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'SCHOOL_PUBLIC_ORIGIN' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'SCHOOL_DIARY_SYNC_URL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'SCHOOL_DIARY_ALLOWED_ORIGINS' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport(), BACKUP_TRANSPORT: createBackupTransport() }' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
-          grep -F 'return transport.fetch(input, { ...init, redirect: "manual" });' deploy/v52/overrides/app/api/integration-actions/route.ts >/dev/null
-          test -s deploy/v52/overrides/production/tochka-transport.mjs
-          grep -F 'const responseBody = await readBoundedResponseBody(upstream);' deploy/v52/overrides/production/tochka-transport.mjs >/dev/null
-          grep -F 'workerd reaches the Node service binding through its supported internal redirect mode' deploy/v52/overrides/tests/tochka-node-transport.test.mjs >/dev/null
-          if grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
+          grep -F 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'ARTHELLO_PUBLIC_ORIGIN' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'cf: false' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'INTEGRATION_CREDENTIALS_KEY_FILE' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'INTEGRATION_CREDENTIALS_KEY' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'CENTRAL_ACCESS_SECRET_FILE' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'OPENAI_API_KEY_FILE' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'SCHOOL_PUBLIC_ORIGIN' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'SCHOOL_DIARY_SYNC_URL' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'SCHOOL_DIARY_ALLOWED_ORIGINS' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'OPENAI_OCR_MODEL' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'TBANK_EGRESS_IP' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport(), BACKUP_TRANSPORT: createBackupTransport() }' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'return transport.fetch(input, { ...init, redirect: "manual" });' deploy/v52/src/app/api/integration-actions/route.ts >/dev/null
+          test -s deploy/v52/src/production/tochka-transport.mjs
+          grep -F 'const responseBody = await readBoundedResponseBody(upstream);' deploy/v52/src/production/tochka-transport.mjs >/dev/null
+          grep -F 'workerd reaches the Node service binding through its supported internal redirect mode' deploy/v52/src/tests/tochka-node-transport.test.mjs >/dev/null
+          if grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/src/production/runtime-server.mjs; then
             echo 'Plaintext central access secret binding is forbidden' >&2
             exit 1
           fi
-          if grep -E 'OPENAI_API_KEY:[[:space:]]*process\.env\.OPENAI_API_KEY([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
+          if grep -E 'OPENAI_API_KEY:[[:space:]]*process\.env\.OPENAI_API_KEY([[:space:],}]|$)' deploy/v52/src/production/runtime-server.mjs; then
             echo 'Plaintext OpenAI key binding is forbidden' >&2
             exit 1
           fi
-          grep -F 'd1Databases: { DB: "arthello-production" }' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+          grep -F 'd1Databases: { DB: "arthello-production" }' deploy/v52/src/production/runtime-server.mjs >/dev/null
           test -s deploy/v52/Dockerfile
           test -s deploy/v52/runtime/package.json
           test -s deploy/v52/runtime/package-lock.json
@@ -917,7 +917,7 @@ jobs:
           import pathlib
           import re
 
-          database_source = pathlib.Path("deploy/v52/overrides/db/index.ts").read_text(encoding="utf-8")
+          database_source = pathlib.Path("deploy/v52/src/db/index.ts").read_text(encoding="utf-8")
           inventory_source = pathlib.Path("deploy/v52/maintenance/production-data-inventory.py").read_text(encoding="utf-8")
           match = re.search(r'const integrationCredentialPrefix = "([^"]+)";', database_source)
           if match is None or match.group(1) not in inventory_source:

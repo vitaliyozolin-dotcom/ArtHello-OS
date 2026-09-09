@@ -1075,8 +1075,6 @@ Hosted inspection run `34337932856` / job `102421685466` на source `0e8e75ffd7
 Банковские auth/selected scope/dates/leases/backoff/activation protocol не расширяются; forced retry остаётся вне выпуска. Данные, payment operations, роли и сообщения сотрудникам не создаются вручную. Стоп — source/provenance/identity/capacity/history/consumer/backup proof mismatch или отказ владельца. После публичной границы восстановление выполняется отдельной оценкой текущих данных, не старым snapshot. Полные owner-backup, daily future execution, Alfa scoped import, Content и financial coverage остаются открытыми до своих реальных доказательств.
 
 Закрепление нового выпуска: PR392, branch `codex/arthello-r13-20260909`, parent `7f398e3180fb341754c267760463dec968fc6420` / tree `bd803a153bdadfb2fced0890190a22769042c40e`. Родитель включает D092 fixture compatibility из PR391; его отдельный hosted visual результат при подготовке ещё ожидается. Новая release identity не равна опубликованному R13; фактический результат дописывается после protected run.
-
-
 ## D-097 — Уникальность банковской операции в пределах счёта
 
 Статус: подготовлено в исходниках; production-выпуск и банковская приёмка ожидаются.
@@ -1097,3 +1095,8 @@ R14 воспроизводит принятый R13 controller через зак
 
 Сохраняются auth, scope четырёх счетов, даты, scheduler lease/generation/backoff и все границы публикации. После potential seal, candidate authentication или public start запрещено восстановление старых данных; rollback кода не сужает account-scoped индекс. До production запуска необходимы review итогового SHA/tree/diff и успешные exact-head Quality, Proof, v52 и все три R14 verification jobs. Production PASS и финансовая приёмка объявляются отдельно по фактическим receipts и обычному банковскому запуску. Stop: source/identity drift, нарушение backup/data boundaries, недостаточная capacity, неуспешные проверки либо отказ владельца.
 
+## D-099 — Материализованный School source вместо chunk/patch transport (2026-09-10)
+
+Фаза 6 нормализует version control School без изменения runtime-поведения: точные v44 и v52 archive+override деревья воспроизведены вне checkout, до записи просканированы pinned Gitleaks v8.30.0 и сохранены как обычные файлы в `deploy/v44/src` и `deploy/v52/src`. Исходные archive SHA-256: v44 `c72c6c7ced52f0d533be16ff8a8aa2d11fad8d0743b6f1229bde7f034a057062`, v52 `e76fb44dca272825fda4486e7584290b14969c1fd054a8c955eae738899b7c12`. После rebase поверх актуального main с принятыми D-097/D-098 canonical materialized tree SHA-256: v44 `adf06829e21c346fc58014ac11a8cbbffb417ad19f09b225129bf4186ca11a15`, v52 `1c683f1230eac04752d898892a4cf2de1af0b449d729731e721970b95e8d9ed6`; последние банковские и production-data изменения сохранены в materialized деревьях.
+
+Docker application stages копируют материализованный source напрямую. Удаление chunk/override transport разрешено только после повторной сборки и проверки эквивалентности runtime outputs; frozen R13 может сохранить одну неисполняемую evidence-копию по прежнему пути. Постоянные source SHA проверяются в `test:refactoring`, а ручные v44 cutover-скрипты сверяют canonical tree SHA. Production, данные, маршруты и принятый v3-cutover этим решением не изменяются.

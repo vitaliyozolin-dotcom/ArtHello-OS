@@ -1,0 +1,4 @@
+export function offerScore(offer:{priceMinor:number;deliveryDays:number;warrantyMonths:number;qualityScore:number},minPriceMinor:number){const price=Math.min(100,minPriceMinor/offer.priceMinor*100),delivery=Math.max(0,100-offer.deliveryDays*5),warranty=Math.min(100,offer.warrantyMonths/36*100);return Math.round(price*.45+delivery*.2+warranty*.15+offer.qualityScore*.2)}
+export function stockAfter(current:number,eventType:string,quantity:number){if(!Number.isInteger(quantity)||quantity<=0)throw new Error("Invalid quantity");const next=["Выдача","Списание"].includes(eventType)?current-quantity:eventType==="Приёмка"?current+quantity:current;if(next<0)throw new Error("Insufficient stock");return next}
+export function monthlyDepreciation(costMinor:number,months:number){if(months<=0)throw new Error("Invalid useful life");return Math.round(costMinor/months)}
+export function warrantyState(until:string,today:string){return until>=today?"На гарантии":"Гарантия истекла"}

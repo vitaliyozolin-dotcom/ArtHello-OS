@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "projectId": "ARTHELLO-OS",
+  "routeId": "VISUAL-SYSTEM-2026-08-21",
+  "status": "deploying_for_final_review",
+  "objective": "Единая современная оболочка, полный набор разделов, первый клик, drill-down, mobile, accessibility и проверяемая навигация без потери работающей доменной логики.",
+  "approvalBoundary": "Исполнитель может довести сборку только до ГОТОВО К ИТОГОВОЙ ПРОВЕРКЕ. ПРИНЯТО ПРЕДСТАВИТЕЛЕМ устанавливается только представителем после внешней проверки.",
+  "currentStep": "central-family-access-checkpoint",
+  "steps": [
+    {"id": 0, "name": "Аудит", "status": "completed", "evidence": ["docs/ux-audit-2026-08-21.md", "desktop preview", "CSS typography audit", "module map"]},
+    {"id": 1, "name": "Айдентика и токены", "status": "completed", "dependsOn": [0], "evidence": ["app/design-tokens.css", "docs/design-system.md", "app/components/AppIcon.tsx"]},
+    {"id": 2, "name": "Компонентная система", "status": "completed", "dependsOn": [1], "evidence": ["app/globals.css", "app/components/SystemWorkspace.tsx", "tests/visual-shell.test.mjs"]},
+    {"id": 3, "name": "Общая оболочка и навигация", "status": "completed", "dependsOn": [1, 2], "evidence": ["pushState/back fallback", "breadcrumbs/context bar", "command palette", "global search", "recent modules"]},
+    {"id": 4, "name": "Ролевые дашборды", "status": "completed", "dependsOn": [3], "evidence": ["8 dashboard profiles", "tests/visual-shell.test.mjs"]},
+    {"id": 5, "name": "Полнота модулей", "status": "completed", "dependsOn": [3], "evidence": ["25 modules", "5 new standalone workspaces", "clients/methods split", "data/action-registry.json"]},
+    {"id": 6, "name": "Drill-down и сквозные связи", "status": "completed", "dependsOn": [4, 5], "evidence": ["181-action registry", "8 master cross-module routes", "10 repeatable D1 readiness scenarios"]},
+    {"id": 7, "name": "Mobile и accessibility", "status": "completed", "dependsOn": [3, 6], "evidence": ["mobile dock and drawer", "42–50 px touch controls", "focus-visible", "ARIA labels", "prefers-reduced-motion"]},
+    {"id": 8, "name": "E2E, visual regression и performance", "status": "completed", "dependsOn": [7], "evidence": ["84/84 automated tests", "lint clean", "production build", "desktop browser smoke", "64 kB initial shell budget"]},
+    {"id": 9, "name": "Итоговая передача представителю", "status": "in_progress", "dependsOn": [8]},
+    {"id": 10, "name": "Филиалы, доступы и первичный ввод", "status": "in_progress", "dependsOn": [8], "evidence": ["branch-scoped D1 records", "settings workspace", "selective integration scopes", "98 source tests"]},
+    {"id": 11, "name": "Центральные семьи и доступы дневника", "status": "in_progress", "dependsOn": [10], "evidence": ["family_system_access", "card-based phone/email grants", "signed family projection", "local directory mutations blocked"]}
+  ],
+  "qualityGates": {
+    "p0": 0,
+    "p1": 0,
+    "minimumBodyPx": 16,
+    "minimumHelperPx": 14,
+    "deadActions": 0,
+    "requiredModules": 25,
+    "requiredCrossModuleScenarios": 8,
+    "requiredViewportClasses": ["mobile", "tablet", "desktop", "wide"]
+  },
+  "knownUnknowns": [
+    "Утверждённые исходники логотипа и локальные файлы фирменного шрифта не предоставлены",
+    "Реальные внешние интеграции и секреты отсутствуют",
+    "Медицинские и персональные данные остаются синтетическими и role-restricted"
+  ],
+  "blockedActions": [
+    "Не устанавливать ПРИНЯТО ПРЕДСТАВИТЕЛЕМ самостоятельно",
+    "Не публиковать production вне закрытого тестового контура",
+    "Не смешивать synthetic и fact",
+    "Не удалять исторические записи и аудит"
+  ]
+}
