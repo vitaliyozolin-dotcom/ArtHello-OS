@@ -93,9 +93,10 @@ fingerprint="$(jq -cS -f "$source_root/deploy/v52/maintenance/image-runtime-fing
 
 # The browser is built off-host from the existing frozen lock and base digest.
 # No application build, package install or live credential is used on a VPS.
-corepack pnpm@11.7.0 --dir "$source_root/deploy/browser" install --ignore-workspace --frozen-lockfile
+browser_context="$work/browser-context"
+node "$script_root/assemble-browser-context.cjs" "$source_root/deploy/browser" "$browser_context"
 docker build --platform linux/amd64 --build-arg "SOURCE_SHA=$TARGET_SOURCE_SHA" \
-  --tag "$resource-browser-image" "$source_root/deploy/browser" > "$work/browser-build.log" 2>&1
+  --tag "$resource-browser-image" "$browser_context" > "$work/browser-build.log" 2>&1
 browser_id="$(docker image inspect "$resource-browser-image" --format '{{.Id}}')"
 [[ "$browser_id" =~ ^sha256:[a-f0-9]{64}$ ]]
 common=(--pull never --user 1000:1000 --read-only --cap-drop ALL
