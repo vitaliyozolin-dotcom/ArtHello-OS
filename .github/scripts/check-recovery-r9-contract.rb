@@ -2,11 +2,11 @@ require 'yaml'
 require 'digest'
 require 'json'
 
-# D080 is an explicit transaction-boundary change. Normalization below proves
+# D081 authorizes the preserved d080 protocol. Normalization below proves
 # every unchanged R8 cutover line, and separately proves the preserved public tail.
 EXPECTED_RELEASE_PR = '377'
 EXPECTED_RELEASE_HEAD = 'codex/school-arthello-recovery-r9-20260909'
-PREVIOUS_RELEASE_SHA = '582edaf1a66a953edb2d61e03040d1a13e70a0ad'
+PREVIOUS_RELEASE_SHA = '59372b139fb0b2345cf3e41fc23c8223099b187f'
 def canonical(value)
   case value
   when Hash then value.keys.sort.to_h {|key| [key, canonical(value.fetch(key))]}
@@ -81,10 +81,10 @@ normalized.sub!('if [ "$candidate_auth_started" -eq 0 ] && require_safe_work_pat
 raise 'Preserved R8 clone, backup, identities, locks or rollback changed' unless normalized == old_run
 
 expected = Marshal.load(Marshal.dump(old))
-expected['name'] = 'Deploy ArtHello recovery R9 D080'
+expected['name'] = 'Deploy ArtHello recovery R9 D081'
 expected['env'].merge!('EXPECTED_RELEASE_HEAD'=>EXPECTED_RELEASE_HEAD, 'EXPECTED_RELEASE_PR'=>EXPECTED_RELEASE_PR, 'PREVIOUS_RELEASE_SHA'=>PREVIOUS_RELEASE_SHA)
 %w[bundle deploy].each do |name|
-  expected['jobs'][name]['if'] = expected['jobs'][name]['if'].gsub('codex/school-arthello-recovery-r8-20260908', EXPECTED_RELEASE_HEAD).gsub("fromJSON('370')", "fromJSON('#{EXPECTED_RELEASE_PR}')").gsub('D078: guarded R8','D080: guarded R9')
+  expected['jobs'][name]['if'] = expected['jobs'][name]['if'].gsub('codex/school-arthello-recovery-r8-20260908', EXPECTED_RELEASE_HEAD).gsub("fromJSON('370')", "fromJSON('#{EXPECTED_RELEASE_PR}')").gsub('D078: guarded R8','D081: guarded R9')
 end
 steps = expected.fetch('jobs').fetch('deploy').fetch('steps')
 replay = File.read('.github/scripts/d080-replay-guard.py')
@@ -115,7 +115,7 @@ checkout = actual_steps.index {|item| item['uses'].to_s.start_with?('actions/che
 raise 'Production capability before source verification' if actual_steps.take(checkout).map {|item| item['run'].to_s}.join("\n").match?(/(^|\s)(docker|ssh|sudo)(\s|$)/)
 browser = YAML.safe_load(File.read('.github/workflows/check-arthello-server-browser.yml'), aliases: true)
 bundle = Marshal.load(Marshal.dump(browser.fetch('jobs').fetch('bundle')))
-bundle['if'] = job.fetch('if').strip + " && startsWith(github.event.workflow_run.head_commit.message, 'D080: guarded R9')"
+bundle['if'] = job.fetch('if').strip + " && startsWith(github.event.workflow_run.head_commit.message, 'D081: guarded R9')"
 raise 'Canonical D076 bundle changed' unless current.fetch('jobs').fetch('bundle') == bundle
 {
   'r8-live-browser-acceptance.py'=>'417b9c6f1177708a1ea9b0b136ac49a6be7041001de94a6a0fc06974fe11934b',

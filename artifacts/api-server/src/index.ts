@@ -1,7 +1,7 @@
 import app from "./app.js";
 import { logger } from "./lib/logger.js";
 import { startBankingPolling } from "./lib/banking/registry.js";
-import { runMigrations } from "./lib/migrate.js";
+import { assertMigrationStateReady } from "./lib/migration-state-gate.js";
 import { assertSecuritySchemaReady } from "./lib/security/security-schema-gate.js";
 
 const rawPort = process.env["PORT"];
@@ -19,7 +19,7 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 async function startServer(): Promise<void> {
-  await runMigrations();
+  await assertMigrationStateReady();
   await assertSecuritySchemaReady();
   app.listen(port, (err) => {
     if (err) {

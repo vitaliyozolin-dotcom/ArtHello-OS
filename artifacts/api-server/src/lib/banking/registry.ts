@@ -530,7 +530,7 @@ export async function syncConnector(
 
                 // ── Save to DB with ON CONFLICT upsert ─────────────────────────
                 // Requires unique index on (bank_connector_id, external_account_id, period_from).
-                // The index is created by runMigrations() at server startup.
+                // The index is created by checked-in SQL before server startup.
                 // On failure: log full PG error details and fall back to plain INSERT.
                 try {
                   await db

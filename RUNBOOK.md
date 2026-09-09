@@ -107,7 +107,7 @@ pnpm run dev
 
 ## Запуск API
 
-Текущий `artifacts/api-server/src/index.ts` вызывает `runMigrations()`, затем `assertSecuritySchemaReady()`, и только потом `listen()`. Ошибка migration, отсутствующий auth/audit column/index или несовпадение timestamp+hash migrations `0009–0010` останавливают listener и polling с кодом 1. Это подтверждалось unit/source regression tests и controlled rollback/fail-closed процессом на одноразовом PostgreSQL 16; каждый candidate обязан повторить тот же CI gate на exact PR head. Против production `DATABASE_URL` запуск запрещён.
+Production entrypoint запускает `lib/db/scripts/checked-migration-runner.mjs`: до подключения он сверяет все SQL с `migration-manifest.json`, затем принимает только точный префикс ledger и применяет оставшиеся checked-in миграции последовательно в транзакциях. После этого `artifacts/api-server/src/index.ts` выполняет read-only `assertMigrationStateReady()`, затем `assertSecuritySchemaReady()`, и только потом `listen()`. Изменённый/незарегистрированный SQL, ошибка migration, отсутствующий auth/audit column/index или несовпадение ledger останавливают listener и polling с кодом 1. Runtime `drizzle-kit`, package manager, codegen и legacy `migrate.ts` запрещены. Каждый candidate обязан повторить CI gate на exact PR head; против production `DATABASE_URL` запуск без отдельного разрешения D-009 запрещён.
 
 Новый auth runtime требует migration `0009_famous_ma_gnuci.sql`, а session scope и access audit — `0010_outstanding_cargill.sql`. Обе прошли apply/rollback на одноразовом PostgreSQL 16 CI и не применялись к production. Нельзя выпускать auth-код до проверки `backup → restore → apply → session/CSRF/scope/audit smoke → rollback` на восстановленной репрезентативной sandbox-копии.
 
@@ -209,9 +209,9 @@ Production backup пока не выполнялся: доступ отсутс�
 6. зафиксировать инцидент и remediation;
 7. не возобновлять синхронизацию до проверки.
 
-## D080 — Продолжение защищённого выпуска кандидата
+## D081 — Продолжение защищённого выпуска кандидата
 
-Этот раздел относится только к R9/PR377 и D080; исторические запреты/описания других выпусков не переиспользуются как актуальная инструкция.
+Этот раздел относится только к R9/PR377 и D081; исторические запреты/описания других выпусков не переиспользуются как актуальная инструкция.
 
 При отказе до candidate auth boundary действует прежний проверенный pre-public rollback. После boundary не восстанавливать snapshot, не удалять candidate/rollback volume и не открывать непроверенный public route. Штатные auth/SSO записи ArtHello и независимое состояние School сохраняются.
 
@@ -220,3 +220,5 @@ Production backup пока не выполнялся: доступ отсутс�
 Если условие продолжения не выполнено, требуется конкретный новый проверенный forward-fix с сохранением текущей БД. Не использовать старые R1–R8, ручную подмену receipt, смену роли сотрудника, отключение sandbox или snapshot restore для обхода отказа. Разрешение на исходный выпуск уже предоставлено владельцем; новое общее согласование не заменяет техническую проверку.
 
 Результат считать готовым только после actual candidate PASS, публичного повторного прохода и исходной бизнес-приёмки. Успешный локальный тест/CI или ручной вход владельца не являются таким результатом.
+
+Уточнение идентичности 2026-09-09: пока кандидат PR377 проходил проверки, main обновился с 582edaf1a66a953edb2d61e03040d1a13e70a0ad до 59372b139fb0b2345cf3e41fc23c8223099b187f (checked PostgreSQL migrations), заняв D-080. Решению этого выпуска присвоен следующий свободный номер D-081. Технические имена файлов d080-*, схемы и маркеры ARTHELLO_D080 сохранены как неизменённые идентификаторы проверенного протокола; они относятся к D-081 и не запускают миграции PostgreSQL. Префикс активации нового выпуска — D081: guarded R9. Все изменения другого участника сохранены; R9 собирает отдельный v52 runtime с D1 и не выполняет deploy/api-entrypoint.sh или SQL0018.

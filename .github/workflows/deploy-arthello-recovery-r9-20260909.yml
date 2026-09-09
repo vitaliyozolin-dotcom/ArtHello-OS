@@ -1,7 +1,8 @@
-# D-080: fresh R9 identity; real candidate acceptance before public opening.
+# D-081: fresh R9 identity; real candidate acceptance before public opening.
+# Internal d080 helper names and state markers are the preserved R9 protocol.
 # D059/D063/D064/D065/D066/D067 controllers remain unchanged; failed repairs are not replayed.
 # Read-only School verification and pinned old-live 403 precede candidate acceptance; no School changes.
-name: Deploy ArtHello recovery R9 D080
+name: Deploy ArtHello recovery R9 D081
 'on':
   workflow_run:
     workflows:
@@ -23,7 +24,7 @@ env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
   EXPECTED_RELEASE_HEAD: codex/school-arthello-recovery-r9-20260909
   EXPECTED_RELEASE_PR: '377'
-  PREVIOUS_RELEASE_SHA: 582edaf1a66a953edb2d61e03040d1a13e70a0ad
+  PREVIOUS_RELEASE_SHA: 59372b139fb0b2345cf3e41fc23c8223099b187f
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -49,7 +50,7 @@ jobs:
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D080: guarded R9')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D081: guarded R9')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:

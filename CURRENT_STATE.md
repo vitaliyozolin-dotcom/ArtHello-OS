@@ -1,5 +1,12 @@
 # ArtHello OS — Current State
 
+## Refactoring Phase 2.3–2.4 — checked migrations and orphan schema retirement (2026-09-09)
+
+- D-080 делает manifest-verified checked-in Drizzle SQL единственным runtime-авторитетом миграций; `migrate.ts` и runtime `drizzle-kit` удалены из startup path.
+- Schema-diff на одноразовом PostgreSQL 16 подтвердил равенство конечного legacy и checked-in путей: normalized catalog SHA-256 `f0078f8046a7b986194e8ccc56ec583b80f026b412b612138af7fda7971079e0`. Это технический snapshot, не продуктовая метрика.
+- Миграция `0018_retire_orphan_chat` сохраняет доказанную legacy schema-дельту и удаляет только пустые общие `messages`/`conversations`; непустые таблицы блокируют транзакцию. Живые `front_office_messages`/`front_office_conversations` остаются.
+- API boot только читает полный migration ledger и security catalog до `listen()`/polling. Production применение по-прежнему запрещено без backup, restored-sandbox evidence и отдельного разрешения D-009.
+
 ## Production continuation R7 — 2026-09-08
 
 - R6 source PR361 is merged as eb47c1360fbd701876a3c49efe029194707304db; exact PR and main Quality, Proof, Verify passed, including 756 application tests.
@@ -15,7 +22,7 @@ Full R6 receipt and gate identifiers are retained on branch `codex/recovery-evid
 
 - D-077 закрепляет Drizzle builder как основной путь, допускает `db.execute(sql)` для отчётных запросов и запрещает новые `pool.query` точным сокращаемым baseline.
 - PGlite ограничен `scripts/`; policy-check включён в `lint` и агрегатный `test:refactoring` с поведенческими allow/deny/stale-baseline тестами.
-- Существующие запросы и бизнес-поведение не изменены. Фаза 2 не закрыта: остаются вывод `migrate.ts` из эксплуатации (2.3) и удаление сиротских схем с migration twin-proof (2.4).
+- Существующие запросы и бизнес-поведение не изменены. Шаги 2.3–2.4 завершены отдельным кандидатом D-080; до окончательного закрытия Фазы 2 остаются restored-sandbox, backup/rollback, удалённый CI и независимый Reviewer gate.
 
 ## Refactoring Phase 2.5 — lazy configuration checkpoint (2026-09-08)
 
