@@ -121,6 +121,7 @@ jobs:
           set -Eeuo pipefail
           bash -n deploy/activate-git-transport.sh
           sh -n deploy/api-entrypoint.sh
+          python3 -I .github/scripts/test-d082-route-diagnostic.py
           grep -F 'db_workspace=/app/lib/db' deploy/api-entrypoint.sh
           grep -F 'cd "$db_workspace"' deploy/api-entrypoint.sh
           grep -F 'node "$checked_runner"' deploy/api-entrypoint.sh
@@ -189,3 +190,4 @@ jobs:
           path: ci-provenance/
           if-no-files-found: error
           retention-days: 30
+
