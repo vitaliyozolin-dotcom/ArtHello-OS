@@ -101,7 +101,7 @@ current_prefix = readonly.fetch('run').split("printf 'SCHOOL_DIAGNOSTIC_FILE=").
 raise 'Readonly School probe changed' unless preserved_prefix == current_prefix
 steps[steps.index(before)] = readonly
 %w[cutover].each {|id| steps[steps.index {|step| step['id'] == id}] = actual_steps.find {|step| step['id'] == id}}
-steps.last = actual_steps.last
+steps[-1] = actual_steps.last
 post = steps.find {|step| step['name'] == 'School diagnostic and real browser acceptance after cutover'}
 post['run'] = post.fetch('run').sub('run-r8-live-browser.sh', 'run-r9-live-browser.sh')
 ['Verify retained candidate before any replay skip','Verify actual gateway Caddy with isolated candidate fixture'].each do |name|
