@@ -33,7 +33,7 @@ RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* |
     && node /app/scripts/patch-school-sso-entry.mjs \
     && node /app/scripts/patch-css-budget-shell-split.mjs \
     && node /app/scripts/verify-system-wide-operational-shells.mjs \
-    && echo "e78978c13431d32a0db2db25da73f24fd6245703aa14d4cb3ec34647324f6f40  /app/db/index.ts" | sha256sum -c - \
+    && echo "36632d3d24e6297db6b687731eccac1ae80c6500004dcd26d9a81af250c6c89a  /app/db/index.ts" | sha256sum -c - \
     && node /app/scripts/patch-finance-operation-allocation.mjs \
     && node /app/scripts/patch-finance-operation-allocation-css-scope.mjs \
     && node /app/scripts/patch-tochka-pending-lifecycle.mjs \
