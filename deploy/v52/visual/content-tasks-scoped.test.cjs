@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const vm = require("node:vm");
 const scoped = require("./content-tasks-scoped.cjs");
 
 const validEnvironment = () => ({
@@ -102,6 +103,102 @@ test("instrumentation inserts only the one explicit number assertion after the e
   assert.equal(changed.replace(injection, ""), prefix);
   assert.throws(() => scoped.instrumentHarness("no heading"));
   assert.throws(() => scoped.instrumentHarness(scoped.TASK_HEADING.repeat(2)));
+});
+
+const overviewPermissions = { canManageAll: true, canApprove: true, canManageDocuments: true };
+const detailPermissions = { canView: true, canManage: true, canComment: true, canApprove: true };
+const overviewInsertion = "  permissions: { canManageAll: true, canApprove: true, canManageDocuments: true },\n";
+const detailInsertion = "  permissions: { canView: true, canManage: true, canComment: true, canApprove: true },\n";
+
+function frozenPrefix() {
+  const filename = process.env.HARNESS_TEST_SOURCE || path.join(__dirname, "contractors-design-system.cjs");
+  const bytes = fs.readFileSync(filename);
+  assert.equal(scoped.gitBlob(bytes), scoped.HARNESS_BLOB);
+  return scoped.detachHarness(bytes.toString("utf8"));
+}
+
+function workflowFixtures(prefix) {
+  const start = "const emptyWorkflow = {\n";
+  const end = "const emptyLegal = {\n";
+  assert.equal(prefix.split(start).length, 2);
+  assert.equal(prefix.split(end).length, 2);
+  const block = prefix.slice(prefix.indexOf(start), prefix.indexOf(end));
+  return vm.runInNewContext(block + "\n({ emptyWorkflow, populatedWorkflow, populatedWorkflowDetail })", {}, { timeout: 1000 });
+}
+
+test("compiled scoped harness supplies compatible overview fixtures before browser navigation", async () => {
+  const filename = process.env.HARNESS_TEST_SOURCE || path.join(__dirname, "contractors-design-system.cjs");
+  const harness = scoped.loadHarness(fs.readFileSync(filename), { chromium: { launch() { throw new Error("no browser launch"); } } });
+  for (const mode of ["empty", "populated"]) {
+    let payload;
+    const captured = new Error("fixture captured before navigation");
+    const browser = { async newContext() { return {
+      async route(endpoint, handler) {
+        assert.equal(endpoint.test("http://localhost:18082/api/work-items"), true);
+        await handler({ async fulfill(response) {
+          assert.equal(response.status, 200);
+          payload = JSON.parse(response.body);
+          throw captured;
+        } });
+      },
+    }; } };
+    await assert.rejects(harness.captureWaveRoute(browser, harness.pilotUrl, {}, "pilot", [390, 844], "tasks", mode), (error) => error === captured);
+    // Same accepted Documents-tab read as WorkflowWorkspace.tsx line 174.
+    assert.equal(payload.permissions.canManageDocuments, true);
+    assert.deepEqual(payload.permissions, overviewPermissions);
+  }
+});
+
+test("fixture compatibility adds only the accepted synthetic-owner permission objects", () => {
+  const prefix = frozenPrefix();
+  const changed = scoped.adaptWorkflowFixtures(prefix);
+  assert.equal(changed.split(overviewInsertion).length, 2);
+  assert.equal(changed.split(detailInsertion).length, 2);
+  assert.equal(changed.replace(overviewInsertion, "").replace(detailInsertion, ""), prefix);
+  const original = workflowFixtures(prefix);
+  const adapted = workflowFixtures(changed);
+  for (const name of ["emptyWorkflow", "populatedWorkflow", "populatedWorkflowDetail"]) {
+    const actual = JSON.parse(JSON.stringify(adapted[name]));
+    assert.deepEqual(actual.permissions, name === "populatedWorkflowDetail" ? detailPermissions : overviewPermissions);
+    delete actual.permissions;
+    assert.deepEqual(actual, JSON.parse(JSON.stringify(original[name])));
+  }
+  assert.equal(adapted.populatedWorkflow.tasks[0].id, 801);
+  assert.equal(adapted.populatedWorkflowDetail.task.id, 801);
+});
+
+test("fixture transformation refuses missing, duplicated, changed or already adapted boundaries", () => {
+  const prefix = frozenPrefix();
+  for (const boundary of [scoped.WORKFLOW_OVERVIEW_FIXTURE, scoped.WORKFLOW_DETAIL_FIXTURE]) {
+    for (const changed of [
+      prefix.replace(boundary, ""),
+      prefix.replace(boundary, boundary + boundary),
+      prefix.replace(boundary, boundary.replace(" = {", " =  {")),
+    ]) assert.throws(() => scoped.adaptWorkflowFixtures(changed), /fixture boundary/);
+  }
+  assert.throws(() => scoped.adaptWorkflowFixtures(scoped.adaptWorkflowFixtures(prefix)), /fixture boundary/);
+});
+
+test("original fixtures fail the accepted component permission reads and adapted fixtures satisfy them", () => {
+  const filename = process.env.WORKFLOW_TEST_SOURCE || path.join(__dirname, "../overrides/app/components/WorkflowWorkspace.tsx");
+  const bytes = fs.readFileSync(filename);
+  // Exact accepted R12 app 77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed.
+  assert.equal(scoped.gitBlob(bytes), "4a8f839a6f2ab52a504973319d05b44596699487");
+  const reads = [...new Set(bytes.toString("utf8").match(/\b(?:data|detail)\.permissions\.[A-Za-z]+/g))].sort();
+  assert.deepEqual(reads, ["data.permissions.canManageDocuments", "detail.permissions.canApprove", "detail.permissions.canManage"]);
+  const prefix = frozenPrefix();
+  const original = workflowFixtures(prefix);
+  const adapted = workflowFixtures(scoped.adaptWorkflowFixtures(prefix));
+  for (const overview of ["emptyWorkflow", "populatedWorkflow"]) {
+    for (const expression of reads) {
+      assert.throws(() => vm.runInNewContext(expression, {
+        data: original[overview], detail: original.populatedWorkflowDetail,
+      }, { timeout: 1000 }), /Cannot read properties of undefined/);
+      assert.equal(vm.runInNewContext(expression, {
+        data: adapted[overview], detail: adapted.populatedWorkflowDetail,
+      }, { timeout: 1000 }), true);
+    }
+  }
 });
 
 test("dependency adapter permits only fixed imports and full Chromium sandbox launch", async () => {

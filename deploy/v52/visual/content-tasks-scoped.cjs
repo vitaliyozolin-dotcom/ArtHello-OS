@@ -13,6 +13,19 @@ const UPSTREAM = "http://visual-app:8081";
 const OUTPUT = "/screens";
 const IIFE_MARKER = "\n(async () => {\n";
 const TASK_HEADING = '  await page.getByRole("heading", { name: "Проверить результат visual fixture", exact: true }).waitFor({ state: "visible", timeout: 30000 });\n';
+const WORKFLOW_OVERVIEW_FIXTURE = `const emptyWorkflow = {
+  tasks: [],
+  notifications: [],
+  escalations: [],
+  documents: [],
+  obligations: [],
+  assignees: [],
+  stats: { open: 0, overdue: 0, waitingApproval: 0, escalations: 0 },
+};
+`;
+const WORKFLOW_DETAIL_FIXTURE = `const populatedWorkflowDetail = {
+  task: { ...populatedWorkflow.tasks[0], priority: "Высокий", status: "Входящие" },
+`;
 const ROUTES = Object.freeze(["content", "tasks"]);
 const VIEWPORTS = Object.freeze([Object.freeze([390, 844]), Object.freeze([1440, 900])]);
 const EXPORTS = "\nmodule.exports = { chromium, pilotUrl, manifest, persist, startLoopbackProxy, closeServer, establishAuth, captureWaveRoute, assertWaveStructure, assertWaveEmptyTypography, assertWavePopulated, captureWorkflowDialog };\n";
@@ -33,6 +46,20 @@ function detachHarness(source) {
 function instrumentHarness(prefix) {
   if (prefix.split(TASK_HEADING).length !== 2) throw new Error("Frozen task heading boundary differs");
   return prefix.replace(TASK_HEADING, TASK_HEADING + "  await assertTaskNumber(dialog);\n");
+}
+
+function adaptWorkflowFixtures(prefix) {
+  if (prefix.split(WORKFLOW_OVERVIEW_FIXTURE).length !== 2 ||
+      prefix.split(WORKFLOW_DETAIL_FIXTURE).length !== 2) {
+    throw new Error("Frozen workflow fixture boundary differs");
+  }
+  // Accepted R12 /api/work-items emits these exact permissions for the existing
+  // synthetic OWNER. populatedWorkflow inherits the overview object by spread.
+  return prefix
+    .replace(WORKFLOW_OVERVIEW_FIXTURE, WORKFLOW_OVERVIEW_FIXTURE.replace("\n",
+      "\n  permissions: { canManageAll: true, canApprove: true, canManageDocuments: true },\n"))
+    .replace(WORKFLOW_DETAIL_FIXTURE, WORKFLOW_DETAIL_FIXTURE.replace("\n",
+      "\n  permissions: { canView: true, canManage: true, canComment: true, canApprove: true },\n"));
 }
 
 // This is the sole additional UI assertion. The existing header also contains
@@ -76,13 +103,14 @@ function loadHarness(bytes, playwrightCore) {
   const source = bytes.toString("utf8");
   if (!Buffer.from(source, "utf8").equals(bytes)) throw new Error("Frozen harness encoding differs");
   const prefix = detachHarness(source);
-  const instrumented = instrumentHarness(prefix);
+  const instrumented = instrumentHarness(adaptWorkflowFixtures(prefix));
   const compiled = new Module(HARNESS_PATH, module);
   compiled.filename = HARNESS_PATH;
   compiled.paths = [];
   compiled.require = harnessRequire(playwrightCore);
-  // Only the verified source prefix is evaluated. Its sole modification is the
-  // explicit task-number assertion; the full-suite IIFE never executes.
+  // Only the verified source prefix is evaluated. Its changes are the two fixed
+  // fixture permission objects and explicit task-number assertion; the full-suite
+  // IIFE never executes, and all original UI assertions remain intact.
   compiled._compile(instrumented + "\n" + assertTaskNumber.toString() + "\n" + EXPORTS, HARNESS_PATH);
   return compiled.exports;
 }
@@ -226,6 +254,7 @@ async function main() {
 }
 
 module.exports = { HARNESS_BLOB, IIFE_MARKER, TASK_HEADING, detachHarness, instrumentHarness, gitBlob,
+  WORKFLOW_OVERVIEW_FIXTURE, WORKFLOW_DETAIL_FIXTURE, adaptWorkflowFixtures,
   harnessRequire, loadHarness, validateEnvironment, assertTaskNumber, assertWorkflowDialog,
   runChecks, expectedPngNames, verifyArtifacts, writeScopedResult };
 
