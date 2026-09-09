@@ -1085,3 +1085,15 @@ Hosted inspection run `34337932856` / job `102421685466` на source `0e8e75ffd7
 
 При ошибке sync_commit планировщик сохраняет только фиксированный `commitFailureKind`, никогда сообщение исключения. Lease, доступ, credential generation, пауза и backoff остаются прежними. Локально воспроизведённая коллизия не объявляется установленной причиной live-сбоя без отдельного доказательства. Приёмка требует реальных операций по четырём счетам и сверки ДДС. Mini-spec и проверка миграции: `docs/acceptance/2026-09-09-tochka-account-identity.md`.
 
+
+
+## D-098 — R14 для сохранения операций Точки
+
+Дата: 2026-09-09. Владелец — Виталий; продолжение разрешённого исправления и публикации. Цель — доставить D097, согласующий уникальность банковской операции с её счётом, и получить реальные операции в реестре и ДДС. PR397 объединён в `e74e41d9b6d49f8854e8ad50b0cffc0a6b2cde80` после четырёх успешных exact-head gates. Последнее наблюдение production 17:30Z: четыре счёта, 12 READY imports, ноль bank/finance rows, failureStage=sync_commit; следующий обычный запуск 22:01:53.357Z. Коллизия воспроизведена локально, точная причина live exception пока не доказана.
+
+Новый выпуск закреплён на PR398, branch `codex/arthello-r14-20260909`, parent `e74e41d9b6d49f8854e8ad50b0cffc0a6b2cde80`. Принятый live baseline — R13 source `f5fa3e46e3510e6fc98ae4455f4b499c0ba30695`, producing run34340461537, image `sha256:99b77401c79bb439d3ecbc06d6895b22aae311b3264c27be7dcdf9fabb4b3554`. Backup service остаётся принятым R12; его история и данные сохраняются. Перед cutover требуется свежий snapshot и точная проверка всех canonical consumers. Остановленные R12 и R11 predecessors допускаются только каждый со своим проверенным историческим receipt. Любой другой consumer блокирует выпуск.
+
+R14 воспроизводит принятый R13 controller через закреплённую трансформацию, новые history/live/adoption adapters и natural browser wrapper. Сам frozen R13 не перезапускается. Выполненные active R13 deploy/verify workflows заменяются R14 парой; R12 и R13 contracts остаются обязательными отдельными jobs на exact source с архивными YAML comparison fixtures. Active budget14 не увеличивается. Retire helper касается только точного unused R13 browser image при двух свежих recoverability проверках; app/worker/containers/volumes не удаляются.
+
+Сохраняются auth, scope четырёх счетов, даты, scheduler lease/generation/backoff и все границы публикации. После potential seal, candidate authentication или public start запрещено восстановление старых данных; rollback кода не сужает account-scoped индекс. До production запуска необходимы review итогового SHA/tree/diff и успешные exact-head Quality, Proof, v52 и все три R14 verification jobs. Production PASS и финансовая приёмка объявляются отдельно по фактическим receipts и обычному банковскому запуску. Stop: source/identity drift, нарушение backup/data boundaries, недостаточная capacity, неуспешные проверки либо отказ владельца.
+
