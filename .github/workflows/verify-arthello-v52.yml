@@ -53,6 +53,13 @@ on:
       - .github/scripts/r8-live-browser-acceptance.py
       - .github/scripts/test-r8-live-browser-acceptance.py
       - .github/scripts/run-r8-live-browser.sh
+      - .github/workflows/deploy-arthello-recovery-r9-20260909.yml
+      - .github/scripts/check-recovery-r9-contract.rb
+      - .github/scripts/d080-replay-guard.py
+      - .github/scripts/test-d080-replay-guard.py
+      - .github/scripts/r9-live-browser-acceptance.py
+      - .github/scripts/test-r9-live-browser-acceptance.py
+      - .github/scripts/run-r9-live-browser.sh
       - .github/scripts/check-recovery-r7-contract.rb
       - .github/scripts/check-school-live-acceptance-r7.py
       - .github/scripts/d069-replay-guard.py
@@ -133,6 +140,13 @@ on:
       - .github/scripts/r8-live-browser-acceptance.py
       - .github/scripts/test-r8-live-browser-acceptance.py
       - .github/scripts/run-r8-live-browser.sh
+      - .github/workflows/deploy-arthello-recovery-r9-20260909.yml
+      - .github/scripts/check-recovery-r9-contract.rb
+      - .github/scripts/d080-replay-guard.py
+      - .github/scripts/test-d080-replay-guard.py
+      - .github/scripts/r9-live-browser-acceptance.py
+      - .github/scripts/test-r9-live-browser-acceptance.py
+      - .github/scripts/run-r9-live-browser.sh
       - .github/scripts/check-recovery-r7-contract.rb
       - .github/scripts/check-school-live-acceptance-r7.py
       - .github/scripts/d069-replay-guard.py
@@ -490,6 +504,10 @@ jobs:
           python3 -I .github/scripts/test-d078-replay-guard.py
           python3 -I .github/scripts/test-r8-live-browser-acceptance.py
           bash -n .github/scripts/run-r8-live-browser.sh
+          ruby .github/scripts/check-recovery-r9-contract.rb
+          python3 -I .github/scripts/test-d080-replay-guard.py
+          python3 -I .github/scripts/test-r9-live-browser-acceptance.py
+          bash -n .github/scripts/run-r9-live-browser.sh
           python3 -I .github/scripts/test-recovery-r7-gates.py
           python3 -I .github/scripts/test-r7-backup-runtime.py
           python3 -I -B deploy/v52/backup/test_worker.py

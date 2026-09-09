@@ -36,6 +36,18 @@ export function validateCredentials(input) {
   return { login, password };
 }
 
+export function validateMaintenanceNonce(value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || value.length !== 64 || !/^[a-f0-9]{64}$/.test(value)) throw Error('candidate_nonce_invalid');
+  return value;
+}
+
+export function validateBrowserInput(input) {
+  const credentials = validateCredentials(input);
+  const maintenanceNonce = validateMaintenanceNonce(input?.maintenanceNonce);
+  return maintenanceNonce === undefined ? credentials : { ...credentials, maintenanceNonce };
+}
+
 export function validateEmployee(user) {
   if (!user?.userId || user.isSystemOwner !== false || user.apiRole === 'OWNER' || user.role === 'owner') throw Error('dedicated_employee_required');
   if (user.mustChangePassword !== false) throw Error('permanent_password_required');
@@ -90,6 +102,38 @@ export async function installNetworkBoundary(context) {
     return route.continue();
   });
   await context.routeWebSocket('**/*', socket => socket.close());
+}
+
+// Keep the context-wide network/write policy above active for every page.
+// Never set this secret with Playwright route.continue headers: Playwright
+// carries those overrides across redirects. CDP Fetch.continueRequest applies
+// its header override to one request only, including each real redirect hop.
+// https://chromedevtools.github.io/devtools-protocol/tot/Fetch/#method-continueRequest
+export async function installCandidateGate(context, page, value) {
+  const nonce = validateMaintenanceNonce(value);
+  if (!nonce || page.context() !== context) throw Error('candidate_nonce_invalid');
+  const session = await context.newCDPSession(page);
+  let failed = false;
+  let loginAttempts = 0;
+  session.on('Fetch.requestPaused', async event => {
+    try {
+      const request = event.request;
+      if (failed || !requestAllowed(request.url, request.method) || (request.method === 'POST' && ++loginAttempts > 1)) {
+        await session.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'BlockedByClient' });
+        return;
+      }
+      const headers = Object.entries(request.headers).filter(([name]) => !['authorization', 'x-arthello-candidate-gate'].includes(name.toLowerCase()))
+        .map(([name, headerValue]) => ({ name, value: String(headerValue) }));
+      if (new URL(request.url).origin === ARTHELLO) headers.push({ name: 'Authorization', value: 'ArtHelloCandidate ' + nonce });
+      await session.send('Fetch.continueRequest', { requestId: event.requestId, headers });
+    } catch {
+      failed = true;
+      await session.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'BlockedByClient' }).catch(() => {});
+      await context.close().catch(() => {});
+    }
+  });
+  await session.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
+  return { assertHealthy() { if (failed) throw Error('candidate_network_boundary_failed'); } };
 }
 
 // Production and hosted fixture execute this same interaction. No API-created

@@ -8,6 +8,63 @@ import * as browserFlow from '../../deploy/browser/flow.mjs';
 import { retirePreviousBrowserImage, retireCurrentBrowserImage } from '../../deploy/browser/retire-image.mjs';
 
 const employee = { userId: 'fixture-id', isSystemOwner: false, apiRole: 'EMPLOYEE', role: 'viewer', mustChangePassword: false, allowedModules: ['education'] };
+test('candidate input preserves normal credentials and admits only an optional strict nonce', () => {
+  const credentials = { login: 'fixture@example.invalid', password: 'fixture-private-password' };
+  assert.deepEqual(browserFlow.validateBrowserInput(credentials), credentials);
+  const nonce = 'a'.repeat(64);
+  assert.deepEqual(browserFlow.validateBrowserInput({ ...credentials, maintenanceNonce: nonce }), { ...credentials, maintenanceNonce: nonce });
+  for (const maintenanceNonce of [null, '', 'a'.repeat(63), 'a'.repeat(65), 'A'.repeat(64), nonce + '\n', 'PRIVATE_NONCE', 123, {}, ['a'.repeat(64)]]) {
+    assert.throws(() => browserFlow.validateBrowserInput({ ...credentials, maintenanceNonce }), /^Error: candidate_nonce_invalid$/);
+  }
+});
+
+async function candidateHarness(failContinue = false) {
+  const calls = [];
+  let paused;
+  let closed = false;
+  const session = {
+    on(event, callback) { assert.equal(event, 'Fetch.requestPaused'); paused = callback; },
+    async send(method, params) {
+      calls.push({ method, params });
+      if (failContinue && method === 'Fetch.continueRequest') throw Error('PRIVATE_TRANSPORT_DETAIL');
+    },
+  };
+  const context = { async newCDPSession() { return session; }, async close() { closed = true; } };
+  const page = { context() { return context; } };
+  const gate = await browserFlow.installCandidateGate(context, page, '7'.repeat(64));
+  return { gate, calls, isClosed: () => closed, request: async (url, method = 'GET', headers = {}) => {
+    await paused({ requestId: String(calls.length), request: { url, method, headers } });
+    return calls.at(-1);
+  } };
+}
+
+test('candidate header belongs only to the current ArtHello hop, preserving session cookies', async () => {
+  const h = await candidateHarness();
+  let result = await h.request(browserFlow.ARTHELLO + '/api/school-sso/authorize?state=fixture', 'GET', { Cookie: 'ordinary-session', Authorization: 'stale', 'X-Arthello-Candidate-Gate': 'stale' });
+  assert.equal(result.method, 'Fetch.continueRequest');
+  assert.deepEqual(result.params.headers, [{ name: 'Cookie', value: 'ordinary-session' }, { name: 'Authorization', value: 'ArtHelloCandidate ' + '7'.repeat(64) }]);
+  result = await h.request(browserFlow.SCHOOL + '/auth/central/callback?code=fixture', 'GET', { Authorization: 'ArtHelloCandidate ' + '7'.repeat(64), Cookie: 'school-session' });
+  assert.deepEqual(result.params.headers, [{ name: 'Cookie', value: 'school-session' }]);
+  h.gate.assertHealthy();
+  assert.equal(h.isClosed(), false);
+});
+
+test('candidate transport rejects forbidden writes and a second login at every redirect hop', async () => {
+  const h = await candidateHarness();
+  assert.equal((await h.request(browserFlow.ARTHELLO + '/api/auth/login', 'POST')).method, 'Fetch.continueRequest');
+  for (const [url, method] of [[browserFlow.ARTHELLO + '/api/auth/login', 'POST'], [browserFlow.ARTHELLO + '/api/finance', 'POST'],
+    [browserFlow.SCHOOL + '/api/school', 'POST'], ['https://example.invalid/', 'GET'], ['http://arthello-188-225-38-55.sslip.io/', 'GET']]) {
+    assert.equal((await h.request(url, method)).method, 'Fetch.failRequest');
+  }
+  h.gate.assertHealthy();
+});
+
+test('a candidate interceptor error closes the context and emits no transport detail', async () => {
+  const h = await candidateHarness(true);
+  await h.request(browserFlow.ARTHELLO + '/');
+  assert.equal(h.isClosed(), true);
+  assert.throws(() => h.gate.assertHealthy(), /^Error: candidate_network_boundary_failed$/);
+});
 test('capacity reserves expanded import copies, both download copies and host headroom', () => {
   assert.deepEqual(capacity(1024, 4096), { scratchKiB: RESERVE_KIB + 2, dockerKiB: RESERVE_KIB + 14 });
   for (const values of [[0, 1], [1, 0], [-1, 4], [2, 1], [NaN, 4], [1.5, 4], [1, 101 * 1024 ** 3]]) {

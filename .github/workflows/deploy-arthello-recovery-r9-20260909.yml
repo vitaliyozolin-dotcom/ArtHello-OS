@@ -1,0 +1,2948 @@
+# D-080: fresh R9 identity; real candidate acceptance before public opening.
+# D059/D063/D064/D065/D066/D067 controllers remain unchanged; failed repairs are not replayed.
+# Read-only School verification and pinned old-live 403 precede candidate acceptance; no School changes.
+name: Deploy ArtHello recovery R9 D080
+'on':
+  workflow_run:
+    workflows:
+    - Verify ArtHello v52 release
+    types:
+    - completed
+    branches:
+    - main
+permissions:
+  actions: read
+  contents: read
+  deployments: read
+  pull-requests: read
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+  queue: max
+env:
+  EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
+  EXPECTED_RELEASE_HEAD: codex/school-arthello-recovery-r9-20260909
+  EXPECTED_RELEASE_PR: '0'
+  PREVIOUS_RELEASE_SHA: 582edaf1a66a953edb2d61e03040d1a13e70a0ad
+  RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+  TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
+  PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+  PUBLIC_HOST: arthello-188-225-38-55.sslip.io
+  SCHOOL_URL: https://school-188-225-38-55.sslip.io
+  CADDY_CONTAINER: stroios-caddy-1
+  DATA_VOLUME: arthello-direct-v44-data
+  CHECKED_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+  BROWSER_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+jobs:
+  bundle:
+    if: |-
+      github.event_name == 'workflow_run' && github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.repository_owner == 'vitaliyozolin-dotcom' && github.event.workflow_run.name == 'Verify ArtHello v52 release' && (
+        github.event.workflow_run.path == '.github/workflows/verify-arthello-v52.yml' ||
+        github.event.workflow_run.path == '.github/workflows/verify-arthello-v52.yml@main'
+      ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt >= 1 && (
+        github.event.workflow_run.pull_requests[0] == null ||
+        (
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/school-arthello-recovery-r9-20260909' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('0') &&
+          github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
+          github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
+          github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
+          github.event.workflow_run.pull_requests[1] == null
+        )
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D080: guarded R9')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      archive_name: ${{ steps.bundle.outputs.archive_name }}
+      archive_sha: ${{ steps.bundle.outputs.archive_sha }}
+      fingerprint: ${{ steps.bundle.outputs.fingerprint }}
+      archive_bytes: ${{ steps.bundle.outputs.archive_bytes }}
+      expanded_bytes: ${{ steps.bundle.outputs.expanded_bytes }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CHECKED_SOURCE_SHA }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Test browser policy and install locked package off the VPS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          node --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs
+          bash -n scripts/run-server-browser.sh
+          corepack enable
+          corepack pnpm@11.7.0 --dir deploy/browser install --ignore-workspace --frozen-lockfile
+      - name: Build immutable bundle and exercise Chromium sandbox and natural flow fixture
+        id: bundle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tag="arthello-e2e:$CHECKED_SOURCE_SHA"
+          docker build --platform linux/amd64 --build-arg "SOURCE_SHA=$CHECKED_SOURCE_SHA" -t "$tag" deploy/browser
+          image_id="$(docker image inspect "$tag" --format '{{.Id}}')"
+          timeout --signal=TERM --kill-after=10 90 docker run --rm --init \
+            --pull never --user 1000:1000 --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --security-opt "seccomp=$PWD/deploy/browser/seccomp.json" \
+            --memory 1g --memory-swap 1g --cpus 1 --pids-limit 256 --shm-size 128m \
+            --tmpfs /tmp:rw,nosuid,nodev,size=512m,uid=1000,gid=1000,mode=700 \
+            "$image_id" --smoke
+          mkdir -p "$RUNNER_TEMP/browser-bundle"
+          docker save "$tag" | gzip -1 -n > "$RUNNER_TEMP/browser-bundle/browser.tar.gz"
+          archive_sha="$(sha256sum "$RUNNER_TEMP/browser-bundle/browser.tar.gz" | cut -d ' ' -f 1)"
+          fingerprint="$(docker image inspect "$image_id" | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq | sha256sum | cut -d ' ' -f 1)"
+          printf 'archive_sha=%s\nfingerprint=%s\n' "$archive_sha" "$fingerprint" >> "$GITHUB_OUTPUT"
+          printf 'archive_name=server-browser-%s-%s-%s\n' "$CHECKED_SOURCE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          archive_bytes="$(stat -c %s "$RUNNER_TEMP/browser-bundle/browser.tar.gz")"
+          expanded_bytes="$(gzip -cd "$RUNNER_TEMP/browser-bundle/browser.tar.gz" | wc -c)"
+          printf 'archive_bytes=%s\nexpanded_bytes=%s\n' "$archive_bytes" "$expanded_bytes" >> "$GITHUB_OUTPUT"
+          printf 'BROWSER_BUNDLE_BYTES archive=%s expanded=%s\n' "$archive_bytes" "$expanded_bytes"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.bundle.outputs.archive_name }}
+          path: ${{ runner.temp }}/browser-bundle/browser.tar.gz
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error
+
+  deploy:
+    needs: bundle
+    env:
+      BROWSER_FINGERPRINT: ${{ needs.bundle.outputs.fingerprint }}
+    if: |-
+      github.event_name == 'workflow_run' && github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.repository_owner == 'vitaliyozolin-dotcom' && github.event.workflow_run.name == 'Verify ArtHello v52 release' && (
+        github.event.workflow_run.path == '.github/workflows/verify-arthello-v52.yml' ||
+        github.event.workflow_run.path == '.github/workflows/verify-arthello-v52.yml@main'
+      ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt >= 1 && (
+        github.event.workflow_run.pull_requests[0] == null ||
+        (
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/school-arthello-recovery-r9-20260909' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('0') &&
+          github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
+          github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
+          github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
+          github.event.workflow_run.pull_requests[1] == null
+        )
+      )
+    runs-on:
+    - self-hosted
+    - linux
+    - x64
+    - arthello-gateway
+    timeout-minutes: 240
+    environment: production-ru
+    concurrency:
+      group: school-1-11-production
+      cancel-in-progress: false
+      queue: max
+    steps:
+    - name: Verify D080 R9 identity and preserved R5 R8 abort boundary
+      timeout-minutes: 4
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -Eeuo pipefail
+        test "$GITHUB_EVENT_NAME" = workflow_run
+        test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+        [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+        [[ "$TRIGGER_VERIFY_RUN_ID" =~ ^[0-9]+$ ]]
+        [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+        [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+        [[ "$EXPECTED_RELEASE_PR" =~ ^[0-9]+$ ]]
+        [[ "$PREVIOUS_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+        test "$RELEASE_SHA" != "$PREVIOUS_RELEASE_SHA"
+
+        api="https://api.github.com/repos/$GITHUB_REPOSITORY"
+        headers=(
+          --header "Authorization: Bearer $GH_TOKEN"
+          --header "Accept: application/vnd.github+json"
+          --header "X-GitHub-Api-Version: 2022-11-28"
+        )
+        trigger_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+          "${headers[@]}" "$api/actions/runs/$TRIGGER_VERIFY_RUN_ID")"
+        jq -e \
+          --argjson run_id "$TRIGGER_VERIFY_RUN_ID" \
+          --arg sha "$RELEASE_SHA" \
+          --arg repository "$EXPECTED_REPOSITORY" '
+            .id == $run_id and
+            .name == "Verify ArtHello v52 release" and
+            (.path == ".github/workflows/verify-arthello-v52.yml" or
+             .path == ".github/workflows/verify-arthello-v52.yml@main") and
+            .event == "push" and
+            .head_branch == "main" and
+            .head_sha == $sha and
+            .run_attempt == 1 and
+            .status == "completed" and
+            .conclusion == "success" and
+            .repository.full_name == $repository and
+            .head_repository.full_name == $repository and
+            .actor.login == "vitaliyozolin-dotcom" and
+            .triggering_actor.login == "vitaliyozolin-dotcom"
+          ' <<<"$trigger_json" >/dev/null
+
+        release_pr_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+          "${headers[@]}" "$api/pulls/$EXPECTED_RELEASE_PR")"
+        jq -e \
+          --arg sha "$RELEASE_SHA" \
+          --arg repository "$EXPECTED_REPOSITORY" \
+          --arg expected_head "$EXPECTED_RELEASE_HEAD" \
+          --argjson expected_pr "$EXPECTED_RELEASE_PR" '
+            .number == $expected_pr and
+            .state == "closed" and
+            .merged == true and
+            .merged_at != null and
+            .base.ref == "main" and
+            .base.repo.full_name == $repository and
+            .head.ref == $expected_head and
+            .head.repo.full_name == $repository and
+            .merge_commit_sha == $sha and
+            .user.login == "vitaliyozolin-dotcom" and
+            .merged_by.login == "vitaliyozolin-dotcom"
+          ' <<<"$release_pr_json" >/dev/null
+
+        python3 -I - <<'D080_REPLAY'
+        import json, os, urllib.request
+        
+        INSTALL_SHA = 'ee8f3080d941a12be357eec0fd1d902acd01a2f9'
+        INSTALL_RUN = 34208952716
+        INSTALL_JOB = 102005327418
+        INSTALL_PATH = '.github/workflows/deploy-arthello-recovery-r5-20260908.yml'
+        CONSUMER_PATH = '.github/workflows/deploy-arthello-recovery-r9-20260909.yml'
+        PREVIOUS_SHA = 'eb47c1360fbd701876a3c49efe029194707304db'
+        PREVIOUS_RUN = 34221458013
+        PREVIOUS_JOB = 102045375780
+        PREVIOUS_PATH = '.github/workflows/deploy-arthello-recovery-r6-20260908.yml'
+        
+        def safe_previous_job(job):
+            if job.get('status') != 'completed':
+                return False
+            if job.get('conclusion') == 'skipped' and not job.get('steps'):
+                return True
+            cutovers = [step for step in job.get('steps', []) if step.get('name') == 'Clone preflight and guarded production cutover']
+            verifications = [step for step in job.get('steps', []) if step.get('name') == 'Verify installed R5 School relay with fresh receipt']
+            return (len(cutovers) == 1 and cutovers[0].get('conclusion') == 'skipped' and
+                    len(verifications) == 1 and verifications[0].get('conclusion') in ('success', 'skipped'))
+        
+        def validate_installation(run, jobs, repository):
+            assert run['id'] == INSTALL_RUN and run['head_sha'] == INSTALL_SHA
+            assert run['path'].split('@')[0] == INSTALL_PATH
+            assert run['repository']['full_name'] == repository and run['head_repository']['full_name'] == repository
+            assert run['event'] == 'workflow_run' and run['head_branch'] == 'main'
+            assert run['actor']['login'] == 'vitaliyozolin-dotcom' and run['triggering_actor']['login'] == 'vitaliyozolin-dotcom'
+            assert run['run_attempt'] == 1 and run['status'] == 'completed' and run['conclusion'] == 'failure'
+            assert jobs['total_count'] == len(jobs['jobs']) == 1
+            job = jobs['jobs'][0]
+            assert job['id'] == INSTALL_JOB and job['name'] == 'deploy' and job['run_attempt'] == 1
+            assert job['status'] == 'completed' and job['conclusion'] == 'failure'
+            expectations = {
+                'Repair School egress configuration with durable receipt': 'success',
+                'Read-only School diagnostic and real browser acceptance': 'failure',
+                'Clone preflight and guarded production cutover': 'skipped',
+            }
+            for name, conclusion in expectations.items():
+                matching = [step for step in job['steps'] if step.get('name') == name]
+                assert len(matching) == 1 and matching[0].get('conclusion') == conclusion
+        
+        def validate_previous_attempt(jobs, attempt):
+            assert jobs['total_count'] == len(jobs['jobs']), 'Attempt jobs pagination incomplete'
+            names = [job['name'] for job in jobs['jobs']]
+            assert len(names) == 2 and len(names) == len(set(names)), 'Incomplete or duplicate release jobs'
+            assert set(names) == {'bundle', 'deploy'}, 'Missing or unknown release capability job'
+            for job in jobs['jobs']:
+                assert job['run_attempt'] == attempt
+                if job['name'] == 'bundle':
+                    assert job['status'] == 'completed'
+                    assert job['conclusion'] in ('success', 'failure', 'cancelled', 'skipped')
+                    assert 'ubuntu-latest' in job.get('labels', []) and 'self-hosted' not in job['labels']
+                else:
+                    assert safe_previous_job(job), 'A previous cutover started or its absence cannot be proven'
+        
+        def run():
+            repository = os.environ['EXPECTED_REPOSITORY']
+            release = os.environ['RELEASE_SHA']
+            assert release not in (INSTALL_SHA, PREVIOUS_SHA, 'dbe630145a3828643fcfb9f202b1239e8cc54826', R8_SHA), 'R9 candidate identity must differ from preserved releases'
+            current_run = int(os.environ['GITHUB_RUN_ID'])
+            current_attempt = int(os.environ['GITHUB_RUN_ATTEMPT'])
+            api = 'https://api.github.com/repos/' + repository
+            def get(path):
+                request = urllib.request.Request(api + path, headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'})
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    return json.load(response)
+            # The verified R5 is a preserved prerequisite, never a rearmed failed consumer.
+            validate_installation(get('/actions/runs/' + str(INSTALL_RUN)),
+                                 get('/actions/runs/' + str(INSTALL_RUN) + '/attempts/1/jobs?per_page=100'), repository)
+            validate_r6_abort(get('/actions/runs/' + str(PREVIOUS_RUN)),
+                              get('/actions/runs/' + str(PREVIOUS_RUN) + '/attempts/1/jobs?per_page=100'), repository)
+            validate_r7_abort(get('/actions/runs/34227595623'),
+                              get('/actions/runs/34227595623/attempts/1/jobs?per_page=100'), repository)
+            validate_r8_abort(get('/actions/runs/' + str(R8_RUN)),
+                              get('/actions/runs/' + str(R8_RUN) + '/attempts/1/jobs?per_page=100'), repository)
+            runs = get('/actions/workflows/' + CONSUMER_PATH.split('/')[-1] + '/runs?event=workflow_run&head_sha=' + release + '&per_page=100')
+            validate_history(runs, get, repository, release, current_run, current_attempt)
+            print('ARTHELLO_D080_PRESERVED_R5_AND_R8_ABORT_REPLAY_BOUNDARY=VERIFIED')
+        
+        def validate_r6_abort(run, jobs, repository):
+            assert run['id'] == PREVIOUS_RUN and run['head_sha'] == PREVIOUS_SHA
+            assert run['path'].split('@')[0] == PREVIOUS_PATH
+            assert run['repository']['full_name'] == repository and run['head_repository']['full_name'] == repository
+            assert run['event'] == 'workflow_run' and run['head_branch'] == 'main'
+            assert run['actor']['login'] == 'vitaliyozolin-dotcom' and run['triggering_actor']['login'] == 'vitaliyozolin-dotcom'
+            assert run['run_attempt'] == 1 and run['status'] == 'completed' and run['conclusion'] == 'failure'
+            assert jobs['total_count'] == len(jobs['jobs']) == 1
+            job = jobs['jobs'][0]
+            assert job['id'] == PREVIOUS_JOB and job['name'] == 'deploy' and job['run_attempt'] == 1
+            assert job['status'] == 'completed' and job['conclusion'] == 'failure'
+            expected = {'Verify installed R5 School relay with fresh receipt':'success',
+                        'Check existing gateway backup installation capability':'failure',
+                        'Read-only School diagnostic and real browser acceptance':'skipped',
+                        'Clone preflight and guarded production cutover':'skipped'}
+            for name, conclusion in expected.items():
+                matching = [step for step in job['steps'] if step.get('name') == name]
+                assert len(matching) == 1 and matching[0].get('conclusion') == conclusion
+        
+        
+        def validate_r7_abort(run, jobs, repository):
+            assert run['id'] == 34227595623 and run['head_sha'] == 'dbe630145a3828643fcfb9f202b1239e8cc54826'
+            assert run['path'].split('@')[0] == '.github/workflows/deploy-arthello-recovery-r7-20260908.yml'
+            assert run['repository']['full_name'] == repository and run['head_repository']['full_name'] == repository
+            assert run['event'] == 'workflow_run' and run['head_branch'] == 'main'
+            assert run['actor']['login'] == 'vitaliyozolin-dotcom' and run['triggering_actor']['login'] == 'vitaliyozolin-dotcom'
+            assert run['run_attempt'] == 1 and run['status'] == 'completed' and run['conclusion'] == 'failure'
+            assert jobs['total_count'] == len(jobs['jobs']) == 1
+            job = jobs['jobs'][0]
+            assert job['id'] == 102065872459 and job['name'] == 'deploy' and job['run_attempt'] == 1
+            assert job['status'] == 'completed' and job['conclusion'] == 'failure'
+            expected = {'Verify installed R5 School relay with fresh receipt': 'success',
+                        'Check existing gateway Docker authority': 'success',
+                        'Read-only School diagnostic and real browser acceptance': 'failure',
+                        'Download and load exact hosted-verified image': 'skipped',
+                        'Verify and load exact hosted-verified image': 'skipped',
+                        'Resolve authoritative School sync secret': 'skipped',
+                        'Clone preflight and guarded production cutover': 'skipped'}
+            for name, conclusion in expected.items():
+                matching = [step for step in job['steps'] if step.get('name') == name]
+                assert len(matching) == 1 and matching[0].get('conclusion') == conclusion
+        
+        
+        R8_RUN = 34283447507
+        R8_SHA = '5385090d48f4dae29c314dff7ae974d854560940'
+        R8_PATH = '.github/workflows/deploy-arthello-recovery-r8-20260908.yml'
+        # Immutable, complete step graph observed from /attempts/1/jobs on 2026-09-09.
+        # No log bodies, credentials or browser page data are consumed by this guard.
+        R8_STEPS = {
+            "bundle": [
+                ("Set up job", 1, "success"),
+                ("Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262", 2, "success"),
+                ("Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020", 3, "success"),
+                ("Test browser policy and install locked package off the VPS", 4, "success"),
+                ("Build immutable bundle and exercise Chromium sandbox and natural flow fixture", 5, "success"),
+                ("Run actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", 6, "success"),
+                ("Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020", 11, "success"),
+                ("Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262", 12, "success"),
+                ("Complete job", 13, "success"),
+            ],
+            "deploy": [
+                ("Set up job", 1, "success"),
+                ("Verify D078 R8 identity and preserved R5 R7 abort boundary", 2, "success"),
+                ("Wait for exact main Quality Proof and v52 verification", 3, "success"),
+                ("Check out exact verified release", 4, "success"),
+                ("Verify checkout and release contracts", 5, "success"),
+                ("Verify installed R5 School relay with fresh receipt", 6, "success"),
+                ("Check existing gateway Docker authority", 7, "success"),
+                ("Check current release and existing browser runtime", 8, "success"),
+                ("Measure import capacity before downloading the verified archive", 9, "success"),
+                ("Run actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093", 10, "success"),
+                ("Verify archive, import off-host bundle and verify portable identity", 11, "success"),
+                ("School diagnostic and real browser acceptance before cutover", 12, "failure"),
+                ("Download and load exact hosted-verified image", 13, "skipped"),
+                ("Verify and load exact hosted-verified image", 14, "skipped"),
+                ("Resolve authoritative School sync secret", 15, "skipped"),
+                ("Clone preflight and guarded production cutover", 16, "skipped"),
+                ("School diagnostic and real browser acceptance after cutover", 17, "skipped"),
+                ("Remove only this downloaded temporary archive", 18, "success"),
+                ("Remove temporary School SSH material", 19, "success"),
+                ("Production summary", 20, "success"),
+                ("Post Check out exact verified release", 40, "success"),
+                ("Complete job", 41, "success"),
+            ],
+        }
+        
+        
+        def validate_r8_abort(run, jobs, repository):
+            assert run['id'] == R8_RUN and run['head_sha'] == R8_SHA
+            assert run['path'].split('@')[0] == R8_PATH
+            assert run['repository']['full_name'] == repository and run['head_repository']['full_name'] == repository
+            assert run['event'] == 'workflow_run' and run['head_branch'] == 'main'
+            assert run['actor']['login'] == 'vitaliyozolin-dotcom' and run['triggering_actor']['login'] == 'vitaliyozolin-dotcom'
+            assert run['run_attempt'] == 1 and run['status'] == 'completed' and run['conclusion'] == 'failure'
+            assert jobs['total_count'] == len(jobs['jobs']) == 2, 'R8 attempt jobs pagination incomplete'
+            names = [job['name'] for job in jobs['jobs']]
+            assert len(set(names)) == 2 and set(names) == {'bundle', 'deploy'}, 'R8 job graph mismatch'
+            expected_jobs = {'bundle': (102253627289, 'success', ['ubuntu-latest']),
+                             'deploy': (102254222317, 'failure', ['self-hosted', 'linux', 'x64', 'arthello-gateway'])}
+            for job in jobs['jobs']:
+                identity, conclusion, labels = expected_jobs[job['name']]
+                assert job['id'] == identity and job['run_id'] == R8_RUN and job['run_attempt'] == 1
+                assert job['head_sha'] == R8_SHA and job['head_branch'] == 'main'
+                assert job['status'] == 'completed' and job['conclusion'] == conclusion
+                assert job['labels'] == labels, 'R8 runner identity mismatch'
+                steps = job['steps']
+                assert all(step['status'] == 'completed' for step in steps)
+                observed = [(step['name'], step['number'], step['conclusion']) for step in steps]
+                assert observed == R8_STEPS[job['name']], 'R8 complete abort step graph mismatch'
+        
+        
+        def validate_history(runs, get, repository, release, current_run, current_attempt):
+            assert runs['total_count'] == len(runs['workflow_runs']), 'Replay history pagination incomplete'
+            identities = [previous['id'] for previous in runs['workflow_runs']]
+            assert all(type(identity) is int and identity > 0 for identity in identities)
+            assert len(set(identities)) == len(identities), 'Replay history contains duplicate runs'
+            assert identities.count(current_run) == 1, 'Current run is missing from complete replay history'
+            assert type(current_attempt) is int and 1 <= current_attempt <= 50
+            for previous in runs['workflow_runs']:
+                assert previous['head_sha'] == release
+                assert previous['repository']['full_name'] == repository and previous['head_repository']['full_name'] == repository
+                assert previous['path'].split('@')[0] == CONSUMER_PATH
+                assert previous['event'] == 'workflow_run' and previous['head_branch'] == 'main'
+                assert previous['actor']['login'] == 'vitaliyozolin-dotcom' and previous['triggering_actor']['login'] == 'vitaliyozolin-dotcom'
+                attempt_count = previous['run_attempt']
+                assert type(attempt_count) is int and 1 <= attempt_count <= 50
+                if previous['id'] == current_run:
+                    assert attempt_count == current_attempt
+                    attempts = range(1, current_attempt)
+                else:
+                    assert previous['status'] == 'completed', 'Another release run is active'
+                    assert previous['conclusion'] in ['failure', 'cancelled', 'skipped'], 'Successful or ambiguous release cannot be replayed'
+                    attempts = range(1, attempt_count + 1)
+                for attempt in attempts:
+                    jobs = get('/actions/runs/' + str(previous['id']) + '/attempts/' + str(attempt) + '/jobs?per_page=100')
+                    validate_previous_attempt(jobs, attempt)
+                    job_ids = [job['id'] for job in jobs['jobs']]
+                    assert all(type(identity) is int and identity > 0 for identity in job_ids)
+                    assert len(job_ids) == len(set(job_ids)), 'Replay jobs contain duplicate identities'
+                    for job in jobs['jobs']:
+                        assert job['run_id'] == previous['id'] and job['head_sha'] == release
+                        assert job['head_branch'] == 'main'
+                        if job['name'] == 'deploy' and job.get('steps'):
+                            after = [step for step in job.get('steps', []) if step.get('name') == 'School diagnostic and real browser acceptance after cutover']
+                            assert len(after) == 1 and after[0].get('conclusion') == 'skipped', 'Post-cutover execution or missing evidence prohibits replay'
+        
+        
+        if __name__ == '__main__':
+            run()
+        D080_REPLAY
+
+        # GitHub evaluates the protected Environment before starting this job.
+        # Its configuration is enforced by the platform and statically pinned
+        # by the hosted verification workflow; GITHUB_TOKEN does not need
+        # repository-administration permission to re-read that configuration.
+        printf 'ARTHELLO_PRODUCTION_AUTHORIZATION=PLATFORM_ENVIRONMENT\n'
+    - name: Wait for exact main Quality Proof and v52 verification
+      id: provenance
+      timeout-minutes: 28
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -Eeuo pipefail
+        api="https://api.github.com/repos/$GITHUB_REPOSITORY"
+        headers=(
+          --header "Authorization: Bearer $GH_TOKEN"
+          --header "Accept: application/vnd.github+json"
+          --header "X-GitHub-Api-Version: 2022-11-28"
+        )
+
+        ref_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+          "${headers[@]}" "$api/git/ref/heads/main")"
+        test "$(jq -r '.object.sha' <<<"$ref_json")" = "$RELEASE_SHA"
+
+        commit_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+          "${headers[@]}" "$api/commits/$RELEASE_SHA")"
+        jq -e \
+          --arg sha "$RELEASE_SHA" \
+          --arg previous_sha "$PREVIOUS_RELEASE_SHA" \
+          '.sha == $sha and
+           .commit.verification.verified == true and
+           (.parents | length) == 1 and
+           .parents[0].sha == $previous_sha' <<<"$commit_json" >/dev/null
+        tree_sha="$(jq -r '.commit.tree.sha' <<<"$commit_json")"
+        [[ "$tree_sha" =~ ^[a-f0-9]{40}$ ]]
+
+        release_pr_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+          "${headers[@]}" "$api/pulls/$EXPECTED_RELEASE_PR")"
+        jq -e \
+          --arg sha "$RELEASE_SHA" \
+          --arg repository "$EXPECTED_REPOSITORY" \
+          --arg expected_head "$EXPECTED_RELEASE_HEAD" \
+          --argjson expected_pr "$EXPECTED_RELEASE_PR" \
+          '.number == $expected_pr and
+           .state == "closed" and
+           .merged == true and
+           .merged_at != null and
+           .base.ref == "main" and
+           .base.repo.full_name == $repository and
+           .head.ref == $expected_head and
+           .head.repo.full_name == $repository and
+           .merge_commit_sha == $sha and
+           .user.login == "vitaliyozolin-dotcom" and
+           .merged_by.login == "vitaliyozolin-dotcom"' <<<"$release_pr_json" >/dev/null
+
+        workflow_success() {
+          local workflow_file="$1"
+          local workflow_name="$2"
+          local required_jobs_csv="$3"
+          local expected_run_id="${4:-}"
+          local runs_json run_json run_id jobs_json
+          runs_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+            "${headers[@]}" \
+            "$api/actions/workflows/$workflow_file/runs?branch=main&event=push&head_sha=$RELEASE_SHA&per_page=20")" || return 1
+          run_json="$(jq -c \
+            --arg sha "$RELEASE_SHA" \
+            --arg name "$workflow_name" \
+            --arg path ".github/workflows/$workflow_file" \
+            --arg repository "$EXPECTED_REPOSITORY" \
+            '[.workflow_runs[] | select(
+              .head_sha == $sha and
+              .head_branch == "main" and
+              .event == "push" and
+              .name == $name and
+              (.path == $path or .path == ($path + "@main")) and
+              .repository.full_name == $repository
+            )] | sort_by(.id) | last // empty' <<<"$runs_json")"
+          test -n "$run_json" || return 1
+          jq -e '.run_attempt == 1 and .status == "completed" and .conclusion == "success"' <<<"$run_json" >/dev/null || return 1
+          run_id="$(jq -r '.id' <<<"$run_json")"
+          [[ "$run_id" =~ ^[0-9]+$ ]] || return 1
+          if [ -n "$expected_run_id" ]; then test "$run_id" = "$expected_run_id" || return 1; fi
+          jobs_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+            "${headers[@]}" "$api/actions/runs/$run_id/jobs?per_page=100")" || return 1
+          jq -e --arg sha "$RELEASE_SHA" --argjson run "$run_id" '
+          .total_count == (.jobs | length) and
+          all(.jobs[]; .head_sha == $sha and .run_id == $run and .run_attempt == 1 and
+            .status == "completed" and .conclusion == "success" and
+            .labels == ["ubuntu-latest"] and .runner_group_name == "GitHub Actions")
+        ' <<<"$jobs_json" >/dev/null || return 1
+        IFS=',' read -r -a required_jobs <<<"$required_jobs_csv"
+          for required_job in "${required_jobs[@]}"; do
+            jq -e --arg name "$required_job" \
+              '[.jobs[] | select(.name == $name and .status == "completed" and .conclusion == "success")] | length == 1' \
+              <<<"$jobs_json" >/dev/null || return 1
+          done
+          printf '%s' "$run_id"
+        }
+
+        quality_run=""
+        verify_run=""
+        proof_run=""
+        for attempt in $(seq 1 100); do
+          if [ -z "$quality_run" ]; then
+            quality_run="$(workflow_success quality.yml 'Quality gates' 'secret-scan,test' || true)"
+          fi
+          if [ -z "$verify_run" ]; then
+            verify_run="$(workflow_success verify-arthello-v52.yml 'Verify ArtHello v52 release' 'verify-v52' "$TRIGGER_VERIFY_RUN_ID" || true)"
+          fi
+          if [ -z "$proof_run" ]; then
+            proof_run="$(workflow_success proof-gates.yml 'ArtHello Proof Gates' 'prove' || true)"
+          fi
+          if [ -n "$quality_run" ] && [ -n "$verify_run" ] && [ -n "$proof_run" ]; then
+            break
+          fi
+          sleep 15
+        done
+        test -n "$quality_run"
+        test -n "$verify_run"
+        test -n "$proof_run"
+
+        ref_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+          "${headers[@]}" "$api/git/ref/heads/main")"
+        test "$(jq -r '.object.sha' <<<"$ref_json")" = "$RELEASE_SHA"
+
+        printf 'tree_sha=%s\nquality_run=%s\nverify_run=%s\nproof_run=%s\n' \
+          "$tree_sha" "$quality_run" "$verify_run" "$proof_run" >> "$GITHUB_OUTPUT"
+        printf 'ARTHELLO_EXACT_SHA_GATES=VERIFIED\n'
+    - name: Check out exact verified release
+      timeout-minutes: 3
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ github.event.workflow_run.head_sha }}
+        fetch-depth: 1
+        clean: true
+        persist-credentials: false
+    - name: Verify checkout and release contracts
+      timeout-minutes: 4
+      env:
+        EXPECTED_TREE: ${{ steps.provenance.outputs.tree_sha }}
+      run: |
+        set -Eeuo pipefail
+        test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+        test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+        test -s deploy/v52/Dockerfile
+        test -s deploy/v52/maintenance/image-runtime-fingerprint.jq
+        test -s deploy/v52/certificates/russian-trusted-root-ca.pem
+        echo 'aa800ef345422d6158c6fafe1c06c429dbda21c3df4bb1ccb45a920ec1111399  deploy/v52/certificates/russian-trusted-root-ca.pem' | sha256sum -c -
+        jq -n -f deploy/v52/maintenance/image-runtime-fingerprint.jq >/dev/null
+        python3 -m py_compile deploy/v52/maintenance/production-data-inventory.py
+        grep -F 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'ARTHELLO_PUBLIC_ORIGIN' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'cf: false' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'INTEGRATION_CREDENTIALS_KEY_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'INTEGRATION_CREDENTIALS_KEY' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'CENTRAL_ACCESS_SECRET_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'OPENAI_API_KEY_FILE' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'SCHOOL_PUBLIC_ORIGIN' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'SCHOOL_DIARY_SYNC_URL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'SCHOOL_DIARY_ALLOWED_ORIGINS' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'OPENAI_OCR_MODEL' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'TBANK_EGRESS_IP' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport(), BACKUP_TRANSPORT: createBackupTransport() }' deploy/v52/overrides/production/runtime-server.mjs >/dev/null
+        grep -F 'return transport.fetch(input, { ...init, redirect: "manual" });' deploy/v52/overrides/app/api/integration-actions/route.ts >/dev/null
+        test -s deploy/v52/overrides/production/tochka-transport.mjs
+        grep -F 'const responseBody = await readBoundedResponseBody(upstream);' deploy/v52/overrides/production/tochka-transport.mjs >/dev/null
+        grep -F 'workerd reaches the Node service binding through its supported internal redirect mode' deploy/v52/overrides/tests/tochka-node-transport.test.mjs >/dev/null
+        grep -F 'COPY --from=application /app/production/tochka-transport.mjs /app/production/tochka-transport.mjs' deploy/v52/Dockerfile >/dev/null
+        grep -F 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem' deploy/v52/Dockerfile >/dev/null
+        if grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
+          echo 'Plaintext central access secret binding is forbidden' >&2
+          exit 1
+        fi
+        if grep -E 'OPENAI_API_KEY:[[:space:]]*process\.env\.OPENAI_API_KEY([[:space:],}]|$)' deploy/v52/overrides/production/runtime-server.mjs; then
+          echo 'Plaintext OpenAI key binding is forbidden' >&2
+          exit 1
+        fi
+        printf 'ARTHELLO_CHECKOUT=%s\nARTHELLO_TREE=%s\n' "$RELEASE_SHA" "$EXPECTED_TREE"
+    - name: Verify installed R5 School relay with fresh receipt
+      timeout-minutes: 20
+      shell: bash
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+        DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+        DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+        DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -Eeuo pipefail
+        umask 077
+        : "${SSH_PRIVATE_KEY:?missing protected School SSH key}"
+        : "${DEPLOY_HOST:?missing protected School deploy host}"
+        : "${DEPLOY_USER:?missing protected School deploy user}"
+        [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+        [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+        deploy_port="${DEPLOY_PORT:-2222}"
+        [[ "$deploy_port" =~ ^[0-9]{1,5}$ ]]
+        test "$deploy_port" -ge 1
+        test "$deploy_port" -le 65535
+
+        ssh_dir="$RUNNER_TEMP/arthello-school-sync-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        case "$ssh_dir" in
+          "$RUNNER_TEMP"/arthello-school-sync-*) ;;
+          *) echo 'Unsafe School SSH work path' >&2; exit 1 ;;
+        esac
+        cleanup_school_ssh() {
+          rm -f -- \
+            "$ssh_dir/id_ed25519" \
+            "$ssh_dir/known_hosts" \
+            "$ssh_dir/known_hosts.scan" \
+            "$ssh_dir/school-sync-probe-wrong.json" \
+            "$ssh_dir/school-sync-probe-wrong.headers" \
+            "$ssh_dir/school-sync-probe.json" \
+            "$ssh_dir/school-sync-probe.headers" \
+            >/dev/null 2>&1 || true
+          rmdir -- "$ssh_dir" >/dev/null 2>&1 || true
+        }
+        trap cleanup_school_ssh EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        trap 'exit 129' HUP
+        test ! -e "$ssh_dir"
+        test ! -L "$ssh_dir"
+        install -m 0700 -d "$ssh_dir"
+        printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+        unset SSH_PRIVATE_KEY
+        chmod 0600 "$ssh_dir/id_ed25519"
+        ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+
+        scan="$ssh_dir/known_hosts.scan"
+        : > "$scan"
+        chmod 0600 "$scan"
+        for attempt in 1 2 3; do
+          timeout --signal=TERM --kill-after=5s 150s \
+            ssh -p "$deploy_port" \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$scan" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=none \
+              -o PubkeyAuthentication=no \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o ConnectTimeout=140 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              "$DEPLOY_USER@$DEPLOY_HOST" true \
+              </dev/null >/dev/null 2>&1 || true
+          test -s "$scan" && break
+          sleep 5
+        done
+        test -s "$scan"
+        fingerprint="$(ssh-keygen -lf "$scan" -E sha256 | awk '{print $2; exit}')"
+        test "$fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+        mv "$scan" "$ssh_dir/known_hosts"
+
+        ssh_options=(
+          -T
+          -p "$deploy_port"
+          -i "$ssh_dir/id_ed25519"
+          -o IdentitiesOnly=yes
+          -o PreferredAuthentications=publickey
+          -o PasswordAuthentication=no
+          -o KbdInteractiveAuthentication=no
+          -o BatchMode=yes
+          -o StrictHostKeyChecking=yes
+          -o UserKnownHostsFile="$ssh_dir/known_hosts"
+          -o GlobalKnownHostsFile=/dev/null
+          -o ConnectTimeout=140
+          -o ServerAliveInterval=10
+          -o ServerAliveCountMax=30
+          -o IPQoS=none
+          -o Compression=no
+          -o KexAlgorithms=curve25519-sha256
+          -o HostKeyAlgorithms=ssh-ed25519
+          -o PubkeyAcceptedAlgorithms=ssh-ed25519
+          -o Ciphers=aes128-ctr
+          -o MACs=hmac-sha2-256
+        )
+        timeout --signal=TERM --kill-after=5s 180s \
+          ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" true \
+          </dev/null >/dev/null
+
+        # Read-only verification of the exact installed R5. Candidate identity is separate.
+        # No School repair, relabel, runtime/configuration write or lock normalization occurs.
+        umask 077
+        repair_bundle_file="$RUNNER_TEMP/school-r3-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+        repair_receipt_file="$RUNNER_TEMP/school-r3-receipt-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+        repair_bundle_meta="$RUNNER_TEMP/school-r3-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.meta"
+        REPAIR_BUNDLE_FILE="$repair_bundle_file" python3 -I - <<'PY_BUNDLE' > "$repair_bundle_meta"
+        import base64
+        import hashlib
+        import json
+        import os
+        from pathlib import Path
+        import stat
+
+        root=Path('deploy/school/sso-relay-r5')
+        files={}
+        for name in ('manifest.json','repair.py','relay.mjs','healthcheck.mjs'):
+            path=root/name
+            assert stat.S_ISREG(path.lstat().st_mode) and not path.is_symlink()
+            data=path.read_bytes()
+            assert 0 < len(data) <= 262144
+            files[name]=base64.b64encode(data).decode('ascii')
+        manifest=json.loads(base64.b64decode(files['manifest.json']))
+        config=hashlib.sha256(json.dumps(manifest,sort_keys=True,separators=(',',':')).encode('utf-8')).hexdigest()
+        raw=json.dumps({'schemaVersion':1,'files':files},sort_keys=True,separators=(',',':')).encode('utf-8')
+        assert len(raw)<=1048576
+        path=Path(os.environ['REPAIR_BUNDLE_FILE'])
+        fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+        with os.fdopen(fd,'wb') as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        print(config)
+        print(hashlib.sha256(raw).hexdigest())
+        PY_BUNDLE
+        mapfile -t repair_digests < "$repair_bundle_meta"
+        test "${#repair_digests[@]}" -eq 2
+        repair_config_sha256="${repair_digests[0]}"
+        repair_bundle_sha256="${repair_digests[1]}"
+        [[ "$repair_config_sha256" =~ ^[a-f0-9]{64}$ ]]
+        [[ "$repair_bundle_sha256" =~ ^[a-f0-9]{64}$ ]]
+        [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+        [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
+        [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,2}$ ]]
+        bootstrap_base64="$(base64 -w0 .github/scripts/verify-installed-school-relay-r6.py)"
+        [[ "$bootstrap_base64" =~ ^[A-Za-z0-9+/=]+$ ]]
+        # Public identities and a reviewed bootstrap are the only remote environment.
+        # Bundle bytes use stdin, stay below the fixed size cap, and are hash checked
+        # before any trusted repair source can execute on the School host.
+        # Recheck current main immediately before installed R5 verification.
+        current_main="$(curl --fail-with-body --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          --header 'Accept: application/vnd.github+json' \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" | jq -er '.object.sha')"
+        test "$current_main" = "$RELEASE_SHA"
+        timeout --signal=TERM --kill-after=15s 720s \
+          ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+          "RELEASE_SHA='$RELEASE_SHA' RELEASE_RUN_ID='$GITHUB_RUN_ID' RELEASE_ATTEMPT='$GITHUB_RUN_ATTEMPT' EXPECTED_REPAIR_CONFIG_SHA256='$repair_config_sha256' EXPECTED_REPAIR_BUNDLE_SHA256='$repair_bundle_sha256' R6_VERIFIER_BASE64='$bootstrap_base64' python3 -I -c 'import base64,os; exec(base64.b64decode(os.environ[\"R6_VERIFIER_BASE64\"]))'" \
+          < "$repair_bundle_file" | tee "$repair_receipt_file"
+        SCHOOL_REPAIR_CONFIG_SHA256="$repair_config_sha256" \
+          python3 -I .github/scripts/check-school-repair-receipt-r3.py \
+            --manifest deploy/school/sso-relay-r5/manifest.json \
+            --receipt "$repair_receipt_file"
+        printf 'config_sha256=%s\n' "$repair_config_sha256" >> "$GITHUB_OUTPUT"
+        rm -f -- "$repair_bundle_file" "$repair_bundle_meta"
+      id: school_repair
+    - name: Check existing gateway Docker authority
+      timeout-minutes: 1
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        mapfile -t gateway_live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
+        test "${#gateway_live_ids[@]}" -eq 1
+        gateway_live_sha="$(docker inspect "${gateway_live_ids[0]}" --format '{{index .Config.Labels "arthello.release.sha"}}')"
+        [[ "$gateway_live_sha" =~ ^[a-f0-9]{40}$ ]]
+        printf 'ARTHELLO_OBSERVED_LIVE_RELEASE_SHA=%s\n' "$gateway_live_sha"
+        gateway_uid="$(id -u)"
+        [[ "$gateway_uid" =~ ^[0-9]+$ ]]
+        docker version --format '{{.Server.APIVersion}}' >/dev/null
+        docker volume inspect "$DATA_VOLUME" --format '{{.Name}}' | grep -Fx "$DATA_VOLUME" >/dev/null
+        docker exec --user 1000:1000 -i "${gateway_live_ids[0]}" node <<'D069_SOURCE_READONLY'
+        const fs = require('node:fs');
+        const source = '/data/d1/miniflare-D1DatabaseObject/5a499c55f63d6b9f725547d510cf454e288954b6f3c2d5024eb1443f29c97730.sqlite';
+        let fd;
+        let proof = { schemaVersion: 1, sourceReadable: false, sourceOwnershipVerified: false };
+        try {
+          if (process.getuid() !== 1000 || process.getgid() !== 1000 || fs.realpathSync(source) !== source) throw Error('SOURCE_PRECONDITION');
+          fd = fs.openSync(source, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+          const info = fs.fstatSync(fd);
+          const pathInfo = fs.lstatSync(source);
+          proof = { ...proof, sourceUid: info.uid, sourceGid: info.gid, sourceMode: (info.mode & 0o7777).toString(8).padStart(4, '0'), sourceReadable: true };
+          if (!info.isFile() || info.uid !== 1000 || info.gid !== 1000 || (info.mode & 0o002) !== 0 || info.dev !== pathInfo.dev || info.ino !== pathInfo.ino) throw Error('SOURCE_PRECONDITION');
+          proof.sourceOwnershipVerified = true;
+        } catch {
+          process.exitCode = 1;
+        } finally {
+          if (fd !== undefined) fs.closeSync(fd);
+          console.log(JSON.stringify(proof));
+        }
+        D069_SOURCE_READONLY
+        printf '{"gatewayUid":%s,"dockerApiRead":true,"backupWorkerReady":false,"scope":"existing-deployment-authority"}\n' "$gateway_uid"
+    - name: Check current release and existing browser runtime
+      env:
+        GH_TOKEN: ${{ github.token }}
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        [[ "$CHECKED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+        current_main="$(curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $GH_TOKEN" \
+          https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+        test "$current_main" = "$CHECKED_SOURCE_SHA"
+        precheck_node="$(command -v node || true)"
+        if [[ -z "$precheck_node" ]]; then
+          runner_root="$(realpath "$RUNNER_TEMP/../..")"
+          precheck_node="$runner_root/externals/node24/bin/node"
+        fi
+        test -x "$precheck_node"
+        "$precheck_node" -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(2)'
+        printf 'PRECHECK_NODE=%s\n' "$precheck_node" >> "$GITHUB_ENV"
+    - name: Measure import capacity before downloading the verified archive
+      env:
+        ARCHIVE_BYTES: ${{ needs.bundle.outputs.archive_bytes }}
+        EXPANDED_BYTES: ${{ needs.bundle.outputs.expanded_bytes }}
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        read -r required_scratch required_docker < <("$PRECHECK_NODE" --input-type=module -e '
+          import { capacity } from "./deploy/browser/capacity.mjs";
+          const required = capacity(Number(process.env.ARCHIVE_BYTES), Number(process.env.EXPANDED_BYTES));
+          process.stdout.write(required.scratchKiB + " " + required.dockerKiB + "\n");
+        ')
+        docker_root="$(docker info --format '{{.DockerRootDir}}')"
+        scratch_available="$(df -Pk -- "$RUNNER_TEMP" | awk 'NR==2 {print $4}')"
+        docker_available="$(df -Pk -- "$docker_root" | awk 'NR==2 {print $4}')"
+        [[ "$scratch_available" =~ ^[0-9]+$ && "$docker_available" =~ ^[0-9]+$ ]]
+        printf 'BROWSER_IMPORT_CAPACITY_KIB scratch_available=%s scratch_required=%s docker_available=%s docker_required=%s\n' \
+          "$scratch_available" "$required_scratch" "$docker_available" "$required_docker"
+        if (( scratch_available < required_scratch || docker_available < required_docker )); then
+          echo 'SERVER_BROWSER_BLOCKED=insufficient_import_space'
+          exit 2
+        fi
+        printf 'IMPORT_DOCKER_MIN_KIB=%s\n' "$(( (3 * EXPANDED_BYTES + 1023) / 1024 + 2097152 ))" >> "$GITHUB_ENV"
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: ${{ needs.bundle.outputs.archive_name }}
+        path: ${{ runner.temp }}/browser-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+    - name: Verify archive, import off-host bundle and verify portable identity
+      env:
+        EXPECTED_ARCHIVE_SHA: ${{ needs.bundle.outputs.archive_sha }}
+        EXPECTED_FINGERPRINT: ${{ needs.bundle.outputs.fingerprint }}
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        import_stage=archive_identity
+        trap 'printf "SERVER_BROWSER_BLOCKED=import_%s\n" "$import_stage"' ERR
+        test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+        [[ "$EXPECTED_ARCHIVE_SHA" =~ ^[a-f0-9]{64}$ && "$EXPECTED_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
+        archive="$RUNNER_TEMP/browser-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/browser.tar.gz"
+        test "$(sha256sum "$archive" | cut -d ' ' -f 1)" = "$EXPECTED_ARCHIVE_SHA"
+        echo 'SERVER_BROWSER_ARCHIVE=verified'
+        # Import only; never pull/build/install on the production server.
+        # Capacity was checked on the actual Docker store with measured sizes.
+        import_stage=capacity_recheck
+        docker_root="$(docker info --format '{{.DockerRootDir}}')"
+        docker_available="$(df -Pk -- "$docker_root" | awk 'NR==2 {print $4}')"
+        scratch_available="$(df -Pk -- "$RUNNER_TEMP" | awk 'NR==2 {print $4}')"
+        [[ "$IMPORT_DOCKER_MIN_KIB" =~ ^[0-9]+$ && "$docker_available" =~ ^[0-9]+$ && "$scratch_available" =~ ^[0-9]+$ ]]
+        printf 'BROWSER_IMPORT_RECHECK_KIB docker_available=%s docker_required=%s scratch_available=%s\n' "$docker_available" "$IMPORT_DOCKER_MIN_KIB" "$scratch_available"
+        (( docker_available >= IMPORT_DOCKER_MIN_KIB && scratch_available >= 2097152 ))
+        import_stage=image_load
+        docker image load --input "$archive"
+        import_stage=image_identity
+        image_id="$(docker image inspect "arthello-e2e:$CHECKED_SOURCE_SHA" --format '{{.Id}}')"
+        fingerprint="$(docker image inspect "$image_id" | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq | sha256sum | cut -d ' ' -f 1)"
+        test "$fingerprint" = "$EXPECTED_FINGERPRINT"
+        test "$(docker image inspect "$image_id" --format '{{.Config.User}}')" = 1000:1000
+        test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$CHECKED_SOURCE_SHA"
+        test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.arthello.role"}}')" = e2e-browser
+        printf 'BROWSER_IMAGE_ID=%s\n' "$image_id" >> "$GITHUB_ENV"
+        printf 'BROWSER_IMAGE_VERIFIED source=%s fingerprint=%s\n' "$CHECKED_SOURCE_SHA" "$fingerprint"
+    - name: Read-only School diagnostic before candidate acceptance
+      timeout-minutes: 15
+      shell: bash
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+        DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+        DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+        DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        GH_TOKEN: ${{ github.token }}
+        SCHOOL_REPAIR_CONFIG_SHA256: ${{ steps.school_repair.outputs.config_sha256 }}
+        SCHOOL_REPAIR_RECEIPT_FILE: ${{ runner.temp }}/school-r3-receipt-${{ github.run_id }}-${{ github.run_attempt }}.json
+      run: |+
+        set -Eeuo pipefail
+        umask 077
+        python3 -I .github/scripts/d080-baseline-evidence.py
+        : "${SSH_PRIVATE_KEY:?missing protected School SSH key}"
+        : "${DEPLOY_HOST:?missing protected School deploy host}"
+        : "${DEPLOY_USER:?missing protected School deploy user}"
+        [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+        [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+        deploy_port="${DEPLOY_PORT:-2222}"
+        [[ "$deploy_port" =~ ^[0-9]{1,5}$ ]]
+        test "$deploy_port" -ge 1
+        test "$deploy_port" -le 65535
+
+        ssh_dir="$RUNNER_TEMP/arthello-school-sync-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        case "$ssh_dir" in
+          "$RUNNER_TEMP"/arthello-school-sync-*) ;;
+          *) echo 'Unsafe School SSH work path' >&2; exit 1 ;;
+        esac
+        cleanup_school_ssh() {
+          rm -f -- \
+            "$ssh_dir/id_ed25519" \
+            "$ssh_dir/known_hosts" \
+            "$ssh_dir/known_hosts.scan" \
+            "$ssh_dir/school-sync-probe-wrong.json" \
+            "$ssh_dir/school-sync-probe-wrong.headers" \
+            "$ssh_dir/school-sync-probe.json" \
+            "$ssh_dir/school-sync-probe.headers" \
+            >/dev/null 2>&1 || true
+          rmdir -- "$ssh_dir" >/dev/null 2>&1 || true
+        }
+        trap cleanup_school_ssh EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        trap 'exit 129' HUP
+        test ! -e "$ssh_dir"
+        test ! -L "$ssh_dir"
+        install -m 0700 -d "$ssh_dir"
+        printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+        unset SSH_PRIVATE_KEY
+        chmod 0600 "$ssh_dir/id_ed25519"
+        ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+
+        scan="$ssh_dir/known_hosts.scan"
+        : > "$scan"
+        chmod 0600 "$scan"
+        for attempt in 1 2 3; do
+          timeout --signal=TERM --kill-after=5s 150s \
+            ssh -p "$deploy_port" \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$scan" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=none \
+              -o PubkeyAuthentication=no \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o ConnectTimeout=140 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              "$DEPLOY_USER@$DEPLOY_HOST" true \
+              </dev/null >/dev/null 2>&1 || true
+          test -s "$scan" && break
+          sleep 5
+        done
+        test -s "$scan"
+        fingerprint="$(ssh-keygen -lf "$scan" -E sha256 | awk '{print $2; exit}')"
+        test "$fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+        mv "$scan" "$ssh_dir/known_hosts"
+
+        ssh_options=(
+          -T
+          -p "$deploy_port"
+          -i "$ssh_dir/id_ed25519"
+          -o IdentitiesOnly=yes
+          -o PreferredAuthentications=publickey
+          -o PasswordAuthentication=no
+          -o KbdInteractiveAuthentication=no
+          -o BatchMode=yes
+          -o StrictHostKeyChecking=yes
+          -o UserKnownHostsFile="$ssh_dir/known_hosts"
+          -o GlobalKnownHostsFile=/dev/null
+          -o ConnectTimeout=140
+          -o ServerAliveInterval=10
+          -o ServerAliveCountMax=30
+          -o IPQoS=none
+          -o Compression=no
+          -o KexAlgorithms=curve25519-sha256
+          -o HostKeyAlgorithms=ssh-ed25519
+          -o PubkeyAcceptedAlgorithms=ssh-ed25519
+          -o Ciphers=aes128-ctr
+          -o MACs=hmac-sha2-256
+        )
+        timeout --signal=TERM --kill-after=5s 180s \
+          ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" true \
+          </dev/null >/dev/null
+
+        diagnostic_file="$RUNNER_TEMP/arthello-school-sso-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.jsonl"
+        test -s .github/scripts/school-sso-readonly-diagnostic.sh
+        bash .github/scripts/school-sso-readonly-diagnostic.sh --self-test
+        diagnostic_payload="$(base64 -w0 .github/scripts/school-sso-readonly-diagnostic.sh)"
+        timeout --signal=TERM --kill-after=5s 180s \
+          ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+          "printf '%s' '$diagnostic_payload' | base64 -d | bash" \
+          </dev/null | tee "$diagnostic_file"
+        legacy_probe_payload="$(base64 -w0 .github/scripts/r2-alfacrm-env-presence.sh)"
+        timeout --signal=TERM --kill-after=5s 60s   ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST"   "printf '%s' '$legacy_probe_payload' | base64 -d | bash -s -- --school-legacy"   </dev/null
+        mapfile -t acceptance_live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
+        test "${#acceptance_live_ids[@]}" -eq 1
+        observed_arthello_sha="$(docker inspect "${acceptance_live_ids[0]}" --format '{{index .Config.Labels "arthello.release.sha"}}')"
+        [[ "$observed_arthello_sha" =~ ^[a-f0-9]{40}$ ]]
+        bash .github/scripts/r2-alfacrm-env-presence.sh --current-arthello "${acceptance_live_ids[0]}"
+
+        printf 'SCHOOL_DIAGNOSTIC_FILE=%s\nOBSERVED_READONLY_ARTHELLO_SHA=%s\n' \
+          "$diagnostic_file" "$observed_arthello_sha" >> "$GITHUB_ENV"
+        python3 -I - "$diagnostic_file" >> "$GITHUB_ENV" <<'D080_SCHOOL_IDENTITY'
+        import json, re, sys
+        from pathlib import Path
+        content = Path(sys.argv[1]).read_text()
+        assert len(content) <= 32768
+        observed = []
+        for line in content.splitlines():
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict) and 'imageId' in record and 'release' in record:
+                observed.append(record['release'])
+        assert len(observed) == 1 and re.fullmatch('[a-f0-9]{40}', observed[0])
+        print('OBSERVED_READONLY_SCHOOL_SHA=' + observed[0])
+        D080_SCHOOL_IDENTITY
+        printf 'ARTHELLO_R9_SCHOOL_DIAGNOSTIC=READ_ONLY_COMPLETE\n'
+
+    - name: Download and load exact hosted-verified image
+      timeout-minutes: 25
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: arthello-v52-verification-${{ env.TRIGGER_VERIFY_RUN_ID }}
+        path: ${{ runner.temp }}/arthello-v52-release-${{ github.run_id }}
+        github-token: ${{ github.token }}
+        run-id: ${{ env.TRIGGER_VERIFY_RUN_ID }}
+    - name: Verify and load exact hosted-verified image
+      id: image_import
+      timeout-minutes: 12
+      env:
+        EXPECTED_TREE: ${{ steps.provenance.outputs.tree_sha }}
+      run: |
+        set -Eeuo pipefail
+        artifact="$RUNNER_TEMP/arthello-v52-release-$GITHUB_RUN_ID"
+        evidence="$artifact/arthello-v52.json"
+        archive="$artifact/arthello-v52-image.tar.gz"
+        test -f "$evidence"
+        test -f "$evidence.sha256"
+        test -s "$archive"
+        (cd "$artifact" && sha256sum -c arthello-v52.json.sha256)
+
+        dockerfile_sha256="$(sha256sum deploy/v52/Dockerfile | cut -d ' ' -f 1)"
+        runtime_lock_sha256="$(sha256sum deploy/v52/runtime/package-lock.json | cut -d ' ' -f 1)"
+        inventory_sha256="$(sha256sum deploy/v52/maintenance/production-data-inventory.py | cut -d ' ' -f 1)"
+        tochka_ca_sha256="$(sha256sum deploy/v52/certificates/russian-trusted-root-ca.pem | cut -d ' ' -f 1)"
+        fingerprint_filter_sha256="$(sha256sum deploy/v52/maintenance/image-runtime-fingerprint.jq | cut -d ' ' -f 1)"
+        archive_sha256="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+        jq -e \
+          --arg repository "$EXPECTED_REPOSITORY" \
+          --arg run "$TRIGGER_VERIFY_RUN_ID" \
+          --arg sha "$RELEASE_SHA" \
+          --arg tree "$EXPECTED_TREE" \
+          --arg dockerfile "$dockerfile_sha256" \
+          --arg lock "$runtime_lock_sha256" \
+          --arg inventory "$inventory_sha256" \
+          --arg tochka_ca "$tochka_ca_sha256" \
+          --arg fingerprint_filter "$fingerprint_filter_sha256" \
+          --arg archive "$archive_sha256" '
+            .repository == $repository and
+            .workflowRunId == $run and
+            .workflowRunAttempt == "1" and
+            .headSha == $sha and
+            .treeSha == $tree and
+            .dockerfileSha256 == $dockerfile and
+            .runtimeLockSha256 == $lock and
+            .inventorySha256 == $inventory and
+            .tochkaCaSha256 == $tochka_ca and
+            .fingerprintFilterSha256 == $fingerprint_filter and
+            .imageArchiveSha256 == $archive and
+            .runnerTrust == "github-hosted-ephemeral" and
+            .productionCapability == false and
+            (.runtimeFingerprintSha256 | test("^[a-f0-9]{64}$")) and
+            (.imageId | test("^sha256:[a-f0-9]{64}$"))
+          ' "$evidence" >/dev/null
+
+        printf 'ARTHELLO_IMAGE_EVIDENCE=VERIFIED archive_sha256=%s\n' "$archive_sha256"
+        gzip -t "$archive"
+        docker_server_version="$(docker version --format '{{.Server.Version}}')"
+        docker_root="$(docker info --format '{{.DockerRootDir}}')"
+        test -n "$docker_server_version"
+        test -d "$docker_root"
+        available_kib="$(df -Pk "$docker_root" | awk 'NR == 2 { print $4 }')"
+        [[ "$available_kib" =~ ^[0-9]+$ ]]
+        printf 'ARTHELLO_DOCKER_PREFLIGHT=VERIFIED server_version=%s available_kib=%s\n' \
+          "$docker_server_version" "$available_kib"
+
+        verified_image="arthello-v52-verify:$RELEASE_SHA"
+        image="arthello-direct:$RELEASE_SHA"
+        while IFS='|' read -r repository tag image_id; do
+          case "$repository" in
+            arthello-direct|arthello-v52-verify) ;;
+            *) continue ;;
+          esac
+          test "$tag" != '<none>' || continue
+          ref="$repository:$tag"
+          case "$ref" in
+            "$verified_image"|"$image") continue ;;
+          esac
+          if [ -n "$(docker ps -aq --filter "ancestor=$image_id")" ]; then
+            printf 'ARTHELLO_IMAGE_PRESERVED ref=%s reason=container-reference\n' "$ref"
+            continue
+          fi
+          docker image rm "$ref"
+          printf 'ARTHELLO_STALE_IMAGE_REMOVED ref=%s\n' "$ref"
+        done < <(docker image ls --no-trunc --format '{{.Repository}}|{{.Tag}}|{{.ID}}')
+
+        load_log="$RUNNER_TEMP/arthello-docker-load-$GITHUB_RUN_ID.log"
+        if ! docker image load --input "$archive" >"$load_log" 2>&1; then
+          sed -n '1,240p' "$load_log" >&2
+          printf '::error::Docker rejected the verified image archive before production cutover\n'
+          df -h "$docker_root" || true
+          docker system df || true
+          exit 1
+        fi
+        sed -n '1,120p' "$load_log"
+        printf 'ARTHELLO_IMAGE_IMPORT=COMPLETE\n'
+        expected_image_id="$(jq -r '.imageId' "$evidence")"
+        actual_image_id="$(docker image inspect "$verified_image" --format '{{.Id}}')"
+        [[ "$actual_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+        expected_runtime_fingerprint="$(jq -r '.runtimeFingerprintSha256' "$evidence")"
+        actual_runtime_fingerprint="$(
+          docker image inspect "$actual_image_id" \
+            | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq \
+            | sha256sum \
+            | cut -d ' ' -f 1
+        )"
+        if [ "$actual_runtime_fingerprint" != "$expected_runtime_fingerprint" ]; then
+          printf '::error::Imported image runtime fingerprint does not match hosted evidence\n'
+          exit 1
+        fi
+        printf 'ARTHELLO_IMAGE_ID_REPRESENTATION hosted=%s production=%s\n' \
+          "$expected_image_id" "$actual_image_id"
+        printf 'ARTHELLO_IMAGE_RUNTIME_FINGERPRINT=VERIFIED sha256=%s\n' \
+          "$actual_runtime_fingerprint"
+        test "$(docker image inspect "$actual_image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$RELEASE_SHA"
+        test "$(docker image inspect "$actual_image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$EXPECTED_TREE"
+        test "$(docker image inspect "$actual_image_id" --format '{{.Config.User}}')" = node
+        test "$(docker image inspect "$actual_image_id" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fc 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem')" -eq 1
+        docker tag "$actual_image_id" "$image"
+        test "$(docker image inspect "$image" --format '{{.Id}}')" = "$actual_image_id"
+        printf 'image_id=%s\nruntime_fingerprint=%s\n' \
+          "$actual_image_id" "$actual_runtime_fingerprint" >> "$GITHUB_OUTPUT"
+        printf 'ARTHELLO_HOSTED_IMAGE=VERIFIED image=%s id=%s\n' "$image" "$actual_image_id"
+    - name: Resolve authoritative School sync secret
+      timeout-minutes: 40
+      shell: bash
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+        DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+        DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+        DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+      run: |
+        set -Eeuo pipefail
+        umask 077
+        : "${SSH_PRIVATE_KEY:?missing protected School SSH key}"
+        : "${DEPLOY_HOST:?missing protected School deploy host}"
+        : "${DEPLOY_USER:?missing protected School deploy user}"
+        [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+        [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+        deploy_port="${DEPLOY_PORT:-2222}"
+        [[ "$deploy_port" =~ ^[0-9]{1,5}$ ]]
+        test "$deploy_port" -ge 1
+        test "$deploy_port" -le 65535
+
+        ssh_dir="$RUNNER_TEMP/arthello-school-sync-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        case "$ssh_dir" in
+          "$RUNNER_TEMP"/arthello-school-sync-*) ;;
+          *) echo 'Unsafe School SSH work path' >&2; exit 1 ;;
+        esac
+        cleanup_school_ssh() {
+          rm -f -- \
+            "$ssh_dir/id_ed25519" \
+            "$ssh_dir/known_hosts" \
+            "$ssh_dir/known_hosts.scan" \
+            "$ssh_dir/school-sync-probe-wrong.json" \
+            "$ssh_dir/school-sync-probe-wrong.headers" \
+            "$ssh_dir/school-sync-probe.json" \
+            "$ssh_dir/school-sync-probe.headers" \
+            >/dev/null 2>&1 || true
+          rmdir -- "$ssh_dir" >/dev/null 2>&1 || true
+        }
+        trap cleanup_school_ssh EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        trap 'exit 129' HUP
+        test ! -e "$ssh_dir"
+        test ! -L "$ssh_dir"
+        install -m 0700 -d "$ssh_dir"
+        printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+        unset SSH_PRIVATE_KEY
+        chmod 0600 "$ssh_dir/id_ed25519"
+        ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+
+        scan="$ssh_dir/known_hosts.scan"
+        : > "$scan"
+        chmod 0600 "$scan"
+        for attempt in 1 2 3; do
+          timeout --signal=TERM --kill-after=5s 150s \
+            ssh -p "$deploy_port" \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$scan" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=none \
+              -o PubkeyAuthentication=no \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o ConnectTimeout=140 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              "$DEPLOY_USER@$DEPLOY_HOST" true \
+              </dev/null >/dev/null 2>&1 || true
+          test -s "$scan" && break
+          sleep 5
+        done
+        test -s "$scan"
+        fingerprint="$(ssh-keygen -lf "$scan" -E sha256 | awk '{print $2; exit}')"
+        test "$fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+        mv "$scan" "$ssh_dir/known_hosts"
+
+        ssh_options=(
+          -T
+          -p "$deploy_port"
+          -i "$ssh_dir/id_ed25519"
+          -o IdentitiesOnly=yes
+          -o PreferredAuthentications=publickey
+          -o PasswordAuthentication=no
+          -o KbdInteractiveAuthentication=no
+          -o BatchMode=yes
+          -o StrictHostKeyChecking=yes
+          -o UserKnownHostsFile="$ssh_dir/known_hosts"
+          -o GlobalKnownHostsFile=/dev/null
+          -o ConnectTimeout=140
+          -o ServerAliveInterval=10
+          -o ServerAliveCountMax=30
+          -o IPQoS=none
+          -o Compression=no
+          -o KexAlgorithms=curve25519-sha256
+          -o HostKeyAlgorithms=ssh-ed25519
+          -o PubkeyAcceptedAlgorithms=ssh-ed25519
+          -o Ciphers=aes128-ctr
+          -o MACs=hmac-sha2-256
+        )
+        timeout --signal=TERM --kill-after=5s 180s \
+          ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" true \
+          </dev/null >/dev/null
+
+        payload="$(base64 -w0 <<'REMOTE'
+        set -Eeuo pipefail
+        production=school-1-11
+        exec 9>>/var/lock/school-1-11-production.lock
+        flock -w 900 9
+        school_container_id="$(docker container inspect "$production" --format '{{.Id}}')"
+        [[ "$school_container_id" =~ ^[a-f0-9]{64}$ ]]
+        test "$(docker container inspect "$school_container_id" --format '{{.State.Running}}')" = true
+        test "$(docker container inspect "$school_container_id" --format '{{.State.Health.Status}}')" = healthy
+        test "$(docker container inspect "$school_container_id" --format '{{index .Config.Labels "school.system"}}')" = school-1-11
+        test "$(docker container inspect "$school_container_id" --format '{{index .Config.Labels "school.environment"}}')" = production
+        docker container inspect "$school_container_id" | python3 -I -c '
+        import json
+        import sys
+
+        item = json.load(sys.stdin)[0]
+        matches = [
+            value.removeprefix("CENTRAL_ACCESS_SECRET=")
+            for value in (item.get("Config") or {}).get("Env") or []
+            if value.startswith("CENTRAL_ACCESS_SECRET=")
+        ]
+        if len(matches) != 1:
+            raise SystemExit("School must expose exactly one central access secret")
+        secret = matches[0]
+        if not 32 <= len(secret) <= 4096 or any(character.isspace() for character in secret):
+            raise SystemExit("School central access secret has an unsafe format")
+        sys.stdout.write(secret)
+        '
+        REMOTE
+        )"
+        central_access_secret="$(
+          timeout --signal=TERM --kill-after=5s 1200s \
+            ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "printf '%s' '$payload' | base64 -d | bash" \
+            </dev/null
+        )"
+        test "${#central_access_secret}" -ge 32
+        test "${#central_access_secret}" -le 4096
+        [[ "$central_access_secret" != *[[:space:]]* ]]
+        escaped_secret="${central_access_secret//'%'/'%25'}"
+        printf '::add-mask::%s\n' "$escaped_secret"
+
+        secret_dir="$HOME/.config/arthello"
+        central_access_secret_file="$secret_dir/central-access-secret"
+        test ! -L "$secret_dir"
+        install -d -m 0700 "$secret_dir"
+        test "$(stat -c '%a' "$secret_dir")" = 700
+        if [ -L "$central_access_secret_file" ]; then
+          echo 'Central access secret file must not be a symlink' >&2
+          exit 1
+        elif [ -e "$central_access_secret_file" ]; then
+          test -f "$central_access_secret_file"
+          test -r "$central_access_secret_file"
+          current_secret="$(python3 -I -c 'import pathlib, sys; sys.stdout.write(pathlib.Path(sys.argv[1]).read_text(encoding="ascii"))' "$central_access_secret_file")"
+          test "${#current_secret}" -ge 32
+          test "${#current_secret}" -le 4096
+          [[ "$current_secret" != *[[:space:]]* ]]
+          escaped_current="${current_secret//'%'/'%25'}"
+          printf '::add-mask::%s\n' "$escaped_current"
+          test "$current_secret" = "$central_access_secret"
+          chmod 0444 "$central_access_secret_file"
+        else
+          temporary="$(mktemp "$secret_dir/.central-access-secret.XXXXXX")"
+          printf '%s' "$central_access_secret" > "$temporary"
+          sync -f "$temporary"
+          chmod 0444 "$temporary"
+          mv -f -- "$temporary" "$central_access_secret_file"
+          chmod 0444 "$central_access_secret_file"
+          sync -d "$secret_dir"
+        fi
+        test -f "$central_access_secret_file"
+        test ! -L "$central_access_secret_file"
+        test "$(stat -c '%a' "$central_access_secret_file")" = 444
+
+        timestamp="$(date +%s)"
+        wrong_response_body="$ssh_dir/school-sync-probe-wrong.json"
+        wrong_response_headers="$ssh_dir/school-sync-probe-wrong.headers"
+        wrong_status="$(curl --silent --show-error --max-time 30 \
+          --request POST \
+          --header 'content-type: application/json' \
+          --header "x-arthello-timestamp: $timestamp" \
+          --header 'x-arthello-signature: 0000000000000000000000000000000000000000000000000000000000000000' \
+          --data-binary '{}' \
+          --dump-header "$wrong_response_headers" \
+          --output "$wrong_response_body" \
+          --write-out '%{http_code}' \
+          "$SCHOOL_URL/api/internal/staff-sync")"
+        test "$wrong_status" = 401
+        grep -Eiq '^content-type:[[:space:]]*application/json([[:space:]]*;|[[:space:]]*$)' "$wrong_response_headers"
+        jq -e 'type == "object" and keys == ["error"] and .error == "Неверная подпись синхронизации"' \
+          "$wrong_response_body" >/dev/null
+
+        signature="$(python3 -I - "$central_access_secret_file" "$timestamp" <<'PY'
+        import hashlib
+        import hmac
+        import pathlib
+        import sys
+
+        secret = pathlib.Path(sys.argv[1]).read_bytes()
+        message = f"{sys.argv[2]}.{{}}".encode("utf-8")
+        sys.stdout.write(hmac.new(secret, message, hashlib.sha256).hexdigest())
+        PY
+        )"
+        [[ "$signature" =~ ^[a-f0-9]{64}$ ]]
+        response_body="$ssh_dir/school-sync-probe.json"
+        response_headers="$ssh_dir/school-sync-probe.headers"
+        status="$(curl --silent --show-error --max-time 30 \
+          --request POST \
+          --header 'content-type: application/json' \
+          --header "x-arthello-timestamp: $timestamp" \
+          --header "x-arthello-signature: $signature" \
+          --data-binary '{}' \
+          --dump-header "$response_headers" \
+          --output "$response_body" \
+          --write-out '%{http_code}' \
+          "$SCHOOL_URL/api/internal/staff-sync")"
+        test "$status" = 400
+        grep -Eiq '^content-type:[[:space:]]*application/json([[:space:]]*;|[[:space:]]*$)' "$response_headers"
+        jq -e 'type == "object" and keys == ["error"] and .error == "Неизвестное действие синхронизации"' \
+          "$response_body" >/dev/null
+        printf 'ARTHELLO_SCHOOL_SYNC_SECRET=VERIFIED source=protected-remote\n'
+    - name: Clone preflight and guarded production cutover
+      id: cutover
+      timeout-minutes: 75
+      env:
+        EXPECTED_TREE: ${{ steps.provenance.outputs.tree_sha }}
+        GH_TOKEN: ${{ github.token }}
+        VALIDATED_IMAGE_ID: ${{ steps.image_import.outputs.image_id }}
+        VALIDATED_RUNTIME_FINGERPRINT: ${{ steps.image_import.outputs.runtime_fingerprint }}
+        ARTHELLO_E2E_LOGIN: ${{ secrets.ARTHELLO_E2E_LOGIN }}
+        ARTHELLO_E2E_PASSWORD: ${{ secrets.ARTHELLO_E2E_PASSWORD }}
+        SCHOOL_REPAIR_CONFIG_SHA256: ${{ steps.school_repair.outputs.config_sha256 }}
+        SCHOOL_REPAIR_RECEIPT_FILE: ${{ runner.temp }}/school-r3-receipt-${{ github.run_id }}-${{ github.run_attempt }}.json
+      run: |
+        set -Eeuo pipefail
+        umask 077
+
+        immutable_image_id="$VALIDATED_IMAGE_ID"
+        [[ "$immutable_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+        [[ "$VALIDATED_RUNTIME_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
+        test "$(docker image inspect "$immutable_image_id" --format '{{.Id}}')" = "$immutable_image_id"
+        test "$(docker image inspect "$immutable_image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$RELEASE_SHA"
+        test "$(docker image inspect "$immutable_image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$EXPECTED_TREE"
+        test "$(docker image inspect "$immutable_image_id" --format '{{.Config.User}}')" = node
+        cutover_runtime_fingerprint="$(
+          docker image inspect "$immutable_image_id" \
+            | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq \
+            | sha256sum \
+            | cut -d ' ' -f 1
+        )"
+        test "$cutover_runtime_fingerprint" = "$VALIDATED_RUNTIME_FINGERPRINT"
+        printf 'ARTHELLO_CUTOVER_IMMUTABLE_IMAGE=VERIFIED id=%s fingerprint=%s\n' \
+          "$immutable_image_id" "$cutover_runtime_fingerprint"
+
+        run_key="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        work="$RUNNER_TEMP/arthello-deploy-$run_key"
+        clone_volume="arthello-preflight-$run_key"
+        rollback_volume="arthello-rollback-$run_key"
+        clone_container="arthello-preflight-$run_key"
+        candidate="arthello-direct-$run_key"
+        copy_helper="arthello-copy-$run_key"
+        snapshot_helper="arthello-snapshot-$run_key"
+        backup_worker="arthello-v52-backup-worker-$run_key"
+        backup_volume="arthello-v52-backups-$run_key"
+        backup_control_volume="arthello-v52-backup-control-$run_key"
+        bank_activation_volume="arthello-v52-tochka-activation-$run_key"
+        route_new="/data/external-routes.caddy.arthello-$run_key"
+        config_new="/tmp/Caddyfile.arthello-$run_key"
+        secret_dir="$HOME/.config/arthello"
+        backup_runtime_state_dir="$secret_dir/release-state/backup-runtime-$run_key"
+        backup_runtime_state="$backup_runtime_state_dir/backup-runtime-state.json"
+        integration_key_file="$secret_dir/integration-credentials-key"
+        bootstrap_file="$secret_dir/bootstrap-password"
+        central_access_secret_file="$secret_dir/central-access-secret"
+        openai_api_key_file="$secret_dir/openai-api-key"
+        tbank_egress_ip_file="$secret_dir/tbank-egress-ip"
+        inventory_script="deploy/v52/maintenance/production-data-inventory.py"
+        active_d1_relative_path="$(python3 "$inventory_script" --print-active-database-relative-path)"
+        test "$active_d1_relative_path" = "d1/miniflare-D1DatabaseObject/5a499c55f63d6b9f725547d510cf454e288954b6f3c2d5024eb1443f29c97730.sqlite"
+        active_d1_path="/data/$active_d1_relative_path"
+
+        live_id=""
+        live_name=""
+        live_image_id=""
+        old_restart_name=""
+        old_restart_max="0"
+        live_paused=0
+        candidate_paused=0
+        old_restart_disabled=0
+        old_stopped=0
+        backup_ready=0
+        live_data_modified=0
+        route_changed=0
+        release_active=0
+        public_commit_started=0
+        candidate_auth_started=0
+        backup_runtime_started=0
+        backup_runtime_cleanup_failed=0
+        autosync_activation_id="$(python3 -I -c 'import secrets; print(secrets.token_hex(32))')"
+        [[ "$autosync_activation_id" =~ ^[a-f0-9]{64}$ ]]
+        candidate_route_sha=""
+        maintenance_route_sha=""
+        maintenance_route_new="$route_new.maintenance"
+        maintenance_config_new="$config_new.maintenance"
+        candidate_state_file="$secret_dir/release-state/candidate-acceptance-$RELEASE_SHA.json"
+        gate_nonce_file="$work/candidate-gate.nonce"
+
+        require_safe_work_path() {
+          case "$work" in
+            "$RUNNER_TEMP"/arthello-deploy-*) ;;
+            *) echo 'Unsafe deployment work path' >&2; return 1 ;;
+          esac
+        }
+
+        container_exists() {
+          docker inspect "$1" >/dev/null 2>&1
+        }
+
+        volume_exists() {
+          docker volume inspect "$1" >/dev/null 2>&1
+        }
+
+        require_current_main_release() {
+          local current_main
+          current_main="$(curl --fail-with-body --silent --show-error --max-time 30 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" \
+            | jq -r '.object.sha')" || return 1
+          test "$current_main" = "$RELEASE_SHA"
+        }
+
+        assert_readonly_secret_mount() {
+          local target="$1" destination="$2"
+          docker inspect "$target" | jq -e --arg destination "$destination" '
+            [.[0].Mounts[]
+              | select(
+                  .Type == "bind" and
+                  .Destination == $destination and
+                  .RW == false
+                )
+            ] | length == 1
+          ' >/dev/null
+        }
+
+        assert_exact_runtime_env() {
+          local configured="$1" variable="$2" expected="$3" count
+          count="$(awk -F= -v variable="$variable" '$1 == variable { matches += 1 } END { print matches + 0 }' <<<"$configured")"
+          test "$count" -eq 1
+          grep -Fx "$variable=$expected" <<<"$configured" >/dev/null
+        }
+
+        assert_file_only_secret_env() {
+          local target="$1" configured
+          configured="$(docker inspect "$target" --format '{{range .Config.Env}}{{println .}}{{end}}')" || return 1
+          if grep -Eq '^(ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY|CENTRAL_ACCESS_SECRET|OPENAI_API_KEY)=' <<<"$configured"; then
+            echo 'Plaintext runtime secret found in container configuration' >&2
+            return 1
+          fi
+          assert_exact_runtime_env "$configured" ARTHELLO_BOOTSTRAP_PASSWORD_FILE /run/secrets/bootstrap-password
+          assert_exact_runtime_env "$configured" INTEGRATION_CREDENTIALS_KEY_FILE /run/secrets/integration-credentials-key
+          assert_exact_runtime_env "$configured" CENTRAL_ACCESS_SECRET_FILE /run/secrets/central-access-secret
+          assert_exact_runtime_env "$configured" SCHOOL_PUBLIC_ORIGIN "$SCHOOL_URL"
+          assert_exact_runtime_env "$configured" SCHOOL_DIARY_SYNC_URL "$SCHOOL_URL"
+          assert_exact_runtime_env "$configured" SCHOOL_DIARY_ALLOWED_ORIGINS "$SCHOOL_URL"
+          assert_exact_runtime_env "$configured" OPENAI_OCR_MODEL gpt-4.1-mini
+          assert_exact_runtime_env "$configured" NODE_EXTRA_CA_CERTS /app/production/russian-trusted-root-ca.pem
+          assert_readonly_secret_mount "$target" /run/secrets/bootstrap-password
+          assert_readonly_secret_mount "$target" /run/secrets/integration-credentials-key
+          assert_readonly_secret_mount "$target" /run/secrets/central-access-secret
+
+          if [ "$openai_enabled" -eq 1 ]; then
+            assert_exact_runtime_env "$configured" OPENAI_API_KEY_FILE /run/secrets/openai-api-key
+            assert_readonly_secret_mount "$target" /run/secrets/openai-api-key
+          else
+            if grep -Eq '^OPENAI_API_KEY(_FILE)?=' <<<"$configured"; then
+              echo 'OpenAI runtime configuration is present without the protected key file' >&2
+              return 1
+            fi
+            docker inspect "$target" | jq -e '
+              [.[0].Mounts[] | select(.Destination == "/run/secrets/openai-api-key")] | length == 0
+            ' >/dev/null
+          fi
+
+          if [ "$tbank_enabled" -eq 1 ]; then
+            assert_exact_runtime_env "$configured" TBANK_EGRESS_IP "$tbank_egress_ip"
+          elif grep -q '^TBANK_EGRESS_IP=' <<<"$configured"; then
+            echo 'T-Bank runtime configuration is present without the validated egress control file' >&2
+            return 1
+          fi
+        }
+
+        assert_active_d1_file_descriptors() {
+          local target="$1" role="$2" report expected_handles unexpected_handles
+          case "$role" in live|preflight|candidate) ;; *) return 1 ;; esac
+          if ! report="$(docker exec \
+            -e ARTHELLO_EXPECTED_D1_FILE="$active_d1_path" \
+            "$target" /bin/sh -ceu '
+              scanner_uid="$(id -u)"
+              pid_one_uid="$(sed -n "s/^Uid:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p" /proc/1/status)"
+              case "$scanner_uid" in ""|*[!0-9]*) exit 1 ;; esac
+              case "$pid_one_uid" in ""|*[!0-9]*) exit 1 ;; esac
+              test "$scanner_uid" -ne 0
+              test "$scanner_uid" = "$pid_one_uid"
+              expected_handles=0
+              unexpected_handles=0
+              for descriptor in /proc/[0-9]*/fd/*; do
+                [ -e "$descriptor" ] || continue
+                target_path="$(readlink "$descriptor" 2>/dev/null || true)"
+                case "$target_path" in
+                  "$ARTHELLO_EXPECTED_D1_FILE"|"$ARTHELLO_EXPECTED_D1_FILE-wal"|"$ARTHELLO_EXPECTED_D1_FILE-shm")
+                    expected_handles=$((expected_handles + 1))
+                    ;;
+                  /data/d1/miniflare-D1DatabaseObject/*.sqlite|/data/d1/miniflare-D1DatabaseObject/*.sqlite-wal|/data/d1/miniflare-D1DatabaseObject/*.sqlite-shm)
+                    case "$target_path" in
+                      */metadata.sqlite|*/metadata.sqlite-wal|*/metadata.sqlite-shm) ;;
+                      *) unexpected_handles=$((unexpected_handles + 1)) ;;
+                    esac
+                    ;;
+                esac
+              done
+              printf "%s %s\n" "$expected_handles" "$unexpected_handles"
+            ')"; then
+            printf 'ARTHELLO_ACTIVE_D1_FD=REJECTED role=%s reason=scanner-failed\n' "$role" >&2
+            return 1
+          fi
+          read -r expected_handles unexpected_handles <<<"$report"
+          if ! [[ "$expected_handles" =~ ^[0-9]+$ && "$unexpected_handles" =~ ^[0-9]+$ ]]; then
+            printf 'ARTHELLO_ACTIVE_D1_FD=REJECTED role=%s reason=malformed-counts\n' "$role" >&2
+            return 1
+          fi
+          if [ "$expected_handles" -le 0 ] || [ "$unexpected_handles" -ne 0 ]; then
+            printf 'ARTHELLO_ACTIVE_D1_FD=REJECTED role=%s expected_handles=%s unexpected_handles=%s\n' \
+              "$role" "$expected_handles" "$unexpected_handles" >&2
+            return 1
+          fi
+          printf 'ARTHELLO_ACTIVE_D1_FD=VERIFIED role=%s handles=%s\n' "$role" "$expected_handles"
+        }
+
+        probe_tochka_tls_egress() {
+          local probe_network="$1"
+          docker run --rm -i \
+            --network "$probe_network" \
+            --read-only \
+            --entrypoint node \
+            "$immutable_image_id" --input-type=module - <<'NODE'
+        import { X509Certificate } from "node:crypto";
+        import { getCACertificates } from "node:tls";
+        import { probeTochkaTlsEgress } from "./production/tochka-transport.mjs";
+
+        const expectedRoot = "D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31";
+        const extraRoots = getCACertificates("extra").map((pem) => new X509Certificate(pem));
+        if (!extraRoots.some((certificate) => certificate.fingerprint256 === expectedRoot && certificate.ca && certificate.subject === certificate.issuer && certificate.verify(certificate.publicKey))) {
+          throw new Error("Pinned Tochka trust anchor is not active");
+        }
+
+        const status = await probeTochkaTlsEgress();
+        console.log(`ARTHELLO_TOCHKA_TLS_EGRESS=VERIFIED status=${status}`);
+        NODE
+        }
+
+        initialize_backup_runtime_state() {
+          python3 -I - "$secret_dir" "$run_key" <<'D069_BACKUP_STATE_DIRECTORY'
+        import json, os, re, stat, sys
+        descriptors = []
+        try:
+            secret_path, run_key = sys.argv[1:]
+            if not os.path.isabs(secret_path) or not re.fullmatch(r'[1-9][0-9]{0,19}-[1-9][0-9]{0,5}', run_key):
+                raise ValueError('identity')
+            parts = secret_path.split('/')[1:]
+            if not parts or any(part in ('', '.', '..') for part in parts):
+                raise ValueError('path')
+            uid = os.geteuid()
+            flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+            parent = os.open('/', flags)
+            descriptors.append(parent)
+            for part in parts:
+                child = os.open(part, flags, dir_fd=parent)
+                descriptors.append(child)
+                info = os.fstat(child)
+                if info.st_uid not in (0, uid) or stat.S_IMODE(info.st_mode) & 0o022:
+                    raise ValueError('ancestor')
+                parent = child
+            info = os.fstat(parent)
+            if info.st_uid != uid or stat.S_IMODE(info.st_mode) != 0o700:
+                raise ValueError('secret-directory')
+            try:
+                os.mkdir('release-state', 0o700, dir_fd=parent)
+                os.fsync(parent)
+            except FileExistsError:
+                pass
+            release = os.open('release-state', flags, dir_fd=parent)
+            descriptors.append(release)
+            info = os.fstat(release)
+            if info.st_uid != uid or stat.S_IMODE(info.st_mode) != 0o700:
+                raise ValueError('release-directory')
+            name = 'backup-runtime-' + run_key
+            os.mkdir(name, 0o700, dir_fd=release)
+            os.fsync(release)
+            state = os.open(name, flags, dir_fd=release)
+            descriptors.append(state)
+            info = os.fstat(state)
+            if info.st_uid != uid or stat.S_IMODE(info.st_mode) != 0o700:
+                raise ValueError('state-directory')
+            os.fsync(state)
+            print(json.dumps({'schemaVersion': 1, 'state': 'created', 'executionUid': uid, 'mode': '0700'}))
+        except (OSError, ValueError):
+            print(json.dumps({'state': 'refused', 'code': 'BACKUP_STATE_DIRECTORY_UNTRUSTED_OR_ALREADY_EXISTS'}), file=sys.stderr)
+            raise SystemExit(1)
+        finally:
+            for descriptor in reversed(descriptors):
+                os.close(descriptor)
+        D069_BACKUP_STATE_DIRECTORY
+        }
+
+        backup_runtime() {
+          python3 -I .github/scripts/r7-backup-runtime.py "$1" \
+            --image-id "$immutable_image_id" --release-sha "$RELEASE_SHA" --tree-sha "$EXPECTED_TREE" \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --source-relative "$active_d1_relative_path" --state-file "$backup_runtime_state"
+        }
+
+        cleanup_backup_runtime() {
+          if [ "$backup_runtime_started" -eq 1 ]; then
+            if backup_runtime cleanup; then
+              backup_runtime_started=0
+            else
+              backup_runtime_cleanup_failed=1
+              printf 'ARTHELLO_BACKUP_RUNTIME_CLEANUP=BLOCKED: preserve owned-resource evidence for recovery\n' >&2
+              return 1
+            fi
+          fi
+        }
+
+        cleanup_transient() {
+          set +e
+          docker unpause "$clone_container" >/dev/null 2>&1 || true
+          docker rm -f "$clone_container" >/dev/null 2>&1 || true
+          docker rm -f "$copy_helper" >/dev/null 2>&1 || true
+          docker rm -f "$snapshot_helper" >/dev/null 2>&1 || true
+          docker volume rm -f "$clone_volume" >/dev/null 2>&1 || true
+          docker exec "$CADDY_CONTAINER" rm -f \
+            "$route_new" "$config_new" "$route_new.rollback" "$config_new.rollback" \
+            "$maintenance_route_new" "$maintenance_config_new" \
+            >/dev/null 2>&1 || true
+          if require_safe_work_path; then rm -rf -- "$work"; fi
+          set -e
+        }
+
+        restart_argument() {
+          case "$old_restart_name" in
+            no|always|unless-stopped) printf '%s' "$old_restart_name" ;;
+            on-failure)
+              if [ "$old_restart_max" -gt 0 ]; then
+                printf 'on-failure:%s' "$old_restart_max"
+              else
+                printf 'on-failure'
+              fi
+              ;;
+            *) echo 'Unsupported previous restart policy' >&2; return 1 ;;
+          esac
+        }
+
+        apply_previous_restart_policy() {
+          local target="$1" expected
+          expected="$(restart_argument)"
+          docker update --restart="$expected" "$target" >/dev/null
+          test "$(docker inspect "$target" --format '{{.HostConfig.RestartPolicy.Name}}')" = "$old_restart_name"
+          test "$(docker inspect "$target" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')" = "$old_restart_max"
+        }
+
+        copy_volume() {
+          local source_volume="$1" target_volume="$2"
+          docker rm -f "$copy_helper" >/dev/null 2>&1 || true
+          docker run --rm \
+            --name "$copy_helper" \
+            --network none \
+            --read-only \
+            --user 0:0 \
+            --entrypoint /bin/sh \
+            -v "$source_volume:/source:ro" \
+            -v "$target_volume:/target" \
+            "$live_image_id" -ceu '
+              find /target -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+              cp -a /source/. /target/
+              sync
+            '
+        }
+
+        snapshot_volume() {
+          local source_volume="$1" destination="$2"
+          install -d -m 0700 "$destination"
+          docker rm -f "$snapshot_helper" >/dev/null 2>&1 || true
+          docker create \
+            --name "$snapshot_helper" \
+            --network none \
+            --read-only \
+            --user 0:0 \
+            -v "$source_volume:/data:ro" \
+            "$live_image_id" true >/dev/null || return 1
+          if ! docker cp "$snapshot_helper:/data/." "$destination"; then
+            docker rm -f "$snapshot_helper" >/dev/null 2>&1 || true
+            return 1
+          fi
+          docker rm -f "$snapshot_helper" >/dev/null || return 1
+        }
+
+        content_manifest() {
+          local directory="$1" output="$2"
+          (
+            cd "$directory"
+            find . -type f -print0 | LC_ALL=C sort -z | xargs -0r sha256sum
+          ) > "$output"
+        }
+
+        wait_local_candidate() {
+          local target="$1" ready=0
+          for attempt in $(seq 1 90); do
+            if docker exec -i -e PUBLIC_URL="$PUBLIC_URL" "$target" node - <<'NODE'
+        const base = 'http://127.0.0.1:8081';
+        try {
+          const health = await fetch(base + '/api/health');
+          const healthBody = await health.json();
+          if (!health.ok || healthBody.status !== 'ok' || healthBody.database !== 'available') process.exit(1);
+          const root = await fetch(base + '/');
+          const html = await root.text();
+          const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
+          if (!root.ok || refs.length < 2) process.exit(1);
+          for (const path of [...new Set(refs)]) {
+            if (!(await fetch(base + path)).ok) process.exit(1);
+          }
+          if ((await fetch(base + '/api/auth/me')).status !== 401) process.exit(1);
+          const forged = await fetch(base + '/api/settings', {
+            headers: {
+              'oai-authenticated-user-email': 'forged@example.invalid',
+              'x-arthello-role': 'OWNER',
+            },
+          });
+          if (forged.status !== 401) process.exit(1);
+          const login = await fetch(base + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: process.env.PUBLIC_URL },
+            body: JSON.stringify({ login: `deploy-probe-${Date.now()}`, password: 'deliberately-invalid' }),
+          });
+          const loginBody = await login.json();
+          if (login.status !== 401 || typeof loginBody.error !== 'string') process.exit(1);
+          const crossOrigin = await fetch(base + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: 'https://invalid.example' },
+            body: JSON.stringify({ login: 'deploy-probe', password: 'deliberately-invalid' }),
+          });
+          if (crossOrigin.status !== 403) process.exit(1);
+          const wrongMethod = await fetch(base + '/api/auth/login');
+          if (wrongMethod.status !== 405 || wrongMethod.headers.get('allow') !== 'POST') process.exit(1);
+          if ((await fetch(base + '/api/auth/not-a-route')).status !== 404) process.exit(1);
+        } catch {
+          process.exit(1);
+        }
+        NODE
+            then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+        }
+
+        wait_old_health() {
+          local ready=0
+          for attempt in $(seq 1 60); do
+            if docker exec -i "$live_id" node - <<'NODE'
+        try {
+          const response = await fetch('http://127.0.0.1:8081/api/health');
+          const body = await response.json();
+          if (!response.ok || body.status !== 'ok' || body.database !== 'available') process.exit(1);
+        } catch {
+          process.exit(1);
+        }
+        NODE
+            then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+        }
+
+        verify_public() {
+          local probe="$1" base_url="${2:-$PUBLIC_URL}" ready=0
+          for attempt in $(seq 1 40); do
+            if docker exec -i \
+              -e PUBLIC_URL="$base_url" \
+              -e EXPECTED_PUBLIC_ORIGIN="$PUBLIC_URL" \
+              -e SCHOOL_URL="$SCHOOL_URL" \
+              -e PROBE="$probe-$attempt" \
+              "$candidate" node - <<'NODE'
+        const base = process.env.PUBLIC_URL;
+        const expectedOrigin = process.env.EXPECTED_PUBLIC_ORIGIN;
+        const school = process.env.SCHOOL_URL;
+        try {
+          const root = await fetch(`${base}/?probe=${process.env.PROBE}`, { headers: { 'cache-control': 'no-cache' } });
+          const html = await root.text();
+          const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
+          if (!root.ok || refs.length < 2) process.exit(1);
+          for (const path of [...new Set(refs)]) {
+            if (!(await fetch(base + path, { headers: { 'cache-control': 'no-cache' } })).ok) process.exit(1);
+          }
+          const health = await fetch(base + '/api/health', { headers: { 'cache-control': 'no-cache' } });
+          const healthBody = await health.json();
+          if (!health.ok || healthBody.status !== 'ok' || healthBody.database !== 'available') process.exit(1);
+          if ((await fetch(base + '/api/auth/me', { headers: { 'cache-control': 'no-cache' } })).status !== 401) process.exit(1);
+          const forged = await fetch(base + '/api/settings', {
+            headers: {
+              'cache-control': 'no-cache',
+              'oai-authenticated-user-email': 'forged@example.invalid',
+              'x-arthello-role': 'OWNER',
+            },
+          });
+          if (forged.status !== 401) process.exit(1);
+          const login = await fetch(base + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'cache-control': 'no-cache', 'content-type': 'application/json', origin: expectedOrigin },
+            body: JSON.stringify({ login: `deploy-probe-${Date.now()}`, password: 'deliberately-invalid' }),
+          });
+          const loginBody = await login.json();
+          if (login.status !== 401 || typeof loginBody.error !== 'string') process.exit(1);
+          const crossOrigin = await fetch(base + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: 'https://invalid.example' },
+            body: JSON.stringify({ login: 'deploy-probe', password: 'deliberately-invalid' }),
+          });
+          if (crossOrigin.status !== 403) process.exit(1);
+          const wrongMethod = await fetch(base + '/api/auth/login');
+          if (wrongMethod.status !== 405 || wrongMethod.headers.get('allow') !== 'POST') process.exit(1);
+          if ((await fetch(base + '/api/auth/not-a-route')).status !== 404) process.exit(1);
+          const schoolHealth = await fetch(school + '/api/health', { headers: { 'cache-control': 'no-cache' } });
+          const schoolBody = await schoolHealth.json();
+          if (!schoolHealth.ok || schoolBody.status !== 'ok') process.exit(1);
+        } catch {
+          process.exit(1);
+        }
+        NODE
+            then
+              ready=1
+              break
+            fi
+            sleep 3
+          done
+          test "$ready" -eq 1
+        }
+
+        atomic_secret_write() {
+          local target="$1" value="$2" temporary
+          test ! -L "$target"
+          temporary="$(mktemp "$secret_dir/.arthello-secret.XXXXXX")"
+          printf '%s' "$value" > "$temporary"
+          sync -f "$temporary"
+          chmod 0444 "$temporary"
+          mv -f "$temporary" "$target"
+          chmod 0444 "$target"
+          sync -d "$secret_dir"
+        }
+
+        mask_secret() {
+          local value="$1" escaped
+          [[ "$value" != *$'\r'* && "$value" != *$'\n'* ]]
+          escaped="${value//'%'/'%25'}"
+          printf '::add-mask::%s\n' "$escaped"
+        }
+
+        verify_school_sync_secret() {
+          local label="$1" timestamp signature
+          local wrong_response_body wrong_response_headers wrong_status
+          local response_body response_headers status
+          [[ "$label" =~ ^[a-z0-9-]+$ ]]
+          test -f "$central_access_secret_file"
+          test ! -L "$central_access_secret_file"
+          test "$(stat -c '%a' "$central_access_secret_file")" = 444
+          timestamp="$(date +%s)"
+          wrong_response_body="$work/school-sync-probe-$label-wrong.json"
+          wrong_response_headers="$work/school-sync-probe-$label-wrong.headers"
+          wrong_status="$(curl --silent --show-error --max-time 30 \
+            --request POST \
+            --header 'content-type: application/json' \
+            --header "x-arthello-timestamp: $timestamp" \
+            --header 'x-arthello-signature: 0000000000000000000000000000000000000000000000000000000000000000' \
+            --data-binary '{}' \
+            --dump-header "$wrong_response_headers" \
+            --output "$wrong_response_body" \
+            --write-out '%{http_code}' \
+            "$SCHOOL_URL/api/internal/staff-sync")"
+          test "$wrong_status" = 401
+          grep -Eiq '^content-type:[[:space:]]*application/json([[:space:]]*;|[[:space:]]*$)' "$wrong_response_headers"
+          jq -e 'type == "object" and keys == ["error"] and .error == "Неверная подпись синхронизации"' \
+            "$wrong_response_body" >/dev/null
+
+          signature="$(python3 -I - "$central_access_secret_file" "$timestamp" <<'PY'
+        import hashlib
+        import hmac
+        import pathlib
+        import sys
+
+        secret = pathlib.Path(sys.argv[1]).read_bytes()
+        message = f"{sys.argv[2]}.{{}}".encode("utf-8")
+        sys.stdout.write(hmac.new(secret, message, hashlib.sha256).hexdigest())
+        PY
+          )"
+          [[ "$signature" =~ ^[a-f0-9]{64}$ ]]
+          response_body="$work/school-sync-probe-$label.json"
+          response_headers="$work/school-sync-probe-$label.headers"
+          status="$(curl --silent --show-error --max-time 30 \
+            --request POST \
+            --header 'content-type: application/json' \
+            --header "x-arthello-timestamp: $timestamp" \
+            --header "x-arthello-signature: $signature" \
+            --data-binary '{}' \
+            --dump-header "$response_headers" \
+            --output "$response_body" \
+            --write-out '%{http_code}' \
+            "$SCHOOL_URL/api/internal/staff-sync")"
+          test "$status" = 400
+          grep -Eiq '^content-type:[[:space:]]*application/json([[:space:]]*;|[[:space:]]*$)' "$response_headers"
+          jq -e 'type == "object" and keys == ["error"] and .error == "Неизвестное действие синхронизации"' \
+            "$response_body" >/dev/null
+          printf 'ARTHELLO_SCHOOL_SYNC_HMAC=VERIFIED phase=%s\n' "$label"
+        }
+
+        restore_caddy_route() {
+          local rollback_route="$route_new.rollback" rollback_config="$config_new.rollback"
+          local current_route_sha
+          current_route_sha="$(docker exec "$CADDY_CONTAINER" sh -ceu \
+            'sha256sum /data/external-routes.caddy | cut -d " " -f 1')" || return 1
+          if [ "$current_route_sha" = "$original_route_sha" ]; then
+            docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || return 1
+            return 0
+          fi
+          test "$current_route_sha" = "$candidate_route_sha" || return 1
+          docker cp "$work/external-routes.before.caddy" "$CADDY_CONTAINER:$rollback_route" || return 1
+          docker exec "$CADDY_CONTAINER" sh -ceu \
+            "sed 's#/data/external-routes.caddy#$rollback_route#' /etc/caddy/Caddyfile > '$rollback_config'" || return 1
+          docker exec "$CADDY_CONTAINER" caddy validate --config "$rollback_config" --adapter caddyfile >/dev/null || return 1
+          docker exec \
+            -e EXPECTED_CURRENT_SHA="$candidate_route_sha" \
+            -e ROLLBACK_ROUTE="$rollback_route" \
+            "$CADDY_CONTAINER" sh -ceu '
+              current_sha="$(sha256sum /data/external-routes.caddy | cut -d " " -f 1)"
+              test "$current_sha" = "$EXPECTED_CURRENT_SHA"
+              mv "$ROLLBACK_ROUTE" /data/external-routes.caddy
+            ' || return 1
+          docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null || return 1
+          test "$(docker exec "$CADDY_CONTAINER" sh -ceu 'sha256sum /data/external-routes.caddy | cut -d " " -f 1')" = "$original_route_sha"
+        }
+
+        # D080_CANDIDATE_COMPLETION_BEGIN
+        complete_candidate_release() {
+          candidate_acceptance_file="$work/r9-acceptance-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+          require_current_main_release
+          test "$(docker exec "$CADDY_CONTAINER" sh -ceu 'sha256sum /data/external-routes.caddy | cut -d " " -f 1')" = "$maintenance_route_sha"
+          python3 -I .github/scripts/d080-maintenance-route.py probe --nonce-file "$gate_nonce_file"
+          D080_CANDIDATE_CONTEXT_SHA256="$(jq -er '.contextSha256' "$candidate_state_file")" \
+          BROWSER_PHASE=candidate BROWSER_CANDIDATE_ID="$candidate_id" \
+            OBSERVED_LIVE_ARTHELLO_SHA="$RELEASE_SHA" D080_ACCEPTANCE_FILE="$candidate_acceptance_file" \
+            bash .github/scripts/run-r9-live-browser.sh < "$gate_nonce_file"
+          python3 -I .github/scripts/d080-candidate-state.py verified \
+            --state "$candidate_state_file" --receipt "$candidate_acceptance_file" --attempt "$GITHUB_RUN_ATTEMPT"
+          require_current_main_release
+          python3 -I .github/scripts/d080-maintenance-route.py probe --nonce-file "$gate_nonce_file"
+        require_current_main_release
+        docker cp "$work/external-routes.candidate.caddy" "$CADDY_CONTAINER:$route_new"
+        docker exec "$CADDY_CONTAINER" sh -ceu \
+          "sed 's#/data/external-routes.caddy#$route_new#' /etc/caddy/Caddyfile > '$config_new'"
+        if ! docker exec "$CADDY_CONTAINER" caddy validate --config "$config_new" --adapter caddyfile >/dev/null 2>&1; then
+          printf 'ARTHELLO_D080_PUBLIC_CONFIG=BLOCKED\n' >&2
+          return 1
+        fi
+        original_route_sha="$(sha256sum "$work/external-routes.before.caddy" | cut -d ' ' -f 1)"
+        candidate_route_sha="$(sha256sum "$work/external-routes.candidate.caddy" | cut -d ' ' -f 1)"
+        # Durable commit boundary: after this marker, an ambiguous reload or public
+        # check failure must preserve the current writable database and candidate.
+        activation_state_dir="$secret_dir/release-state"
+        test ! -L "$activation_state_dir"
+        install -d -m 0700 "$activation_state_dir"
+        activation_state_file="$activation_state_dir/activation-$RELEASE_SHA.json"
+        candidate_id="$(docker inspect "$candidate" --format '{{.Id}}')"
+        previous_id="$(docker inspect "$live_id" --format '{{.Id}}')"
+        require_current_main_release
+        python3 -I .github/scripts/d063-activation-state.py activation-start \
+          "$activation_state_file" "$RELEASE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+          "$candidate_id" "$previous_id" "$rollback_volume" \
+          "$original_route_sha" "$candidate_route_sha" "$work"
+        python3 -I .github/scripts/d080-candidate-state.py public-start \
+          --state "$candidate_state_file" --receipt "$candidate_acceptance_file" --attempt "$GITHUB_RUN_ATTEMPT"
+        public_commit_started=1
+        route_changed=1
+        docker exec \
+          -e EXPECTED_CURRENT_SHA="$maintenance_route_sha" \
+          -e CANDIDATE_ROUTE="$route_new" \
+          "$CADDY_CONTAINER" sh -ceu '
+            current_sha="$(sha256sum /data/external-routes.caddy | cut -d " " -f 1)"
+            test "$current_sha" = "$EXPECTED_CURRENT_SHA"
+            mv "$CANDIDATE_ROUTE" /data/external-routes.caddy
+          '
+        docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+
+        verify_public "$run_key"
+        verify_school_sync_secret after-route-activation
+        require_current_main_release
+        docker run --rm \
+          --name "arthello-v52-activation-writer-$run_key" \
+          --user 1002:1000 --network none --read-only --cap-drop ALL \
+          --security-opt no-new-privileges:true --pids-limit 16 --memory 64m --cpus 0.25 \
+          --entrypoint python3 \
+          --mount "type=volume,src=$bank_activation_volume,dst=/var/lib/arthello-v52-tochka-activation,volume-nocopy" \
+          "$immutable_image_id" -I /opt/arthello-backup/activation-volume.py write \
+          --directory /var/lib/arthello-v52-tochka-activation --release-sha "$RELEASE_SHA" --nonce "$autosync_activation_id" \
+          | tee "$work/bank-activation-receipt.json"
+        jq -e --arg sha "$RELEASE_SHA" --arg nonce "$autosync_activation_id" '
+          .schemaVersion == 1 and .state == "verified" and .protocol == "ARTHELLO_TOCHKA_AUTOSYNC_V2" and
+          .releaseSha == $sha and .activationId == $nonce and .executionUid == 1002 and .executionGid == 1000 and
+          .markerMode == "0640" and .mode == "created" and
+          (.contentSha256 | test("^[a-f0-9]{64}$"))
+        ' "$work/bank-activation-receipt.json" >/dev/null
+        printf 'ARTHELLO_TOCHKA_AUTOSYNC_ACTIVATION_V2=VERIFIED\n' 
+
+        printf 'release_container=%s\nrollback_volume=%s\nprevious_container=%s\n' \
+          "$candidate" "$rollback_volume" "$live_name" >> "$GITHUB_OUTPUT"
+        printf 'ARTHELLO_RELEASE_ACTIVE=%s\nARTHELLO_RELEASE_CONTAINER=%s\n' "$RELEASE_SHA" "$candidate"
+
+        }
+        # D080_CANDIDATE_COMPLETION_END
+
+        rollback() {
+          local original_rc="$1" rollback_failed=0 restored_dir candidate_contained=1 data_safe=1
+          trap - EXIT INT TERM HUP
+          set +e
+          if [ "$public_commit_started" -eq 1 ] || [ "$candidate_auth_started" -eq 1 ]; then
+            # Real candidate authentication or public writes may already have committed.
+            # Keep maintenance/current routes, the same candidate DB and all evidence.
+            # No snapshot restore, candidate removal or bank activation is permitted.
+            printf 'ARTHELLO_POST_AUTH_RECOVERY_REQUIRED=1 state=%s diagnostics=%s\n' \
+              "$candidate_state_file" "$work" >&2
+            exit "$original_rc"
+          fi
+          printf 'ARTHELLO_ROLLBACK=START\n' >&2
+
+          if [ "$candidate_paused" -eq 1 ]; then
+            docker unpause "$candidate" >/dev/null 2>&1 || rollback_failed=1
+            candidate_paused=0
+          fi
+          if [ -n "$live_id" ] && container_exists "$live_id"; then
+            if [ "$(docker inspect "$live_id" --format '{{.State.Paused}}' 2>/dev/null)" = true ]; then
+              docker unpause "$live_id" >/dev/null 2>&1 || rollback_failed=1
+            fi
+            live_paused=0
+          fi
+          docker rm -f "$clone_container" >/dev/null 2>&1 || true
+
+          if [ "$release_active" -eq 0 ] && [ -n "$live_id" ]; then
+            if container_exists "$candidate"; then
+              docker rm -f "$candidate" >/dev/null 2>&1 || candidate_contained=0
+            fi
+            if container_exists "$candidate"; then candidate_contained=0; fi
+            if [ "$candidate_contained" -ne 1 ]; then rollback_failed=1; fi
+
+            # Stop the read-only backup consumer before any pre-public database restore.
+            # A failed containment proof keeps the current database and evidence intact.
+            if ! cleanup_backup_runtime; then
+              candidate_contained=0
+              rollback_failed=1
+            fi
+
+            if [ "$live_data_modified" -eq 1 ]; then
+              if [ "$candidate_contained" -ne 1 ] || [ "$backup_ready" -ne 1 ] || ! volume_exists "$rollback_volume"; then
+                rollback_failed=1
+              else
+                copy_volume "$rollback_volume" "$DATA_VOLUME" || rollback_failed=1
+                restored_dir="$work/restored"
+                snapshot_volume "$DATA_VOLUME" "$restored_dir" || rollback_failed=1
+                if [ "$rollback_failed" -eq 0 ]; then
+                  content_manifest "$restored_dir" "$work/restored.sha256" || rollback_failed=1
+                  cmp -s "$work/rollback.sha256" "$work/restored.sha256" || rollback_failed=1
+                  python3 "$inventory_script" "$restored_dir" >/dev/null || rollback_failed=1
+                fi
+              fi
+            fi
+
+            if [ "$live_data_modified" -eq 1 ] && [ "$rollback_failed" -ne 0 ]; then data_safe=0; fi
+            if [ "$data_safe" -eq 1 ] && container_exists "$live_id"; then
+              if [ "$(docker inspect "$live_id" --format '{{.State.Running}}')" != true ]; then
+                docker start "$live_id" >/dev/null || rollback_failed=1
+              fi
+              if [ "$rollback_failed" -eq 0 ]; then wait_old_health || rollback_failed=1; fi
+            fi
+            if [ "$data_safe" -eq 1 ] && [ "$rollback_failed" -eq 0 ] && [ "$old_restart_disabled" -eq 1 ]; then
+              apply_previous_restart_policy "$live_id" || rollback_failed=1
+            fi
+            if [ "$route_changed" -eq 1 ]; then
+              restore_caddy_route || rollback_failed=1
+            fi
+            if [ "$rollback_failed" -eq 0 ]; then
+              curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | jq -e '.status == "ok" and .database == "available"' >/dev/null || rollback_failed=1
+              curl -fsS --max-time 20 "$SCHOOL_URL/api/health" | jq -e '.status == "ok"' >/dev/null || rollback_failed=1
+            fi
+          fi
+
+          if ! cleanup_backup_runtime; then rollback_failed=1; fi
+          cleanup_transient
+          if [ "$backup_ready" -eq 0 ]; then
+            docker volume rm -f "$rollback_volume" >/dev/null 2>&1 || true
+          fi
+          if [ "$rollback_failed" -eq 0 ]; then
+            printf 'ARTHELLO_ROLLBACK=VERIFIED\n' >&2
+          else
+            printf 'ARTHELLO_ROLLBACK=FAILED_MANUAL_RECOVERY_REQUIRED\n' >&2
+          fi
+          exit "$original_rc"
+        }
+
+        on_exit() {
+          local rc=$?
+          if [ "$rc" -ne 0 ]; then
+            rollback "$rc"
+          fi
+          trap - EXIT INT TERM HUP
+          cleanup_transient
+          exit 0
+        }
+        trap on_exit EXIT
+        trap 'rollback 130' INT
+        trap 'rollback 143' TERM
+        trap 'rollback 129' HUP
+
+        require_safe_work_path
+        install -d -m 0700 "$work"
+        test ! -L "$secret_dir"
+        install -d -m 0700 "$secret_dir"
+
+        require_current_main_release
+
+        test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = 188.225.38.55
+        docker version >/dev/null
+        test "$(docker inspect --format '{{.State.Running}}' "$CADDY_CONTAINER")" = true
+        docker exec "$CADDY_CONTAINER" sh -lc "grep -F 'import /data/external-routes.caddy' /etc/caddy/Caddyfile >/dev/null"
+        docker exec "$CADDY_CONTAINER" test -s /data/external-routes.caddy
+        curl -fsS --max-time 20 "$SCHOOL_URL/api/health" | jq -e '.status == "ok"' >/dev/null
+        curl -fsS --max-time 20 "$PUBLIC_URL/api/health" | jq -e '.status == "ok" and .database == "available"' >/dev/null
+
+        test -f "$central_access_secret_file"
+        test ! -L "$central_access_secret_file"
+        test -r "$central_access_secret_file"
+        test -s "$central_access_secret_file"
+        test "$(stat -c '%a' "$central_access_secret_file")" = 444
+        central_access_secret="$(python3 -I -c 'import pathlib, sys; sys.stdout.write(pathlib.Path(sys.argv[1]).read_text(encoding="ascii"))' "$central_access_secret_file")"
+        mask_secret "$central_access_secret"
+        test "${#central_access_secret}" -ge 32
+        test "${#central_access_secret}" -le 4096
+        [[ "$central_access_secret" != *[[:space:]]* ]]
+        verify_school_sync_secret before-preflight
+
+        openai_enabled=0
+        openai_api_key=""
+        if [ -L "$openai_api_key_file" ]; then
+          echo 'OpenAI key file must not be a symlink' >&2
+          exit 1
+        elif [ -e "$openai_api_key_file" ]; then
+          test -f "$openai_api_key_file"
+          test -r "$openai_api_key_file"
+          test -s "$openai_api_key_file"
+          test "$(stat -c '%s' "$openai_api_key_file")" -ge 20
+          test "$(stat -c '%s' "$openai_api_key_file")" -le 4096
+          openai_api_key="$(
+            python3 - "$openai_api_key_file" <<'PY'
+        import pathlib
+        import sys
+
+        raw = pathlib.Path(sys.argv[1]).read_bytes()
+        if not 20 <= len(raw) <= 4096:
+            raise SystemExit("OpenAI key file has an unsafe length")
+        try:
+            value = raw.decode("ascii")
+        except UnicodeDecodeError as error:
+            raise SystemExit("OpenAI key file must contain ASCII") from error
+        if any(character.isspace() for character in value):
+            raise SystemExit("OpenAI key file must not contain whitespace")
+        if any(ord(character) < 33 or ord(character) > 126 for character in value):
+            raise SystemExit("OpenAI key file contains an unsupported character")
+        print(value, end="")
+        PY
+          )"
+          mask_secret "$openai_api_key"
+          chmod 0444 "$openai_api_key_file"
+          test "$(stat -c '%a' "$openai_api_key_file")" = 444
+          openai_enabled=1
+        fi
+
+        # The public inbound host address is not an egress attestation. T-Bank
+        # receives a value only from this operator-provisioned control file.
+        tbank_enabled=0
+        tbank_egress_ip=""
+        if [ -L "$tbank_egress_ip_file" ]; then
+          echo 'T-Bank egress control file must not be a symlink' >&2
+          exit 1
+        elif [ -e "$tbank_egress_ip_file" ]; then
+          test -f "$tbank_egress_ip_file"
+          test -r "$tbank_egress_ip_file"
+          test -s "$tbank_egress_ip_file"
+          test "$(stat -c '%s' "$tbank_egress_ip_file")" -ge 3
+          test "$(stat -c '%s' "$tbank_egress_ip_file")" -le 45
+          tbank_egress_ip="$(
+            python3 - "$tbank_egress_ip_file" <<'PY'
+        import ipaddress
+        import pathlib
+        import sys
+
+        raw = pathlib.Path(sys.argv[1]).read_bytes()
+        if not 3 <= len(raw) <= 45:
+            raise SystemExit("T-Bank egress IP has an unsafe length")
+        try:
+            value = raw.decode("ascii")
+        except UnicodeDecodeError as error:
+            raise SystemExit("T-Bank egress IP must contain ASCII") from error
+        if not value or any(character.isspace() for character in value):
+            raise SystemExit("T-Bank egress IP must be one literal without whitespace")
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError as error:
+            raise SystemExit("T-Bank egress IP is invalid") from error
+        if (
+            not address.is_global
+            or address.is_multicast
+            or address.is_unspecified
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_reserved
+            or str(address) != value
+        ):
+            raise SystemExit("T-Bank egress IP must be a canonical global literal")
+        print(value, end="")
+        PY
+          )"
+          tbank_enabled=1
+        fi
+
+        mapfile -t live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
+        test "${#live_ids[@]}" -eq 1
+        live_id="$(docker inspect "${live_ids[0]}" --format '{{.Id}}')"
+        [[ "$live_id" =~ ^[a-f0-9]{64}$ ]]
+        live_name="$(docker inspect "$live_id" --format '{{.Name}}' | sed 's#^/##')"
+        [[ "$live_name" =~ ^arthello-direct-[A-Za-z0-9._-]+$ ]]
+        live_image_id="$(docker inspect "$live_id" --format '{{.Image}}')"
+        [[ "$live_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+        test "$(docker image inspect "$live_image_id" --format '{{.Id}}')" = "$live_image_id"
+        test "$(docker image inspect "$live_image_id" --format '{{.Config.User}}')" = node
+        test "$(docker image inspect "$live_image_id" --format '{{json .Config.Cmd}}')" = '["node","production/runtime-server.mjs"]'
+        test "$(docker inspect "$live_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+        old_restart_name="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')"
+        old_restart_max="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
+        [[ "$old_restart_max" =~ ^[0-9]+$ ]]
+        restart_argument >/dev/null
+        assert_active_d1_file_descriptors "$live_id" live
+
+        docker cp "$CADDY_CONTAINER:/data/external-routes.caddy" "$work/external-routes.before.caddy"
+        chmod 0600 "$work/external-routes.before.caddy"
+        test -s "$work/external-routes.before.caddy"
+        # D080_MAINTENANCE_RENDER_BEGIN
+        docker cp "$CADDY_CONTAINER:/etc/caddy/Caddyfile" "$work/Caddyfile.before"
+        chmod 0600 "$work/Caddyfile.before"
+        python3 -I - "$gate_nonce_file" <<'D080_PRIVATE_NONCE'
+        import os, secrets, sys
+        descriptor = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, 'w', encoding='ascii') as stream:
+            stream.write(secrets.token_hex(32) + '\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        D080_PRIVATE_NONCE
+        python3 -I .github/scripts/d080-maintenance-route.py render \
+          --input "$work/external-routes.before.caddy" --main-config "$work/Caddyfile.before" \
+          --normal-output "$work/external-routes.candidate.caddy" \
+          --maintenance-output "$work/external-routes.maintenance.caddy" \
+          --old-upstream "$live_name:8081" --candidate-upstream "$candidate:8081" \
+          --nonce-file "$gate_nonce_file"
+        # D080_MAINTENANCE_RENDER_END
+
+        docker volume create \
+          --label arthello.scope=preflight \
+          --label "arthello.release.sha=$RELEASE_SHA" \
+          --label "arthello.release.run=$GITHUB_RUN_ID" \
+          "$clone_volume" >/dev/null
+        require_current_main_release
+        docker pause "$live_id" >/dev/null
+        live_paused=1
+        copy_volume "$DATA_VOLUME" "$clone_volume"
+        docker unpause "$live_id" >/dev/null
+        live_paused=0
+
+        snapshot_volume "$clone_volume" "$work/preflight-before"
+        python3 "$inventory_script" "$work/preflight-before" \
+          --github-output "$work/inventory-before.env" >/dev/null
+        encrypted_credentials_present="$(sed -n 's/^encrypted_credentials_present=//p' "$work/inventory-before.env")"
+        encrypted_credentials_count="$(sed -n 's/^encrypted_credentials_count=//p' "$work/inventory-before.env")"
+        encrypted_credentials_digest="$(sed -n 's/^encrypted_credentials_digest=//p' "$work/inventory-before.env")"
+        case "$encrypted_credentials_present" in true|false) ;; *) exit 1 ;; esac
+        [[ "$encrypted_credentials_count" =~ ^[0-9]+$ ]]
+        [[ "$encrypted_credentials_digest" =~ ^[a-f0-9]{64}$ ]]
+        if [ "$encrypted_credentials_present" = true ]; then
+          test "$encrypted_credentials_count" -gt 0
+        else
+          test "$encrypted_credentials_count" -eq 0
+        fi
+
+        current_file_key=""
+        current_legacy_key=""
+        current_key_path="$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+          | sed -n 's/^INTEGRATION_CREDENTIALS_KEY_FILE=//p' | head -n1)"
+        if [ -n "$current_key_path" ]; then
+          case "$current_key_path" in /run/secrets/*) ;; *) echo 'Unsafe integration key file path in current container' >&2; exit 1 ;; esac
+          current_file_key="$(docker exec "$live_id" sh -ceu 'cat -- "$1"' sh "$current_key_path")"
+          test -n "$current_file_key"
+          mask_secret "$current_file_key"
+        fi
+        current_legacy_key="$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+          | sed -n 's/^INTEGRATION_CREDENTIALS_KEY=//p' | head -n1)"
+        if [ -n "$current_legacy_key" ]; then mask_secret "$current_legacy_key"; fi
+        if [ -n "$current_file_key" ] && [ -n "$current_legacy_key" ]; then
+          test "$current_file_key" = "$current_legacy_key"
+        fi
+        current_integration_key="${current_file_key:-$current_legacy_key}"
+
+        if [ -L "$integration_key_file" ]; then echo 'Integration key file must not be a symlink' >&2; exit 1; fi
+        if [ -s "$integration_key_file" ]; then
+          integration_key="$(cat "$integration_key_file")"
+          mask_secret "$integration_key"
+          if [ -n "$current_integration_key" ]; then test "$integration_key" = "$current_integration_key"; fi
+        elif [ -n "$current_integration_key" ]; then
+          integration_key="$current_integration_key"
+          atomic_secret_write "$integration_key_file" "$integration_key"
+        elif [ "$encrypted_credentials_present" = true ]; then
+          echo 'Encrypted credentials exist but their runtime key is unavailable' >&2
+          exit 1
+        else
+          integration_key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48), end="")')"
+          mask_secret "$integration_key"
+          atomic_secret_write "$integration_key_file" "$integration_key"
+        fi
+        test "${#integration_key}" -ge 32
+        [[ "$integration_key" != *[$'\r\n\t ']* ]]
+        chmod 0444 "$integration_key_file"
+        test "$(stat -c '%a' "$integration_key_file")" = 444
+
+        current_bootstrap_file=""
+        current_bootstrap_legacy=""
+        current_bootstrap_path="$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+          | sed -n 's/^ARTHELLO_BOOTSTRAP_PASSWORD_FILE=//p' | head -n1)"
+        if [ -n "$current_bootstrap_path" ]; then
+          case "$current_bootstrap_path" in /run/secrets/*) ;; *) echo 'Unsafe bootstrap password file path in current container' >&2; exit 1 ;; esac
+          current_bootstrap_file="$(docker exec "$live_id" sh -ceu 'cat -- "$1"' sh "$current_bootstrap_path")"
+          test -n "$current_bootstrap_file"
+          mask_secret "$current_bootstrap_file"
+        fi
+        current_bootstrap_legacy="$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+          | sed -n 's/^ARTHELLO_BOOTSTRAP_PASSWORD=//p' | head -n1)"
+        if [ -n "$current_bootstrap_legacy" ]; then mask_secret "$current_bootstrap_legacy"; fi
+        if [ -n "$current_bootstrap_file" ] && [ -n "$current_bootstrap_legacy" ]; then
+          test "$current_bootstrap_file" = "$current_bootstrap_legacy"
+        fi
+        current_bootstrap="${current_bootstrap_file:-$current_bootstrap_legacy}"
+        if [ -L "$bootstrap_file" ]; then echo 'Bootstrap password file must not be a symlink' >&2; exit 1; fi
+        if [ -s "$bootstrap_file" ]; then
+          bootstrap_password="$(cat "$bootstrap_file")"
+          mask_secret "$bootstrap_password"
+          if [ -n "$current_bootstrap" ]; then test "$bootstrap_password" = "$current_bootstrap"; fi
+        elif [ -n "$current_bootstrap" ]; then
+          bootstrap_password="$current_bootstrap"
+          atomic_secret_write "$bootstrap_file" "$bootstrap_password"
+        else
+          bootstrap_password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24), end="")')"
+          mask_secret "$bootstrap_password"
+          atomic_secret_write "$bootstrap_file" "$bootstrap_password"
+        fi
+        test -n "$bootstrap_password"
+        chmod 0444 "$bootstrap_file"
+        test "$(stat -c '%a' "$bootstrap_file")" = 444
+
+        runtime_env="$work/runtime.env"
+        {
+          printf 'NODE_ENV=production\n'
+          printf 'PORT=8081\n'
+          printf 'ARTHELLO_D1_PATH=/data/d1\n'
+          printf 'ARTHELLO_PUBLIC_ORIGIN=%s\n' "$PUBLIC_URL"
+          printf 'ARTHELLO_BOOTSTRAP_LOGIN=owner\n'
+          printf 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE=/run/secrets/bootstrap-password\n'
+          printf 'INTEGRATION_CREDENTIALS_KEY_FILE=/run/secrets/integration-credentials-key\n'
+          printf 'SCHOOL_PUBLIC_ORIGIN=%s\n' "$SCHOOL_URL"
+          printf 'SCHOOL_DIARY_SYNC_URL=%s\n' "$SCHOOL_URL"
+          printf 'SCHOOL_DIARY_ALLOWED_ORIGINS=%s\n' "$SCHOOL_URL"
+          printf 'CENTRAL_ACCESS_SECRET_FILE=/run/secrets/central-access-secret\n'
+          printf 'OPENAI_OCR_MODEL=gpt-4.1-mini\n'
+          if [ "$openai_enabled" -eq 1 ]; then
+            printf 'OPENAI_API_KEY_FILE=/run/secrets/openai-api-key\n'
+          fi
+          if [ "$tbank_enabled" -eq 1 ]; then
+            printf 'TBANK_EGRESS_IP=%s\n' "$tbank_egress_ip"
+          fi
+        } > "$runtime_env"
+        chmod 0600 "$runtime_env"
+        runtime_configuration="$(cat "$runtime_env")"
+        if grep -Eq '^(ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY|CENTRAL_ACCESS_SECRET|OPENAI_API_KEY)=' <<<"$runtime_configuration"; then
+          echo 'Plaintext secret found in runtime.env' >&2
+          exit 1
+        fi
+        assert_exact_runtime_env "$runtime_configuration" ARTHELLO_BOOTSTRAP_PASSWORD_FILE /run/secrets/bootstrap-password
+        assert_exact_runtime_env "$runtime_configuration" INTEGRATION_CREDENTIALS_KEY_FILE /run/secrets/integration-credentials-key
+        assert_exact_runtime_env "$runtime_configuration" CENTRAL_ACCESS_SECRET_FILE /run/secrets/central-access-secret
+        assert_exact_runtime_env "$runtime_configuration" SCHOOL_PUBLIC_ORIGIN "$SCHOOL_URL"
+        assert_exact_runtime_env "$runtime_configuration" SCHOOL_DIARY_SYNC_URL "$SCHOOL_URL"
+        assert_exact_runtime_env "$runtime_configuration" SCHOOL_DIARY_ALLOWED_ORIGINS "$SCHOOL_URL"
+        assert_exact_runtime_env "$runtime_configuration" OPENAI_OCR_MODEL gpt-4.1-mini
+        if [ "$openai_enabled" -eq 1 ]; then
+          assert_exact_runtime_env "$runtime_configuration" OPENAI_API_KEY_FILE /run/secrets/openai-api-key
+        elif grep -q '^OPENAI_API_KEY_FILE=' <<<"$runtime_configuration"; then
+          exit 1
+        fi
+        if [ "$tbank_enabled" -eq 1 ]; then
+          assert_exact_runtime_env "$runtime_configuration" TBANK_EGRESS_IP "$tbank_egress_ip"
+        elif grep -q '^TBANK_EGRESS_IP=' <<<"$runtime_configuration"; then
+          exit 1
+        fi
+
+        runtime_secret_mounts=(
+          --mount "type=bind,src=$integration_key_file,dst=/run/secrets/integration-credentials-key,readonly"
+          --mount "type=bind,src=$bootstrap_file,dst=/run/secrets/bootstrap-password,readonly"
+          --mount "type=bind,src=$central_access_secret_file,dst=/run/secrets/central-access-secret,readonly"
+        )
+        if [ "$openai_enabled" -eq 1 ]; then
+          runtime_secret_mounts+=(
+            --mount "type=bind,src=$openai_api_key_file,dst=/run/secrets/openai-api-key,readonly"
+          )
+        fi
+
+        docker run --rm \
+          --network none \
+          --read-only \
+          -e ARTHELLO_OPENAI_ENABLED="$openai_enabled" \
+          "${runtime_secret_mounts[@]}" \
+          --entrypoint /bin/sh \
+          "$immutable_image_id" -ceu '
+            test -r /run/secrets/integration-credentials-key
+            test "$(wc -c < /run/secrets/integration-credentials-key)" -ge 32
+            test -r /run/secrets/bootstrap-password
+            test -s /run/secrets/bootstrap-password
+            test -r /run/secrets/central-access-secret
+            test "$(wc -c < /run/secrets/central-access-secret)" -ge 32
+            test "$(wc -c < /run/secrets/central-access-secret)" -le 4096
+            if grep -q "[[:space:]]" /run/secrets/central-access-secret; then
+              echo "Central access secret contains whitespace" >&2
+              exit 1
+            fi
+            if [ "$ARTHELLO_OPENAI_ENABLED" -eq 1 ]; then
+              test -r /run/secrets/openai-api-key
+              test "$(wc -c < /run/secrets/openai-api-key)" -ge 20
+              test "$(wc -c < /run/secrets/openai-api-key)" -le 4096
+              if grep -q "[[:space:]]" /run/secrets/openai-api-key; then
+                echo "OpenAI key contains whitespace" >&2
+                exit 1
+              fi
+            else
+              test ! -e /run/secrets/openai-api-key
+            fi
+          '
+
+        network="$(docker inspect "$CADDY_CONTAINER" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | head -n1)"
+        test -n "$network"
+        probe_tochka_tls_egress "$network"
+        docker run -d \
+          --name "$clone_container" \
+          --restart no \
+          --read-only \
+          --tmpfs /tmp \
+          --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
+          --network none \
+          --env-file "$runtime_env" \
+          -e TOCHKA_AUTOSYNC_ENABLED=0 \
+          "${runtime_secret_mounts[@]}" \
+          -v "$clone_volume:/data" \
+          "$immutable_image_id" >/dev/null
+        assert_file_only_secret_env "$clone_container"
+        wait_local_candidate "$clone_container"
+        assert_active_d1_file_descriptors "$clone_container" preflight
+        docker pause "$clone_container" >/dev/null
+        snapshot_volume "$clone_volume" "$work/preflight-after"
+        docker unpause "$clone_container" >/dev/null
+        python3 "$inventory_script" "$work/preflight-after" \
+          --github-output "$work/inventory-after.env" >/dev/null
+        test "$(sed -n 's/^encrypted_credentials_present=//p' "$work/inventory-after.env")" = "$encrypted_credentials_present"
+        test "$(sed -n 's/^encrypted_credentials_count=//p' "$work/inventory-after.env")" = "$encrypted_credentials_count"
+        test "$(sed -n 's/^encrypted_credentials_digest=//p' "$work/inventory-after.env")" = "$encrypted_credentials_digest"
+        docker rm -f "$clone_container" >/dev/null
+        docker volume rm "$clone_volume" >/dev/null
+        printf 'ARTHELLO_CLONE_PREFLIGHT=VERIFIED\n'
+
+        # Already selected by the immutable live-FD and clone gates; no host path access.
+        require_current_main_release
+        initialize_backup_runtime_state
+        backup_runtime_started=1
+        backup_runtime prepare | tee "$work/backup-runtime-ready.json"
+        jq -e --arg release "$RELEASE_SHA" --arg image "$immutable_image_id" --arg tree "$EXPECTED_TREE" \
+          --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg source "$DATA_VOLUME" \
+          --arg source_hash "$(printf '%s' "$active_d1_relative_path" | sha256sum | cut -d ' ' -f 1)" \
+          --arg worker "$backup_worker" --arg backups "$backup_volume" \
+          --arg control "$backup_control_volume" --arg activation "$bank_activation_volume" '
+          .schemaVersion == 1 and .state == "verified" and .releaseSha == $release and .imageId == $image and
+          .treeSha == $tree and .runId == $run and .attempt == $attempt and .sourceVolume == $source and
+          .sourceRelativeSha256 == $source_hash and
+          .worker.name == $worker and (.worker.id | test("^[a-f0-9]{64}$")) and
+          .volumes.backups.name == $backups and .volumes.control.name == $control and
+          .volumes.activation.name == $activation
+        ' "$work/backup-runtime-ready.json" >/dev/null
+        printf 'ARTHELLO_BACKUP_ORDINARY_RUNTIME=VERIFIED\n'
+
+        require_current_main_release
+        verify_school_sync_secret before-live-mutation
+        old_restart_disabled=1
+        docker update --restart=no "$live_id" >/dev/null
+        test "$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')" = no
+        docker stop --time 30 "$live_id" >/dev/null
+        test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = false
+        old_stopped=1
+
+        docker volume create \
+          --label arthello.scope=production-rollback \
+          --label "arthello.release.sha=$RELEASE_SHA" \
+          --label "arthello.release.tree=$EXPECTED_TREE" \
+          --label "arthello.release.run=$GITHUB_RUN_ID" \
+          --label "arthello.release.attempt=$GITHUB_RUN_ATTEMPT" \
+          --label "arthello.rollback.source-container=$live_id" \
+          --label "arthello.rollback.data-volume=$DATA_VOLUME" \
+          --label "arthello.rollback.restart-name=$old_restart_name" \
+          --label "arthello.rollback.restart-max=$old_restart_max" \
+          "$rollback_volume" >/dev/null
+        copy_volume "$DATA_VOLUME" "$rollback_volume"
+        snapshot_volume "$rollback_volume" "$work/rollback"
+        python3 "$inventory_script" "$work/rollback" >/dev/null
+        content_manifest "$work/rollback" "$work/rollback.sha256"
+        test -s "$work/rollback.sha256"
+        backup_ready=1
+        printf 'ARTHELLO_ROLLBACK_VOLUME=VERIFIED name=%s\n' "$rollback_volume"
+
+        require_current_main_release
+        live_data_modified=1
+        docker run -d \
+          --name "$candidate" \
+          --mount "type=volume,src=$backup_control_volume,dst=/var/lib/arthello-v52-backup-control,readonly,volume-nocopy" \
+          --mount "type=volume,src=$bank_activation_volume,dst=/var/lib/arthello-v52-tochka-activation,readonly,volume-nocopy" \
+          --restart no \
+          --read-only \
+          --tmpfs /tmp \
+          --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
+          --network "$network" \
+          --env-file "$runtime_env" \
+          -e TOCHKA_AUTOSYNC_ENABLED=1 \
+          -e RELEASE_SHA="$RELEASE_SHA" \
+          -e TOCHKA_AUTOSYNC_ACTIVATION_ID="$autosync_activation_id" \
+          "${runtime_secret_mounts[@]}" \
+          --label "arthello.release.sha=$RELEASE_SHA" \
+          --label "arthello.release.tree=$EXPECTED_TREE" \
+          --label "arthello.release.run=$GITHUB_RUN_ID" \
+          -v "$DATA_VOLUME:/data" \
+          "$immutable_image_id" >/dev/null
+        assert_file_only_secret_env "$candidate"
+        assert_exact_runtime_env "$(docker inspect "$candidate" --format '{{range .Config.Env}}{{println .}}{{end}}')" TOCHKA_AUTOSYNC_ENABLED 1
+        assert_exact_runtime_env "$(docker inspect "$candidate" --format '{{range .Config.Env}}{{println .}}{{end}}')" RELEASE_SHA "$RELEASE_SHA"
+        assert_exact_runtime_env "$(docker inspect "$candidate" --format '{{range .Config.Env}}{{println .}}{{end}}')" TOCHKA_AUTOSYNC_ACTIVATION_ID "$autosync_activation_id"
+        docker inspect "$candidate" | jq -e --arg control "$backup_control_volume" --arg activation "$bank_activation_volume" '
+          [.[0].Mounts[] | select(.Destination == "/var/lib/arthello-v52-backup-control" or .Destination == "/var/lib/arthello-v52-tochka-activation")] as $mounts |
+          ($mounts | length) == 2 and all($mounts[]; .Type == "volume" and .RW == false) and
+          any($mounts[]; .Destination == "/var/lib/arthello-v52-backup-control" and .Name == $control) and
+          any($mounts[]; .Destination == "/var/lib/arthello-v52-tochka-activation" and .Name == $activation)
+        ' >/dev/null
+        wait_local_candidate "$candidate"
+        assert_active_d1_file_descriptors "$candidate" candidate
+        docker pause "$candidate" >/dev/null
+        candidate_paused=1
+        snapshot_volume "$DATA_VOLUME" "$work/live-after"
+        python3 "$inventory_script" "$work/live-after" \
+          --github-output "$work/inventory-live-after.env" >/dev/null
+        test "$(sed -n 's/^encrypted_credentials_present=//p' "$work/inventory-live-after.env")" = "$encrypted_credentials_present"
+        test "$(sed -n 's/^encrypted_credentials_count=//p' "$work/inventory-live-after.env")" = "$encrypted_credentials_count"
+        test "$(sed -n 's/^encrypted_credentials_digest=//p' "$work/inventory-live-after.env")" = "$encrypted_credentials_digest"
+        docker unpause "$candidate" >/dev/null
+        candidate_paused=0
+
+        verify_public "$run_key-internal" http://127.0.0.1:8081
+        verify_school_sync_secret before-route-activation
+        require_current_main_release
+        apply_previous_restart_policy "$candidate"
+        test "$(docker inspect "$candidate" --format '{{.State.Running}}')" = true
+        test "$(docker inspect "$candidate" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+        test "$(docker inspect "$candidate" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$RELEASE_SHA"
+
+        # D080_MAINTENANCE_ACTIVATION_BEGIN
+        require_current_main_release
+        docker cp "$work/external-routes.maintenance.caddy" "$CADDY_CONTAINER:$maintenance_route_new"
+        docker exec "$CADDY_CONTAINER" sh -ceu \
+          "sed 's#/data/external-routes.caddy#$maintenance_route_new#' /etc/caddy/Caddyfile > '$maintenance_config_new'"
+        if ! docker exec "$CADDY_CONTAINER" caddy validate --config "$maintenance_config_new" --adapter caddyfile >/dev/null 2>&1; then
+          printf 'ARTHELLO_D080_MAINTENANCE_CONFIG=BLOCKED\n' >&2
+          exit 1
+        fi
+        original_route_sha="$(sha256sum "$work/external-routes.before.caddy" | cut -d ' ' -f 1)"
+        maintenance_route_sha="$(sha256sum "$work/external-routes.maintenance.caddy" | cut -d ' ' -f 1)"
+        candidate_route_sha="$(sha256sum "$work/external-routes.candidate.caddy" | cut -d ' ' -f 1)"
+        candidate_id="$(docker inspect "$candidate" --format '{{.Id}}')"
+        candidate_browser_id="$(docker image inspect "arthello-e2e:$BROWSER_SOURCE_SHA" --format '{{.Id}}')"
+        install -d -m 0700 "$secret_dir/release-state"
+        python3 -I - "$work/candidate-context.json" \
+          "$RELEASE_SHA" \
+          "$EXPECTED_TREE" \
+          "$GITHUB_RUN_ID" \
+          "$GITHUB_RUN_ATTEMPT" \
+          "$candidate_id" \
+          "$candidate" \
+          "$live_id" \
+          "$live_name" \
+          "$immutable_image_id" \
+          "$VALIDATED_RUNTIME_FINGERPRINT" \
+          "$DATA_VOLUME" \
+          "$rollback_volume" \
+          "$backup_worker" \
+          "$backup_volume" \
+          "$backup_control_volume" \
+          "$bank_activation_volume" \
+          "$autosync_activation_id" \
+          "$BROWSER_SOURCE_SHA" \
+          "$candidate_browser_id" \
+          "$BROWSER_FINGERPRINT" \
+          "$original_route_sha" \
+          "$maintenance_route_sha" \
+          "$candidate_route_sha" \
+          "$work" \
+          "$work/external-routes.before.caddy" \
+          "$work/external-routes.maintenance.caddy" \
+          "$work/external-routes.candidate.caddy" \
+          "$gate_nonce_file" \
+          "$SCHOOL_REPAIR_RECEIPT_FILE" \
+          "$SCHOOL_REPAIR_CONFIG_SHA256" \
+          "$OBSERVED_READONLY_SCHOOL_SHA" \
+          "$backup_runtime_state" <<'D080_PRIVATE_CONTEXT'
+        import hashlib, json, os, sys
+        keys = ['releaseSha', 'sourceTree', 'runId', 'runAttempt', 'candidateContainerId', 'candidateName', 'previousContainerId', 'previousName', 'imageId', 'runtimeFingerprint', 'dataVolume', 'rollbackVolume', 'backupWorker', 'backupVolume', 'backupControlVolume', 'bankActivationVolume', 'bankActivationId', 'browserSourceSha', 'browserImageId', 'browserFingerprint', 'originalRouteSha256', 'maintenanceRouteSha256', 'publicRouteSha256', 'workDirectory', 'originalRouteFile', 'maintenanceRouteFile', 'publicRouteFile', 'gateNonceFile', 'schoolRepairReceiptFile', 'schoolRepairConfigSha256', 'schoolSha', 'backupRuntimeStateFile']
+        assert len(sys.argv[2:]) == len(keys)
+        context = dict(zip(keys, sys.argv[2:]))
+        with open(context['schoolRepairReceiptFile'], encoding='utf-8') as receipt_file:
+            repair = json.load(receipt_file)
+        context['schoolRepairReceiptSha256'] = hashlib.sha256((json.dumps(repair, sort_keys=True, separators=(',', ':')) + '\n').encode()).hexdigest()
+        descriptor = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+            json.dump(context, stream, separators=(',', ':'))
+            stream.write('\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        D080_PRIVATE_CONTEXT
+        # From this point even an ambiguous failure must retain current authentication writes.
+        candidate_auth_started=1
+        python3 -I .github/scripts/d080-candidate-state.py begin \
+          --context "$work/candidate-context.json" --state "$candidate_state_file"
+        require_current_main_release
+        route_changed=1
+        docker exec \
+          -e EXPECTED_CURRENT_SHA="$original_route_sha" \
+          -e CANDIDATE_ROUTE="$maintenance_route_new" \
+          "$CADDY_CONTAINER" sh -ceu '
+            current_sha="$(sha256sum /data/external-routes.caddy | cut -d " " -f 1)"
+            test "$current_sha" = "$EXPECTED_CURRENT_SHA"
+            mv "$CANDIDATE_ROUTE" /data/external-routes.caddy
+          '
+        if ! docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then
+          printf 'ARTHELLO_D080_MAINTENANCE_RELOAD=BLOCKED\n' >&2
+          exit 1
+        fi
+        complete_candidate_release
+        # D080_MAINTENANCE_ACTIVATION_END
+
+        candidate_id="$(docker inspect "$candidate" --format '{{.Id}}')"
+        while IFS= read -r stale_id; do
+          [ -n "$stale_id" ] || continue
+          [ "$stale_id" = "$live_id" ] && continue
+          [ "$stale_id" = "$candidate_id" ] && continue
+          docker rm "$stale_id" >/dev/null 2>&1 || true
+        done < <(docker ps -aq --filter 'name=^/arthello-direct-' --filter status=exited)
+
+        release_active=1
+        trap - EXIT INT TERM HUP
+        cleanup_transient
+    - name: School diagnostic and real browser acceptance after cutover
+      timeout-minutes: 15
+      shell: bash
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+        DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+        DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+        DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        GH_TOKEN: ${{ github.token }}
+        ARTHELLO_E2E_LOGIN: ${{ secrets.ARTHELLO_E2E_LOGIN }}
+        ARTHELLO_E2E_PASSWORD: ${{ secrets.ARTHELLO_E2E_PASSWORD }}
+        BROWSER_PHASE: after
+        SCHOOL_REPAIR_CONFIG_SHA256: ${{ steps.school_repair.outputs.config_sha256 }}
+        SCHOOL_REPAIR_RECEIPT_FILE: ${{ runner.temp }}/school-r3-receipt-${{ github.run_id }}-${{ github.run_attempt }}.json
+      run: |+
+        set -Eeuo pipefail
+        umask 077
+        : "${SSH_PRIVATE_KEY:?missing protected School SSH key}"
+        : "${DEPLOY_HOST:?missing protected School deploy host}"
+        : "${DEPLOY_USER:?missing protected School deploy user}"
+        [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+        [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+        deploy_port="${DEPLOY_PORT:-2222}"
+        [[ "$deploy_port" =~ ^[0-9]{1,5}$ ]]
+        test "$deploy_port" -ge 1
+        test "$deploy_port" -le 65535
+
+        ssh_dir="$RUNNER_TEMP/arthello-school-sync-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        case "$ssh_dir" in
+          "$RUNNER_TEMP"/arthello-school-sync-*) ;;
+          *) echo 'Unsafe School SSH work path' >&2; exit 1 ;;
+        esac
+        cleanup_school_ssh() {
+          rm -f -- \
+            "$ssh_dir/id_ed25519" \
+            "$ssh_dir/known_hosts" \
+            "$ssh_dir/known_hosts.scan" \
+            "$ssh_dir/school-sync-probe-wrong.json" \
+            "$ssh_dir/school-sync-probe-wrong.headers" \
+            "$ssh_dir/school-sync-probe.json" \
+            "$ssh_dir/school-sync-probe.headers" \
+            >/dev/null 2>&1 || true
+          rmdir -- "$ssh_dir" >/dev/null 2>&1 || true
+        }
+        trap cleanup_school_ssh EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        trap 'exit 129' HUP
+        test ! -e "$ssh_dir"
+        test ! -L "$ssh_dir"
+        install -m 0700 -d "$ssh_dir"
+        printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+        unset SSH_PRIVATE_KEY
+        chmod 0600 "$ssh_dir/id_ed25519"
+        ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+
+        scan="$ssh_dir/known_hosts.scan"
+        : > "$scan"
+        chmod 0600 "$scan"
+        for attempt in 1 2 3; do
+          timeout --signal=TERM --kill-after=5s 150s \
+            ssh -p "$deploy_port" \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$scan" \
+              -o GlobalKnownHostsFile=/dev/null \
+              -o PreferredAuthentications=none \
+              -o PubkeyAuthentication=no \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o ConnectTimeout=140 \
+              -o HostKeyAlgorithms=ssh-ed25519 \
+              "$DEPLOY_USER@$DEPLOY_HOST" true \
+              </dev/null >/dev/null 2>&1 || true
+          test -s "$scan" && break
+          sleep 5
+        done
+        test -s "$scan"
+        fingerprint="$(ssh-keygen -lf "$scan" -E sha256 | awk '{print $2; exit}')"
+        test "$fingerprint" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+        mv "$scan" "$ssh_dir/known_hosts"
+
+        ssh_options=(
+          -T
+          -p "$deploy_port"
+          -i "$ssh_dir/id_ed25519"
+          -o IdentitiesOnly=yes
+          -o PreferredAuthentications=publickey
+          -o PasswordAuthentication=no
+          -o KbdInteractiveAuthentication=no
+          -o BatchMode=yes
+          -o StrictHostKeyChecking=yes
+          -o UserKnownHostsFile="$ssh_dir/known_hosts"
+          -o GlobalKnownHostsFile=/dev/null
+          -o ConnectTimeout=140
+          -o ServerAliveInterval=10
+          -o ServerAliveCountMax=30
+          -o IPQoS=none
+          -o Compression=no
+          -o KexAlgorithms=curve25519-sha256
+          -o HostKeyAlgorithms=ssh-ed25519
+          -o PubkeyAcceptedAlgorithms=ssh-ed25519
+          -o Ciphers=aes128-ctr
+          -o MACs=hmac-sha2-256
+        )
+        timeout --signal=TERM --kill-after=5s 180s \
+          ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" true \
+          </dev/null >/dev/null
+
+        diagnostic_file="$RUNNER_TEMP/arthello-school-sso-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.jsonl"
+        test -s .github/scripts/school-sso-readonly-diagnostic.sh
+        bash .github/scripts/school-sso-readonly-diagnostic.sh --self-test
+        diagnostic_payload="$(base64 -w0 .github/scripts/school-sso-readonly-diagnostic.sh)"
+        timeout --signal=TERM --kill-after=5s 180s \
+          ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+          "printf '%s' '$diagnostic_payload' | base64 -d | bash" \
+          </dev/null | tee "$diagnostic_file"
+        legacy_probe_payload="$(base64 -w0 .github/scripts/r2-alfacrm-env-presence.sh)"
+        timeout --signal=TERM --kill-after=5s 60s   ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST"   "printf '%s' '$legacy_probe_payload' | base64 -d | bash -s -- --school-legacy"   </dev/null
+        mapfile -t acceptance_live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
+        test "${#acceptance_live_ids[@]}" -eq 1
+        observed_arthello_sha="$(docker inspect "${acceptance_live_ids[0]}" --format '{{index .Config.Labels "arthello.release.sha"}}')"
+        [[ "$observed_arthello_sha" =~ ^[a-f0-9]{40}$ ]]
+        bash .github/scripts/r2-alfacrm-env-presence.sh --current-arthello "${acceptance_live_ids[0]}"
+
+        SCHOOL_DIAGNOSTIC_FILE="$diagnostic_file" OBSERVED_LIVE_ARTHELLO_SHA="$observed_arthello_sha" \
+          bash .github/scripts/run-r9-live-browser.sh
+
+    - name: Remove only this downloaded temporary archive
+      if: always()
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        archive="$RUNNER_TEMP/browser-bundle-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/browser.tar.gz"
+        rm -f -- "$archive"
+    - name: Remove temporary School SSH material
+      if: always()
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        ssh_dir="$RUNNER_TEMP/arthello-school-sync-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        case "$ssh_dir" in
+          "$RUNNER_TEMP"/arthello-school-sync-*) ;;
+          *) echo 'Unsafe School SSH cleanup path' >&2; exit 1 ;;
+        esac
+        rm -f -- \
+          "$ssh_dir/id_ed25519" \
+          "$ssh_dir/known_hosts" \
+          "$ssh_dir/known_hosts.scan" \
+          "$ssh_dir/school-sync-probe-wrong.json" \
+          "$ssh_dir/school-sync-probe-wrong.headers" \
+          "$ssh_dir/school-sync-probe.json" \
+          "$ssh_dir/school-sync-probe.headers"
+        rmdir -- "$ssh_dir" >/dev/null 2>&1 || true
+    - name: Production summary
+      if: always()
+      shell: bash
+      env:
+        QUALITY_RUN: ${{ steps.provenance.outputs.quality_run }}
+        VERIFY_RUN: ${{ steps.provenance.outputs.verify_run }}
+        RELEASE_CONTAINER: ${{ steps.cutover.outputs.release_container }}
+        ROLLBACK_VOLUME: ${{ steps.cutover.outputs.rollback_volume }}
+        PROOF_RUN: ${{ steps.provenance.outputs.proof_run }}
+        SCHOOL_REPAIR_CONFIG: ${{ steps.school_repair.outputs.config_sha256 }}
+      run: |
+        if ! {
+          echo '## ArtHello R9 production deployment'
+          echo
+          echo "- Commit: $RELEASE_SHA"
+          echo "- Quality run: $QUALITY_RUN"
+          echo "- Proof run: $PROOF_RUN"
+          echo "- School relay config: ${SCHOOL_REPAIR_CONFIG:-not verified}"
+          echo "- Relay verification is separate from natural browser SSO acceptance."
+          echo "- v52 verification run: $VERIFY_RUN"
+          echo "- Public: $PUBLIC_URL"
+          echo "- Release container: ${RELEASE_CONTAINER:-not reported; inspect activation state before recovery}"
+          echo "- Rollback volume: ${ROLLBACK_VOLUME:-not reported}"
+          echo "- Result: ${{ job.status }}"
+          echo "- After candidate authentication begins, automatic snapshot restore is forbidden; preserve current data."
+          echo "- Failed candidate acceptance holds maintenance and the same candidate database."
+          echo "- New-release natural diary browser acceptance remains mandatory."
+        } >> "$GITHUB_STEP_SUMMARY"; then
+          printf '::warning::Unable to write deployment summary\n'
+        fi
