@@ -7,6 +7,7 @@ on:
       - scripts/run-server-browser.sh
       - scripts/test/server-browser.test.mjs
       - scripts/test/browser-proxy.test.mjs
+      - scripts/test/retire-r12-browser.test.mjs
       - .github/workflows/check-arthello-server-browser.yml
   workflow_dispatch:
   workflow_run:
@@ -68,7 +69,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
-          node --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs
+          node --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs scripts/test/retire-r12-browser.test.mjs
           bash -n scripts/run-server-browser.sh
           corepack enable
           corepack pnpm@11.7.0 --dir deploy/browser install --ignore-workspace --frozen-lockfile
@@ -153,6 +154,16 @@ jobs:
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
           "$PRECHECK_NODE" deploy/browser/retire-image.mjs
+      - name: Retire only the exact unused accepted R12 browser image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_BYTES: ${{ needs.bundle.outputs.archive_bytes }}
+          EXPANDED_BYTES: ${{ needs.bundle.outputs.expanded_bytes }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          "$PRECHECK_NODE" deploy/browser/retire-r12-browser.mjs
       - name: Measure import capacity before downloading the verified archive
         env:
           ARCHIVE_BYTES: ${{ needs.bundle.outputs.archive_bytes }}

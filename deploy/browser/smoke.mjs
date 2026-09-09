@@ -24,6 +24,8 @@ export async function smoke(browser) {
     let authorizedHops = [];
     let schoolHops = 0;
     let businessWrites = 0;
+    let feedbackReads = 0, feedbackAllReads = 0, backupReads = 0;
+    let feedbackManagementVisible = false, backupUnexpectedAccess = false, backupRedirect = false;
     server = https.createServer({ key: readFileSync(directory + '/key.pem'), cert: readFileSync(directory + '/cert.pem') }, (request, response) => {
       request.resume();
       const url = new URL(request.url, 'https://' + request.headers.host);
@@ -49,13 +51,51 @@ export async function smoke(browser) {
         return json({ error: 'forbidden_fixture_write' }, 403);
       }
       if (url.pathname === '/fixture-same-origin') return redirect(ARTHELLO + '/');
-      if (url.origin === ARTHELLO && url.pathname === '/') return html(`<form><input name="login"><input name="password" type="password"><button>Войти</button></form><script>document.querySelector('form').onsubmit=async(e)=>{e.preventDefault();await fetch('/api/auth/login',{method:'POST'});document.body.innerHTML='<aside aria-label="Основная навигация"><a href="#education">Обучение</a></aside>';document.querySelector('a').onclick=async(e)=>{e.preventDefault();await fetch('/api/education');document.body.insertAdjacentHTML('beforeend','<button id="diary">Открыть дневник</button>');document.querySelector('#diary').onclick=()=>location.assign('${SCHOOL}/auth/central/start');};};</script>`);
+      if (url.origin === ARTHELLO && url.pathname === '/') {
+        const shell = `<aside aria-label="Основная навигация"><a href="#education">Обучение</a></aside>
+          <button id="feedback" aria-haspopup="dialog">Разработчикам</button>
+          <dialog aria-labelledby="ahFeedbackHeading"><header><h2 id="ahFeedbackHeading">Разработчикам</h2>
+            <button id="feedback-close" type="button" aria-label="Закрыть обращения">×</button></header>
+            <nav aria-label="Обращения"><button type="button">Написать</button><button id="feedback-mine" type="button">Мои обращения</button>
+              ${feedbackManagementVisible ? '<button type="button">Все обращения</button>' : ''}</nav>
+            <form id="feedback-form"><label>Тема<input required></label><label>Описание<textarea required></textarea></label><button type="submit">Отправить</button></form>
+            <section aria-label="Мои обращения" aria-busy="true" hidden><p>Обращений пока нет.</p></section>
+          </dialog>`;
+        return html(`<form><input name="login"><input name="password" type="password"><button>Войти</button></form><script>
+          document.querySelector('form').onsubmit=async(e)=>{
+            e.preventDefault();await fetch('/api/auth/login',{method:'POST'});
+            document.body.innerHTML=${JSON.stringify(shell)};
+            const dialog=document.querySelector('dialog');
+            const list=document.querySelector('section[aria-label="Мои обращения"]');
+            const ownList=async()=>{list.setAttribute('aria-busy','true');await fetch('/api/developer-feedback?scope=mine');list.setAttribute('aria-busy','false');};
+            document.querySelector('#feedback').onclick=()=>{dialog.showModal();void ownList();};
+            document.querySelector('#feedback-mine').onclick=()=>{document.querySelector('#feedback-form').hidden=true;list.hidden=false;void ownList();};
+            document.querySelector('#feedback-close').onclick=()=>dialog.close();
+            document.querySelector('#feedback-form').onsubmit=async(e)=>{e.preventDefault();await fetch('/api/developer-feedback',{method:'POST'});};
+            document.querySelector('a').onclick=async(e)=>{e.preventDefault();await fetch('/api/education');document.body.insertAdjacentHTML('beforeend','<button id="diary">Открыть дневник</button>');document.querySelector('#diary').onclick=()=>location.assign('${SCHOOL}/auth/central/start');};
+          };
+        </script>`);
+      }
       if (url.origin === ARTHELLO && url.pathname === '/api/auth/login') {
         loginCount++;
         response.setHeader('Set-Cookie', 'arthello_session=fixture; Path=/; Secure; HttpOnly; SameSite=Lax');
         return json({ userId: 'fixture', isSystemOwner: owner, apiRole: owner ? 'OWNER' : 'EMPLOYEE', role: owner ? 'owner' : 'viewer', mustChangePassword: false, canAccessMedical: false, allowedModules: finance ? ['education', 'finance'] : ['education'] });
       }
-      if (url.origin === ARTHELLO && ['/api/finance', '/api/medical', '/api/education', '/api/school-sso/authorize'].includes(url.pathname) && !hasCookie('arthello_session')) return json({ error: 'fixture_arthello_session_missing' }, 401);
+      if (url.origin === ARTHELLO && ['/api/finance', '/api/medical', '/api/education', '/api/school-sso/authorize', '/api/developer-feedback', '/api/settings/backups'].includes(url.pathname) && !hasCookie('arthello_session')) return json({ error: 'fixture_arthello_session_missing' }, 401);
+      if (url.origin === ARTHELLO && ['/api/developer-feedback', '/api/settings/backups'].includes(url.pathname) && request.method !== 'GET') {
+        businessWrites++;
+        return json({ error: 'forbidden_fixture_write' }, 403);
+      }
+      if (url.origin === ARTHELLO && url.pathname === '/api/developer-feedback') {
+        if (url.search === '?scope=mine') { feedbackReads++; return json({ items: [], nextBefore: null, canManage: false }); }
+        feedbackAllReads++;
+        return json({ error: 'fixture_scope_forbidden' }, 403);
+      }
+      if (url.origin === ARTHELLO && url.pathname === '/api/settings/backups') {
+        backupReads++;
+        if (backupRedirect) return redirect(ARTHELLO + '/api/finance');
+        return json({ error: 'PRIVATE_FIXTURE_BACKUP_DETAIL' }, backupUnexpectedAccess ? 200 : 403);
+      }
       if (url.origin === ARTHELLO && url.pathname === '/api/finance') return json({ error: 'fixture' }, 403);
       if (url.origin === ARTHELLO && url.pathname === '/api/medical') return json({ error: 'fixture' }, 403);
       if (url.origin === ARTHELLO && url.pathname === '/api/education') return json({});
@@ -79,7 +119,11 @@ export async function smoke(browser) {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     proxy = await startProxy(() => net.connect({ host: '127.0.0.1', port: server.address().port }));
     const accounts = [{ owner: false, finance: false }, { owner: false, finance: true }, { owner: true, finance: false }];
-    for (const scenario of [false, true].flatMap(candidate => accounts.map(account => ({ ...account, candidate })))) {
+    const scenarios = [false, true].flatMap(candidate => accounts.map(account => ({ ...account, candidate })));
+    scenarios.push({ owner: false, finance: false, candidate: false, feedbackManagementVisible: true, failure: 'feedback_all_control_visible' },
+      { owner: false, finance: false, candidate: false, backupUnexpectedAccess: true, failure: 'backup_api_not_forbidden' },
+      { owner: false, finance: false, candidate: false, backupRedirect: true, failure: 'backup_probe_failed' });
+    for (const scenario of scenarios) {
       owner = scenario.owner;
       finance = scenario.finance;
       maintenance = scenario.candidate;
@@ -88,6 +132,10 @@ export async function smoke(browser) {
       authorizedHops = [];
       schoolHops = 0;
       businessWrites = 0;
+      feedbackReads = 0; feedbackAllReads = 0; backupReads = 0;
+      feedbackManagementVisible = Boolean(scenario.feedbackManagementVisible);
+      backupUnexpectedAccess = Boolean(scenario.backupUnexpectedAccess);
+      backupRedirect = Boolean(scenario.backupRedirect);
       // Only the local, self-signed fixture accepts its throwaway TLS cert.
       // The real entrypoint always sets ignoreHTTPSErrors:false.
       const context = await browser.newContext({ proxy: proxy.settings, ignoreHTTPSErrors: true, serviceWorkers: 'block', viewport: { width: 1440, height: 1000 } });
@@ -98,27 +146,33 @@ export async function smoke(browser) {
         page.setDefaultTimeout(10000);
         const task = naturalFlow(page, { login: 'fixture@example.invalid', password: 'fixture-password-only' }, stage => process.stderr.write('FIXTURE_STAGE=' + stage + '\n'));
         if (owner) await assert.rejects(task, /dedicated_employee_required/);
+        else if (scenario.failure) await assert.rejects(task, error => error.message === scenario.failure);
         else {
           const result = await task;
           assert.equal(result.result, 'pass');
           assert.equal(result.deniedApi, 'verified');
           assert.equal(result.deniedModule, finance ? 'medical' : 'finance');
+          for (const field of ['feedbackDialog', 'feedbackOwnList', 'feedbackAllHidden', 'backupApiDenied']) assert.equal(result[field], 'verified');
+          assert.equal(result.feedbackVisible, true);
+          assert.equal(feedbackReads, 2);
+          assert.equal(backupReads, 1);
           assert.ok(schoolHops >= 3, 'Natural School chain did not reach the real fixture server');
           if (maintenance) assert.ok(authorizedHops.includes('/api/school-sso/authorize'), 'Candidate header missing on the real redirect hop');
         }
         assert.equal(loginCount, 1);
+        assert.equal(feedbackAllReads, 0);
         // Same-origin redirects also need a fresh per-hop header, and the
         // original global one-login/write policy remains in force.
         await page.goto(ARTHELLO + '/fixture-same-origin');
         const deniedWrites = await page.evaluate(async () => {
           const statuses = [];
-          for (const endpoint of ['/api/auth/login', '/fixture-business-write']) {
+          for (const endpoint of ['/api/auth/login', '/fixture-business-write', '/api/developer-feedback', '/api/settings/backups']) {
             try { await fetch(endpoint, { method: 'POST' }); statuses.push('sent'); }
             catch { statuses.push('blocked'); }
           }
           return statuses;
         });
-        assert.deepEqual(deniedWrites, ['blocked', 'blocked']);
+        assert.deepEqual(deniedWrites, ['blocked', 'blocked', 'blocked', 'blocked']);
         assert.equal(loginCount, 1);
         assert.equal(businessWrites, 0);
         assert.equal(headerViolation, false, 'Candidate header was absent or crossed the origin boundary');

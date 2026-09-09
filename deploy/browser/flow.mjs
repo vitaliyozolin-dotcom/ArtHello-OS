@@ -9,6 +9,9 @@ const employeeFailureReasons = new Set([
 
 const failureReasonsByStage = new Map([
   ['employee_access', employeeFailureReasons],
+  ['feedback', new Set(['feedback_open_failed', 'feedback_response_missing', 'feedback_list_forbidden', 'feedback_list_rejected',
+    'feedback_dialog_missing', 'feedback_own_list_failed', 'feedback_all_control_visible', 'feedback_close_failed'])],
+  ['backup_access', new Set(['backup_probe_failed', 'backup_api_not_forbidden'])],
   ['education', new Set(['education_response_missing', 'education_navigation_failed', 'education_forbidden', 'education_rejected', 'diary_entry_not_visible'])],
   ['diary_navigation', new Set(['school_response_missing', 'diary_entry_click_failed', 'school_forbidden', 'school_rejected'])],
   ['school_identity', new Set(['unreadable_school_response', 'school_identity_mismatch', 'natural_redirect_chain_missing', 'school_navigation_unavailable', 'school_diary_not_visible'])],
@@ -136,6 +139,46 @@ export async function installCandidateGate(context, page, value) {
   return { assertHealthy() { if (failed) throw Error('candidate_network_boundary_failed'); } };
 }
 
+// Ordinary employee navigation may lazily initialize the feedback schema. This is
+// not D075's database-only observation. Inspect statuses and UI structure only:
+// never read/report feedback bodies, fill the form, send, or change a status.
+export async function employeeReadControls(page, stage = () => {}) {
+  stage('feedback');
+  const trigger = page.getByRole('button', { name: 'Разработчикам', exact: true }).first();
+  const ownListResponse = () => page.waitForResponse(response =>
+    response.url() === ARTHELLO + '/api/developer-feedback?scope=mine' && response.request().method() === 'GET')
+    .catch(() => { throw Error('feedback_response_missing'); });
+  const requireOwnList = response => {
+    if (response.status() === 403) throw Error('feedback_list_forbidden');
+    if (response.status() !== 200) throw Error('feedback_list_rejected');
+  };
+  const [opened] = await Promise.all([
+    ownListResponse(), trigger.click().catch(() => { throw Error('feedback_open_failed'); }),
+  ]);
+  requireOwnList(opened);
+  const dialog = page.getByRole('dialog', { name: 'Разработчикам', exact: true });
+  await dialog.waitFor({ state: 'visible' }).catch(() => { throw Error('feedback_dialog_missing'); });
+  const [listed] = await Promise.all([
+    ownListResponse(),
+    dialog.getByRole('button', { name: 'Мои обращения', exact: true }).click()
+      .catch(() => { throw Error('feedback_own_list_failed'); }),
+  ]);
+  requireOwnList(listed);
+  await dialog.locator('section[aria-label="Мои обращения"][aria-busy="false"]').waitFor({ state: 'visible' })
+    .catch(() => { throw Error('feedback_own_list_failed'); });
+  if (await dialog.getByRole('alert').count()) throw Error('feedback_own_list_failed');
+  if (await dialog.getByRole('button', { name: 'Все обращения', exact: true }).count()) throw Error('feedback_all_control_visible');
+  await dialog.getByRole('button', { name: 'Закрыть обращения', exact: true }).click()
+    .catch(() => { throw Error('feedback_close_failed'); });
+  await dialog.waitFor({ state: 'hidden' }).catch(() => { throw Error('feedback_close_failed'); });
+  stage('backup_access');
+  const backupStatus = await page.evaluate(async endpoint => (await fetch(endpoint, { cache: 'no-store', redirect: 'error' })).status, '/api/settings/backups')
+    .catch(() => { throw Error('backup_probe_failed'); });
+  if (backupStatus !== 403) throw Error('backup_api_not_forbidden');
+  return { feedbackVisible: true, feedbackDialog: 'verified', feedbackOwnList: 'verified',
+    feedbackAllHidden: 'verified', backupApiDenied: 'verified' };
+}
+
 // Production and hosted fixture execute this same interaction. No API-created
 // session, cookie injection, prebuilt callback, trace or screenshot is used.
 export async function naturalFlow(page, input, stage = () => {}) {
@@ -163,11 +206,11 @@ export async function naturalFlow(page, input, stage = () => {}) {
   try {
     await page.locator('aside[aria-label="Основная навигация"] a[href="#education"]').first().waitFor({ state: 'visible' });
   } catch { throw Error('employee_navigation_unavailable'); }
-  const feedbackVisible = await page.getByRole('button', { name: /Разработчикам/ }).first().isVisible();
   const denied = selectDeniedProbe(user);
   if (await page.locator('aside a[href="#' + denied.module + '"]').count()) throw Error('denied_navigation_visible');
   const deniedStatus = await page.evaluate(async endpoint => (await fetch(endpoint, { cache: 'no-store' })).status, denied.path);
   if (deniedStatus !== 403) throw Error('denied_api_not_forbidden');
+  const employeeControls = await employeeReadControls(page, stage);
   stage('education');
   const [educationResponse] = await Promise.all([
     page.waitForResponse(response => new URL(response.url()).origin === ARTHELLO && new URL(response.url()).pathname === '/api/education' && response.request().method() === 'GET')
@@ -200,7 +243,7 @@ export async function naturalFlow(page, input, stage = () => {}) {
   return {
     result: 'pass', method: 'natural-browser-navigation', sessionInjected: false, callbackUrlConstructed: false,
     employeeAccount: 'verified', educationAccess: 'verified', schoolIdentity: 'verified', deniedApi: 'verified', deniedModule: denied.module,
-    feedbackVisible,
+    ...employeeControls,
     verifiedSteps: ['open_education_in_authenticated_arthello', 'click_diary_entry', 'follow_natural_sso_redirects', 'authenticated_school_diary_visible'],
   };
 }
