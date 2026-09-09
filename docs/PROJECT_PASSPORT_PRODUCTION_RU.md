@@ -719,3 +719,11 @@ decision:
 - Полный scope, границы, AI-контракт, метрика и остановка: DECISIONS D083. Владелец и исходная авторизация неизменны; новые пароли, роли или общий допуск не запрашиваются. Исходная бизнес-приёмка остаётся незавершённой.
 
 - Уточнение после external commit aaa0b2b0d31a936751076472736ee1ba07bcbbfd: принятое D082 относится к API-refactoring; наша read-only диагностика — D083 с прежними техническими d082 именами. Сохранены все55 изменений и общий runtime не изменён. Старый diagnostic head6a3d48a2 прошёл3 CI, новый объединённый источник требует своих gate. Production-диагностика ещё не выполнялась.
+
+
+### D-084 — R10 после подтверждённого отказа главной конфигурации
+
+- Actual D083 diagnosis: sourceedb7bfa1c666853be162c99295e0044820753ab0, run34320812445/job102366801535,2026-09-09T06:49:28.520Z: blocked/main_structure/main_environment_expansion. Только чтение; no login/reload/application mutation. Это подтверждение причины прежнего R9 pre-auth abort, а не приёмка приложения.
+- Создан инертный draft PR379 из codex/school-arthello-recovery-r10-20260909; R10/D084 будет иметь собственные identity/replay checks. R9 и его candidate-only continuation не меняются. Подготовлены новые gateway evidence/domain helper, context binding и resume checks; одиночная exact R9 browser retirement ограничена целью и recovery artifact, указанными в DECISIONS D084.
+- Новый runtime не меняет роли и не обходит Education/School. До public остаётся полный natural browser с выделенной учёткой; после public повторяются проверки. Предыдущие данные, секреты и источники не подменяются. Исходные банковские/AlfaCRM/доступы/обращения/контент/backups сценарии остаются непринятыми до фактической проверки.
+- Статус preparation. Независимый helper review и20 локальных tests PASS; controller integration и134 actual Caddy checks должны получить собственные подтверждения. Полный scope, source/cleanup/AI-контракт и условия остановки: DECISIONS D084. Exact remote review, hosted gates и protected run ещё не объявлены успешными.
