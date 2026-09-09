@@ -15,7 +15,11 @@ cleanup() {
 if docker inspect "$probe" >/dev/null 2>&1; then echo 'READONLY_BLOCKED=helper_already_exists'; exit 2; fi
 trap cleanup EXIT INT TERM HUP
 observe_consumers() {
-  if [[ "$EXPECTED_LIVE_SOURCE_SHA" == f5fa3e46e3510e6fc98ae4455f4b499c0ba30695 ]]; then
+  if [[ "$EXPECTED_LIVE_SOURCE_SHA" == d44137d8342b7eacec510f9f70ffeba6c3bf4f3a ]]; then
+    timeout 60 python3 -I scripts/production-data-consumers-r14.py \
+      --expected-release "$EXPECTED_LIVE_SOURCE_SHA" \
+      --release-state-dir "$HOME/.config/arthello/release-state"
+  elif [[ "$EXPECTED_LIVE_SOURCE_SHA" == f5fa3e46e3510e6fc98ae4455f4b499c0ba30695 ]]; then
     timeout 60 python3 -I scripts/production-data-consumers-r13.py \
       --expected-release "$EXPECTED_LIVE_SOURCE_SHA" \
       --release-state-dir "$HOME/.config/arthello/release-state"
@@ -102,7 +106,7 @@ def runtime(value, stamp):
     require(connection["enabled"] is None or type(connection["enabled"]) is bool)
     nullable_timestamp(connection["nextSyncAtUtc"])
     autosync = value["autosync"]
-    fields(autosync, "state outcome generationMatchesSetup nextAtUtc leasedUntilUtc leaseState failures updatedAgeSeconds httpStatus httpStatusState updatedAtUtc failureStage failureStageState")
+    fields(autosync, "state outcome generationMatchesSetup nextAtUtc leasedUntilUtc leaseState failures updatedAgeSeconds httpStatus httpStatusState updatedAtUtc failureStage failureStageState commitFailureKind commitFailureKindState")
     choice(autosync["outcome"], "running complete pending busy error unknown not_observed")
     require(autosync["generationMatchesSetup"] is None or type(autosync["generationMatchesSetup"]) is bool)
     nullable_timestamp(autosync["nextAtUtc"])
@@ -124,6 +128,13 @@ def runtime(value, stamp):
                     "sync_callback", "response_decode", "response_result"))
     else:
         require(autosync["failureStage"] is None)
+    require(autosync["commitFailureKindState"] in ("observed", "missing", "invalid"))
+    if autosync["commitFailureKindState"] == "observed":
+        require(autosync["outcome"] == "error" and autosync["failureStageState"] == "observed"
+                and autosync["failureStage"] == "sync_commit" and type(autosync["commitFailureKind"]) is str)
+        choice(autosync["commitFailureKind"], "provider_identity transaction_identity unique_constraint required_value foreign_key check_constraint schema binding_type query_limit database_busy storage_full database_readonly storage_error other")
+    else:
+        require(autosync["commitFailureKind"] is None)
     lease = value["statementLease"]
     fields(lease, "state expiresAtUtc leaseState")
     nullable_timestamp(lease["expiresAtUtc"])
@@ -219,7 +230,12 @@ def validate(value, code):
         for key in ("rejectedRows", "errorRows", "conflictRows"):
             count(sync[key])
         counts(bank["coverage"], "accountRows distinctAccountKeys legalEntities invalidAccountKeys accountsWithStatement coveredInLatestRun accountsWithContainingStatementInLatestRun accountsWithMatchingTransactionCount")
-        counts(bank["transactions"], "rows eligibleRows incomeRows expenseRows eligibleMissingLinks danglingLinks pendingOrNonRub unexpectedAccountRows")
+        counts(bank["transactions"], "rows eligibleRows incomeRows expenseRows eligibleMissingLinks danglingLinks pendingOrNonRub unexpectedAccountRows incomeAmountMinor expenseAmountMinor linkedIncomeAmountMinor linkedExpenseAmountMinor linkedFinancialRows financialMismatchRows")
+        if bank["checksComplete"]:
+            money=bank["transactions"]
+            require(money["financialMismatchRows"] == 0 and money["linkedFinancialRows"] == money["eligibleRows"]
+                    and money["incomeAmountMinor"] == money["linkedIncomeAmountMinor"]
+                    and money["expenseAmountMinor"] == money["linkedExpenseAmountMinor"])
         counts(bank["duplicates"], "groups excessRows missingIdentityRows")
         require(bank["activity"] in ("observed", "not_observed"))
     else:

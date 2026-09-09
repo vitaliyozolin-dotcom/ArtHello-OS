@@ -364,3 +364,12 @@ PR398: `codex/arthello-r14-20260909`, parent `e74e41d9b6d49f8854e8ad50b0cffc0a6b
 
 После фактического выпуска закрепить новые source/tree/image/run/job/container и public context для read-only D075. До этого old R13 diagnostic не является наблюдением R14. Дождаться обычного банковского запуска по сохранённому nextAtUtc, не сбрасывать backoff и не вызывать service key вручную. Проверить четыре выбранных счёта, период с 2026-09-01, bank/finance counts, суммы, отсутствие дубликатов и broken links; при error разрешён только фиксированный commitFailureKind без exception text. До этих доказательств задача Точки остаётся открытой.
 
+
+
+## D099 — Проверить операции Точки и связанные суммы ДДС на принятом R14
+
+Подготовка находится в draft. R14 source d44137d8342b7eacec510f9f70ffeba6c3bf4f3a / tree 6f6a1c26d9a5b2c8a78eb2d942b6720c453484af ещё не является принятым live: attempt1 run34391105865 остановлен на import_archive_identity до cutover, cleanup завершён; attempt2 выполняется. Пока protected run активен, main не менять.
+
+После реального successful deploy записать actual run/resource attempt/accepted attempt, image/fingerprint, candidate container и context SHA256 в новый R14 consumer proof; fixture-значения запрещены. Зафиксировать candidate/after receipts, сохранённый backup и School identity в acceptance-документе. Затем review точного SHA/tree/diff и успешные exact-head CI; только после этого merge с прежним prefix D075: read-only production data и неизменный main до terminal observation.
+
+В отчёте отдельно проверить четыре счёта и полное окно с 1 сентября по дату наблюдения, реальные bank rows, account-scoped duplicates, income/expense minor totals банка и связанных financial rows, ноль financialMismatchRows и отсутствие общих/потерянных связей. При incomplete_or_issues честно сохранить exit2. При новом sync_commit error читать только фиксированный commitFailureKind и качество поля; сообщение exception не собирать. Следующий банковский запуск определяется фактическим nextAtUtc; принудительно не сбрасывать ожидание или lease. Read-only наблюдение не выполняет банковские запросы и ничего не записывает в production.

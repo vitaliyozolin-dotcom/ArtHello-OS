@@ -240,7 +240,9 @@ def report(complete=True):
         transactions=dict(rows=2 if complete else 0, eligibleRows=2 if complete else 0,
                           incomeRows=1 if complete else 0, expenseRows=1 if complete else 0,
                           eligibleMissingLinks=0, danglingLinks=0, pendingOrNonRub=0,
-                          unexpectedAccountRows=0),
+                          unexpectedAccountRows=0, incomeAmountMinor=100000 if complete else 0,
+                          expenseAmountMinor=40000 if complete else 0, linkedIncomeAmountMinor=100000 if complete else 0,
+                          linkedExpenseAmountMinor=40000 if complete else 0, linkedFinancialRows=2 if complete else 0, financialMismatchRows=0),
         duplicates=dict(groups=0, excessRows=0, missingIdentityRows=0),
         activity='observed' if complete else 'not_observed', checksComplete=complete)
     value['bankRuntime'] = dict(
@@ -252,7 +254,7 @@ def report(complete=True):
                       nextAtUtc='2026-09-09T09:30:00.000Z', leasedUntilUtc=None,
                       leaseState='released', failures=0, updatedAgeSeconds=120,
                       httpStatus=200, httpStatusState='observed', updatedAtUtc='2026-09-09T08:58:00.000Z',
-                      failureStage=None, failureStageState='missing'),
+                      failureStage=None, failureStageState='missing', commitFailureKind=None, commitFailureKindState='missing'),
         statementLease=dict(state='not_observed', expiresAtUtc=None, leaseState='unknown'),
         retainedJobs=dict(state='observed', scopeMatch='unverified', providerStatus='not_stored',
                           total=4, invalidRows=0, exactWindowRows=0, olderEndRows=4,
@@ -485,9 +487,11 @@ else:
                 if self.log.exists():
                     self.log.unlink()
                 value = copy.deepcopy(D088_REPORT)
+                for name in 'incomeAmountMinor expenseAmountMinor linkedIncomeAmountMinor linkedExpenseAmountMinor linkedFinancialRows financialMismatchRows'.split():
+                    value['bankWindow']['transactions'][name]=0
                 # Synthetic values exercise D091 transport; D088 did not observe these fields.
                 value['bankRuntime']['autosync'].update(httpStatus=status, httpStatusState=state,
-                                                       updatedAtUtc='2026-09-09T08:31:16.000Z', failureStage=None, failureStageState='missing')
+                                                       updatedAtUtc='2026-09-09T08:31:16.000Z', failureStage=None, failureStageState='missing', commitFailureKind=None, commitFailureKindState='missing')
                 result = self.run_launcher(value=value, probe_exit=2)
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertEqual(len(self.observations()), 2)
@@ -495,8 +499,10 @@ else:
                 self.assertIn('READONLY_FINISHED=', result.stdout)
                 observed = [json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')]
                 self.assertEqual(observed, [value])
-                for key in ('httpStatus', 'httpStatusState', 'updatedAtUtc', 'failureStage', 'failureStageState'):
+                for key in ('httpStatus', 'httpStatusState', 'updatedAtUtc', 'failureStage', 'failureStageState', 'commitFailureKind', 'commitFailureKindState'):
                     del observed[0]['bankRuntime']['autosync'][key]
+                for name in 'incomeAmountMinor expenseAmountMinor linkedIncomeAmountMinor linkedExpenseAmountMinor linkedFinancialRows financialMismatchRows'.split():
+                    del observed[0]['bankWindow']['transactions'][name]
                 self.assertEqual(observed[0], D088_REPORT)
 
     def test_lexical_failure_stage_passes_only_the_fixed_enum_and_final_identity_check(self):
@@ -525,6 +531,32 @@ else:
                 value = report(False)
                 value['bankRuntime']['autosync'].update(outcome=outcome, failureStage=stage, failureStageState=state)
                 self.assert_blocked(self.run_launcher(value=value, probe_exit=2), 'invalid_probe_report')
+
+    def test_commit_failure_kind_is_checked_before_any_report_is_emitted(self):
+        for kind in ['provider_identity', 'transaction_identity', 'unique_constraint', 'required_value', 'foreign_key', 'check_constraint', 'schema', 'binding_type', 'query_limit', 'database_busy', 'storage_full', 'database_readonly', 'storage_error', 'other']:
+            value=report(False)
+            value['bankRuntime']['autosync'].update(outcome='error',failureStage='sync_commit',failureStageState='observed',commitFailureKind=kind,commitFailureKindState='observed')
+            result=self.run_launcher(value=value,probe_exit=2)
+            self.assertEqual(result.returncode,2,result.stderr)
+            self.assertIn('READONLY_FINISHED=',result.stdout)
+        for kind,state,stage,outcome in [('PRIVATE_ERROR','observed','sync_commit','error'),
+             ({'message':'PRIVATE_ERROR'},'observed','sync_commit','error'),
+             ('schema','missing','sync_commit','error'),('schema','observed','bank_sync','error'),
+             ('schema','observed','sync_commit','complete')]:
+            value=report(False)
+            value['bankRuntime']['autosync'].update(outcome=outcome,failureStage=stage,failureStageState='observed',commitFailureKind=kind,commitFailureKindState=state)
+            result=self.run_launcher(value=value,probe_exit=2)
+            self.assert_blocked(result,'invalid_probe_report')
+            self.assertNotIn('PRIVATE_ERROR',result.stdout+result.stderr)
+
+    def test_money_fields_cannot_claim_completion_with_inconsistent_totals(self):
+        for field,val in [('incomeAmountMinor',-1),('expenseAmountMinor',1.5),
+                          ('linkedIncomeAmountMinor','PRIVATE_MONEY'),('financialMismatchRows',1),
+                          ('linkedFinancialRows',1),('linkedIncomeAmountMinor',99999)]:
+            value=report(True);value['bankWindow']['transactions'][field]=val
+            result=self.run_launcher(value=value,probe_exit=0)
+            self.assert_blocked(result,'invalid_probe_report')
+            self.assertNotIn('PRIVATE_MONEY',result.stdout+result.stderr)
 
     def test_commit_schema_passes_only_known_column_names_and_bounded_metadata(self):
         schema = dict(state='partial', tables={name: dict(state='schema_missing') for name in
@@ -585,3 +617,4 @@ else:
 
 if __name__ == '__main__':
     unittest.main()
+

@@ -72,8 +72,8 @@ test('bank commit schema: index scope, extra constraints and absent tables remai
     assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
   } finally { db.close(); }
   const matching = new DatabaseSync(':memory:');
-  matching.exec(`CREATE TABLE bank_transactions(id TEXT,connection_id TEXT,provider_transaction_id TEXT);
-    CREATE UNIQUE INDEX PRIVATE_EQUIVALENT ON bank_transactions(connection_id,provider_transaction_id);`);
+  matching.exec(`CREATE TABLE bank_transactions(id TEXT,connection_id TEXT,provider_account_id TEXT,provider_transaction_id TEXT);
+    CREATE UNIQUE INDEX PRIVATE_EQUIVALENT ON bank_transactions(connection_id,provider_account_id,provider_transaction_id);`);
   try {
     const result = inspectDatabase(matching, bankOptions).bankCommitSchema.tables.bank_transactions;
     assert.equal(result.providerIndex, 'matched');
@@ -200,7 +200,7 @@ test('bank runtime: metadata distinguishes future pending retry, expired lease a
     assert.deepEqual(runtime.autosync, { state: 'observed', outcome: 'pending', generationMatchesSetup: true,
       nextAtUtc: '2026-09-09T12:05:00.000Z', leasedUntilUtc: null, leaseState: 'released', failures: 0, updatedAgeSeconds: 300,
       httpStatus: 200, httpStatusState: 'observed', updatedAtUtc: '2026-09-09T11:55:00.000Z',
-      failureStage: null, failureStageState: 'missing' });
+      failureStage: null, failureStageState: 'missing', commitFailureKind: null, commitFailureKindState: 'missing' });
     assert.deepEqual(runtime.statementLease, { state: 'observed', expiresAtUtc: '2026-09-09T11:59:00.000Z', leaseState: 'expired' });
     assert.deepEqual(runtime.retainedJobs, { state: 'observed', scopeMatch: 'unverified', providerStatus: 'not_stored',
       total: 4, invalidRows: 0, exactWindowRows: 2, olderEndRows: 2, otherWindowRows: 0, oldestAgeSeconds: 300 });
@@ -506,6 +506,21 @@ function bankFixture({ complete = false, status = 'Успешно', runTime = ba
           '2026-09-05', 'Booked', 'RUB', i ? 'Списание' : 'Поступление', 'PRIVATE-BODY');
     }
   }
+  db.exec(`ALTER TABLE bank_transactions ADD COLUMN amount_minor INTEGER;
+    ALTER TABLE financial_operations ADD COLUMN amount_minor INTEGER;
+    ALTER TABLE financial_operations ADD COLUMN direction TEXT;
+    ALTER TABLE financial_operations ADD COLUMN operation_date TEXT;
+    ALTER TABLE financial_operations ADD COLUMN legal_entity_id TEXT;
+    ALTER TABLE financial_operations ADD COLUMN source_system TEXT;
+    ALTER TABLE financial_operations ADD COLUMN bank_operation_ref TEXT;
+    UPDATE bank_transactions SET amount_minor=CASE WHEN direction='Поступление' THEN 100000 ELSE 40000 END;
+    UPDATE financial_operations SET
+      amount_minor=(SELECT amount_minor FROM bank_transactions WHERE financial_operation_id=financial_operations.id),
+      direction=(SELECT direction FROM bank_transactions WHERE financial_operation_id=financial_operations.id),
+      operation_date=(SELECT operation_date FROM bank_transactions WHERE financial_operation_id=financial_operations.id),
+      legal_entity_id=(SELECT legal_entity_id FROM bank_transactions WHERE financial_operation_id=financial_operations.id),
+      source_system='BANK_TOCHKA_API',
+      bank_operation_ref=(SELECT provider_transaction_id FROM bank_transactions WHERE financial_operation_id=financial_operations.id);`);
   return db;
 }
 
@@ -774,19 +789,20 @@ test('bank aggregate: UTC day is fixed once and previous-day statements do not c
   } finally { db.close(); }
 });
 
-test('bank aggregate: external identity uniqueness spans accounts within the connection', () => {
+test('bank aggregate: same external identity on different accounts is valid after D097', () => {
   const db = bankFixture({ complete: true });
   db.exec(`
     UPDATE bank_transactions SET provider_account_id='PRIVATE-ACCOUNT-1',provider_transaction_id='PRIVATE-EXTERNAL-0'
       WHERE id='PRIVATE-TX-1';
+    UPDATE financial_operations SET bank_operation_ref='PRIVATE-EXTERNAL-0' WHERE id='PRIVATE-FIN-1';
     UPDATE bank_statement_imports SET transaction_count=1 WHERE provider_account_id IN ('PRIVATE-ACCOUNT-0','PRIVATE-ACCOUNT-1');
   `);
   try {
     const result = inspectDatabase(db, bankOptions);
     assert.equal(result.bankWindow.coverage.accountsWithMatchingTransactionCount, 4);
-    assert.equal(result.bankWindow.duplicates.groups, 1);
-    assert.equal(result.bankWindow.duplicates.excessRows, 1);
-    assert.equal(result.bankWindow.checksComplete, false);
+    assert.equal(result.bankWindow.duplicates.groups, 0);
+    assert.equal(result.bankWindow.duplicates.excessRows, 0);
+    assert.equal(result.bankWindow.checksComplete, true);
   } finally { db.close(); }
 });
 
@@ -799,4 +815,76 @@ test('bank aggregate: transactions outside the four current account keys cannot 
     assert.equal(result.bankWindow.checksComplete, false);
     assert.equal(diagnosticExitCode(result), 2);
   } finally { db.close(); }
+});
+
+
+test('bank runtime: commit failure kind only reflects the fixed enum at sync_commit', () => {
+  const kinds = 'provider_identity transaction_identity unique_constraint required_value foreign_key check_constraint schema binding_type query_limit database_busy storage_full database_readonly storage_error other'.split(' ');
+  const cases = kinds.map(kind => ({outcome:'error',stage:'sync_commit',kind,expected:kind,state:'observed'}));
+  cases.push(...[
+    {outcome:'error',stage:'sync_commit',kind:null,expected:null,state:'missing'},
+    {outcome:'error',stage:'sync_commit',kind:'PRIVATE_ERROR',expected:null,state:'invalid'},
+    {outcome:'error',stage:'sync_commit',kind:{message:'PRIVATE_ERROR'},expected:null,state:'invalid'},
+    {outcome:'complete',stage:'sync_commit',kind:'schema',expected:null,state:'invalid'},
+    {outcome:'error',stage:'bank_sync',kind:'schema',expected:null,state:'invalid'},
+  ]);
+  for (const {outcome,stage,kind,expected,state} of cases) {
+    const {db}=runtimeFixture({outcome});const key='tochka-autosync:v1:INT-T-TOCHKA';
+    const saved=JSON.parse(db.prepare('SELECT state_value FROM system_runtime_state WHERE state_key=?').get(key).state_value);
+    Object.assign(saved,{failureStage:stage,commitFailureKind:kind});
+    const raw=JSON.stringify(saved);db.prepare('UPDATE system_runtime_state SET state_value=? WHERE state_key=?').run(raw,key);
+    try {
+      const result=inspectDatabase(db,bankOptions);const value=result.bankRuntime.autosync;
+      assert.equal(value.commitFailureKind,expected);assert.equal(value.commitFailureKindState,state);
+      assert.equal(JSON.stringify(result).includes('PRIVATE_ERROR'),false);
+      assert.equal(result.bankWindow.checksComplete,false);
+      assert.equal(db.prepare('SELECT state_value FROM system_runtime_state WHERE state_key=?').get(key).state_value,raw);
+      assert.throws(()=>db.exec('DELETE FROM system_runtime_state'));
+    } finally {db.close();}
+  }
+});
+
+test('bank commit schema: account-scoped identity is required after D097', () => {
+  for(const accountScoped of [false,true]) {
+    const db=new DatabaseSync(':memory:');
+    db.exec(`CREATE TABLE bank_transactions(id TEXT PRIMARY KEY,connection_id TEXT,provider_account_id TEXT,provider_transaction_id TEXT);
+      CREATE UNIQUE INDEX bank_transactions_provider_uidx ON bank_transactions(connection_id,${accountScoped?'provider_account_id,':''}provider_transaction_id);`);
+    try {assert.equal(inspectDatabase(db,bankOptions).bankCommitSchema.tables.bank_transactions.providerIndex,accountScoped?'matched':'missing');}
+    finally {db.close();}
+  }
+});
+
+
+test('bank reconciliation: exact minor-unit sums and one financial row per eligible bank transaction', () => {
+  const db=bankFixture({complete:true});
+  try {
+    const result=inspectDatabase(db,bankOptions);const t=result.bankWindow.transactions;
+    assert.equal(t.incomeAmountMinor,100000);assert.equal(t.expenseAmountMinor,40000);
+    assert.equal(t.linkedIncomeAmountMinor,100000);assert.equal(t.linkedExpenseAmountMinor,40000);
+    assert.equal(t.linkedFinancialRows,2);assert.equal(t.financialMismatchRows,0);
+    assert.equal(result.bankWindow.checksComplete,true);
+  }finally{db.close();}
+});
+
+test('bank reconciliation: wrong amount, direction, source, date, entity and shared links cannot pass', () => {
+  for(const sql of [
+    "UPDATE financial_operations SET amount_minor=amount_minor+1",
+    "UPDATE financial_operations SET direction='Списание' WHERE id='PRIVATE-FIN-0'",
+    "UPDATE financial_operations SET source_system='PRIVATE_OTHER'",
+    "UPDATE financial_operations SET operation_date='2026-09-04'",
+    "UPDATE financial_operations SET legal_entity_id='PRIVATE_OTHER'",
+    "UPDATE financial_operations SET bank_operation_ref='PRIVATE_OTHER'",
+    "UPDATE bank_transactions SET financial_operation_id='PRIVATE-FIN-0'",
+    "UPDATE bank_transactions SET amount_minor=NULL",
+    "UPDATE bank_transactions SET amount_minor=1.5",
+  ]) {
+    const db=bankFixture({complete:true});db.exec(sql);
+    try {
+      const result=inspectDatabase(db,bankOptions);
+      assert.equal(result.bankWindow.state,'observed');
+      assert.ok(result.bankWindow.transactions.financialMismatchRows>0);
+      assert.equal(result.bankWindow.checksComplete,false);assert.equal(diagnosticExitCode(result),2);
+      assert.equal(JSON.stringify(result).includes('PRIVATE'),false);
+    }finally{db.close();}
+  }
 });

@@ -1097,3 +1097,14 @@ R14 воспроизводит принятый R13 controller через зак
 
 Сохраняются auth, scope четырёх счетов, даты, scheduler lease/generation/backoff и все границы публикации. После potential seal, candidate authentication или public start запрещено восстановление старых данных; rollback кода не сужает account-scoped индекс. До production запуска необходимы review итогового SHA/tree/diff и успешные exact-head Quality, Proof, v52 и все три R14 verification jobs. Production PASS и финансовая приёмка объявляются отдельно по фактическим receipts и обычному банковскому запуску. Stop: source/identity drift, нарушение backup/data boundaries, недостаточная capacity, неуспешные проверки либо отказ владельца.
 
+
+
+## D-099 — Сверка банка и ДДС после выпуска R14
+
+Статус: проект решения в draft; принятие и production-наблюдение запрещены до фактической успешной приёмки R14 и закрепления её receipt. Владелец — Виталий. Продолжение одной задачи по Точке; новый продуктовый scope не вводится.
+
+D075 получает отдельный read-only consumer proof для R14 и сохраняет прежние R13/legacy proofs. Новый proof должен проверять фактические source/tree, run/resource attempt/accepted attempt, image, fingerprint, candidate container и context digest; до записи реальных значений он отказывает. Сохраняются D063 activation, public gateway, sealed adoption, прежний backup worker и полный canonical inventory, включая только отдельно доказанных остановленных predecessors. Отказ не вызывает fallback.
+
+Диагностика согласует duplicate key с D097: connection + account + provider transaction. Одинаковый provider ID на разных счетах не считается дублем; отсутствие account/transaction identity и повторы внутри одного счёта остаются ошибками. Для проведённых RUB-операций добавляются только суммы в целых копейках, количество связанных финансовых строк и число расхождений суммы, направления, даты, юрлица, банковской ссылки и источника. checksComplete требует равных сумм банка и связанных строк ДДС, отдельных связей и отсутствия расхождений. Общие ручные/кассовые операции в эти суммы не входят.
+
+При sync_commit error допускается только фиксированный commitFailureKind из D097 и состояние observed/missing/invalid; произвольные ошибки и идентификаторы не выходят. Прежние owner/exact-main/Quality/attempt1 gates, protected Environment, два locks, canonical read-only mount, before/after identity proofs и exit2 при incomplete_or_issues сохраняются. Ни SQL writes, ни bank calls, ни resync/lease/backoff/auth/roles changes не добавляются. Технический merge prefix после приёмки остаётся D075: read-only production data. Проверки и условия — docs/acceptance/2026-09-09-r14-bank-observation.md.
