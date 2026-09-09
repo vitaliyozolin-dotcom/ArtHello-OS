@@ -1,3 +1,4 @@
+import { apiFetch } from "@workspace/api-client-react";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pencil, CheckCircle2, XCircle, ChevronRight, DollarSign, TrendingDown, ArrowLeftRight, Package, Landmark } from "lucide-react";
@@ -190,23 +191,23 @@ export default function ArticlesPage() {
 
   const { data: articles = [], isLoading } = useQuery<Article[]>({
     queryKey: ["articles"],
-    queryFn: () => fetch("/api/articles").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/articles").then((r) => r.json()),
   });
 
   const createMutation = useMutation({
     mutationFn: (body: Partial<Article>) =>
-      fetch("/api/articles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()),
+      apiFetch("/api/articles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["articles"] }); setShowForm(false); },
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, ...body }: Partial<Article> & { id: string }) =>
-      fetch(`/api/articles/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()),
+      apiFetch(`/api/articles/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["articles"] }); setEditing(null); },
   });
 
   const deactivateMutation = useMutation({
-    mutationFn: (id: string) => fetch(`/api/articles/${id}`, { method: "DELETE" }).then((r) => r.json()),
+    mutationFn: (id: string) => apiFetch(`/api/articles/${id}`, { method: "DELETE" }).then((r) => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["articles"] }),
   });
 

@@ -166,8 +166,8 @@ Evidence: отчёт дельты строк (`git log --diff-filter=D`); `pnpm 
 
 1. **[выполнено 2026-09-08] [BEH]** 2.1 `0016_snapshot.json`/`0017_snapshot.json` восстановлены из точных исторических schema trees; `drizzle-kit generate` на неизменной текущей схеме дал пустой diff.
 2. **[выполнено 2026-09-08 для disposable PostgreSQL 16; restored-sandbox gate BACKLOG остаётся] [BEH]** 2.2 `migration-twin.mjs` проверяет 0009–0010 на owner/accountant/viewer sessions, login attempts и audit evidence, включая rollback/reapply и необратимый отзыв non-owner sessions.
-3. **[BEH]** 2.3 Вывести из эксплуатации `migrate.ts`: (a) diff конечного состояния против drizzle-0017 на twin-базах (schema-dump diff = evidence); (b) реальные дельты → новая проверенная Drizzle-миграция `0018_*`; (c) boot-time — только read-only schema assertion c fail-fast; (d) release содержит immutable manifest и только checked-in SQL с зафиксированными SHA-256; deploy применяет эти миграции последовательным migration runner'ом. В production запрещены `drizzle-kit push`, `generate`, introspection-driven mutation и любой незакоммиченный SQL; prod-VPS ничего не генерирует и не собирает. Backup, проверенный rollback, отдельное разрешение и Reviewer/Coordinator gates из D-009 сохраняются.
-4. **[DEL]** 2.4 Теперь удалить сиротские схемы `messages`/`conversations`: файлы + DROP-миграция + twin-proof.
+3. **[выполнено 2026-09-09] [BEH]** 2.3 D-080 вывело из эксплуатации `migrate.ts`: измеренная legacy schema-дельта перенесена в `0018_retire_orphan_chat`, runtime применяет только manifest-verified checked-in SQL, а API boot выполняет read-only assertion полного ledger до security gate и listener.
+4. **[выполнено 2026-09-09] [DEL]** 2.4 Сиротские схемы `messages`/`conversations` удалены из исходников; `0018` fail closed при непустых legacy-таблицах, удаляет только пустые и имеет structural rollback/twin-proof. Живые `front_office_*` сохранены.
 5. **[выполнено 2026-09-08] [BEH]** 2.5 В `lib/db` module-level env-throw заменён на `createDb(env)` и ленивые совместимые exports; `alphaCrmClient` читает tenant-конфигурацию лениво через `createAlphaCrmConfig(env)` и fail closed до сетевого запроса.
 6. **[выполнено 2026-09-09] [BEH]** 2.6 D-077 закрепляет политику доступа к БД: drizzle builder по умолчанию; `db.execute(sql)` допустим для отчётности; новые `pool.query` запрещены сокращаемым baseline-ratchet; PGlite разрешён только в `scripts/`. Policy включён в lint и агрегатный `test:refactoring`.
 
@@ -177,11 +177,11 @@ Evidence: лог пустого diff `drizzle-kit generate` только в CI/s
 
 ### Фаза 3 — унификация контракта и общих корректностно-критичных утилит (L)
 
-1. **[BEH]** Пакет `lib/shared`: первыми — дубли с риском корректности: `normalizePhone` (characterization-тесты, фиксирующие поведение каждого текущего варианта, затем канонический с D-номером семантики), `sha256` (5 копий), CSRF (3 места), money-format (18 inline-мест). Каждый PR консолидации несёт тест канонического поведения против старых call-site'ов.
-2. **[BEH]** Сверка контракта: `openapi.yaml` объявляется источником истины (D-номер). Инвентаризация разрыва 290 путей сервера / 171 в спеке / 80 хуков: каждый server-only путь → задокументировать, пометить deprecated или удалить (kill-list уходит в фазу 4).
-3. **[BEH]** Новый постоянный гейт `scripts/contract-drift.mjs`: поднимает Express-приложение, дампит route table, диффит против openapi.yaml; встраивается в `proof-gates.yml` рядом с `permission-proof.mjs`.
-4. **[BEH]** FETCH: 43 ручных `fetch("/api/...")` → сгенерированные хуки `lib/api-client-react` (восстанавливает единообразие auth+CSRF). По PR на кластер файлов; evidence — grep-счётчик `fetch("/api` → 0 в drift-гейте.
-5. api-zod: внедрять только в файлы, **не** идущие под декомпозицию фазы 4 (гиганты получают zod при разборе, чтобы не трогать дважды).
+1. **[выполнено 2026-09-09] [BEH]** D-082 создало `lib/shared` для канонических `normalizePhone`, SHA-256, CSRF-cookie и RUB-format helpers; characterization-тесты фиксируют выбранную семантику, а identity merge остаётся запрещённым.
+2. **[выполнено 2026-09-09] [BEH]** `openapi.yaml` объявлен источником публичного типизированного контракта. Актуальный runtime/OpenAPI разрыв измеряется исполняемым inventory; каждый существующий server-only method/path имеет disposition `document-in-openapi`, новый необъяснённый путь запрещён.
+3. **[выполнено 2026-09-09] [BEH]** `scripts/contract-drift.mjs` импортирует Express-приложение, сравнивает route table с OpenAPI и inventory и включён в `proof-gates.yml` рядом с permission proof.
+4. **[выполнено 2026-09-09] [BEH]** Исполняемые frontend API-вызовы переведены с глобального `fetch` на `lib/api-client-react`: generated operations остаются основным путём, `apiFetch` — совместимый transport для инвентаризированных server-only операций. Ratchet запрещает возврат прямого API `fetch`.
+5. **[выполнено 2026-09-09]** api-zod применяется только в стабильных route-модулях; гиганты Фазы 4 намеренно не получили промежуточную перепись.
 
 НЕ трогать: внутреннюю структуру god-файлов, топологию mount'ов, UI-компоненты, `deploy/`.
 

@@ -95,4 +95,46 @@ budget covers three expanded copies, two download copies, and2GiB host headroom;
 it is rechecked immediately before import. Missing space gives actual/required
 counts and fails closed. Import failures name their fixed stage; checksums,
 portable fingerprint, source identity and credential restrictions remain required.
-No images, application resources, backups or volumes are pruned to make room.
+The original D076 invocation cleanup removes only its container and downloaded
+archive. D079 adds an explicit, separately reviewed lifecycle action for the
+unused R8 browser image described below. General image pruning and application,
+backup, container or volume deletion to make room remain prohibited.
+
+## D079: bounded lifecycle of our test images
+
+The successful R8 bundle and failed pre-cutover run34283447507 left its own test
+image after the invocation ended. D076 run34285119759 then observed6005696KiB
+available against7995036KiB required, before download or credential use.
+
+For the pre-capacity step, only image `sha256:0763e7e6404c4ecf19b81bdcc236dd815a0210e9bb6b087adec279692cc7701c`
+from source `5385090d48f4dae29c314dff7ae974d854560940` is eligible for retirement.
+Its one expected tag, role, UID and portable fingerprint must match; no running
+or stopped container may reference it. The protected step rechecks current main
+and identity before the sole `docker image rm --no-prune` command by that fixed
+ID. It never forces deletion or selects another image. A missing image is a
+skip only when both its ID and tag are verifiably absent, not when Docker fails.
+The retained exact R8 artifact must remain available and unexpired before removal.
+
+The existing capacity, archive, source and sandbox gates then run unchanged.
+Available capacity is measured again, not inferred from the image size. Insufficient space still blocks the
+new browser before credentials; an old image never substitutes for current source.
+This lifecycle action follows the standing instruction to prepare the isolated
+test and does not grant general server cleanup or application deployment rights.
+
+A separate final always-step in canonical D076 also removes that invocation's
+successfully verified image. It is enabled only by the full image ID emitted
+after all import/identity assertions. It rechecks the source, sole expected tag,
+role, UID and fingerprint from the same producing job, retained unexpired run
+artifact, all-state container absence and current main before the same non-force
+removal. Missing verification never enables a tag fallback. Cleanup failures
+stay visible; the original downloaded-archive cleanup is unchanged. This final
+step must not be placed between a release controller's pre/post browser checks.
+
+
+D074 run34288036300 observed that the gateway stores the fixed R8 image with one
+RepoDigests self-reference, `arthello-e2e@` followed by its exact full image ID.
+All identity and fingerprint checks matched. The D079 representation check now
+accepts either an empty array or exactly that one same-ID reference. Null,
+foreign repositories, different digests and multiple references remain blocked.
+All target, recovery-artifact, current-main, container-consumer and capacity
+guards remain unchanged. The observation itself performed no deletion or login.

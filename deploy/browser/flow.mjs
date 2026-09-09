@@ -1,6 +1,30 @@
 export const ARTHELLO = 'https://arthello-188-225-38-55.sslip.io';
 export const SCHOOL = 'https://school-188-225-38-55.sslip.io';
 
+const employeeFailureReasons = new Set([
+  'login_rejected', 'dedicated_employee_required', 'permanent_password_required', 'education_grant_missing',
+  'denied_probe_missing', 'denied_navigation_visible', 'denied_api_not_forbidden',
+  'unreadable_login_response', 'employee_navigation_unavailable',
+]);
+
+const failureReasonsByStage = new Map([
+  ['employee_access', employeeFailureReasons],
+  ['education', new Set(['education_response_missing', 'education_navigation_failed', 'education_forbidden', 'education_rejected', 'diary_entry_not_visible'])],
+  ['diary_navigation', new Set(['school_response_missing', 'diary_entry_click_failed', 'school_forbidden', 'school_rejected'])],
+  ['school_identity', new Set(['unreadable_school_response', 'school_identity_mismatch', 'natural_redirect_chain_missing', 'school_navigation_unavailable', 'school_diary_not_visible'])],
+]);
+
+export function safeFailureReason(stage, error) {
+  const reasons = failureReasonsByStage.get(stage);
+  const fallback = stage === 'employee_access' ? 'employee_access_failed' : 'browser_check_failed';
+  if (!reasons) return fallback;
+  // Exact tags only: never interpolate an exception, response, contact or URL.
+  try {
+    const message = error instanceof Error ? error.message : '';
+    return reasons.has(message) ? message : fallback;
+  } catch { return fallback; }
+}
+
 export function inspectSandbox(rows) {
   return { namespaces: rows['Layer 1 Sandbox'] === 'Namespace', pidNamespaces: rows['PID namespaces'] === 'Yes', networkNamespaces: rows['Network namespaces'] === 'Yes', seccomp: rows['Seccomp-BPF sandbox'] === 'Yes' };
 }
@@ -10,6 +34,18 @@ export function validateCredentials(input) {
   const password = input?.password;
   if (!login || login.length > 254 || login.toLowerCase() === 'owner' || typeof password !== 'string' || password.length < 12 || password.length > 512) throw Error('credentials_invalid');
   return { login, password };
+}
+
+export function validateMaintenanceNonce(value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || value.length !== 64 || !/^[a-f0-9]{64}$/.test(value)) throw Error('candidate_nonce_invalid');
+  return value;
+}
+
+export function validateBrowserInput(input) {
+  const credentials = validateCredentials(input);
+  const maintenanceNonce = validateMaintenanceNonce(input?.maintenanceNonce);
+  return maintenanceNonce === undefined ? credentials : { ...credentials, maintenanceNonce };
 }
 
 export function validateEmployee(user) {
@@ -68,6 +104,38 @@ export async function installNetworkBoundary(context) {
   await context.routeWebSocket('**/*', socket => socket.close());
 }
 
+// Keep the context-wide network/write policy above active for every page.
+// Never set this secret with Playwright route.continue headers: Playwright
+// carries those overrides across redirects. CDP Fetch.continueRequest applies
+// its header override to one request only, including each real redirect hop.
+// https://chromedevtools.github.io/devtools-protocol/tot/Fetch/#method-continueRequest
+export async function installCandidateGate(context, page, value) {
+  const nonce = validateMaintenanceNonce(value);
+  if (!nonce || page.context() !== context) throw Error('candidate_nonce_invalid');
+  const session = await context.newCDPSession(page);
+  let failed = false;
+  let loginAttempts = 0;
+  session.on('Fetch.requestPaused', async event => {
+    try {
+      const request = event.request;
+      if (failed || !requestAllowed(request.url, request.method) || (request.method === 'POST' && ++loginAttempts > 1)) {
+        await session.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'BlockedByClient' });
+        return;
+      }
+      const headers = Object.entries(request.headers).filter(([name]) => !['authorization', 'x-arthello-candidate-gate'].includes(name.toLowerCase()))
+        .map(([name, headerValue]) => ({ name, value: String(headerValue) }));
+      if (new URL(request.url).origin === ARTHELLO) headers.push({ name: 'Authorization', value: 'ArtHelloCandidate ' + nonce });
+      await session.send('Fetch.continueRequest', { requestId: event.requestId, headers });
+    } catch {
+      failed = true;
+      await session.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'BlockedByClient' }).catch(() => {});
+      await context.close().catch(() => {});
+    }
+  });
+  await session.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
+  return { assertHealthy() { if (failed) throw Error('candidate_network_boundary_failed'); } };
+}
+
 // Production and hosted fixture execute this same interaction. No API-created
 // session, cookie injection, prebuilt callback, trace or screenshot is used.
 export async function naturalFlow(page, input, stage = () => {}) {
@@ -88,10 +156,13 @@ export async function naturalFlow(page, input, stage = () => {}) {
   ]);
   stage('employee_access');
   if (loginResponse.status() !== 200) throw Error('login_rejected');
-  const user = await loginResponse.json();
+  let user;
+  try { user = await loginResponse.json(); } catch { throw Error('unreadable_login_response'); }
   validateEmployee(user);
   credentials.password = '';
-  await page.locator('aside[aria-label="Основная навигация"] a[href="#education"]').first().waitFor({ state: 'visible' });
+  try {
+    await page.locator('aside[aria-label="Основная навигация"] a[href="#education"]').first().waitFor({ state: 'visible' });
+  } catch { throw Error('employee_navigation_unavailable'); }
   const feedbackVisible = await page.getByRole('button', { name: /Разработчикам/ }).first().isVisible();
   const denied = selectDeniedProbe(user);
   if (await page.locator('aside a[href="#' + denied.module + '"]').count()) throw Error('denied_navigation_visible');
@@ -99,23 +170,31 @@ export async function naturalFlow(page, input, stage = () => {}) {
   if (deniedStatus !== 403) throw Error('denied_api_not_forbidden');
   stage('education');
   const [educationResponse] = await Promise.all([
-    page.waitForResponse(response => new URL(response.url()).origin === ARTHELLO && new URL(response.url()).pathname === '/api/education' && response.request().method() === 'GET'),
-    page.locator('aside[aria-label="Основная навигация"] a[href="#education"]').first().click(),
+    page.waitForResponse(response => new URL(response.url()).origin === ARTHELLO && new URL(response.url()).pathname === '/api/education' && response.request().method() === 'GET')
+      .catch(() => { throw Error('education_response_missing'); }),
+    page.locator('aside[aria-label="Основная навигация"] a[href="#education"]').first().click()
+      .catch(() => { throw Error('education_navigation_failed'); }),
   ]);
+  if (educationResponse.status() === 403) throw Error('education_forbidden');
   if (educationResponse.status() !== 200) throw Error('education_rejected');
   const diary = page.getByRole('button', { name: /^(Открыть дневник|Перейти в дневник)$/ });
-  await diary.waitFor({ state: 'visible' });
+  try { await diary.waitFor({ state: 'visible' }); } catch { throw Error('diary_entry_not_visible'); }
   stage('diary_navigation');
   const [schoolResponse] = await Promise.all([
-    page.waitForResponse(response => new URL(response.url()).origin === SCHOOL && new URL(response.url()).pathname === '/api/school' && response.request().method() === 'GET'),
-    diary.click(),
+    page.waitForResponse(response => new URL(response.url()).origin === SCHOOL && new URL(response.url()).pathname === '/api/school' && response.request().method() === 'GET')
+      .catch(() => { throw Error('school_response_missing'); }),
+    diary.click().catch(() => { throw Error('diary_entry_click_failed'); }),
   ]);
+  if (schoolResponse.status() === 403) throw Error('school_forbidden');
   if (schoolResponse.status() !== 200) throw Error('school_rejected');
   stage('school_identity');
-  const snapshot = await schoolResponse.json();
+  let snapshot;
+  try { snapshot = await schoolResponse.json(); } catch { throw Error('unreadable_school_response'); }
   if (!sameSchoolIdentity(snapshot.viewer, credentials.login)) throw Error('school_identity_mismatch');
   if (JSON.stringify(observed) !== JSON.stringify(['school_start', 'arthello_authorize', 'school_callback'])) throw Error('natural_redirect_chain_missing');
-  await page.locator('nav[aria-label="Основная навигация"]').first().waitFor({ state: 'visible' });
+  try {
+    await page.locator('nav[aria-label="Основная навигация"]').first().waitFor({ state: 'visible' });
+  } catch { throw Error('school_navigation_unavailable'); }
   if (new URL(page.url()).origin !== SCHOOL || await page.locator('input[type="password"]').count()) throw Error('school_diary_not_visible');
   stage('complete');
   return {

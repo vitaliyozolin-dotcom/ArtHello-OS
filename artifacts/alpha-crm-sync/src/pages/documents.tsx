@@ -1,3 +1,5 @@
+import { apiFetch } from "@workspace/api-client-react";
+import { formatRubles } from "@workspace/shared/money";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -60,7 +62,7 @@ const AI_CONFIG: Record<string, { icon: React.ReactNode; color: string }> = {
 
 function fmt(amount: string | null) {
   if (!amount) return "—";
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(parseFloat(amount));
+  return formatRubles(parseFloat(amount));
 }
 
 function monthLabel(m: string) {
@@ -99,7 +101,7 @@ function AddDocModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
   async function save() {
     setLoading(true);
     try {
-      await fetch("/api/documents", {
+      await apiFetch("/api/documents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -264,7 +266,7 @@ export default function DocumentsPage() {
 
   const { data: summary, isLoading: summaryLoading } = useQuery<DocSummary>({
     queryKey: ["docs-summary"],
-    queryFn: () => fetch("/api/documents/summary").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/documents/summary").then((r) => r.json()),
   });
 
   const { data: docs = [], isLoading } = useQuery<DocRecord[]>({
@@ -274,17 +276,17 @@ export default function DocumentsPage() {
       if (period) params.set("period", period);
       if (docType) params.set("docType", docType);
       if (status) params.set("status", status);
-      return fetch(`/api/documents?${params}`).then((r) => r.json());
+      return apiFetch(`/api/documents?${params}`).then((r) => r.json());
     },
   });
 
   const aiCheckMutation = useMutation({
-    mutationFn: (id: string) => fetch(`/api/documents/${id}/ai-check`, { method: "POST" }).then((r) => r.json()),
+    mutationFn: (id: string) => apiFetch(`/api/documents/${id}/ai-check`, { method: "POST" }).then((r) => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["documents"] }),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => fetch(`/api/documents/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => apiFetch(`/api/documents/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["documents"] });
       qc.invalidateQueries({ queryKey: ["docs-summary"] });
@@ -294,7 +296,7 @@ export default function DocumentsPage() {
   async function aiCheckAll() {
     setAiCheckingAll(true);
     try {
-      await fetch("/api/documents/ai-check-all", { method: "POST" });
+      await apiFetch("/api/documents/ai-check-all", { method: "POST" });
       qc.invalidateQueries({ queryKey: ["documents"] });
       qc.invalidateQueries({ queryKey: ["docs-summary"] });
     } finally {

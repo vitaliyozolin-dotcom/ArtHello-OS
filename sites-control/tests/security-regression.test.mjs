@@ -57,7 +57,8 @@ test("A.1 security controls are explicit without claiming production readiness",
     sessionRollback,
     scopeRollback,
     accessAudit,
-    startupMigration,
+    checkedMigrationRunner,
+    migrationStateGate,
     serverEntry,
     logger,
     evotor,
@@ -76,7 +77,8 @@ test("A.1 security controls are explicit without claiming production readiness",
     readFile(resolve(projectRoot, "lib/db/rollbacks/0009_auth_security.down.sql"), "utf8"),
     readFile(resolve(projectRoot, "lib/db/rollbacks/0010_auth_scope_audit.down.sql"), "utf8"),
     readFile(resolve(projectRoot, "artifacts/api-server/src/lib/security/access-audit.ts"), "utf8"),
-    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/migrate.ts"), "utf8"),
+    readFile(resolve(projectRoot, "lib/db/scripts/checked-migration-runner.mjs"), "utf8"),
+    readFile(resolve(projectRoot, "artifacts/api-server/src/lib/migration-state-gate.ts"), "utf8"),
     readFile(resolve(projectRoot, "artifacts/api-server/src/index.ts"), "utf8"),
     readFile(resolve(projectRoot, "artifacts/api-server/src/lib/logger.ts"), "utf8"),
     readFile(resolve(projectRoot, "artifacts/api-server/src/routes/evotor.ts"), "utf8"),
@@ -99,8 +101,11 @@ test("A.1 security controls are explicit without claiming production readiness",
   assert.match(sessionRollback, /DROP TABLE IF EXISTS "auth_sessions"/);
   assert.match(scopeRollback, /DROP TABLE IF EXISTS "security_access_audit"/);
   assert.match(accessAudit, /INSERT INTO security_access_audit/);
-  assert.match(startupMigration, /startup is blocked/);
+  assert.match(checkedMigrationRunner, /verifyMigrationBundle/);
+  assert.match(checkedMigrationRunner, /Migration SHA-256 mismatch/);
+  assert.match(migrationStateGate, /SELECT hash, created_at::text/);
   assert.match(serverEntry, /process\.exit\(1\)/);
+  assert.match(serverEntry, /await assertMigrationStateReady\(\)/);
   assert.match(serverEntry, /await assertSecuritySchemaReady\(\)/);
   assert.match(logger, /sanitizeLogRecord/);
   assert.doesNotMatch(evotor, /fallback-key/);

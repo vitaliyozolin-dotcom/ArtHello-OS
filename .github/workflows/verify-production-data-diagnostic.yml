@@ -1,0 +1,67 @@
+name: Verify bounded production data diagnostic
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/check-arthello-production-data.yml'
+      - '.github/workflows/verify-production-data-diagnostic.yml'
+      - '.github/scripts/d083-*.py'
+      - '.github/scripts/test-d083-resume-candidate.py'
+      - '.github/scripts/r7-backup-runtime.py'
+      - 'scripts/production-readonly.mjs'
+      - 'scripts/production-data-consumers.py'
+      - 'scripts/run-production-readonly.sh'
+      - 'scripts/live-d1-identity.mjs'
+      - 'scripts/test/production-readonly.test.mjs'
+      - 'scripts/test/production-data-consumers.test.py'
+      - 'scripts/test/run-production-readonly.test.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/check-arthello-production-data.yml'
+      - '.github/workflows/verify-production-data-diagnostic.yml'
+      - '.github/scripts/d083-*.py'
+      - '.github/scripts/test-d083-resume-candidate.py'
+      - '.github/scripts/r7-backup-runtime.py'
+      - 'scripts/production-readonly.mjs'
+      - 'scripts/production-data-consumers.py'
+      - 'scripts/run-production-readonly.sh'
+      - 'scripts/live-d1-identity.mjs'
+      - 'scripts/test/production-readonly.test.mjs'
+      - 'scripts/test/production-data-consumers.test.py'
+      - 'scripts/test/run-production-readonly.test.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-data-diagnostic-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CHECKED_SOURCE_SHA }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Test bounded aggregates and accepted public runtime observation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$CHECKED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          node --test scripts/test/production-readonly.test.mjs
+          python3 -I scripts/test/production-data-consumers.test.py
+          python3 -I scripts/test/run-production-readonly.test.py
+          node --check scripts/production-readonly.mjs
+          bash -n scripts/run-production-readonly.sh

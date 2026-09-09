@@ -41,6 +41,8 @@ jobs:
       queue: max
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+      # Accepted R12 source: protected run34326582961 and both natural browser checks passed.
+      EXPECTED_LIVE_SOURCE_SHA: '77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed'
     steps:
       - name: Verify current main before repository execution
         env:
@@ -77,6 +79,8 @@ jobs:
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
           "$PRECHECK_NODE" --test scripts/test/production-readonly.test.mjs
+          python3 -I scripts/test/production-data-consumers.test.py
+          python3 -I scripts/test/run-production-readonly.test.py
           bash -n scripts/run-production-readonly.sh
 
       - name: Observe bounded aggregates from read-only volume

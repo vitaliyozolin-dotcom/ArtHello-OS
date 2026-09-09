@@ -70,6 +70,14 @@ SELECT count(*) AS account_rows,
  AND s.fetched_at=(SELECT started_at FROM r)
  AND a.synced_at=(SELECT started_at FROM r)
  THEN 1 ELSE 0 END),0) AS covered_in_latest_run,
+ COALESCE(sum(CASE WHEN lower(trim(s.status)) IN ('ready','completed')
+ AND s.start_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+ AND s.end_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+ AND date(s.start_date,'+0 days')=s.start_date AND date(s.end_date,'+0 days')=s.end_date
+ AND s.start_date<=:start AND s.end_date>=:end
+ AND s.fetched_at=(SELECT started_at FROM r)
+ AND a.synced_at=(SELECT started_at FROM r)
+ THEN 1 ELSE 0 END),0) AS accounts_with_containing_statement_in_latest_run,
  COALESCE(sum(CASE WHEN s.start_date=:start AND s.end_date=:end
  AND s.transaction_count=COALESCE(tx.n,0) THEN 1 ELSE 0 END),0) AS accounts_with_matching_transaction_count
 FROM a LEFT JOIN ranked s ON s.rn=1 AND s.connection_id=a.connection_id
@@ -105,7 +113,8 @@ FROM t LEFT JOIN financial_operations f ON f.id=t.financial_operation_id;`,
 };
 const bankCountFields = {
   coverage: ['account_rows', 'distinct_account_keys', 'legal_entities', 'invalid_account_keys',
-    'accounts_with_statement', 'covered_in_latest_run', 'accounts_with_matching_transaction_count'],
+    'accounts_with_statement', 'covered_in_latest_run', 'accounts_with_containing_statement_in_latest_run',
+    'accounts_with_matching_transaction_count'],
   transactions: ['transaction_rows', 'eligible_rows', 'income_rows', 'expense_rows',
     'eligible_missing_links', 'dangling_links', 'pending_or_non_rub', 'unexpected_account_rows'],
   duplicates: ['duplicate_external_identity_groups', 'excess_rows', 'missing_identity_rows'],

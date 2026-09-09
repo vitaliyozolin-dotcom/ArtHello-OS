@@ -1,3 +1,5 @@
+import { apiFetch } from "@workspace/api-client-react";
+import { formatRubles } from "@workspace/shared/money";
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -264,11 +266,7 @@ const ALL_DEPARTMENTS = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "RUB",
-    maximumFractionDigits: 0,
-  }).format(n);
+  return formatRubles(n);
 }
 
 function fmtCompact(n: number): string {
@@ -548,7 +546,7 @@ function ClassificationEditor({
 
   const mutation = useMutation({
     mutationFn: (body: object) =>
-      fetch(`/api/employees/${employee.id}/classification`, {
+      apiFetch(`/api/employees/${employee.id}/classification`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -913,7 +911,7 @@ function EmployeeCard({
   const { data, isLoading } = useQuery<EmployeeDetail>({
     queryKey: ["employee-detail", employeeId, month],
     queryFn: () =>
-      fetch(`/api/employees/${employeeId}?month=${month}`).then((r) => r.json()),
+      apiFetch(`/api/employees/${employeeId}?month=${month}`).then((r) => r.json()),
   });
 
   const [addRuleOpen, setAddRuleOpen] = useState(false);
@@ -923,7 +921,7 @@ function EmployeeCard({
 
   const addRuleMutation = useMutation({
     mutationFn: (body: object) =>
-      fetch("/api/employees/payroll-rules", {
+      apiFetch("/api/employees/payroll-rules", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -1452,7 +1450,7 @@ function AddEmployeeModal({
 
   const mutation = useMutation({
     mutationFn: (body: object) =>
-      fetch("/api/employees", {
+      apiFetch("/api/employees", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -2007,7 +2005,7 @@ function ResponsibilityTab() {
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<ResponsibilityAudit>({
     queryKey: ["responsibility-audit"],
-    queryFn: () => fetch("/api/educational-units/responsibility-audit").then(r => r.json()),
+    queryFn: () => apiFetch("/api/educational-units/responsibility-audit").then(r => r.json()),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -2268,7 +2266,7 @@ export function EmployeesPage() {
 
   const populateMutation = useMutation({
     mutationFn: () =>
-      fetch("/api/employees/populate-from-crm-teachers", { method: "POST" }).then((r) => r.json()),
+      apiFetch("/api/employees/populate-from-crm-teachers", { method: "POST" }).then((r) => r.json()),
     onSuccess: (data: PopulateResult) => {
       setPopulateResult(data);
       qc.invalidateQueries({ queryKey: ["employees"] });
@@ -2278,7 +2276,7 @@ export function EmployeesPage() {
 
   const classifyMutation = useMutation({
     mutationFn: () =>
-      fetch("/api/employees/classify", { method: "POST" }).then((r) => r.json()),
+      apiFetch("/api/employees/classify", { method: "POST" }).then((r) => r.json()),
     onSuccess: (data: ClassifyResult) => {
       setClassifyResult(data);
       qc.invalidateQueries({ queryKey: ["employees"] });
@@ -2288,7 +2286,7 @@ export function EmployeesPage() {
 
   const { data: departments = [] } = useQuery<Department[]>({
     queryKey: ["departments"],
-    queryFn: () => fetch("/api/departments").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/departments").then((r) => r.json()),
   });
 
   const params = new URLSearchParams({ month });
@@ -2300,12 +2298,12 @@ export function EmployeesPage() {
 
   const { data: employees = [], isLoading } = useQuery<Employee[]>({
     queryKey: ["employees", month, department, status, employmentType, search, showExcluded],
-    queryFn: () => fetch(`/api/employees?${params}`).then((r) => r.json()),
+    queryFn: () => apiFetch(`/api/employees?${params}`).then((r) => r.json()),
   });
 
   const { data: stats } = useQuery<Stats>({
     queryKey: ["employees-stats"],
-    queryFn: () => fetch("/api/employees/stats").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/employees/stats").then((r) => r.json()),
   });
 
   const totalRevenue = employees.reduce((s, e) => s + (e.revenueRub ?? 0), 0);

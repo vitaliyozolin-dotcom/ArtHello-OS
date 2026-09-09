@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { normalizePhone } from "@workspace/shared/normalize-phone";
+import { sha256Hex } from "@workspace/shared/sha256";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { PGlite } from "@electric-sql/pglite";
@@ -60,9 +61,7 @@ function stableJson(value: unknown): string {
   return JSON.stringify(stableValue(value));
 }
 
-function sha256(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
+const sha256 = sha256Hex;
 
 function firstString(value: unknown): string | null {
   if (Array.isArray(value)) {
@@ -134,20 +133,6 @@ function providerTimestamp(value: unknown): string | null {
     : `${normalized}+03:00`;
   const parsed = new Date(withTimezone);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-}
-
-function normalizePhone(value: unknown): string | null {
-  const raw = firstString(value);
-  if (!raw) return null;
-  const digits = raw.replace(/\D/g, "");
-  if (
-    digits.length === 11 &&
-    (digits.startsWith("7") || digits.startsWith("8"))
-  ) {
-    return `+7${digits.slice(1)}`;
-  }
-  if (digits.length === 10) return `+7${digits}`;
-  return digits ? `+${digits}` : null;
 }
 
 function listItems(value: unknown): JsonRecord[] {

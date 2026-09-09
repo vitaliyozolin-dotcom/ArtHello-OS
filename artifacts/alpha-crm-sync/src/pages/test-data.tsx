@@ -1,3 +1,4 @@
+import { apiFetch } from "@workspace/api-client-react";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -37,13 +38,13 @@ export default function TestDataPage() {
 
   const { data: status, isLoading: statusLoading, refetch } = useQuery<TestDataStatus>({
     queryKey: ["test-data-status"],
-    queryFn: () => fetch("/api/test-data/status").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/test-data/status").then((r) => r.json()),
     refetchInterval: 5000,
   });
 
   const seedMutation = useMutation({
     mutationFn: () =>
-      fetch("/api/test-data/seed", { method: "POST" }).then((r) => r.json()),
+      apiFetch("/api/test-data/seed", { method: "POST" }).then((r) => r.json()),
     onSuccess: (data) => {
       setSeedResult(data.seeded);
       setDeleteResult(null);
@@ -57,7 +58,7 @@ export default function TestDataPage() {
 
   const deleteMutation = useMutation({
     mutationFn: () =>
-      fetch("/api/test-data", { method: "DELETE" }).then((r) => r.json()),
+      apiFetch("/api/test-data", { method: "DELETE" }).then((r) => r.json()),
     onSuccess: (data) => {
       setDeleteResult(data.deleted);
       setSeedResult(null);

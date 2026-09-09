@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -45,6 +46,93 @@ export function inspectBrowserImage(value, imageId, sourceSha) {
   };
 }
 
+// Supplemental D074 evidence for the one D079 predecessor only. Observation
+// never changes the prerequisite verdict and does not authorize image removal.
+const retirementId = 'sha256:0763e7e6404c4ecf19b81bdcc236dd815a0210e9bb6b087adec279692cc7701c';
+const retirementSource = '5385090d48f4dae29c314dff7ae974d854560940';
+const retirementTag = 'arthello-e2e:' + retirementSource;
+const retirementFingerprint = '5970abba2518f5fc1f3bb27ef2624570e8050cbc606a3cb300f596031c26564e';
+const ownDigestPattern = /^arthello-e2e@sha256:[a-f0-9]{64}$/;
+const metadataType = value => value === undefined ? 'missing' : value === null ? 'null' : Array.isArray(value) ? 'array' : 'other';
+const readOptions = () => ({ timeout: 8000, maxBuffer: 1024 * 1024, env: { PATH: process.env.PATH } });
+
+function retirementMetadataFingerprint(value) {
+  const filter = fileURLToPath(new URL('../deploy/v52/maintenance/image-runtime-fingerprint.jq', import.meta.url));
+  const canonical = execFileSync('jq', ['-cS', '-f', filter], {
+    ...readOptions(), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], input: JSON.stringify([value]),
+  });
+  return createHash('sha256').update(canonical).digest('hex');
+}
+
+function projectRetirementMetadata(value, fingerprint) {
+  const config = value.Config;
+  const labels = config?.Labels;
+  const checks = {
+    idMatches: value.Id === retirementId,
+    sourceMatches: labels?.['org.opencontainers.image.revision'] === retirementSource,
+    roleMatches: labels?.['org.arthello.role'] === 'e2e-browser',
+    userMatches: config?.User === '1000:1000',
+    osMatches: value.Os === 'linux',
+    architectureMatches: value.Architecture === 'amd64',
+    entrypointMatches: JSON.stringify(config?.Entrypoint) === JSON.stringify(['node', '/opt/arthello-e2e/run.mjs']),
+  };
+  const tags = value.RepoTags;
+  const digests = value.RepoDigests;
+  const ownDigests = Array.isArray(digests) ? digests.filter(item => typeof item === 'string'
+    && item.length === 84 && ownDigestPattern.test(item)) : [];
+  let fingerprintResult;
+  try {
+    const digest = fingerprint(value);
+    if (typeof digest !== 'string' || digest.length !== 64 || !/^[a-f0-9]{64}$/.test(digest)) throw Error();
+    fingerprintResult = { status: 'computed', matches: digest === retirementFingerprint };
+  } catch {
+    fingerprintResult = { status: 'unavailable', matches: null };
+  }
+  return {
+    status: 'observed', checks,
+    repoTags: {
+      type: metadataType(tags), count: Array.isArray(tags) ? tags.length : null,
+      expectedOnly: Array.isArray(tags) && tags.length === 1 && tags[0] === retirementTag,
+    },
+    repoDigests: {
+      type: metadataType(digests), count: Array.isArray(digests) ? digests.length : null,
+      ownRepositoryDigests: checks.idMatches ? ownDigests.slice(0, 16) : [],
+      otherCount: Array.isArray(digests) ? digests.length - ownDigests.length : null,
+      referencesTruncated: ownDigests.length > 16,
+    },
+    fingerprint: fingerprintResult,
+  };
+}
+
+export async function observeRetirementImage(dependencies = {}) {
+  const executeRead = dependencies.executeRead ?? execute;
+  const fingerprint = dependencies.fingerprint ?? retirementMetadataFingerprint;
+  const result = { byId: { status: 'unavailable' }, tagBinding: { status: 'unavailable' }, liveAcceptance: 'not_run', productionMutations: false };
+  let metadataStatus = 'unavailable';
+  try {
+    const { stdout } = await executeRead('docker', ['image', 'inspect', retirementId, '--format', '{{json .}}'], readOptions());
+    metadataStatus = 'unreadable';
+    const value = JSON.parse(stdout);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error();
+    result.byId = projectRetirementMetadata(value, fingerprint);
+  } catch {
+    result.byId = { status: metadataStatus };
+  }
+  let tagStatus = 'unavailable';
+  try {
+    // A retagged foreign image may be observed only as an ID mismatch, never as
+    // a second full configuration or a raw foreign image ID in the report.
+    const { stdout } = await executeRead('docker', ['image', 'inspect', retirementTag, '--format', '{{.Id}}'], readOptions());
+    tagStatus = 'unreadable';
+    const id = stdout.trim();
+    if (!isImage(id)) throw Error();
+    result.tagBinding = { status: 'observed', idMatches: id === retirementId };
+  } catch {
+    result.tagBinding = { status: tagStatus };
+  }
+  return result;
+}
+
 export async function probeOrigins(fetcher = fetch) {
   return Promise.all(origins.map(async ([service, origin]) => {
     try {
@@ -86,6 +174,7 @@ async function main() {
       report.browserImage = { status: 'blocked', blockers: ['browser_image_unavailable'], liveAcceptance: 'not_run' };
     }
   }
+  report.retirementImage = await observeRetirementImage();
   if (configuration.status === 'configured' && report.browserImage.status === 'inventory_match'
     && report.endpoints.length === 2 && report.endpoints.every(item => ['responding', 'redirect_not_followed'].includes(item.status))) {
     report.status = 'prerequisites_observed';

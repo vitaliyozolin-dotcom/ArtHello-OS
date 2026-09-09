@@ -1,3 +1,5 @@
+import { formatRubles } from "@workspace/shared/money";
+import { apiFetch } from "@workspace/api-client-react";
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -35,7 +37,7 @@ interface FotDashboard {
 function FotDashboardView({ month }: { month: string }) {
   const { data, isLoading } = useQuery<FotDashboard>({
     queryKey: ["fot-dashboard", month],
-    queryFn: () => fetch(`/api/staff/fot-dashboard?month=${month}`).then((r) => r.json()),
+    queryFn: () => apiFetch(`/api/staff/fot-dashboard?month=${month}`).then((r) => r.json()),
   });
 
   if (isLoading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-violet-400" /></div>;
@@ -44,7 +46,7 @@ function FotDashboardView({ month }: { month: string }) {
   const teachers = data?.teachers ?? [];
 
   function fmtRub(n: number) {
-    return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(n);
+    return formatRubles(n);
   }
 
   return (
@@ -164,7 +166,7 @@ interface Stats {
 
 function fmt(n: number | null | undefined): string {
   if (n == null) return "—";
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(n);
+  return formatRubles(n);
 }
 
 function initials(name: string | null): string {
@@ -225,7 +227,7 @@ function RateDialog({ teacher, onClose }: { teacher: Teacher; onClose: () => voi
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/staff/rates", {
+      const res = await apiFetch("/api/staff/rates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -504,7 +506,7 @@ interface PayrollReserve {
 }
 
 function fmtRub2(n: number) {
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(n);
+  return formatRubles(n);
 }
 
 // ─── Vacations Tab ────────────────────────────────────────────────────────────
@@ -517,17 +519,17 @@ function VacationsTab() {
 
   const { data: teachers } = useQuery<{ teachers: Teacher[] }>({
     queryKey: ["staff-teachers", ""],
-    queryFn: () => fetch("/api/staff/teachers").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/staff/teachers").then((r) => r.json()),
   });
 
   const { data: vacations = [], isLoading } = useQuery<Vacation[]>({
     queryKey: ["staff-vacations"],
-    queryFn: () => fetch("/api/staff/vacations").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/staff/vacations").then((r) => r.json()),
   });
 
   const { data: hrSummary } = useQuery<{ vacations: { total: number; onVacation: number; planned: number; totalDays: number } }>({
     queryKey: ["staff-hr-summary"],
-    queryFn: () => fetch("/api/staff/hr-summary").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/staff/hr-summary").then((r) => r.json()),
   });
 
   const teacherName = (crmId: string) =>
@@ -537,7 +539,7 @@ function VacationsTab() {
     if (!form.teacherCrmId || !form.startDate || !form.endDate) return;
     setAdding(true);
     try {
-      await fetch("/api/staff/vacations", {
+      await apiFetch("/api/staff/vacations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, accruedAmount: form.accruedAmount || undefined }),
@@ -685,12 +687,12 @@ function DeductionsTab({ month }: { month: string }) {
 
   const { data: teachers } = useQuery<{ teachers: Teacher[] }>({
     queryKey: ["staff-teachers", ""],
-    queryFn: () => fetch("/api/staff/teachers").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/staff/teachers").then((r) => r.json()),
   });
 
   const { data: deductions = [], isLoading } = useQuery<Deduction[]>({
     queryKey: ["staff-deductions", month],
-    queryFn: () => fetch(`/api/staff/deductions?periodMonth=${month}`).then((r) => r.json()),
+    queryFn: () => apiFetch(`/api/staff/deductions?periodMonth=${month}`).then((r) => r.json()),
   });
 
   const totalAmount = deductions.reduce((s, d) => s + parseFloat(d.amount), 0);
@@ -702,7 +704,7 @@ function DeductionsTab({ month }: { month: string }) {
     if (!form.teacherCrmId || !form.amount) return;
     setAdding(true);
     try {
-      await fetch("/api/staff/deductions", {
+      await apiFetch("/api/staff/deductions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, periodMonth: month }),
@@ -820,7 +822,7 @@ function DeductionsTab({ month }: { month: string }) {
 function ReserveTab() {
   const { data: reserve, isLoading } = useQuery<PayrollReserve>({
     queryKey: ["staff-payroll-reserve"],
-    queryFn: () => fetch("/api/staff/payroll-reserve").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/staff/payroll-reserve").then((r) => r.json()),
   });
 
   const bars = reserve ? [
@@ -904,17 +906,17 @@ export default function StaffPage() {
 
   const { data: monthsData } = useQuery<string[]>({
     queryKey: ["staff-months"],
-    queryFn: () => fetch("/api/staff/months").then((r) => r.json()),
+    queryFn: () => apiFetch("/api/staff/months").then((r) => r.json()),
   });
 
   const { data: statsData, isLoading: statsLoading } = useQuery<Stats>({
     queryKey: ["staff-stats", month],
-    queryFn: () => fetch(`/api/staff/stats?month=${month}`).then((r) => r.json()),
+    queryFn: () => apiFetch(`/api/staff/stats?month=${month}`).then((r) => r.json()),
   });
 
   const { data: teachersData, isLoading: teachersLoading } = useQuery<{ teachers: Teacher[]; month: string | null }>({
     queryKey: ["staff-teachers", month],
-    queryFn: () => fetch(`/api/staff/teachers?month=${month}`).then((r) => r.json()),
+    queryFn: () => apiFetch(`/api/staff/teachers?month=${month}`).then((r) => r.json()),
   });
 
   const teachers = teachersData?.teachers ?? [];
@@ -934,7 +936,7 @@ export default function StaffPage() {
   async function recalc() {
     setRecalcLoading(true);
     try {
-      await fetch("/api/staff/payouts/recalc", {
+      await apiFetch("/api/staff/payouts/recalc", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ month }),

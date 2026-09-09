@@ -9,14 +9,14 @@ import {
 } from "@workspace/db";
 import { eq, sql, count } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
-import crypto from "node:crypto";
+import { sha256Hex } from "@workspace/shared/sha256";
 
 export const integrationsRouter = Router();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeHash(data: string): string {
-  return crypto.createHash("sha256").update(data).digest("hex");
+  return sha256Hex(data);
 }
 
 function getGoogleAuth() {

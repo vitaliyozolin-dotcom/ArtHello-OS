@@ -919,7 +919,7 @@ test("web authentication no longer persists bearer tokens in browser storage", a
   assert.match(authRoute, /req\.is\("application\/json"\)/);
 });
 
-test("security migration is explicit and is not embedded in startup migration code", async () => {
+test("security migration is explicit and API startup contains no migration DDL", async () => {
   const sessionMigration = await readFile(
     path.join(
       workspaceDir,
@@ -927,11 +927,8 @@ test("security migration is explicit and is not embedded in startup migration co
     ),
     "utf8",
   );
-  const startupMigration = await readFile(
-    path.join(
-      artifactDir,
-      "src/lib/migrate.ts",
-    ),
+  const serverEntry = await readFile(
+    path.join(artifactDir, "src/index.ts"),
     "utf8",
   );
   const scopeMigration = await readFile(
@@ -946,26 +943,20 @@ test("security migration is explicit and is not embedded in startup migration co
   assert.match(sessionMigration, /CREATE TABLE "auth_login_attempts"/);
   assert.match(scopeMigration, /CREATE TABLE "security_access_audit"/);
   assert.match(scopeMigration, /ADD COLUMN "scope_mode"/);
-  assert.doesNotMatch(startupMigration, /CREATE TABLE IF NOT EXISTS auth_sessions/);
+  assert.doesNotMatch(serverEntry, /runMigrations|CREATE TABLE|ALTER TABLE|DROP TABLE/);
 });
 
-test("migration failure aborts startup before listener and polling", async () => {
-  const startupMigration = await readFile(
-    path.join(artifactDir, "src/lib/migrate.ts"),
-    "utf8",
-  );
+test("migration assertion failure aborts startup before listener and polling", async () => {
   const serverEntry = await readFile(
     path.join(artifactDir, "src/index.ts"),
     "utf8",
   );
 
-  assert.match(startupMigration, /startup is blocked/);
-  assert.match(startupMigration, /throw err/);
-  assert.match(serverEntry, /await runMigrations\(\)/);
+  assert.match(serverEntry, /await assertMigrationStateReady\(\)/);
   assert.match(serverEntry, /await assertSecuritySchemaReady\(\)/);
   assert.match(serverEntry, /process\.exit\(1\)/);
   assert.ok(
-    serverEntry.indexOf("await runMigrations()") <
+    serverEntry.indexOf("await assertMigrationStateReady()") <
       serverEntry.indexOf("await assertSecuritySchemaReady()"),
   );
   assert.ok(

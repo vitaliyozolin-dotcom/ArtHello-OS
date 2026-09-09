@@ -139,6 +139,7 @@ test('bank aggregate: all four current statements and booked links pass only bou
     const result = inspectDatabase(db, bankOptions);
     assert.deepEqual(result.bankWindow.period, { startDate: '2026-09-01', endDate: '2026-09-09' });
     assert.equal(result.bankWindow.coverage.coveredInLatestRun, 4);
+    assert.equal(result.bankWindow.coverage.accountsWithContainingStatementInLatestRun, 4);
     assert.equal(result.bankWindow.coverage.accountsWithMatchingTransactionCount, 4);
     assert.equal(result.bankWindow.transactions.incomeRows, 1);
     assert.equal(result.bankWindow.transactions.expenseRows, 1);
@@ -165,6 +166,67 @@ test('bank aggregate: latest pending, failed, review or unknown outcomes cannot 
       assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
     } finally { db.close(); }
   }
+});
+
+test('bank aggregate: a broader current statement is visible without satisfying exact-window checks', () => {
+  const db = bankFixture({ complete: true });
+  db.exec("UPDATE bank_statement_imports SET start_date='2026-01-01'");
+  try {
+    const result = inspectDatabase(db, bankOptions);
+    assert.equal(result.bankWindow.coverage.accountsWithContainingStatementInLatestRun, 4);
+    assert.equal(result.bankWindow.coverage.coveredInLatestRun, 0);
+    assert.equal(result.bankWindow.coverage.accountsWithMatchingTransactionCount, 0);
+    assert.equal(result.bankWindow.checksComplete, false);
+    assert.equal(diagnosticExitCode(result), 2);
+    assert.equal(result.liveAcceptance, 'not_run');
+    assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+  } finally { db.close(); }
+});
+
+test('bank aggregate: containing coverage rejects partial windows, unready, stale and malformed statements', () => {
+  for (const sql of [
+    "UPDATE bank_statement_imports SET start_date='2026-09-02'",
+    "UPDATE bank_statement_imports SET end_date='2026-09-08'",
+    "UPDATE bank_statement_imports SET status='Pending'",
+    "UPDATE bank_statement_imports SET fetched_at='2026-09-09T10:00:00.000Z'",
+    "UPDATE bank_accounts SET synced_at='2026-09-09T10:00:00.000Z'",
+    "UPDATE integration_sync_runs SET started_at='2026-09-09T11:30:00.000Z',finished_at='2026-09-09T11:30:00.000Z'",
+    "UPDATE bank_statement_imports SET start_date='0000-PRIVATE'",
+    "UPDATE bank_statement_imports SET end_date='9999-PRIVATE'",
+    "UPDATE bank_statement_imports SET start_date='2026-02-30'",
+    "UPDATE bank_statement_imports SET end_date='2026-09-31'",
+    "UPDATE bank_statement_imports SET start_date='2026-01-01T00:00:00Z'",
+    "UPDATE bank_statement_imports SET end_date='2026-09-09T00:00:00Z'",
+    "UPDATE bank_statement_imports SET start_date=NULL",
+    "UPDATE bank_statement_imports SET end_date=NULL",
+  ]) {
+    const db = bankFixture({ complete: true });
+    db.exec("UPDATE bank_statement_imports SET start_date='2026-01-01'");
+    db.exec(sql);
+    try {
+      const result = inspectDatabase(db, bankOptions);
+      assert.equal(result.bankWindow.coverage.accountsWithContainingStatementInLatestRun, 0);
+      assert.equal(result.bankWindow.coverage.coveredInLatestRun, 0);
+      assert.equal(result.bankWindow.checksComplete, false);
+      assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+    } finally { db.close(); }
+  }
+});
+
+test('bank aggregate: containing coverage never falls back behind a newer partial statement', () => {
+  const db = bankFixture({ complete: true });
+  db.exec(`
+    UPDATE bank_statement_imports SET start_date='2026-01-01';
+    INSERT INTO bank_statement_imports VALUES('PRIVATE-NEWER','INT-T-TOCHKA','PRIVATE-ENTITY','PRIVATE-ACCOUNT-3',
+      '2026-09-02','2026-09-09','Ready',0,'2026-09-09T11:30:00.000Z');
+  `);
+  try {
+    const result = inspectDatabase(db, bankOptions);
+    assert.equal(result.bankWindow.coverage.accountsWithContainingStatementInLatestRun, 3);
+    assert.equal(result.bankWindow.coverage.coveredInLatestRun, 0);
+    assert.equal(result.bankWindow.checksComplete, false);
+    assert.equal(JSON.stringify(result).includes('PRIVATE'), false);
+  } finally { db.close(); }
 });
 
 test('bank aggregate: freshness is explicit and stale or future successful timestamps cannot pass', () => {

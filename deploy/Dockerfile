@@ -10,7 +10,8 @@ FROM node:24-bookworm-slim AS api
 ENV NODE_ENV=production PORT=8080
 WORKDIR /app
 COPY --from=build /app /app
-RUN test -x /app/lib/db/node_modules/.bin/drizzle-kit \
+RUN test -r /app/lib/db/scripts/checked-migration-runner.mjs \
+    && test -r /app/lib/db/migration-manifest.json \
     && chmod 0555 /app/deploy/api-entrypoint.sh
 USER node
 EXPOSE 8080

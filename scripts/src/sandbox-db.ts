@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Hex } from "@workspace/shared/sha256";
 import { readdir, readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,9 +9,7 @@ const workspaceRoot = resolve(
 );
 const migrationsDirectory = resolve(workspaceRoot, "lib/db/drizzle");
 
-function sha256(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
+const sha256 = sha256Hex;
 
 function isWithin(parent: string, candidate: string): boolean {
   const path = relative(parent, candidate);

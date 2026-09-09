@@ -107,7 +107,7 @@ pnpm run dev
 
 ## Запуск API
 
-Текущий `artifacts/api-server/src/index.ts` вызывает `runMigrations()`, затем `assertSecuritySchemaReady()`, и только потом `listen()`. Ошибка migration, отсутствующий auth/audit column/index или несовпадение timestamp+hash migrations `0009–0010` останавливают listener и polling с кодом 1. Это подтверждалось unit/source regression tests и controlled rollback/fail-closed процессом на одноразовом PostgreSQL 16; каждый candidate обязан повторить тот же CI gate на exact PR head. Против production `DATABASE_URL` запуск запрещён.
+Production entrypoint запускает `lib/db/scripts/checked-migration-runner.mjs`: до подключения он сверяет все SQL с `migration-manifest.json`, затем принимает только точный префикс ledger и применяет оставшиеся checked-in миграции последовательно в транзакциях. После этого `artifacts/api-server/src/index.ts` выполняет read-only `assertMigrationStateReady()`, затем `assertSecuritySchemaReady()`, и только потом `listen()`. Изменённый/незарегистрированный SQL, ошибка migration, отсутствующий auth/audit column/index или несовпадение ledger останавливают listener и polling с кодом 1. Runtime `drizzle-kit`, package manager, codegen и legacy `migrate.ts` запрещены. Каждый candidate обязан повторить CI gate на exact PR head; против production `DATABASE_URL` запуск без отдельного разрешения D-009 запрещён.
 
 Новый auth runtime требует migration `0009_famous_ma_gnuci.sql`, а session scope и access audit — `0010_outstanding_cargill.sql`. Обе прошли apply/rollback на одноразовом PostgreSQL 16 CI и не применялись к production. Нельзя выпускать auth-код до проверки `backup → restore → apply → session/CSRF/scope/audit smoke → rollback` на восстановленной репрезентативной sandbox-копии.
 
@@ -208,3 +208,53 @@ Production backup пока не выполнялся: доступ отсутс�
 5. определить затронутые данные и временной интервал;
 6. зафиксировать инцидент и remediation;
 7. не возобновлять синхронизацию до проверки.
+
+## D081 — Продолжение защищённого выпуска кандидата
+
+Этот раздел относится только к R9/PR377 и D081; исторические запреты/описания других выпусков не переиспользуются как актуальная инструкция.
+
+При отказе до candidate auth boundary действует прежний проверенный pre-public rollback. После boundary не восстанавливать snapshot, не удалять candidate/rollback volume и не открывать непроверенный public route. Штатные auth/SSO записи ArtHello и независимое состояние School сохраняются.
+
+Если protected job завершился с проверенным candidate-maintenance hold marker, current main/source не изменился и public/bank activation не начинались, допустим только защищённый rerun failed jobs этого же run. Controller заново проверяет предыдущий job graph, durable context, оригинальные routes/nonce/School repair, exact runtime/volumes/networks/mounts/backup; затем продолжает полный candidate browser и public activation. Файлы продолжения должны переживать очистку RUNNER_TEMP. Смена source, неизвестный route/state или начавшийся public marker блокируют этот путь.
+
+Если условие продолжения не выполнено, требуется конкретный новый проверенный forward-fix с сохранением текущей БД. Не использовать старые R1–R8, ручную подмену receipt, смену роли сотрудника, отключение sandbox или snapshot restore для обхода отказа. Разрешение на исходный выпуск уже предоставлено владельцем; новое общее согласование не заменяет техническую проверку.
+
+Результат считать готовым только после actual candidate PASS, публичного повторного прохода и исходной бизнес-приёмки. Успешный локальный тест/CI или ручной вход владельца не являются таким результатом.
+
+Уточнение идентичности 2026-09-09: пока кандидат PR377 проходил проверки, main обновился с 582edaf1a66a953edb2d61e03040d1a13e70a0ad до 59372b139fb0b2345cf3e41fc23c8223099b187f (checked PostgreSQL migrations), заняв D-080. Решению этого выпуска присвоен следующий свободный номер D-081. Технические имена файлов d080-*, схемы и маркеры ARTHELLO_D080 сохранены как неизменённые идентификаторы проверенного протокола; они относятся к D-081 и не запускают миграции PostgreSQL. Префикс активации нового выпуска — D081: guarded R9. Все изменения другого участника сохранены; R9 собирает отдельный v52 runtime с D1 и не выполняет deploy/api-entrypoint.sh или SQL0018.
+
+
+## D084 — R10 и штатный домен общего шлюза
+
+R10/PR379 продолжает D081 только после доказанного pre-auth abort R9 и D083 read-only причины. Frozen R9 не перевзводить. Перед маршрутизацией получить private gateway evidence из конкретного Caddy; не подставлять домен в реальный Caddyfile. Этот файл привязан к durable context/receipt, его нельзя пересоздавать для обхода отказа. При смене gateway ID/image/domain/main config продолжение блокируется.
+
+До нового import допускается только точный unused recoverable R9 browser image из DECISIONS D084, без force/prune и без application image/volume удаления. Capacity проверяется после этого штатно.
+
+Сохранены полный runtime/route/hash/backup/current-main gates и порядок maintenance → real candidate browser → public → повторный browser. Если same-source R10 остановился после auth с проверенным maintenance hold и до public/bank activation, разрешён только предусмотренный controller rerun failed jobs с новой проверкой всех evidence. Неизвестный исход или public boundary требуют отдельного проверенного forward-fix с текущей БД; snapshot restore и подмена receipt запрещены. Результат не считать готовым до всей исходной бизнес-приёмки.
+
+
+## D085 / R11: продолжение после pre-auth cleanup failure R10
+
+Run34322039891/job102371510204 остановился после Caddy134 PASS и ARTHELLO_TARGET_CADDY_FIXTURE=VERIFIED на удалении test-fixtures. Не повторять R10 как новый кандидат и не считать fixture PASS выпуском. В R11 используется новый helper, который перед удалением возвращает право записи только собственным обычным каталогам текущего fixture; частичная подготовка допускается, подмена/symlink запрещены.
+
+R11 PR380/префикс `D085: guarded R11`/parent2e57dd22 запускается после exact CI с дополнительным d085-candidate-tests. Frozen R10/R9/V52 и D083 state/browser/backup/public протоколы не редактируются. Новый guard доказывает полный R10 pre-auth abort; fresh capacity и прежний точный R9 retirement остаются, удаление иных образов не добавляется. Изменять main во время protected run нельзя. При held-candidate resume действуют все прежние identity/runtime/route/backup проверки; после auth/public rollback snapshot не допускается. Результат принимать только по реальным evidence шагов; все исходные бизнес-проверки вести отдельно.
+
+
+## D086 / R12: ёмкость после R11 pre-import abort
+
+R11 run34324235442/job102378379405 завершился insufficient_import_space/exit2 до download/import, при5807140KiB свободно против7995084KiB необходимо. Его replay доказательство закрепляет весь граф и отсутствие поздних шагов. R12 PR381/префикс D086: guarded R12/parent e579a20a сохраняет старые workflows и Quality; отдельный Verify ArtHello R12 continuation с d086-candidate-tests обязателен по exact main вместе с прежними gates.
+
+Новый helper deploy/browser/retire-r10-images.mjs не принимает CLI targets и может удалить только immutable unused R10 browser44ef654e после повторных source/tag/role/UID/fingerprint/no-consumer/current-main/recovery-artifact проверок. Application image не является целью. Подмена/ошибка/consumer/истёкший artifact — blocked. После удаления или доказанного отсутствия новый замер обязан удовлетворить прежнюю capacity с резервом2GiB; иначе остановка до archive download. Дальнейший исходный capacity step также остаётся обязательным. Main во время protected run не менять. Full authority/target/evidence: DECISIONS D086.
+
+Не возвращать отклонённую mutable-tag очистку application image, не понижать reserve, не подменять новый browser старым. Не выдавать освобождённое место за принятый выпуск. Требуются фактические candidate и post-public browser outcomes, backup evidence и отдельная исходная бизнес-приёмка. До actual accepted live source банковский PR371 и visual runtime pin остаются закрытыми.
+
+## D087 / PR371 — Счётчики банка после accepted public release
+
+1. Дождаться terminal outcome защищённого выпуска и проверить фактические candidate/post-public browser, public runtime и backup evidence. Не менять main во время protected run. Accepted source заполняется только по этой связке: `77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed` / tree `ac3fcaac06acf33bf9ee32e438d0c040adb38fd7` / image `sha256:5a39c36001cb79abe6d0bc8d691275b58cdec5456e7d13d95fc717eba6702284`, release run `34326582961`, deploy `102386111240`, outcome `success`; evidence [R12 protected release](https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34326582961). Если факт не подтверждён, `EXPECTED_LIVE_SOURCE_SHA: ''` остаётся пустым.
+2. Обновить PR371 от свежего main, сохранить исторические документы и Quality, проверить номер D087. Перенести только рассмотренные шесть code/test overlays и две workflow proposals. В PR заменить устаревшие 23 tests на ранее подтверждённые 57: 26 aggregate, 27 metadata/consumer, 4 launcher. Это локальная история проверки; для rebased PR-head/main нужны собственные exact-source hosted evidence. Повторять локальные тесты при конкретно изменившейся зависимости или коде, не вместо проверки provenance.
+3. Закрепить `EXPECTED_LIVE_SOURCE_SHA` за фактически принятым приложением. `CHECKED_SOURCE_SHA` оставить значением из события для кода диагностики. Исправить устаревший комментарий workflow о R10 на актуальное основание. Не подставлять диагностический merge SHA как live source: этот PR не публикует приложение.
+4. Сохранить owner/repository restrictions, первый attempt successful Quality push-main, `production-ru`, обе блокировки `gateway-38-55-arthello-production` и `school-1-11-production`. Merge title обязан начинаться **`D075: read-only production data`**; номер решения D087 не заменяет технический trigger. Hosted workflow называется `Verify bounded production data diagnostic`; protected job повторяет целевые тесты и проверяет current main перед исполнением checkout.
+5. В protected job runtime observer должен подтвердить точное опубликованное приложение и его штатный R7 backup worker, immutable image/source/tree, приватный контекст и текущий public route. Затем проверяются активная D1 и ограниченный UID1000 helper с read-only/no-copy volume, без сети, secrets или RW mount. Неизвестное состояние, дополнительный работающий consumer, несовпадение выборки после probe или deadline блокируют завершение. Удаляется только собственный временный helper.
+6. Сохранить безопасные `READONLY_LIVE_SOURCE`, `READONLY_IMAGE`, `observedAtUtc`, JSON status и фактический terminal outcome. `READONLY_BACKUP=exact_readonly_consumer_history_not_verified` сообщает только о допустимом worker. `READONLY_FINISHED=aggregate_observation_not_live_acceptance` и `bounded_checks_complete` не заменяют исходную бизнес-приёмку. При `incomplete_or_issues`/blocked сохранить фиксированную причину; не исправлять её resync/SQL writes в диагностическом job.
+7. Интерпретировать счётчики по фактическому периоду `2026-09-01`…UTC-дата наблюдения. `accountsWithContainingStatementInLatestRun` показывает включение периода последней готовой выпиской, но не заменяет точное окно и совпадение количества операций. Четыре содержащие выписки сами по себе не дают `checksComplete`. Production launcher не передаёт `syncNotBefore`; `freshness=not_requested` оставляет fresh-resync proof открытым. Суммы, ДДС, банковская полнота и финансовое соответствие не проверяются.
+8. После отчёта дополнить acceptance note и PR evidence index действительными source/run/time/counts и следующим проверяемым шагом. Продолжить отдельную сверку денег/ДДС и остальные исходные бизнес-сценарии в их разрешённых границах. Браузерный PASS, выборочный AlfaCRM, обращения, роли и manual/automatic backup доказательства учитывать раздельно по фактическим результатам.

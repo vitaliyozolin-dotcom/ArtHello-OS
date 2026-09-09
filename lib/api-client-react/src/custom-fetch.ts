@@ -1,3 +1,5 @@
+import { readCsrfCookie } from "@workspace/shared/csrf";
+
 export type CustomFetchOptions = RequestInit & {
   responseType?: "json" | "text" | "blob" | "auto";
 };
@@ -79,23 +81,6 @@ function resolveUrl(input: RequestInfo | URL): string {
   return input.url;
 }
 
-function readCsrfCookie(): string | null {
-  if (typeof document === "undefined") return null;
-  const names = ["__Host-arthello_csrf", "arthello_csrf"];
-
-  for (const name of names) {
-    const prefix = `${name}=`;
-    const match = document.cookie
-      .split(";")
-      .map((entry) => entry.trim())
-      .find((entry) => entry.startsWith(prefix));
-    if (match) {
-      return decodeURIComponent(match.slice(prefix.length));
-    }
-  }
-  return null;
-}
-
 function mergeHeaders(...sources: Array<HeadersInit | undefined>): Headers {
   const headers = new Headers();
 
@@ -107,6 +92,24 @@ function mergeHeaders(...sources: Array<HeadersInit | undefined>): Headers {
   }
 
   return headers;
+}
+
+export async function apiFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  const method = resolveMethod(input, init.method);
+  const headers = mergeHeaders(isRequest(input) ? input.headers : undefined, init.headers);
+  if (!SAFE_METHOD.has(method) && !headers.has("x-csrf-token")) {
+    const csrfToken = readCsrfCookie();
+    if (csrfToken) headers.set("x-csrf-token", csrfToken);
+  }
+  return fetch(applyBaseUrl(input), {
+    ...init,
+    method,
+    headers,
+    credentials: init.credentials ?? "same-origin",
+  });
 }
 
 function getMediaType(headers: Headers): string | null {

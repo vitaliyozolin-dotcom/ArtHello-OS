@@ -15,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@workspace/shared": "workspace:*",
     "@electric-sql/pglite": "0.3.14",
     "pg": "^8.20.0"
   },

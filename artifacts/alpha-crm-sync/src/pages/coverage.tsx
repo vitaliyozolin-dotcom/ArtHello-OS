@@ -1,3 +1,4 @@
+import { formatRubles } from "@workspace/shared/money";
 import React, { useState } from 'react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
@@ -1855,7 +1856,7 @@ function PaymentAuditPanel({ branchId }: { branchId: string }) {
   const normCount = Number(norm?.normalizedPayments ?? 0);
 
   const fmt = (n: number) => n.toLocaleString('ru-RU');
-  const fmtRub = (n: number) => new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(n);
+  const fmtRub = (n: number) => formatRubles(n);
 
   if (isLoading) return <div className="py-6 text-center text-gray-400 text-sm"><Loader2 className="inline animate-spin mr-1 w-4 h-4" />Загрузка payment audit…</div>;
   if (error) return <div className="py-4 text-red-500 text-sm">Ошибка: {String(error)}</div>;
@@ -2077,7 +2078,7 @@ function PaymentCleanupPanel({ branchId }: { branchId: string }) {
   const cleanupRan = Boolean(d?.cleanupRan);
 
   const fmt    = (n: number) => n.toLocaleString('ru-RU');
-  const fmtRub = (n: number) => new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(n);
+  const fmtRub = (n: number) => formatRubles(n);
 
   const readinessColor = readiness === 'READY' ? 'bg-green-50 border-green-200 text-green-800'
     : readiness === 'PARTIAL' ? 'bg-amber-50 border-amber-200 text-amber-800'
@@ -2855,7 +2856,7 @@ function FinalAuditReportPanel({ branchId }: { branchId: string }) {
   const warns= (d?.warnings as string[] | undefined) ?? [];
 
   const fmt    = (n: number | unknown) => Number(n).toLocaleString('ru-RU');
-  const fmtRub = (n: number | unknown) => new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(Number(n));
+  const fmtRub = (n: number | unknown) => formatRubles(Number(n));
 
   const verdictColor = (v: string | undefined) => {
     if (!v) return 'bg-gray-100 text-gray-700';

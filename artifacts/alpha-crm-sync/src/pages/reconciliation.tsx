@@ -95,7 +95,7 @@ type ImportBatch = {
 function fmt(v: string | number | null | undefined): string {
   const n = typeof v === "string" ? parseFloat(v) : (v ?? 0);
   if (isNaN(n)) return "—";
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n);
+  return formatRubleNumber(n);
 }
 
 function fmtDate(d: string | null | undefined): string {
@@ -907,3 +907,4 @@ export default function ReconciliationPage() {
     </div>
   );
 }
+import { formatRubleNumber } from "@workspace/shared/money";

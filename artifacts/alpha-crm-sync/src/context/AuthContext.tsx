@@ -1,4 +1,6 @@
+import { apiFetch } from "@workspace/api-client-react";
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { readCsrfCookie } from '@workspace/shared/csrf';
 
 interface AuthUser {
   role: 'owner' | 'accountant' | 'viewer';
@@ -28,7 +30,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const verifySession = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+      const res = await apiFetch('/api/auth/me', { credentials: 'same-origin' });
       if (!res.ok) return false;
       const data = await res.json() as AuthUser;
       setUser({ role: data.role, name: data.name, mustChangePassword: Boolean(data.mustChangePassword) });
@@ -44,7 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (loginStr: string, password: string): Promise<string | null> => {
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await apiFetch('/api/auth/login', {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ login: loginStr, password }),
@@ -60,7 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const csrfToken = readCsrfCookie();
       if (!csrfToken) return 'Защитная сессия устарела. Войдите заново.';
-      const res = await fetch('/api/auth/password', {
+      const res = await apiFetch('/api/auth/password', {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
         body: JSON.stringify({ currentPassword, newPassword }),
@@ -74,7 +76,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = () => {
     const csrfToken = readCsrfCookie();
-    fetch('/api/auth/logout', {
+    apiFetch('/api/auth/logout', {
       method: 'POST', credentials: 'same-origin',
       headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : {},
     }).catch(() => null);
@@ -85,13 +87,3 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useAuth() { return useContext(AuthContext); }
-
-function readCsrfCookie(): string | null {
-  if (typeof document === 'undefined') return null;
-  for (const name of ['__Host-arthello_csrf', 'arthello_csrf']) {
-    const prefix = `${name}=`;
-    const match = document.cookie.split(';').map((entry) => entry.trim()).find((entry) => entry.startsWith(prefix));
-    if (match) return decodeURIComponent(match.slice(prefix.length));
-  }
-  return null;
-}

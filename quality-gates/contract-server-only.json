@@ -1,0 +1,589 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "route": "DELETE /articles/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "DELETE /contracts/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "DELETE /documents/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "DELETE /educational/directions/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "DELETE /educational/groups/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "DELETE /educational/programs/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "DELETE /schedule/assignments/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "DELETE /staff/rates/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "DELETE /test-data",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /articles",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /auth/me",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /auth/users",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /banking/analytics",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /banking/oauth/callback",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /cfo/alerts",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /cfo/context",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /contractors",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /contractors/stats/summary",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /contractors/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /contracts",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /contracts/stats",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /coverage/lesson-eu-diagnostic",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /departments",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /documents",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /documents/summary",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /educational-units/group-based-metrics",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /educational-units/lesson-based-metrics",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /educational-units/responsibility-audit",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /educational/directions",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /educational/enrollments",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /educational/groups",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /educational/programs",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /educational/stats",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /employees",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /employees/attribution",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /employees/stats",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /employees/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /employees/{param}/educational-unit-links",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /employees/{param}/payroll-rules",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /employees/{param}/roles",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /front-office/channel-inbox",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /front-office/health",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /front-office/workspace",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /integrations/smsvizitka/status",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /months",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /months/{param}/status",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /people-access/readiness",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /pnl/breakdown",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /pnl/months",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /pnl/summary",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /pnl/trend",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /qa/summary",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /schedule/assignments",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /schedule/months",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /schedule/pl-by-direction",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /schedule/teacher-workload",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /staff/bonuses",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /staff/deductions",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /staff/fot-dashboard",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /staff/fot-trend",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /staff/hr-summary",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /staff/months",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /staff/payroll-reserve",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /staff/profiles",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /staff/stats",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /staff/teachers",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /staff/teachers/{param}/lessons",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /staff/vacations",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /system/db-audit",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /taxes/advisor",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /taxes/calendar",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /taxes/months",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /taxes/obligations",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /taxes/summary",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /test-data/status",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /trust-score/issues",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /trust-score/monthly",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /webhooks/website-lead",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /articles/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /auth/users/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /contractors/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /contracts/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /documents/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /educational-units/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /educational/directions/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /educational/groups/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /employees/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /employees/{param}/classification",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /employees/{param}/educational-unit-links",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /front-office/leads/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /front-office/tasks/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /schedule/assignments/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /staff/deductions/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /staff/payouts/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /staff/vacations/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "PATCH /taxes/obligations/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /articles",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /auth/login",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /auth/logout",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /auth/password",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /auth/users",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /auth/users/{param}/reset-password",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /cfo/chat",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /cfo/insights",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /contractors",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /contractors/{param}/accruals",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /contractors/{param}/documents",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /contractors/{param}/payments",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /contracts",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /departments",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /documents",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /documents/ai-check-all",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /documents/{param}/ai-check",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /educational-units/classify-from-crm-groups",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /educational-units/reclassify",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /educational/directions",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /educational/enrollments",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /educational/groups",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /educational/programs",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /employees",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /employees/classify",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /employees/exclude-non-atlas-bootstrap",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /employees/map-educational-units",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /employees/payroll-rules",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /employees/populate-from-crm-teachers",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /employees/roles",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /finance/bank/import",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /finance/bank/preview",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /front-office/conversations/{param}/notes",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /front-office/demo/seed",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /front-office/leads",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /months/{param}/close",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /months/{param}/reopen",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /people-access/apply",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /people-access/plan",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /schedule/assignments",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /staff/bonuses",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /staff/deductions",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /staff/payouts/recalc",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /staff/profiles/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /staff/rates",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /staff/vacations",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /taxes/obligations",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /taxes/reserve",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /test-data/seed",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /webhooks/smsvizitka",
+      "disposition": "document-in-openapi"
+    }
+  ]
+}
