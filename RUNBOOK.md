@@ -107,7 +107,7 @@ pnpm run dev
 
 ## Запуск API
 
-Текущий `artifacts/api-server/src/index.ts` вызывает `runMigrations()`, затем `assertSecuritySchemaReady()`, и только потом `listen()`. Ошибка migration, отсутствующий auth/audit column/index или несовпадение timestamp+hash migrations `0009–0010` останавливают listener и polling с кодом 1. Это подтверждалось unit/source regression tests и controlled rollback/fail-closed процессом на одноразовом PostgreSQL 16; каждый candidate обязан повторить тот же CI gate на exact PR head. Против production `DATABASE_URL` запуск запрещён.
+Production entrypoint запускает `lib/db/scripts/checked-migration-runner.mjs`: до подключения он сверяет все SQL с `migration-manifest.json`, затем принимает только точный префикс ledger и применяет оставшиеся checked-in миграции последовательно в транзакциях. После этого `artifacts/api-server/src/index.ts` выполняет read-only `assertMigrationStateReady()`, затем `assertSecuritySchemaReady()`, и только потом `listen()`. Изменённый/незарегистрированный SQL, ошибка migration, отсутствующий auth/audit column/index или несовпадение ledger останавливают listener и polling с кодом 1. Runtime `drizzle-kit`, package manager, codegen и legacy `migrate.ts` запрещены. Каждый candidate обязан повторить CI gate на exact PR head; против production `DATABASE_URL` запуск без отдельного разрешения D-009 запрещён.
 
 Новый auth runtime требует migration `0009_famous_ma_gnuci.sql`, а session scope и access audit — `0010_outstanding_cargill.sql`. Обе прошли apply/rollback на одноразовом PostgreSQL 16 CI и не применялись к production. Нельзя выпускать auth-код до проверки `backup → restore → apply → session/CSRF/scope/audit smoke → rollback` на восстановленной репрезентативной sandbox-копии.
 

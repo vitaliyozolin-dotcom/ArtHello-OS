@@ -1,0 +1,203 @@
+-- Explicit schema delta preserved from the retired legacy startup runner.
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "branch_id" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "lesson_id" uuid;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "lesson_alpha_id" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "raw_lesson_record_id" uuid;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "visit_alpha_id" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "visit_index" integer;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "student_alpha_id" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "student_id" uuid;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "family_id" uuid;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "group_alpha_id" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "subject_alpha_id" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "teacher_alpha_ids" jsonb;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "is_attend_raw" integer;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "visit_status_normalized" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "is_present" boolean;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "is_absent" boolean;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "absence_reason_id" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "absence_reason_name" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "absence_reason_normalized" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "commission" numeric;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "ctt_id" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "visit_note" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "lesson_date" timestamp with time zone;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "lesson_start_time" timestamp with time zone;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "lesson_end_time" timestamp with time zone;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "source_payload" jsonb;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "payload_hash" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "sync_source" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "normalization_status" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "normalization_error" text;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "created_at" timestamp with time zone;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "updated_at" timestamp with time zone;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "student_identity_id" uuid;
+ALTER TABLE "crm_attendance" ADD COLUMN IF NOT EXISTS "identity_resolution_status" text;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "subject_crm_id" text;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "teacher_crm_ids" jsonb;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "group_crm_ids" jsonb;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "time_from" timestamp with time zone;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "time_to" timestamp with time zone;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "lifecycle_status" text;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "alpha_status" text;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "source_payload_hash" text;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "visits_raw" jsonb;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "visits_count" integer;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "room_crm_id" text;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "lesson_type_id" integer;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "lesson_type_name" text;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "regular_crm_id" text;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "topic" text;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "note" text;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "customer_crm_ids" jsonb;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "created_at_crm" timestamp with time zone;
+ALTER TABLE "crm_lessons" ADD COLUMN IF NOT EXISTS "updated_at_crm" timestamp with time zone;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "source_payload_hash" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "document_date" date;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "created_at_alpha" timestamp with time zone;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "updated_at_alpha" timestamp with time zone;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "income" numeric;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "outcome" numeric;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "direction" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "payment_type_id_raw" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "payment_type_name_raw" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "payment_type_normalized" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "payer_name" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "account_raw" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "pay_item_id" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "ctt_id" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "group_alpha_id" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "is_confirmed" boolean;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "is_correction" boolean DEFAULT false;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "is_refund" boolean DEFAULT false;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "is_cancelled" boolean DEFAULT false;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "normalization_status" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "normalization_error" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "sync_source" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "student_id" uuid;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "student_identity_id" uuid;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "family_id" uuid;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "reconciliation_risk_level" text;
+ALTER TABLE "crm_payments" ADD COLUMN IF NOT EXISTS "finance_treatment_hint" text;
+ALTER TABLE "crm_students" ADD COLUMN IF NOT EXISTS "lifecycle_status" text;
+ALTER TABLE "crm_students" ADD COLUMN IF NOT EXISTS "alpha_status" text;
+ALTER TABLE "crm_students" ADD COLUMN IF NOT EXISTS "source_payload_hash" text;
+ALTER TABLE "crm_students" ADD COLUMN IF NOT EXISTS "birthdate" text;
+ALTER TABLE "crm_students" ADD COLUMN IF NOT EXISTS "guardian_name" text;
+ALTER TABLE "crm_students" ADD COLUMN IF NOT EXISTS "updated_at_crm" timestamp with time zone;
+ALTER TABLE "crm_students" ADD COLUMN IF NOT EXISTS "source" text;
+ALTER TABLE "crm_teachers" ADD COLUMN IF NOT EXISTS "lifecycle_status" text;
+ALTER TABLE "crm_teachers" ADD COLUMN IF NOT EXISTS "alpha_status" text;
+ALTER TABLE "crm_teachers" ADD COLUMN IF NOT EXISTS "source_payload_hash" text;
+ALTER TABLE "crm_teachers" ADD COLUMN IF NOT EXISTS "dob" text;
+ALTER TABLE "crm_teachers" ADD COLUMN IF NOT EXISTS "note" text;
+ALTER TABLE "crm_teachers" ADD COLUMN IF NOT EXISTS "e_date_crm" text;
+ALTER TABLE "crm_teachers" ADD COLUMN IF NOT EXISTS "custom_oklad" text;
+ALTER TABLE "crm_teachers" ADD COLUMN IF NOT EXISTS "branch_ids_crm" jsonb;
+ALTER TABLE "crm_teachers" ADD COLUMN IF NOT EXISTS "updated_at_crm" timestamp with time zone;
+CREATE INDEX IF NOT EXISTS employees_classification_status_idx ON public.employees USING btree (classification_status);
+CREATE INDEX IF NOT EXISTS employees_employee_kind_idx ON public.employees USING btree (employee_kind);
+CREATE INDEX IF NOT EXISTS employees_exclude_from_staff_analytics_idx ON public.employees USING btree (exclude_from_staff_analytics);
+CREATE INDEX IF NOT EXISTS idx_ali_branch ON public.alpha_linking_issues USING btree (branch_id);
+CREATE INDEX IF NOT EXISTS idx_ali_entity_type_bid ON public.alpha_linking_issues USING btree (entity_type, branch_id);
+CREATE INDEX IF NOT EXISTS idx_alpha_dup_branch ON public.alpha_duplicate_candidates USING btree (branch_id);
+CREATE INDEX IF NOT EXISTS idx_alpha_dup_candidate ON public.alpha_duplicate_candidates USING btree (candidate_type);
+CREATE INDEX IF NOT EXISTS idx_alpha_dup_entity ON public.alpha_duplicate_candidates USING btree (entity_type);
+CREATE INDEX IF NOT EXISTS idx_alpha_dup_status ON public.alpha_duplicate_candidates USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_alpha_issues_batch_id ON public.alpha_linking_issues USING btree (sync_batch_id);
+CREATE INDEX IF NOT EXISTS idx_alpha_issues_entity ON public.alpha_linking_issues USING btree (entity_type);
+CREATE INDEX IF NOT EXISTS idx_alpha_issues_issue_type ON public.alpha_linking_issues USING btree (issue_type);
+CREATE INDEX IF NOT EXISTS idx_alpha_raw_alpha_id ON public.alpha_raw_records USING btree (alpha_id, entity_type);
+CREATE INDEX IF NOT EXISTS idx_alpha_raw_batch_id ON public.alpha_raw_records USING btree (sync_batch_id);
+CREATE INDEX IF NOT EXISTS idx_alpha_raw_branch_id ON public.alpha_raw_records USING btree (branch_id);
+CREATE INDEX IF NOT EXISTS idx_alpha_raw_entity_type ON public.alpha_raw_records USING btree (entity_type);
+CREATE INDEX IF NOT EXISTS idx_alpha_raw_synced_at ON public.alpha_raw_records USING btree (synced_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alpha_registry_entity ON public.alpha_endpoint_registry USING btree (entity_key);
+CREATE INDEX IF NOT EXISTS idx_alpha_registry_status ON public.alpha_endpoint_registry USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_alpha_scope_active ON public.alpha_sync_scope USING btree (is_active);
+CREATE INDEX IF NOT EXISTS idx_bar_bank_tx_id ON public.bank_alpha_reconciliation_matches USING btree (bank_transaction_id);
+CREATE INDEX IF NOT EXISTS idx_bar_crm_pay_id ON public.bank_alpha_reconciliation_matches USING btree (crm_payment_id);
+CREATE INDEX IF NOT EXISTS idx_bar_match_status ON public.bank_alpha_reconciliation_matches USING btree (match_status);
+CREATE INDEX IF NOT EXISTS idx_bar_run_id ON public.bank_alpha_reconciliation_matches USING btree (run_id);
+CREATE INDEX IF NOT EXISTS idx_cp_class_ver ON public.counterparties USING btree (classification_version);
+CREATE INDEX IF NOT EXISTS idx_cp_exclude_rev ON public.counterparties USING btree (exclude_from_revenue_expense);
+CREATE INDEX IF NOT EXISTS idx_cp_needs_review ON public.counterparties USING btree (needs_manual_review);
+CREATE INDEX IF NOT EXISTS idx_crm_att_branch ON public.crm_attendance USING btree (branch_id);
+CREATE INDEX IF NOT EXISTS idx_crm_att_family ON public.crm_attendance USING btree (family_id);
+CREATE INDEX IF NOT EXISTS idx_crm_att_id_res ON public.crm_attendance USING btree (identity_resolution_status);
+CREATE INDEX IF NOT EXISTS idx_crm_att_identity ON public.crm_attendance USING btree (student_identity_id);
+CREATE INDEX IF NOT EXISTS idx_crm_att_lesson ON public.crm_attendance USING btree (lesson_id);
+CREATE INDEX IF NOT EXISTS idx_crm_att_lesson_date ON public.crm_attendance USING btree (lesson_date);
+CREATE INDEX IF NOT EXISTS idx_crm_att_status ON public.crm_attendance USING btree (visit_status_normalized);
+CREATE INDEX IF NOT EXISTS idx_crm_att_student ON public.crm_attendance USING btree (student_id);
+CREATE INDEX IF NOT EXISTS idx_crm_att_student_alpha ON public.crm_attendance USING btree (student_alpha_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_att_uniq ON public.crm_attendance USING btree (lesson_alpha_id, visit_alpha_id);
+CREATE INDEX IF NOT EXISTS idx_crm_groups_branch ON public.crm_groups USING btree (branch_crm_id);
+CREATE INDEX IF NOT EXISTS idx_crm_groups_lifecycle ON public.crm_groups USING btree (lifecycle_status);
+CREATE INDEX IF NOT EXISTS idx_crm_lessons_branch ON public.crm_lessons USING btree (branch_crm_id);
+CREATE INDEX IF NOT EXISTS idx_crm_lessons_lesson_date ON public.crm_lessons USING btree (lesson_date);
+CREATE INDEX IF NOT EXISTS idx_crm_lessons_lifecycle ON public.crm_lessons USING btree (lifecycle_status);
+CREATE INDEX IF NOT EXISTS idx_crm_lessons_subject ON public.crm_lessons USING btree (subject_crm_id);
+CREATE INDEX IF NOT EXISTS idx_crm_pay_branch ON public.crm_payments USING btree (branch_crm_id);
+CREATE INDEX IF NOT EXISTS idx_crm_pay_customer ON public.crm_payments USING btree (student_crm_id);
+CREATE INDEX IF NOT EXISTS idx_crm_pay_direction ON public.crm_payments USING btree (direction);
+CREATE INDEX IF NOT EXISTS idx_crm_pay_doc_date ON public.crm_payments USING btree (document_date);
+CREATE INDEX IF NOT EXISTS idx_crm_pay_identity ON public.crm_payments USING btree (student_identity_id);
+CREATE INDEX IF NOT EXISTS idx_crm_pay_norm_status ON public.crm_payments USING btree (normalization_status);
+CREATE INDEX IF NOT EXISTS idx_crm_pay_risk_level ON public.crm_payments USING btree (reconciliation_risk_level);
+CREATE INDEX IF NOT EXISTS idx_crm_pay_student ON public.crm_payments USING btree (student_id);
+CREATE INDEX IF NOT EXISTS idx_crm_pay_type_norm ON public.crm_payments USING btree (payment_type_normalized);
+CREATE INDEX IF NOT EXISTS idx_crm_students_branch ON public.crm_students USING btree (branch_crm_id);
+CREATE INDEX IF NOT EXISTS idx_crm_students_lifecycle ON public.crm_students USING btree (lifecycle_status);
+CREATE INDEX IF NOT EXISTS idx_crm_teachers_branch ON public.crm_teachers USING btree (branch_crm_id);
+CREATE INDEX IF NOT EXISTS idx_crm_teachers_lifecycle ON public.crm_teachers USING btree (lifecycle_status);
+CREATE INDEX IF NOT EXISTS idx_csi_alpha_cid ON public.crm_student_identities USING btree (alpha_customer_id);
+CREATE INDEX IF NOT EXISTS idx_csi_branch ON public.crm_student_identities USING btree (branch_id);
+CREATE INDEX IF NOT EXISTS idx_csi_resolution ON public.crm_student_identities USING btree (resolution_status);
+CREATE INDEX IF NOT EXISTS idx_csi_student ON public.crm_student_identities USING btree (student_id);
+CREATE INDEX IF NOT EXISTS idx_employee_roles_employee_id ON public.employee_roles USING btree (employee_id);
+CREATE INDEX IF NOT EXISTS idx_employees_department ON public.employees USING btree (primary_department);
+CREATE INDEX IF NOT EXISTS idx_employees_person_id ON public.employees USING btree (person_id);
+CREATE INDEX IF NOT EXISTS idx_employees_status ON public.employees USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_employees_teacher_crm_id ON public.employees USING btree (teacher_crm_id);
+CREATE INDEX IF NOT EXISTS idx_evotor_raw_batch ON public.evotor_raw_records USING btree (batch_id);
+CREATE INDEX IF NOT EXISTS idx_evotor_raw_entity ON public.evotor_raw_records USING btree (entity_type);
+CREATE INDEX IF NOT EXISTS idx_obligation_documents_obligation ON public.obligation_documents USING btree (obligation_id);
+CREATE INDEX IF NOT EXISTS idx_payable_obligations_bank_tx ON public.payable_obligations USING btree (linked_bank_transaction_id);
+CREATE INDEX IF NOT EXISTS idx_payable_obligations_counterparty ON public.payable_obligations USING btree (counterparty_name);
+CREATE INDEX IF NOT EXISTS idx_payable_obligations_due_date ON public.payable_obligations USING btree (due_date);
+CREATE INDEX IF NOT EXISTS idx_payable_obligations_recurring ON public.payable_obligations USING btree (related_recurring_id);
+CREATE INDEX IF NOT EXISTS idx_payable_obligations_source_type ON public.payable_obligations USING btree (source_type);
+CREATE INDEX IF NOT EXISTS idx_payable_obligations_status ON public.payable_obligations USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_payroll_rules_employee_id ON public.payroll_rules USING btree (employee_id);
+CREATE INDEX IF NOT EXISTS idx_payroll_rules_is_active ON public.payroll_rules USING btree (is_active);
+DO $preserve_legacy_employee_identity$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'uq_employees_teacher_crm_id'
+      AND conrelid = 'public.employees'::regclass
+  ) THEN
+    ALTER TABLE "employees"
+      ADD CONSTRAINT "uq_employees_teacher_crm_id" UNIQUE ("teacher_crm_id");
+  END IF;
+END $preserve_legacy_employee_identity$;
+
+DO $retire_orphan_chat$
+DECLARE
+  message_rows bigint := 0;
+  conversation_rows bigint := 0;
+BEGIN
+  IF to_regclass('public.messages') IS NOT NULL THEN
+    EXECUTE 'SELECT count(*) FROM public.messages' INTO message_rows;
+  END IF;
+  IF to_regclass('public.conversations') IS NOT NULL THEN
+    EXECUTE 'SELECT count(*) FROM public.conversations' INTO conversation_rows;
+  END IF;
+  IF message_rows <> 0 OR conversation_rows <> 0 THEN
+    RAISE EXCEPTION 'orphan chat tables contain data: messages=%, conversations=%',
+      message_rows, conversation_rows;
+  END IF;
+END $retire_orphan_chat$;--> statement-breakpoint
+DROP TABLE IF EXISTS "messages";--> statement-breakpoint
+DROP TABLE IF EXISTS "conversations";

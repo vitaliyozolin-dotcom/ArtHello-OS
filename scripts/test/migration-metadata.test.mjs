@@ -35,6 +35,7 @@ test("every migration from 0009 has a rollback companion", () => {
     "0015": "0015_front_office_internal_alpha.down.sql",
     "0016": "0016_personal_auth.down.sql",
     "0017": "0017_people_access_operator.down.sql",
+    "0018": "0018_retire_orphan_chat.down.sql",
   };
   for (const entry of journal.entries.filter(({ idx }) => idx >= 9)) {
     const prefix = String(entry.idx).padStart(4, "0");
@@ -44,4 +45,35 @@ test("every migration from 0009 has a rollback companion", () => {
       `rollback for ${entry.tag} is missing`,
     );
   }
+});
+
+test("immutable manifest matches the journal and every checked-in migration hash", async () => {
+  const { createHash } = await import("node:crypto");
+  const manifest = JSON.parse(
+    readFileSync(new URL("lib/db/migration-manifest.json", root), "utf8"),
+  );
+  assert.deepEqual(
+    manifest.migrations.map(({ tag, timestamp }) => ({ tag, timestamp })),
+    journal.entries.map(({ tag, when }) => ({ tag, timestamp: when })),
+  );
+  for (const migration of manifest.migrations) {
+    const sql = readFileSync(
+      new URL(`lib/db/drizzle/${migration.tag}.sql`, root),
+    );
+    assert.equal(
+      createHash("sha256").update(sql).digest("hex"),
+      migration.sha256,
+    );
+  }
+});
+
+test("orphan chat retirement is fail closed and cannot target live front-office tables", () => {
+  const migration = readFileSync(
+    new URL("lib/db/drizzle/0018_retire_orphan_chat.sql", root),
+    "utf8",
+  );
+  assert.match(migration, /message_rows <> 0 OR conversation_rows <> 0/);
+  assert.match(migration, /DROP TABLE IF EXISTS "messages"/);
+  assert.match(migration, /DROP TABLE IF EXISTS "conversations"/);
+  assert.doesNotMatch(migration, /DROP TABLE[^;]*front_office_/);
 });
