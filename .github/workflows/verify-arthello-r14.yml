@@ -1,0 +1,143 @@
+name: Verify ArtHello R14 continuation
+'on':
+  pull_request:
+    paths:
+    - .github/workflows/**
+    - .github/scripts/**
+    - deploy/**
+    - scripts/run-frozen-release-contract.py
+    - scripts/test/**
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/**
+    - .github/scripts/**
+    - deploy/**
+    - scripts/run-frozen-release-contract.py
+    - scripts/test/**
+permissions:
+  contents: read
+concurrency:
+  group: verify-arthello-r14-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+jobs:
+  r12-candidate-tests:
+    name: r12-candidate-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+    - name: Check out exact unprivileged R13 verification source
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ env.CHECKED_SOURCE_SHA }}
+        fetch-depth: 0
+        clean: true
+        persist-credentials: false
+        submodules: false
+        lfs: false
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: 24
+    - name: Verify archived R12 contracts with current code
+      shell: bash
+      run: 'set -Eeuo pipefail
+
+        test "$(id -u)" -ne 0
+
+        test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+
+        test "$(sha256sum deploy/v52/recovery-r12/check-contract.rb | cut -d '' '' -f 1)" = "594e30bc2adfd993e61d87aead3c1564d363c517122b8f70a63b47d276eb4b9b"
+
+        python3 -I scripts/run-frozen-release-contract.py r12
+
+        '
+  r13-candidate-tests:
+    name: r13-candidate-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+    - name: Check out exact unprivileged R13 verification source
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ env.CHECKED_SOURCE_SHA }}
+        fetch-depth: 0
+        clean: true
+        persist-credentials: false
+        submodules: false
+        lfs: false
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: 24
+    - name: Verify archived R13 contracts with current code
+      shell: bash
+      run: 'set -Eeuo pipefail
+
+        test "$(id -u)" -ne 0
+
+        test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+
+        test "$(sha256sum deploy/v52/recovery-r13/check-contract.rb | cut -d '' '' -f 1)" = "d65d1aa20817ba4d7d07aa46ae1cce71bb14297b5744ab6872bea5482fe97885"
+
+        python3 -I scripts/run-frozen-release-contract.py r13
+
+        '
+  r14-candidate-tests:
+    name: r14-candidate-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      R14_CONTRACT_SHA256: 37614beafcbf18347d2429713301699bd4c5e3474cd4f7db840dc166b4c852a3
+    steps:
+    - name: Check out exact unprivileged R14 verification source
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ env.CHECKED_SOURCE_SHA }}
+        fetch-depth: 0
+        clean: true
+        persist-credentials: false
+        submodules: false
+        lfs: false
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: 24
+    - name: Verify frozen contracts and bounded R14 continuation behavior
+      shell: bash
+      run: 'set -Eeuo pipefail
+
+        test "$(id -u)" -ne 0
+
+        [[ "$CHECKED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+
+        test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+
+        [[ "$R14_CONTRACT_SHA256" =~ ^[a-f0-9]{64}$ ]]
+
+        test "$(sha256sum deploy/v52/recovery-r14/check-contract.rb | cut -d '' '' -f 1)" = "$R14_CONTRACT_SHA256"
+
+        ruby deploy/v52/recovery-r14/check-contract.rb
+
+        python3 -I -B .github/scripts/test-r14-contract.py
+
+        python3 -I -B .github/scripts/test-r14-history-gate.py
+
+        python3 -I -B .github/scripts/test-r14-backup-adoption.py
+
+        python3 -I -B .github/scripts/test-r14-backup-controller.py
+
+        python3 -I -B .github/scripts/test-r14-continuation-adapters.py
+
+        python3 -I -B .github/scripts/test-r14-live-baseline.py
+
+        python3 -I -B .github/scripts/test-run-r14-live-browser.py
+
+        node --test scripts/test/retire-r13-browser.test.mjs
+
+        node --check deploy/browser/retire-r13-browser.mjs
+
+        '

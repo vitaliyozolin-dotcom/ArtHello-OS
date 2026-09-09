@@ -1,0 +1,185 @@
+{
+  "format": 1,
+  "basePath": "deploy/v52/recovery-r14/accepted-r13-controller.yml",
+  "baseSha256": "92b244c827af98d6944641d971f68ed92100a5d92548f59fcbf09c47644551d3",
+  "groups": [
+    {
+      "name": "common",
+      "operations": [
+        {
+          "kind": "replace",
+          "label": "release-head",
+          "count": 3,
+          "before": "codex/arthello-r13-20260909",
+          "after": "__R14_RELEASE_HEAD_NONPUBLISHABLE_UNASSIGNED__"
+        },
+        {
+          "kind": "replace",
+          "label": "release-pr-environment",
+          "count": 1,
+          "before": "EXPECTED_RELEASE_PR: '392'",
+          "after": "EXPECTED_RELEASE_PR: '__R14_RELEASE_PR_NONPUBLISHABLE_UNASSIGNED__'"
+        },
+        {
+          "kind": "replace",
+          "label": "release-pr-events",
+          "count": 2,
+          "before": "fromJSON('392')",
+          "after": "fromJSON('__R14_RELEASE_PR_NONPUBLISHABLE_UNASSIGNED__')"
+        },
+        {
+          "kind": "replace",
+          "label": "release-parent",
+          "count": 1,
+          "before": "7f398e3180fb341754c267760463dec968fc6420",
+          "after": "__R14_PARENT_SHA_NONPUBLISHABLE_UNASSIGNED__"
+        },
+        {
+          "kind": "replace",
+          "label": "current-helper-namespace",
+          "count": 30,
+          "before": "r13",
+          "after": "r14"
+        },
+        {
+          "kind": "replace",
+          "label": "current-release-namespace",
+          "count": 33,
+          "before": "R13",
+          "after": "R14"
+        },
+        {
+          "kind": "replace",
+          "label": "decision-prefix",
+          "count": 3,
+          "before": "D096",
+          "after": "D098"
+        },
+        {
+          "kind": "replace",
+          "label": "unbound-header",
+          "count": 1,
+          "before": "# D098: fresh R14 identity and accepted R12 history; canonical D076 browser protocol.\n# Exact accepted-live/School identity and adopted backup ownership precede fresh cutover.\n# Durable candidate/public/backup boundaries preserve current data on ambiguous continuation.\n# Frozen R5-R12 workflows and contracts remain unchanged.\n",
+          "after": "# NONPUBLISHABLE_R14_COMMON_ONLY: release pins and integrated review are unresolved.\n# D098 candidate; accepted R13 runtime and R12 backup service remain distinct.\n# No production authorization or business acceptance is claimed by this preview.\n# Archived R5-R13 controllers are comparison inputs only.\n"
+        },
+        {
+          "kind": "replace",
+          "label": "accepted-live-step",
+          "count": 2,
+          "before": "accepted R12 success history",
+          "after": "accepted R13 success history"
+        },
+        {
+          "kind": "replace",
+          "label": "accepted-live-baseline-step",
+          "count": 2,
+          "before": "accepted R12 baseline",
+          "after": "accepted R13 baseline"
+        },
+        {
+          "kind": "replace",
+          "label": "recoverable-browser-step",
+          "count": 3,
+          "before": "accepted R12 browser image",
+          "after": "accepted R13 browser image"
+        },
+        {
+          "kind": "replace",
+          "label": "recoverable-browser-helper",
+          "count": 1,
+          "before": "retire-r12-browser.mjs",
+          "after": "retire-r13-browser.mjs"
+        },
+        {
+          "kind": "replace",
+          "label": "legacy-gate-variable",
+          "count": 1,
+          "before": "        r12_run=\"\"\n",
+          "after": ""
+        },
+        {
+          "kind": "replace",
+          "label": "legacy-gate-folded",
+          "count": 1,
+          "before": "          if [ -z \"$r12_run\" ]; then\n            r12_run=\"$(workflow_success verify-arthello-r12.yml 'Verify ArtHello R12 continuation' 'd086-candidate-tests' || true)\"\n          fi\n",
+          "after": ""
+        },
+        {
+          "kind": "replace",
+          "label": "legacy-jobs-in-current-gate",
+          "count": 1,
+          "before": "'Verify ArtHello R14 continuation' 'r14-candidate-tests'",
+          "after": "'Verify ArtHello R14 continuation' 'r12-candidate-tests,r13-candidate-tests,r14-candidate-tests'"
+        },
+        {
+          "kind": "replace",
+          "label": "legacy-gate-conjunction",
+          "count": 1,
+          "before": " && [ -n \"$r12_run\" ]",
+          "after": ""
+        },
+        {
+          "kind": "replace",
+          "label": "legacy-gate-test",
+          "count": 1,
+          "before": "        test -n \"$r12_run\"\n",
+          "after": ""
+        },
+        {
+          "kind": "replace",
+          "label": "legacy-gate-output",
+          "count": 1,
+          "before": "        printf 'r12_run=%s\\n' \"$r12_run\" >> \"$GITHUB_OUTPUT\"\n",
+          "after": ""
+        },
+        {
+          "kind": "replace",
+          "label": "legacy-gate-summary-env",
+          "count": 1,
+          "before": "        R12_RUN: ${{ steps.provenance.outputs.r12_run }}\n",
+          "after": ""
+        },
+        {
+          "kind": "replace",
+          "label": "legacy-gate-summary-line",
+          "count": 1,
+          "before": "          echo \"- R12 regression run: $R12_RUN\"\n",
+          "after": ""
+        }
+      ]
+    },
+    {
+      "name": "backup",
+      "operations": [
+        {
+          "kind": "replace",
+          "label": "adoption-schema",
+          "count": 1,
+          "before": ".schemaVersion == 13 and .state == \"adopted\"",
+          "after": ".schemaVersion == 14 and .state == \"adopted\""
+        },
+        {
+          "kind": "replace",
+          "label": "accepted-live-container",
+          "count": 1,
+          "before": "956bc25a8e4eab6a2e14021100abd7adac42130c20e53321aeafaa01f12a6614",
+          "after": "6356740984e0c7ad1ad6a30da8bd8f5c6c0b8c268d11f35d09e5984e76c2f76e"
+        }
+      ]
+    },
+    {
+      "name": "history-live",
+      "operations": [
+        {
+          "kind": "history",
+          "label": "accepted-r13-history",
+          "start": "        history_receipt=\"$(python3 -I - <<'R14_HISTORY'\n",
+          "end": "        R14_HISTORY_RECEIPT\n",
+          "beforeSha256": "81799e0af763ee307a96f6d0b489a77fe53f30eb64e0258866defe0b3e355c0c",
+          "afterTemplate": "        history_receipt=\"$(python3 -I - <<'R14_HISTORY'\n        import hashlib\n        HELPER_LITERAL = __R14_HISTORY_BYTES_REPR__\n        FROZEN_LITERAL = __D080_FUNCTION_BYTES_REPR__\n        if hashlib.sha256(HELPER_LITERAL).hexdigest() != \"4e6214001d46e1467e5321c254928e11ab6b5cd7eb61c498d606d09cd5e20e67\":\n            raise SystemExit(\"ARTHELLO_R14_INLINE_SOURCE=BLOCKED\")\n        if hashlib.sha256(FROZEN_LITERAL).hexdigest() != \"0d579abf075cbf84c9ca92e4f39e1855843bfcad24aa14edfe6ad09287250ca9\":\n            raise SystemExit(\"ARTHELLO_R14_INLINE_SOURCE=BLOCKED\")\n        namespace = {\"__name__\": \"r14_inline\"}\n        exec(compile(HELPER_LITERAL, \"<trusted-workflow-inline>\", \"exec\"), namespace)\n        raise SystemExit(namespace[\"main\"](frozen_functions=FROZEN_LITERAL))\n        R14_HISTORY\n        )\"\n        HISTORY_RECEIPT=\"$history_receipt\" python3 -I - <<'R14_HISTORY_RECEIPT'\n        import json, os\n        def require(value):\n            if not value:\n                raise ValueError()\n        def unique(pairs):\n            value = {}\n            for key, item in pairs:\n                require(key not in value)\n                value[key] = item\n            return value\n        try:\n            raw = os.environ['HISTORY_RECEIPT']\n            require(0 < len(raw.encode('utf-8')) <= 8192)\n            value = json.loads(raw, object_pairs_hook=unique)\n            require(isinstance(value, dict) and set(value) == {\n                'schemaVersion', 'history', 'mode', 'acceptedSource', 'acceptedTree',\n                'acceptedRun', 'dataRestoreAuthorized', 'retainedRuntimeVerificationRequired'})\n            require(type(value['schemaVersion']) is int and value['schemaVersion'] == 14)\n            require(value['history'] == 'verified' and value['mode'] in ('fresh', 'resume_candidate'))\n            require(value['acceptedSource'] == 'f5fa3e46e3510e6fc98ae4455f4b499c0ba30695')\n            require(value['acceptedTree'] == '3f49b1b7c0e3ed6dfdaaafbccc071386c9b5edde')\n            require(type(value['acceptedRun']) is int and value['acceptedRun'] == 34340461537)\n            require(value['dataRestoreAuthorized'] is False)\n            resume = value['mode'] == 'resume_candidate'\n            require(value['retainedRuntimeVerificationRequired'] is resume)\n            with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as stream:\n                stream.write('R9_RESUME_CANDIDATE=' + ('1' if resume else '0') + '\\n')\n        except Exception:\n            raise SystemExit('ARTHELLO_R14_HISTORY_RECEIPT=BLOCKED') from None\n        print('ARTHELLO_R14_SUCCESS_HISTORY=VERIFIED mode=' + value['mode'])\n        R14_HISTORY_RECEIPT\n",
+          "afterSha256": "ae1f7a2572b3e568c56ba28e7513091317c31db11659b8e21785d25a8875174b"
+        }
+      ]
+    }
+  ]
+}
