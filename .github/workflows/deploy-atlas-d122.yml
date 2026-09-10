@@ -1,0 +1,181 @@
+name: Deploy Atlas diary D122
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/deploy-atlas-d122.yml
+      - deploy/activate-atlas-d122.sh
+      - scripts/test/atlas-activation-release.test.mjs
+      - DECISIONS.md
+      - CURRENT_STATE.md
+      - RUNBOOK.md
+      - docs/acceptance/2026-09-10-atlas-production-activation.md
+  workflow_run:
+    workflows: [Quality gates]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+  queue: max
+
+env:
+  ATLAS_SOURCE_SHA: 987abd5951dc4832e2c071d8744051c518bae42e
+  ATLAS_SOURCE_TREE: 1dccbd1fea14838bde0319014f7509b572b06061
+
+jobs:
+  bundle:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' && (
+        github.event_name == 'pull_request' ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.name == 'Quality gates' &&
+         github.event.workflow_run.path == '.github/workflows/quality.yml' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.repository.id == github.event.repository.id &&
+         github.event.workflow_run.head_repository.id == github.event.repository.id &&
+         startsWith(github.event.workflow_run.head_commit.message, 'D122: guarded Atlas activation'))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CONTROLLER_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+    steps:
+      - name: Check out exact controller source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CONTROLLER_SHA }}
+          path: controller
+          persist-credentials: false
+
+      - name: Check out accepted Atlas source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.ATLAS_SOURCE_SHA }}
+          path: atlas
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+
+      - name: Verify controller and immutable Atlas source
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C controller rev-parse HEAD)" = "$CONTROLLER_SHA"
+          test "$(git -C atlas rev-parse HEAD)" = "$ATLAS_SOURCE_SHA"
+          test "$(git -C atlas rev-parse HEAD^{tree})" = "$ATLAS_SOURCE_TREE"
+          bash -n controller/deploy/activate-atlas-d122.sh
+          (cd controller && node --test scripts/test/atlas-activation-release.test.mjs)
+
+      - name: Build and exercise immutable Atlas image
+        run: |
+          set -Eeuo pipefail
+          docker build \
+            --label "org.opencontainers.image.revision=$ATLAS_SOURCE_SHA" \
+            --label "org.opencontainers.image.source-tree=$ATLAS_SOURCE_TREE" \
+            --tag "atlas-diary:$ATLAS_SOURCE_SHA" atlas
+          container="atlas-d122-smoke-$GITHUB_RUN_ID"
+          data="atlas-d122-smoke-data-$GITHUB_RUN_ID"
+          backups="atlas-d122-smoke-backups-$GITHUB_RUN_ID"
+          cleanup() {
+            docker rm -f "$container" >/dev/null 2>&1 || true
+            docker volume rm "$data" "$backups" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker volume create "$data" >/dev/null
+          docker volume create "$backups" >/dev/null
+          docker run -d --name "$container" --network none --read-only \
+            --tmpfs /tmp:rw,uid=1001,gid=1001 \
+            -e PUBLIC_APP_ORIGIN=https://atlas-188-225-38-55.sslip.io \
+            -e ARTHELLO_PUBLIC_ORIGIN=https://arthello-188-225-38-55.sslip.io \
+            -e CENTRAL_ACCESS_SECRET=atlas-ci-only-key-123456789012345678901234567890 \
+            -e PASSWORDLESS_PEPPER=atlas-ci-only-pepper-1234567890123456789012345678 \
+            -v "$data:/data" -v "$backups:/backups" \
+            "atlas-diary:$ATLAS_SOURCE_SHA"
+          ready=0
+          for _ in $(seq 1 40); do
+            if docker exec "$container" node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = 1
+          docker exec "$container" node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync('/data/atlas-school.sqlite'); if(db.prepare(\"SELECT institution_id FROM diary_identity WHERE id='primary'\").get()?.institution_id!=='atlas-school')throw Error('institution'); if(db.prepare('SELECT count(*) n FROM users').get().n!==0)throw Error('users'); db.close();"
+
+      - name: Package verified Atlas image
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/atlas-d122-bundle"
+          docker save "atlas-diary:$ATLAS_SOURCE_SHA" | gzip -1 -n > "$RUNNER_TEMP/atlas-d122-bundle/atlas-image.tar.gz"
+          image_id="$(docker image inspect "atlas-diary:$ATLAS_SOURCE_SHA" --format '{{.Id}}')"
+          jq -n --arg source "$ATLAS_SOURCE_SHA" --arg tree "$ATLAS_SOURCE_TREE" --arg image "$image_id" \
+            '{sourceSha:$source,sourceTree:$tree,imageId:$image}' > "$RUNNER_TEMP/atlas-d122-bundle/receipt.json"
+          (cd "$RUNNER_TEMP/atlas-d122-bundle" && sha256sum atlas-image.tar.gz receipt.json > checksums.sha256)
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: atlas-d122-bundle
+          path: ${{ runner.temp }}/atlas-d122-bundle/
+          retention-days: 7
+          compression-level: 0
+
+  deploy:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.head_sha == github.event.workflow_run.head_commit.id &&
+      startsWith(github.event.workflow_run.head_commit.message, 'D122: guarded Atlas activation')
+    needs: bundle
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    timeout-minutes: 20
+    concurrency:
+      group: school-1-11-production
+      cancel-in-progress: false
+      queue: max
+    env:
+      CONTROLLER_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Verify current main before repository execution
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          current="$(curl --fail --silent --show-error --max-time 20 \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+          test "$current" = "$CONTROLLER_SHA"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CONTROLLER_SHA }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: atlas-d122-bundle
+          path: ${{ runner.temp }}/atlas-d122-bundle
+
+      - name: Activate Atlas and central SSO with rollback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATLAS_BUNDLE_DIR: ${{ runner.temp }}/atlas-d122-bundle
+        run: bash deploy/activate-atlas-d122.sh
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: atlas-d122-production-receipt
+          path: ${{ runner.temp }}/atlas-d122-bundle/production-receipt.json
+          if-no-files-found: ignore
+          retention-days: 30
