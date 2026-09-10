@@ -27,6 +27,9 @@ try {
       // The actual stylesheet requests these optional public fonts. Keep this
       // disposable fixture offline and exercise its normal system-font fallback.
       if(['https://fonts.googleapis.com','https://fonts.gstatic.com'].includes(url.origin)&&request.method()==='GET') {await route.abort();return;}
+      // layout.tsx resolves these optional metadata images against its fixed
+      // historical metadataBase. They stay blocked; this fixture never calls Sites.
+      if(url.origin==='https://arthello-os.ozolin.chatgpt.site'&&['/favicon.svg','/og.png'].includes(url.pathname)&&!url.search&&request.method()==='GET') {await route.abort();return;}
       assert.equal(url.origin,ORIGIN);routePhase='request_budget';assert(++requests<=500);
       method=request.method();routePhase='method';
       if(!['GET','HEAD'].includes(method)) {
@@ -75,6 +78,7 @@ try {
   await page.screenshot({path:'/evidence/desktop-articles.png',fullPage:true});
   stage='desktop_allocation';await preview('CI Обучение','9999999999','CI обучение');
   const dialog=page.getByRole('dialog');await dialog.getByRole('combobox',{name:'Статья ДДС'}).selectOption('CI Обучение');
+  assert.equal(await dialog.locator('.operation-classification-form').evaluate(e=>getComputedStyle(e).display),'grid');
   await dialog.getByRole('combobox',{name:'Класс ОПиУ'}).selectOption('Доходы ОПиУ');await dialog.getByRole('combobox',{name:'Статья ОПиУ'}).selectOption('CI Услуги');await dialog.getByLabel('Период ОПиУ',{exact:true}).fill('2026-09');
   await save(()=>dialog.getByRole('button',{name:'Сохранить разнесение',exact:true}).click());await dialog.waitFor({state:'hidden'});
   stage='reload_dds';await page.reload();await page.getByRole('tab',{name:'ДДС',exact:true}).click();
@@ -82,10 +86,15 @@ try {
   await page.screenshot({path:'/evidence/desktop-dds.png',fullPage:true});await dds.getByRole('button',{name:'CI Обучение',exact:true}).click();assert.equal(await page.locator('.finance-table tbody tr').count(),1);
   stage='mobile_articles';await page.setViewportSize({width:390,height:844});await create('CI Аренда','cashflow','Списание');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
+  await page.locator('.ahFinanceArticleForm').first().evaluate(e=>e.scrollIntoView({block:'center'}));
   await page.screenshot({path:'/evidence/mobile-articles.png',fullPage:true});
   stage='mobile_allocation';await preview('CI Аренда','8888888888','CI аренда');
+  const mobileForm=dialog.locator('.operation-classification-form');
+  assert.equal(await mobileForm.evaluate(e=>getComputedStyle(e).display),'grid');
+  assert.equal(await mobileForm.evaluate(e=>getComputedStyle(e).gridTemplateColumns.trim().split(/\s+/).length),1);
+  assert(await mobileForm.locator('input,select,button').evaluateAll(nodes=>nodes.every(e=>e.getBoundingClientRect().height>=44)));
   assert(await dialog.evaluate(e=>e.scrollWidth<=e.clientWidth+2));await dialog.getByRole('combobox',{name:'Статья ДДС'}).selectOption('CI Аренда');
-  await dialog.getByRole('button',{name:'Не включать в ОПиУ',exact:true}).click();await page.screenshot({path:'/evidence/mobile-allocation.png',fullPage:true});
+  await dialog.getByRole('button',{name:'Не включать в ОПиУ',exact:true}).click();await dialog.getByRole('combobox',{name:'Статья ДДС'}).scrollIntoViewIfNeeded();await page.screenshot({path:'/evidence/mobile-allocation.png',fullPage:true});
   await save(()=>dialog.getByRole('button',{name:'Сохранить разнесение',exact:true}).click());await dialog.waitFor({state:'hidden'});
   stage='archive_history';await page.getByRole('tab',{name:'Статьи',exact:true}).click();
   const archived=page.locator('.ahFinanceArticleList li').filter({has:page.getByText('CI Обучение',{exact:true})});await save(()=>archived.getByRole('button',{name:'В архив',exact:true}).click());

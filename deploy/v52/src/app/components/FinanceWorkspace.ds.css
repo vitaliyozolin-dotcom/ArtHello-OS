@@ -482,24 +482,24 @@
 
 /* D069_FINANCE_OPERATION_ALLOCATION */
 /* D069_FINANCE_OPERATION_ALLOCATION_SCOPED */
-.ahFinancePage .operation-classification { display: grid; gap: 12px; border-top: 1px solid var(--ah-color-border); padding-top: 16px; }
-.ahFinancePage .operation-classification-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.ahFinancePage .operation-classification-head > div { display: grid; gap: 4px; }
-.ahFinancePage .operation-classification-head p { margin: 0; font-weight: 750; }
-.ahFinancePage .operation-classification-head span { color: var(--ah-color-text-secondary); font-size: 12px; line-height: 17px; }
-.ahFinancePage .operation-classification-head b { white-space: nowrap; font-size: 12px; }
-.ahFinancePage .operation-classification-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.ahFinancePage .operation-classification-form label { display: grid; gap: 5px; min-width: 0; }
-.ahFinancePage .operation-classification-form label > span { color: var(--ah-color-text-secondary); font-size: 11px; line-height: 16px; }
-.ahFinancePage .operation-classification-form input, .ahFinancePage .operation-classification-form select { width: 100%; min-width: 0; min-height: 40px; border: 1px solid var(--ah-color-border); border-radius: 10px; background: var(--ah-color-surface); padding: 9px 10px; font: inherit; }
-.ahFinancePage .operation-classification-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
-.ahFinancePage .operation-classification-actions button { min-height: 38px; border-radius: 10px; padding: 8px 12px; }
-.ahFinancePage .operation-classification-actions button:last-child { background: var(--ah-color-accent); color: white; border-color: transparent; }
+.finance-drawer .operation-classification { display: grid; gap: 12px; border-top: 1px solid var(--ah-color-border); padding-top: 16px; }
+.finance-drawer .operation-classification-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.finance-drawer .operation-classification-head > div { display: grid; gap: 4px; }
+.finance-drawer .operation-classification-head p { margin: 0; font-weight: 750; }
+.finance-drawer .operation-classification-head span { color: var(--ah-color-text-secondary); font-size: 12px; line-height: 17px; }
+.finance-drawer .operation-classification-head b { white-space: nowrap; font-size: 12px; }
+.finance-drawer .operation-classification-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.finance-drawer .operation-classification-form label { display: grid; gap: 5px; min-width: 0; }
+.finance-drawer .operation-classification-form label > span { color: var(--ah-color-text-secondary); font-size: 11px; line-height: 16px; }
+.finance-drawer .operation-classification-form input, .finance-drawer .operation-classification-form select { width: 100%; min-width: 0; min-height: 44px; border: 1px solid var(--ah-color-border); border-radius: 10px; background: var(--ah-color-surface); padding: 9px 10px; font: inherit; }
+.finance-drawer .operation-classification-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+.finance-drawer .operation-classification-actions button { min-height: 44px; border: 1px solid var(--ah-color-border); border-radius: 10px; padding: 8px 12px; background: var(--ah-color-surface); color: var(--ah-color-text-primary); cursor: pointer; }
+.finance-drawer .operation-classification-actions button:last-child { background: var(--ah-color-primary); color: white; border-color: transparent; }
 .ahFinancePage .finance-table td:first-child small { display: block; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 767px) {
-  .ahFinancePage .operation-classification-form { grid-template-columns: 1fr; }
-  .ahFinancePage .operation-classification-actions { grid-column: auto; display: grid; }
-  .ahFinancePage .operation-classification-form input, .ahFinancePage .operation-classification-form select { font-size: 16px; }
+  .finance-drawer .operation-classification-form { grid-template-columns: 1fr; }
+  .finance-drawer .operation-classification-actions { grid-column: auto; display: grid; }
+  .finance-drawer .operation-classification-form input, .finance-drawer .operation-classification-form select { font-size: 16px; }
 }
 
 /* D108 finance articles: scoped to the finance workspace, including narrow screens. */
@@ -513,3 +513,8 @@
 .ahFinancePage .ahFinanceArticleActions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ahFinancePage .ahFinanceArchiveToggle { display: flex; align-items: center; gap: 8px; }
 .ahFinancePage .ahFinanceArchiveToggle input { width: 20px; height: 20px; }
+
+/* D110: the operation dialog is a body portal, outside .ahFinancePage. */
+.finance-drawer .operation-classification-form > p { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.5; color: var(--ah-color-text-secondary); }
+.ahFinancePage .ahFinanceArticles .finance-panel { padding: 16px; }
+.ahFinancePage .ahFinanceArticles .finance-panel-head { padding: 0; min-height: 0; margin-bottom: 16px; }

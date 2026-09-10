@@ -17,13 +17,13 @@ BASELINE_TREE = '1ce4c733034060dc84d558d49dab96d1be9b1cf8'
 PINS = 'deploy/v52/recovery-r16/source-pins.json'
 PINS_SHA256 = 'd6f6b71b0cf5e8c64e43e3978d3cdba7b90528ab44b729a7f484d63f599e5448'
 WORKFLOW = '.github/workflows/verify-arthello-r14.yml'
-WORKFLOW_NORMALIZED_SHA256 = '4a432b41b22d971ecac1e34e3b22460fa5766750f245791f5d7ad4a6273f908c'
+WORKFLOW_NORMALIZED_SHA256 = '4404375c365a933b1134c403d63d151ae176a81687bdcbe1a54e4610ce2af363'
 # These are the only changed inputs among the 97 frozen R16 source pins.
 # The manifest represents the reviewed current application. Two inputs are D105
 # and two are D107; their bytes are preserved. Current source and scheduler
 # behavior are tested before any historical fixture is created. D109 adds only
 # the separate Atlas origin/key bindings to the current runtime entrypoint.
-CURRENT_INPUTS = {'scripts/test/school-source.test.mjs': 'bec0e629af23804461f9a9a70849a8e75db4257204d363d0b4e0faf5fdab66ae', 'deploy/school-source-manifest.json': '8a6da5de241307c6dbbfd98b724a3dbdb5af2f7df74c443953f33741bbc99d59', 'deploy/v52/Dockerfile': 'a5372486dc7fa4efe45646a4a2a0562514e362fcfbad28d1d6ea8cb4872c09a6', 'deploy/v52/src/lib/tochka-autosync.ts': 'be895ff2426e1fac2941986ec0de0de18586dc9756bf5ee0ac239387e26a94dc', 'scripts/verify-school-source.mjs': 'ce78eac029d2e7238cc5164e93c006f1ba68723f51dba4b81ccf76fbda176309', 'deploy/v52/src/production/runtime-server.mjs': '25e217b1eefb4c816a018db5cc9c9bf5776c7027c743b09083a3e6587acb568f'}
+CURRENT_INPUTS = {'scripts/test/school-source.test.mjs': 'bec0e629af23804461f9a9a70849a8e75db4257204d363d0b4e0faf5fdab66ae', 'deploy/school-source-manifest.json': '77d5b14f247c4ae5978a2263e326557a7716264bd8a0c6f23a75a4b2c6210f66', 'deploy/v52/Dockerfile': 'a5372486dc7fa4efe45646a4a2a0562514e362fcfbad28d1d6ea8cb4872c09a6', 'deploy/v52/src/lib/tochka-autosync.ts': 'be895ff2426e1fac2941986ec0de0de18586dc9756bf5ee0ac239387e26a94dc', 'scripts/verify-school-source.mjs': 'ce78eac029d2e7238cc5164e93c006f1ba68723f51dba4b81ccf76fbda176309', 'deploy/v52/src/production/runtime-server.mjs': '25e217b1eefb4c816a018db5cc9c9bf5776c7027c743b09083a3e6587acb568f'}
 COMMANDS = {
     'r14': [
         ['python3', '-I', '-B', 'scripts/test/r14-historical-contract.test.py'],
