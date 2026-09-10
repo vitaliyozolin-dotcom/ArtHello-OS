@@ -1,13 +1,13 @@
 {
   "format": 1,
   "release": {
-    "head": "codex/finance-r17-20260910",
+    "head": "codex/finance-r17-receipt-fix-20260910",
     "mergeMethod": "squash",
-    "parentSha": "93cb27839584f7f59d2ef5f1f0ecafc5b6bbd682",
-    "pr": 412,
-    "prefix": "D110: guarded finance R17"
+    "parentSha": "a3ccfb3af2118dc7ebc734d3f994092b7ebc52e2",
+    "pr": 414,
+    "prefix": "D111: guarded finance R17"
   },
-  "controllerSha256": "7ba8d17d5a39e37f9c43a298388a84f863003d19d4deb0fd3909a1a30639d8a5",
+  "controllerSha256": "72e78e299f30f6de2d4847c74d57e931d762ff19c091b3d467c52b53481c96ae",
   "verificationNormalizedSha256": "2f2a5d63636b3b718d9c8a0fe3f0cf1ff3133816f6b591c598f698290dfed60a",
   "sourceFiles": {
     ".github/scripts/check-school-live-acceptance-r7.py": "6fae34638acd1757cad922c288ede1282f8300a8ecfcbe3547661378445cb884",
@@ -43,7 +43,7 @@
     ".github/scripts/r17-backup-adoption.py": "598a596d4dc8ea01b8d09a755ed1f06c5194c64a6a6901333c86e3c296c2cab4",
     ".github/scripts/r17-backup-controller.py": "9a44119571777a24a595f7916d921a151312518697e415385876093806e83135",
     ".github/scripts/r17-candidate-state.py": "5279102d0d9e32bc23ff8f4f8db98404111df3fac19be42f9e5c134027e20f29",
-    ".github/scripts/r17-history-gate.py": "b54110c0a740bcbcbfb98dbf6e76b559eddc19e22049e43ed7682c0fc100f0b1",
+    ".github/scripts/r17-history-gate.py": "715c74e4ba8cebbd63a8ffec26f0445473b97807803670516c410feb2d9a7f56",
     ".github/scripts/r17-live-baseline.py": "ee763f3b05dfbc7f302198d21d817a202093bce360f21ebbf64f8206c5918a6d",
     ".github/scripts/r17-public-audit.py": "f45bb228ef0373bda1622cb384ab8e39b34267fe52bcdea808f373befa6a792c",
     ".github/scripts/r17-resume-candidate.py": "adbf4a18820006503c29511630379cb19fe872ade99d5dc3050f9b083ed790f1",
@@ -73,7 +73,7 @@
     ".github/scripts/test-r17-backup-adoption.py": "faae203c54e8c02e4ea954e0565e315e6f65fe25401907bccce73dc7d3192f83",
     ".github/scripts/test-r17-backup-controller.py": "aa780068a689ceb95775819cec79caccb79f6bba15babb38f425d0bfd6263090",
     ".github/scripts/test-r17-continuation-adapters.py": "4d4811718a5e88f51746afcc7365daae43e765116c24757789e9f7a20bddd985",
-    ".github/scripts/test-r17-contract.py": "eea291e400eda1ef922d0f46016a890d8ebec39988a224f7121d48ee060435e2",
+    ".github/scripts/test-r17-contract.py": "864df47d8c78cddb6cdfe09bf336004b71b9b1fb766abec5d2109f302097a902",
     ".github/scripts/test-r17-digest-scan.py": "88ce05883220f511d33100ac42e6d8ba73f4e72439f0daf0cfbb9f23c6095f67",
     ".github/scripts/test-r17-history-gate.py": "c08733177dc526745ce4c0ee06630283ad3ed4a33ad4a342fef93222883e5c41",
     ".github/scripts/test-r17-live-baseline.py": "9e37f9031ac1082d5db7e1f4416865051c73168a051ceaca11483abf6b810089",
@@ -112,7 +112,7 @@
     "deploy/v52/recovery-r16/source-pins.json": "d6f6b71b0cf5e8c64e43e3978d3cdba7b90528ab44b729a7f484d63f599e5448",
     "deploy/v52/recovery-r16/transform.json": "304688a387e8819887416cefe8be262a835281432456c85bb407d6e0d8fc106f",
     "deploy/v52/recovery-r16/verify-contract.py": "029e08d750800734ee32ec022b4284aad62a8371b6011c9855aad51aeac27fc1",
-    "deploy/v52/recovery-r17/verify-contract.py": "51c57117161533a8f7ba85247f43dd706fd7ece17987946958e50688a4d13e01",
+    "deploy/v52/recovery-r17/verify-contract.py": "55b1e91d2fabcc22bdbcc9e5432de32a652e5de1b9ae2dcbd331e32b56d3c929",
     "deploy/v52/runtime/package-lock.json": "8ea263b0c45c65ddd7332f5e683cc52b8f694cc4de64fbe8b7c01a3d4718a735",
     "deploy/v52/src/app/api/finance-actions/route.ts": "458a2991a3bbb086d045b217efe778efdcd4b6999c097ad4892951c0b763c14c",
     "deploy/v52/src/app/api/finance/route.ts": "6420212bc2373f11f38550b3062e54a038caf8661ecd9e3f46b75f9cbca80cb8",

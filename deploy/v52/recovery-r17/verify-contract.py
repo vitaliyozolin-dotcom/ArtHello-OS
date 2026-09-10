@@ -9,13 +9,13 @@ import sys
 DIRECTORY = 'deploy/v52/recovery-r17/'
 BASE = DIRECTORY + 'r16-controller.yml'
 BASE_SHA = '8f10d8c7ac5a608eddd9368dd8e828c54c0fe02366cc28c56561af1f126832fe'
-RECIPE_SHA = '8f1c7a66b453566d6d95929833971aee268b29a6c3f7c01db418655066d7e970'
+RECIPE_SHA = '6f9e0611324077d5fdac3eb24edb8ba68a584627fda540af90b5be430ad9e5bf'
 CONTROLLER = '.github/workflows/deploy-arthello-finance-r17-20260910.yml'
 VERIFICATION = '.github/workflows/verify-arthello-r14.yml'
 OLD_CONTROLLER = '.github/workflows/deploy-arthello-tochka-r16-20260910.yml'
 FROZEN_PINS = 'deploy/v52/recovery-r16/source-pins.json'
 FROZEN_PINS_SHA = 'd6f6b71b0cf5e8c64e43e3978d3cdba7b90528ab44b729a7f484d63f599e5448'
-RELEASE = {'head': 'codex/finance-r17-20260910', 'mergeMethod': 'squash', 'parentSha': '93cb27839584f7f59d2ef5f1f0ecafc5b6bbd682', 'pr': 412, 'prefix': 'D110: guarded finance R17'}
+RELEASE = {'head': 'codex/finance-r17-receipt-fix-20260910', 'mergeMethod': 'squash', 'parentSha': 'a3ccfb3af2118dc7ebc734d3f994092b7ebc52e2', 'pr': 414, 'prefix': 'D111: guarded finance R17'}
 CHANGED_FROZEN_INPUTS = {'deploy/school-source-manifest.json', 'deploy/v52/Dockerfile', 'deploy/v52/src/lib/tochka-autosync.ts', 'deploy/v52/src/production/runtime-server.mjs', 'scripts/test/school-source.test.mjs', 'scripts/verify-school-source.mjs'}
 EXTRA_INPUTS = {'.github/scripts/finance-ci-browser.mjs', '.github/scripts/finance-ci-seed.mjs', '.github/scripts/fixtures/r17-accepted-r16-history.json', '.github/scripts/r17-backup-adoption.py', '.github/scripts/r17-backup-controller.py', '.github/scripts/r17-candidate-state.py', '.github/scripts/r17-history-gate.py', '.github/scripts/r17-live-baseline.py', '.github/scripts/r17-public-audit.py', '.github/scripts/r17-resume-candidate.py', '.github/scripts/run-finance-ci-browser.sh', '.github/scripts/run-r17-live-browser.py', '.github/scripts/test-r17-backup-adoption.py', '.github/scripts/test-r17-backup-controller.py', '.github/scripts/test-r17-continuation-adapters.py', '.github/scripts/test-r17-contract.py', '.github/scripts/test-r17-digest-scan.py', '.github/scripts/test-r17-history-gate.py', '.github/scripts/test-r17-live-baseline.py', '.github/scripts/test-run-finance-ci-browser.py', '.github/scripts/test-run-r17-live-browser.py', '.github/workflows/verify-arthello-v52.yml', '.gitleaks.toml', 'deploy/browser/retire-r16-browser.mjs', 'deploy/school-source-manifest.json', 'deploy/v52/Dockerfile', 'deploy/v52/recovery-r16/check-contract.rb', 'deploy/v52/recovery-r16/r15-controller.yml', 'deploy/v52/recovery-r16/source-pins.json', 'deploy/v52/recovery-r16/transform.json', 'deploy/v52/recovery-r17/verify-contract.py', 'deploy/v52/src/app/api/finance-actions/route.ts', 'deploy/v52/src/app/api/finance/route.ts', 'deploy/v52/src/app/components/FinanceWorkspace.ds.css', 'deploy/v52/src/app/components/FinanceWorkspace.tsx', 'deploy/v52/src/lib/finance-article-store.ts', 'deploy/v52/src/lib/finance-articles.ts', 'deploy/v52/src/lib/tochka-autosync.ts', 'deploy/v52/src/production/runtime-server.mjs', 'deploy/v52/src/tests/finance-article-store.test.mjs', 'deploy/v52/src/tests/finance-articles-api.test.mjs', 'deploy/v52/src/tests/finance-articles-d1.test.mjs', 'deploy/v52/src/tests/finance-articles.test.mjs', 'scripts/run-accepted-r16-history.py', 'scripts/test/accepted-r16-history.test.py', 'scripts/test/retire-r16-browser.test.mjs', 'scripts/test/school-source.test.mjs', 'scripts/verify-school-source.mjs'}
 RUBY_TEMPLATE = """require 'digest'
@@ -72,7 +72,7 @@ def transform(base, raw_recipe):
     recipe = strict_json(raw_recipe)
     require(recipe['format'] == 1 and recipe['baseSha256'] == BASE_SHA and recipe['release'] == RELEASE,
             'RELEASE_IDENTITY')
-    require(len(recipe['operations']) == 28, 'TRANSFORM_SHAPE')
+    require(len(recipe['operations']) == 29, 'TRANSFORM_SHAPE')
     text = base.decode()
     labels = set()
     for operation in recipe['operations']:
