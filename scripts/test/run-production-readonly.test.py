@@ -261,7 +261,8 @@ def report(complete=True):
                           otherWindowRows=0, oldestAgeSeconds=3600),
         statementImports=dict(state='observed', readyRows=0, pendingRows=12, failedRows=0, unknownRows=0),
         latestRun=dict(state='observed', startedAtUtc='2026-09-09T08:58:00.000Z',
-                       finishedAtUtc='2026-09-09T08:58:01.000Z'))
+                       finishedAtUtc='2026-09-09T08:58:01.000Z',
+                       status='complete' if complete else 'pending', failureKind=None))
     return value
 
 
@@ -492,6 +493,8 @@ else:
                 # Synthetic values exercise D091 transport; D088 did not observe these fields.
                 value['bankRuntime']['autosync'].update(httpStatus=status, httpStatusState=state,
                                                        updatedAtUtc='2026-09-09T08:31:16.000Z', failureStage=None, failureStageState='missing', commitFailureKind=None, commitFailureKindState='missing')
+                # Synthetic current-schema extension; keep the historical D088 receipt unchanged.
+                value['bankRuntime']['latestRun'].update(status='pending', failureKind=None)
                 result = self.run_launcher(value=value, probe_exit=2)
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertEqual(len(self.observations()), 2)
@@ -503,6 +506,8 @@ else:
                     del observed[0]['bankRuntime']['autosync'][key]
                 for name in 'incomeAmountMinor expenseAmountMinor linkedIncomeAmountMinor linkedExpenseAmountMinor linkedFinancialRows financialMismatchRows'.split():
                     del observed[0]['bankWindow']['transactions'][name]
+                for key in ('status', 'failureKind'):
+                    del observed[0]['bankRuntime']['latestRun'][key]
                 self.assertEqual(observed[0], D088_REPORT)
 
     def test_lexical_failure_stage_passes_only_the_fixed_enum_and_final_identity_check(self):
@@ -548,6 +553,20 @@ else:
             result=self.run_launcher(value=value,probe_exit=2)
             self.assert_blocked(result,'invalid_probe_report')
             self.assertNotIn('PRIVATE_ERROR',result.stdout+result.stderr)
+
+    def test_manual_result_schema_accepts_fixed_failure_and_refuses_payload_or_inconsistent_status(self):
+        value = report(False)
+        value['bankRuntime']['latestRun'].update(status='error', failureKind='statement_read_unclassified')
+        result = self.run_launcher(value=value, probe_exit=2)
+        self.assertIn('READONLY_FINISHED=aggregate_observation_not_live_acceptance', result.stdout)
+        for change in ({'failureKind': 'UNSAFE_BANK_BODY'}, {'status': 'UNSAFE_STATUS'},
+                       {'status': 'complete'}, {'failureKind': None}, {'httpStatus': 404}):
+            invalid = copy.deepcopy(value)
+            invalid['bankRuntime']['latestRun'].update(change)
+            result = self.run_launcher(value=invalid, probe_exit=2)
+            self.assertNotIn('READONLY_FINISHED=', result.stdout)
+            self.assertNotIn('UNSAFE_', result.stdout)
+            self.assertNotIn('"bankRuntime"', result.stdout)
 
     def test_money_fields_cannot_claim_completion_with_inconsistent_totals(self):
         for field,val in [('incomeAmountMinor',-1),('expenseAmountMinor',1.5),

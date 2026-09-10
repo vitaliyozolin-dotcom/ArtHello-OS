@@ -204,7 +204,8 @@ test('bank runtime: metadata distinguishes future pending retry, expired lease a
     assert.deepEqual(runtime.statementLease, { state: 'observed', expiresAtUtc: '2026-09-09T11:59:00.000Z', leaseState: 'expired' });
     assert.deepEqual(runtime.retainedJobs, { state: 'observed', scopeMatch: 'unverified', providerStatus: 'not_stored',
       total: 4, invalidRows: 0, exactWindowRows: 2, olderEndRows: 2, otherWindowRows: 0, oldestAgeSeconds: 300 });
-    assert.deepEqual(runtime.latestRun, { state: 'observed', startedAtUtc: bankSyncTime, finishedAtUtc: bankSyncTime });
+    assert.deepEqual(runtime.latestRun, { state: 'observed', startedAtUtc: bankSyncTime, finishedAtUtc: bankSyncTime,
+      status: 'pending', failureKind: null });
     assert.equal(result.bankWindow.sync.state, 'pending');
     assert.equal(result.bankWindow.checksComplete, false);
     assert.equal(diagnosticExitCode(result), 2);
@@ -215,6 +216,50 @@ test('bank runtime: metadata distinguishes future pending retry, expired lease a
     }
     assert.throws(() => db.exec('DELETE FROM system_runtime_state'));
   } finally { db.close(); }
+});
+
+test('bank runtime: latest persisted manual failure emits only exact fixed reason codes without inventing HTTP status', () => {
+  for (const [message, expected] of [
+    ['Точка не подтвердила доступ к готовой выписке', 'statement_read_unclassified'],
+    ['Ключ Точки не даёт права читать готовой выписке', 'statement_read_forbidden'],
+    ['Точка отклонила ключ', 'key_rejected'],
+    ['Точка временно ограничила число запросов', 'rate_limited'],
+    ['Не удалось связаться с Точкой', 'transport_unavailable'],
+    ['Выписка Точки не соответствует запрошенному счёту или периоду', 'statement_identity'],
+    ['Точка вернула некорректную выписку', 'statement_format'],
+    ['Точка не смогла сформировать выписку. Повторите загрузку для нового запроса.', 'statement_failed'],
+    ['Точка не подтвердила доступ к готовой выписке PRIVATE-KEY 404', 'unclassified'],
+    ['PRIVATE-ACCOUNT PRIVATE-PAYLOAD', 'unclassified'],
+    [null, 'unclassified'],
+  ]) {
+    const { db } = runtimeFixture();
+    db.prepare("UPDATE integration_sync_runs SET status='Ошибка',error_count=1,error_message=?").run(message);
+    try {
+      const report = inspectDatabase(db, bankOptions);
+      assert.deepEqual(report.bankRuntime.latestRun, { state: 'observed', startedAtUtc: bankSyncTime,
+        finishedAtUtc: bankSyncTime, status: 'error', failureKind: expected });
+      assert.equal(report.bankWindow.checksComplete, false);
+      assert.equal(diagnosticExitCode(report), 2);
+      assert.equal(Object.hasOwn(report.bankRuntime.latestRun, 'httpStatus'), false);
+      assert.equal(JSON.stringify(report).includes('PRIVATE'), false);
+      assert.throws(() => db.exec('DELETE FROM integration_sync_runs'));
+    } finally { db.close(); }
+  }
+});
+
+test('bank runtime: only the latest non-dry Tochka run supplies fixed failure facts', () => {
+  for (const [status, expected] of [['Успешно','complete'],['Ожидание банка','pending'],['Требует проверки','review'],['PRIVATE-STATUS','unknown']]) {
+    const { db } = runtimeFixture();
+    db.prepare('UPDATE integration_sync_runs SET status=?,error_message=?').run(status, 'Точка отклонила ключ');
+    db.exec("INSERT INTO integration_sync_runs(id,connection_id,dry_run,status,started_at,finished_at,error_message) VALUES('PRIVATE-OTHER','OTHER',0,'Ошибка','2026-09-09T11:59:00.000Z','2026-09-09T11:59:00.000Z','Точка отклонила ключ'),('PRIVATE-DRY','INT-T-TOCHKA',1,'Ошибка','2026-09-09T11:59:00.000Z','2026-09-09T11:59:00.000Z','Точка отклонила ключ')");
+    try {
+      const report = inspectDatabase(db, bankOptions);
+      assert.equal(report.bankRuntime.latestRun.status, expected);
+      assert.equal(report.bankRuntime.latestRun.failureKind, null);
+      assert.equal(report.bankRuntime.latestRun.startedAtUtc, bankSyncTime);
+      assert.equal(JSON.stringify(report).includes('PRIVATE'), false);
+    } finally { db.close(); }
+  }
 });
 
 test('bank runtime: current PENDING and historical READY import rows are fixed counts, not retained provider status', () => {
@@ -478,7 +523,7 @@ function bankFixture({ complete = false, status = 'Успешно', runTime = ba
     CREATE TABLE alfacrm_finance_snapshots(id TEXT);
     CREATE TABLE alfacrm_family_merge_candidates(id TEXT);
     CREATE TABLE integration_sync_runs(id TEXT,connection_id TEXT,dry_run INTEGER,status TEXT,
-      rejected_count INTEGER,error_count INTEGER,conflict_count INTEGER,started_at TEXT,finished_at TEXT);
+      rejected_count INTEGER,error_count INTEGER,conflict_count INTEGER,started_at TEXT,finished_at TEXT,error_message TEXT);
     CREATE TABLE bank_accounts(id TEXT,connection_id TEXT,legal_entity_id TEXT,provider_account_id TEXT,synced_at TEXT);
     CREATE TABLE bank_statement_imports(id TEXT,connection_id TEXT,legal_entity_id TEXT,provider_account_id TEXT,
       start_date TEXT,end_date TEXT,status TEXT,transaction_count INTEGER,fetched_at TEXT);
@@ -489,7 +534,7 @@ function bankFixture({ complete = false, status = 'Успешно', runTime = ba
     INSERT INTO integration_connections VALUES('INT-T-TOCHKA');
   `);
   if (complete) {
-    db.prepare('INSERT INTO integration_sync_runs VALUES(?,?,?,?,?,?,?,?,?)')
+    db.prepare('INSERT INTO integration_sync_runs(id,connection_id,dry_run,status,rejected_count,error_count,conflict_count,started_at,finished_at) VALUES(?,?,?,?,?,?,?,?,?)')
       .run('PRIVATE-RUN', 'INT-T-TOCHKA', 0, status, 0, 0, 0, runTime, runTime);
     for (let i = 0; i < 4; i++) {
       db.prepare('INSERT INTO bank_accounts VALUES(?,?,?,?,?)')
@@ -729,7 +774,7 @@ test('bank aggregate: four ready zero-activity statements do not establish obser
 
 test('bank aggregate: a newer pending run or wrong-window statement cannot fall back to older successful evidence', () => {
   for (const sql of [
-    "INSERT INTO integration_sync_runs VALUES('NEW-PENDING','INT-T-TOCHKA',0,'Ожидание банка',0,0,0,'2026-09-09T11:30:00.000Z','2026-09-09T11:30:00.000Z')",
+    "INSERT INTO integration_sync_runs(id,connection_id,dry_run,status,rejected_count,error_count,conflict_count,started_at,finished_at) VALUES('NEW-PENDING','INT-T-TOCHKA',0,'Ожидание банка',0,0,0,'2026-09-09T11:30:00.000Z','2026-09-09T11:30:00.000Z')",
     "INSERT INTO bank_statement_imports VALUES('NEW-WINDOW','INT-T-TOCHKA','PRIVATE-ENTITY','PRIVATE-ACCOUNT-3','2026-09-02','2026-09-09','Ready',0,'2026-09-09T11:30:00.000Z')",
   ]) {
     const db = bankFixture({ complete: true });

@@ -1135,6 +1135,14 @@ Exact-head V52 run34443910215/job102764455280 остановился 2026-09-10T
 
 ## D-102 — Сверка банка и ДДС после принятого R15 (2026-09-10)
 
+### Продолжение после ручного запуска владельцем
+
+10 сентября владелец явно поручил запустить штатную синхронизацию вручную. Это разрешает существующую owner UI-кнопку `retrySync` с прежней авторизацией, CSRF, credential scope и общей statement lease. Это не разрешает service-key вызов, новую роль, произвольную SQL-запись или сброс scheduler backoff. После нажатия владелец предоставил экранное сообщение «Точка не подтвердила доступ к готовой выписке». В accepted R15 оно соответствует неуспешному GET выписки, кроме отдельно классифицированных 401/403/429. Сам HTTP status, upstream/bridge origin и причина отказа этим сообщением не доказаны.
+
+D075 расширяется только двумя фиксированными полями последнего сохранённого non-dry-run запуска Точки: `latestRun.status` и `latestRun.failureKind`. Точная классификация известных application messages выполняется внутри read-only SQL; исходный error_message, provider body, account/statement IDs и actor не выводятся. Неизвестная причина остаётся unclassified; HTTP status не реконструируется из сообщения. Старый scheduler error не приписывается новому manual run. Это продолжение D102 evidence, не изменение банковского runtime или критериев приёмки. Следующий защищённый отчёт нужен из-за нового пользовательского запуска, поэтому ожидание старого nextAtUtc не является условием read-only проверки.
+
+### Принятый выпуск и исходный контракт
+
 R15 принят в production: source `4a0713b4a7d87f132e49836fe0ce9ca9258bc1ec`, tree `ac0ec2a2845eee6254ba7cf8c0e0b83d0e5848de`, protected run `34445017241`, resource/accepted attempt `1/1`. Candidate и after-public natural browser acceptance прошли, live release совпал с source. Принятые image/fingerprint/candidate/context pins записываются только из actual deploy receipt. School остался на source `54242340f2d9b6a9887d69ecc03520ddf9f7982c` и healthy; принятый R12 backup worker/history/control сохранён, adoption sealed. Это доказательство выпуска, но не банковской полноты.
 
 D075 получает отдельный fail-closed proof для принятого R15 поверх неизменённой R14 durable schema14. Filename старого adapter сохраняется только как стабильная ссылка; source/tree и семь runtime pins привязаны к R15. Proof проверяется до и после единственного read-only database probe, без fallback. Сохраняются exact owner/current-main/Quality/attempt1 gates, protected environment, оба production locks, canonical D1 identity, read-only/no-copy mount и полный consumer inventory.

@@ -149,9 +149,16 @@ def runtime(value, stamp):
     for key in ("readyRows", "pendingRows", "failedRows", "unknownRows"):
         nullable_count(imports[key])
     latest = value["latestRun"]
-    fields(latest, "state startedAtUtc finishedAtUtc")
+    fields(latest, "state startedAtUtc finishedAtUtc status failureKind")
     nullable_timestamp(latest["startedAtUtc"])
     nullable_timestamp(latest["finishedAtUtc"])
+    require(type(latest["status"]) is str)
+    choice(latest["status"], "complete pending review error unknown not_observed")
+    if latest["status"] == "error":
+        require(type(latest["failureKind"]) is str)
+        choice(latest["failureKind"], "statement_read_unclassified statement_read_forbidden key_rejected rate_limited transport_unavailable statement_identity statement_format statement_failed unclassified")
+    else:
+        require(latest["failureKind"] is None)
 def states(value, observed, others):
     require(type(value) is dict)
     if value.get("state") == "observed":
