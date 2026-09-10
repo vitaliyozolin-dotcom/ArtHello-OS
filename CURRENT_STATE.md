@@ -1,5 +1,10 @@
 # ArtHello OS — Current State
 
+## 2026-09-10 — D138: School через защищённую SSH-границу, кандидат
+
+- D137 run `34541397143` не нашёл School image на локальном Docker daemon и остановился до мутаций; Atlas не запускался. School находится за отдельной deploy-границей, как в его принятом production workflow.
+- D138 переносит immutable archive/controller по pinned known-host SSH, проверяет SHA файлов на целевом хосте и там выбирает единственный running image old revision. Остальные границы неизменны.
+
 ## 2026-09-10 — D137: School по immutable image identity, кандидат
 
 - D136 run `34540282349` остановился до мутаций: на gateway Docker daemon отсутствует прежняя сеть `arthello-os_backend`; Atlas не запускался.

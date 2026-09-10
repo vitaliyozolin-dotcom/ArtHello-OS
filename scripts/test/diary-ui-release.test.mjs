@@ -18,7 +18,7 @@ test("production runs only after exact successful main Quality and inside the pr
   const workflow = read(".github/workflows/deploy-diaries-d133.yml");
   assert.match(workflow, /workflow_run:/);
   assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(workflow, /startsWith\(github\.event\.workflow_run\.head_commit\.message, 'D137: resolve School image identity'\)/);
+  assert.match(workflow, /startsWith\(github\.event\.workflow_run\.head_commit\.message, 'D138: use School remote boundary'\)/);
   assert.match(workflow, /environment: production-ru/);
   assert.match(workflow, /runs-on: \[self-hosted, linux, x64, arthello-gateway\]/);
 });
@@ -45,17 +45,21 @@ test("Atlas upgrade is backup-first, preserves the data volume and has rollback"
 
 test("School uses its current-topology standalone backup and rollback cutover without package installation on production", () => {
   const workflow = read(".github/workflows/deploy-diaries-d133.yml");
+  const sshWrapper = read("deploy/run-school-ssh-d138.sh");
   const productionJob = workflow.split("\n  deploy:")[1] ?? "";
   assert.match(workflow, /school-curriculum-standalone-cutover\.sh/);
   assert.match(workflow, /SCHOOL_STANDALONE_CUTOVER=PASS/);
   assert.match(workflow, /SCHOOL_STANDALONE_BACKUP=VERIFIED/);
-  assert.match(workflow, /docker ps -q/);
-  assert.match(workflow, /revision.*54242340f2d9b6a9887d69ecc03520ddf9f7982c/);
-  assert.match(workflow, /docker image inspect "\$school_image"/);
-  assert.match(workflow, /org\.opencontainers\.image\.revision/);
-  assert.match(workflow, /SCHOOL_CONTAINER="\$school_container"/);
+  assert.match(workflow, /ARTHELLO_RU_SSH_PRIVATE_KEY/);
+  assert.match(workflow, /run-school-ssh-d138\.sh/);
+  assert.match(workflow, /StrictHostKeyChecking=yes/);
+  assert.match(sshWrapper, /docker image inspect "\$image"/);
+  assert.match(sshWrapper, /org\.opencontainers\.image\.revision/);
+  assert.match(sshWrapper, /SCHOOL_CONTAINER="\$school_container"/);
   const syntax = spawnSync("bash", ["-n", fileURLToPath(new URL("../../deploy/school-curriculum-standalone-cutover.sh", import.meta.url))], { encoding: "utf8" });
   assert.equal(syntax.status, 0, syntax.stderr);
+  const wrapperSyntax = spawnSync("bash", ["-n", fileURLToPath(new URL("../../deploy/run-school-ssh-d138.sh", import.meta.url))], { encoding: "utf8" });
+  assert.equal(wrapperSyntax.status, 0, wrapperSyntax.stderr);
   assert.doesNotMatch(productionJob, /repair-deploy\.sh/);
   assert.doesNotMatch(productionJob, /npm (ci|install)/);
 });

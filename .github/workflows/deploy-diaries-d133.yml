@@ -1,4 +1,4 @@
-name: Deploy diary UI consistency D137
+name: Deploy diary UI consistency D138
 
 on:
   pull_request:
@@ -7,6 +7,7 @@ on:
       - deploy/upgrade-atlas-d133.sh
       - deploy/school-curriculum-standalone-cutover.sh
       - deploy/verify-school-release.mjs
+      - deploy/run-school-ssh-d138.sh
       - deploy/activate-atlas-owner-access.mjs
       - scripts/test/diary-ui-release.test.mjs
       - DECISIONS.md
@@ -48,7 +49,7 @@ jobs:
          github.event.workflow_run.conclusion == 'success' &&
          github.event.workflow_run.repository.id == github.event.repository.id &&
          github.event.workflow_run.head_repository.id == github.event.repository.id &&
-         startsWith(github.event.workflow_run.head_commit.message, 'D137: resolve School image identity')))
+         startsWith(github.event.workflow_run.head_commit.message, 'D138: use School remote boundary')))
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -131,7 +132,7 @@ jobs:
          github.event.workflow_run.event == 'push' &&
          github.event.workflow_run.head_branch == 'main' &&
          github.event.workflow_run.conclusion == 'success' &&
-         startsWith(github.event.workflow_run.head_commit.message, 'D137: resolve School image identity')))
+         startsWith(github.event.workflow_run.head_commit.message, 'D138: use School remote boundary')))
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -156,7 +157,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.head_sha == github.event.workflow_run.head_commit.id &&
-      startsWith(github.event.workflow_run.head_commit.message, 'D137: resolve School image identity')
+      startsWith(github.event.workflow_run.head_commit.message, 'D138: use School remote boundary')
     needs: [bundle-atlas, verify-school-source]
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru
@@ -188,56 +189,51 @@ jobs:
           name: atlas-d133-bundle
           path: ${{ runner.temp }}/atlas-d133-bundle
       - name: Upgrade School 1–11 with its standalone backup and rollback cutover
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
         run: |
           set -Eeuo pipefail
           test "$(git -C school rev-parse HEAD)" = "$SCHOOL_SOURCE_SHA"
           test "$(git -C school rev-parse HEAD^{tree})" = "$SCHOOL_SOURCE_TREE"
           bash -n controller/deploy/school-curriculum-standalone-cutover.sh
-          mapfile -t school_ids < <(docker ps -q | while IFS= read -r id; do
-            image="$(docker inspect "$id" --format '{{.Image}}')"
-            revision="$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true)"
-            if [ "$revision" = 54242340f2d9b6a9887d69ecc03520ddf9f7982c ]; then printf '%s\n' "$id"; fi
-          done)
-          test "${#school_ids[@]}" -eq 1
-          test "$(docker inspect "${school_ids[0]}" --format '{{.State.Running}}')" = true
-          school_image="$(docker inspect "${school_ids[0]}" --format '{{.Image}}')"
-          test "$(docker image inspect "$school_image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = 54242340f2d9b6a9887d69ecc03520ddf9f7982c
-          school_container="$(docker inspect "${school_ids[0]}" --format '{{.Name}}' | sed 's#^/##')"
-          [[ "$school_container" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]
+          bash -n controller/deploy/run-school-ssh-d138.sh
           runtime_node="$(command -v node || true)"
           if [[ -z "$runtime_node" ]]; then
             runner_root="$(realpath "$RUNNER_TEMP/../..")"
             runtime_node="$runner_root/externals/node24/bin/node"
           fi
           "$runtime_node" --check controller/deploy/verify-school-release.mjs
-          job_parent=/tmp/school-curriculum-deploy-jobs
-          job_dir="$job_parent/${SCHOOL_SOURCE_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          test ! -e "$job_dir"
-          if test ! -e "$job_parent"; then install -d -m 0700 "$job_parent"; fi
-          test -d "$job_parent" && test ! -L "$job_parent"
-          test "$(stat -c %u "$job_parent")" = "$(id -u)"
-          chmod 0700 "$job_parent"
-          install -d -m 0700 "$job_dir"
           stage="$RUNNER_TEMP/school-d134-source"
           install -d -m 0700 "$stage"
           git -C school archive "$SCHOOL_SOURCE_SHA" | tar -x -C "$stage"
           printf '%s\n' "$SCHOOL_SOURCE_SHA" > "$stage/.school-source-sha"
           printf '%s\n' "$SCHOOL_SOURCE_TREE" > "$stage/.school-source-tree"
-          source_archive="$job_dir/school-release.tar.gz"
+          source_archive="$RUNNER_TEMP/school-release.tar.gz"
           tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
             -C "$stage" -cf - . | gzip -n > "$source_archive"
-          install -m 0400 controller/deploy/verify-school-release.mjs "$job_dir/verify-school-release.mjs"
           source_sha="$(sha256sum "$source_archive" | cut -d ' ' -f 1)"
-          verify_sha="$(sha256sum "$job_dir/verify-school-release.mjs" | cut -d ' ' -f 1)"
-          RUN_ID="$GITHUB_RUN_ID" RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" WORKFLOW_SHA="$CONTROLLER_SHA" \
-            RELEASE_SHA="$SCHOOL_SOURCE_SHA" RELEASE_TREE="$SCHOOL_SOURCE_TREE" \
-            SOURCE_ARCHIVE="$source_archive" SOURCE_SHA256="$source_sha" \
-            VERIFY_SCRIPT="$job_dir/verify-school-release.mjs" VERIFY_SHA256="$verify_sha" \
-            OFFLINE_BASE_REF='node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e' \
-            SCHOOL_ORIGIN=https://school-188-225-38-55.sslip.io \
-            ARTHELLO_ORIGIN=https://arthello-188-225-38-55.sslip.io JOB_DIR="$job_dir" \
-            SCHOOL_CONTAINER="$school_container" \
-            bash controller/deploy/school-curriculum-standalone-cutover.sh | tee "$RUNNER_TEMP/school-d133.log"
+          verify_sha="$(sha256sum controller/deploy/verify-school-release.mjs | cut -d ' ' -f 1)"
+          cutover_sha="$(sha256sum controller/deploy/school-curriculum-standalone-cutover.sh | cut -d ' ' -f 1)"
+          wrapper_sha="$(sha256sum controller/deploy/run-school-ssh-d138.sh | cut -d ' ' -f 1)"
+          remote_job="/tmp/school-d138/${SCHOOL_SOURCE_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh_dir="$RUNNER_TEMP/school-d138-ssh"
+          install -d -m 0700 "$ssh_dir"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 0600 "$ssh_dir/id_ed25519" "$ssh_dir/known_hosts"
+          ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+          deploy_port="${DEPLOY_PORT:-2222}"
+          ssh_opts=(-p "$deploy_port" -i "$ssh_dir/id_ed25519" -o UserKnownHostsFile="$ssh_dir/known_hosts" -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o ConnectTimeout=30)
+          scp_opts=(-O -P "$deploy_port" -i "$ssh_dir/id_ed25519" -o UserKnownHostsFile="$ssh_dir/known_hosts" -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o ConnectTimeout=30)
+          ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "set -Eeuo pipefail; install -d -m 0700 /tmp/school-d138; test ! -e '$remote_job'; install -d -m 0700 '$remote_job'"
+          scp "${scp_opts[@]}" "$source_archive" controller/deploy/verify-school-release.mjs controller/deploy/school-curriculum-standalone-cutover.sh controller/deploy/run-school-ssh-d138.sh "$DEPLOY_USER@$DEPLOY_HOST:$remote_job/"
+          ssh "${ssh_opts[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "set -Eeuo pipefail; test \"\$(sha256sum '$remote_job/school-curriculum-standalone-cutover.sh' | cut -d ' ' -f 1)\" = '$cutover_sha'; test \"\$(sha256sum '$remote_job/run-school-ssh-d138.sh' | cut -d ' ' -f 1)\" = '$wrapper_sha'; RUN_ID='$GITHUB_RUN_ID' RUN_ATTEMPT='$GITHUB_RUN_ATTEMPT' WORKFLOW_SHA='$CONTROLLER_SHA' RELEASE_SHA='$SCHOOL_SOURCE_SHA' RELEASE_TREE='$SCHOOL_SOURCE_TREE' SOURCE_SHA256='$source_sha' VERIFY_SHA256='$verify_sha' JOB_DIR='$remote_job' bash '$remote_job/run-school-ssh-d138.sh'" \
+            | tee "$RUNNER_TEMP/school-d133.log"
           grep -F 'SCHOOL_STANDALONE_CUTOVER=PASS' "$RUNNER_TEMP/school-d133.log" >/dev/null
           grep -F 'SCHOOL_STANDALONE_BACKUP=VERIFIED' "$RUNNER_TEMP/school-d133.log" >/dev/null
       - name: Upgrade Atlas while preserving its database volume

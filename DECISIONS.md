@@ -635,3 +635,7 @@ D135 run `34539171120` остановился до мутаций: legacy system
 ## D137 — Разрешить School только по immutable image revision (2026-09-10, кандидат)
 
 D136 run `34540282349` остановился до мутаций, потому что на current gateway daemon отсутствует прежняя сеть `arthello-os_backend`. D137 перебирает только running containers и требует ровно один image с revision `54242340f2d9b6a9887d69ecc03520ddf9f7982c`; его безопасное имя передаётся standalone controller. Ноль/множественность/revision drift — stop. Trigger: `D137: resolve School image identity`.
+
+## D138 — Вернуть School на принятую SSH deploy boundary (2026-09-10, кандидат)
+
+D137 run `34541397143` не нашёл production School image на локальном Docker daemon и остановился до мутаций/Atlas. D138 использует прежнюю защищённую SSH boundary School: pinned known hosts, key-only auth, remote checksums immutable archive/controller и единственный running image old revision. Только после remote standalone PASS выполняется локальный Atlas шаг. Trigger: `D138: use School remote boundary`.
