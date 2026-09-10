@@ -44,6 +44,13 @@ success; исходный workflow восстанавливается по blob
 `9dcea69d6aa05707efd3281493ef63b0c5cd1310` (SHA-256
 `274b13333dd255c576e7d73b94c7d3bf8d33565a5d508af02e287ea124c41c55`).
 
+Шестой cleanup-блок D133 переносит завершённый Atlas D122–D130 controller из
+активной директории в `docs/workflow-history/deploy-atlas-d122.yml`. Его
+production prefixes уже приняты и не могут сработать на новом main; новый D133
+controller объединяет только текущий выпуск интерфейсов двух дневников.
+Исторический workflow сохранён с blob `9952c900da21eac16a37ddf3adb5f52cb4d586cf`
+и SHA-256 `fcebf657da1ba80a9d56d2f381841a58e061375bb1d31d6d3e5cf9a0f1b83f3c`.
+
 | Blob SHA                                   | Путь                                                                                |
 | ------------------------------------------ | ----------------------------------------------------------------------------------- |
 | `46ce4c5ed22c88a692f565e91dc8112e400bdff6` | `.github/workflows/d060-tochka-production-hotfix-v2.yml`                            |

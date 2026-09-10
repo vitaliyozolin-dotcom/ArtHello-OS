@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const workflow = readFileSync(
-  ".github/workflows/deploy-atlas-d122.yml",
+  "docs/workflow-history/deploy-atlas-d122.yml",
   "utf8",
 );
 const release = readFileSync("deploy/activate-atlas-d122.sh", "utf8");

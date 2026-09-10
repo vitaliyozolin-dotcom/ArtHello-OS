@@ -1,0 +1,254 @@
+name: Deploy diary UI consistency D133
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/deploy-diaries-d133.yml
+      - deploy/upgrade-atlas-d133.sh
+      - deploy/activate-atlas-owner-access.mjs
+      - scripts/test/diary-ui-release.test.mjs
+      - DECISIONS.md
+      - CURRENT_STATE.md
+      - RUNBOOK.md
+      - docs/PROJECT_PASSPORT_PRODUCTION_RU.md
+      - docs/acceptance/2026-09-10-diary-ui-consistency.md
+  workflow_run:
+    workflows: [Quality gates]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+
+env:
+  ATLAS_SOURCE_SHA: f856fb3bd098152bb6b02c4d0273c4c9170b130c
+  ATLAS_SOURCE_TREE: e63e28520670527bc12d84abcd45cd8fffe2b876
+  SCHOOL_SOURCE_SHA: 1a501aa11c55a7a743fc05888d5a57190f2a5c80
+  SCHOOL_SOURCE_TREE: ff140e1c5cee91dfe685962c1c5a9e1b6d7d14f1
+
+jobs:
+  bundle-atlas:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' && (
+        github.event_name == 'pull_request' ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.name == 'Quality gates' &&
+         github.event.workflow_run.path == '.github/workflows/quality.yml' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.repository.id == github.event.repository.id &&
+         github.event.workflow_run.head_repository.id == github.event.repository.id &&
+         startsWith(github.event.workflow_run.head_commit.message, 'D133: release diary UI consistency')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CONTROLLER_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CONTROLLER_SHA }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.ATLAS_SOURCE_SHA }}
+          path: atlas
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Verify controller and Atlas source
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C controller rev-parse HEAD)" = "$CONTROLLER_SHA"
+          test "$(git -C atlas rev-parse HEAD)" = "$ATLAS_SOURCE_SHA"
+          test "$(git -C atlas rev-parse HEAD^{tree})" = "$ATLAS_SOURCE_TREE"
+          bash -n controller/deploy/upgrade-atlas-d133.sh
+          (cd controller && node --test scripts/test/diary-ui-release.test.mjs scripts/test/atlas-owner-access-activation.test.mjs)
+          (cd atlas && npm ci && npm run test:atlas)
+      - name: Build and smoke Atlas image
+        run: |
+          set -Eeuo pipefail
+          docker build \
+            --label "org.opencontainers.image.revision=$ATLAS_SOURCE_SHA" \
+            --label "org.opencontainers.image.source-tree=$ATLAS_SOURCE_TREE" \
+            --tag "atlas-diary:$ATLAS_SOURCE_SHA" atlas
+          container="atlas-d133-smoke-$GITHUB_RUN_ID"
+          data="atlas-d133-smoke-data-$GITHUB_RUN_ID"
+          backups="atlas-d133-smoke-backups-$GITHUB_RUN_ID"
+          cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; docker volume rm "$data" "$backups" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker volume create "$data" >/dev/null
+          docker volume create "$backups" >/dev/null
+          docker run -d --name "$container" --network none --read-only \
+            --tmpfs /tmp:rw,uid=1001,gid=1001 \
+            -e PUBLIC_APP_ORIGIN=https://atlas-188-225-38-55.sslip.io \
+            -e ARTHELLO_PUBLIC_ORIGIN=https://arthello-188-225-38-55.sslip.io \
+            -e CENTRAL_ACCESS_SECRET=atlas-ci-only-key-123456789012345678901234567890 \
+            -e PASSWORDLESS_PEPPER=atlas-ci-only-pepper-1234567890123456789012345678 \
+            -v "$data:/data" -v "$backups:/backups" "atlas-diary:$ATLAS_SOURCE_SHA"
+          ready=0
+          for _ in $(seq 1 40); do
+            if docker exec "$container" node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" = 1
+          docker exec "$container" node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync('/data/atlas-school.sqlite'); if(db.prepare(\"SELECT institution_id FROM diary_identity WHERE id='primary'\").get()?.institution_id!=='atlas-school')throw Error('institution'); if(db.prepare('SELECT count(*) n FROM users').get().n!==0)throw Error('users'); db.close();"
+      - name: Package Atlas image
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/atlas-d133-bundle"
+          docker save "atlas-diary:$ATLAS_SOURCE_SHA" | gzip -1 -n > "$RUNNER_TEMP/atlas-d133-bundle/atlas-image.tar.gz"
+          image_id="$(docker image inspect "atlas-diary:$ATLAS_SOURCE_SHA" --format '{{.Id}}')"
+          jq -n --arg source "$ATLAS_SOURCE_SHA" --arg tree "$ATLAS_SOURCE_TREE" --arg image "$image_id" \
+            '{sourceSha:$source,sourceTree:$tree,imageId:$image}' > "$RUNNER_TEMP/atlas-d133-bundle/receipt.json"
+          (cd "$RUNNER_TEMP/atlas-d133-bundle" && sha256sum atlas-image.tar.gz receipt.json > checksums.sha256)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: atlas-d133-bundle
+          path: ${{ runner.temp }}/atlas-d133-bundle/
+          retention-days: 7
+          compression-level: 0
+
+  verify-school-source:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' && (
+        github.event_name == 'pull_request' ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.name == 'Quality gates' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         startsWith(github.event.workflow_run.head_commit.message, 'D133: release diary UI consistency')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.SCHOOL_SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Verify exact School source and return navigation
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$SCHOOL_SOURCE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$SCHOOL_SOURCE_TREE"
+          grep -F 'href="/auth/central/return"' app/school-app.tsx >/dev/null
+          grep -F 'Вернуться в ArtHello OS' app/school-app.tsx >/dev/null
+          npm ci
+          npm test
+
+  deploy:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.head_sha == github.event.workflow_run.head_commit.id &&
+      startsWith(github.event.workflow_run.head_commit.message, 'D133: release diary UI consistency')
+    needs: [bundle-atlas, verify-school-source]
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    timeout-minutes: 45
+    env:
+      CONTROLLER_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Verify exact accepted main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          current="$(curl --fail --silent --show-error --max-time 20 \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+          test "$current" = "$CONTROLLER_SHA"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CONTROLLER_SHA }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.SCHOOL_SOURCE_SHA }}
+          path: school
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: atlas-d133-bundle
+          path: ${{ runner.temp }}/atlas-d133-bundle
+      - name: Upgrade School 1–11 with its established backup and rollback cutover
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C school rev-parse HEAD)" = "$SCHOOL_SOURCE_SHA"
+          test "$(git -C school rev-parse HEAD^{tree})" = "$SCHOOL_SOURCE_TREE"
+          SOURCE_DIR="$GITHUB_WORKSPACE/school" DELIVERY_REF="$SCHOOL_SOURCE_SHA" \
+            SCHOOL_HOST=school-188-225-38-55.sslip.io VERIFY_PUBLIC=1 \
+            bash school/deploy/repair-deploy.sh | tee "$RUNNER_TEMP/school-d133.log"
+          grep -F 'SCHOOL_DEPLOY=SUCCESS' "$RUNNER_TEMP/school-d133.log" >/dev/null
+          grep -F 'SCHOOL_BACKUP=VERIFIED' "$RUNNER_TEMP/school-d133.log" >/dev/null
+      - name: Upgrade Atlas while preserving its database volume
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ATLAS_BUNDLE_DIR: ${{ runner.temp }}/atlas-d133-bundle
+        run: bash controller/deploy/upgrade-atlas-d133.sh
+      - name: Verify owner Atlas SSO after image replacement
+        env:
+          ARTHELLO_OWNER_LOGIN: ${{ secrets.ARTHELLO_FINANCE_IMPORT_LOGIN }}
+          ARTHELLO_OWNER_PASSWORD: ${{ secrets.ARTHELLO_FINANCE_IMPORT_PASSWORD }}
+          ATLAS_OWNER_ACCESS_APPLY: "1"
+        run: |
+          set -Eeuo pipefail
+          service=atlas-school-diary
+          rollback_name="${service}-d133-rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rollback_available=0
+          if docker inspect "$rollback_name" >/dev/null 2>&1; then rollback_available=1; fi
+          restore_on_failure() {
+            status=$?
+            set +e
+            if [ "$status" -ne 0 ] && [ "$rollback_available" -eq 1 ]; then
+              printf 'ATLAS_SSO_ROLLBACK=STARTED\n' >&2
+              docker rm -f "$service" >/dev/null 2>&1
+              docker rename "$rollback_name" "$service" >/dev/null 2>&1
+              docker start "$service" >/dev/null 2>&1
+              curl -fsS --max-time 20 https://atlas-188-225-38-55.sslip.io/api/health >/dev/null
+            fi
+            exit "$status"
+          }
+          trap restore_on_failure EXIT
+          runtime_node="$(command -v node || true)"
+          if [[ -z "$runtime_node" ]]; then
+            runner_root="$(realpath "$RUNNER_TEMP/../..")"
+            runtime_node="$runner_root/externals/node24/bin/node"
+          fi
+          test -x "$runtime_node"
+          result="$("$runtime_node" controller/deploy/activate-atlas-owner-access.mjs)"
+          jq -e '.status == "accepted" and .ownerGrant == "director" and .atlasSso == "verified"' <<<"$result" >/dev/null
+          if [ "$rollback_available" -eq 1 ]; then
+            test "$(docker inspect "$rollback_name" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = 987abd5951dc4832e2c071d8744051c518bae42e
+            docker rm "$rollback_name" >/dev/null
+            rollback_available=0
+          fi
+          jq -n --arg controller "$CONTROLLER_SHA" --argjson result "$result" \
+            '{schemaVersion:1,kind:"diary-ui-production-acceptance",controllerSha:$controller,atlasOwnerSso:$result,schoolReturn:true}' \
+            > "$RUNNER_TEMP/diary-d133-production-receipt.json"
+          trap - EXIT
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: diary-d133-production-receipts
+          path: |
+            ${{ runner.temp }}/atlas-d133-bundle/atlas-d133-production-receipt.json
+            ${{ runner.temp }}/diary-d133-production-receipt.json
+            ${{ runner.temp }}/school-d133.log
+          if-no-files-found: warn
+          retention-days: 30
