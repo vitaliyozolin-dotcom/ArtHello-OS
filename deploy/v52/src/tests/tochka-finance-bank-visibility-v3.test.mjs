@@ -86,13 +86,14 @@ test("D-066 imports a documented Tochka transaction without transactionId", asyn
   assert.equal(operation.amountMinor, 120000);
 });
 
-test("D-066 finance API exposes safe bank balances and preserves forecast semantics", async () => {
+test("D-066 bank source remains connected while D128 hides shared legal-entity balances from branch reports", async () => {
   const source = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
   const patched = patchD066FinanceRoute(source);
   assert.match(patched, /bankAccountsView/);
   assert.match(patched, /rubBalanceMinor/);
   assert.match(patched, /const openingBalanceMinor = 0;/, "bank balance must not silently redefine forecast opening balance");
-  assert.match(patched, /Точка подключена · \$\{bankSummary\.accountCount\} счетов/);
+  assert.match(patched, /const bankAccountsView: typeof sourceBankAccounts = \[\];/);
+  assert.match(patched, /общий остаток юрлица не включён/);
   const start = patched.indexOf("db.select({\n        id: bankAccounts.id");
   const end = patched.indexOf("}).from(bankAccounts)", start);
   assert.ok(start >= 0 && end > start);

@@ -477,6 +477,7 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
               displayName={displayName}
               userKey={authenticatedUser?.userId ?? ""}
               role={role}
+              selectedBranch={selectedBranch}
               setActive={openModule}
               setDrawer={setDrawer}
               createTask={() => setTaskOpen(true)}
@@ -489,7 +490,7 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
           ) : routedActive === "registry" ? (
             <RegistryWorkspace notify={setNotice} capabilities={registryAccess} />
           ) : routedActive === "finance" ? (
-            <FinanceWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} focusId={moduleFocus?.module === "finance" ? moduleFocus.id : undefined} />
+            <FinanceWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} selectedBranch={selectedBranch} branchName={branches.find((branch) => branch.id === selectedBranch)?.name ?? ""} focusId={moduleFocus?.module === "finance" ? moduleFocus.id : undefined} />
           ) : routedActive === "sales" ? (
             <SalesWorkspace workspace="sales" role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenFinance={() => openModule("finance")} onOpenIntegrations={() => openModule("integrations")} focusId={moduleFocus?.module === "sales" ? moduleFocus.id : undefined} />
           ) : routedActive === "clients" ? (
@@ -550,6 +551,7 @@ function HomeView({
   displayName,
   userKey,
   role,
+  selectedBranch,
   setActive,
   setDrawer,
   createTask,
@@ -560,6 +562,7 @@ function HomeView({
   displayName: string;
   userKey: string;
   role: string;
+  selectedBranch: string;
   setActive: (id: ModuleId) => void;
   setDrawer: (value: DrawerData) => void;
   createTask: () => void;
@@ -573,6 +576,7 @@ function HomeView({
       displayName={displayName}
       userKey={userKey}
       roleLabel={profile.label}
+      selectedBranch={selectedBranch}
       tasks={tasks}
       availableModules={availableModules}
       sourceOnly={sourceOnly}

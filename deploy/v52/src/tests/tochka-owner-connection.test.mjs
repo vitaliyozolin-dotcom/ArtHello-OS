@@ -6,6 +6,8 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import * as ts from "typescript";
 import { canAccessAssignedIntegration, normalizePublicIntegrationIp, probeTochkaJwt, toTochkaFinancialOperation, validateTochkaJwt } from "../lib/integrations.ts";
+import { classifyFinanceOperation, isAutoAllocationCatalogReady } from "../lib/finance-auto-allocation.ts";
+import { FINANCE_ACCOUNTING_START_DATE } from "../lib/finance-branch-scope.ts";
 
 const fixedNow = Date.UTC(2026, 8, 2, 12, 0, 0);
 const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -161,6 +163,9 @@ async function loadCredentialDbModule(database) {
     ['import { entityDuplicateKey, manualEntityNormalization } from "../lib/entity-provenance";', "const entityDuplicateKey = () => ''; const manualEntityNormalization = () => null;"],
     ['import { ensureOperatingIntegrationCatalog } from "../lib/operating-integration-catalog";', "const ensureOperatingIntegrationCatalog = async () => {};"],
     ['import { toTochkaFinancialOperation } from "../lib/integrations";', "const toTochkaFinancialOperation = globalThis.__ARTHELLO_TOCHKA_DB_PROJECT__;"],
+    ['import { classifyFinanceOperation, isAutoAllocationCatalogReady, type FinanceAutoAllocation } from "../lib/finance-auto-allocation";', "const { classifyFinanceOperation, isAutoAllocationCatalogReady } = globalThis.__ARTHELLO_FINANCE_RULE_TEST__;"],
+    ['import { FINANCE_ACCOUNTING_START_DATE } from "../lib/finance-branch-scope";', "const { FINANCE_ACCOUNTING_START_DATE } = globalThis.__ARTHELLO_FINANCE_RULE_TEST__;"],
+    ['import { loadArticleCatalog } from "../lib/finance-article-store";', "const loadArticleCatalog = globalThis.__ARTHELLO_FINANCE_RULE_TEST__.loadArticleCatalog;"],
     ['import * as schema from "./schema";', "const schema = {};"],
   ];
   for (const [search, replacement] of replacements) {
@@ -173,6 +178,12 @@ async function loadCredentialDbModule(database) {
   };
   globalThis.__ARTHELLO_TOCHKA_DB_PROJECT__ = toTochkaFinancialOperation;
   globalThis.__ARTHELLO_TOCHKA_STATE_TEST__ = { acquireTochkaStatementState, tochkaStatementLeaseGuardSql };
+  globalThis.__ARTHELLO_FINANCE_RULE_TEST__ = {
+    classifyFinanceOperation,
+    isAutoAllocationCatalogReady,
+    FINANCE_ACCOUNTING_START_DATE,
+    loadArticleCatalog: async () => ({ catalog: { schema: 1, revision: 1, articles: [] }, raw: null }),
+  };
   const output = ts.transpileModule(databaseSource, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
     fileName: "db/index.ts",
@@ -218,7 +229,7 @@ function createCredentialSchema(database) {
       message TEXT NOT NULL, record_ref TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE TABLE entities (id TEXT PRIMARY KEY NOT NULL, entity_type TEXT NOT NULL);
+    CREATE TABLE entities (id TEXT PRIMARY KEY NOT NULL, entity_type TEXT NOT NULL, display_name TEXT NOT NULL);
     CREATE TABLE organization_branches (id TEXT PRIMARY KEY NOT NULL, status TEXT NOT NULL);
     CREATE TABLE audit_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -229,7 +240,7 @@ function createCredentialSchema(database) {
       payload TEXT NOT NULL
     );
     INSERT INTO integration_connections (id) VALUES ('INT-T-TOCHKA');
-    INSERT INTO entities (id,entity_type) VALUES ('ORG-LIVE-1','Юрлицо'),('ORG-LIVE-2','Юрлицо');
+    INSERT INTO entities (id,entity_type,display_name) VALUES ('ORG-LIVE-1','Юрлицо','ООО «АртХелло»'),('ORG-LIVE-2','Юрлицо','ООО Другое');
     INSERT INTO organization_branches (id,status) VALUES ('BR-LIVE','Активен');
   `);
 }
@@ -239,7 +250,8 @@ function createBankSyncSchema(database) {
     CREATE TABLE financial_operations (
       id TEXT PRIMARY KEY NOT NULL, operation_date TEXT NOT NULL, period TEXT NOT NULL,
       direction TEXT NOT NULL, amount_minor INTEGER NOT NULL, category TEXT NOT NULL,
-      report_class TEXT NOT NULL, counterparty_entity_id TEXT NOT NULL DEFAULT '',
+      cashflow_article TEXT NOT NULL DEFAULT '', pnl_article TEXT NOT NULL DEFAULT '',
+      report_class TEXT NOT NULL, accrual_period TEXT NOT NULL DEFAULT '', counterparty_entity_id TEXT NOT NULL DEFAULT '',
       contract_id TEXT NOT NULL DEFAULT '', document_id TEXT NOT NULL DEFAULT '',
       project_entity_id TEXT NOT NULL DEFAULT '', legal_entity_id TEXT NOT NULL DEFAULT '',
       object_entity_id TEXT NOT NULL DEFAULT '', cfr_entity_id TEXT NOT NULL DEFAULT '',
@@ -283,7 +295,7 @@ function credentialSetup(legalEntityId, customerCode) {
   return {
     connectionId: "INT-T-TOCHKA",
     authMethod: "JWT",
-    startDate: "2026-01-01",
+    startDate: "2026-09-01",
     syncIntervalMinutes: 60,
     syncMinute: 5,
     endpoint: "",

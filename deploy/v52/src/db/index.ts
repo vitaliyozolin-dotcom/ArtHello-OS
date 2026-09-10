@@ -1,3696 +1,2062 @@
-// TOCHKA_AUTOMATIC_READONLY_V1
-import { acquireTochkaStatementState, tochkaStatementLeaseGuardSql } from '../lib/tochka-statement-state';
-import type { TochkaStatementLeaseFence } from '../lib/tochka-statement-state';
-// TOCHKA_PENDING_STATEMENT_LIFECYCLE_V1
-import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
-import { entityDuplicateKey, manualEntityNormalization } from "../lib/entity-provenance";
-import { ensureOperatingIntegrationCatalog } from "../lib/operating-integration-catalog";
-import { toTochkaFinancialOperation } from "../lib/integrations";
-import type { TochkaReadOnlySyncResult } from "../lib/integrations";
-import * as schema from "./schema";
-
-export function getDb() {
-  if (!env.DB) {
-    throw new Error(
-      "Cloudflare D1 binding `DB` is unavailable. Set the `d1` field in .openai/hosting.json to `DB` or let your control plane inject the real binding values before using the database."
-    );
-  }
-
-  return drizzle(env.DB, { schema });
-}
-
-const CORE_SCHEMA_VERSION = "arthello-os-task-ownership-v1";
-const INTEGRATION_DEMO_BOOTSTRAP_VERSION = "integration-demo-v3";
-const FINANCE_ENTITY_LINKS_BOOTSTRAP_VERSION = "finance-entity-links-v1";
-const SYSTEM_DEMO_PURGE_VERSION = "global-demo-purge-v2";
-const MANUAL_ENTITY_PROVENANCE_VERSION = "manual-entity-provenance-v2";
-const TASK_OWNER_BACKFILL_VERSION = "task-created-by-user-v1";
-const HUMAN_READABLE_RECORDS_VERSION = "human-readable-records-v1";
-const LEGACY_ALFA_BANK_MIGRATION_VERSION = "legacy-alfa-bank-to-tbank-v1";
-const REQUIRED_CORE_TABLES = [
-  "organization_branches",
-  "app_users",
-  "app_systems",
-  "user_system_access",
-  "access_sync_events",
-  "family_system_access",
-  "user_branch_access",
-  "manual_records",
-  "tasks",
-  "entities",
-  "financial_operations",
-  "bank_accounts",
-  "bank_statement_imports",
-  "bank_transactions",
-  "client_lifecycles",
-  "content_plan_items",
-  "education_programs",
-  "hr_employees",
-  "legal_contracts",
-  "legal_contract_text_versions",
-  "procurement_suppliers",
-  "food_products",
-  "safety_systems",
-  "medical_cases",
-  "accounting_documents",
-  "strategy_projects",
-  "integration_connections",
-  "analytics_signals",
-  "readiness_scenarios",
-] as const;
-
-let coreTablesPromise: Promise<void> | null = null;
-
-export async function ensureCoreTables() {
-  if (!env.DB) {
-    throw new Error("Cloudflare D1 binding `DB` is unavailable.");
-  }
-
-  if (!coreTablesPromise) {
-    coreTablesPromise = ensureCoreTablesOnce().catch((error) => {
-      coreTablesPromise = null;
-      throw error;
-    });
-  }
-
-  return coreTablesPromise;
-}
-
-async function ensureCoreTablesOnce() {
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS system_runtime_state (
-    state_key TEXT PRIMARY KEY NOT NULL,
-    state_value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`).run();
-
-  const mode = await getSystemDataMode();
-  const marker = await env.DB.prepare(
-    "SELECT state_value FROM system_runtime_state WHERE state_key = 'core_schema'"
-  ).first<{ state_value: string }>();
-  const placeholders = REQUIRED_CORE_TABLES.map(() => "?").join(",");
-  const existing = await env.DB.prepare(
-    `SELECT COUNT(*) AS table_count FROM sqlite_master WHERE type = 'table' AND name IN (${placeholders})`
-  ).bind(...REQUIRED_CORE_TABLES).first<{ table_count: number }>();
-  const hasAllCoreTables = Number(existing?.table_count ?? 0) === REQUIRED_CORE_TABLES.length;
-
-  // DDL repair is deliberately independent from data initialization. Every
-  // process validates the complete idempotent schema once, including tables
-  // outside REQUIRED_CORE_TABLES, while demo rows are created only in an
-  // explicitly selected test contour.
-  await initializeCoreTables();
-  await ensureFinanceOperationAllocationColumns();
-  await migrateLegacyAlfaBankIntegration();
-  await normalizeManualEntityProvenance();
-  // A stored bank credential is useful only while the runtime master key can
-  // actually decrypt it. Validate every envelope during readiness so a stale
-  // runner-side key fails before a candidate can touch or replace production.
-  await verifyStoredIntegrationCredentials();
-  if (!hasAllCoreTables && mode === "test") await seedInitialDemoData();
-  if (mode === "test") await normalizeHumanReadableDemoRecords();
-
-  if (marker?.state_value !== CORE_SCHEMA_VERSION || !hasAllCoreTables) {
-    await env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-      VALUES ('core_schema',?,CURRENT_TIMESTAMP)
-      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-      .bind(CORE_SCHEMA_VERSION)
-      .run();
-  }
-
-  // Empty production data is durable: health checks may repair DDL, but they must
-  // never recreate demo, imported or derived business records.
-  if (mode === "empty") {
-    await ensureOperatingIntegrationCatalogState();
-    return;
-  }
-
-  await ensurePaymentDerivedCounterparties();
-
-  if (mode === "source_only") {
-    await ensureSourceOnlyCleanup();
-  } else {
-    await ensureIntegrationDemoBootstrap();
-    await ensureAnalyticsDemoBootstrap();
-    await ensureFinanceEntityLinksBootstrap();
-  }
-  await ensureOperatingIntegrationCatalogState();
-}
-
-async function ensureOperatingIntegrationCatalogState() {
-  await ensureOperatingIntegrationCatalog();
-}
-
-// D069_FINANCE_OPERATION_ALLOCATION
-async function ensureFinanceOperationAllocationColumns() {
-  const info = await env.DB.prepare("PRAGMA table_info(financial_operations)").all<{ name: string }>();
-  const existing = new Set((info.results ?? []).map((row) => row.name));
-  const additions = [
-    ["cashflow_article", "TEXT NOT NULL DEFAULT ''"],
-    ["pnl_article", "TEXT NOT NULL DEFAULT ''"],
-    ["accrual_period", "TEXT NOT NULL DEFAULT ''"],
-    ["counterparty_label", "TEXT NOT NULL DEFAULT ''"],
-    ["management_purpose", "TEXT NOT NULL DEFAULT ''"],
-  ] as const;
-  for (const [name, ddl] of additions) {
-    if (!existing.has(name)) await env.DB.prepare(`ALTER TABLE financial_operations ADD COLUMN ${name} ${ddl}`).run();
-  }
-  await env.DB.prepare(`UPDATE financial_operations
-    SET cashflow_article=category
-    WHERE cashflow_article='' AND category<>'' AND category<>'ÐÐµ ÐºÐ»Ð°ÑÑÐ¸Ñ„Ð¸Ñ†Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¾'`).run();
-}
-
-async function migrateLegacyAlfaBankIntegration() {
-  const marker = await env.DB.prepare(
-    "SELECT state_value FROM system_runtime_state WHERE state_key='legacy_alfa_bank_migration'",
-  ).first<{ state_value: string }>();
-  if (marker?.state_value !== LEGACY_ALFA_BANK_MIGRATION_VERSION) {
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key='integration_setup:INT-T-ALFABANK'"),
-      env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key LIKE 'integration_credential:v2:INT-T-ALFABANK:%'"),
-      env.DB.prepare("DELETE FROM tasks WHERE source_type='ÐšÐ¾Ð½Ñ„Ð»Ð¸ÐºÑ‚ Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ð¸' AND source_id IN (SELECT id FROM integration_conflicts WHERE connection_id='INT-T-ALFABANK')"),
-      env.DB.prepare("DELETE FROM integration_log_entries WHERE connection_id='INT-T-ALFABANK'"),
-      env.DB.prepare("DELETE FROM integration_conflicts WHERE connection_id='INT-T-ALFABANK'"),
-      env.DB.prepare("DELETE FROM integration_sync_runs WHERE connection_id='INT-T-ALFABANK'"),
-      env.DB.prepare("DELETE FROM integration_connections WHERE id='INT-T-ALFABANK'"),
-      env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-        VALUES ('legacy_alfa_bank_migration',?,CURRENT_TIMESTAMP)
-        ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-        .bind(LEGACY_ALFA_BANK_MIGRATION_VERSION),
-    ]);
-  }
-}
-
-async function normalizeHumanReadableDemoRecords() {
-  const marker = await env.DB.prepare(
-    "SELECT state_value FROM system_runtime_state WHERE state_key = 'human_readable_records'",
-  ).first<{ state_value: string }>();
-  if (marker?.state_value === HUMAN_READABLE_RECORDS_VERSION) return;
-
-  await env.DB.batch([
-    env.DB.prepare("UPDATE accounting_documents SET number='0031' WHERE id='ACC-INV-T-031' AND source_type='SYNTHETIC_ACCOUNTING_TEST'"),
-    env.DB.prepare("UPDATE accounting_documents SET number='0088' WHERE id='ACC-UPD-T-088' AND source_type='SYNTHETIC_ACCOUNTING_TEST'"),
-    env.DB.prepare("UPDATE accounting_documents SET number='0821' WHERE id='ACC-RECEIPT-T-FOOD' AND source_type='SYNTHETIC_ACCOUNTING_TEST'"),
-    env.DB.prepare("UPDATE education_progress SET period='3 ÐºÐ²Ð°Ñ€Ñ‚Ð°Ð» 2026',evidence='ÐŸÐ¾ÑÐµÑ‰Ð°ÐµÐ¼Ð¾ÑÑ‚ÑŒ Ð¸ Ð¿Ñ€Ð¾Ð²ÐµÑ€Ð¾Ñ‡Ð½Ð°Ñ Ñ€Ð°Ð±Ð¾Ñ‚Ð° â„–0004' WHERE id IN ('PROG-T-014','PROG-T-015')"),
-    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='ÐŸÐ¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ñ Ð·Ð° Ð¼ÐµÑÑÑ† Ð¼Ð¸Ð½ÑƒÑ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ñ',source_quality='Ð¤Ð°ÐºÑ‚ Ð¸ÑÑ…Ð¾Ð´Ð½Ð¾Ð¹ Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ñ‹ Ð¸ Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ð¾ Ð¿Ð¾Ð¼ÐµÑ‡ÐµÐ½Ð½Ñ‹Ðµ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ðµ Ð·Ð°Ð¿Ð¸ÑÐ¸' WHERE id='MET-T-CASH'"),
-    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='ÐÐ°Ñ‡Ð°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ðº Ð¿Ð»ÑŽÑ Ð¿Ð¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ñ Ð¸ Ð¼Ð¸Ð½ÑƒÑ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ñ Ñ ÑƒÑ‡Ñ‘Ñ‚Ð¾Ð¼ Ð²ÐµÑ€Ð¾ÑÑ‚Ð½Ð¾ÑÑ‚Ð¸' WHERE id='MET-T-CASH-GAP'"),
-    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Ð¡ÑƒÐ¼Ð¼Ð° Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ñ… Ð¾Ð¿Ð»Ð°Ñ‚ ÑÐµÐ¼ÑŒÐ¸' WHERE id='MET-T-LTV'"),
-    env.DB.prepare("UPDATE analytics_metric_definitions SET definition='Ð§Ð¸ÑÐ»Ð¾ Ð°ÐºÑ‚Ð¸Ð²Ð½Ñ‹Ñ… ÑÐµÐ¼ÐµÐ¹ Ñ Ð²Ñ‹ÑÐ¾ÐºÐ¸Ð¼ Ñ€Ð¸ÑÐºÐ¾Ð¼',formula='Ð§Ð¸ÑÐ»Ð¾ Ð°ÐºÑ‚Ð¸Ð²Ð½Ñ‹Ñ… ÑÐµÐ¼ÐµÐ¹ Ñ Ð²Ñ‹ÑÐ¾ÐºÐ¸Ð¼ Ñ€Ð¸ÑÐºÐ¾Ð¼' WHERE id='MET-T-CHURN'"),
-    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Ð¡Ñ€ÐµÐ´Ð½ÐµÐµ Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ðµ Ð¿Ñ€Ð¾Ð³Ñ€ÐµÑÑÐ°',freshness='3 ÐºÐ²Ð°Ñ€Ñ‚Ð°Ð» 2026' WHERE id='MET-T-EDU'"),
-    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Ð§Ð¸ÑÐ»Ð¾ Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÑŽÑ‰Ð¸Ñ… ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ¾Ð²' WHERE id='MET-T-STAFF'"),
-    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Ð§Ð¸ÑÐ»Ð¾ Ð½ÐµÐ·Ð°ÐºÑ€Ñ‹Ñ‚Ñ‹Ñ… Ð½ÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÐµÐ¹' WHERE id='MET-T-SAFETY'"),
-    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Ð”Ð¾Ð»Ñ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»Ð¸ Ð¿Ð¾ÑÐ»Ðµ ÑÑ‚Ð¾Ð¸Ð¼Ð¾ÑÑ‚Ð¸ Ð¿Ñ€Ð¾Ð´ÑƒÐºÑ‚Ð¾Ð² Ð¸ ÑÐ¼ÐµÐ½' WHERE id='MET-T-FOOD'"),
-    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Ð§Ð¸ÑÐ»Ð¾ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð¾Ð² Ð¿Ð¾Ð´ Ñ€Ð¸ÑÐºÐ¾Ð¼' WHERE id='MET-T-PROJECT'"),
-    env.DB.prepare("UPDATE analytics_metric_definitions SET formula='Ð§Ð¸ÑÐ»Ð¾ Ð¾Ñ‚ÐºÑ€Ñ‹Ñ‚Ñ‹Ñ… Ñ€Ð°ÑÑ…Ð¾Ð¶Ð´ÐµÐ½Ð¸Ð¹ Ð² Ñ„Ð¸Ð½Ð°Ð½ÑÐ°Ñ… Ð¸ Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸ÑÑ…' WHERE id='MET-T-DQ'"),
-    env.DB.prepare("UPDATE ai_process_contracts SET version='ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼' WHERE id LIKE 'AI-CONTRACT-%'"),
-    env.DB.prepare("UPDATE ai_model_runs SET model_version='ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼',input_snapshot_ref='ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒÐ½Ñ‹Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº Ð°Ð½Ð°Ð»Ð¸Ñ‚Ð¸ÐºÐ¸' WHERE id LIKE 'AI-RUN-T-%'"),
-    env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-      VALUES ('human_readable_records',?,CURRENT_TIMESTAMP)
-      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-      .bind(HUMAN_READABLE_RECORDS_VERSION),
-  ]);
-}
-
-async function normalizeManualEntityProvenance() {
-  const marker = await env.DB.prepare(
-    "SELECT state_value FROM system_runtime_state WHERE state_key='manual_entity_provenance'"
-  ).first<{ state_value: string }>();
-  if (marker?.state_value === MANUAL_ENTITY_PROVENANCE_VERSION) return;
-
-  type ManualEntityRow = {
-    id: string;
-    entityType: string;
-    displayName: string;
-    sourceSystem: string;
-    dataQuality: string;
-    status: string;
-    hrStatus: string | null;
-  };
-  type IdentityRow = { entityType: string; displayName: string };
-  const [manualResult, identityResult] = await Promise.all([
-    env.DB.prepare(`SELECT entity.id AS id,entity.entity_type AS entityType,entity.display_name AS displayName,
-      entity.source_system AS sourceSystem,entity.data_quality AS dataQuality,entity.status AS status,employee.status AS hrStatus
-      FROM entities AS entity LEFT JOIN hr_employees AS employee ON employee.id=entity.id
-      WHERE (upper(entity.source_system)='MANUAL' OR upper(entity.source_system) GLOB 'MANUAL_*')
-        AND entity.status <> 'ÐžÐ±ÑŠÐµÐ´Ð¸Ð½ÐµÐ½Ð°'`).all<ManualEntityRow>(),
-    env.DB.prepare(`SELECT entity_type AS entityType,display_name AS displayName
-      FROM entities WHERE status <> 'ÐžÐ±ÑŠÐµÐ´Ð¸Ð½ÐµÐ½Ð°'`).all<IdentityRow>(),
-  ]);
-  const duplicateCounts = new Map<string, number>();
-  for (const row of identityResult.results ?? []) {
-    const key = entityDuplicateKey(row);
-    duplicateCounts.set(key, (duplicateCounts.get(key) ?? 0) + 1);
-  }
-  const eligible = (manualResult.results ?? []).flatMap((row) => {
-    const normalized = manualEntityNormalization(
-      row,
-      (duplicateCounts.get(entityDuplicateKey(row)) ?? 0) > 1,
-      row.hrStatus,
-    );
-    return normalized ? [{ row, normalized }] : [];
-  });
-  for (let offset = 0; offset < eligible.length; offset += 40) {
-    const statements = eligible.slice(offset, offset + 40).flatMap(({ row, normalized }) => {
-      const payload = JSON.stringify({
-        from: row.dataQuality,
-        to: normalized.dataQuality,
-        provenance: "Ð¡Ð¾Ð·Ð´Ð°Ð½Ð¾ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ",
-        statusFrom: row.status,
-        statusTo: normalized.status,
-        reason: "manual-source-without-duplicate",
-      });
-      return [
-        env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
-          SELECT 'system-migration','entity.provenance_normalized','entity',id,?
-          FROM entities WHERE id=? AND data_quality=? AND status=?`).bind(payload, row.id, row.dataQuality, row.status),
-        env.DB.prepare(`UPDATE entities SET data_quality=?,status=?,updated_at=CURRENT_TIMESTAMP
-          WHERE id=? AND data_quality=? AND status=?`).bind(normalized.dataQuality, normalized.status, row.id, row.dataQuality, row.status),
-      ];
-    });
-    await env.DB.batch(statements);
-  }
-  await env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-    VALUES ('manual_entity_provenance',?,CURRENT_TIMESTAMP)
-    ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-    .bind(MANUAL_ENTITY_PROVENANCE_VERSION)
-    .run();
-}
-
-async function ensurePaymentDerivedCounterparties() {
-  if (await getSystemDataMode() === "empty") return;
-  await env.DB.prepare(`INSERT INTO entities
-    (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by,updated_at)
-    VALUES ('SUP-T-001','ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚','ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-001 Â· Ð¿Ñ€Ð¾Ð´ÑƒÐºÑ‚Ñ‹','ÐÐºÑ‚Ð¸Ð²Ð½Ð°','XLSX_MASKED','ODDS-CTR-T-FOOD','ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ','Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹','{}','system-finance-source',CURRENT_TIMESTAMP)
-    ON CONFLICT(id) DO UPDATE SET entity_type='ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚',display_name='ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-001 Â· Ð¿Ñ€Ð¾Ð´ÑƒÐºÑ‚Ñ‹',source_system='XLSX_MASKED',source_record_id='ODDS-CTR-T-FOOD',data_quality='ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ',scope='Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹',updated_at=CURRENT_TIMESTAMP
-    WHERE entities.created_by LIKE 'system-%'`).run();
-}
-
-async function ensureSourceOnlyCleanup() {
-  const marker = await env.DB.prepare(
-    "SELECT state_value FROM system_runtime_state WHERE state_key='system_demo_purge'"
-  ).first<{ state_value: string }>();
-  if (marker?.state_value === SYSTEM_DEMO_PURGE_VERSION) return;
-  await removeSystemDemoData("system-migration");
-}
-
-async function ensureFinanceEntityLinksBootstrap() {
-  if (await getSystemDataMode() === "empty") return;
-  const marker = await env.DB.prepare(
-    "SELECT state_value FROM system_runtime_state WHERE state_key = 'finance_entity_links_bootstrap'"
-  ).first<{ state_value: string }>();
-  if (marker?.state_value === FINANCE_ENTITY_LINKS_BOOTSTRAP_VERSION) return;
-
-  await env.DB.prepare(`INSERT OR IGNORE INTO entity_links
-    (from_entity_id, to_entity_id, relation_type, created_by)
-    SELECT 'FAM-GROUP-T', 'FAM-T-014', 'Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ Ð¿Ñ€Ð¸Ð¼ÐµÑ€ ÑÐµÐ¼ÑŒÐ¸ Â· Ð½Ðµ Ð´ÐµÑ‚Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ XLSX', 'system-seed'
-    WHERE EXISTS (SELECT 1 FROM entities WHERE id = 'FAM-GROUP-T')
-      AND EXISTS (SELECT 1 FROM entities WHERE id = 'FAM-T-014')`)
-    .run();
-
-  await env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-    VALUES ('finance_entity_links_bootstrap',?,CURRENT_TIMESTAMP)
-    ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-    .bind(FINANCE_ENTITY_LINKS_BOOTSTRAP_VERSION)
-    .run();
-}
-
-async function initializeCoreTables() {
-  if (!env.DB) {
-    throw new Error("Cloudflare D1 binding `DB` is unavailable.");
-  }
-
-  const schemaStatements = [
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS organization_branches (
-      id TEXT PRIMARY KEY NOT NULL,
-      name TEXT NOT NULL,
-      kind TEXT NOT NULL DEFAULT 'Ð¤Ð¸Ð»Ð¸Ð°Ð»',
-      status TEXT NOT NULL DEFAULT 'ÐÐºÑ‚Ð¸Ð²ÐµÐ½',
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS app_users (
-      id TEXT PRIMARY KEY NOT NULL,
-      contact_type TEXT NOT NULL,
-      contact TEXT NOT NULL,
-      display_name TEXT NOT NULL,
-      role TEXT NOT NULL,
-      job_title TEXT NOT NULL DEFAULT '',
-      allowed_modules TEXT NOT NULL DEFAULT '',
-      favorite_modules TEXT NOT NULL DEFAULT '',
-      is_administrative INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'ÐŸÑ€Ð¸Ð³Ð»Ð°ÑˆÑ‘Ð½',
-      invitation_status TEXT NOT NULL DEFAULT 'ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð°ÐºÑ‚Ð¸Ð²Ð°Ñ†Ð¸Ð¸',
-      access_version INTEGER NOT NULL DEFAULT 1,
-      invited_by TEXT NOT NULL,
-      invited_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      activated_at TEXT NOT NULL DEFAULT '',
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS app_systems (
-      id TEXT PRIMARY KEY NOT NULL,
-      system_key TEXT NOT NULL,
-      name TEXT NOT NULL,
-      description TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'ÐÐºÑ‚Ð¸Ð²Ð½Ð°',
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_system_access (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      user_id TEXT NOT NULL,
-      system_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ÐÐºÑ‚Ð¸Ð²ÐµÐ½',
-      access_version INTEGER NOT NULL DEFAULT 1,
-      last_sync_status TEXT NOT NULL DEFAULT 'ÐÐµ Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ',
-      last_synced_at TEXT NOT NULL DEFAULT '',
-      granted_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS access_sync_events (
-      id TEXT PRIMARY KEY NOT NULL,
-      event_type TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      system_id TEXT NOT NULL,
-      payload TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ð¸',
-      attempts INTEGER NOT NULL DEFAULT 0,
-      last_error TEXT NOT NULL DEFAULT '',
-      result TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS family_system_access (
-      id TEXT PRIMARY KEY NOT NULL,
-      family_entity_id TEXT NOT NULL,
-      principal_entity_id TEXT NOT NULL,
-      principal_type TEXT NOT NULL,
-      system_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      login_type TEXT NOT NULL,
-      login TEXT NOT NULL,
-      delivery_channel TEXT NOT NULL,
-      delivery_status TEXT NOT NULL DEFAULT 'ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ¸',
-      status TEXT NOT NULL DEFAULT 'ÐÐºÑ‚Ð¸Ð²ÐµÐ½',
-      access_version INTEGER NOT NULL DEFAULT 1,
-      last_sync_status TEXT NOT NULL DEFAULT 'ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ð¸',
-      last_synced_at TEXT NOT NULL DEFAULT '',
-      granted_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_branch_access (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      user_id TEXT NOT NULL,
-      branch_id TEXT NOT NULL,
-      access_level TEXT NOT NULL DEFAULT 'Ð Ð°Ð±Ð¾Ñ‚Ð°',
-      granted_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS manual_records (
-      id TEXT PRIMARY KEY NOT NULL,
-      branch_id TEXT NOT NULL,
-      record_type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      period TEXT NOT NULL DEFAULT '',
-      amount_minor INTEGER NOT NULL DEFAULT 0,
-      details TEXT NOT NULL DEFAULT '{}',
-      status TEXT NOT NULL DEFAULT 'Ð§ÐµÑ€Ð½Ð¾Ð²Ð¸Ðº',
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS tasks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      title TEXT NOT NULL,
-      owner TEXT NOT NULL,
-      due_date TEXT NOT NULL DEFAULT '',
-      priority TEXT NOT NULL DEFAULT 'Ð¡Ñ€ÐµÐ´Ð½Ð¸Ð¹',
-      status TEXT NOT NULL DEFAULT 'Ð’Ñ…Ð¾Ð´ÑÑ‰Ð¸Ðµ',
-      source_type TEXT NOT NULL DEFAULT 'Ð ÑƒÑ‡Ð½Ð°Ñ Ð·Ð°Ð´Ð°Ñ‡Ð°',
-      source_id TEXT NOT NULL DEFAULT 'MANUAL',
-      description TEXT NOT NULL DEFAULT '',
-      assignee_entity_id TEXT NOT NULL DEFAULT '',
-      parent_task_id INTEGER,
-      kind TEXT NOT NULL DEFAULT 'Ð—Ð°Ð´Ð°Ñ‡Ð°',
-      recurrence_rule TEXT NOT NULL DEFAULT '',
-      automation_key TEXT,
-      requires_approval INTEGER NOT NULL DEFAULT 0,
-      result TEXT NOT NULL DEFAULT '',
-      result_evidence TEXT NOT NULL DEFAULT '',
-      completed_at TEXT NOT NULL DEFAULT '',
-      created_by_user_id TEXT NOT NULL DEFAULT '',
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS acceptance_decisions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      stage TEXT NOT NULL,
-      verdict TEXT NOT NULL,
-      comment TEXT NOT NULL DEFAULT '',
-      actor TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS audit_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      actor TEXT NOT NULL,
-      action TEXT NOT NULL,
-      entity_type TEXT NOT NULL,
-      entity_id TEXT NOT NULL,
-      payload TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS entities (
-      id TEXT PRIMARY KEY NOT NULL,
-      entity_type TEXT NOT NULL,
-      display_name TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ÐÐºÑ‚Ð¸Ð²Ð½Ð°',
-      source_system TEXT NOT NULL,
-      source_record_id TEXT NOT NULL,
-      data_quality TEXT NOT NULL DEFAULT 'Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ðµ Ð´Ð°Ð½Ð½Ñ‹Ðµ',
-      scope TEXT NOT NULL,
-      metadata TEXT NOT NULL DEFAULT '{}',
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS entity_links (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      from_entity_id TEXT NOT NULL,
-      to_entity_id TEXT NOT NULL,
-      relation_type TEXT NOT NULL,
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS entity_documents (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      entity_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      document_type TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ÐÐºÑ‚ÑƒÐ°Ð»ÐµÐ½',
-      valid_until TEXT NOT NULL DEFAULT '',
-      source TEXT NOT NULL DEFAULT 'MANUAL',
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS entity_merges (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      survivor_id TEXT NOT NULL,
-      duplicate_id TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS task_watchers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      task_id INTEGER NOT NULL,
-      entity_id TEXT NOT NULL,
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS task_checklist (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      task_id INTEGER NOT NULL,
-      title TEXT NOT NULL,
-      is_done INTEGER NOT NULL DEFAULT 0,
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS task_comments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      task_id INTEGER NOT NULL,
-      body TEXT NOT NULL,
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS task_approvals (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      task_id INTEGER NOT NULL,
-      step_name TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚',
-      decided_by TEXT NOT NULL DEFAULT '',
-      comment TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS workflow_documents (
-      id TEXT PRIMARY KEY NOT NULL,
-      title TEXT NOT NULL,
-      document_type TEXT NOT NULL,
-      current_version INTEGER NOT NULL DEFAULT 1,
-      status TEXT NOT NULL DEFAULT 'ÐÐºÑ‚ÑƒÐ°Ð»ÐµÐ½',
-      valid_until TEXT NOT NULL DEFAULT '',
-      owner_entity_id TEXT NOT NULL DEFAULT '',
-      source TEXT NOT NULL DEFAULT 'MANUAL',
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS document_versions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      document_id TEXT NOT NULL,
-      version INTEGER NOT NULL,
-      note TEXT NOT NULL DEFAULT '',
-      reference TEXT NOT NULL DEFAULT '',
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS task_documents (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      task_id INTEGER NOT NULL,
-      document_id TEXT NOT NULL,
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS obligations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      document_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      due_date TEXT NOT NULL,
-      owner_entity_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð¾',
-      warning_days INTEGER NOT NULL DEFAULT 30,
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS notifications (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      recipient_entity_id TEXT NOT NULL,
-      notification_type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      source_type TEXT NOT NULL,
-      source_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ÐÐ¾Ð²Ð¾Ðµ',
-      dedup_key TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      read_at TEXT NOT NULL DEFAULT ''
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS escalations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      task_id INTEGER NOT NULL,
-      level INTEGER NOT NULL DEFAULT 1,
-      reason TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð°',
-      recipient_entity_id TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS financial_operations (
-      id TEXT PRIMARY KEY NOT NULL,
-      operation_date TEXT NOT NULL,
-      period TEXT NOT NULL,
-      direction TEXT NOT NULL,
-      amount_minor INTEGER NOT NULL,
-      category TEXT NOT NULL,
-      report_class TEXT NOT NULL,
-      counterparty_entity_id TEXT NOT NULL DEFAULT '',
-      contract_id TEXT NOT NULL DEFAULT '',
-      document_id TEXT NOT NULL DEFAULT '',
-      project_entity_id TEXT NOT NULL DEFAULT '',
-      legal_entity_id TEXT NOT NULL DEFAULT '',
-      object_entity_id TEXT NOT NULL DEFAULT '',
-      cfr_entity_id TEXT NOT NULL DEFAULT '',
-      bank_operation_ref TEXT NOT NULL DEFAULT '',
-      operation_kind TEXT NOT NULL DEFAULT 'XLSX_AGGREGATE',
-      source_system TEXT NOT NULL,
-      source_file TEXT NOT NULL,
-      source_sheet TEXT NOT NULL,
-      source_ref TEXT NOT NULL,
-      data_quality TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'Ð Ð°Ð·Ð½ÐµÑÐµÐ½Ð¾',
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS bank_accounts (
-      id TEXT PRIMARY KEY NOT NULL,
-      connection_id TEXT NOT NULL,
-      legal_entity_id TEXT NOT NULL,
-      provider_account_id TEXT NOT NULL,
-      masked_account TEXT NOT NULL,
-      name TEXT NOT NULL,
-      currency TEXT NOT NULL,
-      status TEXT NOT NULL,
-      balance_minor INTEGER,
-      balance_as_of TEXT NOT NULL DEFAULT '',
-      synced_at TEXT NOT NULL
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS bank_statement_imports (
-      id TEXT PRIMARY KEY NOT NULL,
-      connection_id TEXT NOT NULL,
-      legal_entity_id TEXT NOT NULL,
-      provider_statement_id TEXT NOT NULL,
-      provider_account_id TEXT NOT NULL,
-      start_date TEXT NOT NULL,
-      end_date TEXT NOT NULL,
-      status TEXT NOT NULL,
-      start_balance_minor INTEGER NOT NULL,
-      end_balance_minor INTEGER NOT NULL,
-      currency TEXT NOT NULL,
-      transaction_count INTEGER NOT NULL,
-      fetched_at TEXT NOT NULL
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS bank_transactions (
-      id TEXT PRIMARY KEY NOT NULL,
-      connection_id TEXT NOT NULL,
-      legal_entity_id TEXT NOT NULL,
-      provider_account_id TEXT NOT NULL,
-      provider_statement_id TEXT NOT NULL,
-      provider_transaction_id TEXT NOT NULL,
-      payment_id TEXT NOT NULL DEFAULT '',
-      operation_date TEXT NOT NULL,
-      direction TEXT NOT NULL,
-      amount_minor INTEGER NOT NULL,
-      currency TEXT NOT NULL,
-      status TEXT NOT NULL,
-      document_number TEXT NOT NULL DEFAULT '',
-      transaction_type TEXT NOT NULL DEFAULT '',
-      description TEXT NOT NULL DEFAULT '',
-      counterparty_name TEXT NOT NULL DEFAULT '',
-      counterparty_inn TEXT NOT NULL DEFAULT '',
-      counterparty_kpp TEXT NOT NULL DEFAULT '',
-      source_payload_hash TEXT NOT NULL,
-      financial_operation_id TEXT NOT NULL DEFAULT '',
-      imported_at TEXT NOT NULL
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS finance_accruals (
-      id TEXT PRIMARY KEY NOT NULL,
-      period TEXT NOT NULL,
-      contour TEXT NOT NULL,
-      subject_entity_id TEXT NOT NULL,
-      records_count INTEGER NOT NULL,
-      accrual_minor INTEGER NOT NULL,
-      paid_minor INTEGER NOT NULL,
-      debt_minor INTEGER NOT NULL,
-      debt_cases INTEGER NOT NULL,
-      source_file TEXT NOT NULL,
-      source_sheet TEXT NOT NULL,
-      source_ref TEXT NOT NULL,
-      data_quality TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS finance_budgets (
-      id TEXT PRIMARY KEY NOT NULL,
-      period TEXT NOT NULL,
-      line TEXT NOT NULL,
-      plan_minor INTEGER NOT NULL,
-      scenario TEXT NOT NULL,
-      assumption TEXT NOT NULL,
-      source_type TEXT NOT NULL,
-      owner_entity_id TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS finance_forecast_items (
-      id TEXT PRIMARY KEY NOT NULL,
-      forecast_date TEXT NOT NULL,
-      direction TEXT NOT NULL,
-      amount_minor INTEGER NOT NULL,
-      probability INTEGER NOT NULL,
-      category TEXT NOT NULL,
-      source_type TEXT NOT NULL,
-      assumption TEXT NOT NULL,
-      linked_entity_id TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS finance_payroll_summary (
-      id TEXT PRIMARY KEY NOT NULL,
-      period TEXT NOT NULL,
-      amount_minor INTEGER NOT NULL,
-      scope TEXT NOT NULL,
-      source_file TEXT NOT NULL,
-      source_sheet TEXT NOT NULL,
-      source_ref TEXT NOT NULL,
-      data_quality TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS finance_corrections (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      operation_id TEXT NOT NULL,
-      field_name TEXT NOT NULL,
-      before_value TEXT NOT NULL,
-      after_value TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ÐŸÑ€ÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð°',
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS finance_reconciliation_issues (
-      id TEXT PRIMARY KEY NOT NULL,
-      title TEXT NOT NULL,
-      severity TEXT NOT NULL,
-      source_a TEXT NOT NULL,
-      source_b TEXT NOT NULL,
-      difference_minor INTEGER NOT NULL,
-      owner_entity_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð¾',
-      related_task_id INTEGER,
-      resolution TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS sales_leads (
-      id TEXT PRIMARY KEY NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      first_click_at TEXT NOT NULL,
-      source TEXT NOT NULL,
-      utm_source TEXT NOT NULL DEFAULT '',
-      utm_medium TEXT NOT NULL DEFAULT '',
-      utm_campaign TEXT NOT NULL DEFAULT '',
-      utm_content TEXT NOT NULL DEFAULT '',
-      campaign_id TEXT NOT NULL DEFAULT '',
-      creative_id TEXT NOT NULL DEFAULT '',
-      offer_id TEXT NOT NULL DEFAULT '',
-      form_id TEXT NOT NULL DEFAULT '',
-      manager_entity_id TEXT NOT NULL DEFAULT '',
-      stage TEXT NOT NULL DEFAULT 'Ð—Ð°ÑÐ²ÐºÐ°',
-      status TEXT NOT NULL DEFAULT 'ÐÐºÑ‚Ð¸Ð²ÐµÐ½',
-      family_entity_id TEXT NOT NULL DEFAULT '',
-      child_entity_id TEXT NOT NULL DEFAULT '',
-      contract_id TEXT NOT NULL DEFAULT '',
-      service_entity_id TEXT NOT NULL DEFAULT '',
-      rejection_reason TEXT NOT NULL DEFAULT '',
-      tags TEXT NOT NULL DEFAULT '[]',
-      data_quality TEXT NOT NULL DEFAULT 'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ðµ Ð´Ð°Ð½Ð½Ñ‹Ðµ',
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS sales_touchpoints (
-      id TEXT PRIMARY KEY NOT NULL,
-      lead_id TEXT NOT NULL,
-      touchpoint_type TEXT NOT NULL,
-      occurred_at TEXT NOT NULL,
-      channel TEXT NOT NULL,
-      direction TEXT NOT NULL DEFAULT 'Ð’Ñ…Ð¾Ð´ÑÑ‰Ð¸Ð¹',
-      summary TEXT NOT NULL,
-      outcome TEXT NOT NULL,
-      source_ref TEXT NOT NULL DEFAULT 'SYNTHETIC',
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS sales_stage_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      lead_id TEXT NOT NULL,
-      from_stage TEXT NOT NULL,
-      to_stage TEXT NOT NULL,
-      outcome TEXT NOT NULL,
-      reason TEXT NOT NULL DEFAULT '',
-      actor TEXT NOT NULL,
-      occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS client_lifecycles (
-      id TEXT PRIMARY KEY NOT NULL,
-      lead_id TEXT NOT NULL,
-      family_entity_id TEXT NOT NULL,
-      child_entity_id TEXT NOT NULL,
-      contract_id TEXT NOT NULL,
-      service_entity_id TEXT NOT NULL,
-      accrual_id TEXT NOT NULL,
-      payment_operation_id TEXT NOT NULL DEFAULT '',
-      service_start_date TEXT NOT NULL,
-      monthly_value_minor INTEGER NOT NULL,
-      ltv_minor INTEGER NOT NULL,
-      lifetime_months INTEGER NOT NULL,
-      next_payment_date TEXT NOT NULL,
-      next_payment_minor INTEGER NOT NULL,
-      churn_risk_score INTEGER NOT NULL,
-      churn_risk_band TEXT NOT NULL,
-      churn_risk_factors TEXT NOT NULL DEFAULT '[]',
-      loyalty_tier TEXT NOT NULL,
-      repeat_offer TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'ÐÐºÑ‚Ð¸Ð²ÐµÐ½',
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS client_accruals (
-      id TEXT PRIMARY KEY NOT NULL,
-      family_entity_id TEXT NOT NULL,
-      child_entity_id TEXT NOT NULL,
-      contract_id TEXT NOT NULL,
-      service_entity_id TEXT NOT NULL,
-      period TEXT NOT NULL,
-      amount_minor INTEGER NOT NULL,
-      due_date TEXT NOT NULL,
-      status TEXT NOT NULL,
-      payment_operation_id TEXT NOT NULL DEFAULT '',
-      source_type TEXT NOT NULL DEFAULT 'SYNTHETIC_TEST',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS client_bonuses (
-      id TEXT PRIMARY KEY NOT NULL,
-      family_entity_id TEXT NOT NULL,
-      event_type TEXT NOT NULL,
-      points INTEGER NOT NULL,
-      reason TEXT NOT NULL,
-      related_contract_id TEXT NOT NULL DEFAULT '',
-      occurred_at TEXT NOT NULL,
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS marketing_accounts (
-      id TEXT PRIMARY KEY NOT NULL,
-      platform TEXT NOT NULL,
-      display_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      audience_count INTEGER NOT NULL,
-      source_type TEXT NOT NULL DEFAULT 'SYNTHETIC_TEST',
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS content_plan_items (
-      id TEXT PRIMARY KEY NOT NULL,
-      scheduled_at TEXT NOT NULL,
-      account_id TEXT NOT NULL,
-      author_entity_id TEXT NOT NULL,
-      format TEXT NOT NULL,
-      topic TEXT NOT NULL,
-      offer_id TEXT NOT NULL DEFAULT '',
-      campaign_id TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'Ð—Ð°Ð¿Ð»Ð°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¾',
-      brief TEXT NOT NULL,
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS content_publications (
-      id TEXT PRIMARY KEY NOT NULL,
-      plan_item_id TEXT NOT NULL,
-      published_at TEXT NOT NULL,
-      publication_ref TEXT NOT NULL,
-      reach INTEGER NOT NULL,
-      views INTEGER NOT NULL,
-      reactions INTEGER NOT NULL,
-      clicks INTEGER NOT NULL,
-      leads INTEGER NOT NULL,
-      contracts INTEGER NOT NULL,
-      revenue_minor INTEGER NOT NULL,
-      source_type TEXT NOT NULL DEFAULT 'SYNTHETIC_TEST',
-      data_quality TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS content_attributions (
-      id TEXT PRIMARY KEY NOT NULL,
-      publication_id TEXT NOT NULL,
-      click_id TEXT NOT NULL,
-      lead_id TEXT NOT NULL,
-      contract_id TEXT NOT NULL,
-      payment_operation_id TEXT NOT NULL,
-      revenue_minor INTEGER NOT NULL,
-      attribution_model TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS content_recommendations (
-      id TEXT PRIMARY KEY NOT NULL,
-      publication_id TEXT NOT NULL DEFAULT '',
-      signal_type TEXT NOT NULL,
-      evidence TEXT NOT NULL,
-      recommendation TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ÐÐ¾Ð²Ð°Ñ',
-      related_task_id INTEGER,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS education_programs (id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL,version INTEGER NOT NULL,status TEXT NOT NULL,author_entity_id TEXT NOT NULL,methodist_entity_id TEXT NOT NULL,scope TEXT NOT NULL,material_ref TEXT NOT NULL,expected_result TEXT NOT NULL,source_type TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS education_groups (id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,unit_entity_id TEXT NOT NULL,program_id TEXT NOT NULL,teacher_entity_id TEXT NOT NULL,room TEXT NOT NULL,status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS education_students (id TEXT PRIMARY KEY NOT NULL,child_entity_id TEXT NOT NULL,family_entity_id TEXT NOT NULL,group_id TEXT NOT NULL,cabinet_status TEXT NOT NULL,status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS education_lessons (id TEXT PRIMARY KEY NOT NULL,group_id TEXT NOT NULL,program_id TEXT NOT NULL,scheduled_at TEXT NOT NULL,topic TEXT NOT NULL,teacher_entity_id TEXT NOT NULL,substitute_entity_id TEXT NOT NULL DEFAULT '',room TEXT NOT NULL,status TEXT NOT NULL,homework TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS education_attendance (id TEXT PRIMARY KEY NOT NULL,lesson_id TEXT NOT NULL,student_id TEXT NOT NULL,attendance_status TEXT NOT NULL,grade TEXT NOT NULL DEFAULT '',result TEXT NOT NULL DEFAULT '',recorded_by TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS education_progress (id TEXT PRIMARY KEY NOT NULL,student_id TEXT NOT NULL,program_id TEXT NOT NULL,period TEXT NOT NULL,metric TEXT NOT NULL,score INTEGER NOT NULL,trend TEXT NOT NULL,evidence TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS education_feedback (id TEXT PRIMARY KEY NOT NULL,student_id TEXT NOT NULL,family_entity_id TEXT NOT NULL,program_id TEXT NOT NULL,rating INTEGER NOT NULL,comment TEXT NOT NULL,recommendation TEXT NOT NULL,status TEXT NOT NULL,related_task_id INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS education_communications (id TEXT PRIMARY KEY NOT NULL,communication_type TEXT NOT NULL,audience_type TEXT NOT NULL,audience_id TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,event_at TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS hr_vacancies (id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL,unit TEXT NOT NULL,position_id TEXT NOT NULL,headcount INTEGER NOT NULL,status TEXT NOT NULL,source_type TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS hr_candidates (id TEXT PRIMARY KEY NOT NULL,entity_id TEXT NOT NULL,vacancy_id TEXT NOT NULL,source TEXT NOT NULL,stage TEXT NOT NULL,score INTEGER NOT NULL,decision TEXT NOT NULL DEFAULT '',rejection_reason TEXT NOT NULL DEFAULT '',offer_status TEXT NOT NULL DEFAULT '',evidence TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS hr_interviews (id TEXT PRIMARY KEY NOT NULL,candidate_id TEXT NOT NULL,scheduled_at TEXT NOT NULL,interviewer_entity_id TEXT NOT NULL,score INTEGER NOT NULL,summary TEXT NOT NULL,decision TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS hr_employees (id TEXT PRIMARY KEY NOT NULL,candidate_id TEXT NOT NULL,contract_id TEXT NOT NULL,position_id TEXT NOT NULL,unit TEXT NOT NULL,rate_minor INTEGER NOT NULL,hire_date TEXT NOT NULL,status TEXT NOT NULL,termination_date TEXT NOT NULL DEFAULT '',termination_reason TEXT NOT NULL DEFAULT '',access_status TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS hr_onboarding (id TEXT PRIMARY KEY NOT NULL,employee_id TEXT NOT NULL,step TEXT NOT NULL,status TEXT NOT NULL,due_date TEXT NOT NULL,evidence TEXT NOT NULL DEFAULT '',related_task_id INTEGER,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS hr_development (id TEXT PRIMARY KEY NOT NULL,employee_id TEXT NOT NULL,event_type TEXT NOT NULL,title TEXT NOT NULL,event_date TEXT NOT NULL,score INTEGER NOT NULL,status TEXT NOT NULL,evidence TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS hr_rewards (id TEXT PRIMARY KEY NOT NULL,employee_id TEXT NOT NULL,event_type TEXT NOT NULL,amount_minor INTEGER NOT NULL,reason TEXT NOT NULL,period TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS hr_accesses (id TEXT PRIMARY KEY NOT NULL,employee_id TEXT NOT NULL,system TEXT NOT NULL,role TEXT NOT NULL,status TEXT NOT NULL,granted_at TEXT NOT NULL,revoked_at TEXT NOT NULL DEFAULT '',revocation_reason TEXT NOT NULL DEFAULT '')`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS legal_contracts (id TEXT PRIMARY KEY NOT NULL,reference_document_id TEXT NOT NULL,contract_type TEXT NOT NULL,party_type TEXT NOT NULL,party_entity_id TEXT NOT NULL,number TEXT NOT NULL,signed_status TEXT NOT NULL,valid_from TEXT NOT NULL,valid_until TEXT NOT NULL,limit_minor INTEGER NOT NULL,spent_minor INTEGER NOT NULL,status TEXT NOT NULL,electronic_signature_status TEXT NOT NULL,requisite_status TEXT NOT NULL,owner_entity_id TEXT NOT NULL,closing_required INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS legal_document_items (id TEXT PRIMARY KEY NOT NULL,stable_id TEXT NOT NULL,contract_id TEXT NOT NULL,item_type TEXT NOT NULL,title TEXT NOT NULL,version INTEGER NOT NULL,required INTEGER NOT NULL DEFAULT 0,signed_status TEXT NOT NULL,status TEXT NOT NULL,due_date TEXT NOT NULL DEFAULT '',reference TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS legal_contract_text_versions (id TEXT PRIMARY KEY NOT NULL,stable_id TEXT NOT NULL,contract_id TEXT NOT NULL,document_item_id TEXT NOT NULL,version INTEGER NOT NULL,body_text TEXT NOT NULL,source_mode TEXT NOT NULL,model_version TEXT NOT NULL,policy_version TEXT NOT NULL,protection_class TEXT NOT NULL,confirmed_by TEXT NOT NULL,confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS legal_responsibility_zones (id TEXT PRIMARY KEY NOT NULL,contract_id TEXT NOT NULL,zone TEXT NOT NULL,responsible_entity_id TEXT NOT NULL,scope TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS legal_checks (id TEXT PRIMARY KEY NOT NULL,contract_id TEXT NOT NULL,signal_type TEXT NOT NULL,severity TEXT NOT NULL,evidence TEXT NOT NULL,recommendation TEXT NOT NULL,status TEXT NOT NULL,related_task_id INTEGER,detected_at TEXT NOT NULL,resolved_at TEXT NOT NULL DEFAULT '',resolution TEXT NOT NULL DEFAULT '')`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS procurement_suppliers (id TEXT PRIMARY KEY NOT NULL,entity_id TEXT NOT NULL,specialization TEXT NOT NULL,contract_id TEXT NOT NULL,base_price_minor INTEGER NOT NULL,quality_score INTEGER NOT NULL,rating INTEGER NOT NULL,market_index INTEGER NOT NULL,status TEXT NOT NULL,data_quality TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS purchase_requests (id TEXT PRIMARY KEY NOT NULL,requester_entity_id TEXT NOT NULL,unit TEXT NOT NULL,item_name TEXT NOT NULL,quantity INTEGER NOT NULL,budget_minor INTEGER NOT NULL,need_by TEXT NOT NULL,status TEXT NOT NULL,justification TEXT NOT NULL,approver_entity_id TEXT NOT NULL DEFAULT '',approved_at TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS supplier_offers (id TEXT PRIMARY KEY NOT NULL,request_id TEXT NOT NULL,supplier_id TEXT NOT NULL,price_minor INTEGER NOT NULL,delivery_days INTEGER NOT NULL,warranty_months INTEGER NOT NULL,quality_score INTEGER NOT NULL,status TEXT NOT NULL,comparison_note TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS purchase_orders (id TEXT PRIMARY KEY NOT NULL,request_id TEXT NOT NULL,offer_id TEXT NOT NULL,supplier_id TEXT NOT NULL,order_number TEXT NOT NULL,amount_minor INTEGER NOT NULL,status TEXT NOT NULL,ordered_at TEXT NOT NULL,expected_at TEXT NOT NULL,contract_id TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS procurement_deliveries (id TEXT PRIMARY KEY NOT NULL,order_id TEXT NOT NULL,delivered_at TEXT NOT NULL,document_id TEXT NOT NULL,status TEXT NOT NULL,quantity INTEGER NOT NULL,accepted_quantity INTEGER NOT NULL,accepted_by TEXT NOT NULL,quality_note TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS inventory_items (id TEXT PRIMARY KEY NOT NULL,sku TEXT NOT NULL,name TEXT NOT NULL,category TEXT NOT NULL,warehouse TEXT NOT NULL,quantity INTEGER NOT NULL,unit_cost_minor INTEGER NOT NULL,asset_id TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS inventory_events (id TEXT PRIMARY KEY NOT NULL,item_id TEXT NOT NULL,event_type TEXT NOT NULL,quantity INTEGER NOT NULL,from_location TEXT NOT NULL DEFAULT '',to_location TEXT NOT NULL DEFAULT '',document_id TEXT NOT NULL DEFAULT '',occurred_at TEXT NOT NULL,actor TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS assets (id TEXT PRIMARY KEY NOT NULL,item_id TEXT NOT NULL,serial_number TEXT NOT NULL,object_entity_id TEXT NOT NULL,assigned_to_entity_id TEXT NOT NULL DEFAULT '',warranty_until TEXT NOT NULL,service_due TEXT NOT NULL,status TEXT NOT NULL,acquisition_date TEXT NOT NULL,cost_minor INTEGER NOT NULL,monthly_depreciation_minor INTEGER NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS asset_maintenance (id TEXT PRIMARY KEY NOT NULL,asset_id TEXT NOT NULL,maintenance_type TEXT NOT NULL,scheduled_at TEXT NOT NULL,completed_at TEXT NOT NULL DEFAULT '',contractor_id TEXT NOT NULL,status TEXT NOT NULL,cost_minor INTEGER NOT NULL,document_id TEXT NOT NULL DEFAULT '',related_task_id INTEGER)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS food_products (id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,supplier_id TEXT NOT NULL,unit TEXT NOT NULL,purchase_cost_minor INTEGER NOT NULL,storage_norm TEXT NOT NULL,status TEXT NOT NULL,project_entity_id TEXT NOT NULL,cfr_entity_id TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS food_batches (id TEXT PRIMARY KEY NOT NULL,product_id TEXT NOT NULL,purchase_request_id TEXT NOT NULL,received_at TEXT NOT NULL,expires_at TEXT NOT NULL,quantity INTEGER NOT NULL,remaining_quantity INTEGER NOT NULL,unit TEXT NOT NULL,warehouse TEXT NOT NULL,status TEXT NOT NULL,quality_note TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS food_recipes (id TEXT PRIMARY KEY NOT NULL,dish_name TEXT NOT NULL,version INTEGER NOT NULL,yield_portions INTEGER NOT NULL,standard_cost_minor INTEGER NOT NULL,norm_description TEXT NOT NULL,menu_date TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS food_recipe_ingredients (id TEXT PRIMARY KEY NOT NULL,recipe_id TEXT NOT NULL,product_id TEXT NOT NULL,quantity_per_batch INTEGER NOT NULL,unit TEXT NOT NULL,cost_minor INTEGER NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS food_production (id TEXT PRIMARY KEY NOT NULL,production_date TEXT NOT NULL,recipe_id TEXT NOT NULL,shift_id TEXT NOT NULL,planned_portions INTEGER NOT NULL,actual_portions INTEGER NOT NULL,material_cost_minor INTEGER NOT NULL,status TEXT NOT NULL,evidence TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS food_shipments (id TEXT PRIMARY KEY NOT NULL,production_id TEXT NOT NULL,destination_object_id TEXT NOT NULL,shipped_portions INTEGER NOT NULL,consumed_portions INTEGER NOT NULL,returned_portions INTEGER NOT NULL,written_off_portions INTEGER NOT NULL,revenue_minor INTEGER NOT NULL,status TEXT NOT NULL,document_id TEXT NOT NULL,shipped_at TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS food_shifts (id TEXT PRIMARY KEY NOT NULL,employee_entity_id TEXT NOT NULL,started_at TEXT NOT NULL,ended_at TEXT NOT NULL,rate_minor INTEGER NOT NULL,status TEXT NOT NULL,role TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS food_checks (id TEXT PRIMARY KEY NOT NULL,check_type TEXT NOT NULL,object_entity_id TEXT NOT NULL,checked_at TEXT NOT NULL,result TEXT NOT NULL,violation TEXT NOT NULL DEFAULT '',evidence TEXT NOT NULL,status TEXT NOT NULL,related_task_id INTEGER)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS safety_systems (id TEXT PRIMARY KEY NOT NULL,system_type TEXT NOT NULL,name TEXT NOT NULL,object_entity_id TEXT NOT NULL,scheme_ref TEXT NOT NULL,journal_ref TEXT NOT NULL,responsible_entity_id TEXT NOT NULL,status TEXT NOT NULL,source_type TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS safety_equipment (id TEXT PRIMARY KEY NOT NULL,system_id TEXT NOT NULL,name TEXT NOT NULL,inventory_number TEXT NOT NULL,location TEXT NOT NULL,contractor_id TEXT NOT NULL,criticality TEXT NOT NULL,next_check_at TEXT NOT NULL,status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS safety_checks (id TEXT PRIMARY KEY NOT NULL,equipment_id TEXT NOT NULL,object_entity_id TEXT NOT NULL,check_type TEXT NOT NULL,scheduled_at TEXT NOT NULL,checked_at TEXT NOT NULL DEFAULT '',result TEXT NOT NULL,evidence TEXT NOT NULL,responsible_entity_id TEXT NOT NULL,status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS safety_faults (id TEXT PRIMARY KEY NOT NULL,check_id TEXT NOT NULL,equipment_id TEXT NOT NULL,severity TEXT NOT NULL,description TEXT NOT NULL,detected_at TEXT NOT NULL,status TEXT NOT NULL,related_task_id INTEGER)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS safety_incidents (id TEXT PRIMARY KEY NOT NULL,object_entity_id TEXT NOT NULL,system_id TEXT NOT NULL,happened_at TEXT NOT NULL,category TEXT NOT NULL,severity TEXT NOT NULL,description TEXT NOT NULL,response TEXT NOT NULL,status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS safety_repairs (id TEXT PRIMARY KEY NOT NULL,fault_id TEXT NOT NULL,contractor_id TEXT NOT NULL,action_type TEXT NOT NULL,started_at TEXT NOT NULL,completed_at TEXT NOT NULL DEFAULT '',result TEXT NOT NULL,act_document_id TEXT NOT NULL DEFAULT '',cost_minor INTEGER NOT NULL,payment_operation_id TEXT NOT NULL DEFAULT '',status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS safety_next_checks (id TEXT PRIMARY KEY NOT NULL,equipment_id TEXT NOT NULL,source_repair_id TEXT NOT NULL,scheduled_at TEXT NOT NULL,check_type TEXT NOT NULL,responsible_entity_id TEXT NOT NULL,status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS safety_guard_shifts (id TEXT PRIMARY KEY NOT NULL,object_entity_id TEXT NOT NULL,employee_entity_id TEXT NOT NULL,post TEXT NOT NULL,started_at TEXT NOT NULL,ended_at TEXT NOT NULL,journal_ref TEXT NOT NULL,status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS medical_access_grants (id TEXT PRIMARY KEY NOT NULL,principal_type TEXT NOT NULL,principal_ref TEXT NOT NULL,scope TEXT NOT NULL,granted_by TEXT NOT NULL,valid_until TEXT NOT NULL,status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS medical_documents (id TEXT PRIMARY KEY NOT NULL,subject_entity_id TEXT NOT NULL,subject_type TEXT NOT NULL,document_type TEXT NOT NULL,document_ref TEXT NOT NULL,valid_from TEXT NOT NULL,valid_until TEXT NOT NULL,status TEXT NOT NULL,storage_class TEXT NOT NULL,minimum_summary TEXT NOT NULL,confirmed_at TEXT NOT NULL DEFAULT '')`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS medical_restrictions (id TEXT PRIMARY KEY NOT NULL,subject_entity_id TEXT NOT NULL,record_id TEXT NOT NULL,category TEXT NOT NULL,limitation TEXT NOT NULL,valid_until TEXT NOT NULL,action_scope TEXT NOT NULL,status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS medical_cases (id TEXT PRIMARY KEY NOT NULL,subject_entity_id TEXT NOT NULL,case_type TEXT NOT NULL,opened_at TEXT NOT NULL,severity TEXT NOT NULL,minimum_summary TEXT NOT NULL,responsible_entity_id TEXT NOT NULL,due_at TEXT NOT NULL,status TEXT NOT NULL,closed_at TEXT NOT NULL DEFAULT '',confirmation_ref TEXT NOT NULL DEFAULT '')`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS medical_incidents (id TEXT PRIMARY KEY NOT NULL,case_id TEXT NOT NULL,happened_at TEXT NOT NULL,incident_type TEXT NOT NULL,minimum_facts TEXT NOT NULL,response_required TEXT NOT NULL,status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS medical_actions (id TEXT PRIMARY KEY NOT NULL,case_id TEXT NOT NULL,incident_id TEXT NOT NULL DEFAULT '',action_type TEXT NOT NULL,responsible_entity_id TEXT NOT NULL,due_at TEXT NOT NULL,completed_at TEXT NOT NULL DEFAULT '',result TEXT NOT NULL DEFAULT '',confirmation_ref TEXT NOT NULL DEFAULT '',status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS accounting_documents (id TEXT PRIMARY KEY NOT NULL,document_type TEXT NOT NULL,number TEXT NOT NULL,document_date TEXT NOT NULL,counterparty_entity_id TEXT NOT NULL,contract_id TEXT NOT NULL DEFAULT '',amount_minor INTEGER NOT NULL,vat_minor INTEGER NOT NULL,payment_operation_id TEXT NOT NULL DEFAULT '',file_ref TEXT NOT NULL DEFAULT '',signature_status TEXT NOT NULL,edo_status TEXT NOT NULL,source_type TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS accounting_document_links (id TEXT PRIMARY KEY NOT NULL,from_document_id TEXT NOT NULL,to_document_id TEXT NOT NULL,relation_type TEXT NOT NULL,evidence TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS accounting_completeness_checks (id TEXT PRIMARY KEY NOT NULL,operation_id TEXT NOT NULL,contract_id TEXT NOT NULL,required_types TEXT NOT NULL,missing_types TEXT NOT NULL,owner_entity_id TEXT NOT NULL,status TEXT NOT NULL,related_task_id INTEGER,checked_at TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS accounting_exports (id TEXT PRIMARY KEY NOT NULL,export_type TEXT NOT NULL,period TEXT NOT NULL,document_count INTEGER NOT NULL,amount_minor INTEGER NOT NULL,status TEXT NOT NULL,file_ref TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS accounting_integrations (id TEXT PRIMARY KEY NOT NULL,system TEXT NOT NULL,mode TEXT NOT NULL,status TEXT NOT NULL,truth TEXT NOT NULL,last_success_at TEXT NOT NULL DEFAULT '',next_attempt_at TEXT NOT NULL DEFAULT '',record_count INTEGER NOT NULL,error TEXT NOT NULL DEFAULT '')`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS strategy_goals (id TEXT PRIMARY KEY NOT NULL,level TEXT NOT NULL,unit_entity_id TEXT NOT NULL DEFAULT '',title TEXT NOT NULL,period TEXT NOT NULL,owner_entity_id TEXT NOT NULL,status TEXT NOT NULL,success_definition TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS strategy_kpis (id TEXT PRIMARY KEY NOT NULL,goal_id TEXT NOT NULL,name TEXT NOT NULL,unit TEXT NOT NULL,target_value INTEGER NOT NULL,actual_value INTEGER NOT NULL,forecast_value INTEGER NOT NULL,variance_value INTEGER NOT NULL,status TEXT NOT NULL,source_ref TEXT NOT NULL,updated_at TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS strategy_initiatives (id TEXT PRIMARY KEY NOT NULL,goal_id TEXT NOT NULL,kpi_id TEXT NOT NULL,title TEXT NOT NULL,hypothesis TEXT NOT NULL,owner_entity_id TEXT NOT NULL,planned_start TEXT NOT NULL,planned_end TEXT NOT NULL,status TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS strategy_projects (id TEXT PRIMARY KEY NOT NULL,initiative_id TEXT NOT NULL,goal_id TEXT NOT NULL,title TEXT NOT NULL,owner_entity_id TEXT NOT NULL,budget_id TEXT NOT NULL,budget_plan_minor INTEGER NOT NULL,budget_actual_minor INTEGER NOT NULL,started_at TEXT NOT NULL,due_at TEXT NOT NULL,status TEXT NOT NULL,outcome TEXT NOT NULL DEFAULT '')`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS business_events (id TEXT PRIMARY KEY NOT NULL,project_id TEXT NOT NULL,title TEXT NOT NULL,event_at TEXT NOT NULL,location TEXT NOT NULL,responsible_entity_id TEXT NOT NULL,budget_minor INTEGER NOT NULL,actual_minor INTEGER NOT NULL,status TEXT NOT NULL,result TEXT NOT NULL DEFAULT '',feedback_score INTEGER NOT NULL DEFAULT 0)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS event_participants (id TEXT PRIMARY KEY NOT NULL,event_id TEXT NOT NULL,participant_entity_id TEXT NOT NULL,participant_role TEXT NOT NULL,attendance_status TEXT NOT NULL,feedback TEXT NOT NULL DEFAULT '')`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS strategy_results (id TEXT PRIMARY KEY NOT NULL,project_id TEXT NOT NULL,event_id TEXT NOT NULL DEFAULT '',result_type TEXT NOT NULL,metric_name TEXT NOT NULL,metric_value INTEGER NOT NULL,unit TEXT NOT NULL,evidence TEXT NOT NULL,recorded_at TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS strategy_deviations (id TEXT PRIMARY KEY NOT NULL,kpi_id TEXT NOT NULL,project_id TEXT NOT NULL,deviation_type TEXT NOT NULL,variance_value INTEGER NOT NULL,explanation TEXT NOT NULL,decision TEXT NOT NULL,status TEXT NOT NULL,related_task_id INTEGER,detected_at TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS integration_connections (id TEXT PRIMARY KEY NOT NULL,system TEXT NOT NULL,category TEXT NOT NULL,target_module TEXT NOT NULL,owner_entity_id TEXT NOT NULL,source_of_truth TEXT NOT NULL,mode TEXT NOT NULL,status TEXT NOT NULL,auth_status TEXT NOT NULL,credential_expires_at TEXT NOT NULL DEFAULT '',last_success_at TEXT NOT NULL DEFAULT '',next_sync_at TEXT NOT NULL DEFAULT '',received_count INTEGER NOT NULL DEFAULT 0,accepted_count INTEGER NOT NULL DEFAULT 0,rejected_count INTEGER NOT NULL DEFAULT 0,error_count INTEGER NOT NULL DEFAULT 0,conflict_count INTEGER NOT NULL DEFAULT 0,impact TEXT NOT NULL,adapter_version TEXT NOT NULL,verified_transfer INTEGER NOT NULL DEFAULT 0,is_enabled INTEGER NOT NULL DEFAULT 0,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS integration_sync_runs (id TEXT PRIMARY KEY NOT NULL,connection_id TEXT NOT NULL,started_at TEXT NOT NULL,finished_at TEXT NOT NULL DEFAULT '',trigger TEXT NOT NULL,status TEXT NOT NULL,received_count INTEGER NOT NULL DEFAULT 0,accepted_count INTEGER NOT NULL DEFAULT 0,rejected_count INTEGER NOT NULL DEFAULT 0,error_count INTEGER NOT NULL DEFAULT 0,conflict_count INTEGER NOT NULL DEFAULT 0,checkpoint TEXT NOT NULL DEFAULT '',error_message TEXT NOT NULL DEFAULT '',initiated_by TEXT NOT NULL,correlation_id TEXT NOT NULL,dry_run INTEGER NOT NULL DEFAULT 0)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS integration_log_entries (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,run_id TEXT NOT NULL,connection_id TEXT NOT NULL,level TEXT NOT NULL,event TEXT NOT NULL,message TEXT NOT NULL,record_ref TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS integration_conflicts (id TEXT PRIMARY KEY NOT NULL,connection_id TEXT NOT NULL,external_record_id TEXT NOT NULL,internal_entity_id TEXT NOT NULL DEFAULT '',conflict_type TEXT NOT NULL,field_name TEXT NOT NULL,source_value TEXT NOT NULL,target_value TEXT NOT NULL,owner_entity_id TEXT NOT NULL,status TEXT NOT NULL,resolution TEXT NOT NULL DEFAULT '',evidence TEXT NOT NULL DEFAULT '',related_task_id INTEGER,detected_at TEXT NOT NULL,resolved_at TEXT NOT NULL DEFAULT '')`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS analytics_metric_definitions (id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,category TEXT NOT NULL,definition TEXT NOT NULL,formula TEXT NOT NULL,unit TEXT NOT NULL,grain TEXT NOT NULL,source_tables TEXT NOT NULL,source_quality TEXT NOT NULL,freshness TEXT NOT NULL,owner_entity_id TEXT NOT NULL,target_value INTEGER,sensitive INTEGER NOT NULL DEFAULT 0)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS analytics_signals (id TEXT PRIMARY KEY NOT NULL,contract_id TEXT NOT NULL,domain TEXT NOT NULL,signal_type TEXT NOT NULL,severity TEXT NOT NULL,title TEXT NOT NULL,evidence TEXT NOT NULL,explanation TEXT NOT NULL,recommendation TEXT NOT NULL,source_refs TEXT NOT NULL,confidence INTEGER NOT NULL,status TEXT NOT NULL,related_task_id INTEGER,human_decision TEXT NOT NULL DEFAULT '',decision_evidence TEXT NOT NULL DEFAULT '',detected_at TEXT NOT NULL,decided_at TEXT NOT NULL DEFAULT '')`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS ai_process_contracts (id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,input_data TEXT NOT NULL,expected_result TEXT NOT NULL,allowed_actions TEXT NOT NULL,forbidden_actions TEXT NOT NULL,human_owner TEXT NOT NULL,cost_minor INTEGER NOT NULL,benefit_metric TEXT NOT NULL,auto_stop_condition TEXT NOT NULL,opt_out_allowed INTEGER NOT NULL DEFAULT 1,opt_out_procedure TEXT NOT NULL,fallback_functionality TEXT NOT NULL,stopped_data_processing TEXT NOT NULL,historical_data_policy TEXT NOT NULL,opt_out_impact TEXT NOT NULL,status TEXT NOT NULL,version TEXT NOT NULL,source_refs TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS ai_model_runs (id TEXT PRIMARY KEY NOT NULL,contract_id TEXT NOT NULL,ran_at TEXT NOT NULL,model_version TEXT NOT NULL,status TEXT NOT NULL,input_snapshot_ref TEXT NOT NULL,output_type TEXT NOT NULL,output_summary TEXT NOT NULL,confidence INTEGER NOT NULL,cost_minor INTEGER NOT NULL,explanation TEXT NOT NULL,human_decision TEXT NOT NULL DEFAULT '',decided_by TEXT NOT NULL DEFAULT '',decision_at TEXT NOT NULL DEFAULT '',is_synthetic INTEGER NOT NULL DEFAULT 1)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS ai_opt_outs (id TEXT PRIMARY KEY NOT NULL,contract_id TEXT NOT NULL,scope_type TEXT NOT NULL,scope_ref TEXT NOT NULL,requested_by TEXT NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL,stops_processing_at TEXT NOT NULL,historical_data_policy TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS customer_complaints (id TEXT PRIMARY KEY NOT NULL,family_entity_id TEXT NOT NULL,child_entity_id TEXT NOT NULL,service_entity_id TEXT NOT NULL,channel TEXT NOT NULL,received_at TEXT NOT NULL,category TEXT NOT NULL,summary TEXT NOT NULL,responsible_entity_id TEXT NOT NULL,status TEXT NOT NULL,related_task_id INTEGER,satisfaction_score INTEGER NOT NULL DEFAULT 0,closed_at TEXT NOT NULL DEFAULT '')`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS complaint_actions (id TEXT PRIMARY KEY NOT NULL,complaint_id TEXT NOT NULL,task_id INTEGER NOT NULL,action_type TEXT NOT NULL,owner_entity_id TEXT NOT NULL,due_at TEXT NOT NULL,result TEXT NOT NULL,evidence TEXT NOT NULL,status TEXT NOT NULL,completed_at TEXT NOT NULL DEFAULT '')`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS readiness_scenarios (id TEXT PRIMARY KEY NOT NULL,number INTEGER NOT NULL,name TEXT NOT NULL,chain TEXT NOT NULL,owner_entity_id TEXT NOT NULL,status TEXT NOT NULL,data_boundary TEXT NOT NULL,evidence TEXT NOT NULL DEFAULT '',failure TEXT NOT NULL DEFAULT '',last_run_at TEXT NOT NULL DEFAULT '',duration_ms INTEGER NOT NULL DEFAULT 0)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS readiness_scenario_steps (id TEXT PRIMARY KEY NOT NULL,scenario_id TEXT NOT NULL,step_order INTEGER NOT NULL,step_name TEXT NOT NULL,entity_type TEXT NOT NULL,entity_id TEXT NOT NULL,check_type TEXT NOT NULL,status TEXT NOT NULL,evidence TEXT NOT NULL DEFAULT '',checked_at TEXT NOT NULL DEFAULT '')`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS readiness_validation_runs (id TEXT PRIMARY KEY NOT NULL,suite TEXT NOT NULL,environment TEXT NOT NULL,started_at TEXT NOT NULL,finished_at TEXT NOT NULL,status TEXT NOT NULL,passed INTEGER NOT NULL,failed INTEGER NOT NULL,skipped INTEGER NOT NULL,commit_sha TEXT NOT NULL,artifact_ref TEXT NOT NULL,initiated_by TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS release_gates (id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,status TEXT NOT NULL,required INTEGER NOT NULL DEFAULT 1,evidence TEXT NOT NULL,owner_entity_id TEXT NOT NULL,updated_at TEXT NOT NULL)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS recovery_drills (id TEXT PRIMARY KEY NOT NULL,drill_type TEXT NOT NULL,scope TEXT NOT NULL,started_at TEXT NOT NULL,finished_at TEXT NOT NULL,status TEXT NOT NULL,rpo_minutes INTEGER NOT NULL DEFAULT 0,rto_minutes INTEGER NOT NULL DEFAULT 0,checksum_before TEXT NOT NULL DEFAULT '',checksum_after TEXT NOT NULL DEFAULT '',evidence TEXT NOT NULL,limitation TEXT NOT NULL)`),
-  ];
-
-  for (let index = 0; index < schemaStatements.length; index += 40) {
-    await env.DB.batch(schemaStatements.slice(index, index + 40));
-  }
-
-  await ensureTaskColumns();
-  await backfillTaskOwnership();
-  await ensureAccessColumns();
-  await ensureTochkaTransactionIdentityIndex();
-
-  await env.DB.batch([
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS entities_source_unique ON entities (entity_type, source_system, source_record_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS app_users_contact_unique ON app_users (contact)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS app_systems_key_unique ON app_systems (system_key)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS user_system_access_unique ON user_system_access (user_id, system_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS user_branch_access_unique ON user_branch_access (user_id, branch_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS family_system_access_principal_unique ON family_system_access (principal_entity_id, system_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS family_system_access_login_unique ON family_system_access (login, system_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS entity_links_unique ON entity_links (from_entity_id, to_entity_id, relation_type)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS entity_merges_duplicate_unique ON entity_merges (duplicate_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS tasks_automation_unique ON tasks (automation_key)"),
-    env.DB.prepare("CREATE INDEX IF NOT EXISTS tasks_created_by_user_idx ON tasks (created_by_user_id)"),
-    env.DB.prepare("CREATE INDEX IF NOT EXISTS tasks_assignee_entity_idx ON tasks (assignee_entity_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS task_watchers_unique ON task_watchers (task_id, entity_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS task_approvals_unique ON task_approvals (task_id, step_name)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS document_versions_unique ON document_versions (document_id, version)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS task_documents_unique ON task_documents (task_id, document_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS obligations_unique ON obligations (document_id, title)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS notifications_dedup_unique ON notifications (dedup_key)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS escalations_unique ON escalations (task_id, level)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS client_lifecycles_lead_unique ON client_lifecycles (lead_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS content_publications_plan_unique ON content_publications (plan_item_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS education_attendance_lesson_student_unique ON education_attendance (lesson_id, student_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS hr_access_employee_system_unique ON hr_accesses (employee_id, system)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS legal_document_stable_version_unique ON legal_document_items (stable_id, version)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS legal_contract_text_stable_version_unique ON legal_contract_text_versions (stable_id, version)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS bank_accounts_provider_unique ON bank_accounts (connection_id, legal_entity_id, provider_account_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS bank_statement_provider_unique ON bank_statement_imports (connection_id, provider_statement_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS bank_transactions_provider_unique ON bank_transactions (connection_id, provider_account_id, provider_transaction_id)"),
-    env.DB.prepare("CREATE INDEX IF NOT EXISTS bank_transactions_date_idx ON bank_transactions (operation_date)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS integration_runs_correlation_unique ON integration_sync_runs (correlation_id)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS readiness_step_order_unique ON readiness_scenario_steps (scenario_id, step_order)"),
-  ]);
-
-}
-
-async function seedInitialDemoData() {
-  await seedRegistry();
-  await seedWorkflow();
-  await seedFinance();
-  await seedSales();
-  await seedContent();
-  await seedEducation();
-  await seedHr();
-  await seedLegal();
-  await seedProcurement();
-  await seedFood();
-  await seedSafety();
-  await seedMedical();
-  await seedAccounting();
-  await seedStrategy();
-  await seedIntegrations();
-  await seedAnalytics();
-  await seedReadiness();
-}
-
-// Bank row IDs and financial projection IDs already include the account.
-// Keep the database uniqueness constraint in the same account scope.
-async function ensureTochkaTransactionIdentityIndex() {
-  const expected = ["connection_id", "provider_account_id", "provider_transaction_id"];
-  const legacy = ["connection_id", "provider_transaction_id"];
-  const readKeys = async () => {
-    const list = await env.DB.prepare("PRAGMA index_list(bank_transactions)")
-      .all<{ name: string; unique: number; partial: number; origin: string }>();
-    const index = (list.results ?? []).find((row) => row.name === "bank_transactions_provider_unique");
-    if (!index) return null;
-    if (index.unique !== 1 || index.partial !== 0 || index.origin !== "c") {
-      throw new Error("TOCHKA_IDENTITY_INDEX_UNEXPECTED");
-    }
-    const detail = await env.DB.prepare("PRAGMA index_xinfo(bank_transactions_provider_unique)")
-      .all<{ seqno: number; name: string | null; desc: number; coll: string; key: number }>();
-    const keys = (detail.results ?? []).filter((row) => row.key === 1).sort((a, b) => a.seqno - b.seqno);
-    if (keys.some((row) => !row.name || row.desc !== 0 || row.coll !== "BINARY")) {
-      throw new Error("TOCHKA_IDENTITY_INDEX_UNEXPECTED");
-    }
-    return keys.map((row) => row.name);
-  };
-  const before = await readKeys();
-  if (before?.join("|") === expected.join("|")) return;
-  if (before !== null && before.join("|") !== legacy.join("|")) {
-    throw new Error("TOCHKA_IDENTITY_INDEX_UNEXPECTED");
-  }
-  const create = env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS bank_transactions_provider_unique ON bank_transactions (connection_id, provider_account_id, provider_transaction_id)");
-  if (before === null) {
-    await create.run();
-  } else {
-    // D1 batch is transactional: a failed rebuild keeps the former constraint.
-    // No bank row, projection, or manual classification is rewritten.
-    await env.DB.batch([
-      env.DB.prepare("DROP INDEX IF EXISTS bank_transactions_provider_unique"),
-      create,
-    ]);
-  }
-  if ((await readKeys())?.join("|") !== expected.join("|")) {
-    throw new Error("TOCHKA_IDENTITY_INDEX_UNEXPECTED");
-  }
-}
-
-
-async function ensureTaskColumns() {
-  const current = await env.DB.prepare("PRAGMA table_info(tasks)").all<{ name: string }>();
-  const names = new Set((current.results || []).map((column) => column.name));
-  const columns: Record<string, string> = {
-    description: "TEXT NOT NULL DEFAULT ''",
-    assignee_entity_id: "TEXT NOT NULL DEFAULT ''",
-    parent_task_id: "INTEGER",
-    kind: "TEXT NOT NULL DEFAULT 'Ð—Ð°Ð´Ð°Ñ‡Ð°'",
-    recurrence_rule: "TEXT NOT NULL DEFAULT ''",
-    automation_key: "TEXT",
-    requires_approval: "INTEGER NOT NULL DEFAULT 0",
-    result: "TEXT NOT NULL DEFAULT ''",
-    result_evidence: "TEXT NOT NULL DEFAULT ''",
-    completed_at: "TEXT NOT NULL DEFAULT ''",
-    created_by_user_id: "TEXT NOT NULL DEFAULT ''",
-  };
-  const missing = Object.entries(columns).filter(([name]) => !names.has(name));
-  for (const [name, definition] of missing) {
-    try {
-      await env.DB.prepare(`ALTER TABLE tasks ADD COLUMN ${name} ${definition}`).run();
-    } catch (error) {
-      // Parallel isolates may observe the same missing column. Accept only a
-      // confirmed concurrent repair; every other migration error must surface.
-      const refreshed = await env.DB.prepare("PRAGMA table_info(tasks)").all<{ name: string }>();
-      if (!(refreshed.results || []).some((column) => column.name === name)) throw error;
-    }
-  }
-}
-
-async function backfillTaskOwnership() {
-  const marker = await env.DB.prepare(
-    "SELECT state_value FROM system_runtime_state WHERE state_key='task_owner_backfill'"
-  ).first<{ state_value: string }>();
-  if (marker?.state_value === TASK_OWNER_BACKFILL_VERSION) return;
-  // Legacy ownership can be recovered only when the display contact maps to
-  // exactly one active app user whose account already existed when the task
-  // was created. Ambiguous, recycled, future or unknown contacts deliberately
-  // keep an empty immutable owner and therefore fail closed for non-managers.
-  // This runs once: a contact registered later must never inherit an old task.
-  await env.DB.batch([
-    env.DB.prepare(`UPDATE tasks
-      SET created_by_user_id = (
-        SELECT MIN(app_users.id)
-        FROM app_users
-        WHERE lower(trim(app_users.contact)) = lower(trim(tasks.created_by))
-          AND app_users.status = 'ÐÐºÑ‚Ð¸Ð²ÐµÐ½'
-          AND datetime(app_users.invited_at) <= datetime(tasks.created_at)
-      )
-      WHERE trim(created_by_user_id) = ''
-        AND trim(created_by) <> ''
-        AND (
-          SELECT COUNT(*)
-          FROM app_users
-          WHERE lower(trim(app_users.contact)) = lower(trim(tasks.created_by))
-            AND app_users.status = 'ÐÐºÑ‚Ð¸Ð²ÐµÐ½'
-            AND datetime(app_users.invited_at) <= datetime(tasks.created_at)
-        ) = 1`),
-    env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-      VALUES ('task_owner_backfill',?,CURRENT_TIMESTAMP)
-      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-      .bind(TASK_OWNER_BACKFILL_VERSION),
-  ]);
-}
-
-async function ensureAccessColumns() {
-  const current = await env.DB.prepare("PRAGMA table_info(app_users)").all<{ name: string }>();
-  const names = new Set((current.results || []).map((column) => column.name));
-  const columns: Record<string, string> = {
-    access_version: "INTEGER NOT NULL DEFAULT 1",
-    job_title: "TEXT NOT NULL DEFAULT ''",
-    allowed_modules: "TEXT NOT NULL DEFAULT ''",
-    favorite_modules: "TEXT NOT NULL DEFAULT ''",
-  };
-  for (const [name, definition] of Object.entries(columns)) {
-    if (names.has(name)) continue;
-    try {
-      await env.DB.prepare(`ALTER TABLE app_users ADD COLUMN ${name} ${definition}`).run();
-    } catch (error) {
-      const refreshed = await env.DB.prepare("PRAGMA table_info(app_users)").all<{ name: string }>();
-      if (!(refreshed.results || []).some((column) => column.name === name)) throw error;
-    }
-  }
-}
-
-async function seedRegistry() {
-  const entitySeeds = [
-    ["ORG-T-001", "Ð®Ñ€Ð»Ð¸Ñ†Ð¾", "ÐžÐžÐž Â«ÐÑ€Ñ‚Ð¥ÐµÐ»Ð»Ð¾Â» Â· Ñ‚ÐµÑÑ‚", "SYNTHETIC", "ORG-SRC-T-001", "Ð“Ñ€ÑƒÐ¿Ð¿Ð° ArtHello", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["OBJ-T-001", "ÐžÐ±ÑŠÐµÐºÑ‚", "ÐšÐ¾Ñ€Ð¿ÑƒÑ 1 Â· Ñ‚ÐµÑÑ‚", "SYNTHETIC", "OBJ-SRC-T-001", "Ð¨ÐºÐ¾Ð»Ð° 1â€“11", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["UNT-T-001", "ÐŸÐ¾Ð´Ñ€Ð°Ð·Ð´ÐµÐ»ÐµÐ½Ð¸Ðµ", "Ð¨ÐºÐ¾Ð»Ð° 1â€“11 Â· Ñ‚ÐµÑÑ‚", "SYNTHETIC", "UNT-SRC-T-001", "Ð“Ñ€ÑƒÐ¿Ð¿Ð° ArtHello", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["PRJ-T-001", "ÐŸÑ€Ð¾ÐµÐºÑ‚", "ArtHello OS", "SYNTHETIC", "PRJ-SRC-T-001", "Ð£Ð¿Ñ€Ð°Ð²Ð»ÑÑŽÑ‰Ð°Ñ ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ñ", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["DIR-T-001", "ÐÐ°Ð¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð¸Ðµ", "ÐžÐ±Ñ‰ÐµÐµ Ð¾Ð±Ñ€Ð°Ð·Ð¾Ð²Ð°Ð½Ð¸Ðµ Â· Ñ‚ÐµÑÑ‚", "SYNTHETIC", "DIR-SRC-T-001", "Ð¨ÐºÐ¾Ð»Ð° 1â€“11", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["SVC-T-001", "Ð£ÑÐ»ÑƒÐ³Ð°", "ÐžÐ±ÑƒÑ‡ÐµÐ½Ð¸Ðµ 1â€“11 Â· Ñ‚ÐµÑÑ‚", "SYNTHETIC", "SVC-SRC-T-001", "Ð¨ÐºÐ¾Ð»Ð° 1â€“11", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["FAM-T-014", "Ð¡ÐµÐ¼ÑŒÑ", "Ð¡ÐµÐ¼ÑŒÑ â„–0014", "SYNTHETIC", "FAM-SRC-T-014", "Ð¨ÐºÐ¾Ð»Ð° 1â€“11", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["CLI-T-014", "ÐšÐ»Ð¸ÐµÐ½Ñ‚", "ÐšÐ»Ð¸ÐµÐ½Ñ‚ T-014", "SYNTHETIC", "CLI-SRC-T-014", "Ð¨ÐºÐ¾Ð»Ð° 1â€“11", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["CHD-T-014", "Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº", "Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº â„–0014", "SYNTHETIC", "CHD-SRC-T-014", "3Ð Â· Ñ‚ÐµÑÑ‚Ð¾Ð²Ð°Ñ Ð³Ñ€ÑƒÐ¿Ð¿Ð°", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["EMP-T-032", "Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº", "ÐŸÐµÐ´Ð°Ð³Ð¾Ð³ â„–0032", "XLSX_MASKED", "PAYROLL-ROW-T-032", "Ð¨ÐºÐ¾Ð»Ð° 1â€“11", "Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ ÑÐ²ÐµÑ€ÐºÐ¸"],
-    ["CAN-T-001", "ÐšÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚", "ÐšÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚ T-001", "SYNTHETIC", "CAN-SRC-T-001", "Ð¨ÐºÐ¾Ð»Ð° 1â€“11", "ÐÐ° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐµ"],
-    ["CON-T-001", "ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº", "ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº T-001", "SYNTHETIC", "CON-SRC-T-001", "Ð­ÐºÑÐ¿Ð»ÑƒÐ°Ñ‚Ð°Ñ†Ð¸Ñ", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["SUP-T-001", "ÐŸÐ¾ÑÑ‚Ð°Ð²Ñ‰Ð¸Ðº", "ÐŸÐ¾ÑÑ‚Ð°Ð²Ñ‰Ð¸Ðº T-001", "SYNTHETIC", "SUP-SRC-T-001", "ÐŸÐ¸Ñ‚Ð°Ð½Ð¸Ðµ", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["CTR-T-001", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-001", "SYNTHETIC", "CTR-SRC-T-001", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐÐ° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐµ"],
-    ["OBJ-T-002", "ÐžÐ±ÑŠÐµÐºÑ‚", "Ð£Ñ‡ÐµÐ±Ð½Ñ‹Ð¹ ÐºÐ¾Ð¼Ð¿Ð»ÐµÐºÑ Â· Ñ‚ÐµÑÑ‚", "SYNTHETIC", "OBJ-SRC-T-002", "ÐžÐ±Ñ€Ð°Ð·Ð¾Ð²Ð°Ð½Ð¸Ðµ", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["PRJ-T-004", "ÐŸÑ€Ð¾ÐµÐºÑ‚", "Ð£Ñ‡ÐµÐ±Ð½Ñ‹Ð¹ Ð³Ð¾Ð´ 2026/27 Â· Ñ‚ÐµÑÑ‚", "SYNTHETIC", "PRJ-SRC-T-004", "ÐžÐ±Ñ€Ð°Ð·Ð¾Ð²Ð°Ð½Ð¸Ðµ", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["CFR-T-001", "Ð¦Ð¤Ðž", "Ð¦Ð¤Ðž ÐžÐ±Ñ€Ð°Ð·Ð¾Ð²Ð°Ð½Ð¸Ðµ Â· Ñ‚ÐµÑÑ‚", "SYNTHETIC", "CFR-SRC-T-001", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["CFR-T-002", "Ð¦Ð¤Ðž", "Ð¦Ð¤Ðž Ð£Ð¿Ñ€Ð°Ð²Ð»ÑÑŽÑ‰Ð°Ñ ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ñ Â· Ñ‚ÐµÑÑ‚", "SYNTHETIC", "CFR-SRC-T-002", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾"],
-    ["FAM-GROUP-T", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "Ð“Ñ€ÑƒÐ¿Ð¿Ð° ÑÐµÐ¼ÐµÐ¹ Â· Ð¾Ð±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð¾", "XLSX_MASKED", "PAYMENTS-GROUP-T", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐÐ³Ñ€ÐµÐ³Ð°Ñ‚"],
-    ["EMP-GROUP-T", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "Ð“Ñ€ÑƒÐ¿Ð¿Ð° ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ¾Ð² Â· Ð¾Ð±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð¾", "XLSX_MASKED", "PAYROLL-GROUP-T", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐÐ³Ñ€ÐµÐ³Ð°Ñ‚"],
-    ["CTR-T-101", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-101 Â· Ð°Ñ€ÐµÐ½Ð´Ð°", "XLSX_MASKED", "ODDS-CTR-T-101", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-102", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-102 Â· Ð¾Ð±ÑŠÐµÐºÑ‚", "XLSX_MASKED", "ODDS-CTR-T-102", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-103", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-103 Â· Ð±Ð°Ð½Ðº", "XLSX_MASKED", "ODDS-CTR-T-103", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-104", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-104 Â· Ð·Ð°Ñ‘Ð¼", "XLSX_MASKED", "ODDS-CTR-T-104", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-105", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-105 Â· Ñ„Ð¸Ð½Ð°Ð½ÑÐ¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ", "XLSX_MASKED", "ODDS-CTR-T-105", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-106", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-106 Â· Ð¼Ð°Ñ€ÐºÐµÑ‚Ð¸Ð½Ð³", "XLSX_MASKED", "ODDS-CTR-T-106", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-107", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-107 Â· Ð¿Ñ€Ð¾Ñ‡Ð¸Ðµ Ð´Ð¾Ñ…Ð¾Ð´Ñ‹", "XLSX_MASKED", "ODDS-CTR-T-107", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-108", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-108 Â· Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ñ‹", "XLSX_MASKED", "ODDS-CTR-T-108", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-109", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-109 Â· Ð½Ð°Ð»Ð¾Ð³Ð¸", "XLSX_MASKED", "ODDS-CTR-T-109", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-110", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-110 Â· ÑÐ¾Ð´ÐµÑ€Ð¶Ð°Ð½Ð¸Ðµ", "XLSX_MASKED", "ODDS-CTR-T-110", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-111", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-111 Â· Ð´ÐµÑÑ‚ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚ÑŒ", "XLSX_MASKED", "ODDS-CTR-T-111", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-112", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-112 Â· ÑƒÐ¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð¸Ðµ", "XLSX_MASKED", "ODDS-CTR-T-112", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-113", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-113 Â· ÑÐ²ÑÐ·ÑŒ", "XLSX_MASKED", "ODDS-CTR-T-113", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-114", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-114 Â· Ñ„Ð¸Ð½Ð°Ð½ÑÐ¾Ð²Ð°Ñ Ð´ÐµÑÑ‚ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚ÑŒ", "XLSX_MASKED", "ODDS-CTR-T-114", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "ÐŸÑ€Ð¾ÐµÐºÑ†Ð¸Ñ"],
-    ["CTR-T-199", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚", "ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚ T-199 Â· Ð½Ðµ Ñ€Ð°Ð·Ð½ÐµÑÐµÐ½Ð¾", "XLSX_MASKED", "ODDS-CTR-T-199", "Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹", "Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ ÑÐ²ÐµÑ€ÐºÐ¸"],
-  ];
-  await env.DB.batch(entitySeeds.map((row) => env.DB.prepare(
-    "INSERT OR IGNORE INTO entities (id, entity_type, display_name, source_system, source_record_id, scope, data_quality, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'system-seed')"
-  ).bind(...row)));
-  await env.DB.batch([
-    env.DB.prepare("UPDATE entities SET entity_type = 'Ð®Ñ€Ð»Ð¸Ñ†Ð¾', display_name = 'ÐžÐžÐž Â«ÐÑ€Ñ‚Ð¥ÐµÐ»Ð»Ð¾Â» Â· Ñ‚ÐµÑÑ‚', data_quality = 'ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾' WHERE id = 'ORG-T-001' AND created_by = 'system-seed'"),
-    env.DB.prepare("UPDATE entities SET display_name = 'Ð¡ÐµÐ¼ÑŒÑ â„–0014', data_quality = 'ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾' WHERE id = 'FAM-T-014' AND created_by = 'system-seed' AND display_name = 'Ð¡ÐµÐ¼ÑŒÑ T-014'"),
-    env.DB.prepare("UPDATE entities SET display_name = 'ÐŸÐµÐ´Ð°Ð³Ð¾Ð³ â„–0032', source_system = 'XLSX_MASKED', source_record_id = 'PAYROLL-ROW-T-032', data_quality = 'Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ ÑÐ²ÐµÑ€ÐºÐ¸' WHERE id = 'EMP-T-032' AND created_by = 'system-seed' AND display_name = 'Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº T-032 Â· Ð¿ÐµÐ´Ð°Ð³Ð¾Ð³'"),
-  ]);
-
-  const linkSeeds = [
-    ["FAM-T-014", "CHD-T-014", "Ð¡ÐµÐ¼ÑŒÑ â†’ Ñ€ÐµÐ±Ñ‘Ð½Ð¾Ðº"],
-    ["CLI-T-014", "FAM-T-014", "ÐšÐ»Ð¸ÐµÐ½Ñ‚ÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° ÑÐµÐ¼ÑŒÐ¸"],
-    ["FAM-GROUP-T", "FAM-T-014", "Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ Ð¿Ñ€Ð¸Ð¼ÐµÑ€ ÑÐµÐ¼ÑŒÐ¸ Â· Ð½Ðµ Ð´ÐµÑ‚Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ XLSX"],
-    ["CHD-T-014", "SVC-T-001", "ÐŸÐ¾Ð»ÑƒÑ‡Ð°ÐµÑ‚ ÑƒÑÐ»ÑƒÐ³Ñƒ"],
-    ["EMP-T-032", "UNT-T-001", "Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚ Ð² Ð¿Ð¾Ð´Ñ€Ð°Ð·Ð´ÐµÐ»ÐµÐ½Ð¸Ð¸"],
-    ["UNT-T-001", "ORG-T-001", "Ð’Ñ…Ð¾Ð´Ð¸Ñ‚ Ð² ÑŽÑ€Ð»Ð¸Ñ†Ð¾"],
-    ["OBJ-T-001", "ORG-T-001", "ÐŸÑ€Ð¸Ð½Ð°Ð´Ð»ÐµÐ¶Ð¸Ñ‚ ÑŽÑ€Ð»Ð¸Ñ†Ñƒ"],
-    ["PRJ-T-001", "ORG-T-001", "ÐŸÑ€Ð¾ÐµÐºÑ‚ ÑŽÑ€Ð»Ð¸Ñ†Ð°"],
-    ["SUP-T-001", "SVC-T-001", "ÐŸÐ¾ÑÑ‚Ð°Ð²Ð»ÑÐµÑ‚ Ð´Ð»Ñ ÑƒÑÐ»ÑƒÐ³Ð¸"],
-  ];
-  await env.DB.batch(linkSeeds.map((row) => env.DB.prepare(
-    "INSERT OR IGNORE INTO entity_links (from_entity_id, to_entity_id, relation_type, created_by) VALUES (?, ?, ?, 'system-seed')"
-  ).bind(...row)));
-
-  const documentSeeds = [
-    ["FAM-T-014", "DOG-T-2026-014", "Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ñ ÑÐµÐ¼ÑŒÑ‘Ð¹", "ÐÐºÑ‚ÑƒÐ°Ð»ÐµÐ½", "2027-08-31", "SYNTHETIC"],
-    ["EMP-T-032", "EMP-DOG-T-032", "Ð¢Ñ€ÑƒÐ´Ð¾Ð²Ð¾Ð¹ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€", "ÐÐ° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐµ", "", "XLSX_MASKED"],
-    ["ORG-T-001", "ORG-CARD-T-001", "ÐšÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° ÑŽÑ€Ð»Ð¸Ñ†Ð°", "ÐÐºÑ‚ÑƒÐ°Ð»ÐµÐ½", "", "SYNTHETIC"],
-  ];
-  await env.DB.batch(documentSeeds.map((row) => env.DB.prepare(
-    "INSERT INTO entity_documents (entity_id, title, document_type, status, valid_until, source, created_by) SELECT ?, ?, ?, ?, ?, ?, 'system-seed' WHERE NOT EXISTS (SELECT 1 FROM entity_documents WHERE entity_id = ? AND title = ?)"
-  ).bind(...row, row[0], row[1])));
-}
-
-async function seedWorkflow() {
-  await env.DB.prepare("INSERT OR IGNORE INTO entities (id, entity_type, display_name, source_system, source_record_id, scope, data_quality, created_by) VALUES ('EMP-T-004', 'Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº', 'ÐÐ´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€ ÑÐ¸ÑÑ‚ÐµÐ¼Ñ‹ â„–4', 'SYNTHETIC', 'EMP-SRC-T-004', 'Ð£Ð¿Ñ€Ð°Ð²Ð»ÑÑŽÑ‰Ð°Ñ ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ñ', 'ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð¾', 'system-seed')").run();
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO workflow_documents (id, title, document_type, current_version, status, valid_until, owner_entity_id, source, created_by) VALUES ('DOG-T-2026-044', 'Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ñ Ð¿Ð¾Ð´Ñ€ÑÐ´Ñ‡Ð¸ÐºÐ¾Ð¼', 'Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€', 2, 'Ð˜ÑÑ‚ÐµÐºÐ°ÐµÑ‚', '2026-09-02', 'EMP-T-004', 'SYNTHETIC', 'system-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO document_versions (document_id, version, note, reference, created_by) VALUES ('DOG-T-2026-044', 1, 'Ð˜ÑÑ…Ð¾Ð´Ð½Ð°Ñ Ð²ÐµÑ€ÑÐ¸Ñ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð°', 'ÐšÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° Â· Ð²ÐµÑ€ÑÐ¸Ñ 1', 'system-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO document_versions (document_id, version, note, reference, created_by) VALUES ('DOG-T-2026-044', 2, 'Ð”Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ ÑÐ¾Ð³Ð»Ð°ÑˆÐµÐ½Ð¸Ðµ Â· Ñ‚ÐµÑÑ‚', 'Ð”Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ ÑÐ¾Ð³Ð»Ð°ÑˆÐµÐ½Ð¸Ðµ Â· Ð²ÐµÑ€ÑÐ¸Ñ 2', 'system-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO obligations (document_id, title, due_date, owner_entity_id, status, warning_days, created_by) VALUES ('DOG-T-2026-044', 'ÐŸÑ€Ð¾Ð´Ð»Ð¸Ñ‚ÑŒ Ð¸Ð»Ð¸ Ð·Ð°ÐºÑ€Ñ‹Ñ‚ÑŒ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€', '2026-09-02', 'EMP-T-004', 'ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð¾', 30, 'system-seed')"),
-  ]);
-
-  await env.DB.prepare(`INSERT OR IGNORE INTO tasks (
-    title, owner, due_date, priority, status, source_type, source_id, description,
-    assignee_entity_id, kind, automation_key, requires_approval, created_by
-  ) VALUES (
-    'ÐŸÑ€Ð¾Ð´Ð»Ð¸Ñ‚ÑŒ Ð¸Ð»Ð¸ Ð·Ð°ÐºÑ€Ñ‹Ñ‚ÑŒ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ â„–0044', 'ÐÐ´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€ ÑÐ¸ÑÑ‚ÐµÐ¼Ñ‹', '2026-08-28',
-    'Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹', 'Ð’Ñ…Ð¾Ð´ÑÑ‰Ð¸Ðµ', 'ÐžÐ±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÑÑ‚Ð²Ð¾ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð°', 'DOG-T-2026-044',
-    'Ð¡Ñ€Ð¾Ðº Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° Ð¸ÑÑ‚ÐµÐºÐ°ÐµÑ‚ 02.09.2026. ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÑÑ‚Ð²Ð°, ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ñ‚ÑŒ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð¸ ÑÐ¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚.',
-    'EMP-T-004', 'ÐÐ²Ñ‚Ð¾Ð·Ð°Ð´Ð°Ñ‡Ð°', 'CONTRACT_EXPIRY:DOG-T-2026-044', 1, 'system-automation'
-  )`).run();
-
-  const autoTask = await env.DB.prepare("SELECT id FROM tasks WHERE automation_key = 'CONTRACT_EXPIRY:DOG-T-2026-044'").first<{ id: number }>();
-  if (!autoTask) return;
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO task_watchers (task_id, entity_id, created_by) VALUES (?, 'ROLE:DIRECTOR', 'system-automation')").bind(autoTask.id),
-    env.DB.prepare("INSERT OR IGNORE INTO task_approvals (task_id, step_name, status) VALUES (?, 'Ð ÐµÑˆÐµÐ½Ð¸Ðµ Ñ€ÑƒÐºÐ¾Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»Ñ', 'ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚')").bind(autoTask.id),
-    env.DB.prepare("INSERT INTO task_checklist (task_id, title, created_by) SELECT ?, 'ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ ÑƒÑÐ»Ð¾Ð²Ð¸Ñ Ð¿Ñ€Ð¾Ð´Ð»ÐµÐ½Ð¸Ñ', 'system-automation' WHERE NOT EXISTS (SELECT 1 FROM task_checklist WHERE task_id = ? AND title = 'ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ ÑƒÑÐ»Ð¾Ð²Ð¸Ñ Ð¿Ñ€Ð¾Ð´Ð»ÐµÐ½Ð¸Ñ')").bind(autoTask.id, autoTask.id),
-    env.DB.prepare("INSERT INTO task_checklist (task_id, title, created_by) SELECT ?, 'Ð¡Ð¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ñ‚ÑŒ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ñ Ñ€ÑƒÐºÐ¾Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÐµÐ¼', 'system-automation' WHERE NOT EXISTS (SELECT 1 FROM task_checklist WHERE task_id = ? AND title = 'Ð¡Ð¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ñ‚ÑŒ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ñ Ñ€ÑƒÐºÐ¾Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÐµÐ¼')").bind(autoTask.id, autoTask.id),
-    env.DB.prepare("INSERT INTO task_checklist (task_id, title, created_by) SELECT ?, 'Ð—Ð°Ñ„Ð¸ÐºÑÐ¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð½Ð¾Ð²ÑƒÑŽ Ð²ÐµÑ€ÑÐ¸ÑŽ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ð°', 'system-automation' WHERE NOT EXISTS (SELECT 1 FROM task_checklist WHERE task_id = ? AND title = 'Ð—Ð°Ñ„Ð¸ÐºÑÐ¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð½Ð¾Ð²ÑƒÑŽ Ð²ÐµÑ€ÑÐ¸ÑŽ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ð°')").bind(autoTask.id, autoTask.id),
-    env.DB.prepare("INSERT OR IGNORE INTO task_documents (task_id, document_id, created_by) VALUES (?, 'DOG-T-2026-044', 'system-automation')").bind(autoTask.id),
-    env.DB.prepare("INSERT OR IGNORE INTO notifications (recipient_entity_id, notification_type, title, body, source_type, source_id, status, dedup_key) VALUES ('ROLE:DIRECTOR', 'Ð¡Ñ€Ð¾Ðº Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÑÑ‚Ð²Ð°', 'Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ â„–0044 Ð¸ÑÑ‚ÐµÐºÐ°ÐµÑ‚ Ñ‡ÐµÑ€ÐµÐ· 12 Ð´Ð½ÐµÐ¹', 'Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð¾ Ð¿Ñ€Ð¾Ð´Ð»ÐµÐ½Ð¸Ð¸ Ð¸Ð»Ð¸ Ð·Ð°ÐºÑ€Ñ‹Ñ‚Ð¸Ð¸ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° â„–0044.', 'document', 'DOG-T-2026-044', 'ÐÐ¾Ð²Ð¾Ðµ', 'CONTRACT_EXPIRY:DOG-T-2026-044:DIRECTOR')"),
-    env.DB.prepare("INSERT OR IGNORE INTO escalations (task_id, level, reason, status, recipient_entity_id) VALUES (?, 1, 'Ð”Ð¾ ÑÑ€Ð¾ÐºÐ° Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° Ð¼ÐµÐ½ÑŒÑˆÐµ 14 Ð´Ð½ÐµÐ¹', 'ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð°', 'ROLE:DIRECTOR')").bind(autoTask.id),
-    env.DB.prepare("INSERT INTO audit_events (actor, action, entity_type, entity_id, payload) SELECT 'system-automation', 'task.auto_created', 'task', CAST(? AS TEXT), '{\"sourceId\":\"DOG-T-2026-044\",\"rule\":\"contract_expiry\"}' WHERE NOT EXISTS (SELECT 1 FROM audit_events WHERE action = 'task.auto_created' AND entity_type = 'task' AND entity_id = CAST(? AS TEXT))").bind(autoTask.id, autoTask.id),
-  ]);
-  await env.DB.batch([
-    env.DB.prepare("UPDATE entities SET display_name='ÐÐ´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€ ÑÐ¸ÑÑ‚ÐµÐ¼Ñ‹ â„–4' WHERE id='EMP-T-004' AND created_by='system-seed' AND display_name='ÐÐ´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€ T-004'"),
-    env.DB.prepare("UPDATE workflow_documents SET title='Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ñ Ð¿Ð¾Ð´Ñ€ÑÐ´Ñ‡Ð¸ÐºÐ¾Ð¼' WHERE id='DOG-T-2026-044' AND created_by='system-seed' AND title='Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ñ Ð¿Ð¾Ð´Ñ€ÑÐ´Ñ‡Ð¸ÐºÐ¾Ð¼ Â· Ñ‚ÐµÑÑ‚'"),
-    env.DB.prepare("UPDATE document_versions SET reference='ÐšÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° Â· Ð²ÐµÑ€ÑÐ¸Ñ 1' WHERE document_id='DOG-T-2026-044' AND version=1 AND created_by='system-seed' AND reference='SYNTHETIC:DOG-T-2026-044:v1'"),
-    env.DB.prepare("UPDATE document_versions SET reference='Ð”Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ ÑÐ¾Ð³Ð»Ð°ÑˆÐµÐ½Ð¸Ðµ Â· Ð²ÐµÑ€ÑÐ¸Ñ 2' WHERE document_id='DOG-T-2026-044' AND version=2 AND created_by='system-seed' AND reference='SYNTHETIC:DOG-T-2026-044:v2'"),
-    env.DB.prepare("UPDATE tasks SET title='ÐŸÑ€Ð¾Ð´Ð»Ð¸Ñ‚ÑŒ Ð¸Ð»Ð¸ Ð·Ð°ÐºÑ€Ñ‹Ñ‚ÑŒ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ â„–0044' WHERE automation_key='CONTRACT_EXPIRY:DOG-T-2026-044' AND created_by='system-automation' AND title='ÐŸÑ€Ð¾Ð´Ð»Ð¸Ñ‚ÑŒ Ð¸Ð»Ð¸ Ð·Ð°ÐºÑ€Ñ‹Ñ‚ÑŒ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ DOG-T-2026-044'"),
-    env.DB.prepare("UPDATE tasks SET owner='ÐÐ´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€ ÑÐ¸ÑÑ‚ÐµÐ¼Ñ‹' WHERE automation_key='CONTRACT_EXPIRY:DOG-T-2026-044' AND created_by='system-automation' AND owner='ÐÐ´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€ T-004'"),
-    env.DB.prepare("UPDATE notifications SET title='Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ â„–0044 Ð¸ÑÑ‚ÐµÐºÐ°ÐµÑ‚ Ñ‡ÐµÑ€ÐµÐ· 12 Ð´Ð½ÐµÐ¹' WHERE dedup_key='CONTRACT_EXPIRY:DOG-T-2026-044:DIRECTOR' AND title='Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ð¸ÑÑ‚ÐµÐºÐ°ÐµÑ‚ Ñ‡ÐµÑ€ÐµÐ· 12 Ð´Ð½ÐµÐ¹'"),
-    env.DB.prepare("UPDATE notifications SET body='Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð¾ Ð¿Ñ€Ð¾Ð´Ð»ÐµÐ½Ð¸Ð¸ Ð¸Ð»Ð¸ Ð·Ð°ÐºÑ€Ñ‹Ñ‚Ð¸Ð¸ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° â„–0044.' WHERE dedup_key='CONTRACT_EXPIRY:DOG-T-2026-044:DIRECTOR' AND body='DOG-T-2026-044: Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð¾ Ð¿Ñ€Ð¾Ð´Ð»ÐµÐ½Ð¸Ð¸ Ð¸Ð»Ð¸ Ð·Ð°ÐºÑ€Ñ‹Ñ‚Ð¸Ð¸.'"),
-  ]);
-}
-
-type FinanceSeedLine = {
-  row: number;
-  category: string;
-  amounts: number[];
-  reportClass: string;
-  counterparty: string;
-  contract: string;
-  document: string;
-  cfr?: string;
-};
-
-async function seedFinance() {
-  const periods = ["2026-01", "2026-02", "2026-03", "2026-04"];
-  const periodDates = ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30"];
-  const periodColumns = ["B", "C", "D", "E"];
-  const receiptTotals = [6576895, 7383710, 8189741.5, 11380450];
-  const outflowTotals = [6748348.21, 8064360.08, 8565774, 7500221.05];
-  const receipts: FinanceSeedLine[] = [
-    { row: 5, category: "Ð’Ð½ÐµÑ€ÐµÐ°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ð¾Ð½Ð½Ñ‹Ðµ Ð´Ð¾Ñ…Ð¾Ð´Ñ‹", amounts: [0, 500, 750, 0], reportClass: "Ð”Ð¾Ñ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-107", contract: "", document: "DOC-T-NONOP" },
-    { row: 6, category: "Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‚ ÑÑ€ÐµÐ´ÑÑ‚Ð²", amounts: [195, 0, 0, 0], reportClass: "ÐÐµ Ð²ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¾ Ð² ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-108", contract: "", document: "DOC-T-REFUND" },
-    { row: 10, category: "Ð”Ð¾Ñ…Ð¾Ð´Ñ‹ Ð±ÑƒÐ´ÑƒÑ‰Ð¸Ñ… Ð¿ÐµÑ€Ð¸Ð¾Ð´Ð¾Ð²", amounts: [455000, 1564000, 1989680.5, 4163600], reportClass: "Ð”Ð¾Ñ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "FAM-GROUP-T", contract: "DOG-GROUP-T", document: "REG-PAY-T" },
-    { row: 12, category: "Ð”Ð¾Ñ…Ð¾Ð´Ñ‹ Ð±ÑƒÐ´ÑƒÑ‰Ð¸Ñ… Ð¿ÐµÑ€Ð¸Ð¾Ð´Ð¾Ð² Â· Ð¿Ð¾ÑÐ¾Ð±Ð¸Ñ", amounts: [0, 0, 0, 150000], reportClass: "Ð”Ð¾Ñ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "FAM-GROUP-T", contract: "DOG-GROUP-T", document: "REG-AID-T" },
-    { row: 13, category: "Ð”ÐµÑ‚ÑÐºÐ¸Ð¹ ÑÐ°Ð´ Ð¸ Ñ€Ð°Ð·Ð²Ð¸Ð²Ð°ÑŽÑ‰Ð¸Ð¹ Ñ†ÐµÐ½Ñ‚Ñ€", amounts: [6120480, 5813870, 6186361, 6257785], reportClass: "Ð”Ð¾Ñ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "FAM-GROUP-T", contract: "DOG-GROUP-T", document: "REG-PAY-T" },
-    { row: 23, category: "ÐŸÐ¸Ñ‚Ð°Ð½Ð¸Ðµ Ð² Ð´ÐµÑ‚ÑÐºÐ¾Ð¼ ÑÐ°Ð´Ñƒ", amounts: [1220, 4840, 12950, 9065], reportClass: "Ð”Ð¾Ñ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "FAM-GROUP-T", contract: "DOG-GROUP-T", document: "REG-FOOD-T" },
-    { row: 28, category: "ÐŸÑ€Ð¾Ñ‡Ð¸Ðµ Ð´Ð¾Ñ…Ð¾Ð´Ñ‹", amounts: [0, 500, 0, 700000], reportClass: "Ð”Ð¾Ñ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-107", contract: "", document: "DOC-T-OTHER" },
-    { row: 31, category: "Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‚ Ð·Ð°Ð¹Ð¼Ð°", amounts: [0, 0, 0, 100000], reportClass: "Ð¤Ð¸Ð½Ð°Ð½ÑÐ¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ", counterparty: "CTR-T-104", contract: "DOG-T-LOAN", document: "DOC-T-LOAN" },
-  ];
-  const outflows: FinanceSeedLine[] = [
-    { row: 35, category: "ÐÑ€ÐµÐ½Ð´Ð°", amounts: [451734.6, 500000, 500000, 502000], reportClass: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-101", contract: "DOG-T-RENT", document: "ACT-T-RENT" },
-    { row: 36, category: "ÐÑ€ÐµÐ½Ð´Ð° Ð±Ð°ÑÑÐµÐ¹Ð½Ð°", amounts: [0, 100000, 100000, 150000], reportClass: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-102", contract: "DOG-T-POOL", document: "ACT-T-POOL" },
-    { row: 38, category: "Ð‘Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ¾Ðµ Ð¾Ð±ÑÐ»ÑƒÐ¶Ð¸Ð²Ð°Ð½Ð¸Ðµ", amounts: [62874.18, 67899.88, 62544, 63910], reportClass: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-103", contract: "DOG-T-BANK", document: "BANK-FEE-T" },
-    { row: 43, category: "Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‚ Ð·Ð°Ð¹Ð¼Ð°", amounts: [130000, 130000, 130440, 130440], reportClass: "Ð¤Ð¸Ð½Ð°Ð½ÑÐ¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ", counterparty: "CTR-T-104", contract: "DOG-T-LOAN", document: "DOC-T-LOAN" },
-    { row: 46, category: "Ð”Ð¸Ð²Ð¸Ð´ÐµÐ½Ð´Ñ‹ Ð¸ Ð»Ð¸Ð·Ð¸Ð½Ð³", amounts: [186238.03, 186237.4, 195000, 186237.4], reportClass: "Ð¤Ð¸Ð½Ð°Ð½ÑÐ¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ", counterparty: "CTR-T-105", contract: "DEC-T-DIV", document: "DEC-T-DIV" },
-    { row: 54, category: "Ð—Ð°Ñ€Ð°Ð±Ð¾Ñ‚Ð½Ð°Ñ Ð¿Ð»Ð°Ñ‚Ð°", amounts: [3606785, 4171025.09, 3713833, 3908271.44], reportClass: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "EMP-GROUP-T", contract: "PAYROLL-T", document: "PAYROLL-T-2026" },
-    { row: 62, category: "ÐœÐ°Ñ€ÐºÐµÑ‚Ð¸Ð½Ð³", amounts: [0, 112420, 61165, 224302], reportClass: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-106", contract: "DOG-T-MKT", document: "ACT-T-MKT" },
-    { row: 66, category: "ÐÐ°Ð»Ð¾Ð³Ð¸ Ð·Ð° ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ¾Ð²", amounts: [622201.64, 63989.81, 1383168.5, 714776.06], reportClass: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-109", contract: "", document: "TAX-T-PAYROLL" },
-    { row: 73, category: "ÐŸÑ€Ð¾Ð´ÑƒÐºÑ‚Ñ‹", amounts: [611406.74, 357541.64, 542143, 664882.49], reportClass: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "SUP-T-001", contract: "DOG-T-FOOD", document: "ACT-T-FOOD" },
-    { row: 78, category: "Ð¡Ð¾Ð´ÐµÑ€Ð¶Ð°Ð½Ð¸Ðµ Ð¾Ð±ÑŠÐµÐºÑ‚Ð¾Ð²", amounts: [95233.42, 571839.78, 277666.5, 0], reportClass: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-110", contract: "DOG-T-FACILITY", document: "ACT-T-FACILITY" },
-    { row: 87, category: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ Ð¿Ð¾ Ð´ÐµÑÑ‚ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚Ð¸", amounts: [465659.94, 132044.37, 221054, 155398.66], reportClass: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-111", contract: "REQ-T-ACTIVITY", document: "ACT-T-ACTIVITY" },
-    { row: 104, category: "Ð£Ð¿Ñ€Ð°Ð²Ð»ÑÑŽÑ‰Ð°Ñ ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ñ", amounts: [316000, 433000, 415600, 363200], reportClass: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-112", contract: "DOG-T-MANAGEMENT", document: "ACT-T-MANAGEMENT", cfr: "CFR-T-002" },
-    { row: 106, category: "Ð¡Ð²ÑÐ·ÑŒ Ð¸ Ð¸Ð½Ñ‚ÐµÑ€Ð½ÐµÑ‚", amounts: [34000, 34400, 11000, 59800], reportClass: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-113", contract: "DOG-T-COMMS", document: "ACT-T-COMMS" },
-    { row: 107, category: "Ð¤Ð¸Ð½Ð°Ð½ÑÐ¾Ð²Ð°Ñ Ð´ÐµÑÑ‚ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚ÑŒ", amounts: [1500, 921000, 680000, 250000], reportClass: "Ð¤Ð¸Ð½Ð°Ð½ÑÐ¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ", counterparty: "CTR-T-114", contract: "DOG-T-FIN", document: "DOC-T-FIN" },
-  ];
-
-  const operations: Array<Record<string, string | number>> = [];
-  for (let periodIndex = 0; periodIndex < periods.length; periodIndex += 1) {
-    let operationIndex = 1;
-    const add = (line: FinanceSeedLine, direction: string, amount: number, sourceRef?: string, status = "Ð Ð°Ð·Ð½ÐµÑÐµÐ½Ð¾") => {
-      if (!amount) return;
-      operations.push({
-        id: `FIN-${periods[periodIndex]}-${direction === "ÐŸÐ¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ðµ" ? "IN" : "OUT"}-${String(operationIndex).padStart(3, "0")}`,
-        operationDate: periodDates[periodIndex], period: periods[periodIndex], direction,
-        amountMinor: Math.round(amount * 100), category: line.category, reportClass: line.reportClass,
-        counterparty: line.counterparty, contract: line.contract, document: line.document,
-        project: line.cfr === "CFR-T-002" ? "PRJ-T-001" : "PRJ-T-004", legal: "ORG-T-001",
-        object: line.cfr === "CFR-T-002" ? "OBJ-T-001" : "OBJ-T-002", cfr: line.cfr ?? "CFR-T-001",
-        bankRef: `BANK-TEST-${periods[periodIndex].replace("-", "")}-${String(operationIndex).padStart(3, "0")}`,
-        sourceRef: sourceRef ?? `${periodColumns[periodIndex]}${line.row}`, status,
-      });
-      operationIndex += 1;
-    };
-    receipts.forEach((line) => add(line, "ÐŸÐ¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ðµ", line.amounts[periodIndex]));
-    outflows.forEach((line) => add(line, "Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ", line.amounts[periodIndex]));
-    const mappedOutflow = outflows.reduce((sum, line) => sum + line.amounts[periodIndex], 0);
-    const residual = Math.round((outflowTotals[periodIndex] - mappedOutflow) * 100) / 100;
-    add({ row: 34, category: "ÐŸÑ€Ð¾Ñ‡Ð¸Ðµ Ð´ÐµÑ‚Ð°Ð»Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ðµ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ñ", amounts: [], reportClass: "Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£", counterparty: "CTR-T-199", contract: "", document: "REG-ODDS-T" }, "Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ", residual, `${periodColumns[periodIndex]}34:${periodColumns[periodIndex]}110 Â· Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ðº Ð¿Ð¾ÑÐ»Ðµ Ð´ÐµÑ‚Ð°Ð»Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ñ… ÑÑ‚Ð°Ñ‚ÐµÐ¹`, "Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ Ñ€Ð°Ð·Ð½ÐµÑÐµÐ½Ð¸Ñ");
-  }
-
-  await env.DB.batch(operations.map((operation) => env.DB.prepare(`INSERT OR IGNORE INTO financial_operations (
-    id, operation_date, period, direction, amount_minor, category, report_class, counterparty_entity_id,
-    contract_id, document_id, project_entity_id, legal_entity_id, object_entity_id, cfr_entity_id,
-    bank_operation_ref, operation_kind, source_system, source_file, source_sheet, source_ref, data_quality, status, created_by
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'XLSX_AGGREGATE', 'XLSX_ODDS_READONLY',
-    'ÐÑ‚Ð»Ð°Ñ ÐžÐ”Ð”Ð¡ 01.01.2023-31.01.2026.xlsx', '2026', ?,
-    'Ð¤Ð°ÐºÑ‚ XLSX Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½; ÑÑÑ‹Ð»ÐºÐ° Ð±Ð°Ð½ÐºÐ° ÑÐ²Ð»ÑÐµÑ‚ÑÑ Ñ‚ÐµÑÑ‚Ð¾Ð²Ð¾Ð¹ Ð¿Ñ€Ð¾ÐµÐºÑ†Ð¸ÐµÐ¹ Ð´Ð¾ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ñ Ð²Ñ‹Ð¿Ð¸ÑÐºÐ¸', ?, 'system-finance-seed')`
-    ).bind(
-      operation.id, operation.operationDate, operation.period, operation.direction, operation.amountMinor,
-      operation.category, operation.reportClass, operation.counterparty, operation.contract, operation.document,
-      operation.project, operation.legal, operation.object, operation.cfr, operation.bankRef,
-      operation.sourceRef, operation.status,
-    )));
-
-  const expectedTotals = periods.map((period, index) => ({ period, receiptMinor: Math.round(receiptTotals[index] * 100), outflowMinor: Math.round(outflowTotals[index] * 100) }));
-  for (const expected of expectedTotals) {
-    const actual = await env.DB.prepare("SELECT direction, SUM(amount_minor) AS total FROM financial_operations WHERE period = ? GROUP BY direction").bind(expected.period).all<{ direction: string; total: number }>();
-    const totals = Object.fromEntries((actual.results || []).map((row) => [row.direction, Number(row.total)]));
-    if (totals["ÐŸÐ¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ðµ"] !== expected.receiptMinor || totals["Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ"] !== expected.outflowMinor) {
-      throw new Error(`Finance seed does not reconcile for ${expected.period}`);
-    }
-  }
-
-  const accrualSeeds = [
-    ["ACR-2026-05-SCHOOL", "2026-05", "Ð¨ÐºÐ¾Ð»Ð°", "GROUP-T-SCHOOL", 30, 1486900, 1374400, 112500, 2, "ÐœÐ°Ð¹ 2026 Â· ÑˆÐºÐ¾Ð»Ð°"],
-    ["ACR-2026-05-KINDER", "2026-05", "Ð”ÐµÑ‚ÑÐºÐ¸Ð¹ ÑÐ°Ð´", "GROUP-T-KINDER", 78, 3255390, 3240390, 15000, 1, "ÐœÐ°Ð¹ 2026 Â· Ð´ÐµÑ‚ÑÐºÐ¸Ð¹ ÑÐ°Ð´"],
-    ["ACR-2026-06-CAMP", "2026-06", "Ð›Ð°Ð³ÐµÑ€ÑŒ", "GROUP-T-CAMP", 15, 653100, 452100, 201000, 7, "Ð˜ÑŽÐ½ÑŒ 2026 Â· Ð»Ð°Ð³ÐµÑ€ÑŒ"],
-    ["ACR-2026-06-KINDER", "2026-06", "Ð”ÐµÑ‚ÑÐºÐ¸Ð¹ ÑÐ°Ð´", "GROUP-T-KINDER", 55, 2365000, 173550, 2191450, 35, "Ð˜ÑŽÐ½ÑŒ 2026 Â· Ð´ÐµÑ‚ÑÐºÐ¸Ð¹ ÑÐ°Ð´"],
-  ];
-  await env.DB.batch(accrualSeeds.map((row) => env.DB.prepare(`INSERT OR IGNORE INTO finance_accruals (
-    id, period, contour, subject_entity_id, records_count, accrual_minor, paid_minor, debt_minor, debt_cases,
-    source_file, source_sheet, source_ref, data_quality
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Ð•Ð¶ÐµÐ¼ÐµÑÑÑ‡Ð½Ñ‹Ðµ Ð¾Ð¿Ð»Ð°Ñ‚Ñ‹.xlsx', ?, 'AGGREGATE:PAID+DEBT', 'ÐžÐ±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð½Ñ‹Ð¹ Ð°Ð³Ñ€ÐµÐ³Ð°Ñ‚; Ð¿ÐµÑ€ÑÐ¾Ð½Ð°Ð»ÑŒÐ½Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð½Ðµ Ð¿ÐµÑ€ÐµÐ½ÐµÑÐµÐ½Ñ‹')`
-    ).bind(row[0], row[1], row[2], row[3], row[4], Math.round(Number(row[5]) * 100), Math.round(Number(row[6]) * 100), Math.round(Number(row[7]) * 100), row[8], row[9])));
-
-  const budgetSeeds = [
-    ["2026-01", 6700000, 6600000], ["2026-02", 7200000, 7500000], ["2026-03", 8300000, 8100000],
-    ["2026-04", 10800000, 7200000], ["2026-05", 9600000, 8000000], ["2026-06", 8900000, 8300000],
-  ];
-  await env.DB.batch(budgetSeeds.flatMap(([period, income, expense]) => [
-    env.DB.prepare("INSERT OR IGNORE INTO finance_budgets (id, period, line, plan_minor, scenario, assumption, source_type, owner_entity_id) VALUES (?, ?, 'Ð”Ð¾Ñ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£', ?, 'Ð‘Ð°Ð·Ð¾Ð²Ñ‹Ð¹', 'Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ Ð±ÑŽÐ´Ð¶ÐµÑ‚ Ð´Ð»Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ Ð¿Ð»Ð°Ð½-Ñ„Ð°ÐºÑ‚Ð°; ÑƒÑ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ð¹ Ñ„Ð°Ð¹Ð» Ð±ÑŽÐ´Ð¶ÐµÑ‚Ð° Ð½Ðµ Ð¿Ñ€ÐµÐ´Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½', 'SYNTHETIC_ASSUMPTION', 'ROLE:FINANCE')").bind(`BUD-${period}-IN`, period, Math.round(Number(income) * 100)),
-    env.DB.prepare("INSERT OR IGNORE INTO finance_budgets (id, period, line, plan_minor, scenario, assumption, source_type, owner_entity_id) VALUES (?, ?, 'Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£', ?, 'Ð‘Ð°Ð·Ð¾Ð²Ñ‹Ð¹', 'Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ Ð±ÑŽÐ´Ð¶ÐµÑ‚ Ð´Ð»Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ Ð¿Ð»Ð°Ð½-Ñ„Ð°ÐºÑ‚Ð°; ÑƒÑ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ð¹ Ñ„Ð°Ð¹Ð» Ð±ÑŽÐ´Ð¶ÐµÑ‚Ð° Ð½Ðµ Ð¿Ñ€ÐµÐ´Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½', 'SYNTHETIC_ASSUMPTION', 'ROLE:FINANCE')").bind(`BUD-${period}-OUT`, period, Math.round(Number(expense) * 100)),
-  ]));
-
-  const forecastSeeds = [
-    ["FC-T-001", "2026-09-01", "ÐŸÐ¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ðµ", 1400000, 70, "ÐžÐ¿Ð»Ð°Ñ‚Ñ‹ Ð¾Ð±ÑƒÑ‡ÐµÐ½Ð¸Ñ", "AGGREGATE_FORECAST", "70% Ð¾Ñ‚ Ð¾Ð¶Ð¸Ð´Ð°ÐµÐ¼Ñ‹Ñ… Ð¾Ð¿Ð»Ð°Ñ‚ Ð¿Ð¾ Ð¾Ð±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð½Ð¾Ð¼Ñƒ Ñ€ÐµÐµÑÑ‚Ñ€Ñƒ", "GROUP-T-SCHOOL"],
-    ["FC-T-002", "2026-09-02", "Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ", 2100000, 100, "Ð—Ð°Ñ€Ð°Ð±Ð¾Ñ‚Ð½Ð°Ñ Ð¿Ð»Ð°Ñ‚Ð°", "CALENDAR", "ÐŸÐ»Ð°Ñ‚Ñ‘Ð¶Ð½Ñ‹Ð¹ ÐºÐ°Ð»ÐµÐ½Ð´Ð°Ñ€ÑŒ Â· Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ ÑÑ€Ð¾Ðº", "EMP-GROUP-T"],
-    ["FC-T-003", "2026-09-03", "ÐŸÐ¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ðµ", 450000, 60, "ÐžÐ¿Ð»Ð°Ñ‚Ñ‹ Ð´ÐµÑ‚ÑÐºÐ¾Ð³Ð¾ ÑÐ°Ð´Ð°", "AGGREGATE_FORECAST", "60% Ð¾Ñ‚ Ð¾Ð¶Ð¸Ð´Ð°ÐµÐ¼Ñ‹Ñ… Ð¾Ð¿Ð»Ð°Ñ‚ Ð¿Ð¾ Ð¾Ð±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð½Ð¾Ð¼Ñƒ Ñ€ÐµÐµÑÑ‚Ñ€Ñƒ", "GROUP-T-KINDER"],
-    ["FC-T-004", "2026-09-04", "Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ", 600000, 100, "ÐÑ€ÐµÐ½Ð´Ð°", "CONTRACT_SCHEDULE", "Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð½Ñ‹Ð¹ Ð³Ñ€Ð°Ñ„Ð¸Ðº Â· Ñ‚ÐµÑÑ‚Ð¾Ð²Ð°Ñ Ð¿Ñ€Ð¾ÐµÐºÑ†Ð¸Ñ", "CTR-T-101"],
-    ["FC-T-005", "2026-09-05", "Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ", 820000, 100, "ÐÐ°Ð»Ð¾Ð³Ð¸", "CALENDAR", "ÐÐ°Ð»Ð¾Ð³Ð¾Ð²Ñ‹Ð¹ ÐºÐ°Ð»ÐµÐ½Ð´Ð°Ñ€ÑŒ Â· Ñ‚ÐµÑÑ‚Ð¾Ð²Ð°Ñ Ð´Ð°Ñ‚Ð°", "CTR-T-109"],
-    ["FC-T-006", "2026-09-08", "ÐŸÐ¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ðµ", 2200000, 65, "ÐžÐ¿Ð»Ð°Ñ‚Ñ‹ Ð¾Ð±ÑƒÑ‡ÐµÐ½Ð¸Ñ", "AGGREGATE_FORECAST", "65% Ð¾Ñ‚ Ð¾Ð¶Ð¸Ð´Ð°ÐµÐ¼Ñ‹Ñ… Ð¾Ð¿Ð»Ð°Ñ‚ Ð¿Ð¾ Ð¾Ð±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð½Ð¾Ð¼Ñƒ Ñ€ÐµÐµÑÑ‚Ñ€Ñƒ", "GROUP-T-SCHOOL"],
-  ];
-  await env.DB.batch(forecastSeeds.map((row) => env.DB.prepare("INSERT OR IGNORE INTO finance_forecast_items (id, forecast_date, direction, amount_minor, probability, category, source_type, assumption, linked_entity_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(row[0], row[1], row[2], Math.round(Number(row[3]) * 100), row[4], row[5], row[6], row[7], row[8])));
-
-  const payrollSeeds = [
-    ["PAY-SUM-2025-09", "2025-09", 3542536.7], ["PAY-SUM-2025-10", "2025-10", 3880831.53],
-    ["PAY-SUM-2025-11", "2025-11", 3804982.38], ["PAY-SUM-2025-12", "2025-12", 3978052.82],
-    ["PAY-SUM-2026-01", "2026-01", 3620548.32],
-  ];
-  await env.DB.batch(payrollSeeds.map((row, index) => env.DB.prepare("INSERT OR IGNORE INTO finance_payroll_summary (id, period, amount_minor, scope, source_file, source_sheet, source_ref, data_quality) VALUES (?, ?, ?, 'Ð“Ñ€ÑƒÐ¿Ð¿Ð° ArtHello Â· Ð¾Ð±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð½Ñ‹Ð¹ Ð¸Ñ‚Ð¾Ð³', 'Ð—Ð°Ñ€Ð¿Ð»Ð°Ñ‚Ð½Ð°Ñ Ð²ÐµÐ´Ð¾Ð¼Ð¾ÑÑ‚ÑŒ.xlsx', ?, 'SUMMARY:ACCRUALS', 'ÐÐ³Ñ€ÐµÐ³Ð°Ñ‚; Ð¤Ð˜Ðž Ð¸ Ð¿ÐµÑ€ÑÐ¾Ð½Ð°Ð»ÑŒÐ½Ñ‹Ðµ Ð½Ð°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ñ Ð½Ðµ Ð¿ÐµÑ€ÐµÐ½ÐµÑÐµÐ½Ñ‹')").bind(row[0], row[1], Math.round(Number(row[2]) * 100), `SHEET-${String(index + 17).padStart(3, "0")}`)));
-
-  const issueSeeds = [
-    ["FIN-DQ-001", "Ð ÐµÐµÑÑ‚Ñ€ Ð¾Ð¿Ð»Ð°Ñ‚ Ð¾Ñ‚ÑÑ‚Ð°Ñ‘Ñ‚ Ð¾Ñ‚ Ñ‚ÐµÐºÑƒÑ‰ÐµÐ¹ Ð´Ð°Ñ‚Ñ‹", "Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹", "Ð•Ð¶ÐµÐ¼ÐµÑÑÑ‡Ð½Ñ‹Ðµ Ð¾Ð¿Ð»Ð°Ñ‚Ñ‹.xlsx Â· Ð¸ÑŽÐ½ÑŒ 2026", "Ð¢ÐµÐºÑƒÑ‰Ð°Ñ Ð´Ð°Ñ‚Ð° Â· Ð°Ð²Ð³ÑƒÑÑ‚ 2026", 0, "ROLE:FINANCE", "ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð¾"],
-    ["FIN-DQ-002", "Ð¡Ñ‚Ð°Ñ‚ÑŒÑ ÐžÐ”Ð”Ð¡ Ñ Ð¾ÑˆÐ¸Ð±Ð¾Ñ‡Ð½Ñ‹Ð¼ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚Ð¾Ð¼ Ð´Ð°Ñ‚Ñ‹", "Ð¡Ñ€ÐµÐ´Ð½Ð¸Ð¹", "ÐÑ‚Ð»Ð°Ñ ÐžÐ”Ð”Ð¡ Â· Ð»Ð¸ÑÑ‚ 2025", "ÐŸÑ€Ð°Ð²Ð¸Ð»Ð¾ Ñ‚Ð¸Ð¿Ð° Ð´Ð°Ð½Ð½Ñ‹Ñ…", 0, "ROLE:FINANCE", "ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð¾"],
-    ["FIN-REC-003", "Ð£Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ð¹ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº ÐžÐŸÐ¸Ð£ Ð½Ðµ Ð¿Ñ€ÐµÐ´Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½", "Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹", "ÐžÐ”Ð”Ð¡ Â· Ð´ÐµÐ½ÐµÐ¶Ð½Ñ‹Ð¹ Ñ„Ð°ÐºÑ‚", "ÐžÐŸÐ¸Ð£ Â· Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚", 0, "ROLE:FINANCE", "ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº"],
-    ["FIN-REC-004", "Ð‘Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ°Ñ Ð²Ñ‹Ð¿Ð¸ÑÐºÐ° Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð°", "Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹", "ÐžÐ”Ð”Ð¡ Â· Ð°Ð¿Ñ€ÐµÐ»ÑŒ 2026", "Ð¢Ð¾Ñ‡ÐºÐ° / Ð¢â€‘Ð‘Ð°Ð½Ðº Â· Ð½ÐµÑ‚ Ð´Ð°Ð½Ð½Ñ‹Ñ…", 1138045000, "ROLE:FINANCE", "ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº"],
-    ["FIN-REC-005", "Ð”ÐµÑ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ ÑÐ¾Ð´ÐµÑ€Ð¶Ð°Ð½Ð¸Ñ Ð½Ðµ Ð²ÐºÐ»ÑŽÑ‡ÐµÐ½Ñ‹ Ð² Ð¸Ñ‚Ð¾Ð³ Ð°Ð¿Ñ€ÐµÐ»Ñ", "Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹", "ÐžÐ”Ð”Ð¡ Â· 2026 Â· E79:E85", "ÐžÐ”Ð”Ð¡ Â· 2026 Â· E78 Ð¸ E34", 60919538, "ROLE:FINANCE", "ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð¾"],
-    ["FIN-REC-006", "Ð§Ð¸ÑÑ‚Ñ‹Ð¹ Ð¿Ð¾Ñ‚Ð¾Ðº ÑÐ½Ð²Ð°Ñ€Ñ Ð½Ðµ Ñ€Ð°Ð²ÐµÐ½ Ð¿Ð¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸ÑÐ¼ Ð¼Ð¸Ð½ÑƒÑ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ñ", "Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹", "ÐžÐ”Ð”Ð¡ Â· 2026 Â· B2 Ð¸ B34", "ÐžÐ”Ð”Ð¡ Â· 2026 Â· B111", -13474438, "ROLE:FINANCE", "ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð¾"],
-    ["FIN-RISK-001", "ÐŸÑ€Ð¾Ð³Ð½Ð¾Ð·Ð½Ñ‹Ð¹ ÐºÐ°ÑÑÐ¾Ð²Ñ‹Ð¹ Ñ€Ð°Ð·Ñ€Ñ‹Ð² 5 ÑÐµÐ½Ñ‚ÑÐ±Ñ€Ñ", "Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹", "ÐŸÐ»Ð°Ñ‚Ñ‘Ð¶Ð½Ñ‹Ð¹ ÐºÐ°Ð»ÐµÐ½Ð´Ð°Ñ€ÑŒ Â· Ñ‚ÐµÑÑ‚", "ÐŸÑ€Ð¾Ð³Ð½Ð¾Ð·Ð½Ñ‹Ð¹ Ð±Ð°Ð»Ð°Ð½Ñ", -47000000, "ROLE:FINANCE", "ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð¾"],
-  ];
-  await env.DB.batch(issueSeeds.map((row) => env.DB.prepare("INSERT OR IGNORE INTO finance_reconciliation_issues (id, title, severity, source_a, source_b, difference_minor, owner_entity_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(...row)));
-  await env.DB.prepare("UPDATE finance_reconciliation_issues SET source_b='Ð¢Ð¾Ñ‡ÐºÐ° / Ð¢â€‘Ð‘Ð°Ð½Ðº Â· Ð½ÐµÑ‚ Ð´Ð°Ð½Ð½Ñ‹Ñ…' WHERE id='FIN-REC-004' AND source_b='Ð¢Ð¾Ñ‡ÐºÐ° / ÐÐ»ÑŒÑ„Ð°-Ð‘Ð°Ð½Ðº Â· Ð½ÐµÑ‚ Ð´Ð°Ð½Ð½Ñ‹Ñ…'").run();
-}
-
-async function seedSales() {
-  const entitySeeds = [
-    ["EMP-T-SALES-001", "Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº", "ÐœÐµÐ½ÐµÐ´Ð¶ÐµÑ€ Ð¿Ð¾ Ð¿Ñ€Ð¾Ð´Ð°Ð¶Ð°Ð¼ â„–1", "ÐŸÑ€Ð¾Ð´Ð°Ð¶Ð¸"],
-    ["EMP-T-SALES-002", "Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº", "ÐœÐµÐ½ÐµÐ´Ð¶ÐµÑ€ Ð¿Ð¾ Ð¿Ñ€Ð¾Ð´Ð°Ð¶Ð°Ð¼ â„–2", "ÐŸÑ€Ð¾Ð´Ð°Ð¶Ð¸"],
-    ["FAM-T-021", "Ð¡ÐµÐ¼ÑŒÑ", "Ð¡ÐµÐ¼ÑŒÑ â„–0021", "Ð”ÐµÑ‚ÑÐºÐ¸Ð¹ ÑÐ°Ð´"],
-    ["CHD-T-021", "Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº", "Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº â„–0021", "Ð”ÐµÑ‚ÑÐºÐ¸Ð¹ ÑÐ°Ð´"],
-    ["FAM-T-071", "Ð¡ÐµÐ¼ÑŒÑ", "Ð¡ÐµÐ¼ÑŒÑ â„–0071", "Ð”Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ Ð¾Ð±Ñ€Ð°Ð·Ð¾Ð²Ð°Ð½Ð¸Ðµ"],
-    ["CHD-T-071", "Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº", "Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº â„–0071", "Ð”Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ Ð¾Ð±Ñ€Ð°Ð·Ð¾Ð²Ð°Ð½Ð¸Ðµ"],
-    ["SVC-T-021", "Ð£ÑÐ»ÑƒÐ³Ð°", "Ð”ÐµÑ‚ÑÐºÐ¸Ð¹ ÑÐ°Ð´ Â· Ð¿Ð¾Ð»Ð½Ñ‹Ð¹ Ð´ÐµÐ½ÑŒ", "Ð”ÐµÑ‚ÑÐºÐ¸Ð¹ ÑÐ°Ð´"],
-    ["SVC-T-071", "Ð£ÑÐ»ÑƒÐ³Ð°", "Ð¢ÐµÐ°Ñ‚Ñ€Ð°Ð»ÑŒÐ½Ð°Ñ ÑÑ‚ÑƒÐ´Ð¸Ñ", "Ð”Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ Ð¾Ð±Ñ€Ð°Ð·Ð¾Ð²Ð°Ð½Ð¸Ðµ"],
-  ];
-  await env.DB.batch(entitySeeds.map((row, index) => env.DB.prepare(`INSERT OR IGNORE INTO entities (
-    id, entity_type, display_name, status, source_system, source_record_id, data_quality, scope, metadata, created_by
-  ) VALUES (?, ?, ?, 'ÐÐºÑ‚Ð¸Ð²Ð½Ð°', 'SYNTHETIC_SALES_TEST', ?, 'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð´Ð»Ñ Ð¿Ñ€Ð¸Ñ‘Ð¼ÐºÐ¸ ÑÑ‚Ð°Ð¿Ð° 5', ?, '{}', 'system-sales-seed')`)
-    .bind(row[0], row[1], row[2], `SALES-ENTITY-${String(index + 1).padStart(3, "0")}`, row[3])));
-
-  const leads = [
-    ["LEAD-T-014", "2026-04-02T09:12:00Z", "Ð¯Ð½Ð´ÐµÐºÑ ÐŸÐ¾Ð¸ÑÐº", "yandex", "cpc", "school_2026", "math_future", "CMP-T-001", "CR-T-011", "OFF-T-001", "FORM-T-SCHOOL", "EMP-T-SALES-001", "ÐŸÐ»Ð°Ñ‚Ñ‘Ð¶", "ÐÐºÑ‚Ð¸Ð²ÐµÐ½", "FAM-T-014", "CHD-T-014", "DOG-T-2026-014", "SVC-T-001", "", '["ÑˆÐºÐ¾Ð»Ð°","3 ÐºÐ»Ð°ÑÑ","Ð¿Ñ€Ð¸Ð¾Ñ€Ð¸Ñ‚ÐµÑ‚"]'],
-    ["LEAD-T-021", "2026-08-04T11:40:00Z", "VK", "vk", "social", "kindergarten_aug", "open_day", "CMP-T-002", "CR-T-022", "OFF-T-002", "FORM-T-KINDER", "EMP-T-SALES-002", "Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€", "ÐÐºÑ‚Ð¸Ð²ÐµÐ½", "FAM-T-021", "CHD-T-021", "DOG-T-2026-021", "SVC-T-021", "", '["Ð´ÐµÑ‚ÑÐºÐ¸Ð¹ ÑÐ°Ð´","Ð¿Ð¾Ð»Ð½Ñ‹Ð¹ Ð´ÐµÐ½ÑŒ"]'],
-    ["LEAD-T-033", "2026-08-15T08:25:00Z", "Telegram", "telegram", "messenger", "august_referral", "campus_tour", "CMP-T-003", "CR-T-031", "OFF-T-003", "FORM-T-CONSULT", "EMP-T-SALES-001", "ÐŸÐ¾ÑÐµÑ‰ÐµÐ½Ð¸Ðµ", "ÐÐºÑ‚Ð¸Ð²ÐµÐ½", "", "", "", "", "", '["ÑˆÐºÐ¾Ð»Ð°","ÑÐºÑÐºÑƒÑ€ÑÐ¸Ñ"]'],
-    ["LEAD-T-041", "2026-08-17T14:05:00Z", "Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ñ", "referral", "partner", "parent_referral", "family_story", "CMP-T-004", "CR-T-041", "OFF-T-004", "FORM-T-CALLBACK", "EMP-T-SALES-002", "ÐšÐ¾Ð½ÑÑƒÐ»ÑŒÑ‚Ð°Ñ†Ð¸Ñ", "ÐÐºÑ‚Ð¸Ð²ÐµÐ½", "", "", "", "", "", '["Ñ€ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ñ","ÑÐ°Ð´"]'],
-    ["LEAD-T-052", "2026-08-20T10:18:00Z", "Ð¡Ð°Ð¹Ñ‚", "direct", "organic", "direct_august", "school_landing", "CMP-T-005", "CR-T-052", "OFF-T-001", "FORM-T-SCHOOL", "EMP-T-SALES-001", "Ð—Ð°ÑÐ²ÐºÐ°", "ÐÐºÑ‚Ð¸Ð²ÐµÐ½", "", "", "", "", "", '["Ð½Ð¾Ð²Ñ‹Ð¹","ÑˆÐºÐ¾Ð»Ð°"]'],
-    ["LEAD-T-063", "2026-08-11T16:30:00Z", "Ð¯Ð½Ð´ÐµÐºÑ ÐšÐ°Ñ€Ñ‚Ñ‹", "yandex_maps", "organic", "maps_august", "campus_photo", "CMP-T-006", "CR-T-063", "OFF-T-002", "FORM-T-CALLBACK", "EMP-T-SALES-002", "ÐšÐ¾Ð½ÑÑƒÐ»ÑŒÑ‚Ð°Ñ†Ð¸Ñ", "Ð—Ð°ÐºÑ€Ñ‹Ñ‚", "", "", "", "", "Ð¡Ñ‚Ð¾Ð¸Ð¼Ð¾ÑÑ‚ÑŒ", '["Ð¾Ñ‚ÐºÐ°Ð·","ÑÐ°Ð´"]'],
-    ["LEAD-T-071", "2026-07-01T12:00:00Z", "Instagram", "instagram", "social", "theatre_summer", "stage_video", "CMP-T-007", "CR-T-071", "OFF-T-007", "FORM-T-STUDIO", "EMP-T-SALES-001", "ÐŸÐ»Ð°Ñ‚Ñ‘Ð¶", "ÐÐºÑ‚Ð¸Ð²ÐµÐ½", "FAM-T-071", "CHD-T-071", "DOG-T-2026-071", "SVC-T-071", "", '["ÑÑ‚ÑƒÐ´Ð¸Ñ","Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€Ð½Ð°Ñ Ð¿Ñ€Ð¾Ð´Ð°Ð¶Ð°"]'],
-    ["LEAD-T-080", "2026-08-21T06:45:00Z", "ÐÐµ Ð¾Ð¿Ñ€ÐµÐ´ÐµÐ»Ñ‘Ð½", "", "", "", "", "", "", "", "", "", "ÐŸÐµÑ€Ð²Ñ‹Ð¹ ÐºÐ»Ð¸Ðº", "ÐÐºÑ‚Ð¸Ð²ÐµÐ½", "", "", "", "", "", '["Ð±ÐµÐ· Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸ÐºÐ°"]'],
-  ];
-  await env.DB.batch(leads.map((row) => env.DB.prepare(`INSERT OR IGNORE INTO sales_leads (
-    id, first_click_at, source, utm_source, utm_medium, utm_campaign, utm_content, campaign_id, creative_id,
-    offer_id, form_id, manager_entity_id, stage, status, family_entity_id, child_entity_id, contract_id,
-    service_entity_id, rejection_reason, tags, data_quality
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ðµ Ð´Ð°Ð½Ð½Ñ‹Ðµ; Ð¿ÐµÑ€ÑÐ¾Ð½Ð°Ð»ÑŒÐ½Ñ‹Ðµ Ð´Ð°Ð½Ð½Ñ‹Ðµ Ð½Ðµ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÑŽÑ‚ÑÑ')`).bind(...row)));
-
-  const touchpoints = [
-    ["TP-T-014-01", "LEAD-T-014", "ÐŸÐµÑ€Ð²Ñ‹Ð¹ ÐºÐ»Ð¸Ðº", "2026-04-02T09:12:00Z", "Ð¯Ð½Ð´ÐµÐºÑ ÐŸÐ¾Ð¸ÑÐº", "Ð’Ñ…Ð¾Ð´ÑÑ‰Ð¸Ð¹", "ÐŸÐµÑ€ÐµÑ…Ð¾Ð´ Ð¿Ð¾ Ð¾Ð±ÑŠÑÐ²Ð»ÐµÐ½Ð¸ÑŽ Â«Ð‘ÑƒÐ´ÑƒÑ‰ÐµÐµ Ð¼Ð°Ñ‚ÐµÐ¼Ð°Ñ‚Ð¸ÐºÐ¸Â»", "Ð¡Ñ‚Ñ€Ð°Ð½Ð¸Ñ†Ð° Ð¾Ñ‚ÐºÑ€Ñ‹Ñ‚Ð°", "CLICK-T-014"],
-    ["TP-T-014-02", "LEAD-T-014", "Ð¤Ð¾Ñ€Ð¼Ð°", "2026-04-02T09:16:00Z", "Ð¡Ð°Ð¹Ñ‚", "Ð’Ñ…Ð¾Ð´ÑÑ‰Ð¸Ð¹", "Ð¤Ð¾Ñ€Ð¼Ð° ÑˆÐºÐ¾Ð»Ñ‹ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð°", "Ð—Ð°ÑÐ²ÐºÐ° ÑÐ¾Ð·Ð´Ð°Ð½Ð°", "FORM-T-SCHOOL:SUB-T-014"],
-    ["TP-T-014-03", "LEAD-T-014", "Ð—Ð²Ð¾Ð½Ð¾Ðº", "2026-04-02T10:02:00Z", "Ð¢ÐµÐ»ÐµÑ„Ð¾Ð½Ð¸Ñ Â· Ñ‚ÐµÑÑ‚", "Ð˜ÑÑ…Ð¾Ð´ÑÑ‰Ð¸Ð¹", "ÐœÐµÐ½ÐµÐ´Ð¶ÐµÑ€ ÑƒÑ‚Ð¾Ñ‡Ð½Ð¸Ð» Ð·Ð°Ð¿Ñ€Ð¾Ñ ÑÐµÐ¼ÑŒÐ¸", "ÐšÐ¾Ð½ÑÑƒÐ»ÑŒÑ‚Ð°Ñ†Ð¸Ñ Ð½Ð°Ð·Ð½Ð°Ñ‡ÐµÐ½Ð°", "CALL-T-014"],
-    ["TP-T-014-04", "LEAD-T-014", "ÐŸÐµÑ€ÐµÐ¿Ð¸ÑÐºÐ°", "2026-04-02T10:11:00Z", "Telegram Â· Ñ‚ÐµÑÑ‚", "Ð˜ÑÑ…Ð¾Ð´ÑÑ‰Ð¸Ð¹", "ÐžÑ‚Ð¿Ñ€Ð°Ð²Ð»ÐµÐ½Ñ‹ Ð¿Ñ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ð° Ð¸ Ð¼Ð°Ñ€ÑˆÑ€ÑƒÑ‚", "Ð¡Ð¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ðµ Ð¿Ñ€Ð¾Ñ‡Ð¸Ñ‚Ð°Ð½Ð¾", "CHAT-T-014"],
-    ["TP-T-014-05", "LEAD-T-014", "ÐšÐ¾Ð½ÑÑƒÐ»ÑŒÑ‚Ð°Ñ†Ð¸Ñ", "2026-04-04T13:00:00Z", "ÐžÑ‡Ð½Ð¾", "Ð’Ñ…Ð¾Ð´ÑÑ‰Ð¸Ð¹", "ÐžÐ±ÑÑƒÐ¶Ð´ÐµÐ½Ñ‹ Ð¿Ñ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ð° Ð¸ ÑƒÑÐ»Ð¾Ð²Ð¸Ñ", "ÐŸÐ¾ÑÐµÑ‰ÐµÐ½Ð¸Ðµ Ð½Ð°Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¾", "CONSULT-T-014"],
-    ["TP-T-014-06", "LEAD-T-014", "ÐŸÐ¾ÑÐµÑ‰ÐµÐ½Ð¸Ðµ", "2026-04-06T15:00:00Z", "ÐšÐ¾Ñ€Ð¿ÑƒÑ 1", "Ð’Ñ…Ð¾Ð´ÑÑ‰Ð¸Ð¹", "Ð­ÐºÑÐºÑƒÑ€ÑÐ¸Ñ Ð¸ Ð²ÑÑ‚Ñ€ÐµÑ‡Ð° Ñ ÐºÑƒÑ€Ð°Ñ‚Ð¾Ñ€Ð¾Ð¼", "Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½", "VISIT-T-014"],
-    ["TP-T-021-01", "LEAD-T-021", "Ð—Ð²Ð¾Ð½Ð¾Ðº", "2026-08-04T12:05:00Z", "Ð¢ÐµÐ»ÐµÑ„Ð¾Ð½Ð¸Ñ Â· Ñ‚ÐµÑÑ‚", "Ð˜ÑÑ…Ð¾Ð´ÑÑ‰Ð¸Ð¹", "Ð£Ñ‚Ð¾Ñ‡Ð½Ñ‘Ð½ Ñ€ÐµÐ¶Ð¸Ð¼ Ð¿Ð¾Ð»Ð½Ð¾Ð³Ð¾ Ð´Ð½Ñ", "ÐšÐ¾Ð½ÑÑƒÐ»ÑŒÑ‚Ð°Ñ†Ð¸Ñ Ð½Ð°Ð·Ð½Ð°Ñ‡ÐµÐ½Ð°", "CALL-T-021"],
-    ["TP-T-033-01", "LEAD-T-033", "ÐŸÐ¾ÑÐµÑ‰ÐµÐ½Ð¸Ðµ", "2026-08-20T15:30:00Z", "Ð£Ñ‡ÐµÐ±Ð½Ñ‹Ð¹ ÐºÐ¾Ð¼Ð¿Ð»ÐµÐºÑ", "Ð’Ñ…Ð¾Ð´ÑÑ‰Ð¸Ð¹", "ÐŸÑ€Ð¾Ð²ÐµÐ´ÐµÐ½Ð° ÑÐºÑÐºÑƒÑ€ÑÐ¸Ñ", "ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ", "VISIT-T-033"],
-    ["TP-T-041-01", "LEAD-T-041", "ÐšÐ¾Ð½ÑÑƒÐ»ÑŒÑ‚Ð°Ñ†Ð¸Ñ", "2026-08-21T12:00:00Z", "Ð’Ð¸Ð´ÐµÐ¾", "Ð’Ñ…Ð¾Ð´ÑÑ‰Ð¸Ð¹", "ÐŸÐµÑ€Ð²Ð¸Ñ‡Ð½Ð°Ñ ÐºÐ¾Ð½ÑÑƒÐ»ÑŒÑ‚Ð°Ñ†Ð¸Ñ", "ÐŸÑ€Ð¸Ð³Ð»Ð°ÑˆÑ‘Ð½ Ð½Ð° Ð¿Ð¾ÑÐµÑ‰ÐµÐ½Ð¸Ðµ", "CONSULT-T-041"],
-    ["TP-T-063-01", "LEAD-T-063", "ÐšÐ¾Ð½ÑÑƒÐ»ÑŒÑ‚Ð°Ñ†Ð¸Ñ", "2026-08-12T14:00:00Z", "Ð¢ÐµÐ»ÐµÑ„Ð¾Ð½", "Ð’Ñ…Ð¾Ð´ÑÑ‰Ð¸Ð¹", "ÐžÐ±ÑÑƒÐ¶Ð´ÐµÐ½Ñ‹ ÑƒÑÐ»Ð¾Ð²Ð¸Ñ Ð¸ ÑÑ‚Ð¾Ð¸Ð¼Ð¾ÑÑ‚ÑŒ", "ÐžÑ‚ÐºÐ°Ð·: ÑÑ‚Ð¾Ð¸Ð¼Ð¾ÑÑ‚ÑŒ", "CONSULT-T-063"],
-  ];
-  await env.DB.batch(touchpoints.map((row) => env.DB.prepare(`INSERT OR IGNORE INTO sales_touchpoints (
-    id, lead_id, touchpoint_type, occurred_at, channel, direction, summary, outcome, source_ref, created_by
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'system-sales-seed')`).bind(...row)));
-
-  const chainStages = ["ÐŸÐµÑ€Ð²Ñ‹Ð¹ ÐºÐ»Ð¸Ðº", "Ð—Ð°ÑÐ²ÐºÐ°", "ÐšÐ¾Ð½ÑÑƒÐ»ÑŒÑ‚Ð°Ñ†Ð¸Ñ", "ÐŸÐ¾ÑÐµÑ‰ÐµÐ½Ð¸Ðµ", "Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€", "ÐÐ°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ", "ÐŸÐ»Ð°Ñ‚Ñ‘Ð¶"];
-  await env.DB.batch(chainStages.slice(1).map((stage, index) => env.DB.prepare(`INSERT INTO sales_stage_events (
-    lead_id, from_stage, to_stage, outcome, reason, actor, occurred_at
-  ) SELECT 'LEAD-T-014', ?, ?, 'Ð£ÑÐ¿ÐµÑˆÐ½Ð¾', 'Ð­Ñ‚Ð°Ð¿ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½ Ð´ÐµÐ¼Ð¾Ð½ÑÑ‚Ñ€Ð°Ñ†Ð¸Ð¾Ð½Ð½Ñ‹Ð¼ ÑÐ¾Ð±Ñ‹Ñ‚Ð¸ÐµÐ¼', 'system-sales-seed', ?
-    WHERE NOT EXISTS (SELECT 1 FROM sales_stage_events WHERE lead_id = 'LEAD-T-014' AND to_stage = ?)`)
-    .bind(chainStages[index], stage, `2026-04-${String(2 + index * 2).padStart(2, "0")}T12:00:00Z`, stage)));
-
-  await env.DB.prepare(`INSERT OR IGNORE INTO financial_operations (
-    id, operation_date, period, direction, amount_minor, category, report_class, counterparty_entity_id,
-    contract_id, document_id, project_entity_id, legal_entity_id, object_entity_id, cfr_entity_id,
-    bank_operation_ref, operation_kind, source_system, source_file, source_sheet, source_ref, data_quality, status, created_by
-  ) VALUES (
-    'FIN-TEST-CLIENT-014', '2026-08-05', '2026-08', 'ÐŸÐ¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ðµ', 8500000,
-    'ÐžÐ±ÑƒÑ‡ÐµÐ½Ð¸Ðµ 1â€“11 Â· Ñ‚ÐµÑÑ‚Ð¾Ð²Ð°Ñ ÐºÐ»Ð¸ÐµÐ½Ñ‚ÑÐºÐ°Ñ Ñ†ÐµÐ¿Ð¾Ñ‡ÐºÐ°', 'Ð”Ð¾Ñ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£', 'FAM-T-014', 'DOG-T-2026-014',
-    'PAY-T-014-001', 'PRJ-T-004', 'ORG-T-001', 'OBJ-T-002', 'CFR-T-001', 'BANK-TEST-CLIENT-014',
-    'SYNTHETIC_TRACE', 'SYNTHETIC_SALES_TEST', 'â€”', 'â€”', 'Ð›Ð¸Ð´ â„–0014 â†’ Ð½Ð°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ â„–0014',
-    'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ñ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð´Ð»Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ ÑÐºÐ²Ð¾Ð·Ð½Ð¾Ð³Ð¾ Ð¼Ð°Ñ€ÑˆÑ€ÑƒÑ‚Ð°; Ð½Ðµ Ð±Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ¸Ð¹ Ñ„Ð°ÐºÑ‚', 'Ð Ð°Ð·Ð½ÐµÑÐµÐ½Ð¾', 'system-sales-seed'
-  )`).run();
-
-  const accruals = [
-    ["ACR-CLIENT-T-014", "FAM-T-014", "CHD-T-014", "DOG-T-2026-014", "SVC-T-001", "2026-08", 8500000, "2026-08-05", "ÐžÐ¿Ð»Ð°Ñ‡ÐµÐ½Ð¾", "FIN-TEST-CLIENT-014"],
-    ["ACR-CLIENT-T-021", "FAM-T-021", "CHD-T-021", "DOG-T-2026-021", "SVC-T-021", "2026-09", 6400000, "2026-09-05", "ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ÑÑ", ""],
-    ["ACR-CLIENT-T-071", "FAM-T-071", "CHD-T-071", "DOG-T-2026-071", "SVC-T-071", "2026-09", 4600000, "2026-09-05", "ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ÑÑ", ""],
-  ];
-  await env.DB.batch(accruals.map((row) => env.DB.prepare(`INSERT OR IGNORE INTO client_accruals (
-    id, family_entity_id, child_entity_id, contract_id, service_entity_id, period, amount_minor, due_date, status, payment_operation_id, source_type
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNTHETIC_SALES_TEST')`).bind(...row)));
-
-  const lifecycles = [
-    ["LIFE-T-014", "LEAD-T-014", "FAM-T-014", "CHD-T-014", "DOG-T-2026-014", "SVC-T-001", "ACR-CLIENT-T-014", "FIN-TEST-CLIENT-014", "2026-01-10", 8500000, 68000000, 8, "2026-09-05", 8500000, 18, "ÐÐ¸Ð·ÐºÐ¸Ð¹", '["ÐŸÐ»Ð°Ñ‚ÐµÐ¶Ð¸ Ð±ÐµÐ· Ð¿Ñ€Ð¾ÑÑ€Ð¾Ñ‡ÐºÐ¸","ÐÐºÑ‚Ð¸Ð²Ð½Ð°Ñ ÐºÐ¾Ð¼Ð¼ÑƒÐ½Ð¸ÐºÐ°Ñ†Ð¸Ñ"]', "Ð¡ÐµÑ€ÐµÐ±Ñ€Ð¾", "Ð¢ÐµÐ°Ñ‚Ñ€Ð°Ð»ÑŒÐ½Ð°Ñ ÑÑ‚ÑƒÐ´Ð¸Ñ Â· Ð¿Ñ€Ð¾Ð±Ð½Ð¾Ðµ Ð·Ð°Ð½ÑÑ‚Ð¸Ðµ", "ÐÐºÑ‚Ð¸Ð²ÐµÐ½"],
-    ["LIFE-T-021", "LEAD-T-021", "FAM-T-021", "CHD-T-021", "DOG-T-2026-021", "SVC-T-021", "ACR-CLIENT-T-021", "", "2026-06-01", 6400000, 19200000, 3, "2026-09-05", 6400000, 72, "Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹", '["Ð•ÑÑ‚ÑŒ Ð¿Ñ€Ð¾ÑÑ€Ð¾Ñ‡ÐºÐ°","ÐÐµÑ‚ Ð¾Ñ‚Ð²ÐµÑ‚Ð° 12 Ð´Ð½ÐµÐ¹"]', "Ð‘Ð°Ð·Ð¾Ð²Ñ‹Ð¹", "Ð’ÑÑ‚Ñ€ÐµÑ‡Ð° Ñ ÐºÑƒÑ€Ð°Ñ‚Ð¾Ñ€Ð¾Ð¼ Ð¸ Ð³Ð¸Ð±ÐºÐ¸Ð¹ Ð³Ñ€Ð°Ñ„Ð¸Ðº", "Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ Ð²Ð½Ð¸Ð¼Ð°Ð½Ð¸Ñ"],
-    ["LIFE-T-071", "LEAD-T-071", "FAM-T-071", "CHD-T-071", "DOG-T-2026-071", "SVC-T-071", "ACR-CLIENT-T-071", "", "2025-09-01", 4600000, 55200000, 12, "2026-09-05", 4600000, 34, "Ð¡Ñ€ÐµÐ´Ð½Ð¸Ð¹", '["Ð¡Ð½Ð¸Ð¶ÐµÐ½Ð¸Ðµ Ð¿Ð¾ÑÐµÑ‰Ð°ÐµÐ¼Ð¾ÑÑ‚Ð¸","ÐžÐ¿Ð»Ð°Ñ‚Ð° Ð² ÑÑ€Ð¾Ðº"]', "Ð—Ð¾Ð»Ð¾Ñ‚Ð¾", "Ð¡ÐµÐ¼ÐµÐ¹Ð½Ñ‹Ð¹ Ð°Ð±Ð¾Ð½ÐµÐ¼ÐµÐ½Ñ‚ Ð½Ð° Ð²Ñ‚Ð¾Ñ€Ð¾Ð¹ ÐºÑ€ÑƒÐ¶Ð¾Ðº", "ÐÐºÑ‚Ð¸Ð²ÐµÐ½"],
-  ];
-  await env.DB.batch(lifecycles.map((row) => env.DB.prepare(`INSERT OR IGNORE INTO client_lifecycles (
-    id, lead_id, family_entity_id, child_entity_id, contract_id, service_entity_id, accrual_id,
-    payment_operation_id, service_start_date, monthly_value_minor, ltv_minor, lifetime_months,
-    next_payment_date, next_payment_minor, churn_risk_score, churn_risk_band, churn_risk_factors,
-    loyalty_tier, repeat_offer, status
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(...row)));
-
-  const bonuses = [
-    ["BON-T-014-01", "FAM-T-014", "ÐÐ°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ", 850, "ÐžÐ¿Ð»Ð°Ñ‚Ð° Ð¾Ð±ÑƒÑ‡ÐµÐ½Ð¸Ñ Ð·Ð° Ð°Ð²Ð³ÑƒÑÑ‚", "DOG-T-2026-014", "2026-08-05T10:00:00Z"],
-    ["BON-T-014-02", "FAM-T-014", "Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ", -300, "Ð‘Ð¸Ð»ÐµÑ‚ Ð½Ð° ÑÐµÐ¼ÐµÐ¹Ð½Ð¾Ðµ ÑÐ¾Ð±Ñ‹Ñ‚Ð¸Ðµ", "DOG-T-2026-014", "2026-08-16T12:00:00Z"],
-    ["BON-T-071-01", "FAM-T-071", "ÐÐ°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ", 1200, "12 Ð¼ÐµÑÑÑ†ÐµÐ² Ð² ArtHello", "DOG-T-2026-071", "2026-08-01T09:00:00Z"],
-  ];
-  await env.DB.batch(bonuses.map((row) => env.DB.prepare(`INSERT OR IGNORE INTO client_bonuses (
-    id, family_entity_id, event_type, points, reason, related_contract_id, occurred_at, created_by
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, 'system-sales-seed')`).bind(...row)));
-  await env.DB.batch([
-    env.DB.prepare("UPDATE entities SET display_name='ÐœÐµÐ½ÐµÐ´Ð¶ÐµÑ€ Ð¿Ð¾ Ð¿Ñ€Ð¾Ð´Ð°Ð¶Ð°Ð¼ â„–1' WHERE id='EMP-T-SALES-001' AND created_by='system-sales-seed' AND display_name='ÐœÐµÐ½ÐµÐ´Ð¶ÐµÑ€ T-01 Â· Ð¿Ñ€Ð¾Ð´Ð°Ð¶Ð¸'"),
-    env.DB.prepare("UPDATE entities SET display_name='ÐœÐµÐ½ÐµÐ´Ð¶ÐµÑ€ Ð¿Ð¾ Ð¿Ñ€Ð¾Ð´Ð°Ð¶Ð°Ð¼ â„–2' WHERE id='EMP-T-SALES-002' AND created_by='system-sales-seed' AND display_name='ÐœÐµÐ½ÐµÐ´Ð¶ÐµÑ€ T-02 Â· Ð¿Ñ€Ð¾Ð´Ð°Ð¶Ð¸'"),
-    env.DB.prepare("UPDATE entities SET display_name='Ð¡ÐµÐ¼ÑŒÑ â„–0021' WHERE id='FAM-T-021' AND created_by='system-sales-seed' AND display_name='Ð¡ÐµÐ¼ÑŒÑ T-021'"),
-    env.DB.prepare("UPDATE entities SET display_name='Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº â„–0021' WHERE id='CHD-T-021' AND created_by='system-sales-seed' AND display_name='Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº T-021'"),
-    env.DB.prepare("UPDATE entities SET display_name='Ð¡ÐµÐ¼ÑŒÑ â„–0071' WHERE id='FAM-T-071' AND created_by='system-sales-seed' AND display_name='Ð¡ÐµÐ¼ÑŒÑ T-071'"),
-    env.DB.prepare("UPDATE entities SET display_name='Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº â„–0071' WHERE id='CHD-T-071' AND created_by='system-sales-seed' AND display_name='Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº T-071'"),
-    env.DB.prepare("UPDATE entities SET display_name='Ð¡ÐµÐ¼ÑŒÑ â„–0014' WHERE id='FAM-T-014' AND created_by='system-seed' AND display_name='Ð¡ÐµÐ¼ÑŒÑ T-014'"),
-    env.DB.prepare("UPDATE entities SET display_name='Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº â„–0014' WHERE id='CHD-T-014' AND created_by='system-seed' AND display_name='Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº T-014'"),
-    env.DB.prepare("UPDATE entities SET display_name='ÐŸÐµÐ´Ð°Ð³Ð¾Ð³ â„–0032' WHERE id='EMP-T-032' AND created_by='system-seed' AND display_name='Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº T-032 Â· Ð¿ÐµÐ´Ð°Ð³Ð¾Ð³'"),
-    env.DB.prepare("UPDATE entities SET display_name='ÐžÐ±ÑƒÑ‡ÐµÐ½Ð¸Ðµ 1â€“11' WHERE id='SVC-T-001' AND created_by='system-seed' AND display_name='ÐžÐ±ÑƒÑ‡ÐµÐ½Ð¸Ðµ 1â€“11 Â· Ñ‚ÐµÑÑ‚'"),
-    env.DB.prepare("UPDATE sales_touchpoints SET summary='ÐŸÐµÑ€ÐµÑ…Ð¾Ð´ Ð¿Ð¾ Ð¾Ð±ÑŠÑÐ²Ð»ÐµÐ½Ð¸ÑŽ Â«Ð‘ÑƒÐ´ÑƒÑ‰ÐµÐµ Ð¼Ð°Ñ‚ÐµÐ¼Ð°Ñ‚Ð¸ÐºÐ¸Â»' WHERE id='TP-T-014-01' AND created_by='system-sales-seed' AND summary='ÐŸÐµÑ€ÐµÑ…Ð¾Ð´ Ð¿Ð¾ Ð¾Ð±ÑŠÑÐ²Ð»ÐµÐ½Ð¸ÑŽ math_future'"),
-    env.DB.prepare("UPDATE sales_touchpoints SET outcome='Ð¡Ñ‚Ñ€Ð°Ð½Ð¸Ñ†Ð° Ð¾Ñ‚ÐºÑ€Ñ‹Ñ‚Ð°' WHERE id='TP-T-014-01' AND created_by='system-sales-seed' AND outcome='Ð›ÐµÐ½Ð´Ð¸Ð½Ð³ Ð¾Ñ‚ÐºÑ€Ñ‹Ñ‚'"),
-    env.DB.prepare("UPDATE sales_stage_events SET reason='Ð­Ñ‚Ð°Ð¿ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½ Ð´ÐµÐ¼Ð¾Ð½ÑÑ‚Ñ€Ð°Ñ†Ð¸Ð¾Ð½Ð½Ñ‹Ð¼ ÑÐ¾Ð±Ñ‹Ñ‚Ð¸ÐµÐ¼' WHERE lead_id='LEAD-T-014' AND actor='system-sales-seed' AND reason='Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ ÑÐºÐ²Ð¾Ð·Ð½Ð¾Ð¹ Ð¼Ð°Ñ€ÑˆÑ€ÑƒÑ‚ ÑÑ‚Ð°Ð¿Ð° 5'"),
-    env.DB.prepare("UPDATE financial_operations SET source_ref='Ð›Ð¸Ð´ â„–0014 â†’ Ð½Ð°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ â„–0014' WHERE id='FIN-TEST-CLIENT-014' AND created_by='system-sales-seed' AND source_ref='LEAD-T-014 â†’ ACR-CLIENT-T-014'"),
-  ]);
-}
-
-async function seedContent() {
-  const authors = [
-    ["EMP-T-CONTENT-001", "Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº T-C01 Â· Ñ€ÐµÐ´Ð°ÐºÑ‚Ð¾Ñ€", "ÐœÐ°Ñ€ÐºÐµÑ‚Ð¸Ð½Ð³"],
-    ["EMP-T-CONTENT-002", "Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº T-C02 Â· Ð°Ð²Ñ‚Ð¾Ñ€", "ÐœÐ°Ñ€ÐºÐµÑ‚Ð¸Ð½Ð³"],
-  ];
-  await env.DB.batch(authors.map((row, index) => env.DB.prepare(`INSERT OR IGNORE INTO entities (
-    id, entity_type, display_name, status, source_system, source_record_id, data_quality, scope, metadata, created_by
-  ) VALUES (?, 'Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº', ?, 'ÐÐºÑ‚Ð¸Ð²Ð½Ð°', 'SYNTHETIC_CONTENT_TEST', ?, 'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð°Ð²Ñ‚Ð¾Ñ€Ð°', ?, '{}', 'system-content-seed')`)
-    .bind(row[0], row[1], `CONTENT-AUTHOR-${index + 1}`, row[2])));
-
-  const accounts = [
-    ["ACC-T-VK", "VK", "ArtHello Â· VK Â· Ñ‚ÐµÑÑ‚", "ÐÐºÑ‚Ð¸Ð²ÐµÐ½", 12840],
-    ["ACC-T-TG", "Telegram", "ArtHello Â· Telegram Â· Ñ‚ÐµÑÑ‚", "ÐÐºÑ‚Ð¸Ð²ÐµÐ½", 4210],
-    ["ACC-T-IG", "Instagram", "ArtHello Â· Instagram Â· Ñ‚ÐµÑÑ‚", "ÐÐºÑ‚Ð¸Ð²ÐµÐ½", 18220],
-    ["ACC-T-YT", "YouTube", "ArtHello Â· YouTube Â· Ñ‚ÐµÑÑ‚", "ÐÐ° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐµ", 2860],
-  ];
-  await env.DB.batch(accounts.map((row) => env.DB.prepare(`INSERT OR IGNORE INTO marketing_accounts (
-    id, platform, display_name, status, audience_count, source_type
-  ) VALUES (?, ?, ?, ?, ?, 'SYNTHETIC_CONTENT_TEST')`).bind(...row)));
-
-  const plan = [
-    ["PLAN-T-071", "2026-07-01T09:00:00Z", "ACC-T-IG", "EMP-T-CONTENT-002", "ÐšÐ¾Ñ€Ð¾Ñ‚ÐºÐ¾Ðµ Ð²Ð¸Ð´ÐµÐ¾", "Ð¢ÐµÐ°Ñ‚Ñ€ Ð¿Ð¾Ð¼Ð¾Ð³Ð°ÐµÑ‚ Ð³Ð¾Ð²Ð¾Ñ€Ð¸Ñ‚ÑŒ ÑƒÐ²ÐµÑ€ÐµÐ½Ð½ÐµÐµ", "OFF-T-007", "CMP-T-007", "ÐžÐ¿ÑƒÐ±Ð»Ð¸ÐºÐ¾Ð²Ð°Ð½Ð¾", "Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ Ð·Ð°Ð½ÑÑ‚Ð¸Ñ, Ð¾Ð´Ð¸Ð½ ÑÑÐ½Ñ‹Ð¹ Ð¾Ñ„Ñ„ÐµÑ€ Ð¸ ÑÑÑ‹Ð»ÐºÐ° Ñ UTM"],
-    ["PLAN-T-102", "2026-08-05T12:00:00Z", "ACC-T-VK", "EMP-T-CONTENT-001", "ÐšÐ°Ñ€ÑƒÑÐµÐ»ÑŒ", "ÐšÐ°Ðº Ð²Ñ‹Ð±Ñ€Ð°Ñ‚ÑŒ ÑˆÐºÐ¾Ð»Ñƒ Ð±ÐµÐ· Ð»Ð¸ÑˆÐ½ÐµÐ¹ Ñ‚Ñ€ÐµÐ²Ð¾Ð³Ð¸", "OFF-T-001", "CMP-T-102", "ÐžÐ¿ÑƒÐ±Ð»Ð¸ÐºÐ¾Ð²Ð°Ð½Ð¾", "ÐŸÑÑ‚ÑŒ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÑÐµÐ¼Ñ‹Ñ… Ð²Ð¾Ð¿Ñ€Ð¾ÑÐ¾Ð² Ð´Ð»Ñ ÑÐµÐ¼ÑŒÐ¸"],
-    ["PLAN-T-103", "2026-08-10T10:00:00Z", "ACC-T-TG", "EMP-T-CONTENT-001", "Ð›Ð¾Ð½Ð³Ñ€Ð¸Ð´", "ÐŸÐµÑ€Ð²Ñ‹Ð¹ Ð¼ÐµÑÑÑ† Ð² Ð´ÐµÑ‚ÑÐºÐ¾Ð¼ ÑÐ°Ð´Ñƒ", "OFF-T-002", "CMP-T-103", "ÐžÐ¿ÑƒÐ±Ð»Ð¸ÐºÐ¾Ð²Ð°Ð½Ð¾", "ÐŸÑ€Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ Ñ‡ÐµÐº-Ð»Ð¸ÑÑ‚ Ð°Ð´Ð°Ð¿Ñ‚Ð°Ñ†Ð¸Ð¸"],
-    ["PLAN-T-104", "2026-08-15T17:00:00Z", "ACC-T-YT", "EMP-T-CONTENT-002", "Ð’Ð¸Ð´ÐµÐ¾", "Ð­ÐºÑÐºÑƒÑ€ÑÐ¸Ñ Ð¿Ð¾ ÑƒÑ‡ÐµÐ±Ð½Ð¾Ð¼Ñƒ ÐºÐ¾Ð¼Ð¿Ð»ÐµÐºÑÑƒ", "OFF-T-003", "CMP-T-104", "ÐžÐ¿ÑƒÐ±Ð»Ð¸ÐºÐ¾Ð²Ð°Ð½Ð¾", "ÐœÐ°Ñ€ÑˆÑ€ÑƒÑ‚ Ð¿Ð¾ Ð¿Ñ€Ð¾ÑÑ‚Ñ€Ð°Ð½ÑÑ‚Ð²Ñƒ Ð¸ Ð¾Ñ‚Ð²ÐµÑ‚Ñ‹ Ð¿ÐµÐ´Ð°Ð³Ð¾Ð³Ð¾Ð²"],
-    ["PLAN-T-105", "2026-08-24T09:30:00Z", "ACC-T-IG", "EMP-T-CONTENT-002", "ÐšÐ¾Ñ€Ð¾Ñ‚ÐºÐ¾Ðµ Ð²Ð¸Ð´ÐµÐ¾", "ÐŸÑ€Ð¾ÐµÐºÑ‚Ð½Ð°Ñ Ð½ÐµÐ´ÐµÐ»Ñ Ð³Ð»Ð°Ð·Ð°Ð¼Ð¸ Ñ€ÐµÐ±Ñ‘Ð½ÐºÐ°", "OFF-T-001", "CMP-T-105", "ÐÐ° ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð¸Ð¸", "Ð”Ð¾ÐºÐ°Ð·ÑƒÐµÐ¼Ñ‹Ð¹ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð²Ð¼ÐµÑÑ‚Ð¾ Ð¾Ð±Ñ‰ÐµÐ³Ð¾ Ð¾Ð±ÐµÑ‰Ð°Ð½Ð¸Ñ"],
-    ["PLAN-T-106", "2026-08-26T12:00:00Z", "ACC-T-TG", "EMP-T-CONTENT-001", "ÐŸÐ¾ÑÑ‚", "ÐžÑ‚Ð²ÐµÑ‚Ñ‹ Ð½Ð° Ð²Ð¾Ð¿Ñ€Ð¾ÑÑ‹ Ð¾ Ð½Ð°Ð±Ð¾Ñ€Ðµ", "OFF-T-001", "CMP-T-106", "Ð§ÐµÑ€Ð½Ð¾Ð²Ð¸Ðº", "Ð¡Ð¾Ð±Ñ€Ð°Ñ‚ÑŒ Ñ€ÐµÐ°Ð»ÑŒÐ½Ñ‹Ðµ Ð²Ð¾Ð¿Ñ€Ð¾ÑÑ‹ Ð¸Ð· Ð·Ð²Ð¾Ð½ÐºÐ¾Ð² Ð¿Ñ€Ð¾Ð´Ð°Ð¶"],
-  ];
-  await env.DB.batch(plan.map((row) => env.DB.prepare(`INSERT OR IGNORE INTO content_plan_items (
-    id, scheduled_at, account_id, author_entity_id, format, topic, offer_id, campaign_id, status, brief, created_by
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system-content-seed')`).bind(...row)));
-
-  const publications = [
-    ["PUB-T-071", "PLAN-T-071", "2026-07-01T09:03:00Z", "POST-TEST-IG-071", 12400, 9800, 740, 310, 12, 1, 4600000],
-    ["PUB-T-102", "PLAN-T-102", "2026-08-05T12:02:00Z", "POST-TEST-VK-102", 8900, 11400, 520, 96, 5, 0, 0],
-    ["PUB-T-103", "PLAN-T-103", "2026-08-10T10:01:00Z", "POST-TEST-TG-103", 3650, 4200, 310, 142, 7, 0, 0],
-    ["PUB-T-104", "PLAN-T-104", "2026-08-15T17:05:00Z", "VIDEO-TEST-YT-104", 5100, 8300, 455, 61, 2, 0, 0],
-  ];
-  await env.DB.batch(publications.map((row) => env.DB.prepare(`INSERT OR IGNORE INTO content_publications (
-    id, plan_item_id, published_at, publication_ref, reach, views, reactions, clicks, leads, contracts,
-    revenue_minor, source_type, data_quality
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SYNTHETIC_CONTENT_TEST', 'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ð¼ÐµÑ‚Ñ€Ð¸ÐºÐ¸; ÐŸÑ€Ð¾Ð´Ð²Ð¸Ð¶ÐµÐ½Ð¸Ðµ.xlsx Ð¸ API ÑÐ¾Ñ†ÑÐµÑ‚ÐµÐ¹ Ð½Ðµ Ð¿Ñ€ÐµÐ´Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ñ‹')`).bind(...row)));
-
-  await env.DB.prepare(`INSERT OR IGNORE INTO financial_operations (
-    id, operation_date, period, direction, amount_minor, category, report_class, counterparty_entity_id,
-    contract_id, document_id, project_entity_id, legal_entity_id, object_entity_id, cfr_entity_id,
-    bank_operation_ref, operation_kind, source_system, source_file, source_sheet, source_ref, data_quality, status, created_by
-  ) VALUES (
-    'FIN-TEST-CONTENT-071', '2026-08-07', '2026-08', 'ÐŸÐ¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ðµ', 4600000,
-    'Ð¢ÐµÐ°Ñ‚Ñ€Ð°Ð»ÑŒÐ½Ð°Ñ ÑÑ‚ÑƒÐ´Ð¸Ñ Â· Ñ‚ÐµÑÑ‚Ð¾Ð²Ð°Ñ ÐºÐ¾Ð½Ñ‚ÐµÐ½Ñ‚-Ð°Ñ‚Ñ€Ð¸Ð±ÑƒÑ†Ð¸Ñ', 'Ð”Ð¾Ñ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£', 'FAM-T-071', 'DOG-T-2026-071',
-    'PAY-T-071-001', 'PRJ-T-004', 'ORG-T-001', 'OBJ-T-002', 'CFR-T-001', 'BANK-TEST-CONTENT-071',
-    'SYNTHETIC_TRACE', 'SYNTHETIC_CONTENT_TEST', 'â€”', 'â€”', 'PUB-T-071 â†’ LEAD-T-071 â†’ ACR-CLIENT-T-071',
-    'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ñ Ð´Ð»Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ ÐºÐ¾Ð½Ñ‚ÐµÐ½Ñ‚-Ð°Ñ‚Ñ€Ð¸Ð±ÑƒÑ†Ð¸Ð¸; Ð½Ðµ Ð±Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ¸Ð¹ Ñ„Ð°ÐºÑ‚', 'Ð Ð°Ð·Ð½ÐµÑÐµÐ½Ð¾', 'system-content-seed'
-  )`).run();
-  await env.DB.batch([
-    env.DB.prepare("UPDATE client_lifecycles SET payment_operation_id = 'FIN-TEST-CONTENT-071', updated_at = CURRENT_TIMESTAMP WHERE lead_id = 'LEAD-T-071' AND payment_operation_id = ''"),
-    env.DB.prepare("UPDATE client_accruals SET payment_operation_id = 'FIN-TEST-CONTENT-071', status = 'ÐžÐ¿Ð»Ð°Ñ‡ÐµÐ½Ð¾' WHERE id = 'ACR-CLIENT-T-071' AND payment_operation_id = ''"),
-  ]);
-
-  await env.DB.prepare(`INSERT OR IGNORE INTO content_attributions (
-    id, publication_id, click_id, lead_id, contract_id, payment_operation_id, revenue_minor, attribution_model
-  ) VALUES ('ATTR-T-071', 'PUB-T-071', 'CLICK-T-071', 'LEAD-T-071', 'DOG-T-2026-071', 'FIN-TEST-CONTENT-071', 4600000, 'ÐŸÐµÑ€Ð²Ñ‹Ð¹ ÐºÐ»Ð¸Ðº Â· Ñ‚ÐµÑÑ‚')`).run();
-
-  const recommendations = [
-    ["REC-CONT-T-001", "PUB-T-071", "Ð’Ñ‹Ñ€ÑƒÑ‡ÐºÐ°", "1 Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ð¸ 46 000 â‚½ Ñ‚ÐµÑÑ‚Ð¾Ð²Ð¾Ð¹ Ð²Ñ‹Ñ€ÑƒÑ‡ÐºÐ¸ Ð¿Ñ€Ð¸ 310 ÐºÐ»Ð¸ÐºÐ°Ñ…", "ÐŸÐ¾Ð²Ñ‚Ð¾Ñ€Ð¸Ñ‚ÑŒ Ñ‚ÐµÐ¼Ñƒ Ð² VK Ð¸ Telegram, ÑÐ¾Ñ…Ñ€Ð°Ð½Ð¸Ð² Ð¾Ñ„Ñ„ÐµÑ€ Ð¸ UTM"],
-    ["REC-CONT-T-002", "PUB-T-104", "ÐÐ¸Ð·ÐºÐ¸Ð¹ CTR", "8 300 Ð¿Ñ€Ð¾ÑÐ¼Ð¾Ñ‚Ñ€Ð¾Ð² Ð¸ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ 61 Ð¿ÐµÑ€ÐµÑ…Ð¾Ð´", "ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ Ð¿ÐµÑ€Ð²Ñ‹Ðµ 10 ÑÐµÐºÑƒÐ½Ð´, CTA Ð¸ ÑÑÑ‹Ð»ÐºÑƒ; Ð½Ðµ Ð¾Ñ†ÐµÐ½Ð¸Ð²Ð°Ñ‚ÑŒ Ð²Ð¸Ð´ÐµÐ¾ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¿Ð¾ Ð¿Ñ€Ð¾ÑÐ¼Ð¾Ñ‚Ñ€Ð°Ð¼"],
-    ["REC-CONT-T-003", "PUB-T-102", "ÐÐµÑ‚ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð¾Ð²", "5 Ð·Ð°ÑÐ²Ð¾Ðº, Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð¾Ð² Ð¸ Ð²Ñ‹Ñ€ÑƒÑ‡ÐºÐ¸ Ð¿Ð¾ÐºÐ° Ð½ÐµÑ‚", "ÐŸÐµÑ€ÐµÐ´Ð°Ñ‚ÑŒ Ð¿Ñ€Ð¾Ð´Ð°Ð¶Ð¸ Ð¼ÐµÐ½ÐµÐ´Ð¶ÐµÑ€Ñƒ Ð¸ Ð¿Ñ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ ÐºÐ°Ñ‡ÐµÑÑ‚Ð²Ð¾ Ð»Ð¸Ð´Ð¾Ð² Ð´Ð¾ Ð¼Ð°ÑÑˆÑ‚Ð°Ð±Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ñ"],
-  ];
-  await env.DB.batch(recommendations.map((row) => env.DB.prepare(`INSERT OR IGNORE INTO content_recommendations (
-    id, publication_id, signal_type, evidence, recommendation, status
-  ) VALUES (?, ?, ?, ?, ?, 'ÐÐ¾Ð²Ð°Ñ')`).bind(...row)));
-}
-
-async function seedEducation() {
-  const entitiesToAdd = [
-    ["EMP-T-METHOD-001","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","ÐœÐµÑ‚Ð¾Ð´Ð¸ÑÑ‚ T-M01","ÐœÐµÑ‚Ð¾Ð´Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ Ñ†ÐµÐ½Ñ‚Ñ€"],["EMP-T-041","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","ÐŸÐµÐ´Ð°Ð³Ð¾Ð³ T-041","Ð¨ÐºÐ¾Ð»Ð° 1â€“11"],
-    ["FAM-T-015","Ð¡ÐµÐ¼ÑŒÑ","Ð¡ÐµÐ¼ÑŒÑ T-015","Ð¨ÐºÐ¾Ð»Ð° 1â€“11"],["CHD-T-015","Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº","Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº T-015","3Ð Â· Ñ‚ÐµÑÑ‚Ð¾Ð²Ð°Ñ Ð³Ñ€ÑƒÐ¿Ð¿Ð°"],
-    ["FAM-T-016","Ð¡ÐµÐ¼ÑŒÑ","Ð¡ÐµÐ¼ÑŒÑ T-016","Ð¨ÐºÐ¾Ð»Ð° 1â€“11"],["CHD-T-016","Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº","Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº T-016","3Ð Â· Ñ‚ÐµÑÑ‚Ð¾Ð²Ð°Ñ Ð³Ñ€ÑƒÐ¿Ð¿Ð°"],
-  ];
-  await env.DB.batch(entitiesToAdd.map((row,index)=>env.DB.prepare(`INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES (?,?,?,'ÐÐºÑ‚Ð¸Ð²Ð½Ð°','SYNTHETIC_EDUCATION_TEST',?,'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð±ÐµÐ· Ð¿ÐµÑ€ÑÐ¾Ð½Ð°Ð»ÑŒÐ½Ñ‹Ñ… Ð´Ð°Ð½Ð½Ñ‹Ñ…',?,'{}','system-education-seed')`).bind(row[0],row[1],row[2],`EDU-ENTITY-${index+1}`,row[3])));
-  const programs=[
-    ["PRG-T-012","ÐœÐ°Ñ‚ÐµÐ¼Ð°Ñ‚Ð¸ÐºÐ° Â· 3 ÐºÐ»Ð°ÑÑ",4,"Ð”ÐµÐ¹ÑÑ‚Ð²ÑƒÐµÑ‚","EMP-T-032","EMP-T-METHOD-001","3Ð","MATERIAL-T-MATH-4","Ð ÐµÑˆÐ°ÐµÑ‚ ÑÐ¾ÑÑ‚Ð°Ð²Ð½Ñ‹Ðµ Ð·Ð°Ð´Ð°Ñ‡Ð¸ Ð¸ Ð¾Ð±ÑŠÑÑÐ½ÑÐµÑ‚ Ñ…Ð¾Ð´ Ñ€ÐµÑˆÐµÐ½Ð¸Ñ"],
-    ["PRG-T-019","ÐŸÑ€Ð¾ÐµÐºÑ‚Ð½Ð°Ñ Ð»Ð°Ð±Ð¾Ñ€Ð°Ñ‚Ð¾Ñ€Ð¸Ñ",2,"ÐÐ° Ð¿ÐµÑ€ÐµÑÐ¼Ð¾Ñ‚Ñ€Ðµ","EMP-T-041","EMP-T-METHOD-001","3Ðâ€“5Ð‘","MATERIAL-T-PROJECT-2","ÐŸÐ»Ð°Ð½Ð¸Ñ€ÑƒÐµÑ‚ ÐºÐ¾Ð¼Ð°Ð½Ð´Ð½Ñ‹Ð¹ Ð¿Ñ€Ð¾ÐµÐºÑ‚ Ð¸ Ð¿Ñ€ÐµÐ´ÑÑ‚Ð°Ð²Ð»ÑÐµÑ‚ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚"],
-  ];
-  await env.DB.batch(programs.map(row=>env.DB.prepare(`INSERT OR IGNORE INTO education_programs (id,title,version,status,author_entity_id,methodist_entity_id,scope,material_ref,expected_result,source_type) VALUES (?,?,?,?,?,?,?,?,?,'SYNTHETIC_EDUCATION_TEST')`).bind(...row)));
-  const groups=[["GRP-T-3A","3Ð Â· Ñ‚ÐµÑÑ‚Ð¾Ð²Ð°Ñ Ð³Ñ€ÑƒÐ¿Ð¿Ð°","UNT-T-001","PRG-T-012","EMP-T-032","ÐšÐ°Ð±Ð¸Ð½ÐµÑ‚ 12","ÐÐºÑ‚Ð¸Ð²Ð½Ð°"],["GRP-T-LAB","ÐŸÑ€Ð¾ÐµÐºÑ‚Ð½Ð°Ñ Ð³Ñ€ÑƒÐ¿Ð¿Ð° Â· Ñ‚ÐµÑÑ‚","UNT-T-001","PRG-T-019","EMP-T-041","Ð›Ð°Ð±Ð¾Ñ€Ð°Ñ‚Ð¾Ñ€Ð¸Ñ","ÐÐºÑ‚Ð¸Ð²Ð½Ð°"]];
-  await env.DB.batch(groups.map(row=>env.DB.prepare("INSERT OR IGNORE INTO education_groups (id,name,unit_entity_id,program_id,teacher_entity_id,room,status) VALUES (?,?,?,?,?,?,?)").bind(...row)));
-  const students=[["STU-T-014","CHD-T-014","FAM-T-014","GRP-T-3A","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐžÐ±ÑƒÑ‡Ð°ÐµÑ‚ÑÑ"],["STU-T-015","CHD-T-015","FAM-T-015","GRP-T-3A","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐžÐ±ÑƒÑ‡Ð°ÐµÑ‚ÑÑ"],["STU-T-016","CHD-T-016","FAM-T-016","GRP-T-3A","ÐŸÑ€Ð¸Ð³Ð»Ð°ÑˆÐµÐ½Ð¸Ðµ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð¾","ÐžÐ±ÑƒÑ‡Ð°ÐµÑ‚ÑÑ"]];
-  await env.DB.batch(students.map(row=>env.DB.prepare("INSERT OR IGNORE INTO education_students (id,child_entity_id,family_entity_id,group_id,cabinet_status,status) VALUES (?,?,?,?,?,?)").bind(...row)));
-  const lessons=[
-    ["LES-T-3A-0821","GRP-T-3A","PRG-T-012","2026-08-21T09:00:00Z","Ð¡Ð¾ÑÑ‚Ð°Ð²Ð½Ð°Ñ Ð·Ð°Ð´Ð°Ñ‡Ð°: Ð¼Ð¾Ð´ÐµÐ»ÑŒ Ð¸ Ð¾Ð±ÑŠÑÑÐ½ÐµÐ½Ð¸Ðµ","EMP-T-032","","ÐšÐ°Ð±Ð¸Ð½ÐµÑ‚ 12","Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð¾","â„– 18â€“20; Ð¾Ð±ÑŠÑÑÐ½Ð¸Ñ‚ÑŒ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð¾Ð´Ð½Ð¾Ð¹ Ð·Ð°Ð´Ð°Ñ‡Ð¸"],
-    ["LES-T-3A-0824","GRP-T-3A","PRG-T-012","2026-08-24T09:00:00Z","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð³Ð¸Ð¿Ð¾Ñ‚ÐµÐ·Ñ‹ Ð² Ð·Ð°Ð´Ð°Ñ‡Ðµ","EMP-T-032","EMP-T-041","ÐšÐ°Ð±Ð¸Ð½ÐµÑ‚ 12","Ð—Ð°Ð¿Ð»Ð°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¾",""],
-    ["LES-T-LAB-0821","GRP-T-LAB","PRG-T-019","2026-08-21T11:30:00Z","Ð Ð¾Ð»Ð¸ Ð² Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ð¾Ð¹ ÐºÐ¾Ð¼Ð°Ð½Ð´Ðµ","EMP-T-041","","Ð›Ð°Ð±Ð¾Ñ€Ð°Ñ‚Ð¾Ñ€Ð¸Ñ","Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð¾","Ð¡Ñ„Ð¾Ñ€Ð¼ÑƒÐ»Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð»Ð¸Ñ‡Ð½Ñ‹Ð¹ Ð²ÐºÐ»Ð°Ð´"],
-  ];
-  await env.DB.batch(lessons.map(row=>env.DB.prepare("INSERT OR IGNORE INTO education_lessons (id,group_id,program_id,scheduled_at,topic,teacher_entity_id,substitute_entity_id,room,status,homework) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const attendance=[
-    ["ATT-T-014","LES-T-3A-0821","STU-T-014","ÐŸÑ€Ð¸ÑÑƒÑ‚ÑÑ‚Ð²Ð¾Ð²Ð°Ð»","5","Ð¡Ð°Ð¼Ð¾ÑÑ‚Ð¾ÑÑ‚ÐµÐ»ÑŒÐ½Ð¾ Ð¿Ð¾ÑÑ‚Ñ€Ð¾Ð¸Ð» Ð¼Ð¾Ð´ÐµÐ»ÑŒ","EMP-T-032"],
-    ["ATT-T-015","LES-T-3A-0821","STU-T-015","ÐŸÑ€Ð¸ÑÑƒÑ‚ÑÑ‚Ð²Ð¾Ð²Ð°Ð»","4","ÐÑƒÐ¶Ð½Ð° Ð¿Ð¾Ð´ÑÐºÐ°Ð·ÐºÐ° Ð½Ð° Ð²Ñ‚Ð¾Ñ€Ð¾Ð¼ ÑˆÐ°Ð³Ðµ","EMP-T-032"],
-    ["ATT-T-016","LES-T-3A-0821","STU-T-016","ÐžÑ‚ÑÑƒÑ‚ÑÑ‚Ð²Ð¾Ð²Ð°Ð»","","Ð ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð½Ðµ Ñ„Ð¸ÐºÑÐ¸Ñ€Ð¾Ð²Ð°Ð»ÑÑ","EMP-T-032"],
-  ];
-  await env.DB.batch(attendance.map(row=>env.DB.prepare("INSERT OR IGNORE INTO education_attendance (id,lesson_id,student_id,attendance_status,grade,result,recorded_by) VALUES (?,?,?,?,?,?,?)").bind(...row)));
-  const progress=[["PROG-T-014","STU-T-014","PRG-T-012","3 ÐºÐ²Ð°Ñ€Ñ‚Ð°Ð» 2026","Ð ÐµÑˆÐµÐ½Ð¸Ðµ ÑÐ¾ÑÑ‚Ð°Ð²Ð½Ñ‹Ñ… Ð·Ð°Ð´Ð°Ñ‡",86,"Ð Ð¾ÑÑ‚","ÐŸÐ¾ÑÐµÑ‰Ð°ÐµÐ¼Ð¾ÑÑ‚ÑŒ Ð¸ Ð¿Ñ€Ð¾Ð²ÐµÑ€Ð¾Ñ‡Ð½Ð°Ñ Ñ€Ð°Ð±Ð¾Ñ‚Ð° â„–0004"],["PROG-T-015","STU-T-015","PRG-T-012","3 ÐºÐ²Ð°Ñ€Ñ‚Ð°Ð» 2026","Ð ÐµÑˆÐµÐ½Ð¸Ðµ ÑÐ¾ÑÑ‚Ð°Ð²Ð½Ñ‹Ñ… Ð·Ð°Ð´Ð°Ñ‡",68,"Ð¡Ñ‚Ð°Ð±Ð¸Ð»ÑŒÐ½Ð¾","ÐŸÐ¾ÑÐµÑ‰Ð°ÐµÐ¼Ð¾ÑÑ‚ÑŒ Ð¸ Ð¿Ñ€Ð¾Ð²ÐµÑ€Ð¾Ñ‡Ð½Ð°Ñ Ñ€Ð°Ð±Ð¾Ñ‚Ð° â„–0004"],["PROG-T-016","STU-T-016","PRG-T-012","3 ÐºÐ²Ð°Ñ€Ñ‚Ð°Ð» 2026","Ð ÐµÑˆÐµÐ½Ð¸Ðµ ÑÐ¾ÑÑ‚Ð°Ð²Ð½Ñ‹Ñ… Ð·Ð°Ð´Ð°Ñ‡",52,"Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ Ð´Ð°Ð½Ð½Ñ‹Ñ…","ÐžÐ´Ð½Ð¾ Ð·Ð°Ð½ÑÑ‚Ð¸Ðµ Ð¿Ñ€Ð¾Ð¿ÑƒÑ‰ÐµÐ½Ð¾; Ð½ÐµÐ´Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ñ‡Ð½Ð¾ Ð½Ð°Ð±Ð»ÑŽÐ´ÐµÐ½Ð¸Ð¹"]];
-  await env.DB.batch(progress.map(row=>env.DB.prepare("INSERT OR IGNORE INTO education_progress (id,student_id,program_id,period,metric,score,trend,evidence) VALUES (?,?,?,?,?,?,?,?)").bind(...row)));
-  const feedback=[["FDB-T-014","STU-T-014","FAM-T-014","PRG-T-012",5,"Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº ÑÑ‚Ð°Ð» ÑÐ¿Ð¾ÐºÐ¾Ð¹Ð½ÐµÐµ Ð¾Ð±ÑŠÑÑÐ½ÑÑ‚ÑŒ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ","Ð”Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð¿Ð°Ñ€Ð½Ð¾Ðµ Ð¾Ð±ÑŠÑÑÐ½ÐµÐ½Ð¸Ðµ Ð² ÑÐ»ÐµÐ´ÑƒÑŽÑ‰ÑƒÑŽ Ð²ÐµÑ€ÑÐ¸ÑŽ","ÐÐ¾Ð²Ð°Ñ"],["FDB-T-015","STU-T-015","FAM-T-015","PRG-T-012",3,"Ð”Ð¾Ð¼Ð°ÑˆÐ½ÐµÐµ Ð·Ð°Ð´Ð°Ð½Ð¸Ðµ Ð·Ð°Ð½ÑÐ»Ð¾ Ð±Ð¾Ð»ÑŒÑˆÐµ Ñ‡Ð°ÑÐ°","Ð Ð°Ð·Ð´ÐµÐ»Ð¸Ñ‚ÑŒ Ð·Ð°Ð´Ð°Ð½Ð¸Ðµ Ð½Ð° Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½ÑƒÑŽ Ð¸ Ð´Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½ÑƒÑŽ Ñ‡Ð°ÑÑ‚Ð¸","Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸"]];
-  await env.DB.batch(feedback.map(row=>env.DB.prepare("INSERT OR IGNORE INTO education_feedback (id,student_id,family_entity_id,program_id,rating,comment,recommendation,status) VALUES (?,?,?,?,?,?,?,?)").bind(...row)));
-  const comms=[["COM-T-NEWS-01","ÐÐ¾Ð²Ð¾ÑÑ‚ÑŒ","Ð“Ñ€ÑƒÐ¿Ð¿Ð°","GRP-T-3A","ÐÐµÐ´ÐµÐ»Ñ Ð¼Ð°Ñ‚ÐµÐ¼Ð°Ñ‚Ð¸ÐºÐ¸","Ð’ Ð¿ÑÑ‚Ð½Ð¸Ñ†Ñƒ Ð¿Ð¾ÐºÐ°Ð¶ÐµÐ¼ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ñ‹ Ð¸ Ñ€ÐµÑˆÐµÐ½Ð¸Ñ ÑÐµÐ¼ÐµÐ¹Ð½Ñ‹Ð¼ ÐºÐ¾Ð¼Ð°Ð½Ð´Ð°Ð¼.","","EMP-T-032"],["COM-T-EVT-01","Ð¡Ð¾Ð±Ñ‹Ñ‚Ð¸Ðµ","Ð“Ñ€ÑƒÐ¿Ð¿Ð°","GRP-T-3A","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð°Ñ Ð»Ð°Ð±Ð¾Ñ€Ð°Ñ‚Ð¾Ñ€Ð¸Ñ","ÐŸÑ€Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð²ÑÑ‚Ñ€ÐµÑ‡Ð° Ð´Ð»Ñ Ð´ÐµÑ‚ÐµÐ¹ Ð¸ Ñ€Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÐµÐ¹.","2026-08-28T16:00:00Z","EMP-T-041"],["COM-T-CHAT-01","Ð§Ð°Ñ‚","Ð¡ÐµÐ¼ÑŒÑ","FAM-T-014","ÐžÑ‚Ð²ÐµÑ‚ Ð¿Ð¾ Ð´Ð¾Ð¼Ð°ÑˆÐ½ÐµÐ¼Ñƒ Ð·Ð°Ð´Ð°Ð½Ð¸ÑŽ","ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¾: Ð´Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ñ‡Ð½Ð¾ Ð²Ñ‹Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÑŒ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½ÑƒÑŽ Ñ‡Ð°ÑÑ‚ÑŒ.","","EMP-T-032"]];
-  await env.DB.batch(comms.map(row=>env.DB.prepare("INSERT OR IGNORE INTO education_communications (id,communication_type,audience_type,audience_id,title,body,event_at,created_by) VALUES (?,?,?,?,?,?,?,?)").bind(...row)));
-}
-
-async function seedHr() {
-  const people = [
-    ["CAND-T-008","ÐšÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚","ÐšÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚ T-008","ÐÐµÐ°ÐºÑ‚Ð¸Ð²Ð½Ð°","CANDIDATE-008","HR"],
-    ["CAND-T-019","ÐšÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚","ÐšÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚ T-019","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","CANDIDATE-019","HR"],
-    ["CAND-T-027","ÐšÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚","ÐšÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚ T-027","ÐÐµÐ°ÐºÑ‚Ð¸Ð²Ð½Ð°","CANDIDATE-027","HR"],
-    ["EMP-T-052","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº T-052 Â· Ð¿ÐµÐ´Ð°Ð³Ð¾Ð³","ÐÐµÐ°ÐºÑ‚Ð¸Ð²Ð½Ð°","EMPLOYEE-052","Ð¨ÐºÐ¾Ð»Ð° 1â€“11"],
-    ["EMP-T-063","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº T-063 Â· ÐºÑƒÑ€Ð°Ñ‚Ð¾Ñ€","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","EMPLOYEE-063","Ð¨ÐºÐ¾Ð»Ð° 1â€“11"],
-    ["EMP-T-HR-001","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","HR T-H01","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","EMPLOYEE-HR-001","HR"],
-  ];
-  await env.DB.batch(people.map(row=>env.DB.prepare(`INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES (?,?,?,?,'SYNTHETIC_HR_TEST',?,'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð±ÐµÐ· Ð¿ÐµÑ€ÑÐ¾Ð½Ð°Ð»ÑŒÐ½Ñ‹Ñ… Ð´Ð°Ð½Ð½Ñ‹Ñ…',?,'{}','system-hr-seed')`).bind(...row)));
-  const vacancies=[
-    ["VAC-T-008","ÐŸÐµÐ´Ð°Ð³Ð¾Ð³ Ð½Ð°Ñ‡Ð°Ð»ÑŒÐ½Ð¾Ð¹ ÑˆÐºÐ¾Ð»Ñ‹","Ð¨ÐºÐ¾Ð»Ð° 1â€“11","POS-T-TEACHER",1,"Ð—Ð°ÐºÑ€Ñ‹Ñ‚Ð°"],
-    ["VAC-T-019","ÐšÑƒÑ€Ð°Ñ‚Ð¾Ñ€ ÐºÐ»Ð°ÑÑÐ°","Ð¨ÐºÐ¾Ð»Ð° 1â€“11","POS-T-CURATOR",1,"Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ"],
-    ["VAC-T-027","ÐœÐµÑ‚Ð¾Ð´Ð¸ÑÑ‚","ÐœÐµÑ‚Ð¾Ð´Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ Ñ†ÐµÐ½Ñ‚Ñ€","POS-T-METHODIST",1,"Ð§ÐµÑ€Ð½Ð¾Ð²Ð¸Ðº"],
-  ];
-  await env.DB.batch(vacancies.map(row=>env.DB.prepare("INSERT OR IGNORE INTO hr_vacancies (id,title,unit,position_id,headcount,status,source_type) VALUES (?,?,?,?,?,?,'SYNTHETIC_HR_TEST')").bind(...row)));
-  const candidates=[
-    ["CANDREC-T-008","CAND-T-008","VAC-T-008","Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ñ","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº",88,"ÐÐ°Ð½ÑÑ‚","","ÐŸÑ€Ð¸Ð½ÑÑ‚","Ð˜Ð½Ñ‚ÐµÑ€Ð²ÑŒÑŽ INTV-T-008, Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ HR-DEC-T-008"],
-    ["CANDREC-T-019","CAND-T-019","VAC-T-019","hh.ru Â· Ñ‚ÐµÑÑ‚","Ð˜Ð½Ñ‚ÐµÑ€Ð²ÑŒÑŽ",74,"","","","Ð¡ÐºÑ€Ð¸Ð½Ð¸Ð½Ð³ Ð¿Ñ€Ð¾Ð¹Ð´ÐµÐ½, Ð¸Ð½Ñ‚ÐµÑ€Ð²ÑŒÑŽ Ð½Ð°Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¾"],
-    ["CANDREC-T-027","CAND-T-027","VAC-T-008","Ð¡Ð°Ð¹Ñ‚ Â· Ñ‚ÐµÑÑ‚","ÐžÑ‚ÑÐµÐ²",52,"ÐÐµ Ð¿Ñ€Ð¾Ð´Ð¾Ð»Ð¶Ð°Ñ‚ÑŒ","ÐÐµÐ´Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ñ‡Ð½Ð¾ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ð¾Ð³Ð¾ Ð¾Ð¿Ñ‹Ñ‚Ð°","","Ð ÐµÑˆÐµÐ½Ð¸Ðµ Ð¾ÑÐ½Ð¾Ð²Ð°Ð½Ð¾ Ð½Ð° Ð¼Ð°Ñ‚Ñ€Ð¸Ñ†Ðµ Ð¸Ð½Ñ‚ÐµÑ€Ð²ÑŒÑŽ, Ð½Ðµ Ð½Ð° Ð˜Ð˜"],
-  ];
-  await env.DB.batch(candidates.map(row=>env.DB.prepare("INSERT OR IGNORE INTO hr_candidates (id,entity_id,vacancy_id,source,stage,score,decision,rejection_reason,offer_status,evidence) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const interviews=[
-    ["INTV-T-008","CANDREC-T-008","2026-02-03T10:00:00Z","EMP-T-HR-001",88,"ÐšÐµÐ¹Ñ Ð¸ ÑÑ‚Ñ€ÑƒÐºÑ‚ÑƒÑ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ð¾Ðµ Ð¸Ð½Ñ‚ÐµÑ€Ð²ÑŒÑŽ Ð¿Ñ€Ð¾Ð¹Ð´ÐµÐ½Ñ‹; Ñ€ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ð¸ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐµÐ½Ñ‹","Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð¾Ð²Ð°Ñ‚ÑŒ Ð¾Ñ„Ñ„ÐµÑ€"],
-    ["INTV-T-019","CANDREC-T-019","2026-08-25T11:00:00Z","EMP-T-HR-001",74,"Ð¡ÐºÑ€Ð¸Ð½Ð¸Ð½Ð³ Ð¿Ñ€Ð¾Ð¹Ð´ÐµÐ½, ÐºÐµÐ¹Ñ Ð¾Ð¶Ð¸Ð´Ð°ÐµÑ‚ÑÑ","ÐŸÑ€Ð¾Ð´Ð¾Ð»Ð¶Ð¸Ñ‚ÑŒ"],
-    ["INTV-T-027","CANDREC-T-027","2026-08-14T13:00:00Z","EMP-T-HR-001",52,"ÐÐµ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ð¹ Ð¾Ð¿Ñ‹Ñ‚ Ñ€Ð°Ð±Ð¾Ñ‚Ñ‹ Ð¿Ð¾ Ð¿Ñ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ðµ","ÐžÑ‚ÑÐµÐ²"],
-  ];
-  await env.DB.batch(interviews.map(row=>env.DB.prepare("INSERT OR IGNORE INTO hr_interviews (id,candidate_id,scheduled_at,interviewer_entity_id,score,summary,decision) VALUES (?,?,?,?,?,?,?)").bind(...row)));
-  const employees=[
-    ["EMP-T-052","CANDREC-T-008","DOG-EMP-T-052","POS-T-TEACHER","Ð¨ÐºÐ¾Ð»Ð° 1â€“11",9500000,"2026-02-16","Ð£Ð²Ð¾Ð»ÐµÐ½","2026-08-15","Ð¡Ð¾Ð³Ð»Ð°ÑˆÐµÐ½Ð¸Ðµ ÑÑ‚Ð¾Ñ€Ð¾Ð½","ÐžÑ‚Ð¾Ð·Ð²Ð°Ð½"],
-    ["EMP-T-063","","DOG-EMP-T-063","POS-T-CURATOR","Ð¨ÐºÐ¾Ð»Ð° 1â€“11",8200000,"2026-06-01","Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚","","","ÐÐºÑ‚Ð¸Ð²ÐµÐ½"],
-  ];
-  await env.DB.batch(employees.map(row=>env.DB.prepare("INSERT OR IGNORE INTO hr_employees (id,candidate_id,contract_id,position_id,unit,rate_minor,hire_date,status,termination_date,termination_reason,access_status) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO workflow_documents (id,title,document_type,current_version,status,valid_until,owner_entity_id,source,created_by) VALUES ('DOG-EMP-T-052','Ð¢Ñ€ÑƒÐ´Ð¾Ð²Ð¾Ð¹ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Â· ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº T-052','Ð¢Ñ€ÑƒÐ´Ð¾Ð²Ð¾Ð¹ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€',1,'Ð—Ð°Ð²ÐµÑ€ÑˆÑ‘Ð½','2026-08-15','EMP-T-052','SYNTHETIC_HR_TEST','system-hr-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO workflow_documents (id,title,document_type,current_version,status,valid_until,owner_entity_id,source,created_by) VALUES ('DOG-EMP-T-063','Ð¢Ñ€ÑƒÐ´Ð¾Ð²Ð¾Ð¹ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Â· ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº T-063','Ð¢Ñ€ÑƒÐ´Ð¾Ð²Ð¾Ð¹ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€',1,'ÐÐºÑ‚ÑƒÐ°Ð»ÐµÐ½','2027-05-31','EMP-T-063','SYNTHETIC_HR_TEST','system-hr-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO tasks (title,owner,due_date,priority,status,source_type,source_id,description,assignee_entity_id,kind,automation_key,requires_approval,result,result_evidence,completed_at,created_by) VALUES ('ÐÐ´Ð°Ð¿Ñ‚Ð°Ñ†Ð¸Ñ ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ° T-052','HR T-H01','2026-03-16','Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹','Ð’Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð¾','ÐžÐ½Ð±Ð¾Ñ€Ð´Ð¸Ð½Ð³','EMP-T-052','Ð Ð°Ð±Ð¾Ñ‡ÐµÐµ Ð¼ÐµÑÑ‚Ð¾, Ð´Ð¾ÑÑ‚ÑƒÐ¿Ñ‹, Ð½Ð°ÑÑ‚Ð°Ð²Ð½Ð¸Ðº Ð¸ Ð²Ð²Ð¾Ð´Ð½Ð¾Ðµ Ð¾Ð±ÑƒÑ‡ÐµÐ½Ð¸Ðµ','EMP-T-HR-001','HR-Ð¿Ñ€Ð¾Ñ†ÐµÑÑ','HR_ONBOARD:EMP-T-052',1,'ÐÐ´Ð°Ð¿Ñ‚Ð°Ñ†Ð¸Ñ Ð·Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°','ONB-T-052-01..04','2026-03-14T16:00:00Z','system-hr-seed')"),
-  ]);
-  const onboarding=[
-    ["ONB-T-052-01","EMP-T-052","ÐžÑ„Ð¾Ñ€Ð¼Ð»ÐµÐ½Ð¸Ðµ Ð¸ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€","Ð’Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð¾","2026-02-16","DOG-EMP-T-052"],
-    ["ONB-T-052-02","EMP-T-052","Ð Ð°Ð±Ð¾Ñ‡ÐµÐµ Ð¼ÐµÑÑ‚Ð¾ Ð¸ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ñ‹","Ð’Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð¾","2026-02-17","ACC-TASKS-052, ACC-EDU-052"],
-    ["ONB-T-052-03","EMP-T-052","Ð’Ð²Ð¾Ð´Ð½Ð¾Ðµ Ð¾Ð±ÑƒÑ‡ÐµÐ½Ð¸Ðµ","Ð’Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð¾","2026-02-28","DEV-T-052-01"],
-    ["ONB-T-063-01","EMP-T-063","ÐÑ‚Ñ‚ÐµÑÑ‚Ð°Ñ†Ð¸Ñ Ð¿Ð¾ÑÐ»Ðµ Ð°Ð´Ð°Ð¿Ñ‚Ð°Ñ†Ð¸Ð¸","Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ","2026-09-01","ÐŸÑ€Ð¾Ð¼ÐµÐ¶ÑƒÑ‚Ð¾Ñ‡Ð½Ð°Ñ Ð¾Ñ†ÐµÐ½ÐºÐ° 78"],
-  ];
-  await env.DB.batch(onboarding.map(row=>env.DB.prepare("INSERT OR IGNORE INTO hr_onboarding (id,employee_id,step,status,due_date,evidence) VALUES (?,?,?,?,?,?)").bind(...row)));
-  const development=[
-    ["DEV-T-052-01","EMP-T-052","ÐžÐ±ÑƒÑ‡ÐµÐ½Ð¸Ðµ","Ð’Ð²Ð¾Ð´Ð½Ñ‹Ð¹ ÐºÑƒÑ€Ñ ArtHello OS","2026-02-28",92,"Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð¾","Ð¢ÐµÑÑ‚ Ð¸ Ð¿Ñ€Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð·Ð°Ð´Ð°Ñ‡Ð°"],
-    ["DEV-T-052-02","EMP-T-052","ÐžÑ†ÐµÐ½ÐºÐ°","ÐžÑ†ÐµÐ½ÐºÐ° Ð¿Ð¾ Ð¸Ñ‚Ð¾Ð³Ð°Ð¼ Ð¿Ð¾Ð»ÑƒÐ³Ð¾Ð´Ð¸Ñ","2026-08-01",81,"Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð¾","Ð¦ÐµÐ»Ð¸ 4/5, Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð°Ñ ÑÐ²ÑÐ·ÑŒ Ñ€ÑƒÐºÐ¾Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»Ñ"],
-    ["DEV-T-052-03","EMP-T-052","Ð›Ð¾ÑÐ»ÑŒÐ½Ð¾ÑÑ‚ÑŒ","ÐŸÑƒÐ»ÑŒÑ ÐºÐ¾Ð¼Ð°Ð½Ð´Ñ‹","2026-07-15",68,"Ð¡Ð¸Ð³Ð½Ð°Ð»","ÐÐ½Ð¾Ð½Ð¸Ð¼Ð½Ñ‹Ð¹ Ð°Ð³Ñ€ÐµÐ³Ð°Ñ‚; Ð½Ðµ Ð¾ÑÐ½Ð¾Ð²Ð°Ð½Ð¸Ðµ Ð´Ð»Ñ ÐºÐ°Ð´Ñ€Ð¾Ð²Ð¾Ð³Ð¾ Ñ€ÐµÑˆÐµÐ½Ð¸Ñ"],
-    ["DEV-T-063-01","EMP-T-063","ÐšÐ°Ð´Ñ€Ð¾Ð²Ñ‹Ð¹ Ñ€ÐµÐ·ÐµÑ€Ð²","Ð ÐµÐ·ÐµÑ€Ð² Ð½Ð° ÑÑ‚Ð°Ñ€ÑˆÐµÐ³Ð¾ ÐºÑƒÑ€Ð°Ñ‚Ð¾Ñ€Ð°","2026-08-10",84,"ÐšÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚","Ð ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð·Ð°Ð´Ð°Ñ‡ Ð¸ Ð¾Ñ†ÐµÐ½ÐºÐ° Ñ€ÑƒÐºÐ¾Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»Ñ"],
-    ["DEV-T-063-02","EMP-T-063","ÐÑ‚Ñ‚ÐµÑÑ‚Ð°Ñ†Ð¸Ñ","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð¿Ð¾ÑÐ»Ðµ Ð°Ð´Ð°Ð¿Ñ‚Ð°Ñ†Ð¸Ð¸","2026-09-01",78,"Ð—Ð°Ð¿Ð»Ð°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¾","ÐœÐ°Ñ‚Ñ€Ð¸Ñ†Ð° ÐºÐ¾Ð¼Ð¿ÐµÑ‚ÐµÐ½Ñ†Ð¸Ð¹ v2"],
-  ];
-  await env.DB.batch(development.map(row=>env.DB.prepare("INSERT OR IGNORE INTO hr_development (id,employee_id,event_type,title,event_date,score,status,evidence) VALUES (?,?,?,?,?,?,?,?)").bind(...row)));
-  const rewards=[
-    ["REW-T-052-01","EMP-T-052","ÐŸÑ€ÐµÐ¼Ð¸Ñ",1200000,"Ð ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ð¾Ð¹ Ð½ÐµÐ´ÐµÐ»Ð¸","2026-06","Ð’Ñ‹Ð¿Ð»Ð°Ñ‡ÐµÐ½Ð¾"],
-    ["REW-T-052-02","EMP-T-052","ÐÐ°Ñ€ÑƒÑˆÐµÐ½Ð¸Ðµ",0,"ÐžÐ¿Ð¾Ð·Ð´Ð°Ð½Ð¸Ðµ Ð¾Ñ‚Ñ‡Ñ‘Ñ‚Ð°; Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¾ Ñ€ÑƒÐºÐ¾Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÐµÐ¼","2026-07","Ð—Ð°ÐºÑ€Ñ‹Ñ‚Ð¾"],
-    ["REW-T-063-01","EMP-T-063","Ð”ÐµÐ¿Ñ€ÐµÐ¼Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ",-500000,"ÐÐµÐ²Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð½Ñ‹Ð¹ ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ KPI; Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ñ","2026-08","ÐÐ° ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð¸Ð¸"],
-  ];
-  await env.DB.batch(rewards.map(row=>env.DB.prepare("INSERT OR IGNORE INTO hr_rewards (id,employee_id,event_type,amount_minor,reason,period,status) VALUES (?,?,?,?,?,?,?)").bind(...row)));
-  const accesses=[
-    ["ACC-TASKS-052","EMP-T-052","ArtHello OS","ÐŸÐµÐ´Ð°Ð³Ð¾Ð³","ÐžÑ‚Ð¾Ð·Ð²Ð°Ð½","2026-02-16T08:00:00Z","2026-08-15T18:00:00Z","Ð£Ð²Ð¾Ð»ÑŒÐ½ÐµÐ½Ð¸Ðµ EMP-T-052"],
-    ["ACC-EDU-052","EMP-T-052","Ð–ÑƒÑ€Ð½Ð°Ð» Ð¾Ð±ÑƒÑ‡ÐµÐ½Ð¸Ñ","ÐŸÐµÐ´Ð°Ð³Ð¾Ð³","ÐžÑ‚Ð¾Ð·Ð²Ð°Ð½","2026-02-16T08:00:00Z","2026-08-15T18:00:00Z","Ð£Ð²Ð¾Ð»ÑŒÐ½ÐµÐ½Ð¸Ðµ EMP-T-052"],
-    ["ACC-TASKS-063","EMP-T-063","ArtHello OS","ÐšÑƒÑ€Ð°Ñ‚Ð¾Ñ€","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","2026-06-01T08:00:00Z","",""],
-  ];
-  await env.DB.batch(accesses.map(row=>env.DB.prepare("INSERT OR IGNORE INTO hr_accesses (id,employee_id,system,role,status,granted_at,revoked_at,revocation_reason) VALUES (?,?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.prepare(`INSERT OR IGNORE INTO financial_operations (id,operation_date,period,direction,amount_minor,category,report_class,counterparty_entity_id,contract_id,document_id,project_entity_id,legal_entity_id,object_entity_id,cfr_entity_id,bank_operation_ref,operation_kind,source_system,source_file,source_sheet,source_ref,data_quality,status,created_by) VALUES ('FIN-TEST-PAYROLL-052','2026-07-31','2026-07','Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ',9500000,'Ð—Ð°Ñ€Ð°Ð±Ð¾Ñ‚Ð½Ð°Ñ Ð¿Ð»Ð°Ñ‚Ð° Â· ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº T-052','Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ Ð½Ð° Ð¿ÐµÑ€ÑÐ¾Ð½Ð°Ð»','EMP-T-052','DOG-EMP-T-052','PAYROLL-T-052-07','PRJ-T-004','ORG-T-001','OBJ-T-002','CFR-T-001','BANK-TEST-PAYROLL-052','SYNTHETIC_TRACE','SYNTHETIC_HR_TEST','â€”','â€”','EMP-T-052 â†’ 2026-07','Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð²Ñ‹Ð¿Ð»Ð°Ñ‚Ð° Ð´Ð»Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ HR-Ñ†ÐµÐ¿Ð¾Ñ‡ÐºÐ¸; Ð½Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ° Ñ€ÐµÐ°Ð»ÑŒÐ½Ð¾Ð¹ Ð²ÐµÐ´Ð¾Ð¼Ð¾ÑÑ‚Ð¸','Ð Ð°Ð·Ð½ÐµÑÐµÐ½Ð¾','system-hr-seed')`).run();
-}
-
-async function seedLegal() {
-  const entitiesToAdd=[
-    ["CTR-T-044","ÐžÑ€Ð³Ð°Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ","ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº T-044","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","CONTRACTOR-044","ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸ÐºÐ¸"],
-    ["CTR-T-077","ÐžÑ€Ð³Ð°Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ","ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº T-077","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","CONTRACTOR-077","ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸ÐºÐ¸"],
-    ["CTR-T-099","ÐžÑ€Ð³Ð°Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ","ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº T-099","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","CONTRACTOR-099","ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸ÐºÐ¸"],
-    ["EMP-T-LEGAL-001","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","Ð®Ñ€Ð¸ÑÑ‚ T-L01","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","EMPLOYEE-LEGAL-001","Ð®Ñ€Ð¸Ð´Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ ÐºÐ¾Ð½Ñ‚ÑƒÑ€"],
-  ];
-  await env.DB.batch(entitiesToAdd.map(row=>env.DB.prepare("INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES (?,?,?,?,'SYNTHETIC_LEGAL_TEST',?,'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÑŽÑ€Ð¸Ð´Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ°',?,'{}','system-legal-seed')").bind(...row)));
-  const contracts=[
-    ["LCON-T-044","DOG-T-2026-044","ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº","ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº","CTR-T-044","44/26","ÐŸÐ¾Ð´Ð¿Ð¸ÑÐ°Ð½","2026-01-15","2026-09-02",50000000,54000000,"Ð˜ÑÑ‚ÐµÐºÐ°ÐµÑ‚","Ð˜Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ñ Ð­ÐŸ Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð°","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ñ‹","EMP-T-LEGAL-001",1],
-    ["LCON-CLIENT-T-014","DOG-T-2026-014","ÐšÐ»Ð¸ÐµÐ½Ñ‚","Ð¡ÐµÐ¼ÑŒÑ","FAM-T-014","014/26","ÐŸÐ¾Ð´Ð¿Ð¸ÑÐ°Ð½","2026-01-10","2027-01-09",8500000,8500000,"ÐÐºÑ‚ÑƒÐ°Ð»ÐµÐ½","Ð˜Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ñ Ð­ÐŸ Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð°","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ñ‹","EMP-T-SALES-001",0],
-    ["LCON-EMP-T-052","DOG-EMP-T-052","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","EMP-T-052","052-Ð¢Ð”","ÐŸÐ¾Ð´Ð¿Ð¸ÑÐ°Ð½","2026-02-16","2026-08-15",0,0,"Ð—Ð°Ð²ÐµÑ€ÑˆÑ‘Ð½","Ð˜Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ñ Ð­ÐŸ Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð°","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ñ‹","EMP-T-HR-001",1],
-    ["LCON-T-077","DOG-T-2026-077","ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº","ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº","CTR-T-077","77/26","ÐÐµ Ð¿Ð¾Ð´Ð¿Ð¸ÑÐ°Ð½","2026-08-01","2026-12-31",30000000,0,"ÐÐ° ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð¸Ð¸","Ð˜Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ñ Ð­ÐŸ Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð°","Ð¢Ñ€ÐµÐ±ÑƒÑŽÑ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸","EMP-T-LEGAL-001",1],
-  ];
-  await env.DB.batch(contracts.map(row=>env.DB.prepare("INSERT OR IGNORE INTO legal_contracts (id,reference_document_id,contract_type,party_type,party_entity_id,number,signed_status,valid_from,valid_until,limit_minor,spent_minor,status,electronic_signature_status,requisite_status,owner_entity_id,closing_required) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const docs=[
-    ["APP-T-044-V1","APP-T-044","LCON-T-044","ÐŸÑ€Ð¸Ð»Ð¾Ð¶ÐµÐ½Ð¸Ðµ","Ð¢ÐµÑ…Ð½Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ Ð·Ð°Ð´Ð°Ð½Ð¸Ðµ",1,1,"ÐŸÐ¾Ð´Ð¿Ð¸ÑÐ°Ð½Ð¾","ÐÐºÑ‚ÑƒÐ°Ð»ÐµÐ½","2026-01-15","SYNTHETIC:APP-T-044"],
-    ["ACT-T-044-V1","ACT-T-044","LCON-T-044","ÐÐºÑ‚","ÐÐºÑ‚ Ð·Ð° Ð°Ð²Ð³ÑƒÑÑ‚",1,1,"ÐÐµ Ð¿Ð¾Ð´Ð¿Ð¸ÑÐ°Ð½Ð¾","ÐžÑ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚","2026-08-31",""],
-    ["CLOSE-T-044-V1","CLOSE-T-044","LCON-T-044","Ð—Ð°ÐºÑ€Ñ‹Ð²Ð°ÑŽÑ‰Ð¸Ð¹ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","Ð—Ð°ÐºÑ€Ñ‹Ð²Ð°ÑŽÑ‰Ð¸Ð¹ Ð¿Ð°ÐºÐµÑ‚",1,1,"ÐÐµ Ð¿Ð¾Ð´Ð¿Ð¸ÑÐ°Ð½Ð¾","ÐžÑ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚","2026-09-05",""],
-    ["CONS-T-014-V1","CONS-T-014","LCON-CLIENT-T-014","Ð¡Ð¾Ð³Ð»Ð°ÑÐ¸Ðµ","Ð¡Ð¾Ð³Ð»Ð°ÑÐ¸Ðµ Ð½Ð° Ð¾Ð±Ñ€Ð°Ð±Ð¾Ñ‚ÐºÑƒ Ð´Ð°Ð½Ð½Ñ‹Ñ… Â· Ñ‚ÐµÑÑ‚",1,1,"ÐŸÐ¾Ð´Ð¿Ð¸ÑÐ°Ð½Ð¾","ÐÐºÑ‚ÑƒÐ°Ð»ÐµÐ½","2027-01-09","SYNTHETIC:CONS-T-014"],
-    ["INS-T-001-V2","INS-T-001","LCON-EMP-T-052","Ð˜Ð½ÑÑ‚Ñ€ÑƒÐºÑ†Ð¸Ñ","Ð˜Ð½ÑÑ‚Ñ€ÑƒÐºÑ†Ð¸Ñ ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ°",2,1,"ÐŸÐ¾Ð´Ð¿Ð¸ÑÐ°Ð½Ð¾","ÐÑ€Ñ…Ð¸Ð²","2026-08-15","SYNTHETIC:INS-T-001-V2"],
-    ["JRN-T-001-V1","JRN-T-001","LCON-EMP-T-052","Ð–ÑƒÑ€Ð½Ð°Ð»","Ð–ÑƒÑ€Ð½Ð°Ð» Ð¾Ð·Ð½Ð°ÐºÐ¾Ð¼Ð»ÐµÐ½Ð¸Ñ",1,1,"ÐŸÐ¾Ð´Ð¿Ð¸ÑÐ°Ð½Ð¾","ÐÑ€Ñ…Ð¸Ð²","2026-08-15","SYNTHETIC:JRN-T-001"],
-  ];
-  await env.DB.batch(docs.map(row=>env.DB.prepare("INSERT OR IGNORE INTO legal_document_items (id,stable_id,contract_id,item_type,title,version,required,signed_status,status,due_date,reference) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const zones=[
-    ["ZONE-T-044-01","LCON-T-044","ÐŸÑ€Ð¸Ñ‘Ð¼ÐºÐ° Ñ€Ð°Ð±Ð¾Ñ‚","EMP-T-004","ÐÐºÑ‚ Ð¸ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ðµ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ð°","ÐÐºÑ‚Ð¸Ð²Ð½Ð°"],
-    ["ZONE-T-044-02","LCON-T-044","Ð›Ð¸Ð¼Ð¸Ñ‚ Ð¸ Ð¾Ð¿Ð»Ð°Ñ‚Ð°","EMP-T-FIN-001","500 000 â‚½ Ð¿Ð¾ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ñƒ","ÐÐºÑ‚Ð¸Ð²Ð½Ð°"],
-    ["ZONE-T-014-01","LCON-CLIENT-T-014","Ð¡Ð¾Ð³Ð»Ð°ÑÐ¸Ñ ÑÐµÐ¼ÑŒÐ¸","EMP-T-SALES-001","Ð¡Ð¾Ð³Ð»Ð°ÑÐ¸Ðµ Ð¸ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ ÐºÐ»Ð¸ÐµÐ½Ñ‚Ð°","ÐÐºÑ‚Ð¸Ð²Ð½Ð°"],
-  ];
-  await env.DB.batch(zones.map(row=>env.DB.prepare("INSERT OR IGNORE INTO legal_responsibility_zones (id,contract_id,zone,responsible_entity_id,scope,status) VALUES (?,?,?,?,?,?)").bind(...row)));
-  const checks=[
-    ["SIG-LGL-T-001","LCON-T-044","Ð˜ÑÑ‚ÐµÐºÐ°ÑŽÑ‰Ð¸Ð¹ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€","Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹","DOG-T-2026-044 Ð´ÐµÐ¹ÑÑ‚Ð²ÑƒÐµÑ‚ Ð´Ð¾ 2026-09-02; Ð¾ÑÑ‚Ð°Ð»Ð¾ÑÑŒ Ð¼ÐµÐ½ÐµÐµ 30 Ð´Ð½ÐµÐ¹","ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¾Ð´Ð»ÐµÐ½Ð¸Ðµ Ð¸Ð»Ð¸ Ð·Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð¸Ðµ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÑÑ‚Ð²","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚","2026-08-21T07:00:00Z"],
-    ["SIG-LGL-T-002","LCON-T-044","ÐžÑ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‰Ð¸Ð¹ Ð°ÐºÑ‚","Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹","ÐžÐ±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ð¹ ACT-T-044 Ð¸Ð¼ÐµÐµÑ‚ ÑÑ‚Ð°Ñ‚ÑƒÑ Â«ÐžÑ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚Â» Ð¸ ÑÑ€Ð¾Ðº 2026-08-31","Ð—Ð°Ð¿Ñ€Ð¾ÑÐ¸Ñ‚ÑŒ Ð°ÐºÑ‚ Ð¸ ÑÐ²ÑÐ·Ð°Ñ‚ÑŒ Ñ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ð¼ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ð¾Ð¼","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚","2026-08-21T07:01:00Z"],
-    ["SIG-LGL-T-003","LCON-T-044","ÐŸÑ€ÐµÐ²Ñ‹ÑˆÐµÐ½Ð¸Ðµ Ð»Ð¸Ð¼Ð¸Ñ‚Ð°","Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹","Ð Ð°ÑÑ…Ð¾Ð´ 540 000 â‚½ Ð¿Ñ€ÐµÐ²Ñ‹ÑˆÐ°ÐµÑ‚ Ð»Ð¸Ð¼Ð¸Ñ‚ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° 500 000 â‚½ Ð½Ð° 40 000 â‚½","ÐžÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Ð½Ð¾Ð²Ð¾Ðµ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÑÑ‚Ð²Ð¾ Ð´Ð¾ Ñ€ÐµÑˆÐµÐ½Ð¸Ñ ÑƒÐ¿Ð¾Ð»Ð½Ð¾Ð¼Ð¾Ñ‡ÐµÐ½Ð½Ð¾Ð³Ð¾ Ð»Ð¸Ñ†Ð°","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚","2026-08-21T07:02:00Z"],
-    ["SIG-LGL-T-004","LCON-T-077","ÐÐµÐ¿Ð¾Ð´Ð¿Ð¸ÑÐ°Ð½Ð½Ñ‹Ð¹ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€","Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹","Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ 77/26 Ð¸Ð¼ÐµÐµÑ‚ ÑÑ‚Ð°Ñ‚ÑƒÑ Â«ÐÐµ Ð¿Ð¾Ð´Ð¿Ð¸ÑÐ°Ð½Â»","ÐÐµ Ð´Ð¾Ð¿ÑƒÑÐºÐ°Ñ‚ÑŒ Ñ€Ð°Ð±Ð¾Ñ‚Ñƒ Ð¸Ð»Ð¸ Ð¾Ð¿Ð»Ð°Ñ‚Ñƒ Ð´Ð¾ Ð¿Ð¾Ð´Ð¿Ð¸ÑÐ°Ð½Ð¸Ñ","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚","2026-08-21T07:03:00Z"],
-    ["SIG-LGL-T-005","MISSING:CTR-T-099","ÐžÑ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‰Ð¸Ð¹ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€","ÐšÑ€Ð¸Ñ‚Ð¸Ñ‡Ð½Ñ‹Ð¹","ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº CTR-T-099 Ð¿Ñ€Ð¸ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚ Ð² Ñ€ÐµÐµÑÑ‚Ñ€Ðµ, ÑÐ²ÑÐ·Ð°Ð½Ð½Ñ‹Ð¹ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½","ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ Ð¾ÑÐ½Ð¾Ð²Ð°Ð½Ð¸Ðµ Ð²Ð·Ð°Ð¸Ð¼Ð¾Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ñ; Ð½Ðµ Ð´ÐµÐ»Ð°Ñ‚ÑŒ Ð²Ñ‹Ð²Ð¾Ð´ Ð¾ Ð½Ð°Ñ€ÑƒÑˆÐµÐ½Ð¸Ð¸ Ð±ÐµÐ· Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ð¾Ð²","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚","2026-08-21T07:04:00Z"],
-    ["SIG-LGL-T-006","LCON-T-044","Ð’Ð¾Ð·Ð¼Ð¾Ð¶Ð½Ñ‹Ð¹ ÐºÐ¾Ð½Ñ„Ð»Ð¸ÐºÑ‚ Â· ÑÐ¸Ð³Ð½Ð°Ð»","Ð¡Ñ€ÐµÐ´Ð½Ð¸Ð¹","Ð’ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ñ… Ñ€ÐµÐºÐ²Ð¸Ð·Ð¸Ñ‚Ð°Ñ… CTR-T-044 Ð¸ CTR-T-077 ÑÐ¾Ð²Ð¿Ð°Ð» ÐºÐ¾Ð½Ñ‚Ð°ÐºÑ‚ ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð¸Ñ; ÑÑ‚Ð¾ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¿Ñ€Ð¸Ð·Ð½Ð°Ðº Ð´Ð»Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸","Ð¡Ð²ÐµÑ€Ð¸Ñ‚ÑŒ Ð¿Ð¾Ð»Ð½Ð¾Ð¼Ð¾Ñ‡Ð¸Ñ, Ñ€ÐµÐºÐ²Ð¸Ð·Ð¸Ñ‚Ñ‹ Ð¸ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ñ‹; Ð½Ðµ Ð¾Ð±Ð²Ð¸Ð½ÑÑ‚ÑŒ ÑÑ‚Ð¾Ñ€Ð¾Ð½Ñƒ","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚","2026-08-21T07:05:00Z"],
-    ["SIG-LGL-T-007","LCON-T-044","ÐžÑ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‰Ð¸Ð¹ Ð·Ð°ÐºÑ€Ñ‹Ð²Ð°ÑŽÑ‰Ð¸Ð¹ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","Ð¡Ñ€ÐµÐ´Ð½Ð¸Ð¹","ÐžÐ±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ð¹ CLOSE-T-044 Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚, ÑÑ€Ð¾Ðº 2026-09-05","ÐÐ°Ð·Ð½Ð°Ñ‡Ð¸Ñ‚ÑŒ Ð²Ð»Ð°Ð´ÐµÐ»ÑŒÑ†Ð° Ð¸ Ð·Ð°Ð¿Ñ€Ð¾ÑÐ¸Ñ‚ÑŒ Ð·Ð°ÐºÑ€Ñ‹Ð²Ð°ÑŽÑ‰Ð¸Ð¹ Ð¿Ð°ÐºÐµÑ‚","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚","2026-08-21T07:06:00Z"],
-  ];
-  await env.DB.batch(checks.map(row=>env.DB.prepare("INSERT OR IGNORE INTO legal_checks (id,contract_id,signal_type,severity,evidence,recommendation,status,detected_at) VALUES (?,?,?,?,?,?,?,?)").bind(...row)));
-}
-
-async function seedProcurement() {
-  const parties=[
-    ["SUP-T-022","ÐžÑ€Ð³Ð°Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ","ÐŸÐ¾ÑÑ‚Ð°Ð²Ñ‰Ð¸Ðº T-022 Â· Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ°","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","SUPPLIER-022","Ð—Ð°ÐºÑƒÐ¿ÐºÐ¸"],
-    ["SUP-T-023","ÐžÑ€Ð³Ð°Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ","ÐŸÐ¾ÑÑ‚Ð°Ð²Ñ‰Ð¸Ðº T-023 Â· Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ°","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","SUPPLIER-023","Ð—Ð°ÐºÑƒÐ¿ÐºÐ¸"],
-    ["SUP-T-024","ÐžÑ€Ð³Ð°Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ","ÐŸÐ¾ÑÑ‚Ð°Ð²Ñ‰Ð¸Ðº T-024 Â· Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ°","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","SUPPLIER-024","Ð—Ð°ÐºÑƒÐ¿ÐºÐ¸"],
-    ["EMP-T-PROC-001","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","Ð¡Ð¿ÐµÑ†Ð¸Ð°Ð»Ð¸ÑÑ‚ Ð·Ð°ÐºÑƒÐ¿Ð¾Ðº T-P01","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","EMPLOYEE-PROC-001","Ð—Ð°ÐºÑƒÐ¿ÐºÐ¸"],
-  ];
-  await env.DB.batch(parties.map(row=>env.DB.prepare("INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES (?,?,?,?,'SYNTHETIC_PROCUREMENT_TEST',?,'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð±ÐµÐ· Ñ€ÐµÐ°Ð»ÑŒÐ½Ñ‹Ñ… Ñ€ÐµÐºÐ²Ð¸Ð·Ð¸Ñ‚Ð¾Ð²',?,'{}','system-procurement-seed')").bind(...row)));
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO workflow_documents (id,title,document_type,current_version,status,valid_until,owner_entity_id,source,created_by) VALUES ('DOG-SUP-T-022','Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ð¿Ð¾ÑÑ‚Ð°Ð²ÐºÐ¸ T-022','Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ð¿Ð¾ÑÑ‚Ð°Ð²ÐºÐ¸',1,'ÐÐºÑ‚ÑƒÐ°Ð»ÐµÐ½','2027-08-01','EMP-T-PROC-001','SYNTHETIC_PROCUREMENT_TEST','system-procurement-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO legal_contracts (id,reference_document_id,contract_type,party_type,party_entity_id,number,signed_status,valid_from,valid_until,limit_minor,spent_minor,status,electronic_signature_status,requisite_status,owner_entity_id,closing_required) VALUES ('LCON-SUP-T-022','DOG-SUP-T-022','ÐŸÐ¾ÑÑ‚Ð°Ð²Ñ‰Ð¸Ðº','ÐŸÐ¾ÑÑ‚Ð°Ð²Ñ‰Ð¸Ðº','SUP-T-022','SUP-022/26','ÐŸÐ¾Ð´Ð¿Ð¸ÑÐ°Ð½','2026-08-01','2027-08-01',100000000,48000000,'ÐÐºÑ‚ÑƒÐ°Ð»ÐµÐ½','Ð˜Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ñ Ð­ÐŸ Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð°','ÐŸÑ€Ð¾Ð²ÐµÑ€ÐµÐ½Ñ‹','EMP-T-PROC-001',1)"),
-  ]);
-  const suppliers=[
-    ["SUPREC-T-022","SUP-T-022","ÐšÐ¾Ð¼Ð¿ÑŒÑŽÑ‚ÐµÑ€Ð½Ð°Ñ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ°","LCON-SUP-T-022",4800000,91,88,96,"ÐÐºÑ‚Ð¸Ð²ÐµÐ½","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ñ†ÐµÐ½Ð°; ÑÑ€Ð°Ð²Ð½ÐµÐ½Ð¸Ðµ Ñ€Ñ‹Ð½ÐºÐ° Ð±ÐµÐ· Ð²Ð½ÐµÑˆÐ½ÐµÐ³Ð¾ API"],
-    ["SUPREC-T-023","SUP-T-023","ÐšÐ¾Ð¼Ð¿ÑŒÑŽÑ‚ÐµÑ€Ð½Ð°Ñ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ°","",4520000,76,74,90,"ÐÐ° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐµ","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ñ†ÐµÐ½Ð°; Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚"],
-    ["SUPREC-T-024","SUP-T-024","ÐšÐ¾Ð¼Ð¿ÑŒÑŽÑ‚ÐµÑ€Ð½Ð°Ñ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ°","",5150000,95,82,103,"ÐÐºÑ‚Ð¸Ð²ÐµÐ½","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ñ†ÐµÐ½Ð° Ð²Ñ‹ÑˆÐµ Ð¼ÐµÐ´Ð¸Ð°Ð½Ñ‹ Ñ‚ÐµÑÑ‚Ð¾Ð²Ð¾Ð³Ð¾ Ð½Ð°Ð±Ð¾Ñ€Ð°"],
-  ];
-  await env.DB.batch(suppliers.map(row=>env.DB.prepare("INSERT OR IGNORE INTO procurement_suppliers (id,entity_id,specialization,contract_id,base_price_minor,quality_score,rating,market_index,status,data_quality) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.prepare("INSERT OR IGNORE INTO purchase_requests (id,requester_entity_id,unit,item_name,quantity,budget_minor,need_by,status,justification,approver_entity_id,approved_at) VALUES ('REQ-T-088','EMP-T-032','Ð¨ÐºÐ¾Ð»Ð° 1â€“11','ÐÐ¾ÑƒÑ‚Ð±ÑƒÐº Ð´Ð»Ñ ÑƒÑ‡ÐµÐ±Ð½Ð¾Ð³Ð¾ ÐºÐ»Ð°ÑÑÐ°',10,50000000,'2026-08-20','Ð¡Ð¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð°','ÐžÐ±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ¸ Ð´Ð»Ñ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ð¾Ð¹ Ð»Ð°Ð±Ð¾Ñ€Ð°Ñ‚Ð¾Ñ€Ð¸Ð¸','EMP-T-004','2026-08-03T10:00:00Z')").run();
-  const offers=[
-    ["OFFR-T-088-22","REQ-T-088","SUPREC-T-022",48000000,5,24,91,"Ð’Ñ‹Ð±Ñ€Ð°Ð½Ð¾","ÐÐµ ÑÐ°Ð¼Ð°Ñ Ð½Ð¸Ð·ÐºÐ°Ñ Ñ†ÐµÐ½Ð°; Ð»ÑƒÑ‡ÑˆÐ¸Ð¹ Ð±Ð°Ð»Ð°Ð½Ñ ÐºÐ°Ñ‡ÐµÑÑ‚Ð²Ð°, Ð³Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ð¸ Ð¸ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð°"],
-    ["OFFR-T-088-23","REQ-T-088","SUPREC-T-023",45200000,8,12,76,"ÐžÑ‚ÐºÐ»Ð¾Ð½ÐµÐ½Ð¾","ÐÐ¸Ð¶Ðµ Ñ†ÐµÐ½Ð°, Ð½Ð¾ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ð¸ ÐºÐ¾Ñ€Ð¾Ñ‡Ðµ Ð³Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ñ"],
-    ["OFFR-T-088-24","REQ-T-088","SUPREC-T-024",51500000,3,36,95,"ÐžÑ‚ÐºÐ»Ð¾Ð½ÐµÐ½Ð¾","Ð’Ñ‹ÑˆÐµ ÐºÐ°Ñ‡ÐµÑÑ‚Ð²Ð¾ Ð¸ Ð³Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ñ, Ð½Ð¾ Ð¿Ñ€ÐµÐ²Ñ‹ÑˆÐµÐ½ Ð±ÑŽÐ´Ð¶ÐµÑ‚"],
-  ];
-  await env.DB.batch(offers.map(row=>env.DB.prepare("INSERT OR IGNORE INTO supplier_offers (id,request_id,supplier_id,price_minor,delivery_days,warranty_months,quality_score,status,comparison_note) VALUES (?,?,?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.prepare("INSERT OR IGNORE INTO purchase_orders (id,request_id,offer_id,supplier_id,order_number,amount_minor,status,ordered_at,expected_at,contract_id) VALUES ('ORD-T-088','REQ-T-088','OFFR-T-088-22','SUPREC-T-022','PO-088/26',48000000,'ÐŸÑ€Ð¸Ð½ÑÑ‚','2026-08-04T09:00:00Z','2026-08-09','LCON-SUP-T-022')").run();
-  await env.DB.prepare("INSERT OR IGNORE INTO procurement_deliveries (id,order_id,delivered_at,document_id,status,quantity,accepted_quantity,accepted_by,quality_note) VALUES ('DLV-T-088','ORD-T-088','2026-08-09T12:00:00Z','ACT-REQ-T-088','ÐŸÑ€Ð¸Ð½ÑÑ‚Ð¾',10,10,'EMP-T-PROC-001','ÐšÐ¾Ð¼Ð¿Ð»ÐµÐºÑ‚Ð½Ð¾ÑÑ‚ÑŒ Ð¸ ÑÐµÑ€Ð¸Ð¹Ð½Ñ‹Ðµ Ð½Ð¾Ð¼ÐµÑ€Ð° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐµÐ½Ñ‹')").run();
-  const inventory=[
-    ["ITEM-T-LAPTOP-088","NB-CLASS-T","ÐÐ¾ÑƒÑ‚Ð±ÑƒÐº ÑƒÑ‡ÐµÐ±Ð½Ñ‹Ð¹ Â· Ñ‚ÐµÑÑ‚","ÐžÐ±Ð¾Ñ€ÑƒÐ´Ð¾Ð²Ð°Ð½Ð¸Ðµ","Ð¡ÐºÐ»Ð°Ð´ ÑˆÐºÐ¾Ð»Ñ‹",8,4800000,"ASSET-T-088-01","Ð’ Ð½Ð°Ð»Ð¸Ñ‡Ð¸Ð¸"],
-    ["ITEM-T-PAPER-014","PAPER-A4-T","Ð‘ÑƒÐ¼Ð°Ð³Ð° Ð4 Â· Ñ‚ÐµÑÑ‚","Ð Ð°ÑÑ…Ð¾Ð´Ð½Ñ‹Ðµ Ð¼Ð°Ñ‚ÐµÑ€Ð¸Ð°Ð»Ñ‹","Ð¦ÐµÐ½Ñ‚Ñ€Ð°Ð»ÑŒÐ½Ñ‹Ð¹ ÑÐºÐ»Ð°Ð´",24,45000,"","Ð’ Ð½Ð°Ð»Ð¸Ñ‡Ð¸Ð¸"],
-  ];
-  await env.DB.batch(inventory.map(row=>env.DB.prepare("INSERT OR IGNORE INTO inventory_items (id,sku,name,category,warehouse,quantity,unit_cost_minor,asset_id,status) VALUES (?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const events=[
-    ["INV-T-088-01","ITEM-T-LAPTOP-088","ÐŸÑ€Ð¸Ñ‘Ð¼ÐºÐ°",10,"ÐŸÐ¾ÑÑ‚Ð°Ð²Ñ‰Ð¸Ðº T-022","Ð¡ÐºÐ»Ð°Ð´ ÑˆÐºÐ¾Ð»Ñ‹","ACT-REQ-T-088","2026-08-09T12:30:00Z","EMP-T-PROC-001"],
-    ["INV-T-088-02","ITEM-T-LAPTOP-088","Ð’Ñ‹Ð´Ð°Ñ‡Ð°",2,"Ð¡ÐºÐ»Ð°Ð´ ÑˆÐºÐ¾Ð»Ñ‹","ÐšÐ»Ð°ÑÑ 3Ð","ISSUE-T-088-02","2026-08-12T08:00:00Z","EMP-T-PROC-001"],
-    ["INV-T-088-03","ITEM-T-LAPTOP-088","Ð˜Ð½Ð²ÐµÐ½Ñ‚Ð°Ñ€Ð¸Ð·Ð°Ñ†Ð¸Ñ",8,"Ð¡ÐºÐ»Ð°Ð´ ÑˆÐºÐ¾Ð»Ñ‹","Ð¡ÐºÐ»Ð°Ð´ ÑˆÐºÐ¾Ð»Ñ‹","STOCKTAKE-T-0820","2026-08-20T16:00:00Z","EMP-T-PROC-001"],
-    ["INV-T-014-01","ITEM-T-PAPER-014","ÐŸÐµÑ€ÐµÐ¼ÐµÑ‰ÐµÐ½Ð¸Ðµ",6,"Ð¦ÐµÐ½Ñ‚Ñ€Ð°Ð»ÑŒÐ½Ñ‹Ð¹ ÑÐºÐ»Ð°Ð´","Ð¨ÐºÐ¾Ð»Ð° 1â€“11","MOVE-T-014","2026-08-18T10:00:00Z","EMP-T-PROC-001"],
-  ];
-  await env.DB.batch(events.map(row=>env.DB.prepare("INSERT OR IGNORE INTO inventory_events (id,item_id,event_type,quantity,from_location,to_location,document_id,occurred_at,actor) VALUES (?,?,?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.prepare("INSERT OR IGNORE INTO assets (id,item_id,serial_number,object_entity_id,assigned_to_entity_id,warranty_until,service_due,status,acquisition_date,cost_minor,monthly_depreciation_minor) VALUES ('ASSET-T-088-01','ITEM-T-LAPTOP-088','SERIAL-T-088-01','OBJ-T-002','EMP-T-032','2028-08-09','2027-02-09','Ð’ ÑÐºÑÐ¿Ð»ÑƒÐ°Ñ‚Ð°Ñ†Ð¸Ð¸','2026-08-09',4800000,200000)").run();
-  await env.DB.prepare("INSERT OR IGNORE INTO asset_maintenance (id,asset_id,maintenance_type,scheduled_at,completed_at,contractor_id,status,cost_minor,document_id) VALUES ('MAINT-T-088-01','ASSET-T-088-01','ÐŸÐ»Ð°Ð½Ð¾Ð²Ð¾Ðµ Ð¾Ð±ÑÐ»ÑƒÐ¶Ð¸Ð²Ð°Ð½Ð¸Ðµ','2027-02-09','','SUP-T-022','Ð—Ð°Ð¿Ð»Ð°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¾',0,'')").run();
-  await env.DB.prepare(`INSERT OR IGNORE INTO financial_operations (id,operation_date,period,direction,amount_minor,category,report_class,counterparty_entity_id,contract_id,document_id,project_entity_id,legal_entity_id,object_entity_id,cfr_entity_id,bank_operation_ref,operation_kind,source_system,source_file,source_sheet,source_ref,data_quality,status,created_by) VALUES ('FIN-TEST-PROC-088','2026-08-12','2026-08','Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ',48000000,'ÐžÐ±Ð¾Ñ€ÑƒÐ´Ð¾Ð²Ð°Ð½Ð¸Ðµ Ð´Ð»Ñ ÑƒÑ‡ÐµÐ±Ð½Ð¾Ð³Ð¾ ÐºÐ»Ð°ÑÑÐ°','Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£','SUP-T-022','DOG-SUP-T-022','ACT-REQ-T-088','PRJ-T-004','ORG-T-001','OBJ-T-002','CFR-T-001','BANK-TEST-PROC-088','SYNTHETIC_TRACE','SYNTHETIC_PROCUREMENT_TEST','â€”','â€”','REQ-T-088 â†’ ORD-T-088 â†’ DLV-T-088','Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð¾Ð¿Ð»Ð°Ñ‚Ð° Ð´Ð»Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ Ð·Ð°ÐºÑƒÐ¿Ð¾Ñ‡Ð½Ð¾Ð¹ Ñ†ÐµÐ¿Ð¾Ñ‡ÐºÐ¸; Ð½Ðµ Ð±Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ¸Ð¹ Ñ„Ð°ÐºÑ‚','Ð Ð°Ð·Ð½ÐµÑÐµÐ½Ð¾','system-procurement-seed')`).run();
-}
-
-async function seedFood(){
-  const entitiesToAdd=[
-    ["PRJ-T-KITCHEN","ÐŸÑ€Ð¾ÐµÐºÑ‚","ÐšÑƒÑ…Ð½Ñ ArtHello Â· Ñ‚ÐµÑÑ‚","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","PROJECT-KITCHEN","ÐšÑƒÑ…Ð½Ñ"],
-    ["CFR-T-KITCHEN","Ð¦Ð¤Ðž","Ð¦Ð¤Ðž ÐšÑƒÑ…Ð½Ñ Â· Ñ‚ÐµÑÑ‚","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","CFR-KITCHEN","ÐšÑƒÑ…Ð½Ñ"],
-    ["SUP-T-FOOD-001","ÐžÑ€Ð³Ð°Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ","ÐŸÐ¾ÑÑ‚Ð°Ð²Ñ‰Ð¸Ðº Ð¿Ñ€Ð¾Ð´ÑƒÐºÑ‚Ð¾Ð² T-F01","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","SUPPLIER-FOOD-001","ÐšÑƒÑ…Ð½Ñ"],
-    ["EMP-T-FOOD-001","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","ÐŸÐ¾Ð²Ð°Ñ€ T-F01","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","EMPLOYEE-FOOD-001","ÐšÑƒÑ…Ð½Ñ"],
-    ["EMP-T-FOOD-002","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","Ð Ð°Ð±Ð¾Ñ‚Ð½Ð¸Ðº ÐºÑƒÑ…Ð½Ð¸ T-F02","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","EMPLOYEE-FOOD-002","ÐšÑƒÑ…Ð½Ñ"],
-  ];
-  await env.DB.batch(entitiesToAdd.map(row=>env.DB.prepare("INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES (?,?,?,?,'SYNTHETIC_FOOD_TEST',?,'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ°',?,'{}','system-food-seed')").bind(...row)));
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO procurement_suppliers (id,entity_id,specialization,contract_id,base_price_minor,quality_score,rating,market_index,status,data_quality) VALUES ('SUPREC-T-FOOD-001','SUP-T-FOOD-001','ÐŸÑ€Ð¾Ð´ÑƒÐºÑ‚Ñ‹ Ð¿Ð¸Ñ‚Ð°Ð½Ð¸Ñ','DOG-SUP-T-FOOD-001',25000,90,87,100,'ÐÐºÑ‚Ð¸Ð²ÐµÐ½','Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ñ†ÐµÐ½Ñ‹ Ð¸ Ð¿Ð¾ÑÑ‚Ð°Ð²Ñ‰Ð¸Ðº')"),
-    env.DB.prepare("INSERT OR IGNORE INTO purchase_requests (id,requester_entity_id,unit,item_name,quantity,budget_minor,need_by,status,justification,approver_entity_id,approved_at) VALUES ('REQ-T-FOOD-021','EMP-T-FOOD-001','ÐšÑƒÑ…Ð½Ñ','ÐŸÑ€Ð¾Ð´ÑƒÐºÑ‚Ñ‹ Ð¼ÐµÐ½ÑŽ 21 Ð°Ð²Ð³ÑƒÑÑ‚Ð°',1,3500000,'2026-08-20','Ð¡Ð¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð°','ÐœÐµÐ½ÑŽ ÑˆÐºÐ¾Ð»Ñ‹ Ð¸ Ð´ÐµÑ‚ÑÐºÐ¾Ð³Ð¾ ÑÐ°Ð´Ð°','EMP-T-004','2026-08-18T09:00:00Z')"),
-    env.DB.prepare("INSERT OR IGNORE INTO purchase_orders (id,request_id,offer_id,supplier_id,order_number,amount_minor,status,ordered_at,expected_at,contract_id) VALUES ('ORD-T-FOOD-021','REQ-T-FOOD-021','OFFR-T-FOOD-021','SUPREC-T-FOOD-001','FOOD-021/26',3200000,'ÐŸÑ€Ð¸Ð½ÑÑ‚','2026-08-18T10:00:00Z','2026-08-20','DOG-SUP-T-FOOD-001')"),
-    env.DB.prepare("INSERT OR IGNORE INTO procurement_deliveries (id,order_id,delivered_at,document_id,status,quantity,accepted_quantity,accepted_by,quality_note) VALUES ('DLV-T-FOOD-021','ORD-T-FOOD-021','2026-08-20T07:00:00Z','ACT-T-FOOD-021','ÐŸÑ€Ð¸Ð½ÑÑ‚Ð¾',1,1,'EMP-T-FOOD-001','Ð¢ÐµÐ¼Ð¿ÐµÑ€Ð°Ñ‚ÑƒÑ€Ð° Ð¸ ÑÑ€Ð¾ÐºÐ¸ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐµÐ½Ñ‹')"),
-  ]);
-  const products=[
-    ["FOOD-PROD-T-001","ÐšÑ€ÑƒÐ¿Ð° Ð³Ñ€ÐµÑ‡Ð½ÐµÐ²Ð°Ñ","SUPREC-T-FOOD-001","Ð³",22,"Ð¡ÑƒÑ…Ð¾Ð¹ ÑÐºÐ»Ð°Ð´ Â· Ð´Ð¾ +25Â°C","ÐÐºÑ‚Ð¸Ð²ÐµÐ½"],
-    ["FOOD-PROD-T-002","Ð¤Ð¸Ð»Ðµ ÐºÑƒÑ€Ð¸Ð½Ð¾Ðµ","SUPREC-T-FOOD-001","Ð³",48,"Ð¥Ð¾Ð»Ð¾Ð´Ð¸Ð»ÑŒÐ½Ð¸Ðº Â· 0â€¦+4Â°C","ÐÐºÑ‚Ð¸Ð²ÐµÐ½"],
-    ["FOOD-PROD-T-003","ÐžÐ²Ð¾Ñ‰Ð½Ð°Ñ ÑÐ¼ÐµÑÑŒ","SUPREC-T-FOOD-001","Ð³",31,"Ð¥Ð¾Ð»Ð¾Ð´Ð¸Ð»ÑŒÐ½Ð¸Ðº Â· 0â€¦+4Â°C","ÐÐºÑ‚Ð¸Ð²ÐµÐ½"],
-  ];
-  await env.DB.batch(products.map(row=>env.DB.prepare("INSERT OR IGNORE INTO food_products (id,name,supplier_id,unit,purchase_cost_minor,storage_norm,status,project_entity_id,cfr_entity_id) VALUES (?,?,?,?,?,?,?,'PRJ-T-KITCHEN','CFR-T-KITCHEN')").bind(...row)));
-  const batches=[
-    ["BATCH-T-021-01","FOOD-PROD-T-001","REQ-T-FOOD-021","2026-08-20T07:00:00Z","2027-02-20",25000,9000,"Ð³","Ð¡ÑƒÑ…Ð¾Ð¹ ÑÐºÐ»Ð°Ð´","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð°","Ð£Ð¿Ð°ÐºÐ¾Ð²ÐºÐ° Ñ†ÐµÐ»Ð°Ñ"],
-    ["BATCH-T-021-02","FOOD-PROD-T-002","REQ-T-FOOD-021","2026-08-20T07:00:00Z","2026-08-23",18000,3000,"Ð³","Ð¥Ð¾Ð»Ð¾Ð´Ð¸Ð»ÑŒÐ½Ð¸Ðº","Ð¡ÐºÐ¾Ñ€Ð¾Ð¿Ð¾Ñ€Ñ‚ÑÑ‰Ð°ÑÑÑ Â· Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ Ð¿ÐµÑ€Ð²Ð¾Ð¹"],
-    ["BATCH-T-021-03","FOOD-PROD-T-003","REQ-T-FOOD-021","2026-08-20T07:00:00Z","2026-08-25",16000,5000,"Ð³","Ð¥Ð¾Ð»Ð¾Ð´Ð¸Ð»ÑŒÐ½Ð¸Ðº","Ð¢ÐµÐ¼Ð¿ÐµÑ€Ð°Ñ‚ÑƒÑ€Ð° Ð¿Ñ€Ð¸ Ð¿Ñ€Ð¸Ñ‘Ð¼ÐºÐµ +3Â°C"],
-  ];
-  await env.DB.batch(batches.map(row=>env.DB.prepare("INSERT OR IGNORE INTO food_batches (id,product_id,purchase_request_id,received_at,expires_at,quantity,remaining_quantity,unit,warehouse,status,quality_note) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.prepare("INSERT OR IGNORE INTO food_recipes (id,dish_name,version,yield_portions,standard_cost_minor,norm_description,menu_date,status) VALUES ('TTK-T-014','Ð“Ñ€ÐµÑ‡ÐºÐ° Ñ ÐºÑƒÑ€Ð¸Ñ†ÐµÐ¹ Ð¸ Ð¾Ð²Ð¾Ñ‰Ð°Ð¼Ð¸',3,10,92000,'ÐÐ° 10 Ð¿Ð¾Ñ€Ñ†Ð¸Ð¹: ÐºÑ€ÑƒÐ¿Ð° 1,2 ÐºÐ³, ÐºÑƒÑ€Ð¸Ñ†Ð° 1,1 ÐºÐ³, Ð¾Ð²Ð¾Ñ‰Ð¸ 0,8 ÐºÐ³','2026-08-21','Ð”ÐµÐ¹ÑÑ‚Ð²ÑƒÐµÑ‚')").run();
-  const ingredients=[["ING-T-014-01","TTK-T-014","FOOD-PROD-T-001",1200,"Ð³",26400],["ING-T-014-02","TTK-T-014","FOOD-PROD-T-002",1100,"Ð³",52800],["ING-T-014-03","TTK-T-014","FOOD-PROD-T-003",800,"Ð³",24800]];
-  await env.DB.batch(ingredients.map(row=>env.DB.prepare("INSERT OR IGNORE INTO food_recipe_ingredients (id,recipe_id,product_id,quantity_per_batch,unit,cost_minor) VALUES (?,?,?,?,?,?)").bind(...row)));
-  const shifts=[["SHIFT-T-0821-01","EMP-T-FOOD-001","2026-08-21T05:30:00Z","2026-08-21T14:00:00Z",500000,"Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°","ÐŸÐ¾Ð²Ð°Ñ€"],["SHIFT-T-0821-02","EMP-T-FOOD-002","2026-08-21T06:00:00Z","2026-08-21T14:00:00Z",300000,"Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°","Ð Ð°Ð±Ð¾Ñ‚Ð½Ð¸Ðº ÐºÑƒÑ…Ð½Ð¸"]];
-  await env.DB.batch(shifts.map(row=>env.DB.prepare("INSERT OR IGNORE INTO food_shifts (id,employee_entity_id,started_at,ended_at,rate_minor,status,role) VALUES (?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.prepare("INSERT OR IGNORE INTO food_production (id,production_date,recipe_id,shift_id,planned_portions,actual_portions,material_cost_minor,status,evidence) VALUES ('PROD-T-0821','2026-08-21','TTK-T-014','SHIFT-T-0821-01',130,130,1200000,'Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð¾','Ð–ÑƒÑ€Ð½Ð°Ð» Ñ‚ÐµÐ¼Ð¿ÐµÑ€Ð°Ñ‚ÑƒÑ€Ñ‹ Ð¸ ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒ Ð²Ñ‹Ñ…Ð¾Ð´Ð° T-0821')").run();
-  const shipments=[
-    ["SHIP-T-0821-01","PROD-T-0821","OBJ-T-002",80,75,3,2,1800000,"Ð—Ð°ÐºÑ€Ñ‹Ñ‚Ð°","DOC-SHIP-T-0821-01","2026-08-21T10:30:00Z"],
-    ["SHIP-T-0821-02","PROD-T-0821","OBJ-T-001",50,45,5,0,1200000,"Ð—Ð°ÐºÑ€Ñ‹Ñ‚Ð°","DOC-SHIP-T-0821-02","2026-08-21T10:45:00Z"],
-  ];
-  await env.DB.batch(shipments.map(row=>env.DB.prepare("INSERT OR IGNORE INTO food_shipments (id,production_id,destination_object_id,shipped_portions,consumed_portions,returned_portions,written_off_portions,revenue_minor,status,document_id,shipped_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const checks=[
-    ["FOOD-CHECK-T-001","Ð¡Ñ€Ð¾ÐºÐ¸ Ð¸ Ð¼Ð°Ñ€ÐºÐ¸Ñ€Ð¾Ð²ÐºÐ°","PRJ-T-KITCHEN","2026-08-21T06:00:00Z","Ð¡Ð¾Ð¾Ñ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚","","Ð¤Ð¾Ñ‚Ð¾ Ð¶ÑƒÑ€Ð½Ð°Ð»Ð° T-0821 Ð¸ Ð¿Ð°Ñ€Ñ‚Ð¸Ð¸ BATCH-T-021-02","Ð—Ð°ÐºÑ€Ñ‹Ñ‚Ð°"],
-    ["FOOD-CHECK-T-002","Ð¢ÐµÐ¼Ð¿ÐµÑ€Ð°Ñ‚ÑƒÑ€Ð° Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸Ñ","PRJ-T-KITCHEN","2026-08-21T12:00:00Z","Ð—Ð°Ð¼ÐµÑ‡Ð°Ð½Ð¸Ðµ","ÐšÑ€Ð°Ñ‚ÐºÐ¾Ð²Ñ€ÐµÐ¼ÐµÐ½Ð½Ð¾Ðµ Ð¾Ñ‚ÐºÐ»Ð¾Ð½ÐµÐ½Ð¸Ðµ +6Â°C Ð² Ñ…Ð¾Ð»Ð¾Ð´Ð¸Ð»ÑŒÐ½Ð¸ÐºÐµ 2","Ð—Ð°Ð¿Ð¸ÑÑŒ Ð´Ð°Ñ‚Ñ‡Ð¸ÐºÐ° T-SENSOR-02; Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ°, Ð½Ðµ Ð²Ñ‹Ð²Ð¾Ð´ Ð¾ Ð²Ð¸Ð½Ð¾Ð²Ð½Ð¸ÐºÐµ","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð°"],
-  ];
-  await env.DB.batch(checks.map(row=>env.DB.prepare("INSERT OR IGNORE INTO food_checks (id,check_type,object_entity_id,checked_at,result,violation,evidence,status) VALUES (?,?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO financial_operations (id,operation_date,period,direction,amount_minor,category,report_class,counterparty_entity_id,contract_id,document_id,project_entity_id,legal_entity_id,object_entity_id,cfr_entity_id,bank_operation_ref,operation_kind,source_system,source_file,source_sheet,source_ref,data_quality,status,created_by) VALUES ('FIN-TEST-FOOD-REV-0821','2026-08-21','2026-08','ÐŸÐ¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ðµ',3000000,'Ð’Ñ‹Ñ€ÑƒÑ‡ÐºÐ° ÐºÑƒÑ…Ð½Ð¸ Â· Ñ‚ÐµÑÑ‚','Ð”Ð¾Ñ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£','PRJ-T-KITCHEN','','DOC-SHIP-T-0821','PRJ-T-KITCHEN','ORG-T-001','OBJ-T-002','CFR-T-KITCHEN','BANK-TEST-FOOD-REV','SYNTHETIC_TRACE','SYNTHETIC_FOOD_TEST','â€”','â€”','SHIP-T-0821-01..02','Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð²Ñ‹Ñ€ÑƒÑ‡ÐºÐ° ÐºÑƒÑ…Ð½Ð¸; Ð½Ðµ Ð±Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ¸Ð¹ Ñ„Ð°ÐºÑ‚','Ð Ð°Ð·Ð½ÐµÑÐµÐ½Ð¾','system-food-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO financial_operations (id,operation_date,period,direction,amount_minor,category,report_class,counterparty_entity_id,contract_id,document_id,project_entity_id,legal_entity_id,object_entity_id,cfr_entity_id,bank_operation_ref,operation_kind,source_system,source_file,source_sheet,source_ref,data_quality,status,created_by) VALUES ('FIN-TEST-FOOD-COST-0821','2026-08-21','2026-08','Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ',1200000,'Ð¡ÐµÐ±ÐµÑÑ‚Ð¾Ð¸Ð¼Ð¾ÑÑ‚ÑŒ Ð¿Ñ€Ð¾Ð´ÑƒÐºÑ‚Ð¾Ð² Â· Ñ‚ÐµÑÑ‚','Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£','SUP-T-FOOD-001','DOG-SUP-T-FOOD-001','ACT-T-FOOD-021','PRJ-T-KITCHEN','ORG-T-001','OBJ-T-002','CFR-T-KITCHEN','BANK-TEST-FOOD-COST','SYNTHETIC_TRACE','SYNTHETIC_FOOD_TEST','â€”','â€”','PROD-T-0821','Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÑÐµÐ±ÐµÑÑ‚Ð¾Ð¸Ð¼Ð¾ÑÑ‚ÑŒ; Ð½Ðµ Ð±Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ¸Ð¹ Ñ„Ð°ÐºÑ‚','Ð Ð°Ð·Ð½ÐµÑÐµÐ½Ð¾','system-food-seed')"),
-  ]);
-}
-
-async function seedSafety(){
-  const entitiesToAdd=[
-    ["EMP-T-SAFE-001","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","ÐžÑ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹ Ð¿Ð¾ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","EMPLOYEE-SAFETY-001","Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚ÑŒ"],
-    ["EMP-T-GUARD-001","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº Ð¾Ñ…Ñ€Ð°Ð½Ñ‹ â„–1","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","EMPLOYEE-GUARD-001","Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚ÑŒ"],
-    ["SUP-T-SAFE-001","ÐžÑ€Ð³Ð°Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ","ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº Ð¸Ð½Ð¶ÐµÐ½ÐµÑ€Ð½Ñ‹Ñ… ÑÐ¸ÑÑ‚ÐµÐ¼ â„–1","ÐÐºÑ‚Ð¸Ð²Ð½Ð°","SUPPLIER-SAFETY-001","Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚ÑŒ"],
-  ];
-  await env.DB.batch(entitiesToAdd.map(row=>env.DB.prepare("INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES (?,?,?,?,'SYNTHETIC_SAFETY_TEST',?,'Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ°',?,'{}','system-safety-seed')").bind(...row)));
-  const systems=[
-    ["SAFE-SYS-T-FIRE-01","ÐŸÐ¾Ð¶Ð°Ñ€Ð½Ð°Ñ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚ÑŒ","ÐÐŸÐ¡ Ð¸ Ð´Ñ‹Ð¼Ð¾ÑƒÐ´Ð°Ð»ÐµÐ½Ð¸Ðµ Â· ÐºÐ¾Ñ€Ð¿ÑƒÑ 1","OBJ-T-001","SCHEME-T-FIRE-01","JOURNAL-T-FIRE-0826","EMP-T-SAFE-001","Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚","SYNTHETIC_SAFETY_TEST"],
-    ["SAFE-SYS-T-ALERT-01","ÐžÐ¿Ð¾Ð²ÐµÑ‰ÐµÐ½Ð¸Ðµ","Ð¡ÐžÐ£Ð­ Â· ÐºÐ¾Ñ€Ð¿ÑƒÑ 1","OBJ-T-001","SCHEME-T-ALERT-01","JOURNAL-T-ALERT-0826","EMP-T-SAFE-001","Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚","SYNTHETIC_SAFETY_TEST"],
-    ["SAFE-SYS-T-ACS-01","Ð¡ÐšÐ£Ð”","ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð° Â· Ð³Ð»Ð°Ð²Ð½Ñ‹Ð¹ Ð²Ñ…Ð¾Ð´","OBJ-T-002","SCHEME-T-ACS-01","JOURNAL-T-ACS-0826","EMP-T-SAFE-001","ÐžÐ³Ñ€Ð°Ð½Ð¸Ñ‡ÐµÐ½Ð¾","SYNTHETIC_SAFETY_TEST"],
-    ["SAFE-SYS-T-CCTV-01","ÐšÐ°Ð¼ÐµÑ€Ñ‹","Ð’Ð¸Ð´ÐµÐ¾Ð½Ð°Ð±Ð»ÑŽÐ´ÐµÐ½Ð¸Ðµ Â· Ð¿ÐµÑ€Ð¸Ð¼ÐµÑ‚Ñ€","OBJ-T-002","SCHEME-T-CCTV-01","JOURNAL-T-CCTV-0826","EMP-T-SAFE-001","Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚","SYNTHETIC_SAFETY_TEST"],
-    ["SAFE-SYS-T-GUARD-01","ÐžÑ…Ñ€Ð°Ð½Ð°","ÐŸÐ¾ÑÑ‚ Ð¾Ñ…Ñ€Ð°Ð½Ñ‹ Â· Ð³Ð»Ð°Ð²Ð½Ñ‹Ð¹ Ð²Ñ…Ð¾Ð´","OBJ-T-002","SCHEME-T-GUARD-01","JOURNAL-T-GUARD-0826","EMP-T-SAFE-001","Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚","SYNTHETIC_SAFETY_TEST"],
-  ];
-  await env.DB.batch(systems.map(row=>env.DB.prepare("INSERT OR IGNORE INTO safety_systems (id,system_type,name,object_entity_id,scheme_ref,journal_ref,responsible_entity_id,status,source_type) VALUES (?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const equipment=[
-    ["SAFE-EQ-T-001","SAFE-SYS-T-FIRE-01","Ð¨Ð»ÐµÐ¹Ñ„ Ð´Ñ‹Ð¼Ð¾Ð²Ñ‹Ñ… Ð¸Ð·Ð²ÐµÑ‰Ð°Ñ‚ÐµÐ»ÐµÐ¹ â„–4","INV-SAFE-T-001","ÐšÐ¾Ñ€Ð¿ÑƒÑ 1 Â· ÑÑ‚Ð°Ð¶ 2","SUP-T-SAFE-001","Ð’Ñ‹ÑÐ¾ÐºÐ°Ñ","2026-09-20","Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚"],
-    ["SAFE-EQ-T-002","SAFE-SYS-T-ACS-01","ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ð»ÐµÑ€ Ð´Ð²ÐµÑ€Ð¸ Ð³Ð»Ð°Ð²Ð½Ð¾Ð³Ð¾ Ð²Ñ…Ð¾Ð´Ð°","INV-SAFE-T-002","Ð¨ÐºÐ¾Ð»Ð° Â· Ð³Ð»Ð°Ð²Ð½Ñ‹Ð¹ Ð²Ñ…Ð¾Ð´","SUP-T-SAFE-001","Ð’Ñ‹ÑÐ¾ÐºÐ°Ñ","2026-08-28","ÐžÐ³Ñ€Ð°Ð½Ð¸Ñ‡ÐµÐ½Ð¾"],
-    ["SAFE-EQ-T-003","SAFE-SYS-T-CCTV-01","ÐšÐ°Ð¼ÐµÑ€Ð° Ð²Ñ…Ð¾Ð´Ð½Ð¾Ð¹ Ð³Ñ€ÑƒÐ¿Ð¿Ñ‹","INV-SAFE-T-003","Ð¨ÐºÐ¾Ð»Ð° Â· Ð³Ð»Ð°Ð²Ð½Ñ‹Ð¹ Ð²Ñ…Ð¾Ð´","SUP-T-SAFE-001","Ð¡Ñ€ÐµÐ´Ð½ÑÑ","2026-09-05","Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚"],
-    ["SAFE-EQ-T-004","SAFE-SYS-T-ALERT-01","Ð ÐµÑ‡ÐµÐ²Ð¾Ð¹ Ð¾Ð¿Ð¾Ð²ÐµÑ‰Ð°Ñ‚ÐµÐ»ÑŒ â„–7","INV-SAFE-T-004","ÐšÐ¾Ñ€Ð¿ÑƒÑ 1 Â· Ñ…Ð¾Ð»Ð»","SUP-T-SAFE-001","Ð’Ñ‹ÑÐ¾ÐºÐ°Ñ","2026-08-26","Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚"],
-  ];
-  await env.DB.batch(equipment.map(row=>env.DB.prepare("INSERT OR IGNORE INTO safety_equipment (id,system_id,name,inventory_number,location,contractor_id,criticality,next_check_at,status) VALUES (?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const checks=[
-    ["SAFE-CHK-T-090","SAFE-EQ-T-001","OBJ-T-001","ÐŸÐ»Ð°Ð½Ð¾Ð²Ð°Ñ","2026-08-20","2026-08-20T08:30:00Z","ÐÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ","ÐÐºÑ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ â„–0090: Ð¾Ð±Ñ€Ñ‹Ð² ÑˆÐ»ÐµÐ¹Ñ„Ð° 4","EMP-T-SAFE-001","Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°"],
-    ["SAFE-CHK-T-091","SAFE-EQ-T-003","OBJ-T-002","Ð•Ð¶ÐµÐ¼ÐµÑÑÑ‡Ð½Ð°Ñ","2026-08-21","2026-08-21T07:00:00Z","Ð¡Ð¾Ð¾Ñ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚","ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒÐ½Ñ‹Ð¹ ÐºÐ°Ð´Ñ€ Ð¸ Ð·Ð°Ð¿Ð¸ÑÑŒ Ð¶ÑƒÑ€Ð½Ð°Ð»Ð°","EMP-T-SAFE-001","Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°"],
-    ["SAFE-CHK-T-092","SAFE-EQ-T-004","OBJ-T-001","ÐŸÐ»Ð°Ð½Ð¾Ð²Ð°Ñ","2026-08-26","","ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° ÑƒÑ€Ð¾Ð²Ð½Ñ Ð¸ Ñ€Ð°Ð·Ð±Ð¾Ñ€Ñ‡Ð¸Ð²Ð¾ÑÑ‚Ð¸ Ð¾Ð¿Ð¾Ð²ÐµÑ‰ÐµÐ½Ð¸Ñ","EMP-T-SAFE-001","Ð—Ð°Ð¿Ð»Ð°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð°"],
-  ];
-  await env.DB.batch(checks.map(row=>env.DB.prepare("INSERT OR IGNORE INTO safety_checks (id,equipment_id,object_entity_id,check_type,scheduled_at,checked_at,result,evidence,responsible_entity_id,status) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const faults=[
-    ["SAFE-FLT-T-031","SAFE-CHK-T-090","SAFE-EQ-T-001","Ð’Ñ‹ÑÐ¾ÐºÐ°Ñ","ÐžÐ±Ñ€Ñ‹Ð² ÑˆÐ»ÐµÐ¹Ñ„Ð° Ð´Ñ‹Ð¼Ð¾Ð²Ñ‹Ñ… Ð¸Ð·Ð²ÐµÑ‰Ð°Ñ‚ÐµÐ»ÐµÐ¹ â„–4","2026-08-20T08:35:00Z","Ð£ÑÑ‚Ñ€Ð°Ð½ÐµÐ½Ð°"],
-    ["SAFE-FLT-T-032","SAFE-CHK-T-091","SAFE-EQ-T-002","Ð¡Ñ€ÐµÐ´Ð½ÑÑ","ÐÐµÑÑ‚Ð°Ð±Ð¸Ð»ÑŒÐ½Ð¾Ðµ Ñ‡Ñ‚ÐµÐ½Ð¸Ðµ ÐºÐ°Ñ€Ñ‚Ñ‹ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð°; Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ Ð´Ð¸Ð°Ð³Ð½Ð¾ÑÑ‚Ð¸ÐºÐ°","2026-08-21T07:20:00Z","Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ"],
-  ];
-  await env.DB.batch(faults.map(row=>env.DB.prepare("INSERT OR IGNORE INTO safety_faults (id,check_id,equipment_id,severity,description,detected_at,status) VALUES (?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO tasks (title,owner,due_date,priority,status,source_type,source_id,description,assignee_entity_id,kind,automation_key,requires_approval,result,result_evidence,completed_at,created_by) VALUES ('Ð£ÑÑ‚Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ Ð½ÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ Ð¿Ð¾Ð¶Ð°Ñ€Ð½Ð¾Ð³Ð¾ ÑˆÐ»ÐµÐ¹Ñ„Ð°','ÐžÑ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹ Ð¿Ð¾ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸','2026-08-20','Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹','Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°','ÐÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸','SAFE-FLT-T-031','ÐžÐ±Ñ€Ñ‹Ð² ÑˆÐ»ÐµÐ¹Ñ„Ð° 4 Ð¿Ð¾ Ð°ÐºÑ‚Ñƒ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ â„–0090','EMP-T-SAFE-001','ÐÐ²Ñ‚Ð¾Ð·Ð°Ð´Ð°Ñ‡Ð°','SAFETY_FAULT:SAFE-FLT-T-031',1,'Ð¨Ð»ÐµÐ¹Ñ„ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½, ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒÐ½Ñ‹Ð¹ Ñ‚ÐµÑÑ‚ Ð¿Ñ€Ð¾Ð¹Ð´ÐµÐ½','ÐÐºÑ‚ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð½Ñ‹Ñ… Ñ€Ð°Ð±Ð¾Ñ‚ â„–0031','2026-08-20T15:40:00Z','system-safety-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO tasks (title,owner,due_date,priority,status,source_type,source_id,description,assignee_entity_id,kind,automation_key,requires_approval,created_by) VALUES ('Ð”Ð¸Ð°Ð³Ð½Ð¾ÑÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ð»ÐµÑ€ Ð¡ÐšÐ£Ð”','ÐžÑ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹ Ð¿Ð¾ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸','2026-08-22','Ð¡Ñ€ÐµÐ´Ð½Ð¸Ð¹','Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ','ÐÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸','SAFE-FLT-T-032','ÐÐµÑÑ‚Ð°Ð±Ð¸Ð»ÑŒÐ½Ð¾Ðµ Ñ‡Ñ‚ÐµÐ½Ð¸Ðµ ÐºÐ°Ñ€Ñ‚Ñ‹ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð°; Ð¿Ñ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ Ð¶ÑƒÑ€Ð½Ð°Ð» Ð¸ ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ð»ÐµÑ€','EMP-T-SAFE-001','ÐÐ²Ñ‚Ð¾Ð·Ð°Ð´Ð°Ñ‡Ð°','SAFETY_FAULT:SAFE-FLT-T-032',1,'system-safety-seed')"),
-  ]);
-  await env.DB.batch([
-    env.DB.prepare("UPDATE safety_faults SET related_task_id=(SELECT id FROM tasks WHERE automation_key='SAFETY_FAULT:SAFE-FLT-T-031') WHERE id='SAFE-FLT-T-031'"),
-    env.DB.prepare("UPDATE safety_faults SET related_task_id=(SELECT id FROM tasks WHERE automation_key='SAFETY_FAULT:SAFE-FLT-T-032') WHERE id='SAFE-FLT-T-032'"),
-  ]);
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO safety_incidents (id,object_entity_id,system_id,happened_at,category,severity,description,response,status) VALUES ('SAFE-INC-T-014','OBJ-T-002','SAFE-SYS-T-ACS-01','2026-08-19T17:42:00Z','Ð¡ÐšÐ£Ð”','Ð¡Ñ€ÐµÐ´Ð½ÑÑ','Ð”Ð²ÐµÑ€ÑŒ ÑƒÐ´ÐµÑ€Ð¶Ð¸Ð²Ð°Ð»Ð°ÑÑŒ Ð¾Ñ‚ÐºÑ€Ñ‹Ñ‚Ð¾Ð¹ 74 ÑÐµÐºÑƒÐ½Ð´Ñ‹','ÐžÑ…Ñ€Ð°Ð½Ð° Ð¿Ñ€Ð¾Ð²ÐµÑ€Ð¸Ð»Ð° Ð·Ð¾Ð½Ñƒ, ÑÐ¾Ð±Ñ‹Ñ‚Ð¸Ðµ Ð·Ð°Ð¿Ð¸ÑÐ°Ð½Ð¾; Ð¿Ñ€Ð¸Ð·Ð½Ð°ÐºÐ¾Ð² ÑƒÑ‰ÐµÑ€Ð±Ð° Ð½ÐµÑ‚','Ð—Ð°ÐºÑ€Ñ‹Ñ‚')"),
-    env.DB.prepare("INSERT OR IGNORE INTO safety_repairs (id,fault_id,contractor_id,action_type,started_at,completed_at,result,act_document_id,cost_minor,payment_operation_id,status) VALUES ('SAFE-REP-T-031','SAFE-FLT-T-031','SUP-T-SAFE-001','Ð ÐµÐ¼Ð¾Ð½Ñ‚','2026-08-20T10:00:00Z','2026-08-20T15:30:00Z','ÐšÐ°Ð±ÐµÐ»ÑŒ Ð·Ð°Ð¼ÐµÐ½Ñ‘Ð½, ÑˆÐ»ÐµÐ¹Ñ„ Ð¿Ñ€Ð¾Ñ‚ÐµÑÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ð½','ACT-SAFE-T-031',1850000,'FIN-TEST-SAFE-031','Ð—Ð°Ð²ÐµÑ€ÑˆÑ‘Ð½')"),
-    env.DB.prepare("INSERT OR IGNORE INTO safety_repairs (id,fault_id,contractor_id,action_type,started_at,completed_at,result,act_document_id,cost_minor,payment_operation_id,status) VALUES ('SAFE-REP-T-032','SAFE-FLT-T-032','SUP-T-SAFE-001','Ð”Ð¸Ð°Ð³Ð½Ð¾ÑÑ‚Ð¸ÐºÐ°','2026-08-21T09:00:00Z','','Ð Ð°Ð±Ð¾Ñ‚Ð° Ð½Ð°Ñ‡Ð°Ñ‚Ð°','',650000,'','Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ')"),
-    env.DB.prepare("INSERT OR IGNORE INTO safety_next_checks (id,equipment_id,source_repair_id,scheduled_at,check_type,responsible_entity_id,status) VALUES ('SAFE-NEXT-T-031','SAFE-EQ-T-001','SAFE-REP-T-031','2026-09-20','ÐŸÐ¾ÑÐ»Ðµ Ñ€ÐµÐ¼Ð¾Ð½Ñ‚Ð°','EMP-T-SAFE-001','Ð—Ð°Ð¿Ð»Ð°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð°')"),
-    env.DB.prepare("INSERT OR IGNORE INTO safety_guard_shifts (id,object_entity_id,employee_entity_id,post,started_at,ended_at,journal_ref,status) VALUES ('SAFE-GUARD-T-0821','OBJ-T-002','EMP-T-GUARD-001','Ð“Ð»Ð°Ð²Ð½Ñ‹Ð¹ Ð²Ñ…Ð¾Ð´','2026-08-21T06:45:00Z','2026-08-21T19:00:00Z','JOURNAL-T-GUARD-0826','ÐÐ° Ð¿Ð¾ÑÑ‚Ñƒ')"),
-    env.DB.prepare("INSERT OR IGNORE INTO financial_operations (id,operation_date,period,direction,amount_minor,category,report_class,counterparty_entity_id,contract_id,document_id,project_entity_id,legal_entity_id,object_entity_id,cfr_entity_id,bank_operation_ref,operation_kind,source_system,source_file,source_sheet,source_ref,data_quality,status,created_by) VALUES ('FIN-TEST-SAFE-031','2026-08-20','2026-08','Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ',1850000,'Ð ÐµÐ¼Ð¾Ð½Ñ‚ ÑÐ¸ÑÑ‚ÐµÐ¼ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸ Â· Ñ‚ÐµÑÑ‚','Ð Ð°ÑÑ…Ð¾Ð´Ñ‹ ÐžÐŸÐ¸Ð£','SUP-T-SAFE-001','DOG-SUP-T-SAFE-001','ACT-SAFE-T-031','PRJ-T-004','ORG-T-001','OBJ-T-001','CFR-T-001','BANK-TEST-SAFE-031','SYNTHETIC_TRACE','SYNTHETIC_SAFETY_TEST','â€”','â€”','ÐÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ â„–0031 â†’ Ñ€ÐµÐ¼Ð¾Ð½Ñ‚ â„–0031','Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð¾Ð¿Ð»Ð°Ñ‚Ð°; Ð½Ðµ Ð±Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ¸Ð¹ Ñ„Ð°ÐºÑ‚','Ð Ð°Ð·Ð½ÐµÑÐµÐ½Ð¾','system-safety-seed')"),
-  ]);
-  await env.DB.batch([
-    env.DB.prepare("UPDATE entities SET display_name='ÐžÑ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹ Ð¿Ð¾ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸' WHERE id='EMP-T-SAFE-001' AND created_by='system-safety-seed' AND display_name='ÐžÑ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹ Ð¿Ð¾ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸ T-S01'"),
-    env.DB.prepare("UPDATE entities SET display_name='Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº Ð¾Ñ…Ñ€Ð°Ð½Ñ‹ â„–1' WHERE id='EMP-T-GUARD-001' AND created_by='system-safety-seed' AND display_name='Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº Ð¾Ñ…Ñ€Ð°Ð½Ñ‹ T-G01'"),
-    env.DB.prepare("UPDATE entities SET display_name='ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº Ð¸Ð½Ð¶ÐµÐ½ÐµÑ€Ð½Ñ‹Ñ… ÑÐ¸ÑÑ‚ÐµÐ¼ â„–1' WHERE id='SUP-T-SAFE-001' AND created_by='system-safety-seed' AND display_name='ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº Ð¸Ð½Ð¶ÐµÐ½ÐµÑ€Ð½Ñ‹Ñ… ÑÐ¸ÑÑ‚ÐµÐ¼ T-S01'"),
-    env.DB.prepare("UPDATE safety_checks SET evidence='ÐÐºÑ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ â„–0090: Ð¾Ð±Ñ€Ñ‹Ð² ÑˆÐ»ÐµÐ¹Ñ„Ð° 4' WHERE id='SAFE-CHK-T-090' AND evidence='ÐÐºÑ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ SAFE-CHECK-ACT-T-090: Ð¾Ð±Ñ€Ñ‹Ð² ÑˆÐ»ÐµÐ¹Ñ„Ð° 4'"),
-    env.DB.prepare("UPDATE safety_checks SET evidence='ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒÐ½Ñ‹Ð¹ ÐºÐ°Ð´Ñ€ Ð¸ Ð·Ð°Ð¿Ð¸ÑÑŒ Ð¶ÑƒÑ€Ð½Ð°Ð»Ð°' WHERE id='SAFE-CHK-T-091' AND evidence='ÐšÐ°Ð´Ñ€ Ñ‚ÐµÑÑ‚Ð° T-CCTV-0821 Ð¸ Ð·Ð°Ð¿Ð¸ÑÑŒ Ð¶ÑƒÑ€Ð½Ð°Ð»Ð°'"),
-    env.DB.prepare("UPDATE tasks SET title='Ð£ÑÑ‚Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ Ð½ÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ Ð¿Ð¾Ð¶Ð°Ñ€Ð½Ð¾Ð³Ð¾ ÑˆÐ»ÐµÐ¹Ñ„Ð°' WHERE automation_key='SAFETY_FAULT:SAFE-FLT-T-031' AND created_by='system-safety-seed' AND title='Ð£ÑÑ‚Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ Ð½ÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ Â· SAFE-EQ-T-001'"),
-    env.DB.prepare("UPDATE tasks SET description='ÐžÐ±Ñ€Ñ‹Ð² ÑˆÐ»ÐµÐ¹Ñ„Ð° 4 Ð¿Ð¾ Ð°ÐºÑ‚Ñƒ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ â„–0090' WHERE automation_key='SAFETY_FAULT:SAFE-FLT-T-031' AND created_by='system-safety-seed' AND description='ÐžÐ±Ñ€Ñ‹Ð² ÑˆÐ»ÐµÐ¹Ñ„Ð° 4 Ð¿Ð¾ Ð°ÐºÑ‚Ñƒ SAFE-CHECK-ACT-T-090'"),
-    env.DB.prepare("UPDATE tasks SET result_evidence='ÐÐºÑ‚ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð½Ñ‹Ñ… Ñ€Ð°Ð±Ð¾Ñ‚ â„–0031' WHERE automation_key='SAFETY_FAULT:SAFE-FLT-T-031' AND created_by='system-safety-seed' AND result_evidence='ACT-SAFE-T-031'"),
-    env.DB.prepare("UPDATE financial_operations SET source_ref='ÐÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ â„–0031 â†’ Ñ€ÐµÐ¼Ð¾Ð½Ñ‚ â„–0031' WHERE id='FIN-TEST-SAFE-031' AND created_by='system-safety-seed' AND source_ref='SAFE-FLT-T-031 â†’ SAFE-REP-T-031'"),
-  ]);
-}
-
-async function seedMedical(){
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES ('EMP-T-MED-001','Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº','ÐœÐµÐ´Ñ€Ð°Ð±Ð¾Ñ‚Ð½Ð¸Ðº T-MED-01','ÐÐºÑ‚Ð¸Ð²Ð½Ð°','SYNTHETIC_MEDICAL_TEST','EMPLOYEE-MEDICAL-001','Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ°','ÐœÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¾Ðµ ÑÐ¾Ð¿Ñ€Ð¾Ð²Ð¾Ð¶Ð´ÐµÐ½Ð¸Ðµ','{}','system-medical-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO medical_access_grants (id,principal_type,principal_ref,scope,granted_by,valid_until,status) VALUES ('MED-GRANT-T-ROLE-01','Ð Ð¾Ð»ÑŒ','ROLE:MEDICAL','MEDICAL_FULL_SYNTHETIC','system-medical-seed','2027-08-21','ÐÐºÑ‚Ð¸Ð²ÐµÐ½')"),
-  ]);
-  const documents=[
-    ["MED-DOC-T-CH-014","CHD-T-014","Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº","Ð¡Ð¿Ñ€Ð°Ð²ÐºÐ° Ð´Ð¾Ð¿ÑƒÑÐºÐ°","PROTECTED:SYNTHETIC:MED-DOC-T-CH-014","2026-08-01","2027-07-31","Ð”ÐµÐ¹ÑÑ‚Ð²ÑƒÐµÑ‚","PROTECTED_SYNTHETIC","Ð”Ð¾Ð¿ÑƒÑÐº Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½; Ð´ÐµÐ¹ÑÑ‚Ð²ÑƒÐµÑ‚ Ð¾Ð³Ñ€Ð°Ð½Ð¸Ñ‡ÐµÐ½Ð¸Ðµ Ð½Ð°Ð³Ñ€ÑƒÐ·ÐºÐ¸","2026-08-02T09:00:00Z"],
-    ["MED-DOC-T-EMP-063","EMP-T-063","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","ÐœÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¸Ð¹ Ð´Ð¾Ð¿ÑƒÑÐº","PROTECTED:SYNTHETIC:MED-DOC-T-EMP-063","2026-06-01","2027-05-31","Ð”ÐµÐ¹ÑÑ‚Ð²ÑƒÐµÑ‚","PROTECTED_SYNTHETIC","ÐžÐ±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ð¹ Ð´Ð¾Ð¿ÑƒÑÐº Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½","2026-06-02T09:00:00Z"],
-  ];
-  await env.DB.batch(documents.map(row=>env.DB.prepare("INSERT OR IGNORE INTO medical_documents (id,subject_entity_id,subject_type,document_type,document_ref,valid_from,valid_until,status,storage_class,minimum_summary,confirmed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.prepare("INSERT OR IGNORE INTO medical_restrictions (id,subject_entity_id,record_id,category,limitation,valid_until,action_scope,status) VALUES ('MED-LIMIT-T-014','CHD-T-014','MED-DOC-T-CH-014','Ð¤Ð¸Ð·Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð½Ð°Ð³Ñ€ÑƒÐ·ÐºÐ°','Ð¢Ð¾Ð»ÑŒÐºÐ¾ Ñ‰Ð°Ð´ÑÑ‰Ð¸Ð¹ Ñ€ÐµÐ¶Ð¸Ð¼ Ð¿Ð¾ Ð´ÐµÐ¹ÑÑ‚Ð²ÑƒÑŽÑ‰ÐµÐ¼Ñƒ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ñƒ','2027-07-31','ÐŸÐµÐ´Ð°Ð³Ð¾Ð³Ñƒ Ð¿ÐµÑ€ÐµÐ´Ð°Ñ‘Ñ‚ÑÑ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ñ€Ð°Ð·Ñ€ÐµÑˆÑ‘Ð½Ð½Ñ‹Ð¹ Ñ€ÐµÐ¶Ð¸Ð¼ Ð±ÐµÐ· Ð¼ÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¾Ð³Ð¾ Ð¾ÑÐ½Ð¾Ð²Ð°Ð½Ð¸Ñ','ÐÐºÑ‚Ð¸Ð²Ð½Ð¾')").run();
-  const cases=[
-    ["MED-CASE-T-021","CHD-T-014","Ð¡Ð»ÑƒÑ‡Ð°Ð¹ Ð² ÑƒÑ‡ÐµÐ±Ð½Ð¾Ðµ Ð²Ñ€ÐµÐ¼Ñ","2026-08-21T10:15:00Z","Ð¡Ñ€ÐµÐ´Ð½ÑÑ","Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒ ÑÐ¾ÑÑ‚Ð¾ÑÐ½Ð¸Ñ Ð¿Ð¾ ÑƒÑ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ð¾Ð¼Ñƒ Ð¿Ñ€Ð¾Ñ‚Ð¾ÐºÐ¾Ð»Ñƒ","EMP-T-MED-001","2026-08-21T18:00:00Z","Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ","",""],
-    ["MED-CASE-T-019","EMP-T-063","ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒ Ð´Ð¾Ð¿ÑƒÑÐºÐ°","2026-08-19T09:00:00Z","ÐÐ¸Ð·ÐºÐ°Ñ","Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐµÐ½, Ð¾Ð³Ñ€Ð°Ð½Ð¸Ñ‡ÐµÐ½Ð¸Ð¹ Ð´Ð»Ñ Ñ€Ð°Ð±Ð¾Ñ‚Ñ‹ Ð½Ðµ Ð¿ÐµÑ€ÐµÐ´Ð°Ñ‘Ñ‚ÑÑ","EMP-T-MED-001","2026-08-20T18:00:00Z","Ð—Ð°ÐºÑ€Ñ‹Ñ‚","2026-08-20T12:00:00Z","MED-CONF-T-019"],
-  ];
-  await env.DB.batch(cases.map(row=>env.DB.prepare("INSERT OR IGNORE INTO medical_cases (id,subject_entity_id,case_type,opened_at,severity,minimum_summary,responsible_entity_id,due_at,status,closed_at,confirmation_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.prepare("INSERT OR IGNORE INTO medical_incidents (id,case_id,happened_at,incident_type,minimum_facts,response_required,status) VALUES ('MED-INC-T-021','MED-CASE-T-021','2026-08-21T10:15:00Z','Ð¡Ð°Ð¼Ð¾Ñ‡ÑƒÐ²ÑÑ‚Ð²Ð¸Ðµ','Ð¡Ð¾Ð±Ñ‹Ñ‚Ð¸Ðµ Ð·Ð°Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¾ Ð² ÑƒÑ‡ÐµÐ±Ð½Ð¾Ðµ Ð²Ñ€ÐµÐ¼Ñ; Ð¿ÐµÑ€ÑÐ¾Ð½Ð°Ð»ÑŒÐ½Ñ‹Ðµ Ð¿Ð¾Ð´Ñ€Ð¾Ð±Ð½Ð¾ÑÑ‚Ð¸ Ð¼Ð¸Ð½Ð¸Ð¼Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½Ñ‹','ÐžÑÐ¼Ð¾Ñ‚Ñ€ Ð¿Ð¾ Ð¿Ñ€Ð¾Ñ‚Ð¾ÐºÐ¾Ð»Ñƒ, ÑÐ²ÑÐ·ÑŒ Ñ Ð·Ð°ÐºÐ¾Ð½Ð½Ñ‹Ð¼ Ð¿Ñ€ÐµÐ´ÑÑ‚Ð°Ð²Ð¸Ñ‚ÐµÐ»ÐµÐ¼ Ð¿Ð¾ ÑƒÑ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ð¾Ð¼Ñƒ ÐºÐ°Ð½Ð°Ð»Ñƒ','Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ')").run();
-  const actions=[
-    ["MED-ACT-T-021-01","MED-CASE-T-021","MED-INC-T-021","ÐŸÐµÑ€Ð²Ð¸Ñ‡Ð½Ñ‹Ð¹ Ð¾ÑÐ¼Ð¾Ñ‚Ñ€","EMP-T-MED-001","2026-08-21T10:30:00Z","2026-08-21T10:27:00Z","ÐžÑÐ¼Ð¾Ñ‚Ñ€ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½, Ð´Ð°Ð»ÑŒÐ½ÐµÐ¹ÑˆÐµÐµ Ð½Ð°Ð±Ð»ÑŽÐ´ÐµÐ½Ð¸Ðµ Ð½Ð°Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¾","MED-CONF-T-021-01","Ð’Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð¾"],
-    ["MED-ACT-T-021-02","MED-CASE-T-021","MED-INC-T-021","ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒ ÑÐ¾ÑÑ‚Ð¾ÑÐ½Ð¸Ñ","EMP-T-MED-001","2026-08-21T14:00:00Z","","","","Ð—Ð°Ð¿Ð»Ð°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¾"],
-    ["MED-ACT-T-019-01","MED-CASE-T-019","","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ð°","EMP-T-MED-001","2026-08-20T12:00:00Z","2026-08-20T12:00:00Z","Ð¡Ñ€Ð¾Ðº Ð¸ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ðµ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐµÐ½Ñ‹","MED-CONF-T-019","Ð’Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð¾"],
-  ];
-  await env.DB.batch(actions.map(row=>env.DB.prepare("INSERT OR IGNORE INTO medical_actions (id,case_id,incident_id,action_type,responsible_entity_id,due_at,completed_at,result,confirmation_ref,status) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-}
-
-async function seedAccounting(){
-  await env.DB.prepare("INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES ('EMP-T-ACC-001','Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº','Ð‘ÑƒÑ…Ð³Ð°Ð»Ñ‚ÐµÑ€ T-ACC-01','ÐÐºÑ‚Ð¸Ð²Ð½Ð°','SYNTHETIC_ACCOUNTING_TEST','EMPLOYEE-ACCOUNTING-001','Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ°','Ð‘ÑƒÑ…Ð³Ð°Ð»Ñ‚ÐµÑ€Ð¸Ñ','{}','system-accounting-seed')").run();
-  const documents=[
-    ["ACC-INV-T-031","Ð¡Ñ‡Ñ‘Ñ‚","0031","2026-08-20","SUP-T-SAFE-001","DOG-SUP-T-SAFE-001",1850000,308333,"FIN-TEST-SAFE-031","PROTECTED:SYNTHETIC:ACC-INV-T-031","ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¾ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","Ð­Ð”Ðž Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½","SYNTHETIC_ACCOUNTING_TEST","Ð¡Ð²ÑÐ·Ð°Ð½"],
-    ["ACC-ACT-T-031","ÐÐºÑ‚","ACT-SAFE-T-031","2026-08-20","SUP-T-SAFE-001","DOG-SUP-T-SAFE-001",1850000,308333,"FIN-TEST-SAFE-031","PROTECTED:SYNTHETIC:ACT-SAFE-T-031","ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¾ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","Ð­Ð”Ðž Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½","SYNTHETIC_ACCOUNTING_TEST","Ð¡Ð²ÑÐ·Ð°Ð½"],
-    ["ACC-UPD-T-088","Ð£ÐŸÐ”","0088","2026-08-09","SUP-T-022","DOG-SUP-T-022",48000000,8000000,"FIN-TEST-PROC-088","PROTECTED:SYNTHETIC:ACC-UPD-T-088","ÐÐ° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐµ","Ð­Ð”Ðž Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½","SYNTHETIC_ACCOUNTING_TEST","Ð¡Ð²ÑÐ·Ð°Ð½"],
-    ["ACC-RECEIPT-T-FOOD","Ð§ÐµÐº","0821","2026-08-20","SUP-T-FOOD-001","DOG-SUP-T-FOOD-001",1200000,200000,"FIN-TEST-FOOD-COST-0821","PROTECTED:SYNTHETIC:ACC-RECEIPT-T-FOOD","ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¾ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","ÐÐµ Ð¿Ñ€Ð¸Ð¼ÐµÐ½Ð¸Ð¼Ð¾","SYNTHETIC_ACCOUNTING_TEST","Ð¡Ð²ÑÐ·Ð°Ð½"],
-    ["ACC-WAY-T-FOOD","ÐÐ°ÐºÐ»Ð°Ð´Ð½Ð°Ñ","FOOD-WAY-021","2026-08-20","SUP-T-FOOD-001","DOG-SUP-T-FOOD-001",3200000,533333,"","PROTECTED:SYNTHETIC:ACC-WAY-T-FOOD","ÐÐ° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐµ","Ð­Ð”Ðž Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½","SYNTHETIC_ACCOUNTING_TEST","ÐÐµ Ñ…Ð²Ð°Ñ‚Ð°ÐµÑ‚ ÑÑ‡Ñ‘Ñ‚Ð°"],
-  ];
-  await env.DB.batch(documents.map(row=>env.DB.prepare("INSERT OR IGNORE INTO accounting_documents (id,document_type,number,document_date,counterparty_entity_id,contract_id,amount_minor,vat_minor,payment_operation_id,file_ref,signature_status,edo_status,source_type,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const links=[
-    ["ACC-LINK-T-031","ACC-INV-T-031","ACC-ACT-T-031","Ð¡Ñ‡Ñ‘Ñ‚ â†’ Ð°ÐºÑ‚","ÐžÐ´Ð¸Ð½Ð°ÐºÐ¾Ð²Ñ‹Ðµ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€, ÑÑƒÐ¼Ð¼Ð° Ð¸ Ð¿Ð¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº"],
-    ["ACC-LINK-T-FOOD","ACC-WAY-T-FOOD","ACC-RECEIPT-T-FOOD","ÐŸÐ¾ÑÑ‚Ð°Ð²ÐºÐ° â†’ Ñ‡ÐµÐº","ÐžÐ±Ñ‰Ð°Ñ Ð·Ð°ÐºÑƒÐ¿ÐºÐ° REQ-T-FOOD-021; ÑÑƒÐ¼Ð¼Ñ‹ Ñ€Ð°Ð·Ð»Ð¸Ñ‡Ð°ÑŽÑ‚ÑÑ Ð¸ Ñ‚Ñ€ÐµÐ±ÑƒÑŽÑ‚ ÑÑ‡Ñ‘Ñ‚Ð°"],
-  ];
-  await env.DB.batch(links.map(row=>env.DB.prepare("INSERT OR IGNORE INTO accounting_document_links (id,from_document_id,to_document_id,relation_type,evidence) VALUES (?,?,?,?,?)").bind(...row)));
-  const checks=[
-    ["ACC-COMP-T-031","FIN-TEST-SAFE-031","DOG-SUP-T-SAFE-001",'["Ð¡Ñ‡Ñ‘Ñ‚","ÐÐºÑ‚"]','[]',"EMP-T-ACC-001","ÐšÐ¾Ð¼Ð¿Ð»ÐµÐºÑ‚Ð½Ð¾","2026-08-21T08:00:00Z"],
-    ["ACC-COMP-T-088","FIN-TEST-PROC-088","DOG-SUP-T-022",'["Ð£ÐŸÐ”"]','[]',"EMP-T-ACC-001","ÐšÐ¾Ð¼Ð¿Ð»ÐµÐºÑ‚Ð½Ð¾","2026-08-21T08:05:00Z"],
-    ["ACC-COMP-T-FOOD","FIN-TEST-FOOD-COST-0821","DOG-SUP-T-FOOD-001",'["Ð¡Ñ‡Ñ‘Ñ‚","ÐÐ°ÐºÐ»Ð°Ð´Ð½Ð°Ñ"]','["Ð¡Ñ‡Ñ‘Ñ‚"]',"EMP-T-ACC-001","ÐÐµ ÐºÐ¾Ð¼Ð¿Ð»ÐµÐºÑ‚Ð½Ð¾","2026-08-21T08:10:00Z"],
-  ];
-  await env.DB.batch(checks.map(row=>env.DB.prepare("INSERT OR IGNORE INTO accounting_completeness_checks (id,operation_id,contract_id,required_types,missing_types,owner_entity_id,status,checked_at) VALUES (?,?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.prepare("INSERT OR IGNORE INTO tasks (title,owner,due_date,priority,status,source_type,source_id,description,assignee_entity_id,kind,automation_key,requires_approval,created_by) VALUES ('ÐŸÐ¾Ð»ÑƒÑ‡Ð¸Ñ‚ÑŒ Ð½ÐµÐ´Ð¾ÑÑ‚Ð°ÑŽÑ‰Ð¸Ð¹ ÑÑ‡Ñ‘Ñ‚ Ð¿Ð¾ ÐºÑƒÑ…Ð½Ðµ','Ð‘ÑƒÑ…Ð³Ð°Ð»Ñ‚ÐµÑ€','2026-08-22','Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹','Ð’Ñ…Ð¾Ð´ÑÑ‰Ð¸Ðµ','ÐšÐ¾Ð¼Ð¿Ð»ÐµÐºÑ‚Ð½Ð¾ÑÑ‚ÑŒ Ð¿ÐµÑ€Ð²Ð¸Ñ‡ÐºÐ¸','ACC-COMP-T-FOOD','Ð”Ð»Ñ FIN-TEST-FOOD-COST-0821 Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚ ÑÑ‡Ñ‘Ñ‚; Ð½Ð°ÐºÐ»Ð°Ð´Ð½Ð°Ñ Ð¸ Ñ‡ÐµÐº ÑƒÐ¶Ðµ Ð·Ð°Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ñ‹','EMP-T-ACC-001','ÐÐ²Ñ‚Ð¾Ð·Ð°Ð´Ð°Ñ‡Ð°','ACCOUNTING_MISSING:ACC-COMP-T-FOOD',0,'system-accounting-seed')").run();
-  await env.DB.prepare("UPDATE accounting_completeness_checks SET related_task_id=(SELECT id FROM tasks WHERE automation_key='ACCOUNTING_MISSING:ACC-COMP-T-FOOD') WHERE id='ACC-COMP-T-FOOD'").run();
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO accounting_exports (id,export_type,period,document_count,amount_minor,status,file_ref,created_by) VALUES ('ACC-EXP-T-1C-0826','ÐŸÐ°ÐºÐµÑ‚ Ð´Ð»Ñ 1Ð¡','2026-08',4,51050000,'ÐŸÐ¾Ð´Ð³Ð¾Ñ‚Ð¾Ð²Ð»ÐµÐ½','EXPORT:SYNTHETIC:1C:2026-08','system-accounting-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO accounting_integrations (id,system,mode,status,truth,last_success_at,next_attempt_at,record_count,error) VALUES ('ACC-INT-T-EDO','Ð­Ð”Ðž','Ð¢Ð¾Ð»ÑŒÐºÐ¾ Ð¿Ð¾ÑÐ»Ðµ ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð¸Ñ','ÐÐµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½','Ð¡Ñ‚Ð°Ñ‚ÑƒÑÑ‹ Ð¿Ð¾Ð´Ð¿Ð¸ÑÐ°Ð½Ð¸Ñ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ð°ÑŽÑ‚ÑÑ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ; API Ð¸ Ð¾Ð¿ÐµÑ€Ð°Ñ‚Ð¾Ñ€ Ð­Ð”Ðž Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‚','','',0,'ÐÐµÑ‚ ÑƒÑ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ð¾Ð³Ð¾ Ð¾Ð¿ÐµÑ€Ð°Ñ‚Ð¾Ñ€Ð° Ð¸ Ñ‚Ð¾ÐºÐµÐ½Ð°')"),
-    env.DB.prepare("INSERT OR IGNORE INTO accounting_integrations (id,system,mode,status,truth,last_success_at,next_attempt_at,record_count,error) VALUES ('ACC-INT-T-1C','1Ð¡','Ð­ÐºÑÐ¿Ð¾Ñ€Ñ‚Ð½Ñ‹Ð¹ Ð¿Ð°ÐºÐµÑ‚','ÐÐµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½','Ð¡Ð¾Ð·Ð´Ð°Ñ‘Ñ‚ÑÑ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ Ñ€ÐµÐµÑÑ‚Ñ€ Ð²Ñ‹Ð³Ñ€ÑƒÐ·ÐºÐ¸; Ð¿ÐµÑ€ÐµÐ´Ð°Ñ‡Ð¸ Ð² 1Ð¡ Ð½ÐµÑ‚','','',0,'Ð˜Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ñ Ð¾Ð¶Ð¸Ð´Ð°ÐµÑ‚ ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð¸Ñ')"),
-  ]);
-}
-
-async function seedStrategy(){
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES ('STR-PRJ-T-014','ÐŸÑ€Ð¾ÐµÐºÑ‚','Ð¡ÐµÐ¼ÐµÐ¹Ð½Ñ‹Ðµ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ñ‹Ðµ ÑÑƒÐ±Ð±Ð¾Ñ‚Ñ‹ Â· Ñ‚ÐµÑÑ‚','ÐÐºÑ‚Ð¸Ð²Ð½Ð°','SYNTHETIC_STRATEGY_TEST','STRATEGY-PROJECT-014','Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ°','Ð¨ÐºÐ¾Ð»Ð° 1â€“11','{}','system-strategy-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES ('EMP-T-PROJ-001','Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº','Ð ÑƒÐºÐ¾Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÑŒ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð¾Ð² T-P01','ÐÐºÑ‚Ð¸Ð²Ð½Ð°','SYNTHETIC_STRATEGY_TEST','EMPLOYEE-PROJECT-001','Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ°','Ð£Ð¿Ñ€Ð°Ð²Ð»ÑÑŽÑ‰Ð°Ñ ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ñ','{}','system-strategy-seed')"),
-  ]);
-  const goals=[
-    ["GOAL-T-2026-01","ÐšÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ñ","","Ð£Ð²ÐµÐ»Ð¸Ñ‡Ð¸Ñ‚ÑŒ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½ÑƒÑŽ Ñ†ÐµÐ½Ð½Ð¾ÑÑ‚ÑŒ Ð´Ð»Ñ ÑÐµÐ¼ÐµÐ¹","2026/27","EMP-T-004","Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ","Ð˜Ð½Ð´ÐµÐºÑ ÑƒÐ´Ð¾Ð²Ð»ÐµÑ‚Ð²Ð¾Ñ€Ñ‘Ð½Ð½Ð¾ÑÑ‚Ð¸ â‰¥ 80 Ð¸ Ð½Ðµ Ð¼ÐµÐ½ÐµÐµ 4 Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð½Ñ‹Ñ… Ð¸Ð½Ð¸Ñ†Ð¸Ð°Ñ‚Ð¸Ð²"],
-    ["GOAL-T-2026-02","ÐŸÐ¾Ð´Ñ€Ð°Ð·Ð´ÐµÐ»ÐµÐ½Ð¸Ðµ","UNT-T-001","Ð£ÑÐ¸Ð»Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ð¾Ðµ Ð¾Ð±ÑƒÑ‡ÐµÐ½Ð¸Ðµ ÑˆÐºÐ¾Ð»Ñ‹","2026/27","EMP-T-032","Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ","ÐÐµ Ð¼ÐµÐ½ÐµÐµ 70% ÑÐµÐ¼ÐµÐ¹ ÑƒÑ‡Ð°ÑÑ‚Ð²ÑƒÑŽÑ‚ Ð² Ð¾Ð´Ð½Ð¾Ð¼ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ð¾Ð¼ ÑÐ¾Ð±Ñ‹Ñ‚Ð¸Ð¸"],
-  ];
-  await env.DB.batch(goals.map(row=>env.DB.prepare("INSERT OR IGNORE INTO strategy_goals (id,level,unit_entity_id,title,period,owner_entity_id,status,success_definition) VALUES (?,?,?,?,?,?,?,?)").bind(...row)));
-  const kpis=[
-    ["KPI-T-FAMILY-01","GOAL-T-2026-01","Ð˜Ð½Ð´ÐµÐºÑ ÑƒÐ´Ð¾Ð²Ð»ÐµÑ‚Ð²Ð¾Ñ€Ñ‘Ð½Ð½Ð¾ÑÑ‚Ð¸ ÑÐµÐ¼ÐµÐ¹","%",80,72,76,-8,"ÐžÑ‚ÐºÐ»Ð¾Ð½ÐµÐ½Ð¸Ðµ","FDB-T-014 + SYNTHETIC_SURVEY_TEST","2026-08-21T08:00:00Z"],
-    ["KPI-T-PROJECT-01","GOAL-T-2026-02","Ð”Ð¾Ð»Ñ ÑÐµÐ¼ÐµÐ¹-ÑƒÑ‡Ð°ÑÑ‚Ð½Ð¸ÐºÐ¾Ð²","%",70,64,71,-6,"ÐÐ° Ð³Ñ€Ð°Ð½Ð¸Ñ†Ðµ","EVENT-T-071 + EVENT-T-0824","2026-08-21T08:00:00Z"],
-  ];
-  await env.DB.batch(kpis.map(row=>env.DB.prepare("INSERT OR IGNORE INTO strategy_kpis (id,goal_id,name,unit,target_value,actual_value,forecast_value,variance_value,status,source_ref,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  await env.DB.prepare("INSERT OR IGNORE INTO strategy_initiatives (id,goal_id,kpi_id,title,hypothesis,owner_entity_id,planned_start,planned_end,status) VALUES ('INIT-T-014','GOAL-T-2026-01','KPI-T-FAMILY-01','Ð¡ÐµÐ¼ÐµÐ¹Ð½Ñ‹Ðµ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ñ‹Ðµ ÑÑƒÐ±Ð±Ð¾Ñ‚Ñ‹','Ð¡Ð¾Ð²Ð¼ÐµÑÑ‚Ð½Ñ‹Ð¹ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð¸ ÐºÐ¾Ñ€Ð¾Ñ‚ÐºÐ°Ñ Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð°Ñ ÑÐ²ÑÐ·ÑŒ Ð¿Ð¾Ð²Ñ‹ÑÑÑ‚ Ð¸Ð·Ð¼ÐµÑ€Ð¸Ð¼ÑƒÑŽ Ñ†ÐµÐ½Ð½Ð¾ÑÑ‚ÑŒ Ð¿Ñ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ñ‹','EMP-T-PROJ-001','2026-08-01','2026-10-31','ÐŸÐ¸Ð»Ð¾Ñ‚')").run();
-  await env.DB.prepare("INSERT OR IGNORE INTO strategy_projects (id,initiative_id,goal_id,title,owner_entity_id,budget_id,budget_plan_minor,budget_actual_minor,started_at,due_at,status,outcome) VALUES ('STR-PRJ-T-014','INIT-T-014','GOAL-T-2026-01','ÐŸÐ¸Ð»Ð¾Ñ‚ ÑÐµÐ¼ÐµÐ¹Ð½Ñ‹Ñ… Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ñ‹Ñ… ÑÑƒÐ±Ð±Ð¾Ñ‚','EMP-T-PROJ-001','BUD-2026-08-OUT',120000000,85000000,'2026-08-01','2026-10-31','Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ','ÐŸÐ¸Ð»Ð¾Ñ‚ 1 Ð¿Ñ€Ð¾Ð²ÐµÐ´Ñ‘Ð½; Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð¼Ð°ÑÑˆÑ‚Ð°Ð±Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð¿Ð¾ÑÐ»Ðµ Ð²Ñ‚Ð¾Ñ€Ð¾Ð³Ð¾ ÑÐ¾Ð±Ñ‹Ñ‚Ð¸Ñ')").run();
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO tasks (title,owner,due_date,priority,status,source_type,source_id,description,assignee_entity_id,kind,automation_key,requires_approval,result,result_evidence,completed_at,created_by) VALUES ('ÐŸÐ¾Ð´Ð³Ð¾Ñ‚Ð¾Ð²Ð¸Ñ‚ÑŒ Ð¿Ð¸Ð»Ð¾Ñ‚ ÑÐµÐ¼ÐµÐ¹Ð½Ð¾Ð¹ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ð¾Ð¹ ÑÑƒÐ±Ð±Ð¾Ñ‚Ñ‹','Ð ÑƒÐºÐ¾Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÑŒ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð¾Ð²','2026-08-15','Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹','Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°','ÐŸÑ€Ð¾ÐµÐºÑ‚','STR-PRJ-T-014','ÐŸÑ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ð°, ÑƒÑ‡Ð°ÑÑ‚Ð½Ð¸ÐºÐ¸, Ð±ÑŽÐ´Ð¶ÐµÑ‚ Ð¸ Ñ„Ð¾Ñ€Ð¼Ð° Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð¾Ð¹ ÑÐ²ÑÐ·Ð¸','EMP-T-PROJ-001','ÐŸÑ€Ð¾ÐµÐºÑ‚Ð½Ð°Ñ Ð·Ð°Ð´Ð°Ñ‡Ð°','PROJECT:STR-PRJ-T-014:MILESTONE:1',1,'ÐŸÐ¸Ð»Ð¾Ñ‚ Ð¿Ñ€Ð¾Ð²ÐµÐ´Ñ‘Ð½','EVENT-T-071','2026-08-17T16:00:00Z','system-strategy-seed')"),
-    env.DB.prepare("INSERT OR IGNORE INTO tasks (title,owner,due_date,priority,status,source_type,source_id,description,assignee_entity_id,kind,automation_key,requires_approval,created_by) VALUES ('Ð¡ÐºÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ ÑÑ†ÐµÐ½Ð°Ñ€Ð¸Ð¹ Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð¾Ð¹ ÑÐ²ÑÐ·Ð¸ ÑÐµÐ¼ÐµÐ¹','Ð ÑƒÐºÐ¾Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÑŒ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð¾Ð²','2026-08-28','Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹','Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ','ÐžÑ‚ÐºÐ»Ð¾Ð½ÐµÐ½Ð¸Ðµ KPI','DEV-T-KPI-01','Ð˜Ð½Ð´ÐµÐºÑ 72 Ð¿Ñ€Ð¸ Ñ†ÐµÐ»Ð¸ 80; Ð¿Ñ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ Ð²Ñ‚Ð¾Ñ€Ð¾Ð¹ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚ ÑÐ¾Ð±Ñ‹Ñ‚Ð¸Ñ Ð¸ ÑÑ‚Ñ€ÑƒÐºÑ‚ÑƒÑ€Ñƒ Ð¾Ð¿Ñ€Ð¾ÑÐ°','EMP-T-PROJ-001','ÐšÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð¸Ñ€ÑƒÑŽÑ‰ÐµÐµ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ','STRATEGY_DEVIATION:DEV-T-KPI-01',1,'system-strategy-seed')"),
-  ]);
-  const events=[
-    ["EVENT-T-071","STR-PRJ-T-014","Ð¡ÐµÐ¼ÐµÐ¹Ð½Ð°Ñ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ð°Ñ ÑÑƒÐ±Ð±Ð¾Ñ‚Ð° Â· Ð¿Ð¸Ð»Ð¾Ñ‚ 1","2026-08-17T11:00:00Z","Ð¨ÐºÐ¾Ð»Ð° Â· Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ð°Ñ Ð»Ð°Ð±Ð¾Ñ€Ð°Ñ‚Ð¾Ñ€Ð¸Ñ","EMP-T-PROJ-001",60000000,42000000,"ÐŸÑ€Ð¾Ð²ÐµÐ´ÐµÐ½Ð¾","28 ÑÐµÐ¼ÐµÐ¹ Ð·Ð°Ð²ÐµÑ€ÑˆÐ¸Ð»Ð¸ Ð¾Ð±Ñ‰Ð¸Ð¹ Ð¿Ñ€Ð¾ÐµÐºÑ‚",86],
-    ["EVENT-T-0824","STR-PRJ-T-014","Ð¡ÐµÐ¼ÐµÐ¹Ð½Ð°Ñ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð½Ð°Ñ ÑÑƒÐ±Ð±Ð¾Ñ‚Ð° Â· Ð¿Ð¸Ð»Ð¾Ñ‚ 2","2026-08-24T11:00:00Z","Ð¨ÐºÐ¾Ð»Ð° Â· Ð°ÐºÑ‚Ð¾Ð²Ñ‹Ð¹ Ð·Ð°Ð»","EMP-T-PROJ-001",60000000,43000000,"Ð—Ð°Ð¿Ð»Ð°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¾","",0],
-  ];
-  await env.DB.batch(events.map(row=>env.DB.prepare("INSERT OR IGNORE INTO business_events (id,project_id,title,event_at,location,responsible_entity_id,budget_minor,actual_minor,status,result,feedback_score) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const participants=[
-    ["EVP-T-071-01","EVENT-T-071","FAM-T-014","Ð¡ÐµÐ¼ÑŒÑ","Ð£Ñ‡Ð°ÑÑ‚Ð²Ð¾Ð²Ð°Ð»","ÐŸÐ¾Ð½ÑÑ‚Ð½Ñ‹Ð¹ Ð¸Ñ‚Ð¾Ð³ Ð¸ Ñ…Ð¾Ñ€Ð¾ÑˆÐ°Ñ ÑÐ¾Ð²Ð¼ÐµÑÑ‚Ð½Ð°Ñ Ñ€Ð°Ð±Ð¾Ñ‚Ð°"],
-    ["EVP-T-071-02","EVENT-T-071","EMP-T-032","ÐŸÐµÐ´Ð°Ð³Ð¾Ð³","Ð£Ñ‡Ð°ÑÑ‚Ð²Ð¾Ð²Ð°Ð»","ÐÑƒÐ¶Ð½Ð° Ð±Ð¾Ð»ÐµÐµ ÐºÐ¾Ñ€Ð¾Ñ‚ÐºÐ°Ñ Ð²Ð²Ð¾Ð´Ð½Ð°Ñ Ñ‡Ð°ÑÑ‚ÑŒ"],
-    ["EVP-T-0824-01","EVENT-T-0824","FAM-T-021","Ð¡ÐµÐ¼ÑŒÑ","ÐŸÑ€Ð¸Ð³Ð»Ð°ÑˆÑ‘Ð½",""],
-  ];
-  await env.DB.batch(participants.map(row=>env.DB.prepare("INSERT OR IGNORE INTO event_participants (id,event_id,participant_entity_id,participant_role,attendance_status,feedback) VALUES (?,?,?,?,?,?)").bind(...row)));
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO strategy_results (id,project_id,event_id,result_type,metric_name,metric_value,unit,evidence,recorded_at) VALUES ('STR-RES-T-071','STR-PRJ-T-014','EVENT-T-071','Ð¡Ð¾Ð±Ñ‹Ñ‚Ð¸Ðµ','Ð£Ð´Ð¾Ð²Ð»ÐµÑ‚Ð²Ð¾Ñ€Ñ‘Ð½Ð½Ð¾ÑÑ‚ÑŒ ÑƒÑ‡Ð°ÑÑ‚Ð½Ð¸ÐºÐ¾Ð²',86,'%','28 ÑÐµÐ¼ÐµÐ¹; 2 Ð¾Ð±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð½Ñ‹Ñ… Ð¿Ñ€Ð¸Ð¼ÐµÑ€Ð° Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð¾Ð¹ ÑÐ²ÑÐ·Ð¸','2026-08-17T16:30:00Z')"),
-    env.DB.prepare("INSERT OR IGNORE INTO strategy_deviations (id,kpi_id,project_id,deviation_type,variance_value,explanation,decision,status,related_task_id,detected_at) VALUES ('DEV-T-KPI-01','KPI-T-FAMILY-01','STR-PRJ-T-014','ÐÐ¸Ð¶Ðµ Ñ†ÐµÐ»Ð¸',-8,'Ð˜Ð½Ð´ÐµÐºÑ 72 Ð¿Ñ€Ð¸ Ñ†ÐµÐ»Ð¸ 80; Ð²Ñ‹Ð±Ð¾Ñ€ÐºÐ° Ð¸ Ñ„Ð¾Ñ€Ð¼ÑƒÐ»Ð¸Ñ€Ð¾Ð²ÐºÐ¸ Ð¾Ð¿Ñ€Ð¾ÑÐ° Ñ‚Ñ€ÐµÐ±ÑƒÑŽÑ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸','ÐŸÑ€Ð¾Ð²ÐµÑÑ‚Ð¸ Ð²Ñ‚Ð¾Ñ€Ð¾Ð¹ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚, Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€Ð¸Ñ‚ÑŒ Ð¸Ð·Ð¼ÐµÑ€ÐµÐ½Ð¸Ðµ Ð¸ Ñ€ÐµÑˆÐ¸Ñ‚ÑŒ Ð¾ Ð¼Ð°ÑÑˆÑ‚Ð°Ð±Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ð¸',(SELECT CASE WHEN 1=1 THEN 'Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ' END),(SELECT id FROM tasks WHERE automation_key='STRATEGY_DEVIATION:DEV-T-KPI-01'),'2026-08-21T08:00:00Z')"),
-  ]);
-}
-
-async function seedIntegrations(){
-  await env.DB.prepare("INSERT OR IGNORE INTO entities (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES ('EMP-T-INT-001','Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº','ÐÐ´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€ Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ð¹ T-I01','ÐÐºÑ‚Ð¸Ð²Ð½Ð°','SYNTHETIC_INTEGRATION_TEST','EMPLOYEE-INTEGRATIONS-001','Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ°','ÐŸÐ»Ð°Ñ‚Ñ„Ð¾Ñ€Ð¼ÐµÐ½Ð½Ð¾Ðµ ÑÐ´Ñ€Ð¾','{}','system-integration-seed')").run();
-  const connections=[
-    ["INT-T-D1","ArtHello OS D1","Ð’Ð½ÑƒÑ‚Ñ€ÐµÐ½Ð½ÑÑ Ð¿Ð»Ð°Ñ‚Ñ„Ð¾Ñ€Ð¼Ð°","Ð’ÑÐµ Ð¼Ð¾Ð´ÑƒÐ»Ð¸","EMP-T-INT-001","ArtHello OS D1","Binding Â· read/write","Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚","Ð¡ÐµÑ€Ð²Ð¸ÑÐ½Ð°Ñ Ð¿Ñ€Ð¸Ð²ÑÐ·ÐºÐ° Ð°ÐºÑ‚Ð¸Ð²Ð½Ð°","","2026-08-21T09:30:00Z","2026-08-21T09:45:00Z",1,1,0,0,0,"ÐšÑ€Ð¸Ñ‚Ð¸Ñ‡Ð½Ð¾Ðµ: Ð±ÐµÐ· D1 Ð½ÐµÐ´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ñ‹ Ñ€Ð°Ð±Ð¾Ñ‡Ð¸Ðµ Ð·Ð°Ð¿Ð¸ÑÐ¸","d1-core@1",1,1],
-    ["INT-T-ODDS","ÐÑ‚Ð»Ð°Ñ ÐžÐ”Ð”Ð¡.xlsx","Ð¤Ð°Ð¹Ð»Ð¾Ð²Ñ‹Ð¹ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚","Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹","EMP-T-ACC-001","ÐÑ‚Ð»Ð°Ñ ÐžÐ”Ð”Ð¡ 01.01.2023â€“31.01.2026.xlsx","ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ð¸Ñ€ÑƒÐµÐ¼Ñ‹Ð¹ snapshot","Ð¤Ð°Ð¹Ð» Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐµÐ½","ÐšÐ»ÑŽÑ‡ Ð½Ðµ Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ","","2026-08-21T07:40:00Z","",4,4,0,0,2,"Ð¡Ñ€ÐµÐ´Ð½ÐµÐµ: Ð±ÐµÐ· Ð¾Ð±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ñ ÑƒÑÑ‚Ð°Ñ€ÐµÐ²Ð°ÐµÑ‚ ÑƒÐ¿Ñ€Ð°Ð²Ð»ÐµÐ½Ñ‡ÐµÑÐºÐ¸Ð¹ Ð”Ð”Ð¡","xlsx-odds@1",1,0],
-    ["INT-T-PAYROLL","Ð—Ð°Ñ€Ð¿Ð»Ð°Ñ‚Ð½Ð°Ñ Ð²ÐµÐ´Ð¾Ð¼Ð¾ÑÑ‚ÑŒ.xlsx","Ð¤Ð°Ð¹Ð»Ð¾Ð²Ñ‹Ð¹ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚","HR Â· Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹","EMP-T-ACC-001","Ð—Ð°Ñ€Ð¿Ð»Ð°Ñ‚Ð½Ð°Ñ Ð²ÐµÐ´Ð¾Ð¼Ð¾ÑÑ‚ÑŒ.xlsx","ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ð¸Ñ€ÑƒÐµÐ¼Ñ‹Ð¹ snapshot","ÐÐ° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐµ","ÐšÐ»ÑŽÑ‡ Ð½Ðµ Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ","","2026-08-21T07:45:00Z","",114,112,2,0,2,"Ð’Ñ‹ÑÐ¾ÐºÐ¾Ðµ: ÐºÐ°Ð´Ñ€Ð¾Ð²Ñ‹Ðµ Ð°Ð³Ñ€ÐµÐ³Ð°Ñ‚Ñ‹ Ñ‚Ñ€ÐµÐ±ÑƒÑŽÑ‚ Ð´ÐµÐ´ÑƒÐ¿Ð»Ð¸ÐºÐ°Ñ†Ð¸Ð¸","xlsx-payroll@1",1,0],
-    ["INT-T-PAYMENTS","Ð•Ð¶ÐµÐ¼ÐµÑÑÑ‡Ð½Ñ‹Ðµ Ð¾Ð¿Ð»Ð°Ñ‚Ñ‹.xlsx","Ð¤Ð°Ð¹Ð»Ð¾Ð²Ñ‹Ð¹ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚","Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹ Â· ÐšÐ»Ð¸ÐµÐ½Ñ‚Ñ‹","EMP-T-ACC-001","Ð•Ð¶ÐµÐ¼ÐµÑÑÑ‡Ð½Ñ‹Ðµ Ð¾Ð¿Ð»Ð°Ñ‚Ñ‹.xlsx","ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ð¸Ñ€ÑƒÐµÐ¼Ñ‹Ð¹ snapshot","Ð£ÑÑ‚Ð°Ñ€ÐµÐ»","ÐšÐ»ÑŽÑ‡ Ð½Ðµ Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ","","2026-08-21T07:50:00Z","",4,4,0,0,1,"Ð’Ñ‹ÑÐ¾ÐºÐ¾Ðµ: Ð½Ð¾Ð²Ñ‹Ðµ Ð¾Ð¿Ð»Ð°Ñ‚Ñ‹ Ð½Ðµ Ð¿Ð¾ÑÑ‚ÑƒÐ¿Ð°ÑŽÑ‚ Ð¿Ð¾ÑÐ»Ðµ Ð¸ÑŽÐ½Ñ 2026","xlsx-payments@1",1,0],
-    ["INT-T-TOCHKA","Ð‘Ð°Ð½Ðº Ð¢Ð¾Ñ‡ÐºÐ°","Ð‘Ð°Ð½Ðº","Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹","ROLE:OWNER","Ð‘Ð°Ð½Ðº Ð¢Ð¾Ñ‡ÐºÐ°","Ð—Ð°Ñ‰Ð¸Ñ‰Ñ‘Ð½Ð½Ð¾Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ðµ Â· Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ð¸ Ð¸ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ñ‹Ñ… ÑÑ‡ÐµÑ‚Ð¾Ð²","ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð´Ð¾ÑÑ‚ÑƒÐ¿","ÐÐµ Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½Ð°","","","",0,0,0,0,0,"ÐšÑ€Ð¸Ñ‚Ð¸Ñ‡Ð½Ð¾Ðµ: Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ° Ð±Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ¸Ñ… Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ð¹ Ð¢Ð¾Ñ‡ÐºÐ¸ ÐµÑ‰Ñ‘ Ð½Ðµ Ñ€ÐµÐ°Ð»Ð¸Ð·Ð¾Ð²Ð°Ð½Ð°","bank-tochka@1",0,0],
-    ["INT-T-TBANK","Ð¢â€‘Ð‘Ð°Ð½Ðº","Ð‘Ð°Ð½Ðº","Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹","ROLE:OWNER","ÐžÑ„Ð¸Ñ†Ð¸Ð°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¸Ð½Ñ‚ÐµÑ€Ñ„ÐµÐ¹Ñ Ð¢â€‘Ð‘Ð°Ð½ÐºÐ° Ð´Ð»Ñ Ð±Ð¸Ð·Ð½ÐµÑÐ°","ÐŸÑ€ÑÐ¼Ð¾Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ðµ Â· Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ñ‡Ñ‚ÐµÐ½Ð¸Ðµ ÑÑ‡ÐµÑ‚Ð¾Ð² Ð¸ ÐºÐ¾Ñ€Ð¾Ñ‚ÐºÐ¾Ð¹ Ð²Ñ‹Ð¿Ð¸ÑÐºÐ¸","ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð´Ð¾ÑÑ‚ÑƒÐ¿","ÐÐµ Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½Ð°","","","",0,0,0,0,0,"ÐšÑ€Ð¸Ñ‚Ð¸Ñ‡Ð½Ð¾Ðµ: Ð´Ð¾ÑÑ‚ÑƒÐ¿ Ð¼Ð¾Ð¶Ð½Ð¾ Ð¿Ñ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ, Ð½Ð¾ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ð¸ Ð½Ðµ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚Ð¸Ñ€ÑƒÑŽÑ‚ÑÑ Ð¸ Ð¿Ð»Ð°Ñ‚ÐµÐ¶Ð¸ Ð½Ðµ ÑÐ¾Ð·Ð´Ð°ÑŽÑ‚ÑÑ","tbank-h2h-readonly@1",0,0],
-    ["INT-T-ALFACRM","AlfaCRM","CRM","ÐŸÑ€Ð¾Ð´Ð°Ð¶Ð¸ Â· ÐšÐ»Ð¸ÐµÐ½Ñ‚Ñ‹","EMP-T-SALES-001","AlfaCRM","API Â· Ð´Ð²ÑƒÑÑ‚Ð¾Ñ€Ð¾Ð½Ð½Ð¸Ð¹","ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð´Ð¾ÑÑ‚ÑƒÐ¿","ÐÐµ Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½Ð°","","","ÐŸÐ¾ÑÐ»Ðµ Ð²Ñ‹Ð´Ð°Ñ‡Ð¸ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð°",0,0,0,1,0,"Ð’Ñ‹ÑÐ¾ÐºÐ¾Ðµ: Ð»Ð¸Ð´Ñ‹ Ð¸ ÑÑ‚Ð°Ñ‚ÑƒÑÑ‹ ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€ÑƒÑŽÑ‚ÑÑ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","alfacrm@0",0,0],
-    ["INT-T-DIARY","Ð­Ð»ÐµÐºÑ‚Ñ€Ð¾Ð½Ð½Ñ‹Ð¹ Ð´Ð½ÐµÐ²Ð½Ð¸Ðº","ÐžÐ±Ñ€Ð°Ð·Ð¾Ð²Ð°Ð½Ð¸Ðµ","ÐžÐ±ÑƒÑ‡ÐµÐ½Ð¸Ðµ","EMP-T-METHOD-001","Ð£Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ð¹ ÑÐ»ÐµÐºÑ‚Ñ€Ð¾Ð½Ð½Ñ‹Ð¹ Ð´Ð½ÐµÐ²Ð½Ð¸Ðº","API Â· Ñ‡Ñ‚ÐµÐ½Ð¸Ðµ","ÐÐµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½","ÐŸÑ€Ð¾Ð²Ð°Ð¹Ð´ÐµÑ€ Ð½Ðµ ÑƒÑ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½","","","ÐŸÐ¾ÑÐ»Ðµ Ð²Ñ‹Ð±Ð¾Ñ€Ð° Ð¿Ñ€Ð¾Ð²Ð°Ð¹Ð´ÐµÑ€Ð°",0,0,0,0,0,"Ð’Ñ‹ÑÐ¾ÐºÐ¾Ðµ: Ñ€Ð°ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ðµ Ð¸ Ð¿Ð¾ÑÐµÑ‰Ð°ÐµÐ¼Ð¾ÑÑ‚ÑŒ Ð½Ðµ Ð¾Ð±Ð½Ð¾Ð²Ð»ÑÑŽÑ‚ÑÑ","diary@0",0,0],
-    ["INT-T-FORMS","Ð¤Ð¾Ñ€Ð¼Ñ‹ ÑÐ°Ð¹Ñ‚Ð°","ÐœÐ°Ñ€ÐºÐµÑ‚Ð¸Ð½Ð³","ÐŸÑ€Ð¾Ð´Ð°Ð¶Ð¸","EMP-T-MKT-001","Ð¤Ð¾Ñ€Ð¼Ñ‹ ÑÐ°Ð¹Ñ‚Ð° ArtHello","Webhook Â· Ð²Ñ…Ð¾Ð´ÑÑ‰Ð¸Ðµ Ð·Ð°ÑÐ²ÐºÐ¸","ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð´Ð¾ÑÑ‚ÑƒÐ¿","Webhook Ð½Ðµ Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½","","","ÐŸÐ¾ÑÐ»Ðµ Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ¸ webhook",0,0,0,0,0,"Ð’Ñ‹ÑÐ¾ÐºÐ¾Ðµ: first-click Ð¸ Ð·Ð°ÑÐ²ÐºÐ¸ Ð½Ðµ Ð¿Ð¾ÑÑ‚ÑƒÐ¿Ð°ÑŽÑ‚ Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸","web-forms@0",0,0],
-    ["INT-T-PHONE","Ð¢ÐµÐ»ÐµÑ„Ð¾Ð½Ð¸Ñ","ÐšÐ¾Ð¼Ð¼ÑƒÐ½Ð¸ÐºÐ°Ñ†Ð¸Ð¸","ÐŸÑ€Ð¾Ð´Ð°Ð¶Ð¸","EMP-T-SALES-001","Ð£Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ð°Ñ Ñ‚ÐµÐ»ÐµÑ„Ð¾Ð½Ð¸Ñ","Webhook Â· ÑÐ¾Ð±Ñ‹Ñ‚Ð¸Ñ Ð·Ð²Ð¾Ð½ÐºÐ¾Ð²","ÐÐµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½","ÐŸÑ€Ð¾Ð²Ð°Ð¹Ð´ÐµÑ€ Ð½Ðµ ÑƒÑ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½","","","ÐŸÐ¾ÑÐ»Ðµ Ð²Ñ‹Ð±Ð¾Ñ€Ð° Ð¿Ñ€Ð¾Ð²Ð°Ð¹Ð´ÐµÑ€Ð°",0,0,0,0,0,"Ð¡Ñ€ÐµÐ´Ð½ÐµÐµ: Ð·Ð²Ð¾Ð½ÐºÐ¸ Ñ„Ð¸ÐºÑÐ¸Ñ€ÑƒÑŽÑ‚ÑÑ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","telephony@0",0,0],
-    ["INT-T-ADS","Ð ÐµÐºÐ»Ð°Ð¼Ð½Ñ‹Ðµ ÐºÐ°Ð±Ð¸Ð½ÐµÑ‚Ñ‹","ÐœÐ°Ñ€ÐºÐµÑ‚Ð¸Ð½Ð³","ÐšÐ¾Ð½Ñ‚ÐµÐ½Ñ‚ Â· ÐŸÑ€Ð¾Ð´Ð°Ð¶Ð¸","EMP-T-MKT-001","Ð ÐµÐºÐ»Ð°Ð¼Ð½Ñ‹Ðµ Ð¿Ð»Ð°Ñ‚Ñ„Ð¾Ñ€Ð¼Ñ‹","API Â· ÑÑ‚Ð°Ñ‚Ð¸ÑÑ‚Ð¸ÐºÐ°","ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð´Ð¾ÑÑ‚ÑƒÐ¿","ÐÐµ Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½Ð°","","","ÐŸÐ¾ÑÐ»Ðµ Ð²Ñ‹Ð´Ð°Ñ‡Ð¸ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð°",0,0,0,0,0,"Ð¡Ñ€ÐµÐ´Ð½ÐµÐµ: ÑÑ‚Ð¾Ð¸Ð¼Ð¾ÑÑ‚ÑŒ Ð»Ð¸Ð´Ð° Ð½Ðµ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ð°ÐµÑ‚ÑÑ Ð¿Ð»Ð°Ñ‚Ñ„Ð¾Ñ€Ð¼Ð¾Ð¹","ads@0",0,0],
-    ["INT-T-SOCIAL","Ð¡Ð¾Ñ†Ð¸Ð°Ð»ÑŒÐ½Ñ‹Ðµ ÑÐµÑ‚Ð¸","ÐšÐ¾Ð½Ñ‚ÐµÐ½Ñ‚","ÐšÐ¾Ð½Ñ‚ÐµÐ½Ñ‚ Â· ÐŸÑ€Ð¾Ð´Ð°Ð¶Ð¸","EMP-T-MKT-001","Ð¡Ð¾Ñ†Ð¸Ð°Ð»ÑŒÐ½Ñ‹Ðµ Ð¿Ð»Ð°Ñ‚Ñ„Ð¾Ñ€Ð¼Ñ‹","API Â· Ð¿ÑƒÐ±Ð»Ð¸ÐºÐ°Ñ†Ð¸Ð¸ Ð¸ Ð¼ÐµÑ‚Ñ€Ð¸ÐºÐ¸","ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð´Ð¾ÑÑ‚ÑƒÐ¿","ÐÐµ Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½Ð°","","","ÐŸÐ¾ÑÐ»Ðµ Ð²Ñ‹Ð´Ð°Ñ‡Ð¸ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð°",0,0,0,0,0,"Ð¡Ñ€ÐµÐ´Ð½ÐµÐµ: Ð¾Ñ…Ð²Ð°Ñ‚Ñ‹ Ð¸ Ð¿ÐµÑ€ÐµÑ…Ð¾Ð´Ñ‹ Ð¾ÑÑ‚Ð°ÑŽÑ‚ÑÑ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¼Ð¸","social@0",0,0],
-    ["INT-T-EDO","Ð­Ð”Ðž","Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ñ‹","Ð‘ÑƒÑ…Ð³Ð°Ð»Ñ‚ÐµÑ€Ð¸Ñ Â· Ð®Ñ€Ð¸ÑÑ‚","EMP-T-ACC-001","Ð£Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ð¹ Ð¾Ð¿ÐµÑ€Ð°Ñ‚Ð¾Ñ€ Ð­Ð”Ðž","API Â· Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ñ‹ Ð¸ Ð¿Ð¾Ð´Ð¿Ð¸ÑÐ¸","ÐÐµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½","ÐžÐ¿ÐµÑ€Ð°Ñ‚Ð¾Ñ€ Ð½Ðµ ÑƒÑ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½","","","ÐŸÐ¾ÑÐ»Ðµ Ð²Ñ‹Ð±Ð¾Ñ€Ð° Ð¾Ð¿ÐµÑ€Ð°Ñ‚Ð¾Ñ€Ð°",0,0,0,0,0,"Ð’Ñ‹ÑÐ¾ÐºÐ¾Ðµ: Ð¿Ð¾Ð´Ð¿Ð¸ÑÐ¸ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ð°ÑŽÑ‚ÑÑ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","edo@0",0,0],
-    ["INT-T-1C","1Ð¡","Ð£Ñ‡Ñ‘Ñ‚","Ð‘ÑƒÑ…Ð³Ð°Ð»Ñ‚ÐµÑ€Ð¸Ñ","EMP-T-ACC-001","1Ð¡","ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ð¸Ñ€ÑƒÐµÐ¼Ñ‹Ð¹ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚/ÑÐºÑÐ¿Ð¾Ñ€Ñ‚","ÐÐµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½","ÐšÐ¾Ð½Ñ‚ÑƒÑ€ Ð¸ Ð´Ð¾ÑÑ‚ÑƒÐ¿ Ð½Ðµ Ð¿Ñ€ÐµÐ´Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ñ‹","","","ÐŸÐ¾ÑÐ»Ðµ Ð¿Ñ€ÐµÐ´Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ð¸Ñ Ñ‚ÐµÑÑ‚Ð¾Ð²Ð¾Ð¹ Ð±Ð°Ð·Ñ‹",0,0,0,0,0,"Ð’Ñ‹ÑÐ¾ÐºÐ¾Ðµ: Ð¿Ð°ÐºÐµÑ‚ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð³Ð¾Ñ‚Ð¾Ð²Ð¸Ñ‚ÑÑ, Ð½Ð¾ Ð½Ðµ Ð¿ÐµÑ€ÐµÐ´Ð°Ñ‘Ñ‚ÑÑ","1c@0",0,0],
-    ["INT-T-ACS","Ð¡ÐšÐ£Ð”","Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚ÑŒ","Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚ÑŒ","EMP-T-SAFE-001","Ð¡ÐšÐ£Ð” Ð¾Ð±ÑŠÐµÐºÑ‚Ð¾Ð²","API Â· ÑÐ¾Ð±Ñ‹Ñ‚Ð¸Ñ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð°","ÐÐµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½","ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ð»ÐµÑ€Ñ‹ Ð½Ðµ Ð¿Ñ€ÐµÐ´Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ñ‹","","","ÐŸÐ¾ÑÐ»Ðµ Ð¸Ð½Ð²ÐµÐ½Ñ‚Ð°Ñ€Ð¸Ð·Ð°Ñ†Ð¸Ð¸ ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ð»ÐµÑ€Ð¾Ð²",0,0,0,0,0,"ÐšÑ€Ð¸Ñ‚Ð¸Ñ‡Ð½Ð¾Ðµ: ÑÐ¾Ð±Ñ‹Ñ‚Ð¸Ñ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð° Ð½Ðµ Ð¿Ð¾ÑÑ‚ÑƒÐ¿Ð°ÑŽÑ‚","acs@0",0,0],
-    ["INT-T-CAM","ÐšÐ°Ð¼ÐµÑ€Ñ‹","Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚ÑŒ","Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚ÑŒ","EMP-T-SAFE-001","VMS Ð¾Ð±ÑŠÐµÐºÑ‚Ð¾Ð²","Ð¡Ð¾Ð±Ñ‹Ñ‚Ð¸Ñ Ð±ÐµÐ· Ð²Ð¸Ð´ÐµÐ¾Ð¿Ð¾Ñ‚Ð¾ÐºÐ°","ÐÐµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½","VMS Ð½Ðµ Ð¿Ñ€ÐµÐ´Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ð°","","","ÐŸÐ¾ÑÐ»Ðµ ÑƒÑ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ñ VMS",0,0,0,0,0,"Ð¡Ñ€ÐµÐ´Ð½ÐµÐµ: Ð²Ð¸Ð´ÐµÐ¾ Ð¸ ÑÐ¾Ð±Ñ‹Ñ‚Ð¸Ñ ÐºÐ°Ð¼ÐµÑ€ Ð½Ðµ Ð¿Ð¾ÑÑ‚ÑƒÐ¿Ð°ÑŽÑ‚","cameras@0",0,0],
-    ["INT-T-TG","Telegram","ÐšÐ¾Ð¼Ð¼ÑƒÐ½Ð¸ÐºÐ°Ñ†Ð¸Ð¸","Ð—Ð°Ð´Ð°Ñ‡Ð¸ Â· ÐšÐ»Ð¸ÐµÐ½Ñ‚Ñ‹","EMP-T-INT-001","Telegram Bot API","Webhook Â· ÑƒÐ²ÐµÐ´Ð¾Ð¼Ð»ÐµÐ½Ð¸Ñ","ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð´Ð¾ÑÑ‚ÑƒÐ¿","Ð¢Ð¾ÐºÐµÐ½ Ð½Ðµ Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½","","","ÐŸÐ¾ÑÐ»Ðµ Ð²Ñ‹Ð´Ð°Ñ‡Ð¸ bot token",0,0,0,0,0,"Ð¡Ñ€ÐµÐ´Ð½ÐµÐµ: ÑƒÐ²ÐµÐ´Ð¾Ð¼Ð»ÐµÐ½Ð¸Ñ Ð¾ÑÑ‚Ð°ÑŽÑ‚ÑÑ Ð²Ð½ÑƒÑ‚Ñ€Ð¸ ÑÐ¸ÑÑ‚ÐµÐ¼Ñ‹","telegram@0",0,0],
-    ["INT-T-MAIL","Ð¡ÐµÑ€Ð²Ð¸Ñ Ñ€Ð°ÑÑÑ‹Ð»Ð¾Ðº","ÐšÐ¾Ð¼Ð¼ÑƒÐ½Ð¸ÐºÐ°Ñ†Ð¸Ð¸","ÐšÐ»Ð¸ÐµÐ½Ñ‚Ñ‹ Â· ÐšÐ¾Ð½Ñ‚ÐµÐ½Ñ‚","EMP-T-MKT-001","Ð£Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ð¹ ÑÐµÑ€Ð²Ð¸Ñ Ñ€Ð°ÑÑÑ‹Ð»Ð¾Ðº","API Â· Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ° Ð¸ ÑÑ‚Ð°Ñ‚ÑƒÑÑ‹","ÐÐµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½","ÐŸÑ€Ð¾Ð²Ð°Ð¹Ð´ÐµÑ€ Ð½Ðµ ÑƒÑ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½","","","ÐŸÐ¾ÑÐ»Ðµ Ð²Ñ‹Ð±Ð¾Ñ€Ð° Ð¿Ñ€Ð¾Ð²Ð°Ð¹Ð´ÐµÑ€Ð°",0,0,0,0,0,"Ð¡Ñ€ÐµÐ´Ð½ÐµÐµ: Ð¼Ð°ÑÑÐ¾Ð²Ñ‹Ðµ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ Ð½Ðµ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²Ð»ÑÑŽÑ‚ÑÑ","mailing@0",0,0]
-    ,["INT-T-OPENAI-IMAGES","OpenAI Images","ÐšÐ¾Ð½Ñ‚ÐµÐ½Ñ‚","ÐšÐ¾Ð½Ñ‚ÐµÐ½Ñ‚ Â· Ð¡Ñ‚ÑƒÐ´Ð¸Ñ","EMP-T-MKT-001","OpenAI Images API","API Â· Ð³ÐµÐ½ÐµÑ€Ð°Ñ†Ð¸Ñ Ð¸ Ñ€ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ","ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð´Ð¾ÑÑ‚ÑƒÐ¿","API-ÐºÐ»ÑŽÑ‡ Ð½Ðµ Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½","","","ÐŸÐ¾ÑÐ»Ðµ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾Ð¹ Ð¿ÐµÑ€ÐµÐ´Ð°Ñ‡Ð¸ ÐºÐ»ÑŽÑ‡Ð°",0,0,0,0,0,"Ð¡Ñ€ÐµÐ´Ð½ÐµÐµ: Ð³ÐµÐ½ÐµÑ€Ð°Ñ†Ð¸Ñ Ð¸Ð·Ð¾Ð±Ñ€Ð°Ð¶ÐµÐ½Ð¸Ð¹ Ð½ÐµÐ´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð°","openai-images@0",0,0]
-  ];
-  await env.DB.batch(connections.map(row=>env.DB.prepare("INSERT OR IGNORE INTO integration_connections (id,system,category,target_module,owner_entity_id,source_of_truth,mode,status,auth_status,credential_expires_at,last_success_at,next_sync_at,received_count,accepted_count,rejected_count,error_count,conflict_count,impact,adapter_version,verified_transfer,is_enabled) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const runs=[
-    ["INT-RUN-T-D1-01","INT-T-D1","2026-08-21T09:30:00Z","2026-08-21T09:30:01Z","ÐŸÐ»Ð°Ð½Ð¾Ð²Ð°Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ°","Ð£ÑÐ¿ÐµÑˆÐ½Ð¾",1,1,0,0,0,"D1:health:ok","","system-integration-seed","CORR-T-D1-01",0],
-    ["INT-RUN-T-ODDS-01","INT-T-ODDS","2026-08-21T07:39:00Z","2026-08-21T07:40:00Z","Ð ÑƒÑ‡Ð½Ð¾Ð¹ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚","Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð¾ Ñ ÐºÐ¾Ð½Ñ„Ð»Ð¸ÐºÑ‚Ð°Ð¼Ð¸",4,4,0,0,2,"sheet:2026:apr","","system-integration-seed","CORR-T-ODDS-01",0],
-    ["INT-RUN-T-PAYROLL-01","INT-T-PAYROLL","2026-08-21T07:43:00Z","2026-08-21T07:45:00Z","Ð ÑƒÑ‡Ð½Ð¾Ð¹ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚","Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð¾ Ñ ÐºÐ¾Ð½Ñ„Ð»Ð¸ÐºÑ‚Ð°Ð¼Ð¸",114,112,2,0,2,"sheet:COMMON:114","Ð”Ð²Ð° ÑÐ¾Ð²Ð¿Ð°Ð´Ð°ÑŽÑ‰Ð¸Ñ… Ð¸Ð¼ÐµÐ½Ð¸ Ñ‚Ñ€ÐµÐ±ÑƒÑŽÑ‚ Ñ€ÑƒÑ‡Ð½Ð¾Ð¹ ÑÐ²ÐµÑ€ÐºÐ¸","system-integration-seed","CORR-T-PAYROLL-01",0],
-    ["INT-RUN-T-PAYMENTS-01","INT-T-PAYMENTS","2026-08-21T07:48:00Z","2026-08-21T07:50:00Z","Ð ÑƒÑ‡Ð½Ð¾Ð¹ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚","Ð£ÑÐ¿ÐµÑˆÐ½Ð¾",4,4,0,0,1,"period:2026-06","Ð˜ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº Ð¿Ñ€Ð¾Ñ‡Ð¸Ñ‚Ð°Ð½, Ð½Ð¾ ÑƒÑÑ‚Ð°Ñ€ÐµÐ» Ð¾Ñ‚Ð½Ð¾ÑÐ¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾ Ñ‚ÐµÐºÑƒÑ‰ÐµÐ¹ Ð´Ð°Ñ‚Ñ‹","system-integration-seed","CORR-T-PAYMENTS-01",0],
-    ["INT-RUN-T-CRM-PREFLIGHT","INT-T-ALFACRM","2026-08-21T08:05:00Z","2026-08-21T08:05:01Z","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð³Ð¾Ñ‚Ð¾Ð²Ð½Ð¾ÑÑ‚Ð¸","Ð—Ð°Ð±Ð»Ð¾ÐºÐ¸Ñ€Ð¾Ð²Ð°Ð½Ð¾",0,0,0,1,0,"preflight:auth","API-ÐºÐ»ÑŽÑ‡ Ð¸ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ endpoint Ð½Ðµ Ð¿Ñ€ÐµÐ´Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ñ‹","system-integration-seed","CORR-T-CRM-PREFLIGHT",1]
-  ];
-  for (const row of runs) {
-    await env.DB.prepare("INSERT INTO integration_sync_runs (id,connection_id,started_at,finished_at,trigger,status,received_count,accepted_count,rejected_count,error_count,conflict_count,checkpoint,error_message,initiated_by,correlation_id,dry_run) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING").bind(...row).run();
-  }
-  const logs=[
-    ["INT-RUN-T-D1-01","INT-T-D1","INFO","health.verified","D1 binding Ð¾Ñ‚Ð²ÐµÑ‡Ð°ÐµÑ‚; Ñ‡Ñ‚ÐµÐ½Ð¸Ðµ Ñ€Ð°Ð±Ð¾Ñ‡Ð¸Ñ… Ñ‚Ð°Ð±Ð»Ð¸Ñ† Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¾","D1:health"],
-    ["INT-RUN-T-ODDS-01","INT-T-ODDS","INFO","file.read","ÐŸÑ€Ð¾Ñ‡Ð¸Ñ‚Ð°Ð½Ñ‹ Ñ‡ÐµÑ‚Ñ‹Ñ€Ðµ Ð»Ð¸ÑÑ‚Ð°, Ð¸ÑÑ…Ð¾Ð´Ð½Ñ‹Ð¹ Ñ„Ð°Ð¹Ð» Ð½Ðµ Ð¸Ð·Ð¼ÐµÐ½Ñ‘Ð½","01-01.01.2023-31.01.2026.xlsx"],
-    ["INT-RUN-T-ODDS-01","INT-T-ODDS","WARN","quality.conflict","Ð”Ð²Ð° Ñ€Ð°ÑÑ…Ð¾Ð¶Ð´ÐµÐ½Ð¸Ñ Ð¸ÑÑ…Ð¾Ð´Ð½Ñ‹Ñ… Ð¸Ñ‚Ð¾Ð³Ð¾Ð² Ð²Ñ‹Ð½ÐµÑÐµÐ½Ñ‹ Ð² Ð¾Ñ‡ÐµÑ€ÐµÐ´ÑŒ","2026:apr"],
-    ["INT-RUN-T-PAYROLL-01","INT-T-PAYROLL","WARN","identity.conflict","Ð¡Ð¾Ð²Ð¿Ð°Ð´ÐµÐ½Ð¸Ñ Ð½Ðµ Ð¾Ð±ÑŠÐµÐ´Ð¸Ð½ÐµÐ½Ñ‹ Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸","COMMON:rows"],
-    ["INT-RUN-T-PAYMENTS-01","INT-T-PAYMENTS","WARN","freshness.stale","ÐŸÐ¾ÑÐ»ÐµÐ´Ð½Ð¸Ð¹ Ð½Ð°Ð¹Ð´ÐµÐ½Ð½Ñ‹Ð¹ Ð¿ÐµÑ€Ð¸Ð¾Ð´ â€” Ð¸ÑŽÐ½ÑŒ 2026","period:2026-06"],
-    ["INT-RUN-T-CRM-PREFLIGHT","INT-T-ALFACRM","ERROR","auth.missing","Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð½Ðµ Ð·Ð°Ð¿ÑƒÑÐºÐ°Ð»Ð°ÑÑŒ: Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚ API-ÐºÐ»ÑŽÑ‡","auth"]
-  ];
-  for (const row of logs) {
-    await env.DB.prepare("INSERT INTO integration_log_entries (run_id,connection_id,level,event,message,record_ref) SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM integration_log_entries WHERE run_id=? AND event=? AND record_ref=?)").bind(...row,row[0],row[3],row[5]).run();
-  }
-  const conflicts=[
-    ["INT-CNF-T-ODDS-01","INT-T-ODDS","2026:APR:OUTFLOW","","Ð˜ÑÑ…Ð¾Ð´Ð½Ñ‹Ð¹ Ð¸Ñ‚Ð¾Ð³","Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ñ Ð°Ð¿Ñ€ÐµÐ»Ñ","Ð¡ÑƒÐ¼Ð¼Ð° Ð´ÐµÑ‚Ð°Ð»ÑŒÐ½Ñ‹Ñ… ÑÑ‚Ñ€Ð¾Ðº","Ð˜Ñ‚Ð¾Ð³Ð¾Ð²Ð°Ñ ÑÑ‚Ñ€Ð¾ÐºÐ° Ñ„Ð°Ð¹Ð»Ð°","EMP-T-ACC-001","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚","","","2026-08-21T07:40:00Z"],
-    ["INT-CNF-T-PAYROLL-01","INT-T-PAYROLL","COMMON:DUPLICATE:01","","Ð’Ð¾Ð·Ð¼Ð¾Ð¶Ð½Ñ‹Ð¹ Ð´ÑƒÐ±Ð»ÑŒ","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","Ð”Ð²Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ñ ÑÐ¾Ð²Ð¿Ð°Ð´Ð°ÑŽÑ‰Ð¸Ð¼ Ð¸Ð¼ÐµÐ½ÐµÐ¼","ÐžÑ‚Ð´ÐµÐ»ÑŒÐ½Ñ‹Ðµ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ¸ Ð´Ð¾ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸","EMP-T-HR-001","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚","","","2026-08-21T07:45:00Z"],
-    ["INT-CNF-T-PAYMENTS-01","INT-T-PAYMENTS","PERIOD:LAST","","Ð¡Ð²ÐµÐ¶ÐµÑÑ‚ÑŒ","ÐŸÐ¾ÑÐ»ÐµÐ´Ð½Ð¸Ð¹ Ð¿ÐµÑ€Ð¸Ð¾Ð´","2026-06","2026-08","EMP-T-ACC-001","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚","","","2026-08-21T07:50:00Z"]
-  ];
-  for (const row of conflicts) {
-    await env.DB.prepare("INSERT INTO integration_conflicts (id,connection_id,external_record_id,internal_entity_id,conflict_type,field_name,source_value,target_value,owner_entity_id,status,resolution,evidence,detected_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING").bind(...row).run();
-  }
-}
-
-export type IntegrationTestDataStatus = {
-  active: boolean;
-  connections: number;
-  runs: number;
-  logs: number;
-  conflicts: number;
-  total: number;
-  scope: string;
-};
-
-async function ensureIntegrationDemoBootstrap() {
-  if (await getSystemDataMode() === "empty") return;
-  const marker = await env.DB.prepare(
-    "SELECT state_value FROM system_runtime_state WHERE state_key='integration_demo_bootstrap'"
-  ).first<{ state_value: string }>();
-  if (marker?.state_value === INTEGRATION_DEMO_BOOTSTRAP_VERSION) return;
-
-  const before = await getIntegrationTestDataStatus();
-  if (!integrationDemoComplete(before)) await seedIntegrations();
-  const after = await getIntegrationTestDataStatus();
-  if (!integrationDemoComplete(after)) {
-    throw new Error(`Integration demo bootstrap incomplete: ${after.connections}/${after.runs}/${after.logs}/${after.conflicts}`);
-  }
-
-  await env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-    VALUES ('integration_demo_bootstrap',?,CURRENT_TIMESTAMP)
-    ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-    .bind(INTEGRATION_DEMO_BOOTSTRAP_VERSION)
-    .run();
-}
-
-export async function getIntegrationTestDataStatus(): Promise<IntegrationTestDataStatus> {
-  const [connectionRow, runRow, logRow, conflictRow] = await Promise.all([
-    env.DB.prepare("SELECT COUNT(*) AS total FROM integration_connections").first<{ total: number }>(),
-    env.DB.prepare("SELECT COUNT(*) AS total FROM integration_sync_runs").first<{ total: number }>(),
-    env.DB.prepare("SELECT COUNT(*) AS total FROM integration_log_entries").first<{ total: number }>(),
-    env.DB.prepare("SELECT COUNT(*) AS total FROM integration_conflicts").first<{ total: number }>(),
-  ]);
-  const connections = Number(connectionRow?.total ?? 0);
-  const runs = Number(runRow?.total ?? 0);
-  const logs = Number(logRow?.total ?? 0);
-  const conflicts = Number(conflictRow?.total ?? 0);
-  const demoRecords = runs + logs + conflicts;
-  return {
-    active: demoRecords > 0,
-    connections,
-    runs,
-    logs,
-    conflicts,
-    total: demoRecords,
-    scope: "Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ðµ Ð·Ð°Ð¿ÑƒÑÐºÐ¸, Ð¶ÑƒÑ€Ð½Ð°Ð»Ñ‹ Ð¸ ÐºÐ¾Ð½Ñ„Ð»Ð¸ÐºÑ‚Ñ‹ Ð¦ÐµÐ½Ñ‚Ñ€Ð° Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ð¹. ÐšÐ°Ñ‚Ð°Ð»Ð¾Ð³ Ð¿Ñ€Ð¾Ð²Ð°Ð¹Ð´ÐµÑ€Ð¾Ð² Ð¾ÑÑ‚Ð°Ñ‘Ñ‚ÑÑ, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð¿Ð¾ÑÐ»Ðµ Ð¾Ñ‡Ð¸ÑÑ‚ÐºÐ¸ Ð¼Ð¾Ð¶Ð½Ð¾ Ð±Ñ‹Ð»Ð¾ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ñ€ÐµÐ°Ð»ÑŒÐ½Ñ‹Ðµ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸ÐºÐ¸.",
-  };
-}
-
-export async function addIntegrationTestData(actor: string) {
-  if (await getSystemDataMode() === "empty") {
-    throw new Error("Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ðµ Ð´Ð°Ð½Ð½Ñ‹Ðµ Ð½ÐµÐ»ÑŒÐ·Ñ Ð´Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ, Ð¿Ð¾ÐºÐ° ÑÐ¸ÑÑ‚ÐµÐ¼Ð° Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚ Ð² Ð¿ÑƒÑÑ‚Ð¾Ð¼ Ñ€ÐµÐ¶Ð¸Ð¼Ðµ");
-  }
-  await clearIntegrationTestData(false);
-  await seedIntegrations();
-  const status = await getIntegrationTestDataStatus();
-  if (!integrationDemoComplete(status)) {
-    throw new Error(`Integration demo seed incomplete: ${status.connections}/${status.runs}/${status.logs}/${status.conflicts}`);
-  }
-  await writeIntegrationDatasetAudit(actor, "integration.test_data_added", status);
-  return status;
-}
-
-function integrationDemoComplete(status: IntegrationTestDataStatus) {
-  return status.connections >= 19 && status.runs >= 5 && status.logs >= 6 && status.conflicts >= 3;
-}
-
-export async function removeIntegrationTestData(actor: string) {
-  const before = await getIntegrationTestDataStatus();
-  await clearIntegrationTestData(true);
-  const status = await getIntegrationTestDataStatus();
-  await writeIntegrationDatasetAudit(actor, "integration.test_data_removed", { before, after: status });
-  return status;
-}
-
-async function clearIntegrationTestData(keepCatalog = false) {
-  const statements = [
-    env.DB.prepare("DELETE FROM integration_log_entries"),
-    env.DB.prepare("DELETE FROM integration_conflicts"),
-    env.DB.prepare("DELETE FROM integration_sync_runs"),
-    env.DB.prepare("DELETE FROM tasks WHERE source_type='ÐšÐ¾Ð½Ñ„Ð»Ð¸ÐºÑ‚ Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ð¸' AND source_id LIKE 'INT-CNF-T-%'"),
-  ];
-  if (!keepCatalog) {
-    statements.push(
-      env.DB.prepare("DELETE FROM integration_connections"),
-      env.DB.prepare("DELETE FROM entities WHERE id='EMP-T-INT-001' AND created_by='system-integration-seed'"),
-    );
-  } else {
-    statements.push(env.DB.prepare(`UPDATE integration_connections SET
-      received_count=0,accepted_count=0,rejected_count=0,error_count=0,conflict_count=0,
-      last_success_at=CASE WHEN id='INT-T-D1' THEN last_success_at ELSE '' END,
-      updated_at=CURRENT_TIMESTAMP`));
-  }
-  await env.DB.batch(statements);
-}
-
-async function writeIntegrationDatasetAudit(actor: string, action: string, payload: unknown) {
-  await env.DB.prepare(
-    "INSERT INTO audit_events (actor,action,entity_type,entity_id,payload) VALUES (?,?,?,?,?)"
-  ).bind(actor, action, "integration_test_dataset", "INTEGRATION-DEMO", JSON.stringify(payload)).run();
-}
-
-export type IntegrationSetup = {
-  connectionId: string;
-  authMethod: string;
-  startDate: string;
-  syncIntervalMinutes: number;
-  syncMinute: number;
-  endpoint: string;
-  legalEntityId: string;
-  customerCode: string;
-  branchId: string;
-  allocationMode: "single_branch" | "classify_transactions";
-  accountScope: string;
-  channelType: string;
-  sourceMapping: string;
-  dataScopes: string[];
-  readOnlyScopeConfirmed: boolean;
-  credentialGeneration: string;
-  secretStatus: "missing" | "stored" | "external_required";
-  updatedAt: string;
-  updatedBy: string;
-};
-
-const integrationSetupPrefix = "integration_setup:";
-const integrationCredentialPrefix = "integration_credential:v2:";
-const tochkaCompanySelectionPrefix = "integration_company_selection:v1:";
-const tochkaConnectionId = "INT-T-TOCHKA";
-const tbankConnectionId = "INT-T-TBANK";
-const tbankCredentialScope = "bank-read-v1";
-const tochkaCompanySelectionTtlMs = 5 * 60_000;
-
-type TochkaCompanySelectionPayload = {
-  version: 1;
-  legalEntityId: string;
-  customerCode: string;
-  credentialDigest: string;
-  issuedTo: string;
-  expiresAtMs: number;
-};
-
-export type TochkaCompanySelectionHandle = { id: string; name: string };
-export type TochkaCompanySelectionResult =
-  | { ok: true; customerCode: string }
-  | { ok: false; reason: string };
-
-type EncryptedIntegrationCredential = {
-  version: 1;
-  algorithm: "AES-GCM";
-  iv: string;
-  ciphertext: string;
-  updatedAt: string;
-  updatedBy: string;
-};
-
-export async function getIntegrationSetups(): Promise<Record<string, IntegrationSetup>> {
-  const [setupRows, credentialRows] = await Promise.all([
-    env.DB.prepare(
-      "SELECT state_key,state_value FROM system_runtime_state WHERE state_key LIKE 'integration_setup:%'"
-    ).all<{ state_key: string; state_value: string }>(),
-    env.DB.prepare(
-      "SELECT state_key FROM system_runtime_state WHERE state_key LIKE 'integration_credential:v2:%'"
-    ).all<{ state_key: string }>(),
-  ]);
-  const storedCredentialKeys = new Set((credentialRows.results ?? []).map((row: { state_key: string }) => row.state_key));
-  const result: Record<string, IntegrationSetup> = {};
-  for (const row of setupRows.results ?? []) {
-    try {
-      const value = JSON.parse(row.state_value) as IntegrationSetup;
-      const connectionId = row.state_key.slice(integrationSetupPrefix.length);
-      const legalEntityId = String(value.legalEntityId ?? "").trim().slice(0, 80);
-      const customerCode = String(value.customerCode ?? "").trim().slice(0, 80);
-      const tochkaJwt = connectionId === tochkaConnectionId && value.authMethod === "JWT";
-      const tbankToken = connectionId === tbankConnectionId && value.authMethod === "Bearer token";
-      const credentialScope = tbankToken ? tbankCredentialScope : customerCode;
-      result[connectionId] = {
-        ...value,
-        connectionId,
-        endpoint: normalizeStoredIntegrationEndpoint(value.endpoint),
-        legalEntityId,
-        customerCode,
-        allocationMode: value.allocationMode === "single_branch" ? "single_branch" : "classify_transactions",
-        accountScope: value.accountScope || (tochkaJwt || tbankToken ? "all_permitted" : ""),
-        readOnlyScopeConfirmed: connectionId === tbankConnectionId && value.readOnlyScopeConfirmed === true,
-        credentialGeneration: normalizeCredentialGeneration(value.credentialGeneration),
-        secretStatus: tochkaJwt || tbankToken
-          ? credentialScope && storedCredentialKeys.has(integrationCredentialStateKey(connectionId, legalEntityId, credentialScope)) ? "stored" : "missing"
-          : value.secretStatus === "stored" ? "stored" : "external_required",
-      };
-    } catch {
-      // A malformed setup is ignored and remains visible as not configured.
-    }
-  }
-  return result;
-}
-
-type PreparedIntegrationSetup = {
-  setup: IntegrationSetup;
-  protectedBankConnection: boolean;
-  protectedBankCredential: boolean;
-};
-
-export async function validateIntegrationSetupReferences(input: Partial<IntegrationSetup>) {
-  const connectionId = String(input.connectionId ?? "").trim().toUpperCase().slice(0, 80);
-  if (!connectionId) throw new Error("ÐÐµ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð° Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ñ");
-  const connection = await env.DB.prepare("SELECT id FROM integration_connections WHERE id=?")
-    .bind(connectionId).first<{ id: string }>();
-  if (!connection) throw new Error("Ð˜Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ñ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ð°");
-  const bankConnection = connectionId === tochkaConnectionId || connectionId === tbankConnectionId;
-  const legalEntityId = String(input.legalEntityId ?? "").trim().slice(0, 80);
-  const allocationMode: IntegrationSetup["allocationMode"] = input.allocationMode === "single_branch" ? "single_branch" : "classify_transactions";
-  const branchId = String(input.branchId ?? "").trim().slice(0, 80);
-  if (bankConnection && !legalEntityId) throw new Error("Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ ÑŽÑ€Ð¸Ð´Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ Ð»Ð¸Ñ†Ð¾");
-  if (bankConnection) {
-    const legalEntity = await env.DB.prepare("SELECT id FROM entities WHERE id=? AND entity_type='Ð®Ñ€Ð»Ð¸Ñ†Ð¾' LIMIT 1")
-      .bind(legalEntityId).first<{ id: string }>();
-    if (!legalEntity) throw new Error("Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÑŽÑ‰ÑƒÑŽ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÑƒ ÑŽÑ€Ð¸Ð´Ð¸Ñ‡ÐµÑÐºÐ¾Ð³Ð¾ Ð»Ð¸Ñ†Ð°");
-  }
-  const requiresBranch = !bankConnection || allocationMode === "single_branch";
-  if (requiresBranch && !branchId) {
-    throw new Error("Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ Ñ„Ð¸Ð»Ð¸Ð°Ð» Ð½Ð°Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ñ");
-  }
-  if (requiresBranch && branchId) {
-    const branch = await env.DB.prepare("SELECT id FROM organization_branches WHERE id=? AND status='ÐÐºÑ‚Ð¸Ð²ÐµÐ½' LIMIT 1")
-      .bind(branchId).first<{ id: string }>();
-    if (!branch) throw new Error("Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ Ð´ÐµÐ¹ÑÑ‚Ð²ÑƒÑŽÑ‰Ð¸Ð¹ Ñ„Ð¸Ð»Ð¸Ð°Ð»");
-  }
-  return { connectionId, bankConnection, legalEntityId, allocationMode, branchId };
-}
-
-async function prepareIntegrationSetup(
-  actor: string,
-  input: Partial<IntegrationSetup>,
-  forceStoredCredential = false,
-): Promise<PreparedIntegrationSetup> {
-  const references = await validateIntegrationSetupReferences(input);
-  const { connectionId, bankConnection, legalEntityId, allocationMode, branchId } = references;
-  const protectedBankConnection = connectionId === tochkaConnectionId || connectionId === tbankConnectionId;
-  const tochkaReadOnlyImport = connectionId === tochkaConnectionId;
-  const startDate = protectedBankConnection && !tochkaReadOnlyImport ? "" : String(input.startDate ?? "").trim().slice(0, 10);
-  if ((!protectedBankConnection || tochkaReadOnlyImport) && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new Error("Ð£ÐºÐ°Ð¶Ð¸Ñ‚Ðµ Ð´Ð°Ñ‚Ñƒ Ð½Ð°Ñ‡Ð°Ð»Ð° Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ¸");
-  const interval = protectedBankConnection && !tochkaReadOnlyImport
-    ? 0
-    : [60, 180, 360, 1440].includes(Number(input.syncIntervalMinutes))
-    ? Number(input.syncIntervalMinutes)
-    : 60;
-  const minute = protectedBankConnection && !tochkaReadOnlyImport ? 0 : Math.min(59, Math.max(0, Number(input.syncMinute) || 0));
-  const authMethod = String(input.authMethod ?? "").trim().slice(0, 80);
-  const tochkaJwt = connectionId === tochkaConnectionId && authMethod === "JWT";
-  const tbankToken = connectionId === tbankConnectionId && authMethod === "Bearer token";
-  const protectedBankCredential = tochkaJwt || tbankToken;
-  const customerCode = String(input.customerCode ?? "").trim().slice(0, 80);
-  const credentialScope = tbankToken ? tbankCredentialScope : customerCode;
-  if (connectionId === tochkaConnectionId && customerCode && !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,79}$/.test(customerCode)) {
-    throw new Error("ÐÐµÐºÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð½Ð¾ ÑƒÐºÐ°Ð·Ð°Ð½Ð° ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ñ Ð¢Ð¾Ñ‡ÐºÐ¸");
-  }
-  const credentialStored = protectedBankCredential && (
-    forceStoredCredential || Boolean(credentialScope && await hasIntegrationCredential(connectionId, legalEntityId, credentialScope))
-  );
-  const updatedAt = new Date().toISOString();
-  const setup: IntegrationSetup = {
-    connectionId,
-    authMethod,
-    startDate,
-    syncIntervalMinutes: interval,
-    syncMinute: minute,
-    endpoint: protectedBankConnection ? "" : normalizeSubmittedIntegrationEndpoint(input.endpoint),
-    legalEntityId,
-    customerCode: connectionId === tochkaConnectionId ? customerCode : "",
-    branchId: bankConnection && allocationMode === "classify_transactions" ? "" : branchId,
-    allocationMode,
-    accountScope: bankConnection ? "all_permitted" : String(input.accountScope ?? "").trim().slice(0, 160),
-    channelType: String(input.channelType ?? "").trim().slice(0, 80),
-    sourceMapping: String(input.sourceMapping ?? "").trim().slice(0, 500),
-    dataScopes: connectionId === tochkaConnectionId
-      ? ["Ð¡Ñ‡ÐµÑ‚Ð°", "Ð’Ñ‹Ð¿Ð¸ÑÐºÐ¸", "ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ð¸ Ð¸ Ð¿Ð»Ð°Ñ‚ÐµÐ¶Ð¸", "Ð ÐµÐµÑÑ‚Ñ€ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ð¹", "ÐžÑÑ‚Ð°Ñ‚ÐºÐ¸"]
-      : Array.isArray(input.dataScopes) ? input.dataScopes.filter((item): item is string => typeof item === "string").map((item) => item.trim().slice(0, 80)).filter(Boolean).slice(0, 30) : [],
-    readOnlyScopeConfirmed: connectionId === tbankConnectionId && input.readOnlyScopeConfirmed === true,
-    credentialGeneration: protectedBankConnection ? crypto.randomUUID() : "",
-    secretStatus: protectedBankCredential ? credentialStored ? "stored" : "missing" : "external_required",
-    updatedAt,
-    updatedBy: actor,
-  };
-  if (!setup.dataScopes.length) throw new Error("Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ, ÐºÐ°ÐºÐ¸Ðµ Ð´Ð°Ð½Ð½Ñ‹Ðµ Ð¿Ð¾Ð»ÑƒÑ‡Ð°Ñ‚ÑŒ");
-  return { setup, protectedBankConnection, protectedBankCredential };
-}
-
-async function persistIntegrationSetup(
-  actor: string,
-  prepared: PreparedIntegrationSetup,
-  baseline: Pick<IntegrationSetup, "credentialGeneration" | "updatedAt"> | null = null,
-) {
-  const { setup, protectedBankConnection, protectedBankCredential } = prepared;
-  const saveSetupStatement = env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-    VALUES (?,?,CURRENT_TIMESTAMP)
-    ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-    .bind(`${integrationSetupPrefix}${setup.connectionId}`, JSON.stringify(setup));
-  const updateConnectionStatement = env.DB.prepare(`UPDATE integration_connections SET
-    auth_status=?,
-    next_sync_at=?,
-    updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(
-      protectedBankCredential
-        ? setup.secretStatus === "stored" ? "ÐšÐ»ÑŽÑ‡ ÑÐ¾Ñ…Ñ€Ð°Ð½Ñ‘Ð½ Â· Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð±Ð°Ð½ÐºÐ°" : "ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ° ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð° Â· ÐºÐ»ÑŽÑ‡ Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ"
-        : "ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ° ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð° Â· ÑÐµÐºÑ€ÐµÑ‚ Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ",
-      protectedBankConnection
-        ? ""
-        : "ÐŸÐ¾ÑÐ»Ðµ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾Ð¹ Ð¿ÐµÑ€ÐµÐ´Ð°Ñ‡Ð¸ ÑÐµÐºÑ€ÐµÑ‚Ð°",
-      setup.connectionId,
-    );
-  const auditPayload = JSON.stringify({
-    connectionId: setup.connectionId,
-    selectedLegalEntityId: setup.legalEntityId,
-    companySelectionConfirmed: Boolean(setup.customerCode),
-    accountScope: setup.accountScope,
-    allocationMode: setup.allocationMode,
-    startDate: setup.startDate,
-    syncIntervalMinutes: setup.syncIntervalMinutes,
-    syncMinute: setup.syncMinute,
-    accessMethod: setup.connectionId === tochkaConnectionId
-      ? "ÐšÐ»ÑŽÑ‡ Ð¢Ð¾Ñ‡ÐºÐ¸"
-      : setup.connectionId === tbankConnectionId
-        ? "Ð¢Ð¾ÐºÐµÐ½ Ð¢â€‘Ð‘Ð°Ð½ÐºÐ°"
-        : setup.authMethod,
-    dataScopes: setup.dataScopes,
-    limitedPermissionsConfirmedByOwner: setup.connectionId === tbankConnectionId
-      ? setup.readOnlyScopeConfirmed
-      : undefined,
-    secretStored: setup.secretStatus === "stored",
-  });
-  if (protectedBankConnection) {
-    const setupStateKey = `${integrationSetupPrefix}${setup.connectionId}`;
-    const guard = baseline
-      ? `EXISTS (SELECT 1 FROM system_runtime_state
-          WHERE state_key=?
-            AND COALESCE(json_extract(state_value,'$.credentialGeneration'),'')=?
-            AND COALESCE(json_extract(state_value,'$.updatedAt'),'')=?)`
-      : "NOT EXISTS (SELECT 1 FROM system_runtime_state WHERE state_key=?)";
-    const guardBindings = baseline
-      ? [setupStateKey, normalizeCredentialGeneration(baseline.credentialGeneration), baseline.updatedAt]
-      : [setupStateKey];
-    const statements = [];
-    if (setup.secretStatus !== "stored") {
-      statements.push(env.DB.prepare(`DELETE FROM system_runtime_state
-        WHERE state_key LIKE ? AND ${guard}`)
-        .bind(integrationCredentialConnectionPattern(setup.connectionId), ...guardBindings));
-    }
-    statements.push(
-      env.DB.prepare(`UPDATE integration_connections SET
-        auth_status=?,next_sync_at='',updated_at=CURRENT_TIMESTAMP WHERE id=? AND ${guard}`)
-        .bind(
-          protectedBankCredential
-            ? setup.secretStatus === "stored" ? "ÐšÐ»ÑŽÑ‡ ÑÐ¾Ñ…Ñ€Ð°Ð½Ñ‘Ð½ Â· Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð±Ð°Ð½ÐºÐ°" : "ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ° ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð° Â· ÐºÐ»ÑŽÑ‡ Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ"
-            : "ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ° ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð° Â· ÑÐµÐºÑ€ÐµÑ‚ Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ",
-          setup.connectionId,
-          ...guardBindings,
-        ),
-      env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
-        SELECT ?,'integration.setup_saved','integration_test_dataset','INTEGRATION-DEMO',? WHERE ${guard}`)
-        .bind(actor, auditPayload, ...guardBindings),
-      env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-        SELECT ?,?,CURRENT_TIMESTAMP WHERE ${guard}
-        ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-        .bind(setupStateKey, JSON.stringify(setup), ...guardBindings),
-    );
-    const results = await env.DB.batch(statements);
-    const setupResult = results.at(-1) as { meta?: { changes?: number } } | undefined;
-    return Number(setupResult?.meta?.changes ?? 0) > 0;
-  } else {
-    await env.DB.batch([
-      saveSetupStatement,
-      updateConnectionStatement,
-      env.DB.prepare("INSERT INTO audit_events (actor,action,entity_type,entity_id,payload) VALUES (?,?,?,?,?)")
-        .bind(actor, "integration.setup_saved", "integration_test_dataset", "INTEGRATION-DEMO", auditPayload),
-    ]);
-    return true;
-  }
-}
-
-export async function saveIntegrationSetup(actor: string, input: Partial<IntegrationSetup>) {
-  const connectionId = String(input.connectionId ?? "").trim().toUpperCase().slice(0, 80);
-  const protectedBankConnection = connectionId === tochkaConnectionId || connectionId === tbankConnectionId;
-  const baseline = protectedBankConnection
-    ? (await getIntegrationSetups())[connectionId] ?? null
-    : null;
-  const prepared = await prepareIntegrationSetup(actor, input);
-  const saved = await persistIntegrationSetup(actor, prepared, baseline);
-  if (!saved) throw new Error("ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ° Ð±Ð°Ð½ÐºÐ° Ð¸Ð·Ð¼ÐµÐ½Ð¸Ð»Ð°ÑÑŒ Ð²Ð¾ Ð²Ñ€ÐµÐ¼Ñ ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸Ñ. ÐŸÐ¾Ð²Ñ‚Ð¾Ñ€Ð¸Ñ‚Ðµ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ.");
-  return prepared.setup;
-}
-
-export async function saveTochkaSetupWithCredential(
-  actor: string,
-  input: Partial<IntegrationSetup>,
-  value: unknown,
-  baseline: Pick<IntegrationSetup, "credentialGeneration" | "updatedAt"> | null,
-) {
-  const prepared = await prepareIntegrationSetup(actor, input, true);
-  const { setup } = prepared;
-  if (setup.connectionId !== tochkaConnectionId || setup.authMethod !== "JWT" || !setup.customerCode) {
-    throw new Error("ÐšÐ»ÑŽÑ‡ Ð¿Ñ€Ð¸Ð½Ð¸Ð¼Ð°ÐµÑ‚ÑÑ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð´Ð»Ñ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ð¾Ð³Ð¾ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ñ Ð±Ð°Ð½ÐºÐ° Ð¢Ð¾Ñ‡ÐºÐ°");
-  }
-  const credential = await encryptIntegrationCredential(
-    actor,
-    setup.connectionId,
-    setup.legalEntityId,
-    setup.customerCode,
-    value,
-  );
-  const setupAudit = JSON.stringify({
-    connectionId: setup.connectionId,
-    selectedLegalEntityId: setup.legalEntityId,
-    companySelectionConfirmed: true,
-    accountScope: setup.accountScope,
-    allocationMode: setup.allocationMode,
-    startDate: setup.startDate,
-    syncIntervalMinutes: setup.syncIntervalMinutes,
-    syncMinute: setup.syncMinute,
-    accessMethod: "ÐšÐ»ÑŽÑ‡ Ð¢Ð¾Ñ‡ÐºÐ¸",
-    dataScopes: setup.dataScopes,
-    secretStored: true,
-  });
-  const credentialAudit = JSON.stringify({
-    connectionId: credential.connectionId,
-    selectedLegalEntityId: credential.legalEntityId,
-    credentialEnvelopeStored: true,
-    version: credential.envelope.version,
-    algorithm: credential.envelope.algorithm,
-  });
-  const saved = await persistBankSetupWithCredentialCas(
-    actor,
-    setup,
-    credential,
-    baseline,
-    setupAudit,
-    credentialAudit,
-    "ÐšÐ»ÑŽÑ‡ Ð¢Ð¾Ñ‡ÐºÐ¸ ÑÐ¾Ñ…Ñ€Ð°Ð½Ñ‘Ð½ Â· Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð±Ð°Ð½ÐºÐ°",
-  );
-  return saved ? setup : null;
-}
-
-export async function createTochkaCompanySelectionHandles(
-  actorValue: string,
-  legalEntityIdValue: string,
-  credentialValue: unknown,
-  choicesValue: Array<{ code: string; name: string }>,
-  nowMs = Date.now(),
-): Promise<TochkaCompanySelectionHandle[]> {
-  const actor = String(actorValue ?? "").trim().slice(0, 120);
-  if (!actor) throw new Error("ÐÐµ Ð¾Ð¿Ñ€ÐµÐ´ÐµÐ»Ñ‘Ð½ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒ Ð²Ñ‹Ð±Ð¾Ñ€Ð° ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ð¸");
-  const legalEntityId = normalizeIntegrationCredentialScope(legalEntityIdValue, "ÑŽÑ€Ð¸Ð´Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ Ð»Ð¸Ñ†Ð¾");
-  const credentialDigest = await integrationCredentialDigest(credentialValue);
-  const expiresAtMs = nowMs + tochkaCompanySelectionTtlMs;
-  const rows = choicesValue.slice(0, 100).flatMap((choice, index) => {
-    const customerCode = String(choice.code ?? "").trim().slice(0, 80);
-    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{1,79}$/.test(customerCode)) return [];
-    const id = `${crypto.randomUUID().replace(/-/g, "")}${crypto.randomUUID().replace(/-/g, "")}`;
-    const name = String(choice.name ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 120)
-      || `ÐšÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ñ ${index + 1}`;
-    const payload: TochkaCompanySelectionPayload = {
-      version: 1,
-      legalEntityId,
-      customerCode,
-      credentialDigest,
-      issuedTo: actor,
-      expiresAtMs,
-    };
-    return [{ id, name, payload }];
-  });
-  if (!rows.length) return [];
-  await env.DB.batch([
-    env.DB.prepare(`DELETE FROM system_runtime_state
-      WHERE state_key LIKE ? AND CAST(json_extract(state_value,'$.expiresAtMs') AS INTEGER)<?`)
-      .bind(`${tochkaCompanySelectionPrefix}%`, nowMs),
-    ...rows.map((row) => env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-      VALUES (?,?,CURRENT_TIMESTAMP) ON CONFLICT(state_key) DO NOTHING`)
-      .bind(`${tochkaCompanySelectionPrefix}${row.id}`, JSON.stringify(row.payload))),
-  ]);
-  return rows.map(({ id, name }) => ({ id, name }));
-}
-
-export async function consumeTochkaCompanySelectionHandle(
-  actorValue: string,
-  handleValue: unknown,
-  legalEntityIdValue: string,
-  credentialValue: unknown,
-  nowMs = Date.now(),
-): Promise<TochkaCompanySelectionResult> {
-  const handle = typeof handleValue === "string" ? handleValue.trim() : "";
-  if (!/^[a-f0-9]{64}$/.test(handle)) {
-    return { ok: false, reason: "Ð’Ñ‹Ð±Ð¾Ñ€ ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ð¸ Ð½ÐµÐ´ÐµÐ¹ÑÑ‚Ð²Ð¸Ñ‚ÐµÐ»ÐµÐ½. ÐÐ°Ñ‡Ð½Ð¸Ñ‚Ðµ Ð²Ñ‹Ð±Ð¾Ñ€ Ð·Ð°Ð½Ð¾Ð²Ð¾." };
-  }
-  const stateKey = `${tochkaCompanySelectionPrefix}${handle}`;
-  const row = await env.DB.prepare("SELECT state_value FROM system_runtime_state WHERE state_key=?")
-    .bind(stateKey).first<{ state_value: string }>();
-  if (!row) return { ok: false, reason: "Ð’Ñ‹Ð±Ð¾Ñ€ ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ð¸ ÑƒÐ¶Ðµ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½ Ð¸Ð»Ð¸ ÑƒÑÑ‚Ð°Ñ€ÐµÐ». ÐÐ°Ñ‡Ð½Ð¸Ñ‚Ðµ Ð²Ñ‹Ð±Ð¾Ñ€ Ð·Ð°Ð½Ð¾Ð²Ð¾." };
-
-  let payload: TochkaCompanySelectionPayload;
-  try {
-    payload = JSON.parse(row.state_value) as TochkaCompanySelectionPayload;
-  } catch {
-    await env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key=? AND state_value=?")
-      .bind(stateKey, row.state_value).run();
-    return { ok: false, reason: "Ð’Ñ‹Ð±Ð¾Ñ€ ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ð¸ Ð½ÐµÐ´ÐµÐ¹ÑÑ‚Ð²Ð¸Ñ‚ÐµÐ»ÐµÐ½. ÐÐ°Ñ‡Ð½Ð¸Ñ‚Ðµ Ð²Ñ‹Ð±Ð¾Ñ€ Ð·Ð°Ð½Ð¾Ð²Ð¾." };
-  }
-  if (payload.version !== 1 || !Number.isFinite(payload.expiresAtMs) || payload.expiresAtMs <= nowMs) {
-    await env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key=? AND state_value=?")
-      .bind(stateKey, row.state_value).run();
-    return { ok: false, reason: "Ð’Ñ€ÐµÐ¼Ñ Ð²Ñ‹Ð±Ð¾Ñ€Ð° ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ð¸ Ð¸ÑÑ‚ÐµÐºÐ»Ð¾. ÐÐ°Ñ‡Ð½Ð¸Ñ‚Ðµ Ð²Ñ‹Ð±Ð¾Ñ€ Ð·Ð°Ð½Ð¾Ð²Ð¾." };
-  }
-
-  const actor = String(actorValue ?? "").trim().slice(0, 120);
-  let legalEntityId = "";
-  let credentialDigest = "";
-  try {
-    legalEntityId = normalizeIntegrationCredentialScope(legalEntityIdValue, "ÑŽÑ€Ð¸Ð´Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ Ð»Ð¸Ñ†Ð¾");
-    credentialDigest = await integrationCredentialDigest(credentialValue);
-  } catch {
-    return { ok: false, reason: "Ð’Ñ‹Ð±Ð¾Ñ€ ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ð¸ Ð½Ðµ Ð¾Ñ‚Ð½Ð¾ÑÐ¸Ñ‚ÑÑ Ðº ÑÑ‚Ð¾Ð¼Ñƒ ÐºÐ»ÑŽÑ‡Ñƒ. ÐÐ°Ñ‡Ð½Ð¸Ñ‚Ðµ Ð²Ñ‹Ð±Ð¾Ñ€ Ð·Ð°Ð½Ð¾Ð²Ð¾." };
-  }
-  const expectedCode = String(payload.customerCode ?? "").trim().slice(0, 80);
-  const bindingMatches = constantTimeEqual(payload.issuedTo, actor)
-    && constantTimeEqual(payload.legalEntityId, legalEntityId)
-    && constantTimeEqual(payload.credentialDigest, credentialDigest)
-    && /^[A-Za-z0-9][A-Za-z0-9._:-]{1,79}$/.test(expectedCode);
-  if (!bindingMatches) {
-    return { ok: false, reason: "Ð’Ñ‹Ð±Ð¾Ñ€ ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ð¸ Ð½Ðµ Ð¾Ñ‚Ð½Ð¾ÑÐ¸Ñ‚ÑÑ Ðº ÑÑ‚Ð¾Ð¼Ñƒ ÐºÐ»ÑŽÑ‡Ñƒ. ÐÐ°Ñ‡Ð½Ð¸Ñ‚Ðµ Ð²Ñ‹Ð±Ð¾Ñ€ Ð·Ð°Ð½Ð¾Ð²Ð¾." };
-  }
-
-  const consumed = await env.DB.prepare(
-    "DELETE FROM system_runtime_state WHERE state_key=? AND state_value=? RETURNING state_value"
-  ).bind(stateKey, row.state_value).first<{ state_value: string }>();
-  if (!consumed) return { ok: false, reason: "Ð’Ñ‹Ð±Ð¾Ñ€ ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ð¸ ÑƒÐ¶Ðµ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½ Ð¸Ð»Ð¸ ÑƒÑÑ‚Ð°Ñ€ÐµÐ». ÐÐ°Ñ‡Ð½Ð¸Ñ‚Ðµ Ð²Ñ‹Ð±Ð¾Ñ€ Ð·Ð°Ð½Ð¾Ð²Ð¾." };
-  return { ok: true, customerCode: expectedCode };
-}
-
-export async function saveTBankSetupWithCredential(
-  actor: string,
-  input: Partial<IntegrationSetup>,
-  value: unknown,
-  baseline: Pick<IntegrationSetup, "credentialGeneration" | "updatedAt"> | null,
-) {
-  const prepared = await prepareIntegrationSetup(actor, input, true);
-  const { setup } = prepared;
-  if (setup.connectionId !== tbankConnectionId || setup.authMethod !== "Bearer token" || !setup.readOnlyScopeConfirmed) {
-    throw new Error("ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð´Ð¸Ñ‚Ðµ Ð¾Ð³Ñ€Ð°Ð½Ð¸Ñ‡ÐµÐ½Ð½Ñ‹Ðµ Ð¿Ñ€Ð°Ð²Ð° Ñ‚Ð¾ÐºÐµÐ½Ð° Ð¢â€‘Ð‘Ð°Ð½ÐºÐ°");
-  }
-  const credential = await encryptIntegrationCredential(
-    actor,
-    setup.connectionId,
-    setup.legalEntityId,
-    tbankCredentialScope,
-    value,
-  );
-  const setupAudit = JSON.stringify({
-    connectionId: setup.connectionId,
-    selectedLegalEntityId: setup.legalEntityId,
-    accountScope: setup.accountScope,
-    allocationMode: setup.allocationMode,
-    accessMethod: "Ð¢Ð¾ÐºÐµÐ½ Ð¢â€‘Ð‘Ð°Ð½ÐºÐ°",
-    limitedPermissionsConfirmedByOwner: true,
-    dataScopes: setup.dataScopes,
-    secretStored: true,
-  });
-  const credentialAudit = JSON.stringify({
-    connectionId: credential.connectionId,
-    selectedLegalEntityId: credential.legalEntityId,
-    credentialEnvelopeStored: true,
-    version: credential.envelope.version,
-    algorithm: credential.envelope.algorithm,
-  });
-  const saved = await persistBankSetupWithCredentialCas(
-    actor,
-    setup,
-    credential,
-    baseline,
-    setupAudit,
-    credentialAudit,
-    "Ð¢Ð¾ÐºÐµÐ½ Ð¢â€‘Ð‘Ð°Ð½ÐºÐ° ÑÐ¾Ñ…Ñ€Ð°Ð½Ñ‘Ð½ Â· Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð±Ð°Ð½ÐºÐ°",
-  );
-  return saved ? setup : null;
-}
-
-async function persistBankSetupWithCredentialCas(
-  actor: string,
-  setup: IntegrationSetup,
-  credential: Awaited<ReturnType<typeof encryptIntegrationCredential>>,
-  baseline: Pick<IntegrationSetup, "credentialGeneration" | "updatedAt"> | null,
-  setupAudit: string,
-  credentialAudit: string,
-  authStatus: string,
-) {
-  const setupStateKey = `${integrationSetupPrefix}${setup.connectionId}`;
-  const guard = baseline
-    ? `EXISTS (SELECT 1 FROM system_runtime_state
-        WHERE state_key=?
-          AND COALESCE(json_extract(state_value,'$.credentialGeneration'),'')=?
-          AND COALESCE(json_extract(state_value,'$.updatedAt'),'')=?)`
-    : "NOT EXISTS (SELECT 1 FROM system_runtime_state WHERE state_key=?)";
-  const guardBindings = baseline
-    ? [setupStateKey, normalizeCredentialGeneration(baseline.credentialGeneration), baseline.updatedAt]
-    : [setupStateKey];
-  const results = await env.DB.batch([
-    env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-      SELECT ?,?,CURRENT_TIMESTAMP WHERE ${guard}
-      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-      .bind(credential.stateKey, JSON.stringify(credential.envelope), ...guardBindings),
-    env.DB.prepare(`DELETE FROM system_runtime_state
-      WHERE state_key LIKE ? AND state_key<>? AND ${guard}`)
-      .bind(integrationCredentialConnectionPattern(setup.connectionId), credential.stateKey, ...guardBindings),
-    env.DB.prepare(`UPDATE integration_connections SET
-      auth_status=?,next_sync_at='',updated_at=CURRENT_TIMESTAMP WHERE id=? AND ${guard}`)
-      .bind(authStatus, setup.connectionId, ...guardBindings),
-    env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
-      SELECT ?,'integration.setup_saved','integration_test_dataset','INTEGRATION-DEMO',? WHERE ${guard}`)
-      .bind(actor, setupAudit, ...guardBindings),
-    env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
-      SELECT ?,'integration.credential_replaced','integration_test_dataset','INTEGRATION-DEMO',? WHERE ${guard}`)
-      .bind(actor, credentialAudit, ...guardBindings),
-    env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-      SELECT ?,?,CURRENT_TIMESTAMP WHERE ${guard}
-      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-      .bind(setupStateKey, JSON.stringify(setup), ...guardBindings),
-  ]);
-  const setupResult = results[5] as { meta?: { changes?: number } } | undefined;
-  return Number(setupResult?.meta?.changes ?? 0) > 0;
-}
-
-export type IntegrationBankProbeCommit = {
-  valid: boolean;
-  runId: string;
-  correlationId: string;
-  occurredAt: string;
-  trigger: string;
-  reason: string;
-  receivedCount: number;
-  checkpoint: string;
-  logEvent: string;
-  logMessage: string;
-  logRecordRef: string;
-  successStatus: string;
-  successAuthStatus: string;
-  failureAuthStatus: string;
-  credentialExpiresAt: string;
-  auditAction: string;
-  auditPayload: Record<string, unknown>;
-};
-
-export async function commitIntegrationBankProbe(
-  actor: string,
-  setup: IntegrationSetup,
-  commit: IntegrationBankProbeCommit,
-) {
-  const generation = normalizeCredentialGeneration(setup.credentialGeneration);
-  if (!generation || setup.secretStatus !== "stored") return false;
-  const credentialScope = setup.connectionId === tbankConnectionId ? tbankCredentialScope : setup.customerCode;
-  const credentialStateKey = integrationCredentialStateKey(setup.connectionId, setup.legalEntityId, credentialScope);
-  const setupStateKey = `${integrationSetupPrefix}${setup.connectionId}`;
-  const guard = `EXISTS (
-    SELECT 1 FROM system_runtime_state AS saved_setup
-    JOIN system_runtime_state AS saved_credential ON saved_credential.state_key=?
-    WHERE saved_setup.state_key=?
-      AND json_extract(saved_setup.state_value,'$.credentialGeneration')=?
-  ) AND EXISTS (SELECT 1 FROM integration_connections WHERE id=?)`;
-  const guardBindings = [credentialStateKey, setupStateKey, generation, setup.connectionId];
-  const runStatus = commit.valid ? "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð¿Ñ€Ð¾Ð¹Ð´ÐµÐ½Ð°" : "Ð—Ð°Ð±Ð»Ð¾ÐºÐ¸Ñ€Ð¾Ð²Ð°Ð½Ð¾";
-  const connectionStatement = commit.valid
-    ? env.DB.prepare(`UPDATE integration_connections SET
-        status=?,auth_status=?,credential_expires_at=?,last_success_at='',next_sync_at='',
-        received_count=0,accepted_count=0,rejected_count=0,error_count=0,
-        verified_transfer=0,is_enabled=0,updated_at=?
-      WHERE id=? AND ${guard}`)
-      .bind(
-        commit.successStatus,
-        commit.successAuthStatus,
-        commit.credentialExpiresAt,
-        commit.occurredAt,
-        setup.connectionId,
-        ...guardBindings,
-      )
-    : env.DB.prepare(`UPDATE integration_connections SET
-        status='ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÑƒ',auth_status=?,credential_expires_at=?,
-        verified_transfer=0,is_enabled=0,error_count=error_count+1,updated_at=?
-      WHERE id=? AND ${guard}`)
-      .bind(
-        commit.failureAuthStatus,
-        commit.credentialExpiresAt,
-        commit.occurredAt,
-        setup.connectionId,
-        ...guardBindings,
-      );
-  const results = await env.DB.batch([
-    env.DB.prepare(`INSERT INTO integration_sync_runs
-      (id,connection_id,started_at,finished_at,trigger,status,received_count,accepted_count,rejected_count,error_count,conflict_count,checkpoint,error_message,initiated_by,correlation_id,dry_run)
-      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}`)
-      .bind(
-        commit.runId,
-        setup.connectionId,
-        commit.occurredAt,
-        commit.occurredAt,
-        commit.trigger,
-        runStatus,
-        commit.valid ? commit.receivedCount : 0,
-        0,
-        0,
-        commit.valid ? 0 : 1,
-        0,
-        commit.valid ? commit.checkpoint : "",
-        commit.valid ? "" : commit.reason,
-        actor,
-        commit.correlationId,
-        1,
-        ...guardBindings,
-      ),
-    env.DB.prepare(`INSERT INTO integration_log_entries
-      (run_id,connection_id,level,event,message,record_ref)
-      SELECT ?,?,?,?,?,? WHERE ${guard}`)
-      .bind(
-        commit.runId,
-        setup.connectionId,
-        commit.valid ? "INFO" : "ERROR",
-        commit.logEvent,
-        commit.valid ? commit.logMessage : commit.reason,
-        commit.logRecordRef,
-        ...guardBindings,
-      ),
-    connectionStatement,
-    env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
-      SELECT ?,?,'integration_connection',?,? WHERE ${guard}`)
-      .bind(
-        actor,
-        commit.auditAction,
-        setup.connectionId,
-        JSON.stringify({ runId: commit.runId, ...commit.auditPayload }),
-        ...guardBindings,
-      ),
-  ]);
-  const connectionResult = results[2] as { meta?: { changes?: number } } | undefined;
-  return Number(connectionResult?.meta?.changes ?? 0) > 0;
-}
-
-export async function openTochkaStatementState(setup: IntegrationSetup, requireAutomatic = false) {
-  return acquireTochkaStatementState(env.DB, {
-    connectionId: setup.connectionId,
-    legalEntityId: setup.legalEntityId,
-    customerCode: setup.customerCode,
-    credentialGeneration: normalizeCredentialGeneration(setup.credentialGeneration),
-    credentialStateKey: integrationCredentialStateKey(setup.connectionId, setup.legalEntityId, setup.customerCode),
-    setupStateKey: integrationSetupPrefix + setup.connectionId,
-    requireAutomatic,
-  });
-}
-
-export async function commitTochkaReadOnlySync(
-  actor: string,
-  setup: IntegrationSetup,
-  sync: TochkaReadOnlySyncResult,
-  trigger: string,
-  statementLease?: TochkaStatementLeaseFence,
-) {
-  const generation = normalizeCredentialGeneration(setup.credentialGeneration);
-  if (!generation || setup.connectionId !== tochkaConnectionId || setup.secretStatus !== "stored") {
-    return { committed: false, runId: "", financialOperationCount: 0 };
-  }
-  const credentialStateKey = integrationCredentialStateKey(setup.connectionId, setup.legalEntityId, setup.customerCode);
-  const setupStateKey = `${integrationSetupPrefix}${setup.connectionId}`;
-  const guard = `EXISTS (
-    SELECT 1 FROM system_runtime_state AS saved_setup
-    JOIN system_runtime_state AS saved_credential ON saved_credential.state_key=?
-    WHERE saved_setup.state_key=?
-      AND json_extract(saved_setup.state_value,'$.credentialGeneration')=?
-  ) AND EXISTS (SELECT 1 FROM integration_connections WHERE id=?)${statementLease ? ` AND ${tochkaStatementLeaseGuardSql}` : ""}${statementLease?.requireAutomatic ? " AND EXISTS (SELECT 1 FROM integration_connections WHERE id='INT-T-TOCHKA' AND status <> 'ÐÐ° Ð¿Ð°ÑƒÐ·Ðµ' AND (is_enabled=1 OR status='ÐžÑˆÐ¸Ð±ÐºÐ° Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ñ'))" : ""}`;
-  const guardBindings = [credentialStateKey, setupStateKey, generation, setup.connectionId, ...(statementLease ? [statementLease.key, statementLease.owner] : [])];
-  const currentSetup = await env.DB.prepare(`SELECT 1 AS current WHERE ${guard}`)
-    .bind(...guardBindings).first<{ current: number }>();
-  if (!currentSetup) return { committed: false, runId: "", financialOperationCount: 0 };
-
-  const occurredAt = new Date().toISOString();
-  const runId = `INT-RUN-${crypto.randomUUID().toUpperCase()}`;
-  const correlationId = `CORR-${crypto.randomUUID()}`;
-  const projectedByTransaction = new Map<string, NonNullable<Awaited<ReturnType<typeof toTochkaFinancialOperation>>>>();
-  for (const transaction of sync.transactions) {
-    const operation = await toTochkaFinancialOperation(transaction, setup.legalEntityId);
-    if (operation) projectedByTransaction.set(transaction.id, {
-      ...operation,
-      objectEntityId: setup.allocationMode === "single_branch" ? setup.branchId : "",
-    });
-  }
-
-  const latestStatementByAccount = new Map(sync.statements.map((statement) => [statement.accountId, statement]));
-  const accountStatements = sync.accounts.map((account) => {
-    const statement = latestStatementByAccount.get(account.accountId);
-    return env.DB.prepare(`INSERT INTO bank_accounts
-      (id,connection_id,legal_entity_id,provider_account_id,masked_account,name,currency,status,balance_minor,balance_as_of,synced_at)
-      SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
-      ON CONFLICT(id) DO UPDATE SET
-        masked_account=excluded.masked_account,name=excluded.name,currency=excluded.currency,status=excluded.status,
-        balance_minor=excluded.balance_minor,balance_as_of=excluded.balance_as_of,synced_at=excluded.synced_at`)
-      .bind(
-        account.id,
-        setup.connectionId,
-        setup.legalEntityId,
-        account.accountId,
-        account.maskedAccount,
-        account.name,
-        account.currency,
-        account.status,
-        statement?.endBalanceMinor ?? null,
-        statement?.endDate ?? "",
-        occurredAt,
-        ...guardBindings,
-      );
-  });
-  const statementStatements = sync.statements.map((statement) => env.DB.prepare(`INSERT INTO bank_statement_imports
-    (id,connection_id,legal_entity_id,provider_statement_id,provider_account_id,start_date,end_date,status,start_balance_minor,end_balance_minor,currency,transaction_count,fetched_at)
-    SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
-    ON CONFLICT(id) DO UPDATE SET
-      status=excluded.status,start_balance_minor=excluded.start_balance_minor,end_balance_minor=excluded.end_balance_minor,
-      currency=excluded.currency,transaction_count=excluded.transaction_count,fetched_at=excluded.fetched_at`)
-    .bind(
-      statement.id,
-      setup.connectionId,
-      setup.legalEntityId,
-      statement.statementId,
-      statement.accountId,
-      statement.startDate,
-      statement.endDate,
-      statement.status,
-      statement.startBalanceMinor,
-      statement.endBalanceMinor,
-      statement.currency,
-      statement.transactionCount,
-      occurredAt,
-      ...guardBindings,
-    ));
-  const transactionStatements = sync.transactions.map((transaction) => env.DB.prepare(`INSERT INTO bank_transactions
-    (id,connection_id,legal_entity_id,provider_account_id,provider_statement_id,provider_transaction_id,payment_id,operation_date,direction,amount_minor,currency,status,document_number,transaction_type,description,counterparty_name,counterparty_inn,counterparty_kpp,source_payload_hash,financial_operation_id,imported_at)
-    SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
-    ON CONFLICT(id) DO NOTHING`)
-    .bind(
-      transaction.id,
-      setup.connectionId,
-      setup.legalEntityId,
-      transaction.accountId,
-      transaction.statementId,
-      transaction.providerTransactionId,
-      transaction.paymentId,
-      transaction.operationDate,
-      transaction.direction,
-      transaction.amountMinor,
-      transaction.currency,
-      transaction.status,
-      transaction.documentNumber,
-      transaction.transactionType,
-      transaction.description,
-      transaction.counterpartyName,
-      transaction.counterpartyInn,
-      transaction.counterpartyKpp,
-      transaction.sourcePayloadHash,
-      projectedByTransaction.get(transaction.id)?.id ?? "",
-      occurredAt,
-      ...guardBindings,
-    ));
-  const financialStatements = [...projectedByTransaction.values()].map((operation) => env.DB.prepare(`INSERT INTO financial_operations
-    (id,operation_date,period,direction,amount_minor,category,report_class,counterparty_entity_id,contract_id,document_id,project_entity_id,legal_entity_id,object_entity_id,cfr_entity_id,bank_operation_ref,operation_kind,source_system,source_file,source_sheet,source_ref,data_quality,status,created_by)
-    SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
-    ON CONFLICT(id) DO NOTHING`)
-    .bind(
-      operation.id,
-      operation.operationDate,
-      operation.period,
-      operation.direction,
-      operation.amountMinor,
-      operation.category,
-      operation.reportClass,
-      operation.counterpartyEntityId,
-      operation.contractId,
-      operation.documentId,
-      operation.projectEntityId,
-      operation.legalEntityId,
-      operation.objectEntityId,
-      operation.cfrEntityId,
-      operation.bankOperationRef,
-      operation.operationKind,
-      operation.sourceSystem,
-      operation.sourceFile,
-      operation.sourceSheet,
-      operation.sourceRef,
-      operation.dataQuality,
-      operation.status,
-      operation.createdBy,
-      ...guardBindings,
-    ));
-
-  for (const statements of [accountStatements, statementStatements, transactionStatements]) {
-    for (let index = 0; index < statements.length; index += 40) {
-      await env.DB.batch(statements.slice(index, index + 40));
-    }
-  }
-  let financialOperationCount = 0;
-  for (let index = 0; index < financialStatements.length; index += 40) {
-    const results = await env.DB.batch(financialStatements.slice(index, index + 40));
-    financialOperationCount += results.reduce(
-      (total, result) => total + Number((result as { meta?: { changes?: number } })?.meta?.changes ?? 0),
-      0,
-    );
-  }
-
-  const receivedCount = sync.accounts.length + sync.statements.length + sync.transactions.length;
-  const acceptedCount = Math.max(0, receivedCount - sync.rejectedCount);
-  const nextSyncAt = new Date(Date.now() + Math.max(60, setup.syncIntervalMinutes || 60) * 60_000).toISOString();
-  const runStatus = sync.valid && sync.complete && sync.rejectedCount === 0 ? "Ð£ÑÐ¿ÐµÑˆÐ½Ð¾" : sync.rejectedCount > 0 ? "Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸" : sync.valid ? "ÐžÐ¶Ð¸Ð´Ð°Ð½Ð¸Ðµ Ð±Ð°Ð½ÐºÐ°" : "ÐžÑˆÐ¸Ð±ÐºÐ°";
-  const checkpoint = `accounts:${sync.accounts.length};statements:${sync.statements.length};transactions:${sync.transactions.length}`;
-  const finalResults = await env.DB.batch([
-    env.DB.prepare(`INSERT INTO integration_sync_runs
-      (id,connection_id,started_at,finished_at,trigger,status,received_count,accepted_count,rejected_count,error_count,conflict_count,checkpoint,error_message,initiated_by,correlation_id,dry_run)
-      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}`)
-      .bind(
-        runId,
-        setup.connectionId,
-        occurredAt,
-        occurredAt,
-        trigger,
-        runStatus,
-        receivedCount,
-        acceptedCount,
-        sync.rejectedCount,
-        sync.valid ? 0 : 1,
-        0,
-        checkpoint,
-        sync.valid ? "" : sync.reason,
-        actor,
-        correlationId,
-        0,
-        ...guardBindings,
-      ),
-    env.DB.prepare(`INSERT INTO integration_log_entries
-      (run_id,connection_id,level,event,message,record_ref)
-      SELECT ?,?,?,?,?,? WHERE ${guard}`)
-      .bind(
-        runId,
-        setup.connectionId,
-        sync.valid ? "INFO" : "ERROR",
-        sync.complete ? "tochka.statements_imported" : "tochka.statements_pending",
-        sync.reason,
-        checkpoint,
-        ...guardBindings,
-      ),
-    env.DB.prepare(`UPDATE integration_connections SET
-      status=?,auth_status=?,credential_expires_at=?,last_success_at=COALESCE(NULLIF(?,''),last_success_at),next_sync_at=?,
-      received_count=?,accepted_count=?,rejected_count=?,error_count=?,conflict_count=0,
-      verified_transfer=?,is_enabled=?,updated_at=?
-      WHERE id=? AND ${guard}`)
-      .bind(
-        !sync.valid ? "ÐžÑˆÐ¸Ð±ÐºÐ° Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ñ" : sync.rejectedCount > 0 ? "Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸" : sync.complete ? "Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚" : "Ð¤Ð¾Ñ€Ð¼Ð¸Ñ€ÑƒÑŽÑ‚ÑÑ Ð²Ñ‹Ð¿Ð¸ÑÐºÐ¸",
-        !sync.valid ? "ÐšÐ»ÑŽÑ‡ ÑÐ¾Ñ…Ñ€Ð°Ð½Ñ‘Ð½ Â· Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ° Ð¸Ð· Ð¢Ð¾Ñ‡ÐºÐ¸ Ð½Ðµ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð°" : sync.complete ? "ÐšÐ»ÑŽÑ‡ Ð¿Ñ€Ð¸Ð½ÑÑ‚ Â· ÑÑ‡ÐµÑ‚Ð°, Ð²Ñ‹Ð¿Ð¸ÑÐºÐ¸ Ð¸ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ð¸ Ð·Ð°Ð³Ñ€ÑƒÐ¶ÐµÐ½Ñ‹" : "ÐšÐ»ÑŽÑ‡ Ð¿Ñ€Ð¸Ð½ÑÑ‚ Â· Ð¢Ð¾Ñ‡ÐºÐ° Ñ„Ð¾Ñ€Ð¼Ð¸Ñ€ÑƒÐµÑ‚ Ð²Ñ‹Ð¿Ð¸ÑÐºÐ¸",
-        sync.expiresAt,
-        sync.valid && sync.complete && sync.rejectedCount === 0 ? occurredAt : "",
-        nextSyncAt,
-        receivedCount,
-        acceptedCount,
-        sync.rejectedCount,
-        sync.valid ? 0 : 1,
-        sync.valid && sync.complete && sync.rejectedCount === 0 && sync.statements.length > 0 ? 1 : 0,
-        sync.valid ? 1 : 0,
-        occurredAt,
-        setup.connectionId,
-        ...guardBindings,
-      ),
-    env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
-      SELECT ?,'integration.tochka_readonly_sync_completed','integration_connection',?,? WHERE ${guard}`)
-      .bind(
-        actor,
-        setup.connectionId,
-        JSON.stringify({
-          runId,
-          selectedLegalEntityId: setup.legalEntityId,
-          accountCount: sync.accounts.length,
-          statementCount: sync.statements.length,
-          transactionCount: sync.transactions.length,
-          financialOperationCount,
-          rejectedCount: sync.rejectedCount,
-          complete: sync.complete,
-          paymentCreationAllowed: false,
-        }),
-        ...guardBindings,
-      ),
-  ]);
-  const connectionResult = finalResults[2] as { meta?: { changes?: number } } | undefined;
-  return {
-    committed: Number(connectionResult?.meta?.changes ?? 0) > 0,
-    runId,
-    financialOperationCount,
-  };
-}
-
-export async function hasIntegrationCredential(connectionIdValue: string, legalEntityIdValue: string, customerCodeValue: string) {
-  const stateKey = integrationCredentialStateKey(connectionIdValue, legalEntityIdValue, customerCodeValue);
-  const row = await env.DB.prepare("SELECT 1 AS present FROM system_runtime_state WHERE state_key=?")
-    .bind(stateKey).first<{ present: number }>();
-  return row?.present === 1;
-}
-
-export async function saveIntegrationCredential(
-  actor: string,
-  connectionIdValue: string,
-  legalEntityIdValue: string,
-  customerCodeValue: string,
-  value: unknown,
-) {
-  const credential = await encryptIntegrationCredential(
-    actor,
-    connectionIdValue,
-    legalEntityIdValue,
-    customerCodeValue,
-    value,
-  );
-  await env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-    VALUES (?,?,CURRENT_TIMESTAMP)
-    ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-    .bind(credential.stateKey, JSON.stringify(credential.envelope)).run();
-  await writeIntegrationDatasetAudit(actor, "integration.credential_replaced", {
-    connectionId: credential.connectionId,
-    selectedLegalEntityId: credential.legalEntityId,
-    credentialEnvelopeStored: true,
-    version: credential.envelope.version,
-    algorithm: credential.envelope.algorithm,
-  });
-}
-
-export async function revokeTochkaIntegrationCredential(actor: string) {
-  return revokeBankIntegrationCredential(actor, tochkaConnectionId);
-}
-
-export async function revokeBankIntegrationCredential(actor: string, connectionIdValue: string) {
-  const connectionId = String(connectionIdValue ?? "").trim().toUpperCase();
-  if (connectionId !== tochkaConnectionId && connectionId !== tbankConnectionId) {
-    throw new Error("Ð£Ð´Ð°Ð»ÐµÐ½Ð¸Ðµ ÐºÐ»ÑŽÑ‡Ð° Ð´Ð»Ñ ÑÑ‚Ð¾Ð¹ Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ð¸ Ð½Ðµ Ð¿Ð¾Ð´Ð´ÐµÑ€Ð¶Ð¸Ð²Ð°ÐµÑ‚ÑÑ");
-  }
-  const setup = (await getIntegrationSetups())[connectionId];
-  const revokedAt = new Date().toISOString();
-  const revokedSetup = setup ? {
-    ...setup,
-    credentialGeneration: crypto.randomUUID(),
-    secretStatus: "missing" as const,
-    updatedAt: revokedAt,
-    updatedBy: actor,
-  } : null;
-  const statements = [
-    env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key LIKE ?")
-      .bind(integrationCredentialConnectionPattern(connectionId)),
-  ];
-  if (revokedSetup) {
-    statements.push(env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-      VALUES (?,?,CURRENT_TIMESTAMP)
-      ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-      .bind(`${integrationSetupPrefix}${connectionId}`, JSON.stringify(revokedSetup)));
-  }
-  statements.push(
-    env.DB.prepare(`UPDATE integration_connections SET
-      status='ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð´Ð¾ÑÑ‚ÑƒÐ¿',auth_status=?,credential_expires_at='',
-      last_success_at='',next_sync_at='',received_count=0,accepted_count=0,rejected_count=0,
-      verified_transfer=0,is_enabled=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-      .bind(connectionId === tochkaConnectionId ? "ÐšÐ»ÑŽÑ‡ Ð¢Ð¾Ñ‡ÐºÐ¸ ÑƒÐ´Ð°Ð»Ñ‘Ð½ Ð¸Ð· ArtHello OS Ð²Ð»Ð°Ð´ÐµÐ»ÑŒÑ†ÐµÐ¼" : "Ð¢Ð¾ÐºÐµÐ½ Ð¢â€‘Ð‘Ð°Ð½ÐºÐ° ÑƒÐ´Ð°Ð»Ñ‘Ð½ Ð¸Ð· ArtHello OS Ð²Ð»Ð°Ð´ÐµÐ»ÑŒÑ†ÐµÐ¼", connectionId),
-    env.DB.prepare("INSERT INTO audit_events (actor,action,entity_type,entity_id,payload) VALUES (?,?,?,?,?)")
-      .bind(actor, "integration.credential_deleted_locally", "integration_connection", connectionId, JSON.stringify({
-        connectionId,
-        selectedLegalEntityId: setup?.legalEntityId ?? "",
-        companySelectionConfirmed: Boolean(setup?.customerCode),
-      })),
-  );
-  await env.DB.batch(statements);
-  return revokedSetup;
-}
-
-async function encryptIntegrationCredential(
-  actor: string,
-  connectionIdValue: string,
-  legalEntityIdValue: string,
-  customerCodeValue: string,
-  value: unknown,
-) {
-  const connectionId = normalizeIntegrationCredentialScope(connectionIdValue, "Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ñ");
-  const legalEntityId = normalizeIntegrationCredentialScope(legalEntityIdValue, "ÑŽÑ€Ð¸Ð´Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ Ð»Ð¸Ñ†Ð¾");
-  const customerCode = normalizeIntegrationCredentialScope(customerCodeValue, "customerCode");
-  const secret = typeof value === "string" ? value.trim() : "";
-  const minimumLength = connectionId === tbankConnectionId ? 24 : 40;
-  if (secret.length < minimumLength || secret.length > 16_384 || /\s/.test(secret)) {
-    throw new Error("ÐšÐ»ÑŽÑ‡ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð° Ð²Ñ‹Ð³Ð»ÑÐ´Ð¸Ñ‚ Ð½ÐµÐ¿Ð¾Ð»Ð½Ñ‹Ð¼ Ð¸Ð»Ð¸ ÑÐ¾Ð´ÐµÑ€Ð¶Ð¸Ñ‚ Ð½ÐµÐ´Ð¾Ð¿ÑƒÑÑ‚Ð¸Ð¼Ñ‹Ðµ ÑÐ¸Ð¼Ð²Ð¾Ð»Ñ‹");
-  }
-  const key = await integrationCredentialEncryptionKey();
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const aad = new TextEncoder().encode(integrationCredentialAad(connectionId, legalEntityId, customerCode));
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: aad, tagLength: 128 },
-    key,
-    new TextEncoder().encode(secret),
-  );
-  const envelope: EncryptedIntegrationCredential = {
-    version: 1,
-    algorithm: "AES-GCM",
-    iv: encodeIntegrationCredentialBytes(iv),
-    ciphertext: encodeIntegrationCredentialBytes(new Uint8Array(ciphertext)),
-    updatedAt: new Date().toISOString(),
-    updatedBy: actor,
-  };
-  return {
-    connectionId,
-    legalEntityId,
-    customerCode,
-    stateKey: integrationCredentialStateKey(connectionId, legalEntityId, customerCode),
-    envelope,
-  };
-}
-
-export async function readIntegrationCredential(connectionIdValue: string, legalEntityIdValue: string, customerCodeValue: string) {
-  const connectionId = normalizeIntegrationCredentialScope(connectionIdValue, "Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ñ");
-  const legalEntityId = normalizeIntegrationCredentialScope(legalEntityIdValue, "ÑŽÑ€Ð¸Ð´Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ Ð»Ð¸Ñ†Ð¾");
-  const customerCode = normalizeIntegrationCredentialScope(customerCodeValue, "customerCode");
-  const row = await env.DB.prepare("SELECT state_value FROM system_runtime_state WHERE state_key=?")
-    .bind(integrationCredentialStateKey(connectionId, legalEntityId, customerCode)).first<{ state_value: string }>();
-  if (!row) return null;
-  try {
-    const envelope = JSON.parse(row.state_value) as EncryptedIntegrationCredential;
-    if (envelope.version !== 1 || envelope.algorithm !== "AES-GCM" || !envelope.iv || !envelope.ciphertext) {
-      throw new Error("Unsupported credential envelope");
-    }
-    const key = await integrationCredentialEncryptionKey();
-    const plaintext = await crypto.subtle.decrypt(
-      {
-        name: "AES-GCM",
-        iv: decodeIntegrationCredentialBytes(envelope.iv),
-        additionalData: new TextEncoder().encode(integrationCredentialAad(connectionId, legalEntityId, customerCode)),
-        tagLength: 128,
-      },
-      key,
-      decodeIntegrationCredentialBytes(envelope.ciphertext),
-    );
-    const secret = new TextDecoder().decode(plaintext);
-    const minimumLength = connectionId === tbankConnectionId ? 24 : 40;
-    if (secret.length < minimumLength || secret.length > 16_384 || /\s/.test(secret)) throw new Error("Invalid credential payload");
-    return secret;
-  } catch {
-    // Never expose ciphertext, parsing details or key material to callers.
-    throw new Error(connectionId === tochkaConnectionId
-      ? "Ð—Ð°Ñ‰Ð¸Ñ‰Ñ‘Ð½Ð½Ñ‹Ð¹ ÐºÐ»ÑŽÑ‡ Ð¢Ð¾Ñ‡ÐºÐ¸ Ð½ÐµÐ´Ð¾ÑÑ‚ÑƒÐ¿ÐµÐ½. Ð’Ð²ÐµÐ´Ð¸Ñ‚Ðµ ÐºÐ»ÑŽÑ‡ Ð·Ð°Ð½Ð¾Ð²Ð¾."
-      : "Ð—Ð°Ñ‰Ð¸Ñ‰Ñ‘Ð½Ð½Ñ‹Ð¹ Ñ‚Ð¾ÐºÐµÐ½ Ð¢â€‘Ð‘Ð°Ð½ÐºÐ° Ð½ÐµÐ´Ð¾ÑÑ‚ÑƒÐ¿ÐµÐ½. Ð’Ð²ÐµÐ´Ð¸Ñ‚Ðµ ÐºÐ»ÑŽÑ‡ Ð·Ð°Ð½Ð¾Ð²Ð¾.");
-  }
-}
-
-export async function readTBankIntegrationCredential(legalEntityId: string) {
-  return readIntegrationCredential(tbankConnectionId, legalEntityId, tbankCredentialScope);
-}
-
-export async function verifyStoredIntegrationCredentials() {
-  const rows = await env.DB.prepare(
-    "SELECT state_key FROM system_runtime_state WHERE state_key LIKE 'integration_credential:v2:%' ORDER BY state_key"
-  ).all<{ state_key: string }>();
-  for (const row of rows.results ?? []) {
-    try {
-      const parts = row.state_key.slice(integrationCredentialPrefix.length).split(":");
-      if (parts.length !== 3 || parts.some((part) => !part)) throw new Error("Invalid credential scope");
-      const [connectionId, legalEntityId, customerCode] = parts.map((part) => decodeURIComponent(part));
-      if (integrationCredentialStateKey(connectionId, legalEntityId, customerCode) !== row.state_key) {
-        throw new Error("Non-canonical credential scope");
-      }
-      const secret = await readIntegrationCredential(connectionId, legalEntityId, customerCode);
-      if (!secret) throw new Error("Missing credential envelope");
-    } catch {
-      // Readiness must fail without exposing the state key, envelope or secret.
-      throw new Error("Ð—Ð°Ñ‰Ð¸Ñ‰Ñ‘Ð½Ð½Ñ‹Ðµ Ð±Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ¸Ðµ ÐºÐ»ÑŽÑ‡Ð¸ Ð½Ðµ Ð¿Ñ€Ð¾ÑˆÐ»Ð¸ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÑƒ Ñ…Ñ€Ð°Ð½Ð¸Ð»Ð¸Ñ‰Ð°");
-    }
-  }
-}
-
-function integrationCredentialStateKey(connectionIdValue: string, legalEntityIdValue: string, customerCodeValue: string) {
-  const connectionId = normalizeIntegrationCredentialScope(connectionIdValue, "Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ñ");
-  const legalEntityId = normalizeIntegrationCredentialScope(legalEntityIdValue, "ÑŽÑ€Ð¸Ð´Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ Ð»Ð¸Ñ†Ð¾");
-  const customerCode = normalizeIntegrationCredentialScope(customerCodeValue, "customerCode");
-  return `${integrationCredentialPrefix}${encodeURIComponent(connectionId)}:${encodeURIComponent(legalEntityId)}:${encodeURIComponent(customerCode)}`;
-}
-
-function integrationCredentialConnectionPattern(connectionIdValue: string) {
-  const connectionId = normalizeIntegrationCredentialScope(connectionIdValue, "Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ñ");
-  return `${integrationCredentialPrefix}${encodeURIComponent(connectionId)}:%`;
-}
-
-function normalizeIntegrationCredentialScope(value: string, label: string, allowEmpty = false) {
-  const clean = String(value ?? "").trim().slice(0, 80);
-  if ((!clean && !allowEmpty) || (clean && !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,79}$/.test(clean))) {
-    throw new Error(`ÐÐµÐºÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð½Ð¾ ÑƒÐºÐ°Ð·Ð°Ð½Ð¾ ${label}`);
-  }
-  return clean;
-}
-
-function normalizeCredentialGeneration(value: unknown) {
-  const generation = typeof value === "string" ? value.trim().toLowerCase() : "";
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(generation)
-    ? generation
-    : "";
-}
-
-function normalizeSubmittedIntegrationEndpoint(value: unknown) {
-  const endpoint = typeof value === "string" ? value.trim().slice(0, 240) : "";
-  if (!endpoint) return "";
-  const normalized = normalizeStoredIntegrationEndpoint(endpoint);
-  if (!normalized) {
-    throw new Error("ÐÐ´Ñ€ÐµÑ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ñ Ð´Ð¾Ð»Ð¶ÐµÐ½ Ð±Ñ‹Ñ‚ÑŒ HTTPS-ÑÑÑ‹Ð»ÐºÐ¾Ð¹ Ð±ÐµÐ· Ð»Ð¾Ð³Ð¸Ð½Ð°, Ð¿Ð°Ñ€Ð¾Ð»Ñ, Ð¿Ð°Ñ€Ð°Ð¼ÐµÑ‚Ñ€Ð¾Ð² Ð¸Ð»Ð¸ ÑÐ»ÑƒÐ¶ÐµÐ±Ð½Ð¾Ð¹ Ñ‡Ð°ÑÑ‚Ð¸");
-  }
-  return normalized;
-}
-
-function normalizeStoredIntegrationEndpoint(value: unknown) {
-  const endpoint = typeof value === "string" ? value.trim().slice(0, 240) : "";
-  if (!endpoint) return "";
-  try {
-    const url = new URL(endpoint);
-    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || !url.hostname) return "";
-    return url.toString();
-  } catch {
-    return "";
-  }
-}
-
-function integrationCredentialAad(connectionId: string, legalEntityId: string, customerCode: string) {
-  const credentialType = connectionId === tbankConnectionId ? "TBANK_BANK_READ_V1" : "TOCHKA_ACCOUNTS_READ_V1";
-  return `arthello.integration-credential.v2\n${connectionId}\n${legalEntityId}\n${customerCode}\n${credentialType}`;
-}
-
-async function integrationCredentialDigest(value: unknown) {
-  const secret = typeof value === "string" ? value.trim() : "";
-  if (secret.length < 40 || secret.length > 16_384 || /\s/.test(secret)) {
-    throw new Error("ÐšÐ»ÑŽÑ‡ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð° Ð²Ñ‹Ð³Ð»ÑÐ´Ð¸Ñ‚ Ð½ÐµÐ¿Ð¾Ð»Ð½Ñ‹Ð¼ Ð¸Ð»Ð¸ ÑÐ¾Ð´ÐµÑ€Ð¶Ð¸Ñ‚ Ð½ÐµÐ´Ð¾Ð¿ÑƒÑÑ‚Ð¸Ð¼Ñ‹Ðµ ÑÐ¸Ð¼Ð²Ð¾Ð»Ñ‹");
-  }
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`arthello.tochka-company-selection.v1\n${secret}`),
-  );
-  return encodeIntegrationCredentialBytes(new Uint8Array(digest));
-}
-
-function constantTimeEqual(leftValue: unknown, rightValue: unknown) {
-  const left = typeof leftValue === "string" ? leftValue : "";
-  const right = typeof rightValue === "string" ? rightValue : "";
-  const length = Math.max(left.length, right.length);
-  let difference = left.length ^ right.length;
-  for (let index = 0; index < length; index += 1) {
-    difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
-  }
-  return difference === 0;
-}
-
-async function integrationCredentialEncryptionKey() {
-  const runtime = env as unknown as Record<string, unknown>;
-  const configured = runtime.INTEGRATION_CREDENTIALS_KEY;
-  if (typeof configured !== "string" || configured.length < 32) {
-    throw new Error("Ð—Ð°Ñ‰Ð¸Ñ‰Ñ‘Ð½Ð½Ð¾Ðµ Ñ…Ñ€Ð°Ð½Ð¸Ð»Ð¸Ñ‰Ðµ Ð½Ðµ Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½Ð¾: Ð·Ð°Ð´Ð°Ð¹Ñ‚Ðµ INTEGRATION_CREDENTIALS_KEY");
-  }
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`arthello.integration-credential.key.v1\n${configured}`),
-  );
-  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
-}
-
-function encodeIntegrationCredentialBytes(bytes: Uint8Array) {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function decodeIntegrationCredentialBytes(value: string) {
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
-  const binary = atob(base64);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
-
-export type SystemDataMode = "test" | "source_only" | "empty";
-
-export async function getSystemDataMode(): Promise<SystemDataMode> {
-  const row = await env.DB.prepare(
-    "SELECT state_value FROM system_runtime_state WHERE state_key='system_data_mode'"
-  ).first<{ state_value: string }>();
-  if (row?.state_value === "test" || row?.state_value === "source_only" || row?.state_value === "empty") return row.state_value;
-  // Production must fail closed. A new database, a missing state row or an
-  // unrecognised value must never opt the application into source/demo seeds.
-  return "empty";
-}
-
-export async function setSystemDataMode(actor: string, mode: SystemDataMode) {
-  const current = await getSystemDataMode();
-  if (current === "empty" && mode !== "empty") {
-    throw new Error("ÐŸÑƒÑÑ‚Ð¾Ð¹ production-ÐºÐ¾Ð½Ñ‚ÑƒÑ€ Ð·Ð°Ð±Ð»Ð¾ÐºÐ¸Ñ€Ð¾Ð²Ð°Ð½. Ð¡Ð¼ÐµÐ½Ð° Ñ€ÐµÐ¶Ð¸Ð¼Ð° Ð²Ð¾Ð·Ð¼Ð¾Ð¶Ð½Ð° Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ð¾Ð¹ Ð¾Ñ„Ð»Ð°Ð¹Ð½-Ð¿Ñ€Ð¾Ñ†ÐµÐ´ÑƒÑ€Ð¾Ð¹ Ð¾Ð±ÑÐ»ÑƒÐ¶Ð¸Ð²Ð°Ð½Ð¸Ñ.");
-  }
-  await env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-    VALUES ('system_data_mode',?,CURRENT_TIMESTAMP)
-    ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-    .bind(mode).run();
-  await writeIntegrationDatasetAudit(actor, "system.data_mode_changed", {
-    mode,
-    behavior: mode === "empty"
-      ? "ÐŸÑƒÑÑ‚Ð¾Ð¹ production-ÐºÐ¾Ð½Ñ‚ÑƒÑ€: Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ ÑÐ¾Ð·Ð´Ð°Ð½Ð¸Ðµ Ð´ÐµÐ¼Ð¾Ð½ÑÑ‚Ñ€Ð°Ñ†Ð¸Ð¾Ð½Ð½Ñ‹Ñ… Ð¸ Ð¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´Ð½Ñ‹Ñ… Ð·Ð°Ð¿Ð¸ÑÐµÐ¹ Ð¾Ñ‚ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¾"
-      : mode === "source_only"
-        ? "Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ð¼Ð¾Ð´ÑƒÐ»Ð¸ ÑÐºÑ€Ñ‹Ñ‚Ñ‹; XLSX-Ñ„Ð°ÐºÑ‚Ñ‹ Ð¸ Ð°ÑƒÐ´Ð¸Ñ‚ ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ñ‹"
-        : "Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ Ð´ÐµÐ¼Ð¾Ð½ÑÑ‚Ñ€Ð°Ñ†Ð¸Ð¾Ð½Ð½Ñ‹Ð¹ ÐºÐ¾Ð½Ñ‚ÑƒÑ€ ÑÐ½Ð¾Ð²Ð° Ð²Ð¸Ð´Ð¸Ð¼",
-  });
-  return mode;
-}
-
-const demoOnlyTables = [
-  "sales_touchpoints", "sales_stage_events", "sales_leads", "client_accruals", "client_bonuses", "client_lifecycles",
-  "content_attributions", "content_recommendations", "content_publications", "content_plan_items", "marketing_accounts",
-  "education_attendance", "education_progress", "education_feedback", "education_communications", "education_students", "education_lessons", "education_groups", "education_programs",
-  "hr_onboarding", "hr_development", "hr_rewards", "hr_accesses", "hr_interviews", "hr_candidates", "hr_employees", "hr_vacancies",
-  "legal_contract_text_versions", "legal_document_items", "legal_responsibility_zones", "legal_checks", "legal_contracts",
-  "supplier_offers", "purchase_orders", "procurement_deliveries", "purchase_requests", "procurement_suppliers", "inventory_events", "inventory_items",
-  "asset_maintenance", "assets", "food_recipe_ingredients", "food_recipes", "food_production", "food_shipments", "food_shifts", "food_checks", "food_batches", "food_products",
-  "safety_next_checks", "safety_repairs", "safety_incidents", "safety_faults", "safety_checks", "safety_equipment", "safety_systems", "safety_guard_shifts",
-  "medical_actions", "medical_incidents", "medical_cases", "medical_restrictions", "medical_documents", "medical_access_grants",
-  "accounting_document_links", "accounting_completeness_checks", "accounting_exports", "accounting_documents", "accounting_integrations",
-  "event_participants", "business_events", "strategy_results", "strategy_deviations", "strategy_projects", "strategy_initiatives", "strategy_kpis", "strategy_goals",
-  "complaint_actions", "customer_complaints", "ai_model_runs", "ai_opt_outs", "analytics_signals", "ai_process_contracts", "analytics_metric_definitions",
-  "readiness_scenario_steps", "readiness_scenarios", "readiness_validation_runs", "release_gates", "recovery_drills",
-] as const;
-
-export type SystemDemoRemovalStatus = {
-  mode: SystemDataMode;
-  removed: number;
-  preserved: string[];
-};
-
-export async function removeSystemDemoData(actor: string): Promise<SystemDemoRemovalStatus> {
-  if (await getSystemDataMode() === "empty") {
-    throw new Error("ÐŸÑƒÑÑ‚Ð¾Ð¹ production-ÐºÐ¾Ð½Ñ‚ÑƒÑ€ Ð½ÐµÐ»ÑŒÐ·Ñ Ð¿ÐµÑ€ÐµÐ²ÐµÑÑ‚Ð¸ Ð² source_only Ð¸Ð· web runtime.");
-  }
-  const countRow = await env.DB.prepare(`SELECT
-    (SELECT COUNT(*) FROM entities WHERE source_system LIKE 'SYNTHETIC%') +
-    (SELECT COUNT(*) FROM financial_operations WHERE source_system LIKE 'SYNTHETIC%') +
-    (SELECT COUNT(*) FROM tasks WHERE created_by LIKE 'system-%') AS total`).first<{ total: number }>();
-  const systemTaskFilter = "SELECT id FROM tasks WHERE created_by LIKE 'system-%'";
-  const statements = [
-    env.DB.prepare(`DELETE FROM task_watchers WHERE task_id IN (${systemTaskFilter})`),
-    env.DB.prepare(`DELETE FROM task_checklist WHERE task_id IN (${systemTaskFilter})`),
-    env.DB.prepare(`DELETE FROM task_comments WHERE task_id IN (${systemTaskFilter})`),
-    env.DB.prepare(`DELETE FROM task_approvals WHERE task_id IN (${systemTaskFilter})`),
-    env.DB.prepare(`DELETE FROM task_documents WHERE task_id IN (${systemTaskFilter})`),
-    env.DB.prepare(`DELETE FROM escalations WHERE task_id IN (${systemTaskFilter})`),
-    env.DB.prepare("DELETE FROM notifications WHERE source_id LIKE '%-T-%' OR dedup_key LIKE '%-T-%'"),
-    env.DB.prepare("DELETE FROM tasks WHERE created_by LIKE 'system-%'"),
-    env.DB.prepare("DELETE FROM document_versions WHERE document_id IN (SELECT id FROM workflow_documents WHERE source LIKE 'SYNTHETIC%' OR created_by LIKE 'system-%')"),
-    env.DB.prepare("DELETE FROM obligations WHERE document_id IN (SELECT id FROM workflow_documents WHERE source LIKE 'SYNTHETIC%' OR created_by LIKE 'system-%')"),
-    env.DB.prepare("DELETE FROM workflow_documents WHERE source LIKE 'SYNTHETIC%' OR created_by LIKE 'system-%'"),
-    env.DB.prepare("DELETE FROM entity_documents WHERE source LIKE 'SYNTHETIC%'"),
-    env.DB.prepare("DELETE FROM entity_links WHERE created_by LIKE 'system-%'"),
-    env.DB.prepare("DELETE FROM entity_merges WHERE survivor_id IN (SELECT id FROM entities WHERE source_system LIKE 'SYNTHETIC%') OR duplicate_id IN (SELECT id FROM entities WHERE source_system LIKE 'SYNTHETIC%')"),
-    env.DB.prepare("DELETE FROM financial_operations WHERE source_system LIKE 'SYNTHETIC%'"),
-    env.DB.prepare("DELETE FROM finance_budgets"),
-    env.DB.prepare("DELETE FROM finance_forecast_items"),
-    env.DB.prepare("DELETE FROM integration_log_entries"),
-    env.DB.prepare("DELETE FROM integration_conflicts"),
-    env.DB.prepare("DELETE FROM integration_sync_runs"),
-    env.DB.prepare("UPDATE integration_connections SET received_count=0,accepted_count=0,rejected_count=0,error_count=0,conflict_count=0,last_success_at=CASE WHEN id='INT-T-D1' THEN last_success_at ELSE '' END,updated_at=CURRENT_TIMESTAMP"),
-    ...demoOnlyTables.map((table) => env.DB.prepare(`DELETE FROM ${table}`)),
-    env.DB.prepare("DELETE FROM entities WHERE source_system LIKE 'SYNTHETIC%'"),
-    env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key IN ('integration_demo_bootstrap','finance_entity_links_bootstrap')"),
-  ];
-  for (let index = 0; index < statements.length; index += 35) {
-    await env.DB.batch(statements.slice(index, index + 35));
-  }
-  await setSystemDataMode(actor, "source_only");
-  await env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
-    VALUES ('system_demo_purge',?,CURRENT_TIMESTAMP)
-    ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP`)
-    .bind(SYSTEM_DEMO_PURGE_VERSION).run();
-  const removed = Number(countRow?.total ?? 0);
-  const preserved = ["XLSX-Ñ„Ð°ÐºÑ‚Ñ‹", "Ñ€ÑƒÑ‡Ð½Ñ‹Ðµ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ¸ Ð¸ Ð·Ð°Ð´Ð°Ñ‡Ð¸", "Ð°ÑƒÐ´Ð¸Ñ‚", "ÐºÐ°Ñ‚Ð°Ð»Ð¾Ð³ Ð¸ Ð¿Ð°Ñ€Ð°Ð¼ÐµÑ‚Ñ€Ñ‹ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ð¹"];
-  await writeIntegrationDatasetAudit(actor, "system.demo_data_removed", { removed, preserved });
-  return { mode: "source_only", removed, preserved };
-}
-
-export async function restoreSystemDemoData(actor: string) {
-  if (await getSystemDataMode() === "empty") {
-    throw new Error("Ð’Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ð´ÐµÐ¼Ð¾Ð½ÑÑ‚Ñ€Ð°Ñ†Ð¸Ð¾Ð½Ð½Ð¾Ð³Ð¾ ÐºÐ¾Ð½Ñ‚ÑƒÑ€Ð° Ð·Ð°Ð¿Ñ€ÐµÑ‰ÐµÐ½Ð¾ Ð² production. Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐ¹Ñ‚Ðµ Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½ÑƒÑŽ Ð¾Ñ„Ð»Ð°Ð¹Ð½-Ð¿Ñ€Ð¾Ñ†ÐµÐ´ÑƒÑ€Ñƒ Ð¾Ð±ÑÐ»ÑƒÐ¶Ð¸Ð²Ð°Ð½Ð¸Ñ.");
-  }
-  await setSystemDataMode(actor, "test");
-  await seedRegistry();
-  await seedWorkflow();
-  await seedFinance();
-  await seedSales();
-  await seedContent();
-  await seedEducation();
-  await seedHr();
-  await seedLegal();
-  await seedProcurement();
-  await seedFood();
-  await seedSafety();
-  await seedMedical();
-  await seedAccounting();
-  await seedStrategy();
-  await seedIntegrations();
-  await seedAnalytics();
-  await seedReadiness();
-  await ensureFinanceEntityLinksBootstrap();
-  await writeIntegrationDatasetAudit(actor, "system.demo_data_restored", { mode: "test" });
-  return "test" as const;
-}
-
-export type AnalyticsDemoStatus = {
-  metrics: number;
-  contracts: number;
-  signals: number;
-  runs: number;
-};
-
-export async function getAnalyticsDemoStatus(): Promise<AnalyticsDemoStatus> {
-  if (!env.DB) throw new Error("Cloudflare D1 binding `DB` is unavailable.");
-  const row = await env.DB.prepare(`SELECT
-    (SELECT COUNT(*) FROM analytics_metric_definitions) AS metrics,
-    (SELECT COUNT(*) FROM ai_process_contracts) AS contracts,
-    (SELECT COUNT(*) FROM analytics_signals) AS signals,
-    (SELECT COUNT(*) FROM ai_model_runs) AS runs`
-  ).first<{ metrics: number; contracts: number; signals: number; runs: number }>();
-  return {
-    metrics: Number(row?.metrics ?? 0),
-    contracts: Number(row?.contracts ?? 0),
-    signals: Number(row?.signals ?? 0),
-    runs: Number(row?.runs ?? 0),
-  };
-}
-
-export async function ensureAnalyticsDemoBootstrap(): Promise<AnalyticsDemoStatus> {
-  const before = await getAnalyticsDemoStatus();
-  if (await getSystemDataMode() === "empty") return before;
-  if (analyticsDemoComplete(before)) return before;
-
-  await seedAnalytics();
-  const after = await getAnalyticsDemoStatus();
-  if (!analyticsDemoComplete(after)) {
-    throw new Error(`Analytics demo bootstrap incomplete: ${after.metrics}/${after.contracts}/${after.signals}/${after.runs}`);
-  }
-  return after;
-}
-
-function analyticsDemoComplete(status: AnalyticsDemoStatus) {
-  return status.metrics >= 10 && status.contracts >= 13 && status.signals >= 12 && status.runs >= 6;
-}
-
-async function seedAnalytics(){
-  const metrics=[
-    ["MET-T-CASH","Ð§Ð¸ÑÑ‚Ñ‹Ð¹ Ð´ÐµÐ½ÐµÐ¶Ð½Ñ‹Ð¹ Ð¿Ð¾Ñ‚Ð¾Ðº","Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹","ÐŸÐ¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ñ Ð¼Ð¸Ð½ÑƒÑ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ñ Ð·Ð° ÐºÐ°Ð»ÐµÐ½Ð´Ð°Ñ€Ð½Ñ‹Ð¹ Ð¼ÐµÑÑÑ†","ÐŸÐ¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ñ Ð·Ð° Ð¼ÐµÑÑÑ† Ð¼Ð¸Ð½ÑƒÑ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ñ","â‚½","ÐœÐµÑÑÑ†","financial_operations","Ð¤Ð°ÐºÑ‚ Ð¸ÑÑ…Ð¾Ð´Ð½Ð¾Ð¹ Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ñ‹ Ð¸ Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ð¾ Ð¿Ð¾Ð¼ÐµÑ‡ÐµÐ½Ð½Ñ‹Ðµ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ðµ Ð·Ð°Ð¿Ð¸ÑÐ¸","ÐžÐ”Ð”Ð¡: Ð°Ð¿Ñ€ÐµÐ»ÑŒ 2026; Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ðµ ÑÐ»ÐµÐ´Ñ‹: Ð°Ð²Ð³ÑƒÑÑ‚","EMP-T-FIN-001",0,1],
-    ["MET-T-CASH-GAP","ÐœÐ¸Ð½Ð¸Ð¼Ð°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¿Ñ€Ð¾Ð³Ð½Ð¾Ð·Ð½Ñ‹Ð¹ Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ðº","Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹","ÐœÐ¸Ð½Ð¸Ð¼ÑƒÐ¼ Ð½Ð°ÐºÐ¾Ð¿Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ð³Ð¾ Ð²ÐµÑ€Ð¾ÑÑ‚Ð½Ð¾ÑÑ‚Ð½Ð¾Ð³Ð¾ Ð¾ÑÑ‚Ð°Ñ‚ÐºÐ° Ð½Ð° Ð³Ð¾Ñ€Ð¸Ð·Ð¾Ð½Ñ‚Ðµ","ÐÐ°Ñ‡Ð°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ðº Ð¿Ð»ÑŽÑ Ð¿Ð¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ñ Ð¸ Ð¼Ð¸Ð½ÑƒÑ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ñ Ñ ÑƒÑ‡Ñ‘Ñ‚Ð¾Ð¼ Ð²ÐµÑ€Ð¾ÑÑ‚Ð½Ð¾ÑÑ‚Ð¸","â‚½","Ð”ÐµÐ½ÑŒ","finance_forecast_items","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð¼Ð¾Ð´ÐµÐ»ÑŒ","Ð“Ð¾Ñ€Ð¸Ð·Ð¾Ð½Ñ‚ 1â€“8 ÑÐµÐ½Ñ‚ÑÐ±Ñ€Ñ 2026","EMP-T-FIN-001",0,1],
-    ["MET-T-LTV","LTV ÑÐµÐ¼ÑŒÐ¸","ÐšÐ»Ð¸ÐµÐ½Ñ‚Ñ‹","ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ð°Ñ Ð²Ñ‹Ñ€ÑƒÑ‡ÐºÐ° ÑÐµÐ¼ÑŒÐ¸ Ð·Ð° ÑÑ€Ð¾Ðº Ð¶Ð¸Ð·Ð½Ð¸","Ð¡ÑƒÐ¼Ð¼Ð° Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ñ… Ð¾Ð¿Ð»Ð°Ñ‚ ÑÐµÐ¼ÑŒÐ¸","â‚½","Ð¡ÐµÐ¼ÑŒÑ","client_lifecycles,financial_operations","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ¸","Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº 21 Ð°Ð²Ð³ÑƒÑÑ‚Ð°","EMP-T-SALES-001",null,1],
-    ["MET-T-CHURN","Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹ Ñ€Ð¸ÑÐº ÑƒÑ…Ð¾Ð´Ð°","ÐšÐ»Ð¸ÐµÐ½Ñ‚Ñ‹","Ð§Ð¸ÑÐ»Ð¾ Ð°ÐºÑ‚Ð¸Ð²Ð½Ñ‹Ñ… ÑÐµÐ¼ÐµÐ¹ Ñ Ð²Ñ‹ÑÐ¾ÐºÐ¸Ð¼ Ñ€Ð¸ÑÐºÐ¾Ð¼","Ð§Ð¸ÑÐ»Ð¾ Ð°ÐºÑ‚Ð¸Ð²Ð½Ñ‹Ñ… ÑÐµÐ¼ÐµÐ¹ Ñ Ð²Ñ‹ÑÐ¾ÐºÐ¸Ð¼ Ñ€Ð¸ÑÐºÐ¾Ð¼","ÑÐµÐ¼ÐµÐ¹","Ð¡Ð½Ð¸Ð¼Ð¾Ðº","client_lifecycles","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ¸","Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº 21 Ð°Ð²Ð³ÑƒÑÑ‚Ð°","EMP-T-SALES-001",0,1],
-    ["MET-T-EDU","Ð¡Ñ€ÐµÐ´Ð½Ð¸Ð¹ ÑƒÑ‡ÐµÐ±Ð½Ñ‹Ð¹ Ð¿Ñ€Ð¾Ð³Ñ€ÐµÑÑ","ÐžÐ±ÑƒÑ‡ÐµÐ½Ð¸Ðµ","Ð¡Ñ€ÐµÐ´Ð½ÐµÐµ Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ðµ Ð¿Ð¾ÑÐ»ÐµÐ´Ð½Ð¸Ñ… Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ñ… Ð¼ÐµÑ‚Ñ€Ð¸Ðº Ð¿Ñ€Ð¾Ð³Ñ€ÐµÑÑÐ°","Ð¡Ñ€ÐµÐ´Ð½ÐµÐµ Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ðµ Ð¿Ñ€Ð¾Ð³Ñ€ÐµÑÑÐ°","%","Ð£Ñ‡ÐµÐ½Ð¸Ðº Ã— Ð¿Ñ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ð° Ã— Ð¿ÐµÑ€Ð¸Ð¾Ð´","education_progress","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ð¾Ð±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð½Ñ‹Ðµ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ¸","3 ÐºÐ²Ð°Ñ€Ñ‚Ð°Ð» 2026","EMP-T-METHOD-001",75,1],
-    ["MET-T-STAFF","ÐÐºÑ‚Ð¸Ð²Ð½Ñ‹Ðµ ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ¸","HR","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ¸ ÑÐ¾ ÑÑ‚Ð°Ñ‚ÑƒÑÐ¾Ð¼ Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚ Ð² HR-ÐºÐ¾Ð½Ñ‚ÑƒÑ€Ðµ","Ð§Ð¸ÑÐ»Ð¾ Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÑŽÑ‰Ð¸Ñ… ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ¾Ð²","Ñ‡ÐµÐ».","Ð¡Ð½Ð¸Ð¼Ð¾Ðº","hr_employees","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ¸","Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº 21 Ð°Ð²Ð³ÑƒÑÑ‚Ð°","EMP-T-HR-001",null,1],
-    ["MET-T-SAFETY","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ñ‹Ðµ Ð½ÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚Ð¸","Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚ÑŒ","ÐÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚Ð¸, ÑÑ‚Ð°Ñ‚ÑƒÑ ÐºÐ¾Ñ‚Ð¾Ñ€Ñ‹Ñ… Ð½Ðµ Ð—Ð°ÐºÑ€Ñ‹Ñ‚","Ð§Ð¸ÑÐ»Ð¾ Ð½ÐµÐ·Ð°ÐºÑ€Ñ‹Ñ‚Ñ‹Ñ… Ð½ÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÐµÐ¹","ÑˆÑ‚.","Ð¡Ð½Ð¸Ð¼Ð¾Ðº","safety_faults","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸","Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº 21 Ð°Ð²Ð³ÑƒÑÑ‚Ð°","EMP-T-SAFE-001",0,1],
-    ["MET-T-FOOD","ÐœÐ°Ñ€Ð¶Ð¸Ð½Ð°Ð»ÑŒÐ½Ð¾ÑÑ‚ÑŒ ÐºÑƒÑ…Ð½Ð¸","ÐŸÐ¸Ñ‚Ð°Ð½Ð¸Ðµ","Ð’Ñ‹Ñ€ÑƒÑ‡ÐºÐ° Ð¼Ð¸Ð½ÑƒÑ Ð¼Ð°Ñ‚ÐµÑ€Ð¸Ð°Ð»ÑŒÐ½Ñ‹Ðµ Ð¸ ÑÐ¼ÐµÐ½Ð½Ñ‹Ðµ Ð·Ð°Ñ‚Ñ€Ð°Ñ‚Ñ‹, Ð´ÐµÐ»Ñ‘Ð½Ð½Ñ‹Ðµ Ð½Ð° Ð²Ñ‹Ñ€ÑƒÑ‡ÐºÑƒ","Ð”Ð¾Ð»Ñ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»Ð¸ Ð¿Ð¾ÑÐ»Ðµ ÑÑ‚Ð¾Ð¸Ð¼Ð¾ÑÑ‚Ð¸ Ð¿Ñ€Ð¾Ð´ÑƒÐºÑ‚Ð¾Ð² Ð¸ ÑÐ¼ÐµÐ½","%","Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ Ð¿ÐµÑ€Ð¸Ð¾Ð´","food_shipments,food_production,food_shifts","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÑÐºÐ¾Ð½Ð¾Ð¼Ð¸ÐºÐ° ÐºÑƒÑ…Ð½Ð¸","Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº 21 Ð°Ð²Ð³ÑƒÑÑ‚Ð°","EMP-T-KITCHEN-001",20,1],
-    ["MET-T-PROJECT","ÐŸÑ€Ð¾ÐµÐºÑ‚Ñ‹ Ð¿Ð¾Ð´ Ñ€Ð¸ÑÐºÐ¾Ð¼","ÐŸÑ€Ð¾ÐµÐºÑ‚Ñ‹","ÐŸÑ€Ð¾ÐµÐºÑ‚Ñ‹ ÑÐ¾ ÑÑ‚Ð°Ñ‚ÑƒÑÐ¾Ð¼ ÐŸÐ¾Ð´ Ñ€Ð¸ÑÐºÐ¾Ð¼","Ð§Ð¸ÑÐ»Ð¾ Ð¿Ñ€Ð¾ÐµÐºÑ‚Ð¾Ð² Ð¿Ð¾Ð´ Ñ€Ð¸ÑÐºÐ¾Ð¼","ÑˆÑ‚.","Ð¡Ð½Ð¸Ð¼Ð¾Ðº","strategy_projects","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÑÑ‚Ñ€Ð°Ñ‚ÐµÐ³Ð¸Ñ","Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº 21 Ð°Ð²Ð³ÑƒÑÑ‚Ð°","EMP-T-PROJ-001",0,1],
-    ["MET-T-DQ","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ñ‹Ðµ ÑÐ¸Ð³Ð½Ð°Ð»Ñ‹ ÐºÐ°Ñ‡ÐµÑÑ‚Ð²Ð°","Ð”Ð°Ð½Ð½Ñ‹Ðµ","Ð¤Ð¸Ð½Ð°Ð½ÑÐ¾Ð²Ñ‹Ðµ Ð¸ Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ð¾Ð½Ð½Ñ‹Ðµ ÐºÐ¾Ð½Ñ„Ð»Ð¸ÐºÑ‚Ñ‹, Ð½Ðµ Ð¸Ð¼ÐµÑŽÑ‰Ð¸Ðµ Ñ€ÐµÑˆÐµÐ½Ð¸Ñ","Ð§Ð¸ÑÐ»Ð¾ Ð¾Ñ‚ÐºÑ€Ñ‹Ñ‚Ñ‹Ñ… Ñ€Ð°ÑÑ…Ð¾Ð¶Ð´ÐµÐ½Ð¸Ð¹ Ð² Ñ„Ð¸Ð½Ð°Ð½ÑÐ°Ñ… Ð¸ Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸ÑÑ…","ÑˆÑ‚.","Ð¡Ð½Ð¸Ð¼Ð¾Ðº","finance_reconciliation_issues,integration_conflicts","Ð¡Ð¼ÐµÑˆÐ°Ð½Ð½Ð°Ñ: XLSX Ñ„Ð°ÐºÑ‚ + ÑÐ¸ÑÑ‚ÐµÐ¼Ð½Ñ‹Ð¹ ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒ","Ð¢ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº 21 Ð°Ð²Ð³ÑƒÑÑ‚Ð°","EMP-T-INT-001",0,1]
-  ];
-  await env.DB.batch(metrics.map(row=>env.DB.prepare("INSERT OR IGNORE INTO analytics_metric_definitions (id,name,category,definition,formula,unit,grain,source_tables,source_quality,freshness,owner_entity_id,target_value,sensitive) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const commonForbidden="ÐÐµ Ð¸Ð·Ð¼ÐµÐ½ÑÑ‚ÑŒ Ñ„Ð¸Ð½Ð°Ð½ÑÐ¾Ð²Ñ‹Ð¹ Ñ„Ð°ÐºÑ‚; Ð½Ðµ Ð¿Ð¾Ð´Ð¿Ð¸ÑÑ‹Ð²Ð°Ñ‚ÑŒ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ñ‹; Ð½Ðµ ÑƒÐ²Ð¾Ð»ÑŒÐ½ÑÑ‚ÑŒ, Ð½Ðµ Ð½Ð°ÐºÐ°Ð·Ñ‹Ð²Ð°Ñ‚ÑŒ Ð¸ Ð½Ðµ Ð¾Ð±Ð²Ð¸Ð½ÑÑ‚ÑŒ Ð»ÑŽÐ´ÐµÐ¹; Ð½Ðµ ÑÑ‚Ð°Ð²Ð¸Ñ‚ÑŒ Ð´Ð¸Ð°Ð³Ð½Ð¾Ð·Ñ‹; Ð½Ðµ ÑƒÐ´Ð°Ð»ÑÑ‚ÑŒ Ð¿ÐµÑ€Ð²Ð¸Ñ‡Ð½Ñ‹Ðµ Ð´Ð°Ð½Ð½Ñ‹Ðµ; Ð½Ðµ Ð²Ñ‹Ð´Ð°Ð²Ð°Ñ‚ÑŒ ÐºÑ€Ð¸Ñ‚Ð¸Ñ‡Ð½Ñ‹Ðµ Ð¿Ñ€Ð°Ð²Ð°";
-  const contracts=[
-    ["AI-CONTRACT-PAYMENTS","ÐŸÑ€Ð¾Ð³Ð½Ð¾Ð· Ð¿Ð»Ð°Ñ‚ÐµÐ¶ÐµÐ¹","ÐžÐ±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð½Ñ‹Ðµ Ð½Ð°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ñ, ÑÑ€Ð¾ÐºÐ¸ Ð¸ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ðµ Ð¾Ð¿Ð»Ð°Ñ‚Ñ‹","Ð’ÐµÑ€Ð¾ÑÑ‚Ð½Ð¾ÑÑ‚Ð½Ñ‹Ð¹ Ð³Ñ€Ð°Ñ„Ð¸Ðº Ð¿Ð¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ð¹ Ñ Ñ„Ð°ÐºÑ‚Ð¾Ñ€Ð°Ð¼Ð¸ Ð¸ Ð´Ð¸Ð°Ð¿Ð°Ð·Ð¾Ð½Ð¾Ð¼","Ð§Ð¸Ñ‚Ð°Ñ‚ÑŒ Ð°Ð³Ñ€ÐµÐ³Ð°Ñ‚Ñ‹; ÑÑ„Ð¾Ñ€Ð¼Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð¾Ð±ÑŠÑÑÐ½Ð¸Ð¼Ñ‹Ð¹ Ð¿Ñ€Ð¾Ð³Ð½Ð¾Ð·; Ð¿Ñ€ÐµÐ´Ð»Ð¾Ð¶Ð¸Ñ‚ÑŒ Ð·Ð°Ð´Ð°Ñ‡Ñƒ",commonForbidden,"Ð¤Ð¸Ð½Ð°Ð½ÑÐ¾Ð²Ñ‹Ð¹ ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ñ‘Ñ€",0,"Ð¢Ð¾Ñ‡Ð½Ð¾ÑÑ‚ÑŒ ÑÑƒÐ¼Ð¼Ñ‹ Ð¸ Ð´Ð°Ñ‚Ñ‹ Ð½Ð° Ð³Ð¾Ñ€Ð¸Ð·Ð¾Ð½Ñ‚Ðµ 30 Ð´Ð½ÐµÐ¹","ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ð¾ÑÐ»Ðµ 3 Ð¿ÐµÑ€Ð¸Ð¾Ð´Ð¾Ð² Ñ Ð¾ÑˆÐ¸Ð±ÐºÐ¾Ð¹ Ð±Ð¾Ð»ÐµÐµ 30%",1,"Ð’ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐµ ÐºÐ¾Ð½Ñ‚Ñ€Ð°ÐºÑ‚Ð° Ð²Ñ‹Ð±Ñ€Ð°Ñ‚ÑŒ ÐžÑ‚ÐºÐ°Ð·Ð°Ñ‚ÑŒÑÑ Ð¸ ÑƒÐºÐ°Ð·Ð°Ñ‚ÑŒ Ð¾ÑÐ½Ð¾Ð²Ð°Ð½Ð¸Ðµ","ÐŸÐ»Ð°Ñ‚Ñ‘Ð¶Ð½Ñ‹Ð¹ ÐºÐ°Ð»ÐµÐ½Ð´Ð°Ñ€ÑŒ Ð¸ Ñ€ÑƒÑ‡Ð½Ð¾Ð¹ Ð¿Ñ€Ð¾Ð³Ð½Ð¾Ð· Ð¿Ñ€Ð¾Ð´Ð¾Ð»Ð¶Ð°ÑŽÑ‚ Ñ€Ð°Ð±Ð¾Ñ‚Ð°Ñ‚ÑŒ","ÐÐ¾Ð²Ñ‹Ðµ Ð¿Ñ€Ð¸Ð·Ð½Ð°ÐºÐ¸ Ð¿Ð»Ð°Ñ‚ÐµÐ¶Ð½Ð¾Ð³Ð¾ Ð¿Ð¾Ð²ÐµÐ´ÐµÐ½Ð¸Ñ Ð½Ðµ Ð¿ÐµÑ€ÐµÐ´Ð°ÑŽÑ‚ÑÑ Ð¼Ð¾Ð´ÐµÐ»Ð¸","Ð Ð°Ð½ÐµÐµ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½Ð½Ñ‹Ðµ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ðµ Ð°Ð³Ñ€ÐµÐ³Ð°Ñ‚Ñ‹ Ð¾ÑÑ‚Ð°ÑŽÑ‚ÑÑ Ð² Ð°ÑƒÐ´Ð¸Ñ‚Ðµ; Ð¿ÐµÑ€Ð²Ð¸Ñ‡Ð½Ñ‹Ðµ Ð´Ð°Ð½Ð½Ñ‹Ðµ Ð½Ðµ ÑƒÐ´Ð°Ð»ÑÑŽÑ‚ÑÑ","ÐŸÑ€Ð¾Ð³Ð½Ð¾Ð· Ð¾Ð±Ð½Ð¾Ð²Ð»ÑÐµÑ‚ÑÑ Ð¼ÐµÐ´Ð»ÐµÐ½Ð½ÐµÐµ Ð¸ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","finance_accruals,client_lifecycles"],
-    ["AI-CONTRACT-LTV","ÐŸÑ€Ð¾Ð³Ð½Ð¾Ð· LTV","ÐžÐ±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð½Ñ‹Ðµ Ð¿Ð»Ð°Ñ‚ÐµÐ¶Ð¸, ÑÑ€Ð¾Ðº Ð¶Ð¸Ð·Ð½Ð¸, ÑƒÑÐ»ÑƒÐ³Ð° Ð¸ Ñ‡Ð°ÑÑ‚Ð¾Ñ‚Ð°","Ð”Ð¸Ð°Ð¿Ð°Ð·Ð¾Ð½ Ð¾Ð¶Ð¸Ð´Ð°ÐµÐ¼Ð¾Ð¹ Ñ†ÐµÐ½Ð½Ð¾ÑÑ‚Ð¸ ÑÐµÐ¼ÑŒÐ¸ Ñ Ñ„Ð°ÐºÑ‚Ð¾Ñ€Ð°Ð¼Ð¸","Ð¡Ñ‡Ð¸Ñ‚Ð°Ñ‚ÑŒ Ð°Ð³Ñ€ÐµÐ³Ð°Ñ‚Ñ‹; Ñ€Ð°Ð½Ð¶Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð´Ð»Ñ Ð°Ð½Ð°Ð»Ð¸Ð·Ð°; Ð¿Ñ€ÐµÐ´Ð»Ð¾Ð¶Ð¸Ñ‚ÑŒ ÐºÐ¾Ð½Ñ‚Ð°ÐºÑ‚",commonForbidden,"Ð”Ð¸Ñ€ÐµÐºÑ‚Ð¾Ñ€ Ð¿Ð¾ Ð¿Ñ€Ð¾Ð´Ð°Ð¶Ð°Ð¼",0,"ÐžÑˆÐ¸Ð±ÐºÐ° Ð¿Ñ€Ð¾Ð³Ð½Ð¾Ð·Ð° LTV Ð½Ð° ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒÐ½Ð¾Ð¹ Ð²Ñ‹Ð±Ð¾Ñ€ÐºÐµ","ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸ drift >25% Ð¸Ð»Ð¸ coverage <60%",1,"ÐžÑ‚ÐºÐ°Ð· Ð² ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐµ ÐºÐ¾Ð½Ñ‚Ñ€Ð°ÐºÑ‚Ð° Ð¿Ð¾ ÑÐµÐ¼ÑŒÐµ Ð¸Ð»Ð¸ Ð²ÑÐµÐ¼Ñƒ ÑÑ†ÐµÐ½Ð°Ñ€Ð¸ÑŽ","Ð¤Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ LTV Ð¸ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° ÑÐµÐ¼ÑŒÐ¸ Ð¾ÑÑ‚Ð°ÑŽÑ‚ÑÑ","ÐÐ¾Ð²Ñ‹Ðµ Ð¿Ð¾Ð²ÐµÐ´ÐµÐ½Ñ‡ÐµÑÐºÐ¸Ðµ Ð¿Ñ€Ð¸Ð·Ð½Ð°ÐºÐ¸ Ð½Ðµ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÑŽÑ‚ÑÑ Ð´Ð»Ñ LTV","Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ Ð°ÑƒÐ´Ð¸Ñ‚ ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÑ‚ÑÑ Ð¿Ð¾ Ð¿Ð¾Ð»Ð¸Ñ‚Ð¸ÐºÐµ Ñ‚ÐµÑÑ‚Ð¾Ð²Ð¾Ð³Ð¾ ÐºÐ¾Ð½Ñ‚ÑƒÑ€Ð°","Ð˜ÑÑ‡ÐµÐ·Ð°ÐµÑ‚ Ð¿Ñ€Ð¾Ð³Ð½Ð¾Ð·, Ñ„Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð²Ñ‹Ñ€ÑƒÑ‡ÐºÐ° Ð¾ÑÑ‚Ð°Ñ‘Ñ‚ÑÑ","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","client_lifecycles,financial_operations"],
-    ["AI-CONTRACT-CHURN","Ð Ð¸ÑÐº ÑƒÑ…Ð¾Ð´Ð°","ÐŸÑ€Ð¾ÑÑ€Ð¾Ñ‡ÐºÐ°, ÐºÐ¾Ð¼Ð¼ÑƒÐ½Ð¸ÐºÐ°Ñ†Ð¸Ð¸, Ð¿Ð¾ÑÐµÑ‰Ð°ÐµÐ¼Ð¾ÑÑ‚ÑŒ Ð¸ ÑÑ€Ð¾Ðº Ð¶Ð¸Ð·Ð½Ð¸","ÐžÐ±ÑŠÑÑÐ½Ð¸Ð¼Ñ‹Ð¹ Ñ€Ð¸ÑÐº-ÑÐ¸Ð³Ð½Ð°Ð» Ð±ÐµÐ· Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ð³Ð¾ Ñ€ÐµÑˆÐµÐ½Ð¸Ñ","Ð’Ñ‹Ð´ÐµÐ»Ð¸Ñ‚ÑŒ Ñ„Ð°ÐºÑ‚Ð¾Ñ€Ñ‹; Ð¿Ñ€ÐµÐ´Ð»Ð¾Ð¶Ð¸Ñ‚ÑŒ Ñ‡ÐµÐ»Ð¾Ð²ÐµÑ‡ÐµÑÐºÐ¸Ð¹ ÐºÐ¾Ð½Ñ‚Ð°ÐºÑ‚; ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ Ð·Ð°Ð´Ð°Ñ‡Ñƒ",commonForbidden,"Ð”Ð¸Ñ€ÐµÐºÑ‚Ð¾Ñ€ ÐºÐ»Ð¸ÐµÐ½Ñ‚ÑÐºÐ¾Ð³Ð¾ ÑÐµÑ€Ð²Ð¸ÑÐ°",0,"Ð”Ð¾Ð»Ñ Ð¿Ð¾Ð»ÐµÐ·Ð½Ñ‹Ñ… Ñ€Ð°Ð½Ð½Ð¸Ñ… ÐºÐ¾Ð½Ñ‚Ð°ÐºÑ‚Ð¾Ð²","ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸ false-positive >40% Ð´Ð²Ð° Ð¿ÐµÑ€Ð¸Ð¾Ð´Ð°",1,"ÐžÑ‚ÐºÐ°Ð· ÑÐµÐ¼ÑŒÐ¸ Ð¸Ð»Ð¸ Ð²Ð»Ð°Ð´ÐµÐ»ÑŒÑ†Ð° Ñ‡ÐµÑ€ÐµÐ· ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÑƒ ÐºÐ¾Ð½Ñ‚Ñ€Ð°ÐºÑ‚Ð°","Ð ÑƒÑ‡Ð½Ð°Ñ Ñ€Ð°Ð±Ð¾Ñ‚Ð° ÐºÑƒÑ€Ð°Ñ‚Ð¾Ñ€Ð° Ð¸ Ð¸ÑÑ‚Ð¾Ñ€Ð¸Ñ Ð¾Ð±Ñ€Ð°Ñ‰ÐµÐ½Ð¸Ð¹ Ð¿Ñ€Ð¾Ð´Ð¾Ð»Ð¶Ð°ÑŽÑ‚ÑÑ","ÐÐ¾Ð²Ñ‹Ðµ Ð¿Ð¾Ð²ÐµÐ´ÐµÐ½Ñ‡ÐµÑÐºÐ¸Ðµ Ð¿Ñ€Ð¸Ð·Ð½Ð°ÐºÐ¸ ÑÐµÐ¼ÑŒÐ¸ Ð½Ðµ Ð¾Ñ†ÐµÐ½Ð¸Ð²Ð°ÑŽÑ‚ÑÑ","Ð Ð°Ð½ÐµÐµ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½Ð½Ñ‹Ðµ Ð°Ð³Ñ€ÐµÐ³Ð°Ñ‚Ñ‹ Ð½Ðµ ÑƒÐ´Ð°Ð»ÑÑŽÑ‚ÑÑ Ð¸Ð· Ð°ÑƒÐ´Ð¸Ñ‚Ð°","Ð¡Ð¸Ð³Ð½Ð°Ð» Ð¿Ð¾ÑÐ²Ð»ÑÐµÑ‚ÑÑ Ð¿Ð¾Ð·Ð¶Ðµ Ð¿Ð¾ÑÐ»Ðµ Ñ€ÑƒÑ‡Ð½Ð¾Ð³Ð¾ Ð¿Ñ€Ð¾ÑÐ¼Ð¾Ñ‚Ñ€Ð°","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","client_lifecycles,education_attendance"],
-    ["AI-CONTRACT-CASH-GAP","Ð Ð¸ÑÐº ÐºÐ°ÑÑÐ¾Ð²Ð¾Ð³Ð¾ Ñ€Ð°Ð·Ñ€Ñ‹Ð²Ð°","ÐžÑÑ‚Ð°Ñ‚Ð¾Ðº, Ð¿Ð»Ð°Ð½Ð¾Ð²Ñ‹Ðµ Ð¿Ð¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ñ/ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ñ, Ð²ÐµÑ€Ð¾ÑÑ‚Ð½Ð¾ÑÑ‚Ð¸","Ð”Ð°Ñ‚Ð° Ð¸ Ð³Ð»ÑƒÐ±Ð¸Ð½Ð° Ð²Ð¾Ð·Ð¼Ð¾Ð¶Ð½Ð¾Ð³Ð¾ Ñ€Ð°Ð·Ñ€Ñ‹Ð²Ð° Ñ Ð´Ð¾Ð¿ÑƒÑ‰ÐµÐ½Ð¸ÑÐ¼Ð¸","Ð Ð°ÑÑÑ‡Ð¸Ñ‚Ð°Ñ‚ÑŒ ÑÑ†ÐµÐ½Ð°Ñ€Ð¸Ð¹; Ð¿Ð¾ÐºÐ°Ð·Ð°Ñ‚ÑŒ Ð²ÐºÐ»Ð°Ð´ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ð¹; ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ Ð·Ð°Ð´Ð°Ñ‡Ñƒ",commonForbidden,"Ð¤Ð¸Ð½Ð°Ð½ÑÐ¾Ð²Ñ‹Ð¹ Ð´Ð¸Ñ€ÐµÐºÑ‚Ð¾Ñ€",0,"Ð”Ð½Ð¸ Ð¿Ñ€ÐµÐ´ÑƒÐ¿Ñ€ÐµÐ¶Ð´ÐµÐ½Ð¸Ñ Ð´Ð¾ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ð¾Ð³Ð¾ Ñ€Ð°Ð·Ñ€Ñ‹Ð²Ð°","ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸ Ð½ÐµÐ°ÐºÑ‚ÑƒÐ°Ð»ÑŒÐ½Ð¾Ð¼ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸ÐºÐµ Ð±Ð¾Ð»ÐµÐµ 7 Ð´Ð½ÐµÐ¹",1,"ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¼Ð¾Ð´ÐµÐ»ÑŒÐ½Ñ‹Ð¹ ÑÐ»Ð¾Ð¹ Ð² ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐµ; ÑƒÐºÐ°Ð·Ð°Ñ‚ÑŒ Ð¿Ñ€Ð¸Ñ‡Ð¸Ð½Ñƒ","Ð”Ð”Ð¡, Ð¿Ð»Ð°Ñ‚ÐµÐ¶Ð½Ñ‹Ð¹ ÐºÐ°Ð»ÐµÐ½Ð´Ð°Ñ€ÑŒ Ð¸ Ñ€ÑƒÑ‡Ð½Ð¾Ð¹ Ð¿Ð»Ð°Ð½-Ñ„Ð°ÐºÑ‚ Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÑŽÑ‚","ÐŸÑ€Ð¾Ð³Ð½Ð¾Ð·Ð½Ñ‹Ðµ Ð¿Ñ€Ð¸Ð·Ð½Ð°ÐºÐ¸ Ð¿ÐµÑ€ÐµÑÑ‚Ð°ÑŽÑ‚ Ð¿ÐµÑ€ÐµÑÑ‡Ð¸Ñ‚Ñ‹Ð²Ð°Ñ‚ÑŒÑÑ","Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ Ð·Ð°Ð¿ÑƒÑÐºÐ¾Ð² Ð¾ÑÑ‚Ð°Ñ‘Ñ‚ÑÑ Ð´Ð»Ñ Ð°ÑƒÐ´Ð¸Ñ‚Ð°","ÐžÑÑ‚Ð°Ñ‘Ñ‚ÑÑ Ñ€ÑƒÑ‡Ð½Ð¾Ð¹ Ñ€Ð°ÑÑ‡Ñ‘Ñ‚ Ð±ÐµÐ· Ñ€Ð°Ð½Ð½ÐµÐ³Ð¾ ÑÐ¸Ð³Ð½Ð°Ð»Ð°","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","finance_forecast_items,financial_operations"],
-    ["AI-CONTRACT-ANOMALY","ÐŸÐ¾Ð¸ÑÐº Ð°Ð½Ð¾Ð¼Ð°Ð»Ð¸Ð¹","ÐÐ³Ñ€ÐµÐ³Ð°Ñ‚Ñ‹, ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒÐ½Ñ‹Ðµ ÑÑƒÐ¼Ð¼Ñ‹, Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€ÑÐµÐ¼Ð¾ÑÑ‚ÑŒ Ð¸ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº","Ð¡Ð¿Ð¸ÑÐ¾Ðº Ñ€Ð°ÑÑ…Ð¾Ð¶Ð´ÐµÐ½Ð¸Ð¹ Ñ Ñ„Ð¾Ñ€Ð¼ÑƒÐ»Ð¾Ð¹ Ð¸ ÑÑÑ‹Ð»ÐºÐ¾Ð¹ Ð½Ð° ÑÑ‚Ñ€Ð¾ÐºÐ¸","Ð¡Ñ€Ð°Ð²Ð½Ð¸Ð²Ð°Ñ‚ÑŒ; Ð¾Ð±ÑŠÑÑÐ½ÑÑ‚ÑŒ; ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ Ð·Ð°Ð´Ð°Ñ‡Ñƒ ÑÐ²ÐµÑ€ÐºÐ¸",commonForbidden,"Ð’Ð»Ð°Ð´ÐµÐ»ÐµÑ† Ð´Ð°Ð½Ð½Ñ‹Ñ…",0,"ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ðµ Ñ€Ð°ÑÑ…Ð¾Ð¶Ð´ÐµÐ½Ð¸Ñ Ð½Ð° 100 Ð¿Ñ€Ð¾Ð²ÐµÑ€Ð¾Ðº","ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸ 50% Ð»Ð¾Ð¶Ð½Ñ‹Ñ… ÑÐ¸Ð³Ð½Ð°Ð»Ð¾Ð²",1,"ÐžÑ‚ÐºÐ°Ð·Ð°Ñ‚ÑŒÑÑ Ð¾Ñ‚ Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ð¹ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ð¾Ð³Ð¾ Ð½Ð°Ð±Ð¾Ñ€Ð°","Ð ÑƒÑ‡Ð½Ñ‹Ðµ ÑÐ²ÐµÑ€ÐºÐ¸ Ð¸ ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒÐ½Ñ‹Ðµ ÑÑƒÐ¼Ð¼Ñ‹ Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÑŽÑ‚","ÐÐ¾Ð²Ñ‹Ðµ Ð½Ð°Ð±Ð¾Ñ€Ñ‹ Ð½Ðµ ÑÐºÐ°Ð½Ð¸Ñ€ÑƒÑŽÑ‚ÑÑ Ð¿Ñ€Ð°Ð²Ð¸Ð»Ð°Ð¼Ð¸","Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ñ… Ñ€Ð°ÑÑ…Ð¾Ð¶Ð´ÐµÐ½Ð¸Ð¹ ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÑ‚ÑÑ","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð·Ð°Ð½Ð¸Ð¼Ð°ÐµÑ‚ Ð±Ð¾Ð»ÑŒÑˆÐµ Ð²Ñ€ÐµÐ¼ÐµÐ½Ð¸","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","finance_reconciliation_issues,integration_conflicts"],
-    ["AI-CONTRACT-BONUS","Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ð¸ Ð¿Ð¾ Ð±Ð¾Ð½ÑƒÑÐ°Ð¼","ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ðµ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ñ‹, Ð¿Ñ€Ð°Ð²Ð¸Ð»Ð° Ð¼Ð¾Ñ‚Ð¸Ð²Ð°Ñ†Ð¸Ð¸ Ð¸ Ð±ÑŽÐ´Ð¶ÐµÑ‚","Ð§ÐµÑ€Ð½Ð¾Ð²Ð¸Ðº Ñ€ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ð¸ Ñ Ñ„Ð°ÐºÑ‚Ð¾Ñ€Ð°Ð¼Ð¸ Ð´Ð»Ñ Ñ‡ÐµÐ»Ð¾Ð²ÐµÐºÐ°","Ð¡Ñ„Ð¾Ñ€Ð¼Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ ÑÐ¿Ñ€Ð°Ð²ÐºÑƒ; ÑÑ€Ð°Ð²Ð½Ð¸Ñ‚ÑŒ Ñ Ð¿Ñ€Ð°Ð²Ð¸Ð»Ð°Ð¼Ð¸; Ð·Ð°Ð¿Ñ€Ð¾ÑÐ¸Ñ‚ÑŒ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ",commonForbidden,"HR-Ð´Ð¸Ñ€ÐµÐºÑ‚Ð¾Ñ€",0,"Ð”Ð¾Ð»Ñ Ñ€ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ð¹, Ð¿Ð¾Ð»ÐµÐ·Ð½Ñ‹Ñ… Ð¿Ñ€Ð¸ Ñ€ÑƒÑ‡Ð½Ð¾Ð¼ review","ÐÐµÐ¼ÐµÐ´Ð»ÐµÐ½Ð½Ð¾ Ð¾Ñ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸ Ð¿Ñ€Ð¸Ð·Ð½Ð°ÐºÐµ Ð´Ð¸ÑÐºÑ€Ð¸Ð¼Ð¸Ð½Ð°Ñ†Ð¸Ð¸ Ð¸Ð»Ð¸ Ð½ÐµÐ¿Ð¾Ð»Ð½Ð¾Ð¼ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸ÐºÐµ",1,"ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ ÑÑ†ÐµÐ½Ð°Ñ€Ð¸Ð¹ Ð¸Ð»Ð¸ Ð¸ÑÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ° Ñ‡ÐµÑ€ÐµÐ· ÐºÐ¾Ð½Ñ‚Ñ€Ð°ÐºÑ‚","Ð¤Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ñ‹ Ð¸ Ñ€ÑƒÑ‡Ð½Ð¾Ðµ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ HR Ð¾ÑÑ‚Ð°ÑŽÑ‚ÑÑ","ÐÐ¾Ð²Ñ‹Ðµ ÐºÐ°Ð´Ñ€Ð¾Ð²Ñ‹Ðµ Ð¿Ñ€Ð¸Ð·Ð½Ð°ÐºÐ¸ Ð½Ðµ Ð°Ð½Ð°Ð»Ð¸Ð·Ð¸Ñ€ÑƒÑŽÑ‚ÑÑ","Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ Ð¿Ñ€Ð¸Ð½ÑÑ‚Ñ‹Ñ… Ñ‡ÐµÐ»Ð¾Ð²ÐµÐºÐ¾Ð¼ Ñ€ÐµÑˆÐµÐ½Ð¸Ð¹ ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÑ‚ÑÑ","Ð Ð°ÑÑ‡Ñ‘Ñ‚ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÑÐµÑ‚ÑÑ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","hr_development,hr_rewards,finance_budgets"],
-    ["AI-CONTRACT-CONTENT","Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ð¸ Ð¿Ð¾ ÐºÐ¾Ð½Ñ‚ÐµÐ½Ñ‚Ñƒ","ÐŸÑƒÐ±Ð»Ð¸ÐºÐ°Ñ†Ð¸Ð¸, Ð¿Ñ€Ð¾ÑÐ¼Ð¾Ñ‚Ñ€Ñ‹, ÐºÐ»Ð¸ÐºÐ¸, Ð»Ð¸Ð´Ñ‹, Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ñ‹ Ð¸ Ð²Ñ‹Ñ€ÑƒÑ‡ÐºÐ°","Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ñ Ñ‚ÐµÐ¼Ñ‹/Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚Ð° Ñ Ð¿Ð¾Ð»Ð½Ð¾Ð¹ Ð°Ñ‚Ñ€Ð¸Ð±ÑƒÑ†Ð¸ÐµÐ¹","Ð¡Ñ€Ð°Ð²Ð½Ð¸Ð²Ð°Ñ‚ÑŒ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚Ñ‹; Ð¿Ñ€ÐµÐ´Ð»Ð°Ð³Ð°Ñ‚ÑŒ Ñ‚ÐµÑÑ‚; ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ Ð·Ð°Ð´Ð°Ñ‡Ñƒ",commonForbidden,"Ð ÑƒÐºÐ¾Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÑŒ Ð¼Ð°Ñ€ÐºÐµÑ‚Ð¸Ð½Ð³Ð°",0,"Ð”Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ðµ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ðµ Ð·Ð°ÑÐ²ÐºÐ¸ Ð½Ð° Ñ‚ÐµÑÑ‚","ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²Ð¸Ð¸ Ñ€ÐµÐ°Ð»ÑŒÐ½Ñ‹Ñ… Ð¼ÐµÑ‚Ñ€Ð¸Ðº Ð¸Ð»Ð¸ 3 Ð±ÐµÑÐ¿Ð¾Ð»ÐµÐ·Ð½Ñ‹Ñ… Ñ‚ÐµÑÑ‚Ð°Ñ…",1,"ÐžÑ‚ÐºÐ°Ð· Ð² ÐºÐ¾Ð½Ñ‚Ñ€Ð°ÐºÑ‚Ðµ ÐºÐ¾Ð½Ñ‚ÐµÐ½Ñ‚Ð½Ð¾Ð³Ð¾ ÑÑ†ÐµÐ½Ð°Ñ€Ð¸Ñ","ÐšÐ¾Ð½Ñ‚ÐµÐ½Ñ‚-Ð¿Ð»Ð°Ð½ Ð¸ Ñ€ÑƒÑ‡Ð½Ð°Ñ Ð°Ð½Ð°Ð»Ð¸Ñ‚Ð¸ÐºÐ° Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÑŽÑ‚","ÐÐ¾Ð²Ñ‹Ðµ Ð¼ÐµÑ‚Ñ€Ð¸ÐºÐ¸ Ð¿ÑƒÐ±Ð»Ð¸ÐºÐ°Ñ†Ð¸Ð¹ Ð½Ðµ Ð¾Ð±Ñ€Ð°Ð±Ð°Ñ‚Ñ‹Ð²Ð°ÑŽÑ‚ÑÑ Ð¼Ð¾Ð´ÐµÐ»ÑŒÑŽ","Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ñ… Ñ€ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ð¹ ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÑ‚ÑÑ","Ð’Ñ‹Ð±Ð¾Ñ€ Ñ‚ÐµÐ¼ ÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑÑ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","content_publications,content_attributions"],
-    ["AI-CONTRACT-TRENDS","Ð¢Ñ€ÐµÐ½Ð´Ñ‹","Ð’Ñ€ÐµÐ¼ÐµÐ½Ð½Ñ‹Ðµ Ñ€ÑÐ´Ñ‹ KPI Ñ ÐºÐ°Ñ‡ÐµÑÑ‚Ð²Ð¾Ð¼ Ð¸ ÑÐ²ÐµÐ¶ÐµÑÑ‚ÑŒÑŽ","ÐÐ°Ð¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð¸Ðµ Ð¸ Ð·Ð½Ð°Ñ‡Ð¸Ð¼Ð¾Ðµ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ðµ Ð±ÐµÐ· Ð¿Ñ€Ð¸Ñ‡Ð¸Ð½Ð½Ð¾Ð³Ð¾ ÑƒÑ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ñ","Ð Ð°ÑÑÑ‡Ð¸Ñ‚Ð°Ñ‚ÑŒ Ñ‚Ñ€ÐµÐ½Ð´; Ð¿Ð¾ÐºÐ°Ð·Ð°Ñ‚ÑŒ ÑÑ€Ð°Ð²Ð½ÐµÐ½Ð¸Ðµ Ð¸ Ð¿Ð¾ÐºÑ€Ñ‹Ñ‚Ð¸Ðµ",commonForbidden,"Ð‘Ð¸Ð·Ð½ÐµÑ-Ð°Ð½Ð°Ð»Ð¸Ñ‚Ð¸Ðº",0,"Ð”Ð¾Ð»Ñ Ñ‚Ñ€ÐµÐ½Ð´Ð¾Ð², Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð´Ð¸Ð²ÑˆÐ¸Ñ…ÑÑ ÑÐ»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¼ Ð¿ÐµÑ€Ð¸Ð¾Ð´Ð¾Ð¼","ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸ coverage <3 Ð¿ÐµÑ€Ð¸Ð¾Ð´Ð°",1,"ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð´Ð»Ñ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ð¾Ð¹ Ð¼ÐµÑ‚Ñ€Ð¸ÐºÐ¸","Ð¤Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ð³Ñ€Ð°Ñ„Ð¸ÐºÐ¸ Ð¾ÑÑ‚Ð°ÑŽÑ‚ÑÑ","ÐÐ¾Ð²Ñ‹Ðµ Ñ€ÑÐ´Ñ‹ Ð½Ðµ Ð¿Ð¾Ð»ÑƒÑ‡Ð°ÑŽÑ‚ Ð¼Ð¾Ð´ÐµÐ»ÑŒÐ½ÑƒÑŽ Ð¸Ð½Ñ‚ÐµÑ€Ð¿Ñ€ÐµÑ‚Ð°Ñ†Ð¸ÑŽ","Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ Ñ€ÑÐ´Ð¾Ð² Ð½Ðµ ÑƒÐ´Ð°Ð»ÑÐµÑ‚ÑÑ","ÐŸÐ¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒ Ð¸Ð½Ñ‚ÐµÑ€Ð¿Ñ€ÐµÑ‚Ð¸Ñ€ÑƒÐµÑ‚ Ð³Ñ€Ð°Ñ„Ð¸Ðº ÑÐ°Ð¼Ð¾ÑÑ‚Ð¾ÑÑ‚ÐµÐ»ÑŒÐ½Ð¾","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","analytics_metric_definitions"],
-    ["AI-CONTRACT-METHODS","Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ð¸ Ð¿Ð¾ Ð¼ÐµÑ‚Ð¾Ð´Ð¸ÐºÐ°Ð¼","Ð’ÐµÑ€ÑÐ¸Ñ Ð¿Ñ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ñ‹, Ð¿Ñ€Ð¾Ð³Ñ€ÐµÑÑ, Ð¿Ð¾ÑÐµÑ‰Ð°ÐµÐ¼Ð¾ÑÑ‚ÑŒ Ð¸ Ð¾Ð±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð½Ð°Ñ Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð°Ñ ÑÐ²ÑÐ·ÑŒ","ÐŸÑ€Ð¾Ð²ÐµÑ€ÑÐµÐ¼Ð°Ñ Ð³Ð¸Ð¿Ð¾Ñ‚ÐµÐ·Ð° ÑƒÐ»ÑƒÑ‡ÑˆÐµÐ½Ð¸Ñ Ð¿Ñ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ñ‹","ÐŸÑ€ÐµÐ´Ð»Ð¾Ð¶Ð¸Ñ‚ÑŒ ÑÐºÑÐ¿ÐµÑ€Ð¸Ð¼ÐµÐ½Ñ‚; ÑÐ²ÑÐ·Ð°Ñ‚ÑŒ Ñ Ð²ÐµÑ€ÑÐ¸ÐµÐ¹; ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ Ð·Ð°Ð´Ð°Ñ‡Ñƒ Ð¼ÐµÑ‚Ð¾Ð´Ð¸ÑÑ‚Ñƒ",commonForbidden,"Ð“Ð»Ð°Ð²Ð½Ñ‹Ð¹ Ð¼ÐµÑ‚Ð¾Ð´Ð¸ÑÑ‚",0,"Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ðµ ÑƒÑ‡ÐµÐ±Ð½Ð¾Ð³Ð¾ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ð° Ð¿Ð¾ÑÐ»Ðµ ÑƒÑ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ð¾Ð³Ð¾ Ñ‚ÐµÑÑ‚Ð°","ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸ Ð¼Ð°Ð»Ð¾Ð¹ Ð²Ñ‹Ð±Ð¾Ñ€ÐºÐµ Ð¸Ð»Ð¸ Ð½ÐµÐ³Ð°Ñ‚Ð¸Ð²Ð½Ð¾Ð¼ guardrail",1,"ÐžÑ‚ÐºÐ°Ð· ÑÐµÐ¼ÑŒÐ¸/Ð¿ÐµÐ´Ð°Ð³Ð¾Ð³Ð° Ð¸Ð»Ð¸ Ð²ÑÐµÐ³Ð¾ ÑÑ†ÐµÐ½Ð°Ñ€Ð¸Ñ Ñ‡ÐµÑ€ÐµÐ· ÐºÐ¾Ð½Ñ‚Ñ€Ð°ÐºÑ‚","ÐŸÑ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ñ‹, Ð¶ÑƒÑ€Ð½Ð°Ð» Ð¸ Ñ€ÑƒÑ‡Ð½Ð°Ñ Ñ€Ð°Ð±Ð¾Ñ‚Ð° Ð¼ÐµÑ‚Ð¾Ð´Ð¸ÑÑ‚Ð° Ð¾ÑÑ‚Ð°ÑŽÑ‚ÑÑ","Ð˜ÑÐºÐ»ÑŽÑ‡Ñ‘Ð½Ð½Ñ‹Ðµ ÑƒÑ‡ÐµÐ±Ð½Ñ‹Ðµ Ð¿Ñ€Ð¸Ð·Ð½Ð°ÐºÐ¸ Ð½Ðµ Ð°Ð½Ð°Ð»Ð¸Ð·Ð¸Ñ€ÑƒÑŽÑ‚ÑÑ","Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ Ð²ÐµÑ€ÑÐ¸Ð¹ Ð¸ Ñ€ÐµÑˆÐµÐ½Ð¸Ð¹ ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÑ‚ÑÑ","Ð“Ð¸Ð¿Ð¾Ñ‚ÐµÐ·Ñ‹ Ñ„Ð¾Ñ€Ð¼Ð¸Ñ€ÑƒÑŽÑ‚ÑÑ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","education_progress,education_feedback,education_programs"],
-    ["AI-CONTRACT-HR-RISK","ÐŸÑ€Ð¾Ð³Ð½Ð¾Ð· ÐºÐ°Ð´Ñ€Ð¾Ð²Ñ‹Ñ… Ñ€Ð¸ÑÐºÐ¾Ð²","Ð’Ð°ÐºÐ°Ð½ÑÐ¸Ð¸, ÑÑ€Ð¾ÐºÐ¸ Ð°Ð´Ð°Ð¿Ñ‚Ð°Ñ†Ð¸Ð¸, Ð´Ð¾ÑÑ‚ÑƒÐ¿Ñ‹ Ð¸ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ñ‹Ðµ Ð¾Ñ†ÐµÐ½ÐºÐ¸","Ð Ð°Ð½Ð½Ð¸Ð¹ Ð¾Ñ€Ð³Ð°Ð½Ð¸Ð·Ð°Ñ†Ð¸Ð¾Ð½Ð½Ñ‹Ð¹ ÑÐ¸Ð³Ð½Ð°Ð» Ð±ÐµÐ· Ð¾Ñ†ÐµÐ½ÐºÐ¸ Ð»Ð¸Ñ‡Ð½Ð¾ÑÑ‚Ð¸","ÐŸÐ¾ÐºÐ°Ð·Ð°Ñ‚ÑŒ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ð¾Ð½Ð½Ñ‹Ðµ Ñ„Ð°ÐºÑ‚Ð¾Ñ€Ñ‹; Ð¿Ñ€ÐµÐ´Ð»Ð¾Ð¶Ð¸Ñ‚ÑŒ review HR",commonForbidden,"HR-Ð´Ð¸Ñ€ÐµÐºÑ‚Ð¾Ñ€",0,"Ð”Ð¾Ð»Ñ Ð¿Ñ€ÐµÐ´Ð¾Ñ‚Ð²Ñ€Ð°Ñ‰Ñ‘Ð½Ð½Ñ‹Ñ… Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ð¾Ð½Ð½Ñ‹Ñ… ÑÑ€Ñ‹Ð²Ð¾Ð²","ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸ Ð¿Ñ€Ð¸Ð·Ð½Ð°ÐºÐµ Ð¿Ñ€ÐµÐ´Ð²Ð·ÑÑ‚Ð¾ÑÑ‚Ð¸ Ð¸Ð»Ð¸ Ð¶Ð°Ð»Ð¾Ð±Ðµ ÑÑƒÐ±ÑŠÐµÐºÑ‚Ð°",1,"Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº Ð¸Ð»Ð¸ HR Ð¾Ñ„Ð¾Ñ€Ð¼Ð»ÑÐµÑ‚ Ð¾Ñ‚ÐºÐ°Ð· Ð² ÐºÐ¾Ð½Ñ‚Ñ€Ð°ÐºÑ‚Ðµ","HR-Ð¿Ñ€Ð¾Ñ†ÐµÑÑÑ‹ Ð¸ Ð¾Ñ‚Ñ‡Ñ‘Ñ‚Ñ‹ Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÑŽÑ‚ Ð±ÐµÐ· Ð¿Ñ€Ð¾Ð³Ð½Ð¾Ð·Ð°","ÐÐ¾Ð²Ñ‹Ðµ ÐºÐ°Ð´Ñ€Ð¾Ð²Ñ‹Ðµ Ð¿Ñ€Ð¸Ð·Ð½Ð°ÐºÐ¸ ÑÑƒÐ±ÑŠÐµÐºÑ‚Ð° Ð½Ðµ Ð°Ð½Ð°Ð»Ð¸Ð·Ð¸Ñ€ÑƒÑŽÑ‚ÑÑ","Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ ÐºÐ°Ð´Ñ€Ð¾Ð²Ñ‹Ð¹ Ñ„Ð°ÐºÑ‚ ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÑ‚ÑÑ Ð¿Ð¾ Ñ€ÐµÐ³Ð»Ð°Ð¼ÐµÐ½Ñ‚Ñƒ","Ð Ð¸ÑÐº Ð¾Ñ†ÐµÐ½Ð¸Ð²Ð°ÐµÑ‚ÑÑ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","hr_vacancies,hr_onboarding,hr_accesses"],
-    ["AI-CONTRACT-SUPPLIER","Ð¡Ñ€Ð°Ð²Ð½ÐµÐ½Ð¸Ðµ Ð¿Ð¾Ð´Ñ€ÑÐ´Ñ‡Ð¸ÐºÐ¾Ð²","Ð¦ÐµÐ½Ð°, ÑÑ€Ð¾Ðº, ÐºÐ°Ñ‡ÐµÑÑ‚Ð²Ð¾, Ñ€ÐµÐ¹Ñ‚Ð¸Ð½Ð³, Ð³Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ñ Ð¸ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€","ÐžÐ±ÑŠÑÑÐ½Ð¸Ð¼Ñ‹Ð¹ Ñ€ÐµÐ¹Ñ‚Ð¸Ð½Ð³ Ð¿Ñ€ÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð¸Ð¹ Ð±ÐµÐ· Ð°Ð²Ñ‚Ð¾Ð·Ð°ÐºÑƒÐ¿ÐºÐ¸","Ð¡Ñ€Ð°Ð²Ð½Ð¸Ñ‚ÑŒ; Ð¿Ð¾ÐºÐ°Ð·Ð°Ñ‚ÑŒ Ñ„Ð¾Ñ€Ð¼ÑƒÐ»Ñƒ; Ð¿Ñ€ÐµÐ´Ð»Ð¾Ð¶Ð¸Ñ‚ÑŒ shortlist",commonForbidden,"Ð ÑƒÐºÐ¾Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÑŒ Ð·Ð°ÐºÑƒÐ¿Ð¾Ðº",0,"Ð­ÐºÐ¾Ð½Ð¾Ð¼Ð¸Ñ Ð¿Ñ€Ð¸ ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸Ð¸ quality guardrail","ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸ Ð½ÐµÐ¿Ð¾Ð»Ð½Ñ‹Ñ… ÐºÐ¾Ð¼Ð¼ÐµÑ€Ñ‡ÐµÑÐºÐ¸Ñ… Ð¿Ñ€ÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð¸ÑÑ…",1,"ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ ÑÑ†ÐµÐ½Ð°Ñ€Ð¸Ð¹ ÑÑ€Ð°Ð²Ð½ÐµÐ½Ð¸Ñ Ð² ÐºÐ¾Ð½Ñ‚Ñ€Ð°ÐºÑ‚Ðµ","Ð¢Ð°Ð±Ð»Ð¸Ñ†Ð° Ð¿Ñ€ÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð¸Ð¹ Ð¸ Ñ€ÑƒÑ‡Ð½Ð¾Ð¹ Ð²Ñ‹Ð±Ð¾Ñ€ Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÑŽÑ‚","ÐÐ¾Ð²Ñ‹Ðµ Ð¿Ñ€ÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð¸Ñ Ð½Ðµ Ñ€Ð°Ð½Ð¶Ð¸Ñ€ÑƒÑŽÑ‚ÑÑ Ð¼Ð¾Ð´ÐµÐ»ÑŒÑŽ","Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ Ð·Ð°ÐºÑƒÐ¿Ð¾Ðº ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÑ‚ÑÑ","Ð¡Ñ€Ð°Ð²Ð½ÐµÐ½Ð¸Ðµ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÑÐµÑ‚ÑÑ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","procurement_suppliers,supplier_offers"],
-    ["AI-CONTRACT-MISSING-DOCS","ÐžÑ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‰Ð¸Ðµ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ñ‹","ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ñ, Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ð¸ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ð¹ ÐºÐ¾Ð¼Ð¿Ð»ÐµÐºÑ‚ Ð¿ÐµÑ€Ð²Ð¸Ñ‡ÐºÐ¸","Ð¡Ð¿Ð¸ÑÐ¾Ðº Ð½ÐµÐ´Ð¾ÑÑ‚Ð°ÑŽÑ‰Ð¸Ñ… Ñ‚Ð¸Ð¿Ð¾Ð² Ð¸ Ð²Ð»Ð°Ð´ÐµÐ»ÐµÑ†","ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ ÐºÐ¾Ð¼Ð¿Ð»ÐµÐºÑ‚; ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ Ð¾Ð´Ð½Ñƒ Ð·Ð°Ð´Ð°Ñ‡Ñƒ",commonForbidden,"Ð“Ð»Ð°Ð²Ð½Ñ‹Ð¹ Ð±ÑƒÑ…Ð³Ð°Ð»Ñ‚ÐµÑ€",0,"Ð”Ð¾Ð»Ñ ÐºÐ¾Ð¼Ð¿Ð»ÐµÐºÑ‚Ð¾Ð², Ð·Ð°ÐºÑ€Ñ‹Ñ‚Ñ‹Ñ… Ð´Ð¾ Ð¾Ñ‚Ñ‡Ñ‘Ñ‚Ð½Ð¾Ð¹ Ð´Ð°Ñ‚Ñ‹","ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸ Ð½ÐµÐ²ÐµÑ€Ð½Ð¾Ð¹ Ð¼Ð°Ñ‚Ñ€Ð¸Ñ†Ðµ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ñ… Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ð¾Ð²",1,"ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð°Ð²Ñ‚Ð¾Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÑƒ Ð² ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐµ ÐºÐ¾Ð½Ñ‚Ñ€Ð°ÐºÑ‚Ð°","Ð ÐµÐµÑÑ‚Ñ€ Ð¿ÐµÑ€Ð²Ð¸Ñ‡ÐºÐ¸ Ð¸ Ñ€ÑƒÑ‡Ð½Ð°Ñ ÐºÐ¾Ð¼Ð¿Ð»ÐµÐºÑ‚Ð½Ð¾ÑÑ‚ÑŒ Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÑŽÑ‚","ÐÐ¾Ð²Ñ‹Ðµ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ð¸ Ð½Ðµ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÑÑŽÑ‚ÑÑ ÑÑ†ÐµÐ½Ð°Ñ€Ð¸ÐµÐ¼","Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ñ‹ Ð¸ Ð¸ÑÑ‚Ð¾Ñ€Ð¸Ñ Ð·Ð°Ð´Ð°Ñ‡ ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÑŽÑ‚ÑÑ","ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÑÐµÑ‚ÑÑ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","accounting_completeness_checks,accounting_documents"],
-    ["AI-CONTRACT-EARLY-SIGNALS","Ð Ð°Ð½Ð½Ð¸Ðµ ÑÐ¸Ð³Ð½Ð°Ð»Ñ‹ Ð¿Ñ€Ð¾Ð±Ð»ÐµÐ¼","ÐŸÑ€Ð¾ÑÑ€Ð¾Ñ‡ÐºÐ¸, Ð½ÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚Ð¸, Ð¾Ñ‚ÐºÐ»Ð¾Ð½ÐµÐ½Ð¸Ñ KPI Ð¸ ÐºÐ°Ñ‡ÐµÑÑ‚Ð²Ð¾ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸ÐºÐ¾Ð²","ÐŸÑ€Ð¸Ð¾Ñ€Ð¸Ñ‚Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ð°Ñ Ð¾Ñ‡ÐµÑ€ÐµÐ´ÑŒ Ñ Ð´Ð¾ÐºÐ°Ð·Ð°Ñ‚ÐµÐ»ÑŒÑÑ‚Ð²Ð°Ð¼Ð¸","ÐžÐ±ÑŠÐµÐ´Ð¸Ð½Ð¸Ñ‚ÑŒ ÑÐ¸Ð³Ð½Ð°Ð»Ñ‹; Ð¾Ð±ÑŠÑÑÐ½Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸Ð¾Ñ€Ð¸Ñ‚ÐµÑ‚; Ð¿Ñ€ÐµÐ´Ð»Ð¾Ð¶Ð¸Ñ‚ÑŒ Ð·Ð°Ð´Ð°Ñ‡Ñƒ",commonForbidden,"ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ð¾Ð½Ð½Ñ‹Ð¹ Ð´Ð¸Ñ€ÐµÐºÑ‚Ð¾Ñ€",0,"Ð¡Ñ€ÐµÐ´Ð½ÐµÐµ Ð²Ñ€ÐµÐ¼Ñ Ð¾Ñ‚ ÑÐ¸Ð³Ð½Ð°Ð»Ð° Ð´Ð¾ Ð¾Ñ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ð¾Ð³Ð¾","ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¸ Ð¿Ñ€Ð¾Ð¿ÑƒÑÐºÐµ ÐºÑ€Ð¸Ñ‚Ð¸Ñ‡Ð½Ð¾Ð³Ð¾ ÑÐ¾Ð±Ñ‹Ñ‚Ð¸Ñ Ð¸Ð»Ð¸ Ð¿ÐµÑ€ÐµÐ³Ñ€ÑƒÐ·ÐºÐµ Ð¾Ñ‡ÐµÑ€ÐµÐ´Ð¸",1,"ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ ÐºÐ¾Ð½ÐºÑ€ÐµÑ‚Ð½Ñ‹Ð¹ Ð´Ð¾Ð¼ÐµÐ½ Ð¸Ð»Ð¸ Ð²ÐµÑÑŒ ÑÑ†ÐµÐ½Ð°Ñ€Ð¸Ð¹","Ð”Ð¾Ð¼ÐµÐ½Ð½Ñ‹Ðµ Ð¶ÑƒÑ€Ð½Ð°Ð»Ñ‹ Ð¸ Ð·Ð°Ð´Ð°Ñ‡Ð¸ Ð¿Ñ€Ð¾Ð´Ð¾Ð»Ð¶Ð°ÑŽÑ‚ Ñ€Ð°Ð±Ð¾Ñ‚Ð°Ñ‚ÑŒ","ÐÐ¾Ð²Ñ‹Ðµ Ð¼ÐµÐ¶Ð¼Ð¾Ð´ÑƒÐ»ÑŒÐ½Ñ‹Ðµ Ð¿Ñ€Ð¸Ð·Ð½Ð°ÐºÐ¸ Ð½Ðµ Ð°Ð³Ñ€ÐµÐ³Ð¸Ñ€ÑƒÑŽÑ‚ÑÑ","Ð”Ð¾Ð¼ÐµÐ½Ð½Ñ‹Ðµ Ñ„Ð°ÐºÑ‚Ñ‹ Ð½Ðµ ÑƒÐ´Ð°Ð»ÑÑŽÑ‚ÑÑ","Ð¡Ð¸Ð³Ð½Ð°Ð»Ñ‹ Ð¿Ñ€Ð¾ÑÐ¼Ð°Ñ‚Ñ€Ð¸Ð²Ð°ÑŽÑ‚ÑÑ Ð¿Ð¾ Ð¼Ð¾Ð´ÑƒÐ»ÑÐ¼ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ","ÐÐºÑ‚Ð¸Ð²ÐµÐ½","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼","tasks,safety_faults,strategy_deviations,integration_conflicts"]
-  ];
-  await env.DB.batch(contracts.map(row=>env.DB.prepare("INSERT OR IGNORE INTO ai_process_contracts (id,name,input_data,expected_result,allowed_actions,forbidden_actions,human_owner,cost_minor,benefit_metric,auto_stop_condition,opt_out_allowed,opt_out_procedure,fallback_functionality,stopped_data_processing,historical_data_policy,opt_out_impact,status,version,source_refs) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(...row)));
-  const signals=[
-    ["AI-SIG-T-CASH","AI-CONTRACT-CASH-GAP","Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹","ÐŸÑ€Ð¾Ð³Ð½Ð¾Ð·","Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹","Ð’ Ñ‚ÐµÑÑ‚Ð¾Ð²Ð¾Ð¼ ÑÑ†ÐµÐ½Ð°Ñ€Ð¸Ð¸ Ð²Ð¾Ð·Ð¼Ð¾Ð¶ÐµÐ½ ÐºÐ°ÑÑÐ¾Ð²Ñ‹Ð¹ Ñ€Ð°Ð·Ñ€Ñ‹Ð² 4 ÑÐµÐ½Ñ‚ÑÐ±Ñ€Ñ","ÐŸÑ€Ð¾Ð³Ð½Ð¾Ð·Ð½Ñ‹Ð¹ Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ðº Ð¿Ñ€Ð¾Ñ…Ð¾Ð´Ð¸Ñ‚ Ð½Ð¸Ð¶Ðµ Ð½ÑƒÐ»Ñ Ð¿Ð¾ÑÐ»Ðµ Ð°Ñ€ÐµÐ½Ð´Ñ‹","ÐÐ°Ñ‡Ð°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ðº 1,2 Ð¼Ð»Ð½ â‚½; Ð²ÐµÑ€Ð¾ÑÑ‚Ð½Ð¾ÑÑ‚Ð½Ñ‹Ðµ Ð¿Ð¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ñ Ð½Ðµ Ð¿Ð¾ÐºÑ€Ñ‹Ð²Ð°ÑŽÑ‚ Ð·Ð°Ñ€Ð¿Ð»Ð°Ñ‚Ñƒ Ð¸ Ð°Ñ€ÐµÐ½Ð´Ñƒ","ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ Ð´Ð°Ñ‚Ñ‹ Ð¿Ð¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ð¹ Ð¸ Ð¿Ð¾Ð´Ð³Ð¾Ñ‚Ð¾Ð²Ð¸Ñ‚ÑŒ Ñ‡ÐµÐ»Ð¾Ð²ÐµÑ‡ÐµÑÐºÐ¾Ðµ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð¿Ð¾ ÐºÐ°Ð»ÐµÐ½Ð´Ð°Ñ€ÑŽ","FC-T-001..006",62,"ÐÐ¾Ð²Ñ‹Ð¹"],
-    ["AI-SIG-T-PAYMENT","AI-CONTRACT-PAYMENTS","Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹","ÐŸÑ€Ð¾Ð³Ð½Ð¾Ð·","Ð¡Ñ€ÐµÐ´Ð½Ð¸Ð¹","ÐÐ° 5 ÑÐµÐ½Ñ‚ÑÐ±Ñ€Ñ Ð¾Ð¶Ð¸Ð´Ð°ÐµÑ‚ÑÑ 149 000 â‚½ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ñ… Ð¾Ð¿Ð»Ð°Ñ‚","Ð¡ÑƒÐ¼Ð¼Ð° next_payment_minor Ð°ÐºÑ‚Ð¸Ð²Ð½Ñ‹Ñ… ÑÐµÐ¼ÐµÐ¹","Ð¢Ñ€Ð¸ ÑÐ¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ ÑÐµÐ¼ÑŒÐ¸ Ð¸Ð¼ÐµÑŽÑ‚ Ð·Ð°Ð¿Ð»Ð°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ Ð¿Ð»Ð°Ñ‚Ñ‘Ð¶ Ð½Ð° Ð¾Ð´Ð½Ñƒ Ð´Ð°Ñ‚Ñƒ","Ð¡Ð²ÐµÑ€Ð¸Ñ‚ÑŒ Ñ Ñ€ÐµÐ°Ð»ÑŒÐ½Ñ‹Ð¼ Ñ€ÐµÐµÑÑ‚Ñ€Ð¾Ð¼ Ð¿Ð¾ÑÐ»Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ñ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸ÐºÐ°","LIFE-T-014,LIFE-T-021,LIFE-T-071",58,"ÐÐ¾Ð²Ñ‹Ð¹"],
-    ["AI-SIG-T-LTV","AI-CONTRACT-LTV","ÐšÐ»Ð¸ÐµÐ½Ñ‚Ñ‹","ÐŸÑ€Ð¾Ð³Ð½Ð¾Ð·","ÐÐ¸Ð·ÐºÐ¸Ð¹","LIFE-T-014 Ð¸Ð¼ÐµÐµÑ‚ Ð½Ð°Ð¸Ð±Ð¾Ð»ÑŒÑˆÐ¸Ð¹ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ð¹ LTV","680 000 â‚½ Ð·Ð° 8 Ð¼ÐµÑÑÑ†ÐµÐ² Ð² ÑÐ¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ð¹ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐµ","Ð¤Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ñ„Ð¾Ñ€Ð¼ÑƒÐ»Ð° Ð¿Ð¾ÐºÐ°Ð·Ð°Ð½Ð°, Ð½Ð¾ ÐºÐ»Ð¸ÐµÐ½Ñ‚ÑÐºÐ¸Ðµ Ð´Ð°Ð½Ð½Ñ‹Ðµ Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ðµ","Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð´Ð»Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ Ð¸Ð½Ñ‚ÐµÑ€Ñ„ÐµÐ¹ÑÐ°","LIFE-T-014,FIN-TEST-CLIENT-014",55,"ÐÐ¾Ð²Ñ‹Ð¹"],
-    ["AI-SIG-T-CHURN","AI-CONTRACT-CHURN","ÐšÐ»Ð¸ÐµÐ½Ñ‚Ñ‹","Ð Ð¸ÑÐº","Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹","FAM-T-021 Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ Ñ‡ÐµÐ»Ð¾Ð²ÐµÑ‡ÐµÑÐºÐ¾Ð³Ð¾ ÐºÐ¾Ð½Ñ‚Ð°ÐºÑ‚Ð°","Ð Ð¸ÑÐº 72: Ð¿Ñ€Ð¾ÑÑ€Ð¾Ñ‡ÐºÐ° Ð¸ Ð½ÐµÑ‚ Ð¾Ñ‚Ð²ÐµÑ‚Ð° 12 Ð´Ð½ÐµÐ¹","ÐŸÑ€Ð°Ð²Ð¸Ð»Ð¾ ÑÑƒÐ¼Ð¼Ð¸Ñ€ÑƒÐµÑ‚ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð´Ð²Ð° ÑÐ²Ð½Ð¾ Ð²Ð¸Ð´Ð¸Ð¼Ñ‹Ñ… Ñ‚ÐµÑÑ‚Ð¾Ð²Ñ‹Ñ… Ñ„Ð°ÐºÑ‚Ð¾Ñ€Ð°","ÐÐ°Ð·Ð½Ð°Ñ‡Ð¸Ñ‚ÑŒ ÐºÑƒÑ€Ð°Ñ‚Ð¾Ñ€Ñƒ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÑƒ, Ð½Ðµ Ð¿Ñ€Ð¸Ð½Ð¸Ð¼Ð°Ñ‚ÑŒ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð·Ð° ÑÐµÐ¼ÑŒÑŽ","LIFE-T-021,FAM-T-021",72,"ÐÐ¾Ð²Ñ‹Ð¹"],
-    ["AI-SIG-T-ANOMALY","AI-CONTRACT-ANOMALY","Ð¤Ð¸Ð½Ð°Ð½ÑÑ‹","ÐÐ½Ð¾Ð¼Ð°Ð»Ð¸Ñ","Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹","Ð”ÐµÑ‚Ð°Ð»Ð¸ Ñ€Ð°ÑÑ…Ð¾Ð´Ð¾Ð² Ð°Ð¿Ñ€ÐµÐ»Ñ Ð½Ðµ Ð²Ñ…Ð¾Ð´ÑÑ‚ Ð² Ð¸Ñ‚Ð¾Ð³Ð¾Ð²ÑƒÑŽ ÑÑ‚Ñ€Ð¾ÐºÑƒ","Ð Ð°ÑÑ…Ð¾Ð¶Ð´ÐµÐ½Ð¸Ðµ 609 195,38 â‚½ Ð¼ÐµÐ¶Ð´Ñƒ ÑÑ‚Ñ€Ð¾ÐºÐ°Ð¼Ð¸ Ð¸ÑÑ…Ð¾Ð´Ð½Ð¾Ð³Ð¾ ÐžÐ”Ð”Ð¡","Ð¡Ñ€Ð°Ð²Ð½ÐµÐ½Ñ‹ Ñ„Ð¾Ñ€Ð¼ÑƒÐ»Ñ‹ Ð¸ Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ñ Ð¾Ð´Ð½Ð¾Ð³Ð¾ XLSX; Ð¾Ñ€Ð¸Ð³Ð¸Ð½Ð°Ð» Ð½Ðµ Ð¸Ð·Ð¼ÐµÐ½Ñ‘Ð½","Ð’Ñ‹Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÑŒ ÑÐ²ÐµÑ€ÐºÑƒ Ð²Ð»Ð°Ð´ÐµÐ»ÑŒÑ†ÐµÐ¼ ÐžÐ”Ð”Ð¡","FIN-REC-005,INT-CNF-T-ODDS-01",99,"ÐÐ¾Ð²Ñ‹Ð¹"],
-    ["AI-SIG-T-BONUS","AI-CONTRACT-BONUS","HR","Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ñ","Ð¡Ñ€ÐµÐ´Ð½Ð¸Ð¹","Ð”ÐµÐ¿Ñ€ÐµÐ¼Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ REW-T-063-01 Ð½ÐµÐ»ÑŒÐ·Ñ Ð¿Ñ€Ð¸Ð¼ÐµÐ½ÑÑ‚ÑŒ Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸","Ð ÐµÑˆÐµÐ½Ð¸Ðµ Ð½Ð°Ñ…Ð¾Ð´Ð¸Ñ‚ÑÑ Ð½Ð° ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð¸Ð¸ Ð¸ Ð¾Ð¿Ð¸Ñ€Ð°ÐµÑ‚ÑÑ Ð½Ð° ÑÐ¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ KPI","ÐšÐ°Ð´Ñ€Ð¾Ð²Ð¾Ðµ Ð¿Ð¾ÑÐ»ÐµÐ´ÑÑ‚Ð²Ð¸Ðµ ÑÐ²Ð»ÑÐµÑ‚ÑÑ high-impact Ð¸ Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ Ñ‡ÐµÐ»Ð¾Ð²ÐµÐºÐ°","ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ Ð¾ÑÐ½Ð¾Ð²Ð°Ð½Ð¸Ðµ, Ð¿Ñ€Ð°Ð²Ð¸Ð»Ð¾ Ð¼Ð¾Ñ‚Ð¸Ð²Ð°Ñ†Ð¸Ð¸ Ð¸ Ð¿Ñ€Ð°Ð²Ð¾ ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ° Ð½Ð° review","REW-T-063-01,DEV-T-063-02",95,"ÐÐ¾Ð²Ñ‹Ð¹"],
-    ["AI-SIG-T-CONTENT","AI-CONTRACT-CONTENT","ÐšÐ¾Ð½Ñ‚ÐµÐ½Ñ‚","Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ñ","ÐÐ¸Ð·ÐºÐ¸Ð¹","ÐŸÐ¾Ð²Ñ‚Ð¾Ñ€Ð¸Ñ‚ÑŒ Ñ‚ÐµÐ¼Ñƒ PUB-T-071 ÐºÐ°Ðº ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ð¸Ñ€ÑƒÐµÐ¼Ñ‹Ð¹ Ñ‚ÐµÑÑ‚","ÐŸÑƒÐ±Ð»Ð¸ÐºÐ°Ñ†Ð¸Ñ ÑÐ²ÑÐ·Ð°Ð½Ð° Ñ 1 Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð¾Ð¼ Ð¸ 46 000 â‚½ ÑÐ¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ð¹ Ð²Ñ‹Ñ€ÑƒÑ‡ÐºÐ¸","ÐÑ‚Ñ€Ð¸Ð±ÑƒÑ†Ð¸Ñ Ð¿Ð¾Ð»Ð½Ð°Ñ, Ð½Ð¾ API ÑÐ¾Ñ†ÑÐµÑ‚ÐµÐ¹ Ð¸ CRM Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ñ‹","Ð¡Ð¾Ð·Ð´Ð°Ñ‚ÑŒ Ñ‚ÐµÑÑ‚ Ð¿Ð»Ð°Ð½Ð°, Ð½Ðµ Ð¼Ð°ÑÑˆÑ‚Ð°Ð±Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð±ÑŽÐ´Ð¶ÐµÑ‚ Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸","PUB-T-071,ATTR-T-071",68,"ÐÐ¾Ð²Ñ‹Ð¹"],
-    ["AI-SIG-T-METHOD","AI-CONTRACT-METHODS","ÐžÐ±ÑƒÑ‡ÐµÐ½Ð¸Ðµ","Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ñ","Ð¡Ñ€ÐµÐ´Ð½Ð¸Ð¹","Ð Ð°Ð·Ð´ÐµÐ»Ð¸Ñ‚ÑŒ Ð´Ð¾Ð¼Ð°ÑˆÐ½ÐµÐµ Ð·Ð°Ð´Ð°Ð½Ð¸Ðµ Ð½Ð° Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½ÑƒÑŽ Ð¸ Ð´Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½ÑƒÑŽ Ñ‡Ð°ÑÑ‚Ð¸","ÐžÑ†ÐµÐ½ÐºÐ° FDB-T-015 = 3; Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð¸Ðµ Ð·Ð°Ð½ÑÐ»Ð¾ Ð±Ð¾Ð»ÐµÐµ Ñ‡Ð°ÑÐ°","ÐžÐ´Ð¸Ð½ Ð¾Ð±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð½Ñ‹Ð¹ Ð¾Ñ‚Ð·Ñ‹Ð² Ð½Ðµ Ð´Ð¾ÐºÐ°Ð·Ñ‹Ð²Ð°ÐµÑ‚ ÑÑ„Ñ„ÐµÐºÑ‚ Ð´Ð»Ñ Ð²ÑÐµÐ¹ Ð¿Ñ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ñ‹","ÐœÐµÑ‚Ð¾Ð´Ð¸ÑÑ‚Ñƒ Ð¿Ñ€Ð¾Ð²ÐµÑÑ‚Ð¸ Ð¼Ð°Ð»Ñ‹Ð¹ Ñ‚ÐµÑÑ‚ Ð½Ð¾Ð²Ð¾Ð¹ Ð²ÐµÑ€ÑÐ¸Ð¸","FDB-T-015,PRG-T-012",61,"ÐÐ¾Ð²Ñ‹Ð¹"],
-    ["AI-SIG-T-HR","AI-CONTRACT-HR-RISK","HR","Ð Ð¸ÑÐº","Ð¡Ñ€ÐµÐ´Ð½Ð¸Ð¹","ÐÑ‚Ñ‚ÐµÑÑ‚Ð°Ñ†Ð¸Ñ EMP-T-063 Ð¿Ñ€Ð¸Ð±Ð»Ð¸Ð¶Ð°ÐµÑ‚ÑÑ","Ð¨Ð°Ð³ ONB-T-063-01 Ð½Ð°Ð·Ð½Ð°Ñ‡ÐµÐ½ Ð½Ð° 1 ÑÐµÐ½Ñ‚ÑÐ±Ñ€Ñ","Ð­Ñ‚Ð¾ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ð¾Ð½Ð½Ñ‹Ð¹ ÑÑ€Ð¾Ðº, Ð½Ðµ Ð¾Ñ†ÐµÐ½ÐºÐ° Ð»Ð¸Ñ‡Ð½Ð¾ÑÑ‚Ð¸ ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ°","HR Ð¿Ñ€Ð¾Ð²ÐµÑ€ÑÐµÑ‚ Ð³Ð¾Ñ‚Ð¾Ð²Ð½Ð¾ÑÑ‚ÑŒ Ð¼Ð°Ñ‚ÐµÑ€Ð¸Ð°Ð»Ð¾Ð² Ð¸ Ð¾Ñ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ð¾Ð³Ð¾","ONB-T-063-01,DEV-T-063-02",90,"ÐÐ¾Ð²Ñ‹Ð¹"],
-    ["AI-SIG-T-SUPPLIER","AI-CONTRACT-SUPPLIER","Ð—Ð°ÐºÑƒÐ¿ÐºÐ¸","Ð¡Ñ€Ð°Ð²Ð½ÐµÐ½Ð¸Ðµ","ÐÐ¸Ð·ÐºÐ¸Ð¹","ÐŸÑ€ÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð¸Ðµ Ð²Ñ‹Ð±Ð¸Ñ€Ð°ÐµÑ‚ÑÑ Ð¿Ð¾ Ñ†ÐµÐ½Ðµ, ÑÑ€Ð¾ÐºÑƒ Ð¸ ÐºÐ°Ñ‡ÐµÑÑ‚Ð²Ñƒ","Ð¤Ð¾Ñ€Ð¼ÑƒÐ»Ð° ÑÑ€Ð°Ð²Ð½ÐµÐ½Ð¸Ñ ÑÑ‚Ð°Ð¿Ð° 10 Ñ€Ð°ÑÐºÑ€Ñ‹Ñ‚Ð° Ð² ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐµ Ð¿Ñ€ÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð¸Ñ","Ð Ñ‹Ð½Ð¾Ðº Ð¸ ÐºÐ¾Ð¼Ð¼ÐµÑ€Ñ‡ÐµÑÐºÐ¸Ðµ Ð¿Ñ€ÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð¸Ñ ÑÐ¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ","Ð¡Ð¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ Ñ‡ÐµÐ»Ð¾Ð²ÐµÑ‡ÐµÑÐºÐ¾Ðµ ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð¸Ðµ Ð·Ð°ÐºÑƒÐ¿ÐºÐ¸","REQ-T-088,OFFR-T-088-22",77,"ÐÐ¾Ð²Ñ‹Ð¹"],
-    ["AI-SIG-T-DOC","AI-CONTRACT-MISSING-DOCS","Ð‘ÑƒÑ…Ð³Ð°Ð»Ñ‚ÐµÑ€Ð¸Ñ","Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹","Ð”Ð»Ñ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ð¸ ÐºÑƒÑ…Ð½Ð¸ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚ ÑÑ‡Ñ‘Ñ‚","ACC-COMP-T-FOOD: Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹ ÑÑ‡Ñ‘Ñ‚ Ð¸ Ð½Ð°ÐºÐ»Ð°Ð´Ð½Ð°Ñ; ÑÑ‡Ñ‘Ñ‚ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð¾ÑÐ½Ð¾Ð²Ð°Ð½Ð° Ð½Ð° ÑÐ²Ð½Ð¾Ð¹ Ð¼Ð°Ñ‚Ñ€Ð¸Ñ†Ðµ ÐºÐ¾Ð¼Ð¿Ð»ÐµÐºÑ‚Ð°","ÐŸÐ¾Ð»ÑƒÑ‡Ð¸Ñ‚ÑŒ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚ Ð¸Ð»Ð¸ Ð·Ð°Ñ„Ð¸ÐºÑÐ¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð¿Ñ€Ð¸Ð¼ÐµÐ½Ð¸Ð¼Ð¾Ðµ Ð¸ÑÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ðµ","ACC-COMP-T-FOOD,FIN-TEST-FOOD-COST-0821",100,"Ð’ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ"],
-    ["AI-SIG-T-EARLY","AI-CONTRACT-EARLY-SIGNALS","Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚ÑŒ","Ð Ð°Ð½Ð½Ð¸Ð¹ ÑÐ¸Ð³Ð½Ð°Ð»","Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹","SAFE-FLT-T-032 Ð¾ÑÑ‚Ð°Ñ‘Ñ‚ÑÑ Ð² Ñ€Ð°Ð±Ð¾Ñ‚Ðµ","Ð”Ð¸Ð°Ð³Ð½Ð¾ÑÑ‚Ð¸ÐºÐ° Ð½Ð°Ñ‡Ð°Ñ‚Ð°, Ð·Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð¸Ðµ Ð¸ Ð°ÐºÑ‚ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‚","ÐŸÑ€Ð¸Ð¾Ñ€Ð¸Ñ‚ÐµÑ‚ Ð·Ð°Ð´Ð°Ð½ Ñ‚ÑÐ¶ÐµÑÑ‚ÑŒÑŽ Ð¸ SLA Ð¿Ñ€Ð°Ð²Ð¸Ð»Ð° Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸","ÐžÑ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÑÐµÑ‚ Ð·Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð¸Ðµ Ð¸ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚, Ð˜Ð˜ Ð½Ðµ Ð·Ð°ÐºÑ€Ñ‹Ð²Ð°ÐµÑ‚ Ð¸Ð½Ñ†Ð¸Ð´ÐµÐ½Ñ‚","SAFE-FLT-T-032,SAFE-REP-T-032",93,"ÐÐ¾Ð²Ñ‹Ð¹"]
-  ];
-  await env.DB.batch(signals.map(row=>env.DB.prepare("INSERT OR IGNORE INTO analytics_signals (id,contract_id,domain,signal_type,severity,title,evidence,explanation,recommendation,source_refs,confidence,status,detected_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, '2026-08-21T10:10:00Z')").bind(...row)));
-  const runs=[
-    ["AI-RUN-T-CASH-01","AI-CONTRACT-CASH-GAP","Ð¡Ð¸Ð³Ð½Ð°Ð»","Ð’Ð¾Ð·Ð¼Ð¾Ð¶ÐµÐ½ Ð¾Ñ‚Ñ€Ð¸Ñ†Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ð¹ Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ðº 4 ÑÐµÐ½Ñ‚ÑÐ±Ñ€Ñ","62","ÐÐ°Ñ‡Ð°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ðº + Ð²ÐµÑ€Ð¾ÑÑ‚Ð½Ð¾ÑÑ‚Ð½Ñ‹Ðµ Ð¿Ð¾ÑÑ‚ÑƒÐ¿Ð»ÐµÐ½Ð¸Ñ âˆ’ Ð¿Ð»Ð°Ð½Ð¾Ð²Ñ‹Ðµ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ñ; Ð²ÑÐµ Ð´Ð¾Ð¿ÑƒÑ‰ÐµÐ½Ð¸Ñ Ð¿Ð¾ÐºÐ°Ð·Ð°Ð½Ñ‹"],
-    ["AI-RUN-T-CHURN-01","AI-CONTRACT-CHURN","Ð¡Ð¸Ð³Ð½Ð°Ð»","ÐžÐ´Ð½Ð° ÑÐ¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÑÐµÐ¼ÑŒÑ Ð² Ð²Ñ‹ÑÐ¾ÐºÐ¾Ð¹ Ð·Ð¾Ð½Ðµ Ñ€Ð¸ÑÐºÐ°","72","ÐŸÑ€Ð¾ÑÑ€Ð¾Ñ‡ÐºÐ° Ð¸ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²Ð¸Ðµ Ð¾Ñ‚Ð²ÐµÑ‚Ð° 12 Ð´Ð½ÐµÐ¹; Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ð¾ ÐºÑƒÑ€Ð°Ñ‚Ð¾Ñ€Ñƒ"],
-    ["AI-RUN-T-ANOM-01","AI-CONTRACT-ANOMALY","Ð Ð°ÑÑ…Ð¾Ð¶Ð´ÐµÐ½Ð¸Ðµ","ÐÐ°Ð¹Ð´ÐµÐ½Ð¾ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ñ‘Ð½Ð½Ð¾Ðµ Ñ€Ð°ÑÑ…Ð¾Ð¶Ð´ÐµÐ½Ð¸Ðµ ÐžÐ”Ð”Ð¡ Ð°Ð¿Ñ€ÐµÐ»Ñ","99","Ð¡Ñ€Ð°Ð²Ð½ÐµÐ½Ð¸Ðµ Ð´ÐµÑ‚Ð°Ð»ÑŒÐ½Ñ‹Ñ… ÑÑ‚Ñ€Ð¾Ðº Ñ Ð¸Ñ‚Ð¾Ð³Ð¾Ð²Ð¾Ð¹ Ñ„Ð¾Ñ€Ð¼ÑƒÐ»Ð¾Ð¹ Ð¸ÑÑ…Ð¾Ð´Ð½Ð¾Ð³Ð¾ Ñ„Ð°Ð¹Ð»Ð°"],
-    ["AI-RUN-T-CONT-01","AI-CONTRACT-CONTENT","Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ñ","ÐŸÐ¾Ð²Ñ‚Ð¾Ñ€Ð¸Ñ‚ÑŒ PUB-T-071 ÐºÐ°Ðº Ð¼Ð°Ð»Ñ‹Ð¹ Ñ‚ÐµÑÑ‚","68","Ð¡Ð²ÑÐ·ÑŒ ÐºÐ»Ð¸ÐºÐ°, Ð»Ð¸Ð´Ð°, Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° Ð¸ Ñ‚ÐµÑÑ‚Ð¾Ð²Ð¾Ð¹ Ð²Ñ‹Ñ€ÑƒÑ‡ÐºÐ¸ ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð°"],
-    ["AI-RUN-T-DOC-01","AI-CONTRACT-MISSING-DOCS","Ð—Ð°Ð´Ð°Ñ‡Ð°","ÐÐµ Ñ…Ð²Ð°Ñ‚Ð°ÐµÑ‚ ÑÑ‡Ñ‘Ñ‚Ð° Ð´Ð»Ñ ACC-COMP-T-FOOD","100","Ð¯Ð²Ð½Ð°Ñ Ð¼Ð°Ñ‚Ñ€Ð¸Ñ†Ð° Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ñ… Ñ‚Ð¸Ð¿Ð¾Ð²; Ð·Ð°Ð´Ð°Ñ‡Ð° ÑƒÐ¶Ðµ ÑÐ¾Ð·Ð´Ð°Ð½Ð° Ð¸Ð´ÐµÐ¼Ð¿Ð¾Ñ‚ÐµÐ½Ñ‚Ð½Ð¾"],
-    ["AI-RUN-T-EARLY-01","AI-CONTRACT-EARLY-SIGNALS","Ð¡Ð¸Ð³Ð½Ð°Ð»","ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð°Ñ Ð½ÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ñ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ð° Ð¸ Ð°ÐºÑ‚Ð°","93","ÐŸÑ€Ð¸Ð¾Ñ€Ð¸Ñ‚ÐµÑ‚ Ð¾ÑÐ½Ð¾Ð²Ð°Ð½ Ð½Ð° SLA, ÑÑ‚Ð°Ñ‚ÑƒÑÐµ Ñ€ÐµÐ¼Ð¾Ð½Ñ‚Ð° Ð¸ Ð½Ð°Ð»Ð¸Ñ‡Ð¸Ð¸ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ð°"]
-  ];
-  await env.DB.batch(runs.map(row=>env.DB.prepare("INSERT OR IGNORE INTO ai_model_runs (id,contract_id,ran_at,model_version,status,input_snapshot_ref,output_type,output_summary,confidence,cost_minor,explanation,is_synthetic) VALUES (?,?,'2026-08-21T10:10:00Z','ÐŸÑ€Ð°Ð²Ð¸Ð»Ð° Ñ Ñ€ÑƒÑ‡Ð½Ñ‹Ð¼ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸ÐµÐ¼','Ð—Ð°Ð²ÐµÑ€ÑˆÑ‘Ð½','ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒÐ½Ñ‹Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº Ð°Ð½Ð°Ð»Ð¸Ñ‚Ð¸ÐºÐ¸',?,?,?,0,?,1)").bind(row[0],row[1],row[2],row[3],Number(row[4]),row[5])));
-}
-
-async function seedReadiness(){
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO education_lessons (id,group_id,program_id,scheduled_at,topic,teacher_entity_id,substitute_entity_id,room,status,homework) VALUES ('LES-T-EMP052-0610','GRP-T-3A','PRG-T-012','2026-06-10T09:00:00Z','Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ Ð·Ð°Ð½ÑÑ‚Ð¸Ðµ ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ° â„–0052','EMP-T-052','','ÐšÐ°Ð±Ð¸Ð½ÐµÑ‚ 12','Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð¾','Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð·Ð°Ð¿Ð¸ÑÑŒ Ð´Ð»Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ ÐºÐ°Ð´Ñ€Ð¾Ð²Ð¾Ð¹ Ñ†ÐµÐ¿Ð¾Ñ‡ÐºÐ¸')"),
-    env.DB.prepare("INSERT OR IGNORE INTO document_versions (document_id,version,note,reference,created_by) VALUES ('DOG-T-2026-044',3,'ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒÐ½Ð¾Ðµ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð¾ Ð¿Ñ€Ð¾Ð´Ð»ÐµÐ½Ð¸Ð¸','ÐšÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° Â· Ð²ÐµÑ€ÑÐ¸Ñ 3','system-readiness-seed')"),
-    env.DB.prepare("UPDATE workflow_documents SET current_version=MAX(current_version,3),status='ÐŸÑ€Ð¾Ð´Ð»Ñ‘Ð½',valid_until='2027-09-02',updated_at=CURRENT_TIMESTAMP WHERE id='DOG-T-2026-044' AND source='SYNTHETIC'"),
-    env.DB.prepare("UPDATE obligations SET status='Ð—Ð°ÐºÑ€Ñ‹Ñ‚Ð¾' WHERE document_id='DOG-T-2026-044' AND title='ÐŸÑ€Ð¾Ð´Ð»Ð¸Ñ‚ÑŒ Ð¸Ð»Ð¸ Ð·Ð°ÐºÑ€Ñ‹Ñ‚ÑŒ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€'"),
-    env.DB.prepare("UPDATE tasks SET status='Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°',result='Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ Ð¿Ñ€Ð¾Ð´Ð»Ñ‘Ð½ Ð² Ñ‚ÐµÑÑ‚Ð¾Ð²Ð¾Ð¼ ÐºÐ¾Ð½Ñ‚ÑƒÑ€Ðµ',result_evidence='ÐšÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° Â· Ð²ÐµÑ€ÑÐ¸Ñ 3',completed_at='2026-08-21T10:45:00Z',updated_at=CURRENT_TIMESTAMP WHERE automation_key='CONTRACT_EXPIRY:DOG-T-2026-044' AND created_by='system-automation'"),
-    env.DB.prepare("INSERT INTO audit_events (actor,action,entity_type,entity_id,payload) SELECT 'system-readiness-seed','medical.case_closed','medical_case','MED-CASE-T-019','{\"confirmationRef\":\"MED-CONF-T-019\",\"contentExcluded\":true}' WHERE NOT EXISTS (SELECT 1 FROM audit_events WHERE action='medical.case_closed' AND entity_id='MED-CASE-T-019')"),
-    env.DB.prepare("INSERT OR IGNORE INTO strategy_results (id,project_id,event_id,result_type,metric_name,metric_value,unit,evidence,recorded_at) VALUES ('STR-RES-T-KPI-01','STR-PRJ-T-014','','ÐŸÐ¾Ð²Ñ‚Ð¾Ñ€Ð½Ð¾Ðµ Ð¸Ð·Ð¼ÐµÑ€ÐµÐ½Ð¸Ðµ','Ð˜Ð½Ð´ÐµÐºÑ ÑƒÐ´Ð¾Ð²Ð»ÐµÑ‚Ð²Ð¾Ñ€Ñ‘Ð½Ð½Ð¾ÑÑ‚Ð¸ ÑÐµÐ¼ÐµÐ¹',81,'%','ÐŸÐ¾Ð²Ñ‚Ð¾Ñ€Ð½Ð°Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð¿Ð¾ÑÐ»Ðµ ÐºÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð¸Ñ€ÑƒÑŽÑ‰ÐµÐ³Ð¾ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ñ','2026-08-21T10:50:00Z')"),
-    env.DB.prepare("INSERT OR IGNORE INTO tasks (title,owner,due_date,priority,status,source_type,source_id,description,assignee_entity_id,kind,automation_key,requires_approval,result,result_evidence,completed_at,created_by) VALUES ('Ð Ð°Ð·Ð¾Ð±Ñ€Ð°Ñ‚ÑŒ Ð¾Ð±Ñ€Ð°Ñ‰ÐµÐ½Ð¸Ðµ ÑÐµÐ¼ÑŒÐ¸ â„–0014','ÐšÑƒÑ€Ð°Ñ‚Ð¾Ñ€ ÑÐµÐ¼ÑŒÐ¸','2026-08-21','Ð’Ñ‹ÑÐ¾ÐºÐ¸Ð¹','Ð—Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°','Ð–Ð°Ð»Ð¾Ð±Ð° ÐºÐ»Ð¸ÐµÐ½Ñ‚Ð°','COMPL-T-014','ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ Ð¾Ð±Ñ€Ð°Ñ‚Ð½ÑƒÑŽ ÑÐ²ÑÐ·ÑŒ, Ð¿Ñ€Ð¾Ð²ÐµÑÑ‚Ð¸ ÐºÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð¸Ñ€ÑƒÑŽÑ‰ÐµÐµ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ Ð¸ Ð¿Ð¾Ð»ÑƒÑ‡Ð¸Ñ‚ÑŒ Ð¾Ñ†ÐµÐ½ÐºÑƒ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ð°','EMP-T-032','ÐšÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð¸Ñ€ÑƒÑŽÑ‰ÐµÐµ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ','COMPLAINT:COMPL-T-014',1,'Ð Ð°ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ðµ Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð¾Ð¹ ÑÐ²ÑÐ·Ð¸ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¾; ÑÐµÐ¼ÑŒÑ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð´Ð¸Ð»Ð° Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚','ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ðµ ÑÐµÐ¼ÑŒÐ¸ Ð¿Ð¾ÑÐ»Ðµ Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð¾Ð¹ ÑÐ²ÑÐ·Ð¸','2026-08-21T10:20:00Z','system-readiness-seed')"),
-    env.DB.prepare("UPDATE document_versions SET note='ÐšÐ¾Ð½Ñ‚Ñ€Ð¾Ð»ÑŒÐ½Ð¾Ðµ Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð¾ Ð¿Ñ€Ð¾Ð´Ð»ÐµÐ½Ð¸Ð¸',reference='ÐšÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° Â· Ð²ÐµÑ€ÑÐ¸Ñ 3' WHERE document_id='DOG-T-2026-044' AND version=3 AND created_by='system-readiness-seed' AND reference='SYNTHETIC:DOG-T-2026-044:v3'"),
-    env.DB.prepare("UPDATE tasks SET result_evidence='ÐšÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° Â· Ð²ÐµÑ€ÑÐ¸Ñ 3' WHERE automation_key='CONTRACT_EXPIRY:DOG-T-2026-044' AND created_by='system-automation' AND result_evidence='SYNTHETIC:DOG-T-2026-044:v3'"),
-    env.DB.prepare("UPDATE tasks SET title='Ð Ð°Ð·Ð¾Ð±Ñ€Ð°Ñ‚ÑŒ Ð¾Ð±Ñ€Ð°Ñ‰ÐµÐ½Ð¸Ðµ ÑÐµÐ¼ÑŒÐ¸ â„–0014',result_evidence='ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ðµ ÑÐµÐ¼ÑŒÐ¸ Ð¿Ð¾ÑÐ»Ðµ Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð¾Ð¹ ÑÐ²ÑÐ·Ð¸' WHERE automation_key='COMPLAINT:COMPL-T-014' AND created_by='system-readiness-seed' AND title='Ð Ð°Ð·Ð¾Ð±Ñ€Ð°Ñ‚ÑŒ Ð¾Ð±Ñ€Ð°Ñ‰ÐµÐ½Ð¸Ðµ ÑÐµÐ¼ÑŒÐ¸ T-014'"),
-  ]);
-  const complaintTask=await env.DB.prepare("SELECT id FROM tasks WHERE automation_key='COMPLAINT:COMPL-T-014'").first<{id:number}>();
-  if(!complaintTask)throw new Error("Readiness complaint task was not created");
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO customer_complaints (id,family_entity_id,child_entity_id,service_entity_id,channel,received_at,category,summary,responsible_entity_id,status,related_task_id,satisfaction_score,closed_at) VALUES ('COMPL-T-014','FAM-T-014','CHD-T-014','SVC-T-001','Ð›Ð¸Ñ‡Ð½Ñ‹Ð¹ ÐºÐ°Ð±Ð¸Ð½ÐµÑ‚','2026-08-20T09:10:00Z','ÐšÐ¾Ð¼Ð¼ÑƒÐ½Ð¸ÐºÐ°Ñ†Ð¸Ñ','Ð¡ÐµÐ¼ÑŒÐµ Ñ‚Ñ€ÐµÐ±Ð¾Ð²Ð°Ð»ÑÑ Ð±Ð¾Ð»ÐµÐµ Ð¿Ð¾Ð½ÑÑ‚Ð½Ñ‹Ð¹ ÑÑ€Ð¾Ðº Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð¾Ð¹ ÑÐ²ÑÐ·Ð¸','EMP-T-032','Ð—Ð°ÐºÑ€Ñ‹Ñ‚Ð°',?,5,'2026-08-21T10:20:00Z')").bind(complaintTask.id),
-    env.DB.prepare("INSERT OR IGNORE INTO complaint_actions (id,complaint_id,task_id,action_type,owner_entity_id,due_at,result,evidence,status,completed_at) VALUES ('CMP-ACT-T-014','COMPL-T-014',?,'ÐšÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð¸Ñ€ÑƒÑŽÑ‰ÐµÐµ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ','EMP-T-032','2026-08-21T12:00:00Z','Ð¡Ñ€Ð¾Ðº Ð¾Ñ‚Ð²ÐµÑ‚Ð° Ð·Ð°ÐºÑ€ÐµÐ¿Ð»Ñ‘Ð½, ÑÐµÐ¼ÑŒÑ Ð¿Ð¾Ð»ÑƒÑ‡Ð¸Ð»Ð° Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ðµ','FDB-COMPLAINT-T-014','Ð’Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð¾','2026-08-21T10:20:00Z')").bind(complaintTask.id),
-  ]);
-
-  const scenarios:[string,number,string,string,string,string][]=[
-    ["SCN-T-01",1,"ÐžÑ‚ Ð¾Ð±ÑŠÑÐ²Ð»ÐµÐ½Ð¸Ñ Ð´Ð¾ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»Ð¸","ÐžÐ±ÑŠÑÐ²Ð»ÐµÐ½Ð¸Ðµ â†’ Ð¿ÐµÑ€Ð²Ñ‹Ð¹ ÐºÐ»Ð¸Ðº â†’ Ð·Ð°ÑÐ²ÐºÐ° â†’ Ð¼ÐµÐ½ÐµÐ´Ð¶ÐµÑ€ â†’ Ð¿Ð¾ÑÐµÑ‰ÐµÐ½Ð¸Ðµ â†’ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ â†’ Ñ€ÐµÐ±Ñ‘Ð½Ð¾Ðº â†’ Ð½Ð°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ â†’ Ð¾Ð¿Ð»Ð°Ñ‚Ð° â†’ Ð´Ð²Ð¸Ð¶ÐµÐ½Ð¸Ðµ Ð´ÐµÐ½ÐµÐ³ â†’ Ð¾Ñ‚Ñ‡Ñ‘Ñ‚ Ð¾ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»ÑÑ… Ð¸ ÑƒÐ±Ñ‹Ñ‚ÐºÐ°Ñ… â†’ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»ÑŒ","EMP-T-SALES-001","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ñ†ÐµÐ¿Ð¾Ñ‡ÐºÐ°; Ð±Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ°Ñ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ñ Ð¸ Ñ€ÐµÐºÐ»Ð°Ð¼Ð½Ð°Ñ ÑÑ‚Ð°Ñ‚Ð¸ÑÑ‚Ð¸ÐºÐ° Ð½Ðµ ÑÐ²Ð»ÑÑŽÑ‚ÑÑ Ñ„Ð°ÐºÑ‚Ð¾Ð¼"],
-    ["SCN-T-02",2,"ÐŸÐ¾Ð»Ð½Ñ‹Ð¹ Ð¶Ð¸Ð·Ð½ÐµÐ½Ð½Ñ‹Ð¹ Ñ†Ð¸ÐºÐ» ÑÐ¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸ÐºÐ°","Ð’Ð°ÐºÐ°Ð½ÑÐ¸Ñ â†’ ÐºÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚ â†’ Ð°Ð´Ð°Ð¿Ñ‚Ð°Ñ†Ð¸Ñ â†’ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ â†’ Ð´Ð¾Ð»Ð¶Ð½Ð¾ÑÑ‚ÑŒ â†’ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ñ‹ â†’ Ñ€Ð°ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ðµ â†’ Ð·Ð°Ð´Ð°Ñ‡Ð¸ â†’ Ð½Ð°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ â†’ Ð²Ñ‹Ð¿Ð»Ð°Ñ‚Ð° â†’ ÑƒÐ²Ð¾Ð»ÑŒÐ½ÐµÐ½Ð¸Ðµ â†’ Ð¾Ñ‚Ð·Ñ‹Ð² Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð¾Ð²","EMP-T-HR-001","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ ÐºÐ°Ð´Ñ€Ð¾Ð²Ñ‹Ðµ Ð·Ð°Ð¿Ð¸ÑÐ¸; Ð¿ÐµÑ€ÑÐ¾Ð½Ð°Ð»ÑŒÐ½Ñ‹Ðµ Ð´Ð°Ð½Ð½Ñ‹Ðµ Ð¸ÑÑ…Ð¾Ð´Ð½Ð¾Ð¹ Ð²ÐµÐ´Ð¾Ð¼Ð¾ÑÑ‚Ð¸ Ð½Ðµ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÑŽÑ‚ÑÑ"],
-    ["SCN-T-03",3,"Ð£Ñ‡ÐµÐ±Ð½Ñ‹Ð¹ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð¸ Ð¼ÐµÑ‚Ð¾Ð´Ð¸ÐºÐ°","ÐŸÑ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ð° â†’ Ð¿ÐµÐ´Ð°Ð³Ð¾Ð³ â†’ Ð³Ñ€ÑƒÐ¿Ð¿Ð° â†’ Ð·Ð°Ð½ÑÑ‚Ð¸Ðµ â†’ Ð¿Ð¾ÑÐµÑ‰Ð°ÐµÐ¼Ð¾ÑÑ‚ÑŒ â†’ Ð´Ð¾Ð¼Ð°ÑˆÐ½ÐµÐµ Ð·Ð°Ð´Ð°Ð½Ð¸Ðµ â†’ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ â†’ Ð¾Ñ‚Ð·Ñ‹Ð² Ñ€Ð¾Ð´Ð¸Ñ‚ÐµÐ»Ñ â†’ Ñ€ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ñ Ð¼ÐµÑ‚Ð¾Ð´Ð¸ÑÑ‚Ñƒ","EMP-T-METHOD-001","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ð¾Ð±ÐµÐ·Ð»Ð¸Ñ‡ÐµÐ½Ð½Ñ‹Ðµ ÑƒÑ‡ÐµÐ±Ð½Ñ‹Ðµ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ¸"],
-    ["SCN-T-04",4,"Ð—Ð°ÐºÑƒÐ¿ÐºÐ° Ð¾Ñ‚ Ð·Ð°ÑÐ²ÐºÐ¸ Ð´Ð¾ Ñ„Ð¸Ð½Ð°Ð½ÑÐ¾Ð²Ð¾Ð³Ð¾ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ð°","Ð—Ð°ÑÐ²ÐºÐ° â†’ ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð¸Ðµ â†’ ÑÑ€Ð°Ð²Ð½ÐµÐ½Ð¸Ðµ Ð¿Ð¾ÑÑ‚Ð°Ð²Ñ‰Ð¸ÐºÐ¾Ð² â†’ Ð·Ð°ÐºÐ°Ð· â†’ Ð¿Ð¾ÑÑ‚Ð°Ð²ÐºÐ° â†’ Ð¿Ñ€Ð¸Ñ‘Ð¼ Ð¿Ð¾ÑÑ‚Ð°Ð²ÐºÐ¸ â†’ ÑÐºÐ»Ð°Ð´ â†’ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚ â†’ Ð¾Ð¿Ð»Ð°Ñ‚Ð° â†’ Ð¾Ñ‚Ñ‡Ñ‘Ñ‚ Ð¾ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»ÑÑ… Ð¸ ÑƒÐ±Ñ‹Ñ‚ÐºÐ°Ñ…","EMP-T-PROC-001","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð·Ð°ÐºÑƒÐ¿ÐºÐ°; ÑÐ»ÐµÐºÑ‚Ñ€Ð¾Ð½Ð½Ñ‹Ð¹ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ð¾Ð¾Ð±Ð¾Ñ€Ð¾Ñ‚ Ð¸ Ð±Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ¸Ð¹ Ñ„Ð°ÐºÑ‚ Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ñ‹"],
-    ["SCN-T-05",5,"ÐÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ Ð´Ð¾ ÑÐ»ÐµÐ´ÑƒÑŽÑ‰ÐµÐ¹ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° â†’ Ð½ÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ â†’ Ð·Ð°Ð´Ð°Ñ‡Ð° â†’ Ð¿Ð¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº â†’ Ñ€ÐµÐ¼Ð¾Ð½Ñ‚ â†’ Ð°ÐºÑ‚ â†’ Ð¾Ð¿Ð»Ð°Ñ‚Ð° â†’ ÑÐ»ÐµÐ´ÑƒÑŽÑ‰Ð°Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ°","EMP-T-SAFE-001","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ ÐºÐ¾Ð½Ñ‚ÑƒÑ€ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸ Ð±ÐµÐ· Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ð¸ ÑÐ¸ÑÑ‚ÐµÐ¼Ñ‹ ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ñ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð°"],
-    ["SCN-T-06",6,"ÐŸÐ¸Ñ‚Ð°Ð½Ð¸Ðµ ÐºÐ°Ðº Ñ†ÐµÐ½Ñ‚Ñ€ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»Ð¸","ÐŸÑ€Ð¾Ð´ÑƒÐºÑ‚ â†’ Ð¿Ð°Ñ€Ñ‚Ð¸Ñ â†’ Ñ‚ÐµÑ…Ð½Ð¾Ð»Ð¾Ð³Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð° â†’ Ð¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´ÑÑ‚Ð²Ð¾ â†’ Ð¾Ñ‚Ð³Ñ€ÑƒÐ·ÐºÐ° â†’ Ð¿Ð¾Ñ‚Ñ€ÐµÐ±Ð»ÐµÐ½Ð¸Ðµ â†’ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ðµ â†’ ÑÐµÐ±ÐµÑÑ‚Ð¾Ð¸Ð¼Ð¾ÑÑ‚ÑŒ â†’ Ñ€ÐµÐ½Ñ‚Ð°Ð±ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚ÑŒ","EMP-T-KITCHEN-001","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ Ð¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹ Ð¸ Ñ„Ð¸Ð½Ð°Ð½ÑÐ¾Ð²Ñ‹Ð¹ ÐºÐ¾Ð½Ñ‚ÑƒÑ€ ÐºÑƒÑ…Ð½Ð¸"],
-    ["SCN-T-07",7,"Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð½Ð¾Ðµ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÑÑ‚Ð²Ð¾","Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€ â†’ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÑÑ‚Ð²Ð¾ â†’ ÑÑ€Ð¾Ðº â†’ Ð¿Ñ€ÐµÐ´ÑƒÐ¿Ñ€ÐµÐ¶Ð´ÐµÐ½Ð¸Ðµ â†’ Ð·Ð°Ð´Ð°Ñ‡Ð° â†’ Ð¿Ñ€Ð¾Ð´Ð»ÐµÐ½Ð¸Ðµ/Ð·Ð°ÐºÑ€Ñ‹Ñ‚Ð¸Ðµ â†’ Ð¸ÑÑ‚Ð¾Ñ€Ð¸Ñ","EMP-T-LEGAL-001","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€; ÑÐ»ÐµÐºÑ‚Ñ€Ð¾Ð½Ð½Ð°Ñ Ð¿Ð¾Ð´Ð¿Ð¸ÑÑŒ Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð°"],
-    ["SCN-T-08",8,"Ð–Ð°Ð»Ð¾Ð±Ð° ÑÐµÐ¼ÑŒÐ¸ Ð´Ð¾ ÑƒÐ´Ð¾Ð²Ð»ÐµÑ‚Ð²Ð¾Ñ€Ñ‘Ð½Ð½Ð¾ÑÑ‚Ð¸","Ð–Ð°Ð»Ð¾Ð±Ð° â†’ ÑÐµÐ¼ÑŒÑ â†’ Ñ€ÐµÐ±Ñ‘Ð½Ð¾Ðº â†’ ÑƒÑÐ»ÑƒÐ³Ð° â†’ Ð¾Ñ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹ â†’ Ð·Ð°Ð´Ð°Ñ‡Ð° â†’ ÐºÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð¸Ñ€ÑƒÑŽÑ‰ÐµÐµ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ â†’ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ â†’ ÑƒÐ´Ð¾Ð²Ð»ÐµÑ‚Ð²Ð¾Ñ€Ñ‘Ð½Ð½Ð¾ÑÑ‚ÑŒ","EMP-T-032","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ Ð¾Ð±Ñ€Ð°Ñ‰ÐµÐ½Ð¸Ðµ Ð±ÐµÐ· Ð¿ÐµÑ€ÑÐ¾Ð½Ð°Ð»ÑŒÐ½Ñ‹Ñ… Ð´Ð°Ð½Ð½Ñ‹Ñ…"],
-    ["SCN-T-09",9,"Ð—Ð°Ñ‰Ð¸Ñ‰Ñ‘Ð½Ð½Ñ‹Ð¹ Ð¼ÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¸Ð¹ ÑÐ»ÑƒÑ‡Ð°Ð¹","Ð¡Ð»ÑƒÑ‡Ð°Ð¹ â†’ ÑÑƒÐ±ÑŠÐµÐºÑ‚ â†’ ÑƒÐ¿Ð¾Ð»Ð½Ð¾Ð¼Ð¾Ñ‡ÐµÐ½Ð½Ñ‹Ð¹ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒ â†’ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ â†’ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚ â†’ Ð·Ð°ÐºÑ€Ñ‹Ñ‚Ð¸Ðµ â†’ Ð·Ð°Ñ‰Ð¸Ñ‰Ñ‘Ð½Ð½Ñ‹Ð¹ Ð°ÑƒÐ´Ð¸Ñ‚","EMP-T-MED-001","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð·Ð°Ñ‰Ð¸Ñ‰Ñ‘Ð½Ð½Ð°Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ°; Ð¼ÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¾Ðµ ÑÐ¾Ð´ÐµÑ€Ð¶Ð°Ð½Ð¸Ðµ Ð¸ÑÐºÐ»ÑŽÑ‡ÐµÐ½Ð¾ Ð¸Ð· Ð¾Ñ‚Ð²ÐµÑ‚Ð° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸"],
-    ["SCN-T-10",10,"ÐŸÐ¾ÐºÐ°Ð·Ð°Ñ‚ÐµÐ»ÑŒ Ð´Ð¾ Ð½Ð¾Ð²Ð¾Ð³Ð¾ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ð°","ÐŸÐ¾ÐºÐ°Ð·Ð°Ñ‚ÐµÐ»ÑŒ â†’ Ð¾Ñ‚ÐºÐ»Ð¾Ð½ÐµÐ½Ð¸Ðµ â†’ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº â†’ Ð¿Ñ€Ð¸Ñ‡Ð¸Ð½Ð° â†’ Ð·Ð°Ð´Ð°Ñ‡Ð° â†’ Ð¾Ñ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹ â†’ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ â†’ Ð½Ð¾Ð²Ñ‹Ð¹ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚","EMP-T-PROJ-001","Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ð¿Ð¾ÐºÐ°Ð·Ð°Ñ‚ÐµÐ»Ð¸ Ð¸ Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€Ð½Ð¾Ðµ Ð¸Ð·Ð¼ÐµÑ€ÐµÐ½Ð¸Ðµ"],
-  ];
-  await env.DB.batch(scenarios.map(row=>env.DB.prepare("INSERT OR IGNORE INTO readiness_scenarios (id,number,name,chain,owner_entity_id,status,data_boundary) VALUES (?,?,?,?,?,'ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð·Ð°Ð¿ÑƒÑÐº',?)").bind(...row)));
-
-  const steps:Record<string,[string,string,string,string][]>={
-    "SCN-T-01":[["ÐžÐ±ÑŠÑÐ²Ð»ÐµÐ½Ð¸Ðµ","ÐŸÑƒÐ±Ð»Ð¸ÐºÐ°Ñ†Ð¸Ñ","PUB-T-071","REFERENCE"],["ÐŸÐµÑ€Ð²Ñ‹Ð¹ ÐºÐ»Ð¸Ðº","ÐÑ‚Ñ€Ð¸Ð±ÑƒÑ†Ð¸Ñ","CLICK-T-071","REFERENCE"],["Ð—Ð°ÑÐ²ÐºÐ°","Ð—Ð°ÑÐ²ÐºÐ°","LEAD-T-071","REFERENCE"],["ÐœÐµÐ½ÐµÐ´Ð¶ÐµÑ€","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","EMP-T-SALES-001","REFERENCE"],["ÐŸÐ¾ÑÐµÑ‰ÐµÐ½Ð¸Ðµ","ÐšÐ¾Ð½Ñ‚Ð°ÐºÑ‚","VISIT-T-014","REFERENCE"],["Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€","Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","DOG-T-2026-071","REFERENCE"],["Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº","Ð¡ÑƒÑ‰Ð½Ð¾ÑÑ‚ÑŒ","CHD-T-071","REFERENCE"],["ÐÐ°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ","ÐÐ°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ","ACR-CLIENT-T-071","REFERENCE"],["ÐžÐ¿Ð»Ð°Ñ‚Ð°","ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ñ","FIN-TEST-CONTENT-071","REFERENCE"],["Ð”Ð²Ð¸Ð¶ÐµÐ½Ð¸Ðµ Ð´ÐµÐ½ÐµÐ³","ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ñ","FIN-TEST-CONTENT-071","DERIVED"],["ÐžÑ‚Ñ‡Ñ‘Ñ‚ Ð¾ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»ÑÑ… Ð¸ ÑƒÐ±Ñ‹Ñ‚ÐºÐ°Ñ…","ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ñ","FIN-TEST-CONTENT-071","DERIVED"],["ÐŸÑ€Ð¸Ð±Ñ‹Ð»ÑŒ","ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ñ","FIN-TEST-CONTENT-071","DERIVED"]],
-    "SCN-T-02":[["Ð’Ð°ÐºÐ°Ð½ÑÐ¸Ñ","Ð’Ð°ÐºÐ°Ð½ÑÐ¸Ñ","VAC-T-008","REFERENCE"],["ÐšÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚","ÐšÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚","CANDREC-T-008","REFERENCE"],["ÐÐ´Ð°Ð¿Ñ‚Ð°Ñ†Ð¸Ñ","Ð—Ð°Ð´Ð°Ñ‡Ð°","HR_ONBOARD:EMP-T-052","REFERENCE"],["Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€","Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","DOG-EMP-T-052","REFERENCE"],["Ð”Ð¾Ð»Ð¶Ð½Ð¾ÑÑ‚ÑŒ","Ð”Ð¾Ð»Ð¶Ð½Ð¾ÑÑ‚ÑŒ","POS-T-TEACHER","REFERENCE"],["Ð”Ð¾ÑÑ‚ÑƒÐ¿Ñ‹","Ð”Ð¾ÑÑ‚ÑƒÐ¿","ACC-TASKS-052","REFERENCE"],["Ð Ð°ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ðµ","Ð—Ð°Ð½ÑÑ‚Ð¸Ðµ","LES-T-EMP052-0610","REFERENCE"],["Ð—Ð°Ð´Ð°Ñ‡Ð¸","Ð—Ð°Ð´Ð°Ñ‡Ð°","HR_ONBOARD:EMP-T-052","REFERENCE"],["ÐÐ°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","EMP-T-052","DERIVED"],["Ð’Ñ‹Ð¿Ð»Ð°Ñ‚Ð°","ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ñ","FIN-TEST-PAYROLL-052","REFERENCE"],["Ð£Ð²Ð¾Ð»ÑŒÐ½ÐµÐ½Ð¸Ðµ","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","EMP-T-052","DERIVED"],["ÐžÑ‚Ð·Ñ‹Ð² Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð¾Ð²","Ð”Ð¾ÑÑ‚ÑƒÐ¿","ACC-EDU-052","DERIVED"]],
-    "SCN-T-03":[["ÐŸÑ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ð°","ÐŸÑ€Ð¾Ð³Ñ€Ð°Ð¼Ð¼Ð°","PRG-T-012","REFERENCE"],["ÐŸÐµÐ´Ð°Ð³Ð¾Ð³","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","EMP-T-032","REFERENCE"],["Ð“Ñ€ÑƒÐ¿Ð¿Ð°","Ð“Ñ€ÑƒÐ¿Ð¿Ð°","GRP-T-3A","REFERENCE"],["Ð—Ð°Ð½ÑÑ‚Ð¸Ðµ","Ð—Ð°Ð½ÑÑ‚Ð¸Ðµ","LES-T-3A-0821","REFERENCE"],["ÐŸÐ¾ÑÐµÑ‰Ð°ÐµÐ¼Ð¾ÑÑ‚ÑŒ","ÐŸÐ¾ÑÐµÑ‰ÐµÐ½Ð¸Ðµ","ATT-T-014","REFERENCE"],["Ð”Ð¾Ð¼Ð°ÑˆÐ½ÐµÐµ Ð·Ð°Ð´Ð°Ð½Ð¸Ðµ","Ð—Ð°Ð½ÑÑ‚Ð¸Ðµ","LES-T-3A-0821","DERIVED"],["Ð ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚","ÐŸÑ€Ð¾Ð³Ñ€ÐµÑÑ","PROG-T-014","REFERENCE"],["ÐžÑ‚Ð·Ñ‹Ð² Ñ€Ð¾Ð´Ð¸Ñ‚ÐµÐ»Ñ","ÐžÐ±Ñ€Ð°Ñ‚Ð½Ð°Ñ ÑÐ²ÑÐ·ÑŒ","FDB-T-014","REFERENCE"],["Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ñ Ð¼ÐµÑ‚Ð¾Ð´Ð¸ÑÑ‚Ñƒ","AI-ÑÐ¸Ð³Ð½Ð°Ð»","AI-SIG-T-METHOD","REFERENCE"]],
-    "SCN-T-04":[["Ð—Ð°ÑÐ²ÐºÐ°","Ð—Ð°ÑÐ²ÐºÐ°","REQ-T-088","REFERENCE"],["Ð¡Ð¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð¸Ðµ","Ð—Ð°ÑÐ²ÐºÐ°","REQ-T-088","DERIVED"],["Ð¡Ñ€Ð°Ð²Ð½ÐµÐ½Ð¸Ðµ","ÐŸÑ€ÐµÐ´Ð»Ð¾Ð¶ÐµÐ½Ð¸Ðµ","OFFR-T-088-22","REFERENCE"],["Ð—Ð°ÐºÐ°Ð·","Ð—Ð°ÐºÐ°Ð·","ORD-T-088","REFERENCE"],["ÐŸÐ¾ÑÑ‚Ð°Ð²ÐºÐ°","ÐŸÐ¾ÑÑ‚Ð°Ð²ÐºÐ°","DLV-T-088","REFERENCE"],["ÐŸÑ€Ð¸Ñ‘Ð¼ Ð¿Ð¾ÑÑ‚Ð°Ð²ÐºÐ¸","ÐŸÐ¾ÑÑ‚Ð°Ð²ÐºÐ°","DLV-T-088","DERIVED"],["Ð¡ÐºÐ»Ð°Ð´","Ð”Ð²Ð¸Ð¶ÐµÐ½Ð¸Ðµ","INV-T-088-01","REFERENCE"],["Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","ACT-REQ-T-088","REFERENCE"],["ÐžÐ¿Ð»Ð°Ñ‚Ð°","ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ñ","FIN-TEST-PROC-088","REFERENCE"],["ÐžÑ‚Ñ‡Ñ‘Ñ‚ Ð¾ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»ÑÑ… Ð¸ ÑƒÐ±Ñ‹Ñ‚ÐºÐ°Ñ…","ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ñ","FIN-TEST-PROC-088","DERIVED"]],
-    "SCN-T-05":[["ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ°","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ°","SAFE-CHK-T-090","REFERENCE"],["ÐÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ","ÐÐµÐ¸ÑÐ¿Ñ€Ð°Ð²Ð½Ð¾ÑÑ‚ÑŒ","SAFE-FLT-T-031","REFERENCE"],["Ð—Ð°Ð´Ð°Ñ‡Ð°","Ð—Ð°Ð´Ð°Ñ‡Ð°","SAFETY_FAULT:SAFE-FLT-T-031","REFERENCE"],["ÐŸÐ¾Ð´Ñ€ÑÐ´Ñ‡Ð¸Ðº","ÐšÐ¾Ð½Ñ‚Ñ€Ð°Ð³ÐµÐ½Ñ‚","SUP-T-SAFE-001","REFERENCE"],["Ð ÐµÐ¼Ð¾Ð½Ñ‚","Ð ÐµÐ¼Ð¾Ð½Ñ‚","SAFE-REP-T-031","REFERENCE"],["ÐÐºÑ‚","Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","ACT-SAFE-T-031","REFERENCE"],["ÐžÐ¿Ð»Ð°Ñ‚Ð°","ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ñ","FIN-TEST-SAFE-031","REFERENCE"],["Ð¡Ð»ÐµÐ´ÑƒÑŽÑ‰Ð°Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ°","ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ°","SAFE-NEXT-T-031","REFERENCE"]],
-    "SCN-T-06":[["ÐŸÑ€Ð¾Ð´ÑƒÐºÑ‚","ÐŸÑ€Ð¾Ð´ÑƒÐºÑ‚","FOOD-PROD-T-002","REFERENCE"],["ÐŸÐ°Ñ€Ñ‚Ð¸Ñ","ÐŸÐ°Ñ€Ñ‚Ð¸Ñ","BATCH-T-021-02","REFERENCE"],["Ð¢ÐµÑ…Ð½Ð¾Ð»Ð¾Ð³Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð°","Ð ÐµÑ†ÐµÐ¿Ñ‚","TTK-T-014","REFERENCE"],["ÐŸÑ€Ð¾Ð¸Ð·Ð²Ð¾Ð´ÑÑ‚Ð²Ð¾","ÐŸÑ€Ð¾Ð¸Ð·Ð²Ð¾Ð´ÑÑ‚Ð²Ð¾","PROD-T-0821","REFERENCE"],["ÐžÑ‚Ð³Ñ€ÑƒÐ·ÐºÐ°","ÐžÑ‚Ð³Ñ€ÑƒÐ·ÐºÐ°","SHIP-T-0821-01","REFERENCE"],["ÐŸÐ¾Ñ‚Ñ€ÐµÐ±Ð»ÐµÐ½Ð¸Ðµ","ÐžÑ‚Ð³Ñ€ÑƒÐ·ÐºÐ°","SHIP-T-0821-01","DERIVED"],["Ð¡Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ","ÐžÑ‚Ð³Ñ€ÑƒÐ·ÐºÐ°","SHIP-T-0821-01","DERIVED"],["Ð¡ÐµÐ±ÐµÑÑ‚Ð¾Ð¸Ð¼Ð¾ÑÑ‚ÑŒ","ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ñ","FIN-TEST-FOOD-COST-0821","REFERENCE"],["Ð ÐµÐ½Ñ‚Ð°Ð±ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚ÑŒ","ÐžÐ¿ÐµÑ€Ð°Ñ†Ð¸Ñ","FIN-TEST-FOOD-REV-0821","DERIVED"]],
-    "SCN-T-07":[["Ð”Ð¾Ð³Ð¾Ð²Ð¾Ñ€","Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","DOG-T-2026-044","REFERENCE"],["ÐžÐ±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÑÑ‚Ð²Ð¾","Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","DOG-T-2026-044","DERIVED"],["Ð¡Ñ€Ð¾Ðº","Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","DOG-T-2026-044","DERIVED"],["ÐŸÑ€ÐµÐ´ÑƒÐ¿Ñ€ÐµÐ¶Ð´ÐµÐ½Ð¸Ðµ","Ð£Ð²ÐµÐ´Ð¾Ð¼Ð»ÐµÐ½Ð¸Ðµ","CONTRACT_EXPIRY:DOG-T-2026-044:DIRECTOR","REFERENCE"],["Ð—Ð°Ð´Ð°Ñ‡Ð°","Ð—Ð°Ð´Ð°Ñ‡Ð°","CONTRACT_EXPIRY:DOG-T-2026-044","REFERENCE"],["ÐŸÑ€Ð¾Ð´Ð»ÐµÐ½Ð¸Ðµ","Ð’ÐµÑ€ÑÐ¸Ñ","ÐšÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° Â· Ð²ÐµÑ€ÑÐ¸Ñ 3","REFERENCE"],["Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ","Ð’ÐµÑ€ÑÐ¸Ñ","Ð”Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ ÑÐ¾Ð³Ð»Ð°ÑˆÐµÐ½Ð¸Ðµ Â· Ð²ÐµÑ€ÑÐ¸Ñ 2","REFERENCE"]],
-    "SCN-T-08":[["Ð–Ð°Ð»Ð¾Ð±Ð°","Ð–Ð°Ð»Ð¾Ð±Ð°","COMPL-T-014","REFERENCE"],["Ð¡ÐµÐ¼ÑŒÑ","Ð¡ÑƒÑ‰Ð½Ð¾ÑÑ‚ÑŒ","FAM-T-014","REFERENCE"],["Ð ÐµÐ±Ñ‘Ð½Ð¾Ðº","Ð¡ÑƒÑ‰Ð½Ð¾ÑÑ‚ÑŒ","CHD-T-014","REFERENCE"],["Ð£ÑÐ»ÑƒÐ³Ð°","Ð¡ÑƒÑ‰Ð½Ð¾ÑÑ‚ÑŒ","SVC-T-001","REFERENCE"],["ÐžÑ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","EMP-T-032","REFERENCE"],["Ð—Ð°Ð´Ð°Ñ‡Ð°","Ð—Ð°Ð´Ð°Ñ‡Ð°","COMPLAINT:COMPL-T-014","REFERENCE"],["ÐšÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð¸Ñ€ÑƒÑŽÑ‰ÐµÐµ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ","Ð”ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ","CMP-ACT-T-014","REFERENCE"],["Ð ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚","Ð”Ð¾ÐºÐ°Ð·Ð°Ñ‚ÐµÐ»ÑŒÑÑ‚Ð²Ð¾","FDB-COMPLAINT-T-014","REFERENCE"],["Ð£Ð´Ð¾Ð²Ð»ÐµÑ‚Ð²Ð¾Ñ€Ñ‘Ð½Ð½Ð¾ÑÑ‚ÑŒ","Ð–Ð°Ð»Ð¾Ð±Ð°","COMPL-T-014","DERIVED"]],
-    "SCN-T-09":[["Ð¡Ð»ÑƒÑ‡Ð°Ð¹","ÐœÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¸Ð¹ ÑÐ»ÑƒÑ‡Ð°Ð¹","MED-CASE-T-019","PROTECTED"],["Ð¡ÑƒÐ±ÑŠÐµÐºÑ‚","Ð¡ÑƒÑ‰Ð½Ð¾ÑÑ‚ÑŒ","EMP-T-063","PROTECTED"],["Ð£Ð¿Ð¾Ð»Ð½Ð¾Ð¼Ð¾Ñ‡ÐµÐ½Ð½Ñ‹Ð¹ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒ","Grant","MED-GRANT-T-ROLE-01","PROTECTED"],["Ð”ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ","ÐœÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¾Ðµ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ","MED-ACT-T-019-01","PROTECTED"],["Ð”Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","ÐœÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¸Ð¹ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚","MED-DOC-T-EMP-063","PROTECTED"],["Ð—Ð°ÐºÑ€Ñ‹Ñ‚Ð¸Ðµ","ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ðµ","MED-CONF-T-019","PROTECTED"],["Ð—Ð°Ñ‰Ð¸Ñ‰Ñ‘Ð½Ð½Ñ‹Ð¹ Ð°ÑƒÐ´Ð¸Ñ‚","Audit","MED-CASE-T-019","PROTECTED"]],
-    "SCN-T-10":[["ÐŸÐ¾ÐºÐ°Ð·Ð°Ñ‚ÐµÐ»ÑŒ","ÐŸÐ¾ÐºÐ°Ð·Ð°Ñ‚ÐµÐ»ÑŒ","KPI-T-FAMILY-01","REFERENCE"],["ÐžÑ‚ÐºÐ»Ð¾Ð½ÐµÐ½Ð¸Ðµ","ÐžÑ‚ÐºÐ»Ð¾Ð½ÐµÐ½Ð¸Ðµ","DEV-T-KPI-01","REFERENCE"],["Ð˜ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº","ÐžÐ±Ñ€Ð°Ñ‚Ð½Ð°Ñ ÑÐ²ÑÐ·ÑŒ","FDB-T-014","REFERENCE"],["ÐŸÑ€Ð¸Ñ‡Ð¸Ð½Ð°","ÐžÑ‚ÐºÐ»Ð¾Ð½ÐµÐ½Ð¸Ðµ","DEV-T-KPI-01","DERIVED"],["Ð—Ð°Ð´Ð°Ñ‡Ð°","Ð—Ð°Ð´Ð°Ñ‡Ð°","STRATEGY_DEVIATION:DEV-T-KPI-01","REFERENCE"],["ÐžÑ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹","Ð¡Ð¾Ñ‚Ñ€ÑƒÐ´Ð½Ð¸Ðº","EMP-T-PROJ-001","REFERENCE"],["Ð”ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ","Ð—Ð°Ð´Ð°Ñ‡Ð°","STRATEGY_DEVIATION:DEV-T-KPI-01","DERIVED"],["ÐÐ¾Ð²Ñ‹Ð¹ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚","Ð ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚","STR-RES-T-KPI-01","REFERENCE"]],
-  };
-  const stepStatements=[];
-  for(const scenario of scenarios){
-    const scenarioSteps=steps[scenario[0]];
-    for(let index=0;index<scenarioSteps.length;index++){
-      const step=scenarioSteps[index];
-      stepStatements.push(env.DB.prepare("INSERT OR IGNORE INTO readiness_scenario_steps (id,scenario_id,step_order,step_name,entity_type,entity_id,check_type,status) VALUES (?,?,?,?,?,?,?,'ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð·Ð°Ð¿ÑƒÑÐº')").bind(`${scenario[0]}-${String(index+1).padStart(2,"0")}`,scenario[0],index+1,...step));
-    }
-  }
-  for(let index=0;index<stepStatements.length;index+=80)await env.DB.batch(stepStatements.slice(index,index+80));
-  await env.DB.batch([
-    env.DB.prepare("UPDATE readiness_scenarios SET chain='ÐžÐ±ÑŠÑÐ²Ð»ÐµÐ½Ð¸Ðµ â†’ Ð¿ÐµÑ€Ð²Ñ‹Ð¹ ÐºÐ»Ð¸Ðº â†’ Ð·Ð°ÑÐ²ÐºÐ° â†’ Ð¼ÐµÐ½ÐµÐ´Ð¶ÐµÑ€ â†’ Ð¿Ð¾ÑÐµÑ‰ÐµÐ½Ð¸Ðµ â†’ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ â†’ Ñ€ÐµÐ±Ñ‘Ð½Ð¾Ðº â†’ Ð½Ð°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ â†’ Ð¾Ð¿Ð»Ð°Ñ‚Ð° â†’ Ð´Ð²Ð¸Ð¶ÐµÐ½Ð¸Ðµ Ð´ÐµÐ½ÐµÐ³ â†’ Ð¾Ñ‚Ñ‡Ñ‘Ñ‚ Ð¾ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»ÑÑ… Ð¸ ÑƒÐ±Ñ‹Ñ‚ÐºÐ°Ñ… â†’ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»ÑŒ' WHERE id='SCN-T-01' AND chain='ÐžÐ±ÑŠÑÐ²Ð»ÐµÐ½Ð¸Ðµ â†’ Ð¿ÐµÑ€Ð²Ñ‹Ð¹ ÐºÐ»Ð¸Ðº â†’ Ð»Ð¸Ð´ â†’ Ð¼ÐµÐ½ÐµÐ´Ð¶ÐµÑ€ â†’ Ð¿Ð¾ÑÐµÑ‰ÐµÐ½Ð¸Ðµ â†’ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ â†’ Ñ€ÐµÐ±Ñ‘Ð½Ð¾Ðº â†’ Ð½Ð°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ â†’ Ð¾Ð¿Ð»Ð°Ñ‚Ð° â†’ Ð”Ð”Ð¡ â†’ ÐžÐŸÐ¸Ð£ â†’ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»ÑŒ'"),
-    env.DB.prepare("UPDATE readiness_scenarios SET chain='Ð’Ð°ÐºÐ°Ð½ÑÐ¸Ñ â†’ ÐºÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚ â†’ Ð°Ð´Ð°Ð¿Ñ‚Ð°Ñ†Ð¸Ñ â†’ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ â†’ Ð´Ð¾Ð»Ð¶Ð½Ð¾ÑÑ‚ÑŒ â†’ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ñ‹ â†’ Ñ€Ð°ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ðµ â†’ Ð·Ð°Ð´Ð°Ñ‡Ð¸ â†’ Ð½Ð°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ â†’ Ð²Ñ‹Ð¿Ð»Ð°Ñ‚Ð° â†’ ÑƒÐ²Ð¾Ð»ÑŒÐ½ÐµÐ½Ð¸Ðµ â†’ Ð¾Ñ‚Ð·Ñ‹Ð² Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð¾Ð²',data_boundary='Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ ÐºÐ°Ð´Ñ€Ð¾Ð²Ñ‹Ðµ Ð·Ð°Ð¿Ð¸ÑÐ¸; Ð¿ÐµÑ€ÑÐ¾Ð½Ð°Ð»ÑŒÐ½Ñ‹Ðµ Ð´Ð°Ð½Ð½Ñ‹Ðµ Ð¸ÑÑ…Ð¾Ð´Ð½Ð¾Ð¹ Ð²ÐµÐ´Ð¾Ð¼Ð¾ÑÑ‚Ð¸ Ð½Ðµ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÑŽÑ‚ÑÑ' WHERE id='SCN-T-02' AND chain='Ð’Ð°ÐºÐ°Ð½ÑÐ¸Ñ â†’ ÐºÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚ â†’ Ð¾Ð½Ð±Ð¾Ñ€Ð´Ð¸Ð½Ð³ â†’ Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€ â†’ Ð´Ð¾Ð»Ð¶Ð½Ð¾ÑÑ‚ÑŒ â†’ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ñ‹ â†’ Ñ€Ð°ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ðµ â†’ Ð·Ð°Ð´Ð°Ñ‡Ð¸ â†’ Ð½Ð°Ñ‡Ð¸ÑÐ»ÐµÐ½Ð¸Ðµ â†’ Ð²Ñ‹Ð¿Ð»Ð°Ñ‚Ð° â†’ ÑƒÐ²Ð¾Ð»ÑŒÐ½ÐµÐ½Ð¸Ðµ â†’ Ð¾Ñ‚Ð·Ñ‹Ð² Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð¾Ð²'"),
-    env.DB.prepare("UPDATE readiness_scenarios SET name='Ð—Ð°ÐºÑƒÐ¿ÐºÐ° Ð¾Ñ‚ Ð·Ð°ÑÐ²ÐºÐ¸ Ð´Ð¾ Ñ„Ð¸Ð½Ð°Ð½ÑÐ¾Ð²Ð¾Ð³Ð¾ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ð°',chain='Ð—Ð°ÑÐ²ÐºÐ° â†’ ÑÐ¾Ð³Ð»Ð°ÑÐ¾Ð²Ð°Ð½Ð¸Ðµ â†’ ÑÑ€Ð°Ð²Ð½ÐµÐ½Ð¸Ðµ Ð¿Ð¾ÑÑ‚Ð°Ð²Ñ‰Ð¸ÐºÐ¾Ð² â†’ Ð·Ð°ÐºÐ°Ð· â†’ Ð¿Ð¾ÑÑ‚Ð°Ð²ÐºÐ° â†’ Ð¿Ñ€Ð¸Ñ‘Ð¼ Ð¿Ð¾ÑÑ‚Ð°Ð²ÐºÐ¸ â†’ ÑÐºÐ»Ð°Ð´ â†’ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚ â†’ Ð¾Ð¿Ð»Ð°Ñ‚Ð° â†’ Ð¾Ñ‚Ñ‡Ñ‘Ñ‚ Ð¾ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»ÑÑ… Ð¸ ÑƒÐ±Ñ‹Ñ‚ÐºÐ°Ñ…',data_boundary='Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð·Ð°ÐºÑƒÐ¿ÐºÐ°; ÑÐ»ÐµÐºÑ‚Ñ€Ð¾Ð½Ð½Ñ‹Ð¹ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ð¾Ð¾Ð±Ð¾Ñ€Ð¾Ñ‚ Ð¸ Ð±Ð°Ð½ÐºÐ¾Ð²ÑÐºÐ¸Ð¹ Ñ„Ð°ÐºÑ‚ Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ñ‹' WHERE id='SCN-T-04' AND name='Ð—Ð°ÐºÑƒÐ¿ÐºÐ° Ð¾Ñ‚ Ð·Ð°ÑÐ²ÐºÐ¸ Ð´Ð¾ ÐžÐŸÐ¸Ð£'"),
-    env.DB.prepare("UPDATE readiness_scenarios SET data_boundary='Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ ÐºÐ¾Ð½Ñ‚ÑƒÑ€ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸ Ð±ÐµÐ· Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ð¸ ÑÐ¸ÑÑ‚ÐµÐ¼Ñ‹ ÐºÐ¾Ð½Ñ‚Ñ€Ð¾Ð»Ñ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð°' WHERE id='SCN-T-05' AND data_boundary='Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ð¹ ÐºÐ¾Ð½Ñ‚ÑƒÑ€ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸ Ð±ÐµÐ· Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ð¸ Ð¡ÐšÐ£Ð”'"),
-    env.DB.prepare("UPDATE readiness_scenarios SET chain='ÐŸÑ€Ð¾Ð´ÑƒÐºÑ‚ â†’ Ð¿Ð°Ñ€Ñ‚Ð¸Ñ â†’ Ñ‚ÐµÑ…Ð½Ð¾Ð»Ð¾Ð³Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð° â†’ Ð¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´ÑÑ‚Ð²Ð¾ â†’ Ð¾Ñ‚Ð³Ñ€ÑƒÐ·ÐºÐ° â†’ Ð¿Ð¾Ñ‚Ñ€ÐµÐ±Ð»ÐµÐ½Ð¸Ðµ â†’ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ðµ â†’ ÑÐµÐ±ÐµÑÑ‚Ð¾Ð¸Ð¼Ð¾ÑÑ‚ÑŒ â†’ Ñ€ÐµÐ½Ñ‚Ð°Ð±ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚ÑŒ' WHERE id='SCN-T-06' AND chain='ÐŸÑ€Ð¾Ð´ÑƒÐºÑ‚ â†’ Ð¿Ð°Ñ€Ñ‚Ð¸Ñ â†’ Ð¢Ð¢Ðš â†’ Ð¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´ÑÑ‚Ð²Ð¾ â†’ Ð¾Ñ‚Ð³Ñ€ÑƒÐ·ÐºÐ° â†’ Ð¿Ð¾Ñ‚Ñ€ÐµÐ±Ð»ÐµÐ½Ð¸Ðµ â†’ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ðµ â†’ ÑÐµÐ±ÐµÑÑ‚Ð¾Ð¸Ð¼Ð¾ÑÑ‚ÑŒ â†’ Ñ€ÐµÐ½Ñ‚Ð°Ð±ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚ÑŒ'"),
-    env.DB.prepare("UPDATE readiness_scenarios SET name='ÐŸÐ¾ÐºÐ°Ð·Ð°Ñ‚ÐµÐ»ÑŒ Ð´Ð¾ Ð½Ð¾Ð²Ð¾Ð³Ð¾ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ð°',chain='ÐŸÐ¾ÐºÐ°Ð·Ð°Ñ‚ÐµÐ»ÑŒ â†’ Ð¾Ñ‚ÐºÐ»Ð¾Ð½ÐµÐ½Ð¸Ðµ â†’ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº â†’ Ð¿Ñ€Ð¸Ñ‡Ð¸Ð½Ð° â†’ Ð·Ð°Ð´Ð°Ñ‡Ð° â†’ Ð¾Ñ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹ â†’ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ â†’ Ð½Ð¾Ð²Ñ‹Ð¹ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚',data_boundary='Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ð¿Ð¾ÐºÐ°Ð·Ð°Ñ‚ÐµÐ»Ð¸ Ð¸ Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€Ð½Ð¾Ðµ Ð¸Ð·Ð¼ÐµÑ€ÐµÐ½Ð¸Ðµ' WHERE id='SCN-T-10' AND name='KPI Ð´Ð¾ Ð½Ð¾Ð²Ð¾Ð³Ð¾ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ð°'"),
-    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='Ð—Ð°ÑÐ²ÐºÐ°',entity_type='Ð—Ð°ÑÐ²ÐºÐ°' WHERE scenario_id='SCN-T-01' AND step_order=3 AND step_name='Ð›Ð¸Ð´'"),
-    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='Ð”Ð²Ð¸Ð¶ÐµÐ½Ð¸Ðµ Ð´ÐµÐ½ÐµÐ³' WHERE scenario_id='SCN-T-01' AND step_order=10 AND step_name='Ð”Ð”Ð¡'"),
-    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='ÐžÑ‚Ñ‡Ñ‘Ñ‚ Ð¾ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»ÑÑ… Ð¸ ÑƒÐ±Ñ‹Ñ‚ÐºÐ°Ñ…' WHERE scenario_id='SCN-T-01' AND step_order=11 AND step_name='ÐžÐŸÐ¸Ð£'"),
-    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='ÐÐ´Ð°Ð¿Ñ‚Ð°Ñ†Ð¸Ñ' WHERE scenario_id='SCN-T-02' AND step_order=3 AND step_name='ÐžÐ½Ð±Ð¾Ñ€Ð´Ð¸Ð½Ð³'"),
-    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='ÐŸÑ€Ð¸Ñ‘Ð¼ Ð¿Ð¾ÑÑ‚Ð°Ð²ÐºÐ¸' WHERE scenario_id='SCN-T-04' AND step_order=6 AND step_name='ÐŸÑ€Ð¸Ñ‘Ð¼ÐºÐ°'"),
-    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='ÐžÑ‚Ñ‡Ñ‘Ñ‚ Ð¾ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»ÑÑ… Ð¸ ÑƒÐ±Ñ‹Ñ‚ÐºÐ°Ñ…' WHERE scenario_id='SCN-T-04' AND step_order=10 AND step_name='ÐžÐŸÐ¸Ð£'"),
-    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='Ð¢ÐµÑ…Ð½Ð¾Ð»Ð¾Ð³Ð¸Ñ‡ÐµÑÐºÐ°Ñ ÐºÐ°Ñ€Ñ‚Ð°' WHERE scenario_id='SCN-T-06' AND step_order=3 AND step_name='Ð¢Ð¢Ðš'"),
-    env.DB.prepare("UPDATE readiness_scenario_steps SET step_name='ÐŸÐ¾ÐºÐ°Ð·Ð°Ñ‚ÐµÐ»ÑŒ',entity_type='ÐŸÐ¾ÐºÐ°Ð·Ð°Ñ‚ÐµÐ»ÑŒ' WHERE scenario_id='SCN-T-10' AND step_order=1 AND step_name='KPI'"),
-    env.DB.prepare("UPDATE readiness_scenario_steps SET entity_id='ÐšÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ° Ð´Ð¾Ð³Ð¾Ð²Ð¾Ñ€Ð° Â· Ð²ÐµÑ€ÑÐ¸Ñ 3' WHERE scenario_id='SCN-T-07' AND step_order=6 AND entity_id='SYNTHETIC:DOG-T-2026-044:v3'"),
-    env.DB.prepare("UPDATE readiness_scenario_steps SET entity_id='Ð”Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ ÑÐ¾Ð³Ð»Ð°ÑˆÐµÐ½Ð¸Ðµ Â· Ð²ÐµÑ€ÑÐ¸Ñ 2' WHERE scenario_id='SCN-T-07' AND step_order=7 AND entity_id='SYNTHETIC:DOG-T-2026-044:v2'"),
-    env.DB.prepare("UPDATE readiness_scenarios SET data_boundary='Ð¡Ð¸Ð½Ñ‚ÐµÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð·Ð°Ñ‰Ð¸Ñ‰Ñ‘Ð½Ð½Ð°Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ°; Ð¼ÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¾Ðµ ÑÐ¾Ð´ÐµÑ€Ð¶Ð°Ð½Ð¸Ðµ Ð¸ÑÐºÐ»ÑŽÑ‡ÐµÐ½Ð¾ Ð¸Ð· Ð¾Ñ‚Ð²ÐµÑ‚Ð° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸' WHERE id='SCN-T-09' AND data_boundary='PROTECTED_SYNTHETIC; Ð¼ÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¾Ðµ ÑÐ¾Ð´ÐµÑ€Ð¶Ð°Ð½Ð¸Ðµ Ð¸ÑÐºÐ»ÑŽÑ‡ÐµÐ½Ð¾ Ð¸Ð· readiness API'"),
-  ]);
-
-  const gates=[
-    ["GATE-T-SCENARIOS","10 ÑÐºÐ²Ð¾Ð·Ð½Ñ‹Ñ… ÑÑ†ÐµÐ½Ð°Ñ€Ð¸ÐµÐ²","ÐžÐ¶Ð¸Ð´Ð°ÐµÑ‚ Ð·Ð°Ð¿ÑƒÑÐº",1,"Ð’ÑÐµ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ðµ ÑˆÐ°Ð³Ð¸ Ð´Ð¾Ð»Ð¶Ð½Ñ‹ Ð¿Ñ€Ð¾Ð¹Ñ‚Ð¸ Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€ÑÐµÐ¼ÑƒÑŽ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÑƒ Ñ€Ð°Ð±Ð¾Ñ‡ÐµÐ¹ Ð±Ð°Ð·Ñ‹","EMP-T-QA-001"],
-    ["GATE-T-P0P1","ÐšÑ€Ð¸Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ð´ÐµÑ„ÐµÐºÑ‚Ñ‹","ÐŸÑ€Ð¾Ð¹Ð´ÐµÐ½Ð¾",1,"Ð¡Ð±Ð¾Ñ€ÐºÐ°, Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° ÐºÐ°Ñ‡ÐµÑÑ‚Ð²Ð° ÐºÐ¾Ð´Ð° Ð¸ Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ñ‚ÐµÑÑ‚Ñ‹ Ð·Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ñ‹ Ð±ÐµÐ· ÐºÑ€Ð¸Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ñ… Ð´ÐµÑ„ÐµÐºÑ‚Ð¾Ð²","EMP-T-QA-001"],
-    ["GATE-T-RBAC","ÐŸÑ€Ð°Ð²Ð° Ð¸ Ð¼ÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ°Ñ Ð¸Ð·Ð¾Ð»ÑÑ†Ð¸Ñ","ÐŸÑ€Ð¾Ð¹Ð´ÐµÐ½Ð¾",1,"ÐžÐ³Ñ€Ð°Ð½Ð¸Ñ‡ÐµÐ½Ð¸Ñ Ñ€Ð¾Ð»ÐµÐ¹, Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ñ‹Ð¹ Ð¼ÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¸Ð¹ Ð´Ð¾Ð¿ÑƒÑÐº Ð¸ Ð·Ð°Ð¿Ñ€ÐµÑ‚ Ð¼ÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¸Ñ… Ð°Ð³Ñ€ÐµÐ³Ð°Ñ‚Ð¾Ð² Ð¿Ð¾ÐºÑ€Ñ‹Ñ‚Ñ‹ Ñ‚ÐµÑÑ‚Ð°Ð¼Ð¸","EMP-T-QA-001"],
-    ["GATE-T-MIGRATIONS","Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ñ‹Ðµ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ Ð±Ð°Ð·Ñ‹","ÐŸÑ€Ð¾Ð¹Ð´ÐµÐ½Ð¾",1,"Ð¡Ñ…ÐµÐ¼Ð° Ñ€Ð°ÑÑˆÐ¸Ñ€ÑÐµÑ‚ÑÑ Ð±ÐµÐ· Ñ€Ð°Ð·Ñ€ÑƒÑˆÐ¸Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ñ… Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ð¹; Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€Ð½Ð°Ñ Ð¸Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð°","EMP-T-QA-001"],
-    ["GATE-T-INTEGRATIONS","Ð ÐµÐ°Ð»ÑŒÐ½Ñ‹Ðµ Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ð¸","Ð—Ð°Ð±Ð»Ð¾ÐºÐ¸Ñ€Ð¾Ð²Ð°Ð½Ð¾",1,"Ð‘Ð°Ð½ÐºÐ¸, ÑÐ¸ÑÑ‚ÐµÐ¼Ð° Ð¿Ñ€Ð¾Ð´Ð°Ð¶, Ð´Ð½ÐµÐ²Ð½Ð¸Ðº, ÑÐ»ÐµÐºÑ‚Ñ€Ð¾Ð½Ð½Ñ‹Ð¹ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ð¾Ð¾Ð±Ð¾Ñ€Ð¾Ñ‚, ÑƒÑ‡Ñ‘Ñ‚ Ð¸ Ñ€ÐµÐºÐ»Ð°Ð¼Ð½Ñ‹Ðµ ÐºÐ°Ð±Ð¸Ð½ÐµÑ‚Ñ‹ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ñ‹ Ð½Ðµ Ð¿Ð¾Ð»Ð½Ð¾ÑÑ‚ÑŒÑŽ","EMP-T-INT-001"],
-    ["GATE-T-BACKUP","Ð’Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ñ€Ð°Ð±Ð¾Ñ‡ÐµÐ¹ Ð±Ð°Ð·Ñ‹","Ð—Ð°Ð±Ð»Ð¾ÐºÐ¸Ñ€Ð¾Ð²Ð°Ð½Ð¾",1,"ÐŸÑ€Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ñ€ÐµÐ·ÐµÑ€Ð²Ð½Ð¾Ð¹ ÐºÐ¾Ð¿Ð¸Ð¸ Ð½Ðµ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÑÐ»Ð¾ÑÑŒ; Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ Ð°Ñ€Ñ‚ÐµÑ„Ð°ÐºÑ‚Ð° Ð½ÐµÐ´Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ñ‡Ð½Ð¾","EMP-T-QA-001"],
-    ["GATE-T-ROLLBACK","ÐžÑ‚ÐºÐ°Ñ‚ Ð¿Ñ€Ð¸Ð»Ð¾Ð¶ÐµÐ½Ð¸Ñ","ÐŸÑ€Ð¾Ð¹Ð´ÐµÐ½Ð¾",1,"ÐžÐ¿ÑƒÐ±Ð»Ð¸ÐºÐ¾Ð²Ð°Ð½Ð½ÑƒÑŽ Ð²ÐµÑ€ÑÐ¸ÑŽ Ð¼Ð¾Ð¶Ð½Ð¾ Ð²ÐµÑ€Ð½ÑƒÑ‚ÑŒ Ð±ÐµÐ· Ñ€Ð°Ð·Ñ€ÑƒÑˆÐ¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ð³Ð¾ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ Ð´Ð°Ð½Ð½Ñ‹Ñ…","EMP-T-QA-001"],
-    ["GATE-T-BROWSER","Ð‘Ñ€Ð°ÑƒÐ·ÐµÑ€Ñ‹, Ð²Ð½ÐµÑˆÐ½Ð¸Ð¹ Ð²Ð¸Ð´ Ð¸ ÑÐºÐ¾Ñ€Ð¾ÑÑ‚ÑŒ","ÐžÐ³Ñ€Ð°Ð½Ð¸Ñ‡ÐµÐ½Ð¾",1,"Ð¡Ð±Ð¾Ñ€ÐºÐ° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð°; Ð¿Ð¾Ð»Ð½Ð°Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð¿Ð¾Ð´Ð´ÐµÑ€Ð¶Ð¸Ð²Ð°ÐµÐ¼Ñ‹Ñ… Ð±Ñ€Ð°ÑƒÐ·ÐµÑ€Ð¾Ð² Ð¸ Ð¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚Ð¸ ÐµÑ‰Ñ‘ Ð½Ðµ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð°","EMP-T-QA-001"],
-    ["GATE-T-APPROVAL","ÐžÑ‚Ð´ÐµÐ»ÑŒÐ½Ð¾Ðµ Ñ€Ð°Ð·Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð½Ð° Ð²Ñ‹Ð¿ÑƒÑÐº","Ð—Ð°Ð±Ð»Ð¾ÐºÐ¸Ñ€Ð¾Ð²Ð°Ð½Ð¾",1,"ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° ÑÐ¸ÑÑ‚ÐµÐ¼Ñ‹ Ð½Ðµ Ð·Ð°Ð¼ÐµÐ½ÑÐµÑ‚ Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ð¾Ð³Ð¾ Ñ€ÐµÑˆÐµÐ½Ð¸Ñ ÑÐ¾Ð±ÑÑ‚Ð²ÐµÐ½Ð½Ð¸ÐºÐ°","Ð¡Ð¾Ð±ÑÑ‚Ð²ÐµÐ½Ð½Ð¸Ðº"],
-  ];
-  await env.DB.batch(gates.map(row=>env.DB.prepare("INSERT OR IGNORE INTO release_gates (id,name,status,required,evidence,owner_entity_id,updated_at) VALUES (?,?,?,?,?,?,'2026-08-21T11:00:00Z')").bind(...row)));
-  await env.DB.batch([
-    env.DB.prepare("UPDATE release_gates SET evidence='Ð’ÑÐµ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ðµ ÑˆÐ°Ð³Ð¸ Ð´Ð¾Ð»Ð¶Ð½Ñ‹ Ð¿Ñ€Ð¾Ð¹Ñ‚Ð¸ Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€ÑÐµÐ¼ÑƒÑŽ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÑƒ Ñ€Ð°Ð±Ð¾Ñ‡ÐµÐ¹ Ð±Ð°Ð·Ñ‹' WHERE id='GATE-T-SCENARIOS' AND evidence='Ð’ÑÐµ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ðµ ÑˆÐ°Ð³Ð¸ Ð´Ð¾Ð»Ð¶Ð½Ñ‹ Ð¿Ñ€Ð¾Ð¹Ñ‚Ð¸ Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€ÑÐµÐ¼ÑƒÑŽ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÑƒ D1'"),
-    env.DB.prepare("UPDATE release_gates SET name='ÐšÑ€Ð¸Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ð´ÐµÑ„ÐµÐºÑ‚Ñ‹',evidence='Ð¡Ð±Ð¾Ñ€ÐºÐ°, Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° ÐºÐ°Ñ‡ÐµÑÑ‚Ð²Ð° ÐºÐ¾Ð´Ð° Ð¸ Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ñ‚ÐµÑÑ‚Ñ‹ Ð·Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ñ‹ Ð±ÐµÐ· ÐºÑ€Ð¸Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ñ… Ð´ÐµÑ„ÐµÐºÑ‚Ð¾Ð²' WHERE id='GATE-T-P0P1' AND name='P0/P1 = 0'"),
-    env.DB.prepare("UPDATE release_gates SET evidence='ÐžÐ³Ñ€Ð°Ð½Ð¸Ñ‡ÐµÐ½Ð¸Ñ Ñ€Ð¾Ð»ÐµÐ¹, Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ñ‹Ð¹ Ð¼ÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¸Ð¹ Ð´Ð¾Ð¿ÑƒÑÐº Ð¸ Ð·Ð°Ð¿Ñ€ÐµÑ‚ Ð¼ÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¸Ñ… Ð°Ð³Ñ€ÐµÐ³Ð°Ñ‚Ð¾Ð² Ð¿Ð¾ÐºÑ€Ñ‹Ñ‚Ñ‹ Ñ‚ÐµÑÑ‚Ð°Ð¼Ð¸' WHERE id='GATE-T-RBAC' AND evidence='Role guards, Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ñ‹Ð¹ grant Ð¸ Ð·Ð°Ð¿Ñ€ÐµÑ‚ Ð¼ÐµÐ´Ð¸Ñ†Ð¸Ð½ÑÐºÐ¸Ñ… Ð°Ð³Ñ€ÐµÐ³Ð°Ñ‚Ð¾Ð² Ð¿Ð¾ÐºÑ€Ñ‹Ñ‚Ñ‹ Ñ‚ÐµÑÑ‚Ð°Ð¼Ð¸'"),
-    env.DB.prepare("UPDATE release_gates SET name='Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ñ‹Ðµ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ Ð±Ð°Ð·Ñ‹',evidence='Ð¡Ñ…ÐµÐ¼Ð° Ñ€Ð°ÑÑˆÐ¸Ñ€ÑÐµÑ‚ÑÑ Ð±ÐµÐ· Ñ€Ð°Ð·Ñ€ÑƒÑˆÐ¸Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ñ… Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ð¹; Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€Ð½Ð°Ñ Ð¸Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð°' WHERE id='GATE-T-MIGRATIONS' AND name='ÐÐ´Ð´Ð¸Ñ‚Ð¸Ð²Ð½Ñ‹Ðµ Ð¼Ð¸Ð³Ñ€Ð°Ñ†Ð¸Ð¸'"),
-    env.DB.prepare("UPDATE release_gates SET evidence='Ð‘Ð°Ð½ÐºÐ¸, ÑÐ¸ÑÑ‚ÐµÐ¼Ð° Ð¿Ñ€Ð¾Ð´Ð°Ð¶, Ð´Ð½ÐµÐ²Ð½Ð¸Ðº, ÑÐ»ÐµÐºÑ‚Ñ€Ð¾Ð½Ð½Ñ‹Ð¹ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚Ð¾Ð¾Ð±Ð¾Ñ€Ð¾Ñ‚, ÑƒÑ‡Ñ‘Ñ‚ Ð¸ Ñ€ÐµÐºÐ»Ð°Ð¼Ð½Ñ‹Ðµ ÐºÐ°Ð±Ð¸Ð½ÐµÑ‚Ñ‹ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ñ‹ Ð½Ðµ Ð¿Ð¾Ð»Ð½Ð¾ÑÑ‚ÑŒÑŽ' WHERE id='GATE-T-INTEGRATIONS' AND evidence='Ð‘Ð°Ð½ÐºÐ¸, CRM, Ð´Ð½ÐµÐ²Ð½Ð¸Ðº, Ð­Ð”Ðž/1Ð¡, Ð¡ÐšÐ£Ð” Ð¸ Ñ€ÐµÐºÐ»Ð°Ð¼Ð½Ñ‹Ðµ API Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ñ‹'"),
-    env.DB.prepare("UPDATE release_gates SET name='Ð’Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ñ€Ð°Ð±Ð¾Ñ‡ÐµÐ¹ Ð±Ð°Ð·Ñ‹',evidence='ÐŸÑ€Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ñ€ÐµÐ·ÐµÑ€Ð²Ð½Ð¾Ð¹ ÐºÐ¾Ð¿Ð¸Ð¸ Ð½Ðµ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÑÐ»Ð¾ÑÑŒ; Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ Ð°Ñ€Ñ‚ÐµÑ„Ð°ÐºÑ‚Ð° Ð½ÐµÐ´Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ñ‡Ð½Ð¾' WHERE id='GATE-T-BACKUP' AND name='Ð’Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ D1'"),
-    env.DB.prepare("UPDATE release_gates SET evidence='ÐžÐ¿ÑƒÐ±Ð»Ð¸ÐºÐ¾Ð²Ð°Ð½Ð½ÑƒÑŽ Ð²ÐµÑ€ÑÐ¸ÑŽ Ð¼Ð¾Ð¶Ð½Ð¾ Ð²ÐµÑ€Ð½ÑƒÑ‚ÑŒ Ð±ÐµÐ· Ñ€Ð°Ð·Ñ€ÑƒÑˆÐ¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ð³Ð¾ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ Ð´Ð°Ð½Ð½Ñ‹Ñ…' WHERE id='GATE-T-ROLLBACK' AND evidence='ÐšÐ°Ð¶Ð´Ñ‹Ð¹ Sites checkpoint Ð½ÐµÐ¸Ð·Ð¼ÐµÐ½ÑÐµÐ¼ Ð¸ Ð´Ð¾Ð¿ÑƒÑÐºÐ°ÐµÑ‚ Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚ Ð²ÐµÑ€ÑÐ¸Ð¸; Ð¼Ð¸Ð³Ñ€Ð°Ñ†Ð¸Ð¸ Ð°Ð´Ð´Ð¸Ñ‚Ð¸Ð²Ð½Ñ‹'"),
-    env.DB.prepare("UPDATE release_gates SET name='Ð‘Ñ€Ð°ÑƒÐ·ÐµÑ€Ñ‹, Ð²Ð½ÐµÑˆÐ½Ð¸Ð¹ Ð²Ð¸Ð´ Ð¸ ÑÐºÐ¾Ñ€Ð¾ÑÑ‚ÑŒ',evidence='Ð¡Ð±Ð¾Ñ€ÐºÐ° Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð°; Ð¿Ð¾Ð»Ð½Ð°Ñ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð¿Ð¾Ð´Ð´ÐµÑ€Ð¶Ð¸Ð²Ð°ÐµÐ¼Ñ‹Ñ… Ð±Ñ€Ð°ÑƒÐ·ÐµÑ€Ð¾Ð² Ð¸ Ð¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚Ð¸ ÐµÑ‰Ñ‘ Ð½Ðµ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð°' WHERE id='GATE-T-BROWSER' AND name='Ð‘Ñ€Ð°ÑƒÐ·ÐµÑ€Ñ‹, visual Ð¸ performance'"),
-    env.DB.prepare("UPDATE release_gates SET name='ÐžÑ‚Ð´ÐµÐ»ÑŒÐ½Ð¾Ðµ Ñ€Ð°Ð·Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð½Ð° Ð²Ñ‹Ð¿ÑƒÑÐº',evidence='ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° ÑÐ¸ÑÑ‚ÐµÐ¼Ñ‹ Ð½Ðµ Ð·Ð°Ð¼ÐµÐ½ÑÐµÑ‚ Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ð¾Ð³Ð¾ Ñ€ÐµÑˆÐµÐ½Ð¸Ñ ÑÐ¾Ð±ÑÑ‚Ð²ÐµÐ½Ð½Ð¸ÐºÐ°',owner_entity_id='Ð¡Ð¾Ð±ÑÑ‚Ð²ÐµÐ½Ð½Ð¸Ðº' WHERE id='GATE-T-APPROVAL' AND owner_entity_id='ROLE:REPRESENTATIVE'"),
-  ]);
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO recovery_drills (id,drill_type,scope,started_at,finished_at,status,rpo_minutes,rto_minutes,checksum_before,checksum_after,evidence,limitation) VALUES ('DRILL-T-ARTIFACT-01','ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð°Ñ€Ñ‚ÐµÑ„Ð°ÐºÑ‚Ð°','Ð˜ÑÑ…Ð¾Ð´Ð½Ñ‹Ð¹ ÐºÐ¾Ð´ Ð¸ ÑÐ¾ÑÑ‚Ð°Ð² ÑÐ±Ð¾Ñ€ÐºÐ¸','2026-08-21T10:55:00Z','2026-08-21T11:00:00Z','ÐŸÑ€Ð¾Ð¹Ð´ÐµÐ½Ð¾',0,5,'SOURCE-TREE-STAGE17','BUILD-STAGE18','Ð¡Ð±Ð¾Ñ€ÐºÐ° Ñ„Ð¾Ñ€Ð¼Ð¸Ñ€ÑƒÐµÑ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÑÐµÐ¼Ñ‹Ð¹ Ð½ÐµÐ¸Ð·Ð¼ÐµÐ½ÑÐµÐ¼Ñ‹Ð¹ Ð°Ñ€Ñ‚ÐµÑ„Ð°ÐºÑ‚','ÐÐµ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ð°ÐµÑ‚ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ñ€Ð°Ð±Ð¾Ñ‡ÐµÐ¹ Ð±Ð°Ð·Ñ‹')"),
-    env.DB.prepare("INSERT OR IGNORE INTO recovery_drills (id,drill_type,scope,started_at,finished_at,status,rpo_minutes,rto_minutes,checksum_before,checksum_after,evidence,limitation) VALUES ('DRILL-T-D1-RESTORE-01','Ð’Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ð¸Ð· Ñ€ÐµÐ·ÐµÑ€Ð²Ð½Ð¾Ð¹ ÐºÐ¾Ð¿Ð¸Ð¸','Ð¢ÐµÑÑ‚Ð¾Ð²Ð°Ñ ÐºÐ¾Ð¿Ð¸Ñ Ñ€Ð°Ð±Ð¾Ñ‡ÐµÐ¹ Ð±Ð°Ð·Ñ‹','','','ÐÐµ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÐµÐ½Ð¾',0,0,'','','ÐÐµÑ‚ Ð²Ñ‹Ð´ÐµÐ»ÐµÐ½Ð½Ð¾Ð¹ ÐºÐ¾Ð¿Ð¸Ð¸ Ð¸ Ñ€Ð°Ð·Ñ€ÐµÑˆÑ‘Ð½Ð½Ð¾Ð¹ Ð¿Ñ€Ð¾Ñ†ÐµÐ´ÑƒÑ€Ñ‹ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ñ','Ð”Ð¾ Ð¿Ñ€Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ð¹ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ Ð²Ñ‹Ð¿ÑƒÑÐº Ð·Ð°Ð¿Ñ€ÐµÑ‰Ñ‘Ð½')"),
-    env.DB.prepare("UPDATE recovery_drills SET scope='Ð˜ÑÑ…Ð¾Ð´Ð½Ñ‹Ð¹ ÐºÐ¾Ð´ Ð¸ ÑÐ¾ÑÑ‚Ð°Ð² ÑÐ±Ð¾Ñ€ÐºÐ¸',evidence='Ð¡Ð±Ð¾Ñ€ÐºÐ° Ñ„Ð¾Ñ€Ð¼Ð¸Ñ€ÑƒÐµÑ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÑÐµÐ¼Ñ‹Ð¹ Ð½ÐµÐ¸Ð·Ð¼ÐµÐ½ÑÐµÐ¼Ñ‹Ð¹ Ð°Ñ€Ñ‚ÐµÑ„Ð°ÐºÑ‚',limitation='ÐÐµ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ð°ÐµÑ‚ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ñ€Ð°Ð±Ð¾Ñ‡ÐµÐ¹ Ð±Ð°Ð·Ñ‹' WHERE id='DRILL-T-ARTIFACT-01' AND scope='Ð˜ÑÑ…Ð¾Ð´Ð½Ñ‹Ð¹ ÐºÐ¾Ð´ + build manifest'"),
-    env.DB.prepare("UPDATE recovery_drills SET scope='Ð¢ÐµÑÑ‚Ð¾Ð²Ð°Ñ ÐºÐ¾Ð¿Ð¸Ñ Ñ€Ð°Ð±Ð¾Ñ‡ÐµÐ¹ Ð±Ð°Ð·Ñ‹',evidence='ÐÐµÑ‚ Ð²Ñ‹Ð´ÐµÐ»ÐµÐ½Ð½Ð¾Ð¹ ÐºÐ¾Ð¿Ð¸Ð¸ Ð¸ Ñ€Ð°Ð·Ñ€ÐµÑˆÑ‘Ð½Ð½Ð¾Ð¹ Ð¿Ñ€Ð¾Ñ†ÐµÐ´ÑƒÑ€Ñ‹ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ñ',limitation='Ð”Ð¾ Ð¿Ñ€Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ð¹ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ Ð²Ñ‹Ð¿ÑƒÑÐº Ð·Ð°Ð¿Ñ€ÐµÑ‰Ñ‘Ð½' WHERE id='DRILL-T-D1-RESTORE-01' AND scope='Live D1 test database'"),
-  ]);
-}
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí×^üóÔèµ©hºÚn¶X§zÍKËÈÐÒÐWÐUUÓPUP×Ô‘PQÓ“WÕŒBš[\ÜÈXÜ]Z\™UØÚØTÝ][Y[Ý]KØÚØTÝ][Y[X\ÙQÝX\™Ü[Hœ›ÛH	Ë‹‹ÛX‹ÝØÚØK\Ý][Y[\Ý]IÎÂš[\Ü\HÈØÚØTÝ][Y[X\ÙQ™[˜ÙHHœ›ÛH	Ë‹‹ÛX‹ÝØÚØK\Ý][Y[\Ý]IÎÂ‹ËÈÐÒÐWÔS‘S‘×ÔÕUSQS•ÓQ‘PÖPÓWÕŒBš[\ÜÈ[ˆHœ›ÛH˜ÛÝY›\™NÛÜšÙ\œÈŽÂš[\ÜÈš^ž›HHœ›ÛH™š^ž›K[Ü›KÙHŽÂš[\ÜÈ[]Q\XØ]RÙ^KX[X[[]S›Ü›X[^˜][ÛˆHœ›ÛH‹‹‹ÛX‹Ù[]K\›Ý™[˜[˜ÙHŽÂš[\ÜÈ[œÝ\™SÜ\˜][™Ò[YÜ˜][ÛØ][ÙÈHœ›ÛH‹‹‹ÛX‹ÛÜ\˜][™ËZ[YÜ˜][Û‹XØ][ÙÈŽÂš[\ÜÈÕØÚØQš[˜[˜ÚX[Ü\˜][ÛˆHœ›ÛH‹‹‹ÛX‹Ú[YÜ˜][ÛœÈŽÂš[\Ü\HÈØÚØT™XYÛ›TÞ[˜Ô™\Ý[Hœ›ÛH‹‹‹ÛX‹Ú[YÜ˜][ÛœÈŽÂš[\ÜÈÛ\ÜÚYžQš[˜[˜ÙSÜ\˜][Û‹\Ð]]Ð[ØØ][ÛØ][ÙÔ™XYK\Hš[˜[˜ÙP]]Ð[ØØ][ÛˆHœ›ÛH‹‹‹ÛX‹Ùš[˜[˜ÙKX]]ËX[ØØ][ÛˆŽÂš[\ÜÈ’SSÑWÐPÐÓÕS•S‘×ÔÕT•ÑUHHœ›ÛH‹‹‹ÛX‹Ùš[˜[˜ÙKXœ˜[˜Ú\ØÛÜHŽÂš[\ÜÈØY\XÛPØ][ÙÈHœ›ÛH‹‹‹ÛX‹Ùš[˜[˜ÙKX\XÛK\ÝÜ™HŽÂš[\Ü
+ˆ\ÈØÚ[XHœ›ÛH‹‹ÜØÚ[XHŽÂ‚™^Ü[˜Ý[ÛˆÙ]Š
+HÂˆYˆ
+Y[‹‘ŠHÂˆ›ÝÈ™]È\œ›ÜŠˆÛÝY›\™HHš[™[™È˜\È[˜]˜Z[X›KˆÙ]HXšY[[ˆ›Ü[˜ZKÚÜÝ[™ËšœÛÛˆÈ˜Üˆ][Ý\ˆÛÛ›Û[™H[š™XÝH™X[š[™[™È˜[Y\È™Y›Ü™H\Ú[™ÈH]X˜\ÙKˆ‚ˆ
+NÂˆB‚ˆ™]\›ˆš^ž›J[‹‘‹ÈØÚ[XHJNÂŸB‚˜ÛÛœÝÓÔ‘WÔÐÒSPWÕ‘T”ÒSÓˆH˜\[Ë[ÜË]\ÚË[ÝÛ™\œÚ\]ŒHŽÂ˜ÛÛœÝS•QÔUSÓ—ÑSS×Ð“ÓÕÕTÕ‘T”ÒSÓˆHš[YÜ˜][Û‹Y[[Ë]ŒÈŽÂ˜ÛÛœÝ’SSÑWÑS•UWÓS’Ô×Ð“ÓÕÕTÕ‘T”ÒSÓˆH™š[˜[˜ÙKY[]K[[šÜË]ŒHŽÂ˜ÛÛœÝÖTÕSWÑSS×ÔT‘ÑWÕ‘T”ÒSÓˆH™ÛØ˜[Y[[Ë\\™ÙK]ŒˆŽÂ˜ÛÛœÝPS•PSÑS•UWÔ“Õ‘SSÑWÕ‘T”ÒSÓˆH›X[X[Y[]K\›Ý™[˜[˜ÙK]ŒˆŽÂ˜ÛÛœÝTÒ×ÓÕÓ‘T—ÐPÒÑ’SÕ‘T”ÒSÓˆH\ÚËXÜ™X]YXžK]\Ù\‹]ŒHŽÂ˜ÛÛœÝSPS—Ô‘PQP“WÔ‘PÓÔ‘×Õ‘T”ÒSÓˆHš[X[‹\™XYX›K\™XÛÜ™Ë]ŒHŽÂ˜ÛÛœÝQÐPÖWÐSWÐS’×ÓRQÔUSÓ—Õ‘T”ÒSÓˆH›YØXÞKX[˜KX˜[šË]Ë]˜[šË]ŒHŽÂ˜ÛÛœÝ‘TURT‘QÐÓÔ‘WÕP“TÈHÂˆ›Ü™Ø[š^˜][Û—Øœ˜[˜Ú\È‹ˆ˜\Ý\Ù\œÈ‹ˆ˜\ÜÞ\Ý[\È‹ˆ\Ù\—ÜÞ\Ý[WØXØÙ\ÜÈ‹ˆ˜XØÙ\Ü×ÜÞ[˜×Ù]™[È‹ˆ™˜[Z[WÜÞ\Ý[WØXØÙ\ÜÈ‹ˆ\Ù\—Øœ˜[˜ÚØXØÙ\ÜÈ‹ˆ›X[X[Ü™XÛÜ™È‹ˆ\ÚÜÈ‹ˆ™[]Y\È‹ˆ™š[˜[˜ÚX[ÛÜ\˜][ÛœÈ‹ˆ˜˜[š×ØXØÛÝ[È‹ˆ˜˜[š×ÜÝ][Y[Ú[\ÜÈ‹ˆ˜˜[š×Ý˜[œØXÝ[ÛœÈ‹ˆ˜ÛY[ÛY™XÞXÛ\È‹ˆ˜ÛÛ[Ü[—Ú][\È‹ˆ™YXØ][Û—Ü›ÙÜ˜[\È‹ˆš—Ù[\ÞYY\È‹ˆ›YØ[ØÛÛ˜XÝÈ‹ˆ›YØ[ØÛÛ˜XÝÝ^Ý™\œÚ[ÛœÈ‹ˆœ›ØÝ\™[Y[ÜÝ\Y\œÈ‹ˆ™›ÛÙÜ›ÙXÝÈ‹ˆœØY™]WÜÞ\Ý[\È‹ˆ›YYXØ[ØØ\Ù\È‹ˆ˜XØÛÝ[[™×ÙØÝ[Y[È‹ˆœÝ˜]YÞWÜ›Ú™XÝÈ‹ˆš[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈ‹ˆ˜[˜[]XÜ×ÜÚYÛ˜[È‹ˆœ™XY[™\Ü×ÜØÙ[˜\š[ÜÈ‹—H\ÈÛÛœÝÂ‚›]ÛÜ™UX›\Ô›ÛZ\ÙNˆ›ÛZ\ÙO›ÚYˆ[H[Â‚™^Ü\Þ[˜È[˜Ý[Ûˆ[œÝ\™PÛÜ™UX›\Ê
+HÂˆYˆ
+Y[‹‘ŠHÂˆ›ÝÈ™]È\œ›ÜŠÛÝY›\™HHš[™[™È˜\È[˜]˜Z[X›KˆŠNÂˆB‚ˆYˆ
+XÛÜ™UX›\Ô›ÛZ\ÙJHÂˆÛÜ™UX›\Ô›ÛZ\ÙHH[œÝ\™PÛÜ™UX›\ÓÛ˜ÙJ
+K˜Ø]Ú
+
+\œ›ÜŠHOˆÂˆÛÜ™UX›\Ô›ÛZ\ÙHH[Âˆ›ÝÈ\œ›ÜŽÂˆJNÂˆB‚ˆ™]\›ˆÛÜ™UX›\Ô›ÛZ\ÙNÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ[œÝ\™PÛÜ™UX›\ÓÛ˜ÙJ
+HÂˆ]ØZ][‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÞ\Ý[WÜ[[YWÜÝ]H
+ˆÝ]WÚÙ^HV’SPT–HÑVH“Õ•SˆÝ]WÝ˜[YHV“Õ•Sˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kœ[Š
+NÂ‚ˆÛÛœÝ[ÙHH]ØZ]Ù]Þ\Ý[Q]S[ÙJ
+NÂˆÛÛœÝX\šÙ\ˆH]ØZ][‹‘‹œ™\\™Jˆ”ÑSPÕÝ]WÝ˜[YH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^HH	ØÛÜ™WÜØÚ[XIÈ‚ˆ
+K™š\œÝÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+NÂˆÛÛœÝXÙZÛ\œÈH‘TURT‘QÐÓÔ‘WÕP“TË›X\
+
+
+HOˆÈŠKš›Ú[Š‹ŠNÂˆÛÛœÝ^\Ý[™ÈH]ØZ][‹‘‹œ™\\™JˆÑSPÕÓÕS•
+
+ŠHTÈX›WØÛÝ[”“ÓHÜ[]WÛX\Ý\ˆÒT‘H\HH	ÝX›IÈS‘˜[YHSˆ
+	ÜXÙZÛ\œßJXˆ
+K˜š[™
+‹‹”‘TURT‘QÐÓÔ‘WÕP“TÊK™š\œÝÈX›WØÛÝ[ˆ[X™\ˆOŠ
+NÂˆÛÛœÝ\Ð[ÛÜ™UX›\ÈH[X™\Š^\Ý[™ÏËX›WØÛÝ[ÏÈ
+HOOH‘TURT‘QÐÓÔ‘WÕP“TË›[™ÝÂ‚ˆËÈ™\Z\ˆ\È[X™\˜][H[™\[™[œ›ÛH]H[š]X[^˜][Û‹ˆ]™\žBˆËÈ›ØÙ\ÜÈ˜[Y]\ÈHÛÛ\]HY[\Ý[ØÚ[XHÛ˜ÙK[˜ÛY[™ÈX›\ÂˆËÈÝ]ÚYH‘TURT‘QÐÓÔ‘WÕP“TËÚ[H[[È›ÝÜÈ\™HÜ™X]YÛ›H[ˆ[‚ˆËÈ^XÚ]HÙ[XÝY\ÝÛÛÝ\‹‚ˆ]ØZ][š]X[^™PÛÜ™UX›\Ê
+NÂˆ]ØZ][œÝ\™Qš[˜[˜ÙSÜ\˜][Û[ØØ][ÛÛÛ[[œÊ
+NÂˆ]ØZ]ZYÜ˜]SYØXÞP[˜P˜[šÒ[YÜ˜][ÛŠ
+NÂˆ]ØZ]›Ü›X[^™SX[X[[]T›Ý™[˜[˜ÙJ
+NÂˆËÈHÝÜ™Y˜[šÈÜ™Y[X[\È\ÙY[Û›HÚ[HH[[YHX\Ý\ˆÙ^HØ[‚ˆËÈXÝX[HXÜž\]ˆ˜[Y]H]™\žH[™[ÜH\š[™È™XY[™\ÜÈÛÈHÝ[BˆËÈ[›™\‹\ÚYHÙ^H˜Z[È™Y›Ü™HHØ[™Y]HØ[ˆÝXÚÜˆ™\XÙH›ÙXÝ[Û‹‚ˆ]ØZ]™\šYžTÝÜ™Y[YÜ˜][ÛÜ™Y[X[Ê
+NÂˆYˆ
+Z\Ð[ÛÜ™UX›\È	‰ˆ[ÙHOOH\ÝŠH]ØZ]ÙYY[š]X[[[Ñ]J
+NÂˆYˆ
+[ÙHOOH\ÝŠH]ØZ]›Ü›X[^™R[X[”™XYX›Q[[Ô™XÛÜ™Ê
+NÂ‚ˆYˆ
+X\šÙ\ËœÝ]WÝ˜[YHOOHÓÔ‘WÔÐÒSPWÕ‘T”ÒSÓˆZ\Ð[ÛÜ™UX›\ÊHÂˆ]ØZ][‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+	ØÛÜ™WÜØÚ[XIËËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+ÓÔ‘WÔÐÒSPWÕ‘T”ÒSÓŠBˆœ[Š
+NÂˆB‚ˆËÈ[\H›ÙXÝ[Ûˆ]H\È\˜X›NˆX[ÚXÚÜÈX^H™\Z\ˆ]^H]\ÝˆËÈ™]™\ˆ™XÜ™X]H[[Ë[\ÜYÜˆ\š]™Y\Ú[™\ÜÈ™XÛÜ™Ë‚ˆYˆ
+[ÙHOOH™[\HŠHÂˆ]ØZ][œÝ\™SÜ\˜][™Ò[YÜ˜][ÛØ][ÙÔÝ]J
+NÂˆ™]\›ŽÂˆB‚ˆ]ØZ][œÝ\™T^[Y[\š]™YÛÝ[\œ\Y\Ê
+NÂ‚ˆYˆ
+[ÙHOOHœÛÝ\˜ÙWÛÛ›HŠHÂˆ]ØZ][œÝ\™TÛÝ\˜ÙSÛ›PÛX[\
+
+NÂˆH[ÙHÂˆ]ØZ][œÝ\™R[YÜ˜][Û‘[[Ð›ÛÝÝ˜\
+
+NÂˆ]ØZ][œÝ\™P[˜[]XÜÑ[[Ð›ÛÝÝ˜\
+
+NÂˆ]ØZ][œÝ\™Qš[˜[˜ÙQ[]S[šÜÐ›ÛÝÝ˜\
+
+NÂˆBˆ]ØZ][œÝ\™SÜ\˜][™Ò[YÜ˜][ÛØ][ÙÔÝ]J
+NÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ[œÝ\™SÜ\˜][™Ò[YÜ˜][ÛØ][ÙÔÝ]J
+HÂˆ]ØZ][œÝ\™SÜ\˜][™Ò[YÜ˜][ÛØ][ÙÊ
+NÂŸB‚‹ËÈŽWÑ’SSÑWÓÔTUSÓ—ÐSÐÐUSÓ‚˜\Þ[˜È[˜Ý[Ûˆ[œÝ\™Qš[˜[˜ÙSÜ\˜][Û[ØØ][ÛÛÛ[[œÊ
+HÂˆÛÛœÝ[™›ÈH]ØZ][‹‘‹œ™\\™J”QÓPHX›WÚ[™›Êš[˜[˜ÚX[ÛÜ\˜][ÛœÊHŠK˜[È˜[YNˆÝš[™ÈOŠ
+NÂˆÛÛœÝ^\Ý[™ÈH™]ÈÙ]
+
+[™›Ëœ™\Ý[ÈÏÈ×JK›X\
+
+›ÝÊHOˆ›ÝË›˜[YJJNÂˆÛÛœÝY][ÛœÈHÂˆÈ˜Ø\Ú›Ý×Ø\XÛH‹•V“Õ•SQUS	ÉÈ—KˆÈœ›Ø\XÛH‹•V“Õ•SQUS	ÉÈ—KˆÈ˜XØÜX[Ü\š[Ù‹•V“Õ•SQUS	ÉÈ—KˆÈ˜ÛÝ[\œ\WÛX™[‹•V“Õ•SQUS	ÉÈ—KˆÈ›X[˜YÙ[Y[Ü\œÜÙH‹•V“Õ•SQUS	ÉÈ—KˆH\ÈÛÛœÝÂˆ›Üˆ
+ÛÛœÝÛ˜[YKHÙˆY][ÛœÊHÂˆYˆ
+Y^\Ý[™Ëš\Ê˜[YJJH]ØZ][‹‘‹œ™\\™JSTˆP“Hš[˜[˜ÚX[ÛÜ\˜][ÛœÈQÓÓSSˆ	Û˜[Y_H	ÙX
+Kœ[Š
+NÂˆBˆ]ØZ][‹‘‹œ™\\™JTUHš[˜[˜ÚX[ÛÜ\˜][ÛœÂˆÑUØ\Ú›Ý×Ø\XÛOXØ]YÛÜžBˆÒT‘HØ\Ú›Ý×Ø\XÛOIÉÈS‘Ø]YÛÜžO‰ÉÈS‘Ø]YÛÜžO‰ô't-H4.´.ô,4`t`t.4a4.4a´.4`4/´,´,4/t/‰Ø
+Kœ[Š
+NÂŸB‚˜\Þ[˜È[˜Ý[ÛˆZYÜ˜]SYØXÞP[˜P˜[šÒ[YÜ˜][ÛŠ
+HÂˆÛÛœÝX\šÙ\ˆH]ØZ][‹‘‹œ™\\™Jˆ”ÑSPÕÝ]WÝ˜[YH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OIÛYØXÞWØ[˜WØ˜[š×ÛZYÜ˜][Û‰È‹ˆ
+K™š\œÝÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+X\šÙ\ËœÝ]WÝ˜[YHOOHQÐPÖWÐSWÐS’×ÓRQÔUSÓ—Õ‘T”ÒSÓŠHÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J‘SUH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OIÚ[YÜ˜][Û—ÜÙ]\’S•UPSPS’ÉÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^HRÑH	Ú[YÜ˜][Û—ØÜ™Y[X[ŒŽ’S•UPSPS’Î‰IÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH\ÚÜÈÒT‘HÛÝ\˜ÙWÝ\OIô&´/´/ta4.ô.4.´`ˆ4.4/t`´-t,ô`4,4a´.4.	ÈS‘ÛÝ\˜ÙWÚYSˆ
+ÑSPÕY”“ÓH[YÜ˜][Û—ØÛÛ™›XÝÈÒT‘HÛÛ›™XÝ[Û—ÚYIÒS•UPSPS’ÉÊHŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[YÜ˜][Û—ÛÙ×Ù[šY\ÈÒT‘HÛÛ›™XÝ[Û—ÚYIÒS•UPSPS’ÉÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[YÜ˜][Û—ØÛÛ™›XÝÈÒT‘HÛÛ›™XÝ[Û—ÚYIÒS•UPSPS’ÉÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[YÜ˜][Û—ÜÞ[˜×Ü[œÈÒT‘HÛÛ›™XÝ[Û—ÚYIÒS•UPSPS’ÉÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÒT‘HYIÒS•UPSPS’ÉÈŠKˆ[‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+	ÛYØXÞWØ[˜WØ˜[š×ÛZYÜ˜][Û‰ËËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+QÐPÖWÐSWÐS’×ÓRQÔUSÓ—Õ‘T”ÒSÓŠKˆJNÂˆBŸB‚˜\Þ[˜È[˜Ý[Ûˆ›Ü›X[^™R[X[”™XYX›Q[[Ô™XÛÜ™Ê
+HÂˆÛÛœÝX\šÙ\ˆH]ØZ][‹‘‹œ™\\™Jˆ”ÑSPÕÝ]WÝ˜[YH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^HH	Ú[X[—Ü™XYX›WÜ™XÛÜ™ÉÈ‹ˆ
+K™š\œÝÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+X\šÙ\ËœÝ]WÝ˜[YHOOHSPS—Ô‘PQP“WÔ‘PÓÔ‘×Õ‘T”ÒSÓŠH™]\›ŽÂ‚ˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J•TUHXØÛÝ[[™×ÙØÝ[Y[ÈÑU[X™\IÌÌIÈÒT‘HYIÐPÐËRS•‹ULÌIÈS‘ÛÝ\˜ÙWÝ\OIÔÖS•UP×ÐPÐÓÕS•S‘×ÕTÕ	ÈŠKˆ[‹‘‹œ™\\™J•TUHXØÛÝ[[™×ÙØÝ[Y[ÈÑU[X™\IÌ	ÈÒT‘HYIÐPÐËUTUL	ÈS‘ÛÝ\˜ÙWÝ\OIÔÖS•UP×ÐPÐÓÕS•S‘×ÕTÕ	ÈŠKˆ[‹‘‹œ™\\™J•TUHXØÛÝ[[™×ÙØÝ[Y[ÈÑU[X™\IÌŒIÈÒT‘HYIÐPÐËT‘PÑRTUQ“ÓÑ	ÈS‘ÛÝ\˜ÙWÝ\OIÔÖS•UP×ÐPÐÓÕS•S‘×ÕTÕ	ÈŠKˆ[‹‘‹œ™\\™J•TUHYXØ][Û—Ü›ÙÜ™\ÜÈÑU\š[ÙIÌÈ4.´,´,4`4`´,4.ÈŒ‰Ë]šY[˜ÙOIô'ô/´`t-tbt,4-t/4/´`t`´c4.4/ô`4/´,´-t`4/´aô/t,4cÈ4`4,4,t/´`´,8¡%Œ	ÈÒT‘HYSˆ
+	Ô“ÑËULM	Ë	Ô“ÑËULMIÊHŠKˆ[‹‘‹œ™\\™J•TUH[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈÑU›Ü›][OIô'ô/´`t`´`ô/ô.ô-t/t.4cÈ4-ô,4/4-t`tcôaˆ4/4.4/t`ô`H4`t/ô.4`t,4/t.4cÉËÛÝ\˜ÙWÜ]X[]OIô)4,4.´`ˆ4.4`tat/´-4/t/´.H4`´,4,t.ô.4a´bÈ4.4/´`´-4-t.ôc4/t/ˆ4/ô/´/4-taô-t/t/tbô-H4`´-t`t`´/´,´bô-H4-ô,4/ô.4`t.	ÈÒT‘HYIÓQUUPÐTÒ	ÈŠKˆ[‹‘‹œ™\\™J•TUH[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈÑU›Ü›][OIô't,4aô,4.ôc4/tbô.H4/´`t`´,4`´/´.ˆ4/ô.ôc´`H4/ô/´`t`´`ô/ô.ô-t/t.4cÈ4.4/4.4/t`ô`H4`t/ô.4`t,4/t.4cÈ4`H4`ôaôdt`´/´/4,´-t`4/´cô`´/t/´`t`´.	ÈÒT‘HYIÓQUUPÐTÒQÐT	ÈŠKˆ[‹‘‹œ™\\™J•TUH[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈÑU›Ü›][OIô(t`ô/4/4,4/ô/´-4`´,´-t`4-´-4dt/t/tbôaH4/´/ô.ô,4`ˆ4`t-t/4c4.	ÈÒT‘HYIÓQUUS‰ÈŠKˆ[‹‘‹œ™\\™J•TUH[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈÑUYš[š][ÛIô)ô.4`t.ô/ˆ4,4.´`´.4,´/tbôaH4`t-t/4-t.H4`H4,´bô`t/´.´.4/4`4.4`t.´/´/	Ë›Ü›][OIô)ô.4`t.ô/ˆ4,4.´`´.4,´/tbôaH4`t-t/4-t.H4`H4,´bô`t/´.´.4/4`4.4`t.´/´/	ÈÒT‘HYIÓQUUPÒT“‰ÈŠKˆ[‹‘‹œ™\\™J•TUH[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈÑU›Ü›][OIô(t`4-t-4/t-t-H4-ô/t,4aô-t/t.4-H4/ô`4/´,ô`4-t`t`t,	Ëœ™\Ú™\ÜÏIÌÈ4.´,´,4`4`´,4.ÈŒ‰ÈÒT‘HYIÓQUUQQIÈŠKˆ[‹‘‹œ™\\™J•TUH[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈÑU›Ü›][OIô)ô.4`t.ô/ˆ4`4,4,t/´`´,4c´bt.4aH4`t/´`´`4`ô-4/t.4.´/´,‰ÈÒT‘HYIÓQUUTÕQ‘‰ÈŠKˆ[‹‘‹œ™\\™J•TUH[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈÑU›Ü›][OIô)ô.4`t.ô/ˆ4/t-t-ô,4.´`4bô`´bôaH4/t-t.4`t/ô`4,4,´/t/´`t`´-t.IÈÒT‘HYIÓQUUTÐQ‘UIÈŠKˆ[‹‘‹œ™\\™J•TUH[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈÑU›Ü›][OIô%4/´.ôcÈ4/ô`4.4,tbô.ô.4/ô/´`t.ô-H4`t`´/´.4/4/´`t`´.4/ô`4/´-4`ô.´`´/´,ˆ4.4`t/4-t/IÈÒT‘HYIÓQUUQ“ÓÑ	ÈŠKˆ[‹‘‹œ™\\™J•TUH[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈÑU›Ü›][OIô)ô.4`t.ô/ˆ4/ô`4/´-t.´`´/´,ˆ4/ô/´-4`4.4`t.´/´/	ÈÒT‘HYIÓQUUT“Ò‘PÕ	ÈŠKˆ[‹‘‹œ™\\™J•TUH[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈÑU›Ü›][OIô)ô.4`t.ô/ˆ4/´`´.´`4bô`´bôaH4`4,4`tat/´-´-4-t/t.4.H4,ˆ4a4.4/t,4/t`t,4aH4.4.4/t`´-t,ô`4,4a´.4côaIÈÒT‘HYIÓQUUQIÈŠKˆ[‹‘‹œ™\\™J•TUHZWÜ›ØÙ\Ü×ØÛÛ˜XÝÈÑU™\œÚ[ÛIô'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/	ÈÒT‘HYRÑH	ÐRKPÓÓ•PÕIIÈŠKˆ[‹‘‹œ™\\™J•TUHZWÛ[Ù[Ü[œÈÑU[Ù[Ý™\œÚ[ÛIô'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/	Ë[œ]ÜÛ˜\ÚÝÜ™YIô&´/´/t`´`4/´.ôc4/tbô.H4`t/t.4/4/´.ˆ4,4/t,4.ô.4`´.4.´.	ÈÒT‘HYRÑH	ÐRKT•S‹UIIÈŠKˆ[‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+	Ú[X[—Ü™XYX›WÜ™XÛÜ™ÉËËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+SPS—Ô‘PQP“WÔ‘PÓÔ‘×Õ‘T”ÒSÓŠKˆJNÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ›Ü›X[^™SX[X[[]T›Ý™[˜[˜ÙJ
+HÂˆÛÛœÝX\šÙ\ˆH]ØZ][‹‘‹œ™\\™Jˆ”ÑSPÕÝ]WÝ˜[YH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OIÛX[X[Ù[]WÜ›Ý™[˜[˜ÙIÈ‚ˆ
+K™š\œÝÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+X\šÙ\ËœÝ]WÝ˜[YHOOHPS•PSÑS•UWÔ“Õ‘SSÑWÕ‘T”ÒSÓŠH™]\›ŽÂ‚ˆ\HX[X[[]T›ÝÈHÂˆYˆÝš[™ÎÂˆ[]U\NˆÝš[™ÎÂˆ\Ü^S˜[YNˆÝš[™ÎÂˆÛÝ\˜ÙTÞ\Ý[NˆÝš[™ÎÂˆ]T]X[]NˆÝš[™ÎÂˆÝ]\ÎˆÝš[™ÎÂˆ”Ý]\ÎˆÝš[™È[ÂˆNÂˆ\HY[]T›ÝÈHÈ[]U\NˆÝš[™ÎÈ\Ü^S˜[YNˆÝš[™ÈNÂˆÛÛœÝÛX[X[™\Ý[Y[]T™\Ý[HH]ØZ]›ÛZ\ÙK˜[
+Âˆ[‹‘‹œ™\\™JÑSPÕ[]KšYTÈY[]K™[]WÝ\HTÈ[]U\K[]K™\Ü^WÛ˜[YHTÈ\Ü^S˜[YKˆ[]KœÛÝ\˜ÙWÜÞ\Ý[HTÈÛÝ\˜ÙTÞ\Ý[K[]K™]WÜ]X[]HTÈ]T]X[]K[]KœÝ]\ÈTÈÝ]\Ë[\ÞYYKœÝ]\ÈTÈ”Ý]\Âˆ”“ÓH[]Y\ÈTÈ[]HQ•“ÒSˆ—Ù[\ÞYY\ÈTÈ[\ÞYYHÓˆ[\ÞYYKšYY[]KšYˆÒT‘H
+\\Š[]KœÛÝ\˜ÙWÜÞ\Ý[JOIÓPS•PS	ÈÔˆ\\Š[]KœÛÝ\˜ÙWÜÞ\Ý[JHÓÐˆ	ÓPS•PSÊ‰ÊBˆS‘[]KœÝ]\Èˆ	ô'´,tb´-t-4.4/t-t/t,	Ø
+K˜[X[X[[]T›ÝÏŠ
+Kˆ[‹‘‹œ™\\™JÑSPÕ[]WÝ\HTÈ[]U\K\Ü^WÛ˜[YHTÈ\Ü^S˜[YBˆ”“ÓH[]Y\ÈÒT‘HÝ]\Èˆ	ô'´,tb´-t-4.4/t-t/t,	Ø
+K˜[Y[]T›ÝÏŠ
+KˆJNÂˆÛÛœÝ\XØ]PÛÝ[ÈH™]ÈX\Ýš[™Ë[X™\Š
+NÂˆ›Üˆ
+ÛÛœÝ›ÝÈÙˆY[]T™\Ý[œ™\Ý[ÈÏÈ×JHÂˆÛÛœÝÙ^HH[]Q\XØ]RÙ^J›ÝÊNÂˆ\XØ]PÛÝ[ËœÙ]
+Ù^K
+\XØ]PÛÝ[Ë™Ù]
+Ù^JHÏÈ
+H
+ÈJNÂˆBˆÛÛœÝ[YÚX›HH
+X[X[™\Ý[œ™\Ý[ÈÏÈ×JK™›]X\
+
+›ÝÊHOˆÂˆÛÛœÝ›Ü›X[^™YHX[X[[]S›Ü›X[^˜][ÛŠˆ›ÝËˆ
+\XØ]PÛÝ[Ë™Ù]
+[]Q\XØ]RÙ^J›ÝÊJHÏÈ
+HˆKˆ›ÝËš”Ý]\Ëˆ
+NÂˆ™]\›ˆ›Ü›X[^™YÈÞÈ›ÝË›Ü›X[^™YWHˆ×NÂˆJNÂˆ›Üˆ
+]Ù™œÙ]HÈÙ™œÙ][YÚX›K›[™ÝÈÙ™œÙ]
+ÏH
+HÂˆÛÛœÝÝ][Y[ÈH[YÚX›KœÛXÙJÙ™œÙ]Ù™œÙ]
+È
+K™›]X\
+
+È›ÝË›Ü›X[^™YJHOˆÂˆÛÛœÝ^[ØYH”ÓÓ‹œÝš[™ÚYžJÂˆœ›ÛNˆ›ÝË™]T]X[]KˆÎˆ›Ü›X[^™Y™]T]X[]Kˆ›Ý™[˜[˜ÙNˆ´(t/´-ô-4,4/t/ˆ4,´`4`ôaô/t`ôcˆ‹ˆÝ]\Ñœ›ÛNˆ›ÝËœÝ]\ËˆÝ]\ÕÎˆ›Ü›X[^™YœÝ]\Ëˆ™X\ÛÛŽˆ›X[X[\ÛÝ\˜ÙK]Ú]Ý]Y\XØ]H‹ˆJNÂˆ™]\›ˆÂˆ[‹‘‹œ™\\™JS”ÑT•S•È]Y]Ù]™[È
+XÝÜ‹XÝ[Û‹[]WÝ\K[]WÚY^[ØY
+BˆÑSPÕ	ÜÞ\Ý[K[ZYÜ˜][Û‰Ë	Ù[]Kœ›Ý™[˜[˜ÙWÛ›Ü›X[^™Y	Ë	Ù[]IËYÂˆ”“ÓH[]Y\ÈÒT‘HYOÈS‘]WÜ]X[]OOÈS‘Ý]\ÏOØ
+K˜š[™
+^[ØY›ÝËšY›ÝË™]T]X[]K›ÝËœÝ]\ÊKˆ[‹‘‹œ™\\™JTUH[]Y\ÈÑU]WÜ]X[]OOËÝ]\ÏOË\]YØ]PÕT”‘S•ÕSQTÕSTˆÒT‘HYOÈS‘]WÜ]X[]OOÈS‘Ý]\ÏOØ
+K˜š[™
+›Ü›X[^™Y™]T]X[]K›Ü›X[^™YœÝ]\Ë›ÝËšY›ÝË™]T]X[]K›ÝËœÝ]\ÊKˆNÂˆJNÂˆ]ØZ][‹‘‹˜˜]Ú
+Ý][Y[ÊNÂˆBˆ]ØZ][‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+	ÛX[X[Ù[]WÜ›Ý™[˜[˜ÙIËËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+PS•PSÑS•UWÔ“Õ‘SSÑWÕ‘T”ÒSÓŠBˆœ[Š
+NÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ[œÝ\™T^[Y[\š]™YÛÝ[\œ\Y\Ê
+HÂˆYˆ
+]ØZ]Ù]Þ\Ý[Q]S[ÙJ
+HOOH™[\HŠH™]\›ŽÂˆ]ØZ][‹‘‹œ™\\™JS”ÑT•S•È[]Y\Âˆ
+Y[]WÝ\K\Ü^WÛ˜[YKÝ]\ËÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÜ™XÛÜ™ÚY]WÜ]X[]KØÛÜKY]Y]KÜ™X]YØžK\]YØ]
+BˆSQTÈ
+	ÔÕTULIË	ô&´/´/t`´`4,4,ô-t/t`‰Ë	ô&´/´/t`´`4,4,ô-t/t`ˆLH0­È4/ô`4/´-4`ô.´`´bÉË	ô$4.´`´.4,´/t,	Ë	ÖÖÓPTÒÑQ	Ë	ÓÑËPÕ‹UQ“ÓÑ	Ë	ô'ô`4/´-t.´a´.4cÉË	ô)4.4/t,4/t`tbÉË	ÞßIË	ÜÞ\Ý[KYš[˜[˜ÙK\ÛÝ\˜ÙIËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Y
+HÈTUHÑU[]WÝ\OIô&´/´/t`´`4,4,ô-t/t`‰Ë\Ü^WÛ˜[YOIô&´/´/t`´`4,4,ô-t/t`ˆLH0­È4/ô`4/´-4`ô.´`´bÉËÛÝ\˜ÙWÜÞ\Ý[OIÖÖÓPTÒÑQ	ËÛÝ\˜ÙWÜ™XÛÜ™ÚYIÓÑËPÕ‹UQ“ÓÑ	Ë]WÜ]X[]OIô'ô`4/´-t.´a´.4cÉËØÛÜOIô)4.4/t,4/t`tbÉË\]YØ]PÕT”‘S•ÕSQTÕSTˆÒT‘H[]Y\Ë˜Ü™X]YØžHRÑH	ÜÞ\Ý[KIIØ
+Kœ[Š
+NÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ[œÝ\™TÛÝ\˜ÙSÛ›PÛX[\
+
+HÂˆÛÛœÝX\šÙ\ˆH]ØZ][‹‘‹œ™\\™Jˆ”ÑSPÕÝ]WÝ˜[YH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OIÜÞ\Ý[WÙ[[×Ü\™ÙIÈ‚ˆ
+K™š\œÝÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+X\šÙ\ËœÝ]WÝ˜[YHOOHÖTÕSWÑSS×ÔT‘ÑWÕ‘T”ÒSÓŠH™]\›ŽÂˆ]ØZ]™[[Ý™TÞ\Ý[Q[[Ñ]JœÞ\Ý[K[ZYÜ˜][ÛˆŠNÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ[œÝ\™Qš[˜[˜ÙQ[]S[šÜÐ›ÛÝÝ˜\
+
+HÂˆYˆ
+]ØZ]Ù]Þ\Ý[Q]S[ÙJ
+HOOH™[\HŠH™]\›ŽÂˆÛÛœÝX\šÙ\ˆH]ØZ][‹‘‹œ™\\™Jˆ”ÑSPÕÝ]WÝ˜[YH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^HH	Ùš[˜[˜ÙWÙ[]WÛ[šÜ×Ø›ÛÝÝ˜\	È‚ˆ
+K™š\œÝÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+X\šÙ\ËœÝ]WÝ˜[YHOOH’SSÑWÑS•UWÓS’Ô×Ð“ÓÕÕTÕ‘T”ÒSÓŠH™]\›ŽÂ‚ˆ]ØZ][‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•È[]WÛ[šÜÂˆ
+œ›ÛWÙ[]WÚY×Ù[]WÚY™[][Û—Ý\KÜ™X]YØžJBˆÑSPÕ	ÑSKQÔ“ÕTU	Ë	ÑSKULM	Ë	ô(´-t`t`´/´,´bô.H4/ô`4.4/4-t`4`t-t/4c4.0­È4/t-H4-4-t`´,4.ô.4-ô,4a´.4cÈÖ	Ë	ÜÞ\Ý[K\ÙYY	ÂˆÒT‘HVTÕÈ
+ÑSPÕH”“ÓH[]Y\ÈÒT‘HYH	ÑSKQÔ“ÕTU	ÊBˆS‘VTÕÈ
+ÑSPÕH”“ÓH[]Y\ÈÒT‘HYH	ÑSKULM	ÊX
+Bˆœ[Š
+NÂ‚ˆ]ØZ][‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+	Ùš[˜[˜ÙWÙ[]WÛ[šÜ×Ø›ÛÝÝ˜\	ËËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+’SSÑWÑS•UWÓS’Ô×Ð“ÓÕÕTÕ‘T”ÒSÓŠBˆœ[Š
+NÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ[š]X[^™PÛÜ™UX›\Ê
+HÂˆYˆ
+Y[‹‘ŠHÂˆ›ÝÈ™]È\œ›ÜŠÛÝY›\™HHš[™[™È˜\È[˜]˜Z[X›KˆŠNÂˆB‚ˆÛÛœÝØÚ[XTÝ][Y[ÈHÂˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÜ™Ø[š^˜][Û—Øœ˜[˜Ú\È
+ˆYV’SPT–HÑVH“Õ•Sˆ˜[YHV“Õ•SˆÚ[™V“Õ•SQUS	ô)4.4.ô.4,4.ÉËˆÝ]\ÈV“Õ•SQUS	ô$4.´`´.4,´-t/IËˆÛÜÛÜ™\ˆS•QÑTˆ“Õ•SQUSˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\Ý\Ù\œÈ
+ˆYV’SPT–HÑVH“Õ•SˆÛÛXÝÝ\HV“Õ•SˆÛÛXÝV“Õ•Sˆ\Ü^WÛ˜[YHV“Õ•Sˆ›ÛHV“Õ•Sˆ›Ø—Ý]HV“Õ•SQUS	ÉËˆ[ÝÙYÛ[Ù[\ÈV“Õ•SQUS	ÉËˆ˜]›Üš]WÛ[Ù[\ÈV“Õ•SQUS	ÉËˆ\×ØYZ[š\Ý˜]]™HS•QÑTˆ“Õ•SQUSˆÝ]\ÈV“Õ•SQUS	ô'ô`4.4,ô.ô,4b4dt/IËˆ[š]][Û—ÜÝ]\ÈV“Õ•SQUS	ô'´-´.4-4,4-t`ˆ4,4.´`´.4,´,4a´.4.	ËˆXØÙ\Ü×Ý™\œÚ[ÛˆS•QÑTˆ“Õ•SQUSKˆ[š]YØžHV“Õ•Sˆ[š]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆXÝ]˜]YØ]V“Õ•SQUS	ÉËˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\ÜÞ\Ý[\È
+ˆYV’SPT–HÑVH“Õ•SˆÞ\Ý[WÚÙ^HV“Õ•Sˆ˜[YHV“Õ•Sˆ\ØÜš\[ÛˆV“Õ•SQUS	ÉËˆÝ]\ÈV“Õ•SQUS	ô$4.´`´.4,´/t,	ËˆÛÜÛÜ™\ˆS•QÑTˆ“Õ•SQUSˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\Ù\—ÜÞ\Ý[WØXØÙ\ÜÈ
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•Sˆ\Ù\—ÚYV“Õ•SˆÞ\Ý[WÚYV“Õ•Sˆ›ÛHV“Õ•SˆÝ]\ÈV“Õ•SQUS	ô$4.´`´.4,´-t/IËˆXØÙ\Ü×Ý™\œÚ[ÛˆS•QÑTˆ“Õ•SQUSKˆ\ÝÜÞ[˜×ÜÝ]\ÈV“Õ•SQUS	ô't-H4`´`4-t,t`ô-t`´`tcÉËˆ\ÝÜÞ[˜ÙYØ]V“Õ•SQUS	ÉËˆÜ˜[YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈXØÙ\Ü×ÜÞ[˜×Ù]™[È
+ˆYV’SPT–HÑVH“Õ•Sˆ]™[Ý\HV“Õ•Sˆ\Ù\—ÚYV“Õ•SˆÞ\Ý[WÚYV“Õ•Sˆ^[ØYV“Õ•SˆÝ]\ÈV“Õ•SQUS	ô'´-´.4-4,4-t`ˆ4`t.4/tat`4/´/t.4-ô,4a´.4.	Ëˆ][\ÈS•QÑTˆ“Õ•SQUSˆ\ÝÙ\œ›ÜˆV“Õ•SQUS	ÉËˆ™\Ý[V“Õ•SQUS	ÞßIËˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ˜[Z[WÜÞ\Ý[WØXØÙ\ÜÈ
+ˆYV’SPT–HÑVH“Õ•Sˆ˜[Z[WÙ[]WÚYV“Õ•Sˆš[˜Ú\[Ù[]WÚYV“Õ•Sˆš[˜Ú\[Ý\HV“Õ•SˆÞ\Ý[WÚYV“Õ•Sˆ›ÛHV“Õ•SˆÙÚ[—Ý\HV“Õ•SˆÙÚ[ˆV“Õ•Sˆ[]™\žWØÚ[›™[V“Õ•Sˆ[]™\žWÜÝ]\ÈV“Õ•SQUS	ô'´-´.4-4,4-t`ˆ4/´`´/ô`4,4,´.´.	ËˆÝ]\ÈV“Õ•SQUS	ô$4.´`´.4,´-t/IËˆXØÙ\Ü×Ý™\œÚ[ÛˆS•QÑTˆ“Õ•SQUSKˆ\ÝÜÞ[˜×ÜÝ]\ÈV“Õ•SQUS	ô'´-´.4-4,4-t`ˆ4`t.4/tat`4/´/t.4-ô,4a´.4.	Ëˆ\ÝÜÞ[˜ÙYØ]V“Õ•SQUS	ÉËˆÜ˜[YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\Ù\—Øœ˜[˜ÚØXØÙ\ÜÈ
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•Sˆ\Ù\—ÚYV“Õ•Sˆœ˜[˜ÚÚYV“Õ•SˆXØÙ\Ü×Û]™[V“Õ•SQUS	ô(4,4,t/´`´,	ËˆÜ˜[YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈX[X[Ü™XÛÜ™È
+ˆYV’SPT–HÑVH“Õ•Sˆœ˜[˜ÚÚYV“Õ•Sˆ™XÛÜ™Ý\HV“Õ•Sˆ]HV“Õ•Sˆ\š[ÙV“Õ•SQUS	ÉËˆ[[Ý[ÛZ[›ÜˆS•QÑTˆ“Õ•SQUSˆ]Z[ÈV“Õ•SQUS	ÞßIËˆÝ]\ÈV“Õ•SQUS	ô)ô-t`4/t/´,´.4.‰ËˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\ÚÜÈ
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•Sˆ]HV“Õ•SˆÝÛ™\ˆV“Õ•SˆYWÙ]HV“Õ•SQUS	ÉËˆš[Üš]HV“Õ•SQUS	ô(t`4-t-4/t.4.IËˆÝ]\ÈV“Õ•SQUS	ô$´at/´-4côbt.4-IËˆÛÝ\˜ÙWÝ\HV“Õ•SQUS	ô(4`ôaô/t,4cÈ4-ô,4-4,4aô,	ËˆÛÝ\˜ÙWÚYV“Õ•SQUS	ÓPS•PS	Ëˆ\ØÜš\[ÛˆV“Õ•SQUS	ÉËˆ\ÜÚYÛ™YWÙ[]WÚYV“Õ•SQUS	ÉËˆ\™[Ý\Ú×ÚYS•QÑT‹ˆÚ[™V“Õ•SQUS	ô%ô,4-4,4aô,	Ëˆ™XÝ\œ™[˜ÙWÜ[HV“Õ•SQUS	ÉËˆ]]ÛX][Û—ÚÙ^HVˆ™\]Z\™\×Ø\›Ý˜[S•QÑTˆ“Õ•SQUSˆ™\Ý[V“Õ•SQUS	ÉËˆ™\Ý[Ù]šY[˜ÙHV“Õ•SQUS	ÉËˆÛÛ\]YØ]V“Õ•SQUS	ÉËˆÜ™X]YØžWÝ\Ù\—ÚYV“Õ•SQUS	ÉËˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈXØÙ\[˜ÙWÙXÚ\Ú[ÛœÈ
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•SˆÝYÙHV“Õ•Sˆ™\™XÝV“Õ•SˆÛÛ[Y[V“Õ•SQUS	ÉËˆXÝÜˆV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ]Y]Ù]™[È
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•SˆXÝÜˆV“Õ•SˆXÝ[ÛˆV“Õ•Sˆ[]WÝ\HV“Õ•Sˆ[]WÚYV“Õ•Sˆ^[ØYV“Õ•SQUS	ÞßIËˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ[]Y\È
+ˆYV’SPT–HÑVH“Õ•Sˆ[]WÝ\HV“Õ•Sˆ\Ü^WÛ˜[YHV“Õ•SˆÝ]\ÈV“Õ•SQUS	ô$4.´`´.4,´/t,	ËˆÛÝ\˜ÙWÜÞ\Ý[HV“Õ•SˆÛÝ\˜ÙWÜ™XÛÜ™ÚYV“Õ•Sˆ]WÜ]X[]HV“Õ•SQUS	ô(´-t`t`´/´,´bô-H4-4,4/t/tbô-IËˆØÛÜHV“Õ•SˆY]Y]HV“Õ•SQUS	ÞßIËˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ[]WÛ[šÜÈ
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•Sˆœ›ÛWÙ[]WÚYV“Õ•Sˆ×Ù[]WÚYV“Õ•Sˆ™[][Û—Ý\HV“Õ•SˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ[]WÙØÝ[Y[È
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•Sˆ[]WÚYV“Õ•Sˆ]HV“Õ•SˆØÝ[Y[Ý\HV“Õ•SˆÝ]\ÈV“Õ•SQUS	ô$4.´`´`ô,4.ô-t/IËˆ˜[YÝ[[V“Õ•SQUS	ÉËˆÛÝ\˜ÙHV“Õ•SQUS	ÓPS•PS	ËˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ[]WÛY\™Ù\È
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•SˆÝ\š]›Ü—ÚYV“Õ•Sˆ\XØ]WÚYV“Õ•Sˆ™X\ÛÛˆV“Õ•SˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\Ú×ÝØ]Ú\œÈ
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•Sˆ\Ú×ÚYS•QÑTˆ“Õ•Sˆ[]WÚYV“Õ•SˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\Ú×ØÚXÚÛ\Ý
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•Sˆ\Ú×ÚYS•QÑTˆ“Õ•Sˆ]HV“Õ•Sˆ\×ÙÛ™HS•QÑTˆ“Õ•SQUSˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\Ú×ØÛÛ[Y[È
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•Sˆ\Ú×ÚYS•QÑTˆ“Õ•Sˆ›ÙHV“Õ•SˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\Ú×Ø\›Ý˜[È
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•Sˆ\Ú×ÚYS•QÑTˆ“Õ•SˆÝ\Û˜[YHV“Õ•SˆÝ]\ÈV“Õ•SQUS	ô'´-´.4-4,4-t`‰ËˆXÚYYØžHV“Õ•SQUS	ÉËˆÛÛ[Y[V“Õ•SQUS	ÉËˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÛÜšÙ›Ý×ÙØÝ[Y[È
+ˆYV’SPT–HÑVH“Õ•Sˆ]HV“Õ•SˆØÝ[Y[Ý\HV“Õ•SˆÝ\œ™[Ý™\œÚ[ÛˆS•QÑTˆ“Õ•SQUSKˆÝ]\ÈV“Õ•SQUS	ô$4.´`´`ô,4.ô-t/IËˆ˜[YÝ[[V“Õ•SQUS	ÉËˆÝÛ™\—Ù[]WÚYV“Õ•SQUS	ÉËˆÛÝ\˜ÙHV“Õ•SQUS	ÓPS•PS	ËˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØÝ[Y[Ý™\œÚ[ÛœÈ
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•SˆØÝ[Y[ÚYV“Õ•Sˆ™\œÚ[ÛˆS•QÑTˆ“Õ•Sˆ›ÝHV“Õ•SQUS	ÉËˆ™Y™\™[˜ÙHV“Õ•SQUS	ÉËˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\Ú×ÙØÝ[Y[È
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•Sˆ\Ú×ÚYS•QÑTˆ“Õ•SˆØÝ[Y[ÚYV“Õ•SˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØ›YØ][ÛœÈ
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•SˆØÝ[Y[ÚYV“Õ•Sˆ]HV“Õ•SˆYWÙ]HV“Õ•SˆÝÛ™\—Ù[]WÚYV“Õ•SˆÝ]\ÈV“Õ•SQUS	ô'´`´.´`4bô`´/‰ËˆØ\›š[™×Ù^\ÈS•QÑTˆ“Õ•SQUSÌˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ›ÝYšXØ][ÛœÈ
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•Sˆ™XÚ\Y[Ù[]WÚYV“Õ•Sˆ›ÝYšXØ][Û—Ý\HV“Õ•Sˆ]HV“Õ•Sˆ›ÙHV“Õ•SˆÛÝ\˜ÙWÝ\HV“Õ•SˆÛÝ\˜ÙWÚYV“Õ•SˆÝ]\ÈV“Õ•SQUS	ô't/´,´/´-IËˆY\ÚÙ^HVˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ™XYØ]V“Õ•SQUS	ÉÂˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\ØØ[][ÛœÈ
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•Sˆ\Ú×ÚYS•QÑTˆ“Õ•Sˆ]™[S•QÑTˆ“Õ•SQUSKˆ™X\ÛÛˆV“Õ•SˆÝ]\ÈV“Õ•SQUS	ô'´`´.´`4bô`´,	Ëˆ™XÚ\Y[Ù[]WÚYV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈš[˜[˜ÚX[ÛÜ\˜][ÛœÈ
+ˆYV’SPT–HÑVH“Õ•SˆÜ\˜][Û—Ù]HV“Õ•Sˆ\š[ÙV“Õ•Sˆ\™XÝ[ÛˆV“Õ•Sˆ[[Ý[ÛZ[›ÜˆS•QÑTˆ“Õ•SˆØ]YÛÜžHV“Õ•Sˆ™\ÜØÛ\ÜÈV“Õ•SˆÛÝ[\œ\WÙ[]WÚYV“Õ•SQUS	ÉËˆÛÛ˜XÝÚYV“Õ•SQUS	ÉËˆØÝ[Y[ÚYV“Õ•SQUS	ÉËˆ›Ú™XÝÙ[]WÚYV“Õ•SQUS	ÉËˆYØ[Ù[]WÚYV“Õ•SQUS	ÉËˆØš™XÝÙ[]WÚYV“Õ•SQUS	ÉËˆÙœ—Ù[]WÚYV“Õ•SQUS	ÉËˆ˜[š×ÛÜ\˜][Û—Ü™YˆV“Õ•SQUS	ÉËˆÜ\˜][Û—ÚÚ[™V“Õ•SQUS	ÖÖÐQÑÔ‘QÐUIËˆÛÝ\˜ÙWÜÞ\Ý[HV“Õ•SˆÛÝ\˜ÙWÙš[HV“Õ•SˆÛÝ\˜ÙWÜÚY]V“Õ•SˆÛÝ\˜ÙWÜ™YˆV“Õ•Sˆ]WÜ]X[]HV“Õ•SˆÝ]\ÈV“Õ•SQUS	ô(4,4-ô/t-t`t-t/t/‰ËˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ˜[š×ØXØÛÝ[È
+ˆYV’SPT–HÑVH“Õ•SˆÛÛ›™XÝ[Û—ÚYV“Õ•SˆYØ[Ù[]WÚYV“Õ•Sˆ›ÝšY\—ØXØÛÝ[ÚYV“Õ•SˆX\ÚÙYØXØÛÝ[V“Õ•Sˆ˜[YHV“Õ•SˆÝ\œ™[˜ÞHV“Õ•SˆÝ]\ÈV“Õ•Sˆ˜[[˜ÙWÛZ[›ÜˆS•QÑT‹ˆ˜[[˜ÙWØ\×ÛÙˆV“Õ•SQUS	ÉËˆÞ[˜ÙYØ]V“Õ•Sˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ˜[š×ÜÝ][Y[Ú[\ÜÈ
+ˆYV’SPT–HÑVH“Õ•SˆÛÛ›™XÝ[Û—ÚYV“Õ•SˆYØ[Ù[]WÚYV“Õ•Sˆ›ÝšY\—ÜÝ][Y[ÚYV“Õ•Sˆ›ÝšY\—ØXØÛÝ[ÚYV“Õ•SˆÝ\Ù]HV“Õ•Sˆ[™Ù]HV“Õ•SˆÝ]\ÈV“Õ•SˆÝ\Ø˜[[˜ÙWÛZ[›ÜˆS•QÑTˆ“Õ•Sˆ[™Ø˜[[˜ÙWÛZ[›ÜˆS•QÑTˆ“Õ•SˆÝ\œ™[˜ÞHV“Õ•Sˆ˜[œØXÝ[Û—ØÛÝ[S•QÑTˆ“Õ•Sˆ™]ÚYØ]V“Õ•Sˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ˜[š×Ý˜[œØXÝ[ÛœÈ
+ˆYV’SPT–HÑVH“Õ•SˆÛÛ›™XÝ[Û—ÚYV“Õ•SˆYØ[Ù[]WÚYV“Õ•Sˆ›ÝšY\—ØXØÛÝ[ÚYV“Õ•Sˆ›ÝšY\—ÜÝ][Y[ÚYV“Õ•Sˆ›ÝšY\—Ý˜[œØXÝ[Û—ÚYV“Õ•Sˆ^[Y[ÚYV“Õ•SQUS	ÉËˆÜ\˜][Û—Ù]HV“Õ•Sˆ\™XÝ[ÛˆV“Õ•Sˆ[[Ý[ÛZ[›ÜˆS•QÑTˆ“Õ•SˆÝ\œ™[˜ÞHV“Õ•SˆÝ]\ÈV“Õ•SˆØÝ[Y[Û[X™\ˆV“Õ•SQUS	ÉËˆ˜[œØXÝ[Û—Ý\HV“Õ•SQUS	ÉËˆ\ØÜš\[ÛˆV“Õ•SQUS	ÉËˆÛÝ[\œ\WÛ˜[YHV“Õ•SQUS	ÉËˆÛÝ[\œ\WÚ[›ˆV“Õ•SQUS	ÉËˆÛÝ[\œ\WÚÜV“Õ•SQUS	ÉËˆÛÝ\˜ÙWÜ^[ØYÚ\ÚV“Õ•Sˆš[˜[˜ÚX[ÛÜ\˜][Û—ÚYV“Õ•SQUS	ÉËˆ[\ÜYØ]V“Õ•Sˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈš[˜[˜ÙWØXØÜX[È
+ˆYV’SPT–HÑVH“Õ•Sˆ\š[ÙV“Õ•SˆÛÛÝ\ˆV“Õ•SˆÝXš™XÝÙ[]WÚYV“Õ•Sˆ™XÛÜ™×ØÛÝ[S•QÑTˆ“Õ•SˆXØÜX[ÛZ[›ÜˆS•QÑTˆ“Õ•SˆZYÛZ[›ÜˆS•QÑTˆ“Õ•SˆXÛZ[›ÜˆS•QÑTˆ“Õ•SˆXØØ\Ù\ÈS•QÑTˆ“Õ•SˆÛÝ\˜ÙWÙš[HV“Õ•SˆÛÝ\˜ÙWÜÚY]V“Õ•SˆÛÝ\˜ÙWÜ™YˆV“Õ•Sˆ]WÜ]X[]HV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈš[˜[˜ÙWØYÙ]È
+ˆYV’SPT–HÑVH“Õ•Sˆ\š[ÙV“Õ•Sˆ[™HV“Õ•Sˆ[—ÛZ[›ÜˆS•QÑTˆ“Õ•SˆØÙ[˜\š[ÈV“Õ•Sˆ\ÜÝ[\[ÛˆV“Õ•SˆÛÝ\˜ÙWÝ\HV“Õ•SˆÝÛ™\—Ù[]WÚYV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈš[˜[˜ÙWÙ›Ü™XØ\ÝÚ][\È
+ˆYV’SPT–HÑVH“Õ•Sˆ›Ü™XØ\ÝÙ]HV“Õ•Sˆ\™XÝ[ÛˆV“Õ•Sˆ[[Ý[ÛZ[›ÜˆS•QÑTˆ“Õ•Sˆ›Ø˜Xš[]HS•QÑTˆ“Õ•SˆØ]YÛÜžHV“Õ•SˆÛÝ\˜ÙWÝ\HV“Õ•Sˆ\ÜÝ[\[ÛˆV“Õ•Sˆ[šÙYÙ[]WÚYV“Õ•SQUS	ÉËˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈš[˜[˜ÙWÜ^\›ÛÜÝ[[X\žH
+ˆYV’SPT–HÑVH“Õ•Sˆ\š[ÙV“Õ•Sˆ[[Ý[ÛZ[›ÜˆS•QÑTˆ“Õ•SˆØÛÜHV“Õ•SˆÛÝ\˜ÙWÙš[HV“Õ•SˆÛÝ\˜ÙWÜÚY]V“Õ•SˆÛÝ\˜ÙWÜ™YˆV“Õ•Sˆ]WÜ]X[]HV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈš[˜[˜ÙWØÛÜœ™XÝ[ÛœÈ
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•SˆÜ\˜][Û—ÚYV“Õ•SˆšY[Û˜[YHV“Õ•Sˆ™Y›Ü™WÝ˜[YHV“Õ•SˆY\—Ý˜[YHV“Õ•Sˆ™X\ÛÛˆV“Õ•SˆÝ]\ÈV“Õ•SQUS	ô'ô`4-t-4.ô/´-´-t/t,	ËˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈš[˜[˜ÙWÜ™XÛÛ˜Ú[X][Û—Ú\ÜÝY\È
+ˆYV’SPT–HÑVH“Õ•Sˆ]HV“Õ•SˆÙ]™\š]HV“Õ•SˆÛÝ\˜ÙWØHV“Õ•SˆÛÝ\˜ÙWØˆV“Õ•SˆY™™\™[˜ÙWÛZ[›ÜˆS•QÑTˆ“Õ•SˆÝÛ™\—Ù[]WÚYV“Õ•SˆÝ]\ÈV“Õ•SQUS	ô'´`´.´`4bô`´/‰Ëˆ™[]YÝ\Ú×ÚYS•QÑT‹ˆ™\ÛÛ][ÛˆV“Õ•SQUS	ÉËˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØ[\×ÛXYÈ
+ˆYV’SPT–HÑVH“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆš\œÝØÛXÚ×Ø]V“Õ•SˆÛÝ\˜ÙHV“Õ•Sˆ]WÜÛÝ\˜ÙHV“Õ•SQUS	ÉËˆ]WÛYY][HV“Õ•SQUS	ÉËˆ]WØØ[\ZYÛˆV“Õ•SQUS	ÉËˆ]WØÛÛ[V“Õ•SQUS	ÉËˆØ[\ZYÛ—ÚYV“Õ•SQUS	ÉËˆÜ™X]]™WÚYV“Õ•SQUS	ÉËˆÙ™™\—ÚYV“Õ•SQUS	ÉËˆ›Ü›WÚYV“Õ•SQUS	ÉËˆX[˜YÙ\—Ù[]WÚYV“Õ•SQUS	ÉËˆÝYÙHV“Õ•SQUS	ô%ô,4cô,´.´,	ËˆÝ]\ÈV“Õ•SQUS	ô$4.´`´.4,´-t/IËˆ˜[Z[WÙ[]WÚYV“Õ•SQUS	ÉËˆÚ[Ù[]WÚYV“Õ•SQUS	ÉËˆÛÛ˜XÝÚYV“Õ•SQUS	ÉËˆÙ\šXÙWÙ[]WÚYV“Õ•SQUS	ÉËˆ™Z™XÝ[Û—Ü™X\ÛÛˆV“Õ•SQUS	ÉËˆYÜÈV“Õ•SQUS	Ö×IËˆ]WÜ]X[]HV“Õ•SQUS	ô(t.4/t`´-t`´.4aô-t`t.´.4-H4`´-t`t`´/´,´bô-H4-4,4/t/tbô-IËˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØ[\×ÝÝXÚÚ[È
+ˆYV’SPT–HÑVH“Õ•SˆXYÚYV“Õ•SˆÝXÚÚ[Ý\HV“Õ•SˆØØÝ\œ™YØ]V“Õ•SˆÚ[›™[V“Õ•Sˆ\™XÝ[ÛˆV“Õ•SQUS	ô$´at/´-4côbt.4.IËˆÝ[[X\žHV“Õ•SˆÝ]ÛÛYHV“Õ•SˆÛÝ\˜ÙWÜ™YˆV“Õ•SQUS	ÔÖS•UPÉËˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØ[\×ÜÝYÙWÙ]™[È
+ˆYS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•SˆXYÚYV“Õ•Sˆœ›ÛWÜÝYÙHV“Õ•Sˆ×ÜÝYÙHV“Õ•SˆÝ]ÛÛYHV“Õ•Sˆ™X\ÛÛˆV“Õ•SQUS	ÉËˆXÝÜˆV“Õ•SˆØØÝ\œ™YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÛY[ÛY™XÞXÛ\È
+ˆYV’SPT–HÑVH“Õ•SˆXYÚYV“Õ•Sˆ˜[Z[WÙ[]WÚYV“Õ•SˆÚ[Ù[]WÚYV“Õ•SˆÛÛ˜XÝÚYV“Õ•SˆÙ\šXÙWÙ[]WÚYV“Õ•SˆXØÜX[ÚYV“Õ•Sˆ^[Y[ÛÜ\˜][Û—ÚYV“Õ•SQUS	ÉËˆÙ\šXÙWÜÝ\Ù]HV“Õ•Sˆ[ÛWÝ˜[YWÛZ[›ÜˆS•QÑTˆ“Õ•Sˆ—ÛZ[›ÜˆS•QÑTˆ“Õ•SˆY™][YWÛ[ÛÈS•QÑTˆ“Õ•Sˆ™^Ü^[Y[Ù]HV“Õ•Sˆ™^Ü^[Y[ÛZ[›ÜˆS•QÑTˆ“Õ•SˆÚ\›—Üš\Ú×ÜØÛÜ™HS•QÑTˆ“Õ•SˆÚ\›—Üš\Ú×Ø˜[™V“Õ•SˆÚ\›—Üš\Ú×Ù˜XÝÜœÈV“Õ•SQUS	Ö×IËˆÞX[WÝY\ˆV“Õ•Sˆ™\X]ÛÙ™™\ˆV“Õ•SQUS	ÉËˆÝ]\ÈV“Õ•SQUS	ô$4.´`´.4,´-t/IËˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÛY[ØXØÜX[È
+ˆYV’SPT–HÑVH“Õ•Sˆ˜[Z[WÙ[]WÚYV“Õ•SˆÚ[Ù[]WÚYV“Õ•SˆÛÛ˜XÝÚYV“Õ•SˆÙ\šXÙWÙ[]WÚYV“Õ•Sˆ\š[ÙV“Õ•Sˆ[[Ý[ÛZ[›ÜˆS•QÑTˆ“Õ•SˆYWÙ]HV“Õ•SˆÝ]\ÈV“Õ•Sˆ^[Y[ÛÜ\˜][Û—ÚYV“Õ•SQUS	ÉËˆÛÝ\˜ÙWÝ\HV“Õ•SQUS	ÔÖS•UP×ÕTÕ	ËˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÛY[Ø›Û\Ù\È
+ˆYV’SPT–HÑVH“Õ•Sˆ˜[Z[WÙ[]WÚYV“Õ•Sˆ]™[Ý\HV“Õ•SˆÚ[ÈS•QÑTˆ“Õ•Sˆ™X\ÛÛˆV“Õ•Sˆ™[]YØÛÛ˜XÝÚYV“Õ•SQUS	ÉËˆØØÝ\œ™YØ]V“Õ•SˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈX\šÙ][™×ØXØÛÝ[È
+ˆYV’SPT–HÑVH“Õ•Sˆ]›Ü›HV“Õ•Sˆ\Ü^WÛ˜[YHV“Õ•SˆÝ]\ÈV“Õ•Sˆ]YY[˜ÙWØÛÝ[S•QÑTˆ“Õ•SˆÛÝ\˜ÙWÝ\HV“Õ•SQUS	ÔÖS•UP×ÕTÕ	Ëˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÛÛ[Ü[—Ú][\È
+ˆYV’SPT–HÑVH“Õ•SˆØÚY[YØ]V“Õ•SˆXØÛÝ[ÚYV“Õ•Sˆ]]Ü—Ù[]WÚYV“Õ•Sˆ›Ü›X]V“Õ•SˆÜXÈV“Õ•SˆÙ™™\—ÚYV“Õ•SQUS	ÉËˆØ[\ZYÛ—ÚYV“Õ•SQUS	ÉËˆÝ]\ÈV“Õ•SQUS	ô%ô,4/ô.ô,4/t.4`4/´,´,4/t/‰ËˆœšYYˆV“Õ•SˆÜ™X]YØžHV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÛÛ[ÜX›XØ][ÛœÈ
+ˆYV’SPT–HÑVH“Õ•Sˆ[—Ú][WÚYV“Õ•SˆX›\ÚYØ]V“Õ•SˆX›XØ][Û—Ü™YˆV“Õ•Sˆ™XXÚS•QÑTˆ“Õ•SˆšY]ÜÈS•QÑTˆ“Õ•Sˆ™XXÝ[ÛœÈS•QÑTˆ“Õ•SˆÛXÚÜÈS•QÑTˆ“Õ•SˆXYÈS•QÑTˆ“Õ•SˆÛÛ˜XÝÈS•QÑTˆ“Õ•Sˆ™]™[YWÛZ[›ÜˆS•QÑTˆ“Õ•SˆÛÝ\˜ÙWÝ\HV“Õ•SQUS	ÔÖS•UP×ÕTÕ	Ëˆ]WÜ]X[]HV“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÛÛ[Ø]šX][ÛœÈ
+ˆYV’SPT–HÑVH“Õ•SˆX›XØ][Û—ÚYV“Õ•SˆÛXÚ×ÚYV“Õ•SˆXYÚYV“Õ•SˆÛÛ˜XÝÚYV“Õ•Sˆ^[Y[ÛÜ\˜][Û—ÚYV“Õ•Sˆ™]™[YWÛZ[›ÜˆS•QÑTˆ“Õ•Sˆ]šX][Û—Û[Ù[V“Õ•SˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÛÛ[Ü™XÛÛ[Y[™][ÛœÈ
+ˆYV’SPT–HÑVH“Õ•SˆX›XØ][Û—ÚYV“Õ•SQUS	ÉËˆÚYÛ˜[Ý\HV“Õ•Sˆ]šY[˜ÙHV“Õ•Sˆ™XÛÛ[Y[™][ÛˆV“Õ•SˆÝ]\ÈV“Õ•SQUS	ô't/´,´,4cÉËˆ™[]YÝ\Ú×ÚYS•QÑT‹ˆÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕSTˆ
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYXØ][Û—Ü›ÙÜ˜[\È
+YV’SPT–HÑVH“Õ•S]HV“Õ•S™\œÚ[ÛˆS•QÑTˆ“Õ•SÝ]\ÈV“Õ•S]]Ü—Ù[]WÚYV“Õ•SY]Ù\ÝÙ[]WÚYV“Õ•SØÛÜHV“Õ•SX]\šX[Ü™YˆV“Õ•S^XÝYÜ™\Ý[V“Õ•SÛÝ\˜ÙWÝ\HV“Õ•SÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYXØ][Û—ÙÜ›Ý\È
+YV’SPT–HÑVH“Õ•S˜[YHV“Õ•S[š]Ù[]WÚYV“Õ•S›ÙÜ˜[WÚYV“Õ•SXXÚ\—Ù[]WÚYV“Õ•S›ÛÛHV“Õ•SÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYXØ][Û—ÜÝY[È
+YV’SPT–HÑVH“Õ•SÚ[Ù[]WÚYV“Õ•S˜[Z[WÙ[]WÚYV“Õ•SÜ›Ý\ÚYV“Õ•SØXš[™]ÜÝ]\ÈV“Õ•SÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYXØ][Û—Û\ÜÛÛœÈ
+YV’SPT–HÑVH“Õ•SÜ›Ý\ÚYV“Õ•S›ÙÜ˜[WÚYV“Õ•SØÚY[YØ]V“Õ•SÜXÈV“Õ•SXXÚ\—Ù[]WÚYV“Õ•SÝXœÝ]]WÙ[]WÚYV“Õ•SQUS	ÉË›ÛÛHV“Õ•SÝ]\ÈV“Õ•SÛY]ÛÜšÈV“Õ•SQUS	ÉËÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYXØ][Û—Ø][™[˜ÙH
+YV’SPT–HÑVH“Õ•S\ÜÛÛ—ÚYV“Õ•SÝY[ÚYV“Õ•S][™[˜ÙWÜÝ]\ÈV“Õ•SÜ˜YHV“Õ•SQUS	ÉË™\Ý[V“Õ•SQUS	ÉË™XÛÜ™YØžHV“Õ•S\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYXØ][Û—Ü›ÙÜ™\ÜÈ
+YV’SPT–HÑVH“Õ•SÝY[ÚYV“Õ•S›ÙÜ˜[WÚYV“Õ•S\š[ÙV“Õ•SY]šXÈV“Õ•SØÛÜ™HS•QÑTˆ“Õ•S™[™V“Õ•S]šY[˜ÙHV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYXØ][Û—Ù™YY˜XÚÈ
+YV’SPT–HÑVH“Õ•SÝY[ÚYV“Õ•S˜[Z[WÙ[]WÚYV“Õ•S›ÙÜ˜[WÚYV“Õ•S˜][™ÈS•QÑTˆ“Õ•SÛÛ[Y[V“Õ•S™XÛÛ[Y[™][ÛˆV“Õ•SÝ]\ÈV“Õ•S™[]YÝ\Ú×ÚYS•QÑT‹Ü™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYXØ][Û—ØÛÛ[][šXØ][ÛœÈ
+YV’SPT–HÑVH“Õ•SÛÛ[][šXØ][Û—Ý\HV“Õ•S]YY[˜ÙWÝ\HV“Õ•S]YY[˜ÙWÚYV“Õ•S]HV“Õ•S›ÙHV“Õ•S]™[Ø]V“Õ•SQUS	ÉËÜ™X]YØžHV“Õ•SÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ—Ý˜XØ[˜ÚY\È
+YV’SPT–HÑVH“Õ•S]HV“Õ•S[š]V“Õ•SÜÚ][Û—ÚYV“Õ•SXYÛÝ[S•QÑTˆ“Õ•SÝ]\ÈV“Õ•SÛÝ\˜ÙWÝ\HV“Õ•SÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ—ØØ[™Y]\È
+YV’SPT–HÑVH“Õ•S[]WÚYV“Õ•S˜XØ[˜ÞWÚYV“Õ•SÛÝ\˜ÙHV“Õ•SÝYÙHV“Õ•SØÛÜ™HS•QÑTˆ“Õ•SXÚ\Ú[ÛˆV“Õ•SQUS	ÉË™Z™XÝ[Û—Ü™X\ÛÛˆV“Õ•SQUS	ÉËÙ™™\—ÜÝ]\ÈV“Õ•SQUS	ÉË]šY[˜ÙHV“Õ•SQUS	ÉËÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ—Ú[\šY]ÜÈ
+YV’SPT–HÑVH“Õ•SØ[™Y]WÚYV“Õ•SØÚY[YØ]V“Õ•S[\šY]Ù\—Ù[]WÚYV“Õ•SØÛÜ™HS•QÑTˆ“Õ•SÝ[[X\žHV“Õ•SXÚ\Ú[ÛˆV“Õ•SÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ—Ù[\ÞYY\È
+YV’SPT–HÑVH“Õ•SØ[™Y]WÚYV“Õ•SÛÛ˜XÝÚYV“Õ•SÜÚ][Û—ÚYV“Õ•S[š]V“Õ•S˜]WÛZ[›ÜˆS•QÑTˆ“Õ•S\™WÙ]HV“Õ•SÝ]\ÈV“Õ•S\›Z[˜][Û—Ù]HV“Õ•SQUS	ÉË\›Z[˜][Û—Ü™X\ÛÛˆV“Õ•SQUS	ÉËXØÙ\Ü×ÜÝ]\ÈV“Õ•SÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ—ÛÛ˜›Ø\™[™È
+YV’SPT–HÑVH“Õ•S[\ÞYYWÚYV“Õ•SÝ\V“Õ•SÝ]\ÈV“Õ•SYWÙ]HV“Õ•S]šY[˜ÙHV“Õ•SQUS	ÉË™[]YÝ\Ú×ÚYS•QÑT‹\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ—Ù]™[ÜY[
+YV’SPT–HÑVH“Õ•S[\ÞYYWÚYV“Õ•S]™[Ý\HV“Õ•S]HV“Õ•S]™[Ù]HV“Õ•SØÛÜ™HS•QÑTˆ“Õ•SÝ]\ÈV“Õ•S]šY[˜ÙHV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ—Ü™]Ø\™È
+YV’SPT–HÑVH“Õ•S[\ÞYYWÚYV“Õ•S]™[Ý\HV“Õ•S[[Ý[ÛZ[›ÜˆS•QÑTˆ“Õ•S™X\ÛÛˆV“Õ•S\š[ÙV“Õ•SÝ]\ÈV“Õ•SÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ—ØXØÙ\ÜÙ\È
+YV’SPT–HÑVH“Õ•S[\ÞYYWÚYV“Õ•SÞ\Ý[HV“Õ•S›ÛHV“Õ•SÝ]\ÈV“Õ•SÜ˜[YØ]V“Õ•S™]›ÚÙYØ]V“Õ•SQUS	ÉË™]›ØØ][Û—Ü™X\ÛÛˆV“Õ•SQUS	ÉÊX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYØ[ØÛÛ˜XÝÈ
+YV’SPT–HÑVH“Õ•S™Y™\™[˜ÙWÙØÝ[Y[ÚYV“Õ•SÛÛ˜XÝÝ\HV“Õ•S\WÝ\HV“Õ•S\WÙ[]WÚYV“Õ•S[X™\ˆV“Õ•SÚYÛ™YÜÝ]\ÈV“Õ•S˜[YÙœ›ÛHV“Õ•S˜[YÝ[[V“Õ•S[Z]ÛZ[›ÜˆS•QÑTˆ“Õ•SÜ[ÛZ[›ÜˆS•QÑTˆ“Õ•SÝ]\ÈV“Õ•S[XÝ›ÛšX×ÜÚYÛ˜]\™WÜÝ]\ÈV“Õ•S™\]Z\Ú]WÜÝ]\ÈV“Õ•SÝÛ™\—Ù[]WÚYV“Õ•SÛÜÚ[™×Ü™\]Z\™YS•QÑTˆ“Õ•SQUSÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYØ[ÙØÝ[Y[Ú][\È
+YV’SPT–HÑVH“Õ•SÝX›WÚYV“Õ•SÛÛ˜XÝÚYV“Õ•S][WÝ\HV“Õ•S]HV“Õ•S™\œÚ[ÛˆS•QÑTˆ“Õ•S™\]Z\™YS•QÑTˆ“Õ•SQUSÚYÛ™YÜÝ]\ÈV“Õ•SÝ]\ÈV“Õ•SYWÙ]HV“Õ•SQUS	ÉË™Y™\™[˜ÙHV“Õ•SQUS	ÉËÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYØ[ØÛÛ˜XÝÝ^Ý™\œÚ[ÛœÈ
+YV’SPT–HÑVH“Õ•SÝX›WÚYV“Õ•SÛÛ˜XÝÚYV“Õ•SØÝ[Y[Ú][WÚYV“Õ•S™\œÚ[ÛˆS•QÑTˆ“Õ•S›ÙWÝ^V“Õ•SÛÝ\˜ÙWÛ[ÙHV“Õ•S[Ù[Ý™\œÚ[ÛˆV“Õ•SÛXÞWÝ™\œÚ[ÛˆV“Õ•S›ÝXÝ[Û—ØÛ\ÜÈV“Õ•SÛÛ™š\›YYØžHV“Õ•SÛÛ™š\›YYØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYØ[Ü™\ÜÛœÚXš[]WÞ›Û™\È
+YV’SPT–HÑVH“Õ•SÛÛ˜XÝÚYV“Õ•S›Û™HV“Õ•S™\ÜÛœÚX›WÙ[]WÚYV“Õ•SØÛÜHV“Õ•SÝ]\ÈV“Õ•SÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYØ[ØÚXÚÜÈ
+YV’SPT–HÑVH“Õ•SÛÛ˜XÝÚYV“Õ•SÚYÛ˜[Ý\HV“Õ•SÙ]™\š]HV“Õ•S]šY[˜ÙHV“Õ•S™XÛÛ[Y[™][ÛˆV“Õ•SÝ]\ÈV“Õ•S™[]YÝ\Ú×ÚYS•QÑT‹]XÝYØ]V“Õ•S™\ÛÛ™YØ]V“Õ•SQUS	ÉË™\ÛÛ][ÛˆV“Õ•SQUS	ÉÊX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ›ØÝ\™[Y[ÜÝ\Y\œÈ
+YV’SPT–HÑVH“Õ•S[]WÚYV“Õ•SÜXÚX[^˜][ÛˆV“Õ•SÛÛ˜XÝÚYV“Õ•S˜\ÙWÜšXÙWÛZ[›ÜˆS•QÑTˆ“Õ•S]X[]WÜØÛÜ™HS•QÑTˆ“Õ•S˜][™ÈS•QÑTˆ“Õ•SX\šÙ]Ú[™^S•QÑTˆ“Õ•SÝ]\ÈV“Õ•S]WÜ]X[]HV“Õ•S\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\˜Ú\ÙWÜ™\]Y\ÝÈ
+YV’SPT–HÑVH“Õ•S™\]Y\Ý\—Ù[]WÚYV“Õ•S[š]V“Õ•S][WÛ˜[YHV“Õ•S]X[]HS•QÑTˆ“Õ•SYÙ]ÛZ[›ÜˆS•QÑTˆ“Õ•S™YYØžHV“Õ•SÝ]\ÈV“Õ•S\ÝYšXØ][ÛˆV“Õ•S\›Ý™\—Ù[]WÚYV“Õ•SQUS	ÉË\›Ý™YØ]V“Õ•SQUS	ÉËÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÝ\Y\—ÛÙ™™\œÈ
+YV’SPT–HÑVH“Õ•S™\]Y\ÝÚYV“Õ•SÝ\Y\—ÚYV“Õ•SšXÙWÛZ[›ÜˆS•QÑTˆ“Õ•S[]™\žWÙ^\ÈS•QÑTˆ“Õ•SØ\œ˜[WÛ[ÛÈS•QÑTˆ“Õ•S]X[]WÜØÛÜ™HS•QÑTˆ“Õ•SÝ]\ÈV“Õ•SÛÛ\\š\ÛÛ—Û›ÝHV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\˜Ú\ÙWÛÜ™\œÈ
+YV’SPT–HÑVH“Õ•S™\]Y\ÝÚYV“Õ•SÙ™™\—ÚYV“Õ•SÝ\Y\—ÚYV“Õ•SÜ™\—Û[X™\ˆV“Õ•S[[Ý[ÛZ[›ÜˆS•QÑTˆ“Õ•SÝ]\ÈV“Õ•SÜ™\™YØ]V“Õ•S^XÝYØ]V“Õ•SÛÛ˜XÝÚYV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ›ØÝ\™[Y[Ù[]™\šY\È
+YV’SPT–HÑVH“Õ•SÜ™\—ÚYV“Õ•S[]™\™YØ]V“Õ•SØÝ[Y[ÚYV“Õ•SÝ]\ÈV“Õ•S]X[]HS•QÑTˆ“Õ•SXØÙ\YÜ]X[]HS•QÑTˆ“Õ•SXØÙ\YØžHV“Õ•S]X[]WÛ›ÝHV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ[™[ÜžWÚ][\È
+YV’SPT–HÑVH“Õ•SÚÝHV“Õ•S˜[YHV“Õ•SØ]YÛÜžHV“Õ•SØ\™ZÝ\ÙHV“Õ•S]X[]HS•QÑTˆ“Õ•S[š]ØÛÜÝÛZ[›ÜˆS•QÑTˆ“Õ•S\ÜÙ]ÚYV“Õ•SQUS	ÉËÝ]\ÈV“Õ•S\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ[™[ÜžWÙ]™[È
+YV’SPT–HÑVH“Õ•S][WÚYV“Õ•S]™[Ý\HV“Õ•S]X[]HS•QÑTˆ“Õ•Sœ›ÛWÛØØ][ÛˆV“Õ•SQUS	ÉË×ÛØØ][ÛˆV“Õ•SQUS	ÉËØÝ[Y[ÚYV“Õ•SQUS	ÉËØØÝ\œ™YØ]V“Õ•SXÝÜˆV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\ÜÙ]È
+YV’SPT–HÑVH“Õ•S][WÚYV“Õ•SÙ\šX[Û[X™\ˆV“Õ•SØš™XÝÙ[]WÚYV“Õ•S\ÜÚYÛ™YÝ×Ù[]WÚYV“Õ•SQUS	ÉËØ\œ˜[WÝ[[V“Õ•SÙ\šXÙWÙYHV“Õ•SÝ]\ÈV“Õ•SXÜ]Z\Ú][Û—Ù]HV“Õ•SÛÜÝÛZ[›ÜˆS•QÑTˆ“Õ•S[ÛWÙ\™XÚX][Û—ÛZ[›ÜˆS•QÑTˆ“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\ÜÙ]ÛXZ[[˜[˜ÙH
+YV’SPT–HÑVH“Õ•S\ÜÙ]ÚYV“Õ•SXZ[[˜[˜ÙWÝ\HV“Õ•SØÚY[YØ]V“Õ•SÛÛ\]YØ]V“Õ•SQUS	ÉËÛÛ˜XÝÜ—ÚYV“Õ•SÝ]\ÈV“Õ•SÛÜÝÛZ[›ÜˆS•QÑTˆ“Õ•SØÝ[Y[ÚYV“Õ•SQUS	ÉË™[]YÝ\Ú×ÚYS•QÑTŠX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ›ÛÙÜ›ÙXÝÈ
+YV’SPT–HÑVH“Õ•S˜[YHV“Õ•SÝ\Y\—ÚYV“Õ•S[š]V“Õ•S\˜Ú\ÙWØÛÜÝÛZ[›ÜˆS•QÑTˆ“Õ•SÝÜ˜YÙWÛ›Ü›HV“Õ•SÝ]\ÈV“Õ•S›Ú™XÝÙ[]WÚYV“Õ•SÙœ—Ù[]WÚYV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ›ÛÙØ˜]Ú\È
+YV’SPT–HÑVH“Õ•S›ÙXÝÚYV“Õ•S\˜Ú\ÙWÜ™\]Y\ÝÚYV“Õ•S™XÙZ]™YØ]V“Õ•S^\™\×Ø]V“Õ•S]X[]HS•QÑTˆ“Õ•S™[XZ[š[™×Ü]X[]HS•QÑTˆ“Õ•S[š]V“Õ•SØ\™ZÝ\ÙHV“Õ•SÝ]\ÈV“Õ•S]X[]WÛ›ÝHV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ›ÛÙÜ™XÚ\\È
+YV’SPT–HÑVH“Õ•S\ÚÛ˜[YHV“Õ•S™\œÚ[ÛˆS•QÑTˆ“Õ•SZY[ÜÜ[ÛœÈS•QÑTˆ“Õ•SÝ[™\™ØÛÜÝÛZ[›ÜˆS•QÑTˆ“Õ•S›Ü›WÙ\ØÜš\[ÛˆV“Õ•SY[WÙ]HV“Õ•SÝ]\ÈV“Õ•SÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ›ÛÙÜ™XÚ\WÚ[™Ü™YY[È
+YV’SPT–HÑVH“Õ•S™XÚ\WÚYV“Õ•S›ÙXÝÚYV“Õ•S]X[]WÜ\—Ø˜]ÚS•QÑTˆ“Õ•S[š]V“Õ•SÛÜÝÛZ[›ÜˆS•QÑTˆ“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ›ÛÙÜ›ÙXÝ[Ûˆ
+YV’SPT–HÑVH“Õ•S›ÙXÝ[Û—Ù]HV“Õ•S™XÚ\WÚYV“Õ•SÚYÚYV“Õ•S[›™YÜÜ[ÛœÈS•QÑTˆ“Õ•SXÝX[ÜÜ[ÛœÈS•QÑTˆ“Õ•SX]\šX[ØÛÜÝÛZ[›ÜˆS•QÑTˆ“Õ•SÝ]\ÈV“Õ•S]šY[˜ÙHV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ›ÛÙÜÚ\Y[È
+YV’SPT–HÑVH“Õ•S›ÙXÝ[Û—ÚYV“Õ•S\Ý[˜][Û—ÛØš™XÝÚYV“Õ•SÚ\YÜÜ[ÛœÈS•QÑTˆ“Õ•SÛÛœÝ[YYÜÜ[ÛœÈS•QÑTˆ“Õ•S™]\›™YÜÜ[ÛœÈS•QÑTˆ“Õ•SÜš][—ÛÙ™—ÜÜ[ÛœÈS•QÑTˆ“Õ•S™]™[YWÛZ[›ÜˆS•QÑTˆ“Õ•SÝ]\ÈV“Õ•SØÝ[Y[ÚYV“Õ•SÚ\YØ]V“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ›ÛÙÜÚYÈ
+YV’SPT–HÑVH“Õ•S[\ÞYYWÙ[]WÚYV“Õ•SÝ\YØ]V“Õ•S[™YØ]V“Õ•S˜]WÛZ[›ÜˆS•QÑTˆ“Õ•SÝ]\ÈV“Õ•S›ÛHV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ›ÛÙØÚXÚÜÈ
+YV’SPT–HÑVH“Õ•SÚXÚ×Ý\HV“Õ•SØš™XÝÙ[]WÚYV“Õ•SÚXÚÙYØ]V“Õ•S™\Ý[V“Õ•Sš[Û][ÛˆV“Õ•SQUS	ÉË]šY[˜ÙHV“Õ•SÝ]\ÈV“Õ•S™[]YÝ\Ú×ÚYS•QÑTŠX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØY™]WÜÞ\Ý[\È
+YV’SPT–HÑVH“Õ•SÞ\Ý[WÝ\HV“Õ•S˜[YHV“Õ•SØš™XÝÙ[]WÚYV“Õ•SØÚ[YWÜ™YˆV“Õ•S›Ý\›˜[Ü™YˆV“Õ•S™\ÜÛœÚX›WÙ[]WÚYV“Õ•SÝ]\ÈV“Õ•SÛÝ\˜ÙWÝ\HV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØY™]WÙ\]Z\Y[
+YV’SPT–HÑVH“Õ•SÞ\Ý[WÚYV“Õ•S˜[YHV“Õ•S[™[ÜžWÛ[X™\ˆV“Õ•SØØ][ÛˆV“Õ•SÛÛ˜XÝÜ—ÚYV“Õ•SÜš]XØ[]HV“Õ•S™^ØÚXÚ×Ø]V“Õ•SÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØY™]WØÚXÚÜÈ
+YV’SPT–HÑVH“Õ•S\]Z\Y[ÚYV“Õ•SØš™XÝÙ[]WÚYV“Õ•SÚXÚ×Ý\HV“Õ•SØÚY[YØ]V“Õ•SÚXÚÙYØ]V“Õ•SQUS	ÉË™\Ý[V“Õ•S]šY[˜ÙHV“Õ•S™\ÜÛœÚX›WÙ[]WÚYV“Õ•SÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØY™]WÙ˜][È
+YV’SPT–HÑVH“Õ•SÚXÚ×ÚYV“Õ•S\]Z\Y[ÚYV“Õ•SÙ]™\š]HV“Õ•S\ØÜš\[ÛˆV“Õ•S]XÝYØ]V“Õ•SÝ]\ÈV“Õ•S™[]YÝ\Ú×ÚYS•QÑTŠX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØY™]WÚ[˜ÚY[È
+YV’SPT–HÑVH“Õ•SØš™XÝÙ[]WÚYV“Õ•SÞ\Ý[WÚYV“Õ•S\[™YØ]V“Õ•SØ]YÛÜžHV“Õ•SÙ]™\š]HV“Õ•S\ØÜš\[ÛˆV“Õ•S™\ÜÛœÙHV“Õ•SÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØY™]WÜ™\Z\œÈ
+YV’SPT–HÑVH“Õ•S˜][ÚYV“Õ•SÛÛ˜XÝÜ—ÚYV“Õ•SXÝ[Û—Ý\HV“Õ•SÝ\YØ]V“Õ•SÛÛ\]YØ]V“Õ•SQUS	ÉË™\Ý[V“Õ•SXÝÙØÝ[Y[ÚYV“Õ•SQUS	ÉËÛÜÝÛZ[›ÜˆS•QÑTˆ“Õ•S^[Y[ÛÜ\˜][Û—ÚYV“Õ•SQUS	ÉËÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØY™]WÛ™^ØÚXÚÜÈ
+YV’SPT–HÑVH“Õ•S\]Z\Y[ÚYV“Õ•SÛÝ\˜ÙWÜ™\Z\—ÚYV“Õ•SØÚY[YØ]V“Õ•SÚXÚ×Ý\HV“Õ•S™\ÜÛœÚX›WÙ[]WÚYV“Õ•SÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈØY™]WÙÝX\™ÜÚYÈ
+YV’SPT–HÑVH“Õ•SØš™XÝÙ[]WÚYV“Õ•S[\ÞYYWÙ[]WÚYV“Õ•SÜÝV“Õ•SÝ\YØ]V“Õ•S[™YØ]V“Õ•S›Ý\›˜[Ü™YˆV“Õ•SÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYYXØ[ØXØÙ\Ü×ÙÜ˜[È
+YV’SPT–HÑVH“Õ•Sš[˜Ú\[Ý\HV“Õ•Sš[˜Ú\[Ü™YˆV“Õ•SØÛÜHV“Õ•SÜ˜[YØžHV“Õ•S˜[YÝ[[V“Õ•SÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYYXØ[ÙØÝ[Y[È
+YV’SPT–HÑVH“Õ•SÝXš™XÝÙ[]WÚYV“Õ•SÝXš™XÝÝ\HV“Õ•SØÝ[Y[Ý\HV“Õ•SØÝ[Y[Ü™YˆV“Õ•S˜[YÙœ›ÛHV“Õ•S˜[YÝ[[V“Õ•SÝ]\ÈV“Õ•SÝÜ˜YÙWØÛ\ÜÈV“Õ•SZ[š[][WÜÝ[[X\žHV“Õ•SÛÛ™š\›YYØ]V“Õ•SQUS	ÉÊX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYYXØ[Ü™\ÝšXÝ[ÛœÈ
+YV’SPT–HÑVH“Õ•SÝXš™XÝÙ[]WÚYV“Õ•S™XÛÜ™ÚYV“Õ•SØ]YÛÜžHV“Õ•S[Z]][ÛˆV“Õ•S˜[YÝ[[V“Õ•SXÝ[Û—ÜØÛÜHV“Õ•SÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYYXØ[ØØ\Ù\È
+YV’SPT–HÑVH“Õ•SÝXš™XÝÙ[]WÚYV“Õ•SØ\ÙWÝ\HV“Õ•SÜ[™YØ]V“Õ•SÙ]™\š]HV“Õ•SZ[š[][WÜÝ[[X\žHV“Õ•S™\ÜÛœÚX›WÙ[]WÚYV“Õ•SYWØ]V“Õ•SÝ]\ÈV“Õ•SÛÜÙYØ]V“Õ•SQUS	ÉËÛÛ™š\›X][Û—Ü™YˆV“Õ•SQUS	ÉÊX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYYXØ[Ú[˜ÚY[È
+YV’SPT–HÑVH“Õ•SØ\ÙWÚYV“Õ•S\[™YØ]V“Õ•S[˜ÚY[Ý\HV“Õ•SZ[š[][WÙ˜XÝÈV“Õ•S™\ÜÛœÙWÜ™\]Z\™YV“Õ•SÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈYYXØ[ØXÝ[ÛœÈ
+YV’SPT–HÑVH“Õ•SØ\ÙWÚYV“Õ•S[˜ÚY[ÚYV“Õ•SQUS	ÉËXÝ[Û—Ý\HV“Õ•S™\ÜÛœÚX›WÙ[]WÚYV“Õ•SYWØ]V“Õ•SÛÛ\]YØ]V“Õ•SQUS	ÉË™\Ý[V“Õ•SQUS	ÉËÛÛ™š\›X][Û—Ü™YˆV“Õ•SQUS	ÉËÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈXØÛÝ[[™×ÙØÝ[Y[È
+YV’SPT–HÑVH“Õ•SØÝ[Y[Ý\HV“Õ•S[X™\ˆV“Õ•SØÝ[Y[Ù]HV“Õ•SÛÝ[\œ\WÙ[]WÚYV“Õ•SÛÛ˜XÝÚYV“Õ•SQUS	ÉË[[Ý[ÛZ[›ÜˆS•QÑTˆ“Õ•S˜]ÛZ[›ÜˆS•QÑTˆ“Õ•S^[Y[ÛÜ\˜][Û—ÚYV“Õ•SQUS	ÉËš[WÜ™YˆV“Õ•SQUS	ÉËÚYÛ˜]\™WÜÝ]\ÈV“Õ•SY×ÜÝ]\ÈV“Õ•SÛÝ\˜ÙWÝ\HV“Õ•SÝ]\ÈV“Õ•SÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈXØÛÝ[[™×ÙØÝ[Y[Û[šÜÈ
+YV’SPT–HÑVH“Õ•Sœ›ÛWÙØÝ[Y[ÚYV“Õ•S×ÙØÝ[Y[ÚYV“Õ•S™[][Û—Ý\HV“Õ•S]šY[˜ÙHV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈXØÛÝ[[™×ØÛÛ\][™\Ü×ØÚXÚÜÈ
+YV’SPT–HÑVH“Õ•SÜ\˜][Û—ÚYV“Õ•SÛÛ˜XÝÚYV“Õ•S™\]Z\™YÝ\\ÈV“Õ•SZ\ÜÚ[™×Ý\\ÈV“Õ•SÝÛ™\—Ù[]WÚYV“Õ•SÝ]\ÈV“Õ•S™[]YÝ\Ú×ÚYS•QÑT‹ÚXÚÙYØ]V“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈXØÛÝ[[™×Ù^ÜÈ
+YV’SPT–HÑVH“Õ•S^ÜÝ\HV“Õ•S\š[ÙV“Õ•SØÝ[Y[ØÛÝ[S•QÑTˆ“Õ•S[[Ý[ÛZ[›ÜˆS•QÑTˆ“Õ•SÝ]\ÈV“Õ•Sš[WÜ™YˆV“Õ•SÜ™X]YØžHV“Õ•SÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈXØÛÝ[[™×Ú[YÜ˜][ÛœÈ
+YV’SPT–HÑVH“Õ•SÞ\Ý[HV“Õ•S[ÙHV“Õ•SÝ]\ÈV“Õ•S]V“Õ•S\ÝÜÝXØÙ\Ü×Ø]V“Õ•SQUS	ÉË™^Ø][\Ø]V“Õ•SQUS	ÉË™XÛÜ™ØÛÝ[S•QÑTˆ“Õ•S\œ›ÜˆV“Õ•SQUS	ÉÊX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÝ˜]YÞWÙÛØ[È
+YV’SPT–HÑVH“Õ•S]™[V“Õ•S[š]Ù[]WÚYV“Õ•SQUS	ÉË]HV“Õ•S\š[ÙV“Õ•SÝÛ™\—Ù[]WÚYV“Õ•SÝ]\ÈV“Õ•SÝXØÙ\Ü×ÙYš[š][ÛˆV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÝ˜]YÞWÚÜ\È
+YV’SPT–HÑVH“Õ•SÛØ[ÚYV“Õ•S˜[YHV“Õ•S[š]V“Õ•S\™Ù]Ý˜[YHS•QÑTˆ“Õ•SXÝX[Ý˜[YHS•QÑTˆ“Õ•S›Ü™XØ\ÝÝ˜[YHS•QÑTˆ“Õ•S˜\šX[˜ÙWÝ˜[YHS•QÑTˆ“Õ•SÝ]\ÈV“Õ•SÛÝ\˜ÙWÜ™YˆV“Õ•S\]YØ]V“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÝ˜]YÞWÚ[š]X]]™\È
+YV’SPT–HÑVH“Õ•SÛØ[ÚYV“Õ•SÜWÚYV“Õ•S]HV“Õ•S\Ý\Ú\ÈV“Õ•SÝÛ™\—Ù[]WÚYV“Õ•S[›™YÜÝ\V“Õ•S[›™YÙ[™V“Õ•SÝ]\ÈV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÝ˜]YÞWÜ›Ú™XÝÈ
+YV’SPT–HÑVH“Õ•S[š]X]]™WÚYV“Õ•SÛØ[ÚYV“Õ•S]HV“Õ•SÝÛ™\—Ù[]WÚYV“Õ•SYÙ]ÚYV“Õ•SYÙ]Ü[—ÛZ[›ÜˆS•QÑTˆ“Õ•SYÙ]ØXÝX[ÛZ[›ÜˆS•QÑTˆ“Õ•SÝ\YØ]V“Õ•SYWØ]V“Õ•SÝ]\ÈV“Õ•SÝ]ÛÛYHV“Õ•SQUS	ÉÊX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ\Ú[™\Ü×Ù]™[È
+YV’SPT–HÑVH“Õ•S›Ú™XÝÚYV“Õ•S]HV“Õ•S]™[Ø]V“Õ•SØØ][ÛˆV“Õ•S™\ÜÛœÚX›WÙ[]WÚYV“Õ•SYÙ]ÛZ[›ÜˆS•QÑTˆ“Õ•SXÝX[ÛZ[›ÜˆS•QÑTˆ“Õ•SÝ]\ÈV“Õ•S™\Ý[V“Õ•SQUS	ÉË™YY˜XÚ×ÜØÛÜ™HS•QÑTˆ“Õ•SQUS
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ]™[Ü\XÚ\[È
+YV’SPT–HÑVH“Õ•S]™[ÚYV“Õ•S\XÚ\[Ù[]WÚYV“Õ•S\XÚ\[Ü›ÛHV“Õ•S][™[˜ÙWÜÝ]\ÈV“Õ•S™YY˜XÚÈV“Õ•SQUS	ÉÊX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÝ˜]YÞWÜ™\Ý[È
+YV’SPT–HÑVH“Õ•S›Ú™XÝÚYV“Õ•S]™[ÚYV“Õ•SQUS	ÉË™\Ý[Ý\HV“Õ•SY]šX×Û˜[YHV“Õ•SY]šX×Ý˜[YHS•QÑTˆ“Õ•S[š]V“Õ•S]šY[˜ÙHV“Õ•S™XÛÜ™YØ]V“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÝ˜]YÞWÙ]šX][ÛœÈ
+YV’SPT–HÑVH“Õ•SÜWÚYV“Õ•S›Ú™XÝÚYV“Õ•S]šX][Û—Ý\HV“Õ•S˜\šX[˜ÙWÝ˜[YHS•QÑTˆ“Õ•S^[˜][ÛˆV“Õ•SXÚ\Ú[ÛˆV“Õ•SÝ]\ÈV“Õ•S™[]YÝ\Ú×ÚYS•QÑT‹]XÝYØ]V“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈ
+YV’SPT–HÑVH“Õ•SÞ\Ý[HV“Õ•SØ]YÛÜžHV“Õ•S\™Ù]Û[Ù[HV“Õ•SÝÛ™\—Ù[]WÚYV“Õ•SÛÝ\˜ÙWÛÙ—Ý]V“Õ•S[ÙHV“Õ•SÝ]\ÈV“Õ•S]]ÜÝ]\ÈV“Õ•SÜ™Y[X[Ù^\™\×Ø]V“Õ•SQUS	ÉË\ÝÜÝXØÙ\Ü×Ø]V“Õ•SQUS	ÉË™^ÜÞ[˜×Ø]V“Õ•SQUS	ÉË™XÙZ]™YØÛÝ[S•QÑTˆ“Õ•SQUSXØÙ\YØÛÝ[S•QÑTˆ“Õ•SQUS™Z™XÝYØÛÝ[S•QÑTˆ“Õ•SQUS\œ›Ü—ØÛÝ[S•QÑTˆ“Õ•SQUSÛÛ™›XÝØÛÝ[S•QÑTˆ“Õ•SQUS[\XÝV“Õ•SY\\—Ý™\œÚ[ÛˆV“Õ•S™\šYšYYÝ˜[œÙ™\ˆS•QÑTˆ“Õ•SQUS\×Ù[˜X›YS•QÑTˆ“Õ•SQUS\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ[YÜ˜][Û—ÜÞ[˜×Ü[œÈ
+YV’SPT–HÑVH“Õ•SÛÛ›™XÝ[Û—ÚYV“Õ•SÝ\YØ]V“Õ•Sš[š\ÚYØ]V“Õ•SQUS	ÉËšYÙÙ\ˆV“Õ•SÝ]\ÈV“Õ•S™XÙZ]™YØÛÝ[S•QÑTˆ“Õ•SQUSXØÙ\YØÛÝ[S•QÑTˆ“Õ•SQUS™Z™XÝYØÛÝ[S•QÑTˆ“Õ•SQUS\œ›Ü—ØÛÝ[S•QÑTˆ“Õ•SQUSÛÛ™›XÝØÛÝ[S•QÑTˆ“Õ•SQUSÚXÚÜÚ[V“Õ•SQUS	ÉË\œ›Ü—ÛY\ÜØYÙHV“Õ•SQUS	ÉË[š]X]YØžHV“Õ•SÛÜœ™[][Û—ÚYV“Õ•SžWÜ[ˆS•QÑTˆ“Õ•SQUS
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ[YÜ˜][Û—ÛÙ×Ù[šY\È
+YS•QÑTˆ’SPT–HÑVHUUÒSÔ‘SQS•“Õ•S[—ÚYV“Õ•SÛÛ›™XÝ[Û—ÚYV“Õ•S]™[V“Õ•S]™[V“Õ•SY\ÜØYÙHV“Õ•S™XÛÜ™Ü™YˆV“Õ•SQUS	ÉËÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ[YÜ˜][Û—ØÛÛ™›XÝÈ
+YV’SPT–HÑVH“Õ•SÛÛ›™XÝ[Û—ÚYV“Õ•S^\›˜[Ü™XÛÜ™ÚYV“Õ•S[\›˜[Ù[]WÚYV“Õ•SQUS	ÉËÛÛ™›XÝÝ\HV“Õ•SšY[Û˜[YHV“Õ•SÛÝ\˜ÙWÝ˜[YHV“Õ•S\™Ù]Ý˜[YHV“Õ•SÝÛ™\—Ù[]WÚYV“Õ•SÝ]\ÈV“Õ•S™\ÛÛ][ÛˆV“Õ•SQUS	ÉË]šY[˜ÙHV“Õ•SQUS	ÉË™[]YÝ\Ú×ÚYS•QÑT‹]XÝYØ]V“Õ•S™\ÛÛ™YØ]V“Õ•SQUS	ÉÊX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈ
+YV’SPT–HÑVH“Õ•S˜[YHV“Õ•SØ]YÛÜžHV“Õ•SYš[š][ÛˆV“Õ•S›Ü›][HV“Õ•S[š]V“Õ•SÜ˜Z[ˆV“Õ•SÛÝ\˜ÙWÝX›\ÈV“Õ•SÛÝ\˜ÙWÜ]X[]HV“Õ•Sœ™\Ú™\ÜÈV“Õ•SÝÛ™\—Ù[]WÚYV“Õ•S\™Ù]Ý˜[YHS•QÑT‹Ù[œÚ]]™HS•QÑTˆ“Õ•SQUS
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ[˜[]XÜ×ÜÚYÛ˜[È
+YV’SPT–HÑVH“Õ•SÛÛ˜XÝÚYV“Õ•SÛXZ[ˆV“Õ•SÚYÛ˜[Ý\HV“Õ•SÙ]™\š]HV“Õ•S]HV“Õ•S]šY[˜ÙHV“Õ•S^[˜][ÛˆV“Õ•S™XÛÛ[Y[™][ÛˆV“Õ•SÛÝ\˜ÙWÜ™YœÈV“Õ•SÛÛ™šY[˜ÙHS•QÑTˆ“Õ•SÝ]\ÈV“Õ•S™[]YÝ\Ú×ÚYS•QÑT‹[X[—ÙXÚ\Ú[ÛˆV“Õ•SQUS	ÉËXÚ\Ú[Û—Ù]šY[˜ÙHV“Õ•SQUS	ÉË]XÝYØ]V“Õ•SXÚYYØ]V“Õ•SQUS	ÉÊX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈZWÜ›ØÙ\Ü×ØÛÛ˜XÝÈ
+YV’SPT–HÑVH“Õ•S˜[YHV“Õ•S[œ]Ù]HV“Õ•S^XÝYÜ™\Ý[V“Õ•S[ÝÙYØXÝ[ÛœÈV“Õ•S›Ü˜šY[—ØXÝ[ÛœÈV“Õ•S[X[—ÛÝÛ™\ˆV“Õ•SÛÜÝÛZ[›ÜˆS•QÑTˆ“Õ•S™[™Yš]ÛY]šXÈV“Õ•S]]×ÜÝÜØÛÛ™][ÛˆV“Õ•SÜÛÝ]Ø[ÝÙYS•QÑTˆ“Õ•SQUSKÜÛÝ]Ü›ØÙY\™HV“Õ•S˜[˜XÚ×Ù[˜Ý[Û˜[]HV“Õ•SÝÜYÙ]WÜ›ØÙ\ÜÚ[™ÈV“Õ•S\ÝÜšXØ[Ù]WÜÛXÞHV“Õ•SÜÛÝ]Ú[\XÝV“Õ•SÝ]\ÈV“Õ•S™\œÚ[ÛˆV“Õ•SÛÝ\˜ÙWÜ™YœÈV“Õ•S\]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈZWÛ[Ù[Ü[œÈ
+YV’SPT–HÑVH“Õ•SÛÛ˜XÝÚYV“Õ•S˜[—Ø]V“Õ•S[Ù[Ý™\œÚ[ÛˆV“Õ•SÝ]\ÈV“Õ•S[œ]ÜÛ˜\ÚÝÜ™YˆV“Õ•SÝ]]Ý\HV“Õ•SÝ]]ÜÝ[[X\žHV“Õ•SÛÛ™šY[˜ÙHS•QÑTˆ“Õ•SÛÜÝÛZ[›ÜˆS•QÑTˆ“Õ•S^[˜][ÛˆV“Õ•S[X[—ÙXÚ\Ú[ÛˆV“Õ•SQUS	ÉËXÚYYØžHV“Õ•SQUS	ÉËXÚ\Ú[Û—Ø]V“Õ•SQUS	ÉË\×ÜÞ[]XÈS•QÑTˆ“Õ•SQUSJX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈZWÛÜÛÝ]È
+YV’SPT–HÑVH“Õ•SÛÛ˜XÝÚYV“Õ•SØÛÜWÝ\HV“Õ•SØÛÜWÜ™YˆV“Õ•S™\]Y\ÝYØžHV“Õ•S™X\ÛÛˆV“Õ•SÝ]\ÈV“Õ•SÝÜ×Ü›ØÙ\ÜÚ[™×Ø]V“Õ•S\ÝÜšXØ[Ù]WÜÛXÞHV“Õ•SÜ™X]YØ]V“Õ•SQUSÕT”‘S•ÕSQTÕST
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÝ\ÝÛY\—ØÛÛ\Z[È
+YV’SPT–HÑVH“Õ•S˜[Z[WÙ[]WÚYV“Õ•SÚ[Ù[]WÚYV“Õ•SÙ\šXÙWÙ[]WÚYV“Õ•SÚ[›™[V“Õ•S™XÙZ]™YØ]V“Õ•SØ]YÛÜžHV“Õ•SÝ[[X\žHV“Õ•S™\ÜÛœÚX›WÙ[]WÚYV“Õ•SÝ]\ÈV“Õ•S™[]YÝ\Ú×ÚYS•QÑT‹Ø]\Ù˜XÝ[Û—ÜØÛÜ™HS•QÑTˆ“Õ•SQUSÛÜÙYØ]V“Õ•SQUS	ÉÊX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈÛÛ\Z[ØXÝ[ÛœÈ
+YV’SPT–HÑVH“Õ•SÛÛ\Z[ÚYV“Õ•S\Ú×ÚYS•QÑTˆ“Õ•SXÝ[Û—Ý\HV“Õ•SÝÛ™\—Ù[]WÚYV“Õ•SYWØ]V“Õ•S™\Ý[V“Õ•S]šY[˜ÙHV“Õ•SÝ]\ÈV“Õ•SÛÛ\]YØ]V“Õ•SQUS	ÉÊX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ™XY[™\Ü×ÜØÙ[˜\š[ÜÈ
+YV’SPT–HÑVH“Õ•S[X™\ˆS•QÑTˆ“Õ•S˜[YHV“Õ•SÚZ[ˆV“Õ•SÝÛ™\—Ù[]WÚYV“Õ•SÝ]\ÈV“Õ•S]WØ›Ý[™\žHV“Õ•S]šY[˜ÙHV“Õ•SQUS	ÉË˜Z[\™HV“Õ•SQUS	ÉË\ÝÜ[—Ø]V“Õ•SQUS	ÉË\˜][Û—Û\ÈS•QÑTˆ“Õ•SQUS
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\È
+YV’SPT–HÑVH“Õ•SØÙ[˜\š[×ÚYV“Õ•SÝ\ÛÜ™\ˆS•QÑTˆ“Õ•SÝ\Û˜[YHV“Õ•S[]WÝ\HV“Õ•S[]WÚYV“Õ•SÚXÚ×Ý\HV“Õ•SÝ]\ÈV“Õ•S]šY[˜ÙHV“Õ•SQUS	ÉËÚXÚÙYØ]V“Õ•SQUS	ÉÊX
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ™XY[™\Ü×Ý˜[Y][Û—Ü[œÈ
+YV’SPT–HÑVH“Õ•SÝZ]HV“Õ•S[š\›Û›Y[V“Õ•SÝ\YØ]V“Õ•Sš[š\ÚYØ]V“Õ•SÝ]\ÈV“Õ•S\ÜÙYS•QÑTˆ“Õ•S˜Z[YS•QÑTˆ“Õ•SÚÚ\YS•QÑTˆ“Õ•SÛÛ[Z]ÜÚHV“Õ•S\Y˜XÝÜ™YˆV“Õ•S[š]X]YØžHV“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ™[X\ÙWÙØ]\È
+YV’SPT–HÑVH“Õ•S˜[YHV“Õ•SÝ]\ÈV“Õ•S™\]Z\™YS•QÑTˆ“Õ•SQUSK]šY[˜ÙHV“Õ•SÝÛ™\—Ù[]WÚYV“Õ•S\]YØ]V“Õ•S
+X
+Kˆ[‹‘‹œ™\\™JÔ‘PUHP“HQˆ“ÕVTÕÈ™XÛÝ™\žWÙš[È
+YV’SPT–HÑVH“Õ•Sš[Ý\HV“Õ•SØÛÜHV“Õ•SÝ\YØ]V“Õ•Sš[š\ÚYØ]V“Õ•SÝ]\ÈV“Õ•Sœ×ÛZ[]\ÈS•QÑTˆ“Õ•SQUS×ÛZ[]\ÈS•QÑTˆ“Õ•SQUSÚXÚÜÝ[WØ™Y›Ü™HV“Õ•SQUS	ÉËÚXÚÜÝ[WØY\ˆV“Õ•SQUS	ÉË]šY[˜ÙHV“Õ•S[Z]][ÛˆV“Õ•S
+X
+KˆNÂ‚ˆ›Üˆ
+][™^HÈ[™^ØÚ[XTÝ][Y[Ë›[™ÝÈ[™^
+ÏH
+HÂˆ]ØZ][‹‘‹˜˜]Ú
+ØÚ[XTÝ][Y[ËœÛXÙJ[™^[™^
+È
+JNÂˆB‚ˆ]ØZ][œÝ\™U\ÚÐÛÛ[[œÊ
+NÂˆ]ØZ]˜XÚÙš[\ÚÓÝÛ™\œÚ\
+
+NÂˆ]ØZ][œÝ\™PXØÙ\ÜÐÛÛ[[œÊ
+NÂˆ]ØZ][œÝ\™UØÚØU˜[œØXÝ[Û’Y[]R[™^
+
+NÂ‚ˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ[]Y\×ÜÛÝ\˜ÙWÝ[š\]YHÓˆ[]Y\È
+[]WÝ\KÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÜ™XÛÜ™ÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ\Ý\Ù\œ×ØÛÛXÝÝ[š\]YHÓˆ\Ý\Ù\œÈ
+ÛÛXÝ
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ\ÜÞ\Ý[\×ÚÙ^WÝ[š\]YHÓˆ\ÜÞ\Ý[\È
+Þ\Ý[WÚÙ^JHŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ\Ù\—ÜÞ\Ý[WØXØÙ\Ü×Ý[š\]YHÓˆ\Ù\—ÜÞ\Ý[WØXØÙ\ÜÈ
+\Ù\—ÚYÞ\Ý[WÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ\Ù\—Øœ˜[˜ÚØXØÙ\Ü×Ý[š\]YHÓˆ\Ù\—Øœ˜[˜ÚØXØÙ\ÜÈ
+\Ù\—ÚYœ˜[˜ÚÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ˜[Z[WÜÞ\Ý[WØXØÙ\Ü×Üš[˜Ú\[Ý[š\]YHÓˆ˜[Z[WÜÞ\Ý[WØXØÙ\ÜÈ
+š[˜Ú\[Ù[]WÚYÞ\Ý[WÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ˜[Z[WÜÞ\Ý[WØXØÙ\Ü×ÛÙÚ[—Ý[š\]YHÓˆ˜[Z[WÜÞ\Ý[WØXØÙ\ÜÈ
+ÙÚ[‹Þ\Ý[WÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ[]WÛ[šÜ×Ý[š\]YHÓˆ[]WÛ[šÜÈ
+œ›ÛWÙ[]WÚY×Ù[]WÚY™[][Û—Ý\JHŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ[]WÛY\™Ù\×Ù\XØ]WÝ[š\]YHÓˆ[]WÛY\™Ù\È
+\XØ]WÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ\ÚÜ×Ø]]ÛX][Û—Ý[š\]YHÓˆ\ÚÜÈ
+]]ÛX][Û—ÚÙ^JHŠKˆ[‹‘‹œ™\\™JÔ‘PUHS‘VQˆ“ÕVTÕÈ\ÚÜ×ØÜ™X]YØžWÝ\Ù\—ÚYÓˆ\ÚÜÈ
+Ü™X]YØžWÝ\Ù\—ÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS‘VQˆ“ÕVTÕÈ\ÚÜ×Ø\ÜÚYÛ™YWÙ[]WÚYÓˆ\ÚÜÈ
+\ÜÚYÛ™YWÙ[]WÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ\Ú×ÝØ]Ú\œ×Ý[š\]YHÓˆ\Ú×ÝØ]Ú\œÈ
+\Ú×ÚY[]WÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ\Ú×Ø\›Ý˜[×Ý[š\]YHÓˆ\Ú×Ø\›Ý˜[È
+\Ú×ÚYÝ\Û˜[YJHŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈØÝ[Y[Ý™\œÚ[Ûœ×Ý[š\]YHÓˆØÝ[Y[Ý™\œÚ[ÛœÈ
+ØÝ[Y[ÚY™\œÚ[ÛŠHŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ\Ú×ÙØÝ[Y[×Ý[š\]YHÓˆ\Ú×ÙØÝ[Y[È
+\Ú×ÚYØÝ[Y[ÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈØ›YØ][Ûœ×Ý[š\]YHÓˆØ›YØ][ÛœÈ
+ØÝ[Y[ÚY]JHŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ›ÝYšXØ][Ûœ×ÙY\Ý[š\]YHÓˆ›ÝYšXØ][ÛœÈ
+Y\ÚÙ^JHŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ\ØØ[][Ûœ×Ý[š\]YHÓˆ\ØØ[][ÛœÈ
+\Ú×ÚY]™[
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈÛY[ÛY™XÞXÛ\×ÛXYÝ[š\]YHÓˆÛY[ÛY™XÞXÛ\È
+XYÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈÛÛ[ÜX›XØ][Ûœ×Ü[—Ý[š\]YHÓˆÛÛ[ÜX›XØ][ÛœÈ
+[—Ú][WÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈYXØ][Û—Ø][™[˜ÙWÛ\ÜÛÛ—ÜÝY[Ý[š\]YHÓˆYXØ][Û—Ø][™[˜ÙH
+\ÜÛÛ—ÚYÝY[ÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ—ØXØÙ\Ü×Ù[\ÞYYWÜÞ\Ý[WÝ[š\]YHÓˆ—ØXØÙ\ÜÙ\È
+[\ÞYYWÚYÞ\Ý[JHŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈYØ[ÙØÝ[Y[ÜÝX›WÝ™\œÚ[Û—Ý[š\]YHÓˆYØ[ÙØÝ[Y[Ú][\È
+ÝX›WÚY™\œÚ[ÛŠHŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈYØ[ØÛÛ˜XÝÝ^ÜÝX›WÝ™\œÚ[Û—Ý[š\]YHÓˆYØ[ØÛÛ˜XÝÝ^Ý™\œÚ[ÛœÈ
+ÝX›WÚY™\œÚ[ÛŠHŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ˜[š×ØXØÛÝ[×Ü›ÝšY\—Ý[š\]YHÓˆ˜[š×ØXØÛÝ[È
+ÛÛ›™XÝ[Û—ÚYYØ[Ù[]WÚY›ÝšY\—ØXØÛÝ[ÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ˜[š×ÜÝ][Y[Ü›ÝšY\—Ý[š\]YHÓˆ˜[š×ÜÝ][Y[Ú[\ÜÈ
+ÛÛ›™XÝ[Û—ÚY›ÝšY\—ÜÝ][Y[ÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ˜[š×Ý˜[œØXÝ[Ûœ×Ü›ÝšY\—Ý[š\]YHÓˆ˜[š×Ý˜[œØXÝ[ÛœÈ
+ÛÛ›™XÝ[Û—ÚY›ÝšY\—ØXØÛÝ[ÚY›ÝšY\—Ý˜[œØXÝ[Û—ÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS‘VQˆ“ÕVTÕÈ˜[š×Ý˜[œØXÝ[Ûœ×Ù]WÚYÓˆ˜[š×Ý˜[œØXÝ[ÛœÈ
+Ü\˜][Û—Ù]JHŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ[YÜ˜][Û—Ü[œ×ØÛÜœ™[][Û—Ý[š\]YHÓˆ[YÜ˜][Û—ÜÞ[˜×Ü[œÈ
+ÛÜœ™[][Û—ÚY
+HŠKˆ[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ™XY[™\Ü×ÜÝ\ÛÜ™\—Ý[š\]YHÓˆ™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\È
+ØÙ[˜\š[×ÚYÝ\ÛÜ™\ŠHŠKˆJNÂ‚ŸB‚˜\Þ[˜È[˜Ý[ÛˆÙYY[š]X[[[Ñ]J
+HÂˆ]ØZ]ÙYY™YÚ\ÝžJ
+NÂˆ]ØZ]ÙYYÛÜšÙ›ÝÊ
+NÂˆ]ØZ]ÙYYš[˜[˜ÙJ
+NÂˆ]ØZ]ÙYYØ[\Ê
+NÂˆ]ØZ]ÙYYÛÛ[
+
+NÂˆ]ØZ]ÙYYYXØ][ÛŠ
+NÂˆ]ØZ]ÙYYŠ
+NÂˆ]ØZ]ÙYYYØ[
+
+NÂˆ]ØZ]ÙYY›ØÝ\™[Y[
+
+NÂˆ]ØZ]ÙYY›ÛÙ
+
+NÂˆ]ØZ]ÙYYØY™]J
+NÂˆ]ØZ]ÙYYYYXØ[
+
+NÂˆ]ØZ]ÙYYXØÛÝ[[™Ê
+NÂˆ]ØZ]ÙYYÝ˜]YÞJ
+NÂˆ]ØZ]ÙYY[YÜ˜][ÛœÊ
+NÂˆ]ØZ]ÙYY[˜[]XÜÊ
+NÂˆ]ØZ]ÙYY™XY[™\ÜÊ
+NÂŸB‚‹ËÈ˜[šÈ›ÝÈQÈ[™š[˜[˜ÚX[›Ú™XÝ[ÛˆQÈ[™XYH[˜ÛYHHXØÛÝ[‚‹ËÈÙY\H]X˜\ÙH[š\]Y[™\ÜÈÛÛœÝ˜Z[[ˆHØ[YHXØÛÝ[ØÛÜK‚˜\Þ[˜È[˜Ý[Ûˆ[œÝ\™UØÚØU˜[œØXÝ[Û’Y[]R[™^
+
+HÂˆÛÛœÝ^XÝYHÈ˜ÛÛ›™XÝ[Û—ÚY‹œ›ÝšY\—ØXØÛÝ[ÚY‹œ›ÝšY\—Ý˜[œØXÝ[Û—ÚY—NÂˆÛÛœÝYØXÞHHÈ˜ÛÛ›™XÝ[Û—ÚY‹œ›ÝšY\—Ý˜[œØXÝ[Û—ÚY—NÂˆÛÛœÝ™XYÙ^\ÈH\Þ[˜È
+
+HOˆÂˆÛÛœÝ\ÝH]ØZ][‹‘‹œ™\\™J”QÓPH[™^Û\Ý
+˜[š×Ý˜[œØXÝ[ÛœÊHŠBˆ˜[È˜[YNˆÝš[™ÎÈ[š\]YNˆ[X™\ŽÈ\X[ˆ[X™\ŽÈÜšYÚ[ŽˆÝš[™ÈOŠ
+NÂˆÛÛœÝ[™^H
+\Ýœ™\Ý[ÈÏÈ×JK™š[™
+
+›ÝÊHOˆ›ÝË›˜[YHOOH˜˜[š×Ý˜[œØXÝ[Ûœ×Ü›ÝšY\—Ý[š\]YHŠNÂˆYˆ
+Z[™^
+H™]\›ˆ[ÂˆYˆ
+[™^[š\]YHOOHH[™^œ\X[OOH[™^›ÜšYÚ[ˆOOH˜ÈŠHÂˆ›ÝÈ™]È\œ›ÜŠ•ÐÒÐWÒQS•UWÒS‘VÕS‘VPÕQŠNÂˆBˆÛÛœÝ]Z[H]ØZ][‹‘‹œ™\\™J”QÓPH[™^Þ[™›Ê˜[š×Ý˜[œØXÝ[Ûœ×Ü›ÝšY\—Ý[š\]YJHŠBˆ˜[ÈÙ\[›Îˆ[X™\ŽÈ˜[YNˆÝš[™È[È\ØÎˆ[X™\ŽÈÛÛˆÝš[™ÎÈÙ^Nˆ[X™\ˆOŠ
+NÂˆÛÛœÝÙ^\ÈH
+]Z[œ™\Ý[ÈÏÈ×JK™š[\Š
+›ÝÊHOˆ›ÝËšÙ^HOOHJKœÛÜ
+
+KŠHOˆKœÙ\[›ÈH‹œÙ\[›ÊNÂˆYˆ
+Ù^\ËœÛÛYJ
+›ÝÊHOˆ\›ÝË›˜[YH›ÝË™\ØÈOOH›ÝË˜ÛÛOOH’ST–HŠJHÂˆ›ÝÈ™]È\œ›ÜŠ•ÐÒÐWÒQS•UWÒS‘VÕS‘VPÕQŠNÂˆBˆ™]\›ˆÙ^\Ë›X\
+
+›ÝÊHOˆ›ÝË›˜[YJNÂˆNÂˆÛÛœÝ™Y›Ü™HH]ØZ]™XYÙ^\Ê
+NÂˆYˆ
+™Y›Ü™OËš›Ú[ŠŸŠHOOH^XÝYš›Ú[ŠŸŠJH™]\›ŽÂˆYˆ
+™Y›Ü™HOOH[	‰ˆ™Y›Ü™Kš›Ú[ŠŸŠHOOHYØXÞKš›Ú[ŠŸŠJHÂˆ›ÝÈ™]È\œ›ÜŠ•ÐÒÐWÒQS•UWÒS‘VÕS‘VPÕQŠNÂˆBˆÛÛœÝÜ™X]HH[‹‘‹œ™\\™JÔ‘PUHS’TUQHS‘VQˆ“ÕVTÕÈ˜[š×Ý˜[œØXÝ[Ûœ×Ü›ÝšY\—Ý[š\]YHÓˆ˜[š×Ý˜[œØXÝ[ÛœÈ
+ÛÛ›™XÝ[Û—ÚY›ÝšY\—ØXØÛÝ[ÚY›ÝšY\—Ý˜[œØXÝ[Û—ÚY
+HŠNÂˆYˆ
+™Y›Ü™HOOH[
+HÂˆ]ØZ]Ü™X]Kœ[Š
+NÂˆH[ÙHÂˆËÈH˜]Ú\È˜[œØXÝ[Û˜[ˆH˜Z[Y™XZ[ÙY\ÈH›Ü›Y\ˆÛÛœÝ˜Z[‚ˆËÈ›È˜[šÈ›ÝË›Ú™XÝ[Û‹ÜˆX[X[Û\ÜÚYšXØ][Ûˆ\È™]Üš][‹‚ˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J‘“ÔS‘VQˆVTÕÈ˜[š×Ý˜[œØXÝ[Ûœ×Ü›ÝšY\—Ý[š\]YHŠKˆÜ™X]KˆJNÂˆBˆYˆ
+
+]ØZ]™XYÙ^\Ê
+JOËš›Ú[ŠŸŠHOOH^XÝYš›Ú[ŠŸŠJHÂˆ›ÝÈ™]È\œ›ÜŠ•ÐÒÐWÒQS•UWÒS‘VÕS‘VPÕQŠNÂˆBŸB‚‚˜\Þ[˜È[˜Ý[Ûˆ[œÝ\™U\ÚÐÛÛ[[œÊ
+HÂˆÛÛœÝÝ\œ™[H]ØZ][‹‘‹œ™\\™J”QÓPHX›WÚ[™›Ê\ÚÜÊHŠK˜[È˜[YNˆÝš[™ÈOŠ
+NÂˆÛÛœÝ˜[Y\ÈH™]ÈÙ]
+
+Ý\œ™[œ™\Ý[È×JK›X\
+
+ÛÛ[[ŠHOˆÛÛ[[‹›˜[YJJNÂˆÛÛœÝÛÛ[[œÎˆ™XÛÜ™Ýš[™ËÝš[™ÏˆHÂˆ\ØÜš\[ÛŽˆ•V“Õ•SQUS	ÉÈ‹ˆ\ÜÚYÛ™YWÙ[]WÚYˆ•V“Õ•SQUS	ÉÈ‹ˆ\™[Ý\Ú×ÚYˆ’S•QÑTˆ‹ˆÚ[™ˆ•V“Õ•SQUS	ô%ô,4-4,4aô,	È‹ˆ™XÝ\œ™[˜ÙWÜ[Nˆ•V“Õ•SQUS	ÉÈ‹ˆ]]ÛX][Û—ÚÙ^Nˆ•V‹ˆ™\]Z\™\×Ø\›Ý˜[ˆ’S•QÑTˆ“Õ•SQUS‹ˆ™\Ý[ˆ•V“Õ•SQUS	ÉÈ‹ˆ™\Ý[Ù]šY[˜ÙNˆ•V“Õ•SQUS	ÉÈ‹ˆÛÛ\]YØ]ˆ•V“Õ•SQUS	ÉÈ‹ˆÜ™X]YØžWÝ\Ù\—ÚYˆ•V“Õ•SQUS	ÉÈ‹ˆNÂˆÛÛœÝZ\ÜÚ[™ÈHØš™XÝ™[šY\ÊÛÛ[[œÊK™š[\Š
+Û˜[YWJHOˆ[˜[Y\Ëš\Ê˜[YJJNÂˆ›Üˆ
+ÛÛœÝÛ˜[YKYš[š][Û—HÙˆZ\ÜÚ[™ÊHÂˆžHÂˆ]ØZ][‹‘‹œ™\\™JSTˆP“H\ÚÜÈQÓÓSSˆ	Û˜[Y_H	ÙYš[š][ÛŸX
+Kœ[Š
+NÂˆHØ]Ú
+\œ›ÜŠHÂˆËÈ\˜[[\ÛÛ]\ÈX^HØœÙ\™HHØ[YHZ\ÜÚ[™ÈÛÛ[[‹ˆXØÙ\Û›HBˆËÈÛÛ™š\›YYÛÛ˜Ý\œ™[™\Z\ŽÈ]™\žHÝ\ˆZYÜ˜][Ûˆ\œ›Üˆ]\ÝÝ\™˜XÙK‚ˆÛÛœÝ™Yœ™\ÚYH]ØZ][‹‘‹œ™\\™J”QÓPHX›WÚ[™›Ê\ÚÜÊHŠK˜[È˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+J™Yœ™\ÚYœ™\Ý[È×JKœÛÛYJ
+ÛÛ[[ŠHOˆÛÛ[[‹›˜[YHOOH˜[YJJH›ÝÈ\œ›ÜŽÂˆBˆBŸB‚˜\Þ[˜È[˜Ý[Ûˆ˜XÚÙš[\ÚÓÝÛ™\œÚ\
+
+HÂˆÛÛœÝX\šÙ\ˆH]ØZ][‹‘‹œ™\\™Jˆ”ÑSPÕÝ]WÝ˜[YH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OIÝ\Ú×ÛÝÛ™\—Ø˜XÚÙš[	È‚ˆ
+K™š\œÝÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+X\šÙ\ËœÝ]WÝ˜[YHOOHTÒ×ÓÕÓ‘T—ÐPÒÑ’SÕ‘T”ÒSÓŠH™]\›ŽÂˆËÈYØXÞHÝÛ™\œÚ\Ø[ˆ™H™XÛÝ™\™YÛ›HÚ[ˆH\Ü^HÛÛXÝX\ÈÂˆËÈ^XÝHÛ™HXÝ]™H\\Ù\ˆÚÜÙHXØÛÝ[[™XYH^\ÝYÚ[ˆH\ÚÂˆËÈØ\ÈÜ™X]Yˆ[XšYÝ[Ý\Ë™XÞXÛY]\™HÜˆ[šÛ›ÝÛˆÛÛXÝÈ[X™\˜][BˆËÈÙY\[ˆ[\H[[]]X›HÝÛ™\ˆ[™\™Y›Ü™H˜Z[ÛÜÙY›Üˆ›Û‹[X[˜YÙ\œË‚ˆËÈ\È[œÈÛ˜ÙNˆHÛÛXÝ™YÚ\Ý\™Y]\ˆ]\Ý™]™\ˆ[š\š][ˆÛ\ÚË‚ˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™JTUH\ÚÜÂˆÑUÜ™X]YØžWÝ\Ù\—ÚYH
+ˆÑSPÕRSŠ\Ý\Ù\œËšY
+Bˆ”“ÓH\Ý\Ù\œÂˆÒT‘HÝÙ\Šš[J\Ý\Ù\œË˜ÛÛXÝ
+JHHÝÙ\Šš[J\ÚÜË˜Ü™X]YØžJJBˆS‘\Ý\Ù\œËœÝ]\ÈH	ô$4.´`´.4,´-t/IÂˆS‘]][YJ\Ý\Ù\œËš[š]YØ]
+HH]][YJ\ÚÜË˜Ü™X]YØ]
+Bˆ
+BˆÒT‘Hš[JÜ™X]YØžWÝ\Ù\—ÚY
+HH	ÉÂˆS‘š[JÜ™X]YØžJHˆ	ÉÂˆS‘
+ˆÑSPÕÓÕS•
+
+ŠBˆ”“ÓH\Ý\Ù\œÂˆÒT‘HÝÙ\Šš[J\Ý\Ù\œË˜ÛÛXÝ
+JHHÝÙ\Šš[J\ÚÜË˜Ü™X]YØžJJBˆS‘\Ý\Ù\œËœÝ]\ÈH	ô$4.´`´.4,´-t/IÂˆS‘]][YJ\Ý\Ù\œËš[š]YØ]
+HH]][YJ\ÚÜË˜Ü™X]YØ]
+Bˆ
+HHX
+Kˆ[‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+	Ý\Ú×ÛÝÛ™\—Ø˜XÚÙš[	ËËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+TÒ×ÓÕÓ‘T—ÐPÒÑ’SÕ‘T”ÒSÓŠKˆJNÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ[œÝ\™PXØÙ\ÜÐÛÛ[[œÊ
+HÂˆÛÛœÝÝ\œ™[H]ØZ][‹‘‹œ™\\™J”QÓPHX›WÚ[™›Ê\Ý\Ù\œÊHŠK˜[È˜[YNˆÝš[™ÈOŠ
+NÂˆÛÛœÝ˜[Y\ÈH™]ÈÙ]
+
+Ý\œ™[œ™\Ý[È×JK›X\
+
+ÛÛ[[ŠHOˆÛÛ[[‹›˜[YJJNÂˆÛÛœÝÛÛ[[œÎˆ™XÛÜ™Ýš[™ËÝš[™ÏˆHÂˆXØÙ\Ü×Ý™\œÚ[ÛŽˆ’S•QÑTˆ“Õ•SQUSH‹ˆ›Ø—Ý]Nˆ•V“Õ•SQUS	ÉÈ‹ˆ[ÝÙYÛ[Ù[\Îˆ•V“Õ•SQUS	ÉÈ‹ˆ˜]›Üš]WÛ[Ù[\Îˆ•V“Õ•SQUS	ÉÈ‹ˆNÂˆ›Üˆ
+ÛÛœÝÛ˜[YKYš[š][Û—HÙˆØš™XÝ™[šY\ÊÛÛ[[œÊJHÂˆYˆ
+˜[Y\Ëš\Ê˜[YJJHÛÛ[YNÂˆžHÂˆ]ØZ][‹‘‹œ™\\™JSTˆP“H\Ý\Ù\œÈQÓÓSSˆ	Û˜[Y_H	ÙYš[š][ÛŸX
+Kœ[Š
+NÂˆHØ]Ú
+\œ›ÜŠHÂˆÛÛœÝ™Yœ™\ÚYH]ØZ][‹‘‹œ™\\™J”QÓPHX›WÚ[™›Ê\Ý\Ù\œÊHŠK˜[È˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+J™Yœ™\ÚYœ™\Ý[È×JKœÛÛYJ
+ÛÛ[[ŠHOˆÛÛ[[‹›˜[YHOOH˜[YJJH›ÝÈ\œ›ÜŽÂˆBˆBŸB‚˜\Þ[˜È[˜Ý[ÛˆÙYY™YÚ\ÝžJ
+HÂˆÛÛœÝ[]TÙYYÈHÂˆÈ“Ô‘ËULH‹´+´`4.ô.4a´/ˆ‹´'´'´'ˆ0ªô$4`4`´)t-t.ô.ô/°®È0­È4`´-t`t`ˆ‹”ÖS•UPÈ‹“Ô‘ËTÔËULH‹´$ô`4`ô/ô/ô,\[È‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈ“Ð’‹ULH‹´'´,tb´-t.´`ˆ‹´&´/´`4/ô`ô`HH0­È4`´-t`t`ˆ‹”ÖS•UPÈ‹“Ð’‹TÔËULH‹´*4.´/´.ô,x $ÌLH‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈ•S•ULH‹´'ô/´-4`4,4-ô-4-t.ô-t/t.4-H‹´*4.´/´.ô,x $ÌLH0­È4`´-t`t`ˆ‹”ÖS•UPÈ‹•S•TÔËULH‹´$ô`4`ô/ô/ô,\[È‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈ”’‹ULH‹´'ô`4/´-t.´`ˆ‹\[ÈÔÈ‹”ÖS•UPÈ‹”’‹TÔËULH‹´(ô/ô`4,4,´.ôcôc´bt,4cÈ4.´/´/4/ô,4/t.4cÈ‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈ‘T‹ULH‹´'t,4/ô`4,4,´.ô-t/t.4-H‹´'´,tbt-t-H4/´,t`4,4-ô/´,´,4/t.4-H0­È4`´-t`t`ˆ‹”ÖS•UPÈ‹‘T‹TÔËULH‹´*4.´/´.ô,x $ÌLH‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈ”ÕËULH‹´(ô`t.ô`ô,ô,‹´'´,t`ôaô-t/t.4-Hx $ÌLH0­È4`´-t`t`ˆ‹”ÖS•UPÈ‹”ÕËTÔËULH‹´*4.´/´.ô,x $ÌLH‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈ‘SKULM‹´(t-t/4c4cÈ‹´(t-t/4c4cÈ8¡%ŒM‹”ÖS•UPÈ‹‘SKTÔËULM‹´*4.´/´.ô,x $ÌLH‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈÓKULM‹´&´.ô.4-t/t`ˆ‹´&´.ô.4-t/t`ˆLM‹”ÖS•UPÈ‹ÓKTÔËULM‹´*4.´/´.ô,x $ÌLH‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈÒULM‹´(4-t,tdt/t/´.ˆ‹´(4-t,tdt/t/´.ˆ8¡%ŒM‹”ÖS•UPÈ‹ÒTÔËULM‹Œô$0­È4`´-t`t`´/´,´,4cÈ4,ô`4`ô/ô/ô,‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈ‘STULÌˆ‹´(t/´`´`4`ô-4/t.4.ˆ‹´'ô-t-4,4,ô/´,È8¡%ŒÌˆ‹–ÖÓPTÒÑQ‹”VT“ÓT“ÕËULÌˆ‹´*4.´/´.ô,x $ÌLH‹´(´`4-t,t`ô-t`ˆ4`t,´-t`4.´.—KˆÈÐS‹ULH‹´&´,4/t-4.4-4,4`ˆ‹´&´,4/t-4.4-4,4`ˆLH‹”ÖS•UPÈ‹ÐS‹TÔËULH‹´*4.´/´.ô,x $ÌLH‹´'t,4/ô`4/´,´-t`4.´-H—KˆÈÓÓ‹ULH‹´'ô/´-4`4cô-4aô.4.ˆ‹´'ô/´-4`4cô-4aô.4.ˆLH‹”ÖS•UPÈ‹ÓÓ‹TÔËULH‹´+t.´`t/ô.ô`ô,4`´,4a´.4cÈ‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈ”ÕTULH‹´'ô/´`t`´,4,´bt.4.ˆ‹´'ô/´`t`´,4,´bt.4.ˆLH‹”ÖS•UPÈ‹”ÕTTÔËULH‹´'ô.4`´,4/t.4-H‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈÕ‹ULH‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLH‹”ÖS•UPÈ‹Õ‹TÔËULH‹´)4.4/t,4/t`tbÈ‹´'t,4/ô`4/´,´-t`4.´-H—KˆÈ“Ð’‹ULˆ‹´'´,tb´-t.´`ˆ‹´(ôaô-t,t/tbô.H4.´/´/4/ô.ô-t.´`H0­È4`´-t`t`ˆ‹”ÖS•UPÈ‹“Ð’‹TÔËULˆ‹´'´,t`4,4-ô/´,´,4/t.4-H‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈ”’‹UL‹´'ô`4/´-t.´`ˆ‹´(ôaô-t,t/tbô.H4,ô/´-Œ‹ÌÈ0­È4`´-t`t`ˆ‹”ÖS•UPÈ‹”’‹TÔËUL‹´'´,t`4,4-ô/´,´,4/t.4-H‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈÑ”‹ULH‹´)´)4'ˆ‹´)´)4'ˆ4'´,t`4,4-ô/´,´,4/t.4-H0­È4`´-t`t`ˆ‹”ÖS•UPÈ‹Ñ”‹TÔËULH‹´)4.4/t,4/t`tbÈ‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈÑ”‹ULˆ‹´)´)4'ˆ‹´)´)4'ˆ4(ô/ô`4,4,´.ôcôc´bt,4cÈ4.´/´/4/ô,4/t.4cÈ0­È4`´-t`t`ˆ‹”ÖS•UPÈ‹Ñ”‹TÔËULˆ‹´)4.4/t,4/t`tbÈ‹´'ô`4/´,´-t`4-t/t/ˆ—KˆÈ‘SKQÔ“ÕTU‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´$ô`4`ô/ô/ô,4`t-t/4-t.H0­È4/´,t-t-ô.ô.4aô-t/t/ˆ‹–ÖÓPTÒÑQ‹”VSQS•ËQÔ“ÕTU‹´)4.4/t,4/t`tbÈ‹´$4,ô`4-t,ô,4`ˆ—KˆÈ‘STQÔ“ÕTU‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´$ô`4`ô/ô/ô,4`t/´`´`4`ô-4/t.4.´/´,ˆ0­È4/´,t-t-ô.ô.4aô-t/t/ˆ‹–ÖÓPTÒÑQ‹”VT“ÓQÔ“ÕTU‹´)4.4/t,4/t`tbÈ‹´$4,ô`4-t,ô,4`ˆ—KˆÈÕ‹ULLH‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLLH0­È4,4`4-t/t-4,‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULLH‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULLˆ‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLLˆ0­È4/´,tb´-t.´`ˆ‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULLˆ‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULLÈ‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLLÈ0­È4,t,4/t.ˆ‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULLÈ‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULL‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLL0­È4-ô,4dt/‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULL‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULLH‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLLH0­È4a4.4/t,4/t`t.4`4/´,´,4/t.4-H‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULLH‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULLˆ‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLLˆ0­È4/4,4`4.´-t`´.4/t,È‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULLˆ‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULLÈ‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLLÈ0­È4/ô`4/´aô.4-H4-4/´at/´-4bÈ‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULLÈ‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULL‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLL0­È4,´/´-ô,´`4,4`´bÈ‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULL‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULLH‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLLH0­È4/t,4.ô/´,ô.‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULLH‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULLL‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLLL0­È4`t/´-4-t`4-´,4/t.4-H‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULLL‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULLLH‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLLLH0­È4-4-tcô`´-t.ôc4/t/´`t`´c‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULLLH‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULLLˆ‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLLLˆ0­È4`ô/ô`4,4,´.ô-t/t.4-H‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULLLˆ‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULLLÈ‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLLLÈ0­È4`t,´cô-ôc‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULLLÈ‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULLM‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLLM0­È4a4.4/t,4/t`t/´,´,4cÈ4-4-tcô`´-t.ôc4/t/´`t`´c‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULLM‹´)4.4/t,4/t`tbÈ‹´'ô`4/´-t.´a´.4cÈ—KˆÈÕ‹ULNNH‹´&´/´/t`´`4,4,ô-t/t`ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆLNNH0­È4/t-H4`4,4-ô/t-t`t-t/t/ˆ‹–ÖÓPTÒÑQ‹“ÑËPÕ‹ULNNH‹´)4.4/t,4/t`tbÈ‹´(´`4-t,t`ô-t`ˆ4`t,´-t`4.´.—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+[]TÙYYË›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™Jˆ’S”ÑT•ÔˆQÓ“Ô‘HS•È[]Y\È
+Y[]WÝ\K\Ü^WÛ˜[YKÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÜ™XÛÜ™ÚYØÛÜK]WÜ]X[]KÜ™X]YØžJHSQTÈ
+ËËËËËËË	ÜÞ\Ý[K\ÙYY	ÊH‚ˆ
+K˜š[™
+‹‹œ›ÝÊJJNÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU[]WÝ\HH	ô+´`4.ô.4a´/‰Ë\Ü^WÛ˜[YHH	ô'´'´'ˆ0ªô$4`4`´)t-t.ô.ô/°®È0­È4`´-t`t`‰Ë]WÜ]X[]HH	ô'ô`4/´,´-t`4-t/t/‰ÈÒT‘HYH	ÓÔ‘ËULIÈS‘Ü™X]YØžHH	ÜÞ\Ý[K\ÙYY	ÈŠKˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YHH	ô(t-t/4c4cÈ8¡%ŒM	Ë]WÜ]X[]HH	ô'ô`4/´,´-t`4-t/t/‰ÈÒT‘HYH	ÑSKULM	ÈS‘Ü™X]YØžHH	ÜÞ\Ý[K\ÙYY	ÈS‘\Ü^WÛ˜[YHH	ô(t-t/4c4cÈLM	ÈŠKˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YHH	ô'ô-t-4,4,ô/´,È8¡%ŒÌ‰ËÛÝ\˜ÙWÜÞ\Ý[HH	ÖÖÓPTÒÑQ	ËÛÝ\˜ÙWÜ™XÛÜ™ÚYH	ÔVT“ÓT“ÕËULÌ‰Ë]WÜ]X[]HH	ô(´`4-t,t`ô-t`ˆ4`t,´-t`4.´.	ÈÒT‘HYH	ÑSTULÌ‰ÈS‘Ü™X]YØžHH	ÜÞ\Ý[K\ÙYY	ÈS‘\Ü^WÛ˜[YHH	ô(t/´`´`4`ô-4/t.4.ˆLÌˆ0­È4/ô-t-4,4,ô/´,ÉÈŠKˆJNÂ‚ˆÛÛœÝ[šÔÙYYÈHÂˆÈ‘SKULM‹ÒULM‹´(t-t/4c4cÈ8¡¤ˆ4`4-t,tdt/t/´.ˆ—KˆÈÓKULM‹‘SKULM‹´&´.ô.4-t/t`´`t.´,4cÈ4.´,4`4`´/´aô.´,4`t-t/4c4.—KˆÈ‘SKQÔ“ÕTU‹‘SKULM‹´(´-t`t`´/´,´bô.H4/ô`4.4/4-t`4`t-t/4c4.0­È4/t-H4-4-t`´,4.ô.4-ô,4a´.4cÈÖ—KˆÈÒULM‹”ÕËULH‹´'ô/´.ô`ôaô,4-t`ˆ4`ô`t.ô`ô,ô`È—KˆÈ‘STULÌˆ‹•S•ULH‹´(4,4,t/´`´,4-t`ˆ4,ˆ4/ô/´-4`4,4-ô-4-t.ô-t/t.4.—KˆÈ•S•ULH‹“Ô‘ËULH‹´$´at/´-4.4`ˆ4,ˆ4c´`4.ô.4a´/ˆ—KˆÈ“Ð’‹ULH‹“Ô‘ËULH‹´'ô`4.4/t,4-4.ô-t-´.4`ˆ4c´`4.ô.4a´`È—KˆÈ”’‹ULH‹“Ô‘ËULH‹´'ô`4/´-t.´`ˆ4c´`4.ô.4a´,—KˆÈ”ÕTULH‹”ÕËULH‹´'ô/´`t`´,4,´.ôcô-t`ˆ4-4.ôcÈ4`ô`t.ô`ô,ô.—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+[šÔÙYYË›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™Jˆ’S”ÑT•ÔˆQÓ“Ô‘HS•È[]WÛ[šÜÈ
+œ›ÛWÙ[]WÚY×Ù[]WÚY™[][Û—Ý\KÜ™X]YØžJHSQTÈ
+ËËË	ÜÞ\Ý[K\ÙYY	ÊH‚ˆ
+K˜š[™
+‹‹œ›ÝÊJJNÂ‚ˆÛÛœÝØÝ[Y[ÙYYÈHÂˆÈ‘SKULM‹‘ÑËULŒ‹LM‹´%4/´,ô/´,´/´`4`H4`t-t/4c4dt.H‹´$4.´`´`ô,4.ô-t/H‹ŒŒËLLÌH‹”ÖS•UPÈ—KˆÈ‘STULÌˆ‹‘STQÑËULÌˆ‹´(´`4`ô-4/´,´/´.H4-4/´,ô/´,´/´`‹´'t,4/ô`4/´,´-t`4.´-H‹ˆ‹–ÖÓPTÒÑQ—KˆÈ“Ô‘ËULH‹“Ô‘ËPÐT‘ULH‹´&´,4`4`´/´aô.´,4c´`4.ô.4a´,‹´$4.´`´`ô,4.ô-t/H‹ˆ‹”ÖS•UPÈ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+ØÝ[Y[ÙYYË›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™Jˆ’S”ÑT•S•È[]WÙØÝ[Y[È
+[]WÚY]KØÝ[Y[Ý\KÝ]\Ë˜[YÝ[[ÛÝ\˜ÙKÜ™X]YØžJHÑSPÕËËËËËË	ÜÞ\Ý[K\ÙYY	ÈÒT‘H“ÕVTÕÈ
+ÑSPÕH”“ÓH[]WÙØÝ[Y[ÈÒT‘H[]WÚYHÈS‘]HHÊH‚ˆ
+K˜š[™
+‹‹œ›ÝË›ÝÖÌK›ÝÖÌWJJJNÂŸB‚˜\Þ[˜È[˜Ý[ÛˆÙYYÛÜšÙ›ÝÊ
+HÂˆ]ØZ][‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È[]Y\È
+Y[]WÝ\K\Ü^WÛ˜[YKÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÜ™XÛÜ™ÚYØÛÜK]WÜ]X[]KÜ™X]YØžJHSQTÈ
+	ÑSTUL	Ë	ô(t/´`´`4`ô-4/t.4.‰Ë	ô$4-4/4.4/t.4`t`´`4,4`´/´`4`t.4`t`´-t/4bÈ8¡%	Ë	ÔÖS•UPÉË	ÑSTTÔËUL	Ë	ô(ô/ô`4,4,´.ôcôc´bt,4cÈ4.´/´/4/ô,4/t.4cÉË	ô'ô`4/´,´-t`4-t/t/‰Ë	ÜÞ\Ý[K\ÙYY	ÊHŠKœ[Š
+NÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈÛÜšÙ›Ý×ÙØÝ[Y[È
+Y]KØÝ[Y[Ý\KÝ\œ™[Ý™\œÚ[Û‹Ý]\Ë˜[YÝ[[ÝÛ™\—Ù[]WÚYÛÝ\˜ÙKÜ™X]YØžJHSQTÈ
+	ÑÑËULŒ‹L	Ë	ô%4/´,ô/´,´/´`4`H4/ô/´-4`4cô-4aô.4.´/´/	Ë	ô%4/´,ô/´,´/´`	Ë‹	ô&4`t`´-t.´,4-t`‰Ë	ÌŒ‹LKL‰Ë	ÑSTUL	Ë	ÔÖS•UPÉË	ÜÞ\Ý[K\ÙYY	ÊHŠKˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈØÝ[Y[Ý™\œÚ[ÛœÈ
+ØÝ[Y[ÚY™\œÚ[Û‹›ÝK™Y™\™[˜ÙKÜ™X]YØžJHSQTÈ
+	ÑÑËULŒ‹L	ËK	ô&4`tat/´-4/t,4cÈ4,´-t`4`t.4cÈ4-4/´,ô/´,´/´`4,	Ë	ô&´,4`4`´/´aô.´,4-4/´,ô/´,´/´`4,0­È4,´-t`4`t.4cÈIË	ÜÞ\Ý[K\ÙYY	ÊHŠKˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈØÝ[Y[Ý™\œÚ[ÛœÈ
+ØÝ[Y[ÚY™\œÚ[Û‹›ÝK™Y™\™[˜ÙKÜ™X]YØžJHSQTÈ
+	ÑÑËULŒ‹L	Ë‹	ô%4/´/ô/´.ô/t.4`´-t.ôc4/t/´-H4`t/´,ô.ô,4b4-t/t.4-H0­È4`´-t`t`‰Ë	ô%4/´/ô/´.ô/t.4`´-t.ôc4/t/´-H4`t/´,ô.ô,4b4-t/t.4-H0­È4,´-t`4`t.4cÈ‰Ë	ÜÞ\Ý[K\ÙYY	ÊHŠKˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈØ›YØ][ÛœÈ
+ØÝ[Y[ÚY]KYWÙ]KÝÛ™\—Ù[]WÚYÝ]\ËØ\›š[™×Ù^\ËÜ™X]YØžJHSQTÈ
+	ÑÑËULŒ‹L	Ë	ô'ô`4/´-4.ô.4`´c4.4.ô.4-ô,4.´`4bô`´c4-4/´,ô/´,´/´`	Ë	ÌŒ‹LKL‰Ë	ÑSTUL	Ë	ô'´`´.´`4bô`´/‰ËÌ	ÜÞ\Ý[K\ÙYY	ÊHŠKˆJNÂ‚ˆ]ØZ][‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•È\ÚÜÈ
+ˆ]KÝÛ™\‹YWÙ]Kš[Üš]KÝ]\ËÛÝ\˜ÙWÝ\KÛÝ\˜ÙWÚY\ØÜš\[Û‹ˆ\ÜÚYÛ™YWÙ[]WÚYÚ[™]]ÛX][Û—ÚÙ^K™\]Z\™\×Ø\›Ý˜[Ü™X]YØžBˆ
+HSQTÈ
+ˆ	ô'ô`4/´-4.ô.4`´c4.4.ô.4-ô,4.´`4bô`´c4-4/´,ô/´,´/´`8¡%Œ	Ë	ô$4-4/4.4/t.4`t`´`4,4`´/´`4`t.4`t`´-t/4bÉË	ÌŒ‹LLŽ	Ëˆ	ô$´bô`t/´.´.4.IË	ô$´at/´-4côbt.4-IË	ô'´,tcô-ô,4`´-t.ôc4`t`´,´/ˆ4-4/´,ô/´,´/´`4,	Ë	ÑÑËULŒ‹L	Ëˆ	ô(t`4/´.ˆ4-4/´,ô/´,´/´`4,4.4`t`´-t.´,4-t`ˆ‹ŒKŒŒ‹ˆ4'ô`4/´,´-t`4.4`´c4/´,tcô-ô,4`´-t.ôc4`t`´,´,4`t/´,ô.ô,4`t/´,´,4`´c4`4-tb4-t/t.4-H4.4`t/´at`4,4/t.4`´c4`4-t-ô`ô.ôc4`´,4`‹‰Ëˆ	ÑSTUL	Ë	ô$4,´`´/´-ô,4-4,4aô,	Ë	ÐÓÓ•PÕÑVT–N‘ÑËULŒ‹L	ËK	ÜÞ\Ý[KX]]ÛX][Û‰Âˆ
+X
+Kœ[Š
+NÂ‚ˆÛÛœÝ]]Õ\ÚÈH]ØZ][‹‘‹œ™\\™J”ÑSPÕY”“ÓH\ÚÜÈÒT‘H]]ÛX][Û—ÚÙ^HH	ÐÓÓ•PÕÑVT–N‘ÑËULŒ‹L	ÈŠK™š\œÝÈYˆ[X™\ˆOŠ
+NÂˆYˆ
+X]]Õ\ÚÊH™]\›ŽÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È\Ú×ÝØ]Ú\œÈ
+\Ú×ÚY[]WÚYÜ™X]YØžJHSQTÈ
+Ë	Ô“ÓN‘T‘PÕÔ‰Ë	ÜÞ\Ý[KX]]ÛX][Û‰ÊHŠK˜š[™
+]]Õ\ÚËšY
+Kˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È\Ú×Ø\›Ý˜[È
+\Ú×ÚYÝ\Û˜[YKÝ]\ÊHSQTÈ
+Ë	ô(4-tb4-t/t.4-H4`4`ô.´/´,´/´-4.4`´-t.ôcÉË	ô'´-´.4-4,4-t`‰ÊHŠK˜š[™
+]]Õ\ÚËšY
+Kˆ[‹‘‹œ™\\™J’S”ÑT•S•È\Ú×ØÚXÚÛ\Ý
+\Ú×ÚY]KÜ™X]YØžJHÑSPÕË	ô'ô`4/´,´-t`4.4`´c4`ô`t.ô/´,´.4cÈ4/ô`4/´-4.ô-t/t.4cÉË	ÜÞ\Ý[KX]]ÛX][Û‰ÈÒT‘H“ÕVTÕÈ
+ÑSPÕH”“ÓH\Ú×ØÚXÚÛ\ÝÒT‘H\Ú×ÚYHÈS‘]HH	ô'ô`4/´,´-t`4.4`´c4`ô`t.ô/´,´.4cÈ4/ô`4/´-4.ô-t/t.4cÉÊHŠK˜š[™
+]]Õ\ÚËšY]]Õ\ÚËšY
+Kˆ[‹‘‹œ™\\™J’S”ÑT•S•È\Ú×ØÚXÚÛ\Ý
+\Ú×ÚY]KÜ™X]YØžJHÑSPÕË	ô(t/´,ô.ô,4`t/´,´,4`´c4`4-tb4-t/t.4-H4`H4`4`ô.´/´,´/´-4.4`´-t.ô-t/	Ë	ÜÞ\Ý[KX]]ÛX][Û‰ÈÒT‘H“ÕVTÕÈ
+ÑSPÕH”“ÓH\Ú×ØÚXÚÛ\ÝÒT‘H\Ú×ÚYHÈS‘]HH	ô(t/´,ô.ô,4`t/´,´,4`´c4`4-tb4-t/t.4-H4`H4`4`ô.´/´,´/´-4.4`´-t.ô-t/	ÊHŠK˜š[™
+]]Õ\ÚËšY]]Õ\ÚËšY
+Kˆ[‹‘‹œ™\\™J’S”ÑT•S•È\Ú×ØÚXÚÛ\Ý
+\Ú×ÚY]KÜ™X]YØžJHÑSPÕË	ô%ô,4a4.4.´`t.4`4/´,´,4`´c4/t/´,´`ôcˆ4,´-t`4`t.4cˆ4-4/´.´`ô/4-t/t`´,	Ë	ÜÞ\Ý[KX]]ÛX][Û‰ÈÒT‘H“ÕVTÕÈ
+ÑSPÕH”“ÓH\Ú×ØÚXÚÛ\ÝÒT‘H\Ú×ÚYHÈS‘]HH	ô%ô,4a4.4.´`t.4`4/´,´,4`´c4/t/´,´`ôcˆ4,´-t`4`t.4cˆ4-4/´.´`ô/4-t/t`´,	ÊHŠK˜š[™
+]]Õ\ÚËšY]]Õ\ÚËšY
+Kˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È\Ú×ÙØÝ[Y[È
+\Ú×ÚYØÝ[Y[ÚYÜ™X]YØžJHSQTÈ
+Ë	ÑÑËULŒ‹L	Ë	ÜÞ\Ý[KX]]ÛX][Û‰ÊHŠK˜š[™
+]]Õ\ÚËšY
+Kˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È›ÝYšXØ][ÛœÈ
+™XÚ\Y[Ù[]WÚY›ÝYšXØ][Û—Ý\K]K›ÙKÛÝ\˜ÙWÝ\KÛÝ\˜ÙWÚYÝ]\ËY\ÚÙ^JHSQTÈ
+	Ô“ÓN‘T‘PÕÔ‰Ë	ô(t`4/´.ˆ4/´,tcô-ô,4`´-t.ôc4`t`´,´,	Ë	ô%4/´,ô/´,´/´`8¡%Œ4.4`t`´-t.´,4-t`ˆ4aô-t`4-t-ÈLˆ4-4/t-t.IË	ô(´`4-t,t`ô-t`´`tcÈ4`4-tb4-t/t.4-H4/ˆ4/ô`4/´-4.ô-t/t.4.4.4.ô.4-ô,4.´`4bô`´.4.4-4/´,ô/´,´/´`4,8¡%Œ‰Ë	ÙØÝ[Y[	Ë	ÑÑËULŒ‹L	Ë	ô't/´,´/´-IË	ÐÓÓ•PÕÑVT–N‘ÑËULŒ‹L‘T‘PÕÔ‰ÊHŠKˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È\ØØ[][ÛœÈ
+\Ú×ÚY]™[™X\ÛÛ‹Ý]\Ë™XÚ\Y[Ù[]WÚY
+HSQTÈ
+ËK	ô%4/ˆ4`t`4/´.´,4-4/´,ô/´,´/´`4,4/4-t/tc4b4-HM4-4/t-t.IË	ô'´`´.´`4bô`´,	Ë	Ô“ÓN‘T‘PÕÔ‰ÊHŠK˜š[™
+]]Õ\ÚËšY
+Kˆ[‹‘‹œ™\\™J’S”ÑT•S•È]Y]Ù]™[È
+XÝÜ‹XÝ[Û‹[]WÝ\K[]WÚY^[ØY
+HÑSPÕ	ÜÞ\Ý[KX]]ÛX][Û‰Ë	Ý\ÚË˜]]×ØÜ™X]Y	Ë	Ý\ÚÉËÐTÕ
+ÈTÈV
+K	Þ×œÛÝ\˜ÙRYŽ—‘ÑËULŒ‹L‹œ[WŽ—˜ÛÛ˜XÝÙ^\žWŸIÈÒT‘H“ÕVTÕÈ
+ÑSPÕH”“ÓH]Y]Ù]™[ÈÒT‘HXÝ[ÛˆH	Ý\ÚË˜]]×ØÜ™X]Y	ÈS‘[]WÝ\HH	Ý\ÚÉÈS‘[]WÚYHÐTÕ
+ÈTÈV
+JHŠK˜š[™
+]]Õ\ÚËšY]]Õ\ÚËšY
+KˆJNÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YOIô$4-4/4.4/t.4`t`´`4,4`´/´`4`t.4`t`´-t/4bÈ8¡%	ÈÒT‘HYIÑSTUL	ÈS‘Ü™X]YØžOIÜÞ\Ý[K\ÙYY	ÈS‘\Ü^WÛ˜[YOIô$4-4/4.4/t.4`t`´`4,4`´/´`L	ÈŠKˆ[‹‘‹œ™\\™J•TUHÛÜšÙ›Ý×ÙØÝ[Y[ÈÑU]OIô%4/´,ô/´,´/´`4`H4/ô/´-4`4cô-4aô.4.´/´/	ÈÒT‘HYIÑÑËULŒ‹L	ÈS‘Ü™X]YØžOIÜÞ\Ý[K\ÙYY	ÈS‘]OIô%4/´,ô/´,´/´`4`H4/ô/´-4`4cô-4aô.4.´/´/0­È4`´-t`t`‰ÈŠKˆ[‹‘‹œ™\\™J•TUHØÝ[Y[Ý™\œÚ[ÛœÈÑU™Y™\™[˜ÙOIô&´,4`4`´/´aô.´,4-4/´,ô/´,´/´`4,0­È4,´-t`4`t.4cÈIÈÒT‘HØÝ[Y[ÚYIÑÑËULŒ‹L	ÈS‘™\œÚ[ÛLHS‘Ü™X]YØžOIÜÞ\Ý[K\ÙYY	ÈS‘™Y™\™[˜ÙOIÔÖS•UPÎ‘ÑËULŒ‹LŒIÈŠKˆ[‹‘‹œ™\\™J•TUHØÝ[Y[Ý™\œÚ[ÛœÈÑU™Y™\™[˜ÙOIô%4/´/ô/´.ô/t.4`´-t.ôc4/t/´-H4`t/´,ô.ô,4b4-t/t.4-H0­È4,´-t`4`t.4cÈ‰ÈÒT‘HØÝ[Y[ÚYIÑÑËULŒ‹L	ÈS‘™\œÚ[ÛLˆS‘Ü™X]YØžOIÜÞ\Ý[K\ÙYY	ÈS‘™Y™\™[˜ÙOIÔÖS•UPÎ‘ÑËULŒ‹LŒ‰ÈŠKˆ[‹‘‹œ™\\™J•TUH\ÚÜÈÑU]OIô'ô`4/´-4.ô.4`´c4.4.ô.4-ô,4.´`4bô`´c4-4/´,ô/´,´/´`8¡%Œ	ÈÒT‘H]]ÛX][Û—ÚÙ^OIÐÓÓ•PÕÑVT–N‘ÑËULŒ‹L	ÈS‘Ü™X]YØžOIÜÞ\Ý[KX]]ÛX][Û‰ÈS‘]OIô'ô`4/´-4.ô.4`´c4.4.ô.4-ô,4.´`4bô`´c4-4/´,ô/´,´/´`ÑËULŒ‹L	ÈŠKˆ[‹‘‹œ™\\™J•TUH\ÚÜÈÑUÝÛ™\Iô$4-4/4.4/t.4`t`´`4,4`´/´`4`t.4`t`´-t/4bÉÈÒT‘H]]ÛX][Û—ÚÙ^OIÐÓÓ•PÕÑVT–N‘ÑËULŒ‹L	ÈS‘Ü™X]YØžOIÜÞ\Ý[KX]]ÛX][Û‰ÈS‘ÝÛ™\Iô$4-4/4.4/t.4`t`´`4,4`´/´`L	ÈŠKˆ[‹‘‹œ™\\™J•TUH›ÝYšXØ][ÛœÈÑU]OIô%4/´,ô/´,´/´`8¡%Œ4.4`t`´-t.´,4-t`ˆ4aô-t`4-t-ÈLˆ4-4/t-t.IÈÒT‘HY\ÚÙ^OIÐÓÓ•PÕÑVT–N‘ÑËULŒ‹L‘T‘PÕÔ‰ÈS‘]OIô%4/´,ô/´,´/´`4.4`t`´-t.´,4-t`ˆ4aô-t`4-t-ÈLˆ4-4/t-t.IÈŠKˆ[‹‘‹œ™\\™J•TUH›ÝYšXØ][ÛœÈÑU›ÙOIô(´`4-t,t`ô-t`´`tcÈ4`4-tb4-t/t.4-H4/ˆ4/ô`4/´-4.ô-t/t.4.4.4.ô.4-ô,4.´`4bô`´.4.4-4/´,ô/´,´/´`4,8¡%Œ‰ÈÒT‘HY\ÚÙ^OIÐÓÓ•PÕÑVT–N‘ÑËULŒ‹L‘T‘PÕÔ‰ÈS‘›ÙOIÑÑËULŒ‹Lˆ4`´`4-t,t`ô-t`´`tcÈ4`4-tb4-t/t.4-H4/ˆ4/ô`4/´-4.ô-t/t.4.4.4.ô.4-ô,4.´`4bô`´.4.‰ÈŠKˆJNÂŸB‚\Hš[˜[˜ÙTÙYY[™HHÂˆ›ÝÎˆ[X™\ŽÂˆØ]YÛÜžNˆÝš[™ÎÂˆ[[Ý[Îˆ[X™\–×NÂˆ™\ÜÛ\ÜÎˆÝš[™ÎÂˆÛÝ[\œ\NˆÝš[™ÎÂˆÛÛ˜XÝˆÝš[™ÎÂˆØÝ[Y[ˆÝš[™ÎÂˆÙœÎˆÝš[™ÎÂŸNÂ‚˜\Þ[˜È[˜Ý[ÛˆÙYYš[˜[˜ÙJ
+HÂˆÛÛœÝ\š[ÙÈHÈŒŒ‹LH‹ŒŒ‹Lˆ‹ŒŒ‹LÈ‹ŒŒ‹L—NÂˆÛÛœÝ\š[Ù]\ÈHÈŒŒ‹LKLÌH‹ŒŒ‹L‹LŽ‹ŒŒ‹LËLÌH‹ŒŒ‹LLÌ—NÂˆÛÛœÝ\š[ÙÛÛ[[œÈHÈˆ‹È‹‘‹‘H—NÂˆÛÛœÝ™XÙZ\Ý[ÈHÍMÍŽMKÌÎÍÌLNMÍKKLLÎLNÂˆÛÛœÝÝ]›ÝÕÝ[ÈHÍÍÍŒŒKÍŒŒMMÍÍÍLŒŒKŒWNÂˆÛÛœÝ™XÙZ\Îˆš[˜[˜ÙTÙYY[™V×HHÂˆÈ›ÝÎˆKØ]YÛÜžNˆ´$´/t-t`4-t,4.ô.4-ô,4a´.4/´/t/tbô-H4-4/´at/´-4bÈ‹[[Ý[ÎˆÌLÍLK™\ÜÛ\ÜÎˆ´%4/´at/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULLÈ‹ÛÛ˜XÝˆˆ‹ØÝ[Y[ˆ‘ÐËUS“Ó“ÔˆKˆÈ›ÝÎˆ‹Ø]YÛÜžNˆ´$´/´-ô,´`4,4`ˆ4`t`4-t-4`t`´,ˆ‹[[Ý[ÎˆÌNMKK™\ÜÛ\ÜÎˆ´'t-H4,´.´.ôc´aô-t/t/ˆ4,ˆ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULL‹ÛÛ˜XÝˆˆ‹ØÝ[Y[ˆ‘ÐËUT‘Q•S‘ˆKˆÈ›ÝÎˆLØ]YÛÜžNˆ´%4/´at/´-4bÈ4,t`ô-4`ôbt.4aH4/ô-t`4.4/´-4/´,ˆ‹[[Ý[ÎˆÍMLMMNNMŽKMŒÍŒK™\ÜÛ\ÜÎˆ´%4/´at/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\Nˆ‘SKQÔ“ÕTU‹ÛÛ˜XÝˆ‘ÑËQÔ“ÕTU‹ØÝ[Y[ˆ”‘QËTVKUˆKˆÈ›ÝÎˆL‹Ø]YÛÜžNˆ´%4/´at/´-4bÈ4,t`ô-4`ôbt.4aH4/ô-t`4.4/´-4/´,ˆ0­È4/ô/´`t/´,t.4cÈ‹[[Ý[ÎˆÌMLK™\ÜÛ\ÜÎˆ´%4/´at/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\Nˆ‘SKQÔ“ÕTU‹ÛÛ˜XÝˆ‘ÑËQÔ“ÕTU‹ØÝ[Y[ˆ”‘QËPRQUˆKˆÈ›ÝÎˆLËØ]YÛÜžNˆ´%4-t`´`t.´.4.H4`t,4-4.4`4,4-ô,´.4,´,4c´bt.4.H4a´-t/t`´`‹[[Ý[ÎˆÍŒLŒNLÎÌŒNŒÍŒKŒMÍÎWK™\ÜÛ\ÜÎˆ´%4/´at/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\Nˆ‘SKQÔ“ÕTU‹ÛÛ˜XÝˆ‘ÑËQÔ“ÕTU‹ØÝ[Y[ˆ”‘QËTVKUˆKˆÈ›ÝÎˆŒËØ]YÛÜžNˆ´'ô.4`´,4/t.4-H4,ˆ4-4-t`´`t.´/´/4`t,4-4`È‹[[Ý[ÎˆÌLŒŒLŽMLLWK™\ÜÛ\ÜÎˆ´%4/´at/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\Nˆ‘SKQÔ“ÕTU‹ÛÛ˜XÝˆ‘ÑËQÔ“ÕTU‹ØÝ[Y[ˆ”‘QËQ“ÓÑUˆKˆÈ›ÝÎˆŽØ]YÛÜžNˆ´'ô`4/´aô.4-H4-4/´at/´-4bÈ‹[[Ý[ÎˆÌLÌK™\ÜÛ\ÜÎˆ´%4/´at/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULLÈ‹ÛÛ˜XÝˆˆ‹ØÝ[Y[ˆ‘ÐËUSÕTˆˆKˆÈ›ÝÎˆÌKØ]YÛÜžNˆ´$´/´-ô,´`4,4`ˆ4-ô,4.t/4,‹[[Ý[ÎˆÌLK™\ÜÛ\ÜÎˆ´)4.4/t,4/t`t.4`4/´,´,4/t.4-H‹ÛÝ[\œ\NˆÕ‹ULL‹ÛÛ˜XÝˆ‘ÑËUSÐSˆ‹ØÝ[Y[ˆ‘ÐËUSÐSˆˆKˆNÂˆÛÛœÝÝ]›ÝÜÎˆš[˜[˜ÙTÙYY[™V×HHÂˆÈ›ÝÎˆÍKØ]YÛÜžNˆ´$4`4-t/t-4,‹[[Ý[ÎˆÍLMÌÍ‹LLLŒK™\ÜÛ\ÜÎˆ´(4,4`tat/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULLH‹ÛÛ˜XÝˆ‘ÑËUT‘S•‹ØÝ[Y[ˆPÕUT‘S•ˆKˆÈ›ÝÎˆÍ‹Ø]YÛÜžNˆ´$4`4-t/t-4,4,t,4`t`t-t.t/t,‹[[Ý[ÎˆÌLLMLK™\ÜÛ\ÜÎˆ´(4,4`tat/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULLˆ‹ÛÛ˜XÝˆ‘ÑËUTÓÓ‹ØÝ[Y[ˆPÕUTÓÓˆKˆÈ›ÝÎˆÎØ]YÛÜžNˆ´$t,4/t.´/´,´`t.´/´-H4/´,t`t.ô`ô-´.4,´,4/t.4-H‹[[Ý[ÎˆÍŒŽÍŒNÎNKŽŒMŒÎLLK™\ÜÛ\ÜÎˆ´(4,4`tat/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULLÈ‹ÛÛ˜XÝˆ‘ÑËUPS’È‹ØÝ[Y[ˆS’ËQ‘QKUˆKˆÈ›ÝÎˆËØ]YÛÜžNˆ´$´/´-ô,´`4,4`ˆ4-ô,4.t/4,‹[[Ý[ÎˆÌLÌLÌLÌLÌK™\ÜÛ\ÜÎˆ´)4.4/t,4/t`t.4`4/´,´,4/t.4-H‹ÛÝ[\œ\NˆÕ‹ULL‹ÛÛ˜XÝˆ‘ÑËUSÐSˆ‹ØÝ[Y[ˆ‘ÐËUSÐSˆˆKˆÈ›ÝÎˆ‹Ø]YÛÜžNˆ´%4.4,´.4-4-t/t-4bÈ4.4.ô.4-ô.4/t,È‹[[Ý[ÎˆÌNŒŒÎŒËNŒŒÍËNMLNŒŒÍËK™\ÜÛ\ÜÎˆ´)4.4/t,4/t`t.4`4/´,´,4/t.4-H‹ÛÝ[\œ\NˆÕ‹ULLH‹ÛÛ˜XÝˆ‘PËUQUˆ‹ØÝ[Y[ˆ‘PËUQUˆˆKˆÈ›ÝÎˆMØ]YÛÜžNˆ´%ô,4`4,4,t/´`´/t,4cÈ4/ô.ô,4`´,‹[[Ý[ÎˆÌÍŒÎKMÌLKŒKÍÌLÎÌËÎLÌKK™\ÜÛ\ÜÎˆ´(4,4`tat/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\Nˆ‘STQÔ“ÕTU‹ÛÛ˜XÝˆ”VT“ÓU‹ØÝ[Y[ˆ”VT“ÓULŒˆˆKˆÈ›ÝÎˆŒ‹Ø]YÛÜžNˆ´'4,4`4.´-t`´.4/t,È‹[[Ý[ÎˆÌLLŒŒLMKŒÌ—K™\ÜÛ\ÜÎˆ´(4,4`tat/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULLˆ‹ÛÛ˜XÝˆ‘ÑËUSRÕ‹ØÝ[Y[ˆPÕUSRÕˆKˆÈ›ÝÎˆ‹Ø]YÛÜžNˆ´'t,4.ô/´,ô.4-ô,4`t/´`´`4`ô-4/t.4.´/´,ˆ‹[[Ý[ÎˆÍŒŒŒŒKŒÎNKŽKLÎÌMŽKÌMÍÍ‹Œ—K™\ÜÛ\ÜÎˆ´(4,4`tat/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULLH‹ÛÛ˜XÝˆˆ‹ØÝ[Y[ˆ•VUTVT“ÓˆKˆÈ›ÝÎˆÌËØ]YÛÜžNˆ´'ô`4/´-4`ô.´`´bÈ‹[[Ý[ÎˆÍŒLM‹ÍÍMÍMKMŒMË‹WK™\ÜÛ\ÜÎˆ´(4,4`tat/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\Nˆ”ÕTULH‹ÛÛ˜XÝˆ‘ÑËUQ“ÓÑ‹ØÝ[Y[ˆPÕUQ“ÓÑˆKˆÈ›ÝÎˆÎØ]YÛÜžNˆ´(t/´-4-t`4-´,4/t.4-H4/´,tb´-t.´`´/´,ˆ‹[[Ý[ÎˆÎMLŒÌË‹MÌNÎKÎÍÍ‹KK™\ÜÛ\ÜÎˆ´(4,4`tat/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULLL‹ÛÛ˜XÝˆ‘ÑËUQPÒSUH‹ØÝ[Y[ˆPÕUQPÒSUHˆKˆÈ›ÝÎˆËØ]YÛÜžNˆ´(4,4`tat/´-4bÈ4/ô/ˆ4-4-tcô`´-t.ôc4/t/´`t`´.‹[[Ý[ÎˆÍMNKŽMLÌŒŒÍËŒŒLMMMLÎN—K™\ÜÛ\ÜÎˆ´(4,4`tat/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULLLH‹ÛÛ˜XÝˆ”‘TKUPPÕU’UH‹ØÝ[Y[ˆPÕUPPÕU’UHˆKˆÈ›ÝÎˆLØ]YÛÜžNˆ´(ô/ô`4,4,´.ôcôc´bt,4cÈ4.´/´/4/ô,4/t.4cÈ‹[[Ý[ÎˆÌÌMŒÌÌMMŒÍŒÌŒK™\ÜÛ\ÜÎˆ´(4,4`tat/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULLLˆ‹ÛÛ˜XÝˆ‘ÑËUSPSQÑSQS•‹ØÝ[Y[ˆPÕUSPSQÑSQS•‹ÙœŽˆÑ”‹ULˆˆKˆÈ›ÝÎˆL‹Ø]YÛÜžNˆ´(t,´cô-ôc4.4.4/t`´-t`4/t-t`ˆ‹[[Ý[ÎˆÌÍÍLLNNK™\ÜÛ\ÜÎˆ´(4,4`tat/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULLLÈ‹ÛÛ˜XÝˆ‘ÑËUPÓÓSTÈ‹ØÝ[Y[ˆPÕUPÓÓSTÈˆKˆÈ›ÝÎˆLËØ]YÛÜžNˆ´)4.4/t,4/t`t/´,´,4cÈ4-4-tcô`´-t.ôc4/t/´`t`´c‹[[Ý[ÎˆÌMLLŒLŽLK™\ÜÛ\ÜÎˆ´)4.4/t,4/t`t.4`4/´,´,4/t.4-H‹ÛÝ[\œ\NˆÕ‹ULLM‹ÛÛ˜XÝˆ‘ÑËUQ’Sˆ‹ØÝ[Y[ˆ‘ÐËUQ’SˆˆKˆNÂ‚ˆÛÛœÝÜ\˜][ÛœÎˆ\œ˜^O™XÛÜ™Ýš[™ËÝš[™È[X™\ˆH×NÂˆ›Üˆ
+]\š[Ù[™^HÈ\š[Ù[™^\š[ÙË›[™ÝÈ\š[Ù[™^
+ÏHJHÂˆ]Ü\˜][Û’[™^HNÂˆÛÛœÝYH
+[™Nˆš[˜[˜ÙTÙYY[™K\™XÝ[ÛŽˆÝš[™Ë[[Ý[ˆ[X™\‹ÛÝ\˜ÙT™YÎˆÝš[™ËÝ]\ÈH´(4,4-ô/t-t`t-t/t/ˆŠHOˆÂˆYˆ
+X[[Ý[
+H™]\›ŽÂˆÜ\˜][ÛœËœ\Ú
+ÂˆYˆ’S‹IÜ\š[ÙÖÜ\š[Ù[™^_KIÙ\™XÝ[ÛˆOOH´'ô/´`t`´`ô/ô.ô-t/t.4-HˆÈ’Sˆˆˆ“ÕUŸKIÔÝš[™ÊÜ\˜][Û’[™^
+KœYÝ\
+ËŒŠ_XˆÜ\˜][Û‘]Nˆ\š[Ù]\ÖÜ\š[Ù[™^K\š[Ùˆ\š[ÙÖÜ\š[Ù[™^K\™XÝ[Û‹ˆ[[Ý[Z[›ÜŽˆX]œ›Ý[™
+[[Ý[
+ˆL
+KØ]YÛÜžNˆ[™K˜Ø]YÛÜžK™\ÜÛ\ÜÎˆ[™Kœ™\ÜÛ\ÜËˆÛÝ[\œ\Nˆ[™K˜ÛÝ[\œ\KÛÛ˜XÝˆ[™K˜ÛÛ˜XÝØÝ[Y[ˆ[™K™ØÝ[Y[ˆ›Ú™XÝˆ[™K˜ÙœˆOOHÑ”‹ULˆˆÈ”’‹ULHˆˆ”’‹UL‹YØ[ˆ“Ô‘ËULH‹ˆØš™XÝˆ[™K˜ÙœˆOOHÑ”‹ULˆˆÈ“Ð’‹ULHˆˆ“Ð’‹ULˆ‹ÙœŽˆ[™K˜ÙœˆÏÈÑ”‹ULH‹ˆ˜[šÔ™YŽˆS’ËUTÕIÜ\š[ÙÖÜ\š[Ù[™^Kœ™\XÙJ‹H‹ˆŠ_KIÔÝš[™ÊÜ\˜][Û’[™^
+KœYÝ\
+ËŒŠ_XˆÛÝ\˜ÙT™YŽˆÛÝ\˜ÙT™YˆÏÈ	Ü\š[ÙÛÛ[[œÖÜ\š[Ù[™^_IÛ[™Kœ›ÝßXÝ]\ËˆJNÂˆÜ\˜][Û’[™^
+ÏHNÂˆNÂˆ™XÙZ\Ë™›Ü‘XXÚ
+
+[™JHOˆY
+[™K´'ô/´`t`´`ô/ô.ô-t/t.4-H‹[™K˜[[Ý[ÖÜ\š[Ù[™^JJNÂˆÝ]›ÝÜË™›Ü‘XXÚ
+
+[™JHOˆY
+[™K´(t/ô.4`t,4/t.4-H‹[™K˜[[Ý[ÖÜ\š[Ù[™^JJNÂˆÛÛœÝX\YÝ]›ÝÈHÝ]›ÝÜËœ™YXÙJ
+Ý[K[™JHOˆÝ[H
+È[™K˜[[Ý[ÖÜ\š[Ù[™^K
+NÂˆÛÛœÝ™\ÚYX[HX]œ›Ý[™
+
+Ý]›ÝÕÝ[ÖÜ\š[Ù[™^HHX\YÝ]›ÝÊH
+ˆL
+HÈLÂˆY
+È›ÝÎˆÍØ]YÛÜžNˆ´'ô`4/´aô.4-H4-4-t`´,4.ô.4-ô.4`4/´,´,4/t/tbô-H4`t/ô.4`t,4/t.4cÈ‹[[Ý[Îˆ×K™\ÜÛ\ÜÎˆ´(4,4`tat/´-4bÈ4'´'ô.4(È‹ÛÝ[\œ\NˆÕ‹ULNNH‹ÛÛ˜XÝˆˆ‹ØÝ[Y[ˆ”‘QËSÑËUˆK´(t/ô.4`t,4/t.4-H‹™\ÚYX[	Ü\š[ÙÛÛ[[œÖÜ\š[Ù[™^_LÍ‰Ü\š[ÙÛÛ[[œÖÜ\š[Ù[™^_LLL0­È4/´`t`´,4`´/´.ˆ4/ô/´`t.ô-H4-4-t`´,4.ô.4-ô.4`4/´,´,4/t/tbôaH4`t`´,4`´-t.X´(´`4-t,t`ô-t`ˆ4`4,4-ô/t-t`t-t/t.4cÈŠNÂˆB‚ˆ]ØZ][‹‘‹˜˜]Ú
+Ü\˜][ÛœË›X\
+
+Ü\˜][ÛŠHOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•Èš[˜[˜ÚX[ÛÜ\˜][ÛœÈ
+ˆYÜ\˜][Û—Ù]K\š[Ù\™XÝ[Û‹[[Ý[ÛZ[›Ü‹Ø]YÛÜžK™\ÜØÛ\ÜËÛÝ[\œ\WÙ[]WÚYˆÛÛ˜XÝÚYØÝ[Y[ÚY›Ú™XÝÙ[]WÚYYØ[Ù[]WÚYØš™XÝÙ[]WÚYÙœ—Ù[]WÚYˆ˜[š×ÛÜ\˜][Û—Ü™Y‹Ü\˜][Û—ÚÚ[™ÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÙš[KÛÝ\˜ÙWÜÚY]ÛÝ\˜ÙWÜ™Y‹]WÜ]X[]KÝ]\ËÜ™X]YØžBˆ
+HSQTÈ
+ËËËËËËËËËËËËËËË	ÖÖÐQÑÔ‘QÐUIË	ÖÖÓÑ×Ô‘PQÓ“IËˆ	ô$4`´.ô,4`H4'´%4%4(HKŒKŒŒŒËLÌKŒKŒŒ‹žÞ	Ë	ÌŒ‰ËËˆ	ô)4,4.´`ˆÖ4/ô/´-4`´,´-t`4-´-4dt/NÈ4`t`tbô.ô.´,4,t,4/t.´,4cô,´.ôcô-t`´`tcÈ4`´-t`t`´/´,´/´.H4/ô`4/´-t.´a´.4-t.H4-4/ˆ4/ô/´-4.´.ôc´aô-t/t.4cÈ4,´bô/ô.4`t.´.	ËË	ÜÞ\Ý[KYš[˜[˜ÙK\ÙYY	ÊXˆ
+K˜š[™
+ˆÜ\˜][Û‹šYÜ\˜][Û‹›Ü\˜][Û‘]KÜ\˜][Û‹œ\š[ÙÜ\˜][Û‹™\™XÝ[Û‹Ü\˜][Û‹˜[[Ý[Z[›Ü‹ˆÜ\˜][Û‹˜Ø]YÛÜžKÜ\˜][Û‹œ™\ÜÛ\ÜËÜ\˜][Û‹˜ÛÝ[\œ\KÜ\˜][Û‹˜ÛÛ˜XÝÜ\˜][Û‹™ØÝ[Y[ˆÜ\˜][Û‹œ›Ú™XÝÜ\˜][Û‹›YØ[Ü\˜][Û‹›Øš™XÝÜ\˜][Û‹˜Ùœ‹Ü\˜][Û‹˜˜[šÔ™Y‹ˆÜ\˜][Û‹œÛÝ\˜ÙT™Y‹Ü\˜][Û‹œÝ]\Ëˆ
+JJNÂ‚ˆÛÛœÝ^XÝYÝ[ÈH\š[ÙË›X\
+
+\š[Ù[™^
+HOˆ
+È\š[Ù™XÙZ\Z[›ÜŽˆX]œ›Ý[™
+™XÙZ\Ý[ÖÚ[™^H
+ˆL
+KÝ]›ÝÓZ[›ÜŽˆX]œ›Ý[™
+Ý]›ÝÕÝ[ÖÚ[™^H
+ˆL
+HJJNÂˆ›Üˆ
+ÛÛœÝ^XÝYÙˆ^XÝYÝ[ÊHÂˆÛÛœÝXÝX[H]ØZ][‹‘‹œ™\\™J”ÑSPÕ\™XÝ[Û‹ÕSJ[[Ý[ÛZ[›ÜŠHTÈÝ[”“ÓHš[˜[˜ÚX[ÛÜ\˜][ÛœÈÒT‘H\š[ÙHÈÔ“ÕT–H\™XÝ[ÛˆŠK˜š[™
+^XÝYœ\š[Ù
+K˜[È\™XÝ[ÛŽˆÝš[™ÎÈÝ[ˆ[X™\ˆOŠ
+NÂˆÛÛœÝÝ[ÈHØš™XÝ™œ›ÛQ[šY\Ê
+XÝX[œ™\Ý[È×JK›X\
+
+›ÝÊHOˆÜ›ÝË™\™XÝ[Û‹[X™\Š›ÝËÝ[
+WJJNÂˆYˆ
+Ý[ÖÈ´'ô/´`t`´`ô/ô.ô-t/t.4-H—HOOH^XÝYœ™XÙZ\Z[›ÜˆÝ[ÖÈ´(t/ô.4`t,4/t.4-H—HOOH^XÝY›Ý]›ÝÓZ[›ÜŠHÂˆ›ÝÈ™]È\œ›ÜŠš[˜[˜ÙHÙYYÙ\È›Ý™XÛÛ˜Ú[H›Üˆ	Ù^XÝYœ\š[ÙX
+NÂˆBˆB‚ˆÛÛœÝXØÜX[ÙYYÈHÂˆÈPÔ‹LŒ‹LKTÐÒÓÓ‹ŒŒ‹LH‹´*4.´/´.ô,‹‘Ô“ÕTUTÐÒÓÓ‹ÌMŽLLÍÍLLL‹´'4,4.HŒˆ0­È4b4.´/´.ô,—KˆÈPÔ‹LŒ‹LKRÒS‘Tˆ‹ŒŒ‹LH‹´%4-t`´`t.´.4.H4`t,4-‹‘Ô“ÕTURÒS‘Tˆ‹ÎÌMLÎLÌÎLMLK´'4,4.HŒˆ0­È4-4-t`´`t.´.4.H4`t,4-—KˆÈPÔ‹LŒ‹L‹PÐST‹ŒŒ‹Lˆ‹´&ô,4,ô-t`4c‹‘Ô“ÕTUPÐST‹MKLÌLLŒLŒLË´&4c´/tcŒˆ0­È4.ô,4,ô-t`4c—KˆÈPÔ‹LŒ‹L‹RÒS‘Tˆ‹ŒŒ‹Lˆ‹´%4-t`´`t.´.4.H4`t,4-‹‘Ô“ÕTURÒS‘Tˆ‹MKŒÍLMÌÍMLŒNLMLÍK´&4c´/tcŒˆ0­È4-4-t`´`t.´.4.H4`t,4-—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+XØÜX[ÙYYË›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•Èš[˜[˜ÙWØXØÜX[È
+ˆY\š[ÙÛÛÝ\‹ÝXš™XÝÙ[]WÚY™XÛÜ™×ØÛÝ[XØÜX[ÛZ[›Ü‹ZYÛZ[›Ü‹XÛZ[›Ü‹XØØ\Ù\ËˆÛÝ\˜ÙWÙš[KÛÝ\˜ÙWÜÚY]ÛÝ\˜ÙWÜ™Y‹]WÜ]X[]Bˆ
+HSQTÈ
+ËËËËËËËËË	ô%t-´-t/4-t`tcôaô/tbô-H4/´/ô.ô,4`´bËžÞ	ËË	ÐQÑÔ‘QÐUN”RQ
+ÑP•	Ë	ô'´,t-t-ô.ô.4aô-t/t/tbô.H4,4,ô`4-t,ô,4`ŽÈ4/ô-t`4`t/´/t,4.ôc4/tbô-H4`t`´`4/´.´.4/t-H4/ô-t`4-t/t-t`t-t/tbÉÊXˆ
+K˜š[™
+›ÝÖÌK›ÝÖÌWK›ÝÖÌ—K›ÝÖÌ×K›ÝÖÍKX]œ›Ý[™
+[X™\Š›ÝÖÍWJH
+ˆL
+KX]œ›Ý[™
+[X™\Š›ÝÖÍ—JH
+ˆL
+KX]œ›Ý[™
+[X™\Š›ÝÖÍ×JH
+ˆL
+K›ÝÖÎK›ÝÖÎWJJJNÂ‚ˆÛÛœÝYÙ]ÙYYÈHÂˆÈŒŒ‹LH‹ÌŒKÈŒŒ‹Lˆ‹ÌŒÍLKÈŒŒ‹LÈ‹ÌLKˆÈŒŒ‹L‹LÌŒKÈŒŒ‹LH‹MŒKÈŒŒ‹Lˆ‹LÌKˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+YÙ]ÙYYË™›]X\
+
+Ü\š[Ù[˜ÛÛYK^[œÙWJHOˆÂˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•Èš[˜[˜ÙWØYÙ]È
+Y\š[Ù[™K[—ÛZ[›Ü‹ØÙ[˜\š[Ë\ÜÝ[\[Û‹ÛÝ\˜ÙWÝ\KÝÛ™\—Ù[]WÚY
+HSQTÈ
+ËË	ô%4/´at/´-4bÈ4'´'ô.4(ÉËË	ô$t,4-ô/´,´bô.IË	ô(´-t`t`´/´,´bô.H4,tc´-4-´-t`ˆ4-4.ôcÈ4/ô`4/´,´-t`4.´.4/ô.ô,4/Kta4,4.´`´,È4`ô`´,´-t`4-´-4dt/t/tbô.H4a4,4.t.È4,tc´-4-´-t`´,4/t-H4/ô`4-t-4/´`t`´,4,´.ô-t/IË	ÔÖS•UP×ÐTÔÕSTSÓ‰Ë	Ô“ÓN‘’SSÑIÊHŠK˜š[™
+•QIÜ\š[ÙKRS˜\š[ÙX]œ›Ý[™
+[X™\Š[˜ÛÛYJH
+ˆL
+JKˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•Èš[˜[˜ÙWØYÙ]È
+Y\š[Ù[™K[—ÛZ[›Ü‹ØÙ[˜\š[Ë\ÜÝ[\[Û‹ÛÝ\˜ÙWÝ\KÝÛ™\—Ù[]WÚY
+HSQTÈ
+ËË	ô(4,4`tat/´-4bÈ4'´'ô.4(ÉËË	ô$t,4-ô/´,´bô.IË	ô(´-t`t`´/´,´bô.H4,tc´-4-´-t`ˆ4-4.ôcÈ4/ô`4/´,´-t`4.´.4/ô.ô,4/Kta4,4.´`´,È4`ô`´,´-t`4-´-4dt/t/tbô.H4a4,4.t.È4,tc´-4-´-t`´,4/t-H4/ô`4-t-4/´`t`´,4,´.ô-t/IË	ÔÖS•UP×ÐTÔÕSTSÓ‰Ë	Ô“ÓN‘’SSÑIÊHŠK˜š[™
+•QIÜ\š[ÙKSÕU\š[ÙX]œ›Ý[™
+[X™\Š^[œÙJH
+ˆL
+JKˆJJNÂ‚ˆÛÛœÝ›Ü™XØ\ÝÙYYÈHÂˆÈ‘ËULH‹ŒŒ‹LKLH‹´'ô/´`t`´`ô/ô.ô-t/t.4-H‹MÌ´'´/ô.ô,4`´bÈ4/´,t`ôaô-t/t.4cÈ‹QÑÔ‘QÐUWÑ“Ô‘PÐTÕ‹Ì	H4/´`ˆ4/´-´.4-4,4-t/4bôaH4/´/ô.ô,4`ˆ4/ô/ˆ4/´,t-t-ô.ô.4aô-t/t/t/´/4`È4`4-t-t`t`´`4`È‹‘Ô“ÕTUTÐÒÓÓ—KˆÈ‘ËULˆ‹ŒŒ‹LKLˆ‹´(t/ô.4`t,4/t.4-H‹ŒLL´%ô,4`4,4,t/´`´/t,4cÈ4/ô.ô,4`´,‹ÐSS‘Tˆ‹´'ô.ô,4`´dt-´/tbô.H4.´,4.ô-t/t-4,4`4c0­È4`´-t`t`´/´,´bô.H4`t`4/´.ˆ‹‘STQÔ“ÕTU—KˆÈ‘ËULÈ‹ŒŒ‹LKLÈ‹´'ô/´`t`´`ô/ô.ô-t/t.4-H‹LŒ´'´/ô.ô,4`´bÈ4-4-t`´`t.´/´,ô/ˆ4`t,4-4,‹QÑÔ‘QÐUWÑ“Ô‘PÐTÕ‹Œ	H4/´`ˆ4/´-´.4-4,4-t/4bôaH4/´/ô.ô,4`ˆ4/ô/ˆ4/´,t-t-ô.ô.4aô-t/t/t/´/4`È4`4-t-t`t`´`4`È‹‘Ô“ÕTURÒS‘Tˆ—KˆÈ‘ËUL‹ŒŒ‹LKL‹´(t/ô.4`t,4/t.4-H‹ŒL´$4`4-t/t-4,‹ÓÓ•PÕÔÐÒQSH‹´%4/´,ô/´,´/´`4/tbô.H4,ô`4,4a4.4.ˆ0­È4`´-t`t`´/´,´,4cÈ4/ô`4/´-t.´a´.4cÈ‹Õ‹ULLH—KˆÈ‘ËULH‹ŒŒ‹LKLH‹´(t/ô.4`t,4/t.4-H‹ŒL´'t,4.ô/´,ô.‹ÐSS‘Tˆ‹´'t,4.ô/´,ô/´,´bô.H4.´,4.ô-t/t-4,4`4c0­È4`´-t`t`´/´,´,4cÈ4-4,4`´,‹Õ‹ULLH—KˆÈ‘ËULˆ‹ŒŒ‹LKL‹´'ô/´`t`´`ô/ô.ô-t/t.4-H‹ŒŒK´'´/ô.ô,4`´bÈ4/´,t`ôaô-t/t.4cÈ‹QÑÔ‘QÐUWÑ“Ô‘PÐTÕ‹IH4/´`ˆ4/´-´.4-4,4-t/4bôaH4/´/ô.ô,4`ˆ4/ô/ˆ4/´,t-t-ô.ô.4aô-t/t/t/´/4`È4`4-t-t`t`´`4`È‹‘Ô“ÕTUTÐÒÓÓ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+›Ü™XØ\ÝÙYYË›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•Èš[˜[˜ÙWÙ›Ü™XØ\ÝÚ][\È
+Y›Ü™XØ\ÝÙ]K\™XÝ[Û‹[[Ý[ÛZ[›Ü‹›Ø˜Xš[]KØ]YÛÜžKÛÝ\˜ÙWÝ\K\ÜÝ[\[Û‹[šÙYÙ[]WÚY
+HSQTÈ
+ËËËËËËËËÊHŠK˜š[™
+›ÝÖÌK›ÝÖÌWK›ÝÖÌ—KX]œ›Ý[™
+[X™\Š›ÝÖÌ×JH
+ˆL
+K›ÝÖÍK›ÝÖÍWK›ÝÖÍ—K›ÝÖÍ×K›ÝÖÎJJJNÂ‚ˆÛÛœÝ^\›ÛÙYYÈHÂˆÈ”VKTÕSKLŒKLH‹ŒŒKLH‹ÍMLÍ‹×KÈ”VKTÕSKLŒKLL‹ŒŒKLL‹ÎÌKL×KˆÈ”VKTÕSKLŒKLLH‹ŒŒKLLH‹ÎN‹ŒÎKÈ”VKTÕSKLŒKLLˆ‹ŒŒKLLˆ‹ÎMÎL‹Ž—KˆÈ”VKTÕSKLŒ‹LH‹ŒŒ‹LH‹ÍŒŒMŒÌ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+^\›ÛÙYYË›X\
+
+›ÝË[™^
+HOˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•Èš[˜[˜ÙWÜ^\›ÛÜÝ[[X\žH
+Y\š[Ù[[Ý[ÛZ[›Ü‹ØÛÜKÛÝ\˜ÙWÙš[KÛÝ\˜ÙWÜÚY]ÛÝ\˜ÙWÜ™Y‹]WÜ]X[]JHSQTÈ
+ËËË	ô$ô`4`ô/ô/ô,\[È0­È4/´,t-t-ô.ô.4aô-t/t/tbô.H4.4`´/´,ÉË	ô%ô,4`4/ô.ô,4`´/t,4cÈ4,´-t-4/´/4/´`t`´cžÞ	ËË	ÔÕSSPT–NPÐÔ•PSÉË	ô$4,ô`4-t,ô,4`ŽÈ4)4&4'ˆ4.4/ô-t`4`t/´/t,4.ôc4/tbô-H4/t,4aô.4`t.ô-t/t.4cÈ4/t-H4/ô-t`4-t/t-t`t-t/tbÉÊHŠK˜š[™
+›ÝÖÌK›ÝÖÌWKX]œ›Ý[™
+[X™\Š›ÝÖÌ—JH
+ˆL
+KÒQUIÔÝš[™Ê[™^
+ÈMÊKœYÝ\
+ËŒŠ_X
+JJNÂ‚ˆÛÛœÝ\ÜÝYTÙYYÈHÂˆÈ‘’S‹QKLH‹´(4-t-t`t`´`4/´/ô.ô,4`ˆ4/´`´`t`´,4dt`ˆ4/´`ˆ4`´-t.´`ôbt-t.H4-4,4`´bÈ‹´$´bô`t/´.´.4.H‹´%t-´-t/4-t`tcôaô/tbô-H4/´/ô.ô,4`´bËžÞ0­È4.4c´/tcŒˆ‹´(´-t.´`ôbt,4cÈ4-4,4`´,0­È4,4,´,ô`ô`t`ˆŒˆ‹”“ÓN‘’SSÑH‹´'´`´.´`4bô`´/ˆ—KˆÈ‘’S‹QKLˆ‹´(t`´,4`´c4cÈ4'´%4%4(H4`H4/´b4.4,t/´aô/tbô/4a4/´`4/4,4`´/´/4-4,4`´bÈ‹´(t`4-t-4/t.4.H‹´$4`´.ô,4`H4'´%4%4(H0­È4.ô.4`t`ˆŒH‹´'ô`4,4,´.4.ô/ˆ4`´.4/ô,4-4,4/t/tbôaH‹”“ÓN‘’SSÑH‹´'´`´.´`4bô`´/ˆ—KˆÈ‘’S‹T‘PËLÈ‹´(ô`´,´-t`4-´-4dt/t/tbô.H4.4`t`´/´aô/t.4.ˆ4'´'ô.4(È4/t-H4/ô`4-t-4/´`t`´,4,´.ô-t/H‹´$´bô`t/´.´.4.H‹´'´%4%4(H0­È4-4-t/t-t-´/tbô.H4a4,4.´`ˆ‹´'´'ô.4(È0­È4.4`t`´/´aô/t.4.ˆ4/´`´`t`ô`´`t`´,´`ô-t`ˆ‹”“ÓN‘’SSÑH‹´'´-´.4-4,4-t`ˆ4.4`t`´/´aô/t.4.ˆ—KˆÈ‘’S‹T‘PËL‹´$t,4/t.´/´,´`t.´,4cÈ4,´bô/ô.4`t.´,4/t-H4/ô/´-4.´.ôc´aô-t/t,‹´$´bô`t/´.´.4.H‹´'´%4%4(H0­È4,4/ô`4-t.ôcŒˆ‹´(´/´aô.´,È4(¸ $t$t,4/t.ˆ0­È4/t-t`ˆ4-4,4/t/tbôaH‹LLÎL”“ÓN‘’SSÑH‹´'´-´.4-4,4-t`ˆ4.4`t`´/´aô/t.4.ˆ—KˆÈ‘’S‹T‘PËLH‹´%4-t`´,4.ôc4/tbô-H4`t`´`4/´.´.4`t/´-4-t`4-´,4/t.4cÈ4/t-H4,´.´.ôc´aô-t/tbÈ4,ˆ4.4`´/´,È4,4/ô`4-t.ôcÈ‹´$´bô`t/´.´.4.H‹´'´%4%4(H0­ÈŒˆ0­ÈMÎN‘NH‹´'´%4%4(H0­ÈŒˆ0­ÈMÎ4.LÍ‹ŒLNMLÎ”“ÓN‘’SSÑH‹´'´`´.´`4bô`´/ˆ—KˆÈ‘’S‹T‘PËLˆ‹´)ô.4`t`´bô.H4/ô/´`´/´.ˆ4cô/t,´,4`4cÈ4/t-H4`4,4,´-t/H4/ô/´`t`´`ô/ô.ô-t/t.4cô/4/4.4/t`ô`H4`t/ô.4`t,4/t.4cÈ‹´$´bô`t/´.´.4.H‹´'´%4%4(H0­ÈŒˆ0­ÈŒˆ4.ŒÍ‹´'´%4%4(H0­ÈŒˆ0­ÈŒLLH‹LLÍÍÎ”“ÓN‘’SSÑH‹´'´`´.´`4bô`´/ˆ—KˆÈ‘’S‹T’TÒËLH‹´'ô`4/´,ô/t/´-ô/tbô.H4.´,4`t`t/´,´bô.H4`4,4-ô`4bô,ˆH4`t-t/t`´cô,t`4cÈ‹´$´bô`t/´.´.4.H‹´'ô.ô,4`´dt-´/tbô.H4.´,4.ô-t/t-4,4`4c0­È4`´-t`t`ˆ‹´'ô`4/´,ô/t/´-ô/tbô.H4,t,4.ô,4/t`H‹MÌ”“ÓN‘’SSÑH‹´'´`´.´`4bô`´/ˆ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+\ÜÝYTÙYYË›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•Èš[˜[˜ÙWÜ™XÛÛ˜Ú[X][Û—Ú\ÜÝY\È
+Y]KÙ]™\š]KÛÝ\˜ÙWØKÛÝ\˜ÙWØ‹Y™™\™[˜ÙWÛZ[›Ü‹ÝÛ™\—Ù[]WÚYÝ]\ÊHSQTÈ
+ËËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆ]ØZ][‹‘‹œ™\\™J•TUHš[˜[˜ÙWÜ™XÛÛ˜Ú[X][Û—Ú\ÜÝY\ÈÑUÛÝ\˜ÙWØIô(´/´aô.´,È4(¸ $t$t,4/t.ˆ0­È4/t-t`ˆ4-4,4/t/tbôaIÈÒT‘HYIÑ’S‹T‘PËL	ÈS‘ÛÝ\˜ÙWØIô(´/´aô.´,È4$4.ôc4a4,t$t,4/t.ˆ0­È4/t-t`ˆ4-4,4/t/tbôaIÈŠKœ[Š
+NÂŸB‚˜\Þ[˜È[˜Ý[ÛˆÙYYØ[\Ê
+HÂˆÛÛœÝ[]TÙYYÈHÂˆÈ‘STUTÐSTËLH‹´(t/´`´`4`ô-4/t.4.ˆ‹´'4-t/t-t-4-´-t`4/ô/ˆ4/ô`4/´-4,4-´,4/8¡%ŒH‹´'ô`4/´-4,4-´.—KˆÈ‘STUTÐSTËLˆ‹´(t/´`´`4`ô-4/t.4.ˆ‹´'4-t/t-t-4-´-t`4/ô/ˆ4/ô`4/´-4,4-´,4/8¡%Œˆ‹´'ô`4/´-4,4-´.—KˆÈ‘SKULŒH‹´(t-t/4c4cÈ‹´(t-t/4c4cÈ8¡%ŒŒH‹´%4-t`´`t.´.4.H4`t,4-—KˆÈÒULŒH‹´(4-t,tdt/t/´.ˆ‹´(4-t,tdt/t/´.ˆ8¡%ŒŒH‹´%4-t`´`t.´.4.H4`t,4-—KˆÈ‘SKULÌH‹´(t-t/4c4cÈ‹´(t-t/4c4cÈ8¡%ŒÌH‹´%4/´/ô/´.ô/t.4`´-t.ôc4/t/´-H4/´,t`4,4-ô/´,´,4/t.4-H—KˆÈÒULÌH‹´(4-t,tdt/t/´.ˆ‹´(4-t,tdt/t/´.ˆ8¡%ŒÌH‹´%4/´/ô/´.ô/t.4`´-t.ôc4/t/´-H4/´,t`4,4-ô/´,´,4/t.4-H—KˆÈ”ÕËULŒH‹´(ô`t.ô`ô,ô,‹´%4-t`´`t.´.4.H4`t,4-0­È4/ô/´.ô/tbô.H4-4-t/tc‹´%4-t`´`t.´.4.H4`t,4-—KˆÈ”ÕËULÌH‹´(ô`t.ô`ô,ô,‹´(´-t,4`´`4,4.ôc4/t,4cÈ4`t`´`ô-4.4cÈ‹´%4/´/ô/´.ô/t.4`´-t.ôc4/t/´-H4/´,t`4,4-ô/´,´,4/t.4-H—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+[]TÙYYË›X\
+
+›ÝË[™^
+HOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•È[]Y\È
+ˆY[]WÝ\K\Ü^WÛ˜[YKÝ]\ËÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÜ™XÛÜ™ÚY]WÜ]X[]KØÛÜKY]Y]KÜ™X]YØžBˆ
+HSQTÈ
+ËËË	ô$4.´`´.4,´/t,	Ë	ÔÖS•UP×ÔÐST×ÕTÕ	ËË	ô(t.4/t`´-t`´.4aô-t`t.´,4cÈ4.´,4`4`´/´aô.´,4-4.ôcÈ4/ô`4.4dt/4.´.4ct`´,4/ô,IËË	ÞßIË	ÜÞ\Ý[K\Ø[\Ë\ÙYY	ÊX
+Bˆ˜š[™
+›ÝÖÌK›ÝÖÌWK›ÝÖÌ—KÐSTËQS•UKIÔÝš[™Ê[™^
+ÈJKœYÝ\
+ËŒŠ_X›ÝÖÌ×JJJNÂ‚ˆÛÛœÝXYÈHÂˆÈ“PQULM‹ŒŒ‹LL•NŒLŽŒˆ‹´+ô/t-4-t.´`H4'ô/´.4`t.ˆ‹žX[™^‹˜ÜÈ‹œØÚÛÛÌŒˆ‹›X]Ù]\™H‹ÓTULH‹Ô‹ULLH‹“Ñ‘‹ULH‹‘“Ô“KUTÐÒÓÓ‹‘STUTÐSTËLH‹´'ô.ô,4`´dt-ˆ‹´$4.´`´.4,´-t/H‹‘SKULM‹ÒULM‹‘ÑËULŒ‹LM‹”ÕËULH‹ˆ‹	ÖÈ´b4.´/´.ô,‹ŒÈ4.´.ô,4`t`H‹´/ô`4.4/´`4.4`´-t`ˆ—I×KˆÈ“PQULŒH‹ŒŒ‹LLLNŒˆ‹•’È‹šÈ‹œÛØÚX[‹šÚ[™\™Ø\[—Ø]YÈ‹›Ü[—Ù^H‹ÓTULˆ‹Ô‹ULŒˆ‹“Ñ‘‹ULˆ‹‘“Ô“KURÒS‘Tˆ‹‘STUTÐSTËLˆ‹´%4/´,ô/´,´/´`‹´$4.´`´.4,´-t/H‹‘SKULŒH‹ÒULŒH‹‘ÑËULŒ‹LŒH‹”ÕËULŒH‹ˆ‹	ÖÈ´-4-t`´`t.´.4.H4`t,4-‹´/ô/´.ô/tbô.H4-4-t/tc—I×KˆÈ“PQULÌÈ‹ŒŒ‹LLMUŒNŒˆ‹•[YÜ˜[H‹[YÜ˜[H‹›Y\ÜÙ[™Ù\ˆ‹˜]YÝ\ÝÜ™Y™\œ˜[‹˜Ø[\\×ÝÝ\ˆ‹ÓTULÈ‹Ô‹ULÌH‹“Ñ‘‹ULÈ‹‘“Ô“KUPÓÓ”ÕS‹‘STUTÐSTËLH‹´'ô/´`t-tbt-t/t.4-H‹´$4.´`´.4,´-t/H‹ˆ‹ˆ‹ˆ‹ˆ‹ˆ‹	ÖÈ´b4.´/´.ô,‹´ct.´`t.´`ô`4`t.4cÈ—I×KˆÈ“PQULH‹ŒŒ‹LLMÕMŒNŒˆ‹´(4-t.´/´/4-t/t-4,4a´.4cÈ‹œ™Y™\œ˜[‹œ\™\ˆ‹œ\™[Ü™Y™\œ˜[‹™˜[Z[WÜÝÜžH‹ÓTUL‹Ô‹ULH‹“Ñ‘‹UL‹‘“Ô“KUPÐSPÒÈ‹‘STUTÐSTËLˆ‹´&´/´/t`t`ô.ôc4`´,4a´.4cÈ‹´$4.´`´.4,´-t/H‹ˆ‹ˆ‹ˆ‹ˆ‹ˆ‹	ÖÈ´`4-t.´/´/4-t/t-4,4a´.4cÈ‹´`t,4-—I×KˆÈ“PQULLˆ‹ŒŒ‹LLŒLŒNŒˆ‹´(t,4.t`ˆ‹™\™XÝ‹›Ü™Ø[šXÈ‹™\™XÝØ]YÝ\Ý‹œØÚÛÛÛ[™[™È‹ÓTULH‹Ô‹ULLˆ‹“Ñ‘‹ULH‹‘“Ô“KUTÐÒÓÓ‹‘STUTÐSTËLH‹´%ô,4cô,´.´,‹´$4.´`´.4,´-t/H‹ˆ‹ˆ‹ˆ‹ˆ‹ˆ‹	ÖÈ´/t/´,´bô.H‹´b4.´/´.ô,—I×KˆÈ“PQULŒÈ‹ŒŒ‹LLLUMŽŒÌŒˆ‹´+ô/t-4-t.´`H4&´,4`4`´bÈ‹žX[™^ÛX\È‹›Ü™Ø[šXÈ‹›X\×Ø]YÝ\Ý‹˜Ø[\\×ÜÝÈ‹ÓTULˆ‹Ô‹ULŒÈ‹“Ñ‘‹ULˆ‹‘“Ô“KUPÐSPÒÈ‹‘STUTÐSTËLˆ‹´&´/´/t`t`ô.ôc4`´,4a´.4cÈ‹´%ô,4.´`4bô`ˆ‹ˆ‹ˆ‹ˆ‹ˆ‹´(t`´/´.4/4/´`t`´c‹	ÖÈ´/´`´.´,4-È‹´`t,4-—I×KˆÈ“PQULÌH‹ŒŒ‹LËLULŽŒŒˆ‹’[œÝYÜ˜[H‹š[œÝYÜ˜[H‹œÛØÚX[‹X]™WÜÝ[[Y\ˆ‹œÝYÙWÝšY[È‹ÓTULÈ‹Ô‹ULÌH‹“Ñ‘‹ULÈ‹‘“Ô“KUTÕQSÈ‹‘STUTÐSTËLH‹´'ô.ô,4`´dt-ˆ‹´$4.´`´.4,´-t/H‹‘SKULÌH‹ÒULÌH‹‘ÑËULŒ‹LÌH‹”ÕËULÌH‹ˆ‹	ÖÈ´`t`´`ô-4.4cÈ‹´/ô/´,´`´/´`4/t,4cÈ4/ô`4/´-4,4-´,—I×KˆÈ“PQUL‹ŒŒ‹LLŒUŽNŒˆ‹´'t-H4/´/ô`4-t-4-t.ôdt/H‹ˆ‹ˆ‹ˆ‹ˆ‹ˆ‹ˆ‹ˆ‹ˆ‹ˆ‹´'ô-t`4,´bô.H4.´.ô.4.ˆ‹´$4.´`´.4,´-t/H‹ˆ‹ˆ‹ˆ‹ˆ‹ˆ‹	ÖÈ´,t-t-È4.4`t`´/´aô/t.4.´,—I×KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+XYË›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•ÈØ[\×ÛXYÈ
+ˆYš\œÝØÛXÚ×Ø]ÛÝ\˜ÙK]WÜÛÝ\˜ÙK]WÛYY][K]WØØ[\ZYÛ‹]WØÛÛ[Ø[\ZYÛ—ÚYÜ™X]]™WÚYˆÙ™™\—ÚY›Ü›WÚYX[˜YÙ\—Ù[]WÚYÝYÙKÝ]\Ë˜[Z[WÙ[]WÚYÚ[Ù[]WÚYÛÛ˜XÝÚYˆÙ\šXÙWÙ[]WÚY™Z™XÝ[Û—Ü™X\ÛÛ‹YÜË]WÜ]X[]Bˆ
+HSQTÈ
+ËËËËËËËËËËËËËËËËËËËË	ô(t.4/t`´-t`´.4aô-t`t.´.4-H4`´-t`t`´/´,´bô-H4-4,4/t/tbô-NÈ4/ô-t`4`t/´/t,4.ôc4/tbô-H4-4,4/t/tbô-H4/t-H4.4`t/ô/´.ôc4-ô`ôc´`´`tcÉÊX
+K˜š[™
+‹‹œ›ÝÊJJNÂ‚ˆÛÛœÝÝXÚÚ[ÈHÂˆÈ•ULMLH‹“PQULM‹´'ô-t`4,´bô.H4.´.ô.4.ˆ‹ŒŒ‹LL•NŒLŽŒˆ‹´+ô/t-4-t.´`H4'ô/´.4`t.ˆ‹´$´at/´-4côbt.4.H‹´'ô-t`4-tat/´-4/ô/ˆ4/´,tb´cô,´.ô-t/t.4cˆ0ªô$t`ô-4`ôbt-t-H4/4,4`´-t/4,4`´.4.´.0®È‹´(t`´`4,4/t.4a´,4/´`´.´`4bô`´,‹ÓPÒËULM—KˆÈ•ULMLˆ‹“PQULM‹´)4/´`4/4,‹ŒŒ‹LL•NŒMŽŒˆ‹´(t,4.t`ˆ‹´$´at/´-4côbt.4.H‹´)4/´`4/4,4b4.´/´.ôbÈ4/´`´/ô`4,4,´.ô-t/t,‹´%ô,4cô,´.´,4`t/´-ô-4,4/t,‹‘“Ô“KUTÐÒÓÓ”ÕP‹ULM—KˆÈ•ULMLÈ‹“PQULM‹´%ô,´/´/t/´.ˆ‹ŒŒ‹LL•LŒŽŒˆ‹´(´-t.ô-ta4/´/t.4cÈ0­È4`´-t`t`ˆ‹´&4`tat/´-4côbt.4.H‹´'4-t/t-t-4-´-t`4`ô`´/´aô/t.4.È4-ô,4/ô`4/´`H4`t-t/4c4.‹´&´/´/t`t`ô.ôc4`´,4a´.4cÈ4/t,4-ô/t,4aô-t/t,‹ÐSULM—KˆÈ•ULML‹“PQULM‹´'ô-t`4-t/ô.4`t.´,‹ŒŒ‹LL•LŒLNŒˆ‹•[YÜ˜[H0­È4`´-t`t`ˆ‹´&4`tat/´-4côbt.4.H‹´'´`´/ô`4,4,´.ô-t/tbÈ4/ô`4/´,ô`4,4/4/4,4.4/4,4`4b4`4`ô`ˆ‹´(t/´/´,tbt-t/t.4-H4/ô`4/´aô.4`´,4/t/ˆ‹ÒUULM—KˆÈ•ULMLH‹“PQULM‹´&´/´/t`t`ô.ôc4`´,4a´.4cÈ‹ŒŒ‹LLLÎŒŒˆ‹´'´aô/t/ˆ‹´$´at/´-4côbt.4.H‹´'´,t`t`ô-´-4-t/tbÈ4/ô`4/´,ô`4,4/4/4,4.4`ô`t.ô/´,´.4cÈ‹´'ô/´`t-tbt-t/t.4-H4/t,4-ô/t,4aô-t/t/ˆ‹ÓÓ”ÕSULM—KˆÈ•ULMLˆ‹“PQULM‹´'ô/´`t-tbt-t/t.4-H‹ŒŒ‹LL•MNŒŒˆ‹´&´/´`4/ô`ô`HH‹´$´at/´-4côbt.4.H‹´+t.´`t.´`ô`4`t.4cÈ4.4,´`t`´`4-taô,4`H4.´`ô`4,4`´/´`4/´/‹´%4/´,ô/´,´/´`4`t/´,ô.ô,4`t/´,´,4/H‹•’TÒUULM—KˆÈ•ULŒKLH‹“PQULŒH‹´%ô,´/´/t/´.ˆ‹ŒŒ‹LLLŽŒNŒˆ‹´(´-t.ô-ta4/´/t.4cÈ0­È4`´-t`t`ˆ‹´&4`tat/´-4côbt.4.H‹´(ô`´/´aô/tdt/H4`4-t-´.4/4/ô/´.ô/t/´,ô/ˆ4-4/tcÈ‹´&´/´/t`t`ô.ôc4`´,4a´.4cÈ4/t,4-ô/t,4aô-t/t,‹ÐSULŒH—KˆÈ•ULÌËLH‹“PQULÌÈ‹´'ô/´`t-tbt-t/t.4-H‹ŒŒ‹LLŒMNŒÌŒˆ‹´(ôaô-t,t/tbô.H4.´/´/4/ô.ô-t.´`H‹´$´at/´-4côbt.4.H‹´'ô`4/´,´-t-4-t/t,4ct.´`t.´`ô`4`t.4cÈ‹´'´-´.4-4,4-t`ˆ4`4-tb4-t/t.4-H‹•’TÒUULÌÈ—KˆÈ•ULKLH‹“PQULH‹´&´/´/t`t`ô.ôc4`´,4a´.4cÈ‹ŒŒ‹LLŒULŽŒŒˆ‹´$´.4-4-t/ˆ‹´$´at/´-4côbt.4.H‹´'ô-t`4,´.4aô/t,4cÈ4.´/´/t`t`ô.ôc4`´,4a´.4cÈ‹´'ô`4.4,ô.ô,4b4dt/H4/t,4/ô/´`t-tbt-t/t.4-H‹ÓÓ”ÕSULH—KˆÈ•ULŒËLH‹“PQULŒÈ‹´&´/´/t`t`ô.ôc4`´,4a´.4cÈ‹ŒŒ‹LLL•MŒŒˆ‹´(´-t.ô-ta4/´/H‹´$´at/´-4côbt.4.H‹´'´,t`t`ô-´-4-t/tbÈ4`ô`t.ô/´,´.4cÈ4.4`t`´/´.4/4/´`t`´c‹´'´`´.´,4-Îˆ4`t`´/´.4/4/´`t`´c‹ÓÓ”ÕSULŒÈ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+ÝXÚÚ[Ë›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•ÈØ[\×ÝÝXÚÚ[È
+ˆYXYÚYÝXÚÚ[Ý\KØØÝ\œ™YØ]Ú[›™[\™XÝ[Û‹Ý[[X\žKÝ]ÛÛYKÛÝ\˜ÙWÜ™Y‹Ü™X]YØžBˆ
+HSQTÈ
+ËËËËËËËËË	ÜÞ\Ý[K\Ø[\Ë\ÙYY	ÊX
+K˜š[™
+‹‹œ›ÝÊJJNÂ‚ˆÛÛœÝÚZ[”ÝYÙ\ÈHÈ´'ô-t`4,´bô.H4.´.ô.4.ˆ‹´%ô,4cô,´.´,‹´&´/´/t`t`ô.ôc4`´,4a´.4cÈ‹´'ô/´`t-tbt-t/t.4-H‹´%4/´,ô/´,´/´`‹´'t,4aô.4`t.ô-t/t.4-H‹´'ô.ô,4`´dt-ˆ—NÂˆ]ØZ][‹‘‹˜˜]Ú
+ÚZ[”ÝYÙ\ËœÛXÙJJK›X\
+
+ÝYÙK[™^
+HOˆ[‹‘‹œ™\\™JS”ÑT•S•ÈØ[\×ÜÝYÙWÙ]™[È
+ˆXYÚYœ›ÛWÜÝYÙK×ÜÝYÙKÝ]ÛÛYK™X\ÛÛ‹XÝÜ‹ØØÝ\œ™YØ]ˆ
+HÑSPÕ	ÓPQULM	ËËË	ô(ô`t/ô-tb4/t/‰Ë	ô+t`´,4/È4/ô/´-4`´,´-t`4-´-4dt/H4-4-t/4/´/t`t`´`4,4a´.4/´/t/tbô/4`t/´,tbô`´.4-t/	Ë	ÜÞ\Ý[K\Ø[\Ë\ÙYY	ËÂˆÒT‘H“ÕVTÕÈ
+ÑSPÕH”“ÓHØ[\×ÜÝYÙWÙ]™[ÈÒT‘HXYÚYH	ÓPQULM	ÈS‘×ÜÝYÙHHÊX
+Bˆ˜š[™
+ÚZ[”ÝYÙ\ÖÚ[™^KÝYÙKŒ‹LIÔÝš[™Êˆ
+È[™^
+ˆŠKœYÝ\
+‹ŒŠ_ULŽŒŒ˜ÝYÙJJJNÂ‚ˆ]ØZ][‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•Èš[˜[˜ÚX[ÛÜ\˜][ÛœÈ
+ˆYÜ\˜][Û—Ù]K\š[Ù\™XÝ[Û‹[[Ý[ÛZ[›Ü‹Ø]YÛÜžK™\ÜØÛ\ÜËÛÝ[\œ\WÙ[]WÚYˆÛÛ˜XÝÚYØÝ[Y[ÚY›Ú™XÝÙ[]WÚYYØ[Ù[]WÚYØš™XÝÙ[]WÚYÙœ—Ù[]WÚYˆ˜[š×ÛÜ\˜][Û—Ü™Y‹Ü\˜][Û—ÚÚ[™ÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÙš[KÛÝ\˜ÙWÜÚY]ÛÝ\˜ÙWÜ™Y‹]WÜ]X[]KÝ]\ËÜ™X]YØžBˆ
+HSQTÈ
+ˆ	Ñ’S‹UTÕPÓQS•LM	Ë	ÌŒ‹LLIË	ÌŒ‹L	Ë	ô'ô/´`t`´`ô/ô.ô-t/t.4-IËLˆ	ô'´,t`ôaô-t/t.4-Hx $ÌLH0­È4`´-t`t`´/´,´,4cÈ4.´.ô.4-t/t`´`t.´,4cÈ4a´-t/ô/´aô.´,	Ë	ô%4/´at/´-4bÈ4'´'ô.4(ÉË	ÑSKULM	Ë	ÑÑËULŒ‹LM	Ëˆ	ÔVKULMLIË	Ô’‹UL	Ë	ÓÔ‘ËULIË	ÓÐ’‹UL‰Ë	ÐÑ”‹ULIË	ÐS’ËUTÕPÓQS•LM	Ëˆ	ÔÖS•UP×ÕPÑIË	ÔÖS•UP×ÔÐST×ÕTÕ	Ë	ø %	Ë	ø %	Ë	ô&ô.4-8¡%ŒM8¡¤ˆ4/t,4aô.4`t.ô-t/t.4-H8¡%ŒM	Ëˆ	ô(t.4/t`´-t`´.4aô-t`t.´,4cÈ4/´/ô-t`4,4a´.4cÈ4`´/´.ôc4.´/ˆ4-4.ôcÈ4/ô`4/´,´-t`4.´.4`t.´,´/´-ô/t/´,ô/ˆ4/4,4`4b4`4`ô`´,È4/t-H4,t,4/t.´/´,´`t.´.4.H4a4,4.´`‰Ë	ô(4,4-ô/t-t`t-t/t/‰Ë	ÜÞ\Ý[K\Ø[\Ë\ÙYY	Âˆ
+X
+Kœ[Š
+NÂ‚ˆÛÛœÝXØÜX[ÈHÂˆÈPÔ‹PÓQS•ULM‹‘SKULM‹ÒULM‹‘ÑËULŒ‹LM‹”ÕËULH‹ŒŒ‹L‹LŒŒ‹LLH‹´'´/ô.ô,4aô-t/t/ˆ‹‘’S‹UTÕPÓQS•LM—KˆÈPÔ‹PÓQS•ULŒH‹‘SKULŒH‹ÒULŒH‹‘ÑËULŒ‹LŒH‹”ÕËULŒH‹ŒŒ‹LH‹ŒŒ‹LKLH‹´'´-´.4-4,4-t`´`tcÈ‹ˆ—KˆÈPÔ‹PÓQS•ULÌH‹‘SKULÌH‹ÒULÌH‹‘ÑËULŒ‹LÌH‹”ÕËULÌH‹ŒŒ‹LH‹ŒŒŒ‹LKLH‹´'´-´.4-4,4-t`´`tcÈ‹ˆ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+XØÜX[Ë›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•ÈÛY[ØXØÜX[È
+ˆY˜[Z[WÙ[]WÚYÚ[Ù[]WÚYÛÛ˜XÝÚYÙ\šXÙWÙ[]WÚY\š[Ù[[Ý[ÛZ[›Ü‹YWÙ]KÝ]\Ë^[Y[ÛÜ\˜][Û—ÚYÛÝ\˜ÙWÝ\Bˆ
+HSQTÈ
+ËËËËËËËËËË	ÔÖS•UP×ÔÐST×ÕTÕ	ÊX
+K˜š[™
+‹‹œ›ÝÊJJNÂ‚ˆÛÛœÝY™XÞXÛ\ÈHÂˆÈ“Q‘KULM‹“PQULM‹‘SKULM‹ÒULM‹‘ÑËULŒ‹LM‹”ÕËULH‹PÔ‹PÓQS•ULM‹‘’S‹UTÕPÓQS•LM‹ŒŒ‹LKLL‹LŽŒŒ‹LKLH‹LN´'t.4-ô.´.4.H‹	ÖÈ´'ô.ô,4`´-t-´.4,t-t-È4/ô`4/´`t`4/´aô.´.‹´$4.´`´.4,´/t,4cÈ4.´/´/4/4`ô/t.4.´,4a´.4cÈ—IË´(t-t`4-t,t`4/ˆ‹´(´-t,4`´`4,4.ôc4/t,4cÈ4`t`´`ô-4.4cÈ0­È4/ô`4/´,t/t/´-H4-ô,4/tcô`´.4-H‹´$4.´`´.4,´-t/H—KˆÈ“Q‘KULŒH‹“PQULŒH‹‘SKULŒH‹ÒULŒH‹‘ÑËULŒ‹LŒH‹”ÕËULŒH‹PÔ‹PÓQS•ULŒH‹ˆ‹ŒŒ‹L‹LH‹NLŒËŒŒ‹LKLH‹Ì‹´$´bô`t/´.´.4.H‹	ÖÈ´%t`t`´c4/ô`4/´`t`4/´aô.´,‹´'t-t`ˆ4/´`´,´-t`´,Lˆ4-4/t-t.H—IË´$t,4-ô/´,´bô.H‹´$´`t`´`4-taô,4`H4.´`ô`4,4`´/´`4/´/4.4,ô.4,t.´.4.H4,ô`4,4a4.4.ˆ‹´(´`4-t,t`ô-t`ˆ4,´/t.4/4,4/t.4cÈ—KˆÈ“Q‘KULÌH‹“PQULÌH‹‘SKULÌH‹ÒULÌH‹‘ÑËULŒ‹LÌH‹”ÕËULÌH‹PÔ‹PÓQS•ULÌH‹ˆ‹ŒŒKLKLH‹ŒMLŒL‹ŒŒ‹LKLH‹ŒÍ´(t`4-t-4/t.4.H‹	ÖÈ´(t/t.4-´-t/t.4-H4/ô/´`t-tbt,4-t/4/´`t`´.‹´'´/ô.ô,4`´,4,ˆ4`t`4/´.ˆ—IË´%ô/´.ô/´`´/ˆ‹´(t-t/4-t.t/tbô.H4,4,t/´/t-t/4-t/t`ˆ4/t,4,´`´/´`4/´.H4.´`4`ô-´/´.ˆ‹´$4.´`´.4,´-t/H—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+Y™XÞXÛ\Ë›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•ÈÛY[ÛY™XÞXÛ\È
+ˆYXYÚY˜[Z[WÙ[]WÚYÚ[Ù[]WÚYÛÛ˜XÝÚYÙ\šXÙWÙ[]WÚYXØÜX[ÚYˆ^[Y[ÛÜ\˜][Û—ÚYÙ\šXÙWÜÝ\Ù]K[ÛWÝ˜[YWÛZ[›Ü‹—ÛZ[›Ü‹Y™][YWÛ[ÛËˆ™^Ü^[Y[Ù]K™^Ü^[Y[ÛZ[›Ü‹Ú\›—Üš\Ú×ÜØÛÜ™KÚ\›—Üš\Ú×Ø˜[™Ú\›—Üš\Ú×Ù˜XÝÜœËˆÞX[WÝY\‹™\X]ÛÙ™™\‹Ý]\Âˆ
+HSQTÈ
+ËËËËËËËËËËËËËËËËËËËÊX
+K˜š[™
+‹‹œ›ÝÊJJNÂ‚ˆÛÛœÝ›Û\Ù\ÈHÂˆÈ“Ó‹ULMLH‹‘SKULM‹´'t,4aô.4`t.ô-t/t.4-H‹L´'´/ô.ô,4`´,4/´,t`ôaô-t/t.4cÈ4-ô,4,4,´,ô`ô`t`ˆ‹‘ÑËULŒ‹LM‹ŒŒ‹LLULŒŒˆ—KˆÈ“Ó‹ULMLˆ‹‘SKULM‹´(t/ô.4`t,4/t.4-H‹LÌ´$t.4.ô-t`ˆ4/t,4`t-t/4-t.t/t/´-H4`t/´,tbô`´.4-H‹‘ÑËULŒ‹LM‹ŒŒ‹LLM•LŽŒŒˆ—KˆÈ“Ó‹ULÌKLH‹‘SKULÌH‹´'t,4aô.4`t.ô-t/t.4-H‹LŒŒLˆ4/4-t`tcôa´-t,ˆ4,ˆ\[È‹‘ÑËULŒ‹LÌH‹ŒŒ‹LLUNŒŒˆ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+›Û\Ù\Ë›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•ÈÛY[Ø›Û\Ù\È
+ˆY˜[Z[WÙ[]WÚY]™[Ý\KÚ[Ë™X\ÛÛ‹™[]YØÛÛ˜XÝÚYØØÝ\œ™YØ]Ü™X]YØžBˆ
+HSQTÈ
+ËËËËËËË	ÜÞ\Ý[K\Ø[\Ë\ÙYY	ÊX
+K˜š[™
+‹‹œ›ÝÊJJNÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YOIô'4-t/t-t-4-´-t`4/ô/ˆ4/ô`4/´-4,4-´,4/8¡%ŒIÈÒT‘HYIÑSTUTÐSTËLIÈS‘Ü™X]YØžOIÜÞ\Ý[K\Ø[\Ë\ÙYY	ÈS‘\Ü^WÛ˜[YOIô'4-t/t-t-4-´-t`LH0­È4/ô`4/´-4,4-´.	ÈŠKˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YOIô'4-t/t-t-4-´-t`4/ô/ˆ4/ô`4/´-4,4-´,4/8¡%Œ‰ÈÒT‘HYIÑSTUTÐSTËL‰ÈS‘Ü™X]YØžOIÜÞ\Ý[K\Ø[\Ë\ÙYY	ÈS‘\Ü^WÛ˜[YOIô'4-t/t-t-4-´-t`Lˆ0­È4/ô`4/´-4,4-´.	ÈŠKˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YOIô(t-t/4c4cÈ8¡%ŒŒIÈÒT‘HYIÑSKULŒIÈS‘Ü™X]YØžOIÜÞ\Ý[K\Ø[\Ë\ÙYY	ÈS‘\Ü^WÛ˜[YOIô(t-t/4c4cÈLŒIÈŠKˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YOIô(4-t,tdt/t/´.ˆ8¡%ŒŒIÈÒT‘HYIÐÒULŒIÈS‘Ü™X]YØžOIÜÞ\Ý[K\Ø[\Ë\ÙYY	ÈS‘\Ü^WÛ˜[YOIô(4-t,tdt/t/´.ˆLŒIÈŠKˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YOIô(t-t/4c4cÈ8¡%ŒÌIÈÒT‘HYIÑSKULÌIÈS‘Ü™X]YØžOIÜÞ\Ý[K\Ø[\Ë\ÙYY	ÈS‘\Ü^WÛ˜[YOIô(t-t/4c4cÈLÌIÈŠKˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YOIô(4-t,tdt/t/´.ˆ8¡%ŒÌIÈÒT‘HYIÐÒULÌIÈS‘Ü™X]YØžOIÜÞ\Ý[K\Ø[\Ë\ÙYY	ÈS‘\Ü^WÛ˜[YOIô(4-t,tdt/t/´.ˆLÌIÈŠKˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YOIô(t-t/4c4cÈ8¡%ŒM	ÈÒT‘HYIÑSKULM	ÈS‘Ü™X]YØžOIÜÞ\Ý[K\ÙYY	ÈS‘\Ü^WÛ˜[YOIô(t-t/4c4cÈLM	ÈŠKˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YOIô(4-t,tdt/t/´.ˆ8¡%ŒM	ÈÒT‘HYIÐÒULM	ÈS‘Ü™X]YØžOIÜÞ\Ý[K\ÙYY	ÈS‘\Ü^WÛ˜[YOIô(4-t,tdt/t/´.ˆLM	ÈŠKˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YOIô'ô-t-4,4,ô/´,È8¡%ŒÌ‰ÈÒT‘HYIÑSTULÌ‰ÈS‘Ü™X]YØžOIÜÞ\Ý[K\ÙYY	ÈS‘\Ü^WÛ˜[YOIô(t/´`´`4`ô-4/t.4.ˆLÌˆ0­È4/ô-t-4,4,ô/´,ÉÈŠKˆ[‹‘‹œ™\\™J•TUH[]Y\ÈÑU\Ü^WÛ˜[YOIô'´,t`ôaô-t/t.4-Hx $ÌLIÈÒT‘HYIÔÕËULIÈS‘Ü™X]YØžOIÜÞ\Ý[K\ÙYY	ÈS‘\Ü^WÛ˜[YOIô'´,t`ôaô-t/t.4-Hx $ÌLH0­È4`´-t`t`‰ÈŠKˆ[‹‘‹œ™\\™J•TUHØ[\×ÝÝXÚÚ[ÈÑUÝ[[X\žOIô'ô-t`4-tat/´-4/ô/ˆ4/´,tb´cô,´.ô-t/t.4cˆ0ªô$t`ô-4`ôbt-t-H4/4,4`´-t/4,4`´.4.´.0®ÉÈÒT‘HYIÕULMLIÈS‘Ü™X]YØžOIÜÞ\Ý[K\Ø[\Ë\ÙYY	ÈS‘Ý[[X\žOIô'ô-t`4-tat/´-4/ô/ˆ4/´,tb´cô,´.ô-t/t.4cˆX]Ù]\™IÈŠKˆ[‹‘‹œ™\\™J•TUHØ[\×ÝÝXÚÚ[ÈÑUÝ]ÛÛYOIô(t`´`4,4/t.4a´,4/´`´.´`4bô`´,	ÈÒT‘HYIÕULMLIÈS‘Ü™X]YØžOIÜÞ\Ý[K\Ø[\Ë\ÙYY	ÈS‘Ý]ÛÛYOIô&ô-t/t-4.4/t,È4/´`´.´`4bô`‰ÈŠKˆ[‹‘‹œ™\\™J•TUHØ[\×ÜÝYÙWÙ]™[ÈÑU™X\ÛÛIô+t`´,4/È4/ô/´-4`´,´-t`4-´-4dt/H4-4-t/4/´/t`t`´`4,4a´.4/´/t/tbô/4`t/´,tbô`´.4-t/	ÈÒT‘HXYÚYIÓPQULM	ÈS‘XÝÜIÜÞ\Ý[K\Ø[\Ë\ÙYY	ÈS‘™X\ÛÛIô(´-t`t`´/´,´bô.H4`t.´,´/´-ô/t/´.H4/4,4`4b4`4`ô`ˆ4ct`´,4/ô,IÈŠKˆ[‹‘‹œ™\\™J•TUHš[˜[˜ÚX[ÛÜ\˜][ÛœÈÑUÛÝ\˜ÙWÜ™YIô&ô.4-8¡%ŒM8¡¤ˆ4/t,4aô.4`t.ô-t/t.4-H8¡%ŒM	ÈÒT‘HYIÑ’S‹UTÕPÓQS•LM	ÈS‘Ü™X]YØžOIÜÞ\Ý[K\Ø[\Ë\ÙYY	ÈS‘ÛÝ\˜ÙWÜ™YIÓPQULM8¡¤ˆPÔ‹PÓQS•ULM	ÈŠKˆJNÂŸB‚˜\Þ[˜È[˜Ý[ÛˆÙYYÛÛ[
+
+HÂˆÛÛœÝ]]ÜœÈHÂˆÈ‘STUPÓÓ•S•LH‹´(t/´`´`4`ô-4/t.4.ˆPÌH0­È4`4-t-4,4.´`´/´`‹´'4,4`4.´-t`´.4/t,È—KˆÈ‘STUPÓÓ•S•Lˆ‹´(t/´`´`4`ô-4/t.4.ˆPÌˆ0­È4,4,´`´/´`‹´'4,4`4.´-t`´.4/t,È—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+]]ÜœË›X\
+
+›ÝË[™^
+HOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•È[]Y\È
+ˆY[]WÝ\K\Ü^WÛ˜[YKÝ]\ËÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÜ™XÛÜ™ÚY]WÜ]X[]KØÛÜKY]Y]KÜ™X]YØžBˆ
+HSQTÈ
+Ë	ô(t/´`´`4`ô-4/t.4.‰ËË	ô$4.´`´.4,´/t,	Ë	ÔÖS•UP×ÐÓÓ•S•ÕTÕ	ËË	ô(t.4/t`´-t`´.4aô-t`t.´,4cÈ4.´,4`4`´/´aô.´,4,4,´`´/´`4,	ËË	ÞßIË	ÜÞ\Ý[KXÛÛ[\ÙYY	ÊX
+Bˆ˜š[™
+›ÝÖÌK›ÝÖÌWKÓÓ•S•PUUÔ‹IÚ[™^
+È_X›ÝÖÌ—JJJNÂ‚ˆÛÛœÝXØÛÝ[ÈHÂˆÈPÐËUU’È‹•’È‹\[È0­È’È0­È4`´-t`t`ˆ‹´$4.´`´.4,´-t/H‹LŽKˆÈPÐËUUÈ‹•[YÜ˜[H‹\[È0­È[YÜ˜[H0­È4`´-t`t`ˆ‹´$4.´`´.4,´-t/H‹ŒLKˆÈPÐËURQÈ‹’[œÝYÜ˜[H‹\[È0­È[œÝYÜ˜[H0­È4`´-t`t`ˆ‹´$4.´`´.4,´-t/H‹NŒŒKˆÈPÐËUVU‹–[ÝUX™H‹\[È0­È[ÝUX™H0­È4`´-t`t`ˆ‹´'t,4/ô`4/´,´-t`4.´-H‹ŽŒKˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+XØÛÝ[Ë›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•ÈX\šÙ][™×ØXØÛÝ[È
+ˆY]›Ü›K\Ü^WÛ˜[YKÝ]\Ë]YY[˜ÙWØÛÝ[ÛÝ\˜ÙWÝ\Bˆ
+HSQTÈ
+ËËËËË	ÔÖS•UP×ÐÓÓ•S•ÕTÕ	ÊX
+K˜š[™
+‹‹œ›ÝÊJJNÂ‚ˆÛÛœÝ[ˆHÂˆÈ”S‹ULÌH‹ŒŒ‹LËLUNŒŒˆ‹PÐËURQÈ‹‘STUPÓÓ•S•Lˆ‹´&´/´`4/´`´.´/´-H4,´.4-4-t/ˆ‹´(´-t,4`´`4/ô/´/4/´,ô,4-t`ˆ4,ô/´,´/´`4.4`´c4`ô,´-t`4-t/t/t-t-H‹“Ñ‘‹ULÈ‹ÓTULÈ‹´'´/ô`ô,t.ô.4.´/´,´,4/t/ˆ‹´&4`t`´/´`4.4cÈ4-ô,4/tcô`´.4cË4/´-4.4/H4cô`t/tbô.H4/´a4a4-t`4.4`t`tbô.ô.´,4`HUH—KˆÈ”S‹ULLˆ‹ŒŒ‹LLULŽŒŒˆ‹PÐËUU’È‹‘STUPÓÓ•S•LH‹´&´,4`4`ô`t-t.ôc‹´&´,4.ˆ4,´bô,t`4,4`´c4b4.´/´.ô`È4,t-t-È4.ô.4b4/t-t.H4`´`4-t,´/´,ô.‹“Ñ‘‹ULH‹ÓTULLˆ‹´'´/ô`ô,t.ô.4.´/´,´,4/t/ˆ‹´'ôcô`´c4/ô`4/´,´-t`4cô-t/4bôaH4,´/´/ô`4/´`t/´,ˆ4-4.ôcÈ4`t-t/4c4.—KˆÈ”S‹ULLÈ‹ŒŒ‹LLLLŒŒˆ‹PÐËUUÈ‹‘STUPÓÓ•S•LH‹´&ô/´/t,ô`4.4-‹´'ô-t`4,´bô.H4/4-t`tcôaˆ4,ˆ4-4-t`´`t.´/´/4`t,4-4`È‹“Ñ‘‹ULˆ‹ÓTULLÈ‹´'´/ô`ô,t.ô.4.´/´,´,4/t/ˆ‹´'ô`4,4.´`´.4aô-t`t.´.4.H4aô-t.‹t.ô.4`t`ˆ4,4-4,4/ô`´,4a´.4.—KˆÈ”S‹ULL‹ŒŒ‹LLMUMÎŒŒˆ‹PÐËUVU‹‘STUPÓÓ•S•Lˆ‹´$´.4-4-t/ˆ‹´+t.´`t.´`ô`4`t.4cÈ4/ô/ˆ4`ôaô-t,t/t/´/4`È4.´/´/4/ô.ô-t.´`t`È‹“Ñ‘‹ULÈ‹ÓTULL‹´'´/ô`ô,t.ô.4.´/´,´,4/t/ˆ‹´'4,4`4b4`4`ô`ˆ4/ô/ˆ4/ô`4/´`t`´`4,4/t`t`´,´`È4.4/´`´,´-t`´bÈ4/ô-t-4,4,ô/´,ô/´,ˆ—KˆÈ”S‹ULLH‹ŒŒ‹LLNŒÌŒˆ‹PÐËURQÈ‹‘STUPÓÓ•S•Lˆ‹´&´/´`4/´`´.´/´-H4,´.4-4-t/ˆ‹´'ô`4/´-t.´`´/t,4cÈ4/t-t-4-t.ôcÈ4,ô.ô,4-ô,4/4.4`4-t,tdt/t.´,‹“Ñ‘‹ULH‹ÓTULLH‹´'t,4`t/´,ô.ô,4`t/´,´,4/t.4.‹´%4/´.´,4-ô`ô-t/4bô.H4`4-t-ô`ô.ôc4`´,4`ˆ4,´/4-t`t`´/ˆ4/´,tbt-t,ô/ˆ4/´,t-tbt,4/t.4cÈ—KˆÈ”S‹ULLˆ‹ŒŒ‹LL•LŽŒŒˆ‹PÐËUUÈ‹‘STUPÓÓ•S•LH‹´'ô/´`t`ˆ‹´'´`´,´-t`´bÈ4/t,4,´/´/ô`4/´`tbÈ4/ˆ4/t,4,t/´`4-H‹“Ñ‘‹ULH‹ÓTULLˆ‹´)ô-t`4/t/´,´.4.ˆ‹´(t/´,t`4,4`´c4`4-t,4.ôc4/tbô-H4,´/´/ô`4/´`tbÈ4.4-È4-ô,´/´/t.´/´,ˆ4/ô`4/´-4,4-ˆ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+[‹›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•ÈÛÛ[Ü[—Ú][\È
+ˆYØÚY[YØ]XØÛÝ[ÚY]]Ü—Ù[]WÚY›Ü›X]ÜXËÙ™™\—ÚYØ[\ZYÛ—ÚYÝ]\ËœšYY‹Ü™X]YØžBˆ
+HSQTÈ
+ËËËËËËËËËË	ÜÞ\Ý[KXÛÛ[\ÙYY	ÊX
+K˜š[™
+‹‹œ›ÝÊJJNÂ‚ˆÛÛœÝX›XØ][ÛœÈHÂˆÈ”P‹ULÌH‹”S‹ULÌH‹ŒŒ‹LËLUNŒÎŒˆ‹”ÔÕUTÕRQËLÌH‹LNÍÌLL‹KŒKˆÈ”P‹ULLˆ‹”S‹ULLˆ‹ŒŒ‹LLULŽŒŽŒˆ‹”ÔÕUTÕU’ËLLˆ‹LLMLŒM‹KKˆÈ”P‹ULLÈ‹”S‹ULLÈ‹ŒŒ‹LLLLŒNŒˆ‹”ÔÕUTÕUËLLÈ‹ÍLŒÌLM‹ËKˆÈ”P‹ULL‹”S‹ULL‹ŒŒ‹LLMUMÎŒNŒˆ‹•’QSËUTÕVULL‹LLÌMKŒK‹KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+X›XØ][ÛœË›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•ÈÛÛ[ÜX›XØ][ÛœÈ
+ˆY[—Ú][WÚYX›\ÚYØ]X›XØ][Û—Ü™Y‹™XXÚšY]ÜË™XXÝ[ÛœËÛXÚÜËXYËÛÛ˜XÝËˆ™]™[YWÛZ[›Ü‹ÛÝ\˜ÙWÝ\K]WÜ]X[]Bˆ
+HSQTÈ
+ËËËËËËËËËËË	ÔÖS•UP×ÐÓÓ•S•ÕTÕ	Ë	ô(t.4/t`´-t`´.4aô-t`t.´.4-H4/4-t`´`4.4.´.È4'ô`4/´-4,´.4-´-t/t.4-KžÞ4.TH4`t/´a´`t-t`´-t.H4/t-H4/ô`4-t-4/´`t`´,4,´.ô-t/tbÉÊX
+K˜š[™
+‹‹œ›ÝÊJJNÂ‚ˆ]ØZ][‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•Èš[˜[˜ÚX[ÛÜ\˜][ÛœÈ
+ˆYÜ\˜][Û—Ù]K\š[Ù\™XÝ[Û‹[[Ý[ÛZ[›Ü‹Ø]YÛÜžK™\ÜØÛ\ÜËÛÝ[\œ\WÙ[]WÚYˆÛÛ˜XÝÚYØÝ[Y[ÚY›Ú™XÝÙ[]WÚYYØ[Ù[]WÚYØš™XÝÙ[]WÚYÙœ—Ù[]WÚYˆ˜[š×ÛÜ\˜][Û—Ü™Y‹Ü\˜][Û—ÚÚ[™ÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÙš[KÛÝ\˜ÙWÜÚY]ÛÝ\˜ÙWÜ™Y‹]WÜ]X[]KÝ]\ËÜ™X]YØžBˆ
+HSQTÈ
+ˆ	Ñ’S‹UTÕPÓÓ•S•LÌIË	ÌŒ‹LLÉË	ÌŒ‹L	Ë	ô'ô/´`t`´`ô/ô.ô-t/t.4-IËŒˆ	ô(´-t,4`´`4,4.ôc4/t,4cÈ4`t`´`ô-4.4cÈ0­È4`´-t`t`´/´,´,4cÈ4.´/´/t`´-t/t`‹t,4`´`4.4,t`ôa´.4cÉË	ô%4/´at/´-4bÈ4'´'ô.4(ÉË	ÑSKULÌIË	ÑÑËULŒ‹LÌIËˆ	ÔVKULÌKLIË	Ô’‹UL	Ë	ÓÔ‘ËULIË	ÓÐ’‹UL‰Ë	ÐÑ”‹ULIË	ÐS’ËUTÕPÓÓ•S•LÌIËˆ	ÔÖS•UP×ÕPÑIË	ÔÖS•UP×ÐÓÓ•S•ÕTÕ	Ë	ø %	Ë	ø %	Ë	ÔP‹ULÌH8¡¤ˆPQULÌH8¡¤ˆPÔ‹PÓQS•ULÌIËˆ	ô(t.4/t`´-t`´.4aô-t`t.´,4cÈ4/´/ô-t`4,4a´.4cÈ4-4.ôcÈ4/ô`4/´,´-t`4.´.4.´/´/t`´-t/t`‹t,4`´`4.4,t`ôa´.4.È4/t-H4,t,4/t.´/´,´`t.´.4.H4a4,4.´`‰Ë	ô(4,4-ô/t-t`t-t/t/‰Ë	ÜÞ\Ý[KXÛÛ[\ÙYY	Âˆ
+X
+Kœ[Š
+NÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J•TUHÛY[ÛY™XÞXÛ\ÈÑU^[Y[ÛÜ\˜][Û—ÚYH	Ñ’S‹UTÕPÓÓ•S•LÌIË\]YØ]HÕT”‘S•ÕSQTÕSTÒT‘HXYÚYH	ÓPQULÌIÈS‘^[Y[ÛÜ\˜][Û—ÚYH	ÉÈŠKˆ[‹‘‹œ™\\™J•TUHÛY[ØXØÜX[ÈÑU^[Y[ÛÜ\˜][Û—ÚYH	Ñ’S‹UTÕPÓÓ•S•LÌIËÝ]\ÈH	ô'´/ô.ô,4aô-t/t/‰ÈÒT‘HYH	ÐPÔ‹PÓQS•ULÌIÈS‘^[Y[ÛÜ\˜][Û—ÚYH	ÉÈŠKˆJNÂ‚ˆ]ØZ][‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•ÈÛÛ[Ø]šX][ÛœÈ
+ˆYX›XØ][Û—ÚYÛXÚ×ÚYXYÚYÛÛ˜XÝÚY^[Y[ÛÜ\˜][Û—ÚY™]™[YWÛZ[›Ü‹]šX][Û—Û[Ù[ˆ
+HSQTÈ
+	ÐU‹ULÌIË	ÔP‹ULÌIË	ÐÓPÒËULÌIË	ÓPQULÌIË	ÑÑËULŒ‹LÌIË	Ñ’S‹UTÕPÓÓ•S•LÌIËŒ	ô'ô-t`4,´bô.H4.´.ô.4.ˆ0­È4`´-t`t`‰ÊX
+Kœ[Š
+NÂ‚ˆÛÛœÝ™XÛÛ[Y[™][ÛœÈHÂˆÈ”‘PËPÓÓ•ULH‹”P‹ULÌH‹´$´bô`4`ôaô.´,‹ŒH4-4/´,ô/´,´/´`4.ˆ8 ¯H4`´-t`t`´/´,´/´.H4,´bô`4`ôaô.´.4/ô`4.ÌL4.´.ô.4.´,4aH‹´'ô/´,´`´/´`4.4`´c4`´-t/4`È4,ˆ’È4.[YÜ˜[K4`t/´at`4,4/t.4,ˆ4/´a4a4-t`4.UH—KˆÈ”‘PËPÓÓ•ULˆ‹”P‹ULL‹´'t.4-ô.´.4.HÕˆ‹ŽÌ4/ô`4/´`t/4/´`´`4/´,ˆ4.4`´/´.ôc4.´/ˆŒH4/ô-t`4-tat/´-‹´'ô`4/´,´-t`4.4`´c4/ô-t`4,´bô-HL4`t-t.´`ô/t-ÕH4.4`t`tbô.ô.´`ÎÈ4/t-H4/´a´-t/t.4,´,4`´c4,´.4-4-t/ˆ4`´/´.ôc4.´/ˆ4/ô/ˆ4/ô`4/´`t/4/´`´`4,4/—KˆÈ”‘PËPÓÓ•ULÈ‹”P‹ULLˆ‹´'t-t`ˆ4-4/´,ô/´,´/´`4/´,ˆ‹H4-ô,4cô,´/´.‹4-4/´,ô/´,´/´`4/´,ˆ4.4,´bô`4`ôaô.´.4/ô/´.´,4/t-t`ˆ‹´'ô-t`4-t-4,4`´c4/ô`4/´-4,4-´.4/4-t/t-t-4-´-t`4`È4.4/ô`4/´,´-t`4.4`´c4.´,4aô-t`t`´,´/ˆ4.ô.4-4/´,ˆ4-4/ˆ4/4,4`tb4`´,4,t.4`4/´,´,4/t.4cÈ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+™XÛÛ[Y[™][ÛœË›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•ÈÛÛ[Ü™XÛÛ[Y[™][ÛœÈ
+ˆYX›XØ][Û—ÚYÚYÛ˜[Ý\K]šY[˜ÙK™XÛÛ[Y[™][Û‹Ý]\Âˆ
+HSQTÈ
+ËËËËË	ô't/´,´,4cÉÊX
+K˜š[™
+‹‹œ›ÝÊJJNÂŸB‚˜\Þ[˜È[˜Ý[ÛˆÙYYYXØ][ÛŠ
+HÂˆÛÛœÝ[]Y\ÕÐYHÂˆÈ‘STUSQUÑLH‹´(t/´`´`4`ô-4/t.4.ˆ‹´'4-t`´/´-4.4`t`ˆSLH‹´'4-t`´/´-4.4aô-t`t.´.4.H4a´-t/t`´`—KÈ‘STULH‹´(t/´`´`4`ô-4/t.4.ˆ‹´'ô-t-4,4,ô/´,ÈLH‹´*4.´/´.ô,x $ÌLH—KˆÈ‘SKULMH‹´(t-t/4c4cÈ‹´(t-t/4c4cÈLMH‹´*4.´/´.ô,x $ÌLH—KÈÒULMH‹´(4-t,tdt/t/´.ˆ‹´(4-t,tdt/t/´.ˆLMH‹Œô$0­È4`´-t`t`´/´,´,4cÈ4,ô`4`ô/ô/ô,—KˆÈ‘SKULMˆ‹´(t-t/4c4cÈ‹´(t-t/4c4cÈLMˆ‹´*4.´/´.ô,x $ÌLH—KÈÒULMˆ‹´(4-t,tdt/t/´.ˆ‹´(4-t,tdt/t/´.ˆLMˆ‹Œô$0­È4`´-t`t`´/´,´,4cÈ4,ô`4`ô/ô/ô,—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+[]Y\ÕÐY›X\
+
+›ÝË[™^
+OO™[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•È[]Y\È
+Y[]WÝ\K\Ü^WÛ˜[YKÝ]\ËÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÜ™XÛÜ™ÚY]WÜ]X[]KØÛÜKY]Y]KÜ™X]YØžJHSQTÈ
+ËËË	ô$4.´`´.4,´/t,	Ë	ÔÖS•UP×ÑQPÐUSÓ—ÕTÕ	ËË	ô(t.4/t`´-t`´.4aô-t`t.´,4cÈ4.´,4`4`´/´aô.´,4,t-t-È4/ô-t`4`t/´/t,4.ôc4/tbôaH4-4,4/t/tbôaIËË	ÞßIË	ÜÞ\Ý[KYYXØ][Û‹\ÙYY	ÊX
+K˜š[™
+›ÝÖÌK›ÝÖÌWK›ÝÖÌ—KQKQS•UKIÚ[™^
+Ì_X›ÝÖÌ×JJJNÂˆÛÛœÝ›ÙÜ˜[\ÏVÂˆÈ”‘ËULLˆ‹´'4,4`´-t/4,4`´.4.´,0­ÈÈ4.´.ô,4`t`H‹´%4-t.t`t`´,´`ô-t`ˆ‹‘STULÌˆ‹‘STUSQUÑLH‹Œô$‹“PUT’PSUSPUM‹´(4-tb4,4-t`ˆ4`t/´`t`´,4,´/tbô-H4-ô,4-4,4aô.4.4/´,tb´cô`t/tcô-t`ˆ4at/´-4`4-tb4-t/t.4cÈ—KˆÈ”‘ËULNH‹´'ô`4/´-t.´`´/t,4cÈ4.ô,4,t/´`4,4`´/´`4.4cÈ‹‹´'t,4/ô-t`4-t`t/4/´`´`4-H‹‘STULH‹‘STUSQUÑLH‹Œô$8 $Ít$H‹“PUT’PSUT“Ò‘PÕLˆ‹´'ô.ô,4/t.4`4`ô-t`ˆ4.´/´/4,4/t-4/tbô.H4/ô`4/´-t.´`ˆ4.4/ô`4-t-4`t`´,4,´.ôcô-t`ˆ4`4-t-ô`ô.ôc4`´,4`ˆ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+›ÙÜ˜[\Ë›X\
+›ÝÏO™[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•ÈYXØ][Û—Ü›ÙÜ˜[\È
+Y]K™\œÚ[Û‹Ý]\Ë]]Ü—Ù[]WÚYY]Ù\ÝÙ[]WÚYØÛÜKX]\šX[Ü™Y‹^XÝYÜ™\Ý[ÛÝ\˜ÙWÝ\JHSQTÈ
+ËËËËËËËËË	ÔÖS•UP×ÑQPÐUSÓ—ÕTÕ	ÊX
+K˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝÜ›Ý\ÏVÖÈ‘Ô”ULÐH‹Œô$0­È4`´-t`t`´/´,´,4cÈ4,ô`4`ô/ô/ô,‹•S•ULH‹”‘ËULLˆ‹‘STULÌˆ‹´&´,4,t.4/t-t`ˆLˆ‹´$4.´`´.4,´/t,—KÈ‘Ô”USPˆ‹´'ô`4/´-t.´`´/t,4cÈ4,ô`4`ô/ô/ô,0­È4`´-t`t`ˆ‹•S•ULH‹”‘ËULNH‹‘STULH‹´&ô,4,t/´`4,4`´/´`4.4cÈ‹´$4.´`´.4,´/t,—WNÂˆ]ØZ][‹‘‹˜˜]Ú
+Ü›Ý\Ë›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈYXØ][Û—ÙÜ›Ý\È
+Y˜[YK[š]Ù[]WÚY›ÙÜ˜[WÚYXXÚ\—Ù[]WÚY›ÛÛKÝ]\ÊHSQTÈ
+ËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝÝY[ÏVÖÈ”ÕKULM‹ÒULM‹‘SKULM‹‘Ô”ULÐH‹´$4.´`´.4,´-t/H‹´'´,t`ôaô,4-t`´`tcÈ—KÈ”ÕKULMH‹ÒULMH‹‘SKULMH‹‘Ô”ULÐH‹´$4.´`´.4,´-t/H‹´'´,t`ôaô,4-t`´`tcÈ—KÈ”ÕKULMˆ‹ÒULMˆ‹‘SKULMˆ‹‘Ô”ULÐH‹´'ô`4.4,ô.ô,4b4-t/t.4-H4/´`´/ô`4,4,´.ô-t/t/ˆ‹´'´,t`ôaô,4-t`´`tcÈ—WNÂˆ]ØZ][‹‘‹˜˜]Ú
+ÝY[Ë›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈYXØ][Û—ÜÝY[È
+YÚ[Ù[]WÚY˜[Z[WÙ[]WÚYÜ›Ý\ÚYØXš[™]ÜÝ]\ËÝ]\ÊHSQTÈ
+ËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝ\ÜÛÛœÏVÂˆÈ“TËULÐKLŒH‹‘Ô”ULÐH‹”‘ËULLˆ‹ŒŒ‹LLŒUNŒŒˆ‹´(t/´`t`´,4,´/t,4cÈ4-ô,4-4,4aô,ˆ4/4/´-4-t.ôc4.4/´,tb´cô`t/t-t/t.4-H‹‘STULÌˆ‹ˆ‹´&´,4,t.4/t-t`ˆLˆ‹´%ô,4,´-t`4b4-t/t/ˆ‹¸¡%ˆN8 $ÌŒÈ4/´,tb´cô`t/t.4`´c4`4-tb4-t/t.4-H4/´-4/t/´.H4-ô,4-4,4aô.—KˆÈ“TËULÐKL‹‘Ô”ULÐH‹”‘ËULLˆ‹ŒŒ‹LLNŒŒˆ‹´'ô`4/´,´-t`4.´,4,ô.4/ô/´`´-t-ôbÈ4,ˆ4-ô,4-4,4aô-H‹‘STULÌˆ‹‘STULH‹´&´,4,t.4/t-t`ˆLˆ‹´%ô,4/ô.ô,4/t.4`4/´,´,4/t/ˆ‹ˆ—KˆÈ“TËUSP‹LŒH‹‘Ô”USPˆ‹”‘ËULNH‹ŒŒ‹LLŒULNŒÌŒˆ‹´(4/´.ô.4,ˆ4/ô`4/´-t.´`´/t/´.H4.´/´/4,4/t-4-H‹‘STULH‹ˆ‹´&ô,4,t/´`4,4`´/´`4.4cÈ‹´%ô,4,´-t`4b4-t/t/ˆ‹´(ta4/´`4/4`ô.ô.4`4/´,´,4`´c4.ô.4aô/tbô.H4,´.´.ô,4-—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+\ÜÛÛœË›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈYXØ][Û—Û\ÜÛÛœÈ
+YÜ›Ý\ÚY›ÙÜ˜[WÚYØÚY[YØ]ÜXËXXÚ\—Ù[]WÚYÝXœÝ]]WÙ[]WÚY›ÛÛKÝ]\ËÛY]ÛÜšÊHSQTÈ
+ËËËËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝ][™[˜ÙOVÂˆÈUULM‹“TËULÐKLŒH‹”ÕKULM‹´'ô`4.4`t`ô`´`t`´,´/´,´,4.È‹H‹´(t,4/4/´`t`´/´cô`´-t.ôc4/t/ˆ4/ô/´`t`´`4/´.4.È4/4/´-4-t.ôc‹‘STULÌˆ—KˆÈUULMH‹“TËULÐKLŒH‹”ÕKULMH‹´'ô`4.4`t`ô`´`t`´,´/´,´,4.È‹‹´'t`ô-´/t,4/ô/´-4`t.´,4-ô.´,4/t,4,´`´/´`4/´/4b4,4,ô-H‹‘STULÌˆ—KˆÈUULMˆ‹“TËULÐKLŒH‹”ÕKULMˆ‹´'´`´`t`ô`´`t`´,´/´,´,4.È‹ˆ‹´(4-t-ô`ô.ôc4`´,4`ˆ4/t-H4a4.4.´`t.4`4/´,´,4.ô`tcÈ‹‘STULÌˆ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+][™[˜ÙK›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈYXØ][Û—Ø][™[˜ÙH
+Y\ÜÛÛ—ÚYÝY[ÚY][™[˜ÙWÜÝ]\ËÜ˜YK™\Ý[™XÛÜ™YØžJHSQTÈ
+ËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝ›ÙÜ™\ÜÏVÖÈ”“ÑËULM‹”ÕKULM‹”‘ËULLˆ‹ŒÈ4.´,´,4`4`´,4.ÈŒˆ‹´(4-tb4-t/t.4-H4`t/´`t`´,4,´/tbôaH4-ô,4-4,4aÈ‹‹´(4/´`t`ˆ‹´'ô/´`t-tbt,4-t/4/´`t`´c4.4/ô`4/´,´-t`4/´aô/t,4cÈ4`4,4,t/´`´,8¡%Œ—KÈ”“ÑËULMH‹”ÕKULMH‹”‘ËULLˆ‹ŒÈ4.´,´,4`4`´,4.ÈŒˆ‹´(4-tb4-t/t.4-H4`t/´`t`´,4,´/tbôaH4-ô,4-4,4aÈ‹Ž´(t`´,4,t.4.ôc4/t/ˆ‹´'ô/´`t-tbt,4-t/4/´`t`´c4.4/ô`4/´,´-t`4/´aô/t,4cÈ4`4,4,t/´`´,8¡%Œ—KÈ”“ÑËULMˆ‹”ÕKULMˆ‹”‘ËULLˆ‹ŒÈ4.´,´,4`4`´,4.ÈŒˆ‹´(4-tb4-t/t.4-H4`t/´`t`´,4,´/tbôaH4-ô,4-4,4aÈ‹L‹´(´`4-t,t`ô-t`ˆ4-4,4/t/tbôaH‹´'´-4/t/ˆ4-ô,4/tcô`´.4-H4/ô`4/´/ô`ôbt-t/t/ŽÈ4/t-t-4/´`t`´,4`´/´aô/t/ˆ4/t,4,t.ôc´-4-t/t.4.H—WNÂˆ]ØZ][‹‘‹˜˜]Ú
+›ÙÜ™\ÜË›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈYXØ][Û—Ü›ÙÜ™\ÜÈ
+YÝY[ÚY›ÙÜ˜[WÚY\š[ÙY]šXËØÛÜ™K™[™]šY[˜ÙJHSQTÈ
+ËËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝ™YY˜XÚÏVÖÈ‘‘‹ULM‹”ÕKULM‹‘SKULM‹”‘ËULLˆ‹K´(4-t,tdt/t/´.ˆ4`t`´,4.È4`t/ô/´.´/´.t/t-t-H4/´,tb´cô`t/tcô`´c4`4-tb4-t/t.4-H‹´%4/´,t,4,´.4`´c4/ô,4`4/t/´-H4/´,tb´cô`t/t-t/t.4-H4,ˆ4`t.ô-t-4`ôc´bt`ôcˆ4,´-t`4`t.4cˆ‹´'t/´,´,4cÈ—KÈ‘‘‹ULMH‹”ÕKULMH‹‘SKULMH‹”‘ËULLˆ‹Ë´%4/´/4,4b4/t-t-H4-ô,4-4,4/t.4-H4-ô,4/tcô.ô/ˆ4,t/´.ôc4b4-H4aô,4`t,‹´(4,4-ô-4-t.ô.4`´c4-ô,4-4,4/t.4-H4/t,4/´,tcô-ô,4`´-t.ôc4/t`ôcˆ4.4-4/´/ô/´.ô/t.4`´-t.ôc4/t`ôcˆ4aô,4`t`´.‹´(´`4-t,t`ô-t`ˆ4/ô`4/´,´-t`4.´.—WNÂˆ]ØZ][‹‘‹˜˜]Ú
+™YY˜XÚË›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈYXØ][Û—Ù™YY˜XÚÈ
+YÝY[ÚY˜[Z[WÙ[]WÚY›ÙÜ˜[WÚY˜][™ËÛÛ[Y[™XÛÛ[Y[™][Û‹Ý]\ÊHSQTÈ
+ËËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝÛÛ[\ÏVÖÈÓÓKUS‘UÔËLH‹´'t/´,´/´`t`´c‹´$ô`4`ô/ô/ô,‹‘Ô”ULÐH‹´'t-t-4-t.ôcÈ4/4,4`´-t/4,4`´.4.´.‹´$ˆ4/ôcô`´/t.4a´`È4/ô/´.´,4-´-t/4/ô`4/´-t.´`´bÈ4.4`4-tb4-t/t.4cÈ4`t-t/4-t.t/tbô/4.´/´/4,4/t-4,4/ˆ‹ˆ‹‘STULÌˆ—KÈÓÓKUQU•LH‹´(t/´,tbô`´.4-H‹´$ô`4`ô/ô/ô,‹‘Ô”ULÐH‹´'´`´.´`4bô`´,4cÈ4.ô,4,t/´`4,4`´/´`4.4cÈ‹´'ô`4,4.´`´.4aô-t`t.´,4cÈ4,´`t`´`4-taô,4-4.ôcÈ4-4-t`´-t.H4.4`4/´-4.4`´-t.ô-t.Kˆ‹ŒŒ‹LLŽMŽŒŒˆ‹‘STULH—KÈÓÓKUPÒULH‹´)ô,4`ˆ‹´(t-t/4c4cÈ‹‘SKULM‹´'´`´,´-t`ˆ4/ô/ˆ4-4/´/4,4b4/t-t/4`È4-ô,4-4,4/t.4cˆ‹´'ô/´-4`´,´-t`4-´-4-t/t/Žˆ4-4/´`t`´,4`´/´aô/t/ˆ4,´bô/ô/´.ô/t.4`´c4/´,tcô-ô,4`´-t.ôc4/t`ôcˆ4aô,4`t`´cˆ‹ˆ‹‘STULÌˆ—WNÂˆ]ØZ][‹‘‹˜˜]Ú
+ÛÛ[\Ë›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈYXØ][Û—ØÛÛ[][šXØ][ÛœÈ
+YÛÛ[][šXØ][Û—Ý\K]YY[˜ÙWÝ\K]YY[˜ÙWÚY]K›ÙK]™[Ø]Ü™X]YØžJHSQTÈ
+ËËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂŸB‚˜\Þ[˜È[˜Ý[ÛˆÙYYŠ
+HÂˆÛÛœÝ[ÜHHÂˆÈÐS‘UL‹´&´,4/t-4.4-4,4`ˆ‹´&´,4/t-4.4-4,4`ˆL‹´'t-t,4.´`´.4,´/t,‹ÐS‘QUKL‹’ˆ—KˆÈÐS‘ULNH‹´&´,4/t-4.4-4,4`ˆ‹´&´,4/t-4.4-4,4`ˆLNH‹´$4.´`´.4,´/t,‹ÐS‘QUKLNH‹’ˆ—KˆÈÐS‘ULÈ‹´&´,4/t-4.4-4,4`ˆ‹´&´,4/t-4.4-4,4`ˆLÈ‹´'t-t,4.´`´.4,´/t,‹ÐS‘QUKLÈ‹’ˆ—KˆÈ‘STULLˆ‹´(t/´`´`4`ô-4/t.4.ˆ‹´(t/´`´`4`ô-4/t.4.ˆLLˆ0­È4/ô-t-4,4,ô/´,È‹´'t-t,4.´`´.4,´/t,‹‘STÖQQKLLˆ‹´*4.´/´.ô,x $ÌLH—KˆÈ‘STULŒÈ‹´(t/´`´`4`ô-4/t.4.ˆ‹´(t/´`´`4`ô-4/t.4.ˆLŒÈ0­È4.´`ô`4,4`´/´`‹´$4.´`´.4,´/t,‹‘STÖQQKLŒÈ‹´*4.´/´.ô,x $ÌLH—KˆÈ‘STUR‹LH‹´(t/´`´`4`ô-4/t.4.ˆ‹’ˆRH‹´$4.´`´.4,´/t,‹‘STÖQQKR‹LH‹’ˆ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+[ÜK›X\
+›ÝÏO™[‹‘‹œ™\\™JS”ÑT•ÔˆQÓ“Ô‘HS•È[]Y\È
+Y[]WÝ\K\Ü^WÛ˜[YKÝ]\ËÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÜ™XÛÜ™ÚY]WÜ]X[]KØÛÜKY]Y]KÜ™X]YØžJHSQTÈ
+ËËËË	ÔÖS•UP×Ò—ÕTÕ	ËË	ô(t.4/t`´-t`´.4aô-t`t.´,4cÈ4.´,4`4`´/´aô.´,4,t-t-È4/ô-t`4`t/´/t,4.ôc4/tbôaH4-4,4/t/tbôaIËË	ÞßIË	ÜÞ\Ý[KZ‹\ÙYY	ÊX
+K˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝ˜XØ[˜ÚY\ÏVÂˆÈ•PËUL‹´'ô-t-4,4,ô/´,È4/t,4aô,4.ôc4/t/´.H4b4.´/´.ôbÈ‹´*4.´/´.ô,x $ÌLH‹”ÔËUUPPÒTˆ‹K´%ô,4.´`4bô`´,—KˆÈ•PËULNH‹´&´`ô`4,4`´/´`4.´.ô,4`t`t,‹´*4.´/´.ô,x $ÌLH‹”ÔËUPÕTUÔˆ‹K´$ˆ4`4,4,t/´`´-H—KˆÈ•PËULÈ‹´'4-t`´/´-4.4`t`ˆ‹´'4-t`´/´-4.4aô-t`t.´.4.H4a´-t/t`´`‹”ÔËUSQUÑTÕ‹K´)ô-t`4/t/´,´.4.ˆ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+˜XØ[˜ÚY\Ë›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È—Ý˜XØ[˜ÚY\È
+Y]K[š]ÜÚ][Û—ÚYXYÛÝ[Ý]\ËÛÝ\˜ÙWÝ\JHSQTÈ
+ËËËËËË	ÔÖS•UP×Ò—ÕTÕ	ÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝØ[™Y]\ÏVÂˆÈÐS‘‘PËUL‹ÐS‘UL‹•PËUL‹´(4-t.´/´/4-t/t-4,4a´.4cÈ‹´(t/´`´`4`ô-4/t.4.ˆ‹´'t,4/tcô`ˆ‹ˆ‹´'ô`4.4/tcô`ˆ‹´&4/t`´-t`4,´c4cˆS•‹UL4`4-tb4-t/t.4-H‹QPËUL—KˆÈÐS‘‘PËULNH‹ÐS‘ULNH‹•PËULNH‹šœH0­È4`´-t`t`ˆ‹´&4/t`´-t`4,´c4cˆ‹Íˆ‹ˆ‹ˆ‹´(t.´`4.4/t.4/t,È4/ô`4/´.t-4-t/K4.4/t`´-t`4,´c4cˆ4/t,4-ô/t,4aô-t/t/ˆ—KˆÈÐS‘‘PËULÈ‹ÐS‘ULÈ‹•PËUL‹´(t,4.t`ˆ0­È4`´-t`t`ˆ‹´'´`´`t-t,ˆ‹L‹´'t-H4/ô`4/´-4/´.ô-´,4`´c‹´'t-t-4/´`t`´,4`´/´aô/t/ˆ4/ô/´-4`´,´-t`4-´-4dt/t/t/´,ô/ˆ4/´/ôbô`´,‹ˆ‹´(4-tb4-t/t.4-H4/´`t/t/´,´,4/t/ˆ4/t,4/4,4`´`4.4a´-H4.4/t`´-t`4,´c4c‹4/t-H4/t,4&4&—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+Ø[™Y]\Ë›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È—ØØ[™Y]\È
+Y[]WÚY˜XØ[˜ÞWÚYÛÝ\˜ÙKÝYÙKØÛÜ™KXÚ\Ú[Û‹™Z™XÝ[Û—Ü™X\ÛÛ‹Ù™™\—ÜÝ]\Ë]šY[˜ÙJHSQTÈ
+ËËËËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝ[\šY]ÜÏVÂˆÈ’S•‹UL‹ÐS‘‘PËUL‹ŒŒ‹L‹LÕLŒŒˆ‹‘STUR‹LH‹´&´-t.t`H4.4`t`´`4`ô.´`´`ô`4.4`4/´,´,4/t/t/´-H4.4/t`´-t`4,´c4cˆ4/ô`4/´.t-4-t/tbÎÈ4`4-t.´/´/4-t/t-4,4a´.4.4/ô`4/´,´-t`4-t/tbÈ‹´(4-t.´/´/4-t/t-4/´,´,4`´c4/´a4a4-t`—KˆÈ’S•‹ULNH‹ÐS‘‘PËULNH‹ŒŒ‹LLULNŒŒˆ‹‘STUR‹LH‹Í´(t.´`4.4/t.4/t,È4/ô`4/´.t-4-t/K4.´-t.t`H4/´-´.4-4,4-t`´`tcÈ‹´'ô`4/´-4/´.ô-´.4`´c—KˆÈ’S•‹ULÈ‹ÐS‘‘PËULÈ‹ŒŒ‹LLMLÎŒŒˆ‹‘STUR‹LH‹L‹´'t-H4/ô/´-4`´,´-t`4-´-4dt/H4/´,tcô-ô,4`´-t.ôc4/tbô.H4/´/ôbô`ˆ4`4,4,t/´`´bÈ4/ô/ˆ4/ô`4/´,ô`4,4/4/4-H‹´'´`´`t-t,ˆ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+[\šY]ÜË›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È—Ú[\šY]ÜÈ
+YØ[™Y]WÚYØÚY[YØ][\šY]Ù\—Ù[]WÚYØÛÜ™KÝ[[X\žKXÚ\Ú[ÛŠHSQTÈ
+ËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝ[\ÞYY\ÏVÂˆÈ‘STULLˆ‹ÐS‘‘PËUL‹‘ÑËQSTULLˆ‹”ÔËUUPPÒTˆ‹´*4.´/´.ô,x $ÌLH‹MLŒŒ‹L‹LMˆ‹´(ô,´/´.ô-t/H‹ŒŒ‹LLMH‹´(t/´,ô.ô,4b4-t/t.4-H4`t`´/´`4/´/H‹´'´`´/´-ô,´,4/H—KˆÈ‘STULŒÈ‹ˆ‹‘ÑËQSTULŒÈ‹”ÔËUPÕTUÔˆ‹´*4.´/´.ô,x $ÌLH‹ŒŒŒ‹L‹LH‹´(4,4,t/´`´,4-t`ˆ‹ˆ‹ˆ‹´$4.´`´.4,´-t/H—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+[\ÞYY\Ë›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È—Ù[\ÞYY\È
+YØ[™Y]WÚYÛÛ˜XÝÚYÜÚ][Û—ÚY[š]˜]WÛZ[›Ü‹\™WÙ]KÝ]\Ë\›Z[˜][Û—Ù]K\›Z[˜][Û—Ü™X\ÛÛ‹XØÙ\Ü×ÜÝ]\ÊHSQTÈ
+ËËËËËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈÛÜšÙ›Ý×ÙØÝ[Y[È
+Y]KØÝ[Y[Ý\KÝ\œ™[Ý™\œÚ[Û‹Ý]\Ë˜[YÝ[[ÝÛ™\—Ù[]WÚYÛÝ\˜ÙKÜ™X]YØžJHSQTÈ
+	ÑÑËQSTULL‰Ë	ô(´`4`ô-4/´,´/´.H4-4/´,ô/´,´/´`0­È4`t/´`´`4`ô-4/t.4.ˆLL‰Ë	ô(´`4`ô-4/´,´/´.H4-4/´,ô/´,´/´`	ËK	ô%ô,4,´-t`4b4dt/IË	ÌŒ‹LLMIË	ÑSTULL‰Ë	ÔÖS•UP×Ò—ÕTÕ	Ë	ÜÞ\Ý[KZ‹\ÙYY	ÊHŠKˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈÛÜšÙ›Ý×ÙØÝ[Y[È
+Y]KØÝ[Y[Ý\KÝ\œ™[Ý™\œÚ[Û‹Ý]\Ë˜[YÝ[[ÝÛ™\—Ù[]WÚYÛÝ\˜ÙKÜ™X]YØžJHSQTÈ
+	ÑÑËQSTULŒÉË	ô(´`4`ô-4/´,´/´.H4-4/´,ô/´,´/´`0­È4`t/´`´`4`ô-4/t.4.ˆLŒÉË	ô(´`4`ô-4/´,´/´.H4-4/´,ô/´,´/´`	ËK	ô$4.´`´`ô,4.ô-t/IË	ÌŒËLKLÌIË	ÑSTULŒÉË	ÔÖS•UP×Ò—ÕTÕ	Ë	ÜÞ\Ý[KZ‹\ÙYY	ÊHŠKˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È\ÚÜÈ
+]KÝÛ™\‹YWÙ]Kš[Üš]KÝ]\ËÛÝ\˜ÙWÝ\KÛÝ\˜ÙWÚY\ØÜš\[Û‹\ÜÚYÛ™YWÙ[]WÚYÚ[™]]ÛX][Û—ÚÙ^K™\]Z\™\×Ø\›Ý˜[™\Ý[™\Ý[Ù]šY[˜ÙKÛÛ\]YØ]Ü™X]YØžJHSQTÈ
+	ô$4-4,4/ô`´,4a´.4cÈ4`t/´`´`4`ô-4/t.4.´,LL‰Ë	ÒˆRIË	ÌŒ‹LËLM‰Ë	ô$´bô`t/´.´.4.IË	ô$´bô/ô/´.ô/t-t/t/‰Ë	ô'´/t,t/´`4-4.4/t,ÉË	ÑSTULL‰Ë	ô(4,4,t/´aô-t-H4/4-t`t`´/‹4-4/´`t`´`ô/ôbË4/t,4`t`´,4,´/t.4.ˆ4.4,´,´/´-4/t/´-H4/´,t`ôaô-t/t.4-IË	ÑSTUR‹LIË	Ò‹t/ô`4/´a´-t`t`IË	Ò—ÓÓ“ÐT‘‘STULL‰ËK	ô$4-4,4/ô`´,4a´.4cÈ4-ô,4,´-t`4b4-t/t,	Ë	ÓÓ‹ULL‹LK‹Œ	Ë	ÌŒ‹LËLMMŽŒŒ‰Ë	ÜÞ\Ý[KZ‹\ÙYY	ÊHŠKˆJNÂˆÛÛœÝÛ˜›Ø\™[™ÏVÂˆÈ“Ó‹ULL‹LH‹‘STULLˆ‹´'´a4/´`4/4.ô-t/t.4-H4.4-4/´,ô/´,´/´`‹´$´bô/ô/´.ô/t-t/t/ˆ‹ŒŒ‹L‹LMˆ‹‘ÑËQSTULLˆ—KˆÈ“Ó‹ULL‹Lˆ‹‘STULLˆ‹´(4,4,t/´aô-t-H4/4-t`t`´/ˆ4.4-4/´`t`´`ô/ôbÈ‹´$´bô/ô/´.ô/t-t/t/ˆ‹ŒŒ‹L‹LMÈ‹PÐËUTÒÔËLL‹PÐËQQKLLˆ—KˆÈ“Ó‹ULL‹LÈ‹‘STULLˆ‹´$´,´/´-4/t/´-H4/´,t`ôaô-t/t.4-H‹´$´bô/ô/´.ô/t-t/t/ˆ‹ŒŒ‹L‹LŽ‹‘U‹ULL‹LH—KˆÈ“Ó‹ULŒËLH‹‘STULŒÈ‹´$4`´`´-t`t`´,4a´.4cÈ4/ô/´`t.ô-H4,4-4,4/ô`´,4a´.4.‹´$ˆ4`4,4,t/´`´-H‹ŒŒ‹LKLH‹´'ô`4/´/4-t-´`ô`´/´aô/t,4cÈ4/´a´-t/t.´,Î—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+Û˜›Ø\™[™Ë›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È—ÛÛ˜›Ø\™[™È
+Y[\ÞYYWÚYÝ\Ý]\ËYWÙ]K]šY[˜ÙJHSQTÈ
+ËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝ]™[ÜY[VÂˆÈ‘U‹ULL‹LH‹‘STULLˆ‹´'´,t`ôaô-t/t.4-H‹´$´,´/´-4/tbô.H4.´`ô`4`H\[ÈÔÈ‹ŒŒ‹L‹LŽ‹L‹´%ô,4,´-t`4b4-t/t/ˆ‹´(´-t`t`ˆ4.4/ô`4,4.´`´.4aô-t`t.´,4cÈ4-ô,4-4,4aô,—KˆÈ‘U‹ULL‹Lˆ‹‘STULLˆ‹´'´a´-t/t.´,‹´'´a´-t/t.´,4/ô/ˆ4.4`´/´,ô,4/4/ô/´.ô`ô,ô/´-4.4cÈ‹ŒŒ‹LLH‹K´%ô,4,´-t`4b4-t/t/ˆ‹´)´-t.ô.ÍK4/´,t`4,4`´/t,4cÈ4`t,´cô-ôc4`4`ô.´/´,´/´-4.4`´-t.ôcÈ—KˆÈ‘U‹ULL‹LÈ‹‘STULLˆ‹´&ô/´cô.ôc4/t/´`t`´c‹´'ô`ô.ôc4`H4.´/´/4,4/t-4bÈ‹ŒŒ‹LËLMH‹Ž´(t.4,ô/t,4.È‹´$4/t/´/t.4/4/tbô.H4,4,ô`4-t,ô,4`ŽÈ4/t-H4/´`t/t/´,´,4/t.4-H4-4.ôcÈ4.´,4-4`4/´,´/´,ô/ˆ4`4-tb4-t/t.4cÈ—KˆÈ‘U‹ULŒËLH‹‘STULŒÈ‹´&´,4-4`4/´,´bô.H4`4-t-ô-t`4,ˆ‹´(4-t-ô-t`4,ˆ4/t,4`t`´,4`4b4-t,ô/ˆ4.´`ô`4,4`´/´`4,‹ŒŒ‹LLL‹´&´,4/t-4.4-4,4`ˆ‹´(4-t-ô`ô.ôc4`´,4`ˆ4-ô,4-4,4aÈ4.4/´a´-t/t.´,4`4`ô.´/´,´/´-4.4`´-t.ôcÈ—KˆÈ‘U‹ULŒËLˆ‹‘STULŒÈ‹´$4`´`´-t`t`´,4a´.4cÈµïÏ=¶‰žËkºwµçt-t.´`´.4`4`ôc´bt-t-H4-4-t.t`t`´,´.4-IË	ÔÕUQÖWÑU’PUSÓŽ‘U‹URÔKLIËK	ÜÞ\Ý[K\Ý˜]YÞK\ÙYY	ÊHŠKˆJNÂˆÛÛœÝ]™[ÏVÂˆÈ‘U‘S•ULÌH‹”Õ‹T’‹ULM‹´(t-t/4-t.t/t,4cÈ4/ô`4/´-t.´`´/t,4cÈ4`t`ô,t,t/´`´,0­È4/ô.4.ô/´`ˆH‹ŒŒ‹LLMÕLNŒŒˆ‹´*4.´/´.ô,0­È4/ô`4/´-t.´`´/t,4cÈ4.ô,4,t/´`4,4`´/´`4.4cÈ‹‘STUT“Ò‹LH‹ŒŒ´'ô`4/´,´-t-4-t/t/ˆ‹ŒŽ4`t-t/4-t.H4-ô,4,´-t`4b4.4.ô.4/´,tbt.4.H4/ô`4/´-t.´`ˆ‹—KˆÈ‘U‘S•UL‹”Õ‹T’‹ULM‹´(t-t/4-t.t/t,4cÈ4/ô`4/´-t.´`´/t,4cÈ4`t`ô,t,t/´`´,0­È4/ô.4.ô/´`ˆˆ‹ŒŒ‹LLLNŒŒˆ‹´*4.´/´.ô,0­È4,4.´`´/´,´bô.H4-ô,4.È‹‘STUT“Ò‹LH‹ŒÌ´%ô,4/ô.ô,4/t.4`4/´,´,4/t/ˆ‹ˆ‹KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+]™[Ë›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È\Ú[™\Ü×Ù]™[È
+Y›Ú™XÝÚY]K]™[Ø]ØØ][Û‹™\ÜÛœÚX›WÙ[]WÚYYÙ]ÛZ[›Ü‹XÝX[ÛZ[›Ü‹Ý]\Ë™\Ý[™YY˜XÚ×ÜØÛÜ™JHSQTÈ
+ËËËËËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝ\XÚ\[ÏVÂˆÈ‘U”ULÌKLH‹‘U‘S•ULÌH‹‘SKULM‹´(t-t/4c4cÈ‹´(ôaô,4`t`´,´/´,´,4.È‹´'ô/´/tcô`´/tbô.H4.4`´/´,È4.4at/´`4/´b4,4cÈ4`t/´,´/4-t`t`´/t,4cÈ4`4,4,t/´`´,—KˆÈ‘U”ULÌKLˆ‹‘U‘S•ULÌH‹‘STULÌˆ‹´'ô-t-4,4,ô/´,È‹´(ôaô,4`t`´,´/´,´,4.È‹´'t`ô-´/t,4,t/´.ô-t-H4.´/´`4/´`´.´,4cÈ4,´,´/´-4/t,4cÈ4aô,4`t`´c—KˆÈ‘U”ULLH‹‘U‘S•UL‹‘SKULŒH‹´(t-t/4c4cÈ‹´'ô`4.4,ô.ô,4b4dt/H‹ˆ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+\XÚ\[Ë›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È]™[Ü\XÚ\[È
+Y]™[ÚY\XÚ\[Ù[]WÚY\XÚ\[Ü›ÛK][™[˜ÙWÜÝ]\Ë™YY˜XÚÊHSQTÈ
+ËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈÝ˜]YÞWÜ™\Ý[È
+Y›Ú™XÝÚY]™[ÚY™\Ý[Ý\KY]šX×Û˜[YKY]šX×Ý˜[YK[š]]šY[˜ÙK™XÛÜ™YØ]
+HSQTÈ
+	ÔÕ‹T‘TËULÌIË	ÔÕ‹T’‹ULM	Ë	ÑU‘S•ULÌIË	ô(t/´,tbô`´.4-IË	ô(ô-4/´,´.ô-t`´,´/´`4dt/t/t/´`t`´c4`ôaô,4`t`´/t.4.´/´,‰Ë‹	ÉIË	ÌŽ4`t-t/4-t.NÈˆ4/´,t-t-ô.ô.4aô-t/t/tbôaH4/ô`4.4/4-t`4,4/´,t`4,4`´/t/´.H4`t,´cô-ô.	Ë	ÌŒ‹LLMÕMŽŒÌŒ‰ÊHŠKˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈÝ˜]YÞWÙ]šX][ÛœÈ
+YÜWÚY›Ú™XÝÚY]šX][Û—Ý\K˜\šX[˜ÙWÝ˜[YK^[˜][Û‹XÚ\Ú[Û‹Ý]\Ë™[]YÝ\Ú×ÚY]XÝYØ]
+HSQTÈ
+	ÑU‹URÔKLIË	ÒÔKUQSRSKLIË	ÔÕ‹T’‹ULM	Ë	ô't.4-´-H4a´-t.ô.	ËN	ô&4/t-4-t.´`HÌˆ4/ô`4.4a´-t.ô.È4,´bô,t/´`4.´,4.4a4/´`4/4`ô.ô.4`4/´,´.´.4/´/ô`4/´`t,4`´`4-t,t`ôc´`ˆ4/ô`4/´,´-t`4.´.	Ë	ô'ô`4/´,´-t`t`´.4,´`´/´`4/´.H4a4/´`4/4,4`‹4/ô/´,´`´/´`4.4`´c4.4-ô/4-t`4-t/t.4-H4.4`4-tb4.4`´c4/ˆ4/4,4`tb4`´,4,t.4`4/´,´,4/t.4.	Ë
+ÑSPÕÐTÑHÒSˆOLHSˆ	ô$ˆ4`4,4,t/´`´-IÈS‘
+K
+ÑSPÕY”“ÓH\ÚÜÈÒT‘H]]ÛX][Û—ÚÙ^OIÔÕUQÖWÑU’PUSÓŽ‘U‹URÔKLIÊK	ÌŒ‹LLŒUŒŒ‰ÊHŠKˆJNÂŸB‚˜\Þ[˜È[˜Ý[ÛˆÙYY[YÜ˜][ÛœÊ
+^Âˆ]ØZ][‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È[]Y\È
+Y[]WÝ\K\Ü^WÛ˜[YKÝ]\ËÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÜ™XÛÜ™ÚY]WÜ]X[]KØÛÜKY]Y]KÜ™X]YØžJHSQTÈ
+	ÑSTURS•LIË	ô(t/´`´`4`ô-4/t.4.‰Ë	ô$4-4/4.4/t.4`t`´`4,4`´/´`4.4/t`´-t,ô`4,4a´.4.HRLIË	ô$4.´`´.4,´/t,	Ë	ÔÖS•UP×ÒS•QÔUSÓ—ÕTÕ	Ë	ÑSTÖQQKRS•QÔUSÓ”ËLIË	ô(t.4/t`´-t`´.4aô-t`t.´,4cÈ4.´,4`4`´/´aô.´,	Ë	ô'ô.ô,4`´a4/´`4/4-t/t/t/´-H4cô-4`4/‰Ë	ÞßIË	ÜÞ\Ý[KZ[YÜ˜][Û‹\ÙYY	ÊHŠKœ[Š
+NÂˆÛÛœÝÛÛ›™XÝ[ÛœÏVÂˆÈ’S•UQH‹\[ÈÔÈH‹´$´/t`ô`´`4-t/t/tcôcÈ4/ô.ô,4`´a4/´`4/4,‹´$´`t-H4/4/´-4`ô.ô.‹‘STURS•LH‹\[ÈÔÈH‹š[™[™È0­È™XYÝÜš]H‹´(4,4,t/´`´,4-t`ˆ‹´(t-t`4,´.4`t/t,4cÈ4/ô`4.4,´cô-ô.´,4,4.´`´.4,´/t,‹ˆ‹ŒŒ‹LLŒUNŒÌŒˆ‹ŒŒ‹LLŒUNNŒˆ‹KK´&´`4.4`´.4aô/t/´-Nˆ4,t-t-ÈH4/t-t-4/´`t`´`ô/ô/tbÈ4`4,4,t/´aô.4-H4-ô,4/ô.4`t.‹™KXÛÜ™PH‹KWKˆÈ’S•USÑÈ‹´$4`´.ô,4`H4'´%4%4(KžÞ‹´)4,4.t.ô/´,´bô.H4.4/4/ô/´`4`ˆ‹´)4.4/t,4/t`tbÈ‹‘STUPPÐËLH‹´$4`´.ô,4`H4'´%4%4(HKŒKŒŒŒø $ÌÌKŒKŒŒ‹žÞ‹´&´/´/t`´`4/´.ô.4`4`ô-t/4bô.HÛ˜\ÚÝ‹´)4,4.t.È4/ô`4/´,´-t`4-t/H‹´&´.ôc´aÈ4/t-H4`´`4-t,t`ô-t`´`tcÈ‹ˆ‹ŒŒ‹LLŒUÎŒˆ‹ˆ‹‹´(t`4-t-4/t-t-Nˆ4,t-t-È4/´,t/t/´,´.ô-t/t.4cÈ4`ô`t`´,4`4-t,´,4-t`ˆ4`ô/ô`4,4,´.ô-t/taô-t`t.´.4.H4%4%4(H‹žÞ[ÙÐH‹KKˆÈ’S•UTVT“Ó‹´%ô,4`4/ô.ô,4`´/t,4cÈ4,´-t-4/´/4/´`t`´cžÞ‹´)4,4.t.ô/´,´bô.H4.4/4/ô/´`4`ˆ‹’ˆ0­È4)4.4/t,4/t`tbÈ‹‘STUPPÐËLH‹´%ô,4`4/ô.ô,4`´/t,4cÈ4,´-t-4/´/4/´`t`´cžÞ‹´&´/´/t`´`4/´.ô.4`4`ô-t/4bô.HÛ˜\ÚÝ‹´'t,4/ô`4/´,´-t`4.´-H‹´&´.ôc´aÈ4/t-H4`´`4-t,t`ô-t`´`tcÈ‹ˆ‹ŒŒ‹LLŒUÎNŒˆ‹ˆ‹LMLL‹‹‹´$´bô`t/´.´/´-Nˆ4.´,4-4`4/´,´bô-H4,4,ô`4-t,ô,4`´bÈ4`´`4-t,t`ôc´`ˆ4-4-t-4`ô/ô.ô.4.´,4a´.4.‹žÞ\^\›ÛH‹KKˆÈ’S•UTVSQS•È‹´%t-´-t/4-t`tcôaô/tbô-H4/´/ô.ô,4`´bËžÞ‹´)4,4.t.ô/´,´bô.H4.4/4/ô/´`4`ˆ‹´)4.4/t,4/t`tbÈ0­È4&´.ô.4-t/t`´bÈ‹‘STUPPÐËLH‹´%t-´-t/4-t`tcôaô/tbô-H4/´/ô.ô,4`´bËžÞ‹´&´/´/t`´`4/´.ô.4`4`ô-t/4bô.HÛ˜\ÚÝ‹´(ô`t`´,4`4-t.È‹´&´.ôc´aÈ4/t-H4`´`4-t,t`ô-t`´`tcÈ‹ˆ‹ŒŒ‹LLŒUÎLŒˆ‹ˆ‹K´$´bô`t/´.´/´-Nˆ4/t/´,´bô-H4/´/ô.ô,4`´bÈ4/t-H4/ô/´`t`´`ô/ô,4c´`ˆ4/ô/´`t.ô-H4.4c´/tcÈŒˆ‹žÞ\^[Y[ÐH‹KKˆÈ’S•UUÐÒÐH‹´$t,4/t.ˆ4(´/´aô.´,‹´$t,4/t.ˆ‹´)4.4/t,4/t`tbÈ‹”“ÓN“ÕÓ‘Tˆ‹´$t,4/t.ˆ4(´/´aô.´,‹´%ô,4bt.4btdt/t/t/´-H4/ô/´-4.´.ôc´aô-t/t.4-H0­È4/ô`4/´,´-t`4.´,4.´/´/4/ô,4/t.4.4.4-4/´`t`´`ô/ô/tbôaH4`taô-t`´/´,ˆ‹´'´-´.4-4,4-t`ˆ4-4/´`t`´`ô/È‹´'t-H4/t,4`t`´`4/´-t/t,‹ˆ‹ˆ‹ˆ‹´&´`4.4`´.4aô/t/´-Nˆ4-ô,4,ô`4`ô-ô.´,4,t,4/t.´/´,´`t.´.4aH4/´/ô-t`4,4a´.4.H4(´/´aô.´.4-tbtdH4/t-H4`4-t,4.ô.4-ô/´,´,4/t,‹˜˜[šË]ØÚØPH‹KˆÈ’S•UUS’È‹´(¸ $t$t,4/t.ˆ‹´$t,4/t.ˆ‹´)4.4/t,4/t`tbÈ‹”“ÓN“ÕÓ‘Tˆ‹´'´a4.4a´.4,4.ôc4/tbô.H4.4/t`´-t`4a4-t.t`H4(¸ $t$t,4/t.´,4-4.ôcÈ4,t.4-ô/t-t`t,‹´'ô`4cô/4/´-H4/ô/´-4.´.ôc´aô-t/t.4-H0­È4`´/´.ôc4.´/ˆ4aô`´-t/t.4-H4`taô-t`´/´,ˆ4.4.´/´`4/´`´.´/´.H4,´bô/ô.4`t.´.‹´'´-´.4-4,4-t`ˆ4-4/´`t`´`ô/È‹´'t-H4/t,4`t`´`4/´-t/t,‹ˆ‹ˆ‹ˆ‹´&´`4.4`´.4aô/t/´-Nˆ4-4/´`t`´`ô/È4/4/´-´/t/ˆ4/ô`4/´,´-t`4.4`´c4/t/ˆ4/´/ô-t`4,4a´.4.4/t-H4.4/4/ô/´`4`´.4`4`ôc´`´`tcÈ4.4/ô.ô,4`´-t-´.4/t-H4`t/´-ô-4,4c´`´`tcÈ‹˜[šËZš\™XYÛ›PH‹KˆÈ’S•UPSPÔ“H‹[˜PÔ“H‹Ô“H‹´'ô`4/´-4,4-´.0­È4&´.ô.4-t/t`´bÈ‹‘STUTÐSTËLH‹[˜PÔ“H‹TH0­È4-4,´`ô`t`´/´`4/´/t/t.4.H‹´'´-´.4-4,4-t`ˆ4-4/´`t`´`ô/È‹´'t-H4/t,4`t`´`4/´-t/t,‹ˆ‹ˆ‹´'ô/´`t.ô-H4,´bô-4,4aô.4-4/´`t`´`ô/ô,‹K´$´bô`t/´.´/´-Nˆ4.ô.4-4bÈ4.4`t`´,4`´`ô`tbÈ4`t.4/tat`4/´/t.4-ô.4`4`ôc´`´`tcÈ4,´`4`ôaô/t`ôcˆ‹˜[˜XÜ›P‹KˆÈ’S•UQPT–H‹´+t.ô-t.´`´`4/´/t/tbô.H4-4/t-t,´/t.4.ˆ‹´'´,t`4,4-ô/´,´,4/t.4-H‹´'´,t`ôaô-t/t.4-H‹‘STUSQUÑLH‹´(ô`´,´-t`4-´-4dt/t/tbô.H4ct.ô-t.´`´`4/´/t/tbô.H4-4/t-t,´/t.4.ˆ‹TH0­È4aô`´-t/t.4-H‹´'t-H4/ô/´-4.´.ôc´aôdt/H‹´'ô`4/´,´,4.t-4-t`4/t-H4`ô`´,´-t`4-´-4dt/H‹ˆ‹ˆ‹´'ô/´`t.ô-H4,´bô,t/´`4,4/ô`4/´,´,4.t-4-t`4,‹´$´bô`t/´.´/´-Nˆ4`4,4`t/ô.4`t,4/t.4-H4.4/ô/´`t-tbt,4-t/4/´`t`´c4/t-H4/´,t/t/´,´.ôcôc´`´`tcÈ‹™X\žP‹KˆÈ’S•UQ“Ô“TÈ‹´)4/´`4/4bÈ4`t,4.t`´,‹´'4,4`4.´-t`´.4/t,È‹´'ô`4/´-4,4-´.‹‘STUSRÕLH‹´)4/´`4/4bÈ4`t,4.t`´,\[È‹•ÙXšÛÚÈ0­È4,´at/´-4côbt.4-H4-ô,4cô,´.´.‹´'´-´.4-4,4-t`ˆ4-4/´`t`´`ô/È‹•ÙXšÛÚÈ4/t-H4/t,4`t`´`4/´-t/H‹ˆ‹ˆ‹´'ô/´`t.ô-H4/t,4`t`´`4/´.t.´.ÙXšÛÚÈ‹´$´bô`t/´.´/´-Nˆš\œÝXÛXÚÈ4.4-ô,4cô,´.´.4/t-H4/ô/´`t`´`ô/ô,4c´`ˆ4,4,´`´/´/4,4`´.4aô-t`t.´.‹ÙX‹Y›Ü›\Ð‹KˆÈ’S•UTÓ‘H‹´(´-t.ô-ta4/´/t.4cÈ‹´&´/´/4/4`ô/t.4.´,4a´.4.‹´'ô`4/´-4,4-´.‹‘STUTÐSTËLH‹´(ô`´,´-t`4-´-4dt/t/t,4cÈ4`´-t.ô-ta4/´/t.4cÈ‹•ÙXšÛÚÈ0­È4`t/´,tbô`´.4cÈ4-ô,´/´/t.´/´,ˆ‹´'t-H4/ô/´-4.´.ôc´aôdt/H‹´'ô`4/´,´,4.t-4-t`4/t-H4`ô`´,´-t`4-´-4dt/H‹ˆ‹ˆ‹´'ô/´`t.ô-H4,´bô,t/´`4,4/ô`4/´,´,4.t-4-t`4,‹´(t`4-t-4/t-t-Nˆ4-ô,´/´/t.´.4a4.4.´`t.4`4`ôc´`´`tcÈ4,´`4`ôaô/t`ôcˆ‹[\ÛžP‹KˆÈ’S•UPQÈ‹´(4-t.´.ô,4/4/tbô-H4.´,4,t.4/t-t`´bÈ‹´'4,4`4.´-t`´.4/t,È‹´&´/´/t`´-t/t`ˆ0­È4'ô`4/´-4,4-´.‹‘STUSRÕLH‹´(4-t.´.ô,4/4/tbô-H4/ô.ô,4`´a4/´`4/4bÈ‹TH0­È4`t`´,4`´.4`t`´.4.´,‹´'´-´.4-4,4-t`ˆ4-4/´`t`´`ô/È‹´'t-H4/t,4`t`´`4/´-t/t,‹ˆ‹ˆ‹´'ô/´`t.ô-H4,´bô-4,4aô.4-4/´`t`´`ô/ô,‹´(t`4-t-4/t-t-Nˆ4`t`´/´.4/4/´`t`´c4.ô.4-4,4/t-H4/ô/´-4`´,´-t`4-´-4,4-t`´`tcÈ4/ô.ô,4`´a4/´`4/4/´.H‹˜YÐ‹KˆÈ’S•UTÓÐÒPS‹´(t/´a´.4,4.ôc4/tbô-H4`t-t`´.‹´&´/´/t`´-t/t`ˆ‹´&´/´/t`´-t/t`ˆ0­È4'ô`4/´-4,4-´.‹‘STUSRÕLH‹´(t/´a´.4,4.ôc4/tbô-H4/ô.ô,4`´a4/´`4/4bÈ‹TH0­È4/ô`ô,t.ô.4.´,4a´.4.4.4/4-t`´`4.4.´.‹´'´-´.4-4,4-t`ˆ4-4/´`t`´`ô/È‹´'t-H4/t,4`t`´`4/´-t/t,‹ˆ‹ˆ‹´'ô/´`t.ô-H4,´bô-4,4aô.4-4/´`t`´`ô/ô,‹´(t`4-t-4/t-t-Nˆ4/´at,´,4`´bÈ4.4/ô-t`4-tat/´-4bÈ4/´`t`´,4c´`´`tcÈ4`´-t`t`´/´,´bô/4.‹œÛØÚX[‹KˆÈ’S•UQQÈ‹´+t%4'ˆ‹´%4/´.´`ô/4-t/t`´bÈ‹´$t`ôat,ô,4.ô`´-t`4.4cÈ0­È4+´`4.4`t`ˆ‹‘STUPPÐËLH‹´(ô`´,´-t`4-´-4dt/t/tbô.H4/´/ô-t`4,4`´/´`4+t%4'ˆ‹TH0­È4-4/´.´`ô/4-t/t`´bÈ4.4/ô/´-4/ô.4`t.‹´'t-H4/ô/´-4.´.ôc´aôdt/H‹´'´/ô-t`4,4`´/´`4/t-H4`ô`´,´-t`4-´-4dt/H‹ˆ‹ˆ‹´'ô/´`t.ô-H4,´bô,t/´`4,4/´/ô-t`4,4`´/´`4,‹´$´bô`t/´.´/´-Nˆ4/ô/´-4/ô.4`t.4/ô/´-4`´,´-t`4-´-4,4c´`´`tcÈ4,´`4`ôaô/t`ôcˆ‹™YÐ‹KˆÈ’S•ULPÈ‹Œt(H‹´(ôaôdt`ˆ‹´$t`ôat,ô,4.ô`´-t`4.4cÈ‹‘STUPPÐËLH‹Œt(H‹´&´/´/t`´`4/´.ô.4`4`ô-t/4bô.H4.4/4/ô/´`4`‹ôct.´`t/ô/´`4`ˆ‹´'t-H4/ô/´-4.´.ôc´aôdt/H‹´&´/´/t`´`ô`4.4-4/´`t`´`ô/È4/t-H4/ô`4-t-4/´`t`´,4,´.ô-t/tbÈ‹ˆ‹ˆ‹´'ô/´`t.ô-H4/ô`4-t-4/´`t`´,4,´.ô-t/t.4cÈ4`´-t`t`´/´,´/´.H4,t,4-ôbÈ‹´$´bô`t/´.´/´-Nˆ4/ô,4.´-t`ˆ4`´/´.ôc4.´/ˆ4,ô/´`´/´,´.4`´`tcË4/t/ˆ4/t-H4/ô-t`4-t-4,4dt`´`tcÈ‹ŒXÐ‹KˆÈ’S•UPPÔÈ‹´(t&´(ô%‹´$t-t-ô/´/ô,4`t/t/´`t`´c‹´$t-t-ô/´/ô,4`t/t/´`t`´c‹‘STUTÐQ‘KLH‹´(t&´(ô%4/´,tb´-t.´`´/´,ˆ‹TH0­È4`t/´,tbô`´.4cÈ4-4/´`t`´`ô/ô,‹´'t-H4/ô/´-4.´.ôc´aôdt/H‹´&´/´/t`´`4/´.ô.ô-t`4bÈ4/t-H4/ô`4-t-4/´`t`´,4,´.ô-t/tbÈ‹ˆ‹ˆ‹´'ô/´`t.ô-H4.4/t,´-t/t`´,4`4.4-ô,4a´.4.4.´/´/t`´`4/´.ô.ô-t`4/´,ˆ‹´&´`4.4`´.4aô/t/´-Nˆ4`t/´,tbô`´.4cÈ4-4/´`t`´`ô/ô,4/t-H4/ô/´`t`´`ô/ô,4c´`ˆ‹˜XÜÐ‹KˆÈ’S•UPÐSH‹´&´,4/4-t`4bÈ‹´$t-t-ô/´/ô,4`t/t/´`t`´c‹´$t-t-ô/´/ô,4`t/t/´`t`´c‹‘STUTÐQ‘KLH‹•“TÈ4/´,tb´-t.´`´/´,ˆ‹´(t/´,tbô`´.4cÈ4,t-t-È4,´.4-4-t/´/ô/´`´/´.´,‹´'t-H4/ô/´-4.´.ôc´aôdt/H‹•“TÈ4/t-H4/ô`4-t-4/´`t`´,4,´.ô-t/t,‹ˆ‹ˆ‹´'ô/´`t.ô-H4`ô`´,´-t`4-´-4-t/t.4cÈ“TÈ‹´(t`4-t-4/t-t-Nˆ4,´.4-4-t/ˆ4.4`t/´,tbô`´.4cÈ4.´,4/4-t`4/t-H4/ô/´`t`´`ô/ô,4c´`ˆ‹˜Ø[Y\˜\Ð‹KˆÈ’S•UUÈ‹•[YÜ˜[H‹´&´/´/4/4`ô/t.4.´,4a´.4.‹´%ô,4-4,4aô.0­È4&´.ô.4-t/t`´bÈ‹‘STURS•LH‹•[YÜ˜[H›ÝTH‹•ÙXšÛÚÈ0­È4`ô,´-t-4/´/4.ô-t/t.4cÈ‹´'´-´.4-4,4-t`ˆ4-4/´`t`´`ô/È‹´(´/´.´-t/H4/t-H4/t,4`t`´`4/´-t/H‹ˆ‹ˆ‹´'ô/´`t.ô-H4,´bô-4,4aô.›ÝÚÙ[ˆ‹´(t`4-t-4/t-t-Nˆ4`ô,´-t-4/´/4.ô-t/t.4cÈ4/´`t`´,4c´`´`tcÈ4,´/t`ô`´`4.4`t.4`t`´-t/4bÈ‹[YÜ˜[P‹KˆÈ’S•USPRS‹´(t-t`4,´.4`H4`4,4`t`tbô.ô/´.ˆ‹´&´/´/4/4`ô/t.4.´,4a´.4.‹´&´.ô.4-t/t`´bÈ0­È4&´/´/t`´-t/t`ˆ‹‘STUSRÕLH‹´(ô`´,´-t`4-´-4dt/t/tbô.H4`t-t`4,´.4`H4`4,4`t`tbô.ô/´.ˆ‹TH0­È4/´`´/ô`4,4,´.´,4.4`t`´,4`´`ô`tbÈ‹´'t-H4/ô/´-4.´.ôc´aôdt/H‹´'ô`4/´,´,4.t-4-t`4/t-H4`ô`´,´-t`4-´-4dt/H‹ˆ‹ˆ‹´'ô/´`t.ô-H4,´bô,t/´`4,4/ô`4/´,´,4.t-4-t`4,‹´(t`4-t-4/t-t-Nˆ4/4,4`t`t/´,´bô-H4`t/´/´,tbt-t/t.4cÈ4/t-H4/´`´/ô`4,4,´.ôcôc´`´`tcÈ‹›XZ[[™Ð‹BˆÈ’S•USÔSRKRSPQÑTÈ‹“Ü[RH[XYÙ\È‹´&´/´/t`´-t/t`ˆ‹´&´/´/t`´-t/t`ˆ0­È4(t`´`ô-4.4cÈ‹‘STUSRÕLH‹“Ü[RH[XYÙ\ÈTH‹TH0­È4,ô-t/t-t`4,4a´.4cÈ4.4`4-t-4,4.´`´.4`4/´,´,4/t.4-H‹´'´-´.4-4,4-t`ˆ4-4/´`t`´`ô/È‹TKt.´.ôc´aÈ4/t-H4/t,4`t`´`4/´-t/H‹ˆ‹ˆ‹´'ô/´`t.ô-H4,t-t-ô/´/ô,4`t/t/´.H4/ô-t`4-t-4,4aô.4.´.ôc´aô,‹´(t`4-t-4/t-t-Nˆ4,ô-t/t-t`4,4a´.4cÈ4.4-ô/´,t`4,4-´-t/t.4.H4/t-t-4/´`t`´`ô/ô/t,‹›Ü[˜ZKZ[XYÙ\Ð‹BˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+ÛÛ›™XÝ[ÛœË›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈ
+YÞ\Ý[KØ]YÛÜžK\™Ù]Û[Ù[KÝÛ™\—Ù[]WÚYÛÝ\˜ÙWÛÙ—Ý][ÙKÝ]\Ë]]ÜÝ]\ËÜ™Y[X[Ù^\™\×Ø]\ÝÜÝXØÙ\Ü×Ø]™^ÜÞ[˜×Ø]™XÙZ]™YØÛÝ[XØÙ\YØÛÝ[™Z™XÝYØÛÝ[\œ›Ü—ØÛÝ[ÛÛ™›XÝØÛÝ[[\XÝY\\—Ý™\œÚ[Û‹™\šYšYYÝ˜[œÙ™\‹\×Ù[˜X›Y
+HSQTÈ
+ËËËËËËËËËËËËËËËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝ[œÏVÂˆÈ’S•T•S‹UQKLH‹’S•UQH‹ŒŒ‹LLŒUNŒÌŒˆ‹ŒŒ‹LLŒUNŒÌŒVˆ‹´'ô.ô,4/t/´,´,4cÈ4/ô`4/´,´-t`4.´,‹´(ô`t/ô-tb4/t/ˆ‹KK‘NšX[›ÚÈ‹ˆ‹œÞ\Ý[KZ[YÜ˜][Û‹\ÙYY‹ÓÔ”‹UQKLH‹KˆÈ’S•T•S‹USÑËLH‹’S•USÑÈ‹ŒŒ‹LLŒUÎŒÎNŒˆ‹ŒŒ‹LLŒUÎŒˆ‹´(4`ôaô/t/´.H4.4/4/ô/´`4`ˆ‹´%ô,4,´-t`4b4-t/t/ˆ4`H4.´/´/ta4.ô.4.´`´,4/4.‹‹œÚY]ŒŒŽ˜\ˆ‹ˆ‹œÞ\Ý[KZ[YÜ˜][Û‹\ÙYY‹ÓÔ”‹USÑËLH‹KˆÈ’S•T•S‹UTVT“ÓLH‹’S•UTVT“Ó‹ŒŒ‹LLŒUÎÎŒˆ‹ŒŒ‹LLŒUÎNŒˆ‹´(4`ôaô/t/´.H4.4/4/ô/´`4`ˆ‹´%ô,4,´-t`4b4-t/t/ˆ4`H4.´/´/ta4.ô.4.´`´,4/4.‹LMLL‹‹‹œÚY]ÓÓSSÓŽŒLM‹´%4,´,4`t/´,´/ô,4-4,4c´bt.4aH4.4/4-t/t.4`´`4-t,t`ôc´`ˆ4`4`ôaô/t/´.H4`t,´-t`4.´.‹œÞ\Ý[KZ[YÜ˜][Û‹\ÙYY‹ÓÔ”‹UTVT“ÓLH‹KˆÈ’S•T•S‹UTVSQS•ËLH‹’S•UTVSQS•È‹ŒŒ‹LLŒUÎŒˆ‹ŒŒ‹LLŒUÎLŒˆ‹´(4`ôaô/t/´.H4.4/4/ô/´`4`ˆ‹´(ô`t/ô-tb4/t/ˆ‹Kœ\š[ÙŒŒ‹Lˆ‹´&4`t`´/´aô/t.4.ˆ4/ô`4/´aô.4`´,4/K4/t/ˆ4`ô`t`´,4`4-t.È4/´`´/t/´`t.4`´-t.ôc4/t/ˆ4`´-t.´`ôbt-t.H4-4,4`´bÈ‹œÞ\Ý[KZ[YÜ˜][Û‹\ÙYY‹ÓÔ”‹UTVSQS•ËLH‹KˆÈ’S•T•S‹UPÔ“KT‘Q“QÒ‹’S•UPSPÔ“H‹ŒŒ‹LLŒUŒNŒˆ‹ŒŒ‹LLŒUŒNŒVˆ‹´'ô`4/´,´-t`4.´,4,ô/´`´/´,´/t/´`t`´.‹´%ô,4,t.ô/´.´.4`4/´,´,4/t/ˆ‹Kœ™Y›YÚ˜]]‹TKt.´.ôc´aÈ4.4`´-t`t`´/´,´bô.H[™Ú[4/t-H4/ô`4-t-4/´`t`´,4,´.ô-t/tbÈ‹œÞ\Ý[KZ[YÜ˜][Û‹\ÙYY‹ÓÔ”‹UPÔ“KT‘Q“QÒ‹WBˆNÂˆ›Üˆ
+ÛÛœÝ›ÝÈÙˆ[œÊHÂˆ]ØZ][‹‘‹œ™\\™J’S”ÑT•S•È[YÜ˜][Û—ÜÞ[˜×Ü[œÈ
+YÛÛ›™XÝ[Û—ÚYÝ\YØ]š[š\ÚYØ]šYÙÙ\‹Ý]\Ë™XÙZ]™YØÛÝ[XØÙ\YØÛÝ[™Z™XÝYØÛÝ[\œ›Ü—ØÛÝ[ÛÛ™›XÝØÛÝ[ÚXÚÜÚ[\œ›Ü—ÛY\ÜØYÙK[š]X]YØžKÛÜœ™[][Û—ÚYžWÜ[ŠHSQTÈ
+ËËËËËËËËËËËËËËËÊHÓˆÓÓ‘“PÕ
+Y
+HÈ“ÕS‘ÈŠK˜š[™
+‹‹œ›ÝÊKœ[Š
+NÂˆBˆÛÛœÝÙÜÏVÂˆÈ’S•T•S‹UQKLH‹’S•UQH‹’S‘“È‹šX[™\šYšYY‹‘Hš[™[™È4/´`´,´-taô,4-t`ŽÈ4aô`´-t/t.4-H4`4,4,t/´aô.4aH4`´,4,t.ô.4aˆ4/ô/´-4`´,´-t`4-´-4-t/t/ˆ‹‘NšX[—KˆÈ’S•T•S‹USÑËLH‹’S•USÑÈ‹’S‘“È‹™š[Kœ™XY‹´'ô`4/´aô.4`´,4/tbÈ4aô-t`´bô`4-H4.ô.4`t`´,4.4`tat/´-4/tbô.H4a4,4.t.È4/t-H4.4-ô/4-t/tdt/H‹ŒKLKŒKŒŒŒËLÌKŒKŒŒ‹žÞ—KˆÈ’S•T•S‹USÑËLH‹’S•USÑÈ‹•ÐT“ˆ‹œ]X[]K˜ÛÛ™›XÝ‹´%4,´,4`4,4`tat/´-´-4-t/t.4cÈ4.4`tat/´-4/tbôaH4.4`´/´,ô/´,ˆ4,´bô/t-t`t-t/tbÈ4,ˆ4/´aô-t`4-t-4c‹ŒŒŽ˜\ˆ—KˆÈ’S•T•S‹UTVT“ÓLH‹’S•UTVT“Ó‹•ÐT“ˆ‹šY[]K˜ÛÛ™›XÝ‹´(t/´,´/ô,4-4-t/t.4cÈ4/t-H4/´,tb´-t-4.4/t-t/tbÈ4,4,´`´/´/4,4`´.4aô-t`t.´.‹ÓÓSSÓŽœ›ÝÜÈ—KˆÈ’S•T•S‹UTVSQS•ËLH‹’S•UTVSQS•È‹•ÐT“ˆ‹™œ™\Ú™\ÜËœÝ[H‹´'ô/´`t.ô-t-4/t.4.H4/t,4.t-4-t/t/tbô.H4/ô-t`4.4/´-8 %4.4c´/tcŒˆ‹œ\š[ÙŒŒ‹Lˆ—KˆÈ’S•T•S‹UPÔ“KT‘Q“QÒ‹’S•UPSPÔ“H‹‘T”“Ôˆ‹˜]]›Z\ÜÚ[™È‹´(t.4/tat`4/´/t.4-ô,4a´.4cÈ4/t-H4-ô,4/ô`ô`t.´,4.ô,4`tcˆ4/´`´`t`ô`´`t`´,´`ô-t`ˆTKt.´.ôc´aÈ‹˜]]—BˆNÂˆ›Üˆ
+ÛÛœÝ›ÝÈÙˆÙÜÊHÂˆ]ØZ][‹‘‹œ™\\™J’S”ÑT•S•È[YÜ˜][Û—ÛÙ×Ù[šY\È
+[—ÚYÛÛ›™XÝ[Û—ÚY]™[]™[Y\ÜØYÙK™XÛÜ™Ü™YŠHÑSPÕËËËËËÈÒT‘H“ÕVTÕÈ
+ÑSPÕH”“ÓH[YÜ˜][Û—ÛÙ×Ù[šY\ÈÒT‘H[—ÚYOÈS‘]™[OÈS‘™XÛÜ™Ü™YOÊHŠK˜š[™
+‹‹œ›ÝË›ÝÖÌK›ÝÖÌ×K›ÝÖÍWJKœ[Š
+NÂˆBˆÛÛœÝÛÛ™›XÝÏVÂˆÈ’S•PÓ‘‹USÑËLH‹’S•USÑÈ‹ŒŒŽTŽ“ÕU“ÕÈ‹ˆ‹´&4`tat/´-4/tbô.H4.4`´/´,È‹´(t/ô.4`t,4/t.4cÈ4,4/ô`4-t.ôcÈ‹´(t`ô/4/4,4-4-t`´,4.ôc4/tbôaH4`t`´`4/´.ˆ‹´&4`´/´,ô/´,´,4cÈ4`t`´`4/´.´,4a4,4.t.ô,‹‘STUPPÐËLH‹´'´`´.´`4bô`ˆ‹ˆ‹ˆ‹ŒŒ‹LLŒUÎŒˆ—KˆÈ’S•PÓ‘‹UTVT“ÓLH‹’S•UTVT“Ó‹ÓÓSSÓŽ‘TPÐUNŒH‹ˆ‹´$´/´-ô/4/´-´/tbô.H4-4`ô,t.ôc‹´(t/´`´`4`ô-4/t.4.ˆ‹´%4,´-H4`t`´`4/´.´.4`H4`t/´,´/ô,4-4,4c´bt.4/4.4/4-t/t-t/‹´'´`´-4-t.ôc4/tbô-H4.´,4`4`´/´aô.´.4-4/ˆ4/ô`4/´,´-t`4.´.‹‘STUR‹LH‹´'´`´.´`4bô`ˆ‹ˆ‹ˆ‹ŒŒ‹LLŒUÎNŒˆ—KˆÈ’S•PÓ‘‹UTVSQS•ËLH‹’S•UTVSQS•È‹”T’SÑ“TÕ‹ˆ‹´(t,´-t-´-t`t`´c‹´'ô/´`t.ô-t-4/t.4.H4/ô-t`4.4/´-‹ŒŒ‹Lˆ‹ŒŒ‹L‹‘STUPPÐËLH‹´'´`´.´`4bô`ˆ‹ˆ‹ˆ‹ŒŒ‹LLŒUÎLŒˆ—BˆNÂˆ›Üˆ
+ÛÛœÝ›ÝÈÙˆÛÛ™›XÝÊHÂˆ]ØZ][‹‘‹œ™\\™J’S”ÑT•S•È[YÜ˜][Û—ØÛÛ™›XÝÈ
+YÛÛ›™XÝ[Û—ÚY^\›˜[Ü™XÛÜ™ÚY[\›˜[Ù[]WÚYÛÛ™›XÝÝ\KšY[Û˜[YKÛÝ\˜ÙWÝ˜[YK\™Ù]Ý˜[YKÝÛ™\—Ù[]WÚYÝ]\Ë™\ÛÛ][Û‹]šY[˜ÙK]XÝYØ]
+HSQTÈ
+ËËËËËËËËËËËËÊHÓˆÓÓ‘“PÕ
+Y
+HÈ“ÕS‘ÈŠK˜š[™
+‹‹œ›ÝÊKœ[Š
+NÂˆBŸB‚™^Ü\H[YÜ˜][Û•\Ý]TÝ]\ÈHÂˆXÝ]™Nˆ›ÛÛX[ŽÂˆÛÛ›™XÝ[ÛœÎˆ[X™\ŽÂˆ[œÎˆ[X™\ŽÂˆÙÜÎˆ[X™\ŽÂˆÛÛ™›XÝÎˆ[X™\ŽÂˆÝ[ˆ[X™\ŽÂˆØÛÜNˆÝš[™ÎÂŸNÂ‚˜\Þ[˜È[˜Ý[Ûˆ[œÝ\™R[YÜ˜][Û‘[[Ð›ÛÝÝ˜\
+
+HÂˆYˆ
+]ØZ]Ù]Þ\Ý[Q]S[ÙJ
+HOOH™[\HŠH™]\›ŽÂˆÛÛœÝX\šÙ\ˆH]ØZ][‹‘‹œ™\\™Jˆ”ÑSPÕÝ]WÝ˜[YH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OIÚ[YÜ˜][Û—Ù[[×Ø›ÛÝÝ˜\	È‚ˆ
+K™š\œÝÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+X\šÙ\ËœÝ]WÝ˜[YHOOHS•QÔUSÓ—ÑSS×Ð“ÓÕÕTÕ‘T”ÒSÓŠH™]\›ŽÂ‚ˆÛÛœÝ™Y›Ü™HH]ØZ]Ù][YÜ˜][Û•\Ý]TÝ]\Ê
+NÂˆYˆ
+Z[YÜ˜][Û‘[[ÐÛÛ\]J™Y›Ü™JJH]ØZ]ÙYY[YÜ˜][ÛœÊ
+NÂˆÛÛœÝY\ˆH]ØZ]Ù][YÜ˜][Û•\Ý]TÝ]\Ê
+NÂˆYˆ
+Z[YÜ˜][Û‘[[ÐÛÛ\]JY\ŠJHÂˆ›ÝÈ™]È\œ›ÜŠ[YÜ˜][Ûˆ[[È›ÛÝÝ˜\[˜ÛÛ\]Nˆ	ØY\‹˜ÛÛ›™XÝ[ÛœßKÉØY\‹œ[œßKÉØY\‹›ÙÜßKÉØY\‹˜ÛÛ™›XÝßX
+NÂˆB‚ˆ]ØZ][‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+	Ú[YÜ˜][Û—Ù[[×Ø›ÛÝÝ˜\	ËËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+S•QÔUSÓ—ÑSS×Ð“ÓÕÕTÕ‘T”ÒSÓŠBˆœ[Š
+NÂŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆÙ][YÜ˜][Û•\Ý]TÝ]\Ê
+Nˆ›ÛZ\ÙO[YÜ˜][Û•\Ý]TÝ]\ÏˆÂˆÛÛœÝØÛÛ›™XÝ[Û”›ÝË[”›ÝËÙÔ›ÝËÛÛ™›XÝ›Ý×HH]ØZ]›ÛZ\ÙK˜[
+Âˆ[‹‘‹œ™\\™J”ÑSPÕÓÕS•
+
+ŠHTÈÝ[”“ÓH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈŠK™š\œÝÈÝ[ˆ[X™\ˆOŠ
+Kˆ[‹‘‹œ™\\™J”ÑSPÕÓÕS•
+
+ŠHTÈÝ[”“ÓH[YÜ˜][Û—ÜÞ[˜×Ü[œÈŠK™š\œÝÈÝ[ˆ[X™\ˆOŠ
+Kˆ[‹‘‹œ™\\™J”ÑSPÕÓÕS•
+
+ŠHTÈÝ[”“ÓH[YÜ˜][Û—ÛÙ×Ù[šY\ÈŠK™š\œÝÈÝ[ˆ[X™\ˆOŠ
+Kˆ[‹‘‹œ™\\™J”ÑSPÕÓÕS•
+
+ŠHTÈÝ[”“ÓH[YÜ˜][Û—ØÛÛ™›XÝÈŠK™š\œÝÈÝ[ˆ[X™\ˆOŠ
+KˆJNÂˆÛÛœÝÛÛ›™XÝ[ÛœÈH[X™\ŠÛÛ›™XÝ[Û”›ÝÏËÝ[ÏÈ
+NÂˆÛÛœÝ[œÈH[X™\Š[”›ÝÏËÝ[ÏÈ
+NÂˆÛÛœÝÙÜÈH[X™\ŠÙÔ›ÝÏËÝ[ÏÈ
+NÂˆÛÛœÝÛÛ™›XÝÈH[X™\ŠÛÛ™›XÝ›ÝÏËÝ[ÏÈ
+NÂˆÛÛœÝ[[Ô™XÛÜ™ÈH[œÈ
+ÈÙÜÈ
+ÈÛÛ™›XÝÎÂˆ™]\›ˆÂˆXÝ]™Nˆ[[Ô™XÛÜ™ÈˆˆÛÛ›™XÝ[ÛœËˆ[œËˆÙÜËˆÛÛ™›XÝËˆÝ[ˆ[[Ô™XÛÜ™ËˆØÛÜNˆ´(´-t`t`´/´,´bô-H4-ô,4/ô`ô`t.´.4-´`ô`4/t,4.ôbÈ4.4.´/´/ta4.ô.4.´`´bÈ4)´-t/t`´`4,4.4/t`´-t,ô`4,4a´.4.Kˆ4&´,4`´,4.ô/´,È4/ô`4/´,´,4.t-4-t`4/´,ˆ4/´`t`´,4dt`´`tcË4aô`´/´,tbÈ4/ô/´`t.ô-H4/´aô.4`t`´.´.4/4/´-´/t/ˆ4,tbô.ô/ˆ4/ô/´-4.´.ôc´aô.4`´c4`4-t,4.ôc4/tbô-H4.4`t`´/´aô/t.4.´.ˆ‹ˆNÂŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆY[YÜ˜][Û•\Ý]JXÝÜŽˆÝš[™ÊHÂˆYˆ
+]ØZ]Ù]Þ\Ý[Q]S[ÙJ
+HOOH™[\HŠHÂˆ›ÝÈ™]È\œ›ÜŠ´(´-t`t`´/´,´bô-H4-4,4/t/tbô-H4/t-t.ôc4-ôcÈ4-4/´,t,4,´.4`´c4/ô/´.´,4`t.4`t`´-t/4,4`4,4,t/´`´,4-t`ˆ4,ˆ4/ô`ô`t`´/´/4`4-t-´.4/4-HŠNÂˆBˆ]ØZ]ÛX\’[YÜ˜][Û•\Ý]J˜[ÙJNÂˆ]ØZ]ÙYY[YÜ˜][ÛœÊ
+NÂˆÛÛœÝÝ]\ÈH]ØZ]Ù][YÜ˜][Û•\Ý]TÝ]\Ê
+NÂˆYˆ
+Z[YÜ˜][Û‘[[ÐÛÛ\]JÝ]\ÊJHÂˆ›ÝÈ™]È\œ›ÜŠ[YÜ˜][Ûˆ[[ÈÙYY[˜ÛÛ\]Nˆ	ÜÝ]\Ë˜ÛÛ›™XÝ[ÛœßKÉÜÝ]\Ëœ[œßKÉÜÝ]\Ë›ÙÜßKÉÜÝ]\Ë˜ÛÛ™›XÝßX
+NÂˆBˆ]ØZ]Üš]R[YÜ˜][Û‘]\Ù]]Y]
+XÝÜ‹š[YÜ˜][Û‹\ÝÙ]WØYY‹Ý]\ÊNÂˆ™]\›ˆÝ]\ÎÂŸB‚™[˜Ý[Ûˆ[YÜ˜][Û‘[[ÐÛÛ\]JÝ]\Îˆ[YÜ˜][Û•\Ý]TÝ]\ÊHÂˆ™]\›ˆÝ]\Ë˜ÛÛ›™XÝ[ÛœÈHNH	‰ˆÝ]\Ëœ[œÈHH	‰ˆÝ]\Ë›ÙÜÈHˆ	‰ˆÝ]\Ë˜ÛÛ™›XÝÈHÎÂŸB‚™^Ü\Þ[˜È[˜Ý[Ûˆ™[[Ý™R[YÜ˜][Û•\Ý]JXÝÜŽˆÝš[™ÊHÂˆÛÛœÝ™Y›Ü™HH]ØZ]Ù][YÜ˜][Û•\Ý]TÝ]\Ê
+NÂˆ]ØZ]ÛX\’[YÜ˜][Û•\Ý]JYJNÂˆÛÛœÝÝ]\ÈH]ØZ]Ù][YÜ˜][Û•\Ý]TÝ]\Ê
+NÂˆ]ØZ]Üš]R[YÜ˜][Û‘]\Ù]]Y]
+XÝÜ‹š[YÜ˜][Û‹\ÝÙ]WÜ™[[Ý™Y‹È™Y›Ü™KY\ŽˆÝ]\ÈJNÂˆ™]\›ˆÝ]\ÎÂŸB‚˜\Þ[˜È[˜Ý[ÛˆÛX\’[YÜ˜][Û•\Ý]JÙY\Ø][ÙÈH˜[ÙJHÂˆÛÛœÝÝ][Y[ÈHÂˆ[‹‘‹œ™\\™J‘SUH”“ÓH[YÜ˜][Û—ÛÙ×Ù[šY\ÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[YÜ˜][Û—ØÛÛ™›XÝÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[YÜ˜][Û—ÜÞ[˜×Ü[œÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH\ÚÜÈÒT‘HÛÝ\˜ÙWÝ\OIô&´/´/ta4.ô.4.´`ˆ4.4/t`´-t,ô`4,4a´.4.	ÈS‘ÛÝ\˜ÙWÚYRÑH	ÒS•PÓ‘‹UIIÈŠKˆNÂˆYˆ
+ZÙY\Ø][ÙÊHÂˆÝ][Y[Ëœ\Ú
+ˆ[‹‘‹œ™\\™J‘SUH”“ÓH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[]Y\ÈÒT‘HYIÑSTURS•LIÈS‘Ü™X]YØžOIÜÞ\Ý[KZ[YÜ˜][Û‹\ÙYY	ÈŠKˆ
+NÂˆH[ÙHÂˆÝ][Y[Ëœ\Ú
+[‹‘‹œ™\\™JTUH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÑUˆ™XÙZ]™YØÛÝ[LXØÙ\YØÛÝ[L™Z™XÝYØÛÝ[L\œ›Ü—ØÛÝ[LÛÛ™›XÝØÛÝ[Lˆ\ÝÜÝXØÙ\Ü×Ø]PÐTÑHÒSˆYIÒS•UQIÈSˆ\ÝÜÝXØÙ\Ü×Ø]SÑH	ÉÈS‘ˆ\]YØ]PÕT”‘S•ÕSQTÕST
+JNÂˆBˆ]ØZ][‹‘‹˜˜]Ú
+Ý][Y[ÊNÂŸB‚˜\Þ[˜È[˜Ý[ÛˆÜš]R[YÜ˜][Û‘]\Ù]]Y]
+XÝÜŽˆÝš[™ËXÝ[ÛŽˆÝš[™Ë^[ØYˆ[šÛ›ÝÛŠHÂˆ]ØZ][‹‘‹œ™\\™Jˆ’S”ÑT•S•È]Y]Ù]™[È
+XÝÜ‹XÝ[Û‹[]WÝ\K[]WÚY^[ØY
+HSQTÈ
+ËËËËÊH‚ˆ
+K˜š[™
+XÝÜ‹XÝ[Û‹š[YÜ˜][Û—Ý\ÝÙ]\Ù]‹’S•QÔUSÓ‹QSSÈ‹”ÓÓ‹œÝš[™ÚYžJ^[ØY
+JKœ[Š
+NÂŸB‚™^Ü\H[YÜ˜][Û”Ù]\HÂˆÛÛ›™XÝ[Û’YˆÝš[™ÎÂˆ]]Y]ÙˆÝš[™ÎÂˆÝ\]NˆÝš[™ÎÂˆÞ[˜Ò[\˜[Z[]\Îˆ[X™\ŽÂˆÞ[˜ÓZ[]Nˆ[X™\ŽÂˆ[™Ú[ˆÝš[™ÎÂˆYØ[[]RYˆÝš[™ÎÂˆÝ\ÝÛY\ÛÙNˆÝš[™ÎÂˆœ˜[˜ÚYˆÝš[™ÎÂˆ[ØØ][Û“[ÙNˆœÚ[™ÛWØœ˜[˜Úˆ˜Û\ÜÚYžWÝ˜[œØXÝ[ÛœÈŽÂˆXØÛÝ[ØÛÜNˆÝš[™ÎÂˆÚ[›™[\NˆÝš[™ÎÂˆÛÝ\˜ÙSX\[™ÎˆÝš[™ÎÂˆ]TØÛÜ\ÎˆÝš[™Ö×NÂˆ™XYÛ›TØÛÜPÛÛ™š\›YYˆ›ÛÛX[ŽÂˆÜ™Y[X[Ù[™\˜][ÛŽˆÝš[™ÎÂˆÙXÜ™]Ý]\Îˆ›Z\ÜÚ[™ÈˆœÝÜ™Yˆ™^\›˜[Ü™\]Z\™YŽÂˆ\]Y]ˆÝš[™ÎÂˆ\]YžNˆÝš[™ÎÂŸNÂ‚˜ÛÛœÝ[YÜ˜][Û”Ù]\™Yš^Hš[YÜ˜][Û—ÜÙ]\ˆŽÂ˜ÛÛœÝ[YÜ˜][ÛÜ™Y[X[™Yš^Hš[YÜ˜][Û—ØÜ™Y[X[ŒŽˆŽÂ˜ÛÛœÝØÚØPÛÛ\[žTÙ[XÝ[Û”™Yš^Hš[YÜ˜][Û—ØÛÛ\[žWÜÙ[XÝ[ÛŽŒNˆŽÂ˜ÛÛœÝØÚØPÛÛ›™XÝ[Û’YH’S•UUÐÒÐHŽÂ˜ÛÛœÝ˜[šÐÛÛ›™XÝ[Û’YH’S•UUS’ÈŽÂ˜ÛÛœÝ˜[šÐÜ™Y[X[ØÛÜHH˜˜[šË\™XY]ŒHŽÂ˜ÛÛœÝØÚØPÛÛ\[žTÙ[XÝ[Û•\ÈHH
+ˆŒÌÂ‚\HØÚØPÛÛ\[žTÙ[XÝ[Û”^[ØYHÂˆ™\œÚ[ÛŽˆNÂˆYØ[[]RYˆÝš[™ÎÂˆÝ\ÝÛY\ÛÙNˆÝš[™ÎÂˆÜ™Y[X[YÙ\ÝˆÝš[™ÎÂˆ\ÜÝYYÎˆÝš[™ÎÂˆ^\™\Ð]\Îˆ[X™\ŽÂŸNÂ‚™^Ü\HØÚØPÛÛ\[žTÙ[XÝ[Û’[™HHÈYˆÝš[™ÎÈ˜[YNˆÝš[™ÈNÂ™^Ü\HØÚØPÛÛ\[žTÙ[XÝ[Û”™\Ý[BˆÈÚÎˆYNÈÝ\ÝÛY\ÛÙNˆÝš[™ÈBˆÈÚÎˆ˜[ÙNÈ™X\ÛÛŽˆÝš[™ÈNÂ‚\H[˜Üž\Y[YÜ˜][ÛÜ™Y[X[HÂˆ™\œÚ[ÛŽˆNÂˆ[ÛÜš]NˆQTËQÐÓHŽÂˆ]ŽˆÝš[™ÎÂˆÚ\\^ˆÝš[™ÎÂˆ\]Y]ˆÝš[™ÎÂˆ\]YžNˆÝš[™ÎÂŸNÂ‚™^Ü\Þ[˜È[˜Ý[ÛˆÙ][YÜ˜][Û”Ù]\Ê
+Nˆ›ÛZ\ÙO™XÛÜ™Ýš[™Ë[YÜ˜][Û”Ù]\ˆÂˆÛÛœÝÜÙ]\›ÝÜËÜ™Y[X[›ÝÜ×HH]ØZ]›ÛZ\ÙK˜[
+Âˆ[‹‘‹œ™\\™Jˆ”ÑSPÕÝ]WÚÙ^KÝ]WÝ˜[YH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^HRÑH	Ú[YÜ˜][Û—ÜÙ]\‰IÈ‚ˆ
+K˜[ÈÝ]WÚÙ^NˆÝš[™ÎÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+Kˆ[‹‘‹œ™\\™Jˆ”ÑSPÕÝ]WÚÙ^H”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^HRÑH	Ú[YÜ˜][Û—ØÜ™Y[X[ŒŽ‰IÈ‚ˆ
+K˜[ÈÝ]WÚÙ^NˆÝš[™ÈOŠ
+KˆJNÂˆÛÛœÝÝÜ™YÜ™Y[X[Ù^\ÈH™]ÈÙ]
+
+Ü™Y[X[›ÝÜËœ™\Ý[ÈÏÈ×JK›X\
+
+›ÝÎˆÈÝ]WÚÙ^NˆÝš[™ÈJHOˆ›ÝËœÝ]WÚÙ^JJNÂˆÛÛœÝ™\Ý[ˆ™XÛÜ™Ýš[™Ë[YÜ˜][Û”Ù]\ˆHßNÂˆ›Üˆ
+ÛÛœÝ›ÝÈÙˆÙ]\›ÝÜËœ™\Ý[ÈÏÈ×JHÂˆžHÂˆÛÛœÝ˜[YHH”ÓÓ‹œ\œÙJ›ÝËœÝ]WÝ˜[YJH\È[YÜ˜][Û”Ù]\ÂˆÛÛœÝÛÛ›™XÝ[Û’YH›ÝËœÝ]WÚÙ^KœÛXÙJ[YÜ˜][Û”Ù]\™Yš^›[™Ý
+NÂˆÛÛœÝYØ[[]RYHÝš[™Ê˜[YK›YØ[[]RYÏÈˆŠKš[J
+KœÛXÙJ
+NÂˆÛÛœÝÝ\ÝÛY\ÛÙHHÝš[™Ê˜[YK˜Ý\ÝÛY\ÛÙHÏÈˆŠKš[J
+KœÛXÙJ
+NÂˆÛÛœÝØÚØRÝHÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’Y	‰ˆ˜[YK˜]]Y]ÙOOH’•ÕŽÂˆÛÛœÝ˜[šÕÚÙ[ˆHÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’Y	‰ˆ˜[YK˜]]Y]ÙOOH™X\™\ˆÚÙ[ˆŽÂˆÛÛœÝÜ™Y[X[ØÛÜHH˜[šÕÚÙ[ˆÈ˜[šÐÜ™Y[X[ØÛÜHˆÝ\ÝÛY\ÛÙNÂˆ™\Ý[ØÛÛ›™XÝ[Û’YHHÂˆ‹‹˜[YKˆÛÛ›™XÝ[Û’Yˆ[™Ú[ˆ›Ü›X[^™TÝÜ™Y[YÜ˜][Û‘[™Ú[
+˜[YK™[™Ú[
+KˆYØ[[]RYˆÝ\ÝÛY\ÛÙKˆ[ØØ][Û“[ÙNˆ˜[YK˜[ØØ][Û“[ÙHOOHœÚ[™ÛWØœ˜[˜ÚˆÈœÚ[™ÛWØœ˜[˜Úˆˆ˜Û\ÜÚYžWÝ˜[œØXÝ[ÛœÈ‹ˆXØÛÝ[ØÛÜNˆ˜[YK˜XØÛÝ[ØÛÜH
+ØÚØRÝ˜[šÕÚÙ[ˆÈ˜[Ü\›Z]YˆˆˆŠKˆ™XYÛ›TØÛÜPÛÛ™š\›YYˆÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’Y	‰ˆ˜[YKœ™XYÛ›TØÛÜPÛÛ™š\›YYOOHYKˆÜ™Y[X[Ù[™\˜][ÛŽˆ›Ü›X[^™PÜ™Y[X[Ù[™\˜][ÛŠ˜[YK˜Ü™Y[X[Ù[™\˜][ÛŠKˆÙXÜ™]Ý]\ÎˆØÚØRÝ˜[šÕÚÙ[‚ˆÈÜ™Y[X[ØÛÜH	‰ˆÝÜ™YÜ™Y[X[Ù^\Ëš\Ê[YÜ˜][ÛÜ™Y[X[Ý]RÙ^JÛÛ›™XÝ[Û’YYØ[[]RYÜ™Y[X[ØÛÜJJHÈœÝÜ™Yˆˆ›Z\ÜÚ[™È‚ˆˆ˜[YKœÙXÜ™]Ý]\ÈOOHœÝÜ™YˆÈœÝÜ™Yˆˆ™^\›˜[Ü™\]Z\™Y‹ˆNÂˆHØ]ÚÂˆËÈHX[›Ü›YYÙ]\\ÈYÛ›Ü™Y[™™[XZ[œÈš\ÚX›H\È›ÝÛÛ™šYÝ\™Y‚ˆBˆBˆ™]\›ˆ™\Ý[ÂŸB‚\H™\\™Y[YÜ˜][Û”Ù]\HÂˆÙ]\ˆ[YÜ˜][Û”Ù]\Âˆ›ÝXÝY˜[šÐÛÛ›™XÝ[ÛŽˆ›ÛÛX[ŽÂˆ›ÝXÝY˜[šÐÜ™Y[X[ˆ›ÛÛX[ŽÂŸNÂ‚™^Ü\Þ[˜È[˜Ý[Ûˆ˜[Y]R[YÜ˜][Û”Ù]\™Y™\™[˜Ù\Ê[œ]ˆ\X[[YÜ˜][Û”Ù]\ŠHÂˆÛÛœÝÛÛ›™XÝ[Û’YHÝš[™Ê[œ]˜ÛÛ›™XÝ[Û’YÏÈˆŠKš[J
+KÕ\\Ø\ÙJ
+KœÛXÙJ
+NÂˆYˆ
+XÛÛ›™XÝ[Û’Y
+H›ÝÈ™]È\œ›ÜŠ´'t-H4,´bô,t`4,4/t,4.4/t`´-t,ô`4,4a´.4cÈŠNÂˆÛÛœÝÛÛ›™XÝ[ÛˆH]ØZ][‹‘‹œ™\\™J”ÑSPÕY”“ÓH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÒT‘HYOÈŠBˆ˜š[™
+ÛÛ›™XÝ[Û’Y
+K™š\œÝÈYˆÝš[™ÈOŠ
+NÂˆYˆ
+XÛÛ›™XÝ[ÛŠH›ÝÈ™]È\œ›ÜŠ´&4/t`´-t,ô`4,4a´.4cÈ4/t-H4/t,4.t-4-t/t,ŠNÂˆÛÛœÝ˜[šÐÛÛ›™XÝ[ÛˆHÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’YÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’YÂˆÛÛœÝYØ[[]RYHÝš[™Ê[œ]›YØ[[]RYÏÈˆŠKš[J
+KœÛXÙJ
+NÂˆÛÛœÝ[ØØ][Û“[ÙNˆ[YÜ˜][Û”Ù]\È˜[ØØ][Û“[ÙH—HH[œ]˜[ØØ][Û“[ÙHOOHœÚ[™ÛWØœ˜[˜ÚˆÈœÚ[™ÛWØœ˜[˜Úˆˆ˜Û\ÜÚYžWÝ˜[œØXÝ[ÛœÈŽÂˆÛÛœÝœ˜[˜ÚYHÝš[™Ê[œ]˜œ˜[˜ÚYÏÈˆŠKš[J
+KœÛXÙJ
+NÂˆYˆ
+˜[šÐÛÛ›™XÝ[Ûˆ	‰ˆ[YØ[[]RY
+H›ÝÈ™]È\œ›ÜŠ´$´bô,t-t`4.4`´-H4c´`4.4-4.4aô-t`t.´/´-H4.ô.4a´/ˆŠNÂˆYˆ
+˜[šÐÛÛ›™XÝ[ÛŠHÂˆÛÛœÝYØ[[]HH]ØZ][‹‘‹œ™\\™J”ÑSPÕY”“ÓH[]Y\ÈÒT‘HYOÈS‘[]WÝ\OIô+´`4.ô.4a´/‰ÈSRUHŠBˆ˜š[™
+YØ[[]RY
+K™š\œÝÈYˆÝš[™ÈOŠ
+NÂˆYˆ
+[YØ[[]JH›ÝÈ™]È\œ›ÜŠ´$´bô,t-t`4.4`´-H4`t`ôbt-t`t`´,´`ôc´bt`ôcˆ4.´,4`4`´/´aô.´`È4c´`4.4-4.4aô-t`t.´/´,ô/ˆ4.ô.4a´,ŠNÂˆBˆÛÛœÝ™\]Z\™\Ðœ˜[˜ÚHX˜[šÐÛÛ›™XÝ[Ûˆ[ØØ][Û“[ÙHOOHœÚ[™ÛWØœ˜[˜ÚŽÂˆYˆ
+™\]Z\™\Ðœ˜[˜Ú	‰ˆXœ˜[˜ÚY
+HÂˆ›ÝÈ™]È\œ›ÜŠ´$´bô,t-t`4.4`´-H4a4.4.ô.4,4.È4/t,4-ô/t,4aô-t/t.4cÈŠNÂˆBˆYˆ
+™\]Z\™\Ðœ˜[˜Ú	‰ˆœ˜[˜ÚY
+HÂˆÛÛœÝœ˜[˜ÚH]ØZ][‹‘‹œ™\\™J”ÑSPÕY”“ÓHÜ™Ø[š^˜][Û—Øœ˜[˜Ú\ÈÒT‘HYOÈS‘Ý]\ÏIô$4.´`´.4,´-t/IÈSRUHŠBˆ˜š[™
+œ˜[˜ÚY
+K™š\œÝÈYˆÝš[™ÈOŠ
+NÂˆYˆ
+Xœ˜[˜Ú
+H›ÝÈ™]È\œ›ÜŠ´$´bô,t-t`4.4`´-H4-4-t.t`t`´,´`ôc´bt.4.H4a4.4.ô.4,4.ÈŠNÂˆBˆ™]\›ˆÈÛÛ›™XÝ[Û’Y˜[šÐÛÛ›™XÝ[Û‹YØ[[]RY[ØØ][Û“[ÙKœ˜[˜ÚYNÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ™\\™R[YÜ˜][Û”Ù]\
+ˆXÝÜŽˆÝš[™Ëˆ[œ]ˆ\X[[YÜ˜][Û”Ù]\‹ˆ›Ü˜ÙTÝÜ™YÜ™Y[X[H˜[ÙKŠNˆ›ÛZ\ÙO™\\™Y[YÜ˜][Û”Ù]\ˆÂˆÛÛœÝ™Y™\™[˜Ù\ÈH]ØZ]˜[Y]R[YÜ˜][Û”Ù]\™Y™\™[˜Ù\Ê[œ]
+NÂˆÛÛœÝÈÛÛ›™XÝ[Û’Y˜[šÐÛÛ›™XÝ[Û‹YØ[[]RY[ØØ][Û“[ÙKœ˜[˜ÚYHH™Y™\™[˜Ù\ÎÂˆÛÛœÝ›ÝXÝY˜[šÐÛÛ›™XÝ[ÛˆHÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’YÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’YÂˆÛÛœÝØÚØT™XYÛ›R[\ÜHÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’YÂˆÛÛœÝÝ\]HH›ÝXÝY˜[šÐÛÛ›™XÝ[Ûˆ	‰ˆ]ØÚØT™XYÛ›R[\ÜÈˆˆˆÝš[™Ê[œ]œÝ\]HÏÈˆŠKš[J
+KœÛXÙJL
+NÂˆYˆ
+
+\›ÝXÝY˜[šÐÛÛ›™XÝ[ÛˆØÚØT™XYÛ›R[\Ü
+H	‰ˆK×—ÍKWÌŸKWÌŸIË\Ý
+Ý\]JJH›ÝÈ™]È\œ›ÜŠ´(ô.´,4-´.4`´-H4-4,4`´`È4/t,4aô,4.ô,4-ô,4,ô`4`ô-ô.´.ŠNÂˆYˆ
+ØÚØT™XYÛ›R[\Ü	‰ˆÝ\]H’SSÑWÐPÐÓÕS•S‘×ÔÕT•ÑUJH›ÝÈ™]È\œ›ÜŠ´(ôaôdt`ˆ4/t,4aô.4/t,4-t`´`tcÈ4`HH4`t-t/t`´cô,t`4cÈŒˆ4,ô/´-4,ŠNÂˆÛÛœÝ[\˜[H›ÝXÝY˜[šÐÛÛ›™XÝ[Ûˆ	‰ˆ]ØÚØT™XYÛ›R[\ÜˆÈˆˆÍŒNÍŒMKš[˜ÛY\Ê[X™\Š[œ]œÞ[˜Ò[\˜[Z[]\ÊJBˆÈ[X™\Š[œ]œÞ[˜Ò[\˜[Z[]\ÊBˆˆŒÂˆÛÛœÝZ[]HH›ÝXÝY˜[šÐÛÛ›™XÝ[Ûˆ	‰ˆ]ØÚØT™XYÛ›R[\ÜÈˆX]›Z[ŠNKX]›X^
+[X™\Š[œ]œÞ[˜ÓZ[]JH
+JNÂˆÛÛœÝ]]Y]ÙHÝš[™Ê[œ]˜]]Y]ÙÏÈˆŠKš[J
+KœÛXÙJ
+NÂˆÛÛœÝØÚØRÝHÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’Y	‰ˆ]]Y]ÙOOH’•ÕŽÂˆÛÛœÝ˜[šÕÚÙ[ˆHÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’Y	‰ˆ]]Y]ÙOOH™X\™\ˆÚÙ[ˆŽÂˆÛÛœÝ›ÝXÝY˜[šÐÜ™Y[X[HØÚØRÝ˜[šÕÚÙ[ŽÂˆÛÛœÝÝ\ÝÛY\ÛÙHHÝš[™Ê[œ]˜Ý\ÝÛY\ÛÙHÏÈˆŠKš[J
+KœÛXÙJ
+NÂˆÛÛœÝÜ™Y[X[ØÛÜHH˜[šÕÚÙ[ˆÈ˜[šÐÜ™Y[X[ØÛÜHˆÝ\ÝÛY\ÛÙNÂˆYˆ
+ÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’Y	‰ˆÝ\ÝÛY\ÛÙH	‰ˆK×–ÐKV˜K^ŒNWVÐKV˜K^ŒNK—Î‹W^ÌKÎ_IË\Ý
+Ý\ÝÛY\ÛÙJJHÂˆ›ÝÈ™]È\œ›ÜŠ´'t-t.´/´`4`4-t.´`´/t/ˆ4`ô.´,4-ô,4/t,4.´/´/4/ô,4/t.4cÈ4(´/´aô.´.ŠNÂˆBˆÛÛœÝÜ™Y[X[ÝÜ™YH›ÝXÝY˜[šÐÜ™Y[X[	‰ˆ
+ˆ›Ü˜ÙTÝÜ™YÜ™Y[X[›ÛÛX[ŠÜ™Y[X[ØÛÜH	‰ˆ]ØZ]\Ò[YÜ˜][ÛÜ™Y[X[
+ÛÛ›™XÝ[Û’YYØ[[]RYÜ™Y[X[ØÛÜJJBˆ
+NÂˆÛÛœÝ\]Y]H™]È]J
+KÒTÓÔÝš[™Ê
+NÂˆÛÛœÝÙ]\ˆ[YÜ˜][Û”Ù]\HÂˆÛÛ›™XÝ[Û’Yˆ]]Y]ÙˆÝ\]KˆÞ[˜Ò[\˜[Z[]\Îˆ[\˜[ˆÞ[˜ÓZ[]NˆZ[]Kˆ[™Ú[ˆ›ÝXÝY˜[šÐÛÛ›™XÝ[ÛˆÈˆˆˆ›Ü›X[^™TÝX›Z]Y[YÜ˜][Û‘[™Ú[
+[œ]™[™Ú[
+KˆYØ[[]RYˆÝ\ÝÛY\ÛÙNˆÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’YÈÝ\ÝÛY\ÛÙHˆˆ‹ˆœ˜[˜ÚYˆ˜[šÐÛÛ›™XÝ[Ûˆ	‰ˆ[ØØ][Û“[ÙHOOH˜Û\ÜÚYžWÝ˜[œØXÝ[ÛœÈˆÈˆˆˆœ˜[˜ÚYˆ[ØØ][Û“[ÙKˆXØÛÝ[ØÛÜNˆ˜[šÐÛÛ›™XÝ[ÛˆÈ˜[Ü\›Z]YˆˆÝš[™Ê[œ]˜XØÛÝ[ØÛÜHÏÈˆŠKš[J
+KœÛXÙJMŒ
+KˆÚ[›™[\NˆÝš[™Ê[œ]˜Ú[›™[\HÏÈˆŠKš[J
+KœÛXÙJ
+KˆÛÝ\˜ÙSX\[™ÎˆÝš[™Ê[œ]œÛÝ\˜ÙSX\[™ÈÏÈˆŠKš[J
+KœÛXÙJL
+Kˆ]TØÛÜ\ÎˆÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’YˆÈÈ´(taô-t`´,‹´$´bô/ô.4`t.´.‹´'´/ô-t`4,4a´.4.4.4/ô.ô,4`´-t-´.‹´(4-t-t`t`´`4/´/ô-t`4,4a´.4.H‹´'´`t`´,4`´.´.—Bˆˆ\œ˜^Kš\Ð\œ˜^J[œ]™]TØÛÜ\ÊHÈ[œ]™]TØÛÜ\Ë™š[\Š
+][JNˆ][H\ÈÝš[™ÈOˆ\[Ùˆ][HOOHœÝš[™ÈŠK›X\
+
+][JHOˆ][Kš[J
+KœÛXÙJ
+JK™š[\Š›ÛÛX[ŠKœÛXÙJÌ
+Hˆ×Kˆ™XYÛ›TØÛÜPÛÛ™š\›YYˆÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’Y	‰ˆ[œ]œ™XYÛ›TØÛÜPÛÛ™š\›YYOOHYKˆÜ™Y[X[Ù[™\˜][ÛŽˆ›ÝXÝY˜[šÐÛÛ›™XÝ[ÛˆÈÜž\Ëœ˜[™ÛUURQ
+
+Hˆˆ‹ˆÙXÜ™]Ý]\Îˆ›ÝXÝY˜[šÐÜ™Y[X[ÈÜ™Y[X[ÝÜ™YÈœÝÜ™Yˆˆ›Z\ÜÚ[™Èˆˆ™^\›˜[Ü™\]Z\™Y‹ˆ\]Y]ˆ\]YžNˆXÝÜ‹ˆNÂˆYˆ
+\Ù]\™]TØÛÜ\Ë›[™Ý
+H›ÝÈ™]È\œ›ÜŠ´$´bô,t-t`4.4`´-K4.´,4.´.4-H4-4,4/t/tbô-H4/ô/´.ô`ôaô,4`´cŠNÂˆ™]\›ˆÈÙ]\›ÝXÝY˜[šÐÛÛ›™XÝ[Û‹›ÝXÝY˜[šÐÜ™Y[X[NÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ\œÚ\Ý[YÜ˜][Û”Ù]\
+ˆXÝÜŽˆÝš[™Ëˆ™\\™Yˆ™\\™Y[YÜ˜][Û”Ù]\ˆ˜\Ù[[™NˆXÚÏ[YÜ˜][Û”Ù]\˜Ü™Y[X[Ù[™\˜][Ûˆˆ\]Y]ˆ[H[ŠHÂˆÛÛœÝÈÙ]\›ÝXÝY˜[šÐÛÛ›™XÝ[Û‹›ÝXÝY˜[šÐÜ™Y[X[HH™\\™YÂˆÛÛœÝØ]™TÙ]\Ý][Y[H[‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+ËËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+	Ú[YÜ˜][Û”Ù]\™Yš^IÜÙ]\˜ÛÛ›™XÝ[Û’YX”ÓÓ‹œÝš[™ÚYžJÙ]\
+JNÂˆÛÛœÝ\]PÛÛ›™XÝ[Û”Ý][Y[H[‹‘‹œ™\\™JTUH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÑUˆ]]ÜÝ]\ÏOËˆ™^ÜÞ[˜×Ø]OËˆ\]YØ]PÕT”‘S•ÕSQTÕSTÒT‘HYOØ
+K˜š[™
+ˆ›ÝXÝY˜[šÐÜ™Y[X[ˆÈÙ]\œÙXÜ™]Ý]\ÈOOHœÝÜ™YˆÈ´&´.ôc´aÈ4`t/´at`4,4/tdt/H0­È4`´`4-t,t`ô-t`´`tcÈ4/ô`4/´,´-t`4.´,4,t,4/t.´,ˆˆ´'t,4`t`´`4/´.t.´,4`t/´at`4,4/t-t/t,0­È4.´.ôc´aÈ4`´`4-t,t`ô-t`´`tcÈ‚ˆˆ´'t,4`t`´`4/´.t.´,4`t/´at`4,4/t-t/t,0­È4`t-t.´`4-t`ˆ4`´`4-t,t`ô-t`´`tcÈ‹ˆ›ÝXÝY˜[šÐÛÛ›™XÝ[Û‚ˆÈˆ‚ˆˆ´'ô/´`t.ô-H4,t-t-ô/´/ô,4`t/t/´.H4/ô-t`4-t-4,4aô.4`t-t.´`4-t`´,‹ˆÙ]\˜ÛÛ›™XÝ[Û’Yˆ
+NÂˆÛÛœÝ]Y]^[ØYH”ÓÓ‹œÝš[™ÚYžJÂˆÛÛ›™XÝ[Û’YˆÙ]\˜ÛÛ›™XÝ[Û’YˆÙ[XÝYYØ[[]RYˆÙ]\›YØ[[]RYˆÛÛ\[žTÙ[XÝ[ÛÛÛ™š\›YYˆ›ÛÛX[ŠÙ]\˜Ý\ÝÛY\ÛÙJKˆXØÛÝ[ØÛÜNˆÙ]\˜XØÛÝ[ØÛÜKˆ[ØØ][Û“[ÙNˆÙ]\˜[ØØ][Û“[ÙKˆÝ\]NˆÙ]\œÝ\]KˆÞ[˜Ò[\˜[Z[]\ÎˆÙ]\œÞ[˜Ò[\˜[Z[]\ËˆÞ[˜ÓZ[]NˆÙ]\œÞ[˜ÓZ[]KˆXØÙ\ÜÓY]ÙˆÙ]\˜ÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’YˆÈ´&´.ôc´aÈ4(´/´aô.´.‚ˆˆÙ]\˜ÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’YˆÈ´(´/´.´-t/H4(¸ $t$t,4/t.´,‚ˆˆÙ]\˜]]Y]Ùˆ]TØÛÜ\ÎˆÙ]\™]TØÛÜ\Ëˆ[Z]Y\›Z\ÜÚ[ÛœÐÛÛ™š\›YYžSÝÛ™\ŽˆÙ]\˜ÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’YˆÈÙ]\œ™XYÛ›TØÛÜPÛÛ™š\›YYˆˆ[™Yš[™YˆÙXÜ™]ÝÜ™YˆÙ]\œÙXÜ™]Ý]\ÈOOHœÝÜ™Y‹ˆJNÂˆYˆ
+›ÝXÝY˜[šÐÛÛ›™XÝ[ÛŠHÂˆÛÛœÝÙ]\Ý]RÙ^HH	Ú[YÜ˜][Û”Ù]\™Yš^IÜÙ]\˜ÛÛ›™XÝ[Û’YXÂˆÛÛœÝÝX\™H˜\Ù[[™BˆÈVTÕÈ
+ÑSPÕH”“ÓHÞ\Ý[WÜ[[YWÜÝ]BˆÒT‘HÝ]WÚÙ^OOÂˆS‘ÓÐSTÐÑJœÛÛ—Ù^˜XÝ
+Ý]WÝ˜[YK	É˜Ü™Y[X[Ù[™\˜][Û‰ÊK	ÉÊOOÂˆS‘ÓÐSTÐÑJœÛÛ—Ù^˜XÝ
+Ý]WÝ˜[YK	É\]Y]	ÊK	ÉÊOOÊXˆˆ““ÕVTÕÈ
+ÑSPÕH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OOÊHŽÂˆÛÛœÝÝX\™š[™[™ÜÈH˜\Ù[[™BˆÈÜÙ]\Ý]RÙ^K›Ü›X[^™PÜ™Y[X[Ù[™\˜][ÛŠ˜\Ù[[™K˜Ü™Y[X[Ù[™\˜][ÛŠK˜\Ù[[™K\]Y]BˆˆÜÙ]\Ý]RÙ^WNÂˆÛÛœÝÝ][Y[ÈH×NÂˆYˆ
+Ù]\œÙXÜ™]Ý]\ÈOOHœÝÜ™YŠHÂˆÝ][Y[Ëœ\Ú
+[‹‘‹œ™\\™JSUH”“ÓHÞ\Ý[WÜ[[YWÜÝ]BˆÒT‘HÝ]WÚÙ^HRÑHÈS‘	ÙÝX\™X
+Bˆ˜š[™
+[YÜ˜][ÛÜ™Y[X[ÛÛ›™XÝ[Û”]\›ŠÙ]\˜ÛÛ›™XÝ[Û’Y
+K‹‹™ÝX\™š[™[™ÜÊJNÂˆBˆÝ][Y[Ëœ\Ú
+ˆ[‹‘‹œ™\\™JTUH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÑUˆ]]ÜÝ]\ÏOË™^ÜÞ[˜×Ø]IÉË\]YØ]PÕT”‘S•ÕSQTÕSTÒT‘HYOÈS‘	ÙÝX\™X
+Bˆ˜š[™
+ˆ›ÝXÝY˜[šÐÜ™Y[X[ˆÈÙ]\œÙXÜ™]Ý]\ÈOOHœÝÜ™YˆÈ´&´.ôc´aÈ4`t/´at`4,4/tdt/H0­È4`´`4-t,t`ô-t`´`tcÈ4/ô`4/´,´-t`4.´,4,t,4/t.´,ˆˆ´'t,4`t`´`4/´.t.´,4`t/´at`4,4/t-t/t,0­È4.´.ôc´aÈ4`´`4-t,t`ô-t`´`tcÈ‚ˆˆ´'t,4`t`´`4/´.t.´,4`t/´at`4,4/t-t/t,0­È4`t-t.´`4-t`ˆ4`´`4-t,t`ô-t`´`tcÈ‹ˆÙ]\˜ÛÛ›™XÝ[Û’Yˆ‹‹™ÝX\™š[™[™ÜËˆ
+Kˆ[‹‘‹œ™\\™JS”ÑT•S•È]Y]Ù]™[È
+XÝÜ‹XÝ[Û‹[]WÝ\K[]WÚY^[ØY
+BˆÑSPÕË	Ú[YÜ˜][Û‹œÙ]\ÜØ]™Y	Ë	Ú[YÜ˜][Û—Ý\ÝÙ]\Ù]	Ë	ÒS•QÔUSÓ‹QSSÉËÈÒT‘H	ÙÝX\™X
+Bˆ˜š[™
+XÝÜ‹]Y]^[ØY‹‹™ÝX\™š[™[™ÜÊKˆ[‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆÑSPÕËËÕT”‘S•ÕSQTÕSTÒT‘H	ÙÝX\™BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+Ù]\Ý]RÙ^K”ÓÓ‹œÝš[™ÚYžJÙ]\
+K‹‹™ÝX\™š[™[™ÜÊKˆ
+NÂˆÛÛœÝ™\Ý[ÈH]ØZ][‹‘‹˜˜]Ú
+Ý][Y[ÊNÂˆÛÛœÝÙ]\™\Ý[H™\Ý[Ë˜]
+LJH\ÈÈY]OÎˆÈÚ[™Ù\ÏÎˆ[X™\ˆHH[™Yš[™YÂˆ™]\›ˆ[X™\ŠÙ]\™\Ý[Ë›Y]OË˜Ú[™Ù\ÈÏÈ
+HˆÂˆH[ÙHÂˆ]ØZ][‹‘‹˜˜]Ú
+ÂˆØ]™TÙ]\Ý][Y[ˆ\]PÛÛ›™XÝ[Û”Ý][Y[ˆ[‹‘‹œ™\\™J’S”ÑT•S•È]Y]Ù]™[È
+XÝÜ‹XÝ[Û‹[]WÝ\K[]WÚY^[ØY
+HSQTÈ
+ËËËËÊHŠBˆ˜š[™
+XÝÜ‹š[YÜ˜][Û‹œÙ]\ÜØ]™Y‹š[YÜ˜][Û—Ý\ÝÙ]\Ù]‹’S•QÔUSÓ‹QSSÈ‹]Y]^[ØY
+KˆJNÂˆ™]\›ˆYNÂˆBŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆØ]™R[YÜ˜][Û”Ù]\
+XÝÜŽˆÝš[™Ë[œ]ˆ\X[[YÜ˜][Û”Ù]\ŠHÂˆÛÛœÝÛÛ›™XÝ[Û’YHÝš[™Ê[œ]˜ÛÛ›™XÝ[Û’YÏÈˆŠKš[J
+KÕ\\Ø\ÙJ
+KœÛXÙJ
+NÂˆÛÛœÝ›ÝXÝY˜[šÐÛÛ›™XÝ[ÛˆHÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’YÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’YÂˆÛÛœÝ˜\Ù[[™HH›ÝXÝY˜[šÐÛÛ›™XÝ[Û‚ˆÈ
+]ØZ]Ù][YÜ˜][Û”Ù]\Ê
+JVØÛÛ›™XÝ[Û’YHÏÈ[ˆˆ[ÂˆÛÛœÝ™\\™YH]ØZ]™\\™R[YÜ˜][Û”Ù]\
+XÝÜ‹[œ]
+NÂˆÛÛœÝØ]™YH]ØZ]\œÚ\Ý[YÜ˜][Û”Ù]\
+XÝÜ‹™\\™Y˜\Ù[[™JNÂˆYˆ
+\Ø]™Y
+H›ÝÈ™]È\œ›ÜŠ´'t,4`t`´`4/´.t.´,4,t,4/t.´,4.4-ô/4-t/t.4.ô,4`tc4,´/ˆ4,´`4-t/4cÈ4`t/´at`4,4/t-t/t.4cËˆ4'ô/´,´`´/´`4.4`´-H4-4-t.t`t`´,´.4-KˆŠNÂˆ™]\›ˆ™\\™YœÙ]\ÂŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆØ]™UØÚØTÙ]\Ú]Ü™Y[X[
+ˆXÝÜŽˆÝš[™Ëˆ[œ]ˆ\X[[YÜ˜][Û”Ù]\‹ˆ˜[YNˆ[šÛ›ÝÛ‹ˆ˜\Ù[[™NˆXÚÏ[YÜ˜][Û”Ù]\˜Ü™Y[X[Ù[™\˜][Ûˆˆ\]Y]ˆ[ŠHÂˆÛÛœÝ™\\™YH]ØZ]™\\™R[YÜ˜][Û”Ù]\
+XÝÜ‹[œ]YJNÂˆÛÛœÝÈÙ]\HH™\\™YÂˆYˆ
+Ù]\˜ÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’YÙ]\˜]]Y]ÙOOH’•Õˆ\Ù]\˜Ý\ÝÛY\ÛÙJHÂˆ›ÝÈ™]È\œ›ÜŠ´&´.ôc´aÈ4/ô`4.4/t.4/4,4-t`´`tcÈ4`´/´.ôc4.´/ˆ4-4.ôcÈ4/ô/´-4`´,´-t`4-´-4dt/t/t/´,ô/ˆ4/ô/´-4.´.ôc´aô-t/t.4cÈ4,t,4/t.´,4(´/´aô.´,ŠNÂˆBˆÛÛœÝÜ™Y[X[H]ØZ][˜Üž\[YÜ˜][ÛÜ™Y[X[
+ˆXÝÜ‹ˆÙ]\˜ÛÛ›™XÝ[Û’YˆÙ]\›YØ[[]RYˆÙ]\˜Ý\ÝÛY\ÛÙKˆ˜[YKˆ
+NÂˆÛÛœÝÙ]\]Y]H”ÓÓ‹œÝš[™ÚYžJÂˆÛÛ›™XÝ[Û’YˆÙ]\˜ÛÛ›™XÝ[Û’YˆÙ[XÝYYØ[[]RYˆÙ]\›YØ[[]RYˆÛÛ\[žTÙ[XÝ[ÛÛÛ™š\›YYˆYKˆXØÛÝ[ØÛÜNˆÙ]\˜XØÛÝ[ØÛÜKˆ[ØØ][Û“[ÙNˆÙ]\˜[ØØ][Û“[ÙKˆÝ\]NˆÙ]\œÝ\]KˆÞ[˜Ò[\˜[Z[]\ÎˆÙ]\œÞ[˜Ò[\˜[Z[]\ËˆÞ[˜ÓZ[]NˆÙ]\œÞ[˜ÓZ[]KˆXØÙ\ÜÓY]Ùˆ´&´.ôc´aÈ4(´/´aô.´.‹ˆ]TØÛÜ\ÎˆÙ]\™]TØÛÜ\ËˆÙXÜ™]ÝÜ™YˆYKˆJNÂˆÛÛœÝÜ™Y[X[]Y]H”ÓÓ‹œÝš[™ÚYžJÂˆÛÛ›™XÝ[Û’YˆÜ™Y[X[˜ÛÛ›™XÝ[Û’YˆÙ[XÝYYØ[[]RYˆÜ™Y[X[›YØ[[]RYˆÜ™Y[X[[™[ÜTÝÜ™YˆYKˆ™\œÚ[ÛŽˆÜ™Y[X[™[™[ÜK™\œÚ[Û‹ˆ[ÛÜš]NˆÜ™Y[X[™[™[ÜK˜[ÛÜš]KˆJNÂˆÛÛœÝØ]™YH]ØZ]\œÚ\Ý˜[šÔÙ]\Ú]Ü™Y[X[Ø\ÊˆXÝÜ‹ˆÙ]\ˆÜ™Y[X[ˆ˜\Ù[[™KˆÙ]\]Y]ˆÜ™Y[X[]Y]ˆ´&´.ôc´aÈ4(´/´aô.´.4`t/´at`4,4/tdt/H0­È4`´`4-t,t`ô-t`´`tcÈ4/ô`4/´,´-t`4.´,4,t,4/t.´,‹ˆ
+NÂˆ™]\›ˆØ]™YÈÙ]\ˆ[ÂŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆÜ™X]UØÚØPÛÛ\[žTÙ[XÝ[Û’[™\ÊˆXÝÜ•˜[YNˆÝš[™ËˆYØ[[]RY˜[YNˆÝš[™ËˆÜ™Y[X[˜[YNˆ[šÛ›ÝÛ‹ˆÚÚXÙ\Õ˜[YNˆ\œ˜^OÈÛÙNˆÝš[™ÎÈ˜[YNˆÝš[™ÈO‹ˆ›ÝÓ\ÈH]K››ÝÊ
+KŠNˆ›ÛZ\ÙOØÚØPÛÛ\[žTÙ[XÝ[Û’[™V×OˆÂˆÛÛœÝXÝÜˆHÝš[™ÊXÝÜ•˜[YHÏÈˆŠKš[J
+KœÛXÙJLŒ
+NÂˆYˆ
+XXÝÜŠH›ÝÈ™]È\œ›ÜŠ´'t-H4/´/ô`4-t-4-t.ôdt/H4/ô/´.ôc4-ô/´,´,4`´-t.ôc4,´bô,t/´`4,4.´/´/4/ô,4/t.4.ŠNÂˆÛÛœÝYØ[[]RYH›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJYØ[[]RY˜[YK´c´`4.4-4.4aô-t`t.´/´-H4.ô.4a´/ˆŠNÂˆÛÛœÝÜ™Y[X[YÙ\ÝH]ØZ][YÜ˜][ÛÜ™Y[X[YÙ\Ý
+Ü™Y[X[˜[YJNÂˆÛÛœÝ^\™\Ð]\ÈH›ÝÓ\È
+ÈØÚØPÛÛ\[žTÙ[XÝ[Û•\ÎÂˆÛÛœÝ›ÝÜÈHÚÚXÙ\Õ˜[YKœÛXÙJL
+K™›]X\
+
+ÚÚXÙK[™^
+HOˆÂˆÛÛœÝÝ\ÝÛY\ÛÙHHÝš[™ÊÚÚXÙK˜ÛÙHÏÈˆŠKš[J
+KœÛXÙJ
+NÂˆYˆ
+K×–ÐKV˜K^ŒNWVÐKV˜K^ŒNK—Î‹W^ÌKÎ_IË\Ý
+Ý\ÝÛY\ÛÙJJH™]\›ˆ×NÂˆÛÛœÝYH	ØÜž\Ëœ˜[™ÛUURQ
+
+Kœ™\XÙJËKÙËˆŠ_IØÜž\Ëœ˜[™ÛUURQ
+
+Kœ™\XÙJËKÙËˆŠ_XÂˆÛÛœÝ˜[YHHÝš[™ÊÚÚXÙK›˜[YHÏÈˆŠKœ™\XÙJÖ×LWLY—LÙ—KÙËˆŠKš[J
+KœÛXÙJLŒ
+Bˆ4&´/´/4/ô,4/t.4cÈ	Ú[™^
+È_XÂˆÛÛœÝ^[ØYˆØÚØPÛÛ\[žTÙ[XÝ[Û”^[ØYHÂˆ™\œÚ[ÛŽˆKˆYØ[[]RYˆÝ\ÝÛY\ÛÙKˆÜ™Y[X[YÙ\Ýˆ\ÜÝYYÎˆXÝÜ‹ˆ^\™\Ð]\ËˆNÂˆ™]\›ˆÞÈY˜[YK^[ØYWNÂˆJNÂˆYˆ
+\›ÝÜË›[™Ý
+H™]\›ˆ×NÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™JSUH”“ÓHÞ\Ý[WÜ[[YWÜÝ]BˆÒT‘HÝ]WÚÙ^HRÑHÈS‘ÐTÕ
+œÛÛ—Ù^˜XÝ
+Ý]WÝ˜[YK	É™^\™\Ð]\ÉÊHTÈS•QÑTŠOØ
+Bˆ˜š[™
+	ÝØÚØPÛÛ\[žTÙ[XÝ[Û”™Yš^IX›ÝÓ\ÊKˆ‹‹œ›ÝÜË›X\
+
+›ÝÊHOˆ[‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+ËËÕT”‘S•ÕSQTÕST
+HÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈ“ÕS‘Ø
+Bˆ˜š[™
+	ÝØÚØPÛÛ\[žTÙ[XÝ[Û”™Yš^IÜ›ÝËšYX”ÓÓ‹œÝš[™ÚYžJ›ÝËœ^[ØY
+JJKˆJNÂˆ™]\›ˆ›ÝÜË›X\
+
+ÈY˜[YHJHOˆ
+ÈY˜[YHJJNÂŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆÛÛœÝ[YUØÚØPÛÛ\[žTÙ[XÝ[Û’[™JˆXÝÜ•˜[YNˆÝš[™Ëˆ[™U˜[YNˆ[šÛ›ÝÛ‹ˆYØ[[]RY˜[YNˆÝš[™ËˆÜ™Y[X[˜[YNˆ[šÛ›ÝÛ‹ˆ›ÝÓ\ÈH]K››ÝÊ
+KŠNˆ›ÛZ\ÙOØÚØPÛÛ\[žTÙ[XÝ[Û”™\Ý[ˆÂˆÛÛœÝ[™HH\[Ùˆ[™U˜[YHOOHœÝš[™ÈˆÈ[™U˜[YKš[J
+HˆˆŽÂˆYˆ
+K×–ØKYŒNW^ÍIË\Ý
+[™JJHÂˆ™]\›ˆÈÚÎˆ˜[ÙK™X\ÛÛŽˆ´$´bô,t/´`4.´/´/4/ô,4/t.4.4/t-t-4-t.t`t`´,´.4`´-t.ô-t/Kˆ4't,4aô/t.4`´-H4,´bô,t/´`4-ô,4/t/´,´/‹ˆˆNÂˆBˆÛÛœÝÝ]RÙ^HH	ÝØÚØPÛÛ\[žTÙ[XÝ[Û”™Yš^IÚ[™_XÂˆÛÛœÝ›ÝÈH]ØZ][‹‘‹œ™\\™J”ÑSPÕÝ]WÝ˜[YH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OOÈŠBˆ˜š[™
+Ý]RÙ^JK™š\œÝÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+\›ÝÊH™]\›ˆÈÚÎˆ˜[ÙK™X\ÛÛŽˆ´$´bô,t/´`4.´/´/4/ô,4/t.4.4`ô-´-H4.4`t/ô/´.ôc4-ô/´,´,4/H4.4.ô.4`ô`t`´,4`4-t.Ëˆ4't,4aô/t.4`´-H4,´bô,t/´`4-ô,4/t/´,´/‹ˆˆNÂ‚ˆ]^[ØYˆØÚØPÛÛ\[žTÙ[XÝ[Û”^[ØYÂˆžHÂˆ^[ØYH”ÓÓ‹œ\œÙJ›ÝËœÝ]WÝ˜[YJH\ÈØÚØPÛÛ\[žTÙ[XÝ[Û”^[ØYÂˆHØ]ÚÂˆ]ØZ][‹‘‹œ™\\™J‘SUH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OOÈS‘Ý]WÝ˜[YOOÈŠBˆ˜š[™
+Ý]RÙ^K›ÝËœÝ]WÝ˜[YJKœ[Š
+NÂˆ™]\›ˆÈÚÎˆ˜[ÙK™X\ÛÛŽˆ´$´bô,t/´`4.´/´/4/ô,4/t.4.4/t-t-4-t.t`t`´,´.4`´-t.ô-t/Kˆ4't,4aô/t.4`´-H4,´bô,t/´`4-ô,4/t/´,´/‹ˆˆNÂˆBˆYˆ
+^[ØY™\œÚ[ÛˆOOHHS[X™\‹š\Ñš[š]J^[ØY™^\™\Ð]\ÊH^[ØY™^\™\Ð]\ÈH›ÝÓ\ÊHÂˆ]ØZ][‹‘‹œ™\\™J‘SUH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OOÈS‘Ý]WÝ˜[YOOÈŠBˆ˜š[™
+Ý]RÙ^K›ÝËœÝ]WÝ˜[YJKœ[Š
+NÂˆ™]\›ˆÈÚÎˆ˜[ÙK™X\ÛÛŽˆ´$´`4-t/4cÈ4,´bô,t/´`4,4.´/´/4/ô,4/t.4.4.4`t`´-t.´.ô/‹ˆ4't,4aô/t.4`´-H4,´bô,t/´`4-ô,4/t/´,´/‹ˆˆNÂˆB‚ˆÛÛœÝXÝÜˆHÝš[™ÊXÝÜ•˜[YHÏÈˆŠKš[J
+KœÛXÙJLŒ
+NÂˆ]YØ[[]RYHˆŽÂˆ]Ü™Y[X[YÙ\ÝHˆŽÂˆžHÂˆYØ[[]RYH›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJYØ[[]RY˜[YK´c´`4.4-4.4aô-t`t.´/´-H4.ô.4a´/ˆŠNÂˆÜ™Y[X[YÙ\ÝH]ØZ][YÜ˜][ÛÜ™Y[X[YÙ\Ý
+Ü™Y[X[˜[YJNÂˆHØ]ÚÂˆ™]\›ˆÈÚÎˆ˜[ÙK™X\ÛÛŽˆ´$´bô,t/´`4.´/´/4/ô,4/t.4.4/t-H4/´`´/t/´`t.4`´`tcÈ4.ˆ4ct`´/´/4`È4.´.ôc´aô`Ëˆ4't,4aô/t.4`´-H4,´bô,t/´`4-ô,4/t/´,´/‹ˆˆNÂˆBˆÛÛœÝ^XÝYÛÙHHÝš[™Ê^[ØY˜Ý\ÝÛY\ÛÙHÏÈˆŠKš[J
+KœÛXÙJ
+NÂˆÛÛœÝš[™[™ÓX]Ú\ÈHÛÛœÝ[[YQ\]X[
+^[ØYš\ÜÝYYËXÝÜŠBˆ	‰ˆÛÛœÝ[[YQ\]X[
+^[ØY›YØ[[]RYYØ[[]RY
+Bˆ	‰ˆÛÛœÝ[[YQ\]X[
+^[ØY˜Ü™Y[X[YÙ\ÝÜ™Y[X[YÙ\Ý
+Bˆ	‰ˆ×–ÐKV˜K^ŒNWVÐKV˜K^ŒNK—Î‹W^ÌKÎ_IË\Ý
+^XÝYÛÙJNÂˆYˆ
+Xš[™[™ÓX]Ú\ÊHÂˆ™]\›ˆÈÚÎˆ˜[ÙK™X\ÛÛŽˆ´$´bô,t/´`4.´/´/4/ô,4/t.4.4/t-H4/´`´/t/´`t.4`´`tcÈ4.ˆ4ct`´/´/4`È4.´.ôc´aô`Ëˆ4't,4aô/t.4`´-H4,´bô,t/´`4-ô,4/t/´,´/‹ˆˆNÂˆB‚ˆÛÛœÝÛÛœÝ[YYH]ØZ][‹‘‹œ™\\™Jˆ‘SUH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OOÈS‘Ý]WÝ˜[YOOÈ‘UT“’S‘ÈÝ]WÝ˜[YH‚ˆ
+K˜š[™
+Ý]RÙ^K›ÝËœÝ]WÝ˜[YJK™š\œÝÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+XÛÛœÝ[YY
+H™]\›ˆÈÚÎˆ˜[ÙK™X\ÛÛŽˆ´$´bô,t/´`4.´/´/4/ô,4/t.4.4`ô-´-H4.4`t/ô/´.ôc4-ô/´,´,4/H4.4.ô.4`ô`t`´,4`4-t.Ëˆ4't,4aô/t.4`´-H4,´bô,t/´`4-ô,4/t/´,´/‹ˆˆNÂˆ™]\›ˆÈÚÎˆYKÝ\ÝÛY\ÛÙNˆ^XÝYÛÙHNÂŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆØ]™U˜[šÔÙ]\Ú]Ü™Y[X[
+ˆXÝÜŽˆÝš[™Ëˆ[œ]ˆ\X[[YÜ˜][Û”Ù]\‹ˆ˜[YNˆ[šÛ›ÝÛ‹ˆ˜\Ù[[™NˆXÚÏ[YÜ˜][Û”Ù]\˜Ü™Y[X[Ù[™\˜][Ûˆˆ\]Y]ˆ[ŠHÂˆÛÛœÝ™\\™YH]ØZ]™\\™R[YÜ˜][Û”Ù]\
+XÝÜ‹[œ]YJNÂˆÛÛœÝÈÙ]\HH™\\™YÂˆYˆ
+Ù]\˜ÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’YÙ]\˜]]Y]ÙOOH™X\™\ˆÚÙ[ˆˆ\Ù]\œ™XYÛ›TØÛÜPÛÛ™š\›YY
+HÂˆ›ÝÈ™]È\œ›ÜŠ´'ô/´-4`´,´-t`4-4.4`´-H4/´,ô`4,4/t.4aô-t/t/tbô-H4/ô`4,4,´,4`´/´.´-t/t,4(¸ $t$t,4/t.´,ŠNÂˆBˆÛÛœÝÜ™Y[X[H]ØZ][˜Üž\[YÜ˜][ÛÜ™Y[X[
+ˆXÝÜ‹ˆÙ]\˜ÛÛ›™XÝ[Û’YˆÙ]\›YØ[[]RYˆ˜[šÐÜ™Y[X[ØÛÜKˆ˜[YKˆ
+NÂˆÛÛœÝÙ]\]Y]H”ÓÓ‹œÝš[™ÚYžJÂˆÛÛ›™XÝ[Û’YˆÙ]\˜ÛÛ›™XÝ[Û’YˆÙ[XÝYYØ[[]RYˆÙ]\›YØ[[]RYˆXØÛÝ[ØÛÜNˆÙ]\˜XØÛÝ[ØÛÜKˆ[ØØ][Û“[ÙNˆÙ]\˜[ØØ][Û“[ÙKˆXØÙ\ÜÓY]Ùˆ´(´/´.´-t/H4(¸ $t$t,4/t.´,‹ˆ[Z]Y\›Z\ÜÚ[ÛœÐÛÛ™š\›YYžSÝÛ™\ŽˆYKˆ]TØÛÜ\ÎˆÙ]\™]TØÛÜ\ËˆÙXÜ™]ÝÜ™YˆYKˆJNÂˆÛÛœÝÜ™Y[X[]Y]H”ÓÓ‹œÝš[™ÚYžJÂˆÛÛ›™XÝ[Û’YˆÜ™Y[X[˜ÛÛ›™XÝ[Û’YˆÙ[XÝYYØ[[]RYˆÜ™Y[X[›YØ[[]RYˆÜ™Y[X[[™[ÜTÝÜ™YˆYKˆ™\œÚ[ÛŽˆÜ™Y[X[™[™[ÜK™\œÚ[Û‹ˆ[ÛÜš]NˆÜ™Y[X[™[™[ÜK˜[ÛÜš]KˆJNÂˆÛÛœÝØ]™YH]ØZ]\œÚ\Ý˜[šÔÙ]\Ú]Ü™Y[X[Ø\ÊˆXÝÜ‹ˆÙ]\ˆÜ™Y[X[ˆ˜\Ù[[™KˆÙ]\]Y]ˆÜ™Y[X[]Y]ˆ´(´/´.´-t/H4(¸ $t$t,4/t.´,4`t/´at`4,4/tdt/H0­È4`´`4-t,t`ô-t`´`tcÈ4/ô`4/´,´-t`4.´,4,t,4/t.´,‹ˆ
+NÂˆ™]\›ˆØ]™YÈÙ]\ˆ[ÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ\œÚ\Ý˜[šÔÙ]\Ú]Ü™Y[X[Ø\ÊˆXÝÜŽˆÝš[™ËˆÙ]\ˆ[YÜ˜][Û”Ù]\ˆÜ™Y[X[ˆ]ØZ]Y™]\›•\O\[Ùˆ[˜Üž\[YÜ˜][ÛÜ™Y[X[‹ˆ˜\Ù[[™NˆXÚÏ[YÜ˜][Û”Ù]\˜Ü™Y[X[Ù[™\˜][Ûˆˆ\]Y]ˆ[ˆÙ]\]Y]ˆÝš[™ËˆÜ™Y[X[]Y]ˆÝš[™Ëˆ]]Ý]\ÎˆÝš[™ËŠHÂˆÛÛœÝÙ]\Ý]RÙ^HH	Ú[YÜ˜][Û”Ù]\™Yš^IÜÙ]\˜ÛÛ›™XÝ[Û’YXÂˆÛÛœÝÝX\™H˜\Ù[[™BˆÈVTÕÈ
+ÑSPÕH”“ÓHÞ\Ý[WÜ[[YWÜÝ]BˆÒT‘HÝ]WÚÙ^OOÂˆS‘ÓÐSTÐÑJœÛÛ—Ù^˜XÝ
+Ý]WÝ˜[YK	É˜Ü™Y[X[Ù[™\˜][Û‰ÊK	ÉÊOOÂˆS‘ÓÐSTÐÑJœÛÛ—Ù^˜XÝ
+Ý]WÝ˜[YK	É\]Y]	ÊK	ÉÊOOÊXˆˆ““ÕVTÕÈ
+ÑSPÕH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OOÊHŽÂˆÛÛœÝÝX\™š[™[™ÜÈH˜\Ù[[™BˆÈÜÙ]\Ý]RÙ^K›Ü›X[^™PÜ™Y[X[Ù[™\˜][ÛŠ˜\Ù[[™K˜Ü™Y[X[Ù[™\˜][ÛŠK˜\Ù[[™K\]Y]BˆˆÜÙ]\Ý]RÙ^WNÂˆÛÛœÝ™\Ý[ÈH]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆÑSPÕËËÕT”‘S•ÕSQTÕSTÒT‘H	ÙÝX\™BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+Ü™Y[X[œÝ]RÙ^K”ÓÓ‹œÝš[™ÚYžJÜ™Y[X[™[™[ÜJK‹‹™ÝX\™š[™[™ÜÊKˆ[‹‘‹œ™\\™JSUH”“ÓHÞ\Ý[WÜ[[YWÜÝ]BˆÒT‘HÝ]WÚÙ^HRÑHÈS‘Ý]WÚÙ^OÈS‘	ÙÝX\™X
+Bˆ˜š[™
+[YÜ˜][ÛÜ™Y[X[ÛÛ›™XÝ[Û”]\›ŠÙ]\˜ÛÛ›™XÝ[Û’Y
+KÜ™Y[X[œÝ]RÙ^K‹‹™ÝX\™š[™[™ÜÊKˆ[‹‘‹œ™\\™JTUH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÑUˆ]]ÜÝ]\ÏOË™^ÜÞ[˜×Ø]IÉË\]YØ]PÕT”‘S•ÕSQTÕSTÒT‘HYOÈS‘	ÙÝX\™X
+Bˆ˜š[™
+]]Ý]\ËÙ]\˜ÛÛ›™XÝ[Û’Y‹‹™ÝX\™š[™[™ÜÊKˆ[‹‘‹œ™\\™JS”ÑT•S•È]Y]Ù]™[È
+XÝÜ‹XÝ[Û‹[]WÝ\K[]WÚY^[ØY
+BˆÑSPÕË	Ú[YÜ˜][Û‹œÙ]\ÜØ]™Y	Ë	Ú[YÜ˜][Û—Ý\ÝÙ]\Ù]	Ë	ÒS•QÔUSÓ‹QSSÉËÈÒT‘H	ÙÝX\™X
+Bˆ˜š[™
+XÝÜ‹Ù]\]Y]‹‹™ÝX\™š[™[™ÜÊKˆ[‹‘‹œ™\\™JS”ÑT•S•È]Y]Ù]™[È
+XÝÜ‹XÝ[Û‹[]WÝ\K[]WÚY^[ØY
+BˆÑSPÕË	Ú[YÜ˜][Û‹˜Ü™Y[X[Ü™\XÙY	Ë	Ú[YÜ˜][Û—Ý\ÝÙ]\Ù]	Ë	ÒS•QÔUSÓ‹QSSÉËÈÒT‘H	ÙÝX\™X
+Bˆ˜š[™
+XÝÜ‹Ü™Y[X[]Y]‹‹™ÝX\™š[™[™ÜÊKˆ[‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆÑSPÕËËÕT”‘S•ÕSQTÕSTÒT‘H	ÙÝX\™BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+Ù]\Ý]RÙ^K”ÓÓ‹œÝš[™ÚYžJÙ]\
+K‹‹™ÝX\™š[™[™ÜÊKˆJNÂˆÛÛœÝÙ]\™\Ý[H™\Ý[ÖÍWH\ÈÈY]OÎˆÈÚ[™Ù\ÏÎˆ[X™\ˆHH[™Yš[™YÂˆ™]\›ˆ[X™\ŠÙ]\™\Ý[Ë›Y]OË˜Ú[™Ù\ÈÏÈ
+HˆÂŸB‚™^Ü\H[YÜ˜][Û˜[šÔ›Ø™PÛÛ[Z]HÂˆ˜[Yˆ›ÛÛX[ŽÂˆ[’YˆÝš[™ÎÂˆÛÜœ™[][Û’YˆÝš[™ÎÂˆØØÝ\œ™Y]ˆÝš[™ÎÂˆšYÙÙ\ŽˆÝš[™ÎÂˆ™X\ÛÛŽˆÝš[™ÎÂˆ™XÙZ]™YÛÝ[ˆ[X™\ŽÂˆÚXÚÜÚ[ˆÝš[™ÎÂˆÙÑ]™[ˆÝš[™ÎÂˆÙÓY\ÜØYÙNˆÝš[™ÎÂˆÙÔ™XÛÜ™™YŽˆÝš[™ÎÂˆÝXØÙ\ÜÔÝ]\ÎˆÝš[™ÎÂˆÝXØÙ\ÜÐ]]Ý]\ÎˆÝš[™ÎÂˆ˜Z[\™P]]Ý]\ÎˆÝš[™ÎÂˆÜ™Y[X[^\™\Ð]ˆÝš[™ÎÂˆ]Y]XÝ[ÛŽˆÝš[™ÎÂˆ]Y]^[ØYˆ™XÛÜ™Ýš[™Ë[šÛ›ÝÛŽÂŸNÂ‚™^Ü\Þ[˜È[˜Ý[ÛˆÛÛ[Z][YÜ˜][Û˜[šÔ›Ø™JˆXÝÜŽˆÝš[™ËˆÙ]\ˆ[YÜ˜][Û”Ù]\ˆÛÛ[Z]ˆ[YÜ˜][Û˜[šÔ›Ø™PÛÛ[Z]ŠHÂˆÛÛœÝÙ[™\˜][ÛˆH›Ü›X[^™PÜ™Y[X[Ù[™\˜][ÛŠÙ]\˜Ü™Y[X[Ù[™\˜][ÛŠNÂˆYˆ
+YÙ[™\˜][ÛˆÙ]\œÙXÜ™]Ý]\ÈOOHœÝÜ™YŠH™]\›ˆ˜[ÙNÂˆÛÛœÝÜ™Y[X[ØÛÜHHÙ]\˜ÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’YÈ˜[šÐÜ™Y[X[ØÛÜHˆÙ]\˜Ý\ÝÛY\ÛÙNÂˆÛÛœÝÜ™Y[X[Ý]RÙ^HH[YÜ˜][ÛÜ™Y[X[Ý]RÙ^JÙ]\˜ÛÛ›™XÝ[Û’YÙ]\›YØ[[]RYÜ™Y[X[ØÛÜJNÂˆÛÛœÝÙ]\Ý]RÙ^HH	Ú[YÜ˜][Û”Ù]\™Yš^IÜÙ]\˜ÛÛ›™XÝ[Û’YXÂˆÛÛœÝÝX\™HVTÕÈ
+ˆÑSPÕH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HTÈØ]™YÜÙ]\ˆ“ÒSˆÞ\Ý[WÜ[[YWÜÝ]HTÈØ]™YØÜ™Y[X[ÓˆØ]™YØÜ™Y[X[œÝ]WÚÙ^OOÂˆÒT‘HØ]™YÜÙ]\œÝ]WÚÙ^OOÂˆS‘œÛÛ—Ù^˜XÝ
+Ø]™YÜÙ]\œÝ]WÝ˜[YK	É˜Ü™Y[X[Ù[™\˜][Û‰ÊOOÂˆ
+HS‘VTÕÈ
+ÑSPÕH”“ÓH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÒT‘HYOÊXÂˆÛÛœÝÝX\™š[™[™ÜÈHØÜ™Y[X[Ý]RÙ^KÙ]\Ý]RÙ^KÙ[™\˜][Û‹Ù]\˜ÛÛ›™XÝ[Û’YNÂˆÛÛœÝ[”Ý]\ÈHÛÛ[Z]˜[YÈ´'ô`4/´,´-t`4.´,4/ô`4/´.t-4-t/t,ˆˆ´%ô,4,t.ô/´.´.4`4/´,´,4/t/ˆŽÂˆÛÛœÝÛÛ›™XÝ[Û”Ý][Y[HÛÛ[Z]˜[YˆÈ[‹‘‹œ™\\™JTUH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÑUˆÝ]\ÏOË]]ÜÝ]\ÏOËÜ™Y[X[Ù^\™\×Ø]OË\ÝÜÝXØÙ\Ü×Ø]IÉË™^ÜÞ[˜×Ø]IÉËˆ™XÙZ]™YØÛÝ[LXØÙ\YØÛÝ[L™Z™XÝYØÛÝ[L\œ›Ü—ØÛÝ[Lˆ™\šYšYYÝ˜[œÙ™\L\×Ù[˜X›YL\]YØ]OÂˆÒT‘HYOÈS‘	ÙÝX\™X
+Bˆ˜š[™
+ˆÛÛ[Z]œÝXØÙ\ÜÔÝ]\ËˆÛÛ[Z]œÝXØÙ\ÜÐ]]Ý]\ËˆÛÛ[Z]˜Ü™Y[X[^\™\Ð]ˆÛÛ[Z]›ØØÝ\œ™Y]ˆÙ]\˜ÛÛ›™XÝ[Û’Yˆ‹‹™ÝX\™š[™[™ÜËˆ
+Bˆˆ[‹‘‹œ™\\™JTUH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÑUˆÝ]\ÏIô'´-´.4-4,4-t`ˆ4/ô`4/´,´-t`4.´`ÉË]]ÜÝ]\ÏOËÜ™Y[X[Ù^\™\×Ø]OËˆ™\šYšYYÝ˜[œÙ™\L\×Ù[˜X›YL\œ›Ü—ØÛÝ[Y\œ›Ü—ØÛÝ[
+ÌK\]YØ]OÂˆÒT‘HYOÈS‘	ÙÝX\™X
+Bˆ˜š[™
+ˆÛÛ[Z]™˜Z[\™P]]Ý]\ËˆÛÛ[Z]˜Ü™Y[X[^\™\Ð]ˆÛÛ[Z]›ØØÝ\œ™Y]ˆÙ]\˜ÛÛ›™XÝ[Û’Yˆ‹‹™ÝX\™š[™[™ÜËˆ
+NÂˆÛÛœÝ™\Ý[ÈH]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™JS”ÑT•S•È[YÜ˜][Û—ÜÞ[˜×Ü[œÂˆ
+YÛÛ›™XÝ[Û—ÚYÝ\YØ]š[š\ÚYØ]šYÙÙ\‹Ý]\Ë™XÙZ]™YØÛÝ[XØÙ\YØÛÝ[™Z™XÝYØÛÝ[\œ›Ü—ØÛÝ[ÛÛ™›XÝØÛÝ[ÚXÚÜÚ[\œ›Ü—ÛY\ÜØYÙK[š]X]YØžKÛÜœ™[][Û—ÚYžWÜ[ŠBˆÑSPÕËËËËËËËËËËËËËËËÈÒT‘H	ÙÝX\™X
+Bˆ˜š[™
+ˆÛÛ[Z]œ[’YˆÙ]\˜ÛÛ›™XÝ[Û’YˆÛÛ[Z]›ØØÝ\œ™Y]ˆÛÛ[Z]›ØØÝ\œ™Y]ˆÛÛ[Z]šYÙÙ\‹ˆ[”Ý]\ËˆÛÛ[Z]˜[YÈÛÛ[Z]œ™XÙZ]™YÛÝ[ˆˆˆˆÛÛ[Z]˜[YÈˆKˆˆÛÛ[Z]˜[YÈÛÛ[Z]˜ÚXÚÜÚ[ˆˆ‹ˆÛÛ[Z]˜[YÈˆˆˆÛÛ[Z]œ™X\ÛÛ‹ˆXÝÜ‹ˆÛÛ[Z]˜ÛÜœ™[][Û’YˆKˆ‹‹™ÝX\™š[™[™ÜËˆ
+Kˆ[‹‘‹œ™\\™JS”ÑT•S•È[YÜ˜][Û—ÛÙ×Ù[šY\Âˆ
+[—ÚYÛÛ›™XÝ[Û—ÚY]™[]™[Y\ÜØYÙK™XÛÜ™Ü™YŠBˆÑSPÕËËËËËÈÒT‘H	ÙÝX\™X
+Bˆ˜š[™
+ˆÛÛ[Z]œ[’YˆÙ]\˜ÛÛ›™XÝ[Û’YˆÛÛ[Z]˜[YÈ’S‘“Èˆˆ‘T”“Ôˆ‹ˆÛÛ[Z]›ÙÑ]™[ˆÛÛ[Z]˜[YÈÛÛ[Z]›ÙÓY\ÜØYÙHˆÛÛ[Z]œ™X\ÛÛ‹ˆÛÛ[Z]›ÙÔ™XÛÜ™™Y‹ˆ‹‹™ÝX\™š[™[™ÜËˆ
+KˆÛÛ›™XÝ[Û”Ý][Y[ˆ[‹‘‹œ™\\™JS”ÑT•S•È]Y]Ù]™[È
+XÝÜ‹XÝ[Û‹[]WÝ\K[]WÚY^[ØY
+BˆÑSPÕËË	Ú[YÜ˜][Û—ØÛÛ›™XÝ[Û‰ËËÈÒT‘H	ÙÝX\™X
+Bˆ˜š[™
+ˆXÝÜ‹ˆÛÛ[Z]˜]Y]XÝ[Û‹ˆÙ]\˜ÛÛ›™XÝ[Û’Yˆ”ÓÓ‹œÝš[™ÚYžJÈ[’YˆÛÛ[Z]œ[’Y‹‹˜ÛÛ[Z]˜]Y]^[ØYJKˆ‹‹™ÝX\™š[™[™ÜËˆ
+KˆJNÂˆÛÛœÝÛÛ›™XÝ[Û”™\Ý[H™\Ý[ÖÌ—H\ÈÈY]OÎˆÈÚ[™Ù\ÏÎˆ[X™\ˆHH[™Yš[™YÂˆ™]\›ˆ[X™\ŠÛÛ›™XÝ[Û”™\Ý[Ë›Y]OË˜Ú[™Ù\ÈÏÈ
+HˆÂŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆÜ[•ØÚØTÝ][Y[Ý]JÙ]\ˆ[YÜ˜][Û”Ù]\™\]Z\™P]]ÛX]XÈH˜[ÙJHÂˆ™]\›ˆXÜ]Z\™UØÚØTÝ][Y[Ý]J[‹‘‹ÂˆÛÛ›™XÝ[Û’YˆÙ]\˜ÛÛ›™XÝ[Û’YˆYØ[[]RYˆÙ]\›YØ[[]RYˆÝ\ÝÛY\ÛÙNˆÙ]\˜Ý\ÝÛY\ÛÙKˆÜ™Y[X[Ù[™\˜][ÛŽˆ›Ü›X[^™PÜ™Y[X[Ù[™\˜][ÛŠÙ]\˜Ü™Y[X[Ù[™\˜][ÛŠKˆÜ™Y[X[Ý]RÙ^Nˆ[YÜ˜][ÛÜ™Y[X[Ý]RÙ^JÙ]\˜ÛÛ›™XÝ[Û’YÙ]\›YØ[[]RYÙ]\˜Ý\ÝÛY\ÛÙJKˆÙ]\Ý]RÙ^Nˆ[YÜ˜][Û”Ù]\™Yš^
+ÈÙ]\˜ÛÛ›™XÝ[Û’Yˆ™\]Z\™P]]ÛX]XËˆJNÂŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆÛÛ[Z]ØÚØT™XYÛ›TÞ[˜ÊˆXÝÜŽˆÝš[™ËˆÙ]\ˆ[YÜ˜][Û”Ù]\ˆÞ[˜ÎˆØÚØT™XYÛ›TÞ[˜Ô™\Ý[ˆšYÙÙ\ŽˆÝš[™ËˆÝ][Y[X\ÙOÎˆØÚØTÝ][Y[X\ÙQ™[˜ÙKŠHÂˆÛÛœÝÙ[™\˜][ÛˆH›Ü›X[^™PÜ™Y[X[Ù[™\˜][ÛŠÙ]\˜Ü™Y[X[Ù[™\˜][ÛŠNÂˆYˆ
+YÙ[™\˜][ÛˆÙ]\˜ÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’YÙ]\œÙXÜ™]Ý]\ÈOOHœÝÜ™YŠHÂˆ™]\›ˆÈÛÛ[Z]Yˆ˜[ÙK[’Yˆˆ‹š[˜[˜ÚX[Ü\˜][ÛÛÝ[ˆNÂˆBˆÛÛœÝÜ™Y[X[Ý]RÙ^HH[YÜ˜][ÛÜ™Y[X[Ý]RÙ^JÙ]\˜ÛÛ›™XÝ[Û’YÙ]\›YØ[[]RYÙ]\˜Ý\ÝÛY\ÛÙJNÂˆÛÛœÝÙ]\Ý]RÙ^HH	Ú[YÜ˜][Û”Ù]\™Yš^IÜÙ]\˜ÛÛ›™XÝ[Û’YXÂˆÛÛœÝÝX\™HVTÕÈ
+ˆÑSPÕH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HTÈØ]™YÜÙ]\ˆ“ÒSˆÞ\Ý[WÜ[[YWÜÝ]HTÈØ]™YØÜ™Y[X[ÓˆØ]™YØÜ™Y[X[œÝ]WÚÙ^OOÂˆÒT‘HØ]™YÜÙ]\œÝ]WÚÙ^OOÂˆS‘œÛÛ—Ù^˜XÝ
+Ø]™YÜÙ]\œÝ]WÝ˜[YK	É˜Ü™Y[X[Ù[™\˜][Û‰ÊOOÂˆ
+HS‘VTÕÈ
+ÑSPÕH”“ÓH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÒT‘HYOÊIÜÝ][Y[X\ÙHÈS‘	ÝØÚØTÝ][Y[X\ÙQÝX\™Ü[XˆˆŸIÜÝ][Y[X\ÙOËœ™\]Z\™P]]ÛX]XÈÈˆS‘VTÕÈ
+ÑSPÕH”“ÓH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÒT‘HYIÒS•UUÐÒÐIÈS‘Ý]\Èˆ	ô't,4/ô,4`ô-ô-IÈS‘
+\×Ù[˜X›YLHÔˆÝ]\ÏIô'´b4.4,t.´,4/ô/´-4.´.ôc´aô-t/t.4cÉÊJHˆˆˆŸXÂˆÛÛœÝÝX\™š[™[™ÜÈHØÜ™Y[X[Ý]RÙ^KÙ]\Ý]RÙ^KÙ[™\˜][Û‹Ù]\˜ÛÛ›™XÝ[Û’Y‹‹ŠÝ][Y[X\ÙHÈÜÝ][Y[X\ÙKšÙ^KÝ][Y[X\ÙK›ÝÛ™\—Hˆ×JWNÂˆÛÛœÝÝ\œ™[Ù]\H]ØZ][‹‘‹œ™\\™JÑSPÕHTÈÝ\œ™[ÒT‘H	ÙÝX\™X
+Bˆ˜š[™
+‹‹™ÝX\™š[™[™ÜÊK™š\œÝÈÝ\œ™[ˆ[X™\ˆOŠ
+NÂˆYˆ
+XÝ\œ™[Ù]\
+H™]\›ˆÈÛÛ[Z]Yˆ˜[ÙK[’Yˆˆ‹š[˜[˜ÚX[Ü\˜][ÛÛÝ[ˆNÂ‚ˆÛÛœÝØØÝ\œ™Y]H™]È]J
+KÒTÓÔÝš[™Ê
+NÂˆÛÛœÝ[’YHS•T•S‹IØÜž\Ëœ˜[™ÛUURQ
+
+KÕ\\Ø\ÙJ
+_XÂˆÛÛœÝÛÜœ™[][Û’YHÓÔ”‹IØÜž\Ëœ˜[™ÛUURQ
+
+_XÂˆÛÛœÝYØ[[]HH]ØZ][‹‘‹œ™\\™J”ÑSPÕ\Ü^WÛ˜[YHTÈ\Ü^S˜[YH”“ÓH[]Y\ÈÒT‘HYOÈSRUHŠBˆ˜š[™
+Ù]\›YØ[[]RY
+K™š\œÝÈ\Ü^S˜[YNˆÝš[™ÈOŠ
+NÂˆÛÛœÝÈØ][ÙÎˆ\XÛPØ][ÙÈHH]ØZ]ØY\XÛPØ][ÙÊ[‹‘ŠNÂˆÛÛœÝ]]ÛX]XÐ[ØØ][Û‘[˜X›YHÙ]\˜[ØØ][Û“[ÙHOOH˜Û\ÜÚYžWÝ˜[œØXÝ[ÛœÈˆ	‰ˆ\Ð]]Ð[ØØ][ÛØ][ÙÔ™XYJ\XÛPØ][ÙÊNÂˆ\H˜\ÙT›Ú™XÝYÜ\˜][ÛˆH›Û“[X›O]ØZ]Y™]\›•\O\[ÙˆÕØÚØQš[˜[˜ÚX[Ü\˜][ÛŽÂˆ\H›Ú™XÝYÜ\˜][ÛˆHÛZ]˜\ÙT›Ú™XÝYÜ\˜][Û‹Ù^[Ùˆš[˜[˜ÙP]]Ð[ØØ][Ûˆ	ˆÂˆØš™XÝ[]RYˆÝš[™ÎÂˆØ\Ú›ÝÐ\XÛOÎˆÝš[™ÎÂˆ›\XÛOÎˆÝš[™ÎÂˆ™\ÜÛ\ÜÎˆÝš[™ÎÂˆXØÜX[\š[ÙÎˆÝš[™ÎÂˆÝ]\ÎˆÝš[™ÎÂˆNÂˆÛÛœÝ›Ú™XÝYžU˜[œØXÝ[ÛˆH™]ÈX\Ýš[™Ë›Ú™XÝYÜ\˜][ÛŠ
+NÂˆ›Üˆ
+ÛÛœÝ˜[œØXÝ[ÛˆÙˆÞ[˜Ë˜[œØXÝ[ÛœÊHÂˆYˆ
+˜[œØXÝ[Û‹›Ü\˜][Û‘]H’SSÑWÐPÐÓÕS•S‘×ÔÕT•ÑUJHÛÛ[YNÂˆÛÛœÝÜ\˜][ÛˆH]ØZ]ÕØÚØQš[˜[˜ÚX[Ü\˜][ÛŠ˜[œØXÝ[Û‹Ù]\›YØ[[]RY
+NÂˆYˆ
+[Ü\˜][ÛŠHÛÛ[YNÂˆÛÛœÝ[ØØ][ÛˆH]]ÛX]XÐ[ØØ][Û‘[˜X›YÈÛ\ÜÚYžQš[˜[˜ÙSÜ\˜][ÛŠÂˆYØ[[]S˜[YNˆYØ[[]OË™\Ü^S˜[YHÏÈˆ‹ˆÜ\˜][Û‘]Nˆ˜[œØXÝ[Û‹›Ü\˜][Û‘]Kˆ\™XÝ[ÛŽˆ˜[œØXÝ[Û‹™\™XÝ[Û‹ˆÝ\œ™[˜ÞNˆ˜[œØXÝ[Û‹˜Ý\œ™[˜ÞKˆ\ØÜš\[ÛŽˆ˜[œØXÝ[Û‹™\ØÜš\[Û‹ˆJHˆ[Âˆ›Ú™XÝYžU˜[œØXÝ[Û‹œÙ]
+˜[œØXÝ[Û‹šYÂˆ‹‹›Ü\˜][Û‹ˆ‹‹Š[ØØ][ÛˆÏÈßJKˆØ]YÛÜžNˆ[ØØ][ÛË˜Ø\Ú›ÝÐ\XÛHÏÈÜ\˜][Û‹˜Ø]YÛÜžKˆØš™XÝ[]RYˆÙ]\˜[ØØ][Û“[ÙHOOHœÚ[™ÛWØœ˜[˜ÚˆÈÙ]\˜œ˜[˜ÚYˆ[ØØ][ÛË›Øš™XÝ[]RYÏÈˆ‹ˆJNÂˆB‚ˆÛÛœÝ]\ÝÝ][Y[žPXØÛÝ[H™]ÈX\
+Þ[˜ËœÝ][Y[Ë›X\
+
+Ý][Y[
+HOˆÜÝ][Y[˜XØÛÝ[YÝ][Y[JJNÂˆÛÛœÝXØÛÝ[Ý][Y[ÈHÞ[˜Ë˜XØÛÝ[Ë›X\
+
+XØÛÝ[
+HOˆÂˆÛÛœÝÝ][Y[H]\ÝÝ][Y[žPXØÛÝ[™Ù]
+XØÛÝ[˜XØÛÝ[Y
+NÂˆ™]\›ˆ[‹‘‹œ™\\™JS”ÑT•S•È˜[š×ØXØÛÝ[Âˆ
+YÛÛ›™XÝ[Û—ÚYYØ[Ù[]WÚY›ÝšY\—ØXØÛÝ[ÚYX\ÚÙYØXØÛÝ[˜[YKÝ\œ™[˜ÞKÝ]\Ë˜[[˜ÙWÛZ[›Ü‹˜[[˜ÙWØ\×ÛÙ‹Þ[˜ÙYØ]
+BˆÑSPÕËËËËËËËËËËÈÒT‘H	ÙÝX\™BˆÓˆÓÓ‘“PÕ
+Y
+HÈTUHÑUˆX\ÚÙYØXØÛÝ[Y^ÛYY›X\ÚÙYØXØÛÝ[˜[YOY^ÛYY›˜[YKÝ\œ™[˜ÞOY^ÛYY˜Ý\œ™[˜ÞKÝ]\ÏY^ÛYYœÝ]\Ëˆ˜[[˜ÙWÛZ[›ÜY^ÛYY˜˜[[˜ÙWÛZ[›Ü‹˜[[˜ÙWØ\×ÛÙY^ÛYY˜˜[[˜ÙWØ\×ÛÙ‹Þ[˜ÙYØ]Y^ÛYYœÞ[˜ÙYØ]
+Bˆ˜š[™
+ˆXØÛÝ[šYˆÙ]\˜ÛÛ›™XÝ[Û’YˆÙ]\›YØ[[]RYˆXØÛÝ[˜XØÛÝ[YˆXØÛÝ[›X\ÚÙYXØÛÝ[ˆXØÛÝ[›˜[YKˆXØÛÝ[˜Ý\œ™[˜ÞKˆXØÛÝ[œÝ]\ËˆÝ][Y[Ë™[™˜[[˜ÙSZ[›ÜˆÏÈ[ˆÝ][Y[Ë™[™]HÏÈˆ‹ˆØØÝ\œ™Y]ˆ‹‹™ÝX\™š[™[™ÜËˆ
+NÂˆJNÂˆÛÛœÝÝ][Y[Ý][Y[ÈHÞ[˜ËœÝ][Y[Ë›X\
+
+Ý][Y[
+HOˆ[‹‘‹œ™\\™JS”ÑT•S•È˜[š×ÜÝ][Y[Ú[\ÜÂˆ
+YÛÛ›™XÝ[Û—ÚYYØ[Ù[]WÚY›ÝšY\—ÜÝ][Y[ÚY›ÝšY\—ØXØÛÝ[ÚYÝ\Ù]K[™Ù]KÝ]\ËÝ\Ø˜[[˜ÙWÛZ[›Ü‹[™Ø˜[[˜ÙWÛZ[›Ü‹Ý\œ™[˜ÞK˜[œØXÝ[Û—ØÛÝ[™]ÚYØ]
+BˆÑSPÕËËËËËËËËËËËËÈÒT‘H	ÙÝX\™BˆÓˆÓÓ‘“PÕ
+Y
+HÈTUHÑUˆÝ]\ÏY^ÛYYœÝ]\ËÝ\Ø˜[[˜ÙWÛZ[›ÜY^ÛYYœÝ\Ø˜[[˜ÙWÛZ[›Ü‹[™Ø˜[[˜ÙWÛZ[›ÜY^ÛYY™[™Ø˜[[˜ÙWÛZ[›Ü‹ˆÝ\œ™[˜ÞOY^ÛYY˜Ý\œ™[˜ÞK˜[œØXÝ[Û—ØÛÝ[Y^ÛYY˜[œØXÝ[Û—ØÛÝ[™]ÚYØ]Y^ÛYY™™]ÚYØ]
+Bˆ˜š[™
+ˆÝ][Y[šYˆÙ]\˜ÛÛ›™XÝ[Û’YˆÙ]\›YØ[[]RYˆÝ][Y[œÝ][Y[YˆÝ][Y[˜XØÛÝ[YˆÝ][Y[œÝ\]KˆÝ][Y[™[™]KˆÝ][Y[œÝ]\ËˆÝ][Y[œÝ\˜[[˜ÙSZ[›Ü‹ˆÝ][Y[™[™˜[[˜ÙSZ[›Ü‹ˆÝ][Y[˜Ý\œ™[˜ÞKˆÝ][Y[˜[œØXÝ[ÛÛÝ[ˆØØÝ\œ™Y]ˆ‹‹™ÝX\™š[™[™ÜËˆ
+JNÂˆÛÛœÝ˜[œØXÝ[Û”Ý][Y[ÈHÞ[˜Ë˜[œØXÝ[ÛœË›X\
+
+˜[œØXÝ[ÛŠHOˆ[‹‘‹œ™\\™JS”ÑT•S•È˜[š×Ý˜[œØXÝ[ÛœÂˆ
+YÛÛ›™XÝ[Û—ÚYYØ[Ù[]WÚY›ÝšY\—ØXØÛÝ[ÚY›ÝšY\—ÜÝ][Y[ÚY›ÝšY\—Ý˜[œØXÝ[Û—ÚY^[Y[ÚYÜ\˜][Û—Ù]K\™XÝ[Û‹[[Ý[ÛZ[›Ü‹Ý\œ™[˜ÞKÝ]\ËØÝ[Y[Û[X™\‹˜[œØXÝ[Û—Ý\K\ØÜš\[Û‹ÛÝ[\œ\WÛ˜[YKÛÝ[\œ\WÚ[›‹ÛÝ[\œ\WÚÜÛÝ\˜ÙWÜ^[ØYÚ\Úš[˜[˜ÚX[ÛÜ\˜][Û—ÚY[\ÜYØ]
+BˆÑSPÕËËËËËËËËËËËËËËËËËËËËÈÒT‘H	ÙÝX\™BˆÓˆÓÓ‘“PÕ
+Y
+HÈ“ÕS‘Ø
+Bˆ˜š[™
+ˆ˜[œØXÝ[Û‹šYˆÙ]\˜ÛÛ›™XÝ[Û’YˆÙ]\›YØ[[]RYˆ˜[œØXÝ[Û‹˜XØÛÝ[Yˆ˜[œØXÝ[Û‹œÝ][Y[Yˆ˜[œØXÝ[Û‹œ›ÝšY\•˜[œØXÝ[Û’Yˆ˜[œØXÝ[Û‹œ^[Y[Yˆ˜[œØXÝ[Û‹›Ü\˜][Û‘]Kˆ˜[œØXÝ[Û‹™\™XÝ[Û‹ˆ˜[œØXÝ[Û‹˜[[Ý[Z[›Ü‹ˆ˜[œØXÝ[Û‹˜Ý\œ™[˜ÞKˆ˜[œØXÝ[Û‹œÝ]\Ëˆ˜[œØXÝ[Û‹™ØÝ[Y[[X™\‹ˆ˜[œØXÝ[Û‹˜[œØXÝ[Û•\Kˆ˜[œØXÝ[Û‹™\ØÜš\[Û‹ˆ˜[œØXÝ[Û‹˜ÛÝ[\œ\S˜[YKˆ˜[œØXÝ[Û‹˜ÛÝ[\œ\R[›‹ˆ˜[œØXÝ[Û‹˜ÛÝ[\œ\RÜˆ˜[œØXÝ[Û‹œÛÝ\˜ÙT^[ØY\Úˆ›Ú™XÝYžU˜[œØXÝ[Û‹™Ù]
+˜[œØXÝ[Û‹šY
+OËšYÏÈˆ‹ˆØØÝ\œ™Y]ˆ‹‹™ÝX\™š[™[™ÜËˆ
+JNÂˆÛÛœÝš[˜[˜ÚX[Ý][Y[ÈHË‹‹œ›Ú™XÝYžU˜[œØXÝ[Û‹˜[Y\Ê
+WK›X\
+
+Ü\˜][ÛŠHOˆ[‹‘‹œ™\\™JS”ÑT•S•Èš[˜[˜ÚX[ÛÜ\˜][ÛœÂˆ
+YÜ\˜][Û—Ù]K\š[Ù\™XÝ[Û‹[[Ý[ÛZ[›Ü‹Ø]YÛÜžKØ\Ú›Ý×Ø\XÛK›Ø\XÛK™\ÜØÛ\ÜËXØÜX[Ü\š[ÙÛÝ[\œ\WÙ[]WÚYÛÛ˜XÝÚYØÝ[Y[ÚY›Ú™XÝÙ[]WÚYYØ[Ù[]WÚYØš™XÝÙ[]WÚYÙœ—Ù[]WÚY˜[š×ÛÜ\˜][Û—Ü™Y‹Ü\˜][Û—ÚÚ[™ÛÝ\˜ÙWÜÞ\Ý[KÛÝ\˜ÙWÙš[KÛÝ\˜ÙWÜÚY]ÛÝ\˜ÙWÜ™Y‹]WÜ]X[]KÝ]\ËÜ™X]YØžJBˆÑSPÕËËËËËËËËËËËËËËËËËËËËËËËËËÈÒT‘H	ÙÝX\™BˆÓˆÓÓ‘“PÕ
+Y
+HÈ“ÕS‘Ø
+Bˆ˜š[™
+ˆÜ\˜][Û‹šYˆÜ\˜][Û‹›Ü\˜][Û‘]KˆÜ\˜][Û‹œ\š[ÙˆÜ\˜][Û‹™\™XÝ[Û‹ˆÜ\˜][Û‹˜[[Ý[Z[›Ü‹ˆÜ\˜][Û‹˜Ø]YÛÜžKˆÜ\˜][Û‹˜Ø\Ú›ÝÐ\XÛHÏÈˆ‹ˆÜ\˜][Û‹œ›\XÛHÏÈˆ‹ˆÜ\˜][Û‹œ™\ÜÛ\ÜËˆÜ\˜][Û‹˜XØÜX[\š[ÙÏÈˆ‹ˆÜ\˜][Û‹˜ÛÝ[\œ\Q[]RYˆÜ\˜][Û‹˜ÛÛ˜XÝYˆÜ\˜][Û‹™ØÝ[Y[YˆÜ\˜][Û‹œ›Ú™XÝ[]RYˆÜ\˜][Û‹›YØ[[]RYˆÜ\˜][Û‹›Øš™XÝ[]RYˆÜ\˜][Û‹˜Ùœ‘[]RYˆÜ\˜][Û‹˜˜[šÓÜ\˜][Û”™Y‹ˆÜ\˜][Û‹›Ü\˜][Û’Ú[™ˆÜ\˜][Û‹œÛÝ\˜ÙTÞ\Ý[KˆÜ\˜][Û‹œÛÝ\˜ÙQš[KˆÜ\˜][Û‹œÛÝ\˜ÙTÚY]ˆÜ\˜][Û‹œÛÝ\˜ÙT™Y‹ˆÜ\˜][Û‹™]T]X[]KˆÜ\˜][Û‹œÝ]\ËˆÜ\˜][Û‹˜Ü™X]YžKˆ‹‹™ÝX\™š[™[™ÜËˆ
+JNÂ‚ˆ›Üˆ
+ÛÛœÝÝ][Y[ÈÙˆØXØÛÝ[Ý][Y[ËÝ][Y[Ý][Y[Ë˜[œØXÝ[Û”Ý][Y[×JHÂˆ›Üˆ
+][™^HÈ[™^Ý][Y[Ë›[™ÝÈ[™^
+ÏH
+HÂˆ]ØZ][‹‘‹˜˜]Ú
+Ý][Y[ËœÛXÙJ[™^[™^
+È
+JNÂˆBˆBˆ]š[˜[˜ÚX[Ü\˜][ÛÛÝ[HÂˆ›Üˆ
+][™^HÈ[™^š[˜[˜ÚX[Ý][Y[Ë›[™ÝÈ[™^
+ÏH
+HÂˆÛÛœÝ™\Ý[ÈH]ØZ][‹‘‹˜˜]Ú
+š[˜[˜ÚX[Ý][Y[ËœÛXÙJ[™^[™^
+È
+JNÂˆš[˜[˜ÚX[Ü\˜][ÛÛÝ[
+ÏH™\Ý[Ëœ™YXÙJˆ
+Ý[™\Ý[
+HOˆÝ[
+È[X™\Š
+™\Ý[\ÈÈY]OÎˆÈÚ[™Ù\ÏÎˆ[X™\ˆHJOË›Y]OË˜Ú[™Ù\ÈÏÈ
+Kˆˆ
+NÂˆB‚ˆÛÛœÝ™XÙZ]™YÛÝ[HÞ[˜Ë˜XØÛÝ[Ë›[™Ý
+ÈÞ[˜ËœÝ][Y[Ë›[™Ý
+ÈÞ[˜Ë˜[œØXÝ[ÛœË›[™ÝÂˆÛÛœÝXØÙ\YÛÝ[HX]›X^
+™XÙZ]™YÛÝ[HÞ[˜Ëœ™Z™XÝYÛÝ[
+NÂˆÛÛœÝ™^Þ[˜Ð]H™]È]J]K››ÝÊ
+H
+ÈX]›X^
+ŒÙ]\œÞ[˜Ò[\˜[Z[]\ÈŒ
+H
+ˆŒÌ
+KÒTÓÔÝš[™Ê
+NÂˆÛÛœÝ[”Ý]\ÈHÞ[˜Ë˜[Y	‰ˆÞ[˜Ë˜ÛÛ\]H	‰ˆÞ[˜Ëœ™Z™XÝYÛÝ[OOHÈ´(ô`t/ô-tb4/t/ˆˆˆÞ[˜Ëœ™Z™XÝYÛÝ[ˆÈ´(´`4-t,t`ô-t`ˆ4/ô`4/´,´-t`4.´.ˆˆÞ[˜Ë˜[YÈ´'´-´.4-4,4/t.4-H4,t,4/t.´,ˆˆ´'´b4.4,t.´,ŽÂˆÛÛœÝÚXÚÜÚ[HXØÛÝ[Î‰ÜÞ[˜Ë˜XØÛÝ[Ë›[™ÝNÜÝ][Y[Î‰ÜÞ[˜ËœÝ][Y[Ë›[™ÝNÝ˜[œØXÝ[ÛœÎ‰ÜÞ[˜Ë˜[œØXÝ[ÛœË›[™ÝXÂˆÛÛœÝš[˜[™\Ý[ÈH]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™JS”ÑT•S•È[YÜ˜][Û—ÜÞ[˜×Ü[œÂˆ
+YÛÛ›™XÝ[Û—ÚYÝ\YØ]š[š\ÚYØ]šYÙÙ\‹Ý]\Ë™XÙZ]™YØÛÝ[XØÙ\YØÛÝ[™Z™XÝYØÛÝ[\œ›Ü—ØÛÝ[ÛÛ™›XÝØÛÝ[ÚXÚÜÚ[\œ›Ü—ÛY\ÜØYÙK[š]X]YØžKÛÜœ™[][Û—ÚYžWÜ[ŠBˆÑSPÕËËËËËËËËËËËËËËËÈÒT‘H	ÙÝX\™X
+Bˆ˜š[™
+ˆ[’YˆÙ]\˜ÛÛ›™XÝ[Û’YˆØØÝ\œ™Y]ˆØØÝ\œ™Y]ˆšYÙÙ\‹ˆ[”Ý]\Ëˆ™XÙZ]™YÛÝ[ˆXØÙ\YÛÝ[ˆÞ[˜Ëœ™Z™XÝYÛÝ[ˆÞ[˜Ë˜[YÈˆKˆˆÚXÚÜÚ[ˆÞ[˜Ë˜[YÈˆˆˆÞ[˜Ëœ™X\ÛÛ‹ˆXÝÜ‹ˆÛÜœ™[][Û’Yˆˆ‹‹™ÝX\™š[™[™ÜËˆ
+Kˆ[‹‘‹œ™\\™JS”ÑT•S•È[YÜ˜][Û—ÛÙ×Ù[šY\Âˆ
+[—ÚYÛÛ›™XÝ[Û—ÚY]™[]™[Y\ÜØYÙK™XÛÜ™Ü™YŠBˆÑSPÕËËËËËÈÒT‘H	ÙÝX\™X
+Bˆ˜š[™
+ˆ[’YˆÙ]\˜ÛÛ›™XÝ[Û’YˆÞ[˜Ë˜[YÈ’S‘“Èˆˆ‘T”“Ôˆ‹ˆÞ[˜Ë˜ÛÛ\]HÈØÚØKœÝ][Y[×Ú[\ÜYˆˆØÚØKœÝ][Y[×Ü[™[™È‹ˆÞ[˜Ëœ™X\ÛÛ‹ˆÚXÚÜÚ[ˆ‹‹™ÝX\™š[™[™ÜËˆ
+Kˆ[‹‘‹œ™\\™JTUH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÑUˆÝ]\ÏOË]]ÜÝ]\ÏOËÜ™Y[X[Ù^\™\×Ø]OË\ÝÜÝXØÙ\Ü×Ø]PÓÐSTÐÑJ•SQŠË	ÉÊK\ÝÜÝXØÙ\Ü×Ø]
+K™^ÜÞ[˜×Ø]OËˆ™XÙZ]™YØÛÝ[OËXØÙ\YØÛÝ[OË™Z™XÝYØÛÝ[OË\œ›Ü—ØÛÝ[OËÛÛ™›XÝØÛÝ[Lˆ™\šYšYYÝ˜[œÙ™\OË\×Ù[˜X›YOË\]YØ]OÂˆÒT‘HYOÈS‘	ÙÝX\™X
+Bˆ˜š[™
+ˆ\Þ[˜Ë˜[YÈ´'´b4.4,t.´,4/ô/´-4.´.ôc´aô-t/t.4cÈˆˆÞ[˜Ëœ™Z™XÝYÛÝ[ˆÈ´(´`4-t,t`ô-t`ˆ4/ô`4/´,´-t`4.´.ˆˆÞ[˜Ë˜ÛÛ\]HÈ´(4,4,t/´`´,4-t`ˆˆˆ´)4/´`4/4.4`4`ôc´`´`tcÈ4,´bô/ô.4`t.´.‹ˆ\Þ[˜Ë˜[YÈ´&´.ôc´aÈ4`t/´at`4,4/tdt/H0­È4-ô,4,ô`4`ô-ô.´,4.4-È4(´/´aô.´.4/t-H4,´bô/ô/´.ô/t-t/t,ˆˆÞ[˜Ë˜ÛÛ\]HÈ´&´.ôc´aÈ4/ô`4.4/tcô`ˆ0­È4`taô-t`´,4,´bô/ô.4`t.´.4.4/´/ô-t`4,4a´.4.4-ô,4,ô`4`ô-´-t/tbÈˆˆ´&´.ôc´aÈ4/ô`4.4/tcô`ˆ0­È4(´/´aô.´,4a4/´`4/4.4`4`ô-t`ˆ4,´bô/ô.4`t.´.‹ˆÞ[˜Ë™^\™\Ð]ˆÞ[˜Ë˜[Y	‰ˆÞ[˜Ë˜ÛÛ\]H	‰ˆÞ[˜Ëœ™Z™XÝYÛÝ[OOHÈØØÝ\œ™Y]ˆˆ‹ˆ™^Þ[˜Ð]ˆ™XÙZ]™YÛÝ[ˆXØÙ\YÛÝ[ˆÞ[˜Ëœ™Z™XÝYÛÝ[ˆÞ[˜Ë˜[YÈˆKˆÞ[˜Ë˜[Y	‰ˆÞ[˜Ë˜ÛÛ\]H	‰ˆÞ[˜Ëœ™Z™XÝYÛÝ[OOH	‰ˆÞ[˜ËœÝ][Y[Ë›[™ÝˆÈHˆˆÞ[˜Ë˜[YÈHˆˆØØÝ\œ™Y]ˆÙ]\˜ÛÛ›™XÝ[Û’Yˆ‹‹™ÝX\™š[™[™ÜËˆ
+Kˆ[‹‘‹œ™\\™JS”ÑT•S•È]Y]Ù]™[È
+XÝÜ‹XÝ[Û‹[]WÝ\K[]WÚY^[ØY
+BˆÑSPÕË	Ú[YÜ˜][Û‹ØÚØWÜ™XYÛ›WÜÞ[˜×ØÛÛ\]Y	Ë	Ú[YÜ˜][Û—ØÛÛ›™XÝ[Û‰ËËÈÒT‘H	ÙÝX\™X
+Bˆ˜š[™
+ˆXÝÜ‹ˆÙ]\˜ÛÛ›™XÝ[Û’Yˆ”ÓÓ‹œÝš[™ÚYžJÂˆ[’YˆÙ[XÝYYØ[[]RYˆÙ]\›YØ[[]RYˆXØÛÝ[ÛÝ[ˆÞ[˜Ë˜XØÛÝ[Ë›[™ÝˆÝ][Y[ÛÝ[ˆÞ[˜ËœÝ][Y[Ë›[™Ýˆ˜[œØXÝ[ÛÛÝ[ˆÞ[˜Ë˜[œØXÝ[ÛœË›[™Ýˆš[˜[˜ÚX[Ü\˜][ÛÛÝ[ˆ™Z™XÝYÛÝ[ˆÞ[˜Ëœ™Z™XÝYÛÝ[ˆÛÛ\]NˆÞ[˜Ë˜ÛÛ\]Kˆ^[Y[Ü™X][Û[ÝÙYˆ˜[ÙKˆJKˆ‹‹™ÝX\™š[™[™ÜËˆ
+KˆJNÂˆÛÛœÝÛÛ›™XÝ[Û”™\Ý[Hš[˜[™\Ý[ÖÌ—H\ÈÈY]OÎˆÈÚ[™Ù\ÏÎˆ[X™\ˆHH[™Yš[™YÂˆ™]\›ˆÂˆÛÛ[Z]Yˆ[X™\ŠÛÛ›™XÝ[Û”™\Ý[Ë›Y]OË˜Ú[™Ù\ÈÏÈ
+Hˆˆ[’Yˆš[˜[˜ÚX[Ü\˜][ÛÛÝ[ˆNÂŸB‚™^Ü\Þ[˜È[˜Ý[Ûˆ\Ò[YÜ˜][ÛÜ™Y[X[
+ÛÛ›™XÝ[Û’Y˜[YNˆÝš[™ËYØ[[]RY˜[YNˆÝš[™ËÝ\ÝÛY\ÛÙU˜[YNˆÝš[™ÊHÂˆÛÛœÝÝ]RÙ^HH[YÜ˜][ÛÜ™Y[X[Ý]RÙ^JÛÛ›™XÝ[Û’Y˜[YKYØ[[]RY˜[YKÝ\ÝÛY\ÛÙU˜[YJNÂˆÛÛœÝ›ÝÈH]ØZ][‹‘‹œ™\\™J”ÑSPÕHTÈ™\Ù[”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OOÈŠBˆ˜š[™
+Ý]RÙ^JK™š\œÝÈ™\Ù[ˆ[X™\ˆOŠ
+NÂˆ™]\›ˆ›ÝÏËœ™\Ù[OOHNÂŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆØ]™R[YÜ˜][ÛÜ™Y[X[
+ˆXÝÜŽˆÝš[™ËˆÛÛ›™XÝ[Û’Y˜[YNˆÝš[™ËˆYØ[[]RY˜[YNˆÝš[™ËˆÝ\ÝÛY\ÛÙU˜[YNˆÝš[™Ëˆ˜[YNˆ[šÛ›ÝÛ‹ŠHÂˆÛÛœÝÜ™Y[X[H]ØZ][˜Üž\[YÜ˜][ÛÜ™Y[X[
+ˆXÝÜ‹ˆÛÛ›™XÝ[Û’Y˜[YKˆYØ[[]RY˜[YKˆÝ\ÝÛY\ÛÙU˜[YKˆ˜[YKˆ
+NÂˆ]ØZ][‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+ËËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+Ü™Y[X[œÝ]RÙ^K”ÓÓ‹œÝš[™ÚYžJÜ™Y[X[™[™[ÜJJKœ[Š
+NÂˆ]ØZ]Üš]R[YÜ˜][Û‘]\Ù]]Y]
+XÝÜ‹š[YÜ˜][Û‹˜Ü™Y[X[Ü™\XÙY‹ÂˆÛÛ›™XÝ[Û’YˆÜ™Y[X[˜ÛÛ›™XÝ[Û’YˆÙ[XÝYYØ[[]RYˆÜ™Y[X[›YØ[[]RYˆÜ™Y[X[[™[ÜTÝÜ™YˆYKˆ™\œÚ[ÛŽˆÜ™Y[X[™[™[ÜK™\œÚ[Û‹ˆ[ÛÜš]NˆÜ™Y[X[™[™[ÜK˜[ÛÜš]KˆJNÂŸB‚™^Ü\Þ[˜È[˜Ý[Ûˆ™]›ÚÙUØÚØR[YÜ˜][ÛÜ™Y[X[
+XÝÜŽˆÝš[™ÊHÂˆ™]\›ˆ™]›ÚÙP˜[šÒ[YÜ˜][ÛÜ™Y[X[
+XÝÜ‹ØÚØPÛÛ›™XÝ[Û’Y
+NÂŸB‚™^Ü\Þ[˜È[˜Ý[Ûˆ™]›ÚÙP˜[šÒ[YÜ˜][ÛÜ™Y[X[
+XÝÜŽˆÝš[™ËÛÛ›™XÝ[Û’Y˜[YNˆÝš[™ÊHÂˆÛÛœÝÛÛ›™XÝ[Û’YHÝš[™ÊÛÛ›™XÝ[Û’Y˜[YHÏÈˆŠKš[J
+KÕ\\Ø\ÙJ
+NÂˆYˆ
+ÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’Y	‰ˆÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’Y
+HÂˆ›ÝÈ™]È\œ›ÜŠ´(ô-4,4.ô-t/t.4-H4.´.ôc´aô,4-4.ôcÈ4ct`´/´.H4.4/t`´-t,ô`4,4a´.4.4/t-H4/ô/´-4-4-t`4-´.4,´,4-t`´`tcÈŠNÂˆBˆÛÛœÝÙ]\H
+]ØZ]Ù][YÜ˜][Û”Ù]\Ê
+JVØÛÛ›™XÝ[Û’YNÂˆÛÛœÝ™]›ÚÙY]H™]È]J
+KÒTÓÔÝš[™Ê
+NÂˆÛÛœÝ™]›ÚÙYÙ]\HÙ]\ÈÂˆ‹‹œÙ]\ˆÜ™Y[X[Ù[™\˜][ÛŽˆÜž\Ëœ˜[™ÛUURQ
+
+KˆÙXÜ™]Ý]\Îˆ›Z\ÜÚ[™Èˆ\ÈÛÛœÝˆ\]Y]ˆ™]›ÚÙY]ˆ\]YžNˆXÝÜ‹ˆHˆ[ÂˆÛÛœÝÝ][Y[ÈHÂˆ[‹‘‹œ™\\™J‘SUH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^HRÑHÈŠBˆ˜š[™
+[YÜ˜][ÛÜ™Y[X[ÛÛ›™XÝ[Û”]\›ŠÛÛ›™XÝ[Û’Y
+JKˆNÂˆYˆ
+™]›ÚÙYÙ]\
+HÂˆÝ][Y[Ëœ\Ú
+[‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+ËËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+	Ú[YÜ˜][Û”Ù]\™Yš^IØÛÛ›™XÝ[Û’YX”ÓÓ‹œÝš[™ÚYžJ™]›ÚÙYÙ]\
+JJNÂˆBˆÝ][Y[Ëœ\Ú
+ˆ[‹‘‹œ™\\™JTUH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÑUˆÝ]\ÏIô'´-´.4-4,4-t`ˆ4-4/´`t`´`ô/ÉË]]ÜÝ]\ÏOËÜ™Y[X[Ù^\™\×Ø]IÉËˆ\ÝÜÝXØÙ\Ü×Ø]IÉË™^ÜÞ[˜×Ø]IÉË™XÙZ]™YØÛÝ[LXØÙ\YØÛÝ[L™Z™XÝYØÛÝ[Lˆ™\šYšYYÝ˜[œÙ™\L\×Ù[˜X›YL\]YØ]PÕT”‘S•ÕSQTÕSTÒT‘HYOØ
+Bˆ˜š[™
+ÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’YÈ´&´.ôc´aÈ4(´/´aô.´.4`ô-4,4.ôdt/H4.4-È\[ÈÔÈ4,´.ô,4-4-t.ôc4a´-t/ˆˆ´(´/´.´-t/H4(¸ $t$t,4/t.´,4`ô-4,4.ôdt/H4.4-È\[ÈÔÈ4,´.ô,4-4-t.ôc4a´-t/‹ÛÛ›™XÝ[Û’Y
+Kˆ[‹‘‹œ™\\™J’S”ÑT•S•È]Y]Ù]™[È
+XÝÜ‹XÝ[Û‹[]WÝ\K[]WÚY^[ØY
+HSQTÈ
+ËËËËÊHŠBˆ˜š[™
+XÝÜ‹š[YÜ˜][Û‹˜Ü™Y[X[Ù[]YÛØØ[H‹š[YÜ˜][Û—ØÛÛ›™XÝ[Ûˆ‹ÛÛ›™XÝ[Û’Y”ÓÓ‹œÝš[™ÚYžJÂˆÛÛ›™XÝ[Û’YˆÙ[XÝYYØ[[]RYˆÙ]\Ë›YØ[[]RYÏÈˆ‹ˆÛÛ\[žTÙ[XÝ[ÛÛÛ™š\›YYˆ›ÛÛX[ŠÙ]\Ë˜Ý\ÝÛY\ÛÙJKˆJJKˆ
+NÂˆ]ØZ][‹‘‹˜˜]Ú
+Ý][Y[ÊNÂˆ™]\›ˆ™]›ÚÙYÙ]\ÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ[˜Üž\[YÜ˜][ÛÜ™Y[X[
+ˆXÝÜŽˆÝš[™ËˆÛÛ›™XÝ[Û’Y˜[YNˆÝš[™ËˆYØ[[]RY˜[YNˆÝš[™ËˆÝ\ÝÛY\ÛÙU˜[YNˆÝš[™Ëˆ˜[YNˆ[šÛ›ÝÛ‹ŠHÂˆÛÛœÝÛÛ›™XÝ[Û’YH›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJÛÛ›™XÝ[Û’Y˜[YK´.4/t`´-t,ô`4,4a´.4cÈŠNÂˆÛÛœÝYØ[[]RYH›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJYØ[[]RY˜[YK´c´`4.4-4.4aô-t`t.´/´-H4.ô.4a´/ˆŠNÂˆÛÛœÝÝ\ÝÛY\ÛÙHH›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJÝ\ÝÛY\ÛÙU˜[YK˜Ý\ÝÛY\ÛÙHŠNÂˆÛÛœÝÙXÜ™]H\[Ùˆ˜[YHOOHœÝš[™ÈˆÈ˜[YKš[J
+HˆˆŽÂˆÛÛœÝZ[š[][S[™ÝHÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’YÈˆÂˆYˆ
+ÙXÜ™]›[™ÝZ[š[][S[™ÝÙXÜ™]›[™ÝˆM—ÌÎ×ËË\Ý
+ÙXÜ™]
+JHÂˆ›ÝÈ™]È\œ›ÜŠ´&´.ôc´aÈ4-4/´`t`´`ô/ô,4,´bô,ô.ôcô-4.4`ˆ4/t-t/ô/´.ô/tbô/4.4.ô.4`t/´-4-t`4-´.4`ˆ4/t-t-4/´/ô`ô`t`´.4/4bô-H4`t.4/4,´/´.ôbÈŠNÂˆBˆÛÛœÝÙ^HH]ØZ][YÜ˜][ÛÜ™Y[X[[˜Üž\[Û’Ù^J
+NÂˆÛÛœÝ]ˆHÜž\Ë™Ù]˜[™ÛU˜[Y\Ê™]ÈZ[\œ˜^JLŠJNÂˆÛÛœÝXYH™]È^[˜ÛÙ\Š
+K™[˜ÛÙJ[YÜ˜][ÛÜ™Y[X[XY
+ÛÛ›™XÝ[Û’YYØ[[]RYÝ\ÝÛY\ÛÙJJNÂˆÛÛœÝÚ\\^H]ØZ]Üž\ËœÝXK™[˜Üž\
+ˆÈ˜[YNˆQTËQÐÓH‹]‹Y][Û˜[]NˆXYYÓ[™ÝˆLŽKˆÙ^Kˆ™]È^[˜ÛÙ\Š
+K™[˜ÛÙJÙXÜ™]
+Kˆ
+NÂˆÛÛœÝ[™[ÜNˆ[˜Üž\Y[YÜ˜][ÛÜ™Y[X[HÂˆ™\œÚ[ÛŽˆKˆ[ÛÜš]NˆQTËQÐÓH‹ˆ]Žˆ[˜ÛÙR[YÜ˜][ÛÜ™Y[X[ž]\Ê]ŠKˆÚ\\^ˆ[˜ÛÙR[YÜ˜][ÛÜ™Y[X[ž]\Ê™]ÈZ[\œ˜^JÚ\\^
+JKˆ\]Y]ˆ™]È]J
+KÒTÓÔÝš[™Ê
+Kˆ\]YžNˆXÝÜ‹ˆNÂˆ™]\›ˆÂˆÛÛ›™XÝ[Û’YˆYØ[[]RYˆÝ\ÝÛY\ÛÙKˆÝ]RÙ^Nˆ[YÜ˜][ÛÜ™Y[X[Ý]RÙ^JÛÛ›™XÝ[Û’YYØ[[]RYÝ\ÝÛY\ÛÙJKˆ[™[ÜKˆNÂŸB‚™^Ü\Þ[˜È[˜Ý[Ûˆ™XY[YÜ˜][ÛÜ™Y[X[
+ÛÛ›™XÝ[Û’Y˜[YNˆÝš[™ËYØ[[]RY˜[YNˆÝš[™ËÝ\ÝÛY\ÛÙU˜[YNˆÝš[™ÊHÂˆÛÛœÝÛÛ›™XÝ[Û’YH›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJÛÛ›™XÝ[Û’Y˜[YK´.4/t`´-t,ô`4,4a´.4cÈŠNÂˆÛÛœÝYØ[[]RYH›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJYØ[[]RY˜[YK´c´`4.4-4.4aô-t`t.´/´-H4.ô.4a´/ˆŠNÂˆÛÛœÝÝ\ÝÛY\ÛÙHH›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJÝ\ÝÛY\ÛÙU˜[YK˜Ý\ÝÛY\ÛÙHŠNÂˆÛÛœÝ›ÝÈH]ØZ][‹‘‹œ™\\™J”ÑSPÕÝ]WÝ˜[YH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OOÈŠBˆ˜š[™
+[YÜ˜][ÛÜ™Y[X[Ý]RÙ^JÛÛ›™XÝ[Û’YYØ[[]RYÝ\ÝÛY\ÛÙJJK™š\œÝÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+\›ÝÊH™]\›ˆ[ÂˆžHÂˆÛÛœÝ[™[ÜHH”ÓÓ‹œ\œÙJ›ÝËœÝ]WÝ˜[YJH\È[˜Üž\Y[YÜ˜][ÛÜ™Y[X[ÂˆYˆ
+[™[ÜK™\œÚ[ÛˆOOHH[™[ÜK˜[ÛÜš]HOOHQTËQÐÓHˆY[™[ÜKš]ˆY[™[ÜK˜Ú\\^
+HÂˆ›ÝÈ™]È\œ›ÜŠ•[œÝ\ÜYÜ™Y[X[[™[ÜHŠNÂˆBˆÛÛœÝÙ^HH]ØZ][YÜ˜][ÛÜ™Y[X[[˜Üž\[Û’Ù^J
+NÂˆÛÛœÝZ[^H]ØZ]Üž\ËœÝXK™XÜž\
+ˆÂˆ˜[YNˆQTËQÐÓH‹ˆ]ŽˆXÛÙR[YÜ˜][ÛÜ™Y[X[ž]\Ê[™[ÜKš]ŠKˆY][Û˜[]Nˆ™]È^[˜ÛÙ\Š
+K™[˜ÛÙJ[YÜ˜][ÛÜ™Y[X[XY
+ÛÛ›™XÝ[Û’YYØ[[]RYÝ\ÝÛY\ÛÙJJKˆYÓ[™ÝˆLŽˆKˆÙ^KˆXÛÙR[YÜ˜][ÛÜ™Y[X[ž]\Ê[™[ÜK˜Ú\\^
+Kˆ
+NÂˆÛÛœÝÙXÜ™]H™]È^XÛÙ\Š
+K™XÛÙJZ[^
+NÂˆÛÛœÝZ[š[][S[™ÝHÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’YÈˆÂˆYˆ
+ÙXÜ™]›[™ÝZ[š[][S[™ÝÙXÜ™]›[™ÝˆM—ÌÎ×ËË\Ý
+ÙXÜ™]
+JH›ÝÈ™]È\œ›ÜŠ’[˜[YÜ™Y[X[^[ØYŠNÂˆ™]\›ˆÙXÜ™]ÂˆHØ]ÚÂˆËÈ™]™\ˆ^ÜÙHÚ\\^\œÚ[™È]Z[ÈÜˆÙ^HX]\šX[ÈØ[\œË‚ˆ›ÝÈ™]È\œ›ÜŠÛÛ›™XÝ[Û’YOOHØÚØPÛÛ›™XÝ[Û’YˆÈ´%ô,4bt.4btdt/t/tbô.H4.´.ôc´aÈ4(´/´aô.´.4/t-t-4/´`t`´`ô/ô-t/Kˆ4$´,´-t-4.4`´-H4.´.ôc´aÈ4-ô,4/t/´,´/‹ˆ‚ˆˆ´%ô,4bt.4btdt/t/tbô.H4`´/´.´-t/H4(¸ $t$t,4/t.´,4/t-t-4/´`t`´`ô/ô-t/Kˆ4$´,´-t-4.4`´-H4.´.ôc´aÈ4-ô,4/t/´,´/‹ˆŠNÂˆBŸB‚™^Ü\Þ[˜È[˜Ý[Ûˆ™XY˜[šÒ[YÜ˜][ÛÜ™Y[X[
+YØ[[]RYˆÝš[™ÊHÂˆ™]\›ˆ™XY[YÜ˜][ÛÜ™Y[X[
+˜[šÐÛÛ›™XÝ[Û’YYØ[[]RY˜[šÐÜ™Y[X[ØÛÜJNÂŸB‚™^Ü\Þ[˜È[˜Ý[Ûˆ™\šYžTÝÜ™Y[YÜ˜][ÛÜ™Y[X[Ê
+HÂˆÛÛœÝ›ÝÜÈH]ØZ][‹‘‹œ™\\™Jˆ”ÑSPÕÝ]WÚÙ^H”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^HRÑH	Ú[YÜ˜][Û—ØÜ™Y[X[ŒŽ‰IÈÔ‘Tˆ–HÝ]WÚÙ^H‚ˆ
+K˜[ÈÝ]WÚÙ^NˆÝš[™ÈOŠ
+NÂˆ›Üˆ
+ÛÛœÝ›ÝÈÙˆ›ÝÜËœ™\Ý[ÈÏÈ×JHÂˆžHÂˆÛÛœÝ\ÈH›ÝËœÝ]WÚÙ^KœÛXÙJ[YÜ˜][ÛÜ™Y[X[™Yš^›[™Ý
+KœÜ]
+ŽˆŠNÂˆYˆ
+\Ë›[™ÝOOHÈ\ËœÛÛYJ
+\
+HOˆ\\
+JH›ÝÈ™]È\œ›ÜŠ’[˜[YÜ™Y[X[ØÛÜHŠNÂˆÛÛœÝØÛÛ›™XÝ[Û’YYØ[[]RYÝ\ÝÛY\ÛÙWHH\Ë›X\
+
+\
+HOˆXÛÙUT’PÛÛ\Û™[
+\
+JNÂˆYˆ
+[YÜ˜][ÛÜ™Y[X[Ý]RÙ^JÛÛ›™XÝ[Û’YYØ[[]RYÝ\ÝÛY\ÛÙJHOOH›ÝËœÝ]WÚÙ^JHÂˆ›ÝÈ™]È\œ›ÜŠ“›Û‹XØ[›ÛšXØ[Ü™Y[X[ØÛÜHŠNÂˆBˆÛÛœÝÙXÜ™]H]ØZ]™XY[YÜ˜][ÛÜ™Y[X[
+ÛÛ›™XÝ[Û’YYØ[[]RYÝ\ÝÛY\ÛÙJNÂˆYˆ
+\ÙXÜ™]
+H›ÝÈ™]È\œ›ÜŠ“Z\ÜÚ[™ÈÜ™Y[X[[™[ÜHŠNÂˆHØ]ÚÂˆËÈ™XY[™\ÜÈ]\Ý˜Z[Ú]Ý]^ÜÚ[™ÈHÝ]HÙ^K[™[ÜHÜˆÙXÜ™]‚ˆ›ÝÈ™]È\œ›ÜŠ´%ô,4bt.4btdt/t/tbô-H4,t,4/t.´/´,´`t.´.4-H4.´.ôc´aô.4/t-H4/ô`4/´b4.ô.4/ô`4/´,´-t`4.´`È4at`4,4/t.4.ô.4bt,ŠNÂˆBˆBŸB‚™[˜Ý[Ûˆ[YÜ˜][ÛÜ™Y[X[Ý]RÙ^JÛÛ›™XÝ[Û’Y˜[YNˆÝš[™ËYØ[[]RY˜[YNˆÝš[™ËÝ\ÝÛY\ÛÙU˜[YNˆÝš[™ÊHÂˆÛÛœÝÛÛ›™XÝ[Û’YH›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJÛÛ›™XÝ[Û’Y˜[YK´.4/t`´-t,ô`4,4a´.4cÈŠNÂˆÛÛœÝYØ[[]RYH›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJYØ[[]RY˜[YK´c´`4.4-4.4aô-t`t.´/´-H4.ô.4a´/ˆŠNÂˆÛÛœÝÝ\ÝÛY\ÛÙHH›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJÝ\ÝÛY\ÛÙU˜[YK˜Ý\ÝÛY\ÛÙHŠNÂˆ™]\›ˆ	Ú[YÜ˜][ÛÜ™Y[X[™Yš^IÙ[˜ÛÙUT’PÛÛ\Û™[
+ÛÛ›™XÝ[Û’Y
+_N‰Ù[˜ÛÙUT’PÛÛ\Û™[
+YØ[[]RY
+_N‰Ù[˜ÛÙUT’PÛÛ\Û™[
+Ý\ÝÛY\ÛÙJ_XÂŸB‚™[˜Ý[Ûˆ[YÜ˜][ÛÜ™Y[X[ÛÛ›™XÝ[Û”]\›ŠÛÛ›™XÝ[Û’Y˜[YNˆÝš[™ÊHÂˆÛÛœÝÛÛ›™XÝ[Û’YH›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJÛÛ›™XÝ[Û’Y˜[YK´.4/t`´-t,ô`4,4a´.4cÈŠNÂˆ™]\›ˆ	Ú[YÜ˜][ÛÜ™Y[X[™Yš^IÙ[˜ÛÙUT’PÛÛ\Û™[
+ÛÛ›™XÝ[Û’Y
+_N‰XÂŸB‚™[˜Ý[Ûˆ›Ü›X[^™R[YÜ˜][ÛÜ™Y[X[ØÛÜJ˜[YNˆÝš[™ËX™[ˆÝš[™Ë[ÝÑ[\HH˜[ÙJHÂˆÛÛœÝÛX[ˆHÝš[™Ê˜[YHÏÈˆŠKš[J
+KœÛXÙJ
+NÂˆYˆ
+
+XÛX[ˆ	‰ˆX[ÝÑ[\JH
+ÛX[ˆ	‰ˆK×–ÐKV˜K^ŒNWVÐKV˜K^ŒNK—Î‹W^ÌKÎ_IË\Ý
+ÛX[ŠJJHÂˆ›ÝÈ™]È\œ›ÜŠ4't-t.´/´`4`4-t.´`´/t/ˆ4`ô.´,4-ô,4/t/ˆ	ÛX™[X
+NÂˆBˆ™]\›ˆÛX[ŽÂŸB‚™[˜Ý[Ûˆ›Ü›X[^™PÜ™Y[X[Ù[™\˜][ÛŠ˜[YNˆ[šÛ›ÝÛŠHÂˆÛÛœÝÙ[™\˜][ÛˆH\[Ùˆ˜[YHOOHœÝš[™ÈˆÈ˜[YKš[J
+KÓÝÙ\Ø\ÙJ
+HˆˆŽÂˆ™]\›ˆ×–ÌNXKY—^ÎKVÌNXKY—^ÍKMÌNXKY—^ÌßKVÎXX—VÌNXKY—^ÌßKVÌNXKY—^ÌLŸIË\Ý
+Ù[™\˜][ÛŠBˆÈÙ[™\˜][Û‚ˆˆˆŽÂŸB‚™[˜Ý[Ûˆ›Ü›X[^™TÝX›Z]Y[YÜ˜][Û‘[™Ú[
+˜[YNˆ[šÛ›ÝÛŠHÂˆÛÛœÝ[™Ú[H\[Ùˆ˜[YHOOHœÝš[™ÈˆÈ˜[YKš[J
+KœÛXÙJ
+HˆˆŽÂˆYˆ
+Y[™Ú[
+H™]\›ˆˆŽÂˆÛÛœÝ›Ü›X[^™YH›Ü›X[^™TÝÜ™Y[YÜ˜][Û‘[™Ú[
+[™Ú[
+NÂˆYˆ
+[›Ü›X[^™Y
+HÂˆ›ÝÈ™]È\œ›ÜŠ´$4-4`4-t`H4/ô/´-4.´.ôc´aô-t/t.4cÈ4-4/´.ô-´-t/H4,tbô`´cËt`t`tbô.ô.´/´.H4,t-t-È4.ô/´,ô.4/t,4/ô,4`4/´.ôcË4/ô,4`4,4/4-t`´`4/´,ˆ4.4.ô.4`t.ô`ô-´-t,t/t/´.H4aô,4`t`´.ŠNÂˆBˆ™]\›ˆ›Ü›X[^™YÂŸB‚™[˜Ý[Ûˆ›Ü›X[^™TÝÜ™Y[YÜ˜][Û‘[™Ú[
+˜[YNˆ[šÛ›ÝÛŠHÂˆÛÛœÝ[™Ú[H\[Ùˆ˜[YHOOHœÝš[™ÈˆÈ˜[YKš[J
+KœÛXÙJ
+HˆˆŽÂˆYˆ
+Y[™Ú[
+H™]\›ˆˆŽÂˆžHÂˆÛÛœÝ\›H™]ÈT“
+[™Ú[
+NÂˆYˆ
+\›œ›ÝØÛÛOOHšÎˆˆ\›\Ù\›˜[YH\›œ\ÜÝÛÜ™\›œÙX\˜Ú\›š\Ú]\›šÜÝ˜[YJH™]\›ˆˆŽÂˆ™]\›ˆ\›ÔÝš[™Ê
+NÂˆHØ]ÚÂˆ™]\›ˆˆŽÂˆBŸB‚™[˜Ý[Ûˆ[YÜ˜][ÛÜ™Y[X[XY
+ÛÛ›™XÝ[Û’YˆÝš[™ËYØ[[]RYˆÝš[™ËÝ\ÝÛY\ÛÙNˆÝš[™ÊHÂˆÛÛœÝÜ™Y[X[\HHÛÛ›™XÝ[Û’YOOH˜[šÐÛÛ›™XÝ[Û’YÈ•S’×ÐS’×Ô‘PQÕŒHˆˆ•ÐÒÐWÐPÐÓÕS•×Ô‘PQÕŒHŽÂˆ™]\›ˆ\[Ëš[YÜ˜][Û‹XÜ™Y[X[Œ—‰ØÛÛ›™XÝ[Û’YW‰ÛYØ[[]RYW‰ØÝ\ÝÛY\ÛÙ_W‰ØÜ™Y[X[\_XÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ[YÜ˜][ÛÜ™Y[X[YÙ\Ý
+˜[YNˆ[šÛ›ÝÛŠHÂˆÛÛœÝÙXÜ™]H\[Ùˆ˜[YHOOHœÝš[™ÈˆÈ˜[YKš[J
+HˆˆŽÂˆYˆ
+ÙXÜ™]›[™ÝÙXÜ™]›[™ÝˆM—ÌÎ×ËË\Ý
+ÙXÜ™]
+JHÂˆ›ÝÈ™]È\œ›ÜŠ´&´.ôc´aÈ4-4/´`t`´`ô/ô,4,´bô,ô.ôcô-4.4`ˆ4/t-t/ô/´.ô/tbô/4.4.ô.4`t/´-4-t`4-´.4`ˆ4/t-t-4/´/ô`ô`t`´.4/4bô-H4`t.4/4,´/´.ôbÈŠNÂˆBˆÛÛœÝYÙ\ÝH]ØZ]Üž\ËœÝXK™YÙ\Ý
+ˆ”ÒKLMˆ‹ˆ™]È^[˜ÛÙ\Š
+K™[˜ÛÙJ\[ËØÚØKXÛÛ\[žK\Ù[XÝ[Û‹ŒW‰ÜÙXÜ™]X
+Kˆ
+NÂˆ™]\›ˆ[˜ÛÙR[YÜ˜][ÛÜ™Y[X[ž]\Ê™]ÈZ[\œ˜^JYÙ\Ý
+JNÂŸB‚™[˜Ý[ÛˆÛÛœÝ[[YQ\]X[
+Y˜[YNˆ[šÛ›ÝÛ‹šYÚ˜[YNˆ[šÛ›ÝÛŠHÂˆÛÛœÝYH\[ÙˆY˜[YHOOHœÝš[™ÈˆÈY˜[YHˆˆŽÂˆÛÛœÝšYÚH\[ÙˆšYÚ˜[YHOOHœÝš[™ÈˆÈšYÚ˜[YHˆˆŽÂˆÛÛœÝ[™ÝHX]›X^
+Y›[™ÝšYÚ›[™Ý
+NÂˆ]Y™™\™[˜ÙHHY›[™ÝˆšYÚ›[™ÝÂˆ›Üˆ
+][™^HÈ[™^[™ÝÈ[™^
+ÏHJHÂˆY™™\™[˜ÙHH
+Y˜Ú\ÛÙP]
+[™^
+H
+Hˆ
+šYÚ˜Ú\ÛÙP]
+[™^
+H
+NÂˆBˆ™]\›ˆY™™\™[˜ÙHOOHÂŸB‚˜\Þ[˜È[˜Ý[Ûˆ[YÜ˜][ÛÜ™Y[X[[˜Üž\[Û’Ù^J
+HÂˆÛÛœÝ[[YHH[ˆ\È[šÛ›ÝÛˆ\È™XÛÜ™Ýš[™Ë[šÛ›ÝÛŽÂˆÛÛœÝÛÛ™šYÝ\™YH[[YK’S•QÔUSÓ—ÐÔ‘QS•PS×ÒÑVNÂˆYˆ
+\[ÙˆÛÛ™šYÝ\™YOOHœÝš[™ÈˆÛÛ™šYÝ\™Y›[™ÝÌŠHÂˆ›ÝÈ™]È\œ›ÜŠ´%ô,4bt.4btdt/t/t/´-H4at`4,4/t.4.ô.4bt-H4/t-H4/t,4`t`´`4/´-t/t/Žˆ4-ô,4-4,4.t`´-HS•QÔUSÓ—ÐÔ‘QS•PS×ÒÑVHŠNÂˆBˆÛÛœÝYÙ\ÝH]ØZ]Üž\ËœÝXK™YÙ\Ý
+ˆ”ÒKLMˆ‹ˆ™]È^[˜ÛÙ\Š
+K™[˜ÛÙJ\[Ëš[YÜ˜][Û‹XÜ™Y[X[šÙ^KŒW‰ØÛÛ™šYÝ\™YX
+Kˆ
+NÂˆ™]\›ˆÜž\ËœÝXKš[\ÜÙ^Jœ˜]È‹YÙ\ÝQTËQÐÓH‹˜[ÙKÈ™[˜Üž\‹™XÜž\—JNÂŸB‚™[˜Ý[Ûˆ[˜ÛÙR[YÜ˜][ÛÜ™Y[X[ž]\Êž]\ÎˆZ[\œ˜^JHÂˆ]š[˜\žHHˆŽÂˆ›Üˆ
+ÛÛœÝž]HÙˆž]\ÊHš[˜\žH
+ÏHÝš[™Ë™œ›ÛPÚ\ÛÙJž]JNÂˆ™]\›ˆØJš[˜\žJKœ™\XÙJ×
+ËÙË‹HŠKœ™\XÙJ×ËÙË—ÈŠKœ™\XÙJÏJÉÙËˆŠNÂŸB‚™[˜Ý[ÛˆXÛÙR[YÜ˜][ÛÜ™Y[X[ž]\Ê˜[YNˆÝš[™ÊHÂˆÛÛœÝ˜\ÙMH˜[YKœ™\XÙJËKÙËŠÈŠKœ™\XÙJ×ËÙË‹ÈŠKœY[™
+X]˜ÙZ[
+˜[YK›[™ÝÈ
+H
+ˆHŠNÂˆÛÛœÝš[˜\žHH]ØŠ˜\ÙM
+NÂˆ™]\›ˆZ[\œ˜^K™œ›ÛJš[˜\žK
+Ú\˜XÝ\ŠHOˆÚ\˜XÝ\‹˜Ú\ÛÙP]
+
+JNÂŸB‚™^Ü\HÞ\Ý[Q]S[ÙHH\ÝˆœÛÝ\˜ÙWÛÛ›Hˆ™[\HŽÂ‚™^Ü\Þ[˜È[˜Ý[ÛˆÙ]Þ\Ý[Q]S[ÙJ
+Nˆ›ÛZ\ÙOÞ\Ý[Q]S[ÙOˆÂˆÛÛœÝ›ÝÈH]ØZ][‹‘‹œ™\\™Jˆ”ÑSPÕÝ]WÝ˜[YH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^OIÜÞ\Ý[WÙ]WÛ[ÙIÈ‚ˆ
+K™š\œÝÈÝ]WÝ˜[YNˆÝš[™ÈOŠ
+NÂˆYˆ
+›ÝÏËœÝ]WÝ˜[YHOOH\Ýˆ›ÝÏËœÝ]WÝ˜[YHOOHœÛÝ\˜ÙWÛÛ›Hˆ›ÝÏËœÝ]WÝ˜[YHOOH™[\HŠH™]\›ˆ›ÝËœÝ]WÝ˜[YNÂˆËÈ›ÙXÝ[Ûˆ]\Ý˜Z[ÛÜÙYˆH™]È]X˜\ÙKHZ\ÜÚ[™ÈÝ]H›ÝÈÜˆ[‚ˆËÈ[œ™XÛÙÛš\ÙY˜[YH]\Ý™]™\ˆÜH\XØ][Ûˆ[ÈÛÝ\˜ÙKÙ[[ÈÙYYË‚ˆ™]\›ˆ™[\HŽÂŸB‚™^Ü\Þ[˜È[˜Ý[ÛˆÙ]Þ\Ý[Q]S[ÙJXÝÜŽˆÝš[™Ë[ÙNˆÞ\Ý[Q]S[ÙJHÂˆÛÛœÝÝ\œ™[H]ØZ]Ù]Þ\Ý[Q]S[ÙJ
+NÂˆYˆ
+Ý\œ™[OOH™[\Hˆ	‰ˆ[ÙHOOH™[\HŠHÂˆ›ÝÈ™]È\œ›ÜŠ´'ô`ô`t`´/´.H›ÙXÝ[Û‹t.´/´/t`´`ô`4-ô,4,t.ô/´.´.4`4/´,´,4/Kˆ4(t/4-t/t,4`4-t-´.4/4,4,´/´-ô/4/´-´/t,4`´/´.ôc4.´/ˆ4/´`´-4-t.ôc4/t/´.H4/´a4.ô,4.t/Kt/ô`4/´a´-t-4`ô`4/´.H4/´,t`t.ô`ô-´.4,´,4/t.4cËˆŠNÂˆBˆ]ØZ][‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+	ÜÞ\Ý[WÙ]WÛ[ÙIËËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+[ÙJKœ[Š
+NÂˆ]ØZ]Üš]R[YÜ˜][Û‘]\Ù]]Y]
+XÝÜ‹œÞ\Ý[K™]WÛ[ÙWØÚ[™ÙY‹Âˆ[ÙKˆ™Z]š[ÜŽˆ[ÙHOOH™[\H‚ˆÈ´'ô`ô`t`´/´.H›ÙXÝ[Û‹t.´/´/t`´`ô`ˆ4,4,´`´/´/4,4`´.4aô-t`t.´/´-H4`t/´-ô-4,4/t.4-H4-4-t/4/´/t`t`´`4,4a´.4/´/t/tbôaH4.4/ô`4/´.4-ô,´/´-4/tbôaH4-ô,4/ô.4`t-t.H4/´`´.´.ôc´aô-t/t/ˆ‚ˆˆ[ÙHOOHœÛÝ\˜ÙWÛÛ›H‚ˆÈ´(t.4/t`´-t`´.4aô-t`t.´.4-H4/4/´-4`ô.ô.4`t.´`4bô`´bÎÈÖta4,4.´`´bÈ4.4,4`ô-4.4`ˆ4`t/´at`4,4/t-t/tbÈ‚ˆˆ´(t.4/t`´-t`´.4aô-t`t.´.4.H4-4-t/4/´/t`t`´`4,4a´.4/´/t/tbô.H4.´/´/t`´`ô`4`t/t/´,´,4,´.4-4.4/‹ˆJNÂˆ™]\›ˆ[ÙNÂŸB‚˜ÛÛœÝ[[ÓÛ›UX›\ÈHÂˆœØ[\×ÝÝXÚÚ[È‹œØ[\×ÜÝYÙWÙ]™[È‹œØ[\×ÛXYÈ‹˜ÛY[ØXØÜX[È‹˜ÛY[Ø›Û\Ù\È‹˜ÛY[ÛY™XÞXÛ\È‹ˆ˜ÛÛ[Ø]šX][ÛœÈ‹˜ÛÛ[Ü™XÛÛ[Y[™][ÛœÈ‹˜ÛÛ[ÜX›XØ][ÛœÈ‹˜ÛÛ[Ü[—Ú][\È‹›X\šÙ][™×ØXØÛÝ[È‹ˆ™YXØ][Û—Ø][™[˜ÙH‹™YXØ][Û—Ü›ÙÜ™\ÜÈ‹™YXØ][Û—Ù™YY˜XÚÈ‹™YXØ][Û—ØÛÛ[][šXØ][ÛœÈ‹™YXØ][Û—ÜÝY[È‹™YXØ][Û—Û\ÜÛÛœÈ‹™YXØ][Û—ÙÜ›Ý\È‹™YXØ][Û—Ü›ÙÜ˜[\È‹ˆš—ÛÛ˜›Ø\™[™È‹š—Ù]™[ÜY[‹š—Ü™]Ø\™È‹š—ØXØÙ\ÜÙ\È‹š—Ú[\šY]ÜÈ‹š—ØØ[™Y]\È‹š—Ù[\ÞYY\È‹š—Ý˜XØ[˜ÚY\È‹ˆ›YØ[ØÛÛ˜XÝÝ^Ý™\œÚ[ÛœÈ‹›YØ[ÙØÝ[Y[Ú][\È‹›YØ[Ü™\ÜÛœÚXš[]WÞ›Û™\È‹›YØ[ØÚXÚÜÈ‹›YØ[ØÛÛ˜XÝÈ‹ˆœÝ\Y\—ÛÙ™™\œÈ‹œ\˜Ú\ÙWÛÜ™\œÈ‹œ›ØÝ\™[Y[Ù[]™\šY\È‹œ\˜Ú\ÙWÜ™\]Y\ÝÈ‹œ›ØÝ\™[Y[ÜÝ\Y\œÈ‹š[™[ÜžWÙ]™[È‹š[™[ÜžWÚ][\È‹ˆ˜\ÜÙ]ÛXZ[[˜[˜ÙH‹˜\ÜÙ]È‹™›ÛÙÜ™XÚ\WÚ[™Ü™YY[È‹™›ÛÙÜ™XÚ\\È‹™›ÛÙÜ›ÙXÝ[Ûˆ‹™›ÛÙÜÚ\Y[È‹™›ÛÙÜÚYÈ‹™›ÛÙØÚXÚÜÈ‹™›ÛÙØ˜]Ú\È‹™›ÛÙÜ›ÙXÝÈ‹ˆœØY™]WÛ™^ØÚXÚÜÈ‹œØY™]WÜ™\Z\œÈ‹œØY™]WÚ[˜ÚY[È‹œØY™]WÙ˜][È‹œØY™]WØÚXÚÜÈ‹œØY™]WÙ\]Z\Y[‹œØY™]WÜÞ\Ý[\È‹œØY™]WÙÝX\™ÜÚYÈ‹ˆ›YYXØ[ØXÝ[ÛœÈ‹›YYXØ[Ú[˜ÚY[È‹›YYXØ[ØØ\Ù\È‹›YYXØ[Ü™\ÝšXÝ[ÛœÈ‹›YYXØ[ÙØÝ[Y[È‹›YYXØ[ØXØÙ\Ü×ÙÜ˜[È‹ˆ˜XØÛÝ[[™×ÙØÝ[Y[Û[šÜÈ‹˜XØÛÝ[[™×ØÛÛ\][™\Ü×ØÚXÚÜÈ‹˜XØÛÝ[[™×Ù^ÜÈ‹˜XØÛÝ[[™×ÙØÝ[Y[È‹˜XØÛÝ[[™×Ú[YÜ˜][ÛœÈ‹ˆ™]™[Ü\XÚ\[È‹˜\Ú[™\Ü×Ù]™[È‹œÝ˜]YÞWÜ™\Ý[È‹œÝ˜]YÞWÙ]šX][ÛœÈ‹œÝ˜]YÞWÜ›Ú™XÝÈ‹œÝ˜]YÞWÚ[š]X]]™\È‹œÝ˜]YÞWÚÜ\È‹œÝ˜]YÞWÙÛØ[È‹ˆ˜ÛÛ\Z[ØXÝ[ÛœÈ‹˜Ý\ÝÛY\—ØÛÛ\Z[È‹˜ZWÛ[Ù[Ü[œÈ‹˜ZWÛÜÛÝ]È‹˜[˜[]XÜ×ÜÚYÛ˜[È‹˜ZWÜ›ØÙ\Ü×ØÛÛ˜XÝÈ‹˜[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈ‹ˆœ™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\È‹œ™XY[™\Ü×ÜØÙ[˜\š[ÜÈ‹œ™XY[™\Ü×Ý˜[Y][Û—Ü[œÈ‹œ™[X\ÙWÙØ]\È‹œ™XÛÝ™\žWÙš[È‹—H\ÈÛÛœÝÂ‚™^Ü\HÞ\Ý[Q[[Ô™[[Ý˜[Ý]\ÈHÂˆ[ÙNˆÞ\Ý[Q]S[ÙNÂˆ™[[Ý™Yˆ[X™\ŽÂˆ™\Ù\™YˆÝš[™Ö×NÂŸNÂ‚™^Ü\Þ[˜È[˜Ý[Ûˆ™[[Ý™TÞ\Ý[Q[[Ñ]JXÝÜŽˆÝš[™ÊNˆ›ÛZ\ÙOÞ\Ý[Q[[Ô™[[Ý˜[Ý]\ÏˆÂˆYˆ
+]ØZ]Ù]Þ\Ý[Q]S[ÙJ
+HOOH™[\HŠHÂˆ›ÝÈ™]È\œ›ÜŠ´'ô`ô`t`´/´.H›ÙXÝ[Û‹t.´/´/t`´`ô`4/t-t.ôc4-ôcÈ4/ô-t`4-t,´-t`t`´.4,ˆÛÝ\˜ÙWÛÛ›H4.4-ÈÙXˆ[[YKˆŠNÂˆBˆÛÛœÝÛÝ[›ÝÈH]ØZ][‹‘‹œ™\\™JÑSPÕˆ
+ÑSPÕÓÕS•
+
+ŠH”“ÓH[]Y\ÈÒT‘HÛÝ\˜ÙWÜÞ\Ý[HRÑH	ÔÖS•UPÉIÊH
+Âˆ
+ÑSPÕÓÕS•
+
+ŠH”“ÓHš[˜[˜ÚX[ÛÜ\˜][ÛœÈÒT‘HÛÝ\˜ÙWÜÞ\Ý[HRÑH	ÔÖS•UPÉIÊH
+Âˆ
+ÑSPÕÓÕS•
+
+ŠH”“ÓH\ÚÜÈÒT‘HÜ™X]YØžHRÑH	ÜÞ\Ý[KIIÊHTÈÝ[
+K™š\œÝÈÝ[ˆ[X™\ˆOŠ
+NÂˆÛÛœÝÞ\Ý[U\ÚÑš[\ˆH”ÑSPÕY”“ÓH\ÚÜÈÒT‘HÜ™X]YØžHRÑH	ÜÞ\Ý[KIIÈŽÂˆÛÛœÝÝ][Y[ÈHÂˆ[‹‘‹œ™\\™JSUH”“ÓH\Ú×ÝØ]Ú\œÈÒT‘H\Ú×ÚYSˆ
+	ÜÞ\Ý[U\ÚÑš[\ŸJX
+Kˆ[‹‘‹œ™\\™JSUH”“ÓH\Ú×ØÚXÚÛ\ÝÒT‘H\Ú×ÚYSˆ
+	ÜÞ\Ý[U\ÚÑš[\ŸJX
+Kˆ[‹‘‹œ™\\™JSUH”“ÓH\Ú×ØÛÛ[Y[ÈÒT‘H\Ú×ÚYSˆ
+	ÜÞ\Ý[U\ÚÑš[\ŸJX
+Kˆ[‹‘‹œ™\\™JSUH”“ÓH\Ú×Ø\›Ý˜[ÈÒT‘H\Ú×ÚYSˆ
+	ÜÞ\Ý[U\ÚÑš[\ŸJX
+Kˆ[‹‘‹œ™\\™JSUH”“ÓH\Ú×ÙØÝ[Y[ÈÒT‘H\Ú×ÚYSˆ
+	ÜÞ\Ý[U\ÚÑš[\ŸJX
+Kˆ[‹‘‹œ™\\™JSUH”“ÓH\ØØ[][ÛœÈÒT‘H\Ú×ÚYSˆ
+	ÜÞ\Ý[U\ÚÑš[\ŸJX
+Kˆ[‹‘‹œ™\\™J‘SUH”“ÓH›ÝYšXØ][ÛœÈÒT‘HÛÝ\˜ÙWÚYRÑH	ÉKUIIÈÔˆY\ÚÙ^HRÑH	ÉKUIIÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH\ÚÜÈÒT‘HÜ™X]YØžHRÑH	ÜÞ\Ý[KIIÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓHØÝ[Y[Ý™\œÚ[ÛœÈÒT‘HØÝ[Y[ÚYSˆ
+ÑSPÕY”“ÓHÛÜšÙ›Ý×ÙØÝ[Y[ÈÒT‘HÛÝ\˜ÙHRÑH	ÔÖS•UPÉIÈÔˆÜ™X]YØžHRÑH	ÜÞ\Ý[KIIÊHŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓHØ›YØ][ÛœÈÒT‘HØÝ[Y[ÚYSˆ
+ÑSPÕY”“ÓHÛÜšÙ›Ý×ÙØÝ[Y[ÈÒT‘HÛÝ\˜ÙHRÑH	ÔÖS•UPÉIÈÔˆÜ™X]YØžHRÑH	ÜÞ\Ý[KIIÊHŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓHÛÜšÙ›Ý×ÙØÝ[Y[ÈÒT‘HÛÝ\˜ÙHRÑH	ÔÖS•UPÉIÈÔˆÜ™X]YØžHRÑH	ÜÞ\Ý[KIIÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[]WÙØÝ[Y[ÈÒT‘HÛÝ\˜ÙHRÑH	ÔÖS•UPÉIÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[]WÛ[šÜÈÒT‘HÜ™X]YØžHRÑH	ÜÞ\Ý[KIIÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[]WÛY\™Ù\ÈÒT‘HÝ\š]›Ü—ÚYSˆ
+ÑSPÕY”“ÓH[]Y\ÈÒT‘HÛÝ\˜ÙWÜÞ\Ý[HRÑH	ÔÖS•UPÉIÊHÔˆ\XØ]WÚYSˆ
+ÑSPÕY”“ÓH[]Y\ÈÒT‘HÛÝ\˜ÙWÜÞ\Ý[HRÑH	ÔÖS•UPÉIÊHŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓHš[˜[˜ÚX[ÛÜ\˜][ÛœÈÒT‘HÛÝ\˜ÙWÜÞ\Ý[HRÑH	ÔÖS•UPÉIÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓHš[˜[˜ÙWØYÙ]ÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓHš[˜[˜ÙWÙ›Ü™XØ\ÝÚ][\ÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[YÜ˜][Û—ÛÙ×Ù[šY\ÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[YÜ˜][Û—ØÛÛ™›XÝÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[YÜ˜][Û—ÜÞ[˜×Ü[œÈŠKˆ[‹‘‹œ™\\™J•TUH[YÜ˜][Û—ØÛÛ›™XÝ[ÛœÈÑU™XÙZ]™YØÛÝ[LXØÙ\YØÛÝ[L™Z™XÝYØÛÝ[L\œ›Ü—ØÛÝ[LÛÛ™›XÝØÛÝ[L\ÝÜÝXØÙ\Ü×Ø]PÐTÑHÒSˆYIÒS•UQIÈSˆ\ÝÜÝXØÙ\Ü×Ø]SÑH	ÉÈS‘\]YØ]PÕT”‘S•ÕSQTÕSTŠKˆ‹‹™[[ÓÛ›UX›\Ë›X\
+
+X›JHOˆ[‹‘‹œ™\\™JSUH”“ÓH	ÝX›_X
+JKˆ[‹‘‹œ™\\™J‘SUH”“ÓH[]Y\ÈÒT‘HÛÝ\˜ÙWÜÞ\Ý[HRÑH	ÔÖS•UPÉIÈŠKˆ[‹‘‹œ™\\™J‘SUH”“ÓHÞ\Ý[WÜ[[YWÜÝ]HÒT‘HÝ]WÚÙ^HSˆ
+	Ú[YÜ˜][Û—Ù[[×Ø›ÛÝÝ˜\	Ë	Ùš[˜[˜ÙWÙ[]WÛ[šÜ×Ø›ÛÝÝ˜\	ÊHŠKˆNÂˆ›Üˆ
+][™^HÈ[™^Ý][Y[Ë›[™ÝÈ[™^
+ÏHÍJHÂˆ]ØZ][‹‘‹˜˜]Ú
+Ý][Y[ËœÛXÙJ[™^[™^
+ÈÍJJNÂˆBˆ]ØZ]Ù]Þ\Ý[Q]S[ÙJXÝÜ‹œÛÝ\˜ÙWÛÛ›HŠNÂˆ]ØZ][‹‘‹œ™\\™JS”ÑT•S•ÈÞ\Ý[WÜ[[YWÜÝ]H
+Ý]WÚÙ^KÝ]WÝ˜[YK\]YØ]
+BˆSQTÈ
+	ÜÞ\Ý[WÙ[[×Ü\™ÙIËËÕT”‘S•ÕSQTÕST
+BˆÓˆÓÓ‘“PÕ
+Ý]WÚÙ^JHÈTUHÑUÝ]WÝ˜[YOY^ÛYYœÝ]WÝ˜[YK\]YØ]PÕT”‘S•ÕSQTÕST
+Bˆ˜š[™
+ÖTÕSWÑSS×ÔT‘ÑWÕ‘T”ÒSÓŠKœ[Š
+NÂˆÛÛœÝ™[[Ý™YH[X™\ŠÛÝ[›ÝÏËÝ[ÏÈ
+NÂˆÛÛœÝ™\Ù\™YHÈ–Öta4,4.´`´bÈ‹´`4`ôaô/tbô-H4.´,4`4`´/´aô.´.4.4-ô,4-4,4aô.‹´,4`ô-4.4`ˆ‹´.´,4`´,4.ô/´,È4.4/ô,4`4,4/4-t`´`4bÈ4/ô/´-4.´.ôc´aô-t/t.4.H—NÂˆ]ØZ]Üš]R[YÜ˜][Û‘]\Ù]]Y]
+XÝÜ‹œÞ\Ý[K™[[×Ù]WÜ™[[Ý™Y‹È™[[Ý™Y™\Ù\™YJNÂˆ™]\›ˆÈ[ÙNˆœÛÝ\˜ÙWÛÛ›H‹™[[Ý™Y™\Ù\™YNÂŸB‚™^Ü\Þ[˜È[˜Ý[Ûˆ™\ÝÜ™TÞ\Ý[Q[[Ñ]JXÝÜŽˆÝš[™ÊHÂˆYˆ
+]ØZ]Ù]Þ\Ý[Q]S[ÙJ
+HOOH™[\HŠHÂˆ›ÝÈ™]È\œ›ÜŠ´$´/´`t`t`´,4/t/´,´.ô-t/t.4-H4-4-t/4/´/t`t`´`4,4a´.4/´/t/t/´,ô/ˆ4.´/´/t`´`ô`4,4-ô,4/ô`4-tbt-t/t/ˆ4,ˆ›ÙXÝ[Û‹ˆ4&4`t/ô/´.ôc4-ô`ô.t`´-H4/´`´-4-t.ôc4/t`ôcˆ4/´a4.ô,4.t/Kt/ô`4/´a´-t-4`ô`4`È4/´,t`t.ô`ô-´.4,´,4/t.4cËˆŠNÂˆBˆ]ØZ]Ù]Þ\Ý[Q]S[ÙJXÝÜ‹\ÝŠNÂˆ]ØZ]ÙYY™YÚ\ÝžJ
+NÂˆ]ØZ]ÙYYÛÜšÙ›ÝÊ
+NÂˆ]ØZ]ÙYYš[˜[˜ÙJ
+NÂˆ]ØZ]ÙYYØ[\Ê
+NÂˆ]ØZ]ÙYYÛÛ[
+
+NÂˆ]ØZ]ÙYYYXØ][ÛŠ
+NÂˆ]ØZ]ÙYYŠ
+NÂˆ]ØZ]ÙYYYØ[
+
+NÂˆ]ØZ]ÙYY›ØÝ\™[Y[
+
+NÂˆ]ØZ]ÙYY›ÛÙ
+
+NÂˆ]ØZ]ÙYYØY™]J
+NÂˆ]ØZ]ÙYYYYXØ[
+
+NÂˆ]ØZ]ÙYYXØÛÝ[[™Ê
+NÂˆ]ØZ]ÙYYÝ˜]YÞJ
+NÂˆ]ØZ]ÙYY[YÜ˜][ÛœÊ
+NÂˆ]ØZ]ÙYY[˜[]XÜÊ
+NÂˆ]ØZ]ÙYY™XY[™\ÜÊ
+NÂˆ]ØZ][œÝ\™Qš[˜[˜ÙQ[]S[šÜÐ›ÛÝÝ˜\
+
+NÂˆ]ØZ]Üš]R[YÜ˜][Û‘]\Ù]]Y]
+XÝÜ‹œÞ\Ý[K™[[×Ù]WÜ™\ÝÜ™Y‹È[ÙNˆ\ÝˆJNÂˆ™]\›ˆ\Ýˆ\ÈÛÛœÝÂŸB‚™^Ü\H[˜[]XÜÑ[[ÔÝ]\ÈHÂˆY]šXÜÎˆ[X™\ŽÂˆÛÛ˜XÝÎˆ[X™\ŽÂˆÚYÛ˜[Îˆ[X™\ŽÂˆ[œÎˆ[X™\ŽÂŸNÂ‚™^Ü\Þ[˜È[˜Ý[ÛˆÙ][˜[]XÜÑ[[ÔÝ]\Ê
+Nˆ›ÛZ\ÙO[˜[]XÜÑ[[ÔÝ]\ÏˆÂˆYˆ
+Y[‹‘ŠH›ÝÈ™]È\œ›ÜŠÛÝY›\™HHš[™[™È˜\È[˜]˜Z[X›KˆŠNÂˆÛÛœÝ›ÝÈH]ØZ][‹‘‹œ™\\™JÑSPÕˆ
+ÑSPÕÓÕS•
+
+ŠH”“ÓH[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÊHTÈY]šXÜËˆ
+ÑSPÕÓÕS•
+
+ŠH”“ÓHZWÜ›ØÙ\Ü×ØÛÛ˜XÝÊHTÈÛÛ˜XÝËˆ
+ÑSPÕÓÕS•
+
+ŠH”“ÓH[˜[]XÜ×ÜÚYÛ˜[ÊHTÈÚYÛ˜[Ëˆ
+ÑSPÕÓÕS•
+
+ŠH”“ÓHZWÛ[Ù[Ü[œÊHTÈ[œØˆ
+K™š\œÝÈY]šXÜÎˆ[X™\ŽÈÛÛ˜XÝÎˆ[X™\ŽÈÚYÛ˜[Îˆ[X™\ŽÈ[œÎˆ[X™\ˆOŠ
+NÂˆ™]\›ˆÂˆY]šXÜÎˆ[X™\Š›ÝÏË›Y]šXÜÈÏÈ
+KˆÛÛ˜XÝÎˆ[X™\Š›ÝÏË˜ÛÛ˜XÝÈÏÈ
+KˆÚYÛ˜[Îˆ[X™\Š›ÝÏËœÚYÛ˜[ÈÏÈ
+Kˆ[œÎˆ[X™\Š›ÝÏËœ[œÈÏÈ
+KˆNÂŸB‚™^Ü\Þ[˜È[˜Ý[Ûˆ[œÝ\™P[˜[]XÜÑ[[Ð›ÛÝÝ˜\
+
+Nˆ›ÛZ\ÙO[˜[]XÜÑ[[ÔÝ]\ÏˆÂˆÛÛœÝ™Y›Ü™HH]ØZ]Ù][˜[]XÜÑ[[ÔÝ]\Ê
+NÂˆYˆ
+]ØZ]Ù]Þ\Ý[Q]S[ÙJ
+HOOH™[\HŠH™]\›ˆ™Y›Ü™NÂˆYˆ
+[˜[]XÜÑ[[ÐÛÛ\]J™Y›Ü™JJH™]\›ˆ™Y›Ü™NÂ‚ˆ]ØZ]ÙYY[˜[]XÜÊ
+NÂˆÛÛœÝY\ˆH]ØZ]Ù][˜[]XÜÑ[[ÔÝ]\Ê
+NÂˆYˆ
+X[˜[]XÜÑ[[ÐÛÛ\]JY\ŠJHÂˆ›ÝÈ™]È\œ›ÜŠ[˜[]XÜÈ[[È›ÛÝÝ˜\[˜ÛÛ\]Nˆ	ØY\‹›Y]šXÜßKÉØY\‹˜ÛÛ˜XÝßKÉØY\‹œÚYÛ˜[ßKÉØY\‹œ[œßX
+NÂˆBˆ™]\›ˆY\ŽÂŸB‚™[˜Ý[Ûˆ[˜[]XÜÑ[[ÐÛÛ\]JÝ]\Îˆ[˜[]XÜÑ[[ÔÝ]\ÊHÂˆ™]\›ˆÝ]\Ë›Y]šXÜÈHL	‰ˆÝ]\Ë˜ÛÛ˜XÝÈHLÈ	‰ˆÝ]\ËœÚYÛ˜[ÈHLˆ	‰ˆÝ]\Ëœ[œÈHŽÂŸB‚˜\Þ[˜È[˜Ý[ÛˆÙYY[˜[]XÜÊ
+^ÂˆÛÛœÝY]šXÜÏVÂˆÈ“QUUPÐTÒ‹´)ô.4`t`´bô.H4-4-t/t-t-´/tbô.H4/ô/´`´/´.ˆ‹´)4.4/t,4/t`tbÈ‹´'ô/´`t`´`ô/ô.ô-t/t.4cÈ4/4.4/t`ô`H4`t/ô.4`t,4/t.4cÈ4-ô,4.´,4.ô-t/t-4,4`4/tbô.H4/4-t`tcôaˆ‹´'ô/´`t`´`ô/ô.ô-t/t.4cÈ4-ô,4/4-t`tcôaˆ4/4.4/t`ô`H4`t/ô.4`t,4/t.4cÈ‹¸ ¯H‹´'4-t`tcôaˆ‹™š[˜[˜ÚX[ÛÜ\˜][ÛœÈ‹´)4,4.´`ˆ4.4`tat/´-4/t/´.H4`´,4,t.ô.4a´bÈ4.4/´`´-4-t.ôc4/t/ˆ4/ô/´/4-taô-t/t/tbô-H4`´-t`t`´/´,´bô-H4-ô,4/ô.4`t.‹´'´%4%4(Nˆ4,4/ô`4-t.ôcŒŽÈ4`´-t`t`´/´,´bô-H4`t.ô-t-4bÎˆ4,4,´,ô`ô`t`ˆ‹‘STUQ’S‹LH‹WKˆÈ“QUUPÐTÒQÐT‹´'4.4/t.4/4,4.ôc4/tbô.H4/ô`4/´,ô/t/´-ô/tbô.H4/´`t`´,4`´/´.ˆ‹´)4.4/t,4/t`tbÈ‹´'4.4/t.4/4`ô/4/t,4.´/´/ô.4`´-t.ôc4/t/´,ô/ˆ4,´-t`4/´cô`´/t/´`t`´/t/´,ô/ˆ4/´`t`´,4`´.´,4/t,4,ô/´`4.4-ô/´/t`´-H‹´'t,4aô,4.ôc4/tbô.H4/´`t`´,4`´/´.ˆ4/ô.ôc´`H4/ô/´`t`´`ô/ô.ô-t/t.4cÈ4.4/4.4/t`ô`H4`t/ô.4`t,4/t.4cÈ4`H4`ôaôdt`´/´/4,´-t`4/´cô`´/t/´`t`´.‹¸ ¯H‹´%4-t/tc‹™š[˜[˜ÙWÙ›Ü™XØ\ÝÚ][\È‹´(t.4/t`´-t`´.4aô-t`t.´,4cÈ4/4/´-4-t.ôc‹´$ô/´`4.4-ô/´/t`ˆx $Î4`t-t/t`´cô,t`4cÈŒˆ‹‘STUQ’S‹LH‹WKˆÈ“QUUSˆ‹“ˆ4`t-t/4c4.‹´&´.ô.4-t/t`´bÈ‹´'ô/´-4`´,´-t`4-´-4dt/t/t,4cÈ4,´bô`4`ôaô.´,4`t-t/4c4.4-ô,4`t`4/´.ˆ4-´.4-ô/t.‹´(t`ô/4/4,4/ô/´-4`´,´-t`4-´-4dt/t/tbôaH4/´/ô.ô,4`ˆ4`t-t/4c4.‹¸ ¯H‹´(t-t/4c4cÈ‹˜ÛY[ÛY™XÞXÛ\Ëš[˜[˜ÚX[ÛÜ\˜][ÛœÈ‹´(t.4/t`´-t`´.4aô-t`t.´.4-H4.´,4`4`´/´aô.´.‹´(´-t`t`´/´,´bô.H4`t/t.4/4/´.ˆŒH4,4,´,ô`ô`t`´,‹‘STUTÐSTËLH‹[WKˆÈ“QUUPÒT“ˆ‹´$´bô`t/´.´.4.H4`4.4`t.ˆ4`ôat/´-4,‹´&´.ô.4-t/t`´bÈ‹´)ô.4`t.ô/ˆ4,4.´`´.4,´/tbôaH4`t-t/4-t.H4`H4,´bô`t/´.´.4/4`4.4`t.´/´/‹´)ô.4`t.ô/ˆ4,4.´`´.4,´/tbôaH4`t-t/4-t.H4`H4,´bô`t/´.´.4/4`4.4`t.´/´/‹´`t-t/4-t.H‹´(t/t.4/4/´.ˆ‹˜ÛY[ÛY™XÞXÛ\È‹´(t.4/t`´-t`´.4aô-t`t.´.4-H4.´,4`4`´/´aô.´.‹´(´-t`t`´/´,´bô.H4`t/t.4/4/´.ˆŒH4,4,´,ô`ô`t`´,‹‘STUTÐSTËLH‹WKˆÈ“QUUQQH‹´(t`4-t-4/t.4.H4`ôaô-t,t/tbô.H4/ô`4/´,ô`4-t`t`H‹´'´,t`ôaô-t/t.4-H‹´(t`4-t-4/t-t-H4-ô/t,4aô-t/t.4-H4/ô/´`t.ô-t-4/t.4aH4`´-t`t`´/´,´bôaH4/4-t`´`4.4.ˆ4/ô`4/´,ô`4-t`t`t,‹´(t`4-t-4/t-t-H4-ô/t,4aô-t/t.4-H4/ô`4/´,ô`4-t`t`t,‹‰H‹´(ôaô-t/t.4.ˆ0åÈ4/ô`4/´,ô`4,4/4/4,0åÈ4/ô-t`4.4/´-‹™YXØ][Û—Ü›ÙÜ™\ÜÈ‹´(t.4/t`´-t`´.4aô-t`t.´.4-H4/´,t-t-ô.ô.4aô-t/t/tbô-H4.´,4`4`´/´aô.´.‹ŒÈ4.´,´,4`4`´,4.ÈŒˆ‹‘STUSQUÑLH‹ÍKWKˆÈ“QUUTÕQ‘ˆ‹´$4.´`´.4,´/tbô-H4`t/´`´`4`ô-4/t.4.´.‹’ˆ‹´(t/´`´`4`ô-4/t.4.´.4`t/ˆ4`t`´,4`´`ô`t/´/4(4,4,t/´`´,4-t`ˆ4,ˆ‹t.´/´/t`´`ô`4-H‹´)ô.4`t.ô/ˆ4`4,4,t/´`´,4c´bt.4aH4`t/´`´`4`ô-4/t.4.´/´,ˆ‹´aô-t.Ëˆ‹´(t/t.4/4/´.ˆ‹š—Ù[\ÞYY\È‹´(t.4/t`´-t`´.4aô-t`t.´.4-H4.´,4`4`´/´aô.´.‹´(´-t`t`´/´,´bô.H4`t/t.4/4/´.ˆŒH4,4,´,ô`ô`t`´,‹‘STUR‹LH‹[WKˆÈ“QUUTÐQ‘UH‹´'´`´.´`4bô`´bô-H4/t-t.4`t/ô`4,4,´/t/´`t`´.‹´$t-t-ô/´/ô,4`t/t/´`t`´c‹´'t-t.4`t/ô`4,4,´/t/´`t`´.4`t`´,4`´`ô`H4.´/´`´/´`4bôaH4/t-H4%ô,4.´`4bô`ˆ‹´)ô.4`t.ô/ˆ4/t-t-ô,4.´`4bô`´bôaH4/t-t.4`t/ô`4,4,´/t/´`t`´-t.H‹´b4`‹ˆ‹´(t/t.4/4/´.ˆ‹œØY™]WÙ˜][È‹´(t.4/t`´-t`´.4aô-t`t.´.4-H4/ô`4/´,´-t`4.´.‹´(´-t`t`´/´,´bô.H4`t/t.4/4/´.ˆŒH4,4,´,ô`ô`t`´,‹‘STUTÐQ‘KLH‹WKˆÈ“QUUQ“ÓÑ‹´'4,4`4-´.4/t,4.ôc4/t/´`t`´c4.´`ôat/t.‹´'ô.4`´,4/t.4-H‹´$´bô`4`ôaô.´,4/4.4/t`ô`H4/4,4`´-t`4.4,4.ôc4/tbô-H4.4`t/4-t/t/tbô-H4-ô,4`´`4,4`´bË4-4-t.ôdt/t/tbô-H4/t,4,´bô`4`ôaô.´`È‹´%4/´.ôcÈ4/ô`4.4,tbô.ô.4/ô/´`t.ô-H4`t`´/´.4/4/´`t`´.4/ô`4/´-4`ô.´`´/´,ˆ4.4`t/4-t/H‹‰H‹´(´-t`t`´/´,´bô.H4/ô-t`4.4/´-‹™›ÛÙÜÚ\Y[Ë›ÛÙÜ›ÙXÝ[Û‹›ÛÙÜÚYÈ‹´(t.4/t`´-t`´.4aô-t`t.´,4cÈ4ct.´/´/t/´/4.4.´,4.´`ôat/t.‹´(´-t`t`´/´,´bô.H4`t/t.4/4/´.ˆŒH4,4,´,ô`ô`t`´,‹‘STURÒUÒS‹LH‹ŒWKˆÈ“QUUT“Ò‘PÕ‹´'ô`4/´-t.´`´bÈ4/ô/´-4`4.4`t.´/´/‹´'ô`4/´-t.´`´bÈ‹´'ô`4/´-t.´`´bÈ4`t/ˆ4`t`´,4`´`ô`t/´/4'ô/´-4`4.4`t.´/´/‹´)ô.4`t.ô/ˆ4/ô`4/´-t.´`´/´,ˆ4/ô/´-4`4.4`t.´/´/‹´b4`‹ˆ‹´(t/t.4/4/´.ˆ‹œÝ˜]YÞWÜ›Ú™XÝÈ‹´(t.4/t`´-t`´.4aô-t`t.´,4cÈ4`t`´`4,4`´-t,ô.4cÈ‹´(´-t`t`´/´,´bô.H4`t/t.4/4/´.ˆŒH4,4,´,ô`ô`t`´,‹‘STUT“Ò‹LH‹WKˆÈ“QUUQH‹´'´`´.´`4bô`´bô-H4`t.4,ô/t,4.ôbÈ4.´,4aô-t`t`´,´,‹´%4,4/t/tbô-H‹´)4.4/t,4/t`t/´,´bô-H4.4.4/t`´-t,ô`4,4a´.4/´/t/tbô-H4.´/´/ta4.ô.4.´`´bË4/t-H4.4/4-tc´bt.4-H4`4-tb4-t/t.4cÈ‹´)ô.4`t.ô/ˆ4/´`´.´`4bô`´bôaH4`4,4`tat/´-´-4-t/t.4.H4,ˆ4a4.4/t,4/t`t,4aH4.4.4/t`´-t,ô`4,4a´.4côaH‹´b4`‹ˆ‹´(t/t.4/4/´.ˆ‹™š[˜[˜ÙWÜ™XÛÛ˜Ú[X][Û—Ú\ÜÝY\Ë[YÜ˜][Û—ØÛÛ™›XÝÈ‹´(t/4-tb4,4/t/t,4cÎˆÖ4a4,4.´`ˆ
+È4`t.4`t`´-t/4/tbô.H4.´/´/t`´`4/´.ôc‹´(´-t`t`´/´,´bô.H4`t/t.4/4/´.ˆŒH4,4,´,ô`ô`t`´,‹‘STURS•LH‹WBˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+Y]šXÜË›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈ
+Y˜[YKØ]YÛÜžKYš[š][Û‹›Ü›][K[š]Ü˜Z[‹ÛÝ\˜ÙWÝX›\ËÛÝ\˜ÙWÜ]X[]Kœ™\Ú™\ÜËÝÛ™\—Ù[]WÚY\™Ù]Ý˜[YKÙ[œÚ]]™JHSQTÈ
+ËËËËËËËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝÛÛ[[Û‘›Ü˜šY[H´'t-H4.4-ô/4-t/tcô`´c4a4.4/t,4/t`t/´,´bô.H4a4,4.´`ŽÈ4/t-H4/ô/´-4/ô.4`tbô,´,4`´c4-4/´,ô/´,´/´`4bÎÈ4/t-H4`ô,´/´.ôc4/tcô`´c4/t-H4/t,4.´,4-ôbô,´,4`´c4.4/t-H4/´,t,´.4/tcô`´c4.ôc´-4-t.NÈ4/t-H4`t`´,4,´.4`´c4-4.4,4,ô/t/´-ôbÎÈ4/t-H4`ô-4,4.ôcô`´c4/ô-t`4,´.4aô/tbô-H4-4,4/t/tbô-NÈ4/t-H4,´bô-4,4,´,4`´c4.´`4.4`´.4aô/tbô-H4/ô`4,4,´,ŽÂˆÛÛœÝÛÛ˜XÝÏVÂˆÈRKPÓÓ•PÕTVSQS•È‹´'ô`4/´,ô/t/´-È4/ô.ô,4`´-t-´-t.H‹´'´,t-t-ô.ô.4aô-t/t/tbô-H4/t,4aô.4`t.ô-t/t.4cË4`t`4/´.´.4.4/ô/´-4`´,´-t`4-´-4dt/t/tbô-H4/´/ô.ô,4`´bÈ‹´$´-t`4/´cô`´/t/´`t`´/tbô.H4,ô`4,4a4.4.ˆ4/ô/´`t`´`ô/ô.ô-t/t.4.H4`H4a4,4.´`´/´`4,4/4.4.4-4.4,4/ô,4-ô/´/t/´/‹´)ô.4`´,4`´c4,4,ô`4-t,ô,4`´bÎÈ4`ta4/´`4/4.4`4/´,´,4`´c4/´,tb´cô`t/t.4/4bô.H4/ô`4/´,ô/t/´-ÎÈ4/ô`4-t-4.ô/´-´.4`´c4-ô,4-4,4aô`È‹ÛÛ[[Û‘›Ü˜šY[‹´)4.4/t,4/t`t/´,´bô.H4.´/´/t`´`4/´.ôdt`‹´(´/´aô/t/´`t`´c4`t`ô/4/4bÈ4.4-4,4`´bÈ4/t,4,ô/´`4.4-ô/´/t`´-HÌ4-4/t-t.H‹´'´`´.´.ôc´aô.4`´c4/ô/´`t.ô-HÈ4/ô-t`4.4/´-4/´,ˆ4`H4/´b4.4,t.´/´.H4,t/´.ô-t-HÌ	H‹K´$ˆ4.´,4`4`´/´aô.´-H4.´/´/t`´`4,4.´`´,4,´bô,t`4,4`´c4'´`´.´,4-ô,4`´c4`tcÈ4.4`ô.´,4-ô,4`´c4/´`t/t/´,´,4/t.4-H‹´'ô.ô,4`´dt-´/tbô.H4.´,4.ô-t/t-4,4`4c4.4`4`ôaô/t/´.H4/ô`4/´,ô/t/´-È4/ô`4/´-4/´.ô-´,4c´`ˆ4`4,4,t/´`´,4`´c‹´'t/´,´bô-H4/ô`4.4-ô/t,4.´.4/ô.ô,4`´-t-´/t/´,ô/ˆ4/ô/´,´-t-4-t/t.4cÈ4/t-H4/ô-t`4-t-4,4c´`´`tcÈ4/4/´-4-t.ô.‹´(4,4/t-t-H4.4`t/ô/´.ôc4-ô/´,´,4/t/tbô-H4`´-t`t`´/´,´bô-H4,4,ô`4-t,ô,4`´bÈ4/´`t`´,4c´`´`tcÈ4,ˆ4,4`ô-4.4`´-NÈ4/ô-t`4,´.4aô/tbô-H4-4,4/t/tbô-H4/t-H4`ô-4,4.ôcôc´`´`tcÈ‹´'ô`4/´,ô/t/´-È4/´,t/t/´,´.ôcô-t`´`tcÈ4/4-t-4.ô-t/t/t-t-H4.4,´`4`ôaô/t`ôcˆ‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹™š[˜[˜ÙWØXØÜX[ËÛY[ÛY™XÞXÛ\È—KˆÈRKPÓÓ•PÕSˆ‹´'ô`4/´,ô/t/´-Èˆ‹´'´,t-t-ô.ô.4aô-t/t/tbô-H4/ô.ô,4`´-t-´.4`t`4/´.ˆ4-´.4-ô/t.4`ô`t.ô`ô,ô,4.4aô,4`t`´/´`´,‹´%4.4,4/ô,4-ô/´/H4/´-´.4-4,4-t/4/´.H4a´-t/t/t/´`t`´.4`t-t/4c4.4`H4a4,4.´`´/´`4,4/4.‹´(taô.4`´,4`´c4,4,ô`4-t,ô,4`´bÎÈ4`4,4/t-´.4`4/´,´,4`´c4-4.ôcÈ4,4/t,4.ô.4-ô,È4/ô`4-t-4.ô/´-´.4`´c4.´/´/t`´,4.´`ˆ‹ÛÛ[[Û‘›Ü˜šY[‹´%4.4`4-t.´`´/´`4/ô/ˆ4/ô`4/´-4,4-´,4/‹´'´b4.4,t.´,4/ô`4/´,ô/t/´-ô,ˆ4/t,4.´/´/t`´`4/´.ôc4/t/´.H4,´bô,t/´`4.´-H‹´'´`´.´.ôc´aô.4`´c4/ô`4.šYŒIH4.4.ô.ÛÝ™\˜YÙHŒ	H‹K´'´`´.´,4-È4,ˆ4.´,4`4`´/´aô.´-H4.´/´/t`´`4,4.´`´,4/ô/ˆ4`t-t/4c4-H4.4.ô.4,´`t-t/4`È4`ta´-t/t,4`4.4cˆ‹´)4,4.´`´.4aô-t`t.´.4.Hˆ4.4.´,4`4`´/´aô.´,4`t-t/4c4.4/´`t`´,4c´`´`tcÈ‹´'t/´,´bô-H4/ô/´,´-t-4-t/taô-t`t.´.4-H4/ô`4.4-ô/t,4.´.4/t-H4.4`t/ô/´.ôc4-ô`ôc´`´`tcÈ4-4.ôcÈˆ‹´&4`t`´/´`4.4aô-t`t.´.4.H4,4`ô-4.4`ˆ4`t/´at`4,4/tcô-t`´`tcÈ4/ô/ˆ4/ô/´.ô.4`´.4.´-H4`´-t`t`´/´,´/´,ô/ˆ4.´/´/t`´`ô`4,‹´&4`taô-t-ô,4-t`ˆ4/ô`4/´,ô/t/´-Ë4a4,4.´`´.4aô-t`t.´,4cÈ4,´bô`4`ôaô.´,4/´`t`´,4dt`´`tcÈ‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹˜ÛY[ÛY™XÞXÛ\Ëš[˜[˜ÚX[ÛÜ\˜][ÛœÈ—KˆÈRKPÓÓ•PÕPÒT“ˆ‹´(4.4`t.ˆ4`ôat/´-4,‹´'ô`4/´`t`4/´aô.´,4.´/´/4/4`ô/t.4.´,4a´.4.4/ô/´`t-tbt,4-t/4/´`t`´c4.4`t`4/´.ˆ4-´.4-ô/t.‹´'´,tb´cô`t/t.4/4bô.H4`4.4`t.‹t`t.4,ô/t,4.È4,t-t-È4,4,´`´/´/4,4`´.4aô-t`t.´/´,ô/ˆ4`4-tb4-t/t.4cÈ‹´$´bô-4-t.ô.4`´c4a4,4.´`´/´`4bÎÈ4/ô`4-t-4.ô/´-´.4`´c4aô-t.ô/´,´-taô-t`t.´.4.H4.´/´/t`´,4.´`ŽÈ4`t/´-ô-4,4`´c4-ô,4-4,4aô`È‹ÛÛ[[Û‘›Ü˜šY[‹´%4.4`4-t.´`´/´`4.´.ô.4-t/t`´`t.´/´,ô/ˆ4`t-t`4,´.4`t,‹´%4/´.ôcÈ4/ô/´.ô-t-ô/tbôaH4`4,4/t/t.4aH4.´/´/t`´,4.´`´/´,ˆ‹´'´`´.´.ôc´aô.4`´c4/ô`4.˜[ÙK\ÜÚ]]™H	H4-4,´,4/ô-t`4.4/´-4,‹K´'´`´.´,4-È4`t-t/4c4.4.4.ô.4,´.ô,4-4-t.ôc4a´,4aô-t`4-t-È4.´,4`4`´/´aô.´`È4.´/´/t`´`4,4.´`´,‹´(4`ôaô/t,4cÈ4`4,4,t/´`´,4.´`ô`4,4`´/´`4,4.4.4`t`´/´`4.4cÈ4/´,t`4,4bt-t/t.4.H4/ô`4/´-4/´.ô-´,4c´`´`tcÈ‹´'t/´,´bô-H4/ô/´,´-t-4-t/taô-t`t.´.4-H4/ô`4.4-ô/t,4.´.4`t-t/4c4.4/t-H4/´a´-t/t.4,´,4c´`´`tcÈ‹´(4,4/t-t-H4.4`t/ô/´.ôc4-ô/´,´,4/t/tbô-H4,4,ô`4-t,ô,4`´bÈ4/t-H4`ô-4,4.ôcôc´`´`tcÈ4.4-È4,4`ô-4.4`´,‹´(t.4,ô/t,4.È4/ô/´cô,´.ôcô-t`´`tcÈ4/ô/´-ô-´-H4/ô/´`t.ô-H4`4`ôaô/t/´,ô/ˆ4/ô`4/´`t/4/´`´`4,‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹˜ÛY[ÛY™XÞXÛ\ËYXØ][Û—Ø][™[˜ÙH—KˆÈRKPÓÓ•PÕPÐTÒQÐT‹´(4.4`t.ˆ4.´,4`t`t/´,´/´,ô/ˆ4`4,4-ô`4bô,´,‹´'´`t`´,4`´/´.‹4/ô.ô,4/t/´,´bô-H4/ô/´`t`´`ô/ô.ô-t/t.4cËô`t/ô.4`t,4/t.4cË4,´-t`4/´cô`´/t/´`t`´.‹´%4,4`´,4.4,ô.ô`ô,t.4/t,4,´/´-ô/4/´-´/t/´,ô/ˆ4`4,4-ô`4bô,´,4`H4-4/´/ô`ôbt-t/t.4cô/4.‹´(4,4`t`taô.4`´,4`´c4`ta´-t/t,4`4.4.NÈ4/ô/´.´,4-ô,4`´c4,´.´.ô,4-4/´/ô-t`4,4a´.4.NÈ4`t/´-ô-4,4`´c4-ô,4-4,4aô`È‹ÛÛ[[Û‘›Ü˜šY[‹´)4.4/t,4/t`t/´,´bô.H4-4.4`4-t.´`´/´`‹´%4/t.4/ô`4-t-4`ô/ô`4-t-´-4-t/t.4cÈ4-4/ˆ4/ô/´-4`´,´-t`4-´-4dt/t/t/´,ô/ˆ4`4,4-ô`4bô,´,‹´'´`´.´.ôc´aô.4`´c4/ô`4.4/t-t,4.´`´`ô,4.ôc4/t/´/4.4`t`´/´aô/t.4.´-H4,t/´.ô-t-HÈ4-4/t-t.H‹K´'´`´.´.ôc´aô.4`´c4/4/´-4-t.ôc4/tbô.H4`t.ô/´.H4,ˆ4.´,4`4`´/´aô.´-NÈ4`ô.´,4-ô,4`´c4/ô`4.4aô.4/t`È‹´%4%4(K4/ô.ô,4`´-t-´/tbô.H4.´,4.ô-t/t-4,4`4c4.4`4`ôaô/t/´.H4/ô.ô,4/Kta4,4.´`ˆ4`4,4,t/´`´,4c´`ˆ‹´'ô`4/´,ô/t/´-ô/tbô-H4/ô`4.4-ô/t,4.´.4/ô-t`4-t`t`´,4c´`ˆ4/ô-t`4-t`taô.4`´bô,´,4`´c4`tcÈ‹´&4`t`´/´`4.4cÈ4-ô,4/ô`ô`t.´/´,ˆ4/´`t`´,4dt`´`tcÈ4-4.ôcÈ4,4`ô-4.4`´,‹´'´`t`´,4dt`´`tcÈ4`4`ôaô/t/´.H4`4,4`taôdt`ˆ4,t-t-È4`4,4/t/t-t,ô/ˆ4`t.4,ô/t,4.ô,‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹™š[˜[˜ÙWÙ›Ü™XØ\ÝÚ][\Ëš[˜[˜ÚX[ÛÜ\˜][ÛœÈ—KˆÈRKPÓÓ•PÕPS“ÓPSH‹´'ô/´.4`t.ˆ4,4/t/´/4,4.ô.4.H‹´$4,ô`4-t,ô,4`´bË4.´/´/t`´`4/´.ôc4/tbô-H4`t`ô/4/4bË4/ô/´,´`´/´`4cô-t/4/´`t`´c4.4.4`t`´/´aô/t.4.ˆ‹´(t/ô.4`t/´.ˆ4`4,4`tat/´-´-4-t/t.4.H4`H4a4/´`4/4`ô.ô/´.H4.4`t`tbô.ô.´/´.H4/t,4`t`´`4/´.´.‹´(t`4,4,´/t.4,´,4`´cÈ4/´,tb´cô`t/tcô`´cÈ4`t/´-ô-4,4`´c4-ô,4-4,4aô`È4`t,´-t`4.´.‹ÛÛ[[Û‘›Ü˜šY[‹´$´.ô,4-4-t.ô-taˆ4-4,4/t/tbôaH‹´'ô/´-4`´,´-t`4-´-4dt/t/tbô-H4`4,4`tat/´-´-4-t/t.4cÈ4/t,L4/ô`4/´,´-t`4/´.ˆ‹´'´`´.´.ôc´aô.4`´c4/ô`4.L	H4.ô/´-´/tbôaH4`t.4,ô/t,4.ô/´,ˆ‹K´'´`´.´,4-ô,4`´c4`tcÈ4/´`ˆ4,4,´`´/´/4,4`´.4aô-t`t.´/´.H4/ô`4/´,´-t`4.´.4,´bô,t`4,4/t/t/´,ô/ˆ4/t,4,t/´`4,‹´(4`ôaô/tbô-H4`t,´-t`4.´.4.4.´/´/t`´`4/´.ôc4/tbô-H4`t`ô/4/4bÈ4`4,4,t/´`´,4c´`ˆ‹´'t/´,´bô-H4/t,4,t/´`4bÈ4/t-H4`t.´,4/t.4`4`ôc´`´`tcÈ4/ô`4,4,´.4.ô,4/4.‹´&4`t`´/´`4.4cÈ4/ô/´-4`´,´-t`4-´-4dt/t/tbôaH4`4,4`tat/´-´-4-t/t.4.H4`t/´at`4,4/tcô-t`´`tcÈ‹´'ô`4/´,´-t`4.´,4-ô,4/t.4/4,4-t`ˆ4,t/´.ôc4b4-H4,´`4-t/4-t/t.‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹™š[˜[˜ÙWÜ™XÛÛ˜Ú[X][Û—Ú\ÜÝY\Ë[YÜ˜][Û—ØÛÛ™›XÝÈ—KˆÈRKPÓÓ•PÕP“Ó•TÈ‹´(4-t.´/´/4-t/t-4,4a´.4.4/ô/ˆ4,t/´/t`ô`t,4/‹´'ô/´-4`´,´-t`4-´-4dt/t/tbô-H4`4-t-ô`ô.ôc4`´,4`´bË4/ô`4,4,´.4.ô,4/4/´`´.4,´,4a´.4.4.4,tc´-4-´-t`ˆ‹´)ô-t`4/t/´,´.4.ˆ4`4-t.´/´/4-t/t-4,4a´.4.4`H4a4,4.´`´/´`4,4/4.4-4.ôcÈ4aô-t.ô/´,´-t.´,‹´(ta4/´`4/4.4`4/´,´,4`´c4`t/ô`4,4,´.´`ÎÈ4`t`4,4,´/t.4`´c4`H4/ô`4,4,´.4.ô,4/4.È4-ô,4/ô`4/´`t.4`´c4`4-tb4-t/t.4-H‹ÛÛ[[Û‘›Ü˜šY[‹’‹t-4.4`4-t.´`´/´`‹´%4/´.ôcÈ4`4-t.´/´/4-t/t-4,4a´.4.K4/ô/´.ô-t-ô/tbôaH4/ô`4.4`4`ôaô/t/´/™]šY]È‹´'t-t/4-t-4.ô-t/t/t/ˆ4/´`´.´.ôc´aô.4`´c4/ô`4.4/ô`4.4-ô/t,4.´-H4-4.4`t.´`4.4/4.4/t,4a´.4.4.4.ô.4/t-t/ô/´.ô/t/´/4.4`t`´/´aô/t.4.´-H‹K´'´`´.´.ôc´aô.4`´c4`ta´-t/t,4`4.4.H4.4.ô.4.4`t.´.ôc´aô.4`´c4`t/´`´`4`ô-4/t.4.´,4aô-t`4-t-È4.´/´/t`´`4,4.´`ˆ‹´)4,4.´`´.4aô-t`t.´.4-H4`4-t-ô`ô.ôc4`´,4`´bÈ4.4`4`ôaô/t/´-H4`4-tb4-t/t.4-Hˆ4/´`t`´,4c´`´`tcÈ‹´'t/´,´bô-H4.´,4-4`4/´,´bô-H4/ô`4.4-ô/t,4.´.4/t-H4,4/t,4.ô.4-ô.4`4`ôc´`´`tcÈ‹´&4`t`´/´`4.4cÈ4/ô`4.4/tcô`´bôaH4aô-t.ô/´,´-t.´/´/4`4-tb4-t/t.4.H4`t/´at`4,4/tcô-t`´`tcÈ‹´(4,4`taôdt`ˆ4,´bô/ô/´.ô/tcô-t`´`tcÈ4,´`4`ôaô/t`ôcˆ‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹š—Ù]™[ÜY[—Ü™]Ø\™Ëš[˜[˜ÙWØYÙ]È—KˆÈRKPÓÓ•PÕPÓÓ•S•‹´(4-t.´/´/4-t/t-4,4a´.4.4/ô/ˆ4.´/´/t`´-t/t`´`È‹´'ô`ô,t.ô.4.´,4a´.4.4/ô`4/´`t/4/´`´`4bË4.´.ô.4.´.4.ô.4-4bË4-4/´,ô/´,´/´`4bÈ4.4,´bô`4`ôaô.´,‹´(4-t.´/´/4-t/t-4,4a´.4cÈ4`´-t/4bËôa4/´`4/4,4`´,4`H4/ô/´.ô/t/´.H4,4`´`4.4,t`ôa´.4-t.H‹´(t`4,4,´/t.4,´,4`´c4a4/´`4/4,4`´bÎÈ4/ô`4-t-4.ô,4,ô,4`´c4`´-t`t`ŽÈ4`t/´-ô-4,4`´c4-ô,4-4,4aô`È‹ÛÛ[[Û‘›Ü˜šY[‹´(4`ô.´/´,´/´-4.4`´-t.ôc4/4,4`4.´-t`´.4/t,ô,‹´%4/´/ô/´.ô/t.4`´-t.ôc4/tbô-H4/ô/´-4`´,´-t`4-´-4dt/t/tbô-H4-ô,4cô,´.´.4/t,4`´-t`t`ˆ‹´'´`´.´.ôc´aô.4`´c4/ô`4.4/´`´`t`ô`´`t`´,´.4.4`4-t,4.ôc4/tbôaH4/4-t`´`4.4.ˆ4.4.ô.È4,t-t`t/ô/´.ô-t-ô/tbôaH4`´-t`t`´,4aH‹K´'´`´.´,4-È4,ˆ4.´/´/t`´`4,4.´`´-H4.´/´/t`´-t/t`´/t/´,ô/ˆ4`ta´-t/t,4`4.4cÈ‹´&´/´/t`´-t/t`‹t/ô.ô,4/H4.4`4`ôaô/t,4cÈ4,4/t,4.ô.4`´.4.´,4`4,4,t/´`´,4c´`ˆ‹´'t/´,´bô-H4/4-t`´`4.4.´.4/ô`ô,t.ô.4.´,4a´.4.H4/t-H4/´,t`4,4,t,4`´bô,´,4c´`´`tcÈ4/4/´-4-t.ôc4cˆ‹´&4`t`´/´`4.4cÈ4`´-t`t`´/´,´bôaH4`4-t.´/´/4-t/t-4,4a´.4.H4`t/´at`4,4/tcô-t`´`tcÈ‹´$´bô,t/´`4`´-t/4`t`´,4/t/´,´.4`´`tcÈ4`4`ôaô/tbô/‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹˜ÛÛ[ÜX›XØ][ÛœËÛÛ[Ø]šX][ÛœÈ—KˆÈRKPÓÓ•PÕU‘S‘È‹´(´`4-t/t-4bÈ‹´$´`4-t/4-t/t/tbô-H4`4cô-4bÈÔH4`H4.´,4aô-t`t`´,´/´/4.4`t,´-t-´-t`t`´c4cˆ‹´'t,4/ô`4,4,´.ô-t/t.4-H4.4-ô/t,4aô.4/4/´-H4.4-ô/4-t/t-t/t.4-H4,t-t-È4/ô`4.4aô.4/t/t/´,ô/ˆ4`ô`´,´-t`4-´-4-t/t.4cÈ‹´(4,4`t`taô.4`´,4`´c4`´`4-t/t-È4/ô/´.´,4-ô,4`´c4`t`4,4,´/t-t/t.4-H4.4/ô/´.´`4bô`´.4-H‹ÛÛ[[Û‘›Ü˜šY[‹´$t.4-ô/t-t`Kt,4/t,4.ô.4`´.4.ˆ‹´%4/´.ôcÈ4`´`4-t/t-4/´,‹4/ô/´-4`´,´-t`4-4.4,´b4.4at`tcÈ4`t.ô-t-4`ôc´bt.4/4/ô-t`4.4/´-4/´/‹´'´`´.´.ôc´aô.4`´c4/ô`4.ÛÝ™\˜YÙHÈ4/ô-t`4.4/´-4,‹K´'´`´.´.ôc´aô.4`´c4-4.ôcÈ4,´bô,t`4,4/t/t/´.H4/4-t`´`4.4.´.‹´)4,4.´`´.4aô-t`t.´.4-H4,ô`4,4a4.4.´.4/´`t`´,4c´`´`tcÈ‹´'t/´,´bô-H4`4cô-4bÈ4/t-H4/ô/´.ô`ôaô,4c´`ˆ4/4/´-4-t.ôc4/t`ôcˆ4.4/t`´-t`4/ô`4-t`´,4a´.4cˆ‹´&4`t`´/´`4.4cÈ4`4cô-4/´,ˆ4/t-H4`ô-4,4.ôcô-t`´`tcÈ‹´'ô/´.ôc4-ô/´,´,4`´-t.ôc4.4/t`´-t`4/ô`4-t`´.4`4`ô-t`ˆ4,ô`4,4a4.4.ˆ4`t,4/4/´`t`´/´cô`´-t.ôc4/t/ˆ‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹˜[˜[]XÜ×ÛY]šX×ÙYš[š][ÛœÈ—KˆÈRKPÓÓ•PÕSQUÑÈ‹´(4-t.´/´/4-t/t-4,4a´.4.4/ô/ˆ4/4-t`´/´-4.4.´,4/‹´$´-t`4`t.4cÈ4/ô`4/´,ô`4,4/4/4bË4/ô`4/´,ô`4-t`t`K4/ô/´`t-tbt,4-t/4/´`t`´c4.4/´,t-t-ô.ô.4aô-t/t/t,4cÈ4/´,t`4,4`´/t,4cÈ4`t,´cô-ôc‹´'ô`4/´,´-t`4cô-t/4,4cÈ4,ô.4/ô/´`´-t-ô,4`ô.ô`ôaôb4-t/t.4cÈ4/ô`4/´,ô`4,4/4/4bÈ‹´'ô`4-t-4.ô/´-´.4`´c4ct.´`t/ô-t`4.4/4-t/t`ŽÈ4`t,´cô-ô,4`´c4`H4,´-t`4`t.4-t.NÈ4`t/´-ô-4,4`´c4-ô,4-4,4aô`È4/4-t`´/´-4.4`t`´`È‹ÛÛ[[Û‘›Ü˜šY[‹´$ô.ô,4,´/tbô.H4/4-t`´/´-4.4`t`ˆ‹´&4-ô/4-t/t-t/t.4-H4`ôaô-t,t/t/´,ô/ˆ4`4-t-ô`ô.ôc4`´,4`´,4/ô/´`t.ô-H4`ô`´,´-t`4-´-4dt/t/t/´,ô/ˆ4`´-t`t`´,‹´'´`´.´.ôc´aô.4`´c4/ô`4.4/4,4.ô/´.H4,´bô,t/´`4.´-H4.4.ô.4/t-t,ô,4`´.4,´/t/´/ÝX\™˜Z[‹K´'´`´.´,4-È4`t-t/4c4.ô/ô-t-4,4,ô/´,ô,4.4.ô.4,´`t-t,ô/ˆ4`ta´-t/t,4`4.4cÈ4aô-t`4-t-È4.´/´/t`´`4,4.´`ˆ‹´'ô`4/´,ô`4,4/4/4bË4-´`ô`4/t,4.È4.4`4`ôaô/t,4cÈ4`4,4,t/´`´,4/4-t`´/´-4.4`t`´,4/´`t`´,4c´`´`tcÈ‹´&4`t.´.ôc´aôdt/t/tbô-H4`ôaô-t,t/tbô-H4/ô`4.4-ô/t,4.´.4/t-H4,4/t,4.ô.4-ô.4`4`ôc´`´`tcÈ‹´&4`t`´/´`4.4cÈ4,´-t`4`t.4.H4.4`4-tb4-t/t.4.H4`t/´at`4,4/tcô-t`´`tcÈ‹´$ô.4/ô/´`´-t-ôbÈ4a4/´`4/4.4`4`ôc´`´`tcÈ4,´`4`ôaô/t`ôcˆ‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹™YXØ][Û—Ü›ÙÜ™\ÜËYXØ][Û—Ù™YY˜XÚËYXØ][Û—Ü›ÙÜ˜[\È—KˆÈRKPÓÓ•PÕR‹T’TÒÈ‹´'ô`4/´,ô/t/´-È4.´,4-4`4/´,´bôaH4`4.4`t.´/´,ˆ‹´$´,4.´,4/t`t.4.4`t`4/´.´.4,4-4,4/ô`´,4a´.4.4-4/´`t`´`ô/ôbÈ4.4/ô/´-4`´,´-t`4-´-4dt/t/tbô-H4/´a´-t/t.´.‹´(4,4/t/t.4.H4/´`4,ô,4/t.4-ô,4a´.4/´/t/tbô.H4`t.4,ô/t,4.È4,t-t-È4/´a´-t/t.´.4.ô.4aô/t/´`t`´.‹´'ô/´.´,4-ô,4`´c4/´/ô-t`4,4a´.4/´/t/tbô-H4a4,4.´`´/´`4bÎÈ4/ô`4-t-4.ô/´-´.4`´c™]šY]Èˆ‹ÛÛ[[Û‘›Ü˜šY[‹’‹t-4.4`4-t.´`´/´`‹´%4/´.ôcÈ4/ô`4-t-4/´`´,´`4,4btdt/t/tbôaH4/´/ô-t`4,4a´.4/´/t/tbôaH4`t`4bô,´/´,ˆ‹´'´`´.´.ôc´aô.4`´c4/ô`4.4/ô`4.4-ô/t,4.´-H4/ô`4-t-4,´-ôcô`´/´`t`´.4.4.ô.4-´,4.ô/´,t-H4`t`ô,tb´-t.´`´,‹K´(t/´`´`4`ô-4/t.4.ˆ4.4.ô.ˆ4/´a4/´`4/4.ôcô-t`ˆ4/´`´.´,4-È4,ˆ4.´/´/t`´`4,4.´`´-H‹’‹t/ô`4/´a´-t`t`tbÈ4.4/´`´aôdt`´bÈ4`4,4,t/´`´,4c´`ˆ4,t-t-È4/ô`4/´,ô/t/´-ô,‹´'t/´,´bô-H4.´,4-4`4/´,´bô-H4/ô`4.4-ô/t,4.´.4`t`ô,tb´-t.´`´,4/t-H4,4/t,4.ô.4-ô.4`4`ôc´`´`tcÈ‹´&4`t`´/´`4.4aô-t`t.´.4.H4.´,4-4`4/´,´bô.H4a4,4.´`ˆ4`t/´at`4,4/tcô-t`´`tcÈ4/ô/ˆ4`4-t,ô.ô,4/4-t/t`´`È‹´(4.4`t.ˆ4/´a´-t/t.4,´,4-t`´`tcÈ4`´/´.ôc4.´/ˆ4,´`4`ôaô/t`ôcˆ‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹š—Ý˜XØ[˜ÚY\Ë—ÛÛ˜›Ø\™[™Ë—ØXØÙ\ÜÙ\È—KˆÈRKPÓÓ•PÕTÕTQTˆ‹´(t`4,4,´/t-t/t.4-H4/ô/´-4`4cô-4aô.4.´/´,ˆ‹´)´-t/t,4`t`4/´.‹4.´,4aô-t`t`´,´/‹4`4-t.t`´.4/t,Ë4,ô,4`4,4/t`´.4cÈ4.4-4/´,ô/´,´/´`‹´'´,tb´cô`t/t.4/4bô.H4`4-t.t`´.4/t,È4/ô`4-t-4.ô/´-´-t/t.4.H4,t-t-È4,4,´`´/´-ô,4.´`ô/ô.´.‹´(t`4,4,´/t.4`´cÈ4/ô/´.´,4-ô,4`´c4a4/´`4/4`ô.ô`ÎÈ4/ô`4-t-4.ô/´-´.4`´cÚÜ\Ý‹ÛÛ[[Û‘›Ü˜šY[‹´(4`ô.´/´,´/´-4.4`´-t.ôc4-ô,4.´`ô/ô/´.ˆ‹´+t.´/´/t/´/4.4cÈ4/ô`4.4`t/´at`4,4/t-t/t.4.]X[]HÝX\™˜Z[‹´'´`´.´.ôc´aô.4`´c4/ô`4.4/t-t/ô/´.ô/tbôaH4.´/´/4/4-t`4aô-t`t.´.4aH4/ô`4-t-4.ô/´-´-t/t.4côaH‹K´'´`´.´.ôc´aô.4`´c4`ta´-t/t,4`4.4.H4`t`4,4,´/t-t/t.4cÈ4,ˆ4.´/´/t`´`4,4.´`´-H‹´(´,4,t.ô.4a´,4/ô`4-t-4.ô/´-´-t/t.4.H4.4`4`ôaô/t/´.H4,´bô,t/´`4`4,4,t/´`´,4c´`ˆ‹´'t/´,´bô-H4/ô`4-t-4.ô/´-´-t/t.4cÈ4/t-H4`4,4/t-´.4`4`ôc´`´`tcÈ4/4/´-4-t.ôc4cˆ‹´&4`t`´/´`4.4cÈ4-ô,4.´`ô/ô/´.ˆ4`t/´at`4,4/tcô-t`´`tcÈ‹´(t`4,4,´/t-t/t.4-H4,´bô/ô/´.ô/tcô-t`´`tcÈ4,´`4`ôaô/t`ôcˆ‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹œ›ØÝ\™[Y[ÜÝ\Y\œËÝ\Y\—ÛÙ™™\œÈ—KˆÈRKPÓÓ•PÕSRTÔÒS‘ËQÐÔÈ‹´'´`´`t`ô`´`t`´,´`ôc´bt.4-H4-4/´.´`ô/4-t/t`´bÈ‹´'´/ô-t`4,4a´.4cË4-4/´,ô/´,´/´`4.4/´,tcô-ô,4`´-t.ôc4/tbô.H4.´/´/4/ô.ô-t.´`ˆ4/ô-t`4,´.4aô.´.‹´(t/ô.4`t/´.ˆ4/t-t-4/´`t`´,4c´bt.4aH4`´.4/ô/´,ˆ4.4,´.ô,4-4-t.ô-taˆ‹´'ô`4/´,´-t`4.4`´c4.´/´/4/ô.ô-t.´`ŽÈ4`t/´-ô-4,4`´c4/´-4/t`È4-ô,4-4,4aô`È‹ÛÛ[[Û‘›Ü˜šY[‹´$ô.ô,4,´/tbô.H4,t`ôat,ô,4.ô`´-t`‹´%4/´.ôcÈ4.´/´/4/ô.ô-t.´`´/´,‹4-ô,4.´`4bô`´bôaH4-4/ˆ4/´`´aôdt`´/t/´.H4-4,4`´bÈ‹´'´`´.´.ôc´aô.4`´c4/ô`4.4/t-t,´-t`4/t/´.H4/4,4`´`4.4a´-H4/´,tcô-ô,4`´-t.ôc4/tbôaH4-4/´.´`ô/4-t/t`´/´,ˆ‹K´'´`´.´.ôc´aô.4`´c4,4,´`´/´/ô`4/´,´-t`4.´`È4,ˆ4.´,4`4`´/´aô.´-H4.´/´/t`´`4,4.´`´,‹´(4-t-t`t`´`4/ô-t`4,´.4aô.´.4.4`4`ôaô/t,4cÈ4.´/´/4/ô.ô-t.´`´/t/´`t`´c4`4,4,t/´`´,4c´`ˆ‹´'t/´,´bô-H4/´/ô-t`4,4a´.4.4/t-H4/ô`4/´,´-t`4côc´`´`tcÈ4`ta´-t/t,4`4.4-t/‹´%4/´.´`ô/4-t/t`´bÈ4.4.4`t`´/´`4.4cÈ4-ô,4-4,4aÈ4`t/´at`4,4/tcôc´`´`tcÈ‹´&´/´/t`´`4/´.ôc4,´bô/ô/´.ô/tcô-t`´`tcÈ4,´`4`ôaô/t`ôcˆ‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹˜XØÛÝ[[™×ØÛÛ\][™\Ü×ØÚXÚÜËXØÛÝ[[™×ÙØÝ[Y[È—KˆÈRKPÓÓ•PÕQPT“KTÒQÓSÈ‹´(4,4/t/t.4-H4`t.4,ô/t,4.ôbÈ4/ô`4/´,t.ô-t/‹´'ô`4/´`t`4/´aô.´.4/t-t.4`t/ô`4,4,´/t/´`t`´.4/´`´.´.ô/´/t-t/t.4cÈÔH4.4.´,4aô-t`t`´,´/ˆ4.4`t`´/´aô/t.4.´/´,ˆ‹´'ô`4.4/´`4.4`´.4-ô.4`4/´,´,4/t/t,4cÈ4/´aô-t`4-t-4c4`H4-4/´.´,4-ô,4`´-t.ôc4`t`´,´,4/4.‹´'´,tb´-t-4.4/t.4`´c4`t.4,ô/t,4.ôbÎÈ4/´,tb´cô`t/t.4`´c4/ô`4.4/´`4.4`´-t`ŽÈ4/ô`4-t-4.ô/´-´.4`´c4-ô,4-4,4aô`È‹ÛÛ[[Û‘›Ü˜šY[‹´'´/ô-t`4,4a´.4/´/t/tbô.H4-4.4`4-t.´`´/´`‹´(t`4-t-4/t-t-H4,´`4-t/4cÈ4/´`ˆ4`t.4,ô/t,4.ô,4-4/ˆ4/´`´,´-t`´`t`´,´-t/t/t/´,ô/ˆ‹´'´`´.´.ôc´aô.4`´c4/ô`4.4/ô`4/´/ô`ô`t.´-H4.´`4.4`´.4aô/t/´,ô/ˆ4`t/´,tbô`´.4cÈ4.4.ô.4/ô-t`4-t,ô`4`ô-ô.´-H4/´aô-t`4-t-4.‹K´'´`´.´.ôc´aô.4`´c4.´/´/t.´`4-t`´/tbô.H4-4/´/4-t/H4.4.ô.4,´-t`tc4`ta´-t/t,4`4.4.H‹´%4/´/4-t/t/tbô-H4-´`ô`4/t,4.ôbÈ4.4-ô,4-4,4aô.4/ô`4/´-4/´.ô-´,4c´`ˆ4`4,4,t/´`´,4`´c‹´'t/´,´bô-H4/4-t-´/4/´-4`ô.ôc4/tbô-H4/ô`4.4-ô/t,4.´.4/t-H4,4,ô`4-t,ô.4`4`ôc´`´`tcÈ‹´%4/´/4-t/t/tbô-H4a4,4.´`´bÈ4/t-H4`ô-4,4.ôcôc´`´`tcÈ‹´(t.4,ô/t,4.ôbÈ4/ô`4/´`t/4,4`´`4.4,´,4c´`´`tcÈ4/ô/ˆ4/4/´-4`ô.ôcô/4,´`4`ôaô/t`ôcˆ‹´$4.´`´.4,´-t/H‹´'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/‹\ÚÜËØY™]WÙ˜][ËÝ˜]YÞWÙ]šX][ÛœË[YÜ˜][Û—ØÛÛ™›XÝÈ—BˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+ÛÛ˜XÝË›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈZWÜ›ØÙ\Ü×ØÛÛ˜XÝÈ
+Y˜[YK[œ]Ù]K^XÝYÜ™\Ý[[ÝÙYØXÝ[ÛœË›Ü˜šY[—ØXÝ[ÛœË[X[—ÛÝÛ™\‹ÛÜÝÛZ[›Ü‹™[™Yš]ÛY]šXË]]×ÜÝÜØÛÛ™][Û‹ÜÛÝ]Ø[ÝÙYÜÛÝ]Ü›ØÙY\™K˜[˜XÚ×Ù[˜Ý[Û˜[]KÝÜYÙ]WÜ›ØÙ\ÜÚ[™Ë\ÝÜšXØ[Ù]WÜÛXÞKÜÛÝ]Ú[\XÝÝ]\Ë™\œÚ[Û‹ÛÝ\˜ÙWÜ™YœÊHSQTÈ
+ËËËËËËËËËËËËËËËËËËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝÚYÛ˜[ÏVÂˆÈRKTÒQËUPÐTÒ‹RKPÓÓ•PÕPÐTÒQÐT‹´)4.4/t,4/t`tbÈ‹´'ô`4/´,ô/t/´-È‹´$´bô`t/´.´.4.H‹´$ˆ4`´-t`t`´/´,´/´/4`ta´-t/t,4`4.4.4,´/´-ô/4/´-´-t/H4.´,4`t`t/´,´bô.H4`4,4-ô`4bô,ˆ4`t-t/t`´cô,t`4cÈ‹´'ô`4/´,ô/t/´-ô/tbô.H4/´`t`´,4`´/´.ˆ4/ô`4/´at/´-4.4`ˆ4/t.4-´-H4/t`ô.ôcÈ4/ô/´`t.ô-H4,4`4-t/t-4bÈ‹´'t,4aô,4.ôc4/tbô.H4/´`t`´,4`´/´.ˆKˆ4/4.ô/H8 ¯NÈ4,´-t`4/´cô`´/t/´`t`´/tbô-H4/ô/´`t`´`ô/ô.ô-t/t.4cÈ4/t-H4/ô/´.´`4bô,´,4c´`ˆ4-ô,4`4/ô.ô,4`´`È4.4,4`4-t/t-4`È‹´'ô`4/´,´-t`4.4`´c4-4,4`´bÈ4/ô/´`t`´`ô/ô.ô-t/t.4.H4.4/ô/´-4,ô/´`´/´,´.4`´c4aô-t.ô/´,´-taô-t`t.´/´-H4`4-tb4-t/t.4-H4/ô/ˆ4.´,4.ô-t/t-4,4`4cˆ‹‘ËULK‹Œˆ‹Œ‹´'t/´,´bô.H—KˆÈRKTÒQËUTVSQS•‹RKPÓÓ•PÕTVSQS•È‹´)4.4/t,4/t`tbÈ‹´'ô`4/´,ô/t/´-È‹´(t`4-t-4/t.4.H‹´'t,H4`t-t/t`´cô,t`4cÈ4/´-´.4-4,4-t`´`tcÈMH8 ¯H4`´-t`t`´/´,´bôaH4/´/ô.ô,4`ˆ‹´(t`ô/4/4,™^Ü^[Y[ÛZ[›Üˆ4,4.´`´.4,´/tbôaH4`t-t/4-t.H‹´(´`4.4`t.4/t`´-t`´.4aô-t`t.´.4-H4`t-t/4c4.4.4/4-tc´`ˆ4-ô,4/ô.ô,4/t.4`4/´,´,4/t/tbô.H4/ô.ô,4`´dt-ˆ4/t,4/´-4/t`È4-4,4`´`È‹´(t,´-t`4.4`´c4`H4`4-t,4.ôc4/tbô/4`4-t-t`t`´`4/´/4/ô/´`t.ô-H4/ô/´-4.´.ôc´aô-t/t.4cÈ4.4`t`´/´aô/t.4.´,‹“Q‘KULMQ‘KULŒKQ‘KULÌH‹N´'t/´,´bô.H—KˆÈRKTÒQËUSˆ‹RKPÓÓ•PÕSˆ‹´&´.ô.4-t/t`´bÈ‹´'ô`4/´,ô/t/´-È‹´'t.4-ô.´.4.H‹“Q‘KULM4.4/4-t-t`ˆ4/t,4.4,t/´.ôc4b4.4.H4`´-t`t`´/´,´bô.Hˆ‹Ž8 ¯H4-ô,4/4-t`tcôa´-t,ˆ4,ˆ4`t.4/t`´-t`´.4aô-t`t.´/´.H4.´,4`4`´/´aô.´-H‹´)4,4.´`´.4aô-t`t.´,4cÈ4a4/´`4/4`ô.ô,4/ô/´.´,4-ô,4/t,4/t/ˆ4.´.ô.4-t/t`´`t.´.4-H4-4,4/t/tbô-H4`´-t`t`´/´,´bô-H‹´&4`t/ô/´.ôc4-ô/´,´,4`´c4`´/´.ôc4.´/ˆ4-4.ôcÈ4/ô`4/´,´-t`4.´.4.4/t`´-t`4a4-t.t`t,‹“Q‘KULM’S‹UTÕPÓQS•LM‹MK´'t/´,´bô.H—KˆÈRKTÒQËUPÒT“ˆ‹RKPÓÓ•PÕPÒT“ˆ‹´&´.ô.4-t/t`´bÈ‹´(4.4`t.ˆ‹´$´bô`t/´.´.4.H‹‘SKULŒH4`´`4-t,t`ô-t`ˆ4aô-t.ô/´,´-taô-t`t.´/´,ô/ˆ4.´/´/t`´,4.´`´,‹´(4.4`t.ˆÌŽˆ4/ô`4/´`t`4/´aô.´,4.4/t-t`ˆ4/´`´,´-t`´,Lˆ4-4/t-t.H‹´'ô`4,4,´.4.ô/ˆ4`t`ô/4/4.4`4`ô-t`ˆ4`´/´.ôc4.´/ˆ4-4,´,4cô,´/t/ˆ4,´.4-4.4/4bôaH4`´-t`t`´/´,´bôaH4a4,4.´`´/´`4,‹´'t,4-ô/t,4aô.4`´c4.´`ô`4,4`´/´`4`È4/ô`4/´,´-t`4.´`Ë4/t-H4/ô`4.4/t.4/4,4`´c4`4-tb4-t/t.4-H4-ô,4`t-t/4c4cˆ‹“Q‘KULŒKSKULŒH‹Ì‹´'t/´,´bô.H—KˆÈRKTÒQËUPS“ÓPSH‹RKPÓÓ•PÕPS“ÓPSH‹´)4.4/t,4/t`tbÈ‹´$4/t/´/4,4.ô.4cÈ‹´$´bô`t/´.´.4.H‹´%4-t`´,4.ô.4`4,4`tat/´-4/´,ˆ4,4/ô`4-t.ôcÈ4/t-H4,´at/´-4cô`ˆ4,ˆ4.4`´/´,ô/´,´`ôcˆ4`t`´`4/´.´`È‹´(4,4`tat/´-´-4-t/t.4-HŒHNMKÎ8 ¯H4/4-t-´-4`È4`t`´`4/´.´,4/4.4.4`tat/´-4/t/´,ô/ˆ4'´%4%4(H‹´(t`4,4,´/t-t/tbÈ4a4/´`4/4`ô.ôbÈ4.4-ô/t,4aô-t/t.4cÈ4/´-4/t/´,ô/ˆÖÈ4/´`4.4,ô.4/t,4.È4/t-H4.4-ô/4-t/tdt/H‹´$´bô/ô/´.ô/t.4`´c4`t,´-t`4.´`È4,´.ô,4-4-t.ôc4a´-t/4'´%4%4(H‹‘’S‹T‘PËLKS•PÓ‘‹USÑËLH‹NK´'t/´,´bô.H—KˆÈRKTÒQËUP“Ó•TÈ‹RKPÓÓ•PÕP“Ó•TÈ‹’ˆ‹´(4-t.´/´/4-t/t-4,4a´.4cÈ‹´(t`4-t-4/t.4.H‹´%4-t/ô`4-t/4.4`4/´,´,4/t.4-H‘UËULŒËLH4/t-t.ôc4-ôcÈ4/ô`4.4/4-t/tcô`´c4,4,´`´/´/4,4`´.4aô-t`t.´.‹´(4-tb4-t/t.4-H4/t,4at/´-4.4`´`tcÈ4/t,4`t/´,ô.ô,4`t/´,´,4/t.4.4.4/´/ô.4`4,4-t`´`tcÈ4/t,4`t.4/t`´-t`´.4aô-t`t.´.4.HÔH‹´&´,4-4`4/´,´/´-H4/ô/´`t.ô-t-4`t`´,´.4-H4cô,´.ôcô-t`´`tcÈYÚZ[\XÝ4.4`´`4-t,t`ô-t`ˆ4aô-t.ô/´,´-t.´,‹´'ô`4/´,´-t`4.4`´c4/´`t/t/´,´,4/t.4-K4/ô`4,4,´.4.ô/ˆ4/4/´`´.4,´,4a´.4.4.4/ô`4,4,´/ˆ4`t/´`´`4`ô-4/t.4.´,4/t,™]šY]È‹”‘UËULŒËLKU‹ULŒËLˆ‹MK´'t/´,´bô.H—KˆÈRKTÒQËUPÓÓ•S•‹RKPÓÓ•PÕPÓÓ•S•‹´&´/´/t`´-t/t`ˆ‹´(4-t.´/´/4-t/t-4,4a´.4cÈ‹´'t.4-ô.´.4.H‹´'ô/´,´`´/´`4.4`´c4`´-t/4`ÈP‹ULÌH4.´,4.ˆ4.´/´/t`´`4/´.ô.4`4`ô-t/4bô.H4`´-t`t`ˆ‹´'ô`ô,t.ô.4.´,4a´.4cÈ4`t,´cô-ô,4/t,4`HH4-4/´,ô/´,´/´`4/´/4.ˆ8 ¯H4`t.4/t`´-t`´.4aô-t`t.´/´.H4,´bô`4`ôaô.´.‹´$4`´`4.4,t`ôa´.4cÈ4/ô/´.ô/t,4cË4/t/ˆTH4`t/´a´`t-t`´-t.H4.Ô“H4/t-H4/ô/´-4.´.ôc´aô-t/tbÈ‹´(t/´-ô-4,4`´c4`´-t`t`ˆ4/ô.ô,4/t,4/t-H4/4,4`tb4`´,4,t.4`4/´,´,4`´c4,tc´-4-´-t`ˆ4,4,´`´/´/4,4`´.4aô-t`t.´.‹”P‹ULÌKU‹ULÌH‹Ž´'t/´,´bô.H—KˆÈRKTÒQËUSQUÑ‹RKPÓÓ•PÕSQUÑÈ‹´'´,t`ôaô-t/t.4-H‹´(4-t.´/´/4-t/t-4,4a´.4cÈ‹´(t`4-t-4/t.4.H‹´(4,4-ô-4-t.ô.4`´c4-4/´/4,4b4/t-t-H4-ô,4-4,4/t.4-H4/t,4/´,tcô-ô,4`´-t.ôc4/t`ôcˆ4.4-4/´/ô/´.ô/t.4`´-t.ôc4/t`ôcˆ4aô,4`t`´.‹´'´a´-t/t.´,‘‹ULMHHÎÈ4,´bô/ô/´.ô/t-t/t.4-H4-ô,4/tcô.ô/ˆ4,t/´.ô-t-H4aô,4`t,‹´'´-4.4/H4/´,t-t-ô.ô.4aô-t/t/tbô.H4/´`´-ôbô,ˆ4/t-H4-4/´.´,4-ôbô,´,4-t`ˆ4cta4a4-t.´`ˆ4-4.ôcÈ4,´`t-t.H4/ô`4/´,ô`4,4/4/4bÈ‹´'4-t`´/´-4.4`t`´`È4/ô`4/´,´-t`t`´.4/4,4.ôbô.H4`´-t`t`ˆ4/t/´,´/´.H4,´-t`4`t.4.‹‘‘‹ULMK‘ËULLˆ‹ŒK´'t/´,´bô.H—KˆÈRKTÒQËURˆ‹RKPÓÓ•PÕR‹T’TÒÈ‹’ˆ‹´(4.4`t.ˆ‹´(t`4-t-4/t.4.H‹´$4`´`´-t`t`´,4a´.4cÈSTULŒÈ4/ô`4.4,t.ô.4-´,4-t`´`tcÈ‹´*4,4,ÈÓ‹ULŒËLH4/t,4-ô/t,4aô-t/H4/t,H4`t-t/t`´cô,t`4cÈ‹´+t`´/ˆ4/´/ô-t`4,4a´.4/´/t/tbô.H4`t`4/´.‹4/t-H4/´a´-t/t.´,4.ô.4aô/t/´`t`´.4`t/´`´`4`ô-4/t.4.´,‹’ˆ4/ô`4/´,´-t`4cô-t`ˆ4,ô/´`´/´,´/t/´`t`´c4/4,4`´-t`4.4,4.ô/´,ˆ4.4/´`´,´-t`´`t`´,´-t/t/t/´,ô/ˆ‹“Ó‹ULŒËLKU‹ULŒËLˆ‹L´'t/´,´bô.H—KˆÈRKTÒQËUTÕTQTˆ‹RKPÓÓ•PÕTÕTQTˆ‹´%ô,4.´`ô/ô.´.‹´(t`4,4,´/t-t/t.4-H‹´'t.4-ô.´.4.H‹´'ô`4-t-4.ô/´-´-t/t.4-H4,´bô,t.4`4,4-t`´`tcÈ4/ô/ˆ4a´-t/t-K4`t`4/´.´`È4.4.´,4aô-t`t`´,´`È‹´)4/´`4/4`ô.ô,4`t`4,4,´/t-t/t.4cÈ4ct`´,4/ô,L4`4,4`t.´`4bô`´,4,ˆ4.´,4`4`´/´aô.´-H4/ô`4-t-4.ô/´-´-t/t.4cÈ‹´(4bô/t/´.ˆ4.4.´/´/4/4-t`4aô-t`t.´.4-H4/ô`4-t-4.ô/´-´-t/t.4cÈ4`t.4/t`´-t`´.4aô-t`t.´.4-H‹´(t/´at`4,4/t.4`´c4aô-t.ô/´,´-taô-t`t.´/´-H4`t/´,ô.ô,4`t/´,´,4/t.4-H4-ô,4.´`ô/ô.´.‹”‘TKULÑ‘”‹ULLŒˆ‹ÍË´'t/´,´bô.H—KˆÈRKTÒQËUQÐÈ‹RKPÓÓ•PÕSRTÔÒS‘ËQÐÔÈ‹´$t`ôat,ô,4.ô`´-t`4.4cÈ‹´%4/´.´`ô/4-t/t`ˆ‹´$´bô`t/´.´.4.H‹´%4.ôcÈ4/´/ô-t`4,4a´.4.4.´`ôat/t.4/´`´`t`ô`´`t`´,´`ô-t`ˆ4`taôdt`ˆ‹PÐËPÓÓTUQ“ÓÑˆ4/´,tcô-ô,4`´-t.ôc4/tbÈ4`taôdt`ˆ4.4/t,4.´.ô,4-4/t,4cÎÈ4`taôdt`ˆ4/´`´`t`ô`´`t`´,´`ô-t`ˆ‹´'ô`4/´,´-t`4.´,4/´`t/t/´,´,4/t,4/t,4cô,´/t/´.H4/4,4`´`4.4a´-H4.´/´/4/ô.ô-t.´`´,‹´'ô/´.ô`ôaô.4`´c4-4/´.´`ô/4-t/t`ˆ4.4.ô.4-ô,4a4.4.´`t.4`4/´,´,4`´c4/ô`4.4/4-t/t.4/4/´-H4.4`t.´.ôc´aô-t/t.4-H‹PÐËPÓÓTUQ“ÓÑ’S‹UTÕQ“ÓÑPÓÔÕLŒH‹L´$ˆ4`4,4,t/´`´-H—KˆÈRKTÒQËUQPT“H‹RKPÓÓ•PÕQPT“KTÒQÓSÈ‹´$t-t-ô/´/ô,4`t/t/´`t`´c‹´(4,4/t/t.4.H4`t.4,ô/t,4.È‹´$´bô`t/´.´.4.H‹”ÐQ‘KQ“ULÌˆ4/´`t`´,4dt`´`tcÈ4,ˆ4`4,4,t/´`´-H‹´%4.4,4,ô/t/´`t`´.4.´,4/t,4aô,4`´,4-ô,4,´-t`4b4-t/t.4-H4.4,4.´`ˆ4/´`´`t`ô`´`t`´,´`ôc´`ˆ‹´'ô`4.4/´`4.4`´-t`ˆ4-ô,4-4,4/H4`´cô-´-t`t`´c4cˆ4.ÓH4/ô`4,4,´.4.ô,4,t-t-ô/´/ô,4`t/t/´`t`´.‹´'´`´,´-t`´`t`´,´-t/t/tbô.H4/ô`4/´,´-t`4cô-t`ˆ4-ô,4,´-t`4b4-t/t.4-H4.4-4/´.´`ô/4-t/t`‹4&4&4/t-H4-ô,4.´`4bô,´,4-t`ˆ4.4/ta´.4-4-t/t`ˆ‹”ÐQ‘KQ“ULÌ‹ÐQ‘KT‘TULÌˆ‹LË´'t/´,´bô.H—BˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+ÚYÛ˜[Ë›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È[˜[]XÜ×ÜÚYÛ˜[È
+YÛÛ˜XÝÚYÛXZ[‹ÚYÛ˜[Ý\KÙ]™\š]K]K]šY[˜ÙK^[˜][Û‹™XÛÛ[Y[™][Û‹ÛÝ\˜ÙWÜ™YœËÛÛ™šY[˜ÙKÝ]\Ë]XÝYØ]
+HSQTÈ
+ËËËËËËËËËËËË	ÌŒ‹LLŒULŒLŒ‰ÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆÛÛœÝ[œÏVÂˆÈRKT•S‹UPÐTÒLH‹RKPÓÓ•PÕPÐTÒQÐT‹´(t.4,ô/t,4.È‹´$´/´-ô/4/´-´-t/H4/´`´`4.4a´,4`´-t.ôc4/tbô.H4/´`t`´,4`´/´.ˆ4`t-t/t`´cô,t`4cÈ‹Œˆ‹´'t,4aô,4.ôc4/tbô.H4/´`t`´,4`´/´.ˆ
+È4,´-t`4/´cô`´/t/´`t`´/tbô-H4/ô/´`t`´`ô/ô.ô-t/t.4cÈ8¢$ˆ4/ô.ô,4/t/´,´bô-H4`t/ô.4`t,4/t.4cÎÈ4,´`t-H4-4/´/ô`ôbt-t/t.4cÈ4/ô/´.´,4-ô,4/tbÈ—KˆÈRKT•S‹UPÒT“‹LH‹RKPÓÓ•PÕPÒT“ˆ‹´(t.4,ô/t,4.È‹´'´-4/t,4`t.4/t`´-t`´.4aô-t`t.´,4cÈ4`t-t/4c4cÈ4,ˆ4,´bô`t/´.´/´.H4-ô/´/t-H4`4.4`t.´,‹Ìˆ‹´'ô`4/´`t`4/´aô.´,4.4/´`´`t`ô`´`t`´,´.4-H4/´`´,´-t`´,Lˆ4-4/t-t.NÈ4`4-tb4-t/t.4-H4/´`t`´,4,´.ô-t/t/ˆ4.´`ô`4,4`´/´`4`È—KˆÈRKT•S‹UPS“ÓKLH‹RKPÓÓ•PÕPS“ÓPSH‹´(4,4`tat/´-´-4-t/t.4-H‹´'t,4.t-4-t/t/ˆ4/ô/´-4`´,´-t`4-´-4dt/t/t/´-H4`4,4`tat/´-´-4-t/t.4-H4'´%4%4(H4,4/ô`4-t.ôcÈ‹ŽNH‹´(t`4,4,´/t-t/t.4-H4-4-t`´,4.ôc4/tbôaH4`t`´`4/´.ˆ4`H4.4`´/´,ô/´,´/´.H4a4/´`4/4`ô.ô/´.H4.4`tat/´-4/t/´,ô/ˆ4a4,4.t.ô,—KˆÈRKT•S‹UPÓÓ•LH‹RKPÓÓ•PÕPÓÓ•S•‹´(4-t.´/´/4-t/t-4,4a´.4cÈ‹´'ô/´,´`´/´`4.4`´cP‹ULÌH4.´,4.ˆ4/4,4.ôbô.H4`´-t`t`ˆ‹Ž‹´(t,´cô-ôc4.´.ô.4.´,4.ô.4-4,4-4/´,ô/´,´/´`4,4.4`´-t`t`´/´,´/´.H4,´bô`4`ôaô.´.4`t/´at`4,4/t-t/t,—KˆÈRKT•S‹UQÐËLH‹RKPÓÓ•PÕSRTÔÒS‘ËQÐÔÈ‹´%ô,4-4,4aô,‹´'t-H4at,´,4`´,4-t`ˆ4`taôdt`´,4-4.ôcÈPÐËPÓÓTUQ“ÓÑ‹ŒL‹´+ô,´/t,4cÈ4/4,4`´`4.4a´,4/´,tcô-ô,4`´-t.ôc4/tbôaH4`´.4/ô/´,ŽÈ4-ô,4-4,4aô,4`ô-´-H4`t/´-ô-4,4/t,4.4-4-t/4/ô/´`´-t/t`´/t/ˆ—KˆÈRKT•S‹UQPT“KLH‹RKPÓÓ•PÕQPT“KTÒQÓSÈ‹´(t.4,ô/t,4.È‹´'´`´.´`4bô`´,4cÈ4/t-t.4`t/ô`4,4,´/t/´`t`´c4`´`4-t,t`ô-t`ˆ4.´/´/t`´`4/´.ôcÈ4`4-t-ô`ô.ôc4`´,4`´,4.4,4.´`´,‹ŽLÈ‹´'ô`4.4/´`4.4`´-t`ˆ4/´`t/t/´,´,4/H4/t,ÓK4`t`´,4`´`ô`t-H4`4-t/4/´/t`´,4.4/t,4.ô.4aô.4.4-4/´.´`ô/4-t/t`´,—BˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+[œË›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈZWÛ[Ù[Ü[œÈ
+YÛÛ˜XÝÚY˜[—Ø][Ù[Ý™\œÚ[Û‹Ý]\Ë[œ]ÜÛ˜\ÚÝÜ™Y‹Ý]]Ý\KÝ]]ÜÝ[[X\žKÛÛ™šY[˜ÙKÛÜÝÛZ[›Ü‹^[˜][Û‹\×ÜÞ[]XÊHSQTÈ
+ËË	ÌŒ‹LLŒULŒLŒ‰Ë	ô'ô`4,4,´.4.ô,4`H4`4`ôaô/tbô/4/ô/´-4`´,´-t`4-´-4-t/t.4-t/	Ë	ô%ô,4,´-t`4b4dt/IË	ô&´/´/t`´`4/´.ôc4/tbô.H4`t/t.4/4/´.ˆ4,4/t,4.ô.4`´.4.´.	ËËËËËJHŠK˜š[™
+›ÝÖÌK›ÝÖÌWK›ÝÖÌ—K›ÝÖÌ×K[X™\Š›ÝÖÍJK›ÝÖÍWJJJNÂŸB‚˜\Þ[˜È[˜Ý[ÛˆÙYY™XY[™\ÜÊ
+^Âˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈYXØ][Û—Û\ÜÛÛœÈ
+YÜ›Ý\ÚY›ÙÜ˜[WÚYØÚY[YØ]ÜXËXXÚ\—Ù[]WÚYÝXœÝ]]WÙ[]WÚY›ÛÛKÝ]\ËÛY]ÛÜšÊHSQTÈ
+	ÓTËUQSTL‹LŒL	Ë	ÑÔ”ULÐIË	Ô‘ËULL‰Ë	ÌŒ‹L‹LLNŒŒ‰Ë	ô&4`t`´/´`4.4aô-t`t.´/´-H4-ô,4/tcô`´.4-H4`t/´`´`4`ô-4/t.4.´,8¡%ŒL‰Ë	ÑSTULL‰Ë	ÉË	ô&´,4,t.4/t-t`ˆL‰Ë	ô%ô,4,´-t`4b4-t/t/‰Ë	ô&4`t`´/´`4.4aô-t`t.´,4cÈ4-ô,4/ô.4`tc4-4.ôcÈ4/ô`4/´,´-t`4.´.4.´,4-4`4/´,´/´.H4a´-t/ô/´aô.´.	ÊHŠKˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈØÝ[Y[Ý™\œÚ[ÛœÈ
+ØÝ[Y[ÚY™\œÚ[Û‹›ÝK™Y™\™[˜ÙKÜ™X]YØžJHSQTÈ
+	ÑÑËULŒ‹L	ËË	ô&´/´/t`´`4/´.ôc4/t/´-H4`4-tb4-t/t.4-H4/ˆ4/ô`4/´-4.ô-t/t.4.	Ë	ô&´,4`4`´/´aô.´,4-4/´,ô/´,´/´`4,0­È4,´-t`4`t.4cÈÉË	ÜÞ\Ý[K\™XY[™\ÜË\ÙYY	ÊHŠKˆ[‹‘‹œ™\\™J•TUHÛÜšÙ›Ý×ÙØÝ[Y[ÈÑUÝ\œ™[Ý™\œÚ[ÛSPV
+Ý\œ™[Ý™\œÚ[Û‹ÊKÝ]\ÏIô'ô`4/´-4.ôdt/IË˜[YÝ[[IÌŒËLKL‰Ë\]YØ]PÕT”‘S•ÕSQTÕSTÒT‘HYIÑÑËULŒ‹L	ÈS‘ÛÝ\˜ÙOIÔÖS•UPÉÈŠKˆ[‹‘‹œ™\\™J•TUHØ›YØ][ÛœÈÑUÝ]\ÏIô%ô,4.´`4bô`´/‰ÈÒT‘HØÝ[Y[ÚYIÑÑËULŒ‹L	ÈS‘]OIô'ô`4/´-4.ô.4`´c4.4.ô.4-ô,4.´`4bô`´c4-4/´,ô/´,´/´`	ÈŠKˆ[‹‘‹œ™\\™J•TUH\ÚÜÈÑUÝ]\ÏIô%ô,4,´-t`4b4-t/t,	Ë™\Ý[Iô%4/´,ô/´,´/´`4/ô`4/´-4.ôdt/H4,ˆ4`´-t`t`´/´,´/´/4.´/´/t`´`ô`4-IË™\Ý[Ù]šY[˜ÙOIô&´,4`4`´/´aô.´,4-4/´,ô/´,´/´`4,0­È4,´-t`4`t.4cÈÉËÛÛ\]YØ]IÌŒ‹LLŒULNŒ‰Ë\]YØ]PÕT”‘S•ÕSQTÕSTÒT‘H]]ÛX][Û—ÚÙ^OIÐÓÓ•PÕÑVT–N‘ÑËULŒ‹L	ÈS‘Ü™X]YØžOIÜÞ\Ý[KX]]ÛX][Û‰ÈŠKˆ[‹‘‹œ™\\™J’S”ÑT•S•È]Y]Ù]™[È
+XÝÜ‹XÝ[Û‹[]WÝ\K[]WÚY^[ØY
+HÑSPÕ	ÜÞ\Ý[K\™XY[™\ÜË\ÙYY	Ë	ÛYYXØ[˜Ø\ÙWØÛÜÙY	Ë	ÛYYXØ[ØØ\ÙIË	ÓQQPÐTÑKULNIË	Þ×˜ÛÛ™š\›X][Û”™Y—Ž—“QQPÓÓ‘‹ULNW‹˜ÛÛ[^ÛYYŽY_IÈÒT‘H“ÕVTÕÈ
+ÑSPÕH”“ÓH]Y]Ù]™[ÈÒT‘HXÝ[ÛIÛYYXØ[˜Ø\ÙWØÛÜÙY	ÈS‘[]WÚYIÓQQPÐTÑKULNIÊHŠKˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈÝ˜]YÞWÜ™\Ý[È
+Y›Ú™XÝÚY]™[ÚY™\Ý[Ý\KY]šX×Û˜[YKY]šX×Ý˜[YK[š]]šY[˜ÙK™XÛÜ™YØ]
+HSQTÈ
+	ÔÕ‹T‘TËURÔKLIË	ÔÕ‹T’‹ULM	Ë	ÉË	ô'ô/´,´`´/´`4/t/´-H4.4-ô/4-t`4-t/t.4-IË	ô&4/t-4-t.´`H4`ô-4/´,´.ô-t`´,´/´`4dt/t/t/´`t`´.4`t-t/4-t.IËK	ÉIË	ô'ô/´,´`´/´`4/t,4cÈ4/ô`4/´,´-t`4.´,4/ô/´`t.ô-H4.´/´`4`4-t.´`´.4`4`ôc´bt-t,ô/ˆ4-4-t.t`t`´,´.4cÉË	ÌŒ‹LLŒULLŒ‰ÊHŠKˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È\ÚÜÈ
+]KÝÛ™\‹YWÙ]Kš[Üš]KÝ]\ËÛÝ\˜ÙWÝ\KÛÝ\˜ÙWÚY\ØÜš\[Û‹\ÜÚYÛ™YWÙ[]WÚYÚ[™]]ÛX][Û—ÚÙ^K™\]Z\™\×Ø\›Ý˜[™\Ý[™\Ý[Ù]šY[˜ÙKÛÛ\]YØ]Ü™X]YØžJHSQTÈ
+	ô(4,4-ô/´,t`4,4`´c4/´,t`4,4bt-t/t.4-H4`t-t/4c4.8¡%ŒM	Ë	ô&´`ô`4,4`´/´`4`t-t/4c4.	Ë	ÌŒ‹LLŒIË	ô$´bô`t/´.´.4.IË	ô%ô,4,´-t`4b4-t/t,	Ë	ô%´,4.ô/´,t,4.´.ô.4-t/t`´,	Ë	ÐÓÓTULM	Ë	ô'ô`4/´,´-t`4.4`´c4/´,t`4,4`´/t`ôcˆ4`t,´cô-ôc4/ô`4/´,´-t`t`´.4.´/´`4`4-t.´`´.4`4`ôc´bt-t-H4-4-t.t`t`´,´.4-H4.4/ô/´.ô`ôaô.4`´c4/´a´-t/t.´`È4`4-t-ô`ô.ôc4`´,4`´,	Ë	ÑSTULÌ‰Ë	ô&´/´`4`4-t.´`´.4`4`ôc´bt-t-H4-4-t.t`t`´,´.4-IË	ÐÓÓTRS•ÓÓTULM	ËK	ô(4,4`t/ô.4`t,4/t.4-H4/´,t`4,4`´/t/´.H4`t,´cô-ô.4.4-ô/4-t/t-t/t/ŽÈ4`t-t/4c4cÈ4/ô/´-4`´,´-t`4-4.4.ô,4`4-t-ô`ô.ôc4`´,4`‰Ë	ô'ô/´-4`´,´-t`4-´-4-t/t.4-H4`t-t/4c4.4/ô/´`t.ô-H4/´,t`4,4`´/t/´.H4`t,´cô-ô.	Ë	ÌŒ‹LLŒULŒŒŒ‰Ë	ÜÞ\Ý[K\™XY[™\ÜË\ÙYY	ÊHŠKˆ[‹‘‹œ™\\™J•TUHØÝ[Y[Ý™\œÚ[ÛœÈÑU›ÝOIô&´/´/t`´`4/´.ôc4/t/´-H4`4-tb4-t/t.4-H4/ˆ4/ô`4/´-4.ô-t/t.4.	Ë™Y™\™[˜ÙOIô&´,4`4`´/´aô.´,4-4/´,ô/´,´/´`4,0­È4,´-t`4`t.4cÈÉÈÒT‘HØÝ[Y[ÚYIÑÑËULŒ‹L	ÈS‘™\œÚ[ÛLÈS‘Ü™X]YØžOIÜÞ\Ý[K\™XY[™\ÜË\ÙYY	ÈS‘™Y™\™[˜ÙOIÔÖS•UPÎ‘ÑËULŒ‹LŒÉÈŠKˆ[‹‘‹œ™\\™J•TUH\ÚÜÈÑU™\Ý[Ù]šY[˜ÙOIô&´,4`4`´/´aô.´,4-4/´,ô/´,´/´`4,0­È4,´-t`4`t.4cÈÉÈÒT‘H]]ÛX][Û—ÚÙ^OIÐÓÓ•PÕÑVT–N‘ÑËULŒ‹L	ÈS‘Ü™X]YØžOIÜÞ\Ý[KX]]ÛX][Û‰ÈS‘™\Ý[Ù]šY[˜ÙOIÔÖS•UPÎ‘ÑËULŒ‹LŒÉÈŠKˆ[‹‘‹œ™\\™J•TUH\ÚÜÈÑU]OIô(4,4-ô/´,t`4,4`´c4/´,t`4,4bt-t/t.4-H4`t-t/4c4.8¡%ŒM	Ë™\Ý[Ù]šY[˜ÙOIô'ô/´-4`´,´-t`4-´-4-t/t.4-H4`t-t/4c4.4/ô/´`t.ô-H4/´,t`4,4`´/t/´.H4`t,´cô-ô.	ÈÒT‘H]]ÛX][Û—ÚÙ^OIÐÓÓTRS•ÓÓTULM	ÈS‘Ü™X]YØžOIÜÞ\Ý[K\™XY[™\ÜË\ÙYY	ÈS‘]OIô(4,4-ô/´,t`4,4`´c4/´,t`4,4bt-t/t.4-H4`t-t/4c4.LM	ÈŠKˆJNÂˆÛÛœÝÛÛ\Z[\ÚÏX]ØZ][‹‘‹œ™\\™J”ÑSPÕY”“ÓH\ÚÜÈÒT‘H]]ÛX][Û—ÚÙ^OIÐÓÓTRS•ÓÓTULM	ÈŠK™š\œÝÚY›[X™\ŸOŠ
+NÂˆYŠXÛÛ\Z[\ÚÊ]›ÝÈ™]È\œ›ÜŠ”™XY[™\ÜÈÛÛ\Z[\ÚÈØ\È›ÝÜ™X]YŠNÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈÝ\ÝÛY\—ØÛÛ\Z[È
+Y˜[Z[WÙ[]WÚYÚ[Ù[]WÚYÙ\šXÙWÙ[]WÚYÚ[›™[™XÙZ]™YØ]Ø]YÛÜžKÝ[[X\žK™\ÜÛœÚX›WÙ[]WÚYÝ]\Ë™[]YÝ\Ú×ÚYØ]\Ù˜XÝ[Û—ÜØÛÜ™KÛÜÙYØ]
+HSQTÈ
+	ÐÓÓTULM	Ë	ÑSKULM	Ë	ÐÒULM	Ë	ÔÕËULIË	ô&ô.4aô/tbô.H4.´,4,t.4/t-t`‰Ë	ÌŒ‹LLŒNŒLŒ‰Ë	ô&´/´/4/4`ô/t.4.´,4a´.4cÉË	ô(t-t/4c4-H4`´`4-t,t/´,´,4.ô`tcÈ4,t/´.ô-t-H4/ô/´/tcô`´/tbô.H4`t`4/´.ˆ4/´,t`4,4`´/t/´.H4`t,´cô-ô.	Ë	ÑSTULÌ‰Ë	ô%ô,4.´`4bô`´,	ËËK	ÌŒ‹LLŒULŒŒŒ‰ÊHŠK˜š[™
+ÛÛ\Z[\ÚËšY
+Kˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•ÈÛÛ\Z[ØXÝ[ÛœÈ
+YÛÛ\Z[ÚY\Ú×ÚYXÝ[Û—Ý\KÝÛ™\—Ù[]WÚYYWØ]™\Ý[]šY[˜ÙKÝ]\ËÛÛ\]YØ]
+HSQTÈ
+	ÐÓTPPÕULM	Ë	ÐÓÓTULM	ËË	ô&´/´`4`4-t.´`´.4`4`ôc´bt-t-H4-4-t.t`t`´,´.4-IË	ÑSTULÌ‰Ë	ÌŒ‹LLŒULŽŒŒ‰Ë	ô(t`4/´.ˆ4/´`´,´-t`´,4-ô,4.´`4-t/ô.ôdt/K4`t-t/4c4cÈ4/ô/´.ô`ôaô.4.ô,4/ô/´-4`´,´-t`4-´-4-t/t.4-IË	Ñ‘‹PÓÓTRS•ULM	Ë	ô$´bô/ô/´.ô/t-t/t/‰Ë	ÌŒ‹LLŒULŒŒŒ‰ÊHŠK˜š[™
+ÛÛ\Z[\ÚËšY
+KˆJNÂ‚ˆÛÛœÝØÙ[˜\š[ÜÎ–ÜÝš[™Ë[X™\‹Ýš[™ËÝš[™ËÝš[™ËÝš[™×V×OVÂˆÈ”ÐÓ‹ULH‹K´'´`ˆ4/´,tb´cô,´.ô-t/t.4cÈ4-4/ˆ4/ô`4.4,tbô.ô.‹´'´,tb´cô,´.ô-t/t.4-H8¡¤ˆ4/ô-t`4,´bô.H4.´.ô.4.ˆ8¡¤ˆ4-ô,4cô,´.´,8¡¤ˆ4/4-t/t-t-4-´-t`8¡¤ˆ4/ô/´`t-tbt-t/t.4-H8¡¤ˆ4-4/´,ô/´,´/´`8¡¤ˆ4`4-t,tdt/t/´.ˆ8¡¤ˆ4/t,4aô.4`t.ô-t/t.4-H8¡¤ˆ4/´/ô.ô,4`´,8¡¤ˆ4-4,´.4-´-t/t.4-H4-4-t/t-t,È8¡¤ˆ4/´`´aôdt`ˆ4/ˆ4/ô`4.4,tbô.ôcôaH4.4`ô,tbô`´.´,4aH8¡¤ˆ4/ô`4.4,tbô.ôc‹‘STUTÐSTËLH‹´(t.4/t`´-t`´.4aô-t`t.´,4cÈ4a´-t/ô/´aô.´,È4,t,4/t.´/´,´`t.´,4cÈ4/´/ô-t`4,4a´.4cÈ4.4`4-t.´.ô,4/4/t,4cÈ4`t`´,4`´.4`t`´.4.´,4/t-H4cô,´.ôcôc´`´`tcÈ4a4,4.´`´/´/—KˆÈ”ÐÓ‹ULˆ‹‹´'ô/´.ô/tbô.H4-´.4-ô/t-t/t/tbô.H4a´.4.´.È4`t/´`´`4`ô-4/t.4.´,‹´$´,4.´,4/t`t.4cÈ8¡¤ˆ4.´,4/t-4.4-4,4`ˆ8¡¤ˆ4,4-4,4/ô`´,4a´.4cÈ8¡¤ˆ4-4/´,ô/´,´/´`8¡¤ˆ4-4/´.ô-´/t/´`t`´c8¡¤ˆ4-4/´`t`´`ô/ôbÈ8¡¤ˆ4`4,4`t/ô.4`t,4/t.4-H8¡¤ˆ4-ô,4-4,4aô.8¡¤ˆ4/t,4aô.4`t.ô-t/t.4-H8¡¤ˆ4,´bô/ô.ô,4`´,8¡¤ˆ4`ô,´/´.ôc4/t-t/t.4-H8¡¤ˆ4/´`´-ôbô,ˆ4-4/´`t`´`ô/ô/´,ˆ‹‘STUR‹LH‹´(t.4/t`´-t`´.4aô-t`t.´.4-H4.´,4-4`4/´,´bô-H4-ô,4/ô.4`t.È4/ô-t`4`t/´/t,4.ôc4/tbô-H4-4,4/t/tbô-H4.4`tat/´-4/t/´.H4,´-t-4/´/4/´`t`´.4/t-H4.4`t/ô/´.ôc4-ô`ôc´`´`tcÈ—KˆÈ”ÐÓ‹ULÈ‹Ë´(ôaô-t,t/tbô.H4`4-t-ô`ô.ôc4`´,4`ˆ4.4/4-t`´/´-4.4.´,‹´'ô`4/´,ô`4,4/4/4,8¡¤ˆ4/ô-t-4,4,ô/´,È8¡¤ˆ4,ô`4`ô/ô/ô,8¡¤ˆ4-ô,4/tcô`´.4-H8¡¤ˆ4/ô/´`t-tbt,4-t/4/´`t`´c8¡¤ˆ4-4/´/4,4b4/t-t-H4-ô,4-4,4/t.4-H8¡¤ˆ4`4-t-ô`ô.ôc4`´,4`ˆ8¡¤ˆ4/´`´-ôbô,ˆ4`4/´-4.4`´-t.ôcÈ8¡¤ˆ4`4-t.´/´/4-t/t-4,4a´.4cÈ4/4-t`´/´-4.4`t`´`È‹‘STUSQUÑLH‹´(t.4/t`´-t`´.4aô-t`t.´.4-H4/´,t-t-ô.ô.4aô-t/t/tbô-H4`ôaô-t,t/tbô-H4.´,4`4`´/´aô.´.—KˆÈ”ÐÓ‹UL‹´%ô,4.´`ô/ô.´,4/´`ˆ4-ô,4cô,´.´.4-4/ˆ4a4.4/t,4/t`t/´,´/´,ô/ˆ4`4-t-ô`ô.ôc4`´,4`´,‹´%ô,4cô,´.´,8¡¤ˆ4`t/´,ô.ô,4`t/´,´,4/t.4-H8¡¤ˆ4`t`4,4,´/t-t/t.4-H4/ô/´`t`´,4,´bt.4.´/´,ˆ8¡¤ˆ4-ô,4.´,4-È8¡¤ˆ4/ô/´`t`´,4,´.´,8¡¤ˆ4/ô`4.4dt/4/ô/´`t`´,4,´.´.8¡¤ˆ4`t.´.ô,4-8¡¤ˆ4-4/´.´`ô/4-t/t`ˆ8¡¤ˆ4/´/ô.ô,4`´,8¡¤ˆ4/´`´aôdt`ˆ4/ˆ4/ô`4.4,tbô.ôcôaH4.4`ô,tbô`´.´,4aH‹‘STUT“ÐËLH‹´(t.4/t`´-t`´.4aô-t`t.´,4cÈ4-ô,4.´`ô/ô.´,È4ct.ô-t.´`´`4/´/t/tbô.H4-4/´.´`ô/4-t/t`´/´/´,t/´`4/´`ˆ4.4,t,4/t.´/´,´`t.´.4.H4a4,4.´`ˆ4/t-H4/ô/´-4.´.ôc´aô-t/tbÈ—KˆÈ”ÐÓ‹ULH‹K´'t-t.4`t/ô`4,4,´/t/´`t`´c4-4/ˆ4`t.ô-t-4`ôc´bt-t.H4/ô`4/´,´-t`4.´.‹´'ô`4/´,´-t`4.´,8¡¤ˆ4/t-t.4`t/ô`4,4,´/t/´`t`´c8¡¤ˆ4-ô,4-4,4aô,8¡¤ˆ4/ô/´-4`4cô-4aô.4.ˆ8¡¤ˆ4`4-t/4/´/t`ˆ8¡¤ˆ4,4.´`ˆ8¡¤ˆ4/´/ô.ô,4`´,8¡¤ˆ4`t.ô-t-4`ôc´bt,4cÈ4/ô`4/´,´-t`4.´,‹‘STUTÐQ‘KLH‹´(t.4/t`´-t`´.4aô-t`t.´.4.H4.´/´/t`´`ô`4,t-t-ô/´/ô,4`t/t/´`t`´.4,t-t-È4.4/t`´-t,ô`4,4a´.4.4`t.4`t`´-t/4bÈ4.´/´/t`´`4/´.ôcÈ4-4/´`t`´`ô/ô,—KˆÈ”ÐÓ‹ULˆ‹‹´'ô.4`´,4/t.4-H4.´,4.ˆ4a´-t/t`´`4/ô`4.4,tbô.ô.‹´'ô`4/´-4`ô.´`ˆ8¡¤ˆ4/ô,4`4`´.4cÈ8¡¤ˆ4`´-tat/t/´.ô/´,ô.4aô-t`t.´,4cÈ4.´,4`4`´,8¡¤ˆ4/ô`4/´.4-ô,´/´-4`t`´,´/ˆ8¡¤ˆ4/´`´,ô`4`ô-ô.´,8¡¤ˆ4/ô/´`´`4-t,t.ô-t/t.4-H8¡¤ˆ4`t/ô.4`t,4/t.4-H8¡¤ˆ4`t-t,t-t`t`´/´.4/4/´`t`´c8¡¤ˆ4`4-t/t`´,4,t-t.ôc4/t/´`t`´c‹‘STURÒUÒS‹LH‹´(t.4/t`´-t`´.4aô-t`t.´.4.H4/ô`4/´.4-ô,´/´-4`t`´,´-t/t/tbô.H4.4a4.4/t,4/t`t/´,´bô.H4.´/´/t`´`ô`4.´`ôat/t.—KˆÈ”ÐÓ‹ULÈ‹Ë´%4/´,ô/´,´/´`4/t/´-H4/´,tcô-ô,4`´-t.ôc4`t`´,´/ˆ‹´%4/´,ô/´,´/´`8¡¤ˆ4/´,tcô-ô,4`´-t.ôc4`t`´,´/ˆ8¡¤ˆ4`t`4/´.ˆ8¡¤ˆ4/ô`4-t-4`ô/ô`4-t-´-4-t/t.4-H8¡¤ˆ4-ô,4-4,4aô,8¡¤ˆ4/ô`4/´-4.ô-t/t.4-Kô-ô,4.´`4bô`´.4-H8¡¤ˆ4.4`t`´/´`4.4cÈ‹‘STUSQÐSLH‹´(t.4/t`´-t`´.4aô-t`t.´.4.H4-4/´,ô/´,´/´`È4ct.ô-t.´`´`4/´/t/t,4cÈ4/ô/´-4/ô.4`tc4/t-H4/ô/´-4.´.ôc´aô-t/t,—KˆÈ”ÐÓ‹UL‹´%´,4.ô/´,t,4`t-t/4c4.4-4/ˆ4`ô-4/´,´.ô-t`´,´/´`4dt/t/t/´`t`´.‹´%´,4.ô/´,t,8¡¤ˆ4`t-t/4c4cÈ8¡¤ˆ4`4-t,tdt/t/´.ˆ8¡¤ˆ4`ô`t.ô`ô,ô,8¡¤ˆ4/´`´,´-t`´`t`´,´-t/t/tbô.H8¡¤ˆ4-ô,4-4,4aô,8¡¤ˆ4.´/´`4`4-t.´`´.4`4`ôc´bt-t-H4-4-t.t`t`´,´.4-H8¡¤ˆ4`4-t-ô`ô.ôc4`´,4`ˆ8¡¤ˆ4`ô-4/´,´.ô-t`´,´/´`4dt/t/t/´`t`´c‹‘STULÌˆ‹´(t.4/t`´-t`´.4aô-t`t.´/´-H4/´,t`4,4bt-t/t.4-H4,t-t-È4/ô-t`4`t/´/t,4.ôc4/tbôaH4-4,4/t/tbôaH—KˆÈ”ÐÓ‹ULH‹K´%ô,4bt.4btdt/t/tbô.H4/4-t-4.4a´.4/t`t.´.4.H4`t.ô`ôaô,4.H‹´(t.ô`ôaô,4.H8¡¤ˆ4`t`ô,tb´-t.´`ˆ8¡¤ˆ4`ô/ô/´.ô/t/´/4/´aô-t/t/tbô.H4/ô/´.ôc4-ô/´,´,4`´-t.ôc8¡¤ˆ4-4-t.t`t`´,´.4-H8¡¤ˆ4-4/´.´`ô/4-t/t`ˆ8¡¤ˆ4-ô,4.´`4bô`´.4-H8¡¤ˆ4-ô,4bt.4btdt/t/tbô.H4,4`ô-4.4`ˆ‹‘STUSQQLH‹´(t.4/t`´-t`´.4aô-t`t.´,4cÈ4-ô,4bt.4btdt/t/t,4cÈ4/ô`4/´,´-t`4.´,È4/4-t-4.4a´.4/t`t.´/´-H4`t/´-4-t`4-´,4/t.4-H4.4`t.´.ôc´aô-t/t/ˆ4.4-È4/´`´,´-t`´,4/ô`4/´,´-t`4.´.—KˆÈ”ÐÓ‹ULL‹L´'ô/´.´,4-ô,4`´-t.ôc4-4/ˆ4/t/´,´/´,ô/ˆ4`4-t-ô`ô.ôc4`´,4`´,‹´'ô/´.´,4-ô,4`´-t.ôc8¡¤ˆ4/´`´.´.ô/´/t-t/t.4-H8¡¤ˆ4.4`t`´/´aô/t.4.ˆ8¡¤ˆ4/ô`4.4aô.4/t,8¡¤ˆ4-ô,4-4,4aô,8¡¤ˆ4/´`´,´-t`´`t`´,´-t/t/tbô.H8¡¤ˆ4-4-t.t`t`´,´.4-H8¡¤ˆ4/t/´,´bô.H4`4-t-ô`ô.ôc4`´,4`ˆ‹‘STUT“Ò‹LH‹´(t.4/t`´-t`´.4aô-t`t.´.4-H4/ô/´.´,4-ô,4`´-t.ô.4.4/ô/´,´`´/´`4/t/´-H4.4-ô/4-t`4-t/t.4-H—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+ØÙ[˜\š[ÜË›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È™XY[™\Ü×ÜØÙ[˜\š[ÜÈ
+Y[X™\‹˜[YKÚZ[‹ÝÛ™\—Ù[]WÚYÝ]\Ë]WØ›Ý[™\žJHSQTÈ
+ËËËËË	ô'´-´.4-4,4-t`ˆ4-ô,4/ô`ô`t.‰ËÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂ‚ˆÛÛœÝÝ\Î”™XÛÜ™Ýš[™ËÜÝš[™ËÝš[™ËÝš[™ËÝš[™×V×O^Âˆ”ÐÓ‹ULHŽ–ÖÈ´'´,tb´cô,´.ô-t/t.4-H‹´'ô`ô,t.ô.4.´,4a´.4cÈ‹”P‹ULÌH‹”‘Q‘T‘SÑH—KÈ´'ô-t`4,´bô.H4.´.ô.4.ˆ‹´$4`´`4.4,t`ôa´.4cÈ‹ÓPÒËULÌH‹”‘Q‘T‘SÑH—KÈ´%ô,4cô,´.´,‹´%ô,4cô,´.´,‹“PQULÌH‹”‘Q‘T‘SÑH—KÈ´'4-t/t-t-4-´-t`‹´(t/´`´`4`ô-4/t.4.ˆ‹‘STUTÐSTËLH‹”‘Q‘T‘SÑH—KÈ´'ô/´`t-tbt-t/t.4-H‹´&´/´/t`´,4.´`ˆ‹•’TÒUULM‹”‘Q‘T‘SÑH—KÈ´%4/´,ô/´,´/´`‹´%4/´.´`ô/4-t/t`ˆ‹‘ÑËULŒ‹LÌH‹”‘Q‘T‘SÑH—KÈ´(4-t,tdt/t/´.ˆ‹´(t`ôbt/t/´`t`´c‹ÒULÌH‹”‘Q‘T‘SÑH—KÈ´'t,4aô.4`t.ô-t/t.4-H‹´'t,4aô.4`t.ô-t/t.4-H‹PÔ‹PÓQS•ULÌH‹”‘Q‘T‘SÑH—KÈ´'´/ô.ô,4`´,‹´'´/ô-t`4,4a´.4cÈ‹‘’S‹UTÕPÓÓ•S•LÌH‹”‘Q‘T‘SÑH—KÈ´%4,´.4-´-t/t.4-H4-4-t/t-t,È‹´'´/ô-t`4,4a´.4cÈ‹‘’S‹UTÕPÓÓ•S•LÌH‹‘T’U‘Q—KÈ´'´`´aôdt`ˆ4/ˆ4/ô`4.4,tbô.ôcôaH4.4`ô,tbô`´.´,4aH‹´'´/ô-t`4,4a´.4cÈ‹‘’S‹UTÕPÓÓ•S•LÌH‹‘T’U‘Q—KÈ´'ô`4.4,tbô.ôc‹´'´/ô-t`4,4a´.4cÈ‹‘’S‹UTÕPÓÓ•S•LÌH‹‘T’U‘Q—WKˆ”ÐÓ‹ULˆŽ–ÖÈ´$´,4.´,4/t`t.4cÈ‹´$´,4.´,4/t`t.4cÈ‹•PËUL‹”‘Q‘T‘SÑH—KÈ´&´,4/t-4.4-4,4`ˆ‹´&´,4/t-4.4-4,4`ˆ‹ÐS‘‘PËUL‹”‘Q‘T‘SÑH—KÈ´$4-4,4/ô`´,4a´.4cÈ‹´%ô,4-4,4aô,‹’—ÓÓ“ÐT‘‘STULLˆ‹”‘Q‘T‘SÑH—KÈ´%4/´,ô/´,´/´`‹´%4/´.´`ô/4-t/t`ˆ‹‘ÑËQSTULLˆ‹”‘Q‘T‘SÑH—KÈ´%4/´.ô-´/t/´`t`´c‹´%4/´.ô-´/t/´`t`´c‹”ÔËUUPPÒTˆ‹”‘Q‘T‘SÑH—KÈ´%4/´`t`´`ô/ôbÈ‹´%4/´`t`´`ô/È‹PÐËUTÒÔËLLˆ‹”‘Q‘T‘SÑH—KÈ´(4,4`t/ô.4`t,4/t.4-H‹´%ô,4/tcô`´.4-H‹“TËUQSTL‹LŒL‹”‘Q‘T‘SÑH—KÈ´%ô,4-4,4aô.‹´%ô,4-4,4aô,‹’—ÓÓ“ÐT‘‘STULLˆ‹”‘Q‘T‘SÑH—KÈ´'t,4aô.4`t.ô-t/t.4-H‹´(t/´`´`4`ô-4/t.4.ˆ‹‘STULLˆ‹‘T’U‘Q—KÈ´$´bô/ô.ô,4`´,‹´'´/ô-t`4,4a´.4cÈ‹‘’S‹UTÕTVT“ÓLLˆ‹”‘Q‘T‘SÑH—KÈ´(ô,´/´.ôc4/t-t/t.4-H‹´(t/´`´`4`ô-4/t.4.ˆ‹‘STULLˆ‹‘T’U‘Q—KÈ´'´`´-ôbô,ˆ4-4/´`t`´`ô/ô/´,ˆ‹´%4/´`t`´`ô/È‹PÐËQQKLLˆ‹‘T’U‘Q—WKˆ”ÐÓ‹ULÈŽ–ÖÈ´'ô`4/´,ô`4,4/4/4,‹´'ô`4/´,ô`4,4/4/4,‹”‘ËULLˆ‹”‘Q‘T‘SÑH—KÈ´'ô-t-4,4,ô/´,È‹´(t/´`´`4`ô-4/t.4.ˆ‹‘STULÌˆ‹”‘Q‘T‘SÑH—KÈ´$ô`4`ô/ô/ô,‹´$ô`4`ô/ô/ô,‹‘Ô”ULÐH‹”‘Q‘T‘SÑH—KÈ´%ô,4/tcô`´.4-H‹´%ô,4/tcô`´.4-H‹“TËULÐKLŒH‹”‘Q‘T‘SÑH—KÈ´'ô/´`t-tbt,4-t/4/´`t`´c‹´'ô/´`t-tbt-t/t.4-H‹UULM‹”‘Q‘T‘SÑH—KÈ´%4/´/4,4b4/t-t-H4-ô,4-4,4/t.4-H‹´%ô,4/tcô`´.4-H‹“TËULÐKLŒH‹‘T’U‘Q—KÈ´(4-t-ô`ô.ôc4`´,4`ˆ‹´'ô`4/´,ô`4-t`t`H‹”“ÑËULM‹”‘Q‘T‘SÑH—KÈ´'´`´-ôbô,ˆ4`4/´-4.4`´-t.ôcÈ‹´'´,t`4,4`´/t,4cÈ4`t,´cô-ôc‹‘‘‹ULM‹”‘Q‘T‘SÑH—KÈ´(4-t.´/´/4-t/t-4,4a´.4cÈ4/4-t`´/´-4.4`t`´`È‹RKt`t.4,ô/t,4.È‹RKTÒQËUSQUÑ‹”‘Q‘T‘SÑH—WKˆ”ÐÓ‹ULŽ–ÖÈ´%ô,4cô,´.´,‹´%ô,4cô,´.´,‹”‘TKUL‹”‘Q‘T‘SÑH—KÈ´(t/´,ô.ô,4`t/´,´,4/t.4-H‹´%ô,4cô,´.´,‹”‘TKUL‹‘T’U‘Q—KÈ´(t`4,4,´/t-t/t.4-H‹´'ô`4-t-4.ô/´-´-t/t.4-H‹“Ñ‘”‹ULLŒˆ‹”‘Q‘T‘SÑH—KÈ´%ô,4.´,4-È‹´%ô,4.´,4-È‹“Ô‘UL‹”‘Q‘T‘SÑH—KÈ´'ô/´`t`´,4,´.´,‹´'ô/´`t`´,4,´.´,‹‘‹UL‹”‘Q‘T‘SÑH—KÈ´'ô`4.4dt/4/ô/´`t`´,4,´.´.‹´'ô/´`t`´,4,´.´,‹‘‹UL‹‘T’U‘Q—KÈ´(t.´.ô,4-‹´%4,´.4-´-t/t.4-H‹’S•‹ULLH‹”‘Q‘T‘SÑH—KÈ´%4/´.´`ô/4-t/t`ˆ‹´%4/´.´`ô/4-t/t`ˆ‹PÕT‘TKUL‹”‘Q‘T‘SÑH—KÈ´'´/ô.ô,4`´,‹´'´/ô-t`4,4a´.4cÈ‹‘’S‹UTÕT“ÐËL‹”‘Q‘T‘SÑH—KÈ´'´`´aôdt`ˆ4/ˆ4/ô`4.4,tbô.ôcôaH4.4`ô,tbô`´.´,4aH‹´'´/ô-t`4,4a´.4cÈ‹‘’S‹UTÕT“ÐËL‹‘T’U‘Q—WKˆ”ÐÓ‹ULHŽ–ÖÈ´'ô`4/´,´-t`4.´,‹´'ô`4/´,´-t`4.´,‹”ÐQ‘KPÒËULL‹”‘Q‘T‘SÑH—KÈ´'t-t.4`t/ô`4,4,´/t/´`t`´c‹´'t-t.4`t/ô`4,4,´/t/´`t`´c‹”ÐQ‘KQ“ULÌH‹”‘Q‘T‘SÑH—KÈ´%ô,4-4,4aô,‹´%ô,4-4,4aô,‹”ÐQ‘UWÑUS”ÐQ‘KQ“ULÌH‹”‘Q‘T‘SÑH—KÈ´'ô/´-4`4cô-4aô.4.ˆ‹´&´/´/t`´`4,4,ô-t/t`ˆ‹”ÕTUTÐQ‘KLH‹”‘Q‘T‘SÑH—KÈ´(4-t/4/´/t`ˆ‹´(4-t/4/´/t`ˆ‹”ÐQ‘KT‘TULÌH‹”‘Q‘T‘SÑH—KÈ´$4.´`ˆ‹´%4/´.´`ô/4-t/t`ˆ‹PÕTÐQ‘KULÌH‹”‘Q‘T‘SÑH—KÈ´'´/ô.ô,4`´,‹´'´/ô-t`4,4a´.4cÈ‹‘’S‹UTÕTÐQ‘KLÌH‹”‘Q‘T‘SÑH—KÈ´(t.ô-t-4`ôc´bt,4cÈ4/ô`4/´,´-t`4.´,‹´'ô`4/´,´-t`4.´,‹”ÐQ‘KS‘VULÌH‹”‘Q‘T‘SÑH—WKˆ”ÐÓ‹ULˆŽ–ÖÈ´'ô`4/´-4`ô.´`ˆ‹´'ô`4/´-4`ô.´`ˆ‹‘“ÓÑT“ÑULˆ‹”‘Q‘T‘SÑH—KÈ´'ô,4`4`´.4cÈ‹´'ô,4`4`´.4cÈ‹UÒULŒKLˆ‹”‘Q‘T‘SÑH—KÈ´(´-tat/t/´.ô/´,ô.4aô-t`t.´,4cÈ4.´,4`4`´,‹´(4-ta´-t/ô`ˆ‹•ËULM‹”‘Q‘T‘SÑH—KÈ´'ô`4/´.4-ô,´/´-4`t`´,´/ˆ‹´'ô`4/´.4-ô,´/´-4`t`´,´/ˆ‹”“ÑULŒH‹”‘Q‘T‘SÑH—KÈ´'´`´,ô`4`ô-ô.´,‹´'´`´,ô`4`ô-ô.´,‹”ÒTULŒKLH‹”‘Q‘T‘SÑH—KÈ´'ô/´`´`4-t,t.ô-t/t.4-H‹´'´`´,ô`4`ô-ô.´,‹”ÒTULŒKLH‹‘T’U‘Q—KÈ´(t/ô.4`t,4/t.4-H‹´'´`´,ô`4`ô-ô.´,‹”ÒTULŒKLH‹‘T’U‘Q—KÈ´(t-t,t-t`t`´/´.4/4/´`t`´c‹´'´/ô-t`4,4a´.4cÈ‹‘’S‹UTÕQ“ÓÑPÓÔÕLŒH‹”‘Q‘T‘SÑH—KÈ´(4-t/t`´,4,t-t.ôc4/t/´`t`´c‹´'´/ô-t`4,4a´.4cÈ‹‘’S‹UTÕQ“ÓÑT‘U‹LŒH‹‘T’U‘Q—WKˆ”ÐÓ‹ULÈŽ–ÖÈ´%4/´,ô/´,´/´`‹´%4/´.´`ô/4-t/t`ˆ‹‘ÑËULŒ‹L‹”‘Q‘T‘SÑH—KÈ´'´,tcô-ô,4`´-t.ôc4`t`´,´/ˆ‹´%4/´.´`ô/4-t/t`ˆ‹‘ÑËULŒ‹L‹‘T’U‘Q—KÈ´(t`4/´.ˆ‹´%4/´.´`ô/4-t/t`ˆ‹‘ÑËULŒ‹L‹‘T’U‘Q—KÈ´'ô`4-t-4`ô/ô`4-t-´-4-t/t.4-H‹´(ô,´-t-4/´/4.ô-t/t.4-H‹ÓÓ•PÕÑVT–N‘ÑËULŒ‹L‘T‘PÕÔˆ‹”‘Q‘T‘SÑH—KÈ´%ô,4-4,4aô,‹´%ô,4-4,4aô,‹ÓÓ•PÕÑVT–N‘ÑËULŒ‹L‹”‘Q‘T‘SÑH—KÈ´'ô`4/´-4.ô-t/t.4-H‹´$´-t`4`t.4cÈ‹´&´,4`4`´/´aô.´,4-4/´,ô/´,´/´`4,0­È4,´-t`4`t.4cÈÈ‹”‘Q‘T‘SÑH—KÈ´&4`t`´/´`4.4cÈ‹´$´-t`4`t.4cÈ‹´%4/´/ô/´.ô/t.4`´-t.ôc4/t/´-H4`t/´,ô.ô,4b4-t/t.4-H0­È4,´-t`4`t.4cÈˆ‹”‘Q‘T‘SÑH—WKˆ”ÐÓ‹ULŽ–ÖÈ´%´,4.ô/´,t,‹´%´,4.ô/´,t,‹ÓÓTULM‹”‘Q‘T‘SÑH—KÈ´(t-t/4c4cÈ‹´(t`ôbt/t/´`t`´c‹‘SKULM‹”‘Q‘T‘SÑH—KÈ´(4-t,tdt/t/´.ˆ‹´(t`ôbt/t/´`t`´c‹ÒULM‹”‘Q‘T‘SÑH—KÈ´(ô`t.ô`ô,ô,‹´(t`ôbt/t/´`t`´c‹”ÕËULH‹”‘Q‘T‘SÑH—KÈ´'´`´,´-t`´`t`´,´-t/t/tbô.H‹´(t/´`´`4`ô-4/t.4.ˆ‹‘STULÌˆ‹”‘Q‘T‘SÑH—KÈ´%ô,4-4,4aô,‹´%ô,4-4,4aô,‹ÓÓTRS•ÓÓTULM‹”‘Q‘T‘SÑH—KÈ´&´/´`4`4-t.´`´.4`4`ôc´bt-t-H4-4-t.t`t`´,´.4-H‹´%4-t.t`t`´,´.4-H‹ÓTPPÕULM‹”‘Q‘T‘SÑH—KÈ´(4-t-ô`ô.ôc4`´,4`ˆ‹´%4/´.´,4-ô,4`´-t.ôc4`t`´,´/ˆ‹‘‘‹PÓÓTRS•ULM‹”‘Q‘T‘SÑH—KÈ´(ô-4/´,´.ô-t`´,´/´`4dt/t/t/´`t`´c‹´%´,4.ô/´,t,‹ÓÓTULM‹‘T’U‘Q—WKˆ”ÐÓ‹ULHŽ–ÖÈ´(t.ô`ôaô,4.H‹´'4-t-4.4a´.4/t`t.´.4.H4`t.ô`ôaô,4.H‹“QQPÐTÑKULNH‹”“ÕPÕQ—KÈ´(t`ô,tb´-t.´`ˆ‹´(t`ôbt/t/´`t`´c‹‘STULŒÈ‹”“ÕPÕQ—KÈ´(ô/ô/´.ô/t/´/4/´aô-t/t/tbô.H4/ô/´.ôc4-ô/´,´,4`´-t.ôc‹‘Ü˜[‹“QQQÔS•UT“ÓKLH‹”“ÕPÕQ—KÈ´%4-t.t`t`´,´.4-H‹´'4-t-4.4a´.4/t`t.´/´-H4-4-t.t`t`´,´.4-H‹“QQPPÕULNKLH‹”“ÕPÕQ—KÈ´%4/´.´`ô/4-t/t`ˆ‹´'4-t-4.4a´.4/t`t.´.4.H4-4/´.´`ô/4-t/t`ˆ‹“QQQÐËUQSTLŒÈ‹”“ÕPÕQ—KÈ´%ô,4.´`4bô`´.4-H‹´'ô/´-4`´,´-t`4-´-4-t/t.4-H‹“QQPÓÓ‘‹ULNH‹”“ÕPÕQ—KÈ´%ô,4bt.4btdt/t/tbô.H4,4`ô-4.4`ˆ‹]Y]‹“QQPÐTÑKULNH‹”“ÕPÕQ—WKˆ”ÐÓ‹ULLŽ–ÖÈ´'ô/´.´,4-ô,4`´-t.ôc‹´'ô/´.´,4-ô,4`´-t.ôc‹’ÔKUQSRSKLH‹”‘Q‘T‘SÑH—KÈ´'´`´.´.ô/´/t-t/t.4-H‹´'´`´.´.ô/´/t-t/t.4-H‹‘U‹URÔKLH‹”‘Q‘T‘SÑH—KÈ´&4`t`´/´aô/t.4.ˆ‹´'´,t`4,4`´/t,4cÈ4`t,´cô-ôc‹‘‘‹ULM‹”‘Q‘T‘SÑH—KÈ´'ô`4.4aô.4/t,‹´'´`´.´.ô/´/t-t/t.4-H‹‘U‹URÔKLH‹‘T’U‘Q—KÈ´%ô,4-4,4aô,‹´%ô,4-4,4aô,‹”ÕUQÖWÑU’PUSÓŽ‘U‹URÔKLH‹”‘Q‘T‘SÑH—KÈ´'´`´,´-t`´`t`´,´-t/t/tbô.H‹´(t/´`´`4`ô-4/t.4.ˆ‹‘STUT“Ò‹LH‹”‘Q‘T‘SÑH—KÈ´%4-t.t`t`´,´.4-H‹´%ô,4-4,4aô,‹”ÕUQÖWÑU’PUSÓŽ‘U‹URÔKLH‹‘T’U‘Q—KÈ´'t/´,´bô.H4`4-t-ô`ô.ôc4`´,4`ˆ‹´(4-t-ô`ô.ôc4`´,4`ˆ‹”Õ‹T‘TËURÔKLH‹”‘Q‘T‘SÑH—WKˆNÂˆÛÛœÝÝ\Ý][Y[ÏV×NÂˆ›ÜŠÛÛœÝØÙ[˜\š[ÈÙˆØÙ[˜\š[ÜÊ^ÂˆÛÛœÝØÙ[˜\š[ÔÝ\Ï\Ý\ÖÜØÙ[˜\š[ÖÌWNÂˆ›ÜŠ][™^LÚ[™^ØÙ[˜\š[ÔÝ\Ë›[™ÝÚ[™^
+ÊÊ^ÂˆÛÛœÝÝ\\ØÙ[˜\š[ÔÝ\ÖÚ[™^NÂˆÝ\Ý][Y[Ëœ\Ú
+[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\È
+YØÙ[˜\š[×ÚYÝ\ÛÜ™\‹Ý\Û˜[YK[]WÝ\K[]WÚYÚXÚ×Ý\KÝ]\ÊHSQTÈ
+ËËËËËËË	ô'´-´.4-4,4-t`ˆ4-ô,4/ô`ô`t.‰ÊHŠK˜š[™
+	ÜØÙ[˜\š[ÖÌ_KIÔÝš[™Ê[™^
+ÌJKœYÝ\
+‹ŒŠ_XØÙ[˜\š[ÖÌK[™^
+ÌK‹‹œÝ\
+JNÂˆBˆBˆ›ÜŠ][™^LÚ[™^Ý\Ý][Y[Ë›[™ÝÚ[™^
+ÏN
+X]ØZ][‹‘‹˜˜]Ú
+Ý\Ý][Y[ËœÛXÙJ[™^[™^
+Î
+JNÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[ÜÈÑUÚZ[Iô'´,tb´cô,´.ô-t/t.4-H8¡¤ˆ4/ô-t`4,´bô.H4.´.ô.4.ˆ8¡¤ˆ4-ô,4cô,´.´,8¡¤ˆ4/4-t/t-t-4-´-t`8¡¤ˆ4/ô/´`t-tbt-t/t.4-H8¡¤ˆ4-4/´,ô/´,´/´`8¡¤ˆ4`4-t,tdt/t/´.ˆ8¡¤ˆ4/t,4aô.4`t.ô-t/t.4-H8¡¤ˆ4/´/ô.ô,4`´,8¡¤ˆ4-4,´.4-´-t/t.4-H4-4-t/t-t,È8¡¤ˆ4/´`´aôdt`ˆ4/ˆ4/ô`4.4,tbô.ôcôaH4.4`ô,tbô`´.´,4aH8¡¤ˆ4/ô`4.4,tbô.ôc	ÈÒT‘HYIÔÐÓ‹ULIÈS‘ÚZ[Iô'´,tb´cô,´.ô-t/t.4-H8¡¤ˆ4/ô-t`4,´bô.H4.´.ô.4.ˆ8¡¤ˆ4.ô.4-8¡¤ˆ4/4-t/t-t-4-´-t`8¡¤ˆ4/ô/´`t-tbt-t/t.4-H8¡¤ˆ4-4/´,ô/´,´/´`8¡¤ˆ4`4-t,tdt/t/´.ˆ8¡¤ˆ4/t,4aô.4`t.ô-t/t.4-H8¡¤ˆ4/´/ô.ô,4`´,8¡¤ˆ4%4%4(H8¡¤ˆ4'´'ô.4(È8¡¤ˆ4/ô`4.4,tbô.ôc	ÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[ÜÈÑUÚZ[Iô$´,4.´,4/t`t.4cÈ8¡¤ˆ4.´,4/t-4.4-4,4`ˆ8¡¤ˆ4,4-4,4/ô`´,4a´.4cÈ8¡¤ˆ4-4/´,ô/´,´/´`8¡¤ˆ4-4/´.ô-´/t/´`t`´c8¡¤ˆ4-4/´`t`´`ô/ôbÈ8¡¤ˆ4`4,4`t/ô.4`t,4/t.4-H8¡¤ˆ4-ô,4-4,4aô.8¡¤ˆ4/t,4aô.4`t.ô-t/t.4-H8¡¤ˆ4,´bô/ô.ô,4`´,8¡¤ˆ4`ô,´/´.ôc4/t-t/t.4-H8¡¤ˆ4/´`´-ôbô,ˆ4-4/´`t`´`ô/ô/´,‰Ë]WØ›Ý[™\žOIô(t.4/t`´-t`´.4aô-t`t.´.4-H4.´,4-4`4/´,´bô-H4-ô,4/ô.4`t.È4/ô-t`4`t/´/t,4.ôc4/tbô-H4-4,4/t/tbô-H4.4`tat/´-4/t/´.H4,´-t-4/´/4/´`t`´.4/t-H4.4`t/ô/´.ôc4-ô`ôc´`´`tcÉÈÒT‘HYIÔÐÓ‹UL‰ÈS‘ÚZ[Iô$´,4.´,4/t`t.4cÈ8¡¤ˆ4.´,4/t-4.4-4,4`ˆ8¡¤ˆ4/´/t,t/´`4-4.4/t,È8¡¤ˆ4-4/´,ô/´,´/´`8¡¤ˆ4-4/´.ô-´/t/´`t`´c8¡¤ˆ4-4/´`t`´`ô/ôbÈ8¡¤ˆ4`4,4`t/ô.4`t,4/t.4-H8¡¤ˆ4-ô,4-4,4aô.8¡¤ˆ4/t,4aô.4`t.ô-t/t.4-H8¡¤ˆ4,´bô/ô.ô,4`´,8¡¤ˆ4`ô,´/´.ôc4/t-t/t.4-H8¡¤ˆ4/´`´-ôbô,ˆ4-4/´`t`´`ô/ô/´,‰ÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[ÜÈÑU˜[YOIô%ô,4.´`ô/ô.´,4/´`ˆ4-ô,4cô,´.´.4-4/ˆ4a4.4/t,4/t`t/´,´/´,ô/ˆ4`4-t-ô`ô.ôc4`´,4`´,	ËÚZ[Iô%ô,4cô,´.´,8¡¤ˆ4`t/´,ô.ô,4`t/´,´,4/t.4-H8¡¤ˆ4`t`4,4,´/t-t/t.4-H4/ô/´`t`´,4,´bt.4.´/´,ˆ8¡¤ˆ4-ô,4.´,4-È8¡¤ˆ4/ô/´`t`´,4,´.´,8¡¤ˆ4/ô`4.4dt/4/ô/´`t`´,4,´.´.8¡¤ˆ4`t.´.ô,4-8¡¤ˆ4-4/´.´`ô/4-t/t`ˆ8¡¤ˆ4/´/ô.ô,4`´,8¡¤ˆ4/´`´aôdt`ˆ4/ˆ4/ô`4.4,tbô.ôcôaH4.4`ô,tbô`´.´,4aIË]WØ›Ý[™\žOIô(t.4/t`´-t`´.4aô-t`t.´,4cÈ4-ô,4.´`ô/ô.´,È4ct.ô-t.´`´`4/´/t/tbô.H4-4/´.´`ô/4-t/t`´/´/´,t/´`4/´`ˆ4.4,t,4/t.´/´,´`t.´.4.H4a4,4.´`ˆ4/t-H4/ô/´-4.´.ôc´aô-t/tbÉÈÒT‘HYIÔÐÓ‹UL	ÈS‘˜[YOIô%ô,4.´`ô/ô.´,4/´`ˆ4-ô,4cô,´.´.4-4/ˆ4'´'ô.4(ÉÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[ÜÈÑU]WØ›Ý[™\žOIô(t.4/t`´-t`´.4aô-t`t.´.4.H4.´/´/t`´`ô`4,t-t-ô/´/ô,4`t/t/´`t`´.4,t-t-È4.4/t`´-t,ô`4,4a´.4.4`t.4`t`´-t/4bÈ4.´/´/t`´`4/´.ôcÈ4-4/´`t`´`ô/ô,	ÈÒT‘HYIÔÐÓ‹ULIÈS‘]WØ›Ý[™\žOIô(t.4/t`´-t`´.4aô-t`t.´.4.H4.´/´/t`´`ô`4,t-t-ô/´/ô,4`t/t/´`t`´.4,t-t-È4.4/t`´-t,ô`4,4a´.4.4(t&´(ô%	ÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[ÜÈÑUÚZ[Iô'ô`4/´-4`ô.´`ˆ8¡¤ˆ4/ô,4`4`´.4cÈ8¡¤ˆ4`´-tat/t/´.ô/´,ô.4aô-t`t.´,4cÈ4.´,4`4`´,8¡¤ˆ4/ô`4/´.4-ô,´/´-4`t`´,´/ˆ8¡¤ˆ4/´`´,ô`4`ô-ô.´,8¡¤ˆ4/ô/´`´`4-t,t.ô-t/t.4-H8¡¤ˆ4`t/ô.4`t,4/t.4-H8¡¤ˆ4`t-t,t-t`t`´/´.4/4/´`t`´c8¡¤ˆ4`4-t/t`´,4,t-t.ôc4/t/´`t`´c	ÈÒT‘HYIÔÐÓ‹UL‰ÈS‘ÚZ[Iô'ô`4/´-4`ô.´`ˆ8¡¤ˆ4/ô,4`4`´.4cÈ8¡¤ˆ4(´(´&ˆ8¡¤ˆ4/ô`4/´.4-ô,´/´-4`t`´,´/ˆ8¡¤ˆ4/´`´,ô`4`ô-ô.´,8¡¤ˆ4/ô/´`´`4-t,t.ô-t/t.4-H8¡¤ˆ4`t/ô.4`t,4/t.4-H8¡¤ˆ4`t-t,t-t`t`´/´.4/4/´`t`´c8¡¤ˆ4`4-t/t`´,4,t-t.ôc4/t/´`t`´c	ÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[ÜÈÑU˜[YOIô'ô/´.´,4-ô,4`´-t.ôc4-4/ˆ4/t/´,´/´,ô/ˆ4`4-t-ô`ô.ôc4`´,4`´,	ËÚZ[Iô'ô/´.´,4-ô,4`´-t.ôc8¡¤ˆ4/´`´.´.ô/´/t-t/t.4-H8¡¤ˆ4.4`t`´/´aô/t.4.ˆ8¡¤ˆ4/ô`4.4aô.4/t,8¡¤ˆ4-ô,4-4,4aô,8¡¤ˆ4/´`´,´-t`´`t`´,´-t/t/tbô.H8¡¤ˆ4-4-t.t`t`´,´.4-H8¡¤ˆ4/t/´,´bô.H4`4-t-ô`ô.ôc4`´,4`‰Ë]WØ›Ý[™\žOIô(t.4/t`´-t`´.4aô-t`t.´.4-H4/ô/´.´,4-ô,4`´-t.ô.4.4/ô/´,´`´/´`4/t/´-H4.4-ô/4-t`4-t/t.4-IÈÒT‘HYIÔÐÓ‹ULL	ÈS‘˜[YOIÒÔH4-4/ˆ4/t/´,´/´,ô/ˆ4`4-t-ô`ô.ôc4`´,4`´,	ÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\ÈÑUÝ\Û˜[YOIô%ô,4cô,´.´,	Ë[]WÝ\OIô%ô,4cô,´.´,	ÈÒT‘HØÙ[˜\š[×ÚYIÔÐÓ‹ULIÈS‘Ý\ÛÜ™\LÈS‘Ý\Û˜[YOIô&ô.4-	ÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\ÈÑUÝ\Û˜[YOIô%4,´.4-´-t/t.4-H4-4-t/t-t,ÉÈÒT‘HØÙ[˜\š[×ÚYIÔÐÓ‹ULIÈS‘Ý\ÛÜ™\LLS‘Ý\Û˜[YOIô%4%4(IÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\ÈÑUÝ\Û˜[YOIô'´`´aôdt`ˆ4/ˆ4/ô`4.4,tbô.ôcôaH4.4`ô,tbô`´.´,4aIÈÒT‘HØÙ[˜\š[×ÚYIÔÐÓ‹ULIÈS‘Ý\ÛÜ™\LLHS‘Ý\Û˜[YOIô'´'ô.4(ÉÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\ÈÑUÝ\Û˜[YOIô$4-4,4/ô`´,4a´.4cÉÈÒT‘HØÙ[˜\š[×ÚYIÔÐÓ‹UL‰ÈS‘Ý\ÛÜ™\LÈS‘Ý\Û˜[YOIô'´/t,t/´`4-4.4/t,ÉÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\ÈÑUÝ\Û˜[YOIô'ô`4.4dt/4/ô/´`t`´,4,´.´.	ÈÒT‘HØÙ[˜\š[×ÚYIÔÐÓ‹UL	ÈS‘Ý\ÛÜ™\MˆS‘Ý\Û˜[YOIô'ô`4.4dt/4.´,	ÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\ÈÑUÝ\Û˜[YOIô'´`´aôdt`ˆ4/ˆ4/ô`4.4,tbô.ôcôaH4.4`ô,tbô`´.´,4aIÈÒT‘HØÙ[˜\š[×ÚYIÔÐÓ‹UL	ÈS‘Ý\ÛÜ™\LLS‘Ý\Û˜[YOIô'´'ô.4(ÉÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\ÈÑUÝ\Û˜[YOIô(´-tat/t/´.ô/´,ô.4aô-t`t.´,4cÈ4.´,4`4`´,	ÈÒT‘HØÙ[˜\š[×ÚYIÔÐÓ‹UL‰ÈS‘Ý\ÛÜ™\LÈS‘Ý\Û˜[YOIô(´(´&‰ÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\ÈÑUÝ\Û˜[YOIô'ô/´.´,4-ô,4`´-t.ôc	Ë[]WÝ\OIô'ô/´.´,4-ô,4`´-t.ôc	ÈÒT‘HØÙ[˜\š[×ÚYIÔÐÓ‹ULL	ÈS‘Ý\ÛÜ™\LHS‘Ý\Û˜[YOIÒÔIÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\ÈÑU[]WÚYIô&´,4`4`´/´aô.´,4-4/´,ô/´,´/´`4,0­È4,´-t`4`t.4cÈÉÈÒT‘HØÙ[˜\š[×ÚYIÔÐÓ‹ULÉÈS‘Ý\ÛÜ™\MˆS‘[]WÚYIÔÖS•UPÎ‘ÑËULŒ‹LŒÉÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[×ÜÝ\ÈÑU[]WÚYIô%4/´/ô/´.ô/t.4`´-t.ôc4/t/´-H4`t/´,ô.ô,4b4-t/t.4-H0­È4,´-t`4`t.4cÈ‰ÈÒT‘HØÙ[˜\š[×ÚYIÔÐÓ‹ULÉÈS‘Ý\ÛÜ™\MÈS‘[]WÚYIÔÖS•UPÎ‘ÑËULŒ‹LŒ‰ÈŠKˆ[‹‘‹œ™\\™J•TUH™XY[™\Ü×ÜØÙ[˜\š[ÜÈÑU]WØ›Ý[™\žOIô(t.4/t`´-t`´.4aô-t`t.´,4cÈ4-ô,4bt.4btdt/t/t,4cÈ4/ô`4/´,´-t`4.´,È4/4-t-4.4a´.4/t`t.´/´-H4`t/´-4-t`4-´,4/t.4-H4.4`t.´.ôc´aô-t/t/ˆ4.4-È4/´`´,´-t`´,4/ô`4/´,´-t`4.´.	ÈÒT‘HYIÔÐÓ‹ULIÈS‘]WØ›Ý[™\žOIÔ“ÕPÕQÔÖS•UPÎÈ4/4-t-4.4a´.4/t`t.´/´-H4`t/´-4-t`4-´,4/t.4-H4.4`t.´.ôc´aô-t/t/ˆ4.4-È™XY[™\ÜÈTIÈŠKˆJNÂ‚ˆÛÛœÝØ]\ÏVÂˆÈ‘ÐUKUTÐÑST’SÔÈ‹ŒL4`t.´,´/´-ô/tbôaH4`ta´-t/t,4`4.4-t,ˆ‹´'´-´.4-4,4-t`ˆ4-ô,4/ô`ô`t.ˆ‹K´$´`t-H4/´,tcô-ô,4`´-t.ôc4/tbô-H4b4,4,ô.4-4/´.ô-´/tbÈ4/ô`4/´.t`´.4/ô/´,´`´/´`4cô-t/4`ôcˆ4/ô`4/´,´-t`4.´`È4`4,4,t/´aô-t.H4,t,4-ôbÈ‹‘STUTPKLH—KˆÈ‘ÐUKUTH‹´&´`4.4`´.4aô-t`t.´.4-H4-4-ta4-t.´`´bÈ‹´'ô`4/´.t-4-t/t/ˆ‹K´(t,t/´`4.´,4/ô`4/´,´-t`4.´,4.´,4aô-t`t`´,´,4.´/´-4,4.4,4,´`´/´/4,4`´.4aô-t`t.´.4-H4`´-t`t`´bÈ4-ô,4,´-t`4b4-t/tbÈ4,t-t-È4.´`4.4`´.4aô-t`t.´.4aH4-4-ta4-t.´`´/´,ˆ‹‘STUTPKLH—KˆÈ‘ÐUKUTPÈ‹´'ô`4,4,´,4.4/4-t-4.4a´.4/t`t.´,4cÈ4.4-ô/´.ôcôa´.4cÈ‹´'ô`4/´.t-4-t/t/ˆ‹K´'´,ô`4,4/t.4aô-t/t.4cÈ4`4/´.ô-t.K4/´`´-4-t.ôc4/tbô.H4/4-t-4.4a´.4/t`t.´.4.H4-4/´/ô`ô`t.ˆ4.4-ô,4/ô`4-t`ˆ4/4-t-4.4a´.4/t`t.´.4aH4,4,ô`4-t,ô,4`´/´,ˆ4/ô/´.´`4bô`´bÈ4`´-t`t`´,4/4.‹‘STUTPKLH—KˆÈ‘ÐUKUSRQÔUSÓ”È‹´$t-t-ô/´/ô,4`t/tbô-H4.4-ô/4-t/t-t/t.4cÈ4,t,4-ôbÈ‹´'ô`4/´.t-4-t/t/ˆ‹K´(tat-t/4,4`4,4`tb4.4`4cô-t`´`tcÈ4,t-t-È4`4,4-ô`4`ôb4.4`´-t.ôc4/tbôaH4.4-ô/4-t/t-t/t.4.NÈ4/ô/´,´`´/´`4/t,4cÈ4.4/t.4a´.4,4.ô.4-ô,4a´.4cÈ4,t-t-ô/´/ô,4`t/t,‹‘STUTPKLH—KˆÈ‘ÐUKURS•QÔUSÓ”È‹´(4-t,4.ôc4/tbô-H4.4/t`´-t,ô`4,4a´.4.‹´%ô,4,t.ô/´.´.4`4/´,´,4/t/ˆ‹K´$t,4/t.´.4`t.4`t`´-t/4,4/ô`4/´-4,4-‹4-4/t-t,´/t.4.‹4ct.ô-t.´`´`4/´/t/tbô.H4-4/´.´`ô/4-t/t`´/´/´,t/´`4/´`‹4`ôaôdt`ˆ4.4`4-t.´.ô,4/4/tbô-H4.´,4,t.4/t-t`´bÈ4/ô/´-4.´.ôc´aô-t/tbÈ4/t-H4/ô/´.ô/t/´`t`´c4cˆ‹‘STURS•LH—KˆÈ‘ÐUKUPPÒÕT‹´$´/´`t`t`´,4/t/´,´.ô-t/t.4-H4`4,4,t/´aô-t.H4,t,4-ôbÈ‹´%ô,4,t.ô/´.´.4`4/´,´,4/t/ˆ‹K´'ô`4,4.´`´.4aô-t`t.´/´-H4,´/´`t`t`´,4/t/´,´.ô-t/t.4-H4`4-t-ô-t`4,´/t/´.H4.´/´/ô.4.4/t-H4,´bô/ô/´.ô/tcô.ô/´`tcÈ4/ô`4/´,´-t`4.´.4,4`4`´-ta4,4.´`´,4/t-t-4/´`t`´,4`´/´aô/t/ˆ‹‘STUTPKLH—KˆÈ‘ÐUKUT“ÓPÒÈ‹´'´`´.´,4`ˆ4/ô`4.4.ô/´-´-t/t.4cÈ‹´'ô`4/´.t-4-t/t/ˆ‹K´'´/ô`ô,t.ô.4.´/´,´,4/t/t`ôcˆ4,´-t`4`t.4cˆ4/4/´-´/t/ˆ4,´-t`4/t`ô`´c4,t-t-È4`4,4-ô`4`ôb4.4`´-t.ôc4/t/´,ô/ˆ4.4-ô/4-t/t-t/t.4cÈ4-4,4/t/tbôaH‹‘STUTPKLH—KˆÈ‘ÐUKUP”“ÕÔÑTˆ‹´$t`4,4`ô-ô-t`4bË4,´/t-tb4/t.4.H4,´.4-4.4`t.´/´`4/´`t`´c‹´'´,ô`4,4/t.4aô-t/t/ˆ‹K´(t,t/´`4.´,4/ô`4/´,´-t`4-t/t,È4/ô/´.ô/t,4cÈ4/ô`4/´,´-t`4.´,4/ô/´-4-4-t`4-´.4,´,4-t/4bôaH4,t`4,4`ô-ô-t`4/´,ˆ4.4/ô`4/´.4-ô,´/´-4.4`´-t.ôc4/t/´`t`´.4-tbtdH4/t-H4/ô/´-4`´,´-t`4-´-4-t/t,‹‘STUTPKLH—KˆÈ‘ÐUKUPT“ÕS‹´'´`´-4-t.ôc4/t/´-H4`4,4-ô`4-tb4-t/t.4-H4/t,4,´bô/ô`ô`t.ˆ‹´%ô,4,t.ô/´.´.4`4/´,´,4/t/ˆ‹K´'ô`4/´,´-t`4.´,4`t.4`t`´-t/4bÈ4/t-H4-ô,4/4-t/tcô-t`ˆ4/´`´-4-t.ôc4/t/´,ô/ˆ4`4-tb4-t/t.4cÈ4`t/´,t`t`´,´-t/t/t.4.´,‹´(t/´,t`t`´,´-t/t/t.4.ˆ—KˆNÂˆ]ØZ][‹‘‹˜˜]Ú
+Ø]\Ë›X\
+›ÝÏO™[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È™[X\ÙWÙØ]\È
+Y˜[YKÝ]\Ë™\]Z\™Y]šY[˜ÙKÝÛ™\—Ù[]WÚY\]YØ]
+HSQTÈ
+ËËËËËË	ÌŒ‹LLŒULNŒŒ‰ÊHŠK˜š[™
+‹‹œ›ÝÊJJNÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J•TUH™[X\ÙWÙØ]\ÈÑU]šY[˜ÙOIô$´`t-H4/´,tcô-ô,4`´-t.ôc4/tbô-H4b4,4,ô.4-4/´.ô-´/tbÈ4/ô`4/´.t`´.4/ô/´,´`´/´`4cô-t/4`ôcˆ4/ô`4/´,´-t`4.´`È4`4,4,t/´aô-t.H4,t,4-ôbÉÈÒT‘HYIÑÐUKUTÐÑST’SÔÉÈS‘]šY[˜ÙOIô$´`t-H4/´,tcô-ô,4`´-t.ôc4/tbô-H4b4,4,ô.4-4/´.ô-´/tbÈ4/ô`4/´.t`´.4/ô/´,´`´/´`4cô-t/4`ôcˆ4/ô`4/´,´-t`4.´`ÈIÈŠKˆ[‹‘‹œ™\\™J•TUH™[X\ÙWÙØ]\ÈÑU˜[YOIô&´`4.4`´.4aô-t`t.´.4-H4-4-ta4-t.´`´bÉË]šY[˜ÙOIô(t,t/´`4.´,4/ô`4/´,´-t`4.´,4.´,4aô-t`t`´,´,4.´/´-4,4.4,4,´`´/´/4,4`´.4aô-t`t.´.4-H4`´-t`t`´bÈ4-ô,4,´-t`4b4-t/tbÈ4,t-t-È4.´`4.4`´.4aô-t`t.´.4aH4-4-ta4-t.´`´/´,‰ÈÒT‘HYIÑÐUKUTIÈS‘˜[YOIÔÔHH	ÈŠKˆ[‹‘‹œ™\\™J•TUH™[X\ÙWÙØ]\ÈÑU]šY[˜ÙOIô'´,ô`4,4/t.4aô-t/t.4cÈ4`4/´.ô-t.K4/´`´-4-t.ôc4/tbô.H4/4-t-4.4a´.4/t`t.´.4.H4-4/´/ô`ô`t.ˆ4.4-ô,4/ô`4-t`ˆ4/4-t-4.4a´.4/t`t.´.4aH4,4,ô`4-t,ô,4`´/´,ˆ4/ô/´.´`4bô`´bÈ4`´-t`t`´,4/4.	ÈÒT‘HYIÑÐUKUTPÉÈS‘]šY[˜ÙOIÔ›ÛHÝX\™Ë4/´`´-4-t.ôc4/tbô.HÜ˜[4.4-ô,4/ô`4-t`ˆ4/4-t-4.4a´.4/t`t.´.4aH4,4,ô`4-t,ô,4`´/´,ˆ4/ô/´.´`4bô`´bÈ4`´-t`t`´,4/4.	ÈŠKˆ[‹‘‹œ™\\™J•TUH™[X\ÙWÙØ]\ÈÑU˜[YOIô$t-t-ô/´/ô,4`t/tbô-H4.4-ô/4-t/t-t/t.4cÈ4,t,4-ôbÉË]šY[˜ÙOIô(tat-t/4,4`4,4`tb4.4`4cô-t`´`tcÈ4,t-t-È4`4,4-ô`4`ôb4.4`´-t.ôc4/tbôaH4.4-ô/4-t/t-t/t.4.NÈ4/ô/´,´`´/´`4/t,4cÈ4.4/t.4a´.4,4.ô.4-ô,4a´.4cÈ4,t-t-ô/´/ô,4`t/t,	ÈÒT‘HYIÑÐUKUSRQÔUSÓ”ÉÈS‘˜[YOIô$4-4-4.4`´.4,´/tbô-H4/4.4,ô`4,4a´.4.	ÈŠKˆ[‹‘‹œ™\\™J•TUH™[X\ÙWÙØ]\ÈÑU]šY[˜ÙOIô$t,4/t.´.4`t.4`t`´-t/4,4/ô`4/´-4,4-‹4-4/t-t,´/t.4.‹4ct.ô-t.´`´`4/´/t/tbô.H4-4/´.´`ô/4-t/t`´/´/´,t/´`4/´`‹4`ôaôdt`ˆ4.4`4-t.´.ô,4/4/tbô-H4.´,4,t.4/t-t`´bÈ4/ô/´-4.´.ôc´aô-t/tbÈ4/t-H4/ô/´.ô/t/´`t`´c4c‰ÈÒT‘HYIÑÐUKURS•QÔUSÓ”ÉÈS‘]šY[˜ÙOIô$t,4/t.´.Ô“K4-4/t-t,´/t.4.‹4+t%4'‹Ìt(K4(t&´(ô%4.4`4-t.´.ô,4/4/tbô-HTH4/t-H4/ô/´-4.´.ôc´aô-t/tbÉÈŠKˆ[‹‘‹œ™\\™J•TUH™[X\ÙWÙØ]\ÈÑU˜[YOIô$´/´`t`t`´,4/t/´,´.ô-t/t.4-H4`4,4,t/´aô-t.H4,t,4-ôbÉË]šY[˜ÙOIô'ô`4,4.´`´.4aô-t`t.´/´-H4,´/´`t`t`´,4/t/´,´.ô-t/t.4-H4`4-t-ô-t`4,´/t/´.H4.´/´/ô.4.4/t-H4,´bô/ô/´.ô/tcô.ô/´`tcÈ4/ô`4/´,´-t`4.´.4,4`4`´-ta4,4.´`´,4/t-t-4/´`t`´,4`´/´aô/t/‰ÈÒT‘HYIÑÐUKUPPÒÕT	ÈS‘˜[YOIô$´/´`t`t`´,4/t/´,´.ô-t/t.4-HIÈŠKˆ[‹‘‹œ™\\™J•TUH™[X\ÙWÙØ]\ÈÑU]šY[˜ÙOIô'´/ô`ô,t.ô.4.´/´,´,4/t/t`ôcˆ4,´-t`4`t.4cˆ4/4/´-´/t/ˆ4,´-t`4/t`ô`´c4,t-t-È4`4,4-ô`4`ôb4.4`´-t.ôc4/t/´,ô/ˆ4.4-ô/4-t/t-t/t.4cÈ4-4,4/t/tbôaIÈÒT‘HYIÑÐUKUT“ÓPÒÉÈS‘]šY[˜ÙOIô&´,4-´-4bô.HÚ]\ÈÚXÚÜÚ[4/t-t.4-ô/4-t/tcô-t/4.4-4/´/ô`ô`t.´,4-t`ˆ4,´/´-ô,´`4,4`ˆ4,´-t`4`t.4.È4/4.4,ô`4,4a´.4.4,4-4-4.4`´.4,´/tbÉÈŠKˆ[‹‘‹œ™\\™J•TUH™[X\ÙWÙØ]\ÈÑU˜[YOIô$t`4,4`ô-ô-t`4bË4,´/t-tb4/t.4.H4,´.4-4.4`t.´/´`4/´`t`´c	Ë]šY[˜ÙOIô(t,t/´`4.´,4/ô`4/´,´-t`4-t/t,È4/ô/´.ô/t,4cÈ4/ô`4/´,´-t`4.´,4/ô/´-4-4-t`4-´.4,´,4-t/4bôaH4,t`4,4`ô-ô-t`4/´,ˆ4.4/ô`4/´.4-ô,´/´-4.4`´-t.ôc4/t/´`t`´.4-tbtdH4/t-H4/ô/´-4`´,´-t`4-´-4-t/t,	ÈÒT‘HYIÑÐUKUP”“ÕÔÑT‰ÈS‘˜[YOIô$t`4,4`ô-ô-t`4bËš\ÝX[4.\™›Ü›X[˜ÙIÈŠKˆ[‹‘‹œ™\\™J•TUH™[X\ÙWÙØ]\ÈÑU˜[YOIô'´`´-4-t.ôc4/t/´-H4`4,4-ô`4-tb4-t/t.4-H4/t,4,´bô/ô`ô`t.‰Ë]šY[˜ÙOIô'ô`4/´,´-t`4.´,4`t.4`t`´-t/4bÈ4/t-H4-ô,4/4-t/tcô-t`ˆ4/´`´-4-t.ôc4/t/´,ô/ˆ4`4-tb4-t/t.4cÈ4`t/´,t`t`´,´-t/t/t.4.´,	ËÝÛ™\—Ù[]WÚYIô(t/´,t`t`´,´-t/t/t.4.‰ÈÒT‘HYIÑÐUKUPT“ÕS	ÈS‘ÝÛ™\—Ù[]WÚYIÔ“ÓN”‘T‘TÑS•UU‘IÈŠKˆJNÂˆ]ØZ][‹‘‹˜˜]Ú
+Âˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È™XÛÝ™\žWÙš[È
+Yš[Ý\KØÛÜKÝ\YØ]š[š\ÚYØ]Ý]\Ëœ×ÛZ[]\Ë×ÛZ[]\ËÚXÚÜÝ[WØ™Y›Ü™KÚXÚÜÝ[WØY\‹]šY[˜ÙK[Z]][ÛŠHSQTÈ
+	Ñ’SUPT•QPÕLIË	ô'ô`4/´,´-t`4.´,4,4`4`´-ta4,4.´`´,	Ë	ô&4`tat/´-4/tbô.H4.´/´-4.4`t/´`t`´,4,ˆ4`t,t/´`4.´.	Ë	ÌŒ‹LLŒULMNŒ‰Ë	ÌŒ‹LLŒULNŒŒ‰Ë	ô'ô`4/´.t-4-t/t/‰ËK	ÔÓÕTÑKU‘QKTÕQÑLMÉË	Ð•RSTÕQÑLN	Ë	ô(t,t/´`4.´,4a4/´`4/4.4`4`ô-t`ˆ4/ô`4/´,´-t`4cô-t/4bô.H4/t-t.4-ô/4-t/tcô-t/4bô.H4,4`4`´-ta4,4.´`‰Ë	ô't-H4/ô/´-4`´,´-t`4-´-4,4-t`ˆ4,´/´`t`t`´,4/t/´,´.ô-t/t.4-H4`4,4,t/´aô-t.H4,t,4-ôbÉÊHŠKˆ[‹‘‹œ™\\™J’S”ÑT•ÔˆQÓ“Ô‘HS•È™XÛÝ™\žWÙš[È
+Yš[Ý\KØÛÜKÝ\YØ]š[š\ÚYØ]Ý]\Ëœ×ÛZ[]\Ë×ÛZ[]\ËÚXÚÜÝ[WØ™Y›Ü™KÚXÚÜÝ[WØY\‹]šY[˜ÙK[Z]][ÛŠHSQTÈ
+	Ñ’SUQKT‘TÕÔ‘KLIË	ô$´/´`t`t`´,4/t/´,´.ô-t/t.4-H4.4-È4`4-t-ô-t`4,´/t/´.H4.´/´/ô.4.	Ë	ô(´-t`t`´/´,´,4cÈ4.´/´/ô.4cÈ4`4,4,t/´aô-t.H4,t,4-ôbÉË	ÉË	ÉË	ô't-H4,´bô/ô/´.ô/t-t/t/‰Ë	ÉË	ÉË	ô't-t`ˆ4,´bô-4-t.ô-t/t/t/´.H4.´/´/ô.4.4.4`4,4-ô`4-tb4dt/t/t/´.H4/ô`4/´a´-t-4`ô`4bÈ4,´/´`t`t`´,4/t/´,´.ô-t/t.4cÉË	ô%4/ˆ4/ô`4,4.´`´.4aô-t`t.´/´.H4/ô`4/´,´-t`4.´.4,´bô/ô`ô`t.ˆ4-ô,4/ô`4-tbtdt/IÊHŠKˆ[‹‘‹œ™\\™J•TUH™XÛÝ™\žWÙš[ÈÑUØÛÜOIô&4`tat/´-4/tbô.H4.´/´-4.4`t/´`t`´,4,ˆ4`t,t/´`4.´.	Ë]šY[˜ÙOIô(t,t/´`4.´,4a4/´`4/4.4`4`ô-t`ˆ4/ô`4/´,´-t`4cô-t/4bô.H4/t-t.4-ô/4-t/tcô-t/4bô.H4,4`4`´-ta4,4.´`‰Ë[Z]][ÛIô't-H4/ô/´-4`´,´-t`4-´-4,4-t`ˆ4,´/´`t`t`´,4/t/´,´.ô-t/t.4-H4`4,4,t/´aô-t.H4,t,4-ôbÉÈÒT‘HYIÑ’SUPT•QPÕLIÈS‘ØÛÜOIô&4`tat/´-4/tbô.H4.´/´-
+ÈZ[X[šY™\Ý	ÈŠKˆ[‹‘‹œ™\\™J•TUH™XÛÝ™\žWÙš[ÈÑUØÛÜOIô(´-t`t`´/´,´,4cÈ4.´/´/ô.4cÈ4`4,4,t/´aô-t.H4,t,4-ôbÉË]šY[˜ÙOIô't-t`ˆ4,´bô-4-t.ô-t/t/t/´.H4.´/´/ô.4.4.4`4,4-ô`4-tb4dt/t/t/´.H4/ô`4/´a´-t-4`ô`4bÈ4,´/´`t`t`´,4/t/´,´.ô-t/t.4cÉË[Z]][ÛIô%4/ˆ4/ô`4,4.´`´.4aô-t`t.´/´.H4/ô`4/´,´-t`4.´.4,´bô/ô`ô`t.ˆ4-ô,4/ô`4-tbtdt/IÈÒT‘HYIÑ’SUQKT‘TÕÔ‘KLIÈS‘ØÛÜOIÓ]™HH\Ý]X˜\ÙIÈŠKˆJNÂŸB

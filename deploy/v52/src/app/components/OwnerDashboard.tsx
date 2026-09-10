@@ -81,6 +81,7 @@ type OwnerDashboardProps = {
   displayName: string;
   userKey?: string;
   roleLabel: string;
+  selectedBranch: string;
   availableModules: ReadonlyArray<{ id: ModuleId; label: string }>;
   tasks: TaskSummary[];
   sourceOnly: boolean;
@@ -342,7 +343,7 @@ function sizeClass(size: DashboardWidgetSize) {
   return styles.sizeCompact;
 }
 
-export function OwnerDashboard({ displayName, userKey, roleLabel, availableModules, tasks, sourceOnly, navigate, createTask, openOperation }: OwnerDashboardProps) {
+export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch, availableModules, tasks, sourceOnly, navigate, createTask, openOperation }: OwnerDashboardProps) {
   const [finance, setFinance] = useState<FinancePayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -472,12 +473,19 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
 
   useEffect(() => {
     if (!needsFinance) return;
+    if (!selectedBranch || selectedBranch === "ALL") {
+      setFinance(null);
+      setLoading(false);
+      setError("Выберите филиал: объединённый финансовый отчёт пока отключён");
+      return;
+    }
     const controller = new AbortController();
     async function load() {
       setLoading(true);
       try {
-        const periodQuery = dashboardPeriod ? `?period=${encodeURIComponent(dashboardPeriod)}` : "";
-        const response = await fetch(`/api/finance${periodQuery}`, { cache: "no-store", signal: controller.signal });
+        const params = new URLSearchParams({ branchId: selectedBranch });
+        if (dashboardPeriod) params.set("period", dashboardPeriod);
+        const response = await fetch(`/api/finance?${params.toString()}`, { cache: "no-store", signal: controller.signal });
         const payload = await response.json() as FinancePayload & { error?: string };
         if (!response.ok) throw new Error(payload.error ?? "Не удалось загрузить финансовый контур");
         setFinance(payload);
@@ -494,7 +502,7 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, availableModul
     }
     void load();
     return () => controller.abort();
-  }, [dashboardPeriod, needsFinance]);
+  }, [dashboardPeriod, needsFinance, selectedBranch]);
 
   const updateLayout = useCallback((change: (current: DashboardWidgetPreference[]) => DashboardWidgetPreference[]) => {
     const current = layoutRef.current;
