@@ -943,3 +943,7 @@ AI разрешено использовать существующую защи
 ## Приложение D134 — повтор после несовпадения School topology (2026-09-10)
 
 D133 source и hosted gates приняты, но protected run `34536320576` остановился до Atlas: compose-oriented School controller потребовал отсутствующий `/srv/school-1-11/shared/.env`. D134 не меняет scope, sources, данные или права. Разрешён только guarded standalone School cutover для контейнера `school-1-11` с write gate, backup/integrity, preflight и rollback; затем выполняются неизменные Atlas backup/image/owner-SSO проверки. Успехом остаются receipts сохранения volumes, public health двух дневников и реальный owner Atlas SSO.
+
+## Приложение D135 — identity-based School container discovery (2026-09-10)
+
+D134 run `34537971479` остановился после проверки и сборки image, но до backup/cutover: hard-coded Docker name уже не существует. D135 разрешает read-only определить ровно один running container по label `school.system=school-1-11` и прежней revision, проверить безопасное имя и передать его неизменному standalone controller. При нуле/множественности/source drift — stop. Scope, sources, данные, права и критерии D134 не меняются.

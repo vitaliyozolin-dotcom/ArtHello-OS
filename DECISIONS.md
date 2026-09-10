@@ -621,3 +621,9 @@ Atlas pin: принятый PR438 source `f856fb3bd098152bb6b02c4d0273c4c9170b13
 D133 hosted CI прошёл, но protected run `34536320576` остановился на строке 523 legacy School controller: production не содержит compose-state `/srv/school-1-11/shared/.env`. Atlas step не запускался, поэтому его runtime и данные не изменились.
 
 Принято заменить только School delivery path на уже проверенный `school-curriculum-standalone-cutover.sh`, соответствующий наблюдаемому контейнеру `school-1-11` и его named volumes. Immutable School/Atlas sources, продуктовая логика, данные и права не меняются. Cutover обязан сохранить write gate, backup/integrity, isolated preflight, rollback и public verification; затем выполняются неизменные Atlas backup/image/SSO steps. Новый запуск допустим только exact-main Quality с prefix `D134: repair diary UI release` в `production-ru`.
+
+## D135 — Обнаружить School container по identity, не по имени (2026-09-10, кандидат)
+
+D134 run `34537971479` успешно проверил archive и собрал School image, но до backup/cutover получил `no such object: school-1-11`; Atlas не запускался. Значит, standalone topology подтверждена, но Docker name изменился после более позднего cutover.
+
+Принято выбрать ровно один running container по immutable identity label `school.system=school-1-11`, дополнительно потребовать прежнюю revision `54242340f2d9b6a9887d69ecc03520ddf9f7982c` и безопасный Docker name. Только это имя передаётся прежнему standalone rollback-controller. Неоднозначность, отсутствие или revision drift запрещают мутацию. Source pins и остальные D134 границы неизменны; trigger — exact-main Quality prefix `D135: discover School container`.

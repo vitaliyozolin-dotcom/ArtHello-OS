@@ -25,3 +25,5 @@ Controller не меняет центральный ArtHello runtime, grants и�
 ## Повтор D134
 
 D133 PR439 и hosted run `34535437429` прошли. Protected run `34536320576` остановился до Atlas: School `repair-deploy.sh` потребовал отсутствующий `/srv/school-1-11/shared/.env`. Это несовпадение controller и фактической standalone-топологии, а не отказ приложения или данных. D134 сохраняет оба source pin и использует guarded standalone cutover для наблюдаемого контейнера `school-1-11`.
+
+D134 protected run `34537971479` затем проверил source/archive и собрал новый School image, но hard-coded Docker name отсутствует; fail-closed случился до backup/cutover, Atlas снова не запускался. D135 определяет единственный живой School container по system label и old revision и передаёт его фактическое имя тому же controller.

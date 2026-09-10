@@ -1,5 +1,10 @@
 # ArtHello OS — Runbook
 
+## Diaries D135 — безопасное обнаружение School container
+
+- D134 run `34537971479` подтвердил source/build, но hard-coded `school-1-11` не является текущим Docker name; остановка произошла до backup/cutover и до Atlas.
+- D135 допускает ровно один running container с label `school.system=school-1-11` и old revision `54242340f2d9b6a9887d69ecc03520ddf9f7982c`. Его валидированное имя передаётся standalone controller. Любая неоднозначность или source drift — немедленный stop.
+
 ## Diaries D134 — повтор после School topology mismatch
 
 - D133 protected run `34536320576` остановился до мутаций Atlas: `/srv/school-1-11/shared/.env` отсутствует, поэтому compose-oriented `repair-deploy.sh` не соответствует текущей standalone-топологии School.
