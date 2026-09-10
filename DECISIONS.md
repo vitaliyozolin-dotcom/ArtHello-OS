@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 40322)
+Total output lines: 569
+
 Warning: truncated output (original token count: 79581)
 Total output lines: 1245
 
@@ -310,13 +313,7 @@ PR355 слит как 8d4fc1cb589db8550cc4e7857e1a7537ac771ae5 (M2). Exact first
 Статус: принято как необходимое исправление подтверждённого runtime-дефекта в рамках исходного поручения владельца  
 Владелец: Исполнитель ArtHello OS
 
-PR #354 слит как 68a159dc647f35cdd30ce586fc6d5beb93b89a51. Точные main Quality, Proof и Verify успешны. D063 run 34193103822 дошёл до read-only School diagnostic и остановился до image/clone/cutover: School на внутренней Docker bridge arthello-os_backend и…39581 tokens truncated…; окончательный статус зависит от реального Chromium. Прежние Quality, R12 и банковские workflows не изменяются. Полная бизнес-приёмка ведётся по отдельным фактическим результатам.
-
-## D-090 — Клиент AlfaCRM использует действующий CSRF-контракт
-
-Дата: 2026-09-09. Владелец — Виталий; исполнитель — Codex. Статус: подготовка исправления в рамках действующего поручения завершить выпуск и бизнес-приёмку. Supersedes: нет. D088/D089 и прежние ограничения сохраняются; запись маршрута и AI-контракта — паспорт production, D090.
-
-В принятом R12 source `77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed` мастер AlfaCRM отправляет `x-arthello-csrf` из `arthello_csrf`, тогда как действующий сервер выдаёт `__Host-arthello_csrf` и проверяет только `x-csrf-token`. Ограниченная локальная fixture выполнила настоящий POST-отправитель компонента против неизменённых `appendAuthCookies`, `verifyAuthenticatedRequestCsrf` и origin guard: RED — один ожидаемый отказ `csrf_denied` из пяти тестов; после исправления GREEN — 5/5. Независимый review подтвердил ограниченный scope; это evidence подготовки, не наблюдение live POST.
+PR #354 слит как 68a159dc647f35cdd30ce586fc6d5beb93b89a51. Точные main Quality, Proof и Verify успешны. D063 run 34193103822 дошёл до read-only School diagnostic и остановился до image/clo…322 tokens truncated…ниченная локальная fixture выполнила настоящий POST-отправитель компонента против неизменённых `appendAuthCookies`, `verifyAuthenticatedRequestCsrf` и origin guard: RED — один ожидаемый отказ `csrf_denied` из пяти тестов; после исправления GREEN — 5/5. Независимый review подтвердил ограниченный scope; это evidence подготовки, не наблюдение live POST.
 
 Изменяются ровно два code/test файла под `deploy/v52/overrides`: одна строка в `app/components/AlfaCrmSetupWizard.tsx` использует `"x-csrf-token": readCookie("__Host-arthello_csrf")`; новый `tests/alfacrm-csrf-contract.test.mjs` проверяет совместимость настоящего отправителя и сервера. Серверные auth/access/origin/CSRF проверки, роли, connection assignment, branch scope, endpoint, payload и cookies сервера не меняются. Legacy fallback не добавляется. Отрицательные случаи сохраняют запрет legacy-only cookie/header, неверного токена и иного origin.
 
@@ -561,3 +558,9 @@ Standalone `Verify bounded production data diagnostic` не имеет productio
 Контроллер допускается только из успешного exact-main `Quality gates`, владельцем репозитория, через `production-ru` и обе production concurrency-блокировки. Новый отдельный secret не выводится и не попадает в Docker config: central читает file binding, Atlas экспортирует file binding только внутри entrypoint process. Central пересоздаётся из точного принятого image с прежними data/backup-control/bank-activation volumes и runtime values плюс две Atlas-настройки. Atlas начинает с отдельной пустой БД и первого backup; люди, семьи, классы и права не seed-ятся.
 
 Central и Atlas проверяются до публикации. Оба Caddy upstream публикуются одним compare-and-swap route file; при ошибке до принятия исходный route восстанавливается, новый central удаляется, прежний central запускается с исходной restart policy. После успешной public health/School/303 SSO проверки старый central сохраняется остановленным как rollback predecessor. Natural browser, реальный вход сотрудника и mobile acceptance остаются отдельными незавершёнными воротами. Старый автоматический v44 UI deploy архивируется как завершённый legacy path, поэтому workflow ratchet остаётся 13.
+
+## D123 — Совместимость Atlas image lookup на gateway (2026-09-10, кандидат)
+
+Первый D122 run `34520906921`, deploy job `103018492882`, прошёл exact main, checkout, artifact download и checksums, затем отказал на raw `sha256:` lookup сразу после `docker load`. Контейнеры и Caddy ещё не создавались и не менялись; отдельные Atlas secret files могли быть безопасно созданы и сохраняются. Повторять этот run нельзя.
+
+D123 разрешает только обращение к загруженному Atlas image через его immutable tag `atlas-diary:<exact-source-sha>` с немедленной проверкой, что tag разрешается ровно в image ID из signed receipt. Source/tree, artifact, central pins, secret/file boundary, empty database, atomic route, rollback и public acceptance D122 не меняются. Новый protected запуск разрешён только свежим squash main с prefix `D123: Atlas image tag compatibility` после exact-head CI.

@@ -178,8 +178,9 @@ test "$(jq -er '.sourceTree' "$ATLAS_BUNDLE_DIR/receipt.json")" = "$ATLAS_SOURCE
 atlas_image="$(jq -er '.imageId' "$ATLAS_BUNDLE_DIR/receipt.json")"
 [[ "$atlas_image" =~ ^sha256:[a-f0-9]{64}$ ]]
 docker load --input "$ATLAS_BUNDLE_DIR/atlas-image.tar.gz" >/dev/null
-test "$(docker image inspect "$atlas_image" --format '{{.Id}}')" = "$atlas_image"
-test "$(docker image inspect "$atlas_image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$ATLAS_SOURCE_SHA"
+loaded_atlas_image="$(docker image inspect "atlas-diary:$ATLAS_SOURCE_SHA" --format '{{.Id}}')"
+test "$loaded_atlas_image" = "$atlas_image"
+test "$(docker image inspect "atlas-diary:$ATLAS_SOURCE_SHA" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$ATLAS_SOURCE_SHA"
 
 {
   printf 'NODE_ENV=production\nPORT=8081\nARTHELLO_D1_PATH=/data/d1\n'
@@ -229,7 +230,7 @@ docker run -d --name "$atlas_service" --restart unless-stopped --network "$netwo
   --mount "type=bind,src=$atlas_pepper,dst=/run/secrets/atlas-passwordless-pepper,readonly" \
   -v "$atlas_data:/data" -v "$atlas_backups:/backups" \
   --label "org.opencontainers.image.revision=$ATLAS_SOURCE_SHA" --label arthello.institution=atlas-school \
-  --entrypoint /bin/sh "$atlas_image" -ceu '
+  --entrypoint /bin/sh "atlas-diary:$ATLAS_SOURCE_SHA" -ceu '
     export CENTRAL_ACCESS_SECRET="$(cat /run/secrets/atlas-central-access-secret)"
     export PASSWORDLESS_PEPPER="$(cat /run/secrets/atlas-passwordless-pepper)"
     exec node server.js
