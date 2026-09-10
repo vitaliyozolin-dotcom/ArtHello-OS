@@ -821,6 +821,21 @@ jobs:
           test "$ready" -eq 1
           printf 'ARTHELLO_V52_ISOLATED_RUNTIME=VERIFIED\n'
 
+      - name: Verify finance articles in an isolated real browser and database
+        env:
+          CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          IMMUTABLE_IMAGE_ID: ${{ steps.image.outputs.image_id }}
+        run: bash .github/scripts/run-finance-ci-browser.sh
+
+      - name: Preserve synthetic finance browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: finance-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/finance-browser-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Verify isolated backup and activation volumes on the exact image
         env:
           IMMUTABLE_IMAGE_ID: ${{ steps.image.outputs.image_id }}

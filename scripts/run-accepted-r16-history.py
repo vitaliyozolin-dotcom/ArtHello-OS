@@ -17,13 +17,13 @@ BASELINE_TREE = '1ce4c733034060dc84d558d49dab96d1be9b1cf8'
 PINS = 'deploy/v52/recovery-r16/source-pins.json'
 PINS_SHA256 = 'd6f6b71b0cf5e8c64e43e3978d3cdba7b90528ab44b729a7f484d63f599e5448'
 WORKFLOW = '.github/workflows/verify-arthello-r14.yml'
-WORKFLOW_NORMALIZED_SHA256 = '884bcf91e9ee7b6e07127b7114a0b9bb17155413a3f1bf79ddb4792b1fc9c55d'
+WORKFLOW_NORMALIZED_SHA256 = '4404375c365a933b1134c403d63d151ae176a81687bdcbe1a54e4610ce2af363'
 # These are the only changed inputs among the 97 frozen R16 source pins.
 # The manifest represents the reviewed current application. Two inputs are D105
 # and two are D107; their bytes are preserved. Current source and scheduler
 # behavior are tested before any historical fixture is created. D109 adds only
 # the separate Atlas origin/key bindings to the current runtime entrypoint.
-CURRENT_INPUTS = {'scripts/test/school-source.test.mjs': 'bec0e629af23804461f9a9a70849a8e75db4257204d363d0b4e0faf5fdab66ae', 'deploy/school-source-manifest.json': '8a6da5de241307c6dbbfd98b724a3dbdb5af2f7df74c443953f33741bbc99d59', 'deploy/v52/Dockerfile': 'a5372486dc7fa4efe45646a4a2a0562514e362fcfbad28d1d6ea8cb4872c09a6', 'deploy/v52/src/lib/tochka-autosync.ts': 'be895ff2426e1fac2941986ec0de0de18586dc9756bf5ee0ac239387e26a94dc', 'scripts/verify-school-source.mjs': 'ce78eac029d2e7238cc5164e93c006f1ba68723f51dba4b81ccf76fbda176309', 'deploy/v52/src/production/runtime-server.mjs': '25e217b1eefb4c816a018db5cc9c9bf5776c7027c743b09083a3e6587acb568f'}
+CURRENT_INPUTS = {'scripts/test/school-source.test.mjs': 'bec0e629af23804461f9a9a70849a8e75db4257204d363d0b4e0faf5fdab66ae', 'deploy/school-source-manifest.json': 'ad3fcc40bd8dc46bb154c51c2f45891a426dd9417a11b2cdeeea99871ad9aa52', 'deploy/v52/Dockerfile': 'a5372486dc7fa4efe45646a4a2a0562514e362fcfbad28d1d6ea8cb4872c09a6', 'deploy/v52/src/lib/tochka-autosync.ts': 'be895ff2426e1fac2941986ec0de0de18586dc9756bf5ee0ac239387e26a94dc', 'scripts/verify-school-source.mjs': 'ce78eac029d2e7238cc5164e93c006f1ba68723f51dba4b81ccf76fbda176309', 'deploy/v52/src/production/runtime-server.mjs': '25e217b1eefb4c816a018db5cc9c9bf5776c7027c743b09083a3e6587acb568f'}
 COMMANDS = {
     'r14': [
         ['python3', '-I', '-B', 'scripts/test/r14-historical-contract.test.py'],
@@ -74,12 +74,15 @@ def check_current(read):
     atlas_bindings = '    ATLAS_PUBLIC_ORIGIN: process.env.ATLAS_PUBLIC_ORIGIN || "",\n    ATLAS_CENTRAL_ACCESS_SECRET: readRuntimeSecret("ATLAS_CENTRAL_ACCESS_SECRET", "ATLAS_CENTRAL_ACCESS_SECRET_FILE"),\n'
     require(runtime.count(atlas_bindings) == 1, 'ATLAS_RUNTIME_BINDING_COUNT')
     require(digest(runtime.replace(atlas_bindings, '').encode()) == pins['sourceFiles'][runtime_path], 'ATLAS_RUNTIME_UNRELATED_DRIFT')
-    require(digest(read('.github/workflows/deploy-arthello-tochka-r16-20260910.yml')) == pins['controllerSha256'],
+    require(digest(read('deploy/v52/recovery-r17/r16-controller.yml')) == pins['controllerSha256'],
             'FROZEN_CONTROLLER_DRIFT')
     workflow = read(WORKFLOW).decode()
     pattern = r'(?m)^      ACCEPTED_HISTORY_RUNNER_SHA256: [a-f0-9]{64}$'
     require(len(re.findall(pattern, workflow)) == 3, 'RUNNER_PIN_COUNT')
     normalized = re.sub(pattern, '      ACCEPTED_HISTORY_RUNNER_SHA256: RUNNER_SHA256_PENDING', workflow)
+    current_pattern = r'(?m)^      R17_CONTRACT_SHA256: [a-f0-9]{64}$'
+    require(len(re.findall(current_pattern, normalized)) == 1, 'CURRENT_CONTRACT_PIN_COUNT')
+    normalized = re.sub(current_pattern, '      R17_CONTRACT_SHA256: CONTRACT_SHA256_PENDING', normalized)
     require(digest(normalized.encode()) == WORKFLOW_NORMALIZED_SHA256, 'CURRENT_WORKFLOW_DRIFT')
 
 

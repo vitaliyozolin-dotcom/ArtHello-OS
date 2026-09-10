@@ -1,0 +1,273 @@
+{
+  "run": {
+    "id": 34461449594,
+    "name": "Deploy ArtHello Tochka R16 D104",
+    "path": ".github/workflows/deploy-arthello-tochka-r16-20260910.yml",
+    "head_sha": "cb990279e070fddbfa9a0adbd21b56de25b85588",
+    "head_branch": "main",
+    "event": "workflow_run",
+    "run_attempt": 1,
+    "status": "completed",
+    "conclusion": "success",
+    "repository": {
+      "full_name": "vitaliyozolin-dotcom/ArtHello-OS"
+    },
+    "head_repository": {
+      "full_name": "vitaliyozolin-dotcom/ArtHello-OS"
+    },
+    "actor": {
+      "login": "vitaliyozolin-dotcom"
+    },
+    "triggering_actor": {
+      "login": "vitaliyozolin-dotcom"
+    }
+  },
+  "jobs": {
+    "total_count": 2,
+    "jobs": [
+      {
+        "id": 102819996124,
+        "run_id": 34461449594,
+        "run_attempt": 1,
+        "head_sha": "cb990279e070fddbfa9a0adbd21b56de25b85588",
+        "head_branch": "main",
+        "name": "bundle",
+        "status": "completed",
+        "conclusion": "success",
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "steps": [
+          {
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+            "number": 2,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+            "number": 3,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Test browser policy and install locked package off the VPS",
+            "number": 4,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Build immutable bundle and exercise Chromium sandbox and natural flow fixture",
+            "number": 5,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+            "number": 6,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+            "number": 11,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+            "number": 12,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "number": 13,
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "id": 102820502860,
+        "run_id": 34461449594,
+        "run_attempt": 1,
+        "head_sha": "cb990279e070fddbfa9a0adbd21b56de25b85588",
+        "head_branch": "main",
+        "name": "deploy",
+        "status": "completed",
+        "conclusion": "success",
+        "labels": [
+          "self-hosted",
+          "linux",
+          "x64",
+          "arthello-gateway"
+        ],
+        "steps": [
+          {
+            "name": "Set up job",
+            "number": 1,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Verify R16 identity and accepted R15 success history",
+            "number": 2,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Wait for exact main Quality Proof and v52 verification",
+            "number": 3,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Check out exact verified release",
+            "number": 4,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Verify R16 checkout and release contracts",
+            "number": 5,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Verify retained R16 candidate before any replay skip",
+            "number": 6,
+            "status": "completed",
+            "conclusion": "skipped"
+          },
+          {
+            "name": "Verify accepted R15 baseline and preserved School relay",
+            "number": 7,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Check existing gateway Docker authority",
+            "number": 8,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Check current release and existing browser runtime",
+            "number": 9,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Retire only the exact unused accepted R15 browser image",
+            "number": 10,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Measure import capacity before downloading the verified archive",
+            "number": 11,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Run actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+            "number": 12,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Verify archive, import off-host bundle and verify portable identity",
+            "number": 13,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Read-only School diagnostic before candidate acceptance",
+            "number": 14,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Download and load exact hosted-verified image",
+            "number": 15,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Verify and load exact hosted-verified image",
+            "number": 16,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Verify actual gateway Caddy with isolated candidate fixture",
+            "number": 17,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Resolve authoritative School sync secret",
+            "number": 18,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Clone fresh snapshot and guarded R16 production cutover",
+            "number": 19,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "School diagnostic and real browser acceptance after R16 cutover",
+            "number": 20,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Remove only this downloaded temporary archive",
+            "number": 21,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Remove temporary School SSH material",
+            "number": 22,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Production summary",
+            "number": 23,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Post Check out exact verified release",
+            "number": 46,
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Complete job",
+            "number": 47,
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      }
+    ]
+  },
+  "commit": {
+    "sha": "cb990279e070fddbfa9a0adbd21b56de25b85588",
+    "tree": {
+      "sha": "1ce4c733034060dc84d558d49dab96d1be9b1cf8"
+    }
+  }
+}

@@ -99,7 +99,7 @@ jobs:
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       R14_CONTRACT_SHA256: 37614beafcbf18347d2429713301699bd4c5e3474cd4f7db840dc166b4c852a3
-      ACCEPTED_HISTORY_RUNNER_SHA256: 5189a1d128faf766b4870204b82f687a07958991d9068c47621412725b51f254
+      ACCEPTED_HISTORY_RUNNER_SHA256: 59942f6477f2991a718099bc2bf9dfbf0ce48f5b7ff9ea796971862ea9992a2c
       R14_HISTORICAL_RUNNER_SHA256: ab0aeb384d5c5eb4859b86274f0a70778518b846620e4c2dbe47710c9c0fb48b
     steps:
     - name: Check out exact unprivileged R14 verification source
@@ -142,7 +142,7 @@ jobs:
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       R15_CONTRACT_SHA256: db8d577e4acd86180cb2a08234f99e654832918fcf29ad01697b25d57d700533
-      ACCEPTED_HISTORY_RUNNER_SHA256: 5189a1d128faf766b4870204b82f687a07958991d9068c47621412725b51f254
+      ACCEPTED_HISTORY_RUNNER_SHA256: 59942f6477f2991a718099bc2bf9dfbf0ce48f5b7ff9ea796971862ea9992a2c
       R15_HISTORICAL_RUNNER_SHA256: bcaa0ef337e40dd428349293dbabbbe89193841d916c4dc3df8be07a6d336111
     steps:
     - name: Check out exact unprivileged R15 verification source
@@ -174,7 +174,7 @@ jobs:
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       R16_CONTRACT_SHA256: fbf8f98aaf6c751296009178fba73139372b9153f7b2f8a7e4a0b4ed4b40fa30
-      ACCEPTED_HISTORY_RUNNER_SHA256: 5189a1d128faf766b4870204b82f687a07958991d9068c47621412725b51f254
+      ACCEPTED_HISTORY_RUNNER_SHA256: 59942f6477f2991a718099bc2bf9dfbf0ce48f5b7ff9ea796971862ea9992a2c
     steps:
     - name: Check out exact unprivileged R16 verification source
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -198,3 +198,42 @@ jobs:
         test "$(sha256sum scripts/run-accepted-r16-history.py | cut -d ' ' -f 1)" = "$ACCEPTED_HISTORY_RUNNER_SHA256"
         python3 -I -B scripts/test/accepted-r16-history.test.py
         python3 -I -B scripts/run-accepted-r16-history.py r16
+  r17-candidate-tests:
+    name: r17-candidate-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      R17_CONTRACT_SHA256: af91195358fcc047bedef2aca399619ffdd044c3ece79a3daecb99f37378e542
+    steps:
+    - name: Check out exact unprivileged R17 verification source
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ env.CHECKED_SOURCE_SHA }}
+        fetch-depth: 0
+        clean: true
+        persist-credentials: false
+        submodules: false
+        lfs: false
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: 24
+    - name: Verify R17 transformation and preserved backup history
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        test "$(id -u)" -ne 0
+        test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+        test "$(sha256sum deploy/v52/recovery-r17/check-contract.rb | cut -d ' ' -f 1)" = "$R17_CONTRACT_SHA256"
+        ruby deploy/v52/recovery-r17/check-contract.rb
+        python3 -I -B .github/scripts/test-r17-contract.py
+        python3 -I -B .github/scripts/test-r17-history-gate.py
+        python3 -I -B .github/scripts/test-r17-backup-adoption.py
+        python3 -I -B .github/scripts/test-r17-backup-controller.py
+        python3 -I -B .github/scripts/test-r17-continuation-adapters.py
+        python3 -I -B .github/scripts/test-r17-live-baseline.py
+        python3 -I -B .github/scripts/test-run-r17-live-browser.py
+        python3 -I -B .github/scripts/test-run-finance-ci-browser.py
+        python3 -I -B .github/scripts/test-r17-digest-scan.py
+        node --test scripts/test/retire-r16-browser.test.mjs
+        node --check deploy/browser/retire-r16-browser.mjs

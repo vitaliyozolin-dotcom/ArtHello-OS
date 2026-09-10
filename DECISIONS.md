@@ -1202,3 +1202,7 @@ Capacity retirement ограничен отдельным точным неис�
 Центральные формы содержат отдельную роль Атласа; собственник настраивает личный вход без изменения своей основной роли. Производственные права конкретных сотрудников не назначались по имени. Первый выпуск дневника остаётся пустым: реальные классы, семьи и календарь не копируются из «1–11». Подключение проекции семей Атласа и проверка реального входа относятся к незавершённой приёмке.
 
 Frozen R16 workflow, bank activation/backup contexts и текущая production-БД этим кандидатом не изменены. Для production нужен отдельный согласованный с действующим протоколом выпуск центрального runtime с ATLAS_PUBLIC_ORIGIN и отдельным ATLAS_CENTRAL_ACCESS_SECRET_FILE.
+
+## D110 — Guarded R17 для статей и разнесения (2026-09-10)
+
+Виталий явно поручил проверить и выпустить D108 в production. PR412 добавляет реальный hosted browser/DB сценарий на синтетических данных и новый R17 adapter от actual accepted R16. Старые frozen contracts не переопределяются. Сохраняются source/owner/signed-single-parent/main/attempt1, обе блокировки, environment, backup/history/snapshot/seal/auth/capacity и School. Доставка только squash `D110: guarded finance R17` после окончательного review/CI; main неизменен до terminal+cleanup. Статьи и реальные назначения не создаются автоматически. Контракт и evidence: docs/acceptance/2026-09-10-r17-finance-release.md.

@@ -1,0 +1,14 @@
+title = "Default scanner with one verified public source digest"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Exact SHA-256 of the public finance API regression test in the R17 source inventory"
+condition = "AND"
+paths = ['''(^|/)deploy/v52/recovery-r17/source-pins\.json$''']
+regexTarget = "secret"
+regexes = ['''^b7276c29aa18837416f49b9d18d7899f5b9886e0548554e2ee037c59f5ea38e3$''']
