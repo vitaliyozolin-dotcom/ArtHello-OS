@@ -1,5 +1,6 @@
-import {spawn} from 'node:child_process';
-import {mkdtempSync} from 'node:fs';
+import {spawn,execFileSync} from 'node:child_process';
+import {createServer} from 'node:https';
+import {mkdtempSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
@@ -8,7 +9,20 @@ import assert from 'node:assert/strict';
 const root=process.cwd(), path=join(mkdtempSync(join(tmpdir(),'atlas-http-')),'atlas.sqlite');
 const origin='http://127.0.0.1:3117';
 const testKey='atlas-test-only-key-not-a-production-secret';
-const child=spawn(process.execPath,['node_modules/next/dist/bin/next','start','-H','127.0.0.1','-p','3117'],{cwd:root,env:{...process.env,DATABASE_PATH:path,PUBLIC_APP_ORIGIN:origin,ARTHELLO_PUBLIC_ORIGIN:'https://arthello.example.test',CENTRAL_ACCESS_SECRET:testKey,PASSWORDLESS_PEPPER:testKey},stdio:['ignore','pipe','pipe']});
+const tlsRoot=mkdtempSync(join(tmpdir(),'atlas-central-tls-'));
+execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',join(tlsRoot,'key.pem'),'-out',join(tlsRoot,'cert.pem'),'-days','1','-subj','/CN=127.0.0.1','-addext','subjectAltName=IP:127.0.0.1'],{stdio:'ignore'});
+const deniedStaff=new Set();
+const mockCentral=createServer({key:readFileSync(join(tlsRoot,'key.pem')),cert:readFileSync(join(tlsRoot,'cert.pem'))},async(req,res)=>{
+ let body=''; for await(const chunk of req)body+=chunk;
+ const stamp=req.headers['x-arthello-timestamp'];
+ const signed=req.headers['x-arthello-signature']===createHmac('sha256',testKey).update(stamp+'.'+body).digest('hex');
+ const p=JSON.parse(body||'{}');
+ const ok=signed && req.url==='/api/atlas-sso/check' && p.systemId==='SYS-SCHOOL-ATLAS' && p.branchId==='BR-ATLAS-SCHOOL' && p.identity?.centralUserId?.startsWith('fixture-') && !deniedStaff.has(p.identity.centralUserId);
+ res.writeHead(ok?200:403,{'content-type':'application/json'});res.end(JSON.stringify({ok,systemId:'SYS-SCHOOL-ATLAS',branchId:'BR-ATLAS-SCHOOL'}));
+});
+await new Promise(resolve=>mockCentral.listen(0,'127.0.0.1',resolve));
+const centralOrigin='https://127.0.0.1:'+mockCentral.address().port;
+const child=spawn(process.execPath,['node_modules/next/dist/bin/next','start','-H','127.0.0.1','-p','3117'],{cwd:root,env:{...process.env,DATABASE_PATH:path,PUBLIC_APP_ORIGIN:origin,ARTHELLO_PUBLIC_ORIGIN:centralOrigin,NODE_EXTRA_CA_CERTS:join(tlsRoot,'cert.pem'),CENTRAL_ACCESS_SECRET:testKey,PASSWORDLESS_PEPPER:testKey},stdio:['ignore','pipe','pipe']});
 let logs='';child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
 const read=async (role,q='')=>{const r=await fetch(origin+'/api/school'+q,{headers:{cookie:`atlas_school_session=fixture-${role}`}});return{status:r.status,data:await r.json()};};
 const post=async(role,body)=>{const r=await fetch(origin+'/api/school',{method:'POST',headers:{cookie:`atlas_school_session=fixture-${role}`,origin,'content-type':'application/json'},body:JSON.stringify(body)});return{status:r.status,data:await r.json()};};
@@ -20,12 +34,15 @@ try{
  assert.equal(db.prepare("SELECT institution_id FROM diary_identity WHERE id='primary'").get().institution_id,'atlas-school');
  for(const role of ['deputy','teacher','parent','student','admin','methodist']){
   db.prepare('INSERT INTO users(id,email,display_name,role,status,profile_status,auth_version)VALUES(?,?,?,?,?,?,1)').run(role,role+'@example.test',role,role,'active','confirmed');
+  db.prepare('UPDATE users SET central_user_id=?,central_access_version=1 WHERE id=?').run('fixture-'+role,role);
   db.prepare('INSERT INTO auth_sessions(id,user_id,token_hash,auth_version,expires_at)VALUES(?,?,?,1,?)').run('s-'+role,role,createHash('sha256').update('fixture-'+role).digest('hex'),'2099-01-01T00:00:00Z');
  }
  let r=await read('deputy');assert.equal(r.status,200,JSON.stringify(r));assert.equal(r.data.school.name,'Школа Атлас');assert.equal(r.data.school.academicYear,'');console.log('PASS empty Atlas DB and deputy snapshot');
+ deniedStaff.add('fixture-deputy');assert.equal((await read('deputy')).status,401,'central revoke invalidates existing local session');deniedStaff.delete('fixture-deputy');
+ db.prepare("UPDATE users SET central_user_id=NULL WHERE id='methodist'").run();assert.equal((await read('methodist')).status,401,'staff without central identity is denied');db.prepare("UPDATE users SET central_user_id='fixture-methodist' WHERE id='methodist'").run();
 
  const returned=await fetch(origin+'/auth/central/return?next=https://foreign.example.test',{redirect:'manual',headers:{cookie:'atlas_school_session=fixture-deputy'}});
- assert.equal(returned.status,303);assert.equal(returned.headers.get('location'),'https://arthello.example.test/');assert.equal(returned.headers.get('set-cookie'),null);
+ assert.equal(returned.status,303);assert.equal(returned.headers.get('location'),centralOrigin+'/');assert.equal(returned.headers.get('set-cookie'),null);
  const started=await fetch(origin+'/auth/central/start',{redirect:'manual'});assert.equal(started.status,303);const target=new URL(started.headers.get('location'));assert.equal(target.pathname,'/api/atlas-sso/authorize');assert.equal(target.searchParams.get('system_id'),'SYS-SCHOOL-ATLAS');
  const syncBody={systemId:'SYS-SCHOOL-ATLAS',branchId:'BR-ATLAS-SCHOOL',eventId:'atlas-fixture-staff-event',action:'upsert',issuedAt:new Date().toISOString(),actor:'test-owner',user:{centralUserId:'test-atlas-staff',displayName:'Сотрудник проверки',phone:'',email:'atlas-sync@example.test',role:'deputy',status:'active',accessVersion:1,branches:[{id:'BR-ATLAS-SCHOOL',name:'Атлас — школа'}]}};
  async function sync(payload){const body=JSON.stringify(payload), timestamp=String(Math.floor(Date.now()/1000));const response=await fetch(origin+'/api/internal/staff-sync',{method:'POST',headers:{'content-type':'application/json','x-arthello-timestamp':timestamp,'x-arthello-signature':createHmac('sha256',testKey).update(timestamp+'.'+body).digest('hex')},body});return {status:response.status,data:await response.json()};}
@@ -71,4 +88,4 @@ try{
  r=await read('parent','?class=4А');assert.equal(r.status,200,JSON.stringify(r));assert.equal(r.data.homework.length,1);assert.equal(r.data.homework[0].description,'Задание для семьи');assert.deepEqual(r.data.comments.map(x=>x.id),['public']);assert.deepEqual(r.data.events.map(x=>x.id).sort(),['all','ownclass']);
  console.log('PASS teacher publishes approved KTP homework; parent sees own class, published feedback, intended events');
  assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0);db.close();console.log('ALL ATLAS HTTP SCENARIOS PASSED');
-}catch(e){console.error(e);console.error(logs.slice(-3000));process.exitCode=1;}finally{child.kill('SIGTERM');}
+}catch(e){console.error(e);console.error(logs.slice(-3000));process.exitCode=1;}finally{child.kill('SIGTERM');mockCentral.closeAllConnections();mockCentral.close();}

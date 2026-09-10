@@ -1,12 +1,12 @@
 ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1=true
 ARG NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED=false
 
-FROM node:24-bookworm-slim AS dependencies
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:24-bookworm-slim AS builder
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS builder
 ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1
 ARG NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED
 WORKDIR /app
@@ -17,7 +17,7 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:24-bookworm-slim AS runner
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runner
 ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1
 ARG NEXT_PUBLIC_SCHOOL_PARENT_OTP_ENABLED
 WORKDIR /app
