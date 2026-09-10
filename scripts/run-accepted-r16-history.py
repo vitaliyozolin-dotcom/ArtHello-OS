@@ -17,7 +17,7 @@ BASELINE_TREE = '1ce4c733034060dc84d558d49dab96d1be9b1cf8'
 PINS = 'deploy/v52/recovery-r16/source-pins.json'
 PINS_SHA256 = 'd6f6b71b0cf5e8c64e43e3978d3cdba7b90528ab44b729a7f484d63f599e5448'
 WORKFLOW = '.github/workflows/verify-arthello-r14.yml'
-WORKFLOW_NORMALIZED_SHA256 = '4404375c365a933b1134c403d63d151ae176a81687bdcbe1a54e4610ce2af363'
+WORKFLOW_NORMALIZED_SHA256 = '68942ca6c3fa8758fb56516f89014ffc6b1f50d035ccbc75d6d4cf8eb309bf3b'
 # These are the only changed inputs among the 97 frozen R16 source pins.
 # The manifest represents the reviewed current application. Two inputs are D105
 # and two are D107; their bytes are preserved. Current source and scheduler

@@ -419,3 +419,7 @@ PR412 публиковать только после реального browser/
 ## D111 — Повторная публикация исправленного R17
 
 D110 terminal failed до изменения production, cleanup success. Новый PR414 — только squash, branchcodex/finance-r17-receipt-fix-20260910, prefix `D111: guarded finance R17`, parenta3ccfb3af2118dc7ebc734d3f994092b7ebc52e2. Проверить exact-head Quality/Proof/V52/6continuation,14contract regression включая исполнение actual accepted R16 receipt inline consumer. После merge проверить actual signed single-parent/tree/main; freeze main до terminal нового R17+cleanup. Не rerun failed D110 или accepted R16. Новый runtime принимается только по actual candidate/after-public/backup/School receipts, затем bound D075 и реальная сверка банка/ДДС.
+
+## D112 — Выпуск после ARTIFACT_INVENTORY
+
+Использовать PR415 / codex/finance-r17-artifact-fix-20260910 / parentc2b29672bb4d42a535ff44ea2b407622282aa0ac / squash prefix `D112: guarded finance R17`. Пройти Quality/Proof/V52/6continuation на final head, review SHA/tree/diff и fresh main/runs; после merge проверить signed single-parent/tree и заморозить main до terminal+cleanup. Exact app+proof inventory не допускает лишние artifacts; application ZIP остаётся с тремя обычными членами и прежними SHA/CRC/path/size/current-main guards. Не удалять failed R17 browser ради удобства; штатный capacity gate решает допустимость. Actual successful runtime receipts затем закрепить в D075, подтвердить реальные банковские суммы.
