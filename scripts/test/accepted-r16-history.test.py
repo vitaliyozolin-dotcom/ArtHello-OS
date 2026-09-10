@@ -23,7 +23,7 @@ class HistoryBoundaryTests(unittest.TestCase):
 
     def test_pins_controller_and_workflow_cannot_be_redefined(self):
         for path, reason in [(history.PINS, 'FROZEN_R16_PINS_DRIFT'),
-                             ('.github/workflows/deploy-arthello-tochka-r16-20260910.yml', 'FROZEN_CONTROLLER_DRIFT'),
+                             ('deploy/v52/recovery-r17/r16-controller.yml', 'FROZEN_CONTROLLER_DRIFT'),
                              (history.WORKFLOW, 'CURRENT_WORKFLOW_DRIFT')]:
             with self.subTest(path=path), self.assertRaisesRegex(ValueError, reason):
                 history.check_current(lambda name: self.read(name) + b'\n# unreviewed\n' if name == path else self.read(name))

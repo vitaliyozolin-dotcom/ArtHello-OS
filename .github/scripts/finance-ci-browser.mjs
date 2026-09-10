@@ -22,6 +22,9 @@ try {
     try {
       const request=route.request(),url=new URL(request.url());
       requestKind=url.pathname==='/'?'root':url.pathname.startsWith('/assets/')?'asset':['/api/auth/login','/api/auth/me','/api/finance','/api/finance-actions','/api/user-dashboard-layouts','/api/notifications','/api/settings'].includes(url.pathname)?url.pathname:'other';
+      // The actual stylesheet requests these optional public fonts. Keep this
+      // disposable fixture offline and exercise its normal system-font fallback.
+      if(['https://fonts.googleapis.com','https://fonts.gstatic.com'].includes(url.origin)&&request.method()==='GET') {await route.abort();return;}
       assert.equal(url.origin,ORIGIN);assert(++requests<=500);
       method=request.method();routePhase='method';
       if(!['GET','HEAD'].includes(method)) {
@@ -43,7 +46,7 @@ try {
   await page.getByLabel('Пароль',{exact:true}).fill(readFileSync('/run/secrets/fixture-password','utf8').trim());
   const login=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/auth/login');
   await page.getByRole('button',{name:'Войти',exact:true}).click();assert.equal((await login).status(),200);
-  stage='finance_navigation';await page.getByRole('button',{name:'Финансы',exact:true}).first().click();
+  stage='finance_navigation';await page.getByRole('link',{name:'Деньги',exact:true}).click();
   await page.getByRole('tab',{name:'Статьи',exact:true}).click();
   stage='empty_catalog';await page.getByText('Статьи ещё не добавлены',{exact:true}).waitFor();
   async function save(click,expected=200) { const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/finance-actions'&&r.request().method()==='POST');await click();const r=await response;assert.equal(r.status(),expected);await page.waitForFunction(()=>!document.querySelector('.ahFinanceArticles button:disabled')); }

@@ -17,7 +17,7 @@ BASELINE_TREE = '1ce4c733034060dc84d558d49dab96d1be9b1cf8'
 PINS = 'deploy/v52/recovery-r16/source-pins.json'
 PINS_SHA256 = 'd6f6b71b0cf5e8c64e43e3978d3cdba7b90528ab44b729a7f484d63f599e5448'
 WORKFLOW = '.github/workflows/verify-arthello-r14.yml'
-WORKFLOW_NORMALIZED_SHA256 = '884bcf91e9ee7b6e07127b7114a0b9bb17155413a3f1bf79ddb4792b1fc9c55d'
+WORKFLOW_NORMALIZED_SHA256 = '100ebe3d7476277100c1a073c642829d4feedbc792090e18c23dd6a6fd078f6f'
 # These are the only changed inputs among the 97 frozen R16 source pins.
 # The manifest represents the reviewed current application. Two inputs are D105
 # and two are D107; their bytes are preserved. Current source and scheduler
@@ -67,12 +67,15 @@ def check_current(read):
                                    'deploy/v52/src/lib/tochka-autosync.ts', 'scripts/verify-school-source.mjs', 'scripts/test/school-source.test.mjs'}, 'MUTABLE_INPUT_INVENTORY')
     for path, expected in pins['sourceFiles'].items():
         require(digest(read(path)) == CURRENT_INPUTS.get(path, expected), 'CURRENT_SOURCE_DRIFT:' + path)
-    require(digest(read('.github/workflows/deploy-arthello-tochka-r16-20260910.yml')) == pins['controllerSha256'],
+    require(digest(read('deploy/v52/recovery-r17/r16-controller.yml')) == pins['controllerSha256'],
             'FROZEN_CONTROLLER_DRIFT')
     workflow = read(WORKFLOW).decode()
     pattern = r'(?m)^      ACCEPTED_HISTORY_RUNNER_SHA256: [a-f0-9]{64}$'
     require(len(re.findall(pattern, workflow)) == 3, 'RUNNER_PIN_COUNT')
     normalized = re.sub(pattern, '      ACCEPTED_HISTORY_RUNNER_SHA256: RUNNER_SHA256_PENDING', workflow)
+    current_pattern = r'(?m)^      R17_CONTRACT_SHA256: [a-f0-9]{64}$'
+    require(len(re.findall(current_pattern, normalized)) == 1, 'CURRENT_CONTRACT_PIN_COUNT')
+    normalized = re.sub(current_pattern, '      R17_CONTRACT_SHA256: CONTRACT_SHA256_PENDING', normalized)
     require(digest(normalized.encode()) == WORKFLOW_NORMALIZED_SHA256, 'CURRENT_WORKFLOW_DRIFT')
 
 
