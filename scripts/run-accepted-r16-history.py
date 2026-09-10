@@ -23,7 +23,7 @@ WORKFLOW_NORMALIZED_SHA256 = '884bcf91e9ee7b6e07127b7114a0b9bb17155413a3f1bf79dd
 # and two are D107; their bytes are preserved. Current source and scheduler
 # behavior are tested before any historical fixture is created. D109 adds only
 # the separate Atlas origin/key bindings to the current runtime entrypoint.
-CURRENT_INPUTS = {'scripts/test/school-source.test.mjs': 'bec0e629af23804461f9a9a70849a8e75db4257204d363d0b4e0faf5fdab66ae', 'deploy/school-source-manifest.json': '6c8e656ad1b0166f02796d4b43de5a20c6281061f3eb558d94aa938cc8cbcffb', 'deploy/v52/Dockerfile': 'a5372486dc7fa4efe45646a4a2a0562514e362fcfbad28d1d6ea8cb4872c09a6', 'deploy/v52/src/lib/tochka-autosync.ts': 'be895ff2426e1fac2941986ec0de0de18586dc9756bf5ee0ac239387e26a94dc', 'scripts/verify-school-source.mjs': 'ce78eac029d2e7238cc5164e93c006f1ba68723f51dba4b81ccf76fbda176309', 'deploy/v52/src/production/runtime-server.mjs': '25e217b1eefb4c816a018db5cc9c9bf5776c7027c743b09083a3e6587acb568f'}
+CURRENT_INPUTS = {'scripts/test/school-source.test.mjs': 'bec0e629af23804461f9a9a70849a8e75db4257204d363d0b4e0faf5fdab66ae', 'deploy/school-source-manifest.json': '8a6da5de241307c6dbbfd98b724a3dbdb5af2f7df74c443953f33741bbc99d59', 'deploy/v52/Dockerfile': 'a5372486dc7fa4efe45646a4a2a0562514e362fcfbad28d1d6ea8cb4872c09a6', 'deploy/v52/src/lib/tochka-autosync.ts': 'be895ff2426e1fac2941986ec0de0de18586dc9756bf5ee0ac239387e26a94dc', 'scripts/verify-school-source.mjs': 'ce78eac029d2e7238cc5164e93c006f1ba68723f51dba4b81ccf76fbda176309', 'deploy/v52/src/production/runtime-server.mjs': '25e217b1eefb4c816a018db5cc9c9bf5776c7027c743b09083a3e6587acb568f'}
 COMMANDS = {
     'r14': [
         ['python3', '-I', '-B', 'scripts/test/r14-historical-contract.test.py'],
