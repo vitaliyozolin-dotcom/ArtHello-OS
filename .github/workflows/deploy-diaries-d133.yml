@@ -1,10 +1,12 @@
-name: Deploy diary UI consistency D133
+name: Deploy diary UI consistency D134
 
 on:
   pull_request:
     paths:
       - .github/workflows/deploy-diaries-d133.yml
       - deploy/upgrade-atlas-d133.sh
+      - deploy/school-curriculum-standalone-cutover.sh
+      - deploy/verify-school-release.mjs
       - deploy/activate-atlas-owner-access.mjs
       - scripts/test/diary-ui-release.test.mjs
       - DECISIONS.md
@@ -46,7 +48,7 @@ jobs:
          github.event.workflow_run.conclusion == 'success' &&
          github.event.workflow_run.repository.id == github.event.repository.id &&
          github.event.workflow_run.head_repository.id == github.event.repository.id &&
-         startsWith(github.event.workflow_run.head_commit.message, 'D133: release diary UI consistency')))
+         startsWith(github.event.workflow_run.head_commit.message, 'D134: repair diary UI release')))
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -129,7 +131,7 @@ jobs:
          github.event.workflow_run.event == 'push' &&
          github.event.workflow_run.head_branch == 'main' &&
          github.event.workflow_run.conclusion == 'success' &&
-         startsWith(github.event.workflow_run.head_commit.message, 'D133: release diary UI consistency')))
+         startsWith(github.event.workflow_run.head_commit.message, 'D134: repair diary UI release')))
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -154,11 +156,11 @@ jobs:
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.head_sha == github.event.workflow_run.head_commit.id &&
-      startsWith(github.event.workflow_run.head_commit.message, 'D133: release diary UI consistency')
+      startsWith(github.event.workflow_run.head_commit.message, 'D134: repair diary UI release')
     needs: [bundle-atlas, verify-school-source]
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru
-    timeout-minutes: 45
+    timeout-minutes: 125
     env:
       CONTROLLER_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
@@ -185,16 +187,47 @@ jobs:
         with:
           name: atlas-d133-bundle
           path: ${{ runner.temp }}/atlas-d133-bundle
-      - name: Upgrade School 1–11 with its established backup and rollback cutover
+      - name: Upgrade School 1–11 with its standalone backup and rollback cutover
         run: |
           set -Eeuo pipefail
           test "$(git -C school rev-parse HEAD)" = "$SCHOOL_SOURCE_SHA"
           test "$(git -C school rev-parse HEAD^{tree})" = "$SCHOOL_SOURCE_TREE"
-          SOURCE_DIR="$GITHUB_WORKSPACE/school" DELIVERY_REF="$SCHOOL_SOURCE_SHA" \
-            SCHOOL_HOST=school-188-225-38-55.sslip.io VERIFY_PUBLIC=1 \
-            bash school/deploy/repair-deploy.sh | tee "$RUNNER_TEMP/school-d133.log"
-          grep -F 'SCHOOL_DEPLOY=SUCCESS' "$RUNNER_TEMP/school-d133.log" >/dev/null
-          grep -F 'SCHOOL_BACKUP=VERIFIED' "$RUNNER_TEMP/school-d133.log" >/dev/null
+          bash -n controller/deploy/school-curriculum-standalone-cutover.sh
+          runtime_node="$(command -v node || true)"
+          if [[ -z "$runtime_node" ]]; then
+            runner_root="$(realpath "$RUNNER_TEMP/../..")"
+            runtime_node="$runner_root/externals/node24/bin/node"
+          fi
+          "$runtime_node" --check controller/deploy/verify-school-release.mjs
+          job_parent=/tmp/school-curriculum-deploy-jobs
+          job_dir="$job_parent/${SCHOOL_SOURCE_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          test ! -e "$job_dir"
+          if test ! -e "$job_parent"; then install -d -m 0700 "$job_parent"; fi
+          test -d "$job_parent" && test ! -L "$job_parent"
+          test "$(stat -c %u "$job_parent")" = "$(id -u)"
+          chmod 0700 "$job_parent"
+          install -d -m 0700 "$job_dir"
+          stage="$RUNNER_TEMP/school-d134-source"
+          install -d -m 0700 "$stage"
+          git -C school archive "$SCHOOL_SOURCE_SHA" | tar -x -C "$stage"
+          printf '%s\n' "$SCHOOL_SOURCE_SHA" > "$stage/.school-source-sha"
+          printf '%s\n' "$SCHOOL_SOURCE_TREE" > "$stage/.school-source-tree"
+          source_archive="$job_dir/school-release.tar.gz"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -C "$stage" -cf - . | gzip -n > "$source_archive"
+          install -m 0400 controller/deploy/verify-school-release.mjs "$job_dir/verify-school-release.mjs"
+          source_sha="$(sha256sum "$source_archive" | cut -d ' ' -f 1)"
+          verify_sha="$(sha256sum "$job_dir/verify-school-release.mjs" | cut -d ' ' -f 1)"
+          RUN_ID="$GITHUB_RUN_ID" RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" WORKFLOW_SHA="$CONTROLLER_SHA" \
+            RELEASE_SHA="$SCHOOL_SOURCE_SHA" RELEASE_TREE="$SCHOOL_SOURCE_TREE" \
+            SOURCE_ARCHIVE="$source_archive" SOURCE_SHA256="$source_sha" \
+            VERIFY_SCRIPT="$job_dir/verify-school-release.mjs" VERIFY_SHA256="$verify_sha" \
+            OFFLINE_BASE_REF='node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e' \
+            SCHOOL_ORIGIN=https://school-188-225-38-55.sslip.io \
+            ARTHELLO_ORIGIN=https://arthello-188-225-38-55.sslip.io JOB_DIR="$job_dir" \
+            bash controller/deploy/school-curriculum-standalone-cutover.sh | tee "$RUNNER_TEMP/school-d133.log"
+          grep -F 'SCHOOL_STANDALONE_CUTOVER=PASS' "$RUNNER_TEMP/school-d133.log" >/dev/null
+          grep -F 'SCHOOL_STANDALONE_BACKUP=VERIFIED' "$RUNNER_TEMP/school-d133.log" >/dev/null
       - name: Upgrade Atlas while preserving its database volume
         env:
           GH_TOKEN: ${{ github.token }}

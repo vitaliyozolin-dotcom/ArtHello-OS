@@ -21,3 +21,7 @@
 Controller не меняет центральный ArtHello runtime, grants или учебные данные. School использует существующий backup/rollback release path. Atlas volume не удаляется: после остановки создаётся постоянная SQLite-копия, проверяется integrity, новый image запускается на том же data volume, прежний контейнер остаётся rollback-кандидатом до public health.
 
 До exact-head CI и фактических production receipts результат не объявляется опубликованным.
+
+## Повтор D134
+
+D133 PR439 и hosted run `34535437429` прошли. Protected run `34536320576` остановился до Atlas: School `repair-deploy.sh` потребовал отсутствующий `/srv/school-1-11/shared/.env`. Это несовпадение controller и фактической standalone-топологии, а не отказ приложения или данных. D134 сохраняет оба source pin и использует guarded standalone cutover для наблюдаемого контейнера `school-1-11`.

@@ -939,3 +939,7 @@ AI разрешено использовать существующую защи
 Мобильный повтор владельца закрыл проверку входа D130 и открыл точный UI-дефект: Atlas директор видел пустой родительский preview вместо первого управленческого экрана. Параллельный снимок School 1–11 доказал, что его живой source всё ещё не содержит уже принятого возврата в ArtHello OS.
 
 Текущий шаг: выпустить два неизменяемых source pin единым защищённым controller без объединения баз и прав. Atlas меняет только приложение, сохраняет `atlas-school-diary-data` и проверенный backup; School применяет собственный принятый backup/rollback cutover. Критерий перехода: директор Atlas сразу видит ролевой дашборд, пустого parent preview нет, School показывает возврат сотруднику, оба public health и Atlas owner SSO проходят. До production receipt этап остаётся `candidate`.
+
+## Приложение D134 — повтор после несовпадения School topology (2026-09-10)
+
+D133 source и hosted gates приняты, но protected run `34536320576` остановился до Atlas: compose-oriented School controller потребовал отсутствующий `/srv/school-1-11/shared/.env`. D134 не меняет scope, sources, данные или права. Разрешён только guarded standalone School cutover для контейнера `school-1-11` с write gate, backup/integrity, preflight и rollback; затем выполняются неизменные Atlas backup/image/owner-SSO проверки. Успехом остаются receipts сохранения volumes, public health двух дневников и реальный owner Atlas SSO.
