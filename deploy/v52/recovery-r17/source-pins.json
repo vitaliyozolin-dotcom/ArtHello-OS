@@ -1,13 +1,13 @@
 {
   "format": 1,
   "release": {
-    "head": "codex/finance-r17-artifact-fix-20260910",
+    "head": "codex/finance-r17-browser-startup-20260910",
     "mergeMethod": "squash",
-    "parentSha": "c2b29672bb4d42a535ff44ea2b407622282aa0ac",
-    "pr": 415,
-    "prefix": "D112: guarded finance R17"
+    "parentSha": "1a45eb6aa5b1a9b21c4390105016b8b0e54afef5",
+    "pr": 416,
+    "prefix": "D113: guarded finance R17"
   },
-  "controllerSha256": "8f3702d1d26d4bfdc4543ac8bea86694f34c17fb6ffef3a892a6027379aff2eb",
+  "controllerSha256": "4cdcd2771994fe8ea11bb731fa1ef5f997da489adfc89e3e78baff271096d659",
   "verificationNormalizedSha256": "85c0740875d6b7d1fd77a21063acce76c124cec2b6bc11a3c2d15f4be72683bf",
   "sourceFiles": {
     ".github/scripts/check-school-live-acceptance-r7.py": "6fae34638acd1757cad922c288ede1282f8300a8ecfcbe3547661378445cb884",
@@ -45,7 +45,7 @@
     ".github/scripts/r17-backup-adoption.py": "598a596d4dc8ea01b8d09a755ed1f06c5194c64a6a6901333c86e3c296c2cab4",
     ".github/scripts/r17-backup-controller.py": "9a44119571777a24a595f7916d921a151312518697e415385876093806e83135",
     ".github/scripts/r17-candidate-state.py": "5279102d0d9e32bc23ff8f4f8db98404111df3fac19be42f9e5c134027e20f29",
-    ".github/scripts/r17-history-gate.py": "9ca8491d1b4fe62bdd4c695ec8087bef0508f2746f6d5c01b378b7757c9c3cf7",
+    ".github/scripts/r17-history-gate.py": "bd9308fb35ceddf1b6b36d3a576a68f9d6688f5e956a3e19ca58dda14abcd5ee",
     ".github/scripts/r17-live-baseline.py": "ee763f3b05dfbc7f302198d21d817a202093bce360f21ebbf64f8206c5918a6d",
     ".github/scripts/r17-public-audit.py": "f45bb228ef0373bda1622cb384ab8e39b34267fe52bcdea808f373befa6a792c",
     ".github/scripts/r17-resume-candidate.py": "adbf4a18820006503c29511630379cb19fe872ade99d5dc3050f9b083ed790f1",
@@ -84,6 +84,7 @@
     ".github/scripts/test-run-r14-live-browser.py": "a9f4c2f3bb92e4dfd62106c00cb067143bced50e1d1704e31908efde01160db2",
     ".github/scripts/test-run-r16-live-browser.py": "73b3f4823008d62be4f7096db5bb46a1edc3599a3feec64ed3e82b76d23c70cf",
     ".github/scripts/test-run-r17-live-browser.py": "500cdacb7c905f04e8522a3a75fcb3b9e845d7e98cd9504a4047357b8edd35fc",
+    ".github/workflows/proof-gates.yml": "99e69d052a53d3a2ce0037ddf5e1c4bb2724be285293477fe634719512012ae6",
     ".github/workflows/verify-arthello-v52.yml": "19c873296e78f701caa5501b24cf3c080bd91c657bd688bfedcfe5fb57b0da6d",
     ".gitleaks.toml": "587de0ee9b85255a97d356611555714a9ca2e3f9a0878c4f40dc08e6ec181849",
     "deploy/browser/capacity.mjs": "61db6b108b43420f7e0b9124a4470c028d30552ab4733ac73b3446013277ccb0",
@@ -115,7 +116,7 @@
     "deploy/v52/recovery-r16/source-pins.json": "d6f6b71b0cf5e8c64e43e3978d3cdba7b90528ab44b729a7f484d63f599e5448",
     "deploy/v52/recovery-r16/transform.json": "304688a387e8819887416cefe8be262a835281432456c85bb407d6e0d8fc106f",
     "deploy/v52/recovery-r16/verify-contract.py": "029e08d750800734ee32ec022b4284aad62a8371b6011c9855aad51aeac27fc1",
-    "deploy/v52/recovery-r17/verify-contract.py": "af8872422952909b8f82ae02268e03a1daa0aac31008ab38c197c4361f68a1e7",
+    "deploy/v52/recovery-r17/verify-contract.py": "2823a108065a4ae2ccd6c1a5db2fb628369b13cbf4de84a20e1c0df45d793d2c",
     "deploy/v52/runtime/package-lock.json": "8ea263b0c45c65ddd7332f5e683cc52b8f694cc4de64fbe8b7c01a3d4718a735",
     "deploy/v52/src/app/api/finance-actions/route.ts": "458a2991a3bbb086d045b217efe778efdcd4b6999c097ad4892951c0b763c14c",
     "deploy/v52/src/app/api/finance/route.ts": "6420212bc2373f11f38550b3062e54a038caf8661ecd9e3f46b75f9cbca80cb8",
@@ -138,6 +139,7 @@
     "deploy/v52/src/tests/tochka-autosync.test.mjs": "d99844ddccb9cd9896f4747bcd17c8d4a37a61291dcbc72af48cf7edd74bf8fd",
     "deploy/v52/src/tests/tochka-node-transport.test.mjs": "a17a9a300b5296cb39a3183aa8809dbddc54d5282873819d08ccee639363de27",
     "deploy/v52/src/tests/tochka-pending-lifecycle.test.mjs": "525652fe49ba808c4c3520dd9dd705920dcdaa0152092e03cd8b74cda37e7a3d",
+    "scripts/lib/visual-browser-startup.mjs": "a97e0e7d68f35d7b6f6006096a8d222afe269948f29cc001e9ec20ceb53f1c2d",
     "scripts/run-accepted-r16-history.py": "973a4c69e8d0aacf623060928022662e36cda24bbef1da969ebb85ce781c3841",
     "scripts/run-frozen-release-contract.py": "f6e3e21abb92ac45558c756ed7b14ed4ce3b1be4a489379238aa7e5c97f4d28d",
     "scripts/run-r14-historical-contract.py": "ab0aeb384d5c5eb4859b86274f0a70778518b846620e4c2dbe47710c9c0fb48b",
@@ -151,6 +153,8 @@
     "scripts/test/retire-r16-browser.test.mjs": "a6ccd8131f89d629bfcf28d7e9ff3b92704c20f38c5da8df3e322ee47a263124",
     "scripts/test/school-source.test.mjs": "bec0e629af23804461f9a9a70849a8e75db4257204d363d0b4e0faf5fdab66ae",
     "scripts/test/tochka-account-identity.test.mjs": "f1857eea31cc55372a69d35c29784dc0c1e6a87667c53297fe4f6f8c61e1f3e4",
-    "scripts/verify-school-source.mjs": "ce78eac029d2e7238cc5164e93c006f1ba68723f51dba4b81ccf76fbda176309"
+    "scripts/test/visual-browser-startup.test.mjs": "c3a4073e36aec0c73e4ff4a6254e404e9d5de55aa953d4eb937bb464488d4e3f",
+    "scripts/verify-school-source.mjs": "ce78eac029d2e7238cc5164e93c006f1ba68723f51dba4b81ccf76fbda176309",
+    "scripts/visual-acceptance.mjs": "8b7ab781d8737aa6ce9e5df8a42028fd8cfac2dac9a2304005628e022146a30a"
   }
 }

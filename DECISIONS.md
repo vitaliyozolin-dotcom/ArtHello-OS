@@ -1214,3 +1214,7 @@ Frozen R16 workflow, bank activation/backup contexts и текущая productio
 ## D112 — Точный состав артефактов R17
 
 D111 остановился до application import/cutover: actual producer содержит app + finance browser proof, старый downloader требует один artifact. Новый versioned R17 downloader проверяет ровно два известных artifact одного owner/main/attempt1/source, скачивает только app и сохраняет byte-identical delivery/extraction tail. Frozen R15 не меняется; весь downstream protocol сохранён. Только новый squash PR415 после exact-head CI/review, без rerun failed D111/D110. Основание — ранее разрешённый выпуск статей. Контракт: docs/acceptance/2026-09-10-r17-artifact-inventory-fix.md.
+
+## D113 — Ограничить сбой запуска браузера в обязательном Proof
+
+Actual main Proof34490868754 отказал до проверки страницы: локальный Chrome endpoint9223 недоступен, stderr прежний launcher отбрасывал; точная причина Chrome не доказана. Hosted launcher проверяет собственный CDP endpoint, пишет bounded fixed startup receipt и допускает один повтор только старта до навигации. Все visual assertions/acceptance и production natural-browser guards сохранены. Новый PR416/D113 только после terminal+cleanup старого protected34491463434, exact-head CI/review; no rerun/attempt bypass. Контракт docs/acceptance/2026-09-10-r17-browser-startup-fix.md.

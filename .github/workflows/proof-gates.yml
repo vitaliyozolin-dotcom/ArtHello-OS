@@ -17,6 +17,8 @@ on:
       - "scripts/workflow-policy.mjs"
       - "scripts/test/workflow-policy.test.mjs"
       - "scripts/visual-acceptance.mjs"
+      - "scripts/lib/visual-browser-startup.mjs"
+      - "scripts/test/visual-browser-startup.test.mjs"
       - "lib/db/scripts/migration-twin.mjs"
       - "scripts/test/migration-twin-report.test.mjs"
       - ".github/workflows/**"
@@ -83,6 +85,9 @@ jobs:
           pnpm --filter @workspace/alpha-crm-sync exec vite preview --config vite.config.ts --host 127.0.0.1 --port 4173 > /tmp/arthello-vite.log 2>&1 &
           echo $! > /tmp/arthello-vite.pid
           curl --fail --retry 30 --retry-delay 1 --retry-connrefused http://127.0.0.1:4173/ >/dev/null
+
+      - name: Verify owned browser startup and bounded failure cleanup
+        run: node --test scripts/test/visual-browser-startup.test.mjs
 
       - name: Design Memory + Visual Acceptance Gate
         run: node scripts/visual-acceptance.mjs --url http://127.0.0.1:4173/ --out .artifacts/visual-acceptance
