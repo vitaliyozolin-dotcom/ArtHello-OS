@@ -173,6 +173,8 @@ for resource in "$atlas_service" "$atlas_data" "$atlas_backups"; do
   ! docker inspect "$resource" >/dev/null 2>&1
 done
 (cd "$ATLAS_BUNDLE_DIR" && sha256sum --check checksums.sha256)
+atlas_archive_sha="$(sha256sum "$ATLAS_BUNDLE_DIR/atlas-image.tar.gz" | cut -d ' ' -f 1)"
+[[ "$atlas_archive_sha" =~ ^[a-f0-9]{64}$ ]]
 test "$(jq -er '.sourceSha' "$ATLAS_BUNDLE_DIR/receipt.json")" = "$ATLAS_SOURCE_SHA"
 test "$(jq -er '.sourceTree' "$ATLAS_BUNDLE_DIR/receipt.json")" = "$ATLAS_SOURCE_TREE"
 atlas_image="$(jq -er '.imageId' "$ATLAS_BUNDLE_DIR/receipt.json")"
@@ -185,13 +187,15 @@ if docker image inspect "$atlas_image_ref" >/dev/null 2>&1; then
 fi
 docker load --input "$ATLAS_BUNDLE_DIR/atlas-image.tar.gz" >/dev/null
 loaded_atlas_image="$(docker image inspect "$atlas_image_ref" --format '{{.Id}}')"
-if [ "$loaded_atlas_image" != "$atlas_image" ]; then
-  printf 'Atlas image receipt mismatch: expected=%s loaded=%s\n' "$atlas_image" "$loaded_atlas_image" >&2
-  exit 1
-fi
+[[ "$loaded_atlas_image" =~ ^sha256:[a-f0-9]{64}$ ]]
 loaded_atlas_revision="$(docker image inspect "$atlas_image_ref" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
 if [ "$loaded_atlas_revision" != "$ATLAS_SOURCE_SHA" ]; then
   printf 'Atlas image revision mismatch: expected=%s loaded=%s\n' "$ATLAS_SOURCE_SHA" "$loaded_atlas_revision" >&2
+  exit 1
+fi
+loaded_atlas_tree="$(docker image inspect "$atlas_image_ref" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')"
+if [ "$loaded_atlas_tree" != "$ATLAS_SOURCE_TREE" ]; then
+  printf 'Atlas image source-tree mismatch: expected=%s loaded=%s\n' "$ATLAS_SOURCE_TREE" "$loaded_atlas_tree" >&2
   exit 1
 fi
 
@@ -295,10 +299,12 @@ test "$(docker inspect "$atlas_service" --format '{{.State.Running}}')" = true
 require_main
 release_active=1
 jq -n --arg controller "$CONTROLLER_SHA" --arg atlasSource "$ATLAS_SOURCE_SHA" \
+  --arg atlasSourceTree "$ATLAS_SOURCE_TREE" --arg atlasArchiveSha256 "$atlas_archive_sha" \
+  --arg atlasBuilderImageId "$atlas_image" --arg atlasGatewayImageId "$loaded_atlas_image" \
   --arg centralContainer "$(docker inspect "$candidate" --format '{{.Id}}')" \
   --arg atlasContainer "$(docker inspect "$atlas_service" --format '{{.Id}}')" \
   --arg url "$atlas_origin" \
-  '{schemaVersion:1,kind:"atlas-d122-production-receipt",controllerSha:$controller,atlasSourceSha:$atlasSource,centralContainerId:$centralContainer,atlasContainerId:$atlasContainer,publicUrl:$url,centralHealth:true,schoolHealth:true,atlasHealth:true,centralSsoOpen:true,naturalBrowserAcceptance:false}' \
+  '{schemaVersion:1,kind:"atlas-d122-production-receipt",controllerSha:$controller,atlasSourceSha:$atlasSource,atlasSourceTree:$atlasSourceTree,atlasArchiveSha256:$atlasArchiveSha256,atlasBuilderImageId:$atlasBuilderImageId,atlasGatewayImageId:$atlasGatewayImageId,centralContainerId:$centralContainer,atlasContainerId:$atlasContainer,publicUrl:$url,centralHealth:true,schoolHealth:true,atlasHealth:true,centralSsoOpen:true,naturalBrowserAcceptance:false}' \
   | tee "$ATLAS_BUNDLE_DIR/production-receipt.json"
 echo "ATLAS_PUBLIC_URL=$atlas_origin"
 echo 'ATLAS_D122_HEALTHY: natural staff and mobile acceptance remain required.'

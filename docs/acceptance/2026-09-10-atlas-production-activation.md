@@ -2,7 +2,7 @@
 
 Статус: кандидат, не принят.
 
-Первый protected D122 run `34520906921/103018492882` и D125 run `34523308648/103026645872` остановились после успешных artifact checksums и до container/Caddy mutation. D126 удаляет только оставшийся неиспользуемый Atlas tag перед load, затем обязательно сверяет новый tag с точным receipt image ID и source revision; остальные ворота неизменны.
+Первые protected runs остановились после успешных artifact checksums и до container/Caddy mutation. D126 run `34524982542/103032229379` доказал, что разные Docker daemons дают разные local image IDs одному проверенному archive (`3bc9ae0d...` на builder, `70466bbc...` на gateway). D127 проверяет точный archive SHA-256 и source/tree labels, а оба local IDs записывает в production receipt; остальные ворота неизменны.
 
 ## Наблюдённый baseline
 
