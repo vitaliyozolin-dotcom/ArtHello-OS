@@ -1,4 +1,4 @@
-name: Import finance model and classify Atlas D123
+name: Import finance model and classify Atlas D124
 
 on:
   push:
@@ -47,7 +47,7 @@ jobs:
         env:
           EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
           EXPECTED_ACTOR: vitaliyozolin-dotcom
-          EXPECTED_PARENT: c8947e5ae591936199dbd76f27015c67f2906e8d
+          EXPECTED_PARENT: b49a5a8a8740736bc516a704bdcb9aa49881c568
           EXPECTED_CATALOG_DIGEST: b07049751a1bc97430bd994f56aa0a9191369e6bf1745b4b72940b9bf7608c39
         run: |
           set -Eeuo pipefail
@@ -59,25 +59,12 @@ jobs:
           test "$(git rev-list --count HEAD^)" -ge 1
           parents="$(git show -s --format=%P HEAD)"
           test "$parents" = "$EXPECTED_PARENT"
-          test "$(git show -s --format=%s HEAD)" = 'D123: apply finance operating model'
+          test "$(git show -s --format=%s HEAD)" = 'D124: fix finance import parent pin'
           python3 -I - <<'PY'
           import subprocess
           expected = {
-              '.github/scripts/classify-arthello-atlas.py',
-              '.github/scripts/test_classify_arthello_atlas.py',
-              '.github/scripts/test_import_finance_articles.py',
               '.github/workflows/import-finance-articles-20260911.yml',
-              'BACKLOG.md',
-              'CURRENT_STATE.md',
-              'DATA_COVERAGE.md',
-              'DECISIONS.md',
-              'docs/PROJECT_PASSPORT_PRODUCTION_RU.md',
-              'docs/acceptance/2026-09-10-d123-finance-operating-model.md',
               'docs/acceptance/2026-09-11-finance-article-import.md',
-              'docs/finance/article-catalog-2026-09-11.json',
-              'scripts/src/alfacrm-safe.ts',
-              'scripts/src/arthello-master-data.ts',
-              'scripts/test/alfacrm-safe.test.mjs',
           }
           changed = set(subprocess.check_output(
               ['git', 'diff', '--name-only', 'HEAD^', 'HEAD'], text=True
@@ -113,7 +100,7 @@ jobs:
               if runs and runs[0].get('status') == 'completed':
                   if runs[0].get('conclusion') != 'success' or runs[0].get('run_attempt') != 1:
                       raise SystemExit('QUALITY_NOT_ACCEPTED')
-                  print('ARTHELLO_D123_QUALITY=VERIFIED')
+                  print('ARTHELLO_D124_QUALITY=VERIFIED')
                   break
               time.sleep(15)
           else:
