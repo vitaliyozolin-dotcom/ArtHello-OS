@@ -951,3 +951,7 @@ D134 run `34537971479` остановился после проверки и с�
 ## Приложение D136 — School network identity (2026-09-10)
 
 D135 run `34539171120` остановился до мутаций из-за отсутствия legacy system label. D136 выбирает ровно один running container в `arthello-os_backend` с network alias `school-1-11` и требует old revision на его image label. Остальные границы и критерии неизменны.
+
+## Приложение D137 — immutable School image identity (2026-09-10)
+
+D136 run `34540282349` остановился до мутаций из-за отсутствия legacy network на current runner. D137 выбирает ровно один running container по old image revision `54242340f2d9b6a9887d69ecc03520ddf9f7982c`; никаких предположений о Docker name, container labels или network нет. Остальные границы неизменны.

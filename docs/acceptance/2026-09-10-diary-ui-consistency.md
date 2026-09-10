@@ -29,3 +29,5 @@ D133 PR439 и hosted run `34535437429` прошли. Protected run `34536320576`
 D134 protected run `34537971479` затем проверил source/archive и собрал новый School image, но hard-coded Docker name отсутствует; fail-closed случился до backup/cutover, Atlas снова не запускался. D135 определяет единственный живой School container по system label и old revision и передаёт его фактическое имя тому же controller.
 
 D135 protected run `34539171120` подтвердил, что legacy system label уже отсутствует, и остановился до сборки/backup. D136 использует единственную фактическую routing identity: network alias `school-1-11` в `arthello-os_backend`, а revision проверяет на image label.
+
+D136 run `34540282349` обнаружил отсутствие этой legacy-сети на current runner и остановился до мутаций. D137 оставляет единственную неизменяемую identity — old image revision — и требует ровно один такой running container.

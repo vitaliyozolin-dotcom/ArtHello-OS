@@ -631,3 +631,7 @@ D134 run `34537971479` успешно проверил archive и собрал S
 ## D136 — Разрешить School по network alias и image revision (2026-09-10, кандидат)
 
 D135 run `34539171120` остановился до мутаций: legacy system label отсутствует. Caddy достигает School через Docker network alias `school-1-11`, поэтому D136 требует ровно один running container в `arthello-os_backend` с этим alias и отдельно проверяет old revision на immutable image label. Ноль/множественность/revision drift — stop. Остальные D135 границы неизменны; trigger — exact-main Quality prefix `D136: resolve School network alias`.
+
+## D137 — Разрешить School только по immutable image revision (2026-09-10, кандидат)
+
+D136 run `34540282349` остановился до мутаций, потому что на current gateway daemon отсутствует прежняя сеть `arthello-os_backend`. D137 перебирает только running containers и требует ровно один image с revision `54242340f2d9b6a9887d69ecc03520ddf9f7982c`; его безопасное имя передаётся standalone controller. Ноль/множественность/revision drift — stop. Trigger: `D137: resolve School image identity`.

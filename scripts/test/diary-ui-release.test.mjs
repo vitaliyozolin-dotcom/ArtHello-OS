@@ -18,7 +18,7 @@ test("production runs only after exact successful main Quality and inside the pr
   const workflow = read(".github/workflows/deploy-diaries-d133.yml");
   assert.match(workflow, /workflow_run:/);
   assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(workflow, /startsWith\(github\.event\.workflow_run\.head_commit\.message, 'D136: resolve School network alias'\)/);
+  assert.match(workflow, /startsWith\(github\.event\.workflow_run\.head_commit\.message, 'D137: resolve School image identity'\)/);
   assert.match(workflow, /environment: production-ru/);
   assert.match(workflow, /runs-on: \[self-hosted, linux, x64, arthello-gateway\]/);
 });
@@ -49,8 +49,8 @@ test("School uses its current-topology standalone backup and rollback cutover wi
   assert.match(workflow, /school-curriculum-standalone-cutover\.sh/);
   assert.match(workflow, /SCHOOL_STANDALONE_CUTOVER=PASS/);
   assert.match(workflow, /SCHOOL_STANDALONE_BACKUP=VERIFIED/);
-  assert.match(workflow, /docker network inspect arthello-os_backend/);
-  assert.match(workflow, /Aliases\[\]\?; \. == "school-1-11"/);
+  assert.match(workflow, /docker ps -q/);
+  assert.match(workflow, /revision.*54242340f2d9b6a9887d69ecc03520ddf9f7982c/);
   assert.match(workflow, /docker image inspect "\$school_image"/);
   assert.match(workflow, /org\.opencontainers\.image\.revision/);
   assert.match(workflow, /SCHOOL_CONTAINER="\$school_container"/);
