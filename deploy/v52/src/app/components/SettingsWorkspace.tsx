@@ -55,6 +55,7 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
   const [accessEmployeeId, setAccessEmployeeId] = useState("");
   const [temporaryCredential, setTemporaryCredential] = useState<TemporaryCredential | null>(null);
   const [ownerDiaryOpen, setOwnerDiaryOpen] = useState(false);
+  const [ownerDiarySystem, setOwnerDiarySystem] = useState("SYS-SCHOOL-1-11");
 
   const load = useCallback(async () => {
     try {
@@ -141,6 +142,7 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
       isAdministrative: form.get("isAdministrative") === "on",
       branchIds: form.getAll("branchIds"),
       systemIds: form.getAll("systemIds"),
+      atlasDiaryRole: form.get("atlasDiaryRole"),
       diaryRole: form.get("diaryRole"),
       expectedAccessVersion: selected.accessVersion,
     }, "invite");
@@ -205,19 +207,22 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
                       : <button disabled={busy === `block-${user.id}`} onClick={() => void action({ action: "blockUser", userId: user.id, employeeId: user.employeeId, expectedAccessVersion: user.accessVersion }, `block-${user.id}`)}>Заблокировать</button> : null}
                   </div> : null}
                   {data.canManage && user.id === data.me.id ? <div className="user-access-buttons owner-access-buttons">
-                    <button className="access-configure" onClick={() => { setAccessEmployeeId(""); setOwnerDiaryOpen(true); }}>Настроить дневник</button>
+                    <button className="access-configure" onClick={() => { setAccessEmployeeId(""); setOwnerDiarySystem("SYS-SCHOOL-1-11"); setOwnerDiaryOpen(true); }}>Настроить дневник 1–11</button>
+                    <button className="access-configure" onClick={() => { setAccessEmployeeId(""); setOwnerDiarySystem("SYS-SCHOOL-ATLAS"); setOwnerDiaryOpen(true); }}>Настроить дневник Атласа</button>
                   </div> : null}
                 </div>;
               })}</div>
             </article>
             {data.canManage && ownerDiaryOpen
               ? <OwnerDiaryAccessForm
-                grant={data.systemGrants.find((grant) => grant.userId === data.me.id && grant.systemId === "SYS-SCHOOL-1-11")}
-                roles={data.systemRoleOptions["SYS-SCHOOL-1-11"] ?? []}
+                key={ownerDiarySystem}
+                atlas={ownerDiarySystem === "SYS-SCHOOL-ATLAS"}
+                grant={data.systemGrants.find((grant) => grant.userId === data.me.id && grant.systemId === ownerDiarySystem)}
+                roles={data.systemRoleOptions[ownerDiarySystem] ?? []}
                 busy={busy === "owner-diary"}
                 close={() => setOwnerDiaryOpen(false)}
                 save={async (enabled, diaryRole) => {
-                  const result = await action({ action: "saveOwnerDiaryAccess", enabled, diaryRole, expectedAccessVersion: data.me.accessVersion, expectedUpdatedAt: data.me.updatedAt }, "owner-diary");
+                  const result = await action({ action: "saveOwnerDiaryAccess", systemId: ownerDiarySystem, enabled, diaryRole, expectedAccessVersion: data.me.accessVersion, expectedUpdatedAt: data.me.updatedAt }, "owner-diary");
                   if (result) setOwnerDiaryOpen(false);
                 }}
               />
@@ -436,7 +441,8 @@ function syncEventLabel(value: string) {
   } as Record<string, string>)[value] ?? "Изменение доступа";
 }
 
-function OwnerDiaryAccessForm({ grant, roles, busy, close, save }: {
+function OwnerDiaryAccessForm({ grant, roles, busy, close, save, atlas = false }: {
+  atlas?: boolean;
   grant?: { role: string; status: string };
   roles: Array<{ value: string; label: string }>;
   busy: boolean;
@@ -446,7 +452,7 @@ function OwnerDiaryAccessForm({ grant, roles, busy, close, save }: {
   const [enabled, setEnabled] = useState(grant?.status === "Активен");
   const [diaryRole, setDiaryRole] = useState(grant?.role ?? "director");
   return <form className="settings-card settings-form owner-diary-access-form" onSubmit={(event) => { event.preventDefault(); void save(enabled, diaryRole); }}>
-    <header><div><p>Личный доступ владельца</p><h3>Вход в «Дневник 1–11»</h3><small>Меняется только разрешение на вход в дневник. Роль, логин и права владельца в ArtHello OS останутся без изменений.</small></div><button type="button" onClick={close} aria-label="Закрыть форму">×</button></header>
+    <header><div><p>Личный доступ владельца</p><h3>{atlas ? "Вход в дневник Атласа" : "Вход в «Дневник 1–11»"}</h3><small>Меняется только разрешение на вход в дневник. Роль, логин и права владельца в ArtHello OS останутся без изменений.</small></div><button type="button" onClick={close} aria-label="Закрыть форму">×</button></header>
     <label className="owner-diary-toggle"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /><span>Разрешить мне вход в электронный дневник</span></label>
     {enabled ? <label><span>Роль в дневнике</span><SoftSelect ariaLabel="Роль владельца в дневнике" value={diaryRole} onChange={setDiaryRole} options={roles} /><small>Эта роль действует только внутри учебного контура.</small></label> : <p className="owner-diary-warning">После сохранения вход в дневник будет отключён. Текущий доступ к ArtHello OS сохранится.</p>}
     <footer className="owner-diary-actions"><button type="button" onClick={close}>Отмена</button><button disabled={busy || (enabled && !diaryRole)}>{busy ? "Сохраняем…" : "Сохранить"}</button></footer>
@@ -481,6 +487,7 @@ function AccessAssignmentForm({ user, data, busy, close, submit }: { user: Setti
       <fieldset><legend>Филиалы из карточки</legend>{data.branches.map((branch) => { const belongs = employeeBranchIds.has(branch.id); return <label key={branch.id} className={!belongs ? "unavailable" : ""}><input type="checkbox" name="branchIds" value={branch.id} disabled={!belongs && !user.isAdministrative} defaultChecked={branchIds.has(branch.id)} /><span>{branch.name}</span></label>; })}<small>Здесь можно сузить доступ, но добавить новый филиал сотруднику можно только в его основной карточке.</small></fieldset>
       <fieldset className="module-access-fieldset"><legend>Ручная настройка разделов</legend><div className="module-access-grid">{assignableModules.map((module) => { const specialMedical = module.id === "medical" && selectedRole !== "Медработник"; return <label key={module.id} className={specialMedical ? "unavailable" : ""}><input type="checkbox" name="allowedModules" value={module.id} checked={allowedModules.includes(module.id)} disabled={specialMedical} onChange={(event) => toggleModule(module.id, event.target.checked)} /><span><strong>{module.label}</strong><small>{module.group}{specialMedical ? " · нужен отдельный медицинский допуск" : ""}</small></span></label>; })}</div><small>Снятая галочка закрывает экран и действия раздела. Добавленный сверх шаблона раздел доступен только для чтения; изменение данных всё равно ограничено ролью.</small></fieldset>
       <fieldset><legend>Доступные системы</legend>{data.systems.map((system, index) => <label key={system.id}><input type="checkbox" name="systemIds" value={system.id} defaultChecked={user.hasAccess ? systemIds.has(system.id) : index === 0} /><span><strong>{system.name}</strong><small>{system.description}</small></span></label>)}</fieldset>
+      <label><span>Роль в дневнике Атласа</span><SoftSelect name="atlasDiaryRole" ariaLabel="Роль в дневнике Атласа" defaultValue={systemGrants.find(grant => grant.systemId === "SYS-SCHOOL-ATLAS")?.role ?? "teacher"} options={data.systemRoleOptions["SYS-SCHOOL-ATLAS"] ?? []} /><small>Действует только при выбранном дневнике Атласа и доступе к школе Атлас.</small></label>
       <label><span>Роль в дневнике</span><SoftSelect name="diaryRole" ariaLabel="Роль в дневнике" defaultValue={diaryRole} options={data.systemRoleOptions["SYS-SCHOOL-1-11"] ?? []} /><small>Используется, только если выбран «Дневник 1–11».</small></label>
     </div>
     <div className="access-approval-note"><strong>Отдельное подтверждение</strong><span>Сохранение карточки сотрудника в «Команде» не выдаёт доступ. Приглашение будет создано только после нажатия кнопки ниже.</span></div>
