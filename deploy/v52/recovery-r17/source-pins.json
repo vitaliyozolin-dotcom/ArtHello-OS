@@ -18,7 +18,7 @@
     ".github/scripts/d083-public-audit.py": "551c62fbcff2603f69602fd207d46e378099c2fd5900d2e69c7893a5c9fefcda",
     ".github/scripts/d083-resume-candidate.py": "08609dd4f2ef2df6c15ae5714518d4cf6c821a49fc4457238af990a3f1d88f69",
     ".github/scripts/download-v52-artifact-r15.py": "85975b2b3a6835728e756dba88219a8f0bcf37b333c0921df2c618afc224776f",
-    ".github/scripts/finance-ci-browser.mjs": "894bf27f00c840af65a27f6591030823beaafb6d6fb411b6bea6e8ebd0d913f0",
+    ".github/scripts/finance-ci-browser.mjs": "c7719e580af981386a14c6146fadf988b07f8e50824d445e8c7e0471cb0b2ab1",
     ".github/scripts/finance-ci-seed.mjs": "aafb248e72c1b740adb562acb1e138863408f8f1dd2a7f781250593af0b75f00",
     ".github/scripts/fixtures/r14-accepted-r13-history.json": "efbf53bc68b3082eb3f6dc78238745001311b56d03fc679f9e12ec6ded6be1fb",
     ".github/scripts/fixtures/r15-rejected-publication.json": "9e395438604ebe98395cbe085d644af34b70ac38da9b3ae21201c903a731aaa2",

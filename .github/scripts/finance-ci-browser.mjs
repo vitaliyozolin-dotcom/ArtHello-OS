@@ -7,7 +7,7 @@ import { inspectSandbox } from './flow.mjs';
 
 const ORIGIN='https://finance.ci.invalid';
 let stage='guard',actionStage=null,browser,page;
-const errors=[],writes=[];let requests=0,loginCount=0,transportFailed=false,transportFailure=null;
+const errors=[],writes=[];let requests=0,loginCount=0,dashboardWrites=0,transportFailed=false,transportFailure=null,mobileMetrics=null;
 try {
   assert.equal(process.env.ARTHELLO_FINANCE_CI,'disposable-hosted-fixture');
   assert.match(process.env.CHECKED_SOURCE_SHA||'',/^[a-f0-9]{40}$/);
@@ -23,7 +23,7 @@ try {
       const request=route.request(),url=new URL(request.url());
       destinationOrigin=url.origin.slice(0,120);
       destinationKind=url.origin===ORIGIN?'fixture':url.origin==='null'?'opaque':url.hostname==='127.0.0.1'?'localhost':url.protocol==='http:'?'other_http':'other_https';
-      requestKind=url.pathname==='/'?'root':url.pathname.startsWith('/assets/')?'asset':['/api/auth/login','/api/auth/me','/api/finance','/api/finance-actions','/api/user-dashboard-layouts','/api/notifications','/api/settings'].includes(url.pathname)?url.pathname:'other';
+      requestKind=url.pathname==='/'?'root':url.pathname.startsWith('/assets/')?'asset':['/api/auth/login','/api/auth/me','/api/finance','/api/finance-actions','/api/user-dashboard-layouts','/api/dashboard-layout','/api/notifications','/api/settings'].includes(url.pathname)?url.pathname:'other';
       // The actual stylesheet requests these optional public fonts. Keep this
       // disposable fixture offline and exercise its normal system-font fallback.
       if(['https://fonts.googleapis.com','https://fonts.gstatic.com'].includes(url.origin)&&request.method()==='GET') {await route.abort();return;}
@@ -33,14 +33,21 @@ try {
       assert.equal(url.origin,ORIGIN);routePhase='request_budget';assert(++requests<=500);
       method=request.method();routePhase='method';
       if(!['GET','HEAD'].includes(method)) {
-        assert.equal(method,'POST');
-        if(url.pathname==='/api/auth/login') assert.equal(++loginCount,1);
-        else { assert.equal(url.pathname,'/api/finance-actions');const action=JSON.parse(request.postData()||'{}').action;assert(['createArticle','approveArticle','archiveArticle','classifyOperation'].includes(action));writes.push(action); }
+        // A fresh owner naturally persists the default dashboard layout during
+        // initial hydration. Permit only this bounded real fixture API call.
+        if(method==='PUT'&&url.pathname==='/api/dashboard-layout'&&!url.search) {
+          assert(++dashboardWrites<=3);assert(Buffer.byteLength(request.postData()||'')<=4096);
+          const layout=JSON.parse(request.postData()||'{}');assert.equal(layout.version,1);assert(Array.isArray(layout.widgets));
+        } else {
+          assert.equal(method,'POST');
+          if(url.pathname==='/api/auth/login') assert.equal(++loginCount,1);
+          else { assert.equal(url.pathname,'/api/finance-actions');const action=JSON.parse(request.postData()||'{}').action;assert(['createArticle','approveArticle','archiveArticle','classifyOperation'].includes(action));writes.push(action); }
+        }
       }
       const headers={...request.headers(),host:'finance.ci.invalid'};
       delete headers['content-length'];delete headers['accept-encoding'];
       routePhase='fetch';const response=await fetch('http://127.0.0.1:8081'+url.pathname+url.search,{method,headers,body:['GET','HEAD'].includes(method)?undefined:request.postDataBuffer(),redirect:'manual',signal:AbortSignal.timeout(20000)});
-      statusCode=response.status;routePhase='headers';const out=Object.fromEntries(response.headers);delete out['content-encoding'];delete out['content-length'];delete out['transfer-encoding'];
+      statusCode=response.status;if(method==='PUT')assert.equal(response.status,200);routePhase='headers';const out=Object.fromEntries(response.headers);delete out['content-encoding'];delete out['content-length'];delete out['transfer-encoding'];
       const cookies=response.headers.getSetCookie();if(cookies.length)out['set-cookie']=cookies.join('\n');
       routePhase='fulfill';await route.fulfill({status:response.status,headers:out,body:Buffer.from(await response.arrayBuffer())});
     } catch(error) {transportFailed=true;transportFailure??={routePhase,requestKind,destinationKind,destinationOrigin,method,statusCode,errorKind:['AssertionError','TypeError','Error'].includes(error?.name)?error.name:'other',cause:['ECONNREFUSED','ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT'].includes(error?.cause?.code)?error.cause.code:null};await route.abort().catch(()=>{});}
@@ -73,6 +80,7 @@ try {
     await form.getByRole('button',{name:'Предпросмотр',exact:true}).click();await page.getByText(/Найдено: 1 · сумма/).waitFor();
     await page.getByRole('button',{name:'Открыть операции',exact:true}).click();
     await page.locator('.finance-table tbody tr').first().click();await page.getByRole('dialog').waitFor();
+    await page.getByRole('dialog').evaluate(async e=>{await Promise.all(e.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished));});
   }
   stage='desktop_articles';await create('CI Обучение','cashflow','Поступление');await create('CI Услуги','pnl','Поступление');
   await page.screenshot({path:'/evidence/desktop-articles.png',fullPage:true});
@@ -90,10 +98,10 @@ try {
   await page.screenshot({path:'/evidence/mobile-articles.png',fullPage:true});
   stage='mobile_allocation';await preview('CI Аренда','8888888888','CI аренда');
   const mobileForm=dialog.locator('.operation-classification-form');
-  assert.equal(await mobileForm.evaluate(e=>getComputedStyle(e).display),'grid');
-  assert.equal(await mobileForm.evaluate(e=>getComputedStyle(e).gridTemplateColumns.trim().split(/\s+/).length),1);
-  assert(await mobileForm.locator('input,select,button').evaluateAll(nodes=>nodes.every(e=>e.getBoundingClientRect().height>=44)));
-  assert(await dialog.evaluate(e=>e.scrollWidth<=e.clientWidth+2));await dialog.getByRole('combobox',{name:'Статья ДДС'}).selectOption('CI Аренда');
+  mobileMetrics=await mobileForm.evaluate(e=>({display:getComputedStyle(e).display,columns:getComputedStyle(e).gridTemplateColumns.trim().split(/\s+/).length,heights:Array.from(e.querySelectorAll('input,select,button')).map(n=>Math.round(n.getBoundingClientRect().height*100)/100)}));
+  actionStage='mobile_grid';assert.equal(mobileMetrics.display,'grid');assert.equal(mobileMetrics.columns,1);
+  actionStage='mobile_touch_targets';assert(mobileMetrics.heights.every(h=>h>=44));
+  actionStage='mobile_overflow';assert(await dialog.evaluate(e=>e.scrollWidth<=e.clientWidth+2));actionStage=null;await dialog.getByRole('combobox',{name:'Статья ДДС'}).selectOption('CI Аренда');
   await dialog.getByRole('button',{name:'Не включать в ОПиУ',exact:true}).click();await dialog.getByRole('combobox',{name:'Статья ДДС'}).scrollIntoViewIfNeeded();await page.screenshot({path:'/evidence/mobile-allocation.png',fullPage:true});
   await save(()=>dialog.getByRole('button',{name:'Сохранить разнесение',exact:true}).click());await dialog.waitFor({state:'hidden'});
   stage='archive_history';await page.getByRole('tab',{name:'Статьи',exact:true}).click();
@@ -102,10 +110,10 @@ try {
   await page.reload();await page.getByRole('tab',{name:'ДДС',exact:true}).click();await page.getByRole('button',{name:'CI Обучение',exact:true}).click();await page.locator('.finance-table tbody tr').first().click();
   assert.equal(await dialog.getByRole('combobox',{name:'Статья ДДС'}).inputValue(),'CI Обучение');
   assert.equal(loginCount,1);assert.equal(transportFailed,false);assert.equal(errors.length,0);assert.equal(writes.filter(x=>x==='classifyOperation').length,2);assert.equal(writes.length,9);
-  const result={kind:'finance-isolated-browser',result:'pass',sourceSha:process.env.CHECKED_SOURCE_SHA,viewports:[1440,390],actualApplication:true,actualDatabase:true,apiMocked:false,sessionInjected:false,chromiumSandbox:'verified',productionAcceptance:'not_run',bankFacts:'synthetic CI only',screenshots:['desktop-articles.png','desktop-dds.png','mobile-articles.png','mobile-allocation.png']};
+  const result={kind:'finance-isolated-browser',result:'pass',sourceSha:process.env.CHECKED_SOURCE_SHA,viewports:[1440,390],actualApplication:true,actualDatabase:true,apiMocked:false,dashboardWrites,mobileMetrics,sessionInjected:false,chromiumSandbox:'verified',productionAcceptance:'not_run',bankFacts:'synthetic CI only',screenshots:['desktop-articles.png','desktop-dds.png','mobile-articles.png','mobile-allocation.png']};
   writeFileSync('/evidence/result.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 } catch(error) {
   if(page&&stage!=='natural_login')await page.screenshot({path:'/evidence/failure.png',fullPage:true}).catch(()=>{});
   const reason=String(error?.message||'').includes('strict mode violation')?'ambiguous_locator':error?.name==='TimeoutError'?'timeout':error?.name==='AssertionError'?'assertion':'other';
-  console.error(JSON.stringify({kind:'finance-isolated-browser',result:'fail',stage,actionStage,reason,requests,writes:writes.length,transportFailed,transportFailure,pageErrors:errors.length,productionAcceptance:'not_run'}));process.exitCode=2;
+  console.error(JSON.stringify({kind:'finance-isolated-browser',result:'fail',stage,actionStage,reason,requests,writes:writes.length,dashboardWrites,mobileMetrics,transportFailed,transportFailure,pageErrors:errors.length,productionAcceptance:'not_run'}));process.exitCode=2;
 } finally {await browser?.close();}

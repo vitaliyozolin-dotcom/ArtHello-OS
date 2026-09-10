@@ -204,7 +204,7 @@ jobs:
     timeout-minutes: 15
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      R17_CONTRACT_SHA256: 5536438f723db45ace32af3a462b1b9dbb6cca790aa9c985e76fae2e7361d50e
+      R17_CONTRACT_SHA256: af91195358fcc047bedef2aca399619ffdd044c3ece79a3daecb99f37378e542
     steps:
     - name: Check out exact unprivileged R17 verification source
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
