@@ -57,7 +57,8 @@ test("non-finance roles do not request finance and KPI-only finance layouts stil
   assert.match(dashboard, /preset !== "work" && availableModuleIds\.has\("finance"\)/);
   assert.match(dashboard, /const needsFinance = canUseFinanceWidgets && layout\.some/);
   assert.match(dashboard, /if \(!needsFinance\) return;[\s\S]*?fetch\(`\/api\/finance/);
-  assert.match(dashboard, /fetch\(`\/api\/finance\$\{periodQuery\}`/);
+  assert.match(dashboard, /new URLSearchParams\(\{ branchId: selectedBranch \}\)/);
+  assert.match(dashboard, /fetch\(`\/api\/finance\?\$\{params\.toString\(\)\}`/);
   assert.match(dashboard, /finance\.monthly\.filter\(\(item\) => cashPeriods\.has\(item\.period\)\)\.slice\(-12\)/);
   assert.match(dashboard, /label: "Поступления"[\s\S]*?module: "finance" as ModuleId/);
   assert.match(dashboard, /label: "Списания"[\s\S]*?module: "finance" as ModuleId/);

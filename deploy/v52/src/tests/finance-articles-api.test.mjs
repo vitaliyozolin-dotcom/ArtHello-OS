@@ -9,7 +9,7 @@ const modules = {
   'cloudflare:workers': 'export const env = { DB: { prepare() { throw Error("unexpected database access"); } } };',
   'drizzle-orm': 'export const and=()=>null, eq=()=>null;',
   '../../../db': 'export async function ensureCoreTables(){globalThis.__financeArticleApiTest.ensures++} export function getDb(){return {select(){return {from(){return {where(){return {limit(){return []}}}}}}}}}',
-  '../../../db/schema': 'export const auditEvents={},financeCorrections={},financeReconciliationIssues={},financialOperations={},tasks={};',
+  '../../../db/schema': 'export const auditEvents={},financeCorrections={},financeReconciliationIssues={},financialOperations={},organizationBranches={},tasks={},userBranchAccess={};',
   '../../../lib/production-auth': 'export async function getAuthenticatedRequestContext(){return globalThis.__financeArticleApiTest.context} export function verifyAuthenticatedRequestCsrf(){if(!globalThis.__financeArticleApiTest.csrf)throw Error("private session detail");}',
   '../../../lib/task-access': 'export const resolveTaskAssignment=()=>({ok:false});',
   '../../../lib/task-access-query': 'export const findScopedAutomationTask=()=>null, scopedAutomationTaskResponse=()=>null;',
@@ -38,11 +38,11 @@ test('non-finance role denied even with valid session and CSRF', async () => {
   assert.equal((await POST(request({ action: 'classifyOperation' }))).status, 403);
   assert.equal(fixture.ensures, 0);
 });
-test('missing operation is 404; unknown action is 400; storage exception is fixed public error', async () => {
+test('missing operation is 404; unknown action is 400; fixed catalog rejects mutation', async () => {
   fixture.context = { actor: 'synthetic-owner', apiRole: 'OWNER' }; fixture.csrf = true;
   assert.equal((await POST(request({ action: 'classifyOperation', operationId: 'missing' }))).status, 404);
   assert.equal((await POST(request({ action: 'unknown' }))).status, 400);
   const response = await POST(request({ action: 'createArticle' }));
-  assert.equal(response.status, 500);
-  assert.doesNotMatch(JSON.stringify(await response.json()), /unexpected database|SELECT|prepare/);
+  assert.equal(response.status, 409);
+  assert.match(JSON.stringify(await response.json()), /Справочник зафиксирован/);
 });

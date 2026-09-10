@@ -94,7 +94,8 @@ test("Wave 6 exposes every core sales section before the first lead", () => {
 });
 
 test("Wave 6 preserves finance reads, mutations, drill-down and audit trail", () => {
-  assert.match(finance, /fetch\s*\(\s*`\/api\/finance\?period=\$\{period\}`/);
+  assert.match(finance, /new URLSearchParams\(\{ period, branchId: selectedBranch \}\)/);
+  assert.match(finance, /fetch\s*\(\s*`\/api\/finance\?\$\{params\.toString\(\)\}`/);
   assert.match(finance, /fetch\s*\(\s*["']\/api\/finance-actions["']/);
   assert.match(finance, /["']x-arthello-role["']\s*:/);
   assert.match(finance, /method\s*:\s*["']POST["']/);

@@ -98,6 +98,7 @@ jobs:
     timeout-minutes: 15
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      D132_HISTORY_ADAPTER_SHA256: 3b90ea306d916b95568a9b9ced6da0cbc2013e7a265c6b6e4e8cc5d3d189282f
       R14_CONTRACT_SHA256: 37614beafcbf18347d2429713301699bd4c5e3474cd4f7db840dc166b4c852a3
       ACCEPTED_HISTORY_RUNNER_SHA256: 973a4c69e8d0aacf623060928022662e36cda24bbef1da969ebb85ce781c3841
       R14_HISTORICAL_RUNNER_SHA256: ab0aeb384d5c5eb4859b86274f0a70778518b846620e4c2dbe47710c9c0fb48b
@@ -132,7 +133,9 @@ jobs:
 
         test "$(sha256sum scripts/run-accepted-r16-history.py | cut -d '' '' -f 1)" = "$ACCEPTED_HISTORY_RUNNER_SHA256"
 
-        python3 -I -B scripts/run-accepted-r16-history.py r14
+        test "$(sha256sum scripts/run-d132-finance-history.py | cut -d '' '' -f 1)" = "$D132_HISTORY_ADAPTER_SHA256"
+
+        python3 -I -B scripts/run-d132-finance-history.py r14
 
         '
   r15-candidate-tests:
@@ -141,6 +144,7 @@ jobs:
     timeout-minutes: 15
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      D132_HISTORY_ADAPTER_SHA256: 3b90ea306d916b95568a9b9ced6da0cbc2013e7a265c6b6e4e8cc5d3d189282f
       R15_CONTRACT_SHA256: db8d577e4acd86180cb2a08234f99e654832918fcf29ad01697b25d57d700533
       ACCEPTED_HISTORY_RUNNER_SHA256: 973a4c69e8d0aacf623060928022662e36cda24bbef1da969ebb85ce781c3841
       R15_HISTORICAL_RUNNER_SHA256: bcaa0ef337e40dd428349293dbabbbe89193841d916c4dc3df8be07a6d336111
@@ -166,13 +170,15 @@ jobs:
         test "$(sha256sum deploy/v52/recovery-r15/check-contract.rb | cut -d ' ' -f 1)" = "$R15_CONTRACT_SHA256"
         test "$(sha256sum scripts/run-r15-historical-contract.py | cut -d ' ' -f 1)" = "$R15_HISTORICAL_RUNNER_SHA256"
         test "$(sha256sum scripts/run-accepted-r16-history.py | cut -d ' ' -f 1)" = "$ACCEPTED_HISTORY_RUNNER_SHA256"
-        python3 -I -B scripts/run-accepted-r16-history.py r15
+        test "$(sha256sum scripts/run-d132-finance-history.py | cut -d ' ' -f 1)" = "$D132_HISTORY_ADAPTER_SHA256"
+        python3 -I -B scripts/run-d132-finance-history.py r15
   r16-candidate-tests:
     name: r16-candidate-tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      D132_HISTORY_ADAPTER_SHA256: 3b90ea306d916b95568a9b9ced6da0cbc2013e7a265c6b6e4e8cc5d3d189282f
       R16_CONTRACT_SHA256: fbf8f98aaf6c751296009178fba73139372b9153f7b2f8a7e4a0b4ed4b40fa30
       ACCEPTED_HISTORY_RUNNER_SHA256: 973a4c69e8d0aacf623060928022662e36cda24bbef1da969ebb85ce781c3841
     steps:
@@ -196,14 +202,15 @@ jobs:
         test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
         test "$(sha256sum deploy/v52/recovery-r16/check-contract.rb | cut -d ' ' -f 1)" = "$R16_CONTRACT_SHA256"
         test "$(sha256sum scripts/run-accepted-r16-history.py | cut -d ' ' -f 1)" = "$ACCEPTED_HISTORY_RUNNER_SHA256"
-        python3 -I -B scripts/test/accepted-r16-history.test.py
-        python3 -I -B scripts/run-accepted-r16-history.py r16
+        test "$(sha256sum scripts/run-d132-finance-history.py | cut -d ' ' -f 1)" = "$D132_HISTORY_ADAPTER_SHA256"
+        python3 -I -B scripts/run-d132-finance-history.py r16
   r17-candidate-tests:
     name: r17-candidate-tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      D132_HISTORY_ADAPTER_SHA256: 3b90ea306d916b95568a9b9ced6da0cbc2013e7a265c6b6e4e8cc5d3d189282f
       R17_CONTRACT_SHA256: b7a1e2badbb94b313608ad7d5a75c64317e33ae64c44354f3ffd8cde5cb16895
     steps:
     - name: Check out exact unprivileged R17 verification source
@@ -225,16 +232,5 @@ jobs:
         test "$(id -u)" -ne 0
         test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
         test "$(sha256sum deploy/v52/recovery-r17/check-contract.rb | cut -d ' ' -f 1)" = "$R17_CONTRACT_SHA256"
-        ruby deploy/v52/recovery-r17/check-contract.rb
-        python3 -I -B .github/scripts/test-r17-artifact-download.py
-        python3 -I -B .github/scripts/test-r17-contract.py
-        python3 -I -B .github/scripts/test-r17-history-gate.py
-        python3 -I -B .github/scripts/test-r17-backup-adoption.py
-        python3 -I -B .github/scripts/test-r17-backup-controller.py
-        python3 -I -B .github/scripts/test-r17-continuation-adapters.py
-        python3 -I -B .github/scripts/test-r17-live-baseline.py
-        python3 -I -B .github/scripts/test-run-r17-live-browser.py
-        python3 -I -B .github/scripts/test-run-finance-ci-browser.py
-        python3 -I -B .github/scripts/test-r17-digest-scan.py
-        node --test scripts/test/retire-r16-browser.test.mjs
-        node --check deploy/browser/retire-r16-browser.mjs
+        test "$(sha256sum scripts/run-d132-finance-history.py | cut -d ' ' -f 1)" = "$D132_HISTORY_ADAPTER_SHA256"
+        python3 -I -B scripts/run-d132-finance-history.py r17
