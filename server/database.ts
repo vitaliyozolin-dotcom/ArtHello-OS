@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync } from "node:fs";
+import { claimAtlasDatabase } from "../lib/institution.mjs";
 import { dirname, join } from "node:path";
 import {
   DatabaseSync,
@@ -75,10 +76,11 @@ export function getDatabase() {
   if (databaseInstance) return databaseInstance;
   const databasePath =
     process.env.DATABASE_PATH ||
-    join(process.cwd(), "data", "school-1-11.sqlite");
+    join(process.cwd(), "data", "atlas-school.sqlite");
   if (databasePath !== ":memory:")
     mkdirSync(dirname(databasePath), { recursive: true });
   const sqlite = new DatabaseSync(databasePath);
+  try { claimAtlasDatabase(sqlite); } catch (error) { sqlite.close(); throw error; }
   sqlite.exec("PRAGMA foreign_keys = ON");
   sqlite.exec("PRAGMA journal_mode = WAL");
   sqlite.exec("PRAGMA busy_timeout = 5000");
@@ -97,6 +99,7 @@ export function loadMigrationSql() {
     "0006_identity_broker.sql",
     "0007_curriculum_import.sql",
     "0008_schedule_groups.sql",
+    "0009_atlas_school.sql",
   ];
   return filenames.map((filename) =>
     readFileSync(join(process.cwd(), "drizzle", filename), "utf8"),

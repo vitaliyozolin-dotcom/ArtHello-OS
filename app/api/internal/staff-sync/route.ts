@@ -1,3 +1,4 @@
+import { institution, assertInstitution } from "../../../../lib/institution.mjs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Role } from "../../../level-zero-types";
 import { normalizePhone } from "../../../../server/auth";
@@ -23,6 +24,8 @@ const actions = new Set([
 ]);
 
 type StaffAccessPayload = {
+  systemId: string;
+  branchId: string;
   eventId: string;
   action: "upsert" | "block" | "restore" | "reset_password" | "revoke";
   issuedAt: string;
@@ -54,6 +57,7 @@ export async function POST(request: Request) {
     const bodyText = await request.text();
     verifySignature(request, bodyText);
     const payload = JSON.parse(bodyText) as StaffAccessPayload;
+    assertInstitution(payload);
     validatePayload(payload);
     await ensureDatabaseReady();
     const db = getDatabase();
@@ -173,8 +177,8 @@ async function applyAccess(payload: StaffAccessPayload) {
     throw new Error("Для сотрудника нужен телефон или email в ArtHello OS");
   if (!staffRoles.has(payload.user.role))
     throw new Error("Недопустимая роль сотрудника в дневнике");
-  if (!payload.user.branches.some((branch) => branch.id === "BR-SCHOOL"))
-    throw new Error("Сотруднику не назначен филиал «Школа 1–11»");
+  if (!payload.user.branches.some((branch) => branch.id === institution.branchId))
+    throw new Error("Сотруднику не назначен филиал «Атлас — школа»");
 
   const storedEmail =
     email ||

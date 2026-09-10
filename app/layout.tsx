@@ -5,12 +5,12 @@ import "./globals.css";
 import "./mobile-polish.css";
 
 export const metadata: Metadata = {
-  title: "Школа 1–11",
+  title: "Школа Атлас",
   description:
-    "Электронный дневник Школы 1–11: расписание, журнал, задания, календарь и школьная жизнь.",
+    "Электронный дневник школы Атлас: расписание, журнал, задания, календарь и школьная жизнь.",
   icons: {
-    icon: "/school-logo.svg",
-    shortcut: "/school-logo.svg",
+    icon: "/atlas-mark.svg",
+    shortcut: "/atlas-mark.svg",
   },
 };
 

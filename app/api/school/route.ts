@@ -1,3 +1,5 @@
+import { institution } from "../../../lib/institution.mjs";
+import { validateAcademicYear, assertLessonDate } from "../../../lib/academic-config.mjs";
 import type { ActionKind, Role, SchoolSnapshot } from "../../level-zero-types";
 import { mayPreviewParent, projectParentPreview } from "../../../lib/parent-preview.mjs";
 import {
@@ -102,7 +104,7 @@ const centralDirectoryActions = new Set<ActionKind>([
   "user.password.reset",
   "student.create",
 ]);
-let structureReady = false;
+
 
 type UserRow = {
   id: string;
@@ -136,353 +138,6 @@ type InvitationRow = {
   usedCount: number;
   status: string;
 };
-
-const SCHOOL_CLASSES = [
-  {
-    id: "class-1",
-    name: "1",
-    grade: 1,
-    homeroomTeacherUserId: "teacher-ivanova",
-  },
-  {
-    id: "class-2",
-    name: "2",
-    grade: 2,
-    homeroomTeacherUserId: "teacher-nasyrova",
-  },
-  {
-    id: "class-3",
-    name: "3",
-    grade: 3,
-    homeroomTeacherUserId: "teacher-chukovskaya",
-  },
-  {
-    id: "class-4",
-    name: "4",
-    grade: 4,
-    homeroomTeacherUserId: "teacher-sotkina",
-  },
-  { id: "class-5", name: "5", grade: 5, homeroomTeacherUserId: null },
-  { id: "class-6", name: "6", grade: 6, homeroomTeacherUserId: null },
-] as const;
-
-const ACADEMIC_YEAR = {
-  id: "2026/27",
-  startsOn: "2026-09-01",
-  endsOn: "2027-05-31",
-} as const;
-
-const ACADEMIC_CALENDAR_PERIODS = [
-  { id: "vacation-autumn-2026", title: "Осенние каникулы", startsOn: "2026-10-26", endsOn: "2026-11-03" },
-  { id: "vacation-winter-2026", title: "Зимние каникулы", startsOn: "2026-12-31", endsOn: "2027-01-10" },
-  { id: "vacation-february-2027", title: "Дополнительные каникулы", startsOn: "2027-02-15", endsOn: "2027-02-21" },
-  { id: "vacation-spring-2027", title: "Весенние каникулы", startsOn: "2027-03-27", endsOn: "2027-04-04" },
-] as const;
-
-const SCHOOL_SUBJECTS = [
-  {
-    id: "math",
-    name: "Математика",
-    shortName: "Математика",
-    color: "#6e5bd7",
-    icon: "∑",
-    stage: "1–6",
-  },
-  {
-    id: "russian",
-    name: "Русский язык",
-    shortName: "Русский",
-    color: "#df5c73",
-    icon: "А",
-    stage: "1–6",
-  },
-  {
-    id: "reading",
-    name: "Литературное чтение",
-    shortName: "Чтение",
-    color: "#cf7b45",
-    icon: "Ч",
-    stage: "1–4",
-  },
-  {
-    id: "world",
-    name: "Окружающий мир",
-    shortName: "Окр. мир",
-    color: "#5a9b4c",
-    icon: "◎",
-    stage: "1–4",
-  },
-  {
-    id: "creative",
-    name: "Творческие технологии",
-    shortName: "Технологии",
-    color: "#c56aa2",
-    icon: "Т",
-    stage: "1–6",
-  },
-  {
-    id: "geography",
-    name: "География",
-    shortName: "География",
-    color: "#278f86",
-    icon: "Г",
-    stage: "5–6",
-  },
-  {
-    id: "pe",
-    name: "Физическая культура",
-    shortName: "Физкультура",
-    color: "#2d9b62",
-    icon: "⚽",
-    stage: "1–6",
-  },
-  {
-    id: "ai",
-    name: "AI-мышление",
-    shortName: "AI-мышление",
-    color: "#267fb0",
-    icon: "AI",
-    stage: "1–6",
-  },
-  {
-    id: "literature",
-    name: "Литература",
-    shortName: "Литература",
-    color: "#b66f3e",
-    icon: "Л",
-    stage: "5–6",
-  },
-  {
-    id: "history",
-    name: "История",
-    shortName: "История",
-    color: "#b9853d",
-    icon: "И",
-    stage: "5–6",
-  },
-  {
-    id: "musical-theatre",
-    name: "Музыкальный театр",
-    shortName: "Муз. театр",
-    color: "#a15dc7",
-    icon: "М",
-    stage: "1–6",
-  },
-  {
-    id: "literary-club",
-    name: "Литературный клуб",
-    shortName: "Лит. клуб",
-    color: "#8b6a49",
-    icon: "К",
-    stage: "1–6",
-  },
-  {
-    id: "swimming",
-    name: "Бассейн",
-    shortName: "Бассейн",
-    color: "#318fc2",
-    icon: "≈",
-    stage: "1–6",
-  },
-  {
-    id: "english",
-    name: "Английский язык",
-    shortName: "English",
-    color: "#4d74c9",
-    icon: "En",
-    stage: "1–6",
-  },
-] as const;
-
-const STAFF_PROFILES = [
-  {
-    id: "teacher-ivanova",
-    email: "staff.ivanova@school.local",
-    displayName: "Иванова Анастасия Андреевна",
-    profileStatus: "confirmed",
-    notes: "Учитель 1 класса",
-  },
-  {
-    id: "teacher-nasyrova",
-    email: "staff.nasyrova@school.local",
-    displayName: "Насырова Надежда Юрьевна",
-    profileStatus: "confirmed",
-    notes: "Учитель 2 класса; русский язык в 5–6 классах",
-  },
-  {
-    id: "teacher-chukovskaya",
-    email: "staff.chukovskaya@school.local",
-    displayName: "Чуковская Анна Николаевна",
-    profileStatus: "confirmed",
-    notes: "Учитель 3 класса; география в 5–6 классах",
-  },
-  {
-    id: "teacher-sotkina",
-    email: "staff.sotkina@school.local",
-    displayName: "Соткина Ксения Болеславовна",
-    profileStatus: "confirmed",
-    notes: "Учитель 4 класса; математика в 5–6 классах",
-  },
-  {
-    id: "teacher-alexyunina",
-    email: "staff.alexyunina@school.local",
-    displayName: "Алексюнина Анастасия Витальевна",
-    profileStatus: "unconfirmed",
-    notes: "Кандидат пока не утверждён",
-  },
-  {
-    id: "teacher-ozolina",
-    email: "staff.ozolina@school.local",
-    displayName: "Озолина Алина Владиславовна",
-    profileStatus: "confirmed",
-    notes: "Физическая культура, 1–6 классы",
-  },
-  {
-    id: "teacher-rottsy",
-    email: "staff.rottsy@school.local",
-    displayName: "Ротцы Анна Максимовна",
-    profileStatus: "confirmed",
-    notes: "AI-мышление, 1–6 классы",
-  },
-  {
-    id: "teacher-komova",
-    email: "staff.komova@school.local",
-    displayName: "Комова Наталья Юрьевна",
-    profileStatus: "confirmed",
-    notes: "Литература и история, 5–6 классы",
-  },
-  {
-    id: "teacher-curator-2",
-    email: "staff.curator-2@school.local",
-    displayName: "Куратор №2",
-    profileStatus: "vacant",
-    notes: "ФИО не определено; музыкальный театр и литературный клуб",
-  },
-  {
-    id: "teacher-fedorov",
-    email: "staff.fedorov@school.local",
-    displayName: "Федоров Павел Олегович",
-    profileStatus: "confirmed",
-    notes: "Бассейн, 1–6 классы",
-  },
-  {
-    id: "teacher-english-primary",
-    email: "staff.english-primary@school.local",
-    displayName: "Педагог английского 1–4",
-    profileStatus: "vacant",
-    notes: "ФИО не определено",
-  },
-  {
-    id: "teacher-english-secondary",
-    email: "staff.english-secondary@school.local",
-    displayName: "Дмитриевна Наталья Витальевна",
-    profileStatus: "needs_confirmation",
-    notes: "ФИО сохранено как передано; требуется уточнить фамилию",
-  },
-] as const;
-
-type AssignmentGroup = {
-  teacherUserId: string;
-  classes: string[];
-  subjects: string[];
-  status?: string;
-  notes?: string;
-};
-
-const ASSIGNMENT_GROUPS: AssignmentGroup[] = [
-  {
-    teacherUserId: "teacher-ivanova",
-    classes: ["1"],
-    subjects: ["math", "russian", "reading", "world", "creative"],
-  },
-  {
-    teacherUserId: "teacher-nasyrova",
-    classes: ["2"],
-    subjects: ["math", "russian", "reading", "world"],
-  },
-  {
-    teacherUserId: "teacher-nasyrova",
-    classes: ["5", "6"],
-    subjects: ["russian"],
-  },
-  {
-    teacherUserId: "teacher-chukovskaya",
-    classes: ["3"],
-    subjects: ["math", "russian", "reading", "world"],
-  },
-  {
-    teacherUserId: "teacher-chukovskaya",
-    classes: ["5", "6"],
-    subjects: ["geography"],
-  },
-  {
-    teacherUserId: "teacher-sotkina",
-    classes: ["4"],
-    subjects: ["math", "russian", "reading", "world"],
-  },
-  { teacherUserId: "teacher-sotkina", classes: ["5", "6"], subjects: ["math"] },
-  {
-    teacherUserId: "teacher-alexyunina",
-    classes: ["2", "3", "4", "5", "6"],
-    subjects: ["creative"],
-    status: "unconfirmed",
-    notes: "Кандидат пока не утверждён",
-  },
-  {
-    teacherUserId: "teacher-ozolina",
-    classes: ["1", "2", "3", "4", "5", "6"],
-    subjects: ["pe"],
-  },
-  {
-    teacherUserId: "teacher-rottsy",
-    classes: ["1", "2", "3", "4", "5", "6"],
-    subjects: ["ai"],
-  },
-  {
-    teacherUserId: "teacher-komova",
-    classes: ["5", "6"],
-    subjects: ["literature", "history"],
-  },
-  {
-    teacherUserId: "teacher-curator-2",
-    classes: ["1", "2", "3", "4", "5", "6"],
-    subjects: ["musical-theatre", "literary-club"],
-    status: "vacant",
-    notes: "Педагог не назначен",
-  },
-  {
-    teacherUserId: "teacher-fedorov",
-    classes: ["1", "2", "3", "4", "5", "6"],
-    subjects: ["swimming"],
-  },
-  {
-    teacherUserId: "teacher-english-primary",
-    classes: ["1", "2", "3", "4"],
-    subjects: ["english"],
-    status: "vacant",
-    notes: "Педагог не назначен",
-  },
-  {
-    teacherUserId: "teacher-english-secondary",
-    classes: ["5", "6"],
-    subjects: ["english"],
-    status: "needs_confirmation",
-    notes: "Требуется уточнить ФИО",
-  },
-];
-
-const STAFF_ASSIGNMENTS = ASSIGNMENT_GROUPS.flatMap((group) =>
-  group.classes.flatMap((className) =>
-    group.subjects.map((subjectId) => ({
-      id: `assignment-${group.teacherUserId}-${className}-${subjectId}`,
-      teacherUserId: group.teacherUserId,
-      className,
-      subjectId,
-      status: group.status ?? "confirmed",
-      notes: group.notes ?? "",
-    })),
-  ),
-);
 
 function textValue(value: unknown, max = 500, required = true) {
   const result = typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -518,121 +173,16 @@ async function ensureRuntimeSchema() {
 }
 
 async function ensureSchoolStructure() {
-  if (structureReady) return;
   await ensureRuntimeSchema();
-  const db = await database();
-  const statements = [
-    ...SCHOOL_SUBJECTS.map((subject) =>
-      db
-        .prepare(
-          `INSERT INTO subjects
-      (id, name, short_name, color, icon, stage, weekly_hours, status)
-      VALUES (?, ?, ?, ?, ?, ?, 0, 'active')
-      ON CONFLICT(id) DO UPDATE SET name = excluded.name, short_name = excluded.short_name,
-        color = excluded.color, icon = excluded.icon, stage = excluded.stage,
-        weekly_hours = excluded.weekly_hours, status = 'active', updated_at = CURRENT_TIMESTAMP`,
-        )
-        .bind(
-          subject.id,
-          subject.name,
-          subject.shortName,
-          subject.color,
-          subject.icon,
-          subject.stage,
-        ),
-    ),
-    ...STAFF_PROFILES.map((staff) =>
-      db
-        .prepare(
-          `INSERT INTO users
-      (id, email, display_name, role, linked_student_id, status, profile_status, notes)
-      VALUES (?, ?, ?, 'teacher', NULL, 'setup', ?, ?)
-      ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, role = 'teacher',
-        profile_status = excluded.profile_status, notes = excluded.notes, updated_at = CURRENT_TIMESTAMP`,
-        )
-        .bind(
-          staff.id,
-          staff.email,
-          staff.displayName,
-          staff.profileStatus,
-          staff.notes,
-        ),
-    ),
-    ...SCHOOL_CLASSES.map((schoolClass) =>
-      db
-        .prepare(
-          `INSERT INTO school_classes
-      (id, name, grade, homeroom_teacher_user_id, status)
-      VALUES (?, ?, ?, ?, 'active')
-      ON CONFLICT(id) DO UPDATE SET name = excluded.name, grade = excluded.grade,
-        homeroom_teacher_user_id = excluded.homeroom_teacher_user_id,
-        status = 'active', updated_at = CURRENT_TIMESTAMP`,
-        )
-        .bind(
-          schoolClass.id,
-          schoolClass.name,
-          schoolClass.grade,
-          schoolClass.homeroomTeacherUserId,
-        ),
-    ),
-    ...STAFF_ASSIGNMENTS.map((assignment) =>
-      db
-        .prepare(
-          `INSERT INTO teacher_assignments
-      (id, teacher_user_id, class_name, subject_id, status, notes)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET teacher_user_id = excluded.teacher_user_id,
-        class_name = excluded.class_name, subject_id = excluded.subject_id,
-        status = excluded.status, notes = excluded.notes, updated_at = CURRENT_TIMESTAMP`,
-        )
-        .bind(
-          assignment.id,
-          assignment.teacherUserId,
-          assignment.className,
-          assignment.subjectId,
-          assignment.status,
-          assignment.notes,
-        ),
-    ),
-    ...ACADEMIC_CALENDAR_PERIODS.map((period) =>
-      db
-        .prepare(
-          `INSERT INTO academic_calendar_periods
-      (id, academic_year, kind, title, starts_on, ends_on)
-      VALUES (?, ?, 'vacation', ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET academic_year = excluded.academic_year,
-        kind = excluded.kind, title = excluded.title, starts_on = excluded.starts_on,
-        ends_on = excluded.ends_on, updated_at = CURRENT_TIMESTAMP`,
-        )
-        .bind(period.id, ACADEMIC_YEAR.id, period.title, period.startsOn, period.endsOn),
-    ),
-    db.prepare(
-      "UPDATE subjects SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id IN ('algebra', 'geometry', 'social', 'physics', 'chemistry', 'biology')",
-    ),
-    db.prepare(
-      "UPDATE users SET status = 'archived', profile_status = 'demo', notes = 'Архивная тестовая запись' WHERE id IN ('user-admin-demo', 'user-parent-demo', 'user-teacher-demo', 'user-student-demo')",
-    ),
-    db.prepare(
-      "UPDATE students SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id IN ('student-alexander', 'student-polina', 'student-maxim', 'student-sofia')",
-    ),
-    db.prepare(
-      "UPDATE lessons SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE class_name = '7Б'",
-    ),
-    db.prepare(
-      "UPDATE homework SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE class_name = '7Б'",
-    ),
-    db.prepare(
-      "DELETE FROM menu_days WHERE id IN ('menu-2026-08-11', 'menu-2026-08-12', 'menu-2026-08-13')",
-    ),
-    db.prepare(
-      "DELETE FROM events WHERE id IN ('event-1', 'event-2', 'event-3')",
-    ),
-    db.prepare(
-      "DELETE FROM activities WHERE id IN ('activity-1', 'activity-2', 'activity-3')",
-    ),
-  ];
-  await db.batch(statements);
-  structureReady = true;
+}
+
+async function academicConfiguration(required = false) {
+  const row = await getDatabase().prepare("SELECT value FROM diary_settings WHERE key='academic-year'").first<{value:string}>();
+  if (!row) {
+    if (required) throw new Error("Завуч должен настроить учебный год и каникулы в календаре");
+    return {id: "", startsOn: "", endsOn: "", periods: [] as Array<{title:string;startsOn:string;endsOn:string}>};
+  }
+  return validateAcademicYear(JSON.parse(row.value));
 }
 
 async function authenticatedIdentity(
@@ -960,6 +510,7 @@ async function loadSnapshot(
   request: Request,
 ): Promise<SchoolSnapshot> {
   const db = await database();
+  const academicYear = await academicConfiguration();
   const url = new URL(request.url);
   const viewer = actor;
   const allowedStudentIds = await visibleStudentIds(viewer);
@@ -989,8 +540,8 @@ async function loadSnapshot(
     students.find((student) => student.id === selectedStudentId) ?? null;
   const rankingsPromise = loadRankings(viewer, selectedStudent);
   const requestedClass = url.searchParams.get("class");
-  const selectedClass =
-    requestedClass && classes.some((item) => item.name === requestedClass)
+  const selectedClass = familyRoles.has(viewer.role) ? (selectedStudent?.className ?? "") :
+    !familyRoles.has(viewer.role) && requestedClass && classes.some((item) => item.name === requestedClass)
       ? requestedClass
       : (selectedStudent?.className ??
         students[0]?.className ??
@@ -1033,7 +584,9 @@ async function loadSnapshot(
       ORDER BY day_date LIMIT 14`,
     ),
     rows<SchoolSnapshot["events"][number]>(
-      "SELECT id, title, description, starts_at AS startsAt, location, audience, status, capacity FROM events WHERE status != 'archived' ORDER BY starts_at LIMIT 20",
+      `SELECT id, title, description, starts_at AS startsAt, location, audience, status, capacity FROM events
+      WHERE status = 'published' ${familyRoles.has(viewer.role) ? "AND (audience = 'all' OR audience = ? OR audience = ?)" : ""} ORDER BY starts_at LIMIT 200`,
+      familyRoles.has(viewer.role) ? [viewer.role, `class:${selectedClass}`] : [],
     ),
     rows<SchoolSnapshot["activities"][number]>(
       `SELECT id, title, schedule, teacher, price, capacity, enrolled, status
@@ -1059,7 +612,7 @@ async function loadSnapshot(
           [viewer.id],
         ] as const)
       : ([
-          `${homeworkSelect} WHERE h.class_name = ? AND h.status != 'archived' ORDER BY h.due_at`,
+          `${homeworkSelect} WHERE h.class_name = ? AND h.status = 'published' ORDER BY h.due_at`,
           [selectedClass],
         ] as const);
   const [grades, homework, achievements, comments, subscriptions] =
@@ -1076,7 +629,7 @@ async function loadSnapshot(
         studentBindings,
       ),
       rows<SchoolSnapshot["comments"][number]>(
-        `SELECT c.id, c.student_id AS studentId, st.first_name || ' ' || st.last_name AS studentName, c.teacher_user_id AS teacherUserId, u.display_name AS teacherName, c.subject_id AS subjectId, s.name AS subjectName, c.body, c.visibility, c.comment_date AS commentDate FROM teacher_comments c JOIN students st ON st.id = c.student_id JOIN users u ON u.id = c.teacher_user_id LEFT JOIN subjects s ON s.id = c.subject_id WHERE c.student_id ${recordWhere} ORDER BY c.comment_date DESC, c.created_at DESC`,
+        `SELECT c.id, c.student_id AS studentId, st.first_name || ' ' || st.last_name AS studentName, c.teacher_user_id AS teacherUserId, u.display_name AS teacherName, c.subject_id AS subjectId, s.name AS subjectName, c.body, c.visibility, c.comment_date AS commentDate FROM teacher_comments c JOIN students st ON st.id = c.student_id JOIN users u ON u.id = c.teacher_user_id LEFT JOIN subjects s ON s.id = c.subject_id WHERE c.student_id ${recordWhere} ${familyRoles.has(viewer.role) ? "AND c.visibility = 'parent'" : ""} ORDER BY c.comment_date DESC, c.created_at DESC`,
         studentBindings,
       ),
       rows<SchoolSnapshot["subscriptions"][number]>(
@@ -1218,13 +771,13 @@ async function loadSnapshot(
           starts_on AS startsOn, ends_on AS endsOn
         FROM academic_calendar_periods
         WHERE academic_year = ? ORDER BY starts_on`,
-        [ACADEMIC_YEAR.id],
+        [academicYear.id],
       )
     : [];
   const attendance = await rows<SchoolSnapshot["attendance"][number]>(
     `SELECT a.id, a.lesson_id AS lessonId,
-      a.student_id AS studentId, a.status, a.note, a.marked_at AS markedAt
-    FROM attendance a WHERE a.student_id ${recordWhere} ORDER BY a.marked_at DESC LIMIT 200`,
+      a.student_id AS studentId, a.status, a.note, a.marked_at AS markedAt, a.lesson_date AS lessonDate, a.version
+    FROM attendance_by_date a WHERE a.student_id ${recordWhere} ORDER BY a.lesson_date DESC, a.lesson_id, a.student_id`,
     studentBindings,
   );
   const notifications = await rows<SchoolSnapshot["notifications"][number]>(
@@ -1243,10 +796,11 @@ async function loadSnapshot(
 
   return {
     school: {
-      name: "Школа 1–11",
-      academicYear: "2026/27",
+      name: institution.name,
+      academicYear: academicYear.id,
+      startsOn: academicYear.startsOn, endsOn: academicYear.endsOn,
       timezone: "Europe/Moscow",
-      dataMode: liveUserCount >= 4 ? "live" : "template",
+      dataMode: "live",
     },
     viewer: {
       id: viewer.id,
@@ -1296,13 +850,13 @@ async function loadSnapshot(
         },
         {
           id: "registration",
-          label: "Самостоятельная регистрация семей",
-          done: true,
+          label: "Семьи подключены из ArtHello",
+          done: students.length > 0,
         },
         {
           id: "structure",
-          label: "1–6 классы и педагогическая матрица",
-          done: classes.length === 6 && teacherAssignments.length > 0,
+          label: "Классы Атласа и назначения педагогов",
+          done: classes.length > 0 && teacherAssignments.length > 0,
         },
         {
           id: "data",
@@ -1423,6 +977,7 @@ async function calculateCurriculumAllocation(
   teacherUserId: string,
   topicRows: CurriculumRowInput[],
 ) {
+  const academicYear = await academicConfiguration(true);
   const db = await database();
   const lessonResult = await db
     .prepare(
@@ -1441,11 +996,11 @@ async function calculateCurriculumAllocation(
       WHERE academic_year = ? AND kind IN ('vacation', 'holiday', 'non_instruction')
       ORDER BY starts_on`,
     )
-    .bind(ACADEMIC_YEAR.id)
+    .bind(academicYear.id)
     .all<{ startsOn: string; endsOn: string }>();
   const slots = buildScheduleSlots({
-    startDate: ACADEMIC_YEAR.startsOn,
-    endDate: ACADEMIC_YEAR.endsOn,
+    startDate: academicYear.startsOn,
+    endDate: academicYear.endsOn,
     lessons: lessonResult.results,
     periods: periodResult.results,
   });
@@ -1779,7 +1334,7 @@ export async function GET(request: Request) {
         headers: { "cache-control": "private, no-store" },
       });
     }
-    return Response.json(await loadSnapshot(actor, request));
+    return Response.json(await loadSnapshot(actor, request), {headers:{"cache-control":"private, no-store"}});
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Не удалось открыть дневник";
@@ -1800,6 +1355,7 @@ export async function POST(request: Request) {
     const body = (isMultipart
       ? Object.fromEntries((await request.formData()).entries())
       : await request.json()) as RequestBody;
+    const academicYear = await academicConfiguration();
     const action = typeof body.action === "string" ? body.action : undefined;
     if (!action)
       return Response.json({ error: "Не указано действие" }, { status: 400 });
@@ -1846,6 +1402,8 @@ export async function POST(request: Request) {
         "Приглашение создаёт родитель или уполномоченный сотрудник школы",
       );
 
+    if (["calendar.configure", "subject.upsert"].includes(action) && !leadershipRoles.has(actor.role))
+      return Response.json({error:"Настройки доступны завучу и директору"},{status:403});
     const db = await database();
     const id = `${action.replace(".", "-")}-${crypto.randomUUID()}`;
     let responsePayload: Record<string, unknown> = {};
@@ -1853,7 +1411,21 @@ export async function POST(request: Request) {
       timeZone: "Europe/Moscow",
     }).format(new Date());
 
-    if (action === "grade.create") {
+    if (action === "calendar.configure") {
+      const config = validateAcademicYear(body);
+      const existingProgram = await db.prepare("SELECT id FROM programs WHERE academic_year=? LIMIT 1").bind(config.id).first();
+      if (existingProgram) throw new Error("Календарь этого года уже используется в КТП. Изменение требует отдельного пересмотра дат; создайте новый учебный год или сохраните текущий календарь.");
+      const statements = [db.prepare("INSERT INTO diary_settings(key,value) VALUES('academic-year',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(JSON.stringify(config)),
+        db.prepare("DELETE FROM academic_calendar_periods WHERE academic_year=?").bind(config.id),
+        ...config.periods.map((period: {title:string;startsOn:string;endsOn:string},index: number) => db.prepare("INSERT INTO academic_calendar_periods(id,academic_year,kind,title,starts_on,ends_on) VALUES(?,?,'non_instruction',?,?,?)").bind(`atlas-${config.id}-${index}`,config.id,period.title,period.startsOn,period.endsOn))];
+      await db.batch(statements);
+      await audit(actor,action,"academic_year",config.id,"Настроен учебный календарь");
+    } else if (action === "subject.upsert") {
+      const name = textValue(body.name,80);
+      const subjectId = textValue(body.subjectId,80,false) || id;
+      await db.prepare("INSERT INTO subjects(id,name,short_name,color,icon,stage,status) VALUES(?,?,?,'#e04512','book','Атлас','active') ON CONFLICT(id) DO UPDATE SET name=excluded.name,short_name=excluded.short_name").bind(subjectId,name,name.slice(0,16)).run();
+      await audit(actor,action,"subject",subjectId,name);
+    } else if (action === "grade.create") {
       const studentId = textValue(body.studentId, 80);
       const subjectId = textValue(body.subjectId, 80);
       await assertTeacherScope(effectiveUser, studentId, subjectId);
@@ -2345,7 +1917,7 @@ export async function POST(request: Request) {
         )
         .bind(className)
         .first<{ id: string }>();
-      if (!schoolClass) throw new Error("Выберите класс из списка 1–6");
+      if (!schoolClass) throw new Error("Выберите действующий класс Атласа");
       const subject = await db
         .prepare("SELECT id FROM subjects WHERE id = ? AND status = 'active'")
         .bind(subjectId)
@@ -2474,7 +2046,7 @@ export async function POST(request: Request) {
         )
         .bind(className)
         .first<{ id: string }>();
-      if (!schoolClass) throw new Error("Выберите класс из списка 1–6");
+      if (!schoolClass) throw new Error("Выберите действующий класс Атласа");
       const sourceLessons = await db
         .prepare(
           `SELECT id, starts_at AS startsAt, ends_at AS endsAt,
@@ -2555,6 +2127,7 @@ export async function POST(request: Request) {
         `${sourceWeekday} → ${targetWeekday}; ${copied.length} уроков`,
       );
     } else if (action === "program.import") {
+      await academicConfiguration(true);
       const file = body.file;
       if (!(file instanceof File)) throw new Error("Выберите файл XLSX");
       if (!file.name.toLowerCase().endsWith(".xlsx"))
@@ -2589,7 +2162,7 @@ export async function POST(request: Request) {
           `SELECT id, status FROM programs
           WHERE academic_year = ? AND class_name = ? AND subject_id = ? AND teacher_user_id = ?`,
         )
-        .bind(ACADEMIC_YEAR.id, className, subjectId, teacherUserId)
+        .bind(academicYear.id, className, subjectId, teacherUserId)
         .first<{ id: string; status: string }>();
       if (
         !leadershipRoles.has(actor.role) &&
@@ -2658,7 +2231,7 @@ export async function POST(request: Request) {
       const title =
         textValue(body.title, 180, false) ||
         defaultTitle ||
-        `Рабочая программа ${ACADEMIC_YEAR.id}`;
+        `Рабочая программа ${academicYear.id}`;
       const statements = [
         db
           .prepare(
@@ -2672,7 +2245,7 @@ export async function POST(request: Request) {
           )
           .bind(
             programId,
-            ACADEMIC_YEAR.id,
+            academicYear.id,
             className,
             subjectId,
             teacherUserId,
@@ -2917,6 +2490,7 @@ export async function POST(request: Request) {
           : `${session.className} класс: тема изменена вручную`,
       );
     } else if (action === "program.upsert") {
+      await academicConfiguration(true);
       const className = textValue(body.className, 20);
       const subjectId = textValue(body.subjectId, 80);
       const title = textValue(body.title, 180);
@@ -2964,7 +2538,7 @@ export async function POST(request: Request) {
         : null;
       if (
         existingProgram &&
-        (existingProgram.academicYear !== ACADEMIC_YEAR.id ||
+        (existingProgram.academicYear !== academicYear.id ||
           existingProgram.className !== className ||
           existingProgram.subjectId !== subjectId ||
           existingProgram.teacherUserId !== teacherUserId)
@@ -2981,7 +2555,7 @@ export async function POST(request: Request) {
             WHERE academic_year = ? AND class_name = ? AND subject_id = ?
               AND teacher_user_id = ?`,
           )
-          .bind(ACADEMIC_YEAR.id, className, subjectId, teacherUserId)
+          .bind(academicYear.id, className, subjectId, teacherUserId)
           .first<{
             id: string;
             academicYear: string;
@@ -3023,7 +2597,7 @@ export async function POST(request: Request) {
             AND p.teacher_user_id = ?
           ORDER BY pi.created_at DESC, pi.rowid DESC LIMIT 1`,
         )
-        .bind(ACADEMIC_YEAR.id, className, subjectId, teacherUserId)
+        .bind(academicYear.id, className, subjectId, teacherUserId)
         .first<{ requiredHours: number; unscheduledHours: number }>();
       if (
         importedValidation &&
@@ -3075,35 +2649,28 @@ export async function POST(request: Request) {
     } else if (action === "attendance.mark") {
       const lessonId = textValue(body.lessonId, 120);
       const studentId = textValue(body.studentId, 100);
+      const lessonDate = textValue(body.lessonDate, 10);
       const status = textValue(body.status, 30);
       const note = textValue(body.note, 300, false);
-      if (!["present", "absent", "late", "excused"].includes(status))
-        throw new Error("Проверьте отметку посещаемости");
-      const lesson = await db
-        .prepare(
-          "SELECT class_name AS className, subject_id AS subjectId FROM lessons WHERE id = ? AND status != 'archived'",
-        )
-        .bind(lessonId)
-        .first<{ className: string; subjectId: string }>();
-      if (!lesson) throw new Error("Урок не найден");
+      const version = Number(body.version);
+      if (!Number.isInteger(version) || version < 0 || !["present", "absent", "late", "excused"].includes(status)) throw new Error("Проверьте отметку посещаемости");
+      const lesson = await db.prepare("SELECT class_name AS className, subject_id AS subjectId, weekday, teacher_user_id AS teacherId FROM lessons WHERE id=? AND status NOT IN ('archived','cancelled')").bind(lessonId).first<{className:string;subjectId:string;weekday:number;teacherId:string}>();
+      const student = await db.prepare("SELECT class_name AS className FROM students WHERE id=? AND status='active'").bind(studentId).first<{className:string}>();
+      if (!lesson || !student) throw new Error("Урок или ученик не найден");
+      if (actor.role === "teacher" && lesson.teacherId !== actor.id) throw new Error("Урок ведёт другой педагог");
       await assertTeacherScope(effectiveUser, studentId, lesson.subjectId);
-      await db
-        .prepare(
-          `INSERT INTO attendance (id, lesson_id, student_id, status, note, marked_by_user_id)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(lesson_id, student_id) DO UPDATE SET status = excluded.status,
-          note = excluded.note, marked_by_user_id = excluded.marked_by_user_id,
-          marked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP`,
-        )
-        .bind(id, lessonId, studentId, status, note || null, actor.id)
-        .run();
-      await audit(
-        actor,
-        action,
-        "attendance",
-        `${lessonId}-${studentId}`,
-        status,
-      );
+      const config = await academicConfiguration(true);
+      assertLessonDate(lesson, student, lessonDate, config, config.periods);
+      const today = new Intl.DateTimeFormat("en-CA", {timeZone:"Europe/Moscow"}).format(new Date());
+      if (lessonDate > today) throw new Error("Посещаемость будущего занятия ещё нельзя отметить");
+      const existing = await db.prepare("SELECT version FROM attendance_by_date WHERE lesson_id=? AND student_id=? AND lesson_date=?").bind(lessonId,studentId,lessonDate).first<{version:number}>();
+      if ((existing?.version ?? 0) !== version) return Response.json({error:"Отметка изменена другим сотрудником. Обновите журнал."}, {status:409});
+      const changed = await db.prepare(`INSERT INTO attendance_by_date(id,lesson_id,student_id,lesson_date,status,note,marked_by_user_id)
+        VALUES (?,?,?,?,?,?,?) ON CONFLICT(lesson_id,student_id,lesson_date) DO UPDATE SET status=excluded.status,note=excluded.note,
+        marked_by_user_id=excluded.marked_by_user_id,marked_at=CURRENT_TIMESTAMP,version=attendance_by_date.version+1 WHERE attendance_by_date.version=?`)
+        .bind(id,lessonId,studentId,lessonDate,status,note,actor.id,version).run();
+      if (!changed.meta.changes) return Response.json({error:"Отметка изменилась. Обновите журнал."}, {status:409});
+      await audit(actor,action,"attendance",`${lessonId}:${studentId}:${lessonDate}`,status);
     } else if (action === "notification.read") {
       const notificationId = textValue(body.notificationId, 120);
       const result = await db
@@ -3144,6 +2711,9 @@ export async function POST(request: Request) {
       const startsAt = textValue(body.startsAt, 80);
       const location = textValue(body.location, 160);
       const audience = textValue(body.audience, 80);
+      if (!["all","parent","student","teacher"].includes(audience)) {
+        if (!audience.startsWith("class:") || !await db.prepare("SELECT id FROM school_classes WHERE name=? AND status='active'").bind(audience.slice(6)).first()) throw new Error("Выберите аудиторию события");
+      }
       await db
         .prepare(
           "INSERT INTO events (id, title, description, starts_at, location, audience) VALUES (?, ?, ?, ?, ?, ?)",

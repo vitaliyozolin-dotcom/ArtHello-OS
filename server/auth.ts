@@ -7,7 +7,7 @@ import {
 import type { Role } from "../app/level-zero-types";
 import { getDatabase } from "./database";
 
-const SESSION_COOKIE = "school_session";
+const SESSION_COOKIE = "atlas_school_session";
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
 const MAX_FAILED_LOGINS = 5;
 

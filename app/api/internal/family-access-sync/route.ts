@@ -1,3 +1,4 @@
+import { assertInstitution } from "../../../../lib/institution.mjs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Role } from "../../../level-zero-types";
 import { normalizePhone } from "../../../../server/auth";
@@ -26,6 +27,8 @@ type Member = {
 };
 
 type FamilyAccessPayload = {
+  systemId: string;
+  branchId: string;
   eventId: string;
   action:
     | "grant_access"
@@ -71,6 +74,7 @@ export async function POST(request: Request) {
     const bodyText = await request.text();
     verifySignature(request, bodyText);
     const payload = JSON.parse(bodyText) as FamilyAccessPayload;
+    assertInstitution(payload);
     validatePayload(payload);
     await ensureDatabaseReady();
     const db = getDatabase();
@@ -322,7 +326,7 @@ async function syncFamilyProjection(family: FamilyAccessPayload["family"]) {
   )) {
     const { firstName, lastName } = splitName(member.displayName);
     const className = normalizeClassName(member.scope);
-    const grade = Number(className.match(/^([1-9]|1[01])/)?.[1] ?? 1);
+    const grade = Number(className.match(/^(1[01]|[1-9])/)?.[1] ?? 1);
     await db
       .prepare(
         `INSERT INTO school_classes (id, name, grade, status)

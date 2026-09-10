@@ -283,7 +283,7 @@ async function deliverChallenge(input: {
     expiresAt: new Date(input.expiresAt * 1000).toISOString(),
     message:
       input.channel === "sms"
-        ? `Школа 1–11: код входа ${input.code}. Никому его не сообщайте.`
+        ? `Школа Атлас: код входа ${input.code}. Никому его не сообщайте.`
         : `Код входа в дневник: ${input.code}. Также можно открыть одноразовую ссылку: ${input.magicLink}`,
   });
   const timestamp = String(nowSeconds());

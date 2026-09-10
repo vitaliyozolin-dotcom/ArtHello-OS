@@ -91,6 +91,8 @@ export type AcademicCalendarPeriodRecord = {
 
 export type AttendanceRecord = {
   id: string;
+  lessonDate: string;
+  version: number;
   lessonId: string;
   studentId: string;
   status: "present" | "absent" | "late" | "excused" | string;
@@ -357,6 +359,8 @@ export type SchoolSnapshot = {
   school: {
     name: string;
     academicYear: string;
+    startsOn?: string;
+    endsOn?: string;
     timezone: string;
     dataMode: "template" | "live";
   };
@@ -395,6 +399,8 @@ export type SchoolSnapshot = {
 };
 
 export type ActionKind =
+  | "calendar.configure"
+  | "subject.upsert"
   | "grade.create"
   | "homework.create"
   | "achievement.create"

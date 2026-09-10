@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { institution, assertInstitution } from "../lib/institution.mjs";
 import type { Role } from "../app/level-zero-types";
 import { createSession } from "./auth";
 import {
@@ -10,12 +11,12 @@ import {
 } from "./identity-broker";
 import { getDatabase } from "./database";
 
-const TRANSACTION_COOKIE = "school_sso_tx";
+const TRANSACTION_COOKIE = "atlas_school_sso_tx";
 const TRANSACTION_TTL_SECONDS = 5 * 60;
 const ARTHELLO_FALLBACK_ORIGIN =
   "https://arthello-188-225-38-55.sslip.io";
 const SCHOOL_FALLBACK_ORIGIN =
-  "https://school-188-225-38-55.sslip.io";
+  "";
 
 type SsoTransaction = {
   state: string;
@@ -25,6 +26,8 @@ type SsoTransaction = {
 };
 
 type ExchangePayload = {
+  systemId?: string;
+  branchId?: string;
   ok?: boolean;
   identity?: {
     centralUserId?: string;
@@ -42,7 +45,7 @@ function nowSeconds() {
 
 function safeReturnTo(value: unknown) {
   const route = typeof value === "string" ? value.trim() : "";
-  return route.startsWith("/") && !route.startsWith("//") ? route : "/";
+  return route.startsWith("/") && !route.startsWith("//") && !route.includes("\\") && !/[\u0000-\u001f\u007f]/.test(route) ? route : "/";
 }
 
 export function arthelloOrigin() {
@@ -150,7 +153,8 @@ export function startCentralSso(returnToInput: unknown) {
     returnTo,
     expiresAt: nowSeconds() + TRANSACTION_TTL_SECONDS,
   };
-  const authorize = new URL("/api/school-sso/authorize", arthelloOrigin());
+  const authorize = new URL("/api/atlas-sso/authorize", arthelloOrigin());
+  authorize.searchParams.set("system_id", institution.systemId);
   authorize.searchParams.set("state", state);
   authorize.searchParams.set("code_challenge", pkceChallenge(verifier));
   authorize.searchParams.set("return_to", returnTo);
@@ -161,6 +165,7 @@ export function startCentralSso(returnToInput: unknown) {
 }
 
 function validateIdentity(payload: ExchangePayload): CentralStaffIdentity {
+  assertInstitution(payload);
   const identity = payload.identity;
   const allowedRoles = new Set<Role>([
     "director",
@@ -202,7 +207,7 @@ export async function finishCentralSso(
   if (!code || state !== transaction.state)
     throw new Error("ArtHello OS вернула недействительный сеанс входа");
 
-  const exchangeUrl = new URL("/api/school-sso/exchange", arthelloOrigin());
+  const exchangeUrl = new URL("/api/atlas-sso/exchange", arthelloOrigin());
   const exchangeBody = JSON.stringify({
     code,
     codeVerifier: transaction.verifier,

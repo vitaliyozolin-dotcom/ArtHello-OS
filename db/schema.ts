@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { check, unique, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 const timestamps = {
   createdAt: text("created_at")
@@ -526,3 +526,22 @@ export const consents = sqliteTable("consents", {
   source: text("source").notNull().default("manual"),
   ...timestamps,
 });
+
+// Atlas uses dated attendance; the legacy weekly table is retained only for schema history.
+export const diaryIdentity = sqliteTable("diary_identity", {
+  id: text("id").primaryKey(), institutionId: text("institution_id").notNull(),
+});
+export const diarySettings = sqliteTable("diary_settings", {
+  key: text("key").primaryKey(), value: text("value").notNull(),
+});
+export const attendanceByDate = sqliteTable("attendance_by_date", {
+  id: text("id").primaryKey(),
+  lessonId: text("lesson_id").notNull().references(()=>lessons.id),
+  studentId: text("student_id").notNull().references(()=>students.id),
+  lessonDate: text("lesson_date").notNull(),
+  status: text("status", {enum:["present","absent","late","excused"]}).notNull(),
+  note: text("note").notNull().default(""),
+  markedByUserId: text("marked_by_user_id").notNull().references(()=>users.id),
+  markedAt: text("marked_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  version: integer("version").notNull().default(1),
+}, t=>[unique("atlas_attendance_lesson_student_date").on(t.lessonId,t.studentId,t.lessonDate),check("atlas_attendance_status",sql`${t.status} IN ('present','absent','late','excused')`)]);
