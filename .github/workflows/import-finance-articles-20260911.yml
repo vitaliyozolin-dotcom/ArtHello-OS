@@ -39,7 +39,7 @@ jobs:
         env:
           EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
           EXPECTED_ACTOR: vitaliyozolin-dotcom
-          EXPECTED_PARENT: 228d832a22d0fe8cd0089fe7057098ebfc923076
+          EXPECTED_PARENT: 2081da08dbfdb6863d3a6c931dfda0a014c1e814
           EXPECTED_CATALOG_DIGEST: 945a5c824da3c136142ae209456a083e9a926369986ca79077359195a971187f
         run: |
           set -Eeuo pipefail
@@ -51,16 +51,12 @@ jobs:
           test "$(git rev-list --count HEAD^)" -ge 1
           parents="$(git show -s --format=%P HEAD)"
           test "$parents" = "$EXPECTED_PARENT"
-          test "$(git show -s --format=%s HEAD)" = 'D115: import approved finance article catalog'
+          test "$(git show -s --format=%s HEAD)" = 'D117: report guarded finance import result'
           python3 -I - <<'PY'
           import subprocess
           expected = {
-              '.github/scripts/import-finance-articles.py',
-              '.github/scripts/test_import_finance_articles.py',
               '.github/workflows/import-finance-articles-20260911.yml',
-              'docs/finance/article-catalog-2026-09-11.json',
               'docs/acceptance/2026-09-11-finance-article-import.md',
-              'quality-gates/workflow-policy-ratchet.json',
           }
           changed = set(subprocess.check_output(
               ['git', 'diff', '--name-only', 'HEAD^', 'HEAD'], text=True
@@ -127,6 +123,10 @@ jobs:
           test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
           test "$GITHUB_TRIGGERING_ACTOR" = vitaliyozolin-dotcom
           test "$(git rev-parse HEAD)" = "${{ needs.verify.outputs.release_sha }}"
+          set +e
           result="$(python3 -I .github/scripts/import-finance-articles.py)"
-          jq -e '.status == "accepted" and .desired == 144 and .activeVerified == 144 and (.articlesToCreate | type == "number") and (.draftsToApprove | type == "number")' <<<"$result" >/dev/null
+          import_status="$?"
+          set -e
           printf '%s\n' "$result"
+          test "$import_status" -eq 0
+          jq -e '.status == "accepted" and .desired == 144 and .activeVerified == 144 and (.articlesToCreate | type == "number") and (.draftsToApprove | type == "number")' <<<"$result" >/dev/null
