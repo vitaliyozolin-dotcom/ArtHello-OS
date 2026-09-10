@@ -1,4 +1,4 @@
-name: Deploy diary UI consistency D135
+name: Deploy diary UI consistency D136
 
 on:
   pull_request:
@@ -48,7 +48,7 @@ jobs:
          github.event.workflow_run.conclusion == 'success' &&
          github.event.workflow_run.repository.id == github.event.repository.id &&
          github.event.workflow_run.head_repository.id == github.event.repository.id &&
-         startsWith(github.event.workflow_run.head_commit.message, 'D135: discover School container')))
+         startsWith(github.event.workflow_run.head_commit.message, 'D136: resolve School network alias')))
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -131,7 +131,7 @@ jobs:
          github.event.workflow_run.event == 'push' &&
          github.event.workflow_run.head_branch == 'main' &&
          github.event.workflow_run.conclusion == 'success' &&
-         startsWith(github.event.workflow_run.head_commit.message, 'D135: discover School container')))
+         startsWith(github.event.workflow_run.head_commit.message, 'D136: resolve School network alias')))
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -156,7 +156,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.head_sha == github.event.workflow_run.head_commit.id &&
-      startsWith(github.event.workflow_run.head_commit.message, 'D135: discover School container')
+      startsWith(github.event.workflow_run.head_commit.message, 'D136: resolve School network alias')
     needs: [bundle-atlas, verify-school-source]
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru
@@ -193,10 +193,15 @@ jobs:
           test "$(git -C school rev-parse HEAD)" = "$SCHOOL_SOURCE_SHA"
           test "$(git -C school rev-parse HEAD^{tree})" = "$SCHOOL_SOURCE_TREE"
           bash -n controller/deploy/school-curriculum-standalone-cutover.sh
-          mapfile -t school_ids < <(docker ps -q --filter label=school.system=school-1-11)
+          mapfile -t school_ids < <(docker network inspect arthello-os_backend | jq -r '
+            .[0].Containers | to_entries[] |
+            .key' | while IFS= read -r id; do
+              docker inspect "$id" | jq -e '.[0].State.Running == true and any(.[0].NetworkSettings.Networks[]?.Aliases[]?; . == "school-1-11")' >/dev/null && printf '%s\n' "$id"
+            done)
           test "${#school_ids[@]}" -eq 1
           test "$(docker inspect "${school_ids[0]}" --format '{{.State.Running}}')" = true
-          test "$(docker inspect "${school_ids[0]}" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = 54242340f2d9b6a9887d69ecc03520ddf9f7982c
+          school_image="$(docker inspect "${school_ids[0]}" --format '{{.Image}}')"
+          test "$(docker image inspect "$school_image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = 54242340f2d9b6a9887d69ecc03520ddf9f7982c
           school_container="$(docker inspect "${school_ids[0]}" --format '{{.Name}}' | sed 's#^/##')"
           [[ "$school_container" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]
           runtime_node="$(command -v node || true)"

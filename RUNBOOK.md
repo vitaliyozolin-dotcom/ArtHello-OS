@@ -1,5 +1,9 @@
 # ArtHello OS — Runbook
 
+## Diaries D136 — School network identity
+
+- D135 run `34539171120` доказал отсутствие legacy system label до любых мутаций. D136 разрешает School только как единственный running member `arthello-os_backend` с network alias `school-1-11` и image revision `54242340f2d9b6a9887d69ecc03520ddf9f7982c`.
+
 ## Diaries D135 — безопасное обнаружение School container
 
 - D134 run `34537971479` подтвердил source/build, но hard-coded `school-1-11` не является текущим Docker name; остановка произошла до backup/cutover и до Atlas.
