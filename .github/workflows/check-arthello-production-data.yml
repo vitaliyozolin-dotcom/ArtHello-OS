@@ -41,8 +41,8 @@ jobs:
       queue: max
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
-      # Accepted R16: run34461449594 attempt1, candidate/after-public and cleanup PASS.
-      EXPECTED_LIVE_SOURCE_SHA: 'cb990279e070fddbfa9a0adbd21b56de25b85588'
+      # Accepted R17: run34495273615 attempt1, candidate/after-public and cleanup PASS.
+      EXPECTED_LIVE_SOURCE_SHA: 'ff8559254faaedade63a9ee7567a45686d08c13a'
     steps:
       - name: Verify current main before repository execution
         env:

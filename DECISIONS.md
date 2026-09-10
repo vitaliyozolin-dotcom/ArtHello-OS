@@ -1218,3 +1218,7 @@ D111 остановился до application import/cutover: actual producer с�
 ## D113 — Ограничить сбой запуска браузера в обязательном Proof
 
 Actual main Proof34490868754 отказал до проверки страницы: локальный Chrome endpoint9223 недоступен, stderr прежний launcher отбрасывал; точная причина Chrome не доказана. Hosted launcher проверяет собственный CDP endpoint, пишет bounded fixed startup receipt и допускает один повтор только старта до навигации. Все visual assertions/acceptance и production natural-browser guards сохранены. Новый PR416/D113 только после terminal+cleanup старого protected34491463434, exact-head CI/review; no rerun/attempt bypass. Контракт docs/acceptance/2026-09-10-r17-browser-startup-fix.md.
+
+## D114 — Послерелизная сверка статей и банка на R17
+
+Accepted R17 подтверждён actual run34495273615. Закрепить actual source/tree и7pins в существующем D075 consumer; полная цепочка4предшественников, backup/School/current-main/двойные locks/read-only защита сохранены. Проверить реальные bank/financial sums и связи. Runtime/данные/роли/lease/секреты не менять. Контракт docs/acceptance/2026-09-10-r17-finance-observation.md.

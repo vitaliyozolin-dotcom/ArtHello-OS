@@ -1,7 +1,7 @@
-"""D075 read-only proof for the accepted R16 app and its adopted R12 backup reader.
+"""D075 read-only proof for the accepted R17 app and its adopted R12 backup reader.
 
-The filename stays stable because R16 deliberately retains the R14 durable-state
-schema. Release identity is bound to the actual successful R16 receipts.
+The filename stays stable because R17 deliberately retains the R14 durable-state
+schema. Release identity is bound to the actual successful R17 receipts.
 """
 import argparse
 import datetime as dt
@@ -15,22 +15,14 @@ import subprocess
 from types import ModuleType
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_SOURCE = 'cb990279e070fddbfa9a0adbd21b56de25b85588'
-EXPECTED_TREE = '1ce4c733034060dc84d558d49dab96d1be9b1cf8'
-ACCEPTED_PINS = dict(
-    acceptedAttempt='1',
-    candidateContainerId='d012fe547d8e57d13677d921b07d7847219705a4e0202faee3134c328f07c498',
-    contextSha256='a43ac4fa996ffcf18854afc83c3245552fe804e80abb94a25a0fa515cd2a9eef',
-    imageId='sha256:556216a36f878fad5b99bc1e2cca0158ebdcc3f7d2ee23fda191285d4ad4ef44',
-    resourceAttempt='1',
-    runId='34461449594',
-    runtimeFingerprint='e77874370bebb875bab6e661011eccbaee1748e9bc3bb7e7b48b05fc328e6442',
-)
+EXPECTED_SOURCE = 'ff8559254faaedade63a9ee7567a45686d08c13a'
+EXPECTED_TREE = '6aeb7e6879b786a434d12f026f765bcaf9acb5a4'
+ACCEPTED_PINS = {'runId': '34495273615', 'resourceAttempt': '1', 'acceptedAttempt': '1', 'imageId': 'sha256:34402014063a05c81754716f46b3f9059297f1d21d37da7e5f00b1eb8f7fdd46', 'runtimeFingerprint': 'a97c538504d68613ed29d9de1230cf2ab23fc905207d6806d24a35f1d3e79bff', 'candidateContainerId': '9909bd54d31244627477bd60c3b8e7cc6cd84758902943e54eb555206c4a1142', 'contextSha256': '5343207eb2f8f7769b1c2a4d9b56222ffe645eb2cfe2b18a7e7db0269b843215'}
 
 
 def require(value):
     if not value:
-        raise ValueError('READONLY_BLOCKED=accepted_r16_runtime_identity')
+        raise ValueError('READONLY_BLOCKED=accepted_r17_runtime_identity')
 
 
 def checked_module(name, relative, expected):
@@ -43,8 +35,8 @@ def checked_module(name, relative, expected):
     return result
 
 
-boundary = checked_module('d075_r14_boundary', '.github/scripts/r16-resume-candidate.py',
-                          '620060e6463a9048f5dd95f457ba18e421211d3b1b5c03516025dbf70345bbcc')
+boundary = checked_module('d075_r14_boundary', '.github/scripts/r17-resume-candidate.py',
+                          'adbf4a18820006503c29511630379cb19fe872ade99d5dc3050f9b083ed790f1')
 gateway = checked_module('d075_r14_gateway', '.github/scripts/d083-maintenance-route.py',
                          'f669e1889be6f31ddb88fbdb5316a07bdfa9dcd0cae3cf82ae429e7235363276')
 state, controller = boundary.state, boundary.controller
@@ -213,7 +205,7 @@ def main():
     try:
         result = observe(args.expected_release, args.release_state_dir)
     except Exception:
-        raise SystemExit('READONLY_BLOCKED=accepted_r16_runtime_identity') from None
+        raise SystemExit('READONLY_BLOCKED=accepted_r17_runtime_identity') from None
     print(json.dumps(result, separators=(',', ':')))
 
 
