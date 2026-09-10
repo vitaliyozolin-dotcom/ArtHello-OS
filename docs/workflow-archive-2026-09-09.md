@@ -23,6 +23,15 @@ D092 artifact inspector. Для инспектора подтверждён term
 Content/Tasks acceptance остаётся активной, поскольку фактическая visual
 приёмка не завершена.
 
+Четвёртый cleanup-блок после принятого R17 переносит его завершённый controller
+из активного каталога в `deploy/v52/recovery-r18/r17-controller.yml`. Accepted
+run `34495273615` / deploy job `102932695823` завершился успешно, cleanup —
+success; последующий run `34498059829` был skipped. Controller сохранён
+байт-в-байт с SHA-256
+`4cdcd2771994fe8ea11bb731fa1ef5f997da489adfc89e3e78baff271096d659`, а
+R17 source verifier теперь читает архивный путь. Исторический GitHub
+`CONSUMER_PATH` внутри frozen controller не меняется.
+
 | Blob SHA | Путь |
 |---|---|
 | `46ce4c5ed22c88a692f565e91dc8112e400bdff6` | `.github/workflows/d060-tochka-production-hotfix-v2.yml` |

@@ -1222,3 +1222,7 @@ Actual main Proof34490868754 отказал до проверки страниц
 ## D114 — Послерелизная сверка статей и банка на R17
 
 Accepted R17 подтверждён actual run34495273615. Закрепить actual source/tree и7pins в существующем D075 consumer; полная цепочка4предшественников, backup/School/current-main/двойные locks/read-only защита сохранены. Проверить реальные bank/financial sums и связи. Runtime/данные/роли/lease/секреты не менять. Контракт docs/acceptance/2026-09-10-r17-finance-observation.md.
+
+## D116 — Архивировать завершённый R17 controller
+
+R17 принят actual run `34495273615` / deploy job `102932695823`, cleanup success; D075 закрепил послерелизную read-only сверку, а последующий controller run `34498059829` завершился skipped. Датированный production controller больше не является постоянным CD и переносится байт-в-байт из `.github/workflows` в `deploy/v52/recovery-r18/r17-controller.yml` с SHA-256 `4cdcd2771994fe8ea11bb731fa1ef5f997da489adfc89e3e78baff271096d659`. R17 verifier и его pins переводятся на архивный путь; исторический `CONSUMER_PATH` принятого run не переписывается. Параллельный D115 добавил отдельный approved-catalog importer, поэтому активный workflow ratchet после удаления R17 снижается с 15 до 14. Нового deploy, изменения production или ослабления recovery contracts это решение не разрешает.
