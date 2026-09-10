@@ -32,7 +32,7 @@ ARCHIVED_PATHS = (
 # are substituted in a private fixture. Unlisted frozen helper drift is refused.
 CURRENT_PINS = {
     "deploy/v52/Dockerfile": "90f0f3b76e02b14163038711a49c24fc08bc5bb4e1622e53ae773c16e92d3930",
-    "deploy/school-source-manifest.json": "37d2d31c5feaee2c3228c427c99cbb9422db8da5c61b84c27a64458be540eecf",
+    "deploy/school-source-manifest.json": "6cdd08eb0a330836889096e207858314a1a5dfd53b0153210aed0e2fabc9c6bc",
     "scripts/verify-school-source.mjs": "9a2b5d18ef74d5e87840ec4c4c7754bcd9e7f22b7c69cd05d96f5012d17862d5",
     "scripts/test/tochka-account-identity.test.mjs": "f1857eea31cc55372a69d35c29784dc0c1e6a87667c53297fe4f6f8c61e1f3e4",
 }
