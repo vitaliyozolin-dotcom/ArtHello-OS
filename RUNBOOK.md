@@ -1,5 +1,12 @@
 # ArtHello OS — Runbook
 
+## Atlas D122 — первый выпуск
+
+- Публичный кандидат: `https://atlas-188-225-38-55.sslip.io`; central: `https://arthello-188-225-38-55.sslip.io`; School `1–11` должен оставаться healthy.
+- Запуск разрешён только squash-коммитом с prefix `D122: guarded Atlas activation` после exact-head CI. Не запускать Atlas workflow вручную и не обходить `production-ru`.
+- Успех требует artifact receipt, central/School/Atlas health и `303 location: https://atlas-188-225-38-55.sslip.io/auth/central/start`. Это не заменяет natural browser/login/mobile acceptance.
+- При terminal failure читать bounded deploy log и проверять, что исходный central снова running, route восстановлен, а `atlas-school-diary` не опубликован. Не удалять остановленный predecessor или Caddy recovery route до отдельной послерелизной приёмки.
+
 ## A.4: изолированный импорт данных
 
 Sandbox DB обязана находиться по абсолютному пути вне source checkout. Единственная переменная пути — `ARTHELLO_SANDBOX_DB_PATH`; команда завершится fail closed при пустом, относительном, корневом или вложенном в репозиторий пути.
@@ -223,7 +230,6 @@ Production backup пока не выполнялся: доступ отсутс�
 
 Уточнение идентичности 2026-09-09: пока кандидат PR377 проходил проверки, main обновился с 582edaf1a66a953edb2d61e03040d1a13e70a0ad до 59372b139fb0b2345cf3e41fc23c8223099b187f (checked PostgreSQL migrations), заняв D-080. Решению этого выпуска присвоен следующий свободный номер D-081. Технические имена файлов d080-*, схемы и маркеры ARTHELLO_D080 сохранены как неизменённые идентификаторы проверенного протокола; они относятся к D-081 и не запускают миграции PostgreSQL. Префикс активации нового выпуска — D081: guarded R9. Все изменения другого участника сохранены; R9 собирает отдельный v52 runtime с D1 и не выполняет deploy/api-entrypoint.sh или SQL0018.
 
-
 ## D084 — R10 и штатный домен общего шлюза
 
 R10/PR379 продолжает D081 только после доказанного pre-auth abort R9 и D083 read-only причины. Frozen R9 не перевзводить. Перед маршрутизацией получить private gateway evidence из конкретного Caddy; не подставлять домен в реальный Caddyfile. Этот файл привязан к durable context/receipt, его нельзя пересоздавать для обхода отказа. При смене gateway ID/image/domain/main config продолжение блокируется.
@@ -232,13 +238,11 @@ R10/PR379 продолжает D081 только после доказанног
 
 Сохранены полный runtime/route/hash/backup/current-main gates и порядок maintenance → real candidate browser → public → повторный browser. Если same-source R10 остановился после auth с проверенным maintenance hold и до public/bank activation, разрешён только предусмотренный controller rerun failed jobs с новой проверкой всех evidence. Неизвестный исход или public boundary требуют отдельного проверенного forward-fix с текущей БД; snapshot restore и подмена receipt запрещены. Результат не считать готовым до всей исходной бизнес-приёмки.
 
-
 ## D085 / R11: продолжение после pre-auth cleanup failure R10
 
 Run34322039891/job102371510204 остановился после Caddy134 PASS и ARTHELLO_TARGET_CADDY_FIXTURE=VERIFIED на удалении test-fixtures. Не повторять R10 как новый кандидат и не считать fixture PASS выпуском. В R11 используется новый helper, который перед удалением возвращает право записи только собственным обычным каталогам текущего fixture; частичная подготовка допускается, подмена/symlink запрещены.
 
 R11 PR380/префикс `D085: guarded R11`/parent2e57dd22 запускается после exact CI с дополнительным d085-candidate-tests. Frozen R10/R9/V52 и D083 state/browser/backup/public протоколы не редактируются. Новый guard доказывает полный R10 pre-auth abort; fresh capacity и прежний точный R9 retirement остаются, удаление иных образов не добавляется. Изменять main во время protected run нельзя. При held-candidate resume действуют все прежние identity/runtime/route/backup проверки; после auth/public rollback snapshot не допускается. Результат принимать только по реальным evidence шагов; все исходные бизнес-проверки вести отдельно.
-
 
 ## D086 / R12: ёмкость после R11 pre-import abort
 
@@ -259,7 +263,6 @@ R11 run34324235442/job102378379405 завершился insufficient_import_spac
 7. Интерпретировать счётчики по фактическому периоду `2026-09-01`…UTC-дата наблюдения. `accountsWithContainingStatementInLatestRun` показывает включение периода последней готовой выпиской, но не заменяет точное окно и совпадение количества операций. Четыре содержащие выписки сами по себе не дают `checksComplete`. Production launcher не передаёт `syncNotBefore`; `freshness=not_requested` оставляет fresh-resync proof открытым. Суммы, ДДС, банковская полнота и финансовое соответствие не проверяются.
 8. После отчёта дополнить acceptance note и PR evidence index действительными source/run/time/counts и следующим проверяемым шагом. Продолжить отдельную сверку денег/ДДС и остальные исходные бизнес-сценарии в их разрешённых границах. Браузерный PASS, выборочный AlfaCRM, обращения, роли и manual/automatic backup доказательства учитывать раздельно по фактическим результатам.
 
-
 ## D088 — Различить замечания данных и отказ probe
 
 D087run34328837388/job102392362747 получил valid incomplete_or_issues snapshot с4счетами/12statement records/0операций иpending sync, но launcher послеexit2 пропустил повторный observer. Не называть это подтверждённым timeout или ошибкой банка. D088 сохраняет diagnosticExitCode2 для замечаний, проверяет ограниченный JSON, затем завершает финальную сверку consumers для валидных complete/incomplete отчётов. Data issues не становятся зелёным финансовым PASS.
@@ -267,7 +270,6 @@ D087run34328837388/job102392362747 получил valid incomplete_or_issues sna
 Новый schedule/retained-job metadata section читается только из сохранённого canonical D1; dates/status/counts не содержат IDs/credentials/денежных значений. Различать actual bank_statement_imports status и retained-job providerStatus:not_stored; scopeMatch:unverified не трактовать как current-scope. Setup/nextAt/lease и latestsync timestamp помогают определить, чего ждёт уже установленный scheduler. Не выполнять банковские запросы или resync в этом read-only job.
 
 Запуск — прежний owner-controlled merge с D075: read-only production data prefix после exactCI; source checkout диагностики отличается от acceptedlive77f. Environment/locks/mounts/deadlines/Quality остаются прежними. После terminal outcome сохранить весь валидный ограниченный отчёт, фиксированный READONLY_RESULT, marker финальной сверки и exitcode. Приincomplete продолжать по фактам, приblocked сначала выяснять конкретное ограничение. Main не менять во время protected observation. См.DECISIONS D088; visuals вынесены в отдельное D089 и не смешаны с этим изменением.
-
 
 ## D089 — Визуальная проверка Content/Tasks принятого образа
 
@@ -277,7 +279,6 @@ Runtime отдельно закреплён за accepted R12 source77f26ec9/tre
 
 Проверить реальное отображение, отсутствие обрезки/переполнения и Task «Задача №801» в двух размерах. Результат относится к принятому image snapshot и синтетическим данным. Form persistence, backend content generation, delivery/права и банковская приёмка остаются отдельными доказательствами. Подробные пути, artifact checksum и ограничения — deploy/v52/visual/CONTENT_TASKS_HOSTED.md и DECISIONS D089.
 
-
 ## D090 — CSRF-запросы мастера AlfaCRM
 
 Переносить после D089 на актуальный main, сохраняя полную историю D088/D089. Code/test scope — одна строка `deploy/v52/overrides/app/components/AlfaCrmSetupWizard.tsx` и новый `deploy/v52/overrides/tests/alfacrm-csrf-contract.test.mjs`. Серверный auth не изменять; не добавлять приём legacy header/cookie и не включать импорт.
@@ -286,13 +287,11 @@ Runtime отдельно закреплён за accepted R12 source77f26ec9/tre
 
 После проверенного выпуска наблюдать обычный запрос мастера через настоящую сессию, не подменяя UI ручным добавлением токена. Проверить принятие корректной CSRF-пары и сохранение остальных отказов. Отдельно учитывать connected/importEnabled и разрешения; открытие wizard может создавать lazy schema, preview пишет state/audit, import пишет данные. Эти действия не являются read-only диагностикой и не выполнялись в D090 preparation. Направление финансовых операций и import-enable gate не меняются; успешный CSRF не объявлять приёмкой upstream или импорта. Evidence — acceptance note `docs/acceptance/2026-09-09-d090-alfacrm-csrf.md`.
 
-
 ## D091 — Различить сохранённые результаты scheduler
 
 После D088 читать дополнительно autosync.httpStatus/httpStatusState/updatedAtUtc. Выводить только целый HTTP-код 100–599 или null и фиксированный статус качества поля. Это сохранённый результат callback scheduler, а не доказанный HTTP-ответ банка. В частности, 500 может обозначать исключение на любом этапе до возвращения ответа. Не читать и не печатать произвольный connection config или исключения.
 
 Запускать прежним D075 merge prefix после review и CI; main сохранять неизменным до terminal protected outcome. Accepted live по-прежнему 77f26ec9. Записать source/run/job, валидный bounded JSON, READONLY_RESULT и READONLY_FINISHED. Exit 2 при incomplete_or_issues означает завершённое наблюдение с замечаниями. Не выполнять принудительный resync в диагностике. D088 facts: две ошибки, следующая попытка 09:01:16.902Z, операции отсутствуют; D091 пока не имеет фактического результата.
-
 
 ## D092 — Собрать читаемый hosted browser context
 
@@ -304,7 +303,6 @@ Runtime отдельно закреплён за accepted R12 source77f26ec9/tre
 
 После review и требуемого exact-source CI использовать прежний технический prefix `D089: hosted Content Tasks visual` и прежние owner/main условия. Main не менять до terminal outcome активного protected банковского job. D092 не требует нового production release: application source остаётся accepted R12 `77f26ec9` / tree `ac3fcaac` / producer `34326274447`. Следующий критерий — успешный hosted smoke, затем полный scoped run с 14 PNG, manifest/scoped-result/evidence и просмотром изображений. До этого visual status — failure/not accepted; live content, persistence, numbering rules и банковская полнота не доказаны. Подробный scope — DECISIONS D092 и `docs/acceptance/2026-09-09-d092-browser-assembly.md`.
 
-
 ## D093 — Собственные обращения и backup denial через настоящую сессию
 
 После D092 main `b4c39d5af8ab348882759c48c0f82dbe810a8065` использовать отдельный `check-arthello-employee-controls.yml` с prefix `D093: employee controls`. Перед публикацией сверить точный manifest и четыре документа. Канонические D076 workflow/flow/smoke/test должны byte-for-byte совпадать с базой: R8/R9 recovery contracts сравнивают bundle с этими bytes. Первоначальный PR387 прошёл собственный browser fixture, но не frozen contracts; новый standalone source должен пройти все CI. Сохранить owner/Quality/main, production-ru, gateway/School locks, точный checkout, sandbox, единственный обычный login и текущую сетевую политику. Требуются hosted policy/retirement tests и настоящий image/UID1000/Chromium smoke. Локальные 74 browser/retirement/canonical PASS и reviews не являются live evidence.
@@ -313,30 +311,25 @@ Runtime отдельно закреплён за accepted R12 source77f26ec9/tre
 
 Перед download/import новый workflow выполняет только fixed R12 browser retirement с размерами нового bundle; канонический D076/R8 workflow не меняется. При отсутствии fixed ID/tag пропустить удаление; при наличии требовать свежие identity, unused и recoverable-artifact проверки, удалить только immutable browser ID без force/prune и повторно измерить capacity. Не удалять app/containers/volumes и не ослаблять guard при истёкшем artifact или нехватке места. Current main держать неизменным до terminal result и финального current-browser cleanup. Зафиксировать source/tree/run/job и проверяемый bounded JSON. Если smoke, identity, result или cleanup не подтверждены, оставить этап незавершённым. Контракт — DECISIONS D093 и `docs/acceptance/2026-09-09-d093-employee-controls.md`.
 
-
 ## D094 — Наблюдать этап банковского сбоя
 
 После включения четырёх D094 application/test overlays в новый verified release дождаться обычного scheduler tick по сохранённому расписанию. Не обходить backoff, не менять selected scope/даты, не вызывать service capability вручную и не выдавать наблюдение за resync. D094 в main сам по себе не меняет live R12.
 
 D075 fixed report дополнительно читает autosync.failureStage/failureStageState. При missing этап неизвестен (в том числе старый runtime); при invalid значение не выводится; observed допустим только для outcome=error и одного из 11 закреплённых имён. Сопоставлять его с accepted app source/image, updatedAtUtc и завершённым read-only отчётом. HTTP500 означает сохранённый callback status, а не доказанный ответ банка. Сохранять прежние checksComplete, exit2, оба consumer observations, canonical D1 identity и отсутствие raw financial/credential data. Причину исправлять после фактического результата; ноль operations и исторические READY imports не объявлять полноценной загрузкой.
 
-
 ## D095 — Проверить формат номера задачи
 
 После нового выпуска проверить единый `Задача №0001`/`№0801` в очереди, карточке и drawer, сохранив открытие того же raw ID. До нового runtime фиксировать статус prepared, не live PASS. Старый D089 visual adapter работает с accepted R12 source77f и literal№801; новый padded visual expectation требует нового закреплённого artifact/runtime. Модуль10000 и поиск по raw ID не меняются и не объявляются исправленными.
 
-
 ### D092 — Диагностика уже сохранённого visual artifact
 
 После D092 smoke PASS / scoped BLOCKED читать existing artifact10096640452 через новый owner push-main workflow с prefix `D092: inspect existing visual evidence`. Сначала exact current head и fixed unexpired producer/artifact metadata, затем ordinary GET и frozen ZIP reader. PR только проверяет исходники; никаких production permissions или UI rerun. Результат даёт ограниченный stage/result/completedCaptures/archive PNG count; произвольная ошибка и содержимое PNG не выводятся. Проверка receipt не равна визуальному просмотру или полной UI приёмке. Полный контракт — READ_EXISTING_EVIDENCE.md. При отказе identity/digest/схемы оставить stage неизвестным и не ослаблять границы.
-
 
 ### D092 — Исправить неполную модель прав в synthetic workflow fixtures
 
 Existing receipt прочитан в run34337932856: tasks-empty-390x844,2 capture records,4 PNG entries; изображения не просмотрены. Scoped adapter дополняет verified frozen overview/detail fixtures точным permission shape synthetic OWNER. Полный harness, UI assertions, old R12 runtime pin и №801 остаются прежними.
 
 После exact-source CI и независимого review использовать существующий технический prefix `D089: hosted Content Tasks visual` для одного обусловленного исправлением hosted запуска. Не менять main до результата. Фиксировать реальный completed stage/PNG inventory/task-number assertion; screenshot inspection и save persistence отмечать отдельно. Если вновь BLOCKED, читать конкретный новый receipt и не ослаблять проверку. Полный контракт и ограничения — docs/acceptance/2026-09-09-d092-workflow-fixture.md.
-
 
 ## D096 — Продолжение после работающего R12
 
@@ -346,7 +339,6 @@ Existing receipt прочитан в run34337932856: tasks-empty-390x844,2 captu
 
 Candidate и after browser проходят через новый expected-ID wrapper вокруг неизменённого natural browser harness. New RELEASE_SHA остаётся новым source; accepted77f используется только в fresh baseline. Actual result и image/source/container identity сохранять как bounded receipts, без diary content, password, callback URL или raw financial errors. После R13 дождаться обычного банковского запуска и читать D094 stage только при новом observed error; не форсировать backoff/leases. Отчёт о выпуске отдельно указывает опубликованную версию и незавершённые бизнес-критерии.
 
-
 ## D075 — Read-only наблюдение после принятого R13
 
 Accepted live-source pin — `f5fa3e46e3510e6fc98ae4455f4b499c0ba30695`, tree `3f49b1b7c0e3ed6dfdaaafbccc071386c9b5edde`: protected run `34340461537` / attempt `1`, deploy job `102430586207` завершён SUCCESS в `2026-09-09T10:35:58Z`. Candidate natural acceptance — `10:35:33.120Z`, after-public — `10:35:51.449Z`. Новый consumer proof закрепляет actual run/resource attempt/accepted attempt, image/fingerprint, candidate ID и context SHA256 из принятого receipt. Это release evidence; нового D075 наблюдения ещё нет. Новое D-решение в этой технической подготовке не назначено.
@@ -355,7 +347,6 @@ Accepted live-source pin — `f5fa3e46e3510e6fc98ae4455f4b499c0ba30695`, tree `3
 
 После независимого review окончательных pins и CI использовать прежний merge prefix `D075: read-only production data`; main сохранять неизменным до terminal protected outcome. Зафиксировать diagnostic source/run/job, accepted R13 proof, autosync nextAtUtc/leaseState/updatedAtUtc/outcome/httpStatus/failureStage и качество полей, bounded financial coverage и READONLY_RESULT/READONLY_FINISHED. Сохранённый backoff, включая возможные два часа, не сбрасывать; ждать обычный scheduler tick. HTTP500 остаётся сохранённым callback status, а не доказанным ответом банка. Exit 2 при incomplete_or_issues — завершённое наблюдение с замечаниями, не полная банковская приёмка. Никаких retry, resync, SQL-записей, quiesce/restore, сообщений или денежных действий.
 
-
 ## D098 — Выпустить исправление Точки после принятого R13
 
 PR398: `codex/arthello-r14-20260909`, parent `e74e41d9b6d49f8854e8ad50b0cffc0a6b2cde80`, технический merge prefix `D098: guarded R14`. Перед merge проверить exact-head Quality, Proof, v52 и три jobs R14 (архивные R12/R13 contracts плюс текущий R14). Во время protected run сохранять main до terminal result и cleanup.
@@ -363,8 +354,6 @@ PR398: `codex/arthello-r14-20260909`, parent `e74e41d9b6d49f8854e8ad50b0cffc0a6b
 Проверить fresh R13 live baseline и исторический run34340461537 отдельно; сохранить R12 backup worker, receipts и историю. Два остановленных predecessors допустимы только с точной отдельной provenance каждого. Пройти capacity, recoverable exact-browser retirement, свежий snapshot/adoption, natural candidate и after-public acceptance. При неоднозначном seal/auth/public boundary не восстанавливать старые данные. Account-scoped unique index после отката кода не сужать; новый R13 IF NOT EXISTS его не заменяет.
 
 После фактического выпуска закрепить новые source/tree/image/run/job/container и public context для read-only D075. До этого old R13 diagnostic не является наблюдением R14. Дождаться обычного банковского запуска по сохранённому nextAtUtc, не сбрасывать backoff и не вызывать service key вручную. Проверить четыре выбранных счёта, период с 2026-09-01, bank/finance counts, суммы, отсутствие дубликатов и broken links; при error разрешён только фиксированный commitFailureKind без exception text. До этих доказательств задача Точки остаётся открытой.
-
-
 
 ## D101 — Порядок нового R15 после остановленного R14
 
@@ -376,13 +365,11 @@ Retirement касается только unused R14 browser image `sha256:19a867
 
 Фактический successful R15 фиксировать source/tree/run/resourceAttempt/acceptedAttempt/image/fingerprint/container/context, candidate/after-public, School/backup. Лишь после этого адаптировать и закрепить actual pins в PR399, выполнить final review/CI, затем D075 текущим защищённым read-only путём. Bank nextAtUtc не сбрасывать. Завершение — четыре счёта, полное окно с 01.09, реальные операции и копеечная сверка ДДС без дублей/потерь/общих связей. CI и выпуск не заменяют эту приёмку.
 
-
 ### D101 — Обязательный squash после отказа первого R15
 
 Актуальное продолжение — PR405, branch `codex/tochka-r15-squash-fix-20260910`, parent `bd3553187c6adcda3e0be1586b25c9c3b61dc3de`, prefix `D101: guarded Tochka R15`. После final SHA/tree/diff review и exact-head Quality/Proof/V52/четырёх continuation jobs объединять только с `merge_method: squash` и `expected_head_sha` окончательного head. Обычный merge с двумя parents не соответствует неизменённому provenance gate. Сразу после merge свежо проверить verified signature, ровно одного parent (указанный SHA), точное reviewed tree и actual current main. Сохранить main до terminal нового protected run/cleanup.
 
 Первый R15 run34443217193 attempt1 terminal failure06:00:42Z: identity/history PASS, provenance отказ до checkout/import/cutover, cleanup PASS. Fresh commit metadata signature=true, parents=2; исходный jq gate требует parents=1. Не повторять этот source/run, не переписывать историю и не менять gate ради двух-parent commit. Новый PR добавляет явный mergeMethod=squash и регрессию на actual public commit metadata; synthetic допустимая форма не является production receipt. Все data/backup/School/auth/capacity boundaries прежние. Банковская приёмка остаётся открытой.
-
 
 ## D102 — Read-only сверка принятого R15 и банковских сумм
 
@@ -397,6 +384,7 @@ Accepted runtime: source `4a0713b4a7d87f132e49836fe0ce9ca9258bc1ec`, tree `ac0ec
 Для нового manual error использовать actual D075 08:53:54.807Z и latestRun 08:35:08.056Z; старый scheduler error не выдавать за новый. Generic message плюс retainedJobs4→3 поддерживают гипотезу 404/410, но не дают точного HTTP или срока хранения Точки. В D103 подготовлен bounded recovery: один replacement только сохранённой ссылки после фактического 404/410, под той же statement lease, с тем же окном и scope. Не сбрасывать pending state SQL-записью и не обходить backoff. Непосредственный вызов банка по service-key запрещён; штатная owner UI-кнопка разрешена прежним поручением.
 
 Перед публикацией source fix: exact-head review/Quality/Proof/V52, current canonical source и R12/R13/R14/R15 historical contracts. R15 source-pins/controller не менять и старый run не повторять. Новый guarded release adapter должен принять actual R15 predecessor и сохранить backup/history/School/snapshot/auth/identity/capacity/public boundary. Пока такого accepted release нет, live остаётся R15. Затем ordinary manual/scheduler sync и bounded D075 по реальным банковским суммам. Подготовленные unit tests не заменяют business acceptance.
+
 ## D104 — Выпуск R16 после ручной ошибки Точки
 
 PR408 закреплён на D103 parent `422f32e52b38a8a5b6b942c4ea9d1cef71e15d05`; использовать только squash и prefix `D104: guarded Tochka R16`. До merge проверить окончательные SHA/tree/diff, полный source contract (97 inputs, 31 transforms), exact-head attempt1 Quality/Proof/V52 и все пять continuation jobs. Проверить отсутствие конкурирующих protected runs, затем actual GitHub signed commit, ровно одного parent, tree и fresh main. Держать main неизменным до terminal protected R16 и cleanup; старые R13/R14/R15 runs не перезапускать.
@@ -404,6 +392,7 @@ PR408 закреплён на D103 parent `422f32e52b38a8a5b6b942c4ea9d1cef71e15
 История actual R15 run34445017241, accepted runtime/context, backup R12 и School проверяются до нового cutover. Архив R15 controller и старые helpers/pins сохраняются. Новый history-chain validator добавляет только доказанный R13 predecessor между actual R15 и прежней R12 цепочкой. Любой identity/context/state/mount drift останавливает установку. Retirement касается только точного unused recoverable R15 browser image; отсутствие image не заменяет capacity gate. Ни lock bypass, ни восстановление БД после seal/auth/public boundary не разрешены.
 
 После successful release сохранить actual source/tree/run/resourceAttempt/acceptedAttempt/image/runtime/container/context, candidate и after-public acceptance, healthy backup/history и School. Затем адаптировать существующий D075 read-only consumer к этому actual runtime, review/CI/squash с техническим prefix `D075: read-only production data`, frozen main до terminal report. Обычный owner UI manual sync уже разрешён; не создавать sessions/roles/service-key calls и не менять scheduler state/lease/backoff вручную. Если новая обычная попытка дала ошибку, разбирать только фиксированные failureStage/failureKind/commitFailureKind и bounded facts. UI toast не доказывает точный HTTP и не требует автоматически менять ключ.
+
 ## D105 — Прочитать банк на фактически принятом R16
 
 Сначала получить terminal success нового protected R16 с complete job graph, candidate/after-public receipts и cleanup. Сверить source/tree/run/resourceAttempt/acceptedAttempt/image/runtimeFingerprint/container/context, retained healthy R12 backup/history и School. Только actual pins закрепляются в D075 consumer; None, fixtures или старые R15 receipts не допускаются. Проверить полный diff, новые 36 consumer tests и прежние 25 launcher/51 aggregate tests, exact-head Quality/Proof/V52/continuation/diagnostic. Публиковать squash с prefix `D075: read-only production data`, держать main неизменным до terminal отчёта. Existing environment и обе блокировки обязательны.

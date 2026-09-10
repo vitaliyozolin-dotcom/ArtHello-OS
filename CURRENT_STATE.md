@@ -1,5 +1,6 @@
 # ArtHello OS — Current State
 
+- D-122 готовит первый защищённый запуск отдельного дневника «Атласа» на `https://atlas-188-225-38-55.sslip.io`. Read-only runs `34517280798` и `34518569941` доказали: central healthy и единственный, но Atlas secret/env/container/volumes/route отсутствуют; живой central — accepted D113 source `ff8559254faaedade63a9ee7567a45686d08c13a`, image `sha256:34402014063a05c81754716f46b3f9059297f1d21d37da7e5f00b1eb8f7fdd46`. Кандидат D-122 ещё не принят: до CI, merge, protected receipt и публичных health/SSO проверок production остаётся без Atlas.
 - D-120 консолидирует hosted bounded production diagnostic в основной Quality: четыре Python recovery contracts стали частью `test:full`, а уже усыновлённые Node tests больше не запускаются повторно отдельными командами. Последний standalone diagnostic run `34497446356` был SUCCESS; workflow архивирован с blob/SHA-256 provenance, активный ratchet снижен с 14 до 13. Тестовая стратегия отделяет behavioral tests от структурных policy assertions и frozen recovery contracts; проверка запуска lint переведена с regex текста workflow на YAML structure.
 - D-119 усыновляет полный `scripts/test/*.test.mjs` как последовательный legacy CI suite; локальная инвентаризация дала 374 PASS и один fixture-зависимый migration-twin test, который теперь явно skip без report и по-прежнему исполняется PostgreSQL gate. Coverage расширен вторым фактически измеренным scope `visual-browser-startup` (100% lines, 78.69% branches, 90% functions; ratchet 100/78/90).
 - PostgreSQL backup теперь пишет `.partial`, проверяет custom archive через `pg_restore --list`, атомарно публикует dump/checksum и после отдельной ошибки повторяет попытку вместо смерти контейнера. Manual v44 Git fallback больше не использует TOFU. Off-host/alerts/RPO/RTO остаются не подтверждены: провайдер, destination и целевые значения владельцем не заданы.
@@ -371,20 +372,17 @@ Unit/source regression suite проверяет эти ветки без product
 
 Кодовая база реальна и содержит значительный функциональный фундамент. Реальный payroll source прошёл изолированный импорт и контрольные сверки, но формулы и identities ещё требуют ручного утверждения. Owner-only sanitized Sites checkpoint можно проверять без production-данных; production/Replit и detailed live-data gate остаётся `BLOCKED`. Свежие количества AlfaCRM, фактическая карта филиалов/юрлиц, банковские счета и операции не подтверждены. Поэтому ДДС, ОПиУ, финансовая модель и AI CFO не могут открываться до закрытия HIGH, full Alfa import, read-only bank OAuth и нового Reviewer/Coordinator gate.
 
-
 ## 2026-09-10 — D100 source исправлен; D101/R15 подготовлен
 
 PR403 объединён: `9862a6e863d4d791c00ddeaba9480154ad5b8c4d`, tree `7a08a2e88e8ea45c2ef1e9631f62ba5c612d6034`. Exact PR head `1912996e925cbf5c26ff7d2e2f789c8bcc6e1657` прошёл Quality34440928812, Proof34440928740, V5234440928818 и R14/R13/R1234440928953. Чужая materialization сохранена; bank tests и historical source checks восстановлены. Это исходники, не новый live.
 
 R15 готовится в PR404 поверх этой базы: pinned R14-to-R15 transformation, bounded verified artifact delivery и exact unused R14 browser retirement. Protected R15 ещё не выполнен. Старый R14 run34391105865 attempt2 terminal failure до cutover; cleanup success. Accepted live остаётся R13, новый D075 не получен, реальные банковские операции и суммы не приняты. PR399 остаётся draft/UNBOUND. Следующий шаг — окончательный review/CI PR404, штатный guarded release и затем реальные bank/DDS receipts.
 
-
 ## 2026-09-10 06:00Z — Первый R15 остановлен до установки; исправление в PR405
 
 R15 run34443217193 attempt1 / deploy102762766189 завершился failure на provenance после successful accepted-R13 history. Checkout, image downloads/import, snapshot, cutover и after-public SKIPPED; обе cleanup SUCCESS. Current main `bd3553187c6adcda3e0be1586b25c9c3b61dc3de` подписан GitHub, но имеет два parents; неизменённый gate требует один. Причина — выбранный Codex обычный merge PR404 вместо необходимого squash. Все основные CI на этом main PASS; они не являются установленным выпуском.
 
 Новый PR405 (`codex/tochka-r15-squash-fix-20260910`) сохраняет guard и фиксирует squash в publication contract. Локально actual-metadata jq regression и 12 contract +23 history tests PASS; exact-head CI/final review ожидаются. Старый R15 source/run нельзя повторять. App/data/backup/School не менялись этим failed запуском. Accepted baseline остаётся R13; PR399 UNBOUND, новые bank/DDS числа не получены.
-
 
 ### D101 — Устранить случайное ложное срабатывание банковского теста
 
@@ -395,7 +393,6 @@ Exact-head V52 run34443910215/job102764455280 остановился 2026-09-10T
 ## 10.09.2026 — новый этап статей, кандидат D108
 
 После поручения владельца начата отдельная ветка статей и ручного разнесения от actual main `1bfe6634bf1a0e90ae20c64cbf428d9cd3358549`. Действующий runtime и банковские данные не изменялись этим этапом. Конкретные статьи не утверждены и не назначены. Контракт/ограничения: `docs/acceptance/2026-09-10-finance-articles.md`; production acceptance отсутствует.
-
 
 ## Дневник Атласа — D109, подготовка выпуска 10.09.2026
 
