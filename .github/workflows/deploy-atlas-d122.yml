@@ -46,7 +46,8 @@ jobs:
          (startsWith(github.event.workflow_run.head_commit.message, 'D122: guarded Atlas activation') ||
           startsWith(github.event.workflow_run.head_commit.message, 'D125: Atlas image tag compatibility') ||
           startsWith(github.event.workflow_run.head_commit.message, 'D126: clear stale Atlas image tag') ||
-          startsWith(github.event.workflow_run.head_commit.message, 'D127: portable Atlas image receipt')))
+          startsWith(github.event.workflow_run.head_commit.message, 'D127: portable Atlas image receipt') ||
+          startsWith(github.event.workflow_run.head_commit.message, 'D128: fix Atlas route snapshot mode')))
       )
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -140,7 +141,8 @@ jobs:
       (startsWith(github.event.workflow_run.head_commit.message, 'D122: guarded Atlas activation') ||
        startsWith(github.event.workflow_run.head_commit.message, 'D125: Atlas image tag compatibility') ||
        startsWith(github.event.workflow_run.head_commit.message, 'D126: clear stale Atlas image tag') ||
-       startsWith(github.event.workflow_run.head_commit.message, 'D127: portable Atlas image receipt'))
+       startsWith(github.event.workflow_run.head_commit.message, 'D127: portable Atlas image receipt') ||
+       startsWith(github.event.workflow_run.head_commit.message, 'D128: fix Atlas route snapshot mode'))
     needs: bundle
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru

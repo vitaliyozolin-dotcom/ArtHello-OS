@@ -585,3 +585,9 @@ D126 разрешает удалить только tag `atlas-diary:<exact-sour
 D126 run `34524982542`, deploy job `103032229379`, после удаления старого tag и загрузки точного проверенного архива доказал cross-daemon rewrite: builder image ID `sha256:3bc9ae0d594b513b83ccb83fb465f2e041824400ab672bf791c8ffa0d90c5e20`, gateway image ID `sha256:70466bbc95a05718c8a4e77cf4e1ca5d7f7efcb475c50e0af26dd23f448fad88`. Run остановился до Atlas volumes/containers и Caddy.
 
 Daemon-local image ID не является переносимой границей между версиями Docker. D127 оставляет builder ID в signed receipt, проверяет байт-в-байт SHA-256 загруженного `atlas-image.tar.gz`, предварительно удаляет неиспользуемый tag, затем требует точные `org.opencontainers.image.revision` и `org.opencontainers.image.source-tree` на загруженном tag. Итоговый production receipt обязан сохранить archive SHA-256, source/tree и оба daemon-local image ID. Остальные D122/D126 границы неизменны. Новый protected запуск разрешён только свежим squash main с prefix `D127: portable Atlas image receipt` после exact-head CI.
+
+## D128 — Исправить режим локальных снимков Caddy (2026-09-10, кандидат)
+
+D127 run `34526464994`, deploy job `103037110088`, прошёл переносимую image provenance, затем `d083-maintenance-route.py observe-gateway` отказал до создания Atlas volumes/containers и до Caddy mutation. Код parser требует owner-only regular input files mode `0600`; `docker cp` сохранил иной режим, а Atlas-контроллер в отличие от принятых v52-контроллеров не выполнил последующий `chmod`.
+
+D128 разрешает только выставить `0600` на временных локальных копиях `external-routes.caddy` и `Caddyfile` непосредственно перед неизменным fail-closed parser. Содержимое файлов, gateway и route этим не меняются. Остальные D122/D127 границы неизменны. Новый protected запуск разрешён только свежим squash main с prefix `D128: fix Atlas route snapshot mode` после exact-head CI.

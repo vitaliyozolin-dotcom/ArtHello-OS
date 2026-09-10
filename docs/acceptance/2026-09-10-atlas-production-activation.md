@@ -2,7 +2,7 @@
 
 Статус: кандидат, не принят.
 
-Первые protected runs остановились после успешных artifact checksums и до container/Caddy mutation. D126 run `34524982542/103032229379` доказал, что разные Docker daemons дают разные local image IDs одному проверенному archive (`3bc9ae0d...` на builder, `70466bbc...` на gateway). D127 проверяет точный archive SHA-256 и source/tree labels, а оба local IDs записывает в production receipt; остальные ворота неизменны.
+Первые protected runs остановились до container/Caddy mutation. D126 доказал cross-daemon image-ID rewrite; D127 run `34526464994/103037110088` прошёл portable archive/source/tree provenance и выявил отсутствующий обязательный `0600` на локальных снимках Caddy после `docker cp`. D128 выставляет режим до защитного parse; остальные ворота неизменны.
 
 ## Наблюдённый baseline
 
