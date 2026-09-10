@@ -39,7 +39,7 @@ jobs:
         env:
           EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
           EXPECTED_ACTOR: vitaliyozolin-dotcom
-          EXPECTED_PARENT: acceb6ffe0dbd6c8e34d25d573f042da1500d5cb
+          EXPECTED_PARENT: c8759ff213c72fd50763eb96afce68d93d2e67d7
           EXPECTED_CATALOG_DIGEST: 945a5c824da3c136142ae209456a083e9a926369986ca79077359195a971187f
         run: |
           set -Eeuo pipefail
@@ -51,7 +51,7 @@ jobs:
           test "$(git rev-list --count HEAD^)" -ge 1
           parents="$(git show -s --format=%P HEAD)"
           test "$parents" = "$EXPECTED_PARENT"
-          test "$(git show -s --format=%s HEAD)" = 'D118: use live owner credential for finance import'
+          test "$(git show -s --format=%s HEAD)" = 'D121: use protected owner secrets for finance import'
           python3 -I - <<'PY'
           import subprocess
           expected = {
@@ -114,6 +114,8 @@ jobs:
         env:
           ARTHELLO_PUBLIC_ORIGIN: https://arthello-188-225-38-55.sslip.io
           ARTHELLO_IMPORT_APPLY: "1"
+          ARTHELLO_E2E_LOGIN: ${{ secrets.ARTHELLO_FINANCE_IMPORT_LOGIN }}
+          ARTHELLO_E2E_PASSWORD: ${{ secrets.ARTHELLO_FINANCE_IMPORT_PASSWORD }}
           EXPECTED_LIVE_SOURCE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
         run: |
           set -Eeuo pipefail
@@ -127,14 +129,10 @@ jobs:
           live_id="$(docker inspect "${live_ids[0]}" --format '{{.Id}}')"
           [[ "$live_id" =~ ^[a-f0-9]{64}$ ]]
           test "$(docker inspect "$live_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$EXPECTED_LIVE_SOURCE_SHA"
-          password_file="$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^ARTHELLO_BOOTSTRAP_PASSWORD_FILE=//p')"
-          test "$password_file" = /run/secrets/bootstrap-password
-          owner_password="$(docker exec "$live_id" sh -c 'test "$ARTHELLO_BOOTSTRAP_PASSWORD_FILE" = /run/secrets/bootstrap-password && cat "$ARTHELLO_BOOTSTRAP_PASSWORD_FILE"')"
-          test -n "$owner_password"
-          test "${#owner_password}" -le 512
-          export ARTHELLO_E2E_LOGIN=owner ARTHELLO_E2E_PASSWORD="$owner_password"
-          cleanup() { unset owner_password ARTHELLO_E2E_PASSWORD; }
-          trap cleanup EXIT
+          test -n "$ARTHELLO_E2E_LOGIN"
+          test -n "$ARTHELLO_E2E_PASSWORD"
+          test "${#ARTHELLO_E2E_LOGIN}" -le 320
+          test "${#ARTHELLO_E2E_PASSWORD}" -le 512
           set +e
           result="$(python3 -I .github/scripts/import-finance-articles.py)"
           import_status="$?"
