@@ -5,11 +5,14 @@ on:
     paths:
       - .github/workflows/deploy-atlas-d122.yml
       - deploy/activate-atlas-d122.sh
+      - deploy/activate-atlas-owner-access.mjs
       - scripts/test/atlas-activation-release.test.mjs
+      - scripts/test/atlas-owner-access-activation.test.mjs
       - DECISIONS.md
       - CURRENT_STATE.md
       - RUNBOOK.md
       - docs/acceptance/2026-09-10-atlas-production-activation.md
+      - docs/acceptance/2026-09-10-atlas-owner-access.md
   workflow_run:
     workflows: [Quality gates]
     types: [completed]
@@ -81,6 +84,7 @@ jobs:
           test "$(git -C atlas rev-parse HEAD^{tree})" = "$ATLAS_SOURCE_TREE"
           bash -n controller/deploy/activate-atlas-d122.sh
           (cd controller && node --test scripts/test/atlas-activation-release.test.mjs)
+          (cd controller && node --test scripts/test/atlas-owner-access-activation.test.mjs)
 
       - name: Build and exercise immutable Atlas image
         run: |
@@ -187,5 +191,87 @@ jobs:
         with:
           name: atlas-d122-production-receipt
           path: ${{ runner.temp }}/atlas-d122-bundle/production-receipt.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  activate-owner-access:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      github.event.workflow_run.name == 'Quality gates' &&
+      github.event.workflow_run.path == '.github/workflows/quality.yml' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_sha == github.event.workflow_run.head_commit.id &&
+      github.event.workflow_run.repository.id == github.event.repository.id &&
+      github.event.workflow_run.head_repository.id == github.event.repository.id &&
+      startsWith(github.event.workflow_run.head_commit.message, 'D130: activate Atlas owner access')
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    timeout-minutes: 10
+    concurrency:
+      group: school-1-11-production
+      cancel-in-progress: false
+      queue: max
+    env:
+      CONTROLLER_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Verify exact main and production runtime identities
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          current="$(curl --fail --silent --show-error --max-time 20 \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+          test "$current" = "$CONTROLLER_SHA"
+          mapfile -t live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
+          test "${#live_ids[@]}" -eq 1
+          live_id="$(docker inspect "${live_ids[0]}" --format '{{.Id}}')"
+          test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$live_id" --format '{{index .Config.Labels "arthello.release.sha"}}')" = ff8559254faaedade63a9ee7567a45686d08c13a
+          test "$(docker inspect atlas-school-diary --format '{{.State.Running}}')" = true
+          test "$(docker inspect atlas-school-diary --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = 987abd5951dc4832e2c071d8744051c518bae42e
+          curl -fsS --max-time 20 https://arthello-188-225-38-55.sslip.io/api/health | jq -e '.status == "ok" and .database == "available"' >/dev/null
+          curl -fsS --max-time 20 https://atlas-188-225-38-55.sslip.io/api/health | jq -e '.status == "ok"' >/dev/null
+          precheck_node="$(command -v node || true)"
+          if [[ -z "$precheck_node" ]]; then
+            runner_root="$(realpath "$RUNNER_TEMP/../..")"
+            precheck_node="$runner_root/externals/node24/bin/node"
+          fi
+          test -x "$precheck_node"
+          "$precheck_node" -e 'if(Number(process.versions.node.split(".")[0])<24)process.exit(2)'
+          printf 'PRECHECK_NODE=%s\n' "$precheck_node" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CONTROLLER_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Activate only the canonical owner grant and verify complete Atlas SSO
+        env:
+          ARTHELLO_OWNER_LOGIN: ${{ secrets.ARTHELLO_FINANCE_IMPORT_LOGIN }}
+          ARTHELLO_OWNER_PASSWORD: ${{ secrets.ARTHELLO_FINANCE_IMPORT_PASSWORD }}
+          ATLAS_OWNER_ACCESS_APPLY: "1"
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CONTROLLER_SHA"
+          test -n "$ARTHELLO_OWNER_LOGIN"
+          test -n "$ARTHELLO_OWNER_PASSWORD"
+          result="$("$PRECHECK_NODE" deploy/activate-atlas-owner-access.mjs)"
+          jq -e '.status == "accepted" and .ownerGrant == "director" and .atlasSso == "verified" and (.mutation == "created" or .mutation == "already-active")' <<<"$result" >/dev/null
+          jq -n --arg controller "$CONTROLLER_SHA" --argjson result "$result" \
+            '{schemaVersion:1,kind:"atlas-owner-access-receipt",controllerSha:$controller,productionMutation:true,canonicalOwnerOnly:true,result:$result}' \
+            | tee "$RUNNER_TEMP/atlas-owner-access-receipt.json"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: atlas-owner-access-receipt
+          path: ${{ runner.temp }}/atlas-owner-access-receipt.json
           if-no-files-found: ignore
           retention-days: 30

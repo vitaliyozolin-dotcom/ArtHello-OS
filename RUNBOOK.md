@@ -7,6 +7,13 @@
 - Успех требует artifact receipt, central/School/Atlas health и `303 location: https://atlas-188-225-38-55.sslip.io/auth/central/start`. Это не заменяет natural browser/login/mobile acceptance.
 - При terminal failure читать bounded deploy log и проверять, что исходный central снова running, route восстановлен, а `atlas-school-diary` не опубликован. Не удалять остановленный predecessor или Caddy recovery route до отдельной послерелизной приёмки.
 
+## Atlas D130 — личный доступ владельца
+
+- Запускать только автоматически после successful exact-main Quality для squash-коммита с prefix `D130: activate Atlas owner access`; среда `production-ru` и production concurrency обязательны.
+- Допустима только отсутствующая запись `USR-OWNER` / `SYS-SCHOOL-ATLAS` / `director` через `saveOwnerDiaryAccess`. Любой существующий конфликт роли, статуса или версии — stop без перезаписи.
+- PASS требует точную цепочку Atlas start → central authorize → Atlas callback → Atlas home и успешный `/api/school` с владельцем-директором. После проверки обе созданные проверочные сессии завершаются.
+- Не печатать credential, cookies, query callback, display name или контакты. Receipt содержит только controller SHA, признак owner-only, mutation created/already-active и SSO verified.
+
 ## A.4: изолированный импорт данных
 
 Sandbox DB обязана находиться по абсолютному пути вне source checkout. Единственная переменная пути — `ARTHELLO_SANDBOX_DB_PATH`; команда завершится fail closed при пустом, относительном, корневом или вложенном в репозиторий пути.
