@@ -82,6 +82,90 @@ jobs:
           "$PRECHECK_NODE" --test scripts/test/server-e2e-preflight.test.mjs
           python3 -I .github/scripts/test-d082-route-diagnostic.py
 
+      - name: Inventory Atlas production prerequisites without changing gateway
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          atlas_origin='https://atlas-188-225-38-55.sslip.io'
+          atlas_host='atlas-188-225-38-55.sslip.io'
+          caddy='stroios-caddy-1'
+          secret_file="$HOME/.config/arthello/atlas-central-access-secret"
+          mapfile -t live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
+          live_count="${#live_ids[@]}"
+          central_running=false
+          central_origin_configured=false
+          central_secret_configured=false
+          central_open_status=000
+          if [ "$live_count" -eq 1 ]; then
+            live_id="${live_ids[0]}"
+            test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+            central_running=true
+            configured="$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}')"
+            if grep -Fx "ATLAS_PUBLIC_ORIGIN=$atlas_origin" <<<"$configured" >/dev/null; then
+              central_origin_configured=true
+            fi
+            if grep -Fx 'ATLAS_CENTRAL_ACCESS_SECRET_FILE=/run/secrets/atlas-central-access-secret' <<<"$configured" >/dev/null \
+              && docker inspect "$live_id" | jq -e '
+                [.[0].Mounts[] | select(
+                  .Destination == "/run/secrets/atlas-central-access-secret" and
+                  .RW == false and
+                  .Type == "bind"
+                )] | length == 1
+              ' >/dev/null; then
+              central_secret_configured=true
+            fi
+            central_open_status="$(curl --silent --show-error --max-time 15 --output /dev/null \
+              --write-out '%{http_code}' -H 'Host: arthello-188-225-38-55.sslip.io' \
+              http://127.0.0.1/api/atlas-sso/open || true)"
+          fi
+          atlas_secret_ready=false
+          if [ -f "$secret_file" ] && [ ! -L "$secret_file" ] \
+            && [ "$(stat -c %a "$secret_file")" = 600 ] \
+            && [ "$(wc -c < "$secret_file")" -ge 32 ]; then
+            atlas_secret_ready=true
+          fi
+          atlas_container_present=false
+          atlas_container_running=false
+          if docker inspect atlas-school-diary >/dev/null 2>&1; then
+            atlas_container_present=true
+            if [ "$(docker inspect atlas-school-diary --format '{{.State.Running}}')" = true ]; then
+              atlas_container_running=true
+            fi
+          fi
+          atlas_data_volume_present=false
+          atlas_backup_volume_present=false
+          docker volume inspect atlas-school-diary-data >/dev/null 2>&1 && atlas_data_volume_present=true
+          docker volume inspect atlas-school-diary-backups >/dev/null 2>&1 && atlas_backup_volume_present=true
+          atlas_route_present=false
+          if [ "$(docker inspect "$caddy" --format '{{.State.Running}}')" = true ]; then
+            route_copy="$RUNNER_TEMP/atlas-routes-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.caddy"
+            trap 'rm -f -- "$route_copy"' EXIT
+            docker cp "$caddy:/data/external-routes.caddy" "$route_copy" >/dev/null
+            grep -F "$atlas_host" "$route_copy" >/dev/null && atlas_route_present=true
+          fi
+          jq -n \
+            --argjson liveCount "$live_count" \
+            --argjson centralRunning "$central_running" \
+            --argjson centralOriginConfigured "$central_origin_configured" \
+            --argjson centralSecretConfigured "$central_secret_configured" \
+            --arg centralOpenStatus "$central_open_status" \
+            --argjson atlasSecretReady "$atlas_secret_ready" \
+            --argjson atlasContainerPresent "$atlas_container_present" \
+            --argjson atlasContainerRunning "$atlas_container_running" \
+            --argjson atlasDataVolumePresent "$atlas_data_volume_present" \
+            --argjson atlasBackupVolumePresent "$atlas_backup_volume_present" \
+            --argjson atlasRoutePresent "$atlas_route_present" \
+            '{schemaVersion:1,kind:"atlas-production-prerequisites",productionMutations:false,
+              liveCentralCount:$liveCount,centralRunning:$centralRunning,
+              centralOriginConfigured:$centralOriginConfigured,
+              centralSecretConfigured:$centralSecretConfigured,
+              centralOpenStatus:$centralOpenStatus,atlasSecretReady:$atlasSecretReady,
+              atlasContainerPresent:$atlasContainerPresent,atlasContainerRunning:$atlasContainerRunning,
+              atlasDataVolumePresent:$atlasDataVolumePresent,
+              atlasBackupVolumePresent:$atlasBackupVolumePresent,
+              atlasRoutePresent:$atlasRoutePresent}' \
+            | tee "$RUNNER_TEMP/atlas-production-prerequisites.json"
+
       - name: Diagnose rejected R9 route without changing gateway
         if: >-
           github.event_name == 'workflow_run' &&
