@@ -8,13 +8,17 @@ import { startVisualChrome } from '../lib/visual-browser-startup.mjs';
 
 // Real child processes and loopback sockets; no Chrome installation needed here.
 // The unchanged browser/visual gate is also executed with real Chrome in hosted CI.
-const worker = `import fs from 'node:fs'; import http from 'node:http';
+const worker = `import fs from 'node:fs'; import http from 'node:http'; import {spawn} from 'node:child_process';
 const [scenario, root] = process.argv.slice(2);
 const flag = name => process.argv.find(x => x.startsWith(name+'=')).slice(name.length+1);
 const profile=flag('--user-data-dir'), requested=Number(flag('--remote-debugging-port'));
 const log=root+'/children.jsonl'; const attempt=fs.existsSync(log)?fs.readFileSync(log,'utf8').trim().split('\\n').length+1:1;
 fs.appendFileSync(log,JSON.stringify({pid:process.pid,profile,attempt})+'\\n');
 process.stderr.write('synthetic-private-startup-sentinel\\n');
+if(scenario==='writer') {
+ const program="const fs=require('node:fs');const p=process.argv[1];process.on('SIGTERM',()=>{});setInterval(()=>{fs.mkdirSync(p+'/Default',{recursive:true});fs.writeFileSync(p+'/Default/active','fixture')},5);";
+ spawn(process.execPath,['-e',program,profile],{stdio:'ignore'});
+}
 if(scenario==='exit'||(scenario==='recover'&&attempt===1)) process.exit(3);
 if(scenario==='silent') setInterval(()=>{},1000);
 else setTimeout(()=>{
@@ -81,4 +85,10 @@ test('invalid bounds fail before process creation', async t => {
   for(const options of [{port:-1},{port:65536},{timeoutMs:0},{timeoutMs:30001}])
     await assert.rejects(f.start('ready',options),{message:'BROWSER_STARTUP_BOUNDS'});
   await assert.rejects(fs.stat(path.join(f.root,'children.jsonl')),{code:'ENOENT'});
+});
+test('a renderer that ignores TERM cannot race profile cleanup or keep writing afterwards', async t => {
+  const f=await fixture(t), browser=await f.start('writer');
+  await browser.close();await f.cleaned(1);
+  await new Promise(r=>setTimeout(r,150));await f.cleaned(1);
+  assert.equal((await f.receipt()).attempts[0].cleanup,'removed');
 });

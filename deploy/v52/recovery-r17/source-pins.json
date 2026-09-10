@@ -139,7 +139,7 @@
     "deploy/v52/src/tests/tochka-autosync.test.mjs": "d99844ddccb9cd9896f4747bcd17c8d4a37a61291dcbc72af48cf7edd74bf8fd",
     "deploy/v52/src/tests/tochka-node-transport.test.mjs": "a17a9a300b5296cb39a3183aa8809dbddc54d5282873819d08ccee639363de27",
     "deploy/v52/src/tests/tochka-pending-lifecycle.test.mjs": "525652fe49ba808c4c3520dd9dd705920dcdaa0152092e03cd8b74cda37e7a3d",
-    "scripts/lib/visual-browser-startup.mjs": "a97e0e7d68f35d7b6f6006096a8d222afe269948f29cc001e9ec20ceb53f1c2d",
+    "scripts/lib/visual-browser-startup.mjs": "0eb6770cf00289f4ef3ca2bcd1cb42e95e31169129beef3df361fd6c900c979d",
     "scripts/run-accepted-r16-history.py": "973a4c69e8d0aacf623060928022662e36cda24bbef1da969ebb85ce781c3841",
     "scripts/run-frozen-release-contract.py": "f6e3e21abb92ac45558c756ed7b14ed4ce3b1be4a489379238aa7e5c97f4d28d",
     "scripts/run-r14-historical-contract.py": "ab0aeb384d5c5eb4859b86274f0a70778518b846620e4c2dbe47710c9c0fb48b",
@@ -153,7 +153,7 @@
     "scripts/test/retire-r16-browser.test.mjs": "a6ccd8131f89d629bfcf28d7e9ff3b92704c20f38c5da8df3e322ee47a263124",
     "scripts/test/school-source.test.mjs": "bec0e629af23804461f9a9a70849a8e75db4257204d363d0b4e0faf5fdab66ae",
     "scripts/test/tochka-account-identity.test.mjs": "f1857eea31cc55372a69d35c29784dc0c1e6a87667c53297fe4f6f8c61e1f3e4",
-    "scripts/test/visual-browser-startup.test.mjs": "c3a4073e36aec0c73e4ff4a6254e404e9d5de55aa953d4eb937bb464488d4e3f",
+    "scripts/test/visual-browser-startup.test.mjs": "e2f60eef5a6def9ce876f8ebb1ccff5ce0f0a31cd56f344a370c0f5acdbc0541",
     "scripts/verify-school-source.mjs": "ce78eac029d2e7238cc5164e93c006f1ba68723f51dba4b81ccf76fbda176309",
     "scripts/visual-acceptance.mjs": "8b7ab781d8737aa6ce9e5df8a42028fd8cfac2dac9a2304005628e022146a30a"
   }

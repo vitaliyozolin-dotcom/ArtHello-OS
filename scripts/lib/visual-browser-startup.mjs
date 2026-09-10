@@ -19,7 +19,7 @@ export async function startVisualChrome(binary, { out, port = 0, timeoutMs = 300
     receipt.attempts.push(row);
     const child = spawn(binary, [...prefix, '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
       '--disable-gpu', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${port}`,
-      `--user-data-dir=${profile}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+      `--user-data-dir=${profile}`, 'about:blank'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
     let ended = false, startupOutput = '', reportedEndpoint = null;
     child.on('error', () => { ended = true; row.reason = 'CHROME_SPAWN'; });
     child.on('exit', (code, signal) => { ended = true; row.exitCode = code; row.signal = signal; });
@@ -30,16 +30,25 @@ export async function startVisualChrome(binary, { out, port = 0, timeoutMs = 300
       if (match) reportedEndpoint = `${match[1]}\n${match[2]}\n`;
     });
     let cleaned = false;
+    const signalOwnedGroup = signal => {
+      if (!child.pid) return;
+      try { process.kill(-child.pid, signal); }
+      catch (error) { if (error.code !== 'ESRCH') throw fail('BROWSER_CLEANUP'); }
+    };
     const close = async () => {
       if (cleaned) return;
-      if (!ended) child.kill('SIGTERM');
+      // The browser wrapper may exit while its renderer still writes Default/.
+      // detached:true creates our own process group; never signal a shared one.
+      signalOwnedGroup('SIGTERM');
       const until = performance.now() + 2000;
       while (!ended && performance.now() < until) await delay(20);
-      if (!ended) child.kill('SIGKILL');
+      signalOwnedGroup('SIGKILL');
       const forcedUntil = performance.now() + 2000;
       while (!ended && performance.now() < forcedUntil) await delay(20);
       if (!ended) throw fail('BROWSER_CLEANUP');
-      await fs.rm(profile, { recursive: true, force: true });
+      try { await fs.rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+      catch { row.cleanup = 'blocked'; receipt.result = 'blocked'; await save(); throw fail('BROWSER_CLEANUP'); }
+      row.cleanup = 'removed'; await save();
       cleaned = true;
     };
     try {
