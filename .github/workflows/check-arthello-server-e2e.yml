@@ -96,10 +96,40 @@ jobs:
           central_origin_configured=false
           central_secret_configured=false
           central_open_status=000
+          central_runtime='null'
           if [ "$live_count" -eq 1 ]; then
             live_id="${live_ids[0]}"
             test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
             central_running=true
+            central_runtime="$(docker inspect "$live_id" | jq -c '
+              .[0] | {
+                name: (.Name | ltrimstr("/")),
+                id: .Id,
+                imageId: .Image,
+                imageRevision: (.Config.Labels["org.opencontainers.image.revision"] // ""),
+                releaseSha: (.Config.Labels["arthello.release.sha"] // ""),
+                user: .Config.User,
+                envNames: ([.Config.Env[] | split("=")[0]] | sort),
+                restart: {
+                  name: .HostConfig.RestartPolicy.Name,
+                  maximumRetryCount: .HostConfig.RestartPolicy.MaximumRetryCount
+                },
+                readonlyRootfs: .HostConfig.ReadonlyRootfs,
+                securityOpt: (.HostConfig.SecurityOpt // []),
+                capDrop: (.HostConfig.CapDrop // []),
+                memory: .HostConfig.Memory,
+                pidsLimit: .HostConfig.PidsLimit,
+                tmpfs: (.HostConfig.Tmpfs // {}),
+                networks: ([.NetworkSettings.Networks | keys[]] | sort),
+                mounts: ([.Mounts[] | {
+                  type: .Type,
+                  name: (if .Type == "volume" then .Name else null end),
+                  destination: .Destination,
+                  rw: .RW,
+                  propagation: .Propagation
+                }] | sort_by(.destination))
+              }
+            ')"
             configured="$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}')"
             if grep -Fx "ATLAS_PUBLIC_ORIGIN=$atlas_origin" <<<"$configured" >/dev/null; then
               central_origin_configured=true
@@ -146,6 +176,7 @@ jobs:
           jq -n \
             --argjson liveCount "$live_count" \
             --argjson centralRunning "$central_running" \
+            --argjson centralRuntime "$central_runtime" \
             --argjson centralOriginConfigured "$central_origin_configured" \
             --argjson centralSecretConfigured "$central_secret_configured" \
             --arg centralOpenStatus "$central_open_status" \
@@ -155,8 +186,9 @@ jobs:
             --argjson atlasDataVolumePresent "$atlas_data_volume_present" \
             --argjson atlasBackupVolumePresent "$atlas_backup_volume_present" \
             --argjson atlasRoutePresent "$atlas_route_present" \
-            '{schemaVersion:1,kind:"atlas-production-prerequisites",productionMutations:false,
+            '{schemaVersion:2,kind:"atlas-production-prerequisites",productionMutations:false,
               liveCentralCount:$liveCount,centralRunning:$centralRunning,
+              centralRuntime:$centralRuntime,
               centralOriginConfigured:$centralOriginConfigured,
               centralSecretConfigured:$centralSecretConfigured,
               centralOpenStatus:$centralOpenStatus,atlasSecretReady:$atlasSecretReady,
