@@ -501,3 +501,15 @@
   .ahFinancePage .operation-classification-actions { grid-column: auto; display: grid; }
   .ahFinancePage .operation-classification-form input, .ahFinancePage .operation-classification-form select { font-size: 16px; }
 }
+
+/* D107 finance articles: scoped to the finance workspace, including narrow screens. */
+.ahFinancePage .ahFinanceArticles { display: grid; gap: 20px; }
+.ahFinancePage .ahFinanceArticleForm { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 14px; align-items: end; margin-block: 20px; }
+.ahFinancePage .ahFinanceArticleForm label { display: grid; gap: 8px; min-width: 0; }
+.ahFinancePage .ahFinanceArticleForm input, .ahFinancePage .ahFinanceArticleForm select { width: 100%; min-height: 44px; padding: 10px; border: 1px solid var(--ah-color-border); border-radius: 10px; background: var(--ah-color-surface); color: inherit; font: inherit; }
+.ahFinancePage .ahFinanceArticleList { padding: 0; list-style: none; }
+.ahFinancePage .ahFinanceArticleList li { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-block: 16px; border-bottom: 1px solid var(--ah-color-border); }
+.ahFinancePage .ahFinanceArticleList li > div:first-child { flex: 1 1 240px; display: grid; gap: 6px; overflow-wrap: anywhere; }
+.ahFinancePage .ahFinanceArticleActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ahFinancePage .ahFinanceArchiveToggle { display: flex; align-items: center; gap: 8px; }
+.ahFinancePage .ahFinanceArchiveToggle input { width: 20px; height: 20px; }

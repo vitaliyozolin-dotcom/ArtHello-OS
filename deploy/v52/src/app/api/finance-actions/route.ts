@@ -1,9 +1,13 @@
+import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
 import { auditEvents, financeCorrections, financeReconciliationIssues, financialOperations, tasks } from "../../../db/schema";
-import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
+import { getAuthenticatedRequestContext, verifyAuthenticatedRequestCsrf } from "../../../lib/production-auth";
 import { resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
 import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
+
+import { changeCatalog, FinanceArticleError, validateClassification } from "../../../lib/finance-articles";
+import { loadArticleCatalog, saveArticleCatalog, saveClassification } from "../../../lib/finance-article-store";
 
 const financeRoles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "FINANCE"]);
 const approverRoles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE"]);
@@ -16,6 +20,8 @@ export async function POST(request: Request) {
     return Response.json({ error: "Сервис авторизации временно недоступен" }, { status: 503 });
   }
   if (!context) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  try { verifyAuthenticatedRequestCsrf(request, context); }
+  catch { return Response.json({ error: "Защитная сессия устарела. Обновите страницу." }, { status: 403 }); }
   const actor = context.actor;
   const role = context.apiRole;
   if (!financeRoles.has(role)) return Response.json({ error: "Недостаточно прав для финансового действия" }, { status: 403 });
@@ -23,7 +29,14 @@ export async function POST(request: Request) {
     await ensureCoreTables();
     const body = (await request.json()) as Record<string, unknown>;
     const action = clean(body.action, 60);
-    if (action === "classifyOperation") return classifyOperation(actor, body);
+    if (["createArticle", "approveArticle", "archiveArticle"].includes(action)) {
+      const snapshot = await loadArticleCatalog(env.DB);
+      if (body.catalogRevision !== snapshot.catalog.revision) throw new FinanceArticleError("Справочник уже изменён. Обновите страницу.", 409);
+      const catalog = changeCatalog(snapshot.catalog, body, role, crypto.randomUUID());
+      await saveArticleCatalog(env.DB, snapshot, catalog, actor, action);
+      return Response.json({ catalog, message: action === "createArticle" ? "Черновик статьи создан" : action === "approveArticle" ? "Статья утверждена" : "Статья перенесена в архив" });
+    }
+    if (action === "classifyOperation") return await classifyOperation(actor, body);
     if (action === "addCorrection") return addCorrection(actor, body);
     if (action === "createIssueTask") return createIssueTask(context, body);
     if (action === "resolveIssue") {
@@ -32,86 +45,22 @@ export async function POST(request: Request) {
     }
     return Response.json({ error: "Неизвестное финансовое действие" }, { status: 400 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Ошибка финансового действия";
-    return Response.json({ error: message }, { status: 500 });
+    if (error instanceof FinanceArticleError) return Response.json({ error: error.message }, { status: error.status });
+    return Response.json({ error: "Не удалось сохранить финансовое действие. Обновите страницу перед повтором." }, { status: 500 });
   }
 }
 
 // D069_FINANCE_OPERATION_ALLOCATION: financial_operations is the management projection; bank_transactions remains immutable.
 async function classifyOperation(actor: string, body: Record<string, unknown>) {
   const operationId = clean(body.operationId, 80);
-  const cashflowArticle = clean(body.cashflowArticle, 160);
-  const pnlArticle = clean(body.pnlArticle, 160);
-  const reportClass = clean(body.reportClass, 80) || "Не включено в ОПиУ";
-  const accrualPeriod = clean(body.accrualPeriod, 7);
-  const counterpartyLabel = clean(body.counterpartyLabel, 240);
-  const managementPurpose = clean(body.managementPurpose, 500);
-  const contractId = clean(body.contractId, 120);
-  const documentId = clean(body.documentId, 120);
-  const projectEntityId = clean(body.projectEntityId, 120);
-  const objectEntityId = clean(body.objectEntityId, 120);
-  const cfrEntityId = clean(body.cfrEntityId, 120);
-  const allowedReportClasses = new Set(["Доходы ОПиУ", "Расходы ОПиУ", "Финансирование", "Не включено в ОПиУ"]);
-  if (!operationId || !cashflowArticle) {
-    return Response.json({ error: "Укажите статью ДДС" }, { status: 400 });
-  }
-  if (!allowedReportClasses.has(reportClass)) {
-    return Response.json({ error: "Выберите корректный класс ОПиУ" }, { status: 400 });
-  }
-  const affectsPnl = reportClass === "Доходы ОПиУ" || reportClass === "Расходы ОПиУ";
-  if (affectsPnl && (!pnlArticle || !/^\d{4}-\d{2}$/.test(accrualPeriod))) {
-    return Response.json({ error: "Для ОПиУ укажите статью и период начисления" }, { status: 400 });
-  }
-  if (accrualPeriod && !/^\d{4}-\d{2}$/.test(accrualPeriod)) {
-    return Response.json({ error: "Период ОПиУ должен быть в формате ГГГГ-ММ" }, { status: 400 });
-  }
-
   const db = getDb();
   const [operation] = await db.select().from(financialOperations).where(eq(financialOperations.id, operationId)).limit(1);
   if (!operation) return Response.json({ error: "Операция не найдена" }, { status: 404 });
-
-  const normalizedPnlArticle = pnlArticle;
-  const normalizedAccrualPeriod = accrualPeriod;
-  const [updated] = await db.update(financialOperations).set({
-    cashflowArticle,
-    pnlArticle: normalizedPnlArticle,
-    accrualPeriod: normalizedAccrualPeriod,
-    counterpartyLabel,
-    managementPurpose,
-    category: cashflowArticle,
-    reportClass,
-    contractId,
-    documentId,
-    projectEntityId,
-    objectEntityId,
-    cfrEntityId,
-    status: "Разнесено",
-  }).where(eq(financialOperations.id, operationId)).returning();
-
-  const changed = {
-    cashflowArticle: [operation.cashflowArticle, cashflowArticle],
-    pnlArticle: [operation.pnlArticle, normalizedPnlArticle],
-    accrualPeriod: [operation.accrualPeriod, normalizedAccrualPeriod],
-    counterpartyLabel: [operation.counterpartyLabel, counterpartyLabel],
-    managementPurpose: [operation.managementPurpose, managementPurpose],
-    reportClass: [operation.reportClass, reportClass],
-    contractId: [operation.contractId, contractId],
-    documentId: [operation.documentId, documentId],
-    projectEntityId: [operation.projectEntityId, projectEntityId],
-    objectEntityId: [operation.objectEntityId, objectEntityId],
-    cfrEntityId: [operation.cfrEntityId, cfrEntityId],
-  };
-  await db.insert(auditEvents).values({
-    actor,
-    action: "finance.operation_classified",
-    entityType: "financial_operation",
-    entityId: operationId,
-    payload: JSON.stringify({
-      immutableBankFact: true,
-      changes: Object.fromEntries(Object.entries(changed).filter(([, pair]) => pair[0] !== pair[1])),
-    }),
-  });
-  return Response.json({ operation: updated, message: "Операция разнесена; ДДС и ОПиУ пересчитаны" });
+  const snapshot = await loadArticleCatalog(env.DB);
+  if (body.catalogRevision !== snapshot.catalog.revision) throw new FinanceArticleError("Справочник уже изменён. Обновите страницу.", 409);
+  const patch = validateClassification(snapshot.catalog, operation, body);
+  const updated = await saveClassification(env.DB, snapshot, operation, patch, actor);
+  return Response.json({ operation: updated, message: "Разнесение сохранено" });
 }
 
 async function addCorrection(actor: string, body: Record<string, unknown>) {

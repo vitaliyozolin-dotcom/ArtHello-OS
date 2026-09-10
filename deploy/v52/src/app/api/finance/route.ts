@@ -1,3 +1,5 @@
+import { env } from "cloudflare:workers";
+import { loadArticleCatalog } from "../../../lib/finance-article-store";
 import { asc, desc } from "drizzle-orm";
 import { ensureCoreTables, getDb, getSystemDataMode } from "../../../db";
 import {
@@ -29,6 +31,7 @@ export async function GET(request: Request) {
   try {
     await ensureCoreTables();
     const db = getDb();
+    const { catalog: articleCatalog } = await loadArticleCatalog(env.DB);
     const mode = await getSystemDataMode();
     const [storedOperations, storedBankAccounts, storedBankTransactions, accruals, storedBudgets, storedForecasts, payroll, corrections, issues, entityRows, lifecycles, allTasks] = await Promise.all([
       db.select().from(financialOperations).orderBy(desc(financialOperations.operationDate), asc(financialOperations.id)),
@@ -143,6 +146,8 @@ export async function GET(request: Request) {
       selectedPeriod,
       operations,
       articleSuggestions,
+      articleCatalog,
+      articlePermissions: { canEdit: ["OWNER", "DIRECTOR", "REPRESENTATIVE", "FINANCE"].includes(context.apiRole), canApprove: ["OWNER", "DIRECTOR", "REPRESENTATIVE"].includes(context.apiRole) },
       bankAccounts: bankAccountsView,
       bankSummary,
       accruals,
