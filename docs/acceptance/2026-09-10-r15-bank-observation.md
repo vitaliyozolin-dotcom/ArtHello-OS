@@ -1,6 +1,14 @@
 # D102 — Проверка операций Точки и связанных сумм ДДС
 
-Статус: R15 принят; production-наблюдение ожидает exact-head review/CI и merge с техническим prefix `D075: read-only production data`. Успешный выпуск сам по себе не является банковской приёмкой.
+Статус: R15 принят; первый D075 report получен. Банк пока не принят. После разрешённого владельцем ручного запуска подготовлен новый read-only report с фиксированной классификацией сохранённого результата; его окончательные review/CI и protected execution ещё необходимы.
+
+## Фактическое первое наблюдение и ручной запуск
+
+PR399 объединён squash-коммитом `bb28bc3644bdcff83d469bb621dafac74621ffee`, tree `2bfd9b4da7e6e51a9380f141564cf1057c594504`. D075 run `34449887309`, attempt1, job `102782982388` получил actual report в `2026-09-10T07:26:42.160Z`: четыре счёта, 12 READY imports, ноль bank/financial rows; retainedJobs4 с более ранним концом окна. Autosync сохранял ошибку от 04:02:22Z до установки R15, failures8 и nextAt10:02:22.834Z; lease released. Exit2 обозначает завершённое наблюдение incomplete_or_issues, не ошибку read-only SQL и не банковскую приёмку.
+
+Владелец затем явно разрешил штатную ручную синхронизацию и предоставил скриншоты карточки и сообщения «Точка не подтвердила доступ к готовой выписке» (на экране 11:35). Это новое UI evidence, но не конкретный HTTP status и не доказанная причина. Accepted source показывает, что сообщение возникает при неуспешном statement GET вне веток 401/403/429; локальный transport также может вернуть 502. При 404/410 старая pending reference удаляется штатным fenced store, но факт такого ответа здесь пока не доказан.
+
+Новый observer добавляет только latestRun.status/failureKind с точной SQL CASE классификацией существующих сообщений, не возвращая исходный текст. Tests: red2 (отсутствующие поля), green51 aggregate; отдельно проверяются неизвестные/private значения, scope последнего non-dry-run и отсутствие выдуманного HTTP status. Ни lease, ни scheduler/backoff, ни банковский runtime, ни frozen release/backup/School pins не меняются. Следующий запуск — прежний защищённый D075 с prefix, current-main/Quality/attempt1/environment и двойными locks. До terminal report main неизменен.
 
 ## Фактический выпуск
 

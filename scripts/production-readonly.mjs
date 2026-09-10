@@ -243,7 +243,8 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
     retainedJobs: { state: 'not_observed', scopeMatch: 'unverified', providerStatus: 'not_stored',
       total: null, invalidRows: null, exactWindowRows: null, olderEndRows: null, otherWindowRows: null, oldestAgeSeconds: null },
     statementImports: { state: 'not_observed', readyRows: null, pendingRows: null, failedRows: null, unknownRows: null },
-    latestRun: { state: 'not_observed', startedAtUtc: null, finishedAtUtc: null },
+    latestRun: { state: 'not_observed', startedAtUtc: null, finishedAtUtc: null,
+      status: 'not_observed', failureKind: null },
   };
   if (!Number.isSafeInteger(now) || now < Date.parse('2026-09-01T00:00:00.000Z') || !epochUtc(now)) {
     result.state = 'invalid_window';
@@ -407,11 +408,27 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
     out.state = 'observed';
   });
   read('latestRun', 'integration_sync_runs', out => {
-    const row = db.prepare(`SELECT ${utcSql('started_at')} AS started_at_utc,${utcSql('finished_at')} AS finished_at_utc
+    // Classify the already stored application result inside SQLite. Never return
+    // error_message, provider payloads or an inferred upstream HTTP status.
+    const row = db.prepare(`SELECT ${utcSql('started_at')} AS started_at_utc,${utcSql('finished_at')} AS finished_at_utc,
+ CASE status WHEN 'Успешно' THEN 'complete' WHEN 'Ожидание банка' THEN 'pending'
+ WHEN 'Требует проверки' THEN 'review' WHEN 'Ошибка' THEN 'error' ELSE 'unknown' END AS status_kind,
+ CASE WHEN status='Ошибка' THEN CASE error_message
+ WHEN 'Точка не подтвердила доступ к готовой выписке' THEN 'statement_read_unclassified'
+ WHEN 'Ключ Точки не даёт права читать готовой выписке' THEN 'statement_read_forbidden'
+ WHEN 'Точка отклонила ключ' THEN 'key_rejected'
+ WHEN 'Точка временно ограничила число запросов' THEN 'rate_limited'
+ WHEN 'Не удалось связаться с Точкой' THEN 'transport_unavailable'
+ WHEN 'Выписка Точки не соответствует запрошенному счёту или периоду' THEN 'statement_identity'
+ WHEN 'Точка вернула некорректную выписку' THEN 'statement_format'
+ WHEN 'Точка не смогла сформировать выписку. Повторите загрузку для нового запроса.' THEN 'statement_failed'
+ ELSE 'unclassified' END ELSE NULL END AS failure_kind
  FROM integration_sync_runs WHERE connection_id='INT-T-TOCHKA' AND dry_run=0 ORDER BY started_at DESC,id DESC LIMIT 1`).get();
     if (!row) return;
     out.startedAtUtc = row.started_at_utc;
     out.finishedAtUtc = row.finished_at_utc;
+    out.status = row.status_kind;
+    out.failureKind = row.failure_kind;
     out.state = out.startedAtUtc !== null && out.finishedAtUtc !== null
       && out.startedAtUtc <= out.finishedAtUtc && out.finishedAtUtc <= result.observedAtUtc ? 'observed' : 'invalid';
   });
