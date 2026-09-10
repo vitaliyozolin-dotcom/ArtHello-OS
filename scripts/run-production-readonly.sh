@@ -15,7 +15,7 @@ cleanup() {
 if docker inspect "$probe" >/dev/null 2>&1; then echo 'READONLY_BLOCKED=helper_already_exists'; exit 2; fi
 trap cleanup EXIT INT TERM HUP
 observe_consumers() {
-  if [[ "$EXPECTED_LIVE_SOURCE_SHA" == 4a0713b4a7d87f132e49836fe0ce9ca9258bc1ec ]]; then
+  if [[ "$EXPECTED_LIVE_SOURCE_SHA" == cb990279e070fddbfa9a0adbd21b56de25b85588 ]]; then
     timeout 60 python3 -I scripts/production-data-consumers-r14.py \
       --expected-release "$EXPECTED_LIVE_SOURCE_SHA" \
       --release-state-dir "$HOME/.config/arthello/release-state"
