@@ -364,3 +364,14 @@ PR398: `codex/arthello-r14-20260909`, parent `e74e41d9b6d49f8854e8ad50b0cffc0a6b
 
 После фактического выпуска закрепить новые source/tree/image/run/job/container и public context для read-only D075. До этого old R13 diagnostic не является наблюдением R14. Дождаться обычного банковского запуска по сохранённому nextAtUtc, не сбрасывать backoff и не вызывать service key вручную. Проверить четыре выбранных счёта, период с 2026-09-01, bank/finance counts, суммы, отсутствие дубликатов и broken links; при error разрешён только фиксированный commitFailureKind без exception text. До этих доказательств задача Точки остаётся открытой.
 
+
+
+## D101 — Порядок нового R15 после остановленного R14
+
+Не повторять R14 run34391105865. Для PR404 требуется final SHA/tree/diff review, exact-head Quality/Proof/V52 и четыре jobs `Verify ArtHello Tochka continuation`. Merge только с prefix `D101: guarded Tochka R15`, parent `9862a6e863d4d791c00ddeaba9480154ad5b8c4d`; затем неизменный main до terminal protected run и cleanup. Старый R14 YAML сохранён побайтно в `deploy/v52/recovery-r15/r14-controller.yml` и восстанавливается лишь в историческом fixture.
+
+Новый ZIP downloader проверяет exact producer/owner/main/attempt1, artifact identity/expiry/size/digest и три ordinary members до extract. Отказ выдаёт фиксированный stage/reason; не выводить URL, API body, исключения или секреты. Разрешены только ограниченные network retries до import. Старые image/gzip/evidence/fingerprint и все downstream guards неизменны. При отказе читать actual terminal graph и bounded receipts, не обходить проверку и не публиковать недоказанный кандидат.
+
+Retirement касается только unused R14 browser image `sha256:19a8671fd03ba31bcfc3ddc7d479dceeabcfbcb836b61bfa7fda17fbf8f77f1a`, дважды доказанного recoverable artifact10119716232 (expiry 2026-09-11T18:48:33Z), затем свежая capacity. При ином consumer/alias/identity/expiry отказ; app/volumes/history не удаляются. R13 baseline, School и R12 healthy backup обязательны. После potential seal/auth/public start старую БД не восстанавливать.
+
+Фактический successful R15 фиксировать source/tree/run/resourceAttempt/acceptedAttempt/image/fingerprint/container/context, candidate/after-public, School/backup. Лишь после этого адаптировать и закрепить actual pins в PR399, выполнить final review/CI, затем D075 текущим защищённым read-only путём. Bank nextAtUtc не сбрасывать. Завершение — четыре счёта, полное окно с 01.09, реальные операции и копеечная сверка ДДС без дублей/потерь/общих связей. CI и выпуск не заменяют эту приёмку.

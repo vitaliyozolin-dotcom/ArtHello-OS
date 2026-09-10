@@ -859,3 +859,12 @@ AI не меняет продуктовые роли, endpoints, данные и
 
 AI готовит PR398 и exact-source gates, затем штатный protected выпуск, read-only наблюдение нового runtime и результат очередного обычного bank tick. Сохраняются банковская авторизация/scope/lease/backoff, R12 backup worker/history, свежий snapshot и durable publication boundaries. Новые owner sessions, force endpoints, ручные service-key вызовы, произвольные SQL writes, платежи и сообщения не разрешаются. Старые frozen выпуски не повторяются. Ресурс — текущие CI и серверы; новых услуг нет, тарифная стоимость неизвестна. Срок — текущая итерация; пересмотр после protected result и банковского наблюдения. Стоп — drift identity/source/capacity/consumers, риск возврата старых данных после seal/auth/publication, неподтверждённые результаты либо отказ владельца. Отдельные Excel/AlfaCRM/Content задачи не включаются в этот этап.
 
+
+
+## D101 — Доставка исправления Точки через новый R15 (2026-09-10)
+
+Владелец — Виталий; исполнитель — Codex. Цель и метрика остаются D098: реальные операции четырёх счетов с 1 сентября по текущую дату и равные суммы ДДС без дублей. Вход — принятый live R13, terminal failure R14 до cutover, проверенный материализованный source D100. Выход — новый guarded R15 с actual candidate/after receipts, затем bound read-only bank reconciliation. PR404 подготовлен; production и банк пока не приняты.
+
+AI выполняет уже разрешённые source compatibility/release repairs, review/CI, merge и защищённый выпуск без нового согласования. Сохраняет D099 source, frozen R14 evidence, R12 backup/history, School, двойные locks, capacity/provenance/auth/snapshot gates. Исправляет проверяемую доставку package, но не выдумывает точный отсутствовавший gateway file. После seal/auth/public boundary старые database restores запрещены. Новых sessions/roles/service-key calls, платежей, сообщений, SQL writes, force/resync и raw exports нет.
+
+Ресурс — текущие GitHub CI и сервер; новых платных услуг нет, стоимость запуска неизвестна. Срок — текущая итерация; пересмотр после actual release result/ordinary scheduler attempt. Не останавливаться лишь из-за failed CI либо технической несовместимости source: исправлять причину в отдельном проверяемом PR. Реальный access blocker или отказ владельца прекращает новые действия с сохранением данных. Критерии финансовой приёмки и подробные release pins — D101 acceptance report.
