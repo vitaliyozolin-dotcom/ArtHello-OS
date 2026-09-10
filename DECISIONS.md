@@ -1,5 +1,13 @@
 # ArtHello OS — Decisions
 
+## D-107 — Generated School metadata не входит в source identity
+
+Дата: 2026-09-10. Статус: исправление подтверждённого exact-CI отказа; новый exact-head CI обязателен.
+
+Quality run `34473673544` на D-106 SHA `1bfe6634bf1a0e90ae20c64cbf428d9cd3358549` доказал, что v44 manifest D-105 был рассчитан из локального рабочего каталога вместе с игнорируемым `tsconfig.tsbuildinfo`. Чистый checkout получил иной canonical SHA; это ошибка provenance, а не изменение School runtime. При этом secret-scan, обе School matrix-сборки, Proof Gates, v52 verification и D-106 coverage gate завершились успешно.
+
+Schema 3 School manifest явно исключает только два воспроизводимых выхода уже обязательного typecheck: корневой `tsconfig.tsbuildinfo` и каталог `.wrangler`. Любой иной дополнительный, удалённый, изменённый или получивший executable bit source-файл продолжает менять identity и блокировать gate. Regression создаёт оба generated output для v44/v52 и требует неизменный hash; clean v44 canonical SHA закреплён как `164da587ce0e07d35e3696ddfda53f4cd372a63e38365dad52fb3c6966d711df`.
+
 ## D-106 — Измеряемый coverage ratchet для API policy-core
 
 Дата: 2026-09-10. Статус: принято владельцем поручением продолжить следующий этап рефакторинга после D-105.

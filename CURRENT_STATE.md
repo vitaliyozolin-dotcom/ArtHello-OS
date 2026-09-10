@@ -1,6 +1,7 @@
 # ArtHello OS — Current State
 
 - D-106 начинает оставшуюся часть трека 6.6: `test:full` получил обязательный Node 24 coverage ratchet для явно ограниченного API policy-core. Checked-in baseline измерен фактическим прогоном: lines 93.32%, branches 70.51%, functions 92.92%, 56/56 тестов PASS; это не заявляется покрытием всего API.
+- Exact D-106 run `34473673544`: coverage ratchet, secret-scan и School v44/v52 matrix jobs PASS, но общий Quality FAIL на School source identity. D-107 устраняет доказанную причину: локальный игнорируемый `tsconfig.tsbuildinfo` ошибочно попал в v44 manifest hash; generated `tsconfig.tsbuildinfo`/`.wrangler` теперь явно исключены из canonical tar. Исправленному SHA нужен собственный exact CI.
 
 ## Tochka source compatibility checkpoint (2026-09-10)
 
@@ -21,7 +22,7 @@
 - Workflow policy gate проверяет оставшийся набор. R13, текущие browser/data checks, `quality.yml` и `proof-gates.yml` не затронуты до проверки фактических GitHub run provenance.
 - Checked-in ratchet `quality-gates/workflow-policy-ratchet.json` ограничивает активный каталог текущим максимумом 14: дальнейшее уменьшение разрешено, незаявленный рост блокирует workflow policy gate.
 - `test:full` теперь включает актуальный importer/sandbox suite workspace `scripts` и PostgreSQL 16 gate; дублирующий отдельный `test:postgres` после агрегата удалён из `quality.yml`. Полный legacy glob `scripts/test/*.test.mjs` пока не считается зелёным CI-suite: в нём остаются spent release contracts и sandbox-sensitive server tests.
-- Фаза 6 остаётся открытой: нужны второй workflow cleanup-блок, консолидация deploy, подключение materialized deploy source к tests/typecheck, SSH/backup hardening, замена хрупких source-regex тестов и coverage ratchet.
+- Фаза 6 остаётся открытой: нужны exact CI исправления D-107, дальнейшая консолидация постоянных workflow/deploy, SSH/backup hardening, усыновление либо архивирование spent tests, замена хрупких source-regex тестов поведенческими и расширение coverage за пределы API policy-core.
 
 ## Refactoring Phase 5 — closed (2026-09-09)
 

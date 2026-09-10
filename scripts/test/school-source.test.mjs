@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   chmod,
   cp,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -52,6 +53,20 @@ test("checkout read/write permissions do not change source identity", async (t) 
   assert.equal((await verifySchoolSource({ repositoryRoot })).length, 2);
   await chmod(directory, 0o775);
   await chmod(file, 0o664);
+  assert.equal((await verifySchoolSource({ repositoryRoot })).length, 2);
+});
+
+test("generated TypeScript metadata does not change source identity", async (t) => {
+  const repositoryRoot = await fixture(t);
+  for (const version of ["v44", "v52"]) {
+    const source = path.join(repositoryRoot, "deploy", version, "src");
+    await writeFile(path.join(source, "tsconfig.tsbuildinfo"), "generated\n");
+    await mkdir(path.join(source, ".wrangler"), { recursive: true });
+    await writeFile(
+      path.join(source, ".wrangler", "worker-configuration.d.ts"),
+      "// generated\n",
+    );
+  }
   assert.equal((await verifySchoolSource({ repositoryRoot })).length, 2);
 });
 

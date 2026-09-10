@@ -1,15 +1,16 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "canonicalTar": {
     "owner": 0,
     "group": 0,
     "mtime": "UTC 1970-01-01",
     "numericOwner": true,
-    "mode": "u+rwX,go+rX,go-w"
+    "mode": "u+rwX,go+rX,go-w",
+    "generatedExcludes": ["./tsconfig.tsbuildinfo", "./.wrangler"]
   },
   "v44": {
     "sourceArchiveSha256": "c72c6c7ced52f0d533be16ff8a8aa2d11fad8d0743b6f1229bde7f034a057062",
-    "materializedTreeSha256": "fe986d777462b383af173fca83fe1760cad02f25659c147f9ca92671bb3e4640"
+    "materializedTreeSha256": "164da587ce0e07d35e3696ddfda53f4cd372a63e38365dad52fb3c6966d711df"
   },
   "v52": {
     "sourceArchiveSha256": "e76fb44dca272825fda4486e7584290b14969c1fd054a8c955eae738899b7c12",
