@@ -1,10 +1,11 @@
 # ArtHello OS — Current State
 
-## 2026-09-10 — D130: вход владельца в Atlas, кандидат
+## 2026-09-10 — D130: вход владельца в Atlas принят
 
 - D129 production run `34529324387`, deploy job `103046467809` успешно поднял центральный и отдельный Atlas runtime; public health и технический SSO entry прошли.
 - Мобильная проверка владельца показала `central_denied`: D109/D122 намеренно оставили реальные Atlas grants пустыми, поэтому публикация адреса не была полной приёмкой сотрудника.
-- D130 готовит только явный личный grant владельца с ролью директора через штатный owner API и требует полного SSO redirect exchange плюс авторизованный `/api/school`. До successful protected receipt вход не объявляется исправленным; права других людей и учебные данные не меняются.
+- D130 merged source `49984055f6baced5f3fe4b14f0023e1fec215ae0`; protected run `34532234336`, job `103055564917` завершён SUCCESS. Receipt artifact `10173964551` подтвердил `mutation=already-active`, `ownerGrant=director`, `atlasSso=verified`: job не переписал существующий grant, полный redirect exchange и авторизованный `/api/school` прошли. Права других людей и учебные данные не менялись.
+- Следующий шаг — мобильный повтор владельца по тому же адресу; затем отдельно назначать роли конкретным сотрудникам и загружать учебные данные.
 
 - D128 protected run `34527921248/103041808551` дошёл до атомарного Caddy reload; первый TLS health получил transient `tlsv1 alert internal error`, после чего trap восстановил исходный route/central и удалил новые контейнеры. D129 добавляет retry-all-errors в 60-секундном окне и перед повтором удаляет только проверенные неиспользуемые пустые Atlas volumes от rollback; production Atlas ещё не принят.
 - D-122 готовит первый защищённый запуск отдельного дневника «Атласа» на `https://atlas-188-225-38-55.sslip.io`. Read-only runs `34517280798` и `34518569941` доказали: central healthy и единственный, но Atlas secret/env/container/volumes/route отсутствуют; живой central — accepted D113 source `ff8559254faaedade63a9ee7567a45686d08c13a`, image `sha256:34402014063a05c81754716f46b3f9059297f1d21d37da7e5f00b1eb8f7fdd46`. Кандидат D-122 ещё не принят: до CI, merge, protected receipt и публичных health/SSO проверок production остаётся без Atlas.
