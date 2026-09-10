@@ -9,7 +9,7 @@ ORIGIN_HOST="${ORIGIN_HOST:-arthello-origin.internal}"
 ROOT="${ARTHELLO_ROOT:-/srv/arthello}"
 TOKEN_FILE="${GITHUB_TOKEN_FILE:-$ROOT/shared/github-release-token}"
 DEPLOY_KEY="${GITHUB_DEPLOY_KEY:-/root/.ssh/arthello_repo_ed25519}"
-SOURCE_DIGEST="c72c6c7ced52f0d533be16ff8a8aa2d11fad8d0743b6f1229bde7f034a057062"
+SOURCE_TREE_DIGEST="adf06829e21c346fc58014ac11a8cbbffb417ad19f09b225129bf4186ca11a15"
 IMAGE="arthello-os-ui:$TARGET_SHA"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 WORK="$ROOT/gateway-cutovers/$TARGET_SHA-$RUN_ID"
@@ -64,8 +64,8 @@ else
 fi
 
 test -f "$SRC/deploy/v44/Dockerfile"
-actual="$(cat "$SRC"/deploy/v44/arthello-sites-v44-source.tar.gz.part-* | sha256sum | awk '{print $1}')"
-[ "$actual" = "$SOURCE_DIGEST" ]
+actual_tree_digest="$(tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C "$SRC/deploy/v44/src" . | sha256sum | awk '{print $1}')"
+[ "$actual_tree_digest" = "$SOURCE_TREE_DIGEST" ]
 
 echo '2/5 Поднимаем новую оболочку...'
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then

@@ -1,13 +1,24 @@
 # ArtHello OS — Current State
 
+## Tochka source compatibility checkpoint (2026-09-10)
+
+- D-100 исправляет воспроизведённые после D-099 ошибки canonical source verification и банковских test imports. Независимая реконструкция дала совпадение 237 v44 и 454 v52 source files; локально 14 targeted tests PASS. Hosted exact-head CI ещё обязателен.
+- Hosted R14 verification разделён на current source/bank checks и frozen historical comparisons в частном temporary fixture. Четыре локальных regression tests подтверждают отказ при current source/protocol drift; protected R14 controller и его runtime contract неизменны и по-прежнему не разрешают выпуск изменённого D-099 source.
+- Это подготовка исходников, не выпуск. Run34391105865 attempt2 завершился до cutover, cleanup завершён. Последний принятый runtime — R13. Новый actual банк/ДДС report не получен, PR399 остаётся UNBOUND.
+- Подробности: `docs/acceptance/2026-09-10-tochka-source-compatibility.md`.
+
 ## Refactoring Phase 6 — workflow cleanup checkpoint (2026-09-09)
+
+- Трек 6.3 завершён кандидатом D-099: v44/v52 School source материализован в обычные деревья `deploy/*/src`, а Dockerfile больше не декодируют архивы и не исполняют patch transport.
+- Exact legacy reconstruction дала пустой файловый diff с materialized source. Canonical tree SHA проверяются `scripts/verify-school-source.mjs` через `test:refactoring`; обе Docker-сборки с внутренними lint/test/build воротами прошли локально. Старые 16 archive chunks и patch/override transport удалены после этой проверки; одна неисполняемая immutable evidence-копия `deploy/v52/overrides/production/backup-transport.mjs` сохранена для frozen R13 source contract.
+- Secret-scan, заявленный при подготовке materialized деревьев, не был повторён в текущей сессии: локальный `gitleaks` отсутствует. Поэтому immutable CI/history-scan остаётся обязательным evidence до принятия кандидата.
 
 - Три доказанных cleanup-блока удалили из активной `.github/workflows` 33 завершённых one-shot: production hotfix D060–D069, recovery R2–R12, ранние School recovery diagnostics, frozen SSO/curriculum cutover, topology probe, legacy RU D059, R12 verifier и завершённый D092 artifact inspector.
 - Активный набор сокращён с 47 до 14 workflow, число `workflow_run` consumers — с 17 до 5. Исходные blob SHA и восстановление из точных parent commits записаны в `docs/workflow-archive-2026-09-09.md`.
 - Workflow policy gate проверяет оставшийся набор. R13, текущие browser/data checks, `quality.yml` и `proof-gates.yml` не затронуты до проверки фактических GitHub run provenance.
 - Checked-in ratchet `quality-gates/workflow-policy-ratchet.json` ограничивает активный каталог текущим максимумом 14: дальнейшее уменьшение разрешено, незаявленный рост блокирует workflow policy gate.
 - `test:full` теперь включает актуальный importer/sandbox suite workspace `scripts` и PostgreSQL 16 gate; дублирующий отдельный `test:postgres` после агрегата удалён из `quality.yml`. Полный legacy glob `scripts/test/*.test.mjs` пока не считается зелёным CI-suite: в нём остаются spent release contracts и sandbox-sensitive server tests.
-- Фаза 6 остаётся открытой: нужны второй workflow cleanup-блок, консолидация deploy, материализация School source, подключение deploy tests/typecheck, SSH/backup hardening, замена хрупких source-regex тестов и coverage ratchet.
+- Фаза 6 остаётся открытой: нужны второй workflow cleanup-блок, консолидация deploy, подключение materialized deploy source к tests/typecheck, SSH/backup hardening, замена хрупких source-regex тестов и coverage ratchet.
 
 ## Refactoring Phase 5 — closed (2026-09-09)
 
@@ -352,3 +363,24 @@ Unit/source regression suite проверяет эти ветки без product
 ## Текущий вывод
 
 Кодовая база реальна и содержит значительный функциональный фундамент. Реальный payroll source прошёл изолированный импорт и контрольные сверки, но формулы и identities ещё требуют ручного утверждения. Owner-only sanitized Sites checkpoint можно проверять без production-данных; production/Replit и detailed live-data gate остаётся `BLOCKED`. Свежие количества AlfaCRM, фактическая карта филиалов/юрлиц, банковские счета и операции не подтверждены. Поэтому ДДС, ОПиУ, финансовая модель и AI CFO не могут открываться до закрытия HIGH, full Alfa import, read-only bank OAuth и нового Reviewer/Coordinator gate.
+
+
+## 2026-09-10 — D100 source исправлен; D101/R15 подготовлен
+
+PR403 объединён: `9862a6e863d4d791c00ddeaba9480154ad5b8c4d`, tree `7a08a2e88e8ea45c2ef1e9631f62ba5c612d6034`. Exact PR head `1912996e925cbf5c26ff7d2e2f789c8bcc6e1657` прошёл Quality34440928812, Proof34440928740, V5234440928818 и R14/R13/R1234440928953. Чужая materialization сохранена; bank tests и historical source checks восстановлены. Это исходники, не новый live.
+
+R15 готовится в PR404 поверх этой базы: pinned R14-to-R15 transformation, bounded verified artifact delivery и exact unused R14 browser retirement. Protected R15 ещё не выполнен. Старый R14 run34391105865 attempt2 terminal failure до cutover; cleanup success. Accepted live остаётся R13, новый D075 не получен, реальные банковские операции и суммы не приняты. PR399 остаётся draft/UNBOUND. Следующий шаг — окончательный review/CI PR404, штатный guarded release и затем реальные bank/DDS receipts.
+
+
+## 2026-09-10 06:00Z — Первый R15 остановлен до установки; исправление в PR405
+
+R15 run34443217193 attempt1 / deploy102762766189 завершился failure на provenance после successful accepted-R13 history. Checkout, image downloads/import, snapshot, cutover и after-public SKIPPED; обе cleanup SUCCESS. Current main `bd3553187c6adcda3e0be1586b25c9c3b61dc3de` подписан GitHub, но имеет два parents; неизменённый gate требует один. Причина — выбранный Codex обычный merge PR404 вместо необходимого squash. Все основные CI на этом main PASS; они не являются установленным выпуском.
+
+Новый PR405 (`codex/tochka-r15-squash-fix-20260910`) сохраняет guard и фиксирует squash в publication contract. Локально actual-metadata jq regression и 12 contract +23 history tests PASS; exact-head CI/final review ожидаются. Старый R15 source/run нельзя повторять. App/data/backup/School не менялись этим failed запуском. Accepted baseline остаётся R13; PR399 UNBOUND, новые bank/DDS числа не получены.
+
+
+### D101 — Устранить случайное ложное срабатывание банковского теста
+
+Exact-head V52 run34443910215/job102764455280 остановился 2026-09-10T06:11:10Z в `tochka-autosync.test.mjs`: regex `/synthetic-private|provider-payload|418/` ошибочно нашёл 418 внутри случайного lease UUID. Actual httpStatus был безопасным 500. Ошибка воспроизведена локально фиксированным valid UUID с 418 до исправления assertions. Исправлен только этот тест: response/state сравниваются целиком с точными полями и числовыми HTTP status, проверки private payload сохранены. Все22 scheduler tests и12 R15 contract tests PASS. Runtime, lease/backoff и банковская логика не менялись.
+
+Единственный изменённый файл materialized source — `deploy/v52/src/tests/tochka-autosync.test.mjs`. Его осознанное изменение отражено в canonical manifest: v52 c76256a9f9239560598df62d3ee2da49e9713da1a83c4af2c9910532482b88ce → b20f022c0865e88dd7c1c62e40c7a0d315780abdf3e2e386c308ace70530bec3; v44 прежний. Current-source/historical-runner/R15 pins обновлены по фактическим bytes, frozen R14 pins/guards не меняются. Final head требует новых обязательных CI; провалившийся старый V52 не повторяется ради случайного удачного UUID.

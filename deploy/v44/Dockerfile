@@ -3,15 +3,8 @@ FROM node:24-bookworm-slim AS application
 
 ENV CI=1
 WORKDIR /app
-COPY deploy/v44/arthello-sites-v44-source.tar.gz.part-* /tmp/arthello-source-parts/
-COPY deploy/v44/overrides/ /tmp/arthello-overrides/
-RUN cat /tmp/arthello-source-parts/arthello-sites-v44-source.tar.gz.part-* > /tmp/arthello-source.tar.gz \
-    && tar -xzf /tmp/arthello-source.tar.gz -C /app \
-    && rm -f /tmp/arthello-source.tar.gz \
-    && rm -rf /tmp/arthello-source-parts \
-    && cp -a /tmp/arthello-overrides/. /app/ \
-    && rm -rf /tmp/arthello-overrides \
-    && ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
+COPY deploy/v44/src/ /app/
+RUN ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
     && grep -q 'invoke_user_worker_ahead_of_assets: false' /app/production/runtime-server.mjs \
     && grep -q 'has_user_worker: true' /app/production/runtime-server.mjs \
     && npm ci \

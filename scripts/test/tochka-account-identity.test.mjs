@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 
-const source=readFileSync(new URL('../../deploy/v52/overrides/db/index.ts',import.meta.url),'utf8');
+const source=readFileSync(new URL('../../deploy/v52/src/db/index.ts',import.meta.url),'utf8');
 function adapter(db, failCreate=false) {
   return {
     prepare(sql) {
@@ -38,7 +38,7 @@ function fixture(index='connection_id,provider_transaction_id') {
 const keys=db=>db.prepare("PRAGMA index_info('bank_transactions_provider_unique')").all().map(row=>row.name);
 
 test('commit failure classification: persists only a fixed reason and clears it after success', async()=>{
-  const {runScheduledTochkaSync,runTochkaSyncStage}=await import(new URL('../../deploy/v52/overrides/lib/tochka-autosync.ts',import.meta.url));
+  const {runScheduledTochkaSync,runTochkaSyncStage}=await import(new URL('../../deploy/v52/src/lib/tochka-autosync.ts',import.meta.url));
   const sqlite=new DatabaseSync(':memory:');
   sqlite.exec("CREATE TABLE system_runtime_state(state_key TEXT PRIMARY KEY,state_value TEXT,updated_at TEXT); CREATE TABLE integration_connections(id TEXT PRIMARY KEY,status TEXT,is_enabled INTEGER,next_sync_at TEXT,updated_at TEXT); INSERT INTO integration_connections VALUES('INT-T-TOCHKA','Работает',1,'','');");
   const setup={connectionId:'INT-T-TOCHKA',authMethod:'JWT',secretStatus:'stored',legalEntityId:'SYNTHETIC',customerCode:'SYNTHETIC',
@@ -61,7 +61,7 @@ test('commit failure classification: persists only a fixed reason and clears it 
   }finally{sqlite.close();}
 });
 test('commit failure classification: bounded local exception causes never emit raw text', async()=>{
-  const {classifyTochkaCommitError}=await import(new URL('../../deploy/v52/overrides/lib/tochka-autosync.ts',import.meta.url));
+  const {classifyTochkaCommitError}=await import(new URL('../../deploy/v52/src/lib/tochka-autosync.ts',import.meta.url));
   for(const [message,kind] of [
     ['D1_TYPE_ERROR: PRIVATE_VALUE','binding_type'],['NOT NULL constraint failed: PRIVATE_COLUMN','required_value'],
     ['no such column: PRIVATE_COLUMN','schema'],['database is locked','database_busy'],['database or disk is full','storage_full'],
@@ -75,7 +75,7 @@ test('commit failure classification: bounded local exception causes never emit r
 
 
 test('real bank commit: same provider ID across four accounts imports eight movements and replays without new rows', async()=>{
-  const core = await import(new URL('../../deploy/v52/overrides/lib/integrations.ts',import.meta.url));
+  const core = await import(new URL('../../deploy/v52/src/lib/integrations.ts',import.meta.url));
   const db=new DatabaseSync(':memory:');
   const tables=['system_runtime_state','integration_connections','integration_sync_runs','integration_log_entries','audit_events','bank_accounts','bank_statement_imports','bank_transactions','financial_operations'];
   for(const table of tables){

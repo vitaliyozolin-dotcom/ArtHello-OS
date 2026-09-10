@@ -1,4 +1,8 @@
-"""D075 read-only proof for one accepted R14 app and its adopted R12 backup reader."""
+"""D075 read-only proof for the accepted R15 app and its adopted R12 backup reader.
+
+The filename stays stable because R15 deliberately retains the R14 durable-state
+schema and validators. Release identity is bound only to the actual R15 receipt.
+"""
 import argparse
 import datetime as dt
 import hashlib
@@ -11,16 +15,20 @@ import subprocess
 from types import ModuleType
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_SOURCE = 'd44137d8342b7eacec510f9f70ffeba6c3bf4f3a'
-EXPECTED_TREE = '6f6a1c26d9a5b2c8a78eb2d942b6720c453484af'
-# NONPUBLISHABLE: wait for actual successful R14 acceptance before binding these pins.
-ACCEPTED_PINS = dict(runId=None, resourceAttempt=None, acceptedAttempt=None,
-    imageId=None, runtimeFingerprint=None, candidateContainerId=None, contextSha256=None)
+EXPECTED_SOURCE = '4a0713b4a7d87f132e49836fe0ce9ca9258bc1ec'
+EXPECTED_TREE = 'ac0ec2a2845eee6254ba7cf8c0e0b83d0e5848de'
+ACCEPTED_PINS = dict(
+    runId='34445017241', resourceAttempt='1', acceptedAttempt='1',
+    imageId='sha256:0f15a32c9dff9cd7278a1449bd66f282abc514f0392edfd57262ed25ef247a6f',
+    runtimeFingerprint='b64e4dcb206ded758f4c636c74bf42588961f2a88e044689207e9dda7939274e',
+    candidateContainerId='3b81e98433e7d948d899fcfc1a9e94ee15faa3ef17cb1d1d4d1cb5c371ff67c7',
+    contextSha256='9c4ef4d58a8a7d97835bc1f8f00cc4aad44849a8cd62b7bcd4869cce247d96ca',
+)
 
 
 def require(value):
     if not value:
-        raise ValueError('READONLY_BLOCKED=accepted_r14_runtime_identity')
+        raise ValueError('READONLY_BLOCKED=accepted_r15_runtime_identity')
 
 
 def checked_module(name, relative, expected):
@@ -164,7 +172,7 @@ def public_gateway(context, evidence, docker):
 
 def observe(expected_release, state_dir, docker=None):
     require(expected_release == EXPECTED_SOURCE)
-    pins = accepted_pins()  # Pending acceptance can never select a live container.
+    pins = accepted_pins()
     directory = state.absolute(str(state_dir))
     require(directory == Path.home() / '.config/arthello/release-state' and directory.resolve() == directory)
     info = directory.stat()
@@ -203,7 +211,7 @@ def main():
     try:
         result = observe(args.expected_release, args.release_state_dir)
     except Exception:
-        raise SystemExit('READONLY_BLOCKED=accepted_r14_runtime_identity') from None
+        raise SystemExit('READONLY_BLOCKED=accepted_r15_runtime_identity') from None
     print(json.dumps(result, separators=(',', ':')))
 
 

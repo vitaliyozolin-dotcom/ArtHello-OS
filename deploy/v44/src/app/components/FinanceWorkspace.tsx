@@ -1,0 +1,298 @@
+"use client";
+
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { EntityPanel } from "./RegistryWorkspace";
+
+type FinanceOperation = {
+  id: string;
+  operationDate: string;
+  period: string;
+  direction: string;
+  amountMinor: number;
+  category: string;
+  reportClass: string;
+  counterpartyEntityId: string;
+  contractId: string;
+  documentId: string;
+  projectEntityId: string;
+  legalEntityId: string;
+  objectEntityId: string;
+  cfrEntityId: string;
+  bankOperationRef: string;
+  operationKind: string;
+  sourceSystem: string;
+  sourceFile: string;
+  sourceSheet: string;
+  sourceRef: string;
+  dataQuality: string;
+  status: string;
+};
+
+type FinanceData = {
+  selectedPeriod: string;
+  operations: FinanceOperation[];
+  accruals: Array<{ id: string; period: string; contour: string; recordsCount: number; accrualMinor: number; paidMinor: number; debtMinor: number; debtCases: number; sourceFile: string; sourceSheet: string; dataQuality: string }>;
+  budgets: Array<{ id: string; period: string; line: string; planMinor: number; scenario: string; assumption: string; sourceType: string }>;
+  payroll: Array<{ id: string; period: string; amountMinor: number; scope: string; sourceSheet: string; dataQuality: string }>;
+  corrections: Array<{ id: number; operationId: string; fieldName: string; beforeValue: string; afterValue: string; reason: string; status: string; createdBy: string; createdAt: string }>;
+  issues: Array<{ id: string; title: string; severity: string; sourceA: string; sourceB: string; differenceMinor: number; ownerEntityId: string; status: string; relatedTaskId: number | null; resolution: string }>;
+  entityNames: Record<string, string>;
+  monthly: Array<{ period: string; receiptsMinor: number; outflowsMinor: number; netMinor: number; revenueMinor: number; expenseMinor: number; resultMinor: number; planRevenueMinor: number; planExpenseMinor: number; planResultMinor: number }>;
+  pnlLines: Array<{ category: string; reportClass: string; amountMinor: number; operationIds: string[] }>;
+  forecast: { openingBalanceMinor: number; timeline: Array<{ id: string; forecastDate: string; direction: string; amountMinor: number; probability: number; category: string; sourceType: string; assumption: string; linkedEntityId: string; balanceMinor: number; isGap: boolean }>; firstGap: { forecastDate: string; balanceMinor: number } | null };
+  summary: { receiptsMinor: number; outflowsMinor: number; netMinor: number; revenueMinor: number; expenseMinor: number; resultMinor: number; planRevenueMinor: number; planExpenseMinor: number; planResultMinor: number; debtMinor: number; openIssues: number };
+  checks: Array<{ id: string; title: string; actualMinor: number; expectedMinor: number; differenceMinor: number; status: string; source: string }>;
+  sourcePolicy: Record<string, string>;
+};
+
+type Tab = "register" | "cashflow" | "pnl" | "plan" | "debts" | "reconciliation";
+
+const tabs: Array<{ id: Tab; label: string }> = [
+  { id: "register", label: "Реестр" },
+  { id: "cashflow", label: "ДДС" },
+  { id: "pnl", label: "ОПиУ" },
+  { id: "plan", label: "План и прогноз" },
+  { id: "debts", label: "Начисления и долги" },
+  { id: "reconciliation", label: "Сверка" },
+];
+
+const periodLabels: Record<string, string> = {
+  "2026-01": "Январь 2026", "2026-02": "Февраль 2026", "2026-03": "Март 2026", "2026-04": "Апрель 2026",
+  "2026-08": "Август 2026 · тест CRM",
+};
+
+const roleCodes: Record<string, string> = {
+  "Собственник": "OWNER",
+  "Директор": "DIRECTOR",
+  "Финансы": "FINANCE",
+  "Педагог": "TEACHER",
+  "Представитель Виталия": "REPRESENTATIVE",
+};
+
+const rub = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 });
+const rubles = (minor: number) => rub.format(minor / 100);
+const signedRubles = (minor: number) => `${minor > 0 ? "+" : ""}${rubles(minor)}`;
+const shortMoney = (minor: number) => `${(minor / 100000000).toFixed(2).replace(".", ",")} млн`;
+
+export function FinanceWorkspace({ role, notify, onTasksChanged }: { role: string; notify: (message: string) => void; onTasksChanged: () => void }) {
+  const [data, setData] = useState<FinanceData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState<Tab>("register");
+  const [period, setPeriod] = useState("2026-04");
+  const [query, setQuery] = useState("");
+  const [direction, setDirection] = useState("Все направления");
+  const [selected, setSelected] = useState<FinanceOperation | null>(null);
+  const [linkedEntityId, setLinkedEntityId] = useState<string | null>(null);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correctionField, setCorrectionField] = useState("amountMinor");
+  const [correctionValue, setCorrectionValue] = useState("");
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [resolution, setResolution] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState("");
+  const operationCloseRef = useRef<HTMLButtonElement>(null);
+
+  const closeOperation = useCallback(() => {
+    setLinkedEntityId(null);
+    setSelected(null);
+  }, []);
+
+  const openOperation = useCallback((operation: FinanceOperation) => {
+    setLinkedEntityId(null);
+    setCorrectionOpen(false);
+    setSelected(operation);
+  }, []);
+
+  const handleOperationKey = useCallback((event: KeyboardEvent<HTMLTableRowElement>, operation: FinanceOperation) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openOperation(operation);
+  }, [openOperation]);
+
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/finance?period=${period}`, { cache: "no-store" });
+      const payload = await response.json() as FinanceData & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Не удалось загрузить финансы");
+      setData(payload);
+      setError("");
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Не удалось загрузить финансы");
+    } finally {
+      setLoading(false);
+    }
+  }, [period]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(handle);
+  }, [load]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const previousOverflow = document.body.style.overflow;
+    const focusFrame = window.requestAnimationFrame(() => operationCloseRef.current?.focus());
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [selected]);
+
+  useEffect(() => {
+    if (!selected || linkedEntityId) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") closeOperation();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeOperation, linkedEntityId, selected]);
+
+  async function action(body: Record<string, unknown>, busyKey: string) {
+    setBusy(busyKey);
+    try {
+      const response = await fetch("/api/finance-actions", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-arthello-role": roleCodes[role] ?? "" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json() as { error?: string; reused?: boolean };
+      if (!response.ok) throw new Error(payload.error ?? "Действие не выполнено");
+      notify(payload.reused ? "Связанная задача уже существует" : "Финансовое действие сохранено");
+      await load();
+      onTasksChanged();
+      return true;
+    } catch (actionError) {
+      notify(actionError instanceof Error ? actionError.message : "Действие не выполнено");
+      return false;
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const filteredOperations = useMemo(() => {
+    if (!data) return [];
+    const normalized = query.trim().toLocaleLowerCase("ru");
+    return data.operations.filter((operation) => operation.period === period)
+      .filter((operation) => direction === "Все направления" || operation.direction === direction)
+      .filter((operation) => !normalized || [operation.id, operation.category, operation.counterpartyEntityId, operation.contractId, operation.documentId, operation.bankOperationRef].some((value) => value.toLocaleLowerCase("ru").includes(normalized)));
+  }, [data, direction, period, query]);
+
+  if (loading && !data) return <section className="page finance-page"><div className="finance-loading">Собираем финансовый контур…</div></section>;
+  if (error && !data) return <section className="page finance-page"><div className="finance-error"><strong>Финансовый раздел временно недоступен</strong><span>{error}</span><button onClick={() => void load()}>Повторить</button></div></section>;
+  if (!data) return null;
+
+  const maxMonthly = Math.max(...data.monthly.flatMap((month) => [month.receiptsMinor, month.outflowsMinor]));
+  const operationCorrections = selected ? data.corrections.filter((correction) => correction.operationId === selected.id) : [];
+  const linkedEntities = selected ? uniqueLinks([
+    { label: counterpartyLabel(selected.counterpartyEntityId), id: selected.counterpartyEntityId },
+    ...(selected.counterpartyEntityId === "FAM-GROUP-T" ? [{ label: "Тестовая семья · не детализация XLSX", id: "FAM-T-014" }] : []),
+    { label: "Юрлицо", id: selected.legalEntityId },
+    { label: "Объект", id: selected.objectEntityId },
+    { label: "Проект", id: selected.projectEntityId },
+    { label: "ЦФО", id: selected.cfrEntityId },
+  ]) : [];
+
+  async function submitCorrection(event: FormEvent) {
+    event.preventDefault();
+    if (!selected) return;
+    const saved = await action({ action: "addCorrection", operationId: selected.id, fieldName: correctionField, afterValue: correctionValue, reason: correctionReason }, `correction:${selected.id}`);
+    if (saved) {
+      setCorrectionOpen(false);
+      setCorrectionValue("");
+      setCorrectionReason("");
+    }
+  }
+
+  return (
+    <section className="page finance-page">
+      <div className="finance-heading">
+        <div><p className="eyebrow">Контур денег · только чтение источников</p><h1>Финансы</h1><p>От строки ОДДС до статьи, контрагента, договора, документа и ответственного — с честной маркировкой тестовых проекций.</p></div>
+        <div className="finance-heading-actions"><span><i />3 XLSX прочитаны</span><button onClick={() => { setTab("reconciliation"); setSelected(null); }}>Расхождения · {data.summary.openIssues}</button></div>
+      </div>
+
+      <div className="finance-source-boundary">
+        <strong>ФАКТ</strong><span>ОДДС, начисления и зарплатные агрегаты взяты из XLSX без изменения оригиналов.</span>
+        <strong className="projection">ПРОЕКЦИЯ</strong><span>Банк, бюджет и ОПиУ помечены как тестовые до подключения утверждённых источников.</span>
+      </div>
+
+      <div className="finance-kpis">
+        <button onClick={() => setTab("cashflow")}><span>Поступления · {periodLabels[period]}</span><strong>{rubles(data.summary.receiptsMinor)}</strong><small>сверено со строкой 2 ОДДС</small></button>
+        <button onClick={() => setTab("cashflow")}><span>Списания</span><strong>{rubles(data.summary.outflowsMinor)}</strong><small>сверено со строкой 34 ОДДС</small></button>
+        <button className={data.summary.netMinor >= 0 ? "positive" : "negative"} onClick={() => setTab("cashflow")}><span>Чистый денежный поток</span><strong>{signedRubles(data.summary.netMinor)}</strong><small>проверка строки 111: OK</small></button>
+        <button className="warning" onClick={() => setTab("debts")}><span>Задолженность по оплатам</span><strong>{rubles(data.summary.debtMinor)}</strong><small>обезличено · {data.accruals.reduce((sum, row) => sum + row.debtCases, 0)} случаев</small></button>
+      </div>
+
+      <div className="finance-tabs" role="tablist">
+        {tabs.map((item) => <button role="tab" aria-selected={tab === item.id} className={tab === item.id ? "active" : ""} key={item.id} onClick={() => setTab(item.id)}>{item.label}{item.id === "reconciliation" ? <b>{data.summary.openIssues}</b> : null}</button>)}
+        <label><span>Период</span><select value={period} onChange={(event) => setPeriod(event.target.value)}>{Object.entries(periodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      </div>
+
+      {tab === "register" ? (
+        <div className="finance-panel">
+          <div className="finance-panel-head"><div><p>Ежедневный реестр</p><h2>Операции периода</h2></div><span className="finance-count">{filteredOperations.length} записей</span></div>
+          <div className="finance-toolbar"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ID, статья, договор, документ…" aria-label="Поиск финансовых операций" /><select value={direction} onChange={(event) => setDirection(event.target.value)}><option>Все направления</option><option>Поступление</option><option>Списание</option></select><span>Суммы хранятся в копейках · исходник неизменяем</span></div>
+          <div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Операция</th><th>Дата</th><th>Направление</th><th>Статья</th><th>Контрагент</th><th>Сумма</th><th>Контроль</th></tr></thead><tbody>
+            {filteredOperations.map((operation) => <tr key={operation.id} tabIndex={0} aria-label={`Открыть операцию ${operation.id}`} onClick={() => openOperation(operation)} onKeyDown={(event) => handleOperationKey(event, operation)}><td><strong>{operation.id}</strong><small>{operation.bankOperationRef}</small></td><td>{new Date(`${operation.operationDate}T00:00:00Z`).toLocaleDateString("ru-RU")}</td><td><span className={`direction-chip ${operation.direction === "Поступление" ? "in" : "out"}`}>{operation.direction}</span></td><td><strong>{operation.category}</strong><small>{operation.reportClass}</small></td><td><strong>{data.entityNames[operation.counterpartyEntityId] ?? operation.counterpartyEntityId}</strong><small>{operation.contractId || "Без договора"}</small></td><td className="money-cell">{operation.direction === "Поступление" ? "+" : "−"}{rubles(operation.amountMinor)}</td><td><span className={operation.status === "Разнесено" ? "quality-ok" : "quality-warn"}>{operation.status}</span></td></tr>)}
+          </tbody></table></div>
+        </div>
+      ) : null}
+
+      {tab === "cashflow" ? (
+        <div className="finance-two-column">
+          <article className="finance-panel cashflow-card"><div className="finance-panel-head"><div><p>Движение денег</p><h2>Поступления и списания</h2></div><span className="source-pill">XLSX · факт</span></div>
+            <div className="finance-bars">{data.monthly.map((month) => <button key={month.period} className={month.period === period ? "active" : ""} onClick={() => setPeriod(month.period)}><div><i className="income-bar" style={{ height: `${Math.max(10, month.receiptsMinor / maxMonthly * 100)}%` }} /><i className="expense-bar" style={{ height: `${Math.max(10, month.outflowsMinor / maxMonthly * 100)}%` }} /></div><span>{periodLabels[month.period].split(" ")[0]}</span><small className={month.netMinor >= 0 ? "positive-text" : "negative-text"}>{signedRubles(month.netMinor)}</small></button>)}</div>
+            <div className="finance-legend"><span><i className="income-dot" />Поступления</span><span><i className="expense-dot" />Списания</span></div>
+          </article>
+          <article className="finance-panel checks-card"><div className="finance-panel-head"><div><p>Контроль модели</p><h2>Сверка с ОДДС</h2></div><strong className={data.checks.every((check) => check.status === "OK") ? "model-pass" : "model-fail"}>MODEL STATUS · {data.checks.every((check) => check.status === "OK") ? "PASS" : "FAIL"}</strong></div><div className="check-list">{data.checks.map((check) => <button key={check.id} onClick={() => setTab("register")}><span className={check.status === "OK" ? "ok" : "fail"}>{check.status}</span><div><strong>{check.title}</strong><small>{check.source}</small></div><em>{check.differenceMinor === 0 ? "Δ 0 ₽" : signedRubles(check.differenceMinor)}</em></button>)}</div></article>
+          <article className="finance-panel monthly-detail"><div className="finance-panel-head"><div><p>{periodLabels[period]}</p><h2>Структура денежного потока</h2></div><button onClick={() => setTab("register")}>Открыть реестр →</button></div><div className="money-waterfall"><div><span>Поступления</span><strong>{rubles(data.summary.receiptsMinor)}</strong></div><i>−</i><div><span>Списания</span><strong>{rubles(data.summary.outflowsMinor)}</strong></div><i>=</i><div className={data.summary.netMinor >= 0 ? "positive" : "negative"}><span>Чистый поток</span><strong>{signedRubles(data.summary.netMinor)}</strong></div></div></article>
+        </div>
+      ) : null}
+
+      {tab === "pnl" ? (
+        <div className="finance-two-column pnl-layout">
+          <article className="finance-panel pnl-summary"><div className="finance-panel-head"><div><p>Рабочая управленческая проекция</p><h2>ОПиУ · {periodLabels[period]}</h2></div><span className="projection-pill">НЕ УТВЕРЖДЁННЫЙ ФАКТ</span></div><div className="pnl-warning"><strong>Отдельный источник ОПиУ не предоставлен</strong><span>Результат рассчитан из классифицированных денежных статей ОДДС. Финансирование исключено, но начислительный метод пока не подтверждён.</span></div><div className="pnl-bridge"><div><span>Доходы</span><strong>{rubles(data.summary.revenueMinor)}</strong></div><div><span>Операционные расходы</span><strong>−{rubles(data.summary.expenseMinor)}</strong></div><div className={data.summary.resultMinor >= 0 ? "positive" : "negative"}><span>Рабочий результат</span><strong>{signedRubles(data.summary.resultMinor)}</strong></div></div></article>
+          <article className="finance-panel pnl-lines"><div className="finance-panel-head"><div><p>Drill-down</p><h2>Статьи результата</h2></div><span>Нажмите на строку</span></div><div>{data.pnlLines.filter((line) => line.reportClass !== "Не включено в ОПиУ").map((line) => <button key={`${line.reportClass}-${line.category}`} onClick={() => { const operation = data.operations.find((item) => item.id === line.operationIds[0]); if (operation) setSelected(operation); }}><span><strong>{line.category}</strong><small>{line.reportClass} · {line.operationIds.length} операция</small></span><em className={line.reportClass === "Доходы ОПиУ" ? "income" : line.reportClass === "Расходы ОПиУ" ? "expense" : "finance"}>{line.reportClass === "Расходы ОПиУ" ? "−" : "+"}{rubles(line.amountMinor)}</em></button>)}</div></article>
+        </div>
+      ) : null}
+
+      {tab === "plan" ? (
+        <div className="finance-two-column plan-layout">
+          <article className="finance-panel"><div className="finance-panel-head"><div><p>Базовый сценарий</p><h2>План‑факт ОПиУ</h2></div><span className="projection-pill">ТЕСТОВЫЙ БЮДЖЕТ</span></div><div className="plan-table"><div className="plan-head"><span>Период</span><span>Доходы факт / план</span><span>Расходы факт / план</span><span>Результат</span></div>{data.monthly.map((month) => <button key={month.period} className={month.period === period ? "active" : ""} onClick={() => setPeriod(month.period)}><strong>{periodLabels[month.period].split(" ")[0]}</strong><span>{shortMoney(month.revenueMinor)} / {shortMoney(month.planRevenueMinor)}</span><span>{shortMoney(month.expenseMinor)} / {shortMoney(month.planExpenseMinor)}</span><em className={month.resultMinor - month.planResultMinor >= 0 ? "positive-text" : "negative-text"}>{signedRubles(month.resultMinor - month.planResultMinor)}</em></button>)}</div><p className="assumption-note">Допущение: план создан только для проверки механики. Утверждённая финансовая модель 2026/27 в источниках отсутствует.</p></article>
+          <article className="finance-panel forecast-card"><div className="finance-panel-head"><div><p>Платёжный календарь</p><h2>Прогноз ликвидности</h2></div><span>Старт {rubles(data.forecast.openingBalanceMinor)}</span></div>{data.forecast.firstGap ? <div className="cash-gap"><span>!</span><div><strong>Кассовый разрыв {new Date(`${data.forecast.firstGap.forecastDate}T00:00:00Z`).toLocaleDateString("ru-RU")}</strong><small>Прогнозный остаток {rubles(data.forecast.firstGap.balanceMinor)}</small></div><button disabled={busy === "gap-task"} onClick={() => void action({ action: "createIssueTask", issueId: "FIN-RISK-001" }, "gap-task")}>Создать задачу</button></div> : null}<div className="forecast-list">{data.forecast.timeline.map((item) => <div className={item.isGap ? "gap" : ""} key={item.id}><time>{new Date(`${item.forecastDate}T00:00:00Z`).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })}</time><span><strong>{item.category}</strong><small>{item.sourceType} · вероятность {item.probability}%</small></span><em className={item.direction === "Поступление" ? "income" : "expense"}>{item.direction === "Поступление" ? "+" : "−"}{rubles(item.amountMinor)}</em><b>{rubles(item.balanceMinor)}</b></div>)}</div></article>
+        </div>
+      ) : null}
+
+      {tab === "debts" ? (
+        <div className="finance-two-column debt-layout">
+          <article className="finance-panel"><div className="finance-panel-head"><div><p>Взаиморасчёты</p><h2>Начисления и задолженности</h2></div><span className="source-pill">XLSX · обезличено</span></div><div className="accrual-list">{data.accruals.map((row) => <article key={row.id}><header><span>{row.contour.slice(0, 2).toLocaleUpperCase("ru")}</span><div><strong>{row.contour}</strong><small>{row.period} · {row.recordsCount} записей</small></div><em>{rubles(row.debtMinor)}</em></header><div><span><small>Начислено</small><strong>{rubles(row.accrualMinor)}</strong></span><span><small>Оплачено</small><strong>{rubles(row.paidMinor)}</strong></span><span><small>Долг</small><strong>{row.debtCases} случаев</strong></span></div><footer>{row.sourceSheet} · {row.dataQuality}</footer></article>)}</div></article>
+          <article className="finance-panel payroll-card"><div className="finance-panel-head"><div><p>Зарплаты</p><h2>Свод начислений</h2></div><span className="source-pill">22 листа</span></div><div className="payroll-trend">{data.payroll.map((row) => { const max = Math.max(...data.payroll.map((item) => item.amountMinor)); return <div key={row.id}><span>{row.period}</span><i><b style={{ width: `${row.amountMinor / max * 100}%` }} /></i><strong>{rubles(row.amountMinor)}</strong><small>{row.sourceSheet}</small></div>; })}</div><div className="privacy-note"><strong>Персональные начисления не перенесены</strong><span>Карточки сотрудников будут связаны после дедупликации HR‑реестра; сейчас доступен только общий итог.</span></div></article>
+        </div>
+      ) : null}
+
+      {tab === "reconciliation" ? (
+        <div className="finance-two-column reconciliation-layout">
+          <article className="finance-panel"><div className="finance-panel-head"><div><p>Очередь контроля</p><h2>Расхождения и ограничения</h2></div><span>{data.issues.length} сигналов</span></div><div className="issue-list">{data.issues.map((issue) => <article key={issue.id} className={issue.status === "Закрыто" ? "resolved" : ""}><header><span className={`severity ${issue.severity === "Высокий" ? "high" : "medium"}`}>{issue.severity}</span><strong>{issue.id}</strong><em>{issue.status}</em></header><h3>{issue.title}</h3><div className="issue-sources"><span>{issue.sourceA}</span><i>↔</i><span>{issue.sourceB}</span></div>{issue.differenceMinor ? <p>Контрольная сумма: <strong>{signedRubles(issue.differenceMinor)}</strong></p> : null}<footer>{issue.relatedTaskId ? <button onClick={() => notify(`Связанная задача TSK-${String(issue.relatedTaskId).padStart(4, "0")}`)}>Задача TSK-{String(issue.relatedTaskId).padStart(4, "0")}</button> : <button disabled={busy === issue.id} onClick={() => void action({ action: "createIssueTask", issueId: issue.id }, issue.id)}>+ Создать задачу</button>}{issue.status === "В работе" ? <form onSubmit={(event) => { event.preventDefault(); void action({ action: "resolveIssue", issueId: issue.id, resolution: resolution[issue.id] ?? "" }, `resolve:${issue.id}`); }}><input value={resolution[issue.id] ?? ""} onChange={(event) => setResolution((current) => ({ ...current, [issue.id]: event.target.value }))} placeholder="Доказательство устранения" /><button disabled={busy === `resolve:${issue.id}`}>Закрыть</button></form> : null}</footer>{issue.resolution ? <small className="resolution">Решение: {issue.resolution}</small> : null}</article>)}</div></article>
+          <article className="finance-panel corrections-card"><div className="finance-panel-head"><div><p>Append-only</p><h2>Журнал корректировок</h2></div><span>{data.corrections.length}</span></div>{data.corrections.length ? <div className="correction-list">{data.corrections.map((correction) => <article key={correction.id}><header><strong>CR-{String(correction.id).padStart(4, "0")}</strong><span>{correction.status}</span></header><p>{correction.operationId} · {correction.fieldName === "amountMinor" ? "Сумма" : "Статья"}</p><small>{correction.reason}</small><footer>{correction.createdBy} · {new Date(`${correction.createdAt.replace(" ", "T")}Z`).toLocaleString("ru-RU")}</footer></article>)}</div> : <div className="finance-empty"><span>↺</span><strong>Корректировок пока нет</strong><p>Исходная операция никогда не перезаписывается. Новое значение добавляется отдельной записью аудита.</p><button onClick={() => setTab("register")}>Выбрать операцию</button></div>}</article>
+        </div>
+      ) : null}
+
+      {selected ? createPortal(<div className="finance-drawer-layer"><button className="drawer-scrim" aria-label="Закрыть карточку операции" onClick={closeOperation} /><aside className="finance-drawer" role="dialog" aria-modal="true" aria-labelledby={`operation-title-${selected.id}`}><header><div><span>{selected.direction}</span><h2 id={`operation-title-${selected.id}`}>{selected.category}</h2><p>{selected.id} · {periodLabels[selected.period]}</p></div><button ref={operationCloseRef} onClick={closeOperation} aria-label="Закрыть">×</button></header><div className="finance-drawer-body"><div className="operation-amount"><span>Сумма операции</span><strong>{selected.direction === "Поступление" ? "+" : "−"}{rubles(selected.amountMinor)}</strong><small>{selected.status} · {selected.operationKind}</small></div><div className="bank-projection-note"><strong>{selected.bankOperationRef}</strong><span>Тестовая банковская проекция. Реальная выписка Точки / Альфа‑Банка не подключена.</span></div><section className="operation-links lineage-section"><p>Связанные данные</p><span className="operation-links-note">Открываются поверх операции — контекст реестра не теряется</span><div className="operation-link-grid">{linkedEntities.map((link) => <button key={link.id} onClick={() => setLinkedEntityId(link.id)}><small>{link.label}</small><strong>{data.entityNames[link.id] ?? link.id}</strong><span>{link.id} →</span></button>)}</div>{selected.counterpartyEntityId === "FAM-GROUP-T" ? <small className="aggregate-boundary">Источник содержит только общий итог по семьям. В карточке группы доступна тестовая семья, но она не считается доказанной частью этой операции.</small> : null}</section><section className="lineage-section"><p>Доказательная цепочка</p><div className="lineage-grid"><article><small>1 · Источник</small><strong>{selected.sourceFile}</strong><span>Лист {selected.sourceSheet} · {selected.sourceRef}</span></article><i>→</i><article><small>2 · Операция</small><strong>{selected.id}</strong><span>{selected.operationDate}</span></article><i>→</i><article><small>3 · Договор</small><strong>{selected.contractId || "Не указан"}</strong><span>связь тестового контура</span></article><i>→</i><article><small>4 · Контрагент</small><strong>{data.entityNames[selected.counterpartyEntityId] ?? selected.counterpartyEntityId}</strong><span>{selected.counterpartyEntityId}</span></article><i>→</i><article><small>5 · Статья / период</small><strong>{selected.category}</strong><span>{periodLabels[selected.period]} · {selected.reportClass}</span></article><i>→</i><article><small>6 · Документ</small><strong>{selected.documentId || "Не указан"}</strong><span>{selected.dataQuality}</span></article></div></section><section className="operation-dimensions"><p>Аналитики</p><dl><div><dt>Юрлицо</dt><dd>{data.entityNames[selected.legalEntityId] ?? selected.legalEntityId}</dd></div><div><dt>Объект</dt><dd>{data.entityNames[selected.objectEntityId] ?? selected.objectEntityId}</dd></div><div><dt>ЦФО</dt><dd>{data.entityNames[selected.cfrEntityId] ?? selected.cfrEntityId}</dd></div><div><dt>Проект</dt><dd>{data.entityNames[selected.projectEntityId] ?? selected.projectEntityId}</dd></div></dl></section><section className="operation-corrections"><div><p>Корректировки</p><button onClick={() => setCorrectionOpen((current) => !current)}>+ Предложить</button></div>{operationCorrections.map((correction) => <article key={correction.id}><strong>CR-{String(correction.id).padStart(4, "0")} · {correction.status}</strong><span>{correction.reason}</span></article>)}{!operationCorrections.length ? <small>Нет корректировок. Исходная запись сохранена без изменений.</small> : null}{correctionOpen ? <form onSubmit={submitCorrection}><label><span>Поле</span><select value={correctionField} onChange={(event) => setCorrectionField(event.target.value)}><option value="amountMinor">Сумма, ₽</option><option value="category">Статья</option></select></label><label><span>Новое значение</span><input value={correctionValue} onChange={(event) => setCorrectionValue(event.target.value)} placeholder={correctionField === "amountMinor" ? "Например, 502000" : "Новая статья"} /></label><label className="wide"><span>Причина и доказательство</span><textarea value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} placeholder="Почему требуется корректировка; какой документ это подтверждает" /></label><div className="wide"><button type="button" onClick={() => setCorrectionOpen(false)}>Отмена</button><button disabled={busy === `correction:${selected.id}`}>Сохранить отдельно от исходника</button></div></form> : null}</section></div></aside></div>, document.body) : null}
+      {linkedEntityId ? <EntityPanel key={linkedEntityId} entityId={linkedEntityId} close={() => setLinkedEntityId(null)} notify={notify} onNavigate={setLinkedEntityId} readOnly backLabel="К операции" initialTab={linkedEntityId === "FAM-GROUP-T" ? "relations" : "overview"} /> : null}
+    </section>
+  );
+}
+
+function counterpartyLabel(id: string) {
+  if (id === "FAM-GROUP-T") return "Группа семей";
+  if (id.startsWith("FAM-")) return "Семья";
+  if (id.startsWith("EMP-")) return "Сотрудники";
+  if (id.startsWith("SUP-")) return "Поставщик";
+  return "Контрагент";
+}
+
+function uniqueLinks(links: Array<{ label: string; id: string }>) {
+  const seen = new Set<string>();
+  return links.filter((link) => link.id && !seen.has(link.id) && seen.add(link.id));
+}

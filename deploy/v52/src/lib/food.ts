@@ -1,0 +1,4 @@
+export function shipmentBalance(row:{shippedPortions:number;consumedPortions:number;returnedPortions:number;writtenOffPortions:number}){return row.shippedPortions-row.consumedPortions-row.returnedPortions-row.writtenOffPortions}
+export function foodEconomics(revenueMinor:number,materialMinor:number,laborMinor:number){const profitMinor=revenueMinor-materialMinor-laborMinor;return{revenueMinor,materialMinor,laborMinor,profitMinor,marginPercent:revenueMinor?Math.round(profitMinor/revenueMinor*100):0}}
+export function expiryBand(expiresAt:string,today:string){const days=Math.ceil((Date.parse(`${expiresAt}T00:00:00Z`)-Date.parse(`${today}T00:00:00Z`))/86400000);return days<0?"Просрочено":days<=3?"Срочно":days<=7?"Скоро":"Норма"}
+export function batchAfterWriteOff(remaining:number,quantity:number){if(!Number.isInteger(quantity)||quantity<=0||quantity>remaining)throw new Error("Invalid write-off");return remaining-quantity}

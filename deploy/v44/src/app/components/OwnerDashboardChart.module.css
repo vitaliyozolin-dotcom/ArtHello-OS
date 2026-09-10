@@ -1,0 +1,153 @@
+.chartPanel {
+  padding-bottom: 8px;
+}
+
+.chartLegend {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 1px 18px 4px;
+  color: #727a91;
+}
+
+.chartLegend span {
+  display: grid;
+  grid-template-columns: 8px auto;
+  column-gap: 6px;
+  align-items: center;
+}
+
+.chartLegend span:last-child { grid-template-columns: auto; }
+
+.chartLegend i {
+  width: 7px;
+  height: 7px;
+  grid-row: 1 / 3;
+  border-radius: 2px;
+}
+
+.chartLegend strong {
+  margin-top: 3px;
+  color: #11162c;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.netPositive strong { color: #15925a; }
+.netNegative strong { color: #d34b43; }
+.inDot { background: #5b56f5; }
+.outDot { background: #a6aec8; }
+
+.lineChart {
+  position: relative;
+  width: 100%;
+  height: 184px;
+  padding: 0 10px 8px;
+  overflow: hidden;
+}
+
+.lineChart svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.gridLine { stroke: #e4e7f0; stroke-dasharray: 2 4; }
+
+.verticalGrid { stroke: #eef0f6; stroke-dasharray: 2 5; }
+
+.inArea {
+  fill: url(#cashflow-area);
+}
+
+.inLine,
+.outLine {
+  fill: none;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.inLine { stroke: #5b56f5; }
+.outLine { stroke: #a6aec8; stroke-dasharray: 5 5; }
+
+.inPoint,
+.outPoint {
+  stroke: #fff;
+  stroke-width: 1.5;
+  transition: r 140ms ease;
+}
+
+.inPoint { fill: #5b56f5; }
+.outPoint { fill: #a6aec8; }
+
+.crosshair {
+  stroke: #9ca2b8;
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+.xLabel,
+.yLabel {
+  fill: #838ba2;
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 550;
+}
+
+.chartHitGrid {
+  position: absolute;
+  inset-block: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  z-index: 2;
+}
+
+.chartHitGrid button {
+  border: 0;
+  background: transparent;
+  cursor: crosshair;
+}
+
+.chartHitGrid button:focus-visible {
+  outline: 2px solid #5b56f5;
+  outline-offset: -4px;
+}
+
+.chartTooltip {
+  position: absolute;
+  top: 5px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  transform: translateX(-50%);
+  border: 1px solid #dfe2ec;
+  border-radius: 10px;
+  padding: 9px 11px;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 9px 22px rgba(31, 35, 72, .12);
+}
+
+.chartTooltip strong { font-size: 9px; }
+
+.chartTooltip span {
+  margin-top: 2px;
+  color: #767e94;
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .chartPanel { order: 3; }
+  .lineChart { height: 178px; }
+  .chartLegend { gap: 12px; overflow-x: auto; }
+  .chartTooltip { top: 8px; }
+}
+
+@media (min-width: 761px) {
+  .chartLegend strong { font-size: 13px; }
+  .xLabel, .yLabel { font-size: 11px; }
+  .chartTooltip strong { font-size: 12px; }
+  .chartTooltip span { font-size: 10px; }
+}

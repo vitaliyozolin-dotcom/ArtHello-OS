@@ -3,44 +3,8 @@
 FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS application
 ENV CI=1 ARTHELLO_BACKUP_REQUIRE_UNIX=1
 WORKDIR /app
-COPY deploy/v52/arthello-sites-v52-source.tar.gz.b64.part-* /tmp/arthello-source-parts/
-COPY deploy/v44/overrides/ /tmp/arthello-overrides/
-COPY deploy/v52/overrides/ /tmp/arthello-v52-overrides/
-RUN cat /tmp/arthello-source-parts/arthello-sites-v52-source.tar.gz.b64.part-* | base64 -d > /tmp/arthello-source.tar.gz \
-    && echo "e76fb44dca272825fda4486e7584290b14969c1fd054a8c955eae738899b7c12  /tmp/arthello-source.tar.gz" | sha256sum -c - \
-    && tar -xzf /tmp/arthello-source.tar.gz -C /app \
-    && rm -f /tmp/arthello-source.tar.gz && rm -rf /tmp/arthello-source-parts \
-    && cp -a /tmp/arthello-overrides/. /app/ && cp -a /tmp/arthello-v52-overrides/. /app/ \
-    && node /app/scripts/patch-dashboard-personalization.mjs \
-    && node /app/scripts/patch-sales-operating-workspace.mjs \
-    && node /app/scripts/patch-system-foundation.mjs \
-    && node /app/scripts/normalize-system-patch-inputs.mjs \
-    && node /app/scripts/patch-system-content-legal.mjs \
-    && node /app/scripts/patch-system-analytics-readiness.mjs \
-    && node /app/scripts/patch-system-operational-modules.mjs \
-    && node /app/scripts/patch-alfacrm-staged-integration.mjs \
-    && node /app/scripts/patch-alfacrm-style-import.mjs \
-    && node /app/scripts/patch-tochka-customer-permission-fallback.mjs \
-    && node /app/scripts/patch-tochka-multi-company-selection.mjs \
-    && node /app/scripts/patch-tochka-statement-array-response.mjs \
-    && node /app/scripts/patch-system-dialog-portals.mjs \
-    && node /app/scripts/patch-mobile-visual-help-followup.mjs \
-    && node /app/scripts/prepare-help-finance-ux-v3.mjs \
-    && node /app/scripts/patch-help-finance-ux-v3.mjs \
-    && node /app/scripts/patch-mobile-canonical-v5.mjs \
-    && node /app/scripts/patch-tochka-finance-bank-visibility.mjs \
-    && node /app/scripts/patch-safe-json-responses.mjs \
-    && node /app/scripts/patch-school-sso-entry.mjs \
-    && node /app/scripts/patch-css-budget-shell-split.mjs \
-    && node /app/scripts/verify-system-wide-operational-shells.mjs \
-    && echo "36632d3d24e6297db6b687731eccac1ae80c6500004dcd26d9a81af250c6c89a  /app/db/index.ts" | sha256sum -c - \
-    && node /app/scripts/patch-finance-operation-allocation.mjs \
-    && node /app/scripts/patch-finance-operation-allocation-css-scope.mjs \
-    && node /app/scripts/patch-tochka-pending-lifecycle.mjs \
-    && node /app/scripts/patch-tochka-autosync.mjs \
-    && node /app/scripts/patch-developer-feedback.mjs \
-    && rm -rf /tmp/arthello-overrides /tmp/arthello-v52-overrides \
-    && ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
+COPY deploy/v52/src/ /app/
+RUN ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
     && grep -q 'invoke_user_worker_ahead_of_assets: false' /app/production/runtime-server.mjs \
     && grep -q 'has_user_worker: true' /app/production/runtime-server.mjs \
     && npm ci && npm run lint && npm test

@@ -1,4 +1,4 @@
-name: Verify ArtHello R14 continuation
+name: Verify ArtHello Tochka continuation
 'on':
   pull_request:
     paths:
@@ -6,6 +6,7 @@ name: Verify ArtHello R14 continuation
     - .github/scripts/**
     - deploy/**
     - scripts/run-frozen-release-contract.py
+    - scripts/run-r14-historical-contract.py
     - scripts/test/**
   push:
     branches:
@@ -15,6 +16,7 @@ name: Verify ArtHello R14 continuation
     - .github/scripts/**
     - deploy/**
     - scripts/run-frozen-release-contract.py
+    - scripts/run-r14-historical-contract.py
     - scripts/test/**
 permissions:
   contents: read
@@ -93,6 +95,7 @@ jobs:
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       R14_CONTRACT_SHA256: 37614beafcbf18347d2429713301699bd4c5e3474cd4f7db840dc166b4c852a3
+      R14_HISTORICAL_RUNNER_SHA256: e59e134c03ec85328ed09e910055a1c9304b5e25e09c8dfb97114d29d3d22c03
     steps:
     - name: Check out exact unprivileged R14 verification source
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -106,7 +109,7 @@ jobs:
     - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
       with:
         node-version: 24
-    - name: Verify frozen contracts and bounded R14 continuation behavior
+    - name: Verify current source and archived R14 protocol
       shell: bash
       run: 'set -Eeuo pipefail
 
@@ -120,24 +123,43 @@ jobs:
 
         test "$(sha256sum deploy/v52/recovery-r14/check-contract.rb | cut -d '' '' -f 1)" = "$R14_CONTRACT_SHA256"
 
-        ruby deploy/v52/recovery-r14/check-contract.rb
+        test "$(sha256sum scripts/run-r14-historical-contract.py | cut -d '' '' -f 1)" = "$R14_HISTORICAL_RUNNER_SHA256"
 
-        python3 -I -B .github/scripts/test-r14-contract.py
+        python3 -I -B scripts/test/r14-historical-contract.test.py
 
-        python3 -I -B .github/scripts/test-r14-history-gate.py
-
-        python3 -I -B .github/scripts/test-r14-backup-adoption.py
-
-        python3 -I -B .github/scripts/test-r14-backup-controller.py
-
-        python3 -I -B .github/scripts/test-r14-continuation-adapters.py
-
-        python3 -I -B .github/scripts/test-r14-live-baseline.py
-
-        python3 -I -B .github/scripts/test-run-r14-live-browser.py
-
-        node --test scripts/test/retire-r13-browser.test.mjs
-
-        node --check deploy/browser/retire-r13-browser.mjs
+        python3 -I -B scripts/run-r14-historical-contract.py
 
         '
+  r15-candidate-tests:
+    name: r15-candidate-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      R15_CONTRACT_SHA256: db8d577e4acd86180cb2a08234f99e654832918fcf29ad01697b25d57d700533
+    steps:
+    - name: Check out exact unprivileged R15 verification source
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ env.CHECKED_SOURCE_SHA }}
+        fetch-depth: 0
+        clean: true
+        persist-credentials: false
+        submodules: false
+        lfs: false
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: 24
+    - name: Verify complete R15 transformation and refusal boundaries
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        test "$(id -u)" -ne 0
+        test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+        test "$(sha256sum deploy/v52/recovery-r15/check-contract.rb | cut -d ' ' -f 1)" = "$R15_CONTRACT_SHA256"
+        ruby deploy/v52/recovery-r15/check-contract.rb
+        python3 -I -B .github/scripts/test-r15-contract.py
+        python3 -I -B .github/scripts/test-r15-artifact-download.py
+        python3 -I -B .github/scripts/test-r15-history-gate.py
+        node --test scripts/test/retire-r14-browser.test.mjs
+        node --check deploy/browser/retire-r14-browser.mjs

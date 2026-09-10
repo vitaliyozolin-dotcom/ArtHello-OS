@@ -41,8 +41,8 @@ jobs:
       queue: max
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
-      # NONPUBLISHABLE until actual R14 production acceptance pins are recorded.
-      EXPECTED_LIVE_SOURCE_SHA: 'd44137d8342b7eacec510f9f70ffeba6c3bf4f3a'
+      # Accepted R15: protected run34445017241, candidate and after-public checks passed.
+      EXPECTED_LIVE_SOURCE_SHA: '4a0713b4a7d87f132e49836fe0ce9ca9258bc1ec'
     steps:
       - name: Verify current main before repository execution
         env:

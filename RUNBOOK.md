@@ -366,10 +366,26 @@ PR398: `codex/arthello-r14-20260909`, parent `e74e41d9b6d49f8854e8ad50b0cffc0a6b
 
 
 
-## D099 — Проверить операции Точки и связанные суммы ДДС на принятом R14
+## D101 — Порядок нового R15 после остановленного R14
 
-Подготовка находится в draft. R14 source d44137d8342b7eacec510f9f70ffeba6c3bf4f3a / tree 6f6a1c26d9a5b2c8a78eb2d942b6720c453484af ещё не является принятым live: attempt1 run34391105865 остановлен на import_archive_identity до cutover, cleanup завершён; attempt2 выполняется. Пока protected run активен, main не менять.
+Не повторять R14 run34391105865. Для PR404 требуется final SHA/tree/diff review, exact-head Quality/Proof/V52 и четыре jobs `Verify ArtHello Tochka continuation`. Merge только с prefix `D101: guarded Tochka R15`, parent `9862a6e863d4d791c00ddeaba9480154ad5b8c4d`; затем неизменный main до terminal protected run и cleanup. Старый R14 YAML сохранён побайтно в `deploy/v52/recovery-r15/r14-controller.yml` и восстанавливается лишь в историческом fixture.
 
-После реального successful deploy записать actual run/resource attempt/accepted attempt, image/fingerprint, candidate container и context SHA256 в новый R14 consumer proof; fixture-значения запрещены. Зафиксировать candidate/after receipts, сохранённый backup и School identity в acceptance-документе. Затем review точного SHA/tree/diff и успешные exact-head CI; только после этого merge с прежним prefix D075: read-only production data и неизменный main до terminal observation.
+Новый ZIP downloader проверяет exact producer/owner/main/attempt1, artifact identity/expiry/size/digest и три ordinary members до extract. Отказ выдаёт фиксированный stage/reason; не выводить URL, API body, исключения или секреты. Разрешены только ограниченные network retries до import. Старые image/gzip/evidence/fingerprint и все downstream guards неизменны. При отказе читать actual terminal graph и bounded receipts, не обходить проверку и не публиковать недоказанный кандидат.
 
-В отчёте отдельно проверить четыре счёта и полное окно с 1 сентября по дату наблюдения, реальные bank rows, account-scoped duplicates, income/expense minor totals банка и связанных financial rows, ноль financialMismatchRows и отсутствие общих/потерянных связей. При incomplete_or_issues честно сохранить exit2. При новом sync_commit error читать только фиксированный commitFailureKind и качество поля; сообщение exception не собирать. Следующий банковский запуск определяется фактическим nextAtUtc; принудительно не сбрасывать ожидание или lease. Read-only наблюдение не выполняет банковские запросы и ничего не записывает в production.
+Retirement касается только unused R14 browser image `sha256:19a8671fd03ba31bcfc3ddc7d479dceeabcfbcb836b61bfa7fda17fbf8f77f1a`, дважды доказанного recoverable artifact10119716232 (expiry 2026-09-11T18:48:33Z), затем свежая capacity. При ином consumer/alias/identity/expiry отказ; app/volumes/history не удаляются. R13 baseline, School и R12 healthy backup обязательны. После potential seal/auth/public start старую БД не восстанавливать.
+
+Фактический successful R15 фиксировать source/tree/run/resourceAttempt/acceptedAttempt/image/fingerprint/container/context, candidate/after-public, School/backup. Лишь после этого адаптировать и закрепить actual pins в PR399, выполнить final review/CI, затем D075 текущим защищённым read-only путём. Bank nextAtUtc не сбрасывать. Завершение — четыре счёта, полное окно с 01.09, реальные операции и копеечная сверка ДДС без дублей/потерь/общих связей. CI и выпуск не заменяют эту приёмку.
+
+
+### D101 — Обязательный squash после отказа первого R15
+
+Актуальное продолжение — PR405, branch `codex/tochka-r15-squash-fix-20260910`, parent `bd3553187c6adcda3e0be1586b25c9c3b61dc3de`, prefix `D101: guarded Tochka R15`. После final SHA/tree/diff review и exact-head Quality/Proof/V52/четырёх continuation jobs объединять только с `merge_method: squash` и `expected_head_sha` окончательного head. Обычный merge с двумя parents не соответствует неизменённому provenance gate. Сразу после merge свежо проверить verified signature, ровно одного parent (указанный SHA), точное reviewed tree и actual current main. Сохранить main до terminal нового protected run/cleanup.
+
+Первый R15 run34443217193 attempt1 terminal failure06:00:42Z: identity/history PASS, provenance отказ до checkout/import/cutover, cleanup PASS. Fresh commit metadata signature=true, parents=2; исходный jq gate требует parents=1. Не повторять этот source/run, не переписывать историю и не менять gate ради двух-parent commit. Новый PR добавляет явный mergeMethod=squash и регрессию на actual public commit metadata; synthetic допустимая форма не является production receipt. Все data/backup/School/auth/capacity boundaries прежние. Банковская приёмка остаётся открытой.
+
+
+## D102 — Read-only сверка принятого R15 и банковских сумм
+
+Accepted runtime: source `4a0713b4a7d87f132e49836fe0ce9ca9258bc1ec`, tree `ac0ec2a2845eee6254ba7cf8c0e0b83d0e5848de`, run `34445017241`, attempt `1`, image `sha256:0f15a32c9dff9cd7278a1449bd66f282abc514f0392edfd57262ed25ef247a6f`, runtime fingerprint `b64e4dcb206ded758f4c636c74bf42588961f2a88e044689207e9dda7939274e`. Candidate `3b81e98433e7d948d899fcfc1a9e94ee15faa3ef17cb1d1d4d1cb5c371ff67c7`, context `9c4ef4d58a8a7d97835bc1f8f00cc4aad44849a8cd62b7bcd4869cce247d96ca`; candidate acceptance `2026-09-10T06:29:36.391Z`, after-public `2026-09-10T06:29:53.317Z`. School source/health and sealed R12 backup adoption verified in the same successful job.
+
+Обновить draft PR399 от точного current main, сохранить materialized source и frozen release history, заменить занятый номер D099 на D102 и закрепить actual pins. После review окончательного SHA/tree/diff и exact-head Quality/Proof/V52/diagnostic CI объединить с prefix `D075: read-only production data`. Main не менять до terminal protected observation. Отчёт принимает банк только при четырёх счетах за окно с 2026-09-01, реальных bank и linked financial rows, нуле дублей/потерь/shared links/mismatch и равенстве income/expense totals в копейках. При будущем `nextAtUtc` ждать ordinary scheduler; force/resync и сброс backoff запрещены.

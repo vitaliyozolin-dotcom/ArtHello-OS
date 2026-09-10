@@ -1,0 +1,143 @@
+/* Airy shell and consistent spatial rhythm derived from the approved dashboard reference. */
+:root {
+  --shell-gap: 16px;
+  --shell-pad: 28px;
+  --surface-radius: 16px;
+}
+
+@media (min-width: 1181px) {
+  .sidebar {
+    position: relative;
+    width: 240px;
+    flex-basis: 240px;
+    overflow: hidden;
+    padding: 20px 14px 16px 66px;
+    border-right: 1px solid var(--border) !important;
+    background: #fff !important;
+  }
+
+  .sidebar::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 52px;
+    background: linear-gradient(180deg, #6661fb 0%, #514cf0 100%);
+  }
+
+  .brand-row { min-height: 48px; padding: 0 4px; }
+  .brand-home { position: absolute; left: 10px; top: 20px; z-index: 2; }
+  .brand-mark-new i { background: #fff !important; box-shadow: 0 1px 1px rgba(36, 31, 116, .12); }
+  .brand-copy strong { font-size: 17px !important; }
+  .nav-scroll { overflow-x: visible; padding: 20px 0 12px; }
+  .nav-group { margin-bottom: 18px; }
+  .nav-group > p { margin: 0 10px 8px; font-size: 10px !important; letter-spacing: .09em; }
+
+  .nav-item {
+    position: relative;
+    min-height: 42px;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 8px !important;
+    margin: 2px 0;
+    border-radius: 10px !important;
+    padding: 9px 10px !important;
+    font-size: 13.5px !important;
+  }
+
+  .nav-item > .nav-mark {
+    position: absolute;
+    left: -54px;
+    top: 50%;
+    width: 36px !important;
+    height: 36px !important;
+    transform: translateY(-50%);
+    border-radius: 10px !important;
+    background: transparent !important;
+    color: rgba(255, 255, 255, .74) !important;
+  }
+
+  .nav-item:hover > .nav-mark,
+  .nav-item.active > .nav-mark {
+    background: rgba(255, 255, 255, .15) !important;
+    color: #fff !important;
+  }
+
+  .nav-more > summary { min-height: 40px; border-radius: 10px; padding: 8px 10px; font-size: 13px; }
+  .nav-more > summary svg { display: none; }
+  .sidebar-tools { padding-top: 12px; }
+  .sidebar-tools > button,
+  .sidebar-collapse { min-height: 38px; padding-inline: 10px; }
+  .sidebar-user { padding: 15px 8px 10px !important; }
+  .sidebar-version { padding: 7px 8px; }
+
+  .sidebar-collapsed .sidebar {
+    width: 64px;
+    flex-basis: 64px;
+    padding: 18px 8px 14px;
+  }
+
+  .sidebar-collapsed .sidebar::before { width: 100%; }
+  .sidebar-collapsed .brand-row { justify-content: center; padding: 0; }
+  .sidebar-collapsed .brand-home { position: static; }
+  .sidebar-collapsed .nav-scroll { overflow-y: auto; padding-top: 18px; }
+  .sidebar-collapsed .nav-item > .nav-mark { position: static; transform: none; }
+  .sidebar-collapsed .nav-item,
+  .sidebar-collapsed .sidebar-tools > button,
+  .sidebar-collapsed .sidebar-collapse { width: 46px; padding: 5px !important; }
+  .sidebar-collapsed .nav-item.active { background: rgba(255, 255, 255, .16) !important; }
+  .sidebar-collapsed .nav-item.active > .nav-mark { background: transparent !important; }
+  .sidebar-collapsed .sidebar-tools { border-color: rgba(255, 255, 255, .22) !important; }
+  .sidebar-collapsed .sidebar-tools > button,
+  .sidebar-collapsed .sidebar-collapse { color: #fff !important; }
+  .sidebar-collapsed .sidebar-user { border-color: rgba(255, 255, 255, .22) !important; }
+  .sidebar-collapsed .sidebar-user .avatar { background: #fff !important; color: var(--brand-primary) !important; }
+  .sidebar-collapsed .sidebar-version { display: none; }
+}
+
+@media (min-width: 761px) {
+  .topbar { height: 72px; flex-basis: 72px; padding: 0 var(--shell-pad) !important; }
+  .search-wrap,
+  .scope-switcher select,
+  .role-switch,
+  .top-icon-action { border-radius: 11px !important; }
+  .page { padding: var(--shell-pad) var(--shell-pad) 36px !important; }
+  .page-heading { margin-bottom: 24px; }
+
+  .content-frame .page :where(.finance-kpis, .content-kpis, .sales-kpis, .edu-kpis, .hr-kpis, .legal-kpis, .proc-kpis, .food-kpis, .safety-kpis, .medical-kpis, .accounting-kpis, .strategy-kpis, .analytics-heroes, .integration-kpis, .readiness-kpis, .registry-kpis, .workflow-kpis, .metrics-grid) {
+    gap: var(--shell-gap) !important;
+    margin-block: 18px !important;
+  }
+
+  .content-frame .page :where(.finance-kpis, .content-kpis, .sales-kpis, .edu-kpis, .hr-kpis, .legal-kpis, .proc-kpis, .food-kpis, .safety-kpis, .medical-kpis, .accounting-kpis, .strategy-kpis, .integration-kpis, .readiness-kpis, .registry-kpis, .workflow-kpis, .metrics-grid) > :where(button, article) {
+    min-height: 118px !important;
+    border-radius: var(--surface-radius) !important;
+    padding: 18px !important;
+  }
+
+  .content-frame .page :where(.finance-panel, .content-panel, .sales-panel, .edu-panel, .hr-panel, .legal-panel, .proc-panel, .food-panel, .safety-panel, .medical-panel, .accounting-panel, .strategy-panel, .analytics-panel, .integration-panel, .system-list-panel, .system-detail, .workflow-shell, .data-card, .quality-card, .finance-trend, .family-grid > article, .manual-module-list > article) {
+    border-radius: var(--surface-radius) !important;
+  }
+
+  .content-frame .page :where(.finance-panel-head, .content-panel-head, .sales-panel-head, .edu-panel-head, .hr-panel-head, .legal-panel-head, .proc-panel-head, .food-panel-head, .safety-panel-head, .medical-panel-head, .accounting-panel-head, .strategy-panel-head, .analytics-panel-head, .integration-panel-head) {
+    min-height: 62px !important;
+    padding: 16px 18px !important;
+  }
+
+  .content-frame .page :where(.finance-two-column, .sales-grid, .edu-layout, .hr-layout, .legal-chain-layout, .proc-layout, .food-layout, .medical-grid, .accounting-layout, .strategy-layout, .owner-dashboard, .money-analytics, .system-layout, .recovery-layout, .content-studio, .family-grid, .manual-module-list) {
+    gap: var(--shell-gap) !important;
+  }
+
+  .finance-bars { gap: 24px !important; padding: 24px 30px 12px !important; }
+  .finance-bars button { padding: 12px 10px !important; }
+  .finance-bars i { width: min(22px, 32%) !important; border-radius: 4px 4px 1px 1px !important; }
+  .income-bar { background: var(--brand-primary) !important; }
+  .expense-bar { background: #b6bed7 !important; }
+  .bar-chart { gap: 28px; padding-top: 24px; padding-bottom: 24px; }
+  .bars button { width: 14px !important; border-radius: 4px 4px 1px 1px !important; }
+  .funnel-bars i,
+  .risk-summary i,
+  .budget-progress i { height: 8px !important; border-radius: 999px !important; overflow: hidden; }
+}
+
+@media (min-width: 761px) and (max-width: 1180px) {
+  :root { --shell-pad: 22px; }
+}
