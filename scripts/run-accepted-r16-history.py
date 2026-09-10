@@ -22,7 +22,7 @@ WORKFLOW_NORMALIZED_SHA256 = '884bcf91e9ee7b6e07127b7114a0b9bb17155413a3f1bf79dd
 # The first represents the reviewed current application; the other two are D105
 # inputs already present in the base and preserved byte-for-byte. Current scheduler
 # behavior is tested before any historical fixture is created.
-CURRENT_INPUTS = {'deploy/school-source-manifest.json': '7fef2b28906074db702be636caed32dacbdadd58843575444f22824f6e9afb24', 'deploy/v52/Dockerfile': 'a5372486dc7fa4efe45646a4a2a0562514e362fcfbad28d1d6ea8cb4872c09a6', 'deploy/v52/src/lib/tochka-autosync.ts': 'be895ff2426e1fac2941986ec0de0de18586dc9756bf5ee0ac239387e26a94dc'}
+CURRENT_INPUTS = {'deploy/school-source-manifest.json': '1d27569c517b8ac34600ef9a8b3bcb92b5a97327528b6098693ac63c18abfa61', 'deploy/v52/Dockerfile': 'a5372486dc7fa4efe45646a4a2a0562514e362fcfbad28d1d6ea8cb4872c09a6', 'deploy/v52/src/lib/tochka-autosync.ts': 'be895ff2426e1fac2941986ec0de0de18586dc9756bf5ee0ac239387e26a94dc'}
 COMMANDS = {
     'r14': [
         ['python3', '-I', '-B', 'scripts/test/r14-historical-contract.test.py'],
