@@ -19,10 +19,10 @@ PINS_SHA256 = 'd6f6b71b0cf5e8c64e43e3978d3cdba7b90528ab44b729a7f484d63f599e5448'
 WORKFLOW = '.github/workflows/verify-arthello-r14.yml'
 WORKFLOW_NORMALIZED_SHA256 = '884bcf91e9ee7b6e07127b7114a0b9bb17155413a3f1bf79ddb4792b1fc9c55d'
 # These are the only changed inputs among the 97 frozen R16 source pins.
-# The first represents the reviewed current application; the other two are D105
-# inputs already present in the base and preserved byte-for-byte. Current scheduler
-# behavior is tested before any historical fixture is created.
-CURRENT_INPUTS = {'scripts/test/school-source.test.mjs': 'bec0e629af23804461f9a9a70849a8e75db4257204d363d0b4e0faf5fdab66ae', 'deploy/school-source-manifest.json': 'f628903fda979d251a8991d2feaaff5f7cb123986d1f2fce88b3411b26156da4', 'deploy/v52/Dockerfile': 'a5372486dc7fa4efe45646a4a2a0562514e362fcfbad28d1d6ea8cb4872c09a6', 'deploy/v52/src/lib/tochka-autosync.ts': 'be895ff2426e1fac2941986ec0de0de18586dc9756bf5ee0ac239387e26a94dc', 'scripts/verify-school-source.mjs': 'ce78eac029d2e7238cc5164e93c006f1ba68723f51dba4b81ccf76fbda176309'}
+# The manifest represents the reviewed current application. Two inputs are D105
+# and two are D107; their bytes are preserved. Current source and scheduler
+# behavior are tested before any historical fixture is created.
+CURRENT_INPUTS = {'scripts/test/school-source.test.mjs': 'bec0e629af23804461f9a9a70849a8e75db4257204d363d0b4e0faf5fdab66ae', 'deploy/school-source-manifest.json': '92097622bf5cfdb54ddeadda5fc05a425cf3694fb57b420fafbfa6f911efbde6', 'deploy/v52/Dockerfile': 'a5372486dc7fa4efe45646a4a2a0562514e362fcfbad28d1d6ea8cb4872c09a6', 'deploy/v52/src/lib/tochka-autosync.ts': 'be895ff2426e1fac2941986ec0de0de18586dc9756bf5ee0ac239387e26a94dc', 'scripts/verify-school-source.mjs': 'ce78eac029d2e7238cc5164e93c006f1ba68723f51dba4b81ccf76fbda176309'}
 COMMANDS = {
     'r14': [
         ['python3', '-I', '-B', 'scripts/test/r14-historical-contract.test.py'],
