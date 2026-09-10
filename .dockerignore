@@ -16,3 +16,6 @@ npm-debug.log*
 deploy/bootstrap
 data/schedules
 data/curricula
+
+# The standalone Next.js release does not use the legacy Sites/Vite config.
+vite.config.ts
