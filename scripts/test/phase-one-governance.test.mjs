@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { parse } from "yaml";
 
 const root = new URL("../../", import.meta.url);
 
@@ -15,14 +16,18 @@ test("quality runs the blocking repository lint command", () => {
   const manifest = JSON.parse(
     readFileSync(new URL("package.json", root), "utf8"),
   );
-  const quality = readFileSync(
-    new URL(".github/workflows/quality.yml", root),
-    "utf8",
+  const quality = parse(
+    readFileSync(new URL(".github/workflows/quality.yml", root), "utf8"),
   );
 
   assert.equal(typeof manifest.scripts?.lint, "string");
   assert.match(manifest.scripts.lint, /prettier --check/);
-  assert.match(quality, /- run: pnpm run lint/);
+  assert.ok(
+    Object.values(quality.jobs).some((job) =>
+      job.steps?.some((step) => step.run === "pnpm run lint"),
+    ),
+    "quality must execute the root lint script",
+  );
 });
 
 test("lint includes a non-regressing legacy application ratchet", () => {

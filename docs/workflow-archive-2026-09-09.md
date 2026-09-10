@@ -32,6 +32,14 @@ success; последующий run `34498059829` был skipped. Controller с�
 R17 source verifier теперь читает архивный путь. Исторический GitHub
 `CONSUMER_PATH` внутри frozen controller не меняется.
 
+Пятый cleanup-блок переносит hosted-only bounded production diagnostic в
+обязательный `test:full`: Node assertions уже усыновлены последовательным
+legacy glob, четыре Python contract test добавлены как
+`test:production-contracts`. Последний проверенный run `34497446356` завершён
+success; исходный workflow восстанавливается по blob
+`9dcea69d6aa05707efd3281493ef63b0c5cd1310` (SHA-256
+`274b13333dd255c576e7d73b94c7d3bf8d33565a5d508af02e287ea124c41c55`).
+
 | Blob SHA | Путь |
 |---|---|
 | `46ce4c5ed22c88a692f565e91dc8112e400bdff6` | `.github/workflows/d060-tochka-production-hotfix-v2.yml` |
@@ -67,6 +75,7 @@ R17 source verifier теперь читает архивный путь. Ист�
 | `04c39023ccc3465eaf69134cf96ed4e379cae0ed` | `.github/workflows/probe-school-production-topology.yml` |
 | `1287afc05fa15236ca435364dbe9c3706d466619` | `.github/workflows/verify-arthello-r12.yml` |
 | `0bf974f9b99c79850b4f4caa27da2000cb4ece94` | `.github/workflows/inspect-d092-visual-evidence.yml` |
+| `9dcea69d6aa05707efd3281493ef63b0c5cd1310` | `.github/workflows/verify-production-data-diagnostic.yml` |
 
 Восстановление отдельного файла:
 

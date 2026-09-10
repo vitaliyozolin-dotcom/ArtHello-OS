@@ -27,7 +27,8 @@
     "test:server-browser": "node --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs",
     "test:visual-readiness": "node --test scripts/test/visual-readiness.test.mjs",
     "test:production-readonly": "node --test scripts/test/production-readonly.test.mjs scripts/test/live-d1-identity.test.mjs",
-    "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:coverage && pnpm run test:refactoring && pnpm run test:scripts && pnpm run test:sites && pnpm run test:e2e-preflight && pnpm run test:server-browser && pnpm run test:visual-readiness && pnpm run test:production-readonly && pnpm run test:postgres && pnpm run test:legacy",
+    "test:production-contracts": "python3 -I scripts/test/production-data-consumers.test.py && python3 -I scripts/test/production-data-consumers-r13.test.py && python3 -I scripts/test/production-data-consumers-r14.test.py && python3 -I scripts/test/run-production-readonly.test.py",
+    "test:full": "pnpm run typecheck && pnpm run test:front-office && pnpm run test:security && pnpm run test:coverage && pnpm run test:scripts && pnpm run test:sites && pnpm run test:postgres && pnpm run test:legacy && pnpm run test:production-contracts",
     "typecheck:libs": "tsc --build --force",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --filter @workspace/sites-control --if-present run typecheck"
   },
