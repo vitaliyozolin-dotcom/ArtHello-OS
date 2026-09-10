@@ -1,7 +1,7 @@
 # ArtHello OS — Current State
 
 - D-106 начинает оставшуюся часть трека 6.6: `test:full` получил обязательный Node 24 coverage ratchet для явно ограниченного API policy-core. Checked-in baseline измерен фактическим прогоном: lines 93.32%, branches 70.51%, functions 92.92%, 56/56 тестов PASS; это не заявляется покрытием всего API.
-- Exact D-106 run `34473673544`: coverage ratchet, secret-scan и School v44/v52 matrix jobs PASS, но общий Quality FAIL на School source identity. D-107 устраняет доказанную причину: локальный игнорируемый `tsconfig.tsbuildinfo` ошибочно попал в v44 manifest hash; generated `tsconfig.tsbuildinfo`/`.wrangler` теперь явно исключены из canonical tar. Исправленному SHA нужен собственный exact CI.
+- Exact D-106 run `34473673544` выявил загрязнение v44 manifest локальным `tsconfig.tsbuildinfo`; D-107 устранил причину. Исправленный SHA `2acc22559ca11f784c07ad6b2a859ee907c87306` / tree `7b3022803ee85ec8e95831b3a2e66fc0adc4d645` прошёл Quality `34477515417`: все 6 jobs SUCCESS, включая coverage, secret-scan и School v44/v52. Provenance artifact `10152210530` не истёк, head/tree совпадают, checksum его `provenance.txt` подтверждён. CI/provenance треков 6.4 и coverage-части 6.6 закрыт; production deploy этим не разрешён.
 
 ## Tochka source compatibility checkpoint (2026-09-10)
 
@@ -12,7 +12,7 @@
 
 ## Refactoring Phase 6 — workflow cleanup checkpoint (2026-09-09)
 
-- D-105 реализует трек 6.4: v44/v52 получили воспроизводимую генерацию Cloudflare runtime declarations и обязательный `tsc`; `quality.yml` запускает отдельную GitHub-hosted matrix-сборку application stage обоих School Dockerfile без secrets, Environment или production runner. Этот checkout содержит 135 School test-файлов. Локально оба application stage прошли typecheck, lint, production build и тесты: v44 — 102/102, v52 — 772/772; exact CI ещё не считается пройденным до фактического run.
+- D-105/D-107 закрыли трек 6.4: v44/v52 получили воспроизводимую генерацию Cloudflare runtime declarations и обязательный `tsc`; `quality.yml` запускает отдельную GitHub-hosted matrix-сборку application stage обоих School Dockerfile без secrets, Environment или production runner. Этот checkout содержит 135 School test-файлов. Локально оба application stage прошли typecheck, lint, production build и тесты: v44 — 102/102, v52 — 772/772; exact Quality `34477515417` подтвердил оба School jobs и общий test job.
 - Трек 6.3 завершён кандидатом D-099: v44/v52 School source материализован в обычные деревья `deploy/*/src`, а Dockerfile больше не декодируют архивы и не исполняют patch transport.
 - Exact legacy reconstruction дала пустой файловый diff с materialized source. Canonical tree SHA проверяются `scripts/verify-school-source.mjs` через `test:refactoring`; обе Docker-сборки с внутренними lint/test/build воротами прошли локально. Старые 16 archive chunks и patch/override transport удалены после этой проверки; одна неисполняемая immutable evidence-копия `deploy/v52/overrides/production/backup-transport.mjs` сохранена для frozen R13 source contract.
 - Secret-scan, заявленный при подготовке materialized деревьев, не был повторён в текущей сессии: локальный `gitleaks` отсутствует. Поэтому immutable CI/history-scan остаётся обязательным evidence до принятия кандидата.
@@ -22,7 +22,7 @@
 - Workflow policy gate проверяет оставшийся набор. R13, текущие browser/data checks, `quality.yml` и `proof-gates.yml` не затронуты до проверки фактических GitHub run provenance.
 - Checked-in ratchet `quality-gates/workflow-policy-ratchet.json` ограничивает активный каталог текущим максимумом 14: дальнейшее уменьшение разрешено, незаявленный рост блокирует workflow policy gate.
 - `test:full` теперь включает актуальный importer/sandbox suite workspace `scripts` и PostgreSQL 16 gate; дублирующий отдельный `test:postgres` после агрегата удалён из `quality.yml`. Полный legacy glob `scripts/test/*.test.mjs` пока не считается зелёным CI-suite: в нём остаются spent release contracts и sandbox-sensitive server tests.
-- Фаза 6 остаётся открытой: нужны exact CI исправления D-107, дальнейшая консолидация постоянных workflow/deploy, SSH/backup hardening, усыновление либо архивирование spent tests, замена хрупких source-regex тестов поведенческими и расширение coverage за пределы API policy-core.
+- Фаза 6 остаётся открытой: нужны дальнейшая консолидация постоянных workflow/deploy, SSH/backup hardening, усыновление либо архивирование spent tests, замена хрупких source-regex тестов поведенческими и расширение coverage за пределы API policy-core.
 
 ## Refactoring Phase 5 — closed (2026-09-09)
 

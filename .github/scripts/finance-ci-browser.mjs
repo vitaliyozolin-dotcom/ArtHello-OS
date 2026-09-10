@@ -7,7 +7,7 @@ import { inspectSandbox } from './flow.mjs';
 
 const ORIGIN='https://finance.ci.invalid';
 let stage='guard',browser,page;
-const errors=[],writes=[];let requests=0,loginCount=0,transportFailed=false;
+const errors=[],writes=[];let requests=0,loginCount=0,transportFailed=false,transportFailure=null;
 try {
   assert.equal(process.env.ARTHELLO_FINANCE_CI,'disposable-hosted-fixture');
   assert.match(process.env.CHECKED_SOURCE_SHA||'',/^[a-f0-9]{40}$/);
@@ -18,10 +18,12 @@ try {
   assert(Object.values(inspectSandbox(rows)).every(Boolean));await sandbox.close();
   const context=await browser.newContext({viewport:{width:1440,height:1000},serviceWorkers:'block',acceptDownloads:false,ignoreHTTPSErrors:false});
   await context.route('**/*',async route=>{
+    let routePhase='origin',requestKind='other',method='unknown',statusCode=null;
     try {
       const request=route.request(),url=new URL(request.url());
+      requestKind=url.pathname==='/'?'root':url.pathname.startsWith('/assets/')?'asset':['/api/auth/login','/api/auth/me','/api/finance','/api/finance-actions','/api/user-dashboard-layouts','/api/notifications','/api/settings'].includes(url.pathname)?url.pathname:'other';
       assert.equal(url.origin,ORIGIN);assert(++requests<=500);
-      const method=request.method();
+      method=request.method();routePhase='method';
       if(!['GET','HEAD'].includes(method)) {
         assert.equal(method,'POST');
         if(url.pathname==='/api/auth/login') assert.equal(++loginCount,1);
@@ -29,11 +31,11 @@ try {
       }
       const headers={...request.headers(),host:'finance.ci.invalid'};
       delete headers['content-length'];delete headers['accept-encoding'];
-      const response=await fetch('http://127.0.0.1:8081'+url.pathname+url.search,{method,headers,body:['GET','HEAD'].includes(method)?undefined:request.postDataBuffer(),redirect:'manual',signal:AbortSignal.timeout(20000)});
-      const out=Object.fromEntries(response.headers);delete out['content-encoding'];delete out['content-length'];delete out['transfer-encoding'];
+      routePhase='fetch';const response=await fetch('http://127.0.0.1:8081'+url.pathname+url.search,{method,headers,body:['GET','HEAD'].includes(method)?undefined:request.postDataBuffer(),redirect:'manual',signal:AbortSignal.timeout(20000)});
+      statusCode=response.status;routePhase='headers';const out=Object.fromEntries(response.headers);delete out['content-encoding'];delete out['content-length'];delete out['transfer-encoding'];
       const cookies=response.headers.getSetCookie();if(cookies.length)out['set-cookie']=cookies.join('\n');
-      await route.fulfill({status:response.status,headers:out,body:Buffer.from(await response.arrayBuffer())});
-    } catch {transportFailed=true;await route.abort().catch(()=>{});}
+      routePhase='fulfill';await route.fulfill({status:response.status,headers:out,body:Buffer.from(await response.arrayBuffer())});
+    } catch(error) {transportFailed=true;transportFailure??={routePhase,requestKind,method,statusCode,errorKind:['AssertionError','TypeError','Error'].includes(error?.name)?error.name:'other',cause:['ECONNREFUSED','ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT'].includes(error?.cause?.code)?error.cause.code:null};await route.abort().catch(()=>{});}
   });
   page=await context.newPage();page.setDefaultTimeout(20000);page.on('pageerror',()=>errors.push('pageerror'));
   stage='natural_login';await page.goto(ORIGIN);
@@ -41,9 +43,9 @@ try {
   await page.getByLabel('Пароль',{exact:true}).fill(readFileSync('/run/secrets/fixture-password','utf8').trim());
   const login=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/auth/login');
   await page.getByRole('button',{name:'Войти',exact:true}).click();assert.equal((await login).status(),200);
-  await page.getByRole('button',{name:'Финансы',exact:true}).first().click();
+  stage='finance_navigation';await page.getByRole('button',{name:'Финансы',exact:true}).first().click();
   await page.getByRole('tab',{name:'Статьи',exact:true}).click();
-  await page.getByText('Статьи ещё не добавлены',{exact:true}).waitFor();
+  stage='empty_catalog';await page.getByText('Статьи ещё не добавлены',{exact:true}).waitFor();
   async function save(click,expected=200) { const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/finance-actions'&&r.request().method()==='POST');await click();const r=await response;assert.equal(r.status(),expected);await page.waitForFunction(()=>!document.querySelector('.ahFinanceArticles button:disabled')); }
   async function create(name,report,direction) {
     await page.getByRole('tab',{name:'Статьи',exact:true}).click();
@@ -88,5 +90,5 @@ try {
   writeFileSync('/evidence/result.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 } catch {
   if(page&&stage!=='natural_login')await page.screenshot({path:'/evidence/failure.png',fullPage:true}).catch(()=>{});
-  console.error(JSON.stringify({kind:'finance-isolated-browser',result:'fail',stage,transportFailed,pageErrors:errors.length,productionAcceptance:'not_run'}));process.exitCode=2;
+  console.error(JSON.stringify({kind:'finance-isolated-browser',result:'fail',stage,transportFailed,transportFailure,pageErrors:errors.length,productionAcceptance:'not_run'}));process.exitCode=2;
 } finally {await browser?.close();}
