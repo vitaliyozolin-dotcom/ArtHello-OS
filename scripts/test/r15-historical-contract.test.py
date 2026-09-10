@@ -16,12 +16,13 @@ class HistoricalR15Tests(unittest.TestCase):
         self.target = Path(self.temporary.name)
         historical.extract_current(ROOT, self.target)
 
-    def test_only_three_reviewed_fixture_inputs_change_and_current_runtime_is_preserved(self):
+    def test_only_four_reviewed_fixture_inputs_change_and_current_runtime_is_preserved(self):
         pins = historical.check_current(self.target)
         before = {str(p.relative_to(self.target)): p.read_bytes() for p in self.target.rglob('*') if p.is_file()}
         historical.overlay_historical(ROOT, self.target, pins)
         after = {str(p.relative_to(self.target)): p.read_bytes() for p in self.target.rglob('*') if p.is_file()}
-        self.assertEqual({p for p in before if before[p] != after[p]}, set(historical.ARCHIVED_PATHS) | {historical.WORKFLOW})
+        self.assertEqual({p for p in before.keys() | after.keys() if before.get(p) != after.get(p)},
+                         set(historical.ARCHIVED_PATHS) | {historical.WORKFLOW, historical.CONTROLLER})
         self.assertTrue(all(after[p] == raw for p, raw in before.items() if '/src/' in p))
         for path, expected in pins['sourceFiles'].items():
             self.assertEqual(historical.digest(after[path]), expected, path)
@@ -44,7 +45,7 @@ class HistoricalR15Tests(unittest.TestCase):
 
     def test_old_controller_and_pins_cannot_be_redefined(self):
         for path, reason in [(historical.PINS_PATH, 'FROZEN_R15_PINS_DRIFT'),
-                             ('.github/workflows/deploy-arthello-tochka-r15-20260910.yml', 'FROZEN_R15_CONTROLLER_DRIFT')]:
+                             (historical.ARCHIVED_CONTROLLER, 'FROZEN_R15_CONTROLLER_DRIFT')]:
             file = self.target / path
             original = file.read_bytes()
             file.write_bytes(b'unreviewed\n')

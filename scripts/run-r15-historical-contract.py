@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hosted-only R15 history check after a reviewed banking source change.
 
-Validate the current canonical source before restoring three pinned inputs in
+Validate the current canonical source before restoring four pinned inputs in
 a private fixture. This helper never authorizes production or changes checkout.
 """
 import hashlib
@@ -20,7 +20,9 @@ PINS_PATH = 'deploy/v52/recovery-r15/source-pins.json'
 PINS_SHA256 = '6070d6944c441707a862a4ee0827165a5b0f11913e612913ecc98f79d10f2f34'
 WORKFLOW = '.github/workflows/verify-arthello-r14.yml'
 WORKFLOW_SHA256 = '8254103a7620a9383fb7c15964edb9387eb52dafcc7e000e182737beec1803bb'
-CURRENT_WORKFLOW_NORMALIZED = 'a5e4e391fb020032dcda9e2a76adc9ccdd9ac77556fd03c9ac5a76fdbd796bb0'
+CONTROLLER = '.github/workflows/deploy-arthello-tochka-r15-20260910.yml'
+ARCHIVED_CONTROLLER = 'deploy/v52/recovery-r16/r15-controller.yml'
+CURRENT_WORKFLOW_NORMALIZED = 'd951661d7a1638d0e246b062b27c0de3d822ddd1cd71659478f0835a6f45b053'
 ARCHIVED_PATHS = ('deploy/school-source-manifest.json', 'scripts/run-r14-historical-contract.py')
 CURRENT_PINS = {
     'deploy/school-source-manifest.json': '6cdd08eb0a330836889096e207858314a1a5dfd53b0153210aed0e2fabc9c6bc',
@@ -77,18 +79,22 @@ def check_current(target):
     for name, expected in pins['sourceFiles'].items():
         if name not in ARCHIVED_PATHS:
             require(digest((target / name).read_bytes()) == expected, 'CURRENT_PROTOCOL_DRIFT:' + name)
-    controller = target / '.github/workflows/deploy-arthello-tochka-r15-20260910.yml'
+    require(not (target / CONTROLLER).exists(), 'RETIRED_R15_CONTROLLER_ACTIVE')
+    controller = target / ARCHIVED_CONTROLLER
     require(digest(controller.read_bytes()) == pins['controllerSha256'], 'FROZEN_R15_CONTROLLER_DRIFT')
     workflow = (target / WORKFLOW).read_text()
     pattern = r'(?m)^      R15_HISTORICAL_RUNNER_SHA256: [a-f0-9]{64}$'
     require(len(re.findall(pattern, workflow)) == 1, 'CURRENT_WORKFLOW_PIN')
     normalized = re.sub(pattern, '      R15_HISTORICAL_RUNNER_SHA256: RUNNER_SHA256_PENDING', workflow)
+    r16_pattern = r'(?m)^      R16_CONTRACT_SHA256: [a-f0-9]{64}$'
+    require(len(re.findall(r16_pattern, normalized)) == 1, 'CURRENT_R16_WORKFLOW_PIN')
+    normalized = re.sub(r16_pattern, '      R16_CONTRACT_SHA256: CONTRACT_SHA256_PENDING', normalized)
     require(digest(normalized.encode()) == CURRENT_WORKFLOW_NORMALIZED, 'CURRENT_WORKFLOW_DRIFT')
     return pins
 
 
 def overlay_historical(root, target, pins):
-    for name, expected in [(name, pins['sourceFiles'][name]) for name in ARCHIVED_PATHS] + [(WORKFLOW, WORKFLOW_SHA256)]:
+    for name, expected in [(name, pins['sourceFiles'][name]) for name in ARCHIVED_PATHS] + [(WORKFLOW, WORKFLOW_SHA256), (CONTROLLER, pins['controllerSha256'])]:
         raw = git(root, 'show', BASELINE + ':' + name)
         require(digest(raw) == expected, 'ARCHIVED_SOURCE_DRIFT:' + name)
         (Path(target) / name).write_bytes(raw)
