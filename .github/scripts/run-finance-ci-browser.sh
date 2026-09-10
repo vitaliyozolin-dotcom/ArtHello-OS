@@ -17,10 +17,11 @@ cleanup() {
   rm -rf -- "$fixture_dir"
   exit "$rc"
 }
-trap cleanup EXIT INT TERM HUP
 test -z "$(docker ps -aq --filter "name=^/$scope-")"
 test -z "$(docker volume ls -q --filter "name=^$scope-data$")"
 test -z "$(docker network ls -q --filter "name=^$scope-net$")"
+# Cleanup becomes authorized only after this namespace is proven unused.
+trap cleanup EXIT INT TERM HUP
 mkdir -p "$RUNNER_TEMP/finance-browser-evidence"
 chmod 0777 "$RUNNER_TEMP/finance-browser-evidence"
 python3 -I - "$fixture_dir" <<'PY'

@@ -99,7 +99,7 @@ jobs:
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       R14_CONTRACT_SHA256: 37614beafcbf18347d2429713301699bd4c5e3474cd4f7db840dc166b4c852a3
-      ACCEPTED_HISTORY_RUNNER_SHA256: 5dfcf88c67dc9215c6348a2fb625efd9bc7edfaaa0864281570e79356d2ff088
+      ACCEPTED_HISTORY_RUNNER_SHA256: 172c0b6780432c46ab1137d9e199626f2a9d3a6127e4d9a52da5c1352bb933ee
       R14_HISTORICAL_RUNNER_SHA256: ab0aeb384d5c5eb4859b86274f0a70778518b846620e4c2dbe47710c9c0fb48b
     steps:
     - name: Check out exact unprivileged R14 verification source
@@ -142,7 +142,7 @@ jobs:
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       R15_CONTRACT_SHA256: db8d577e4acd86180cb2a08234f99e654832918fcf29ad01697b25d57d700533
-      ACCEPTED_HISTORY_RUNNER_SHA256: 5dfcf88c67dc9215c6348a2fb625efd9bc7edfaaa0864281570e79356d2ff088
+      ACCEPTED_HISTORY_RUNNER_SHA256: 172c0b6780432c46ab1137d9e199626f2a9d3a6127e4d9a52da5c1352bb933ee
       R15_HISTORICAL_RUNNER_SHA256: bcaa0ef337e40dd428349293dbabbbe89193841d916c4dc3df8be07a6d336111
     steps:
     - name: Check out exact unprivileged R15 verification source
@@ -174,7 +174,7 @@ jobs:
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       R16_CONTRACT_SHA256: fbf8f98aaf6c751296009178fba73139372b9153f7b2f8a7e4a0b4ed4b40fa30
-      ACCEPTED_HISTORY_RUNNER_SHA256: 5dfcf88c67dc9215c6348a2fb625efd9bc7edfaaa0864281570e79356d2ff088
+      ACCEPTED_HISTORY_RUNNER_SHA256: 172c0b6780432c46ab1137d9e199626f2a9d3a6127e4d9a52da5c1352bb933ee
     steps:
     - name: Check out exact unprivileged R16 verification source
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -204,7 +204,7 @@ jobs:
     timeout-minutes: 15
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      R17_CONTRACT_SHA256: e135afd60943b58b5cd17a9b369bc3ec7ebd07242c5d3a80fb9b8545c580fea1
+      R17_CONTRACT_SHA256: 76b645964e747fe9fe1a58e702a7a813f122987f41dc8b90af404fc0220675bf
     steps:
     - name: Check out exact unprivileged R17 verification source
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -233,5 +233,6 @@ jobs:
         python3 -I -B .github/scripts/test-r17-continuation-adapters.py
         python3 -I -B .github/scripts/test-r17-live-baseline.py
         python3 -I -B .github/scripts/test-run-r17-live-browser.py
+        python3 -I -B .github/scripts/test-run-finance-ci-browser.py
         node --test scripts/test/retire-r16-browser.test.mjs
         node --check deploy/browser/retire-r16-browser.mjs

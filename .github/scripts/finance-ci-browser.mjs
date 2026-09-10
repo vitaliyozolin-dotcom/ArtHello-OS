@@ -6,7 +6,7 @@ import { chromium } from 'playwright-core';
 import { inspectSandbox } from './flow.mjs';
 
 const ORIGIN='https://finance.ci.invalid';
-let stage='guard',browser,page;
+let stage='guard',actionStage=null,browser,page;
 const errors=[],writes=[];let requests=0,loginCount=0,transportFailed=false,transportFailure=null;
 try {
   assert.equal(process.env.ARTHELLO_FINANCE_CI,'disposable-hosted-fixture');
@@ -18,14 +18,16 @@ try {
   assert(Object.values(inspectSandbox(rows)).every(Boolean));await sandbox.close();
   const context=await browser.newContext({viewport:{width:1440,height:1000},serviceWorkers:'block',acceptDownloads:false,ignoreHTTPSErrors:false});
   await context.route('**/*',async route=>{
-    let routePhase='origin',requestKind='other',method='unknown',statusCode=null;
+    let routePhase='origin',requestKind='other',method='unknown',statusCode=null,destinationKind='other',destinationOrigin=null;
     try {
       const request=route.request(),url=new URL(request.url());
+      destinationOrigin=url.origin.slice(0,120);
+      destinationKind=url.origin===ORIGIN?'fixture':url.origin==='null'?'opaque':url.hostname==='127.0.0.1'?'localhost':url.protocol==='http:'?'other_http':'other_https';
       requestKind=url.pathname==='/'?'root':url.pathname.startsWith('/assets/')?'asset':['/api/auth/login','/api/auth/me','/api/finance','/api/finance-actions','/api/user-dashboard-layouts','/api/notifications','/api/settings'].includes(url.pathname)?url.pathname:'other';
       // The actual stylesheet requests these optional public fonts. Keep this
       // disposable fixture offline and exercise its normal system-font fallback.
       if(['https://fonts.googleapis.com','https://fonts.gstatic.com'].includes(url.origin)&&request.method()==='GET') {await route.abort();return;}
-      assert.equal(url.origin,ORIGIN);assert(++requests<=500);
+      assert.equal(url.origin,ORIGIN);routePhase='request_budget';assert(++requests<=500);
       method=request.method();routePhase='method';
       if(!['GET','HEAD'].includes(method)) {
         assert.equal(method,'POST');
@@ -38,7 +40,7 @@ try {
       statusCode=response.status;routePhase='headers';const out=Object.fromEntries(response.headers);delete out['content-encoding'];delete out['content-length'];delete out['transfer-encoding'];
       const cookies=response.headers.getSetCookie();if(cookies.length)out['set-cookie']=cookies.join('\n');
       routePhase='fulfill';await route.fulfill({status:response.status,headers:out,body:Buffer.from(await response.arrayBuffer())});
-    } catch(error) {transportFailed=true;transportFailure??={routePhase,requestKind,method,statusCode,errorKind:['AssertionError','TypeError','Error'].includes(error?.name)?error.name:'other',cause:['ECONNREFUSED','ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT'].includes(error?.cause?.code)?error.cause.code:null};await route.abort().catch(()=>{});}
+    } catch(error) {transportFailed=true;transportFailure??={routePhase,requestKind,destinationKind,destinationOrigin,method,statusCode,errorKind:['AssertionError','TypeError','Error'].includes(error?.name)?error.name:'other',cause:['ECONNREFUSED','ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT'].includes(error?.cause?.code)?error.cause.code:null};await route.abort().catch(()=>{});}
   });
   page=await context.newPage();page.setDefaultTimeout(20000);page.on('pageerror',()=>errors.push('pageerror'));
   stage='natural_login';await page.goto(ORIGIN);
@@ -52,16 +54,18 @@ try {
   async function save(click,expected=200) { const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/finance-actions'&&r.request().method()==='POST');await click();const r=await response;assert.equal(r.status(),expected);await page.waitForFunction(()=>!document.querySelector('.ahFinanceArticles button:disabled')); }
   async function create(name,report,direction) {
     await page.getByRole('tab',{name:'Статьи',exact:true}).click();
-    await page.getByLabel('Название статьи',{exact:true}).fill(name);await page.getByLabel('Отчёт',{exact:true}).selectOption(report);
-    await page.getByLabel(report==='cashflow'?'Направление':'Тип статьи',{exact:true}).selectOption(direction);
-    await save(()=>page.getByRole('button',{name:'Создать черновик',exact:true}).click());
+    const form=page.locator('.ahFinanceArticleForm').first();
+    actionStage='article_name';await form.getByLabel('Название статьи',{exact:true}).fill(name);
+    actionStage='report_select';await form.getByRole('combobox',{name:'Отчёт'}).selectOption(report);
+    actionStage='direction_select';await form.getByRole('combobox',{name:report==='cashflow'?'Направление':'Тип статьи'}).selectOption(direction);
+    actionStage='create_draft';await save(()=>form.getByRole('button',{name:'Создать черновик',exact:true}).click());
     const row=page.locator('.ahFinanceArticleList li').filter({has:page.getByText(name,{exact:true})});
-    await row.getByText('Черновик',{exact:true}).waitFor();
-    await save(()=>row.getByRole('button',{name:'Утвердить',exact:true}).click());await row.getByText('Утверждена',{exact:true}).waitFor();
+    actionStage='draft_visible';await row.getByText('Черновик',{exact:true}).waitFor();
+    actionStage='approve_draft';await save(()=>row.getByRole('button',{name:'Утвердить',exact:true}).click());await row.getByText('Утверждена',{exact:true}).waitFor();actionStage=null;
   }
   async function preview(article,inn,purpose) {
     const form=page.locator('form').filter({has:page.getByRole('button',{name:'Предпросмотр',exact:true})});
-    await form.getByLabel('Статья ДДС',{exact:true}).selectOption({label:article});
+    await form.getByRole('combobox',{name:'Статья ДДС'}).selectOption({label:article});
     await form.getByLabel('ИНН контрагента — точное совпадение',{exact:true}).fill(inn);await form.getByLabel('Назначение содержит',{exact:true}).fill(purpose);
     await form.getByRole('button',{name:'Предпросмотр',exact:true}).click();await page.getByText(/Найдено: 1 · сумма/).waitFor();
     await page.getByRole('button',{name:'Открыть операции',exact:true}).click();
@@ -70,8 +74,8 @@ try {
   stage='desktop_articles';await create('CI Обучение','cashflow','Поступление');await create('CI Услуги','pnl','Поступление');
   await page.screenshot({path:'/evidence/desktop-articles.png',fullPage:true});
   stage='desktop_allocation';await preview('CI Обучение','9999999999','CI обучение');
-  const dialog=page.getByRole('dialog');await dialog.getByLabel('Статья ДДС',{exact:true}).selectOption('CI Обучение');
-  await dialog.getByLabel('Класс ОПиУ',{exact:true}).selectOption('Доходы ОПиУ');await dialog.getByLabel('Статья ОПиУ',{exact:true}).selectOption('CI Услуги');await dialog.getByLabel('Период ОПиУ',{exact:true}).fill('2026-09');
+  const dialog=page.getByRole('dialog');await dialog.getByRole('combobox',{name:'Статья ДДС'}).selectOption('CI Обучение');
+  await dialog.getByRole('combobox',{name:'Класс ОПиУ'}).selectOption('Доходы ОПиУ');await dialog.getByRole('combobox',{name:'Статья ОПиУ'}).selectOption('CI Услуги');await dialog.getByLabel('Период ОПиУ',{exact:true}).fill('2026-09');
   await save(()=>dialog.getByRole('button',{name:'Сохранить разнесение',exact:true}).click());await dialog.waitFor({state:'hidden'});
   stage='reload_dds';await page.reload();await page.getByRole('tab',{name:'ДДС',exact:true}).click();
   const dds=page.locator('.finance-table tbody tr').filter({has:page.getByRole('button',{name:'CI Обучение',exact:true})});await dds.waitFor();assert.match(await dds.innerText(),/1\D*234,56/);
@@ -80,18 +84,19 @@ try {
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
   await page.screenshot({path:'/evidence/mobile-articles.png',fullPage:true});
   stage='mobile_allocation';await preview('CI Аренда','8888888888','CI аренда');
-  assert(await dialog.evaluate(e=>e.scrollWidth<=e.clientWidth+2));await dialog.getByLabel('Статья ДДС',{exact:true}).selectOption('CI Аренда');
+  assert(await dialog.evaluate(e=>e.scrollWidth<=e.clientWidth+2));await dialog.getByRole('combobox',{name:'Статья ДДС'}).selectOption('CI Аренда');
   await dialog.getByRole('button',{name:'Не включать в ОПиУ',exact:true}).click();await page.screenshot({path:'/evidence/mobile-allocation.png',fullPage:true});
   await save(()=>dialog.getByRole('button',{name:'Сохранить разнесение',exact:true}).click());await dialog.waitFor({state:'hidden'});
   stage='archive_history';await page.getByRole('tab',{name:'Статьи',exact:true}).click();
   const archived=page.locator('.ahFinanceArticleList li').filter({has:page.getByText('CI Обучение',{exact:true})});await save(()=>archived.getByRole('button',{name:'В архив',exact:true}).click());
   await page.getByLabel('Показывать архив',{exact:true}).check();await archived.getByText('Архив',{exact:true}).waitFor();
   await page.reload();await page.getByRole('tab',{name:'ДДС',exact:true}).click();await page.getByRole('button',{name:'CI Обучение',exact:true}).click();await page.locator('.finance-table tbody tr').first().click();
-  assert.equal(await dialog.getByLabel('Статья ДДС',{exact:true}).inputValue(),'CI Обучение');
+  assert.equal(await dialog.getByRole('combobox',{name:'Статья ДДС'}).inputValue(),'CI Обучение');
   assert.equal(loginCount,1);assert.equal(transportFailed,false);assert.equal(errors.length,0);assert.equal(writes.filter(x=>x==='classifyOperation').length,2);assert.equal(writes.length,9);
   const result={kind:'finance-isolated-browser',result:'pass',sourceSha:process.env.CHECKED_SOURCE_SHA,viewports:[1440,390],actualApplication:true,actualDatabase:true,apiMocked:false,sessionInjected:false,chromiumSandbox:'verified',productionAcceptance:'not_run',bankFacts:'synthetic CI only',screenshots:['desktop-articles.png','desktop-dds.png','mobile-articles.png','mobile-allocation.png']};
   writeFileSync('/evidence/result.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
-} catch {
+} catch(error) {
   if(page&&stage!=='natural_login')await page.screenshot({path:'/evidence/failure.png',fullPage:true}).catch(()=>{});
-  console.error(JSON.stringify({kind:'finance-isolated-browser',result:'fail',stage,transportFailed,transportFailure,pageErrors:errors.length,productionAcceptance:'not_run'}));process.exitCode=2;
+  const reason=String(error?.message||'').includes('strict mode violation')?'ambiguous_locator':error?.name==='TimeoutError'?'timeout':error?.name==='AssertionError'?'assertion':'other';
+  console.error(JSON.stringify({kind:'finance-isolated-browser',result:'fail',stage,actionStage,reason,requests,writes:writes.length,transportFailed,transportFailure,pageErrors:errors.length,productionAcceptance:'not_run'}));process.exitCode=2;
 } finally {await browser?.close();}
