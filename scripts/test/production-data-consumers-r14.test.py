@@ -1,4 +1,4 @@
-"""R15 public consumer proof with retained R14 validators and bounded FakeDocker."""
+"""R16 public consumer proof with R16 history validators and bounded FakeDocker."""
 import copy
 import datetime as dt
 import fcntl
@@ -24,24 +24,26 @@ def load(name, path):
 
 
 consumers = load('r14_production_consumers_test', ROOT / 'scripts/production-data-consumers-r14.py')
-donor = load('r14_public_consumer_fixtures', ROOT / '.github/scripts/test-r14-continuation-adapters.py')
+donor = load('r14_public_consumer_fixtures', ROOT / '.github/scripts/test-r16-continuation-adapters.py')
 launcher_donor = load('r14_readonly_launcher_fixtures', ROOT / 'scripts/test/run-production-readonly.test.py')
 private, json_bytes = donor.private, donor.json_bytes
 REFUSED = (ValueError, OSError, consumers.adoption.r7.Refused,
-           consumers.controller.r7.Refused, consumers.gateway.GateError,
+           consumers.controller.r7.Refused, consumers.controller.historical.r7.Refused, consumers.gateway.GateError,
            donor.adoption.r7.Refused, donor.backup_tests.r7.Refused)
 
 
-class AcceptedR15ReceiptTests(unittest.TestCase):
-    def test_actual_successful_r15_receipt_is_pinned_exactly(self):
-        self.assertEqual(consumers.EXPECTED_SOURCE, '4a0713b4a7d87f132e49836fe0ce9ca9258bc1ec')
-        self.assertEqual(consumers.EXPECTED_TREE, 'ac0ec2a2845eee6254ba7cf8c0e0b83d0e5848de')
+class AcceptedR16ReceiptTests(unittest.TestCase):
+    def test_actual_successful_r16_receipt_is_pinned_exactly(self):
+        self.assertEqual(consumers.EXPECTED_SOURCE, 'cb990279e070fddbfa9a0adbd21b56de25b85588')
+        self.assertEqual(consumers.EXPECTED_TREE, '1ce4c733034060dc84d558d49dab96d1be9b1cf8')
         self.assertEqual(consumers.ACCEPTED_PINS, {
-            'runId': '34445017241', 'resourceAttempt': '1', 'acceptedAttempt': '1',
-            'imageId': 'sha256:0f15a32c9dff9cd7278a1449bd66f282abc514f0392edfd57262ed25ef247a6f',
-            'runtimeFingerprint': 'b64e4dcb206ded758f4c636c74bf42588961f2a88e044689207e9dda7939274e',
-            'candidateContainerId': '3b81e98433e7d948d899fcfc1a9e94ee15faa3ef17cb1d1d4d1cb5c371ff67c7',
-            'contextSha256': '9c4ef4d58a8a7d97835bc1f8f00cc4aad44849a8cd62b7bcd4869cce247d96ca',
+            'acceptedAttempt': '1',
+            'candidateContainerId': 'd012fe547d8e57d13677d921b07d7847219705a4e0202faee3134c328f07c498',
+            'contextSha256': 'a43ac4fa996ffcf18854afc83c3245552fe804e80abb94a25a0fa515cd2a9eef',
+            'imageId': 'sha256:556216a36f878fad5b99bc1e2cca0158ebdcc3f7d2ee23fda191285d4ad4ef44',
+            'resourceAttempt': '1',
+            'runId': '34461449594',
+            'runtimeFingerprint': 'e77874370bebb875bab6e661011eccbaee1748e9bc3bb7e7b48b05fc328e6442',
         })
         self.assertEqual(consumers.accepted_pins(), consumers.ACCEPTED_PINS)
 
@@ -164,6 +166,12 @@ class PublicConsumerTests(unittest.TestCase):
         live_bound = patch.object(consumers.controller, 'LIVE_CONTEXT_SHA256', fixture.live_historical['contextSha256'])
         live_bound.start()
         self.addCleanup(live_bound.stop)
+        for module, field, digest in [
+            (consumers.controller.historical, 'LIVE_CONTEXT_SHA256', fixture.r13_historical['contextSha256']),
+            (consumers.controller.historical, 'ACCEPTED_CONTEXT_SHA256', fixture.historical['contextSha256'])]:
+            bound = patch.object(module, field, digest)
+            bound.start()
+            self.addCleanup(bound.stop)
         return previous, fixture
 
     def test_exact_public_app_and_adopted_r12_worker_have_readonly_proof(self):
@@ -210,8 +218,31 @@ class PublicConsumerTests(unittest.TestCase):
 
     def test_unpinned_historical_predecessor_is_denied(self):
         _, fixture = self.historical()
-        with patch.object(consumers.controller, 'ACCEPTED_CONTEXT_SHA256', '0' * 64), self.assertRaises(REFUSED):
+        with patch.object(consumers.controller.historical, 'ACCEPTED_CONTEXT_SHA256', '0' * 64), self.assertRaises(REFUSED):
             self.observe()
+
+    def test_all_three_accepted_ancestors_preserve_containers_and_receipts(self):
+        _, fixture = self.historical()
+        donor.controller_tests.ControllerTests.retained_r12(fixture)
+        retired = donor.controller_tests.ControllerTests.retained_r13(fixture)
+        paths = [fixture.live_historical_path, fixture.r13_historical_path, fixture.historical_path]
+        before = copy.deepcopy(self.f.backup.docker.objects), [p.read_bytes() for p in paths]
+        self.assertEqual(self.observe()['liveId'], self.f.candidate['Id'])
+        self.assertEqual(before, (self.f.backup.docker.objects, [p.read_bytes() for p in paths]))
+        retired['State']['Running'] = True
+        with self.assertRaises(REFUSED): self.observe()
+
+    def test_every_historical_context_digest_is_required_with_the_full_chain(self):
+        _, fixture = self.historical()
+        donor.controller_tests.ControllerTests.retained_r12(fixture)
+        donor.controller_tests.ControllerTests.retained_r13(fixture)
+        for path in [fixture.live_historical_path, fixture.r13_historical_path, fixture.historical_path]:
+            original = path.read_bytes()
+            record = json.loads(original)
+            record['contextSha256'] = '0' * 64
+            private(path, json_bytes(record))
+            with self.subTest(path=path.name), self.assertRaises(REFUSED): self.observe()
+            private(path, original)
 
     def test_missing_or_nonpublic_candidate_state_fails_before_docker(self):
         for phase in ('maintenance-started', 'candidate-verified', 'unknown'):
@@ -483,18 +514,18 @@ class PublicConsumerTests(unittest.TestCase):
             docker.read_gateway_config(self.f.caddy['Id'], '/etc/caddy/Caddyfile')
 
 
-class R15LauncherTests(unittest.TestCase):
+class R16LauncherTests(unittest.TestCase):
     """Compose the existing temporary executable harness; do not rediscover its suite."""
     def setUp(self):
         self.fixture = launcher_donor.LauncherTests('test_verified_pair_is_checked_before_and_after_only_readonly_probe')
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
-        self.fixture.environment['EXPECTED_LIVE_SOURCE_SHA'] = '4a0713b4a7d87f132e49836fe0ce9ca9258bc1ec'
+        self.fixture.environment['EXPECTED_LIVE_SOURCE_SHA'] = 'cb990279e070fddbfa9a0adbd21b56de25b85588'
         shim = self.fixture.directory / 'python3'
         source = shim.read_text()
         replacements = [
             ('scripts/production-data-consumers.py', 'scripts/production-data-consumers-r14.py'),
-            ("sourceSha='a'*40", "sourceSha='4a0713b4a7d87f132e49836fe0ce9ca9258bc1ec'"),
+            ("sourceSha='a'*40", "sourceSha='cb990279e070fddbfa9a0adbd21b56de25b85588'"),
             ("backupId=('f' if mode == 'final-drift' and count == 2 else 'd')*64",
              "backupId=('f' if mode == 'final-drift' and count == 2 else 'd')*64,\n"
              "                         proofSha256=('f' if mode == 'proof-drift' and count == 2 else 'e')*64"),
@@ -514,7 +545,7 @@ class R15LauncherTests(unittest.TestCase):
             self.assertEqual(arguments[arguments.index('--expected-release') + 1], self.fixture.environment['EXPECTED_LIVE_SOURCE_SHA'])
         return observations
 
-    def test_fixed_r15_launcher_observes_before_and_after_complete_or_incomplete_probe(self):
+    def test_fixed_r16_launcher_observes_before_and_after_complete_or_incomplete_probe(self):
         for complete in (True, False):
             with self.subTest(complete=complete):
                 self.fixture.log.unlink(missing_ok=True)
@@ -532,7 +563,7 @@ class R15LauncherTests(unittest.TestCase):
                 self.assertNotIn('READONLY_BLOCKED=', result.stdout)
                 self.assertNotIn('UNSAFE_', result.stdout + result.stderr)
 
-    def test_initial_r15_refusal_has_no_legacy_fallback_or_database_probe(self):
+    def test_initial_r16_refusal_has_no_legacy_fallback_or_database_probe(self):
         result = self.fixture.run_launcher('initial-refusal')
         self.assertEqual(result.returncode, 2)
         self.assertEqual(len(self.new_observations()), 1)

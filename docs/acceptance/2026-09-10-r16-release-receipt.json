@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "evidenceKind": "actual-protected-deploy-log",
+  "sourceSha": "cb990279e070fddbfa9a0adbd21b56de25b85588",
+  "sourceTree": "1ce4c733034060dc84d558d49dab96d1be9b1cf8",
+  "runId": "34461449594",
+  "runAttempt": 1,
+  "runConclusion": "success",
+  "bundleJobId": 102819996124,
+  "deployJobId": 102820502860,
+  "cleanup": "success",
+  "acceptedPins": {
+    "acceptedAttempt": "1",
+    "candidateContainerId": "d012fe547d8e57d13677d921b07d7847219705a4e0202faee3134c328f07c498",
+    "contextSha256": "a43ac4fa996ffcf18854afc83c3245552fe804e80abb94a25a0fa515cd2a9eef",
+    "imageId": "sha256:556216a36f878fad5b99bc1e2cca0158ebdcc3f7d2ee23fda191285d4ad4ef44",
+    "resourceAttempt": "1",
+    "runId": "34461449594",
+    "runtimeFingerprint": "e77874370bebb875bab6e661011eccbaee1748e9bc3bb7e7b48b05fc328e6442"
+  },
+  "candidateAcceptance": {
+    "acceptancePhase": "candidate-maintenance",
+    "arthelloOrigin": "https://arthello-188-225-38-55.sslip.io",
+    "callbackUrlConstructed": false,
+    "candidateContainerId": "d012fe547d8e57d13677d921b07d7847219705a4e0202faee3134c328f07c498",
+    "candidateContextSha256": "a43ac4fa996ffcf18854afc83c3245552fe804e80abb94a25a0fa515cd2a9eef",
+    "evidenceReference": "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34461449594/attempts/1",
+    "intendedCandidateArtHelloSha": "cb990279e070fddbfa9a0adbd21b56de25b85588",
+    "method": "natural-browser-navigation",
+    "observedAtUtc": "2026-09-10T09:41:21.086Z",
+    "observedLiveArtHelloSha": "cb990279e070fddbfa9a0adbd21b56de25b85588",
+    "observedLiveSchoolSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+    "observedSchoolRepairConfigSha256": "2ba0ad1ce530db9c9abb622e5727e6345ab74a85699e121b718d9a0405b1f40a",
+    "observedSchoolRepairExecutionUid": 1000,
+    "observedSchoolRepairStateDirectorySha256": "cedd256dabc1dc6ff105887d31b5893bb384cdfe751b532e0c115d69ff6bfeee",
+    "result": "pass",
+    "schemaVersion": 3,
+    "schoolOrigin": "https://school-188-225-38-55.sslip.io",
+    "sessionInjected": false,
+    "verifiedSteps": [
+      "open_education_in_authenticated_arthello",
+      "click_diary_entry",
+      "follow_natural_sso_redirects",
+      "authenticated_school_diary_visible"
+    ]
+  },
+  "afterPublicAcceptance": {
+    "arthelloOrigin": "https://arthello-188-225-38-55.sslip.io",
+    "callbackUrlConstructed": false,
+    "evidenceReference": "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34461449594/attempts/1",
+    "intendedCandidateArtHelloSha": "cb990279e070fddbfa9a0adbd21b56de25b85588",
+    "method": "natural-browser-navigation",
+    "observedAtUtc": "2026-09-10T09:41:39.617Z",
+    "observedLiveArtHelloSha": "cb990279e070fddbfa9a0adbd21b56de25b85588",
+    "observedLiveSchoolSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+    "observedSchoolRepairConfigSha256": "2ba0ad1ce530db9c9abb622e5727e6345ab74a85699e121b718d9a0405b1f40a",
+    "observedSchoolRepairExecutionUid": 1000,
+    "observedSchoolRepairStateDirectorySha256": "cedd256dabc1dc6ff105887d31b5893bb384cdfe751b532e0c115d69ff6bfeee",
+    "result": "pass",
+    "schemaVersion": 3,
+    "schoolOrigin": "https://school-188-225-38-55.sslip.io",
+    "sessionInjected": false,
+    "verifiedSteps": [
+      "open_education_in_authenticated_arthello",
+      "click_diary_entry",
+      "follow_natural_sso_redirects",
+      "authenticated_school_diary_visible"
+    ]
+  },
+  "backup": {
+    "backup": {
+      "historyCount": 2,
+      "initialBackupId": "arthello-v52-20260909T081023Z-f0cce7847651",
+      "lastVerifiedBackupId": "arthello-v52-20260910T003001Z-de297eb80f1f",
+      "nextAt": "2026-09-11T00:15:00+00:00"
+    },
+    "releaseSha": "cb990279e070fddbfa9a0adbd21b56de25b85588",
+    "schemaVersion": 14,
+    "state": "sealed",
+    "volumes": {
+      "activation": {
+        "name": "arthello-v52-tochka-activation-34461449594-1",
+        "ownership": "owned"
+      },
+      "backups": {
+        "name": "arthello-v52-backups-34326582961-1",
+        "ownership": "adopted"
+      },
+      "control": {
+        "name": "arthello-v52-backup-control-34326582961-1",
+        "ownership": "adopted"
+      }
+    },
+    "worker": {
+      "id": "570d3fb2f96dfa7a08d0a98fbeda0d208f08c0805efcc444bc958fbabf515052",
+      "name": "arthello-v52-backup-worker-34326582961-1",
+      "ownership": "adopted"
+    }
+  },
+  "bankAcceptance": "not_observed_after_r16"
+}
