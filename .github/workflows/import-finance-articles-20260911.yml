@@ -1,4 +1,4 @@
-name: Import approved finance articles D115
+name: Import finance model and classify Atlas D123
 
 on:
   push:
@@ -6,12 +6,20 @@ on:
     paths:
       - ".github/scripts/import-finance-articles.py"
       - ".github/scripts/test_import_finance_articles.py"
+      - ".github/scripts/classify-arthello-atlas.py"
+      - ".github/scripts/test_classify_arthello_atlas.py"
       - ".github/workflows/import-finance-articles-20260911.yml"
       - "docs/finance/article-catalog-2026-09-11.json"
       - "docs/acceptance/2026-09-11-finance-article-import.md"
       - "DECISIONS.md"
       - "CURRENT_STATE.md"
+      - "DATA_COVERAGE.md"
       - "BACKLOG.md"
+      - "docs/PROJECT_PASSPORT_PRODUCTION_RU.md"
+      - "docs/acceptance/2026-09-10-d123-finance-operating-model.md"
+      - "scripts/src/alfacrm-safe.ts"
+      - "scripts/src/arthello-master-data.ts"
+      - "scripts/test/alfacrm-safe.test.mjs"
       - "quality-gates/workflow-policy-ratchet.json"
 
 permissions:
@@ -39,8 +47,8 @@ jobs:
         env:
           EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
           EXPECTED_ACTOR: vitaliyozolin-dotcom
-          EXPECTED_PARENT: c8759ff213c72fd50763eb96afce68d93d2e67d7
-          EXPECTED_CATALOG_DIGEST: 945a5c824da3c136142ae209456a083e9a926369986ca79077359195a971187f
+          EXPECTED_PARENT: c8947e5ae591936199dbd76f27015c67f2906e8d
+          EXPECTED_CATALOG_DIGEST: b07049751a1bc97430bd994f56aa0a9191369e6bf1745b4b72940b9bf7608c39
         run: |
           set -Eeuo pipefail
           test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
@@ -51,12 +59,25 @@ jobs:
           test "$(git rev-list --count HEAD^)" -ge 1
           parents="$(git show -s --format=%P HEAD)"
           test "$parents" = "$EXPECTED_PARENT"
-          test "$(git show -s --format=%s HEAD)" = 'D121: use protected owner secrets for finance import'
+          test "$(git show -s --format=%s HEAD)" = 'D123: apply finance operating model'
           python3 -I - <<'PY'
           import subprocess
           expected = {
+              '.github/scripts/classify-arthello-atlas.py',
+              '.github/scripts/test_classify_arthello_atlas.py',
+              '.github/scripts/test_import_finance_articles.py',
               '.github/workflows/import-finance-articles-20260911.yml',
+              'BACKLOG.md',
+              'CURRENT_STATE.md',
+              'DATA_COVERAGE.md',
+              'DECISIONS.md',
+              'docs/PROJECT_PASSPORT_PRODUCTION_RU.md',
+              'docs/acceptance/2026-09-10-d123-finance-operating-model.md',
               'docs/acceptance/2026-09-11-finance-article-import.md',
+              'docs/finance/article-catalog-2026-09-11.json',
+              'scripts/src/alfacrm-safe.ts',
+              'scripts/src/arthello-master-data.ts',
+              'scripts/test/alfacrm-safe.test.mjs',
           }
           changed = set(subprocess.check_output(
               ['git', 'diff', '--name-only', 'HEAD^', 'HEAD'], text=True
@@ -66,8 +87,9 @@ jobs:
           PY
           result="$(ARTHELLO_IMPORT_APPLY=0 python3 -I .github/scripts/import-finance-articles.py)"
           jq -e --arg digest "$EXPECTED_CATALOG_DIGEST" \
-            '.status == "validated" and .desired == 144 and .digest == $digest' <<<"$result" >/dev/null
+            '.status == "validated" and .desired == 148 and .digest == $digest' <<<"$result" >/dev/null
           python3 -I .github/scripts/test_import_finance_articles.py
+          python3 -I .github/scripts/test_classify_arthello_atlas.py
           printf 'release_sha=%s\n' "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
       - name: Wait for exact main Quality
         env:
@@ -91,7 +113,7 @@ jobs:
               if runs and runs[0].get('status') == 'completed':
                   if runs[0].get('conclusion') != 'success' or runs[0].get('run_attempt') != 1:
                       raise SystemExit('QUALITY_NOT_ACCEPTED')
-                  print('ARTHELLO_D115_QUALITY=VERIFIED')
+                  print('ARTHELLO_D123_QUALITY=VERIFIED')
                   break
               time.sleep(15)
           else:
@@ -110,10 +132,12 @@ jobs:
           ref: ${{ needs.verify.outputs.release_sha }}
           fetch-depth: 1
           persist-credentials: false
-      - name: Create verified backup and import approved catalog
+      - name: Import approved catalog and classify explicit Atlas receipts
         env:
           ARTHELLO_PUBLIC_ORIGIN: https://arthello-188-225-38-55.sslip.io
           ARTHELLO_IMPORT_APPLY: "1"
+          ARTHELLO_CLASSIFY_APPLY: "1"
+          ARTHELLO_CLASSIFY_PERIOD: "2026-09"
           ARTHELLO_E2E_LOGIN: ${{ secrets.ARTHELLO_FINANCE_IMPORT_LOGIN }}
           ARTHELLO_E2E_PASSWORD: ${{ secrets.ARTHELLO_FINANCE_IMPORT_PASSWORD }}
           EXPECTED_LIVE_SOURCE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
@@ -139,4 +163,11 @@ jobs:
           set -e
           printf '%s\n' "$result"
           test "$import_status" -eq 0
-          jq -e '.status == "accepted" and .desired == 144 and .activeVerified == 144 and (.articlesToCreate | type == "number") and (.draftsToApprove | type == "number")' <<<"$result" >/dev/null
+          jq -e '.status == "accepted" and .desired == 148 and .activeVerified == 148 and (.articlesToCreate | type == "number") and (.draftsToApprove | type == "number")' <<<"$result" >/dev/null
+          set +e
+          classification="$(python3 -I .github/scripts/classify-arthello-atlas.py)"
+          classification_status="$?"
+          set -e
+          printf '%s\n' "$classification"
+          test "$classification_status" -eq 0
+          jq -e '.status == "accepted" and .period == "2026-09" and (.planned | type == "number") and .applied == .planned and (.atlasKindergarten + .atlasSchool) == .planned' <<<"$classification" >/dev/null
