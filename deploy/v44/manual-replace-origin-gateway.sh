@@ -9,6 +9,7 @@ ORIGIN_HOST="${ORIGIN_HOST:-arthello-origin.internal}"
 ROOT="${ARTHELLO_ROOT:-/srv/arthello}"
 TOKEN_FILE="${GITHUB_TOKEN_FILE:-$ROOT/shared/github-release-token}"
 DEPLOY_KEY="${GITHUB_DEPLOY_KEY:-/root/.ssh/arthello_repo_ed25519}"
+KNOWN_HOSTS_FILE="${GITHUB_KNOWN_HOSTS_FILE:-/root/.ssh/known_hosts}"
 SOURCE_TREE_DIGEST="adf06829e21c346fc58014ac11a8cbbffb417ad19f09b225129bf4186ca11a15"
 IMAGE="arthello-os-ui:$TARGET_SHA"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
@@ -52,7 +53,8 @@ if [ -s "$TOKEN_FILE" ]; then
     -o "$WORK/source.tar.gz" "https://api.github.com/repos/$REPOSITORY/tarball/$TARGET_SHA"
   tar -xzf "$WORK/source.tar.gz" --strip-components=1 -C "$SRC"
 elif [ -s "$DEPLOY_KEY" ]; then
-  export GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+  [ -s "$KNOWN_HOSTS_FILE" ] || { echo 'ARTHELLO_GATEWAY_ERROR=github_known_hosts_missing' >&2; exit 2; }
+  export GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$KNOWN_HOSTS_FILE"
   git -C "$SRC" init -q
   git -C "$SRC" remote add origin "ssh://git@ssh.github.com:443/$REPOSITORY.git"
   git -C "$SRC" fetch --depth 1 --filter=blob:none origin "$TARGET_SHA"

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "scope": "visual-browser-startup",
+  "include": "scripts/lib/visual-browser-startup.mjs",
+  "minimum": {
+    "lines": 100,
+    "branches": 78,
+    "functions": 90
+  },
+  "tests": ["scripts/test/visual-browser-startup.test.mjs"]
+}

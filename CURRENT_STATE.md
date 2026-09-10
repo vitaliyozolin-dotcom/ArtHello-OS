@@ -1,5 +1,7 @@
 # ArtHello OS — Current State
 
+- D-119 усыновляет полный `scripts/test/*.test.mjs` как последовательный legacy CI suite; локальная инвентаризация дала 374 PASS и один fixture-зависимый migration-twin test, который теперь явно skip без report и по-прежнему исполняется PostgreSQL gate. Coverage расширен вторым фактически измеренным scope `visual-browser-startup` (100% lines, 78.69% branches, 90% functions; ratchet 100/78/90).
+- PostgreSQL backup теперь пишет `.partial`, проверяет custom archive через `pg_restore --list`, атомарно публикует dump/checksum и после отдельной ошибки повторяет попытку вместо смерти контейнера. Manual v44 Git fallback больше не использует TOFU. Off-host/alerts/RPO/RTO остаются не подтверждены: провайдер, destination и целевые значения владельцем не заданы.
 - D-106 начинает оставшуюся часть трека 6.6: `test:full` получил обязательный Node 24 coverage ratchet для явно ограниченного API policy-core. Checked-in baseline измерен фактическим прогоном: lines 93.32%, branches 70.51%, functions 92.92%, 56/56 тестов PASS; это не заявляется покрытием всего API.
 - Exact D-106 run `34473673544` выявил загрязнение v44 manifest локальным `tsconfig.tsbuildinfo`; D-107 устранил причину. Исправленный SHA `2acc22559ca11f784c07ad6b2a859ee907c87306` / tree `7b3022803ee85ec8e95831b3a2e66fc0adc4d645` прошёл Quality `34477515417`: все 6 jobs SUCCESS, включая coverage, secret-scan и School v44/v52. Provenance artifact `10152210530` не истёк, head/tree совпадают, checksum его `provenance.txt` подтверждён. CI/provenance треков 6.4 и coverage-части 6.6 закрыт; production deploy этим не разрешён.
 
@@ -22,7 +24,7 @@
 - Workflow policy gate проверяет оставшийся набор. R13, текущие browser/data checks, `quality.yml` и `proof-gates.yml` не затронуты до проверки фактических GitHub run provenance.
 - Checked-in ratchet `quality-gates/workflow-policy-ratchet.json` ограничивает активный каталог текущим максимумом 14: дальнейшее уменьшение разрешено, незаявленный рост блокирует workflow policy gate.
 - `test:full` теперь включает актуальный importer/sandbox suite workspace `scripts` и PostgreSQL 16 gate; дублирующий отдельный `test:postgres` после агрегата удалён из `quality.yml`. Полный legacy glob `scripts/test/*.test.mjs` пока не считается зелёным CI-suite: в нём остаются spent release contracts и sandbox-sensitive server tests.
-- Фаза 6 остаётся открытой: нужны дальнейшая консолидация постоянных workflow/deploy, SSH/backup hardening, усыновление либо архивирование spent tests, замена хрупких source-regex тестов поведенческими и расширение coverage за пределы API policy-core.
+- Фаза 6 остаётся открытой только там, где нет доказанного безопасного repo-only закрытия: дальнейшая консолидация живых workflow, внешний off-host/alert/RPO/RTO контур и постепенная замена сохраняемых recovery/source-policy assertions эквивалентными behavioral contracts.
 
 ## Refactoring Phase 5 — closed (2026-09-09)
 

@@ -8,6 +8,7 @@ PUBLIC_DOMAIN="${PUBLIC_DOMAIN:-arthello-188-225-38-55.sslip.io}"
 ARTHELLO_ROOT="${ARTHELLO_ROOT:-/srv/arthello}"
 TOKEN_FILE="${GITHUB_TOKEN_FILE:-$ARTHELLO_ROOT/shared/github-release-token}"
 DEPLOY_KEY="${GITHUB_DEPLOY_KEY:-/root/.ssh/arthello_repo_ed25519}"
+KNOWN_HOSTS_FILE="${GITHUB_KNOWN_HOSTS_FILE:-/root/.ssh/known_hosts}"
 SOURCE_TREE_DIGEST="adf06829e21c346fc58014ac11a8cbbffb417ad19f09b225129bf4186ca11a15"
 IMAGE="arthello-os-ui:$TARGET_SHA"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
@@ -67,7 +68,11 @@ if [ -s "$TOKEN_FILE" ]; then
   tar -xzf "$ARCHIVE" --strip-components=1 -C "$SOURCE_ROOT"
 elif [ -s "$DEPLOY_KEY" ]; then
   command -v git >/dev/null
-  export GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+  if [ ! -s "$KNOWN_HOSTS_FILE" ]; then
+    printf 'ARTHELLO_MANUAL_ERROR=github_known_hosts_missing\n' >&2
+    exit 2
+  fi
+  export GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$KNOWN_HOSTS_FILE"
   git -C "$SOURCE_ROOT" init -q
   git -C "$SOURCE_ROOT" remote add origin "ssh://git@ssh.github.com:443/$REPOSITORY.git"
   git -C "$SOURCE_ROOT" fetch --depth 1 --filter=blob:none origin "$TARGET_SHA"

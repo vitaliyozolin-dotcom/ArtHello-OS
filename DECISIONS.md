@@ -1226,3 +1226,9 @@ Accepted R17 подтверждён actual run34495273615. Закрепить ac
 ## D116 — Архивировать завершённый R17 controller
 
 R17 принят actual run `34495273615` / deploy job `102932695823`, cleanup success; D075 закрепил послерелизную read-only сверку, а последующий controller run `34498059829` завершился skipped. Датированный production controller больше не является постоянным CD и переносится байт-в-байт из `.github/workflows` в `deploy/v52/recovery-r18/r17-controller.yml` с SHA-256 `4cdcd2771994fe8ea11bb731fa1ef5f997da489adfc89e3e78baff271096d659`. R17 verifier и его pins переводятся на архивный путь; исторический `CONSUMER_PATH` принятого run не переписывается. Параллельный D115 добавил отдельный approved-catalog importer, поэтому активный workflow ratchet после удаления R17 снижается с 15 до 14. Нового deploy, изменения production или ослабления recovery contracts это решение не разрешает.
+
+## D119 — Усыновить legacy tests и fail-closed локальные backup/SSH границы (2026-09-10)
+
+Полный `scripts/test/*.test.mjs` становится обязательным последовательным suite: параллельный запуск недостоверен из-за общих process/fixture ресурсов. Migration-twin assertion без созданного PostgreSQL report обозначается явным skip, но остаётся обязательным в своём PostgreSQL gate. Coverage расширяется с API policy-core на независимо измеренный поведенческий `visual-browser-startup` scope с неубывающими минимумами lines 100%, branches 78%, functions 90%.
+
+Локальный PostgreSQL backup публикует dump и checksum только после `pg_restore --list`, удаляет partial при ошибке и повторяет отдельный сбой с настраиваемой задержкой. Два manual v44 Git fallback требуют заранее заполненный known_hosts и больше не принимают первый встреченный ключ. Это не означает принятого disaster recovery: off-host provider, alert destination и численные RPO/RTO не определены, поэтому они остаются открытыми без домысла. Production deploy и данные этим решением не изменяются.

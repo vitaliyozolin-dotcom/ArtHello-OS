@@ -18,6 +18,10 @@ Ubuntu 24.04 LTS, Docker Engine с Compose v2, отдельный пользов
 - `/srv/arthello/shared/.env.production` — секреты с правами `0600`;
 - `/srv/arthello/backups/postgres` — ежедневные дампы и SHA-256.
 
+PostgreSQL backup публикуется атомарно только после `pg_restore --list`; неуспешный dump или validation оставляет лишь удаляемый `.partial` и повторяется через `BACKUP_RETRY_SECONDS`. Интервал, retry и retention принимают только положительные целые значения (`BACKUP_INTERVAL_SECONDS`, `BACKUP_RETRY_SECONDS`, `BACKUP_RETENTION_DAYS`). `BACKUP_RUN_ONCE=1` предназначен для timer/ручной проверки. Этот каталог пока хранится на том же VPS: off-host provider, alert destination и утверждённые RPO/RTO в репозитории не заданы, поэтому disaster recovery нельзя считать принятым только по наличию локального dump.
+
+Fallback через Git SSH в двух исторических manual v44 scripts разрешён только с непустым заранее проверенным `GITHUB_KNOWN_HOSTS_FILE`; TOFU/`accept-new` запрещены. Основной release path остаётся HTTPS artifact delivery.
+
 Скопировать `production.env.example` в защищённый файл, заменить все `CHANGE_ME` и не коммитить результат.
 
 GitHub Environment `production-ru` хранит deploy-secrets. `ARTHELLO_RU_HOST` сначала равен `:80` для закрытой проверки по IP. После DNS-приёмки его меняют на `os.arthelloteam.ru`, и Caddy получает публичный TLS-сертификат.
