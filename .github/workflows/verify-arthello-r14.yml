@@ -6,6 +6,7 @@ name: Verify ArtHello R14 continuation
     - .github/scripts/**
     - deploy/**
     - scripts/run-frozen-release-contract.py
+    - scripts/run-r14-historical-contract.py
     - scripts/test/**
   push:
     branches:
@@ -15,6 +16,7 @@ name: Verify ArtHello R14 continuation
     - .github/scripts/**
     - deploy/**
     - scripts/run-frozen-release-contract.py
+    - scripts/run-r14-historical-contract.py
     - scripts/test/**
 permissions:
   contents: read
@@ -93,6 +95,7 @@ jobs:
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       R14_CONTRACT_SHA256: 37614beafcbf18347d2429713301699bd4c5e3474cd4f7db840dc166b4c852a3
+      R14_HISTORICAL_RUNNER_SHA256: ffe257110606f2c8c9989a0b974998bab24d48f861a2978f8ee110c97ad82d2a
     steps:
     - name: Check out exact unprivileged R14 verification source
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -106,7 +109,7 @@ jobs:
     - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
       with:
         node-version: 24
-    - name: Verify frozen contracts and bounded R14 continuation behavior
+    - name: Verify current source and archived R14 protocol
       shell: bash
       run: 'set -Eeuo pipefail
 
@@ -120,24 +123,10 @@ jobs:
 
         test "$(sha256sum deploy/v52/recovery-r14/check-contract.rb | cut -d '' '' -f 1)" = "$R14_CONTRACT_SHA256"
 
-        ruby deploy/v52/recovery-r14/check-contract.rb
+        test "$(sha256sum scripts/run-r14-historical-contract.py | cut -d '' '' -f 1)" = "$R14_HISTORICAL_RUNNER_SHA256"
 
-        python3 -I -B .github/scripts/test-r14-contract.py
+        python3 -I -B scripts/test/r14-historical-contract.test.py
 
-        python3 -I -B .github/scripts/test-r14-history-gate.py
-
-        python3 -I -B .github/scripts/test-r14-backup-adoption.py
-
-        python3 -I -B .github/scripts/test-r14-backup-controller.py
-
-        python3 -I -B .github/scripts/test-r14-continuation-adapters.py
-
-        python3 -I -B .github/scripts/test-r14-live-baseline.py
-
-        python3 -I -B .github/scripts/test-run-r14-live-browser.py
-
-        node --test scripts/test/retire-r13-browser.test.mjs
-
-        node --check deploy/browser/retire-r13-browser.mjs
+        python3 -I -B scripts/run-r14-historical-contract.py
 
         '

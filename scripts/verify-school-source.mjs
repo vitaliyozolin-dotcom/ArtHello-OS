@@ -5,7 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const manifestPath = path.join(root, "deploy", "school-source-manifest.json");
+// Git preserves executable identity, not checkout read/write permissions.
+const canonicalMode = "u+rwX,go+rX,go-w";
 
 export async function verifySchoolSource({ repositoryRoot = root } = {}) {
   const manifest = JSON.parse(
@@ -14,6 +15,17 @@ export async function verifySchoolSource({ repositoryRoot = root } = {}) {
       "utf8",
     ),
   );
+  const canonical = manifest.canonicalTar;
+  if (
+    manifest.schemaVersion !== 2 ||
+    canonical?.owner !== 0 ||
+    canonical?.group !== 0 ||
+    canonical?.mtime !== "UTC 1970-01-01" ||
+    canonical?.numericOwner !== true ||
+    canonical?.mode !== canonicalMode
+  ) {
+    throw new Error("Unsupported school source canonicalization");
+  }
   const results = [];
 
   for (const version of ["v44", "v52"]) {
@@ -32,6 +44,7 @@ export async function verifySchoolSource({ repositoryRoot = root } = {}) {
         "--owner=0",
         "--group=0",
         "--numeric-owner",
+        `--mode=${canonicalMode}`,
         "-cf",
         "-",
         "-C",
