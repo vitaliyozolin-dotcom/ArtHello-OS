@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { startVisualChrome } from './lib/visual-browser-startup.mjs';
 import { waitForRenderedRoot } from './lib/visual-readiness.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -14,7 +14,7 @@ const arg = (name, fallback) => {
 };
 const APP_URL = arg('--url', 'http://127.0.0.1:4173/');
 const OUT = path.resolve(process.cwd(), arg('--out', '.artifacts/visual-acceptance'));
-const PORT = Number(arg('--cdp-port', '9223'));
+const PORT = Number(arg('--cdp-port', '0'));
 
 function chromeBinary() {
   const candidates = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
@@ -104,16 +104,7 @@ function auditExpression() {
 }
 
 await fs.mkdir(OUT, { recursive: true });
-const userDir = await fs.mkdtemp(path.join(os.tmpdir(), 'arthello-visual-'));
-const chrome = spawn(chromeBinary(), [
-  '--headless=new',
-  '--no-sandbox',
-  '--disable-dev-shm-usage',
-  '--disable-gpu',
-  `--remote-debugging-port=${PORT}`,
-  `--user-data-dir=${userDir}`,
-  'about:blank'
-], { stdio: 'ignore' });
+const browser = await startVisualChrome(chromeBinary(), { out: OUT, port: PORT });
 
 const report = {
   schema_version: 2,
@@ -125,7 +116,7 @@ const report = {
 };
 
 try {
-  const targets = await fetchJson(`http://127.0.0.1:${PORT}/json/list`);
+  const targets = await fetchJson(`http://127.0.0.1:${browser.port}/json/list`);
   const target = targets.find((item) => item.type === 'page');
   if (!target?.webSocketDebuggerUrl) throw new Error('No CDP page target found.');
   const cdp = new Cdp(target.webSocketDebuggerUrl);
@@ -197,9 +188,7 @@ try {
   }
   cdp.close();
 } finally {
-  chrome.kill('SIGTERM');
-  await sleep(250);
-  await fs.rm(userDir, { recursive: true, force: true }).catch(() => {});
+  await browser.close();
 }
 
 report.summary = {

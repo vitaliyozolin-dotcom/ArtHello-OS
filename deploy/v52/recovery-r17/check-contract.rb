@@ -1,7 +1,7 @@
 require 'digest'
 sources = {
-  'deploy/v52/recovery-r17/verify-contract.py' => 'af8872422952909b8f82ae02268e03a1daa0aac31008ab38c197c4361f68a1e7',
-  'deploy/v52/recovery-r17/source-pins.json' => '0e80414a6b4c771d14da0bac63aaa8b31bb723d47e684d27884c2ff020245a8e',
+  'deploy/v52/recovery-r17/verify-contract.py' => '2823a108065a4ae2ccd6c1a5db2fb628369b13cbf4de84a20e1c0df45d793d2c',
+  'deploy/v52/recovery-r17/source-pins.json' => 'b23c6d45eeb3e84a964375980288f65d00d91b9a41cc6db9c43e7529e6580d68',
 }
 sources.each do |path, expected|
   raise 'Unreviewed R17 verification source' unless Digest::SHA256.file(path).hexdigest == expected

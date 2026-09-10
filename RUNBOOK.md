@@ -423,3 +423,7 @@ D110 terminal failed до изменения production, cleanup success. Нов
 ## D112 — Выпуск после ARTIFACT_INVENTORY
 
 Использовать PR415 / codex/finance-r17-artifact-fix-20260910 / parentc2b29672bb4d42a535ff44ea2b407622282aa0ac / squash prefix `D112: guarded finance R17`. Пройти Quality/Proof/V52/6continuation на final head, review SHA/tree/diff и fresh main/runs; после merge проверить signed single-parent/tree и заморозить main до terminal+cleanup. Exact app+proof inventory не допускает лишние artifacts; application ZIP остаётся с тремя обычными членами и прежними SHA/CRC/path/size/current-main guards. Не удалять failed R17 browser ради удобства; штатный capacity gate решает допустимость. Actual successful runtime receipts затем закрепить в D075, подтвердить реальные банковские суммы.
+
+## D113 — Новый R17 после отказа main Proof
+
+Не менять main1a45eb6aa5b1a9b21c4390105016b8b0e54afef5, пока protected34491463434/cleanup активны. После terminal complete graph review использовать PR416/codex/finance-r17-browser-startup-20260910, squash prefix `D113: guarded finance R17`, parent1a45eb6. Required final-head Quality/Proof/V52/6continuation; actual signed one-parent/tree/main. Затем freeze до terminal нового выпуска/cleanup, actual candidate/after-public/backup/School receipts, bound D075 и сверка банка/ДДС. Перезапуск только hosted Chrome startup ограничен одним новым процессом до любой проверки страницы; это не rerun release/CI и не ослабляет assertions.
