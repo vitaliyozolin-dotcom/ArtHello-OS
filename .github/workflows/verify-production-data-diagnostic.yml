@@ -9,16 +9,20 @@ on:
       - '.github/scripts/test-d083-resume-candidate.py'
       - '.github/scripts/r7-backup-runtime.py'
       - '.github/scripts/r13-*.py'
+      - '.github/scripts/r14-*.py'
+      - '.github/scripts/test-r14-*.py'
       - '.github/scripts/test-r13-*.py'
       - 'deploy/v52/maintenance/image-runtime-fingerprint.jq'
       - 'scripts/production-readonly.mjs'
       - 'scripts/production-data-consumers.py'
       - 'scripts/production-data-consumers-r13.py'
+      - 'scripts/production-data-consumers-r14.py'
       - 'scripts/run-production-readonly.sh'
       - 'scripts/live-d1-identity.mjs'
       - 'scripts/test/production-readonly.test.mjs'
       - 'scripts/test/production-data-consumers.test.py'
       - 'scripts/test/production-data-consumers-r13.test.py'
+      - 'scripts/test/production-data-consumers-r14.test.py'
       - 'scripts/test/run-production-readonly.test.py'
   push:
     branches: [main]
@@ -29,16 +33,20 @@ on:
       - '.github/scripts/test-d083-resume-candidate.py'
       - '.github/scripts/r7-backup-runtime.py'
       - '.github/scripts/r13-*.py'
+      - '.github/scripts/r14-*.py'
+      - '.github/scripts/test-r14-*.py'
       - '.github/scripts/test-r13-*.py'
       - 'deploy/v52/maintenance/image-runtime-fingerprint.jq'
       - 'scripts/production-readonly.mjs'
       - 'scripts/production-data-consumers.py'
       - 'scripts/production-data-consumers-r13.py'
+      - 'scripts/production-data-consumers-r14.py'
       - 'scripts/run-production-readonly.sh'
       - 'scripts/live-d1-identity.mjs'
       - 'scripts/test/production-readonly.test.mjs'
       - 'scripts/test/production-data-consumers.test.py'
       - 'scripts/test/production-data-consumers-r13.test.py'
+      - 'scripts/test/production-data-consumers-r14.test.py'
       - 'scripts/test/run-production-readonly.test.py'
 
 permissions:
@@ -73,6 +81,7 @@ jobs:
           node --test scripts/test/production-readonly.test.mjs
           python3 -I scripts/test/production-data-consumers.test.py
           python3 -I scripts/test/production-data-consumers-r13.test.py
+          python3 -I scripts/test/production-data-consumers-r14.test.py
           python3 -I scripts/test/run-production-readonly.test.py
           node --check scripts/production-readonly.mjs
           bash -n scripts/run-production-readonly.sh

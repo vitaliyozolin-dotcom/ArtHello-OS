@@ -41,8 +41,8 @@ jobs:
       queue: max
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
-      # Accepted R13 source: protected run34340461537 and both natural browser checks passed.
-      EXPECTED_LIVE_SOURCE_SHA: 'f5fa3e46e3510e6fc98ae4455f4b499c0ba30695'
+      # Accepted R15: protected run34445017241, candidate and after-public checks passed.
+      EXPECTED_LIVE_SOURCE_SHA: '4a0713b4a7d87f132e49836fe0ce9ca9258bc1ec'
     steps:
       - name: Verify current main before repository execution
         env:
@@ -81,6 +81,7 @@ jobs:
           "$PRECHECK_NODE" --test scripts/test/production-readonly.test.mjs
           python3 -I scripts/test/production-data-consumers.test.py
           python3 -I scripts/test/production-data-consumers-r13.test.py
+          python3 -I scripts/test/production-data-consumers-r14.test.py
           python3 -I scripts/test/run-production-readonly.test.py
           bash -n scripts/run-production-readonly.sh
 

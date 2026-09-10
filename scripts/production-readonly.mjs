@@ -85,10 +85,20 @@ FROM a LEFT JOIN ranked s ON s.rn=1 AND s.connection_id=a.connection_id
 LEFT JOIN tx ON tx.legal_entity_id=a.legal_entity_id
  AND tx.provider_account_id=a.provider_account_id;`,
   transactions: `WITH t AS (
- SELECT connection_id,legal_entity_id,provider_account_id,financial_operation_id,status,currency,direction FROM bank_transactions WHERE connection_id='INT-T-TOCHKA'
+ SELECT connection_id,legal_entity_id,provider_account_id,provider_transaction_id,financial_operation_id,operation_date,amount_minor,status,currency,direction FROM bank_transactions WHERE connection_id='INT-T-TOCHKA'
  AND operation_date BETWEEN :start AND :end
 )
 SELECT count(*) AS transaction_rows,
+ COALESCE(sum(CASE WHEN lower(trim(t.status))='booked' AND t.currency='RUB' AND typeof(t.amount_minor)='integer' AND t.amount_minor>0 AND t.amount_minor<=9007199254740991 AND t.direction='Поступление' THEN t.amount_minor ELSE 0 END),0) AS income_amount_minor,
+ COALESCE(sum(CASE WHEN lower(trim(t.status))='booked' AND t.currency='RUB' AND typeof(t.amount_minor)='integer' AND t.amount_minor>0 AND t.amount_minor<=9007199254740991 AND t.direction='Списание' THEN t.amount_minor ELSE 0 END),0) AS expense_amount_minor,
+ COALESCE(sum(CASE WHEN lower(trim(t.status))='booked' AND t.currency='RUB' AND typeof(f.amount_minor)='integer' AND f.amount_minor>0 AND f.amount_minor<=9007199254740991 AND f.direction='Поступление' THEN f.amount_minor ELSE 0 END),0) AS linked_income_amount_minor,
+ COALESCE(sum(CASE WHEN lower(trim(t.status))='booked' AND t.currency='RUB' AND typeof(f.amount_minor)='integer' AND f.amount_minor>0 AND f.amount_minor<=9007199254740991 AND f.direction='Списание' THEN f.amount_minor ELSE 0 END),0) AS linked_expense_amount_minor,
+ count(DISTINCT CASE WHEN lower(trim(t.status))='booked' AND t.currency='RUB' THEN f.id END) AS linked_financial_rows,
+ COALESCE(sum(CASE WHEN lower(trim(t.status))='booked' AND t.currency='RUB' AND (NOT (typeof(t.amount_minor)='integer' AND t.amount_minor>0 AND t.amount_minor<=9007199254740991) OR NOT (typeof(f.amount_minor)='integer' AND f.amount_minor>0 AND f.amount_minor<=9007199254740991)
+ OR f.id IS NULL OR f.amount_minor IS NOT t.amount_minor OR f.direction IS NOT t.direction
+ OR f.operation_date IS NOT t.operation_date OR f.legal_entity_id IS NOT t.legal_entity_id
+ OR f.bank_operation_ref IS NOT t.provider_transaction_id OR f.source_system IS NOT 'BANK_TOCHKA_API')
+ THEN 1 ELSE 0 END),0) AS financial_mismatch_rows,
  COALESCE(sum(CASE WHEN lower(trim(t.status))='booked' AND t.currency='RUB' THEN 1 ELSE 0 END),0) AS eligible_rows,
  COALESCE(sum(CASE WHEN lower(trim(t.status))='booked' AND t.currency='RUB'
  AND t.direction='Поступление' THEN 1 ELSE 0 END),0) AS income_rows,
@@ -105,10 +115,10 @@ FROM t LEFT JOIN financial_operations f ON f.id=t.financial_operation_id;`,
   duplicates: `SELECT count(*) AS duplicate_external_identity_groups,
  COALESCE(sum(n-1),0) AS excess_rows,
  (SELECT count(*) FROM bank_transactions WHERE connection_id='INT-T-TOCHKA'
- AND COALESCE(provider_transaction_id,'')='') AS missing_identity_rows FROM (
+ AND (COALESCE(provider_account_id,'')='' OR COALESCE(provider_transaction_id,'')='')) AS missing_identity_rows FROM (
  SELECT count(*) AS n FROM bank_transactions
  WHERE connection_id='INT-T-TOCHKA'
- GROUP BY connection_id,provider_transaction_id HAVING count(*)>1
+ GROUP BY connection_id,provider_account_id,provider_transaction_id HAVING count(*)>1
 );`,
 };
 const bankCountFields = {
@@ -116,7 +126,9 @@ const bankCountFields = {
     'accounts_with_statement', 'covered_in_latest_run', 'accounts_with_containing_statement_in_latest_run',
     'accounts_with_matching_transaction_count'],
   transactions: ['transaction_rows', 'eligible_rows', 'income_rows', 'expense_rows',
-    'eligible_missing_links', 'dangling_links', 'pending_or_non_rub', 'unexpected_account_rows'],
+    'eligible_missing_links', 'dangling_links', 'pending_or_non_rub', 'unexpected_account_rows',
+    'income_amount_minor', 'expense_amount_minor', 'linked_income_amount_minor', 'linked_expense_amount_minor',
+    'linked_financial_rows', 'financial_mismatch_rows'],
   duplicates: ['duplicate_external_identity_groups', 'excess_rows', 'missing_identity_rows'],
 };
 function fixedCounts(row, fields) {
@@ -173,6 +185,9 @@ function inspectBankWindow(db, tableStates, { now = Date.now(), syncNotBefore } 
       && transactions.eligibleMissingLinks === 0 && transactions.danglingLinks === 0
       && transactions.pendingOrNonRub === 0 && transactions.unexpectedAccountRows === 0
       && transactions.incomeRows + transactions.expenseRows === transactions.eligibleRows
+      && transactions.financialMismatchRows === 0 && transactions.linkedFinancialRows === transactions.eligibleRows
+      && transactions.incomeAmountMinor === transactions.linkedIncomeAmountMinor
+      && transactions.expenseAmountMinor === transactions.linkedExpenseAmountMinor
       && duplicates.groups === 0 && duplicates.excessRows === 0 && duplicates.missingIdentityRows === 0;
     return { state: 'observed', period, sync, coverage, transactions, duplicates, activity, checksComplete };
   } catch { return incomplete('unavailable'); }
@@ -222,7 +237,8 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
     autosync: { state: 'not_observed', outcome: 'not_observed', generationMatchesSetup: null,
       nextAtUtc: null, leasedUntilUtc: null, leaseState: 'unknown', failures: null, updatedAgeSeconds: null,
       httpStatus: null, httpStatusState: 'missing', updatedAtUtc: null,
-      failureStage: null, failureStageState: 'missing' },
+      failureStage: null, failureStageState: 'missing',
+      commitFailureKind: null, commitFailureKindState: 'missing' },
     statementLease: { state: 'not_observed', expiresAtUtc: null, leaseState: 'unknown' },
     retainedJobs: { state: 'not_observed', scopeMatch: 'unverified', providerStatus: 'not_stored',
       total: null, invalidRows: null, exactWindowRows: null, olderEndRows: null, otherWindowRows: null, oldestAgeSeconds: null },
@@ -295,6 +311,28 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
  AND json_extract(value,'$.failureStage') IN ('setup_references','credential_read','statement_state_open','bank_sync',
  'statement_fence','sync_commit','statement_acknowledge','statement_release','sync_callback','response_decode','response_result')
  THEN 'observed' ELSE 'invalid' END AS failure_stage_state,
+ CASE WHEN json_extract(value,'$.outcome')='error' AND json_extract(value,'$.failureStage')='sync_commit'
+ THEN CASE json_extract(value,'$.commitFailureKind')
+ WHEN 'provider_identity' THEN 'provider_identity'
+ WHEN 'transaction_identity' THEN 'transaction_identity'
+ WHEN 'unique_constraint' THEN 'unique_constraint'
+ WHEN 'required_value' THEN 'required_value'
+ WHEN 'foreign_key' THEN 'foreign_key'
+ WHEN 'check_constraint' THEN 'check_constraint'
+ WHEN 'schema' THEN 'schema'
+ WHEN 'binding_type' THEN 'binding_type'
+ WHEN 'query_limit' THEN 'query_limit'
+ WHEN 'database_busy' THEN 'database_busy'
+ WHEN 'storage_full' THEN 'storage_full'
+ WHEN 'database_readonly' THEN 'database_readonly'
+ WHEN 'storage_error' THEN 'storage_error'
+ WHEN 'other' THEN 'other' END END AS commit_failure_kind,
+ CASE WHEN valid_json<>1 THEN 'invalid'
+ WHEN json_type(value,'$.commitFailureKind') IS NULL OR json_type(value,'$.commitFailureKind')='null' THEN 'missing'
+ WHEN json_extract(value,'$.outcome')='error' AND json_extract(value,'$.failureStage')='sync_commit'
+ AND json_type(value,'$.commitFailureKind')='text'
+ AND json_extract(value,'$.commitFailureKind') IN ('provider_identity','transaction_identity','unique_constraint','required_value','foreign_key','check_constraint','schema','binding_type','query_limit','database_busy','storage_full','database_readonly','storage_error','other') THEN 'observed'
+ ELSE 'invalid' END AS commit_failure_kind_state,
  CASE WHEN ${uuidSql("json_extract(value,'$.generation')")}
  THEN (SELECT CASE WHEN json_valid(s.state_value) THEN CASE
  WHEN ${uuidSql("json_extract(s.state_value,'$.credentialGeneration')")}
@@ -316,6 +354,8 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
     // Fixed local operation names only; none establishes an upstream provider failure.
     out.failureStage = row.failure_stage;
     out.failureStageState = row.failure_stage_state;
+    out.commitFailureKind = row.commit_failure_kind;
+    out.commitFailureKindState = row.commit_failure_kind_state;
     out.generationMatchesSetup = row.generation_matches === null ? null : row.generation_matches === 1;
     out.state = row.valid_json === 1 && row.valid_version === 1 && out.outcome !== 'unknown'
       && out.nextAtUtc !== null && out.leaseState !== 'unknown' && out.failures !== null
@@ -380,7 +420,7 @@ function inspectBankRuntime(db, { now = Date.now() } = {}) {
   return result;
 }
 
-// Fixed R13 INSERT column contract. This is schema observation, not a write rehearsal.
+// Fixed D097 INSERT column contract. This is schema observation, not a write rehearsal.
 // Only code-owned column names and bounded counts are returned; schema SQL and unknown
 // identifiers are never emitted. No bank payload or credential is read by this function.
 const bankWriteColumns = {
@@ -395,7 +435,7 @@ const bankWriteColumns = {
 const bankProviderIndexes = {
   bank_accounts: ['connection_id', 'legal_entity_id', 'provider_account_id'],
   bank_statement_imports: ['connection_id', 'provider_statement_id'],
-  bank_transactions: ['connection_id', 'provider_transaction_id'],
+  bank_transactions: ['connection_id', 'provider_account_id', 'provider_transaction_id'],
 };
 function inspectBankCommitSchema(db) {
   const result = { state: 'partial', tables: {} };
