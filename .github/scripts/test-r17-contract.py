@@ -2,6 +2,8 @@ import ast
 import copy
 import importlib.util
 import json
+import sys
+import textwrap
 from pathlib import Path
 import re
 import subprocess
@@ -114,6 +116,50 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(len(literals), 1)
         raw = ast.literal_eval(literals[0].split(' = ', 1)[1])
         self.assertEqual(raw, self.read('.github/scripts/r17-history-gate.py'))
+
+    def checked_history_receipt(self):
+        spec = importlib.util.spec_from_file_location('actual_r17_gate', ROOT / '.github/scripts/r17-history-gate.py')
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        actual = json.loads(self.read('.github/scripts/fixtures/r17-accepted-r16-history.json'))
+        current = copy.deepcopy(actual['run'])
+        current.update(id=90000000001, head_sha='1' * 40, path=gate.CONSUMER_PATH,
+                       status='in_progress', conclusion=None, run_attempt=1)
+        def no_read(*_): raise AssertionError('fresh history must not read prior attempts')
+        return gate.validate_gate(actual['run'], actual['jobs'], actual['commit'],
+            {'total_count': 1, 'workflow_runs': [current]}, no_read, no_read,
+            '1' * 40, current['id'], 1)
+
+    def run_inline_history_receipt(self, value):
+        raw = self.read(contract.CONTROLLER).decode()
+        start = raw.index("<<'R14_HISTORY_RECEIPT'\n") + len("<<'R14_HISTORY_RECEIPT'\n")
+        end = raw.index('\n        R14_HISTORY_RECEIPT', start)
+        code = textwrap.dedent(raw[start:end])
+        with tempfile.TemporaryDirectory() as directory:
+            environment_file = Path(directory) / 'environment'
+            result = subprocess.run([sys.executable, '-I', '-c', code],
+                env={'HISTORY_RECEIPT': json.dumps(value), 'GITHUB_ENV': str(environment_file)},
+                capture_output=True, text=True, timeout=10)
+            written = environment_file.read_text() if environment_file.exists() else ''
+        return result, written
+
+    def test_actual_accepted_r16_gate_receipt_passes_the_exact_inline_consumer(self):
+        result, written = self.run_inline_history_receipt(self.checked_history_receipt())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(written, 'R9_RESUME_CANDIDATE=0\n')
+        self.assertEqual(result.stdout.strip(), 'ARTHELLO_R14_SUCCESS_HISTORY=VERIFIED mode=fresh')
+
+    def test_inline_history_receipt_refuses_old_run_and_every_identity_boundary(self):
+        receipt = self.checked_history_receipt()
+        for field, invalid in [('acceptedRun', 34445017241), ('acceptedRun', True),
+            ('acceptedSource', '4a0713b4a7d87f132e49836fe0ce9ca9258bc1ec'),
+            ('acceptedTree', '0' * 40), ('dataRestoreAuthorized', True),
+            ('retainedRuntimeVerificationRequired', True), ('mode', 'unchecked')]:
+            with self.subTest(field=field, invalid=invalid):
+                result, written = self.run_inline_history_receipt(dict(receipt, **{field: invalid}))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(written, '')
+                self.assertEqual(result.stderr.strip(), 'ARTHELLO_R14_HISTORY_RECEIPT=BLOCKED')
 
     def test_publication_method_is_explicitly_squash(self):
         self.assertEqual(contract.RELEASE.get('mergeMethod'), 'squash')
