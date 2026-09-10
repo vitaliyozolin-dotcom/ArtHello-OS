@@ -22,6 +22,7 @@ CHANGED_FROZEN_INPUTS = {
     'deploy/v52/overrides/lib/tochka-autosync.ts',
 }
 EXTRA_INPUTS = {
+    'deploy/v52/src/tests/tochka-autosync.test.mjs',
     '.github/scripts/fixtures/r15-rejected-publication.json',
     '.github/scripts/download-v52-artifact-r15.py', '.github/scripts/test-r15-artifact-download.py',
     '.github/scripts/r15-history-gate.py', '.github/scripts/test-r15-history-gate.py',
