@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { ParentPreview } from "./parent-preview";
 import returnStyles from "./arthello-return.module.css";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -1181,6 +1182,8 @@ function InviteResultModal({ result, close, helpTargetRef }: { result: InviteRes
 }
 
 export default function SchoolApp() {
+  const [previewStudentId, setPreviewStudentId] = useState<string | null>(null);
+  const [previewSelection, setPreviewSelection] = useState("");
   const [snapshot, setSnapshot] = useState<SchoolSnapshot | null>(null);
   const [activeView, setActiveView] = useState<View>("home");
   const [studentId, setStudentId] = useState<string | null>(null);
@@ -1308,7 +1311,12 @@ export default function SchoolApp() {
 
   return (
     <>
-      <AppShell snapshot={snapshot} activeView={activeView} onView={navigate} onStudent={(nextStudent) => void switchStudent(nextStudent)} helpAction={helpAction} helpOverlayKey={helpOverlayKey} helpOverlayLabel={helpOverlayLabel} helpPortalTarget={helpPortalTarget}>{content}</AppShell>
+      <AppShell snapshot={snapshot} activeView={activeView} onView={(view) => { setPreviewStudentId(null); navigate(view); }} onStudent={(nextStudent) => void switchStudent(nextStudent)} helpAction={helpAction} helpOverlayKey={helpOverlayKey} helpOverlayLabel={helpOverlayLabel} helpPortalTarget={helpPortalTarget}>
+        {previewStudentId ? <ParentPreview key={previewStudentId} studentId={previewStudentId} onClose={() => setPreviewStudentId(null)} /> : <>
+          {["director", "deputy"].includes(snapshot.viewer.role) ? <section className="page-shell" aria-label="Просмотр учебных сведений родителя"><div className="content-card"><h2>Кабинет родителя</h2>{snapshot.students.length ? <div className="hero-actions"><label>Ребёнок<select aria-label="Ребёнок для предпросмотра" value={previewSelection || snapshot.students[0].id} onChange={event => setPreviewSelection(event.target.value)}>{snapshot.students.map(student => <option key={student.id} value={student.id}>{student.fullName} · {student.className} класс</option>)}</select></label><button className="ghost-btn" onClick={() => setPreviewStudentId(previewSelection || snapshot.students[0].id)}>Посмотреть глазами родителя</button></div> : <p>Нет доступных детей для предпросмотра.</p>}</div></section> : null}
+          {content}
+        </>}
+      </AppShell>
       {modal ? <ActionModal state={modal} snapshot={snapshot} close={() => setModal(null)} submit={async (kind, values) => { try { await submit(kind, values); } catch (error) { setToast(error instanceof Error ? error.message : "Не удалось сохранить"); throw error; } }} helpTargetRef={captureHelpTarget} /> : null}
       {generatedInvite ? <InviteResultModal result={generatedInvite} close={() => setGeneratedInvite(null)} helpTargetRef={captureHelpTarget} /> : null}
       {toast ? <div className="l0-toast"><Icon name="check" size={17} />{toast}</div> : null}
