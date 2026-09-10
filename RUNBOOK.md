@@ -1,5 +1,9 @@
 # ArtHello OS — Runbook
 
+## Diaries D138 — School SSH boundary
+
+- D137 run `34541397143` доказал отсутствие School image на runner-local daemon до мутаций. School delivery выполняется через `ARTHELLO_RU_*` SSH secrets с strict known hosts; source/controller checksums проверяются на удалённом хосте до запуска standalone cutover.
+
 ## Diaries D137 — School image identity
 
 - D136 run `34540282349` доказал отсутствие старой Docker network на текущем runner до мутаций. D137 разрешает только единственный running container, чей image label revision равен `54242340f2d9b6a9887d69ecc03520ddf9f7982c`; имя и сеть не предполагаются.

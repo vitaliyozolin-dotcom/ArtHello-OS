@@ -31,3 +31,5 @@ D134 protected run `34537971479` затем проверил source/archive и �
 D135 protected run `34539171120` подтвердил, что legacy system label уже отсутствует, и остановился до сборки/backup. D136 использует единственную фактическую routing identity: network alias `school-1-11` в `arthello-os_backend`, а revision проверяет на image label.
 
 D136 run `34540282349` обнаружил отсутствие этой legacy-сети на current runner и остановился до мутаций. D137 оставляет единственную неизменяемую identity — old image revision — и требует ровно один такой running container.
+
+D137 run `34541397143` подтвердил, что School image отсутствует на runner-local Docker daemon. D138 возвращает School delivery на его принятую key-only/known-host SSH boundary; Atlas остаётся локальным и запускается только после School PASS.

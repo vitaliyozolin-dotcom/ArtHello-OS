@@ -955,3 +955,7 @@ D135 run `34539171120` остановился до мутаций из-за от
 ## Приложение D137 — immutable School image identity (2026-09-10)
 
 D136 run `34540282349` остановился до мутаций из-за отсутствия legacy network на current runner. D137 выбирает ровно один running container по old image revision `54242340f2d9b6a9887d69ecc03520ddf9f7982c`; никаких предположений о Docker name, container labels или network нет. Остальные границы неизменны.
+
+## Приложение D138 — School protected SSH boundary (2026-09-10)
+
+D137 run `34541397143` остановился до мутаций: School image отсутствует на локальном Docker daemon runner. D138 доставляет проверенные archive/controller через существующие `ARTHELLO_RU_*` key-only SSH secrets с strict known hosts, сверяет SHA на целевом хосте и только там запускает standalone cutover. Atlas начинается лишь после remote School PASS.
