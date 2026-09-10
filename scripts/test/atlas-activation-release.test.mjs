@@ -40,9 +40,11 @@ test("Atlas source and observed central runtime are immutable pins", () => {
   assert.ok((release.match(/require_main/g) ?? []).length >= 4);
   assert.match(
     release,
-    /loaded_atlas_image="\$\(docker image inspect "atlas-diary:\$ATLAS_SOURCE_SHA"/,
+    /atlas_image_ref="atlas-diary:\$ATLAS_SOURCE_SHA"/,
   );
-  assert.match(release, /test "\$loaded_atlas_image" = "\$atlas_image"/);
+  assert.match(release, /docker image rm "\$atlas_image_ref"/);
+  assert.match(release, /loaded_atlas_image="\$\(docker image inspect "\$atlas_image_ref"/);
+  assert.match(release, /if \[ "\$loaded_atlas_image" != "\$atlas_image" \]/);
   assert.doesNotMatch(release, /docker image inspect "\$atlas_image"/);
 });
 

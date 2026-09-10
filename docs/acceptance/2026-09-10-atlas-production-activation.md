@@ -2,7 +2,7 @@
 
 Статус: кандидат, не принят.
 
-Первый protected D122 run `34520906921/103018492882` остановился до container/Caddy mutation после успешных artifact checksums: gateway Docker не разрешил raw image-ID lookup после load. D125 использует immutable source tag и обязательно сверяет его с тем же receipt image ID; остальные ворота неизменны.
+Первый protected D122 run `34520906921/103018492882` и D125 run `34523308648/103026645872` остановились после успешных artifact checksums и до container/Caddy mutation. D126 удаляет только оставшийся неиспользуемый Atlas tag перед load, затем обязательно сверяет новый tag с точным receipt image ID и source revision; остальные ворота неизменны.
 
 ## Наблюдённый baseline
 
