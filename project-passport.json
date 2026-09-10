@@ -19,17 +19,17 @@
     ]
   },
   "current_state": {
-    "stage": "atlas_central_candidate_and_protected_release_prepared",
-    "current_step": "Пройти exact-source CI PR411/413, выпустить центральный Atlas SSO по новому защищённому протоколу, затем первый отдельный Atlas сервис и natural browser acceptance",
+    "stage": "production_ui_consistency_correction",
+    "current_step": "Вернуть директору Атласа управленческий дашборд как стартовый экран, перенести родительский предпросмотр в отдельный инструмент и выпустить согласованный возврат в ArtHello OS для обеих школ",
     "evidence": [
-      "Отдельный пустой экземпляр atlas-school; SYS-SCHOOL-ATLAS и BR-ATLAS-SCHOOL в коде кандидата",
+      "Отдельный production-экземпляр atlas-school опубликован на atlas-188-225-38-55.sslip.io; данные Школы 1–11 не копировались",
       "Учебный календарь настраивается завучем; посещаемость хранится по датам уроков с проверкой версии",
       "Сборка, 26 unit/contract тестов и изолированный HTTP-сценарий завуч → учитель → родитель пройдены",
       "Подробные доказательства и ограничения: docs/acceptance/2026-09-10-atlas-diary.md",
-      "PR413: отдельные Atlas SSO и права; оба изолированных центральных HTTP-сценария PASS",
-      "Первый серверный запуск Atlas подготовлен; до готовности центрального SSO он отказывает до создания контейнера/данных"
+      "Центральный Atlas SSO владельца с ролью директора подтверждён production-проверкой D130",
+      "Мобильный снимок владельца подтвердил вход директора и одновременно выявил неверный первый экран перед управленческим дашбордом"
     ],
-    "production_status": "not_deployed",
+    "production_status": "deployed_owner_sso_verified_ui_correction_pending",
     "source_template_sha": "257fca54943f2a511f2db4ea89caa314be859840",
     "template_state_is_not_atlas_evidence": true
   },
@@ -53,16 +53,16 @@
     {
       "id": "ATLAS-2",
       "name": "Центральные Atlas SSO, system grants, signed projections",
-      "status": "in_progress",
+      "status": "completed",
       "dependencies": [
         "ATLAS-1"
       ],
-      "exit_evidence": "Реальные центральные права и вход руководителей учебной части в Атлас"
+      "exit_evidence": "D130 production receipt: ownerGrant=director, atlasSso=verified"
     },
     {
       "id": "ATLAS-3",
       "name": "Новый сервис, фактические учебные данные и приёмка в браузере",
-      "status": "pending",
+      "status": "in_progress",
       "dependencies": [
         "ATLAS-2"
       ],
@@ -71,7 +71,7 @@
     {
       "id": "ATLAS-4",
       "name": "Рабочий выпуск школы Атлас",
-      "status": "pending",
+      "status": "in_progress",
       "dependencies": [
         "ATLAS-3"
       ],
@@ -112,14 +112,15 @@
     {
       "id": "atlas-production",
       "name": "Опубликовано в production",
-      "status": "not_deployed",
-      "evidence": null
+      "status": "owner_sso_verified_ui_correction_pending",
+      "evidence": "D130 production receipt и мобильный снимок владельца"
     }
   ],
   "risks": [
     {
       "id": "atlas-central",
-      "description": "Центральная маршрутизация/проекции Атласа ещё не подключены; реальные сотрудники не получают готовый вход лишь от существования этой ветки."
+      "status": "partially_resolved",
+      "description": "Центральная маршрутизация и вход владельца подключены; права остальных сотрудников ещё не назначены."
     },
     {
       "id": "atlas-real-data",
@@ -658,6 +659,31 @@
           "owner": "Codex",
           "status": "pending",
           "evidence_required": "Фактический release SHA, backup/restore, обычный вход и учебный сценарий"
+        }
+      ]
+    },
+    {
+      "decision_id": "D-DIARY-DIRECTOR-HOME-001",
+      "project_id": "atlas-school-diary",
+      "status": "active",
+      "approved_by": "Виталий Озолин",
+      "approved_at": "2026-09-10",
+      "statement": "В обоих школьных дневниках директор начинает работу с управленческого дашборда даже при пустых учебных данных. Родительский предпросмотр является отдельным инструментом руководителя, не называется его кабинетом и не подменяет главную. Возврат в ArtHello OS должен быть доступен сотрудникам и в Атласе, и в Школе 1–11.",
+      "source_links": [
+        "Прямое замечание владельца в чате и мобильные снимки двух production-дневников"
+      ],
+      "actions": [
+        {
+          "action": "Исправить стартовую поверхность Атласа и закрепить правило тестом",
+          "owner": "Codex",
+          "status": "in_progress",
+          "evidence_required": "Директор сразу видит дашборд при 0 и более учениках; пустой родительский preview отсутствует"
+        },
+        {
+          "action": "Выпустить ранее одобренную обратную навигацию в production Школы 1–11",
+          "owner": "Codex",
+          "status": "pending",
+          "evidence_required": "Обычный мобильный маршрут School → ArtHello OS без logout и без потери данных"
         }
       ]
     }
