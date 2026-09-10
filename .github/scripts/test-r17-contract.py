@@ -75,7 +75,7 @@ class ContractTests(unittest.TestCase):
 
     def test_current_source_and_helper_mutations_are_refused(self):
         for name in ['deploy/v52/src/db/index.ts', 'deploy/v52/src/lib/tochka-autosync.ts',
-                     '.github/scripts/download-v52-artifact-r15.py', 'deploy/browser/retire-r14-browser.mjs',
+                     '.github/scripts/download-v52-artifact-r15.py', '.github/scripts/download-v52-artifact-r17.py', 'deploy/browser/retire-r14-browser.mjs',
                      '.github/scripts/r14-live-baseline.py', '.github/scripts/r17-backup-controller.py',
                      '.github/scripts/r17-backup-adoption.py', '.github/scripts/r17-candidate-state.py',
                      'deploy/v52/src/lib/integrations.ts', 'deploy/browser/retire-r16-browser.mjs', 'deploy/v52/src/lib/finance-articles.ts', '.github/scripts/finance-ci-browser.mjs']:

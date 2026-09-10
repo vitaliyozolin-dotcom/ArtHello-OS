@@ -1210,3 +1210,7 @@ Frozen R16 workflow, bank activation/backup contexts и текущая productio
 ## D111 — Исправить точное сопоставление history receipt для R17
 
 10.09.2026. Разрешено прежним поручением Виталия на проверку и production выпуск статей. D110 остановился до checkout/cutover: helper подтвердил accepted R16, но inline consumer сохранял номер R15. Новый D111 PR414 меняет только этот exact run pin и provenance нового squash; добавлен выполняемый тест стыка helper→inline consumer с отказом неверным identities/restore/resume. Runtime/банковские данные/lease/права не меняются; frozen R16 и полный backup/School chain сохранены. Факты и контракт: docs/acceptance/2026-09-10-r17-history-receipt-fix.md. Старый failed a3ccfb3/run34486783972 не повторять.
+
+## D112 — Точный состав артефактов R17
+
+D111 остановился до application import/cutover: actual producer содержит app + finance browser proof, старый downloader требует один artifact. Новый versioned R17 downloader проверяет ровно два известных artifact одного owner/main/attempt1/source, скачивает только app и сохраняет byte-identical delivery/extraction tail. Frozen R15 не меняется; весь downstream protocol сохранён. Только новый squash PR415 после exact-head CI/review, без rerun failed D111/D110. Основание — ранее разрешённый выпуск статей. Контракт: docs/acceptance/2026-09-10-r17-artifact-inventory-fix.md.
