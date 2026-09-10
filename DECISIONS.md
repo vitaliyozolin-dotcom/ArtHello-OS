@@ -8,6 +8,8 @@ Quality run `34473673544` на D-106 SHA `1bfe6634bf1a0e90ae20c64cbf428d9cd33585
 
 Schema 3 School manifest явно исключает только два воспроизводимых выхода уже обязательного typecheck: корневой `tsconfig.tsbuildinfo` и каталог `.wrangler`. Любой иной дополнительный, удалённый, изменённый или получивший executable bit source-файл продолжает менять identity и блокировать gate. Regression создаёт оба generated output для v44/v52 и требует неизменный hash; clean v44 canonical SHA закреплён как `164da587ce0e07d35e3696ddfda53f4cd372a63e38365dad52fb3c6966d711df`.
 
+Exact-head acceptance: SHA `2acc22559ca11f784c07ad6b2a859ee907c87306`, tree `7b3022803ee85ec8e95831b3a2e66fc0adc4d645`, Quality run `34477515417` attempt 1 — SUCCESS. Все шесть jobs, включая `test`, `secret-scan`, `school-source-v44` и `school-source-v52`, завершились успешно. Неистёкший provenance artifact `10152210530` содержит совпадающие head/tree; SHA-256 файла `provenance.txt` подтверждён как `caefe15e113325abf195adab3ffe48ff59143b8af3ed9a6267e09ab7874d51b2`. Это закрывает CI/provenance D-105–D-107, но не разрешает production deploy.
+
 ## D-106 — Измеряемый coverage ratchet для API policy-core
 
 Дата: 2026-09-10. Статус: принято владельцем поручением продолжить следующий этап рефакторинга после D-105.
