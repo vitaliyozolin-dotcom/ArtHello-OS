@@ -9,7 +9,7 @@ ORIGIN_HOST="${ORIGIN_HOST:-arthello-origin.internal}"
 ROOT="${ARTHELLO_ROOT:-/srv/arthello}"
 TOKEN_FILE="${GITHUB_TOKEN_FILE:-$ROOT/shared/github-release-token}"
 DEPLOY_KEY="${GITHUB_DEPLOY_KEY:-/root/.ssh/arthello_repo_ed25519}"
-SOURCE_TREE_DIGEST="c99a5f6ded03d5c8071a4f0601e4ae2504ffa7cd6af4ccc21a8aaf00e8adf020"
+SOURCE_TREE_DIGEST="adf06829e21c346fc58014ac11a8cbbffb417ad19f09b225129bf4186ca11a15"
 IMAGE="arthello-os-ui:$TARGET_SHA"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 WORK="$ROOT/gateway-cutovers/$TARGET_SHA-$RUN_ID"
@@ -64,7 +64,7 @@ else
 fi
 
 test -f "$SRC/deploy/v44/Dockerfile"
-actual_tree_digest="$(tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner --mode='u+rwX,go+rX,go-w' -cf - -C "$SRC/deploy/v44/src" . | sha256sum | awk '{print $1}')"
+actual_tree_digest="$(tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C "$SRC/deploy/v44/src" . | sha256sum | awk '{print $1}')"
 [ "$actual_tree_digest" = "$SOURCE_TREE_DIGEST" ]
 
 echo '2/5 Поднимаем новую оболочку...'

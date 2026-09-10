@@ -49,9 +49,11 @@ independent reconstruction above, not by trusting the failing checkout alone.
 ## Correction and verification
 
 Manifest schema 2 fixes canonical modes without changing on-disk permissions.
-File contents, paths and executable identity remain part of the hash. Both
-manual v44 checksum readers use the same contract. Bank tests import the
-materialized v52 source; their assertions are unchanged.
+File contents, paths and executable identity remain part of the hash. Bank tests import the materialized v52 source; their assertions are unchanged.
+The dormant manual v44 readers are left unchanged and fail closed under D-099.
+Updating those paths would automatically trigger the older v44 deployment on
+merge, which is outside the protected Tochka release route. This PR therefore
+changes no files under deploy/v44 and does not activate that workflow.
 
 `node --test scripts/test/school-source.test.mjs scripts/test/tochka-account-identity.test.mjs`
 passes 14 tests. Source tests reject content edits, added/missing files, changed
@@ -87,6 +89,8 @@ Workflow-hygiene review: 14 active workflows before and after; the changed
 verifier remains pull_request/push, contents:read, ubuntu-latest, exact-head
 checkout without persisted credentials, and no protected environment. No
 production consumer, gateway/School lock, trigger or authorization changes.
+The v44 workflow has an independent push path and lock; excluding every
+`deploy/v44/**` file from the final merge diff prevents that competing release.
 The original verifier YAML is an inert fixture in a temporary directory.
 
 Hosted exact-head CI and final source review remain mandatory. Last accepted
