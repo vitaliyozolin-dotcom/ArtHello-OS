@@ -177,10 +177,23 @@ test "$(jq -er '.sourceSha' "$ATLAS_BUNDLE_DIR/receipt.json")" = "$ATLAS_SOURCE_
 test "$(jq -er '.sourceTree' "$ATLAS_BUNDLE_DIR/receipt.json")" = "$ATLAS_SOURCE_TREE"
 atlas_image="$(jq -er '.imageId' "$ATLAS_BUNDLE_DIR/receipt.json")"
 [[ "$atlas_image" =~ ^sha256:[a-f0-9]{64}$ ]]
+atlas_image_ref="atlas-diary:$ATLAS_SOURCE_SHA"
+if docker image inspect "$atlas_image_ref" >/dev/null 2>&1; then
+  stale_users="$(docker ps -aq --filter "ancestor=$atlas_image_ref")"
+  test -z "$stale_users"
+  docker image rm "$atlas_image_ref" >/dev/null
+fi
 docker load --input "$ATLAS_BUNDLE_DIR/atlas-image.tar.gz" >/dev/null
-loaded_atlas_image="$(docker image inspect "atlas-diary:$ATLAS_SOURCE_SHA" --format '{{.Id}}')"
-test "$loaded_atlas_image" = "$atlas_image"
-test "$(docker image inspect "atlas-diary:$ATLAS_SOURCE_SHA" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$ATLAS_SOURCE_SHA"
+loaded_atlas_image="$(docker image inspect "$atlas_image_ref" --format '{{.Id}}')"
+if [ "$loaded_atlas_image" != "$atlas_image" ]; then
+  printf 'Atlas image receipt mismatch: expected=%s loaded=%s\n' "$atlas_image" "$loaded_atlas_image" >&2
+  exit 1
+fi
+loaded_atlas_revision="$(docker image inspect "$atlas_image_ref" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+if [ "$loaded_atlas_revision" != "$ATLAS_SOURCE_SHA" ]; then
+  printf 'Atlas image revision mismatch: expected=%s loaded=%s\n' "$ATLAS_SOURCE_SHA" "$loaded_atlas_revision" >&2
+  exit 1
+fi
 
 {
   printf 'NODE_ENV=production\nPORT=8081\nARTHELLO_D1_PATH=/data/d1\n'
@@ -230,7 +243,7 @@ docker run -d --name "$atlas_service" --restart unless-stopped --network "$netwo
   --mount "type=bind,src=$atlas_pepper,dst=/run/secrets/atlas-passwordless-pepper,readonly" \
   -v "$atlas_data:/data" -v "$atlas_backups:/backups" \
   --label "org.opencontainers.image.revision=$ATLAS_SOURCE_SHA" --label arthello.institution=atlas-school \
-  --entrypoint /bin/sh "atlas-diary:$ATLAS_SOURCE_SHA" -ceu '
+  --entrypoint /bin/sh "$atlas_image_ref" -ceu '
     export CENTRAL_ACCESS_SECRET="$(cat /run/secrets/atlas-central-access-secret)"
     export PASSWORDLESS_PEPPER="$(cat /run/secrets/atlas-passwordless-pepper)"
     exec node server.js
