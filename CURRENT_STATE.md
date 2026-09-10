@@ -1,5 +1,7 @@
 # ArtHello OS — Current State
 
+- D-106 начинает оставшуюся часть трека 6.6: `test:full` получил обязательный Node 24 coverage ratchet для явно ограниченного API policy-core. Checked-in baseline измерен фактическим прогоном: lines 93.32%, branches 70.51%, functions 92.92%, 56/56 тестов PASS; это не заявляется покрытием всего API.
+
 ## Tochka source compatibility checkpoint (2026-09-10)
 
 - D-100 исправляет воспроизведённые после D-099 ошибки canonical source verification и банковских test imports. Независимая реконструкция дала совпадение 237 v44 и 454 v52 source files; локально 14 targeted tests PASS. Hosted exact-head CI ещё обязателен.

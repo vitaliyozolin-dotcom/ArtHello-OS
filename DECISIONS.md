@@ -1,5 +1,13 @@
 # ArtHello OS — Decisions
 
+## D-106 — Измеряемый coverage ratchet для API policy-core
+
+Дата: 2026-09-10. Статус: принято владельцем поручением продолжить следующий этап рефакторинга после D-105.
+
+Встроенный test coverage Node 24 становится обязательной частью `test:full` для явно ограниченного `api-policy-core`: трёх Front Office suites, migration-state gate, people access policy и security suite. Checked-in `quality-gates/coverage-ratchet.json` хранит список тестов, include-pattern и минимумы, снятые с первого воспроизводимого прогона: lines 93.32%, branches 70.51%, functions 92.92%; 56/56 тестов PASS. Минимумы разрешено только сохранять или повышать по новому измерению.
+
+Этот ratchet доказывает покрытие загруженных production TypeScript-модулей указанного policy-core, а не всего API или продукта. PostgreSQL integration не входит в измерение и продолжает исполняться отдельным обязательным gate; runtime-поведение, схема, routes и production этим решением не меняются.
+
 ## D-105 — Materialized School source является обязательным CI-контуром
 
 Дата: 2026-09-10. Статус: принято владельцем явным поручением закончить рефакторинг, закоммитить и продолжить следующий этап.

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "runtime": "node>=24",
+  "scope": "api-policy-core",
+  "include": "src/**/*.ts",
+  "tests": [
+    "test/front-office-policy.test.mjs",
+    "test/front-office-smsvizitka-shadow.test.mjs",
+    "test/front-office-surface.test.mjs",
+    "test/migration-state-gate.test.mjs",
+    "test/people-access-policy.test.mjs",
+    "test/security.test.mjs"
+  ],
+  "minimum": {
+    "lines": 93.32,
+    "branches": 70.51,
+    "functions": 92.92
+  }
+}
