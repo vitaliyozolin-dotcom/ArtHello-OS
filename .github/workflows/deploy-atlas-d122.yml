@@ -75,7 +75,7 @@ jobs:
           test "$(git -C atlas rev-parse HEAD)" = "$ATLAS_SOURCE_SHA"
           test "$(git -C atlas rev-parse HEAD^{tree})" = "$ATLAS_SOURCE_TREE"
           bash -n controller/deploy/activate-atlas-d122.sh
-          node --test controller/scripts/test/atlas-activation-release.test.mjs
+          (cd controller && node --test scripts/test/atlas-activation-release.test.mjs)
 
       - name: Build and exercise immutable Atlas image
         run: |
