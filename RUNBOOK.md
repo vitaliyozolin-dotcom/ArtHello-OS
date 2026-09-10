@@ -1,5 +1,9 @@
 # ArtHello OS — Runbook
 
+## Diaries D137 — School image identity
+
+- D136 run `34540282349` доказал отсутствие старой Docker network на текущем runner до мутаций. D137 разрешает только единственный running container, чей image label revision равен `54242340f2d9b6a9887d69ecc03520ddf9f7982c`; имя и сеть не предполагаются.
+
 ## Diaries D136 — School network identity
 
 - D135 run `34539171120` доказал отсутствие legacy system label до любых мутаций. D136 разрешает School только как единственный running member `arthello-os_backend` с network alias `school-1-11` и image revision `54242340f2d9b6a9887d69ecc03520ddf9f7982c`.

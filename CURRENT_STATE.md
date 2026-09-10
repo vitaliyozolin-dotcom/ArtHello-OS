@@ -1,5 +1,10 @@
 # ArtHello OS — Current State
 
+## 2026-09-10 — D137: School по immutable image identity, кандидат
+
+- D136 run `34540282349` остановился до мутаций: на gateway Docker daemon отсутствует прежняя сеть `arthello-os_backend`; Atlas не запускался.
+- D137 не предполагает имя, label контейнера или сеть: требует ровно один running container, чей immutable image имеет revision `54242340…`, и передаёт его валидированное имя rollback-controller.
+
 ## 2026-09-10 — D136: разрешение School по сетевому alias, кандидат
 
 - D135 protected run `34539171120` остановился до сборки/backup School: ни один running container не имеет старой system label. Atlas не запускался, production не менялся.
