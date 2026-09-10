@@ -591,3 +591,9 @@ Daemon-local image ID не является переносимой границ�
 D127 run `34526464994`, deploy job `103037110088`, прошёл переносимую image provenance, затем `d083-maintenance-route.py observe-gateway` отказал до создания Atlas volumes/containers и до Caddy mutation. Код parser требует owner-only regular input files mode `0600`; `docker cp` сохранил иной режим, а Atlas-контроллер в отличие от принятых v52-контроллеров не выполнил последующий `chmod`.
 
 D128 разрешает только выставить `0600` на временных локальных копиях `external-routes.caddy` и `Caddyfile` непосредственно перед неизменным fail-closed parser. Содержимое файлов, gateway и route этим не меняются. Остальные D122/D127 границы неизменны. Новый protected запуск разрешён только свежим squash main с prefix `D128: fix Atlas route snapshot mode` после exact-head CI.
+
+## D129 — Повторить TLS health после атомарного Atlas cutover (2026-09-10, кандидат)
+
+D128 run `34527921248`, deploy job `103041808551`, прошёл image и Caddy evidence, создал пустой Atlas runtime, проверил кандидаты и выполнил atomic route reload. Первый немедленный public health получил `tlsv1 alert internal error`; trap перечитал исходный route, удалил новые Atlas/central containers и запустил прежний central. Production receipt не создан. От rollback остаются только помеченные Atlas data/backup volumes с пустой institution-bound БД и первым backup.
+
+D129 разрешает до нового запуска удалить эти два volumes только при точной метке `arthello.institution=atlas-school` и отсутствии любого использующего контейнера. После atomic reload public health и SSO curl получают ограниченный 60 секундами `--retry-all-errors`; содержательные JSON/status проверки остаются прежними. Остальные D122/D128 границы неизменны. Новый protected запуск разрешён только свежим squash main с prefix `D129: retry Atlas TLS cutover` после exact-head CI.

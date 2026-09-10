@@ -2,7 +2,7 @@
 
 Статус: кандидат, не принят.
 
-Первые protected runs остановились до container/Caddy mutation. D126 доказал cross-daemon image-ID rewrite; D127 run `34526464994/103037110088` прошёл portable archive/source/tree provenance и выявил отсутствующий обязательный `0600` на локальных снимках Caddy после `docker cp`. D128 выставляет режим до защитного parse; остальные ворота неизменны.
+Первые protected runs остановились безопасно. D128 run `34527921248/103041808551` впервые дошёл до атомарного Caddy reload; первый post-reload TLS health получил transient `tlsv1 alert internal error`, затем trap восстановил исходный route/central и удалил новые контейнеры. D129 добавляет ограниченный retry-all-errors и очищает только проверенные неиспользуемые пустые Atlas volumes от rollback; остальные ворота неизменны.
 
 ## Наблюдённый baseline
 

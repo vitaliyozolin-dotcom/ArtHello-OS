@@ -169,8 +169,14 @@ for secret in "$atlas_key" "$atlas_pepper"; do
 done
 ! cmp -s "$atlas_key" "$central_key"
 
-for resource in "$atlas_service" "$atlas_data" "$atlas_backups"; do
-  ! docker inspect "$resource" >/dev/null 2>&1
+! docker container inspect "$atlas_service" >/dev/null 2>&1
+for volume in "$atlas_data" "$atlas_backups"; do
+  if docker volume inspect "$volume" >/dev/null 2>&1; then
+    test "$(docker volume inspect "$volume" --format '{{index .Labels "arthello.institution"}}')" = atlas-school
+    test -z "$(docker ps -aq --filter "volume=$volume")"
+    docker volume rm "$volume" >/dev/null
+  fi
+  ! docker volume inspect "$volume" >/dev/null 2>&1
 done
 (cd "$ATLAS_BUNDLE_DIR" && sha256sum --check checksums.sha256)
 atlas_archive_sha="$(sha256sum "$ATLAS_BUNDLE_DIR/atlas-image.tar.gz" | cut -d ' ' -f 1)"
@@ -287,11 +293,11 @@ docker exec -e EXPECTED_SHA="$before_sha" -e NEW_ROUTE="$route_new" "$caddy" sh 
 '
 route_changed=1
 docker exec "$caddy" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
-curl -fsS --retry 5 --retry-delay 2 --max-time 20 "$central_origin/api/health" | jq -e '.status == "ok" and .database == "available"' >/dev/null
-curl -fsS --retry 5 --retry-delay 2 --max-time 20 "$school_origin/api/health" | jq -e '.status == "ok"' >/dev/null
-curl -fsS --retry 5 --retry-delay 2 --max-time 20 "$atlas_origin/api/health" | jq -e '.status == "ok"' >/dev/null
+curl -fsS --retry-all-errors --retry 15 --retry-delay 2 --retry-max-time 60 --max-time 20 "$central_origin/api/health" | jq -e '.status == "ok" and .database == "available"' >/dev/null
+curl -fsS --retry-all-errors --retry 15 --retry-delay 2 --retry-max-time 60 --max-time 20 "$school_origin/api/health" | jq -e '.status == "ok"' >/dev/null
+curl -fsS --retry-all-errors --retry 15 --retry-delay 2 --retry-max-time 60 --max-time 20 "$atlas_origin/api/health" | jq -e '.status == "ok"' >/dev/null
 open_headers="$work/atlas-open.headers"
-open_status="$(curl --silent --show-error --max-time 20 --output /dev/null --dump-header "$open_headers" --write-out '%{http_code}' "$central_origin/api/atlas-sso/open")"
+open_status="$(curl --silent --show-error --retry-all-errors --retry 15 --retry-delay 2 --retry-max-time 60 --max-time 20 --output /dev/null --dump-header "$open_headers" --write-out '%{http_code}' "$central_origin/api/atlas-sso/open")"
 test "$open_status" = 303
 tr -d '\r' < "$open_headers" | grep -Fxi "location: $atlas_origin/auth/central/start" >/dev/null
 docker update --restart=unless-stopped "$candidate" >/dev/null
