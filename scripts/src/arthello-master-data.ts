@@ -1,6 +1,6 @@
 import type { PGlite } from "@electric-sql/pglite";
 
-const confirmationSource = "owner_message_2026-07-25";
+const confirmationSource = "owner_message_2026-09-10_finance_structure";
 
 const legalEntities = [
   {
@@ -23,10 +23,15 @@ const legalEntities = [
   },
 ] as const;
 
-const operatingUnits = [
+export const operatingUnits = [
   {
-    code: "atlas-kindergarten-school",
-    name: "Атлас — садик и школа",
+    code: "atlas-kindergarten",
+    name: "Атлас — садик",
+    legalEntityCode: "ooo-arthello",
+  },
+  {
+    code: "atlas-school",
+    name: "Атлас — школа",
     legalEntityCode: "ooo-arthello",
   },
   {
@@ -37,6 +42,11 @@ const operatingUnits = [
   {
     code: "school-1-11",
     name: "Школа 1-11",
+    legalEntityCode: "ooo-uk-detskoe-obrazovanie",
+  },
+  {
+    code: "nebo-kindergarten",
+    name: "Небо — детский сад",
     legalEntityCode: "ooo-uk-detskoe-obrazovanie",
   },
 ] as const;
@@ -97,6 +107,23 @@ export async function seedOwnerConfirmedMasterData(
         ],
       );
     }
+    await database.query(
+      `UPDATE operating_unit_legal_entity
+       SET mapping_status = 'superseded',
+           effective_to = COALESCE(effective_to, DATE '2026-09-10'),
+           confirmation_source = $2,
+           updated_at = now()
+       WHERE operating_unit_code = $1`,
+      ["atlas-kindergarten-school", confirmationSource],
+    );
+    await database.query(
+      `UPDATE branch_legal_entity_assignments
+       SET mapping_status = 'pending_review_superseded_unit',
+           confirmation_source = $2,
+           updated_at = now()
+       WHERE operating_unit_code = $1`,
+      ["atlas-kindergarten-school", confirmationSource],
+    );
     await database.exec("COMMIT");
   } catch (error) {
     await database.exec("ROLLBACK");

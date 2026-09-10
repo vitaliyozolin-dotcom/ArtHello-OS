@@ -7,6 +7,7 @@ import {
   safeAlfaErrorCode,
   stringValue,
 } from "../src/alfacrm-safe.ts";
+import { operatingUnits } from "../src/arthello-master-data.ts";
 
 test("object values are never coerced into identifiers", () => {
   assert.equal(stringValue({ id: 42 }), null);
@@ -22,8 +23,12 @@ test("customer id resolves from explicit and nested AlfaCRM shapes", () => {
 
 test("owner-confirmed operating units match punctuation variants", () => {
   assert.equal(
-    operatingUnitRule("Атлас — садик и школа")?.operatingUnitCode,
-    "atlas-kindergarten-school",
+    operatingUnitRule("Атлас — садик")?.operatingUnitCode,
+    "atlas-kindergarten",
+  );
+  assert.equal(
+    operatingUnitRule("Атлас — школа")?.operatingUnitCode,
+    "atlas-school",
   );
   assert.equal(
     operatingUnitRule("Лиственная")?.operatingUnitCode,
@@ -37,7 +42,26 @@ test("owner-confirmed operating units match punctuation variants", () => {
     operatingUnitRule("Школа 1 – 11")?.operatingUnitCode,
     "school-1-11",
   );
+  assert.equal(
+    operatingUnitRule("Небо — детский сад")?.operatingUnitCode,
+    "nebo-kindergarten",
+  );
+  assert.equal(operatingUnitRule("Атлас"), null);
+  assert.equal(operatingUnitRule("Атлас — садик и школа"), null);
   assert.equal(operatingUnitRule("Неизвестный филиал"), null);
+});
+
+test("owner-confirmed master data keeps all five branches separate", () => {
+  assert.deepEqual(
+    operatingUnits.map((unit) => [unit.code, unit.legalEntityCode]),
+    [
+      ["atlas-kindergarten", "ooo-arthello"],
+      ["atlas-school", "ooo-arthello"],
+      ["listvennaya", "ip-tyurin-pavel-olegovich"],
+      ["school-1-11", "ooo-uk-detskoe-obrazovanie"],
+      ["nebo-kindergarten", "ooo-uk-detskoe-obrazovanie"],
+    ],
+  );
 });
 
 test("shared phone remains a candidate, not a confirmed guardian fact", () => {

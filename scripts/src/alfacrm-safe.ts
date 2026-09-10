@@ -52,10 +52,14 @@ export function operatingUnitRule(
   branchName: string | null,
 ): OperatingUnitRule | null {
   const normalized = normalizeName(branchName);
-  if (normalized.includes("атлас")) {
+  const school = normalized.includes("школ");
+  const kindergarten = /(?:^|\s)(?:детский\s+сад|детсад|садик|дошкол)/.test(normalized);
+  if (normalized.includes("атлас") && school !== kindergarten) {
     return {
-      operatingUnitCode: "atlas-kindergarten-school",
-      mappingRule: "branch_name_contains_atlas",
+      operatingUnitCode: school ? "atlas-school" : "atlas-kindergarten",
+      mappingRule: school
+        ? "branch_name_atlas_school"
+        : "branch_name_atlas_kindergarten",
     };
   }
   if (normalized.includes("листвен")) {
@@ -65,12 +69,18 @@ export function operatingUnitRule(
     };
   }
   if (
-    normalized.includes("школ") &&
+    school &&
     /(?:^|\s)1\s*11(?:\s|$)/.test(normalized)
   ) {
     return {
       operatingUnitCode: "school-1-11",
       mappingRule: "branch_name_school_1_11",
+    };
+  }
+  if (normalized.includes("небо") && kindergarten) {
+    return {
+      operatingUnitCode: "nebo-kindergarten",
+      mappingRule: "branch_name_nebo_kindergarten",
     };
   }
   return null;

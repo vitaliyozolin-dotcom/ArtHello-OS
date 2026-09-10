@@ -118,6 +118,22 @@
       ]
     },
     {
+      "key": "cf-in-management-services",
+      "name": "Оплата управленческих услуг",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": []
+    },
+    {
+      "key": "cf-in-event-organization",
+      "name": "Оплата организации праздников",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": []
+    },
+    {
       "key": "cf-in-supplier-refund",
       "name": "Возврат от поставщика",
       "report": "cashflow",
@@ -849,6 +865,22 @@
         "Прочая зарплата",
         "Зарплата — персональная строка B"
       ]
+    },
+    {
+      "key": "pl-in-management-services",
+      "name": "Выручка от управленческих услуг",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": []
+    },
+    {
+      "key": "pl-in-event-organization",
+      "name": "Выручка от организации праздников",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": []
     },
     {
       "key": "pl-out-self-employed",

@@ -60,8 +60,14 @@ class CatalogImportTests(unittest.TestCase):
         raw = path.read_text(encoding="utf-8")
         self.assertFalse(MODULE.contains_forbidden_personal_marker(raw))
         desired = MODULE.validate_catalog_document(json.loads(raw))
-        self.assertEqual(len(desired), 144)
-        self.assertEqual(len({MODULE.article_identity(item) for item in desired}), 144)
+        self.assertEqual(len(desired), 148)
+        self.assertEqual(len({MODULE.article_identity(item) for item in desired}), 148)
+        self.assertTrue({
+            ("cashflow", "Оплата управленческих услуг", "Поступление"),
+            ("pnl", "Выручка от управленческих услуг", "Поступление"),
+            ("cashflow", "Оплата организации праздников", "Поступление"),
+            ("pnl", "Выручка от организации праздников", "Поступление"),
+        }.issubset({(item["report"], item["name"], item["direction"]) for item in desired}))
         self.assertRegex(MODULE.catalog_digest(desired), r"^[a-f0-9]{64}$")
 
     def test_import_stages_drafts_then_approves_and_is_idempotent(self):
