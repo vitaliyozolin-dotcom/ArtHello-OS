@@ -3,6 +3,8 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import re
+import subprocess
 import tempfile
 import unittest
 
@@ -108,6 +110,37 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(len(literals), 1)
         raw = ast.literal_eval(literals[0].split(' = ', 1)[1])
         self.assertEqual(raw, self.read('.github/scripts/r15-history-gate.py'))
+
+    def test_publication_method_is_explicitly_squash(self):
+        self.assertEqual(contract.RELEASE.get('mergeMethod'), 'squash')
+        self.assertEqual(self.pins['release'].get('mergeMethod'), 'squash')
+
+    def test_actual_rejected_merge_and_valid_squash_use_unchanged_jq_gate(self):
+        raw = self.read(contract.CONTROLLER).decode()
+        pattern = r"'(\.sha == \$sha and\n\s+\.commit\.verification\.verified == true and\n\s+\(\.parents \| length\) == 1 and\n\s+\.parents\[0\]\.sha == \$previous_sha)'"
+        filters = re.findall(pattern, raw)
+        self.assertEqual(len(filters), 1, 'the original single-parent/signature gate must remain exact')
+        actual = json.loads(self.read('.github/scripts/fixtures/r15-rejected-publication.json'))
+        previous = '9862a6e863d4d791c00ddeaba9480154ad5b8c4d'
+        def accepted(value):
+            run = subprocess.run(['jq', '-e', '--arg', 'sha', actual['sha'], '--arg', 'previous_sha', previous, filters[0]],
+                                 input=json.dumps(value), text=True, capture_output=True, timeout=10)
+            return run.returncode == 0
+        self.assertTrue(actual['commit']['verification']['verified'])
+        self.assertEqual(len(actual['parents']), 2)
+        self.assertFalse(accepted(actual), 'actual PR404 merge must remain rejected')
+        synthetic = copy.deepcopy(actual)
+        synthetic['parents'] = [{'sha': previous}]
+        self.assertTrue(accepted(synthetic), 'synthetic verified squash shape is admissible, not live evidence')
+        for mutation in ['signature', 'source', 'parent', 'no_parents', 'duplicate_parent']:
+            value = copy.deepcopy(synthetic)
+            if mutation == 'signature': value['commit']['verification']['verified'] = False
+            elif mutation == 'source': value['sha'] = '0' * 40
+            elif mutation == 'parent': value['parents'][0]['sha'] = '0' * 40
+            elif mutation == 'no_parents': value['parents'] = []
+            else: value['parents'] *= 2
+            with self.subTest(mutation=mutation):
+                self.assertFalse(accepted(value))
 
 
 if __name__ == '__main__':

@@ -136,7 +136,7 @@ jobs:
     timeout-minutes: 15
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      R15_CONTRACT_SHA256: dfe1a1cd0e456064ae86662e8b947607d2365df2eeaf695da8fa40cfd0da3737
+      R15_CONTRACT_SHA256: 310ba617ea22dcf94dd48f0accfd869d8ea30d11517f87e4f6f7f415837e30ed
     steps:
     - name: Check out exact unprivileged R15 verification source
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

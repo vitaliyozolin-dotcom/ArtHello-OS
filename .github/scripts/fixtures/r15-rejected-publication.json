@@ -1,0 +1,11 @@
+{
+  "sha": "bd3553187c6adcda3e0be1586b25c9c3b61dc3de",
+  "commit": {
+    "tree": { "sha": "b42dc9a70e440e98fe8c473c210891918f6e6632" },
+    "verification": { "verified": true, "reason": "valid" }
+  },
+  "parents": [
+    { "sha": "9862a6e863d4d791c00ddeaba9480154ad5b8c4d" },
+    { "sha": "2b8a72941c938df33cda9d5d697c272f92e663e4" }
+  ]
+}

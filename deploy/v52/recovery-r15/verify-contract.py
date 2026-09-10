@@ -9,20 +9,20 @@ import sys
 DIRECTORY = 'deploy/v52/recovery-r15/'
 BASE = DIRECTORY + 'r14-controller.yml'
 BASE_SHA = 'c6b0fa7117ad6af3b34f3c69d9b624a5ca1ba8104d54dea6bb755a0e9b2de5ea'
-RECIPE_SHA = '09bd2fa77cf647fa404c3ce850984b02fe26827494e63dc259571cc9a00dae66'
+RECIPE_SHA = 'd5c10c929ddb0087601cefe980bb6ce2cd6eb200e54da4d2e568be8ac3e2b53f'
 CONTROLLER = '.github/workflows/deploy-arthello-tochka-r15-20260910.yml'
 VERIFICATION = '.github/workflows/verify-arthello-r14.yml'
 OLD_CONTROLLER = '.github/workflows/deploy-arthello-recovery-r14-20260909.yml'
 FROZEN_PINS = 'deploy/v52/recovery-r14/source-pins.json'
 FROZEN_PINS_SHA = '6101c7ed105a02e6a91bd1e646da715dbff1217a1cd4585cceea9f2ec1f212cb'
-RELEASE = {'head': 'codex/tochka-r15-20260910', 'pr': 404,
-           'parentSha': '9862a6e863d4d791c00ddeaba9480154ad5b8c4d', 'prefix': 'D101: guarded Tochka R15'}
+RELEASE = {'head': 'codex/tochka-r15-squash-fix-20260910', 'pr': 405, 'parentSha': 'bd3553187c6adcda3e0be1586b25c9c3b61dc3de', 'prefix': 'D101: guarded Tochka R15', 'mergeMethod': 'squash'}
 CHANGED_FROZEN_INPUTS = {
     'deploy/v52/Dockerfile', 'scripts/test/tochka-account-identity.test.mjs',
     'deploy/v52/overrides/db/index.ts', 'deploy/v52/overrides/db/schema.ts',
     'deploy/v52/overrides/lib/tochka-autosync.ts',
 }
 EXTRA_INPUTS = {
+    '.github/scripts/fixtures/r15-rejected-publication.json',
     '.github/scripts/download-v52-artifact-r15.py', '.github/scripts/test-r15-artifact-download.py',
     '.github/scripts/r15-history-gate.py', '.github/scripts/test-r15-history-gate.py',
     'deploy/browser/retire-r14-browser.mjs', 'scripts/test/retire-r14-browser.test.mjs',
@@ -136,7 +136,7 @@ def verify(read):
     normalized, contract_sha = normalized_verification(read(VERIFICATION))
     require(digest(ruby) == contract_sha and digest(normalized) == pins['verificationNormalizedSha256'], 'VERIFICATION_DRIFT')
     return {'kind': 'r15-source-transformation', 'result': 'verified', 'sourcePins': len(pins['sourceFiles']),
-            'controllerSha256': digest(actual), 'durableProtocolSchema': 14, 'productionAcceptance': 'not_run'}
+            'controllerSha256': digest(actual), 'durableProtocolSchema': 14, 'requiredMergeMethod': 'squash', 'productionAcceptance': 'not_run'}
 
 
 def main():
