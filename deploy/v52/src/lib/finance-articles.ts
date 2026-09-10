@@ -1,4 +1,4 @@
-/** D107: approved management dictionary. No bank writes, automatic accruals or seeded articles. */
+/** D108: approved management dictionary. No bank writes, automatic accruals or seeded articles. */
 export type Article = {
   id: string; name: string; report: 'cashflow' | 'pnl'; direction: 'Поступление' | 'Списание';
   group: 'operating' | 'investing' | 'financing' | 'internal'; status: 'draft' | 'active' | 'archived';

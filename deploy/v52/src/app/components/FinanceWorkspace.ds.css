@@ -502,7 +502,7 @@
   .ahFinancePage .operation-classification-form input, .ahFinancePage .operation-classification-form select { font-size: 16px; }
 }
 
-/* D107 finance articles: scoped to the finance workspace, including narrow screens. */
+/* D108 finance articles: scoped to the finance workspace, including narrow screens. */
 .ahFinancePage .ahFinanceArticles { display: grid; gap: 20px; }
 .ahFinancePage .ahFinanceArticleForm { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 14px; align-items: end; margin-block: 20px; }
 .ahFinancePage .ahFinanceArticleForm label { display: grid; gap: 8px; min-width: 0; }

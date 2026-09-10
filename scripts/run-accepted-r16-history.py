@@ -22,7 +22,7 @@ WORKFLOW_NORMALIZED_SHA256 = '884bcf91e9ee7b6e07127b7114a0b9bb17155413a3f1bf79dd
 # The first represents the reviewed current application; the other two are D105
 # inputs already present in the base and preserved byte-for-byte. Current scheduler
 # behavior is tested before any historical fixture is created.
-CURRENT_INPUTS = {'deploy/school-source-manifest.json': '1d27569c517b8ac34600ef9a8b3bcb92b5a97327528b6098693ac63c18abfa61', 'deploy/v52/Dockerfile': 'a5372486dc7fa4efe45646a4a2a0562514e362fcfbad28d1d6ea8cb4872c09a6', 'deploy/v52/src/lib/tochka-autosync.ts': 'be895ff2426e1fac2941986ec0de0de18586dc9756bf5ee0ac239387e26a94dc'}
+CURRENT_INPUTS = {'scripts/test/school-source.test.mjs': 'bec0e629af23804461f9a9a70849a8e75db4257204d363d0b4e0faf5fdab66ae', 'deploy/school-source-manifest.json': 'f628903fda979d251a8991d2feaaff5f7cb123986d1f2fce88b3411b26156da4', 'deploy/v52/Dockerfile': 'a5372486dc7fa4efe45646a4a2a0562514e362fcfbad28d1d6ea8cb4872c09a6', 'deploy/v52/src/lib/tochka-autosync.ts': 'be895ff2426e1fac2941986ec0de0de18586dc9756bf5ee0ac239387e26a94dc', 'scripts/verify-school-source.mjs': 'ce78eac029d2e7238cc5164e93c006f1ba68723f51dba4b81ccf76fbda176309'}
 COMMANDS = {
     'r14': [
         ['python3', '-I', '-B', 'scripts/test/r14-historical-contract.test.py'],
@@ -64,7 +64,7 @@ def check_current(read):
     pins = json.loads(raw)
     require(len(pins['sourceFiles']) == 97, 'SOURCE_INVENTORY')
     require(set(CURRENT_INPUTS) == {'deploy/school-source-manifest.json', 'deploy/v52/Dockerfile',
-                                   'deploy/v52/src/lib/tochka-autosync.ts'}, 'MUTABLE_INPUT_INVENTORY')
+                                   'deploy/v52/src/lib/tochka-autosync.ts', 'scripts/verify-school-source.mjs', 'scripts/test/school-source.test.mjs'}, 'MUTABLE_INPUT_INVENTORY')
     for path, expected in pins['sourceFiles'].items():
         require(digest(read(path)) == CURRENT_INPUTS.get(path, expected), 'CURRENT_SOURCE_DRIFT:' + path)
     require(digest(read('.github/workflows/deploy-arthello-tochka-r16-20260910.yml')) == pins['controllerSha256'],
@@ -87,6 +87,7 @@ def run(suite, root=ROOT):
     # Current source tests execute BEFORE the historical checkout is created.
     for command in (
         ['node', 'scripts/verify-school-source.mjs'],
+        ['node', '--test', 'scripts/test/school-source.test.mjs'],
         ['node', '--test', 'deploy/v52/src/tests/tochka-autosync.test.mjs',
          'deploy/v52/src/tests/tochka-pending-lifecycle.test.mjs',
          'scripts/test/tochka-account-identity.test.mjs',

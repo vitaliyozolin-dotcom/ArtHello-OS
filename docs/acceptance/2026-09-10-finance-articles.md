@@ -1,4 +1,4 @@
-# D107 — статьи и ручное разнесение: кандидат
+# D108 — статьи и ручное разнесение: кандидат
 
 Основание: поручение Виталия «Давай тогда перейдем к статьям и их разнесению» после подключения Точки. Владелец процесса — Виталий. Разработка разрешена; конкретные названия статей и назначения реальным платежам не считаются утверждёнными этим документом.
 
@@ -51,8 +51,12 @@ Production-приёмка этого этапа пока НЕ выполнена
 
 ## История выпусков после изменения product source
 
-Унаследованные continuation-проверки R14/R15/R16 отказывали на source drift уже после D105. Они больше не могут объявлять новый продуктовый source старым release source. Новый hosted-only `run-accepted-r16-history.py` сначала проверяет текущий canonical source и 64 поведенческих банковских/финансовых теста, все 97 текущих R16 входов и неизменённый production controller. Единственные три изменённых входа закреплены отдельными SHA: текущий manifest, ранее изменённые D105 Dockerfile и `tochka-autosync.ts`. В последнем D105 убрал повторный `failureStage === sync_commit` при записи результата; observer уже обнуляет kind для других стадий. Эта строка не изменяется D107, текущие scheduler tests выполняются.
+Унаследованные continuation-проверки R14/R15/R16 отказывали на source drift уже после D105. Они больше не могут объявлять новый продуктовый source старым release source. Новый hosted-only `run-accepted-r16-history.py` сначала проверяет текущий canonical source и 64 поведенческих банковских/финансовых теста, все 97 текущих R16 входов и неизменённый production controller. Единственные три изменённых входа закреплены отдельными SHA: текущий manifest, ранее изменённые D105 Dockerfile и `tochka-autosync.ts`. В последнем D105 убрал повторный `failureStage === sync_commit` при записи результата; observer уже обнуляет kind для других стадий. Эта строка не изменяется D108, текущие scheduler tests выполняются.
 
 Старые команды R14/R15/R16 полностью исполняются в отдельном локальном checkout точно принятого `cb990279e070fddbfa9a0adbd21b56de25b85588` / tree `1ce4c733034060dc84d558d49dab96d1be9b1cf8`. Это historical fixture, не кандидат production; результат явно `production_acceptance=not_run`. Новый helper проверяет внешний SHA до/после, pinned исходники и весь verification workflow; тесты отказывают для каждого из 97 изменённых входов, altered pins/controller/workflow, произвольного suite и другого внешнего SHA. Frozen helpers/pins/controllers не редактируются; ни одна старая успешная установка не перезапускается.
 
 Workflow hygiene: изменяется один существующий verifier, число его jobs остаётся 5; triggers PR/push, hosted ubuntu-latest, contents:read, checkout exact SHA/depth0/credentials:false и прежняя concurrency сохраняются; environment/secrets/self-hosted/production actions не добавляются. Production R16 по-прежнему принимает только свой исходный PR/prefix; общий legacy v44 deploy не затронут.
+
+## Совместимость с новым main D107
+
+Пока кандидат проверялся, main перешёл на `2acc22559ca11f784c07ad6b2a859ee907c87306` (независимый D107: исключение только `tsconfig.tsbuildinfo` и `.wrangler` из canonical tar). Его schema3, verifier и новый negative/metadata test сохранены. Наш финансовый этап перенумерован D108. History runner теперь разрешает ровно пять byte-pinned отличий среди 97 R16 inputs: три перечисленных выше плюс текущий canonical verifier и его тест метаданных. Тест canonical source выполняется до исторического checkout. Все остальные входы, старые pins и production controller остаются неизменными. Это отдельная проверка истории, не новый release adapter.
