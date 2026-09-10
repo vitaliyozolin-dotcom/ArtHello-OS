@@ -1,17 +1,18 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "canonicalTar": {
     "owner": 0,
     "group": 0,
     "mtime": "UTC 1970-01-01",
-    "numericOwner": true
+    "numericOwner": true,
+    "mode": "u+rwX,go+rX,go-w"
   },
   "v44": {
     "sourceArchiveSha256": "c72c6c7ced52f0d533be16ff8a8aa2d11fad8d0743b6f1229bde7f034a057062",
-    "materializedTreeSha256": "adf06829e21c346fc58014ac11a8cbbffb417ad19f09b225129bf4186ca11a15"
+    "materializedTreeSha256": "c99a5f6ded03d5c8071a4f0601e4ae2504ffa7cd6af4ccc21a8aaf00e8adf020"
   },
   "v52": {
     "sourceArchiveSha256": "e76fb44dca272825fda4486e7584290b14969c1fd054a8c955eae738899b7c12",
-    "materializedTreeSha256": "1c683f1230eac04752d898892a4cf2de1af0b449d729731e721970b95e8d9ed6"
+    "materializedTreeSha256": "c76256a9f9239560598df62d3ee2da49e9713da1a83c4af2c9910532482b88ce"
   }
 }

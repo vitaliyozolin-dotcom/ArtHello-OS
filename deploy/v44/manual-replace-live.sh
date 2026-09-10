@@ -8,7 +8,7 @@ PUBLIC_DOMAIN="${PUBLIC_DOMAIN:-arthello-188-225-38-55.sslip.io}"
 ARTHELLO_ROOT="${ARTHELLO_ROOT:-/srv/arthello}"
 TOKEN_FILE="${GITHUB_TOKEN_FILE:-$ARTHELLO_ROOT/shared/github-release-token}"
 DEPLOY_KEY="${GITHUB_DEPLOY_KEY:-/root/.ssh/arthello_repo_ed25519}"
-SOURCE_TREE_DIGEST="adf06829e21c346fc58014ac11a8cbbffb417ad19f09b225129bf4186ca11a15"
+SOURCE_TREE_DIGEST="c99a5f6ded03d5c8071a4f0601e4ae2504ffa7cd6af4ccc21a8aaf00e8adf020"
 IMAGE="arthello-os-ui:$TARGET_SHA"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 WORK_ROOT="$ARTHELLO_ROOT/manual-cutovers/$TARGET_SHA-$RUN_ID"
@@ -79,7 +79,7 @@ else
 fi
 test -f "$SOURCE_ROOT/deploy/v44/Dockerfile"
 test -f "$SOURCE_ROOT/deploy/v44/compose.ui.yml"
-actual_tree_digest="$(tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C "$SOURCE_ROOT/deploy/v44/src" . | sha256sum | awk '{print $1}')"
+actual_tree_digest="$(tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner --mode='u+rwX,go+rX,go-w' -cf - -C "$SOURCE_ROOT/deploy/v44/src" . | sha256sum | awk '{print $1}')"
 test "$actual_tree_digest" = "$SOURCE_TREE_DIGEST"
 
 printf '2/5 Собираем и запускаем новый контейнер рядом со старым...\n'

@@ -1,5 +1,11 @@
 # ArtHello OS — Current State
 
+## Tochka source compatibility checkpoint (2026-09-10)
+
+- D-100 исправляет воспроизведённые после D-099 ошибки canonical source verification и банковских test imports. Независимая реконструкция дала совпадение 237 v44 и 454 v52 source files; локально 14 targeted tests PASS. Hosted exact-head CI ещё обязателен.
+- Это подготовка исходников, не выпуск: frozen R14 contract по-прежнему отвергает изменённый D-099 source. Run34391105865 attempt2 завершился до cutover, cleanup завершён. Последний принятый runtime — R13. Новый actual банк/ДДС report не получен, PR399 остаётся UNBOUND.
+- Подробности: `docs/acceptance/2026-09-10-tochka-source-compatibility.md`.
+
 ## Refactoring Phase 6 — workflow cleanup checkpoint (2026-09-09)
 
 - Трек 6.3 завершён кандидатом D-099: v44/v52 School source материализован в обычные деревья `deploy/*/src`, а Dockerfile больше не декодируют архивы и не исполняют patch transport.
