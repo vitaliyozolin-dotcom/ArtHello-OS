@@ -20,6 +20,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: bash -n deploy/publish-atlas.sh && node --test tests/atlas-release.test.mjs
       - run: npm test
         env:
           NEXT_PUBLIC_SCHOOL_DESIGN_V1: 'true'

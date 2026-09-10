@@ -19,13 +19,15 @@
     ]
   },
   "current_state": {
-    "stage": "atlas_local_acceptance_passed",
-    "current_step": "Подключить отдельные центральные Atlas SSO/проекции и новый сервис, затем проверить реальные роли и пройти браузерную приёмку перед открытием школы",
+    "stage": "atlas_central_candidate_and_protected_release_prepared",
+    "current_step": "Пройти exact-source CI PR411/413, выпустить центральный Atlas SSO по новому защищённому протоколу, затем первый отдельный Atlas сервис и natural browser acceptance",
     "evidence": [
       "Отдельный пустой экземпляр atlas-school; SYS-SCHOOL-ATLAS и BR-ATLAS-SCHOOL в коде кандидата",
       "Учебный календарь настраивается завучем; посещаемость хранится по датам уроков с проверкой версии",
       "Сборка, 26 unit/contract тестов и изолированный HTTP-сценарий завуч → учитель → родитель пройдены",
-      "Подробные доказательства и ограничения: docs/acceptance/2026-09-10-atlas-diary.md"
+      "Подробные доказательства и ограничения: docs/acceptance/2026-09-10-atlas-diary.md",
+      "PR413: отдельные Atlas SSO и права; оба изолированных центральных HTTP-сценария PASS",
+      "Первый серверный запуск Atlas подготовлен; до готовности центрального SSO он отказывает до создания контейнера/данных"
     ],
     "production_status": "not_deployed",
     "source_template_sha": "257fca54943f2a511f2db4ea89caa314be859840",
@@ -51,7 +53,7 @@
     {
       "id": "ATLAS-2",
       "name": "Центральные Atlas SSO, system grants, signed projections",
-      "status": "pending",
+      "status": "in_progress",
       "dependencies": [
         "ATLAS-1"
       ],
