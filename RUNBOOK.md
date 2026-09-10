@@ -1,10 +1,15 @@
 # ArtHello OS — Runbook
 
+## Diaries D134 — повтор после School topology mismatch
+
+- D133 protected run `34536320576` остановился до мутаций Atlas: `/srv/school-1-11/shared/.env` отсутствует, поэтому compose-oriented `repair-deploy.sh` не соответствует текущей standalone-топологии School.
+- Повтор разрешён только exact-main Quality для prefix `D134: repair diary UI release`. School source/archive pins не меняются; использовать `school-curriculum-standalone-cutover.sh` с контейнером `school-1-11`, его write gate, backup/integrity, preflight и rollback. После School PASS выполнить неизменный Atlas D133 upgrade и owner SSO.
+
 ## Diaries D133 — старт директора и возврат в ArtHello OS
 
 - Автоматический production job допустим только после successful exact-main Quality для squash с prefix `D133: release diary UI consistency`, на `arthello-gateway` и в protected environment `production-ru`.
 - Immutable pins: Atlas `f856fb3bd098152bb6b02c4d0273c4c9170b130c` / tree `e63e28520670527bc12d84abcd45cd8fffe2b876`; School `1a501aa11c55a7a743fc05888d5a57190f2a5c80` / tree `ff140e1c5cee91dfe685962c1c5a9e1b6d7d14f1`.
-- School обновляется только его проверенным `repair-deploy.sh`: остановка записей, backup и integrity, write gate, private/public проверки, атомарный current link и rollback. Не заменять этот путь ручным `docker run`.
+- D133 первоначально выбрал compose-oriented `repair-deploy.sh`; D134 зафиксировал, что фактический production — standalone-контейнер, и заменил delivery path на проверенный standalone cutover без ручного `docker run`.
 - Atlas controller принимает только прежний source `987abd5951dc4832e2c071d8744051c518bae42e` либо уже активный D133 source. До замены остановить контейнер, скопировать `/data/atlas-school.sqlite` в постоянный backups volume, проверить `PRAGMA integrity_check`; data volume не удалять и не заменять.
 - После замены обязательны public health и полный owner SSO до авторизованного `/api/school`. Receipt не должен содержать credentials, cookies, query или PII.
 - При ошибке School откатывается собственным trap. При ошибке Atlas удалить только новый контейнер, вернуть переименованный прежний контейнер и запустить его на исходном volume. Никаких `docker volume rm`.

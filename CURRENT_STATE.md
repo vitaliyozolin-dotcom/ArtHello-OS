@@ -1,5 +1,10 @@
 # ArtHello OS — Current State
 
+## 2026-09-10 — D134: восстановление выпуска дневников, кандидат
+
+- D133 PR439 и все hosted проверки прошли, exact main `8d39e40df5366309de30e8a70f2a14797c61512a`; protected run `34536320576` остановился на School precondition до Atlas: legacy `repair-deploy.sh` ожидал отсутствующий `/srv/school-1-11/shared/.env`. Atlas, его база и контейнер не менялись.
+- D134 заменяет только неверно выбранный School delivery controller на уже проверенный standalone cutover для фактического контейнера `school-1-11`: immutable archive, write gate, SQLite backup/integrity, сохранение volume, preflight, rollback и public verification. Продуктовые pins D133 не меняются.
+
 ## 2026-09-10 — D133: единая стартовая поверхность двух дневников, кандидат
 
 - Мобильная приёмка владельца подтвердила успешный Atlas SSO и роль директора, но выявила продуктовый дефект: полноэкранный блок «Кабинет родителя» рендерился перед управленческим дашбордом и при нуле учеников выглядел пустой главной.

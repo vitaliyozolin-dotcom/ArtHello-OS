@@ -18,7 +18,7 @@ test("production runs only after exact successful main Quality and inside the pr
   const workflow = read(".github/workflows/deploy-diaries-d133.yml");
   assert.match(workflow, /workflow_run:/);
   assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(workflow, /startsWith\(github\.event\.workflow_run\.head_commit\.message, 'D133: release diary UI consistency'\)/);
+  assert.match(workflow, /startsWith\(github\.event\.workflow_run\.head_commit\.message, 'D134: repair diary UI release'\)/);
   assert.match(workflow, /environment: production-ru/);
   assert.match(workflow, /runs-on: \[self-hosted, linux, x64, arthello-gateway\]/);
 });
@@ -43,10 +43,14 @@ test("Atlas upgrade is backup-first, preserves the data volume and has rollback"
   assert.equal(syntax.status, 0, syntax.stderr);
 });
 
-test("School uses its established backup and rollback cutover without package installation on production", () => {
+test("School uses its current-topology standalone backup and rollback cutover without package installation on production", () => {
   const workflow = read(".github/workflows/deploy-diaries-d133.yml");
   const productionJob = workflow.split("\n  deploy:")[1] ?? "";
-  assert.match(workflow, /SOURCE_DIR="\$GITHUB_WORKSPACE\/school"/);
-  assert.match(workflow, /bash school\/deploy\/repair-deploy\.sh/);
+  assert.match(workflow, /school-curriculum-standalone-cutover\.sh/);
+  assert.match(workflow, /SCHOOL_STANDALONE_CUTOVER=PASS/);
+  assert.match(workflow, /SCHOOL_STANDALONE_BACKUP=VERIFIED/);
+  const syntax = spawnSync("bash", ["-n", fileURLToPath(new URL("../../deploy/school-curriculum-standalone-cutover.sh", import.meta.url))], { encoding: "utf8" });
+  assert.equal(syntax.status, 0, syntax.stderr);
+  assert.doesNotMatch(productionJob, /repair-deploy\.sh/);
   assert.doesNotMatch(productionJob, /npm (ci|install)/);
 });
