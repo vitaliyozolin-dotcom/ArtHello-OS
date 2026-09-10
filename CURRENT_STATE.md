@@ -370,3 +370,17 @@ Unit/source regression suite проверяет эти ветки без product
 PR403 объединён: `9862a6e863d4d791c00ddeaba9480154ad5b8c4d`, tree `7a08a2e88e8ea45c2ef1e9631f62ba5c612d6034`. Exact PR head `1912996e925cbf5c26ff7d2e2f789c8bcc6e1657` прошёл Quality34440928812, Proof34440928740, V5234440928818 и R14/R13/R1234440928953. Чужая materialization сохранена; bank tests и historical source checks восстановлены. Это исходники, не новый live.
 
 R15 готовится в PR404 поверх этой базы: pinned R14-to-R15 transformation, bounded verified artifact delivery и exact unused R14 browser retirement. Protected R15 ещё не выполнен. Старый R14 run34391105865 attempt2 terminal failure до cutover; cleanup success. Accepted live остаётся R13, новый D075 не получен, реальные банковские операции и суммы не приняты. PR399 остаётся draft/UNBOUND. Следующий шаг — окончательный review/CI PR404, штатный guarded release и затем реальные bank/DDS receipts.
+
+
+## 2026-09-10 06:00Z — Первый R15 остановлен до установки; исправление в PR405
+
+R15 run34443217193 attempt1 / deploy102762766189 завершился failure на provenance после successful accepted-R13 history. Checkout, image downloads/import, snapshot, cutover и after-public SKIPPED; обе cleanup SUCCESS. Current main `bd3553187c6adcda3e0be1586b25c9c3b61dc3de` подписан GitHub, но имеет два parents; неизменённый gate требует один. Причина — выбранный Codex обычный merge PR404 вместо необходимого squash. Все основные CI на этом main PASS; они не являются установленным выпуском.
+
+Новый PR405 (`codex/tochka-r15-squash-fix-20260910`) сохраняет guard и фиксирует squash в publication contract. Локально actual-metadata jq regression и 12 contract +23 history tests PASS; exact-head CI/final review ожидаются. Старый R15 source/run нельзя повторять. App/data/backup/School не менялись этим failed запуском. Accepted baseline остаётся R13; PR399 UNBOUND, новые bank/DDS числа не получены.
+
+
+### D101 — Устранить случайное ложное срабатывание банковского теста
+
+Exact-head V52 run34443910215/job102764455280 остановился 2026-09-10T06:11:10Z в `tochka-autosync.test.mjs`: regex `/synthetic-private|provider-payload|418/` ошибочно нашёл 418 внутри случайного lease UUID. Actual httpStatus был безопасным 500. Ошибка воспроизведена локально фиксированным valid UUID с 418 до исправления assertions. Исправлен только этот тест: response/state сравниваются целиком с точными полями и числовыми HTTP status, проверки private payload сохранены. Все22 scheduler tests и12 R15 contract tests PASS. Runtime, lease/backoff и банковская логика не менялись.
+
+Единственный изменённый файл materialized source — `deploy/v52/src/tests/tochka-autosync.test.mjs`. Его осознанное изменение отражено в canonical manifest: v52 c76256a9f9239560598df62d3ee2da49e9713da1a83c4af2c9910532482b88ce → b20f022c0865e88dd7c1c62e40c7a0d315780abdf3e2e386c308ace70530bec3; v44 прежний. Current-source/historical-runner/R15 pins обновлены по фактическим bytes, frozen R14 pins/guards не меняются. Final head требует новых обязательных CI; провалившийся старый V52 не повторяется ради случайного удачного UUID.

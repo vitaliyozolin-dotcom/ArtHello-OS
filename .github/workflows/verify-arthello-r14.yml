@@ -95,7 +95,7 @@ jobs:
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       R14_CONTRACT_SHA256: 37614beafcbf18347d2429713301699bd4c5e3474cd4f7db840dc166b4c852a3
-      R14_HISTORICAL_RUNNER_SHA256: f69463ad864d0a6712f2928af909921392ee6f438ed4f5f976e27e6b27efbc6c
+      R14_HISTORICAL_RUNNER_SHA256: e59e134c03ec85328ed09e910055a1c9304b5e25e09c8dfb97114d29d3d22c03
     steps:
     - name: Check out exact unprivileged R14 verification source
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -136,7 +136,7 @@ jobs:
     timeout-minutes: 15
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      R15_CONTRACT_SHA256: dfe1a1cd0e456064ae86662e8b947607d2365df2eeaf695da8fa40cfd0da3737
+      R15_CONTRACT_SHA256: db8d577e4acd86180cb2a08234f99e654832918fcf29ad01697b25d57d700533
     steps:
     - name: Check out exact unprivileged R15 verification source
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

@@ -243,22 +243,25 @@ test('stage observation rethrows the identical error and retains successful valu
   assert.deepEqual(observed, ['credential_read']);
 });
 
-test('scheduler distinguishes callback, response decoding and result failures using fixed names only', async () => {
+test('scheduler distinguishes callback, response decoding and result failures using fixed names only', async (t) => {
+  // A valid lease UUID can contain the same digits as a rejected HTTP status.
+  t.mock.method(globalThis.crypto, 'randomUUID', () => '00000418-0000-4000-8000-000000000000');
   const cases = [
-    ['sync_callback', async () => { throw Object.assign(new Error('synthetic-private-exception'), { stage: 'credential_read', status: 418 }); }],
-    ['response_decode', async () => new Response('synthetic-private-invalid-json')],
-    ['response_result', async () => Response.json({ error: 'synthetic-private-provider-payload' }, { status: 422 })],
-    ['response_result', async () => Response.json({ test: { ok: true, rejectedCount: 1 } })],
-    ['sync_callback', async observe => { observe('synthetic-private-injected-stage'); throw new Error('private'); }],
+    ['sync_callback', 500, async () => { throw Object.assign(new Error('synthetic-private-exception'), { stage: 'credential_read', status: 418 }); }],
+    ['response_decode', 200, async () => new Response('synthetic-private-invalid-json')],
+    ['response_result', 422, async () => Response.json({ error: 'synthetic-private-provider-payload' }, { status: 422 })],
+    ['response_result', 200, async () => Response.json({ test: { ok: true, rejectedCount: 1 } })],
+    ['sync_callback', 500, async observe => { observe('synthetic-private-injected-stage'); throw new Error('private'); }],
   ];
-  for (const [stage, run] of cases) {
+  for (const [stage, httpStatus, run] of cases) {
     const f = fixture();
     try {
       const result = await runScheduledTochkaSync({ ...f.input, run });
-      assert.equal(result.outcome, 'error'); assert.equal(result.failureStage, stage);
-      assert.equal(f.state().failureStage, stage); assert.equal(f.state().failures, 1);
-      assert.equal(f.state().nextAt, fixedNow + 900_000); assert.equal(f.state().leasedUntil, 0);
-      assert.doesNotMatch(JSON.stringify([result, f.state()]), /synthetic-private|provider-payload|418/);
+      assert.deepEqual(result, { outcome: 'error', ran: true, nextSyncAt: new Date(fixedNow + 900_000).toISOString(), failureStage: stage });
+      assert.deepEqual(f.state(), { version: 1, generation, owner: '00000418-0000-4000-8000-000000000000',
+        leasedUntil: 0, nextAt: fixedNow + 900_000, failures: 1, outcome: 'error', httpStatus,
+        failureStage: stage, commitFailureKind: null });
+      assert.doesNotMatch(JSON.stringify([result, f.state()]), /synthetic-private|provider-payload/);
     } finally { f.sqlite.close(); }
   }
 });

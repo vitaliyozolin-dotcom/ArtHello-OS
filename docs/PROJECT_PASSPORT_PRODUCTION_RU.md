@@ -868,3 +868,8 @@ AI готовит PR398 и exact-source gates, затем штатный protect
 AI выполняет уже разрешённые source compatibility/release repairs, review/CI, merge и защищённый выпуск без нового согласования. Сохраняет D099 source, frozen R14 evidence, R12 backup/history, School, двойные locks, capacity/provenance/auth/snapshot gates. Исправляет проверяемую доставку package, но не выдумывает точный отсутствовавший gateway file. После seal/auth/public boundary старые database restores запрещены. Новых sessions/roles/service-key calls, платежей, сообщений, SQL writes, force/resync и raw exports нет.
 
 Ресурс — текущие GitHub CI и сервер; новых платных услуг нет, стоимость запуска неизвестна. Срок — текущая итерация; пересмотр после actual release result/ordinary scheduler attempt. Не останавливаться лишь из-за failed CI либо технической несовместимости source: исправлять причину в отдельном проверяемом PR. Реальный access blocker или отказ владельца прекращает новые действия с сохранением данных. Критерии финансовой приёмки и подробные release pins — D101 acceptance report.
+
+
+### D101 — Уточнение способа публикации (2026-09-10)
+
+В первом R15 исполнитель выбрал обычный merge, несовместимый с существующим single-parent signed-commit guard. Отказ произошёл до установки, обе cleanup успешны. Исправление — PR405 с новым reviewed source и обязательным squash; guard и остальные production/data boundaries сохраняются. Дополнительное разрешение владельца не требуется. Метрика завершения прежняя: actual successful release, затем четыре счёта и равные bank/DDS суммы без дублей. Ни passing CI, ни исправление способа merge не закрывают банковскую задачу.
