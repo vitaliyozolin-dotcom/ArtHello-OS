@@ -21,7 +21,7 @@
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "migrate:d1-snapshot": "node scripts/build-migration-db.mjs",
     "backup": "node scripts/backup-db.mjs",
-    "test:atlas": "node --test tests/atlas-foundation.test.mjs tests/curriculum-import.test.mjs tests/schedule-import.test.mjs tests/parent-preview.test.mjs",
+    "test:atlas": "node --test tests/atlas-foundation.test.mjs tests/curriculum-import.test.mjs tests/schedule-import.test.mjs tests/parent-preview.test.mjs tests/navigation-policy.test.mjs",
     "test:acceptance": "node tests/atlas-http-acceptance.mjs"
   },
   "dependencies": {

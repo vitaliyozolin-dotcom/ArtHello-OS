@@ -9,6 +9,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEve
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icons";
 import { roleLabels, type ActionKind, type Role, type SchoolSnapshot } from "./level-zero-types";
+import { shouldShowLeadershipParentPreview } from "../lib/navigation-policy.mjs";
 
 type View = "home" | "calendar" | "schedule" | "programs" | "journal" | "homework" | "people" | "school" | "messages" | "management" | "profile";
 type ModalState = { kind: ActionKind; preset?: Record<string, string> } | null;
@@ -1304,6 +1305,11 @@ export default function SchoolApp() {
                   : activeView === "messages" ? <MessagesPage snapshot={snapshot} send={send} viewThread={viewThread} />
                     : activeView === "management" ? <ManagementPage snapshot={snapshot} openAction={openAction} />
                       : <ProfilePage snapshot={snapshot} openAction={openAction} />;
+  const showLeadershipParentPreview = shouldShowLeadershipParentPreview({
+    role: snapshot.viewer.role,
+    view: activeView,
+    studentCount: snapshot.students.length,
+  });
   const content = hasAccess ? routedContent : <AccessDeniedPage onHome={() => navigate("home")} />;
   const helpAction = modal?.kind ?? (generatedInvite ? "family.invite.create" : undefined);
   const helpOverlayKey = modal ? "action-form" : generatedInvite ? "invite-result" : undefined;
@@ -1319,8 +1325,8 @@ export default function SchoolApp() {
     <>
       <AppShell snapshot={snapshot} activeView={activeView} onView={(view) => { setPreviewStudentId(null); navigate(view); }} onStudent={(nextStudent) => void switchStudent(nextStudent)} helpAction={helpAction} helpOverlayKey={helpOverlayKey} helpOverlayLabel={helpOverlayLabel} helpPortalTarget={helpPortalTarget}>
         {previewStudentId ? <ParentPreview key={previewStudentId} studentId={previewStudentId} onClose={() => setPreviewStudentId(null)} /> : <>
-          {["director", "deputy"].includes(snapshot.viewer.role) ? <section className="page-shell" aria-label="Просмотр учебных сведений родителя"><div className="content-card"><h2>Кабинет родителя</h2>{snapshot.students.length ? <div className="hero-actions"><label>Ребёнок<select aria-label="Ребёнок для предпросмотра" value={previewSelection || snapshot.students[0].id} onChange={event => setPreviewSelection(event.target.value)}>{snapshot.students.map(student => <option key={student.id} value={student.id}>{student.fullName} · {student.className} класс</option>)}</select></label><button className="ghost-btn" onClick={() => setPreviewStudentId(previewSelection || snapshot.students[0].id)}>Посмотреть глазами родителя</button></div> : <p>Нет доступных детей для предпросмотра.</p>}</div></section> : null}
           {activeView === "home" ? <AtlasSetup snapshot={snapshot} onCalendar={()=>navigate("calendar")} /> : null}
+          {showLeadershipParentPreview ? <section className="page-shell" aria-label="Предпросмотр учебных сведений семьи"><div className="content-card"><span className="eyebrow">Инструмент руководителя</span><h2>Предпросмотр для родителя</h2><p>Проверьте, какие учебные сведения видит семья выбранного ребёнка.</p><div className="hero-actions"><label>Ребёнок<select aria-label="Ребёнок для предпросмотра" value={previewSelection || snapshot.students[0].id} onChange={event => setPreviewSelection(event.target.value)}>{snapshot.students.map(student => <option key={student.id} value={student.id}>{student.fullName} · {student.className} класс</option>)}</select></label><button className="ghost-btn" onClick={() => setPreviewStudentId(previewSelection || snapshot.students[0].id)}>Посмотреть глазами родителя</button></div></div></section> : null}
           {content}
           {activeView === "calendar" ? <section className="page-shell"><AcademicSettings key={snapshot.school.academicYear || "new"} snapshot={snapshot} submit={submit} /></section> : null}
           {activeView === "management" ? <section className="page-shell"><SubjectSettings snapshot={snapshot} submit={submit} /></section> : null}
