@@ -60,8 +60,35 @@ read/write permission differences. Bank tests exercise cross-account provider
 IDs, idempotent replay, transactional index migration and fixed error codes
 against local fixtures. These numbers are not production bank counts.
 
-Hosted exact-head CI and final source review remain mandatory. R14 remains
-frozen and cannot publish this changed source. A separate reviewed release must
-resolve its identity and the previously failed artifact delivery before any
-cutover. Last accepted runtime remains R13; PR399 observation pins remain
-unbound. No current bank/DDS acceptance is claimed.
+## Historical R14 verification boundary
+
+The hosted R14 job uses `scripts/run-r14-historical-contract.py`. It first
+checks the current materialized source and runs the current banking tests.
+Then, in an invocation-owned temporary source fixture only, it restores exactly
+five obsolete comparison inputs and the original verifier YAML from the fixed
+R14 commit above. Every restored file is checked against its original digest.
+All other R14 protocol inputs still come from the checked commit and must
+match the frozen pins. No source writes occur in the checkout or production.
+
+The five inputs are the old Dockerfile, db/index.ts, db/schema.ts,
+lib/tochka-autosync.ts and the old bank test imports. The current Dockerfile,
+manifest, canonical verifier and bank tests have separately fixed digests;
+the canonical verifier checks every materialized source file. The unchanged
+Ruby entrypoint and every original R14 behavior test then run in the fixture.
+Four local regression tests prove that changed current source/protocol and
+wrong historical pins are refused and that only those comparison inputs change.
+
+The protected R14 controller is byte-identical and still runs its original
+contract against its actual checkout. A historical comparison PASS cannot make
+that controller accept the changed D-099 source. A separate reviewed release
+must resolve fresh identity and artifact delivery before any cutover.
+
+Workflow-hygiene review: 14 active workflows before and after; the changed
+verifier remains pull_request/push, contents:read, ubuntu-latest, exact-head
+checkout without persisted credentials, and no protected environment. No
+production consumer, gateway/School lock, trigger or authorization changes.
+The original verifier YAML is an inert fixture in a temporary directory.
+
+Hosted exact-head CI and final source review remain mandatory. Last accepted
+runtime remains R13; PR399 observation pins remain unbound. No current bank/DDS
+acceptance is claimed.
