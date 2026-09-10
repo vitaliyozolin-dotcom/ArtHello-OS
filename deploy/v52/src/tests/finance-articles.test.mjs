@@ -73,3 +73,9 @@ test('cashflow breakdown preserves every kopek including unclassified and legacy
   assert.equal(groups.reduce((sum, item) => sum + item.outflowsMinor, 0), 303);
   assert.equal(groups.find(item => item.article === 'Без статьи').count, 1);
 });
+
+test('positive-amount P&L model rejects a new income assignment to an outflow', () => {
+  let catalog = approve(create(emptyCatalog()));
+  catalog = approve(create(catalog, { report: 'pnl', name: 'Выручка', direction: 'Поступление' }, 'b'), 'b');
+  assert.throws(() => validateClassification(catalog, operation, { ...allocation, pnlArticle: 'Выручка', reportClass: 'Доходы ОПиУ', accrualPeriod: '2026-09' }), /направлен/);
+});

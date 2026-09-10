@@ -77,6 +77,9 @@ export function validateClassification(catalog: ArticleCatalog, operation: Alloc
   if (!['Доходы ОПиУ', 'Расходы ОПиУ', 'Финансирование', 'Не включено в ОПиУ'].includes(reportClass)) throw new FinanceArticleError('Выберите класс ОПиУ');
   requireArticle(catalog, cashflowArticle, 'cashflow', operation.direction, cashflowArticle === (operation.cashflowArticle || (operation.category === 'Не классифицировано' ? '' : operation.category)));
   const affectsPnl = reportClass === 'Доходы ОПиУ' || reportClass === 'Расходы ОПиУ';
+  const pnlDirection = reportClass === 'Доходы ОПиУ' ? 'Поступление' : 'Списание';
+  const unchangedPnl = reportClass === operation.reportClass && pnlArticle === operation.pnlArticle && accrualPeriod === operation.accrualPeriod;
+  if (affectsPnl && pnlDirection !== operation.direction && !unchangedPnl) throw new FinanceArticleError('Класс ОПиУ не соответствует направлению операции. Для возврата требуется отдельная корректировка ОПиУ.');
   if ((affectsPnl && !monthPattern.test(accrualPeriod)) || (accrualPeriod && !monthPattern.test(accrualPeriod))) throw new FinanceArticleError('Укажите корректный период ОПиУ');
   if (affectsPnl) requireArticle(catalog, pnlArticle, 'pnl', reportClass === 'Доходы ОПиУ' ? 'Поступление' : 'Списание', Boolean(pnlArticle) && pnlArticle === operation.pnlArticle && reportClass === operation.reportClass);
   else if (pnlArticle && pnlArticle !== operation.pnlArticle) throw new FinanceArticleError('Статья ОПиУ требует класса доходов или расходов');
