@@ -218,6 +218,7 @@ chmod 0600 "$atlas_env"
 
 docker cp "$caddy:/data/external-routes.caddy" "$routes_before"
 docker cp "$caddy:/etc/caddy/Caddyfile" "$main_before"
+chmod 0600 "$routes_before" "$main_before"
 ! grep -F "$atlas_host" "$routes_before" "$main_before"
 caddy_id="$(docker inspect "$caddy" --format '{{.Id}}')"
 python3 -I .github/scripts/d083-maintenance-route.py observe-gateway \

@@ -71,6 +71,7 @@ test("central and Atlas secrets stay file-mounted in Docker configuration", () =
 });
 
 test("route publication is compare-and-swap and rollback restores the original route", () => {
+  assert.match(release, /chmod 0600 "\$routes_before" "\$main_before"/);
   assert.match(release, /before_sha="\$\(sha256sum "\$routes_before"/);
   assert.match(release, /test "\$\(sha256sum \/data\/external-routes\.caddy/);
   assert.match(release, /mv "\$NEW_ROUTE" \/data\/external-routes\.caddy/);
