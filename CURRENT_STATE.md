@@ -9,6 +9,7 @@
 
 ## Refactoring Phase 6 — workflow cleanup checkpoint (2026-09-09)
 
+- D-105 реализует трек 6.4: v44/v52 получили воспроизводимую генерацию Cloudflare runtime declarations и обязательный `tsc`; `quality.yml` запускает отдельную GitHub-hosted matrix-сборку application stage обоих School Dockerfile без secrets, Environment или production runner. Этот checkout содержит 135 School test-файлов. Локально оба application stage прошли typecheck, lint, production build и тесты: v44 — 102/102, v52 — 772/772; exact CI ещё не считается пройденным до фактического run.
 - Трек 6.3 завершён кандидатом D-099: v44/v52 School source материализован в обычные деревья `deploy/*/src`, а Dockerfile больше не декодируют архивы и не исполняют patch transport.
 - Exact legacy reconstruction дала пустой файловый diff с materialized source. Canonical tree SHA проверяются `scripts/verify-school-source.mjs` через `test:refactoring`; обе Docker-сборки с внутренними lint/test/build воротами прошли локально. Старые 16 archive chunks и patch/override transport удалены после этой проверки; одна неисполняемая immutable evidence-копия `deploy/v52/overrides/production/backup-transport.mjs` сохранена для frozen R13 source contract.
 - Secret-scan, заявленный при подготовке materialized деревьев, не был повторён в текущей сессии: локальный `gitleaks` отсутствует. Поэтому immutable CI/history-scan остаётся обязательным evidence до принятия кандидата.

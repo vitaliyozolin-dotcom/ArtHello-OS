@@ -20,7 +20,7 @@ export function BackupWorkspace({ notify }: { notify: (message: string) => void 
   const load = useCallback(async () => {
     try {
       const response = await fetch("/api/settings/backups", { cache: "no-store" });
-      const result = await response.json();
+      const result = await response.json() as BackupStatus & { error?: string };
       if (!response.ok) throw new Error(result.error || "Не удалось проверить резервные копии");
       setData(result);
       setError("");
@@ -40,7 +40,7 @@ export function BackupWorkspace({ notify }: { notify: (message: string) => void 
     try {
       const csrf = document.cookie.split(";").map((item) => item.trim()).find((item) => item.startsWith("__Host-arthello_csrf="))?.slice("__Host-arthello_csrf=".length) ?? "";
       const response = await fetch("/api/settings/backups", { method: "POST", headers: { "content-type": "application/json", "x-csrf-token": decodeURIComponent(csrf) }, body: JSON.stringify({ action: "create" }) });
-      const result = await response.json();
+      const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || "Не удалось запустить резервную копию");
       notify("Создание копии запущено. Результат появится после проверки восстановления.");
     } catch (cause) { notify(cause instanceof Error ? cause.message : "Не удалось запустить резервную копию"); }

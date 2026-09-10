@@ -75,6 +75,34 @@ jobs:
             -w /repo \
             "$GITLEAKS_IMAGE" git --no-banner --redact --verbose --log-opts="--full-history HEAD" /repo
 
+  school-source:
+    name: school-source-${{ matrix.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [v44, v52]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify exact source head
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+
+      - name: Typecheck, build and test materialized School source
+        run: >-
+          docker build
+          --target application
+          --file deploy/${{ matrix.version }}/Dockerfile
+          --tag arthello-school-${{ matrix.version }}:${{ github.run_id }}
+          .
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -195,7 +223,7 @@ jobs:
     timeout-minutes: 15
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      R10_CONTRACT_SHA256: '74a486b0e533d9d982bc24a1d5b308cf31b44339640e80a6bca4d44ef45d18e8'
+      R10_CONTRACT_SHA256: "74a486b0e533d9d982bc24a1d5b308cf31b44339640e80a6bca4d44ef45d18e8"
     steps:
       - name: Check out exact unprivileged R10 verification source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -221,7 +249,7 @@ jobs:
     timeout-minutes: 10
     env:
       CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      R11_CONTRACT_SHA256: '67c2f3165e8275c2610dee6619e67fc943cfb14e300b232a61e0d889e6da2ede'
+      R11_CONTRACT_SHA256: "67c2f3165e8275c2610dee6619e67fc943cfb14e300b232a61e0d889e6da2ede"
     steps:
       - name: Check out exact unprivileged R11 verification source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

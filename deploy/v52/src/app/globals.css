@@ -1,7 +1,8 @@
 @import "tailwindcss";
-@source not "../tests";
 @import "./design-tokens.css";
 @import url("https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap");
+@source not "../tests";
+@source not "../.wrangler";
 
 :root {
   --ink: var(--text-primary);

@@ -1,5 +1,15 @@
 # ArtHello OS — Decisions
 
+## D-105 — Materialized School source является обязательным CI-контуром
+
+Дата: 2026-09-10. Статус: принято владельцем явным поручением закончить рефакторинг, закоммитить и продолжить следующий этап.
+
+`deploy/v44/src` и `deploy/v52/src` больше не считаются неизменяемым теневым payload. Каждый пакет генерирует Cloudflare runtime declarations штатным Wrangler из checked-in non-secret config и проходит строгий `tsc` до lint, build и полного набора собственных тестов. Конфигурация объявляет только локальный placeholder D1 binding и не предоставляет live credentials, production identifiers или сетевые полномочия.
+
+Основной `quality.yml` получает matrix-job для v44/v52 на GitHub-hosted runner. Job checkout-ит точный candidate head и строит только application stage соответствующего Dockerfile; Dockerfile выполняет locked install, typecheck, lint, build и тесты. Job не использует self-hosted runner, secrets, protected Environment, SSH, production Docker или deploy/cutover действия.
+
+Acceptance: локально зелёные typecheck и application-stage builds обоих вариантов, 135 обнаруженных School test-файлов, зелёные workflow-policy/proof gates и exact candidate CI. Изменение runtime-политик School, production deployment или данных этим решением не разрешено.
+
 ## D-086 — URL является источником состояния раздела back-office
 
 Дата: 2026-09-09. Статус: принято владельцем явным поручением закончить Фазу 5.
@@ -64,6 +74,7 @@ R9/PR377 merged30f825d674cbf498be713c7b637e1dfd9f9c42cd, treebf1c67e32ea329546ce
 AI-контракт: вход exact source и два приватных Caddy-файла внутри защищённого задания; выход фиксированная причина отказа. Действие — ограниченное чтение в рамках уже разрешённой подготовки выпуска. Запрещены вывод конфигурации/секретов и любые изменения production. Ресурс — существующий runner, без новых услуг; стоимость по тарифу неизвестна. Метрика — однозначный подтверждённый invariant. Срок текущая итерация; пересмотр после фактического отчёта. При отказе Виталия новые действия прекращаются. Готовность приложения этим результатом не объявляется.
 
 Идентичность после параллельного изменения: commit aaa0b2b0d31a936751076472736ee1ba07bcbbfd добавил принятое D-082 о границах API. Диагностике присвоен следующий свободный D-083; технические d082-route-diagnostic.py и kind=d082-route-diagnostic сохранены как проверенные идентификаторы. Все55 изменений параллельного API-кандидата сохранены. Предыдущий head6a3d48a2b60d9ab11a6df1f505338b4707d9052c прошёл Quality34319867568, Proof34319867545 и v5234319867526, но объединённому источнику нужны собственные checks.
+
 ## D-081 — Проверка исправленного кандидата до открытия ArtHello пользователям
 
 Дата: 2026-09-09. Владелец: Виталий; исполнитель: Codex. Статус: preparation. Основание: действующее поручение исправить заявленные функции, самостоятельно проверить и выпустить в production, повторные «Выполняй», «Разрешаю», «продолжай». PR377. Новый общий запрос разрешения на тот же выпуск не требуется.
@@ -885,11 +896,12 @@ D076 run34285119759/job102259393169 на2026-09-08T22:19:37Z остановил�
 
 Уточнение представления Docker по фактическому D074 run34288036300/job102268045952 на2026-09-08T22:52:49.703Z: все признаки закреплённого R8 image и fingerprint совпали; RepoDigests содержит единственную ссылку arthello-e2e@sha256:0763e7e6404c4ecf19b81bdcc236dd815a0210e9bb6b087adec279692cc7701c, то есть на тот же полный ID. Эта служебная self-reference не является неожиданной ссылкой на иной image. Проверка допускает прежний пустой массив либо ровно одну ссылку arthello-e2e@<полный проверяемый ID>. Null, иные repository/digest и несколько ссылок запрещены. Targets, recovery artifact, повторные identity/current-main/no-consumer проверки, non-force deletion и capacity не меняются. Наблюдение не выполняло удаления или входа.
 
-
 ## D-085
+
 Дата: 2026-09-09. Статус: принято к подготовке и проверке в рамках ранее разрешённого выпуска.
 
 ### Узкое продолжение R11 после остановки очистки R10
+
 R10/PR379 опубликован в main как 2e57dd22c6ff1cec1fcad0bd11af479e465c00bb, tree 445762d319e5c792d97617e8a4515045bc3b4126. Main Quality34321728778, Proof34321728769 и V52 34321728779 — SUCCESS; Ruby contract и Caddy134 также PASS. Protected run34322039891, bundle102370988472 — SUCCESS, deploy102371510204 — FAILURE. На установленном Caddy прошли все134 HTTP/redaction проверки и сверка бинарника, затем EXIT-cleanup не смог удалить файл из собственного вложенного каталога test-fixtures с mode0555. Разрешение School sync secret, clone/cutover и browser-after не выполнялись. Последняя наблюдённая рабочая версия6596f69390ad539577ec2640e8ef40c7e12c22dc не переключалась. Старый точный R9 browser image удалён разрешённым D084 retirement; образы R10 импортированы, но приложение R10 не запускалось. Это pre-auth abort, не live/business PASS.
 
 R11/PR380 сохраняет замороженные R10/R9/V52 и протокол D083 candidate state, gateway binding, browser acceptance, backup, rollback/public/bank activation. Меняются только новая identity/prefix/parent, отдельный guard с точным доказательством остановки R10, исполняемый helper очистки собственного fixture и дополнительный hosted regression gate. Исправление chmod ограничено собственными обычными каталогами текущего временного fixture; symlink/подмена владельца не дают расширить область удаления. Пакеты, права Docker, UID приложения и песочница не меняются. Локально тест воспроизводит прежний дефект в среде UID0 без capabilities и с NoNewPrivs; hosted gate дополнительно требует обычный UID. Исправленный сценарий обязан успешно очищать собственный fixture; условия частичной подготовки и подмены путей проверяются отдельно.
@@ -899,7 +911,6 @@ R10 нельзя вслепую перезапускать как новый к�
 Новый contract под deploy/v52/recovery-r11 попадает в существующий V52 trigger, хеширует все новые управляющие файлы и нормализует workflow к неизменённому R10 с перечисленными дельтами. Quality сохраняет все прежние jobs и добавляет d085-candidate-tests, чей точный PASS включён в protected provenance. Merge только проверенного PR380 с префиксом `D085: guarded R11`, ожидаемым родителем2e57dd22 и неизменным main во время защищённого задания. Общая gateway/School блокировка, production-ru, проверка текущего main, вне-VPS сборка и exact-image evidence обязательны.
 
 Прежнее разрешение пользователя на исправление, тестирование и выпуск действует. Новые секреты, роль собственника, привилегированный запуск, общая очистка Docker или публикация банковских/дневниковых данных не требуются и не добавляются. AI готовит, проверяет и запускает этот ограниченный сценарий по точным evidence; неизвестные состояния не трактуются как разрешение ослабить guard. Банковская диагностика PR371 пока не привязана к принятому live source; денежная сверка четырёх счетов/реестра/ДДС, свежий resync и остальные бизнес-сценарии не объявляются завершёнными.
-
 
 ## D-086 — R12: ограниченное завершение жизненного цикла браузерного образа R10
 
@@ -935,7 +946,6 @@ PR371 уточняет прежнюю проверку единственног�
 
 Сохраняются UID1000, канонический volume read-only/no-copy, network:none, read-only rootfs, cap-drop, no-new-privileges и лимиты. SQL writes, копия БД, получение credentials, запросы к банку, resync, платежи, смена ролей/маршрутов, публикация приложения и restore не добавляются. При отсутствующей схеме, превышенном лимите, неизвестной identity или ошибке выводится фиксированный неполный/blocked статус, без сырых исключений и персональных записей. Следующий переход выбирается по фактическому отчёту, без подмены финансовой приёмки счётчиками.
 
-
 ## D-088 — Завершённое read-only наблюдение и расписание ожидания банка
 
 Дата:2026-09-09. Техническое продолжение D075/D087 в рамках действующего поручения Виталия проверить четыре счёта и исходную бизнес-приёмку. R12 остаётся принятой рабочей версией77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed; диагностический main9b6c7069b5163d99385ccc4a48066bf760235bf4 не публиковал приложение. Новых полномочий на платежи, credentials, импорт, resync или SQL writes это решение не создаёт.
@@ -952,7 +962,6 @@ Launcher различает корректный полный отчёт, кор
 
 Прежний D075 owner/repository/first-attempt успешного Quality push-main trigger, production-ru, shared locks и pin actual live77f сохраняются. Merge title по-прежнему начинается D075: read-only production data; D088 — номер нового решения, не новый доступ. Quality и frozen release workflows не меняются. Требуются независимый exact-source review, целевые реальные регрессии, hosted exact-head CI и фактический защищённый результат. AI выполняет только этот проверяемый read-only сценарий; при identity drift или некорректном отчёте останавливает вывод/завершение; неизвестную schema отмечает в отчёте, не подставляет fixtures и не ослабляет guard. Финансовая сверка, fresh resync, ДДС и другие бизнес-сценарии остаются открытыми до своих evidence.
 
-
 ## D-089 — Hosted-проверка экранов «Контент» и «Задачи» принятого R12
 
 Дата:2026-09-09. Владелец — Виталий; исполнитель — Codex. Подготовка в рамках исходного поручения проверить контент, задачи и их номера. R12 source77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed/treeac3fcaac06acf33bf9ee32e438d0c040adb38fd7 фактически принят в protectedrun34326582961; candidate и post-public natural SSO PASS. Это основание для pin образа, а не результат проверки этих экранов. D088 банковское наблюдение остаётся отдельным пунктом; main не менять до его terminal outcome.
@@ -967,7 +976,6 @@ Launcher различает корректный полный отчёт, кор
 
 AI готовит и проверяет собственный scoped runner, проверяет точные источники и исполняет разрешённый hosted сценарий. При mismatch provenance, дополнительном файле artifact, непустом volume, отсутствии sandbox, ошибке cleanup или неполном наборе evidence — blocked/failure, без замены runtime либо запуска fixture на live. Source review,12 adapter tests и4 trigger tests с35 сценариями — подготовка; окончательный статус зависит от реального Chromium. Прежние Quality, R12 и банковские workflows не изменяются. Полная бизнес-приёмка ведётся по отдельным фактическим результатам.
 
-
 ## D-090 — Клиент AlfaCRM использует действующий CSRF-контракт
 
 Дата: 2026-09-09. Владелец — Виталий; исполнитель — Codex. Статус: подготовка исправления в рамках действующего поручения завершить выпуск и бизнес-приёмку. Supersedes: нет. D088/D089 и прежние ограничения сохраняются; запись маршрута и AI-контракта — паспорт production, D090.
@@ -980,7 +988,6 @@ AI готовит и проверяет собственный scoped runner, п
 
 Перед продвижением: сохранить историю D088/D089 при переносе на актуальный main, сверить exact source/tree и неизменность auth dependencies, получить hosted полный application build/tests и необходимые CI. Выпуск и обычное пользовательское поведение подтверждаются отдельно по действующим release gates. Пока hosted aggregate и live browser/API evidence отсутствуют, D090 не считается выпущенным или завершённой приёмкой AlfaCRM.
 
-
 ## D-091 — Код результата автоматической синхронизации банка
 
 Дата: 2026-09-09. Продолжение разрешённой проверки четырёх счетов. D088 завершил валидное наблюдение с финальной сверкой consumers: run 34330892606, job 102398954685, время 08:46:04.026Z. Рабочее приложение остаётся R12 source 77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed. Четыре счёта и 12 записей выписок существуют, bank_transactions и financial_operations пусты. Последняя sync-запись pending от 08:11:14.266Z не отражает две последующие ошибки scheduler.
@@ -990,7 +997,6 @@ AI готовит и проверяет собственный scoped runner, п
 D091 добавляет только безопасное чтение autosync.httpStatus (целое 100–599 либо null), httpStatusState (observed/missing/invalid) и нормализованного updatedAtUtc. Сырые JSON, ошибки, IDs и credentials не выводятся. Схема валидатора расширяется ровно этими полями; прежние SQL-проверки, checksComplete, exit 2 для замечаний и финальная сверка не меняются. По результату 500 нельзя объявлять конкретную ошибку банка: это также значение по умолчанию при исключении callback до ответа. 422 обычно означает отклонённый результат sync, 200 с outcome=error — неприемлемый результат или разбор JSON; 409 обычно формирует busy. Не домысливать отсутствующие сведения.
 
 Прежние D075 owner/Quality/main/first-attempt, environment, locks, canonical read-only volume, ограничения helper и accepted-live pin сохраняются. Merge prefix остаётся D075: read-only production data. Никаких сетевых запросов к банку, resync, SQL writes или смены конфигурации. Требуются независимый review точного source/tree, целевые тесты совместимости и hosted CI, затем фактический законченный отчёт. Неизвестные значения остаются неизвестными; identity drift, некорректный отчёт и timeout блокируют завершение. Полная финансовая приёмка остаётся открытой.
-
 
 ## D-092 — Права файлов при сборке hosted-браузера Content/Tasks
 
@@ -1006,7 +1012,6 @@ Accepted R12 pin остаётся `77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed`, tr
 
 AI готовит только этот assembly fix и проверяемые доказательства. Стоп — drift frozen inputs/runtime, escaping/dangling link, special file, выход нормализации за собственный context, ошибка smoke/cleanup или неполный результат. При отказе не ослаблять sandbox/UID, не менять runtime и не переносить fixture на live. Новая публикация и запуск требуют соблюдения текущей очереди: main не менять во время protected банковского наблюдения. Банковская D091, выпуск приложения и оставшиеся бизнес-критерии остаются отдельными пунктами.
 
-
 ## D-093 — Проверить собственные обращения сотрудника и отказ в доступе к backup
 
 Дата: 2026-09-09. Владелец — Виталий; продолжение разрешённой пользовательской приёмки на рабочем R12. После обычного входа в ArtHello отдельный employee-controls flow открывает «Разработчикам», проверяет успешный GET `developer-feedback?scope=mine`, выбирает «Мои обращения», дожидается завершения загрузки и проверяет отсутствие «Все обращения». Затем закрывает диалог и проверяет только HTTP 403 от GET `/api/settings/backups` в той же сессии, без чтения тела и следования redirect. Send, заполнение формы, управление обращениями, роли и дополнительные mutation/network exceptions не добавляются. Прежние employee/Education/School и отрицательная навигационная проверка сохраняются; полный permission matrix, владелец backup status и история резервных копий этим не подтверждаются.
@@ -1016,7 +1021,6 @@ AI готовит только этот assembly fix и проверяемые �
 Для места под новый browser bundle допускается только условное удаление точного неиспользуемого R12 browser image через новый fixed-target helper. Его image ID `sha256:e07d75e5964218b4382d98e255c5f17829dc6a4429ccef3060fb833d4cc3b61f`, source `77f26ec9bcba7233f39d5e8cb9f59c276bc8c1ed`, recovery artifact `10094111549` и остальные immutable поля закреплены в исходнике. Наличие не предполагается. При полном отсутствии ID и tag — без удаления и без чтения artifact; при наличии — точная identity, fingerprint, отсутствие running/stopped consumers, два свежих подтверждения matching unexpired recovery artifact и повторная проверка main перед удалением по ID без force/prune. Приложение, containers, backup worker, volumes и данные не удаляются. Канонический D076/R8 workflow остаётся неизменным; новый D093 workflow не запускает лишний R8 retirement. Capacity thresholds сохраняются; измерение после retirement не отменяет отказ при нехватке места. Зафиксированный срок artifact — `2026-09-11T08:01:35Z`, но при исполнении требуется свежая проверка.
 
 Новый технический prefix — `D093: employee controls`; отдельный `.github/workflows/check-arthello-employee-controls.yml` сохраняет owner/repository/Quality push-main/first-attempt, environment и обе locks. Канонические D076 workflow, flow, smoke и tests восстановлены byte-for-byte к D092 main `b4c39d5af8ab348882759c48c0f82dbe810a8065`. Причина разделения подтверждена PR387: новый browser fixture прошёл, но frozen R8/R9 bundle equality отклонил изменение канонического bundle. Старые recovery contracts не ослабляются. Отдельный Dockerfile использует тот же pinned browser base/runtime/packages и явно отображает новые employee-controls flow/smoke в пути контейнера. Локально 74 browser/retirement/canonical tests PASS; полные Ruby contracts и новый hosted image требуют CI точного исправленного source. После публикации сохранять main до terminal protected outcome и финального browser cleanup. Это проверка интерфейса без нового application deployment; accepted live R12 и финансовая приёмка остаются отдельными доказательствами.
-
 
 ## D-094 — Фиксированный этап сбоя автоматической загрузки Точки
 
@@ -1030,7 +1034,6 @@ D075 producer/launcher расширяются ровно полями autosync.f
 
 Первый full application run `34335598905` / job `102414127659` дал 767/769 PASS: два старых source-ratchet tests ожидали прямой await acknowledgement/commit, теперь эти же операции обёрнуты lexical observer. D094 синхронно обновляет ровно эти ожидания на точные stage wrappers, сохраняя rejectedCount===0 и строгий commit-before-acknowledge. Дополнительный actual-route behavioral test подтверждает: rejected rows и отказ commit не подтверждают statement, успешный commit предшествует acknowledgement, lease всегда освобождается. Исправленные 22 focused tests PASS; полный новый image build остаётся обязательным.
 
-
 ## D-095 — Единый формат номера задачи с четырьмя цифрами
 
 Дата: 2026-09-09. Владелец — Виталий. Требование пользователя — «Задача №0001…». Accepted R12 и текущий source выводят `Задача №1` / `Задача №801`: общий taskRecordLabel использует recordSequence напрямую, хотя стандартный recordLabel уже дополняет номер до четырёх цифр. D095 меняет одну строку общего форматтера: taskRecordLabel вызывает recordLabel("Задача", value). Существующие очередь, карточка, drawer, подзадачи, уведомления, история и связанные ссылки используют этот helper, поэтому получают одинаковый формат.
@@ -1039,7 +1042,6 @@ D075 producer/launcher расширяются ровно полями autosync.f
 
 Существующий recordSequence сворачивает значения по модулю10000; форматированные подписи не гарантируют глобальной уникальности. Поиск продолжает сопоставлять raw IDs, поэтому введённый padded номер может не найти raw ID без совпадающей строки. Эти прежние ограничения фиксируются отдельно; D095 не выдаётся за новую систему последовательной нумерации или исправленный поиск. Стоп — изменение raw IDs/связей, регрессия иных record labels, несовпадение source либо неподтверждённая сборка. Этот source change станет действующим только после следующего release; live R12 пока прежний.
 
-
 ### D092 — Прочитать существующий visual receipt после успешного smoke
 
 Фактический D092 hosted run `34333105787` / job `102406140419` на source `b4c39d5af8ab348882759c48c0f82dbe810a8065` прошёл сборку браузера и Chromium sandbox fixture (09:11:12.017Z), затем подготовил empty fixture и остановился с `ARTHELLO_CONTENT_TASKS_SCOPED=BLOCKED`. Это исправило первоначальную packaging-проблему; визуальная приёмка не завершена. Сохранён artifact `10096640452`, 389416 bytes, SHA256 `dd600c987b34a1d92a1270a63926815b2a1715c9efb01400a7d1434748e7de5a`, expires 2026-09-23. Локальное получение официально материализованного файла не удалось (HTTP403 при прямом transfer, HTTP502 через поддерживаемый helper); bytes/PNG не просмотрены, обход ограничений не выполнялся.
@@ -1047,7 +1049,6 @@ D075 producer/launcher расширяются ровно полями autosync.f
 Для чтения уже созданного receipt добавляется отдельный GitHub-hosted workflow `inspect-d092-visual-evidence.yml`, prefix `D092: inspect existing visual evidence`. Только owner/repository/push-main/attempt1 и точный current-head; PR запускает только synthetic source tests. Permissions ровно contents/actions read, без Environment, production secrets, Docker, browser/fixture rerun или изменения старого adapter. Guard проверяет fixed producer/run/source/artifact/name/size/digest/unexpired metadata, затем обычный authenticated GET ZIP; reader проверяет размер/digest ZIP и ограниченную схему receipt. В лог идут только фиксированный stage/result и counters. PNG не извлекаются и не объявляются просмотренными; receipt не раскрывает произвольный текст причины. Новое принятое поведение продукта не вводится, номер нового D-решения не требуется: это продолжение сбора D092 evidence.
 
 Локально 5 reader, 6 metadata/refusal и 4 trigger tests PASS, проверки Python -O, YAML/shell и независимый семифайловый review PASS. Фактическое чтение старого receipt и определение следующего UI исправления остаются pending до этого нового hosted run. Стоп — несовпадение identity/digest/схемы, истёкший artifact, изменение main или неподтверждённое чтение. Не перезапускать UI вслепую и не объявлять 14 PNG либо visual PASS по наличию artifact.
-
 
 ### D092 — Совместимость workflow fixtures с принятым R12
 
@@ -1058,7 +1059,6 @@ Hosted inspection run `34337932856` / job `102421685466` на source `0e8e75ffd7
 Исправление ограничено новым scoped adapter: после полного Git-blob контроля неизменённого harness в два однозначных fixture boundary добавляются точные permissions objects существующего synthetic OWNER — три overview и четыре detail booleans, подтверждённые accepted API. Изменений app roles, endpoints, production data, frozen full harness, геометрии/UI assertions или literal №801 нет. Полный набор проверок должен теперь пройти на прежнем accepted R12 artifact; до фактического hosted result visual acceptance остаётся открытой. D095 padding относится к будущему runtime и не подставляется в старую проверку.
 
 Новое поведение продукта не вводится; это продолжение D092 восстановления evidence. Hosted запуск выполняется существующим owner exact-main/attempt1 механизмом с техническим merge prefix `D089: hosted Content Tasks visual`; main остаётся неизменным до результата. Стоп — source/fixture boundary drift, ослабление assertions, иной runtime pin или неподтверждённый результат. Следующий запуск обоснован конкретным schema mismatch, не произвольным повтором.
-
 
 ## D096 — Guarded R13 после принятого R12 (2026-09-09)
 
@@ -1075,6 +1075,7 @@ Hosted inspection run `34337932856` / job `102421685466` на source `0e8e75ffd7
 Банковские auth/selected scope/dates/leases/backoff/activation protocol не расширяются; forced retry остаётся вне выпуска. Данные, payment operations, роли и сообщения сотрудникам не создаются вручную. Стоп — source/provenance/identity/capacity/history/consumer/backup proof mismatch или отказ владельца. После публичной границы восстановление выполняется отдельной оценкой текущих данных, не старым snapshot. Полные owner-backup, daily future execution, Alfa scoped import, Content и financial coverage остаются открытыми до своих реальных доказательств.
 
 Закрепление нового выпуска: PR392, branch `codex/arthello-r13-20260909`, parent `7f398e3180fb341754c267760463dec968fc6420` / tree `bd803a153bdadfb2fced0890190a22769042c40e`. Родитель включает D092 fixture compatibility из PR391; его отдельный hosted visual результат при подготовке ещё ожидается. Новая release identity не равна опубликованному R13; фактический результат дописывается после protected run.
+
 ## D-097 — Уникальность банковской операции в пределах счёта
 
 Статус: подготовлено в исходниках; production-выпуск и банковская приёмка ожидаются.
@@ -1082,8 +1083,6 @@ Hosted inspection run `34337932856` / job `102421685466` на source `0e8e75ffd7
 Для действующего SQLite/D1 v52 уникальный ключ операции Точки — `(connection_id, provider_account_id, provider_transaction_id)`, согласованный с уже существующим account-scoped ID. Старый индекс без account допускается только как распознаваемый источник транзакционной миграции; неизвестное определение останавливает bootstrap. Миграция не меняет строки банка, суммы, provenance, связи и ручную классификацию. После импорта нельзя автоматически сужать индекс при откате кода.
 
 При ошибке sync_commit планировщик сохраняет только фиксированный `commitFailureKind`, никогда сообщение исключения. Lease, доступ, credential generation, пауза и backoff остаются прежними. Локально воспроизведённая коллизия не объявляется установленной причиной live-сбоя без отдельного доказательства. Приёмка требует реальных операций по четырём счетам и сверки ДДС. Mini-spec и проверка миграции: `docs/acceptance/2026-09-09-tochka-account-identity.md`.
-
-
 
 ## D-098 — R14 для сохранения операций Точки
 

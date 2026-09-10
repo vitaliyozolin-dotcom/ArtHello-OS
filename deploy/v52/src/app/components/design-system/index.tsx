@@ -1,6 +1,6 @@
 "use client";
 
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import "./tokens.css";
 import "./design-system.css";
 
@@ -28,8 +28,8 @@ export function PageHeader({ title, description, eyebrow, actions, className }: 
   </header>;
 }
 
-export function Card({ children, className }: CommonProps) {
-  return <div className={join("ahCard", className)}>{children}</div>;
+export function Card({ children, className, ...attributes }: CommonProps & HTMLAttributes<HTMLDivElement>) {
+  return <div className={join("ahCard", className)} {...attributes}>{children}</div>;
 }
 
 export function CompactListCard({ index, title, description, className }: {

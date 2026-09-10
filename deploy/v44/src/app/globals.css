@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./design-tokens.css";
+@source not "../.wrangler";
 
 @font-face {
   font-family: "Cygre";

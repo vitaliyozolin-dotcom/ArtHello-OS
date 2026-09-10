@@ -3,11 +3,13 @@ FROM node:24-bookworm-slim AS application
 
 ENV CI=1
 WORKDIR /app
+COPY deploy/v44/src/package.json deploy/v44/src/package-lock.json /app/
+RUN npm ci
 COPY deploy/v44/src/ /app/
 RUN ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
     && grep -q 'invoke_user_worker_ahead_of_assets: false' /app/production/runtime-server.mjs \
     && grep -q 'has_user_worker: true' /app/production/runtime-server.mjs \
-    && npm ci \
+    && npm run typecheck \
     && npm run lint \
     && npm test
 

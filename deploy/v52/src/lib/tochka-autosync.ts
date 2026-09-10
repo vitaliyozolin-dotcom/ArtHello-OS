@@ -173,7 +173,7 @@ export async function runScheduledTochkaSync(input: {
     : finishedAt + (outcome === 'pending' ? 5 * 60_000 : outcome === 'busy' ? 60_000
       : Math.min(6 * 60 * 60_000, 15 * 60_000 * 2 ** Math.min(failures - 1, 5)));
   const completed = { ...next, leasedUntil: 0, nextAt, failures, outcome, httpStatus, failureStage,
-    commitFailureKind: outcome === 'error' && failureStage === 'sync_commit' ? commitFailureKind : null };
+    commitFailureKind: outcome === 'error' ? commitFailureKind : null };
   const ownedGuard = `EXISTS (SELECT 1 FROM system_runtime_state WHERE state_key=?
     AND json_extract(state_value,'$.owner')=? AND json_extract(state_value,'$.generation')=?)`;
   const ownedBindings = [stateKey, next.owner, setup.credentialGeneration];

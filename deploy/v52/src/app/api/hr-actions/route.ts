@@ -35,7 +35,7 @@ async function importEmployees(actor:string,body:Record<string,unknown>){
   const db=getDb(),created:string[]=[],rejected:Array<{row:number;reason:string}>=[];
   for(let index=0;index<rows.length;index+=1){
     const raw=(rows[index]&&typeof rows[index]==="object"?rows[index]:{}) as Record<string,unknown>,values=employeeValues(raw);
-    if("error" in values){rejected.push({row:index+1,reason:values.error});continue}
+    if("error" in values){rejected.push({row:index+1,reason:values.error ?? "Строка не прошла проверку"});continue}
     const [duplicate]=await db.select().from(entities).where(eq(entities.displayName,values.displayName)).limit(1);if(duplicate&&duplicate.entityType==="Сотрудник"&&duplicate.status!=="Объединена"){rejected.push({row:index+1,reason:`возможный дубль ${duplicate.id}`});continue}
     const id=`EMP-I-${crypto.randomUUID().slice(0,8).toUpperCase()}`,now=new Date().toISOString();
     await db.insert(entities).values({id,entityType:"Сотрудник",displayName:values.displayName,status:"На проверке",sourceSystem:"CSV_IMPORT",sourceRecordId:`CSV:${id}`,dataQuality:"На проверке",scope:values.unit,metadata:JSON.stringify({contact:values.contact,position:values.positionId,employmentType:values.employmentType,branch:values.unit,branches:values.branchNames,branchIds:values.branchIds,note:values.note}),createdBy:actor,updatedAt:now});

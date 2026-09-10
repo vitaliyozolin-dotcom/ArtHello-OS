@@ -62,7 +62,7 @@ export type ApiRule = { prefix: string; read: readonly ApiRole[]; write: readonl
 const withOwner = (...roles: Exclude<ApiRole, "OWNER">[]) => ["OWNER", ...roles] as const;
 const allRoles = [...API_ROLES];
 
-export const API_RULES: readonly ApiRule[] = [
+export const API_RULES: readonly ApiRule[] = ([
   // Every authenticated user may submit/view their own reports; the handler alone grants canonical-owner triage.
   { prefix: "/api/developer-feedback", read: allRoles, write: allRoles },
   { prefix: "/api/integrations/alfacrm", read: withOwner("DIRECTOR", "INTEGRATIONS", "FINANCE", "ACCOUNTING"), write: withOwner("DIRECTOR", "INTEGRATIONS") },
@@ -118,14 +118,14 @@ export const API_RULES: readonly ApiRule[] = [
   { prefix: "/api/tasks", read: allRoles, write: allRoles },
   { prefix: "/api/work-items", read: allRoles, write: [] },
   { prefix: "/api/notifications", read: allRoles, write: allRoles },
-].sort((left, right) => right.prefix.length - left.prefix.length);
+] satisfies ApiRule[]).sort((left, right) => right.prefix.length - left.prefix.length);
 
 /**
  * API paths owned by product sections. Explicit section assignment is enforced
  * here as well as in navigation. A manually added section can expand GET/HEAD
  * visibility, while mutations remain bounded by the selected role template.
  */
-const API_MODULE_REQUIREMENTS: ReadonlyArray<{ prefix: string; modules: readonly ModuleId[] }> = [
+const API_MODULE_REQUIREMENTS: ReadonlyArray<{ prefix: string; modules: readonly ModuleId[] }> = ([
   { prefix: "/api/content-generate", modules: ["content"] },
   { prefix: "/api/content-actions", modules: ["content"] },
   { prefix: "/api/accounting-actions", modules: ["accounting"] },
@@ -171,7 +171,7 @@ const API_MODULE_REQUIREMENTS: ReadonlyArray<{ prefix: string; modules: readonly
   { prefix: "/api/notifications", modules: ["tasks", "events"] },
   { prefix: "/api/tasks", modules: ["tasks", "events"] },
   { prefix: "/api/audit", modules: ["quality"] },
-].sort((left, right) => right.prefix.length - left.prefix.length);
+] satisfies Array<{ prefix: string; modules: readonly ModuleId[] }>).sort((left, right) => right.prefix.length - left.prefix.length);
 
 const MODULE_API_REQUIREMENTS: Record<ModuleId, readonly string[]> = {
   home: [], tasks: ["/api/tasks"], finance: ["/api/finance"], accounting: ["/api/accounting"],

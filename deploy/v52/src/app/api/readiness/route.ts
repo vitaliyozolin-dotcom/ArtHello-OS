@@ -61,6 +61,7 @@ export async function GET(request: Request) {
     ]);
     const scenarios = scenarioRows.map((scenario) => ({
       ...scenario,
+      status: scenario["status"],
       steps: stepRows.filter((step) => step.scenario_id === scenario.id).map((step) => {
         if (step.check_type !== "PROTECTED") return step;
         const publicStep = { ...step };
