@@ -1,0 +1,81 @@
+name: Verify Atlas diary
+on:
+  pull_request:
+    branches: [atlas/foundation]
+  push:
+    branches: [codex/atlas-diary-foundation-20260910, atlas/foundation]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.ref == 'refs/heads/atlas/foundation' && 'gateway-38-55-arthello-production' || format('atlas-verify-{0}', github.ref) }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: bash -n deploy/publish-atlas.sh && node --test tests/atlas-release.test.mjs
+      - run: npm test
+        env:
+          NEXT_PUBLIC_SCHOOL_DESIGN_V1: 'true'
+      - name: Package immutable Atlas image off the production server
+        run: |
+          set -Eeuo pipefail
+          docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "atlas-diary:$GITHUB_SHA" .
+          container="atlas-image-smoke-$GITHUB_RUN_ID"
+          trap 'docker rm -fv "$container" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "$container" --network none --read-only --tmpfs /tmp:rw,uid=1001,gid=1001 -v /data -v /backups "atlas-diary:$GITHUB_SHA"
+          ready=0
+          for i in $(seq 1 30); do
+            if docker exec "$container" node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" = 1
+          docker exec "$container" node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync('/data/atlas-school.sqlite'); if(db.prepare(\"SELECT institution_id FROM diary_identity WHERE id='primary'\").get()?.institution_id!=='atlas-school')throw Error('institution'); if(db.prepare('SELECT count(*) n FROM users').get().n!==0)throw Error('users must start empty'); db.close();"
+          mkdir atlas-bundle
+          docker save "atlas-diary:$GITHUB_SHA" | gzip -1 -n > atlas-bundle/atlas-image.tar.gz
+          image_id="$(docker image inspect "atlas-diary:$GITHUB_SHA" --format '{{.Id}}')"
+          jq -n --arg sha "$GITHUB_SHA" --arg tree "$(git rev-parse HEAD^{tree})" --arg image "$image_id" '{sourceSha:$sha,sourceTree:$tree,imageId:$image}' > atlas-bundle/receipt.json
+          cd atlas-bundle
+          sha256sum atlas-image.tar.gz receipt.json > checksums.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: atlas-bundle-${{ github.sha }}
+          path: atlas-bundle/
+          retention-days: 7
+          compression-level: 0
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/atlas/foundation' && github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.actor == 'vitaliyozolin-dotcom'
+    needs: verify
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    timeout-minutes: 15
+    concurrency:
+      group: school-1-11-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: atlas-bundle-${{ github.sha }}
+          path: ${{ runner.temp }}/atlas-bundle-${{ github.sha }}
+      - name: Publish isolated Atlas after central SSO is live
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ATLAS_BUNDLE_DIR: ${{ runner.temp }}/atlas-bundle-${{ github.sha }}
+        run: bash deploy/publish-atlas.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: atlas-production-receipt-${{ github.sha }}
+          path: ${{ runner.temp }}/atlas-bundle-${{ github.sha }}/production-receipt.json
+          if-no-files-found: ignore

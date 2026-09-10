@@ -1,108 +1,75 @@
-# vinext-starter
+# Электронный дневник школы «Атлас»
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Отдельное приложение школы «Атлас» на основе шаблона «Школа 1–11» и PR402.
+Основание: прямое поручение владельца 10.09.2026 создать дневник Атласа по этому шаблону.
+Статус: первая версия для приёмки; в production не опубликована. Данные, роли, каникулы и расписание «1–11» не переносятся.
 
-## Prerequisites
+## Что работает в кандидате
 
-- Node.js `>=22.13.0`
-- Linux with `flock`, `curl`, and GNU `timeout`
+- Кабинеты завуча/директора, методиста, администратора, учителя, родителя и ученика; серверная проверка действий.
+- Завуч задаёт учебный год, даты обучения, каникулы и неучебные дни.
+- Предметы, назначения учителей, недельное расписание, проверка пересечений и копирование дня.
+- XLSX КТП: темы и часы распределяются по фактическим урокам с учётом календаря. Дефицит часов виден до утверждения. Статусы: черновик → проверка → утверждение → действует.
+- Учитель публикует домашнее задание из действующей программы с явным сроком. Сам импорт не публикует задания.
+- Оценки, учебные комментарии, достижения и посещаемость для отдельной даты урока. Устаревшее сохранение отметки получает 409.
+- Учебный предпросмотр родителя для завуча и директора, без переписки, финансов, чужих детей и изменения уведомлений.
+- События для школы, роли или класса. Родитель получает только предназначенные ему события и опубликованную обратную связь.
+- Видимый возврат сотрудников в ArtHello OS без завершения сессии.
 
-## Sites Lifecycle
+## Границы данных и входа
 
-The Sites lifecycle CLI runs the locked dependency install before returning this checkout. Edit the source under `app/`, then checkpoint when a coherent milestone is ready to inspect or share. The remote Sites builder runs `npm run build` against the pushed commit. Do not repeat install or build as a normal pre-checkpoint step.
+| Параметр | Значение |
+| --- | --- |
+| Экземпляр | `atlas-school` |
+| Система, предусмотренная новым кодом | `SYS-SCHOOL-ATLAS` |
+| Подразделение | `BR-ATLAS-SCHOOL` |
+| База по умолчанию | `data/atlas-school.sqlite` |
+| Сессия | `atlas_school_session` |
+| Центральный вход, ожидаемый контракт | `/api/atlas-sso/authorize`, `/api/atlas-sso/exchange` |
 
-This starter does not use `wrangler.jsonc`.
+`SYS-SCHOOL-ATLAS` — идентификатор нового кандидата; его наличие в production ArtHello не заявляется. Существующие `/api/school-sso/*` относятся к «1–11» и не используются как вход Атласа.
 
-`install:ci` is intentionally a single, non-retrying `npm ci`. It refuses a concurrent install for the same project, consumes a matching image-seeded npm cache with `--prefer-offline` while retaining registry fallback for a missing cache object, otherwise downloads and verifies the complete vinext tarball recorded in `package-lock.json`, limits npm to one socket, and terminates a stalled install. `build` applies a short timeout and then validates the Sites artifact. These helpers target Linux and use GNU `timeout`; they are not native macOS scripts.
+Дневник принимает подписанные staff/family события с **обязательными** `systemId` и `branchId` на верхнем уровне. Для доступа сотрудника дополнительно проверяется `user.branches`. Данные детей, семей, классов и сотрудников создаются в ArtHello и синхронизируются по центральным ID; дневник не открывает обходную локальную регистрацию.
 
-Scripts that need writable project-scoped home, npm, XDG, and temporary paths use `scripts/sites-env.sh`. The `dev` and `start` scripts honor the caller's runtime environment and keep Wrangler logs inside the checkout. The generated `.sites-runtime/` directory is disposable and ignored by Git.
+SSO exchange должен вернуть `{ok:true, systemId:"SYS-SCHOOL-ATLAS", branchId:"BR-ATLAS-SCHOOL", identity:{centralUserId,displayName,contact,role,accessVersion}}`. Код ожидает отдельные центральные маршруты. Центральные маршруты и отдельные роли подготовлены в PR413. До их отдельного production выпуска реальный сотрудник не войдёт в новый экземпляр. Каждый запрос сотрудника использует подписанный `/api/atlas-sso/check`; недоступная проверка и отозванные права закрывают доступ. Проверка redirect/контракта в изолированных тестах не равна прохождению реального SSO.
 
-## Included Shape
+SQLite маркируется учреждением при первом запуске. Дневник отклоняет базу другого учреждения и любую немаркированную существующую базу. Docker-образ исключает снимок и исходные расписания/КТП «1–11». Старые школьные workflow удалены **только из ветки Атласа**; существующий школьный релиз не изменён.
 
-- edit site code under `app/`
-- `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+## Локальная работа и проверка
 
-## Workspace Auth Headers
+Нужен Node 24; для этого самостоятельного Next.js-приложения используется npm и собственный lockfile.
 
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```sh
+npm ci
+npm run dev
+NEXT_PUBLIC_SCHOOL_DESIGN_V1=true npm test
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+`npm test` выполняет production-сборку, 26 модульных/контрактных проверок и сценарии HTTP на временной пустой SQLite. HTTP runner сам поднимает и останавливает локальный сервер. Все данные в нём синтетические, тест не обращается к рабочему ArtHello и не отправляет сообщения.
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+`tests/schedule-import.test.mjs` дополнительно проверяет исторический файл шаблона; этот файл не является расписанием Атласа и не загружается в новый runtime.
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+## Подготовка рабочего запуска
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+1. Подготовить отдельный центральный system grant, Atlas SSO и отправку подписанных проекций только школы Атлас.
+2. Сопоставить реальные центральные ID уполномоченных руководителей учебной части; проверить и выдать согласованные права в Атласе.
+3. Выбрать публичный HTTPS-адрес нового дневника, собрать проверенный immutable Docker-образ вне production VPS.
+4. Использовать `deploy/atlas.compose.yml`: отдельные тома и секреты. Порт 3112 — предлагаемый локальный порт; занятость на сервере ещё не проверена. `ATLAS_IMAGE`, `ATLAS_PUBLIC_ORIGIN`, `ARTHELLO_PUBLIC_ORIGIN`, `ATLAS_CENTRAL_ACCESS_SECRET`, `ATLAS_PASSWORDLESS_PEPPER` обязательны, секреты не хранятся в репозитории.
+5. Подтвердить резервное копирование/восстановление, затем пройти обычный браузерный сценарий ArtHello → Атлас → ArtHello и завуч → учитель → родитель на телефоне и компьютере.
+6. Завуч вводит календарь Атласа, подключает классы/педагогов, заполняет расписание и загружает фактический КТП.
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+До выполнения этих пунктов статус «в production / сотрудники могут войти» не ставится. Отдельного дневника садика, переноса действующих школьных данных, автоматических переносов тем после отмен и интеграции AlfaCRM эта версия не содержит.
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+## Миграция и откат
 
-## Diagnostic Commands
+`drizzle/0009_atlas_school.sql` добавляет `diary_identity`, `diary_settings`, `attendance_by_date`; определения отражены в `db/schema.ts`. Старую таблицу `attendance` не удаляем и не используем для новых отметок. Это создание нового учреждения, а не миграция старой школьной базы.
 
-- `npm run install:ci`: perform the one bounded lockfile install
-- `npm run dev`: start the Vite/Vinext development server
-- `npm run build`: build and validate the deployable Sites artifact
-- `npm run start`: start the built Vinext application
-- `npm test`: build, validate, and verify the rendered development-preview metadata
-- `npm run validate:artifact`: recheck an existing artifact's manifest and ESM `default.fetch` export
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+Первая миграция выполняется на **новом томе**. Повторный запуск идемпотентен. Не присоединять том «1–11» и не вручную менять маркер учреждения ради прохождения проверки. Перед обновлением действующего Атласа — согласованная SQLite backup API/остановка записи и резервная копия. При откате вернуть предыдущий проверенный образ и согласованную копию его базы; не удалять новый журнал посещаемости в качестве «отката». Production backup/restore здесь ещё не выполнялись.
 
-Use build and validation commands for targeted diagnosis after a remote failure, not as part of the normal checkpoint path.
+Доказательства и ограничения: [приёмка первой версии](docs/acceptance/2026-09-10-atlas-diary.md).
 
-The timeout defaults can be overridden for a controlled canary with `SITES_INSTALL_TIMEOUT`, `SITES_INSTALL_KILL_AFTER`, `SITES_BUILD_TIMEOUT`, and `SITES_BUILD_KILL_AFTER`. A timeout fails the command; the helpers never retry an unchanged install or build.
+## Подготовленный первый выпуск
 
-## Learn More
+После проверенного merge в atlas/foundation workflow собирает immutable Docker image вне VPS. Отдельный job требует production-ru и обе производственные блокировки в прежнем порядке. publish-atlas.sh проверяет свежий source, готовность центрального Atlas SSO и отдельный ключ, затем может создать только новый Atlas сервис/тома и добавить свой маршрут. До готовности центрального сервера он завершится с ATLAS_RELEASE_BLOCKED без публикации дневника.
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+Публичный кандидат адреса: https://atlas-188-225-38-55.sslip.io. На сервере ещё не подтверждён. Секреты atlas-central-access-secret и atlas-passwordless-pepper лежат в защищённом конфигурационном каталоге runner; общий ключ предварительно подключается центральным выпуском. Скрипт рассчитан только на первую установку; существующие Atlas тома или контейнер блокируют повтор без отдельной процедуры обновления. Производственные данные автоматически не удаляются и не откатываются.

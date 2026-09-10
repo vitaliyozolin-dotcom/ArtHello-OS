@@ -6,8 +6,9 @@ import {
 } from "node:crypto";
 import type { Role } from "../app/level-zero-types";
 import { getDatabase } from "./database";
+import { centralStaffSessionIsCurrent } from "./central-session-check";
 
-const SESSION_COOKIE = "school_session";
+const SESSION_COOKIE = "atlas_school_session";
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
 const MAX_FAILED_LOGINS = 5;
 
@@ -141,16 +142,21 @@ export async function getSessionUser(
   const token = cookieValue(request, SESSION_COOKIE);
   if (!token) return null;
   const db = getDatabase();
-  return db
+  const user = await db
     .prepare(
       `SELECT u.id, u.email, u.phone, u.display_name AS displayName, u.role,
-      u.linked_student_id AS linkedStudentId, u.status, u.auth_version AS authVersion
+      u.linked_student_id AS linkedStudentId, u.status, u.auth_version AS authVersion,
+      u.central_user_id AS centralUserId, u.central_access_version AS centralAccessVersion
     FROM auth_sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP
       AND s.auth_version = u.auth_version AND u.status = 'active'`,
     )
     .bind(sha256(token))
-    .first<SessionUser>();
+    .first<SessionUser & { centralUserId: string | null; centralAccessVersion: number }>();
+  if (!user) return null;
+  const { centralUserId, centralAccessVersion, ...sessionUser } = user;
+  if (user.role !== "parent" && user.role !== "student" && !await centralStaffSessionIsCurrent({ centralUserId, accessVersion: centralAccessVersion, role: user.role })) return null;
+  return sessionUser;
 }
 
 export async function createSession(user: SessionUser, request: Request) {

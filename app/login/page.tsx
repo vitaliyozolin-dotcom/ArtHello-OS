@@ -142,13 +142,13 @@ export default function LoginPage() {
       <section className="access-card auth-card" aria-labelledby="login-title">
         <Image
           className="auth-logo"
-          src="/school-logo.svg"
+          src="/atlas-mark.svg"
           alt=""
           width={48}
           height={48}
           priority
         />
-        <span className="auth-brand-name">Школа 1–11</span>
+        <span className="auth-brand-name">Школа Атлас</span>
         <h1 id="login-title">Вход в дневник</h1>
         <p className="auth-intro">
           Сотрудникам не нужен второй пароль. Родители и ученики входят прямо в

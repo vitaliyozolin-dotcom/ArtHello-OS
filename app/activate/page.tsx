@@ -46,7 +46,7 @@ export default function ActivatePage() {
   return (
     <div className="gate-stage auth-stage">
       <section className="access-card auth-card">
-        <Image src="/school-logo.svg" alt="" width={68} height={68} />
+        <Image src="/atlas-mark.svg" alt="" width={68} height={68} />
         <span className="eyebrow">Первый вход</span>
         <h1>Создайте свой пароль</h1>
         <p>

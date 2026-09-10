@@ -5,6 +5,7 @@ import type { SchoolSnapshot, StudentRecord } from "./level-zero-types";
 
 type Preview = {
   mode: "parent-academic-preview"; readOnly: true;
+  attendance: Array<Pick<SchoolSnapshot["attendance"][number], "id" | "lessonId" | "lessonDate" | "status" | "markedAt">>;
   student: Pick<StudentRecord, "id" | "firstName" | "fullName" | "className">;
   lessons: Array<Pick<SchoolSnapshot["lessons"][number], "id" | "weekday" | "startsAt" | "endsAt" | "subjectName" | "teacherName" | "room">>;
   homework: Array<Pick<SchoolSnapshot["homework"][number], "id" | "subjectName" | "title" | "description" | "dueAt">>;
@@ -40,6 +41,7 @@ export function ParentPreview({ studentId, onClose }: { studentId: string; onClo
       <section className="content-card"><h2>Домашние задания</h2>{data.homework.length ? data.homework.map(row => <article key={row.id}><h3>{row.subjectName}: {row.title}</h3><p>{row.description}</p><p>Срок: {row.dueAt}</p></article>) : <p>Домашних заданий пока нет.</p>}</section>
       <section className="content-card"><h2>Оценки</h2>{data.grades.length ? data.grades.map(row => <p key={row.id}>{row.gradeDate} · {row.subjectName} · {row.value} · {row.title}{row.comment ? ` — ${row.comment}` : ""}</p>) : <p>Оценок пока нет.</p>}</section>
       <section className="content-card"><h2>Обратная связь педагогов</h2>{data.comments.length ? data.comments.map(row => <article key={row.id}><h3>{row.teacherName}</h3><p>{row.body}</p><small>{row.commentDate}</small></article>) : <p>Опубликованных комментариев пока нет.</p>}</section>
+      <section className="content-card"><h2>Посещаемость</h2>{data.attendance.length ? data.attendance.map(row=><p key={row.id}>{row.lessonDate} · {({present:"Присутствует",absent:"Отсутствует",late:"Опоздал",excused:"Уважительная причина"} as Record<string,string>)[row.status] ?? row.status}</p>) : <p>Отметок пока нет.</p>}</section>
       <section className="content-card"><h2>Достижения</h2>{data.achievements.length ? data.achievements.map(row => <article key={row.id}><h3>{row.title}</h3><p>{row.description}</p></article>) : <p>Достижения пока не добавлены.</p>}</section>
     </>}
   </div>;
