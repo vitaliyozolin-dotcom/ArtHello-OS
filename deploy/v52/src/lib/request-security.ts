@@ -13,6 +13,10 @@ const AUTH_ROUTES: Readonly<Record<string, { method: "GET" | "POST"; access: Aut
 
 const PUBLIC_API_ROUTES: Readonly<Record<string, "GET" | "POST">> = {
   "/api/health": "GET",
+  "/api/atlas-sso/open": "GET",
+  "/api/atlas-sso/authorize": "GET",
+  "/api/atlas-sso/exchange": "POST",
+  "/api/atlas-sso/check": "POST",
   "/api/school-sso/authorize": "GET",
   "/api/school-sso/exchange": "POST",
 };

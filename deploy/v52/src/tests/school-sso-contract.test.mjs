@@ -139,7 +139,9 @@ test("ArtHello education workspace exposes the controlled diary entry", async ()
   ]);
   assert.match(workspace, /SCHOOL_DIARY_SSO_URL/);
   assert.match(workspace, /window\.location\.assign\(SCHOOL_DIARY_SSO_URL\)/);
-  assert.match(workspace, />Открыть дневник<\/Button>/);
+  assert.match(workspace, />Дневник 1–11<\/Button>/);
+  assert.match(workspace, /window\.location\.assign\("\/api\/atlas-sso\/open"\)/);
+  assert.match(workspace, />Дневник Атласа<\/Button>/);
   assert.match(patch, /SCHOOL_DIARY_SSO_URL/);
   assert.match(patch, /\/auth\/central\/start/);
   assert.match(patch, /Открыть дневник/);

@@ -6,7 +6,10 @@
     "mtime": "UTC 1970-01-01",
     "numericOwner": true,
     "mode": "u+rwX,go+rX,go-w",
-    "generatedExcludes": ["./tsconfig.tsbuildinfo", "./.wrangler"]
+    "generatedExcludes": [
+      "./tsconfig.tsbuildinfo",
+      "./.wrangler"
+    ]
   },
   "v44": {
     "sourceArchiveSha256": "c72c6c7ced52f0d533be16ff8a8aa2d11fad8d0743b6f1229bde7f034a057062",
@@ -14,6 +17,6 @@
   },
   "v52": {
     "sourceArchiveSha256": "e76fb44dca272825fda4486e7584290b14969c1fd054a8c955eae738899b7c12",
-    "materializedTreeSha256": "b73dde57d40a50615eb4ca0b329a49890192f8afbee26797b5059a24c395e463"
+    "materializedTreeSha256": "faad2ec93f894544e250d0e738728bbacc75e10dc19022bbe37345ec9350fd04"
   }
 }

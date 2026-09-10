@@ -12,6 +12,8 @@ import { getAuthenticatedRequestContext, isCanonicalOwnerContext, verifyAuthenti
 import { hasTrustedMutationOrigin } from "../../../lib/request-security";
 import { safeSettingsActionError } from "../../../lib/settings-error";
 
+import { normalizeAtlasRole, ATLAS_SYSTEM_ID } from "../../../lib/atlas-sso";
+
 const defaultBranches = [
   { id: "BR-KINDERGARTEN", name: "Атлас — садик", kind: "Детский сад", sortOrder: 10 },
   { id: "BR-ATLAS-SCHOOL", name: "Атлас — школа", kind: "Школа", sortOrder: 20 },
@@ -21,6 +23,7 @@ const defaultBranches = [
 ] as const;
 
 const defaultSystems = [
+  { id: ATLAS_SYSTEM_ID, systemKey: "ATLAS_DIARY", name: "Дневник Атласа", description: "Отдельный дневник школы Атлас; вход через ArtHello OS", sortOrder: 30 },
   { id: "SYS-ARTHELLO-OS", systemKey: "ARTHELLO_OS", name: "ArtHello OS", description: "Управление группой, филиалами и сквозными процессами", sortOrder: 10 },
   { id: SCHOOL_SYSTEM_ID, systemKey: "SCHOOL_DIARY", name: "Дневник 1–11", description: "Учебный контур школы; классы и предметы назначаются уже в дневнике", sortOrder: 20 },
 ] as const;
@@ -101,6 +104,11 @@ export async function GET(request: Request) {
       familyDirectory,
       familyAccessGrants,
       systemRoleOptions: {
+        [ATLAS_SYSTEM_ID]: [
+          { value: "director", label: "Директор" }, { value: "deputy", label: "Завуч" },
+          { value: "methodist", label: "Методист" }, { value: "teacher", label: "Учитель" },
+          { value: "admin", label: "Администратор школы" }, { value: "tech_admin", label: "Технический администратор" },
+        ],
         [SCHOOL_SYSTEM_ID]: [
           { value: "director", label: "Директор" },
           { value: "deputy", label: "Завуч" },
@@ -157,8 +165,11 @@ export async function POST(request: Request) {
         return Response.json({ error: "Укажите, нужно ли включить вход в дневник" }, { status: 400 });
       }
       const enabled = body.enabled;
+      const systemId = body.systemId ?? SCHOOL_SYSTEM_ID;
+      if (systemId !== SCHOOL_SYSTEM_ID && systemId !== ATLAS_SYSTEM_ID) return Response.json({ error: "Неизвестный дневник" }, { status: 400 });
+      const isAtlas = systemId === ATLAS_SYSTEM_ID;
       const diaryRole = clean(body.diaryRole, 40);
-      if (enabled && !diaryRoles.has(diaryRole)) {
+      if (enabled && (isAtlas ? !normalizeAtlasRole(diaryRole) : !diaryRoles.has(diaryRole))) {
         return Response.json({ error: "Выберите роль в дневнике" }, { status: 400 });
       }
 
@@ -186,7 +197,7 @@ export async function POST(request: Request) {
       const branches = await db.select({ id: organizationBranches.id, name: organizationBranches.name })
         .from(organizationBranches)
         .where(eq(organizationBranches.status, "Активен"));
-      const syncEvent = prepareSchoolDiaryAccessEvent({
+      const syncEvent = isAtlas ? null : prepareSchoolDiaryAccessEvent({
         actor,
         eventType: enabled ? "upsert" : "revoke",
         accessRevision: now,
@@ -203,42 +214,43 @@ export async function POST(request: Request) {
       });
       const auditPayload = JSON.stringify({
         enabled,
+        systemId,
         diaryRole: enabled ? diaryRole : null,
         accessVersion,
-        syncEventId: syncEvent.id,
+        syncEventId: syncEvent?.id,
       });
       const ownerGuard = `EXISTS (SELECT 1 FROM app_users
         WHERE id=? AND access_version=? AND updated_at=?)`;
       const diaryMutation = enabled
         ? env.DB.prepare(`INSERT INTO user_system_access
           (user_id,system_id,role,status,access_version,last_sync_status,last_synced_at,granted_by,updated_at)
-          SELECT ?,?,?,?,?,'Ожидает синхронизации','',?,?
+          SELECT ?,?,?,?,?,?,'',?,?
           WHERE ${ownerGuard}
           ON CONFLICT(user_id,system_id) DO UPDATE SET
             role=excluded.role,
             status='Активен',
             access_version=excluded.access_version,
-            last_sync_status='Ожидает синхронизации',
+            last_sync_status=excluded.last_sync_status,
             last_synced_at='',
             granted_by=excluded.granted_by,
             updated_at=excluded.updated_at`)
-          .bind(me.id, SCHOOL_SYSTEM_ID, diaryRole, "Активен", accessVersion, actor, now, me.id, accessVersion, expectedUpdatedAt)
+          .bind(me.id, systemId, diaryRole, "Активен", accessVersion, isAtlas ? "Вход через ArtHello OS" : "Ожидает синхронизации", actor, now, me.id, accessVersion, expectedUpdatedAt)
         : env.DB.prepare(`DELETE FROM user_system_access
           WHERE user_id=? AND system_id=? AND ${ownerGuard}`)
-          .bind(me.id, SCHOOL_SYSTEM_ID, me.id, accessVersion, expectedUpdatedAt);
+          .bind(me.id, systemId, me.id, accessVersion, expectedUpdatedAt);
       const results = await env.DB.batch([
         diaryMutation,
         env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
           SELECT ?,'settings.owner_diary_access_saved','app_user',?,?
           WHERE ${ownerGuard}`)
           .bind(actor, me.id, auditPayload, me.id, accessVersion, expectedUpdatedAt),
-        accessOutboxInsert(syncEvent, ownerGuard, [me.id, accessVersion, expectedUpdatedAt]),
+        ...(syncEvent ? [accessOutboxInsert(syncEvent, ownerGuard, [me.id, accessVersion, expectedUpdatedAt])] : []),
         env.DB.prepare(`UPDATE app_users SET updated_at=?
           WHERE id=? AND access_version=? AND updated_at=?`)
           .bind(now, me.id, accessVersion, expectedUpdatedAt),
       ]);
       assertCasApplied(results.at(-1));
-      const syncResult = await dispatchStaffEventSafely(syncEvent.id);
+      const syncResult = syncEvent ? await dispatchStaffEventSafely(syncEvent.id) : { message: enabled ? "Вход в дневник Атласа настроен. Откройте его через ArtHello OS." : "Вход в дневник Атласа отключён.", activationLink: undefined, expiresAt: undefined };
 
       return Response.json({
         message: syncResult.message || (enabled ? "Вход владельца в дневник настроен" : "Вход владельца в дневник отключён"),
@@ -270,6 +282,7 @@ export async function POST(request: Request) {
       const requestedPosition = clean(body.position, 120);
       const systemIds = stringArray(body.systemIds).filter((id) => defaultSystems.some((system) => system.id === id));
       const diaryRole = clean(body.diaryRole, 40);
+      const atlasDiaryRole = normalizeAtlasRole(body.atlasDiaryRole);
       const administrative = body.isAdministrative === true;
       const branchIds = administrative ? [] : stringArray(body.branchIds).slice(0, 20);
       const [employee] = employeeId ? await db.select().from(hrEmployees).where(eq(hrEmployees.id, employeeId)).limit(1) : [];
@@ -289,6 +302,9 @@ export async function POST(request: Request) {
       if (!administrative && !branchIds.length) return Response.json({ error: "Выберите хотя бы один филиал" }, { status: 400 });
       if (systemIds.includes(SCHOOL_SYSTEM_ID) && (contactType !== "phone" || !diaryRoles.has(diaryRole))) {
         return Response.json({ error: "Для дневника нужен номер телефона и отдельная роль дневника" }, { status: 400 });
+      }
+      if (systemIds.includes(ATLAS_SYSTEM_ID) && (!atlasDiaryRole || !systemIds.includes(CENTRAL_SYSTEM_ID) || (!administrative && !branchIds.includes("BR-ATLAS-SCHOOL")))) {
+        return Response.json({ error: "Для Атласа выберите роль дневника, вход в ArtHello OS и доступ к школе Атлас." }, { status: 400 });
       }
       const canonicalOwnerTarget = existing?.id === "USR-OWNER" || (authenticated.auth.user.isSystemOwner && existing?.id === me.id);
       if (canonicalOwnerTarget) {
@@ -348,7 +364,7 @@ export async function POST(request: Request) {
           statements.push(env.DB.prepare(`INSERT INTO user_system_access
             (user_id,system_id,role,status,access_version,last_sync_status,granted_by,updated_at)
             SELECT ?,?,?,?,?,?,?,? WHERE ${guard}`)
-            .bind(id, systemId, systemId === SCHOOL_SYSTEM_ID ? diaryRole : role, userStatus === "Доступ приостановлен" ? "Приостановлен" : "Активен", nextVersion, systemId === SCHOOL_SYSTEM_ID ? "Ожидает синхронизации" : "Не требуется", actor, now, ...guardValues));
+            .bind(id, systemId, systemId === SCHOOL_SYSTEM_ID ? diaryRole : systemId === ATLAS_SYSTEM_ID ? atlasDiaryRole : role, userStatus === "Доступ приостановлен" ? "Приостановлен" : "Активен", nextVersion, systemId === SCHOOL_SYSTEM_ID ? "Ожидает синхронизации" : systemId === ATLAS_SYSTEM_ID ? "Вход через ArtHello OS" : "Не требуется", actor, now, ...guardValues));
         }
         if (employeeId) {
           statements.push(env.DB.prepare(`UPDATE hr_employees SET position_id=?,access_status=?,updated_at=?
@@ -379,7 +395,7 @@ export async function POST(request: Request) {
           statements.push(env.DB.prepare(`INSERT INTO user_system_access
             (user_id,system_id,role,status,access_version,last_sync_status,granted_by,updated_at)
             SELECT ?,?,?,?,?,?,?,? WHERE ${guard}`)
-            .bind(id, systemId, systemId === SCHOOL_SYSTEM_ID ? diaryRole : role, userStatus === "Доступ приостановлен" ? "Приостановлен" : "Активен", nextVersion, systemId === SCHOOL_SYSTEM_ID ? "Ожидает синхронизации" : "Не требуется", actor, now, ...guardValues));
+            .bind(id, systemId, systemId === SCHOOL_SYSTEM_ID ? diaryRole : systemId === ATLAS_SYSTEM_ID ? atlasDiaryRole : role, userStatus === "Доступ приостановлен" ? "Приостановлен" : "Активен", nextVersion, systemId === SCHOOL_SYSTEM_ID ? "Ожидает синхронизации" : systemId === ATLAS_SYSTEM_ID ? "Вход через ArtHello OS" : "Не требуется", actor, now, ...guardValues));
         }
         if (employeeId) statements.push(env.DB.prepare(`UPDATE hr_employees SET position_id=?,access_status=?,updated_at=?
           WHERE id=? AND ${guard}`).bind(position, "Активен", now, employeeId, ...guardValues));
