@@ -1,5 +1,10 @@
 # ArtHello OS — Current State
 
+## 2026-09-10 — D136: разрешение School по сетевому alias, кандидат
+
+- D135 protected run `34539171120` остановился до сборки/backup School: ни один running container не имеет старой system label. Atlas не запускался, production не менялся.
+- D136 использует фактическую границу Caddy/Docker — единственный running container в `arthello-os_backend` с alias `school-1-11`; old revision проверяется на immutable image label. Ноль/два кандидата или revision drift — stop.
+
 ## 2026-09-10 — D135: обнаружение живого School-контейнера, кандидат
 
 - D134 protected run `34537971479` собрал и проверил School image `e8b07ed67601…`, затем остановился до backup/cutover: имя `school-1-11` отсутствует. Atlas step не запускался; живые данные и контейнеры не менялись.

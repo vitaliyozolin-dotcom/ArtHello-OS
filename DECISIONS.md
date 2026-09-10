@@ -627,3 +627,7 @@ D133 hosted CI прошёл, но protected run `34536320576` остановил
 D134 run `34537971479` успешно проверил archive и собрал School image, но до backup/cutover получил `no such object: school-1-11`; Atlas не запускался. Значит, standalone topology подтверждена, но Docker name изменился после более позднего cutover.
 
 Принято выбрать ровно один running container по immutable identity label `school.system=school-1-11`, дополнительно потребовать прежнюю revision `54242340f2d9b6a9887d69ecc03520ddf9f7982c` и безопасный Docker name. Только это имя передаётся прежнему standalone rollback-controller. Неоднозначность, отсутствие или revision drift запрещают мутацию. Source pins и остальные D134 границы неизменны; trigger — exact-main Quality prefix `D135: discover School container`.
+
+## D136 — Разрешить School по network alias и image revision (2026-09-10, кандидат)
+
+D135 run `34539171120` остановился до мутаций: legacy system label отсутствует. Caddy достигает School через Docker network alias `school-1-11`, поэтому D136 требует ровно один running container в `arthello-os_backend` с этим alias и отдельно проверяет old revision на immutable image label. Ноль/множественность/revision drift — stop. Остальные D135 границы неизменны; trigger — exact-main Quality prefix `D136: resolve School network alias`.

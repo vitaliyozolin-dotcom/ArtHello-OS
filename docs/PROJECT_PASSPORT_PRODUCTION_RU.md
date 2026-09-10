@@ -947,3 +947,7 @@ D133 source и hosted gates приняты, но protected run `34536320576` о�
 ## Приложение D135 — identity-based School container discovery (2026-09-10)
 
 D134 run `34537971479` остановился после проверки и сборки image, но до backup/cutover: hard-coded Docker name уже не существует. D135 разрешает read-only определить ровно один running container по label `school.system=school-1-11` и прежней revision, проверить безопасное имя и передать его неизменному standalone controller. При нуле/множественности/source drift — stop. Scope, sources, данные, права и критерии D134 не меняются.
+
+## Приложение D136 — School network identity (2026-09-10)
+
+D135 run `34539171120` остановился до мутаций из-за отсутствия legacy system label. D136 выбирает ровно один running container в `arthello-os_backend` с network alias `school-1-11` и требует old revision на его image label. Остальные границы и критерии неизменны.
