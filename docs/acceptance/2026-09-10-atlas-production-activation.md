@@ -2,6 +2,8 @@
 
 Статус: кандидат, не принят.
 
+Первый protected D122 run `34520906921/103018492882` остановился до container/Caddy mutation после успешных artifact checksums: gateway Docker не разрешил raw image-ID lookup после load. D125 использует immutable source tag и обязательно сверяет его с тем же receipt image ID; остальные ворота неизменны.
+
 ## Наблюдённый baseline
 
 - Read-only inventory runs: `34517280798/103005739539`, `34518569941/103010096941`.
