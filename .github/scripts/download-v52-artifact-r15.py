@@ -198,6 +198,11 @@ def main():
                           'artifactBytes': artifact['size_in_bytes'], 'zipSha256': artifact['digest'][7:],
                           'members': 3, 'imageImported': False}, separators=(',', ':')), flush=True)
         return 0
+    except Refused as error:
+        # All Refused codes are fixed literals; no external values are used.
+        print(json.dumps({'kind': 'v52-artifact-delivery', 'result': 'blocked', 'stage': stage,
+                          'reason': str(error)}, separators=(',', ':')), flush=True)
+        return 2
     except Exception:
         # No API payload, signed URL, exception string, credentials or paths.
         print(json.dumps({'kind': 'v52-artifact-delivery', 'result': 'blocked', 'stage': stage}, separators=(',', ':')), flush=True)

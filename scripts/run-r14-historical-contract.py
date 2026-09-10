@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run frozen R14 comparisons alongside explicit current-source checks.
 
-This is hosted verification only. It cannot authorize a release or substitute
-the source checked by the unchanged protected R14 controller.
+This is hosted verification only. It cannot authorize a release. The retired
+R14 controller is restored only inside this private historical fixture.
 """
 import hashlib
 import importlib.util
@@ -19,6 +19,8 @@ PINS_PATH = "deploy/v52/recovery-r14/source-pins.json"
 PINS_SHA256 = "6101c7ed105a02e6a91bd1e646da715dbff1217a1cd4585cceea9f2ec1f212cb"
 WORKFLOW = ".github/workflows/verify-arthello-r14.yml"
 WORKFLOW_SHA256 = "694c8f04b8375334bb45daece08f6235cd1326360cec7df9cadc21e97c710a38"
+CONTROLLER = ".github/workflows/deploy-arthello-recovery-r14-20260909.yml"
+CONTROLLER_SHA256 = "c6b0fa7117ad6af3b34f3c69d9b624a5ca1ba8104d54dea6bb755a0e9b2de5ea"
 ARCHIVED_PATHS = (
     "deploy/v52/Dockerfile",
     "deploy/v52/overrides/db/index.ts",
@@ -75,8 +77,8 @@ def extract_current(root, target):
     require(not os.environ.get("CHECKED_SOURCE_SHA") or
             os.environ["CHECKED_SOURCE_SHA"] == head, "CHECKED_SOURCE_MOVED")
     module.extract_archive(git(root, "archive", "--format=tar", head), target)
-    # Current protected controller is included unchanged; only the hosted
-    # verification workflow below receives its historical comparison input.
+    # Current workflows are included for comparison. The two historical YAML
+    # inputs below are restored only after current source/protocol checks pass.
     module.extract_archive(git(root, "archive", "--format=tar", head,
                                ".github/workflows"), target, workflows_only=True)
     return head
@@ -99,7 +101,7 @@ def check_current(target):
 
 def overlay_historical(root, target, pins):
     for name, expected in [(name, pins["sourceFiles"][name]) for name in ARCHIVED_PATHS] + [
-            (WORKFLOW, WORKFLOW_SHA256)]:
+            (WORKFLOW, WORKFLOW_SHA256), (CONTROLLER, CONTROLLER_SHA256)]:
         raw = git(root, "show", BASELINE + ":" + name)
         require(digest(raw) == expected, "ARCHIVED_SOURCE_DRIFT:" + name)
         file = Path(target) / name

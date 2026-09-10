@@ -363,3 +363,10 @@ Unit/source regression suite проверяет эти ветки без product
 ## Текущий вывод
 
 Кодовая база реальна и содержит значительный функциональный фундамент. Реальный payroll source прошёл изолированный импорт и контрольные сверки, но формулы и identities ещё требуют ручного утверждения. Owner-only sanitized Sites checkpoint можно проверять без production-данных; production/Replit и detailed live-data gate остаётся `BLOCKED`. Свежие количества AlfaCRM, фактическая карта филиалов/юрлиц, банковские счета и операции не подтверждены. Поэтому ДДС, ОПиУ, финансовая модель и AI CFO не могут открываться до закрытия HIGH, full Alfa import, read-only bank OAuth и нового Reviewer/Coordinator gate.
+
+
+## 2026-09-10 — D100 source исправлен; D101/R15 подготовлен
+
+PR403 объединён: `9862a6e863d4d791c00ddeaba9480154ad5b8c4d`, tree `7a08a2e88e8ea45c2ef1e9631f62ba5c612d6034`. Exact PR head `1912996e925cbf5c26ff7d2e2f789c8bcc6e1657` прошёл Quality34440928812, Proof34440928740, V5234440928818 и R14/R13/R1234440928953. Чужая materialization сохранена; bank tests и historical source checks восстановлены. Это исходники, не новый live.
+
+R15 готовится в PR404 поверх этой базы: pinned R14-to-R15 transformation, bounded verified artifact delivery и exact unused R14 browser retirement. Protected R15 ещё не выполнен. Старый R14 run34391105865 attempt2 terminal failure до cutover; cleanup success. Accepted live остаётся R13, новый D075 не получен, реальные банковские операции и суммы не приняты. PR399 остаётся draft/UNBOUND. Следующий шаг — окончательный review/CI PR404, штатный guarded release и затем реальные bank/DDS receipts.

@@ -24,11 +24,10 @@ class HistoricalContractTests(unittest.TestCase):
         after = {str(p.relative_to(self.target)): p.read_bytes()
                  for p in self.target.rglob("*") if p.is_file()}
         changed = {p for p in before.keys() | after.keys() if before.get(p) != after.get(p)}
-        self.assertTrue(changed.issubset(set(historical.ARCHIVED_PATHS) | {historical.WORKFLOW}))
+        self.assertTrue(changed.issubset(set(historical.ARCHIVED_PATHS) | {historical.WORKFLOW, historical.CONTROLLER}))
         for path, expected in pins["sourceFiles"].items():
             self.assertEqual(historical.digest(after[path]), expected, path)
-        self.assertEqual(after['.github/workflows/deploy-arthello-recovery-r14-20260909.yml'],
-                         before['.github/workflows/deploy-arthello-recovery-r14-20260909.yml'])
+        self.assertEqual(historical.digest(after[historical.CONTROLLER]), historical.CONTROLLER_SHA256)
         self.assertTrue(all(after[p] == value for p, value in before.items() if '/src/' in p))
 
     def test_current_source_changes_are_not_hidden(self):
@@ -46,6 +45,12 @@ class HistoricalContractTests(unittest.TestCase):
         pins['sourceFiles'][historical.ARCHIVED_PATHS[0]] = '0' * 64
         with self.assertRaisesRegex(ValueError, 'ARCHIVED_SOURCE_DRIFT'):
             historical.overlay_historical(ROOT, self.target, pins)
+
+    def test_retired_controller_is_restored_only_in_private_fixture(self):
+        pins = historical.check_current(self.target)
+        (self.target / historical.CONTROLLER).unlink(missing_ok=True)
+        historical.overlay_historical(ROOT, self.target, pins)
+        self.assertEqual(historical.digest((self.target / historical.CONTROLLER).read_bytes()), historical.CONTROLLER_SHA256)
 
 
 if __name__ == '__main__':

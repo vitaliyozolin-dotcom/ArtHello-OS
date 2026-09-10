@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+from contextlib import redirect_stdout
 import urllib.error
 from email.message import Message
 import zipfile
@@ -129,6 +131,65 @@ class DownloadTests(unittest.TestCase):
                 download.metadata(run, {'total_count': 1, 'artifacts': [wrong]}, main, source, 123, now)
         with self.assertRaises(download.Refused):
             download.metadata(run, {'total_count': 2, 'artifacts': [artifact]}, main, source, 123, now)
+
+    def run_delivery(self, streams, *, main_changed=False, preexisting=False):
+        payload = archive()
+        artifact = {'id': 456, 'size_in_bytes': len(payload), 'digest': 'sha256:' + hashlib.sha256(payload).hexdigest()}
+        directory = self.root / 'owned'
+        if preexisting:
+            directory.mkdir()
+            (directory / 'keep').write_text('must remain')
+        calls = []
+        class Client:
+            def json(self, suffix):
+                calls.append(suffix)
+                return {'object': {'type': 'commit', 'sha': ('b' if main_changed else 'a') * 40}}
+            def stream(self, value):
+                calls.append('stream')
+                incoming = streams.pop(0)
+                if isinstance(incoming, Exception):
+                    raise incoming
+                return io.BytesIO(payload if incoming == 'valid' else incoming)
+        output = io.StringIO()
+        with patch.object(download.sys, 'argv', ['download']), patch.object(download, 'context', return_value=('a' * 40, 123, directory)), \
+             patch.object(download, 'GitHub', return_value=Client()), patch.object(download, 'metadata', return_value=artifact), redirect_stdout(output):
+            status = download.main()
+        return status, json.loads(output.getvalue()), directory, calls
+
+    def test_delivery_recovers_one_network_failure_before_import(self):
+        status, receipt, directory, calls = self.run_delivery([TimeoutError('private-url-must-not-escape'), 'valid'])
+        self.assertEqual(status, 0)
+        self.assertEqual(calls.count('stream'), 2)
+        self.assertEqual({p.name for p in directory.iterdir()}, set(download.MEMBERS))
+        self.assertFalse(receipt['imageImported'])
+
+    def test_network_retries_are_bounded_and_do_not_extract(self):
+        status, receipt, directory, calls = self.run_delivery([TimeoutError('private')] * 3)
+        self.assertEqual(status, 2)
+        self.assertEqual(calls.count('stream'), 3)
+        self.assertEqual(receipt['reason'], 'DOWNLOAD_NETWORK')
+        self.assertEqual(list(directory.iterdir()), [])
+        self.assertNotIn('private', json.dumps(receipt))
+
+    def test_integrity_failure_is_not_retried_or_extracted(self):
+        status, receipt, directory, calls = self.run_delivery([b'truncated', 'valid'])
+        self.assertEqual(status, 2)
+        self.assertEqual(calls.count('stream'), 1)
+        self.assertEqual(receipt['reason'], 'DOWNLOAD_SIZE')
+        self.assertFalse(any((directory / name).exists() for name in download.MEMBERS))
+
+    def test_main_movement_after_download_blocks_extraction(self):
+        status, receipt, directory, calls = self.run_delivery(['valid'], main_changed=True)
+        self.assertEqual(status, 2)
+        self.assertEqual(receipt['reason'], 'MAIN_MOVED')
+        self.assertFalse(any((directory / name).exists() for name in download.MEMBERS))
+
+    def test_preexisting_directory_is_not_overwritten(self):
+        status, receipt, directory, calls = self.run_delivery(['valid'], preexisting=True)
+        self.assertEqual(status, 2)
+        self.assertEqual(receipt['stage'], 'owned_directory')
+        self.assertEqual(calls.count('stream'), 0)
+        self.assertEqual((directory / 'keep').read_text(), 'must remain')
 
 
 if __name__ == '__main__':
