@@ -427,3 +427,7 @@ D110 terminal failed до изменения production, cleanup success. Нов
 ## D113 — Новый R17 после отказа main Proof
 
 Не менять main1a45eb6aa5b1a9b21c4390105016b8b0e54afef5, пока protected34491463434/cleanup активны. После terminal complete graph review использовать PR416/codex/finance-r17-browser-startup-20260910, squash prefix `D113: guarded finance R17`, parent1a45eb6. Required final-head Quality/Proof/V52/6continuation; actual signed one-parent/tree/main. Затем freeze до terminal нового выпуска/cleanup, actual candidate/after-public/backup/School receipts, bound D075 и сверка банка/ДДС. Перезапуск только hosted Chrome startup ограничен одним новым процессом до любой проверки страницы; это не rerun release/CI и не ослабляет assertions.
+
+## D114 — Read-only проверка accepted R17
+
+После actual successful run34495273615 закреплены sourceff8559254faaedade63a9ee7567a45686d08c13a и фактические pins. Требуются exact-head diagnostic/Quality/Proof/V52/6continuation, review SHA/tree/diff; только squash с prefix `D075: read-only production data`. Freeze main до terminal отчёта. Реальные bank/financial суммы и связи проверять отдельно от optional Alfa findings; raw exports и production writes запрещены.

@@ -1,0 +1,102 @@
+{
+  "evidenceKind": "actual-protected-deploy-log",
+  "sourceSha": "ff8559254faaedade63a9ee7567a45686d08c13a",
+  "sourceTree": "6aeb7e6879b786a434d12f026f765bcaf9acb5a4",
+  "runId": "34495273615",
+  "runAttempt": 1,
+  "runConclusion": "success",
+  "deployJobId": 102932695823,
+  "bundleJobId": 102932011920,
+  "cleanup": "success",
+  "attemptEvidence": "Actual run/job attempt1; fresh cutover, retained-resume step skipped; candidate context validated by the pinned state machine.",
+  "acceptedPins": {
+    "runId": "34495273615",
+    "resourceAttempt": "1",
+    "acceptedAttempt": "1",
+    "imageId": "sha256:34402014063a05c81754716f46b3f9059297f1d21d37da7e5f00b1eb8f7fdd46",
+    "runtimeFingerprint": "a97c538504d68613ed29d9de1230cf2ab23fc905207d6806d24a35f1d3e79bff",
+    "candidateContainerId": "9909bd54d31244627477bd60c3b8e7cc6cd84758902943e54eb555206c4a1142",
+    "contextSha256": "5343207eb2f8f7769b1c2a4d9b56222ffe645eb2cfe2b18a7e7db0269b843215"
+  },
+  "candidateAcceptance": {
+    "acceptancePhase": "candidate-maintenance",
+    "arthelloOrigin": "https://arthello-188-225-38-55.sslip.io",
+    "callbackUrlConstructed": false,
+    "candidateContainerId": "9909bd54d31244627477bd60c3b8e7cc6cd84758902943e54eb555206c4a1142",
+    "candidateContextSha256": "5343207eb2f8f7769b1c2a4d9b56222ffe645eb2cfe2b18a7e7db0269b843215",
+    "evidenceReference": "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34495273615/attempts/1",
+    "intendedCandidateArtHelloSha": "ff8559254faaedade63a9ee7567a45686d08c13a",
+    "method": "natural-browser-navigation",
+    "observedAtUtc": "2026-09-10T15:28:48.645Z",
+    "observedLiveArtHelloSha": "ff8559254faaedade63a9ee7567a45686d08c13a",
+    "observedLiveSchoolSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+    "observedSchoolRepairConfigSha256": "2ba0ad1ce530db9c9abb622e5727e6345ab74a85699e121b718d9a0405b1f40a",
+    "observedSchoolRepairExecutionUid": 1000,
+    "observedSchoolRepairStateDirectorySha256": "cedd256dabc1dc6ff105887d31b5893bb384cdfe751b532e0c115d69ff6bfeee",
+    "result": "pass",
+    "schemaVersion": 3,
+    "schoolOrigin": "https://school-188-225-38-55.sslip.io",
+    "sessionInjected": false,
+    "verifiedSteps": [
+      "open_education_in_authenticated_arthello",
+      "click_diary_entry",
+      "follow_natural_sso_redirects",
+      "authenticated_school_diary_visible"
+    ]
+  },
+  "afterPublicAcceptance": {
+    "arthelloOrigin": "https://arthello-188-225-38-55.sslip.io",
+    "callbackUrlConstructed": false,
+    "evidenceReference": "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34495273615/attempts/1",
+    "intendedCandidateArtHelloSha": "ff8559254faaedade63a9ee7567a45686d08c13a",
+    "method": "natural-browser-navigation",
+    "observedAtUtc": "2026-09-10T15:29:07.220Z",
+    "observedLiveArtHelloSha": "ff8559254faaedade63a9ee7567a45686d08c13a",
+    "observedLiveSchoolSha": "54242340f2d9b6a9887d69ecc03520ddf9f7982c",
+    "observedSchoolRepairConfigSha256": "2ba0ad1ce530db9c9abb622e5727e6345ab74a85699e121b718d9a0405b1f40a",
+    "observedSchoolRepairExecutionUid": 1000,
+    "observedSchoolRepairStateDirectorySha256": "cedd256dabc1dc6ff105887d31b5893bb384cdfe751b532e0c115d69ff6bfeee",
+    "result": "pass",
+    "schemaVersion": 3,
+    "schoolOrigin": "https://school-188-225-38-55.sslip.io",
+    "sessionInjected": false,
+    "verifiedSteps": [
+      "open_education_in_authenticated_arthello",
+      "click_diary_entry",
+      "follow_natural_sso_redirects",
+      "authenticated_school_diary_visible"
+    ]
+  },
+  "backup": {
+    "backup": {
+      "historyCount": 2,
+      "initialBackupId": "arthello-v52-20260909T081023Z-f0cce7847651",
+      "lastVerifiedBackupId": "arthello-v52-20260910T003001Z-de297eb80f1f",
+      "nextAt": "2026-09-11T00:15:00+00:00"
+    },
+    "releaseSha": "ff8559254faaedade63a9ee7567a45686d08c13a",
+    "schemaVersion": 14,
+    "state": "sealed",
+    "volumes": {
+      "activation": {
+        "name": "arthello-v52-tochka-activation-34495273615-1",
+        "ownership": "owned"
+      },
+      "backups": {
+        "name": "arthello-v52-backups-34326582961-1",
+        "ownership": "adopted"
+      },
+      "control": {
+        "name": "arthello-v52-backup-control-34326582961-1",
+        "ownership": "adopted"
+      }
+    },
+    "worker": {
+      "id": "570d3fb2f96dfa7a08d0a98fbeda0d208f08c0805efcc444bc958fbabf515052",
+      "name": "arthello-v52-backup-worker-34326582961-1",
+      "ownership": "adopted"
+    }
+  },
+  "deployUrl": "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34495273615",
+  "producerRunId": 34494682859
+}
