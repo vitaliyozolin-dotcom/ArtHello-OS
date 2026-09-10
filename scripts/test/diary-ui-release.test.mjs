@@ -18,7 +18,7 @@ test("production runs only after exact successful main Quality and inside the pr
   const workflow = read(".github/workflows/deploy-diaries-d133.yml");
   assert.match(workflow, /workflow_run:/);
   assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(workflow, /startsWith\(github\.event\.workflow_run\.head_commit\.message, 'D134: repair diary UI release'\)/);
+  assert.match(workflow, /startsWith\(github\.event\.workflow_run\.head_commit\.message, 'D135: discover School container'\)/);
   assert.match(workflow, /environment: production-ru/);
   assert.match(workflow, /runs-on: \[self-hosted, linux, x64, arthello-gateway\]/);
 });
@@ -49,6 +49,9 @@ test("School uses its current-topology standalone backup and rollback cutover wi
   assert.match(workflow, /school-curriculum-standalone-cutover\.sh/);
   assert.match(workflow, /SCHOOL_STANDALONE_CUTOVER=PASS/);
   assert.match(workflow, /SCHOOL_STANDALONE_BACKUP=VERIFIED/);
+  assert.match(workflow, /docker ps -q --filter label=school\.system=school-1-11/);
+  assert.match(workflow, /org\.opencontainers\.image\.revision/);
+  assert.match(workflow, /SCHOOL_CONTAINER="\$school_container"/);
   const syntax = spawnSync("bash", ["-n", fileURLToPath(new URL("../../deploy/school-curriculum-standalone-cutover.sh", import.meta.url))], { encoding: "utf8" });
   assert.equal(syntax.status, 0, syntax.stderr);
   assert.doesNotMatch(productionJob, /repair-deploy\.sh/);

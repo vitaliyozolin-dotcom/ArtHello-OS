@@ -1,5 +1,10 @@
 # ArtHello OS — Current State
 
+## 2026-09-10 — D135: обнаружение живого School-контейнера, кандидат
+
+- D134 protected run `34537971479` собрал и проверил School image `e8b07ed67601…`, затем остановился до backup/cutover: имя `school-1-11` отсутствует. Atlas step не запускался; живые данные и контейнеры не менялись.
+- D135 выбирает ровно один running container только по `school.system=school-1-11`, требует прежний source `54242340…`, извлекает безопасное Docker name и передаёт его неизменному standalone rollback-controller. Ноль, два контейнера или несовпадение source — stop до мутаций.
+
 ## 2026-09-10 — D134: восстановление выпуска дневников, кандидат
 
 - D133 PR439 и все hosted проверки прошли, exact main `8d39e40df5366309de30e8a70f2a14797c61512a`; protected run `34536320576` остановился на School precondition до Atlas: legacy `repair-deploy.sh` ожидал отсутствующий `/srv/school-1-11/shared/.env`. Atlas, его база и контейнер не менялись.

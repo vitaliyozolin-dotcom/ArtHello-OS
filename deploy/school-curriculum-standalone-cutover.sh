@@ -15,6 +15,7 @@ umask 077
 : "${SCHOOL_ORIGIN:?SCHOOL_ORIGIN is required}"
 : "${ARTHELLO_ORIGIN:?ARTHELLO_ORIGIN is required}"
 : "${JOB_DIR:?JOB_DIR is required}"
+: "${SCHOOL_CONTAINER:?SCHOOL_CONTAINER is required}"
 
 [[ "$RUN_ID" =~ ^[0-9]+$ ]]
 [[ "$RUN_ATTEMPT" =~ ^[0-9]+$ ]]
@@ -29,6 +30,7 @@ test "$SOURCE_ARCHIVE" = "$JOB_DIR/school-release.tar.gz"
 test "$VERIFY_SCRIPT" = "$JOB_DIR/verify-school-release.mjs"
 test "$SCHOOL_ORIGIN" = https://school-188-225-38-55.sslip.io
 test "$ARTHELLO_ORIGIN" = https://arthello-188-225-38-55.sslip.io
+[[ "$SCHOOL_CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]
 
 lock_path=/var/lock/school-1-11-production.lock
 exec 9>>"$lock_path"
@@ -58,7 +60,7 @@ if [ -e "$JOB_DIR/cancel-request" ]; then
   exit 143
 fi
 
-production=school-1-11
+production="$SCHOOL_CONTAINER"
 run_key="${RUN_ID}-${RUN_ATTEMPT}"
 rollback="school-1-11-curriculum-rollback-$run_key"
 preflight="school-1-11-curriculum-preflight-$run_key"
