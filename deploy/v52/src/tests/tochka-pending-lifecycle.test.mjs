@@ -162,6 +162,79 @@ test('terminal failures and disappeared provider jobs are cleared for an explici
   }
 });
 
+test('four disappeared retained jobs are replaced once in the same sync with the original account and window', async () => {
+  for (const missingStatus of [404,410]) {
+    const f=fixture(),bank=provider({readyDelay:0});let state=await acquireTochkaStatementState(f.db,f.scope);
+    for (const [index,accountId] of accountIds.entries()) await state.store.put({...job,accountId},'retained-'+index);
+    await state.release();state=await acquireTochkaStatementState(f.db,f.scope);
+    const requests=[];
+    const request=async (url,init)=>{
+      requests.push({url:String(url),method:init.method,body:init.body});
+      if (String(url).includes('/statements/retained-')) return Response.json({error:'synthetic-private-provider-body'}, {status:missingStatus});
+      return bank.input.request(url,init);
+    };
+    const sync=await syncTochkaReadOnly({...bank.input,request,statementState:state.store});
+    assert.equal(sync.complete,true);assert.equal(sync.valid,true);
+    assert.equal(sync.statements.length,4);assert.equal(sync.transactions.length,4);assert.equal(bank.created(),4);
+    assert.equal(requests.filter(entry=>entry.url.includes('/statements/retained-')).length,4);
+    assert.deepEqual(requests.filter(entry=>entry.method==='POST').map(entry=>JSON.parse(entry.body).Data.Statement),
+      accountIds.map(accountId=>({accountId,startDateTime:job.startDate,endDateTime:job.endDate})));
+    const operations=await Promise.all(sync.transactions.map(transaction=>toTochkaFinancialOperation(transaction,f.scope.legalEntityId)));
+    assert.equal(operations.reduce((sum,operation)=>sum+operation.amountMinor,0),400);
+    // Replaying before commit acknowledgement resumes the new jobs, without another POST.
+    await state.release();state=await acquireTochkaStatementState(f.db,f.scope);
+    const replay=await syncTochkaReadOnly({...bank.input,request,statementState:state.store});
+    assert.equal(replay.complete,true);assert.equal(bank.created(),4);
+    assert.deepEqual(replay.transactions.map(row=>row.id),sync.transactions.map(row=>row.id));
+    assert.doesNotMatch(JSON.stringify(sync),/synthetic-private-provider-body/);
+    await state.release();f.sqlite.close();
+  }
+});
+
+test('a retained statement is never recreated for credential, rate-limit or transient errors', async () => {
+  for (const status of [401,403,429,500,502,503]) {
+    const f=fixture(),bank=provider({readyDelay:0}),state=await acquireTochkaStatementState(f.db,f.scope);
+    await state.store.put(job,'retained-0');let reads=0;
+    const request=async (url,init)=>{
+      if (String(url).includes('/statements/retained-')) {reads++;return Response.json({error:'synthetic-private'}, {status});}
+      return bank.input.request(url,init);
+    };
+    const sync=await syncTochkaReadOnly({...bank.input,request,statementState:state.store});
+    assert.equal(sync.valid,false);assert.equal(bank.created(),0);assert.equal(reads,1);
+    assert.equal(await state.store.get(job),'retained-0');assert.doesNotMatch(sync.reason,/synthetic-private/);
+    await state.release();f.sqlite.close();
+  }
+});
+
+test('a replacement that also disappears fails without a third bank job', async () => {
+  const f=fixture(),bank=provider({readyDelay:0,missingStatus:404}),state=await acquireTochkaStatementState(f.db,f.scope);
+  await state.store.put(job,'retained-0');let reads=0;
+  const request=async (url,init)=>{
+    if (String(url).includes('/statements/')) {reads++;return Response.json({error:'synthetic-private'}, {status:404});}
+    return bank.input.request(url,init);
+  };
+  const sync=await syncTochkaReadOnly({...bank.input,request,statementState:state.store});
+  assert.equal(sync.valid,false);assert.equal(bank.created(),1);assert.equal(reads,2);
+  assert.equal(await state.store.get(job),null);
+  await state.release();f.sqlite.close();
+});
+
+test('credential drift while forgetting a missing retained job prevents replacement', async () => {
+  const f=fixture(),bank=provider({readyDelay:0}),state=await acquireTochkaStatementState(f.db,f.scope);
+  await state.store.put(job,'retained-0');
+  const request=async (url,init)=>{
+    if (String(url).includes('/statements/retained-')) {
+      f.setScope({...f.scope,credentialGeneration:'22222222-2222-4222-8222-222222222222'});
+      return Response.json({error:'synthetic-private'}, {status:410});
+    }
+    return bank.input.request(url,init);
+  };
+  const sync=await syncTochkaReadOnly({...bank.input,request,statementState:state.store});
+  assert.equal(sync.valid,false);assert.equal(bank.created(),0);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM system_runtime_state WHERE state_key LIKE 'tochka-statement-pending:%'").get().count,1);
+  await state.release();f.sqlite.close();
+});
+
 test('restart after UTC midnight resumes the stored date window before moving to the new day', async () => {
   const f=fixture(),bank=provider();let state=await acquireTochkaStatementState(f.db,f.scope);
   await syncTochkaReadOnly({...bank.input,statementState:state.store});await state.release();bank.advance(15000);

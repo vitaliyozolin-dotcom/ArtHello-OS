@@ -360,58 +360,70 @@ export async function syncTochkaReadOnly(input: {
     for (const account of accounts) {
       const statementScope = { accountId: account.accountId, startDate, endDate };
       let initiatedStatementId = await input.statementState?.get(statementScope) ?? '';
-      if (!initiatedStatementId) {
-        const statementBody = JSON.stringify({ Data: { Statement: { accountId: account.accountId, startDateTime: startDate, endDateTime: endDate } } });
-        if (!isAllowedTochkaStatementRequest(TOCHKA_STATEMENTS_URL, 'POST')) return empty('Загрузка заблокирована внутренним ограничением методов');
-        const initResponse = await request(TOCHKA_STATEMENTS_URL, requestInit('POST', statementBody));
-        if (!initResponse.ok) return empty(tochkaReadFailure(initResponse.status, 'выпискам'));
-        const initPayload = await readLimitedJson(initResponse);
-        const initiated = readTochkaStatement(initPayload);
-        const initiatedAccountId = cleanTochkaAccountId(initiated?.accountId ?? initiated?.AccountId);
-        initiatedStatementId = cleanProviderId(String(initiated?.statementId ?? initiated?.StatementId ?? ''));
-        if (!initiated || initiatedAccountId !== account.accountId || !initiatedStatementId) {
-          return empty('Точка не вернула номер созданной выписки');
-        }
-        // Persist before polling: retries and restarted workers resume this exact bank job.
-        await input.statementState?.put(statementScope, initiatedStatementId);
-      }
-
-      const statementUrl = `${TOCHKA_ACCOUNTS_URL}/${account.accountId}/statements/${initiatedStatementId}`;
-      if (!isAllowedTochkaStatementRequest(statementUrl, "GET")) return empty("Чтение выписки заблокировано внутренним ограничением методов");
+      const resumedStatement = Boolean(initiatedStatementId);
       let finalStatement: Record<string, unknown> | null = null;
-      for (let attempt = 0; attempt < 4; attempt += 1) {
-        const response = await request(statementUrl, requestInit("GET"));
-        if (!response.ok) {
-          if (response.status === 404 || response.status === 410) await input.statementState?.forget(statementScope, initiatedStatementId);
-          return empty(tochkaReadFailure(response.status, 'готовой выписке'));
+      // A disappeared retained reference may be replaced once. Fresh requests,
+      // transient failures and permission/rate-limit errors are never retried here.
+      statementJob: for (let jobAttempt = 0; jobAttempt < 2; jobAttempt += 1) {
+        if (!initiatedStatementId) {
+          const statementBody = JSON.stringify({ Data: { Statement: { accountId: account.accountId, startDateTime: startDate, endDateTime: endDate } } });
+          if (!isAllowedTochkaStatementRequest(TOCHKA_STATEMENTS_URL, 'POST')) return empty('Загрузка заблокирована внутренним ограничением методов');
+          const initResponse = await request(TOCHKA_STATEMENTS_URL, requestInit('POST', statementBody));
+          if (!initResponse.ok) return empty(tochkaReadFailure(initResponse.status, 'выпискам'));
+          const initPayload = await readLimitedJson(initResponse);
+          const initiated = readTochkaStatement(initPayload);
+          const initiatedAccountId = cleanTochkaAccountId(initiated?.accountId ?? initiated?.AccountId);
+          initiatedStatementId = cleanProviderId(String(initiated?.statementId ?? initiated?.StatementId ?? ''));
+          if (!initiated || initiatedAccountId !== account.accountId || !initiatedStatementId) {
+            return empty('Точка не вернула номер созданной выписки');
+          }
+          // Persist before polling: retries and restarted workers resume this exact bank job.
+          await input.statementState?.put(statementScope, initiatedStatementId);
         }
-        if (response.status === 202 || response.status === 204) {
+
+        const statementUrl = `${TOCHKA_ACCOUNTS_URL}/${account.accountId}/statements/${initiatedStatementId}`;
+        if (!isAllowedTochkaStatementRequest(statementUrl, "GET")) return empty("Чтение выписки заблокировано внутренним ограничением методов");
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const response = await request(statementUrl, requestInit("GET"));
+          if (!response.ok) {
+            if (response.status === 404 || response.status === 410) {
+              await input.statementState?.forget(statementScope, initiatedStatementId);
+              if (resumedStatement && jobAttempt === 0) {
+                initiatedStatementId = '';
+                continue statementJob;
+              }
+            }
+            return empty(tochkaReadFailure(response.status, 'готовой выписке'));
+          }
+          if (response.status === 202 || response.status === 204) {
+            if (attempt < 3) await wait(400 * (attempt + 1));
+            continue;
+          }
+          const payload = await readLimitedJson(response, 10_000_000);
+          const statement = readTochkaStatement(payload);
+          if (!statement) return empty("Точка вернула некорректную выписку");
+          const returnedAccount = statement.accountId ?? statement.AccountId;
+          const returnedId = statement.statementId ?? statement.StatementId;
+          const returnedStart = statement.startDateTime ?? statement.StartDateTime;
+          const returnedEnd = statement.endDateTime ?? statement.EndDateTime;
+          if ((returnedAccount !== undefined && cleanTochkaAccountId(returnedAccount) !== account.accountId)
+            || (returnedId !== undefined && cleanProviderId(String(returnedId)) !== initiatedStatementId)
+            || (returnedStart !== undefined && cleanIsoDate(returnedStart) !== startDate)
+            || (returnedEnd !== undefined && cleanIsoDate(returnedEnd) !== endDate)) {
+            return empty('Выписка Точки не соответствует запрошенному счёту или периоду');
+          }
+          const status = cleanText(statement.status ?? statement.Status, 40);
+          if (/^(ready|completed)$/i.test(status) || (!status && isCompleteTochkaStatement(statement))) {
+            finalStatement = statement;
+            break;
+          }
+          if (/^(error|failed|rejected)$/i.test(status)) {
+            await input.statementState?.forget(statementScope, initiatedStatementId);
+            return empty('Точка не смогла сформировать выписку. Повторите загрузку для нового запроса.');
+          }
           if (attempt < 3) await wait(400 * (attempt + 1));
-          continue;
         }
-        const payload = await readLimitedJson(response, 10_000_000);
-        const statement = readTochkaStatement(payload);
-        if (!statement) return empty("Точка вернула некорректную выписку");
-        const returnedAccount = statement.accountId ?? statement.AccountId;
-        const returnedId = statement.statementId ?? statement.StatementId;
-        const returnedStart = statement.startDateTime ?? statement.StartDateTime;
-        const returnedEnd = statement.endDateTime ?? statement.EndDateTime;
-        if ((returnedAccount !== undefined && cleanTochkaAccountId(returnedAccount) !== account.accountId)
-          || (returnedId !== undefined && cleanProviderId(String(returnedId)) !== initiatedStatementId)
-          || (returnedStart !== undefined && cleanIsoDate(returnedStart) !== startDate)
-          || (returnedEnd !== undefined && cleanIsoDate(returnedEnd) !== endDate)) {
-          return empty('Выписка Точки не соответствует запрошенному счёту или периоду');
-        }
-        const status = cleanText(statement.status ?? statement.Status, 40);
-        if (/^(ready|completed)$/i.test(status) || (!status && isCompleteTochkaStatement(statement))) {
-          finalStatement = statement;
-          break;
-        }
-        if (/^(error|failed|rejected)$/i.test(status)) {
-          await input.statementState?.forget(statementScope, initiatedStatementId);
-          return empty('Точка не смогла сформировать выписку. Повторите загрузку для нового запроса.');
-        }
-        if (attempt < 3) await wait(400 * (attempt + 1));
+        break;
       }
       if (!finalStatement) {
         complete = false;

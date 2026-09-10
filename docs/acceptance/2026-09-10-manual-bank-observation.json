@@ -1,0 +1,198 @@
+{
+  "kind": "actual-bounded-bank-observation",
+  "source": "ef119bbccce44115a841e920e9d09a1375451e5b",
+  "tree": "c28321dc85929317010dab8517d5bc24328eb6c8",
+  "runId": 34457562818,
+  "runAttempt": 1,
+  "jobId": 102807416646,
+  "liveSource": "4a0713b4a7d87f132e49836fe0ce9ca9258bc1ec",
+  "liveImage": "sha256:0f15a32c9dff9cd7278a1449bd66f282abc514f0392edfd57262ed25ef247a6f",
+  "observedAtUtc": "2026-09-10T08:53:54.807Z",
+  "status": "incomplete_or_issues",
+  "productionMutations": false,
+  "bankWindow": {
+    "state": "observed",
+    "period": {
+      "startDate": "2026-09-01",
+      "endDate": "2026-09-10"
+    },
+    "sync": {
+      "state": "failed",
+      "freshness": "not_requested",
+      "rejectedRows": 0,
+      "errorRows": 1,
+      "conflictRows": 0
+    },
+    "coverage": {
+      "accountRows": 4,
+      "distinctAccountKeys": 4,
+      "legalEntities": 1,
+      "invalidAccountKeys": 0,
+      "accountsWithStatement": 4,
+      "coveredInLatestRun": 0,
+      "accountsWithContainingStatementInLatestRun": 0,
+      "accountsWithMatchingTransactionCount": 0
+    },
+    "transactions": {
+      "rows": 0,
+      "eligibleRows": 0,
+      "incomeRows": 0,
+      "expenseRows": 0,
+      "eligibleMissingLinks": 0,
+      "danglingLinks": 0,
+      "pendingOrNonRub": 0,
+      "unexpectedAccountRows": 0,
+      "incomeAmountMinor": 0,
+      "expenseAmountMinor": 0,
+      "linkedIncomeAmountMinor": 0,
+      "linkedExpenseAmountMinor": 0,
+      "linkedFinancialRows": 0,
+      "financialMismatchRows": 0
+    },
+    "duplicates": {
+      "groups": 0,
+      "excessRows": 0,
+      "missingIdentityRows": 0
+    },
+    "activity": "not_observed",
+    "checksComplete": false
+  },
+  "bankRuntime": {
+    "state": "observed",
+    "observedAtUtc": "2026-09-10T08:53:54.807Z",
+    "setup": {
+      "state": "observed",
+      "startDate": "2026-09-01",
+      "syncIntervalMinutes": 60,
+      "syncMinute": 5
+    },
+    "connection": {
+      "state": "observed",
+      "status": "connection_error",
+      "enabled": false,
+      "nextSyncAtUtc": "2026-09-10T09:35:08.056Z"
+    },
+    "autosync": {
+      "state": "observed",
+      "outcome": "error",
+      "generationMatchesSetup": true,
+      "nextAtUtc": "2026-09-10T10:02:22.834Z",
+      "leasedUntilUtc": null,
+      "leaseState": "released",
+      "failures": 8,
+      "updatedAgeSeconds": 17492,
+      "httpStatus": 500,
+      "httpStatusState": "observed",
+      "updatedAtUtc": "2026-09-10T04:02:22.000Z",
+      "failureStage": "sync_commit",
+      "failureStageState": "observed",
+      "commitFailureKind": null,
+      "commitFailureKindState": "missing"
+    },
+    "statementLease": {
+      "state": "not_observed",
+      "expiresAtUtc": null,
+      "leaseState": "unknown"
+    },
+    "retainedJobs": {
+      "state": "observed",
+      "scopeMatch": "unverified",
+      "providerStatus": "not_stored",
+      "total": 3,
+      "invalidRows": 0,
+      "exactWindowRows": 0,
+      "olderEndRows": 3,
+      "otherWindowRows": 0,
+      "oldestAgeSeconds": 88969
+    },
+    "statementImports": {
+      "state": "observed",
+      "readyRows": 12,
+      "pendingRows": 0,
+      "failedRows": 0,
+      "unknownRows": 0
+    },
+    "latestRun": {
+      "state": "observed",
+      "startedAtUtc": "2026-09-10T08:35:08.056Z",
+      "finishedAtUtc": "2026-09-10T08:35:08.056Z",
+      "status": "error",
+      "failureKind": "statement_read_unclassified"
+    }
+  },
+  "bankCommitSchema": {
+    "state": "observed",
+    "tables": {
+      "bank_accounts": {
+        "state": "observed",
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "matched",
+        "unexpectedRequiredColumns": 0,
+        "foreignKeyRows": 0,
+        "triggerRows": 0,
+        "uniqueIndexCount": 2
+      },
+      "bank_statement_imports": {
+        "state": "observed",
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "matched",
+        "unexpectedRequiredColumns": 0,
+        "foreignKeyRows": 0,
+        "triggerRows": 0,
+        "uniqueIndexCount": 2
+      },
+      "bank_transactions": {
+        "state": "observed",
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "matched",
+        "unexpectedRequiredColumns": 0,
+        "foreignKeyRows": 0,
+        "triggerRows": 0,
+        "uniqueIndexCount": 2
+      },
+      "financial_operations": {
+        "state": "observed",
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "not_required",
+        "unexpectedRequiredColumns": 0,
+        "foreignKeyRows": 0,
+        "triggerRows": 0,
+        "uniqueIndexCount": 1
+      },
+      "integration_sync_runs": {
+        "state": "observed",
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "not_required",
+        "unexpectedRequiredColumns": 0,
+        "foreignKeyRows": 0,
+        "triggerRows": 0,
+        "uniqueIndexCount": 2
+      },
+      "integration_log_entries": {
+        "state": "observed",
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "not_required",
+        "unexpectedRequiredColumns": 0,
+        "foreignKeyRows": 0,
+        "triggerRows": 0,
+        "uniqueIndexCount": 0
+      },
+      "audit_events": {
+        "state": "observed",
+        "missingColumns": [],
+        "primaryKeyMatches": true,
+        "providerIndex": "not_required",
+        "unexpectedRequiredColumns": 0,
+        "foreignKeyRows": 0,
+        "triggerRows": 0,
+        "uniqueIndexCount": 0
+      }
+    }
+  }
+}
