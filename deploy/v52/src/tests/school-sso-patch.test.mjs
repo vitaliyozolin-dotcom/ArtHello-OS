@@ -41,7 +41,7 @@ test("School SSO patch installs once and is a no-op on the second run", () => {
     assert.match(second.stdout, /SCHOOL_SSO_PASSWORD_ACTIONS_RETIRED=0/);
     assert.equal(readFileSync(join(fixture, "app/components/EducationWorkspace.tsx"), "utf8"), afterFirst);
     assert.equal(afterFirst.split("SCHOOL_DIARY_SSO_URL").length - 1, 2);
-    assert.equal(afterFirst.split("Открыть дневник").length - 1, 1);
+    assert.equal(afterFirst.split("Дневник 1–11").length - 1, 1);
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }

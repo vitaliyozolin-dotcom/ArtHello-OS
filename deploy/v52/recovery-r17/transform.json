@@ -4,9 +4,9 @@
   "release": {
     "head": "codex/finance-r17-20260910",
     "mergeMethod": "squash",
-    "parentSha": "01959896a53c98509634514433f9b07f5aa89ac9",
+    "parentSha": "93cb27839584f7f59d2ef5f1f0ecafc5b6bbd682",
     "pr": 412,
-    "prefix": "D109: guarded finance R17"
+    "prefix": "D110: guarded finance R17"
   },
   "operations": [
     {
@@ -18,7 +18,7 @@
     {
       "label": "release_description",
       "before": "# D104: fresh Tochka R16 with unchanged durable schema14/public boundaries.\n# Accepted R15 predecessor and complete R13/R12 backup history are preserved.\n# One reviewed retained-statement recovery; retire only exact unused recoverable R15 browser.\n# No database restore after seal/authentication/public boundaries.\nname: Deploy ArtHello Tochka R16 D104\n",
-      "after": "# D109: fresh finance R17 with unchanged durable schema14/public boundaries.\n# Accepted R16 predecessor and complete R15/R13/R12 backup history are preserved.\n# Reviewed finance articles; retire only exact unused recoverable R16 browser.\n# No database restore after seal/authentication/public boundaries.\nname: Deploy ArtHello Finance R17 D109\n",
+      "after": "# D110: fresh finance R17 with unchanged durable schema14/public boundaries.\n# Accepted R16 predecessor and complete R15/R13/R12 backup history are preserved.\n# Reviewed finance articles; retire only exact unused recoverable R16 browser.\n# No database restore after seal/authentication/public boundaries.\nname: Deploy ArtHello Finance R17 D110\n",
       "count": 1
     },
     {
@@ -36,13 +36,13 @@
     {
       "label": "release_parent",
       "before": "422f32e52b38a8a5b6b942c4ea9d1cef71e15d05",
-      "after": "01959896a53c98509634514433f9b07f5aa89ac9",
+      "after": "93cb27839584f7f59d2ef5f1f0ecafc5b6bbd682",
       "count": 1
     },
     {
       "label": "release_prefix",
       "before": "D104: guarded Tochka R16",
-      "after": "D109: guarded finance R17",
+      "after": "D110: guarded finance R17",
       "count": 1
     },
     {

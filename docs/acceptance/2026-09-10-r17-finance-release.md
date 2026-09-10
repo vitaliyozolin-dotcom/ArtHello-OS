@@ -1,4 +1,4 @@
-# D109 — защищённый выпуск статей и разнесения: подготовка
+# D110 — защищённый выпуск статей и разнесения: подготовка
 
 Поручение Виталия: «Проверяй и выпускай в прод». D108 PR410 уже принят в source fdb93556bf3cff27849a872c3f3bba1ae712364b/tree f37059d94d65211803e29ae9a04aaaa4920a8765. Это не production receipt. Последний принятый production — R16 cb990279e070fddbfa9a0adbd21b56de25b85588, run34461449594 attempt1.
 
@@ -12,7 +12,7 @@
 
 ## Выпуск
 
-Новый R17 adapter подготовлен для PR412, ветка codex/finance-r17-20260910, squash prefix `D109: guarded finance R17`, parent `01959896a53c98509634514433f9b07f5aa89ac9`. 28 counted transformations из byte-identical archived R16 controller, 135 source inputs. Допустимы ровно пять ранее reviewed изменений из frozen 97 inputs D105/D107/D108; остальные guards остаются byte-identical. Новый history consumer проверяет R16 → R15 → R13 → R12 → older. Старый active R16 controller архивируется без изменения bytes; active budget остаётся 14. Новый protected R17 ещё не запускался. Старые R16/15/14 controllers/pins/history не переопределяются и успешные runs не повторяются. Перед merge нужны actual R16 graph/receipts, полный reviewed новый source contract, exact-head CI и отдельный защищённый release с прежними backup/snapshot/seal/auth/current-main/identity/capacity/dual locks. После публичной границы восстановление старой БД запрещено. Проверка новой функции не создаёт выдуманные рабочие статьи и не разносит реальные платежи без утверждённого назначения.
+Новый R17 adapter подготовлен для PR412, ветка codex/finance-r17-20260910, squash prefix `D110: guarded finance R17`, parent `93cb27839584f7f59d2ef5f1f0ecafc5b6bbd682`. 28 counted transformations из byte-identical archived R16 controller, 135 source inputs. Допустимы ровно шесть ранее reviewed изменений из frozen 97 inputs D105/D107/D108; остальные guards остаются byte-identical. Новый history consumer проверяет R16 → R15 → R13 → R12 → older. Старый active R16 controller архивируется без изменения bytes; active budget остаётся 14. Новый protected R17 ещё не запускался. Старые R16/15/14 controllers/pins/history не переопределяются и успешные runs не повторяются. Перед merge нужны actual R16 graph/receipts, полный reviewed новый source contract, exact-head CI и отдельный защищённый release с прежними backup/snapshot/seal/auth/current-main/identity/capacity/dual locks. После публичной границы восстановление старой БД запрещено. Проверка новой функции не создаёт выдуманные рабочие статьи и не разносит реальные платежи без утверждённого назначения.
 
 Критерий завершения: successful R17 receipt + candidate/after-public natural acceptance + сохранённый School/backup/history + подтверждённые финансовые инварианты на bounded read-only наблюдении. Стоимость отдельного запуска неизвестна, новые платные услуги не подключаются. Ответственный — Виталий.
 
@@ -25,3 +25,9 @@ Actual accepted R16 history is recorded in `.github/scripts/fixtures/r17-accepte
 Browser run34481672143 reached the empty finance catalog and the article-name field; it stopped before the first article write. The downloaded synthetic screenshot proves the actual form. Native select locators now use their combobox role and form scope; per-action fixed diagnostics distinguish missing/ambiguous selectors from API status/assertions. This is still pending execution evidence, not a runtime defect claim.
 
 Review also found cleanup was armed before CI namespace-absence checks. Cleanup now becomes active only after all three absence checks; a dynamic fake-Docker test proves each occupied container/volume/network causes no create/remove commands, while a later owned-create failure triggers only the exact CI cleanup. Production cleanup/controller bytes are unaffected.
+
+## Compatible current main
+
+While PR412 was open, independently reviewed PR413 was squash-merged as signed current main93cb27839584f7f59d2ef5f1f0ecafc5b6bbd682/tree6cbf75f5002addf12c3e3a1e6522fb4d1c76c8a7. D109 is occupied by that accepted source decision, so this release decision is D110. Conflicts were limited to DECISIONS, hosted history wrapper and its workflow pins. Both decisions and the full main source changes are preserved. R17's parent is now exact93cb278.
+
+The sixth changed frozen input is main's runtime-server.mjs. Existing D109 evidence proves its entire diff consists of two separate optional Atlas bindings; the wrapper verifies their exact presence and verifies all other runtime bytes against frozen R16. R17 supplies no Atlas secret/configuration and creates no role/session. Existing School entry retains its accessible name and route. No Atlas source was changed in this release preparation; current canonical source plus the full hosted tests and natural School acceptance remain mandatory.

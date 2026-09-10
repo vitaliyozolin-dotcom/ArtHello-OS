@@ -1,8 +1,8 @@
-# D109: fresh finance R17 with unchanged durable schema14/public boundaries.
+# D110: fresh finance R17 with unchanged durable schema14/public boundaries.
 # Accepted R16 predecessor and complete R15/R13/R12 backup history are preserved.
 # Reviewed finance articles; retire only exact unused recoverable R16 browser.
 # No database restore after seal/authentication/public boundaries.
-name: Deploy ArtHello Finance R17 D109
+name: Deploy ArtHello Finance R17 D110
 'on':
   workflow_run:
     workflows:
@@ -24,7 +24,7 @@ env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
   EXPECTED_RELEASE_HEAD: codex/finance-r17-20260910
   EXPECTED_RELEASE_PR: '412'
-  PREVIOUS_RELEASE_SHA: '01959896a53c98509634514433f9b07f5aa89ac9'
+  PREVIOUS_RELEASE_SHA: '93cb27839584f7f59d2ef5f1f0ecafc5b6bbd682'
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -50,7 +50,7 @@ jobs:
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D109: guarded finance R17')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D110: guarded finance R17')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
