@@ -1,0 +1,1252 @@
+{
+  "schemaVersion": 1,
+  "catalogId": "atlas-odds-2023-2026-v1",
+  "approvedBy": "Виталий",
+  "approvedAt": "2026-09-11",
+  "source": {
+    "name": "Атлас ОДДС 01.01.2023-31.01.2026.xlsx",
+    "sha256": "96f03dc6b6b9c0dee391eb9b63cd0f84f27bfc02c924d9d8262ddb34f2b9e71c",
+    "sheets": ["2023", "2024", "2025", "2026"]
+  },
+  "articles": [
+    {
+      "key": "cf-in-school",
+      "name": "Оплата школы",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Школа"]
+    },
+    {
+      "key": "cf-in-kindergarten",
+      "name": "Оплата детского сада",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Сад"]
+    },
+    {
+      "key": "cf-in-subscriptions",
+      "name": "Оплата абонементов",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Абонементы"]
+    },
+    {
+      "key": "cf-in-additional",
+      "name": "Оплата дополнительных занятий",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Доп. услуги"]
+    },
+    {
+      "key": "cf-in-summer",
+      "name": "Оплата летней программы",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["ДБП лето"]
+    },
+    {
+      "key": "cf-in-fees",
+      "name": "Вступительные и ежегодные взносы",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["ДБП", "Ежегодный взнос"]
+    },
+    {
+      "key": "cf-in-materials",
+      "name": "Оплата учебных пособий",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["ДБП пособия", "Пособия"]
+    },
+    {
+      "key": "cf-in-food",
+      "name": "Оплата питания",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Питание в саду", "Поставка питания"]
+    },
+    {
+      "key": "cf-in-uniform",
+      "name": "Оплата школьной формы",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Форма для школы"]
+    },
+    {
+      "key": "cf-in-medical",
+      "name": "Оплата медицинских услуг",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Мед. услуги"]
+    },
+    {
+      "key": "cf-in-attestation",
+      "name": "Оплата аттестации",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Аттестация Ламбери"]
+    },
+    {
+      "key": "cf-in-other-revenue",
+      "name": "Прочая выручка",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Выручка"]
+    },
+    {
+      "key": "cf-in-other-operating",
+      "name": "Прочие операционные поступления",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": [
+        "Внереализационные доходы",
+        "Прочие доходы",
+        "Штрафы, пени (ошибочные)"
+      ]
+    },
+    {
+      "key": "cf-in-supplier-refund",
+      "name": "Возврат от поставщика",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Возврат средств"]
+    },
+    {
+      "key": "cf-in-accountable-refund",
+      "name": "Возврат подотчётных средств",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Выдача подотчетных ср-тв"]
+    },
+    {
+      "key": "cf-in-payment-system",
+      "name": "Поступление через платёжную систему",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Получение ПС"]
+    },
+    {
+      "key": "cf-in-customer-deposit",
+      "name": "Клиентские депозиты и авансы",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Депозиты"]
+    },
+    {
+      "key": "cf-in-owner-contribution",
+      "name": "Вклад собственника",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "financing",
+      "sourceAliases": ["Ввод средств"]
+    },
+    {
+      "key": "cf-in-loan",
+      "name": "Получение займа",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "financing",
+      "sourceAliases": ["Получение займа"]
+    },
+    {
+      "key": "cf-in-credit",
+      "name": "Получение кредита",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "financing",
+      "sourceAliases": ["Получение кредита"]
+    },
+    {
+      "key": "cf-in-loan-repayment",
+      "name": "Возврат выданного займа",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "financing",
+      "sourceAliases": ["Возврат займа"]
+    },
+    {
+      "key": "cf-in-security-deposit",
+      "name": "Возврат обеспечительного депозита",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "investing",
+      "sourceAliases": ["Возврат депозита"]
+    },
+    {
+      "key": "cf-in-own-transfer",
+      "name": "Перевод между своими счетами — поступление",
+      "report": "cashflow",
+      "direction": "Поступление",
+      "group": "internal",
+      "sourceAliases": []
+    },
+
+    {
+      "key": "cf-out-rent",
+      "name": "Аренда помещений",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Аренда"]
+    },
+    {
+      "key": "cf-out-pool-rent",
+      "name": "Аренда бассейна",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Аренда бассейна"]
+    },
+    {
+      "key": "cf-out-attestation",
+      "name": "Расходы на аттестацию",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Аттестация Ламбери"]
+    },
+    {
+      "key": "cf-out-bank",
+      "name": "Банковские комиссии и эквайринг",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Банковское обслуживание"]
+    },
+    {
+      "key": "cf-out-customer-refund",
+      "name": "Возвраты клиентам",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Возврат покупателю", "Возврат средств"]
+    },
+    {
+      "key": "cf-out-payroll",
+      "name": "Оплата труда",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": [
+        "Зарпалата 2-я часть",
+        "Зарплата 2-я часть",
+        "Зарплата оф. часть",
+        "Зарплата оф. часть (+самозанятые)",
+        "Зарплата — персональная строка A",
+        "Зарплата — персональная строка A (расширенная)",
+        "Прочая зарплата",
+        "Зарплата — персональная строка B"
+      ]
+    },
+    {
+      "key": "cf-out-self-employed",
+      "name": "Услуги самозанятых",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": []
+    },
+    {
+      "key": "cf-out-social-contributions",
+      "name": "Страховые взносы",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Взносы в фонды"]
+    },
+    {
+      "key": "cf-out-ndfl",
+      "name": "НДФЛ",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["НДФЛ"]
+    },
+    {
+      "key": "cf-out-usn",
+      "name": "УСН",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["УСН"]
+    },
+    {
+      "key": "cf-out-vat",
+      "name": "НДС",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["НДС"]
+    },
+    {
+      "key": "cf-out-income-tax",
+      "name": "Налог на прибыль",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Налоги на доходы (прибыль)"]
+    },
+    {
+      "key": "cf-out-transport-tax",
+      "name": "Транспортный налог",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Транспортный налог"]
+    },
+    {
+      "key": "cf-out-food",
+      "name": "Продукты питания",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Продукты", "Продукты (кроме кухни)"]
+    },
+    {
+      "key": "cf-out-learning-materials",
+      "name": "Учебные пособия и материалы",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": []
+    },
+    {
+      "key": "cf-out-stationery",
+      "name": "Канцелярские товары",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Канцелярские товары"]
+    },
+    {
+      "key": "cf-out-inventory",
+      "name": "Инвентарь",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Инвентарь"]
+    },
+    {
+      "key": "cf-out-household",
+      "name": "Хозяйственные расходы",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Хоз. Нужды"]
+    },
+    {
+      "key": "cf-out-utilities",
+      "name": "Коммунальные услуги",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Коммунальные услуги"]
+    },
+    {
+      "key": "cf-out-waste",
+      "name": "Вывоз отходов",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Вывоз ТБО"]
+    },
+    {
+      "key": "cf-out-sanitation",
+      "name": "Дезинфекция и санитарная обработка",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Дезинфекция, дезинсекция и пр."]
+    },
+    {
+      "key": "cf-out-security",
+      "name": "Охрана и пожарная сигнализация",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Охрана и пожарная сигнализация"]
+    },
+    {
+      "key": "cf-out-premises-repair",
+      "name": "Ремонт и содержание помещений",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Ремонт и содержание помещений"]
+    },
+    {
+      "key": "cf-out-equipment-service",
+      "name": "Ремонт и обслуживание техники",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Ремонт и обслуживание оргтехники"]
+    },
+    {
+      "key": "cf-out-management-company",
+      "name": "Управляющая компания",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Управляющая компания"]
+    },
+    {
+      "key": "cf-out-communications",
+      "name": "Интернет и связь",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Услуги связи", "Услуги связи и интернет"]
+    },
+    {
+      "key": "cf-out-software",
+      "name": "Программное обеспечение",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Программное обеспечение"]
+    },
+    {
+      "key": "cf-out-marketing",
+      "name": "Маркетинг и реклама",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Маркетинг"]
+    },
+    {
+      "key": "cf-out-recruitment",
+      "name": "Найм персонала",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Найм персонала"]
+    },
+    {
+      "key": "cf-out-medical-exams",
+      "name": "Медосмотры",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Медосмотр"]
+    },
+    {
+      "key": "cf-out-dms",
+      "name": "ДМС",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["ДМС"]
+    },
+    {
+      "key": "cf-out-consulting",
+      "name": "Консультационные и профессиональные услуги",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Информационно-консультационные услуги"]
+    },
+    {
+      "key": "cf-out-events",
+      "name": "Организация мероприятий",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Расходы на организацию мероприятий"]
+    },
+    {
+      "key": "cf-out-trips",
+      "name": "Выезды и театры",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Выезды", "Выезды/театры"]
+    },
+    {
+      "key": "cf-out-medical-services",
+      "name": "Медицинские услуги — расходы",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Мед. услуги"]
+    },
+    {
+      "key": "cf-out-uniform",
+      "name": "Пошив одежды и школьная форма",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Пошив одежды", "Форма для школы"]
+    },
+    {
+      "key": "cf-out-additional",
+      "name": "Дополнительные товары и услуги",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Доп. услуги", "Дополнительные товары/услуги"]
+    },
+    {
+      "key": "cf-out-licenses",
+      "name": "Лицензии",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Расходы на лицензию"]
+    },
+    {
+      "key": "cf-out-fuel",
+      "name": "ГСМ",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["ГСМ"]
+    },
+    {
+      "key": "cf-out-staff-transport",
+      "name": "Перевозка персонала",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Перевозка персонала"]
+    },
+    {
+      "key": "cf-out-vehicle-service",
+      "name": "Ремонт и обслуживание транспорта",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Ремонт, ТО, транспондер"]
+    },
+    {
+      "key": "cf-out-delivery",
+      "name": "Доставка и транспортировка",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Транспортировка, доставка"]
+    },
+    {
+      "key": "cf-out-interest",
+      "name": "Проценты по кредитам и займам",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Проценты по кредиту"]
+    },
+    {
+      "key": "cf-out-leasing",
+      "name": "Лизинговые платежи",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Лизинг"]
+    },
+    {
+      "key": "cf-out-charity",
+      "name": "Благотворительность",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Благотворительность"]
+    },
+    {
+      "key": "cf-out-fines",
+      "name": "Штрафы, пени и взыскания",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Штрафы/пени/взыскания"]
+    },
+    {
+      "key": "cf-out-office",
+      "name": "Офисные расходы",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Офисные расходы"]
+    },
+    {
+      "key": "cf-out-other",
+      "name": "Прочие операционные расходы",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Прочие корп. расходы", "Прочие расходы"]
+    },
+    {
+      "key": "cf-out-school-other",
+      "name": "Прочие расходы школы",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Расходы на школу"]
+    },
+    {
+      "key": "cf-out-accountable",
+      "name": "Выдача подотчётных средств",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": []
+    },
+    {
+      "key": "cf-out-principal",
+      "name": "Погашение основного долга",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "financing",
+      "sourceAliases": ["Выплата тела кредита"]
+    },
+    {
+      "key": "cf-out-loan-issued",
+      "name": "Выдача займа",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "financing",
+      "sourceAliases": ["Выдача займа"]
+    },
+    {
+      "key": "cf-out-loan-return",
+      "name": "Возврат займа",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "financing",
+      "sourceAliases": ["Возврат займа"]
+    },
+    {
+      "key": "cf-out-dividends",
+      "name": "Дивиденды",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "financing",
+      "sourceAliases": ["Дивиденды — персональная строка A", "Дивиденды — персональная строка B"]
+    },
+    {
+      "key": "cf-out-owner",
+      "name": "Выплаты собственникам",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "financing",
+      "sourceAliases": ["Вывод прибыли", "Комиссия собственника"]
+    },
+    {
+      "key": "cf-out-old-obligations",
+      "name": "Погашение старых обязательств",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "financing",
+      "sourceAliases": ["Долги после закрытия филиалов"]
+    },
+    {
+      "key": "cf-out-security-deposit",
+      "name": "Обеспечительные депозиты",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "investing",
+      "sourceAliases": []
+    },
+    {
+      "key": "cf-out-equipment",
+      "name": "Покупка оборудования",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "investing",
+      "sourceAliases": []
+    },
+    {
+      "key": "cf-out-capex",
+      "name": "Капитальные улучшения",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "investing",
+      "sourceAliases": []
+    },
+    {
+      "key": "cf-out-own-transfer",
+      "name": "Перевод между своими счетами — списание",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "internal",
+      "sourceAliases": []
+    },
+    {
+      "key": "cf-out-cash-collection",
+      "name": "Инкассация",
+      "report": "cashflow",
+      "direction": "Списание",
+      "group": "internal",
+      "sourceAliases": ["Инкассация расход"]
+    },
+
+    {
+      "key": "pl-in-school",
+      "name": "Выручка школы",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Школа"]
+    },
+    {
+      "key": "pl-in-kindergarten",
+      "name": "Выручка детского сада",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Сад"]
+    },
+    {
+      "key": "pl-in-subscriptions",
+      "name": "Выручка от абонементов",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Абонементы"]
+    },
+    {
+      "key": "pl-in-additional",
+      "name": "Выручка дополнительных занятий",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Доп. услуги"]
+    },
+    {
+      "key": "pl-in-summer",
+      "name": "Выручка летней программы",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["ДБП лето"]
+    },
+    {
+      "key": "pl-in-fees",
+      "name": "Вступительные и ежегодные взносы",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["ДБП", "Ежегодный взнос"]
+    },
+    {
+      "key": "pl-in-materials",
+      "name": "Выручка от учебных пособий",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["ДБП пособия", "Пособия"]
+    },
+    {
+      "key": "pl-in-food",
+      "name": "Выручка от питания",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Питание в саду", "Поставка питания"]
+    },
+    {
+      "key": "pl-in-uniform",
+      "name": "Выручка от школьной формы",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Форма для школы"]
+    },
+    {
+      "key": "pl-in-medical",
+      "name": "Выручка от медицинских услуг",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Мед. услуги"]
+    },
+    {
+      "key": "pl-in-attestation",
+      "name": "Выручка от аттестации",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Аттестация Ламбери"]
+    },
+    {
+      "key": "pl-in-other-revenue",
+      "name": "Прочая выручка",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Выручка"]
+    },
+    {
+      "key": "pl-in-other",
+      "name": "Прочие доходы",
+      "report": "pnl",
+      "direction": "Поступление",
+      "group": "operating",
+      "sourceAliases": ["Внереализационные доходы", "Прочие доходы"]
+    },
+
+    {
+      "key": "pl-out-rent",
+      "name": "Аренда помещений",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Аренда"]
+    },
+    {
+      "key": "pl-out-pool-rent",
+      "name": "Аренда бассейна",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Аренда бассейна"]
+    },
+    {
+      "key": "pl-out-attestation",
+      "name": "Аттестация",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Аттестация Ламбери"]
+    },
+    {
+      "key": "pl-out-bank",
+      "name": "Банковские расходы",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Банковское обслуживание"]
+    },
+    {
+      "key": "pl-out-payroll",
+      "name": "Оплата труда",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": [
+        "Зарпалата 2-я часть",
+        "Зарплата 2-я часть",
+        "Зарплата оф. часть",
+        "Зарплата оф. часть (+самозанятые)",
+        "Зарплата — персональная строка A",
+        "Зарплата — персональная строка A (расширенная)",
+        "Прочая зарплата",
+        "Зарплата — персональная строка B"
+      ]
+    },
+    {
+      "key": "pl-out-self-employed",
+      "name": "Услуги самозанятых",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": []
+    },
+    {
+      "key": "pl-out-social-contributions",
+      "name": "Страховые взносы",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Взносы в фонды"]
+    },
+    {
+      "key": "pl-out-food",
+      "name": "Продукты питания",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Продукты", "Продукты (кроме кухни)"]
+    },
+    {
+      "key": "pl-out-learning-materials",
+      "name": "Учебные пособия и материалы",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": []
+    },
+    {
+      "key": "pl-out-stationery",
+      "name": "Канцелярские товары",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Канцелярские товары"]
+    },
+    {
+      "key": "pl-out-inventory",
+      "name": "Инвентарь и малоценное оборудование",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Инвентарь"]
+    },
+    {
+      "key": "pl-out-household",
+      "name": "Хозяйственные расходы",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Хоз. Нужды"]
+    },
+    {
+      "key": "pl-out-utilities",
+      "name": "Коммунальные услуги",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Коммунальные услуги"]
+    },
+    {
+      "key": "pl-out-waste",
+      "name": "Вывоз отходов",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Вывоз ТБО"]
+    },
+    {
+      "key": "pl-out-sanitation",
+      "name": "Дезинфекция и санитарная обработка",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Дезинфекция, дезинсекция и пр."]
+    },
+    {
+      "key": "pl-out-security",
+      "name": "Охрана и пожарная сигнализация",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Охрана и пожарная сигнализация"]
+    },
+    {
+      "key": "pl-out-premises-repair",
+      "name": "Ремонт и содержание помещений",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Ремонт и содержание помещений"]
+    },
+    {
+      "key": "pl-out-equipment-service",
+      "name": "Ремонт и обслуживание техники",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Ремонт и обслуживание оргтехники"]
+    },
+    {
+      "key": "pl-out-management-company",
+      "name": "Управляющая компания",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Управляющая компания"]
+    },
+    {
+      "key": "pl-out-communications",
+      "name": "Интернет и связь",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Услуги связи", "Услуги связи и интернет"]
+    },
+    {
+      "key": "pl-out-software",
+      "name": "Программное обеспечение",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Программное обеспечение"]
+    },
+    {
+      "key": "pl-out-marketing",
+      "name": "Маркетинг и реклама",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Маркетинг"]
+    },
+    {
+      "key": "pl-out-recruitment",
+      "name": "Найм персонала",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Найм персонала"]
+    },
+    {
+      "key": "pl-out-medical-exams",
+      "name": "Медосмотры",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Медосмотр"]
+    },
+    {
+      "key": "pl-out-dms",
+      "name": "ДМС",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["ДМС"]
+    },
+    {
+      "key": "pl-out-consulting",
+      "name": "Консультационные и профессиональные услуги",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Информационно-консультационные услуги"]
+    },
+    {
+      "key": "pl-out-events",
+      "name": "Организация мероприятий",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Расходы на организацию мероприятий"]
+    },
+    {
+      "key": "pl-out-trips",
+      "name": "Выезды и театры",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Выезды", "Выезды/театры"]
+    },
+    {
+      "key": "pl-out-medical-services",
+      "name": "Медицинские услуги",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Мед. услуги"]
+    },
+    {
+      "key": "pl-out-uniform",
+      "name": "Пошив одежды и школьная форма",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Пошив одежды", "Форма для школы"]
+    },
+    {
+      "key": "pl-out-additional",
+      "name": "Дополнительные товары и услуги",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Доп. услуги", "Дополнительные товары/услуги"]
+    },
+    {
+      "key": "pl-out-licenses",
+      "name": "Лицензии",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Расходы на лицензию"]
+    },
+    {
+      "key": "pl-out-fuel",
+      "name": "ГСМ",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["ГСМ"]
+    },
+    {
+      "key": "pl-out-staff-transport",
+      "name": "Перевозка персонала",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Перевозка персонала"]
+    },
+    {
+      "key": "pl-out-vehicle-service",
+      "name": "Ремонт и обслуживание транспорта",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Ремонт, ТО, транспондер"]
+    },
+    {
+      "key": "pl-out-delivery",
+      "name": "Доставка и транспортировка",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Транспортировка, доставка"]
+    },
+    {
+      "key": "pl-out-interest",
+      "name": "Проценты по кредитам и займам",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Проценты по кредиту"]
+    },
+    {
+      "key": "pl-out-leasing",
+      "name": "Лизинговые расходы",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Лизинг"]
+    },
+    {
+      "key": "pl-out-charity",
+      "name": "Благотворительность",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Благотворительность"]
+    },
+    {
+      "key": "pl-out-fines",
+      "name": "Штрафы, пени и взыскания",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Штрафы/пени/взыскания"]
+    },
+    {
+      "key": "pl-out-office",
+      "name": "Офисные расходы",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Офисные расходы"]
+    },
+    {
+      "key": "pl-out-other",
+      "name": "Прочие операционные расходы",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Прочие корп. расходы", "Прочие расходы"]
+    },
+    {
+      "key": "pl-out-school-other",
+      "name": "Прочие расходы школы",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Расходы на школу"]
+    },
+    {
+      "key": "pl-out-usn",
+      "name": "Налоги при УСН",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["УСН"]
+    },
+    {
+      "key": "pl-out-vat",
+      "name": "НДС",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["НДС"]
+    },
+    {
+      "key": "pl-out-income-tax",
+      "name": "Налог на прибыль",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Налоги на доходы (прибыль)"]
+    },
+    {
+      "key": "pl-out-transport-tax",
+      "name": "Транспортный налог",
+      "report": "pnl",
+      "direction": "Списание",
+      "group": "operating",
+      "sourceAliases": ["Транспортный налог"]
+    }
+  ],
+  "excludedSourceRows": [
+    {
+      "direction": "Поступление",
+      "name": "ДС/РЦ",
+      "reason": "Итоговая группа источника"
+    },
+    {
+      "direction": "Поступление",
+      "name": "Финансовая деятельность",
+      "reason": "Итоговая группа источника"
+    },
+    {
+      "direction": "Поступление",
+      "name": "Неразнесенное поступление",
+      "reason": "Система показывает такие операции как «Без статьи»"
+    },
+    {
+      "direction": "Списание",
+      "name": "Дивиденды",
+      "reason": "Итоговая группа источника"
+    },
+    {
+      "direction": "Списание",
+      "name": "Зарплата",
+      "reason": "Итоговая группа источника"
+    },
+    {
+      "direction": "Списание",
+      "name": "Налоги за сотрудников",
+      "reason": "Итоговая группа источника"
+    },
+    {
+      "direction": "Списание",
+      "name": "Расходы на содержание и оформление ДС / ЦР",
+      "reason": "Итоговая группа источника"
+    },
+    {
+      "direction": "Списание",
+      "name": "Расходы на содержание и оформление ДС/ЦР",
+      "reason": "Дубликат итоговой группы источника"
+    },
+    {
+      "direction": "Списание",
+      "name": "Расходы по деятельности",
+      "reason": "Итоговая группа источника"
+    },
+    {
+      "direction": "Списание",
+      "name": "Транспортные расходы",
+      "reason": "Итоговая группа источника"
+    },
+    {
+      "direction": "Списание",
+      "name": "Финансовая деятельность",
+      "reason": "Итоговая группа источника"
+    },
+    {
+      "direction": "Списание",
+      "name": "Неразнесенное списание",
+      "reason": "Система показывает такие операции как «Без статьи»"
+    }
+  ]
+}
