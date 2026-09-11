@@ -9,8 +9,9 @@ import { eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 import { sha256Hex } from "@workspace/shared/sha256";
 import {
-  authenticateWebsiteWebhook,
+  authenticateWebsiteWebhookWithKeys,
   type WebhookReplayStore,
+  websiteWebhookKeyring,
 } from "../lib/webhooks/webhook-auth.js";
 import {
   canonicalWebsiteLeadPayload,
@@ -125,13 +126,15 @@ webhooksRouter.post(
     const toleranceSeconds = Number(
       process.env.WEBSITE_WEBHOOK_MAX_SKEW_SECONDS,
     );
-    const authentication = await authenticateWebsiteWebhook({
-      secret: process.env.WEBSITE_WEBHOOK_HMAC_SECRET,
+    const rawBody = Buffer.isBuffer(req.body) ? req.body : undefined;
+    const authentication = await authenticateWebsiteWebhookWithKeys({
+      keys: websiteWebhookKeyring(process.env),
+      keyId: req.header("x-arthello-key-id")?.trim(),
       toleranceSeconds,
       signature: req.header("x-arthello-signature")?.trim(),
       timestamp: req.header("x-arthello-timestamp")?.trim(),
       eventId: req.header("x-arthello-event-id")?.trim(),
-      rawBody: req.rawBody,
+      rawBody,
       nowSeconds: Math.floor(Date.now() / 1000),
       store: webhookReplayStore,
     });
@@ -145,6 +148,22 @@ webhooksRouter.post(
     }
     if (authentication.status === "conflict") {
       res.status(409).json({ error: "Webhook event conflict" });
+      return;
+    }
+
+    let parsedBody: unknown;
+    try {
+      parsedBody = JSON.parse(rawBody?.toString("utf8") ?? "");
+    } catch {
+      res.status(400).json({ error: "A valid JSON body is required" });
+      return;
+    }
+    if (
+      !parsedBody ||
+      typeof parsedBody !== "object" ||
+      Array.isArray(parsedBody)
+    ) {
+      res.status(400).json({ error: "A JSON object body is required" });
       return;
     }
 
@@ -162,7 +181,7 @@ webhooksRouter.post(
     }
 
     const canonicalPayload = canonicalWebsiteLeadPayload(
-      req.body as Record<string, unknown>,
+      parsedBody as Record<string, unknown>,
     );
     const { name, phone, email } = canonicalPayload;
 

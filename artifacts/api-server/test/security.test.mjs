@@ -29,6 +29,11 @@ const websiteLeadService = await import(
 const webhookAuth = await import(
   pathToFileURL(path.join(artifactDir, "src/lib/webhooks/webhook-auth.ts")).href
 );
+const requestCorrelation = await import(
+  pathToFileURL(
+    path.join(artifactDir, "src/lib/security/request-correlation.ts"),
+  ).href
+);
 const connectorHealthSanitizer = await import(
   pathToFileURL(path.join(artifactDir, "src/lib/banking/sanitize-health.ts"))
     .href
@@ -155,45 +160,63 @@ test("website webhook boundary fails closed for configuration, authentication, r
   const claimingStore = { async claim() {} };
 
   assert.equal(
-    (await webhookAuth.authenticateWebsiteWebhook({
-      ...base,
-      secret: undefined,
-      signature,
-      store: claimingStore,
-    })).status,
+    (
+      await webhookAuth.authenticateWebsiteWebhook({
+        ...base,
+        secret: undefined,
+        signature,
+        store: claimingStore,
+      })
+    ).status,
     "unavailable",
   );
   assert.equal(
-    (await webhookAuth.authenticateWebsiteWebhook({
-      ...base,
-      signature: "v1=" + "0".repeat(64),
-      store: claimingStore,
-    })).status,
+    (
+      await webhookAuth.authenticateWebsiteWebhook({
+        ...base,
+        signature: "v1=" + "0".repeat(64),
+        store: claimingStore,
+      })
+    ).status,
     "unauthorized",
   );
   assert.equal(
-    (await webhookAuth.authenticateWebsiteWebhook({
-      ...base,
-      timestamp: "1789084700",
-      signature,
-      store: claimingStore,
-    })).status,
+    (
+      await webhookAuth.authenticateWebsiteWebhook({
+        ...base,
+        timestamp: "1789084700",
+        signature,
+        store: claimingStore,
+      })
+    ).status,
     "unauthorized",
   );
   assert.equal(
-    (await webhookAuth.authenticateWebsiteWebhook({
-      ...base,
-      signature,
-      store: { async claim() { return "b".repeat(64); } },
-    })).status,
+    (
+      await webhookAuth.authenticateWebsiteWebhook({
+        ...base,
+        signature,
+        store: {
+          async claim() {
+            return "b".repeat(64);
+          },
+        },
+      })
+    ).status,
     "conflict",
   );
   assert.equal(
-    (await webhookAuth.authenticateWebsiteWebhook({
-      ...base,
-      signature,
-      store: { async claim() { throw new Error("database unavailable"); } },
-    })).status,
+    (
+      await webhookAuth.authenticateWebsiteWebhook({
+        ...base,
+        signature,
+        store: {
+          async claim() {
+            throw new Error("database unavailable");
+          },
+        },
+      })
+    ).status,
     "unavailable",
   );
   assert.deepEqual(
@@ -204,6 +227,103 @@ test("website webhook boundary fails closed for configuration, authentication, r
     }),
     { status: "accepted", duplicate: false },
   );
+});
+
+test("website webhook key rotation selects only an explicit current or previous key", async () => {
+  const rawBody = Buffer.from('{"name":"Synthetic rotation"}');
+  const common = {
+    timestamp: "1789084800",
+    eventId: "evt_rotation_001",
+    rawBody,
+    nowSeconds: 1789084820,
+    toleranceSeconds: 60,
+    store: { async claim() {} },
+  };
+  const keys = new Map([
+    ["key-current", "synthetic-current-secret"],
+    ["key-previous", "synthetic-previous-secret"],
+  ]);
+  for (const keyId of keys.keys()) {
+    const signature = webhookAuth.signWebsiteWebhook({
+      ...common,
+      secret: keys.get(keyId),
+    });
+    assert.deepEqual(
+      await webhookAuth.authenticateWebsiteWebhookWithKeys({
+        ...common,
+        keyId,
+        keys,
+        signature,
+      }),
+      { status: "accepted", duplicate: false },
+    );
+  }
+  assert.equal(
+    (
+      await webhookAuth.authenticateWebsiteWebhookWithKeys({
+        ...common,
+        keyId: "key-unknown",
+        keys,
+        signature: "v1=" + "0".repeat(64),
+      })
+    ).status,
+    "unauthorized",
+  );
+  assert.equal(
+    (
+      await webhookAuth.authenticateWebsiteWebhookWithKeys({
+        ...common,
+        keyId: "key-current",
+        keys: new Map(),
+        signature: "v1=" + "0".repeat(64),
+      })
+    ).status,
+    "unavailable",
+  );
+});
+
+test("website webhook keyring rejects partial and duplicate rotation configuration", () => {
+  assert.equal(
+    webhookAuth.websiteWebhookKeyring({
+      WEBSITE_WEBHOOK_PREVIOUS_KEY_ID: "previous",
+      WEBSITE_WEBHOOK_PREVIOUS_SECRET: "previous-secret",
+    }).size,
+    0,
+  );
+  assert.equal(
+    webhookAuth.websiteWebhookKeyring({
+      WEBSITE_WEBHOOK_CURRENT_KEY_ID: "same",
+      WEBSITE_WEBHOOK_CURRENT_SECRET: "current-secret",
+      WEBSITE_WEBHOOK_PREVIOUS_KEY_ID: "same",
+      WEBSITE_WEBHOOK_PREVIOUS_SECRET: "previous-secret",
+    }).size,
+    0,
+  );
+  assert.equal(
+    webhookAuth.websiteWebhookKeyring({
+      WEBSITE_WEBHOOK_CURRENT_KEY_ID: "current",
+      WEBSITE_WEBHOOK_CURRENT_SECRET: "current-secret",
+    }).size,
+    1,
+  );
+});
+
+test("request correlation exposes the sanitized logger request ID", () => {
+  const headers = new Map();
+  let nextCalled = false;
+  requestCorrelation.exposeRequestId(
+    { id: "synthetic-request-001" },
+    {
+      setHeader(name, value) {
+        headers.set(name, value);
+      },
+    },
+    () => {
+      nextCalled = true;
+    },
+  );
+  assert.equal(headers.get("X-Request-Id"), "synthetic-request-001");
+  assert.equal(nextCalled, true);
 });
 
 test("owner keeps full authenticated access", () => {
@@ -384,7 +504,7 @@ test("legacy sync and unauthenticated provider callbacks stay fail closed", asyn
     "utf8",
   );
   assert.match(webhookRoute, /authenticateWebsiteWebhook/);
-  assert.match(webhookRoute, /WEBSITE_WEBHOOK_HMAC_SECRET/);
+  assert.match(webhookRoute, /websiteWebhookKeyring/);
   assert.match(webhookRoute, /status\(503\)/);
 });
 

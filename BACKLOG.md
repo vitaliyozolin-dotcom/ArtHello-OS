@@ -3,8 +3,8 @@
 ## A.4 — sandbox ingestion и банковский OAuth
 
 - [x] `A4-13-01`: append-only raw + отдельные observations + обязательные raw/batch FK реализованы в migration `0014`; финальный Reviewer PASS и exact-head Quality `34517730899` зафиксированы 2026-09-11.
-- [~] `A4-13-02`: completed-scope reconciliation, current/stale, lead→student и stale family evidence реализованы; partial scope не tombstone-ит. Закрыть только после финального Reviewer/Coordinator.
-- [~] `A4-13-03`: `pageSize`, repeated-page fail, max guard, transport failure и idempotent retry покрыты PGlite tests. Закрыть только после финального Reviewer/Coordinator.
+- [~] `A4-13-02`: completed-scope reconciliation, current/stale, lead→student и stale family evidence реализованы; partial scope не tombstone-ит. Reviewer PASS: `docs/reviews/2026-09-11-a4-lifecycle-pagination.md`; остаётся финальный Coordinator.
+- [~] `A4-13-03`: `pageSize`, repeated-page fail, max guard, transport failure и idempotent retry покрыты PGlite tests. Reviewer PASS: `docs/reviews/2026-09-11-a4-lifecycle-pagination.md`; остаётся финальный Coordinator.
 - [x] `QA-A4-02`: exact candidate `c8759ff213c72fd50763eb96afce68d93d2e67d7` с migration `0014` прошёл агрегат с `test:postgres` на PostgreSQL 16 в Quality `34517730899`.
 - [x] Создать отдельную PostgreSQL-совместимую sandbox-БД вне source checkout.
 - [x] Добавить migration `0011` для raw imports, CRM normalized records, owner-confirmed master data и payroll evidence; подготовить rollback companion.
@@ -63,8 +63,8 @@
 - [x] Удалить hardcoded AlfaCRM tenant fallback и останавливать клиент без `ALFACRM_DOMAIN`.
 - [x] Реализовать encrypted vault для bank connector config; legacy rows требуют guarded sandbox migration после backup.
 - [~] Structured logs и public 5xx responses очищаются централизованно; legacy `/sync` API fail closed, но недоступный исторический code ещё требует замены/удаления.
-- [x] Спроектировать аутентификацию website, bank и Evotor callbacks: raw-body verification, provider-specific auth, durable replay/idempotency, key rotation и fail-closed acceptance закреплены в `docs/security/webhook-authentication.md`; runtime остаётся закрыт до реализации адаптеров.
-- [x] Website lead handler использует payload-bound idempotency key, atomic transaction, advisory lock, `409` conflict и recovery raw-only partial write; public exposure всё ещё запрещён.
+- [x] Спроектировать аутентификацию website, bank и Evotor callbacks: контракт закреплён в `docs/security/webhook-authentication.md`; website adapter реализован, bank/Evotor остаются закрыты до provider-specific adapters.
+- [x] Website lead handler public только через exact raw-body HMAC, explicit current/previous key ID и durable replay claim; payload-bound transaction, `409` conflict и raw-only recovery сохранены.
 - [x] Заменить in-memory bearer sessions на PostgreSQL session model с secure HttpOnly cookie и CSRF-защитой в исходниках.
 - [x] Ввести role RBAC и обязательные branch/legal-entity scope metadata.
 - [x] Fail closed все non-owner business routes до handler-level predicates.
@@ -77,7 +77,7 @@
 - [x] Доказать fail-closed startup реальной контролируемой ошибкой PostgreSQL в одноразовом CI sandbox.
 - [x] Заменить AlfaCRM timestamp limiter на сериализованную очередь и доказать интервал 260 ms конкурентным unit-тестом.
 - [x] Добавлены unit/source regression tests для website transaction rollback/retry/recovery/conflict, schema inventory, strict health allowlist и identifier-safe audit templates.
-- [~] Negative role/scope/security regression tests расширены; остаются provider replay и restored-sandbox failure tests.
+- [~] Negative role/scope/security regression tests расширены; website replay/key rotation/storage outage покрыты, остаются bank/Evotor provider adapters и restored-sandbox failure tests.
 - [~] Историческая `/sync` debug/probe поверхность заблокирована централизованно; недоступный code удалить после проектирования безопасной замены.
 
 ## P0 — read-only аудит данных
@@ -96,7 +96,7 @@
 
 - [x] CI workflow с typecheck, build, unit и PostgreSQL 16 integration/migration tests выполнен на историческом v10 run #8; candidate дополнительно публикует immutable provenance artifact.
 - [ ] Добавить health/readiness checks для БД и каждой интеграции.
-- [~] Введены recursive redaction и access audit; allowed route подтверждён в PostgreSQL, остаются deny/outage smoke, retention и correlation ID.
+- [~] Введены recursive redaction, access audit и безопасный `X-Request-Id`; allowed route подтверждён в PostgreSQL, остаются deny/outage smoke и retention.
 - [ ] Зафиксировать RPO/RTO и проверить восстановление из backup.
 - [x] Tracked build metadata отсутствует; `.wrangler/` игнорируется, а `tsconfig.tsbuildinfo`/`.wrangler` исключены из canonical School identity явным verifier contract и regression-тестом D107.
 
@@ -132,7 +132,6 @@
 - [ ] Утвердить конкретные названия статей владельцем; до этого пустой справочник/черновики, без массового присвоения.
 - [ ] После приёмки ручного разнесения отдельно реализовать сохраняемые правила с предпросмотром, конфликтами, приоритетом и управляемым применением. Текущий подбор ничего не записывает.
 
-
 ## Атлас — выпуск и приёмка D109
 
 - [x] Отдельный пустой дневник по шаблону «1–11», календарь, расписание, XLSX КТП, журнал/посещаемость, предпросмотр родителя; локальная приёмка.
@@ -141,6 +140,7 @@
 - [ ] Проверить точные учётные записи руководителей Атласа и назначить согласованные полномочия школы.
 - [ ] Подключить центральную проекцию только семей/классов Атласа и принять полный реальный сценарий.
 - [ ] Отдельный раздел всех предложений и ошибок; исходная форма «Разработчикам» сохраняется.
+
 ## D123 — следующий финансовый проход
 
 - [x] Зафиксировать три юрлица и пять отдельных филиалов без объединения Атласа.

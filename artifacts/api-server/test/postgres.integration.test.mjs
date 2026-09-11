@@ -78,6 +78,10 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
   const changedOwnerPassword = "PostgresOwnerChanged2026";
   process.env.ALFACRM_DOMAIN = "sandbox.invalid";
   process.env.PORT = "41991";
+  process.env.WEBSITE_WEBHOOK_CURRENT_KEY_ID = "postgres-current";
+  process.env.WEBSITE_WEBHOOK_CURRENT_SECRET =
+    "synthetic-postgres-webhook-secret";
+  process.env.WEBSITE_WEBHOOK_MAX_SKEW_SECONDS = "60";
 
   const databaseModule = await import("@workspace/db");
   const { db, pool } = databaseModule;
@@ -128,6 +132,60 @@ test("PostgreSQL 16 migration, auth, audit, webhook transaction, and rollback ga
     const address = server.address();
     assert.ok(address && typeof address === "object");
     const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const { signWebsiteWebhook } = await import(
+      pathToFileURL(resolve(artifactDir, "src/lib/webhooks/webhook-auth.ts"))
+        .href
+    );
+    const websiteEventId = "postgres-http-event-0001";
+    const websiteTimestamp = String(Math.floor(Date.now() / 1000));
+    const websiteBody = JSON.stringify({
+      name: "Обезличенный HTTP тест",
+      source: "sandbox",
+    });
+    const websiteHeaders = {
+      "content-type": "application/json",
+      "idempotency-key": "postgres-http-lead-0001",
+      "x-arthello-key-id": "postgres-current",
+      "x-arthello-event-id": websiteEventId,
+      "x-arthello-timestamp": websiteTimestamp,
+      "x-arthello-signature": signWebsiteWebhook({
+        secret: process.env.WEBSITE_WEBHOOK_CURRENT_SECRET,
+        timestamp: websiteTimestamp,
+        eventId: websiteEventId,
+        rawBody: Buffer.from(websiteBody),
+      }),
+    };
+    const websiteAccepted = await fetch(
+      `${baseUrl}/api/webhooks/website-lead`,
+      { method: "POST", headers: websiteHeaders, body: websiteBody },
+    );
+    assert.equal(websiteAccepted.status, 200);
+    assert.equal((await websiteAccepted.json()).duplicate, false);
+    const websiteDuplicate = await fetch(
+      `${baseUrl}/api/webhooks/website-lead`,
+      { method: "POST", headers: websiteHeaders, body: websiteBody },
+    );
+    assert.equal(websiteDuplicate.status, 200);
+    assert.equal((await websiteDuplicate.json()).duplicate, true);
+    const conflictingBody = JSON.stringify({ name: "Changed synthetic" });
+    const websiteConflict = await fetch(
+      `${baseUrl}/api/webhooks/website-lead`,
+      {
+        method: "POST",
+        headers: {
+          ...websiteHeaders,
+          "x-arthello-signature": signWebsiteWebhook({
+            secret: process.env.WEBSITE_WEBHOOK_CURRENT_SECRET,
+            timestamp: websiteTimestamp,
+            eventId: websiteEventId,
+            rawBody: Buffer.from(conflictingBody),
+          }),
+        },
+        body: conflictingBody,
+      },
+    );
+    assert.equal(websiteConflict.status, 409);
 
     const firstLogin = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",

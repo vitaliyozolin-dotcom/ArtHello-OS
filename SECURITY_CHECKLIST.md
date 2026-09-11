@@ -96,7 +96,7 @@
 - [x] Bank и Evotor callbacks закрыты auth-gate; website callback открыт только через HMAC/replay boundary.
 - [x] Website lead handler требует payload-bound `Idempotency-Key`, пишет raw/lead/source одной transaction под advisory lock, возвращает `409` при payload conflict и восстанавливает legacy raw-only partial write.
 - [x] Общая fail-closed граница и отдельные website/bank/Evotor контракты спроектированы в `docs/security/webhook-authentication.md`; website adapter подключён, остальные providers закрыты без официальных test vectors.
-- [x] Website HMAC проверяет exact raw-body digest, timestamp и event ID; PostgreSQL replay claim использует unique hash и advisory transaction lock. Missing key, tamper, stale timestamp, replay conflict и DB outage покрыты fail-closed тестами.
+- [x] Website HMAC проверяет exact raw-body digest, explicit current/previous key ID, timestamp и event ID до JSON parsing; PostgreSQL replay claim использует unique hash и advisory transaction lock. Missing/invalid keyring, tamper, stale timestamp, replay conflict и DB outage покрыты fail-closed тестами; HTTP accept/duplicate/conflict доказаны на PostgreSQL 16.
 - [x] Public allowlist содержит только HMAC-защищённый website POST callback; payload conflict/retry покрыты отдельно.
 - [ ] Проверить callback URL после каждого deployment change.
 - [x] Hardcoded AlfaCRM tenant fallback удалён; без `ALFACRM_DOMAIN` клиент fail closed.

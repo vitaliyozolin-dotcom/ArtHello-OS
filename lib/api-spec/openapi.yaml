@@ -547,6 +547,10 @@ paths:
           in: header
           required: true
           schema: { type: string }
+        - name: X-ArtHello-Key-Id
+          in: header
+          required: true
+          schema: { type: string }
         - name: X-ArtHello-Timestamp
           in: header
           required: true

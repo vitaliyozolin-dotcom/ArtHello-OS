@@ -2,6 +2,7 @@
 
 - Webhook hardening добавляет невключённые shared primitives: versioned website HMAC-SHA256 связывает timestamp/event/raw-body digest и сравнивается constant-time; durable replay claim атомарно использует существующий PostgreSQL `raw_events` unique hash под advisory lock, различая claimed/duplicate/conflict. Публичный allowlist и provider routes не расширены.
 - Backlog review 2026-09-11 подтверждает закрытие Atlas production activation по принятым D129/D130 receipts. Отдельно принят design-only callback contract для website/bank/Evotor; публичные provider callbacks не включены и требуют реализации durable replay/verifier tests.
+
 ## 2026-09-10 — D138: School через защищённую SSH-границу, кандидат
 
 - D137 run `34541397143` не нашёл School image на локальном Docker daemon и остановился до мутаций; Atlas не запускался. School находится за отдельной deploy-границей, как в его принятом production workflow.
@@ -440,6 +441,7 @@ Exact-head V52 run34443910215/job102764455280 остановился 2026-09-10T
 ## Дневник Атласа — D109, подготовка выпуска 10.09.2026
 
 Отдельная реализация дневника сохранена в PR411. Центральное подключение подготовлено отдельным кандидатом: [приёмка](docs/acceptance/2026-09-10-atlas-central.md). Production для Атласа ещё не объявляется выпущенным; права реальных сотрудников и семей не менялись. Требуются новый защищённый выпуск центрального runtime, изолированный сервис Атласа и natural browser acceptance.
+
 ## 2026-09-10 — D123: актуальная финансовая структура
 
 Владелец подтвердил три юрлица и пять отдельных филиалов: ООО «АртХелло» → Атлас-школа и Атлас-садик; ИП Тюрин → Лиственная; ООО «УК Детское образование» → школа 1–11 и садик «Небо». Старое объединение двух подразделений Атласа более не является действующим правилом. Доходы УК от общих управленческих ресурсов и от организации праздников выделены как отдельные виды деятельности; внутригрупповые управленческие обороты должны исключаться в консолидации.
@@ -452,4 +454,4 @@ Exact-head V52 run34443910215/job102764455280 остановился 2026-09-10T
 
 ## 2026-09-11 — website webhook HMAC boundary
 
-Website lead callback подключён к versioned HMAC-SHA256 по exact raw JSON bytes, timestamp и event ID. Маршрут public только относительно cookie/session auth и fail closed без `WEBSITE_WEBHOOK_HMAC_SECRET` или валидного `WEBSITE_WEBHOOK_MAX_SKEW_SECONDS`; до lead processing выполняется PostgreSQL replay claim. Missing key, tamper, stale timestamp, replay conflict и storage outage покрыты synthetic security tests. Bank/Evotor callbacks не открывались; production secret и callback URL не проверялись.
+Website lead callback подключён к versioned HMAC-SHA256 по exact raw JSON bytes, explicit current/previous key ID, timestamp и event ID. Маршрут public только относительно cookie/session auth и fail closed без корректного keyring или валидного `WEBSITE_WEBHOOK_MAX_SKEW_SECONDS`; до JSON parsing и lead processing выполняется PostgreSQL replay claim. Missing/duplicate key, unknown key, tamper, stale timestamp, replay conflict и storage outage покрыты synthetic security tests; accept/duplicate/conflicting-body доказаны через настоящий HTTP boundary на одноразовом PostgreSQL 16. Bank/Evotor callbacks не открывались; production secrets и callback URL не проверялись.

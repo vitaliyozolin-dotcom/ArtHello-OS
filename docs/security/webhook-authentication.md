@@ -26,11 +26,18 @@ payment. Raw financial observations remain append-only.
 
 Because ArtHello controls both ends, use versioned HMAC-SHA256 over the exact
 bytes `v1\n<unix-seconds>\n<event-id>\n<sha256(raw-body)>`. Required headers are
-`X-ArtHello-Signature: v1=<lower-hex>`, `X-ArtHello-Timestamp`,
-`X-ArtHello-Event-Id` and the existing payload-bound idempotency key. Reject
+`X-ArtHello-Signature: v1=<lower-hex>`, `X-ArtHello-Key-Id`,
+`X-ArtHello-Timestamp`, `X-ArtHello-Event-Id` and the existing payload-bound idempotency key. Reject
 timestamps outside a configured bounded window and retain the durable event ID
 claim beyond that window. Rotation accepts explicit current/previous key IDs
 for a bounded overlap; absence of configuration keeps the endpoint closed.
+
+Runtime configuration uses `WEBSITE_WEBHOOK_CURRENT_KEY_ID` with
+`WEBSITE_WEBHOOK_CURRENT_SECRET`, optional `WEBSITE_WEBHOOK_PREVIOUS_KEY_ID`
+with `WEBSITE_WEBHOOK_PREVIOUS_SECRET`, and a positive integer
+`WEBSITE_WEBHOOK_MAX_SKEW_SECONDS`. A missing current pair, a partial previous
+pair or duplicate key IDs invalidate the key ring and keep the callback
+unavailable.
 
 ## Bank adapters
 

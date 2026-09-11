@@ -79,6 +79,25 @@ export interface WebhookReplayStore {
   claim(input: WebhookReplayClaim): Promise<string | undefined>;
 }
 
+export function websiteWebhookKeyring(
+  env: Readonly<Record<string, string | undefined>>,
+): Map<string, string> {
+  const currentId = env.WEBSITE_WEBHOOK_CURRENT_KEY_ID?.trim();
+  const currentSecret = env.WEBSITE_WEBHOOK_CURRENT_SECRET;
+  if (!currentId || !currentSecret) return new Map();
+
+  const keys = new Map([[currentId, currentSecret]]);
+  const previousId = env.WEBSITE_WEBHOOK_PREVIOUS_KEY_ID?.trim();
+  const previousSecret = env.WEBSITE_WEBHOOK_PREVIOUS_SECRET;
+  if (previousId || previousSecret) {
+    if (!previousId || !previousSecret || previousId === currentId) {
+      return new Map();
+    }
+    keys.set(previousId, previousSecret);
+  }
+  return keys;
+}
+
 export async function claimWebhookReplay(
   store: WebhookReplayStore,
   input: WebhookReplayClaim,
@@ -111,6 +130,7 @@ export async function authenticateWebsiteWebhook(input: {
   rawBody: Uint8Array | undefined;
   nowSeconds: number;
   store: WebhookReplayStore;
+  claimKeyId?: string;
 }): Promise<
   | { status: "accepted"; duplicate: boolean }
   | { status: "unauthorized" | "conflict" | "unavailable" }
@@ -140,7 +160,7 @@ export async function authenticateWebsiteWebhook(input: {
   try {
     const claim = await claimWebhookReplay(input.store, {
       provider: "website",
-      keyId: verified.keyVersion,
+      keyId: input.claimKeyId ?? verified.keyVersion,
       eventId: input.eventId,
       bodyDigest: webhookBodyDigest(input.rawBody),
     });
@@ -149,4 +169,26 @@ export async function authenticateWebsiteWebhook(input: {
   } catch {
     return { status: "unavailable" };
   }
+}
+
+export async function authenticateWebsiteWebhookWithKeys(input: {
+  keys: ReadonlyMap<string, string>;
+  keyId: string | undefined;
+  toleranceSeconds: number;
+  signature: string | undefined;
+  timestamp: string | undefined;
+  eventId: string | undefined;
+  rawBody: Uint8Array | undefined;
+  nowSeconds: number;
+  store: WebhookReplayStore;
+}): ReturnType<typeof authenticateWebsiteWebhook> {
+  if (input.keys.size === 0) return { status: "unavailable" };
+  if (!input.keyId) return { status: "unauthorized" };
+  const secret = input.keys.get(input.keyId);
+  if (!secret) return { status: "unauthorized" };
+  return authenticateWebsiteWebhook({
+    ...input,
+    secret,
+    claimKeyId: input.keyId,
+  });
 }
