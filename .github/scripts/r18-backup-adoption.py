@@ -132,7 +132,8 @@ class Adoption:
                     and metadata.get('State', {}).get('Running') is False
                     and metadata.get('State', {}).get('Paused') is False
                     and metadata.get('State', {}).get('Restarting') is False
-                    for row in ((HISTORICAL_APP_ID,HISTORICAL_IMAGE,HISTORICAL_RUN,HISTORICAL_SHA),
+                    for row in ((LIVE_STATE_APP_ID,LIVE_IMAGE,LIVE_STATE_RUN,LIVE_SHA),
+                                (HISTORICAL_APP_ID,HISTORICAL_IMAGE,HISTORICAL_RUN,HISTORICAL_SHA),
                                 (OLDER_APP_ID,OLDER_IMAGE,OLDER_RUN,OLDER_SHA)))
                 new_app = (metadata.get('Name') == '/arthello-direct-' + self.args.run_id + '-' + self.args.attempt
                            and metadata.get('Image') == self.args.image_id

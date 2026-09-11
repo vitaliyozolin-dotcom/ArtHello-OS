@@ -12,7 +12,7 @@ from types import ModuleType
 
 HERE = Path(__file__).resolve().parent
 PINS = {
-    "r18-candidate-state.py": "bc6eb268dcce05fa48c5b2681981acf76b42304aa87e197fd17572a3852d0417",
+    "r18-candidate-state.py": "d34a26e0e98b4b821be69fe899a037bd76dcb11e7d11d93988cb9e46785e55c5",
     "run-r10-live-browser.sh": "9715a63c8f1a95168e2a3596641e841eb5f88b6fabef823e9ad78dd05d92e653",
     "r10-live-browser-acceptance.py": "e41949e4a9a48100e3db752e75d27ced4265dc63905e4972a84bc29e85aeb84b",
     "check-school-live-acceptance-r7.py": "6fae34638acd1757cad922c288ede1282f8300a8ecfcbe3547661378445cb884",
