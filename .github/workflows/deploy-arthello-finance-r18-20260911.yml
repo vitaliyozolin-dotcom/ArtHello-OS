@@ -23,7 +23,7 @@ concurrency:
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
   EXPECTED_RELEASE_HEAD: codex/finance-r18-trigger-d140-20260911
-  EXPECTED_RELEASE_PR: '0'
+  EXPECTED_RELEASE_PR: '446'
   PREVIOUS_RELEASE_SHA: '66c414366fae272d7a91f42b2ec08700efdb1287'
   ACCEPTED_RELEASE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
   ACCEPTED_RELEASE_TREE: 6aeb7e6879b786a434d12f026f765bcaf9acb5a4
@@ -47,7 +47,7 @@ jobs:
         github.event.workflow_run.pull_requests[0] == null ||
         (
           github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-trigger-d140-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('0') &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('446') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -126,7 +126,7 @@ jobs:
         github.event.workflow_run.pull_requests[0] == null ||
         (
           github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-trigger-d140-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('0') &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('446') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
