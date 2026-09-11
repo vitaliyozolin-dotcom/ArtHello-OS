@@ -186,6 +186,34 @@
       "disposition": "document-in-openapi"
     },
     {
+      "route": "GET /payments/catalog",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /payments/customers",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /payments/obligations",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /payments/obligations/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /payments/public/{param}",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /payments/requests",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "GET /payments/routes",
+      "disposition": "document-in-openapi"
+    },
+    {
       "route": "GET /people-access/readiness",
       "disposition": "document-in-openapi"
     },
@@ -531,6 +559,30 @@
     },
     {
       "route": "POST /months/{param}/reopen",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /payments/obligations",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /payments/obligations/{param}/requests",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /payments/obligations/{param}/requests/preview",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /payments/operators",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /payments/requests/{param}/cancel",
+      "disposition": "document-in-openapi"
+    },
+    {
+      "route": "POST /payments/routes",
       "disposition": "document-in-openapi"
     },
     {
