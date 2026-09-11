@@ -1,6 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { Router, type Response } from "express";
-import { pool } from "@workspace/db";
+import {
+  branchLegalEntityAssignmentsTable,
+  db,
+  fiscalReceiptsTable,
+  legalEntitiesTable,
+  paymentEventsTable,
+  paymentObligationsTable,
+  paymentRequestsTable,
+  paymentRoutesTable,
+} from "@workspace/db";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { sha256Hex } from "@workspace/shared/sha256";
 import { z } from "zod/v4";
 import { logger } from "../lib/logger.js";
@@ -22,7 +32,12 @@ import {
 
 export const paymentsRouter = Router();
 const authStore = new PostgresAuthStore();
-const ACTIVE_REQUEST_STATUSES = ["ready", "link_creating", "waiting", "authorized"];
+const ACTIVE_REQUEST_STATUSES = [
+  "ready",
+  "link_creating",
+  "waiting",
+  "authorized",
+] as const;
 
 type PaymentAuth = {
   session: {
@@ -33,62 +48,26 @@ type PaymentAuth = {
   };
 };
 
-type ObligationRow = {
-  id: string;
-  branch_crm_id: string;
-  legal_entity_id: string;
-  family_id: string | null;
-  payer_person_id: string | null;
-  student_person_id: string | null;
-  student_crm_id: string | null;
-  contract_id: string | null;
-  invoice_external_id: string | null;
-  billing_period: string | null;
-  purpose: string;
-  amount_kopecks: string | number;
-  confirmed_paid_kopecks: string | number;
-  currency: string;
-  status: string;
-  evidence_status: string;
-  due_date: string | null;
-  payer_email: string | null;
-  payer_phone: string | null;
-  source: string;
-  source_ref: string | null;
-  created_at: Date | string;
-  updated_at: Date | string;
+type ObligationRow = typeof paymentObligationsTable.$inferSelect;
+type RouteRow = typeof paymentRoutesTable.$inferSelect;
+type RequestRow = typeof paymentRequestsTable.$inferSelect;
+
+type RequestPublicExtras = {
+  branchCrmId?: string | null;
+  legalEntityId?: string | null;
+  purpose?: string | null;
+  recipientLabel?: string | null;
+  receiptStatus?: string | null;
 };
 
-type RouteRow = {
-  id: string;
-  branch_crm_id: string;
-  legal_entity_id: string;
-  provider: string;
-  provider_customer_code: string;
-  merchant_id: string;
-  recipient_label: string;
-  fiscal_profile: Record<string, unknown> | null;
-  fiscal_profile_status: string;
-  is_active: boolean;
-};
-
-type RequestRow = {
-  id: string;
-  obligation_id: string;
-  route_id: string;
-  amount_kopecks: string | number;
-  currency: string;
-  payment_link_id: string;
-  status: string;
-  expires_at: Date | string | null;
-  created_at: Date | string;
-  updated_at: Date | string;
-  branch_crm_id?: string;
-  legal_entity_id?: string;
-  purpose?: string;
-  recipient_label?: string;
-  receipt_status?: string | null;
-};
+class PaymentHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: Record<string, unknown>,
+  ) {
+    super(typeof body.error === "string" ? body.error : "Payment request failed");
+  }
+}
 
 function requestAuth(res: Response): PaymentAuth | null {
   const auth = res.locals.auth as PaymentAuth | undefined;
@@ -133,12 +112,11 @@ function requirePaymentScope(
   return false;
 }
 
-function safeKopecks(value: string | number, field: string): number {
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+function safeKopecks(value: number, field: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
     throw new Error(`${field} is outside safe kopeck range`);
   }
-  return parsed;
+  return value;
 }
 
 function evidenceStatus(value: string): PaymentEvidenceStatus {
@@ -150,153 +128,164 @@ function evidenceStatus(value: string): PaymentEvidenceStatus {
 function publicObligation(row: ObligationRow) {
   return {
     id: row.id,
-    branchCrmId: row.branch_crm_id,
-    legalEntityId: row.legal_entity_id,
-    familyId: row.family_id,
-    payerPersonId: row.payer_person_id,
-    studentPersonId: row.student_person_id,
-    studentCrmId: row.student_crm_id,
-    contractId: row.contract_id,
-    invoiceExternalId: row.invoice_external_id,
-    billingPeriod: row.billing_period,
+    branchCrmId: row.branchCrmId,
+    legalEntityId: row.legalEntityId,
+    familyId: row.familyId,
+    payerPersonId: row.payerPersonId,
+    studentPersonId: row.studentPersonId,
+    studentCrmId: row.studentCrmId,
+    contractId: row.contractId,
+    invoiceExternalId: row.invoiceExternalId,
+    billingPeriod: row.billingPeriod,
     purpose: row.purpose,
-    amountKopecks: safeKopecks(row.amount_kopecks, "amountKopecks"),
+    amountKopecks: safeKopecks(row.amountKopecks, "amountKopecks"),
     confirmedPaidKopecks: safeKopecks(
-      row.confirmed_paid_kopecks,
+      row.confirmedPaidKopecks,
       "confirmedPaidKopecks",
     ),
     currency: row.currency,
     status: row.status,
-    evidenceStatus: row.evidence_status,
-    dueDate: row.due_date,
+    evidenceStatus: row.evidenceStatus,
+    dueDate: row.dueDate,
     source: row.source,
-    sourceRef: row.source_ref,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    sourceRef: row.sourceRef,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 
-function publicRequest(row: RequestRow) {
+function publicRequest(row: RequestRow, extras: RequestPublicExtras = {}) {
   return {
     id: row.id,
-    obligationId: row.obligation_id,
-    amountKopecks: safeKopecks(row.amount_kopecks, "amountKopecks"),
+    obligationId: row.obligationId,
+    amountKopecks: safeKopecks(row.amountKopecks, "amountKopecks"),
     currency: row.currency,
-    paymentLinkId: row.payment_link_id,
+    paymentLinkId: row.paymentLinkId,
     status: row.status,
-    expiresAt: row.expires_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    branchCrmId: row.branch_crm_id,
-    legalEntityId: row.legal_entity_id,
-    purpose: row.purpose,
-    recipientLabel: row.recipient_label,
-    receiptStatus: row.receipt_status ?? null,
+    expiresAt: row.expiresAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    branchCrmId: extras.branchCrmId,
+    legalEntityId: extras.legalEntityId,
+    purpose: extras.purpose,
+    recipientLabel: extras.recipientLabel,
+    receiptStatus: extras.receiptStatus ?? null,
   };
 }
 
 async function loadObligation(id: string): Promise<ObligationRow | null> {
-  const result = await pool.query<ObligationRow>(
-    `SELECT id, branch_crm_id, legal_entity_id::text, family_id::text,
-            payer_person_id::text, student_person_id::text, student_crm_id,
-            contract_id, invoice_external_id, billing_period::text, purpose,
-            amount_kopecks, confirmed_paid_kopecks, currency, status,
-            evidence_status, due_date::text, payer_email, payer_phone, source,
-            source_ref, created_at, updated_at
-       FROM payment_obligations
-      WHERE id = $1`,
-    [id],
-  );
-  return result.rows[0] ?? null;
+  const [row] = await db
+    .select()
+    .from(paymentObligationsTable)
+    .where(eq(paymentObligationsTable.id, id))
+    .limit(1);
+  return row ?? null;
 }
 
 async function branchLegalEntityConfirmed(
   branchCrmId: string,
   legalEntityId: string,
 ): Promise<boolean> {
-  const result = await pool.query(
-    `SELECT 1
-       FROM branch_legal_entity_assignments a
-       JOIN legal_entities l ON l.id = a.legal_entity_id
-      WHERE a.branch_crm_id = $1
-        AND a.legal_entity_id = $2::uuid
-        AND a.mapping_status = 'owner_confirmed'
-        AND l.is_active = TRUE
-      LIMIT 1`,
-    [branchCrmId, legalEntityId],
-  );
-  return (result.rowCount ?? 0) === 1;
+  const [row] = await db
+    .select({ id: branchLegalEntityAssignmentsTable.id })
+    .from(branchLegalEntityAssignmentsTable)
+    .innerJoin(
+      legalEntitiesTable,
+      eq(
+        legalEntitiesTable.id,
+        branchLegalEntityAssignmentsTable.legalEntityId,
+      ),
+    )
+    .where(
+      and(
+        eq(branchLegalEntityAssignmentsTable.branchCrmId, branchCrmId),
+        eq(branchLegalEntityAssignmentsTable.legalEntityId, legalEntityId),
+        eq(
+          branchLegalEntityAssignmentsTable.mappingStatus,
+          "owner_confirmed",
+        ),
+        eq(legalEntitiesTable.isActive, true),
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
 }
 
 async function loadActiveRequestAmount(
   obligationId: string,
 ): Promise<number | null> {
-  const result = await pool.query<{ amount_kopecks: string | number }>(
-    `SELECT amount_kopecks
-       FROM payment_requests
-      WHERE obligation_id = $1
-        AND status = ANY($2::text[])
-      ORDER BY created_at DESC
-      LIMIT 1`,
-    [obligationId, ACTIVE_REQUEST_STATUSES],
-  );
-  const row = result.rows[0];
-  return row ? safeKopecks(row.amount_kopecks, "activeRequestKopecks") : null;
+  const [row] = await db
+    .select({ amountKopecks: paymentRequestsTable.amountKopecks })
+    .from(paymentRequestsTable)
+    .where(
+      and(
+        eq(paymentRequestsTable.obligationId, obligationId),
+        inArray(paymentRequestsTable.status, [...ACTIVE_REQUEST_STATUSES]),
+      ),
+    )
+    .orderBy(desc(paymentRequestsTable.createdAt))
+    .limit(1);
+  return row
+    ? safeKopecks(row.amountKopecks, "activeRequestKopecks")
+    : null;
+}
+
+function routeCandidate(row: RouteRow): PaymentRouteCandidate {
+  return {
+    id: row.id,
+    branchId: row.branchCrmId,
+    legalEntityId: row.legalEntityId,
+    active: row.isActive,
+    provider: "tochka",
+    providerCustomerCode: row.providerCustomerCode,
+    merchantId: row.merchantId,
+    fiscalProfileStatus:
+      row.fiscalProfileStatus === "approved"
+        ? "APPROVED"
+        : row.fiscalProfileStatus === "disabled"
+          ? "DISABLED"
+          : "DRAFT",
+  };
 }
 
 async function loadRouteCandidates(
   branchCrmId: string,
   legalEntityId: string,
-): Promise<{ candidate: PaymentRouteCandidate; row: RouteRow }[]> {
-  const result = await pool.query<RouteRow>(
-    `SELECT id, branch_crm_id, legal_entity_id::text, provider,
-            provider_customer_code, merchant_id, recipient_label,
-            fiscal_profile, fiscal_profile_status, is_active
-       FROM payment_routes
-      WHERE branch_crm_id = $1
-        AND legal_entity_id = $2::uuid
-        AND is_active = TRUE`,
-    [branchCrmId, legalEntityId],
-  );
-  return result.rows.map((row) => ({
-    row,
-    candidate: {
-      id: row.id,
-      branchId: row.branch_crm_id,
-      legalEntityId: row.legal_entity_id,
-      active: row.is_active,
-      provider: "tochka",
-      providerCustomerCode: row.provider_customer_code,
-      merchantId: row.merchant_id,
-      fiscalProfileStatus:
-        row.fiscal_profile_status === "approved"
-          ? "APPROVED"
-          : row.fiscal_profile_status === "disabled"
-            ? "DISABLED"
-            : "DRAFT",
-    },
-  }));
+): Promise<RouteRow[]> {
+  return db
+    .select()
+    .from(paymentRoutesTable)
+    .where(
+      and(
+        eq(paymentRoutesTable.branchCrmId, branchCrmId),
+        eq(paymentRoutesTable.legalEntityId, legalEntityId),
+        eq(paymentRoutesTable.isActive, true),
+      ),
+    );
 }
 
 async function previewIssue(obligation: ObligationRow) {
   const activeRequestKopecks = await loadActiveRequestAmount(obligation.id);
   const decision = decidePaymentIssue({
-    obligationKopecks: safeKopecks(obligation.amount_kopecks, "obligationKopecks"),
+    obligationKopecks: safeKopecks(
+      obligation.amountKopecks,
+      "obligationKopecks",
+    ),
     confirmedPaidKopecks: safeKopecks(
-      obligation.confirmed_paid_kopecks,
+      obligation.confirmedPaidKopecks,
       "confirmedPaidKopecks",
     ),
-    evidenceStatus: evidenceStatus(obligation.evidence_status),
+    evidenceStatus: evidenceStatus(obligation.evidenceStatus),
     activeRequestKopecks,
   });
   const routes = await loadRouteCandidates(
-    obligation.branch_crm_id,
-    obligation.legal_entity_id,
+    obligation.branchCrmId,
+    obligation.legalEntityId,
   );
   const routeResolution = resolvePaymentRoute(
-    routes.map(({ candidate }) => candidate),
-    obligation.branch_crm_id,
-    obligation.legal_entity_id,
+    routes.map(routeCandidate),
+    obligation.branchCrmId,
+    obligation.legalEntityId,
   );
   return { decision, routes, routeResolution };
 }
@@ -307,7 +296,9 @@ const routeSchema = z.object({
   providerCustomerCode: z.string().trim().min(1).max(64),
   merchantId: z.string().trim().min(1).max(64),
   recipientLabel: z.string().trim().min(2).max(160),
-  fiscalProfileStatus: z.enum(["draft", "approved", "disabled"]).default("draft"),
+  fiscalProfileStatus: z
+    .enum(["draft", "approved", "disabled"])
+    .default("draft"),
   fiscalProfile: z
     .object({
       taxSystemCode: z.string().trim().min(1).max(64).optional(),
@@ -323,25 +314,25 @@ const routeSchema = z.object({
 paymentsRouter.get("/payments/routes", async (_req, res) => {
   if (!ownerAuth(res)) return;
   try {
-    const result = await pool.query<RouteRow>(
-      `SELECT id, branch_crm_id, legal_entity_id::text, provider,
-              provider_customer_code, merchant_id, recipient_label,
-              fiscal_profile, fiscal_profile_status, is_active
-         FROM payment_routes
-        ORDER BY branch_crm_id, recipient_label`,
-    );
+    const rows = await db
+      .select()
+      .from(paymentRoutesTable)
+      .orderBy(
+        paymentRoutesTable.branchCrmId,
+        paymentRoutesTable.recipientLabel,
+      );
     res.json(
-      result.rows.map((row) => ({
+      rows.map((row) => ({
         id: row.id,
-        branchCrmId: row.branch_crm_id,
-        legalEntityId: row.legal_entity_id,
+        branchCrmId: row.branchCrmId,
+        legalEntityId: row.legalEntityId,
         provider: row.provider,
-        providerCustomerCode: row.provider_customer_code,
-        merchantId: row.merchant_id,
-        recipientLabel: row.recipient_label,
-        fiscalProfile: row.fiscal_profile ?? {},
-        fiscalProfileStatus: row.fiscal_profile_status,
-        active: row.is_active,
+        providerCustomerCode: row.providerCustomerCode,
+        merchantId: row.merchantId,
+        recipientLabel: row.recipientLabel,
+        fiscalProfile: row.fiscalProfile ?? {},
+        fiscalProfileStatus: row.fiscalProfileStatus,
+        active: row.isActive,
       })),
     );
   } catch (err) {
@@ -383,25 +374,22 @@ paymentsRouter.post("/payments/routes", async (req, res) => {
       });
       return;
     }
-    const result = await pool.query<{ id: string }>(
-      `INSERT INTO payment_routes (
-         branch_crm_id, legal_entity_id, provider, provider_customer_code,
-         merchant_id, recipient_label, fiscal_profile, fiscal_profile_status,
-         is_active, created_by_user_id, created_at, updated_at
-       ) VALUES ($1,$2::uuid,'tochka',$3,$4,$5,$6::jsonb,$7,TRUE,$8::uuid,NOW(),NOW())
-       RETURNING id`,
-      [
-        parsed.data.branchCrmId,
-        parsed.data.legalEntityId,
-        parsed.data.providerCustomerCode,
-        parsed.data.merchantId,
-        parsed.data.recipientLabel,
-        JSON.stringify(parsed.data.fiscalProfile),
-        parsed.data.fiscalProfileStatus,
-        auth.session.userId,
-      ],
-    );
-    res.status(201).json({ id: result.rows[0]?.id, active: true });
+    const [created] = await db
+      .insert(paymentRoutesTable)
+      .values({
+        branchCrmId: parsed.data.branchCrmId,
+        legalEntityId: parsed.data.legalEntityId,
+        provider: "tochka",
+        providerCustomerCode: parsed.data.providerCustomerCode,
+        merchantId: parsed.data.merchantId,
+        recipientLabel: parsed.data.recipientLabel,
+        fiscalProfile: parsed.data.fiscalProfile,
+        fiscalProfileStatus: parsed.data.fiscalProfileStatus,
+        isActive: true,
+        createdByUserId: auth.session.userId,
+      })
+      .returning({ id: paymentRoutesTable.id });
+    res.status(201).json({ id: created?.id, active: true });
   } catch (err) {
     if ((err as { code?: string }).code === "23505") {
       res.status(409).json({ error: "Такой маршрут оплаты уже существует" });
@@ -434,23 +422,33 @@ paymentsRouter.post("/payments/operators", async (req, res) => {
     return;
   }
   try {
-    const mapping = await pool.query<{
-      branch_crm_id: string;
-      legal_entity_id: string;
-    }>(
-      `SELECT branch_crm_id, legal_entity_id::text
-         FROM branch_legal_entity_assignments
-        WHERE branch_crm_id = ANY($1::text[])
-          AND mapping_status = 'owner_confirmed'`,
-      [parsed.data.branchIds],
-    );
+    const mapping = await db
+      .select({
+        branchCrmId: branchLegalEntityAssignmentsTable.branchCrmId,
+        legalEntityId: branchLegalEntityAssignmentsTable.legalEntityId,
+      })
+      .from(branchLegalEntityAssignmentsTable)
+      .where(
+        and(
+          inArray(
+            branchLegalEntityAssignmentsTable.branchCrmId,
+            parsed.data.branchIds,
+          ),
+          eq(
+            branchLegalEntityAssignmentsTable.mappingStatus,
+            "owner_confirmed",
+          ),
+        ),
+      );
     const legalSet = new Set(parsed.data.legalEntityIds);
     const mappedBranches = new Set(
-      mapping.rows
-        .filter((row) => legalSet.has(row.legal_entity_id))
-        .map((row) => row.branch_crm_id),
+      mapping
+        .filter((row) => legalSet.has(row.legalEntityId))
+        .map((row) => row.branchCrmId),
     );
-    if (parsed.data.branchIds.some((branchId) => !mappedBranches.has(branchId))) {
+    if (
+      parsed.data.branchIds.some((branchId) => !mappedBranches.has(branchId))
+    ) {
       res.status(409).json({
         error: "Не все филиалы подтверждены за выбранными юридическими лицами",
       });
@@ -537,43 +535,34 @@ paymentsRouter.post("/payments/obligations", async (req, res) => {
       });
       return;
     }
-    const result = await pool.query<ObligationRow>(
-      `INSERT INTO payment_obligations (
-         branch_crm_id, legal_entity_id, family_id, payer_person_id,
-         student_person_id, student_crm_id, contract_id, invoice_external_id,
-         billing_period, purpose, amount_kopecks, confirmed_paid_kopecks,
-         currency, status, evidence_status, due_date, payer_email, payer_phone,
-         source, source_ref, created_by_user_id, created_at, updated_at
-       ) VALUES (
-         $1,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9::date,$10,$11,0,
-         'RUB','open','unavailable',$12::date,$13,$14,'manual',$15,$16::uuid,NOW(),NOW()
-       )
-       RETURNING id, branch_crm_id, legal_entity_id::text, family_id::text,
-                 payer_person_id::text, student_person_id::text, student_crm_id,
-                 contract_id, invoice_external_id, billing_period::text, purpose,
-                 amount_kopecks, confirmed_paid_kopecks, currency, status,
-                 evidence_status, due_date::text, payer_email, payer_phone,
-                 source, source_ref, created_at, updated_at`,
-      [
-        parsed.data.branchCrmId,
-        parsed.data.legalEntityId,
-        parsed.data.familyId ?? null,
-        parsed.data.payerPersonId ?? null,
-        parsed.data.studentPersonId ?? null,
-        parsed.data.studentCrmId ?? null,
-        parsed.data.contractId ?? null,
-        parsed.data.invoiceExternalId ?? null,
-        parsed.data.billingPeriod ?? null,
-        parsed.data.purpose,
-        parsed.data.amountKopecks,
-        parsed.data.dueDate ?? null,
-        parsed.data.payerEmail ?? null,
-        parsed.data.payerPhone ?? null,
-        parsed.data.sourceRef ?? null,
-        auth.session.userId,
-      ],
-    );
-    res.status(201).json(publicObligation(result.rows[0]!));
+    const [created] = await db
+      .insert(paymentObligationsTable)
+      .values({
+        branchCrmId: parsed.data.branchCrmId,
+        legalEntityId: parsed.data.legalEntityId,
+        familyId: parsed.data.familyId,
+        payerPersonId: parsed.data.payerPersonId,
+        studentPersonId: parsed.data.studentPersonId,
+        studentCrmId: parsed.data.studentCrmId,
+        contractId: parsed.data.contractId,
+        invoiceExternalId: parsed.data.invoiceExternalId,
+        billingPeriod: parsed.data.billingPeriod,
+        purpose: parsed.data.purpose,
+        amountKopecks: parsed.data.amountKopecks,
+        confirmedPaidKopecks: 0,
+        currency: "RUB",
+        status: "open",
+        evidenceStatus: "unavailable",
+        dueDate: parsed.data.dueDate,
+        payerEmail: parsed.data.payerEmail,
+        payerPhone: parsed.data.payerPhone,
+        source: "manual",
+        sourceRef: parsed.data.sourceRef,
+        createdByUserId: auth.session.userId,
+      })
+      .returning();
+    if (!created) throw new Error("Payment obligation insert returned no row");
+    res.status(201).json(publicObligation(created));
   } catch (err) {
     if ((err as { code?: string }).code === "23505") {
       res.status(409).json({ error: "Такое начисление уже существует" });
@@ -588,34 +577,28 @@ paymentsRouter.get("/payments/obligations", async (_req, res) => {
   const auth = requestAuth(res);
   if (!auth) return;
   try {
-    const owner = auth.session.role === "owner" || auth.session.scope.unrestricted;
-    const result = owner
-      ? await pool.query<ObligationRow>(
-          `SELECT id, branch_crm_id, legal_entity_id::text, family_id::text,
-                  payer_person_id::text, student_person_id::text, student_crm_id,
-                  contract_id, invoice_external_id, billing_period::text, purpose,
-                  amount_kopecks, confirmed_paid_kopecks, currency, status,
-                  evidence_status, due_date::text, payer_email, payer_phone,
-                  source, source_ref, created_at, updated_at
-             FROM payment_obligations
-            ORDER BY created_at DESC
-            LIMIT 200`,
-        )
-      : await pool.query<ObligationRow>(
-          `SELECT id, branch_crm_id, legal_entity_id::text, family_id::text,
-                  payer_person_id::text, student_person_id::text, student_crm_id,
-                  contract_id, invoice_external_id, billing_period::text, purpose,
-                  amount_kopecks, confirmed_paid_kopecks, currency, status,
-                  evidence_status, due_date::text, payer_email, payer_phone,
-                  source, source_ref, created_at, updated_at
-             FROM payment_obligations
-            WHERE branch_crm_id = ANY($1::text[])
-              AND legal_entity_id::text = ANY($2::text[])
-            ORDER BY created_at DESC
-            LIMIT 200`,
-          [auth.session.scope.branchIds, auth.session.scope.legalEntityIds],
-        );
-    res.json(result.rows.map(publicObligation));
+    const owner =
+      auth.session.role === "owner" || auth.session.scope.unrestricted;
+    const rows = await db
+      .select()
+      .from(paymentObligationsTable)
+      .where(
+        owner
+          ? undefined
+          : and(
+              inArray(
+                paymentObligationsTable.branchCrmId,
+                [...auth.session.scope.branchIds],
+              ),
+              inArray(
+                paymentObligationsTable.legalEntityId,
+                [...auth.session.scope.legalEntityIds],
+              ),
+            ),
+      )
+      .orderBy(desc(paymentObligationsTable.createdAt))
+      .limit(200);
+    res.json(rows.map(publicObligation));
   } catch (err) {
     logger.error({ err }, "Payment obligations list failed");
     res.status(503).json({ error: "Начисления временно недоступны" });
@@ -639,8 +622,8 @@ paymentsRouter.get("/payments/obligations/:obligationId", async (req, res) => {
       !requirePaymentScope(
         res,
         auth,
-        obligation.branch_crm_id,
-        obligation.legal_entity_id,
+        obligation.branchCrmId,
+        obligation.legalEntityId,
       )
     ) {
       return;
@@ -671,8 +654,8 @@ paymentsRouter.post(
         !requirePaymentScope(
           res,
           auth,
-          obligation.branch_crm_id,
-          obligation.legal_entity_id,
+          obligation.branchCrmId,
+          obligation.legalEntityId,
         )
       ) {
         return;
@@ -685,15 +668,16 @@ paymentsRouter.post(
               ready: true,
               recipientLabel:
                 preview.routes.find(
-                  ({ candidate }) =>
-                    candidate.id === preview.routeResolution.route.id,
-                )?.row.recipient_label ?? null,
+                  (route) => route.id === preview.routeResolution.route.id,
+                )?.recipientLabel ?? null,
             }
           : { ready: false, reason: preview.routeResolution.reason },
       });
     } catch (err) {
       logger.error({ err }, "Payment request preview failed");
-      res.status(503).json({ error: "Не удалось проверить возможность оплаты" });
+      res
+        .status(503)
+        .json({ error: "Не удалось проверить возможность оплаты" });
     }
   },
 );
@@ -715,214 +699,193 @@ paymentsRouter.post(
       return;
     }
     const idempotencyKey = `${auth.session.userId}:${clientKey}`;
-    const existing = await pool.query<RequestRow & {
-      branch_crm_id: string;
-      legal_entity_id: string;
-    }>(
-      `SELECT r.id, r.obligation_id, r.route_id, r.amount_kopecks, r.currency,
-              r.payment_link_id, r.status, r.expires_at, r.created_at, r.updated_at,
-              o.branch_crm_id, o.legal_entity_id::text
-         FROM payment_requests r
-         JOIN payment_obligations o ON o.id = r.obligation_id
-        WHERE r.idempotency_key = $1`,
-      [idempotencyKey],
-    );
-    if (existing.rows[0]) {
-      const row = existing.rows[0];
-      if (!requirePaymentScope(res, auth, row.branch_crm_id, row.legal_entity_id)) {
-        return;
-      }
-      res.json({ ...publicRequest(row), idempotentReplay: true });
-      return;
-    }
-
-    const client = await pool.connect();
     try {
-      await client.query("BEGIN");
-      const locked = await client.query<ObligationRow>(
-        `SELECT id, branch_crm_id, legal_entity_id::text, family_id::text,
-                payer_person_id::text, student_person_id::text, student_crm_id,
-                contract_id, invoice_external_id, billing_period::text, purpose,
-                amount_kopecks, confirmed_paid_kopecks, currency, status,
-                evidence_status, due_date::text, payer_email, payer_phone,
-                source, source_ref, created_at, updated_at
-           FROM payment_obligations
-          WHERE id = $1
-          FOR UPDATE`,
-        [req.params.obligationId],
-      );
-      const obligation = locked.rows[0];
-      if (!obligation) {
-        await client.query("ROLLBACK");
-        res.status(404).json({ error: "Начисление не найдено" });
-        return;
-      }
-      if (
-        !requirePaymentScope(
-          res,
-          auth,
-          obligation.branch_crm_id,
-          obligation.legal_entity_id,
+      const [existing] = await db
+        .select({
+          request: paymentRequestsTable,
+          branchCrmId: paymentObligationsTable.branchCrmId,
+          legalEntityId: paymentObligationsTable.legalEntityId,
+        })
+        .from(paymentRequestsTable)
+        .innerJoin(
+          paymentObligationsTable,
+          eq(paymentObligationsTable.id, paymentRequestsTable.obligationId),
         )
-      ) {
-        await client.query("ROLLBACK");
-        return;
-      }
-
-      const activeResult = await client.query<{
-        amount_kopecks: string | number;
-      }>(
-        `SELECT amount_kopecks
-           FROM payment_requests
-          WHERE obligation_id = $1
-            AND status = ANY($2::text[])
-          ORDER BY created_at DESC
-          LIMIT 1`,
-        [obligation.id, ACTIVE_REQUEST_STATUSES],
-      );
-      const decision = decidePaymentIssue({
-        obligationKopecks: safeKopecks(
-          obligation.amount_kopecks,
-          "obligationKopecks",
-        ),
-        confirmedPaidKopecks: safeKopecks(
-          obligation.confirmed_paid_kopecks,
-          "confirmedPaidKopecks",
-        ),
-        evidenceStatus: evidenceStatus(obligation.evidence_status),
-        activeRequestKopecks: activeResult.rows[0]
-          ? safeKopecks(
-              activeResult.rows[0].amount_kopecks,
-              "activeRequestKopecks",
-            )
-          : null,
-      });
-      if (decision.action !== "ISSUE") {
-        await client.query("ROLLBACK");
-        res.status(decision.action === "SKIP" ? 409 : 422).json({ decision });
-        return;
-      }
-
-      const routeResult = await client.query<RouteRow>(
-        `SELECT id, branch_crm_id, legal_entity_id::text, provider,
-                provider_customer_code, merchant_id, recipient_label,
-                fiscal_profile, fiscal_profile_status, is_active
-           FROM payment_routes
-          WHERE branch_crm_id = $1
-            AND legal_entity_id = $2::uuid
-            AND is_active = TRUE`,
-        [obligation.branch_crm_id, obligation.legal_entity_id],
-      );
-      const routePairs = routeResult.rows.map((row) => ({
-        row,
-        candidate: {
-          id: row.id,
-          branchId: row.branch_crm_id,
-          legalEntityId: row.legal_entity_id,
-          active: row.is_active,
-          provider: "tochka" as const,
-          providerCustomerCode: row.provider_customer_code,
-          merchantId: row.merchant_id,
-          fiscalProfileStatus:
-            row.fiscal_profile_status === "approved"
-              ? ("APPROVED" as const)
-              : row.fiscal_profile_status === "disabled"
-                ? ("DISABLED" as const)
-                : ("DRAFT" as const),
-        },
-      }));
-      const routeResolution = resolvePaymentRoute(
-        routePairs.map(({ candidate }) => candidate),
-        obligation.branch_crm_id,
-        obligation.legal_entity_id,
-      );
-      if (!routeResolution.ok) {
-        await client.query("ROLLBACK");
-        res.status(409).json({
-          error: "Маршрут оплаты не готов",
-          reason: routeResolution.reason,
+        .where(eq(paymentRequestsTable.idempotencyKey, idempotencyKey))
+        .limit(1);
+      if (existing) {
+        if (
+          !requirePaymentScope(
+            res,
+            auth,
+            existing.branchCrmId,
+            existing.legalEntityId,
+          )
+        ) {
+          return;
+        }
+        res.json({
+          ...publicRequest(existing.request, {
+            branchCrmId: existing.branchCrmId,
+            legalEntityId: existing.legalEntityId,
+          }),
+          idempotentReplay: true,
         });
         return;
       }
-      const route = routePairs.find(
-        ({ candidate }) => candidate.id === routeResolution.route.id,
-      )?.row;
-      if (!route) throw new Error("Resolved payment route disappeared");
 
-      const paymentLinkId = `AH-${randomUUID()}`;
-      const requestResult = await client.query<RequestRow>(
-        `INSERT INTO payment_requests (
-           obligation_id, route_id, amount_kopecks, currency, idempotency_key,
-           payment_link_id, status, payer_contact_snapshot, fiscal_snapshot,
-           created_by_user_id, created_at, updated_at
-         ) VALUES ($1,$2,$3,'RUB',$4,$5,'ready',$6::jsonb,$7::jsonb,$8::uuid,NOW(),NOW())
-         RETURNING id, obligation_id, route_id, amount_kopecks, currency,
-                   payment_link_id, status, expires_at, created_at, updated_at`,
-        [
-          obligation.id,
-          route.id,
-          decision.outstandingKopecks,
-          idempotencyKey,
+      const result = await db.transaction(async (tx) => {
+        const [obligation] = await tx
+          .select()
+          .from(paymentObligationsTable)
+          .where(eq(paymentObligationsTable.id, req.params.obligationId))
+          .for("update")
+          .limit(1);
+        if (!obligation) {
+          throw new PaymentHttpError(404, { error: "Начисление не найдено" });
+        }
+        if (
+          !hasPaymentScope(
+            auth,
+            obligation.branchCrmId,
+            obligation.legalEntityId,
+          )
+        ) {
+          throw new PaymentHttpError(403, {
+            error: "Недостаточно прав для этого филиала",
+          });
+        }
+
+        const [active] = await tx
+          .select({ amountKopecks: paymentRequestsTable.amountKopecks })
+          .from(paymentRequestsTable)
+          .where(
+            and(
+              eq(paymentRequestsTable.obligationId, obligation.id),
+              inArray(
+                paymentRequestsTable.status,
+                [...ACTIVE_REQUEST_STATUSES],
+              ),
+            ),
+          )
+          .orderBy(desc(paymentRequestsTable.createdAt))
+          .limit(1);
+        const decision = decidePaymentIssue({
+          obligationKopecks: safeKopecks(
+            obligation.amountKopecks,
+            "obligationKopecks",
+          ),
+          confirmedPaidKopecks: safeKopecks(
+            obligation.confirmedPaidKopecks,
+            "confirmedPaidKopecks",
+          ),
+          evidenceStatus: evidenceStatus(obligation.evidenceStatus),
+          activeRequestKopecks: active
+            ? safeKopecks(active.amountKopecks, "activeRequestKopecks")
+            : null,
+        });
+        if (decision.action !== "ISSUE") {
+          throw new PaymentHttpError(decision.action === "SKIP" ? 409 : 422, {
+            decision,
+          });
+        }
+
+        const routes = await tx
+          .select()
+          .from(paymentRoutesTable)
+          .where(
+            and(
+              eq(paymentRoutesTable.branchCrmId, obligation.branchCrmId),
+              eq(paymentRoutesTable.legalEntityId, obligation.legalEntityId),
+              eq(paymentRoutesTable.isActive, true),
+            ),
+          );
+        const routeResolution = resolvePaymentRoute(
+          routes.map(routeCandidate),
+          obligation.branchCrmId,
+          obligation.legalEntityId,
+        );
+        if (!routeResolution.ok) {
+          throw new PaymentHttpError(409, {
+            error: "Маршрут оплаты не готов",
+            reason: routeResolution.reason,
+          });
+        }
+        const route = routes.find(
+          (candidate) => candidate.id === routeResolution.route.id,
+        );
+        if (!route) throw new Error("Resolved payment route disappeared");
+
+        const paymentLinkId = `AH-${randomUUID()}`;
+        const [created] = await tx
+          .insert(paymentRequestsTable)
+          .values({
+            obligationId: obligation.id,
+            routeId: route.id,
+            amountKopecks: decision.outstandingKopecks,
+            currency: "RUB",
+            idempotencyKey,
+            paymentLinkId,
+            status: "ready",
+            payerContactSnapshot: {
+              email: obligation.payerEmail,
+              phone: obligation.payerPhone,
+            },
+            fiscalSnapshot: route.fiscalProfile ?? {},
+            createdByUserId: auth.session.userId,
+          })
+          .returning();
+        if (!created) throw new Error("Payment request insert returned no row");
+
+        await tx.insert(fiscalReceiptsTable).values({
+          requestId: created.id,
+          kind: "sale",
+          status: "expected",
+          fiscalProfileSnapshot: route.fiscalProfile ?? {},
+        });
+        const safeEvent = {
+          action: "REQUEST_PREPARED",
+          amountKopecks: decision.outstandingKopecks,
           paymentLinkId,
-          JSON.stringify({
-            email: obligation.payer_email,
-            phone: obligation.payer_phone,
-          }),
-          JSON.stringify(route.fiscal_profile ?? {}),
-          auth.session.userId,
-        ],
-      );
-      const created = requestResult.rows[0]!;
-      await client.query(
-        `INSERT INTO fiscal_receipts (
-           request_id, kind, status, fiscal_profile_snapshot, created_at, updated_at
-         ) VALUES ($1,'sale','expected',$2::jsonb,NOW(),NOW())`,
-        [created.id, JSON.stringify(route.fiscal_profile ?? {})],
-      );
-      const safeEvent = {
-        action: "REQUEST_PREPARED",
-        amountKopecks: decision.outstandingKopecks,
-        paymentLinkId,
-      };
-      await client.query(
-        `INSERT INTO payment_events (
-           request_id, provider, event_identity, event_type, payload_digest,
-           safe_payload, actor_user_id, occurred_at, processed_at, created_at
-         ) VALUES ($1,'internal',$2,'REQUEST_PREPARED',$3,$4::jsonb,$5::uuid,NOW(),NOW(),NOW())`,
-        [
-          created.id,
-          `request-prepared:${created.id}`,
-          sha256Hex(JSON.stringify(safeEvent)),
-          JSON.stringify(safeEvent),
-          auth.session.userId,
-        ],
-      );
-      await client.query("COMMIT");
+        };
+        await tx.insert(paymentEventsTable).values({
+          requestId: created.id,
+          provider: "internal",
+          eventIdentity: `request-prepared:${created.id}`,
+          eventType: "REQUEST_PREPARED",
+          payloadDigest: sha256Hex(JSON.stringify(safeEvent)),
+          safePayload: safeEvent,
+          actorUserId: auth.session.userId,
+          occurredAt: new Date(),
+          processedAt: new Date(),
+        });
+        return { created, route, decision };
+      });
+
       res.status(201).json({
-        ...publicRequest(created),
-        recipientLabel: route.recipient_label,
-        issueDecision: decision,
+        ...publicRequest(result.created),
+        recipientLabel: result.route.recipientLabel,
+        issueDecision: result.decision,
         providerActivation: "PENDING_TOCHKA_ADAPTER",
       });
     } catch (err) {
-      await client.query("ROLLBACK").catch(() => undefined);
+      if (err instanceof PaymentHttpError) {
+        res.status(err.status).json(err.body);
+        return;
+      }
       if ((err as { code?: string }).code === "23505") {
-        const replay = await pool.query<RequestRow>(
-          `SELECT id, obligation_id, route_id, amount_kopecks, currency,
-                  payment_link_id, status, expires_at, created_at, updated_at
-             FROM payment_requests
-            WHERE idempotency_key = $1`,
-          [idempotencyKey],
-        );
-        if (replay.rows[0]) {
-          res.json({ ...publicRequest(replay.rows[0]), idempotentReplay: true });
+        const [replay] = await db
+          .select()
+          .from(paymentRequestsTable)
+          .where(eq(paymentRequestsTable.idempotencyKey, idempotencyKey))
+          .limit(1);
+        if (replay) {
+          res.json({ ...publicRequest(replay), idempotentReplay: true });
           return;
         }
       }
       logger.error({ err }, "Payment request preparation failed");
       res.status(503).json({ error: "Не удалось подготовить ссылку на оплату" });
-    } finally {
-      client.release();
     }
   },
 );
@@ -931,28 +894,60 @@ paymentsRouter.get("/payments/requests", async (_req, res) => {
   const auth = requestAuth(res);
   if (!auth) return;
   try {
-    const owner = auth.session.role === "owner" || auth.session.scope.unrestricted;
-    const base = `SELECT r.id, r.obligation_id, r.route_id, r.amount_kopecks,
-                         r.currency, r.payment_link_id, r.status, r.expires_at,
-                         r.created_at, r.updated_at, o.branch_crm_id,
-                         o.legal_entity_id::text, o.purpose, pr.recipient_label,
-                         fr.status AS receipt_status
-                    FROM payment_requests r
-                    JOIN payment_obligations o ON o.id = r.obligation_id
-                    JOIN payment_routes pr ON pr.id = r.route_id
-               LEFT JOIN fiscal_receipts fr
-                      ON fr.request_id = r.id AND fr.kind = 'sale'`;
-    const result = owner
-      ? await pool.query<RequestRow>(`${base} ORDER BY r.created_at DESC LIMIT 200`)
-      : await pool.query<RequestRow>(
-          `${base}
-            WHERE o.branch_crm_id = ANY($1::text[])
-              AND o.legal_entity_id::text = ANY($2::text[])
-            ORDER BY r.created_at DESC
-            LIMIT 200`,
-          [auth.session.scope.branchIds, auth.session.scope.legalEntityIds],
-        );
-    res.json(result.rows.map(publicRequest));
+    const owner =
+      auth.session.role === "owner" || auth.session.scope.unrestricted;
+    const rows = await db
+      .select({
+        request: paymentRequestsTable,
+        branchCrmId: paymentObligationsTable.branchCrmId,
+        legalEntityId: paymentObligationsTable.legalEntityId,
+        purpose: paymentObligationsTable.purpose,
+        recipientLabel: paymentRoutesTable.recipientLabel,
+        receiptStatus: fiscalReceiptsTable.status,
+      })
+      .from(paymentRequestsTable)
+      .innerJoin(
+        paymentObligationsTable,
+        eq(paymentObligationsTable.id, paymentRequestsTable.obligationId),
+      )
+      .innerJoin(
+        paymentRoutesTable,
+        eq(paymentRoutesTable.id, paymentRequestsTable.routeId),
+      )
+      .leftJoin(
+        fiscalReceiptsTable,
+        and(
+          eq(fiscalReceiptsTable.requestId, paymentRequestsTable.id),
+          eq(fiscalReceiptsTable.kind, "sale"),
+        ),
+      )
+      .where(
+        owner
+          ? undefined
+          : and(
+              inArray(
+                paymentObligationsTable.branchCrmId,
+                [...auth.session.scope.branchIds],
+              ),
+              inArray(
+                paymentObligationsTable.legalEntityId,
+                [...auth.session.scope.legalEntityIds],
+              ),
+            ),
+      )
+      .orderBy(desc(paymentRequestsTable.createdAt))
+      .limit(200);
+    res.json(
+      rows.map((row) =>
+        publicRequest(row.request, {
+          branchCrmId: row.branchCrmId,
+          legalEntityId: row.legalEntityId,
+          purpose: row.purpose,
+          recipientLabel: row.recipientLabel,
+          receiptStatus: row.receiptStatus,
+        }),
+      ),
+    );
   } catch (err) {
     logger.error({ err }, "Payment requests list failed");
     res.status(503).json({ error: "Платёжные запросы временно недоступны" });
@@ -967,59 +962,66 @@ paymentsRouter.post("/payments/requests/:requestId/cancel", async (req, res) => 
     return;
   }
   try {
-    const current = await pool.query<{
-      id: string;
-      status: string;
-      branch_crm_id: string;
-      legal_entity_id: string;
-    }>(
-      `SELECT r.id, r.status, o.branch_crm_id, o.legal_entity_id::text
-         FROM payment_requests r
-         JOIN payment_obligations o ON o.id = r.obligation_id
-        WHERE r.id = $1`,
-      [req.params.requestId],
-    );
-    const row = current.rows[0];
-    if (!row) {
+    const [current] = await db
+      .select({
+        request: paymentRequestsTable,
+        branchCrmId: paymentObligationsTable.branchCrmId,
+        legalEntityId: paymentObligationsTable.legalEntityId,
+      })
+      .from(paymentRequestsTable)
+      .innerJoin(
+        paymentObligationsTable,
+        eq(paymentObligationsTable.id, paymentRequestsTable.obligationId),
+      )
+      .where(eq(paymentRequestsTable.id, req.params.requestId))
+      .limit(1);
+    if (!current) {
       res.status(404).json({ error: "Платёжный запрос не найден" });
       return;
     }
-    if (!requirePaymentScope(res, auth, row.branch_crm_id, row.legal_entity_id)) {
+    if (
+      !requirePaymentScope(
+        res,
+        auth,
+        current.branchCrmId,
+        current.legalEntityId,
+      )
+    ) {
       return;
     }
-    if (row.status !== "ready") {
+    if (current.request.status !== "ready") {
       res.status(409).json({
-        error: "После передачи запроса провайдеру отмена выполняется отдельной операцией",
+        error:
+          "После передачи запроса провайдеру отмена выполняется отдельной операцией",
       });
       return;
     }
-    const result = await pool.query<RequestRow>(
-      `UPDATE payment_requests
-          SET status = 'cancelled', updated_at = NOW()
-        WHERE id = $1 AND status = 'ready'
-        RETURNING id, obligation_id, route_id, amount_kopecks, currency,
-                  payment_link_id, status, expires_at, created_at, updated_at`,
-      [req.params.requestId],
-    );
-    const cancelled = result.rows[0];
+    const [cancelled] = await db
+      .update(paymentRequestsTable)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(
+        and(
+          eq(paymentRequestsTable.id, req.params.requestId),
+          eq(paymentRequestsTable.status, "ready"),
+        ),
+      )
+      .returning();
     if (!cancelled) {
       res.status(409).json({ error: "Статус платежа уже изменился" });
       return;
     }
     const safeEvent = { action: "REQUEST_CANCELLED" };
-    await pool.query(
-      `INSERT INTO payment_events (
-         request_id, provider, event_identity, event_type, payload_digest,
-         safe_payload, actor_user_id, occurred_at, processed_at, created_at
-       ) VALUES ($1,'internal',$2,'REQUEST_CANCELLED',$3,$4::jsonb,$5::uuid,NOW(),NOW(),NOW())`,
-      [
-        cancelled.id,
-        `request-cancelled:${cancelled.id}:${randomUUID()}`,
-        sha256Hex(JSON.stringify(safeEvent)),
-        JSON.stringify(safeEvent),
-        auth.session.userId,
-      ],
-    );
+    await db.insert(paymentEventsTable).values({
+      requestId: cancelled.id,
+      provider: "internal",
+      eventIdentity: `request-cancelled:${cancelled.id}:${randomUUID()}`,
+      eventType: "REQUEST_CANCELLED",
+      payloadDigest: sha256Hex(JSON.stringify(safeEvent)),
+      safePayload: safeEvent,
+      actorUserId: auth.session.userId,
+      occurredAt: new Date(),
+      processedAt: new Date(),
+    });
     res.json(publicRequest(cancelled));
   } catch (err) {
     logger.error({ err }, "Payment request cancellation failed");
