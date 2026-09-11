@@ -1,5 +1,19 @@
 import { Router, type Response } from "express";
-import { pool } from "@workspace/db";
+import {
+  branchLegalEntityAssignmentsTable,
+  crmBranchesTable,
+  crmStudentsTable,
+  db,
+  familiesTable,
+  fiscalReceiptsTable,
+  legalEntitiesTable,
+  paymentObligationsTable,
+  paymentRequestsTable,
+  paymentRoutesTable,
+  personsTable,
+  studentProfilesTable,
+} from "@workspace/db";
+import { and, asc, eq, ilike, inArray, or } from "drizzle-orm";
 import { z } from "zod/v4";
 import { logger } from "../lib/logger.js";
 import type { AuthRole, BusinessScope } from "../lib/security/access-policy.js";
@@ -29,9 +43,11 @@ function isOwner(auth: PaymentWebAuth): boolean {
 }
 
 function canReadBranch(auth: PaymentWebAuth, branchCrmId: string): boolean {
-  return isOwner(auth) ||
+  return (
+    isOwner(auth) ||
     (auth.session.role === "payment_operator" &&
-      auth.session.scope.branchIds.includes(branchCrmId));
+      auth.session.scope.branchIds.includes(branchCrmId))
+  );
 }
 
 function safeKopecks(value: string | number): number {
@@ -46,37 +62,69 @@ paymentsWebRouter.get("/payments/catalog", async (_req, res) => {
   const auth = requestAuth(res);
   if (!auth) return;
   try {
-    const base = `
-      SELECT a.branch_crm_id,
-             COALESCE(NULLIF(b.name, ''), NULLIF(a.branch_name, ''), a.operating_unit_code) AS branch_name,
-             a.legal_entity_id::text,
-             l.display_name AS legal_entity_name,
-             l.legal_name
-        FROM branch_legal_entity_assignments a
-        JOIN legal_entities l ON l.id = a.legal_entity_id AND l.is_active = TRUE
-   LEFT JOIN crm_branches b ON b.crm_id = a.branch_crm_id
-       WHERE a.mapping_status = 'owner_confirmed'`;
-    const result = isOwner(auth)
-      ? await pool.query(`${base} ORDER BY branch_name, legal_entity_name`)
-      : await pool.query(
-          `${base}
-             AND a.branch_crm_id = ANY($1::text[])
-             AND a.legal_entity_id::text = ANY($2::text[])
-           ORDER BY branch_name, legal_entity_name`,
-          [auth.session.scope.branchIds, auth.session.scope.legalEntityIds],
-        );
+    const conditions = [
+      eq(branchLegalEntityAssignmentsTable.mappingStatus, "owner_confirmed"),
+      eq(legalEntitiesTable.isActive, true),
+    ];
+    if (!isOwner(auth)) {
+      conditions.push(
+        inArray(
+          branchLegalEntityAssignmentsTable.branchCrmId,
+          [...auth.session.scope.branchIds],
+        ),
+        inArray(
+          branchLegalEntityAssignmentsTable.legalEntityId,
+          [...auth.session.scope.legalEntityIds],
+        ),
+      );
+    }
+    const rows = await db
+      .select({
+        branchCrmId: branchLegalEntityAssignmentsTable.branchCrmId,
+        branchNameFromCrm: crmBranchesTable.name,
+        branchNameFromAssignment: branchLegalEntityAssignmentsTable.branchName,
+        operatingUnitCode: branchLegalEntityAssignmentsTable.operatingUnitCode,
+        legalEntityId: legalEntitiesTable.id,
+        legalEntityName: legalEntitiesTable.displayName,
+        legalName: legalEntitiesTable.legalName,
+      })
+      .from(branchLegalEntityAssignmentsTable)
+      .innerJoin(
+        legalEntitiesTable,
+        eq(
+          legalEntitiesTable.id,
+          branchLegalEntityAssignmentsTable.legalEntityId,
+        ),
+      )
+      .leftJoin(
+        crmBranchesTable,
+        eq(
+          crmBranchesTable.crmId,
+          branchLegalEntityAssignmentsTable.branchCrmId,
+        ),
+      )
+      .where(and(...conditions))
+      .orderBy(
+        asc(crmBranchesTable.name),
+        asc(legalEntitiesTable.displayName),
+      );
     res.json(
-      result.rows.map((row) => ({
-        branchCrmId: String(row.branch_crm_id),
-        branchName: String(row.branch_name ?? row.branch_crm_id),
-        legalEntityId: String(row.legal_entity_id),
-        legalEntityName: String(row.legal_entity_name ?? row.legal_name ?? "Юридическое лицо"),
-        legalName: row.legal_name == null ? null : String(row.legal_name),
+      rows.map((row) => ({
+        branchCrmId: row.branchCrmId,
+        branchName:
+          row.branchNameFromCrm?.trim() ||
+          row.branchNameFromAssignment?.trim() ||
+          row.operatingUnitCode,
+        legalEntityId: row.legalEntityId,
+        legalEntityName: row.legalEntityName || row.legalName,
+        legalName: row.legalName,
       })),
     );
   } catch (err) {
     logger.error({ err }, "ArtHello Pay catalog failed");
-    res.status(503).json({ error: "Справочник ArtHello Pay временно недоступен" });
+    res
+      .status(503)
+      .json({ error: "Справочник ArtHello Pay временно недоступен" });
   }
 });
 
@@ -98,78 +146,121 @@ paymentsWebRouter.get("/payments/customers", async (req, res) => {
     return;
   }
   try {
-    const scopeCheck = await pool.query<{ legal_entity_id: string }>(
-      `SELECT legal_entity_id::text
-         FROM branch_legal_entity_assignments
-        WHERE branch_crm_id = $1
-          AND mapping_status = 'owner_confirmed'
-        LIMIT 1`,
-      [parsed.data.branchCrmId],
-    );
-    const legalEntityId = scopeCheck.rows[0]?.legal_entity_id;
+    const [scopeRow] = await db
+      .select({ legalEntityId: branchLegalEntityAssignmentsTable.legalEntityId })
+      .from(branchLegalEntityAssignmentsTable)
+      .where(
+        and(
+          eq(
+            branchLegalEntityAssignmentsTable.branchCrmId,
+            parsed.data.branchCrmId,
+          ),
+          eq(
+            branchLegalEntityAssignmentsTable.mappingStatus,
+            "owner_confirmed",
+          ),
+        ),
+      )
+      .limit(1);
+    const legalEntityId = scopeRow?.legalEntityId;
     if (!legalEntityId) {
-      res.status(409).json({ error: "Для филиала не подтверждено юридическое лицо" });
+      res
+        .status(409)
+        .json({ error: "Для филиала не подтверждено юридическое лицо" });
       return;
     }
-    if (!isOwner(auth) && !auth.session.scope.legalEntityIds.includes(legalEntityId)) {
-      res.status(403).json({ error: "Недостаточно прав для юридического лица" });
+    if (
+      !isOwner(auth) &&
+      !auth.session.scope.legalEntityIds.includes(legalEntityId)
+    ) {
+      res
+        .status(403)
+        .json({ error: "Недостаточно прав для юридического лица" });
       return;
     }
 
-    const query = parsed.data.q.toLowerCase();
-    const result = await pool.query<{
-      student_crm_id: string;
-      student_person_id: string | null;
-      family_id: string | null;
-      student_name: string | null;
-      student_status: string | null;
-      family_name: string | null;
-      payer_person_id: string | null;
-      payer_name: string | null;
-      payer_phone: string | null;
-      payer_email: string | null;
-    }>(
-      `SELECT s.crm_id AS student_crm_id,
-              sp.student_person_id::text,
-              sp.family_id::text,
-              COALESCE(NULLIF(sp.full_name, ''), NULLIF(s.full_name, '')) AS student_name,
-              COALESCE(NULLIF(sp.status, ''), NULLIF(s.status, '')) AS student_status,
-              f.family_name,
-              f.primary_guardian_person_id::text AS payer_person_id,
-              COALESCE(NULLIF(g.full_name, ''), NULLIF(f.family_name, '')) AS payer_name,
-              COALESCE(NULLIF(g.primary_phone, ''), NULLIF(f.primary_phone, ''), NULLIF(s.phone, '')) AS payer_phone,
-              COALESCE(NULLIF(g.primary_email, ''), NULLIF(s.email, '')) AS payer_email
-         FROM crm_students s
-    LEFT JOIN student_profiles sp
-           ON sp.student_crm_id = s.crm_id AND sp.record_state = 'current'
-    LEFT JOIN families f ON f.id = sp.family_id
-    LEFT JOIN persons g ON g.id = f.primary_guardian_person_id
-        WHERE s.branch_crm_id = $1
-          AND s.record_state = 'current'
-          AND (
-            $2 = '' OR
-            LOWER(COALESCE(sp.full_name, s.full_name, '')) LIKE '%' || $2 || '%' OR
-            LOWER(COALESCE(f.family_name, '')) LIKE '%' || $2 || '%' OR
-            LOWER(COALESCE(g.full_name, '')) LIKE '%' || $2 || '%' OR
-            LOWER(COALESCE(g.primary_phone, f.primary_phone, s.phone, '')) LIKE '%' || $2 || '%'
-          )
-        ORDER BY COALESCE(sp.full_name, s.full_name, s.crm_id)
-        LIMIT 60`,
-      [parsed.data.branchCrmId, query],
-    );
+    const query = parsed.data.q.trim();
+    const filters = [
+      eq(crmStudentsTable.branchCrmId, parsed.data.branchCrmId),
+      eq(crmStudentsTable.recordState, "current"),
+    ];
+    if (query) {
+      const pattern = `%${query}%`;
+      filters.push(
+        or(
+          ilike(studentProfilesTable.fullName, pattern),
+          ilike(crmStudentsTable.fullName, pattern),
+          ilike(familiesTable.familyName, pattern),
+          ilike(personsTable.fullName, pattern),
+          ilike(personsTable.primaryPhone, pattern),
+          ilike(familiesTable.primaryPhone, pattern),
+          ilike(crmStudentsTable.phone, pattern),
+        )!,
+      );
+    }
+
+    const rows = await db
+      .select({
+        studentCrmId: crmStudentsTable.crmId,
+        studentPersonId: studentProfilesTable.studentPersonId,
+        familyId: studentProfilesTable.familyId,
+        studentNameFromProfile: studentProfilesTable.fullName,
+        studentNameFromCrm: crmStudentsTable.fullName,
+        studentStatusFromProfile: studentProfilesTable.status,
+        studentStatusFromCrm: crmStudentsTable.status,
+        familyName: familiesTable.familyName,
+        payerPersonId: familiesTable.primaryGuardianPersonId,
+        payerName: personsTable.fullName,
+        guardianPhone: personsTable.primaryPhone,
+        familyPhone: familiesTable.primaryPhone,
+        studentPhone: crmStudentsTable.phone,
+        guardianEmail: personsTable.primaryEmail,
+        studentEmail: crmStudentsTable.email,
+      })
+      .from(crmStudentsTable)
+      .leftJoin(
+        studentProfilesTable,
+        and(
+          eq(studentProfilesTable.studentCrmId, crmStudentsTable.crmId),
+          eq(studentProfilesTable.recordState, "current"),
+        ),
+      )
+      .leftJoin(
+        familiesTable,
+        eq(familiesTable.id, studentProfilesTable.familyId),
+      )
+      .leftJoin(
+        personsTable,
+        eq(personsTable.id, familiesTable.primaryGuardianPersonId),
+      )
+      .where(and(...filters))
+      .orderBy(asc(studentProfilesTable.fullName), asc(crmStudentsTable.fullName))
+      .limit(60);
+
     res.json(
-      result.rows.map((row) => ({
+      rows.map((row) => ({
         branchCrmId: parsed.data.branchCrmId,
         legalEntityId,
-        studentCrmId: row.student_crm_id,
-        studentPersonId: row.student_person_id,
-        familyId: row.family_id,
-        studentName: row.student_name ?? `Ученик ${row.student_crm_id}`,
-        status: row.student_status,
-        payerPersonId: row.payer_person_id,
-        payerName: row.payer_name,
-        payerPhone: row.payer_phone,
-        payerEmail: row.payer_email,
+        studentCrmId: row.studentCrmId,
+        studentPersonId: row.studentPersonId,
+        familyId: row.familyId,
+        studentName:
+          row.studentNameFromProfile?.trim() ||
+          row.studentNameFromCrm?.trim() ||
+          `Ученик ${row.studentCrmId}`,
+        status:
+          row.studentStatusFromProfile?.trim() ||
+          row.studentStatusFromCrm?.trim() ||
+          null,
+        payerPersonId: row.payerPersonId,
+        payerName: row.payerName?.trim() || row.familyName?.trim() || null,
+        payerPhone:
+          row.guardianPhone?.trim() ||
+          row.familyPhone?.trim() ||
+          row.studentPhone?.trim() ||
+          null,
+        payerEmail:
+          row.guardianEmail?.trim() || row.studentEmail?.trim() || null,
       })),
     );
   } catch (err) {
@@ -180,69 +271,93 @@ paymentsWebRouter.get("/payments/customers", async (req, res) => {
 
 paymentsWebRouter.get("/payments/public/:paymentLinkId", async (req, res) => {
   const paymentLinkId = req.params.paymentLinkId?.trim() ?? "";
-  if (!/^AH-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(paymentLinkId)) {
+  if (
+    !/^AH-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      paymentLinkId,
+    )
+  ) {
     res.status(404).json({ error: "Платёжная ссылка не найдена" });
     return;
   }
   res.setHeader("Cache-Control", "no-store");
   try {
-    const result = await pool.query<{
-      payment_link_id: string;
-      request_status: string;
-      amount_kopecks: string | number;
-      currency: string;
-      provider_payment_url: string | null;
-      purpose: string;
-      billing_period: string | null;
-      due_date: string | null;
-      student_name: string | null;
-      recipient_label: string;
-      receipt_status: string | null;
-      receipt_url: string | null;
-    }>(
-      `SELECT r.payment_link_id,
-              r.status AS request_status,
-              r.amount_kopecks,
-              r.currency,
-              r.provider_payment_url,
-              o.purpose,
-              o.billing_period::text,
-              o.due_date::text,
-              COALESCE(NULLIF(sp.full_name, ''), NULLIF(s.full_name, '')) AS student_name,
-              pr.recipient_label,
-              fr.status AS receipt_status,
-              fr.receipt_url
-         FROM payment_requests r
-         JOIN payment_obligations o ON o.id = r.obligation_id
-         JOIN payment_routes pr ON pr.id = r.route_id
-    LEFT JOIN student_profiles sp ON sp.student_crm_id = o.student_crm_id
-    LEFT JOIN crm_students s ON s.crm_id = o.student_crm_id
-    LEFT JOIN fiscal_receipts fr ON fr.request_id = r.id AND fr.kind = 'sale'
-        WHERE r.payment_link_id = $1
-        LIMIT 1`,
-      [paymentLinkId],
-    );
-    const row = result.rows[0];
+    const [row] = await db
+      .select({
+        paymentLinkId: paymentRequestsTable.paymentLinkId,
+        requestStatus: paymentRequestsTable.status,
+        amountKopecks: paymentRequestsTable.amountKopecks,
+        currency: paymentRequestsTable.currency,
+        providerPaymentUrl: paymentRequestsTable.providerPaymentUrl,
+        purpose: paymentObligationsTable.purpose,
+        billingPeriod: paymentObligationsTable.billingPeriod,
+        dueDate: paymentObligationsTable.dueDate,
+        studentNameFromProfile: studentProfilesTable.fullName,
+        studentNameFromCrm: crmStudentsTable.fullName,
+        recipientLabel: paymentRoutesTable.recipientLabel,
+        receiptStatus: fiscalReceiptsTable.status,
+        receiptUrl: fiscalReceiptsTable.receiptUrl,
+      })
+      .from(paymentRequestsTable)
+      .innerJoin(
+        paymentObligationsTable,
+        eq(paymentObligationsTable.id, paymentRequestsTable.obligationId),
+      )
+      .innerJoin(
+        paymentRoutesTable,
+        eq(paymentRoutesTable.id, paymentRequestsTable.routeId),
+      )
+      .leftJoin(
+        studentProfilesTable,
+        eq(
+          studentProfilesTable.studentCrmId,
+          paymentObligationsTable.studentCrmId,
+        ),
+      )
+      .leftJoin(
+        crmStudentsTable,
+        eq(crmStudentsTable.crmId, paymentObligationsTable.studentCrmId),
+      )
+      .leftJoin(
+        fiscalReceiptsTable,
+        and(
+          eq(fiscalReceiptsTable.requestId, paymentRequestsTable.id),
+          eq(fiscalReceiptsTable.kind, "sale"),
+        ),
+      )
+      .where(eq(paymentRequestsTable.paymentLinkId, paymentLinkId))
+      .limit(1);
     if (!row) {
       res.status(404).json({ error: "Платёжная ссылка не найдена" });
       return;
     }
-    const terminalStatuses = new Set(["paid", "fiscalized", "posted", "cancelled", "expired", "refunded"]);
-    const canPay = Boolean(row.provider_payment_url) && !terminalStatuses.has(row.request_status);
+    const terminalStatuses = new Set([
+      "paid",
+      "fiscalized",
+      "posted",
+      "cancelled",
+      "expired",
+      "refunded",
+    ]);
+    const canPay =
+      Boolean(row.providerPaymentUrl) &&
+      !terminalStatuses.has(row.requestStatus);
     res.json({
-      paymentLinkId: row.payment_link_id,
-      status: row.request_status,
-      amountKopecks: safeKopecks(row.amount_kopecks),
+      paymentLinkId: row.paymentLinkId,
+      status: row.requestStatus,
+      amountKopecks: safeKopecks(row.amountKopecks),
       currency: row.currency,
       purpose: row.purpose,
-      billingPeriod: row.billing_period,
-      dueDate: row.due_date,
-      studentName: row.student_name,
-      recipientLabel: row.recipient_label,
-      receiptStatus: row.receipt_status,
-      receiptUrl: row.receipt_url,
+      billingPeriod: row.billingPeriod,
+      dueDate: row.dueDate,
+      studentName:
+        row.studentNameFromProfile?.trim() ||
+        row.studentNameFromCrm?.trim() ||
+        null,
+      recipientLabel: row.recipientLabel,
+      receiptStatus: row.receiptStatus,
+      receiptUrl: row.receiptUrl,
       canPay,
-      paymentUrl: canPay ? row.provider_payment_url : null,
+      paymentUrl: canPay ? row.providerPaymentUrl : null,
     });
   } catch (err) {
     logger.error({ err }, "Public ArtHello Pay request failed");
