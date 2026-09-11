@@ -24,6 +24,8 @@ test("payment_operator is a recognized session role", () => {
 
 test("payment operator can use only explicitly registered ArtHello Pay routes", () => {
   for (const [method, path] of [
+    ["GET", "/payments/catalog"],
+    ["GET", "/payments/customers"],
     ["GET", "/payments/obligations"],
     ["GET", "/payments/obligations/11111111-1111-4111-8111-111111111111"],
     ["GET", "/payments/requests"],
@@ -93,6 +95,15 @@ test("payment operator cannot configure routes or provision other operators", ()
 });
 
 test("payment operator fails closed without complete branch and legal-entity scope", () => {
+  assert.deepEqual(
+    decideRouteAccess(
+      "payment_operator",
+      "GET",
+      "/payments/catalog",
+      incompleteScope,
+    ),
+    { allowed: false, policy: "scope-required" },
+  );
   assert.deepEqual(
     decideRouteAccess(
       "payment_operator",
