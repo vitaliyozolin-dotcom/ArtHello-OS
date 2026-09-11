@@ -20,10 +20,7 @@ import {
   type PaymentEvidenceStatus,
   type PaymentRouteCandidate,
 } from "../lib/payments/payment-policy.js";
-import type {
-  AuthRole,
-  BusinessScope,
-} from "../lib/security/access-policy.js";
+import type { AuthRole, BusinessScope } from "../lib/security/access-policy.js";
 import { PostgresAuthStore } from "../lib/security/auth-store.js";
 import {
   hashPassword,
@@ -65,7 +62,9 @@ class PaymentHttpError extends Error {
     readonly status: number,
     readonly body: Record<string, unknown>,
   ) {
-    super(typeof body.error === "string" ? body.error : "Payment request failed");
+    super(
+      typeof body.error === "string" ? body.error : "Payment request failed",
+    );
   }
 }
 
@@ -93,7 +92,8 @@ function hasPaymentScope(
   branchCrmId: string,
   legalEntityId: string,
 ): boolean {
-  if (auth.session.role === "owner" || auth.session.scope.unrestricted) return true;
+  if (auth.session.role === "owner" || auth.session.scope.unrestricted)
+    return true;
   return (
     auth.session.role === "payment_operator" &&
     auth.session.scope.branchIds.includes(branchCrmId) &&
@@ -200,10 +200,7 @@ async function branchLegalEntityConfirmed(
       and(
         eq(branchLegalEntityAssignmentsTable.branchCrmId, branchCrmId),
         eq(branchLegalEntityAssignmentsTable.legalEntityId, legalEntityId),
-        eq(
-          branchLegalEntityAssignmentsTable.mappingStatus,
-          "owner_confirmed",
-        ),
+        eq(branchLegalEntityAssignmentsTable.mappingStatus, "owner_confirmed"),
         eq(legalEntitiesTable.isActive, true),
       ),
     )
@@ -225,9 +222,7 @@ async function loadActiveRequestAmount(
     )
     .orderBy(desc(paymentRequestsTable.createdAt))
     .limit(1);
-  return row
-    ? safeKopecks(row.amountKopecks, "activeRequestKopecks")
-    : null;
+  return row ? safeKopecks(row.amountKopecks, "activeRequestKopecks") : null;
 }
 
 function routeCandidate(row: RouteRow): PaymentRouteCandidate {
@@ -586,14 +581,12 @@ paymentsRouter.get("/payments/obligations", async (_req, res) => {
         owner
           ? undefined
           : and(
-              inArray(
-                paymentObligationsTable.branchCrmId,
-                [...auth.session.scope.branchIds],
-              ),
-              inArray(
-                paymentObligationsTable.legalEntityId,
-                [...auth.session.scope.legalEntityIds],
-              ),
+              inArray(paymentObligationsTable.branchCrmId, [
+                ...auth.session.scope.branchIds,
+              ]),
+              inArray(paymentObligationsTable.legalEntityId, [
+                ...auth.session.scope.legalEntityIds,
+              ]),
             ),
       )
       .orderBy(desc(paymentObligationsTable.createdAt))
@@ -668,7 +661,11 @@ paymentsRouter.post(
               ready: true,
               recipientLabel:
                 preview.routes.find(
-                  (route) => route.id === preview.routeResolution.route.id,
+                  (route) =>
+                    route.id ===
+                    (preview.routeResolution.ok
+                      ? preview.routeResolution.route.id
+                      : ""),
                 )?.recipientLabel ?? null,
             }
           : { ready: false, reason: preview.routeResolution.reason },
@@ -762,10 +759,9 @@ paymentsRouter.post(
           .where(
             and(
               eq(paymentRequestsTable.obligationId, obligation.id),
-              inArray(
-                paymentRequestsTable.status,
-                [...ACTIVE_REQUEST_STATUSES],
-              ),
+              inArray(paymentRequestsTable.status, [
+                ...ACTIVE_REQUEST_STATUSES,
+              ]),
             ),
           )
           .orderBy(desc(paymentRequestsTable.createdAt))
@@ -885,7 +881,9 @@ paymentsRouter.post(
         }
       }
       logger.error({ err }, "Payment request preparation failed");
-      res.status(503).json({ error: "Не удалось подготовить ссылку на оплату" });
+      res
+        .status(503)
+        .json({ error: "Не удалось подготовить ссылку на оплату" });
     }
   },
 );
@@ -925,14 +923,12 @@ paymentsRouter.get("/payments/requests", async (_req, res) => {
         owner
           ? undefined
           : and(
-              inArray(
-                paymentObligationsTable.branchCrmId,
-                [...auth.session.scope.branchIds],
-              ),
-              inArray(
-                paymentObligationsTable.legalEntityId,
-                [...auth.session.scope.legalEntityIds],
-              ),
+              inArray(paymentObligationsTable.branchCrmId, [
+                ...auth.session.scope.branchIds,
+              ]),
+              inArray(paymentObligationsTable.legalEntityId, [
+                ...auth.session.scope.legalEntityIds,
+              ]),
             ),
       )
       .orderBy(desc(paymentRequestsTable.createdAt))
@@ -954,77 +950,80 @@ paymentsRouter.get("/payments/requests", async (_req, res) => {
   }
 });
 
-paymentsRouter.post("/payments/requests/:requestId/cancel", async (req, res) => {
-  const auth = requestAuth(res);
-  if (!auth) return;
-  if (!z.string().uuid().safeParse(req.params.requestId).success) {
-    res.status(400).json({ error: "Некорректный идентификатор" });
-    return;
-  }
-  try {
-    const [current] = await db
-      .select({
-        request: paymentRequestsTable,
-        branchCrmId: paymentObligationsTable.branchCrmId,
-        legalEntityId: paymentObligationsTable.legalEntityId,
-      })
-      .from(paymentRequestsTable)
-      .innerJoin(
-        paymentObligationsTable,
-        eq(paymentObligationsTable.id, paymentRequestsTable.obligationId),
-      )
-      .where(eq(paymentRequestsTable.id, req.params.requestId))
-      .limit(1);
-    if (!current) {
-      res.status(404).json({ error: "Платёжный запрос не найден" });
+paymentsRouter.post(
+  "/payments/requests/:requestId/cancel",
+  async (req, res) => {
+    const auth = requestAuth(res);
+    if (!auth) return;
+    if (!z.string().uuid().safeParse(req.params.requestId).success) {
+      res.status(400).json({ error: "Некорректный идентификатор" });
       return;
     }
-    if (
-      !requirePaymentScope(
-        res,
-        auth,
-        current.branchCrmId,
-        current.legalEntityId,
-      )
-    ) {
-      return;
-    }
-    if (current.request.status !== "ready") {
-      res.status(409).json({
-        error:
-          "После передачи запроса провайдеру отмена выполняется отдельной операцией",
+    try {
+      const [current] = await db
+        .select({
+          request: paymentRequestsTable,
+          branchCrmId: paymentObligationsTable.branchCrmId,
+          legalEntityId: paymentObligationsTable.legalEntityId,
+        })
+        .from(paymentRequestsTable)
+        .innerJoin(
+          paymentObligationsTable,
+          eq(paymentObligationsTable.id, paymentRequestsTable.obligationId),
+        )
+        .where(eq(paymentRequestsTable.id, req.params.requestId))
+        .limit(1);
+      if (!current) {
+        res.status(404).json({ error: "Платёжный запрос не найден" });
+        return;
+      }
+      if (
+        !requirePaymentScope(
+          res,
+          auth,
+          current.branchCrmId,
+          current.legalEntityId,
+        )
+      ) {
+        return;
+      }
+      if (current.request.status !== "ready") {
+        res.status(409).json({
+          error:
+            "После передачи запроса провайдеру отмена выполняется отдельной операцией",
+        });
+        return;
+      }
+      const [cancelled] = await db
+        .update(paymentRequestsTable)
+        .set({ status: "cancelled", updatedAt: new Date() })
+        .where(
+          and(
+            eq(paymentRequestsTable.id, req.params.requestId),
+            eq(paymentRequestsTable.status, "ready"),
+          ),
+        )
+        .returning();
+      if (!cancelled) {
+        res.status(409).json({ error: "Статус платежа уже изменился" });
+        return;
+      }
+      const safeEvent = { action: "REQUEST_CANCELLED" };
+      await db.insert(paymentEventsTable).values({
+        requestId: cancelled.id,
+        provider: "internal",
+        eventIdentity: `request-cancelled:${cancelled.id}:${randomUUID()}`,
+        eventType: "REQUEST_CANCELLED",
+        payloadDigest: sha256Hex(JSON.stringify(safeEvent)),
+        safePayload: safeEvent,
+        actorUserId: auth.session.userId,
+        occurredAt: new Date(),
+        processedAt: new Date(),
       });
-      return;
+      res.json(publicRequest(cancelled));
+    } catch (err) {
+      logger.error({ err }, "Payment request cancellation failed");
+      res.status(503).json({ error: "Не удалось отменить платёжный запрос" });
     }
-    const [cancelled] = await db
-      .update(paymentRequestsTable)
-      .set({ status: "cancelled", updatedAt: new Date() })
-      .where(
-        and(
-          eq(paymentRequestsTable.id, req.params.requestId),
-          eq(paymentRequestsTable.status, "ready"),
-        ),
-      )
-      .returning();
-    if (!cancelled) {
-      res.status(409).json({ error: "Статус платежа уже изменился" });
-      return;
-    }
-    const safeEvent = { action: "REQUEST_CANCELLED" };
-    await db.insert(paymentEventsTable).values({
-      requestId: cancelled.id,
-      provider: "internal",
-      eventIdentity: `request-cancelled:${cancelled.id}:${randomUUID()}`,
-      eventType: "REQUEST_CANCELLED",
-      payloadDigest: sha256Hex(JSON.stringify(safeEvent)),
-      safePayload: safeEvent,
-      actorUserId: auth.session.userId,
-      occurredAt: new Date(),
-      processedAt: new Date(),
-    });
-    res.json(publicRequest(cancelled));
-  } catch (err) {
-    logger.error({ err }, "Payment request cancellation failed");
-    res.status(503).json({ error: "Не удалось отменить платёжный запрос" });
-  }
-});
+  },
+);

@@ -68,14 +68,12 @@ paymentsWebRouter.get("/payments/catalog", async (_req, res) => {
     ];
     if (!isOwner(auth)) {
       conditions.push(
-        inArray(
-          branchLegalEntityAssignmentsTable.branchCrmId,
-          [...auth.session.scope.branchIds],
-        ),
-        inArray(
-          branchLegalEntityAssignmentsTable.legalEntityId,
-          [...auth.session.scope.legalEntityIds],
-        ),
+        inArray(branchLegalEntityAssignmentsTable.branchCrmId, [
+          ...auth.session.scope.branchIds,
+        ]),
+        inArray(branchLegalEntityAssignmentsTable.legalEntityId, [
+          ...auth.session.scope.legalEntityIds,
+        ]),
       );
     }
     const rows = await db
@@ -104,10 +102,7 @@ paymentsWebRouter.get("/payments/catalog", async (_req, res) => {
         ),
       )
       .where(and(...conditions))
-      .orderBy(
-        asc(crmBranchesTable.name),
-        asc(legalEntitiesTable.displayName),
-      );
+      .orderBy(asc(crmBranchesTable.name), asc(legalEntitiesTable.displayName));
     res.json(
       rows.map((row) => ({
         branchCrmId: row.branchCrmId,
@@ -147,7 +142,9 @@ paymentsWebRouter.get("/payments/customers", async (req, res) => {
   }
   try {
     const [scopeRow] = await db
-      .select({ legalEntityId: branchLegalEntityAssignmentsTable.legalEntityId })
+      .select({
+        legalEntityId: branchLegalEntityAssignmentsTable.legalEntityId,
+      })
       .from(branchLegalEntityAssignmentsTable)
       .where(
         and(
@@ -234,7 +231,10 @@ paymentsWebRouter.get("/payments/customers", async (req, res) => {
         eq(personsTable.id, familiesTable.primaryGuardianPersonId),
       )
       .where(and(...filters))
-      .orderBy(asc(studentProfilesTable.fullName), asc(crmStudentsTable.fullName))
+      .orderBy(
+        asc(studentProfilesTable.fullName),
+        asc(crmStudentsTable.fullName),
+      )
       .limit(60);
 
     res.json(

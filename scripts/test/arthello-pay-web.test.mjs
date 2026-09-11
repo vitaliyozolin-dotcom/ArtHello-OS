@@ -23,10 +23,7 @@ test("ArtHello Pay has an isolated static web shell", () => {
 });
 
 test("ArtHello Pay uses the approved host convention and same-origin API proxy", () => {
-  assert.match(
-    caddy,
-    /\{\$ARTHELLO_PAY_HOST:pay-188-225-38-55\.sslip\.io\}/,
-  );
+  assert.match(caddy, /\{\$ARTHELLO_PAY_HOST:pay-188-225-38-55\.sslip\.io\}/);
   assert.match(caddy, /root \* \/srv\/pay/);
   assert.match(caddy, /@api path \/api\/\*/);
   assert.match(caddy, /reverse_proxy @api api:8080/);

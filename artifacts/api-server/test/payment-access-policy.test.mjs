@@ -38,10 +38,7 @@ test("payment operator can use only explicitly registered ArtHello Pay routes", 
       "POST",
       "/payments/obligations/11111111-1111-4111-8111-111111111111/requests",
     ],
-    [
-      "POST",
-      "/payments/requests/11111111-1111-4111-8111-111111111111/cancel",
-    ],
+    ["POST", "/payments/requests/11111111-1111-4111-8111-111111111111/cancel"],
   ]) {
     assert.deepEqual(
       decideRouteAccess("payment_operator", method, path, completeScope),
@@ -58,7 +55,8 @@ test("payment operator cannot read or write banking routes", () => {
     ["POST", "/banking/transactions/tx-1/match"],
   ]) {
     assert.equal(
-      decideRouteAccess("payment_operator", method, path, completeScope).allowed,
+      decideRouteAccess("payment_operator", method, path, completeScope)
+        .allowed,
       false,
     );
   }

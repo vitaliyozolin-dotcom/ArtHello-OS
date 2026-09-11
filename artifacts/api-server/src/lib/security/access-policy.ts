@@ -7,7 +7,10 @@ export const AUTH_ROLES = [
 export type AuthRole = (typeof AUTH_ROLES)[number];
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const NON_BUSINESS_ACCOUNT_ROUTES: ReadonlyArray<{ method: string; path: string }> = [
+const NON_BUSINESS_ACCOUNT_ROUTES: ReadonlyArray<{
+  method: string;
+  path: string;
+}> = [
   { method: "GET", path: "/auth/me" },
   { method: "POST", path: "/auth/logout" },
   { method: "POST", path: "/auth/password" },
@@ -85,7 +88,9 @@ function normalizePath(path: string): string {
   return withoutQuery === "/" ? withoutQuery : withoutQuery.replace(/\/+$/, "");
 }
 
-export function hasCompleteBusinessScope(scope: BusinessScope | null | undefined): boolean {
+export function hasCompleteBusinessScope(
+  scope: BusinessScope | null | undefined,
+): boolean {
   if (!scope || scope.unrestricted) return Boolean(scope?.unrestricted);
   return scope.branchIds.length > 0 && scope.legalEntityIds.length > 0;
 }
