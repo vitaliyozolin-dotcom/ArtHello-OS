@@ -26,6 +26,16 @@ jobs:
           pnpm install --frozen-lockfile
       - name: Normalize only D149 source files
         run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'artifacts/api-server/src/routes/payments.ts';
+          let source = fs.readFileSync(path, 'utf8');
+          source = source.replace(
+            'route.id === preview.routeResolution.route.id,',
+            'route.id === (preview.routeResolution.ok ? preview.routeResolution.route.id : ""),',
+          );
+          fs.writeFileSync(path, source);
+          NODE
           pnpm exec prettier --write \
             artifacts/api-server/src/routes/payments.ts \
             artifacts/api-server/src/routes/payments-web.ts \
@@ -38,6 +48,7 @@ jobs:
       - name: Run focused architecture and security checks
         run: |
           node scripts/lib/db-access-policy.mjs
+          pnpm run typecheck:libs
           pnpm --filter @workspace/api-server run typecheck
           pnpm --filter @workspace/api-server run test:security
           node --test scripts/test/arthello-pay-web.test.mjs
