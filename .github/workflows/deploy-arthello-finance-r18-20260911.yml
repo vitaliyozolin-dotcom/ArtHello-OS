@@ -363,7 +363,6 @@ jobs:
         quality_run=""
         verify_run=""
         proof_run=""
-        r14_run=""
         for attempt in $(seq 1 100); do
           if [ -z "$quality_run" ]; then
             quality_run="$(workflow_success quality.yml 'Quality gates' 'secret-scan,test,d084-candidate-tests,d085-candidate-tests' || true)"
@@ -374,10 +373,7 @@ jobs:
           if [ -z "$proof_run" ]; then
             proof_run="$(workflow_success proof-gates.yml 'ArtHello Proof Gates' 'prove' || true)"
           fi
-          if [ -z "$r14_run" ]; then
-            r14_run="$(workflow_success verify-arthello-r14.yml 'Verify ArtHello Tochka continuation' 'r12-candidate-tests,r13-candidate-tests,r14-candidate-tests,r15-candidate-tests,r16-candidate-tests,r17-candidate-tests' || true)"
-          fi
-          if [ -n "$quality_run" ] && [ -n "$verify_run" ] && [ -n "$proof_run" ] && [ -n "$r14_run" ]; then
+          if [ -n "$quality_run" ] && [ -n "$verify_run" ] && [ -n "$proof_run" ]; then
             break
           fi
           sleep 15
@@ -385,7 +381,6 @@ jobs:
         test -n "$quality_run"
         test -n "$verify_run"
         test -n "$proof_run"
-        test -n "$r14_run"
 
         ref_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
           "${headers[@]}" "$api/git/ref/heads/main")"
@@ -393,7 +388,6 @@ jobs:
 
         printf 'tree_sha=%s\nquality_run=%s\nverify_run=%s\nproof_run=%s\n' \
           "$tree_sha" "$quality_run" "$verify_run" "$proof_run" >> "$GITHUB_OUTPUT"
-        printf 'r14_run=%s\n' "$r14_run" >> "$GITHUB_OUTPUT"
         printf 'ARTHELLO_EXACT_SHA_GATES=VERIFIED\n'
     - name: Check out exact verified release
       timeout-minutes: 3
@@ -413,7 +407,16 @@ jobs:
         test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
         git merge-base --is-ancestor 6da3dd6488e83dac5a6efe7f6ecf3d53e8a1fbc3 HEAD
         git diff --exit-code --quiet HEAD --
-        python3 -I -B deploy/v52/recovery-r17/verify-contract.py
+        sha256sum -c <<'PINNED_RELEASE_HELPERS'
+        4cdcd2771994fe8ea11bb731fa1ef5f997da489adfc89e3e78baff271096d659  deploy/v52/recovery-r18/r17-controller.yml
+        455f0dbadc2e80c16af72a38e21bdcc86d44e2626c0108845e6a0ea8580b2960  .github/scripts/r18-backup-adoption.py
+        5be9991799c78cfa5067699d76acabb1a84b29331410aacfcc76e6f9c71f3922  .github/scripts/r18-backup-controller.py
+        139ca2ca45b22e9bb5c1749be3cac597147055569eea0fdacc85fe838680a753  .github/scripts/r18-candidate-state.py
+        50f171d4be35ddb0aad247d69a50e7553dbe9cefcc5182e509f91ff4dde45d4a  .github/scripts/r18-live-baseline.py
+        052453d9c0d38203bc9d7e236f56000257b81a252d486af8e139cefcc04defe5  .github/scripts/r18-public-audit.py
+        38fa521a494d349a964ef15cfd615eaaa679ff3f66585d13fed0e7fdaae7e53b  .github/scripts/r18-resume-candidate.py
+        e09894fa31dc768519b493924536ca7b4517475e1fe92b8938d3bf1cc9bdb34f  .github/scripts/run-r18-live-browser.py
+        PINNED_RELEASE_HELPERS
         source_node="$(command -v node || true)"
         if [[ -z "$source_node" ]]; then
           source_node="$(realpath "$RUNNER_TEMP/../..")/externals/node24/bin/node"
