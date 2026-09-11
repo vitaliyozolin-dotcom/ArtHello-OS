@@ -139,7 +139,7 @@ jobs:
           git config user.name "arthello-migration-bot"
           git config user.email "arthello-migration-bot@users.noreply.github.com"
           git rm .github/workflows/d148-generate-payment-snapshot.yml
-          git add -A lib/db/drizzle lib/db/migration-manifest.json .github/workflows/d148-generate-payment-snapshot.yml
+          git add -A
           git status --short
           git commit -m "D148: seal generated ArtHello Pay migration"
           git push origin HEAD:${GITHUB_REF_NAME}
