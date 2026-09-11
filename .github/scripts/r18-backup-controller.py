@@ -252,7 +252,7 @@ def historical_predecessor(docker):
     return identity
 
 
-def accepted_live_predecessor(docker):
+def retained_live_candidate(docker):
     """Prove Atlas's retained, stopped R17 container through the exact R17 public context."""
     root = Path.home() / '.config/arthello/release-state'
     directory = adoption.private_directory(root)
@@ -291,6 +291,41 @@ def accepted_live_predecessor(docker):
     return adoption.LIVE_STATE_APP_ID
 
 
+def accepted_live_predecessor(docker):
+    """Prove the retained R15 predecessor through R17's exact public context."""
+    root = Path.home() / '.config/arthello/release-state'
+    directory = adoption.private_directory(root)
+    try:
+        saved = private_json(directory, 'candidate-acceptance-' + adoption.LIVE_SHA + '.json')
+    finally:
+        os.close(directory)
+    require(isinstance(saved, dict) and saved.get('schemaVersion') == 1
+            and saved.get('phase') == 'public-started', 'LIVE_BOUNDARY_REQUIRED')
+    context = saved.get('context')
+    require(isinstance(context, dict), 'LIVE_CONTEXT_REQUIRED')
+    digest = hashlib.sha256((json.dumps(context, sort_keys=True, separators=(',', ':')) + '\n').encode()).hexdigest()
+    require(digest == LIVE_CONTEXT_SHA256 and saved.get('contextSha256') == digest,
+            'LIVE_CONTEXT_RECEIPT_MISMATCH')
+    expected = {'releaseSha': adoption.LIVE_SHA, 'sourceTree': adoption.LIVE_TREE,
+                'runId': adoption.LIVE_STATE_RUN, 'runAttempt': '1',
+                'candidateContainerId': adoption.LIVE_STATE_APP_ID,
+                'candidateName': 'arthello-direct-' + adoption.LIVE_STATE_RUN + '-1',
+                'imageId': adoption.LIVE_IMAGE, 'dataVolume': r7.SOURCE_VOLUME,
+                'previousContainerId': adoption.HISTORICAL_APP_ID,
+                'previousName': 'arthello-direct-' + adoption.HISTORICAL_RUN + '-1'}
+    require(all(context.get(key) == value for key, value in expected.items()), 'LIVE_CONTEXT_IDENTITY_INVALID')
+    item = docker.inspect('container', expected['previousName'], True)
+    if item is None:
+        return None
+    app_metadata(item, identity=adoption.HISTORICAL_APP_ID, name=expected['previousName'],
+                 image=adoption.HISTORICAL_IMAGE, release=adoption.HISTORICAL_SHA, running=False, paused=False)
+    image = docker.inspect('image', adoption.HISTORICAL_IMAGE)
+    require(image.get('Id') == adoption.HISTORICAL_IMAGE
+            and image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == adoption.HISTORICAL_SHA,
+            'PREDECESSOR_IMAGE_SOURCE_INVALID')
+    return adoption.HISTORICAL_APP_ID
+
+
 def canonical_consumers(args, docker, phase):
     """Shared read-only inventory check; caller separately verifies the backup service."""
     require(phase in PHASES, 'CONSUMER_PHASE_INVALID')
@@ -314,11 +349,16 @@ def canonical_consumers(args, docker, phase):
         # Exact all-container inventory proves no historical canonical consumer remains.
         # No historical evidence is needed to authorize an absent extra consumer.
         return actual
-    require(expected < actual and len(actual - expected) <= 4, 'CANONICAL_CONSUMERS_INVALID')
-    previous = accepted_live_predecessor(docker)
+    require(expected < actual and len(actual - expected) <= 5, 'CANONICAL_CONSUMERS_INVALID')
+    previous = retained_live_candidate(docker)
     if previous is not None:
         require(previous in actual and previous not in expected, 'PREDECESSOR_NOT_PROVEN')
         expected.add(previous)
+    if actual != expected:
+        previous = accepted_live_predecessor(docker)
+        if previous is not None:
+            require(previous in actual and previous not in expected, 'PREDECESSOR_NOT_PROVEN')
+            expected.add(previous)
     if actual != expected:
         ancestor = historical.accepted_live_predecessor(docker)
         if ancestor is not None:
