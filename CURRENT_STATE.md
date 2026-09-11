@@ -449,3 +449,7 @@ Exact-head V52 run34443910215/job102764455280 остановился 2026-09-10T
 ## 2026-09-10 — D132: филиальный финансовый контур с 01.09.2026
 
 В коде зафиксированы дата начала 01.09.2026 и обязательный выбор одного активного доступного филиала. Общий финансовый отчёт отключён. Операции до даты старта и операции другого/неуказанного филиала не попадают в реестр, ОДДС и ОПиУ. Общие банковские остатки и наборы без филиального ключа скрыты из филиального отчёта. Новые однозначные поступления ООО «АртХелло» для школы/садика получают филиал и утверждённые статьи при импорте; остальные остаются для ручной проверки. Справочник зафиксирован и недоступен для рабочих изменений без нового решения. Изменения подготовлены локально; production-выпуск и фактическая проверка новых операций ещё не выполнены.
+
+## 2026-09-11 — website webhook HMAC boundary
+
+Website lead callback подключён к versioned HMAC-SHA256 по exact raw JSON bytes, timestamp и event ID. Маршрут public только относительно cookie/session auth и fail closed без `WEBSITE_WEBHOOK_HMAC_SECRET` или валидного `WEBSITE_WEBHOOK_MAX_SKEW_SECONDS`; до lead processing выполняется PostgreSQL replay claim. Missing key, tamper, stale timestamp, replay conflict и storage outage покрыты synthetic security tests. Bank/Evotor callbacks не открывались; production secret и callback URL не проверялись.

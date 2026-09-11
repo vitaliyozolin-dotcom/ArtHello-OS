@@ -8,7 +8,10 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 import { sha256Hex } from "@workspace/shared/sha256";
-import type { WebhookReplayStore } from "../lib/webhooks/webhook-auth.js";
+import {
+  authenticateWebsiteWebhook,
+  type WebhookReplayStore,
+} from "../lib/webhooks/webhook-auth.js";
 import {
   canonicalWebsiteLeadPayload,
   IdempotencyPayloadConflict,
@@ -119,6 +122,32 @@ export const webhookReplayStore: WebhookReplayStore = {
 webhooksRouter.post(
   "/webhooks/website-lead",
   async (req, res): Promise<void> => {
+    const toleranceSeconds = Number(
+      process.env.WEBSITE_WEBHOOK_MAX_SKEW_SECONDS,
+    );
+    const authentication = await authenticateWebsiteWebhook({
+      secret: process.env.WEBSITE_WEBHOOK_HMAC_SECRET,
+      toleranceSeconds,
+      signature: req.header("x-arthello-signature")?.trim(),
+      timestamp: req.header("x-arthello-timestamp")?.trim(),
+      eventId: req.header("x-arthello-event-id")?.trim(),
+      rawBody: req.rawBody,
+      nowSeconds: Math.floor(Date.now() / 1000),
+      store: webhookReplayStore,
+    });
+    if (authentication.status === "unavailable") {
+      res.status(503).json({ error: "Webhook is unavailable" });
+      return;
+    }
+    if (authentication.status === "unauthorized") {
+      res.status(401).json({ error: "Webhook authentication failed" });
+      return;
+    }
+    if (authentication.status === "conflict") {
+      res.status(409).json({ error: "Webhook event conflict" });
+      return;
+    }
+
     const idempotencyKey = req.header("idempotency-key")?.trim();
     if (
       !idempotencyKey ||

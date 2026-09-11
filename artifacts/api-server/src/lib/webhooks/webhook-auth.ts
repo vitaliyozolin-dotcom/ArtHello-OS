@@ -97,3 +97,56 @@ export async function claimWebhookReplay(
     status: existingDigest === input.bodyDigest ? "duplicate" : "conflict",
   };
 }
+
+export function webhookBodyDigest(rawBody: Uint8Array): string {
+  return createHash("sha256").update(rawBody).digest("hex");
+}
+
+export async function authenticateWebsiteWebhook(input: {
+  secret: string | undefined;
+  toleranceSeconds: number;
+  signature: string | undefined;
+  timestamp: string | undefined;
+  eventId: string | undefined;
+  rawBody: Uint8Array | undefined;
+  nowSeconds: number;
+  store: WebhookReplayStore;
+}): Promise<
+  | { status: "accepted"; duplicate: boolean }
+  | { status: "unauthorized" | "conflict" | "unavailable" }
+> {
+  if (
+    !input.secret ||
+    !Number.isSafeInteger(input.toleranceSeconds) ||
+    input.toleranceSeconds <= 0 ||
+    !input.rawBody
+  ) {
+    return { status: "unavailable" };
+  }
+  if (!input.signature || !input.timestamp || !input.eventId) {
+    return { status: "unauthorized" };
+  }
+  const verified = verifyWebsiteWebhook({
+    secret: input.secret,
+    toleranceSeconds: input.toleranceSeconds,
+    signature: input.signature,
+    timestamp: input.timestamp,
+    eventId: input.eventId,
+    rawBody: input.rawBody,
+    nowSeconds: input.nowSeconds,
+  });
+  if (!verified.ok) return { status: "unauthorized" };
+
+  try {
+    const claim = await claimWebhookReplay(input.store, {
+      provider: "website",
+      keyId: verified.keyVersion,
+      eventId: input.eventId,
+      bodyDigest: webhookBodyDigest(input.rawBody),
+    });
+    if (claim.status === "conflict") return { status: "conflict" };
+    return { status: "accepted", duplicate: claim.status === "duplicate" };
+  } catch {
+    return { status: "unavailable" };
+  }
+}

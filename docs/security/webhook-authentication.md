@@ -1,8 +1,9 @@
 # Callback and webhook authentication contract
 
-Status: shared website verifier and durable PostgreSQL replay-claim primitives
-implemented; provider callbacks remain fail closed until their route adapter,
-raw-body capture and provider-specific negative tests implement the contract.
+Status: the website lead route now captures the bounded raw JSON body, verifies
+the versioned HMAC and durably claims replay identity before lead processing.
+Other provider callbacks remain fail closed until their own adapters and tests
+implement this contract.
 
 ## Common boundary
 

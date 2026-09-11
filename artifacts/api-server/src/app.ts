@@ -12,6 +12,14 @@ import {
 import { publicErrorBoundary } from "./lib/security/public-error-boundary.js";
 import { blockLegacySyncSurface } from "./lib/security/legacy-sync-gate.js";
 
+declare global {
+  namespace Express {
+    interface Request {
+      rawBody?: Buffer;
+    }
+  }
+}
+
 const app: Express = express();
 app.disable("x-powered-by");
 
@@ -67,7 +75,17 @@ app.use(
   }),
 );
 app.use(cookieParser());
-app.use(express.json({ limit: "1mb" }));
+app.use(
+  express.json({
+    limit: "1mb",
+    verify(req, _res, buffer) {
+      if (req.url?.split("?", 1)[0] === "/api/webhooks/website-lead") {
+        (req as typeof req & { rawBody?: Buffer }).rawBody =
+          Buffer.from(buffer);
+      }
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use("/api", publicErrorBoundary);
 app.use("/api", blockLegacySyncSurface);
@@ -78,6 +96,7 @@ app.use("/api", (req, res, next) => {
       req.path === "/healthz") ||
     (req.method === "POST" && req.path === "/auth/login") ||
     (req.method === "POST" && req.path === "/webhooks/smsvizitka") ||
+    (req.method === "POST" && req.path === "/webhooks/website-lead") ||
     (req.method === "GET" && req.path === "/banking/oauth/callback");
 
   if (publicRoute) {

@@ -537,8 +537,26 @@ paths:
       operationId: submitWebsiteLead
       tags: [webhooks]
       summary: Receive a website form lead
+      security: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-ArtHello-Signature
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-ArtHello-Timestamp
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-ArtHello-Event-Id
+          in: header
+          required: true
+          schema: { type: string }
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -550,6 +568,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebsiteLeadResult"
+        "401":
+          description: Webhook authentication failed
+        "409":
+          description: Event identity or idempotency conflict
+        "503":
+          description: Webhook authentication or replay store unavailable
 
   /identity/run-matching:
     post:

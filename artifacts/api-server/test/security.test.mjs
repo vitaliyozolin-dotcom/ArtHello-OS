@@ -141,6 +141,71 @@ test("durable webhook claim is idempotent for one digest and conflicts otherwise
   );
 });
 
+test("website webhook boundary fails closed for configuration, authentication, replay conflict and storage outage", async () => {
+  const rawBody = Buffer.from('{"name":"Synthetic"}');
+  const base = {
+    secret: "synthetic-secret-with-enough-entropy",
+    toleranceSeconds: 60,
+    timestamp: "1789084800",
+    eventId: "evt_boundary_001",
+    rawBody,
+    nowSeconds: 1789084820,
+  };
+  const signature = webhookAuth.signWebsiteWebhook(base);
+  const claimingStore = { async claim() {} };
+
+  assert.equal(
+    (await webhookAuth.authenticateWebsiteWebhook({
+      ...base,
+      secret: undefined,
+      signature,
+      store: claimingStore,
+    })).status,
+    "unavailable",
+  );
+  assert.equal(
+    (await webhookAuth.authenticateWebsiteWebhook({
+      ...base,
+      signature: "v1=" + "0".repeat(64),
+      store: claimingStore,
+    })).status,
+    "unauthorized",
+  );
+  assert.equal(
+    (await webhookAuth.authenticateWebsiteWebhook({
+      ...base,
+      timestamp: "1789084700",
+      signature,
+      store: claimingStore,
+    })).status,
+    "unauthorized",
+  );
+  assert.equal(
+    (await webhookAuth.authenticateWebsiteWebhook({
+      ...base,
+      signature,
+      store: { async claim() { return "b".repeat(64); } },
+    })).status,
+    "conflict",
+  );
+  assert.equal(
+    (await webhookAuth.authenticateWebsiteWebhook({
+      ...base,
+      signature,
+      store: { async claim() { throw new Error("database unavailable"); } },
+    })).status,
+    "unavailable",
+  );
+  assert.deepEqual(
+    await webhookAuth.authenticateWebsiteWebhook({
+      ...base,
+      signature,
+      store: claimingStore,
+    }),
+    { status: "accepted", duplicate: false },
+  );
+});
+
 test("owner keeps full authenticated access", () => {
   assert.equal(
     accessPolicy.decideRouteAccess("owner", "POST", "/sync/students").allowed,
@@ -272,7 +337,7 @@ test("cross-scope business routes remain fail closed for every non-owner role", 
   }
 });
 
-test("legacy sync and provider callbacks stay fail closed", async () => {
+test("legacy sync and unauthenticated provider callbacks stay fail closed", async () => {
   const appSource = await readFile(
     path.join(artifactDir, "src/app.ts"),
     "utf8",
@@ -309,10 +374,18 @@ test("legacy sync and provider callbacks stay fail closed", async () => {
     error: "LEGACY_SYNC_DISABLED",
   });
   assert.match(appSource, /blockLegacySyncSurface/);
+  assert.match(appSource, /req\.path === "\/webhooks\/website-lead"/);
   assert.doesNotMatch(
     appSource,
-    /req\.method === "POST"[\s\S]{0,120}req\.path === "\/(?:webhooks(?:\/website-lead)?|evotor|banking\/webhook)"/,
+    /req\.method === "POST"[\s\S]{0,120}req\.path === "\/(?:webhooks|evotor|banking\/webhook)"/,
   );
+  const webhookRoute = await readFile(
+    path.join(artifactDir, "src/routes/webhooks.ts"),
+    "utf8",
+  );
+  assert.match(webhookRoute, /authenticateWebsiteWebhook/);
+  assert.match(webhookRoute, /WEBSITE_WEBHOOK_HMAC_SECRET/);
+  assert.match(webhookRoute, /status\(503\)/);
 });
 
 test("sensitive access audit canonicalizes identifiers and skips only account lifecycle", () => {

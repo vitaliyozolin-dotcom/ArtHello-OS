@@ -93,11 +93,11 @@
 
 - [x] CORS по умолчанию выключен; allowlist задаётся `APP_ORIGINS`.
 - [x] Browser callback Точки остаётся public только с проверкой OAuth state.
-- [x] Website, bank и Evotor callbacks закрыты auth-gate до безопасного контракта.
+- [x] Bank и Evotor callbacks закрыты auth-gate; website callback открыт только через HMAC/replay boundary.
 - [x] Website lead handler требует payload-bound `Idempotency-Key`, пишет raw/lead/source одной transaction под advisory lock, возвращает `409` при payload conflict и восстанавливает legacy raw-only partial write.
-- [x] Общая fail-closed граница и отдельные website/bank/Evotor контракты спроектированы в `docs/security/webhook-authentication.md`; конкретный provider adapter остаётся закрыт без официальных test vectors.
-- [~] Общий PostgreSQL replay claim реализован поверх уникального `raw_events.hash` и advisory transaction lock; website verifier покрыт tamper/stale/conflict тестами. Provider routes остаются закрыты до raw-body wiring и provider-specific vectors.
-- [x] Negative source test подтверждает, что provider POST callbacks не добавлены в public allowlist; website payload conflict/retry покрыты.
+- [x] Общая fail-closed граница и отдельные website/bank/Evotor контракты спроектированы в `docs/security/webhook-authentication.md`; website adapter подключён, остальные providers закрыты без официальных test vectors.
+- [x] Website HMAC проверяет exact raw-body digest, timestamp и event ID; PostgreSQL replay claim использует unique hash и advisory transaction lock. Missing key, tamper, stale timestamp, replay conflict и DB outage покрыты fail-closed тестами.
+- [x] Public allowlist содержит только HMAC-защищённый website POST callback; payload conflict/retry покрыты отдельно.
 - [ ] Проверить callback URL после каждого deployment change.
 - [x] Hardcoded AlfaCRM tenant fallback удалён; без `ALFACRM_DOMAIN` клиент fail closed.
 - [x] AlfaCRM limiter concurrency-safe: serialized queue 260 ms и конкурентный unit-тест.
