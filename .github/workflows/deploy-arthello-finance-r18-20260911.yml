@@ -1,8 +1,8 @@
-# D142: fresh finance R18 with unchanged durable schema14/public boundaries.
+# D143: fresh finance R18 with exact recoverable R17 browser retirement.
 # Accepted R17 predecessor and complete R15/R13/R12 backup history are preserved.
 # Reviewed finance articles; retire only exact unused recoverable R17 browser.
 # No database restore after seal/authentication/public boundaries.
-name: Deploy ArtHello Finance R18 D142
+name: Deploy ArtHello Finance R18 D143
 'on':
   workflow_run:
     workflows:
@@ -22,9 +22,9 @@ concurrency:
   queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/finance-r18-atlas-baseline-d142-20260911
-  EXPECTED_RELEASE_PR: '448'
-  PREVIOUS_RELEASE_SHA: '48f2a549fd062693b02fbe271ddafb4ac113c0a6'
+  EXPECTED_RELEASE_HEAD: codex/finance-r18-retire-r17-browser-d143-20260911
+  EXPECTED_RELEASE_PR: '0'
+  PREVIOUS_RELEASE_SHA: '21b6ff70d3dc31418289c6a8d72cbb045165568b'
   ACCEPTED_RELEASE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
   ACCEPTED_RELEASE_TREE: 6aeb7e6879b786a434d12f026f765bcaf9acb5a4
   ACCEPTED_RELEASE_RUN_ID: '34495273615'
@@ -48,14 +48,14 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-atlas-baseline-d142-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('448') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-retire-r17-browser-d143-20260911' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('0') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D142: guarded finance R18')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D143: guarded finance R18')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -79,7 +79,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
-          node --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs
+          node --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs scripts/test/retire-r17-browser.test.mjs
           bash -n scripts/run-server-browser.sh
           corepack enable
           corepack pnpm@11.7.0 --dir deploy/browser install --ignore-workspace --frozen-lockfile
@@ -127,8 +127,8 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-atlas-baseline-d142-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('448') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-retire-r17-browser-d143-20260911' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('0') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -450,6 +450,8 @@ jobs:
         c578d39629f9a84669e690d9bc388395ba2e8d410e02203b197813efe265914c  .github/scripts/r18-public-audit.py
         80c44bd62707ab75ad43dfab06bd9a7b61f457f07a14909d64dba369430e4090  .github/scripts/r18-resume-candidate.py
         92cdc839f464dd9aeab1d2c13adeb9e597fbcea58c272a7f6288e2f0a1243e3d  .github/scripts/run-r18-live-browser.py
+        e16847d94728171c93dc84990799f708f8ccd1faf25aae4abe04d2d461067ef0  deploy/browser/retire-r17-browser.mjs
+        aaafb9ab5668cfee338f2b8cafd925c98e2644eaf081f3abcfdd068391074c31  scripts/test/retire-r17-browser.test.mjs
         PINNED_RELEASE_HELPERS
         source_node="$(command -v node || true)"
         if [[ -z "$source_node" ]]; then
@@ -459,6 +461,7 @@ jobs:
         "$source_node" -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(2)'
         "$source_node" scripts/verify-school-source.mjs
         "$source_node" --test \
+          scripts/test/retire-r17-browser.test.mjs \
           deploy/v52/src/tests/finance-articles.test.mjs \
           deploy/v52/src/tests/finance-article-store.test.mjs \
           deploy/v52/src/tests/finance-articles-api.test.mjs
@@ -750,7 +753,7 @@ jobs:
       run: |
         set -Eeuo pipefail
         test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
-        "$PRECHECK_NODE" deploy/browser/retire-r16-browser.mjs
+        "$PRECHECK_NODE" deploy/browser/retire-r17-browser.mjs
     - name: Measure import capacity before downloading the verified archive
       if: env.R9_RESUME_CANDIDATE != '1'
       env:
