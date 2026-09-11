@@ -1,0 +1,54 @@
+name: D149 normalize ArtHello Pay candidate
+
+on:
+  push:
+    branches:
+      - codex/arthello-pay-web-d149-20260911
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    if: github.actor == 'vitaliyozolin-dotcom'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Install exact workspace
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+          pnpm install --frozen-lockfile
+      - name: Normalize only D149 source files
+        run: |
+          pnpm exec prettier --write \
+            artifacts/api-server/src/routes/payments.ts \
+            artifacts/api-server/src/routes/payments-web.ts \
+            artifacts/api-server/src/routes/index.ts \
+            artifacts/api-server/src/app.ts \
+            artifacts/api-server/src/lib/security/access-policy.ts \
+            artifacts/api-server/test/payment-access-policy.test.mjs \
+            scripts/test/arthello-pay-web.test.mjs
+          node --check pay-web/app.js
+      - name: Run focused architecture and security checks
+        run: |
+          node scripts/lib/db-access-policy.mjs
+          pnpm --filter @workspace/api-server run typecheck
+          pnpm --filter @workspace/api-server run test:security
+          node --test scripts/test/arthello-pay-web.test.mjs
+      - name: Commit normalization once and retire this workflow
+        run: |
+          git config user.name "arthello-pay-bot"
+          git config user.email "arthello-pay-bot@users.noreply.github.com"
+          git rm .github/workflows/d149-pay-web-normalize.yml
+          git add -A artifacts/api-server scripts/test .github/workflows
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "D149: normalize and verify ArtHello Pay web candidate"
+          git push origin HEAD:${GITHUB_REF_NAME}
