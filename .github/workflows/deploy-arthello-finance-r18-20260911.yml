@@ -1,8 +1,8 @@
-# D145: fresh finance R18 with the complete Atlas-retained predecessor chain.
+# D146: fresh finance R18 with fixed consumer refusal diagnostics.
 # Accepted R17 predecessor and complete R15/R13/R12 backup history are preserved.
 # Reviewed finance articles; retire only exact unused recoverable R17 browser.
 # No database restore after seal/authentication/public boundaries.
-name: Deploy ArtHello Finance R18 D145
+name: Deploy ArtHello Finance R18 D146
 'on':
   workflow_run:
     workflows:
@@ -22,9 +22,9 @@ concurrency:
   queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/finance-r18-full-predecessor-chain-d145-20260911
-  EXPECTED_RELEASE_PR: '451'
-  PREVIOUS_RELEASE_SHA: '1fc6433206c2e3462cd383e6812747a373102317'
+  EXPECTED_RELEASE_HEAD: codex/finance-r18-consumer-diagnostic-d146-20260911
+  EXPECTED_RELEASE_PR: '452'
+  PREVIOUS_RELEASE_SHA: 'c848acd0c4efae04ad83a80ad20ad144325e9728'
   ACCEPTED_RELEASE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
   ACCEPTED_RELEASE_TREE: 6aeb7e6879b786a434d12f026f765bcaf9acb5a4
   ACCEPTED_RELEASE_RUN_ID: '34495273615'
@@ -48,14 +48,14 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-full-predecessor-chain-d145-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('451') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-consumer-diagnostic-d146-20260911' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('452') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D145: guarded finance R18')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D146: guarded finance R18')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -79,7 +79,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
-          node --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs scripts/test/retire-d144-browser.test.mjs
+          node --test scripts/test/server-browser.test.mjs scripts/test/browser-proxy.test.mjs scripts/test/retire-d145-browser.test.mjs
           bash -n scripts/run-server-browser.sh
           corepack enable
           corepack pnpm@11.7.0 --dir deploy/browser install --ignore-workspace --frozen-lockfile
@@ -127,8 +127,8 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-full-predecessor-chain-d145-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('451') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-consumer-diagnostic-d146-20260911' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('452') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -444,15 +444,15 @@ jobs:
         sha256sum -c <<'PINNED_RELEASE_HELPERS'
         4cdcd2771994fe8ea11bb731fa1ef5f997da489adfc89e3e78baff271096d659  deploy/v52/recovery-r18/r17-controller.yml
         447f079a7af3da00c5b013839a81f00b7973c613fc4265f0753bc7f2a7ee2e01  .github/scripts/r18-backup-adoption.py
-        0b0ae627ffce4537076f83cc39ac9328b2b04c23fc024305677f3617fdcc8374  .github/scripts/r18-backup-controller.py
+        1c24f5c23d60b762ccdd714269b426e885999569bbb59a45015654a05198d0b9  .github/scripts/r18-backup-controller.py
         d34a26e0e98b4b821be69fe899a037bd76dcb11e7d11d93988cb9e46785e55c5  .github/scripts/r18-candidate-state.py
         31614cf50aec3c1f099e91ad2e4e44326d92c6fd829d88e233d898347df3b033  .github/scripts/r18-live-baseline.py
         7fb23bd31e5159a658b0694d0e702ccb34284fc535f825a0707c3012f4854b51  .github/scripts/r18-public-audit.py
-        bc2190be2030311a5ca45ad2a3dd3b1e75c18a4794c11801e91fa3d9eaa4b56c  .github/scripts/r18-resume-candidate.py
+        732747c84a5c165aa6a5d8be1cf26d7c6b74e27c3a5517c22c861c8fdd5f76b6  .github/scripts/r18-resume-candidate.py
         f5391bf3d2a4e2b431dd532585a0ad2212a17145c25e0560d4bda30c12cc2721  .github/scripts/run-r18-live-browser.py
-        b1d56fb9a27588bec083f623867fee2652347e320905d9552e2351a7e17dd797  deploy/browser/retire-d144-browser.mjs
-        34f15544c7f01d7e3ee01070e3b76b17f625572ece98d7ee349c646f9d0f09d5  scripts/test/retire-d144-browser.test.mjs
-        dff9ffe661a9fd83c5a2e3e76af9b9215aed6a56f6b0c80915ff2d7ced422508  .github/scripts/test-r18-atlas-predecessors.py
+        1fc56c6e73aa73ed863ae8ff410ca44493aa666d81cda75c886b37648c6d637d  deploy/browser/retire-d145-browser.mjs
+        dd49a4459daf43f3232eddab50828282e625ffaabdafa781a6490a5fb8d7eb53  scripts/test/retire-d145-browser.test.mjs
+        2787a96721a45555aa6f63f41c567c7ddf1700e12e095404f98075edc79f2b91  .github/scripts/test-r18-atlas-predecessors.py
         PINNED_RELEASE_HELPERS
         source_node="$(command -v node || true)"
         if [[ -z "$source_node" ]]; then
@@ -462,7 +462,7 @@ jobs:
         "$source_node" -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(2)'
         "$source_node" scripts/verify-school-source.mjs
         "$source_node" --test \
-          scripts/test/retire-d144-browser.test.mjs \
+          scripts/test/retire-d145-browser.test.mjs \
           deploy/v52/src/tests/finance-articles.test.mjs \
           deploy/v52/src/tests/finance-article-store.test.mjs \
           deploy/v52/src/tests/finance-articles-api.test.mjs
@@ -755,7 +755,7 @@ jobs:
       run: |
         set -Eeuo pipefail
         test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
-        "$PRECHECK_NODE" deploy/browser/retire-d144-browser.mjs
+        "$PRECHECK_NODE" deploy/browser/retire-d145-browser.mjs
     - name: Measure import capacity before downloading the verified archive
       if: env.R9_RESUME_CANDIDATE != '1'
       env:

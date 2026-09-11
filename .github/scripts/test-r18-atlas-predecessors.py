@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Focused R18 tests for Atlas's extra retained R17 consumer."""
 import copy
+from contextlib import redirect_stderr
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -129,6 +131,20 @@ class AtlasPredecessorTests(unittest.TestCase):
                                release_sha='b' * 40, tree_sha='c' * 40)
         with patch.object(a, 'Adoption', return_value=None), self.assertRaises(REFUSED):
             controller.canonical_consumers(args, docker, 'live')
+
+    def test_cli_emits_only_fixed_refusal_code_to_stderr(self):
+        arguments = ['consumers', '--image-id', 'image', '--release-sha', 'release',
+                     '--tree-sha', 'tree', '--run-id', 'run', '--attempt', '1', '--phase', 'live']
+        output = io.StringIO()
+        with patch.object(controller, 'execute', side_effect=REFUSED('RETAINED_R17_PROOF_FAILED')), redirect_stderr(output):
+            self.assertEqual(controller.main(arguments), 1)
+        self.assertEqual(json.loads(output.getvalue()),
+                         {'state': 'refused', 'code': 'RETAINED_R17_PROOF_FAILED'})
+        output = io.StringIO()
+        with patch.object(controller, 'execute', side_effect=ValueError('private detail')), redirect_stderr(output):
+            self.assertEqual(controller.main(arguments), 1)
+        self.assertEqual(json.loads(output.getvalue()),
+                         {'state': 'refused', 'code': 'R14_CONTROLLER_CHECK_FAILED'})
 
 
 if __name__ == '__main__':

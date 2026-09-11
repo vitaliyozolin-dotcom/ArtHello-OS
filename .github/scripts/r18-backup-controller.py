@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import sys
 from types import ModuleType
 
 
@@ -349,28 +350,44 @@ def canonical_consumers(args, docker, phase):
         # Exact all-container inventory proves no historical canonical consumer remains.
         # No historical evidence is needed to authorize an absent extra consumer.
         return actual
-    require(expected < actual and len(actual - expected) <= 5, 'CANONICAL_CONSUMERS_INVALID')
-    previous = retained_live_candidate(docker)
+    require(expected < actual, 'EXPECTED_CANONICAL_CONSUMERS_MISSING')
+    require(len(actual - expected) <= 5, 'UNPROVEN_CANONICAL_CONSUMER_COUNT_EXCEEDED')
+    try:
+        previous = retained_live_candidate(docker)
+    except Exception:
+        raise r7.Refused('RETAINED_R17_PROOF_FAILED') from None
     if previous is not None:
         require(previous in actual and previous not in expected, 'PREDECESSOR_NOT_PROVEN')
         expected.add(previous)
     if actual != expected:
-        previous = accepted_live_predecessor(docker)
+        try:
+            previous = accepted_live_predecessor(docker)
+        except Exception:
+            raise r7.Refused('R17_PREDECESSOR_PROOF_FAILED') from None
         if previous is not None:
             require(previous in actual and previous not in expected, 'PREDECESSOR_NOT_PROVEN')
             expected.add(previous)
     if actual != expected:
-        ancestor = historical.accepted_live_predecessor(docker)
+        try:
+            ancestor = historical.accepted_live_predecessor(docker)
+        except Exception:
+            raise r7.Refused('R15_PREDECESSOR_PROOF_FAILED') from None
         if ancestor is not None:
             require(ancestor in actual and ancestor not in expected, 'PREDECESSOR_NOT_PROVEN')
             expected.add(ancestor)
     if actual != expected:
-        ancestor = historical.historical.accepted_live_predecessor(docker)
+        try:
+            ancestor = historical.historical.accepted_live_predecessor(docker)
+        except Exception:
+            raise r7.Refused('R13_PREDECESSOR_PROOF_FAILED') from None
         if ancestor is not None:
             require(ancestor in actual and ancestor not in expected, 'PREDECESSOR_NOT_PROVEN')
             expected.add(ancestor)
     if actual != expected:
-        ancestor = historical.historical.historical_predecessor(docker)
+        try:
+            ancestor = historical.historical.historical_predecessor(docker)
+        except Exception:
+            raise r7.Refused('R12_PREDECESSOR_PROOF_FAILED') from None
         require(ancestor is not None and ancestor in actual and ancestor not in expected, 'PREDECESSOR_NOT_PROVEN')
         expected.add(ancestor)
     require(actual == expected, 'CANONICAL_CONSUMERS_INVALID')
@@ -431,9 +448,13 @@ def main(arguments=None):
     try:
         require((args.command == 'consumers') == (args.phase is not None), 'CONSUMER_PHASE_REQUIRED')
         result = execute(args)
-    except Exception:
-        print(json.dumps({'state': 'preserve' if args.command == 'boundary' else 'refused',
-                          'code': 'R14_CONTROLLER_CHECK_FAILED'}, separators=(',', ':')))
+    except Exception as error:
+        code = str(error)
+        if type(error).__name__ != 'Refused' or not re.fullmatch(r'[A-Z0-9_]{1,64}', code):
+            code = 'R14_CONTROLLER_CHECK_FAILED'
+        output = json.dumps({'state': 'preserve' if args.command == 'boundary' else 'refused',
+                             'code': code}, separators=(',', ':'))
+        print(output, file=sys.stderr)
         return 1
     print(json.dumps(result, sort_keys=True, separators=(',', ':')))
     return 0
