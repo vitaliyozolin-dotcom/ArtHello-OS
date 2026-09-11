@@ -59,6 +59,7 @@ const REGISTERED_ROOTS = new Set([
   "marketing",
   "month-closing",
   "payables",
+  "payments",
   "pnl",
   "reconciliation",
   "recurring",
