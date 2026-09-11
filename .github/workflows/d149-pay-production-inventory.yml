@@ -1,0 +1,81 @@
+name: D149 Pay production inventory
+
+on:
+  push:
+    branches:
+      - codex/d149-pay-production-inventory-20260911
+    paths:
+      - .github/workflows/d149-pay-production-inventory.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    if: github.actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 5
+    concurrency:
+      group: gateway-38-55-arthello-production
+      cancel-in-progress: false
+    steps:
+      - name: Read-only runtime inventory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf 'D149_INVENTORY_BEGIN\n'
+          printf 'CONTAINERS_BEGIN\n'
+          docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' \
+            | grep -E '^(arthello|stroios|school|atlas)' \
+            | sed -E 's#(PASSWORD|TOKEN|SECRET|KEY)=[^| ]+#\1=[REDACTED]#g' || true
+          printf 'CONTAINERS_END\n'
+
+          printf 'NETWORKS_BEGIN\n'
+          docker network ls --format '{{.Name}}' | grep -E 'arthello|stroios|school|atlas' || true
+          printf 'NETWORKS_END\n'
+
+          printf 'DIRECT_RUNTIME_BEGIN\n'
+          mapfile -t live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
+          printf 'DIRECT_COUNT=%s\n' "${#live_ids[@]}"
+          if [ "${#live_ids[@]}" -eq 1 ]; then
+            docker inspect "${live_ids[0]}" | jq -r '.[0] | "DIRECT_NAME=" + (.Name|ltrimstr("/")), "DIRECT_IMAGE=" + .Config.Image, "DIRECT_RELEASE=" + (.Config.Labels["arthello.release.sha"] // ""), "DIRECT_NETWORKS=" + ([.NetworkSettings.Networks|keys[]]|sort|join(",")), "DIRECT_MOUNTS=" + ([.Mounts[]|(.Type+":"+(.Name // "bind")+":"+.Destination)]|sort|join(","))'
+          fi
+          printf 'DIRECT_RUNTIME_END\n'
+
+          printf 'LEGACY_RUNTIME_BEGIN\n'
+          for name in arthello-os-api arthello-os-db arthello-os-web arthello-os-newui arthello-os-api-1 arthello-os-db-1 arthello-os-web-1; do
+            if docker inspect "$name" >/dev/null 2>&1; then
+              state="$(docker inspect "$name" --format '{{.State.Status}}')"
+              image="$(docker inspect "$name" --format '{{.Config.Image}}')"
+              nets="$(docker inspect "$name" | jq -r '.[0].NetworkSettings.Networks|keys|sort|join(",")')"
+              printf 'LEGACY=%s|%s|%s|%s\n' "$name" "$state" "$image" "$nets"
+            fi
+          done
+          printf 'LEGACY_RUNTIME_END\n'
+
+          caddy=stroios-caddy-1
+          printf 'CADDY_BEGIN\n'
+          if docker inspect "$caddy" >/dev/null 2>&1; then
+            printf 'CADDY_STATE=%s\n' "$(docker inspect "$caddy" --format '{{.State.Status}}')"
+            route_copy="$RUNNER_TEMP/d149-external-routes.caddy"
+            rm -f -- "$route_copy"
+            if docker cp "$caddy:/data/external-routes.caddy" "$route_copy" >/dev/null 2>&1; then
+              grep -E -B2 -A8 'arthello-188-225-38-55|school-188-225-38-55|atlas-188-225-38-55|pay-188-225-38-55' "$route_copy" \
+                | sed -E 's#(password|token|secret|key)[^ ]*#\1=[REDACTED]#Ig' || true
+              rm -f -- "$route_copy"
+            else
+              printf 'CADDY_ROUTE_FILE=UNAVAILABLE\n'
+            fi
+          else
+            printf 'CADDY_STATE=MISSING\n'
+          fi
+          printf 'CADDY_END\n'
+
+          printf 'LOCAL_PROBES_BEGIN\n'
+          for host in arthello-188-225-38-55.sslip.io pay-188-225-38-55.sslip.io; do
+            root="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' -H "Host: $host" http://127.0.0.1/ || true)"
+            health="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' -H "Host: $host" http://127.0.0.1/api/healthz || true)"
+            printf 'PROBE=%s|root=%s|healthz=%s\n' "$host" "$root" "$health"
+          done
+          printf 'LOCAL_PROBES_END\n'
+          printf 'D149_INVENTORY_END\n'
