@@ -41,6 +41,7 @@ import { evotorRouter } from "./evotor.js";
 import { employeesModuleRouter } from "./employees-module.js";
 import { frontOfficeRouter } from "./front-office.js";
 import { smsVizitkaShadowRouter } from "./front-office-smsvizitka.js";
+import { paymentsRouter } from "./payments.js";
 
 export const apiRouter: IRouter = Router();
 
@@ -86,3 +87,4 @@ apiRouter.use(evotorRouter);
 apiRouter.use(employeesModuleRouter);
 apiRouter.use(frontOfficeRouter);
 apiRouter.use(smsVizitkaShadowRouter);
+apiRouter.use(paymentsRouter);
