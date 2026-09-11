@@ -1,0 +1,45 @@
+name: D149 Pay data inventory
+
+on:
+  push:
+    branches:
+      - codex/d149-pay-production-inventory-20260911
+    paths:
+      - .github/workflows/d149-pay-data-inventory.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    if: github.actor == 'vitaliyozolin-dotcom'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 5
+    concurrency:
+      group: gateway-38-55-arthello-production
+      cancel-in-progress: false
+    steps:
+      - name: Read-only D1 structural inventory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
+          test "${#live_ids[@]}" -eq 1
+          live_id="${live_ids[0]}"
+          docker exec --user 1000:1000 -i "$live_id" node --input-type=module <<'NODE'
+          import { DatabaseSync } from 'node:sqlite';
+          const file='/data/d1/miniflare-D1DatabaseObject/5a499c55f63d6b9f725547d510cf454e288954b6f3c2d5024eb1443f29c97730.sqlite';
+          const db=new DatabaseSync(file,{readOnly:true});
+          const q=(sql)=>db.prepare(sql).all();
+          console.log('D149_DATA_BEGIN');
+          console.log('BRANCHES='+JSON.stringify(q(`SELECT id,name,status FROM organization_branches ORDER BY sort_order,name`)));
+          console.log('ENTITY_TYPES='+JSON.stringify(q(`SELECT entity_type AS type, COUNT(*) AS count FROM entities GROUP BY entity_type ORDER BY entity_type`)));
+          console.log('BUSINESS_ENTITIES='+JSON.stringify(q(`SELECT id,entity_type AS type,display_name AS name,scope,status FROM entities WHERE entity_type IN ('Юрлицо','Юридическое лицо','Филиал','Организация','Компания') ORDER BY entity_type,display_name LIMIT 100`)));
+          console.log('FAMILY_SCOPES='+JSON.stringify(q(`SELECT scope,COUNT(*) AS count FROM entities WHERE entity_type='Семья' GROUP BY scope ORDER BY scope`)));
+          console.log('ACCRUALS='+JSON.stringify(q(`SELECT COUNT(*) AS total, SUM(CASE WHEN status IN ('Оплачено','paid') THEN 1 ELSE 0 END) AS paid FROM client_accruals`)));
+          console.log('BANK_LEGAL_IDS='+JSON.stringify(q(`SELECT legal_entity_id AS legalEntityId,COUNT(*) AS accounts FROM bank_accounts GROUP BY legal_entity_id ORDER BY legal_entity_id`)));
+          console.log('FINANCE_LEGAL_IDS='+JSON.stringify(q(`SELECT legal_entity_id AS legalEntityId,COUNT(*) AS operations FROM financial_operations WHERE legal_entity_id<>'' GROUP BY legal_entity_id ORDER BY legal_entity_id`)));
+          console.log('PAY_TABLES='+JSON.stringify(q(`SELECT name FROM sqlite_master WHERE type='table' AND (name LIKE 'payment_%' OR name LIKE 'pay_%') ORDER BY name`)));
+          console.log('D149_DATA_END');
+          db.close();
+          NODE
