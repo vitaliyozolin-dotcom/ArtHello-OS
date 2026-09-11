@@ -47,6 +47,10 @@ This production candidate deliberately does **not** enable:
 
 Those capabilities require a separate verified provider adapter and acceptance tests before money movement is enabled.
 
+## Candidate normalization
+
+The final D149 candidate keeps `artifacts/api-server/src/routes/payments.ts` as a thin route export and the payment implementation in the feature module. The feature router is Prettier-normalized so the repository legacy-format ratchet is preserved rather than relaxed.
+
 ## Release condition
 
 The candidate may be merged and deployed only after the repository Quality and Proof gates pass for the exact immutable head. Production activation must preserve rollback and existing financial data.
