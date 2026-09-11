@@ -1,8 +1,8 @@
-# D145: fresh finance R18 with the complete Atlas-retained predecessor chain.
+# D146: fresh finance R18 with fixed consumer refusal diagnostics.
 # Accepted R17 predecessor and complete R15/R13/R12 backup history are preserved.
 # Reviewed finance articles; retire only exact unused recoverable R17 browser.
 # No database restore after seal/authentication/public boundaries.
-name: Deploy ArtHello Finance R18 D145
+name: Deploy ArtHello Finance R18 D146
 'on':
   workflow_run:
     workflows:
@@ -22,9 +22,9 @@ concurrency:
   queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/finance-r18-full-predecessor-chain-d145-20260911
-  EXPECTED_RELEASE_PR: '451'
-  PREVIOUS_RELEASE_SHA: '1fc6433206c2e3462cd383e6812747a373102317'
+  EXPECTED_RELEASE_HEAD: codex/finance-r18-consumer-diagnostic-d146-20260911
+  EXPECTED_RELEASE_PR: '452'
+  PREVIOUS_RELEASE_SHA: 'c848acd0c4efae04ad83a80ad20ad144325e9728'
   ACCEPTED_RELEASE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
   ACCEPTED_RELEASE_TREE: 6aeb7e6879b786a434d12f026f765bcaf9acb5a4
   ACCEPTED_RELEASE_RUN_ID: '34495273615'
@@ -48,14 +48,14 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-full-predecessor-chain-d145-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('451') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-consumer-diagnostic-d146-20260911' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('452') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D145: guarded finance R18')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D146: guarded finance R18')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -127,8 +127,8 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-full-predecessor-chain-d145-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('451') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-consumer-diagnostic-d146-20260911' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('452') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
