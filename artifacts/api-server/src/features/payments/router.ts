@@ -20,7 +20,10 @@ import {
   type PaymentEvidenceStatus,
   type PaymentRouteCandidate,
 } from "../../lib/payments/payment-policy.js";
-import type { AuthRole, BusinessScope } from "../../lib/security/access-policy.js";
+import type {
+  AuthRole,
+  BusinessScope,
+} from "../../lib/security/access-policy.js";
 import { PostgresAuthStore } from "../../lib/security/auth-store.js";
 import {
   hashPassword,
