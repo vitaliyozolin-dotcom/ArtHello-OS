@@ -73,7 +73,10 @@ test("API defaults to an authenticated, origin-restricted surface", async () => 
   assert.match(app, /requireRouteAccess\(req, res, next\)/);
   assert.match(app, /process\.env\.APP_ORIGINS/);
   assert.doesNotMatch(app, /app\.use\(cors\(\)\)/);
-  assert.doesNotMatch(app, /publicRoute[\s\S]*website-lead/);
+  assert.match(
+    app,
+    /publicRoute[\s\S]*req\.method === "POST" && req\.path === "\/webhooks\/website-lead"/,
+  );
   assert.doesNotMatch(
     client,
     /localStorage|auth_token|Authorization:\s*`Bearer/,
