@@ -1,6 +1,8 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   date,
   index,
   jsonb,
@@ -55,10 +57,30 @@ export const paymentRoutesTable = pgTable(
       table.provider,
       table.merchantId,
     ),
+    uniqueIndex("payment_routes_active_scope_uniq")
+      .on(table.branchCrmId, table.legalEntityId, table.provider)
+      .where(sql`${table.isActive} = true`),
     index("payment_routes_scope_active_idx").on(
       table.branchCrmId,
       table.legalEntityId,
       table.isActive,
+    ),
+    check("payment_routes_provider_check", sql`${table.provider} = 'tochka'`),
+    check(
+      "payment_routes_fiscal_status_check",
+      sql`${table.fiscalProfileStatus} in ('draft', 'approved', 'disabled')`,
+    ),
+    check(
+      "payment_routes_customer_code_check",
+      sql`length(trim(${table.providerCustomerCode})) > 0`,
+    ),
+    check(
+      "payment_routes_merchant_id_check",
+      sql`length(trim(${table.merchantId})) > 0`,
+    ),
+    check(
+      "payment_routes_recipient_label_check",
+      sql`length(trim(${table.recipientLabel})) > 0`,
     ),
   ],
 );
@@ -115,6 +137,27 @@ export const paymentObligationsTable = pgTable(
       table.studentCrmId,
       table.billingPeriod,
     ),
+    uniqueIndex("payment_obligations_source_ref_uniq")
+      .on(table.source, table.sourceRef)
+      .where(sql`${table.sourceRef} is not null`),
+    check("payment_obligations_amount_check", sql`${table.amountKopecks} > 0`),
+    check(
+      "payment_obligations_paid_check",
+      sql`${table.confirmedPaidKopecks} >= 0 and ${table.confirmedPaidKopecks} <= ${table.amountKopecks}`,
+    ),
+    check("payment_obligations_currency_check", sql`${table.currency} = 'RUB'`),
+    check(
+      "payment_obligations_status_check",
+      sql`${table.status} in ('open', 'partial', 'paid', 'cancelled', 'disputed', 'review_required')`,
+    ),
+    check(
+      "payment_obligations_evidence_check",
+      sql`${table.evidenceStatus} in ('confirmed', 'ambiguous', 'unavailable')`,
+    ),
+    check(
+      "payment_obligations_purpose_check",
+      sql`length(trim(${table.purpose})) > 0`,
+    ),
   ],
 );
 
@@ -163,6 +206,20 @@ export const paymentRequestsTable = pgTable(
       table.status,
       table.createdAt,
     ),
+    check("payment_requests_amount_check", sql`${table.amountKopecks} > 0`),
+    check("payment_requests_currency_check", sql`${table.currency} = 'RUB'`),
+    check(
+      "payment_requests_status_check",
+      sql`${table.status} in ('ready', 'link_creating', 'waiting', 'authorized', 'paid', 'fiscalized', 'expired', 'cancelled', 'refund_pending', 'refunded', 'review_required', 'error')`,
+    ),
+    check(
+      "payment_requests_idempotency_key_check",
+      sql`length(trim(${table.idempotencyKey})) > 0`,
+    ),
+    check(
+      "payment_requests_link_id_check",
+      sql`length(trim(${table.paymentLinkId})) > 0`,
+    ),
   ],
 );
 
@@ -194,6 +251,22 @@ export const paymentEventsTable = pgTable(
       table.eventIdentity,
     ),
     index("payment_events_request_created_idx").on(table.requestId, table.createdAt),
+    check(
+      "payment_events_provider_check",
+      sql`length(trim(${table.provider})) > 0`,
+    ),
+    check(
+      "payment_events_identity_check",
+      sql`length(trim(${table.eventIdentity})) > 0`,
+    ),
+    check(
+      "payment_events_type_check",
+      sql`length(trim(${table.eventType})) > 0`,
+    ),
+    check(
+      "payment_events_digest_check",
+      sql`length(trim(${table.payloadDigest})) > 0`,
+    ),
   ],
 );
 
@@ -220,6 +293,14 @@ export const fiscalReceiptsTable = pgTable(
   (table) => [
     uniqueIndex("fiscal_receipts_request_kind_uniq").on(table.requestId, table.kind),
     index("fiscal_receipts_status_idx").on(table.status, table.createdAt),
+    check(
+      "fiscal_receipts_kind_check",
+      sql`${table.kind} in ('sale', 'refund', 'correction')`,
+    ),
+    check(
+      "fiscal_receipts_status_check",
+      sql`${table.status} in ('expected', 'pending', 'fiscalized', 'failed', 'unknown')`,
+    ),
   ],
 );
 
