@@ -45,6 +45,7 @@ services:
     restart: unless-stopped
     environment:
       ARTHELLO_HOST: ${ARTHELLO_HOST:-os.arthelloteam.ru}
+      ARTHELLO_PAY_HOST: ${ARTHELLO_PAY_HOST:-pay-188-225-38-55.sslip.io}
     depends_on:
       api:
         condition: service_healthy
