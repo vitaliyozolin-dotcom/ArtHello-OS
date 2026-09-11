@@ -59,7 +59,47 @@
     {
       "tag": "0011_data_import_core",
       "timestamp": 1785000755923,
-      "sha256": "649defb2e313dd59f6e8c1ed75ab6f4d2e51ed75ab6f4d2e51ed75ab6f4d2e"
+      "sha256": "649defb2e313dd59f6e8c1ed75ab6f4d2e51d44a3c4186a1f915bbfe237d5c57"
+    },
+    {
+      "tag": "0012_yellow_hellcat",
+      "timestamp": 1785004733052,
+      "sha256": "14ff7365a17183f86f7c23cc789956d7b1631b92b012368b23edf5f7eb49bbec"
+    },
+    {
+      "tag": "0013_low_ego",
+      "timestamp": 1785006559523,
+      "sha256": "73d5c3edaf7dee44a71907aef61339096c47cee978424157537dbe8ae5699139"
+    },
+    {
+      "tag": "0014_green_millenium_guard",
+      "timestamp": 1785008758984,
+      "sha256": "906a0ebb5b8b2a5f396550418585c69d624dffe052fc8ff9e478f3fc2e13b0d8"
+    },
+    {
+      "tag": "0015_front_office_internal_alpha",
+      "timestamp": 1785092263278,
+      "sha256": "f06f8d5af39b2b6d690c7af64c8bf6606b0593758ef8d6e2ffca6bf9b70842f4"
+    },
+    {
+      "tag": "0016_personal_auth",
+      "timestamp": 1787184000000,
+      "sha256": "8a471a91e18919c1a9408394d1b26c551721fd66ca806f85faadd796403a3ca4"
+    },
+    {
+      "tag": "0017_people_access_operator",
+      "timestamp": 1787788800000,
+      "sha256": "707a77fa43c5b6d30dd95f98f1db4cfba401995c77c80100093a8b755f056c5d"
+    },
+    {
+      "tag": "0018_retire_orphan_chat",
+      "timestamp": 1788901853908,
+      "sha256": "63e7578ca6715678a98895b3ffa8b5c394f244fe2a905b75ecb87e6a2e6c0fbd"
+    },
+    {
+      "tag": "0019_arthello_pay_core",
+      "timestamp": 1789128000000,
+      "sha256": "3b2c2fe2a896d5ba6662cc812c51b862ffc12cd50e146a43ea31cc4e64ae7d82"
     }
   ]
 }
