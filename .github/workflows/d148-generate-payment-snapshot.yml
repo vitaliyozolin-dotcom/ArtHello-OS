@@ -1,0 +1,57 @@
+name: D148 payment snapshot generator
+
+on:
+  push:
+    branches:
+      - codex/arthello-pay-d148-20260911
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact branch head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Reset only the unsealed local 0019 metadata in runner
+        run: |
+          rm -f lib/db/drizzle/0019_arthello_pay_core.sql
+          rm -f lib/db/drizzle/meta/0019_snapshot.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const journalPath = 'lib/db/drizzle/meta/_journal.json';
+          const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
+          journal.entries = journal.entries.filter((entry) => entry.idx !== 19);
+          fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+          NODE
+      - name: Generate migration and chained snapshot from schema
+        run: pnpm --filter @workspace/db run generate
+      - name: Verify generator produced exactly one new migration
+        run: |
+          test -f lib/db/drizzle/meta/0019_snapshot.json
+          count="$(find lib/db/drizzle -maxdepth 1 -type f -name '0019_*.sql' | wc -l | tr -d ' ')"
+          test "$count" = "1"
+          find lib/db/drizzle -maxdepth 1 -type f -name '0019_*.sql' -print
+      - name: Upload generated migration evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: d148-generated-payment-migration
+          path: |
+            lib/db/drizzle/0019_*.sql
+            lib/db/drizzle/meta/0019_snapshot.json
+            lib/db/drizzle/meta/_journal.json
+          if-no-files-found: error
+          retention-days: 1
