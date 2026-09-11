@@ -1,0 +1,187 @@
+name: D149 v52 Pay UI bridge
+
+on:
+  push:
+    branches:
+      - codex/arthello-pay-web-d149-20260911
+    paths:
+      - .github/workflows/d149-v52-pay-ui-bridge.yml
+
+permissions:
+  contents: write
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/arthello-pay-web-d149-20260911
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Patch Pay UI for v52 and manual client fallback
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('pay-web/app.js')
+          text = path.read_text(encoding='utf-8')
+
+          old = '''function roleLabel(role) {
+            if (role === "owner") return "Владелец";
+            if (role === "payment_operator") return "Администратор оплат";
+            return "Нет доступа";
+          }'''
+          new = '''function canUsePay(user) {
+            if (!user) return false;
+            if (user.isSystemOwner === true || user.role === "owner") return true;
+            const modules = Array.isArray(user.allowedModules) ? user.allowedModules : [];
+            return user.isAdministrative === true && (modules.includes("ArtHello Pay") || modules.includes("Оплаты"));
+          }
+
+          function roleLabel(userOrRole) {
+            const user = userOrRole && typeof userOrRole === "object" ? userOrRole : null;
+            const role = user?.role ?? userOrRole;
+            if (user?.isSystemOwner === true || role === "owner") return "Владелец";
+            if (role === "payment_operator" || canUsePay(user)) return "Администратор оплат";
+            return "Нет доступа";
+          }'''
+          if old not in text:
+              raise SystemExit('roleLabel block not found')
+          text = text.replace(old, new, 1)
+          text = text.replace('roleLabel(state.user?.role)', 'roleLabel(state.user)')
+          text = text.replace(
+              '[item.purpose, item.studentCrmId, item.contractId, branch?.branchName]',
+              '[item.purpose, item.studentName, item.payerName, item.studentCrmId, item.contractId, branch?.branchName]',
+              1,
+          )
+          old_row = 'item.studentCrmId ? `Ученик ${item.studentCrmId}` : "Клиент"'
+          new_row = 'item.studentName || (item.studentCrmId ? `Ученик ${item.studentCrmId}` : "Клиент")'
+          if old_row not in text:
+              raise SystemExit('obligation student display not found')
+          text = text.replace(old_row, new_row, 1)
+
+          marker = '''                <div class="customer-search-results">${renderCustomerResults()}</div>` : ""}
+            </section>'''
+          replacement = '''                <div class="customer-search-results">${renderCustomerResults()}</div>` : ""}
+              ${modal.branchCrmId && !selected ? `
+                <div class="quick-card" style="margin-top:12px;padding:16px">
+                  <div class="form-section-title"><strong>Нет в справочнике?</strong><span>Можно создать оплату вручную. После синхронизации семьи будут подставляться автоматически.</span></div>
+                  <div class="input-row" style="margin-top:12px">
+                    <div class="field"><label for="manual-student-name">Ребёнок</label><input class="input" id="manual-student-name" name="manualStudentName" data-manual-field="manualStudentName" placeholder="Имя и фамилия" value="${escapeHtml(modal.manualStudentName || "")}" /></div>
+                    <div class="field"><label for="manual-payer-name">Плательщик</label><input class="input" id="manual-payer-name" name="manualPayerName" data-manual-field="manualPayerName" placeholder="Имя плательщика" value="${escapeHtml(modal.manualPayerName || "")}" /></div>
+                  </div>
+                </div>` : ""}
+            </section>'''
+          if marker not in text:
+              raise SystemExit('manual UI insertion marker not found')
+          text = text.replace(marker, replacement, 1)
+
+          old_footer = '${!selected || modal.submitting ? "disabled" : ""}'
+          if old_footer not in text:
+              raise SystemExit('create button disabled expression not found')
+          text = text.replace(old_footer, '${modal.submitting ? "disabled" : ""}', 1)
+          text = text.replace(
+              '<strong>Введите фамилию или выберите клиента</strong><p>Показываются только клиенты выбранного филиала.</p>',
+              '<strong>Клиентов в справочнике пока нет</strong><p>Выберите клиента после синхронизации или заполните ребёнка вручную ниже.</p>',
+              1,
+          )
+
+          old_start = '''async function createPayment(form) {
+            const modal = state.modal;
+            const selected = modal?.selectedCustomer;
+            if (!modal || !selected) return;
+            const formData = new FormData(form);'''
+          new_start = '''async function createPayment(form) {
+            const modal = state.modal;
+            const selected = modal?.selectedCustomer;
+            if (!modal) return;
+            const formData = new FormData(form);
+            const manualStudentName = String(formData.get("manualStudentName") ?? "").trim();
+            const manualPayerName = String(formData.get("manualPayerName") ?? "").trim();
+            if (!selected && !manualStudentName) {
+              modal.error = "Выберите клиента или укажите ребёнка вручную.";
+              renderShell();
+              return;
+            }'''
+          if old_start not in text:
+              raise SystemExit('createPayment start block not found')
+          text = text.replace(old_start, new_start, 1)
+
+          old_payload = '''      familyId: selected.familyId || undefined,
+                payerPersonId: selected.payerPersonId || undefined,
+                studentPersonId: selected.studentPersonId || undefined,
+                studentCrmId: selected.studentCrmId,
+                billingPeriod: monthToDate(period),'''
+          new_payload = '''      familyId: selected?.familyId || undefined,
+                payerPersonId: selected?.payerPersonId || undefined,
+                studentPersonId: selected?.studentPersonId || undefined,
+                studentCrmId: selected?.studentCrmId || undefined,
+                studentName: selected?.studentName || manualStudentName,
+                payerName: selected?.payerName || manualPayerName || undefined,
+                billingPeriod: monthToDate(period),'''
+          if old_payload not in text:
+              raise SystemExit('createPayment payload block not found')
+          text = text.replace(old_payload, new_payload, 1)
+
+          old_source = 'sourceRef: `pay-web:${selected.studentCrmId}:${period}:${amountKopecks}`,'
+          new_source = 'sourceRef: selected?.studentCrmId ? `pay-web:${selected.studentCrmId}:${period}:${amountKopecks}` : `pay-web:manual:${branchCrmId}:${period}:${amountKopecks}:${payerEmail || payerPhone}`,'
+          if old_source not in text:
+              raise SystemExit('sourceRef block not found')
+          text = text.replace(old_source, new_source, 1)
+
+          text = text.replace(
+              'if (!["owner", "payment_operator"].includes(me.role)) {',
+              'if (!canUsePay(me)) {',
+          )
+          if '["owner", "payment_operator"].includes(me.role)' in text:
+              raise SystemExit('stale Pay role gate remains')
+
+          old_modal = '''    submitting: false,
+              error: "",
+            };'''
+          new_modal = '''    manualStudentName: "",
+              manualPayerName: "",
+              submitting: false,
+              error: "",
+            };'''
+          if old_modal not in text:
+              raise SystemExit('new payment modal state marker not found')
+          text = text.replace(old_modal, new_modal, 1)
+
+          input_marker = '''  if (target.matches("[data-customer-search]")) scheduleCustomerSearch(target.value);
+          });'''
+          input_replacement = '''  if (target.matches("[data-customer-search]")) scheduleCustomerSearch(target.value);
+            const manualField = target.getAttribute("data-manual-field");
+            if (manualField && state.modal) state.modal[manualField] = target.value;
+          });'''
+          if input_marker not in text:
+              raise SystemExit('input listener marker not found')
+          text = text.replace(input_marker, input_replacement, 1)
+
+          branch_marker = '''    state.modal.customerQuery = "";
+              state.customerResults = [];'''
+          branch_replacement = '''    state.modal.customerQuery = "";
+              state.modal.manualStudentName = "";
+              state.modal.manualPayerName = "";
+              state.customerResults = [];'''
+          if branch_marker not in text:
+              raise SystemExit('branch reset marker not found')
+          text = text.replace(branch_marker, branch_replacement, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          mkdir -p deploy/v52/public/pay-assets
+          cp pay-web/app.js deploy/v52/public/pay-assets/app.js
+          cp pay-web/styles.css deploy/v52/public/pay-assets/styles.css
+          rm .github/workflows/d149-v52-pay-ui-bridge.yml
+
+          git config user.name "arthello-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "D149: bridge Pay UI into v52 runtime"
+          git push origin HEAD:codex/arthello-pay-web-d149-20260911
