@@ -20,6 +20,7 @@
     {"idx":15,"version":"7","when":1785092263278,"tag":"0015_front_office_internal_alpha","breakpoints":true},
     {"idx":16,"version":"7","when":1787184000000,"tag":"0016_personal_auth","breakpoints":true},
     {"idx":17,"version":"7","when":1787788800000,"tag":"0017_people_access_operator","breakpoints":true},
-    {"idx":18,"version":"7","when":1788901853908,"tag":"0018_retire_orphan_chat","breakpoints":true}
+    {"idx":18,"version":"7","when":1788901853908,"tag":"0018_retire_orphan_chat","breakpoints":true},
+    {"idx":19,"version":"7","when":1789128000000,"tag":"0019_arthello_pay_core","breakpoints":true}
   ]
 }
