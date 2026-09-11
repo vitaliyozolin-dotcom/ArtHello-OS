@@ -17,7 +17,7 @@ from types import ModuleType
 def checked_module():
     path = Path(__file__).with_name('r18-backup-adoption.py')
     source = path.read_bytes()
-    if hashlib.sha256(source).hexdigest() != 'c3f704987d1af11f00aa80f050a618555347560ea6188531bea56e1a40e65bbc':
+    if hashlib.sha256(source).hexdigest() != '447f079a7af3da00c5b013839a81f00b7973c613fc4265f0753bc7f2a7ee2e01':
         raise RuntimeError('R14_ADOPTION_DEPENDENCY_DRIFT')
     module = ModuleType('r14_controller_adoption')
     module.__file__ = str(path)
@@ -253,7 +253,7 @@ def historical_predecessor(docker):
 
 
 def accepted_live_predecessor(docker):
-    """Prove the retained R17 app through its exact public context."""
+    """Prove Atlas's retained, stopped R17 container through the exact R17 public context."""
     root = Path.home() / '.config/arthello/release-state'
     directory = adoption.private_directory(root)
     try:
@@ -275,18 +275,20 @@ def accepted_live_predecessor(docker):
                 'previousContainerId': adoption.HISTORICAL_APP_ID,
                 'previousName': 'arthello-direct-' + adoption.HISTORICAL_RUN + '-1'}
     require(all(context.get(key) == value for key, value in expected.items()), 'LIVE_CONTEXT_IDENTITY_INVALID')
-    item = docker.inspect('container', expected['previousName'], True)
+    retained_name = context['candidateName']
+    item = docker.inspect('container', retained_name, True)
     if item is None:
         return None
-    app_metadata(item, identity=adoption.HISTORICAL_APP_ID, name=expected['previousName'],
-                 image=adoption.HISTORICAL_IMAGE, release=adoption.HISTORICAL_SHA, running=False, paused=False)
-    image = docker.inspect('image', adoption.HISTORICAL_IMAGE)
-    require(image.get('Id') == adoption.HISTORICAL_IMAGE
-            and image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == adoption.HISTORICAL_SHA,
+    app_metadata(item, identity=adoption.LIVE_STATE_APP_ID, name=retained_name,
+                 image=adoption.LIVE_IMAGE, release=adoption.LIVE_SHA, running=False, paused=False)
+    image = docker.inspect('image', adoption.LIVE_IMAGE)
+    require(image.get('Id') == adoption.LIVE_IMAGE
+            and image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == adoption.LIVE_SHA,
             'PREDECESSOR_IMAGE_SOURCE_INVALID')
-    # R13 retains its read-only control socket mount. The adoption verifier checks
-    # every control/history consumer and its no-copy read-only mount separately.
-    return adoption.HISTORICAL_APP_ID
+    # Atlas recreated the live R17 container without deleting the exact stopped
+    # candidate recorded by R17. The frozen chain below separately proves older
+    # historical consumers. All mounts are rechecked by the adoption verifier.
+    return adoption.LIVE_STATE_APP_ID
 
 
 def canonical_consumers(args, docker, phase):
