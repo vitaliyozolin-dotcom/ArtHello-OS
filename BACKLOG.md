@@ -2,10 +2,10 @@
 
 ## A.4 — sandbox ingestion и банковский OAuth
 
-- [~] `A4-13-01`: append-only raw + отдельные observations + обязательные raw/batch FK реализованы в migration `0014`, 29 data tests PASS; закрыть только после финального независимого Reviewer PASS.
+- [x] `A4-13-01`: append-only raw + отдельные observations + обязательные raw/batch FK реализованы в migration `0014`; финальный Reviewer PASS и exact-head Quality `34517730899` зафиксированы 2026-09-11.
 - [~] `A4-13-02`: completed-scope reconciliation, current/stale, lead→student и stale family evidence реализованы; partial scope не tombstone-ит. Закрыть только после финального Reviewer/Coordinator.
 - [~] `A4-13-03`: `pageSize`, repeated-page fail, max guard, transport failure и idempotent retry покрыты PGlite tests. Закрыть только после финального Reviewer/Coordinator.
-- [ ] `QA-A4-02`: выполнить `test:postgres` для exact candidate с migration `0014` на одноразовом PostgreSQL 16; текущая среда не содержит `TEST_DATABASE_URL`, поэтому исторический v10 PASS не переносится на этот candidate.
+- [x] `QA-A4-02`: exact candidate `c8759ff213c72fd50763eb96afce68d93d2e67d7` с migration `0014` прошёл агрегат с `test:postgres` на PostgreSQL 16 в Quality `34517730899`.
 - [x] Создать отдельную PostgreSQL-совместимую sandbox-БД вне source checkout.
 - [x] Добавить migration `0011` для raw imports, CRM normalized records, owner-confirmed master data и payroll evidence; подготовить rollback companion.
 - [x] Добавить migration `0012` с индексами sandbox-import hot paths и отдельным rollback companion.
@@ -98,7 +98,7 @@
 - [ ] Добавить health/readiness checks для БД и каждой интеграции.
 - [~] Введены recursive redaction и access audit; allowed route подтверждён в PostgreSQL, остаются deny/outage smoke, retention и correlation ID.
 - [ ] Зафиксировать RPO/RTO и проверить восстановление из backup.
-- [ ] Удалить tracked build metadata или гарантировать воспроизводимую пересборку.
+- [x] Tracked build metadata отсутствует; `.wrangler/` игнорируется, а `tsconfig.tsbuildinfo`/`.wrangler` исключены из canonical School identity явным verifier contract и regression-тестом D107.
 
 ## P1 — операционная модель
 
