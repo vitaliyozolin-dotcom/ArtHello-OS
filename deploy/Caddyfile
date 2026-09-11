@@ -18,6 +18,27 @@
   file_server
 }
 
+{$ARTHELLO_PAY_HOST:pay-188-225-38-55.sslip.io} {
+  encode zstd gzip
+
+  header {
+    -Server
+    Strict-Transport-Security "max-age=31536000"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "no-referrer"
+    X-Frame-Options "DENY"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+  }
+
+  @api path /api/*
+  reverse_proxy @api api:8080
+
+  root * /srv/pay
+  try_files {path} /index.html
+  file_server
+}
+
 school-188-225-47-207.sslip.io {
   encode zstd gzip
 
