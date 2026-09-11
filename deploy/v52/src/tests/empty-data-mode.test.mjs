@@ -100,6 +100,9 @@ async function loadDbModule(database) {
       ['import { ensureOperatingIntegrationCatalog } from "../lib/operating-integration-catalog";', "const ensureOperatingIntegrationCatalog = async () => {};"],
       ['import { toTochkaFinancialOperation } from "../lib/integrations";', "const toTochkaFinancialOperation = async () => null;"],
       ['import type { TochkaReadOnlySyncResult } from "../lib/integrations";', ""],
+      ['import { classifyFinanceOperation, isAutoAllocationCatalogReady, type FinanceAutoAllocation } from "../lib/finance-auto-allocation";', "const classifyFinanceOperation = () => null; const isAutoAllocationCatalogReady = () => false;"],
+      ['import { FINANCE_ACCOUNTING_START_DATE } from "../lib/finance-branch-scope";', 'const FINANCE_ACCOUNTING_START_DATE = "2026-09-01";'],
+      ['import { loadArticleCatalog } from "../lib/finance-article-store";', "const loadArticleCatalog = async () => ({ catalog: { schema: 1, revision: 1, articles: [] }, raw: null });"],
       ['import * as schema from "./schema";', "const schema = {};"],
     ], "db/index.ts");
     return await importCode(code, "db-index");

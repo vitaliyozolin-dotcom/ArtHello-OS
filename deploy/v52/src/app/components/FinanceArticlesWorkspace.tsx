@@ -36,7 +36,7 @@ export function FinanceArticlesWorkspace({ catalog, permissions, operations, per
   return <div className="ahFinanceArticles">
     <section className="finance-panel">
       <div className="finance-panel-head"><div><p>Справочник</p><h2>Статьи ДДС и ОПиУ</h2></div></div>
-      <p>Сначала создайте черновик статьи. После утверждения руководителем её можно выбрать при разнесении. ДДС отражает движение денег, ОПиУ — доходы и расходы выбранного периода.</p>
+      <p>Утверждённый справочник зафиксирован как рабочая база. ДДС отражает движение денег, ОПиУ — доходы и расходы выбранного периода. Изменения справочника выполняются только по отдельному решению владельца.</p>
       {permissions.canEdit ? <form className="ahFinanceArticleForm" onSubmit={create}>
         <label><span>Название статьи</span><input required maxLength={160} value={name} onChange={e => setName(e.target.value)} /></label>
         <label><span>Отчёт</span><select value={report} onChange={e => setReport(e.target.value)}><option value="cashflow">ДДС</option><option value="pnl">ОПиУ</option></select></label>
@@ -56,7 +56,7 @@ export function FinanceArticlesWorkspace({ catalog, permissions, operations, per
     </section>
     <section className="finance-panel">
       <div className="finance-panel-head"><div><p>Подбор для разнесения</p><h2>Проверить условия правила</h2></div></div>
-      <p>Предпросмотр найдёт банковские операции без статьи за выбранный месяц. Все заполненные условия должны совпасть. Автоматическое разнесение здесь ещё не включается.</p>
+      <p>Предпросмотр найдёт банковские операции без статьи за выбранный месяц. Все заполненные условия должны совпасть. Зафиксированные правила школы и садика применяются автоматически при банковском импорте.</p>
       <form className="ahFinanceArticleForm" onSubmit={inspect} onChange={() => { setPreview(null); setError(''); }}>
         <label><span>Статья ДДС</span><select required value={articleId} onChange={e => setArticleId(e.target.value)}><option value="">Выберите статью</option>{catalog.articles.filter(a => a.report === 'cashflow' && a.status === 'active').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
         <label><span>ИНН контрагента — точное совпадение</span><input inputMode="numeric" maxLength={12} value={counterpartyInn} onChange={e => setInn(e.target.value)} /></label>
