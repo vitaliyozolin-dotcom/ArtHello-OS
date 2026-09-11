@@ -8,6 +8,7 @@ on:
       - DECISIONS.md
       - .github/workflows/deploy-arthello-direct-38-55.yml
       - .github/workflows/verify-arthello-v52.yml
+      - .github/workflows/deploy-arthello-finance-r18-20260911.yml
       - .github/workflows/deploy-arthello-recovery-20260908.yml
       - .github/scripts/check-recovery-release-contract.rb
       - .github/scripts/check-school-live-acceptance.py
@@ -109,6 +110,7 @@ on:
       - DECISIONS.md
       - .github/workflows/deploy-arthello-direct-38-55.yml
       - .github/workflows/verify-arthello-v52.yml
+      - .github/workflows/deploy-arthello-finance-r18-20260911.yml
       - .github/workflows/deploy-arthello-recovery-20260908.yml
       - .github/scripts/check-recovery-release-contract.rb
       - .github/scripts/check-school-live-acceptance.py
