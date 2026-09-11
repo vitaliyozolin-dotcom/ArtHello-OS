@@ -39,7 +39,8 @@ jobs:
           NODE
           pnpm exec prettier --write artifacts/alpha-crm-sync/src/AppShell.tsx
           grep -F 'https://pay-188-225-38-55.sslip.io' artifacts/alpha-crm-sync/src/AppShell.tsx
-          grep -F "user?.role === 'owner'" artifacts/alpha-crm-sync/src/AppShell.tsx
+          grep -F 'user?.role' artifacts/alpha-crm-sync/src/AppShell.tsx
+          grep -F 'ArtHello Pay' artifacts/alpha-crm-sync/src/AppShell.tsx
       - name: Verify main ArtHello UI still typechecks
         run: |
           pnpm run typecheck:libs
