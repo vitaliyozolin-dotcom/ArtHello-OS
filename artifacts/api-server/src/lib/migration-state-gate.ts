@@ -88,6 +88,10 @@ export const REQUIRED_MIGRATION_STATE: readonly ExpectedMigration[] = [
     timestamp: 1788901853908,
     sha256: "63e7578ca6715678a98895b3ffa8b5c394f244fe2a905b75ecb87e6a2e6c0fbd",
   },
+  {
+    timestamp: 1789130135005,
+    sha256: "1f7db04cba6dbb4edf7963773f3fd70db1c4c6f52bae487d647261725d1e72a6",
+  },
 ];
 
 export async function assertMigrationStateReady(
