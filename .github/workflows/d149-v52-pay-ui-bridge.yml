@@ -29,12 +29,19 @@ jobs:
           path = Path('pay-web/app.js')
           text = path.read_text(encoding='utf-8')
 
-          old = '''function roleLabel(role) {
+          def replace_once(old, new, label):
+              global text
+              if old not in text:
+                  raise SystemExit(f'{label} not found')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+          '''function roleLabel(role) {
             if (role === "owner") return "Владелец";
             if (role === "payment_operator") return "Администратор оплат";
             return "Нет доступа";
-          }'''
-          new = '''function canUsePay(user) {
+          }''',
+          '''function canUsePay(user) {
             if (!user) return false;
             if (user.isSystemOwner === true || user.role === "owner") return true;
             const modules = Array.isArray(user.allowedModules) ? user.allowedModules : [];
@@ -47,25 +54,18 @@ jobs:
             if (user?.isSystemOwner === true || role === "owner") return "Владелец";
             if (role === "payment_operator" || canUsePay(user)) return "Администратор оплат";
             return "Нет доступа";
-          }'''
-          if old not in text:
-              raise SystemExit('roleLabel block not found')
-          text = text.replace(old, new, 1)
+          }''', 'roleLabel')
+
           text = text.replace('roleLabel(state.user?.role)', 'roleLabel(state.user)')
-          text = text.replace(
-              '[item.purpose, item.studentCrmId, item.contractId, branch?.branchName]',
-              '[item.purpose, item.studentName, item.payerName, item.studentCrmId, item.contractId, branch?.branchName]',
-              1,
+          replace_once(
+              'item.studentCrmId ? `Ученик ${item.studentCrmId}` : "Клиент"',
+              'item.studentName || (item.studentCrmId ? `Ученик ${item.studentCrmId}` : "Клиент")',
+              'student display',
           )
-          old_row = 'item.studentCrmId ? `Ученик ${item.studentCrmId}` : "Клиент"'
-          new_row = 'item.studentName || (item.studentCrmId ? `Ученик ${item.studentCrmId}` : "Клиент")'
-          if old_row not in text:
-              raise SystemExit('obligation student display not found')
-          text = text.replace(old_row, new_row, 1)
 
           marker = '''                <div class="customer-search-results">${renderCustomerResults()}</div>` : ""}
             </section>'''
-          replacement = '''                <div class="customer-search-results">${renderCustomerResults()}</div>` : ""}
+          manual = '''                <div class="customer-search-results">${renderCustomerResults()}</div>` : ""}
               ${modal.branchCrmId && !selected ? `
                 <div class="quick-card" style="margin-top:12px;padding:16px">
                   <div class="form-section-title"><strong>Нет в справочнике?</strong><span>Можно создать оплату вручную. После синхронизации семьи будут подставляться автоматически.</span></div>
@@ -75,26 +75,26 @@ jobs:
                   </div>
                 </div>` : ""}
             </section>'''
-          if marker not in text:
-              raise SystemExit('manual UI insertion marker not found')
-          text = text.replace(marker, replacement, 1)
+          replace_once(marker, manual, 'manual UI marker')
 
-          old_footer = '${!selected || modal.submitting ? "disabled" : ""}'
-          if old_footer not in text:
-              raise SystemExit('create button disabled expression not found')
-          text = text.replace(old_footer, '${modal.submitting ? "disabled" : ""}', 1)
-          text = text.replace(
+          replace_once(
+              '${!selected || modal.submitting ? "disabled" : ""}',
+              '${modal.submitting ? "disabled" : ""}',
+              'create button gate',
+          )
+          replace_once(
               '<strong>Введите фамилию или выберите клиента</strong><p>Показываются только клиенты выбранного филиала.</p>',
               '<strong>Клиентов в справочнике пока нет</strong><p>Выберите клиента после синхронизации или заполните ребёнка вручную ниже.</p>',
-              1,
+              'empty customer state',
           )
 
-          old_start = '''async function createPayment(form) {
+          replace_once(
+          '''async function createPayment(form) {
             const modal = state.modal;
             const selected = modal?.selectedCustomer;
             if (!modal || !selected) return;
-            const formData = new FormData(form);'''
-          new_start = '''async function createPayment(form) {
+            const formData = new FormData(form);''',
+          '''async function createPayment(form) {
             const modal = state.modal;
             const selected = modal?.selectedCustomer;
             if (!modal) return;
@@ -105,72 +105,63 @@ jobs:
               modal.error = "Выберите клиента или укажите ребёнка вручную.";
               renderShell();
               return;
-            }'''
-          if old_start not in text:
-              raise SystemExit('createPayment start block not found')
-          text = text.replace(old_start, new_start, 1)
+            }''', 'createPayment start')
 
-          old_payload = '''      familyId: selected.familyId || undefined,
+          replace_once(
+          '''      familyId: selected.familyId || undefined,
                 payerPersonId: selected.payerPersonId || undefined,
                 studentPersonId: selected.studentPersonId || undefined,
                 studentCrmId: selected.studentCrmId,
-                billingPeriod: monthToDate(period),'''
-          new_payload = '''      familyId: selected?.familyId || undefined,
+                billingPeriod: monthToDate(period),''',
+          '''      familyId: selected?.familyId || undefined,
                 payerPersonId: selected?.payerPersonId || undefined,
                 studentPersonId: selected?.studentPersonId || undefined,
                 studentCrmId: selected?.studentCrmId || undefined,
                 studentName: selected?.studentName || manualStudentName,
                 payerName: selected?.payerName || manualPayerName || undefined,
-                billingPeriod: monthToDate(period),'''
-          if old_payload not in text:
-              raise SystemExit('createPayment payload block not found')
-          text = text.replace(old_payload, new_payload, 1)
+                billingPeriod: monthToDate(period),''', 'createPayment payload')
 
-          old_source = 'sourceRef: `pay-web:${selected.studentCrmId}:${period}:${amountKopecks}`,'
-          new_source = 'sourceRef: selected?.studentCrmId ? `pay-web:${selected.studentCrmId}:${period}:${amountKopecks}` : `pay-web:manual:${branchCrmId}:${period}:${amountKopecks}:${payerEmail || payerPhone}`,'
-          if old_source not in text:
-              raise SystemExit('sourceRef block not found')
-          text = text.replace(old_source, new_source, 1)
-
-          text = text.replace(
+          replace_once(
+              'sourceRef: `pay-web:${selected.studentCrmId}:${period}:${amountKopecks}`,',
+              'sourceRef: selected?.studentCrmId ? `pay-web:${selected.studentCrmId}:${period}:${amountKopecks}` : `pay-web:manual:${branchCrmId}:${period}:${amountKopecks}:${payerEmail || payerPhone}`,',
+              'manual sourceRef',
+          )
+          replace_once(
               'if (!["owner", "payment_operator"].includes(me.role)) {',
               'if (!canUsePay(me)) {',
+              'bootstrap role gate',
           )
-          if '["owner", "payment_operator"].includes(me.role)' in text:
-              raise SystemExit('stale Pay role gate remains')
 
-          old_modal = '''    submitting: false,
-              error: "",
-            };'''
-          new_modal = '''    manualStudentName: "",
-              manualPayerName: "",
-              submitting: false,
-              error: "",
-            };'''
-          if old_modal not in text:
-              raise SystemExit('new payment modal state marker not found')
-          text = text.replace(old_modal, new_modal, 1)
+          replace_once(
+          '''    dueDate: "",
+            submitting: false,
+            error: "",
+          };''',
+          '''    dueDate: "",
+            manualStudentName: "",
+            manualPayerName: "",
+            submitting: false,
+            error: "",
+          };''', 'modal state')
 
-          input_marker = '''  if (target.matches("[data-customer-search]")) scheduleCustomerSearch(target.value);
-          });'''
-          input_replacement = '''  if (target.matches("[data-customer-search]")) scheduleCustomerSearch(target.value);
+          replace_once(
+          '''  if (target.matches("[data-customer-search]")) scheduleCustomerSearch(target.value);
+          });''',
+          '''  if (target.matches("[data-customer-search]")) scheduleCustomerSearch(target.value);
             const manualField = target.getAttribute("data-manual-field");
             if (manualField && state.modal) state.modal[manualField] = target.value;
-          });'''
-          if input_marker not in text:
-              raise SystemExit('input listener marker not found')
-          text = text.replace(input_marker, input_replacement, 1)
+          });''', 'manual input state')
 
-          branch_marker = '''    state.modal.customerQuery = "";
-              state.customerResults = [];'''
-          branch_replacement = '''    state.modal.customerQuery = "";
-              state.modal.manualStudentName = "";
-              state.modal.manualPayerName = "";
-              state.customerResults = [];'''
-          if branch_marker not in text:
-              raise SystemExit('branch reset marker not found')
-          text = text.replace(branch_marker, branch_replacement, 1)
+          replace_once(
+          '''    state.modal.customerQuery = "";
+            state.customerResults = [];''',
+          '''    state.modal.customerQuery = "";
+            state.modal.manualStudentName = "";
+            state.modal.manualPayerName = "";
+            state.customerResults = [];''', 'branch reset')
 
+          if '["owner", "payment_operator"].includes(me.role)' in text:
+              raise SystemExit('stale Pay role gate remains')
           path.write_text(text, encoding='utf-8')
           PY
 
@@ -178,12 +169,9 @@ jobs:
           cp pay-web/app.js deploy/v52/public/pay-assets/app.js
           cp pay-web/styles.css deploy/v52/public/pay-assets/styles.css
           rm .github/workflows/d149-v52-pay-ui-bridge.yml
-
           git config user.name "arthello-release-bot"
           git config user.email "actions@users.noreply.github.com"
           git add -A
           git diff --cached --check
           git commit -m "D149: bridge Pay UI into v52 runtime"
           git push origin HEAD:codex/arthello-pay-web-d149-20260911
-
-# retrigger after workflow registration
