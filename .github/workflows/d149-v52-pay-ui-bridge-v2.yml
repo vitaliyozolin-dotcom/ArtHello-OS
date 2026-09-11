@@ -116,3 +116,5 @@ jobs:
           git diff --cached --check
           git commit -m "D149: bridge Pay UI into v52 runtime"
           git push origin HEAD:codex/arthello-pay-web-d149-20260911
+
+# registered workflow trigger
