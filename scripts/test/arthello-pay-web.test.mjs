@@ -14,6 +14,9 @@ const apiApp = read("artifacts/api-server/src/app.ts");
 const accessPolicy = read(
   "artifacts/api-server/src/lib/security/access-policy.ts",
 );
+const contractInventory = JSON.parse(
+  read("quality-gates/contract-server-only.json"),
+);
 
 test("ArtHello Pay has an isolated static web shell", () => {
   assert.match(index, /<title>ArtHello Pay<\/title>/);
@@ -50,6 +53,30 @@ test("payment operator catalog access stays scoped and banking remains excluded"
     accessPolicy.match(/const PAYMENT_OPERATOR_ROUTES[\s\S]*?\];/)?.[0] ?? "",
     /banking/,
   );
+});
+
+test("all ArtHello Pay runtime routes are explicitly registered in the server contract inventory", () => {
+  const expected = new Set([
+    "GET /payments/catalog",
+    "GET /payments/customers",
+    "GET /payments/obligations",
+    "GET /payments/obligations/{param}",
+    "GET /payments/public/{param}",
+    "GET /payments/requests",
+    "GET /payments/routes",
+    "POST /payments/obligations",
+    "POST /payments/obligations/{param}/requests",
+    "POST /payments/obligations/{param}/requests/preview",
+    "POST /payments/operators",
+    "POST /payments/requests/{param}/cancel",
+    "POST /payments/routes",
+  ]);
+  const registered = new Set(
+    contractInventory.entries
+      .filter(({ disposition }) => disposition === "document-in-openapi")
+      .map(({ route }) => route),
+  );
+  for (const route of expected) assert.equal(registered.has(route), true, route);
 });
 
 test("ArtHello Pay follows the ArtHello design tokens and has a mobile layout", () => {
