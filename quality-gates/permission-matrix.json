@@ -1,31 +1,210 @@
 {
   "schema_version": 1,
   "source_of_truth": "artifacts/api-server/src/lib/security/access-policy.ts",
-  "production_roles": ["owner", "accountant", "viewer"],
+  "production_roles": ["owner", "accountant", "viewer", "payment_operator"],
   "scopes": {
     "none": null,
-    "complete": {"unrestricted": false, "branchIds": ["proof-branch"], "legalEntityIds": ["proof-legal-entity"]}
+    "complete": {
+      "unrestricted": false,
+      "branchIds": ["proof-branch"],
+      "legalEntityIds": ["proof-legal-entity"]
+    }
   },
   "persona_gaps": [
-    {"persona": "administrator", "status": "NOT_YET_AUTH_ROLE"},
-    {"persona": "teacher", "status": "NOT_YET_AUTH_ROLE"},
-    {"persona": "parent", "status": "NOT_YET_AUTH_ROLE"},
-    {"persona": "employee", "status": "NOT_YET_AUTH_ROLE"}
+    { "persona": "administrator", "status": "NOT_YET_AUTH_ROLE" },
+    { "persona": "teacher", "status": "NOT_YET_AUTH_ROLE" },
+    { "persona": "parent", "status": "NOT_YET_AUTH_ROLE" },
+    { "persona": "employee", "status": "NOT_YET_AUTH_ROLE" }
   ],
   "cases": [
-    {"id":"owner-read-finance","role":"owner","method":"GET","path":"/finance/summary","scope":"none","allowed":true,"policy":"owner-full-access"},
-    {"id":"owner-write-finance","role":"owner","method":"POST","path":"/finance/transactions","scope":"none","allowed":true,"policy":"owner-full-access"},
-    {"id":"owner-people-access-plan","role":"owner","method":"POST","path":"/people-access/plan","scope":"none","allowed":true,"policy":"owner-full-access"},
-    {"id":"accountant-account-self","role":"accountant","method":"GET","path":"/auth/me","scope":"none","allowed":true,"policy":"authenticated-account-route"},
-    {"id":"viewer-account-logout","role":"viewer","method":"POST","path":"/auth/logout","scope":"none","allowed":true,"policy":"authenticated-account-route"},
-    {"id":"accountant-owner-users-denied","role":"accountant","method":"GET","path":"/auth/users","scope":"complete","allowed":false,"policy":"owner-only-read"},
-    {"id":"viewer-people-access-denied","role":"viewer","method":"GET","path":"/people-access/readiness","scope":"complete","allowed":false,"policy":"owner-only-read"},
-    {"id":"viewer-banking-customers-denied","role":"viewer","method":"GET","path":"/banking/connectors/alfa/customers","scope":"complete","allowed":false,"policy":"owner-only-read"},
-    {"id":"accountant-without-scope-denied","role":"accountant","method":"GET","path":"/finance/summary","scope":"none","allowed":false,"policy":"scope-required"},
-    {"id":"accountant-read-business-route-not-yet-enforced","role":"accountant","method":"GET","path":"/finance/summary","scope":"complete","allowed":false,"policy":"scope-route-not-enforced"},
-    {"id":"viewer-read-business-route-not-yet-enforced","role":"viewer","method":"GET","path":"/clients","scope":"complete","allowed":false,"policy":"scope-route-not-enforced"},
-    {"id":"accountant-write-denied","role":"accountant","method":"POST","path":"/finance/transactions","scope":"complete","allowed":false,"policy":"write-denied"},
-    {"id":"viewer-people-access-write-denied","role":"viewer","method":"POST","path":"/people-access/apply","scope":"complete","allowed":false,"policy":"write-denied"},
-    {"id":"viewer-write-denied","role":"viewer","method":"PATCH","path":"/clients/proof-client","scope":"complete","allowed":false,"policy":"write-denied"}
+    {
+      "id": "owner-read-finance",
+      "role": "owner",
+      "method": "GET",
+      "path": "/finance/summary",
+      "scope": "none",
+      "allowed": true,
+      "policy": "owner-full-access"
+    },
+    {
+      "id": "owner-write-finance",
+      "role": "owner",
+      "method": "POST",
+      "path": "/finance/transactions",
+      "scope": "none",
+      "allowed": true,
+      "policy": "owner-full-access"
+    },
+    {
+      "id": "owner-people-access-plan",
+      "role": "owner",
+      "method": "POST",
+      "path": "/people-access/plan",
+      "scope": "none",
+      "allowed": true,
+      "policy": "owner-full-access"
+    },
+    {
+      "id": "accountant-account-self",
+      "role": "accountant",
+      "method": "GET",
+      "path": "/auth/me",
+      "scope": "none",
+      "allowed": true,
+      "policy": "authenticated-account-route"
+    },
+    {
+      "id": "viewer-account-logout",
+      "role": "viewer",
+      "method": "POST",
+      "path": "/auth/logout",
+      "scope": "none",
+      "allowed": true,
+      "policy": "authenticated-account-route"
+    },
+    {
+      "id": "accountant-owner-users-denied",
+      "role": "accountant",
+      "method": "GET",
+      "path": "/auth/users",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "owner-only-read"
+    },
+    {
+      "id": "viewer-people-access-denied",
+      "role": "viewer",
+      "method": "GET",
+      "path": "/people-access/readiness",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "owner-only-read"
+    },
+    {
+      "id": "viewer-banking-customers-denied",
+      "role": "viewer",
+      "method": "GET",
+      "path": "/banking/connectors/alfa/customers",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "owner-only-read"
+    },
+    {
+      "id": "accountant-without-scope-denied",
+      "role": "accountant",
+      "method": "GET",
+      "path": "/finance/summary",
+      "scope": "none",
+      "allowed": false,
+      "policy": "scope-required"
+    },
+    {
+      "id": "accountant-read-business-route-not-yet-enforced",
+      "role": "accountant",
+      "method": "GET",
+      "path": "/finance/summary",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "scope-route-not-enforced"
+    },
+    {
+      "id": "viewer-read-business-route-not-yet-enforced",
+      "role": "viewer",
+      "method": "GET",
+      "path": "/clients",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "scope-route-not-enforced"
+    },
+    {
+      "id": "accountant-write-denied",
+      "role": "accountant",
+      "method": "POST",
+      "path": "/finance/transactions",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "write-denied"
+    },
+    {
+      "id": "viewer-people-access-write-denied",
+      "role": "viewer",
+      "method": "POST",
+      "path": "/people-access/apply",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "write-denied"
+    },
+    {
+      "id": "viewer-write-denied",
+      "role": "viewer",
+      "method": "PATCH",
+      "path": "/clients/proof-client",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "write-denied"
+    },
+    {
+      "id": "payment-operator-account-self",
+      "role": "payment_operator",
+      "method": "GET",
+      "path": "/auth/me",
+      "scope": "none",
+      "allowed": true,
+      "policy": "authenticated-account-route"
+    },
+    {
+      "id": "payment-operator-catalog-scoped",
+      "role": "payment_operator",
+      "method": "GET",
+      "path": "/payments/catalog",
+      "scope": "complete",
+      "allowed": true,
+      "policy": "payment-operator-scoped"
+    },
+    {
+      "id": "payment-operator-create-obligation-scoped",
+      "role": "payment_operator",
+      "method": "POST",
+      "path": "/payments/obligations",
+      "scope": "complete",
+      "allowed": true,
+      "policy": "payment-operator-scoped"
+    },
+    {
+      "id": "payment-operator-without-scope-denied",
+      "role": "payment_operator",
+      "method": "GET",
+      "path": "/payments/catalog",
+      "scope": "none",
+      "allowed": false,
+      "policy": "scope-required"
+    },
+    {
+      "id": "payment-operator-bank-customers-denied",
+      "role": "payment_operator",
+      "method": "GET",
+      "path": "/banking/connectors/tochka/customers",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "owner-only-read"
+    },
+    {
+      "id": "payment-operator-route-config-read-denied",
+      "role": "payment_operator",
+      "method": "GET",
+      "path": "/payments/routes",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "scope-route-not-enforced"
+    },
+    {
+      "id": "payment-operator-route-config-write-denied",
+      "role": "payment_operator",
+      "method": "POST",
+      "path": "/payments/routes",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "write-denied"
+    }
   ]
 }
