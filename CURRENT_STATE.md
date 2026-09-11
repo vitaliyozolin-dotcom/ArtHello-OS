@@ -1,5 +1,6 @@
 # ArtHello OS — Current State
 
+- Backlog review 2026-09-11 подтверждает закрытие Atlas production activation по принятым D129/D130 receipts. Отдельно принят design-only callback contract для website/bank/Evotor; публичные provider callbacks не включены и требуют реализации durable replay/verifier tests.
 ## 2026-09-10 — D138: School через защищённую SSH-границу, кандидат
 
 - D137 run `34541397143` не нашёл School image на локальном Docker daemon и остановился до мутаций; Atlas не запускался. School находится за отдельной deploy-границей, как в его принятом production workflow.

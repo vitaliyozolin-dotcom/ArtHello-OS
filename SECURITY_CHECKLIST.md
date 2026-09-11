@@ -95,7 +95,7 @@
 - [x] Browser callback Точки остаётся public только с проверкой OAuth state.
 - [x] Website, bank и Evotor callbacks закрыты auth-gate до безопасного контракта.
 - [x] Website lead handler требует payload-bound `Idempotency-Key`, пишет raw/lead/source одной transaction под advisory lock, возвращает `409` при payload conflict и восстанавливает legacy raw-only partial write.
-- [ ] Определить HMAC/signature/mTLS контракт для каждого webhook.
+- [x] Общая fail-closed граница и отдельные website/bank/Evotor контракты спроектированы в `docs/security/webhook-authentication.md`; конкретный provider adapter остаётся закрыт без официальных test vectors.
 - [ ] Проверить durable replay protection и idempotency всех callbacks.
 - [x] Negative source test подтверждает, что provider POST callbacks не добавлены в public allowlist; website payload conflict/retry покрыты.
 - [ ] Проверить callback URL после каждого deployment change.

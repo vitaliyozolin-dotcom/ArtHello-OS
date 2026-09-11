@@ -63,7 +63,7 @@
 - [x] Удалить hardcoded AlfaCRM tenant fallback и останавливать клиент без `ALFACRM_DOMAIN`.
 - [x] Реализовать encrypted vault для bank connector config; legacy rows требуют guarded sandbox migration после backup.
 - [~] Structured logs и public 5xx responses очищаются централизованно; legacy `/sync` API fail closed, но недоступный исторический code ещё требует замены/удаления.
-- [ ] Спроектировать аутентификацию website, bank и Evotor webhooks.
+- [x] Спроектировать аутентификацию website, bank и Evotor callbacks: raw-body verification, provider-specific auth, durable replay/idempotency, key rotation и fail-closed acceptance закреплены в `docs/security/webhook-authentication.md`; runtime остаётся закрыт до реализации адаптеров.
 - [x] Website lead handler использует payload-bound idempotency key, atomic transaction, advisory lock, `409` conflict и recovery raw-only partial write; public exposure всё ещё запрещён.
 - [x] Заменить in-memory bearer sessions на PostgreSQL session model с secure HttpOnly cookie и CSRF-защитой в исходниках.
 - [x] Ввести role RBAC и обязательные branch/legal-entity scope metadata.
@@ -137,7 +137,7 @@
 
 - [x] Отдельный пустой дневник по шаблону «1–11», календарь, расписание, XLSX КТП, журнал/посещаемость, предпросмотр родителя; локальная приёмка.
 - [x] Центральный Atlas SSO и отдельные роли, проверка актуальных прав каждого сеанса; код кандидата и изолированные HTTP-проверки.
-- [ ] Production выпуск центрального runtime и нового Atlas сервиса; доказательство обычного входа и возврата.
+- [x] Production central и отдельный Atlas runtime выпущены D129; D130 protected receipt подтвердил полный redirect exchange и авторизованный Atlas API владельца. Обновление School UI остаётся отдельным D138-кандидатом.
 - [ ] Проверить точные учётные записи руководителей Атласа и назначить согласованные полномочия школы.
 - [ ] Подключить центральную проекцию только семей/классов Атласа и принять полный реальный сценарий.
 - [ ] Отдельный раздел всех предложений и ошибок; исходная форма «Разработчикам» сохраняется.
