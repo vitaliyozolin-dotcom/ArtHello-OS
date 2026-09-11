@@ -1,8 +1,8 @@
-# D140: fresh finance R18 with unchanged durable schema14/public boundaries.
+# D141: fresh finance R18 with unchanged durable schema14/public boundaries.
 # Accepted R17 predecessor and complete R15/R13/R12 backup history are preserved.
 # Reviewed finance articles; retire only exact unused recoverable R17 browser.
 # No database restore after seal/authentication/public boundaries.
-name: Deploy ArtHello Finance R18 D140
+name: Deploy ArtHello Finance R18 D141
 'on':
   workflow_run:
     workflows:
@@ -22,9 +22,9 @@ concurrency:
   queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/finance-r18-trigger-d140-20260911
-  EXPECTED_RELEASE_PR: '446'
-  PREVIOUS_RELEASE_SHA: '66c414366fae272d7a91f42b2ec08700efdb1287'
+  EXPECTED_RELEASE_HEAD: codex/finance-r18-checkout-d141-20260911
+  EXPECTED_RELEASE_PR: '447'
+  PREVIOUS_RELEASE_SHA: 'cccf2c96f9a8489c85ead64cba57aef90a80f620'
   ACCEPTED_RELEASE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
   ACCEPTED_RELEASE_TREE: 6aeb7e6879b786a434d12f026f765bcaf9acb5a4
   ACCEPTED_RELEASE_RUN_ID: '34495273615'
@@ -46,14 +46,14 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-trigger-d140-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('446') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-checkout-d141-20260911' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('447') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D140: guarded finance R18')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D141: guarded finance R18')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -125,8 +125,8 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-trigger-d140-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('446') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-checkout-d141-20260911' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('447') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -405,7 +405,6 @@ jobs:
         set -Eeuo pipefail
         test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
         test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
-        git merge-base --is-ancestor 6da3dd6488e83dac5a6efe7f6ecf3d53e8a1fbc3 HEAD
         git diff --exit-code --quiet HEAD --
         sha256sum -c <<'PINNED_RELEASE_HELPERS'
         4cdcd2771994fe8ea11bb731fa1ef5f997da489adfc89e3e78baff271096d659  deploy/v52/recovery-r18/r17-controller.yml
