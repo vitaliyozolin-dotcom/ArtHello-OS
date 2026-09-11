@@ -22,7 +22,7 @@ def checked_module(name, filename, expected):
     exec(compile(source, str(path), 'exec'), value.__dict__)
     return value
 
-adoption = checked_module('r14_adoption', 'r18-backup-adoption.py', '455f0dbadc2e80c16af72a38e21bdcc86d44e2626c0108845e6a0ea8580b2960')
+adoption = checked_module('r14_adoption', 'r18-backup-adoption.py', 'c3f704987d1af11f00aa80f050a618555347560ea6188531bea56e1a40e65bbc')
 
 FIELDS = set('releaseSha sourceTree runId runAttempt candidateContainerId candidateName previousContainerId previousName imageId runtimeFingerprint dataVolume rollbackVolume backupWorker backupVolume backupControlVolume bankActivationVolume bankActivationId browserSourceSha browserImageId browserFingerprint originalRouteSha256 maintenanceRouteSha256 publicRouteSha256 workDirectory originalRouteFile maintenanceRouteFile publicRouteFile gateNonceFile schoolRepairReceiptFile schoolRepairConfigSha256 schoolRepairReceiptSha256 schoolSha backupRuntimeStateFile gatewayEvidenceFile gatewayEvidenceSha256 backupAdoptionStateSha256'.split())
 SHA40 = 'releaseSha sourceTree browserSourceSha schoolSha'.split()

@@ -24,10 +24,10 @@ def checked_module(name, filename, expected):
     exec(compile(source, str(path), 'exec'), value.__dict__)
     return value
 
-state = checked_module('r14_candidate_state', 'r18-candidate-state.py', '139ca2ca45b22e9bb5c1749be3cac597147055569eea0fdacc85fe838680a753')
+state = checked_module('r14_candidate_state', 'r18-candidate-state.py', 'bc6eb268dcce05fa48c5b2681981acf76b42304aa87e197fd17572a3852d0417')
 adoption = state.adoption
 backup = adoption.r7
-controller = checked_module('r14_backup_controller', 'r18-backup-controller.py', '5be9991799c78cfa5067699d76acabb1a84b29331410aacfcc76e6f9c71f3922')
+controller = checked_module('r14_backup_controller', 'r18-backup-controller.py', 'd2725e2ce9c8ef36d022aa301b84f20c61f09a404368234244d4d38e6a047a2a')
 
 
 def require(value):
