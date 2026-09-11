@@ -1,7 +1,8 @@
 # Callback and webhook authentication contract
 
-Status: design only. Provider callbacks remain fail closed until their adapter,
-durable replay store and negative tests implement this contract.
+Status: shared website verifier and durable PostgreSQL replay-claim primitives
+implemented; provider callbacks remain fail closed until their route adapter,
+raw-body capture and provider-specific negative tests implement the contract.
 
 ## Common boundary
 

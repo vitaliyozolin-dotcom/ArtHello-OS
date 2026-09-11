@@ -7,6 +7,8 @@ import {
 } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
+import { sha256Hex } from "@workspace/shared/sha256";
+import type { WebhookReplayStore } from "../lib/webhooks/webhook-auth.js";
 import {
   canonicalWebsiteLeadPayload,
   IdempotencyPayloadConflict,
@@ -70,6 +72,41 @@ export const websiteLeadStore: WebsiteLeadStore = {
         },
       }),
     );
+  },
+};
+
+export const webhookReplayStore: WebhookReplayStore = {
+  claim(input) {
+    const hash = sha256Hex(
+      `webhook_replay__${input.provider}__${input.keyId}__${input.eventId}`,
+    );
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${hash}))`);
+      const [existing] = await tx
+        .select({ raw: rawEventsTable.raw })
+        .from(rawEventsTable)
+        .where(eq(rawEventsTable.hash, hash))
+        .limit(1);
+      if (existing) {
+        const raw =
+          existing.raw && typeof existing.raw === "object"
+            ? (existing.raw as Record<string, unknown>)
+            : {};
+        return typeof raw.body_digest === "string"
+          ? raw.body_digest
+          : "conflict";
+      }
+      await tx.insert(rawEventsTable).values({
+        sourceSystem: `webhook_replay:${input.provider}`,
+        externalId: input.eventId,
+        eventType: "webhook_replay_claim",
+        eventTime: new Date(),
+        raw: { key_id: input.keyId, body_digest: input.bodyDigest },
+        hash,
+        processed: false,
+      });
+      return undefined;
+    });
   },
 };
 

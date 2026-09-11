@@ -1,5 +1,6 @@
 # ArtHello OS — Current State
 
+- Webhook hardening добавляет невключённые shared primitives: versioned website HMAC-SHA256 связывает timestamp/event/raw-body digest и сравнивается constant-time; durable replay claim атомарно использует существующий PostgreSQL `raw_events` unique hash под advisory lock, различая claimed/duplicate/conflict. Публичный allowlist и provider routes не расширены.
 - Backlog review 2026-09-11 подтверждает закрытие Atlas production activation по принятым D129/D130 receipts. Отдельно принят design-only callback contract для website/bank/Evotor; публичные provider callbacks не включены и требуют реализации durable replay/verifier tests.
 ## 2026-09-10 — D138: School через защищённую SSH-границу, кандидат
 

@@ -26,6 +26,9 @@ const websiteLeadService = await import(
     path.join(artifactDir, "src/lib/webhooks/website-lead-service.ts"),
   ).href
 );
+const webhookAuth = await import(
+  pathToFileURL(path.join(artifactDir, "src/lib/webhooks/webhook-auth.ts")).href
+);
 const connectorHealthSanitizer = await import(
   pathToFileURL(path.join(artifactDir, "src/lib/banking/sanitize-health.ts"))
     .href
@@ -66,6 +69,77 @@ const restrictedScope = {
   branchIds: ["branch-6"],
   legalEntityIds: ["entity-1"],
 };
+
+test("website webhook signature binds version, timestamp, event and raw body", () => {
+  const input = {
+    secret: "synthetic-secret-with-enough-entropy",
+    timestamp: "1789084800",
+    eventId: "evt_synthetic_001",
+    rawBody: Buffer.from('{"name":"Synthetic"}'),
+  };
+  const signature = webhookAuth.signWebsiteWebhook(input);
+  assert.deepEqual(
+    webhookAuth.verifyWebsiteWebhook({
+      ...input,
+      signature,
+      nowSeconds: 1789084820,
+      toleranceSeconds: 60,
+    }),
+    { ok: true, keyVersion: "v1" },
+  );
+  for (const changed of [
+    { rawBody: Buffer.from('{"name":"Changed"}') },
+    { eventId: "evt_synthetic_002" },
+    { timestamp: "1789084700" },
+    { signature: "v1=" + "0".repeat(64) },
+  ]) {
+    assert.equal(
+      webhookAuth.verifyWebsiteWebhook({
+        ...input,
+        signature,
+        nowSeconds: 1789084820,
+        toleranceSeconds: 60,
+        ...changed,
+      }).ok,
+      false,
+    );
+  }
+});
+
+test("durable webhook claim is idempotent for one digest and conflicts otherwise", async () => {
+  const rows = new Map();
+  const store = {
+    async claim(input) {
+      const key = `${input.provider}:${input.keyId}:${input.eventId}`;
+      const existing = rows.get(key);
+      if (!existing) rows.set(key, input.bodyDigest);
+      return existing;
+    },
+  };
+  const input = {
+    provider: "website",
+    keyId: "v1",
+    eventId: "evt_1",
+    bodyDigest: "a".repeat(64),
+  };
+  assert.equal(
+    (await webhookAuth.claimWebhookReplay(store, input)).status,
+    "claimed",
+  );
+  assert.equal(
+    (await webhookAuth.claimWebhookReplay(store, input)).status,
+    "duplicate",
+  );
+  assert.equal(
+    (
+      await webhookAuth.claimWebhookReplay(store, {
+        ...input,
+        bodyDigest: "b".repeat(64),
+      })
+    ).status,
+    "conflict",
+  );
+});
 
 test("owner keeps full authenticated access", () => {
   assert.equal(
