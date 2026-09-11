@@ -82,6 +82,8 @@ app.use("/api", (req, res, next) => {
   const publicRoute =
     ((req.method === "GET" || req.method === "HEAD") &&
       req.path === "/healthz") ||
+    ((req.method === "GET" || req.method === "HEAD") &&
+      /^\/payments\/public\/AH-[0-9a-f-]+\/?$/i.test(req.path)) ||
     (req.method === "POST" && req.path === "/auth/login") ||
     (req.method === "POST" && req.path === "/webhooks/smsvizitka") ||
     (req.method === "POST" && req.path === "/webhooks/website-lead") ||
