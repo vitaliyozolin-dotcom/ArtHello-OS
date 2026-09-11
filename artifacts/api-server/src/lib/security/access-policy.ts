@@ -26,6 +26,14 @@ const PAYMENT_OPERATOR_ROUTES: ReadonlyArray<{
 }> = [
   {
     methods: new Set(["GET", "HEAD", "OPTIONS"]),
+    pattern: /^\/payments\/catalog\/?$/,
+  },
+  {
+    methods: new Set(["GET", "HEAD", "OPTIONS"]),
+    pattern: /^\/payments\/customers\/?$/,
+  },
+  {
+    methods: new Set(["GET", "HEAD", "OPTIONS"]),
     pattern: /^\/payments\/obligations\/?$/,
   },
   {
