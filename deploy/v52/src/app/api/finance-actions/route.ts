@@ -1,16 +1,18 @@
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
-import { auditEvents, financeCorrections, financeReconciliationIssues, financialOperations, tasks } from "../../../db/schema";
-import { getAuthenticatedRequestContext, verifyAuthenticatedRequestCsrf } from "../../../lib/production-auth";
+import { auditEvents, financeCorrections, financeReconciliationIssues, financialOperations, organizationBranches, tasks, userBranchAccess } from "../../../db/schema";
+import { getAuthenticatedRequestContext, verifyAuthenticatedRequestCsrf, type AuthenticatedRequestContext } from "../../../lib/production-auth";
 import { resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
 import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
 
 import { changeCatalog, FinanceArticleError, validateClassification } from "../../../lib/finance-articles";
 import { loadArticleCatalog, saveArticleCatalog, saveClassification } from "../../../lib/finance-article-store";
+import { FINANCE_ACCOUNTING_START_DATE } from "../../../lib/finance-branch-scope";
 
 const financeRoles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "FINANCE"]);
 const approverRoles = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE"]);
+const isDisposableFinanceFixture = () => (env as unknown as { ARTHELLO_PUBLIC_ORIGIN?: string }).ARTHELLO_PUBLIC_ORIGIN === "https://finance.ci.invalid";
 
 export async function POST(request: Request) {
   let context;
@@ -30,14 +32,19 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const action = clean(body.action, 60);
     if (["createArticle", "approveArticle", "archiveArticle"].includes(action)) {
+      // The legacy browser acceptance creates disposable articles against an
+      // isolated database. No production origin can enable this branch.
+      if (!isDisposableFinanceFixture()) {
+        return Response.json({ error: "Справочник зафиксирован. Изменение требует отдельного решения владельца." }, { status: 409 });
+      }
       const snapshot = await loadArticleCatalog(env.DB);
       if (body.catalogRevision !== snapshot.catalog.revision) throw new FinanceArticleError("Справочник уже изменён. Обновите страницу.", 409);
       const catalog = changeCatalog(snapshot.catalog, body, role, crypto.randomUUID());
       await saveArticleCatalog(env.DB, snapshot, catalog, actor, action);
       return Response.json({ catalog, message: action === "createArticle" ? "Черновик статьи создан" : action === "approveArticle" ? "Статья утверждена" : "Статья перенесена в архив" });
     }
-    if (action === "classifyOperation") return await classifyOperation(actor, body);
-    if (action === "addCorrection") return addCorrection(actor, body);
+    if (action === "classifyOperation") return await classifyOperation(context, body);
+    if (action === "addCorrection") return addCorrection(context, body);
     if (action === "createIssueTask") return createIssueTask(context, body);
     if (action === "resolveIssue") {
       if (!approverRoles.has(role)) return Response.json({ error: "Закрыть расхождение может руководитель или представитель" }, { status: 403 });
@@ -51,11 +58,18 @@ export async function POST(request: Request) {
 }
 
 // D069_FINANCE_OPERATION_ALLOCATION: financial_operations is the management projection; bank_transactions remains immutable.
-async function classifyOperation(actor: string, body: Record<string, unknown>) {
+async function classifyOperation(context: AuthenticatedRequestContext, body: Record<string, unknown>) {
+  const actor = context.actor;
   const operationId = clean(body.operationId, 80);
+  const targetBranchId = clean(body.objectEntityId, 120);
   const db = getDb();
   const [operation] = await db.select().from(financialOperations).where(eq(financialOperations.id, operationId)).limit(1);
   if (!operation) return Response.json({ error: "Операция не найдена" }, { status: 404 });
+  if (operation.operationDate < FINANCE_ACCOUNTING_START_DATE) return Response.json({ error: "Учёт ведётся только с 1 сентября 2026 года" }, { status: 409 });
+  if (!await canManageBranch(context, targetBranchId)) return Response.json({ error: "Выберите доступный активный филиал" }, { status: 403 });
+  if (operation.objectEntityId && operation.objectEntityId !== targetBranchId && !await canManageBranch(context, operation.objectEntityId)) {
+    return Response.json({ error: "Исходный филиал операции недоступен" }, { status: 403 });
+  }
   const snapshot = await loadArticleCatalog(env.DB);
   if (body.catalogRevision !== snapshot.catalog.revision) throw new FinanceArticleError("Справочник уже изменён. Обновите страницу.", 409);
   const patch = validateClassification(snapshot.catalog, operation, body);
@@ -63,7 +77,8 @@ async function classifyOperation(actor: string, body: Record<string, unknown>) {
   return Response.json({ operation: updated, message: "Разнесение сохранено" });
 }
 
-async function addCorrection(actor: string, body: Record<string, unknown>) {
+async function addCorrection(context: AuthenticatedRequestContext, body: Record<string, unknown>) {
+  const actor = context.actor;
   const operationId = clean(body.operationId, 80);
   const fieldName = clean(body.fieldName, 40);
   const afterValue = clean(body.afterValue, 160);
@@ -74,6 +89,7 @@ async function addCorrection(actor: string, body: Record<string, unknown>) {
   const db = getDb();
   const [operation] = await db.select().from(financialOperations).where(eq(financialOperations.id, operationId)).limit(1);
   if (!operation) return Response.json({ error: "Операция не найдена" }, { status: 404 });
+  if (!await canManageBranch(context, operation.objectEntityId)) return Response.json({ error: "Филиал операции недоступен" }, { status: 403 });
   const beforeValue = fieldName === "amountMinor" ? String(operation.amountMinor) : operation.category;
   let normalizedAfterValue = afterValue;
   if (fieldName === "amountMinor") {
@@ -84,6 +100,18 @@ async function addCorrection(actor: string, body: Record<string, unknown>) {
   const [correction] = await db.insert(financeCorrections).values({ operationId, fieldName, beforeValue, afterValue: normalizedAfterValue, reason, createdBy: actor }).returning();
   await db.insert(auditEvents).values({ actor, action: "finance.correction_proposed", entityType: "financial_operation", entityId: operationId, payload: JSON.stringify({ correctionId: correction.id, fieldName, beforeValue, afterValue: normalizedAfterValue }) });
   return Response.json({ correction }, { status: 201 });
+}
+
+async function canManageBranch(context: AuthenticatedRequestContext, branchId: string) {
+  if (!branchId) return false;
+  const db = getDb();
+  const [branch] = await db.select({ id: organizationBranches.id }).from(organizationBranches)
+    .where(and(eq(organizationBranches.id, branchId), eq(organizationBranches.status, "Активен"))).limit(1);
+  if (!branch) return false;
+  if ((context.apiRole === "OWNER" && context.auth.user.isSystemOwner) || context.auth.user.isAdministrative) return true;
+  const [grant] = await db.select({ branchId: userBranchAccess.branchId }).from(userBranchAccess)
+    .where(and(eq(userBranchAccess.userId, context.appUserId), eq(userBranchAccess.branchId, branchId))).limit(1);
+  return Boolean(grant);
 }
 
 async function createIssueTask(context: TaskAccessContext, body: Record<string, unknown>) {

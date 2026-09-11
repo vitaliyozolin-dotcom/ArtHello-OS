@@ -77,11 +77,16 @@ test('commit failure classification: bounded local exception causes never emit r
 test('real bank commit: same provider ID across four accounts imports eight movements and replays without new rows', async()=>{
   const core = await import(new URL('../../deploy/v52/src/lib/integrations.ts',import.meta.url));
   const db=new DatabaseSync(':memory:');
-  const tables=['system_runtime_state','integration_connections','integration_sync_runs','integration_log_entries','audit_events','bank_accounts','bank_statement_imports','bank_transactions','financial_operations'];
+  const tables=['system_runtime_state','integration_connections','integration_sync_runs','integration_log_entries','audit_events','bank_accounts','bank_statement_imports','bank_transactions','financial_operations','entities'];
   for(const table of tables){
     const match=source.match(new RegExp('CREATE TABLE IF NOT EXISTS '+table+' \\([\\s\\S]*?\\)\\x60'));
     assert.ok(match,'runtime schema for '+table);db.exec(match[0].slice(0,-1));
   }
+  for(const column of [
+    "cashflow_article TEXT NOT NULL DEFAULT ''",
+    "pnl_article TEXT NOT NULL DEFAULT ''",
+    "accrual_period TEXT NOT NULL DEFAULT ''",
+  ]) db.exec(`ALTER TABLE financial_operations ADD COLUMN ${column}`);
   db.exec('CREATE UNIQUE INDEX bank_transactions_provider_unique ON bank_transactions(connection_id,provider_transaction_id)');
   const setup={connectionId:'INT-T-TOCHKA',secretStatus:'stored',credentialGeneration:'11111111-1111-4111-8111-111111111111',
     legalEntityId:'SYNTHETIC-ORG',customerCode:'300000092',allocationMode:'classify_transactions',syncIntervalMinutes:60};
@@ -118,8 +123,9 @@ test('real bank commit: same provider ID across four accounts imports eight move
     query.first=async()=>db.prepare(sql).get(...values)??null;
     return query;
   };
-  const commit=new Function('env','normalizeCredentialGeneration','integrationCredentialStateKey','integrationSetupPrefix','tochkaConnectionId','toTochkaFinancialOperation',
-    body+';return commitTochkaReadOnlySync;')({DB:driver},value=>value,()=> 'synthetic-credential','integration_setup:',setup.connectionId,core.toTochkaFinancialOperation);
+  const commit=new Function('env','normalizeCredentialGeneration','integrationCredentialStateKey','integrationSetupPrefix','tochkaConnectionId','toTochkaFinancialOperation','loadArticleCatalog','isAutoAllocationCatalogReady','classifyFinanceOperation','FINANCE_ACCOUNTING_START_DATE',
+    body+';return commitTochkaReadOnlySync;')({DB:driver},value=>value,()=> 'synthetic-credential','integration_setup:',setup.connectionId,core.toTochkaFinancialOperation,
+      async()=>({catalog:{schema:1,revision:1,articles:[]}}),()=>false,()=>null,'2026-09-01');
   try{
     // Reproduce the defect with the formerly deployed index before migration.
     await assert.rejects(commit('SYNTHETIC',setup,sync,'before migration'),/UNIQUE constraint failed/);

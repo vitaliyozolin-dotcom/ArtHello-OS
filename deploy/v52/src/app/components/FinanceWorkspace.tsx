@@ -69,10 +69,14 @@ type FinanceBankAccount = {
 
 type FinanceData = {
   selectedPeriod: string;
+  branch: { id: string; name: string };
+  accountingStartDate: string;
   operations: FinanceOperation[];
+  reviewOperations: FinanceOperation[];
   articleSuggestions: string[];
   articleCatalog: ArticleCatalog;
   articlePermissions: { canEdit: boolean; canApprove: boolean };
+  classificationPermissions: { canEdit: boolean; canReviewUnassigned: boolean };
   bankAccounts: FinanceBankAccount[];
   bankSummary: { accountCount: number; accountsWithBalance: number; rubBalanceMinor: number; latestSyncedAt: string };
   accruals: Array<{ id: string; period: string; contour: string; recordsCount: number; accrualMinor: number; paidMinor: number; debtMinor: number; debtCases: number; sourceFile: string; sourceSheet: string; dataQuality: string }>;
@@ -142,7 +146,7 @@ const bankMoney = (minor: number | null, currency: string) => {
 const signedRubles = (minor: number) => `${minor > 0 ? "+" : ""}${rubles(minor)}`;
 const shortMoney = (minor: number) => `${(minor / 100000000).toFixed(2).replace(".", ",")} млн`;
 
-export function FinanceWorkspace({ role, notify, onTasksChanged, focusId }: { role: string; notify: (message: string) => void; onTasksChanged: () => void; focusId?: string }) {
+export function FinanceWorkspace({ role, notify, onTasksChanged, selectedBranch, branchName, focusId }: { role: string; notify: (message: string) => void; onTasksChanged: () => void; selectedBranch: string; branchName: string; focusId?: string }) {
   const [data, setData] = useState<FinanceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -181,11 +185,11 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, focusId }: { ro
       contractId: operation.contractId || "",
       documentId: operation.documentId || "",
       projectEntityId: operation.projectEntityId || "",
-      objectEntityId: operation.objectEntityId || "",
+      objectEntityId: operation.objectEntityId || selectedBranch,
       cfrEntityId: operation.cfrEntityId || "",
     });
     setSelected(operation);
-  }, []);
+  }, [selectedBranch]);
 
   const handleOperationKey = useCallback((event: KeyboardEvent<HTMLTableRowElement>, operation: FinanceOperation) => {
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -194,8 +198,16 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, focusId }: { ro
   }, [openOperation]);
 
   const load = useCallback(async () => {
+    if (!selectedBranch || selectedBranch === "ALL") {
+      setData(null);
+      setError("");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     try {
-      const response = await fetch(`/api/finance?period=${period}`, { cache: "no-store" });
+      const params = new URLSearchParams({ period, branchId: selectedBranch });
+      const response = await fetch(`/api/finance?${params.toString()}`, { cache: "no-store" });
       const payload = await readJsonResponse<FinanceData & { error?: string }>(response);
       if (!response.ok) throw new Error(payload.error ?? "Не удалось загрузить финансы");
       setData(payload);
@@ -206,7 +218,7 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, focusId }: { ro
     } finally {
       setLoading(false);
     }
-  }, [period]);
+  }, [period, selectedBranch]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => { void load(); }, 0);
@@ -289,13 +301,15 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, focusId }: { ro
       ].some((value) => value.toLocaleLowerCase("ru").includes(normalized)));
   }, [data, direction, period, query, articleFilter, previewIds]);
 
-  if (loading && !data) return <section className="ahFinanceStatus">Собираем финансовый контур…</section>;
+  if (!selectedBranch || selectedBranch === "ALL") return <PageContainer className="ahFinanceDenied"><Card><EmptyState title="Выберите филиал" description="Финансовые отчёты ведутся отдельно по каждому филиалу. Общий отчёт пока отключён." density="compact" /></Card></PageContainer>;
+  if (loading && !data) return <section className="ahFinanceStatus">Собираем финансовый контур филиала…</section>;
   if (error && !data) return <PageContainer className="ahFinanceDenied"><Card><EmptyState title="Финансовый раздел временно недоступен" description={error} density="compact" action={<Button onClick={() => void load()}>Повторить</Button>} /></Card></PageContainer>;
   if (!data) return null;
 
   const maxMonthly = Math.max(1, ...data.monthly.flatMap((month) => [month.receiptsMinor, month.outflowsMinor]));
   const operationCorrections = selected ? data.corrections.filter((correction) => correction.operationId === selected.id) : [];
   const periodOptions = [...new Set([period, ...data.monthly.map((month) => month.period)])].sort();
+  const reviewOperations = data.reviewOperations.filter((operation) => operation.period === period);
   const linkedEntities = selected ? uniqueLinks([
     { label: counterpartyLabel(selected.counterpartyEntityId), id: selected.counterpartyEntityId },
     { label: "Юрлицо", id: selected.legalEntityId },
@@ -331,15 +345,15 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, focusId }: { ro
   return (
     <PageContainer className="ahFinancePage">
       <PageHeader
-        eyebrow="ДЕНЬГИ · ИСТОЧНИКИ · КОНТРОЛЬ"
-        title="Финансы"
-        description="От строки ОДДС до статьи, контрагента, договора, документа и ответственного — с честной маркировкой тестовых проекций."
+        eyebrow={`ДЕНЬГИ · ${data.branch.name.toLocaleUpperCase("ru")}`}
+        title={`Финансы · ${branchName || data.branch.name}`}
+        description={`Отчёт только по выбранному филиалу. Учёт ведётся с ${new Date(`${data.accountingStartDate}T00:00:00Z`).toLocaleDateString("ru-RU")}; общий отчёт отключён.`}
         actions={<Button variant="primary" onClick={() => { setTab("reconciliation"); setSelected(null); }}>Расхождения · {data.summary.openIssues}</Button>}
       />
 
       <div className="ahFinanceBoundary">
-        <strong>ФАКТ · 3 ТАБЛИЦЫ</strong>
-        <span>ОДДС, начисления и зарплатные агрегаты прочитаны без изменения оригиналов.</span>
+        <strong>ФИЛИАЛ · {data.branch.name}</strong>
+        <span>В отчёт входят только операции с подтверждённым филиальным ключом.</span>
         <b>ПРОЕКЦИЯ</b>
         <span>{data.sourcePolicy.bank}</span>
       </div>
@@ -386,8 +400,9 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, focusId }: { ro
         <div className="finance-panel">
           <div className="finance-panel-head"><div><p>Ежедневный реестр</p><h2>Операции периода</h2></div><span className="finance-count">{filteredOperations.length} записей</span></div>
           <div className="finance-toolbar"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Контрагент, назначение, статья, договор…" aria-label="Поиск финансовых операций" /><select value={direction} onChange={(event) => setDirection(event.target.value)}><option>Все направления</option><option>Поступление</option><option>Списание</option></select><select aria-label="Разнесение по статье" value={articleFilter} onChange={(event) => { setArticleFilter(event.target.value); setPreviewIds(null); }}><option value="all">Все статьи</option><option value="unassigned">Без статьи · {data.operations.filter(op => op.period === period && !operationArticle(op)).length}</option>{[...new Set(data.operations.filter(op => op.period === period).map(operationArticle).filter(Boolean))].sort().map(name => <option key={name} value={`article:${name}`}>{name}</option>)}</select>{previewIds ? <Button onClick={() => setPreviewIds(null)}>Сбросить подбор</Button> : null}<span>Банковский факт неизменяем · разнесение хранится отдельно</span></div>
+          {data.classificationPermissions.canReviewUnassigned && reviewOperations.length ? <section className="finance-panel"><div className="finance-panel-head"><div><p>Отдельная очередь · не входит в отчёт филиала</p><h2>Требует разбора</h2></div><span className="finance-count">{reviewOperations.length} записей</span></div><div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Операция</th><th>Дата</th><th>Направление</th><th>Контрагент</th><th>Сумма</th><th>Действие</th></tr></thead><tbody>{reviewOperations.map((operation) => <tr key={operation.id} tabIndex={0} aria-label={`Разнести ${recordLabel("операцию", operation.id)}`} onClick={() => openOperation(operation)} onKeyDown={(event) => handleOperationKey(event, operation)}><td><strong>{recordLabel("Операция", operation.id)}</strong><small>{operation.bankDetails?.description || operation.sourceFile || "Банковский факт"}</small></td><td>{new Date(`${operation.operationDate}T00:00:00Z`).toLocaleDateString("ru-RU")}</td><td>{operation.direction}</td><td>{operation.bankDetails?.counterpartyName || operation.counterpartyLabel || "Не указан"}</td><td className="money-cell">{operation.direction === "Поступление" ? "+" : "−"}{rubles(operation.amountMinor)}</td><td><Button onClick={() => openOperation(operation)}>Разнести</Button></td></tr>)}</tbody></table></div></section> : null}
           {filteredOperations.length ? <div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Операция</th><th>Дата</th><th>Направление</th><th>Статья</th><th>Контрагент</th><th>Сумма</th><th>Контроль</th></tr></thead><tbody>
-            {filteredOperations.map((operation) => <tr key={operation.id} tabIndex={0} aria-label={`Открыть ${recordLabel("операцию", operation.id)}`} onClick={() => openOperation(operation)} onKeyDown={(event) => handleOperationKey(event, operation)}><td><strong>{operation.bankDetails?.counterpartyName || operation.counterpartyLabel || recordLabel("Операция", operation.id)}</strong><small>{operation.bankDetails?.description || operation.sourceFile || "Финансовый реестр"}</small></td><td>{new Date(`${operation.operationDate}T00:00:00Z`).toLocaleDateString("ru-RU")}</td><td><span className={`direction-chip ${operation.direction === "Поступление" ? "in" : "out"}`}>{operation.direction}</span></td><td><strong>{operation.cashflowArticle || operation.category}</strong><small>{operation.pnlArticle ? `ОПиУ: ${operation.pnlArticle}` : operation.reportClass}</small></td><td><strong>{operation.counterpartyLabel || operation.bankDetails?.counterpartyName || "Не указан"}</strong><small>{operation.bankDetails?.counterpartyInn ? `ИНН ${operation.bankDetails.counterpartyInn}` : operation.contractId ? recordLabel("Договор", operation.contractId) : "Без привязки"}</small></td><td className="money-cell">{operation.direction === "Поступление" ? "+" : "−"}{rubles(operation.amountMinor)}</td><td><span className={operation.status === "Разнесено" ? "quality-ok" : "quality-warn"}>{operation.status}</span></td></tr>)}
+            {filteredOperations.map((operation) => <tr key={operation.id} tabIndex={0} aria-label={`Открыть ${recordLabel("операцию", operation.id)}`} onClick={() => openOperation(operation)} onKeyDown={(event) => handleOperationKey(event, operation)}><td><strong>{operation.bankDetails?.counterpartyName || operation.counterpartyLabel || recordLabel("Операция", operation.id)}</strong><small>{operation.bankDetails?.description || operation.sourceFile || "Финансовый реестр"}</small></td><td>{new Date(`${operation.operationDate}T00:00:00Z`).toLocaleDateString("ru-RU")}</td><td><span className={`direction-chip ${operation.direction === "Поступление" ? "in" : "out"}`}>{operation.direction}</span></td><td><strong>{operation.cashflowArticle || operation.category}</strong><small>{operation.pnlArticle ? `ОПиУ: ${operation.pnlArticle}` : operation.reportClass}</small></td><td><strong>{operation.counterpartyLabel || operation.bankDetails?.counterpartyName || "Не указан"}</strong><small>{operation.bankDetails?.counterpartyInn ? `ИНН ${operation.bankDetails.counterpartyInn}` : operation.contractId ? recordLabel("Договор", operation.contractId) : "Без привязки"}</small></td><td className="money-cell">{operation.direction === "Поступление" ? "+" : "−"}{rubles(operation.amountMinor)}</td><td><span className={operation.status.startsWith("Разнесено") ? "quality-ok" : "quality-warn"}>{operation.status}</span></td></tr>)}
           </tbody></table></div> : data.operations.some(op => op.period === period) ? <EmptyState title="Нет операций по выбранным условиям" description="Измените фильтры или выберите другой месяц." density="compact" /> : <EmptyState title="Операций за период пока нет" description="Реестр заполнится только после загрузки и сохранения подтверждённого финансового источника." density="compact" />}
         </div>
       ) : null}
@@ -435,7 +450,7 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, focusId }: { ro
 
       {selected ? createPortal(<div className="finance-drawer-layer"><button className="drawer-scrim" aria-label="Закрыть карточку операции" onClick={closeOperation} /><aside className="finance-drawer ahFinanceOperationDrawer" role="dialog" aria-modal="true" aria-labelledby={`operation-title-${selected.id}`}><header><div><span>{selected.direction}</span><h2 id={`operation-title-${selected.id}`}>{selected.category}</h2><p>{recordLabel("Операция", selected.id)} · {financePeriodLabel(selected.period)}</p></div><button ref={operationCloseRef} onClick={closeOperation} aria-label="Закрыть">×</button></header><div className="finance-drawer-body"><div className="operation-amount"><span>Сумма операции</span><strong>{selected.direction === "Поступление" ? "+" : "−"}{rubles(selected.amountMinor)}</strong><small>{selected.status} · {operationKindLabel(selected.operationKind)}</small></div><div className="bank-projection-note"><strong>{selected.sourceSystem === "BANK_TOCHKA_API" ? "Подтверждённая операция Точки" : "Банковская выписка пока не подтверждена"}</strong><span>{selected.sourceSystem === "BANK_TOCHKA_API" ? "Операция получена напрямую из банковской выписки только для чтения. Исходная сумма не перезаписывается." : "Банковская проекция. Реальная выписка для этой записи не подключена."}</span></div><section className="operation-links lineage-section"><p>Связанные данные</p><span className="operation-links-note">Открываются поверх операции — контекст реестра не теряется</span><div className="operation-link-grid">{linkedEntities.map((link) => <button key={link.id} onClick={() => setLinkedEntityId(link.id)}><small>{link.label}</small><strong>{data.entityNames[link.id] ?? recordLabel(link.label, link.id)}</strong><span>Открыть →</span></button>)}</div></section><section className="lineage-section"><p>Доказательная цепочка</p><div className="lineage-grid"><article><small>1 · Источник</small><strong>{selected.sourceFile || "Финансовый реестр"}</strong><span>Исходная строка сохранена для проверки</span></article><i>→</i><article><small>2 · Операция</small><strong>{recordLabel("Операция", selected.id)}</strong><span>{selected.operationDate}</span></article><i>→</i><article><small>3 · Договор</small><strong>{selected.contractId ? recordLabel("Договор", selected.contractId) : "Не указан"}</strong><span>связь сохранённого контура</span></article><i>→</i><article><small>4 · Контрагент</small><strong>{data.entityNames[selected.counterpartyEntityId] ?? recordLabel(counterpartyLabel(selected.counterpartyEntityId), selected.counterpartyEntityId)}</strong><span>карточка контрагента</span></article><i>→</i><article><small>5 · Статья / период</small><strong>{selected.category}</strong><span>{financePeriodLabel(selected.period)} · {selected.reportClass}</span></article><i>→</i><article><small>6 · Документ</small><strong>{selected.documentId ? recordLabel("Документ", selected.documentId) : "Не указан"}</strong><span>{humanTechnicalText(selected.dataQuality)}</span></article></div></section><section className="operation-dimensions"><p>Аналитики</p><dl><div><dt>Юрлицо</dt><dd>{data.entityNames[selected.legalEntityId] ?? "Не указано"}</dd></div><div><dt>Объект</dt><dd>{data.entityNames[selected.objectEntityId] ?? "Не указан"}</dd></div><div><dt>Центр ответственности</dt><dd>{data.entityNames[selected.cfrEntityId] ?? "Не указан"}</dd></div><div><dt>Проект</dt><dd>{data.entityNames[selected.projectEntityId] ?? "Не указан"}</dd></div></dl></section><section className="operation-classification" data-d069-marker="D069_FINANCE_OPERATION_ALLOCATION">
     <div className="operation-classification-head"><div><p>Разнесение операции</p><span>Банковская дата и сумма не меняются. Эти поля формируют управленческие ДДС и ОПиУ.</span></div><b>{selected.status}</b></div>
-    {classificationDraft && data.articlePermissions.canEdit ? <form className="operation-classification-form" onSubmit={submitClassification}>
+    {classificationDraft && data.classificationPermissions.canEdit ? <form className="operation-classification-form" onSubmit={submitClassification}>
       <label><span>Кто</span><input value={classificationDraft.counterpartyLabel} onChange={(event) => setClassificationDraft((current) => current ? ({ ...current, counterpartyLabel: event.target.value }) : current)} placeholder={selected.bankDetails?.counterpartyName || "Контрагент / плательщик"} /></label>
       <label><span>За что</span><input value={classificationDraft.managementPurpose} onChange={(event) => setClassificationDraft((current) => current ? ({ ...current, managementPurpose: event.target.value }) : current)} placeholder={selected.bankDetails?.description || "Управленческий смысл операции"} /></label>
       <label><span>Статья ДДС</span><select required value={classificationDraft.cashflowArticle} onChange={(event) => setClassificationDraft((current) => current ? ({ ...current, cashflowArticle: event.target.value }) : current)}><option value="">Выберите утверждённую статью</option>{classificationOptions(data.articleCatalog, "cashflow", selected.direction, operationArticle(selected)).map(article => <option key={article} value={article}>{article}</option>)}</select></label>

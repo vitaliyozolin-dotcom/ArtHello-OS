@@ -8,6 +8,9 @@ import { entityDuplicateKey, manualEntityNormalization } from "../lib/entity-pro
 import { ensureOperatingIntegrationCatalog } from "../lib/operating-integration-catalog";
 import { toTochkaFinancialOperation } from "../lib/integrations";
 import type { TochkaReadOnlySyncResult } from "../lib/integrations";
+import { classifyFinanceOperation, isAutoAllocationCatalogReady, type FinanceAutoAllocation } from "../lib/finance-auto-allocation";
+import { FINANCE_ACCOUNTING_START_DATE } from "../lib/finance-branch-scope";
+import { loadArticleCatalog } from "../lib/finance-article-store";
 import * as schema from "./schema";
 
 export function getDb() {
@@ -2326,6 +2329,7 @@ async function prepareIntegrationSetup(
   const tochkaReadOnlyImport = connectionId === tochkaConnectionId;
   const startDate = protectedBankConnection && !tochkaReadOnlyImport ? "" : String(input.startDate ?? "").trim().slice(0, 10);
   if ((!protectedBankConnection || tochkaReadOnlyImport) && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new Error("Укажите дату начала загрузки");
+  if (tochkaReadOnlyImport && startDate < FINANCE_ACCOUNTING_START_DATE) throw new Error("Учёт начинается с 1 сентября 2026 года");
   const interval = protectedBankConnection && !tochkaReadOnlyImport
     ? 0
     : [60, 180, 360, 1440].includes(Number(input.syncIntervalMinutes))
@@ -2864,12 +2868,36 @@ export async function commitTochkaReadOnlySync(
   const occurredAt = new Date().toISOString();
   const runId = `INT-RUN-${crypto.randomUUID().toUpperCase()}`;
   const correlationId = `CORR-${crypto.randomUUID()}`;
-  const projectedByTransaction = new Map<string, NonNullable<Awaited<ReturnType<typeof toTochkaFinancialOperation>>>>();
+  const legalEntity = await env.DB.prepare("SELECT display_name AS displayName FROM entities WHERE id=? LIMIT 1")
+    .bind(setup.legalEntityId).first<{ displayName: string }>();
+  const { catalog: articleCatalog } = await loadArticleCatalog(env.DB);
+  const automaticAllocationEnabled = setup.allocationMode === "classify_transactions" && isAutoAllocationCatalogReady(articleCatalog);
+  type BaseProjectedOperation = NonNullable<Awaited<ReturnType<typeof toTochkaFinancialOperation>>>;
+  type ProjectedOperation = Omit<BaseProjectedOperation, keyof FinanceAutoAllocation> & {
+    objectEntityId: string;
+    cashflowArticle?: string;
+    pnlArticle?: string;
+    reportClass: string;
+    accrualPeriod?: string;
+    status: string;
+  };
+  const projectedByTransaction = new Map<string, ProjectedOperation>();
   for (const transaction of sync.transactions) {
+    if (transaction.operationDate < FINANCE_ACCOUNTING_START_DATE) continue;
     const operation = await toTochkaFinancialOperation(transaction, setup.legalEntityId);
-    if (operation) projectedByTransaction.set(transaction.id, {
+    if (!operation) continue;
+    const allocation = automaticAllocationEnabled ? classifyFinanceOperation({
+      legalEntityName: legalEntity?.displayName ?? "",
+      operationDate: transaction.operationDate,
+      direction: transaction.direction,
+      currency: transaction.currency,
+      description: transaction.description,
+    }) : null;
+    projectedByTransaction.set(transaction.id, {
       ...operation,
-      objectEntityId: setup.allocationMode === "single_branch" ? setup.branchId : "",
+      ...(allocation ?? {}),
+      category: allocation?.cashflowArticle ?? operation.category,
+      objectEntityId: setup.allocationMode === "single_branch" ? setup.branchId : allocation?.objectEntityId ?? "",
     });
   }
 
@@ -2948,8 +2976,8 @@ export async function commitTochkaReadOnlySync(
       ...guardBindings,
     ));
   const financialStatements = [...projectedByTransaction.values()].map((operation) => env.DB.prepare(`INSERT INTO financial_operations
-    (id,operation_date,period,direction,amount_minor,category,report_class,counterparty_entity_id,contract_id,document_id,project_entity_id,legal_entity_id,object_entity_id,cfr_entity_id,bank_operation_ref,operation_kind,source_system,source_file,source_sheet,source_ref,data_quality,status,created_by)
-    SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
+    (id,operation_date,period,direction,amount_minor,category,cashflow_article,pnl_article,report_class,accrual_period,counterparty_entity_id,contract_id,document_id,project_entity_id,legal_entity_id,object_entity_id,cfr_entity_id,bank_operation_ref,operation_kind,source_system,source_file,source_sheet,source_ref,data_quality,status,created_by)
+    SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
     ON CONFLICT(id) DO NOTHING`)
     .bind(
       operation.id,
@@ -2958,7 +2986,10 @@ export async function commitTochkaReadOnlySync(
       operation.direction,
       operation.amountMinor,
       operation.category,
+      operation.cashflowArticle ?? "",
+      operation.pnlArticle ?? "",
       operation.reportClass,
+      operation.accrualPeriod ?? "",
       operation.counterpartyEntityId,
       operation.contractId,
       operation.documentId,
