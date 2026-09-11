@@ -17,7 +17,7 @@ from types import ModuleType
 def checked_module():
     path = Path(__file__).with_name('r18-backup-adoption.py')
     source = path.read_bytes()
-    if hashlib.sha256(source).hexdigest() != '455f0dbadc2e80c16af72a38e21bdcc86d44e2626c0108845e6a0ea8580b2960':
+    if hashlib.sha256(source).hexdigest() != 'c3f704987d1af11f00aa80f050a618555347560ea6188531bea56e1a40e65bbc':
         raise RuntimeError('R14_ADOPTION_DEPENDENCY_DRIFT')
     module = ModuleType('r14_controller_adoption')
     module.__file__ = str(path)
@@ -268,9 +268,9 @@ def accepted_live_predecessor(docker):
     require(digest == LIVE_CONTEXT_SHA256 and saved.get('contextSha256') == digest,
             'LIVE_CONTEXT_RECEIPT_MISMATCH')
     expected = {'releaseSha': adoption.LIVE_SHA, 'sourceTree': adoption.LIVE_TREE,
-                'runId': adoption.LIVE_RUN, 'runAttempt': '1',
-                'candidateContainerId': adoption.LIVE_APP_ID,
-                'candidateName': 'arthello-direct-' + adoption.LIVE_RUN + '-1',
+                'runId': adoption.LIVE_STATE_RUN, 'runAttempt': '1',
+                'candidateContainerId': adoption.LIVE_STATE_APP_ID,
+                'candidateName': 'arthello-direct-' + adoption.LIVE_STATE_RUN + '-1',
                 'imageId': adoption.LIVE_IMAGE, 'dataVolume': r7.SOURCE_VOLUME,
                 'previousContainerId': adoption.HISTORICAL_APP_ID,
                 'previousName': 'arthello-direct-' + adoption.HISTORICAL_RUN + '-1'}

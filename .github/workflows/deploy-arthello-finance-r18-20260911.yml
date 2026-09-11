@@ -1,8 +1,8 @@
-# D141: fresh finance R18 with unchanged durable schema14/public boundaries.
+# D142: fresh finance R18 with unchanged durable schema14/public boundaries.
 # Accepted R17 predecessor and complete R15/R13/R12 backup history are preserved.
 # Reviewed finance articles; retire only exact unused recoverable R17 browser.
 # No database restore after seal/authentication/public boundaries.
-name: Deploy ArtHello Finance R18 D141
+name: Deploy ArtHello Finance R18 D142
 'on':
   workflow_run:
     workflows:
@@ -22,12 +22,14 @@ concurrency:
   queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/finance-r18-checkout-d141-20260911
-  EXPECTED_RELEASE_PR: '447'
-  PREVIOUS_RELEASE_SHA: 'cccf2c96f9a8489c85ead64cba57aef90a80f620'
+  EXPECTED_RELEASE_HEAD: codex/finance-r18-atlas-baseline-d142-20260911
+  EXPECTED_RELEASE_PR: '448'
+  PREVIOUS_RELEASE_SHA: '48f2a549fd062693b02fbe271ddafb4ac113c0a6'
   ACCEPTED_RELEASE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
   ACCEPTED_RELEASE_TREE: 6aeb7e6879b786a434d12f026f765bcaf9acb5a4
   ACCEPTED_RELEASE_RUN_ID: '34495273615'
+  ACCEPTED_ATLAS_RUN_ID: '34529324387'
+  ACCEPTED_ATLAS_SHA: 0c08fb32c53e787ab0d30f2dfcc8f22bdbf7b09b
   RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -46,14 +48,14 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-checkout-d141-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('447') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-atlas-baseline-d142-20260911' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('448') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D141: guarded finance R18')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D142: guarded finance R18')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -125,8 +127,8 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-checkout-d141-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('447') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-atlas-baseline-d142-20260911' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('448') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -252,6 +254,39 @@ jobs:
           ([.jobs[] | select(.name == "bundle") | .id] == [102932011920]) and
           ([.jobs[] | select(.name == "deploy") | .id] == [102932695823])
         ' <<<"$accepted_jobs_json" >/dev/null
+
+        accepted_atlas_run_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+          "${headers[@]}" "$api/actions/runs/$ACCEPTED_ATLAS_RUN_ID")"
+        jq -e \
+          --argjson run_id "$ACCEPTED_ATLAS_RUN_ID" \
+          --arg sha "$ACCEPTED_ATLAS_SHA" \
+          --arg repository "$EXPECTED_REPOSITORY" '
+            .id == $run_id and
+            .name == "Deploy Atlas diary D122" and
+            .path == ".github/workflows/deploy-atlas-d122.yml" and
+            .event == "workflow_run" and
+            .head_branch == "main" and
+            .head_sha == $sha and
+            .run_attempt == 1 and
+            .status == "completed" and
+            .conclusion == "success" and
+            .repository.full_name == $repository and
+            .head_repository.full_name == $repository and
+            .actor.login == "vitaliyozolin-dotcom" and
+            .triggering_actor.login == "vitaliyozolin-dotcom"
+          ' <<<"$accepted_atlas_run_json" >/dev/null
+
+        accepted_atlas_jobs_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
+          "${headers[@]}" "$api/actions/runs/$ACCEPTED_ATLAS_RUN_ID/attempts/1/jobs?per_page=100")"
+        jq -e --arg sha "$ACCEPTED_ATLAS_SHA" --argjson run "$ACCEPTED_ATLAS_RUN_ID" '
+          .total_count == 2 and (.jobs | length) == 2 and
+          ([.jobs[].name] | sort) == ["bundle", "deploy"] and
+          all(.jobs[];
+            .run_id == $run and .run_attempt == 1 and .head_sha == $sha and
+            .head_branch == "main" and .status == "completed" and .conclusion == "success") and
+          ([.jobs[] | select(.name == "bundle") | .id] == [103045976241]) and
+          ([.jobs[] | select(.name == "deploy") | .id] == [103046467809])
+        ' <<<"$accepted_atlas_jobs_json" >/dev/null
 
         current_history_json="$(curl --fail-with-body --silent --show-error --max-time 30 \
           "${headers[@]}" "$api/actions/workflows/deploy-arthello-finance-r18-20260911.yml/runs?event=workflow_run&head_sha=$RELEASE_SHA&per_page=100")"
@@ -408,13 +443,13 @@ jobs:
         git diff --exit-code --quiet HEAD --
         sha256sum -c <<'PINNED_RELEASE_HELPERS'
         4cdcd2771994fe8ea11bb731fa1ef5f997da489adfc89e3e78baff271096d659  deploy/v52/recovery-r18/r17-controller.yml
-        455f0dbadc2e80c16af72a38e21bdcc86d44e2626c0108845e6a0ea8580b2960  .github/scripts/r18-backup-adoption.py
-        5be9991799c78cfa5067699d76acabb1a84b29331410aacfcc76e6f9c71f3922  .github/scripts/r18-backup-controller.py
-        139ca2ca45b22e9bb5c1749be3cac597147055569eea0fdacc85fe838680a753  .github/scripts/r18-candidate-state.py
-        50f171d4be35ddb0aad247d69a50e7553dbe9cefcc5182e509f91ff4dde45d4a  .github/scripts/r18-live-baseline.py
-        052453d9c0d38203bc9d7e236f56000257b81a252d486af8e139cefcc04defe5  .github/scripts/r18-public-audit.py
-        38fa521a494d349a964ef15cfd615eaaa679ff3f66585d13fed0e7fdaae7e53b  .github/scripts/r18-resume-candidate.py
-        e09894fa31dc768519b493924536ca7b4517475e1fe92b8938d3bf1cc9bdb34f  .github/scripts/run-r18-live-browser.py
+        c3f704987d1af11f00aa80f050a618555347560ea6188531bea56e1a40e65bbc  .github/scripts/r18-backup-adoption.py
+        d2725e2ce9c8ef36d022aa301b84f20c61f09a404368234244d4d38e6a047a2a  .github/scripts/r18-backup-controller.py
+        bc6eb268dcce05fa48c5b2681981acf76b42304aa87e197fd17572a3852d0417  .github/scripts/r18-candidate-state.py
+        31614cf50aec3c1f099e91ad2e4e44326d92c6fd829d88e233d898347df3b033  .github/scripts/r18-live-baseline.py
+        c578d39629f9a84669e690d9bc388395ba2e8d410e02203b197813efe265914c  .github/scripts/r18-public-audit.py
+        80c44bd62707ab75ad43dfab06bd9a7b61f457f07a14909d64dba369430e4090  .github/scripts/r18-resume-candidate.py
+        92cdc839f464dd9aeab1d2c13adeb9e597fbcea58c272a7f6288e2f0a1243e3d  .github/scripts/run-r18-live-browser.py
         PINNED_RELEASE_HELPERS
         source_node="$(command -v node || true)"
         if [[ -z "$source_node" ]]; then
@@ -2277,7 +2312,7 @@ jobs:
         test "${#live_ids[@]}" -eq 1
         live_id="$(docker inspect "${live_ids[0]}" --format '{{.Id}}')"
         [[ "$live_id" =~ ^[a-f0-9]{64}$ ]]
-        test "$live_id" = "9909bd54d31244627477bd60c3b8e7cc6cd84758902943e54eb555206c4a1142"
+        test "$live_id" = "c111c0e1b712962f8c9219cfd1ddab1ae9102ec73782bd7f9562bb51c5882d69"
         live_name="$(docker inspect "$live_id" --format '{{.Name}}' | sed 's#^/##')"
         [[ "$live_name" =~ ^arthello-direct-[A-Za-z0-9._-]+$ ]]
         live_image_id="$(docker inspect "$live_id" --format '{{.Image}}')"

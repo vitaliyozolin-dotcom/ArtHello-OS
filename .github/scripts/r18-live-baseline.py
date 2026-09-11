@@ -14,9 +14,9 @@ import sys
 ACCEPTED_SHA = 'ff8559254faaedade63a9ee7567a45686d08c13a'
 ACCEPTED_TREE = '6aeb7e6879b786a434d12f026f765bcaf9acb5a4'
 ACCEPTED_IMAGE = 'sha256:34402014063a05c81754716f46b3f9059297f1d21d37da7e5f00b1eb8f7fdd46'
-ACCEPTED_APP_ID = '9909bd54d31244627477bd60c3b8e7cc6cd84758902943e54eb555206c4a1142'
-ACCEPTED_RUN = '34495273615'
-ACCEPTED_NAME = '/arthello-direct-34495273615-1'
+ACCEPTED_APP_ID = 'c111c0e1b712962f8c9219cfd1ddab1ae9102ec73782bd7f9562bb51c5882d69'
+ACCEPTED_RUN = '34529324387'
+ACCEPTED_NAME = '/arthello-direct-34529324387-1'
 DATA_VOLUME = "arthello-direct-v44-data"
 SCHOOL_SHA = "54242340f2d9b6a9887d69ecc03520ddf9f7982c"
 SCHOOL_IMAGE = "sha256:664c2c0c3e628a53ca492953803b420e0c4a44acab35eb250f5f899c10bc93df"
@@ -44,11 +44,12 @@ def validate_live(identities, app, image):
     require(app["Image"] == image["Id"] == ACCEPTED_IMAGE)
     require(app["State"]["Running"] is True and app["State"]["Paused"] is False
             and app["State"]["Restarting"] is False)
-    require(app["HostConfig"]["ReadonlyRootfs"] is True)
+    require(app["HostConfig"]["ReadonlyRootfs"] is True
+            and app["HostConfig"]["RestartPolicy"]["Name"] == "unless-stopped")
     labels = app["Config"]["Labels"]
     require(labels["arthello.release.sha"] == ACCEPTED_SHA
-            and labels["arthello.release.tree"] == ACCEPTED_TREE
-            and labels["arthello.release.run"] == ACCEPTED_RUN)
+            and labels.get("arthello.release.tree") is None
+            and labels.get("arthello.release.run") is None)
     for config in (app["Config"], image["Config"]):
         require(config["User"] == "node" and config["Cmd"] == ["node", "production/runtime-server.mjs"])
     require(image["Config"]["Labels"]["org.opencontainers.image.revision"] == ACCEPTED_SHA
