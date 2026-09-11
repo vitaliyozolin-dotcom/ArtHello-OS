@@ -26,7 +26,9 @@ export interface PaymentIssueInput {
 
 function assertKopecks(name: string, value: number): void {
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError(`${name} must be a non-negative safe integer amount in kopecks`);
+    throw new TypeError(
+      `${name} must be a non-negative safe integer amount in kopecks`,
+    );
   }
 }
 
@@ -37,7 +39,9 @@ function assertKopecks(name: string, value: number): void {
  * issues a second request while an active request already represents the exact
  * current debt. All money is integer kopecks.
  */
-export function decidePaymentIssue(input: PaymentIssueInput): PaymentIssueDecision {
+export function decidePaymentIssue(
+  input: PaymentIssueInput,
+): PaymentIssueDecision {
   assertKopecks("obligationKopecks", input.obligationKopecks);
   assertKopecks("confirmedPaidKopecks", input.confirmedPaidKopecks);
   if (input.activeRequestKopecks != null) {
