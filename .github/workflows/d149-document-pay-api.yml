@@ -1,0 +1,291 @@
+name: D149 document ArtHello Pay API
+
+on:
+  push:
+    branches:
+      - codex/arthello-pay-web-d149-20260911
+
+permissions:
+  contents: write
+
+jobs:
+  document:
+    if: github.actor == 'vitaliyozolin-dotcom'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Install exact workspace
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+          pnpm install --frozen-lockfile
+      - name: Document ArtHello Pay runtime routes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('lib/api-spec/openapi.yaml')
+          source = path.read_text(encoding='utf-8')
+          if '  - name: payments\n' not in source:
+              source = source.replace('  - name: identity\n', '  - name: identity\n  - name: payments\n', 1)
+
+          marker = '\ncomponents:\n'
+          if marker not in source:
+              raise SystemExit('OpenAPI components marker not found')
+
+          block = r'''
+  /payments/catalog:
+    get:
+      operationId: getPaymentCatalog
+      tags: [payments]
+      summary: List branch and legal-entity routes visible to the current Pay operator
+      responses:
+        "200":
+          description: Scoped payment catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+
+  /payments/customers:
+    get:
+      operationId: searchPaymentCustomers
+      tags: [payments]
+      summary: Search families and students inside an allowed branch
+      parameters:
+        - { name: branchCrmId, in: query, required: true, schema: { type: string } }
+        - { name: q, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Scoped customer candidates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+
+  /payments/obligations:
+    get:
+      operationId: listPaymentObligations
+      tags: [payments]
+      summary: List payment obligations visible to the current operator
+      responses:
+        "200":
+          description: Payment obligations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+    post:
+      operationId: createPaymentObligation
+      tags: [payments]
+      summary: Create a scoped customer payment obligation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [branchCrmId, legalEntityId, purpose, amountKopecks]
+              properties:
+                branchCrmId: { type: string }
+                legalEntityId: { type: string, format: uuid }
+                familyId: { type: string, format: uuid }
+                payerPersonId: { type: string, format: uuid }
+                studentPersonId: { type: string, format: uuid }
+                studentCrmId: { type: string }
+                contractId: { type: string }
+                invoiceExternalId: { type: string }
+                billingPeriod: { type: string, format: date }
+                purpose: { type: string }
+                amountKopecks: { type: integer, minimum: 1 }
+                dueDate: { type: string, format: date }
+                payerEmail: { type: string, format: email }
+                payerPhone: { type: string }
+                sourceRef: { type: string }
+      responses:
+        "201":
+          description: Obligation created
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /payments/obligations/{obligationId}:
+    get:
+      operationId: getPaymentObligation
+      tags: [payments]
+      summary: Get one scoped payment obligation
+      parameters:
+        - { name: obligationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Payment obligation
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /payments/obligations/{obligationId}/requests/preview:
+    post:
+      operationId: previewPaymentRequest
+      tags: [payments]
+      summary: Check debt evidence and payment routing before issuing a link
+      parameters:
+        - { name: obligationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Issue decision and route readiness
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /payments/obligations/{obligationId}/requests:
+    post:
+      operationId: createPaymentRequest
+      tags: [payments]
+      summary: Prepare an idempotent payment request for the current outstanding balance
+      parameters:
+        - { name: obligationId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 16, maxLength: 128 } }
+      responses:
+        "201":
+          description: Payment request prepared
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /payments/requests:
+    get:
+      operationId: listPaymentRequests
+      tags: [payments]
+      summary: List payment links and fiscalization status visible to the current operator
+      responses:
+        "200":
+          description: Payment requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+
+  /payments/requests/{requestId}/cancel:
+    post:
+      operationId: cancelPaymentRequest
+      tags: [payments]
+      summary: Cancel a local payment request before it is handed to the provider
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Payment request cancelled
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /payments/routes:
+    get:
+      operationId: listPaymentRoutes
+      tags: [payments]
+      summary: Owner-only list of bank merchant and fiscal payment routes
+      responses:
+        "200":
+          description: Payment routes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+    post:
+      operationId: createPaymentRoute
+      tags: [payments]
+      summary: Owner-only configuration of a branch/legal-entity payment route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [branchCrmId, legalEntityId, providerCustomerCode, merchantId, recipientLabel]
+              properties:
+                branchCrmId: { type: string }
+                legalEntityId: { type: string, format: uuid }
+                providerCustomerCode: { type: string }
+                merchantId: { type: string }
+                recipientLabel: { type: string }
+                fiscalProfileStatus: { type: string, enum: [draft, approved, disabled] }
+                fiscalProfile: { type: object, additionalProperties: true }
+      responses:
+        "201":
+          description: Payment route created
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /payments/operators:
+    post:
+      operationId: createPaymentOperator
+      tags: [payments]
+      summary: Owner-only provisioning of a scoped ArtHello Pay operator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [login, name, temporaryPassword, branchIds, legalEntityIds]
+              properties:
+                login: { type: string }
+                name: { type: string }
+                temporaryPassword: { type: string }
+                branchIds: { type: array, items: { type: string } }
+                legalEntityIds: { type: array, items: { type: string, format: uuid } }
+      responses:
+        "201":
+          description: Payment operator created
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /payments/public/{paymentLinkId}:
+    get:
+      operationId: getPublicPaymentRequest
+      tags: [payments]
+      summary: Bearer-style public payment page data without payer or bank secrets
+      parameters:
+        - { name: paymentLinkId, in: path, required: true, schema: { type: string, pattern: '^AH-' } }
+      responses:
+        "200":
+          description: Safe public payment details
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+'''
+          if '  /payments/catalog:\n' not in source:
+              source = source.replace(marker, '\n' + block.rstrip() + '\n' + marker, 1)
+          path.write_text(source, encoding='utf-8')
+          PY
+      - name: Verify API contract
+        run: |
+          pnpm run typecheck:libs
+          node --import ./artifacts/api-server/node_modules/tsx/dist/loader.mjs scripts/contract-drift.mjs
+          node --test scripts/test/openapi-codegen-contract.test.mjs
+      - name: Commit contract once and retire workflow
+        run: |
+          git config user.name "arthello-pay-bot"
+          git config user.email "arthello-pay-bot@users.noreply.github.com"
+          git rm .github/workflows/d149-document-pay-api.yml
+          git add -A lib/api-spec/openapi.yaml .github/workflows
+          git commit -m "D149: document ArtHello Pay API contract"
+          git push origin HEAD:${GITHUB_REF_NAME}
