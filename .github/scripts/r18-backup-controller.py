@@ -18,7 +18,7 @@ from types import ModuleType
 def checked_module():
     path = Path(__file__).with_name('r18-backup-adoption.py')
     source = path.read_bytes()
-    if hashlib.sha256(source).hexdigest() != '447f079a7af3da00c5b013839a81f00b7973c613fc4265f0753bc7f2a7ee2e01':
+    if hashlib.sha256(source).hexdigest() != '41748c8a62b23fd0052436dea28ce3a2af651eb5f1e6269df1272cd33e2d4b8a':
         raise RuntimeError('R14_ADOPTION_DEPENDENCY_DRIFT')
     module = ModuleType('r14_controller_adoption')
     module.__file__ = str(path)
@@ -400,13 +400,21 @@ def consumers(args, docker):
         before = None
         if own.load() is not None:
             before = adoption.digest(loaded(subject))
+        # Prove the complete canonical D1 chain before allowing the inner
+        # backup-volume inventory to recognize those exact container IDs.
+        # A control-only or otherwise foreign consumer is absent from this set
+        # and is still refused by Adoption.no_duplicates().
+        actual = canonical_consumers(args, docker, args.phase)
+        require(isinstance(actual, set)
+                and all(re.fullmatch(r'[a-f0-9]{64}', identity) for identity in actual),
+                'CANONICAL_CONSUMERS_INVALID')
+        subject.proven_consumers = frozenset(actual)
         if args.phase == 'copyback':
             require(before is not None and subject.state['phase'] == 'quiesced', 'QUIESCED_ADOPTION_REQUIRED')
             subject.verify_copyback()  # Actual pre-auth, stopped-worker and stopped-consumer checks.
         else:
             subject.accepted()
             subject.health()  # Uses the exact accepted worker and rechecks it after the probe.
-        actual = canonical_consumers(args, docker, args.phase)
         if args.phase == 'copyback':
             subject.verify_copyback()  # Recheck worker/consumers after intervening identity reads; no health probe.
         else:

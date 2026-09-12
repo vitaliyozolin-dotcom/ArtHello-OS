@@ -77,6 +77,10 @@ class Adoption:
     def __init__(self, args, docker, state, accepted, boundary):
         self.args, self.docker, self.store, self.accepted_store, self.boundary = args, docker, state, accepted, boundary
         self.clock, self.pause = time.monotonic, time.sleep
+        # The read-only outer controller may populate this only after it has
+        # proved the exact canonical D1 consumer chain from durable receipts.
+        # Direct mutation commands keep the empty default and remain fail-closed.
+        self.proven_consumers = frozenset()
         require(args.release_sha != ACCEPTED_SHA and args.image_id != ACCEPTED_IMAGE
                 and args.tree_sha != ACCEPTED_TREE and args.run_id != ACCEPTED_RUN
                 and args.release_sha != LIVE_SHA and args.image_id != LIVE_IMAGE
@@ -125,7 +129,7 @@ class Adoption:
                     and metadata.get('Image') == LIVE_IMAGE
                     and metadata.get('Name') == '/arthello-direct-' + LIVE_RUN + '-1'
                     and labels.get('arthello.release.sha') == LIVE_SHA)
-                historical_app = any(identity == row[0]
+                historical_app = identity in self.proven_consumers or any(identity == row[0]
                     and metadata.get('Image') == row[1]
                     and metadata.get('Name') == '/arthello-direct-' + row[2] + '-1'
                     and labels.get('arthello.release.sha') == row[3]

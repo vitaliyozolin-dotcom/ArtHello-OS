@@ -146,6 +146,40 @@ class AtlasPredecessorTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()),
                          {'state': 'refused', 'code': 'R14_CONTROLLER_CHECK_FAILED'})
 
+    def test_consumer_chain_is_proved_before_inner_backup_inventory(self):
+        proven = {'1' * 64, '2' * 64}
+        events = []
+
+        class Subject:
+            proven_consumers = frozenset()
+
+            def accepted(self):
+                events.append(('accepted', self.proven_consumers))
+
+            def health(self):
+                events.append(('health', self.proven_consumers))
+
+            def running(self):
+                events.append(('running', self.proven_consumers))
+
+        subject = Subject()
+        own = SimpleNamespace(load=lambda: None)
+        opened = __import__('contextlib').nullcontext((subject, own, None))
+        args = SimpleNamespace(phase='live')
+        with patch.object(controller, 'opened', return_value=opened), \
+             patch.object(controller, 'canonical_consumers', side_effect=lambda *_: events.append(('canonical', None)) or proven):
+            result = controller.consumers(args, object())
+
+        self.assertEqual(result['canonicalConsumers'], 2)
+        self.assertEqual(events[0], ('canonical', None))
+        self.assertTrue(all(event[1] == frozenset(proven) for event in events[1:]))
+
+    def test_inner_adoption_keeps_unproved_consumer_fail_closed(self):
+        subject = object.__new__(controller.adoption.Adoption)
+        subject.proven_consumers = frozenset({'1' * 64})
+        self.assertIn('1' * 64, subject.proven_consumers)
+        self.assertNotIn('2' * 64, subject.proven_consumers)
+
 
 if __name__ == '__main__':
     unittest.main()
