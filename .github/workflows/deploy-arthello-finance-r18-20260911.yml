@@ -1,8 +1,8 @@
-# D155: reclaim all unused build cache on the dedicated runner before publishing ArtHello Pay.
+# D156: retire only explicit recoverable historical browser images before publishing ArtHello Pay.
 # Accepted R17 predecessor and complete R15/R13/R12 backup history are preserved.
 # Prove the canonical D1 chain before recognizing its exact backup-control consumers.
 # No database restore after seal/authentication/public boundaries.
-name: Deploy ArtHello Pay R18 D155
+name: Deploy ArtHello Pay R18 D156
 'on':
   workflow_run:
     workflows:
@@ -22,9 +22,9 @@ concurrency:
   queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/pay-production-cache-d155-20260912
-  EXPECTED_RELEASE_PR: '461'
-  PREVIOUS_RELEASE_SHA: 'a03eb0b6a2cedbc6a8d7e2eb400820874e17d269'
+  EXPECTED_RELEASE_HEAD: codex/pay-production-browser-retire-d156-20260912
+  EXPECTED_RELEASE_PR: '462'
+  PREVIOUS_RELEASE_SHA: 'a17a12a8be05e927248874a5776531be90960aa0'
   ACCEPTED_RELEASE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
   ACCEPTED_RELEASE_TREE: 6aeb7e6879b786a434d12f026f765bcaf9acb5a4
   ACCEPTED_RELEASE_RUN_ID: '34495273615'
@@ -50,14 +50,14 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-cache-d155-20260912' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('461') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-browser-retire-d156-20260912' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('462') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D155: publish ArtHello Pay production')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D156: publish ArtHello Pay production')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -129,8 +129,8 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-cache-d155-20260912' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('461') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-browser-retire-d156-20260912' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('462') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -764,7 +764,7 @@ jobs:
         test -x "$precheck_node"
         "$precheck_node" -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(2)'
         printf 'PRECHECK_NODE=%s\n' "$precheck_node" >> "$GITHUB_ENV"
-    - name: Retire only the exact unused recoverable prior browser image
+    - name: Retire only explicit unused recoverable historical browser images
       if: env.R9_RESUME_CANDIDATE != '1'
       env:
         GH_TOKEN: ${{ github.token }}
@@ -774,7 +774,39 @@ jobs:
       run: |
         set -Eeuo pipefail
         test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
-        "$PRECHECK_NODE" deploy/browser/retire-d145-browser.mjs
+        capacity_ready=0
+        for helper in \
+          deploy/browser/retire-r17-browser.mjs \
+          deploy/browser/retire-r16-browser.mjs \
+          deploy/browser/retire-r15-browser.mjs \
+          deploy/browser/retire-r14-browser.mjs \
+          deploy/browser/retire-r13-browser.mjs \
+          deploy/browser/retire-r12-browser.mjs \
+          deploy/browser/retire-d145-browser.mjs \
+          deploy/browser/retire-d144-browser.mjs \
+          deploy/browser/retire-d143-browser.mjs
+        do
+          receipt=''
+          if receipt="$("$PRECHECK_NODE" "$helper")"; then
+            helper_status=0
+          else
+            helper_status=$?
+          fi
+          printf '%s\n' "$receipt"
+          result="$(jq -er '.result' <<<"$receipt")"
+          browser="$(jq -er '.browser' <<<"$receipt")"
+          reason="$(jq -er '.reason // ""' <<<"$receipt")"
+          if [[ "$helper_status" -eq 0 && "$result" = ready ]]; then
+            capacity_ready=1
+            break
+          fi
+          if [[ "$helper_status" -eq 2 && "$result" = blocked && "$reason" = insufficient_import_space &&
+                ( "$browser" = absent || "$browser" = retired ) ]]; then
+            continue
+          fi
+          exit 2
+        done
+        test "$capacity_ready" -eq 1
     - name: Measure import capacity before downloading the verified archive
       if: env.R9_RESUME_CANDIDATE != '1'
       env:
