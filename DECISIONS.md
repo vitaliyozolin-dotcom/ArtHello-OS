@@ -690,3 +690,11 @@ D157 protected run `34695458566`, deploy job `103558277731`, успешно оч
 Принято добавить в существующий read-only prerequisites workflow ограниченную D158-инвентаризацию: filesystem capacity, `docker system df -v`, список контейнеров с их image identity, список локальных images и агрегированные размеры только известных каталогов runner/Docker/service. Шаг не читает содержимое файлов, environment контейнеров, секреты или данные приложений и не исполняет delete/prune/rm/mv/truncate. Никакие контейнеры, images, volumes, маршруты, БД, backups или runtime не меняются.
 
 Результат служит только для выбора одного явно доказанного recoverable target. Любое удаление потребует отдельного решения с точным ID, доказательством отсутствия consumers и прежним fail-closed capacity guard. Банковский приём реальных платежей и фискализация остаются выключены.
+
+## D159 — Удалить один точный неиспользуемый legacy Playwright base и продолжить Pay (2026-09-12, кандидат)
+
+D158 PR464 merged source `aa72c1e832a19a725a6452989dee7210788fe78e`; protected prerequisites run `34703478922`, job `103579224953`, выполнил read-only storage inventory. Корневой раздел имеет `4947256 KiB` свободно. `docker system df -v` доказал отдельный image `mcr.microsoft.com/playwright:v1.55.0-noble`, полный ID `sha256:b27e719ecbfef153e13fd24e8341736733bf2658b229677eb21ff57ff5d7fb29`, unique size `3.639GB`, возраст 12 месяцев и `CONTAINERS=0`. Полная инвентаризация каждого container через `docker inspect ... '{{.Image}}'` не содержит этот ID. Build cache равен `0B`.
+
+Разрешено перед неизменённым browser capacity guard удалить только этот точный image ID командой `docker image rm --no-prune`, только если тег всё ещё указывает на тот же ID, массив RepoTags равен только ожидаемому тегу и ни один существующий container не использует ID. Любой drift, consumer или Docker dependency останавливает шаг; `--force`, wildcard, prune, удаление контейнеров/volumes/application images/данных/backups запрещены. Если image уже отсутствует, шаг идемпотентно продолжает прежний guard без иной очистки.
+
+Новый защищённый выпуск допускается только из single-parent squash main после exact-head Quality/Proof/v52 с prefix `D159: publish ArtHello Pay production`. ArtHello Pay публикуется на `pay-188-225-38-55.sslip.io` с банковским приёмом реальных платежей и фискализацией по-прежнему выключенными.
