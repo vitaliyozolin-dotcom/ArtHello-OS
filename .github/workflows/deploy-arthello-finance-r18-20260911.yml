@@ -1,8 +1,8 @@
-# D150: publish the merged ArtHello Pay UI through the guarded finance R18 cutover.
+# D151: trigger the merged ArtHello Pay UI publication through a user-authored main push.
 # Accepted R17 predecessor and complete R15/R13/R12 backup history are preserved.
 # Prove the canonical D1 chain before recognizing its exact backup-control consumers.
 # No database restore after seal/authentication/public boundaries.
-name: Deploy ArtHello Pay R18 D150
+name: Deploy ArtHello Pay R18 D151
 'on':
   workflow_run:
     workflows:
@@ -22,9 +22,9 @@ concurrency:
   queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/pay-production-d150-20260912
-  EXPECTED_RELEASE_PR: '456'
-  PREVIOUS_RELEASE_SHA: '55f3c60fcd63fae424ff078328b1d422dbfcfc05'
+  EXPECTED_RELEASE_HEAD: codex/pay-production-trigger-d151-20260912
+  EXPECTED_RELEASE_PR: '457'
+  PREVIOUS_RELEASE_SHA: 'b9bf317fe4d2dfe8f39a7866c6c7a79ba0736a00'
   ACCEPTED_RELEASE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
   ACCEPTED_RELEASE_TREE: 6aeb7e6879b786a434d12f026f765bcaf9acb5a4
   ACCEPTED_RELEASE_RUN_ID: '34495273615'
@@ -50,14 +50,14 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-d150-20260912' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('456') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-trigger-d151-20260912' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('457') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D150: guarded ArtHello Pay production publication')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D151: trigger ArtHello Pay production publication')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -129,8 +129,8 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-d150-20260912' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('456') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-trigger-d151-20260912' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('457') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
