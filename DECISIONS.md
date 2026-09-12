@@ -698,3 +698,10 @@ D158 PR464 merged source `aa72c1e832a19a725a6452989dee7210788fe78e`; protected p
 Разрешено перед неизменённым browser capacity guard удалить только этот точный image ID командой `docker image rm --no-prune`, только если тег всё ещё указывает на тот же ID, массив RepoTags равен только ожидаемому тегу и ни один существующий container не использует ID. Любой drift, consumer или Docker dependency останавливает шаг; `--force`, wildcard, prune, удаление контейнеров/volumes/application images/данных/backups запрещены. Если image уже отсутствует, шаг идемпотентно продолжает прежний guard без иной очистки.
 
 Новый защищённый выпуск допускается только из single-parent squash main после exact-head Quality/Proof/v52 с prefix `D159: publish ArtHello Pay production`. ArtHello Pay публикуется на `pay-188-225-38-55.sslip.io` с банковским приёмом реальных платежей и фискализацией по-прежнему выключенными.
+
+## D160 — Исправить непосредственного R17 predecessor после Atlas и повторить Pay (2026-09-12, кандидат)
+
+D159 protected run `34704814322`, deploy job `103583078900`, успешно удалил только exact unused legacy Playwright image, прошёл capacity guard, загрузил и проверил оба immutable images и затем отказал до public/auth boundary с `RETAINED_R17_PROOF_FAILED`. Автоматический pre-auth rollback завершился `ARTHELLO_ROLLBACK=VERIFIED`; принятый runtime `ff8559254faaedade63a9ee7567a45686d08c13a` восстановлен. Освобождённое место сохраняется, расширение диска для продолжения не требуется.
+
+Причина доказана фиксированной цепочкой: R17 candidate context run `34495273615` / container `9909bd54...` создавался поверх непосредственного predecessor run `34461449594` / container `d012fe54...`. R18 Atlas adapter ошибочно ожидал через одну ступень run `34445017241` / container `3b81e984...`, поэтому корректный context digest неизбежно отвергался. Разрешено заменить только эти две predecessor-ссылки на уже frozen `historical.adoption.LIVE_*`, обновить focused regression и повторить тот же защищённый R18 rollout из PR466. Удаление дополнительных объектов, изменение БД/backups/маршрутов вне существующего controller и включение реальных платежей запрещены.
+
