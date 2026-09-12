@@ -109,3 +109,14 @@ test("ArtHello Pay follows the ArtHello design tokens and has a mobile layout", 
   assert.match(css, /\.mobile-bottom-nav/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
 });
+
+test("production disk recovery removes only stale unused build cache", () => {
+  assert.match(
+    productionWorkflow,
+    /docker builder prune --force --filter until=24h/,
+  );
+  assert.doesNotMatch(
+    productionWorkflow,
+    /docker (?:system|volume|image) prune/,
+  );
+});
