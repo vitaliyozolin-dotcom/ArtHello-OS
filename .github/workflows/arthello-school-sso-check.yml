@@ -1,0 +1,63 @@
+name: ArtHello School SSO check
+
+on:
+  push:
+    branches:
+      - codex/arthello-school-sso-20260831
+    paths:
+      - artifacts/arthello-os/server/school-sso.ts
+      - artifacts/arthello-os/app/api/school/sso/route.ts
+      - artifacts/arthello-os/tests/school-sso-contract.test.mjs
+      - .github/workflows/arthello-school-sso-check.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: arthello-school-sso-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@v4
+
+      - name: Run SSO contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --test artifacts/arthello-os/tests/school-sso-contract.test.mjs
+
+      - name: Build ArtHello OS candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          image="arthello-school-sso-check:${GITHUB_SHA::12}"
+          docker build --pull -t "$image" \
+            -f artifacts/arthello-os/Dockerfile \
+            artifacts/arthello-os
+          printf 'ARTHELLO_SCHOOL_SSO_IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
+
+      - name: Report exact result
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.sha,
+              state: process.env.JOB_STATUS === "success" ? "success" : "failure",
+              context: "arthello-os/school-sso-check",
+              description: "ArtHello School SSO build and contract " + process.env.JOB_STATUS,
+              target_url:
+                process.env.GITHUB_SERVER_URL + "/" +
+                process.env.GITHUB_REPOSITORY +
+                "/actions/runs/" + process.env.GITHUB_RUN_ID,
+            });
