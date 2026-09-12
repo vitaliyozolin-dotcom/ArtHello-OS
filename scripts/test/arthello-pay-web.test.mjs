@@ -127,3 +127,21 @@ test("production disk recovery removes only unused build cache", () => {
     /docker (?:system|volume|image) prune/,
   );
 });
+
+test("production capacity recovery uses only explicit recoverable browser helpers", () => {
+  for (const helper of [
+    "retire-r17-browser.mjs",
+    "retire-r16-browser.mjs",
+    "retire-r15-browser.mjs",
+    "retire-r14-browser.mjs",
+    "retire-r13-browser.mjs",
+    "retire-r12-browser.mjs",
+    "retire-d145-browser.mjs",
+    "retire-d144-browser.mjs",
+    "retire-d143-browser.mjs",
+  ]) {
+    assert.match(productionWorkflow, new RegExp(`deploy/browser/${helper}`));
+  }
+  assert.doesNotMatch(productionWorkflow, /retire-\*\.mjs/);
+  assert.match(productionWorkflow, /reason\" = insufficient_import_space/);
+});
