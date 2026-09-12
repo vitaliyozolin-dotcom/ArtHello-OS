@@ -11,6 +11,9 @@ const css = read("pay-web/styles.css");
 const caddy = read("deploy/Caddyfile");
 const dockerfile = read("deploy/Dockerfile");
 const apiApp = read("artifacts/api-server/src/app.ts");
+const v52Page = read("deploy/v52/src/app/pay/[[...path]]/page.tsx");
+const v52App = read("deploy/v52/public/pay-assets/app.js");
+const v52Css = read("deploy/v52/public/pay-assets/styles.css");
 const accessPolicy = read(
   "artifacts/api-server/src/lib/security/access-policy.ts",
 );
@@ -23,6 +26,13 @@ test("ArtHello Pay has an isolated static web shell", () => {
   assert.match(index, /href="\/styles\.css"/);
   assert.match(index, /src="\/app\.js"/);
   assert.match(dockerfile, /COPY pay-web \/srv\/pay/);
+});
+
+test("the active v52 runtime ships the same Pay assets it references", () => {
+  assert.match(v52Page, /href="\/pay-assets\/styles\.css"/);
+  assert.match(v52Page, /src="\/pay-assets\/app\.js"/);
+  assert.equal(v52App, app);
+  assert.equal(v52Css, css);
 });
 
 test("ArtHello Pay uses the approved host convention and same-origin API proxy", () => {
@@ -38,6 +48,7 @@ test("operator UI never calls banking routes", () => {
   assert.match(app, /\/api\/payments\/customers/);
   assert.match(app, /\/api\/payments\/obligations/);
   assert.match(app, /\/api\/payments\/requests/);
+  assert.match(app, /банковский приём платежа пока не включён/);
 });
 
 test("public payment link is bearer-scoped and stable", () => {
@@ -76,7 +87,8 @@ test("all ArtHello Pay runtime routes are explicitly registered in the server co
       .filter(({ disposition }) => disposition === "document-in-openapi")
       .map(({ route }) => route),
   );
-  for (const route of expected) assert.equal(registered.has(route), true, route);
+  for (const route of expected)
+    assert.equal(registered.has(route), true, route);
 });
 
 test("ArtHello Pay follows the ArtHello design tokens and has a mobile layout", () => {

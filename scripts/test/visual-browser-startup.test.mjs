@@ -66,7 +66,10 @@ test('two failed starts refuse with fixed reason and clean both owned profiles',
   assert.equal((await f.receipt()).result,'blocked');await f.cleaned(2);
 });
 test('missing readiness is bounded and does not fabricate visual acceptance', async t => {
-  const f=await fixture(t);await assert.rejects(f.start('silent',{timeoutMs:250}),{message:'CDP_NOT_READY'});
+  // Coverage instrumentation on Node 24 can spend more than 250 ms starting a
+  // fresh child. Keep the refusal bounded while allowing both attempts to
+  // actually reach the synthetic worker before cleanup is asserted.
+  const f=await fixture(t);await assert.rejects(f.start('silent',{timeoutMs:750}),{message:'CDP_NOT_READY'});
   const r=await f.receipt();assert.equal(r.result,'blocked');assert.equal(r.attempts.length,2);
   await f.cleaned(2);
 });
