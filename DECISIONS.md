@@ -666,3 +666,11 @@ D154 protected run `34693238551`, deploy job `103552376274`, доказал ис
 На выделенном gateway runner разрешено заменить age-filtered команду на `docker builder prune --all --force` под прежним timeout. Это удаляет только неиспользуемый воспроизводимый build-cache, включая свежий cache последних CI-прогонов. По-прежнему запрещены `docker system prune`, `docker image prune`, `docker volume prune`, удаление application/browser images, containers, volumes, данных и backups. После очистки прежний fail-closed capacity guard обязателен и при недостатке места снова останавливает выпуск.
 
 Новый запуск допускается только из single-parent squash main после exact-head Quality/Proof/v52 с prefix `D155: publish ArtHello Pay production`; банковский приём реальных платежей и фискализация остаются выключены.
+
+## D156 — Последовательно завершить только восстанавливаемые historical browser images (2026-09-12, кандидат)
+
+D155 protected run `34693940297`, deploy job `103554261191`, успешно удалил весь неиспользуемый Docker builder-cache, но доступное место осталось 4588632 KiB при неизменной потребности 7995048 KiB. Это доказывает, что общий build-cache больше не является источником требуемых 3.4 GiB. Выпуск снова остановлен до загрузки архива, БД, контейнеров и маршрута.
+
+Разрешено последовательно вызвать уже существующие hard-coded retire-helper’ы R17, R16, R15, R14, R13, R12, D145, D144 и D143. Каждый helper сам проверяет точный image ID/tag/source/fingerprint, отсутствие любых container consumers, текущий main и собственный неистёкший recovery artifact перед `docker image rm --no-prune` по полному ID. После каждого удаления измеряется прежний capacity; цепочка останавливается сразу при PASS. Неожиданный identity/archive/API/daemon drift, непроверенная мутация или исчерпание списка без 8 GiB блокируют выпуск.
+
+Application images, backup worker, containers, volumes, данные, backups, общий `docker image prune` и caller-selected targets запрещены. Новый запуск допускается только из single-parent squash main после exact-head Quality/Proof/v52 с prefix `D156: publish ArtHello Pay production`; банковский приём и фискализация остаются выключены.
