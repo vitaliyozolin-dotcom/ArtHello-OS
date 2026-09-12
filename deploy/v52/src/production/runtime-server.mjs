@@ -51,6 +51,7 @@ const runtime = new Miniflare({
   ],
   bindings: {
     ARTHELLO_PUBLIC_ORIGIN: publicOrigin,
+    ARTHELLO_TRUSTED_WEB_ORIGINS: process.env.ARTHELLO_TRUSTED_WEB_ORIGINS || "",
     ARTHELLO_BOOTSTRAP_LOGIN: process.env.ARTHELLO_BOOTSTRAP_LOGIN || "owner",
     ARTHELLO_BOOTSTRAP_PASSWORD: readRuntimeSecret(
       "ARTHELLO_BOOTSTRAP_PASSWORD",

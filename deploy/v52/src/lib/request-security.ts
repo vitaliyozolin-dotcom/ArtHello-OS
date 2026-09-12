@@ -40,12 +40,25 @@ export function publicApiRouteDecision(pathname: string, method: string): AuthRo
   return { kind: "allow", access: "public" };
 }
 
-export function hasTrustedMutationOrigin(request: Request, configuredPublicOrigin = "") {
+export function hasTrustedMutationOrigin(
+  request: Request,
+  configuredPublicOrigin = "",
+  configuredAdditionalOrigins = "",
+) {
   if (["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase())) return true;
 
-  let expectedOrigin: string;
+  const expectedOrigins = new Set<string>();
   try {
-    expectedOrigin = new URL(configuredPublicOrigin.trim() || request.url).origin;
+    expectedOrigins.add(new URL(configuredPublicOrigin.trim() || request.url).origin);
+    for (const raw of configuredAdditionalOrigins.split(",")) {
+      const value = raw.trim();
+      if (!value) continue;
+      const url = new URL(value);
+      if (url.origin !== value || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+        return false;
+      }
+      expectedOrigins.add(url.origin);
+    }
   } catch {
     return false;
   }
@@ -54,7 +67,7 @@ export function hasTrustedMutationOrigin(request: Request, configuredPublicOrigi
   if (!source) return false;
 
   try {
-    return new URL(source).origin === expectedOrigin;
+    return expectedOrigins.has(new URL(source).origin);
   } catch {
     return false;
   }

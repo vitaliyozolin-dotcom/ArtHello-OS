@@ -146,6 +146,50 @@ class AtlasPredecessorTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()),
                          {'state': 'refused', 'code': 'R14_CONTROLLER_CHECK_FAILED'})
 
+    def test_consumer_chain_is_proved_before_inner_backup_inventory(self):
+        proven = {'1' * 64, '2' * 64}
+        events = []
+
+        class Subject:
+            proven_consumers = frozenset()
+
+            def accepted(self):
+                events.append(('accepted', self.proven_consumers))
+
+            def health(self):
+                events.append(('health', self.proven_consumers))
+
+            def running(self):
+                events.append(('running', self.proven_consumers))
+
+        subject = Subject()
+        own = SimpleNamespace(load=lambda: None)
+        opened = __import__('contextlib').nullcontext((subject, own, None))
+        args = SimpleNamespace(phase='live')
+        with patch.object(controller, 'opened', return_value=opened), \
+             patch.object(controller, 'canonical_consumers', side_effect=lambda *_: events.append(('canonical', None)) or proven):
+            result = controller.consumers(args, object())
+
+        self.assertEqual(result['canonicalConsumers'], 2)
+        self.assertEqual(events[0], ('canonical', None))
+        self.assertTrue(all(event[1] == frozenset(proven) for event in events[1:]))
+
+    def test_inner_adoption_accepts_only_inert_immutable_historical_reader_shape(self):
+        identity = '1' * 64
+        image_id = 'sha256:' + '2' * 64
+        release = '3' * 40
+        metadata = app(identity, 'arthello-direct-40000000000-1', image_id, release)
+        metadata['Config'].update({'User': 'node', 'Cmd': ['node', 'production/runtime-server.mjs']})
+        image = {'Id': image_id, 'Config': {'Labels': {'org.opencontainers.image.revision': release}}}
+
+        self.assertTrue(controller.adoption.structural_historical_consumer(metadata, image))
+        running = copy.deepcopy(metadata)
+        running['State']['Running'] = True
+        self.assertFalse(controller.adoption.structural_historical_consumer(running, image))
+        wrong_image = copy.deepcopy(image)
+        wrong_image['Config']['Labels']['org.opencontainers.image.revision'] = '4' * 40
+        self.assertFalse(controller.adoption.structural_historical_consumer(metadata, wrong_image))
+
 
 if __name__ == '__main__':
     unittest.main()

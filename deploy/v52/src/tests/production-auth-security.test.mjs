@@ -12,6 +12,7 @@ import {
 } from "../lib/request-security.ts";
 
 const PUBLIC_ORIGIN = "https://arthello-188-225-38-55.sslip.io";
+const PAY_ORIGIN = "https://pay-188-225-38-55.sslip.io";
 const BOOTSTRAP_LOGIN = "owner@example.test";
 const BOOTSTRAP_PASSWORD = "Runtime-Auth-Test-Password-42";
 const PERMANENT_PASSWORD = "Runtime-Permanent-Password-73";
@@ -39,7 +40,6 @@ test("mutation origin ignores spoofable forwarded headers and uses the canonical
     headers: { origin: PUBLIC_ORIGIN },
   });
   assert.equal(hasTrustedMutationOrigin(accepted, PUBLIC_ORIGIN), true);
-
   const spoofed = new Request("http://internal:8081/api/tasks", {
     method: "POST",
     headers: {
@@ -51,6 +51,14 @@ test("mutation origin ignores spoofable forwarded headers and uses the canonical
   assert.equal(hasTrustedMutationOrigin(spoofed, PUBLIC_ORIGIN), false);
   assert.equal(hasTrustedMutationOrigin(new Request("http://internal:8081/api/tasks", { method: "POST" }), PUBLIC_ORIGIN), false);
   assert.equal(hasTrustedMutationOrigin(new Request("http://internal:8081/api/tasks"), PUBLIC_ORIGIN), true);
+
+  const payRequest = new Request("http://internal:8081/api/payments/obligations", {
+    method: "POST",
+    headers: { origin: PAY_ORIGIN },
+  });
+  assert.equal(hasTrustedMutationOrigin(payRequest, PUBLIC_ORIGIN, PAY_ORIGIN), true);
+  assert.equal(hasTrustedMutationOrigin(payRequest, PUBLIC_ORIGIN), false);
+  assert.equal(hasTrustedMutationOrigin(payRequest, PUBLIC_ORIGIN, `${PAY_ORIGIN}/unexpected`), false);
 
   const proxySource = readFileSync(new URL("../proxy.ts", import.meta.url), "utf8");
   assert.doesNotMatch(proxySource, /headers\.delete\(["'](?:forwarded|x-forwarded-(?:host|proto))["']\)/);
@@ -73,6 +81,7 @@ test("production worker completes login, password rotation and logout with sessi
     ],
     bindings: {
       ARTHELLO_PUBLIC_ORIGIN: PUBLIC_ORIGIN,
+      ARTHELLO_TRUSTED_WEB_ORIGINS: PAY_ORIGIN,
       ARTHELLO_BOOTSTRAP_LOGIN: BOOTSTRAP_LOGIN,
       ARTHELLO_BOOTSTRAP_PASSWORD: BOOTSTRAP_PASSWORD,
       INTEGRATION_CREDENTIALS_KEY: "runtime-test-integration-key-1234567890",

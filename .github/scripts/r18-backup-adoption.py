@@ -60,6 +60,32 @@ def ids(value):
     return set(rows)
 
 
+def structural_historical_consumer(metadata, image):
+    """Recognize only an inert immutable ArtHello D1 reader; mount checks follow."""
+    config = metadata.get('Config', {})
+    labels = config.get('Labels') or {}
+    state = metadata.get('State', {})
+    host = metadata.get('HostConfig', {})
+    image_id = metadata.get('Image', '')
+    release = labels.get('arthello.release.sha', '')
+    canonical = [item for item in metadata.get('Mounts', [])
+                 if item.get('Name') == r7.SOURCE_VOLUME or item.get('Destination') == '/data']
+    return (isinstance(metadata.get('Name'), str)
+            and re.fullmatch(r'/arthello-direct-[1-9][0-9]*-[1-9][0-9]*', metadata['Name']) is not None
+            and re.fullmatch(r'sha256:[a-f0-9]{64}', image_id) is not None
+            and re.fullmatch(r'[a-f0-9]{40}', release) is not None
+            and config.get('User') == 'node'
+            and config.get('Cmd') == ['node', 'production/runtime-server.mjs']
+            and state.get('Running') is False and state.get('Paused') is False
+            and state.get('Restarting', False) is False and state.get('Dead', False) is False
+            and host.get('RestartPolicy') == {'Name': 'no', 'MaximumRetryCount': 0}
+            and len(canonical) == 1 and canonical[0].get('Type') == 'volume'
+            and canonical[0].get('Name') == r7.SOURCE_VOLUME
+            and canonical[0].get('Destination') == '/data' and canonical[0].get('RW') is True
+            and image.get('Id') == image_id
+            and image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == release)
+
+
 class OwnedState:
     """The frozen creator/cleanup sees only new activation/seed ownership."""
     def __init__(self, parent):
@@ -77,6 +103,10 @@ class Adoption:
     def __init__(self, args, docker, state, accepted, boundary):
         self.args, self.docker, self.store, self.accepted_store, self.boundary = args, docker, state, accepted, boundary
         self.clock, self.pause = time.monotonic, time.sleep
+        # The read-only outer controller may populate this only after it has
+        # proved the exact canonical D1 consumer chain from durable receipts.
+        # Direct mutation commands keep the empty default and remain fail-closed.
+        self.proven_consumers = frozenset()
         require(args.release_sha != ACCEPTED_SHA and args.image_id != ACCEPTED_IMAGE
                 and args.tree_sha != ACCEPTED_TREE and args.run_id != ACCEPTED_RUN
                 and args.release_sha != LIVE_SHA and args.image_id != LIVE_IMAGE
@@ -125,7 +155,7 @@ class Adoption:
                     and metadata.get('Image') == LIVE_IMAGE
                     and metadata.get('Name') == '/arthello-direct-' + LIVE_RUN + '-1'
                     and labels.get('arthello.release.sha') == LIVE_SHA)
-                historical_app = any(identity == row[0]
+                historical_app = identity in self.proven_consumers or any(identity == row[0]
                     and metadata.get('Image') == row[1]
                     and metadata.get('Name') == '/arthello-direct-' + row[2] + '-1'
                     and labels.get('arthello.release.sha') == row[3]
@@ -138,6 +168,9 @@ class Adoption:
                 new_app = (metadata.get('Name') == '/arthello-direct-' + self.args.run_id + '-' + self.args.attempt
                            and metadata.get('Image') == self.args.image_id
                            and labels.get('arthello.release.sha') == self.args.release_sha)
+                if not (accepted_app or historical_app or new_app):
+                    image = self.docker.inspect('image', metadata.get('Image', ''))
+                    historical_app = structural_historical_consumer(metadata, image)
                 require(accepted_app or historical_app or new_app, 'FOREIGN_BACKUP_CONSUMER')
                 control = self.old.names['control']
                 protected_mounts = [item for item in metadata.get('Mounts', []) if item.get('Name') in protected]

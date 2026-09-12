@@ -24,10 +24,10 @@ def checked_module(name, filename, expected):
     exec(compile(source, str(path), 'exec'), value.__dict__)
     return value
 
-state = checked_module('r14_candidate_state', 'r18-candidate-state.py', 'd34a26e0e98b4b821be69fe899a037bd76dcb11e7d11d93988cb9e46785e55c5')
+state = checked_module('r14_candidate_state', 'r18-candidate-state.py', '1b1585e33ddc1b46c35f94561f09d08398cd7a3f6f59bd94c820acc01d52101c')
 adoption = state.adoption
 backup = adoption.r7
-controller = checked_module('r14_backup_controller', 'r18-backup-controller.py', '1c24f5c23d60b762ccdd714269b426e885999569bbb59a45015654a05198d0b9')
+controller = checked_module('r14_backup_controller', 'r18-backup-controller.py', 'f846215861c17ffe12956fabcd7b4a73717cf09d67a4e72beb977abb2761c4c1')
 
 
 def require(value):
@@ -104,6 +104,7 @@ def validate_candidate(metadata, context, *, network, secret_dir, expected_entry
                           ('INTEGRATION_CREDENTIALS_KEY_FILE', '/run/secrets/integration-credentials-key'),
                           ('ARTHELLO_BOOTSTRAP_PASSWORD_FILE', '/run/secrets/bootstrap-password'),
                           ('ARTHELLO_PUBLIC_ORIGIN', 'https://arthello-188-225-38-55.sslip.io'),
+                          ('ARTHELLO_TRUSTED_WEB_ORIGINS', 'https://pay-188-225-38-55.sslip.io'),
                           ('SCHOOL_PUBLIC_ORIGIN', 'https://school-188-225-38-55.sslip.io'),
                           ('SCHOOL_DIARY_SYNC_URL', 'https://school-188-225-38-55.sslip.io'),
                           ('SCHOOL_DIARY_ALLOWED_ORIGINS', 'https://school-188-225-38-55.sslip.io'),

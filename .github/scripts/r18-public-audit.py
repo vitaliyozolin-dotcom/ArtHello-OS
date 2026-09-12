@@ -16,7 +16,7 @@ def checked_module(name, filename, expected):
     exec(compile(source, str(path), 'exec'), value.__dict__)
     return value
 
-state = checked_module('r14_candidate_state', 'r18-candidate-state.py', 'd34a26e0e98b4b821be69fe899a037bd76dcb11e7d11d93988cb9e46785e55c5')
+state = checked_module('r14_candidate_state', 'r18-candidate-state.py', '1b1585e33ddc1b46c35f94561f09d08398cd7a3f6f59bd94c820acc01d52101c')
 
 
 def prepare(path, receipt_path, attempt):
