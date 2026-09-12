@@ -674,3 +674,11 @@ D155 protected run `34693940297`, deploy job `103554261191`, успешно уд
 Разрешено последовательно вызвать уже существующие hard-coded retire-helper’ы R17, R16, R15, R14, R13, R12, D145, D144 и D143. Каждый helper сам проверяет точный image ID/tag/source/fingerprint, отсутствие любых container consumers, текущий main и собственный неистёкший recovery artifact перед `docker image rm --no-prune` по полному ID. После каждого удаления измеряется прежний capacity; цепочка останавливается сразу при PASS. Неожиданный identity/archive/API/daemon drift, непроверенная мутация или исчерпание списка без 8 GiB блокируют выпуск.
 
 Application images, backup worker, containers, volumes, данные, backups, общий `docker image prune` и caller-selected targets запрещены. Новый запуск допускается только из single-parent squash main после exact-head Quality/Proof/v52 с prefix `D156: publish ArtHello Pay production`; банковский приём и фискализация остаются выключены.
+
+## D157 — Сжать только reconstructible Git checkout self-hosted runner (2026-09-12, кандидат)
+
+D156 protected run `34694710139`, deploy job `103556304216`, проверил R17, R16, R15, R14, R13, R12, D145, D144 и D143 helpers: все девять точных browser images отсутствуют, ни один image не удалён; доступно 4583580 KiB при требуемых 7995062 KiB. Build-cache уже пуст. Выпуск снова остановлен до загрузки архива и production cutover.
+
+На self-hosted runner разрешено очистить reflog и выполнить `git gc --prune=now` только внутри текущего exact checkout после проверки, что canonical repository root равен canonical `$GITHUB_WORKSPACE`. HEAD проверяется до и после. Это удаляет только недостижимые локальные Git-объекты и reflog воспроизводимого checkout; remote repository, рабочее дерево, Docker, application images, containers, volumes, данные и backups не меняются. Прямое удаление `$GITHUB_WORKSPACE` или `$RUNNER_TEMP` запрещено; прежний capacity guard остаётся обязательным.
+
+Новый запуск допускается только из single-parent squash main после exact-head Quality/Proof/v52 с prefix `D157: publish ArtHello Pay production`; банковский приём и фискализация остаются выключены.

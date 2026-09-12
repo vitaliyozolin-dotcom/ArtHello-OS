@@ -145,3 +145,13 @@ test("production capacity recovery uses only explicit recoverable browser helper
   assert.doesNotMatch(productionWorkflow, /retire-\*\.mjs/);
   assert.match(productionWorkflow, /reason\" = insufficient_import_space/);
 });
+
+test("production compacts only its reconstructible Actions checkout", () => {
+  assert.match(productionWorkflow, /git reflog expire --expire=now --all/);
+  assert.match(productionWorkflow, /git gc --prune=now/);
+  assert.match(
+    productionWorkflow,
+    /git rev-parse --show-toplevel\)\"\)\" = \"\$\(realpath \"\$GITHUB_WORKSPACE\"\)\"/,
+  );
+  assert.doesNotMatch(productionWorkflow, /rm -rf[^\n]*(?:GITHUB_WORKSPACE|RUNNER_TEMP)/);
+});
