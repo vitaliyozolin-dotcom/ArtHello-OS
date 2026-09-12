@@ -1,8 +1,8 @@
-# D157: compact only the current reconstructible Actions checkout before publishing ArtHello Pay.
+# D159: retire one exact unused legacy Playwright base before publishing ArtHello Pay.
 # Accepted R17 predecessor and complete R15/R13/R12 backup history are preserved.
 # Prove the canonical D1 chain before recognizing its exact backup-control consumers.
 # No database restore after seal/authentication/public boundaries.
-name: Deploy ArtHello Pay R18 D157
+name: Deploy ArtHello Pay R18 D159
 'on':
   workflow_run:
     workflows:
@@ -22,9 +22,9 @@ concurrency:
   queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/pay-production-gitgc-d157-20260912
-  EXPECTED_RELEASE_PR: '463'
-  PREVIOUS_RELEASE_SHA: 'd8f8f8f8c4211b0231cd7e24c14a8d5171397160'
+  EXPECTED_RELEASE_HEAD: codex/pay-production-playwright-retire-d159-20260912
+  EXPECTED_RELEASE_PR: '465'
+  PREVIOUS_RELEASE_SHA: 'aa72c1e832a19a725a6452989dee7210788fe78e'
   ACCEPTED_RELEASE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
   ACCEPTED_RELEASE_TREE: 6aeb7e6879b786a434d12f026f765bcaf9acb5a4
   ACCEPTED_RELEASE_RUN_ID: '34495273615'
@@ -50,14 +50,14 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-gitgc-d157-20260912' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('463') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-playwright-retire-d159-20260912' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('465') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D157: publish ArtHello Pay production')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D159: publish ArtHello Pay production')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -129,8 +129,8 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-gitgc-d157-20260912' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('463') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-playwright-retire-d159-20260912' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('465') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -776,6 +776,33 @@ jobs:
         test -x "$precheck_node"
         "$precheck_node" -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(2)'
         printf 'PRECHECK_NODE=%s\n' "$precheck_node" >> "$GITHUB_ENV"
+    - name: Retire only the exact unused legacy Playwright base
+      if: env.R9_RESUME_CANDIDATE != '1'
+      timeout-minutes: 2
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+        target_ref='mcr.microsoft.com/playwright:v1.55.0-noble'
+        expected_id='sha256:b27e719ecbfef153e13fd24e8341736733bf2658b229677eb21ff57ff5d7fb29'
+        actual_id="$(docker image ls --no-trunc --quiet "$target_ref")"
+        if [ -z "$actual_id" ]; then
+          printf 'ARTHELLO_LEGACY_PLAYWRIGHT_BASE=ABSENT\n'
+          exit 0
+        fi
+        test "$actual_id" = "$expected_id"
+        docker image inspect "$expected_id" | jq -e --arg ref "$target_ref" '
+          length == 1 and .[0].Id == "sha256:b27e719ecbfef153e13fd24e8341736733bf2658b229677eb21ff57ff5d7fb29" and
+          .[0].RepoTags == [$ref]
+        ' >/dev/null
+        mapfile -t container_ids < <(docker ps -aq --no-trunc)
+        for container_id in "${container_ids[@]}"; do
+          test "$(docker inspect "$container_id" --format '{{.Image}}')" != "$expected_id"
+        done
+        docker image rm --no-prune "$expected_id"
+        ! docker image inspect "$expected_id" >/dev/null 2>&1
+        ! docker image inspect "$target_ref" >/dev/null 2>&1
+        printf 'ARTHELLO_LEGACY_PLAYWRIGHT_BASE=RETIRED id=%s\n' "$expected_id"
     - name: Retire only explicit unused recoverable historical browser images
       if: env.R9_RESUME_CANDIDATE != '1'
       env:

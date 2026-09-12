@@ -178,3 +178,33 @@ test("D158 gateway storage inventory cannot mutate production", () => {
     /(?:docker\s+(?:system|builder|image|volume|container)\s+prune|docker\s+(?:rm|rmi)|\brm\s+-|\bmv\s+|\btruncate\s+|\bfind\b[^\n]*-delete)/,
   );
 });
+
+test("D159 retires only the exact unused legacy Playwright base", () => {
+  assert.match(
+    productionWorkflow,
+    /target_ref='mcr\.microsoft\.com\/playwright:v1\.55\.0-noble'/,
+  );
+  assert.match(
+    productionWorkflow,
+    /expected_id='sha256:b27e719ecbfef153e13fd24e8341736733bf2658b229677eb21ff57ff5d7fb29'/,
+  );
+  assert.match(
+    productionWorkflow,
+    /actual_id="\$\(docker image ls --no-trunc --quiet "\$target_ref"\)"/,
+  );
+  assert.doesNotMatch(
+    productionWorkflow,
+    /docker image inspect "\$target_ref"[^\n]*\|\| true/,
+  );
+  assert.match(productionWorkflow, /docker ps -aq --no-trunc/);
+  assert.match(
+    productionWorkflow,
+    /docker inspect "\$container_id" --format '\{\{\.Image\}\}'/,
+  );
+  assert.match(
+    productionWorkflow,
+    /docker image rm --no-prune "\$expected_id"/,
+  );
+  assert.doesNotMatch(productionWorkflow, /docker image rm[^\n]*--force/);
+  assert.doesNotMatch(productionWorkflow, /docker (?:system|volume|image) prune/);
+});
