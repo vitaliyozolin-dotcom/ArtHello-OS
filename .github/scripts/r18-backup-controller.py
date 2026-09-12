@@ -37,7 +37,19 @@ def checked_history():
     return module
 
 
+def checked_immediate_predecessor():
+    path = Path(__file__).with_name('r17-backup-adoption.py')
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != '598a596d4dc8ea01b8d09a755ed1f06c5194c64a6a6901333c86e3c296c2cab4':
+        raise RuntimeError('FROZEN_R17_ADOPTION_DRIFT')
+    module = ModuleType('r18_immediate_r17_predecessor')
+    module.__file__ = str(path)
+    exec(compile(raw, str(path), 'exec'), module.__dict__)
+    return module
+
+
 historical = checked_history()
+immediate = checked_immediate_predecessor()
 adoption = checked_module()
 r7, require = adoption.r7, adoption.require
 PHASES = ('live', 'live-paused', 'stopped', 'candidate', 'candidate-paused', 'copyback')
@@ -273,8 +285,8 @@ def retained_live_candidate(docker):
                 'candidateContainerId': adoption.LIVE_STATE_APP_ID,
                 'candidateName': 'arthello-direct-' + adoption.LIVE_STATE_RUN + '-1',
                 'imageId': adoption.LIVE_IMAGE, 'dataVolume': r7.SOURCE_VOLUME,
-                'previousContainerId': adoption.HISTORICAL_APP_ID,
-                'previousName': 'arthello-direct-' + adoption.HISTORICAL_RUN + '-1'}
+                'previousContainerId': immediate.LIVE_APP_ID,
+                'previousName': 'arthello-direct-' + immediate.LIVE_RUN + '-1'}
     require(all(context.get(key) == value for key, value in expected.items()), 'LIVE_CONTEXT_IDENTITY_INVALID')
     retained_name = context['candidateName']
     item = docker.inspect('container', retained_name, True)
@@ -312,19 +324,20 @@ def accepted_live_predecessor(docker):
                 'candidateContainerId': adoption.LIVE_STATE_APP_ID,
                 'candidateName': 'arthello-direct-' + adoption.LIVE_STATE_RUN + '-1',
                 'imageId': adoption.LIVE_IMAGE, 'dataVolume': r7.SOURCE_VOLUME,
-                'previousContainerId': adoption.HISTORICAL_APP_ID,
-                'previousName': 'arthello-direct-' + adoption.HISTORICAL_RUN + '-1'}
+                'previousContainerId': immediate.LIVE_APP_ID,
+                'previousName': 'arthello-direct-' + immediate.LIVE_RUN + '-1'}
     require(all(context.get(key) == value for key, value in expected.items()), 'LIVE_CONTEXT_IDENTITY_INVALID')
     item = docker.inspect('container', expected['previousName'], True)
     if item is None:
         return None
-    app_metadata(item, identity=adoption.HISTORICAL_APP_ID, name=expected['previousName'],
-                 image=adoption.HISTORICAL_IMAGE, release=adoption.HISTORICAL_SHA, running=False, paused=False)
-    image = docker.inspect('image', adoption.HISTORICAL_IMAGE)
-    require(image.get('Id') == adoption.HISTORICAL_IMAGE
-            and image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == adoption.HISTORICAL_SHA,
+    app_metadata(item, identity=immediate.LIVE_APP_ID, name=expected['previousName'],
+                 image=immediate.LIVE_IMAGE, release=immediate.LIVE_SHA,
+                 running=False, paused=False)
+    image = docker.inspect('image', immediate.LIVE_IMAGE)
+    require(image.get('Id') == immediate.LIVE_IMAGE
+            and image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == immediate.LIVE_SHA,
             'PREDECESSOR_IMAGE_SOURCE_INVALID')
-    return adoption.HISTORICAL_APP_ID
+    return immediate.LIVE_APP_ID
 
 
 def canonical_consumers(args, docker, phase):

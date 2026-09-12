@@ -1,8 +1,8 @@
-# D159: retire one exact unused legacy Playwright base before publishing ArtHello Pay.
+# D160: correct the exact R17 predecessor proof after Atlas and publish ArtHello Pay.
 # Accepted R17 predecessor and complete R15/R13/R12 backup history are preserved.
 # Prove the canonical D1 chain before recognizing its exact backup-control consumers.
 # No database restore after seal/authentication/public boundaries.
-name: Deploy ArtHello Pay R18 D159
+name: Deploy ArtHello Pay R18 D160
 'on':
   workflow_run:
     workflows:
@@ -22,9 +22,9 @@ concurrency:
   queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/pay-production-playwright-retire-d159-20260912
-  EXPECTED_RELEASE_PR: '465'
-  PREVIOUS_RELEASE_SHA: 'aa72c1e832a19a725a6452989dee7210788fe78e'
+  EXPECTED_RELEASE_HEAD: codex/pay-production-predecessor-fix-d160-20260912
+  EXPECTED_RELEASE_PR: '466'
+  PREVIOUS_RELEASE_SHA: 'bcc36f2d5b098c55e686f69b48d389120c0bd1df'
   ACCEPTED_RELEASE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
   ACCEPTED_RELEASE_TREE: 6aeb7e6879b786a434d12f026f765bcaf9acb5a4
   ACCEPTED_RELEASE_RUN_ID: '34495273615'
@@ -50,14 +50,14 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-playwright-retire-d159-20260912' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('465') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-predecessor-fix-d160-20260912' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('466') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D159: publish ArtHello Pay production')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D160: publish ArtHello Pay production')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -129,8 +129,8 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-playwright-retire-d159-20260912' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('465') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-predecessor-fix-d160-20260912' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('466') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -446,15 +446,15 @@ jobs:
         sha256sum -c <<'PINNED_RELEASE_HELPERS'
         4cdcd2771994fe8ea11bb731fa1ef5f997da489adfc89e3e78baff271096d659  deploy/v52/recovery-r18/r17-controller.yml
         b58fd745bb0ee3b8acdfcdbc4441179d5fc01891e0c880f2e57b977150f8cd90  .github/scripts/r18-backup-adoption.py
-        f846215861c17ffe12956fabcd7b4a73717cf09d67a4e72beb977abb2761c4c1  .github/scripts/r18-backup-controller.py
+        1eee806addb70230503fd01cc77ef7d456950b236be19111e455a8defc027d55  .github/scripts/r18-backup-controller.py
         1b1585e33ddc1b46c35f94561f09d08398cd7a3f6f59bd94c820acc01d52101c  .github/scripts/r18-candidate-state.py
         31614cf50aec3c1f099e91ad2e4e44326d92c6fd829d88e233d898347df3b033  .github/scripts/r18-live-baseline.py
         8a4949a5eb24bf1738304f0b120bdc9e193989853b65c0f0ac3b78f958f2daf6  .github/scripts/r18-public-audit.py
-        4b95f1f8c18b53134bbe39656c66171e42d3aa6da592babedbf2dc6f8ac30efc  .github/scripts/r18-resume-candidate.py
+        6f77ac06f67ffe498877354974169d7bb7bbb9aa0b0b8ae7200d61c31900d154  .github/scripts/r18-resume-candidate.py
         631a8a13dbcdf2034a67d811832c2436296b49ac225000b00ffeae87fc1beae5  .github/scripts/run-r18-live-browser.py
         1fc56c6e73aa73ed863ae8ff410ca44493aa666d81cda75c886b37648c6d637d  deploy/browser/retire-d145-browser.mjs
         dd49a4459daf43f3232eddab50828282e625ffaabdafa781a6490a5fb8d7eb53  scripts/test/retire-d145-browser.test.mjs
-        a7dd0430bf106340206f7f341c7002323e2b97d177b2faf85acc23597337b16b  .github/scripts/test-r18-atlas-predecessors.py
+        3c89d76c6d432e281bb78d0083ed4a07dd79e0eaf342200ca2373004e2b8c437  .github/scripts/test-r18-atlas-predecessors.py
         ce0480acf24afbf328b0ae373a774f96593d8d7b64ba021e1935773e036593a5  .github/scripts/d150-pay-route.py
         42370bd7ed7c8a723fddcf5ddfb650fc63c89358b8dd2728f2bedb135e08b6a0  .github/scripts/test-d150-pay-route.py
         PINNED_RELEASE_HELPERS

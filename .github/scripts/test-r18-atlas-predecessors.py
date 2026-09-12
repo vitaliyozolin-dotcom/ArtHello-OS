@@ -73,8 +73,8 @@ class AtlasPredecessorTests(unittest.TestCase):
             'candidateContainerId': a.LIVE_STATE_APP_ID,
             'candidateName': 'arthello-direct-' + a.LIVE_STATE_RUN + '-1',
             'imageId': a.LIVE_IMAGE, 'dataVolume': controller.r7.SOURCE_VOLUME,
-            'previousContainerId': a.HISTORICAL_APP_ID,
-            'previousName': 'arthello-direct-' + a.HISTORICAL_RUN + '-1',
+            'previousContainerId': controller.immediate.LIVE_APP_ID,
+            'previousName': 'arthello-direct-' + controller.immediate.LIVE_RUN + '-1',
         }
         digest = hashlib.sha256((json.dumps(self.context, sort_keys=True, separators=(',', ':')) + '\n').encode()).hexdigest()
         self.receipt = {'schemaVersion': 1, 'phase': 'public-started',
@@ -86,18 +86,30 @@ class AtlasPredecessorTests(unittest.TestCase):
         self.digest_patch.start()
         self.addCleanup(self.digest_patch.stop)
         retained = app(a.LIVE_STATE_APP_ID, self.context['candidateName'], a.LIVE_IMAGE, a.LIVE_SHA)
-        predecessor = app(a.HISTORICAL_APP_ID, self.context['previousName'], a.HISTORICAL_IMAGE, a.HISTORICAL_SHA)
+        predecessor = app(
+            controller.immediate.LIVE_APP_ID,
+            self.context['previousName'],
+            controller.immediate.LIVE_IMAGE,
+            controller.immediate.LIVE_SHA,
+        )
         self.objects = {
             ('container', self.context['candidateName']): retained,
             ('container', self.context['previousName']): predecessor,
             ('image', a.LIVE_IMAGE): {'Id': a.LIVE_IMAGE, 'Config': {'Labels': {'org.opencontainers.image.revision': a.LIVE_SHA}}},
-            ('image', a.HISTORICAL_IMAGE): {'Id': a.HISTORICAL_IMAGE, 'Config': {'Labels': {'org.opencontainers.image.revision': a.HISTORICAL_SHA}}},
+            ('image', controller.immediate.LIVE_IMAGE): {
+                'Id': controller.immediate.LIVE_IMAGE,
+                'Config': {'Labels': {
+                    'org.opencontainers.image.revision': controller.immediate.LIVE_SHA}},
+            },
         }
 
-    def test_r17_receipt_proves_both_retained_candidate_and_predecessor(self):
+    def test_r17_receipt_proves_retained_candidate_and_immediate_predecessor(self):
         docker = Docker(self.objects)
         self.assertEqual(controller.retained_live_candidate(docker), controller.adoption.LIVE_STATE_APP_ID)
-        self.assertEqual(controller.accepted_live_predecessor(docker), controller.adoption.HISTORICAL_APP_ID)
+        self.assertEqual(
+            controller.accepted_live_predecessor(docker),
+            controller.immediate.LIVE_APP_ID,
+        )
 
     def test_stopped_retained_candidate_state_drift_is_refused(self):
         changed = copy.deepcopy(self.objects)
