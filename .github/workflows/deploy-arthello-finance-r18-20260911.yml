@@ -1,8 +1,8 @@
-# D152: publish the merged ArtHello Pay UI from a single-parent release commit.
+# D153: reclaim only stale, unused Docker build cache before publishing ArtHello Pay.
 # Accepted R17 predecessor and complete R15/R13/R12 backup history are preserved.
 # Prove the canonical D1 chain before recognizing its exact backup-control consumers.
 # No database restore after seal/authentication/public boundaries.
-name: Deploy ArtHello Pay R18 D152
+name: Deploy ArtHello Pay R18 D153
 'on':
   workflow_run:
     workflows:
@@ -22,9 +22,9 @@ concurrency:
   queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/pay-production-trigger-d152-20260912
-  EXPECTED_RELEASE_PR: '458'
-  PREVIOUS_RELEASE_SHA: 'ff8d58c74f76dff0a75e81a1bb04ee97f3281c85'
+  EXPECTED_RELEASE_HEAD: codex/pay-production-space-d153-20260912
+  EXPECTED_RELEASE_PR: '459'
+  PREVIOUS_RELEASE_SHA: '5472354bc7939c93a80917d26bf7924284f96381'
   ACCEPTED_RELEASE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
   ACCEPTED_RELEASE_TREE: 6aeb7e6879b786a434d12f026f765bcaf9acb5a4
   ACCEPTED_RELEASE_RUN_ID: '34495273615'
@@ -50,14 +50,14 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-trigger-d152-20260912' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('458') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-space-d153-20260912' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('459') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D152: publish ArtHello Pay production')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D153: publish ArtHello Pay production')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -129,8 +129,8 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-trigger-d152-20260912' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('458') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-space-d153-20260912' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('459') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -733,6 +733,19 @@ jobs:
         }
         D069_SOURCE_READONLY
         printf '{"gatewayUid":%s,"dockerApiRead":true,"backupWorkerReady":false,"scope":"existing-deployment-authority"}\n' "$gateway_uid"
+    - name: Reclaim only stale unused Docker build cache
+      if: env.R9_RESUME_CANDIDATE != '1'
+      timeout-minutes: 4
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+        # The gateway runner is dedicated to this deployment. Remove only
+        # reconstructible, unused build cache older than 24 hours; never touch
+        # images, containers, volumes, application data or backup data.
+        timeout --signal=TERM --kill-after=10s 180s \\
+          docker builder prune --force --filter until=24h >/dev/null
+        printf 'ARTHELLO_STALE_BUILD_CACHE=RECLAIMED\n'
     - name: Check current release and existing browser runtime
       env:
         GH_TOKEN: ${{ github.token }}
