@@ -795,13 +795,20 @@ jobs:
           length == 1 and .[0].Id == "sha256:b27e719ecbfef153e13fd24e8341736733bf2658b229677eb21ff57ff5d7fb29" and
           .[0].RepoTags == [$ref]
         ' >/dev/null
-        mapfile -t container_ids < <(docker ps -aq --no-trunc)
-        for container_id in "${container_ids[@]}"; do
-          test "$(docker inspect "$container_id" --format '{{.Image}}')" != "$expected_id"
-        done
+        container_ids="$(docker ps -aq --no-trunc)"
+        while IFS= read -r container_id; do
+          [ -z "$container_id" ] && continue
+          container_image="$(docker inspect "$container_id" --format '{{.Image}}')"
+          test "$container_image" != "$expected_id"
+        done <<< "$container_ids"
         docker image rm --no-prune "$expected_id"
-        ! docker image inspect "$expected_id" >/dev/null 2>&1
-        ! docker image inspect "$target_ref" >/dev/null 2>&1
+        remaining_ref_id="$(docker image ls --no-trunc --quiet "$target_ref")"
+        test -z "$remaining_ref_id"
+        all_image_ids="$(docker image ls --all --no-trunc --quiet)"
+        if grep -Fxq "$expected_id" <<< "$all_image_ids"; then
+          printf 'Expected retired image ID is still present: %s\n' "$expected_id" >&2
+          exit 1
+        fi
         printf 'ARTHELLO_LEGACY_PLAYWRIGHT_BASE=RETIRED id=%s\n' "$expected_id"
     - name: Retire only explicit unused recoverable historical browser images
       if: env.R9_RESUME_CANDIDATE != '1'
