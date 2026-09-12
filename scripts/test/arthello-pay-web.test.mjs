@@ -14,6 +14,9 @@ const apiApp = read("artifacts/api-server/src/app.ts");
 const v52Page = read("deploy/v52/src/app/pay/[[...path]]/page.tsx");
 const v52App = read("deploy/v52/public/pay-assets/app.js");
 const v52Css = read("deploy/v52/public/pay-assets/styles.css");
+const productionWorkflow = read(
+  ".github/workflows/deploy-arthello-finance-r18-20260911.yml",
+);
 const accessPolicy = read(
   "artifacts/api-server/src/lib/security/access-policy.ts",
 );
@@ -40,6 +43,13 @@ test("ArtHello Pay uses the approved host convention and same-origin API proxy",
   assert.match(caddy, /root \* \/srv\/pay/);
   assert.match(caddy, /@api path \/api\/\*/);
   assert.match(caddy, /reverse_proxy @api api:8080/);
+});
+
+test("the guarded v52 rollout publishes and probes the Pay host", () => {
+  assert.match(productionWorkflow, /PAY_URL: https:\/\/pay-188-225-38-55\.sslip\.io/);
+  assert.match(productionWorkflow, /d150-pay-route\.py/);
+  assert.match(productionWorkflow, /verify_pay_public "\$run_key-pay"/);
+  assert.match(productionWorkflow, /money_acceptance=disabled/);
 });
 
 test("operator UI never calls banking routes", () => {

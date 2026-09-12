@@ -18,7 +18,7 @@ from types import ModuleType
 def checked_module():
     path = Path(__file__).with_name('r18-backup-adoption.py')
     source = path.read_bytes()
-    if hashlib.sha256(source).hexdigest() != '41748c8a62b23fd0052436dea28ce3a2af651eb5f1e6269df1272cd33e2d4b8a':
+    if hashlib.sha256(source).hexdigest() != 'b58fd745bb0ee3b8acdfcdbc4441179d5fc01891e0c880f2e57b977150f8cd90':
         raise RuntimeError('R14_ADOPTION_DEPENDENCY_DRIFT')
     module = ModuleType('r14_controller_adoption')
     module.__file__ = str(path)

@@ -60,6 +60,32 @@ def ids(value):
     return set(rows)
 
 
+def structural_historical_consumer(metadata, image):
+    """Recognize only an inert immutable ArtHello D1 reader; mount checks follow."""
+    config = metadata.get('Config', {})
+    labels = config.get('Labels') or {}
+    state = metadata.get('State', {})
+    host = metadata.get('HostConfig', {})
+    image_id = metadata.get('Image', '')
+    release = labels.get('arthello.release.sha', '')
+    canonical = [item for item in metadata.get('Mounts', [])
+                 if item.get('Name') == r7.SOURCE_VOLUME or item.get('Destination') == '/data']
+    return (isinstance(metadata.get('Name'), str)
+            and re.fullmatch(r'/arthello-direct-[1-9][0-9]*-[1-9][0-9]*', metadata['Name']) is not None
+            and re.fullmatch(r'sha256:[a-f0-9]{64}', image_id) is not None
+            and re.fullmatch(r'[a-f0-9]{40}', release) is not None
+            and config.get('User') == 'node'
+            and config.get('Cmd') == ['node', 'production/runtime-server.mjs']
+            and state.get('Running') is False and state.get('Paused') is False
+            and state.get('Restarting', False) is False and state.get('Dead', False) is False
+            and host.get('RestartPolicy') == {'Name': 'no', 'MaximumRetryCount': 0}
+            and len(canonical) == 1 and canonical[0].get('Type') == 'volume'
+            and canonical[0].get('Name') == r7.SOURCE_VOLUME
+            and canonical[0].get('Destination') == '/data' and canonical[0].get('RW') is True
+            and image.get('Id') == image_id
+            and image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == release)
+
+
 class OwnedState:
     """The frozen creator/cleanup sees only new activation/seed ownership."""
     def __init__(self, parent):
@@ -142,6 +168,9 @@ class Adoption:
                 new_app = (metadata.get('Name') == '/arthello-direct-' + self.args.run_id + '-' + self.args.attempt
                            and metadata.get('Image') == self.args.image_id
                            and labels.get('arthello.release.sha') == self.args.release_sha)
+                if not (accepted_app or historical_app or new_app):
+                    image = self.docker.inspect('image', metadata.get('Image', ''))
+                    historical_app = structural_historical_consumer(metadata, image)
                 require(accepted_app or historical_app or new_app, 'FOREIGN_BACKUP_CONSUMER')
                 control = self.old.names['control']
                 protected_mounts = [item for item in metadata.get('Mounts', []) if item.get('Name') in protected]

@@ -30,7 +30,7 @@ export async function proxy(request: Request) {
     return NextResponse.next({ request: { headers } });
   }
 
-  if (!hasTrustedMutationOrigin(request, runtimePublicOrigin())) {
+  if (!hasTrustedMutationOrigin(request, runtimePublicOrigin(), runtimeTrustedWebOrigins())) {
     return privateJson({ error: "Запрос отклонён: источник страницы не совпадает" }, 403);
   }
 
@@ -85,6 +85,10 @@ function sanitizedHeaders(source: Headers) {
 
 function runtimePublicOrigin() {
   return (env as unknown as { ARTHELLO_PUBLIC_ORIGIN?: string }).ARTHELLO_PUBLIC_ORIGIN?.trim() ?? "";
+}
+
+function runtimeTrustedWebOrigins() {
+  return (env as unknown as { ARTHELLO_TRUSTED_WEB_ORIGINS?: string }).ARTHELLO_TRUSTED_WEB_ORIGINS?.trim() ?? "";
 }
 
 function privateJson(body: Record<string, string>, status: number, extraHeaders?: HeadersInit) {

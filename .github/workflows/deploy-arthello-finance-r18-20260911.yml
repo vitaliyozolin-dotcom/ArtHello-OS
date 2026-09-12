@@ -1,8 +1,8 @@
-# D146: fresh finance R18 with fixed consumer refusal diagnostics.
+# D150: publish the merged ArtHello Pay UI through the guarded finance R18 cutover.
 # Accepted R17 predecessor and complete R15/R13/R12 backup history are preserved.
-# Reviewed finance articles; retire only exact unused recoverable R17 browser.
+# Prove the canonical D1 chain before recognizing its exact backup-control consumers.
 # No database restore after seal/authentication/public boundaries.
-name: Deploy ArtHello Finance R18 D146
+name: Deploy ArtHello Pay R18 D150
 'on':
   workflow_run:
     workflows:
@@ -22,9 +22,9 @@ concurrency:
   queue: max
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  EXPECTED_RELEASE_HEAD: codex/finance-r18-consumer-diagnostic-d146-20260911
-  EXPECTED_RELEASE_PR: '452'
-  PREVIOUS_RELEASE_SHA: 'c848acd0c4efae04ad83a80ad20ad144325e9728'
+  EXPECTED_RELEASE_HEAD: codex/pay-production-d150-20260912
+  EXPECTED_RELEASE_PR: '456'
+  PREVIOUS_RELEASE_SHA: '55f3c60fcd63fae424ff078328b1d422dbfcfc05'
   ACCEPTED_RELEASE_SHA: ff8559254faaedade63a9ee7567a45686d08c13a
   ACCEPTED_RELEASE_TREE: 6aeb7e6879b786a434d12f026f765bcaf9acb5a4
   ACCEPTED_RELEASE_RUN_ID: '34495273615'
@@ -34,6 +34,8 @@ env:
   TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   PUBLIC_HOST: arthello-188-225-38-55.sslip.io
+  PAY_URL: https://pay-188-225-38-55.sslip.io
+  PAY_HOST: pay-188-225-38-55.sslip.io
   SCHOOL_URL: https://school-188-225-38-55.sslip.io
   CADDY_CONTAINER: stroios-caddy-1
   DATA_VOLUME: arthello-direct-v44-data
@@ -48,14 +50,14 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-consumer-diagnostic-d146-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('452') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-d150-20260912' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('456') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[1] == null
         )
-      ) && startsWith(github.event.workflow_run.head_commit.message, 'D146: guarded finance R18')
+      ) && startsWith(github.event.workflow_run.head_commit.message, 'D150: guarded ArtHello Pay production publication')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     outputs:
@@ -127,8 +129,8 @@ jobs:
       ) && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.repository.full_name == github.repository && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' && github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' && github.run_attempt == 1 && (
         github.event.workflow_run.pull_requests[0] == null ||
         (
-          github.event.workflow_run.pull_requests[0].head.ref == 'codex/finance-r18-consumer-diagnostic-d146-20260911' &&
-          github.event.workflow_run.pull_requests[0].number == fromJSON('452') &&
+          github.event.workflow_run.pull_requests[0].head.ref == 'codex/pay-production-d150-20260912' &&
+          github.event.workflow_run.pull_requests[0].number == fromJSON('456') &&
           github.event.workflow_run.pull_requests[0].head.repo.id == github.event.repository.id &&
           github.event.workflow_run.pull_requests[0].base.ref == 'main' &&
           github.event.workflow_run.pull_requests[0].base.repo.id == github.event.repository.id &&
@@ -443,16 +445,18 @@ jobs:
         git diff --exit-code --quiet HEAD --
         sha256sum -c <<'PINNED_RELEASE_HELPERS'
         4cdcd2771994fe8ea11bb731fa1ef5f997da489adfc89e3e78baff271096d659  deploy/v52/recovery-r18/r17-controller.yml
-        447f079a7af3da00c5b013839a81f00b7973c613fc4265f0753bc7f2a7ee2e01  .github/scripts/r18-backup-adoption.py
-        1c24f5c23d60b762ccdd714269b426e885999569bbb59a45015654a05198d0b9  .github/scripts/r18-backup-controller.py
-        d34a26e0e98b4b821be69fe899a037bd76dcb11e7d11d93988cb9e46785e55c5  .github/scripts/r18-candidate-state.py
+        b58fd745bb0ee3b8acdfcdbc4441179d5fc01891e0c880f2e57b977150f8cd90  .github/scripts/r18-backup-adoption.py
+        f846215861c17ffe12956fabcd7b4a73717cf09d67a4e72beb977abb2761c4c1  .github/scripts/r18-backup-controller.py
+        1b1585e33ddc1b46c35f94561f09d08398cd7a3f6f59bd94c820acc01d52101c  .github/scripts/r18-candidate-state.py
         31614cf50aec3c1f099e91ad2e4e44326d92c6fd829d88e233d898347df3b033  .github/scripts/r18-live-baseline.py
-        7fb23bd31e5159a658b0694d0e702ccb34284fc535f825a0707c3012f4854b51  .github/scripts/r18-public-audit.py
-        732747c84a5c165aa6a5d8be1cf26d7c6b74e27c3a5517c22c861c8fdd5f76b6  .github/scripts/r18-resume-candidate.py
-        f5391bf3d2a4e2b431dd532585a0ad2212a17145c25e0560d4bda30c12cc2721  .github/scripts/run-r18-live-browser.py
+        8a4949a5eb24bf1738304f0b120bdc9e193989853b65c0f0ac3b78f958f2daf6  .github/scripts/r18-public-audit.py
+        4b95f1f8c18b53134bbe39656c66171e42d3aa6da592babedbf2dc6f8ac30efc  .github/scripts/r18-resume-candidate.py
+        631a8a13dbcdf2034a67d811832c2436296b49ac225000b00ffeae87fc1beae5  .github/scripts/run-r18-live-browser.py
         1fc56c6e73aa73ed863ae8ff410ca44493aa666d81cda75c886b37648c6d637d  deploy/browser/retire-d145-browser.mjs
         dd49a4459daf43f3232eddab50828282e625ffaabdafa781a6490a5fb8d7eb53  scripts/test/retire-d145-browser.test.mjs
-        2787a96721a45555aa6f63f41c567c7ddf1700e12e095404f98075edc79f2b91  .github/scripts/test-r18-atlas-predecessors.py
+        a7dd0430bf106340206f7f341c7002323e2b97d177b2faf85acc23597337b16b  .github/scripts/test-r18-atlas-predecessors.py
+        ce0480acf24afbf328b0ae373a774f96593d8d7b64ba021e1935773e036593a5  .github/scripts/d150-pay-route.py
+        42370bd7ed7c8a723fddcf5ddfb650fc63c89358b8dd2728f2bedb135e08b6a0  .github/scripts/test-d150-pay-route.py
         PINNED_RELEASE_HELPERS
         source_node="$(command -v node || true)"
         if [[ -z "$source_node" ]]; then
@@ -473,8 +477,10 @@ jobs:
         jq -n -f deploy/v52/maintenance/image-runtime-fingerprint.jq >/dev/null
         python3 -m py_compile deploy/v52/maintenance/production-data-inventory.py
         python3 -I .github/scripts/test-r18-atlas-predecessors.py
+        python3 -I .github/scripts/test-d150-pay-route.py
         grep -F 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE' deploy/v52/src/production/runtime-server.mjs >/dev/null
         grep -F 'ARTHELLO_PUBLIC_ORIGIN' deploy/v52/src/production/runtime-server.mjs >/dev/null
+        grep -F 'ARTHELLO_TRUSTED_WEB_ORIGINS' deploy/v52/src/production/runtime-server.mjs >/dev/null
         grep -F 'cf: false' deploy/v52/src/production/runtime-server.mjs >/dev/null
         grep -F 'INTEGRATION_CREDENTIALS_KEY_FILE' deploy/v52/src/production/runtime-server.mjs >/dev/null
         grep -F 'INTEGRATION_CREDENTIALS_KEY' deploy/v52/src/production/runtime-server.mjs >/dev/null
@@ -1828,6 +1834,51 @@ jobs:
           test "$ready" -eq 1
         }
 
+        verify_pay_public() {
+          local probe="$1" ready=0
+          for attempt in $(seq 1 40); do
+            if docker exec -i \
+              -e PAY_URL="$PAY_URL" \
+              -e PROBE="$probe-$attempt" \
+              "$candidate" node - <<'NODE'
+        const base = process.env.PAY_URL;
+        try {
+          const root = await fetch(`${base}/?probe=${process.env.PROBE}`, { headers: { 'cache-control': 'no-cache' } });
+          const html = await root.text();
+          if (!root.ok || !html.includes('ArtHello Pay')) process.exit(1);
+          const refs = [...html.matchAll(/(?:src|href)="(\/pay-assets\/[^\"]+)"/g)].map((match) => match[1]);
+          if (refs.length < 2) process.exit(1);
+          for (const path of [...new Set(refs)]) {
+            if (!(await fetch(base + path, { headers: { 'cache-control': 'no-cache' } })).ok) process.exit(1);
+          }
+          if ((await fetch(base + '/api/auth/me', { headers: { 'cache-control': 'no-cache' } })).status !== 401) process.exit(1);
+          const login = await fetch(base + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: base },
+            body: JSON.stringify({ login: `pay-deploy-probe-${Date.now()}`, password: 'deliberately-invalid' }),
+          });
+          const body = await login.json();
+          if (login.status !== 401 || typeof body.error !== 'string') process.exit(1);
+          const forbidden = await fetch(base + '/api/payments/obligations', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: base },
+            body: '{}',
+          });
+          if (forbidden.status !== 401) process.exit(1);
+        } catch {
+          process.exit(1);
+        }
+        NODE
+            then
+              ready=1
+              break
+            fi
+            sleep 3
+          done
+          test "$ready" -eq 1
+          printf 'ARTHELLO_PAY_PUBLIC=VERIFIED host=%s money_acceptance=disabled\n' "$PAY_HOST"
+        }
+
         atomic_secret_write() {
           local target="$1" value="$2" temporary
           test ! -L "$target"
@@ -1994,6 +2045,7 @@ jobs:
         docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 
         verify_public "$run_key"
+        verify_pay_public "$run_key-pay"
         verify_school_sync_secret after-route-activation
         require_current_main_release
         docker run --rm \
@@ -2360,6 +2412,8 @@ jobs:
           --maintenance-output "$work/external-routes.maintenance.caddy" \
           --old-upstream "$live_name:8081" --candidate-upstream "$candidate:8081" \
           --gateway-env-evidence "$work/gateway-evidence.json" --nonce-file "$gate_nonce_file"
+        python3 -I .github/scripts/d150-pay-route.py \
+          --route "$work/external-routes.candidate.caddy" --upstream "$candidate:8081"
         # D080_MAINTENANCE_RENDER_END
 
         docker volume create \
@@ -2470,6 +2524,7 @@ jobs:
           printf 'PORT=8081\n'
           printf 'ARTHELLO_D1_PATH=/data/d1\n'
           printf 'ARTHELLO_PUBLIC_ORIGIN=%s\n' "$PUBLIC_URL"
+          printf 'ARTHELLO_TRUSTED_WEB_ORIGINS=%s\n' "$PAY_URL"
           printf 'ARTHELLO_BOOTSTRAP_LOGIN=owner\n'
           printf 'ARTHELLO_BOOTSTRAP_PASSWORD_FILE=/run/secrets/bootstrap-password\n'
           printf 'INTEGRATION_CREDENTIALS_KEY_FILE=/run/secrets/integration-credentials-key\n'
@@ -2494,6 +2549,7 @@ jobs:
         assert_exact_runtime_env "$runtime_configuration" ARTHELLO_BOOTSTRAP_PASSWORD_FILE /run/secrets/bootstrap-password
         assert_exact_runtime_env "$runtime_configuration" INTEGRATION_CREDENTIALS_KEY_FILE /run/secrets/integration-credentials-key
         assert_exact_runtime_env "$runtime_configuration" CENTRAL_ACCESS_SECRET_FILE /run/secrets/central-access-secret
+        assert_exact_runtime_env "$runtime_configuration" ARTHELLO_TRUSTED_WEB_ORIGINS "$PAY_URL"
         assert_exact_runtime_env "$runtime_configuration" SCHOOL_PUBLIC_ORIGIN "$SCHOOL_URL"
         assert_exact_runtime_env "$runtime_configuration" SCHOOL_DIARY_SYNC_URL "$SCHOOL_URL"
         assert_exact_runtime_env "$runtime_configuration" SCHOOL_DIARY_ALLOWED_ORIGINS "$SCHOOL_URL"

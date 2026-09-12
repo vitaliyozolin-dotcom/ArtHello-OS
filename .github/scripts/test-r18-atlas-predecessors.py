@@ -174,11 +174,21 @@ class AtlasPredecessorTests(unittest.TestCase):
         self.assertEqual(events[0], ('canonical', None))
         self.assertTrue(all(event[1] == frozenset(proven) for event in events[1:]))
 
-    def test_inner_adoption_keeps_unproved_consumer_fail_closed(self):
-        subject = object.__new__(controller.adoption.Adoption)
-        subject.proven_consumers = frozenset({'1' * 64})
-        self.assertIn('1' * 64, subject.proven_consumers)
-        self.assertNotIn('2' * 64, subject.proven_consumers)
+    def test_inner_adoption_accepts_only_inert_immutable_historical_reader_shape(self):
+        identity = '1' * 64
+        image_id = 'sha256:' + '2' * 64
+        release = '3' * 40
+        metadata = app(identity, 'arthello-direct-40000000000-1', image_id, release)
+        metadata['Config'].update({'User': 'node', 'Cmd': ['node', 'production/runtime-server.mjs']})
+        image = {'Id': image_id, 'Config': {'Labels': {'org.opencontainers.image.revision': release}}}
+
+        self.assertTrue(controller.adoption.structural_historical_consumer(metadata, image))
+        running = copy.deepcopy(metadata)
+        running['State']['Running'] = True
+        self.assertFalse(controller.adoption.structural_historical_consumer(running, image))
+        wrong_image = copy.deepcopy(image)
+        wrong_image['Config']['Labels']['org.opencontainers.image.revision'] = '4' * 40
+        self.assertFalse(controller.adoption.structural_historical_consumer(metadata, wrong_image))
 
 
 if __name__ == '__main__':
