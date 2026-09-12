@@ -115,6 +115,12 @@ test("production disk recovery removes only stale unused build cache", () => {
     productionWorkflow,
     /docker builder prune --force --filter until=24h/,
   );
+  const timeoutLine = productionWorkflow
+    .split("\n")
+    .find((line) => line.includes("timeout --signal=TERM --kill-after=10s"));
+  assert.ok(timeoutLine);
+  assert.equal(timeoutLine.trimEnd().endsWith(" \\"), true);
+  assert.equal(timeoutLine.trimEnd().endsWith(" \\\\"), false);
   assert.doesNotMatch(
     productionWorkflow,
     /docker (?:system|volume|image) prune/,
