@@ -198,6 +198,45 @@ jobs:
               atlasRoutePresent:$atlasRoutePresent}' \
             | tee "$RUNNER_TEMP/atlas-production-prerequisites.json"
 
+      - name: Inventory gateway storage for D158 without mutation
+        if: >-
+          github.event_name == 'workflow_run' &&
+          startsWith(github.event.workflow_run.head_commit.message, 'D158: inventory ArtHello Pay gateway storage')
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = 188.225.38.55
+
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          runner_root="$(realpath "$RUNNER_TEMP/../..")"
+          test -d "$docker_root"
+          test -d "$runner_root"
+
+          echo '## D158 gateway storage inventory — no deletion or production mutation'
+          echo '### Filesystems (KiB)'
+          df -Pk -- "$docker_root" "$RUNNER_TEMP" "$runner_root"
+          echo '### Docker aggregate and object sizes'
+          docker system df -v
+          echo '### All containers and their immutable image IDs'
+          mapfile -t container_ids < <(docker ps -aq --no-trunc)
+          for container_id in "${container_ids[@]}"; do
+            docker inspect "$container_id" --format 'container={{.Id}} name={{.Name}} image_id={{.Image}} status={{.State.Status}}'
+          done
+          echo '### Container writable-layer sizes'
+          docker ps -a --no-trunc --size --format 'container={{.ID}} name={{.Names}} image_reference={{.Image}} status={{.Status}} size={{.Size}}'
+          echo '### All local images'
+          docker image ls --no-trunc --format 'image={{.ID}} repository={{.Repository}} tag={{.Tag}} size={{.Size}} created={{.CreatedSince}}'
+          echo '### Runner directories by apparent bytes'
+          du -x -B1 -d2 "$runner_root" 2>/dev/null | sort -nr | sed -n '1,80p'
+          echo '### Known service directories by apparent bytes'
+          for path in /opt /srv /var/log "$docker_root"; do
+            if [ -d "$path" ]; then
+              du -x -B1 -d1 "$path" 2>/dev/null || true
+            fi
+          done | sort -nr | sed -n '1,100p'
+          echo 'ARTHELLO_GATEWAY_STORAGE_INVENTORY=READ_ONLY'
+
       - name: Diagnose rejected R9 route without changing gateway
         if: >-
           github.event_name == 'workflow_run' &&

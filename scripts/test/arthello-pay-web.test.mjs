@@ -17,6 +17,9 @@ const v52Css = read("deploy/v52/public/pay-assets/styles.css");
 const productionWorkflow = read(
   ".github/workflows/deploy-arthello-finance-r18-20260911.yml",
 );
+const prerequisiteWorkflow = read(
+  ".github/workflows/check-arthello-server-e2e.yml",
+);
 const accessPolicy = read(
   "artifacts/api-server/src/lib/security/access-policy.ts",
 );
@@ -154,4 +157,24 @@ test("production compacts only its reconstructible Actions checkout", () => {
     /git rev-parse --show-toplevel\)\"\)\" = \"\$\(realpath \"\$GITHUB_WORKSPACE\"\)\"/,
   );
   assert.doesNotMatch(productionWorkflow, /rm -rf[^\n]*(?:GITHUB_WORKSPACE|RUNNER_TEMP)/);
+});
+
+test("D158 gateway storage inventory cannot mutate production", () => {
+  const inventory = prerequisiteWorkflow.match(
+    /- name: Inventory gateway storage for D158 without mutation[\s\S]*?(?=\n      - name:)/,
+  )?.[0];
+  assert.ok(inventory);
+  assert.match(inventory, /docker system df -v/);
+  assert.match(inventory, /docker ps -aq --no-trunc/);
+  assert.match(
+    inventory,
+    /docker inspect "\$container_id" --format 'container=\{\{\.Id\}\} name=\{\{\.Name\}\} image_id=\{\{\.Image\}\}/,
+  );
+  assert.match(inventory, /docker ps -a --no-trunc --size/);
+  assert.match(inventory, /docker image ls --no-trunc/);
+  assert.match(inventory, /ARTHELLO_GATEWAY_STORAGE_INVENTORY=READ_ONLY/);
+  assert.doesNotMatch(
+    inventory,
+    /(?:docker\s+(?:system|builder|image|volume|container)\s+prune|docker\s+(?:rm|rmi)|\brm\s+-|\bmv\s+|\btruncate\s+|\bfind\b[^\n]*-delete)/,
+  );
 });

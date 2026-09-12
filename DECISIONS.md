@@ -682,3 +682,11 @@ D156 protected run `34694710139`, deploy job `103556304216`, проверил R1
 На self-hosted runner разрешено очистить reflog и выполнить `git gc --prune=now` только внутри текущего exact checkout после проверки, что canonical repository root равен canonical `$GITHUB_WORKSPACE`. HEAD проверяется до и после. Это удаляет только недостижимые локальные Git-объекты и reflog воспроизводимого checkout; remote repository, рабочее дерево, Docker, application images, containers, volumes, данные и backups не меняются. Прямое удаление `$GITHUB_WORKSPACE` или `$RUNNER_TEMP` запрещено; прежний capacity guard остаётся обязательным.
 
 Новый запуск допускается только из single-parent squash main после exact-head Quality/Proof/v52 с prefix `D157: publish ArtHello Pay production`; банковский приём и фискализация остаются выключены.
+
+## D158 — Инвентаризировать место gateway без мутаций (2026-09-12, кандидат)
+
+D157 protected run `34695458566`, deploy job `103558277731`, успешно очистил недостижимые объекты только текущего reconstructible checkout и увеличил доступное место до `4955060 KiB`, но прежний guard требует `7995083 KiB`. Выпуск снова остановлен до загрузки browser archive и любых изменений production. Владелец запросил продолжать без усложнения, пока Timeweb проверяет отказ увеличения диска с 50 до 60 ГБ.
+
+Принято добавить в существующий read-only prerequisites workflow ограниченную D158-инвентаризацию: filesystem capacity, `docker system df -v`, список контейнеров с их image identity, список локальных images и агрегированные размеры только известных каталогов runner/Docker/service. Шаг не читает содержимое файлов, environment контейнеров, секреты или данные приложений и не исполняет delete/prune/rm/mv/truncate. Никакие контейнеры, images, volumes, маршруты, БД, backups или runtime не меняются.
+
+Результат служит только для выбора одного явно доказанного recoverable target. Любое удаление потребует отдельного решения с точным ID, доказательством отсутствия consumers и прежним fail-closed capacity guard. Банковский приём реальных платежей и фискализация остаются выключены.
