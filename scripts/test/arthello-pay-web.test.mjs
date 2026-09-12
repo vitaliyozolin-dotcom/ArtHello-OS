@@ -196,10 +196,17 @@ test("D159 retires only the exact unused legacy Playwright base", () => {
     productionWorkflow,
     /docker image inspect "\$target_ref"[^\n]*\|\| true/,
   );
-  assert.match(productionWorkflow, /docker ps -aq --no-trunc/);
   assert.match(
     productionWorkflow,
-    /docker inspect "\$container_id" --format '\{\{\.Image\}\}'/,
+    /container_ids="\$\(docker ps -aq --no-trunc\)"/,
+  );
+  assert.doesNotMatch(
+    productionWorkflow,
+    /mapfile[^\n]*< <\(docker ps -aq --no-trunc\)/,
+  );
+  assert.match(
+    productionWorkflow,
+    /container_image="\$\(docker inspect "\$container_id" --format '\{\{\.Image\}\}'\)"/,
   );
   assert.match(
     productionWorkflow,
@@ -207,4 +214,16 @@ test("D159 retires only the exact unused legacy Playwright base", () => {
   );
   assert.doesNotMatch(productionWorkflow, /docker image rm[^\n]*--force/);
   assert.doesNotMatch(productionWorkflow, /docker (?:system|volume|image) prune/);
+  assert.match(
+    productionWorkflow,
+    /remaining_ref_id="\$\(docker image ls --no-trunc --quiet "\$target_ref"\)"/,
+  );
+  assert.match(
+    productionWorkflow,
+    /all_image_ids="\$\(docker image ls --all --no-trunc --quiet\)"/,
+  );
+  assert.doesNotMatch(
+    productionWorkflow,
+    /! docker image inspect "\$(?:expected_id|target_ref)"/,
+  );
 });
