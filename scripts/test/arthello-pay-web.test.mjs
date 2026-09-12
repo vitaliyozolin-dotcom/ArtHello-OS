@@ -110,11 +110,12 @@ test("ArtHello Pay follows the ArtHello design tokens and has a mobile layout", 
   assert.match(css, /env\(safe-area-inset-bottom\)/);
 });
 
-test("production disk recovery removes only stale unused build cache", () => {
+test("production disk recovery removes only unused build cache", () => {
   assert.match(
     productionWorkflow,
-    /docker builder prune --force --filter until=24h/,
+    /docker builder prune --all --force/,
   );
+  assert.doesNotMatch(productionWorkflow, /docker builder prune[^\n]*--filter/);
   const timeoutLine = productionWorkflow
     .split("\n")
     .find((line) => line.includes("timeout --signal=TERM --kill-after=10s"));

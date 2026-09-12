@@ -658,3 +658,11 @@ D152 run `34688078781`, deploy job `103538682509`, успешно провери
 D153 protected run `34692535991`, deploy job `103550435976`, прошёл exact-main provenance, принятый baseline и gateway authority, затем остановился на первом новом шаге до очистки cache и до любых production-изменений. Причина доказана логом: YAML содержал два символа backslash, поэтому `timeout` попытался запустить команду с именем `\\` и завершился с exit 127.
 
 Разрешено заменить только двойной backslash на один shell continuation и добавить регрессионную проверку точного окончания строки. Команда, возраст cache, timeout, capacity guard и все запреты D153 остаются неизменными. Новый запуск допускается только из single-parent squash main после exact-head Quality/Proof/v52 с prefix `D154: publish ArtHello Pay production`; банковский приём и фискализация остаются выключены.
+
+## D155 — Освободить весь неиспользуемый build-cache выделенного runner (2026-09-12, кандидат)
+
+D154 protected run `34693238551`, deploy job `103552376274`, доказал исправность shell continuation и успешно выполнил ограниченную очистку D153. Следующий неизменный guard снова остановил выпуск до загрузки архива и до production-изменений: browser image отсутствует, scratch доступно 4593616 KiB при требуемых 3348702 KiB, Docker доступно 4593616 KiB при требуемых 7995051 KiB. Следовательно, cache старше 24 часов недостаточно; выпуск не достиг capacity gate, импорта, БД, контейнеров и маршрута.
+
+На выделенном gateway runner разрешено заменить age-filtered команду на `docker builder prune --all --force` под прежним timeout. Это удаляет только неиспользуемый воспроизводимый build-cache, включая свежий cache последних CI-прогонов. По-прежнему запрещены `docker system prune`, `docker image prune`, `docker volume prune`, удаление application/browser images, containers, volumes, данных и backups. После очистки прежний fail-closed capacity guard обязателен и при недостатке места снова останавливает выпуск.
+
+Новый запуск допускается только из single-parent squash main после exact-head Quality/Proof/v52 с prefix `D155: publish ArtHello Pay production`; банковский приём реальных платежей и фискализация остаются выключены.
