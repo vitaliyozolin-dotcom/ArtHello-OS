@@ -273,8 +273,8 @@ def retained_live_candidate(docker):
                 'candidateContainerId': adoption.LIVE_STATE_APP_ID,
                 'candidateName': 'arthello-direct-' + adoption.LIVE_STATE_RUN + '-1',
                 'imageId': adoption.LIVE_IMAGE, 'dataVolume': r7.SOURCE_VOLUME,
-                'previousContainerId': adoption.HISTORICAL_APP_ID,
-                'previousName': 'arthello-direct-' + adoption.HISTORICAL_RUN + '-1'}
+                'previousContainerId': historical.adoption.LIVE_APP_ID,
+                'previousName': 'arthello-direct-' + historical.adoption.LIVE_RUN + '-1'}
     require(all(context.get(key) == value for key, value in expected.items()), 'LIVE_CONTEXT_IDENTITY_INVALID')
     retained_name = context['candidateName']
     item = docker.inspect('container', retained_name, True)
@@ -312,19 +312,20 @@ def accepted_live_predecessor(docker):
                 'candidateContainerId': adoption.LIVE_STATE_APP_ID,
                 'candidateName': 'arthello-direct-' + adoption.LIVE_STATE_RUN + '-1',
                 'imageId': adoption.LIVE_IMAGE, 'dataVolume': r7.SOURCE_VOLUME,
-                'previousContainerId': adoption.HISTORICAL_APP_ID,
-                'previousName': 'arthello-direct-' + adoption.HISTORICAL_RUN + '-1'}
+                'previousContainerId': historical.adoption.LIVE_APP_ID,
+                'previousName': 'arthello-direct-' + historical.adoption.LIVE_RUN + '-1'}
     require(all(context.get(key) == value for key, value in expected.items()), 'LIVE_CONTEXT_IDENTITY_INVALID')
     item = docker.inspect('container', expected['previousName'], True)
     if item is None:
         return None
-    app_metadata(item, identity=adoption.HISTORICAL_APP_ID, name=expected['previousName'],
-                 image=adoption.HISTORICAL_IMAGE, release=adoption.HISTORICAL_SHA, running=False, paused=False)
-    image = docker.inspect('image', adoption.HISTORICAL_IMAGE)
-    require(image.get('Id') == adoption.HISTORICAL_IMAGE
-            and image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == adoption.HISTORICAL_SHA,
+    app_metadata(item, identity=historical.adoption.LIVE_APP_ID, name=expected['previousName'],
+                 image=historical.adoption.LIVE_IMAGE, release=historical.adoption.LIVE_SHA,
+                 running=False, paused=False)
+    image = docker.inspect('image', historical.adoption.LIVE_IMAGE)
+    require(image.get('Id') == historical.adoption.LIVE_IMAGE
+            and image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == historical.adoption.LIVE_SHA,
             'PREDECESSOR_IMAGE_SOURCE_INVALID')
-    return adoption.HISTORICAL_APP_ID
+    return historical.adoption.LIVE_APP_ID
 
 
 def canonical_consumers(args, docker, phase):
