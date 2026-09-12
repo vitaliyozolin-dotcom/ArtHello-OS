@@ -21,3 +21,4 @@ export * from "./evotor.js";
 export * from "./security.js";
 export * from "./master-data.js";
 export * from "./front-office.js";
+export * from "./payments.js";

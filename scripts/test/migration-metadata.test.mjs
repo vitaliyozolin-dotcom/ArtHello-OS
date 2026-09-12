@@ -36,6 +36,7 @@ test("every migration from 0009 has a rollback companion", () => {
     "0016": "0016_personal_auth.down.sql",
     "0017": "0017_people_access_operator.down.sql",
     "0018": "0018_retire_orphan_chat.down.sql",
+    "0019": "0019_lying_tarot.down.sql",
   };
   for (const entry of journal.entries.filter(({ idx }) => idx >= 9)) {
     const prefix = String(entry.idx).padStart(4, "0");
