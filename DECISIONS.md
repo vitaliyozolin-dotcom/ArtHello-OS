@@ -652,3 +652,9 @@ D152 run `34688078781`, deploy job `103538682509`, успешно провери
 Перед неизменённым capacity guard разрешено выполнить только `docker builder prune --force --filter until=24h`. Команда удаляет исключительно воспроизводимый и неиспользуемый Docker build-cache старше 24 часов. Запрещены `docker system prune`, `docker image prune`, `docker volume prune`, удаление контейнеров, образов приложения, volumes, данных, backups и ослабление требуемого запаса места. После очистки контроллер заново применяет прежний fail-closed capacity guard; недостаток места снова останавливает выпуск до любых production-изменений.
 
 Новый защищённый выпуск допускается только из single-parent squash main после exact-head Quality/Proof/v52 с prefix `D153: publish ArtHello Pay production`. ArtHello Pay публикуется на `pay-188-225-38-55.sslip.io` в существующем D1/runtime-контуре. Банковский приём реальных платежей, live-адаптер Точки и фискализация этим решением не включаются.
+
+## D154 — Исправить shell continuation шага D153 без расширения очистки (2026-09-12, кандидат)
+
+D153 protected run `34692535991`, deploy job `103550435976`, прошёл exact-main provenance, принятый baseline и gateway authority, затем остановился на первом новом шаге до очистки cache и до любых production-изменений. Причина доказана логом: YAML содержал два символа backslash, поэтому `timeout` попытался запустить команду с именем `\\` и завершился с exit 127.
+
+Разрешено заменить только двойной backslash на один shell continuation и добавить регрессионную проверку точного окончания строки. Команда, возраст cache, timeout, capacity guard и все запреты D153 остаются неизменными. Новый запуск допускается только из single-parent squash main после exact-head Quality/Proof/v52 с prefix `D154: publish ArtHello Pay production`; банковский приём и фискализация остаются выключены.
