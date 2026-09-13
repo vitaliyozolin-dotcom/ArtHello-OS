@@ -305,7 +305,7 @@ def retained_live_candidate(docker):
 
 
 def accepted_live_predecessor(docker):
-    """Prove the retained R15 predecessor through R17's exact public context."""
+    """Prove the immediate R17 predecessor through R17's exact public context."""
     root = Path.home() / '.config/arthello/release-state'
     directory = adoption.private_directory(root)
     try:
@@ -338,6 +338,43 @@ def accepted_live_predecessor(docker):
             and image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == immediate.LIVE_SHA,
             'PREDECESSOR_IMAGE_SOURCE_INVALID')
     return immediate.LIVE_APP_ID
+
+
+def retained_r15_candidate(docker):
+    """Prove the retained, stopped R15 container through its exact public context."""
+    root = Path.home() / '.config/arthello/release-state'
+    directory = adoption.private_directory(root)
+    try:
+        saved = private_json(directory, 'candidate-acceptance-' + historical.adoption.LIVE_SHA + '.json')
+    finally:
+        os.close(directory)
+    require(isinstance(saved, dict) and saved.get('schemaVersion') == 1
+            and saved.get('phase') == 'public-started', 'R15_BOUNDARY_REQUIRED')
+    context = saved.get('context')
+    require(isinstance(context, dict), 'R15_CONTEXT_REQUIRED')
+    digest = hashlib.sha256((json.dumps(context, sort_keys=True, separators=(',', ':')) + '\n').encode()).hexdigest()
+    require(digest == historical.LIVE_CONTEXT_SHA256 and saved.get('contextSha256') == digest,
+            'R15_CONTEXT_RECEIPT_MISMATCH')
+    h = historical.adoption
+    expected = {'releaseSha': h.LIVE_SHA, 'sourceTree': h.LIVE_TREE,
+                'runId': h.LIVE_RUN, 'runAttempt': '1',
+                'candidateContainerId': h.LIVE_APP_ID,
+                'candidateName': 'arthello-direct-' + h.LIVE_RUN + '-1',
+                'imageId': h.LIVE_IMAGE, 'dataVolume': r7.SOURCE_VOLUME,
+                'previousContainerId': h.HISTORICAL_APP_ID,
+                'previousName': 'arthello-direct-' + h.HISTORICAL_RUN + '-1'}
+    require(all(context.get(key) == value for key, value in expected.items()), 'R15_CONTEXT_IDENTITY_INVALID')
+    retained_name = context['candidateName']
+    item = docker.inspect('container', retained_name, True)
+    if item is None:
+        return None
+    app_metadata(item, identity=h.LIVE_APP_ID, name=retained_name,
+                 image=h.LIVE_IMAGE, release=h.LIVE_SHA, running=False, paused=False)
+    image = docker.inspect('image', h.LIVE_IMAGE)
+    require(image.get('Id') == h.LIVE_IMAGE
+            and image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == h.LIVE_SHA,
+            'PREDECESSOR_IMAGE_SOURCE_INVALID')
+    return h.LIVE_APP_ID
 
 
 def canonical_consumers(args, docker, phase):
@@ -380,6 +417,14 @@ def canonical_consumers(args, docker, phase):
         if previous is not None:
             require(previous in actual and previous not in expected, 'PREDECESSOR_NOT_PROVEN')
             expected.add(previous)
+    if actual != expected:
+        try:
+            ancestor = retained_r15_candidate(docker)
+        except Exception:
+            raise r7.Refused('RETAINED_R15_PROOF_FAILED') from None
+        if ancestor is not None:
+            require(ancestor in actual and ancestor not in expected, 'PREDECESSOR_NOT_PROVEN')
+            expected.add(ancestor)
     if actual != expected:
         try:
             ancestor = historical.accepted_live_predecessor(docker)

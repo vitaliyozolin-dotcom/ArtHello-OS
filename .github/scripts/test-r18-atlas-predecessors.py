@@ -117,21 +117,54 @@ class AtlasPredecessorTests(unittest.TestCase):
         with self.assertRaises(REFUSED):
             controller.retained_live_candidate(Docker(changed))
 
+    def test_r15_receipt_proves_the_skipped_retained_candidate(self):
+        h = controller.historical.adoption
+        context = {
+            'releaseSha': h.LIVE_SHA, 'sourceTree': h.LIVE_TREE,
+            'runId': h.LIVE_RUN, 'runAttempt': '1',
+            'candidateContainerId': h.LIVE_APP_ID,
+            'candidateName': 'arthello-direct-' + h.LIVE_RUN + '-1',
+            'imageId': h.LIVE_IMAGE, 'dataVolume': controller.r7.SOURCE_VOLUME,
+            'previousContainerId': h.HISTORICAL_APP_ID,
+            'previousName': 'arthello-direct-' + h.HISTORICAL_RUN + '-1',
+        }
+        digest = hashlib.sha256((json.dumps(context, sort_keys=True, separators=(',', ':')) + '\n').encode()).hexdigest()
+        receipt = self.root / ('candidate-acceptance-' + h.LIVE_SHA + '.json')
+        receipt.write_text(json.dumps({'schemaVersion': 1, 'phase': 'public-started',
+                                       'context': context, 'contextSha256': digest}))
+        receipt.chmod(0o600)
+        retained = app(h.LIVE_APP_ID, context['candidateName'], h.LIVE_IMAGE, h.LIVE_SHA)
+        objects = {
+            ('container', context['candidateName']): retained,
+            ('image', h.LIVE_IMAGE): {
+                'Id': h.LIVE_IMAGE,
+                'Config': {'Labels': {'org.opencontainers.image.revision': h.LIVE_SHA}},
+            },
+        }
+        with patch.object(controller.historical, 'LIVE_CONTEXT_SHA256', digest):
+            self.assertEqual(controller.retained_r15_candidate(Docker(objects)), h.LIVE_APP_ID)
+
     def test_exact_five_historical_consumers_complete_the_chain(self):
         a = controller.adoption
         current = app(a.LIVE_APP_ID, 'arthello-direct-' + a.LIVE_RUN + '-1', a.LIVE_IMAGE, a.LIVE_SHA, True)
         objects = {('container', current['Name'][1:]): current}
-        fifth = '6' * 64
-        historical = [a.LIVE_STATE_APP_ID, a.HISTORICAL_APP_ID, a.OLDER_APP_ID, a.ACCEPTED_APP_ID, fifth]
+        historical = [
+            a.LIVE_STATE_APP_ID,
+            controller.immediate.LIVE_APP_ID,
+            controller.historical.adoption.LIVE_APP_ID,
+            controller.historical.adoption.HISTORICAL_APP_ID,
+            a.ACCEPTED_APP_ID,
+        ]
         docker = Docker(objects, [a.LIVE_APP_ID, a.ACCEPTED_WORKER_ID, *historical])
         args = SimpleNamespace(run_id='40000000001', attempt='1', image_id='sha256:' + 'a' * 64,
                                release_sha='b' * 40, tree_sha='c' * 40)
         with patch.object(a, 'Adoption', return_value=None), \
              patch.object(controller, 'retained_live_candidate', return_value=historical[0]), \
              patch.object(controller, 'accepted_live_predecessor', return_value=historical[1]), \
-             patch.object(controller.historical, 'accepted_live_predecessor', return_value=historical[2]), \
-             patch.object(controller.historical.historical, 'accepted_live_predecessor', return_value=historical[3]), \
-             patch.object(controller.historical.historical, 'historical_predecessor', return_value=fifth):
+             patch.object(controller, 'retained_r15_candidate', return_value=historical[2]), \
+             patch.object(controller.historical, 'accepted_live_predecessor', return_value=historical[3]), \
+             patch.object(controller.historical.historical, 'accepted_live_predecessor', return_value=historical[4]), \
+             patch.object(controller.historical.historical, 'historical_predecessor', side_effect=AssertionError):
             self.assertEqual(controller.canonical_consumers(args, docker, 'live'), set(docker.consumers))
 
     def test_sixth_unproved_historical_consumer_is_refused(self):
