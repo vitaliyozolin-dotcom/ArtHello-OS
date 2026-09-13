@@ -485,3 +485,10 @@ D162 protected run `34744346651`, deploy job `103689558155`, прошёл capaci
 D163 protected run `34747062495`, deploy job `103696817816`, восстановил exact D162 candidate и подтвердил публичные ArtHello, D1, auth и School boundaries. Единственный оставшийся отказ — два URL `/pay-assets/*`: страница Pay отвечает `200`, но immutable `app.js` и `styles.css` не были скопированы Dockerfile D162 в read-only application image и отвечают `404`. База, application image и candidate не меняются.
 
 Владелец явно разрешил опубликовать и запустить ограниченный recovery-workflow без публикации секретов. Он сверяет hash двух файлов из exact D162 tree, атомарно размещает их в постоянном Caddy data volume, заменяет только Pay asset handler с сохранением предыдущего route-файла, валидирует Caddy и выполняет один прозрачный public/auth/Pay probe. При отказе до успешного probe старый маршрут восстанавливается; после успеха сохраняется отдельный private recovery receipt, публикуется предусмотренный read-only Tochka autosync marker и выполняется обязательная after-public natural browser acceptance. Snapshot restore, замена D1, пересборка image, удаление containers/volumes, приём реальных платежей и фискализация запрещены.
+
+
+## D165 — Запустить тот же D164 recovery после parser-only отказа (2026-09-13, recovery)
+
+D164 commit `fa5e009980a12f7a2df625541d86e8a22bca5fec` был опубликован через protected main, но run `34747574247` завершён GitHub до создания jobs и до любых команд на production: один `run__ scalar превысил platform limit в 21 000 символов. Recovery-команды, route swap, запись marker и доступ к секретам не выполнялись.
+
+Разрешено только разделить тот же неизменный recovery на два последовательных шага короче platform limit и запустить его от exact parent D164. Product/runtime, asset hashes, D162 candidate, D1, rollback и public probe не меняются; никаких дополнительных проверочных циклов или cleanup не добавляется.
