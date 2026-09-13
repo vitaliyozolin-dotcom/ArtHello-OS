@@ -2,7 +2,18 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const source = async (relative) => readFile(new URL(relative, import.meta.url), "utf8");
+async function source(...relatives) {
+  let missing;
+  for (const relative of relatives) {
+    try {
+      return await readFile(new URL(relative, import.meta.url), "utf8");
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      missing = error;
+    }
+  }
+  throw missing;
+}
 
 test("acquiring restores legal-entity accounts, balances, operations and sync state", async () => {
   const [route, workspace] = await Promise.all([
@@ -24,8 +35,8 @@ test("acquiring restores legal-entity accounts, balances, operations and sync st
 
 test("Pay is entered only through central OS SSO and preserves launch action", async () => {
   const [asset, mirror, openRoute, loginRoute, sso] = await Promise.all([
-    source("../../public/pay-assets/app.js"),
-    source("../../../../pay-web/app.js"),
+    source("../../public/pay-assets/app.js", "../contract-fixtures/pay-app.js"),
+    source("../../../../pay-web/app.js", "../contract-fixtures/pay-app-mirror.js"),
     source("../app/api/pay-sso/open/route.ts"),
     source("../app/api/auth/login/route.ts"),
     source("../lib/pay-sso.ts"),
@@ -46,7 +57,7 @@ test("Pay is entered only through central OS SSO and preserves launch action", a
 });
 
 test("D168 deployment validates live bank data and Pay boundary without payment secrets", async () => {
-  const workflow = await source("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml");
+  const workflow = await source("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
   assert.match(workflow, /bank_accounts/);
   assert.match(workflow, /balance_minor is not null/);
   assert.match(workflow, /eligiblePayAdministrators/);
