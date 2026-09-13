@@ -12,6 +12,7 @@ COPY deploy/v52/src/ /app/
 COPY deploy/v52/public/pay-assets/app.js /app/contract-fixtures/pay-app.js
 COPY pay-web/app.js /app/contract-fixtures/pay-app-mirror.js
 COPY .github/workflows/deploy-arthello-acquiring-pay-d168.yml /app/contract-fixtures/deploy-d168.yml
+COPY deploy/v52/Dockerfile /app/contract-fixtures/v52.Dockerfile
 RUN ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
     && grep -q 'invoke_user_worker_ahead_of_assets: false' /app/production/runtime-server.mjs \
     && grep -q 'has_user_worker: true' /app/production/runtime-server.mjs \
@@ -34,6 +35,7 @@ COPY --from=application /app/dist /app/dist
 COPY --from=application /app/production/runtime-server.mjs /app/production/runtime-server.mjs
 COPY --from=application /app/production/tochka-transport.mjs /app/production/tochka-transport.mjs
 COPY --from=application /app/production/backup-transport.mjs /app/production/backup-transport.mjs
+COPY --from=application /app/production/alfacrm-transport.mjs /app/production/alfacrm-transport.mjs
 COPY --from=application /app/production/tochka-autosync-timer.mjs /app/production/tochka-autosync-timer.mjs
 COPY --from=runtime-dependencies /runtime/node_modules /app/node_modules
 COPY deploy/v52/certificates/russian-trusted-root-ca.pem /app/production/russian-trusted-root-ca.pem

@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import process from "node:process";
 import { createTochkaTransport } from "./tochka-transport.mjs";
 import { createBackupTransport } from "./backup-transport.mjs";
+import { createAlfaCrmTransport } from "./alfacrm-transport.mjs";
 
 const applicationRoot = process.cwd();
 const dataRoot = process.env.ARTHELLO_D1_PATH || "/data/d1";
@@ -75,7 +76,11 @@ const runtime = new Miniflare({
     TOCHKA_AUTOSYNC_SECRET: tochkaAutosyncSecret,
     ALFACRM_IMPORT_ENABLED: process.env.ALFACRM_IMPORT_ENABLED || "",
   },
-  serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport(), BACKUP_TRANSPORT: createBackupTransport() },
+  serviceBindings: {
+    TOCHKA_TRANSPORT: createTochkaTransport(),
+    BACKUP_TRANSPORT: createBackupTransport(),
+    ALFACRM_TRANSPORT: createAlfaCrmTransport(),
+  },
   d1Databases: { DB: "arthello-production" },
   d1Persist: dataRoot,
   assets: {
