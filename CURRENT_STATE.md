@@ -499,3 +499,9 @@ D164 commit `fa5e009980a12f7a2df625541d86e8a22bca5fec` был опубликов
 D165 run `34747727453`, job `103698630341`, успешно подтвердил exact assets, route, public/auth/Pay, activation marker и natural browser SSO. Сразу после завершения независимый внешний probe снова получил `502 Connection refused__ на ArtHello и Pay: восстановленный процесс повторно остановился после зелёной приёмки, поэтому публикация ещё не считается устойчивой.
 
 Разрешено проверить exact D162 container и D164 private receipt, зафиксировать для этого же candidate production restart policy `unless-stopped`, запустить его при остановленном состоянии и доказать 65 секунд непрерывного local health без роста restart count, включая первый activation timer tick. После окна выполняется один public ArtHello/School/Pay/auth probe и сохраняется private stability receipt. Image, D1, route, secrets, volumes и банковские операции не меняются; cleanup, snapshot restore, real-money acceptance и фискализация запрещены.
+
+## D167 — Убрать пустое окно ArtHello Pay (2026-09-13, recovery)
+
+После успешного D166 пользователь сообщил о пустом окне. Предыдущая проверка подтверждала HTTP-ответы и стабильность backend, но корневая HTML-оболочка Pay всё ещё проксировалась через application container; поэтому видимое окно зависело от backend даже при уже вынесенных в Caddy `app.js` и `styles.css`.
+
+Разрешён один exact-parent recovery без секретов: добавить проверяемый статический `index.html` в тот же постоянный Pay asset root, заменить только host-блок Pay так, чтобы `/pay-assets/*` и SPA-shell отдавались Caddy, а `/api/*` продолжал проксироваться в тот же D162 candidate. Workflow сохраняет предыдущий route, откатывает его при отказе и завершается только после одного logged-out Chromium proof: заголовок, форма входа, оба asset и ответ `/api/auth/me=401` видимы. Application image, D1, volumes, School, реальные платежи и фискализация не меняются.

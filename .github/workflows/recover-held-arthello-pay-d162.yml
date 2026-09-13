@@ -1,5 +1,6 @@
-# D166: stabilize the exact recovered D162 runtime after verified D164 publication.
-# No snapshot restore, D1 replacement, image rebuild, or broad cleanup is permitted.
+# D167: publish a static Pay shell after the recovered backend proved insufficient
+# for a visible user window. No snapshot restore, D1 replacement, image rebuild,
+# secret access, payment activation, or broad cleanup is permitted.
 name: Complete ArtHello Pay D162 recovery
 'on':
   push:
@@ -23,6 +24,7 @@ env:
   TARGET_RUN_ATTEMPT: '1'
   PAY_APP_SHA256: 92cddd009ebd6ee09c29fac3206ada0c3adc482c3d89ba1e8486729a7f3fca39
   PAY_CSS_SHA256: f501d5ff33c11e28de194f2a0bd0c551032460bc908852cedabef88880299407
+  PAY_INDEX_SHA256: deb303ff3adfae963525e920e728cc70392fce738f5eccd679d71fbdc954bc33
   CADDY_CONTAINER: stroios-caddy-1
   DATA_VOLUME: arthello-direct-v44-data
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -801,5 +803,402 @@ jobs:
             echo '- Restart policy: unless-stopped'
             echo '- Stability window: 65 seconds'
             echo '- Snapshot restore, D1 replacement and cleanup: not performed'
+            echo '- Real-money acceptance and fiscalization: disabled'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-visible-shell:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.ref == 'refs/heads/main' &&
+      github.event.before == '0eec6c7200e27f84f019790ac351521054af4ebc' &&
+      startsWith(github.event.head_commit.message, 'D167: publish resilient ArtHello Pay shell') &&
+      github.run_attempt == 1
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - arthello-gateway
+    timeout-minutes: 15
+    environment: production-ru
+    steps:
+      - name: Checkout exact guarded shell source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
+          submodules: false
+          lfs: false
+
+      - name: Stage static shell and restore exact runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          state_root="$HOME/.config/arthello/release-state"
+          state_file="$state_root/candidate-acceptance-$TARGET_RELEASE_SHA.json"
+          recovery_receipt="$state_root/pay-assets-recovery-$TARGET_RELEASE_SHA.json"
+          stability_receipt="$state_root/runtime-stability-$TARGET_RELEASE_SHA.json"
+          for path in "$state_file" "$recovery_receipt" "$stability_receipt"; do
+            test -f "$path" && test ! -L "$path"
+            test "$(stat -c '%U:%a:%h' "$path")" = "$(id -un):600:1"
+          done
+
+          candidate_id="$(jq -er '.context.candidateContainerId' "$state_file")"
+          candidate_name="$(jq -er '.context.candidateName' "$state_file")"
+          image_id="$(jq -er '.context.imageId' "$state_file")"
+          asset_root="$(jq -er '.assetRoot' "$recovery_receipt")"
+          active_route_sha="$(jq -er '.activeRouteSha256' "$recovery_receipt")"
+          [[ "$candidate_id" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$candidate_name" =~ ^arthello-direct-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$active_route_sha" =~ ^[a-f0-9]{64}$ ]]
+          test "$asset_root" = "/data/arthello-pay-assets-$TARGET_RELEASE_SHA"
+
+          jq -e --arg release "$TARGET_RELEASE_SHA" --arg tree "$TARGET_RELEASE_TREE" \
+            --arg candidate "$candidate_id" --arg route "$active_route_sha" '
+              .schemaVersion == 1 and .state == "verified" and
+              .protocol == "ARTHELLO_PAY_ASSET_RECOVERY_D164" and
+              .releaseSha == $release and .releaseTree == $tree and
+              .candidateContainerId == $candidate and .activeRouteSha256 == $route and
+              .moneyAcceptanceEnabled == false and .fiscalizationEnabled == false
+            ' "$recovery_receipt" >/dev/null
+          jq -e --arg release "$TARGET_RELEASE_SHA" --arg candidate "$candidate_id" \
+            --arg route "$active_route_sha" '
+              .schemaVersion == 1 and .state == "verified" and
+              .protocol == "ARTHELLO_RUNTIME_STABILITY_D166" and
+              .releaseSha == $release and .candidateContainerId == $candidate and
+              .activeRouteSha256 == $route and .restartPolicy == "unless-stopped" and
+              .moneyAcceptanceEnabled == false and .fiscalizationEnabled == false
+            ' "$stability_receipt" >/dev/null
+
+          test "$(docker inspect "$candidate_id" --format '{{.Id}}')" = "$candidate_id"
+          test "$(docker inspect "$candidate_id" --format '{{.Name}}')" = "/$candidate_name"
+          test "$(docker inspect "$candidate_id" --format '{{.Image}}')" = "$image_id"
+          test "$(docker inspect "$candidate_id" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$TARGET_RELEASE_SHA"
+          test "$(docker inspect "$candidate_id" --format '{{index .Config.Labels "arthello.release.tree"}}')" = "$TARGET_RELEASE_TREE"
+          test "$(docker inspect "$candidate_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+          test "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true
+          test "$(docker exec "$CADDY_CONTAINER" sh -ceu 'sha256sum /data/external-routes.caddy | cut -d " " -f 1')" = "$active_route_sha"
+
+          before="$(docker inspect "$candidate_id" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}/{{.HostConfig.RestartPolicy.Name}}')"
+          printf 'ARTHELLO_D167_RUNTIME_BEFORE=%s\n' "$before"
+          docker update --restart=unless-stopped "$candidate_id" >/dev/null
+          if [ "$(docker inspect "$candidate_id" --format '{{.State.Running}}')" != true ]; then
+            docker start "$candidate_id" >/dev/null
+          fi
+          ready=0
+          for attempt in $(seq 1 20); do
+            if docker exec -i "$candidate_id" node - <<'NODE'
+          try {
+            const response = await fetch('http://127.0.0.1:8081/api/health', { signal: AbortSignal.timeout(5000) });
+            const body = await response.json();
+            if (!response.ok || body.status !== 'ok' || body.database !== 'available') process.exit(1);
+          } catch { process.exit(1); }
+          NODE
+            then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" = 1
+          test "$(docker inspect "$candidate_id" --format '{{.HostConfig.RestartPolicy.Name}}/{{.HostConfig.RestartPolicy.MaximumRetryCount}}')" = "unless-stopped/0"
+
+          source_root="$GITHUB_WORKSPACE/deploy/v52/public/pay-assets"
+          index_source="$source_root/index.html"
+          test -f "$index_source" && test ! -L "$index_source"
+          test "$(sha256sum "$index_source" | cut -d ' ' -f 1)" = "$PAY_INDEX_SHA256"
+          test "$(sha256sum "$source_root/app.js" | cut -d ' ' -f 1)" = "$PAY_APP_SHA256"
+          test "$(sha256sum "$source_root/styles.css" | cut -d ' ' -f 1)" = "$PAY_CSS_SHA256"
+          index_stage="/data/.arthello-pay-index-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if docker exec -e ASSET_ROOT="$asset_root" "$CADDY_CONTAINER" sh -ceu 'test -e "$ASSET_ROOT/index.html"'; then
+            docker exec -e ASSET_ROOT="$asset_root" -e INDEX_SHA="$PAY_INDEX_SHA256" \
+              "$CADDY_CONTAINER" sh -ceu '
+                test -f "$ASSET_ROOT/index.html" && test ! -L "$ASSET_ROOT/index.html"
+                test "$(sha256sum "$ASSET_ROOT/index.html" | cut -d " " -f 1)" = "$INDEX_SHA"
+              '
+          else
+            docker exec -e INDEX_STAGE="$index_stage" "$CADDY_CONTAINER" sh -ceu 'test ! -e "$INDEX_STAGE"'
+            docker cp "$index_source" "$CADDY_CONTAINER:$index_stage"
+            docker exec --user 0:0 -e ASSET_ROOT="$asset_root" -e INDEX_STAGE="$index_stage" \
+              -e INDEX_SHA="$PAY_INDEX_SHA256" "$CADDY_CONTAINER" sh -ceu '
+                owner="$(stat -c "%u:%g" "$ASSET_ROOT/app.js")"
+                test -f "$INDEX_STAGE" && test ! -L "$INDEX_STAGE"
+                test "$(sha256sum "$INDEX_STAGE" | cut -d " " -f 1)" = "$INDEX_SHA"
+                chown "$owner" "$INDEX_STAGE"
+                chmod 0644 "$INDEX_STAGE"
+                sync "$INDEX_STAGE"
+                mv "$INDEX_STAGE" "$ASSET_ROOT/index.html"
+              '
+          fi
+          printf 'ARTHELLO_D167_STATIC_SHELL_STAGED=VERIFIED index=%s\n' "$PAY_INDEX_SHA256"
+
+      - name: Publish shell route and prove a visible login window
+        id: publish
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+
+          state_root="$HOME/.config/arthello/release-state"
+          state_file="$state_root/candidate-acceptance-$TARGET_RELEASE_SHA.json"
+          recovery_receipt="$state_root/pay-assets-recovery-$TARGET_RELEASE_SHA.json"
+          candidate_id="$(jq -er '.context.candidateContainerId' "$state_file")"
+          candidate_name="$(jq -er '.context.candidateName' "$state_file")"
+          browser_image_id="$(jq -er '.context.browserImageId' "$state_file")"
+          asset_root="$(jq -er '.assetRoot' "$recovery_receipt")"
+          active_route_sha="$(jq -er '.activeRouteSha256' "$recovery_receipt")"
+          [[ "$candidate_id" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$candidate_name" =~ ^arthello-direct-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          [[ "$browser_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$asset_root" = "/data/arthello-pay-assets-$TARGET_RELEASE_SHA"
+          test "$(docker inspect "$candidate_id" --format '{{.State.Running}}')" = true
+          test "$(docker image inspect "$browser_image_id" --format '{{index .Config.Labels "org.arthello.role"}}')" = e2e-browser
+          test "$(docker image inspect "$browser_image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$TARGET_RELEASE_SHA"
+
+          route_before="$RUNNER_TEMP/external-routes.pre-d167-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.caddy"
+          route_after="$RUNNER_TEMP/external-routes.d167-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.caddy"
+          test ! -e "$route_before" && test ! -L "$route_before"
+          test ! -e "$route_after" && test ! -L "$route_after"
+          docker exec "$CADDY_CONTAINER" sh -ceu 'cat /data/external-routes.caddy' > "$route_before"
+          chmod 0600 "$route_before"
+          test "$(sha256sum "$route_before" | cut -d ' ' -f 1)" = "$active_route_sha"
+
+          python3 -I - "$route_before" "$route_after" "$candidate_name" "$asset_root" <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import sys
+
+          source_path, target_path, candidate, asset_root = sys.argv[1:]
+          assert re.fullmatch(r"arthello-direct-[1-9][0-9]*-[1-9][0-9]*", candidate)
+          assert re.fullmatch(r"/data/arthello-pay-assets-[a-f0-9]{40}", asset_root)
+          source = Path(source_path).read_text(encoding="utf-8")
+          marker = "pay-188-225-38-55.sslip.io {"
+          assert source.count(marker) == 1
+          start = source.index(marker)
+          depth = 0
+          end = None
+          for offset, character in enumerate(source[start:], start=start):
+              if character == "{":
+                  depth += 1
+              elif character == "}":
+                  depth -= 1
+                  if depth == 0:
+                      end = offset + 1
+                      break
+          assert end is not None
+          if end < len(source) and source[end] == "\n":
+              end += 1
+          upstream = candidate + ":8081"
+          replacement = f'''pay-188-225-38-55.sslip.io {{
+            encode zstd gzip
+            header {{
+              Cache-Control "no-store"
+              Content-Security-Policy "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'"
+              Permissions-Policy "camera=(), microphone=(), geolocation=()"
+              Referrer-Policy "no-referrer"
+              X-Content-Type-Options "nosniff"
+              X-Frame-Options "DENY"
+            }}
+
+            handle_path /pay-assets/* {{
+              root * {asset_root}
+              file_server
+            }}
+
+            @pay_api path /api/*
+            handle @pay_api {{
+              reverse_proxy {upstream}
+            }}
+
+            handle {{
+              root * {asset_root}
+              try_files {{path}} /index.html
+              file_server
+            }}
+          }}
+          '''
+          body = source[:start] + replacement + source[end:]
+          assert body.count(marker) == 1
+          assert body.count("data/arthello-pay-assets-") >= 2
+          assert body.count("try_files {path} /index.html") == 1
+          descriptor = os.open(target_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+          with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+              stream.write(body)
+              stream.flush()
+              os.fsync(stream.fileno())
+          PY
+          test "$(stat -c '%U:%a:%h' "$route_after")" = "$(id -un):600:1"
+          new_route_sha="$(sha256sum "$route_after" | cut -d ' ' -f 1)"
+          [[ "$new_route_sha" =~ ^[a-f0-9]{64}$ ]]
+          test "$new_route_sha" != "$active_route_sha"
+
+          route_owner="$(docker exec "$CADDY_CONTAINER" stat -c '%u:%g' /data/external-routes.caddy)"
+          route_backup="/data/external-routes.caddy.pre-d167-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          route_stage="/data/.external-routes.d167-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          docker exec -e ROUTE_BACKUP="$route_backup" -e ROUTE_STAGE="$route_stage" \
+            "$CADDY_CONTAINER" sh -ceu 'test ! -e "$ROUTE_BACKUP"; test ! -e "$ROUTE_STAGE"'
+          docker cp "$route_before" "$CADDY_CONTAINER:$route_backup"
+          docker cp "$route_after" "$CADDY_CONTAINER:$route_stage"
+          docker exec --user 0:0 -e ROUTE_BACKUP="$route_backup" -e ROUTE_STAGE="$route_stage" \
+            -e ROUTE_OWNER="$route_owner" -e OLD_SHA="$active_route_sha" -e NEW_SHA="$new_route_sha" \
+            "$CADDY_CONTAINER" sh -ceu '
+              test "$(sha256sum /data/external-routes.caddy | cut -d " " -f 1)" = "$OLD_SHA"
+              test "$(sha256sum "$ROUTE_BACKUP" | cut -d " " -f 1)" = "$OLD_SHA"
+              test "$(sha256sum "$ROUTE_STAGE" | cut -d " " -f 1)" = "$NEW_SHA"
+              chown "$ROUTE_OWNER" "$ROUTE_BACKUP" "$ROUTE_STAGE"
+              chmod 0600 "$ROUTE_BACKUP" "$ROUTE_STAGE"
+              sync "$ROUTE_STAGE"
+              mv "$ROUTE_STAGE" /data/external-routes.caddy
+            '
+
+          route_pending=1
+          browser_name="arthello-pay-d167-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          rollback_unverified_route() {
+            status=$?
+            if docker inspect "$browser_name" >/dev/null 2>&1; then
+              docker rm -f "$browser_name" >/dev/null 2>&1 || true
+            fi
+            if [ "$route_pending" = 1 ]; then
+              printf 'ARTHELLO_D167_ROUTE=RESTORING_PREVIOUS\n' >&2
+              docker exec --user 0:0 -e ROUTE_BACKUP="$route_backup" -e ROUTE_OWNER="$route_owner" \
+                -e OLD_SHA="$active_route_sha" -e NEW_SHA="$new_route_sha" "$CADDY_CONTAINER" sh -ceu '
+                  current="$(sha256sum /data/external-routes.caddy | cut -d " " -f 1)"
+                  if [ "$current" = "$NEW_SHA" ]; then
+                    restore="$ROUTE_BACKUP.restore"
+                    test ! -e "$restore"
+                    cp "$ROUTE_BACKUP" "$restore"
+                    chown "$ROUTE_OWNER" "$restore"
+                    chmod 0600 "$restore"
+                    mv "$restore" /data/external-routes.caddy
+                  else
+                    test "$current" = "$OLD_SHA"
+                  fi
+                ' || true
+              docker exec "$CADDY_CONTAINER" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+              docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+            fi
+            return "$status"
+          }
+          trap rollback_unverified_route EXIT
+
+          docker exec "$CADDY_CONTAINER" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+          docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+          test "$(docker exec "$CADDY_CONTAINER" sh -ceu 'sha256sum /data/external-routes.caddy | cut -d " " -f 1')" = "$new_route_sha"
+
+          docker exec -i -e PAY_URL="$PAY_URL" -e INDEX_SHA="$PAY_INDEX_SHA256" \
+            -e APP_SHA="$PAY_APP_SHA256" -e CSS_SHA="$PAY_CSS_SHA256" "$candidate_id" node - <<'NODE'
+          const { createHash } = await import('node:crypto');
+          const probe = async path => {
+            const response = await fetch(process.env.PAY_URL + path, { signal: AbortSignal.timeout(10000), headers: { 'cache-control': 'no-cache' } });
+            const body = Buffer.from(await response.arrayBuffer());
+            return { status: response.status, body, sha: createHash('sha256').update(body).digest('hex') };
+          };
+          const root = await probe('/?probe=d167-shell');
+          const app = await probe('/pay-assets/app.js');
+          const css = await probe('/pay-assets/styles.css');
+          const auth = await probe('/api/auth/me');
+          const result = { root: root.status, shell: root.body.includes(Buffer.from('data-arthello-pay-shell="d167"')),
+            app: app.status, appSha: app.sha === process.env.APP_SHA, css: css.status,
+            cssSha: css.sha === process.env.CSS_SHA, auth: auth.status };
+          console.log(JSON.stringify(result));
+          if (root.status !== 200 || root.sha !== process.env.INDEX_SHA || !result.shell ||
+              app.status !== 200 || !result.appSha || css.status !== 200 || !result.cssSha || auth.status !== 401) process.exit(1);
+          NODE
+
+          test -f deploy/browser/seccomp.json && test ! -L deploy/browser/seccomp.json
+          docker run --rm --init -i --name "$browser_name" \
+            --label "org.arthello.pay-shell=d167-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --pull never --user 1000:1000 --network bridge --read-only --log-driver none \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --security-opt "seccomp=$GITHUB_WORKSPACE/deploy/browser/seccomp.json" \
+            --memory 1g --memory-swap 1g --cpus 1 --pids-limit 256 --shm-size 128m \
+            --tmpfs /tmp:rw,nosuid,nodev,size=512m,uid=1000,gid=1000,mode=700 \
+            -e PAY_URL="$PAY_URL" --entrypoint node "$browser_image_id" --input-type=module <<'NODE'
+          import { chromium } from 'playwright-core';
+          let browser;
+          try {
+            browser = await chromium.launch({ channel: 'chromium', headless: true, chromiumSandbox: true, timeout: 20000,
+              args: ['--disable-background-networking', '--disable-quic', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] });
+            const context = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: false, viewport: { width: 1440, height: 1000 } });
+            const page = await context.newPage();
+            page.setDefaultTimeout(20000);
+            page.setDefaultNavigationTimeout(20000);
+            const pageErrors = [];
+            const assetStatuses = {};
+            page.on('pageerror', () => pageErrors.push('pageerror'));
+            page.on('response', response => {
+              const path = new URL(response.url()).pathname;
+              if (path === '/pay-assets/app.js' || path === '/pay-assets/styles.css') assetStatuses[path] = response.status();
+            });
+            const authResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/me');
+            const rootResponse = await page.goto(process.env.PAY_URL + '/?probe=d167-browser', { waitUntil: 'domcontentloaded' });
+            const auth = await authResponse;
+            await page.getByRole('heading', { name: 'Войти в ArtHello Pay', exact: true }).waitFor({ state: 'visible' });
+            await page.waitForLoadState('networkidle');
+            const visible = await page.evaluate(() => {
+              const panel = document.querySelector('.auth-page');
+              const login = document.querySelector('input[name="login"]');
+              const password = document.querySelector('input[name="password"]');
+              const rect = panel?.getBoundingClientRect();
+              return { marker: document.body.dataset.arthelloPayShell === 'd167', title: document.title,
+                panel: Boolean(rect && rect.width > 0 && rect.height > 0), login: Boolean(login), password: Boolean(password),
+                text: (document.querySelector('#app')?.textContent || '').trim().length > 80 };
+            });
+            const result = { root: rootResponse?.status() || 0, auth: auth.status(), app: assetStatuses['/pay-assets/app.js'] || 0,
+              css: assetStatuses['/pay-assets/styles.css'] || 0, pageErrors: pageErrors.length, ...visible };
+            console.log(JSON.stringify(result));
+            if (result.root !== 200 || result.auth !== 401 || result.app !== 200 || result.css !== 200 ||
+                result.pageErrors !== 0 || !result.marker || result.title !== 'ArtHello Pay' ||
+                !result.panel || !result.login || !result.password || !result.text) process.exitCode = 2;
+            await context.close();
+          } catch {
+            console.log(JSON.stringify({ result: 'blocked', stage: 'pay-visible-shell' }));
+            process.exitCode = 2;
+          } finally {
+            await browser?.close().catch(() => {});
+          }
+          NODE
+
+          shell_receipt="$state_root/pay-visible-shell-$TARGET_RELEASE_SHA.json"
+          shell_temp="$state_root/.pay-visible-shell-$TARGET_RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+          test ! -e "$shell_receipt" && test ! -L "$shell_receipt"
+          test ! -e "$shell_temp" && test ! -L "$shell_temp"
+          jq -nc --arg release "$TARGET_RELEASE_SHA" --arg candidate "$candidate_id" \
+            --arg previousRoute "$active_route_sha" --arg activeRoute "$new_route_sha" \
+            --arg index "$PAY_INDEX_SHA256" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" '
+              {schemaVersion:1,state:"verified",protocol:"ARTHELLO_PAY_VISIBLE_SHELL_D167",
+               releaseSha:$release,candidateContainerId:$candidate,previousRouteSha256:$previousRoute,
+               activeRouteSha256:$activeRoute,indexSha256:$index,recoveryRunId:$run,
+               recoveryRunAttempt:$attempt,publicPayStatus:200,visibleLoginWindow:true,
+               moneyAcceptanceEnabled:false,fiscalizationEnabled:false,verifiedAtUtc:$at}
+            ' > "$shell_temp"
+          chmod 0600 "$shell_temp"
+          ln "$shell_temp" "$shell_receipt"
+          rm "$shell_temp"
+          sync "$shell_receipt"
+          test "$(stat -c '%U:%a:%h' "$shell_receipt")" = "$(id -un):600:1"
+
+          route_pending=0
+          trap - EXIT
+          printf 'route_sha=%s\n' "$new_route_sha" >> "$GITHUB_OUTPUT"
+          printf 'ARTHELLO_D167_VISIBLE_LOGIN_WINDOW=VERIFIED route=%s\n' "$new_route_sha"
+
+      - name: Visible shell summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## D167 visible ArtHello Pay shell'
+            echo
+            echo "- Release: $TARGET_RELEASE_SHA"
+            echo "- Active route: ${{ steps.publish.outputs.route_sha || 'not verified' }}"
+            echo "- Result: ${{ job.status }}"
+            echo '- Browser proof: logged-out login window visible'
+            echo '- Repository or runtime secrets: not used'
+            echo '- Snapshot restore, D1 replacement, image rebuild and cleanup: not performed'
             echo '- Real-money acceptance and fiscalization: disabled'
           } >> "$GITHUB_STEP_SUMMARY"
