@@ -119,12 +119,12 @@ test("production runtime registers and packages the protected AlfaCRM transport 
   assert.equal((dockerfile.match(/COPY --from=application \/app\/production\/alfacrm-transport\.mjs \/app\/production\/alfacrm-transport\.mjs/g) ?? []).length, 1);
 });
 
-test("D176 release proves AlfaCRM egress without real credentials before stopping production", () => {
+test("D177 release preserves the AlfaCRM egress proof before stopping production", () => {
   const workflow = sourceText("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
-  const egressProof = workflow.indexOf("ARTHELLO_D176_ALFACRM_EGRESS=VERIFIED");
+  const egressProof = workflow.indexOf("ARTHELLO_D177_ALFACRM_EGRESS=VERIFIED");
   const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
 
-  assert.match(workflow, /D176: restore AlfaCRM production transport/);
+  assert.match(workflow, /D177: refine Money cards and mobile bank history/);
   assert.ok(egressProof > 0 && liveStop > egressProof, "AlfaCRM egress must pass before the live container is stopped");
   assert.match(workflow, /import \{ createAlfaCrmTransport \} from "\.\/production\/alfacrm-transport\.mjs"/);
   assert.match(workflow, /api_key: "synthetic-release-probe"/);
