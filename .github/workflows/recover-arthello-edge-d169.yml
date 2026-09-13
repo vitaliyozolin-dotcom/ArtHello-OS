@@ -1,8 +1,8 @@
-# D170: recover the public edge after the verified D168 cutover.
+# D171: rebind the public edge after the verified D168 cutover.
 # The operation is deliberately narrow: retain the D168 image and D1 volume,
 # restore durable container runtime, then restart Caddy only when its public
 # listener is still unavailable. No application secret is read or replaced.
-name: Recover ArtHello production edge D170
+name: Rebind ArtHello production edge D171
 
 'on':
   push:
@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  EXPECTED_PARENT_SHA: d87b68ce171bb94a1aff576b50be661081d0a2f7
+  EXPECTED_PARENT_SHA: 8850657fc3b450f5762c81ac02f814780fc6b13b
   TARGET_RELEASE_SHA: 4e0225874ece24098c0ae7ab664e1655b50846ec
   TARGET_CANDIDATE_NAME: arthello-direct-34753522048-1
   CADDY_CONTAINER: stroios-caddy-1
@@ -33,8 +33,8 @@ jobs:
     if: >-
       github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
       github.ref == 'refs/heads/main' &&
-      github.event.before == 'd87b68ce171bb94a1aff576b50be661081d0a2f7' &&
-      startsWith(github.event.head_commit.message, 'D170: retry D168 production edge recovery') &&
+      github.event.before == '8850657fc3b450f5762c81ac02f814780fc6b13b' &&
+      startsWith(github.event.head_commit.message, 'D171: rebind D168 production edge') &&
       github.run_attempt == 1
     runs-on:
       - self-hosted
@@ -64,7 +64,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$GITHUB_REPOSITORY" = vitaliyozolin-dotcom/ArtHello-OS
           test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT_SHA"
-          test "$(git log -1 --format=%s)" = "D170: retry D168 production edge recovery"
+          test "$(git log -1 --format=%s)" = "D171: rebind D168 production edge"
           current_main="$(curl --fail-with-body --silent --show-error --max-time 30 \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header 'Accept: application/vnd.github+json' \
@@ -74,7 +74,7 @@ jobs:
 
           state_root="$HOME/.config/arthello/release-state"
           d168_receipt="$state_root/production-d168-$TARGET_RELEASE_SHA.json"
-          recovery_receipt="$state_root/edge-recovery-d170-$TARGET_RELEASE_SHA.json"
+          recovery_receipt="$state_root/edge-recovery-d171-$TARGET_RELEASE_SHA.json"
           test -f "$d168_receipt" && test ! -L "$d168_receipt"
           test "$(stat -c '%U:%a:%h' "$d168_receipt")" = "$(id -un):600:2"
           test ! -e "$recovery_receipt" && test ! -L "$recovery_receipt"
@@ -127,7 +127,7 @@ jobs:
             sleep 2
           done
           if [ "$ready" -ne 1 ]; then
-            docker inspect "$candidate_id" --format 'ARTHELLO_D170_APP_FAILED status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} error={{json .State.Error}}'
+            docker inspect "$candidate_id" --format 'ARTHELLO_D171_APP_FAILED status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} error={{json .State.Error}}'
             exit 1
           fi
 
@@ -174,19 +174,20 @@ jobs:
           NODE
           }
 
-          if ! public_probe; then
-            docker restart --time 20 "$CADDY_CONTAINER" >/dev/null
-            recovery_action="${recovery_action}+restart-caddy"
-            for attempt in $(seq 1 30); do
-              if [ "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true ] && public_probe; then
-                ready=1
-                break
-              fi
-              ready=0
-              sleep 2
-            done
-            test "$ready" = 1
-          fi
+          # Hairpin probes can remain green while the externally published
+          # listener is detached. Recreate Caddy's published socket/NAT binding
+          # once, even when the internal route already answers successfully.
+          docker restart --time 20 "$CADDY_CONTAINER" >/dev/null
+          recovery_action="${recovery_action}+restart-caddy"
+          ready=0
+          for attempt in $(seq 1 30); do
+            if [ "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true ] && public_probe; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = 1
 
           candidate_restart_count="$(docker inspect "$candidate_id" --format '{{.RestartCount}}')"
           for observation in $(seq 1 13); do
@@ -199,7 +200,7 @@ jobs:
           candidate_after="$(docker inspect "$candidate_id" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}/{{.HostConfig.RestartPolicy.Name}}')"
           caddy_after="$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}')"
 
-          receipt_temp="$state_root/.edge-recovery-d170-$TARGET_RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+          receipt_temp="$state_root/.edge-recovery-d171-$TARGET_RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
           test ! -e "$receipt_temp" && test ! -L "$receipt_temp"
           jq -nc \
             --arg release "$TARGET_RELEASE_SHA" --arg candidate "$candidate_id" --arg image "$image_id" \
@@ -208,7 +209,7 @@ jobs:
             --arg caddyBefore "$caddy_before" --arg caddyAfter "$caddy_after" \
             --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
             --arg at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" '
-              {schemaVersion:1,state:"verified",protocol:"ARTHELLO_EDGE_RECOVERY_D170",
+              {schemaVersion:1,state:"verified",protocol:"ARTHELLO_EDGE_RECOVERY_D171",
                releaseSha:$release,candidateContainerId:$candidate,imageId:$image,activeRouteSha256:$route,
                recoveryAction:$action,candidateBefore:$candidateBefore,candidateAfter:$candidateAfter,
                caddyBefore:$caddyBefore,caddyAfter:$caddyAfter,recoveryRunId:$run,recoveryRunAttempt:$attempt,
@@ -220,14 +221,14 @@ jobs:
           rm "$receipt_temp"
           sync "$recovery_receipt"
           test "$(stat -c '%U:%a:%h' "$recovery_receipt")" = "$(id -un):600:1"
-          printf 'ARTHELLO_D170_EDGE=VERIFIED release=%s action=%s candidate=%s\n' "$TARGET_RELEASE_SHA" "$recovery_action" "$TARGET_CANDIDATE_NAME"
+          printf 'ARTHELLO_D171_EDGE=VERIFIED release=%s action=%s candidate=%s\n' "$TARGET_RELEASE_SHA" "$recovery_action" "$TARGET_CANDIDATE_NAME"
 
       - name: Publish recovery summary
         if: always()
         shell: bash
         run: |
           {
-            echo '## ArtHello production edge D170'
+            echo '## ArtHello production edge D171'
             echo
             echo "- Retained release: \`$TARGET_RELEASE_SHA\`"
             echo "- Result: ${{ job.status }}"
@@ -235,3 +236,31 @@ jobs:
             echo '- ArtHello OS, School and Pay public responses: checked after a 65-second stability window.'
             echo '- Money acceptance and fiscalization: disabled.'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  verify-external:
+    needs: recover
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify public origins from an independent network
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          probe() {
+            curl --fail --silent --show-error --max-time 15 "$PUBLIC_URL/api/health" \
+              | jq -e '.status == "ok" and .database == "available"' >/dev/null &&
+            curl --fail --silent --show-error --max-time 15 "$SCHOOL_URL/api/health" \
+              | jq -e '.status == "ok"' >/dev/null &&
+            curl --fail --silent --show-error --max-time 15 "$PAY_URL/?probe=d171-external" \
+              | grep -F 'data-arthello-pay-shell="d168"' >/dev/null &&
+            curl --fail --silent --show-error --max-time 15 "$PAY_URL/api/pay-sso/config" \
+              | jq -e --arg central "$PUBLIC_URL" --arg pay "$PAY_URL" \
+                '.centralOrigin == $central and .payOrigin == $pay' >/dev/null
+          }
+          ready=0
+          for attempt in $(seq 1 12); do
+            if probe; then ready=1; break; fi
+            sleep 5
+          done
+          test "$ready" = 1
+          printf 'ARTHELLO_D171_EXTERNAL=VERIFIED arthello=200 school=200 pay=200\n'
