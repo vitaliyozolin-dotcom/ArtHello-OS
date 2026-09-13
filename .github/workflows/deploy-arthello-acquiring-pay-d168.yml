@@ -292,7 +292,8 @@ jobs:
             --label "arthello.rollback.source-container=$live_id" \
             "$rollback_volume" >/dev/null
           docker run --rm --network none --user 0:0 --read-only --cap-drop ALL \
-            --cap-add DAC_OVERRIDE --cap-add CHOWN --security-opt no-new-privileges:true \
+            --cap-add DAC_OVERRIDE --cap-add CHOWN --cap-add FOWNER --cap-add FSETID \
+            --security-opt no-new-privileges:true \
             --pids-limit 64 --memory 256m --cpus 0.5 \
             --mount "type=volume,src=$DATA_VOLUME,dst=/source,readonly,volume-nocopy" \
             --mount "type=volume,src=$rollback_volume,dst=/target,volume-nocopy" \
