@@ -89,7 +89,7 @@ try {
   assert.equal(await dialog.locator('.operation-classification-form').evaluate(e=>getComputedStyle(e).display),'grid');
   await dialog.getByRole('combobox',{name:'Класс ОПиУ'}).selectOption('Доходы ОПиУ');await dialog.getByRole('combobox',{name:'Статья ОПиУ'}).selectOption('CI Услуги');await dialog.getByLabel('Период ОПиУ',{exact:true}).fill('2026-09');
   await save(()=>dialog.getByRole('button',{name:'Сохранить разнесение',exact:true}).click());await dialog.waitFor({state:'hidden'});
-  stage='reload_dds';await page.reload();await page.getByRole('tab',{name:'ДДС',exact:true}).click();
+  stage='reload_dds';await page.reload();await page.getByRole('tab',{name:'ДДС филиала',exact:true}).click();
   const dds=page.locator('.finance-table tbody tr').filter({has:page.getByRole('button',{name:'CI Обучение',exact:true})});await dds.waitFor();assert.match(await dds.innerText(),/1\D*234,56/);
   await page.screenshot({path:'/evidence/desktop-dds.png',fullPage:true});await dds.getByRole('button',{name:'CI Обучение',exact:true}).click();assert.equal(await page.locator('.finance-table tbody tr').count(),1);
   stage='mobile_articles';await page.setViewportSize({width:390,height:844});await create('CI Аренда','cashflow','Списание');
@@ -107,7 +107,7 @@ try {
   stage='archive_history';await page.getByRole('tab',{name:'Статьи',exact:true}).click();
   const archived=page.locator('.ahFinanceArticleList li').filter({has:page.getByText('CI Обучение',{exact:true})});await save(()=>archived.getByRole('button',{name:'В архив',exact:true}).click());
   await page.getByLabel('Показывать архив',{exact:true}).check();await archived.getByText('Архив',{exact:true}).waitFor();
-  await page.reload();await page.getByRole('tab',{name:'ДДС',exact:true}).click();await page.getByRole('button',{name:'CI Обучение',exact:true}).click();await page.locator('.finance-table tbody tr').first().click();
+  await page.reload();await page.getByRole('tab',{name:'ДДС филиала',exact:true}).click();await page.getByRole('button',{name:'CI Обучение',exact:true}).click();await page.locator('.finance-table tbody tr').first().click();
   assert.equal(await dialog.getByRole('combobox',{name:'Статья ДДС'}).inputValue(),'CI Обучение');
   assert.equal(loginCount,1);assert.equal(transportFailed,false);assert.equal(errors.length,0);assert.equal(writes.filter(x=>x==='classifyOperation').length,2);assert.equal(writes.length,9);
   const result={kind:'finance-isolated-browser',result:'pass',sourceSha:process.env.CHECKED_SOURCE_SHA,viewports:[1440,390],actualApplication:true,actualDatabase:true,apiMocked:false,dashboardWrites,mobileMetrics,sessionInjected:false,chromiumSandbox:'verified',productionAcceptance:'not_run',bankFacts:'synthetic CI only',screenshots:['desktop-articles.png','desktop-dds.png','mobile-articles.png','mobile-allocation.png']};
