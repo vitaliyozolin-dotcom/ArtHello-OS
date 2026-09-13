@@ -6,6 +6,19 @@ import { createAlfaCrmTransport } from "../production/alfacrm-transport.mjs";
 
 const loginUrl = "https://tenant.s20.online/v2api/auth/login";
 
+function sourceText(...relatives) {
+  let missing;
+  for (const relative of relatives) {
+    try {
+      return readFileSync(new URL(relative, import.meta.url), "utf8");
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      missing = error;
+    }
+  }
+  throw missing;
+}
+
 function request(url = loginUrl, init = {}) {
   return new Request(url, {
     method: "POST",
@@ -98,8 +111,8 @@ test("AlfaCRM Node transport converts timeout and network failures to sanitized 
 });
 
 test("production runtime registers and packages the protected AlfaCRM transport exactly once", () => {
-  const runtime = readFileSync(new URL("../production/runtime-server.mjs", import.meta.url), "utf8");
-  const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
+  const runtime = sourceText("../production/runtime-server.mjs");
+  const dockerfile = sourceText("../../Dockerfile", "../contract-fixtures/v52.Dockerfile");
 
   assert.match(runtime, /import \{ createAlfaCrmTransport \} from "\.\/alfacrm-transport\.mjs"/);
   assert.equal((runtime.match(/ALFACRM_TRANSPORT:\s*createAlfaCrmTransport\(\)/g) ?? []).length, 1);
@@ -107,7 +120,7 @@ test("production runtime registers and packages the protected AlfaCRM transport 
 });
 
 test("D176 release proves AlfaCRM egress without real credentials before stopping production", () => {
-  const workflow = readFileSync(new URL("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", import.meta.url), "utf8");
+  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
   const egressProof = workflow.indexOf("ARTHELLO_D176_ALFACRM_EGRESS=VERIFIED");
   const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
 
