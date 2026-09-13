@@ -13,6 +13,7 @@ const state = {
   customerResults: [],
   customerLoading: false,
   customerSearchTimer: null,
+  customerRequestId: 0,
 };
 
 const activeRequestStatuses = new Set([
@@ -548,18 +549,25 @@ function renderActionsModal() {
 
 async function loadCustomers(branchCrmId, query = "") {
   if (!branchCrmId) return;
+  const modal = state.modal;
+  const requestId = ++state.customerRequestId;
   state.customerLoading = true;
   renderShell();
   try {
-    state.customerResults = await api(
+    const results = await api(
       `/api/payments/customers?branchCrmId=${encodeURIComponent(branchCrmId)}&q=${encodeURIComponent(query)}`,
     );
+    if (state.modal !== modal || state.customerRequestId !== requestId) return;
+    state.customerResults = results;
   } catch (error) {
+    if (state.modal !== modal || state.customerRequestId !== requestId) return;
     state.customerResults = [];
     toast(error.message, "error");
   } finally {
-    state.customerLoading = false;
-    renderShell();
+    if (state.modal === modal && state.customerRequestId === requestId) {
+      state.customerLoading = false;
+      renderShell();
+    }
   }
 }
 
@@ -847,8 +855,14 @@ function applyLaunchAction() {
   url.searchParams.delete("from");
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   if (action !== "invoice" && action !== "payment") return false;
-  state.view = action === "invoice" ? "obligations" : "requests";
-  openNewPayment();
+  if (action === "invoice") {
+    state.view = "obligations";
+    openNewPayment();
+    return true;
+  }
+  state.view = "requests";
+  state.modal = null;
+  renderShell();
   return true;
 }
 
@@ -856,8 +870,14 @@ function scheduleCustomerSearch(value) {
   if (!state.modal) return;
   state.modal.customerQuery = value;
   window.clearTimeout(state.customerSearchTimer);
+  const branchCrmId = state.modal.branchCrmId;
   state.customerSearchTimer = window.setTimeout(() => {
-    void loadCustomers(state.modal?.branchCrmId || "", value);
+    if (
+      state.modal?.branchCrmId === branchCrmId &&
+      state.modal.customerQuery === value
+    ) {
+      void loadCustomers(branchCrmId, value);
+    }
   }, 260);
 }
 
@@ -916,6 +936,13 @@ app.addEventListener("submit", (event) => {
 app.addEventListener("input", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
+  if (
+    state.modal &&
+    target.form?.id === "create-payment-form" &&
+    target.name
+  ) {
+    state.modal[target.name] = target.value;
+  }
   if (target.matches("[data-search]")) {
     state.search = target.value;
     renderShell();
@@ -969,19 +996,22 @@ app.addEventListener("click", (event) => {
   if (!action) return;
   const name = action.getAttribute("data-action");
   if (name === "close-modal") {
-    if (
-      raw.closest("[data-modal-stop]") &&
-      raw === action.closest("[data-modal-stop]")
-    )
-      return;
+    if (action.matches(".modal-backdrop") && raw !== action) return;
+    event.preventDefault();
     state.modal = null;
     renderShell();
+    return;
   }
-  if (name === "new-payment") openNewPayment();
+  if (name === "new-payment") {
+    event.preventDefault();
+    openNewPayment();
+    return;
+  }
   if (name === "logout") void logoutToArtHello();
   if (name === "retry-sso") void beginCentralSignIn();
   if (name === "return-os") void paySsoConfig().then((config) => window.location.assign(`${config.centralOrigin}/#home`)).catch(() => renderAccessDenied("ArtHello OS временно недоступна"));
   if (name === "select-customer") {
+    event.preventDefault();
     const index = Number(action.getAttribute("data-customer-index"));
     const customer = state.customerResults[index];
     if (state.modal && customer) {
@@ -990,14 +1020,17 @@ app.addEventListener("click", (event) => {
       state.modal.payerPhone = customer.payerPhone || "";
       renderShell();
     }
+    return;
   }
   if (name === "change-customer" && state.modal) {
+    event.preventDefault();
     state.modal.selectedCustomer = null;
     renderShell();
     void loadCustomers(
       state.modal.branchCrmId,
       state.modal.customerQuery || "",
     );
+    return;
   }
   if (name === "copy-link")
     void copyText(action.getAttribute("data-link") || "");
@@ -1021,12 +1054,6 @@ app.addEventListener("click", (event) => {
       renderShell();
     }
   }
-});
-
-app.addEventListener("click", (event) => {
-  const target = event.target;
-  if (target instanceof Element && target.matches("[data-modal-stop]"))
-    event.stopPropagation();
 });
 
 async function bootstrap() {

@@ -125,19 +125,19 @@ export function AcquiringWorkspace({ notify }: { notify: (value: string) => void
     ].some((value) => value.toLocaleLowerCase("ru-RU").includes(needle)));
   }, [data, query]);
 
-  function openPay(action: "invoice" | "payment") {
+  function openPay(destination: "create-link" | "payment-register") {
     if (!data?.capabilities.canOpenPay) {
       notify("Доступ к ArtHello Pay выдаётся владельцем в разделе «Доступы».");
       return;
     }
     const target = new URL("/api/pay-sso/open", window.location.origin);
-    target.searchParams.set("action", action);
+    target.searchParams.set("action", destination === "create-link" ? "invoice" : "payment");
     window.location.assign(target.toString());
   }
 
   const actions = <div className="ahAcquiringActions">
-    <Button variant="secondary" onClick={() => openPay("invoice")}>Новый счёт</Button>
-    <Button variant="primary" onClick={() => openPay("payment")}>Оплата</Button>
+    <Button variant="secondary" onClick={() => openPay("payment-register")}>Реестр платежей</Button>
+    <Button variant="primary" onClick={() => openPay("create-link")}>Создать ссылку на оплату</Button>
   </div>;
 
   if (loading) return <PageContainer className="ahAcquiringPage"><PageHeader eyebrow="Ссылки · оплаты · возвраты · чеки" title="Эквайринг" description="Загружаем эквайринговые операции." actions={actions} /><Card className="ahAcquiringState">Получаем данные эквайринга…</Card></PageContainer>;
@@ -167,7 +167,7 @@ export function AcquiringWorkspace({ notify }: { notify: (value: string) => void
     {tab === "Обзор" ? <div className="ahAcquiringOverview">
       <Card className="ahAcquiringPanel">
         <PanelHead eyebrow="Последние события" title="Ссылки и оплаты" meta={`${data.requests.length} операций`} />
-        {data.requests.length ? <PaymentList requests={data.requests.slice(0, 8)} /> : <EmptyState density="compact" title="Эквайринговых операций пока нет" description="Создайте счёт или ссылку в ArtHello Pay. Банковские движения сюда не подмешиваются." action={<Button variant="primary" onClick={() => openPay("invoice")}>Создать счёт</Button>} />}
+        {data.requests.length ? <PaymentList requests={data.requests.slice(0, 8)} /> : <EmptyState density="compact" title="Эквайринговых операций пока нет" description="Создайте ссылку в ArtHello Pay. Банковские движения сюда не подмешиваются." action={<Button variant="primary" onClick={() => openPay("create-link")}>Создать ссылку на оплату</Button>} />}
         {data.requests.length > 8 ? <button className="ahAcquiringTextAction" type="button" onClick={() => setTab("Ссылки и оплаты")}>Показать все операции</button> : null}
       </Card>
       <Card className="ahAcquiringPanel">

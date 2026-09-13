@@ -1,8 +1,8 @@
-# D172: freeze the canonical Money source and the Acquiring/Pay boundary.
+# D174: separate Pay creation from its register and keep the family form open.
 # The hosted verifier builds the immutable image. The gateway only loads it,
 # takes a recoverable D1 volume snapshot, swaps one candidate and stages static
 # Pay assets. Existing secret-file mounts are reused without printing contents.
-name: Deploy ArtHello Money source and Acquiring boundary D172
+name: Deploy ArtHello Pay actions and family modal D174
 
 'on':
   workflow_run:
@@ -28,6 +28,7 @@ env:
   CHECKED_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   PAY_URL: https://pay-188-225-38-55.sslip.io
+  SCHOOL_URL: https://school-188-225-38-55.sslip.io
   CADDY_CONTAINER: stroios-caddy-1
   DATA_VOLUME: arthello-direct-v44-data
 
@@ -48,7 +49,7 @@ jobs:
       github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' &&
       github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1 &&
-      startsWith(github.event.workflow_run.head_commit.message, 'D172: freeze canonical money and acquiring sources')
+      startsWith(github.event.workflow_run.head_commit.message, 'D174: separate Pay actions and keep family modal')
     runs-on:
       - self-hosted
       - linux
@@ -77,7 +78,7 @@ jobs:
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$TRIGGER_VERIFY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-          test "$(git log -1 --format=%s)" = "D172: freeze canonical money and acquiring sources"
+          test "$(git log -1 --format=%s)" = "D174: separate Pay actions and keep family modal"
           current_main="$(curl --fail-with-body --silent --show-error --max-time 30 \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "Accept: application/vnd.github+json" \
@@ -108,7 +109,7 @@ jobs:
               (.runtimeFingerprintSha256|test("^[a-f0-9]{64}$"))
             ' "$evidence" >/dev/null
           gzip -t "$archive"
-          load_log="$RUNNER_TEMP/d172-docker-load.log"
+          load_log="$RUNNER_TEMP/d174-docker-load.log"
           if ! docker image load --input "$archive" >"$load_log" 2>&1; then
             sed -n '1,160p' "$load_log" >&2
             exit 1
@@ -125,7 +126,7 @@ jobs:
           test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$tree"
           test "$(docker image inspect "$image_id" --format '{{.Config.User}}')" = node
           printf 'image_id=%s\ntree=%s\n' "$image_id" "$tree" >> "$GITHUB_OUTPUT"
-          printf 'ARTHELLO_D172_HOSTED_IMAGE=VERIFIED id=%s runtime_fingerprint=%s\n' "$image_id" "$actual_fingerprint"
+          printf 'ARTHELLO_D174_HOSTED_IMAGE=VERIFIED id=%s runtime_fingerprint=%s\n' "$image_id" "$actual_fingerprint"
 
       - name: Snapshot, switch candidate and publish Pay assets
         id: publish
@@ -146,15 +147,15 @@ jobs:
           candidate="arthello-direct-$run_key"
           rollback_volume="arthello-rollback-$run_key"
           state_root="$HOME/.config/arthello/release-state"
-          work="$state_root/d172-$run_key"
+          work="$state_root/d174-$run_key"
           runtime_env="$work/runtime.env"
           route_before="$work/external-routes.before.caddy"
           route_after="$work/external-routes.after.caddy"
-          receipt="$state_root/production-d172-$RELEASE_SHA.json"
+          receipt="$state_root/production-d174-$RELEASE_SHA.json"
           asset_root="/data/arthello-pay-assets-$RELEASE_SHA"
           asset_stage="/data/.arthello-pay-assets-$run_key"
-          route_stage="/data/.external-routes.d172-$run_key"
-          route_backup="/data/external-routes.caddy.pre-d172-$run_key"
+          route_stage="/data/.external-routes.d174-$run_key"
+          route_backup="/data/external-routes.caddy.pre-d174-$run_key"
           mkdir -p "$work"
           chmod 0700 "$work"
           test ! -e "$receipt"
@@ -255,7 +256,7 @@ jobs:
             trap - EXIT INT TERM HUP
             if [ "$success" -ne 1 ]; then
               if [ "$activation_swapped" -eq 1 ]; then
-                docker run --rm --name "arthello-v52-activation-rollback-d172-$run_key" \
+                docker run --rm --name "arthello-v52-activation-rollback-d174-$run_key" \
                   --user 1002:1000 --network none --read-only --cap-drop ALL \
                   --security-opt no-new-privileges:true --pids-limit 16 --memory 64m --cpus 0.25 \
                   --entrypoint python3 \
@@ -270,6 +271,7 @@ jobs:
                   test -f "$BACKUP" && cp "$BACKUP" /data/external-routes.caddy
                 ' || true
                 docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+                docker restart --time 20 "$CADDY_CONTAINER" >/dev/null 2>&1 || true
               fi
               if [ "$candidate_started" -eq 1 ]; then docker rm -f "$candidate" >/dev/null 2>&1 || true; fi
               docker start "$live_id" >/dev/null 2>&1 || true
@@ -301,7 +303,7 @@ jobs:
           test "$(docker run --rm --network none --user 0:0 --read-only --cap-drop ALL --cap-add DAC_OVERRIDE \
             --mount "type=volume,src=$rollback_volume,dst=/snapshot,readonly,volume-nocopy" \
             --entrypoint /bin/sh "$IMAGE_ID" -ceu 'find /snapshot -type f | wc -l')" -gt 0
-          printf 'ARTHELLO_D172_ROLLBACK_SNAPSHOT=VERIFIED volume=%s\n' "$rollback_volume"
+          printf 'ARTHELLO_D174_ROLLBACK_SNAPSHOT=VERIFIED volume=%s\n' "$rollback_volume"
 
           test "$(current_main)" = "$RELEASE_SHA"
           docker run -d --name "$candidate" --restart no --read-only \
@@ -353,7 +355,7 @@ jobs:
           print(json.dumps({'bankAccounts':accounts,'accountsWithBalances':balances,'bankTransactions':transactions,'eligiblePayAdministrators':eligible,'activePayGrants':grants},separators=(',',':')))
           PY
           jq -e '.bankAccounts>0 and .accountsWithBalances>0 and .eligiblePayAdministrators>0 and .activePayGrants>=.eligiblePayAdministrators' "$database_receipt" >/dev/null
-          printf 'ARTHELLO_D172_DATA_AND_PAY_GRANT=VERIFIED accounts=%s balances=%s admins=%s\n' \
+          printf 'ARTHELLO_D174_DATA_AND_PAY_GRANT=VERIFIED accounts=%s balances=%s admins=%s\n' \
             "$(jq -r .bankAccounts "$database_receipt")" "$(jq -r .accountsWithBalances "$database_receipt")" "$(jq -r .activePayGrants "$database_receipt")"
 
           pay_source="deploy/v52/public/pay-assets"
@@ -401,31 +403,51 @@ jobs:
           docker exec "$CADDY_CONTAINER" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
           docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 
-          docker exec -i -e PUBLIC_URL="$PUBLIC_URL" -e PAY_URL="$PAY_URL" "$candidate" node - <<'NODE'
+          public_acceptance() {
+          docker exec -i -e PUBLIC_URL="$PUBLIC_URL" -e PAY_URL="$PAY_URL" -e SCHOOL_URL="$SCHOOL_URL" "$candidate" node - <<'NODE'
           const get=async(url,init={})=>{const response=await fetch(url,{...init,signal:AbortSignal.timeout(10000),headers:{'cache-control':'no-cache',...(init.headers||{})}});return {response,body:await response.text()}};
           const health=await get(process.env.PUBLIC_URL+'/api/health');
-          const root=await get(process.env.PUBLIC_URL+'/?release=d172');
-          const pay=await get(process.env.PAY_URL+'/?release=d172');
+          const school=await get(process.env.SCHOOL_URL+'/api/health');
+          const root=await get(process.env.PUBLIC_URL+'/?release=d174');
+          const pay=await get(process.env.PAY_URL+'/?release=d174');
           const payApp=await get(process.env.PAY_URL+'/pay-assets/app.js');
           const payConfig=await get(process.env.PAY_URL+'/api/pay-sso/config');
           const payMe=await get(process.env.PAY_URL+'/api/auth/me');
           const publicMissing=await get(process.env.PAY_URL+'/api/payments/public/AH-00000000-0000-4000-8000-000000000000');
           const malformedSso=await get(process.env.PUBLIC_URL+'/api/pay-sso/authorize');
-          let healthBody={},configBody={};
+          let healthBody={},schoolBody={},configBody={};
           try{healthBody=JSON.parse(health.body)}catch{}
+          try{schoolBody=JSON.parse(school.body)}catch{}
           try{configBody=JSON.parse(payConfig.body)}catch{}
           const ok=health.response.status===200&&healthBody.status==='ok'&&root.response.status===200
-            &&pay.response.status===200&&pay.body.includes('data-arthello-pay-shell="d168"')
+            &&school.response.status===200&&schoolBody.status==='ok'
+            &&pay.response.status===200&&pay.body.includes('data-arthello-pay-shell="d174"')
             &&payApp.response.status===200&&payApp.body.includes('beginCentralSignIn')
+            &&payApp.body.includes('state.view = "requests"')
+            &&payApp.body.includes('action.matches(".modal-backdrop") && raw !== action')
             &&payConfig.response.status===200&&configBody.centralOrigin===process.env.PUBLIC_URL&&configBody.payOrigin===process.env.PAY_URL
             &&payMe.response.status===401&&publicMissing.response.status===404&&malformedSso.response.status===400;
-          console.log(JSON.stringify({health:health.response.status,root:root.response.status,pay:pay.response.status,payApp:payApp.response.status,payConfig:payConfig.response.status,payAnonymous:payMe.response.status,publicPaymentBoundary:publicMissing.response.status,ssoBoundary:malformedSso.response.status}));
+          console.log(JSON.stringify({health:health.response.status,school:school.response.status,root:root.response.status,pay:pay.response.status,payApp:payApp.response.status,payConfig:payConfig.response.status,payAnonymous:payMe.response.status,publicPaymentBoundary:publicMissing.response.status,ssoBoundary:malformedSso.response.status}));
           if(!ok)process.exit(1);
           NODE
+          }
+
+          # A reload can leave the public socket detached even while internal
+          # hairpin probes stay green. Recreate the binding before acceptance.
+          docker restart --time 20 "$CADDY_CONTAINER" >/dev/null
+          public_ready=0
+          for attempt in $(seq 1 30); do
+            if [ "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true ] && public_acceptance; then
+              public_ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$public_ready" = 1
 
           test "$(current_main)" = "$RELEASE_SHA"
           activation_receipt="$work/bank-activation.json"
-          docker run --rm --name "arthello-v52-activation-writer-d172-$run_key" \
+          docker run --rm --name "arthello-v52-activation-writer-d174-$run_key" \
             --user 1002:1000 --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges:true --pids-limit 16 --memory 64m --cpus 0.25 \
             --entrypoint python3 \
@@ -449,10 +471,19 @@ jobs:
               })) process.exit(1);
             }).catch(() => process.exit(1));
           '
-          printf 'ARTHELLO_D172_TOCHKA_AUTOSYNC_ACTIVATION=VERIFIED\n'
+          printf 'ARTHELLO_D174_TOCHKA_AUTOSYNC_ACTIVATION=VERIFIED\n'
 
           test "$(current_main)" = "$RELEASE_SHA"
           restore_restart "$candidate"
+          candidate_restart_count="$(docker inspect "$candidate" --format '{{.RestartCount}}')"
+          for observation in $(seq 1 13); do
+            sleep 5
+            docker exec "$candidate" node -e "fetch('http://127.0.0.1:8081/api/health',{signal:AbortSignal.timeout(5000)}).then(async r=>{const b=await r.json();if(!r.ok||b.status!=='ok'||b.database!=='available')process.exit(1)}).catch(()=>process.exit(1))"
+            test "$(docker inspect "$candidate" --format '{{.RestartCount}}')" = "$candidate_restart_count"
+            test "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true
+          done
+          public_acceptance
+          printf 'ARTHELLO_D174_EDGE_STABILITY=VERIFIED seconds=65\n'
           route_sha="$(sha256sum "$route_after" | cut -d ' ' -f 1)"
           jq -n \
             --arg release "$RELEASE_SHA" --arg tree "$RELEASE_TREE" --arg image "$IMAGE_ID" \
@@ -460,7 +491,7 @@ jobs:
             --arg activationVolume "$activation_volume" \
             --arg route "$route_sha" --arg assets "$asset_root" --arg index "$index_sha" --arg app "$app_sha" --arg css "$css_sha" \
             --argjson data "$(cat "$database_receipt")" --argjson activation "$(cat "$activation_receipt")" '
-              {schemaVersion:1,state:"verified",decision:"D172",releaseSha:$release,sourceTree:$tree,imageId:$image,
+              {schemaVersion:1,state:"verified",decision:"D174",releaseSha:$release,sourceTree:$tree,imageId:$image,
                candidateContainerId:$candidate,previousContainerId:$previous,rollbackVolume:$rollback,
                bankActivationVolume:$activationVolume,bankAutosyncActivation:$activation,
                activeRouteSha256:$route,payAssetRoot:$assets,payAssetSha256:{"index.html":$index,"app.js":$app,"styles.css":$css},
@@ -472,7 +503,7 @@ jobs:
           rm -f "$runtime_env"
           trap - EXIT INT TERM HUP
           printf 'candidate=%s\nreceipt=%s\n' "$candidate" "$receipt" >> "$GITHUB_OUTPUT"
-          printf 'ARTHELLO_D172_PRODUCTION=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$candidate"
+          printf 'ARTHELLO_D174_PRODUCTION=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$candidate"
 
       - name: Publish production receipt summary
         if: success()
@@ -480,15 +511,45 @@ jobs:
         run: |
           set -Eeuo pipefail
           {
-            echo '## ArtHello production D172'
+            echo '## ArtHello production D174'
             echo
             echo "- Release: \`$RELEASE_SHA\`"
             echo "- ArtHello OS: $PUBLIC_URL"
             echo "- ArtHello Pay: $PAY_URL"
-            echo '- Home and Money use the same monthly bank transaction source.'
-            echo '- Bank accounts, balances, operations and synchronization live only in Money.'
-            echo '- Acquiring contains only payment links, payments, refunds and receipts.'
+            echo '- “Создать ссылку на оплату” opens a new Pay form.'
+            echo '- “Реестр платежей” opens existing links and payments without a form.'
+            echo '- Family selection stays inside the form and preserves entered values.'
             echo '- Existing ArtHello administrators received the isolated payment_operator system grant.'
             echo '- Pay login: central ArtHello OS one-time PKCE exchange.'
             echo '- Money acceptance and fiscalization: still disabled.'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  verify-external:
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify ArtHello, School and Pay from an independent network
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          probe() {
+            curl --fail --silent --show-error --max-time 15 "$PUBLIC_URL/api/health" \
+              | jq -e '.status == "ok" and .database == "available"' >/dev/null &&
+            curl --fail --silent --show-error --max-time 15 "$SCHOOL_URL/api/health" \
+              | jq -e '.status == "ok"' >/dev/null &&
+            curl --fail --silent --show-error --max-time 15 "$PAY_URL/?release=d174-external-$RELEASE_SHA" \
+              | grep -F 'data-arthello-pay-shell="d174"' >/dev/null &&
+            curl --fail --silent --show-error --max-time 15 "$PAY_URL/pay-assets/app.js?release=$RELEASE_SHA" \
+              | grep -F 'action.matches(".modal-backdrop") && raw !== action' >/dev/null &&
+            curl --fail --silent --show-error --max-time 15 "$PAY_URL/api/pay-sso/config" \
+              | jq -e --arg central "$PUBLIC_URL" --arg pay "$PAY_URL" \
+                '.centralOrigin == $central and .payOrigin == $pay' >/dev/null
+          }
+          ready=0
+          for attempt in $(seq 1 12); do
+            if probe; then ready=1; break; fi
+            sleep 5
+          done
+          test "$ready" = 1
+          printf 'ARTHELLO_D174_EXTERNAL=VERIFIED arthello=200 school=200 pay=200\n'
