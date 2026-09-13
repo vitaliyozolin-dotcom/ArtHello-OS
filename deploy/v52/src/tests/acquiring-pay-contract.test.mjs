@@ -32,10 +32,12 @@ test("D172 keeps bank facts in Money and acquiring events in Acquiring", async (
   assert.match(financeWorkspace, /Счета и текущие остатки/);
   assert.match(financeWorkspace, /Банковские операции/);
   assert.match(financeWorkspace, /Синхронизация/);
-  assert.match(workspace, />Новый счёт<\/Button>/);
-  assert.match(workspace, />Оплата<\/Button>/);
+  assert.match(workspace, />Реестр платежей<\/Button>/);
+  assert.match(workspace, />Создать ссылку на оплату<\/Button>/);
+  assert.doesNotMatch(workspace, />Новый счёт<\/Button>|>Оплата<\/Button>/);
   assert.match(workspace, /\/api\/pay-sso\/open/);
-  assert.match(workspace, /searchParams\.set\("action", action\)/);
+  assert.match(workspace, /destination === "create-link" \? "invoice" : "payment"/);
+  assert.doesNotMatch(workspace, /openPay\("invoice"\)|openPay\("payment"\)/);
 });
 
 test("Pay is entered only through central OS SSO and preserves launch action", async () => {
@@ -52,6 +54,13 @@ test("Pay is entered only through central OS SSO and preserves launch action", a
   assert.match(asset, /currentPayReturnTo/);
   assert.match(asset, /applyLaunchAction/);
   assert.match(asset, /action !== "invoice" && action !== "payment"/);
+  assert.match(asset, /if \(action === "invoice"\) \{[\s\S]*?openNewPayment\(\);[\s\S]*?return true;/);
+  assert.match(asset, /state\.view = "requests";\s*state\.modal = null;\s*renderShell\(\);/);
+  assert.match(asset, /if \(action\.matches\("\.modal-backdrop"\) && raw !== action\) return;/);
+  assert.match(asset, /target\.form\?\.id === "create-payment-form"[\s\S]*?state\.modal\[target\.name\] = target\.value;/);
+  assert.match(asset, /const requestId = \+\+state\.customerRequestId;/);
+  assert.match(asset, /state\.modal !== modal \|\| state\.customerRequestId !== requestId/);
+  assert.doesNotMatch(asset, /raw\.closest\("\[data-modal-stop\]"\)/);
   assert.match(openRoute, /continuePath/);
   assert.match(openRoute, /target\.searchParams\.set\("action", payAction\)/);
   assert.match(loginRoute, /Вход в ArtHello Pay выполняется через ArtHello OS/);
@@ -61,10 +70,12 @@ test("Pay is entered only through central OS SSO and preserves launch action", a
   assert.match(sso, /used_at=0 AND expires_at>\?/);
 });
 
-test("D172 deployment validates live bank data and Pay boundary without payment secrets", async () => {
+test("D174 deployment validates stable public edge and Pay boundary without payment secrets", async () => {
   const workflow = await source("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
-  assert.match(workflow, /D172: freeze canonical money and acquiring sources/);
-  assert.match(workflow, /ARTHELLO_D172_PRODUCTION=VERIFIED/);
+  assert.match(workflow, /D174: separate Pay actions and keep family modal/);
+  assert.match(workflow, /ARTHELLO_D174_PRODUCTION=VERIFIED/);
+  assert.match(workflow, /docker restart --time 20 "\$CADDY_CONTAINER"/);
+  assert.match(workflow, /ARTHELLO_D174_EXTERNAL=VERIFIED/);
   assert.match(workflow, /bank_accounts/);
   assert.match(workflow, /balance_minor is not null/);
   assert.match(workflow, /eligiblePayAdministrators/);
