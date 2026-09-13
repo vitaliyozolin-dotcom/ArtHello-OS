@@ -1,6 +1,6 @@
-# D163: recover only the exact D162 candidate held after its durable public boundary.
+# D164: complete the exact D162 recovery by serving its omitted immutable Pay assets.
 # No snapshot restore, D1 replacement, image rebuild, or broad cleanup is permitted.
-name: Recover held ArtHello Pay D162
+name: Complete ArtHello Pay D162 recovery
 'on':
   push:
     branches:
@@ -21,6 +21,8 @@ env:
   TARGET_RELEASE_TREE: 0e276dd4b78a91dca23a54daffccaf868b4b5d1b
   TARGET_RUN_ID: '34744346651'
   TARGET_RUN_ATTEMPT: '1'
+  PAY_APP_SHA256: 92cddd009ebd6ee09c29fac3206ada0c3adc482c3d89ba1e8486729a7f3fca39
+  PAY_CSS_SHA256: f501d5ff33c11e28de194f2a0bd0c551032460bc908852cedabef88880299407
   CADDY_CONTAINER: stroios-caddy-1
   DATA_VOLUME: arthello-direct-v44-data
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -32,8 +34,8 @@ jobs:
     if: >-
       github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
       github.ref == 'refs/heads/main' &&
-      github.event.before == '5df015323455ea7e513a1386f840016cbb6c249c' &&
-      startsWith(github.event.head_commit.message, 'D163: recover held D162 Pay candidate') &&
+      github.event.before == '00faa2ef071f0975055487b9313d7b947fca18db' &&
+      startsWith(github.event.head_commit.message, 'D164: complete ArtHello Pay asset recovery') &&
       github.run_attempt == 1
     runs-on:
       - self-hosted
@@ -53,7 +55,7 @@ jobs:
           submodules: false
           lfs: false
 
-      - name: Recover exact held candidate and finish public activation
+      - name: Serve exact Pay assets and finish public activation
         id: recover
         shell: bash
         run: |
@@ -145,7 +147,7 @@ jobs:
           }
 
           before_status="$(docker inspect "$candidate_id" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}')"
-          printf 'ARTHELLO_D163_CANDIDATE_BEFORE=%s\n' "$before_status"
+          printf 'ARTHELLO_D164_CANDIDATE_BEFORE=%s\n' "$before_status"
           if ! local_health; then
             if [ "$(docker inspect "$candidate_id" --format '{{.State.Running}}')" = true ]; then
               docker restart --time 20 "$candidate_id" >/dev/null
@@ -160,14 +162,189 @@ jobs:
             sleep 2
           done
           if [ "$ready" -ne 1 ]; then
-            docker inspect "$candidate_id" --format 'ARTHELLO_D163_CANDIDATE_FAILED status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} error={{json .State.Error}}'
+            docker inspect "$candidate_id" --format 'ARTHELLO_D164_CANDIDATE_FAILED status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} error={{json .State.Error}}'
             exit 1
           fi
-          printf 'ARTHELLO_D163_LOCAL_HEALTH=VERIFIED\n'
+          printf 'ARTHELLO_D164_LOCAL_HEALTH=VERIFIED\n'
+
+          pay_source_root="$GITHUB_WORKSPACE/deploy/v52/public/pay-assets"
+          pay_app="$pay_source_root/app.js"
+          pay_css="$pay_source_root/styles.css"
+          for asset in "$pay_app" "$pay_css"; do
+            test -f "$asset"
+            test ! -L "$asset"
+            test "$(stat -c '%U:%a:%h' "$asset")" = "$(id -un):644:1"
+            test "$(stat -c '%s' "$asset")" -gt 0
+            test "$(stat -c '%s' "$asset")" -le 1048576
+          done
+          test "$(sha256sum "$pay_app" | cut -d ' ' -f 1)" = "$PAY_APP_SHA256"
+          test "$(sha256sum "$pay_css" | cut -d ' ' -f 1)" = "$PAY_CSS_SHA256"
+
+          route_owner="$(docker exec "$CADDY_CONTAINER" stat -c '%u:%g' /data/external-routes.caddy)"
+          route_mode="$(docker exec "$CADDY_CONTAINER" stat -c '%a' /data/external-routes.caddy)"
+          [[ "$route_owner" =~ ^[0-9]+:[0-9]+$ ]]
+          test "$route_mode" = 600
+
+          caddy_asset_root="/data/arthello-pay-assets-$TARGET_RELEASE_SHA"
+          caddy_asset_stage="/data/.arthello-pay-assets-$TARGET_RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if docker exec -e ASSET_ROOT="$caddy_asset_root" "$CADDY_CONTAINER" sh -ceu 'test -e "$ASSET_ROOT"'; then
+            docker exec \
+              -e ASSET_ROOT="$caddy_asset_root" \
+              -e APP_SHA="$PAY_APP_SHA256" \
+              -e CSS_SHA="$PAY_CSS_SHA256" \
+              "$CADDY_CONTAINER" sh -ceu '
+                test -d "$ASSET_ROOT"
+                test ! -L "$ASSET_ROOT"
+                test -f "$ASSET_ROOT/app.js" && test ! -L "$ASSET_ROOT/app.js"
+                test -f "$ASSET_ROOT/styles.css" && test ! -L "$ASSET_ROOT/styles.css"
+                test "$(find "$ASSET_ROOT" -mindepth 1 -maxdepth 1 | wc -l | tr -d " ")" = 2
+                test "$(sha256sum "$ASSET_ROOT/app.js" | cut -d " " -f 1)" = "$APP_SHA"
+                test "$(sha256sum "$ASSET_ROOT/styles.css" | cut -d " " -f 1)" = "$CSS_SHA"
+              '
+          else
+            docker exec --user 0:0 \
+              -e ASSET_ROOT="$caddy_asset_root" \
+              -e ASSET_STAGE="$caddy_asset_stage" \
+              "$CADDY_CONTAINER" sh -ceu '
+                test ! -e "$ASSET_ROOT"
+                test ! -e "$ASSET_STAGE"
+                mkdir "$ASSET_STAGE"
+                chmod 0755 "$ASSET_STAGE"
+              '
+            docker cp "$pay_app" "$CADDY_CONTAINER:$caddy_asset_stage/app.js"
+            docker cp "$pay_css" "$CADDY_CONTAINER:$caddy_asset_stage/styles.css"
+            docker exec --user 0:0 \
+              -e ASSET_ROOT="$caddy_asset_root" \
+              -e ASSET_STAGE="$caddy_asset_stage" \
+              -e ROUTE_OWNER="$route_owner" \
+              -e APP_SHA="$PAY_APP_SHA256" \
+              -e CSS_SHA="$PAY_CSS_SHA256" \
+              "$CADDY_CONTAINER" sh -ceu '
+                test ! -e "$ASSET_ROOT"
+                test -d "$ASSET_STAGE" && test ! -L "$ASSET_STAGE"
+                test -f "$ASSET_STAGE/app.js" && test ! -L "$ASSET_STAGE/app.js"
+                test -f "$ASSET_STAGE/styles.css" && test ! -L "$ASSET_STAGE/styles.css"
+                test "$(find "$ASSET_STAGE" -mindepth 1 -maxdepth 1 | wc -l | tr -d " ")" = 2
+                test "$(sha256sum "$ASSET_STAGE/app.js" | cut -d " " -f 1)" = "$APP_SHA"
+                test "$(sha256sum "$ASSET_STAGE/styles.css" | cut -d " " -f 1)" = "$CSS_SHA"
+                chown "$ROUTE_OWNER" "$ASSET_STAGE" "$ASSET_STAGE/app.js" "$ASSET_STAGE/styles.css"
+                chmod 0755 "$ASSET_STAGE"
+                chmod 0644 "$ASSET_STAGE/app.js" "$ASSET_STAGE/styles.css"
+                sync
+                mv "$ASSET_STAGE" "$ASSET_ROOT"
+              '
+          fi
+          printf 'ARTHELLO_D164_PAY_ASSETS_STAGED=VERIFIED app=%s css=%s\n' "$PAY_APP_SHA256" "$PAY_CSS_SHA256"
+
+          route_before="$RUNNER_TEMP/external-routes.pre-d164-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.caddy"
+          route_after="$RUNNER_TEMP/external-routes.d164-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.caddy"
+          test ! -e "$route_before" && test ! -L "$route_before"
+          test ! -e "$route_after" && test ! -L "$route_after"
+          docker exec "$CADDY_CONTAINER" sh -ceu 'cat /data/external-routes.caddy' > "$route_before"
+          chmod 0600 "$route_before"
+          test "$(sha256sum "$route_before" | cut -d ' ' -f 1)" = "$public_route_sha"
+
+          python3 -I - "$route_before" "$route_after" "$candidate_name" "$caddy_asset_root" <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import sys
+
+          source_path, target_path, candidate, asset_root = sys.argv[1:]
+          assert re.fullmatch(r"arthello-direct-[1-9][0-9]*-[1-9][0-9]*", candidate)
+          assert re.fullmatch(r"/data/arthello-pay-assets-[a-f0-9]{40}", asset_root)
+          source = Path(source_path).read_text(encoding="utf-8")
+          upstream = candidate + ":8081"
+          old = f"""  @pay_backend path /api/* /pay-assets/*
+            handle @pay_backend {{
+              reverse_proxy {upstream}
+            }}"""
+          new = f"""  handle_path /pay-assets/* {{
+              root * {asset_root}
+              file_server
+            }}
+
+            @pay_api path /api/*
+            handle @pay_api {{
+              reverse_proxy {upstream}
+            }}"""
+          assert source.count("pay-188-225-38-55.sslip.io {") == 1
+          assert source.count(old) == 1
+          assert asset_root not in source
+          body = source.replace(old, new)
+          assert body.count(old) == 0
+          assert body.count(asset_root) == 1
+          descriptor = os.open(target_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+          with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+              stream.write(body)
+              stream.flush()
+              os.fsync(stream.fileno())
+          PY
+          test "$(stat -c '%U:%a:%h' "$route_after")" = "$(id -un):600:1"
+          active_route_sha="$(sha256sum "$route_after" | cut -d ' ' -f 1)"
+          [[ "$active_route_sha" =~ ^[a-f0-9]{64}$ ]]
+          test "$active_route_sha" != "$public_route_sha"
+
+          caddy_route_stage="/data/.external-routes.d164-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          caddy_route_backup="/data/external-routes.caddy.pre-d164-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          docker exec \
+            -e ROUTE_STAGE="$caddy_route_stage" \
+            -e ROUTE_BACKUP="$caddy_route_backup" \
+            "$CADDY_CONTAINER" sh -ceu '
+              test ! -e "$ROUTE_STAGE"
+              test ! -e "$ROUTE_BACKUP"
+            '
+          docker cp "$route_before" "$CADDY_CONTAINER:$caddy_route_backup"
+          docker cp "$route_after" "$CADDY_CONTAINER:$caddy_route_stage"
+          docker exec --user 0:0 \
+            -e ROUTE_STAGE="$caddy_route_stage" \
+            -e ROUTE_BACKUP="$caddy_route_backup" \
+            -e ROUTE_OWNER="$route_owner" \
+            -e OLD_SHA="$public_route_sha" \
+            -e NEW_SHA="$active_route_sha" \
+            "$CADDY_CONTAINER" sh -ceu '
+              test "$(sha256sum /data/external-routes.caddy | cut -d " " -f 1)" = "$OLD_SHA"
+              test "$(sha256sum "$ROUTE_BACKUP" | cut -d " " -f 1)" = "$OLD_SHA"
+              test "$(sha256sum "$ROUTE_STAGE" | cut -d " " -f 1)" = "$NEW_SHA"
+              chown "$ROUTE_OWNER" "$ROUTE_BACKUP" "$ROUTE_STAGE"
+              chmod 0600 "$ROUTE_BACKUP" "$ROUTE_STAGE"
+              sync
+              mv "$ROUTE_STAGE" /data/external-routes.caddy
+            '
+
+          route_pending=1
+          rollback_unverified_route() {
+            status=$?
+            if [ "$route_pending" = 1 ]; then
+              printf 'ARTHELLO_D164_ROUTE=RESTORING_PREVIOUS\n' >&2
+              docker exec --user 0:0 \
+                -e ROUTE_BACKUP="$caddy_route_backup" \
+                -e ROUTE_OWNER="$route_owner" \
+                -e OLD_SHA="$public_route_sha" \
+                -e NEW_SHA="$active_route_sha" \
+                "$CADDY_CONTAINER" sh -ceu '
+                  current="$(sha256sum /data/external-routes.caddy | cut -d " " -f 1)"
+                  if [ "$current" = "$NEW_SHA" ]; then
+                    restore="$ROUTE_BACKUP.restore"
+                    test ! -e "$restore"
+                    cp "$ROUTE_BACKUP" "$restore"
+                    chown "$ROUTE_OWNER" "$restore"
+                    chmod 0600 "$restore"
+                    mv "$restore" /data/external-routes.caddy
+                  else
+                    test "$current" = "$OLD_SHA"
+                  fi
+                ' || true
+              docker exec "$CADDY_CONTAINER" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+              docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+            fi
+            return "$status"
+          }
+          trap rollback_unverified_route EXIT
 
           docker exec "$CADDY_CONTAINER" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
           docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
-          test "$(docker exec "$CADDY_CONTAINER" sh -ceu 'sha256sum /data/external-routes.caddy | cut -d " " -f 1')" = "$public_route_sha"
+          test "$(docker exec "$CADDY_CONTAINER" sh -ceu 'sha256sum /data/external-routes.caddy | cut -d " " -f 1')" = "$active_route_sha"
 
           docker exec -i \
             -e PUBLIC_URL="$PUBLIC_URL" -e PAY_URL="$PAY_URL" -e SCHOOL_URL="$SCHOOL_URL" \
@@ -181,7 +358,7 @@ jobs:
             }
           };
           const summary = {};
-          const root = await get(process.env.PUBLIC_URL + '/?probe=d163');
+          const root = await get(process.env.PUBLIC_URL + '/?probe=d164');
           const rootAssets = [...root.body.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match => match[1]);
           summary.arthelloRoot = root.response?.status ?? 0;
           summary.arthelloAssets = rootAssets.length;
@@ -192,9 +369,9 @@ jobs:
           summary.arthelloHealthOk = (() => { try { const value = JSON.parse(health.body); return value.status === 'ok' && value.database === 'available'; } catch { return false; } })();
           summary.authMe = (await get(process.env.PUBLIC_URL + '/api/auth/me')).response?.status ?? 0;
           summary.forgedSettings = (await get(process.env.PUBLIC_URL + '/api/settings', { headers: { 'oai-authenticated-user-email': 'forged@example.invalid', 'x-arthello-role': 'OWNER' } })).response?.status ?? 0;
-          const login = await get(process.env.PUBLIC_URL + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: process.env.PUBLIC_URL }, body: JSON.stringify({ login: 'd163-invalid', password: 'deliberately-invalid' }) });
+          const login = await get(process.env.PUBLIC_URL + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: process.env.PUBLIC_URL }, body: JSON.stringify({ login: 'd164-invalid', password: 'deliberately-invalid' }) });
           summary.invalidLogin = login.response?.status ?? 0;
-          const cross = await get(process.env.PUBLIC_URL + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://invalid.example' }, body: JSON.stringify({ login: 'd163-invalid', password: 'deliberately-invalid' }) });
+          const cross = await get(process.env.PUBLIC_URL + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://invalid.example' }, body: JSON.stringify({ login: 'd164-invalid', password: 'deliberately-invalid' }) });
           summary.crossOrigin = cross.response?.status ?? 0;
           const wrongMethod = await get(process.env.PUBLIC_URL + '/api/auth/login');
           summary.wrongMethod = wrongMethod.response?.status ?? 0;
@@ -203,7 +380,7 @@ jobs:
           const school = await get(process.env.SCHOOL_URL + '/api/health');
           summary.schoolHealth = school.response?.status ?? 0;
           summary.schoolHealthOk = (() => { try { return JSON.parse(school.body).status === 'ok'; } catch { return false; } })();
-          const pay = await get(process.env.PAY_URL + '/?probe=d163-pay');
+          const pay = await get(process.env.PAY_URL + '/?probe=d164-pay');
           const payAssets = [...pay.body.matchAll(/(?:src|href)="(\/pay-assets\/[^"]+)"/g)].map(match => match[1]);
           summary.payRoot = pay.response?.status ?? 0;
           summary.payTitle = pay.body.includes('ArtHello Pay');
@@ -211,7 +388,7 @@ jobs:
           summary.payAssetStatuses = [];
           for (const path of [...new Set(payAssets)]) summary.payAssetStatuses.push((await get(process.env.PAY_URL + path)).response?.status ?? 0);
           summary.payAuthMe = (await get(process.env.PAY_URL + '/api/auth/me')).response?.status ?? 0;
-          const payLogin = await get(process.env.PAY_URL + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: process.env.PAY_URL }, body: JSON.stringify({ login: 'd163-invalid', password: 'deliberately-invalid' }) });
+          const payLogin = await get(process.env.PAY_URL + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: process.env.PAY_URL }, body: JSON.stringify({ login: 'd164-invalid', password: 'deliberately-invalid' }) });
           summary.payInvalidLogin = payLogin.response?.status ?? 0;
           summary.payWriteDenied = (await get(process.env.PAY_URL + '/api/payments/obligations', { method: 'POST', headers: { 'content-type': 'application/json', origin: process.env.PAY_URL }, body: '{}' })).response?.status ?? 0;
           console.log(JSON.stringify(summary));
@@ -223,10 +400,74 @@ jobs:
             && summary.payAuthMe === 401 && summary.payInvalidLogin === 401 && summary.payWriteDenied === 401;
           if (!ok) process.exit(1);
           NODE
-          printf 'ARTHELLO_D163_PUBLIC_AND_PAY=VERIFIED money_acceptance=disabled\n'
+          route_pending=0
+          trap - EXIT
+          printf 'ARTHELLO_D164_PUBLIC_AND_PAY=VERIFIED money_acceptance=disabled\n'
+
+          recovery_receipt="$state_root/pay-assets-recovery-$TARGET_RELEASE_SHA.json"
+          recovery_receipt_temp="$state_root/.pay-assets-recovery-$TARGET_RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+          test ! -e "$recovery_receipt" && test ! -L "$recovery_receipt"
+          test ! -e "$recovery_receipt_temp" && test ! -L "$recovery_receipt_temp"
+          verified_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          jq -nc \
+            --arg release "$TARGET_RELEASE_SHA" \
+            --arg tree "$TARGET_RELEASE_TREE" \
+            --arg originalRun "$TARGET_RUN_ID" \
+            --arg recoveryRun "$GITHUB_RUN_ID" \
+            --arg recoveryAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg candidate "$candidate_id" \
+            --arg oldRoute "$public_route_sha" \
+            --arg activeRoute "$active_route_sha" \
+            --arg assetRoot "$caddy_asset_root" \
+            --arg routeBackup "$caddy_route_backup" \
+            --arg app "$PAY_APP_SHA256" \
+            --arg css "$PAY_CSS_SHA256" \
+            --arg verifiedAt "$verified_at" '
+              {
+                schemaVersion: 1,
+                state: "verified",
+                protocol: "ARTHELLO_PAY_ASSET_RECOVERY_D164",
+                releaseSha: $release,
+                releaseTree: $tree,
+                originalRunId: $originalRun,
+                recoveryRunId: $recoveryRun,
+                recoveryRunAttempt: $recoveryAttempt,
+                candidateContainerId: $candidate,
+                previousRouteSha256: $oldRoute,
+                activeRouteSha256: $activeRoute,
+                assetRoot: $assetRoot,
+                routeBackup: $routeBackup,
+                assetSha256: {"app.js": $app, "styles.css": $css},
+                publicPayStatus: 200,
+                moneyAcceptanceEnabled: false,
+                fiscalizationEnabled: false,
+                verifiedAtUtc: $verifiedAt
+              }
+            ' > "$recovery_receipt_temp"
+          chmod 0600 "$recovery_receipt_temp"
+          ln "$recovery_receipt_temp" "$recovery_receipt"
+          rm "$recovery_receipt_temp"
+          sync "$recovery_receipt"
+          test "$(stat -c '%U:%a:%h' "$recovery_receipt")" = "$(id -un):600:1"
+          jq -e \
+            --arg release "$TARGET_RELEASE_SHA" \
+            --arg candidate "$candidate_id" \
+            --arg oldRoute "$public_route_sha" \
+            --arg activeRoute "$active_route_sha" \
+            --arg app "$PAY_APP_SHA256" \
+            --arg css "$PAY_CSS_SHA256" '
+              .schemaVersion == 1 and .state == "verified" and
+              .protocol == "ARTHELLO_PAY_ASSET_RECOVERY_D164" and
+              .releaseSha == $release and .candidateContainerId == $candidate and
+              .previousRouteSha256 == $oldRoute and .activeRouteSha256 == $activeRoute and
+              .assetSha256["app.js"] == $app and .assetSha256["styles.css"] == $css and
+              .publicPayStatus == 200 and .moneyAcceptanceEnabled == false and
+              .fiscalizationEnabled == false
+            ' "$recovery_receipt" >/dev/null
+          printf 'ARTHELLO_D164_RECOVERY_RECEIPT=VERIFIED route=%s\n' "$active_route_sha"
 
           test "$(docker ps -aq --filter "name=^/arthello-v52-activation-writer-$TARGET_RUN_ID-$TARGET_RUN_ATTEMPT$")" = ""
-          receipt="$RUNNER_TEMP/d163-bank-activation.json"
+          receipt="$RUNNER_TEMP/d164-bank-activation.json"
           docker run --rm \
             --name "arthello-v52-activation-writer-$TARGET_RUN_ID-$TARGET_RUN_ATTEMPT" \
             --user 1002:1000 --network none --read-only --cap-drop ALL \
@@ -244,6 +485,7 @@ jobs:
           ' "$receipt" >/dev/null
           printf 'ARTHELLO_TOCHKA_AUTOSYNC_ACTIVATION_V2=VERIFIED\n'
           printf 'candidate_id=%s\n' "$candidate_id" >> "$GITHUB_OUTPUT"
+          printf 'route_sha=%s\n' "$active_route_sha" >> "$GITHUB_OUTPUT"
           printf 'ARTHELLO_RELEASE_ACTIVE=%s\n' "$TARGET_RELEASE_SHA"
 
       - name: Final natural browser acceptance on recovered D162
@@ -269,7 +511,7 @@ jobs:
           [[ "$deploy_port" =~ ^[0-9]{1,5}$ ]]
           test "$deploy_port" -ge 1 && test "$deploy_port" -le 65535
 
-          ssh_dir="$RUNNER_TEMP/arthello-d163-school-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          ssh_dir="$RUNNER_TEMP/arthello-d164-school-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           test ! -e "$ssh_dir" && test ! -L "$ssh_dir"
           install -m 0700 -d "$ssh_dir"
           cleanup() { rm -f -- "$ssh_dir/id_ed25519" "$ssh_dir/known_hosts" "$ssh_dir/known_hosts.scan" "$ssh_dir/school.jsonl"; rmdir -- "$ssh_dir" >/dev/null 2>&1 || true; }
@@ -353,18 +595,19 @@ jobs:
             SCHOOL_DIAGNOSTIC_FILE="$diagnostic_file" \
             SCHOOL_REPAIR_RECEIPT_FILE="$repair_receipt" SCHOOL_REPAIR_CONFIG_SHA256="$repair_config" \
             python3 -I .github/scripts/r10-live-browser-acceptance.py
-          printf 'ARTHELLO_D163_AFTER_PUBLIC_BROWSER=VERIFIED\n'
+          printf 'ARTHELLO_D164_AFTER_PUBLIC_BROWSER=VERIFIED\n'
 
       - name: Recovery summary
         if: always()
         shell: bash
         run: |
           {
-            echo '## D163 held-candidate recovery'
+            echo '## D164 Pay asset recovery'
             echo
             echo "- Release: $TARGET_RELEASE_SHA"
             echo "- Original cutover: https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/$TARGET_RUN_ID/attempts/$TARGET_RUN_ATTEMPT"
             echo "- Candidate: ${{ steps.recover.outputs.candidate_id || 'not verified' }}"
+            echo "- Active route: ${{ steps.recover.outputs.route_sha || 'not verified' }}"
             echo "- Result: ${{ job.status }}"
             echo '- Snapshot restore and destructive cleanup: not performed'
             echo '- Real-money acceptance and fiscalization: disabled'
