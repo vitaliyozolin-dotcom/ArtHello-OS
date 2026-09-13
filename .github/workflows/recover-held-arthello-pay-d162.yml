@@ -4,7 +4,7 @@ name: Recover held ArtHello Pay D162
 'on':
   push:
     branches:
-      - codex/pay-d162-recovery-d163-20260913
+      - main
     paths:
       - .github/workflows/recover-held-arthello-pay-d162.yml
 
@@ -31,8 +31,9 @@ jobs:
   recover:
     if: >-
       github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
-      github.ref == 'refs/heads/codex/pay-d162-recovery-d163-20260913' &&
-      github.event.head_commit.message == 'D163: recover held D162 Pay candidate' &&
+      github.ref == 'refs/heads/main' &&
+      github.event.before == '5df015323455ea7e513a1386f840016cbb6c249c' &&
+      startsWith(github.event.head_commit.message, 'D163: recover held D162 Pay candidate') &&
       github.run_attempt == 1
     runs-on:
       - self-hosted
@@ -64,7 +65,8 @@ jobs:
           current_main="$(curl --fail --silent --show-error --max-time 20 \
             -H "Authorization: Bearer ${{ github.token }}" \
             https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
-          test "$current_main" = "$TARGET_RELEASE_SHA"
+          test "$current_main" = "$GITHUB_SHA"
+          test "$current_main" != "$TARGET_RELEASE_SHA"
 
           state_root="$HOME/.config/arthello/release-state"
           state_file="$state_root/candidate-acceptance-$TARGET_RELEASE_SHA.json"
@@ -321,14 +323,36 @@ jobs:
           [[ "$browser_fingerprint" =~ ^[a-f0-9]{64}$ ]]
           test -s "$repair_receipt"
 
-          env \
-            GITHUB_RUN_ID="$TARGET_RUN_ID" GITHUB_RUN_ATTEMPT="$TARGET_RUN_ATTEMPT" \
-            RELEASE_SHA="$TARGET_RELEASE_SHA" BROWSER_SOURCE_SHA="$TARGET_RELEASE_SHA" \
-            BROWSER_FINGERPRINT="$browser_fingerprint" BROWSER_PHASE=after \
+          browser_image_id="$(docker image inspect "arthello-e2e:$TARGET_RELEASE_SHA" --format '{{.Id}}')"
+          [[ "$browser_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$(docker image inspect "$browser_image_id" --format '{{.Config.User}}')" = 1000:1000
+          test "$(docker image inspect "$browser_image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$TARGET_RELEASE_SHA"
+          test "$(docker image inspect "$browser_image_id" --format '{{index .Config.Labels "org.arthello.role"}}')" = e2e-browser
+          computed_fingerprint="$(docker image inspect "$browser_image_id" | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq | sha256sum | cut -d ' ' -f 1)"
+          test "$computed_fingerprint" = "$browser_fingerprint"
+          precheck_node="$(command -v node || true)"
+          if [[ -z "$precheck_node" ]]; then
+            precheck_node="$(realpath "$RUNNER_TEMP/../..")/externals/node24/bin/node"
+          fi
+          test -x "$precheck_node"
+          "$precheck_node" -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(2)'
+          mapfile -t observed_before < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
+          test "${#observed_before[@]}" -eq 1
+          test "$(docker inspect "${observed_before[0]}" --format '{{.Id}}')" = "$candidate_id"
+
+          report="$RUNNER_TEMP/r10-browser-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-after.json"
+          test ! -e "$report" && test ! -L "$report"
+          CHECKED_SOURCE_SHA="$TARGET_RELEASE_SHA" BROWSER_IMAGE_ID="$browser_image_id" PRECHECK_NODE="$precheck_node" \
+            BROWSER_PHASE=after bash scripts/run-server-browser.sh | tee "$report"
+          mapfile -t observed_after < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
+          test "${#observed_after[@]}" -eq 1
+          test "$(docker inspect "${observed_after[0]}" --format '{{.Id}}')" = "$candidate_id"
+          BROWSER_REPORT_FILE="$report" OBSERVED_CANDIDATE_CONTAINER_ID="$candidate_id" \
+            RELEASE_SHA="$TARGET_RELEASE_SHA" BROWSER_PHASE=after \
             OBSERVED_LIVE_ARTHELLO_SHA="$TARGET_RELEASE_SHA" \
             SCHOOL_DIAGNOSTIC_FILE="$diagnostic_file" \
             SCHOOL_REPAIR_RECEIPT_FILE="$repair_receipt" SCHOOL_REPAIR_CONFIG_SHA256="$repair_config" \
-            python3 -I .github/scripts/run-r18-live-browser.py
+            python3 -I .github/scripts/r10-live-browser-acceptance.py
           printf 'ARTHELLO_D163_AFTER_PUBLIC_BROWSER=VERIFIED\n'
 
       - name: Recovery summary
