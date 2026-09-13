@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "D176: защищённый production-транспорт AlfaCRM",
+    "name": "D177: активация контролируемого импорта AlfaCRM",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -198,7 +198,11 @@
       "IMG_0248/IMG_0249: владелец потребовал убрать отдельный Pay из меню разделов и сообщил, что после ввода одной буквы фамилии мобильная клавиатура закрывается.",
       "D175 опубликован release 854a3c00823857d398b9c1965820e9ae9cc068d3: protected run 34786047645 завершён success, Verify D175 run 34785776113 завершён success.",
       "IMG_0242/IMG_0250/IMG_0251/IMG_0252: AlfaCRM wizard принимает адрес, e-mail и v2api key, но production-запрос завершается общей транспортной ошибкой до появления филиалов.",
-      "D176 PR484 переводит AlfaCRM на ограниченный Node/TLS service binding; 808/810 тестов вне известного managed-filesystem chown-сценария пройдены, два пропущены, production build и typecheck пройдены."
+      "D176 PR484 переводит AlfaCRM на ограниченный Node/TLS service binding; 808/810 тестов вне известного managed-filesystem chown-сценария пройдены, два пропущены, production build и typecheck пройдены.",
+      "D176 release dc0207909789d6f71ed070fbeed3eb11e948edd3 опубликован run 34787872813: synthetic AlfaCRM egress получил ожидаемый 401, rollback snapshot и 65 секунд стабильности подтверждены, внешний контур ArtHello/School/Pay=200.",
+      "IMG_0253/IMG_0254: владелец подключил новый ключ и сопоставил пять рабочих филиалов; Online School оставлена без загрузки.",
+      "IMG_0255: production-предпросмотр без записи нашёл 2887 семей/детей и 193 сотрудника; импорт остался закрыт только runtime-флагом.",
+      "D177 локально: 16/16 release-контрактов и 809/811 остальных тестов вне несовместимого с managed filesystem chown-файла прошли, 2 пропущены; typecheck, lint без ошибок и production build прошли."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
@@ -206,9 +210,9 @@
       "Объединённый код слит и проверен, но production cutover и реальная банковская/Alfa приёмка ещё не выполнены",
       "Фактический R6 gatewayUID995 не имеет sudo для host-установщика бэкапов; выбран R7 с меньшими требованиями к правам, требуется реализовать и проверить новый образ/worker/activation authority.",
       "School transport восстановлен и read-only проверен; естественный авторизованный Education→дневник SSO не подтверждён, облачный браузер возвращает502 до формы входа.",
-      "Customer.balance подтверждён официальным API как денежное поле и исправления слиты; актуальные tenant credentials/coverage/выборочная синхронизация и реальная приёмка ещё не подтверждены. Alfa financial movements явно blocked до проверенного контракта PayType direction.",
+      "Customer.balance подтверждён официальным API как денежное поле; Alfa financial movements остаются blocked до проверенного контракта PayType direction.",
       "Новая ArtHello версия ещё не переключена: нужны первая backup+restore, exact immutable release и пользовательская приёмка шести сценариев.",
-      "D176 ещё не подтверждён production preflight: до переключения live synthetic login должен доказать доступность tenant AlfaCRM без реального ключа; затем владелец перевыпускает v2api key, подключает аккаунт, сопоставляет филиал и проверяет read-only предпросмотр."
+      "D177 ещё не активирован в production: до переключения runtime должны пройти exact-main Verify, проверка сохранённого нового подключения, сопоставлений и двух read-only предпросмотров; затем владелец повторяет предпросмотр при истечении 30 минут и запускает выбранные операционные модули."
     ]
   },
   "stages": [
@@ -448,8 +452,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "Опубликовать D176: направить AlfaCRM через ограниченный Node/TLS transport, до остановки live доказать tenant egress синтетическим запросом и открыть владельцу подключение и сопоставление филиалов без обратной записи в AlfaCRM",
-    "evidence": "Exact SHA/tree, Quality и Verify, synthetic AlfaCRM egress до docker stop, rollback snapshot, 65 секунд стабильности, независимая production-проверка ArtHello/School/Pay и фактическое появление филиалов после ввода владельцем нового v2api key"
+    "result": "Опубликовать D177: после подтверждённого нового подключения, пяти сопоставлений и read-only counts активировать ALFACRM_IMPORT_ENABLED только для контролируемых модульных импортов, сохранив запрет обратной записи и финансовых проводок",
+    "evidence": "Manual owner confirmation, exact current-main Verify, runtime evidence connected+credential+mappings+families/staff previews до docker stop, свежий rollback snapshot, 65 секунд стабильности, независимая production-проверка ArtHello/School/Pay и фактическая доступность кнопки после обновления wizard"
   },
   "decisionLog": [
     {
@@ -2623,12 +2627,12 @@
     },
     {
       "project_id": "ARTHELLO-OS",
-      "status": "active",
+      "status": "completed",
       "approved_by": "Виталий Озолин — явное поручение в текущем чате",
       "approved_at": "2026-09-13",
       "owner": "Исполнитель ArtHello OS",
       "deadline": "текущий цикл исправления",
-      "review_at": "после фактического production-выпуска D176 и появления филиалов AlfaCRM",
+      "review_at": "завершено после production-выпуска D176, нового подключения, сопоставления филиалов и предпросмотра",
       "affected_stages": [
         16,
         18,
@@ -2645,7 +2649,9 @@
       "evidence": [
         "PR484 содержит отдельный alfacrm-transport.mjs, runtime binding, явное Docker packaging и route-level sanitized timeout/unavailable ответы.",
         "Транспортные, route, legacy rollout, lifecycle и Miniflare service-binding проверки пройдены; полный набор без известного managed-filesystem chown-сценария: 808 passed, 0 failed, 2 skipped.",
-        "Production workflow проверяет synthetic AlfaCRM login до первого docker stop, не читает тело ответа и не содержит реальный e-mail или ключ."
+        "Production workflow проверяет synthetic AlfaCRM login до первого docker stop, не читает тело ответа и не содержит реальный e-mail или ключ.",
+        "Release dc0207909789d6f71ed070fbeed3eb11e948edd3 опубликован run 34787872813: AlfaCRM egress=401, edge stability=65 секунд, ArtHello/School/Pay=200.",
+        "IMG_0253/IMG_0254 подтверждают новое подключение и пять сопоставлений; IMG_0255 подтверждает read-only counts 2887 семей/детей и 193 сотрудника."
       ],
       "assumptions": [
         "Адрес аккаунта остаётся https://arthellonew.s20.online без /v2api и параметров.",
@@ -2685,7 +2691,76 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Successful Quality/Verify, protected deployment receipt, ARTHELLO_D176_ALFACRM_EGRESS=VERIFIED, внешние ArtHello/School/Pay=200 и появление филиалов в wizard",
-          "status": "in_progress"
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "decision_id": "DEC-2026-09-13-85",
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "question": "Как снять production-блокировку импорта после подтверждённых подключения, филиалов и предпросмотра, не открывая неконтролируемую синхронизацию?",
+      "statement": "D177: ALFACRM_IMPORT_ENABLED активируется отдельным ручным owner-only workflow только на точном D176 production-образе. До остановки live workflow подтверждает успешную проверку подключения после D176, наличие зашифрованной credential-записи, минимум одно сопоставление, положительные read-only предпросмотры семей и сотрудников и успешный Verify текущего main. Каждый модуль по-прежнему требует собственный свежий preview token, зависимости соблюдаются, обратная запись в AlfaCRM отсутствует, финансовые проводки не создаются.",
+      "context": "После D176 владелец перевыпустил ключ, подключил tenant, сопоставил пять рабочих филиалов и получил read-only counts 2887 семей/детей и 193 сотрудника. Кнопки импорта остались disabled, потому что fail-closed runtime-флаг намеренно не был включён до этих доказательств.",
+      "rationale": "Условия предыдущего gate выполнены фактическим production-результатом. Отдельная конфигурационная активация сохраняет проверенный D176 image, делает свежий snapshot базы и допускает запись только в ArtHello OS после повторного предпросмотра; это уже и безопаснее, чем менять default в коде, и честнее, чем оставлять неработающую кнопку.",
+      "evidence": [
+        "D176 production run 34787872813 завершён success с AlfaCRM egress и внешними 200/200/200.",
+        "IMG_0253/IMG_0254: подключение и пять рабочих сопоставлений сохранены; один ненужный филиал исключён.",
+        "IMG_0255: предпросмотры завершены без записи, counts 2887 и 193.",
+        "D177 contract test сначала упал из-за отсутствующего workflow, затем прошёл после добавления owner confirmation, live evidence, snapshot, rollback и external gates; итоговые release-контракты 16/16 и приложение 809/811 вне chown-файла, 2 skipped."
+      ],
+      "assumptions": [
+        "Новый v2api key введён владельцем только в защищённое окно ArtHello OS и не передан в чат или CI.",
+        "Выбранные сопоставления на IMG_0253 соответствуют организационной структуре владельца.",
+        "Если preview token старше 30 минут к моменту активации, владелец повторно нажимает «Проверить данные» перед импортом.",
+        "Finance сохраняет только raw observations и остаётся без денежной проекции до подтверждённого PayType direction."
+      ],
+      "approved_by": "Виталий Озолин — сообщил о недоступной кнопке после фактического подключения, сопоставления и проверки",
+      "approved_at": "2026-09-13",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после production-активации D177 и первого завершённого импорта семей и сотрудников",
+      "affected_stages": [
+        16,
+        18,
+        22
+      ],
+      "dependencies": [
+        "DEC-2026-09-13-84 completed",
+        "D176 production run 34787872813",
+        "IMG_0253/IMG_0254 branch mappings",
+        "IMG_0255 read-only preview evidence"
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34787872813"
+      ],
+      "raw_deliberation_ref": "Владелец после успешного подключения и предпросмотров сообщил: «Импортировать не нажимается»; приложенные экраны показывают выполненные prerequisites и disabled import.",
+      "rejected_alternatives": [
+        {
+          "option": "Сделать импорт включённым по умолчанию в коде",
+          "reason": "Убирает fail-closed production gate для будущих tenant и не связывает активацию с фактическими доказательствами владельца.",
+          "reopen_condition": "только отдельное решение о постоянной политике onboarding после завершённого первого импорта"
+        },
+        {
+          "option": "Запустить импорт автоматически сразу после активации",
+          "reason": "Лишает владельца проверки количества и нарушает модульную последовательность с 30-минутным preview token.",
+          "reopen_condition": "нет"
+        },
+        {
+          "option": "Изменить переменную вручную на VPS без snapshot и receipt",
+          "reason": "Не оставляет воспроизводимого подтверждения, rollback и внешней проверки доступности.",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Проверить и опубликовать D177, подтвердить runtime-флаг, snapshot, rollback и внешний контур, затем открыть владельцу последовательный импорт семей и сотрудников",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "Successful exact-main Verify, manual protected activation receipt, ARTHELLO_D177_PREVIEW_EVIDENCE=VERIFIED, ARTHELLO_D177_PRODUCTION=VERIFIED и ARTHELLO_D177_EXTERNAL=VERIFIED",
+          "status": "open"
         }
       ]
     }
