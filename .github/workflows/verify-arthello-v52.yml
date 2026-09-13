@@ -544,9 +544,12 @@ jobs:
           grep -F 'SCHOOL_DIARY_ALLOWED_ORIGINS' deploy/v52/src/production/runtime-server.mjs >/dev/null
           grep -F 'OPENAI_OCR_MODEL' deploy/v52/src/production/runtime-server.mjs >/dev/null
           grep -F 'TBANK_EGRESS_IP' deploy/v52/src/production/runtime-server.mjs >/dev/null
-          grep -F 'serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport(), BACKUP_TRANSPORT: createBackupTransport() }' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'TOCHKA_TRANSPORT: createTochkaTransport()' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'BACKUP_TRANSPORT: createBackupTransport()' deploy/v52/src/production/runtime-server.mjs >/dev/null
+          grep -F 'ALFACRM_TRANSPORT: createAlfaCrmTransport()' deploy/v52/src/production/runtime-server.mjs >/dev/null
           grep -F 'return transport.fetch(input, { ...init, redirect: "manual" });' deploy/v52/src/app/api/integration-actions/route.ts >/dev/null
           test -s deploy/v52/src/production/tochka-transport.mjs
+          test -s deploy/v52/src/production/alfacrm-transport.mjs
           grep -F 'const responseBody = await readBoundedResponseBody(upstream);' deploy/v52/src/production/tochka-transport.mjs >/dev/null
           grep -F 'workerd reaches the Node service binding through its supported internal redirect mode' deploy/v52/src/tests/tochka-node-transport.test.mjs >/dev/null
           if grep -E 'CENTRAL_ACCESS_SECRET:[[:space:]]*process\.env\.CENTRAL_ACCESS_SECRET([[:space:],}]|$)' deploy/v52/src/production/runtime-server.mjs; then
@@ -570,6 +573,7 @@ jobs:
           grep -F 'NODE_EXTRA_CA_CERTS=/app/production/russian-trusted-root-ca.pem' deploy/v52/Dockerfile >/dev/null
           grep -F 'COPY deploy/v52/certificates/russian-trusted-root-ca.pem /app/production/russian-trusted-root-ca.pem' deploy/v52/Dockerfile >/dev/null
           grep -F 'COPY --from=application /app/production/tochka-transport.mjs /app/production/tochka-transport.mjs' deploy/v52/Dockerfile >/dev/null
+          grep -F 'COPY --from=application /app/production/alfacrm-transport.mjs /app/production/alfacrm-transport.mjs' deploy/v52/Dockerfile >/dev/null
           if grep -E '^FROM node:24-bookworm-slim AS|npm install .*miniflare' deploy/v52/Dockerfile; then
             echo 'Unpinned runtime dependency installation is forbidden' >&2
             exit 1

@@ -86,7 +86,7 @@ async function setup(t) {
 }
 
 function mockRecords(byPath, observe = () => {}) {
-  globalThis.fetch = async (url, init) => {
+  const upstream = async (url, init) => {
     const path = new URL(String(url)).pathname.replace('/v2api/', '');
     const body = init?.body ? JSON.parse(init.body) : {};
     observe(path, body, init);
@@ -95,6 +95,13 @@ function mockRecords(byPath, observe = () => {}) {
     if (typeof value === 'function') return value(body, url, init);
     return Response.json({ items: value, total: value.length });
   };
+  globalThis.fetch = upstream;
+  harness.env.ALFACRM_TRANSPORT = { fetch: async request => upstream(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: await request.text(),
+    redirect: request.redirect,
+  }) };
 }
 
 async function importSnapshot(module, records, { mappings, token, body = {} } = {}) {

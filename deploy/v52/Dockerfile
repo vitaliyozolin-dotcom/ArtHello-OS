@@ -34,6 +34,7 @@ COPY --from=application /app/dist /app/dist
 COPY --from=application /app/production/runtime-server.mjs /app/production/runtime-server.mjs
 COPY --from=application /app/production/tochka-transport.mjs /app/production/tochka-transport.mjs
 COPY --from=application /app/production/backup-transport.mjs /app/production/backup-transport.mjs
+COPY --from=application /app/production/alfacrm-transport.mjs /app/production/alfacrm-transport.mjs
 COPY --from=application /app/production/tochka-autosync-timer.mjs /app/production/tochka-autosync-timer.mjs
 COPY --from=runtime-dependencies /runtime/node_modules /app/node_modules
 COPY deploy/v52/certificates/russian-trusted-root-ca.pem /app/production/russian-trusted-root-ca.pem

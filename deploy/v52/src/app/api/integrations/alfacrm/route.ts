@@ -67,6 +67,7 @@ type Credentials = { email: string; apiKey: string; appKey: string };
 type AlfaSession = Credentials & { endpoint: string; token: string };
 type FetchedRecord = { remoteBranchId: string; item: JsonRecord };
 type RequestContext = NonNullable<Awaited<ReturnType<typeof getAuthenticatedRequestContext>>>;
+type RuntimeFetcher = { fetch: (request: Request) => Promise<Response> };
 
 let requestTail: Promise<void> = Promise.resolve();
 let mutationTail: Promise<void> = Promise.resolve();
@@ -638,9 +639,36 @@ async function alfaFetch(input: string, init: RequestInit) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      // workerd supports only follow/manual. Never follow a redirect with the
-      // API key or token, including redirects to another allowlisted tenant.
-      const response = await fetch(input, { ...init, signal: controller.signal, cache: "no-store", redirect: "manual" });
+      const transport = (env as unknown as { ALFACRM_TRANSPORT?: RuntimeFetcher }).ALFACRM_TRANSPORT;
+      if (!transport) {
+        throw new AlfaApiError("Серверный канал AlfaCRM не настроен. Подключение не изменено.", 503);
+      }
+      let response: Response;
+      try {
+        // The internal hop uses workerd's supported manual mode. The Node
+        // transport independently validates the tenant, path, method and
+        // headers, then also refuses to follow an upstream redirect.
+        response = await transport.fetch(new Request(input, {
+          ...init,
+          signal: controller.signal,
+          cache: "no-store",
+          redirect: "manual",
+        }));
+      } catch {
+        if (controller.signal.aborted) {
+          throw new AlfaApiError("Сервер ArtHello не дождался ответа AlfaCRM. Подключение не изменено; повторите после восстановления связи.", 504);
+        }
+        throw new AlfaApiError("Сервер ArtHello не смог установить защищённое соединение с AlfaCRM. Подключение не изменено; требуется восстановить связь на сервере.", 502);
+      }
+      const transportFailure = response.headers.get("x-arthello-upstream-error");
+      if (transportFailure === "timeout") {
+        await response.body?.cancel();
+        throw new AlfaApiError("Сервер ArtHello не дождался ответа AlfaCRM. Подключение не изменено; повторите после восстановления связи.", 504);
+      }
+      if (transportFailure === "unavailable") {
+        await response.body?.cancel();
+        throw new AlfaApiError("Сервер ArtHello не смог установить защищённое соединение с AlfaCRM. Подключение не изменено; требуется восстановить связь на сервере.", 502);
+      }
       if (response.status >= 300 && response.status < 400) {
         await response.body?.cancel();
         throw new AlfaApiError("AlfaCRM перенаправила запрос. Проверьте адрес аккаунта; данные доступа на другой адрес не отправлялись.");

@@ -61,7 +61,7 @@ async function setup(t, legacy = legacySetup) {
 }
 
 function mockUpstream({ authStatus = 200, branches = [{ id: 7, name: 'Remote school', is_active: 1 }], redirect = null } = {}) {
-  globalThis.fetch = async (url, init) => {
+  const upstream = async (url, init) => {
     const path = new URL(String(url)).pathname;
     fixture.calls.push({ path, redirect: init.redirect, body: JSON.parse(init.body ?? '{}') });
     if (redirect !== null) return new Response(null, { status: redirect, headers: { location: 'https://unexpected.example.test' } });
@@ -69,6 +69,13 @@ function mockUpstream({ authStatus = 200, branches = [{ id: 7, name: 'Remote sch
     assert.ok(path.endsWith('/branch/index'), `Unexpected external endpoint ${path}`);
     return Response.json({ items: branches, total: branches.length });
   };
+  globalThis.fetch = upstream;
+  fixture.env.ALFACRM_TRANSPORT = { fetch: async request => upstream(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: await request.text(),
+    redirect: request.redirect,
+  }) };
 }
 
 const get = () => route.GET(new Request('https://arthello.example.test/api/integrations/alfacrm'));
@@ -186,6 +193,37 @@ test('Alfa transport uses manual redirects and rejects every redirect response w
   }
 });
 
+test('production route sends AlfaCRM requests through the protected Node binding', async t => {
+  await setup(t);
+  const calls = [];
+  fixture.env.ALFACRM_TRANSPORT = { fetch: async request => {
+    const path = new URL(request.url).pathname;
+    calls.push(path);
+    if (path.endsWith('/auth/login')) return Response.json({ token: 'synthetic-alfa-auth-token' });
+    return Response.json({ items: [{ id: 7, name: 'Remote school', is_active: 1 }], total: 1 });
+  } };
+  globalThis.fetch = async () => { throw new Error('worker fetch must not be used'); };
+
+  const response = await connect();
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.deepEqual(calls, ['/v2api/auth/login', '/v2api/branch/index']);
+});
+
+test('route returns a precise sanitized message when AlfaCRM Node transport times out', async t => {
+  await setup(t);
+  fixture.env.ALFACRM_TRANSPORT = { fetch: async () => new Response(
+    JSON.stringify({ error: 'upstream_timeout' }),
+    { status: 504, headers: { 'content-type': 'application/json', 'x-arthello-upstream-error': 'timeout' } },
+  ) };
+  globalThis.fetch = async () => { throw new Error('worker fetch must not be used'); };
+
+  const response = await connect();
+  assert.equal(response.status, 504);
+  assert.deepEqual(await response.json(), {
+    error: 'Сервер ArtHello не дождался ответа AlfaCRM. Подключение не изменено; повторите после восстановления связи.',
+  });
+});
+
 test('actual Miniflare executes the route transport and rejects redirects before a second upstream request', async t => {
   // The real workerd Request parser is essential here: Node accepts redirect:error,
   // whereas workerd rejects it before making an outgoing request.
@@ -204,7 +242,7 @@ test('actual Miniflare executes the route transport and rejects redirects before
   const outgoing = [];
   const runtime = new Miniflare({
     modules: true, cf: false, telemetry: { enabled: false }, compatibilityDate: '2026-05-15',
-    script: `let requestTail=Promise.resolve();let lastRequestStartedAt=0;${interval}${timeout}
+    script: `let requestTail=Promise.resolve();let lastRequestStartedAt=0;const env={ALFACRM_TRANSPORT:{fetch:request=>fetch(request)}};${interval}${timeout}
       class AlfaApiError extends Error {}
       ${transport}
       export default { async fetch() { try { const response=await alfaFetch('https://upstream.fixture.invalid/v2api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});return Response.json({upstreamStatus:response.status}); } catch(error) { return Response.json({error:error.message},{status:502}); } } };`,

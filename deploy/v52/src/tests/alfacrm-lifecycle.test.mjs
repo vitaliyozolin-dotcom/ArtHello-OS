@@ -86,7 +86,7 @@ async function setup(t) {
 }
 
 function mockRecords(byPath, observe = () => {}) {
-  globalThis.fetch = async (url, init) => {
+  const upstream = async (url, init) => {
     const path = new URL(String(url)).pathname.replace('/v2api/', '');
     const body = init?.body ? JSON.parse(init.body) : {};
     observe(path, body, init);
@@ -95,6 +95,13 @@ function mockRecords(byPath, observe = () => {}) {
     if (typeof value === 'function') return value(body, url, init);
     return Response.json({ items: value, total: value.length });
   };
+  globalThis.fetch = upstream;
+  harness.env.ALFACRM_TRANSPORT = { fetch: async request => upstream(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: await request.text(),
+    redirect: request.redirect,
+  }) };
 }
 
 async function importSnapshot(module, records, { mappings, token, body = {} } = {}) {
@@ -142,6 +149,7 @@ async function captureRuntimeBindings(optionalFlag) {
     './tochka-transport.mjs': adapter('export const createTochkaTransport=()=>({fixture:true});'),
     './tochka-autosync-timer.mjs': adapter('export const startTochkaAutosyncTimer=({enabled,secret})=>{if(enabled!==false||secret!=="")throw new Error("Runtime fixture must keep Tochka autosync disabled");return {stop(){}};};'),
     './backup-transport.mjs': adapter('export const createBackupTransport=()=>({fixture:"closed-backup-transport",fetch(){throw new Error("Runtime fixture attempted a backup operation");}});'),
+    './alfacrm-transport.mjs': adapter('export const createAlfaCrmTransport=()=>({fixture:"protected-alfacrm-transport",fetch(){throw new Error("Runtime fixture attempted an AlfaCRM operation");}});'),
   };
   const runtimeSource = readFileSync(resolve('production/runtime-server.mjs'), 'utf8')
     .replace(/from\s+["']([^"']+)["']/g, (_all, name) => {
@@ -150,17 +158,19 @@ async function captureRuntimeBindings(optionalFlag) {
     });
   await import(adapter(`const console={log:()=>{}};\n${runtimeSource}\n//# sourceURL=alfacrm-runtime-fixture.mjs`));
   assert.ok(fixture.options, 'runtime instantiated Miniflare with the captured worker configuration');
-  return fixture.options.bindings;
+  return fixture.options;
 }
 
 test('production runtime passes a closed AlfaCRM import binding when its environment flag is absent', async () => {
-  const bindings = await captureRuntimeBindings({});
-  assert.equal(bindings.ALFACRM_IMPORT_ENABLED, '');
+  const options = await captureRuntimeBindings({});
+  assert.equal(options.bindings.ALFACRM_IMPORT_ENABLED, '');
+  assert.equal(options.serviceBindings.ALFACRM_TRANSPORT.fixture, 'protected-alfacrm-transport');
 });
 
 test('production runtime forwards an explicitly enabled AlfaCRM import binding into the worker', async () => {
-  const bindings = await captureRuntimeBindings({ ALFACRM_IMPORT_ENABLED: 'true' });
-  assert.equal(bindings.ALFACRM_IMPORT_ENABLED, 'true');
+  const options = await captureRuntimeBindings({ ALFACRM_IMPORT_ENABLED: 'true' });
+  assert.equal(options.bindings.ALFACRM_IMPORT_ENABLED, 'true');
+  assert.equal(options.serviceBindings.ALFACRM_TRANSPORT.fixture, 'protected-alfacrm-transport');
 });
 
 test('assigned DIRECTOR and INTEGRATIONS can reach POST; reader assignments do not grant writes', async t => {
@@ -484,7 +494,10 @@ test('AlfaCRM endpoint allowlist and redirect rejection preserve transport bound
   for (const endpoint of ['https://127.0.0.1', 'https://evil.example', 'https://tenant.s20.online/other', 'https://u:p@tenant.s20.online', 'http://tenant.s20.online', 'https://tenant.s20.online.evil.example']) assert.throws(() => route.normalizeEndpoint(endpoint));
   assert.equal(route.normalizeEndpoint('https://tenant.s20.online'), 'https://tenant.s20.online');
   let observed;
-  globalThis.fetch = async (_url, init) => { observed = init; return Response.json({ items: [] }); };
+  harness.env.ALFACRM_TRANSPORT = { fetch: async request => {
+    observed = { redirect: request.redirect };
+    return Response.json({ items: [] });
+  } };
   await route.alfaFetch('https://tenant.s20.online/v2api/branch/index', { headers: { 'X-ALFACRM-TOKEN': 'fixture-token' } });
   assert.equal(observed.redirect, 'manual');
 });

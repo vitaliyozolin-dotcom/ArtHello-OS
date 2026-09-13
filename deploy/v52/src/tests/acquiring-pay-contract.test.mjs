@@ -89,12 +89,13 @@ test("D175 keeps Pay behind Acquiring and preserves the focused family search", 
   assert.equal((customerLoader.match(/refreshCustomerResults\(\)/g) ?? []).length, 2);
 });
 
-test("D175 deployment validates stable public edge and Pay boundary without payment secrets", async () => {
+test("D176 deployment validates AlfaCRM egress, stable public edge and Pay boundary without secrets", async () => {
   const workflow = await source("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
-  assert.match(workflow, /D175: keep Pay inside Acquiring and preserve mobile focus/);
-  assert.match(workflow, /ARTHELLO_D175_PRODUCTION=VERIFIED/);
+  assert.match(workflow, /D176: restore AlfaCRM production transport/);
+  assert.match(workflow, /ARTHELLO_D176_ALFACRM_EGRESS=VERIFIED/);
+  assert.match(workflow, /ARTHELLO_D176_PRODUCTION=VERIFIED/);
   assert.match(workflow, /docker restart --time 20 "\$CADDY_CONTAINER"/);
-  assert.match(workflow, /ARTHELLO_D175_EXTERNAL=VERIFIED/);
+  assert.match(workflow, /ARTHELLO_D176_EXTERNAL=VERIFIED/);
   assert.match(workflow, /bank_accounts/);
   assert.match(workflow, /balance_minor is not null/);
   assert.match(workflow, /eligiblePayAdministrators/);
