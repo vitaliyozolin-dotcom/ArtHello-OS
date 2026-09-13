@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "D176: защищённый production-транспорт AlfaCRM",
+    "name": "D177: компактные остатки и мобильная банковская история",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -198,7 +198,8 @@
       "IMG_0248/IMG_0249: владелец потребовал убрать отдельный Pay из меню разделов и сообщил, что после ввода одной буквы фамилии мобильная клавиатура закрывается.",
       "D175 опубликован release 854a3c00823857d398b9c1965820e9ae9cc068d3: protected run 34786047645 завершён success, Verify D175 run 34785776113 завершён success.",
       "IMG_0242/IMG_0250/IMG_0251/IMG_0252: AlfaCRM wizard принимает адрес, e-mail и v2api key, но production-запрос завершается общей транспортной ошибкой до появления филиалов.",
-      "D176 PR484 переводит AlfaCRM на ограниченный Node/TLS service binding; 808/810 тестов вне известного managed-filesystem chown-сценария пройдены, два пропущены, production build и typecheck пройдены."
+      "D176 PR484 переводит AlfaCRM на ограниченный Node/TLS service binding; 808/810 тестов вне известного managed-filesystem chown-сценария пройдены, два пропущены, production build и typecheck пройдены.",
+      "IMG_0245/IMG_0246/IMG_0247 и референсы IMG_0243/IMG_0241/IMG_0244: владелец потребовал компактные обороты, аккуратные остатки по счетам и банковскую историю без горизонтального скролла."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
@@ -448,8 +449,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "Опубликовать D176: направить AlfaCRM через ограниченный Node/TLS transport, до остановки live доказать tenant egress синтетическим запросом и открыть владельцу подключение и сопоставление филиалов без обратной записи в AlfaCRM",
-    "evidence": "Exact SHA/tree, Quality и Verify, synthetic AlfaCRM egress до docker stop, rollback snapshot, 65 секунд стабильности, независимая production-проверка ArtHello/School/Pay и фактическое появление филиалов после ввода владельцем нового v2api key"
+    "result": "Опубликовать D177: один компактный блок оборотов, плотный список счетов и вертикальную банковскую историю по датам без горизонтального скролла",
+    "evidence": "D177 UI-контракты, системный verifier, exact SHA/tree, Quality и Verify, сохранённый AlfaCRM egress gate, rollback snapshot, 65 секунд стабильности и независимая production-проверка ArtHello/School/Pay"
   },
   "decisionLog": [
     {
@@ -2623,7 +2624,7 @@
     },
     {
       "project_id": "ARTHELLO-OS",
-      "status": "active",
+      "status": "completed",
       "approved_by": "Виталий Озолин — явное поручение в текущем чате",
       "approved_at": "2026-09-13",
       "owner": "Исполнитель ArtHello OS",
@@ -2645,7 +2646,8 @@
       "evidence": [
         "PR484 содержит отдельный alfacrm-transport.mjs, runtime binding, явное Docker packaging и route-level sanitized timeout/unavailable ответы.",
         "Транспортные, route, legacy rollout, lifecycle и Miniflare service-binding проверки пройдены; полный набор без известного managed-filesystem chown-сценария: 808 passed, 0 failed, 2 skipped.",
-        "Production workflow проверяет synthetic AlfaCRM login до первого docker stop, не читает тело ответа и не содержит реальный e-mail или ключ."
+        "Production workflow проверяет synthetic AlfaCRM login до первого docker stop, не читает тело ответа и не содержит реальный e-mail или ключ.",
+        "Release dc0207909789d6f71ed070fbeed3eb11e948edd3 опубликован protected run 34787872813: AlfaCRM egress=401, snapshot, 4 счёта, 4 остатка, Pay grant, read-only sync, 65 секунд стабильности и внешние ArtHello/School/Pay=200 подтверждены."
       ],
       "assumptions": [
         "Адрес аккаунта остаётся https://arthellonew.s20.online без /v2api и параметров.",
@@ -2685,6 +2687,66 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Successful Quality/Verify, protected deployment receipt, ARTHELLO_D176_ALFACRM_EGRESS=VERIFIED, внешние ArtHello/School/Pay=200 и появление филиалов в wizard",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — явное поручение в текущем чате",
+      "approved_at": "2026-09-13",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска D177",
+      "affected_stages": [
+        4,
+        20,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Владелец показал мобильный экран «Деньги» и потребовал сделать большие плашки оборотов и остатки по счетам аккуратнее по принципу Точки, а широкую таблицу заменить удобной историей операций.",
+      "decision_id": "DEC-2026-09-13-85",
+      "question": "Как сделать банковский обзор компактным и убрать горизонтальный скролл, не меняя зафиксированный источник финансовых данных?",
+      "statement": "D177: раздел «Деньги» сохраняет единственный банковский источник и границы D172, показывает один компактный итог оборотов, плотные строки счетов и вертикальную историю операций, сгруппированную по датам. Банковская вкладка не использует широкую таблицу и не требует горизонтальной прокрутки на мобильном устройстве.",
+      "context": "Четыре равнозначные KPI-карточки и четыре высокие карточки счетов расходуют экран, а пятиколоночный реестр скрывает сумму и статус справа. В Точке приоритет отдан балансу, короткой строке счета и вертикальной истории.",
+      "rationale": "Один визуальный итог быстрее отвечает на вопрос о движении денег, компактные счета позволяют сравнить остатки, а дата-группа и адаптивная строка сохраняют контрагента, назначение, сумму и статусы без боковой прокрутки.",
+      "evidence": [
+        "FinanceWorkspace содержит D177_MONEY_MOBILE_HISTORY, единый ahFinancePulse, компактные ahFinanceBankAccount и сгруппированный ahFinanceBankHistory.",
+        "Системный verifier и отдельные D177-контракты проверяют отсутствие широкой таблицы в банковской вкладке и мобильную компоновку.",
+        "Production workflow сохраняет AlfaCRM synthetic egress, D175 Pay, счета, остатки и read-only синхронизацию без чтения секретов."
+      ],
+      "assumptions": [
+        "Суммы, число операций и остатки продолжают поступать из зафиксированного D172 read-model.",
+        "Визуальный принцип Точки применяется без копирования тёмной темы или фирменной графики банка.",
+        "Реальные платежи, исходящие банковские операции и фискализация остаются выключены."
+      ],
+      "dependencies": [
+        "D172 canonical banking source and module boundaries",
+        "D175 stable Pay navigation and mobile family search",
+        "D176 bounded AlfaCRM production transport",
+        "Explicit owner instruction 2026-09-13"
+      ],
+      "source_links": [],
+      "rejected_alternatives": [
+        {
+          "option": "Сохранить пятиколоночную таблицу и уменьшить шрифт",
+          "reason": "Не устраняет горизонтальный скролл и ухудшает читаемость на мобильном устройстве.",
+          "reopen_condition": "только для отдельного широкого desktop-реестра"
+        },
+        {
+          "option": "Перенести остатки обратно в «Эквайринг»",
+          "reason": "Нарушает постоянную границу D172: остатки являются банковским фактом раздела «Деньги», а не клиентским эквайрингом.",
+          "reopen_condition": "только новое явное решение владельца о границах модулей"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Выпустить exact D177 и подтвердить компактные итоги, счета, историю без горизонтального скролла и сохранность production-данных",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "TypeScript/build, D177 contracts, exact hosted image, protected receipt, 65-second stability and independent external probe",
           "status": "in_progress"
         }
       ]

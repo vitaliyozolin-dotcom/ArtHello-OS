@@ -72,7 +72,8 @@ requireText(finance, "ahFinancePage", "finance workspace is not mounted on the d
 requireText(finance, "<PageContainer", "finance page container is missing");
 requireText(finance, "<PageHeader", "finance page header is missing");
 requireText(finance, "<Tabs", "finance tabs are hidden by an empty-state branch");
-requireText(finance, "<KpiCard", "finance registry KPI cards are missing");
+requireText(finance, 'data-d177-marker="D177_MONEY_MOBILE_HISTORY"', "finance compact turnover summary is missing");
+requireText(finance, 'className="ahFinanceBankHistory"', "finance mobile bank history is missing");
 requireText(finance, "Операций за период пока нет", "finance empty register is not honest");
 forbid(finance, /\bfinance-page\b/, "legacy finance workspace wrapper remains");
 forbid(finance, /if\s*\(\s*!\s*data\.operations\.length\s*\)\s*(?:\{[\s\S]{0,160}?\breturn\b|return\b)/, "finance workspace still collapses when empty");
