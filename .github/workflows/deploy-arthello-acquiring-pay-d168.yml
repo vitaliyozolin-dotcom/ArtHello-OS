@@ -109,15 +109,23 @@ jobs:
             ' "$evidence" >/dev/null
           gzip -t "$archive"
           load_log="$RUNNER_TEMP/d168-docker-load.log"
-          docker image load --input "$archive" >"$load_log" 2>&1 || { sed -n '1,160p' "$load_log" >&2; exit 1; }
+          if ! docker image load --input "$archive" >"$load_log" 2>&1; then
+            sed -n '1,160p' "$load_log" >&2
+            exit 1
+          fi
           image="arthello-v52-verify:$RELEASE_SHA"
           image_id="$(docker image inspect "$image" --format '{{.Id}}')"
-          test "$image_id" = "$(jq -er '.imageId' "$evidence")"
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          expected_fingerprint="$(jq -er '.runtimeFingerprintSha256' "$evidence")"
+          actual_fingerprint="$(docker image inspect "$image_id" \
+            | jq -cS -f deploy/v52/maintenance/image-runtime-fingerprint.jq \
+            | sha256sum | cut -d ' ' -f 1)"
+          test "$actual_fingerprint" = "$expected_fingerprint"
           test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$RELEASE_SHA"
           test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$tree"
           test "$(docker image inspect "$image_id" --format '{{.Config.User}}')" = node
           printf 'image_id=%s\ntree=%s\n' "$image_id" "$tree" >> "$GITHUB_OUTPUT"
-          printf 'ARTHELLO_D168_HOSTED_IMAGE=VERIFIED id=%s\n' "$image_id"
+          printf 'ARTHELLO_D168_HOSTED_IMAGE=VERIFIED id=%s runtime_fingerprint=%s\n' "$image_id" "$actual_fingerprint"
 
       - name: Snapshot, switch candidate and publish Pay assets
         id: publish
