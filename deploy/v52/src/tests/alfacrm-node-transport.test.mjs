@@ -120,7 +120,7 @@ test("production runtime registers and packages the protected AlfaCRM transport 
 });
 
 test("D176 release proves AlfaCRM egress without real credentials before stopping production", () => {
-  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
+  const workflow = sourceText("./contract-fixtures/deploy-d176.yml");
   const egressProof = workflow.indexOf("ARTHELLO_D176_ALFACRM_EGRESS=VERIFIED");
   const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
 
@@ -129,4 +129,26 @@ test("D176 release proves AlfaCRM egress without real credentials before stoppin
   assert.match(workflow, /import \{ createAlfaCrmTransport \} from "\.\/production\/alfacrm-transport\.mjs"/);
   assert.match(workflow, /api_key: "synthetic-release-probe"/);
   assert.doesNotMatch(workflow, /@arthello\.ru|buh@/i);
+});
+
+test("D177 activates controlled AlfaCRM imports only after explicit owner confirmation and preview evidence", () => {
+  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml");
+  const evidence = workflow.indexOf("ARTHELLO_D177_PREVIEW_EVIDENCE=VERIFIED");
+  const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
+
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /confirmation:/);
+  assert.match(workflow, /ACTIVATE ALFACRM IMPORT/);
+  assert.match(workflow, /environment: production-ru/);
+  assert.match(workflow, /runs-on:\s*\[self-hosted, linux, x64, arthello-gateway\]/);
+  assert.match(workflow, /ALFACRM_IMPORT_ENABLED=true/);
+  assert.match(workflow, /connected and credential_stored and mapping_count >= 1/);
+  assert.match(workflow, /families\["status"\] == "previewed" and families\["previewCount"\] > 0/);
+  assert.match(workflow, /staff\["status"\] == "previewed" and staff\["previewCount"\] > 0/);
+  assert.match(workflow, /lastCheckedAt/);
+  assert.ok(evidence > 0 && liveStop > evidence, "preview evidence must pass before the live container is stopped");
+  assert.match(workflow, /cmp -s <\(sort "\$runtime_env"\) "\$candidate_env"/);
+  assert.match(workflow, /production-d177-\$GITHUB_SHA\.json/);
+  assert.match(workflow, /ARTHELLO_D177_EXTERNAL=VERIFIED arthello=200 school=200 pay=200/);
+  assert.doesNotMatch(workflow, /@arthello\.ru|buh@|api_key\s*:/i);
 });
