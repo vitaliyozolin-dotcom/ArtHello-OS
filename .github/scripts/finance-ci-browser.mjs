@@ -58,7 +58,11 @@ try {
   await page.getByLabel('Пароль',{exact:true}).fill(readFileSync('/run/secrets/fixture-password','utf8').trim());
   const login=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/auth/login');
   await page.getByRole('button',{name:'Войти',exact:true}).click();assert.equal((await login).status(),200);
-  stage='finance_navigation';await page.getByRole('link',{name:'Деньги',exact:true}).click();
+  stage='finance_navigation';
+  const branchSelect=page.getByLabel('Выбрать филиал',{exact:true});
+  await page.waitForFunction(()=>{const select=document.querySelector('select[aria-label="Выбрать филиал"]');return select instanceof HTMLSelectElement&&Array.from(select.options).some(option=>option.value&&option.value!=='ALL');});
+  await branchSelect.selectOption({index:1});
+  await page.getByRole('link',{name:'Деньги',exact:true}).click();
   await page.getByRole('tab',{name:'Статьи',exact:true}).click();
   stage='empty_catalog';await page.getByText('Статьи ещё не добавлены',{exact:true}).waitFor();
   async function save(click,expected=200) { const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/finance-actions'&&r.request().method()==='POST');await click();const r=await response;assert.equal(r.status(),expected);await page.waitForFunction(()=>!document.querySelector('.ahFinanceArticles button:disabled')); }

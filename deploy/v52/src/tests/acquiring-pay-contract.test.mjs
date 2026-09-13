@@ -30,7 +30,7 @@ test("D172 keeps bank facts in Money and acquiring events in Acquiring", async (
   assert.match(route, /платёжные ссылки, оплаты, возвраты и чеки/);
   assert.doesNotMatch(workspace, /Остаток по счетам|Синхронизация с банками/);
   assert.match(financeWorkspace, /Счета и текущие остатки/);
-  assert.match(financeWorkspace, /Банковские операции/);
+  assert.match(financeWorkspace, /История операций/);
   assert.match(financeWorkspace, /Синхронизация/);
   assert.match(workspace, />Реестр платежей<\/Button>/);
   assert.match(workspace, />Создать ссылку на оплату<\/Button>/);
@@ -89,13 +89,15 @@ test("D175 keeps Pay behind Acquiring and preserves the focused family search", 
   assert.equal((customerLoader.match(/refreshCustomerResults\(\)/g) ?? []).length, 2);
 });
 
-test("D176 deployment validates AlfaCRM egress, stable public edge and Pay boundary without secrets", async () => {
+test("D177 deployment preserves AlfaCRM and Pay while publishing compact Money history", async () => {
   const workflow = await source("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
-  assert.match(workflow, /D176: restore AlfaCRM production transport/);
-  assert.match(workflow, /ARTHELLO_D176_ALFACRM_EGRESS=VERIFIED/);
-  assert.match(workflow, /ARTHELLO_D176_PRODUCTION=VERIFIED/);
+  assert.match(workflow, /D177: refine Money cards and mobile bank history/);
+  assert.match(workflow, /D177_MONEY_MOBILE_HISTORY/);
+  assert.match(workflow, /ahFinanceBankHistoryRow/);
+  assert.match(workflow, /ARTHELLO_D177_ALFACRM_EGRESS=VERIFIED/);
+  assert.match(workflow, /ARTHELLO_D177_PRODUCTION=VERIFIED/);
   assert.match(workflow, /docker restart --time 20 "\$CADDY_CONTAINER"/);
-  assert.match(workflow, /ARTHELLO_D176_EXTERNAL=VERIFIED/);
+  assert.match(workflow, /ARTHELLO_D177_EXTERNAL=VERIFIED/);
   assert.match(workflow, /bank_accounts/);
   assert.match(workflow, /balance_minor is not null/);
   assert.match(workflow, /eligiblePayAdministrators/);

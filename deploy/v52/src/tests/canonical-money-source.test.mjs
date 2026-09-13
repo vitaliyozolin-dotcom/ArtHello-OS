@@ -36,8 +36,9 @@ test("Home and Money consume one bank summary while Acquiring cannot read bank f
   assert.match(financeRoute, /summarizeBankPeriod\(sourceBankTransactions, selectedPeriod\)/);
   assert.match(financeRoute, /bankAccounts: bankAccountsView/);
   assert.match(financeRoute, /bankSynchronization/);
-  assert.match(financeWorkspace, /value=\{rubles\(data\.bankSummary\.incomingMinor\)\}/);
-  assert.match(financeWorkspace, /value=\{data\.bankSummary\.transactionCount\}/);
+  assert.match(financeWorkspace, /data\.bankSummary\.incomingMinor/);
+  assert.match(financeWorkspace, /data\.bankSummary\.transactionCount/);
+  assert.match(financeWorkspace, /D177_MONEY_MOBILE_HISTORY/);
   assert.match(financeWorkspace, /Управленческий учёт филиала · не банковский итог/);
   assert.match(dashboard, /finance\?\.bankOperations/);
   assert.match(dashboard, /const summary = finance\?\.bankSummary/);
