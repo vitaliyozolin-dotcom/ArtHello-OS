@@ -209,7 +209,7 @@
       "School transport восстановлен и read-only проверен; естественный авторизованный Education→дневник SSO не подтверждён, облачный браузер возвращает502 до формы входа.",
       "Customer.balance подтверждён официальным API как денежное поле и исправления слиты; актуальные tenant credentials/coverage/выборочная синхронизация и реальная приёмка ещё не подтверждены. Alfa financial movements явно blocked до проверенного контракта PayType direction.",
       "Новая ArtHello версия ещё не переключена: нужны первая backup+restore, exact immutable release и пользовательская приёмка шести сценариев.",
-      "D176 ещё не подтверждён production preflight: до переключения live synthetic login должен доказать доступность tenant AlfaCRM без реального ключа; затем владелец перевыпускает v2api key, подключает аккаунт, сопоставляет филиал и проверяет read-only предпросмотр."
+      "D176 production transport и synthetic tenant egress подтверждены; реальная AlfaCRM-приёмка остаётся открытой до перевыпуска владельцем v2api key, появления филиалов в wizard, сопоставления филиала и проверки read-only предпросмотра."
     ]
   },
   "stages": [
@@ -2624,7 +2624,7 @@
     },
     {
       "project_id": "ARTHELLO-OS",
-      "status": "completed",
+      "status": "active",
       "approved_by": "Виталий Озолин — явное поручение в текущем чате",
       "approved_at": "2026-09-13",
       "owner": "Исполнитель ArtHello OS",
@@ -2687,7 +2687,7 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Successful Quality/Verify, protected deployment receipt, ARTHELLO_D176_ALFACRM_EGRESS=VERIFIED, внешние ArtHello/School/Pay=200 и появление филиалов в wizard",
-          "status": "completed"
+          "status": "in_progress"
         }
       ]
     },
