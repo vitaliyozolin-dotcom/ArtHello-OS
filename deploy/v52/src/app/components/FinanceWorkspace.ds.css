@@ -101,48 +101,125 @@
   overflow-wrap: anywhere;
 }
 
-.ahFinanceKpis {
+.ahFinancePulse {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--ah-registry-kpi-gap);
-}
-
-.ahFinanceKpis > .ahKpiCard {
+  grid-template-columns: minmax(230px, .92fr) minmax(0, 1.45fr);
+  grid-template-areas: "head head" "main facts";
+  overflow: hidden;
   min-width: 0;
-  min-height: var(--ah-registry-kpi-min-height);
-  border-radius: var(--ah-registry-kpi-radius);
-  padding: var(--ah-registry-kpi-padding-block) var(--ah-registry-kpi-padding-inline);
-  text-align: left;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 18px;
+  background: var(--ah-color-surface);
 }
 
-.ahFinanceKpis .ahKpiCopy small {
-  font-size: var(--ah-registry-kpi-label-size);
-  font-weight: var(--ah-registry-kpi-label-weight);
-  line-height: var(--ah-registry-kpi-label-line);
+.ahFinancePulse > header {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--ah-color-border);
+  padding: 13px 18px;
 }
 
-.ahFinanceKpis .ahKpiCopy strong {
-  margin-top: var(--ah-registry-kpi-value-gap);
-  font-size: var(--ah-registry-kpi-value-size);
-  font-weight: var(--ah-registry-kpi-value-weight);
-  line-height: var(--ah-registry-kpi-value-line);
+.ahFinancePulse > header div,
+.ahFinancePulseMain {
+  display: grid;
+  gap: 2px;
 }
 
-.ahFinanceKpis .ahKpiCopy > span {
-  margin-top: var(--ah-registry-kpi-note-gap);
-  font-size: var(--ah-registry-kpi-note-size);
-  font-weight: var(--ah-registry-kpi-note-weight);
-  line-height: var(--ah-registry-kpi-note-line);
+.ahFinancePulse > header span {
+  color: var(--ah-color-primary);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 16px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
 }
 
-.ahFinanceKpiWarning {
-  border-color: #f0d4b5;
-  background: var(--ah-color-warning-soft);
+.ahFinancePulse > header small,
+.ahFinancePulseMain small {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
 }
 
-.ahFinanceKpiRisk {
-  border-color: #f3c6c0;
-  background: #fff7f6;
+.ahFinancePulse > header b {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ah-color-primary-soft);
+  padding: 7px 11px;
+  color: var(--ah-color-primary);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 16px;
+}
+
+.ahFinancePulseMain {
+  grid-area: main;
+  align-content: center;
+  min-width: 0;
+  padding: 18px;
+}
+
+.ahFinancePulseMain > span,
+.ahFinancePulse dt {
+  color: var(--ah-color-text-secondary);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.ahFinancePulseMain strong {
+  margin-block: 2px;
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 720;
+  line-height: 1.12;
+  letter-spacing: -.025em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ahFinancePulse .isPositive,
+.ahFinanceBankHistoryAmount .isIncoming {
+  color: #28765e;
+}
+
+.ahFinancePulse .isNegative,
+.ahFinanceBankHistoryAmount .isOutgoing {
+  color: var(--ah-color-danger);
+}
+
+.ahFinancePulse dl {
+  grid-area: facts;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  min-width: 0;
+  margin: 0;
+  border-left: 1px solid var(--ah-color-border);
+}
+
+.ahFinancePulse dl > div {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 18px;
+}
+
+.ahFinancePulse dl > div + div {
+  border-left: 1px solid var(--ah-color-border);
+}
+
+.ahFinancePulse dd {
+  margin: 0;
+  color: var(--ah-color-text-primary);
+  font-size: clamp(18px, 2.3vw, 25px);
+  font-weight: 690;
+  line-height: 1.15;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .ahFinanceNavigation {
@@ -316,8 +393,8 @@
     grid-template-columns: max-content minmax(0, 1fr);
   }
 
-  .ahFinanceKpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .ahFinancePulse {
+    grid-template-columns: minmax(210px, .85fr) minmax(0, 1.15fr);
   }
 }
 
@@ -377,32 +454,35 @@
     line-height: 19px;
   }
 
-  .ahFinanceKpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--ah-registry-kpi-mobile-gap);
+  .ahFinancePulse {
+    grid-template-columns: 1fr;
+    grid-template-areas: "head" "main" "facts";
+    border-radius: 15px;
   }
 
-  .ahFinanceKpis > .ahKpiCard {
-    min-height: var(--ah-registry-kpi-mobile-min-height);
-    border-radius: var(--ah-registry-kpi-mobile-radius);
-    padding: var(--ah-registry-kpi-mobile-padding-block) var(--ah-registry-kpi-mobile-padding-inline);
+  .ahFinancePulse > header {
+    padding: 11px 14px;
   }
 
-  .ahFinanceKpis .ahKpiCopy small {
-    font-size: var(--ah-registry-kpi-mobile-label-size);
-    line-height: var(--ah-registry-kpi-mobile-label-line);
+  .ahFinancePulseMain {
+    padding: 14px 14px 12px;
   }
 
-  .ahFinanceKpis .ahKpiCopy strong {
-    margin-top: var(--ah-registry-kpi-mobile-value-gap);
-    font-size: var(--ah-registry-kpi-mobile-value-size);
-    line-height: var(--ah-registry-kpi-mobile-value-line);
+  .ahFinancePulseMain strong {
+    font-size: clamp(25px, 7.4vw, 31px);
   }
 
-  .ahFinanceKpis .ahKpiCopy > span {
-    margin-top: var(--ah-registry-kpi-mobile-note-gap);
-    font-size: var(--ah-registry-kpi-mobile-note-size);
-    line-height: var(--ah-registry-kpi-mobile-note-line);
+  .ahFinancePulse dl {
+    border-top: 1px solid var(--ah-color-border);
+    border-left: 0;
+  }
+
+  .ahFinancePulse dl > div {
+    padding: 12px 14px 14px;
+  }
+
+  .ahFinancePulse dd {
+    font-size: clamp(17px, 4.8vw, 21px);
   }
 
   .ahFinanceNavigation {
@@ -471,19 +551,44 @@
 
 /* D066_TOCHKA_FINANCE_BANK_VISIBILITY · superseded placement retained for patch identity */
 /* D172_CANONICAL_MONEY_SOURCE */
+/* D176_MONEY_MOBILE_HISTORY · compact balances and a no-horizontal-scroll ledger */
 .ahFinanceBankPanel { display: grid; gap: 0; }
-.ahFinanceBankGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; border-top: 1px solid var(--ah-color-border); padding: 12px 14px 14px; }
-.ahFinanceBankAccount { display: grid; gap: 8px; min-width: 0; border: 1px solid var(--ah-color-border); border-radius: 14px; background: var(--ah-color-surface-soft); padding: 12px; }
-.ahFinanceBankAccount > div { display: grid; gap: 2px; min-width: 0; }
-.ahFinanceBankAccount strong { font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
-.ahFinanceBankAccount span, .ahFinanceBankAccount small { color: var(--ah-color-text-secondary); font-size: 11px; line-height: 16px; }
-.ahFinanceBankAccount b { font-size: 18px; line-height: 22px; font-weight: 720; }
+.ahFinanceBankAccountsHead { align-items: center; }
+.ahFinanceBankAccountsTotal { display: grid; gap: 1px; min-width: 0; text-align: right; }
+.ahFinanceBankAccountsTotal strong { color: var(--ah-color-text-primary); font-size: 19px; font-weight: 720; line-height: 24px; white-space: nowrap; }
+.ahFinanceBankAccountsTotal span { color: var(--ah-color-text-secondary); font-size: 11px; line-height: 15px; }
+.ahFinanceBankGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--ah-color-border); }
+.ahFinanceBankAccount { display: grid; grid-template-columns: 38px minmax(0, 1fr) max-content; align-items: center; gap: 11px; min-width: 0; padding: 15px 16px; }
+.ahFinanceBankAccount:nth-child(2n) { border-left: 1px solid var(--ah-color-border); }
+.ahFinanceBankAccount:nth-child(n + 3) { border-top: 1px solid var(--ah-color-border); }
+.ahFinanceBankMark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--ah-color-primary-soft); color: var(--ah-color-primary); font-size: 15px; font-weight: 760; line-height: 1; }
+.ahFinanceBankAccountCopy, .ahFinanceBankAccountBalance { display: grid; min-width: 0; }
+.ahFinanceBankAccountCopy { gap: 1px; }
+.ahFinanceBankAccountCopy strong { color: var(--ah-color-text-primary); font-size: 13px; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ahFinanceBankAccountCopy span, .ahFinanceBankAccountCopy small, .ahFinanceBankAccountBalance small { overflow: hidden; color: var(--ah-color-text-secondary); font-size: 10px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.ahFinanceBankAccountBalance { justify-items: end; gap: 2px; text-align: right; }
+.ahFinanceBankAccountBalance b { color: var(--ah-color-text-primary); font-size: 17px; font-weight: 720; line-height: 22px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ahFinanceBankBoundary { margin: 0; border-top: 1px solid var(--ah-color-border); padding: 12px 14px; color: var(--ah-color-text-secondary); font-size: 12px; line-height: 18px; }
 .ahFinanceBankWorkspace { align-items: start; }
 .ahFinanceBankOperationsPanel { grid-column: 1 / -1; }
-.ahFinanceBankTotals { display: flex; flex-wrap: wrap; gap: 8px 20px; border-block: 1px solid var(--ah-color-border); padding: 12px 14px; color: var(--ah-color-text-secondary); font-size: 12px; }
-.ahFinanceBankTotals span { display: flex; gap: 6px; }
-.ahFinanceBankTotals strong { color: var(--ah-color-text-primary); }
+.ahFinanceBankHistory { display: grid; border-top: 1px solid var(--ah-color-border); }
+.ahFinanceBankHistoryGroup { min-width: 0; content-visibility: auto; contain-intrinsic-size: auto 360px; }
+.ahFinanceBankHistoryGroup > h3 { margin: 0; border-bottom: 1px solid var(--ah-color-border); background: var(--ah-color-surface-soft); padding: 9px 16px; color: var(--ah-color-text-primary); font-size: 13px; font-weight: 720; line-height: 18px; }
+.ahFinanceBankHistoryGroup > div { display: grid; }
+.ahFinanceBankHistoryRow { display: grid; grid-template-columns: 38px minmax(0, 1fr) max-content; align-items: start; gap: 12px; min-width: 0; padding: 14px 16px; }
+.ahFinanceBankHistoryRow + .ahFinanceBankHistoryRow { border-top: 1px solid var(--ah-color-border); }
+.ahFinanceBankHistoryIcon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 13px; font-size: 18px; font-weight: 760; line-height: 1; }
+.ahFinanceBankHistoryIcon.isIncoming { background: #e7f6f0; color: #28765e; }
+.ahFinanceBankHistoryIcon.isOutgoing { background: var(--ah-color-primary-soft); color: var(--ah-color-primary); }
+.ahFinanceBankHistoryCopy, .ahFinanceBankHistoryAmount { display: grid; min-width: 0; }
+.ahFinanceBankHistoryCopy { gap: 3px; }
+.ahFinanceBankHistoryCopy strong { color: var(--ah-color-text-primary); font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
+.ahFinanceBankHistoryCopy > span { display: -webkit-box; overflow: hidden; color: var(--ah-color-text-secondary); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.ahFinanceBankHistoryCopy small { overflow: hidden; color: var(--ah-color-text-secondary); font-size: 10px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.ahFinanceBankHistoryAmount { justify-items: end; gap: 2px; text-align: right; }
+.ahFinanceBankHistoryAmount b { color: var(--ah-color-text-primary); font-size: 14px; font-weight: 730; line-height: 19px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ahFinanceBankHistoryAmount > span { color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+.ahFinanceBankHistoryAmount > small { margin-top: 3px; font-size: 9px; line-height: 13px; white-space: nowrap; }
 .ahFinanceBankSyncPanel { grid-column: 1 / -1; }
 .ahFinanceBankSyncList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 14px 14px; }
 .ahFinanceBankSyncList article { min-width: 0; border: 1px solid var(--ah-color-border); border-radius: 14px; padding: 14px; }
@@ -498,8 +603,28 @@
 .ahFinanceBankSyncList dt { color: var(--ah-color-text-secondary); font-size: 10px; }
 .ahFinanceBankSyncList dd { margin: 0; font-size: 11px; overflow-wrap: anywhere; }
 .ahFinanceBankSyncFooter { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--ah-color-border); padding: 12px 14px; color: var(--ah-color-text-secondary); font-size: 12px; }
-@media (max-width: 1024px) { .ahFinanceBankGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 767px) { .ahFinanceBankGrid, .ahFinanceBankSyncList { grid-template-columns: 1fr; padding: 10px 12px 12px; } .ahFinanceBankAccount { padding: 12px; } .ahFinanceBankTotals, .ahFinanceBankSyncFooter { align-items: stretch; flex-direction: column; } .ahFinanceBankSyncList dl { grid-template-columns: 1fr; } }
+@media (max-width: 767px) {
+  .ahFinancePage .ahFinanceBankAccountsHead { align-items: center; }
+  .ahFinanceBankAccountsHead > div:first-child { min-width: 0; }
+  .ahFinanceBankAccountsTotal strong { font-size: 16px; line-height: 21px; }
+  .ahFinanceBankGrid, .ahFinanceBankSyncList { grid-template-columns: 1fr; }
+  .ahFinanceBankGrid { padding: 0; }
+  .ahFinanceBankAccount { grid-template-columns: 36px minmax(0, 1fr) max-content; gap: 10px; padding: 13px 14px; }
+  .ahFinanceBankAccount:nth-child(2n) { border-left: 0; }
+  .ahFinanceBankAccount:nth-child(n + 2) { border-top: 1px solid var(--ah-color-border); }
+  .ahFinanceBankMark { width: 36px; height: 36px; border-radius: 11px; }
+  .ahFinanceBankAccountBalance b { font-size: 15px; line-height: 20px; }
+  .ahFinanceBankBoundary { font-size: 11px; line-height: 17px; }
+  .ahFinanceBankHistoryGroup > h3 { padding: 9px 14px; font-size: 14px; }
+  .ahFinanceBankHistoryRow { grid-template-columns: 36px minmax(0, 1fr) max-content; gap: 10px; padding: 13px 14px; }
+  .ahFinanceBankHistoryIcon { width: 36px; height: 36px; border-radius: 12px; }
+  .ahFinanceBankHistoryCopy strong { font-size: 14px; line-height: 19px; }
+  .ahFinanceBankHistoryCopy > span { font-size: 11px; line-height: 16px; }
+  .ahFinanceBankHistoryAmount b { font-size: 14px; line-height: 19px; }
+  .ahFinanceBankSyncList { padding: 10px 12px 12px; }
+  .ahFinanceBankSyncFooter { align-items: stretch; flex-direction: column; }
+  .ahFinanceBankSyncList dl { grid-template-columns: 1fr; }
+}
 
 /* D069_FINANCE_OPERATION_ALLOCATION */
 /* D069_FINANCE_OPERATION_ALLOCATION_SCOPED */

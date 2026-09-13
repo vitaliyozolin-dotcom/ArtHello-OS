@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { humanPeriodLabel, humanTechnicalText, recordLabel, taskRecordLabel } from "../../lib/record-labels";
 import { readJsonResponse } from "../../lib/response-json";
 import { EntityPanel } from "./RegistryWorkspace";
-import { Button, Card, EmptyState, KpiCard, PageContainer, PageHeader, Tabs } from "./design-system";
+import { Button, Card, EmptyState, PageContainer, PageHeader, Tabs } from "./design-system";
 import { FinanceArticlesWorkspace } from "./FinanceArticlesWorkspace";
 import { cashflowBreakdown, operationArticle, type ArticleCatalog } from "../../lib/finance-articles";
 import "./FinanceWorkspace.ds.css";
@@ -185,7 +185,27 @@ const bankMoney = (minor: number | null, currency: string) => {
 };
 const signedRubles = (minor: number) => `${minor > 0 ? "+" : ""}${rubles(minor)}`;
 const shortMoney = (minor: number) => `${(minor / 100000000).toFixed(2).replace(".", ",")} млн`;
+const russianCount = (value: number, forms: [string, string, string]) => {
+  const hundred = Math.abs(value) % 100;
+  const ten = hundred % 10;
+  const form = hundred >= 11 && hundred <= 19 ? forms[2] : ten === 1 ? forms[0] : ten >= 2 && ten <= 4 ? forms[1] : forms[2];
+  return `${value.toLocaleString("ru-RU")} ${form}`;
+};
 const isIncomingBankOperation = (direction: string) => /credit|incoming|приход|поступ|вход/i.test(direction);
+const bankHistoryDate = (value: string) => {
+  const parsed = new Date(`${value}T12:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "UTC" });
+};
+const groupBankOperations = (operations: FinanceBankOperation[]) => {
+  const groups = new Map<string, FinanceBankOperation[]>();
+  for (const operation of operations) {
+    const rows = groups.get(operation.operationDate) ?? [];
+    rows.push(operation);
+    groups.set(operation.operationDate, rows);
+  }
+  return [...groups].map(([date, rows]) => ({ date, rows }));
+};
 const bankSyncDate = (value: string) => {
   if (!value) return "Нет успешной синхронизации";
   const parsed = new Date(value);
@@ -357,6 +377,7 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrati
   const operationCorrections = selected ? data.corrections.filter((correction) => correction.operationId === selected.id) : [];
   const periodOptions = [...new Set([period, ...data.monthly.map((month) => month.period)])].sort();
   const reviewOperations = data.reviewOperations.filter((operation) => operation.period === period);
+  const bankOperationGroups = groupBankOperations(data.bankOperations);
   const linkedEntities = selected ? uniqueLinks([
     { label: counterpartyLabel(selected.counterpartyEntityId), id: selected.counterpartyEntityId },
     { label: "Юрлицо", id: selected.legalEntityId },
@@ -412,26 +433,35 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrati
         </select>
       </label>
 
-      <div className="ahFinanceKpis">
-        <KpiCard label={`Поступления · ${financePeriodLabel(period)}`} value={rubles(data.bankSummary.incomingMinor)} note="единый банковский факт" onClick={() => setTab("bank")} />
-        <KpiCard label="Списания" value={rubles(data.bankSummary.outgoingMinor)} note="единый банковский факт" onClick={() => setTab("bank")} />
-        <KpiCard label="Чистый денежный поток" value={signedRubles(data.bankSummary.netMinor)} note="поступления минус списания" onClick={() => setTab("bank")} className={data.bankSummary.netMinor < 0 ? "ahFinanceKpiRisk" : undefined} />
-        <KpiCard label="Банковские операции" value={data.bankSummary.transactionCount} note={`за ${financePeriodLabel(period).toLocaleLowerCase("ru-RU")}`} onClick={() => setTab("bank")} />
-      </div>
+      <section className="ahFinancePulse" data-d176-marker="D176_MONEY_MOBILE_HISTORY" aria-label={`Банковский итог за ${financePeriodLabel(period)}`}>
+        <header>
+          <div><span>Обороты · {financePeriodLabel(period)}</span><small>Единый банковский факт</small></div>
+          <b>{russianCount(data.bankSummary.transactionCount, ["операция", "операции", "операций"])}</b>
+        </header>
+        <div className="ahFinancePulseMain">
+          <span>Чистый денежный поток</span>
+          <strong className={data.bankSummary.netMinor < 0 ? "isNegative" : "isPositive"}>{signedRubles(data.bankSummary.netMinor)}</strong>
+          <small>поступления минус списания</small>
+        </div>
+        <dl>
+          <div><dt>Поступления</dt><dd className="isPositive">+{rubles(data.bankSummary.incomingMinor)}</dd></div>
+          <div><dt>Списания</dt><dd>−{rubles(data.bankSummary.outgoingMinor)}</dd></div>
+        </dl>
+      </section>
 
       {/* D066_TOCHKA_FINANCE_BANK_VISIBILITY is retained as historical patch identity. */}
       {data.bankAccounts.length ? (
         <section className="finance-panel ahFinanceBankPanel" data-d172-marker="D172_CANONICAL_MONEY_SOURCE">
-          <div className="finance-panel-head">
+          <div className="finance-panel-head ahFinanceBankAccountsHead">
             <div><p>Банк · юридические лица группы</p><h2>Счета и текущие остатки</h2></div>
-            <span className="source-pill">{data.bankSummary.accountsWithBalance ? `${rubles(data.bankSummary.rubBalanceMinor)} · ${data.bankAccounts.length} счетов` : `${data.bankAccounts.length} счетов · остатки не переданы`}</span>
+            <div className="ahFinanceBankAccountsTotal"><strong>{data.bankSummary.accountsWithBalance ? rubles(data.bankSummary.rubBalanceMinor) : "Остатки не переданы"}</strong><span>{russianCount(data.bankAccounts.length, ["счёт", "счёта", "счетов"])}</span></div>
           </div>
           <div className="ahFinanceBankGrid">
             {data.bankAccounts.map((account) => (
               <article key={account.id} className="ahFinanceBankAccount">
-                <div><strong>{account.name || "Расчётный счёт"}</strong><span>{account.provider} · {account.maskedAccount} · {account.currency}</span></div>
-                <b>{bankMoney(account.balanceMinor, account.currency)}</b>
-                <small>{account.legalEntityName} · {account.balanceAsOf ? `остаток на ${new Date(`${account.balanceAsOf}T00:00:00Z`).toLocaleDateString("ru-RU")}` : "дата остатка не передана"}</small>
+                <span className="ahFinanceBankMark" aria-hidden="true">{account.provider.trim().slice(0, 1).toLocaleUpperCase("ru-RU") || "Б"}</span>
+                <div className="ahFinanceBankAccountCopy"><strong>{account.name || "Расчётный счёт"}</strong><span>{account.legalEntityName}</span><small>{account.provider} · {account.maskedAccount} · {account.currency}</small></div>
+                <div className="ahFinanceBankAccountBalance"><b>{bankMoney(account.balanceMinor, account.currency)}</b><small>{account.balanceAsOf ? `на ${new Date(`${account.balanceAsOf}T00:00:00Z`).toLocaleDateString("ru-RU", { timeZone: "UTC" })}` : "дата не передана"}</small></div>
               </article>
             ))}
           </div>
@@ -446,12 +476,22 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrati
 
       {tab === "bank" ? <div className="finance-two-column ahFinanceBankWorkspace">
         <section className="finance-panel ahFinanceBankOperationsPanel">
-          <div className="finance-panel-head"><div><p>Единый банковский факт · {financePeriodLabel(period)}</p><h2>Банковские операции</h2></div><span className="finance-count">{data.bankSummary.transactionCount} операций</span></div>
-          <div className="ahFinanceBankTotals"><span>Поступления <strong>{rubles(data.bankSummary.incomingMinor)}</strong></span><span>Списания <strong>{rubles(data.bankSummary.outgoingMinor)}</strong></span><span>Чистый поток <strong>{signedRubles(data.bankSummary.netMinor)}</strong></span></div>
-          {data.bankOperations.length ? <div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Дата</th><th>Контрагент и назначение</th><th>Счёт</th><th>Сумма</th><th>Разнесение</th></tr></thead><tbody>{data.bankOperations.map((operation) => {
-            const credit = isIncomingBankOperation(operation.direction);
-            return <tr key={operation.id}><td>{new Date(`${operation.operationDate}T00:00:00Z`).toLocaleDateString("ru-RU")}</td><td><strong>{operation.counterpartyName || operation.transactionType || "Банковская операция"}</strong><small>{operation.description || "Назначение не передано банком"}</small></td><td><strong>{operation.accountName}</strong><small>{operation.provider} · {operation.maskedAccount || operation.legalEntityName}</small></td><td className="money-cell">{credit ? "+" : "−"}{bankMoney(Math.abs(operation.amountMinor), operation.currency)}</td><td><span className={operation.allocated ? "quality-ok" : "quality-warn"}>{operation.allocated ? "Разнесено" : "Ожидает разнесения"}</span></td></tr>;
-          })}</tbody></table></div> : <EmptyState title="Банковских операций за этот месяц нет" description="Здесь показываются только неизменяемые факты из банковской выписки." density="compact" />}
+          <div className="finance-panel-head"><div><p>Единый банковский факт · {financePeriodLabel(period)}</p><h2>История операций</h2></div><span className="finance-count">{russianCount(data.bankSummary.transactionCount, ["операция", "операции", "операций"])}</span></div>
+          {bankOperationGroups.length ? <div className="ahFinanceBankHistory">{bankOperationGroups.map((group) => (
+            <section key={group.date} className="ahFinanceBankHistoryGroup" aria-labelledby={`bank-history-${group.date}`}>
+              <h3 id={`bank-history-${group.date}`}>{bankHistoryDate(group.date)}</h3>
+              <div>{group.rows.map((operation) => {
+                const credit = isIncomingBankOperation(operation.direction);
+                const title = operation.counterpartyName || operation.transactionType || "Банковская операция";
+                const description = operation.description && operation.description !== title ? operation.description : "Назначение не передано банком";
+                return <article key={operation.id} className="ahFinanceBankHistoryRow">
+                  <span className={credit ? "ahFinanceBankHistoryIcon isIncoming" : "ahFinanceBankHistoryIcon isOutgoing"} aria-hidden="true">{credit ? "↓" : "↑"}</span>
+                  <div className="ahFinanceBankHistoryCopy"><strong>{title}</strong><span>{description}</span><small>{operation.accountName} · {operation.maskedAccount || operation.legalEntityName}</small></div>
+                  <div className="ahFinanceBankHistoryAmount"><b className={credit ? "isIncoming" : "isOutgoing"}>{credit ? "+" : "−"}{bankMoney(Math.abs(operation.amountMinor), operation.currency)}</b><span>{credit ? "Зачислено" : "Списано"}</span><small className={operation.allocated ? "quality-ok" : "quality-warn"}>{operation.allocated ? "Разнесено" : "Ожидает разнесения"}</small></div>
+                </article>;
+              })}</div>
+            </section>
+          ))}</div> : <EmptyState title="Банковских операций за этот месяц нет" description="Здесь показываются только неизменяемые факты из банковской выписки." density="compact" />}
         </section>
         <section className="finance-panel ahFinanceBankSyncPanel">
           <div className="finance-panel-head"><div><p>Банк · только чтение</p><h2>Синхронизация</h2></div><span className="source-pill">{data.bankSummary.statementCount} пакетов выписки за период</span></div>

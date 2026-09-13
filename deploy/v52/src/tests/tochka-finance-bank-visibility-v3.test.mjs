@@ -102,7 +102,7 @@ test("D-066 bank source remains connected while D172 exposes it only as a labell
   assert.equal(patchD066FinanceRoute(patched), patched);
 });
 
-test("D172 Money UI retains the bank panel and binds the four KPIs to bank facts", async () => {
+test("D176 Money UI retains D172 bank facts in a compact summary and account list", async () => {
   const [workspaceSource, cssSource] = await Promise.all([
     readFile(new URL("../app/components/FinanceWorkspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/FinanceWorkspace.ds.css", import.meta.url), "utf8"),
@@ -111,14 +111,15 @@ test("D172 Money UI retains the bank panel and binds the four KPIs to bank facts
   const css = patchD066FinanceCss(cssSource);
   assert.match(workspace, /Счета и текущие остатки/);
   assert.match(workspace, /data\.bankAccounts\.map/);
-  const kpiBlock = workspace.slice(workspace.indexOf('<div className="ahFinanceKpis">'), workspace.indexOf('</div>', workspace.indexOf('<div className="ahFinanceKpis">')) + 6);
-  assert.equal((kpiBlock.match(/<KpiCard/g) ?? []).length, 4);
-  assert.match(kpiBlock, /data\.bankSummary\.incomingMinor/);
-  assert.match(kpiBlock, /data\.bankSummary\.outgoingMinor/);
-  assert.match(kpiBlock, /data\.bankSummary\.transactionCount/);
+  const summaryBlock = workspace.slice(workspace.indexOf('<section className="ahFinancePulse"'), workspace.indexOf('</section>', workspace.indexOf('<section className="ahFinancePulse"')) + 10);
+  assert.match(summaryBlock, /D176_MONEY_MOBILE_HISTORY/);
+  assert.match(summaryBlock, /data\.bankSummary\.incomingMinor/);
+  assert.match(summaryBlock, /data\.bankSummary\.outgoingMinor/);
+  assert.match(summaryBlock, /data\.bankSummary\.netMinor/);
+  assert.match(summaryBlock, /data\.bankSummary\.transactionCount/);
   assert.match(css, /D066_TOCHKA_FINANCE_BANK_VISIBILITY/);
   assert.match(css, /ahFinanceBankGrid/);
-  assert.match(cssSource, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(cssSource, /\.ahFinanceBankAccount \{ display: grid; grid-template-columns: 38px minmax\(0, 1fr\) max-content;/);
   assert.equal(patchD066FinanceWorkspace(workspace), workspace);
   assert.equal(patchD066FinanceCss(css), css);
 });

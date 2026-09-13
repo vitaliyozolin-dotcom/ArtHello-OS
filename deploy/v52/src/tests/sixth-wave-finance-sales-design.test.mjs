@@ -43,17 +43,17 @@ function cssSelectors(source) {
 }
 
 test("Wave 6 finance and sales use the shared Design System shell", () => {
-  for (const [name, source, className, stylesheet] of [
-    ["FinanceWorkspace", finance, "ahFinancePage", "FinanceWorkspace.ds.css"],
-    ["SalesWorkspace", sales, "ahSalesPage", "SalesWorkspace.ds.css"],
+  for (const [name, source, className, stylesheet, components, kpiCount] of [
+    ["FinanceWorkspace", finance, "ahFinancePage", "FinanceWorkspace.ds.css", ["Button", "Card", "EmptyState", "PageContainer", "PageHeader", "Tabs"], 0],
+    ["SalesWorkspace", sales, "ahSalesPage", "SalesWorkspace.ds.css", ["Button", "Card", "EmptyState", "KpiCard", "PageContainer", "PageHeader", "Tabs"], 4],
   ]) {
     const names = importedNames(source, "./design-system");
-    for (const component of ["Button", "Card", "EmptyState", "KpiCard", "PageContainer", "PageHeader", "Tabs"]) {
+    for (const component of components) {
       assert.ok(names.has(component), `${name} must import ${component}`);
     }
     assert.match(source, new RegExp(`import\\s*["']\\./${escapeRegExp(stylesheet)}["']`));
     assert.match(source, new RegExp(`<PageContainer\\b[^>]*className=["']${className}["']`));
-    assert.equal(occurrences(source, /<KpiCard\b/g), 4);
+    assert.equal(occurrences(source, /<KpiCard\b/g), kpiCount);
     assert.equal(occurrences(source, /<Tabs\b/g), 1);
   }
 });
@@ -68,11 +68,11 @@ test("Wave 6 exposes every core finance section before the first operation", () 
   assert.match(finance, /ahFinancePeriod/);
 });
 
-test("Wave 6 keeps an explicit month selector above mobile finance KPIs", () => {
+test("Wave 6 keeps an explicit month selector above the mobile bank summary", () => {
   const mobilePeriodIndex = finance.indexOf('className="ahFinancePeriod ahFinancePeriodMobile"');
-  const kpiIndex = finance.indexOf('className="ahFinanceKpis"');
+  const summaryIndex = finance.indexOf('className="ahFinancePulse"');
   assert.ok(mobilePeriodIndex >= 0, "mobile finance period selector is missing");
-  assert.ok(mobilePeriodIndex < kpiIndex, "mobile finance period must appear before KPI values");
+  assert.ok(mobilePeriodIndex < summaryIndex, "mobile finance period must appear before bank values");
   assert.match(finance, /Период отчёта/);
   assert.match(finance, /aria-label="Месяц финансового отчёта"/);
   assert.match(finance, /className="ahFinancePeriod ahFinancePeriodDesktop"/);
@@ -136,7 +136,7 @@ test("Wave 6 is isolated from both legacy top-level shells", () => {
     const selectors = cssSelectors(styles);
     assert.ok(selectors.length > 0);
     for (const selector of selectors) assert.match(selector, new RegExp(`^${escapeRegExp(prefix)}`), `unscoped selector: ${selector}`);
-    assert.match(styles, /var\(\s*--ah-registry-kpi-/);
+    if (prefix === ".ahSales") assert.match(styles, /var\(\s*--ah-registry-kpi-/);
     assert.match(styles, /overflow-x\s*:\s*auto/);
   }
 });
