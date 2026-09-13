@@ -1,8 +1,8 @@
-# D171: rebind the public edge after the verified D168 cutover.
-# The operation is deliberately narrow: retain the D168 image and D1 volume,
+# D173: rebind the public edge after the verified D172 cutover.
+# The operation is deliberately narrow: retain the D172 image and D1 volume,
 # restore durable container runtime, then restart Caddy only when its public
 # listener is still unavailable. No application secret is read or replaced.
-name: Rebind ArtHello production edge D171
+name: Rebind ArtHello production edge D173
 
 'on':
   push:
@@ -19,9 +19,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  EXPECTED_PARENT_SHA: 8850657fc3b450f5762c81ac02f814780fc6b13b
-  TARGET_RELEASE_SHA: 4e0225874ece24098c0ae7ab664e1655b50846ec
-  TARGET_CANDIDATE_NAME: arthello-direct-34753522048-1
+  EXPECTED_PARENT_SHA: 7f2f963e2ed427a99f94372cbf03ff8134b049c0
+  TARGET_RELEASE_SHA: 7f2f963e2ed427a99f94372cbf03ff8134b049c0
+  TARGET_CANDIDATE_NAME: arthello-direct-34777555050-1
   CADDY_CONTAINER: stroios-caddy-1
   DATA_VOLUME: arthello-direct-v44-data
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
@@ -33,8 +33,8 @@ jobs:
     if: >-
       github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
       github.ref == 'refs/heads/main' &&
-      github.event.before == '8850657fc3b450f5762c81ac02f814780fc6b13b' &&
-      startsWith(github.event.head_commit.message, 'D171: rebind D168 production edge') &&
+      github.event.before == '7f2f963e2ed427a99f94372cbf03ff8134b049c0' &&
+      startsWith(github.event.head_commit.message, 'D173: rebind D172 production edge') &&
       github.run_attempt == 1
     runs-on:
       - self-hosted
@@ -54,7 +54,7 @@ jobs:
           submodules: false
           lfs: false
 
-      - name: Recover retained D168 runtime and public listener
+      - name: Recover retained D172 runtime and public listener
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -64,7 +64,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$GITHUB_REPOSITORY" = vitaliyozolin-dotcom/ArtHello-OS
           test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT_SHA"
-          test "$(git log -1 --format=%s)" = "D171: rebind D168 production edge"
+          test "$(git log -1 --format=%s)" = "D173: rebind D172 production edge"
           current_main="$(curl --fail-with-body --silent --show-error --max-time 30 \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header 'Accept: application/vnd.github+json' \
@@ -73,14 +73,14 @@ jobs:
           test "$current_main" = "$GITHUB_SHA"
 
           state_root="$HOME/.config/arthello/release-state"
-          d168_receipt="$state_root/production-d168-$TARGET_RELEASE_SHA.json"
-          recovery_receipt="$state_root/edge-recovery-d171-$TARGET_RELEASE_SHA.json"
-          test -f "$d168_receipt" && test ! -L "$d168_receipt"
-          test "$(stat -c '%U:%a:%h' "$d168_receipt")" = "$(id -un):600:2"
+          d172_receipt="$state_root/production-d172-$TARGET_RELEASE_SHA.json"
+          recovery_receipt="$state_root/edge-recovery-d173-$TARGET_RELEASE_SHA.json"
+          test -f "$d172_receipt" && test ! -L "$d172_receipt"
+          test "$(stat -c '%U:%a:%h' "$d172_receipt")" = "$(id -un):600:2"
           test ! -e "$recovery_receipt" && test ! -L "$recovery_receipt"
           jq -e \
             --arg release "$TARGET_RELEASE_SHA" '
-              .schemaVersion == 1 and .state == "verified" and .decision == "D168" and
+              .schemaVersion == 1 and .state == "verified" and .decision == "D172" and
               .releaseSha == $release and
               (.candidateContainerId | test("^[a-f0-9]{64}$")) and
               (.imageId | test("^sha256:[a-f0-9]{64}$")) and
@@ -88,11 +88,11 @@ jobs:
               .dataProof.bankAccounts > 0 and .dataProof.accountsWithBalances > 0 and
               .dataProof.activePayGrants >= .dataProof.eligiblePayAdministrators and
               .moneyAcceptanceEnabled == false and .fiscalizationEnabled == false
-            ' "$d168_receipt" >/dev/null
+            ' "$d172_receipt" >/dev/null
 
-          candidate_id="$(jq -er '.candidateContainerId' "$d168_receipt")"
-          image_id="$(jq -er '.imageId' "$d168_receipt")"
-          route_sha="$(jq -er '.activeRouteSha256' "$d168_receipt")"
+          candidate_id="$(jq -er '.candidateContainerId' "$d172_receipt")"
+          image_id="$(jq -er '.imageId' "$d172_receipt")"
+          route_sha="$(jq -er '.activeRouteSha256' "$d172_receipt")"
           test "$(docker inspect "$candidate_id" --format '{{.Id}}')" = "$candidate_id"
           test "$(docker inspect "$candidate_id" --format '{{.Name}}')" = "/$TARGET_CANDIDATE_NAME"
           test "$(docker inspect "$candidate_id" --format '{{.Image}}')" = "$image_id"
@@ -127,7 +127,7 @@ jobs:
             sleep 2
           done
           if [ "$ready" -ne 1 ]; then
-            docker inspect "$candidate_id" --format 'ARTHELLO_D171_APP_FAILED status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} error={{json .State.Error}}'
+            docker inspect "$candidate_id" --format 'ARTHELLO_D173_APP_FAILED status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} error={{json .State.Error}}'
             exit 1
           fi
 
@@ -152,7 +152,7 @@ jobs:
           };
           const health = await get(process.env.PUBLIC_URL + '/api/health');
           const school = await get(process.env.SCHOOL_URL + '/api/health');
-          const pay = await get(process.env.PAY_URL + '/?probe=d169-edge');
+          const pay = await get(process.env.PAY_URL + '/?probe=d173-edge');
           const payConfig = await get(process.env.PAY_URL + '/api/pay-sso/config');
           let healthBody = {}, schoolBody = {}, configBody = {};
           try { healthBody = JSON.parse(health.body); } catch {}
@@ -200,7 +200,7 @@ jobs:
           candidate_after="$(docker inspect "$candidate_id" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}/{{.HostConfig.RestartPolicy.Name}}')"
           caddy_after="$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}')"
 
-          receipt_temp="$state_root/.edge-recovery-d171-$TARGET_RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+          receipt_temp="$state_root/.edge-recovery-d173-$TARGET_RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
           test ! -e "$receipt_temp" && test ! -L "$receipt_temp"
           jq -nc \
             --arg release "$TARGET_RELEASE_SHA" --arg candidate "$candidate_id" --arg image "$image_id" \
@@ -209,7 +209,7 @@ jobs:
             --arg caddyBefore "$caddy_before" --arg caddyAfter "$caddy_after" \
             --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
             --arg at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" '
-              {schemaVersion:1,state:"verified",protocol:"ARTHELLO_EDGE_RECOVERY_D171",
+              {schemaVersion:1,state:"verified",protocol:"ARTHELLO_EDGE_RECOVERY_D173",
                releaseSha:$release,candidateContainerId:$candidate,imageId:$image,activeRouteSha256:$route,
                recoveryAction:$action,candidateBefore:$candidateBefore,candidateAfter:$candidateAfter,
                caddyBefore:$caddyBefore,caddyAfter:$caddyAfter,recoveryRunId:$run,recoveryRunAttempt:$attempt,
@@ -221,14 +221,14 @@ jobs:
           rm "$receipt_temp"
           sync "$recovery_receipt"
           test "$(stat -c '%U:%a:%h' "$recovery_receipt")" = "$(id -un):600:1"
-          printf 'ARTHELLO_D171_EDGE=VERIFIED release=%s action=%s candidate=%s\n' "$TARGET_RELEASE_SHA" "$recovery_action" "$TARGET_CANDIDATE_NAME"
+          printf 'ARTHELLO_D173_EDGE=VERIFIED release=%s action=%s candidate=%s\n' "$TARGET_RELEASE_SHA" "$recovery_action" "$TARGET_CANDIDATE_NAME"
 
       - name: Publish recovery summary
         if: always()
         shell: bash
         run: |
           {
-            echo '## ArtHello production edge D171'
+            echo '## ArtHello production edge D173'
             echo
             echo "- Retained release: \`$TARGET_RELEASE_SHA\`"
             echo "- Result: ${{ job.status }}"
@@ -251,7 +251,7 @@ jobs:
               | jq -e '.status == "ok" and .database == "available"' >/dev/null &&
             curl --fail --silent --show-error --max-time 15 "$SCHOOL_URL/api/health" \
               | jq -e '.status == "ok"' >/dev/null &&
-            curl --fail --silent --show-error --max-time 15 "$PAY_URL/?probe=d171-external" \
+            curl --fail --silent --show-error --max-time 15 "$PAY_URL/?probe=d173-external" \
               | grep -F 'data-arthello-pay-shell="d168"' >/dev/null &&
             curl --fail --silent --show-error --max-time 15 "$PAY_URL/api/pay-sso/config" \
               | jq -e --arg central "$PUBLIC_URL" --arg pay "$PAY_URL" \
@@ -263,4 +263,4 @@ jobs:
             sleep 5
           done
           test "$ready" = 1
-          printf 'ARTHELLO_D171_EXTERNAL=VERIFIED arthello=200 school=200 pay=200\n'
+          printf 'ARTHELLO_D173_EXTERNAL=VERIFIED arthello=200 school=200 pay=200\n'
