@@ -44,9 +44,10 @@ test("desktop typography and KPI cards do not depend on clipped microcopy", () =
 });
 
 test("owner cash flow is a source-backed interactive chart instead of decorative lines", () => {
-  assert.match(ownerDashboard, /finance\.monthly\.filter\(\(item\) => cashPeriods\.has\(item\.period\)\)\.slice\(-12\)/);
+  assert.match(ownerDashboard, /finance\.bankMonthly\.map/);
+  assert.match(ownerDashboard, /const summary = finance\?\.bankSummary/);
   assert.match(ownerDashboard, /chartGeometry\.ticks\.map/);
-  assert.match(ownerDashboard, /Фактическая динамика поступлений и списаний из отчёта о движении денег/);
+  assert.match(ownerDashboard, /Динамика поступлений и списаний по банковским операциям/);
   assert.match(ownerDashboard, /onMouseEnter=\{\(\) => setActiveChartIndex\(index\)\}/);
   assert.match(ownerDashboard, /navigate\("finance"\)/);
   assert.match(ownerChart, /\.gridLine/);

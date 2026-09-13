@@ -59,7 +59,8 @@ test("non-finance roles do not request finance and KPI-only finance layouts stil
   assert.match(dashboard, /if \(!needsFinance\) return;[\s\S]*?fetch\(`\/api\/finance/);
   assert.match(dashboard, /new URLSearchParams\(\{ branchId: selectedBranch \}\)/);
   assert.match(dashboard, /fetch\(`\/api\/finance\?\$\{params\.toString\(\)\}`/);
-  assert.match(dashboard, /finance\.monthly\.filter\(\(item\) => cashPeriods\.has\(item\.period\)\)\.slice\(-12\)/);
+  assert.match(dashboard, /finance\.bankMonthly\.map/);
+  assert.match(dashboard, /const summary = finance\?\.bankSummary/);
   assert.match(dashboard, /label: "Поступления"[\s\S]*?module: "finance" as ModuleId/);
   assert.match(dashboard, /label: "Списания"[\s\S]*?module: "finance" as ModuleId/);
   assert.match(dashboard, /label: "Задолженность"[\s\S]*?module: "finance" as ModuleId/);
@@ -129,8 +130,8 @@ test("empty states stay compact and never invent production figures", () => {
   assert.doesNotMatch(styles, /\.inlineEmpty[^}]*min-height:\s*(?:[3-9]\d\d|[12]\d{3,})px/);
   assert.match(dashboard, /const financeValue = \(minor: number \| undefined, available: boolean\) => available/);
   assert.match(dashboard, /const hasDebtData = Boolean\(finance\?\.accruals\.length\)/);
-  assert.match(dashboard, /const periodOperations = useMemo\(\(\) => finance\?\.operations\.filter\(\(operation\) => operation\.period === finance\.selectedPeriod\)/);
-  assert.match(dashboard, /Записей: <strong>\{periodOperations\.length\}/);
+  assert.match(dashboard, /const periodOperations = useMemo\(\(\) => finance\?\.bankOperations \?\? \[\]/);
+  assert.match(dashboard, /Операций: <strong>\{periodOperations\.length\}/);
   assert.match(dashboard, /Система не будет придумывать риски/);
   assert.match(dashboard, /milestones = useMemo\(\(\) => openTasks/);
 });
