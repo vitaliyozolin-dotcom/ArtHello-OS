@@ -120,7 +120,7 @@ test("production runtime registers and packages the protected AlfaCRM transport 
 });
 
 test("D177 release preserves the AlfaCRM egress proof before stopping production", () => {
-  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
+  const workflow = sourceText("./contract-fixtures/deploy-d177.yml");
   const egressProof = workflow.indexOf("ARTHELLO_D177_ALFACRM_EGRESS=VERIFIED");
   const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
 
@@ -129,4 +129,33 @@ test("D177 release preserves the AlfaCRM egress proof before stopping production
   assert.match(workflow, /import \{ createAlfaCrmTransport \} from "\.\/production\/alfacrm-transport\.mjs"/);
   assert.match(workflow, /api_key: "synthetic-release-probe"/);
   assert.doesNotMatch(workflow, /@arthello\.ru|buh@/i);
+});
+
+test("D178 activates controlled AlfaCRM imports only after exact D177 and preview evidence", () => {
+  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
+  const evidence = workflow.indexOf("ARTHELLO_D178_PREVIEW_EVIDENCE=VERIFIED");
+  const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
+
+  assert.match(workflow, /workflow_run:/);
+  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(workflow, /github\.event\.workflow_run\.actor\.login == 'vitaliyozolin-dotcom'/);
+  assert.match(workflow, /D178: activate AlfaCRM controlled import/);
+  assert.match(workflow, /ACTIVATION_SHA: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
+  assert.doesNotMatch(workflow, /workflow_dispatch:|inputs\./);
+  assert.match(workflow, /environment: production-ru/);
+  assert.match(workflow, /runs-on:\s*\[self-hosted, linux, x64, arthello-gateway\]/);
+  assert.match(workflow, /EXPECTED_LIVE_RELEASE_SHA: 6ef7a3dc82e4644d1991d5454e61b62149b3738b/);
+  assert.match(workflow, /EXPECTED_LIVE_IMAGE_ID: sha256:8bda721095c7b178ea5721115bd2146269a07fd30eb91f905abe59b889306000/);
+  assert.match(workflow, /production-d177-\$EXPECTED_LIVE_RELEASE_SHA\.json/);
+  assert.match(workflow, /\.decision=="D177"/);
+  assert.match(workflow, /ALFACRM_IMPORT_ENABLED=true/);
+  assert.match(workflow, /connected and credential_stored and mapping_count >= 1/);
+  assert.match(workflow, /families\["status"\] == "previewed" and families\["previewCount"\] > 0/);
+  assert.match(workflow, /staff\["status"\] == "previewed" and staff\["previewCount"\] > 0/);
+  assert.ok(evidence > 0 && liveStop > evidence, "preview evidence must pass before the live container is stopped");
+  assert.match(workflow, /cmp -s <\(sort "\$runtime_env"\) "\$candidate_env"/);
+  assert.match(workflow, /production-d178-\$ACTIVATION_SHA\.json/);
+  assert.match(workflow, /ARTHELLO_D178_ROLLBACK_SNAPSHOT=VERIFIED/);
+  assert.match(workflow, /ARTHELLO_D178_EXTERNAL=VERIFIED arthello=200 school=200 pay=200/);
+  assert.doesNotMatch(workflow, /@arthello\.ru|buh@|api_key\s*:/i);
 });

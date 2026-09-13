@@ -20,8 +20,8 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "D177: компактные остатки и мобильная банковская история",
-    "status": "completed",
+    "name": "D178: активация контролируемого импорта AlfaCRM",
+    "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
       "Три XLSX прочитаны без изменения оригиналов",
@@ -199,7 +199,13 @@
       "D175 опубликован release 854a3c00823857d398b9c1965820e9ae9cc068d3: protected run 34786047645 завершён success, Verify D175 run 34785776113 завершён success.",
       "IMG_0242/IMG_0250/IMG_0251/IMG_0252: AlfaCRM wizard принимает адрес, e-mail и v2api key, но production-запрос завершается общей транспортной ошибкой до появления филиалов.",
       "D176 PR484 переводит AlfaCRM на ограниченный Node/TLS service binding; 808/810 тестов вне известного managed-filesystem chown-сценария пройдены, два пропущены, production build и typecheck пройдены.",
-      "IMG_0245/IMG_0246/IMG_0247 и референсы IMG_0243/IMG_0241/IMG_0244: владелец потребовал компактные обороты, аккуратные остатки по счетам и банковскую историю без горизонтального скролла."
+      "IMG_0245/IMG_0246/IMG_0247 и референсы IMG_0243/IMG_0241/IMG_0244: владелец потребовал компактные обороты, аккуратные остатки по счетам и банковскую историю без горизонтального скролла.",
+      "D176 release dc0207909789d6f71ed070fbeed3eb11e948edd3 опубликован run 34787872813: synthetic AlfaCRM egress получил ожидаемый 401, rollback snapshot и 65 секунд стабильности подтверждены, внешний контур ArtHello/School/Pay=200.",
+      "IMG_0253/IMG_0254: владелец подключил перевыпущенный ключ и сопоставил пять рабочих филиалов; Online School оставлена без загрузки.",
+      "IMG_0255: production-предпросмотр без записи нашёл 2887 семей/детей и 193 сотрудника; импорт остался закрыт только runtime-флагом.",
+      "Concurrent D177 Money release 6ef7a3dc82e4644d1991d5454e61b62149b3738b сохранён; D178 будет активироваться только поверх его verified production receipt.",
+      "D177 production run 34789532262 завершён success: image sha256:8bda721095c7b178ea5721115bd2146269a07fd30eb91f905abe59b889306000, AlfaCRM egress=401, snapshot, данные, 65 секунд стабильности и внешние ArtHello/School/Pay=200 подтверждены.",
+      "D178 локально: 18/18 release/Money-контрактов и 811/813 остальных тестов вне несовместимого с managed filesystem chown-файла прошли, 2 пропущены; typecheck, lint без ошибок и production build прошли."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
@@ -207,9 +213,9 @@
       "Объединённый код слит и проверен, но production cutover и реальная банковская/Alfa приёмка ещё не выполнены",
       "Фактический R6 gatewayUID995 не имеет sudo для host-установщика бэкапов; выбран R7 с меньшими требованиями к правам, требуется реализовать и проверить новый образ/worker/activation authority.",
       "School transport восстановлен и read-only проверен; естественный авторизованный Education→дневник SSO не подтверждён, облачный браузер возвращает502 до формы входа.",
-      "Customer.balance подтверждён официальным API как денежное поле и исправления слиты; актуальные tenant credentials/coverage/выборочная синхронизация и реальная приёмка ещё не подтверждены. Alfa financial movements явно blocked до проверенного контракта PayType direction.",
+      "Customer.balance подтверждён официальным API как денежное поле; Alfa financial movements остаются blocked до проверенного контракта PayType direction.",
       "Новая ArtHello версия ещё не переключена: нужны первая backup+restore, exact immutable release и пользовательская приёмка шести сценариев.",
-      "D176 production transport и synthetic tenant egress подтверждены; реальная AlfaCRM-приёмка остаётся открытой до перевыпуска владельцем v2api key, появления филиалов в wizard, сопоставления филиала и проверки read-only предпросмотра."
+      "D178 ещё не активирован: требуется verified production receipt точного D177 Money release, exact-main D178 Verify, snapshot и внешний ArtHello/School/Pay probe; при истечении 30 минут владелец повторяет предпросмотр перед импортом."
     ]
   },
   "stages": [
@@ -449,8 +455,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "Опубликовать D177: один компактный блок оборотов, плотный список счетов и вертикальную банковскую историю по датам без горизонтального скролла",
-    "evidence": "D177 UI-контракты, системный verifier, exact SHA/tree, Quality и Verify, сохранённый AlfaCRM egress gate, rollback snapshot, 65 секунд стабильности и независимая production-проверка ArtHello/School/Pay"
+    "result": "Опубликовать D178: после подтверждённого подключения, пяти сопоставлений и read-only counts активировать ALFACRM_IMPORT_ENABLED только для контролируемых модульных импортов поверх точного D177 production release",
+    "evidence": "Exact D177 production receipt, explicit owner instruction, exact-main D178 Verify with one-time workflow_run activation, runtime evidence connected+credential+mappings+families/staff previews до docker stop, свежий rollback snapshot, 65 секунд стабильности, независимый ArtHello/School/Pay probe и доступная кнопка после обновления wizard"
   },
   "decisionLog": [
     {
@@ -2624,7 +2630,7 @@
     },
     {
       "project_id": "ARTHELLO-OS",
-      "status": "active",
+      "status": "completed",
       "approved_by": "Виталий Озолин — явное поручение в текущем чате",
       "approved_at": "2026-09-13",
       "owner": "Исполнитель ArtHello OS",
@@ -2647,7 +2653,8 @@
         "PR484 содержит отдельный alfacrm-transport.mjs, runtime binding, явное Docker packaging и route-level sanitized timeout/unavailable ответы.",
         "Транспортные, route, legacy rollout, lifecycle и Miniflare service-binding проверки пройдены; полный набор без известного managed-filesystem chown-сценария: 808 passed, 0 failed, 2 skipped.",
         "Production workflow проверяет synthetic AlfaCRM login до первого docker stop, не читает тело ответа и не содержит реальный e-mail или ключ.",
-        "Release dc0207909789d6f71ed070fbeed3eb11e948edd3 опубликован protected run 34787872813: AlfaCRM egress=401, snapshot, 4 счёта, 4 остатка, Pay grant, read-only sync, 65 секунд стабильности и внешние ArtHello/School/Pay=200 подтверждены."
+        "Release dc0207909789d6f71ed070fbeed3eb11e948edd3 опубликован protected run 34787872813: AlfaCRM egress=401, snapshot, 4 счёта, 4 остатка, Pay grant, read-only sync, 65 секунд стабильности и внешние ArtHello/School/Pay=200 подтверждены.",
+        "IMG_0253/IMG_0254/IMG_0255: перевыпущенный ключ авторизован, пять рабочих филиалов сопоставлены, read-only preview вернул 2887 семей/детей и 193 сотрудника."
       ],
       "assumptions": [
         "Адрес аккаунта остаётся https://arthellonew.s20.online без /v2api и параметров.",
@@ -2687,7 +2694,7 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Successful Quality/Verify, protected deployment receipt, ARTHELLO_D176_ALFACRM_EGRESS=VERIFIED, внешние ArtHello/School/Pay=200 и появление филиалов в wizard",
-          "status": "in_progress"
+          "status": "completed"
         }
       ]
     },
@@ -2751,6 +2758,79 @@
           "due": "текущий цикл",
           "evidence_required": "TypeScript/build, D177 contracts, exact hosted image, protected receipt, 65-second stability and independent external probe",
           "status": "completed"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — после подключения, сопоставления и предпросмотра сообщил: «Импортировать не нажимается»",
+      "approved_at": "2026-09-13",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после production-активации D178 и первого завершённого импорта семей и сотрудников",
+      "affected_stages": [
+        16,
+        18,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "IMG_0253/IMG_0254/IMG_0255 показывают подключённый tenant, пять рабочих сопоставлений, исключённую Online School, preview 2887 семей/детей и 193 сотрудников и disabled-кнопки импорта.",
+      "decision_id": "DEC-2026-09-13-86",
+      "question": "Как снять production-блокировку импорта после подтверждённых подключения, филиалов и предпросмотра, не открывая неконтролируемую синхронизацию?",
+      "statement": "D178: ALFACRM_IMPORT_ENABLED активируется одноразовым owner-authorized workflow_run только после успешного Verify точного D178-коммита в main и поверх verified production receipt точного D177 Money release. До остановки live workflow подтверждает его image/container/route identity, успешную проверку подключения после D176, зашифрованную credential-запись, минимум одно сопоставление и положительные read-only предпросмотры семей и сотрудников. Каждый модуль по-прежнему требует собственный свежий preview token, зависимости соблюдаются, обратная запись в AlfaCRM отсутствует, финансовые проводки не создаются.",
+      "context": "После D176 владелец перевыпустил ключ, подключил tenant, сопоставил пять рабочих филиалов и получил read-only counts 2887 семей/детей и 193 сотрудника. Кнопки импорта остались disabled, потому что fail-closed runtime-флаг намеренно не был включён до этих доказательств. Параллельный D177 обновляет Money и должен быть полностью сохранён.",
+      "rationale": "Условия AlfaCRM gate выполнены фактическим production-результатом. Отдельная конфигурационная активация поверх receipt последнего D177 сохраняет его проверенный образ и интерфейс, делает свежий snapshot базы и допускает запись только в ArtHello OS после предпросмотра.",
+      "evidence": [
+        "D176 production run 34787872813 завершён success с AlfaCRM egress и внешними ArtHello/School/Pay=200.",
+        "IMG_0253/IMG_0254: подключение и пять рабочих сопоставлений сохранены; один ненужный филиал исключён.",
+        "IMG_0255: предпросмотры завершены без записи, counts 2887 и 193.",
+        "D178 controller сохраняет полный D177 release-contract fixture и требует совпадения D177 receipt с live image, container и route до любой остановки production.",
+        "D177 production run 34789532262 успешно создал точный receipt для release 6ef7a3dc82e4644d1991d5454e61b62149b3738b и image sha256:8bda721095c7b178ea5721115bd2146269a07fd30eb91f905abe59b889306000.",
+        "D178 локально прошёл 18/18 release/Money-контрактов и 811/813 остальных тестов вне chown-файла, 2 skipped; typecheck, lint без ошибок и production build успешны."
+      ],
+      "assumptions": [
+        "Новый v2api key введён владельцем только в защищённое окно ArtHello OS и не передан в чат или CI.",
+        "Выбранные сопоставления на IMG_0253 соответствуют организационной структуре владельца.",
+        "Если preview token старше 30 минут к моменту активации, владелец повторно нажимает «Проверить данные» перед импортом.",
+        "Finance сохраняет только raw observations и остаётся без денежной проекции до подтверждённого PayType direction."
+      ],
+      "dependencies": [
+        "DEC-2026-09-13-84 completed",
+        "D176 production run 34787872813",
+        "D177 release 6ef7a3dc82e4644d1991d5454e61b62149b3738b and verified production run 34789532262 receipt",
+        "IMG_0253/IMG_0254 branch mappings",
+        "IMG_0255 read-only preview evidence"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34787872813",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/6ef7a3dc82e4644d1991d5454e61b62149b3738b"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Сделать импорт включённым по умолчанию в коде",
+          "reason": "Убирает fail-closed production gate для будущих tenant и не связывает активацию с фактическими доказательствами владельца.",
+          "reopen_condition": "только отдельное решение о постоянной политике onboarding после завершённого первого импорта"
+        },
+        {
+          "option": "Запустить импорт автоматически сразу после активации",
+          "reason": "Лишает владельца проверки количества и нарушает модульную последовательность с 30-минутным preview token.",
+          "reopen_condition": "нет"
+        },
+        {
+          "option": "Активировать старый D176 после появления нового D177 main",
+          "reason": "Откатило бы параллельно опубликованные изменения Money или создало гонку production-контроллеров.",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Проверить и опубликовать D178, подтвердить D177 receipt, runtime-флаг, snapshot, rollback и внешний контур, затем открыть владельцу последовательный импорт семей и сотрудников",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "Successful exact-main Verify and protected workflow_run activation receipt, ARTHELLO_D178_PREVIEW_EVIDENCE=VERIFIED, ARTHELLO_D178_PRODUCTION=VERIFIED и ARTHELLO_D178_EXTERNAL=VERIFIED",
+          "status": "open"
         }
       ]
     }
