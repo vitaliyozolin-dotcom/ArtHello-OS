@@ -1,0 +1,237 @@
+# D169: recover the public edge after the verified D168 cutover.
+# The operation is deliberately narrow: retain the D168 image and D1 volume,
+# restore durable container runtime, then restart Caddy only when its public
+# listener is still unavailable. No application secret is read or replaced.
+name: Recover ArtHello production edge D169
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/recover-arthello-edge-d169.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+
+env:
+  EXPECTED_PARENT_SHA: 4e0225874ece24098c0ae7ab664e1655b50846ec
+  TARGET_RELEASE_SHA: 4e0225874ece24098c0ae7ab664e1655b50846ec
+  TARGET_CANDIDATE_NAME: arthello-direct-34753522048-1
+  CADDY_CONTAINER: stroios-caddy-1
+  DATA_VOLUME: arthello-direct-v44-data
+  PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+  PAY_URL: https://pay-188-225-38-55.sslip.io
+  SCHOOL_URL: https://school-188-225-38-55.sslip.io
+
+jobs:
+  recover:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.ref == 'refs/heads/main' &&
+      github.event.before == '4e0225874ece24098c0ae7ab664e1655b50846ec' &&
+      startsWith(github.event.head_commit.message, 'D169: recover D168 production edge') &&
+      github.run_attempt == 1
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - arthello-gateway
+    timeout-minutes: 15
+    environment: production-ru
+    steps:
+      - name: Check out the exact recovery source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
+          submodules: false
+          lfs: false
+
+      - name: Recover retained D168 runtime and public listener
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$GITHUB_REPOSITORY" = vitaliyozolin-dotcom/ArtHello-OS
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT_SHA"
+          test "$(git log -1 --format=%s)" = "D169: recover D168 production edge"
+          current_main="$(curl --fail-with-body --silent --show-error --max-time 30 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" | jq -er '.object.sha')"
+          test "$current_main" = "$GITHUB_SHA"
+
+          state_root="$HOME/.config/arthello/release-state"
+          d168_receipt="$state_root/production-d168-$TARGET_RELEASE_SHA.json"
+          recovery_receipt="$state_root/edge-recovery-d169-$TARGET_RELEASE_SHA.json"
+          test -f "$d168_receipt" && test ! -L "$d168_receipt"
+          test "$(stat -c '%U:%a:%h' "$d168_receipt")" = "$(id -un):600:2"
+          test ! -e "$recovery_receipt" && test ! -L "$recovery_receipt"
+          jq -e \
+            --arg release "$TARGET_RELEASE_SHA" '
+              .schemaVersion == 1 and .state == "verified" and .decision == "D168" and
+              .releaseSha == $release and
+              (.candidateContainerId | test("^[a-f0-9]{64}$")) and
+              (.imageId | test("^sha256:[a-f0-9]{64}$")) and
+              (.activeRouteSha256 | test("^[a-f0-9]{64}$")) and
+              .dataProof.bankAccounts > 0 and .dataProof.accountsWithBalances > 0 and
+              .dataProof.activePayGrants >= .dataProof.eligiblePayAdministrators and
+              .moneyAcceptanceEnabled == false and .fiscalizationEnabled == false
+            ' "$d168_receipt" >/dev/null
+
+          candidate_id="$(jq -er '.candidateContainerId' "$d168_receipt")"
+          image_id="$(jq -er '.imageId' "$d168_receipt")"
+          route_sha="$(jq -er '.activeRouteSha256' "$d168_receipt")"
+          test "$(docker inspect "$candidate_id" --format '{{.Id}}')" = "$candidate_id"
+          test "$(docker inspect "$candidate_id" --format '{{.Name}}')" = "/$TARGET_CANDIDATE_NAME"
+          test "$(docker inspect "$candidate_id" --format '{{.Image}}')" = "$image_id"
+          test "$(docker inspect "$candidate_id" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$TARGET_RELEASE_SHA"
+          test "$(docker inspect "$candidate_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+
+          local_health() {
+            test "$(docker inspect "$candidate_id" --format '{{.State.Running}}')" = true &&
+              docker exec -i "$candidate_id" node - <<'NODE'
+          fetch('http://127.0.0.1:8081/api/health', { signal: AbortSignal.timeout(5000) })
+            .then(async (response) => {
+              const body = await response.json();
+              if (!response.ok || body.status !== 'ok' || body.database !== 'available') process.exit(1);
+            })
+            .catch(() => process.exit(1));
+          NODE
+          }
+
+          candidate_before="$(docker inspect "$candidate_id" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}/{{.HostConfig.RestartPolicy.Name}}')"
+          recovery_action=none
+          docker update --restart=unless-stopped "$candidate_id" >/dev/null
+          if [ "$(docker inspect "$candidate_id" --format '{{.State.Running}}')" != true ]; then
+            docker start "$candidate_id" >/dev/null
+            recovery_action=start-candidate
+          elif ! local_health; then
+            docker restart --time 20 "$candidate_id" >/dev/null
+            recovery_action=restart-candidate
+          fi
+          ready=0
+          for attempt in $(seq 1 45); do
+            if local_health; then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker inspect "$candidate_id" --format 'ARTHELLO_D169_APP_FAILED status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} error={{json .State.Error}}'
+            exit 1
+          fi
+
+          caddy_before="$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}')"
+          if [ "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" != true ]; then
+            docker start "$CADDY_CONTAINER" >/dev/null
+            recovery_action="${recovery_action}+start-caddy"
+          fi
+          test "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true
+          test "$(docker exec "$CADDY_CONTAINER" sh -ceu 'sha256sum /data/external-routes.caddy | cut -d " " -f 1')" = "$route_sha"
+          test "$(docker exec -e TARGET="$TARGET_CANDIDATE_NAME:8081" "$CADDY_CONTAINER" sh -ceu 'grep -Foc "$TARGET" /data/external-routes.caddy')" -ge 2
+          docker exec "$CADDY_CONTAINER" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+          docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+
+          public_probe() {
+            docker exec -i -e PUBLIC_URL="$PUBLIC_URL" -e PAY_URL="$PAY_URL" -e SCHOOL_URL="$SCHOOL_URL" "$candidate_id" node - <<'NODE'
+          const get = async (url) => {
+            try {
+              const response = await fetch(url, { signal: AbortSignal.timeout(10000), headers: { 'cache-control': 'no-cache' } });
+              return { response, body: await response.text() };
+            } catch { return { response: null, body: '' }; }
+          };
+          const health = await get(process.env.PUBLIC_URL + '/api/health');
+          const school = await get(process.env.SCHOOL_URL + '/api/health');
+          const pay = await get(process.env.PAY_URL + '/?probe=d169-edge');
+          const payConfig = await get(process.env.PAY_URL + '/api/pay-sso/config');
+          let healthBody = {}, schoolBody = {}, configBody = {};
+          try { healthBody = JSON.parse(health.body); } catch {}
+          try { schoolBody = JSON.parse(school.body); } catch {}
+          try { configBody = JSON.parse(payConfig.body); } catch {}
+          const result = {
+            arthello: health.response?.status ?? 0,
+            school: school.response?.status ?? 0,
+            pay: pay.response?.status ?? 0,
+            payConfig: payConfig.response?.status ?? 0,
+          };
+          console.log(JSON.stringify(result));
+          if (result.arthello !== 200 || healthBody.status !== 'ok' || healthBody.database !== 'available' ||
+              result.school !== 200 || schoolBody.status !== 'ok' ||
+              result.pay !== 200 || !pay.body.includes('data-arthello-pay-shell="d168"') ||
+              result.payConfig !== 200 || configBody.centralOrigin !== process.env.PUBLIC_URL || configBody.payOrigin !== process.env.PAY_URL) {
+            process.exit(1);
+          }
+          NODE
+          }
+
+          if ! public_probe; then
+            docker restart --time 20 "$CADDY_CONTAINER" >/dev/null
+            recovery_action="${recovery_action}+restart-caddy"
+            for attempt in $(seq 1 30); do
+              if [ "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true ] && public_probe; then
+                ready=1
+                break
+              fi
+              ready=0
+              sleep 2
+            done
+            test "$ready" = 1
+          fi
+
+          candidate_restart_count="$(docker inspect "$candidate_id" --format '{{.RestartCount}}')"
+          for observation in $(seq 1 13); do
+            sleep 5
+            local_health
+            test "$(docker inspect "$candidate_id" --format '{{.RestartCount}}')" = "$candidate_restart_count"
+            test "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true
+          done
+          public_probe
+          candidate_after="$(docker inspect "$candidate_id" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}/{{.HostConfig.RestartPolicy.Name}}')"
+          caddy_after="$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}')"
+
+          receipt_temp="$state_root/.edge-recovery-d169-$TARGET_RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+          test ! -e "$receipt_temp" && test ! -L "$receipt_temp"
+          jq -nc \
+            --arg release "$TARGET_RELEASE_SHA" --arg candidate "$candidate_id" --arg image "$image_id" \
+            --arg route "$route_sha" --arg action "$recovery_action" \
+            --arg candidateBefore "$candidate_before" --arg candidateAfter "$candidate_after" \
+            --arg caddyBefore "$caddy_before" --arg caddyAfter "$caddy_after" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" '
+              {schemaVersion:1,state:"verified",protocol:"ARTHELLO_EDGE_RECOVERY_D169",
+               releaseSha:$release,candidateContainerId:$candidate,imageId:$image,activeRouteSha256:$route,
+               recoveryAction:$action,candidateBefore:$candidateBefore,candidateAfter:$candidateAfter,
+               caddyBefore:$caddyBefore,caddyAfter:$caddyAfter,recoveryRunId:$run,recoveryRunAttempt:$attempt,
+               stabilityWindowSeconds:65,arthelloStatus:200,schoolStatus:200,payStatus:200,
+               moneyAcceptanceEnabled:false,fiscalizationEnabled:false,verifiedAtUtc:$at}
+            ' > "$receipt_temp"
+          chmod 0600 "$receipt_temp"
+          ln "$receipt_temp" "$recovery_receipt"
+          rm "$receipt_temp"
+          sync "$recovery_receipt"
+          test "$(stat -c '%U:%a:%h' "$recovery_receipt")" = "$(id -un):600:1"
+          printf 'ARTHELLO_D169_EDGE=VERIFIED release=%s action=%s candidate=%s\n' "$TARGET_RELEASE_SHA" "$recovery_action" "$TARGET_CANDIDATE_NAME"
+
+      - name: Publish recovery summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## ArtHello production edge D169'
+            echo
+            echo "- Retained release: \`$TARGET_RELEASE_SHA\`"
+            echo "- Result: ${{ job.status }}"
+            echo '- D1 replacement, snapshot restore and application-secret access: not performed.'
+            echo '- ArtHello OS, School and Pay public responses: checked after a 65-second stability window.'
+            echo '- Money acceptance and fiscalization: disabled.'
+          } >> "$GITHUB_STEP_SUMMARY"
