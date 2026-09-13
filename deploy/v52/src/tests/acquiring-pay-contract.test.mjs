@@ -90,7 +90,7 @@ test("D175 keeps Pay behind Acquiring and preserves the focused family search", 
 });
 
 test("D177 deployment preserves AlfaCRM and Pay while publishing compact Money history", async () => {
-  const workflow = await source("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
+  const workflow = await source("./contract-fixtures/deploy-d177.yml");
   assert.match(workflow, /D177: refine Money cards and mobile bank history/);
   assert.match(workflow, /D177_MONEY_MOBILE_HISTORY/);
   assert.match(workflow, /ahFinanceBankHistoryRow/);
