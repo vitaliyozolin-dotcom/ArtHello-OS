@@ -455,3 +455,10 @@ Exact-head V52 run34443910215/job102764455280 остановился 2026-09-10T
 ## 2026-09-11 — website webhook HMAC boundary
 
 Website lead callback подключён к versioned HMAC-SHA256 по exact raw JSON bytes, explicit current/previous key ID, timestamp и event ID. Маршрут public только относительно cookie/session auth и fail closed без корректного keyring или валидного `WEBSITE_WEBHOOK_MAX_SKEW_SECONDS`; до JSON parsing и lead processing выполняется PostgreSQL replay claim. Missing/duplicate key, unknown key, tamper, stale timestamp, replay conflict и storage outage покрыты synthetic security tests; accept/duplicate/conflicting-body доказаны через настоящий HTTP boundary на одноразовом PostgreSQL 16. Bank/Evotor callbacks не открывались; production secrets и callback URL не проверялись.
+
+
+## D161 — Повторить публикацию ArtHello Pay после увеличения диска (2026-09-13, кандидат)
+
+D160 protected run `34706132412`, deploy job `103586646447`, подтвердил exact-main provenance и неизменный принятый production `ff8559254faaedade63a9ee7567a45686d08c13a`, но остановился до загрузки архивов, БД, контейнеров и маршрутов: Docker-доступно `4862916 KiB` при требуемых `7995088 KiB`. Все разрешённые точные browser-retirement targets уже отсутствовали; никаких production-данных или volumes не удалено.
+
+Владелец подтвердил, что место на сервере увеличено, и потребовал немедленно повторить публикацию без новых продуктовых изменений и дополнительных cleanup-итераций. Разрешено только перепривязать существующий неизменный R18 rollout к свежему single-parent squash main и повторить его после штатных exact-head Quality/Proof/v52 ворот. Capacity guard, backup, rollback, сохранение данных и обязательная конечная public/auth проверка остаются без ослабления. Дополнительное удаление images/containers/volumes, изменение приложения, включение банковского приёма реальных платежей, live-адаптера Точки или фискализации запрещены.
