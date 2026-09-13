@@ -27,7 +27,7 @@ def checked_module(name, filename, expected):
 state = checked_module('r14_candidate_state', 'r18-candidate-state.py', '1b1585e33ddc1b46c35f94561f09d08398cd7a3f6f59bd94c820acc01d52101c')
 adoption = state.adoption
 backup = adoption.r7
-controller = checked_module('r14_backup_controller', 'r18-backup-controller.py', '1eee806addb70230503fd01cc77ef7d456950b236be19111e455a8defc027d55')
+controller = checked_module('r14_backup_controller', 'r18-backup-controller.py', '1c2c6c5df205b50c5cbf65279b91cd0ade3a716ffb317f987a6151e528a3ffaf')
 
 
 def require(value):
