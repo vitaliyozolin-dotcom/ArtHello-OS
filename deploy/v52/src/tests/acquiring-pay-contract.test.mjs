@@ -66,6 +66,8 @@ test("D168 deployment validates live bank data and Pay boundary without payment 
   assert.match(workflow, /TOCHKA_AUTOSYNC_ACTIVATION_ID/);
   assert.match(workflow, /activation-volume\.py write/);
   assert.match(workflow, /hasTochkaAutosyncActivation/);
+  assert.match(workflow, /runtimeFingerprintSha256/);
+  assert.match(workflow, /image-runtime-fingerprint\.jq/);
   assert.match(workflow, /moneyAcceptanceEnabled:false/);
   assert.match(workflow, /fiscalizationEnabled:false/);
   assert.doesNotMatch(workflow, /TOCHKA_TOKEN|PAYMENT_SECRET|FISCALIZATION_SECRET/);
