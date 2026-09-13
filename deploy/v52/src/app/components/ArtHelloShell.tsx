@@ -19,6 +19,7 @@ import "./SystemWideMobilePolish.css";
 const RegistryWorkspace = lazy(() => import("./RegistryWorkspace").then((item) => ({ default: item.RegistryWorkspace })));
 const WorkflowWorkspace = lazy(() => import("./WorkflowWorkspace").then((item) => ({ default: item.WorkflowWorkspace })));
 const FinanceWorkspace = lazy(() => import("./FinanceWorkspace").then((item) => ({ default: item.FinanceWorkspace })));
+const AcquiringWorkspace = lazy(() => import("./AcquiringWorkspace").then((item) => ({ default: item.AcquiringWorkspace })));
 const SalesWorkspace = lazy(() => import("./SalesWorkspace").then((item) => ({ default: item.SalesWorkspace })));
 const FamilyWorkspace = lazy(() => import("./FamilyWorkspace").then((item) => ({ default: item.FamilyWorkspace })));
 const ContentWorkspace = lazy(() => import("./ContentWorkspace").then((item) => ({ default: item.ContentWorkspace })));
@@ -166,8 +167,9 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
     apiRole: authenticatedUser?.apiRole ?? "",
     isSystemOwner: Boolean(authenticatedUser?.isSystemOwner),
     canAccessMedical: Boolean(authenticatedUser?.canAccessMedical),
+    canAccessPay: Boolean(authenticatedUser?.canAccessPay),
     allowedModules: authenticatedUser?.allowedModules,
-  }), [authenticatedUser?.allowedModules, authenticatedUser?.apiRole, authenticatedUser?.canAccessMedical, authenticatedUser?.isSystemOwner]);
+  }), [authenticatedUser?.allowedModules, authenticatedUser?.apiRole, authenticatedUser?.canAccessMedical, authenticatedUser?.canAccessPay, authenticatedUser?.isSystemOwner]);
   const isModuleAllowed = useCallback((id: ModuleId) => canAccessModule(accessContext, id), [accessContext]);
   const allowedModuleIds = useMemo(
     () => new Set(moduleCatalog.map((module) => module.id).filter(isModuleAllowed)),
@@ -221,6 +223,10 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
     const openHashModule = () => {
       const requested = window.location.hash.slice(1);
       const next = resolveModuleRoute(accessContext, requested, knownModuleIds);
+      if (next === "pay") {
+        window.location.assign("/api/pay-sso/open");
+        return;
+      }
       const settingsTab = settingsTabForModule(next);
       if (settingsTab) {
         setSettingsInitialTab(settingsTab);
@@ -281,6 +287,14 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
 
   function openModule(id: ModuleId, focusId?: string) {
     const settingsTab = settingsTabForModule(id);
+    if (id === "pay") {
+      if (!isModuleAllowed(id)) {
+        setNotice("Доступ к ArtHello Pay не выдан");
+        return;
+      }
+      window.location.assign("/api/pay-sso/open");
+      return;
+    }
     if (settingsTab) {
       if (!isModuleAllowed(id)) {
         setNotice("Этот раздел не входит в права вашей роли");
@@ -357,10 +371,10 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
 
   const routedActive = isModuleAllowed(active) ? active : "home";
   const activeEntry = moduleCatalog.find((item) => item.id === routedActive) ?? moduleCatalog[0];
-  const primaryNav = (["home", "finance", "clients", "education", "hr", "sales", "content", "tasks", "legal", "analytics"] as ModuleId[]).filter((id) => isModuleAllowed(id) && !settingsModuleIds.has(id));
+  const primaryNav = (["home", "finance", "acquiring", "pay", "clients", "education", "hr", "sales", "content", "tasks", "legal", "analytics"] as ModuleId[]).filter((id) => isModuleAllowed(id) && !settingsModuleIds.has(id));
   const favoriteNav = favoriteModules.filter((id) => isModuleAllowed(id) && !settingsModuleIds.has(id));
   const extraNav = moduleCatalog.filter((item) => isModuleAllowed(item.id) && !settingsModuleIds.has(item.id) && !primaryNav.includes(item.id) && !favoriteNav.includes(item.id));
-  const navLabels: Partial<Record<ModuleId, string>> = { finance: "Деньги", clients: "Клиенты", hr: "Команда", legal: "Документы", projects: "План-факт" };
+  const navLabels: Partial<Record<ModuleId, string>> = { finance: "Деньги", acquiring: "Эквайринг", pay: "Pay", clients: "Клиенты", hr: "Команда", legal: "Документы", projects: "План-факт" };
 
   const renderNavItem = (item: typeof moduleCatalog[number], keyPrefix = "") => (
     <a
@@ -495,6 +509,8 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
             <RegistryWorkspace notify={setNotice} capabilities={registryAccess} />
           ) : routedActive === "finance" ? (
             <FinanceWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} selectedBranch={selectedBranch} branchName={branches.find((branch) => branch.id === selectedBranch)?.name ?? ""} focusId={moduleFocus?.module === "finance" ? moduleFocus.id : undefined} />
+          ) : routedActive === "acquiring" ? (
+            <AcquiringWorkspace notify={setNotice} onOpenIntegrations={() => openModule("integrations")} />
           ) : routedActive === "sales" ? (
             <SalesWorkspace workspace="sales" role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenFinance={() => openModule("finance")} onOpenIntegrations={() => openModule("integrations")} focusId={moduleFocus?.module === "sales" ? moduleFocus.id : undefined} />
           ) : routedActive === "clients" ? (

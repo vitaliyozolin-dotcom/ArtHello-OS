@@ -4,6 +4,8 @@ const paths: Record<string, string> = {
   home: "M3 11.5 12 4l9 7.5M5.5 10.5V20h13v-9.5M9.5 20v-6h5v6",
   tasks: "M9 5h10M9 12h10M9 19h10M4 5l1 1 2-2M4 12l1 1 2-2M4 19l1 1 2-2",
   finance: "M12 3v18M16.5 7.5c0-1.7-1.8-3-4.5-3s-4.5 1.2-4.5 3 1.7 2.8 4.5 3 4.5 1.2 4.5 3-1.8 3-4.5 3-4.5-1.3-4.5-3",
+  acquiring: "M3 7h18v12H3zM3 10h18M7 15h4M17 4v3M7 4v3",
+  pay: "M4 6h16v12H4zM4 10h16M8 15h3",
   accounting: "M4 4h16v16H4zM8 8h8M8 12h2M14 12h2M8 16h2M14 16h2",
   registry: "M4 5h16v14H4zM8 9h4M8 13h8M8 16h6",
   sales: "M4 18 10 12l4 4 6-9M15 7h5v5",

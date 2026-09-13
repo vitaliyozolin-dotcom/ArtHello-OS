@@ -19,9 +19,13 @@ export default function SchoolSsoLoginPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [passwordChangeRequired, setPasswordChangeRequired] = useState(false);
+  const [target, setTarget] = useState<"diary" | "pay">("diary");
 
   useEffect(() => {
     let active = true;
+    const targetTimer = window.setTimeout(() => {
+      if (active) setTarget(new URLSearchParams(window.location.search).get("target") === "pay" ? "pay" : "diary");
+    }, 0);
     void fetch("/api/auth/me", { cache: "no-store", credentials: "same-origin" })
       .then(async (response) => {
         if (!active || !response.ok) return;
@@ -35,6 +39,7 @@ export default function SchoolSsoLoginPage() {
       .catch(() => undefined);
     return () => {
       active = false;
+      window.clearTimeout(targetTimer);
     };
   }, []);
 
@@ -124,7 +129,9 @@ export default function SchoolSsoLoginPage() {
         <p className={styles.intro}>
           {passwordChangeRequired
             ? "Введите временный пароль ещё раз и задайте свой — не короче 12 символов."
-            : "Войдите в ArtHello OS. После проверки доступа вы автоматически вернётесь в электронный дневник — второго пароля не будет."}
+            : target === "pay"
+              ? "Войдите в ArtHello OS. После проверки роли вы автоматически перейдёте в ArtHello Pay — второго пароля не будет."
+              : "Войдите в ArtHello OS. После проверки доступа вы автоматически вернётесь в электронный дневник — второго пароля не будет."}
         </p>
         {passwordChangeRequired ? (
           <form onSubmit={changePassword} className={styles.form}>
@@ -194,13 +201,14 @@ export default function SchoolSsoLoginPage() {
               {error ? <p role="alert">{error}</p> : null}
             </div>
             <button type="submit" disabled={busy} aria-busy={busy}>
-              {busy ? "Проверяем доступ…" : "Войти и открыть дневник"}
+              {busy ? "Проверяем доступ…" : target === "pay" ? "Войти и открыть Pay" : "Войти и открыть дневник"}
             </button>
           </form>
         )}
         <small>
-          Эта страница предназначена только для сотрудников. Родители входят
-          непосредственно в дневник по одноразовому коду.
+          {target === "pay"
+            ? "ArtHello OS проверяет сотрудника и право работы со ссылками на оплату. Банковские выписки в Pay не передаются."
+            : "Эта страница предназначена только для сотрудников. Родители входят непосредственно в дневник по одноразовому коду."}
         </small>
       </section>
     </main>

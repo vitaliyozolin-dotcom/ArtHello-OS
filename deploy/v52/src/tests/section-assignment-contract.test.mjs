@@ -7,7 +7,7 @@ import { moduleCatalog } from "../data/test-snapshot.ts";
 
 // Product contract, kept independent of the policy's internal endpoint maps.
 const sections = {
-  tasks: ["tasks"], finance: ["finance"], accounting: ["accounting"],
+  tasks: ["tasks"], finance: ["finance"], acquiring: ["acquiring"], accounting: ["accounting"],
   registry: ["entities", "entity-detail"], sales: ["sales"], clients: ["entities", "families"],
   education: ["education"], methods: ["education"], hr: ["hr"], legal: ["legal"],
   procurement: ["procurement"], food: ["food"], safety: ["safety"], medical: ["medical"],
@@ -20,13 +20,16 @@ const businessMutations = ["tasks", "task-actions", "finance-actions", "accounti
 const user = (apiRole, allowedModules, extra = {}) => ({ apiRole, isSystemOwner: apiRole === "OWNER", allowedModules, ...extra });
 
 test("contract covers every product section including special access and medical", () => {
-  assert.deepEqual(Object.keys(sections).sort(), moduleIds.filter((id) => id !== "home").sort());
+  assert.deepEqual(Object.keys(sections).sort(), moduleIds.filter((id) => id !== "home" && id !== "pay").sort());
+  assert.equal(canAccessModule(user("ADMIN", [], { canAccessPay: true }), "pay"), true);
+  assert.equal(canAccessModule(user("ADMIN", ["pay"]), "pay"), false);
+  assert.equal(canAccessApi(user("ADMIN", [], { canAccessPay: true }), "/api/payments/obligations", "POST"), true);
 });
 
 for (const apiRole of API_ROLES) {
   test(`${apiRole}: unchecked sections are hidden, direct hashes close, and APIs deny GET and POST`, () => {
     const revoked = user(apiRole, [], { canAccessMedical: true });
-    assert.deepEqual(accessibleModules(revoked, moduleIds), ["home"]);
+    assert.deepEqual(accessibleModules(revoked, moduleIds), apiRole === "OWNER" ? ["home", "pay"] : ["home"]);
     for (const [moduleId, endpoints] of Object.entries(sections)) {
       assert.equal(resolveModuleRoute(revoked, moduleId, moduleIds), "home", moduleId);
       for (const endpoint of endpoints) {
@@ -44,7 +47,9 @@ for (const apiRole of API_ROLES) {
       const allowed = moduleId === "access" ? apiRole === "OWNER" : moduleId === "medical" ? apiRole === "MEDICAL" : true;
       assert.equal(canAccessModule(context, moduleId), allowed, moduleId);
       assert.equal(resolveModuleRoute(context, moduleId, moduleIds), allowed ? moduleId : "home", moduleId);
-      assert.deepEqual(accessibleModules(context, moduleIds).sort(), (allowed ? ["home", moduleId] : ["home"]).sort());
+      const visible = allowed ? ["home", moduleId] : ["home"];
+      if (apiRole === "OWNER" && moduleId !== "pay") visible.push("pay");
+      assert.deepEqual(accessibleModules(context, moduleIds).sort(), visible.sort());
       for (const endpoint of endpoints) assert.equal(canAccessApi(context, `/api/${endpoint}`, "GET"), allowed, endpoint);
     }
   });

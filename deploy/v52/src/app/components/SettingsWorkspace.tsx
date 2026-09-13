@@ -43,7 +43,7 @@ type SettingsData = AccessContext & {
 export const settingsTabs = ["Филиалы", "Доступы", "Семьи", "Избранное", "Интеграции", "Проверка системы", "Резервные копии"] as const;
 export type SettingsTab = typeof settingsTabs[number];
 const roles = APP_ROLE_DEFINITIONS.filter((definition) => definition.apiRole !== "OWNER").map((definition) => definition.appRole);
-const assignableModules = moduleCatalog.filter((module) => module.id !== "home" && module.id !== "access");
+const assignableModules = moduleCatalog.filter((module) => !["home", "access", "pay"].includes(module.id));
 
 export function SettingsWorkspace({ close, notify, onContextChanged, initialTab = "Филиалы", onTasksChanged = () => undefined, onFavoritesChanged = () => undefined }: { close: () => void; notify: (value: string) => void; onContextChanged: (value: AccessContext) => void; initialTab?: SettingsTab; onTasksChanged?: () => void | Promise<void>; onFavoritesChanged?: (value: ModuleId[]) => void }) {
   const [data, setData] = useState<SettingsData | null>(null);

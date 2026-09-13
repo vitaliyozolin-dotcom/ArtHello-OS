@@ -249,15 +249,10 @@ export async function ensureArtHelloPayTables() {
   await tablesPromise;
 }
 
-function userHasPayModule(context: AuthenticatedRequestContext) {
-  const modules = context.auth.user.allowedModules ?? [];
-  return context.auth.user.isAdministrative && (modules.includes("ArtHello Pay") || modules.includes("Оплаты"));
-}
-
 export async function requireArtHelloPayContext(request: Request, write = false) {
   const context = await getAuthenticatedRequestContext(request);
   if (!context) throw new ArtHelloPayError("Требуется вход", 401);
-  if (!isCanonicalOwnerContext(context) && !userHasPayModule(context)) {
+  if (!context.auth.user.canAccessPay) {
     throw new ArtHelloPayError("Нет доступа к ArtHello Pay", 403);
   }
   if (write) verifyAuthenticatedRequestCsrf(request, context);

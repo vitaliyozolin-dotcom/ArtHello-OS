@@ -11,6 +11,7 @@ const applicationRoot = process.cwd();
 const dataRoot = process.env.ARTHELLO_D1_PATH || "/data/d1";
 const port = Number(process.env.PORT || 8081);
 const publicOrigin = process.env.ARTHELLO_PUBLIC_ORIGIN || "https://arthello-188-225-38-55.sslip.io";
+const payPublicOrigin = process.env.PAY_PUBLIC_ORIGIN || "https://pay-188-225-38-55.sslip.io";
 const integrationCredentialsKey = readRuntimeSecret(
   "INTEGRATION_CREDENTIALS_KEY",
   "INTEGRATION_CREDENTIALS_KEY_FILE",
@@ -51,7 +52,10 @@ const runtime = new Miniflare({
   ],
   bindings: {
     ARTHELLO_PUBLIC_ORIGIN: publicOrigin,
-    ARTHELLO_TRUSTED_WEB_ORIGINS: process.env.ARTHELLO_TRUSTED_WEB_ORIGINS || "",
+    ARTHELLO_TRUSTED_WEB_ORIGINS: trustedWebOrigins(
+      process.env.ARTHELLO_TRUSTED_WEB_ORIGINS || "",
+      payPublicOrigin,
+    ),
     ARTHELLO_BOOTSTRAP_LOGIN: process.env.ARTHELLO_BOOTSTRAP_LOGIN || "owner",
     ARTHELLO_BOOTSTRAP_PASSWORD: readRuntimeSecret(
       "ARTHELLO_BOOTSTRAP_PASSWORD",
@@ -60,6 +64,7 @@ const runtime = new Miniflare({
     ATLAS_PUBLIC_ORIGIN: process.env.ATLAS_PUBLIC_ORIGIN || "",
     ATLAS_CENTRAL_ACCESS_SECRET: readRuntimeSecret("ATLAS_CENTRAL_ACCESS_SECRET", "ATLAS_CENTRAL_ACCESS_SECRET_FILE"),
     SCHOOL_PUBLIC_ORIGIN: process.env.SCHOOL_PUBLIC_ORIGIN || "",
+    PAY_PUBLIC_ORIGIN: payPublicOrigin,
     SCHOOL_DIARY_SYNC_URL: process.env.SCHOOL_DIARY_SYNC_URL || "",
     SCHOOL_DIARY_ALLOWED_ORIGINS: process.env.SCHOOL_DIARY_ALLOWED_ORIGINS || "",
     CENTRAL_ACCESS_SECRET: centralAccessSecret,
@@ -104,6 +109,10 @@ function allowedOpenAiOcrModel(value) {
   return new Set(["gpt-4.1-mini"]).has(requested)
     ? requested
     : "gpt-4.1-mini";
+}
+
+function trustedWebOrigins(configured, requiredOrigin) {
+  return [...new Set(configured.split(",").map((value) => value.trim()).filter(Boolean).concat(requiredOrigin))].join(",");
 }
 
 const url = await runtime.ready;

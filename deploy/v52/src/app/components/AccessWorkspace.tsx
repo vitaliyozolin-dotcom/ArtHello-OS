@@ -56,7 +56,7 @@ type Tab = typeof tabs[number];
 
 const staffRoles = ASSIGNABLE_APP_ROLES;
 const permissionDomains = moduleCatalog.map(({ id, label }) => [id, label] as const);
-const assignableModules = moduleCatalog.filter((module) => module.id !== "home" && module.id !== "access");
+const assignableModules = moduleCatalog.filter((module) => !["home", "access", "pay"].includes(module.id));
 const roleTemplates = APP_ROLE_DEFINITIONS.map((definition) => ({
   name: definition.appRole,
   description: definition.description,

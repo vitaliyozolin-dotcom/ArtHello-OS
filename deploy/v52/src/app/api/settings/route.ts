@@ -8,7 +8,7 @@ import { batchChangeCount } from "../../../lib/access-sync-outbox";
 import { dispatchFamilyDiaryAccessEvent, type FamilyAccessEvent, prepareFamilyDiaryAccessEvent, type PreparedFamilyAccessSyncEvent } from "../../../lib/family-access-sync";
 import { dispatchSchoolDiaryAccessEvent, prepareSchoolDiaryAccessEvent, type PreparedStaffAccessSyncEvent, SCHOOL_SYSTEM_ID, type StaffAccessEvent, type StaffSyncResult } from "../../../lib/staff-access-sync";
 import { API_ROLE_BY_APP_ROLE, ASSIGNABLE_APP_ROLES, canAccessModule, canManageAccess } from "../../../lib/access-policy";
-import { getAuthenticatedRequestContext, isCanonicalOwnerContext, verifyAuthenticatedRequestCsrf } from "../../../lib/production-auth";
+import { getAuthenticatedRequestContext, isCanonicalOwnerContext, PAY_SYSTEM_ID, verifyAuthenticatedRequestCsrf } from "../../../lib/production-auth";
 import { hasTrustedMutationOrigin } from "../../../lib/request-security";
 import { safeSettingsActionError } from "../../../lib/settings-error";
 
@@ -26,6 +26,7 @@ const defaultSystems = [
   { id: ATLAS_SYSTEM_ID, systemKey: "ATLAS_DIARY", name: "Дневник Атласа", description: "Отдельный дневник школы Атлас; вход через ArtHello OS", sortOrder: 30 },
   { id: "SYS-ARTHELLO-OS", systemKey: "ARTHELLO_OS", name: "ArtHello OS", description: "Управление группой, филиалами и сквозными процессами", sortOrder: 10 },
   { id: SCHOOL_SYSTEM_ID, systemKey: "SCHOOL_DIARY", name: "Дневник 1–11", description: "Учебный контур школы; классы и предметы назначаются уже в дневнике", sortOrder: 20 },
+  { id: PAY_SYSTEM_ID, systemKey: "ARTHELLO_PAY", name: "ArtHello Pay", description: "Отдельный модуль выставления платёжных ссылок; вход через ArtHello OS", sortOrder: 40 },
 ] as const;
 
 const diaryRoles = new Set(["director", "deputy", "admin", "teacher", "tech_admin"]);
@@ -33,7 +34,7 @@ const familyAccessEvents = new Set<FamilyAccessEvent>(["grant_access", "block_ac
 const CENTRAL_SYSTEM_ID = "SYS-ARTHELLO-OS";
 
 const assignableRoles = new Set(ASSIGNABLE_APP_ROLES);
-const assignableModuleIds = new Set<ModuleId>(moduleCatalog.map((module) => module.id).filter((id) => id !== "home" && id !== "access"));
+const assignableModuleIds = new Set<ModuleId>(moduleCatalog.map((module) => module.id).filter((id) => !["home", "access", "pay"].includes(id)));
 const favoriteModuleIds = new Set<ModuleId>(moduleCatalog.map((module) => module.id).filter((id) => !["home", "access", "integrations", "acceptance"].includes(id)));
 
 const recordTypes = new Set([
@@ -115,6 +116,9 @@ export async function GET(request: Request) {
           { value: "admin", label: "Администратор школы" },
           { value: "teacher", label: "Учитель" },
           { value: "tech_admin", label: "Технический администратор" },
+        ],
+        [PAY_SYSTEM_ID]: [
+          { value: "payment_operator", label: "Администратор оплат" },
         ],
       },
       canManage,
@@ -306,6 +310,9 @@ export async function POST(request: Request) {
       if (systemIds.includes(ATLAS_SYSTEM_ID) && (!atlasDiaryRole || !systemIds.includes(CENTRAL_SYSTEM_ID) || (!administrative && !branchIds.includes("BR-ATLAS-SCHOOL")))) {
         return Response.json({ error: "Для Атласа выберите роль дневника, вход в ArtHello OS и доступ к школе Атлас." }, { status: 400 });
       }
+      if (systemIds.includes(PAY_SYSTEM_ID) && (!administrative || !systemIds.includes(CENTRAL_SYSTEM_ID))) {
+        return Response.json({ error: "Для ArtHello Pay нужен административный доступ и активный вход в ArtHello OS." }, { status: 400 });
+      }
       const canonicalOwnerTarget = existing?.id === "USR-OWNER" || (authenticated.auth.user.isSystemOwner && existing?.id === me.id);
       if (canonicalOwnerTarget) {
         if (contactType !== existing.contactType || contact !== existing.contact || role !== "Собственник" || !administrative) {
@@ -364,7 +371,7 @@ export async function POST(request: Request) {
           statements.push(env.DB.prepare(`INSERT INTO user_system_access
             (user_id,system_id,role,status,access_version,last_sync_status,granted_by,updated_at)
             SELECT ?,?,?,?,?,?,?,? WHERE ${guard}`)
-            .bind(id, systemId, systemId === SCHOOL_SYSTEM_ID ? diaryRole : systemId === ATLAS_SYSTEM_ID ? atlasDiaryRole : role, userStatus === "Доступ приостановлен" ? "Приостановлен" : "Активен", nextVersion, systemId === SCHOOL_SYSTEM_ID ? "Ожидает синхронизации" : systemId === ATLAS_SYSTEM_ID ? "Вход через ArtHello OS" : "Не требуется", actor, now, ...guardValues));
+            .bind(id, systemId, systemId === SCHOOL_SYSTEM_ID ? diaryRole : systemId === ATLAS_SYSTEM_ID ? atlasDiaryRole : systemId === PAY_SYSTEM_ID ? "payment_operator" : role, userStatus === "Доступ приостановлен" ? "Приостановлен" : "Активен", nextVersion, systemId === SCHOOL_SYSTEM_ID ? "Ожидает синхронизации" : systemId === ATLAS_SYSTEM_ID || systemId === PAY_SYSTEM_ID ? "Вход через ArtHello OS" : "Не требуется", actor, now, ...guardValues));
         }
         if (employeeId) {
           statements.push(env.DB.prepare(`UPDATE hr_employees SET position_id=?,access_status=?,updated_at=?
@@ -395,7 +402,7 @@ export async function POST(request: Request) {
           statements.push(env.DB.prepare(`INSERT INTO user_system_access
             (user_id,system_id,role,status,access_version,last_sync_status,granted_by,updated_at)
             SELECT ?,?,?,?,?,?,?,? WHERE ${guard}`)
-            .bind(id, systemId, systemId === SCHOOL_SYSTEM_ID ? diaryRole : systemId === ATLAS_SYSTEM_ID ? atlasDiaryRole : role, userStatus === "Доступ приостановлен" ? "Приостановлен" : "Активен", nextVersion, systemId === SCHOOL_SYSTEM_ID ? "Ожидает синхронизации" : systemId === ATLAS_SYSTEM_ID ? "Вход через ArtHello OS" : "Не требуется", actor, now, ...guardValues));
+            .bind(id, systemId, systemId === SCHOOL_SYSTEM_ID ? diaryRole : systemId === ATLAS_SYSTEM_ID ? atlasDiaryRole : systemId === PAY_SYSTEM_ID ? "payment_operator" : role, userStatus === "Доступ приостановлен" ? "Приостановлен" : "Активен", nextVersion, systemId === SCHOOL_SYSTEM_ID ? "Ожидает синхронизации" : systemId === ATLAS_SYSTEM_ID || systemId === PAY_SYSTEM_ID ? "Вход через ArtHello OS" : "Не требуется", actor, now, ...guardValues));
         }
         if (employeeId) statements.push(env.DB.prepare(`UPDATE hr_employees SET position_id=?,access_status=?,updated_at=?
           WHERE id=? AND ${guard}`).bind(position, "Активен", now, employeeId, ...guardValues));

@@ -1,0 +1,483 @@
+# D168: publish the production Acquiring workspace and central Pay SSO.
+# The hosted verifier builds the immutable image. The gateway only loads it,
+# takes a recoverable D1 volume snapshot, swaps one candidate and stages static
+# Pay assets. Existing secret-file mounts are reused without printing contents.
+name: Deploy ArtHello Acquiring and Pay D168
+
+'on':
+  workflow_run:
+    workflows:
+      - Verify ArtHello v52 release
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+
+env:
+  EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
+  RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+  TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
+  CHECKED_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+  PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+  PAY_URL: https://pay-188-225-38-55.sslip.io
+  CADDY_CONTAINER: stroios-caddy-1
+  DATA_VOLUME: arthello-direct-v44-data
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.repository_owner == 'vitaliyozolin-dotcom' &&
+      github.event.workflow_run.name == 'Verify ArtHello v52 release' &&
+      (github.event.workflow_run.path == '.github/workflows/verify-arthello-v52.yml' ||
+       github.event.workflow_run.path == '.github/workflows/verify-arthello-v52.yml@main') &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.repository.full_name == github.repository &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' &&
+      github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' &&
+      github.run_attempt == 1 &&
+      startsWith(github.event.workflow_run.head_commit.message, 'D168: publish production acquiring and Pay SSO')
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - arthello-gateway
+    timeout-minutes: 75
+    environment: production-ru
+    steps:
+      - name: Checkout exact verified release
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
+          submodules: false
+          lfs: false
+
+      - name: Verify release and download hosted image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TRIGGER_VERIFY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(git log -1 --format=%s)" = "D168: publish production acquiring and Pay SSO"
+          current_main="$(curl --fail-with-body --silent --show-error --max-time 30 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" | jq -er '.object.sha')"
+          test "$current_main" = "$RELEASE_SHA"
+          python3 -I -B .github/scripts/download-v52-artifact-r17.py
+
+      - name: Verify and load immutable application image
+        id: image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          artifact="$RUNNER_TEMP/arthello-v52-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          evidence="$artifact/arthello-v52.json"
+          archive="$artifact/arthello-v52-image.tar.gz"
+          test -f "$evidence" && test -f "$evidence.sha256" && test -s "$archive"
+          (cd "$artifact" && sha256sum -c arthello-v52.json.sha256)
+          tree="$(git rev-parse HEAD^{tree})"
+          archive_sha="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          jq -e \
+            --arg repository "$GITHUB_REPOSITORY" --arg run "$TRIGGER_VERIFY_RUN_ID" \
+            --arg sha "$RELEASE_SHA" --arg tree "$tree" --arg archive "$archive_sha" '
+              .repository==$repository and .workflowRunId==$run and .workflowRunAttempt=="1" and
+              .headSha==$sha and .treeSha==$tree and .imageArchiveSha256==$archive and
+              .runnerTrust=="github-hosted-ephemeral" and .productionCapability==false and
+              (.imageId|test("^sha256:[a-f0-9]{64}$")) and
+              (.runtimeFingerprintSha256|test("^[a-f0-9]{64}$"))
+            ' "$evidence" >/dev/null
+          gzip -t "$archive"
+          load_log="$RUNNER_TEMP/d168-docker-load.log"
+          docker image load --input "$archive" >"$load_log" 2>&1 || { sed -n '1,160p' "$load_log" >&2; exit 1; }
+          image="arthello-v52-verify:$RELEASE_SHA"
+          image_id="$(docker image inspect "$image" --format '{{.Id}}')"
+          test "$image_id" = "$(jq -er '.imageId' "$evidence")"
+          test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$RELEASE_SHA"
+          test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$tree"
+          test "$(docker image inspect "$image_id" --format '{{.Config.User}}')" = node
+          printf 'image_id=%s\ntree=%s\n' "$image_id" "$tree" >> "$GITHUB_OUTPUT"
+          printf 'ARTHELLO_D168_HOSTED_IMAGE=VERIFIED id=%s\n' "$image_id"
+
+      - name: Snapshot, switch candidate and publish Pay assets
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_ID: ${{ steps.image.outputs.image_id }}
+          RELEASE_TREE: ${{ steps.image.outputs.tree }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          [[ "$IMAGE_ID" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$RELEASE_TREE" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+
+          run_key="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          candidate="arthello-direct-$run_key"
+          rollback_volume="arthello-rollback-$run_key"
+          state_root="$HOME/.config/arthello/release-state"
+          work="$state_root/d168-$run_key"
+          runtime_env="$work/runtime.env"
+          route_before="$work/external-routes.before.caddy"
+          route_after="$work/external-routes.after.caddy"
+          receipt="$state_root/production-d168-$RELEASE_SHA.json"
+          asset_root="/data/arthello-pay-assets-$RELEASE_SHA"
+          asset_stage="/data/.arthello-pay-assets-$run_key"
+          route_stage="/data/.external-routes.d168-$run_key"
+          route_backup="/data/external-routes.caddy.pre-d168-$run_key"
+          mkdir -p "$work"
+          chmod 0700 "$work"
+          test ! -e "$receipt"
+
+          current_main() {
+            curl --fail-with-body --silent --show-error --max-time 30 \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Accept: application/vnd.github+json" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" | jq -er '.object.sha'
+          }
+          test "$(current_main)" = "$RELEASE_SHA"
+          test "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true
+          test "$(docker volume inspect "$DATA_VOLUME" --format '{{.Name}}')" = "$DATA_VOLUME"
+          docker exec "$CADDY_CONTAINER" sh -ceu 'cat /data/external-routes.caddy' > "$route_before"
+          chmod 0600 "$route_before"
+
+          readarray -t route_identity < <(python3 -I - "$route_before" <<'PY'
+          from pathlib import Path
+          import re, sys
+          body = Path(sys.argv[1]).read_text(encoding='utf-8')
+          upstreams = set(re.findall(r'reverse_proxy\s+(arthello-direct-[1-9][0-9]*-[1-9][0-9]*):8081', body))
+          if len(upstreams) != 1:
+              raise SystemExit('expected one active ArtHello upstream')
+          assets = set(re.findall(r'/data/arthello-pay-assets-[a-f0-9]{40}', body))
+          if len(assets) != 1:
+              raise SystemExit('expected one active Pay asset root')
+          print(next(iter(upstreams)))
+          print(next(iter(assets)))
+          PY
+          )
+          test "${#route_identity[@]}" -eq 2
+          live_name="${route_identity[0]}"
+          old_asset_root="${route_identity[1]}"
+          live_id="$(docker inspect "$live_name" --format '{{.Id}}')"
+          [[ "$live_id" =~ ^[a-f0-9]{64}$ ]]
+          test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$live_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+          activation_volume="$(docker inspect "$live_id" | jq -er '
+            .[0].Mounts | map(select(.Destination == "/var/lib/arthello-v52-tochka-activation")) |
+            select(length == 1 and .[0].Type == "volume" and .[0].RW == false) | .[0].Name')"
+          [[ "$activation_volume" =~ ^arthello-v52-tochka-activation-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          network="$(docker inspect "$live_id" | jq -er '.[0].NetworkSettings.Networks | keys | select(length==1) | .[0]')"
+          [[ "$network" =~ ^[A-Za-z0-9_.-]+$ ]]
+          old_restart="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')"
+          old_restart_max="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
+          case "$old_restart" in no|always|unless-stopped|on-failure) ;; *) exit 1 ;; esac
+          [[ "$old_restart_max" =~ ^[0-9]+$ ]]
+
+          old_release="$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            | awk -F= '$1=="RELEASE_SHA"{print substr($0,index($0,"=")+1)}')"
+          old_activation_id="$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            | awk -F= '$1=="TOCHKA_AUTOSYNC_ACTIVATION_ID"{print substr($0,index($0,"=")+1)}')"
+          [[ "$old_release" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$old_activation_id" =~ ^[a-f0-9]{64}$ ]]
+          docker exec "$live_id" node --input-type=module -e '
+            import("./production/tochka-autosync-timer.mjs").then(async ({hasTochkaAutosyncActivation}) => {
+              if (!await hasTochkaAutosyncActivation({
+                releaseSha: process.env.RELEASE_SHA,
+                activationId: process.env.TOCHKA_AUTOSYNC_ACTIVATION_ID,
+              })) process.exit(1);
+            }).catch(() => process.exit(1));
+          '
+          autosync_activation_id="$(python3 -I -c 'import secrets; print(secrets.token_hex(32))')"
+          [[ "$autosync_activation_id" =~ ^[a-f0-9]{64}$ ]]
+
+          docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            | awk -F= '$1!="RELEASE_SHA" && $1!="PAY_PUBLIC_ORIGIN" && $1!="TOCHKA_AUTOSYNC_ENABLED" && $1!="TOCHKA_AUTOSYNC_ACTIVATION_ID"' > "$runtime_env"
+          chmod 0600 "$runtime_env"
+          if grep -Eq '^(ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY|CENTRAL_ACCESS_SECRET|OPENAI_API_KEY)=' "$runtime_env"; then
+            echo 'Plaintext secret environment is not permitted' >&2
+            exit 1
+          fi
+
+          mount_args=()
+          while IFS= read -r spec; do mount_args+=(--mount "$spec"); done < <(
+            docker inspect "$live_id" | jq -er '.[0].Mounts[] |
+              if .Type=="volume" then "type=volume,src="+.Name+",dst="+.Destination+(if .RW then "" else ",readonly" end)+",volume-nocopy"
+              elif .Type=="bind" then "type=bind,src="+.Source+",dst="+.Destination+(if .RW then "" else ",readonly" end)
+              else empty end'
+          )
+          test "${#mount_args[@]}" -ge 6
+
+          route_swapped=0
+          candidate_started=0
+          activation_swapped=0
+          success=0
+          restore_restart() {
+            local target="$1"
+            if [ "$old_restart" = on-failure ] && [ "$old_restart_max" -gt 0 ]; then
+              docker update --restart="on-failure:$old_restart_max" "$target" >/dev/null
+            else
+              docker update --restart="$old_restart" "$target" >/dev/null
+            fi
+          }
+          rollback() {
+            status=$?
+            trap - EXIT INT TERM HUP
+            if [ "$success" -ne 1 ]; then
+              if [ "$activation_swapped" -eq 1 ]; then
+                docker run --rm --name "arthello-v52-activation-rollback-d168-$run_key" \
+                  --user 1002:1000 --network none --read-only --cap-drop ALL \
+                  --security-opt no-new-privileges:true --pids-limit 16 --memory 64m --cpus 0.25 \
+                  --entrypoint python3 \
+                  --mount "type=volume,src=$activation_volume,dst=/var/lib/arthello-v52-tochka-activation,volume-nocopy" \
+                  "$IMAGE_ID" -I /opt/arthello-backup/activation-volume.py write \
+                  --directory /var/lib/arthello-v52-tochka-activation \
+                  --release-sha "$old_release" --nonce "$old_activation_id" \
+                  > "$work/bank-activation-rollback.json" 2>/dev/null || true
+              fi
+              if [ "$route_swapped" -eq 1 ]; then
+                docker exec --user 0:0 -e BACKUP="$route_backup" "$CADDY_CONTAINER" sh -ceu '
+                  test -f "$BACKUP" && cp "$BACKUP" /data/external-routes.caddy
+                ' || true
+                docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+              fi
+              if [ "$candidate_started" -eq 1 ]; then docker rm -f "$candidate" >/dev/null 2>&1 || true; fi
+              docker start "$live_id" >/dev/null 2>&1 || true
+              restore_restart "$live_id" || true
+            fi
+            rm -f "$runtime_env"
+            exit "$status"
+          }
+          trap rollback EXIT INT TERM HUP
+
+          test "$(current_main)" = "$RELEASE_SHA"
+          docker update --restart=no "$live_id" >/dev/null
+          docker stop --time 30 "$live_id" >/dev/null
+          test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = false
+
+          docker volume create \
+            --label arthello.scope=production-rollback \
+            --label "arthello.release.sha=$RELEASE_SHA" \
+            --label "arthello.release.tree=$RELEASE_TREE" \
+            --label "arthello.rollback.source-container=$live_id" \
+            "$rollback_volume" >/dev/null
+          docker run --rm --network none --user 0:0 --read-only --cap-drop ALL \
+            --cap-add DAC_OVERRIDE --cap-add CHOWN --security-opt no-new-privileges:true \
+            --pids-limit 64 --memory 256m --cpus 0.5 \
+            --mount "type=volume,src=$DATA_VOLUME,dst=/source,readonly,volume-nocopy" \
+            --mount "type=volume,src=$rollback_volume,dst=/target,volume-nocopy" \
+            --entrypoint /bin/sh "$IMAGE_ID" -ceu 'cp -a /source/. /target/ && sync'
+          test "$(docker run --rm --network none --user 0:0 --read-only --cap-drop ALL \
+            --mount "type=volume,src=$rollback_volume,dst=/snapshot,readonly,volume-nocopy" \
+            --entrypoint /bin/sh "$IMAGE_ID" -ceu 'find /snapshot -type f | wc -l')" -gt 0
+          printf 'ARTHELLO_D168_ROLLBACK_SNAPSHOT=VERIFIED volume=%s\n' "$rollback_volume"
+
+          test "$(current_main)" = "$RELEASE_SHA"
+          docker run -d --name "$candidate" --restart no --read-only \
+            --tmpfs /tmp --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
+            --network "$network" --env-file "$runtime_env" \
+            -e TOCHKA_AUTOSYNC_ENABLED=1 \
+            -e RELEASE_SHA="$RELEASE_SHA" \
+            -e TOCHKA_AUTOSYNC_ACTIVATION_ID="$autosync_activation_id" \
+            -e PAY_PUBLIC_ORIGIN="$PAY_URL" \
+            "${mount_args[@]}" \
+            --label "arthello.release.sha=$RELEASE_SHA" \
+            --label "arthello.release.tree=$RELEASE_TREE" \
+            --label "arthello.release.run=$GITHUB_RUN_ID" \
+            "$IMAGE_ID" >/dev/null
+          candidate_started=1
+          candidate_id="$(docker inspect "$candidate" --format '{{.Id}}')"
+          [[ "$candidate_id" =~ ^[a-f0-9]{64}$ ]]
+          ready=0
+          for attempt in $(seq 1 90); do
+            if docker exec "$candidate" node -e "fetch('http://127.0.0.1:8081/api/health',{signal:AbortSignal.timeout(5000)}).then(async r=>{const b=await r.json();if(!r.ok||b.status!=='ok'||b.database!=='available')process.exit(1)}).catch(()=>process.exit(1))"; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          test "$(docker inspect "$candidate" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fx 'PAY_PUBLIC_ORIGIN=https://pay-188-225-38-55.sslip.io' | wc -l)" -eq 1
+          test "$(docker inspect "$candidate" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fx 'TOCHKA_AUTOSYNC_ENABLED=1' | wc -l)" -eq 1
+          test "$(docker inspect "$candidate" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fx "TOCHKA_AUTOSYNC_ACTIVATION_ID=$autosync_activation_id" | wc -l)" -eq 1
+
+          database_receipt="$work/database.json"
+          docker exec "$candidate" python3 -I -B - <<'PY' > "$database_receipt"
+          import glob, json, sqlite3
+          candidates=[]
+          for path in glob.glob('/data/d1/**/*.sqlite', recursive=True):
+              try:
+                  db=sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+                  tables={row[0] for row in db.execute("select name from sqlite_master where type='table'")}
+                  if {'bank_accounts','bank_transactions','app_systems','user_system_access','app_users'} <= tables:
+                      candidates.append((path,db))
+                  else: db.close()
+              except sqlite3.Error: pass
+          assert len(candidates)==1
+          _,db=candidates[0]
+          accounts=db.execute("select count(*) from bank_accounts where connection_id not like 'TEST%'").fetchone()[0]
+          balances=db.execute("select count(*) from bank_accounts where connection_id not like 'TEST%' and balance_minor is not null").fetchone()[0]
+          transactions=db.execute("select count(*) from bank_transactions where connection_id not like 'TEST%'").fetchone()[0]
+          pay_systems=db.execute("select count(*) from app_systems where id='SYS-ARTHELLO-PAY' and status='Активна'").fetchone()[0]
+          eligible=db.execute("""select count(*) from app_users u join user_system_access c on c.user_id=u.id and c.system_id='SYS-ARTHELLO-OS' where u.role='Администратор' and u.is_administrative=1 and u.status='Активен' and c.status='Активен' and c.access_version=u.access_version""").fetchone()[0]
+          grants=db.execute("""select count(*) from app_users u join user_system_access p on p.user_id=u.id and p.system_id='SYS-ARTHELLO-PAY' where u.role='Администратор' and u.is_administrative=1 and u.status='Активен' and p.status='Активен' and p.role='payment_operator' and p.access_version=u.access_version""").fetchone()[0]
+          assert accounts>0 and balances>0 and pay_systems==1 and eligible>0 and grants>=eligible
+          print(json.dumps({'bankAccounts':accounts,'accountsWithBalances':balances,'bankTransactions':transactions,'eligiblePayAdministrators':eligible,'activePayGrants':grants},separators=(',',':')))
+          PY
+          jq -e '.bankAccounts>0 and .accountsWithBalances>0 and .eligiblePayAdministrators>0 and .activePayGrants>=.eligiblePayAdministrators' "$database_receipt" >/dev/null
+          printf 'ARTHELLO_D168_DATA_AND_PAY_GRANT=VERIFIED accounts=%s balances=%s admins=%s\n' \
+            "$(jq -r .bankAccounts "$database_receipt")" "$(jq -r .accountsWithBalances "$database_receipt")" "$(jq -r .activePayGrants "$database_receipt")"
+
+          pay_source="deploy/v52/public/pay-assets"
+          for name in index.html app.js styles.css; do test -s "$pay_source/$name" && test ! -L "$pay_source/$name"; done
+          index_sha="$(sha256sum "$pay_source/index.html" | cut -d ' ' -f 1)"
+          app_sha="$(sha256sum "$pay_source/app.js" | cut -d ' ' -f 1)"
+          css_sha="$(sha256sum "$pay_source/styles.css" | cut -d ' ' -f 1)"
+          docker exec --user 0:0 -e STAGE="$asset_stage" -e ROOT="$asset_root" "$CADDY_CONTAINER" sh -ceu '
+            test ! -e "$ROOT" && test ! -e "$STAGE" && mkdir "$STAGE" && chmod 0755 "$STAGE"
+          '
+          for name in index.html app.js styles.css; do docker cp "$pay_source/$name" "$CADDY_CONTAINER:$asset_stage/$name"; done
+          docker exec --user 0:0 -e STAGE="$asset_stage" -e ROOT="$asset_root" \
+            -e INDEX_SHA="$index_sha" -e APP_SHA="$app_sha" -e CSS_SHA="$css_sha" "$CADDY_CONTAINER" sh -ceu '
+              test "$(sha256sum "$STAGE/index.html"|cut -d " " -f 1)" = "$INDEX_SHA"
+              test "$(sha256sum "$STAGE/app.js"|cut -d " " -f 1)" = "$APP_SHA"
+              test "$(sha256sum "$STAGE/styles.css"|cut -d " " -f 1)" = "$CSS_SHA"
+              chmod 0644 "$STAGE/index.html" "$STAGE/app.js" "$STAGE/styles.css"
+              mv "$STAGE" "$ROOT"
+            '
+
+          python3 -I - "$route_before" "$route_after" "$live_name" "$candidate" "$old_asset_root" "$asset_root" <<'PY'
+          from pathlib import Path
+          import re, sys
+          source,target,old_upstream,new_upstream,old_assets,new_assets=sys.argv[1:]
+          for value in (old_upstream,new_upstream):
+              assert re.fullmatch(r'arthello-direct-[1-9][0-9]*-[1-9][0-9]*',value)
+          assert re.fullmatch(r'/data/arthello-pay-assets-[a-f0-9]{40}',old_assets)
+          assert re.fullmatch(r'/data/arthello-pay-assets-[a-f0-9]{40}',new_assets)
+          body=Path(source).read_text(encoding='utf-8')
+          assert body.count(old_upstream+':8081')>=2
+          assert body.count(old_assets)>=1
+          body=body.replace(old_upstream+':8081',new_upstream+':8081').replace(old_assets,new_assets)
+          assert old_upstream+':8081' not in body and old_assets not in body
+          assert body.count(new_upstream+':8081')>=2 and body.count(new_assets)>=1
+          Path(target).write_text(body,encoding='utf-8')
+          PY
+          chmod 0600 "$route_after"
+          route_owner="$(docker exec "$CADDY_CONTAINER" stat -c '%u:%g' /data/external-routes.caddy)"
+          docker cp "$route_before" "$CADDY_CONTAINER:$route_backup"
+          docker cp "$route_after" "$CADDY_CONTAINER:$route_stage"
+          docker exec --user 0:0 -e OWNER="$route_owner" -e BACKUP="$route_backup" -e STAGE="$route_stage" "$CADDY_CONTAINER" sh -ceu '
+            chown "$OWNER" "$BACKUP" "$STAGE" && chmod 0600 "$BACKUP" "$STAGE" && mv "$STAGE" /data/external-routes.caddy
+          '
+          route_swapped=1
+          docker exec "$CADDY_CONTAINER" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+          docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+
+          docker exec -e PUBLIC_URL="$PUBLIC_URL" -e PAY_URL="$PAY_URL" "$candidate" node - <<'NODE'
+          const get=async(url,init={})=>{const response=await fetch(url,{...init,signal:AbortSignal.timeout(10000),headers:{'cache-control':'no-cache',...(init.headers||{})}});return {response,body:await response.text()}};
+          const health=await get(process.env.PUBLIC_URL+'/api/health');
+          const root=await get(process.env.PUBLIC_URL+'/?release=d168');
+          const pay=await get(process.env.PAY_URL+'/?release=d168');
+          const payApp=await get(process.env.PAY_URL+'/pay-assets/app.js');
+          const payConfig=await get(process.env.PAY_URL+'/api/pay-sso/config');
+          const payMe=await get(process.env.PAY_URL+'/api/auth/me');
+          const publicMissing=await get(process.env.PAY_URL+'/api/payments/public/AH-00000000-0000-4000-8000-000000000000');
+          const malformedSso=await get(process.env.PUBLIC_URL+'/api/pay-sso/authorize');
+          let healthBody={},configBody={};
+          try{healthBody=JSON.parse(health.body)}catch{}
+          try{configBody=JSON.parse(payConfig.body)}catch{}
+          const ok=health.response.status===200&&healthBody.status==='ok'&&root.response.status===200
+            &&pay.response.status===200&&pay.body.includes('data-arthello-pay-shell="d168"')
+            &&payApp.response.status===200&&payApp.body.includes('beginCentralSignIn')
+            &&payConfig.response.status===200&&configBody.centralOrigin===process.env.PUBLIC_URL&&configBody.payOrigin===process.env.PAY_URL
+            &&payMe.response.status===401&&publicMissing.response.status===404&&malformedSso.response.status===400;
+          console.log(JSON.stringify({health:health.response.status,root:root.response.status,pay:pay.response.status,payApp:payApp.response.status,payConfig:payConfig.response.status,payAnonymous:payMe.response.status,publicPaymentBoundary:publicMissing.response.status,ssoBoundary:malformedSso.response.status}));
+          if(!ok)process.exit(1);
+          NODE
+
+          test "$(current_main)" = "$RELEASE_SHA"
+          activation_receipt="$work/bank-activation.json"
+          docker run --rm --name "arthello-v52-activation-writer-d168-$run_key" \
+            --user 1002:1000 --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true --pids-limit 16 --memory 64m --cpus 0.25 \
+            --entrypoint python3 \
+            --mount "type=volume,src=$activation_volume,dst=/var/lib/arthello-v52-tochka-activation,volume-nocopy" \
+            "$IMAGE_ID" -I /opt/arthello-backup/activation-volume.py write \
+            --directory /var/lib/arthello-v52-tochka-activation \
+            --release-sha "$RELEASE_SHA" --nonce "$autosync_activation_id" \
+            > "$activation_receipt"
+          activation_swapped=1
+          jq -e --arg sha "$RELEASE_SHA" --arg nonce "$autosync_activation_id" '
+            .schemaVersion == 1 and .state == "verified" and .protocol == "ARTHELLO_TOCHKA_AUTOSYNC_V2" and
+            .releaseSha == $sha and .activationId == $nonce and .executionUid == 1002 and .executionGid == 1000 and
+            .markerMode == "0640" and (.mode == "created" or .mode == "replaced" or .mode == "verified-existing") and
+            (.contentSha256 | test("^[a-f0-9]{64}$"))
+          ' "$activation_receipt" >/dev/null
+          docker exec "$candidate" node --input-type=module -e '
+            import("./production/tochka-autosync-timer.mjs").then(async ({hasTochkaAutosyncActivation}) => {
+              if (!await hasTochkaAutosyncActivation({
+                releaseSha: process.env.RELEASE_SHA,
+                activationId: process.env.TOCHKA_AUTOSYNC_ACTIVATION_ID,
+              })) process.exit(1);
+            }).catch(() => process.exit(1));
+          '
+          printf 'ARTHELLO_D168_TOCHKA_AUTOSYNC_ACTIVATION=VERIFIED\n'
+
+          test "$(current_main)" = "$RELEASE_SHA"
+          restore_restart "$candidate"
+          route_sha="$(sha256sum "$route_after" | cut -d ' ' -f 1)"
+          jq -n \
+            --arg release "$RELEASE_SHA" --arg tree "$RELEASE_TREE" --arg image "$IMAGE_ID" \
+            --arg candidate "$candidate_id" --arg previous "$live_id" --arg rollback "$rollback_volume" \
+            --arg activationVolume "$activation_volume" \
+            --arg route "$route_sha" --arg assets "$asset_root" --arg index "$index_sha" --arg app "$app_sha" --arg css "$css_sha" \
+            --argjson data "$(cat "$database_receipt")" --argjson activation "$(cat "$activation_receipt")" '
+              {schemaVersion:1,state:"verified",decision:"D168",releaseSha:$release,sourceTree:$tree,imageId:$image,
+               candidateContainerId:$candidate,previousContainerId:$previous,rollbackVolume:$rollback,
+               bankActivationVolume:$activationVolume,bankAutosyncActivation:$activation,
+               activeRouteSha256:$route,payAssetRoot:$assets,payAssetSha256:{"index.html":$index,"app.js":$app,"styles.css":$css},
+               dataProof:$data,moneyAcceptanceEnabled:false,fiscalizationEnabled:false}
+            ' > "$work/receipt.json"
+          chmod 0600 "$work/receipt.json"
+          ln "$work/receipt.json" "$receipt"
+          success=1
+          rm -f "$runtime_env"
+          trap - EXIT INT TERM HUP
+          printf 'candidate=%s\nreceipt=%s\n' "$candidate" "$receipt" >> "$GITHUB_OUTPUT"
+          printf 'ARTHELLO_D168_PRODUCTION=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$candidate"
+
+      - name: Publish production receipt summary
+        if: success()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          {
+            echo '## ArtHello production D168'
+            echo
+            echo "- Release: \`$RELEASE_SHA\`"
+            echo "- ArtHello OS: $PUBLIC_URL"
+            echo "- ArtHello Pay: $PAY_URL"
+            echo '- Bank accounts, balances and operations: verified in the retained production D1 database.'
+            echo '- Existing ArtHello administrators received the isolated payment_operator system grant.'
+            echo '- Pay login: central ArtHello OS one-time PKCE exchange.'
+            echo '- Money acceptance and fiscalization: still disabled.'
+          } >> "$GITHUB_STEP_SUMMARY"
