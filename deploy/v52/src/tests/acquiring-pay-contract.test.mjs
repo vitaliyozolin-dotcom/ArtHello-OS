@@ -69,6 +69,8 @@ test("D168 deployment validates live bank data and Pay boundary without payment 
   assert.match(workflow, /runtimeFingerprintSha256/);
   assert.match(workflow, /image-runtime-fingerprint\.jq/);
   assert.match(workflow, /--cap-add FOWNER --cap-add FSETID/);
+  assert.match(workflow, /docker exec -i "\$candidate" python3 -I -B -/);
+  assert.match(workflow, /docker exec -i -e PUBLIC_URL=/);
   assert.match(workflow, /moneyAcceptanceEnabled:false/);
   assert.match(workflow, /fiscalizationEnabled:false/);
   assert.doesNotMatch(workflow, /TOCHKA_TOKEN|PAYMENT_SECRET|FISCALIZATION_SECRET/);
