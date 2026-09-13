@@ -1,4 +1,4 @@
-# D164: complete the exact D162 recovery by serving its omitted immutable Pay assets.
+# D165: complete the exact D162 recovery by serving its omitted immutable Pay assets.
 # No snapshot restore, D1 replacement, image rebuild, or broad cleanup is permitted.
 name: Complete ArtHello Pay D162 recovery
 'on':
@@ -34,8 +34,8 @@ jobs:
     if: >-
       github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
       github.ref == 'refs/heads/main' &&
-      github.event.before == '00faa2ef071f0975055487b9313d7b947fca18db' &&
-      startsWith(github.event.head_commit.message, 'D164: complete ArtHello Pay asset recovery') &&
+      github.event.before == 'fa5e009980a12f7a2df625541d86e8a22bca5fec' &&
+      startsWith(github.event.head_commit.message, 'D165: run ArtHello Pay asset recovery') &&
       github.run_attempt == 1
     runs-on:
       - self-hosted
@@ -55,7 +55,7 @@ jobs:
           submodules: false
           lfs: false
 
-      - name: Serve exact Pay assets and finish public activation
+      - name: Serve exact Pay assets and verify public boundary
         id: recover
         shell: bash
         run: |
@@ -404,44 +404,74 @@ jobs:
           trap - EXIT
           printf 'ARTHELLO_D164_PUBLIC_AND_PAY=VERIFIED money_acceptance=disabled\n'
 
+          printf 'candidate_id=%s\n' "$candidate_id" >> "$GITHUB_OUTPUT"
+          printf 'route_sha=%s\n' "$active_route_sha" >> "$GITHUB_OUTPUT"
+          printf 'ARTHELLO_RELEASE_PUBLIC=%s\n' "$TARGET_RELEASE_SHA"
+
+      - name: Publish exact read-only autosync activation marker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+
+          state_root="$HOME/.config/arthello/release-state"
+          state_file="$state_root/candidate-acceptance-$TARGET_RELEASE_SHA.json"
           recovery_receipt="$state_root/pay-assets-recovery-$TARGET_RELEASE_SHA.json"
+          test -f "$state_file"
+          test ! -L "$state_file"
+          test "$(stat -c '%U:%a:%h' "$state_file")" = "$(id -un):600:1"
+
+          candidate_id="$(jq -er '.context.candidateContainerId' "$state_file")"
+          image_id="$(jq -er '.context.imageId' "$state_file")"
+          public_route_sha="$(jq -er '.context.publicRouteSha256' "$state_file")"
+          activation_volume="$(jq -er '.context.bankActivationVolume' "$state_file")"
+          activation_id="$(jq -er '.context.bankActivationId' "$state_file")"
+          [[ "$candidate_id" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$public_route_sha" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$activation_volume" =~ ^arthello-v52-tochka-activation-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          [[ "$activation_id" =~ ^[a-f0-9]{64}$ ]]
+          test "$(docker inspect "$candidate_id" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$candidate_id" --format '{{.Image}}')" = "$image_id"
+          test "$(docker inspect "$candidate_id" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$TARGET_RELEASE_SHA"
+
+          caddy_asset_root="/data/arthello-pay-assets-$TARGET_RELEASE_SHA"
+          caddy_route_backup="/data/external-routes.caddy.pre-d164-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          active_route_sha="$(docker exec "$CADDY_CONTAINER" sh -ceu 'sha256sum /data/external-routes.caddy | cut -d " " -f 1')"
+          [[ "$active_route_sha" =~ ^[a-f0-9]{64}$ ]]
+          test "$active_route_sha" != "$public_route_sha"
+          docker exec \
+            -e ASSET_ROOT="$caddy_asset_root" \
+            -e ROUTE_BACKUP="$caddy_route_backup" \
+            -e APP_SHA="$PAY_APP_SHA256" \
+            -e CSS_SHA="$PAY_CSS_SHA256" \
+            -e OLD_SHA="$public_route_sha" \
+            "$CADDY_CONTAINER" sh -ceu '
+              test "$(sha256sum "$ASSET_ROOT/app.js" | cut -d " " -f 1)" = "$APP_SHA"
+              test "$(sha256sum "$ASSET_ROOT/styles.css" | cut -d " " -f 1)" = "$CSS_SHA"
+              test "$(sha256sum "$ROUTE_BACKUP" | cut -d " " -f 1)" = "$OLD_SHA"
+            '
+
           recovery_receipt_temp="$state_root/.pay-assets-recovery-$TARGET_RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
           test ! -e "$recovery_receipt" && test ! -L "$recovery_receipt"
           test ! -e "$recovery_receipt_temp" && test ! -L "$recovery_receipt_temp"
           verified_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           jq -nc \
-            --arg release "$TARGET_RELEASE_SHA" \
-            --arg tree "$TARGET_RELEASE_TREE" \
-            --arg originalRun "$TARGET_RUN_ID" \
-            --arg recoveryRun "$GITHUB_RUN_ID" \
-            --arg recoveryAttempt "$GITHUB_RUN_ATTEMPT" \
-            --arg candidate "$candidate_id" \
-            --arg oldRoute "$public_route_sha" \
-            --arg activeRoute "$active_route_sha" \
-            --arg assetRoot "$caddy_asset_root" \
-            --arg routeBackup "$caddy_route_backup" \
-            --arg app "$PAY_APP_SHA256" \
-            --arg css "$PAY_CSS_SHA256" \
+            --arg release "$TARGET_RELEASE_SHA" --arg tree "$TARGET_RELEASE_TREE" \
+            --arg originalRun "$TARGET_RUN_ID" --arg recoveryRun "$GITHUB_RUN_ID" \
+            --arg recoveryAttempt "$GITHUB_RUN_ATTEMPT" --arg candidate "$candidate_id" \
+            --arg oldRoute "$public_route_sha" --arg activeRoute "$active_route_sha" \
+            --arg assetRoot "$caddy_asset_root" --arg routeBackup "$caddy_route_backup" \
+            --arg app "$PAY_APP_SHA256" --arg css "$PAY_CSS_SHA256" \
             --arg verifiedAt "$verified_at" '
               {
-                schemaVersion: 1,
-                state: "verified",
-                protocol: "ARTHELLO_PAY_ASSET_RECOVERY_D164",
-                releaseSha: $release,
-                releaseTree: $tree,
-                originalRunId: $originalRun,
-                recoveryRunId: $recoveryRun,
-                recoveryRunAttempt: $recoveryAttempt,
-                candidateContainerId: $candidate,
-                previousRouteSha256: $oldRoute,
-                activeRouteSha256: $activeRoute,
-                assetRoot: $assetRoot,
-                routeBackup: $routeBackup,
-                assetSha256: {"app.js": $app, "styles.css": $css},
-                publicPayStatus: 200,
-                moneyAcceptanceEnabled: false,
-                fiscalizationEnabled: false,
-                verifiedAtUtc: $verifiedAt
+                schemaVersion: 1, state: "verified", protocol: "ARTHELLO_PAY_ASSET_RECOVERY_D164",
+                releaseSha: $release, releaseTree: $tree, originalRunId: $originalRun,
+                recoveryRunId: $recoveryRun, recoveryRunAttempt: $recoveryAttempt,
+                candidateContainerId: $candidate, previousRouteSha256: $oldRoute,
+                activeRouteSha256: $activeRoute, assetRoot: $assetRoot, routeBackup: $routeBackup,
+                assetSha256: {"app.js": $app, "styles.css": $css}, publicPayStatus: 200,
+                moneyAcceptanceEnabled: false, fiscalizationEnabled: false, verifiedAtUtc: $verifiedAt
               }
             ' > "$recovery_receipt_temp"
           chmod 0600 "$recovery_receipt_temp"
@@ -451,16 +481,10 @@ jobs:
           test "$(stat -c '%U:%a:%h' "$recovery_receipt")" = "$(id -un):600:1"
           jq -e \
             --arg release "$TARGET_RELEASE_SHA" \
-            --arg candidate "$candidate_id" \
-            --arg oldRoute "$public_route_sha" \
-            --arg activeRoute "$active_route_sha" \
-            --arg app "$PAY_APP_SHA256" \
-            --arg css "$PAY_CSS_SHA256" '
+            --arg candidate "$candidate_id" '
               .schemaVersion == 1 and .state == "verified" and
               .protocol == "ARTHELLO_PAY_ASSET_RECOVERY_D164" and
               .releaseSha == $release and .candidateContainerId == $candidate and
-              .previousRouteSha256 == $oldRoute and .activeRouteSha256 == $activeRoute and
-              .assetSha256["app.js"] == $app and .assetSha256["styles.css"] == $css and
               .publicPayStatus == 200 and .moneyAcceptanceEnabled == false and
               .fiscalizationEnabled == false
             ' "$recovery_receipt" >/dev/null
@@ -484,8 +508,6 @@ jobs:
             (.contentSha256 | test("^[a-f0-9]{64}$"))
           ' "$receipt" >/dev/null
           printf 'ARTHELLO_TOCHKA_AUTOSYNC_ACTIVATION_V2=VERIFIED\n'
-          printf 'candidate_id=%s\n' "$candidate_id" >> "$GITHUB_OUTPUT"
-          printf 'route_sha=%s\n' "$active_route_sha" >> "$GITHUB_OUTPUT"
           printf 'ARTHELLO_RELEASE_ACTIVE=%s\n' "$TARGET_RELEASE_SHA"
 
       - name: Final natural browser acceptance on recovered D162
