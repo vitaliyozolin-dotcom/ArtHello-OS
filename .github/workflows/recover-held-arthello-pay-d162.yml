@@ -1,0 +1,347 @@
+# D163: recover only the exact D162 candidate held after its durable public boundary.
+# No snapshot restore, D1 replacement, image rebuild, or broad cleanup is permitted.
+name: Recover held ArtHello Pay D162
+'on':
+  push:
+    branches:
+      - codex/pay-d162-recovery-d163-20260913
+    paths:
+      - .github/workflows/recover-held-arthello-pay-d162.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: school-1-11-production
+  cancel-in-progress: false
+  queue: max
+
+env:
+  TARGET_RELEASE_SHA: 5df015323455ea7e513a1386f840016cbb6c249c
+  TARGET_RELEASE_TREE: 0e276dd4b78a91dca23a54daffccaf868b4b5d1b
+  TARGET_RUN_ID: '34744346651'
+  TARGET_RUN_ATTEMPT: '1'
+  CADDY_CONTAINER: stroios-caddy-1
+  DATA_VOLUME: arthello-direct-v44-data
+  PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
+  PAY_URL: https://pay-188-225-38-55.sslip.io
+  SCHOOL_URL: https://school-188-225-38-55.sslip.io
+
+jobs:
+  recover:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.ref == 'refs/heads/codex/pay-d162-recovery-d163-20260913' &&
+      github.event.head_commit.message == 'D163: recover held D162 Pay candidate' &&
+      github.run_attempt == 1
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - arthello-gateway
+    timeout-minutes: 35
+    environment: production-ru
+    steps:
+      - name: Checkout exact D162 recovery source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.TARGET_RELEASE_SHA }}
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
+          submodules: false
+          lfs: false
+
+      - name: Recover exact held candidate and finish public activation
+        id: recover
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+
+          test "$(git rev-parse HEAD)" = "$TARGET_RELEASE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$TARGET_RELEASE_TREE"
+          current_main="$(curl --fail --silent --show-error --max-time 20 \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+          test "$current_main" = "$TARGET_RELEASE_SHA"
+
+          state_root="$HOME/.config/arthello/release-state"
+          state_file="$state_root/candidate-acceptance-$TARGET_RELEASE_SHA.json"
+          activation_file="$state_root/activation-$TARGET_RELEASE_SHA.json"
+          for path in "$state_file" "$activation_file"; do
+            test -f "$path"
+            test ! -L "$path"
+            test "$(stat -c '%U:%a:%h' "$path")" = "$(id -un):600:1"
+          done
+
+          jq -e \
+            --arg release "$TARGET_RELEASE_SHA" \
+            --arg tree "$TARGET_RELEASE_TREE" \
+            --arg run "$TARGET_RUN_ID" \
+            --arg attempt "$TARGET_RUN_ATTEMPT" '
+              .schemaVersion == 1 and .phase == "public-started" and
+              .latestAttempt == $attempt and
+              .context.releaseSha == $release and .context.sourceTree == $tree and
+              .context.runId == $run and .context.runAttempt == $attempt and
+              .context.candidateName == ("arthello-direct-" + $run + "-" + $attempt) and
+              .context.dataVolume == "arthello-direct-v44-data"
+            ' "$state_file" >/dev/null
+
+          candidate_id="$(jq -er '.context.candidateContainerId' "$state_file")"
+          candidate_name="$(jq -er '.context.candidateName' "$state_file")"
+          image_id="$(jq -er '.context.imageId' "$state_file")"
+          previous_id="$(jq -er '.context.previousContainerId' "$state_file")"
+          rollback_volume="$(jq -er '.context.rollbackVolume' "$state_file")"
+          public_route_sha="$(jq -er '.context.publicRouteSha256' "$state_file")"
+          activation_volume="$(jq -er '.context.bankActivationVolume' "$state_file")"
+          activation_id="$(jq -er '.context.bankActivationId' "$state_file")"
+
+          [[ "$candidate_id" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$previous_id" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$rollback_volume" =~ ^arthello-rollback-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          [[ "$public_route_sha" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$activation_volume" =~ ^arthello-v52-tochka-activation-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          [[ "$activation_id" =~ ^[a-f0-9]{64}$ ]]
+
+          jq -e \
+            --arg release "$TARGET_RELEASE_SHA" \
+            --arg run "$TARGET_RUN_ID" \
+            --arg attempt "$TARGET_RUN_ATTEMPT" \
+            --arg candidate "$candidate_id" \
+            --arg previous "$previous_id" \
+            --arg rollback "$rollback_volume" \
+            --arg route "$public_route_sha" '
+              .schemaVersion == 1 and .state == "activation-started" and
+              .releaseSha == $release and .runId == $run and .runAttempt == $attempt and
+              .candidateContainerId == $candidate and .previousContainerId == $previous and
+              .rollbackVolume == $rollback and .candidateRouteSha256 == $route
+            ' "$activation_file" >/dev/null
+
+          test "$(docker inspect "$candidate_id" --format '{{.Id}}')" = "$candidate_id"
+          test "$(docker inspect "$candidate_id" --format '{{.Name}}')" = "/$candidate_name"
+          test "$(docker inspect "$candidate_id" --format '{{.Image}}')" = "$image_id"
+          test "$(docker inspect "$candidate_id" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$TARGET_RELEASE_SHA"
+          test "$(docker inspect "$candidate_id" --format '{{index .Config.Labels "arthello.release.tree"}}')" = "$TARGET_RELEASE_TREE"
+          test "$(docker inspect "$candidate_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+          test "$(docker inspect "$previous_id" --format '{{.State.Running}}')" = false
+          docker volume inspect "$rollback_volume" >/dev/null
+          docker volume inspect "$activation_volume" >/dev/null
+          test "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true
+          test "$(docker exec "$CADDY_CONTAINER" sh -ceu 'sha256sum /data/external-routes.caddy | cut -d " " -f 1')" = "$public_route_sha"
+
+          local_health() {
+            test "$(docker inspect "$candidate_id" --format '{{.State.Running}}')" = true &&
+              docker exec -i "$candidate_id" node - <<'NODE'
+          try {
+            const response = await fetch('http://127.0.0.1:8081/api/health', { signal: AbortSignal.timeout(5000) });
+            const body = await response.json();
+            if (!response.ok || body.status !== 'ok' || body.database !== 'available') process.exit(1);
+          } catch { process.exit(1); }
+          NODE
+          }
+
+          before_status="$(docker inspect "$candidate_id" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}')"
+          printf 'ARTHELLO_D163_CANDIDATE_BEFORE=%s\n' "$before_status"
+          if ! local_health; then
+            if [ "$(docker inspect "$candidate_id" --format '{{.State.Running}}')" = true ]; then
+              docker restart --time 20 "$candidate_id" >/dev/null
+            else
+              docker start "$candidate_id" >/dev/null
+            fi
+          fi
+
+          ready=0
+          for attempt in $(seq 1 60); do
+            if local_health; then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker inspect "$candidate_id" --format 'ARTHELLO_D163_CANDIDATE_FAILED status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} error={{json .State.Error}}'
+            exit 1
+          fi
+          printf 'ARTHELLO_D163_LOCAL_HEALTH=VERIFIED\n'
+
+          docker exec "$CADDY_CONTAINER" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+          docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+          test "$(docker exec "$CADDY_CONTAINER" sh -ceu 'sha256sum /data/external-routes.caddy | cut -d " " -f 1')" = "$public_route_sha"
+
+          docker exec -i \
+            -e PUBLIC_URL="$PUBLIC_URL" -e PAY_URL="$PAY_URL" -e SCHOOL_URL="$SCHOOL_URL" \
+            "$candidate_id" node - <<'NODE'
+          const get = async (url, init = {}) => {
+            try {
+              const response = await fetch(url, { ...init, signal: AbortSignal.timeout(10000), headers: { 'cache-control': 'no-cache', ...(init.headers || {}) } });
+              return { response, body: await response.text() };
+            } catch (error) {
+              return { response: null, body: '', error: error?.name || 'fetch_failed' };
+            }
+          };
+          const summary = {};
+          const root = await get(process.env.PUBLIC_URL + '/?probe=d163');
+          const rootAssets = [...root.body.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match => match[1]);
+          summary.arthelloRoot = root.response?.status ?? 0;
+          summary.arthelloAssets = rootAssets.length;
+          summary.arthelloAssetStatuses = [];
+          for (const path of [...new Set(rootAssets)]) summary.arthelloAssetStatuses.push((await get(process.env.PUBLIC_URL + path)).response?.status ?? 0);
+          const health = await get(process.env.PUBLIC_URL + '/api/health');
+          summary.arthelloHealth = health.response?.status ?? 0;
+          summary.arthelloHealthOk = (() => { try { const value = JSON.parse(health.body); return value.status === 'ok' && value.database === 'available'; } catch { return false; } })();
+          summary.authMe = (await get(process.env.PUBLIC_URL + '/api/auth/me')).response?.status ?? 0;
+          summary.forgedSettings = (await get(process.env.PUBLIC_URL + '/api/settings', { headers: { 'oai-authenticated-user-email': 'forged@example.invalid', 'x-arthello-role': 'OWNER' } })).response?.status ?? 0;
+          const login = await get(process.env.PUBLIC_URL + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: process.env.PUBLIC_URL }, body: JSON.stringify({ login: 'd163-invalid', password: 'deliberately-invalid' }) });
+          summary.invalidLogin = login.response?.status ?? 0;
+          const cross = await get(process.env.PUBLIC_URL + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://invalid.example' }, body: JSON.stringify({ login: 'd163-invalid', password: 'deliberately-invalid' }) });
+          summary.crossOrigin = cross.response?.status ?? 0;
+          const wrongMethod = await get(process.env.PUBLIC_URL + '/api/auth/login');
+          summary.wrongMethod = wrongMethod.response?.status ?? 0;
+          summary.wrongMethodAllow = wrongMethod.response?.headers.get('allow') || '';
+          summary.unknownAuthRoute = (await get(process.env.PUBLIC_URL + '/api/auth/not-a-route')).response?.status ?? 0;
+          const school = await get(process.env.SCHOOL_URL + '/api/health');
+          summary.schoolHealth = school.response?.status ?? 0;
+          summary.schoolHealthOk = (() => { try { return JSON.parse(school.body).status === 'ok'; } catch { return false; } })();
+          const pay = await get(process.env.PAY_URL + '/?probe=d163-pay');
+          const payAssets = [...pay.body.matchAll(/(?:src|href)="(\/pay-assets\/[^"]+)"/g)].map(match => match[1]);
+          summary.payRoot = pay.response?.status ?? 0;
+          summary.payTitle = pay.body.includes('ArtHello Pay');
+          summary.payAssets = payAssets.length;
+          summary.payAssetStatuses = [];
+          for (const path of [...new Set(payAssets)]) summary.payAssetStatuses.push((await get(process.env.PAY_URL + path)).response?.status ?? 0);
+          summary.payAuthMe = (await get(process.env.PAY_URL + '/api/auth/me')).response?.status ?? 0;
+          const payLogin = await get(process.env.PAY_URL + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: process.env.PAY_URL }, body: JSON.stringify({ login: 'd163-invalid', password: 'deliberately-invalid' }) });
+          summary.payInvalidLogin = payLogin.response?.status ?? 0;
+          summary.payWriteDenied = (await get(process.env.PAY_URL + '/api/payments/obligations', { method: 'POST', headers: { 'content-type': 'application/json', origin: process.env.PAY_URL }, body: '{}' })).response?.status ?? 0;
+          console.log(JSON.stringify(summary));
+          const ok = summary.arthelloRoot === 200 && summary.arthelloAssets >= 2 && summary.arthelloAssetStatuses.every(status => status === 200)
+            && summary.arthelloHealth === 200 && summary.arthelloHealthOk && summary.authMe === 401 && summary.forgedSettings === 401
+            && summary.invalidLogin === 401 && summary.crossOrigin === 403 && summary.wrongMethod === 405 && summary.wrongMethodAllow === 'POST'
+            && summary.unknownAuthRoute === 404 && summary.schoolHealth === 200 && summary.schoolHealthOk
+            && summary.payRoot === 200 && summary.payTitle && summary.payAssets >= 2 && summary.payAssetStatuses.every(status => status === 200)
+            && summary.payAuthMe === 401 && summary.payInvalidLogin === 401 && summary.payWriteDenied === 401;
+          if (!ok) process.exit(1);
+          NODE
+          printf 'ARTHELLO_D163_PUBLIC_AND_PAY=VERIFIED money_acceptance=disabled\n'
+
+          test "$(docker ps -aq --filter "name=^/arthello-v52-activation-writer-$TARGET_RUN_ID-$TARGET_RUN_ATTEMPT$")" = ""
+          receipt="$RUNNER_TEMP/d163-bank-activation.json"
+          docker run --rm \
+            --name "arthello-v52-activation-writer-$TARGET_RUN_ID-$TARGET_RUN_ATTEMPT" \
+            --user 1002:1000 --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true --pids-limit 16 --memory 64m --cpus 0.25 \
+            --entrypoint python3 \
+            --mount "type=volume,src=$activation_volume,dst=/var/lib/arthello-v52-tochka-activation,volume-nocopy" \
+            "$image_id" -I /opt/arthello-backup/activation-volume.py write \
+            --directory /var/lib/arthello-v52-tochka-activation --release-sha "$TARGET_RELEASE_SHA" --nonce "$activation_id" \
+            | tee "$receipt"
+          jq -e --arg sha "$TARGET_RELEASE_SHA" --arg nonce "$activation_id" '
+            .schemaVersion == 1 and .state == "verified" and .protocol == "ARTHELLO_TOCHKA_AUTOSYNC_V2" and
+            .releaseSha == $sha and .activationId == $nonce and .executionUid == 1002 and .executionGid == 1000 and
+            .markerMode == "0640" and (.mode == "created" or .mode == "verified-existing") and
+            (.contentSha256 | test("^[a-f0-9]{64}$"))
+          ' "$receipt" >/dev/null
+          printf 'ARTHELLO_TOCHKA_AUTOSYNC_ACTIVATION_V2=VERIFIED\n'
+          printf 'candidate_id=%s\n' "$candidate_id" >> "$GITHUB_OUTPUT"
+          printf 'ARTHELLO_RELEASE_ACTIVE=%s\n' "$TARGET_RELEASE_SHA"
+
+      - name: Final natural browser acceptance on recovered D162
+        shell: bash
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+          ARTHELLO_E2E_LOGIN: ${{ secrets.ARTHELLO_E2E_LOGIN }}
+          ARTHELLO_E2E_PASSWORD: ${{ secrets.ARTHELLO_E2E_PASSWORD }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          : "${SSH_PRIVATE_KEY:?missing protected School SSH key}"
+          : "${DEPLOY_HOST:?missing protected School deploy host}"
+          : "${DEPLOY_USER:?missing protected School deploy user}"
+          deploy_port="${DEPLOY_PORT:-2222}"
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [[ "$deploy_port" =~ ^[0-9]{1,5}$ ]]
+          test "$deploy_port" -ge 1 && test "$deploy_port" -le 65535
+
+          ssh_dir="$RUNNER_TEMP/arthello-d163-school-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test ! -e "$ssh_dir" && test ! -L "$ssh_dir"
+          install -m 0700 -d "$ssh_dir"
+          cleanup() { rm -f -- "$ssh_dir/id_ed25519" "$ssh_dir/known_hosts" "$ssh_dir/known_hosts.scan" "$ssh_dir/school.jsonl"; rmdir -- "$ssh_dir" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+          unset SSH_PRIVATE_KEY
+          chmod 0600 "$ssh_dir/id_ed25519"
+          ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+          scan="$ssh_dir/known_hosts.scan"
+          : > "$scan" && chmod 0600 "$scan"
+          for attempt in 1 2 3; do
+            timeout --signal=TERM --kill-after=5s 150s \
+              ssh -p "$deploy_port" -o StrictHostKeyChecking=accept-new \
+                -o UserKnownHostsFile="$scan" -o GlobalKnownHostsFile=/dev/null \
+                -o PreferredAuthentications=none -o PubkeyAuthentication=no \
+                -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+                -o ConnectTimeout=140 -o HostKeyAlgorithms=ssh-ed25519 \
+                "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null 2>&1 || true
+            test -s "$scan" && break
+            sleep 5
+          done
+          test "$(ssh-keygen -lf "$scan" -E sha256 | awk '{print $2; exit}')" = 'SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+          mv "$scan" "$ssh_dir/known_hosts"
+          ssh_options=(
+            -T -p "$deploy_port" -i "$ssh_dir/id_ed25519"
+            -o IdentitiesOnly=yes -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o BatchMode=yes
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" -o GlobalKnownHostsFile=/dev/null
+            -o ConnectTimeout=140 -o ServerAliveInterval=10 -o ServerAliveCountMax=30
+            -o IPQoS=none -o Compression=no -o KexAlgorithms=curve25519-sha256
+            -o HostKeyAlgorithms=ssh-ed25519 -o PubkeyAcceptedAlgorithms=ssh-ed25519
+            -o Ciphers=aes128-ctr -o MACs=hmac-sha2-256
+          )
+          timeout --signal=TERM --kill-after=5s 180s ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" true </dev/null >/dev/null
+
+          diagnostic_file="$ssh_dir/school.jsonl"
+          bash .github/scripts/school-sso-readonly-diagnostic.sh --self-test
+          diagnostic_payload="$(base64 -w0 .github/scripts/school-sso-readonly-diagnostic.sh)"
+          timeout --signal=TERM --kill-after=5s 180s \
+            ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "printf '%s' '$diagnostic_payload' | base64 -d | bash" \
+              </dev/null | tee "$diagnostic_file"
+          python3 -I .github/scripts/r18-live-baseline.py school "$diagnostic_file"
+
+          state_file="$HOME/.config/arthello/release-state/candidate-acceptance-$TARGET_RELEASE_SHA.json"
+          candidate_id="$(jq -er '.context.candidateContainerId' "$state_file")"
+          browser_fingerprint="$(jq -er '.context.browserFingerprint' "$state_file")"
+          repair_receipt="$(jq -er '.context.schoolRepairReceiptFile' "$state_file")"
+          repair_config="$(jq -er '.context.schoolRepairConfigSha256' "$state_file")"
+          [[ "$candidate_id" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$browser_fingerprint" =~ ^[a-f0-9]{64}$ ]]
+          test -s "$repair_receipt"
+
+          env \
+            GITHUB_RUN_ID="$TARGET_RUN_ID" GITHUB_RUN_ATTEMPT="$TARGET_RUN_ATTEMPT" \
+            RELEASE_SHA="$TARGET_RELEASE_SHA" BROWSER_SOURCE_SHA="$TARGET_RELEASE_SHA" \
+            BROWSER_FINGERPRINT="$browser_fingerprint" BROWSER_PHASE=after \
+            OBSERVED_LIVE_ARTHELLO_SHA="$TARGET_RELEASE_SHA" \
+            SCHOOL_DIAGNOSTIC_FILE="$diagnostic_file" \
+            SCHOOL_REPAIR_RECEIPT_FILE="$repair_receipt" SCHOOL_REPAIR_CONFIG_SHA256="$repair_config" \
+            python3 -I .github/scripts/run-r18-live-browser.py
+          printf 'ARTHELLO_D163_AFTER_PUBLIC_BROWSER=VERIFIED\n'
+
+      - name: Recovery summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## D163 held-candidate recovery'
+            echo
+            echo "- Release: $TARGET_RELEASE_SHA"
+            echo "- Original cutover: https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/$TARGET_RUN_ID/attempts/$TARGET_RUN_ATTEMPT"
+            echo "- Candidate: ${{ steps.recover.outputs.candidate_id || 'not verified' }}"
+            echo "- Result: ${{ job.status }}"
+            echo '- Snapshot restore and destructive cleanup: not performed'
+            echo '- Real-money acceptance and fiscalization: disabled'
+          } >> "$GITHUB_STEP_SUMMARY"
