@@ -70,12 +70,31 @@ test("Pay is entered only through central OS SSO and preserves launch action", a
   assert.match(sso, /used_at=0 AND expires_at>\?/);
 });
 
-test("D174 deployment validates stable public edge and Pay boundary without payment secrets", async () => {
+test("D175 keeps Pay behind Acquiring and preserves the focused family search", async () => {
+  const [shell, asset] = await Promise.all([
+    source("../app/components/ArtHelloShell.tsx"),
+    source("../../public/pay-assets/app.js", "../contract-fixtures/pay-app.js"),
+  ]);
+  const primaryNav = shell.split("\n").find((line) => line.includes("const primaryNav =")) ?? "";
+  const customerLoader = asset.match(/async function loadCustomers[\s\S]*?(?=\nasync function loadWorkspace)/)?.[0] ?? "";
+
+  assert.match(shell, /const externalSystemModuleIds[^\n]+new Set\(\["pay"\]\)/);
+  assert.doesNotMatch(primaryNav, /"pay"/);
+  assert.match(shell, /availableDashboardModules[\s\S]*?!externalSystemModuleIds\.has\(moduleEntry\.id\)/);
+  assert.match(shell, /const favoriteNav = [^\n]+!externalSystemModuleIds\.has\(id\)/);
+  assert.match(shell, /const extraNav = [^\n]+!externalSystemModuleIds\.has\(item\.id\)/);
+  assert.match(asset, /function refreshCustomerResults\(\)[\s\S]*?\.customer-search-results[\s\S]*?renderCustomerResults\(\)/);
+  assert.ok(customerLoader);
+  assert.doesNotMatch(customerLoader, /renderShell\(\)/);
+  assert.equal((customerLoader.match(/refreshCustomerResults\(\)/g) ?? []).length, 2);
+});
+
+test("D175 deployment validates stable public edge and Pay boundary without payment secrets", async () => {
   const workflow = await source("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
-  assert.match(workflow, /D174: separate Pay actions and keep family modal/);
-  assert.match(workflow, /ARTHELLO_D174_PRODUCTION=VERIFIED/);
+  assert.match(workflow, /D175: keep Pay inside Acquiring and preserve mobile focus/);
+  assert.match(workflow, /ARTHELLO_D175_PRODUCTION=VERIFIED/);
   assert.match(workflow, /docker restart --time 20 "\$CADDY_CONTAINER"/);
-  assert.match(workflow, /ARTHELLO_D174_EXTERNAL=VERIFIED/);
+  assert.match(workflow, /ARTHELLO_D175_EXTERNAL=VERIFIED/);
   assert.match(workflow, /bank_accounts/);
   assert.match(workflow, /balance_minor is not null/);
   assert.match(workflow, /eligiblePayAdministrators/);
@@ -91,5 +110,6 @@ test("D174 deployment validates stable public edge and Pay boundary without paym
   assert.match(workflow, /docker exec -i -e PUBLIC_URL=/);
   assert.match(workflow, /moneyAcceptanceEnabled:false/);
   assert.match(workflow, /fiscalizationEnabled:false/);
+  assert.match(workflow, /refreshCustomerResults/);
   assert.doesNotMatch(workflow, /TOCHKA_TOKEN|PAYMENT_SECRET|FISCALIZATION_SECRET/);
 });

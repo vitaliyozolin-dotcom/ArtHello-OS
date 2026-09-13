@@ -60,15 +60,18 @@ test("RBAC acceptance: every shell discovery surface uses the same allow-list be
   assert.match(routeStage, /key=\{routedActive\}/);
   assert.doesNotMatch(routeStage, /\bactive\s*===/, "a stale forbidden state must never mount a workspace");
 
-  assert.match(navigation, /const primaryNav = [^\n]+\.filter\(\(id\) => isModuleAllowed\(id\) && !settingsModuleIds\.has\(id\)\)/);
-  assert.match(navigation, /const favoriteNav = favoriteModules\.filter\(\(id\) => isModuleAllowed\(id\) && !settingsModuleIds\.has\(id\)\)/);
+  assert.match(navigation, /const primaryNav = [^\n]+\.filter\(\(id\) => isModuleAllowed\(id\) && !settingsModuleIds\.has\(id\) && !externalSystemModuleIds\.has\(id\)\)/);
+  assert.match(navigation, /const favoriteNav = favoriteModules\.filter\(\(id\) => isModuleAllowed\(id\) && !settingsModuleIds\.has\(id\) && !externalSystemModuleIds\.has\(id\)\)/);
   assert.match(navigation, /const extraNav = moduleCatalog\.filter\(\(item\) => isModuleAllowed\(item\.id\)/);
+  assert.match(navigation, /!externalSystemModuleIds\.has\(item\.id\)/);
   assert.match(search, /moduleCatalog\s*\.filter\(\(module\) => isModuleAllowed\(module\.id\)\)/);
+  assert.match(search, /\.filter\(\(module\) => !externalSystemModuleIds\.has\(module\.id\)\)/);
   assert.match(search, /entitySearchIndex\.filter\(\(item\) => isModuleAllowed\(item\.module\)/);
   assert.match(search, /isModuleAllowed\("tasks"\)/);
 
   assert.match(shell, /<CommandPalette tasks=\{tasks\} allowedModules=\{allowedModuleIds\}/);
   assert.match(palette, /moduleCatalog\.filter\(\(item\) => allowedModules\.has\(item\.id\)\)/);
+  assert.match(palette, /\.filter\(\(item\) => !externalSystemModuleIds\.has\(item\.id\)\)/);
   assert.match(palette, /entitySearchIndex\.filter\(\(item\) => allowedModules\.has\(item\.module\)\)/);
   for (const moduleId of ["tasks", "integrations", "analytics"]) {
     assert.match(palette, new RegExp(`allowedModules\\.has\\("${moduleId}"\\)`));

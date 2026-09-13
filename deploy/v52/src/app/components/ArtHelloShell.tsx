@@ -80,6 +80,9 @@ const uiStorage = {
 const manualFirstModules: ReadonlySet<ModuleId> = new Set();
 const knownModuleIds = moduleCatalog.map((module) => module.id);
 const settingsModuleIds: ReadonlySet<ModuleId> = new Set(["access", "integrations", "acceptance"]);
+// Pay is a separate system launched from Acquiring, not a second OS section.
+// Keep its direct route for SSO compatibility, but hide it from discovery surfaces.
+const externalSystemModuleIds: ReadonlySet<ModuleId> = new Set(["pay"]);
 const defaultFavoriteModules: ModuleId[] = ["registry", "clients", "legal", "hr", "projects"];
 
 function settingsTabForModule(id: ModuleId): SettingsTab | null {
@@ -177,7 +180,7 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
   );
   const availableDashboardModules = useMemo(
     () => moduleCatalog
-      .filter((moduleEntry) => allowedModuleIds.has(moduleEntry.id) && !settingsModuleIds.has(moduleEntry.id))
+      .filter((moduleEntry) => allowedModuleIds.has(moduleEntry.id) && !settingsModuleIds.has(moduleEntry.id) && !externalSystemModuleIds.has(moduleEntry.id))
       .map(({ id, label }) => ({ id, label })),
     [allowedModuleIds],
   );
@@ -360,6 +363,7 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
     if (clean.length < 2) return [];
     const modules = moduleCatalog
       .filter((module) => isModuleAllowed(module.id))
+      .filter((module) => !externalSystemModuleIds.has(module.id))
       .filter((module) => `${module.label} ${module.group}`.toLowerCase().includes(clean))
       .map((module) => ({ id: module.id, label: module.label, type: "Раздел", meta: module.group, module: module.id as ModuleId }));
     const entities = entitySearchIndex.filter((item) => isModuleAllowed(item.module) && `${item.id} ${item.label} ${item.type} ${item.meta}`.toLowerCase().includes(clean));
@@ -371,10 +375,10 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
 
   const routedActive = isModuleAllowed(active) ? active : "home";
   const activeEntry = moduleCatalog.find((item) => item.id === routedActive) ?? moduleCatalog[0];
-  const primaryNav = (["home", "finance", "acquiring", "pay", "clients", "education", "hr", "sales", "content", "tasks", "legal", "analytics"] as ModuleId[]).filter((id) => isModuleAllowed(id) && !settingsModuleIds.has(id));
-  const favoriteNav = favoriteModules.filter((id) => isModuleAllowed(id) && !settingsModuleIds.has(id));
-  const extraNav = moduleCatalog.filter((item) => isModuleAllowed(item.id) && !settingsModuleIds.has(item.id) && !primaryNav.includes(item.id) && !favoriteNav.includes(item.id));
-  const navLabels: Partial<Record<ModuleId, string>> = { finance: "Деньги", acquiring: "Эквайринг", pay: "Pay", clients: "Клиенты", hr: "Команда", legal: "Документы", projects: "План-факт" };
+  const primaryNav = (["home", "finance", "acquiring", "clients", "education", "hr", "sales", "content", "tasks", "legal", "analytics"] as ModuleId[]).filter((id) => isModuleAllowed(id) && !settingsModuleIds.has(id) && !externalSystemModuleIds.has(id));
+  const favoriteNav = favoriteModules.filter((id) => isModuleAllowed(id) && !settingsModuleIds.has(id) && !externalSystemModuleIds.has(id));
+  const extraNav = moduleCatalog.filter((item) => isModuleAllowed(item.id) && !settingsModuleIds.has(item.id) && !externalSystemModuleIds.has(item.id) && !primaryNav.includes(item.id) && !favoriteNav.includes(item.id));
+  const navLabels: Partial<Record<ModuleId, string>> = { finance: "Деньги", acquiring: "Эквайринг", clients: "Клиенты", hr: "Команда", legal: "Документы", projects: "План-факт" };
 
   const renderNavItem = (item: typeof moduleCatalog[number], keyPrefix = "") => (
     <a
@@ -673,7 +677,7 @@ function CommandPalette({
   const [commandQuery, setCommandQuery] = useState("");
   const clean = commandQuery.trim().toLocaleLowerCase("ru-RU");
   const items = [
-    ...moduleCatalog.filter((item) => allowedModules.has(item.id)).map((item) => ({ id: `module-${item.id}`, label: item.label, type: "Раздел", meta: item.group, module: item.id as ModuleId })),
+    ...moduleCatalog.filter((item) => allowedModules.has(item.id)).filter((item) => !externalSystemModuleIds.has(item.id)).map((item) => ({ id: `module-${item.id}`, label: item.label, type: "Раздел", meta: item.group, module: item.id as ModuleId })),
     ...entitySearchIndex.filter((item) => allowedModules.has(item.module)),
     ...(allowedModules.has("tasks") ? tasks.map((task) => ({ id: `task-${task.id}`, label: taskRecordLabel(task.id), type: "Задача", meta: `${humanTechnicalText(task.title)} · ${task.owner} · ${task.status}`, module: "tasks" as ModuleId })) : []),
   ].filter((item) => !clean || `${item.id} ${item.label} ${item.type} ${item.meta}`.toLocaleLowerCase("ru-RU").includes(clean)).slice(0, 12);
