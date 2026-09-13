@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "D175: единая навигация эквайринга и устойчивый мобильный поиск",
+    "name": "D176: защищённый production-транспорт AlfaCRM",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -195,7 +195,10 @@
       "2026-09-13: отдельная форма входа Pay заменена одноразовым 60-секундным PKCE-кодом от ArtHello OS с повторной проверкой активного пользователя, системного grant и access_version.",
       "2026-09-13: владелец явно потребовал опубликовать исправление в production и разрешил recovery/deploy workflow без секретов; реальные платежи и фискализация этим решением не включаются.",
       "D174 опубликован release bed8e98e8a20c1cba63840c3faf5bc0dc7f4f63d: protected run 34784722673 подтвердил snapshot, данные, Pay grant, активацию read-only синхронизации, 65 секунд стабильности и внешние ArtHello/School/Pay=200.",
-      "IMG_0248/IMG_0249: владелец потребовал убрать отдельный Pay из меню разделов и сообщил, что после ввода одной буквы фамилии мобильная клавиатура закрывается."
+      "IMG_0248/IMG_0249: владелец потребовал убрать отдельный Pay из меню разделов и сообщил, что после ввода одной буквы фамилии мобильная клавиатура закрывается.",
+      "D175 опубликован release 854a3c00823857d398b9c1965820e9ae9cc068d3: protected run 34786047645 завершён success, Verify D175 run 34785776113 завершён success.",
+      "IMG_0242/IMG_0250/IMG_0251/IMG_0252: AlfaCRM wizard принимает адрес, e-mail и v2api key, но production-запрос завершается общей транспортной ошибкой до появления филиалов.",
+      "D176 PR484 переводит AlfaCRM на ограниченный Node/TLS service binding; 808/810 тестов вне известного managed-filesystem chown-сценария пройдены, два пропущены, production build и typecheck пройдены."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
@@ -204,7 +207,8 @@
       "Фактический R6 gatewayUID995 не имеет sudo для host-установщика бэкапов; выбран R7 с меньшими требованиями к правам, требуется реализовать и проверить новый образ/worker/activation authority.",
       "School transport восстановлен и read-only проверен; естественный авторизованный Education→дневник SSO не подтверждён, облачный браузер возвращает502 до формы входа.",
       "Customer.balance подтверждён официальным API как денежное поле и исправления слиты; актуальные tenant credentials/coverage/выборочная синхронизация и реальная приёмка ещё не подтверждены. Alfa financial movements явно blocked до проверенного контракта PayType direction.",
-      "Новая ArtHello версия ещё не переключена: нужны первая backup+restore, exact immutable release и пользовательская приёмка шести сценариев."
+      "Новая ArtHello версия ещё не переключена: нужны первая backup+restore, exact immutable release и пользовательская приёмка шести сценариев.",
+      "D176 ещё не подтверждён production preflight: до переключения live synthetic login должен доказать доступность tenant AlfaCRM без реального ключа; затем владелец перевыпускает v2api key, подключает аккаунт, сопоставляет филиал и проверяет read-only предпросмотр."
     ]
   },
   "stages": [
@@ -444,8 +448,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "Опубликовать D175: оставить единственный пункт «Эквайринг», запускать отдельный Pay из него и не заменять активное поле при поиске семьи",
-    "evidence": "Контракт отсутствия Pay в поверхностях выбора разделов, отсутствие renderShell в асинхронном поиске, идентичные Pay assets, exact SHA/tree и независимая production-проверка ArtHello/School/Pay"
+    "result": "Опубликовать D176: направить AlfaCRM через ограниченный Node/TLS transport, до остановки live доказать tenant egress синтетическим запросом и открыть владельцу подключение и сопоставление филиалов без обратной записи в AlfaCRM",
+    "evidence": "Exact SHA/tree, Quality и Verify, synthetic AlfaCRM egress до docker stop, rollback snapshot, 65 секунд стабильности, независимая production-проверка ArtHello/School/Pay и фактическое появление филиалов после ввода владельцем нового v2api key"
   },
   "decisionLog": [
     {
@@ -2559,7 +2563,7 @@
     },
     {
       "project_id": "ARTHELLO-OS",
-      "status": "active",
+      "status": "completed",
       "approved_by": "Виталий Озолин — явное поручение в текущем чате",
       "approved_at": "2026-09-13",
       "owner": "Исполнитель ArtHello OS",
@@ -2580,7 +2584,8 @@
       "evidence": [
         "ArtHelloShell исключает pay из основной, избранной и дополнительной навигации, карточек главной, поиска и палитры команд, сохраняя прямой SSO route для совместимости.",
         "loadCustomers использует refreshCustomerResults до и после запроса; его блок больше не вызывает renderShell.",
-        "Production workflow проверяет новый Pay shell marker и наличие точечного обновления результатов без чтения или публикации секретов."
+        "Production workflow проверяет новый Pay shell marker и наличие точечного обновления результатов без чтения или публикации секретов.",
+        "D175 опубликован release 854a3c00823857d398b9c1965820e9ae9cc068d3; protected run 34786047645 и Verify D175 run 34785776113 завершены success."
       ],
       "assumptions": [
         "Действия «Создать ссылку на оплату» и «Реестр платежей» внутри «Эквайринга» остаются единственными видимыми входами в Pay.",
@@ -2612,6 +2617,74 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Контракты, production build, protected deployment receipt и независимый внешний probe",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — явное поручение в текущем чате",
+      "approved_at": "2026-09-13",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска D176 и появления филиалов AlfaCRM",
+      "affected_stages": [
+        16,
+        18,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Владелец потребовал запустить существующего пользователя AlfaCRM в работу, перевыпустить ключ после готовности окна, сопоставить филиал после его появления и провести проверку перед переносом; IMG_0242/IMG_0250/IMG_0251/IMG_0252 показывают общую production-ошибку соединения.",
+      "decision_id": "DEC-2026-09-13-84",
+      "question": "Как восстановить production-подключение AlfaCRM и не подвергать реальный ключ или live-данные риску при выпуске?",
+      "statement": "D176: запросы AlfaCRM выполняются через отдельный ограниченный Node/TLS transport только к разрешённым HTTPS tenant-host, v2api login и read-only index endpoints. Release до остановки live проверяет tenant egress синтетическим заведомо неверным логином и при сетевой ошибке останавливается без переключения production. Реальный ключ не хранится в коде или CI: владелец перевыпускает и вводит его только после успешного выпуска; обратная запись в AlfaCRM отсутствует, а импорт ArtHello остаётся закрыт до сопоставления и проверенного предпросмотра.",
+      "context": "В production wizard сохраняет форму и запускает проверку, но возвращает общую ошибку. Ранее тот же аккаунт авторизовывался, после чего сетевые вызовы из workerd начали завершаться транспортным сбоем; аналогичная граница уже потребовала Node service binding для Точки.",
+      "rationale": "Node transport использует системную TLS-цепочку, а строгие host/path/header/body/time/size limits сохраняют read-only границу и не позволяют runtime превратить binding в общий прокси. Synthetic preflight доказывает сеть без раскрытия действующих учётных данных и сохраняет D175 при отказе.",
+      "evidence": [
+        "PR484 содержит отдельный alfacrm-transport.mjs, runtime binding, явное Docker packaging и route-level sanitized timeout/unavailable ответы.",
+        "Транспортные, route, legacy rollout, lifecycle и Miniflare service-binding проверки пройдены; полный набор без известного managed-filesystem chown-сценария: 808 passed, 0 failed, 2 skipped.",
+        "Production workflow проверяет synthetic AlfaCRM login до первого docker stop, не читает тело ответа и не содержит реальный e-mail или ключ."
+      ],
+      "assumptions": [
+        "Адрес аккаунта остаётся https://arthellonew.s20.online без /v2api и параметров.",
+        "X-APP-KEY остаётся пустым, если он отдельно не включён в аккаунте AlfaCRM.",
+        "У владельца есть право перевыпустить v2api key пользователя; ключ не передаётся в чат.",
+        "Финансовые проводки остаются заблокированы до подтверждённого направления PayType; обратная запись в AlfaCRM не включается."
+      ],
+      "dependencies": [
+        "D175 stable production release",
+        "Verify ArtHello v52 release for exact D176 SHA",
+        "Actual tenant network availability from production host",
+        "Explicit owner instruction 2026-09-13"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/484"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Оставить AlfaCRM fetch внутри workerd и повторно вводить тот же ключ",
+          "reason": "Не устраняет воспроизводимый transport boundary и снова расходует ключ без доказательства связи.",
+          "reopen_condition": "только если production workerd отдельно докажет стабильный tenant TLS egress"
+        },
+        {
+          "option": "Отключить TLS-проверку или разрешить transport к произвольному URL",
+          "reason": "Расширяет SSRF и credential-exfiltration риск и не требуется для tenant API.",
+          "reopen_condition": "нет"
+        },
+        {
+          "option": "Положить реальный AlfaCRM key в workflow для preflight",
+          "reason": "Секрет не нужен для доказательства сети и не должен попадать в CI или логи.",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Выпустить exact D176, подтвердить synthetic tenant egress и стабильность production, затем открыть владельцу ввод нового ключа, сопоставление филиалов и read-only предпросмотр",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "Successful Quality/Verify, protected deployment receipt, ARTHELLO_D176_ALFACRM_EGRESS=VERIFIED, внешние ArtHello/School/Pay=200 и появление филиалов в wizard",
           "status": "in_progress"
         }
       ]
