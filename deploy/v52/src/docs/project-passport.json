@@ -21,7 +21,7 @@
   "currentState": {
     "stage": 22,
     "name": "D177: компактные остатки и мобильная банковская история",
-    "status": "in_progress",
+    "status": "completed",
     "evidence": [
       "Тестовый Sites-проект создан",
       "Три XLSX прочитаны без изменения оригиналов",
@@ -2693,7 +2693,7 @@
     },
     {
       "project_id": "ARTHELLO-OS",
-      "status": "active",
+      "status": "completed",
       "approved_by": "Виталий Озолин — явное поручение в текущем чате",
       "approved_at": "2026-09-13",
       "owner": "Исполнитель ArtHello OS",
@@ -2715,7 +2715,8 @@
       "evidence": [
         "FinanceWorkspace содержит D177_MONEY_MOBILE_HISTORY, единый ahFinancePulse, компактные ahFinanceBankAccount и сгруппированный ahFinanceBankHistory.",
         "Системный verifier и отдельные D177-контракты проверяют отсутствие широкой таблицы в банковской вкладке и мобильную компоновку.",
-        "Production workflow сохраняет AlfaCRM synthetic egress, D175 Pay, счета, остатки и read-only синхронизацию без чтения секретов."
+        "Production workflow сохраняет AlfaCRM synthetic egress, D175 Pay, счета, остатки и read-only синхронизацию без чтения секретов.",
+        "Release 6ef7a3dc82e4644d1991d5454e61b62149b3738b опубликован protected run 34789532262: четыре счёта, четыре остатка, Pay grant, read-only активация Точки, 65 секунд стабильности и внешние ArtHello/School/Pay=200 подтверждены."
       ],
       "assumptions": [
         "Суммы, число операций и остатки продолжают поступать из зафиксированного D172 read-model.",
@@ -2728,7 +2729,9 @@
         "D176 bounded AlfaCRM production transport",
         "Explicit owner instruction 2026-09-13"
       ],
-      "source_links": [],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/pull/490"
+      ],
       "rejected_alternatives": [
         {
           "option": "Сохранить пятиколоночную таблицу и уменьшить шрифт",
@@ -2747,7 +2750,7 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "TypeScript/build, D177 contracts, exact hosted image, protected receipt, 65-second stability and independent external probe",
-          "status": "in_progress"
+          "status": "completed"
         }
       ]
     }
