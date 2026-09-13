@@ -90,7 +90,7 @@ test("D175 keeps Pay behind Acquiring and preserves the focused family search", 
 });
 
 test("D176 deployment validates AlfaCRM egress, stable public edge and Pay boundary without secrets", async () => {
-  const workflow = await source("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
+  const workflow = await source("./contract-fixtures/deploy-d176.yml");
   assert.match(workflow, /D176: restore AlfaCRM production transport/);
   assert.match(workflow, /ARTHELLO_D176_ALFACRM_EGRESS=VERIFIED/);
   assert.match(workflow, /ARTHELLO_D176_PRODUCTION=VERIFIED/);
