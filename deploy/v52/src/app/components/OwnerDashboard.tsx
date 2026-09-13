@@ -46,9 +46,43 @@ type FinanceOperation = {
   status: string;
 };
 
+type BankOperation = {
+  id: string;
+  operationDate: string;
+  direction: string;
+  amountMinor: number;
+  currency: string;
+  status: string;
+  description: string;
+  counterpartyName: string;
+  transactionType: string;
+  documentNumber: string;
+  provider: string;
+  accountName: string;
+  maskedAccount: string;
+  legalEntityName: string;
+  importedAt: string;
+  allocated: boolean;
+};
+
 type FinancePayload = {
   selectedPeriod: string;
   operations: FinanceOperation[];
+  bankOperations: BankOperation[];
+  bankMonthly: Array<{
+    period: string;
+    transactionCount: number;
+    incomingMinor: number;
+    outgoingMinor: number;
+    netMinor: number;
+  }>;
+  bankSummary: {
+    period: string;
+    transactionCount: number;
+    incomingMinor: number;
+    outgoingMinor: number;
+    netMinor: number;
+  };
   accruals: Array<{ period: string; debtMinor: number }>;
   entityNames: Record<string, string>;
   monthly: Array<{
@@ -94,8 +128,8 @@ const DASHBOARD_STORAGE_PREFIX = `arthello:dashboard-layout:v${DASHBOARD_LAYOUT_
 const MOSCOW_TIME_ZONE = "Europe/Moscow";
 
 const WIDGETS: ReadonlyArray<{ id: DashboardWidgetId; title: string; description: string; defaultSize: DashboardWidgetSize }> = [
-  { id: "kpis", title: "Ключевые показатели", description: "Факт по финансам и открытым задачам", defaultSize: "full" },
-  { id: "cashflow", title: "Денежный поток", description: "Поступления и списания по отчёту о движении денег", defaultSize: "wide" },
+  { id: "kpis", title: "Ключевые показатели", description: "Банковский факт и открытые задачи", defaultSize: "full" },
+  { id: "cashflow", title: "Денежный поток", description: "Поступления и списания по операциям банка", defaultSize: "wide" },
   { id: "decisions", title: "Мои решения", description: "Открытые задачи, требующие действия", defaultSize: "compact" },
   { id: "signals", title: "Сигналы и риски", description: "Только подтверждённые сигналы из аналитики", defaultSize: "compact" },
   { id: "milestones", title: "Контрольные точки", description: "Ближайшие сроки из задач", defaultSize: "compact" },
@@ -148,6 +182,10 @@ function rubles(minor: number) {
   return rub.format(minor / 100);
 }
 
+function bankOperationIsIncoming(direction: string) {
+  return /credit|incoming|приход|поступ|вход/i.test(direction);
+}
+
 function compactMoney(value: number) {
   const absolute = Math.abs(value);
   if (absolute >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(".", ",")} млн ₽`;
@@ -181,12 +219,6 @@ function humanTaskTitle(value: string) {
     .replace(/[\s·:–—-]+$/u, "")
     .trim();
   return withoutCodes || "Без названия";
-}
-
-function humanFinanceClass(value: string) {
-  return humanTechnicalText(value)
-    .replace(/ОПиУ/g, "отчёт о прибылях и убытках")
-    .replace(/ОДДС/g, "отчёт о движении денег");
 }
 
 function moscowHour(value: Date) {
@@ -492,7 +524,7 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
         if (!response.ok) throw new Error(payload.error ?? "Не удалось загрузить финансовый контур");
         setFinance(payload);
         setDashboardPeriod((current) => current || payload.selectedPeriod || payload.monthly.at(-1)?.period || "");
-        const selectedPeriodOperations = payload.operations.filter((operation) => operation.period === payload.selectedPeriod);
+        const selectedPeriodOperations = payload.bankOperations;
         setSelectedId((current) => selectedPeriodOperations.some((operation) => operation.id === current) ? current : selectedPeriodOperations[0]?.id || "");
         setError("");
       } catch (loadError) {
@@ -516,12 +548,12 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
     queueServerLayoutSync("PUT", next);
   }, [applyLayout, dashboardUserKey, queueServerLayoutSync, roleLabel]);
 
-  const periodOperations = useMemo(() => finance?.operations.filter((operation) => operation.period === finance.selectedPeriod) ?? [], [finance]);
+  const periodOperations = useMemo(() => finance?.bankOperations ?? [], [finance]);
   const operations = useMemo(() => {
     const clean = query.trim().toLocaleLowerCase("ru-RU");
     return periodOperations
-      .filter((operation) => direction === "Все типы" || operation.direction === direction)
-      .filter((operation) => !clean || [operation.id, operation.category, operation.counterpartyEntityId, operation.contractId].some((value) => value.toLocaleLowerCase("ru-RU").includes(clean)))
+      .filter((operation) => direction === "Все типы" || (direction === "Поступление" ? bankOperationIsIncoming(operation.direction) : !bankOperationIsIncoming(operation.direction)))
+      .filter((operation) => !clean || [operation.counterpartyName, operation.description, operation.accountName, operation.maskedAccount, operation.documentNumber].some((value) => value.toLocaleLowerCase("ru-RU").includes(clean)))
       .slice(0, 6);
   }, [direction, periodOperations, query]);
 
@@ -529,9 +561,10 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
   const firstName = displayName.trim().split(/\s+/)[0] || "Пользователь";
   const greeting = greetingForMoscow(now);
   const dashboardDate = dashboardDateForMoscow(now);
-  const summary = finance?.summary;
+  const summary = finance?.bankSummary;
+  const managementSummary = finance?.summary;
   const financePeriod = finance?.selectedPeriod ? monthLabel(finance.selectedPeriod, "long") : "Данных пока нет";
-  const hasSelectedCashData = periodOperations.length > 0;
+  const hasSelectedCashData = Boolean(summary?.transactionCount);
   const hasDebtData = Boolean(finance?.accruals.length);
   const financeValue = (minor: number | undefined, available: boolean) => available && minor !== undefined ? compactMoney(minor / 100) : "—";
   const openTasks = useMemo(() => tasks.filter((task) => !COMPLETE_TASK.test(task.status)), [tasks]);
@@ -543,10 +576,10 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
     { label: "Со сроком", value: String(openTasks.filter((task) => Boolean(task.dueDate)).length), note: "Есть контрольная дата", tone: "blue", icon: "projects" as const, module: "tasks" as ModuleId },
   ];
   const financeMetrics = [
-    { label: "Чистый денежный поток", value: financeValue(summary?.netMinor, hasSelectedCashData), note: hasSelectedCashData ? financePeriod : "Подключите источник", tone: "indigo", icon: "finance" as const, module: "finance" as ModuleId },
-    { label: "Поступления", value: financeValue(summary?.receiptsMinor, hasSelectedCashData), note: hasSelectedCashData ? financePeriod : "Факта пока нет", tone: "green", icon: "sales" as const, module: "finance" as ModuleId },
-    { label: "Списания", value: financeValue(summary?.outflowsMinor, hasSelectedCashData), note: hasSelectedCashData ? financePeriod : "Факта пока нет", tone: "orange", icon: "legal" as const, module: "finance" as ModuleId },
-    { label: "Задолженность", value: financeValue(summary?.debtMinor, hasDebtData), note: hasDebtData ? summary?.debtMinor ? "По подтверждённым начислениям" : "Подтверждённого долга нет" : "Источник начислений не подключён", tone: "red", icon: "clients" as const, module: "finance" as ModuleId },
+    { label: "Чистый денежный поток", value: financeValue(summary?.netMinor, hasSelectedCashData), note: hasSelectedCashData ? `${financePeriod} · банк` : "Подключите источник", tone: "indigo", icon: "finance" as const, module: "finance" as ModuleId },
+    { label: "Поступления", value: financeValue(summary?.incomingMinor, hasSelectedCashData), note: hasSelectedCashData ? `${financePeriod} · банк` : "Факта пока нет", tone: "green", icon: "sales" as const, module: "finance" as ModuleId },
+    { label: "Списания", value: financeValue(summary?.outgoingMinor, hasSelectedCashData), note: hasSelectedCashData ? `${financePeriod} · банк` : "Факта пока нет", tone: "orange", icon: "legal" as const, module: "finance" as ModuleId },
+    { label: "Задолженность", value: financeValue(managementSummary?.debtMinor, hasDebtData), note: hasDebtData ? managementSummary?.debtMinor ? "По подтверждённым начислениям" : "Подтверждённого долга нет" : "Источник начислений не подключён", tone: "red", icon: "clients" as const, module: "finance" as ModuleId },
     { label: "Операции", value: loading ? "…" : finance ? String(periodOperations.length) : "—", note: periodOperations.length ? `В реестре за ${financePeriod.toLocaleLowerCase("ru-RU")}` : "Реестр пуст", tone: "blue", icon: "registry" as const, module: "finance" as ModuleId },
     { label: "Открытые задачи", value: String(openTasks.length), note: tasks.length ? "В рабочем контуре" : "Задач пока нет", tone: "violet", icon: "hr" as const, module: "tasks" as ModuleId },
   ];
@@ -558,7 +591,7 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
     .toSorted((left, right) => left.dueDate.localeCompare(right.dueDate))
     .slice(0, 4), [openTasks]);
   const availableDashboardPeriods = useMemo(() => {
-    const values = [finance?.selectedPeriod, ...(finance?.monthly.map((item) => item.period) ?? [])].filter((value): value is string => Boolean(value));
+    const values = [finance?.selectedPeriod, ...(finance?.bankMonthly.map((item) => item.period) ?? [])].filter((value): value is string => Boolean(value));
     return [...new Set(values)].sort().reverse();
   }, [finance]);
   const roleModules = useMemo(() => {
@@ -575,8 +608,12 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
   }, [availableModules, roleProfile]);
   const chartData = useMemo(() => {
     if (!finance) return [];
-    const cashPeriods = new Set(finance.operations.map((operation) => operation.period));
-    return finance.monthly.filter((item) => cashPeriods.has(item.period)).slice(-12);
+    return finance.bankMonthly.map((item) => ({
+      period: item.period,
+      receiptsMinor: item.incomingMinor,
+      outflowsMinor: item.outgoingMinor,
+      netMinor: item.netMinor,
+    })).slice(-12);
   }, [finance]);
   const chartGeometry = useMemo(() => {
     const width = 720;
@@ -624,17 +661,18 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
   const customizableLayout = layout.filter((item) => allowedVisibleWidgets.has(item.id) && widgetIsAvailable(item.id));
   const visibleWidgets = customizableLayout.filter((item) => item.visible);
 
-  function showOperation(operation: FinanceOperation) {
+  function showOperation(operation: BankOperation) {
+    const incoming = bankOperationIsIncoming(operation.direction);
     openOperation({
-      title: operation.category,
-      value: `${operation.direction === "Поступление" ? "+" : "−"}${rubles(operation.amountMinor)}`,
-      summary: `${recordLabel("Операция",operation.id)} · ${finance?.entityNames[operation.counterpartyEntityId] ?? recordLabel("Контрагент",operation.counterpartyEntityId)}`,
-      source: operation.sourceFile ? `${humanTechnicalText(operation.sourceFile)} · строка исходного документа` : "Банковская выписка",
-      calculation: `${operation.direction}; статья ${humanFinanceClass(operation.reportClass)}; исходная сумма операции без перезаписи`,
+      title: operation.description || operation.transactionType || "Банковская операция",
+      value: `${incoming ? "+" : "−"}${rubles(Math.abs(operation.amountMinor))}`,
+      summary: `${operation.counterpartyName || "Контрагент не указан"} · ${operation.accountName}`,
+      source: `${operation.provider} · банковская выписка только для чтения`,
+      calculation: `${incoming ? "Поступление" : "Списание"}; исходная сумма банка без перезаписи`,
       updated: formatDate(operation.operationDate),
       owner: "Финансовый контролёр",
-      quality: humanTechnicalText(operation.dataQuality || operation.status),
-      lineage: ["Источник", "Банковская операция", "Контрагент", "Договор", "Статья ДДС", "Документ"],
+      quality: operation.allocated ? "Разнесено в управленческом учёте" : "Ожидает управленческого разнесения",
+      lineage: ["Банк", "Выписка", "Банковская операция", "Разнесение в «Деньгах»"],
     });
   }
 
@@ -766,14 +804,14 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
     </article>;
 
     if (widget.id === "cashflow") return <article className={`${styles.panel} ${chartStyles.chartPanel}`} data-help-block="cashflow">
-      <header><span><strong>Денежный поток</strong><small>{chartData.length ? `${monthLabel(chartData[0].period)} — ${monthLabel(chartData.at(-1)?.period ?? chartData[0].period, "long")}` : "Фактические данные отчёта о движении денег"}</small></span><button onClick={() => navigate("finance")}>Открыть отчёт</button></header>
+      <header><span><strong>Денежный поток банка</strong><small>{chartData.length ? `${monthLabel(chartData[0].period)} — ${monthLabel(chartData.at(-1)?.period ?? chartData[0].period, "long")}` : "Единый банковский факт"}</small></span><button onClick={() => navigate("finance")}>Открыть «Деньги»</button></header>
       {shownChartItem ? <div className={chartStyles.chartLegend} aria-live="polite">
         <span><i className={chartStyles.inDot} /><small>Поступления</small><strong>{compactMoney(shownChartItem.receiptsMinor / 100)}</strong></span>
         <span><i className={chartStyles.outDot} /><small>Списания</small><strong>{compactMoney(shownChartItem.outflowsMinor / 100)}</strong></span>
         <span className={shownChartItem.netMinor >= 0 ? chartStyles.netPositive : chartStyles.netNegative}><small>Сальдо</small><strong>{shownChartItem.netMinor >= 0 ? "+" : "−"}{compactMoney(Math.abs(shownChartItem.netMinor) / 100)}</strong></span>
       </div> : null}
       {loading && !chartData.length ? <div data-ah-compact-card="true" className={styles.inlineEmpty}><span className={styles.loader} /><strong>Загружаем денежный поток…</strong></div> : error && !chartData.length ? <div data-ah-compact-card="true" className={styles.inlineEmpty}><strong>Данные временно недоступны</strong><span>{error}</span><button onClick={() => navigate("finance")}>Открыть финансы</button></div> : chartData.length ? <div className={chartStyles.lineChart} onMouseLeave={() => setActiveChartIndex(null)} role="group" aria-label="График поступлений и списаний по месяцам">
-        <svg viewBox={`0 0 ${chartGeometry.width} ${chartGeometry.height}`} role="img" aria-label="Фактическая динамика поступлений и списаний из отчёта о движении денег">
+        <svg viewBox={`0 0 ${chartGeometry.width} ${chartGeometry.height}`} role="img" aria-label="Динамика поступлений и списаний по банковским операциям">
           <defs><linearGradient id="cashflow-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#5b56f5" stopOpacity=".17" /><stop offset="100%" stopColor="#5b56f5" stopOpacity="0" /></linearGradient></defs>
           {chartGeometry.ticks.map((tick, index) => {
             const y = chartGeometry.top + index * (chartGeometry.plotHeight / 4);
@@ -798,33 +836,33 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
         <div className={chartStyles.chartHitGrid} style={{ left: `${(chartGeometry.left / chartGeometry.width) * 100}%`, right: `${(chartGeometry.right / chartGeometry.width) * 100}%`, gridTemplateColumns: `repeat(${Math.max(chartData.length, 1)}, 1fr)` }}>
           {chartData.map((item, index) => <button key={item.period} type="button" aria-label={`${monthLabel(item.period, "long")}: открыть операции`} onMouseEnter={() => setActiveChartIndex(index)} onFocus={() => setActiveChartIndex(index)} onClick={() => navigate("finance")} />)}
         </div>
-        {activeChartIndex !== null && shownChartItem && shownChartPoint ? <div className={chartStyles.chartTooltip} style={{ left: `${(shownChartPoint.x / chartGeometry.width) * 100}%` }}><strong>{monthLabel(shownChartItem.period, "long")}</strong><span>Факт отчёта о движении денег · нажмите для детализации</span></div> : null}
+        {activeChartIndex !== null && shownChartItem && shownChartPoint ? <div className={chartStyles.chartTooltip} style={{ left: `${(shownChartPoint.x / chartGeometry.width) * 100}%` }}><strong>{monthLabel(shownChartItem.period, "long")}</strong><span>Единый банковский факт · нажмите для детализации</span></div> : null}
       </div> : <div data-ah-compact-card="true" className={styles.inlineEmpty}><strong>Движений денег пока нет</strong><span>График появится после первой операции из подключённого банка или подтверждённого импорта.</span><button onClick={() => navigate("integrations")}>Подключить источник</button></div>}
     </article>;
 
     if (widget.id === "operations") return <article className={`${styles.panel} ${styles.registry}`} data-help-block="operations">
-      <header><span><strong>Реестр операций</strong><small>{finance?.selectedPeriod ? monthLabel(finance.selectedPeriod, "long") : "Фактические банковские данные"}</small></span><button onClick={() => navigate("finance")}>Все операции</button></header>
+      <header><span><strong>Банковские операции</strong><small>{finance?.selectedPeriod ? `${monthLabel(finance.selectedPeriod, "long")} · тот же итог в «Деньгах»` : "Единый банковский факт"}</small></span><button onClick={() => navigate("finance")}>Открыть «Деньги»</button></header>
       <div className={styles.registryToolbar}>
         <label className={styles.periodSelect}><span className="sr-only">Месяц реестра операций</span><select value={dashboardPeriod} onChange={(event) => setDashboardPeriod(event.target.value)} aria-label="Месяц реестра операций">{availableDashboardPeriods.length ? availableDashboardPeriods.map((item) => <option key={item} value={item}>{monthLabel(item, "long")}</option>) : <option value={dashboardPeriod}>{dashboardPeriod ? monthLabel(dashboardPeriod, "long") : "Период не выбран"}</option>}</select></label>
         <select value={direction} onChange={(event) => setDirection(event.target.value)} aria-label="Тип операции"><option>Все типы</option><option>Поступление</option><option>Списание</option></select>
         <label className={styles.registrySearch}><AppIcon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по реестру" /></label>
         <button type="button" onClick={() => navigate("finance")}><AppIcon name="settings" /> Фильтры</button>
       </div>
-      <div className={styles.registrySummary}><span>Записей: <strong>{periodOperations.length}</strong></span><span>Поступления: <strong>{hasSelectedCashData && summary ? rubles(summary.receiptsMinor) : "—"}</strong></span><span>Списания: <strong>{hasSelectedCashData && summary ? rubles(summary.outflowsMinor) : "—"}</strong></span></div>
+      <div className={styles.registrySummary}><span>Операций: <strong>{periodOperations.length}</strong></span><span>Поступления: <strong>{summary ? rubles(summary.incomingMinor) : "—"}</strong></span><span>Списания: <strong>{summary ? rubles(summary.outgoingMinor) : "—"}</strong></span></div>
       <div className={selected ? styles.registryContent : undefined}>
         <div className={styles.registryMain}>
           {loading ? <div data-ah-compact-card="true" className={styles.registryState}><span className={styles.loader} /><strong>Загружаем реестр…</strong></div> : error ? <div data-ah-compact-card="true" className={styles.registryState}><strong>Реестр временно недоступен</strong><span>{error}</span><button onClick={() => navigate("finance")}>Открыть финансовый раздел</button></div> : operations.length ? (
-            <div className={styles.tableWrap}><table><thead><tr><th>Дата</th><th>Контрагент</th><th>Назначение</th><th>Сумма</th><th>Статус</th></tr></thead><tbody>{operations.map((operation) => (
-              <tr key={operation.id} className={selected?.id === operation.id ? styles.selectedRow : ""} onClick={() => setSelectedId(operation.id)} onDoubleClick={() => showOperation(operation)} tabIndex={0} role="button" aria-pressed={selected?.id === operation.id} aria-label={`${operation.direction}: ${operation.category}, ${rubles(operation.amountMinor)}`} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); showOperation(operation); } }}>
-                <td>{formatDate(operation.operationDate)}</td><td><strong>{finance?.entityNames[operation.counterpartyEntityId] ?? recordLabel("Контрагент",operation.counterpartyEntityId)}</strong><small>{operation.contractId ? recordLabel("Договор",operation.contractId) : "Без договора"}</small></td><td><strong>{operation.category}</strong><small>{humanFinanceClass(operation.reportClass)}</small></td><td className={operation.direction === "Поступление" ? styles.income : styles.expense}>{operation.direction === "Поступление" ? "+" : "−"}{rubles(operation.amountMinor)}</td><td><span className={styles.status}>{operation.status}</span></td>
+            <div className={styles.tableWrap}><table><thead><tr><th>Дата</th><th>Контрагент</th><th>Назначение</th><th>Сумма</th><th>Разнесение</th></tr></thead><tbody>{operations.map((operation) => (
+              <tr key={operation.id} className={selected?.id === operation.id ? styles.selectedRow : ""} onClick={() => setSelectedId(operation.id)} onDoubleClick={() => showOperation(operation)} tabIndex={0} role="button" aria-pressed={selected?.id === operation.id} aria-label={`${bankOperationIsIncoming(operation.direction) ? "Поступление" : "Списание"}: ${operation.description || "банковская операция"}, ${rubles(Math.abs(operation.amountMinor))}`} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); showOperation(operation); } }}>
+                <td>{formatDate(operation.operationDate)}</td><td><strong>{operation.counterpartyName || "Контрагент не указан"}</strong><small>{operation.accountName} · {operation.maskedAccount}</small></td><td><strong>{operation.description || operation.transactionType || "Назначение не передано"}</strong><small>{operation.provider} · банковская выписка</small></td><td className={bankOperationIsIncoming(operation.direction) ? styles.income : styles.expense}>{bankOperationIsIncoming(operation.direction) ? "+" : "−"}{rubles(Math.abs(operation.amountMinor))}</td><td><span className={styles.status}>{operation.allocated ? "Разнесено" : "Ожидает разнесения"}</span></td>
               </tr>
             ))}</tbody></table></div>
           ) : <div data-ah-compact-card="true" className={styles.registryState}><strong>Операций пока нет</strong><span>{sourceOnly ? "Демонстрационных записей нет. Реестр заполнится после подключения банка." : "В выбранном периоде нет операций."}</span><button onClick={() => navigate("integrations")}>Подключить банк</button></div>}
         </div>
         {selected ? <aside className={styles.preview} aria-live="polite" data-help-block="operation-preview">
-          <header><span><strong>{selected.direction}</strong><small>{formatDate(selected.operationDate)}</small></span><button aria-label="Открыть полную карточку" onClick={() => showOperation(selected)}><AppIcon name="more" /></button></header>
-          <div className={styles.operationHero}><strong>{selected.direction === "Поступление" ? "+" : "−"}{rubles(selected.amountMinor)}</strong><small>{selected.status} · {selected.dataQuality}</small></div>
-          <dl><div><dt>Контрагент</dt><dd>{finance?.entityNames[selected.counterpartyEntityId] ?? recordLabel("Контрагент",selected.counterpartyEntityId)}</dd></div><div><dt>Назначение</dt><dd>{selected.category}</dd></div><div><dt>Источник</dt><dd>{selected.sourceFile || "Банковская выписка"}</dd></div></dl>
+          <header><span><strong>{bankOperationIsIncoming(selected.direction) ? "Поступление" : "Списание"}</strong><small>{formatDate(selected.operationDate)}</small></span><button aria-label="Открыть полную карточку" onClick={() => showOperation(selected)}><AppIcon name="more" /></button></header>
+          <div className={styles.operationHero}><strong>{bankOperationIsIncoming(selected.direction) ? "+" : "−"}{rubles(Math.abs(selected.amountMinor))}</strong><small>{selected.allocated ? "Разнесено" : "Ожидает разнесения"} · банковский факт</small></div>
+          <dl><div><dt>Контрагент</dt><dd>{selected.counterpartyName || "Не указан"}</dd></div><div><dt>Назначение</dt><dd>{selected.description || selected.transactionType || "Не передано"}</dd></div><div><dt>Источник</dt><dd>{selected.provider} · банковская выписка</dd></div></dl>
           <footer><button onClick={() => showOperation(selected)}>Открыть карточку</button></footer>
         </aside> : null}
       </div>

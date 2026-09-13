@@ -15,18 +15,23 @@ async function source(...relatives) {
   throw missing;
 }
 
-test("acquiring restores legal-entity accounts, balances, operations and sync state", async () => {
-  const [route, workspace] = await Promise.all([
+test("D172 keeps bank facts in Money and acquiring events in Acquiring", async () => {
+  const [route, workspace, financeRoute, financeWorkspace] = await Promise.all([
     source("../app/api/acquiring/route.ts"),
     source("../app/components/AcquiringWorkspace.tsx"),
+    source("../app/api/finance/route.ts"),
+    source("../app/components/FinanceWorkspace.tsx"),
   ]);
   for (const table of ["bankAccounts", "bankTransactions", "bankStatementImports", "integrationConnections"]) {
-    assert.match(route, new RegExp(`from\\(${table}\\)`), table);
+    assert.doesNotMatch(route, new RegExp(`from\\(${table}\\)|${table}`), table);
+    assert.match(financeRoute, new RegExp(`from\\(${table}\\)`), table);
   }
-  assert.doesNotMatch(route, /bankAccountsView\s*=\s*\[\]/);
-  assert.match(route, /Остатки показаны по счетам юридических лиц/);
-  assert.match(route, /приход\|поступ\|вход/);
-  assert.match(route, /создание, подписание и отправка исходящих платежей[^\n]+запрещены/);
+  assert.match(route, /arthello_pay_requests/);
+  assert.match(route, /платёжные ссылки, оплаты, возвраты и чеки/);
+  assert.doesNotMatch(workspace, /Остаток по счетам|Синхронизация с банками/);
+  assert.match(financeWorkspace, /Счета и текущие остатки/);
+  assert.match(financeWorkspace, /Банковские операции/);
+  assert.match(financeWorkspace, /Синхронизация/);
   assert.match(workspace, />Новый счёт<\/Button>/);
   assert.match(workspace, />Оплата<\/Button>/);
   assert.match(workspace, /\/api\/pay-sso\/open/);
@@ -56,8 +61,10 @@ test("Pay is entered only through central OS SSO and preserves launch action", a
   assert.match(sso, /used_at=0 AND expires_at>\?/);
 });
 
-test("D168 deployment validates live bank data and Pay boundary without payment secrets", async () => {
+test("D172 deployment validates live bank data and Pay boundary without payment secrets", async () => {
   const workflow = await source("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
+  assert.match(workflow, /D172: freeze canonical money and acquiring sources/);
+  assert.match(workflow, /ARTHELLO_D172_PRODUCTION=VERIFIED/);
   assert.match(workflow, /bank_accounts/);
   assert.match(workflow, /balance_minor is not null/);
   assert.match(workflow, /eligiblePayAdministrators/);

@@ -508,9 +508,9 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
           ) : routedActive === "registry" ? (
             <RegistryWorkspace notify={setNotice} capabilities={registryAccess} />
           ) : routedActive === "finance" ? (
-            <FinanceWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} selectedBranch={selectedBranch} branchName={branches.find((branch) => branch.id === selectedBranch)?.name ?? ""} focusId={moduleFocus?.module === "finance" ? moduleFocus.id : undefined} />
+            <FinanceWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenIntegrations={() => openModule("integrations")} selectedBranch={selectedBranch} branchName={branches.find((branch) => branch.id === selectedBranch)?.name ?? ""} focusId={moduleFocus?.module === "finance" ? moduleFocus.id : undefined} />
           ) : routedActive === "acquiring" ? (
-            <AcquiringWorkspace notify={setNotice} onOpenIntegrations={() => openModule("integrations")} />
+            <AcquiringWorkspace notify={setNotice} />
           ) : routedActive === "sales" ? (
             <SalesWorkspace workspace="sales" role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenFinance={() => openModule("finance")} onOpenIntegrations={() => openModule("integrations")} focusId={moduleFocus?.module === "sales" ? moduleFocus.id : undefined} />
           ) : routedActive === "clients" ? (

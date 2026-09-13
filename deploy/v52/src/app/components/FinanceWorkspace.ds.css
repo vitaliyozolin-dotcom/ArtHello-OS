@@ -469,7 +469,8 @@
   }
 }
 
-/* D066_TOCHKA_FINANCE_BANK_VISIBILITY */
+/* D066_TOCHKA_FINANCE_BANK_VISIBILITY · superseded placement retained for patch identity */
+/* D172_CANONICAL_MONEY_SOURCE */
 .ahFinanceBankPanel { display: grid; gap: 0; }
 .ahFinanceBankGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; border-top: 1px solid var(--ah-color-border); padding: 12px 14px 14px; }
 .ahFinanceBankAccount { display: grid; gap: 8px; min-width: 0; border: 1px solid var(--ah-color-border); border-radius: 14px; background: var(--ah-color-surface-soft); padding: 12px; }
@@ -477,8 +478,28 @@
 .ahFinanceBankAccount strong { font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
 .ahFinanceBankAccount span, .ahFinanceBankAccount small { color: var(--ah-color-text-secondary); font-size: 11px; line-height: 16px; }
 .ahFinanceBankAccount b { font-size: 18px; line-height: 22px; font-weight: 720; }
+.ahFinanceBankBoundary { margin: 0; border-top: 1px solid var(--ah-color-border); padding: 12px 14px; color: var(--ah-color-text-secondary); font-size: 12px; line-height: 18px; }
+.ahFinanceBankWorkspace { align-items: start; }
+.ahFinanceBankOperationsPanel { grid-column: 1 / -1; }
+.ahFinanceBankTotals { display: flex; flex-wrap: wrap; gap: 8px 20px; border-block: 1px solid var(--ah-color-border); padding: 12px 14px; color: var(--ah-color-text-secondary); font-size: 12px; }
+.ahFinanceBankTotals span { display: flex; gap: 6px; }
+.ahFinanceBankTotals strong { color: var(--ah-color-text-primary); }
+.ahFinanceBankSyncPanel { grid-column: 1 / -1; }
+.ahFinanceBankSyncList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 14px 14px; }
+.ahFinanceBankSyncList article { min-width: 0; border: 1px solid var(--ah-color-border); border-radius: 14px; padding: 14px; }
+.ahFinanceBankSyncList header { display: flex; align-items: center; gap: 8px; }
+.ahFinanceBankSyncList header > span { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 999px; }
+.ahFinanceBankSyncList .isReady { background: var(--ah-color-success); }
+.ahFinanceBankSyncList .isWaiting { background: #d59440; }
+.ahFinanceBankSyncList .isError { background: var(--ah-color-danger); }
+.ahFinanceBankSyncList header em { margin-left: auto; color: var(--ah-color-text-secondary); font-size: 11px; font-style: normal; }
+.ahFinanceBankSyncList dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0 0; }
+.ahFinanceBankSyncList dl div { display: grid; gap: 4px; min-width: 0; }
+.ahFinanceBankSyncList dt { color: var(--ah-color-text-secondary); font-size: 10px; }
+.ahFinanceBankSyncList dd { margin: 0; font-size: 11px; overflow-wrap: anywhere; }
+.ahFinanceBankSyncFooter { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--ah-color-border); padding: 12px 14px; color: var(--ah-color-text-secondary); font-size: 12px; }
 @media (max-width: 1024px) { .ahFinanceBankGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 767px) { .ahFinanceBankGrid { grid-template-columns: 1fr; padding: 10px 12px 12px; } .ahFinanceBankAccount { padding: 12px; } }
+@media (max-width: 767px) { .ahFinanceBankGrid, .ahFinanceBankSyncList { grid-template-columns: 1fr; padding: 10px 12px 12px; } .ahFinanceBankAccount { padding: 12px; } .ahFinanceBankTotals, .ahFinanceBankSyncFooter { align-items: stretch; flex-direction: column; } .ahFinanceBankSyncList dl { grid-template-columns: 1fr; } }
 
 /* D069_FINANCE_OPERATION_ALLOCATION */
 /* D069_FINANCE_OPERATION_ALLOCATION_SCOPED */

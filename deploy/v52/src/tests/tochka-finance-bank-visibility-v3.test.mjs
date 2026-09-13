@@ -86,32 +86,36 @@ test("D-066 imports a documented Tochka transaction without transactionId", asyn
   assert.equal(operation.amountMinor, 120000);
 });
 
-test("D-066 bank source remains connected while D130 hides shared legal-entity balances from branch reports", async () => {
+test("D-066 bank source remains connected while D172 exposes it only as a labelled group fact in Money", async () => {
   const source = await readFile(new URL("../app/api/finance/route.ts", import.meta.url), "utf8");
   const patched = patchD066FinanceRoute(source);
   assert.match(patched, /bankAccountsView/);
   assert.match(patched, /rubBalanceMinor/);
   assert.match(patched, /const openingBalanceMinor = 0;/, "bank balance must not silently redefine forecast opening balance");
-  assert.match(patched, /const bankAccountsView: typeof sourceBankAccounts = \[\];/);
-  assert.match(patched, /общий остаток юрлица не включён/);
+  assert.match(patched, /D172_CANONICAL_MONEY_SOURCE/);
+  assert.match(patched, /bankAccountsView = sourceBankAccounts\.map/);
+  assert.match(patched, /не являются остатком выбранного филиала/);
   const start = patched.indexOf("db.select({\n        id: bankAccounts.id");
   const end = patched.indexOf("}).from(bankAccounts)", start);
   assert.ok(start >= 0 && end > start);
-  assert.doesNotMatch(patched.slice(start, end), /providerAccountId:/);
+  assert.match(patched.slice(start, end), /providerAccountId:/);
   assert.equal(patchD066FinanceRoute(patched), patched);
 });
 
-test("D-066 finance UI adds a bank panel without changing the four-KPI contract", async () => {
+test("D172 Money UI retains the bank panel and binds the four KPIs to bank facts", async () => {
   const [workspaceSource, cssSource] = await Promise.all([
     readFile(new URL("../app/components/FinanceWorkspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/FinanceWorkspace.ds.css", import.meta.url), "utf8"),
   ]);
   const workspace = patchD066FinanceWorkspace(workspaceSource);
   const css = patchD066FinanceCss(cssSource);
-  assert.match(workspace, /Счета Точки и текущие остатки/);
+  assert.match(workspace, /Счета и текущие остатки/);
   assert.match(workspace, /data\.bankAccounts\.map/);
   const kpiBlock = workspace.slice(workspace.indexOf('<div className="ahFinanceKpis">'), workspace.indexOf('</div>', workspace.indexOf('<div className="ahFinanceKpis">')) + 6);
   assert.equal((kpiBlock.match(/<KpiCard/g) ?? []).length, 4);
+  assert.match(kpiBlock, /data\.bankSummary\.incomingMinor/);
+  assert.match(kpiBlock, /data\.bankSummary\.outgoingMinor/);
+  assert.match(kpiBlock, /data\.bankSummary\.transactionCount/);
   assert.match(css, /D066_TOCHKA_FINANCE_BANK_VISIBILITY/);
   assert.match(css, /ahFinanceBankGrid/);
   assert.match(cssSource, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);

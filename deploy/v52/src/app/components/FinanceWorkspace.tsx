@@ -58,6 +58,9 @@ type FinanceBankAccount = {
   id: string;
   connectionId: string;
   legalEntityId: string;
+  providerAccountId: string;
+  provider: string;
+  legalEntityName: string;
   maskedAccount: string;
   name: string;
   currency: string;
@@ -65,6 +68,38 @@ type FinanceBankAccount = {
   balanceMinor: number | null;
   balanceAsOf: string;
   syncedAt: string;
+};
+
+type FinanceBankOperation = {
+  id: string;
+  provider: string;
+  accountName: string;
+  maskedAccount: string;
+  legalEntityName: string;
+  operationDate: string;
+  direction: string;
+  amountMinor: number;
+  currency: string;
+  status: string;
+  documentNumber: string;
+  transactionType: string;
+  description: string;
+  counterpartyName: string;
+  importedAt: string;
+  allocated: boolean;
+};
+
+type FinanceBankSynchronization = {
+  id: string;
+  system: string;
+  status: string;
+  enabled: boolean;
+  verified: boolean;
+  lastSuccessAt: string;
+  nextSyncAt: string;
+  receivedCount: number;
+  acceptedCount: number;
+  errorCount: number;
 };
 
 type FinanceData = {
@@ -78,7 +113,11 @@ type FinanceData = {
   articlePermissions: { canEdit: boolean; canApprove: boolean };
   classificationPermissions: { canEdit: boolean; canReviewUnassigned: boolean };
   bankAccounts: FinanceBankAccount[];
-  bankSummary: { accountCount: number; accountsWithBalance: number; rubBalanceMinor: number; latestSyncedAt: string };
+  bankOperations: FinanceBankOperation[];
+  bankMonthly: Array<{ period: string; transactionCount: number; incomingMinor: number; outgoingMinor: number; netMinor: number }>;
+  bankSynchronization: FinanceBankSynchronization[];
+  bankSummary: { period: string; transactionCount: number; incomingMinor: number; outgoingMinor: number; netMinor: number; accountCount: number; accountsWithBalance: number; rubBalanceMinor: number; statementCount: number; latestSyncedAt: string };
+  bankBoundary: string;
   accruals: Array<{ id: string; period: string; contour: string; recordsCount: number; accrualMinor: number; paidMinor: number; debtMinor: number; debtCases: number; sourceFile: string; sourceSheet: string; dataQuality: string }>;
   budgets: Array<{ id: string; period: string; line: string; planMinor: number; scenario: string; assumption: string; sourceType: string }>;
   payroll: Array<{ id: string; period: string; amountMinor: number; scope: string; sourceSheet: string; dataQuality: string }>;
@@ -111,13 +150,14 @@ type ClassificationDraft = {
   cfrEntityId: string;
 };
 
-type Tab = "articles" | "register" | "cashflow" | "pnl" | "plan" | "debts" | "reconciliation";
+type Tab = "bank" | "articles" | "register" | "cashflow" | "pnl" | "plan" | "debts" | "reconciliation";
 
 const tabs: Array<{ id: Tab; label: string }> = [
-  { id: "register", label: "Реестр" },
+  { id: "bank", label: "Банк" },
+  { id: "register", label: "Разнесение" },
   { id: "articles", label: "Статьи" },
-  { id: "cashflow", label: "ДДС" },
-  { id: "pnl", label: "ОПиУ" },
+  { id: "cashflow", label: "ДДС филиала" },
+  { id: "pnl", label: "ОПиУ филиала" },
   { id: "plan", label: "План и прогноз" },
   { id: "debts", label: "Начисления и долги" },
   { id: "reconciliation", label: "Сверка" },
@@ -145,12 +185,19 @@ const bankMoney = (minor: number | null, currency: string) => {
 };
 const signedRubles = (minor: number) => `${minor > 0 ? "+" : ""}${rubles(minor)}`;
 const shortMoney = (minor: number) => `${(minor / 100000000).toFixed(2).replace(".", ",")} млн`;
+const isIncomingBankOperation = (direction: string) => /credit|incoming|приход|поступ|вход/i.test(direction);
+const bankSyncDate = (value: string) => {
+  if (!value) return "Нет успешной синхронизации";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString("ru-RU", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+};
 
-export function FinanceWorkspace({ role, notify, onTasksChanged, selectedBranch, branchName, focusId }: { role: string; notify: (message: string) => void; onTasksChanged: () => void; selectedBranch: string; branchName: string; focusId?: string }) {
+export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrations, selectedBranch, branchName, focusId }: { role: string; notify: (message: string) => void; onTasksChanged: () => void; onOpenIntegrations: () => void; selectedBranch: string; branchName: string; focusId?: string }) {
   const [data, setData] = useState<FinanceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<Tab>("register");
+  const [tab, setTab] = useState<Tab>("bank");
   const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("Все направления");
@@ -345,17 +392,17 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, selectedBranch,
   return (
     <PageContainer className="ahFinancePage">
       <PageHeader
-        eyebrow={`ДЕНЬГИ · ${data.branch.name.toLocaleUpperCase("ru")}`}
-        title={`Финансы · ${branchName || data.branch.name}`}
-        description={`Отчёт только по выбранному филиалу. Учёт ведётся с ${new Date(`${data.accountingStartDate}T00:00:00Z`).toLocaleDateString("ru-RU")}; общий отчёт отключён.`}
+        eyebrow="БАНКОВСКИЙ ФАКТ · УПРАВЛЕНЧЕСКИЙ УЧЁТ"
+        title="Деньги"
+        description={`Счета, остатки и банковские операции группы — здесь. ДДС и ОПиУ ведутся отдельно по филиалу «${branchName || data.branch.name}».`}
         actions={<Button variant="primary" onClick={() => { setTab("reconciliation"); setSelected(null); }}>Расхождения · {data.summary.openIssues}</Button>}
       />
 
       <div className="ahFinanceBoundary">
-        <strong>ФИЛИАЛ · {data.branch.name}</strong>
-        <span>В отчёт входят только операции с подтверждённым филиальным ключом.</span>
-        <b>ПРОЕКЦИЯ</b>
-        <span>{data.sourcePolicy.bank}</span>
+        <strong>БАНК · ГРУППА</strong>
+        <span>Один источник показателей: неизменяемые операции банка за выбранный месяц.</span>
+        <b>УПРАВЛЕНЧЕСКИЙ УЧЁТ · {data.branch.name}</b>
+        <span>Разнесение по статьям и филиалу показано отдельно и не меняет банковский итог.</span>
       </div>
 
       <label className="ahFinancePeriod ahFinancePeriodMobile">
@@ -366,27 +413,29 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, selectedBranch,
       </label>
 
       <div className="ahFinanceKpis">
-        <KpiCard label={`Поступления · ${financePeriodLabel(period)}`} value={rubles(data.summary.receiptsMinor)} note="сверено с ОДДС" onClick={() => setTab("cashflow")} />
-        <KpiCard label="Списания" value={rubles(data.summary.outflowsMinor)} note="сверено с ОДДС" onClick={() => setTab("cashflow")} />
-        <KpiCard label="Чистый денежный поток" value={signedRubles(data.summary.netMinor)} note={data.checks.length ? "контрольная модель рассчитана" : "проверок пока нет"} onClick={() => setTab("cashflow")} className={data.summary.netMinor < 0 ? "ahFinanceKpiRisk" : undefined} />
-        <KpiCard label="Задолженность по оплатам" value={rubles(data.summary.debtMinor)} note={`обезличено · ${data.accruals.reduce((sum, row) => sum + row.debtCases, 0)} случаев`} onClick={() => setTab("debts")} className={data.summary.debtMinor > 0 ? "ahFinanceKpiWarning" : undefined} />
+        <KpiCard label={`Поступления · ${financePeriodLabel(period)}`} value={rubles(data.bankSummary.incomingMinor)} note="единый банковский факт" onClick={() => setTab("bank")} />
+        <KpiCard label="Списания" value={rubles(data.bankSummary.outgoingMinor)} note="единый банковский факт" onClick={() => setTab("bank")} />
+        <KpiCard label="Чистый денежный поток" value={signedRubles(data.bankSummary.netMinor)} note="поступления минус списания" onClick={() => setTab("bank")} className={data.bankSummary.netMinor < 0 ? "ahFinanceKpiRisk" : undefined} />
+        <KpiCard label="Банковские операции" value={data.bankSummary.transactionCount} note={`за ${financePeriodLabel(period).toLocaleLowerCase("ru-RU")}`} onClick={() => setTab("bank")} />
       </div>
 
+      {/* D066_TOCHKA_FINANCE_BANK_VISIBILITY is retained as historical patch identity. */}
       {data.bankAccounts.length ? (
-        <section className="finance-panel ahFinanceBankPanel" data-d066-marker="D066_TOCHKA_FINANCE_BANK_VISIBILITY">
+        <section className="finance-panel ahFinanceBankPanel" data-d172-marker="D172_CANONICAL_MONEY_SOURCE">
           <div className="finance-panel-head">
-            <div><p>Банк · факт</p><h2>Счета Точки и текущие остатки</h2></div>
+            <div><p>Банк · юридические лица группы</p><h2>Счета и текущие остатки</h2></div>
             <span className="source-pill">{data.bankSummary.accountsWithBalance ? `${rubles(data.bankSummary.rubBalanceMinor)} · ${data.bankAccounts.length} счетов` : `${data.bankAccounts.length} счетов · остатки не переданы`}</span>
           </div>
           <div className="ahFinanceBankGrid">
             {data.bankAccounts.map((account) => (
               <article key={account.id} className="ahFinanceBankAccount">
-                <div><strong>{account.name || "Расчётный счёт"}</strong><span>{account.maskedAccount} · {account.currency}</span></div>
+                <div><strong>{account.name || "Расчётный счёт"}</strong><span>{account.provider} · {account.maskedAccount} · {account.currency}</span></div>
                 <b>{bankMoney(account.balanceMinor, account.currency)}</b>
-                <small>{account.balanceAsOf ? `Остаток на ${new Date(`${account.balanceAsOf}T00:00:00Z`).toLocaleDateString("ru-RU")}` : "Дата остатка не передана"}</small>
+                <small>{account.legalEntityName} · {account.balanceAsOf ? `остаток на ${new Date(`${account.balanceAsOf}T00:00:00Z`).toLocaleDateString("ru-RU")}` : "дата остатка не передана"}</small>
               </article>
             ))}
           </div>
+          <p className="ahFinanceBankBoundary">{data.bankBoundary}</p>
         </section>
       ) : null}
 
@@ -395,10 +444,26 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, selectedBranch,
         <label className="ahFinancePeriod ahFinancePeriodDesktop"><span>Период</span><select aria-label="Месяц финансового отчёта" value={period} onChange={(event) => setPeriod(event.target.value)}>{periodOptions.map((value) => <option key={value} value={value}>{financePeriodLabel(value)}</option>)}</select></label>
       </div>
 
+      {tab === "bank" ? <div className="finance-two-column ahFinanceBankWorkspace">
+        <section className="finance-panel ahFinanceBankOperationsPanel">
+          <div className="finance-panel-head"><div><p>Единый банковский факт · {financePeriodLabel(period)}</p><h2>Банковские операции</h2></div><span className="finance-count">{data.bankSummary.transactionCount} операций</span></div>
+          <div className="ahFinanceBankTotals"><span>Поступления <strong>{rubles(data.bankSummary.incomingMinor)}</strong></span><span>Списания <strong>{rubles(data.bankSummary.outgoingMinor)}</strong></span><span>Чистый поток <strong>{signedRubles(data.bankSummary.netMinor)}</strong></span></div>
+          {data.bankOperations.length ? <div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Дата</th><th>Контрагент и назначение</th><th>Счёт</th><th>Сумма</th><th>Разнесение</th></tr></thead><tbody>{data.bankOperations.map((operation) => {
+            const credit = isIncomingBankOperation(operation.direction);
+            return <tr key={operation.id}><td>{new Date(`${operation.operationDate}T00:00:00Z`).toLocaleDateString("ru-RU")}</td><td><strong>{operation.counterpartyName || operation.transactionType || "Банковская операция"}</strong><small>{operation.description || "Назначение не передано банком"}</small></td><td><strong>{operation.accountName}</strong><small>{operation.provider} · {operation.maskedAccount || operation.legalEntityName}</small></td><td className="money-cell">{credit ? "+" : "−"}{bankMoney(Math.abs(operation.amountMinor), operation.currency)}</td><td><span className={operation.allocated ? "quality-ok" : "quality-warn"}>{operation.allocated ? "Разнесено" : "Ожидает разнесения"}</span></td></tr>;
+          })}</tbody></table></div> : <EmptyState title="Банковских операций за этот месяц нет" description="Здесь показываются только неизменяемые факты из банковской выписки." density="compact" />}
+        </section>
+        <section className="finance-panel ahFinanceBankSyncPanel">
+          <div className="finance-panel-head"><div><p>Банк · только чтение</p><h2>Синхронизация</h2></div><span className="source-pill">{data.bankSummary.statementCount} пакетов выписки за период</span></div>
+          {data.bankSynchronization.length ? <div className="ahFinanceBankSyncList">{data.bankSynchronization.map((item) => <article key={item.id}><header><span className={item.errorCount ? "isError" : item.verified ? "isReady" : "isWaiting"} /><strong>{item.system}</strong><em>{item.status}</em></header><dl><div><dt>Последний успех</dt><dd>{bankSyncDate(item.lastSuccessAt)}</dd></div><div><dt>Следующий запуск</dt><dd>{bankSyncDate(item.nextSyncAt)}</dd></div><div><dt>Принято</dt><dd>{item.acceptedCount} из {item.receivedCount}</dd></div></dl></article>)}</div> : <EmptyState title="Банковское подключение не найдено" description="Проверьте настройки интеграции банка." density="compact" />}
+          <div className="ahFinanceBankSyncFooter"><span>Обновлено: {bankSyncDate(data.bankSummary.latestSyncedAt)}</span><Button variant="secondary" onClick={onOpenIntegrations}>Настройки подключения</Button></div>
+        </section>
+      </div> : null}
+
       {tab === "articles" ? <FinanceArticlesWorkspace key={`${period}:${data.articleCatalog.revision}`} catalog={data.articleCatalog} permissions={data.articlePermissions} operations={data.operations} period={period} busy={Boolean(busy)} action={action} showOperations={(ids) => { setPreviewIds(ids); setArticleFilter("unassigned"); setDirection("Все направления"); setQuery(""); setTab("register"); }} /> : null}
       {tab === "register" ? (
         <div className="finance-panel">
-          <div className="finance-panel-head"><div><p>Ежедневный реестр</p><h2>Операции периода</h2></div><span className="finance-count">{filteredOperations.length} записей</span></div>
+          <div className="finance-panel-head"><div><p>Управленческий учёт филиала · не банковский итог</p><h2>Разнесение операций</h2></div><span className="finance-count">{filteredOperations.length} разнесено</span></div>
           <div className="finance-toolbar"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Контрагент, назначение, статья, договор…" aria-label="Поиск финансовых операций" /><select value={direction} onChange={(event) => setDirection(event.target.value)}><option>Все направления</option><option>Поступление</option><option>Списание</option></select><select aria-label="Разнесение по статье" value={articleFilter} onChange={(event) => { setArticleFilter(event.target.value); setPreviewIds(null); }}><option value="all">Все статьи</option><option value="unassigned">Без статьи · {data.operations.filter(op => op.period === period && !operationArticle(op)).length}</option>{[...new Set(data.operations.filter(op => op.period === period).map(operationArticle).filter(Boolean))].sort().map(name => <option key={name} value={`article:${name}`}>{name}</option>)}</select>{previewIds ? <Button onClick={() => setPreviewIds(null)}>Сбросить подбор</Button> : null}<span>Банковский факт неизменяем · разнесение хранится отдельно</span></div>
           {data.classificationPermissions.canReviewUnassigned && reviewOperations.length ? <section className="finance-panel"><div className="finance-panel-head"><div><p>Отдельная очередь · не входит в отчёт филиала</p><h2>Требует разбора</h2></div><span className="finance-count">{reviewOperations.length} записей</span></div><div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Операция</th><th>Дата</th><th>Направление</th><th>Контрагент</th><th>Сумма</th><th>Действие</th></tr></thead><tbody>{reviewOperations.map((operation) => <tr key={operation.id} tabIndex={0} aria-label={`Разнести ${recordLabel("операцию", operation.id)}`} onClick={() => openOperation(operation)} onKeyDown={(event) => handleOperationKey(event, operation)}><td><strong>{recordLabel("Операция", operation.id)}</strong><small>{operation.bankDetails?.description || operation.sourceFile || "Банковский факт"}</small></td><td>{new Date(`${operation.operationDate}T00:00:00Z`).toLocaleDateString("ru-RU")}</td><td>{operation.direction}</td><td>{operation.bankDetails?.counterpartyName || operation.counterpartyLabel || "Не указан"}</td><td className="money-cell">{operation.direction === "Поступление" ? "+" : "−"}{rubles(operation.amountMinor)}</td><td><Button onClick={() => openOperation(operation)}>Разнести</Button></td></tr>)}</tbody></table></div></section> : null}
           {filteredOperations.length ? <div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Операция</th><th>Дата</th><th>Направление</th><th>Статья</th><th>Контрагент</th><th>Сумма</th><th>Контроль</th></tr></thead><tbody>
@@ -407,10 +472,10 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, selectedBranch,
         </div>
       ) : null}
 
-      {tab === "cashflow" ? <section className="finance-panel"><h2>ДДС по статьям · {financePeriodLabel(period)}</h2><div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Статья</th><th>Операций</th><th>Поступления</th><th>Списания</th></tr></thead><tbody>{cashflowBreakdown(data.operations, period).map(row => <tr key={row.article}><td><Button onClick={() => { setArticleFilter(row.article === "Без статьи" ? "unassigned" : `article:${row.article}`); setPreviewIds(null); setQuery(""); setDirection("Все направления"); setTab("register"); }}>{row.article}</Button></td><td>{row.count}</td><td>{rubles(row.receiptsMinor)}</td><td>{rubles(row.outflowsMinor)}</td></tr>)}</tbody><tfoot><tr><th>Итого</th><td>{data.operations.filter(op => op.period === period).length}</td><td>{rubles(data.summary.receiptsMinor)}</td><td>{rubles(data.summary.outflowsMinor)}</td></tr></tfoot></table></div></section> : null}
+      {tab === "cashflow" ? <section className="finance-panel"><div className="finance-panel-head"><div><p>Управленческое разнесение · {data.branch.name}</p><h2>ДДС филиала по статьям · {financePeriodLabel(period)}</h2></div><span className="projection-pill">НЕ БАНКОВСКИЙ ИТОГ ГРУППЫ</span></div><div className="finance-table-wrap"><table className="finance-table"><thead><tr><th>Статья</th><th>Операций</th><th>Поступления</th><th>Списания</th></tr></thead><tbody>{cashflowBreakdown(data.operations, period).map(row => <tr key={row.article}><td><Button onClick={() => { setArticleFilter(row.article === "Без статьи" ? "unassigned" : `article:${row.article}`); setPreviewIds(null); setQuery(""); setDirection("Все направления"); setTab("register"); }}>{row.article}</Button></td><td>{row.count}</td><td>{rubles(row.receiptsMinor)}</td><td>{rubles(row.outflowsMinor)}</td></tr>)}</tbody><tfoot><tr><th>Итого разнесено</th><td>{data.operations.filter(op => op.period === period).length}</td><td>{rubles(data.summary.receiptsMinor)}</td><td>{rubles(data.summary.outflowsMinor)}</td></tr></tfoot></table></div></section> : null}
       {tab === "cashflow" ? (
         <div className="finance-two-column">
-          <article className="finance-panel cashflow-card"><div className="finance-panel-head"><div><p>Движение денег</p><h2>Поступления и списания</h2></div><span className="source-pill">Исходные таблицы · факт</span></div>
+          <article className="finance-panel cashflow-card"><div className="finance-panel-head"><div><p>Управленческий ДДС филиала</p><h2>Разнесённые поступления и списания</h2></div><span className="projection-pill">ОТДЕЛЬНО ОТ БАНКА</span></div>
             <div className="finance-bars">{data.monthly.map((month) => <button key={month.period} className={month.period === period ? "active" : ""} onClick={() => setPeriod(month.period)}><div><i className="income-bar" style={{ height: `${Math.max(10, month.receiptsMinor / maxMonthly * 100)}%` }} /><i className="expense-bar" style={{ height: `${Math.max(10, month.outflowsMinor / maxMonthly * 100)}%` }} /></div><span>{financePeriodLabel(month.period).split(" ")[0]}</span><small className={month.netMinor >= 0 ? "positive-text" : "negative-text"}>{signedRubles(month.netMinor)}</small></button>)}</div>
             <div className="finance-legend"><span><i className="income-dot" />Поступления</span><span><i className="expense-dot" />Списания</span></div>
           </article>

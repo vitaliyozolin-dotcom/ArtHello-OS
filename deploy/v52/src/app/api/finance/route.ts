@@ -7,10 +7,13 @@ import {
   financeCorrections,
   financialOperations,
   bankAccounts,
+  bankStatementImports,
   bankTransactions,
+  integrationConnections,
   organizationBranches,
   userBranchAccess,
 } from "../../../db/schema";
+import { bankOperationPeriod, summarizeBankMonths, summarizeBankPeriod } from "../../../lib/bank-facts";
 import { calculateForecast, summarizeCash, summarizePnl, type FinanceBudgetShape } from "../../../lib/finance";
 import { FINANCE_ACCOUNTING_START_DATE, FINANCE_ACCOUNTING_START_PERIOD, requireFinanceBranch, scopeFinanceOperations } from "../../../lib/finance-branch-scope";
 import { canAccessApi } from "../../../lib/access-policy";
@@ -53,12 +56,13 @@ export async function GET(request: Request) {
     }
     const { catalog: articleCatalog } = await loadArticleCatalog(env.DB);
     const mode = await getSystemDataMode();
-    const [storedOperations, storedBankAccounts, storedBankTransactions, corrections, entityRows, allTasks] = await Promise.all([
+    const [storedOperations, storedBankAccounts, storedBankTransactions, storedBankStatements, connectionRows, corrections, entityRows, allTasks] = await Promise.all([
       db.select().from(financialOperations).orderBy(desc(financialOperations.operationDate), asc(financialOperations.id)),
       db.select({
         id: bankAccounts.id,
         connectionId: bankAccounts.connectionId,
         legalEntityId: bankAccounts.legalEntityId,
+        providerAccountId: bankAccounts.providerAccountId,
         maskedAccount: bankAccounts.maskedAccount,
         name: bankAccounts.name,
         currency: bankAccounts.currency,
@@ -68,11 +72,17 @@ export async function GET(request: Request) {
         syncedAt: bankAccounts.syncedAt,
       }).from(bankAccounts).orderBy(asc(bankAccounts.legalEntityId), asc(bankAccounts.maskedAccount)),
       db.select({
+        id: bankTransactions.id,
+        connectionId: bankTransactions.connectionId,
+        legalEntityId: bankTransactions.legalEntityId,
+        providerAccountId: bankTransactions.providerAccountId,
+        providerStatementId: bankTransactions.providerStatementId,
         financialOperationId: bankTransactions.financialOperationId,
         operationDate: bankTransactions.operationDate,
         direction: bankTransactions.direction,
         amountMinor: bankTransactions.amountMinor,
         currency: bankTransactions.currency,
+        status: bankTransactions.status,
         documentNumber: bankTransactions.documentNumber,
         transactionType: bankTransactions.transactionType,
         description: bankTransactions.description,
@@ -80,7 +90,9 @@ export async function GET(request: Request) {
         counterpartyInn: bankTransactions.counterpartyInn,
         counterpartyKpp: bankTransactions.counterpartyKpp,
         importedAt: bankTransactions.importedAt,
-      }).from(bankTransactions),
+      }).from(bankTransactions).orderBy(desc(bankTransactions.operationDate), desc(bankTransactions.importedAt)),
+      db.select().from(bankStatementImports).orderBy(desc(bankStatementImports.fetchedAt)),
+      db.select().from(integrationConnections).orderBy(asc(integrationConnections.system)),
       db.select().from(financeCorrections).orderBy(desc(financeCorrections.id)).limit(50),
       db.select({ id: entities.id, displayName: entities.displayName }).from(entities),
       selectVisibleTasks(db, context),
@@ -130,24 +142,26 @@ export async function GET(request: Request) {
     const scopedIssues: Array<{ relatedTaskId: number | null; status: string }> = [];
     const operationIds = new Set(operations.map((operation) => operation.id));
     const scopedCorrections = corrections.filter((correction) => operationIds.has(correction.operationId));
-    const bankOperationCount = operations.filter((operation) => operation.sourceSystem === "BANK_TOCHKA_API").length;
     const sourceBankAccounts = storedBankAccounts.filter((account) => !account.connectionId.startsWith("TEST"));
-    // A legal-entity account may serve several branches, so its balance is not a
-    // branch balance and must not be displayed inside a branch report.
-    const bankAccountsView: typeof sourceBankAccounts = [];
-    const rubBankAccounts = bankAccountsView.filter((account) => account.currency === "RUB" && account.balanceMinor !== null);
-    const rubBalanceMinor = rubBankAccounts.reduce((sum, account) => sum + Number(account.balanceMinor ?? 0), 0);
-    const bankSummary = {
-      accountCount: bankAccountsView.length,
-      accountsWithBalance: bankAccountsView.filter((account) => account.balanceMinor !== null).length,
-      rubBalanceMinor,
-      latestSyncedAt: bankAccountsView.map((account) => account.syncedAt).filter(Boolean).sort().at(-1) ?? "",
-    };
-    // D066_TOCHKA_FINANCE_BANK_VISIBILITY: stored bank accounts are finance facts even with zero operations.
+    const sourceBankTransactions = storedBankTransactions.filter((transaction) => !transaction.connectionId.startsWith("TEST"));
+    const sourceBankStatements = storedBankStatements.filter((statement) => !statement.connectionId.startsWith("TEST"));
     const entityNames = Object.fromEntries(entityRows.map((entity) => [entity.id, entity.displayName]));
+    const accountByProvider = new Map(sourceBankAccounts.map((account) => [
+      `${account.connectionId}:${account.providerAccountId}`,
+      account,
+    ]));
+    // D066_TOCHKA_FINANCE_BANK_VISIBILITY is retained as historical patch identity.
+    // D172_CANONICAL_MONEY_SOURCE: group bank facts live only in Money. They are
+    // deliberately labelled as legal-entity totals and never as a branch balance.
+    const bankAccountsView = sourceBankAccounts.map((account) => ({
+      ...account,
+      provider: providerLabel(account.connectionId),
+      legalEntityName: entityNames[account.legalEntityId] || account.legalEntityId,
+    }));
     const requestedPeriod = new URL(request.url).searchParams.get("period");
     const periods = [...new Set([
       ...operations.flatMap((operation) => [operation.period, operation.accrualPeriod]),
+      ...sourceBankTransactions.map((operation) => bankOperationPeriod(operation.operationDate)),
       ...scopedAccruals.map((accrual) => accrual.period),
       ...budgets.map((budget) => budget.period),
       ...scopedPayroll.map((item) => item.period),
@@ -157,6 +171,53 @@ export async function GET(request: Request) {
     const selectedPeriod = requestedPeriod && periods.includes(requestedPeriod)
       ? requestedPeriod
       : periods.at(-1) ?? (requestedPeriod && requestedPeriod >= FINANCE_ACCOUNTING_START_PERIOD ? requestedPeriod : defaultPeriod);
+    const bankOperations = sourceBankTransactions
+      .filter((operation) => bankOperationPeriod(operation.operationDate) === selectedPeriod && operation.currency === "RUB")
+      .map((operation) => {
+        const account = accountByProvider.get(`${operation.connectionId}:${operation.providerAccountId}`);
+        return {
+          ...operation,
+          provider: providerLabel(operation.connectionId),
+          accountName: account?.name || "Банковский счёт",
+          maskedAccount: account?.maskedAccount || "",
+          legalEntityName: entityNames[operation.legalEntityId] || operation.legalEntityId,
+          allocated: Boolean(operation.financialOperationId),
+        };
+      });
+    const bankMonthly = summarizeBankMonths(sourceBankTransactions);
+    const bankPeriodSummary = summarizeBankPeriod(sourceBankTransactions, selectedPeriod);
+    const rubBankAccounts = bankAccountsView.filter((account) => account.currency === "RUB" && account.balanceMinor !== null);
+    const selectedStatements = sourceBankStatements.filter((statement) => (
+      bankOperationPeriod(statement.startDate) <= selectedPeriod && bankOperationPeriod(statement.endDate) >= selectedPeriod
+    ));
+    const latestSyncedAt = [
+      ...bankAccountsView.map((account) => account.syncedAt),
+      ...sourceBankStatements.map((statement) => statement.fetchedAt),
+    ].filter(Boolean).sort().at(-1) ?? "";
+    const bankSummary = {
+      ...bankPeriodSummary,
+      accountCount: bankAccountsView.length,
+      accountsWithBalance: rubBankAccounts.length,
+      rubBalanceMinor: rubBankAccounts.reduce((sum, account) => sum + Number(account.balanceMinor ?? 0), 0),
+      statementCount: selectedStatements.length,
+      latestSyncedAt,
+    };
+    const visibleConnections = new Set(sourceBankAccounts.map((account) => account.connectionId));
+    for (const id of ["INT-T-TOCHKA", "INT-T-TBANK"]) visibleConnections.add(id);
+    const bankSynchronization = connectionRows
+      .filter((row) => visibleConnections.has(row.id) || /банк|bank|точка|t-?bank/i.test(`${row.system} ${row.category}`))
+      .map((row) => ({
+        id: row.id,
+        system: row.system,
+        status: row.status,
+        enabled: Boolean(row.isEnabled),
+        verified: Boolean(row.verifiedTransfer),
+        lastSuccessAt: row.lastSuccessAt,
+        nextSyncAt: row.nextSyncAt,
+        receivedCount: row.receivedCount,
+        acceptedCount: row.acceptedCount,
+        errorCount: row.errorCount,
+      }));
     const cash = summarizeCash(cashOperations, selectedPeriod);
     const pnl = summarizePnl(pnlOperations, budgets, selectedPeriod);
     const openingBalanceMinor = 0;
@@ -199,7 +260,11 @@ export async function GET(request: Request) {
       },
       reviewOperations,
       bankAccounts: bankAccountsView,
+      bankOperations,
+      bankMonthly,
+      bankSynchronization,
       bankSummary,
+      bankBoundary: "Счета, остатки и банковские операции показаны по юридическим лицам группы и не являются остатком выбранного филиала. Это единый банковский факт для раздела «Деньги» и главной; исходящие платежи из ArtHello OS запрещены.",
       accruals: scopedAccruals,
       budgets,
       payroll: scopedPayroll,
@@ -217,9 +282,7 @@ export async function GET(request: Request) {
         payments: "Начисления без филиального ключа не включены",
         payroll: "Зарплатные агрегаты без филиального ключа не включены",
         bank: sourceBankAccounts.length
-          ? bankOperationCount
-            ? `Точка подключена · ${bankOperationCount} операций филиала; общий остаток юрлица не включён`
-            : "Точка подключена · операций выбранного филиала пока нет; общий остаток юрлица не включён"
+          ? `Банковский факт группы · ${bankSummary.transactionCount} операций за ${selectedPeriod}; управленческое разнесение филиала считается отдельно`
           : "Банковский источник не подключён",
         pnl: operations.length ? "Рабочая проекция из классифицированных операций" : "Нет данных для расчёта ОПиУ",
         budget: budgets.length ? "Бюджетный сценарий загружен" : "Утверждённый бюджет не подключён",
@@ -229,4 +292,10 @@ export async function GET(request: Request) {
     const message = error instanceof Error ? error.message : "Ошибка финансового контура";
     return Response.json({ error: message.includes("D1 binding") ? "Финансовая база ещё не подключена" : "Не удалось загрузить финансовый контур" }, { status: 503 });
   }
+}
+
+function providerLabel(connectionId: string) {
+  if (connectionId.includes("TOCHKA")) return "Точка";
+  if (connectionId.includes("TBANK")) return "Т‑Банк";
+  return "Банк";
 }

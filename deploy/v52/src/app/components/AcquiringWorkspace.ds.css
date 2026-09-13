@@ -44,6 +44,9 @@
 .ahAcquiringOperationMeta strong.debit { color: #8f5724; }
 .ahAcquiringOperationMeta span,.ahAcquiringOperationMeta small { color: var(--ah-text-secondary); font-size: 10px; }
 .ahAcquiringTextAction { margin-top: 14px; padding: 4px 0; }
+.ahAcquiringScopeList { display: grid; gap: 10px; margin-bottom: 18px; }
+.ahAcquiringScopeList p { margin: 0; border: 1px solid rgba(27,38,33,.08); border-radius: 12px; padding: 12px; background: var(--ah-color-surface-soft); color: var(--ah-text-secondary); font-size: 12px; line-height: 1.5; }
+.ahAcquiringScopeList strong { color: var(--ah-text-primary); }
 .ahAcquiringSearch { display: grid; grid-template-columns: auto minmax(200px,440px); gap: 12px; align-items: center; margin: -4px 0 12px; color: var(--ah-text-secondary); font-size: 12px; }
 .ahAcquiringSearch input { width: 100%; border: 1px solid rgba(27,38,33,.14); border-radius: 11px; padding: 10px 12px; background: #fff; color: inherit; font: inherit; }
 .ahAcquiringSyncList { display: grid; gap: 12px; }

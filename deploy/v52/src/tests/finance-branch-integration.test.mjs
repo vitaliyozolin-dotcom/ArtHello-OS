@@ -14,7 +14,10 @@ test("finance API and UI require an explicit branch and do not offer a consolida
   assert.match(route, /reviewOperations = canReviewUnassigned/);
   assert.match(route, /!operation\.objectEntityId && operation\.operationDate >= FINANCE_ACCOUNTING_START_DATE/);
   assert.match(route, /classificationPermissions/);
-  assert.match(route, /общий остаток юрлица не включён/);
+  assert.match(route, /D172_CANONICAL_MONEY_SOURCE/);
+  assert.match(route, /не являются остатком выбранного филиала/);
+  assert.match(workspace, /БАНК · ГРУППА/);
+  assert.match(workspace, /УПРАВЛЕНЧЕСКИЙ УЧЁТ/);
   assert.match(workspace, /Общий отчёт пока отключён/);
   assert.match(workspace, /branchId: selectedBranch/);
   assert.match(workspace, /Требует разбора/);

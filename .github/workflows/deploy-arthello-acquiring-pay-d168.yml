@@ -1,8 +1,8 @@
-# D168: publish the production Acquiring workspace and central Pay SSO.
+# D172: freeze the canonical Money source and the Acquiring/Pay boundary.
 # The hosted verifier builds the immutable image. The gateway only loads it,
 # takes a recoverable D1 volume snapshot, swaps one candidate and stages static
 # Pay assets. Existing secret-file mounts are reused without printing contents.
-name: Deploy ArtHello Acquiring and Pay D168
+name: Deploy ArtHello Money source and Acquiring boundary D172
 
 'on':
   workflow_run:
@@ -48,7 +48,7 @@ jobs:
       github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' &&
       github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1 &&
-      startsWith(github.event.workflow_run.head_commit.message, 'D168: publish production acquiring and Pay SSO')
+      startsWith(github.event.workflow_run.head_commit.message, 'D172: freeze canonical money and acquiring sources')
     runs-on:
       - self-hosted
       - linux
@@ -77,7 +77,7 @@ jobs:
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$TRIGGER_VERIFY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-          test "$(git log -1 --format=%s)" = "D168: publish production acquiring and Pay SSO"
+          test "$(git log -1 --format=%s)" = "D172: freeze canonical money and acquiring sources"
           current_main="$(curl --fail-with-body --silent --show-error --max-time 30 \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "Accept: application/vnd.github+json" \
@@ -108,7 +108,7 @@ jobs:
               (.runtimeFingerprintSha256|test("^[a-f0-9]{64}$"))
             ' "$evidence" >/dev/null
           gzip -t "$archive"
-          load_log="$RUNNER_TEMP/d168-docker-load.log"
+          load_log="$RUNNER_TEMP/d172-docker-load.log"
           if ! docker image load --input "$archive" >"$load_log" 2>&1; then
             sed -n '1,160p' "$load_log" >&2
             exit 1
@@ -125,7 +125,7 @@ jobs:
           test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$tree"
           test "$(docker image inspect "$image_id" --format '{{.Config.User}}')" = node
           printf 'image_id=%s\ntree=%s\n' "$image_id" "$tree" >> "$GITHUB_OUTPUT"
-          printf 'ARTHELLO_D168_HOSTED_IMAGE=VERIFIED id=%s runtime_fingerprint=%s\n' "$image_id" "$actual_fingerprint"
+          printf 'ARTHELLO_D172_HOSTED_IMAGE=VERIFIED id=%s runtime_fingerprint=%s\n' "$image_id" "$actual_fingerprint"
 
       - name: Snapshot, switch candidate and publish Pay assets
         id: publish
@@ -146,15 +146,15 @@ jobs:
           candidate="arthello-direct-$run_key"
           rollback_volume="arthello-rollback-$run_key"
           state_root="$HOME/.config/arthello/release-state"
-          work="$state_root/d168-$run_key"
+          work="$state_root/d172-$run_key"
           runtime_env="$work/runtime.env"
           route_before="$work/external-routes.before.caddy"
           route_after="$work/external-routes.after.caddy"
-          receipt="$state_root/production-d168-$RELEASE_SHA.json"
+          receipt="$state_root/production-d172-$RELEASE_SHA.json"
           asset_root="/data/arthello-pay-assets-$RELEASE_SHA"
           asset_stage="/data/.arthello-pay-assets-$run_key"
-          route_stage="/data/.external-routes.d168-$run_key"
-          route_backup="/data/external-routes.caddy.pre-d168-$run_key"
+          route_stage="/data/.external-routes.d172-$run_key"
+          route_backup="/data/external-routes.caddy.pre-d172-$run_key"
           mkdir -p "$work"
           chmod 0700 "$work"
           test ! -e "$receipt"
@@ -255,7 +255,7 @@ jobs:
             trap - EXIT INT TERM HUP
             if [ "$success" -ne 1 ]; then
               if [ "$activation_swapped" -eq 1 ]; then
-                docker run --rm --name "arthello-v52-activation-rollback-d168-$run_key" \
+                docker run --rm --name "arthello-v52-activation-rollback-d172-$run_key" \
                   --user 1002:1000 --network none --read-only --cap-drop ALL \
                   --security-opt no-new-privileges:true --pids-limit 16 --memory 64m --cpus 0.25 \
                   --entrypoint python3 \
@@ -301,7 +301,7 @@ jobs:
           test "$(docker run --rm --network none --user 0:0 --read-only --cap-drop ALL --cap-add DAC_OVERRIDE \
             --mount "type=volume,src=$rollback_volume,dst=/snapshot,readonly,volume-nocopy" \
             --entrypoint /bin/sh "$IMAGE_ID" -ceu 'find /snapshot -type f | wc -l')" -gt 0
-          printf 'ARTHELLO_D168_ROLLBACK_SNAPSHOT=VERIFIED volume=%s\n' "$rollback_volume"
+          printf 'ARTHELLO_D172_ROLLBACK_SNAPSHOT=VERIFIED volume=%s\n' "$rollback_volume"
 
           test "$(current_main)" = "$RELEASE_SHA"
           docker run -d --name "$candidate" --restart no --read-only \
@@ -353,7 +353,7 @@ jobs:
           print(json.dumps({'bankAccounts':accounts,'accountsWithBalances':balances,'bankTransactions':transactions,'eligiblePayAdministrators':eligible,'activePayGrants':grants},separators=(',',':')))
           PY
           jq -e '.bankAccounts>0 and .accountsWithBalances>0 and .eligiblePayAdministrators>0 and .activePayGrants>=.eligiblePayAdministrators' "$database_receipt" >/dev/null
-          printf 'ARTHELLO_D168_DATA_AND_PAY_GRANT=VERIFIED accounts=%s balances=%s admins=%s\n' \
+          printf 'ARTHELLO_D172_DATA_AND_PAY_GRANT=VERIFIED accounts=%s balances=%s admins=%s\n' \
             "$(jq -r .bankAccounts "$database_receipt")" "$(jq -r .accountsWithBalances "$database_receipt")" "$(jq -r .activePayGrants "$database_receipt")"
 
           pay_source="deploy/v52/public/pay-assets"
@@ -404,8 +404,8 @@ jobs:
           docker exec -i -e PUBLIC_URL="$PUBLIC_URL" -e PAY_URL="$PAY_URL" "$candidate" node - <<'NODE'
           const get=async(url,init={})=>{const response=await fetch(url,{...init,signal:AbortSignal.timeout(10000),headers:{'cache-control':'no-cache',...(init.headers||{})}});return {response,body:await response.text()}};
           const health=await get(process.env.PUBLIC_URL+'/api/health');
-          const root=await get(process.env.PUBLIC_URL+'/?release=d168');
-          const pay=await get(process.env.PAY_URL+'/?release=d168');
+          const root=await get(process.env.PUBLIC_URL+'/?release=d172');
+          const pay=await get(process.env.PAY_URL+'/?release=d172');
           const payApp=await get(process.env.PAY_URL+'/pay-assets/app.js');
           const payConfig=await get(process.env.PAY_URL+'/api/pay-sso/config');
           const payMe=await get(process.env.PAY_URL+'/api/auth/me');
@@ -425,7 +425,7 @@ jobs:
 
           test "$(current_main)" = "$RELEASE_SHA"
           activation_receipt="$work/bank-activation.json"
-          docker run --rm --name "arthello-v52-activation-writer-d168-$run_key" \
+          docker run --rm --name "arthello-v52-activation-writer-d172-$run_key" \
             --user 1002:1000 --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges:true --pids-limit 16 --memory 64m --cpus 0.25 \
             --entrypoint python3 \
@@ -449,7 +449,7 @@ jobs:
               })) process.exit(1);
             }).catch(() => process.exit(1));
           '
-          printf 'ARTHELLO_D168_TOCHKA_AUTOSYNC_ACTIVATION=VERIFIED\n'
+          printf 'ARTHELLO_D172_TOCHKA_AUTOSYNC_ACTIVATION=VERIFIED\n'
 
           test "$(current_main)" = "$RELEASE_SHA"
           restore_restart "$candidate"
@@ -460,7 +460,7 @@ jobs:
             --arg activationVolume "$activation_volume" \
             --arg route "$route_sha" --arg assets "$asset_root" --arg index "$index_sha" --arg app "$app_sha" --arg css "$css_sha" \
             --argjson data "$(cat "$database_receipt")" --argjson activation "$(cat "$activation_receipt")" '
-              {schemaVersion:1,state:"verified",decision:"D168",releaseSha:$release,sourceTree:$tree,imageId:$image,
+              {schemaVersion:1,state:"verified",decision:"D172",releaseSha:$release,sourceTree:$tree,imageId:$image,
                candidateContainerId:$candidate,previousContainerId:$previous,rollbackVolume:$rollback,
                bankActivationVolume:$activationVolume,bankAutosyncActivation:$activation,
                activeRouteSha256:$route,payAssetRoot:$assets,payAssetSha256:{"index.html":$index,"app.js":$app,"styles.css":$css},
@@ -472,7 +472,7 @@ jobs:
           rm -f "$runtime_env"
           trap - EXIT INT TERM HUP
           printf 'candidate=%s\nreceipt=%s\n' "$candidate" "$receipt" >> "$GITHUB_OUTPUT"
-          printf 'ARTHELLO_D168_PRODUCTION=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$candidate"
+          printf 'ARTHELLO_D172_PRODUCTION=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$candidate"
 
       - name: Publish production receipt summary
         if: success()
@@ -480,12 +480,14 @@ jobs:
         run: |
           set -Eeuo pipefail
           {
-            echo '## ArtHello production D168'
+            echo '## ArtHello production D172'
             echo
             echo "- Release: \`$RELEASE_SHA\`"
             echo "- ArtHello OS: $PUBLIC_URL"
             echo "- ArtHello Pay: $PAY_URL"
-            echo '- Bank accounts, balances and operations: verified in the retained production D1 database.'
+            echo '- Home and Money use the same monthly bank transaction source.'
+            echo '- Bank accounts, balances, operations and synchronization live only in Money.'
+            echo '- Acquiring contains only payment links, payments, refunds and receipts.'
             echo '- Existing ArtHello administrators received the isolated payment_operator system grant.'
             echo '- Pay login: central ArtHello OS one-time PKCE exchange.'
             echo '- Money acceptance and fiscalization: still disabled.'
