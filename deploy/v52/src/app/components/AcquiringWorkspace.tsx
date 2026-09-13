@@ -153,7 +153,7 @@ export function AcquiringWorkspace({ notify }: { notify: (value: string) => void
       actions={actions}
     />
 
-    <Card className="ahAcquiringBoundary"><span className="ahAcquiringLive" aria-hidden="true" /><div><strong>Единая граница разделов зафиксирована</strong><p>{data.boundary}</p></div><button type="button" onClick={() => openPay("payment")}>Открыть ArtHello Pay</button></Card>
+    <Card className="ahAcquiringBoundary"><span className="ahAcquiringLive" aria-hidden="true" /><div><strong>Единая граница разделов зафиксирована</strong><p>{data.boundary}</p></div><button type="button" onClick={() => openPay("payment-register")}>Открыть ArtHello Pay</button></Card>
 
     <section className="ahAcquiringKpis" aria-label="Показатели эквайринга">
       <KpiCard label="Ссылки на оплату" value={data.summary.paymentRequestCount} note={`${data.summary.activePaymentRequestCount} активных`} onClick={() => setTab("Ссылки и оплаты")} />
@@ -177,7 +177,7 @@ export function AcquiringWorkspace({ notify }: { notify: (value: string) => void
           <p><strong>В «Деньгах»:</strong> счета, остатки, банковские операции и синхронизация.</p>
           <p><strong>Вход администратора:</strong> только через ArtHello OS и отдельный доступ Pay.</p>
         </div>
-        <Button variant="primary" onClick={() => openPay("payment")}>Перейти в ArtHello Pay</Button>
+        <Button variant="primary" onClick={() => openPay("payment-register")}>Перейти в ArtHello Pay</Button>
       </Card>
     </div> : null}
 

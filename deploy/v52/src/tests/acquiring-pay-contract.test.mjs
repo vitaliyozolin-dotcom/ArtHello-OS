@@ -37,6 +37,7 @@ test("D172 keeps bank facts in Money and acquiring events in Acquiring", async (
   assert.doesNotMatch(workspace, />Новый счёт<\/Button>|>Оплата<\/Button>/);
   assert.match(workspace, /\/api\/pay-sso\/open/);
   assert.match(workspace, /destination === "create-link" \? "invoice" : "payment"/);
+  assert.doesNotMatch(workspace, /openPay\("invoice"\)|openPay\("payment"\)/);
 });
 
 test("Pay is entered only through central OS SSO and preserves launch action", async () => {
