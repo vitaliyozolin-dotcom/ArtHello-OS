@@ -38,6 +38,8 @@ export const moduleCatalog = [
   { id: "home", label: "Главная", group: "Рабочий день", status: "ready" },
   { id: "tasks", label: "Задачи", group: "Рабочий день", status: "ready" },
   { id: "finance", label: "Финансы", group: "Управление", status: "data" },
+  { id: "acquiring", label: "Эквайринг", group: "Управление", status: "data" },
+  { id: "pay", label: "ArtHello Pay", group: "Управление", status: "ready" },
   { id: "accounting", label: "Бухгалтерия и 1С", group: "Управление", status: "test" },
   { id: "registry", label: "Единые карточки", group: "Управление", status: "ready" },
   { id: "sales", label: "Продажи", group: "Управление", status: "test" },

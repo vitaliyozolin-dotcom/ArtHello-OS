@@ -29,6 +29,7 @@ export type AuthUser = {
   isAdministrative: boolean;
   isSystemOwner: boolean;
   canAccessMedical: boolean;
+  canAccessPay: boolean;
   jobTitle: string;
   allowedModules?: string[];
   favoriteModules: string[];
@@ -70,6 +71,7 @@ type AppAccessRow = {
   user_access_version: number;
   grant_access_version: number;
   medical_access_granted: number;
+  pay_access_granted: number;
 };
 
 export type AuthenticatedRequestContext = {
@@ -103,6 +105,7 @@ const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const TEMPORARY_PASSWORD_TTL_SECONDS = 48 * 60 * 60;
 const PBKDF2_ITERATIONS = 310_000;
 const ARTHELLO_SYSTEM_ID = "SYS-ARTHELLO-OS";
+export const PAY_SYSTEM_ID = "SYS-ARTHELLO-PAY";
 
 let authTablesPromise: Promise<void> | undefined;
 
@@ -288,6 +291,58 @@ export async function authenticate(loginValue: unknown, passwordValue: unknown):
     (token_hash,user_id,csrf_token,expires_at,access_version,created_at) VALUES (?,?,?,?,?,?)`)
     .bind(tokenHash, credential.user_id, csrf, nowSeconds() + SESSION_TTL_SECONDS, access.grant_access_version, nowSeconds()).run();
 
+  return { user: toAuthUser(credential, access), token, csrf };
+}
+
+/**
+ * Creates a domain-local ArtHello session after a short-lived, one-time SSO
+ * code was exchanged. The credential is never copied to the child system; its
+ * current OS access version is checked again before the session is minted.
+ */
+export async function issueFederatedAuthSession(
+  appUserIdValue: unknown,
+  expectedAccessVersion: number,
+): Promise<{ user: AuthUser; token: string; csrf: string }> {
+  await ensureAuthTables();
+  const appUserId = normalizeUserId(appUserIdValue);
+  if (!appUserId || !Number.isSafeInteger(expectedAccessVersion) || expectedAccessVersion < 1) {
+    throw new Error("Права доступа изменились. Начните вход заново");
+  }
+  const credential = await database().prepare(`SELECT user_id,login,display_name,role,password_salt,password_hash,
+      must_change_password,temporary_password_expires_at,failed_attempts,locked_until
+    FROM production_auth_credentials
+    WHERE user_id=? OR (?='USR-OWNER' AND user_id='AUTH-OWNER')
+    ORDER BY CASE WHEN user_id='AUTH-OWNER' THEN 0 ELSE 1 END LIMIT 1`)
+    .bind(appUserId, appUserId)
+    .first<CredentialRow>();
+  if (!credential) throw new Error("Учётная запись ArtHello OS не активирована");
+
+  const access = await loadAppAccessByAuthUserId(credential.user_id);
+  const temporaryPasswordExpired = Boolean(
+    credential.must_change_password
+    && credential.temporary_password_expires_at > 0
+    && credential.temporary_password_expires_at <= nowSeconds(),
+  );
+  if (!isActiveAccess(access)
+    || temporaryPasswordExpired
+    || credential.must_change_password
+    || !credentialLoginMatchesAccess(credential.user_id, credential.login, access)
+    || access.grant_access_version !== expectedAccessVersion) {
+    throw new Error("Права доступа изменились. Начните вход заново");
+  }
+
+  const token = randomToken(32);
+  const csrf = randomToken(24);
+  await database().prepare(`INSERT INTO production_auth_sessions
+    (token_hash,user_id,csrf_token,expires_at,access_version,created_at) VALUES (?,?,?,?,?,?)`)
+    .bind(
+      await sha256(token),
+      credential.user_id,
+      csrf,
+      nowSeconds() + SESSION_TTL_SECONDS,
+      access.grant_access_version,
+      nowSeconds(),
+    ).run();
   return { user: toAuthUser(credential, access), token, csrf };
 }
 
@@ -538,7 +593,16 @@ async function loadAppAccessByAppUserId(appUserId: string) {
           AND medical_grant.scope='MEDICAL_FULL_SYNTHETIC'
           AND medical_grant.status='Активен'
           AND medical_grant.valid_until>=date('now')
-      ) THEN 1 ELSE 0 END AS medical_access_granted
+      ) THEN 1 ELSE 0 END AS medical_access_granted,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM user_system_access pay_grant
+        WHERE pay_grant.user_id=u.id
+          AND u.is_administrative=1
+          AND pay_grant.system_id='SYS-ARTHELLO-PAY'
+          AND pay_grant.role='payment_operator'
+          AND pay_grant.status='Активен'
+          AND pay_grant.access_version=u.access_version
+      ) THEN 1 ELSE 0 END AS pay_access_granted
     FROM app_users u
     JOIN user_system_access g ON g.user_id=u.id AND g.system_id=?
     WHERE u.id=?`)
@@ -611,6 +675,7 @@ function authUserFromAccess(name: string, mustChangePassword: number, access: Ap
     isAdministrative: Boolean(access.is_administrative),
     isSystemOwner: isCanonicalOwnerAccess(access) && apiRole === "OWNER",
     canAccessMedical: apiRole === "MEDICAL" && Boolean(access.medical_access_granted),
+    canAccessPay: (isCanonicalOwnerAccess(access) && apiRole === "OWNER") || Boolean(access.pay_access_granted),
     jobTitle: access.job_title,
     allowedModules: allowedModules ?? undefined,
     favoriteModules,

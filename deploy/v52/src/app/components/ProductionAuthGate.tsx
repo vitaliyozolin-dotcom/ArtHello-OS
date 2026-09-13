@@ -15,6 +15,7 @@ export type AuthUser = {
   isAdministrative: boolean;
   isSystemOwner: boolean;
   canAccessMedical: boolean;
+  canAccessPay: boolean;
   jobTitle: string;
   allowedModules?: string[];
   favoriteModules: string[];

@@ -97,12 +97,7 @@ function initials(name) {
 
 function canUsePay(user) {
   if (!user) return false;
-  if (user.isSystemOwner === true || user.role === "owner") return true;
-  const modules = Array.isArray(user.allowedModules) ? user.allowedModules : [];
-  return (
-    user.isAdministrative === true &&
-    (modules.includes("ArtHello Pay") || modules.includes("Оплаты"))
-  );
+  return user.canAccessPay === true;
 }
 
 function roleLabel(userOrRole) {
@@ -154,10 +149,7 @@ async function api(path, options = {}) {
   const headers = new Headers(options.headers ?? {});
   if (options.body && !headers.has("content-type"))
     headers.set("content-type", "application/json");
-  if (
-    !["GET", "HEAD", "OPTIONS"].includes(method) &&
-    path !== "/api/auth/login"
-  ) {
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
     const token = csrfToken();
     if (token) headers.set("x-csrf-token", token);
   }
@@ -189,59 +181,6 @@ function toast(message, tone = "") {
 
 function renderLoading(label = "Загружаем ArtHello Pay") {
   app.innerHTML = `<main class="loading-page"><div class="loading-card"><div class="spinner"></div><strong>${escapeHtml(label)}</strong></div></main>`;
-}
-
-function renderLogin(error = "") {
-  app.innerHTML = `
-    <main class="auth-page">
-      <section class="auth-brand-panel">
-        <div class="brand-lockup">
-          <div class="brand-mark">A</div>
-          <div class="brand-copy"><strong>ArtHello Pay</strong><span>единый контур оплаты</span></div>
-        </div>
-        <div class="auth-pitch">
-          <div class="eyebrow">Отдельный доступ · без интернет-банка</div>
-          <h1>Оплаты клиентов в одном понятном окне.</h1>
-          <p>Создавайте начисления, выдавайте ссылки и отслеживайте оплату. Остатки, выписки и исходящие банковские операции этому модулю недоступны.</p>
-        </div>
-        <div class="security-note"><span class="security-dot"></span>Приём денег отделён от доступа к банку</div>
-      </section>
-      <section class="auth-form-panel">
-        <div class="auth-card">
-          <h2>Войти в ArtHello Pay</h2>
-          <p>Используйте отдельный доступ администратора оплат или учётную запись владельца.</p>
-          <form class="form-stack" id="login-form">
-            ${error ? `<div class="form-error">${escapeHtml(error)}</div>` : ""}
-            <div class="field"><label for="login">Логин</label><input class="input" id="login" name="login" autocomplete="username" required /></div>
-            <div class="field"><label for="password">Пароль</label><input class="input" id="password" name="password" type="password" autocomplete="current-password" required /></div>
-            <button class="primary-button full-button" type="submit">Войти</button>
-          </form>
-        </div>
-      </section>
-    </main>`;
-}
-
-function renderPasswordChange(error = "") {
-  app.innerHTML = `
-    <main class="auth-page">
-      <section class="auth-brand-panel">
-        <div class="brand-lockup"><div class="brand-mark">A</div><div class="brand-copy"><strong>ArtHello Pay</strong><span>первый вход</span></div></div>
-        <div class="auth-pitch"><div class="eyebrow">Безопасность доступа</div><h1>Задайте свой пароль.</h1><p>Временный пароль действует только для первого входа. После смены все старые сессии закрываются автоматически.</p></div>
-        <div class="security-note"><span class="security-dot"></span>Пароль не даёт доступа к интернет-банку</div>
-      </section>
-      <section class="auth-form-panel">
-        <div class="auth-card">
-          <h2>Сменить временный пароль</h2>
-          <p>После сохранения потребуется войти ещё раз уже с новым паролем.</p>
-          <form class="form-stack" id="password-form">
-            ${error ? `<div class="form-error">${escapeHtml(error)}</div>` : ""}
-            <div class="field"><label for="current-password">Текущий пароль</label><input class="input" id="current-password" name="currentPassword" type="password" autocomplete="current-password" required /></div>
-            <div class="field"><label for="new-password">Новый пароль</label><input class="input" id="new-password" name="newPassword" type="password" autocomplete="new-password" required /></div>
-            <button class="primary-button full-button" type="submit">Сохранить пароль</button>
-          </form>
-        </div>
-      </section>
-    </main>`;
 }
 
 function filteredObligations() {
@@ -635,52 +574,6 @@ async function loadWorkspace() {
   state.requests = requests;
 }
 
-async function performLogin(form) {
-  const formData = new FormData(form);
-  const login = String(formData.get("login") ?? "").trim();
-  const password = String(formData.get("password") ?? "");
-  renderLoading("Проверяем доступ");
-  try {
-    const session = await api("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ login, password }),
-    });
-    state.user = { ...session, scope: null };
-    if (session.mustChangePassword) {
-      renderPasswordChange();
-      return;
-    }
-    const me = await api("/api/auth/me");
-    state.user = me;
-    if (!canUsePay(me)) {
-      await safeLogout();
-      renderLogin("Эта учётная запись не имеет доступа к ArtHello Pay.");
-      return;
-    }
-    await loadWorkspace();
-    renderShell();
-  } catch (error) {
-    renderLogin(error.message);
-  }
-}
-
-async function changePassword(form) {
-  const formData = new FormData(form);
-  const currentPassword = String(formData.get("currentPassword") ?? "");
-  const newPassword = String(formData.get("newPassword") ?? "");
-  try {
-    await api("/api/auth/password", {
-      method: "POST",
-      body: JSON.stringify({ currentPassword, newPassword }),
-    });
-    state.user = null;
-    renderLogin();
-    toast("Пароль изменён. Войдите снова.", "success");
-  } catch (error) {
-    renderPasswordChange(error.message);
-  }
-}
-
 async function safeLogout() {
   try {
     await api("/api/auth/logout", { method: "POST" });
@@ -691,6 +584,103 @@ async function safeLogout() {
   state.catalog = [];
   state.obligations = [];
   state.requests = [];
+}
+
+const paySsoStorageKey = "arthello:pay:sso:v1";
+
+function randomUrlToken(byteLength = 48) {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+}
+
+async function sha256Url(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  const bytes = new Uint8Array(digest);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+}
+
+async function paySsoConfig() {
+  return api("/api/pay-sso/config");
+}
+
+async function beginCentralSignIn(returnTo = "/") {
+  renderLoading("Проверяем доступ через ArtHello OS");
+  try {
+    const config = await paySsoConfig();
+    const stateToken = randomUrlToken();
+    const verifier = randomUrlToken();
+    const challenge = await sha256Url(verifier);
+    sessionStorage.setItem(paySsoStorageKey, JSON.stringify({ state: stateToken, verifier, returnTo, createdAt: Date.now() }));
+    const authorize = new URL(config.authorizeUrl);
+    authorize.searchParams.set("system_id", "SYS-ARTHELLO-PAY");
+    authorize.searchParams.set("state", stateToken);
+    authorize.searchParams.set("code_challenge", challenge);
+    authorize.searchParams.set("return_to", returnTo);
+    window.location.replace(authorize.toString());
+  } catch (error) {
+    renderAccessDenied(error.message || "Не удалось начать вход через ArtHello OS");
+  }
+}
+
+function currentPayReturnTo() {
+  return `${window.location.pathname}${window.location.search}`;
+}
+
+async function exchangeCentralCallback() {
+  if (window.location.pathname !== "/auth/central/callback") return false;
+  renderLoading("Подтверждаем доступ ArtHello OS");
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code") || "";
+  const returnedState = params.get("state") || "";
+  let pending = null;
+  try { pending = JSON.parse(sessionStorage.getItem(paySsoStorageKey) || "null"); } catch (_) { pending = null; }
+  sessionStorage.removeItem(paySsoStorageKey);
+  if (!pending || pending.state !== returnedState || Date.now() - Number(pending.createdAt || 0) > 5 * 60 * 1000) {
+    renderAccessDenied("Запрос входа устарел. Откройте Pay из ArtHello OS ещё раз.");
+    return true;
+  }
+  try {
+    const exchanged = await api("/api/pay-sso/exchange", {
+      method: "POST",
+      body: JSON.stringify({ code, codeVerifier: pending.verifier }),
+    });
+    window.history.replaceState({}, "", exchanged.returnTo || pending.returnTo || "/");
+    return false;
+  } catch (error) {
+    renderAccessDenied(error.message || "Не удалось подтвердить вход через ArtHello OS");
+    return true;
+  }
+}
+
+async function renderCentralDenial() {
+  if (window.location.pathname !== "/auth/central/denied") return false;
+  const reason = new URLSearchParams(window.location.search).get("reason") || "Доступ к ArtHello Pay не выдан";
+  renderAccessDenied(reason);
+  return true;
+}
+
+function renderAccessDenied(message) {
+  app.innerHTML = `
+    <main class="auth-page">
+      <section class="auth-brand-panel">
+        <div class="brand-lockup"><div class="brand-mark">A</div><div class="brand-copy"><strong>ArtHello Pay</strong><span>вход через материнскую систему</span></div></div>
+        <div class="auth-pitch"><div class="eyebrow">ARTHELLO OS · ЕДИНЫЙ ДОСТУП</div><h1>Отдельного пароля для Pay нет.</h1><p>Роль и право входа проверяются в ArtHello OS. Банковские остатки и выписки в Pay не передаются.</p></div>
+      </section>
+      <section class="auth-form-panel"><div class="auth-card"><h2>Доступ не подтверждён</h2><p>${escapeHtml(message)}</p><button class="primary-button full-button" type="button" data-action="retry-sso">Проверить доступ снова</button><button class="secondary-button full-button" style="margin-top:10px" type="button" data-action="return-os">Вернуться в ArtHello OS</button></div></section>
+    </main>`;
+}
+
+async function logoutToArtHello() {
+  let centralOrigin = "";
+  try { centralOrigin = (await paySsoConfig()).centralOrigin || ""; } catch (_) { /* fallback below */ }
+  await safeLogout();
+  if (centralOrigin) window.location.assign(`${centralOrigin}/#home`);
+  else renderAccessDenied("Сессия Pay завершена. Вернитесь в ArtHello OS.");
 }
 
 async function createPayment(form) {
@@ -850,6 +840,18 @@ function openNewPayment() {
   if (first) void loadCustomers(first.branchCrmId, "");
 }
 
+function applyLaunchAction() {
+  const url = new URL(window.location.href);
+  const action = url.searchParams.get("action");
+  url.searchParams.delete("action");
+  url.searchParams.delete("from");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  if (action !== "invoice" && action !== "payment") return false;
+  state.view = action === "invoice" ? "obligations" : "requests";
+  openNewPayment();
+  return true;
+}
+
 function scheduleCustomerSearch(value) {
   if (!state.modal) return;
   state.modal.customerQuery = value;
@@ -908,8 +910,6 @@ app.addEventListener("submit", (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement)) return;
   event.preventDefault();
-  if (form.id === "login-form") void performLogin(form);
-  if (form.id === "password-form") void changePassword(form);
   if (form.id === "create-payment-form") void createPayment(form);
 });
 
@@ -978,7 +978,9 @@ app.addEventListener("click", (event) => {
     renderShell();
   }
   if (name === "new-payment") openNewPayment();
-  if (name === "logout") void safeLogout().then(() => renderLogin());
+  if (name === "logout") void logoutToArtHello();
+  if (name === "retry-sso") void beginCentralSignIn();
+  if (name === "return-os") void paySsoConfig().then((config) => window.location.assign(`${config.centralOrigin}/#home`)).catch(() => renderAccessDenied("ArtHello OS временно недоступна"));
   if (name === "select-customer") {
     const index = Number(action.getAttribute("data-customer-index"));
     const customer = state.customerResults[index];
@@ -1029,24 +1031,27 @@ app.addEventListener("click", (event) => {
 
 async function bootstrap() {
   if (await renderPublicPayment()) return;
+  if (await renderCentralDenial()) return;
+  if (await exchangeCentralCallback()) return;
   renderLoading();
   try {
     const me = await api("/api/auth/me");
     state.user = me;
     if (me.mustChangePassword) {
-      renderPasswordChange();
+      await safeLogout();
+      await beginCentralSignIn(currentPayReturnTo());
       return;
     }
     if (!canUsePay(me)) {
       await safeLogout();
-      renderLogin("Эта учётная запись не имеет доступа к ArtHello Pay.");
+      renderAccessDenied("Эта учётная запись не имеет доступа к ArtHello Pay.");
       return;
     }
     await loadWorkspace();
-    renderShell();
+    if (!applyLaunchAction()) renderShell();
   } catch (error) {
-    if (error.status === 401) renderLogin();
-    else renderLogin(error.message);
+    if (error.status === 401) await beginCentralSignIn(currentPayReturnTo());
+    else renderAccessDenied(error.message);
   }
 }
 

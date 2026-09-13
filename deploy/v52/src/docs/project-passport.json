@@ -6,7 +6,7 @@
     "scope": "Единая операционная система образовательной группы ArtHello",
     "owner": "Виталий Озолин",
     "status": "approved",
-    "asOf": "2026-09-08"
+    "asOf": "2026-09-13"
   },
   "problem": "Деньги, люди, дети, клиенты, обучение, документы и риски находятся в разных источниках и не образуют доказуемую управленческую цепочку.",
   "goal": "Все сотрудники административного комплекса работают в персональных кабинетах на единой модели данных; каждый риск становится задачей, а каждый показатель раскрывается до источника.",
@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "Публикация с сохранённым School R5 и установкой бэкапов без host sudo",
+    "name": "D168: production-эквайринг и вход в ArtHello Pay через ArtHello OS",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -190,7 +190,10 @@
       "R6 PR361 merged eb47c1360fbd701876a3c49efe029194707304db/tree7e7b14ecbfbfb29e1268edaae7e620e4a62eda1c; exact PR/main Quality/Proof/Verify SUCCESS;756/756 application tests; artifact10053891902 digestsha256:49dec25831de36cd10547a2c9475c3f6f12f780ba16d52145259345f567e9e05.",
       "Actual R6 run34221458013/job102045375780 at11:35:42Z verified existing R5 relay read-only; original activation09:16:10Z, School source/config/container unchanged. Live ArtHello freshly observed6596f69390ad539577ec2640e8ef40c7e12c22dc.",
       "Actual R6 gatewayUID995 has no root/passwordless sudo required by current host backup installer. Backup capability step failed; image/secret/clone/cutover skipped. No new host administration privilege obtained.",
-      "R7 backup/activation design independently reviewed: own named volumes, existing D1 RO forUID1000 worker, separate1002-only activation writer after public gates. Actual copy-up/read-only/WAL/restore/restart/marker isolation remain mandatory executable gates."
+      "R7 backup/activation design independently reviewed: own named volumes, existing D1 RO forUID1000 worker, separate1002-only activation writer after public gates. Actual copy-up/read-only/WAL/restore/restart/marker isolation remain mandatory executable gates.",
+      "2026-09-13: production-раздел «Финансы» скрывал общие банковские счета намеренным филиальным фильтром; D168 возвращает счета, остатки, операции и состояние read-only синхронизации в отдельный раздел «Эквайринг».",
+      "2026-09-13: отдельная форма входа Pay заменена одноразовым 60-секундным PKCE-кодом от ArtHello OS с повторной проверкой активного пользователя, системного grant и access_version.",
+      "2026-09-13: владелец явно потребовал опубликовать исправление в production и разрешил recovery/deploy workflow без секретов; реальные платежи и фискализация этим решением не включаются."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
@@ -439,8 +442,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "Реализовать R7 backup worker и отдельный activation writer без host sudo, проверить actual Docker права/restore/расписание и exact CI, сохранить School R5, пройти natural SSO и guarded publication с живой приёмкой",
-    "evidence": "Exact SHA/tree, продуктовые tests/lint/build, Quality/Proof/Verify, приватный immutable image/provenance, изолированный clone и проверенный backup до cutover, rollback и свежая живая приёмка шести сценариев"
+    "result": "Опубликовать D168: вернуть production-остатки и синхронизацию в «Эквайринг», связать обе кнопки с отдельным Pay и допускать администратора в Pay только через ArtHello OS",
+    "evidence": "Exact SHA/tree, hosted immutable image, сохранённая production D1, число банковских счетов и счетов с остатком, активный Pay grant администратора, публичные OS/Pay/auth probes и закрытые real-money/fiscalization границы"
   },
   "decisionLog": [
     {
@@ -2367,6 +2370,66 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Actual Docker UID/mount/RO/WAL/restore/schedule tests, exact CI/artifact, real SSO and production acceptance",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — явное поручение в текущем чате",
+      "approved_at": "2026-09-13",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска D168",
+      "affected_stages": [
+        4,
+        16,
+        20,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Поручение владельца: опубликовать prod, вернуть синхронизацию банка и остатки, оживить «Новый счёт»/«Оплата», оставить операции в «Эквайринг» и открывать отдельный Pay администратору через ArtHello OS; recovery-workflow разрешён без секретов.",
+      "decision_id": "DEC-2026-09-13-80",
+      "question": "Как восстановить production-эквайринг и дать администратору отдельный Pay без передачи банковского доступа?",
+      "statement": "D-168: общий банковский read-only контур остаётся в отдельном разделе «Эквайринг» ArtHello OS; обе кнопки переходят в отдельный ArtHello Pay и сразу открывают создание ссылки. Pay доверяет только одноразовому PKCE-входу через ArtHello OS и отдельному system grant payment_operator; остатки и выписки в Pay не передаются.",
+      "context": "В production филиальный финансовый ответ намеренно скрывал общие счета, а D167 опубликовал только статическую оболочку Pay с отдельной формой входа. Пользователь сообщил о пустом окне и неработающих действиях.",
+      "rationale": "Разделяет банковскую видимость и работу администратора с клиентскими ссылками, восстанавливает существующие данные без дублирования и использует ArtHello OS как единственный источник личности и права входа.",
+      "evidence": [
+        "Исходный finance route устанавливал bankAccountsView=[]; таблицы bank_accounts, bank_transactions и журнал синхронизации сохранены.",
+        "D168-кандидат содержит /api/acquiring, рабочие переходы с action, 60-секундный одноразовый PKCE exchange и повторную проверку access_version.",
+        "TypeScript, production build и 107/107 выбранных контрактов прошли; неточное имя поля нового deployment-теста исправлено без изменения runtime. Production receipt ещё не получен."
+      ],
+      "assumptions": [
+        "В production есть хотя бы один активный административный пользователь с действующим доступом ArtHello OS; workflow проверяет это до переключения маршрута.",
+        "Существующий read-only планировщик Точки и секрет-файлы сохраняются без чтения или вывода значений."
+      ],
+      "dependencies": [
+        "Verify ArtHello v52 release",
+        "Existing production D1 and secret-file mounts",
+        "Existing Caddy Pay host",
+        "Explicit owner authorization 2026-09-13"
+      ],
+      "source_links": [],
+      "rejected_alternatives": [
+        {
+          "option": "Показывать банковские остатки администратору внутри Pay",
+          "reason": "Нарушает требуемое разделение: администратор выставляет ссылки, но не получает банковский контур.",
+          "reopen_condition": "только новое явное решение владельца"
+        },
+        {
+          "option": "Оставить отдельный логин и пароль Pay",
+          "reason": "Создаёт второй источник личности и не выполняет требование входа через материнскую систему.",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Выпустить exact D168, подтвердить сохранённые счета/остатки, Pay grant, OS/Pay endpoints и центральную auth boundary",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "Successful protected workflow и production receipt без значений секретов",
           "status": "in_progress"
         }
       ]

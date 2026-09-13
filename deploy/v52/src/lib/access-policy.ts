@@ -12,6 +12,7 @@ export type AccessPolicyContext = {
   apiRole: string;
   isSystemOwner: boolean;
   canAccessMedical?: boolean;
+  canAccessPay?: boolean;
   /** Undefined keeps the legacy role template; an array is the owner's explicit section assignment. */
   allowedModules?: readonly string[];
 };
@@ -73,6 +74,7 @@ export const API_RULES: readonly ApiRule[] = ([
   // administrative actions in this route still call requireOwner server-side.
   { prefix: "/api/settings", read: allRoles, write: allRoles },
   { prefix: "/api/finance-actions", read: [], write: withOwner("DIRECTOR", "FINANCE") },
+  { prefix: "/api/acquiring", read: withOwner("DIRECTOR", "FINANCE", "ACCOUNTING"), write: [] },
   { prefix: "/api/finance", read: withOwner("DIRECTOR", "FINANCE", "ACCOUNTING", "ANALYTICS"), write: [] },
   { prefix: "/api/accounting-actions", read: [], write: withOwner("DIRECTOR", "ACCOUNTING") },
   { prefix: "/api/accounting", read: withOwner("DIRECTOR", "ACCOUNTING", "FINANCE", "LEGAL"), write: [] },
@@ -134,6 +136,7 @@ const API_MODULE_REQUIREMENTS: ReadonlyArray<{ prefix: string; modules: readonly
   { prefix: "/api/procurement-actions", modules: ["procurement", "assets"] },
   { prefix: "/api/readiness-actions", modules: ["quality", "acceptance"] },
   { prefix: "/api/finance-actions", modules: ["finance"] },
+  { prefix: "/api/acquiring", modules: ["acquiring"] },
   { prefix: "/api/sales-actions", modules: ["sales"] },
   { prefix: "/api/hr-actions", modules: ["hr"] },
   { prefix: "/api/legal-actions", modules: ["legal"] },
@@ -174,7 +177,7 @@ const API_MODULE_REQUIREMENTS: ReadonlyArray<{ prefix: string; modules: readonly
 ] satisfies Array<{ prefix: string; modules: readonly ModuleId[] }>).sort((left, right) => right.prefix.length - left.prefix.length);
 
 const MODULE_API_REQUIREMENTS: Record<ModuleId, readonly string[]> = {
-  home: [], tasks: ["/api/tasks"], finance: ["/api/finance"], accounting: ["/api/accounting"],
+  home: [], tasks: ["/api/tasks"], finance: ["/api/finance"], acquiring: ["/api/acquiring"], pay: [], accounting: ["/api/accounting"],
   registry: ["/api/entities", "/api/entity-detail"], sales: ["/api/sales"], clients: ["/api/entities", "/api/families"],
   education: ["/api/education"], methods: ["/api/education"], hr: ["/api/hr"], legal: ["/api/legal"],
   procurement: ["/api/procurement"], food: ["/api/food"], safety: ["/api/safety"], medical: ["/api/medical"],
@@ -204,6 +207,9 @@ export function isKnownApiRole(role: string): role is ApiRole {
 
 export function canAccessApi(context: AccessPolicyContext, pathname: string, method: string) {
   if (!isKnownApiRole(context.apiRole)) return false;
+  if (pathname === "/api/payments" || pathname.startsWith("/api/payments/")) {
+    return (context.apiRole === "OWNER" && context.isSystemOwner) || context.canAccessPay === true;
+  }
   const assignedModules = context.allowedModules === undefined ? null : new Set(context.allowedModules);
   const moduleRequirement = API_MODULE_REQUIREMENTS.find((item) => pathname === item.prefix || pathname.startsWith(`${item.prefix}/`));
   const sectionAssigned = !moduleRequirement || assignedModules === null
@@ -228,6 +234,9 @@ export function canAccessApi(context: AccessPolicyContext, pathname: string, met
 
 export function canAccessModule(context: AccessPolicyContext, moduleId: ModuleId) {
   if (moduleId === "home") return true;
+  // ArtHello Pay is a separate system grant, not a section checkbox. This keeps
+  // payment-link operators outside bank balances and statements.
+  if (moduleId === "pay") return (context.apiRole === "OWNER" && context.isSystemOwner) || context.canAccessPay === true;
   if (context.allowedModules !== undefined && !context.allowedModules.includes(moduleId)) return false;
   // The settings endpoint also accepts a narrowly scoped self-service favorites
   // mutation. That must never make the access-management screen available to a

@@ -19,6 +19,10 @@ const PUBLIC_API_ROUTES: Readonly<Record<string, "GET" | "POST">> = {
   "/api/atlas-sso/check": "POST",
   "/api/school-sso/authorize": "GET",
   "/api/school-sso/exchange": "POST",
+  "/api/pay-sso/config": "GET",
+  "/api/pay-sso/open": "GET",
+  "/api/pay-sso/authorize": "GET",
+  "/api/pay-sso/exchange": "POST",
 };
 
 export function authRouteDecision(pathname: string, method: string): AuthRouteDecision | null {
@@ -32,6 +36,10 @@ export function authRouteDecision(pathname: string, method: string): AuthRouteDe
 }
 
 export function publicApiRouteDecision(pathname: string, method: string): AuthRouteDecision | null {
+  if (pathname.startsWith("/api/payments/public/")) {
+    if (method.toUpperCase() !== "GET") return { kind: "reject", status: 405, allow: "GET" };
+    return { kind: "allow", access: "public" };
+  }
   const expectedMethod = PUBLIC_API_ROUTES[pathname];
   if (!expectedMethod) return null;
   if (method.toUpperCase() !== expectedMethod) {

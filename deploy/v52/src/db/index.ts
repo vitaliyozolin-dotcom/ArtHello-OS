@@ -31,6 +31,7 @@ const MANUAL_ENTITY_PROVENANCE_VERSION = "manual-entity-provenance-v2";
 const TASK_OWNER_BACKFILL_VERSION = "task-created-by-user-v1";
 const HUMAN_READABLE_RECORDS_VERSION = "human-readable-records-v1";
 const LEGACY_ALFA_BANK_MIGRATION_VERSION = "legacy-alfa-bank-to-tbank-v1";
+const PAY_ADMIN_ACCESS_BOOTSTRAP_VERSION = "arthello-pay-admin-access-v1";
 const REQUIRED_CORE_TABLES = [
   "organization_branches",
   "app_users",
@@ -111,6 +112,7 @@ async function ensureCoreTablesOnce() {
   await verifyStoredIntegrationCredentials();
   if (!hasAllCoreTables && mode === "test") await seedInitialDemoData();
   if (mode === "test") await normalizeHumanReadableDemoRecords();
+  await ensureArtHelloPayAdministrativeAccess();
 
   if (marker?.state_value !== CORE_SCHEMA_VERSION || !hasAllCoreTables) {
     await env.DB.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
@@ -137,6 +139,68 @@ async function ensureCoreTablesOnce() {
     await ensureFinanceEntityLinksBootstrap();
   }
   await ensureOperatingIntegrationCatalogState();
+}
+
+// D168: grant the new, isolated Pay system once to already-active OS
+// administrators. Later owner changes remain authoritative because the marker
+// prevents a revoked grant from being silently recreated.
+async function ensureArtHelloPayAdministrativeAccess() {
+  const db = env.DB;
+  await db.prepare(`INSERT OR IGNORE INTO app_systems
+    (id,system_key,name,description,status,sort_order)
+    VALUES ('SYS-ARTHELLO-PAY','ARTHELLO_PAY','ArtHello Pay',
+      'Отдельный модуль выставления платёжных ссылок; вход через ArtHello OS','Активна',40)`)
+    .run();
+  const marker = await db.prepare(
+    "SELECT state_value FROM system_runtime_state WHERE state_key=?",
+  ).bind(PAY_ADMIN_ACCESS_BOOTSTRAP_VERSION).first<{ state_value: string }>();
+  if (marker?.state_value === "completed") return;
+
+  // The new bank workspace replaces information that was already part of the
+  // owner's finance contour. Preserve explicit owner navigation selections by
+  // adding only this new section once; an empty value still uses the role template.
+  await db.prepare(`UPDATE app_users
+    SET allowed_modules=json_insert(allowed_modules,'$[#]','acquiring'),updated_at=CURRENT_TIMESTAMP
+    WHERE id='USR-OWNER' AND allowed_modules<>'' AND json_valid(allowed_modules)
+      AND NOT EXISTS (
+        SELECT 1 FROM json_each(CASE WHEN json_valid(allowed_modules) THEN allowed_modules ELSE '[]' END)
+        WHERE value='acquiring'
+      )`)
+    .run();
+
+  await db.prepare(`INSERT OR IGNORE INTO user_system_access
+    (user_id,system_id,role,status,access_version,last_sync_status,granted_by,updated_at)
+    SELECT u.id,'SYS-ARTHELLO-PAY','payment_operator','Активен',u.access_version,
+      'Вход через ArtHello OS','production-d168',CURRENT_TIMESTAMP
+    FROM app_users u
+    JOIN user_system_access central_grant
+      ON central_grant.user_id=u.id AND central_grant.system_id='SYS-ARTHELLO-OS'
+    WHERE u.role='Администратор' AND u.is_administrative=1 AND u.status='Активен'
+      AND central_grant.status='Активен' AND central_grant.access_version=u.access_version`)
+    .run();
+  await db.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
+    SELECT 'production-d168','settings.pay_access_bootstrapped','app_user',u.id,
+      '{"systemId":"SYS-ARTHELLO-PAY","role":"payment_operator","source":"explicit-owner-decision-d168"}'
+    FROM app_users u
+    JOIN user_system_access pay_grant
+      ON pay_grant.user_id=u.id AND pay_grant.system_id='SYS-ARTHELLO-PAY'
+    WHERE u.role='Администратор' AND u.is_administrative=1 AND u.status='Активен'
+      AND pay_grant.granted_by='production-d168'`)
+    .run();
+  await db.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
+    SELECT 'production-d168','settings.section_bootstrapped','app_user','USR-OWNER',
+      '{"moduleId":"acquiring","source":"explicit-owner-decision-d168"}'
+    WHERE EXISTS (
+      SELECT 1 FROM app_users u,
+        json_each(CASE WHEN json_valid(u.allowed_modules) THEN u.allowed_modules ELSE '[]' END)
+      WHERE u.id='USR-OWNER' AND json_each.value='acquiring'
+    )`)
+    .run();
+  await db.prepare(`INSERT INTO system_runtime_state (state_key,state_value,updated_at)
+    VALUES (?,'completed',CURRENT_TIMESTAMP)
+    ON CONFLICT(state_key) DO UPDATE SET state_value='completed',updated_at=CURRENT_TIMESTAMP`)
+    .bind(PAY_ADMIN_ACCESS_BOOTSTRAP_VERSION)
+    .run();
 }
 
 async function ensureOperatingIntegrationCatalogState() {
