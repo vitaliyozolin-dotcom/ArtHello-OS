@@ -512,6 +512,11 @@ function renderCustomerResults() {
     .join("");
 }
 
+function refreshCustomerResults() {
+  const results = app.querySelector(".customer-search-results");
+  if (results) results.innerHTML = renderCustomerResults();
+}
+
 function renderSuccessModal() {
   const { request, obligation, warning } = state.modal;
   const link = request ? publicLink(request) : null;
@@ -552,7 +557,7 @@ async function loadCustomers(branchCrmId, query = "") {
   const modal = state.modal;
   const requestId = ++state.customerRequestId;
   state.customerLoading = true;
-  renderShell();
+  refreshCustomerResults();
   try {
     const results = await api(
       `/api/payments/customers?branchCrmId=${encodeURIComponent(branchCrmId)}&q=${encodeURIComponent(query)}`,
@@ -566,7 +571,7 @@ async function loadCustomers(branchCrmId, query = "") {
   } finally {
     if (state.modal === modal && state.customerRequestId === requestId) {
       state.customerLoading = false;
-      renderShell();
+      refreshCustomerResults();
     }
   }
 }
