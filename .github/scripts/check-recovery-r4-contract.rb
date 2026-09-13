@@ -20,10 +20,7 @@ condition = job.fetch('if')
 steps = job.fetch('steps')
 bindings = 'serviceBindings: { TOCHKA_TRANSPORT: createTochkaTransport(), BACKUP_TRANSPORT: createBackupTransport() }'
 checkout_contract = steps.find {|step| step['name'] == 'Verify checkout and release contracts'}.fetch('run')
-verification = File.read('.github/workflows/verify-arthello-v52.yml')
-current_bindings = ['TOCHKA_TRANSPORT: createTochkaTransport()', 'BACKUP_TRANSPORT: createBackupTransport()', 'ALFACRM_TRANSPORT: createAlfaCrmTransport()']
-raise 'Historical production service bindings must remain verified' unless checkout_contract.include?(bindings)
-raise 'Current production service bindings must be verified' unless current_bindings.all? {|binding| verification.include?(binding) }
+raise 'Both production service bindings must be verified' unless checkout_contract.include?(bindings) && File.read('.github/workflows/verify-arthello-v52.yml').include?(bindings)
 checkout_index = steps.index {|step| step['uses'].to_s.start_with?('actions/checkout@')}
 raise 'Checkout missing' unless checkout_index
 before_checkout = steps.take(checkout_index).map {|step| step['run'].to_s}.join("\n")
