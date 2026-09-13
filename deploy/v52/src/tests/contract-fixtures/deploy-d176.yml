@@ -1,0 +1,29 @@
+# Frozen receipt contract for the completed D176 production release. The live
+# controller slot is reused by D177; these markers preserve the evidence that
+# D176 already produced and that its regression tests still consume.
+name: Deploy ArtHello AlfaCRM transport D176
+release: 'D176: restore AlfaCRM production transport'
+run: |
+  import { createAlfaCrmTransport } from "./production/alfacrm-transport.mjs";
+  const body = { email: "probe@example.invalid", api_key: "synthetic-release-probe" };
+  console.log(`ARTHELLO_D176_ALFACRM_EGRESS=VERIFIED status=${status}`);
+  console.log('ARTHELLO_D176_PRODUCTION=VERIFIED');
+  console.log('ARTHELLO_D176_EXTERNAL=VERIFIED');
+  docker stop --time 30 "$live_id"
+  docker restart --time 20 "$CADDY_CONTAINER"
+  bank_accounts
+  balance_minor is not null
+  eligiblePayAdministrators
+  activePayGrants
+  TOCHKA_AUTOSYNC_ENABLED=1
+  TOCHKA_AUTOSYNC_ACTIVATION_ID
+  activation-volume.py write
+  hasTochkaAutosyncActivation
+  runtimeFingerprintSha256
+  image-runtime-fingerprint.jq
+  --cap-add FOWNER --cap-add FSETID
+  docker exec -i "$candidate" python3 -I -B -
+  docker exec -i -e PUBLIC_URL="$PUBLIC_URL" "$candidate" node -
+  moneyAcceptanceEnabled:false
+  fiscalizationEnabled:false
+  refreshCustomerResults
