@@ -1,4 +1,4 @@
-# D165: complete the exact D162 recovery by serving its omitted immutable Pay assets.
+# D166: stabilize the exact recovered D162 runtime after verified D164 publication.
 # No snapshot restore, D1 replacement, image rebuild, or broad cleanup is permitted.
 name: Complete ArtHello Pay D162 recovery
 'on':
@@ -632,5 +632,174 @@ jobs:
             echo "- Active route: ${{ steps.recover.outputs.route_sha || 'not verified' }}"
             echo "- Result: ${{ job.status }}"
             echo '- Snapshot restore and destructive cleanup: not performed'
+            echo '- Real-money acceptance and fiscalization: disabled'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  stabilize:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.ref == 'refs/heads/main' &&
+      github.event.before == '74f275117c85affd7ae15d4c8772675b5af9fca5' &&
+      startsWith(github.event.head_commit.message, 'D166: stabilize recovered ArtHello Pay runtime') &&
+      github.run_attempt == 1
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - arthello-gateway
+    timeout-minutes: 15
+    environment: production-ru
+    steps:
+      - name: Checkout exact D162 recovery source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.TARGET_RELEASE_SHA }}
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
+          submodules: false
+          lfs: false
+
+      - name: Restore durable runtime policy and prove stability
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$TARGET_RELEASE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$TARGET_RELEASE_TREE"
+
+          state_root="$HOME/.config/arthello/release-state"
+          state_file="$state_root/candidate-acceptance-$TARGET_RELEASE_SHA.json"
+          recovery_receipt="$state_root/pay-assets-recovery-$TARGET_RELEASE_SHA.json"
+          for path in "$state_file" "$recovery_receipt"; do
+            test -f "$path" && test ! -L "$path"
+            test "$(stat -c '%U:%a:%h' "$path")" = "$(id -un):600:1"
+          done
+
+          candidate_id="$(jq -er '.context.candidateContainerId' "$state_file")"
+          candidate_name="$(jq -er '.context.candidateName' "$state_file")"
+          image_id="$(jq -er '.context.imageId' "$state_file")"
+          active_route_sha="$(jq -er '.activeRouteSha256' "$recovery_receipt")"
+          caddy_asset_root="$(jq -er '.assetRoot' "$recovery_receipt")"
+          [[ "$candidate_id" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$candidate_name" =~ ^arthello-direct-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$active_route_sha" =~ ^[a-f0-9]{64}$ ]]
+          test "$caddy_asset_root" = "/data/arthello-pay-assets-$TARGET_RELEASE_SHA"
+          jq -e \
+            --arg release "$TARGET_RELEASE_SHA" \
+            --arg tree "$TARGET_RELEASE_TREE" \
+            --arg candidate "$candidate_id" \
+            --arg app "$PAY_APP_SHA256" \
+            --arg css "$PAY_CSS_SHA256" '
+              .schemaVersion == 1 and .state == "verified" and
+              .protocol == "ARTHELLO_PAY_ASSET_RECOVERY_D164" and
+              .releaseSha == $release and .releaseTree == $tree and
+              .candidateContainerId == $candidate and
+              .assetSha256["app.js"] == $app and .assetSha256["styles.css"] == $css and
+              .publicPayStatus == 200 and .moneyAcceptanceEnabled == false and
+              .fiscalizationEnabled == false
+            ' "$recovery_receipt" >/dev/null
+
+          test "$(docker inspect "$candidate_id" --format '{{.Id}}')" = "$candidate_id"
+          test "$(docker inspect "$candidate_id" --format '{{.Name}}')" = "/$candidate_name"
+          test "$(docker inspect "$candidate_id" --format '{{.Image}}')" = "$image_id"
+          test "$(docker inspect "$candidate_id" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$TARGET_RELEASE_SHA"
+          test "$(docker inspect "$candidate_id" --format '{{index .Config.Labels "arthello.release.tree"}}')" = "$TARGET_RELEASE_TREE"
+          test "$(docker inspect "$candidate_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
+          test "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true
+          test "$(docker exec "$CADDY_CONTAINER" sh -ceu 'sha256sum /data/external-routes.caddy | cut -d " " -f 1')" = "$active_route_sha"
+          docker exec \
+            -e ASSET_ROOT="$caddy_asset_root" -e APP_SHA="$PAY_APP_SHA256" -e CSS_SHA="$PAY_CSS_SHA256" \
+            "$CADDY_CONTAINER" sh -ceu '
+              test "$(sha256sum "$ASSET_ROOT/app.js" | cut -d " " -f 1)" = "$APP_SHA"
+              test "$(sha256sum "$ASSET_ROOT/styles.css" | cut -d " " -f 1)" = "$CSS_SHA"
+            '
+
+          before="$(docker inspect "$candidate_id" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}/{{.HostConfig.RestartPolicy.Name}}/{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
+          printf 'ARTHELLO_D166_RUNTIME_BEFORE=%s\n' "$before"
+          docker update --restart=unless-stopped "$candidate_id" >/dev/null
+          test "$(docker inspect "$candidate_id" --format '{{.HostConfig.RestartPolicy.Name}}/{{.HostConfig.RestartPolicy.MaximumRetryCount}}')" = "unless-stopped/0"
+          if [ "$(docker inspect "$candidate_id" --format '{{.State.Running}}')" != true ]; then
+            docker start "$candidate_id" >/dev/null
+          fi
+
+          local_health() {
+            test "$(docker inspect "$candidate_id" --format '{{.State.Running}}')" = true &&
+              docker exec -i "$candidate_id" node - <<'NODE'
+          try {
+            const response = await fetch('http://127.0.0.1:8081/api/health', { signal: AbortSignal.timeout(5000) });
+            const body = await response.json();
+            if (!response.ok || body.status !== 'ok' || body.database !== 'available') process.exit(1);
+          } catch { process.exit(1); }
+          NODE
+          }
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if local_health; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" = 1
+          restart_count="$(docker inspect "$candidate_id" --format '{{.RestartCount}}')"
+          for observation in $(seq 1 13); do
+            sleep 5
+            local_health
+            test "$(docker inspect "$candidate_id" --format '{{.RestartCount}}')" = "$restart_count"
+          done
+
+          docker exec "$CADDY_CONTAINER" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+          docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+          docker exec -i -e PUBLIC_URL="$PUBLIC_URL" -e PAY_URL="$PAY_URL" -e SCHOOL_URL="$SCHOOL_URL" "$candidate_id" node - <<'NODE'
+          const probe = async (url, init = {}) => {
+            try { return await fetch(url, { ...init, signal: AbortSignal.timeout(10000), headers: { 'cache-control': 'no-cache', ...(init.headers || {}) } }); }
+            catch { return null; }
+          };
+          const health = await probe(process.env.PUBLIC_URL + '/api/health');
+          const school = await probe(process.env.SCHOOL_URL + '/api/health');
+          const pay = await probe(process.env.PAY_URL + '/?probe=d166-stable');
+          const app = await probe(process.env.PAY_URL + '/pay-assets/app.js');
+          const css = await probe(process.env.PAY_URL + '/pay-assets/styles.css');
+          const auth = await probe(process.env.PAY_URL + '/api/auth/me');
+          const result = { health: health?.status ?? 0, school: school?.status ?? 0, pay: pay?.status ?? 0,
+            app: app?.status ?? 0, css: css?.status ?? 0, auth: auth?.status ?? 0 };
+          console.log(JSON.stringify(result));
+          if (Object.values(result).join(',') !== '200,200,200,200,200,401') process.exit(1);
+          NODE
+
+          stability_receipt="$state_root/runtime-stability-$TARGET_RELEASE_SHA.json"
+          stability_temp="$state_root/.runtime-stability-$TARGET_RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+          test ! -e "$stability_receipt" && test ! -L "$stability_receipt"
+          test ! -e "$stability_temp" && test ! -L "$stability_temp"
+          after="$(docker inspect "$candidate_id" --format '{{.State.Status}}/{{.State.ExitCode}}/{{.State.OOMKilled}}/{{.RestartCount}}/{{.HostConfig.RestartPolicy.Name}}/{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
+          jq -nc --arg release "$TARGET_RELEASE_SHA" --arg candidate "$candidate_id" \
+            --arg before "$before" --arg after "$after" --arg route "$active_route_sha" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" '
+              {schemaVersion:1,state:"verified",protocol:"ARTHELLO_RUNTIME_STABILITY_D166",
+               releaseSha:$release,candidateContainerId:$candidate,before:$before,after:$after,
+               activeRouteSha256:$route,recoveryRunId:$run,recoveryRunAttempt:$attempt,
+               restartPolicy:"unless-stopped",stabilityWindowSeconds:65,publicPayStatus:200,
+               moneyAcceptanceEnabled:false,fiscalizationEnabled:false,verifiedAtUtc:$at}
+            ' > "$stability_temp"
+          chmod 0600 "$stability_temp"
+          ln "$stability_temp" "$stability_receipt"
+          rm "$stability_temp"
+          sync "$stability_receipt"
+          test "$(stat -c '%U:%a:%h' "$stability_receipt")" = "$(id -un):600:1"
+          printf 'ARTHELLO_D166_RUNTIME_STABILITY=VERIFIED after=%s\n' "$after"
+
+      - name: Stability summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## D166 recovered runtime stability'
+            echo
+            echo "- Release: $TARGET_RELEASE_SHA"
+            echo "- Result: ${{ job.status }}"
+            echo '- Restart policy: unless-stopped'
+            echo '- Stability window: 65 seconds'
+            echo '- Snapshot restore, D1 replacement and cleanup: not performed'
             echo '- Real-money acceptance and fiscalization: disabled'
           } >> "$GITHUB_STEP_SUMMARY"

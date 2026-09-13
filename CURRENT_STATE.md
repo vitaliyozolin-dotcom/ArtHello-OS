@@ -492,3 +492,10 @@ D163 protected run `34747062495`, deploy job `103696817816`, восстанов�
 D164 commit `fa5e009980a12f7a2df625541d86e8a22bca5fec` был опубликован через protected main, но run `34747574247` завершён GitHub до создания jobs и до любых команд на production: один `run__ scalar превысил platform limit в 21 000 символов. Recovery-команды, route swap, запись marker и доступ к секретам не выполнялись.
 
 Разрешено только разделить тот же неизменный recovery на два последовательных шага короче platform limit и запустить его от exact parent D164. Product/runtime, asset hashes, D162 candidate, D1, rollback и public probe не меняются; никаких дополнительных проверочных циклов или cleanup не добавляется.
+
+
+## D166 — Зафиксировать production restart policy восстановленного D162 (2026-09-13, recovery)
+
+D165 run `34747727453`, job `103698630341`, успешно подтвердил exact assets, route, public/auth/Pay, activation marker и natural browser SSO. Сразу после завершения независимый внешний probe снова получил `502 Connection refused__ на ArtHello и Pay: восстановленный процесс повторно остановился после зелёной приёмки, поэтому публикация ещё не считается устойчивой.
+
+Разрешено проверить exact D162 container и D164 private receipt, зафиксировать для этого же candidate production restart policy `unless-stopped`, запустить его при остановленном состоянии и доказать 65 секунд непрерывного local health без роста restart count, включая первый activation timer tick. После окна выполняется один public ArtHello/School/Pay/auth probe и сохраняется private stability receipt. Image, D1, route, secrets, volumes и банковские операции не меняются; cleanup, snapshot restore, real-money acceptance и фискализация запрещены.
