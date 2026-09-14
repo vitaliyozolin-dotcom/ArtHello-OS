@@ -97,6 +97,8 @@ jobs:
           grep -F 'filterAccessibleBranches(context.branches, context.access, context.me.isAdministrative)' deploy/v52/src/app/components/ArtHelloShell.tsx >/dev/null
           grep -F "stage='mobile_branch_recovery'" .github/scripts/finance-ci-browser.mjs >/dev/null
           grep -F "stage='mobile_branch_failure'" .github/scripts/finance-ci-browser.mjs >/dev/null
+          grep -F "env.get('ARTHELLO_ARTIFACT_DELIVERY_EVENT', 'workflow_run')" .github/scripts/download-v52-artifact-r17.py >/dev/null
+          grep -F "env.get('GITHUB_WORKFLOW') == 'Deploy ArtHello mobile finance branch D182'" .github/scripts/download-v52-artifact-r17.py >/dev/null
           grep -F '## D182 —' DECISIONS.md >/dev/null
           grep -F 'runChunkedAlfaImport' deploy/v52/src/app/components/AlfaCrmSetupWizard.tsx >/dev/null
           grep -F 'NOTICE_AUTO_DISMISS_MS = 7_000' deploy/v52/src/lib/notice-dismiss.ts >/dev/null

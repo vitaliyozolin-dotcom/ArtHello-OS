@@ -40,6 +40,10 @@ const artifactDeliveryUrl = new URL(
   "../../../../.github/scripts/download-v52-artifact-r17.py",
   import.meta.url,
 );
+const artifactDeliveryFixtureUrl = new URL(
+  "./contract-fixtures/download-v52-artifact-r17.py",
+  import.meta.url,
+);
 const repositoryDeployUrl = new URL(
   "../../../../.github/workflows/deploy-arthello-finance-d182.yml",
   import.meta.url,
@@ -171,7 +175,13 @@ test("mobile finance scope renders every available branch when the shared scope 
 
 test("D182 deploys the verified mobile Finance fix over the exact D181 production receipt", () => {
   const workflow = sourceText(repositoryDeployUrl, deployFixtureUrl);
-  const artifactDelivery = readFileSync(artifactDeliveryUrl, "utf8");
+  const artifactDelivery = readFileSync(artifactDeliveryFixtureUrl, "utf8");
+  if (existsSync(fileURLToPath(artifactDeliveryUrl))) {
+    assert.equal(
+      readFileSync(artifactDeliveryUrl, "utf8"),
+      readFileSync(artifactDeliveryFixtureUrl, "utf8"),
+    );
+  }
   const egressProof = workflow.indexOf("ARTHELLO_D182_ALFACRM_EGRESS=VERIFIED");
   const productionStop = workflow.indexOf('docker stop --time 30 "$live_id"');
   const snapshotProof = workflow.indexOf(
@@ -281,6 +291,7 @@ test("D182 deploys the verified mobile Finance fix over the exact D181 productio
 });
 
 test("artifact delivery keeps the workflow_run default and narrowly authorizes D182 dispatch", () => {
+  const artifactDeliveryPath = fileURLToPath(artifactDeliveryFixtureUrl);
   const result = spawnSync(
     "python3",
     [
@@ -337,7 +348,7 @@ with tempfile.TemporaryDirectory() as temporary:
         else:
             raise AssertionError(key)
 `,
-      fileURLToPath(artifactDeliveryUrl),
+      artifactDeliveryPath,
     ],
     { encoding: "utf8" },
   );

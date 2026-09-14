@@ -66,7 +66,10 @@ production-изменений. Исправленный D181 release
 `b9dfa00421a62a3a156c6a7950bb7041bf3e7a3bc68f319cee3114299d224c63` и
 `52056abdc2ac69c258bdeb7d03e3b1880062d044d18fa41dadc8da45f1216963`.
 Активный D182 controller и его изолированный fixture совпадают с SHA-256
-`a007cec4d7346b8e089e140031a2685ad28f280dc5ac7db1d5d9f996f510408c`.
+`2b42a2f5a168c88dcc44db3d9b07d8c1a8744591684950a27f5e8f64ffa66011`.
+Общий artifact-delivery helper и его D182 test fixture совпадают с SHA-256
+`b4a95eb7968923db212b1f02b2ade6f1ca72d797be6ac7ff05a2e7cb31790f19`;
+для остальных consumers его default остаётся `workflow_run`.
 
 | Blob SHA                                   | Путь                                                                                |
 | ------------------------------------------ | ----------------------------------------------------------------------------------- |
