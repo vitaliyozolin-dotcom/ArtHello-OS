@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D184: restore the central Atlas SSO boundary and publish the accepted Atlas UI
+# D185: restore the central Atlas SSO boundary and publish the accepted Atlas UI
 # without coupling the release to School 1-11 or replacing either data volume.
 set -Eeuo pipefail
 umask 077
@@ -16,7 +16,7 @@ test "$GITHUB_SHA" = "$CONTROLLER_SHA"
 test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
 test "$GITHUB_TRIGGERING_ACTOR" = vitaliyozolin-dotcom
 test "$GITHUB_RUN_ATTEMPT" = 1
-test "$CUTOVER_CONFIRMATION" = "DEPLOY D184 TO PRODUCTION"
+test "$CUTOVER_CONFIRMATION" = "DEPLOY D185 TO PRODUCTION"
 [[ "$CONTROLLER_SHA" =~ ^[a-f0-9]{40}$ ]]
 test "$ATLAS_SOURCE_SHA" = f856fb3bd098152bb6b02c4d0273c4c9170b130c
 test "$ATLAS_SOURCE_TREE" = e63e28520670527bc12d84abcd45cd8fffe2b876
@@ -37,18 +37,18 @@ secret_dir="$HOME/.config/arthello"
 atlas_secret="$secret_dir/atlas-central-access-secret"
 state_root="$secret_dir/release-state"
 expected_receipt="$state_root/production-d182-$central_release.json"
-receipt="$state_root/production-d184-$CONTROLLER_SHA.json"
+receipt="$state_root/production-d185-$CONTROLLER_SHA.json"
 run_key="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 candidate="arthello-direct-$run_key"
-atlas_rollback="${atlas_service}-d184-rollback-$run_key"
-work="$(mktemp -d "$state_root/.atlas-d184-$run_key.XXXXXXXX")"
+atlas_rollback="${atlas_service}-d185-rollback-$run_key"
+work="$(mktemp -d "$state_root/.atlas-d185-$run_key.XXXXXXXX")"
 live_inspect="$work/live.json"
 runtime_before="$work/runtime.before.env"
 runtime_env="$work/runtime.env"
 route_before="$work/external-routes.before.caddy"
 route_after="$work/external-routes.after.caddy"
-route_backup="/data/external-routes.caddy.pre-d184-$run_key"
-route_stage="/data/.external-routes.d184-$run_key"
+route_backup="/data/external-routes.caddy.pre-d185-$run_key"
+route_stage="/data/.external-routes.d185-$run_key"
 production_receipt="$work/receipt.json"
 central_stopped=0
 candidate_started=0
@@ -84,7 +84,7 @@ rollback() {
   local status=$?
   trap - EXIT INT TERM HUP
   if [ "$success" -ne 1 ]; then
-    printf 'ATLAS_D184_ROLLBACK=STARTED\n' >&2
+    printf 'ATLAS_D185_ROLLBACK=STARTED\n' >&2
     if [ "$route_swapped" -eq 1 ]; then
       docker exec --user 0:0 -e BACKUP="$route_backup" "$caddy" sh -ceu '
         test -f "$BACKUP" && cp "$BACKUP" /data/external-routes.caddy
@@ -184,7 +184,7 @@ for name in index.html app.js styles.css release.json; do
 done
 
 jq -r '.[0].Config.Env[]' "$live_inspect" > "$runtime_before"
-"$runtime_node" "$controller_root/deploy/atlas-runtime-recovery-d184.mjs" env \
+"$runtime_node" "$controller_root/deploy/atlas-runtime-recovery-d185.mjs" env \
   --input "$runtime_before" --output "$runtime_env" --atlas-origin "$atlas_origin"
 chmod 0600 "$runtime_env"
 test "$(grep -Fx "ATLAS_PUBLIC_ORIGIN=$atlas_origin" "$runtime_env" | wc -l)" -eq 1
@@ -213,7 +213,7 @@ if [ "$atlas_mount_count" -eq 0 ]; then
   mount_args+=(--mount "type=bind,src=$atlas_secret,dst=/run/secrets/atlas-central-access-secret,readonly")
 fi
 
-"$runtime_node" "$controller_root/deploy/atlas-runtime-recovery-d184.mjs" route \
+"$runtime_node" "$controller_root/deploy/atlas-runtime-recovery-d185.mjs" route \
   --input "$route_before" --output "$route_after" \
   --old-upstream "$live_name" --new-upstream "$candidate"
 chmod 0600 "$route_after"
@@ -227,12 +227,12 @@ test "$(docker inspect "$atlas_service" --format '{{.State.Running}}')" = true
 test "$(docker inspect "$atlas_service" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$atlas_data"
 test "$(docker inspect "$atlas_service" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Name}}{{end}}{{end}}')" = "$atlas_backups"
 test "$(current_main)" = "$CONTROLLER_SHA"
-printf 'ATLAS_D184_PREDECESSOR=VERIFIED central=%s route=%s atlas=%s\n' "$central_release" "$expected_route_sha" "$atlas_live_source"
+printf 'ATLAS_D185_PREDECESSOR=VERIFIED central=%s route=%s atlas=%s\n' "$central_release" "$expected_route_sha" "$atlas_live_source"
 
-bash "$controller_root/deploy/upgrade-atlas-d184.sh"
+bash "$controller_root/deploy/upgrade-atlas-d185.sh"
 test "$(docker inspect "$atlas_service" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$ATLAS_SOURCE_SHA"
 test "$(docker inspect "$atlas_service" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$ATLAS_SOURCE_TREE"
-atlas_upgrade_receipt="$ATLAS_BUNDLE_DIR/atlas-d184-production-receipt.json"
+atlas_upgrade_receipt="$ATLAS_BUNDLE_DIR/atlas-d185-production-receipt.json"
 test -s "$atlas_upgrade_receipt"
 jq -e '
   (.archiveSha256|test("^[a-f0-9]{64}$")) and
@@ -244,7 +244,7 @@ if [ "$atlas_changed" -eq 1 ]; then
   test "$(jq -er '.backup.integrity' "$atlas_upgrade_receipt")" = ok
   test "$(docker inspect "$atlas_rollback" --format '{{.State.Running}}')" = false
 fi
-printf 'ATLAS_D184_BACKUP=VERIFIED data_volume=%s backups_volume=%s\n' "$atlas_data" "$atlas_backups"
+printf 'ATLAS_D185_BACKUP=VERIFIED data_volume=%s backups_volume=%s\n' "$atlas_data" "$atlas_backups"
 
 test "$(current_main)" = "$CONTROLLER_SHA"
 docker update --restart=no "$live_id" >/dev/null
@@ -258,7 +258,7 @@ docker run -d --name "$candidate" --restart no --read-only \
   "${mount_args[@]}" \
   --label "arthello.release.sha=$central_release" \
   --label "arthello.release.tree=$live_tree" \
-  --label "arthello.config.decision=D184" \
+  --label "arthello.config.decision=D185" \
   --label "arthello.controller.sha=$CONTROLLER_SHA" \
   --label "arthello.release.run=$GITHUB_RUN_ID" \
   "$live_image" >/dev/null
@@ -309,12 +309,12 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 test "$public_ready" -eq 1
-printf 'ATLAS_D184_CENTRAL_SSO_OPEN=VERIFIED status=303\n'
+printf 'ATLAS_D185_CENTRAL_SSO_OPEN=VERIFIED status=303\n'
 
 export ATLAS_OWNER_ACCESS_APPLY=1
 owner_result="$("$runtime_node" "$controller_root/deploy/activate-atlas-owner-access.mjs")"
 jq -e '.status=="accepted" and .ownerGrant=="director" and .atlasSso=="verified"' <<<"$owner_result" >/dev/null
-printf 'ATLAS_D184_OWNER_SSO=VERIFIED role=director\n'
+printf 'ATLAS_D185_OWNER_SSO=VERIFIED role=director\n'
 
 test "$(current_main)" = "$CONTROLLER_SHA"
 restore_restart "$candidate"
@@ -342,7 +342,7 @@ jq -n \
   --argjson data "$(jq '.dataProof' "$expected_receipt")" \
   --argjson alfa "$(jq '.alfaLiveProof' "$expected_receipt")" \
   --argjson owner "$owner_result" '
-    {schemaVersion:1,state:"verified",decision:"D184",controllerSha:$controller,
+    {schemaVersion:1,state:"verified",decision:"D185",controllerSha:$controller,
      applicationReleaseSha:$centralRelease,sourceTree:$centralTree,imageId:$centralImage,
      candidateContainerId:$candidate,previousContainerId:$previous,activeRouteSha256:$route,
      payAssetRoot:$assets,payAssetSha256:$payHashes,dataProof:$data,alfaLiveProof:$alfa,
@@ -355,7 +355,7 @@ if [ "$atlas_changed" -eq 1 ]; then docker rm "$atlas_rollback" >/dev/null; fi
 success=1
 rm -f -- "$runtime_before" "$runtime_env"
 trap - EXIT INT TERM HUP
-printf 'ATLAS_D184_PRODUCTION=VERIFIED controller=%s central=%s atlas=%s candidate=%s\n' \
+printf 'ATLAS_D185_PRODUCTION=VERIFIED controller=%s central=%s atlas=%s candidate=%s\n' \
   "$CONTROLLER_SHA" "$central_release" "$ATLAS_SOURCE_SHA" "$candidate"
 printf 'candidate=%s\nreceipt=%s\n' "$candidate" "$receipt"
 rm -rf -- "$work"

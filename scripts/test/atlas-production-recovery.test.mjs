@@ -7,7 +7,7 @@ import test from "node:test";
 import {
   normalizeRuntimeEnv,
   renderCentralRoute,
-} from "../../deploy/atlas-runtime-recovery-d184.mjs";
+} from "../../deploy/atlas-runtime-recovery-d185.mjs";
 
 const read = (path) =>
   readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
@@ -156,13 +156,13 @@ test("Atlas runtime fingerprint ignores daemon-local identity but detects runtim
   );
 });
 
-test("D184 production workflow is manual, protected, Atlas-only and independently verified", () => {
+test("D185 production workflow is manual, protected, Atlas-only and independently verified", () => {
   const workflow = read(".github/workflows/deploy-diaries-d133.yml");
-  const release = read("deploy/release-atlas-d184.sh");
-  const upgrade = read("deploy/upgrade-atlas-d184.sh");
+  const release = read("deploy/release-atlas-d185.sh");
+  const upgrade = read("deploy/upgrade-atlas-d185.sh");
 
   assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /DEPLOY D184 TO PRODUCTION/);
+  assert.match(workflow, /DEPLOY D185 TO PRODUCTION/);
   assert.match(workflow, /environment: production-ru/);
   assert.match(
     workflow,
@@ -176,19 +176,19 @@ test("D184 production workflow is manual, protected, Atlas-only and independentl
     workflow,
     /ATLAS_SOURCE_TREE: e63e28520670527bc12d84abcd45cd8fffe2b876/,
   );
-  assert.match(workflow, /Verify exact D184 from an independent network/);
+  assert.match(workflow, /Verify exact D185 from an independent network/);
   assert.doesNotMatch(
     workflow,
     /ARTHELLO_RU_SSH_PRIVATE_KEY|school-curriculum-standalone-cutover/,
   );
 
   for (const marker of [
-    "ATLAS_D184_PREDECESSOR=VERIFIED",
-    "ATLAS_D184_BACKUP=VERIFIED",
-    "ATLAS_D184_CENTRAL_SSO_OPEN=VERIFIED",
-    "ATLAS_D184_OWNER_SSO=VERIFIED",
-    "ATLAS_D184_ROLLBACK=STARTED",
-    "ATLAS_D184_PRODUCTION=VERIFIED",
+    "ATLAS_D185_PREDECESSOR=VERIFIED",
+    "ATLAS_D185_BACKUP=VERIFIED",
+    "ATLAS_D185_CENTRAL_SSO_OPEN=VERIFIED",
+    "ATLAS_D185_OWNER_SSO=VERIFIED",
+    "ATLAS_D185_ROLLBACK=STARTED",
+    "ATLAS_D185_PRODUCTION=VERIFIED",
   ])
     assert.match(release, new RegExp(marker));
   assert.doesNotMatch(release, /docker volume rm/);
@@ -200,5 +200,13 @@ test("D184 production workflow is manual, protected, Atlas-only and independentl
   assert.doesNotMatch(
     upgrade,
     /test "\$\(docker image inspect "\$image_ref" --format '\{\{\.Id\}\}'\)" = "\$expected_image"/,
+  );
+  assert.match(
+    upgrade,
+    /--user 0:0 --security-opt no-new-privileges:true \\\n+  --tmpfs \/tmp:rw,nosuid,nodev,size=32m --volume "\$backups_volume:\/backups:ro"/,
+  );
+  assert.match(
+    upgrade,
+    /docker run --rm --network none --read-only --user 0:0 \\\n+  --volume "\$backups_volume:\/backups:ro" --entrypoint sha256sum/,
   );
 });

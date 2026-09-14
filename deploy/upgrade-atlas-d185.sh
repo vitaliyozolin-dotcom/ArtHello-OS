@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D184: replace only the Atlas application image while preserving its database volume.
+# D185: replace only the Atlas application image while preserving its database volume.
 # Image identity is proved with a portable runtime fingerprint because daemon-local
 # Docker image IDs can be rewritten across image stores.
 set -Eeuo pipefail
@@ -24,8 +24,8 @@ central_secret="$secret_dir/atlas-central-access-secret"
 pepper_secret="$secret_dir/atlas-passwordless-pepper"
 atlas_origin=https://atlas-188-225-38-55.sslip.io
 central_origin=https://arthello-188-225-38-55.sslip.io
-rollback_name="${service}-d184-rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-backup_name="pre-d184-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sqlite"
+rollback_name="${service}-d185-rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+backup_name="pre-d185-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sqlite"
 new_created=0
 old_renamed=0
 old_stopped=0
@@ -96,7 +96,7 @@ if [ "$live_source" = "$ATLAS_SOURCE_SHA" ]; then
     --arg archive "$archive_sha" --arg builderImage "$builder_image_id" --arg gatewayImage "$gateway_image_id" \
     --arg runtimeFingerprint "$gateway_runtime_fingerprint" \
     '{schemaVersion:1,kind:"atlas-ui-release",controllerSha:$controller,sourceSha:$source,sourceTree:$tree,status:"already-active",dataVolumePreserved:true,archiveSha256:$archive,builderImageId:$builderImage,gatewayImageId:$gatewayImage,runtimeFingerprintSha256:$runtimeFingerprint}' \
-    > "$ATLAS_BUNDLE_DIR/atlas-d184-production-receipt.json"
+    > "$ATLAS_BUNDLE_DIR/atlas-d185-production-receipt.json"
   printf 'ATLAS_IMAGE_ID_REPRESENTATION builder=%s gateway=%s\n' "$builder_image_id" "$gateway_image_id"
   printf 'ATLAS_IMAGE_RUNTIME_FINGERPRINT=VERIFIED sha256=%s\n' "$gateway_runtime_fingerprint"
   printf 'ATLAS_DATA_VOLUME=PRESERVED\nATLAS_UPGRADE=SUCCESS\n'
@@ -143,7 +143,7 @@ docker run --rm --network none --read-only --user 0:0 --security-opt no-new-priv
     chmod 0444 "/backups/$BACKUP_NAME"
     sync
   '
-docker run --rm --network none --read-only --user 1001:1001 --security-opt no-new-privileges:true \
+docker run --rm --network none --read-only --user 0:0 --security-opt no-new-privileges:true \
   --tmpfs /tmp:rw,nosuid,nodev,size=32m --volume "$backups_volume:/backups:ro" \
   --env BACKUP_PATH="/backups/$backup_name" --entrypoint node "$image_ref" --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
@@ -152,7 +152,8 @@ docker run --rm --network none --read-only --user 1001:1001 --security-opt no-ne
     db.close();
     if (result.integrity_check !== "ok") process.exit(1);
   '
-backup_sha="$(docker run --rm --network none --read-only --volume "$backups_volume:/backups:ro" --entrypoint sha256sum "$image_ref" "/backups/$backup_name" | cut -d ' ' -f 1)"
+backup_sha="$(docker run --rm --network none --read-only --user 0:0 \
+  --volume "$backups_volume:/backups:ro" --entrypoint sha256sum "$image_ref" "/backups/$backup_name" | cut -d ' ' -f 1)"
 [[ "$backup_sha" =~ ^[a-f0-9]{64}$ ]]
 printf 'ATLAS_BACKUP=VERIFIED\n'
 
@@ -192,4 +193,4 @@ jq -n --arg controller "$CONTROLLER_SHA" --arg source "$ATLAS_SOURCE_SHA" --arg 
   --arg runtimeFingerprint "$gateway_runtime_fingerprint" \
   --arg backup "$backup_name" --arg backupSha "$backup_sha" --arg rollback "$rollback_name" \
   '{schemaVersion:1,kind:"atlas-ui-release",controllerSha:$controller,sourceSha:$source,sourceTree:$tree,status:"pending-sso-acceptance",dataVolumePreserved:true,archiveSha256:$archive,builderImageId:$builderImage,gatewayImageId:$gatewayImage,runtimeFingerprintSha256:$runtimeFingerprint,rollbackContainer:$rollback,backup:{file:$backup,sha256:$backupSha,integrity:"ok"}}' \
-  > "$ATLAS_BUNDLE_DIR/atlas-d184-production-receipt.json"
+  > "$ATLAS_BUNDLE_DIR/atlas-d185-production-receipt.json"
