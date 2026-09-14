@@ -556,15 +556,28 @@ jobs:
             echo '- Money acceptance and fiscalization: still disabled.'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  verify-external:
-    needs: deploy
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Verify ArtHello, School and Pay from an independent network
+      # Keep the shared production job lock until the public routes have been
+      # authenticated against the exact container and immutable D179 receipt.
+      - name: Verify exact D179 through the public routes
+        if: success()
         shell: bash
         run: |
           set -Eeuo pipefail
+          receipt="/var/lib/arthello-release-state/production-d179-$RELEASE_SHA.json"
+          test -f "$receipt"
+          candidate="$(jq -er '.candidateContainerId' "$receipt")"
+          expected_image="$(jq -er '.imageId' "$receipt")"
+          [[ "$candidate" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$expected_image" =~ ^sha256:[a-f0-9]{64}$ ]]
+          live_name="$(docker ps --filter label=arthello.production=direct-v44 --format '{{.Names}}')"
+          test "$(printf '%s\n' "$live_name" | sed '/^$/d' | wc -l)" -eq 1
+          live_id="$(docker inspect "$live_name" --format '{{.Id}}')"
+          live_image="$(docker inspect "$live_name" --format '{{.Image}}')"
+          test "$live_id" = "$candidate"
+          test "$live_image" = "$expected_image"
+          test "$(docker inspect "$live_name" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$RELEASE_SHA"
+          docker exec "$CADDY_CONTAINER" sh -ceu 'cat /data/external-routes.caddy' \
+            | grep -F "$live_name:8081" >/dev/null
           probe() {
             curl --fail --silent --show-error --max-time 15 "$PUBLIC_URL/api/health" \
               | jq -e '.status == "ok" and .database == "available"' >/dev/null &&

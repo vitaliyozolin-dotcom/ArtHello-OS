@@ -119,8 +119,16 @@ test("D177 deployment preserves AlfaCRM and Pay while publishing compact Money h
 
 test("D179 deployment preserves AlfaCRM and Pay while publishing the compact finance workflow", async () => {
   const workflow = await source("../../../../.github/workflows/deploy-arthello-finance-d179.yml", "./contract-fixtures/deploy-d179.yml");
+  const productionProof = workflow.indexOf("ARTHELLO_D179_PRODUCTION=VERIFIED");
+  const externalProof = workflow.indexOf("ARTHELLO_D179_EXTERNAL=VERIFIED");
   assert.match(workflow, /D179: compact finance operation workflow/);
   assert.match(workflow, /group: gateway-38-55-arthello-production-d179/);
+  assert.match(workflow, /deploy:\n    concurrency:\n      group: gateway-38-55-arthello-production/);
+  assert.doesNotMatch(workflow, /\n  verify-external:/);
+  assert.ok(productionProof > 0 && externalProof > productionProof, "the shared deployment lock must cover exact-release public verification");
+  assert.match(workflow, /candidateContainerId/);
+  assert.match(workflow, /test "\$live_id" = "\$candidate"/);
+  assert.match(workflow, /arthello\.release\.sha/);
   assert.match(workflow, /D179_FINANCE_COMPACT_OPERATION_CARD/);
   assert.match(workflow, /ahFinanceBankHistoryRow/);
   assert.match(workflow, /finance\.operation_commented/);
