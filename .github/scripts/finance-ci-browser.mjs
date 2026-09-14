@@ -7,7 +7,7 @@ import { inspectSandbox } from './flow.mjs';
 
 const ORIGIN='https://finance.ci.invalid';
 let stage='guard',actionStage=null,browser,page;
-const errors=[],writes=[];let requests=0,loginCount=0,dashboardWrites=0,transportFailed=false,transportFailure=null,mobileMetrics=null;
+const errors=[],writes=[];let requests=0,loginCount=0,dashboardWrites=0,transportFailed=false,transportFailure=null,mobileMetrics=null,mobileBranchOptions=0;
 try {
   assert.equal(process.env.ARTHELLO_FINANCE_CI,'disposable-hosted-fixture');
   assert.match(process.env.CHECKED_SOURCE_SHA||'',/^[a-f0-9]{40}$/);
@@ -97,7 +97,17 @@ try {
   stage='reload_dds';await page.reload();await page.getByRole('tab',{name:'ДДС филиала',exact:true}).click();
   const dds=page.locator('.finance-table tbody tr').filter({has:page.getByText('CI Обучение',{exact:true})});await dds.waitFor();assert.match(await dds.innerText(),/1\D*234,56/);
   await page.screenshot({path:'/evidence/desktop-dds.png',fullPage:true});
-  stage='mobile_articles';await page.setViewportSize({width:390,height:844});await create('CI Аренда','cashflow','Списание');
+  stage='mobile_branch_recovery';
+  await branchSelect.selectOption('ALL');
+  await page.locator('.ahFinanceDenied').getByRole('heading',{name:'Выберите филиал',exact:true}).waitFor();
+  await page.setViewportSize({width:390,height:844});
+  const mobileBranchSelect=page.getByLabel('Выбрать филиал для финансового отчёта',{exact:true});
+  await mobileBranchSelect.waitFor();
+  mobileBranchOptions=await mobileBranchSelect.locator('option').count();assert(mobileBranchOptions>=2);
+  assert(await mobileBranchSelect.evaluate(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.right<=innerWidth+2&&r.height>=44;}));
+  await mobileBranchSelect.selectOption({index:1});
+  await page.getByRole('tab',{name:'Статьи',exact:true}).waitFor();
+  stage='mobile_articles';await create('CI Аренда','cashflow','Списание');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
   await page.locator('.ahFinanceArticleForm').first().evaluate(e=>e.scrollIntoView({block:'center'}));
   await page.screenshot({path:'/evidence/mobile-articles.png',fullPage:true});
@@ -119,7 +129,7 @@ try {
   const note='CI комментарий владельца';await dialog.getByPlaceholder('Добавить комментарий…').fill(note);await save(()=>dialog.getByRole('button',{name:'Добавить',exact:true}).click(),201);await dialog.getByText(note,{exact:true}).waitFor();
   await page.screenshot({path:'/evidence/mobile-operation-card.png',fullPage:true});
   assert.equal(loginCount,1);assert.equal(transportFailed,false);assert.equal(errors.length,0);assert.equal(writes.filter(x=>x==='classifyOperation').length,2);assert.equal(writes.filter(x=>x==='addOperationComment').length,1);assert.equal(writes.length,10);
-  const result={kind:'finance-isolated-browser',result:'pass',sourceSha:process.env.CHECKED_SOURCE_SHA,viewports:[1440,390],actualApplication:true,actualDatabase:true,apiMocked:false,dashboardWrites,mobileMetrics,sessionInjected:false,chromiumSandbox:'verified',productionAcceptance:'not_run',bankFacts:'synthetic CI only',screenshots:['desktop-articles.png','desktop-dds.png','mobile-articles.png','mobile-allocation.png','mobile-operation-card.png']};
+  const result={kind:'finance-isolated-browser',result:'pass',sourceSha:process.env.CHECKED_SOURCE_SHA,viewports:[1440,390],actualApplication:true,actualDatabase:true,apiMocked:false,dashboardWrites,mobileBranchOptions,mobileMetrics,sessionInjected:false,chromiumSandbox:'verified',productionAcceptance:'not_run',bankFacts:'synthetic CI only',screenshots:['desktop-articles.png','desktop-dds.png','mobile-articles.png','mobile-allocation.png','mobile-operation-card.png']};
   writeFileSync('/evidence/result.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 } catch(error) {
   if(page&&stage!=='natural_login')await page.screenshot({path:'/evidence/failure.png',fullPage:true}).catch(()=>{});

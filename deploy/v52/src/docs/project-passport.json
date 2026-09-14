@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "D180: завершение пакетного импорта и видимость клиентов AlfaCRM",
+    "name": "D181: доступный выбор филиала в мобильных «Финансах»",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -213,7 +213,11 @@
       "D178 activation commit 349c4c46e2ed4b7de42aa0dd9cf46666b7b55742 опубликован production run 34791395398: ALFACRM_IMPORT_ENABLED включён поверх exact D177 image, snapshot и внешние ArtHello/School/Pay=200 подтверждены.",
       "IMG_0265(1)/IMG_0266/IMG_0267: импорт абонементов требует ручного продолжения каждые 15 клиентов, раздел «Клиенты» показывает 0 после импорта, нижнее уведомление не исчезает, а 193 сотрудника требуют фильтрации по признакам актуальности.",
       "D180 устраняет четыре причины: автоматическое продолжение безопасных 15-клиентских пакетов, фильтрация сущностей до пагинации, авто-закрытие уведомления через 7 секунд и исключение явно неактивных/завершивших работу сотрудников.",
-      "D180 локально: 107/107 целевых AlfaCRM/реестровых контрактов прошли; typecheck, production build и lint прошли без ошибок. Полный набор: 833 passed, 6 owner/chown-тестов несовместимы с managed filesystem (EINVAL), 2 skipped."
+      "D180 локально: 107/107 целевых AlfaCRM/реестровых контрактов прошли; typecheck, production build и lint прошли без ошибок. Полный набор: 833 passed, 6 owner/chown-тестов несовместимы с managed filesystem (EINVAL), 2 skipped.",
+      "D180 release 511d467763b7ca050c096df23cfcdcd1f62fe51d опубликован production run 34799802826: rollback snapshot, 4 банковских счёта с 4 остатками, 1 Pay grant, live AlfaCRM 2887 семей, 193 сотрудника и 60 абонементов, 65 секунд стабильности и независимые ArtHello/School/Pay=200 подтверждены.",
+      "IMG_0270/IMG_0271: на мобильном глобальный выбор филиала скрыт вместе с desktop top-actions, поэтому «Финансы» остаются в состоянии «Выберите филиал» без доступного действия.",
+      "D181 добавляет компактный филиальный select непосредственно в FinanceWorkspace для заблокированного, загрузочного, ошибочного и рабочего состояний; существующий автоматический выбор первого доступного филиала сохраняется.",
+      "D181 локально: TypeScript, lint без ошибок и production build прошли; 10/10 связанных финансовых контрактов и отдельный D181 release contract прошли. Полный набор: 835 passed, 6 owner/chown-тестов несовместимы с managed filesystem (EINVAL), 2 skipped."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
@@ -223,7 +227,7 @@
       "School transport восстановлен и read-only проверен; естественный авторизованный Education→дневник SSO не подтверждён, облачный браузер возвращает502 до формы входа.",
       "Customer.balance подтверждён официальным API как денежное поле; Alfa financial movements остаются blocked до проверенного контракта PayType direction.",
       "Новая ArtHello версия ещё не переключена: нужны первая backup+restore, exact immutable release и пользовательская приёмка шести сценариев.",
-      "D180 готовится поверх verified D179 release a2f30685f037e540206f459c34a6c37e90d3b95b и production run 34797052085: требуются exact-main Quality/Proof/Verify, совпадение live AlfaCRM import state, rollback snapshot, 65 секунд стабильности и внешний ArtHello/School/Pay probe."
+      "D181 готовится поверх verified D180 release 511d467763b7ca050c096df23cfcdcd1f62fe51d и production run 34799802826: требуются exact-main Quality/Proof/Verify с реальным browser-сценарием 390 px, совпадение live данных и контейнера, rollback snapshot, 65 секунд стабильности и внешний ArtHello/School/Pay probe."
     ]
   },
   "stages": [
@@ -463,8 +467,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "После подтверждённого production-выпуска D179 опубликовать D180: один запуск автоматически завершает безопасные пакеты абонементов, импортированные семьи видны в «Клиентах», уведомления исчезают через 7 секунд, а повторный импорт сотрудников исключает явно неактуальные карточки",
-    "evidence": "Целевые D180 contracts, полный typecheck/test/build на exact D179 main, verified D179 production receipt и live AlfaCRM state до docker stop, свежий rollback snapshot, exact hosted image, 65 секунд стабильности и независимый ArtHello/School/Pay probe"
+    "result": "Опубликовать D181 в production: мобильные «Финансы» всегда показывают компактный выбор доступного филиала и позволяют выйти из состояния «Выберите филиал» без desktop-навигации",
+    "evidence": "D181 component/release contracts, TypeScript/lint/build, hosted real-browser recovery на 390 px, exact D180 production receipt, свежий rollback snapshot, сохранность банковских/AlfaCRM/Pay данных, 65 секунд стабильности и независимый ArtHello/School/Pay probe"
   },
   "decisionLog": [
     {
@@ -2920,12 +2924,12 @@
     },
     {
       "project_id": "ARTHELLO-OS",
-      "status": "active",
+      "status": "completed",
       "approved_by": "Виталий Озолин — сообщил о пакетах по 15, пустом разделе клиентов, постоянном уведомлении и вероятно исторических сотрудниках",
       "approved_at": "2026-09-14",
       "owner": "Исполнитель ArtHello OS",
       "deadline": "текущий цикл исправления",
-      "review_at": "после production-выпуска D180 и продолжения импорта абонементов одним запуском",
+      "review_at": "production-выпуск D180 завершён 2026-09-14",
       "affected_stages": [
         8,
         16,
@@ -2946,7 +2950,8 @@
         "IMG_0266: раздел «Клиенты и семьи» показывает Все 0 при завершённом импорте семей; тёмное уведомление перекрывает нижнюю навигацию.",
         "IMG_0267: то же уведомление остаётся при открытии настроек и перекрывает действия.",
         "D180 contracts подтверждают фильтрацию типа до границы страницы, автоматический цикл и stalled-cursor guard, 7-секундный dismiss, lifecycle-фильтр сотрудников и production wiring.",
-        "D180 workflow требует verified D179 finance receipt, совпадения live release/image/container, ALFACRM_IMPORT_ENABLED=true, сохранённых семей/сотрудников/абонементов, rollback snapshot и независимой внешней проверки."
+        "D180 workflow требует verified D179 finance receipt, совпадения live release/image/container, ALFACRM_IMPORT_ENABLED=true, сохранённых семей/сотрудников/абонементов, rollback snapshot и независимой внешней проверки.",
+        "Release 511d467763b7ca050c096df23cfcdcd1f62fe51d опубликован protected run 34799802826: подтверждены rollback snapshot, live AlfaCRM 2887/193/60, 4 банковских счёта с остатками, Pay grant, 65 секунд стабильности и независимые ArtHello/School/Pay=200."
       ],
       "assumptions": [
         "Фраза владельца о сотрудниках «за всё время» означает, что в рабочей команде должны оставаться только актуальные карточки.",
@@ -2962,7 +2967,9 @@
       ],
       "source_links": [
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34791395398",
-        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34797052085"
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34797052085",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/511d467763b7ca050c096df23cfcdcd1f62fe51d",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34799802826"
       ],
       "rejected_alternatives": [
         {
@@ -2987,6 +2994,71 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Полные typecheck/test/build gates, exact-main Quality/Verify, protected D180 receipt, 65-second stability, ARTHELLO_D180_ALFACRM_LIVE_STATE=VERIFIED и ARTHELLO_D180_EXTERNAL=VERIFIED",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — прислал IMG_0270/IMG_0271 и прямо потребовал публиковать исправление в production",
+      "approved_at": "2026-09-14",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после production-выпуска D181 и мобильной проверки раздела «Финансы»",
+      "affected_stages": [
+        4,
+        19,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "IMG_0271 показывает мобильный раздел «Финансы» с единственным сообщением «Выберите филиал» и без элемента выбора; IMG_0270 подтверждает владельца и доступ к разделу. Пользователь уточнил, что исправление нужно публиковать в production.",
+      "decision_id": "DEC-2026-09-14-89",
+      "question": "Как вернуть владельцу доступ к филиальным финансовым данным на мобильном экране, не включая запрещённый общий финансовый отчёт?",
+      "statement": "D181 сохраняет обязательный филиальный контекст D132 и добавляет компактный выбор филиала непосредственно в FinanceWorkspace. Он доступен на мобильном экране в заблокированном, загрузочном, ошибочном и рабочем состояниях. Выбор вызывает тот же канонический changeBranch, записывает cookie/local scope и повторно загружает отчёт; desktop-переключатель и автоматический выбор первого доступного филиала сохраняются.",
+      "context": "Глобальный selector находится в top-actions, которые полностью скрываются мобильным media query. Если Finance открылся с ALL до загрузки или восстановления контекста, early return показывал просьбу выбрать филиал, но не предоставлял ни одного действия.",
+      "rationale": "Локальный селектор внутри рабочего пространства делает обязательное действие достижимым именно там, где возникает блокировка. Это не создаёт второй источник состояния: оба селектора используют один selectedBranch/changeBranch и тот же API с явным branch query.",
+      "evidence": [
+        "FinanceBranchSelector SSR-контракт подтверждает placeholder, все доступные филиалы, выбранное значение и честное disabled-состояние без филиалов.",
+        "FinanceWorkspace содержит D181_FINANCE_MOBILE_BRANCH во всех ранних состояниях и в загруженном разделе; CSS показывает его только до 767 px с touch-target не меньше 44 px.",
+        "Hosted finance browser flow переводит owner scope в ALL на desktop, меняет viewport на 390x844, проверяет видимость и границы нового select и выбирает филиал до продолжения рабочего сценария.",
+        "Локально TypeScript, lint без ошибок, production build, 10/10 связанных финансовых контрактов, D181 release contract и workflow policy 16/0 прошли.",
+        "Полный локальный набор завершён: 835 passed, 2 skipped; 6 неизменённых activation tests остановлены только на EINVAL chown managed filesystem и остаются обязательными в hosted Verify."
+      ],
+      "assumptions": [
+        "Список branches из /api/settings содержит только филиалы, доступные текущему пользователю.",
+        "Общий финансовый отчёт для ALL остаётся выключенным; пользователь должен выбрать один филиал.",
+        "Банковские факты, комментарии D179, AlfaCRM import state, Pay и read-only синхронизация не меняются."
+      ],
+      "dependencies": [
+        "D132 explicit finance branch boundary",
+        "DEC-2026-09-14-87 completed",
+        "DEC-2026-09-14-88 completed; verified D180 release 511d467763b7ca050c096df23cfcdcd1f62fe51d and production run 34799802826",
+        "Explicit owner production instruction 2026-09-14"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/511d467763b7ca050c096df23cfcdcd1f62fe51d",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34799802826"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Показать общий отчёт при ALL",
+          "reason": "Нарушает принятую границу D132 и смешивает филиальные управленческие отчёты.",
+          "reopen_condition": "только отдельное решение владельца и проверенная модель консолидации"
+        },
+        {
+          "option": "Оставить только текст и ожидать выбора в desktop-меню",
+          "reason": "На мобильном desktop top-actions скрыты, поэтому действие остаётся недостижимым.",
+          "reopen_condition": "нет"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Выпустить exact D181 и подтвердить мобильное восстановление филиала, сохранность production-данных и внешний контур",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "Exact-main Quality/Proof/Verify, hosted finance browser 390 px, protected D181 receipt, rollback snapshot, 65-second stability, ARTHELLO_D181_PRODUCTION=VERIFIED и ARTHELLO_D181_EXTERNAL=VERIFIED",
           "status": "in_progress"
         }
       ]

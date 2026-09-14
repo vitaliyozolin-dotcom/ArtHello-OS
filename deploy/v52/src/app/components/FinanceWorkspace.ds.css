@@ -52,6 +52,39 @@
   line-height: 20px;
 }
 
+.ahFinanceMobileBranchScope {
+  display: none;
+}
+
+.ahFinanceBranchSelector {
+  display: grid;
+  gap: 6px;
+}
+
+.ahFinanceBranchSelector > span {
+  color: var(--ah-color-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 15px;
+}
+
+.ahFinanceBranchSelector select {
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 12px;
+  background: var(--ah-color-surface);
+  padding: 0 38px 0 13px;
+  color: var(--ah-color-text-primary);
+  font: 600 15px/1.2 var(--font-sans);
+}
+
+.ahFinanceBranchSelector select:disabled {
+  color: var(--ah-color-text-secondary);
+  background: var(--ah-color-surface-soft);
+}
+
 .ahFinanceDenied > .ahCard {
   min-height: 180px;
 }
@@ -403,6 +436,15 @@
   .ahFinanceDenied {
     gap: 16px;
     padding-top: 0;
+  }
+
+  .ahFinanceMobileBranchScope {
+    display: block;
+    min-width: 0;
+    border: 1px solid var(--ah-color-border);
+    border-radius: 15px;
+    background: var(--ah-color-surface);
+    padding: 12px 14px 14px;
   }
 
   .ahFinancePage .ahPageHeader {

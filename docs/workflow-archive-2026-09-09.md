@@ -51,6 +51,14 @@ controller объединяет только текущий выпуск инт�
 Исторический workflow сохранён с blob `9952c900da21eac16a37ddf3adb5f52cb4d586cf`
 и SHA-256 `fcebf657da1ba80a9d56d2f381841a58e061375bb1d31d6d3e5cf9a0f1b83f3c`.
 
+Седьмой cleanup-блок D181 заменяет отработавший production controller D180
+следующим одноразовым controller без увеличения активного каталога: workflow
+policy сохраняет 16 workflow и 0 violations. D180 release
+`511d467763b7ca050c096df23cfcdcd1f62fe51d` принят run `34799802826`, а его
+неизменённый contract fixture сохранён в
+`deploy/v52/src/tests/contract-fixtures/deploy-d180.yml` с SHA-256
+`b9dfa00421a62a3a156c6a7950bb7041bf3e7a3bc68f319cee3114299d224c63`.
+
 | Blob SHA                                   | Путь                                                                                |
 | ------------------------------------------ | ----------------------------------------------------------------------------------- |
 | `46ce4c5ed22c88a692f565e91dc8112e400bdff6` | `.github/workflows/d060-tochka-production-hotfix-v2.yml`                            |
