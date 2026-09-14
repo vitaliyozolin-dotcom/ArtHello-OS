@@ -145,7 +145,7 @@ test("D179 preserves the enabled AlfaCRM import and egress proof before stopping
 });
 
 test("D178 activates controlled AlfaCRM imports only after exact D177 and preview evidence", () => {
-  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "./contract-fixtures/deploy-d178.yml");
+  const workflow = sourceText("./contract-fixtures/deploy-d178.yml");
   const evidence = workflow.indexOf("ARTHELLO_D178_PREVIEW_EVIDENCE=VERIFIED");
   const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
 
@@ -170,5 +170,50 @@ test("D178 activates controlled AlfaCRM imports only after exact D177 and previe
   assert.match(workflow, /production-d178-\$ACTIVATION_SHA\.json/);
   assert.match(workflow, /ARTHELLO_D178_ROLLBACK_SNAPSHOT=VERIFIED/);
   assert.match(workflow, /ARTHELLO_D178_EXTERNAL=VERIFIED arthello=200 school=200 pay=200/);
+  assert.doesNotMatch(workflow, /@arthello\.ru|buh@|api_key\s*:/i);
+});
+
+test("D180 deploys the import usability fix over the verified D179 runtime", () => {
+  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-alfacrm-d180.yml", "./contract-fixtures/deploy-d180.yml");
+  const snapshot = workflow.indexOf("ARTHELLO_D180_ROLLBACK_SNAPSHOT=VERIFIED");
+  const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
+  const candidateStart = workflow.indexOf('docker run -d --name "$candidate"');
+  const productionProof = workflow.indexOf("ARTHELLO_D180_PRODUCTION=VERIFIED");
+  const lockedRouteProof = workflow.indexOf("ARTHELLO_D180_LOCKED_ROUTE=VERIFIED");
+  const externalProof = workflow.indexOf("ARTHELLO_D180_EXTERNAL=VERIFIED");
+
+  assert.match(workflow, /D180: fix AlfaCRM live import/);
+  assert.match(workflow, /workflow_run:/);
+  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(workflow, /concurrency:\s*\n\s*group: gateway-38-55-arthello-production-d180[\s\S]*?jobs:\s*\n\s*deploy:\s*\n\s*concurrency:\s*\n\s*group: gateway-38-55-arthello-production/);
+  assert.match(workflow, /verify-external:\n    needs: deploy\n    concurrency:[\s\S]*?group: gateway-38-55-arthello-production[\s\S]*?runs-on: ubuntu-latest/);
+  assert.ok(productionProof > 0 && lockedRouteProof > productionProof && externalProof > lockedRouteProof, "the locked gateway proof must precede off-host exact-release verification");
+  assert.match(workflow, /D180_CANDIDATE_NAME: \$\{\{ steps\.publish\.outputs\.candidate \}\}/);
+  assert.match(workflow, /D180_RECEIPT: \$\{\{ steps\.publish\.outputs\.receipt \}\}/);
+  assert.match(workflow, /test "\$live_id" = "\$candidate"/);
+  assert.match(workflow, /arthello\.release\.sha/);
+  assert.match(workflow, /pay-assets\/release\.json\?release=\$RELEASE_SHA/);
+  assert.match(workflow, /\.decision == "D180" and \.releaseSha == \$release/);
+  assert.doesNotMatch(workflow, /docker ps --filter label=arthello\.production/);
+  assert.match(workflow, /environment: production-ru/);
+  assert.match(workflow, /runs-on:[\s\S]*?self-hosted[\s\S]*?arthello-gateway/);
+  assert.match(workflow, /EXPECTED_LIVE_RELEASE_SHA: a2f30685f037e540206f459c34a6c37e90d3b95b/);
+  assert.doesNotMatch(workflow, /__D179_RELEASE_SHA__/);
+  assert.match(workflow, /production-d179-\$EXPECTED_LIVE_RELEASE_SHA\.json/);
+  assert.match(workflow, /\.decision=="D179"/);
+  assert.match(workflow, /\.releaseSha==\$release/);
+  assert.match(workflow, /expected_live_image="\$\(jq -er '\.imageId'/);
+  assert.match(workflow, /runChunkedAlfaImport/);
+  assert.match(workflow, /NOTICE_AUTO_DISMISS_MS = 7_000/);
+  assert.match(workflow, /listEntities\(storedRows/);
+  assert.match(workflow, /isCurrentAlfaStaffRecord/);
+  assert.match(workflow, /ALFACRM_IMPORT_ENABLED=true/);
+  assert.match(workflow, /families\["status"\] == "imported"/);
+  assert.match(workflow, /staff\["status"\] == "imported"/);
+  assert.match(workflow, /subscriptions\["status"\] in \("importing", "imported"\)/);
+  assert.ok(liveStop > 0 && snapshot > liveStop && candidateStart > snapshot, "recoverable data snapshot must complete before the replacement starts");
+  assert.match(workflow, /ARTHELLO_D180_EDGE_STABILITY=VERIFIED seconds=65/);
+  assert.match(workflow, /ARTHELLO_D180_PRODUCTION=VERIFIED/);
+  assert.match(workflow, /ARTHELLO_D180_EXTERNAL=VERIFIED arthello=200 school=200 pay=200/);
   assert.doesNotMatch(workflow, /@arthello\.ru|buh@|api_key\s*:/i);
 });

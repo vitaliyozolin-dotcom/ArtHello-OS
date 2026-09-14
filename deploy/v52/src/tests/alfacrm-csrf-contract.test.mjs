@@ -34,10 +34,10 @@ const { hasTrustedMutationOrigin } = await import(pathToFileURL(join(temp, 'secu
 // Only React state callbacks, document.cookie and the network are supplied by
 // the fixture; the method, headers, credentials and body come from the source.
 const wizard = readFileSync(new URL('../app/components/AlfaCrmSetupWizard.tsx', import.meta.url), 'utf8');
-const start = '  async function post(';
+const start = '  async function request(';
 const end = '\n  const state = payload.state;';
 const cookieStart = 'function readCookie(name: string)';
-assert.equal(wizard.split(start).length, 2, 'one Alfa mutation sender');
+assert.equal(wizard.split(start).length, 2, 'one Alfa mutation request sender');
 assert.equal(wizard.split(end).length, 2, 'one end of the mutation sender');
 assert.equal(wizard.split(cookieStart).length, 2, 'one cookie reader');
 const sender = wizard.slice(wizard.indexOf(start), wizard.indexOf(end));

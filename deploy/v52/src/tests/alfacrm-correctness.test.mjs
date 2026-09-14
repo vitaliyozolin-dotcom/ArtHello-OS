@@ -10,6 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 const dataModule = text => `data:text/javascript;base64,${Buffer.from(text).toString('base64')}`;
 const policyUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/access-policy.ts'), 'utf8'), { mode: 'strip' }));
 const integrationsUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/integrations.ts'), 'utf8'), { mode: 'strip' }));
+const alfaImportUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/alfacrm-import.ts'), 'utf8'), { mode: 'strip' }));
 const policy = await import(policyUrl);
 globalThis.__alfaCorrectness = { env: {}, actor: null, csrfValid: true, originValid: true };
 const harness = globalThis.__alfaCorrectness;
@@ -20,6 +21,7 @@ const adapters = {
   '../../../../lib/integrations': integrationsUrl,
   '../../../../lib/production-auth': dataModule('export const getAuthenticatedRequestContext=async()=>globalThis.__alfaCorrectness.actor; export const verifyAuthenticatedRequestCsrf=()=>{if(!globalThis.__alfaCorrectness.csrfValid)throw new Error("fixture csrf rejected");};'),
   '../../../../lib/request-security': dataModule('export const hasTrustedMutationOrigin=()=>globalThis.__alfaCorrectness.originValid;'),
+  '../../../../lib/alfacrm-import': alfaImportUrl,
 };
 let source = stripTypeScriptTypes(readFileSync(resolve('app/api/integrations/alfacrm/route.ts'), 'utf8'), { mode: 'transform' })
   .replace(/from\s+["']([^"']+)["']/g, (_all, name) => {
@@ -225,6 +227,41 @@ test('partial subscription chunks do not advance last success; only clean final 
   assert.equal(final.rejected, 0);
   assert.equal(final.state.modules.subscriptions.importedCount, 16);
   assert.notEqual(sql.prepare('SELECT last_success_at FROM integration_connections').get().last_success_at, previousSuccess);
+});
+
+test('long automatic subscription import keeps its roster-bound preview after 30 minutes', async t => {
+  await prepareSubscriptions(t);
+  customersForBalance(0);
+  const preview = await previewSubscriptions();
+  const state = await route.readState();
+  state.modules.subscriptions.lastPreviewAt = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+  await route.persistState(state);
+  const result = await importSubscriptions(preview.previewToken);
+  assert.equal(result.complete, true);
+
+  const expiredState = await route.readState();
+  expiredState.modules.subscriptions.status = 'previewed';
+  expiredState.modules.subscriptions.previewToken = 'expired-six-hour-preview';
+  expiredState.modules.subscriptions.previewSignature = await route.previewSignatureFor('subscriptions', expiredState, { dateFrom: '', dateTo: '' });
+  expiredState.modules.subscriptions.lastPreviewAt = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+  expiredState.modules.subscriptions.customerSignature = await route.readState().then(current => current.modules.subscriptions.customerSignature);
+  await route.persistState(expiredState);
+  const response = await post({ action: 'importModule', module: 'subscriptions', previewToken: 'expired-six-hour-preview' });
+  assert.equal(response.status, 409);
+  assert.match((await response.json()).error, /6 часов/);
+});
+
+test('staff snapshot excludes teacher cards with explicit inactivity or a past end date', async t => {
+  const { sql } = await setup(t);
+  await importSnapshot('staff', { '1': [
+    { id: 11, name: 'Current teacher', e_date: '2030-12-31' },
+    { id: 12, name: 'Former teacher', e_date: '2020-01-01' },
+    { id: 13, name: 'Inactive teacher', is_active: 0 },
+  ] }, { mappings: { '1': 'BR-SCHOOL' } });
+  assert.deepEqual(
+    sql.prepare("SELECT display_name FROM entities WHERE entity_type='Сотрудник' ORDER BY display_name").all().map(row => row.display_name),
+    ['Current teacher'],
+  );
 });
 
 test('a rejected earlier chunk cannot be concealed by continuing to a clean final chunk', async t => {

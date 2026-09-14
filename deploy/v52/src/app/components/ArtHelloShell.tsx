@@ -4,6 +4,7 @@ import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, use
 import { ModuleId, moduleCatalog } from "../../data/test-snapshot";
 import { canAccessModule, registryCapabilities, resolveModuleRoute } from "../../lib/access-policy";
 import { humanPeriodLabel, humanTechnicalText, recordLabel, taskRecordLabel } from "../../lib/record-labels";
+import { scheduleNoticeDismiss } from "../../lib/notice-dismiss";
 import { AppIcon } from "./AppIcon";
 import { DeveloperFeedback } from "./DeveloperFeedback";
 import { OwnerDashboard } from "./OwnerDashboard";
@@ -174,6 +175,10 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
     allowedModules: authenticatedUser?.allowedModules,
   }), [authenticatedUser?.allowedModules, authenticatedUser?.apiRole, authenticatedUser?.canAccessMedical, authenticatedUser?.canAccessPay, authenticatedUser?.isSystemOwner]);
   const isModuleAllowed = useCallback((id: ModuleId) => canAccessModule(accessContext, id), [accessContext]);
+  useEffect(() => {
+    if (!notice) return;
+    return scheduleNoticeDismiss(() => setNotice((current) => current === notice ? null : current));
+  }, [notice]);
   const allowedModuleIds = useMemo(
     () => new Set(moduleCatalog.map((module) => module.id).filter(isModuleAllowed)),
     [isModuleAllowed],
@@ -556,7 +561,7 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
 
       {drawer ? <DetailDrawer data={drawer} close={() => setDrawer(null)} createTask={() => { setDrawer(null); setTaskOpen(true); }} /> : null}
       {taskOpen ? <TaskModal close={() => setTaskOpen(false)} refresh={loadTasks} notify={setNotice} /> : null}
-      {notice ? <div className="toast" role="status">{notice}<button onClick={() => setNotice(null)}>×</button></div> : null}
+      {notice ? <div className="toast" role="status">{notice}<button onClick={() => setNotice(null)} aria-label="Закрыть уведомление">×</button></div> : null}
       {navOpen ? <button className="nav-scrim" aria-label="Закрыть меню" onClick={() => setNavOpen(false)} /> : null}
       {commandOpen ? <CommandPalette tasks={tasks} allowedModules={allowedModuleIds} close={() => setCommandOpen(false)} navigate={(id) => { openModule(id); setCommandOpen(false); }} createTask={() => { setCommandOpen(false); setTaskOpen(true); }} /> : null}
       {settingsOpen ? <Suspense fallback={<div className="settings-layer"><button className="drawer-scrim" onClick={() => setSettingsOpen(false)} aria-label="Закрыть настройки" /><section className="settings-modal" role="dialog" aria-modal="true" aria-label="Настройки"><div className="settings-state"><strong>Открываем настройки…</strong><span>Проверяем роль владельца и доступные филиалы</span></div></section></div>}><SettingsWorkspace key={settingsInitialTab} initialTab={settingsInitialTab} close={() => setSettingsOpen(false)} notify={setNotice} onContextChanged={applyAccessContext} onTasksChanged={loadTasks} onFavoritesChanged={setFavoriteModules} /></Suspense> : null}

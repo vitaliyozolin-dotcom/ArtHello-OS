@@ -171,7 +171,8 @@ if (!alfaWizardSource.includes('<style>{ALFA_CRM_STYLES}</style>')) {
 }
 const effectAnchor = "  useEffect(() => { void load(); }, []);";
 const effectReplacement = "  // Initial connector state is intentionally loaded only once when the modal mounts.\n  // eslint-disable-next-line react-hooks/exhaustive-deps\n  useEffect(() => { void load(); }, []);";
-if (!alfaWizardSource.includes(effectReplacement)) {
+const boundedEffect = "    const timer = window.setTimeout(() => void load(), 0);";
+if (!alfaWizardSource.includes(effectReplacement) && !alfaWizardSource.includes(boundedEffect)) {
   if (!alfaWizardSource.includes(effectAnchor)) throw new Error("AlfaCRM patch: wizard load effect anchor not found");
   alfaWizardSource = alfaWizardSource.replace(effectAnchor, effectReplacement);
 }

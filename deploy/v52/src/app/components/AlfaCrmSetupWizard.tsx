@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { runChunkedAlfaImport } from "../../lib/alfacrm-import";
 import "./AlfaCrmSetupWizard.css";
 
 type ModuleKey = "families" | "staff" | "groups" | "lessons" | "subscriptions" | "finance";
@@ -52,6 +53,8 @@ type ActionResponse = Partial<AlfaPayload> & {
   previewToken?: string;
   complete?: boolean;
   nextCursor?: number;
+  rejected?: number;
+  projectionBlocked?: boolean;
 };
 
 type ModuleDefinition = {
@@ -131,10 +134,6 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
     };
   }, [close]);
 
-  // Initial connector state is intentionally loaded only once when the modal mounts.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { void load(); }, []);
-
   async function load() {
     setLoading(true);
     try {
@@ -170,24 +169,60 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
     }
   }
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+    // Initial connector state is intentionally loaded only once when the modal mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function request(body: Record<string, unknown>) {
+    const response = await fetch("/api/integrations/alfacrm", {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: {
+        "content-type": "application/json",
+        "x-arthello-role": roleCode,
+        "x-csrf-token": readCookie("__Host-arthello_csrf"),
+      },
+      body: JSON.stringify(body),
+    });
+    const result = await response.json() as ActionResponse;
+    if (!response.ok) throw new Error(result.error || "Действие AlfaCRM не выполнено");
+    return result;
+  }
+
   async function post(body: Record<string, unknown>, key: string) {
     setBusy(key);
     try {
-      const response = await fetch("/api/integrations/alfacrm", {
-        method: "POST",
-        credentials: "include",
-        cache: "no-store",
-        headers: {
-          "content-type": "application/json",
-          "x-arthello-role": roleCode,
-          "x-csrf-token": readCookie("__Host-arthello_csrf"),
-        },
-        body: JSON.stringify(body),
-      });
-      const result = await response.json() as ActionResponse;
-      if (!response.ok) throw new Error(result.error || "Действие AlfaCRM не выполнено");
+      const result = await request(body);
       if (result.state) applyPayload({ state: result.state });
       if (result.message) notify(result.message, "success");
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Действие AlfaCRM не выполнено";
+      notify(message, "error");
+      return { error: message } as ActionResponse;
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function importData(definition: ModuleDefinition, period: { dateFrom: string; dateTo: string; transitionDate: string }, previewToken: string) {
+    const key = `import-${definition.key}`;
+    const body = { ...moduleRequest("importModule", definition, period), previewToken };
+    setBusy(key);
+    try {
+      const result = definition.kind === "chunked"
+        ? await runChunkedAlfaImport(
+          () => request(body),
+          (batch) => { if (batch.state) applyPayload({ state: batch.state }); },
+        )
+        : await request(body);
+      if (definition.kind !== "chunked" && result.state) applyPayload({ state: result.state });
+      if (result.error) throw new Error(result.error);
+      if (result.message) notify(result.message, Number(result.rejected) > 0 || result.projectionBlocked ? "error" : "success");
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Действие AlfaCRM не выполнено";
@@ -309,7 +344,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
                 canManage={payload.canManage}
                 importEnabled={payload.importEnabled}
                 preview={() => post(moduleRequest("previewModule", definition, periods[definition.key]), `preview-${definition.key}`)}
-                importData={() => post({ ...moduleRequest("importModule", definition, periods[definition.key]), previewToken: state.modules[definition.key].previewToken }, `import-${definition.key}`)}
+                importData={() => importData(definition, periods[definition.key], state.modules[definition.key].previewToken)}
               />)}
             </div>
             <div className="ahAlfaCrmReadOnlyNote"><strong>Что будет дальше</strong><span>После успешной первичной загрузки каждого модуля можно подключать его инкрементальную автосинхронизацию. Пока она намеренно не включается автоматически: сначала нужно проверить фактические связи и количество данных.</span></div>
@@ -371,7 +406,7 @@ function ModuleCard({ definition, state, period, setPeriod, busy, canManage, imp
 
     <div className="ahAlfaCrmModuleActions">
       <button type="button" className="secondary" disabled={!canManage || Boolean(busy) || Boolean(dependencyMissing)} onClick={() => void preview()}>{previewBusy ? "Считаю…" : imported ? "Пересчитать" : "Проверить данные"}</button>
-      <button type="button" disabled={Boolean(busy) || !canImport} onClick={() => void importData()}>{importBusy ? "Загружаю…" : moduleState.status === "importing" ? "Продолжить загрузку" : imported ? "Обновить выбранный блок" : "Импортировать"}</button>
+      <button type="button" disabled={Boolean(busy) || !canImport} onClick={() => void importData()}>{importBusy ? "Загружаю автоматически…" : moduleState.status === "importing" ? "Продолжить автоматически" : imported ? "Обновить выбранный блок" : "Импортировать"}</button>
     </div>
   </article>;
 }

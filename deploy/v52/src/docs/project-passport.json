@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "D179: единая история и компактная карточка операции",
+    "name": "D180: завершение пакетного импорта и видимость клиентов AlfaCRM",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -207,7 +207,13 @@
       "D177 production run 34789532262 завершён success: image sha256:8bda721095c7b178ea5721115bd2146269a07fd30eb91f905abe59b889306000, AlfaCRM egress=401, snapshot, данные, 65 секунд стабильности и внешние ArtHello/School/Pay=200 подтверждены.",
       "D178 activation run 34791395398 завершён success: ALFACRM_IMPORT_ENABLED включён поверх точного D177 image, rollback snapshot, 65 секунд стабильности и внешние ArtHello/School/Pay=200 подтверждены.",
       "IMG_0256/IMG_0258/IMG_0260/IMG_0261/IMG_0262/IMG_0263: владелец потребовал убрать лишние пояснения и повторные реестры, уплотнить типографику и открывать компактную карточку операции с крестиком и подписанными комментариями.",
-      "D179 локально: typecheck и production build прошли; 93/93 связанных финансовых, банковских, Pay, dashboard и visual contracts прошли."
+      "D179 локально: typecheck и production build прошли; 93/93 связанных финансовых, банковских, Pay, dashboard и visual contracts прошли.",
+      "D179 release a2f30685f037e540206f459c34a6c37e90d3b95b опубликован production run 34797052085: image sha256:b236a7149e74ebe3ae7ead5b94a965ad9a5bcee087a4de44b45d98684c6fd7e0, AlfaCRM egress=401, rollback snapshot, 4 банковских счёта с остатками, 65 секунд стабильности, точный locked route и независимые ArtHello/School/Pay=200 подтверждены.",
+      "D178 локально: 18/18 release/Money-контрактов и 811/813 остальных тестов вне несовместимого с managed filesystem chown-файла прошли, 2 пропущены; typecheck, lint без ошибок и production build прошли.",
+      "D178 activation commit 349c4c46e2ed4b7de42aa0dd9cf46666b7b55742 опубликован production run 34791395398: ALFACRM_IMPORT_ENABLED включён поверх exact D177 image, snapshot и внешние ArtHello/School/Pay=200 подтверждены.",
+      "IMG_0265(1)/IMG_0266/IMG_0267: импорт абонементов требует ручного продолжения каждые 15 клиентов, раздел «Клиенты» показывает 0 после импорта, нижнее уведомление не исчезает, а 193 сотрудника требуют фильтрации по признакам актуальности.",
+      "D180 устраняет четыре причины: автоматическое продолжение безопасных 15-клиентских пакетов, фильтрация сущностей до пагинации, авто-закрытие уведомления через 7 секунд и исключение явно неактивных/завершивших работу сотрудников.",
+      "D180 локально: 107/107 целевых AlfaCRM/реестровых контрактов прошли; typecheck, production build и lint прошли без ошибок. Полный набор: 833 passed, 6 owner/chown-тестов несовместимы с managed filesystem (EINVAL), 2 skipped."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
@@ -217,7 +223,7 @@
       "School transport восстановлен и read-only проверен; естественный авторизованный Education→дневник SSO не подтверждён, облачный браузер возвращает502 до формы входа.",
       "Customer.balance подтверждён официальным API как денежное поле; Alfa financial movements остаются blocked до проверенного контракта PayType direction.",
       "Новая ArtHello версия ещё не переключена: нужны первая backup+restore, exact immutable release и пользовательская приёмка шести сценариев.",
-      "D179 ещё не опубликован: требуются exact-main Verify, isolated browser card/comment path, snapshot, сохранность активированного импорта AlfaCRM, банковских счетов/остатков и внешний ArtHello/School/Pay probe."
+      "D180 готовится поверх verified D179 release a2f30685f037e540206f459c34a6c37e90d3b95b и production run 34797052085: требуются exact-main Quality/Proof/Verify, совпадение live AlfaCRM import state, rollback snapshot, 65 секунд стабильности и внешний ArtHello/School/Pay probe."
     ]
   },
   "stages": [
@@ -457,8 +463,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "Опубликовать D179: единственную банковскую историю, очередь разнесения и компактную карточку операции с подписанными комментариями без отката активированного импорта AlfaCRM",
-    "evidence": "D179 UI/API-контракты, browser path карточки и комментария, exact SHA/tree, Quality и Verify, сохранённые ALFACRM_IMPORT_ENABLED, Pay grants, банковские счета и остатки, rollback snapshot, 65 секунд стабильности и независимая production-проверка ArtHello/School/Pay"
+    "result": "После подтверждённого production-выпуска D179 опубликовать D180: один запуск автоматически завершает безопасные пакеты абонементов, импортированные семьи видны в «Клиентах», уведомления исчезают через 7 секунд, а повторный импорт сотрудников исключает явно неактуальные карточки",
+    "evidence": "Целевые D180 contracts, полный typecheck/test/build на exact D179 main, verified D179 production receipt и live AlfaCRM state до docker stop, свежий rollback snapshot, exact hosted image, 65 секунд стабильности и независимый ArtHello/School/Pay probe"
   },
   "decisionLog": [
     {
@@ -2765,12 +2771,12 @@
     },
     {
       "project_id": "ARTHELLO-OS",
-      "status": "active",
+      "status": "completed",
       "approved_by": "Виталий Озолин — после подключения, сопоставления и предпросмотра сообщил: «Импортировать не нажимается»",
       "approved_at": "2026-09-13",
       "owner": "Исполнитель ArtHello OS",
       "deadline": "текущий цикл исправления",
-      "review_at": "после production-активации D178 и первого завершённого импорта семей и сотрудников",
+      "review_at": "production-активация D178 завершена 2026-09-14; первый импорт проверен владельцем",
       "affected_stages": [
         16,
         18,
@@ -2791,7 +2797,8 @@
         "D178 controller сохраняет полный D177 release-contract fixture и требует совпадения D177 receipt с live image, container и route до любой остановки production.",
         "D177 production run 34789532262 успешно создал точный receipt для release 6ef7a3dc82e4644d1991d5454e61b62149b3738b и image sha256:8bda721095c7b178ea5721115bd2146269a07fd30eb91f905abe59b889306000.",
         "D178 локально прошёл 18/18 release/Money-контрактов и 811/813 остальных тестов вне chown-файла, 2 skipped; typecheck, lint без ошибок и production build успешны.",
-        "D178 activation run 34791395398 завершён success и подтвердил preview evidence, runtime-флаг, rollback snapshot, 65 секунд стабильности и внешний ArtHello/School/Pay=200."
+        "D178 activation commit 349c4c46e2ed4b7de42aa0dd9cf46666b7b55742 и production run 34791395398 завершены success: exact D177 image сохранён, ALFACRM_IMPORT_ENABLED=true, rollback snapshot и внешний ArtHello/School/Pay=200 подтверждены.",
+        "IMG_0265(1): после активации семьи и сотрудники импортированы, абонементы начали сохраняться безопасными пакетами; runtime gate фактически открыт."
       ],
       "assumptions": [
         "Новый v2api key введён владельцем только в защищённое окно ArtHello OS и не передан в чат или CI.",
@@ -2809,7 +2816,8 @@
       "source_links": [
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34787872813",
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/6ef7a3dc82e4644d1991d5454e61b62149b3738b",
-        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34791395398"
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34791395398",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/349c4c46e2ed4b7de42aa0dd9cf46666b7b55742"
       ],
       "rejected_alternatives": [
         {
@@ -2840,7 +2848,7 @@
     },
     {
       "project_id": "ARTHELLO-OS",
-      "status": "active",
+      "status": "completed",
       "approved_by": "Виталий Озолин — явное поручение в текущем чате",
       "approved_at": "2026-09-14",
       "owner": "Исполнитель ArtHello OS",
@@ -2880,7 +2888,8 @@
         "Explicit owner instruction 2026-09-14"
       ],
       "source_links": [
-        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34791395398"
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34791395398",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34797052085"
       ],
       "rejected_alternatives": [
         {
@@ -2905,6 +2914,79 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "TypeScript/build, D179 contracts, browser card/comment path, exact hosted image, protected receipt, 65-second stability and independent external probe",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — сообщил о пакетах по 15, пустом разделе клиентов, постоянном уведомлении и вероятно исторических сотрудниках",
+      "approved_at": "2026-09-14",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после production-выпуска D180 и продолжения импорта абонементов одним запуском",
+      "affected_stages": [
+        8,
+        16,
+        18,
+        21,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "IMG_0265(1) показывает 45 загруженных абонементов и ручную кнопку продолжения; IMG_0266 — 0 семей в «Клиентах» при уже импортированных семьях; IMG_0266/IMG_0267 — постоянную тёмную строку уведомления; владелец отметил, что 193 сотрудника похожи на выборку за всё время.",
+      "decision_id": "DEC-2026-09-14-88",
+      "question": "Как завершить крупный read-only импорт AlfaCRM одним действием и показать его результат, не снимая безопасных ограничений пакета и актуальности данных?",
+      "statement": "D180 сохраняет серверный пакет абонементов по 15 клиентов, но после одного нажатия интерфейс последовательно запрашивает следующие пакеты до подтверждённого complete; отсутствие продвижения курсора и любой отказ останавливают цикл без потери уже записанных пакетов. Предпросмотр абонементов действует 6 часов и на каждом пакете защищён подписью неизменного списка импортированных клиентов. API единого реестра применяет тип, поиск и состояние сверки до пагинации, а раздел «Клиенты» получает семьи страницами по 100. Нижнее уведомление автоматически закрывается через 7 секунд и остаётся закрываемым вручную. Повторный импорт сотрудников исключает карточки с явным inactive/removed или прошедшей датой окончания; запись без отдельного lifecycle-поля сохраняется, если AlfaCRM вернула её в выборке removed=0.",
+      "context": "Серверное ограничение 15 защищает один запрос от длительной работы, но интерфейс перекладывал каждое продолжение на владельца. Пустой раздел клиентов возникал потому, что /api/entities сначала обрезал общий реестр первыми 500 строками и только затем искал семьи. Общий notice не имел таймера. Сотрудники читались с removed=0, но результат дополнительно не проверял явные признаки окончания работы.",
+      "rationale": "Автоматическое продолжение сохраняет ограниченный и идемпотентный серверный пакет, но убирает сотни ручных нажатий. Фильтрация до пагинации возвращает корректную выборку без искусственного общего лимита. Семь секунд достаточно для чтения короткого статуса и освобождает мобильный экран. Консервативная фильтрация сотрудников удаляет только доказанно неактуальные карточки и не теряет действующего педагога из-за отсутствующего необязательного поля.",
+      "evidence": [
+        "IMG_0265(1): состояние subscriptions=importing, загружено 45 и требуется ручное продолжение; последующее уведомление сообщает о 60 обработанных клиентах.",
+        "IMG_0266: раздел «Клиенты и семьи» показывает Все 0 при завершённом импорте семей; тёмное уведомление перекрывает нижнюю навигацию.",
+        "IMG_0267: то же уведомление остаётся при открытии настроек и перекрывает действия.",
+        "D180 contracts подтверждают фильтрацию типа до границы страницы, автоматический цикл и stalled-cursor guard, 7-секундный dismiss, lifecycle-фильтр сотрудников и production wiring.",
+        "D180 workflow требует verified D179 finance receipt, совпадения live release/image/container, ALFACRM_IMPORT_ENABLED=true, сохранённых семей/сотрудников/абонементов, rollback snapshot и независимой внешней проверки."
+      ],
+      "assumptions": [
+        "Фраза владельца о сотрудниках «за всё время» означает, что в рабочей команде должны оставаться только актуальные карточки.",
+        "Лимит 15 остаётся защитой одного серверного запроса и не означает ограничение общего количества импорта.",
+        "Во время автоматического продолжения окно AlfaCRM и вкладка остаются открыты; уже завершённые пакеты сохраняются при разрыве и могут быть продолжены после новой проверки.",
+        "Обратная запись в AlfaCRM, денежная проекция неподтверждённых PayType, реальные платежи и фискализация остаются выключены."
+      ],
+      "dependencies": [
+        "DEC-2026-09-13-86 completed",
+        "DEC-2026-09-14-87 completed; verified D179 release a2f30685f037e540206f459c34a6c37e90d3b95b, production run 34797052085",
+        "Existing encrypted AlfaCRM credential and branch mappings",
+        "Explicit owner defect report 2026-09-14"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34791395398",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34797052085"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Увеличить один серверный пакет с 15 до полного объёма",
+          "reason": "Тысячи последовательных tenant-запросов превысят безопасное время одного запроса и усложнят восстановление после сетевого отказа.",
+          "reopen_condition": "только после появления отдельной durable job queue с возобновляемым курсором"
+        },
+        {
+          "option": "Скрыть уведомления только по ручному нажатию",
+          "reason": "На мобильном экране постоянная строка перекрывает навигацию и следующие действия.",
+          "reopen_condition": "для отдельных подтверждений, требующих явного решения пользователя"
+        },
+        {
+          "option": "Удалять всех сотрудников без даты окончания",
+          "reason": "AlfaCRM может не возвращать необязательное lifecycle-поле для действующей карточки; такое правило создаст ложные увольнения.",
+          "reopen_condition": "после подтверждённого обязательного lifecycle-контракта tenant API"
+        }
+      ],
+      "actions": [
+        {
+          "action": "После verified D179 проверить и опубликовать D180, подтвердить сохранность live AlfaCRM state, автоматическое продолжение, видимость семей, временное уведомление, актуальность сотрудников и внешний production-контур",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "Полные typecheck/test/build gates, exact-main Quality/Verify, protected D180 receipt, 65-second stability, ARTHELLO_D180_ALFACRM_LIVE_STATE=VERIFIED и ARTHELLO_D180_EXTERNAL=VERIFIED",
           "status": "in_progress"
         }
       ]
