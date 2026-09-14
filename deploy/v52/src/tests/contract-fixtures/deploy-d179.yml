@@ -18,7 +18,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: gateway-38-55-arthello-production
+  # This exact-release workflow has its own pending slot: legacy workflow_run
+  # releases share the old group and can otherwise cancel D179 before job.if.
+  group: gateway-38-55-arthello-production-d179
   cancel-in-progress: false
 
 env:
