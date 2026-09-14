@@ -560,10 +560,13 @@ jobs:
       # authenticated against the exact container and immutable D179 receipt.
       - name: Verify exact D179 through the public routes
         if: success()
+        env:
+          D179_RECEIPT: ${{ steps.publish.outputs.receipt }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          receipt="/var/lib/arthello-release-state/production-d179-$RELEASE_SHA.json"
+          receipt="$D179_RECEIPT"
+          test "$receipt" = "$HOME/.config/arthello/release-state/production-d179-$RELEASE_SHA.json"
           test -f "$receipt"
           candidate="$(jq -er '.candidateContainerId' "$receipt")"
           expected_image="$(jq -er '.imageId' "$receipt")"

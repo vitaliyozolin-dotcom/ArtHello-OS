@@ -127,6 +127,9 @@ test("D179 deployment preserves AlfaCRM and Pay while publishing the compact fin
   assert.doesNotMatch(workflow, /\n  verify-external:/);
   assert.ok(productionProof > 0 && externalProof > productionProof, "the shared deployment lock must cover exact-release public verification");
   assert.match(workflow, /candidateContainerId/);
+  assert.match(workflow, /D179_RECEIPT: \$\{\{ steps\.publish\.outputs\.receipt \}\}/);
+  assert.match(workflow, /production-d179-\$RELEASE_SHA\.json/);
+  assert.doesNotMatch(workflow, /\/var\/lib\/arthello-release-state/);
   assert.match(workflow, /test "\$live_id" = "\$candidate"/);
   assert.match(workflow, /arthello\.release\.sha/);
   assert.match(workflow, /D179_FINANCE_COMPACT_OPERATION_CARD/);
