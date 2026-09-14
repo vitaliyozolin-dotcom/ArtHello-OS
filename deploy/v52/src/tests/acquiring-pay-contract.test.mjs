@@ -118,7 +118,7 @@ test("D177 deployment preserves AlfaCRM and Pay while publishing compact Money h
 });
 
 test("D179 deployment preserves AlfaCRM and Pay while publishing the compact finance workflow", async () => {
-  const workflow = await source("../../../../.github/workflows/deploy-arthello-finance-d179.yml");
+  const workflow = await source("../../../../.github/workflows/deploy-arthello-finance-d179.yml", "./contract-fixtures/deploy-d179.yml");
   assert.match(workflow, /D179: compact finance operation workflow/);
   assert.match(workflow, /D179_FINANCE_COMPACT_OPERATION_CARD/);
   assert.match(workflow, /ahFinanceBankHistoryRow/);
