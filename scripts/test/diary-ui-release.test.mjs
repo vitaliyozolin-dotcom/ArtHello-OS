@@ -7,9 +7,9 @@ import test from "node:test";
 const read = (path) =>
   readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 
-test("D185 pins the accepted Atlas source and current central predecessor", () => {
+test("D186 pins the accepted Atlas source and current central predecessor", () => {
   const workflow = read(".github/workflows/deploy-diaries-d133.yml");
-  const release = read("deploy/release-atlas-d185.sh");
+  const release = read("deploy/release-atlas-d186.sh");
   assert.match(
     workflow,
     /ATLAS_SOURCE_SHA: f856fb3bd098152bb6b02c4d0273c4c9170b130c/,
@@ -28,7 +28,7 @@ test("D185 pins the accepted Atlas source and current central predecessor", () =
 test("production runs only after exact successful main gates and manual owner confirmation", () => {
   const workflow = read(".github/workflows/deploy-diaries-d133.yml");
   assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /inputs\.confirmation == 'DEPLOY D185 TO PRODUCTION'/);
+  assert.match(workflow, /inputs\.confirmation == 'DEPLOY D186 TO PRODUCTION'/);
   assert.match(workflow, /verify_run "\$QUALITY_RUN_ID" "Quality gates"/);
   assert.match(workflow, /verify_run "\$PROOF_RUN_ID" "ArtHello Proof Gates"/);
   assert.match(workflow, /environment: production-ru/);
@@ -39,8 +39,8 @@ test("production runs only after exact successful main gates and manual owner co
 });
 
 test("Atlas upgrade is backup-first, preserves the data volume and has rollback", () => {
-  const script = read("deploy/upgrade-atlas-d185.sh");
-  const release = read("deploy/release-atlas-d185.sh");
+  const script = read("deploy/upgrade-atlas-d186.sh");
+  const release = read("deploy/release-atlas-d186.sh");
   for (const marker of [
     "ATLAS_BACKUP=VERIFIED",
     "ATLAS_DATA_VOLUME=PRESERVED",
@@ -51,13 +51,13 @@ test("Atlas upgrade is backup-first, preserves the data volume and has rollback"
   ])
     assert.match(script, new RegExp(marker));
   assert.doesNotMatch(script, /docker volume rm/);
-  assert.match(release, /ATLAS_D185_ROLLBACK=STARTED/);
+  assert.match(release, /ATLAS_D186_ROLLBACK=STARTED/);
   assert.match(release, /docker rename "\$atlas_rollback" "\$atlas_service"/);
   assert.match(release, /owner_result=.*activate-atlas-owner-access\.mjs/);
   assert.doesNotMatch(release, /docker volume rm/);
   for (const path of [
-    "deploy/upgrade-atlas-d185.sh",
-    "deploy/release-atlas-d185.sh",
+    "deploy/upgrade-atlas-d186.sh",
+    "deploy/release-atlas-d186.sh",
   ]) {
     const syntax = spawnSync(
       "bash",

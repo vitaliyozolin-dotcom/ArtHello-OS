@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D185: replace only the Atlas application image while preserving its database volume.
+# D186: replace only the Atlas application image while preserving its database volume.
 # Image identity is proved with a portable runtime fingerprint because daemon-local
 # Docker image IDs can be rewritten across image stores.
 set -Eeuo pipefail
@@ -24,8 +24,9 @@ central_secret="$secret_dir/atlas-central-access-secret"
 pepper_secret="$secret_dir/atlas-passwordless-pepper"
 atlas_origin=https://atlas-188-225-38-55.sslip.io
 central_origin=https://arthello-188-225-38-55.sslip.io
-rollback_name="${service}-d185-rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-backup_name="pre-d185-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sqlite"
+rollback_name="${service}-d186-rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+backup_name="pre-d186-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sqlite"
+backup_helper="$controller_root/deploy/atlas-offline-backup-d186.mjs"
 new_created=0
 old_renamed=0
 old_stopped=0
@@ -96,7 +97,7 @@ if [ "$live_source" = "$ATLAS_SOURCE_SHA" ]; then
     --arg archive "$archive_sha" --arg builderImage "$builder_image_id" --arg gatewayImage "$gateway_image_id" \
     --arg runtimeFingerprint "$gateway_runtime_fingerprint" \
     '{schemaVersion:1,kind:"atlas-ui-release",controllerSha:$controller,sourceSha:$source,sourceTree:$tree,status:"already-active",dataVolumePreserved:true,archiveSha256:$archive,builderImageId:$builderImage,gatewayImageId:$gatewayImage,runtimeFingerprintSha256:$runtimeFingerprint}' \
-    > "$ATLAS_BUNDLE_DIR/atlas-d185-production-receipt.json"
+    > "$ATLAS_BUNDLE_DIR/atlas-d186-production-receipt.json"
   printf 'ATLAS_IMAGE_ID_REPRESENTATION builder=%s gateway=%s\n' "$builder_image_id" "$gateway_image_id"
   printf 'ATLAS_IMAGE_RUNTIME_FINGERPRINT=VERIFIED sha256=%s\n' "$gateway_runtime_fingerprint"
   printf 'ATLAS_DATA_VOLUME=PRESERVED\nATLAS_UPGRADE=SUCCESS\n'
@@ -130,29 +131,34 @@ printf 'ATLAS_IMAGE_ID_REPRESENTATION builder=%s gateway=%s\n' "$builder_image_i
 printf 'ATLAS_IMAGE_RUNTIME_FINGERPRINT=VERIFIED sha256=%s\n' "$gateway_runtime_fingerprint"
 image_ref="$gateway_image_id"
 
-# Stop first so the plain SQLite copy is transactionally stable.
+# Stop first so the main database and its WAL are a stable offline snapshot.
 docker stop --time 30 "$service" >/dev/null
 old_stopped=1
 test "$(docker inspect "$service" --format '{{.State.Running}}')" = false
-docker run --rm --network none --read-only --user 0:0 --security-opt no-new-privileges:true \
+test -f "$backup_helper" && test ! -L "$backup_helper"
+backup_result="$(docker run --rm --network none --read-only --user 0:0 --security-opt no-new-privileges:true \
+  --tmpfs /work:rw,nosuid,nodev,noexec,size=512m \
   --volume "$data_volume:/data:ro" --volume "$backups_volume:/backups" \
-  --env BACKUP_NAME="$backup_name" --entrypoint /bin/sh "$image_ref" -ceu '
-    test -s /data/atlas-school.sqlite
-    test ! -e "/backups/$BACKUP_NAME"
-    cp /data/atlas-school.sqlite "/backups/$BACKUP_NAME"
-    chmod 0444 "/backups/$BACKUP_NAME"
-    sync
-  '
+  --mount "type=bind,src=$backup_helper,dst=/run/atlas-offline-backup-d186.mjs,readonly" \
+  --entrypoint node "$image_ref" /run/atlas-offline-backup-d186.mjs \
+  /data/atlas-school.sqlite /work/atlas-school.sqlite "/backups/$backup_name")"
+case "$backup_result" in
+  'ATLAS_OFFLINE_BACKUP=VERIFIED wal=included') backup_wal_included=true ;;
+  'ATLAS_OFFLINE_BACKUP=VERIFIED wal=absent') backup_wal_included=false ;;
+  *) exit 1 ;;
+esac
+printf '%s\n' "$backup_result"
 docker run --rm --network none --read-only --user 0:0 --security-opt no-new-privileges:true \
   --tmpfs /tmp:rw,nosuid,nodev,size=32m --volume "$backups_volume:/backups:ro" \
   --env BACKUP_PATH="/backups/$backup_name" --entrypoint node "$image_ref" --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
     const db = new DatabaseSync(process.env.BACKUP_PATH, { readOnly: true });
-    const result = db.prepare("PRAGMA integrity_check").get();
+    const integrity = db.prepare("PRAGMA integrity_check").get()?.integrity_check;
+    const journalMode = db.prepare("PRAGMA journal_mode").get()?.journal_mode;
     db.close();
-    if (result.integrity_check !== "ok") process.exit(1);
+    if (integrity !== "ok" || journalMode !== "delete") process.exit(1);
   '
-backup_sha="$(docker run --rm --network none --read-only --user 0:0 \
+backup_sha="$(docker run --rm --network none --read-only --user 0:0 --security-opt no-new-privileges:true \
   --volume "$backups_volume:/backups:ro" --entrypoint sha256sum "$image_ref" "/backups/$backup_name" | cut -d ' ' -f 1)"
 [[ "$backup_sha" =~ ^[a-f0-9]{64}$ ]]
 printf 'ATLAS_BACKUP=VERIFIED\n'
@@ -192,5 +198,6 @@ jq -n --arg controller "$CONTROLLER_SHA" --arg source "$ATLAS_SOURCE_SHA" --arg 
   --arg archive "$archive_sha" --arg builderImage "$builder_image_id" --arg gatewayImage "$gateway_image_id" \
   --arg runtimeFingerprint "$gateway_runtime_fingerprint" \
   --arg backup "$backup_name" --arg backupSha "$backup_sha" --arg rollback "$rollback_name" \
-  '{schemaVersion:1,kind:"atlas-ui-release",controllerSha:$controller,sourceSha:$source,sourceTree:$tree,status:"pending-sso-acceptance",dataVolumePreserved:true,archiveSha256:$archive,builderImageId:$builderImage,gatewayImageId:$gatewayImage,runtimeFingerprintSha256:$runtimeFingerprint,rollbackContainer:$rollback,backup:{file:$backup,sha256:$backupSha,integrity:"ok"}}' \
-  > "$ATLAS_BUNDLE_DIR/atlas-d185-production-receipt.json"
+  --argjson backupWalIncluded "$backup_wal_included" \
+  '{schemaVersion:1,kind:"atlas-ui-release",controllerSha:$controller,sourceSha:$source,sourceTree:$tree,status:"pending-sso-acceptance",dataVolumePreserved:true,archiveSha256:$archive,builderImageId:$builderImage,gatewayImageId:$gatewayImage,runtimeFingerprintSha256:$runtimeFingerprint,rollbackContainer:$rollback,backup:{file:$backup,sha256:$backupSha,integrity:"ok",journalMode:"delete",walIncluded:$backupWalIncluded}}' \
+  > "$ATLAS_BUNDLE_DIR/atlas-d186-production-receipt.json"
