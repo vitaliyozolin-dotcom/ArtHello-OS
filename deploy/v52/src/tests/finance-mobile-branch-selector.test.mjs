@@ -213,6 +213,10 @@ test("D182 deploys the verified mobile Finance fix over the exact D181 productio
   assert.match(workflow, /confirmation:/);
   assert.match(workflow, /DEPLOY D182 TO PRODUCTION/);
   assert.match(workflow, /ARTHELLO_ARTIFACT_DELIVERY_EVENT: workflow_dispatch/);
+  assert.match(
+    workflow,
+    /cmp -s \.github\/scripts\/download-v52-artifact-r17\.py deploy\/v52\/src\/tests\/contract-fixtures\/download-v52-artifact-r17\.py/,
+  );
   assert.doesNotMatch(workflow, /workflow_run:/);
   assert.match(workflow, /environment: production-ru/);
   assert.match(workflow, /github\.sha == inputs\.release_sha/);

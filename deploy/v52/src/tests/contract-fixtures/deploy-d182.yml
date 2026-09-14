@@ -99,6 +99,7 @@ jobs:
           grep -F "stage='mobile_branch_failure'" .github/scripts/finance-ci-browser.mjs >/dev/null
           grep -F "env.get('ARTHELLO_ARTIFACT_DELIVERY_EVENT', 'workflow_run')" .github/scripts/download-v52-artifact-r17.py >/dev/null
           grep -F "env.get('GITHUB_WORKFLOW') == 'Deploy ArtHello mobile finance branch D182'" .github/scripts/download-v52-artifact-r17.py >/dev/null
+          cmp -s .github/scripts/download-v52-artifact-r17.py deploy/v52/src/tests/contract-fixtures/download-v52-artifact-r17.py
           grep -F '## D182 —' DECISIONS.md >/dev/null
           grep -F 'runChunkedAlfaImport' deploy/v52/src/app/components/AlfaCrmSetupWizard.tsx >/dev/null
           grep -F 'NOTICE_AUTO_DISMISS_MS = 7_000' deploy/v52/src/lib/notice-dismiss.ts >/dev/null
