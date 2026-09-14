@@ -18,6 +18,7 @@ const componentUrl = new URL(
   "../app/components/FinanceBranchSelector.tsx",
   import.meta.url,
 );
+const branchAccessUrl = new URL("../lib/branch-access.ts", import.meta.url);
 const shellUrl = new URL(
   "../app/components/ArtHelloShell.tsx",
   import.meta.url,
@@ -51,6 +52,41 @@ function sourceText(...urls) {
     `Required source is unavailable: ${urls.map(String).join(", ")}`,
   );
 }
+
+test("finance branch options expose only branches granted to a non-administrative user", async (t) => {
+  assert.ok(existsSync(fileURLToPath(branchAccessUrl)));
+  const temp = mkdtempSync(join(tmpdir(), "arthello-finance-access-"));
+  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  const source = readFileSync(branchAccessUrl, "utf8");
+  const result = ts.transpileModule(source, {
+    fileName: fileURLToPath(branchAccessUrl),
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+    reportDiagnostics: true,
+  });
+  assert.deepEqual(
+    result.diagnostics?.filter(
+      (item) => item.category === ts.DiagnosticCategory.Error,
+    ),
+    [],
+  );
+  const output = join(temp, "branch-access.mjs");
+  writeFileSync(output, result.outputText);
+  const { filterAccessibleBranches } = await import(pathToFileURL(output));
+  const branches = [
+    { id: "BR-ATLAS-SCHOOL", name: "Школа Атлас" },
+    { id: "BR-NEBO", name: "Садик Небо" },
+  ];
+
+  assert.deepEqual(
+    filterAccessibleBranches(branches, [{ branchId: "BR-NEBO" }], false),
+    [branches[1]],
+  );
+  assert.deepEqual(filterAccessibleBranches(branches, [], false), []);
+  assert.deepEqual(filterAccessibleBranches(branches, [], true), branches);
+});
 
 test("mobile finance scope renders every available branch when the shared scope is ALL", async (t) => {
   assert.ok(
@@ -194,6 +230,10 @@ test("finance workspace keeps the branch picker reachable in its blocked and loa
   assert.match(shell, /branches=\{branches\}/);
   assert.match(shell, /onBranchChange=\{changeBranch\}/);
   assert.match(shell, /key=\{`finance:\$\{selectedBranch\}`\}/);
+  assert.match(
+    shell,
+    /filterAccessibleBranches\(context\.branches, context\.access, context\.me\.isAdministrative\)/,
+  );
   assert.match(
     shell,
     /next === "finance" && selectedBranch === "ALL" && branches\[0\]/,

@@ -3,6 +3,7 @@
 import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ModuleId, moduleCatalog } from "../../data/test-snapshot";
 import { canAccessModule, registryCapabilities, resolveModuleRoute } from "../../lib/access-policy";
+import { filterAccessibleBranches } from "../../lib/branch-access";
 import { humanPeriodLabel, humanTechnicalText, recordLabel, taskRecordLabel } from "../../lib/record-labels";
 import { scheduleNoticeDismiss } from "../../lib/notice-dismiss";
 import { AppIcon } from "./AppIcon";
@@ -195,9 +196,10 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
     setRole(context.me.role);
     const nextFavorites = (context.me.favoriteModules ?? defaultFavoriteModules).filter((id): id is ModuleId => knownModuleIds.includes(id as ModuleId));
     setFavoriteModules((current) => sameOrderedValues(current, nextFavorites) ? current : nextFavorites);
-    setBranches(context.branches);
+    const accessibleBranches = filterAccessibleBranches(context.branches, context.access, context.me.isAdministrative);
+    setBranches(accessibleBranches);
     setAdministrative(context.me.isAdministrative);
-    const allowed = context.me.isAdministrative ? context.branches.map((branch) => branch.id) : context.access.map((grant) => grant.branchId);
+    const allowed = accessibleBranches.map((branch) => branch.id);
     const saved = readStorage("local", uiStorage.branch);
     const next = context.me.isAdministrative && saved === "ALL" ? "ALL" : saved && allowed.includes(saved) ? saved : context.me.isAdministrative ? "ALL" : allowed[0] ?? "";
     const selected = next === "ALL" && window.location.hash === "#finance" ? allowed[0] ?? "" : next;
@@ -275,12 +277,17 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
   }, [accessContext, applyAccessContext, isModuleAllowed]);
 
   const changeBranch = useCallback((branchId: string) => {
+    const allowed = branchId === "ALL" ? administrative : branches.some((branch) => branch.id === branchId);
+    if (!allowed) {
+      setNotice("Нет доступа к выбранному филиалу");
+      return;
+    }
     setSelectedBranch(branchId);
     writeStorage("local", uiStorage.branch, branchId);
     document.cookie = `arthello_branch=${encodeURIComponent(branchId)}; Path=/; SameSite=Lax`;
     setNotice(branchId === "ALL" ? "Показаны все филиалы административного корпуса" : `Рабочий филиал: ${branches.find((branch) => branch.id === branchId)?.name ?? "выбранный филиал"}`);
     window.dispatchEvent(new CustomEvent("arthello:branch-changed", { detail: branchId }));
-  }, [branches]);
+  }, [administrative, branches]);
 
   async function loadTasks() {
     try {

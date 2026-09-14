@@ -85,6 +85,7 @@ jobs:
           test "$(git log -1 --format=%s)" = "D181: restore mobile finance branch"
           grep -F 'data-d181-marker="D181_FINANCE_MOBILE_BRANCH"' deploy/v52/src/app/components/FinanceWorkspace.tsx >/dev/null
           grep -F 'Выбрать филиал для финансового отчёта' deploy/v52/src/app/components/FinanceBranchSelector.tsx >/dev/null
+          grep -F 'filterAccessibleBranches(context.branches, context.access, context.me.isAdministrative)' deploy/v52/src/app/components/ArtHelloShell.tsx >/dev/null
           grep -F "stage='mobile_branch_recovery'" .github/scripts/finance-ci-browser.mjs >/dev/null
           grep -F "stage='mobile_branch_failure'" .github/scripts/finance-ci-browser.mjs >/dev/null
           grep -F '## D181 —' DECISIONS.md >/dev/null
