@@ -55,9 +55,9 @@ controller объединяет только текущий выпуск инт�
 одноразовым ручным controller без увеличения активного каталога: workflow policy
 сохраняет 16 workflow и 0 violations. Запуск требует exact main release SHA,
 ID успешного first-attempt Verify того же SHA, typed confirmation
-`DEPLOY D182 TO PRODUCTION` и protected Environment `production-ru`; подтверждение
-также ограничивает ручной режим загрузчика immutable artifact и повторно
-проверяется непосредственно перед остановкой live. Первые D181 runs
+`DEPLOY D182 TO PRODUCTION` и protected Environment `production-ru`. Отдельный
+D182 artifact-delivery helper принимает только этот exact manual контекст, а
+подтверждение повторно проверяется непосредственно перед остановкой live. Первые D181 runs
 `34810891708` и `34811820022` остановились на source guard до загрузки image и
 production-изменений. Исправленный D181 release
 `eea35ebe384f1039324ad083fcdfa74e0d2217c4` успешно принят run `34812906091`,
@@ -66,10 +66,10 @@ production-изменений. Исправленный D181 release
 `b9dfa00421a62a3a156c6a7950bb7041bf3e7a3bc68f319cee3114299d224c63` и
 `52056abdc2ac69c258bdeb7d03e3b1880062d044d18fa41dadc8da45f1216963`.
 Активный D182 controller и его изолированный fixture совпадают с SHA-256
-`b18c003f7e98b8eb56bf5ef13193932221cee2499599641f897e57b15978b43d`.
-Общий artifact-delivery helper и его D182 test fixture совпадают с SHA-256
-`b4a95eb7968923db212b1f02b2ade6f1ca72d797be6ac7ff05a2e7cb31790f19`;
-для остальных consumers его default остаётся `workflow_run`.
+`12baf134010fded88878bab388e6e3101cb28fc5e44c2040e8c8104acf1837f1`.
+Отдельный D182 artifact-delivery helper и его fixture совпадают с SHA-256
+`5ecf137e45432b1c192e4ddddaa4579ea52a11ed20428b7cd46df1efebb5a3b0`; общий исторический R17 helper восстановлен побайтово и
+по-прежнему принимает только `workflow_run`.
 
 | Blob SHA                                   | Путь                                                                                |
 | ------------------------------------------ | ----------------------------------------------------------------------------------- |

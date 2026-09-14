@@ -930,6 +930,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           node --test scripts/test/tochka-account-identity.test.mjs
+          python3 -I .github/scripts/test-download-v52-artifact-d182.py
           python3 -m py_compile deploy/v52/maintenance/production-data-inventory.py
           python3 deploy/v52/maintenance/test_production_data_inventory.py
           test "$(python3 deploy/v52/maintenance/production-data-inventory.py --print-active-database-relative-path)" = \

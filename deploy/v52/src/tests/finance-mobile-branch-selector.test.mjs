@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdtempSync,
@@ -37,11 +36,11 @@ const browserFlowUrl = new URL(
   import.meta.url,
 );
 const artifactDeliveryUrl = new URL(
-  "../../../../.github/scripts/download-v52-artifact-r17.py",
+  "../../../../.github/scripts/download-v52-artifact-d182.py",
   import.meta.url,
 );
 const artifactDeliveryFixtureUrl = new URL(
-  "./contract-fixtures/download-v52-artifact-r17.py",
+  "./contract-fixtures/download-v52-artifact-d182.py",
   import.meta.url,
 );
 const repositoryDeployUrl = new URL(
@@ -203,7 +202,7 @@ test("D182 deploys the verified mobile Finance fix over the exact D181 productio
   );
   const mainRefRetry = workflow.indexOf("for attempt in 1 2 3 4 5 6; do");
   const artifactDownload = workflow.indexOf(
-    "python3 -I -B .github/scripts/download-v52-artifact-r17.py",
+    "python3 -I -B .github/scripts/download-v52-artifact-d182.py",
   );
 
   assert.match(workflow, /D182: restore mobile finance branch/);
@@ -212,10 +211,9 @@ test("D182 deploys the verified mobile Finance fix over the exact D181 productio
   assert.match(workflow, /verify_run_id:/);
   assert.match(workflow, /confirmation:/);
   assert.match(workflow, /DEPLOY D182 TO PRODUCTION/);
-  assert.match(workflow, /ARTHELLO_ARTIFACT_DELIVERY_EVENT: workflow_dispatch/);
   assert.match(
     workflow,
-    /cmp -s \.github\/scripts\/download-v52-artifact-r17\.py deploy\/v52\/src\/tests\/contract-fixtures\/download-v52-artifact-r17\.py/,
+    /cmp -s \.github\/scripts\/download-v52-artifact-d182\.py deploy\/v52\/src\/tests\/contract-fixtures\/download-v52-artifact-d182\.py/,
   );
   assert.doesNotMatch(workflow, /workflow_run:/);
   assert.match(workflow, /environment: production-ru/);
@@ -232,17 +230,14 @@ test("D182 deploys the verified mobile Finance fix over the exact D181 productio
     workflow,
     /\.status == "completed" and \.conclusion == "success"/,
   );
+  assert.match(artifactDelivery, /'GITHUB_EVENT_NAME': 'workflow_dispatch'/);
   assert.match(
     artifactDelivery,
-    /env\.get\('ARTHELLO_ARTIFACT_DELIVERY_EVENT', 'workflow_run'\)/,
+    /'GITHUB_WORKFLOW': 'Deploy ArtHello mobile finance branch D182'/,
   );
   assert.match(
     artifactDelivery,
-    /env\.get\('GITHUB_WORKFLOW'\) == 'Deploy ArtHello mobile finance branch D182'/,
-  );
-  assert.match(
-    artifactDelivery,
-    /env\.get\('CUTOVER_CONFIRMATION'\) == 'DEPLOY D182 TO PRODUCTION'/,
+    /'CUTOVER_CONFIRMATION': 'DEPLOY D182 TO PRODUCTION'/,
   );
   assert.match(
     workflow,
@@ -292,71 +287,6 @@ test("D182 deploys the verified mobile Finance fix over the exact D181 productio
     workflow,
     /TOCHKA_TOKEN|PAYMENT_SECRET|FISCALIZATION_SECRET/,
   );
-});
-
-test("artifact delivery keeps the workflow_run default and narrowly authorizes D182 dispatch", () => {
-  const artifactDeliveryPath = fileURLToPath(artifactDeliveryFixtureUrl);
-  const result = spawnSync(
-    "python3",
-    [
-      "-I",
-      "-B",
-      "-c",
-      String.raw`
-import importlib.util
-import pathlib
-import sys
-import tempfile
-
-path = pathlib.Path(sys.argv[1])
-spec = importlib.util.spec_from_file_location("delivery", path)
-delivery = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(delivery)
-source = "a" * 40
-delivery.subprocess.run = lambda *args, **kwargs: type("Result", (), {"stdout": (source + "\n").encode()})()
-
-with tempfile.TemporaryDirectory() as temporary:
-    base = {
-        "GITHUB_REPOSITORY": delivery.REPOSITORY,
-        "EXPECTED_REPOSITORY": delivery.REPOSITORY,
-        "GITHUB_ACTOR": delivery.OWNER,
-        "GITHUB_TRIGGERING_ACTOR": delivery.OWNER,
-        "RELEASE_SHA": source,
-        "CHECKED_SOURCE_SHA": source,
-        "TRIGGER_VERIFY_RUN_ID": "1",
-        "GITHUB_RUN_ID": "2",
-        "GITHUB_RUN_ATTEMPT": "1",
-        "RUNNER_TEMP": temporary,
-    }
-    legacy = dict(base, GITHUB_EVENT_NAME="workflow_run")
-    assert delivery.context(legacy)[:2] == (source, 1)
-
-    manual = dict(
-        base,
-        GITHUB_EVENT_NAME="workflow_dispatch",
-        ARTHELLO_ARTIFACT_DELIVERY_EVENT="workflow_dispatch",
-        GITHUB_WORKFLOW="Deploy ArtHello mobile finance branch D182",
-        CUTOVER_CONFIRMATION="DEPLOY D182 TO PRODUCTION",
-    )
-    assert delivery.context(manual)[:2] == (source, 1)
-    for key, value in (
-        ("CUTOVER_CONFIRMATION", "wrong"),
-        ("GITHUB_WORKFLOW", "other"),
-        ("GITHUB_EVENT_NAME", "workflow_run"),
-    ):
-        rejected = dict(manual, **{key: value})
-        try:
-            delivery.context(rejected)
-        except delivery.Refused as error:
-            assert str(error) == "PROTECTED_CONTEXT"
-        else:
-            raise AssertionError(key)
-`,
-      artifactDeliveryPath,
-    ],
-    { encoding: "utf8" },
-  );
-  assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
 test("finance workspace keeps the branch picker reachable in its blocked and loaded states", () => {

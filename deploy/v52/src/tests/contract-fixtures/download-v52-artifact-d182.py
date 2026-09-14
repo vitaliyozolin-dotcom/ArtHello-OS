@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch exact V52 app from its reviewed app-plus-finance-proof inventory; never import an image."""
+"""Fetch the exact verified V52 artifact for manually authorized D182; never import an image."""
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -168,7 +168,9 @@ class GitHub:
 def context(env):
     for key, value in {'GITHUB_REPOSITORY': REPOSITORY, 'EXPECTED_REPOSITORY': REPOSITORY,
                        'GITHUB_ACTOR': OWNER, 'GITHUB_TRIGGERING_ACTOR': OWNER,
-                       'GITHUB_EVENT_NAME': 'workflow_run'}.items():
+                       'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'GITHUB_WORKFLOW': 'Deploy ArtHello mobile finance branch D182',
+                       'CUTOVER_CONFIRMATION': 'DEPLOY D182 TO PRODUCTION'}.items():
         require(env.get(key) == value, 'PROTECTED_CONTEXT')
     source = env.get('RELEASE_SHA', '')
     require(re.fullmatch(r'[a-f0-9]{40}', source), 'SOURCE_IDENTITY')

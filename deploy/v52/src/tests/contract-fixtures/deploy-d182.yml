@@ -34,7 +34,6 @@ env:
   TRIGGER_VERIFY_RUN_ID: ${{ inputs.verify_run_id }}
   CHECKED_SOURCE_SHA: ${{ inputs.release_sha }}
   CUTOVER_CONFIRMATION: ${{ inputs.confirmation }}
-  ARTHELLO_ARTIFACT_DELIVERY_EVENT: workflow_dispatch
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   PAY_URL: https://pay-188-225-38-55.sslip.io
   SCHOOL_URL: https://school-188-225-38-55.sslip.io
@@ -97,9 +96,10 @@ jobs:
           grep -F 'filterAccessibleBranches(context.branches, context.access, context.me.isAdministrative)' deploy/v52/src/app/components/ArtHelloShell.tsx >/dev/null
           grep -F "stage='mobile_branch_recovery'" .github/scripts/finance-ci-browser.mjs >/dev/null
           grep -F "stage='mobile_branch_failure'" .github/scripts/finance-ci-browser.mjs >/dev/null
-          grep -F "env.get('ARTHELLO_ARTIFACT_DELIVERY_EVENT', 'workflow_run')" .github/scripts/download-v52-artifact-r17.py >/dev/null
-          grep -F "env.get('GITHUB_WORKFLOW') == 'Deploy ArtHello mobile finance branch D182'" .github/scripts/download-v52-artifact-r17.py >/dev/null
-          cmp -s .github/scripts/download-v52-artifact-r17.py deploy/v52/src/tests/contract-fixtures/download-v52-artifact-r17.py
+          grep -F "'GITHUB_EVENT_NAME': 'workflow_dispatch'" .github/scripts/download-v52-artifact-d182.py >/dev/null
+          grep -F "'GITHUB_WORKFLOW': 'Deploy ArtHello mobile finance branch D182'" .github/scripts/download-v52-artifact-d182.py >/dev/null
+          grep -F "'CUTOVER_CONFIRMATION': 'DEPLOY D182 TO PRODUCTION'" .github/scripts/download-v52-artifact-d182.py >/dev/null
+          cmp -s .github/scripts/download-v52-artifact-d182.py deploy/v52/src/tests/contract-fixtures/download-v52-artifact-d182.py
           grep -F '## D182 —' DECISIONS.md >/dev/null
           grep -F 'runChunkedAlfaImport' deploy/v52/src/app/components/AlfaCrmSetupWizard.tsx >/dev/null
           grep -F 'NOTICE_AUTO_DISMISS_MS = 7_000' deploy/v52/src/lib/notice-dismiss.ts >/dev/null
@@ -135,7 +135,7 @@ jobs:
             sleep 5
           done
           test "$current_main" = "$RELEASE_SHA"
-          python3 -I -B .github/scripts/download-v52-artifact-r17.py
+          python3 -I -B .github/scripts/download-v52-artifact-d182.py
 
       - name: Verify and load immutable application image
         id: image
