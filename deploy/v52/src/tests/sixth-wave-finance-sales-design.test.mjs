@@ -59,7 +59,7 @@ test("Wave 6 finance and sales use the shared Design System shell", () => {
 });
 
 test("Wave 6 exposes every core finance section before the first operation", () => {
-  for (const tab of ["Реестр", "ДДС", "ОПиУ", "План и прогноз", "Начисления и долги", "Сверка"]) {
+  for (const tab of ["Разнесение", "ДДС", "ОПиУ", "План и прогноз", "Начисления и долги", "Сверка"]) {
     assert.match(finance, new RegExp(escapeRegExp(tab)));
   }
   assert.doesNotMatch(finance, /if\s*\(\s*!\s*data\.operations\.length\s*\)\s*return\b/);
@@ -68,17 +68,15 @@ test("Wave 6 exposes every core finance section before the first operation", () 
   assert.match(finance, /ahFinancePeriod/);
 });
 
-test("Wave 6 keeps an explicit month selector above the mobile bank summary", () => {
-  const mobilePeriodIndex = finance.indexOf('className="ahFinancePeriod ahFinancePeriodMobile"');
+test("Wave 6 keeps one explicit month selector above the bank summary", () => {
+  const periodIndex = finance.indexOf('className="ahFinancePeriod"');
   const summaryIndex = finance.indexOf('className="ahFinancePulse"');
-  assert.ok(mobilePeriodIndex >= 0, "mobile finance period selector is missing");
-  assert.ok(mobilePeriodIndex < summaryIndex, "mobile finance period must appear before bank values");
-  assert.match(finance, /Период отчёта/);
+  assert.ok(periodIndex >= 0, "finance period selector is missing");
+  assert.ok(periodIndex < summaryIndex, "finance period must appear before bank values");
+  assert.match(finance, />Период</);
   assert.match(finance, /aria-label="Месяц финансового отчёта"/);
-  assert.match(finance, /className="ahFinancePeriod ahFinancePeriodDesktop"/);
   assert.doesNotMatch(financeStyles, /\.ahFinancePeriod\s*\{\s*display:\s*none/);
-  assert.match(financeStyles, /@media \(max-width: 767px\)[\s\S]*\.ahFinancePeriodMobile \{\s*display: grid;/);
-  assert.match(financeStyles, /\.ahFinancePeriodDesktop \{\s*display: none;/);
+  assert.match(financeStyles, /@media \(max-width: 767px\)[\s\S]*\.ahFinanceControls \.ahFinancePeriod select \{[^}]*width: 100%/);
   assert.doesNotMatch(financeStyles, /data-ah-help-inline|ah-field-icon/);
 });
 
@@ -99,13 +97,12 @@ test("Wave 6 preserves finance reads, mutations, drill-down and audit trail", ()
   assert.match(finance, /fetch\s*\(\s*["']\/api\/finance-actions["']/);
   assert.match(finance, /["']x-arthello-role["']\s*:/);
   assert.match(finance, /method\s*:\s*["']POST["']/);
-  for (const action of ["addCorrection", "createIssueTask", "resolveIssue"]) {
+  for (const action of ["addOperationComment", "classifyOperation", "createIssueTask", "resolveIssue"]) {
     assert.match(finance, new RegExp(`action\\s*:\\s*["']${action}["']`));
   }
   assert.match(finance, /onTasksChanged\s*\(\s*\)/);
-  assert.match(finance, /<EntityPanel\b/);
   assert.match(finance, /createPortal\s*\(/);
-  assert.match(finance, /operationCorrections/);
+  assert.match(finance, /ahFinanceOperationComments/);
 });
 
 test("Wave 6 preserves sales actions, source navigation and manual lead creation", () => {

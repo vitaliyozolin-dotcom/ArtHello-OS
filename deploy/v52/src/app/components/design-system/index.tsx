@@ -96,12 +96,12 @@ export function SearchField({ value, onChange, placeholder, label, icon, help, c
 }
 
 export function Tabs<T extends string>({ items, value, onChange, ariaLabel = "Разделы" }: {
-  items: Array<{ id: T; label: ReactNode }>;
+  items: Array<{ id: T; label: ReactNode; ariaLabel?: string }>;
   value: T;
   onChange: (value: T) => void;
   ariaLabel?: string;
 }) {
-  return <div className="ahTabs" role="tablist" aria-label={ariaLabel}>{items.map((item) => <button type="button" role="tab" aria-selected={value === item.id} key={item.id} onClick={() => onChange(item.id)}>{item.label}</button>)}</div>;
+  return <div className="ahTabs" role="tablist" aria-label={ariaLabel}>{items.map((item) => <button type="button" role="tab" aria-label={item.ariaLabel} aria-selected={value === item.id} key={item.id} onClick={() => onChange(item.id)}>{item.label}</button>)}</div>;
 }
 
 export function PeriodSelector({ label = "Отчётный период", periodLabel, onPrevious, onNext, onCurrent, centerControl }: {

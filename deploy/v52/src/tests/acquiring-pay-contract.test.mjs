@@ -116,3 +116,33 @@ test("D177 deployment preserves AlfaCRM and Pay while publishing compact Money h
   assert.match(workflow, /refreshCustomerResults/);
   assert.doesNotMatch(workflow, /TOCHKA_TOKEN|PAYMENT_SECRET|FISCALIZATION_SECRET/);
 });
+
+test("D179 deployment preserves AlfaCRM and Pay while publishing the compact finance workflow", async () => {
+  const workflow = await source("../../../../.github/workflows/deploy-arthello-finance-d179.yml");
+  assert.match(workflow, /D179: compact finance operation workflow/);
+  assert.match(workflow, /D179_FINANCE_COMPACT_OPERATION_CARD/);
+  assert.match(workflow, /ahFinanceBankHistoryRow/);
+  assert.match(workflow, /finance\.operation_commented/);
+  assert.match(workflow, /ARTHELLO_D179_ALFACRM_EGRESS=VERIFIED/);
+  assert.match(workflow, /ARTHELLO_D179_PRODUCTION=VERIFIED/);
+  assert.match(workflow, /docker restart --time 20 "\$CADDY_CONTAINER"/);
+  assert.match(workflow, /ARTHELLO_D179_EXTERNAL=VERIFIED/);
+  assert.match(workflow, /bank_accounts/);
+  assert.match(workflow, /balance_minor is not null/);
+  assert.match(workflow, /eligiblePayAdministrators/);
+  assert.match(workflow, /activePayGrants/);
+  assert.match(workflow, /ALFACRM_IMPORT_ENABLED=true/);
+  assert.match(workflow, /TOCHKA_AUTOSYNC_ENABLED=1/);
+  assert.match(workflow, /TOCHKA_AUTOSYNC_ACTIVATION_ID/);
+  assert.match(workflow, /activation-volume\.py write/);
+  assert.match(workflow, /hasTochkaAutosyncActivation/);
+  assert.match(workflow, /runtimeFingerprintSha256/);
+  assert.match(workflow, /image-runtime-fingerprint\.jq/);
+  assert.match(workflow, /--cap-add FOWNER --cap-add FSETID/);
+  assert.match(workflow, /docker exec -i "\$candidate" python3 -I -B -/);
+  assert.match(workflow, /docker exec -i -e PUBLIC_URL=/);
+  assert.match(workflow, /moneyAcceptanceEnabled:false/);
+  assert.match(workflow, /fiscalizationEnabled:false/);
+  assert.match(workflow, /refreshCustomerResults/);
+  assert.doesNotMatch(workflow, /TOCHKA_TOKEN|PAYMENT_SECRET|FISCALIZATION_SECRET/);
+});

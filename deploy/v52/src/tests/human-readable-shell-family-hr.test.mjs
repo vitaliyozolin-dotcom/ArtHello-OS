@@ -10,8 +10,8 @@ test("shell and dashboard keep technical identifiers out of visible summaries", 
   const catalog = read("../data/test-snapshot.ts");
 
   assert.doesNotMatch(shell, /\?\?\s*branchId/);
-  assert.match(dashboard, /bankOperationIsIncoming\(operation\.direction\)/);
-  assert.match(dashboard, /банковская выписка/);
+  assert.match(dashboard, /summary\.transactionCount/);
+  assert.match(dashboard, /Полная история хранится только в «Деньгах»/);
   assert.doesNotMatch(dashboard, /Проекты, KPI|"[^"\n]*ОДДС[^"\n]*"/);
   assert.match(catalog, /label: "Проекты и показатели"/);
   assert.doesNotMatch(catalog, /label: "Проекты и KPI"/);

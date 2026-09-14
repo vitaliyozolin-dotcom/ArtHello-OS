@@ -9,7 +9,7 @@ const modules = {
   'cloudflare:workers': 'export const env = { DB: { prepare() { throw Error("unexpected database access"); } } };',
   'drizzle-orm': 'export const and=()=>null, eq=()=>null;',
   '../../../db': 'export async function ensureCoreTables(){globalThis.__financeArticleApiTest.ensures++} export function getDb(){return {select(){return {from(){return {where(){return {limit(){return []}}}}}}}}}',
-  '../../../db/schema': 'export const auditEvents={},financeCorrections={},financeReconciliationIssues={},financialOperations={},organizationBranches={},tasks={},userBranchAccess={};',
+  '../../../db/schema': 'export const auditEvents={},bankTransactions={},financeCorrections={},financeReconciliationIssues={},financialOperations={},organizationBranches={},tasks={},userBranchAccess={};',
   '../../../lib/production-auth': 'export async function getAuthenticatedRequestContext(){return globalThis.__financeArticleApiTest.context} export function verifyAuthenticatedRequestCsrf(){if(!globalThis.__financeArticleApiTest.csrf)throw Error("private session detail");}',
   '../../../lib/task-access': 'export const resolveTaskAssignment=()=>({ok:false});',
   '../../../lib/task-access-query': 'export const findScopedAutomationTask=()=>null, scopedAutomationTaskResponse=()=>null;',

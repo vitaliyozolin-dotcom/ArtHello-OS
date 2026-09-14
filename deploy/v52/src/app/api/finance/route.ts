@@ -3,6 +3,7 @@ import { loadArticleCatalog } from "../../../lib/finance-article-store";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb, getSystemDataMode } from "../../../db";
 import {
+  auditEvents,
   entities,
   financeCorrections,
   financialOperations,
@@ -56,7 +57,7 @@ export async function GET(request: Request) {
     }
     const { catalog: articleCatalog } = await loadArticleCatalog(env.DB);
     const mode = await getSystemDataMode();
-    const [storedOperations, storedBankAccounts, storedBankTransactions, storedBankStatements, connectionRows, corrections, entityRows, allTasks] = await Promise.all([
+    const [storedOperations, storedBankAccounts, storedBankTransactions, storedBankStatements, connectionRows, corrections, commentRows, entityRows, allTasks] = await Promise.all([
       db.select().from(financialOperations).orderBy(desc(financialOperations.operationDate), asc(financialOperations.id)),
       db.select({
         id: bankAccounts.id,
@@ -94,6 +95,10 @@ export async function GET(request: Request) {
       db.select().from(bankStatementImports).orderBy(desc(bankStatementImports.fetchedAt)),
       db.select().from(integrationConnections).orderBy(asc(integrationConnections.system)),
       db.select().from(financeCorrections).orderBy(desc(financeCorrections.id)).limit(50),
+      db.select().from(auditEvents)
+        .where(eq(auditEvents.action, "finance.operation_commented"))
+        .orderBy(desc(auditEvents.id))
+        .limit(300),
       db.select({ id: entities.id, displayName: entities.displayName }).from(entities),
       selectVisibleTasks(db, context),
     ]);
@@ -124,10 +129,12 @@ export async function GET(request: Request) {
           bankDetails: bankDetailsByOperation.get(operation.id) ?? null,
         }))
       : [];
-    const cashOperations = operations.map((operation) => ({
-      ...operation,
-      category: operation.cashflowArticle || operation.category,
-    }));
+    const cashOperations = operations
+      .filter((operation) => Boolean(operation.cashflowArticle || (operation.category !== "Не классифицировано" && operation.category)))
+      .map((operation) => ({
+        ...operation,
+        category: operation.cashflowArticle || operation.category,
+      }));
     const pnlOperations = operations.map((operation) => ({
       ...operation,
       period: operation.accrualPeriod || operation.period,
@@ -184,6 +191,16 @@ export async function GET(request: Request) {
           allocated: Boolean(operation.financialOperationId),
         };
       });
+    const visibleBankOperationIds = new Set(bankOperations.map((operation) => operation.id));
+    const visibleManagementOperationIds = new Set([...operations, ...reviewOperations].map((operation) => operation.id));
+    const operationComments = commentRows.flatMap((row) => {
+      const targetType = row.entityType === "bank_transaction" ? "bank" : row.entityType === "financial_operation" ? "management" : "";
+      if (!targetType) return [];
+      if (targetType === "bank" && !visibleBankOperationIds.has(row.entityId)) return [];
+      if (targetType === "management" && !visibleManagementOperationIds.has(row.entityId)) return [];
+      const comment = readOperationComment(row.payload);
+      return comment.body ? [{ id: row.id, targetType, operationId: row.entityId, body: comment.body, author: comment.author || row.actor, createdAt: row.createdAt }] : [];
+    });
     const bankMonthly = summarizeBankMonths(sourceBankTransactions);
     const bankPeriodSummary = summarizeBankPeriod(sourceBankTransactions, selectedPeriod);
     const rubBankAccounts = bankAccountsView.filter((account) => account.currency === "RUB" && account.balanceMinor !== null);
@@ -261,6 +278,7 @@ export async function GET(request: Request) {
       reviewOperations,
       bankAccounts: bankAccountsView,
       bankOperations,
+      operationComments,
       bankMonthly,
       bankSynchronization,
       bankSummary,
@@ -298,4 +316,16 @@ function providerLabel(connectionId: string) {
   if (connectionId.includes("TOCHKA")) return "Точка";
   if (connectionId.includes("TBANK")) return "Т‑Банк";
   return "Банк";
+}
+
+function readOperationComment(payload: string) {
+  try {
+    const value = JSON.parse(payload) as { body?: unknown; author?: unknown };
+    return {
+      body: typeof value.body === "string" ? value.body.trim().slice(0, 600) : "",
+      author: typeof value.author === "string" ? value.author.trim().slice(0, 160) : "",
+    };
+  } catch {
+    return { body: "", author: "" };
+  }
 }

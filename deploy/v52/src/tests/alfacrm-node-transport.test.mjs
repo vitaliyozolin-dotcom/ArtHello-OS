@@ -131,6 +131,19 @@ test("D177 release preserves the AlfaCRM egress proof before stopping production
   assert.doesNotMatch(workflow, /@arthello\.ru|buh@/i);
 });
 
+test("D179 preserves the enabled AlfaCRM import and egress proof before stopping production", () => {
+  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-finance-d179.yml");
+  const egressProof = workflow.indexOf("ARTHELLO_D179_ALFACRM_EGRESS=VERIFIED");
+  const importProof = workflow.indexOf("ALFACRM_IMPORT_ENABLED=true");
+  const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
+
+  assert.match(workflow, /D179: compact finance operation workflow/);
+  assert.ok(egressProof > 0 && importProof > 0 && liveStop > egressProof && liveStop > importProof, "AlfaCRM import and egress must be preserved before the live container is stopped");
+  assert.match(workflow, /import \{ createAlfaCrmTransport \} from "\.\/production\/alfacrm-transport\.mjs"/);
+  assert.match(workflow, /api_key: "synthetic-release-probe"/);
+  assert.doesNotMatch(workflow, /@arthello\.ru|buh@/i);
+});
+
 test("D178 activates controlled AlfaCRM imports only after exact D177 and preview evidence", () => {
   const workflow = sourceText("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
   const evidence = workflow.indexOf("ARTHELLO_D178_PREVIEW_EVIDENCE=VERIFIED");

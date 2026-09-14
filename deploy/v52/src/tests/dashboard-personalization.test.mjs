@@ -78,7 +78,7 @@ test("restricted roles get a full-width real task overview instead of an empty c
 
 test("owner can show, hide, reorder and resize dashboard widgets", () => {
   assert.match(dashboard, /Настроить экран/);
-  assert.equal((dashboard.match(/const \[selectedId, setSelectedId\] = useState\(""\)/g) ?? []).length, 1);
+  assert.equal((dashboard.match(/const \[selectedId, setSelectedId\] = useState\(""\)/g) ?? []).length, 0);
   assert.match(dashboard, /checked=\{item\.visible\}/);
   assert.match(dashboard, /function moveWidget\(/);
   assert.match(dashboard, /const target = customizableLayout\[index \+ directionToMove\]/);
@@ -130,19 +130,20 @@ test("empty states stay compact and never invent production figures", () => {
   assert.doesNotMatch(styles, /\.inlineEmpty[^}]*min-height:\s*(?:[3-9]\d\d|[12]\d{3,})px/);
   assert.match(dashboard, /const financeValue = \(minor: number \| undefined, available: boolean\) => available/);
   assert.match(dashboard, /const hasDebtData = Boolean\(finance\?\.accruals\.length\)/);
-  assert.match(dashboard, /const periodOperations = useMemo\(\(\) => finance\?\.bankOperations \?\? \[\]/);
-  assert.match(dashboard, /Операций: <strong>\{periodOperations\.length\}/);
+  assert.doesNotMatch(dashboard, /periodOperations|finance\?\.bankOperations/);
+  assert.match(dashboard, /<dt>Операции<\/dt><dd>\{finance\.bankSummary\.transactionCount\}<\/dd>/);
   assert.match(dashboard, /Система не будет придумывать риски/);
   assert.match(dashboard, /milestones = useMemo\(\(\) => openTasks/);
 });
 
-test("calendar dates, registry interaction and rendering stay deterministic", () => {
+test("calendar dates and the single canonical bank-history link stay deterministic", () => {
   assert.equal((dashboard.match(/timeZone: MOSCOW_TIME_ZONE/g) ?? []).length >= 4, true);
   assert.match(dashboard, /if \(widget\.id === "operations"\) return/);
   assert.match(dashboard, /return null;\n  \}/);
-  assert.match(dashboard, /role="button" aria-pressed=/);
-  assert.match(dashboard, /event\.key === "Enter" \|\| event\.key === " "/);
-  assert.match(styles, /\.registrySearch:focus-within/);
+  const operationsBlock = dashboard.slice(dashboard.indexOf('if (widget.id === "operations")'), dashboard.indexOf("return null;", dashboard.indexOf('if (widget.id === "operations")')));
+  assert.match(operationsBlock, /Открыть историю/);
+  assert.doesNotMatch(operationsBlock, /<table|aria-pressed/);
+  assert.match(styles, /\.registryCompact/);
 });
 
 test("deployment patches recognize the source-native personalized dashboard", () => {

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
 import type { ModuleId } from "../../data/test-snapshot";
-import { humanTechnicalText, recordLabel, taskRecordLabel } from "../../lib/record-labels";
+import { taskRecordLabel } from "../../lib/record-labels";
 import {
   DASHBOARD_LAYOUT_VERSION,
   allowedDashboardWidgetIds,
@@ -46,29 +46,9 @@ type FinanceOperation = {
   status: string;
 };
 
-type BankOperation = {
-  id: string;
-  operationDate: string;
-  direction: string;
-  amountMinor: number;
-  currency: string;
-  status: string;
-  description: string;
-  counterpartyName: string;
-  transactionType: string;
-  documentNumber: string;
-  provider: string;
-  accountName: string;
-  maskedAccount: string;
-  legalEntityName: string;
-  importedAt: string;
-  allocated: boolean;
-};
-
 type FinancePayload = {
   selectedPeriod: string;
   operations: FinanceOperation[];
-  bankOperations: BankOperation[];
   bankMonthly: Array<{
     period: string;
     transactionCount: number;
@@ -134,7 +114,7 @@ const WIDGETS: ReadonlyArray<{ id: DashboardWidgetId; title: string; description
   { id: "signals", title: "Сигналы и риски", description: "Только подтверждённые сигналы из аналитики", defaultSize: "compact" },
   { id: "milestones", title: "Контрольные точки", description: "Ближайшие сроки из задач", defaultSize: "compact" },
   { id: "roleFocus", title: "Мои разделы", description: "Быстрый доступ только к разрешённым разделам", defaultSize: "full" },
-  { id: "operations", title: "Операции", description: "Короткий банковский реестр", defaultSize: "full" },
+  { id: "operations", title: "Операции", description: "Итог банка со ссылкой на историю", defaultSize: "full" },
 ];
 
 type RoleHomeProfile = {
@@ -180,10 +160,6 @@ const rub = new Intl.NumberFormat("ru-RU", {
 
 function rubles(minor: number) {
   return rub.format(minor / 100);
-}
-
-function bankOperationIsIncoming(direction: string) {
-  return /credit|incoming|приход|поступ|вход/i.test(direction);
 }
 
 function compactMoney(value: number) {
@@ -375,13 +351,10 @@ function sizeClass(size: DashboardWidgetSize) {
   return styles.sizeCompact;
 }
 
-export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch, availableModules, tasks, sourceOnly, navigate, createTask, openOperation }: OwnerDashboardProps) {
+export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch, availableModules, tasks, sourceOnly, navigate, createTask }: OwnerDashboardProps) {
   const [finance, setFinance] = useState<FinancePayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [selectedId, setSelectedId] = useState("");
-  const [query, setQuery] = useState("");
-  const [direction, setDirection] = useState("Все типы");
   const [dashboardPeriod, setDashboardPeriod] = useState("");
   const [activeChartIndex, setActiveChartIndex] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
@@ -524,8 +497,6 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
         if (!response.ok) throw new Error(payload.error ?? "Не удалось загрузить финансовый контур");
         setFinance(payload);
         setDashboardPeriod((current) => current || payload.selectedPeriod || payload.monthly.at(-1)?.period || "");
-        const selectedPeriodOperations = payload.bankOperations;
-        setSelectedId((current) => selectedPeriodOperations.some((operation) => operation.id === current) ? current : selectedPeriodOperations[0]?.id || "");
         setError("");
       } catch (loadError) {
         if (controller.signal.aborted) return;
@@ -548,16 +519,6 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
     queueServerLayoutSync("PUT", next);
   }, [applyLayout, dashboardUserKey, queueServerLayoutSync, roleLabel]);
 
-  const periodOperations = useMemo(() => finance?.bankOperations ?? [], [finance]);
-  const operations = useMemo(() => {
-    const clean = query.trim().toLocaleLowerCase("ru-RU");
-    return periodOperations
-      .filter((operation) => direction === "Все типы" || (direction === "Поступление" ? bankOperationIsIncoming(operation.direction) : !bankOperationIsIncoming(operation.direction)))
-      .filter((operation) => !clean || [operation.counterpartyName, operation.description, operation.accountName, operation.maskedAccount, operation.documentNumber].some((value) => value.toLocaleLowerCase("ru-RU").includes(clean)))
-      .slice(0, 6);
-  }, [direction, periodOperations, query]);
-
-  const selected = operations.find((operation) => operation.id === selectedId) ?? operations[0] ?? null;
   const firstName = displayName.trim().split(/\s+/)[0] || "Пользователь";
   const greeting = greetingForMoscow(now);
   const dashboardDate = dashboardDateForMoscow(now);
@@ -580,7 +541,7 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
     { label: "Поступления", value: financeValue(summary?.incomingMinor, hasSelectedCashData), note: hasSelectedCashData ? `${financePeriod} · банк` : "Факта пока нет", tone: "green", icon: "sales" as const, module: "finance" as ModuleId },
     { label: "Списания", value: financeValue(summary?.outgoingMinor, hasSelectedCashData), note: hasSelectedCashData ? `${financePeriod} · банк` : "Факта пока нет", tone: "orange", icon: "legal" as const, module: "finance" as ModuleId },
     { label: "Задолженность", value: financeValue(managementSummary?.debtMinor, hasDebtData), note: hasDebtData ? managementSummary?.debtMinor ? "По подтверждённым начислениям" : "Подтверждённого долга нет" : "Источник начислений не подключён", tone: "red", icon: "clients" as const, module: "finance" as ModuleId },
-    { label: "Операции", value: loading ? "…" : finance ? String(periodOperations.length) : "—", note: periodOperations.length ? `В реестре за ${financePeriod.toLocaleLowerCase("ru-RU")}` : "Реестр пуст", tone: "blue", icon: "registry" as const, module: "finance" as ModuleId },
+    { label: "Операции", value: loading ? "…" : summary ? String(summary.transactionCount) : "—", note: summary?.transactionCount ? `В банке за ${financePeriod.toLocaleLowerCase("ru-RU")}` : "История пуста", tone: "blue", icon: "registry" as const, module: "finance" as ModuleId },
     { label: "Открытые задачи", value: String(openTasks.length), note: tasks.length ? "В рабочем контуре" : "Задач пока нет", tone: "violet", icon: "hr" as const, module: "tasks" as ModuleId },
   ];
   const metrics = canUseFinanceWidgets ? financeMetrics : taskMetrics;
@@ -660,21 +621,6 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
   const allowedVisibleWidgets = new Set(allowedWidgetIds(roleLabel));
   const customizableLayout = layout.filter((item) => allowedVisibleWidgets.has(item.id) && widgetIsAvailable(item.id));
   const visibleWidgets = customizableLayout.filter((item) => item.visible);
-
-  function showOperation(operation: BankOperation) {
-    const incoming = bankOperationIsIncoming(operation.direction);
-    openOperation({
-      title: operation.description || operation.transactionType || "Банковская операция",
-      value: `${incoming ? "+" : "−"}${rubles(Math.abs(operation.amountMinor))}`,
-      summary: `${operation.counterpartyName || "Контрагент не указан"} · ${operation.accountName}`,
-      source: `${operation.provider} · банковская выписка только для чтения`,
-      calculation: `${incoming ? "Поступление" : "Списание"}; исходная сумма банка без перезаписи`,
-      updated: formatDate(operation.operationDate),
-      owner: "Финансовый контролёр",
-      quality: operation.allocated ? "Разнесено в управленческом учёте" : "Ожидает управленческого разнесения",
-      lineage: ["Банк", "Выписка", "Банковская операция", "Разнесение в «Деньгах»"],
-    });
-  }
 
   function changeWidget(id: DashboardWidgetId, patch: Partial<DashboardWidgetPreference>) {
     updateLayout((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
@@ -841,31 +787,11 @@ export function OwnerDashboard({ displayName, userKey, roleLabel, selectedBranch
     </article>;
 
     if (widget.id === "operations") return <article className={`${styles.panel} ${styles.registry}`} data-help-block="operations">
-      <header><span><strong>Банковские операции</strong><small>{finance?.selectedPeriod ? `${monthLabel(finance.selectedPeriod, "long")} · тот же итог в «Деньгах»` : "Единый банковский факт"}</small></span><button onClick={() => navigate("finance")}>Открыть «Деньги»</button></header>
-      <div className={styles.registryToolbar}>
-        <label className={styles.periodSelect}><span className="sr-only">Месяц реестра операций</span><select value={dashboardPeriod} onChange={(event) => setDashboardPeriod(event.target.value)} aria-label="Месяц реестра операций">{availableDashboardPeriods.length ? availableDashboardPeriods.map((item) => <option key={item} value={item}>{monthLabel(item, "long")}</option>) : <option value={dashboardPeriod}>{dashboardPeriod ? monthLabel(dashboardPeriod, "long") : "Период не выбран"}</option>}</select></label>
-        <select value={direction} onChange={(event) => setDirection(event.target.value)} aria-label="Тип операции"><option>Все типы</option><option>Поступление</option><option>Списание</option></select>
-        <label className={styles.registrySearch}><AppIcon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по реестру" /></label>
-        <button type="button" onClick={() => navigate("finance")}><AppIcon name="settings" /> Фильтры</button>
-      </div>
-      <div className={styles.registrySummary}><span>Операций: <strong>{periodOperations.length}</strong></span><span>Поступления: <strong>{summary ? rubles(summary.incomingMinor) : "—"}</strong></span><span>Списания: <strong>{summary ? rubles(summary.outgoingMinor) : "—"}</strong></span></div>
-      <div className={selected ? styles.registryContent : undefined}>
-        <div className={styles.registryMain}>
-          {loading ? <div data-ah-compact-card="true" className={styles.registryState}><span className={styles.loader} /><strong>Загружаем реестр…</strong></div> : error ? <div data-ah-compact-card="true" className={styles.registryState}><strong>Реестр временно недоступен</strong><span>{error}</span><button onClick={() => navigate("finance")}>Открыть финансовый раздел</button></div> : operations.length ? (
-            <div className={styles.tableWrap}><table><thead><tr><th>Дата</th><th>Контрагент</th><th>Назначение</th><th>Сумма</th><th>Разнесение</th></tr></thead><tbody>{operations.map((operation) => (
-              <tr key={operation.id} className={selected?.id === operation.id ? styles.selectedRow : ""} onClick={() => setSelectedId(operation.id)} onDoubleClick={() => showOperation(operation)} tabIndex={0} role="button" aria-pressed={selected?.id === operation.id} aria-label={`${bankOperationIsIncoming(operation.direction) ? "Поступление" : "Списание"}: ${operation.description || "банковская операция"}, ${rubles(Math.abs(operation.amountMinor))}`} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); showOperation(operation); } }}>
-                <td>{formatDate(operation.operationDate)}</td><td><strong>{operation.counterpartyName || "Контрагент не указан"}</strong><small>{operation.accountName} · {operation.maskedAccount}</small></td><td><strong>{operation.description || operation.transactionType || "Назначение не передано"}</strong><small>{operation.provider} · банковская выписка</small></td><td className={bankOperationIsIncoming(operation.direction) ? styles.income : styles.expense}>{bankOperationIsIncoming(operation.direction) ? "+" : "−"}{rubles(Math.abs(operation.amountMinor))}</td><td><span className={styles.status}>{operation.allocated ? "Разнесено" : "Ожидает разнесения"}</span></td>
-              </tr>
-            ))}</tbody></table></div>
-          ) : <div data-ah-compact-card="true" className={styles.registryState}><strong>Операций пока нет</strong><span>{sourceOnly ? "Демонстрационных записей нет. Реестр заполнится после подключения банка." : "В выбранном периоде нет операций."}</span><button onClick={() => navigate("integrations")}>Подключить банк</button></div>}
-        </div>
-        {selected ? <aside className={styles.preview} aria-live="polite" data-help-block="operation-preview">
-          <header><span><strong>{bankOperationIsIncoming(selected.direction) ? "Поступление" : "Списание"}</strong><small>{formatDate(selected.operationDate)}</small></span><button aria-label="Открыть полную карточку" onClick={() => showOperation(selected)}><AppIcon name="more" /></button></header>
-          <div className={styles.operationHero}><strong>{bankOperationIsIncoming(selected.direction) ? "+" : "−"}{rubles(Math.abs(selected.amountMinor))}</strong><small>{selected.allocated ? "Разнесено" : "Ожидает разнесения"} · банковский факт</small></div>
-          <dl><div><dt>Контрагент</dt><dd>{selected.counterpartyName || "Не указан"}</dd></div><div><dt>Назначение</dt><dd>{selected.description || selected.transactionType || "Не передано"}</dd></div><div><dt>Источник</dt><dd>{selected.provider} · банковская выписка</dd></div></dl>
-          <footer><button onClick={() => showOperation(selected)}>Открыть карточку</button></footer>
-        </aside> : null}
-      </div>
+      <header><span><strong>Операции банка</strong><small>Полная история хранится только в «Деньгах»</small></span><button onClick={() => navigate("finance")}>Открыть историю</button></header>
+      {loading ? <div data-ah-compact-card="true" className={styles.registryState}><span className={styles.loader} /><strong>Обновляем банковский итог…</strong></div> : error ? <div data-ah-compact-card="true" className={styles.registryState}><strong>Банковский итог временно недоступен</strong><span>{error}</span><button onClick={() => navigate("finance")}>Открыть «Деньги»</button></div> : finance ? <div className={styles.registryCompact}>
+        <label className={styles.periodSelect}><span className="sr-only">Месяц банковского итога</span><select value={dashboardPeriod} onChange={(event) => setDashboardPeriod(event.target.value)} aria-label="Месяц банковского итога">{availableDashboardPeriods.length ? availableDashboardPeriods.map((item) => <option key={item} value={item}>{monthLabel(item, "long")}</option>) : <option value={dashboardPeriod}>{dashboardPeriod ? monthLabel(dashboardPeriod, "long") : "Период не выбран"}</option>}</select></label>
+        <dl><div><dt>Операции</dt><dd>{finance.bankSummary.transactionCount}</dd></div><div><dt>Поступления</dt><dd className={styles.income}>{rubles(finance.bankSummary.incomingMinor)}</dd></div><div><dt>Списания</dt><dd className={styles.expense}>{rubles(finance.bankSummary.outgoingMinor)}</dd></div></dl>
+      </div> : <div data-ah-compact-card="true" className={styles.registryState}><strong>Операций пока нет</strong><span>{sourceOnly ? "История появится после подключения банка." : "В выбранном периоде нет операций."}</span><button onClick={() => navigate("integrations")}>Подключить банк</button></div>}
     </article>;
 
     return null;

@@ -128,12 +128,12 @@ test("integration center exposes mandatory actions and selective import controls
   assert.match(integrations, /Каждый час/);
 });
 
-test("finance operation opens in a viewport portal and drills into linked entities without inventing family attribution", () => {
-  assert.match(finance, /createPortal\(<div className="finance-drawer-layer"/);
-  assert.match(finance, /className="operation-links lineage-section"/);
-  assert.match(finance, /<EntityPanel key=\{linkedEntityId\}/);
+test("finance operation opens in a compact viewport portal without inventing family attribution", () => {
+  assert.match(finance, /createPortal\(\s*<div className="finance-drawer-layer"/);
+  assert.match(finance, /className="finance-drawer ahFinanceOperationDrawer ahFinanceOperationCard"/);
+  assert.match(finance, /className="ahFinanceOperationComments"/);
   assert.doesNotMatch(finance, /FAM-T-014|Тестовая семья/);
-  assert.match(finance, /Связанные данные/);
+  assert.doesNotMatch(finance, /className="operation-links lineage-section"|<EntityPanel/);
   assert.match(registry, /onNavigate\?\.\(relation\.peer\.id\)/);
   assert.match(db, /ensureFinanceEntityLinksBootstrap/);
   assert.match(css, /\.finance-drawer-layer,.registry-drawer-layer,.sales-drawer-layer,.workflow-drawer-layer,.drawer-layer,.integration-modal-layer\{position:fixed;inset:0;z-index:180/);

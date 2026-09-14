@@ -6,7 +6,7 @@
     "scope": "Единая операционная система образовательной группы ArtHello",
     "owner": "Виталий Озолин",
     "status": "approved",
-    "asOf": "2026-09-13"
+    "asOf": "2026-09-14"
   },
   "problem": "Деньги, люди, дети, клиенты, обучение, документы и риски находятся в разных источниках и не образуют доказуемую управленческую цепочку.",
   "goal": "Все сотрудники административного комплекса работают в персональных кабинетах на единой модели данных; каждый риск становится задачей, а каждый показатель раскрывается до источника.",
@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "D178: активация контролируемого импорта AlfaCRM",
+    "name": "D179: единая история и компактная карточка операции",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -205,7 +205,9 @@
       "IMG_0255: production-предпросмотр без записи нашёл 2887 семей/детей и 193 сотрудника; импорт остался закрыт только runtime-флагом.",
       "Concurrent D177 Money release 6ef7a3dc82e4644d1991d5454e61b62149b3738b сохранён; D178 будет активироваться только поверх его verified production receipt.",
       "D177 production run 34789532262 завершён success: image sha256:8bda721095c7b178ea5721115bd2146269a07fd30eb91f905abe59b889306000, AlfaCRM egress=401, snapshot, данные, 65 секунд стабильности и внешние ArtHello/School/Pay=200 подтверждены.",
-      "D178 локально: 18/18 release/Money-контрактов и 811/813 остальных тестов вне несовместимого с managed filesystem chown-файла прошли, 2 пропущены; typecheck, lint без ошибок и production build прошли."
+      "D178 activation run 34791395398 завершён success: ALFACRM_IMPORT_ENABLED включён поверх точного D177 image, rollback snapshot, 65 секунд стабильности и внешние ArtHello/School/Pay=200 подтверждены.",
+      "IMG_0256/IMG_0258/IMG_0260/IMG_0261/IMG_0262/IMG_0263: владелец потребовал убрать лишние пояснения и повторные реестры, уплотнить типографику и открывать компактную карточку операции с крестиком и подписанными комментариями.",
+      "D179 локально: typecheck и production build прошли; 93/93 связанных финансовых, банковских, Pay, dashboard и visual contracts прошли."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
@@ -215,7 +217,7 @@
       "School transport восстановлен и read-only проверен; естественный авторизованный Education→дневник SSO не подтверждён, облачный браузер возвращает502 до формы входа.",
       "Customer.balance подтверждён официальным API как денежное поле; Alfa financial movements остаются blocked до проверенного контракта PayType direction.",
       "Новая ArtHello версия ещё не переключена: нужны первая backup+restore, exact immutable release и пользовательская приёмка шести сценариев.",
-      "D178 ещё не активирован: требуется verified production receipt точного D177 Money release, exact-main D178 Verify, snapshot и внешний ArtHello/School/Pay probe; при истечении 30 минут владелец повторяет предпросмотр перед импортом."
+      "D179 ещё не опубликован: требуются exact-main Verify, isolated browser card/comment path, snapshot, сохранность активированного импорта AlfaCRM, банковских счетов/остатков и внешний ArtHello/School/Pay probe."
     ]
   },
   "stages": [
@@ -455,8 +457,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "Опубликовать D178: после подтверждённого подключения, пяти сопоставлений и read-only counts активировать ALFACRM_IMPORT_ENABLED только для контролируемых модульных импортов поверх точного D177 production release",
-    "evidence": "Exact D177 production receipt, explicit owner instruction, exact-main D178 Verify with one-time workflow_run activation, runtime evidence connected+credential+mappings+families/staff previews до docker stop, свежий rollback snapshot, 65 секунд стабильности, независимый ArtHello/School/Pay probe и доступная кнопка после обновления wizard"
+    "result": "Опубликовать D179: единственную банковскую историю, очередь разнесения и компактную карточку операции с подписанными комментариями без отката активированного импорта AlfaCRM",
+    "evidence": "D179 UI/API-контракты, browser path карточки и комментария, exact SHA/tree, Quality и Verify, сохранённые ALFACRM_IMPORT_ENABLED, Pay grants, банковские счета и остатки, rollback snapshot, 65 секунд стабильности и независимая production-проверка ArtHello/School/Pay"
   },
   "decisionLog": [
     {
@@ -2788,7 +2790,8 @@
         "IMG_0255: предпросмотры завершены без записи, counts 2887 и 193.",
         "D178 controller сохраняет полный D177 release-contract fixture и требует совпадения D177 receipt с live image, container и route до любой остановки production.",
         "D177 production run 34789532262 успешно создал точный receipt для release 6ef7a3dc82e4644d1991d5454e61b62149b3738b и image sha256:8bda721095c7b178ea5721115bd2146269a07fd30eb91f905abe59b889306000.",
-        "D178 локально прошёл 18/18 release/Money-контрактов и 811/813 остальных тестов вне chown-файла, 2 skipped; typecheck, lint без ошибок и production build успешны."
+        "D178 локально прошёл 18/18 release/Money-контрактов и 811/813 остальных тестов вне chown-файла, 2 skipped; typecheck, lint без ошибок и production build успешны.",
+        "D178 activation run 34791395398 завершён success и подтвердил preview evidence, runtime-флаг, rollback snapshot, 65 секунд стабильности и внешний ArtHello/School/Pay=200."
       ],
       "assumptions": [
         "Новый v2api key введён владельцем только в защищённое окно ArtHello OS и не передан в чат или CI.",
@@ -2805,7 +2808,8 @@
       ],
       "source_links": [
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34787872813",
-        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/6ef7a3dc82e4644d1991d5454e61b62149b3738b"
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/6ef7a3dc82e4644d1991d5454e61b62149b3738b",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34791395398"
       ],
       "rejected_alternatives": [
         {
@@ -2830,7 +2834,78 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Successful exact-main Verify and protected workflow_run activation receipt, ARTHELLO_D178_PREVIEW_EVIDENCE=VERIFIED, ARTHELLO_D178_PRODUCTION=VERIFIED и ARTHELLO_D178_EXTERNAL=VERIFIED",
-          "status": "open"
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — явное поручение в текущем чате",
+      "approved_at": "2026-09-14",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после фактического production-выпуска D179",
+      "affected_stages": [
+        4,
+        20,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "Владелец потребовал убрать лишние поясняющие блоки, уплотнить кнопки и типографику, открывать компактную карточку операции с закрытием и подписанными комментариями, а также устранить дублирование банка, реестра ДДС и реестра на главной.",
+      "decision_id": "DEC-2026-09-14-87",
+      "question": "Как убрать повторяющиеся финансовые реестры и сократить карточку операции, сохранив банковский факт, управленческое разнесение и контроль действий?",
+      "statement": "D179: вкладка «Банк» в разделе «Деньги» является единственной полной историей банковских операций. Главная показывает только компактную сводку со ссылкой на эту историю; «Разнесение» содержит очередь операций, требующих классификации; ДДС показывает агрегированный отчёт по статьям без собственного реестра; Pay остаётся отдельным процессом создания и контроля ссылок на оплату. Нажатие на банковскую операцию открывает компактную карточку с существенными реквизитами, крестиком, сворачиваемым разнесением и подписанными append-only комментариями.",
+      "context": "До D179 одинаковые операции одновременно показывались в банковской истории, на главной и в общем реестре, а карточка занимала несколько экранов техническими пояснениями и аналитиками. Это создавало впечатление разных источников и усложняло мобильную работу.",
+      "rationale": "Одна каноническая история исключает расхождение интерфейсов. Очередь разнесения отвечает за действие, ДДС — за результат классификации, а Pay — за другой жизненный цикл платёжной ссылки. Короткая карточка сохраняет ежедневный контекст, а раскрытие формы оставляет редактирование доступным без перегрузки экрана.",
+      "evidence": [
+        "FinanceWorkspace содержит D179_FINANCE_COMPACT_OPERATION_CARD, кликабельные строки единственной банковской истории, компактную карточку и очередь неразнесённых операций.",
+        "Комментарии сохраняются отдельными finance.operation_commented audit events с actor и не изменяют строки bank_transactions.",
+        "OwnerDashboard больше не рендерит второй реестр операций и ведёт в каноническую историю раздела «Деньги».",
+        "D179 UI/API-контракты и production browser verifier проверяют открытие карточки, закрытие, разнесение и добавление подписанного комментария.",
+        "D179 release controller требует сохранения ALFACRM_IMPORT_ENABLED=true, Pay grants, банковских счетов и остатков до переключения production."
+      ],
+      "assumptions": [
+        "Банковская сумма, дата, счёт и направление продолжают поступать из зафиксированного D172 read-model и не редактируются через карточку.",
+        "Комментарий является внутренней служебной заметкой и доступен только пользователям с доступом к соответствующему финансовому контуру.",
+        "ДДС и ОПиУ остаются управленческими представлениями классифицированных операций, а не независимыми банковскими источниками.",
+        "Реальные исходящие платежи, приём денег в ArtHello OS и фискализация остаются выключены."
+      ],
+      "dependencies": [
+        "D172 canonical banking source and module boundaries",
+        "D175 stable Pay navigation and authentication",
+        "D177 compact Money balances and mobile bank history",
+        "D178 controlled AlfaCRM import activation run 34791395398",
+        "Explicit owner instruction 2026-09-14"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34791395398"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Оставить полный реестр операций одновременно на главной, в «Банке» и в «Разнесении»",
+          "reason": "Три представления одной истории выглядят как разные источники и могут расходиться по фильтрам и итогам.",
+          "reopen_condition": "только для отдельного специализированного сценария с явно отличающимся назначением"
+        },
+        {
+          "option": "Удалить вкладку ДДС вместе с дублирующим реестром",
+          "reason": "ДДС нужен как агрегированный управленческий отчёт по статьям; лишним был повторный список операций, а не сам отчёт.",
+          "reopen_condition": "если владелец откажется от управленческого ДДС как отчёта"
+        },
+        {
+          "option": "Показывать все поля разнесения и доказательную цепочку сразу при открытии операции",
+          "reason": "Карточка перестаёт быть обзором и занимает несколько мобильных экранов; редкие поля доступны после явного раскрытия.",
+          "reopen_condition": "только для отдельного режима аудита"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Выпустить exact D179 и подтвердить единственную банковскую историю, компактную карточку, подписанные комментарии и сохранность ArtHello/School/Pay, банковских данных и AlfaCRM import flag",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "TypeScript/build, D179 contracts, browser card/comment path, exact hosted image, protected receipt, 65-second stability and independent external probe",
+          "status": "in_progress"
         }
       ]
     }
