@@ -167,9 +167,14 @@ class GitHub:
 
 def context(env):
     for key, value in {'GITHUB_REPOSITORY': REPOSITORY, 'EXPECTED_REPOSITORY': REPOSITORY,
-                       'GITHUB_ACTOR': OWNER, 'GITHUB_TRIGGERING_ACTOR': OWNER,
-                       'GITHUB_EVENT_NAME': 'workflow_run'}.items():
+                       'GITHUB_ACTOR': OWNER, 'GITHUB_TRIGGERING_ACTOR': OWNER}.items():
         require(env.get(key) == value, 'PROTECTED_CONTEXT')
+    expected_event = env.get('ARTHELLO_ARTIFACT_DELIVERY_EVENT', 'workflow_run')
+    require(expected_event in {'workflow_run', 'workflow_dispatch'} and
+            env.get('GITHUB_EVENT_NAME') == expected_event, 'PROTECTED_CONTEXT')
+    if expected_event == 'workflow_dispatch':
+        require(env.get('GITHUB_WORKFLOW') == 'Deploy ArtHello mobile finance branch D182' and
+                env.get('CUTOVER_CONFIRMATION') == 'DEPLOY D182 TO PRODUCTION', 'PROTECTED_CONTEXT')
     source = env.get('RELEASE_SHA', '')
     require(re.fullmatch(r'[a-f0-9]{40}', source), 'SOURCE_IDENTITY')
     for key in ('TRIGGER_VERIFY_RUN_ID', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'):

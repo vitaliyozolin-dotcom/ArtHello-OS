@@ -3098,7 +3098,7 @@
         "Branch-access контракт подтверждает один grant, отсутствие grants и административный полный список.",
         "FinanceWorkspace содержит D182_FINANCE_MOBILE_BRANCH во всех ранних состояниях и в загруженном разделе; CSS показывает selector только до 767 px с touch-target не меньше 44 px.",
         "Hosted finance browser flow переводит owner scope в ALL на desktop, меняет viewport на 390x844, выбирает филиал, затем доказывает fail-closed смену, retry и возврат.",
-        "D182 controller проверяет фактическую строку Settings route, runtime на 2 887 семьях, successful exact-SHA Verify, typed owner confirmation непосредственно перед stop, exact D181 predecessor route/Pay assets, rollback и внешний контур."
+        "D182 controller проверяет фактическую строку Settings route, runtime на 2 887 семьях, successful exact-SHA Verify, ограниченный exact-workflow manual artifact delivery, typed owner confirmation непосредственно перед stop, exact D181 predecessor route/Pay assets, rollback и внешний контур."
       ],
       "assumptions": [
         "Неадминистративному пользователю доступны только филиалы, для которых /api/settings вернул действующий access grant; административный пользователь видит полный каталог.",

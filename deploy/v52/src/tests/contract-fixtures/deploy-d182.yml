@@ -34,6 +34,7 @@ env:
   TRIGGER_VERIFY_RUN_ID: ${{ inputs.verify_run_id }}
   CHECKED_SOURCE_SHA: ${{ inputs.release_sha }}
   CUTOVER_CONFIRMATION: ${{ inputs.confirmation }}
+  ARTHELLO_ARTIFACT_DELIVERY_EVENT: workflow_dispatch
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   PAY_URL: https://pay-188-225-38-55.sslip.io
   SCHOOL_URL: https://school-188-225-38-55.sslip.io

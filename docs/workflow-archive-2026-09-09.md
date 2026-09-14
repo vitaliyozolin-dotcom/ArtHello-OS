@@ -56,7 +56,8 @@ controller объединяет только текущий выпуск инт�
 сохраняет 16 workflow и 0 violations. Запуск требует exact main release SHA,
 ID успешного first-attempt Verify того же SHA, typed confirmation
 `DEPLOY D182 TO PRODUCTION` и protected Environment `production-ru`; подтверждение
-повторно проверяется непосредственно перед остановкой live. Первые D181 runs
+также ограничивает ручной режим загрузчика immutable artifact и повторно
+проверяется непосредственно перед остановкой live. Первые D181 runs
 `34810891708` и `34811820022` остановились на source guard до загрузки image и
 production-изменений. Исправленный D181 release
 `eea35ebe384f1039324ad083fcdfa74e0d2217c4` успешно принят run `34812906091`,
@@ -65,7 +66,7 @@ production-изменений. Исправленный D181 release
 `b9dfa00421a62a3a156c6a7950bb7041bf3e7a3bc68f319cee3114299d224c63` и
 `52056abdc2ac69c258bdeb7d03e3b1880062d044d18fa41dadc8da45f1216963`.
 Активный D182 controller и его изолированный fixture совпадают с SHA-256
-`a1d8f5b6e084396dee9a7671480bb062ea41000261288e14720c7fa541b5479d`.
+`a007cec4d7346b8e089e140031a2685ad28f280dc5ac7db1d5d9f996f510408c`.
 
 | Blob SHA                                   | Путь                                                                                |
 | ------------------------------------------ | ----------------------------------------------------------------------------------- |
