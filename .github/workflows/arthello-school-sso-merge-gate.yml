@@ -1,0 +1,63 @@
+name: ArtHello School SSO merge gate
+
+on:
+  push:
+    branches:
+      - codex/arthello-school-sso-20260831
+    paths:
+      - artifacts/arthello-os/server/school-sso.ts
+      - artifacts/arthello-os/app/api/school/sso/route.ts
+      - artifacts/arthello-os/tests/school-sso-contract.test.mjs
+      - .github/workflows/arthello-school-sso-merge-gate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: arthello-school-sso-merge-gate
+  cancel-in-progress: true
+
+jobs:
+  verify-and-merge:
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    timeout-minutes: 50
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@v4
+
+      - name: Run School SSO contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --test artifacts/arthello-os/tests/school-sso-contract.test.mjs
+
+      - name: Build exact ArtHello OS candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          image="arthello-school-sso-gate:${GITHUB_SHA::12}"
+          docker build --pull -t "$image" \
+            -f artifacts/arthello-os/Dockerfile \
+            artifacts/arthello-os
+          printf 'ARTHELLO_SCHOOL_SSO_GATE_IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
+
+      - name: Merge only the exact open candidate PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          pr_number="$(
+            gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --head "$GITHUB_REF_NAME" \
+              --base main \
+              --state open \
+              --json number,headRefOid \
+              --jq 'map(select(.headRefOid == env.GITHUB_SHA)) | if length == 1 then .[0].number else empty end'
+          )"
+          test -n "$pr_number"
+          gh pr merge "$pr_number" --repo "$GITHUB_REPOSITORY" --merge
+          printf 'ARTHELLO_SCHOOL_SSO_MERGED_PR=%s\n' "$pr_number"
