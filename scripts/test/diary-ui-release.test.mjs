@@ -1,31 +1,46 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import test from "node:test";
 
-const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
+const read = (path) =>
+  readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 
-test("D133 pins the accepted Atlas and School UI sources", () => {
+test("D183 pins the accepted Atlas source and current central predecessor", () => {
   const workflow = read(".github/workflows/deploy-diaries-d133.yml");
-  assert.match(workflow, /ATLAS_SOURCE_SHA: f856fb3bd098152bb6b02c4d0273c4c9170b130c/);
-  assert.match(workflow, /ATLAS_SOURCE_TREE: e63e28520670527bc12d84abcd45cd8fffe2b876/);
-  assert.match(workflow, /SCHOOL_SOURCE_SHA: 1a501aa11c55a7a743fc05888d5a57190f2a5c80/);
-  assert.match(workflow, /SCHOOL_SOURCE_TREE: ff140e1c5cee91dfe685962c1c5a9e1b6d7d14f1/);
+  const release = read("deploy/release-atlas-d183.sh");
+  assert.match(
+    workflow,
+    /ATLAS_SOURCE_SHA: f856fb3bd098152bb6b02c4d0273c4c9170b130c/,
+  );
+  assert.match(
+    workflow,
+    /ATLAS_SOURCE_TREE: e63e28520670527bc12d84abcd45cd8fffe2b876/,
+  );
+  assert.match(
+    release,
+    /central_release=95873e519113e93d9d52ac08166eb46b317e5c6e/,
+  );
+  assert.match(release, /expected_receipt=.*production-d182-/);
 });
 
-test("production runs only after exact successful main Quality and inside the protected environment", () => {
+test("production runs only after exact successful main gates and manual owner confirmation", () => {
   const workflow = read(".github/workflows/deploy-diaries-d133.yml");
-  assert.match(workflow, /workflow_run:/);
-  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(workflow, /startsWith\(github\.event\.workflow_run\.head_commit\.message, 'D138: use School remote boundary'\)/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /inputs\.confirmation == 'DEPLOY D183 TO PRODUCTION'/);
+  assert.match(workflow, /verify_run "\$QUALITY_RUN_ID" "Quality gates"/);
+  assert.match(workflow, /verify_run "\$PROOF_RUN_ID" "ArtHello Proof Gates"/);
   assert.match(workflow, /environment: production-ru/);
-  assert.match(workflow, /runs-on: \[self-hosted, linux, x64, arthello-gateway\]/);
+  assert.match(
+    workflow,
+    /runs-on: \[self-hosted, linux, x64, arthello-gateway\]/,
+  );
 });
 
 test("Atlas upgrade is backup-first, preserves the data volume and has rollback", () => {
   const script = read("deploy/upgrade-atlas-d133.sh");
-  const workflow = read(".github/workflows/deploy-diaries-d133.yml");
+  const release = read("deploy/release-atlas-d183.sh");
   for (const marker of [
     "ATLAS_BACKUP=VERIFIED",
     "ATLAS_DATA_VOLUME=PRESERVED",
@@ -33,33 +48,30 @@ test("Atlas upgrade is backup-first, preserves the data volume and has rollback"
     "ATLAS_UPGRADE=SUCCESS",
     "ATLAS_ROLLBACK=RETAINED_UNTIL_SSO",
     "org.opencontainers.image.revision",
-  ]) assert.match(script, new RegExp(marker));
+  ])
+    assert.match(script, new RegExp(marker));
   assert.doesNotMatch(script, /docker volume rm/);
-  assert.doesNotMatch(script, /docker rm \"\$rollback_name\"/);
-  assert.match(workflow, /ATLAS_SSO_ROLLBACK=STARTED/);
-  assert.match(workflow, /docker rm \"\$rollback_name\"/);
-  assert.match(workflow, /atlasOwnerSso:\$result/);
-  const syntax = spawnSync("bash", ["-n", fileURLToPath(new URL("../../deploy/upgrade-atlas-d133.sh", import.meta.url))], { encoding: "utf8" });
-  assert.equal(syntax.status, 0, syntax.stderr);
+  assert.match(release, /ATLAS_D183_ROLLBACK=STARTED/);
+  assert.match(release, /docker rename "\$atlas_rollback" "\$atlas_service"/);
+  assert.match(release, /owner_result=.*activate-atlas-owner-access\.mjs/);
+  assert.doesNotMatch(release, /docker volume rm/);
+  for (const path of [
+    "deploy/upgrade-atlas-d133.sh",
+    "deploy/release-atlas-d183.sh",
+  ]) {
+    const syntax = spawnSync(
+      "bash",
+      ["-n", fileURLToPath(new URL(`../../${path}`, import.meta.url))],
+      { encoding: "utf8" },
+    );
+    assert.equal(syntax.status, 0, syntax.stderr);
+  }
 });
 
-test("School uses its current-topology standalone backup and rollback cutover without package installation on production", () => {
+test("Atlas production release is decoupled from School mutation", () => {
   const workflow = read(".github/workflows/deploy-diaries-d133.yml");
-  const sshWrapper = read("deploy/run-school-ssh-d138.sh");
-  const productionJob = workflow.split("\n  deploy:")[1] ?? "";
-  assert.match(workflow, /school-curriculum-standalone-cutover\.sh/);
-  assert.match(workflow, /SCHOOL_STANDALONE_CUTOVER=PASS/);
-  assert.match(workflow, /SCHOOL_STANDALONE_BACKUP=VERIFIED/);
-  assert.match(workflow, /ARTHELLO_RU_SSH_PRIVATE_KEY/);
-  assert.match(workflow, /run-school-ssh-d138\.sh/);
-  assert.match(workflow, /StrictHostKeyChecking=yes/);
-  assert.match(sshWrapper, /docker image inspect "\$image"/);
-  assert.match(sshWrapper, /org\.opencontainers\.image\.revision/);
-  assert.match(sshWrapper, /SCHOOL_CONTAINER="\$school_container"/);
-  const syntax = spawnSync("bash", ["-n", fileURLToPath(new URL("../../deploy/school-curriculum-standalone-cutover.sh", import.meta.url))], { encoding: "utf8" });
-  assert.equal(syntax.status, 0, syntax.stderr);
-  const wrapperSyntax = spawnSync("bash", ["-n", fileURLToPath(new URL("../../deploy/run-school-ssh-d138.sh", import.meta.url))], { encoding: "utf8" });
-  assert.equal(wrapperSyntax.status, 0, wrapperSyntax.stderr);
-  assert.doesNotMatch(productionJob, /repair-deploy\.sh/);
-  assert.doesNotMatch(productionJob, /npm (ci|install)/);
+  assert.doesNotMatch(workflow, /ARTHELLO_RU_SSH_PRIVATE_KEY/);
+  assert.doesNotMatch(workflow, /school-curriculum-standalone-cutover\.sh/);
+  assert.doesNotMatch(workflow, /run-school-ssh-d138\.sh/);
+  assert.match(workflow, /"\$SCHOOL_URL\/api\/health"/);
 });
