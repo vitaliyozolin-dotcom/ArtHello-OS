@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// D184 keeps the D183 runtime/route transformation and changes only image provenance.
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 

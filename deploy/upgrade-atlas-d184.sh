@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# D133: replace only the Atlas application image while preserving its database volume.
+# D184: replace only the Atlas application image while preserving its database volume.
+# Image identity is proved with a portable runtime fingerprint because daemon-local
+# Docker image IDs can be rewritten across image stores.
 set -Eeuo pipefail
 umask 077
 
@@ -10,19 +12,20 @@ test "$ATLAS_SOURCE_SHA" = f856fb3bd098152bb6b02c4d0273c4c9170b130c
 test "$ATLAS_SOURCE_TREE" = e63e28520670527bc12d84abcd45cd8fffe2b876
 [[ "$CONTROLLER_SHA" =~ ^[a-f0-9]{40}$ ]]
 
+controller_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 service=atlas-school-diary
 data_volume=atlas-school-diary-data
 backups_volume=atlas-school-diary-backups
 network=stroios_default
 source_before=987abd5951dc4832e2c071d8744051c518bae42e
-image_ref="atlas-diary:$ATLAS_SOURCE_SHA"
+image_tag="atlas-diary:$ATLAS_SOURCE_SHA"
 secret_dir="$HOME/.config/arthello"
 central_secret="$secret_dir/atlas-central-access-secret"
 pepper_secret="$secret_dir/atlas-passwordless-pepper"
 atlas_origin=https://atlas-188-225-38-55.sslip.io
 central_origin=https://arthello-188-225-38-55.sslip.io
-rollback_name="${service}-d133-rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-backup_name="pre-d133-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sqlite"
+rollback_name="${service}-d184-rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+backup_name="pre-d184-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sqlite"
 new_created=0
 old_renamed=0
 old_stopped=0
@@ -63,27 +66,69 @@ test "$(docker inspect "$service" --format '{{.State.Running}}')" = true
 test "$(docker inspect "$service" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$data_volume"
 test "$(docker inspect "$service" --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Name}}{{end}}{{end}}')" = "$backups_volume"
 
+(cd "$ATLAS_BUNDLE_DIR" && sha256sum --check checksums.sha256)
+archive_sha="$(sha256sum "$ATLAS_BUNDLE_DIR/atlas-image.tar.gz" | cut -d ' ' -f 1)"
+[[ "$archive_sha" =~ ^[a-f0-9]{64}$ ]]
+test "$(jq -er '.sourceSha' "$ATLAS_BUNDLE_DIR/receipt.json")" = "$ATLAS_SOURCE_SHA"
+test "$(jq -er '.sourceTree' "$ATLAS_BUNDLE_DIR/receipt.json")" = "$ATLAS_SOURCE_TREE"
+builder_image_id="$(jq -er '.imageId' "$ATLAS_BUNDLE_DIR/receipt.json")"
+expected_runtime_fingerprint="$(jq -er '.runtimeFingerprintSha256' "$ATLAS_BUNDLE_DIR/receipt.json")"
+[[ "$builder_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+[[ "$expected_runtime_fingerprint" =~ ^[a-f0-9]{64}$ ]]
+test -s "$controller_root/deploy/v52/maintenance/image-runtime-fingerprint.jq"
+
+runtime_fingerprint() {
+  docker image inspect "$1" \
+    | jq -cS -f "$controller_root/deploy/v52/maintenance/image-runtime-fingerprint.jq" \
+    | sha256sum \
+    | cut -d ' ' -f 1
+}
+
 live_source="$(docker inspect "$service" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
 if [ "$live_source" = "$ATLAS_SOURCE_SHA" ]; then
+  gateway_image_id="$(docker inspect "$service" --format '{{.Image}}')"
+  [[ "$gateway_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+  gateway_runtime_fingerprint="$(runtime_fingerprint "$gateway_image_id")"
+  test "$gateway_runtime_fingerprint" = "$expected_runtime_fingerprint"
+  test "$(docker image inspect "$gateway_image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$ATLAS_SOURCE_TREE"
   curl -fsS --max-time 20 "$atlas_origin/api/health" | jq -e '.status == "ok"' >/dev/null
-  jq -n --arg controller "$CONTROLLER_SHA" --arg source "$ATLAS_SOURCE_SHA" \
-    '{schemaVersion:1,kind:"atlas-ui-release",controllerSha:$controller,sourceSha:$source,status:"already-active",dataVolumePreserved:true}' \
-    > "$ATLAS_BUNDLE_DIR/atlas-d133-production-receipt.json"
+  jq -n --arg controller "$CONTROLLER_SHA" --arg source "$ATLAS_SOURCE_SHA" --arg tree "$ATLAS_SOURCE_TREE" \
+    --arg archive "$archive_sha" --arg builderImage "$builder_image_id" --arg gatewayImage "$gateway_image_id" \
+    --arg runtimeFingerprint "$gateway_runtime_fingerprint" \
+    '{schemaVersion:1,kind:"atlas-ui-release",controllerSha:$controller,sourceSha:$source,sourceTree:$tree,status:"already-active",dataVolumePreserved:true,archiveSha256:$archive,builderImageId:$builderImage,gatewayImageId:$gatewayImage,runtimeFingerprintSha256:$runtimeFingerprint}' \
+    > "$ATLAS_BUNDLE_DIR/atlas-d184-production-receipt.json"
+  printf 'ATLAS_IMAGE_ID_REPRESENTATION builder=%s gateway=%s\n' "$builder_image_id" "$gateway_image_id"
+  printf 'ATLAS_IMAGE_RUNTIME_FINGERPRINT=VERIFIED sha256=%s\n' "$gateway_runtime_fingerprint"
   printf 'ATLAS_DATA_VOLUME=PRESERVED\nATLAS_UPGRADE=SUCCESS\n'
   release_active=1
   exit 0
 fi
 test "$live_source" = "$source_before"
 
-(cd "$ATLAS_BUNDLE_DIR" && sha256sum --check checksums.sha256)
-test "$(jq -er '.sourceSha' "$ATLAS_BUNDLE_DIR/receipt.json")" = "$ATLAS_SOURCE_SHA"
-test "$(jq -er '.sourceTree' "$ATLAS_BUNDLE_DIR/receipt.json")" = "$ATLAS_SOURCE_TREE"
-expected_image="$(jq -er '.imageId' "$ATLAS_BUNDLE_DIR/receipt.json")"
-[[ "$expected_image" =~ ^sha256:[a-f0-9]{64}$ ]]
-docker load --input "$ATLAS_BUNDLE_DIR/atlas-image.tar.gz" >/dev/null
-test "$(docker image inspect "$image_ref" --format '{{.Id}}')" = "$expected_image"
-test "$(docker image inspect "$image_ref" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$ATLAS_SOURCE_SHA"
-test "$(docker image inspect "$image_ref" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$ATLAS_SOURCE_TREE"
+if docker image inspect "$image_tag" >/dev/null 2>&1; then
+  stale_users="$(docker ps -aq --filter "ancestor=$image_tag")"
+  test -z "$stale_users"
+  docker image rm "$image_tag" >/dev/null
+fi
+load_log="$ATLAS_BUNDLE_DIR/docker-load.log"
+if ! docker image load --input "$ATLAS_BUNDLE_DIR/atlas-image.tar.gz" >"$load_log" 2>&1; then
+  sed -n '1,160p' "$load_log" >&2
+  printf '::error::Docker rejected the verified Atlas image archive before production cutover\n' >&2
+  exit 1
+fi
+sed -n '1,80p' "$load_log"
+gateway_image_id="$(docker image inspect "$image_tag" --format '{{.Id}}')"
+[[ "$gateway_image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+gateway_runtime_fingerprint="$(runtime_fingerprint "$gateway_image_id")"
+if [ "$gateway_runtime_fingerprint" != "$expected_runtime_fingerprint" ]; then
+  printf '::error::Imported Atlas runtime fingerprint does not match hosted evidence\n' >&2
+  exit 1
+fi
+test "$(docker image inspect "$gateway_image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$ATLAS_SOURCE_SHA"
+test "$(docker image inspect "$gateway_image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$ATLAS_SOURCE_TREE"
+printf 'ATLAS_IMAGE_ID_REPRESENTATION builder=%s gateway=%s\n' "$builder_image_id" "$gateway_image_id"
+printf 'ATLAS_IMAGE_RUNTIME_FINGERPRINT=VERIFIED sha256=%s\n' "$gateway_runtime_fingerprint"
+image_ref="$gateway_image_id"
 
 # Stop first so the plain SQLite copy is transactionally stable.
 docker stop --time 30 "$service" >/dev/null
@@ -143,6 +188,8 @@ curl -fsS --max-time 20 "$atlas_origin/api/health" | jq -e '.status == "ok"' >/d
 release_active=1
 printf 'ATLAS_DATA_VOLUME=PRESERVED\nATLAS_ROLLBACK=RETAINED_UNTIL_SSO\nATLAS_UPGRADE=SUCCESS\n'
 jq -n --arg controller "$CONTROLLER_SHA" --arg source "$ATLAS_SOURCE_SHA" --arg tree "$ATLAS_SOURCE_TREE" \
+  --arg archive "$archive_sha" --arg builderImage "$builder_image_id" --arg gatewayImage "$gateway_image_id" \
+  --arg runtimeFingerprint "$gateway_runtime_fingerprint" \
   --arg backup "$backup_name" --arg backupSha "$backup_sha" --arg rollback "$rollback_name" \
-  '{schemaVersion:1,kind:"atlas-ui-release",controllerSha:$controller,sourceSha:$source,sourceTree:$tree,status:"pending-sso-acceptance",dataVolumePreserved:true,rollbackContainer:$rollback,backup:{file:$backup,sha256:$backupSha,integrity:"ok"}}' \
-  > "$ATLAS_BUNDLE_DIR/atlas-d133-production-receipt.json"
+  '{schemaVersion:1,kind:"atlas-ui-release",controllerSha:$controller,sourceSha:$source,sourceTree:$tree,status:"pending-sso-acceptance",dataVolumePreserved:true,archiveSha256:$archive,builderImageId:$builderImage,gatewayImageId:$gatewayImage,runtimeFingerprintSha256:$runtimeFingerprint,rollbackContainer:$rollback,backup:{file:$backup,sha256:$backupSha,integrity:"ok"}}' \
+  > "$ATLAS_BUNDLE_DIR/atlas-d184-production-receipt.json"
