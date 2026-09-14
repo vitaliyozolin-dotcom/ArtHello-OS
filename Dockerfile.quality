@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1.7
+
+# Local/CI-equivalent quality runner. This image is intentionally separate from
+# deploy/Dockerfile: production images must not contain or invoke a package
+# manager, while quality gates need the locked workspace toolchain.
+FROM node:24-bookworm-slim
+
+ENV CI=1 \
+    NODE_ENV=test \
+    COREPACK_HOME=/tmp/corepack
+
+WORKDIR /workspace
+
+RUN corepack enable \
+    && corepack prepare pnpm@11.7.0 --activate
+
+COPY . .
+
+RUN pnpm install --frozen-lockfile
+
+ENTRYPOINT ["pnpm"]
+CMD ["run", "test:full"]

@@ -1,0 +1,18 @@
+# Never send host-installed dependencies or generated outputs to Docker.
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+**/coverage
+.git
+.wrangler
+**/.wrangler
+*.tsbuildinfo
+.pnpm-store
+.npm
+
+# Local/editor state is not part of a reproducible image.
+.vscode
+.idea
+.DS_Store
