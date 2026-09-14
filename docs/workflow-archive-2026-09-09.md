@@ -51,6 +51,26 @@ controller объединяет только текущий выпуск инт�
 Исторический workflow сохранён с blob `9952c900da21eac16a37ddf3adb5f52cb4d586cf`
 и SHA-256 `fcebf657da1ba80a9d56d2f381841a58e061375bb1d31d6d3e5cf9a0f1b83f3c`.
 
+Седьмой cleanup-блок D182 заменяет failed-closed controller D181 следующим
+одноразовым ручным controller без увеличения активного каталога: workflow policy
+сохраняет 16 workflow и 0 violations. Запуск требует exact main release SHA,
+ID успешного first-attempt Verify того же SHA, typed confirmation
+`DEPLOY D182 TO PRODUCTION` и protected Environment `production-ru`. Отдельный
+D182 artifact-delivery helper принимает только этот exact manual контекст, а
+подтверждение повторно проверяется непосредственно перед остановкой live. Первые D181 runs
+`34810891708` и `34811820022` остановились на source guard до загрузки image и
+production-изменений. Исправленный D181 release
+`eea35ebe384f1039324ad083fcdfa74e0d2217c4` успешно принят run `34812906091`,
+поэтому он и его exact receipt являются непосредственным predecessor D182.
+Неизменённые contract fixtures D180 и D181 сохранены соответственно с SHA-256
+`b9dfa00421a62a3a156c6a7950bb7041bf3e7a3bc68f319cee3114299d224c63` и
+`52056abdc2ac69c258bdeb7d03e3b1880062d044d18fa41dadc8da45f1216963`.
+Активный D182 controller и его изолированный fixture совпадают с SHA-256
+`12baf134010fded88878bab388e6e3101cb28fc5e44c2040e8c8104acf1837f1`.
+Отдельный D182 artifact-delivery helper и его fixture совпадают с SHA-256
+`5ecf137e45432b1c192e4ddddaa4579ea52a11ed20428b7cd46df1efebb5a3b0`; общий исторический R17 helper восстановлен побайтово и
+по-прежнему принимает только `workflow_run`.
+
 | Blob SHA                                   | Путь                                                                                |
 | ------------------------------------------ | ----------------------------------------------------------------------------------- |
 | `46ce4c5ed22c88a692f565e91dc8112e400bdff6` | `.github/workflows/d060-tochka-production-hotfix-v2.yml`                            |

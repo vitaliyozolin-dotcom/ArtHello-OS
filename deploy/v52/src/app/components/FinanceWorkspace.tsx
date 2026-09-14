@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { humanPeriodLabel, humanTechnicalText, recordLabel, taskRecordLabel } from "../../lib/record-labels";
 import { readJsonResponse } from "../../lib/response-json";
 import { Button, Card, EmptyState, PageContainer, PageHeader, Tabs } from "./design-system";
+import { FinanceBranchSelector, type FinanceBranchOption } from "./FinanceBranchSelector";
 import { FinanceArticlesWorkspace } from "./FinanceArticlesWorkspace";
 import { cashflowBreakdown, operationArticle, type ArticleCatalog } from "../../lib/finance-articles";
 import "./FinanceWorkspace.ds.css";
@@ -229,7 +230,7 @@ const formatCommentDate = (value: string) => {
   return parsed.toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 };
 
-export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrations, selectedBranch, focusId }: { role: string; notify: (message: string) => void; onTasksChanged: () => void; onOpenIntegrations: () => void; selectedBranch: string; branchName: string; focusId?: string }) {
+export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrations, selectedBranch, branches, onBranchChange, focusId }: { role: string; notify: (message: string) => void; onTasksChanged: () => void; onOpenIntegrations: () => void; selectedBranch: string; branches: FinanceBranchOption[]; onBranchChange: (branchId: string) => void; focusId?: string }) {
   const [data, setData] = useState<FinanceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -246,6 +247,7 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrati
   const [resolution, setResolution] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
   const operationCloseRef = useRef<HTMLButtonElement>(null);
+  const loadRequestRef = useRef(0);
 
   const closeOperation = useCallback(() => {
     setSelected(null);
@@ -287,9 +289,10 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrati
   }, [data, openOperation]);
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
+    setData(null);
+    setError("");
     if (!selectedBranch || selectedBranch === "ALL") {
-      setData(null);
-      setError("");
       setLoading(false);
       return;
     }
@@ -299,13 +302,15 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrati
       const response = await fetch(`/api/finance?${params.toString()}`, { cache: "no-store" });
       const payload = await readJsonResponse<FinanceData & { error?: string }>(response);
       if (!response.ok) throw new Error(payload.error ?? "Не удалось загрузить финансы");
+      if (requestId !== loadRequestRef.current) return;
       setData(payload);
       if (payload.selectedPeriod && payload.selectedPeriod !== period) setPeriod(payload.selectedPeriod);
       setError("");
     } catch (loadError) {
+      if (requestId !== loadRequestRef.current) return;
       setError(loadError instanceof Error ? loadError.message : "Не удалось загрузить финансы");
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) setLoading(false);
     }
   }, [period, selectedBranch]);
 
@@ -396,10 +401,11 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrati
       ].some((value) => value.toLocaleLowerCase("ru").includes(normalized)));
   }, [data, direction, period, query, previewIds]);
 
-  if (!selectedBranch || selectedBranch === "ALL") return <PageContainer className="ahFinanceDenied"><Card><EmptyState title="Выберите филиал" description="Финансовые отчёты ведутся отдельно по каждому филиалу. Общий отчёт пока отключён." density="compact" /></Card></PageContainer>;
-  if (loading && !data) return <section className="ahFinanceStatus">Собираем финансовый контур филиала…</section>;
-  if (error && !data) return <PageContainer className="ahFinanceDenied"><Card><EmptyState title="Финансовый раздел временно недоступен" description={error} density="compact" action={<Button onClick={() => void load()}>Повторить</Button>} /></Card></PageContainer>;
-  if (!data) return null;
+  const mobileBranchScope = <div className="ahFinanceMobileBranchScope" data-d182-marker="D182_FINANCE_MOBILE_BRANCH"><FinanceBranchSelector selectedBranch={selectedBranch} branches={branches} onChange={onBranchChange} /></div>;
+
+  if (!selectedBranch || selectedBranch === "ALL") return <PageContainer className="ahFinanceDenied">{mobileBranchScope}<Card><EmptyState title="Выберите филиал" description="Финансовые отчёты ведутся отдельно по каждому филиалу. Общий отчёт пока отключён." density="compact" /></Card></PageContainer>;
+  if (error && data?.branch.id !== selectedBranch) return <PageContainer className="ahFinanceDenied">{mobileBranchScope}<Card><EmptyState title="Финансовый раздел временно недоступен" description={error} density="compact" action={<Button onClick={() => void load()}>Повторить</Button>} /></Card></PageContainer>;
+  if (loading || data?.branch.id !== selectedBranch) return <PageContainer className="ahFinancePage">{mobileBranchScope}<section className="ahFinanceStatus">Собираем финансовый контур филиала…</section></PageContainer>;
 
   const maxMonthly = Math.max(1, ...data.monthly.flatMap((month) => [month.receiptsMinor, month.outflowsMinor]));
   const periodOptions = [...new Set([period, ...data.monthly.map((month) => month.period)])].sort();
@@ -447,6 +453,8 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrati
         eyebrow="ФИНАНСЫ"
         title="Деньги"
       />
+
+      {mobileBranchScope}
 
       <div className="ahFinanceControls">
         <label className="ahFinancePeriod">
