@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
-import { auditEvents, financeCorrections, financeReconciliationIssues, financialOperations, organizationBranches, tasks, userBranchAccess } from "../../../db/schema";
+import { auditEvents, bankTransactions, financeCorrections, financeReconciliationIssues, financialOperations, organizationBranches, tasks, userBranchAccess } from "../../../db/schema";
 import { getAuthenticatedRequestContext, verifyAuthenticatedRequestCsrf, type AuthenticatedRequestContext } from "../../../lib/production-auth";
 import { resolveTaskAssignment, type TaskAccessContext } from "../../../lib/task-access";
 import { findScopedAutomationTask, scopedAutomationTaskResponse } from "../../../lib/task-access-query";
@@ -44,6 +44,7 @@ export async function POST(request: Request) {
       return Response.json({ catalog, message: action === "createArticle" ? "Черновик статьи создан" : action === "approveArticle" ? "Статья утверждена" : "Статья перенесена в архив" });
     }
     if (action === "classifyOperation") return await classifyOperation(context, body);
+    if (action === "addOperationComment") return addOperationComment(context, body);
     if (action === "addCorrection") return addCorrection(context, body);
     if (action === "createIssueTask") return createIssueTask(context, body);
     if (action === "resolveIssue") {
@@ -55,6 +56,35 @@ export async function POST(request: Request) {
     if (error instanceof FinanceArticleError) return Response.json({ error: error.message }, { status: error.status });
     return Response.json({ error: "Не удалось сохранить финансовое действие. Обновите страницу перед повтором." }, { status: 500 });
   }
+}
+
+async function addOperationComment(context: AuthenticatedRequestContext, body: Record<string, unknown>) {
+  const operationId = clean(body.operationId, 80);
+  const targetType = clean(body.targetType, 20);
+  const commentBody = clean(body.comment, 600);
+  if (!operationId || !["bank", "management"].includes(targetType) || !commentBody) {
+    return Response.json({ error: "Напишите комментарий к операции" }, { status: 400 });
+  }
+  const db = getDb();
+  if (targetType === "bank") {
+    const [operation] = await db.select({ id: bankTransactions.id }).from(bankTransactions).where(eq(bankTransactions.id, operationId)).limit(1);
+    if (!operation) return Response.json({ error: "Банковская операция не найдена" }, { status: 404 });
+  } else {
+    const [operation] = await db.select({ id: financialOperations.id, objectEntityId: financialOperations.objectEntityId }).from(financialOperations).where(eq(financialOperations.id, operationId)).limit(1);
+    if (!operation) return Response.json({ error: "Операция не найдена" }, { status: 404 });
+    if (!await canManageBranch(context, operation.objectEntityId)) return Response.json({ error: "Филиал операции недоступен" }, { status: 403 });
+  }
+  const [comment] = await db.insert(auditEvents).values({
+    actor: context.actor,
+    action: "finance.operation_commented",
+    entityType: targetType === "bank" ? "bank_transaction" : "financial_operation",
+    entityId: operationId,
+    payload: JSON.stringify({ body: commentBody, author: context.appUserName }),
+  }).returning();
+  return Response.json({
+    comment: { id: comment.id, targetType, operationId, body: commentBody, author: context.appUserName, createdAt: comment.createdAt },
+    message: "Комментарий добавлен",
+  }, { status: 201 });
 }
 
 // D069_FINANCE_OPERATION_ALLOCATION: financial_operations is the management projection; bank_transactions remains immutable.

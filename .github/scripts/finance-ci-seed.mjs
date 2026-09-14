@@ -48,6 +48,9 @@ try {
     const catalog=JSON.parse(db.prepare("SELECT state_value FROM system_runtime_state WHERE state_key='finance_article_catalog_v1'").get().state_value);
     assert.equal(catalog.articles.length,3);assert.equal(catalog.articles.find(a=>a.name==='CI Обучение').status,'archived');
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='finance.operation_classified'").get().n,2);
+    const comment=db.prepare("SELECT actor,payload FROM audit_events WHERE action='finance.operation_commented'").get();
+    const owner=db.prepare("SELECT contact,display_name FROM app_users WHERE id='USR-OWNER'").get();
+    assert.equal(comment.actor,owner.contact);assert.deepEqual(JSON.parse(comment.payload),{body:'CI комментарий владельца',author:owner.display_name});
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE entity_type='finance_article_catalog'").get().n,7);
   }
   db.close();console.log('FINANCE_CI_'+process.argv[2].toUpperCase()+'=PASS');

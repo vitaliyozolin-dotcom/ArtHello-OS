@@ -866,6 +866,54 @@
   font-weight: 600;
 }
 
+.registryCompact {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  border-top: 1px solid var(--border, #e1e3ec);
+  padding: 13px 14px 15px;
+}
+
+.registryCompact .periodSelect {
+  height: 38px;
+  border: 1px solid var(--border, #e1e3ec);
+  border-radius: 9px;
+  background: #fff;
+  color: #41495f;
+  font: 500 12px/1 var(--font-ui, inherit);
+}
+
+.registryCompact dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.registryCompact dl > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.registryCompact dt {
+  color: var(--text-muted, #737b91);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.registryCompact dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-primary, #171a2b);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 19px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .registryContent {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
@@ -1110,6 +1158,9 @@
   .registrySearch { grid-column: 1 / -1; }
   .registryToolbar > button:last-child { display: none; }
   .registrySummary { gap: 14px; }
+  .registryCompact { grid-template-columns: 1fr; gap: 10px; }
+  .registryCompact dl { gap: 7px; }
+  .registryCompact dd { font-size: 12px; }
   .tableWrap table { min-width: 680px; }
 }
 

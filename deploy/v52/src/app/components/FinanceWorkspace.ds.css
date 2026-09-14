@@ -664,3 +664,104 @@
 .ahFinanceOperationDrawer .operation-classification-form > p { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.5; color: var(--ah-color-text-secondary); }
 .ahFinancePage .ahFinanceArticles .finance-panel { padding: 16px; }
 .ahFinancePage .ahFinanceArticles .finance-panel-head { padding: 0; min-height: 0; margin-bottom: 16px; }
+
+/* D179_FINANCE_COMPACT_OPERATION_CARD */
+.ahFinancePage { gap: 14px; }
+.ahFinancePage .ahPageHeaderCopy > small { margin-bottom: 3px; font-size: 10px; line-height: 14px; }
+.ahFinancePage .ahPageHeaderCopy h1 { font-size: 32px; font-weight: 650; line-height: 1.05; letter-spacing: -.035em; }
+.ahFinanceControls { display: flex; align-items: end; justify-content: space-between; gap: 10px; min-width: 0; }
+.ahFinanceControls .ahFinancePeriod { display: flex; align-items: center; gap: 8px; padding: 0; }
+.ahFinanceControls .ahFinancePeriod > span { color: var(--ah-color-text-primary); font-size: 12px; font-weight: 650; }
+.ahFinanceControls .ahFinancePeriod select { min-width: 168px; }
+.ahFinanceIssueButton { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; border: 1px solid var(--ah-color-border); border-radius: 10px; background: var(--ah-color-surface); padding: 0 11px; color: var(--ah-color-text-primary); font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
+.ahFinanceIssueButton b { display: grid; place-items: center; min-width: 19px; min-height: 19px; border-radius: 999px; background: var(--ah-color-warning-soft); color: #955417; font-size: 10px; }
+.ahFinanceNavigation { grid-template-columns: 1fr; gap: 0; }
+.ahFinanceTabs .ahTabs { gap: 14px; }
+.ahFinanceTabs .ahTabs button { min-height: 38px; font-size: 12px; }
+.ahFinancePulse { border-radius: 16px; }
+.ahFinancePulse > header { padding: 10px 14px; }
+.ahFinancePulseMain, .ahFinancePulse dl > div { padding: 14px; }
+.ahFinancePulseMain strong { font-size: clamp(24px, 3vw, 30px); font-weight: 680; }
+.ahFinancePulse dd { font-size: clamp(17px, 2.1vw, 22px); font-weight: 650; }
+.ahFinanceBankHistoryRow, .ahFinanceAllocationRow { width: 100%; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color .12s ease; }
+.ahFinanceBankHistoryRow:hover, .ahFinanceAllocationRow:hover { background: var(--ah-color-surface-soft); }
+.ahFinanceBankHistoryRow:focus-visible, .ahFinanceAllocationRow:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--ah-color-primary); outline-offset: -2px; }
+.ahFinanceAllocationList { display: grid; border-top: 1px solid var(--ah-color-border); }
+.ahFinanceAllocationRow { display: grid; grid-template-columns: 38px minmax(0, 1fr) max-content; align-items: start; gap: 12px; min-width: 0; padding: 14px 16px; }
+.ahFinanceAllocationRow + .ahFinanceAllocationRow { border-top: 1px solid var(--ah-color-border); }
+.ahFinanceReviewQueue { margin: 12px; border-radius: 13px; }
+.ahFinanceReviewQueue .finance-panel-head { min-height: 54px; padding: 11px 13px; }
+.ahFinancePage .finance-toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+.ahFinancePage .finance-toolbar input { flex: 1 1 240px; min-width: 0; }
+.ahFinancePage .finance-toolbar select, .ahFinancePage .finance-toolbar button { flex: 0 1 auto; }
+
+.ahFinanceOperationCard { width: min(560px, calc(100vw - 32px)); height: auto; max-height: min(760px, calc(100dvh - 32px)); border-radius: 18px; }
+.ahFinanceOperationCard > header { border-bottom: 1px solid var(--ah-color-border); padding: 16px 18px 14px; }
+.ahFinanceOperationCard > header > div { min-width: 0; }
+.ahFinanceOperationCard > header span { padding: 5px 8px; font-size: 10px; line-height: 14px; }
+.ahFinanceOperationCard > header span.isIncoming { background: #e7f6f0; color: #28765e; }
+.ahFinanceOperationCard > header span.isOutgoing { background: #fbecee; color: var(--ah-color-danger); }
+.ahFinanceOperationCard > header h2 { margin: 7px 0 3px; overflow-wrap: anywhere; font-size: 20px; font-weight: 650; line-height: 25px; letter-spacing: -.025em; }
+.ahFinanceOperationCard > header p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ahFinanceOperationCard > header > button { flex: 0 0 36px; font-size: 20px; }
+.ahFinanceOperationCard .finance-drawer-body { padding: 0 18px 18px; background: var(--ah-color-surface); }
+.ahFinanceOperationHero { display: grid; gap: 7px; border-bottom: 1px solid var(--ah-color-border); padding: 16px 0; }
+.ahFinanceOperationHero strong { font-size: 28px; font-weight: 680; line-height: 32px; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.ahFinanceOperationHero strong.isIncoming { color: #28765e; }
+.ahFinanceOperationHero strong.isOutgoing { color: var(--ah-color-danger); }
+.ahFinanceOperationHero p { display: -webkit-box; margin: 0; overflow: hidden; color: var(--ah-color-text-primary); font-size: 13px; line-height: 19px; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.ahFinanceOperationFacts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; margin: 0; border-bottom: 1px solid var(--ah-color-border); padding: 6px 0; }
+.ahFinanceOperationFacts > div { display: grid; gap: 3px; min-width: 0; padding: 9px 8px 9px 0; }
+.ahFinanceOperationFacts dt { color: var(--ah-color-text-secondary); font-size: 10px; line-height: 14px; }
+.ahFinanceOperationFacts dd { margin: 0; overflow-wrap: anywhere; color: var(--ah-color-text-primary); font-size: 12px; font-weight: 600; line-height: 17px; }
+.ahFinanceOperationCard .operation-classification { margin: 0; border-top: 0; border-bottom: 1px solid var(--ah-color-border); padding: 12px 0; }
+.ahFinanceOperationCard .operation-classification-head { align-items: center; }
+.ahFinanceOperationCard .operation-classification-head p { font-size: 13px; line-height: 18px; }
+.ahFinanceOperationCard .operation-classification-head span { font-size: 10px; line-height: 15px; }
+.ahFinanceOperationCard .operation-classification-head > button { min-height: 34px; border: 1px solid var(--ah-color-border); border-radius: 9px; background: var(--ah-color-surface); padding: 0 11px; color: var(--ah-color-primary); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
+.ahFinanceOperationCard .operation-classification-form { margin-top: 4px; border-top: 1px solid var(--ah-color-border); padding-top: 12px; }
+.ahFinanceOperationComments { display: grid; gap: 9px; padding-top: 13px; }
+.ahFinanceOperationCommentsHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ahFinanceOperationCommentsHead h3 { margin: 0; font-size: 14px; font-weight: 650; line-height: 19px; }
+.ahFinanceOperationCommentsHead span { color: var(--ah-color-text-secondary); font-size: 11px; }
+.ahFinanceOperationCommentsEmpty { margin: 0; color: var(--ah-color-text-secondary); font-size: 11px; line-height: 16px; }
+.ahFinanceOperationCommentList { display: grid; gap: 7px; max-height: 156px; overflow-y: auto; }
+.ahFinanceOperationCommentList article { border-radius: 10px; background: var(--ah-color-surface-soft); padding: 9px 10px; }
+.ahFinanceOperationCommentList p { margin: 0; color: var(--ah-color-text-primary); font-size: 12px; line-height: 17px; overflow-wrap: anywhere; }
+.ahFinanceOperationCommentList footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 5px; color: var(--ah-color-text-secondary); font-size: 9px; line-height: 13px; }
+.ahFinanceOperationCommentList footer strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.ahFinanceOperationComments form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; }
+.ahFinanceOperationComments label { min-width: 0; }
+.ahFinanceOperationComments textarea { display: block; width: 100%; min-height: 54px; max-height: 110px; resize: vertical; border: 1px solid var(--ah-color-border); border-radius: 10px; background: var(--ah-color-surface); padding: 9px 10px; color: var(--ah-color-text-primary); font: inherit; font-size: 13px; line-height: 18px; }
+.ahFinanceOperationComments textarea:focus { outline: 2px solid color-mix(in srgb, var(--ah-color-primary) 22%, transparent); border-color: var(--ah-color-primary); }
+.ahFinanceOperationComments form > button { min-height: 38px; border: 0; border-radius: 9px; background: var(--ah-color-primary); padding: 0 12px; color: white; font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
+.ahFinanceOperationComments form > button:disabled { cursor: default; opacity: .45; }
+
+@media (max-width: 767px) {
+  .ahFinancePage { gap: 12px; }
+  .ahFinancePage .ahPageHeader { gap: 0; }
+  .ahFinancePage .ahPageHeaderCopy h1 { font-size: 29px; }
+  .ahFinanceControls { align-items: stretch; }
+  .ahFinanceControls .ahFinancePeriod { flex: 1 1 auto; }
+  .ahFinanceControls .ahFinancePeriod select { width: 100%; min-width: 0; min-height: 38px; font-size: 13px; }
+  .ahFinanceIssueButton { flex: 0 0 auto; }
+  .ahFinancePulseMain { padding: 12px 14px; }
+  .ahFinancePulseMain strong { font-size: clamp(23px, 7vw, 28px); }
+  .ahFinancePulse dl > div { padding: 10px 14px 12px; }
+  .ahFinancePulse dd { font-size: clamp(16px, 4.5vw, 19px); }
+  .ahFinanceTabs .ahTabs { gap: 12px; }
+  .ahFinanceTabs .ahTabs button { min-height: 38px; font-size: 12px; }
+  .ahFinanceAllocationRow { grid-template-columns: 36px minmax(0, 1fr) max-content; gap: 10px; padding: 13px 14px; }
+  .ahFinancePage .finance-toolbar input { flex-basis: 100%; }
+  .ahFinancePage .finance-toolbar select { flex: 1 1 auto; min-width: 0; }
+  .ahFinanceOperationCard { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); border-radius: 14px; }
+  .ahFinanceOperationCard > header { padding: 13px 14px 12px; }
+  .ahFinanceOperationCard > header h2 { font-size: 18px; line-height: 23px; }
+  .ahFinanceOperationCard .finance-drawer-body { padding: 0 14px 14px; }
+  .ahFinanceOperationHero { padding: 13px 0; }
+  .ahFinanceOperationHero strong { font-size: 25px; line-height: 29px; }
+  .ahFinanceOperationFacts { grid-template-columns: 1fr 1fr; }
+  .ahFinanceOperationCard .operation-classification-form { grid-template-columns: 1fr; }
+  .ahFinanceOperationComments form { grid-template-columns: 1fr; }
+  .ahFinanceOperationComments form > button { justify-self: end; }
+}

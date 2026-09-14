@@ -39,10 +39,11 @@ test("Home and Money consume one bank summary while Acquiring cannot read bank f
   assert.match(financeWorkspace, /data\.bankSummary\.incomingMinor/);
   assert.match(financeWorkspace, /data\.bankSummary\.transactionCount/);
   assert.match(financeWorkspace, /D177_MONEY_MOBILE_HISTORY/);
-  assert.match(financeWorkspace, /Управленческий учёт филиала · не банковский итог/);
-  assert.match(dashboard, /finance\?\.bankOperations/);
+  assert.match(financeWorkspace, /ДДС филиала по статьям/);
+  assert.match(financeWorkspace, /РАЗНЕСЁННЫЕ ОПЕРАЦИИ/);
   assert.match(dashboard, /const summary = finance\?\.bankSummary/);
-  assert.match(dashboard, /summary\.incomingMinor/);
+  assert.match(dashboard, /summary\.transactionCount/);
+  assert.match(dashboard, /finance\.bankSummary\.incomingMinor/);
   assert.doesNotMatch(acquiringRoute, /from\(bankAccounts\)|from\(bankTransactions\)|bankStatementImports|integrationConnections/);
   assert.match(acquiringRoute, /arthello_pay_requests/);
   assert.doesNotMatch(acquiringWorkspace, /Остаток по счетам|Банковские операции|Синхронизация с банками/);
