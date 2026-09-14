@@ -456,13 +456,11 @@ Exact-head V52 run34443910215/job102764455280 остановился 2026-09-10T
 
 Website lead callback подключён к versioned HMAC-SHA256 по exact raw JSON bytes, explicit current/previous key ID, timestamp и event ID. Маршрут public только относительно cookie/session auth и fail closed без корректного keyring или валидного `WEBSITE_WEBHOOK_MAX_SKEW_SECONDS`; до JSON parsing и lead processing выполняется PostgreSQL replay claim. Missing/duplicate key, unknown key, tamper, stale timestamp, replay conflict и storage outage покрыты synthetic security tests; accept/duplicate/conflicting-body доказаны через настоящий HTTP boundary на одноразовом PostgreSQL 16. Bank/Evotor callbacks не открывались; production secrets и callback URL не проверялись.
 
-
 ## D161 — Повторить публикацию ArtHello Pay после увеличения диска (2026-09-13, кандидат)
 
 D160 protected run `34706132412`, deploy job `103586646447`, подтвердил exact-main provenance и неизменный принятый production `ff8559254faaedade63a9ee7567a45686d08c13a`, но остановился до загрузки архивов, БД, контейнеров и маршрутов: Docker-доступно `4862916 KiB` при требуемых `7995088 KiB`. Все разрешённые точные browser-retirement targets уже отсутствовали; никаких production-данных или volumes не удалено.
 
 Владелец подтвердил, что место на сервере увеличено, и потребовал немедленно повторить публикацию без новых продуктовых изменений и дополнительных cleanup-итераций. Разрешено только перепривязать существующий неизменный R18 rollout к свежему single-parent squash main и повторить его после штатных exact-head Quality/Proof/v52 ворот. Capacity guard, backup, rollback, сохранение данных и обязательная конечная public/auth проверка остаются без ослабления. Дополнительное удаление images/containers/volumes, изменение приложения, включение банковского приёма реальных платежей, live-адаптера Точки или фискализации запрещены.
-
 
 ## D162 — Доказать пропущенный R15 consumer и завершить публикацию Pay (2026-09-13, кандидат)
 
@@ -472,13 +470,11 @@ D161 protected run `34743362798`, deploy job `103686958705`, подтверди�
 
 Разрешено только добавить read-only доказательство retained R15 container через его существующий hash-pinned public context, исправить focused fixture на пять фактических immutable IDs, обновить зависимые integrity pins и повторить тот же R18 rollout. Product/runtime код, БД, маршруты, права, backup semantics и capacity guard не меняются; дополнительные удаления запрещены; банковский приём реальных платежей и фискализация остаются выключены.
 
-
 ## D163 — Восстановить тот же D162 candidate после необратимой public boundary (2026-09-13, recovery)
 
 D162 protected run `34744346651`, deploy job `103689558155`, прошёл capacity, immutable image, canonical D1 consumer, sealed backup, maintenance, candidate browser и natural SSO gates. После durable `PUBLIC_START` публичный probe не завершился: маршрут уже был переключён на exact D162 candidate, а rollback корректно отказался восстанавливать старый snapshot после возможной аутентификации. Внешнее read-only наблюдение подтвердило `502 Connection refused` на ArtHello и Pay; D1 volume, rollback volume, candidate state и public audit evidence должны быть сохранены.
 
 Разрешён один ограниченный recovery того же immutable candidate `5df015323455ea7e513a1386f840016cbb6c249c`: проверить exact durable state/container/image/data/public-route identities; запустить или перезапустить только этот candidate при недоступном local health; перезагрузить неизменённую Caddy-конфигурацию; повторить прозрачные public/auth/Pay probes; опубликовать предусмотренный D162 read-only Tochka autosync marker только после успешных probes; выполнить обязательную after-public natural browser acceptance. Snapshot restore, замена D1, новый application image, удаление containers/volumes и включение приёма реальных платежей или фискализации запрещены.
-
 
 ## D164 — Завершить recovery двух отсутствующих Pay assets (2026-09-13, recovery)
 
@@ -486,13 +482,11 @@ D163 protected run `34747062495`, deploy job `103696817816`, восстанов�
 
 Владелец явно разрешил опубликовать и запустить ограниченный recovery-workflow без публикации секретов. Он сверяет hash двух файлов из exact D162 tree, атомарно размещает их в постоянном Caddy data volume, заменяет только Pay asset handler с сохранением предыдущего route-файла, валидирует Caddy и выполняет один прозрачный public/auth/Pay probe. При отказе до успешного probe старый маршрут восстанавливается; после успеха сохраняется отдельный private recovery receipt, публикуется предусмотренный read-only Tochka autosync marker и выполняется обязательная after-public natural browser acceptance. Snapshot restore, замена D1, пересборка image, удаление containers/volumes, приём реальных платежей и фискализация запрещены.
 
-
 ## D165 — Запустить тот же D164 recovery после parser-only отказа (2026-09-13, recovery)
 
 D164 commit `fa5e009980a12f7a2df625541d86e8a22bca5fec` был опубликован через protected main, но run `34747574247` завершён GitHub до создания jobs и до любых команд на production: один `run__ scalar превысил platform limit в 21 000 символов. Recovery-команды, route swap, запись marker и доступ к секретам не выполнялись.
 
 Разрешено только разделить тот же неизменный recovery на два последовательных шага короче platform limit и запустить его от exact parent D164. Product/runtime, asset hashes, D162 candidate, D1, rollback и public probe не меняются; никаких дополнительных проверочных циклов или cleanup не добавляется.
-
 
 ## D166 — Зафиксировать production restart policy восстановленного D162 (2026-09-13, recovery)
 
@@ -596,8 +590,10 @@ D182 опирается на фактически активный exact D181 pr
 
 Exact release `95873e519113e93d9d52ac08166eb46b317e5c6e` опубликован protected run `34819003014`.
 
-## D183 — Вход в Атлас и директорский стартовый экран (2026-09-14, кандидат)
+## D184 — Переносимый повтор Atlas release (2026-09-14, кандидат)
 
 Live-проверка зафиксировала central `503` на `/api/atlas-sso/open` при отдельных healthy ArtHello и Atlas. Текущий central runtime потерял `ATLAS_PUBLIC_ORIGIN` и Atlas secret mount, а Atlas остался на исходном source, который показывал владельцу-директору пустой родительский предпросмотр перед рабочими разделами. D138 run `34542621980` остановился на School SSH host key до Atlas и поэтому не доставил уже проверенный source `f856fb3bd098152bb6b02c4d0273c4c9170b130c`.
 
-D183 отделяет Atlas от School: вручную и под `production-ru` он сохраняет exact D182 central image/data/runtime, восстанавливает только Atlas origin + read-only secret mount, делает backup/integrity check Atlas SQLite, заменяет только Atlas image и проверяет полный SSO владельца с ролью `director`. Семьи, классы и ученики остаются не подключены до отдельной центральной проекции.
+D183 exact main `390b71cab149045d6cf2785d94be91d9e600128e` прошёл Quality/Proof, но protected run `34827534460` остановился после проверки Atlas archive и до backup/central stop/route swap. Rollback выполнен, D183 receipt не создан. Причина в возвращённом непереносимом сравнении builder и gateway Docker image IDs, которое уже было опровергнуто production evidence D127.
+
+D184 сохраняет весь Atlas-only контракт D183, но проверяет импорт по checksum, каноническому runtime fingerprint и source/tree labels, а запускает image по локально разрешённому immutable ID. Семьи, классы и ученики остаются не подключены до отдельной центральной проекции.

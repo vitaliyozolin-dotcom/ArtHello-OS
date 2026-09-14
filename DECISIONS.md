@@ -639,6 +639,7 @@ D136 run `34540282349` остановился до мутаций, потому 
 ## D138 — Вернуть School на принятую SSH deploy boundary (2026-09-10, кандидат)
 
 D137 run `34541397143` не нашёл production School image на локальном Docker daemon и остановился до мутаций/Atlas. D138 использует прежнюю защищённую SSH boundary School: pinned known hosts, key-only auth, remote checksums immutable archive/controller и единственный running image old revision. Только после remote standalone PASS выполняется локальный Atlas шаг. Trigger: `D138: use School remote boundary`.
+
 ## D132 — Старт учёта и отдельные финансовые отчёты филиалов (2026-09-10)
 
 Виталий зафиксировал утверждённый справочник статей как рабочую базу, установил начало управленческого учёта 1 сентября 2026 года и запретил объединённый финансовый отчёт на текущем этапе. ОДДС, ОПиУ и реестр формируются только по явно выбранному активному филиалу и только из операций с совпадающим `object_entity_id`; `ALL`, пустой филиал и даты до границы отклоняются. Общие остатки счетов юрлица, начисления, зарплатные агрегаты и другие наборы без доказанного филиального ключа в филиальный отчёт не включаются.
@@ -735,10 +736,18 @@ Hosted real-browser сценарий обязан доказать перехо�
 
 Exact release `95873e519113e93d9d52ac08166eb46b317e5c6e` опубликован protected run `34819003014`; locked route, 65 секунд стабильности и независимые ArtHello/School/Pay probes подтверждены.
 
-## D183 — Восстановить вход в Атлас и опубликовать интерфейс директора (2026-09-14, кандидат)
+## D183 — Восстановить вход в Атлас и опубликовать интерфейс директора (2026-09-14, не принят)
 
 После D182 публичный central и отдельный Atlas runtime оставались healthy, но `/api/atlas-sso/open` отвечал `503` «Дневник Атласа ещё не подключён». Причина — текущий central container не получил `ATLAS_PUBLIC_ORIGIN` и read-only mount `/run/secrets/atlas-central-access-secret`. Отдельно production Atlas всё ещё работал на исходном source `987abd5951dc4832e2c071d8744051c518bae42e`: для владельца с подтверждённым grant `director` он сначала занимал мобильный экран пустым блоком «Кабинет родителя». Принятый исправленный source `f856fb3bd098152bb6b02c4d0273c4c9170b130c` / tree `e63e28520670527bc12d84abcd45cd8fffe2b876` уже прошёл Atlas tests и build, но D133–D138 не доставили его, потому что каждый общий workflow останавливался на School до шага Atlas.
 
 Принято заменить spent School-first workflow ручным Atlas-only D183. Выпуск сохраняет exact D182 application image, все его runtime variables, mounts, D1 volume, Pay assets, read-only AlfaCRM и выключенные денежные границы; добавляет только точные `ATLAS_PUBLIC_ORIGIN` и `ATLAS_CENTRAL_ACCESS_SECRET_FILE` с существующим read-only secret mount. Atlas image собирается на GitHub-hosted runner из двух immutable pins, а production получает готовый archive. Перед заменой Atlas обязательны копия SQLite в постоянный backups volume и `PRAGMA integrity_check`; data volume не удаляется и не заменяется. Любая ошибка после начала переключения восстанавливает прежний central route/container и прежний Atlas container на том же volume.
 
 Cutover разрешён только ручным `workflow_dispatch` владельца из exact `main` после успешных first-attempt `Quality gates` и `ArtHello Proof Gates`, с typed confirmation `DEPLOY D183 TO PRODUCTION`, общим production lock и protected environment `production-ru`. PASS требует central `303` на Atlas start, полного owner SSO до авторизованного Atlas API с ролью `director`, 65 секунд без рестартов, locked receipt/route и независимых ArtHello/Atlas/School/Pay probes. D183 не подключает семьи, классы или учеников Атласа и не меняет School 1–11.
+
+Exact main `390b71cab149045d6cf2785d94be91d9e600128e` прошёл Quality `34826931676` и Proof `34826931506`. Protected run `34827534460`, deploy job `103923694774`, подтвердил D182 predecessor, Atlas source artifact и его checksums, затем остановился внутри Atlas image import до `ATLAS_D183_BACKUP=VERIFIED` и до central stop/route swap; оба rollback trap завершились. Новый production receipt не создан. В D183 повторно появилось уже запрещённое D127 сравнение daemon-local builder image ID с gateway image ID. Исторический D127 доказал, что эти ID на данном gateway переписываются между Docker image stores и не являются переносимой границей.
+
+## D184 — Вернуть переносимую идентичность Atlas image (2026-09-14, кандидат)
+
+D184 не меняет продукт, source pins, D182 predecessor, данные, SSO, роли или cutover-порядок D183. Hosted builder добавляет в receipt канонический runtime fingerprint по принятому `image-runtime-fingerprint.jq`. Gateway проверяет checksum архива, удаляет только неиспользуемый stale tag, загружает archive с явным bounded log, разрешает локальный immutable image ID, сравнивает runtime fingerprint и точные source/tree labels, после чего запускает контейнеры только по этому локальному ID. Builder и gateway IDs сохраняются как разные диагностические представления и не сравниваются на равенство.
+
+Новый запуск допускается только свежим single-parent squash `D184: use portable Atlas image identity` из exact `main`, после успешных first-attempt Quality и Proof, с typed confirmation `DEPLOY D184 TO PRODUCTION`, прежними `production-ru` и общим production lock. Все backup, rollback, owner SSO, 65-секундная стабильность и независимые внешние проверки D183 остаются обязательными.

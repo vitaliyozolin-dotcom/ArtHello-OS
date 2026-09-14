@@ -1,9 +1,11 @@
 # ArtHello OS — Runbook
 
-## Atlas D183 — восстановление входа и director-first UI
+## Atlas D184 — переносимое восстановление входа и director-first UI
 
-- Использовать только ручной `Restore Atlas access and director UI D183` из exact `main`; передать ID успешных first-attempt `Quality gates` и `ArtHello Proof Gates`, затем точную фразу `DEPLOY D183 TO PRODUCTION`. Среда `production-ru` и общий lock `gateway-38-55-arthello-production` обязательны.
+- D183 run `34827534460/103923694774` остановился после проверки archive/checksums и до Atlas backup, central stop и route swap; rollback выполнен. Не повторять D183.
+- Использовать только ручной `Restore Atlas access and director UI D184` из exact `main`; передать ID успешных first-attempt `Quality gates` и `ArtHello Proof Gates`, затем точную фразу `DEPLOY D184 TO PRODUCTION`. Среда `production-ru` и общий lock `gateway-38-55-arthello-production` обязательны.
 - Контроллер принимает только active D182 receipt/release `95873e519113e93d9d52ac08166eb46b317e5c6e`, неизменные Caddy route и Pay assets, Atlas source `987abd5951dc4832e2c071d8744051c518bae42e` либо уже принятый `f856fb3bd098152bb6b02c4d0273c4c9170b130c`.
+- Не сравнивать builder/gateway Docker image IDs. Проверить checksum архива, канонический `runtimeFingerprintSha256`, source/tree labels и запускать только локально разрешённый immutable image ID; stale tag можно удалить лишь при отсутствии любых container consumers.
 - Central пересоздаётся из того же image со всеми прежними env/mounts; разрешено заменить только `ATLAS_PUBLIC_ORIGIN`, `ATLAS_CENTRAL_ACCESS_SECRET_FILE` и при отсутствии вернуть exact read-only Atlas secret mount. Plaintext secrets запрещены.
 - Перед Atlas image swap обязательны backup SQLite и `PRAGMA integrity_check`; volumes `atlas-school-diary-data` и `atlas-school-diary-backups` не удалять и не заменять. При любой ошибке вернуть прежние Atlas container и central route/container.
 - PASS: central open возвращает exact `303` на Atlas start, owner SSO подтверждает `director` и авторизованный `/api/school`, оба контейнера проходят 65 секунд без рестартов, off-host probe видит новый маркер «Инструмент руководителя», ArtHello/Atlas/School/Pay healthy.
