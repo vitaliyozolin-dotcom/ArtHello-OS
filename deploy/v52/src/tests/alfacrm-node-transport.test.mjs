@@ -145,7 +145,7 @@ test("D179 preserves the enabled AlfaCRM import and egress proof before stopping
 });
 
 test("D178 activates controlled AlfaCRM imports only after exact D177 and preview evidence", () => {
-  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "../contract-fixtures/deploy-d168.yml");
+  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-acquiring-pay-d168.yml", "./contract-fixtures/deploy-d178.yml");
   const evidence = workflow.indexOf("ARTHELLO_D178_PREVIEW_EVIDENCE=VERIFIED");
   const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
 

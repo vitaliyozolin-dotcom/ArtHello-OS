@@ -18,7 +18,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: gateway-38-55-arthello-production
+  # This exact-release workflow has its own pending slot: legacy workflow_run
+  # releases share the old group and can otherwise cancel D179 before job.if.
+  group: gateway-38-55-arthello-production-d179
   cancel-in-progress: false
 
 env:
@@ -34,6 +36,9 @@ env:
 
 jobs:
   deploy:
+    concurrency:
+      group: gateway-38-55-arthello-production
+      cancel-in-progress: false
     if: >-
       github.event_name == 'workflow_run' &&
       github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
@@ -383,19 +388,25 @@ jobs:
 
           pay_source="deploy/v52/public/pay-assets"
           for name in index.html app.js styles.css; do test -s "$pay_source/$name" && test ! -L "$pay_source/$name"; done
+          release_identity="$work/release.json"
+          jq -n --arg release "$RELEASE_SHA" '{schemaVersion:1,decision:"D179",releaseSha:$release}' > "$release_identity"
+          chmod 0600 "$release_identity"
           index_sha="$(sha256sum "$pay_source/index.html" | cut -d ' ' -f 1)"
           app_sha="$(sha256sum "$pay_source/app.js" | cut -d ' ' -f 1)"
           css_sha="$(sha256sum "$pay_source/styles.css" | cut -d ' ' -f 1)"
+          release_identity_sha="$(sha256sum "$release_identity" | cut -d ' ' -f 1)"
           docker exec --user 0:0 -e STAGE="$asset_stage" -e ROOT="$asset_root" "$CADDY_CONTAINER" sh -ceu '
             test ! -e "$ROOT" && test ! -e "$STAGE" && mkdir "$STAGE" && chmod 0755 "$STAGE"
           '
           for name in index.html app.js styles.css; do docker cp "$pay_source/$name" "$CADDY_CONTAINER:$asset_stage/$name"; done
+          docker cp "$release_identity" "$CADDY_CONTAINER:$asset_stage/release.json"
           docker exec --user 0:0 -e STAGE="$asset_stage" -e ROOT="$asset_root" \
-            -e INDEX_SHA="$index_sha" -e APP_SHA="$app_sha" -e CSS_SHA="$css_sha" "$CADDY_CONTAINER" sh -ceu '
+            -e INDEX_SHA="$index_sha" -e APP_SHA="$app_sha" -e CSS_SHA="$css_sha" -e RELEASE_IDENTITY_SHA="$release_identity_sha" "$CADDY_CONTAINER" sh -ceu '
               test "$(sha256sum "$STAGE/index.html"|cut -d " " -f 1)" = "$INDEX_SHA"
               test "$(sha256sum "$STAGE/app.js"|cut -d " " -f 1)" = "$APP_SHA"
               test "$(sha256sum "$STAGE/styles.css"|cut -d " " -f 1)" = "$CSS_SHA"
-              chmod 0644 "$STAGE/index.html" "$STAGE/app.js" "$STAGE/styles.css"
+              test "$(sha256sum "$STAGE/release.json"|cut -d " " -f 1)" = "$RELEASE_IDENTITY_SHA"
+              chmod 0644 "$STAGE/index.html" "$STAGE/app.js" "$STAGE/styles.css" "$STAGE/release.json"
               mv "$STAGE" "$ROOT"
             '
 
@@ -513,12 +524,12 @@ jobs:
             --arg release "$RELEASE_SHA" --arg tree "$RELEASE_TREE" --arg image "$IMAGE_ID" \
             --arg candidate "$candidate_id" --arg previous "$live_id" --arg rollback "$rollback_volume" \
             --arg activationVolume "$activation_volume" \
-            --arg route "$route_sha" --arg assets "$asset_root" --arg index "$index_sha" --arg app "$app_sha" --arg css "$css_sha" \
+            --arg route "$route_sha" --arg assets "$asset_root" --arg index "$index_sha" --arg app "$app_sha" --arg css "$css_sha" --arg identity "$release_identity_sha" \
             --argjson data "$(cat "$database_receipt")" --argjson activation "$(cat "$activation_receipt")" '
               {schemaVersion:1,state:"verified",decision:"D179",releaseSha:$release,sourceTree:$tree,imageId:$image,
                candidateContainerId:$candidate,previousContainerId:$previous,rollbackVolume:$rollback,
                bankActivationVolume:$activationVolume,bankAutosyncActivation:$activation,
-               activeRouteSha256:$route,payAssetRoot:$assets,payAssetSha256:{"index.html":$index,"app.js":$app,"styles.css":$css},
+               activeRouteSha256:$route,payAssetRoot:$assets,payAssetSha256:{"index.html":$index,"app.js":$app,"styles.css":$css,"release.json":$identity},
                dataProof:$data,moneyAcceptanceEnabled:false,fiscalizationEnabled:false}
             ' > "$work/receipt.json"
           chmod 0600 "$work/receipt.json"
@@ -551,16 +562,51 @@ jobs:
             echo '- Money acceptance and fiscalization: still disabled.'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify exact D179 gateway state under the shared lock
+        if: success()
+        env:
+          D179_CANDIDATE_NAME: ${{ steps.publish.outputs.candidate }}
+          D179_RECEIPT: ${{ steps.publish.outputs.receipt }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          receipt="$D179_RECEIPT"
+          test "$receipt" = "$HOME/.config/arthello/release-state/production-d179-$RELEASE_SHA.json"
+          test -f "$receipt"
+          candidate="$(jq -er '.candidateContainerId' "$receipt")"
+          expected_image="$(jq -er '.imageId' "$receipt")"
+          [[ "$candidate" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$expected_image" =~ ^sha256:[a-f0-9]{64}$ ]]
+          live_name="$D179_CANDIDATE_NAME"
+          [[ "$live_name" =~ ^arthello-direct-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          test "$(docker inspect "$live_name" --format '{{.State.Running}}')" = true
+          live_id="$(docker inspect "$live_name" --format '{{.Id}}')"
+          live_image="$(docker inspect "$live_name" --format '{{.Image}}')"
+          test "$live_id" = "$candidate"
+          test "$live_image" = "$expected_image"
+          test "$(docker inspect "$live_name" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$RELEASE_SHA"
+          docker exec "$CADDY_CONTAINER" sh -ceu 'cat /data/external-routes.caddy' \
+            | grep -F "$live_name:8081" >/dev/null
+          printf 'ARTHELLO_D179_LOCKED_ROUTE=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$live_name"
+
   verify-external:
     needs: deploy
+    concurrency:
+      # Reacquire the same production lock on the off-host runner. If another
+      # release won the scheduling gap, the immutable identity check fails.
+      group: gateway-38-55-arthello-production
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Verify ArtHello, School and Pay from an independent network
+      - name: Verify exact D179 from an independent network
         shell: bash
         run: |
           set -Eeuo pipefail
           probe() {
+            curl --fail --silent --show-error --max-time 15 "$PAY_URL/pay-assets/release.json?release=$RELEASE_SHA" \
+              | jq -e --arg release "$RELEASE_SHA" \
+                '.schemaVersion == 1 and .decision == "D179" and .releaseSha == $release' >/dev/null &&
             curl --fail --silent --show-error --max-time 15 "$PUBLIC_URL/api/health" \
               | jq -e '.status == "ok" and .database == "available"' >/dev/null &&
             curl --fail --silent --show-error --max-time 15 "$SCHOOL_URL/api/health" \

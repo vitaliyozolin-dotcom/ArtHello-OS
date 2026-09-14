@@ -11,7 +11,7 @@ COPY deploy/v52/src/ /app/
 # none of these files is copied into the production runtime stage.
 COPY deploy/v52/public/pay-assets/app.js /app/contract-fixtures/pay-app.js
 COPY pay-web/app.js /app/contract-fixtures/pay-app-mirror.js
-COPY .github/workflows/deploy-arthello-acquiring-pay-d168.yml /app/contract-fixtures/deploy-d168.yml
+COPY deploy/v52/src/tests/contract-fixtures/deploy-d178.yml /app/contract-fixtures/deploy-d168.yml
 COPY deploy/v52/Dockerfile /app/contract-fixtures/v52.Dockerfile
 RUN ! grep -q 'invoke_user_worker_ahead_of_assets: true' /app/production/runtime-server.mjs \
     && grep -q 'invoke_user_worker_ahead_of_assets: false' /app/production/runtime-server.mjs \
