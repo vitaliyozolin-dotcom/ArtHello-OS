@@ -132,7 +132,7 @@ test("D177 release preserves the AlfaCRM egress proof before stopping production
 });
 
 test("D179 preserves the enabled AlfaCRM import and egress proof before stopping production", () => {
-  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-finance-d179.yml");
+  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-finance-d179.yml", "./contract-fixtures/deploy-d179.yml");
   const egressProof = workflow.indexOf("ARTHELLO_D179_ALFACRM_EGRESS=VERIFIED");
   const importProof = workflow.indexOf("ALFACRM_IMPORT_ENABLED=true");
   const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
