@@ -36,6 +36,9 @@ env:
 
 jobs:
   deploy:
+    concurrency:
+      group: gateway-38-55-arthello-production
+      cancel-in-progress: false
     if: >-
       github.event_name == 'workflow_run' &&
       github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
