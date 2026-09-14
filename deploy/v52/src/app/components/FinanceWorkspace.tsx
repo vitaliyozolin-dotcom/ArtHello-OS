@@ -401,7 +401,7 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrati
       ].some((value) => value.toLocaleLowerCase("ru").includes(normalized)));
   }, [data, direction, period, query, previewIds]);
 
-  const mobileBranchScope = <div className="ahFinanceMobileBranchScope" data-d181-marker="D181_FINANCE_MOBILE_BRANCH"><FinanceBranchSelector selectedBranch={selectedBranch} branches={branches} onChange={onBranchChange} /></div>;
+  const mobileBranchScope = <div className="ahFinanceMobileBranchScope" data-d182-marker="D182_FINANCE_MOBILE_BRANCH"><FinanceBranchSelector selectedBranch={selectedBranch} branches={branches} onChange={onBranchChange} /></div>;
 
   if (!selectedBranch || selectedBranch === "ALL") return <PageContainer className="ahFinanceDenied">{mobileBranchScope}<Card><EmptyState title="Выберите филиал" description="Финансовые отчёты ведутся отдельно по каждому филиалу. Общий отчёт пока отключён." density="compact" /></Card></PageContainer>;
   if (error && data?.branch.id !== selectedBranch) return <PageContainer className="ahFinanceDenied">{mobileBranchScope}<Card><EmptyState title="Финансовый раздел временно недоступен" description={error} density="compact" action={<Button onClick={() => void load()}>Повторить</Button>} /></Card></PageContainer>;

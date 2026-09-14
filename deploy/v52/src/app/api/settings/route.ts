@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { and, asc, desc, eq, inArray, like, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { moduleCatalog, type ModuleId } from "../../../data/test-snapshot";
 import { ensureCoreTables, getDb } from "../../../db";
 import { accessSyncEvents, appSystems, appUsers, auditEvents, entities, entityLinks, familySystemAccess, hrEmployees, manualRecords, organizationBranches, userBranchAccess, userSystemAccess } from "../../../db/schema";
@@ -32,6 +32,9 @@ const defaultSystems = [
 const diaryRoles = new Set(["director", "deputy", "admin", "teacher", "tech_admin"]);
 const familyAccessEvents = new Set<FamilyAccessEvent>(["grant_access", "block_access", "restore_access", "reset_password", "revoke_access"]);
 const CENTRAL_SYSTEM_ID = "SYS-ARTHELLO-OS";
+const FAMILY_DIRECTORY_PAGE_SIZE = 25;
+const FAMILY_DIRECTORY_MAX_PAGE_SIZE = 50;
+const D1_BIND_BATCH_SIZE = 50;
 
 const assignableRoles = new Set(ASSIGNABLE_APP_ROLES);
 const assignableModuleIds = new Set<ModuleId>(moduleCatalog.map((module) => module.id).filter((id) => !["home", "access", "pay"].includes(id)));
@@ -60,6 +63,14 @@ export async function GET(request: Request) {
     const me = await ensureUser(actor);
     if (!me || me.status === "Доступ приостановлен") return Response.json({ error: "Доступ ещё не активирован владельцем" }, { status: 403 });
     const canManage = canManageAccess(requestAccessContext(request));
+    if (new URL(request.url).searchParams.get("section") === "families") {
+      if (!canManage) return Response.json({ error: "Нет прав на каталог семей" }, { status: 403 });
+      const familyPage = await loadFamilyDirectoryPage(request);
+      return Response.json({
+        ...familyPage,
+        familyAccessGrants: await loadFamilyAccessGrants(familyPage.familyDirectory),
+      });
+    }
     const branches = await db.select().from(organizationBranches).where(eq(organizationBranches.status, "Активен")).orderBy(asc(organizationBranches.sortOrder));
     const access = me.isAdministrative
       ? branches.map((branch) => ({ branchId: branch.id, accessLevel: "Администратор" }))
@@ -90,8 +101,6 @@ export async function GET(request: Request) {
     const accessHistory = canManage
       ? await db.select().from(auditEvents).where(like(auditEvents.action, "settings.%")).orderBy(desc(auditEvents.createdAt)).limit(80)
       : [];
-    const familyDirectory = canManage ? await loadFamilyDirectory() : [];
-    const familyAccessGrants = canManage ? await db.select().from(familySystemAccess).orderBy(desc(familySystemAccess.updatedAt)) : [];
     return Response.json({
       me: exposeAccountUser(me),
       branches,
@@ -102,8 +111,10 @@ export async function GET(request: Request) {
       systemGrants,
       syncEvents,
       accessHistory,
-      familyDirectory,
-      familyAccessGrants,
+      familyDirectory: [],
+      familyDirectoryTotal: 0,
+      familyDirectoryHasMore: false,
+      familyAccessGrants: [],
       systemRoleOptions: {
         [ATLAS_SYSTEM_ID]: [
           { value: "director", label: "Директор" }, { value: "deputy", label: "Завуч" },
@@ -762,22 +773,66 @@ async function loadEmployeeAccessDirectory(accountUsers: Array<typeof appUsers.$
   return [...directory, ...accessOnly].sort((a, b) => a.displayName.localeCompare(b.displayName, "ru"));
 }
 
-async function loadFamilyDirectory() {
+async function loadFamilyDirectoryPage(request: Request) {
+  const searchParams = new URL(request.url).searchParams;
+  const query = clean(searchParams.get("query"), 80);
+  const offset = boundedInteger(searchParams.get("offset"), 0, 0, 100_000);
+  const limit = boundedInteger(searchParams.get("limit"), FAMILY_DIRECTORY_PAGE_SIZE, 1, FAMILY_DIRECTORY_MAX_PAGE_SIZE);
   const db = getDb();
-  const families = await db.select().from(entities).where(eq(entities.entityType, "Семья")).orderBy(asc(entities.displayName));
-  const activeFamilies = families.filter((family) => family.status !== "Объединена");
-  if (!activeFamilies.length) return [];
+  const where = and(eq(entities.entityType, "Семья"), sql`${entities.status} <> ${"Объединена"}`);
+  let families: Array<typeof entities.$inferSelect> = [];
+  let familyDirectoryTotal = 0;
+  if (query) {
+    const queryKey = normalizeEntityName(query);
+    const matchingFamilies = (await db.select({ id: entities.id, displayName: entities.displayName }).from(entities)
+      .where(where).orderBy(asc(entities.displayName), asc(entities.id)))
+      .filter((family) => normalizeEntityName(family.displayName).includes(queryKey));
+    familyDirectoryTotal = matchingFamilies.length;
+    const pageIds = matchingFamilies.slice(offset, offset + limit).map((family) => family.id);
+    if (pageIds.length) {
+      const pageRows = await db.select().from(entities).where(inArray(entities.id, pageIds));
+      const rowById = new Map(pageRows.map((family) => [family.id, family]));
+      families = pageIds.map((id) => rowById.get(id)).filter((family): family is typeof entities.$inferSelect => Boolean(family));
+    }
+  } else {
+    const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(entities).where(where);
+    familyDirectoryTotal = Number(count);
+    families = await db.select().from(entities).where(where).orderBy(asc(entities.displayName), asc(entities.id)).limit(limit).offset(offset);
+  }
+  const familyDirectory = await hydrateFamilyDirectory(families);
+  return {
+    familyDirectory,
+    familyDirectoryTotal,
+    familyDirectoryHasMore: offset + familyDirectory.length < familyDirectoryTotal,
+    familyDirectoryOffset: offset,
+    familyDirectoryQuery: query,
+  };
+}
+
+async function hydrateFamilyDirectory(families: Array<typeof entities.$inferSelect>) {
+  if (!families.length) return [];
+  const db = getDb();
+  const activeFamilyNames = await db.select({ displayName: entities.displayName }).from(entities)
+    .where(and(eq(entities.entityType, "Семья"), sql`${entities.status} <> ${"Объединена"}`));
   const duplicateCounts = new Map<string, number>();
-  for (const family of activeFamilies) {
+  for (const family of activeFamilyNames) {
     const key = normalizeEntityName(family.displayName);
     duplicateCounts.set(key, (duplicateCounts.get(key) ?? 0) + 1);
   }
-  const links = await db.select().from(entityLinks);
+  const links = new Map<number, typeof entityLinks.$inferSelect>();
+  for (const familyIds of chunks(families.map((family) => family.id), D1_BIND_BATCH_SIZE)) {
+    const rows = await db.select().from(entityLinks).where(or(
+      inArray(entityLinks.fromEntityId, familyIds),
+      inArray(entityLinks.toEntityId, familyIds),
+    ));
+    for (const row of rows) links.set(row.id, row);
+  }
+  const familyIds = new Set(families.map((family) => family.id));
   const memberIds = new Set<string>();
   const relationsByFamily = new Map<string, Array<{ memberId: string; relation: string }>>();
-  for (const family of activeFamilies) {
+  for (const family of families) {
     const relations: Array<{ memberId: string; relation: string }> = [];
-    for (const link of links) {
+    for (const link of links.values()) {
       if (link.fromEntityId === family.id) {
         relations.push({ memberId: link.toEntityId, relation: link.relationType });
         memberIds.add(link.toEntityId);
@@ -788,9 +843,12 @@ async function loadFamilyDirectory() {
     }
     relationsByFamily.set(family.id, relations);
   }
-  const members = memberIds.size ? await db.select().from(entities).where(inArray(entities.id, [...memberIds])) : [];
+  const members: Array<typeof entities.$inferSelect> = [];
+  for (const ids of chunks([...memberIds].filter((id) => !familyIds.has(id)), D1_BIND_BATCH_SIZE)) {
+    members.push(...await db.select().from(entities).where(inArray(entities.id, ids)));
+  }
   const memberMap = new Map(members.map((member) => [member.id, member]));
-  return activeFamilies.map((family) => ({
+  return families.map((family) => ({
     id: family.id,
     displayName: family.displayName,
     status: family.status,
@@ -807,9 +865,22 @@ async function loadFamilyDirectory() {
   }));
 }
 
+async function loadFamilyAccessGrants(directory: Awaited<ReturnType<typeof hydrateFamilyDirectory>>) {
+  const principalIds = [...new Set(directory.flatMap((family) => family.members.map((member) => member!.id)))];
+  const grants: Array<typeof familySystemAccess.$inferSelect> = [];
+  for (const ids of chunks(principalIds, D1_BIND_BATCH_SIZE)) {
+    grants.push(...await getDb().select().from(familySystemAccess)
+      .where(inArray(familySystemAccess.principalEntityId, ids))
+      .orderBy(desc(familySystemAccess.updatedAt)));
+  }
+  return grants;
+}
+
 async function getFamilySnapshot(familyId: string) {
-  const directory = await loadFamilyDirectory();
-  const family = directory.find((item) => item.id === familyId);
+  const [familyRecord] = await getDb().select().from(entities)
+    .where(and(eq(entities.id, familyId), eq(entities.entityType, "Семья"), sql`${entities.status} <> ${"Объединена"}`))
+    .limit(1);
+  const [family] = familyRecord ? await hydrateFamilyDirectory([familyRecord]) : [];
   if (!family) throw new Error("Семья не найдена в центральном реестре");
   return {
     id: family.id,
@@ -994,7 +1065,16 @@ function requestAccessContext(request: Request) {
 
 function requireOwner(value: boolean) { if (!value) throw new Error("Нет прав: изменять доступы и системные настройки может только собственник"); }
 function clean(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
-function normalizeEntityName(value: string) { return value.toLocaleLowerCase("ru-RU").replace(/[^a-zа-яё0-9]/gi, ""); }
+function boundedInteger(value: string | null, fallback: number, minimum: number, maximum: number) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isSafeInteger(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
+}
+function chunks<T>(values: T[], size: number) {
+  const result: T[][] = [];
+  for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
+  return result;
+}
+function normalizeEntityName(value: string) { return value.normalize("NFKC").toLocaleLowerCase("ru-RU").replace(/[^a-zа-яё0-9]/gi, ""); }
 function familyDataState(family: { sourceSystem: string; dataQuality: string }, hasDuplicate: boolean) { if (hasDuplicate) return "Требует сверки"; if (family.sourceSystem === "MANUAL" && family.dataQuality !== "Требует сверки") return "Создано вручную"; return family.dataQuality; }
 function familyNeedsReview(family: { sourceSystem: string; dataQuality: string }) { return family.dataQuality === "Требует сверки" || family.dataQuality === "На проверке" || (family.sourceSystem !== "MANUAL" && family.dataQuality !== "Проверено"); }
 function stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }

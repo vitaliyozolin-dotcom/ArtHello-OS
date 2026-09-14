@@ -51,13 +51,17 @@ controller объединяет только текущий выпуск инт�
 Исторический workflow сохранён с blob `9952c900da21eac16a37ddf3adb5f52cb4d586cf`
 и SHA-256 `fcebf657da1ba80a9d56d2f381841a58e061375bb1d31d6d3e5cf9a0f1b83f3c`.
 
-Седьмой cleanup-блок D181 заменяет отработавший production controller D180
-следующим одноразовым controller без увеличения активного каталога: workflow
-policy сохраняет 16 workflow и 0 violations. D180 release
-`511d467763b7ca050c096df23cfcdcd1f62fe51d` принят run `34799802826`, а его
-неизменённый contract fixture сохранён в
-`deploy/v52/src/tests/contract-fixtures/deploy-d180.yml` с SHA-256
-`b9dfa00421a62a3a156c6a7950bb7041bf3e7a3bc68f319cee3114299d224c63`.
+Седьмой cleanup-блок D182 заменяет failed-closed controller D181 следующим
+одноразовым controller без увеличения активного каталога: workflow policy
+сохраняет 16 workflow и 0 violations. D181 run `34810891708` остановился на
+source guard до загрузки image и до production-изменений, поэтому фактическим
+predecessor остаётся D180 release
+`511d467763b7ca050c096df23cfcdcd1f62fe51d`, принятый run `34799802826`.
+Неизменённые contract fixtures D180 и D181 сохранены соответственно с SHA-256
+`b9dfa00421a62a3a156c6a7950bb7041bf3e7a3bc68f319cee3114299d224c63` и
+`e1c7b875b4187fab8ddb2b894e57080ad297ffa71cbaac67607e40e9e3078966`.
+Активный D182 controller и его изолированный fixture совпадают с SHA-256
+`812df766a6a4d6d512d5694413f098f51ef76dacd886dbb93ad89c813bb06bb6`.
 
 | Blob SHA                                   | Путь                                                                                |
 | ------------------------------------------ | ----------------------------------------------------------------------------------- |

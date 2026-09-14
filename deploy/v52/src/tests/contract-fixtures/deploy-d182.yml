@@ -1,8 +1,8 @@
-# D181: keep Settings available with production-sized family directories.
+# D182: restore reachable branch selection inside mobile Finance.
 # The hosted verifier builds the immutable image. The gateway proves the exact
 # D180 runtime, takes a recoverable D1 snapshot, preserves controlled read-only
 # imports and swaps one candidate. Existing secret mounts are never printed.
-name: Deploy ArtHello large family settings fix D181
+name: Deploy ArtHello mobile finance branch D182
 
 'on':
   workflow_run:
@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: gateway-38-55-arthello-production-d181
+  group: gateway-38-55-arthello-production-d182
   cancel-in-progress: false
 
 env:
@@ -53,7 +53,7 @@ jobs:
       github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' &&
       github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1 &&
-      startsWith(github.event.workflow_run.head_commit.message, 'D181: keep settings available for large family directories')
+      startsWith(github.event.workflow_run.head_commit.message, 'D182: restore mobile finance branch')
     runs-on:
       - self-hosted
       - linux
@@ -82,9 +82,19 @@ jobs:
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$TRIGGER_VERIFY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-          test "$(git log -1 --format=%s)" = "D181: keep settings available for large family directories"
+          test "$(git log -1 --format=%s)" = "D182: restore mobile finance branch"
+          grep -F 'data-d182-marker="D182_FINANCE_MOBILE_BRANCH"' deploy/v52/src/app/components/FinanceWorkspace.tsx >/dev/null
+          grep -F 'Выбрать филиал для финансового отчёта' deploy/v52/src/app/components/FinanceBranchSelector.tsx >/dev/null
+          grep -F 'filterAccessibleBranches(context.branches, context.access, context.me.isAdministrative)' deploy/v52/src/app/components/ArtHelloShell.tsx >/dev/null
+          grep -F "stage='mobile_branch_recovery'" .github/scripts/finance-ci-browser.mjs >/dev/null
+          grep -F "stage='mobile_branch_failure'" .github/scripts/finance-ci-browser.mjs >/dev/null
+          grep -F '## D182 —' DECISIONS.md >/dev/null
+          grep -F 'runChunkedAlfaImport' deploy/v52/src/app/components/AlfaCrmSetupWizard.tsx >/dev/null
+          grep -F 'NOTICE_AUTO_DISMISS_MS = 7_000' deploy/v52/src/lib/notice-dismiss.ts >/dev/null
+          grep -F 'listEntities(storedRows' deploy/v52/src/app/api/entities/route.ts >/dev/null
+          grep -F 'isCurrentAlfaStaffRecord' deploy/v52/src/app/api/integrations/alfacrm/route.ts >/dev/null
           grep -F 'FAMILY_DIRECTORY_PAGE_SIZE = 25' deploy/v52/src/app/api/settings/route.ts >/dev/null
-          grep -F 'section === "families"' deploy/v52/src/app/api/settings/route.ts >/dev/null
+          grep -F 'searchParams.get("section") === "families"' deploy/v52/src/app/api/settings/route.ts >/dev/null
           grep -F 'loadFamilyPage' deploy/v52/src/app/components/SettingsWorkspace.tsx >/dev/null
           grep -F 'FAMILY_COUNT = 2_887' deploy/v52/src/tests/settings-large-family-directory-runtime.test.mjs >/dev/null
           current_main="$(curl --fail-with-body --silent --show-error --max-time 30 \
@@ -117,7 +127,7 @@ jobs:
               (.runtimeFingerprintSha256|test("^[a-f0-9]{64}$"))
             ' "$evidence" >/dev/null
           gzip -t "$archive"
-          load_log="$RUNNER_TEMP/d181-docker-load.log"
+          load_log="$RUNNER_TEMP/d182-docker-load.log"
           if ! docker image load --input "$archive" >"$load_log" 2>&1; then
             sed -n '1,160p' "$load_log" >&2
             exit 1
@@ -134,7 +144,7 @@ jobs:
           test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$tree"
           test "$(docker image inspect "$image_id" --format '{{.Config.User}}')" = node
           printf 'image_id=%s\ntree=%s\n' "$image_id" "$tree" >> "$GITHUB_OUTPUT"
-          printf 'ARTHELLO_D181_HOSTED_IMAGE=VERIFIED id=%s runtime_fingerprint=%s\n' "$image_id" "$actual_fingerprint"
+          printf 'ARTHELLO_D182_HOSTED_IMAGE=VERIFIED id=%s runtime_fingerprint=%s\n' "$image_id" "$actual_fingerprint"
 
       - name: Probe AlfaCRM, snapshot, switch candidate and preserve Pay assets
         id: publish
@@ -155,17 +165,17 @@ jobs:
           candidate="arthello-direct-$run_key"
           rollback_volume="arthello-rollback-$run_key"
           state_root="$HOME/.config/arthello/release-state"
-          work="$state_root/d181-$run_key"
+          work="$state_root/d182-$run_key"
           runtime_env="$work/runtime.env"
           route_before="$work/external-routes.before.caddy"
           route_after="$work/external-routes.after.caddy"
           alfa_evidence="$work/alfa-live-evidence.json"
-          receipt="$state_root/production-d181-$RELEASE_SHA.json"
+          receipt="$state_root/production-d182-$RELEASE_SHA.json"
           expected_live_receipt="$state_root/production-d180-$EXPECTED_LIVE_RELEASE_SHA.json"
           asset_root="/data/arthello-pay-assets-$RELEASE_SHA"
           asset_stage="/data/.arthello-pay-assets-$run_key"
-          route_stage="/data/.external-routes.d181-$run_key"
-          route_backup="/data/external-routes.caddy.pre-d181-$run_key"
+          route_stage="/data/.external-routes.d182-$run_key"
+          route_backup="/data/external-routes.caddy.pre-d182-$run_key"
           mkdir -p "$work"
           chmod 0700 "$work"
           test ! -e "$receipt"
@@ -190,12 +200,20 @@ jobs:
               .releaseSha==$release and (.sourceTree|test("^[a-f0-9]{40}$")) and
               (.imageId|test("^sha256:[a-f0-9]{64}$")) and
               (.candidateContainerId|test("^[a-f0-9]{64}$")) and
+              (.activeRouteSha256|test("^[a-f0-9]{64}$")) and
+              (.payAssetRoot|test("^/data/arthello-pay-assets-[a-f0-9]{40}$")) and
+              (.payAssetSha256["index.html"]|test("^[a-f0-9]{64}$")) and
+              (.payAssetSha256["app.js"]|test("^[a-f0-9]{64}$")) and
+              (.payAssetSha256["styles.css"]|test("^[a-f0-9]{64}$")) and
+              (.payAssetSha256["release.json"]|test("^[a-f0-9]{64}$")) and
               .dataProof.bankAccounts>0 and .dataProof.accountsWithBalances>0 and
               .dataProof.activePayGrants>=.dataProof.eligiblePayAdministrators and
               .moneyAcceptanceEnabled==false and .fiscalizationEnabled==false
             ' "$expected_live_receipt" >/dev/null
           expected_live_image="$(jq -er '.imageId' "$expected_live_receipt")"
           expected_live_tree="$(jq -er '.sourceTree' "$expected_live_receipt")"
+          expected_route_sha="$(jq -er '.activeRouteSha256' "$expected_live_receipt")"
+          expected_asset_root="$(jq -er '.payAssetRoot' "$expected_live_receipt")"
 
           readarray -t route_identity < <(python3 -I - "$route_before" <<'PY'
           from pathlib import Path
@@ -214,6 +232,20 @@ jobs:
           test "${#route_identity[@]}" -eq 2
           live_name="${route_identity[0]}"
           old_asset_root="${route_identity[1]}"
+          test "$old_asset_root" = "$expected_asset_root"
+          verify_predecessor_identity() {
+            test "$(sha256sum "$route_before" | cut -d ' ' -f 1)" = "$expected_route_sha"
+            test "$(docker exec "$CADDY_CONTAINER" sh -ceu 'cat /data/external-routes.caddy' | sha256sum | cut -d ' ' -f 1)" = "$expected_route_sha"
+            for name in index.html app.js styles.css release.json; do
+              expected_asset_sha="$(jq -er --arg name "$name" '.payAssetSha256[$name]' "$expected_live_receipt")"
+              actual_asset_sha="$(docker exec -e ROOT="$old_asset_root" -e NAME="$name" "$CADDY_CONTAINER" sh -ceu '
+                case "$NAME" in index.html|app.js|styles.css|release.json) ;; *) exit 1 ;; esac
+                test -d "$ROOT" && test ! -L "$ROOT" && test -s "$ROOT/$NAME" && test ! -L "$ROOT/$NAME"
+                sha256sum "$ROOT/$NAME" | cut -d " " -f 1
+              ')"
+              test "$actual_asset_sha" = "$expected_asset_sha"
+            done
+          }
           live_id="$(docker inspect "$live_name" --format '{{.Id}}')"
           [[ "$live_id" =~ ^[a-f0-9]{64}$ ]]
           test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
@@ -243,7 +275,7 @@ jobs:
           const status = response.status;
           await response.body?.cancel();
           if (transportFailure || !((status >= 200 && status < 300) || (status >= 400 && status < 500))) process.exit(1);
-          console.log(`ARTHELLO_D181_ALFACRM_EGRESS=VERIFIED status=${status}`);
+          console.log(`ARTHELLO_D182_ALFACRM_EGRESS=VERIFIED status=${status}`);
           NODE
           old_restart="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')"
           old_restart_max="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
@@ -298,7 +330,7 @@ jobs:
           },separators=(',',':')))
           PY
           jq -e '.connected==true and .credentialStored==true and .branchMappings>=1 and .families>0 and .staff>0 and .subscriptions>0 and (.subscriptionStatus=="importing" or .subscriptionStatus=="imported")' "$alfa_evidence" >/dev/null
-          printf 'ARTHELLO_D181_ALFACRM_LIVE_STATE=VERIFIED families=%s staff=%s subscriptions=%s status=%s\n' \
+          printf 'ARTHELLO_D182_ALFACRM_LIVE_STATE=VERIFIED families=%s staff=%s subscriptions=%s status=%s\n' \
             "$(jq -r .families "$alfa_evidence")" "$(jq -r .staff "$alfa_evidence")" \
             "$(jq -r .subscriptions "$alfa_evidence")" "$(jq -r .subscriptionStatus "$alfa_evidence")"
 
@@ -339,7 +371,7 @@ jobs:
             trap - EXIT INT TERM HUP
             if [ "$success" -ne 1 ]; then
               if [ "$activation_swapped" -eq 1 ]; then
-                docker run --rm --name "arthello-v52-activation-rollback-d181-$run_key" \
+                docker run --rm --name "arthello-v52-activation-rollback-d182-$run_key" \
                   --user 1002:1000 --network none --read-only --cap-drop ALL \
                   --security-opt no-new-privileges:true --pids-limit 16 --memory 64m --cpus 0.25 \
                   --entrypoint python3 \
@@ -366,6 +398,8 @@ jobs:
           trap rollback EXIT INT TERM HUP
 
           test "$(current_main)" = "$RELEASE_SHA"
+          verify_predecessor_identity
+          printf 'ARTHELLO_D182_PREDECESSOR_IDENTITY=VERIFIED route=%s assets=%s\n' "$expected_route_sha" "$old_asset_root"
           docker update --restart=no "$live_id" >/dev/null
           docker stop --time 30 "$live_id" >/dev/null
           test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = false
@@ -386,7 +420,7 @@ jobs:
           test "$(docker run --rm --network none --user 0:0 --read-only --cap-drop ALL --cap-add DAC_OVERRIDE \
             --mount "type=volume,src=$rollback_volume,dst=/snapshot,readonly,volume-nocopy" \
             --entrypoint /bin/sh "$IMAGE_ID" -ceu 'find /snapshot -type f | wc -l')" -gt 0
-          printf 'ARTHELLO_D181_ROLLBACK_SNAPSHOT=VERIFIED volume=%s\n' "$rollback_volume"
+          printf 'ARTHELLO_D182_ROLLBACK_SNAPSHOT=VERIFIED volume=%s\n' "$rollback_volume"
 
           test "$(current_main)" = "$RELEASE_SHA"
           docker run -d --name "$candidate" --restart no --read-only \
@@ -451,13 +485,13 @@ jobs:
           print(json.dumps({'bankAccounts':accounts,'accountsWithBalances':balances,'bankTransactions':transactions,'eligiblePayAdministrators':eligible,'activePayGrants':grants,'alfaCrm':{'connected':True,'credentialStored':alfa_credential,'branchMappings':len(alfa_state.get('branchMappings') or {}),'families':int(alfa_families.get('importedCount') or 0),'staff':int(alfa_staff.get('importedCount') or 0),'subscriptions':int(alfa_subscriptions.get('importedCount') or 0),'subscriptionStatus':alfa_subscriptions.get('status')}},separators=(',',':')))
           PY
           jq -e '.bankAccounts>0 and .accountsWithBalances>0 and .eligiblePayAdministrators>0 and .activePayGrants>=.eligiblePayAdministrators and .alfaCrm.connected==true and .alfaCrm.credentialStored==true and .alfaCrm.branchMappings>=1 and .alfaCrm.families>0 and .alfaCrm.staff>0 and .alfaCrm.subscriptions>0 and (.alfaCrm.subscriptionStatus=="importing" or .alfaCrm.subscriptionStatus=="imported")' "$database_receipt" >/dev/null
-          printf 'ARTHELLO_D181_DATA_AND_PAY_GRANT=VERIFIED accounts=%s balances=%s admins=%s\n' \
+          printf 'ARTHELLO_D182_DATA_AND_PAY_GRANT=VERIFIED accounts=%s balances=%s admins=%s\n' \
             "$(jq -r .bankAccounts "$database_receipt")" "$(jq -r .accountsWithBalances "$database_receipt")" "$(jq -r .activePayGrants "$database_receipt")"
 
           pay_source="deploy/v52/public/pay-assets"
           for name in index.html app.js styles.css; do test -s "$pay_source/$name" && test ! -L "$pay_source/$name"; done
           release_identity="$work/release.json"
-          jq -n --arg release "$RELEASE_SHA" '{schemaVersion:1,decision:"D181",releaseSha:$release}' > "$release_identity"
+          jq -n --arg release "$RELEASE_SHA" '{schemaVersion:1,decision:"D182",releaseSha:$release}' > "$release_identity"
           chmod 0600 "$release_identity"
           index_sha="$(sha256sum "$pay_source/index.html" | cut -d ' ' -f 1)"
           app_sha="$(sha256sum "$pay_source/app.js" | cut -d ' ' -f 1)"
@@ -510,8 +544,8 @@ jobs:
           const get=async(url,init={})=>{const response=await fetch(url,{...init,signal:AbortSignal.timeout(10000),headers:{'cache-control':'no-cache',...(init.headers||{})}});return {response,body:await response.text()}};
           const health=await get(process.env.PUBLIC_URL+'/api/health');
           const school=await get(process.env.SCHOOL_URL+'/api/health');
-          const root=await get(process.env.PUBLIC_URL+'/?release=d181');
-          const pay=await get(process.env.PAY_URL+'/?release=d181');
+          const root=await get(process.env.PUBLIC_URL+'/?release=d182');
+          const pay=await get(process.env.PAY_URL+'/?release=d182');
           const payApp=await get(process.env.PAY_URL+'/pay-assets/app.js');
           const payConfig=await get(process.env.PAY_URL+'/api/pay-sso/config');
           const payMe=await get(process.env.PAY_URL+'/api/auth/me');
@@ -550,7 +584,7 @@ jobs:
 
           test "$(current_main)" = "$RELEASE_SHA"
           activation_receipt="$work/bank-activation.json"
-          docker run --rm --name "arthello-v52-activation-writer-d181-$run_key" \
+          docker run --rm --name "arthello-v52-activation-writer-d182-$run_key" \
             --user 1002:1000 --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges:true --pids-limit 16 --memory 64m --cpus 0.25 \
             --entrypoint python3 \
@@ -574,7 +608,7 @@ jobs:
               })) process.exit(1);
             }).catch(() => process.exit(1));
           '
-          printf 'ARTHELLO_D181_TOCHKA_AUTOSYNC_ACTIVATION=VERIFIED\n'
+          printf 'ARTHELLO_D182_TOCHKA_AUTOSYNC_ACTIVATION=VERIFIED\n'
 
           test "$(current_main)" = "$RELEASE_SHA"
           restore_restart "$candidate"
@@ -586,7 +620,7 @@ jobs:
             test "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true
           done
           public_acceptance
-          printf 'ARTHELLO_D181_EDGE_STABILITY=VERIFIED seconds=65\n'
+          printf 'ARTHELLO_D182_EDGE_STABILITY=VERIFIED seconds=65\n'
           route_sha="$(sha256sum "$route_after" | cut -d ' ' -f 1)"
           jq -n \
             --arg release "$RELEASE_SHA" --arg tree "$RELEASE_TREE" --arg image "$IMAGE_ID" \
@@ -595,7 +629,7 @@ jobs:
             --arg activationVolume "$activation_volume" \
             --arg route "$route_sha" --arg assets "$asset_root" --arg index "$index_sha" --arg app "$app_sha" --arg css "$css_sha" --arg identity "$release_identity_sha" \
             --argjson data "$(cat "$database_receipt")" --argjson alfa "$(cat "$alfa_evidence")" --argjson activation "$(cat "$activation_receipt")" '
-              {schemaVersion:1,state:"verified",decision:"D181",releaseSha:$release,sourceTree:$tree,imageId:$image,
+              {schemaVersion:1,state:"verified",decision:"D182",releaseSha:$release,sourceTree:$tree,imageId:$image,
                candidateContainerId:$candidate,previousContainerId:$previous,rollbackVolume:$rollback,
                previousDecision:"D180",previousReleaseSha:$previousRelease,previousSourceTree:$previousTree,previousImageId:$previousImage,
                bankActivationVolume:$activationVolume,bankAutosyncActivation:$activation,
@@ -609,7 +643,7 @@ jobs:
           rm -f "$runtime_env"
           trap - EXIT INT TERM HUP
           printf 'candidate=%s\nreceipt=%s\n' "$candidate" "$receipt" >> "$GITHUB_OUTPUT"
-          printf 'ARTHELLO_D181_PRODUCTION=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$candidate"
+          printf 'ARTHELLO_D182_PRODUCTION=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$candidate"
 
       - name: Publish production receipt summary
         if: success()
@@ -617,17 +651,22 @@ jobs:
         run: |
           set -Eeuo pipefail
           {
-            echo '## ArtHello large family settings fix D181'
+            echo '## ArtHello mobile Finance branch recovery D182'
             echo
             echo "- Release: \`$RELEASE_SHA\`"
             echo "- ArtHello OS: $PUBLIC_URL"
             echo "- ArtHello Pay: $PAY_URL"
+            echo '- Mobile Finance exposes a compact branch selector in both blocked and loaded states.'
+            echo '- The hosted real-browser flow recovers from All branches at a 390px viewport.'
             echo '- AlfaCRM egress was proved with synthetic authentication before production stopped.'
             echo '- AlfaCRM requests use the bounded read-only Node/TLS transport.'
             echo '- No AlfaCRM credential was stored in or printed by the release workflow.'
-            echo '- Opening Settings does not load or serialize the complete family directory.'
-            echo '- The Families tab loads bounded pages of 25 and supports server-side search.'
-            echo '- Family relations and grants use bounded D1 bind batches.'
+            echo '- AlfaCRM subscription batches continue automatically without repeated clicks.'
+            echo '- Imported families are paged after type filtering and are visible in Clients.'
+            echo '- Notifications dismiss automatically after seven seconds.'
+            echo '- Explicitly inactive or ended teacher cards are excluded on refresh.'
+            echo '- Settings keeps its main response independent of the full family directory.'
+            echo '- The Families tab reads bounded pages of 25 with server-side search.'
             echo '- The 2,887-family runtime regression passes in the verified release.'
             echo '- D175 Pay navigation and focused family search remain preserved.'
             echo '- Existing ArtHello administrators received the isolated payment_operator system grant.'
@@ -635,22 +674,22 @@ jobs:
             echo '- Money acceptance and fiscalization: still disabled.'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify exact D181 gateway state under the shared lock
+      - name: Verify exact D182 gateway state under the shared lock
         if: success()
         env:
-          D181_CANDIDATE_NAME: ${{ steps.publish.outputs.candidate }}
-          D181_RECEIPT: ${{ steps.publish.outputs.receipt }}
+          D182_CANDIDATE_NAME: ${{ steps.publish.outputs.candidate }}
+          D182_RECEIPT: ${{ steps.publish.outputs.receipt }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          receipt="$D181_RECEIPT"
-          test "$receipt" = "$HOME/.config/arthello/release-state/production-d181-$RELEASE_SHA.json"
+          receipt="$D182_RECEIPT"
+          test "$receipt" = "$HOME/.config/arthello/release-state/production-d182-$RELEASE_SHA.json"
           test -f "$receipt"
           candidate="$(jq -er '.candidateContainerId' "$receipt")"
           expected_image="$(jq -er '.imageId' "$receipt")"
           [[ "$candidate" =~ ^[a-f0-9]{64}$ ]]
           [[ "$expected_image" =~ ^sha256:[a-f0-9]{64}$ ]]
-          live_name="$D181_CANDIDATE_NAME"
+          live_name="$D182_CANDIDATE_NAME"
           [[ "$live_name" =~ ^arthello-direct-[1-9][0-9]*-[1-9][0-9]*$ ]]
           test "$(docker inspect "$live_name" --format '{{.State.Running}}')" = true
           live_id="$(docker inspect "$live_name" --format '{{.Id}}')"
@@ -660,7 +699,7 @@ jobs:
           test "$(docker inspect "$live_name" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$RELEASE_SHA"
           docker exec "$CADDY_CONTAINER" sh -ceu 'cat /data/external-routes.caddy' \
             | grep -F "$live_name:8081" >/dev/null
-          printf 'ARTHELLO_D181_LOCKED_ROUTE=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$live_name"
+          printf 'ARTHELLO_D182_LOCKED_ROUTE=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$live_name"
 
   verify-external:
     needs: deploy
@@ -672,19 +711,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Verify exact D181 from an independent network
+      - name: Verify exact D182 from an independent network
         shell: bash
         run: |
           set -Eeuo pipefail
           probe() {
             curl --fail --silent --show-error --max-time 15 "$PAY_URL/pay-assets/release.json?release=$RELEASE_SHA" \
               | jq -e --arg release "$RELEASE_SHA" \
-                '.schemaVersion == 1 and .decision == "D181" and .releaseSha == $release' >/dev/null &&
+                '.schemaVersion == 1 and .decision == "D182" and .releaseSha == $release' >/dev/null &&
             curl --fail --silent --show-error --max-time 15 "$PUBLIC_URL/api/health" \
               | jq -e '.status == "ok" and .database == "available"' >/dev/null &&
             curl --fail --silent --show-error --max-time 15 "$SCHOOL_URL/api/health" \
               | jq -e '.status == "ok"' >/dev/null &&
-            curl --fail --silent --show-error --max-time 15 "$PAY_URL/?release=d181-external-$RELEASE_SHA" \
+            curl --fail --silent --show-error --max-time 15 "$PAY_URL/?release=d182-external-$RELEASE_SHA" \
               | grep -F 'data-arthello-pay-shell="d175"' >/dev/null &&
             curl --fail --silent --show-error --max-time 15 "$PAY_URL/pay-assets/app.js?release=$RELEASE_SHA" \
               | grep -F 'function refreshCustomerResults()' >/dev/null &&
@@ -698,4 +737,4 @@ jobs:
             sleep 5
           done
           test "$ready" = 1
-          printf 'ARTHELLO_D181_EXTERNAL=VERIFIED arthello=200 school=200 pay=200\n'
+          printf 'ARTHELLO_D182_EXTERNAL=VERIFIED arthello=200 school=200 pay=200\n'

@@ -36,11 +36,11 @@ const browserFlowUrl = new URL(
   import.meta.url,
 );
 const repositoryDeployUrl = new URL(
-  "../../../../.github/workflows/deploy-arthello-finance-d181.yml",
+  "../../../../.github/workflows/deploy-arthello-finance-d182.yml",
   import.meta.url,
 );
 const deployFixtureUrl = new URL(
-  "./contract-fixtures/deploy-d181.yml",
+  "./contract-fixtures/deploy-d182.yml",
   import.meta.url,
 );
 
@@ -164,35 +164,38 @@ test("mobile finance scope renders every available branch when the shared scope 
   assert.match(unavailable, /Филиалы недоступны/);
 });
 
-test("D181 deploys only the verified mobile Finance fix over the exact D180 production receipt", () => {
+test("D182 deploys the verified mobile Finance and Settings fixes over the exact D180 production receipt", () => {
   const workflow = sourceText(repositoryDeployUrl, deployFixtureUrl);
-  const egressProof = workflow.indexOf("ARTHELLO_D181_ALFACRM_EGRESS=VERIFIED");
+  const egressProof = workflow.indexOf("ARTHELLO_D182_ALFACRM_EGRESS=VERIFIED");
   const productionStop = workflow.indexOf('docker stop --time 30 "$live_id"');
   const snapshotProof = workflow.indexOf(
-    "ARTHELLO_D181_ROLLBACK_SNAPSHOT=VERIFIED",
+    "ARTHELLO_D182_ROLLBACK_SNAPSHOT=VERIFIED",
   );
   const predecessorProof = workflow.indexOf(
-    "ARTHELLO_D181_PREDECESSOR_IDENTITY=VERIFIED",
+    "ARTHELLO_D182_PREDECESSOR_IDENTITY=VERIFIED",
   );
-  const productionProof = workflow.indexOf("ARTHELLO_D181_PRODUCTION=VERIFIED");
+  const productionProof = workflow.indexOf("ARTHELLO_D182_PRODUCTION=VERIFIED");
   const lockedRouteProof = workflow.indexOf(
-    "ARTHELLO_D181_LOCKED_ROUTE=VERIFIED",
+    "ARTHELLO_D182_LOCKED_ROUTE=VERIFIED",
   );
-  const externalProof = workflow.indexOf("ARTHELLO_D181_EXTERNAL=VERIFIED");
+  const externalProof = workflow.indexOf("ARTHELLO_D182_EXTERNAL=VERIFIED");
 
-  assert.match(workflow, /D181: restore mobile finance branch/);
+  assert.match(workflow, /D182: restore mobile finance branch/);
   assert.match(
     workflow,
     /EXPECTED_LIVE_RELEASE_SHA: 511d467763b7ca050c096df23cfcdcd1f62fe51d/,
   );
   assert.match(workflow, /production-d180-\$EXPECTED_LIVE_RELEASE_SHA\.json/);
   assert.match(workflow, /\.decision=="D180"/);
-  assert.match(workflow, /D181_FINANCE_MOBILE_BRANCH/);
+  assert.match(workflow, /D182_FINANCE_MOBILE_BRANCH/);
+  assert.match(workflow, /FAMILY_DIRECTORY_PAGE_SIZE = 25/);
+  assert.match(workflow, /searchParams\.get\("section"\) === "families"/);
+  assert.match(workflow, /FAMILY_COUNT = 2_887/);
   assert.match(workflow, /mobile_branch_recovery/);
   assert.match(workflow, /mobile_branch_failure/);
   assert.match(workflow, /activeRouteSha256/);
   assert.match(workflow, /payAssetSha256/);
-  assert.match(workflow, /group: gateway-38-55-arthello-production-d181/);
+  assert.match(workflow, /group: gateway-38-55-arthello-production-d182/);
   assert.match(
     workflow,
     /deploy:\n    concurrency:\n      group: gateway-38-55-arthello-production/,
@@ -209,9 +212,9 @@ test("D181 deploys only the verified mobile Finance fix over the exact D180 prod
       lockedRouteProof > productionProof &&
       externalProof > lockedRouteProof,
   );
-  assert.match(workflow, /decision:"D181"/);
+  assert.match(workflow, /decision:"D182"/);
   assert.match(workflow, /previousDecision:"D180"/);
-  assert.match(workflow, /production-d181-\$RELEASE_SHA\.json/);
+  assert.match(workflow, /production-d182-\$RELEASE_SHA\.json/);
   assert.match(workflow, /ALFACRM_IMPORT_ENABLED=true/);
   assert.match(workflow, /TOCHKA_AUTOSYNC_ENABLED=1/);
   assert.match(workflow, /moneyAcceptanceEnabled:false/);
@@ -244,7 +247,7 @@ test("finance workspace keeps the branch picker reachable in its blocked and loa
     /<FinanceBranchSelector[\s\S]*?selectedBranch=\{selectedBranch\}[\s\S]*?branches=\{branches\}[\s\S]*?onChange=\{onBranchChange\}/,
   );
   assert.match(workspace, /ahFinanceMobileBranchScope/);
-  assert.match(workspace, /data-d181-marker="D181_FINANCE_MOBILE_BRANCH"/);
+  assert.match(workspace, /data-d182-marker="D182_FINANCE_MOBILE_BRANCH"/);
   assert.match(workspace, /data\?\.branch\.id !== selectedBranch/);
   assert.match(
     styles,

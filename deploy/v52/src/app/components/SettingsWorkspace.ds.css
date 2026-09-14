@@ -330,6 +330,22 @@
   line-height: var(--ah-compact-card-body-line);
 }
 
+.ahSettingsModal .family-directory-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 8px;
+  align-items: end;
+}
+
+.ahSettingsModal .family-directory-toolbar button,
+.ahSettingsModal .family-directory-more {
+  padding-inline: 16px;
+}
+
+.ahSettingsModal .family-directory-more {
+  width: 100%;
+}
+
 .ahSettingsLayer .temporary-credential-layer {
   position: absolute;
   inset: 0;
@@ -685,7 +701,8 @@
   }
 
   .ahSettingsModal .module-access-grid,
-  .ahSettingsModal .favorites-editor-grid {
+  .ahSettingsModal .favorites-editor-grid,
+  .ahSettingsModal .family-directory-toolbar {
     grid-template-columns: minmax(0, 1fr);
   }
 
