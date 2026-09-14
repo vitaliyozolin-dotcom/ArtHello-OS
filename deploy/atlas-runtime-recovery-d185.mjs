@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// D184 keeps the D183 runtime/route transformation and changes only image provenance.
+// D185 keeps the D183 runtime/route transformation and changes only backup verification authority.
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 

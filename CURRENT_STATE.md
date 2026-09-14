@@ -590,10 +590,12 @@ D182 опирается на фактически активный exact D181 pr
 
 Exact release `95873e519113e93d9d52ac08166eb46b317e5c6e` опубликован protected run `34819003014`.
 
-## D184 — Переносимый повтор Atlas release (2026-09-14, кандидат)
+## D185 — Изолированная root-проверка Atlas backup (2026-09-14, кандидат)
 
 Live-проверка зафиксировала central `503` на `/api/atlas-sso/open` при отдельных healthy ArtHello и Atlas. Текущий central runtime потерял `ATLAS_PUBLIC_ORIGIN` и Atlas secret mount, а Atlas остался на исходном source, который показывал владельцу-директору пустой родительский предпросмотр перед рабочими разделами. D138 run `34542621980` остановился на School SSH host key до Atlas и поэтому не доставил уже проверенный source `f856fb3bd098152bb6b02c4d0273c4c9170b130c`.
 
 D183 exact main `390b71cab149045d6cf2785d94be91d9e600128e` прошёл Quality/Proof, но protected run `34827534460` остановился после проверки Atlas archive и до backup/central stop/route swap. Rollback выполнен, D183 receipt не создан. Причина в возвращённом непереносимом сравнении builder и gateway Docker image IDs, которое уже было опровергнуто production evidence D127.
 
-D184 сохраняет весь Atlas-only контракт D183, но проверяет импорт по checksum, каноническому runtime fingerprint и source/tree labels, а запускает image по локально разрешённому immutable ID. Семьи, классы и ученики остаются не подключены до отдельной центральной проекции.
+D184 exact main `d776bd2f46c763cec7f71479125b60bdf68bbe28` прошёл Quality `34830591245`, Proof `34830591229` и v52 verification `34830591231`. Protected run `34831139683/103935120775` доказал переносимую identity: builder/gateway IDs различались, а runtime fingerprint и source/tree labels совпали. После остановки прежнего Atlas и создания immutable backup проверка завершилась `unable to open database file`: offline helper с UID/GID `1001:1001` не мог прочитать root-owned файл. Это произошло до подтверждения backup, остановки central и route swap; rollback запустил прежний Atlas, D184 receipt не создан.
+
+D185 сохраняет весь Atlas-only контракт и переносимую image identity D184. Только два offline reader одной неизменяемой копии (`PRAGMA integrity_check` и `sha256sum`) запускаются как root в одноразовых контейнерах без сети, с read-only root filesystem, `no-new-privileges` и backup volume только для чтения. Production Atlas остаётся непривилегированным. Семьи, классы и ученики остаются не подключены до отдельной центральной проекции.
