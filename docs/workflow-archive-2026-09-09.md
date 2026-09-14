@@ -53,15 +53,16 @@ controller объединяет только текущий выпуск инт�
 
 Седьмой cleanup-блок D182 заменяет failed-closed controller D181 следующим
 одноразовым controller без увеличения активного каталога: workflow policy
-сохраняет 16 workflow и 0 violations. D181 run `34810891708` остановился на
-source guard до загрузки image и до production-изменений, поэтому фактическим
+сохраняет 16 workflow и 0 violations. D181 runs `34810891708` и
+`34811820022` остановились на source guard до загрузки image и до
+production-изменений, поэтому фактическим
 predecessor остаётся D180 release
 `511d467763b7ca050c096df23cfcdcd1f62fe51d`, принятый run `34799802826`.
 Неизменённые contract fixtures D180 и D181 сохранены соответственно с SHA-256
 `b9dfa00421a62a3a156c6a7950bb7041bf3e7a3bc68f319cee3114299d224c63` и
-`e1c7b875b4187fab8ddb2b894e57080ad297ffa71cbaac67607e40e9e3078966`.
+`4d68af9a289b67825769551b5d529f8c6307ff02ee334348274ade863faf98a9`.
 Активный D182 controller и его изолированный fixture совпадают с SHA-256
-`812df766a6a4d6d512d5694413f098f51ef76dacd886dbb93ad89c813bb06bb6`.
+`9512e838c92c7eac85bd4e1d8d99cb3f71e1e0ca9b55f78701b74665a5fd413e`.
 
 | Blob SHA                                   | Путь                                                                                |
 | ------------------------------------------ | ----------------------------------------------------------------------------------- |

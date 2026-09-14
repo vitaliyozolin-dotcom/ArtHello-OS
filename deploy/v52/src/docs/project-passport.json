@@ -218,7 +218,7 @@
       "IMG_0269: после импорта production-настройки заменяются общей заглушкой «Настройки временно недоступны».",
       "D181 red/green runtime: прежний /api/settings вернул 500 на 2 887 семьях; после отделения каталога основной ответ вернул 200, а отдельная страница — 25 из 2 887 семей и точный серверный поиск.",
       "D181 локально: typecheck, production build и lint прошли; 17/17 целевых runtime/release-тестов зелёные; полный app-набор дал 835 passed, 6 известных managed-filesystem chown failures и 2 skipped.",
-      "D181 exact-main Quality/Proof/Verify прошли, но protected run 34810891708 остановился на неточной source-проверке до загрузки image и до production-изменений; D180 остался активным.",
+      "D181 exact-main Quality/Proof/Verify прошли дважды, но protected runs 34810891708 и 34811820022 остановились на неточной source-проверке до загрузки image и до production-изменений; bounded ref retry из второго source-коммита сохранён, D180 остался активным.",
       "IMG_0270/IMG_0271: на мобильном глобальный выбор филиала скрыт вместе с desktop top-actions, поэтому «Финансы» остаются в состоянии «Выберите филиал» без доступного действия.",
       "D182 добавляет компактный филиальный select во все состояния FinanceWorkspace, ограничивает список действующими grants и исключает показ данных прежнего филиала при смене или ошибке.",
       "D182 локально: TypeScript, lint без ошибок, production build и связанные финансовые/release-контракты прошли; protected proof должен повторно подтвердить и исправление D181."
@@ -3100,20 +3100,22 @@
         "Неадминистративному пользователю доступны только филиалы, для которых /api/settings вернул действующий access grant; административный пользователь видит полный каталог.",
         "Общий финансовый отчёт для ALL остаётся выключенным; пользователь должен выбрать один филиал.",
         "Банковские факты, комментарии D179, AlfaCRM import state, Pay и read-only синхронизация не меняются.",
-        "D181 Settings source входит в D182, поскольку D181 deploy run 34810891708 завершился до image load и не менял production."
+        "D181 Settings source входит в D182, поскольку D181 deploy runs 34810891708 и 34811820022 завершились до image load и не меняли production."
       ],
       "dependencies": [
         "D132 explicit finance branch boundary",
         "DEC-2026-09-14-87 completed",
         "DEC-2026-09-14-88 completed; verified D180 release 511d467763b7ca050c096df23cfcdcd1f62fe51d and production run 34799802826",
-        "DEC-2026-09-14-89 superseded after protected D181 run 34810891708 failed closed before production mutation",
+        "DEC-2026-09-14-89 superseded after protected D181 runs 34810891708 and 34811820022 failed closed before production mutation",
         "Explicit owner production instruction 2026-09-14"
       ],
       "source_links": [
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/511d467763b7ca050c096df23cfcdcd1f62fe51d",
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/2149e3308538dcc759f7cc7a03dde58c537eade9",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/2b8253fd5b835519e66ccf75dab7452de27f5847",
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34799802826",
-        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34810891708"
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34810891708",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34811820022"
       ],
       "rejected_alternatives": [
         {

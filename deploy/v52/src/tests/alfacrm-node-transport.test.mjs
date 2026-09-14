@@ -226,6 +226,8 @@ test("D181 deploys bounded family settings over the verified D180 runtime", () =
   const productionProof = workflow.indexOf("ARTHELLO_D181_PRODUCTION=VERIFIED");
   const lockedRouteProof = workflow.indexOf("ARTHELLO_D181_LOCKED_ROUTE=VERIFIED");
   const externalProof = workflow.indexOf("ARTHELLO_D181_EXTERNAL=VERIFIED");
+  const mainRefRetry = workflow.indexOf("for attempt in 1 2 3 4 5 6; do");
+  const artifactDownload = workflow.indexOf("python3 -I -B .github/scripts/download-v52-artifact-r17.py");
 
   assert.match(workflow, /D181: keep settings available for large family directories/);
   assert.match(workflow, /workflow_run:/);
@@ -240,6 +242,8 @@ test("D181 deploys bounded family settings over the verified D180 runtime", () =
   assert.match(workflow, /section === "families"/);
   assert.match(workflow, /loadFamilyPage/);
   assert.match(workflow, /FAMILY_COUNT = 2_887/);
+  assert.ok(mainRefRetry > 0 && artifactDownload > mainRefRetry, "the exact-main check must tolerate bounded GitHub ref propagation before artifact download");
+  assert.match(workflow, /sleep 5/);
   assert.match(workflow, /ALFACRM_IMPORT_ENABLED=true/);
   assert.match(workflow, /families\["status"\] == "imported"/);
   assert.match(workflow, /staff\["status"\] == "imported"/);

@@ -179,6 +179,10 @@ test("D182 deploys the verified mobile Finance and Settings fixes over the exact
     "ARTHELLO_D182_LOCKED_ROUTE=VERIFIED",
   );
   const externalProof = workflow.indexOf("ARTHELLO_D182_EXTERNAL=VERIFIED");
+  const mainRefRetry = workflow.indexOf("for attempt in 1 2 3 4 5 6; do");
+  const artifactDownload = workflow.indexOf(
+    "python3 -I -B .github/scripts/download-v52-artifact-r17.py",
+  );
 
   assert.match(workflow, /D182: restore mobile finance branch/);
   assert.match(
@@ -191,6 +195,8 @@ test("D182 deploys the verified mobile Finance and Settings fixes over the exact
   assert.match(workflow, /FAMILY_DIRECTORY_PAGE_SIZE = 25/);
   assert.match(workflow, /searchParams\.get\("section"\) === "families"/);
   assert.match(workflow, /FAMILY_COUNT = 2_887/);
+  assert.ok(mainRefRetry > 0 && artifactDownload > mainRefRetry);
+  assert.match(workflow, /sleep 5/);
   assert.match(workflow, /mobile_branch_recovery/);
   assert.match(workflow, /mobile_branch_failure/);
   assert.match(workflow, /activeRouteSha256/);
