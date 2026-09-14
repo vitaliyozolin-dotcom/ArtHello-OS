@@ -164,7 +164,7 @@ test("mobile finance scope renders every available branch when the shared scope 
   assert.match(unavailable, /Филиалы недоступны/);
 });
 
-test("D182 deploys the verified mobile Finance and Settings fixes over the exact D180 production receipt", () => {
+test("D182 deploys the verified mobile Finance fix over the exact D181 production receipt", () => {
   const workflow = sourceText(repositoryDeployUrl, deployFixtureUrl);
   const egressProof = workflow.indexOf("ARTHELLO_D182_ALFACRM_EGRESS=VERIFIED");
   const productionStop = workflow.indexOf('docker stop --time 30 "$live_id"');
@@ -179,18 +179,44 @@ test("D182 deploys the verified mobile Finance and Settings fixes over the exact
     "ARTHELLO_D182_LOCKED_ROUTE=VERIFIED",
   );
   const externalProof = workflow.indexOf("ARTHELLO_D182_EXTERNAL=VERIFIED");
+  const manualCutoverProof = workflow.indexOf(
+    "ARTHELLO_D182_MANUAL_CUTOVER=AUTHORIZED",
+  );
+  const verifyRunLookup = workflow.indexOf(
+    '"https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$TRIGGER_VERIFY_RUN_ID"',
+  );
   const mainRefRetry = workflow.indexOf("for attempt in 1 2 3 4 5 6; do");
   const artifactDownload = workflow.indexOf(
     "python3 -I -B .github/scripts/download-v52-artifact-r17.py",
   );
 
   assert.match(workflow, /D182: restore mobile finance branch/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /release_sha:/);
+  assert.match(workflow, /verify_run_id:/);
+  assert.match(workflow, /confirmation:/);
+  assert.match(workflow, /DEPLOY D182 TO PRODUCTION/);
+  assert.doesNotMatch(workflow, /workflow_run:/);
+  assert.match(workflow, /environment: production-ru/);
+  assert.match(workflow, /github\.sha == inputs\.release_sha/);
+  assert.match(workflow, /github\.actor == 'vitaliyozolin-dotcom'/);
+  assert.match(workflow, /github\.triggering_actor == 'vitaliyozolin-dotcom'/);
+  assert.match(workflow, /\.name == "Verify ArtHello v52 release"/);
   assert.match(
     workflow,
-    /EXPECTED_LIVE_RELEASE_SHA: 511d467763b7ca050c096df23cfcdcd1f62fe51d/,
+    /\.path == "\.github\/workflows\/verify-arthello-v52\.yml"/,
   );
-  assert.match(workflow, /production-d180-\$EXPECTED_LIVE_RELEASE_SHA\.json/);
-  assert.match(workflow, /\.decision=="D180"/);
+  assert.match(workflow, /\.head_branch == "main" and \.head_sha == \$release/);
+  assert.match(
+    workflow,
+    /\.status == "completed" and \.conclusion == "success"/,
+  );
+  assert.match(
+    workflow,
+    /EXPECTED_LIVE_RELEASE_SHA: eea35ebe384f1039324ad083fcdfa74e0d2217c4/,
+  );
+  assert.match(workflow, /production-d181-\$EXPECTED_LIVE_RELEASE_SHA\.json/);
+  assert.match(workflow, /\.decision=="D181"/);
   assert.match(workflow, /D182_FINANCE_MOBILE_BRANCH/);
   assert.match(workflow, /FAMILY_DIRECTORY_PAGE_SIZE = 25/);
   assert.match(workflow, /searchParams\.get\("section"\) === "families"/);
@@ -209,6 +235,10 @@ test("D182 deploys the verified mobile Finance and Settings fixes over the exact
   assert.ok(
     egressProof > 0 &&
       predecessorProof > 0 &&
+      verifyRunLookup > 0 &&
+      productionStop > verifyRunLookup &&
+      manualCutoverProof > predecessorProof &&
+      productionStop > manualCutoverProof &&
       productionStop > predecessorProof &&
       productionStop > egressProof &&
       snapshotProof > productionStop,
@@ -219,7 +249,7 @@ test("D182 deploys the verified mobile Finance and Settings fixes over the exact
       externalProof > lockedRouteProof,
   );
   assert.match(workflow, /decision:"D182"/);
-  assert.match(workflow, /previousDecision:"D180"/);
+  assert.match(workflow, /previousDecision:"D181"/);
   assert.match(workflow, /production-d182-\$RELEASE_SHA\.json/);
   assert.match(workflow, /ALFACRM_IMPORT_ENABLED=true/);
   assert.match(workflow, /TOCHKA_AUTOSYNC_ENABLED=1/);

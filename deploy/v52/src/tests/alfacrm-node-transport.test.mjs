@@ -220,6 +220,7 @@ test("D180 deploys the import usability fix over the verified D179 runtime", () 
 
 test("D181 deploys bounded family settings over the verified D180 runtime", () => {
   const workflow = sourceText("../../../../.github/workflows/deploy-arthello-settings-d181.yml", "./contract-fixtures/deploy-d181.yml");
+  const settingsRoute = sourceText("../app/api/settings/route.ts");
   const snapshot = workflow.indexOf("ARTHELLO_D181_ROLLBACK_SNAPSHOT=VERIFIED");
   const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
   const candidateStart = workflow.indexOf('docker run -d --name "$candidate"');
@@ -239,7 +240,8 @@ test("D181 deploys bounded family settings over the verified D180 runtime", () =
   assert.match(workflow, /production-d180-\$EXPECTED_LIVE_RELEASE_SHA\.json/);
   assert.match(workflow, /\.decision=="D180"/);
   assert.match(workflow, /FAMILY_DIRECTORY_PAGE_SIZE = 25/);
-  assert.match(workflow, /section === "families"/);
+  assert.match(settingsRoute, /searchParams\.get\("section"\) === "families"/);
+  assert.match(workflow, /grep -F 'searchParams\.get\("section"\) === "families"'/);
   assert.match(workflow, /loadFamilyPage/);
   assert.match(workflow, /FAMILY_COUNT = 2_887/);
   assert.ok(mainRefRetry > 0 && artifactDownload > mainRefRetry, "the exact-main check must tolerate bounded GitHub ref propagation before artifact download");

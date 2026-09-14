@@ -218,10 +218,11 @@
       "IMG_0269: после импорта production-настройки заменяются общей заглушкой «Настройки временно недоступны».",
       "D181 red/green runtime: прежний /api/settings вернул 500 на 2 887 семьях; после отделения каталога основной ответ вернул 200, а отдельная страница — 25 из 2 887 семей и точный серверный поиск.",
       "D181 локально: typecheck, production build и lint прошли; 17/17 целевых runtime/release-тестов зелёные; полный app-набор дал 835 passed, 6 известных managed-filesystem chown failures и 2 skipped.",
-      "D181 exact-main Quality/Proof/Verify прошли дважды, но protected runs 34810891708 и 34811820022 остановились на неточной source-проверке до загрузки image и до production-изменений; bounded ref retry из второго source-коммита сохранён, D180 остался активным.",
+      "D181 protected runs 34810891708 и 34811820022 безопасно остановились до image load на неточной source-проверке; исправленный exact release eea35ebe384f1039324ad083fcdfa74e0d2217c4 опубликован run 34812906091 с hosted image, AlfaCRM families=2887/staff=193/subscriptions=60, rollback snapshot, 65 секундами стабильности, locked route и внешними ArtHello/School/Pay=200.",
       "IMG_0270/IMG_0271: на мобильном глобальный выбор филиала скрыт вместе с desktop top-actions, поэтому «Финансы» остаются в состоянии «Выберите филиал» без доступного действия.",
       "D182 добавляет компактный филиальный select во все состояния FinanceWorkspace, ограничивает список действующими grants и исключает показ данных прежнего филиала при смене или ошибке.",
-      "D182 локально: TypeScript, lint без ошибок, production build и связанные финансовые/release-контракты прошли; protected proof должен повторно подтвердить и исправление D181."
+      "D182 локально: TypeScript, lint без ошибок, production build и связанные финансовые/release-контракты прошли; protected proof должен повторно подтвердить и исправление D181.",
+      "D182 production controller запускается только владельцем вручную из main с exact release SHA, ID успешного first-attempt Verify того же SHA и typed confirmation DEPLOY D182 TO PRODUCTION; подтверждение повторно проверяется непосредственно перед остановкой live."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
@@ -231,7 +232,7 @@
       "School transport восстановлен и read-only проверен; естественный авторизованный Education→дневник SSO не подтверждён, облачный браузер возвращает502 до формы входа.",
       "Customer.balance подтверждён официальным API как денежное поле; Alfa financial movements остаются blocked до проверенного контракта PayType direction.",
       "Новая ArtHello версия ещё не переключена: нужны первая backup+restore, exact immutable release и пользовательская приёмка шести сценариев.",
-      "D182 готовится поверх фактически активного verified D180 release 511d467763b7ca050c096df23cfcdcd1f62fe51d и production run 34799802826: требуются exact-main Quality/Proof/Verify, реальный browser-сценарий 390 px, совпадение live AlfaCRM/банковских/Pay данных и контейнера, rollback snapshot, 65 секунд стабильности и внешний ArtHello/School/Pay probe."
+      "D182 готовится поверх фактически активного verified D181 release eea35ebe384f1039324ad083fcdfa74e0d2217c4 и production run 34812906091: требуются exact-main Quality/Proof/Verify, ручной owner dispatch с typed confirmation, реальный browser-сценарий 390 px, совпадение live AlfaCRM/банковских/Pay данных и контейнера, rollback snapshot, 65 секунд стабильности и внешний ArtHello/School/Pay probe."
     ]
   },
   "stages": [
@@ -472,7 +473,7 @@
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
     "result": "Опубликовать D182: мобильные «Финансы» всегда показывают компактный выбор доступного филиала, а настройки сохраняют безопасную пагинацию каталога семей",
-    "evidence": "D182 component/release contracts, runtime на 2 887 семьях, TypeScript/lint/build, hosted real-browser recovery и failure/retry на 390 px, exact D180 production receipt, свежий rollback snapshot, сохранность банковских/AlfaCRM/Pay данных, 65 секунд стабильности и независимый ArtHello/School/Pay probe"
+    "evidence": "D182 component/release contracts, runtime на 2 887 семьях, TypeScript/lint/build, hosted real-browser recovery и failure/retry на 390 px, exact D181 production receipt, свежий rollback snapshot, сохранность банковских/AlfaCRM/Pay данных, 65 секунд стабильности и независимый ArtHello/School/Pay probe"
   },
   "decisionLog": [
     {
@@ -705,7 +706,7 @@
     },
     {
       "id": "DEC-2026-08-21-39",
-      "status": "superseded",
+      "status": "completed",
       "decision": "Изумрудный и лаймовый диапазон, AH-монограмма и честная граница данных сохраняются; микро-типографика, одноуровневая навигация и несогласованные модульные стили перерабатываются системно.",
       "source": "UX-аудит и визуальные материалы 2026-08-21",
       "supersededBy": "DEC-2026-08-21-42"
@@ -3018,7 +3019,7 @@
         22
       ],
       "supersedes": null,
-      "superseded_by": "DEC-2026-09-14-90",
+      "superseded_by": null,
       "raw_deliberation_ref": "IMG_0269 показывает общую заглушку настроек после рабочего импорта 2 887 семей; владелец несколько раз запросил завершение исправления.",
       "decision_id": "DEC-2026-09-14-89",
       "question": "Как сохранить доступность всех настроек после импорта тысяч семей и не скрыть ни одну семейную карточку?",
@@ -3029,7 +3030,8 @@
         "IMG_0269: production показывает «Настройки временно недоступны».",
         "Красный runtime-тест на 2 887 семьях воспроизвёл 500 прежнего /api/settings.",
         "Green runtime-тест подтверждает 200 основного ответа, страницу 25 из 2 887, связанные данные и точный поиск.",
-        "D181 workflow принимает только exact D180 receipt и сохраняет live AlfaCRM/Pay/банковские доказательства до cutover.",
+        "D181 workflow принял только exact D180 receipt и сохранил live AlfaCRM/Pay/банковские доказательства до cutover.",
+        "Exact release eea35ebe384f1039324ad083fcdfa74e0d2217c4 опубликован protected run 34812906091; ARTHELLO_D181_PRODUCTION=VERIFIED, 65-second stability и ARTHELLO_D181_EXTERNAL=VERIFIED подтверждены.",
         "Typecheck, production build, lint, 17/17 целевых тестов и 835 тестов полного app-набора прошли; шесть прежних chown-сценариев не поддерживаются managed filesystem, два теста штатно пропущены."
       ],
       "assumptions": [
@@ -3044,7 +3046,9 @@
         "Explicit owner defect report IMG_0269"
       ],
       "source_links": [
-        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34799802826"
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34799802826",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/eea35ebe384f1039324ad083fcdfa74e0d2217c4",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34812906091"
       ],
       "rejected_alternatives": [
         {
@@ -3064,7 +3068,7 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Полные typecheck/test/build gates, exact-main Quality/Proof/Verify, protected D181 receipt, 65-second stability, live AlfaCRM proof и ARTHELLO_D181_EXTERNAL=VERIFIED",
-          "status": "blocked"
+          "status": "completed"
         }
       ]
     },
@@ -3094,28 +3098,30 @@
         "Branch-access контракт подтверждает один grant, отсутствие grants и административный полный список.",
         "FinanceWorkspace содержит D182_FINANCE_MOBILE_BRANCH во всех ранних состояниях и в загруженном разделе; CSS показывает selector только до 767 px с touch-target не меньше 44 px.",
         "Hosted finance browser flow переводит owner scope в ALL на desktop, меняет viewport на 390x844, выбирает филиал, затем доказывает fail-closed смену, retry и возврат.",
-        "D182 controller проверяет фактическую строку Settings route, runtime на 2 887 семьях, exact D180 predecessor route/Pay assets, rollback и внешний контур."
+        "D182 controller проверяет фактическую строку Settings route, runtime на 2 887 семьях, successful exact-SHA Verify, typed owner confirmation непосредственно перед stop, exact D181 predecessor route/Pay assets, rollback и внешний контур."
       ],
       "assumptions": [
         "Неадминистративному пользователю доступны только филиалы, для которых /api/settings вернул действующий access grant; административный пользователь видит полный каталог.",
         "Общий финансовый отчёт для ALL остаётся выключенным; пользователь должен выбрать один филиал.",
         "Банковские факты, комментарии D179, AlfaCRM import state, Pay и read-only синхронизация не меняются.",
-        "D181 Settings source входит в D182, поскольку D181 deploy runs 34810891708 и 34811820022 завершились до image load и не меняли production."
+        "D181 Settings source уже опубликован exact release eea35ebe384f1039324ad083fcdfa74e0d2217c4 run 34812906091; D182 использует его verified receipt как непосредственный production predecessor."
       ],
       "dependencies": [
         "D132 explicit finance branch boundary",
         "DEC-2026-09-14-87 completed",
         "DEC-2026-09-14-88 completed; verified D180 release 511d467763b7ca050c096df23cfcdcd1f62fe51d and production run 34799802826",
-        "DEC-2026-09-14-89 superseded after protected D181 runs 34810891708 and 34811820022 failed closed before production mutation",
+        "DEC-2026-09-14-89 completed by exact D181 release eea35ebe384f1039324ad083fcdfa74e0d2217c4 and protected run 34812906091",
         "Explicit owner production instruction 2026-09-14"
       ],
       "source_links": [
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/511d467763b7ca050c096df23cfcdcd1f62fe51d",
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/2149e3308538dcc759f7cc7a03dde58c537eade9",
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/2b8253fd5b835519e66ccf75dab7452de27f5847",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/commit/eea35ebe384f1039324ad083fcdfa74e0d2217c4",
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34799802826",
         "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34810891708",
-        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34811820022"
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34811820022",
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34812906091"
       ],
       "rejected_alternatives": [
         {
@@ -3134,7 +3140,7 @@
           "action": "Выпустить exact D182 и подтвердить мобильное восстановление филиала, доступность настроек, сохранность production-данных и внешний контур",
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
-          "evidence_required": "Exact-main Quality/Proof/Verify, hosted finance browser 390 px, protected D182 receipt, rollback snapshot, 65-second stability, ARTHELLO_D182_PRODUCTION=VERIFIED и ARTHELLO_D182_EXTERNAL=VERIFIED",
+          "evidence_required": "Exact-main Quality/Proof/Verify, manual owner dispatch с exact SHA/run ID и typed confirmation, hosted finance browser 390 px, protected D182 receipt, rollback snapshot, 65-second stability, ARTHELLO_D182_MANUAL_CUTOVER=AUTHORIZED, ARTHELLO_D182_PRODUCTION=VERIFIED и ARTHELLO_D182_EXTERNAL=VERIFIED",
           "status": "in_progress"
         }
       ]

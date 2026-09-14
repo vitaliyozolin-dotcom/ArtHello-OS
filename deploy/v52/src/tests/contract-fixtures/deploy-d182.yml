@@ -1,17 +1,24 @@
 # D182: restore reachable branch selection inside mobile Finance.
 # The hosted verifier builds the immutable image. The gateway proves the exact
-# D180 runtime, takes a recoverable D1 snapshot, preserves controlled read-only
+# D181 runtime, takes a recoverable D1 snapshot, preserves controlled read-only
 # imports and swaps one candidate. Existing secret mounts are never printed.
 name: Deploy ArtHello mobile finance branch D182
 
 'on':
-  workflow_run:
-    workflows:
-      - Verify ArtHello v52 release
-    types:
-      - completed
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact D182 main release SHA
+        required: true
+        type: string
+      verify_run_id:
+        description: Successful exact-main Verify ArtHello v52 release run ID
+        required: true
+        type: string
+      confirmation:
+        description: Type DEPLOY D182 TO PRODUCTION
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -23,15 +30,16 @@ concurrency:
 
 env:
   EXPECTED_REPOSITORY: vitaliyozolin-dotcom/ArtHello-OS
-  RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
-  TRIGGER_VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
-  CHECKED_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+  RELEASE_SHA: ${{ inputs.release_sha }}
+  TRIGGER_VERIFY_RUN_ID: ${{ inputs.verify_run_id }}
+  CHECKED_SOURCE_SHA: ${{ inputs.release_sha }}
+  CUTOVER_CONFIRMATION: ${{ inputs.confirmation }}
   PUBLIC_URL: https://arthello-188-225-38-55.sslip.io
   PAY_URL: https://pay-188-225-38-55.sslip.io
   SCHOOL_URL: https://school-188-225-38-55.sslip.io
   CADDY_CONTAINER: stroios-caddy-1
   DATA_VOLUME: arthello-direct-v44-data
-  EXPECTED_LIVE_RELEASE_SHA: 511d467763b7ca050c096df23cfcdcd1f62fe51d
+  EXPECTED_LIVE_RELEASE_SHA: eea35ebe384f1039324ad083fcdfa74e0d2217c4
 
 jobs:
   deploy:
@@ -39,21 +47,15 @@ jobs:
       group: gateway-38-55-arthello-production
       cancel-in-progress: false
     if: >-
-      github.event_name == 'workflow_run' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.sha == inputs.release_sha &&
       github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
       github.repository_owner == 'vitaliyozolin-dotcom' &&
-      github.event.workflow_run.name == 'Verify ArtHello v52 release' &&
-      (github.event.workflow_run.path == '.github/workflows/verify-arthello-v52.yml' ||
-       github.event.workflow_run.path == '.github/workflows/verify-arthello-v52.yml@main') &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.repository.full_name == github.repository &&
-      github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' &&
-      github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1 &&
-      startsWith(github.event.workflow_run.head_commit.message, 'D182: restore mobile finance branch')
+      inputs.confirmation == 'DEPLOY D182 TO PRODUCTION'
     runs-on:
       - self-hosted
       - linux
@@ -79,6 +81,12 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$RELEASE_SHA"
+          test "$GITHUB_ACTOR" = "vitaliyozolin-dotcom"
+          test "$GITHUB_TRIGGERING_ACTOR" = "vitaliyozolin-dotcom"
+          test "$CUTOVER_CONFIRMATION" = "DEPLOY D182 TO PRODUCTION"
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$TRIGGER_VERIFY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
@@ -97,6 +105,20 @@ jobs:
           grep -F 'searchParams.get("section") === "families"' deploy/v52/src/app/api/settings/route.ts >/dev/null
           grep -F 'loadFamilyPage' deploy/v52/src/app/components/SettingsWorkspace.tsx >/dev/null
           grep -F 'FAMILY_COUNT = 2_887' deploy/v52/src/tests/settings-large-family-directory-runtime.test.mjs >/dev/null
+          verify_run="$(curl --fail-with-body --silent --show-error --max-time 30 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$TRIGGER_VERIFY_RUN_ID")"
+          jq -e --arg repository "$GITHUB_REPOSITORY" --arg release "$RELEASE_SHA" '
+              .name == "Verify ArtHello v52 release" and
+              .path == ".github/workflows/verify-arthello-v52.yml" and
+              .event == "push" and .head_branch == "main" and .head_sha == $release and
+              .status == "completed" and .conclusion == "success" and .run_attempt == 1 and
+              .repository.full_name == $repository and .head_repository.full_name == $repository and
+              .actor.login == "vitaliyozolin-dotcom" and
+              .triggering_actor.login == "vitaliyozolin-dotcom"
+            ' <<<"$verify_run" >/dev/null
           current_main=""
           for attempt in 1 2 3 4 5 6; do
             current_main="$(curl --fail-with-body --silent --show-error --max-time 30 \
@@ -177,7 +199,7 @@ jobs:
           route_after="$work/external-routes.after.caddy"
           alfa_evidence="$work/alfa-live-evidence.json"
           receipt="$state_root/production-d182-$RELEASE_SHA.json"
-          expected_live_receipt="$state_root/production-d180-$EXPECTED_LIVE_RELEASE_SHA.json"
+          expected_live_receipt="$state_root/production-d181-$EXPECTED_LIVE_RELEASE_SHA.json"
           asset_root="/data/arthello-pay-assets-$RELEASE_SHA"
           asset_stage="/data/.arthello-pay-assets-$run_key"
           route_stage="/data/.external-routes.d182-$run_key"
@@ -202,7 +224,7 @@ jobs:
           [[ "$EXPECTED_LIVE_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
           test -s "$expected_live_receipt"
           jq -e --arg release "$EXPECTED_LIVE_RELEASE_SHA" '
-              .schemaVersion==1 and .state=="verified" and .decision=="D180" and
+              .schemaVersion==1 and .state=="verified" and .decision=="D181" and
               .releaseSha==$release and (.sourceTree|test("^[a-f0-9]{40}$")) and
               (.imageId|test("^sha256:[a-f0-9]{64}$")) and
               (.candidateContainerId|test("^[a-f0-9]{64}$")) and
@@ -406,6 +428,14 @@ jobs:
           test "$(current_main)" = "$RELEASE_SHA"
           verify_predecessor_identity
           printf 'ARTHELLO_D182_PREDECESSOR_IDENTITY=VERIFIED route=%s assets=%s\n' "$expected_route_sha" "$old_asset_root"
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$RELEASE_SHA"
+          test "$GITHUB_ACTOR" = "vitaliyozolin-dotcom"
+          test "$GITHUB_TRIGGERING_ACTOR" = "vitaliyozolin-dotcom"
+          test "$CUTOVER_CONFIRMATION" = "DEPLOY D182 TO PRODUCTION"
+          printf 'ARTHELLO_D182_MANUAL_CUTOVER=AUTHORIZED actor=%s release=%s verify_run=%s\n' \
+            "$GITHUB_ACTOR" "$RELEASE_SHA" "$TRIGGER_VERIFY_RUN_ID"
           docker update --restart=no "$live_id" >/dev/null
           docker stop --time 30 "$live_id" >/dev/null
           test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = false
@@ -637,7 +667,7 @@ jobs:
             --argjson data "$(cat "$database_receipt")" --argjson alfa "$(cat "$alfa_evidence")" --argjson activation "$(cat "$activation_receipt")" '
               {schemaVersion:1,state:"verified",decision:"D182",releaseSha:$release,sourceTree:$tree,imageId:$image,
                candidateContainerId:$candidate,previousContainerId:$previous,rollbackVolume:$rollback,
-               previousDecision:"D180",previousReleaseSha:$previousRelease,previousSourceTree:$previousTree,previousImageId:$previousImage,
+               previousDecision:"D181",previousReleaseSha:$previousRelease,previousSourceTree:$previousTree,previousImageId:$previousImage,
                bankActivationVolume:$activationVolume,bankAutosyncActivation:$activation,
                activeRouteSha256:$route,payAssetRoot:$assets,payAssetSha256:{"index.html":$index,"app.js":$app,"styles.css":$css,"release.json":$identity},
                dataProof:$data,alfaLiveProof:$alfa,alfaCrmImportEnabled:true,reverseWriteEnabled:false,
