@@ -5,10 +5,11 @@ import test from "node:test";
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
 test("manual family flows from creation through registry to an explicit access grant", async () => {
-  const [familyApi, familyUi, registryApi, registryUi, policy, settingsApi, settingsUi, accessUi] = await Promise.all([
+  const [familyApi, familyUi, registryApi, registryList, registryUi, policy, settingsApi, settingsUi, accessUi] = await Promise.all([
     read("../app/api/families/route.ts"),
     read("../app/components/FamilyWorkspace.tsx"),
     read("../app/api/entities/route.ts"),
+    read("../lib/entity-list.ts"),
     read("../app/components/RegistryWorkspace.tsx"),
     read("../lib/entity-provenance.ts"),
     read("../app/api/settings/route.ts"),
@@ -20,7 +21,8 @@ test("manual family flows from creation through registry to an explicit access g
     assert.match(familyApi, new RegExp(`entityType:\"${entityType}\"[\\s\\S]*?status:\"Активна\"[\\s\\S]*?sourceSystem:\"MANUAL\"[\\s\\S]*?dataQuality:\"Проверено\"`));
   }
   assert.match(familyApi, /access:"not_granted"/);
-  assert.match(registryApi, /entityDataState\(entity,/);
+  assert.match(registryApi, /listEntities\(storedRows/);
+  assert.match(registryList, /entityDataState\(row,/);
   assert.match(policy, /isManualEntitySource\(entity\.sourceSystem\)[\s\S]*?return "Создано вручную"/);
   assert.match(registryUi, /Создано вручную/);
   assert.match(settingsApi, /familyDataState\(family,[\s\S]*?duplicateCounts/);

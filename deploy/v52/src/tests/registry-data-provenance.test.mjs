@@ -6,6 +6,7 @@ const apiUrl = new URL("../app/api/entities/route.ts", import.meta.url);
 const registryUrl = new URL("../app/components/RegistryWorkspace.tsx", import.meta.url);
 const dbUrl = new URL("../db/index.ts", import.meta.url);
 const policyUrl = new URL("../lib/entity-provenance.ts", import.meta.url);
+const listUrl = new URL("../lib/entity-list.ts", import.meta.url);
 
 test("manual cards carry trustworthy provenance instead of an automatic review flag", async () => {
   const [api, registry, db, policy] = await Promise.all([
@@ -47,14 +48,15 @@ test("review counters and labels are limited to actual reconciliation states", a
 });
 
 test("duplicate conflicts cannot be presented or edited as trusted manual data", async () => {
-  const [api, registry, db, policy] = await Promise.all([
+  const [api, registry, db, policy, list] = await Promise.all([
     readFile(apiUrl, "utf8"),
     readFile(registryUrl, "utf8"),
     readFile(dbUrl, "utf8"),
     readFile(policyUrl, "utf8"),
+    readFile(listUrl, "utf8"),
   ]);
 
-  assert.match(api, /duplicateKeys\.get\(entityDuplicateKey\(entity\)\)/);
+  assert.match(list, /duplicateKeys\.get\(entityDuplicateKey\(row\)\)/);
   assert.match(api, /editedEntityDataQuality\(current, requestedDataQuality, hasDuplicate\)/);
   assert.match(policy, /if \(hasDuplicate\) return "Требует сверки"/);
   assert.match(policy, /entity\.dataQuality === "Требует сверки" \? "Требует сверки" : "Проверено"/);

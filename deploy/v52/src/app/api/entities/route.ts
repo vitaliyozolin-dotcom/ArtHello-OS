@@ -3,13 +3,12 @@ import { ensureCoreTables, getDb, getSystemDataMode } from "../../../db";
 import { auditEvents, entities } from "../../../db/schema";
 import {
   editedEntityDataQuality,
-  entityDataState,
-  entityDuplicateKey,
   initialEntityDataQuality,
   isManualEntitySource,
   needsExternalReviewEvidence,
   normalizeEntityIdentityName,
 } from "../../../lib/entity-provenance";
+import { listEntities } from "../../../lib/entity-list";
 import { entityPrefixes, entityTypes } from "../../../lib/registry";
 import { getRequestUser } from "../../../lib/request-user";
 
@@ -25,30 +24,25 @@ export async function GET(request: Request) {
     const type = url.searchParams.get("type")?.trim() || "";
     const q = url.searchParams.get("q")?.trim().toLocaleLowerCase("ru-RU") || "";
     const quality = url.searchParams.get("quality")?.trim() || "";
+    const review = url.searchParams.get("review")?.trim() || "";
+    const offset = boundedInteger(url.searchParams.get("offset"), 0, 0, 100_000);
+    const limit = boundedInteger(url.searchParams.get("limit"), 500, 1, 500);
     const mode = await getSystemDataMode();
-    const storedRows = await getDb().select().from(entities).orderBy(asc(entities.entityType), asc(entities.displayName)).limit(500);
-    const allRows = mode === "source_only"
-      ? storedRows.filter((row) => !row.sourceSystem.startsWith("SYNTHETIC"))
-      : storedRows;
-    const duplicateKeys = new Map<string, number>();
-    allRows.filter((row) => row.status !== "Объединена").forEach((row) => {
-      const key = entityDuplicateKey(row);
-      duplicateKeys.set(key, (duplicateKeys.get(key) ?? 0) + 1);
+    const storedRows = await getDb().select().from(entities).orderBy(asc(entities.entityType), asc(entities.displayName));
+    const listed = listEntities(storedRows, {
+      type: type && entityTypeSet.has(type) ? type : "",
+      q,
+      quality,
+      review,
+      mode,
+      offset,
+      limit,
     });
-    const displayRows = allRows.map((row) => ({
-      ...row,
-      dataQuality: dataStateFor(row, duplicateKeys),
-    }));
-    const rows = displayRows.filter((row) => {
-      if (row.status === "Объединена" && !q) return false;
-      if (type && entityTypeSet.has(type) && row.entityType !== type) return false;
-      if (quality && row.dataQuality !== quality) return false;
-      if (!q) return true;
-      return [row.id, row.displayName, row.sourceRecordId, row.scope, row.sourceSystem]
-        .some((value) => value.toLocaleLowerCase("ru-RU").includes(q));
-    });
+    const { displayRows, duplicateKeys } = listed;
     return Response.json({
-      entities: rows,
+      entities: listed.entities,
+      total: listed.total,
+      resultCounts: listed.resultCounts,
       typeCounts: Object.fromEntries(entityTypes.map((item) => [
         item,
         displayRows.filter((row) => row.status !== "Объединена" && row.entityType === item).length,
@@ -152,11 +146,10 @@ function clean(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-function dataStateFor(
-  entity: { entityType: string; displayName: string; sourceSystem: string; dataQuality: string },
-  duplicateKeys: Map<string, number>,
-) {
-  return entityDataState(entity, (duplicateKeys.get(entityDuplicateKey(entity)) ?? 0) > 1);
+function boundedInteger(value: string | null, fallback: number, minimum: number, maximum: number) {
+  if (value === null || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
 }
 
 function createEntityId(entityType: string) {

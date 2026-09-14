@@ -10,6 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 const dataModule = text => `data:text/javascript;base64,${Buffer.from(text).toString('base64')}`;
 const policyUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/access-policy.ts'), 'utf8'), { mode: 'strip' }));
 const integrationsUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/integrations.ts'), 'utf8'), { mode: 'strip' }));
+const alfaImportUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/alfacrm-import.ts'), 'utf8'), { mode: 'strip' }));
 const policy = await import(policyUrl);
 globalThis.__alfaLifecycle = { env: {}, actor: null, csrfValid: true, originValid: true };
 const harness = globalThis.__alfaLifecycle;
@@ -20,6 +21,7 @@ const adapters = {
   '../../../../lib/integrations': integrationsUrl,
   '../../../../lib/production-auth': dataModule('export const getAuthenticatedRequestContext=async()=>globalThis.__alfaLifecycle.actor; export const verifyAuthenticatedRequestCsrf=()=>{if(!globalThis.__alfaLifecycle.csrfValid)throw new Error("fixture csrf rejected");};'),
   '../../../../lib/request-security': dataModule('export const hasTrustedMutationOrigin=()=>globalThis.__alfaLifecycle.originValid;'),
+  '../../../../lib/alfacrm-import': alfaImportUrl,
 };
 let source = stripTypeScriptTypes(readFileSync(resolve('app/api/integrations/alfacrm/route.ts'), 'utf8'), { mode: 'transform' })
   .replace(/from\s+["']([^"']+)["']/g, (_all, name) => {

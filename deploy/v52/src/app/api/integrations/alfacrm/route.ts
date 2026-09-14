@@ -12,6 +12,7 @@ import {
   verifyAuthenticatedRequestCsrf,
 } from "../../../../lib/production-auth";
 import { hasTrustedMutationOrigin } from "../../../../lib/request-security";
+import { isCurrentAlfaStaffRecord } from "../../../../lib/alfacrm-import";
 
 const CONNECTION_ID = "INT-T-ALFACRM";
 const STATE_KEY = "alfacrm_connector:v1";
@@ -23,6 +24,7 @@ const MIN_REQUEST_INTERVAL_MS = 240;
 const REQUEST_TIMEOUT_MS = 30_000;
 const SUBSCRIPTION_CHUNK_SIZE = 15;
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
+const SUBSCRIPTION_PREVIEW_TTL_MS = 6 * 60 * 60 * 1000;
 const editors = new Set(["OWNER", "DIRECTOR", "REPRESENTATIVE", "INTEGRATIONS"]);
 const ALFACRM_IMPORT_ENABLED_VALUES = new Set(["1", "true", "yes"]);
 const IMPORT_BLOCKED_MESSAGE = "Импорт ожидает завершения проверки данных и подтверждения замены ранее раскрытого ключа AlfaCRM. Подключение и предпросмотр доступны.";
@@ -312,7 +314,7 @@ async function previewModule(context: RequestContext, body: Record<string, unkno
     countUnit = "клиентов к проверке";
   } else {
     const rows = await fetchModuleRecords(session, module, selectedBranches, params);
-    count = rows.length;
+    count = currentProjectionRows(module, rows).length;
   }
   const previewToken = crypto.randomUUID();
   const previewSignature = await previewSignatureFor(module, state, params);
@@ -373,8 +375,9 @@ async function importModule(context: RequestContext, body: Record<string, unknow
   }
   const previewAt = Date.parse(storedModule.lastPreviewAt);
   const previewAge = Date.now() - previewAt;
-  if (!Number.isFinite(previewAt) || previewAge < 0 || previewAge >= PREVIEW_TTL_MS) {
-    return privateJson({ error: "Предпросмотр устарел или его время не подтверждено. Выполните предпросмотр ещё раз; он действует 30 минут." }, 409);
+  const previewTtl = module === "subscriptions" ? SUBSCRIPTION_PREVIEW_TTL_MS : PREVIEW_TTL_MS;
+  if (!Number.isFinite(previewAt) || previewAge < 0 || previewAge >= previewTtl) {
+    return privateJson({ error: `Предпросмотр устарел или его время не подтверждено. Выполните предпросмотр ещё раз; он действует ${module === "subscriptions" ? "6 часов" : "30 минут"}.` }, 409);
   }
   const session = await storedSession(state);
   const localBranches = await readLocalBranches();
@@ -419,21 +422,25 @@ async function importModule(context: RequestContext, body: Record<string, unknow
   await env.DB.prepare("INSERT INTO alfacrm_import_batches (id,module,scope,status,created_at) VALUES (?,?,?,'projecting',?)")
     .bind(batchId, module, JSON.stringify({ endpoint: state.endpoint, selectedBranches, params }), new Date().toISOString()).run();
   const rawCount = await upsertRawRecords(module, rows, batchId);
+  // Keep every immutable upstream observation, including the evidence that a
+  // teacher is inactive or ended. Lifecycle filtering only shapes the current
+  // ArtHello projection and the set used to reconcile departed employees.
+  const projectionRows = currentProjectionRows(module, rows);
   let accepted = 0;
   let rejected = 0;
   let invalidBalanceCount = 0;
   let projectionBlocked = false;
-  if (module === "families") ({ accepted, rejected } = await canonicalizeFamilies(rows, state, localBranches, context.actor));
-  if (module === "staff") ({ accepted, rejected } = await canonicalizeStaff(rows, state, localBranches, context.actor));
-  if (module === "groups") ({ accepted, rejected } = await canonicalizeGroups(rows, state, localBranches));
-  if (module === "lessons") ({ accepted, rejected } = await canonicalizeLessons(rows, state, context.actor));
-  if (module === "subscriptions") ({ accepted, rejected, invalidBalanceCount } = await canonicalizeSubscriptions(rows, state));
-  if (module === "finance") ({ accepted, rejected, projectionBlocked } = await canonicalizeFinance(rows));
+  if (module === "families") ({ accepted, rejected } = await canonicalizeFamilies(projectionRows, state, localBranches, context.actor));
+  if (module === "staff") ({ accepted, rejected } = await canonicalizeStaff(projectionRows, state, localBranches, context.actor));
+  if (module === "groups") ({ accepted, rejected } = await canonicalizeGroups(projectionRows, state, localBranches));
+  if (module === "lessons") ({ accepted, rejected } = await canonicalizeLessons(projectionRows, state, context.actor));
+  if (module === "subscriptions") ({ accepted, rejected, invalidBalanceCount } = await canonicalizeSubscriptions(projectionRows, state));
+  if (module === "finance") ({ accepted, rejected, projectionBlocked } = await canonicalizeFinance(projectionRows));
 
   // Only a fully fetched and fully accepted snapshot proves that missing records departed.
   // Raw observations stay immutable; only the selected current projection is reconciled.
   if (complete && rejected === 0 && ["families", "staff", "groups"].includes(module)) {
-    await reconcileCurrentSnapshot(module, selectedBranches, rows, state);
+    await reconcileCurrentSnapshot(module, selectedBranches, projectionRows, state);
   }
   if ((module === "groups" || module === "families") && rejected === 0) await syncMembershipsFromFamilyRaw(state, context.actor);
   await env.DB.prepare("UPDATE alfacrm_import_batches SET status=? WHERE id=?")
@@ -454,7 +461,7 @@ async function importModule(context: RequestContext, body: Record<string, unknow
     dateTo: params.dateTo,
     note: projectionBlocked ? FINANCE_DIRECTION_UNVERIFIED_MESSAGE : rejected ? `Пропущено записей: ${rejected}.${invalidBalanceCount ? ` Остаток отсутствует или не является корректным числом: ${invalidBalanceCount}; прежние подтверждённые остатки сохранены.` : ""} Выбывшие карточки не архивировались; исправьте данные и повторите предпросмотр.` : complete
       ? moduleCompletionNote(module)
-      : `Загружено пакетами: обработано клиентов ${nextCursor}. Нажмите «Продолжить загрузку».`,
+      : `Загружено пакетами: обработано клиентов ${nextCursor}. Следующий пакет запускается автоматически.`,
   };
   const next = { ...state, modules: { ...state.modules, [module]: moduleState } };
   await persistState(next);
@@ -466,6 +473,7 @@ async function importModule(context: RequestContext, body: Record<string, unknow
     auditStatement(context.actor, "integration.alfacrm_module_imported", {
       module,
       fetched: rows.length,
+      projected: projectionRows.length,
       rawStored: rawCount,
       accepted,
       rejected,
@@ -491,8 +499,8 @@ async function importModule(context: RequestContext, body: Record<string, unknow
     message: rejected || projectionBlocked
       ? moduleState.note
       : complete
-      ? `Модуль «${moduleTitle(module)}» загружен. Принято: ${accepted}, пропущено: ${rejected}.`
-      : `Пакет абонементов загружен. Обработано клиентов: ${nextCursor}. Продолжите загрузку.`,
+      ? `Модуль «${moduleTitle(module)}» загружен. Принято: ${module === "subscriptions" ? importedCount : accepted}, пропущено: ${rejected}.`
+      : `Пакет абонементов загружен. Обработано клиентов: ${nextCursor}. Загрузка продолжается автоматически.`,
   });
 }
 
@@ -585,6 +593,10 @@ async function fetchModuleRecords(session: AlfaSession, module: ModuleKey, branc
     rows.push(...items.map((item) => ({ remoteBranchId, item })));
   }
   return rows;
+}
+
+function currentProjectionRows(module: ModuleKey, rows: FetchedRecord[]) {
+  return module === "staff" ? rows.filter(({ item }) => isCurrentAlfaStaffRecord(item)) : rows;
 }
 
 async function fetchPaged(session: AlfaSession, path: string, filters: JsonRecord) {

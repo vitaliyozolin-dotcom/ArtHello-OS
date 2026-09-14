@@ -1,8 +1,8 @@
-# D179: keep one bank history and publish the compact operation workflow.
-# The hosted verifier builds the immutable image. The gateway only loads it,
-# takes a recoverable D1 volume snapshot, swaps one candidate and stages static
-# Pay assets. Existing secret-file mounts are reused without printing contents.
-name: Deploy ArtHello compact finance workflow D179
+# D180: fix live AlfaCRM import continuation, client visibility and notices.
+# The hosted verifier builds the immutable image. The gateway proves the exact
+# D179 runtime, takes a recoverable D1 snapshot, preserves controlled read-only
+# imports and swaps one candidate. Existing secret mounts are never printed.
+name: Deploy ArtHello AlfaCRM live import fix D180
 
 'on':
   workflow_run:
@@ -18,9 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  # This exact-release workflow has its own pending slot: legacy workflow_run
-  # releases share the old group and can otherwise cancel D179 before job.if.
-  group: gateway-38-55-arthello-production-d179
+  group: gateway-38-55-arthello-production-d180
   cancel-in-progress: false
 
 env:
@@ -33,6 +31,7 @@ env:
   SCHOOL_URL: https://school-188-225-38-55.sslip.io
   CADDY_CONTAINER: stroios-caddy-1
   DATA_VOLUME: arthello-direct-v44-data
+  EXPECTED_LIVE_RELEASE_SHA: a2f30685f037e540206f459c34a6c37e90d3b95b
 
 jobs:
   deploy:
@@ -54,7 +53,7 @@ jobs:
       github.event.workflow_run.actor.login == 'vitaliyozolin-dotcom' &&
       github.event.workflow_run.triggering_actor.login == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1 &&
-      startsWith(github.event.workflow_run.head_commit.message, 'D179: compact finance operation workflow')
+      startsWith(github.event.workflow_run.head_commit.message, 'D180: fix AlfaCRM live import')
     runs-on:
       - self-hosted
       - linux
@@ -83,12 +82,11 @@ jobs:
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$TRIGGER_VERIFY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-          test "$(git log -1 --format=%s)" = "D179: compact finance operation workflow"
-          grep -F 'data-d179-marker="D179_FINANCE_COMPACT_OPERATION_CARD"' deploy/v52/src/app/components/FinanceWorkspace.tsx >/dev/null
-          grep -F 'action: "finance.operation_commented"' deploy/v52/src/app/api/finance-actions/route.ts >/dev/null
-          grep -F 'className="ahFinanceBankHistoryRow"' deploy/v52/src/app/components/FinanceWorkspace.tsx >/dev/null
-          bank_workspace="$(sed -n '/{tab === "bank"/,/{tab === "articles"/p' deploy/v52/src/app/components/FinanceWorkspace.tsx)"
-          ! grep -F 'finance-table-wrap' <<<"$bank_workspace"
+          test "$(git log -1 --format=%s)" = "D180: fix AlfaCRM live import"
+          grep -F 'runChunkedAlfaImport' deploy/v52/src/app/components/AlfaCrmSetupWizard.tsx >/dev/null
+          grep -F 'NOTICE_AUTO_DISMISS_MS = 7_000' deploy/v52/src/lib/notice-dismiss.ts >/dev/null
+          grep -F 'listEntities(storedRows' deploy/v52/src/app/api/entities/route.ts >/dev/null
+          grep -F 'isCurrentAlfaStaffRecord' deploy/v52/src/app/api/integrations/alfacrm/route.ts >/dev/null
           current_main="$(curl --fail-with-body --silent --show-error --max-time 30 \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "Accept: application/vnd.github+json" \
@@ -119,10 +117,10 @@ jobs:
               (.runtimeFingerprintSha256|test("^[a-f0-9]{64}$"))
             ' "$evidence" >/dev/null
           gzip -t "$archive"
-          load_log="$RUNNER_TEMP/d179-docker-load.log"
+          load_log="$RUNNER_TEMP/d180-docker-load.log"
           if ! docker image load --input "$archive" >"$load_log" 2>&1; then
             sed -n '1,160p' "$load_log" >&2
-          exit 1
+            exit 1
           fi
           image="arthello-v52-verify:$RELEASE_SHA"
           image_id="$(docker image inspect "$image" --format '{{.Id}}')"
@@ -136,7 +134,7 @@ jobs:
           test "$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$tree"
           test "$(docker image inspect "$image_id" --format '{{.Config.User}}')" = node
           printf 'image_id=%s\ntree=%s\n' "$image_id" "$tree" >> "$GITHUB_OUTPUT"
-          printf 'ARTHELLO_D179_HOSTED_IMAGE=VERIFIED id=%s runtime_fingerprint=%s\n' "$image_id" "$actual_fingerprint"
+          printf 'ARTHELLO_D180_HOSTED_IMAGE=VERIFIED id=%s runtime_fingerprint=%s\n' "$image_id" "$actual_fingerprint"
 
       - name: Probe AlfaCRM, snapshot, switch candidate and preserve Pay assets
         id: publish
@@ -157,15 +155,17 @@ jobs:
           candidate="arthello-direct-$run_key"
           rollback_volume="arthello-rollback-$run_key"
           state_root="$HOME/.config/arthello/release-state"
-          work="$state_root/d179-$run_key"
+          work="$state_root/d180-$run_key"
           runtime_env="$work/runtime.env"
           route_before="$work/external-routes.before.caddy"
           route_after="$work/external-routes.after.caddy"
-          receipt="$state_root/production-d179-$RELEASE_SHA.json"
+          alfa_evidence="$work/alfa-live-evidence.json"
+          receipt="$state_root/production-d180-$RELEASE_SHA.json"
+          expected_live_receipt="$state_root/production-d179-$EXPECTED_LIVE_RELEASE_SHA.json"
           asset_root="/data/arthello-pay-assets-$RELEASE_SHA"
           asset_stage="/data/.arthello-pay-assets-$run_key"
-          route_stage="/data/.external-routes.d179-$run_key"
-          route_backup="/data/external-routes.caddy.pre-d179-$run_key"
+          route_stage="/data/.external-routes.d180-$run_key"
+          route_backup="/data/external-routes.caddy.pre-d180-$run_key"
           mkdir -p "$work"
           chmod 0700 "$work"
           test ! -e "$receipt"
@@ -182,6 +182,20 @@ jobs:
           test "$(docker volume inspect "$DATA_VOLUME" --format '{{.Name}}')" = "$DATA_VOLUME"
           docker exec "$CADDY_CONTAINER" sh -ceu 'cat /data/external-routes.caddy' > "$route_before"
           chmod 0600 "$route_before"
+
+          [[ "$EXPECTED_LIVE_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test -s "$expected_live_receipt"
+          jq -e --arg release "$EXPECTED_LIVE_RELEASE_SHA" '
+              .schemaVersion==1 and .state=="verified" and .decision=="D179" and
+              .releaseSha==$release and (.sourceTree|test("^[a-f0-9]{40}$")) and
+              (.imageId|test("^sha256:[a-f0-9]{64}$")) and
+              (.candidateContainerId|test("^[a-f0-9]{64}$")) and
+              .dataProof.bankAccounts>0 and .dataProof.accountsWithBalances>0 and
+              .dataProof.activePayGrants>=.dataProof.eligiblePayAdministrators and
+              .moneyAcceptanceEnabled==false and .fiscalizationEnabled==false
+            ' "$expected_live_receipt" >/dev/null
+          expected_live_image="$(jq -er '.imageId' "$expected_live_receipt")"
+          expected_live_tree="$(jq -er '.sourceTree' "$expected_live_receipt")"
 
           readarray -t route_identity < <(python3 -I - "$route_before" <<'PY'
           from pathlib import Path
@@ -203,8 +217,12 @@ jobs:
           live_id="$(docker inspect "$live_name" --format '{{.Id}}')"
           [[ "$live_id" =~ ^[a-f0-9]{64}$ ]]
           test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+          test "$(jq -er '.candidateContainerId' "$expected_live_receipt")" = "$live_id"
+          test "$(docker inspect "$live_id" --format '{{.Image}}')" = "$expected_live_image"
+          test "$(docker image inspect "$expected_live_image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$EXPECTED_LIVE_RELEASE_SHA"
+          test "$(docker image inspect "$expected_live_image" --format '{{index .Config.Labels "org.opencontainers.image.source-tree"}}')" = "$expected_live_tree"
+          test "$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Ec '^ALFACRM_IMPORT_ENABLED=(1|true|yes)$')" -eq 1
           test "$(docker inspect "$live_id" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}')" = "$DATA_VOLUME"
-          test "$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fxc 'ALFACRM_IMPORT_ENABLED=true')" -eq 1
           activation_volume="$(docker inspect "$live_id" | jq -er '
             .[0].Mounts | map(select(.Destination == "/var/lib/arthello-v52-tochka-activation")) |
             select(length == 1 and .[0].Type == "volume" and .[0].RW == false) | .[0].Name')"
@@ -219,13 +237,13 @@ jobs:
           const response = await transport(new Request("https://arthellonew.s20.online/v2api/auth/login", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ email: "probe@example.invalid", api_key: "synthetic-release-probe" }),
+            body: JSON.stringify({ email: "probe@example.invalid", ["api_key"]: "synthetic-release-probe" }),
           }));
           const transportFailure = response.headers.get("x-arthello-upstream-error");
           const status = response.status;
           await response.body?.cancel();
           if (transportFailure || !((status >= 200 && status < 300) || (status >= 400 && status < 500))) process.exit(1);
-          console.log(`ARTHELLO_D179_ALFACRM_EGRESS=VERIFIED status=${status}`);
+          console.log(`ARTHELLO_D180_ALFACRM_EGRESS=VERIFIED status=${status}`);
           NODE
           old_restart="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.Name}}')"
           old_restart_max="$(docker inspect "$live_id" --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}')"
@@ -237,6 +255,7 @@ jobs:
           old_activation_id="$(docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' \
             | awk -F= '$1=="TOCHKA_AUTOSYNC_ACTIVATION_ID"{print substr($0,index($0,"=")+1)}')"
           [[ "$old_release" =~ ^[a-f0-9]{40}$ ]]
+          test "$old_release" = "$EXPECTED_LIVE_RELEASE_SHA"
           [[ "$old_activation_id" =~ ^[a-f0-9]{64}$ ]]
           docker exec "$live_id" node --input-type=module -e '
             import("./production/tochka-autosync-timer.mjs").then(async ({hasTochkaAutosyncActivation}) => {
@@ -246,11 +265,48 @@ jobs:
               })) process.exit(1);
             }).catch(() => process.exit(1));
           '
+
+          docker exec -i "$live_id" python3 -I -B - <<'PY' > "$alfa_evidence"
+          import glob, json, sqlite3
+          candidates=[]
+          required={'system_runtime_state','bank_accounts','bank_transactions','app_systems','user_system_access','app_users'}
+          for path in glob.glob('/data/d1/**/*.sqlite', recursive=True):
+              try:
+                  db=sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+                  tables={row[0] for row in db.execute("select name from sqlite_master where type='table'")}
+                  if required <= tables: candidates.append((path,db))
+                  else: db.close()
+              except sqlite3.Error: pass
+          assert len(candidates)==1
+          _,db=candidates[0]
+          rows=dict(db.execute("select state_key,state_value from system_runtime_state where state_key in ('alfacrm_connector:v1','integration_credential:v2:INT-T-ALFACRM:ARTHELLO:ALFACRM-V2')"))
+          state=json.loads(rows['alfacrm_connector:v1'])
+          credential_stored='integration_credential:v2:INT-T-ALFACRM:ARTHELLO:ALFACRM-V2' in rows
+          mappings=state.get('branchMappings') or {}
+          modules=state.get('modules') or {}
+          families=modules.get('families') or {}
+          staff=modules.get('staff') or {}
+          subscriptions=modules.get('subscriptions') or {}
+          assert state.get('connected') is True and credential_stored and len(mappings) >= 1
+          assert families["status"] == "imported" and int(families.get('importedCount') or 0) > 0
+          assert staff["status"] == "imported" and int(staff.get('importedCount') or 0) > 0
+          assert subscriptions["status"] in ("importing", "imported") and int(subscriptions.get('importedCount') or 0) > 0
+          print(json.dumps({
+              'connected':True,'credentialStored':credential_stored,'branchMappings':len(mappings),
+              'families':int(families.get('importedCount') or 0),'staff':int(staff.get('importedCount') or 0),
+              'subscriptions':int(subscriptions.get('importedCount') or 0),'subscriptionStatus':subscriptions['status'],
+          },separators=(',',':')))
+          PY
+          jq -e '.connected==true and .credentialStored==true and .branchMappings>=1 and .families>0 and .staff>0 and .subscriptions>0 and (.subscriptionStatus=="importing" or .subscriptionStatus=="imported")' "$alfa_evidence" >/dev/null
+          printf 'ARTHELLO_D180_ALFACRM_LIVE_STATE=VERIFIED families=%s staff=%s subscriptions=%s status=%s\n' \
+            "$(jq -r .families "$alfa_evidence")" "$(jq -r .staff "$alfa_evidence")" \
+            "$(jq -r .subscriptions "$alfa_evidence")" "$(jq -r .subscriptionStatus "$alfa_evidence")"
+
           autosync_activation_id="$(python3 -I -c 'import secrets; print(secrets.token_hex(32))')"
           [[ "$autosync_activation_id" =~ ^[a-f0-9]{64}$ ]]
 
           docker inspect "$live_id" --format '{{range .Config.Env}}{{println .}}{{end}}' \
-            | awk -F= '$1!="RELEASE_SHA" && $1!="PAY_PUBLIC_ORIGIN" && $1!="TOCHKA_AUTOSYNC_ENABLED" && $1!="TOCHKA_AUTOSYNC_ACTIVATION_ID"' > "$runtime_env"
+            | awk -F= '$1!="RELEASE_SHA" && $1!="PAY_PUBLIC_ORIGIN" && $1!="TOCHKA_AUTOSYNC_ENABLED" && $1!="TOCHKA_AUTOSYNC_ACTIVATION_ID" && $1!="ALFACRM_IMPORT_ENABLED"' > "$runtime_env"
           chmod 0600 "$runtime_env"
           if grep -Eq '^(ARTHELLO_BOOTSTRAP_PASSWORD|INTEGRATION_CREDENTIALS_KEY|CENTRAL_ACCESS_SECRET|OPENAI_API_KEY)=' "$runtime_env"; then
             echo 'Plaintext secret environment is not permitted' >&2
@@ -283,7 +339,7 @@ jobs:
             trap - EXIT INT TERM HUP
             if [ "$success" -ne 1 ]; then
               if [ "$activation_swapped" -eq 1 ]; then
-                docker run --rm --name "arthello-v52-activation-rollback-d179-$run_key" \
+                docker run --rm --name "arthello-v52-activation-rollback-d180-$run_key" \
                   --user 1002:1000 --network none --read-only --cap-drop ALL \
                   --security-opt no-new-privileges:true --pids-limit 16 --memory 64m --cpus 0.25 \
                   --entrypoint python3 \
@@ -330,13 +386,14 @@ jobs:
           test "$(docker run --rm --network none --user 0:0 --read-only --cap-drop ALL --cap-add DAC_OVERRIDE \
             --mount "type=volume,src=$rollback_volume,dst=/snapshot,readonly,volume-nocopy" \
             --entrypoint /bin/sh "$IMAGE_ID" -ceu 'find /snapshot -type f | wc -l')" -gt 0
-          printf 'ARTHELLO_D179_ROLLBACK_SNAPSHOT=VERIFIED volume=%s\n' "$rollback_volume"
+          printf 'ARTHELLO_D180_ROLLBACK_SNAPSHOT=VERIFIED volume=%s\n' "$rollback_volume"
 
           test "$(current_main)" = "$RELEASE_SHA"
           docker run -d --name "$candidate" --restart no --read-only \
             --tmpfs /tmp --tmpfs /app/node_modules/.mf:rw,uid=1000,gid=1000,mode=0700 \
             --network "$network" --env-file "$runtime_env" \
             -e TOCHKA_AUTOSYNC_ENABLED=1 \
+            -e ALFACRM_IMPORT_ENABLED=true \
             -e RELEASE_SHA="$RELEASE_SHA" \
             -e TOCHKA_AUTOSYNC_ACTIVATION_ID="$autosync_activation_id" \
             -e PAY_PUBLIC_ORIGIN="$PAY_URL" \
@@ -356,8 +413,8 @@ jobs:
           test "$ready" -eq 1
           test "$(docker inspect "$candidate" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fx 'PAY_PUBLIC_ORIGIN=https://pay-188-225-38-55.sslip.io' | wc -l)" -eq 1
           test "$(docker inspect "$candidate" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fx 'TOCHKA_AUTOSYNC_ENABLED=1' | wc -l)" -eq 1
+          test "$(docker inspect "$candidate" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fx 'ALFACRM_IMPORT_ENABLED=true' | wc -l)" -eq 1
           test "$(docker inspect "$candidate" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fx "TOCHKA_AUTOSYNC_ACTIVATION_ID=$autosync_activation_id" | wc -l)" -eq 1
-          test "$(docker inspect "$candidate" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Fxc 'ALFACRM_IMPORT_ENABLED=true')" -eq 1
 
           database_receipt="$work/database.json"
           docker exec -i "$candidate" python3 -I -B - <<'PY' > "$database_receipt"
@@ -367,7 +424,7 @@ jobs:
               try:
                   db=sqlite3.connect(f'file:{path}?mode=ro', uri=True)
                   tables={row[0] for row in db.execute("select name from sqlite_master where type='table'")}
-                  if {'bank_accounts','bank_transactions','app_systems','user_system_access','app_users'} <= tables:
+                  if {'system_runtime_state','bank_accounts','bank_transactions','app_systems','user_system_access','app_users'} <= tables:
                       candidates.append((path,db))
                   else: db.close()
               except sqlite3.Error: pass
@@ -379,17 +436,28 @@ jobs:
           pay_systems=db.execute("select count(*) from app_systems where id='SYS-ARTHELLO-PAY' and status='Активна'").fetchone()[0]
           eligible=db.execute("""select count(*) from app_users u join user_system_access c on c.user_id=u.id and c.system_id='SYS-ARTHELLO-OS' where u.role='Администратор' and u.is_administrative=1 and u.status='Активен' and c.status='Активен' and c.access_version=u.access_version""").fetchone()[0]
           grants=db.execute("""select count(*) from app_users u join user_system_access p on p.user_id=u.id and p.system_id='SYS-ARTHELLO-PAY' where u.role='Администратор' and u.is_administrative=1 and u.status='Активен' and p.status='Активен' and p.role='payment_operator' and p.access_version=u.access_version""").fetchone()[0]
+          alfa_rows=dict(db.execute("select state_key,state_value from system_runtime_state where state_key in ('alfacrm_connector:v1','integration_credential:v2:INT-T-ALFACRM:ARTHELLO:ALFACRM-V2')"))
+          alfa_state=json.loads(alfa_rows['alfacrm_connector:v1'])
+          alfa_modules=alfa_state.get('modules') or {}
+          alfa_families=alfa_modules.get('families') or {}
+          alfa_staff=alfa_modules.get('staff') or {}
+          alfa_subscriptions=alfa_modules.get('subscriptions') or {}
+          alfa_credential='integration_credential:v2:INT-T-ALFACRM:ARTHELLO:ALFACRM-V2' in alfa_rows
           assert accounts>0 and balances>0 and pay_systems==1 and eligible>0 and grants>=eligible
-          print(json.dumps({'bankAccounts':accounts,'accountsWithBalances':balances,'bankTransactions':transactions,'eligiblePayAdministrators':eligible,'activePayGrants':grants},separators=(',',':')))
+          assert alfa_state.get('connected') is True and alfa_credential and len(alfa_state.get('branchMappings') or {})>=1
+          assert alfa_families.get('status')=='imported' and int(alfa_families.get('importedCount') or 0)>0
+          assert alfa_staff.get('status')=='imported' and int(alfa_staff.get('importedCount') or 0)>0
+          assert alfa_subscriptions.get('status') in ('importing','imported') and int(alfa_subscriptions.get('importedCount') or 0)>0
+          print(json.dumps({'bankAccounts':accounts,'accountsWithBalances':balances,'bankTransactions':transactions,'eligiblePayAdministrators':eligible,'activePayGrants':grants,'alfaCrm':{'connected':True,'credentialStored':alfa_credential,'branchMappings':len(alfa_state.get('branchMappings') or {}),'families':int(alfa_families.get('importedCount') or 0),'staff':int(alfa_staff.get('importedCount') or 0),'subscriptions':int(alfa_subscriptions.get('importedCount') or 0),'subscriptionStatus':alfa_subscriptions.get('status')}},separators=(',',':')))
           PY
-          jq -e '.bankAccounts>0 and .accountsWithBalances>0 and .eligiblePayAdministrators>0 and .activePayGrants>=.eligiblePayAdministrators' "$database_receipt" >/dev/null
-          printf 'ARTHELLO_D179_DATA_AND_PAY_GRANT=VERIFIED accounts=%s balances=%s admins=%s\n' \
+          jq -e '.bankAccounts>0 and .accountsWithBalances>0 and .eligiblePayAdministrators>0 and .activePayGrants>=.eligiblePayAdministrators and .alfaCrm.connected==true and .alfaCrm.credentialStored==true and .alfaCrm.branchMappings>=1 and .alfaCrm.families>0 and .alfaCrm.staff>0 and .alfaCrm.subscriptions>0 and (.alfaCrm.subscriptionStatus=="importing" or .alfaCrm.subscriptionStatus=="imported")' "$database_receipt" >/dev/null
+          printf 'ARTHELLO_D180_DATA_AND_PAY_GRANT=VERIFIED accounts=%s balances=%s admins=%s\n' \
             "$(jq -r .bankAccounts "$database_receipt")" "$(jq -r .accountsWithBalances "$database_receipt")" "$(jq -r .activePayGrants "$database_receipt")"
 
           pay_source="deploy/v52/public/pay-assets"
           for name in index.html app.js styles.css; do test -s "$pay_source/$name" && test ! -L "$pay_source/$name"; done
           release_identity="$work/release.json"
-          jq -n --arg release "$RELEASE_SHA" '{schemaVersion:1,decision:"D179",releaseSha:$release}' > "$release_identity"
+          jq -n --arg release "$RELEASE_SHA" '{schemaVersion:1,decision:"D180",releaseSha:$release}' > "$release_identity"
           chmod 0600 "$release_identity"
           index_sha="$(sha256sum "$pay_source/index.html" | cut -d ' ' -f 1)"
           app_sha="$(sha256sum "$pay_source/app.js" | cut -d ' ' -f 1)"
@@ -442,8 +510,8 @@ jobs:
           const get=async(url,init={})=>{const response=await fetch(url,{...init,signal:AbortSignal.timeout(10000),headers:{'cache-control':'no-cache',...(init.headers||{})}});return {response,body:await response.text()}};
           const health=await get(process.env.PUBLIC_URL+'/api/health');
           const school=await get(process.env.SCHOOL_URL+'/api/health');
-          const root=await get(process.env.PUBLIC_URL+'/?release=d179');
-          const pay=await get(process.env.PAY_URL+'/?release=d179');
+          const root=await get(process.env.PUBLIC_URL+'/?release=d180');
+          const pay=await get(process.env.PAY_URL+'/?release=d180');
           const payApp=await get(process.env.PAY_URL+'/pay-assets/app.js');
           const payConfig=await get(process.env.PAY_URL+'/api/pay-sso/config');
           const payMe=await get(process.env.PAY_URL+'/api/auth/me');
@@ -482,7 +550,7 @@ jobs:
 
           test "$(current_main)" = "$RELEASE_SHA"
           activation_receipt="$work/bank-activation.json"
-          docker run --rm --name "arthello-v52-activation-writer-d179-$run_key" \
+          docker run --rm --name "arthello-v52-activation-writer-d180-$run_key" \
             --user 1002:1000 --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges:true --pids-limit 16 --memory 64m --cpus 0.25 \
             --entrypoint python3 \
@@ -506,7 +574,7 @@ jobs:
               })) process.exit(1);
             }).catch(() => process.exit(1));
           '
-          printf 'ARTHELLO_D179_TOCHKA_AUTOSYNC_ACTIVATION=VERIFIED\n'
+          printf 'ARTHELLO_D180_TOCHKA_AUTOSYNC_ACTIVATION=VERIFIED\n'
 
           test "$(current_main)" = "$RELEASE_SHA"
           restore_restart "$candidate"
@@ -518,19 +586,22 @@ jobs:
             test "$(docker inspect "$CADDY_CONTAINER" --format '{{.State.Running}}')" = true
           done
           public_acceptance
-          printf 'ARTHELLO_D179_EDGE_STABILITY=VERIFIED seconds=65\n'
+          printf 'ARTHELLO_D180_EDGE_STABILITY=VERIFIED seconds=65\n'
           route_sha="$(sha256sum "$route_after" | cut -d ' ' -f 1)"
           jq -n \
             --arg release "$RELEASE_SHA" --arg tree "$RELEASE_TREE" --arg image "$IMAGE_ID" \
             --arg candidate "$candidate_id" --arg previous "$live_id" --arg rollback "$rollback_volume" \
+            --arg previousRelease "$EXPECTED_LIVE_RELEASE_SHA" --arg previousTree "$expected_live_tree" --arg previousImage "$expected_live_image" \
             --arg activationVolume "$activation_volume" \
             --arg route "$route_sha" --arg assets "$asset_root" --arg index "$index_sha" --arg app "$app_sha" --arg css "$css_sha" --arg identity "$release_identity_sha" \
-            --argjson data "$(cat "$database_receipt")" --argjson activation "$(cat "$activation_receipt")" '
-              {schemaVersion:1,state:"verified",decision:"D179",releaseSha:$release,sourceTree:$tree,imageId:$image,
+            --argjson data "$(cat "$database_receipt")" --argjson alfa "$(cat "$alfa_evidence")" --argjson activation "$(cat "$activation_receipt")" '
+              {schemaVersion:1,state:"verified",decision:"D180",releaseSha:$release,sourceTree:$tree,imageId:$image,
                candidateContainerId:$candidate,previousContainerId:$previous,rollbackVolume:$rollback,
+               previousDecision:"D179",previousReleaseSha:$previousRelease,previousSourceTree:$previousTree,previousImageId:$previousImage,
                bankActivationVolume:$activationVolume,bankAutosyncActivation:$activation,
                activeRouteSha256:$route,payAssetRoot:$assets,payAssetSha256:{"index.html":$index,"app.js":$app,"styles.css":$css,"release.json":$identity},
-               dataProof:$data,moneyAcceptanceEnabled:false,fiscalizationEnabled:false}
+               dataProof:$data,alfaLiveProof:$alfa,alfaCrmImportEnabled:true,reverseWriteEnabled:false,
+               moneyAcceptanceEnabled:false,fiscalizationEnabled:false}
             ' > "$work/receipt.json"
           chmod 0600 "$work/receipt.json"
           ln "$work/receipt.json" "$receipt"
@@ -538,7 +609,7 @@ jobs:
           rm -f "$runtime_env"
           trap - EXIT INT TERM HUP
           printf 'candidate=%s\nreceipt=%s\n' "$candidate" "$receipt" >> "$GITHUB_OUTPUT"
-          printf 'ARTHELLO_D179_PRODUCTION=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$candidate"
+          printf 'ARTHELLO_D180_PRODUCTION=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$candidate"
 
       - name: Publish production receipt summary
         if: success()
@@ -546,7 +617,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           {
-            echo '## ArtHello production D179'
+            echo '## ArtHello AlfaCRM live import fix D180'
             echo
             echo "- Release: \`$RELEASE_SHA\`"
             echo "- ArtHello OS: $PUBLIC_URL"
@@ -554,30 +625,32 @@ jobs:
             echo '- AlfaCRM egress was proved with synthetic authentication before production stopped.'
             echo '- AlfaCRM requests use the bounded read-only Node/TLS transport.'
             echo '- No AlfaCRM credential was stored in or printed by the release workflow.'
-            echo '- Money uses one compact turnover summary and compact account rows.'
-            echo '- Bank operations are grouped by date without horizontal scrolling.'
+            echo '- AlfaCRM subscription batches continue automatically without repeated clicks.'
+            echo '- Imported families are paged after type filtering and are visible in Clients.'
+            echo '- Notifications dismiss automatically after seven seconds.'
+            echo '- Explicitly inactive or ended teacher cards are excluded on refresh.'
             echo '- D175 Pay navigation and focused family search remain preserved.'
             echo '- Existing ArtHello administrators received the isolated payment_operator system grant.'
             echo '- Pay login: central ArtHello OS one-time PKCE exchange.'
             echo '- Money acceptance and fiscalization: still disabled.'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify exact D179 gateway state under the shared lock
+      - name: Verify exact D180 gateway state under the shared lock
         if: success()
         env:
-          D179_CANDIDATE_NAME: ${{ steps.publish.outputs.candidate }}
-          D179_RECEIPT: ${{ steps.publish.outputs.receipt }}
+          D180_CANDIDATE_NAME: ${{ steps.publish.outputs.candidate }}
+          D180_RECEIPT: ${{ steps.publish.outputs.receipt }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          receipt="$D179_RECEIPT"
-          test "$receipt" = "$HOME/.config/arthello/release-state/production-d179-$RELEASE_SHA.json"
+          receipt="$D180_RECEIPT"
+          test "$receipt" = "$HOME/.config/arthello/release-state/production-d180-$RELEASE_SHA.json"
           test -f "$receipt"
           candidate="$(jq -er '.candidateContainerId' "$receipt")"
           expected_image="$(jq -er '.imageId' "$receipt")"
           [[ "$candidate" =~ ^[a-f0-9]{64}$ ]]
           [[ "$expected_image" =~ ^sha256:[a-f0-9]{64}$ ]]
-          live_name="$D179_CANDIDATE_NAME"
+          live_name="$D180_CANDIDATE_NAME"
           [[ "$live_name" =~ ^arthello-direct-[1-9][0-9]*-[1-9][0-9]*$ ]]
           test "$(docker inspect "$live_name" --format '{{.State.Running}}')" = true
           live_id="$(docker inspect "$live_name" --format '{{.Id}}')"
@@ -587,7 +660,7 @@ jobs:
           test "$(docker inspect "$live_name" --format '{{index .Config.Labels "arthello.release.sha"}}')" = "$RELEASE_SHA"
           docker exec "$CADDY_CONTAINER" sh -ceu 'cat /data/external-routes.caddy' \
             | grep -F "$live_name:8081" >/dev/null
-          printf 'ARTHELLO_D179_LOCKED_ROUTE=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$live_name"
+          printf 'ARTHELLO_D180_LOCKED_ROUTE=VERIFIED release=%s candidate=%s\n' "$RELEASE_SHA" "$live_name"
 
   verify-external:
     needs: deploy
@@ -599,19 +672,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Verify exact D179 from an independent network
+      - name: Verify exact D180 from an independent network
         shell: bash
         run: |
           set -Eeuo pipefail
           probe() {
             curl --fail --silent --show-error --max-time 15 "$PAY_URL/pay-assets/release.json?release=$RELEASE_SHA" \
               | jq -e --arg release "$RELEASE_SHA" \
-                '.schemaVersion == 1 and .decision == "D179" and .releaseSha == $release' >/dev/null &&
+                '.schemaVersion == 1 and .decision == "D180" and .releaseSha == $release' >/dev/null &&
             curl --fail --silent --show-error --max-time 15 "$PUBLIC_URL/api/health" \
               | jq -e '.status == "ok" and .database == "available"' >/dev/null &&
             curl --fail --silent --show-error --max-time 15 "$SCHOOL_URL/api/health" \
               | jq -e '.status == "ok"' >/dev/null &&
-            curl --fail --silent --show-error --max-time 15 "$PAY_URL/?release=d179-external-$RELEASE_SHA" \
+            curl --fail --silent --show-error --max-time 15 "$PAY_URL/?release=d180-external-$RELEASE_SHA" \
               | grep -F 'data-arthello-pay-shell="d175"' >/dev/null &&
             curl --fail --silent --show-error --max-time 15 "$PAY_URL/pay-assets/app.js?release=$RELEASE_SHA" \
               | grep -F 'function refreshCustomerResults()' >/dev/null &&
@@ -625,4 +698,4 @@ jobs:
             sleep 5
           done
           test "$ready" = 1
-          printf 'ARTHELLO_D179_EXTERNAL=VERIFIED arthello=200 school=200 pay=200\n'
+          printf 'ARTHELLO_D180_EXTERNAL=VERIFIED arthello=200 school=200 pay=200\n'
