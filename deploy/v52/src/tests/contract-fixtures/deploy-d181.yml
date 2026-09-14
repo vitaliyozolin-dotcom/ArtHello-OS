@@ -84,7 +84,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(git log -1 --format=%s)" = "D181: keep settings available for large family directories"
           grep -F 'FAMILY_DIRECTORY_PAGE_SIZE = 25' deploy/v52/src/app/api/settings/route.ts >/dev/null
-          grep -F 'section === "families"' deploy/v52/src/app/api/settings/route.ts >/dev/null
+          grep -F 'searchParams.get("section") === "families"' deploy/v52/src/app/api/settings/route.ts >/dev/null
           grep -F 'loadFamilyPage' deploy/v52/src/app/components/SettingsWorkspace.tsx >/dev/null
           grep -F 'FAMILY_COUNT = 2_887' deploy/v52/src/tests/settings-large-family-directory-runtime.test.mjs >/dev/null
           current_main=""
