@@ -135,6 +135,9 @@ test("D181 deploys only the verified mobile Finance fix over the exact D180 prod
   const snapshotProof = workflow.indexOf(
     "ARTHELLO_D181_ROLLBACK_SNAPSHOT=VERIFIED",
   );
+  const predecessorProof = workflow.indexOf(
+    "ARTHELLO_D181_PREDECESSOR_IDENTITY=VERIFIED",
+  );
   const productionProof = workflow.indexOf("ARTHELLO_D181_PRODUCTION=VERIFIED");
   const lockedRouteProof = workflow.indexOf(
     "ARTHELLO_D181_LOCKED_ROUTE=VERIFIED",
@@ -150,6 +153,9 @@ test("D181 deploys only the verified mobile Finance fix over the exact D180 prod
   assert.match(workflow, /\.decision=="D180"/);
   assert.match(workflow, /D181_FINANCE_MOBILE_BRANCH/);
   assert.match(workflow, /mobile_branch_recovery/);
+  assert.match(workflow, /mobile_branch_failure/);
+  assert.match(workflow, /activeRouteSha256/);
+  assert.match(workflow, /payAssetSha256/);
   assert.match(workflow, /group: gateway-38-55-arthello-production-d181/);
   assert.match(
     workflow,
@@ -157,6 +163,8 @@ test("D181 deploys only the verified mobile Finance fix over the exact D180 prod
   );
   assert.ok(
     egressProof > 0 &&
+      predecessorProof > 0 &&
+      productionStop > predecessorProof &&
       productionStop > egressProof &&
       snapshotProof > productionStop,
   );
@@ -185,6 +193,7 @@ test("finance workspace keeps the branch picker reachable in its blocked and loa
 
   assert.match(shell, /branches=\{branches\}/);
   assert.match(shell, /onBranchChange=\{changeBranch\}/);
+  assert.match(shell, /key=\{`finance:\$\{selectedBranch\}`\}/);
   assert.match(
     shell,
     /next === "finance" && selectedBranch === "ALL" && branches\[0\]/,
@@ -196,6 +205,7 @@ test("finance workspace keeps the branch picker reachable in its blocked and loa
   );
   assert.match(workspace, /ahFinanceMobileBranchScope/);
   assert.match(workspace, /data-d181-marker="D181_FINANCE_MOBILE_BRANCH"/);
+  assert.match(workspace, /data\?\.branch\.id !== selectedBranch/);
   assert.match(
     styles,
     /\.ahFinanceMobileBranchScope\s*\{[\s\S]*?display:\s*none/,
@@ -211,6 +221,9 @@ test("finance workspace keeps the branch picker reachable in its blocked and loa
       browserFlow,
       /getByLabel\('Выбрать филиал для финансового отчёта'/,
     );
-    assert.match(browserFlow, /mobileBranchOptions>=2/);
+    assert.match(browserFlow, /mobileBranchOptions>=3/);
+    assert.match(browserFlow, /stage='mobile_branch_failure'/);
+    assert.match(browserFlow, /financeFailureBranch/);
+    assert.match(browserFlow, /locator\('\.ahFinancePulse'\)\.count\(\),0/);
   }
 });
