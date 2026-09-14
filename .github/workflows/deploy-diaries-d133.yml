@@ -1,12 +1,12 @@
-# D185: retry D184 with root-only offline verification of the immutable backup.
-# The product, image provenance and production boundaries remain unchanged.
-name: Restore Atlas access and director UI D185
+# D186: replace the incomplete plain SQLite copy with a WAL-complete offline backup.
+# The product, image provenance and production cutover boundaries remain unchanged.
+name: Restore Atlas access and director UI D186
 
 "on":
   workflow_dispatch:
     inputs:
       release_sha:
-        description: Exact D185 main controller SHA
+        description: Exact D186 main controller SHA
         required: true
         type: string
       quality_run_id:
@@ -18,7 +18,7 @@ name: Restore Atlas access and director UI D185
         required: true
         type: string
       confirmation:
-        description: Type DEPLOY D185 TO PRODUCTION
+        description: Type DEPLOY D186 TO PRODUCTION
         required: true
         type: string
 
@@ -49,7 +49,7 @@ jobs:
       github.actor == 'vitaliyozolin-dotcom' &&
       github.triggering_actor == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1 &&
-      inputs.confirmation == 'DEPLOY D185 TO PRODUCTION'
+      inputs.confirmation == 'DEPLOY D186 TO PRODUCTION'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -71,12 +71,12 @@ jobs:
           test "$GITHUB_ACTOR" = vitaliyozolin-dotcom
           test "$GITHUB_TRIGGERING_ACTOR" = vitaliyozolin-dotcom
           test "$GITHUB_RUN_ATTEMPT" = 1
-          test "$CUTOVER_CONFIRMATION" = "DEPLOY D185 TO PRODUCTION"
+          test "$CUTOVER_CONFIRMATION" = "DEPLOY D186 TO PRODUCTION"
           [[ "$CONTROLLER_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$QUALITY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$PROOF_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           test "$(git rev-parse HEAD)" = "$CONTROLLER_SHA"
-          test "$(git log -1 --format=%s)" = "D185: verify Atlas backup as root"
+          test "$(git log -1 --format=%s)" = "D186: preserve Atlas WAL in backup"
           current="$(curl --fail-with-body --silent --show-error --max-time 30 --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/main" | jq -er '.object.sha')"
           test "$current" = "$CONTROLLER_SHA"
           verify_run() {
@@ -93,15 +93,16 @@ jobs:
           }
           verify_run "$QUALITY_RUN_ID" "Quality gates" ".github/workflows/quality.yml"
           verify_run "$PROOF_RUN_ID" "ArtHello Proof Gates" ".github/workflows/proof-gates.yml"
-          grep -F '## D185 —' DECISIONS.md >/dev/null
-          grep -F 'ATLAS_PUBLIC_ORIGIN' deploy/release-atlas-d185.sh >/dev/null
-          grep -F 'ATLAS_CENTRAL_ACCESS_SECRET_FILE' deploy/release-atlas-d185.sh >/dev/null
-          grep -F 'ATLAS_IMAGE_RUNTIME_FINGERPRINT=VERIFIED' deploy/upgrade-atlas-d185.sh >/dev/null
-          grep -F -- '--user 0:0 --security-opt no-new-privileges:true' deploy/upgrade-atlas-d185.sh >/dev/null
-          bash -n deploy/release-atlas-d185.sh
-          bash -n deploy/upgrade-atlas-d185.sh
-          node --check deploy/atlas-runtime-recovery-d185.mjs
-          node --test scripts/test/atlas-production-recovery.test.mjs scripts/test/atlas-owner-access-activation.test.mjs
+          grep -F '## D186 —' DECISIONS.md >/dev/null
+          grep -F 'ATLAS_PUBLIC_ORIGIN' deploy/release-atlas-d186.sh >/dev/null
+          grep -F 'ATLAS_CENTRAL_ACCESS_SECRET_FILE' deploy/release-atlas-d186.sh >/dev/null
+          grep -F 'ATLAS_IMAGE_RUNTIME_FINGERPRINT=VERIFIED' deploy/upgrade-atlas-d186.sh >/dev/null
+          grep -F -- '--volume "$data_volume:/data:ro" --volume "$backups_volume:/backups"' deploy/upgrade-atlas-d186.sh >/dev/null
+          bash -n deploy/release-atlas-d186.sh
+          bash -n deploy/upgrade-atlas-d186.sh
+          node --check deploy/atlas-runtime-recovery-d186.mjs
+          node --check deploy/atlas-offline-backup-d186.mjs
+          node --test scripts/test/atlas-offline-backup-d186.test.mjs scripts/test/atlas-production-recovery.test.mjs scripts/test/atlas-owner-access-activation.test.mjs
 
   bundle-atlas:
     needs: audit
@@ -135,9 +136,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           docker build --label "org.opencontainers.image.revision=$ATLAS_SOURCE_SHA" --label "org.opencontainers.image.source-tree=$ATLAS_SOURCE_TREE" --tag "atlas-diary:$ATLAS_SOURCE_SHA" atlas
-          container="atlas-d185-smoke-$GITHUB_RUN_ID"
-          data="atlas-d185-smoke-data-$GITHUB_RUN_ID"
-          backups="atlas-d185-smoke-backups-$GITHUB_RUN_ID"
+          container="atlas-d186-smoke-$GITHUB_RUN_ID"
+          data="atlas-d186-smoke-data-$GITHUB_RUN_ID"
+          backups="atlas-d186-smoke-backups-$GITHUB_RUN_ID"
           cleanup() {
             docker rm -f "$container" >/dev/null 2>&1 || true
             docker volume rm "$data" "$backups" >/dev/null 2>&1 || true
@@ -153,11 +154,37 @@ jobs:
           done
           test "$ready" = 1
           docker exec "$container" node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync('/data/atlas-school.sqlite'); if(db.prepare(\"SELECT institution_id FROM diary_identity WHERE id='primary'\").get()?.institution_id!=='atlas-school')throw Error('institution'); db.close();"
+          docker exec "$container" node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync('/data/atlas-school.sqlite'); db.exec('PRAGMA wal_autocheckpoint=0; CREATE TABLE IF NOT EXISTS d186_backup_smoke(value TEXT PRIMARY KEY)'); db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); db.prepare('INSERT OR REPLACE INTO d186_backup_smoke(value) VALUES (?)').run('committed-in-wal');"
+          docker exec "$container" test -s /data/atlas-school.sqlite-wal
+          docker kill --signal KILL "$container" >/dev/null
+          test "$(docker inspect "$container" --format '{{.State.Running}}')" = false
+          backup="pre-d186-$GITHUB_RUN_ID-1.sqlite"
+          helper="$GITHUB_WORKSPACE/controller/deploy/atlas-offline-backup-d186.mjs"
+          backup_result="$(docker run --rm --network none --read-only --user 0:0 --security-opt no-new-privileges:true \
+            --tmpfs /work:rw,nosuid,nodev,noexec,size=512m \
+            --volume "$data:/data:ro" --volume "$backups:/backups" \
+            --mount "type=bind,src=$helper,dst=/run/atlas-offline-backup-d186.mjs,readonly" \
+            --entrypoint node "atlas-diary:$ATLAS_SOURCE_SHA" /run/atlas-offline-backup-d186.mjs \
+            /data/atlas-school.sqlite /work/atlas-school.sqlite "/backups/$backup")"
+          test "$backup_result" = 'ATLAS_OFFLINE_BACKUP=VERIFIED wal=included'
+          printf '%s\n' "$backup_result"
+          docker run --rm --network none --read-only --user 0:0 --security-opt no-new-privileges:true \
+            --tmpfs /tmp:rw,nosuid,nodev,size=32m --volume "$backups:/backups:ro" \
+            --env BACKUP_PATH="/backups/$backup" --entrypoint node "atlas-diary:$ATLAS_SOURCE_SHA" --input-type=module -e '
+              import { DatabaseSync } from "node:sqlite";
+              const db = new DatabaseSync(process.env.BACKUP_PATH, { readOnly: true });
+              const integrity = db.prepare("PRAGMA integrity_check").get()?.integrity_check;
+              const mode = db.prepare("PRAGMA journal_mode").get()?.journal_mode;
+              const row = db.prepare("SELECT value FROM d186_backup_smoke").get()?.value;
+              db.close();
+              if (integrity !== "ok" || mode !== "delete" || row !== "committed-in-wal") process.exit(1);
+            '
+          printf 'ATLAS_D186_HOSTED_WAL_BACKUP=VERIFIED\n'
       - name: Package Atlas image with provenance
         shell: bash
         run: |
           set -Eeuo pipefail
-          bundle="$RUNNER_TEMP/atlas-d185-bundle"
+          bundle="$RUNNER_TEMP/atlas-d186-bundle"
           mkdir -p "$bundle"
           docker save "atlas-diary:$ATLAS_SOURCE_SHA" | gzip -1 -n > "$bundle/atlas-image.tar.gz"
           image_id="$(docker image inspect "atlas-diary:$ATLAS_SOURCE_SHA" --format '{{.Id}}')"
@@ -167,8 +194,8 @@ jobs:
           (cd "$bundle" && sha256sum atlas-image.tar.gz receipt.json > checksums.sha256)
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: atlas-d185-bundle
-          path: ${{ runner.temp }}/atlas-d185-bundle/
+          name: atlas-d186-bundle
+          path: ${{ runner.temp }}/atlas-d186-bundle/
           retention-days: 30
           compression-level: 0
 
@@ -188,57 +215,61 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: atlas-d185-bundle
-          path: ${{ runner.temp }}/atlas-d185-bundle
+          name: atlas-d186-bundle
+          path: ${{ runner.temp }}/atlas-d186-bundle
       - name: Restore Atlas access and publish director-first UI
         id: publish
         env:
           GH_TOKEN: ${{ github.token }}
-          ATLAS_BUNDLE_DIR: ${{ runner.temp }}/atlas-d185-bundle
+          ATLAS_BUNDLE_DIR: ${{ runner.temp }}/atlas-d186-bundle
           ARTHELLO_OWNER_LOGIN: ${{ secrets.ARTHELLO_FINANCE_IMPORT_LOGIN }}
           ARTHELLO_OWNER_PASSWORD: ${{ secrets.ARTHELLO_FINANCE_IMPORT_PASSWORD }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          log="$RUNNER_TEMP/atlas-d185-production.log"
-          bash controller/deploy/release-atlas-d185.sh | tee "$log"
-          grep -F 'ATLAS_D185_PRODUCTION=VERIFIED' "$log" >/dev/null
+          log="$RUNNER_TEMP/atlas-d186-production.log"
+          bash controller/deploy/release-atlas-d186.sh | tee "$log"
+          grep -F 'ATLAS_D186_PRODUCTION=VERIFIED' "$log" >/dev/null
           candidate="$(sed -n 's/^candidate=//p' "$log")"
           receipt="$(sed -n 's/^receipt=//p' "$log")"
           [[ "$candidate" =~ ^arthello-direct-[1-9][0-9]*-1$ ]]
-          test "$receipt" = "$HOME/.config/arthello/release-state/production-d185-$CONTROLLER_SHA.json"
+          test "$receipt" = "$HOME/.config/arthello/release-state/production-d186-$CONTROLLER_SHA.json"
           test -s "$receipt"
           cp "$receipt" "$ATLAS_BUNDLE_DIR/production-receipt.json"
           printf 'candidate=%s\nreceipt=%s\n' "$candidate" "$receipt" >> "$GITHUB_OUTPUT"
-      - name: Verify exact D185 gateway state under the shared lock
+      - name: Verify exact D186 gateway state under the shared lock
         env:
-          D185_CANDIDATE: ${{ steps.publish.outputs.candidate }}
-          D185_RECEIPT: ${{ steps.publish.outputs.receipt }}
+          D186_CANDIDATE: ${{ steps.publish.outputs.candidate }}
+          D186_RECEIPT: ${{ steps.publish.outputs.receipt }}
         shell: bash
         run: |
           set -Eeuo pipefail
           jq -e --arg controller "$CONTROLLER_SHA" '
-            .schemaVersion==1 and .state=="verified" and .decision=="D185" and
+            .schemaVersion==1 and .state=="verified" and .decision=="D186" and
             .controllerSha==$controller and .atlas.sourceSha=="f856fb3bd098152bb6b02c4d0273c4c9170b130c" and
             .atlas.dataVolumePreserved==true and .atlas.ownerSso.ownerGrant=="director" and
             .atlas.ownerSso.atlasSso=="verified" and
+            .atlas.backup.integrity=="ok" and .atlas.backup.journalMode=="delete" and
+            ((.atlas.backup.walIncluded|type)=="boolean") and
+            (.atlas.backup.file|test("^pre-d186-[1-9][0-9]*-1\\.sqlite$")) and
+            (.atlas.backup.sha256|test("^[a-f0-9]{64}$")) and
             (.atlas.imageProof.archiveSha256|test("^[a-f0-9]{64}$")) and
             (.atlas.imageProof.builderImageId|test("^sha256:[a-f0-9]{64}$")) and
             (.atlas.imageProof.gatewayImageId|test("^sha256:[a-f0-9]{64}$")) and
             (.atlas.imageProof.runtimeFingerprintSha256|test("^[a-f0-9]{64}$"))
-          ' "$D185_RECEIPT" >/dev/null
-          live_id="$(docker inspect "$D185_CANDIDATE" --format '{{.Id}}')"
-          test "$live_id" = "$(jq -er '.candidateContainerId' "$D185_RECEIPT")"
-          test "$(docker inspect "$D185_CANDIDATE" --format '{{.State.Running}}')" = true
-          docker exec stroios-caddy-1 sh -ceu 'cat /data/external-routes.caddy' | grep -F "$D185_CANDIDATE:8081" >/dev/null
-          printf 'ATLAS_D185_LOCKED_ROUTE=VERIFIED candidate=%s\n' "$D185_CANDIDATE"
+          ' "$D186_RECEIPT" >/dev/null
+          live_id="$(docker inspect "$D186_CANDIDATE" --format '{{.Id}}')"
+          test "$live_id" = "$(jq -er '.candidateContainerId' "$D186_RECEIPT")"
+          test "$(docker inspect "$D186_CANDIDATE" --format '{{.State.Running}}')" = true
+          docker exec stroios-caddy-1 sh -ceu 'cat /data/external-routes.caddy' | grep -F "$D186_CANDIDATE:8081" >/dev/null
+          printf 'ATLAS_D186_LOCKED_ROUTE=VERIFIED candidate=%s\n' "$D186_CANDIDATE"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: atlas-d185-production-receipts
+          name: atlas-d186-production-receipts
           path: |
-            ${{ runner.temp }}/atlas-d185-bundle/
-            ${{ runner.temp }}/atlas-d185-production.log
+            ${{ runner.temp }}/atlas-d186-bundle/
+            ${{ runner.temp }}/atlas-d186-production.log
           if-no-files-found: warn
           retention-days: 30
 
@@ -250,7 +281,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 7
     steps:
-      - name: Verify exact D185 from an independent network
+      - name: Verify exact D186 from an independent network
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -268,16 +299,16 @@ jobs:
             sleep 5
           done
           test "$ready" = 1
-          html="$(curl --fail --silent --show-error --max-time 15 "$ATLAS_URL/?release=d185-$CONTROLLER_SHA")"
+          html="$(curl --fail --silent --show-error --max-time 15 "$ATLAS_URL/?release=d186-$CONTROLLER_SHA")"
           readarray -t chunks < <(grep -oE 'src="/[^"]+\.js"' <<<"$html" | sed -E 's/^src="|"$//g' | sort -u)
           test "${#chunks[@]}" -gt 0
           ui_marker=0
           for chunk in "${chunks[@]}"; do
-            chunk_body="$(curl --fail --silent --show-error --max-time 15 "$ATLAS_URL$chunk?release=d185-$CONTROLLER_SHA")"
+            chunk_body="$(curl --fail --silent --show-error --max-time 15 "$ATLAS_URL$chunk?release=d186-$CONTROLLER_SHA")"
             if grep -F 'Инструмент руководителя' <<<"$chunk_body" >/dev/null; then
               ui_marker=1
               break
             fi
           done
           test "$ui_marker" = 1
-          printf 'ATLAS_D185_EXTERNAL=VERIFIED central_sso=303 atlas=200 director_ui=present school=200 pay=200\n'
+          printf 'ATLAS_D186_EXTERNAL=VERIFIED central_sso=303 atlas=200 director_ui=present school=200 pay=200\n'

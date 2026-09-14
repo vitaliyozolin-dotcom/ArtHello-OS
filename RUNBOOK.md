@@ -1,14 +1,15 @@
 # ArtHello OS — Runbook
 
-## Atlas D185 — восстановление входа и director-first UI
+## Atlas D186 — WAL-полное восстановление входа и director-first UI
 
 - D183 run `34827534460/103923694774` остановился после проверки archive/checksums и до Atlas backup, central stop и route swap; rollback выполнен. Не повторять D183.
-- D184 run `34831139683/103935120775` подтвердил переносимый fingerprint, но offline backup reader с UID/GID `1001:1001` не открыл root-owned backup. Отказ произошёл до central stop и route swap; rollback запустил прежний Atlas. Не повторять D184 и не удалять сохранённую backup.
-- Использовать только ручной `Restore Atlas access and director UI D185` из exact `main`; передать ID успешных first-attempt `Quality gates` и `ArtHello Proof Gates`, затем точную фразу `DEPLOY D185 TO PRODUCTION`. Среда `production-ru` и общий lock `gateway-38-55-arthello-production` обязательны.
+- D184 run `34831139683/103935120775` подтвердил переносимый fingerprint, но offline backup reader с UID/GID `1001:1001` не открыл backup. D185 доказал, что root получает тот же отказ. Оба отказа произошли до central stop и route swap; rollback запускал прежний Atlas. Не повторять D184 и не удалять сохранённую backup.
+- D185 run `34833717081/103943267204` повторил отказ даже с UID/GID `0:0`: причина в main-only копии WAL database, а не в правах reader. Rollback выполнен до central stop и route swap. Не повторять D185 и не удалять D184/D185 backup-файлы.
+- Использовать только ручной `Restore Atlas access and director UI D186` из exact `main`; передать ID успешных first-attempt `Quality gates` и `ArtHello Proof Gates`, затем точную фразу `DEPLOY D186 TO PRODUCTION`. Среда `production-ru` и общий lock `gateway-38-55-arthello-production` обязательны.
 - Контроллер принимает только active D182 receipt/release `95873e519113e93d9d52ac08166eb46b317e5c6e`, неизменные Caddy route и Pay assets, Atlas source `987abd5951dc4832e2c071d8744051c518bae42e` либо уже принятый `f856fb3bd098152bb6b02c4d0273c4c9170b130c`.
 - Не сравнивать builder/gateway Docker image IDs. Проверить checksum архива, канонический `runtimeFingerprintSha256`, source/tree labels и запускать только локально разрешённый immutable image ID; stale tag можно удалить лишь при отсутствии любых container consumers.
 - Central пересоздаётся из того же image со всеми прежними env/mounts; разрешено заменить только `ATLAS_PUBLIC_ORIGIN`, `ATLAS_CENTRAL_ACCESS_SECRET_FILE` и при отсутствии вернуть exact read-only Atlas secret mount. Plaintext secrets запрещены.
-- Перед Atlas image swap обязательны backup SQLite и `PRAGMA integrity_check`; volumes `atlas-school-diary-data` и `atlas-school-diary-backups` не удалять и не заменять. Integrity и SHA readers запускаются root только в одноразовых контейнерах с `--network none`, read-only root filesystem, `no-new-privileges` и backup volume `:ro`; production Atlas остаётся непривилегированным. При любой ошибке вернуть прежние Atlas container и central route/container.
+- Перед Atlas image swap остановить Atlas; скопировать main SQLite и optional WAL из data volume `:ro` только в ограниченный tmpfs. Node backup API на временной копии обязан сохранить WAL, пройти `PRAGMA integrity_check`, получить `journal_mode=delete`, fsync и опубликовать immutable backup без перезаписи. Финальные integrity/SHA readers используют backups volume `:ro`; volumes не удалять и не заменять. При любой ошибке вернуть прежние Atlas container и central route/container.
 - PASS: central open возвращает exact `303` на Atlas start, owner SSO подтверждает `director` и авторизованный `/api/school`, оба контейнера проходят 65 секунд без рестартов, off-host probe видит новый маркер «Инструмент руководителя», ArtHello/Atlas/School/Pay healthy.
 
 ## Diaries D138 — School SSH boundary

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// D185 keeps the D183 runtime/route transformation and changes only backup verification authority.
+// D186 keeps the D183 runtime/route transformation and changes only backup creation semantics.
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
