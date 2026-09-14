@@ -217,3 +217,36 @@ test("D180 deploys the import usability fix over the verified D179 runtime", () 
   assert.match(workflow, /ARTHELLO_D180_EXTERNAL=VERIFIED arthello=200 school=200 pay=200/);
   assert.doesNotMatch(workflow, /@arthello\.ru|buh@|api_key\s*:/i);
 });
+
+test("D181 deploys bounded family settings over the verified D180 runtime", () => {
+  const workflow = sourceText("../../../../.github/workflows/deploy-arthello-settings-d181.yml", "./contract-fixtures/deploy-d181.yml");
+  const snapshot = workflow.indexOf("ARTHELLO_D181_ROLLBACK_SNAPSHOT=VERIFIED");
+  const liveStop = workflow.indexOf('docker stop --time 30 "$live_id"');
+  const candidateStart = workflow.indexOf('docker run -d --name "$candidate"');
+  const productionProof = workflow.indexOf("ARTHELLO_D181_PRODUCTION=VERIFIED");
+  const lockedRouteProof = workflow.indexOf("ARTHELLO_D181_LOCKED_ROUTE=VERIFIED");
+  const externalProof = workflow.indexOf("ARTHELLO_D181_EXTERNAL=VERIFIED");
+
+  assert.match(workflow, /D181: keep settings available for large family directories/);
+  assert.match(workflow, /workflow_run:/);
+  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(workflow, /concurrency:\s*\n\s*group: gateway-38-55-arthello-production-d181[\s\S]*?jobs:\s*\n\s*deploy:\s*\n\s*concurrency:\s*\n\s*group: gateway-38-55-arthello-production/);
+  assert.match(workflow, /verify-external:\n    needs: deploy\n    concurrency:[\s\S]*?group: gateway-38-55-arthello-production[\s\S]*?runs-on: ubuntu-latest/);
+  assert.ok(productionProof > 0 && lockedRouteProof > productionProof && externalProof > lockedRouteProof, "the locked gateway proof must precede off-host exact-release verification");
+  assert.match(workflow, /EXPECTED_LIVE_RELEASE_SHA: 511d467763b7ca050c096df23cfcdcd1f62fe51d/);
+  assert.match(workflow, /production-d180-\$EXPECTED_LIVE_RELEASE_SHA\.json/);
+  assert.match(workflow, /\.decision=="D180"/);
+  assert.match(workflow, /FAMILY_DIRECTORY_PAGE_SIZE = 25/);
+  assert.match(workflow, /section === "families"/);
+  assert.match(workflow, /loadFamilyPage/);
+  assert.match(workflow, /FAMILY_COUNT = 2_887/);
+  assert.match(workflow, /ALFACRM_IMPORT_ENABLED=true/);
+  assert.match(workflow, /families\["status"\] == "imported"/);
+  assert.match(workflow, /staff\["status"\] == "imported"/);
+  assert.match(workflow, /subscriptions\["status"\] in \("importing", "imported"\)/);
+  assert.ok(liveStop > 0 && snapshot > liveStop && candidateStart > snapshot, "recoverable data snapshot must complete before the replacement starts");
+  assert.match(workflow, /ARTHELLO_D181_EDGE_STABILITY=VERIFIED seconds=65/);
+  assert.match(workflow, /ARTHELLO_D181_PRODUCTION=VERIFIED/);
+  assert.match(workflow, /ARTHELLO_D181_EXTERNAL=VERIFIED arthello=200 school=200 pay=200/);
+  assert.doesNotMatch(workflow, /@arthello\.ru|buh@|api_key\s*:/i);
+});

@@ -20,7 +20,7 @@
   ],
   "currentState": {
     "stage": 22,
-    "name": "D180: завершение пакетного импорта и видимость клиентов AlfaCRM",
+    "name": "D181: доступные настройки при большом каталоге семей",
     "status": "in_progress",
     "evidence": [
       "Тестовый Sites-проект создан",
@@ -213,7 +213,11 @@
       "D178 activation commit 349c4c46e2ed4b7de42aa0dd9cf46666b7b55742 опубликован production run 34791395398: ALFACRM_IMPORT_ENABLED включён поверх exact D177 image, snapshot и внешние ArtHello/School/Pay=200 подтверждены.",
       "IMG_0265(1)/IMG_0266/IMG_0267: импорт абонементов требует ручного продолжения каждые 15 клиентов, раздел «Клиенты» показывает 0 после импорта, нижнее уведомление не исчезает, а 193 сотрудника требуют фильтрации по признакам актуальности.",
       "D180 устраняет четыре причины: автоматическое продолжение безопасных 15-клиентских пакетов, фильтрация сущностей до пагинации, авто-закрытие уведомления через 7 секунд и исключение явно неактивных/завершивших работу сотрудников.",
-      "D180 локально: 107/107 целевых AlfaCRM/реестровых контрактов прошли; typecheck, production build и lint прошли без ошибок. Полный набор: 833 passed, 6 owner/chown-тестов несовместимы с managed filesystem (EINVAL), 2 skipped."
+      "D180 локально: 107/107 целевых AlfaCRM/реестровых контрактов прошли; typecheck, production build и lint прошли без ошибок. Полный набор: 833 passed, 6 owner/chown-тестов несовместимы с managed filesystem (EINVAL), 2 skipped.",
+      "D180 release 511d467763b7ca050c096df23cfcdcd1f62fe51d опубликован production run 34799802826: image sha256:90ab084d2bce26577baf0dd414ce99e3223ea5167f5e6960173ed577476c4d0d, live AlfaCRM families=2887/staff=193/subscriptions=60, rollback snapshot, 65 секунд стабильности, locked route и внешние ArtHello/School/Pay=200 подтверждены.",
+      "IMG_0269: после импорта production-настройки заменяются общей заглушкой «Настройки временно недоступны».",
+      "D181 red/green runtime: прежний /api/settings вернул 500 на 2 887 семьях; после отделения каталога основной ответ вернул 200, а отдельная страница — 25 из 2 887 семей и точный серверный поиск.",
+      "D181 локально: typecheck, production build и lint прошли; 17/17 целевых runtime/release-тестов зелёные; полный app-набор дал 835 passed, 6 известных managed-filesystem chown failures и 2 skipped."
     ],
     "blockers": [
       "Автоматическое распознавание сканов договоров включится после добавления защищённого OPENAI_API_KEY; до этого форма честно остаётся редактируемым ручным черновиком",
@@ -223,7 +227,7 @@
       "School transport восстановлен и read-only проверен; естественный авторизованный Education→дневник SSO не подтверждён, облачный браузер возвращает502 до формы входа.",
       "Customer.balance подтверждён официальным API как денежное поле; Alfa financial movements остаются blocked до проверенного контракта PayType direction.",
       "Новая ArtHello версия ещё не переключена: нужны первая backup+restore, exact immutable release и пользовательская приёмка шести сценариев.",
-      "D180 готовится поверх verified D179 release a2f30685f037e540206f459c34a6c37e90d3b95b и production run 34797052085: требуются exact-main Quality/Proof/Verify, совпадение live AlfaCRM import state, rollback snapshot, 65 секунд стабильности и внешний ArtHello/School/Pay probe."
+      "D181 готовится поверх verified D180 release 511d467763b7ca050c096df23cfcdcd1f62fe51d и production run 34799802826: требуются exact-main Quality/Proof/Verify, совпадение live AlfaCRM import state, rollback snapshot, 65 секунд стабильности и внешний ArtHello/School/Pay probe."
     ]
   },
   "stages": [
@@ -463,8 +467,8 @@
   "currentStep": {
     "owner": "Исполнитель ArtHello OS",
     "deadline": "текущий цикл исправления",
-    "result": "После подтверждённого production-выпуска D179 опубликовать D180: один запуск автоматически завершает безопасные пакеты абонементов, импортированные семьи видны в «Клиентах», уведомления исчезают через 7 секунд, а повторный импорт сотрудников исключает явно неактуальные карточки",
-    "evidence": "Целевые D180 contracts, полный typecheck/test/build на exact D179 main, verified D179 production receipt и live AlfaCRM state до docker stop, свежий rollback snapshot, exact hosted image, 65 секунд стабильности и независимый ArtHello/School/Pay probe"
+    "result": "Опубликовать D181: настройки открываются независимо от размера каталога, а вкладка «Семьи» безопасно загружает страницы по 25 с поиском и продолжением",
+    "evidence": "Runtime red/green на 2 887 семьях, полный typecheck/test/build, exact D180 production receipt и live AlfaCRM state до docker stop, свежий rollback snapshot, exact hosted image, 65 секунд стабильности и независимый ArtHello/School/Pay probe"
   },
   "decisionLog": [
     {
@@ -2920,7 +2924,7 @@
     },
     {
       "project_id": "ARTHELLO-OS",
-      "status": "active",
+      "status": "completed",
       "approved_by": "Виталий Озолин — сообщил о пакетах по 15, пустом разделе клиентов, постоянном уведомлении и вероятно исторических сотрудниках",
       "approved_at": "2026-09-14",
       "owner": "Исполнитель ArtHello OS",
@@ -2987,7 +2991,73 @@
           "owner": "Исполнитель ArtHello OS",
           "due": "текущий цикл",
           "evidence_required": "Полные typecheck/test/build gates, exact-main Quality/Verify, protected D180 receipt, 65-second stability, ARTHELLO_D180_ALFACRM_LIVE_STATE=VERIFIED и ARTHELLO_D180_EXTERNAL=VERIFIED",
-          "status": "in_progress"
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "project_id": "ARTHELLO-OS",
+      "status": "active",
+      "approved_by": "Виталий Озолин — показал IMG_0269 с недоступными настройками и поручил завершить исправление",
+      "approved_at": "2026-09-14",
+      "owner": "Исполнитель ArtHello OS",
+      "deadline": "текущий цикл исправления",
+      "review_at": "после production-выпуска D181 и повторного открытия настроек",
+      "affected_stages": [
+        2,
+        16,
+        18,
+        21,
+        22
+      ],
+      "supersedes": null,
+      "superseded_by": null,
+      "raw_deliberation_ref": "IMG_0269 показывает общую заглушку настроек после рабочего импорта 2 887 семей; владелец несколько раз запросил завершение исправления.",
+      "decision_id": "DEC-2026-09-14-89",
+      "question": "Как сохранить доступность всех настроек после импорта тысяч семей и не скрыть ни одну семейную карточку?",
+      "statement": "D181 исключает семейный каталог и family grants из основного ответа /api/settings. Вкладка «Семьи» отдельно запрашивает до 25 карточек, поддерживает серверный поиск и продолжение; связи, участники и grants читаются пакетами до 50 bind-параметров. Снимок одной семьи для изменения доступа загружается прямым запросом.",
+      "context": "Прежний endpoint при каждом открытии настроек безусловно читал все семьи, все entity_links и всех участников, сопоставлял семьи и связи квадратичным циклом и передавал тысячи ID одним D1 IN. На production-размере 2 887 семей это воспроизводимо давало 500 и блокировало даже вкладку интеграций.",
+      "rationale": "Разделение основного контекста и тяжёлого каталога устраняет общий отказ. Ограниченные страницы и bind-пакеты дают линейную предсказуемую нагрузку, а поиск и продолжение сохраняют доступ ко всем карточкам.",
+      "evidence": [
+        "IMG_0269: production показывает «Настройки временно недоступны».",
+        "Красный runtime-тест на 2 887 семьях воспроизвёл 500 прежнего /api/settings.",
+        "Green runtime-тест подтверждает 200 основного ответа, страницу 25 из 2 887, связанные данные и точный поиск.",
+        "D181 workflow принимает только exact D180 receipt и сохраняет live AlfaCRM/Pay/банковские доказательства до cutover.",
+        "Typecheck, production build, lint, 17/17 целевых тестов и 835 тестов полного app-набора прошли; шесть прежних chown-сценариев не поддерживаются managed filesystem, два теста штатно пропущены."
+      ],
+      "assumptions": [
+        "Полный семейный каталог нужен только при открытии вкладки «Семьи», а не для филиалов, доступов, интеграций или системной проверки.",
+        "Страница 25 карточек и серверный поиск достаточны для ежедневного выбора без полной сериализации каталога.",
+        "D181 не меняет сущности, связи, сопоставления, права или credentials — только способ чтения."
+      ],
+      "dependencies": [
+        "DEC-2026-09-14-88 completed",
+        "Verified D180 release 511d467763b7ca050c096df23cfcdcd1f62fe51d and production run 34799802826",
+        "Existing encrypted AlfaCRM credential, import flag and branch mappings",
+        "Explicit owner defect report IMG_0269"
+      ],
+      "source_links": [
+        "https://github.com/vitaliyozolin-dotcom/ArtHello-OS/actions/runs/34799802826"
+      ],
+      "rejected_alternatives": [
+        {
+          "option": "Увеличить допустимое число D1 bind-параметров и продолжать отдавать весь каталог",
+          "reason": "Это переносит технический предел, но сохраняет квадратичный CPU и неограниченный размер ответа.",
+          "reopen_condition": "не открывать: полный каталог не является обязательным для открытия настроек"
+        },
+        {
+          "option": "Показывать только первые 25 семей без поиска и продолжения",
+          "reason": "Рабочие карточки за первой страницей становятся недоступны.",
+          "reopen_condition": "только если семейный доступ полностью переносится в другой рабочий реестр"
+        }
+      ],
+      "actions": [
+        {
+          "action": "Проверить и опубликовать D181 поверх exact D180, подтвердив доступность настроек, сохранность live данных и внешний production-контур",
+          "owner": "Исполнитель ArtHello OS",
+          "due": "текущий цикл",
+          "evidence_required": "Полные typecheck/test/build gates, exact-main Quality/Proof/Verify, protected D181 receipt, 65-second stability, live AlfaCRM proof и ARTHELLO_D181_EXTERNAL=VERIFIED",
+          "status": "open"
         }
       ]
     }

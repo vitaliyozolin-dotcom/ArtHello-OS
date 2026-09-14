@@ -34,6 +34,8 @@ type SettingsData = AccessContext & {
   systemGrants: Array<{ userId: string; systemId: string; role: string; status: string; lastSyncStatus: string; lastSyncedAt: string }>;
   syncEvents: Array<{ id: string; eventType: string; userId: string; systemId: string; status: string; attempts: number; createdAt: string; updatedAt: string }>;
   familyDirectory: Array<{ id: string; displayName: string; status: string; sourceSystem: string; sourceRecordId: string; dataQuality: string; scope: string; members: Array<{ id: string; displayName: string; entityType: string; relation: string; sourceSystem: string; sourceRecordId: string; scope: string; phone: string; email: string }> }>;
+  familyDirectoryTotal: number;
+  familyDirectoryHasMore: boolean;
   familyAccessGrants: Array<{ id: string; familyEntityId: string; principalEntityId: string; principalType: string; role: string; loginType: string; login: string; deliveryChannel: string; deliveryStatus: string; status: string; accessVersion: number; lastSyncStatus: string; lastSyncedAt: string }>;
   systemRoleOptions: Record<string, Array<{ value: string; label: string }>>;
   canManage: boolean;
@@ -56,6 +58,11 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
   const [temporaryCredential, setTemporaryCredential] = useState<TemporaryCredential | null>(null);
   const [ownerDiaryOpen, setOwnerDiaryOpen] = useState(false);
   const [ownerDiarySystem, setOwnerDiarySystem] = useState("SYS-SCHOOL-1-11");
+  const [familyQuery, setFamilyQuery] = useState("");
+  const [familyAppliedQuery, setFamilyAppliedQuery] = useState("");
+  const [familyLoading, setFamilyLoading] = useState(false);
+  const [familyLoaded, setFamilyLoaded] = useState(false);
+  const [familyError, setFamilyError] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -63,6 +70,10 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
       const payload = await response.json() as SettingsData & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Настройки недоступны");
       setData(payload);
+      setFamilyLoaded(false);
+      setFamilyQuery("");
+      setFamilyAppliedQuery("");
+      setFamilyError("");
       onContextChanged(payload);
       setError("");
     } catch (cause) {
@@ -70,7 +81,39 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
     } finally { setLoading(false); }
   }, [onContextChanged]);
 
+  const loadFamilyPage = useCallback(async (query: string, offset: number, append: boolean) => {
+    setFamilyLoading(true);
+    try {
+      const normalizedQuery = query.trim().slice(0, 80);
+      const search = new URLSearchParams({ section: "families", limit: "25", offset: String(offset) });
+      if (normalizedQuery) search.set("query", normalizedQuery);
+      const response = await fetch(`/api/settings?${search}`, { cache: "no-store" });
+      const payload = await response.json() as Pick<SettingsData, "familyDirectory" | "familyDirectoryTotal" | "familyDirectoryHasMore" | "familyAccessGrants"> & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Каталог семей недоступен");
+      setData((current) => {
+        if (!current) return current;
+        const familyDirectory = append ? [...current.familyDirectory, ...payload.familyDirectory] : payload.familyDirectory;
+        const familyAccessGrants = append
+          ? [...new Map([...current.familyAccessGrants, ...payload.familyAccessGrants].map((grant) => [grant.id, grant])).values()]
+          : payload.familyAccessGrants;
+        return { ...current, ...payload, familyDirectory, familyAccessGrants };
+      });
+      setFamilyAppliedQuery(normalizedQuery);
+      setFamilyLoaded(true);
+      setFamilyError("");
+    } catch (cause) {
+      setFamilyError(cause instanceof Error ? cause.message : "Каталог семей недоступен");
+    } finally {
+      setFamilyLoading(false);
+    }
+  }, []);
+
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+  useEffect(() => {
+    if (tab !== "Семьи" || !data?.canManage || familyLoaded || familyLoading || familyError) return;
+    const timer = window.setTimeout(() => void loadFamilyPage("", 0, false), 0);
+    return () => window.clearTimeout(timer);
+  }, [data?.canManage, familyError, familyLoaded, familyLoading, loadFamilyPage, tab]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -243,8 +286,14 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
           {tab === "Семьи" ? <div className="settings-grid users-grid family-access-grid">
             <div className="settings-boundary family-source-boundary"><strong>Только выдача доступа</strong><span>Ручная карточка уже подтверждена её автором. Для импорта и конфликтов сначала нужна сверка источника. Сам доступ всегда выдаётся здесь отдельным действием.</span></div>
             <article className="settings-card wide">
-              <header><div><p>Центральный реестр</p><h3>Карточки семей</h3></div><span>{data.familyDirectory.length}</span></header>
-              {data.familyDirectory.length ? <div className="family-access-list">{data.familyDirectory.map((family) => <section key={family.id} className="family-access-card">
+              <header><div><p>Центральный реестр</p><h3>Карточки семей</h3></div><span>{familyLoaded ? data.familyDirectoryTotal : "…"}</span></header>
+              <form className="family-directory-toolbar" onSubmit={(event) => { event.preventDefault(); void loadFamilyPage(familyQuery.trim(), 0, false); }}>
+                <label><span>Найти семью</span><input value={familyQuery} onChange={(event) => setFamilyQuery(event.target.value)} placeholder="Имя семьи" /></label>
+                <button type="submit" disabled={familyLoading}>{familyLoading ? "Ищем…" : "Найти"}</button>
+              </form>
+              {familyError ? <div data-ah-compact-card="true" className="settings-empty"><strong>{familyError}</strong><p>Повторите поиск. Остальные настройки продолжают работать.</p></div>
+                : familyLoading && !familyLoaded ? <div data-ah-compact-card="true" className="settings-empty"><strong>Загружаем семьи…</strong><p>Читаем только первую безопасную страницу каталога.</p></div>
+                : data.familyDirectory.length ? <div className="family-access-list">{data.familyDirectory.map((family) => <section key={family.id} className="family-access-card">
                 <header><div><strong>{family.displayName}</strong><small>{recordLabel("Карточка семьи", family.id)} · {family.scope}</small></div><em>{familyAccessState(family)}</em></header>
                 {family.members.length ? <div className="family-member-list">{family.members.map((member) => {
                   const grant = data.familyAccessGrants.find((item) => item.principalEntityId === member.id);
@@ -267,7 +316,8 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
                     </div>
                   </form>;
                 })}</div> : <div data-ah-compact-card="true" className="settings-empty"><strong>Нет связанных людей</strong><p>Сначала AlfaCRM должна передать ребёнка и представителей, а ArtHello OS — связать их со стабильной карточкой семьи.</p></div>}
-              </section>)}</div> : <div data-ah-compact-card="true" className="settings-empty"><strong>Семьи ещё не синхронизированы</strong><p>Подключите AlfaCRM в разделе «Интеграции». Создавать параллельные карточки в дневнике больше не требуется.</p></div>}
+              </section>)}</div> : <div data-ah-compact-card="true" className="settings-empty"><strong>Семьи не найдены</strong><p>{familyAppliedQuery ? "Измените запрос и повторите поиск." : "Подключите AlfaCRM в разделе «Интеграции». Создавать параллельные карточки в дневнике больше не требуется."}</p></div>}
+              {data.familyDirectoryHasMore ? <button className="family-directory-more" type="button" disabled={familyLoading} onClick={() => void loadFamilyPage(familyAppliedQuery, data.familyDirectory.length, true)}>{familyLoading ? "Загружаем…" : "Показать ещё"}</button> : null}
             </article>
             {credentialLink ? <div className="settings-boundary credential-result"><strong>Одноразовая ссылка готова</strong><span>Ссылка предназначена для первого входа или создания нового пароля. После подключения канала она отправляется выбранному человеку по SMS или email.</span><input readOnly value={credentialLink} onFocus={(event) => event.currentTarget.select()} /><button type="button" onClick={() => void copyCredential(credentialLink, "Ссылка")}>Скопировать ссылку</button></div> : null}
             <div className="settings-boundary"><strong>Граница систем</strong><span>{data.authBoundary}</span></div>

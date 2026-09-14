@@ -11,6 +11,8 @@ test("family access is granted centrally from the family card", async () => {
   ]);
   assert.match(settings, /settingsTabs = \["Филиалы", "Доступы", "Семьи"/);
   assert.match(settings, /Пароль человек создаст сам по одноразовой ссылке/);
+  assert.match(settings, /familyAppliedQuery/);
+  assert.match(settings, /loadFamilyPage\(familyAppliedQuery, data\.familyDirectory\.length, true\)/);
   assert.match(route, /grantFamilyAccess/);
   assert.match(route, /ArtHello OS — единый источник сотрудников, семей, родителей, учеников, классов/);
   assert.match(sync, /api\/internal\/family-access-sync/);
