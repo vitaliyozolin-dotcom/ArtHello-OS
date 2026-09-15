@@ -12,7 +12,7 @@ import {
   verifyAuthenticatedRequestCsrf,
 } from "../../../../lib/production-auth";
 import { hasTrustedMutationOrigin } from "../../../../lib/request-security";
-import { isCurrentAlfaStaffRecord } from "../../../../lib/alfacrm-import";
+import { isCurrentAlfaStaffRecord, newAlfaAutosync, advanceAlfaAutosync, authenticateAlfaAutosync, type AlfaAutosync } from "../../../../lib/alfacrm-import";
 
 const CONNECTION_ID = "INT-T-ALFACRM";
 const STATE_KEY = "alfacrm_connector:v1";
@@ -53,6 +53,7 @@ type ModuleState = {
   note: string;
 };
 type AlfaState = {
+  autosync?: AlfaAutosync;
   version: 1;
   connected: boolean;
   endpoint: string;
@@ -69,6 +70,7 @@ type Credentials = { email: string; apiKey: string; appKey: string };
 type AlfaSession = Credentials & { endpoint: string; token: string };
 type FetchedRecord = { remoteBranchId: string; item: JsonRecord };
 type RequestContext = NonNullable<Awaited<ReturnType<typeof getAuthenticatedRequestContext>>>;
+type ImportContext = RequestContext | { scheduler: true; actor: string };
 type RuntimeFetcher = { fetch: (request: Request) => Promise<Response> };
 
 let requestTail: Promise<void> = Promise.resolve();
@@ -96,6 +98,7 @@ export async function GET(request: Request) {
       importBlockedReason: alfaCrmImportEnabled() ? "" : IMPORT_BLOCKED_MESSAGE,
       canManage: editors.has(context.apiRole),
       canManageCredentials: canonicalOwner(context),
+      autosyncAvailable: Boolean(alfaAutosyncSecret()) && alfaCrmImportEnabled(),
       direction: "AlfaCRM → ArtHello OS",
       boundary: "Первичная загрузка выполняется только по выбранным филиалам и модулям. Обратная запись в AlfaCRM отключена.",
     });
@@ -105,6 +108,17 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  if (request.headers.has('x-arthello-alfa-autosync')) {
+    if (!await authenticateAlfaAutosync(request, alfaAutosyncSecret())) return privateJson({ error: 'Запуск отклонён' }, 403);
+    try {
+      await ensureCoreTables();
+      await ensureAlfaTables();
+      return await serializeMutation(runAlfaAutosyncTick);
+    } catch {
+      console.error('alfacrm.autosync_tick_failed');
+      return privateJson({ outcome: 'error' }, 503);
+    }
+  }
   const context = await requireContext(request, true);
   if (context instanceof Response) return context;
   if (!editors.has(context.apiRole)) return privateJson({ error: "Нет прав на настройку AlfaCRM" }, 403);
@@ -114,6 +128,10 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     return await serializeMutation(async () => {
     const action = clean(body.action, 60);
+    if (action === 'setAutosync') return configureAlfaAutosync(context, body);
+    if (['previewModule', 'importModule'].includes(action) && (await readState()).autosync?.enabled) {
+      return privateJson({ error: 'Перед ручной загрузкой остановите автоматическое обновление.' }, 409);
+    }
     if (["connect", "disconnect", "saveBranchMappings"].includes(action) && !canonicalOwner(context)) {
       return privateJson({ error: "Ключи и общее сопоставление филиалов изменяет только собственник" }, 403);
     }
@@ -132,6 +150,79 @@ export async function POST(request: Request) {
     console.error("alfacrm.staged_action_failed");
     return privateJson({ error: safeError(error) }, error instanceof AlfaApiError ? error.status : 500);
   }
+}
+
+function alfaAutosyncSecret() {
+  return (env as unknown as { ALFACRM_AUTOSYNC_SECRET?: string }).ALFACRM_AUTOSYNC_SECRET ?? '';
+}
+
+async function alfaAutosyncScope(state: AlfaState) {
+  return hashText(JSON.stringify([state.endpoint, Object.entries(state.branchMappings).sort(), state.remoteBranches.map(b => b.id).sort()]));
+}
+
+async function configureAlfaAutosync(context: RequestContext, body: Record<string, unknown>) {
+  if (!canonicalOwner(context)) return privateJson({ error: 'Автообновлением управляет собственник' }, 403);
+  const state = await readState();
+  if (body.enabled === false) {
+    if (state.autosync) state.autosync = { ...state.autosync, enabled: false, outcome: 'paused' };
+  } else {
+    if (body.enabled !== true || !alfaAutosyncSecret() || !alfaCrmImportEnabled() || !state.connected) {
+      return privateJson({ error: 'Автоматическое обновление ещё не подключено к серверу или импорт отключён' }, 409);
+    }
+    await assertMappedBranchAccess(context, state);
+    if (!mappedRemoteBranches(state).length) return privateJson({ error: 'Сначала сопоставьте филиалы' }, 409);
+    const modules = Array.isArray(body.modules) ? body.modules.filter((m): m is string => typeof m === 'string') : [];
+    let schedule: AlfaAutosync;
+    try { schedule = newAlfaAutosync(modules, await alfaAutosyncScope(state), Date.now()); }
+    catch { return privateJson({ error: 'Выберите семьи, сотрудников и зависимые группы или остатки' }, 400); }
+    if (schedule.modules.some(m => state.modules[m].status !== 'imported')) {
+      return privateJson({ error: 'Сначала завершите и сверьте первичную загрузку выбранных разделов' }, 409);
+    }
+    state.autosync = schedule;
+  }
+  await persistState(state);
+  await env.DB.batch([
+    env.DB.prepare('UPDATE integration_connections SET next_sync_at=? WHERE id=?')
+      .bind(state.autosync?.enabled ? new Date(state.autosync.nextAt).toISOString() : '', CONNECTION_ID),
+    auditStatement(context.actor, 'integration.alfacrm_autosync_configured', {
+    enabled: state.autosync?.enabled ?? false, modules: state.autosync?.modules ?? [],
+  })]);
+  return privateJson({ state: publicState(state), message: state.autosync?.enabled ? 'Автообновление включено' : 'Автообновление остановлено' });
+}
+
+// Single production worker; uses the same mutex as all manual connector mutations.
+// The cursor, backoff and scope survive process restarts in the connector state.
+async function runAlfaAutosyncTick() {
+  const state = await readState();
+  const schedule = state.autosync;
+  if (!schedule?.enabled || !alfaCrmImportEnabled()) return privateJson({ outcome: 'disabled' });
+  if (schedule.nextAt > Date.now()) return privateJson({ outcome: 'not_due' });
+  const module = schedule.modules[schedule.index];
+  let response: Response;
+  try {
+    if (!state.connected || schedule.scope !== await alfaAutosyncScope(state) || !module) {
+      response = privateJson({ error: 'Источник или филиалы изменились. Повторите сверку.' }, 409);
+    } else {
+      const context: ImportContext = { scheduler: true, actor: 'SYSTEM:ALFACRM_AUTOSYNC' };
+      response = schedule.phase === 'preview'
+        ? await previewModule(context, { module })
+        : await importModule(context, { module, previewToken: state.modules[module].previewToken });
+    }
+  } catch (error) {
+    response = privateJson({}, error instanceof AlfaApiError ? error.status : 503);
+  }
+  const result = await response.json() as Record<string, unknown>;
+  const next = advanceAlfaAutosync(schedule, { ...result, status: response.status }, Date.now());
+  // Read again: the importer persists its module status/cursor independently.
+  const latest = await readState();
+  await persistState({ ...latest, autosync: next });
+  await env.DB.batch([auditStatement('SYSTEM:ALFACRM_AUTOSYNC', 'integration.alfacrm_autosync_tick', {
+    module, phase: schedule.phase, outcome: next.outcome, status: response.status,
+    failures: next.failures, nextAt: next.nextAt,
+  })]);
+  await env.DB.prepare('UPDATE integration_connections SET next_sync_at=? WHERE id=?')
+    .bind(next.enabled ? new Date(next.nextAt).toISOString() : '', CONNECTION_ID).run();
+  return privateJson({ ran: true, outcome: next.outcome });
 }
 
 // The production runtime has a single worker. Serialize connector mutations so
@@ -294,7 +385,7 @@ async function saveBranchMappings(context: RequestContext, body: Record<string, 
   return privateJson({ state: publicState(next), message: `Сопоставлено филиалов: ${Object.keys(mappings).length}. Данные ещё не загружались.` });
 }
 
-async function previewModule(context: RequestContext, body: Record<string, unknown>) {
+async function previewModule(context: ImportContext, body: Record<string, unknown>) {
   const module = normalizeModule(body.module);
   const state = await requireConnectedState();
   const denial = dependencyError(module, state);
@@ -356,7 +447,7 @@ async function previewModule(context: RequestContext, body: Record<string, unkno
   });
 }
 
-async function importModule(context: RequestContext, body: Record<string, unknown>) {
+async function importModule(context: ImportContext, body: Record<string, unknown>) {
   const module = normalizeModule(body.module);
   const state = await requireConnectedState();
   const denial = dependencyError(module, state);
@@ -506,6 +597,7 @@ async function importModule(context: RequestContext, body: Record<string, unknow
 
 async function disconnect(context: RequestContext) {
   const state = await readState();
+  if (state.autosync) state.autosync = { ...state.autosync, enabled: false, outcome: 'paused' };
   const next: AlfaState = { ...state, connected: false, lastCheckedAt: new Date().toISOString() };
   await env.DB.batch([
     env.DB.prepare("DELETE FROM system_runtime_state WHERE state_key=?").bind(CREDENTIAL_STATE_KEY),
@@ -1138,7 +1230,13 @@ function entityUpsert(id: string, entityType: string, displayName: string, sourc
   return env.DB.prepare(`INSERT INTO entities
     (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by,created_at,updated_at)
     VALUES (?,?,?,'Активна','ALFACRM',?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-    ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,status='Активна',data_quality=excluded.data_quality,scope=excluded.scope,metadata=excluded.metadata,updated_at=CURRENT_TIMESTAMP`)
+    ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,status='Активна',
+      data_quality=CASE WHEN entities.display_name=excluded.display_name AND entities.scope=excluded.scope
+        AND entities.status='Активна' AND NOT EXISTS (
+          SELECT 1 FROM json_each(excluded.metadata) incoming
+          WHERE json_extract(entities.metadata, '$.' || incoming.key) IS NOT incoming.value
+        ) THEN entities.data_quality ELSE excluded.data_quality END,
+      scope=excluded.scope,metadata=json_patch(entities.metadata,excluded.metadata),updated_at=CURRENT_TIMESTAMP`)
     .bind(id, entityType, displayName.slice(0, 180), sourceRecordId, dataQuality, scope, JSON.stringify(metadata), actor);
 }
 
@@ -1221,12 +1319,13 @@ function invalidatePreviews(modules: AlfaState["modules"]): AlfaState["modules"]
   return Object.fromEntries(moduleOrder.map((key) => [key, { ...modules[key], previewToken: "", previewSignature: "", cursor: 0 }])) as AlfaState["modules"];
 }
 
-async function assertMappedBranchAccess(context: RequestContext, state: AlfaState) {
+async function assertMappedBranchAccess(context: ImportContext, state: AlfaState) {
   const active = await readLocalBranches();
   const activeIds = new Set(active.map((branch) => branch.id));
   if (Object.values(state.branchMappings).some((id) => !activeIds.has(id))) {
     throw new AlfaApiError("Сопоставленный филиал больше не активен. Собственник должен обновить сопоставление.", 409);
   }
+  if ('scheduler' in context) return;
   if (canonicalOwner(context) || context.auth.user.isAdministrative) return;
   const grants = await env.DB.prepare("SELECT branch_id FROM user_branch_access WHERE user_id=?")
     .bind(context.appUserId).all<{ branch_id: string }>();
