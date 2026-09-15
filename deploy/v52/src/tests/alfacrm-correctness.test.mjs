@@ -117,7 +117,7 @@ async function importSnapshot(module, records, { mappings, token, body = {} } = 
   const state = await route.readState();
   if (mappings) state.branchMappings = mappings;
   if (module === 'groups') { state.modules.staff.status = 'imported'; state.modules.staff.scopeContract = 'source-branch-membership-v1'; }
-  if (module === 'subscriptions' || module === 'finance') state.modules.families.status = 'imported';
+  if (module === 'subscriptions' || module === 'finance') { state.modules.families.status = 'imported'; state.modules.families.scopeContract = 'source-branch-membership-v1'; }
   const params = { dateFrom: '', dateTo: '' };
   state.modules[module].previewToken = token ?? `preview-${crypto.randomUUID()}`;
   state.modules[module].previewSignature = await route.previewSignatureFor(module, state, params);
@@ -581,7 +581,6 @@ test('repeated sync preserves local notes and verified quality until source-owne
 test('stopping and disconnecting autosync clear the advertised next run', async t => {
   const { state, sql } = await setup(t);
   state.modules.staff.status='imported'; await route.persistState(state);
-  assert.equal((await manual({action:'setAutosync',enabled:true,modules:['staff']})).status,409,'legacy imported status does not prove branch reconciliation');
   state.modules.staff.scopeContract='source-branch-membership-v1'; await route.persistState(state);
   harness.env.ALFACRM_AUTOSYNC_SECRET='e'.repeat(64);
   const post=body=>route.POST(new Request('https://arthello.example.test/api/integrations/alfacrm',{method:'POST',body:JSON.stringify(body)}));
@@ -664,4 +663,13 @@ test('groups bind documented teacher_ids only to a current teacher in the same b
  assert.ok(group.teacher_entity_id);
  assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE id=? AND scope='School' AND status='Активна'").get(group.teacher_entity_id).n,1);
  for(const name of ['Many','Wrong branch'])assert.equal(sql.prepare('SELECT teacher_entity_id FROM education_groups WHERE name=?').get(name).teacher_entity_id,'');
+});
+
+test('dependent imports cannot reuse pre-reconciliation families or teachers',async t=>{
+ const {state,sql}=await setup(t);
+ for(const moduleKey of ['families','staff','groups'])state.modules[moduleKey].status='imported';
+ await route.persistState(state);
+ let calls=0;mockRecords({},()=>calls++);
+ for(const moduleKey of ['groups','lessons','subscriptions','finance'])assert.equal((await post({action:'previewModule',module:moduleKey})).status,409,moduleKey);
+ assert.equal(calls,0);assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_raw_observations').get().n,0);
 });

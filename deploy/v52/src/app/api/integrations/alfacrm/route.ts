@@ -1381,6 +1381,11 @@ function mappedRemoteBranches(state: AlfaState) {
 }
 
 function dependencyError(module: ModuleKey, state: AlfaState) {
+  const prerequisites: ModuleKey[] = module === 'groups' ? ['staff'] : module === 'lessons' ? ['staff', 'groups']
+    : module === 'subscriptions' || module === 'finance' ? ['families'] : [];
+  if (prerequisites.some(key => state.modules[key].status === 'imported' && state.modules[key].scopeContract !== ALFA_SCOPE_CONTRACT)) {
+    return 'Сначала повторите полную загрузку исходных разделов с проверкой филиалов: ' + prerequisites.map(moduleTitle).join(', ');
+  }
   if (module === "groups" && state.modules.staff.status !== "imported") return "Сначала загрузите сотрудников: группы должны сразу связаться с педагогами.";
   if (module === "lessons" && (state.modules.staff.status !== "imported" || state.modules.groups.status !== "imported")) return "Сначала загрузите сотрудников и группы.";
   if ((module === "subscriptions" || module === "finance") && state.modules.families.status !== "imported") return "Сначала загрузите семьи и детей.";

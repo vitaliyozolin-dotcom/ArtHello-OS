@@ -22,7 +22,7 @@ test('unknown or malformed membership stops the snapshot instead of assuming the
 });
 test('teachers and groups need source branch membership and current lifecycle',()=>{
  const rows=[{remoteBranchId:'1',item:{id:1,branch_ids:[2]}},{remoteBranchId:'1',item:{id:2,branch_ids:[1],e_date:'01.01.2020'}},{remoteBranchId:'1',item:{id:3,branch_ids:['1']}}];
- for(const module of ['staff','groups'])assert.deepEqual(alfa.scopedAlfaRows(module,rows).map(r=>r.item.id),[3]);
+ for(const moduleKey of ['staff','groups'])assert.deepEqual(alfa.scopedAlfaRows(moduleKey,rows).map(r=>r.item.id),[3]);
 });
 test('legacy raw audit reports unknown evidence without inventing a count of active families',()=>{
  const result=alfa.auditAlfaBranchRows('families',[{remoteBranchId:'1',item:{id:1}}]);

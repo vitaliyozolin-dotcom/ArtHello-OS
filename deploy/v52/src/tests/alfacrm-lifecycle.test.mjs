@@ -116,7 +116,7 @@ async function importSnapshot(module, records, { mappings, token, body = {} } = 
   const state = await route.readState();
   if (mappings) state.branchMappings = mappings;
   if (module === 'groups') { state.modules.staff.status = 'imported'; state.modules.staff.scopeContract = 'source-branch-membership-v1'; }
-  if (module === 'subscriptions' || module === 'finance') state.modules.families.status = 'imported';
+  if (module === 'subscriptions' || module === 'finance') { state.modules.families.status = 'imported'; state.modules.families.scopeContract = 'source-branch-membership-v1'; }
   const params = { dateFrom: '', dateTo: '' };
   state.modules[module].previewToken = token ?? `preview-${crypto.randomUUID()}`;
   state.modules[module].previewSignature = await route.previewSignatureFor(module, state, params);
