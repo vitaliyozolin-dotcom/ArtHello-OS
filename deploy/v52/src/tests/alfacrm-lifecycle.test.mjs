@@ -26,6 +26,7 @@ const adapters = {
   '../../../../lib/production-auth': dataModule('export const getAuthenticatedRequestContext=async()=>globalThis.__alfaLifecycle.actor; export const verifyAuthenticatedRequestCsrf=()=>{if(!globalThis.__alfaLifecycle.csrfValid)throw new Error("fixture csrf rejected");};'),
   '../../../../lib/request-security': dataModule('export const hasTrustedMutationOrigin=()=>globalThis.__alfaLifecycle.originValid;'),
   '../../../../lib/alfacrm-import': alfaImportUrl,
+  '../../../../lib/alfacrm-customer-policy': dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/alfacrm-customer-policy.ts'), 'utf8'), { mode: 'strip' })),
 };
 let source = stripTypeScriptTypes(readFileSync(resolve('app/api/integrations/alfacrm/route.ts'), 'utf8'), { mode: 'transform' })
   .replace(/from\s+["']([^"']+)["']/g, (_all, name) => {
@@ -99,14 +100,14 @@ function mockRecords(byPath, observe = () => {}) {
     const body = init?.body ? JSON.parse(init.body) : {};
     observe(path, body, init);
     if (path === 'auth/login') return Response.json({ token: session.token });
-    const value = byPath[path] ?? [];
+    const value = byPath[path] ?? (/^\d+\/study-status\/index$/.test(path) ? [{ id: 9001, name: 'Активен' }] : []);
     const response = typeof value === 'function' ? await value(body, url, init) : Response.json({ items: value, total: value.length });
     const scope = /^(\d+)\/(customer|teacher|group)\/index$/.exec(path);
     if (!scope || !response.ok) return response;
     let payload; try { payload = await response.clone().json(); } catch { return response; }
     if (!Array.isArray(payload.items)) return response;
     payload.items = payload.items.map(item => item && typeof item === 'object' && !Array.isArray(item)
-      ? { branch_ids: [Number(scope[1])], ...(scope[2] === 'customer' ? { is_study: 1 } : {}), ...item } : item);
+      ? { branch_ids: [Number(scope[1])], ...(scope[2] === 'customer' ? { is_study: 1, study_status_id: 9001 } : {}), ...item } : item);
     return Response.json(payload);
   };
   globalThis.fetch = upstream;

@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { customerPolicy, previewCustomers } from '../lib/alfacrm-customer-policy.ts';
+import { customerPolicy, previewCustomers, resolveCustomerStatuses } from '../lib/alfacrm-customer-policy.ts';
+
+test('status IDs are resolved from each account dictionary without mutating raw records', () => {
+  const record = { id: 10, study_status_id: 1 };
+  assert.equal(resolveCustomerStatuses([record], [{ id: 1, name: 'Завершил' }])[0].statusName, 'Завершил');
+  assert.equal(resolveCustomerStatuses([record], [{ id: 1, name: 'Активен' }])[0].statusName, 'Активен');
+  assert.equal(resolveCustomerStatuses([record], [])[0].statusName, null);
+  assert.deepEqual(record, { id: 10, study_status_id: 1 });
+  assert.throws(() => resolveCustomerStatuses([record], [{ id: 1, name: 'Активен' }, { id: 1, name: 'Открыто' }]));
+});
 
 test('approved statuses retain distinct lifecycle and attendance meaning', () => {
   assert.deepEqual(customerPolicy('Активен'), { include: true, lifecycle: 'active', attendance: 'unspecified', destination: 'clients' });

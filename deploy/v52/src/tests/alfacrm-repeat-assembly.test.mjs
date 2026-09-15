@@ -5,6 +5,7 @@ import { resolve, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { stripTypeScriptTypes } from 'node:module';
+import { customerPolicy } from '../lib/alfacrm-customer-policy.ts';
 
 const routePath = 'app/api/integrations/alfacrm/route.ts';
 const shellPath = 'app/components/IntegrationWorkspace.tsx';
@@ -45,10 +46,10 @@ for (const needsInsertion of [false, true]) {
     };
     let source = stripTypeScriptTypes(first[0], { mode: 'transform' });
     source = source.replace(/^import\s+[\s\S]*?\s+from\s+["'][^"']+["'];?/gm, '');
-    source = `const env={DB:globalThis.__alfaAssemblyDb};\n${source}\nexport {canonicalizeFamilies,defaultState};`;
+    source = `const env={DB:globalThis.__alfaAssemblyDb};\nconst customerPolicy=${customerPolicy.toString()};\n${source}\nexport {canonicalizeFamilies,defaultState};`;
     const route = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}#${needsInsertion}`);
     const state = route.defaultState(); state.branchMappings = { '7': 'BR-FIXTURE' };
-    const result = await route.canonicalizeFamilies([{ remoteBranchId: '7', item: { id: 101, name: 'Fixture pupil', legal_name: 'Fixture guardian' } }], state, [{ id: 'BR-FIXTURE', name: 'Fixture branch' }], 'fixture');
+    const result = await route.canonicalizeFamilies([{ remoteBranchId: '7', statusName: 'Активен', item: { id: 101, name: 'Fixture pupil', legal_name: 'Fixture guardian' } }], state, [{ id: 'BR-FIXTURE', name: 'Fixture branch' }], 'fixture');
     assert.deepEqual(result, { accepted: 1, rejected: 0 });
     assert.equal(writes.filter(statement => /INSERT INTO alfacrm_family_merge_candidates\b/.test(statement.sql)).length, 1);
     assert.equal(writes.filter(statement => /INSERT INTO alfacrm_projection_lineage\b/.test(statement.sql)).length, 3, 'all family projections retain their lineage');

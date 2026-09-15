@@ -50,6 +50,7 @@ type AlfaPayload = {
   error?: string;
 };
 type ActionResponse = Partial<AlfaPayload> & {
+  customerPreview?: CustomerPreview;
   state?: AlfaState;
   error?: string;
   message?: string;
@@ -60,6 +61,15 @@ type ActionResponse = Partial<AlfaPayload> & {
   nextCursor?: number;
   rejected?: number;
   projectionBlocked?: boolean;
+};
+
+type CustomerPreview = {
+  observedAt: string; branchNames: Record<string, string>;
+  byBranch: Record<string, { observed: number; included: number; active: number; open: number; single: number; leads: number; excluded: number; review: number }>;
+  includedAssignments: number; uniqueIncludedCustomerIds: number;
+  excludedStatus: number; excludedLifecycle: number; foreignBranch: number; unknown: number; duplicates: number;
+  intersections: Array<{id: string; branches: string[]}>;
+  schoolAssignments: Array<{id: string; branch: string}>;
 };
 
 type ModuleDefinition = {
@@ -116,6 +126,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
   });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
+  const [customerPreview, setCustomerPreview] = useState<CustomerPreview | null>(null);
   const [connectionEdit, setConnectionEdit] = useState(false);
   const [connection, setConnection] = useState({ endpoint: "https://arthellonew.s20.online", email: "", apiKey: "", appKey: "" });
   const [mappings, setMappings] = useState<Record<string, string>>({});
@@ -213,6 +224,8 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
     setBusy(key);
     try {
       const result = await request(body);
+      if (result.state) setCustomerPreview(null);
+      if (result.customerPreview) setCustomerPreview(result.customerPreview);
       if (result.state) applyPayload({ state: result.state });
       if (result.message) notify(result.message, "success");
       return result;
@@ -338,6 +351,16 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
             </div>
             {!payload.localBranches.length ? <div className="ahAlfaCrmWarning">В ArtHello OS нет активных филиалов для сопоставления. Сначала создайте их в настройках структуры.</div> : null}
             {payload.canManageCredentials?<div><button type="button" disabled={Boolean(busy)} onClick={()=>void auditBranches()}>{busy==="scopeAudit"?"Сверяю…":"Сверить сохранённые данные по филиалам"}</button>
+              <button type="button" disabled={Boolean(busy)} onClick={() => { setCustomerPreview(null); void post({ action: 'previewCustomers' }, 'customerPreview'); }}>{busy === 'customerPreview' ? 'Читаю Альфу…' : 'Проверить клиентов без применения'}</button>
+              {customerPreview ? <div role="status">
+                <p>Сверка источника: {customerPreview.observedAt}. Данные ОС не изменены.</p>
+                <table><thead><tr><th>Филиал Альфы</th><th>Активные</th><th>Открыто</th><th>Разовые</th><th>Запись</th><th>Исключены по статусу</th><th>На сверку</th></tr></thead><tbody>
+                  {Object.entries(customerPreview.byBranch).map(([id, row]) => <tr key={id}><td>{customerPreview.branchNames[id] ?? id}</td><td>{row.active}</td><td>{row.open}</td><td>{row.single}</td><td>{row.leads}</td><td>{row.excluded}</td><td>{row.review}</td></tr>)}
+                </tbody></table>
+                <p>Включено назначений: {customerPreview.includedAssignments}. Уникальных ID клиентов: {customerPreview.uniqueIncludedCustomerIds}. Это не количество семей.</p>
+                <p>Межфилиальных пересечений по ID: {customerPreview.intersections.length}. Чужой филиал: {customerPreview.foreignBranch}. Исключены по состоянию записи: {customerPreview.excludedLifecycle}. Не подтверждено: {customerPreview.unknown}. Повторов: {customerPreview.duplicates}.</p>
+                <p>Школьных назначений для проверки разнесения: {customerPreview.schoolAssignments.length}. Это сверка Альфы; изменения существующих карточек ОС ещё не рассчитаны.</p>
+              </div> : null}
               {payload.scopeAudit?<div role="status"><p>{payload.scopeAudit.source}. {payload.scopeAudit.note}</p>
                 <table><thead><tr><th>Раздел</th><th>Записей</th><th>В своём филиале</th><th>Чужой филиал</th><th>Неактивные</th><th>Не подтверждено</th></tr></thead><tbody>
                 {Object.entries(payload.scopeAudit.modules).map(([key,row])=><tr key={key}><td>{modules.find(m=>m.key===key)?.title??key}</td><td>{row.observed}</td><td>{row.accepted}</td><td>{row.foreignBranch}</td><td>{row.inactive}</td><td>{row.unknown}</td></tr>)}

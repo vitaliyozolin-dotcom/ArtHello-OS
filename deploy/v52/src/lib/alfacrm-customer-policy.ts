@@ -24,6 +24,17 @@ export type PreviewCustomer = {
   branchIds?: string[];
 };
 
+export function resolveCustomerStatuses(records: readonly Record<string, unknown>[], dictionary: readonly Record<string, unknown>[]) {
+  const names = new Map<string, string>();
+  for (const entry of dictionary) {
+    const id = String(entry.id ?? '');
+    const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+    if (!/^[1-9]\d*$/.test(id) || !name || names.has(id)) throw new Error('Справочник статусов AlfaCRM не подтверждён');
+    names.set(id, name);
+  }
+  return records.map(record => ({ record, statusName: names.get(String(record.study_status_id ?? '')) ?? null }));
+}
+
 /** Pure source preview. It neither writes data nor represents an OS migration plan. */
 export function previewCustomers(rows: readonly PreviewCustomer[], branches: readonly string[], snapshot: { complete: boolean }) {
   const byBranch: Record<string, { observed: number; included: number; active: number; open: number; single: number; leads: number; excluded: number; review: number }> = {};

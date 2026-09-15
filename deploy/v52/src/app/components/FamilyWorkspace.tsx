@@ -40,7 +40,7 @@ export function FamilyWorkspace({notify,onOpenIntegrations,onNavigate,canArchive
     {state==="loading"?<div className="family-state"><strong>Загружаем семьи…</strong><span>Собираем единые карточки и связи.</span></div>:null}
     {state==="error"?<div className="family-state"><strong>Семьи временно недоступны</strong><button onClick={()=>void load()}>Повторить</button></div>:null}
     {state==="ready"&&!visible.length?<div className="family-state"><strong>Семей в этом списке пока нет</strong><span>Импортируйте данные из AlfaCRM или создайте семью вручную.</span><button onClick={()=>setEditor("create")}>+ Добавить семью</button></div>:null}
-    {state==="ready"&&visible.length?<><div className="family-grid">{visible.map(family=><article key={family.id}><button className="family-main" disabled={networkLoadingId===family.id} onClick={()=>void openNetwork(family.id)}><span>{recordLabel("Семья",family.id)}</span><h2>{family.displayName}</h2><p>{familyBranches(family)}</p><small>{networkLoadingId===family.id?"Открываем карточку…":`${sourceLabel(family.sourceSystem)} · ${familyDataState(family)}`}</small></button><footer><span className={familyNeedsReview(family)?"review":"verified"}>{familyDataState(family)}</span><div><button disabled={busy} onClick={()=>void edit(family.id)}>Редактировать всё</button><button onClick={()=>onNavigate("legal",family.id)}>Договоры →</button>{canArchive?<button disabled={busy} onClick={()=>void archiveFamily(family)}>{family.status==="Архив"?"Восстановить":"В архив"}</button>:null}</div></footer></article>)}</div>{families.length<total?<div className="family-load-more"><button className="secondary-action" disabled={loadingMore} onClick={()=>void load(families.length)}>{loadingMore?"Загружаем…":`Показать ещё · ${families.length} из ${total}`}</button></div>:null}</>:null}
+    {state==="ready"&&visible.length?<><div className="family-grid">{visible.map(family=><article key={family.id}><button className="family-main" disabled={networkLoadingId===family.id} onClick={()=>void openNetwork(family.id)}><span>{recordLabel("Семья",family.id)}</span><h2>{family.displayName}</h2><p>{familyBranches(family)}</p><small>{networkLoadingId===family.id?"Открываем карточку…":`${sourceLabel(family.sourceSystem)} · ${familyCustomerStatus(family)} · ${familyDataState(family)}`}</small></button><footer><span className={familyNeedsReview(family)?"review":"verified"}>{familyDataState(family)}</span><div><button disabled={busy} onClick={()=>void edit(family.id)}>Редактировать всё</button><button onClick={()=>onNavigate("legal",family.id)}>Договоры →</button>{canArchive?<button disabled={busy} onClick={()=>void archiveFamily(family)}>{family.status==="Архив"?"Восстановить":"В архив"}</button>:null}</div></footer></article>)}</div>{families.length<total?<div className="family-load-more"><button className="secondary-action" disabled={loadingMore} onClick={()=>void load(families.length)}>{loadingMore?"Загружаем…":`Показать ещё · ${families.length} из ${total}`}</button></div>:null}</>:null}
     {network?<FamilyDetailCard detail={network} close={()=>setNetwork(null)} edit={()=>{setNetwork(null);void edit(network.family.id)}} navigate={onNavigate}/>:null}
     {editor?<FamilyEditor detail={editor==="create"?null:editor} busy={busy} close={()=>setEditor(null)} submit={save}/>:null}
   </section>
@@ -87,6 +87,18 @@ function familyNeedsReview(family:Pick<Family,"sourceSystem"|"dataQuality">){ret
 function rub(minor:number){return new Intl.NumberFormat("ru-RU",{style:"currency",currency:"RUB",maximumFractionDigits:0}).format(minor/100)}
 function signedRub(minor:number){return `${minor>0?"+":""}${rub(minor)}`}
 function daysBetween(from:string,to:string){const start=Date.parse(from),end=Date.parse(to);return Number.isFinite(start)&&Number.isFinite(end)?Math.max(0,Math.ceil((end-start)/86400000)):0}
+
+function familyCustomerStatus(family: Family) {
+  if (family.status === 'Архив') return 'Архив';
+  try {
+    const meta = JSON.parse(family.metadata);
+    const labels: Record<string, string> = { active: 'Активен', open: 'Открыто', lead: 'Запись · лид', unverified: 'Активность не подтверждена', review: 'Статус требует сверки' };
+    const describe = (row: Record<string, unknown>) => `${labels[String(row.customerLifecycle)] ?? 'Статус требует сверки'}${row.attendanceFormat === 'single' ? ' · разовые посещения' : ''}`;
+    if (Array.isArray(meta.branchAssignments)) return meta.branchAssignments.filter((row: Record<string, unknown>) => row.active === true).map((row: Record<string, unknown>) => `${String(row.scope)}: ${describe(row)}`).join('; ') || 'Статус требует сверки';
+    if (family.sourceSystem === 'ALFACRM') return describe(meta);
+  } catch { /* Unverified source state is never presented as active. */ }
+  return family.sourceSystem === 'ALFACRM' ? 'Статус требует сверки' : family.status;
+}
 
 function familyBranches(family: Family) {
   try { const assignments = JSON.parse(family.metadata).branchAssignments;
