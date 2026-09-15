@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { runChunkedAlfaImport } from "../../lib/alfacrm-import";
+import { runChunkedAlfaImport, ALFA_AUTO_MODULES, type AlfaAutosync } from "../../lib/alfacrm-import";
 import "./AlfaCrmSetupWizard.css";
 
 type ModuleKey = "families" | "staff" | "groups" | "lessons" | "subscriptions" | "finance";
@@ -20,6 +20,7 @@ type ModuleState = {
   note: string;
 };
 type AlfaState = {
+  autosync?: AlfaAutosync;
   version: 1;
   connected: boolean;
   endpoint: string;
@@ -33,6 +34,7 @@ type AlfaState = {
   legacyDraft?: { remoteBranchId: string; localBranchId: string; startDate: string; dataScopes: string[] };
 };
 type AlfaPayload = {
+  autosyncAvailable?: boolean;
   state: AlfaState;
   localBranches: Array<{ id: string; name: string }>;
   credentialStored: boolean;
@@ -103,6 +105,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
   notify: (message: string, tone?: "success" | "error" | "info") => void;
 }) {
   const dialogRef = useRef<HTMLElement>(null);
+  const [autoModules, setAutoModules] = useState<string[]>(['families', 'staff', 'groups']);
   const [payload, setPayload] = useState<AlfaPayload>({
     state: emptyState(), localBranches: [], credentialStored: false, canManage: false, canManageCredentials: false,
     importEnabled: false, importBlockedReason: "",
@@ -324,6 +327,30 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
             <div className="ahAlfaCrmPanelActions"><button type="button" disabled={!payload.canManageCredentials || Boolean(busy) || !Object.values(mappings).some(Boolean)} onClick={() => void post({ action: "saveBranchMappings", mappings }, "mapping")}>{busy === "mapping" ? "Сохраняю…" : "Сохранить сопоставление филиалов"}</button></div>
           </section> : null}
 
+          {!loading && state.connected && mappedCount > 0 ? <section className="ahAlfaCrmPanel">
+            <div className="ahAlfaCrmPanelHeading"><div>
+              <h3>Автоматическое обновление</h3>
+              <p>Обновление из AlfaCRM каждый час после завершения предыдущего цикла. Доступы выдаются отдельно.</p>
+            </div><StatusBadge status={state.autosync?.enabled ? 'connected' : 'info'} text={state.autosync?.enabled ? 'Включено' : 'Остановлено'} /></div>
+            <p>Последний полный цикл: {state.autosync?.lastSuccessAt ? new Date(state.autosync.lastSuccessAt).toLocaleString('ru-RU') : 'Ещё не завершён'}.
+              {state.autosync?.enabled ? ` Следующий шаг: ${new Date(state.autosync.nextAt).toLocaleString('ru-RU')}.` : ''}</p>
+            {state.autosync?.outcome === 'retry' ? <p role="status">Временная ошибка. Повтор запланирован; попыток: {state.autosync.failures}.</p> : null}
+            {state.autosync?.outcome === 'paused' ? <p role="status">Обновление остановлено. Проверьте данные и журнал перед включением.</p> : null}
+            {!payload.autosyncAvailable ? <p>Фоновое обновление ещё не подключено на сервере.</p> : null}
+            {ALFA_AUTO_MODULES.map(key => <label key={key} style={{ display: 'block' }}>
+              <input type="checkbox" checked={state.autosync?.enabled ? state.autosync.modules.includes(key) : autoModules.includes(key)}
+                disabled={!payload.canManageCredentials || Boolean(state.autosync?.enabled) || state.modules[key].status !== 'imported'}
+                onChange={e => setAutoModules(current => e.target.checked ? [...current, key] : current.filter(m => m !== key))} />
+              {modules.find(m => m.key === key)?.title}{state.modules[key].status !== 'imported' ? ' — первичная загрузка не завершена' : ''}
+            </label>)}
+            <div className="ahAlfaCrmPanelActions">
+              <button type="button" disabled={!payload.canManageCredentials || Boolean(busy) || (!state.autosync?.enabled && (!payload.autosyncAvailable || !autoModules.length || autoModules.some(key => state.modules[key as ModuleKey].status !== 'imported')))}
+                onClick={() => void post({ action: 'setAutosync', enabled: !state.autosync?.enabled, modules: autoModules }, 'autosync')}>
+                {state.autosync?.enabled ? 'Остановить обновление' : 'Включить обновление'}</button>
+              <button type="button" className="secondary" disabled={Boolean(busy)} onClick={() => void load()}>Обновить статус</button>
+            </div>
+          </section> : null}
+
           {!loading && state.connected && mappedCount > 0 ? <section className="ahAlfaCrmPanel ahAlfaCrmDataPanel">
             <div className="ahAlfaCrmPanelHeading">
               <div>
@@ -341,7 +368,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
                 period={periods[definition.key]}
                 setPeriod={(period) => setPeriods({ ...periods, [definition.key]: period })}
                 busy={busy}
-                canManage={payload.canManage}
+                canManage={payload.canManage && !state.autosync?.enabled}
                 importEnabled={payload.importEnabled}
                 preview={() => post(moduleRequest("previewModule", definition, periods[definition.key]), `preview-${definition.key}`)}
                 importData={() => importData(definition, periods[definition.key], state.modules[definition.key].previewToken)}
