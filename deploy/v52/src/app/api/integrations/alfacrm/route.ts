@@ -12,7 +12,7 @@ import {
   verifyAuthenticatedRequestCsrf,
 } from "../../../../lib/production-auth";
 import { hasTrustedMutationOrigin } from "../../../../lib/request-security";
-import { isCurrentAlfaStaffRecord, newAlfaAutosync, advanceAlfaAutosync, authenticateAlfaAutosync, type AlfaAutosync } from "../../../../lib/alfacrm-import";
+import { scopedAlfaRows, auditAlfaBranchRows, alfaBranchDisposition, ALFA_SCOPE_CONTRACT, newAlfaAutosync, advanceAlfaAutosync, authenticateAlfaAutosync, type AlfaAutosync } from "../../../../lib/alfacrm-import";
 
 const CONNECTION_ID = "INT-T-ALFACRM";
 const STATE_KEY = "alfacrm_connector:v1";
@@ -39,6 +39,7 @@ type RemoteBranch = { id: string; name: string };
 type LocalBranch = { id: string; name: string };
 type LegacyDraft = { remoteBranchId: string; localBranchId: string; startDate: string; dataScopes: string[] };
 type ModuleState = {
+  scopeContract?: string;
   status: "not_started" | "previewed" | "importing" | "imported" | "error";
   previewCount: number;
   importedCount: number;
@@ -90,6 +91,8 @@ export async function GET(request: Request) {
         .bind(CREDENTIAL_STATE_KEY).first<{ present: number }>(),
     ]);
     const credentialStored = credentialRow?.present === 1;
+    const requestedAudit = new URL(request.url).searchParams.get('scopeAudit') === '1';
+    if (requestedAudit && !canonicalOwner(context)) return privateJson({ error: 'Сверка всех филиалов доступна собственнику' }, 403);
     return privateJson({
       state: publicState({ ...state, connected: state.connected && credentialStored }),
       localBranches: branches,
@@ -100,6 +103,7 @@ export async function GET(request: Request) {
       canManageCredentials: canonicalOwner(context),
       autosyncAvailable: Boolean(alfaAutosyncSecret()) && alfaCrmImportEnabled(),
       direction: "AlfaCRM → ArtHello OS",
+      ...(requestedAudit ? { scopeAudit: await storedScopeAudit() } : {}),
       boundary: "Первичная загрузка выполняется только по выбранным филиалам и модулям. Обратная запись в AlfaCRM отключена.",
     });
   } catch (error) {
@@ -157,7 +161,25 @@ function alfaAutosyncSecret() {
 }
 
 async function alfaAutosyncScope(state: AlfaState) {
-  return hashText(JSON.stringify([state.endpoint, Object.entries(state.branchMappings).sort(), state.remoteBranches.map(b => b.id).sort()]));
+  return hashText(JSON.stringify([ALFA_SCOPE_CONTRACT, state.endpoint, Object.entries(state.branchMappings).sort(), state.remoteBranches.map(b => b.id).sort()]));
+}
+
+async function storedScopeAudit() {
+  const records = await env.DB.prepare(`SELECT c.module,c.remote_branch_id,o.payload,o.observed_at
+    FROM alfacrm_current_records c JOIN alfacrm_raw_observations o ON o.id=c.observation_id
+    WHERE c.module IN ('families','staff','groups')`).all<{ module: string; remote_branch_id: string; payload: string; observed_at: string }>();
+  const report: Record<string, unknown> = {};
+  for (const module of ['families', 'staff', 'groups']) {
+    const sourceRows = (records.results ?? []).filter(row => row.module === module);
+    const rows = sourceRows.map(row => {
+      let item: JsonRecord = {}; try { item = JSON.parse(row.payload) as JsonRecord; } catch { /* unknown evidence */ }
+      return { remoteBranchId: row.remote_branch_id, item };
+    });
+    report[module] = { ...auditAlfaBranchRows(module, rows), lastObservedAt: sourceRows.map(r => r.observed_at).sort().at(-1) ?? '' };
+  }
+  const familyCounts = await env.DB.prepare("SELECT status,COUNT(*) AS count FROM entities WHERE entity_type='Семья' GROUP BY status").all<{ status: string; count: number }>();
+  return { source: 'Последние сохранённые ответы AlfaCRM', modules: report, familyCardsByStatus: familyCounts.results ?? [],
+    note: 'Уникальные ID клиентов не равны уникальным семьям: несколько детей могут иметь одного представителя. Текущее состояние AlfaCRM подтверждается новой полной загрузкой.' };
 }
 
 async function configureAlfaAutosync(context: RequestContext, body: Record<string, unknown>) {
@@ -175,8 +197,8 @@ async function configureAlfaAutosync(context: RequestContext, body: Record<strin
     let schedule: AlfaAutosync;
     try { schedule = newAlfaAutosync(modules, await alfaAutosyncScope(state), Date.now()); }
     catch { return privateJson({ error: 'Выберите семьи, сотрудников и зависимые группы или остатки' }, 400); }
-    if (schedule.modules.some(m => state.modules[m].status !== 'imported')) {
-      return privateJson({ error: 'Сначала завершите и сверьте первичную загрузку выбранных разделов' }, 409);
+    if (schedule.modules.some(m => state.modules[m].status !== 'imported' || state.modules[m].scopeContract !== ALFA_SCOPE_CONTRACT)) {
+      return privateJson({ error: 'Сначала повторите полную загрузку выбранных разделов с проверкой филиалов' }, 409);
     }
     state.autosync = schedule;
   }
@@ -489,6 +511,9 @@ async function importModule(context: ImportContext, body: Record<string, unknown
       if (freshCustomers.length > 1 || freshCustomers.some((item) => scalar(item.id) !== customer.customerId)) {
         throw new Error("AlfaCRM вернула другой состав клиентов вместо выбранной карточки. Остатки не импортированы.");
       }
+      if (freshCustomers.some(item => alfaBranchDisposition('families', { remoteBranchId: customer.remoteBranchId, item }) !== 'accepted')) {
+        throw new AlfaApiError('Клиент больше не подтверждён в выбранном филиале. Сначала пересверьте семьи.', 409);
+      }
       const tariffs = await fetchPaged(session, `${customer.remoteBranchId}/customer-tariff/index?customer_id=${encodeURIComponent(customer.customerId)}`, { dead: false });
       if (tariffs.some((item) => scalar(item.customer_id) && scalar(item.customer_id) !== customer.customerId)) {
         throw new Error("AlfaCRM вернула абонемент другого клиента. Остатки не импортированы.");
@@ -509,6 +534,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     rows = await fetchModuleRecords(session, module, selectedBranches, params);
   }
 
+  const projectionRows = currentProjectionRows(module, rows);
   const batchId = crypto.randomUUID();
   await env.DB.prepare("INSERT INTO alfacrm_import_batches (id,module,scope,status,created_at) VALUES (?,?,?,'projecting',?)")
     .bind(batchId, module, JSON.stringify({ endpoint: state.endpoint, selectedBranches, params }), new Date().toISOString()).run();
@@ -516,7 +542,6 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   // Keep every immutable upstream observation, including the evidence that a
   // teacher is inactive or ended. Lifecycle filtering only shapes the current
   // ArtHello projection and the set used to reconcile departed employees.
-  const projectionRows = currentProjectionRows(module, rows);
   let accepted = 0;
   let rejected = 0;
   let invalidBalanceCount = 0;
@@ -542,6 +567,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     : accepted;
   const moduleState: ModuleState = {
     ...storedModule,
+    scopeContract: complete && rejected === 0 && !projectionBlocked ? ALFA_SCOPE_CONTRACT : storedModule.scopeContract,
     status: rejected || projectionBlocked ? "error" : complete ? "imported" : "importing",
     previewToken: complete || rejected > 0 ? "" : storedModule.previewToken,
     previewSignature: complete || rejected > 0 ? "" : storedModule.previewSignature,
@@ -688,7 +714,8 @@ async function fetchModuleRecords(session: AlfaSession, module: ModuleKey, branc
 }
 
 function currentProjectionRows(module: ModuleKey, rows: FetchedRecord[]) {
-  return module === "staff" ? rows.filter(({ item }) => isCurrentAlfaStaffRecord(item)) : rows;
+  try { return scopedAlfaRows(module, rows); }
+  catch { throw new AlfaApiError("AlfaCRM не подтвердила филиал или состояние записи. Загрузка остановлена; существующие карточки сохранены.", 409); }
 }
 
 async function fetchPaged(session: AlfaSession, path: string, filters: JsonRecord) {
@@ -1060,7 +1087,10 @@ async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, local
     const localBranchId = state.branchMappings[remoteBranchId] ?? "";
     if (!groupId || !name || !localBranchId) { rejected += 1; continue; }
     const teacherRemoteId = scalar(item.teacher_id) || firstTeacherId(item);
-    const teacherEntityId = teacherRemoteId ? await localTeacherId(remoteBranchId, teacherRemoteId) : "";
+    const candidateTeacherId = teacherRemoteId ? await localTeacherId(remoteBranchId, teacherRemoteId) : "";
+    const currentTeacher = candidateTeacherId ? await env.DB.prepare("SELECT id FROM entities WHERE id=? AND entity_type='Сотрудник' AND status='Активна' AND json_extract(metadata,'$.remoteBranchId')=?")
+      .bind(candidateTeacherId, remoteBranchId).first<{ id: string }>() : null;
+    const teacherEntityId = currentTeacher?.id ?? "";
     const id = await localGroupId(remoteBranchId, groupId);
     const programId = programIds.get(localBranchId) ?? `PRG-A-${await shortHash(localBranchId)}`;
     statements.push(env.DB.prepare(`INSERT INTO education_groups
@@ -1093,6 +1123,7 @@ async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string) {
     if (!state.branchMappings[row.remote_branch_id]) continue;
     let item: JsonRecord;
     try { item = JSON.parse(row.payload) as JsonRecord; } catch { continue; }
+    if (alfaBranchDisposition('families', { remoteBranchId: row.remote_branch_id, item }) !== 'accepted') continue;
     const studentId = scalar(item.id) || row.record_id;
     const childId = `CHD-A-${await shortHash(`${row.remote_branch_id}:${studentId}`)}`;
     const familyId = `FAM-A-${await shortHash(`${row.remote_branch_id}:student:${studentId}`)}`;
@@ -1101,9 +1132,9 @@ async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string) {
       const studentRowId = `STU-A-${await shortHash(`${row.remote_branch_id}:${studentId}:${remoteGroupId}`)}`;
       statements.push(env.DB.prepare(`INSERT INTO education_students
         (id,child_entity_id,family_entity_id,group_id,cabinet_status,status)
-        SELECT ?,?,?,?,'Доступ не выдан','Активен' WHERE EXISTS (SELECT 1 FROM education_groups WHERE id=? AND status='Активна') AND EXISTS (SELECT 1 FROM entities WHERE id=? AND status='Активна')
+        SELECT ?,?,?,?,'Доступ не выдан','Активен' WHERE EXISTS (SELECT 1 FROM education_groups WHERE id=? AND status='Активна') AND EXISTS (SELECT 1 FROM entities WHERE id=? AND status='Активна') AND EXISTS (SELECT 1 FROM entities WHERE id=? AND status='Активна')
         ON CONFLICT(id) DO UPDATE SET child_entity_id=excluded.child_entity_id,family_entity_id=excluded.family_entity_id,group_id=excluded.group_id,status='Активен'`)
-        .bind(studentRowId, childId, familyId, groupId, groupId, childId));
+        .bind(studentRowId, childId, familyId, groupId, groupId, childId, familyId));
       statements.push(lineageStatement("education_students", studentRowId, "families", row.remote_branch_id, studentId));
     }
   }
@@ -1230,7 +1261,8 @@ function entityUpsert(id: string, entityType: string, displayName: string, sourc
   return env.DB.prepare(`INSERT INTO entities
     (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by,created_at,updated_at)
     VALUES (?,?,?,'Активна','ALFACRM',?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-    ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,status='Активна',
+    ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,
+      status=CASE WHEN json_extract(entities.metadata,'$.localArchive')=1 THEN 'Архив' ELSE 'Активна' END,
       data_quality=CASE WHEN entities.display_name=excluded.display_name AND entities.scope=excluded.scope
         AND entities.status='Активна' AND NOT EXISTS (
           SELECT 1 FROM json_each(excluded.metadata) incoming
@@ -1377,7 +1409,7 @@ function moduleParams(module: ModuleKey, body: Record<string, unknown>) {
 async function previewSignatureFor(module: ModuleKey, state: AlfaState, params: { dateFrom: string; dateTo: string }) {
   const mappings = Object.entries(state.branchMappings).sort(([left], [right]) => left.localeCompare(right));
   const sourceContract = module === "subscriptions" ? SUBSCRIPTION_SOURCE_CONTRACT : module === "finance" ? "pay-direction-unverified-v2" : undefined;
-  return hashText(JSON.stringify({ endpoint: state.endpoint, connectedAt: state.connectedAt, module, mappings, params, sourceContract }));
+  return hashText(JSON.stringify({ scopeContract: ALFA_SCOPE_CONTRACT, endpoint: state.endpoint, connectedAt: state.connectedAt, module, mappings, params, sourceContract }));
 }
 
 function alfaCrmImportEnabled() {
@@ -1456,12 +1488,11 @@ function groupIds(item: JsonRecord) {
 }
 
 function firstTeacherId(item: JsonRecord) {
-  const teachers = Array.isArray(item.teachers) ? item.teachers : [];
-  for (const value of teachers) {
-    const id = scalar(record(value)?.id ?? value);
-    if (id) return id;
-  }
-  return "";
+  const teachers = Array.isArray(item.teacher_ids) ? item.teacher_ids : Array.isArray(item.teachers) ? item.teachers : [];
+  const ids = [...new Set(teachers.map(value => scalar(record(value)?.id ?? value)).filter(Boolean))];
+  // The OS group has one teacher slot; preserve multi-teacher evidence in raw
+  // records instead of arbitrarily appointing the first person.
+  return ids.length === 1 ? ids[0] : "";
 }
 
 function scalar(value: unknown): string {

@@ -158,3 +158,8 @@
 - Candidate implemented: preservation of local notes and unchanged verified source records on repeated import.
 - [ ] Complete protected release and runtime activation after reconciling AlfaCRM branch data.
 - [ ] Separately diagnose OS → diary outbox delivery and verify pupils in both School 1–11 and Atlas.
+
+### D188 — исправление AlfaCRM и архив семей
+
+- Кандидат: проверка branch_ids/is_study, отсутствие чужих проекций, сохранение ручного архива, teacher_ids и owner-only отчёт. Новый контракт блокирует включение D187 до повторной полной сверки.
+- Открыто: проверенный выпуск, фактическая свежая сверка количества семей/клиентов по всем филиалам, два полных автоматических цикла, отдельная передача в оба дневника. Оценка 200 не является фильтром. Не считать PR исправлением production.

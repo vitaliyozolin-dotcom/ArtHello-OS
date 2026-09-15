@@ -7,6 +7,51 @@ type AlfaImportBatch = {
   [key: string]: unknown;
 };
 
+type ScopedAlfaRow = { remoteBranchId: string; item: Record<string, unknown> };
+export const ALFA_SCOPE_CONTRACT = 'source-branch-membership-v1';
+export function alfaBranchDisposition(module: string, row: ScopedAlfaRow): 'accepted' | 'foreignBranch' | 'inactive' | 'unknown' {
+  const { item, remoteBranchId } = row;
+  const id = (value: unknown) => (typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
+    || (typeof value === 'string' && /^[1-9]\d*$/.test(value));
+  if (!id(item.id) || !id(remoteBranchId)) return 'unknown';
+  const branches = ['families', 'staff', 'groups'].includes(module) ? item.branch_ids : [item.branch_id];
+  if (!Array.isArray(branches) || !branches.every(id)) return 'unknown';
+  if (!branches.map(String).includes(remoteBranchId)) return 'foreignBranch';
+  if (module === 'families') {
+    if (![0, 1, '0', '1', false, true].includes(item.is_study as number)) return 'unknown';
+    if (isFalseFlag(item.is_study)) return 'inactive';
+  }
+  if ([true, 1, 2, '1', '2', 'true'].includes(item.removed as number) || isFalseFlag(item.is_active)) return 'inactive';
+  if (['staff', 'groups'].includes(module) && !isCurrentAlfaStaffRecord(item)) return 'inactive';
+  return 'accepted';
+}
+
+export function scopedAlfaRows<T extends ScopedAlfaRow>(module: string, rows: T[]): T[] {
+  if (!['families', 'staff', 'groups', 'lessons'].includes(module)) return rows;
+  const classified = rows.map(row => ({ row, disposition: alfaBranchDisposition(module, row) }));
+  if (classified.some(r => r.disposition === 'unknown')) {
+    throw new Error('AlfaCRM не подтвердила филиал или состояние записи. Загрузка остановлена; существующие карточки сохранены.');
+  }
+  return classified.filter(r => r.disposition === 'accepted').map(r => r.row);
+}
+
+export function auditAlfaBranchRows(module: string, rows: ScopedAlfaRow[]) {
+  const result = { observed: rows.length, accepted: 0, foreignBranch: 0, inactive: 0, unknown: 0,
+    uniqueCustomers: 0, complete: true, byBranch: {} as Record<string, number> };
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const disposition = alfaBranchDisposition(module, row);
+    result[disposition] += 1;
+    if (disposition === 'accepted') {
+      ids.add(String(row.item.id));
+      result.byBranch[row.remoteBranchId] = (result.byBranch[row.remoteBranchId] ?? 0) + 1;
+    }
+  }
+  result.uniqueCustomers = ids.size;
+  result.complete = result.unknown === 0;
+  return result;
+}
+
 export const ALFA_AUTO_MODULES = ['families', 'staff', 'groups', 'subscriptions'] as const;
 export type AlfaAutoModule = typeof ALFA_AUTO_MODULES[number];
 export type AlfaAutosync = {

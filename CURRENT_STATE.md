@@ -605,3 +605,7 @@ D186 после остановки Atlas копирует стабильные m
 ## 2026-09-15 — D187 AlfaCRM automatic refresh candidate
 
 Added a server timer, persisted cycle/backoff, owner-controlled modules and scope, and visible last-success/next-step status. It reuses the staged importer and its identity/lineage gates. Re-import preserves local metadata and verified quality when source-owned fields are unchanged. No production activation is claimed. The observed AlfaCRM branch-data mismatch must be reconciled before activation. Both diary directories remain separately unpopulated with pupils; AlfaCRM scheduling does not resolve central-access outbox delivery.
+
+### 2026-09-15 — D188, кандидат исправления филиалов AlfaCRM
+
+Найдено: importer доверял филиалу URL без `branch_ids` записи, список семей включал архив, `teacher_ids` групп не читался, Docker image D187 не включал импортируемый файл таймера. Подготовлены проверка принадлежности, повторная сверка с архивированием ошибочных проекций, обратимый ручной архив и отчёт по источнику. Лист2 остаётся источником расписания с 01.09.2026. Число действующих семей не подтверждено свежей выгрузкой. После обновления страниц в обоих дневниках: 1–11 — 6 классов, 0 учеников, 13 педагогических позиций; Атлас — 0/0/0. Production пока не изменён. Подробности: `docs/acceptance/2026-09-15-d188-alfa-branch-archive.md`.

@@ -70,3 +70,8 @@ test('timer serializes requests, suppresses response data and does not restart a
   assert.equal(queue.length,0);
   assert.deepEqual(logs,['ALFACRM_AUTOSYNC_TICK=INVALID_RESPONSE']);
 });
+
+test('production image carries the Alfa timer imported by the runtime',()=>{
+ let docker; try { docker=readFileSync(new URL('../../Dockerfile',import.meta.url),'utf8'); } catch(error) { if(error.code!=='ENOENT')throw error; docker=readFileSync(new URL('../contract-fixtures/v52.Dockerfile',import.meta.url),'utf8'); }
+ assert.match(docker,/COPY --from=application \/app\/production\/alfacrm-autosync-timer\.mjs \/app\/production\/alfacrm-autosync-timer\.mjs/);
+});

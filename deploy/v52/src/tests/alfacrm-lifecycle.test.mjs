@@ -94,8 +94,14 @@ function mockRecords(byPath, observe = () => {}) {
     observe(path, body, init);
     if (path === 'auth/login') return Response.json({ token: session.token });
     const value = byPath[path] ?? [];
-    if (typeof value === 'function') return value(body, url, init);
-    return Response.json({ items: value, total: value.length });
+    const response = typeof value === 'function' ? await value(body, url, init) : Response.json({ items: value, total: value.length });
+    const scope = /^(\d+)\/(customer|teacher|group)\/index$/.exec(path);
+    if (!scope || !response.ok) return response;
+    let payload; try { payload = await response.clone().json(); } catch { return response; }
+    if (!Array.isArray(payload.items)) return response;
+    payload.items = payload.items.map(item => item && typeof item === 'object' && !Array.isArray(item)
+      ? { branch_ids: [Number(scope[1])], ...(scope[2] === 'customer' ? { is_study: 1 } : {}), ...item } : item);
+    return Response.json(payload);
   };
   globalThis.fetch = upstream;
   harness.env.ALFACRM_TRANSPORT = { fetch: async request => upstream(request.url, {
@@ -109,7 +115,7 @@ function mockRecords(byPath, observe = () => {}) {
 async function importSnapshot(module, records, { mappings, token, body = {} } = {}) {
   const state = await route.readState();
   if (mappings) state.branchMappings = mappings;
-  if (module === 'groups') state.modules.staff.status = 'imported';
+  if (module === 'groups') { state.modules.staff.status = 'imported'; state.modules.staff.scopeContract = 'source-branch-membership-v1'; }
   if (module === 'subscriptions' || module === 'finance') state.modules.families.status = 'imported';
   const params = { dateFrom: '', dateTo: '' };
   state.modules[module].previewToken = token ?? `preview-${crypto.randomUUID()}`;

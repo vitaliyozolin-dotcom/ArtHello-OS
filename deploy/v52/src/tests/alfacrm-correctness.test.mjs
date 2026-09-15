@@ -95,8 +95,14 @@ function mockRecords(byPath, observe = () => {}) {
     observe(path, body, init);
     if (path === 'auth/login') return Response.json({ token: session.token });
     const value = byPath[path] ?? [];
-    if (typeof value === 'function') return value(body, url, init);
-    return Response.json({ items: value, total: value.length });
+    const response = typeof value === 'function' ? await value(body, url, init) : Response.json({ items: value, total: value.length });
+    const scope = /^(\d+)\/(customer|teacher|group)\/index$/.exec(path);
+    if (!scope || !response.ok) return response;
+    let payload; try { payload = await response.clone().json(); } catch { return response; }
+    if (!Array.isArray(payload.items)) return response;
+    payload.items = payload.items.map(item => item && typeof item === 'object' && !Array.isArray(item)
+      ? { branch_ids: [Number(scope[1])], ...(scope[2] === 'customer' ? { is_study: 1 } : {}), ...item } : item);
+    return Response.json(payload);
   };
   globalThis.fetch = upstream;
   harness.env.ALFACRM_TRANSPORT = { fetch: async request => upstream(request.url, {
@@ -110,7 +116,7 @@ function mockRecords(byPath, observe = () => {}) {
 async function importSnapshot(module, records, { mappings, token, body = {} } = {}) {
   const state = await route.readState();
   if (mappings) state.branchMappings = mappings;
-  if (module === 'groups') state.modules.staff.status = 'imported';
+  if (module === 'groups') { state.modules.staff.status = 'imported'; state.modules.staff.scopeContract = 'source-branch-membership-v1'; }
   if (module === 'subscriptions' || module === 'finance') state.modules.families.status = 'imported';
   const params = { dateFrom: '', dateTo: '' };
   state.modules[module].previewToken = token ?? `preview-${crypto.randomUUID()}`;
@@ -344,7 +350,7 @@ test('a fresh Customer money balance is independent of stale family balances and
   const { sql } = await setup(t);
   await importSnapshot('families', { '1': [{ id: 1, name: 'Pupil', balance: 9999, paid_lesson_count: 50 }] }, { mappings: { '1': 'BR-SCHOOL' } });
   const calls = [];
-  const customer = { id: 1, balance: 123.45, paid_lesson_count: 7 };
+  const customer = { id: 1, branch_ids: [1], is_study: 1, balance: 123.45, paid_lesson_count: 7 };
   const tariffs = [{ id: 11, customer_id: 1, balance: 80, tariff_id: 8 }, { id: 12, customer_id: 1, balance: null }];
   mockRecords({
     '1/customer/index': body => { assert.equal(body.id, '1'); return Response.json({ items: [customer], total: 1 }); },
@@ -508,7 +514,7 @@ test('an empty finance period remains explicitly blocked until payment direction
 
 test('autosync uses real import, persists cursor and updates existing identities across cycles', async t => {
   const { state, sql } = await setup(t);
-  state.modules.staff.status = 'imported';
+  state.modules.staff.status = 'imported'; state.modules.staff.scopeContract = 'source-branch-membership-v1';
   await route.persistState(state);
   harness.env.ALFACRM_AUTOSYNC_SECRET = 'c'.repeat(64);
   const manual = body => route.POST(new Request('https://arthello.example.test/api/integrations/alfacrm', {
@@ -544,6 +550,8 @@ test('autosync rejects non-owner configuration, foreign headers, unimported modu
   harness.actor = actor();
   assert.equal((await manual({action:'setAutosync',enabled:true,modules:['staff']})).status,409);
   state.modules.staff.status='imported'; await route.persistState(state);
+  assert.equal((await manual({action:'setAutosync',enabled:true,modules:['staff']})).status,409,'legacy imported status does not prove branch reconciliation');
+  state.modules.staff.scopeContract='source-branch-membership-v1'; await route.persistState(state);
   assert.equal((await manual({action:'setAutosync',enabled:true,modules:['staff']})).status,200);
   assert.equal((await manual({action:'previewModule',module:'staff'})).status,409);
   const latest=await route.readState(); latest.branchMappings={'1':'BR-NURSERY'}; await route.persistState(latest);
@@ -573,6 +581,8 @@ test('repeated sync preserves local notes and verified quality until source-owne
 test('stopping and disconnecting autosync clear the advertised next run', async t => {
   const { state, sql } = await setup(t);
   state.modules.staff.status='imported'; await route.persistState(state);
+  assert.equal((await manual({action:'setAutosync',enabled:true,modules:['staff']})).status,409,'legacy imported status does not prove branch reconciliation');
+  state.modules.staff.scopeContract='source-branch-membership-v1'; await route.persistState(state);
   harness.env.ALFACRM_AUTOSYNC_SECRET='e'.repeat(64);
   const post=body=>route.POST(new Request('https://arthello.example.test/api/integrations/alfacrm',{method:'POST',body:JSON.stringify(body)}));
   for (const action of ['setAutosync','disconnect']) {
@@ -581,4 +591,77 @@ test('stopping and disconnecting autosync clear the advertised next run', async 
     assert.equal((await route.readState()).autosync.enabled,false);
     assert.equal(sql.prepare("SELECT next_sync_at FROM integration_connections WHERE id='INT-T-ALFACRM'").get().next_sync_at,'');
   }
+});
+
+const archiveSource = stripTypeScriptTypes(readFileSync(resolve('app/api/families/archive/route.ts'),'utf8'),{mode:'transform'})
+  .replace(/from\s+["']([^"']+)["']/g,(_all,name)=>{assert.ok(adapters[name],name);return `from "${adapters[name]}"`;});
+const archiveRoute = await import(dataModule(archiveSource));
+const archive = (familyId, archive = true) => archiveRoute.POST(new Request('https://arthello.example.test/api/families/archive',{
+ method:'POST',headers:{origin:'https://arthello.example.test'},body:JSON.stringify({familyId,archive}),
+}));
+
+test('source branch reconciliation archives phantom copies, keeps real memberships and repeats without duplicates',async t=>{
+ const {sql}=await setup(t);
+ // Emulate the prior importer accepting copies under every request branch.
+ await importSnapshot('families',{'1':[{id:7,name:'Pupil',group_ids:[5]}],'2':[{id:7,name:'Pupil',group_ids:[5]}]});
+ await importSnapshot('groups',{'1':[{id:5,name:'School group'}],'2':[{id:5,name:'Nursery group'}]});
+ assert.equal(sql.prepare("SELECT count(*) n FROM education_students WHERE status='Активен'").get().n,2);
+ const rows=[{id:7,name:'Pupil',branch_ids:[1],is_study:1,group_ids:[5]}];
+ for(let n=0;n<2;n++) await importSnapshot('families',{'1':rows,'2':rows});
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Семья'").get().n,2,'history retained');
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Семья' AND status='Активна'").get().n,1);
+ assert.equal(sql.prepare("SELECT scope FROM entities WHERE entity_type='Семья' AND status='Активна'").get().scope,'School');
+ assert.equal(sql.prepare("SELECT count(*) n FROM education_students WHERE status='Активен'").get().n,1);
+ assert.equal(sql.prepare("SELECT count(*) n FROM alfacrm_current_records WHERE module='families' AND active=1").get().n,1);
+});
+
+test('unproved membership stops before writes or archival, while distinct source IDs with one phone never merge',async t=>{
+ const {sql}=await setup(t);
+ await importSnapshot('families',{'1':[{id:1,name:'One',phone:'synthetic'},{id:2,name:'Two',phone:'synthetic'}]});
+ const before=sql.prepare('SELECT count(*) n FROM alfacrm_raw_observations').get().n;
+ await assert.rejects(importSnapshot('families',{'1':[{id:1,name:'One',branch_ids:null,is_study:1}]}),/филиал/);
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_raw_observations').get().n,before);
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Семья' AND status='Активна'").get().n,2);
+});
+
+test('manual archive retains identity and audit, survives repeated sync, and restore validates source branch',async t=>{
+ const {sql}=await setup(t);
+ harness.actor=actor('OWNER',['integrations','clients']);
+ const rows={'1':[{id:1,name:'Pupil',group_ids:[5]}]};
+ await importSnapshot('families',rows);await importSnapshot('groups',{'1':[{id:5,name:'Group'}]});
+ const id=sql.prepare("SELECT id FROM entities WHERE entity_type='Семья'").get().id;
+ assert.equal((await archive(id)).status,200);
+ assert.equal(sql.prepare("SELECT count(*) n FROM education_students WHERE status='Активен'").get().n,0);
+ await importSnapshot('families',rows);await importSnapshot('groups',{'1':[{id:5,name:'Group'}]});
+ assert.equal(sql.prepare('SELECT status FROM entities WHERE id=?').get(id).status,'Архив');
+ assert.equal(sql.prepare("SELECT count(*) n FROM education_students WHERE status='Активен'").get().n,0);
+ assert.equal((await archive(id,false)).status,200);
+ await importSnapshot('families',rows);
+ assert.equal(sql.prepare("SELECT count(*) n FROM education_students WHERE status='Активен'").get().n,1);
+ await importSnapshot('families',{'1':[{id:1,name:'Pupil',branch_ids:[2],is_study:1}]});
+ assert.equal((await archive(id,false)).status,409);
+ assert.equal(sql.prepare("SELECT count(*) n FROM audit_events WHERE action='family.archived'").get().n,1);
+});
+
+test('archive enforces role, current branch grants, session, origin and csrf before changing data',async t=>{
+ const {sql}=await setup(t);await importSnapshot('families',{'1':[{id:1,name:'Pupil'}]});
+ const id=sql.prepare("SELECT id FROM entities WHERE entity_type='Семья'").get().id;
+ harness.actor=null;assert.equal((await archive(id)).status,401);
+ harness.actor=actor('DEPUTY',['clients']);assert.equal((await archive(id)).status,403);
+ harness.actor=actor('DIRECTOR',['clients']);assert.equal((await archive(id)).status,403);
+ sql.prepare('INSERT INTO user_branch_access VALUES(?,?)').run('FIXTURE-OWNER','BR-SCHOOL');
+ assert.equal((await archive(id)).status,200);
+ harness.actor=actor('OWNER',['clients']);harness.csrfValid=false;assert.equal((await archive(id,false)).status,403);
+ harness.csrfValid=true;harness.originValid=false;assert.equal((await archive(id,false)).status,403);
+ assert.equal(sql.prepare('SELECT status FROM entities WHERE id=?').get(id).status,'Архив');
+});
+
+test('groups bind documented teacher_ids only to a current teacher in the same branch, without arbitrary choice',async t=>{
+ const {sql}=await setup(t);
+ await importSnapshot('staff',{'1':[{id:10,name:'Teacher',branch_ids:[1]}],'2':[{id:10,name:'Teacher',branch_ids:[1]}]});
+ await importSnapshot('groups',{'1':[{id:1,name:'One',teacher_ids:[10]},{id:2,name:'Many',teacher_ids:[10,11]}],'2':[{id:1,name:'Wrong branch',teacher_ids:[10]}]});
+ const group=sql.prepare("SELECT teacher_entity_id FROM education_groups WHERE name='One'").get();
+ assert.ok(group.teacher_entity_id);
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE id=? AND scope='School' AND status='Активна'").get(group.teacher_entity_id).n,1);
+ for(const name of ['Many','Wrong branch'])assert.equal(sql.prepare('SELECT teacher_entity_id FROM education_groups WHERE name=?').get(name).teacher_entity_id,'');
 });
