@@ -1,5 +1,19 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, sqliteTable, text, primaryKey, unique } from "drizzle-orm/sqlite-core";
+
+export const centralDirectoryLinks = sqliteTable("central_directory_links", {
+  kind: text("kind").notNull(),
+  centralId: text("central_id").notNull(),
+  localId: text("local_id").notNull(),
+  payload: text("payload").notNull(),
+  active: integer("active").notNull().default(1),
+}, t => [primaryKey({ columns: [t.kind, t.centralId] }), unique("central_directory_local").on(t.kind, t.localId)]);
+
+export const centralDirectoryState = sqliteTable("central_directory_state", {
+  id: text("id").primaryKey(),
+  sequence: integer("sequence").notNull(),
+  digest: text("digest").notNull(),
+});
 
 const timestamps = {
   createdAt: text("created_at")

@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { directoryStudentIsManaged } from "../../../../server/directory-snapshot.mjs";
 import type { Role } from "../../../level-zero-types";
 import { normalizePhone } from "../../../../server/auth";
 import { createPasswordlessInvitation } from "../../../../server/identity-broker";
@@ -74,6 +75,11 @@ export async function POST(request: Request) {
     validatePayload(payload);
     await ensureDatabaseReady();
     const db = getDatabase();
+    if (["grant_access", "restore_access", "reset_password"].includes(payload.action)) {
+      for (const member of payload.family.members.filter(item => item.entityType === "Ребёнок")) {
+        await directoryStudentIsManaged(db, member.id, payload.family.id);
+      }
+    }
     const previous = await db
       .prepare(
         "SELECT result, status FROM central_access_events WHERE id = ?",
@@ -320,6 +326,7 @@ async function syncFamilyProjection(family: FamilyAccessPayload["family"]) {
   for (const member of family.members.filter(
     (item) => item.entityType === "Ребёнок",
   )) {
+    if (await directoryStudentIsManaged(db, member.id, family.id)) continue;
     const { firstName, lastName } = splitName(member.displayName);
     const className = normalizeClassName(member.scope);
     const grade = Number(className.match(/^([1-9]|1[01])/)?.[1] ?? 1);
