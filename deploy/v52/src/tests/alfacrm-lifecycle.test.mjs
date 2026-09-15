@@ -150,6 +150,7 @@ async function captureRuntimeBindings(optionalFlag) {
     'node:crypto': adapter('export const randomBytes=()=>{throw new Error("Disabled autosync unexpectedly requested a secret");};'),
     './tochka-transport.mjs': adapter('export const createTochkaTransport=()=>({fixture:true});'),
     './tochka-autosync-timer.mjs': adapter('export const startTochkaAutosyncTimer=({enabled,secret})=>{if(enabled!==false||secret!=="")throw new Error("Runtime fixture must keep Tochka autosync disabled");return {stop(){}};};'),
+    './alfacrm-autosync-timer.mjs': adapter('export const startAlfaAutosyncTimer=({enabled,secret})=>{if(enabled!==false||secret!=="")throw new Error("Runtime fixture must keep Alfa autosync disabled");return {stop(){}};};'),
     './backup-transport.mjs': adapter('export const createBackupTransport=()=>({fixture:"closed-backup-transport",fetch(){throw new Error("Runtime fixture attempted a backup operation");}});'),
     './alfacrm-transport.mjs': adapter('export const createAlfaCrmTransport=()=>({fixture:"protected-alfacrm-transport",fetch(){throw new Error("Runtime fixture attempted an AlfaCRM operation");}});'),
   };
