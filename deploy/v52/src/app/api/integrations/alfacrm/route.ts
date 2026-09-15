@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-assign-module-variable */
 import { env } from "cloudflare:workers";
+import { customerPolicy, previewCustomers, resolveCustomerStatuses, compareCustomerProjections } from "../../../../lib/alfacrm-customer-policy";
 import { buildIdentityIndex, serializeIdentityMutation } from "../../../../lib/entity-identity";
 import { readIdentityIndex, refreshIdentityProjections, identityHasAccessBindings } from "../../../../lib/entity-identity-db";
 import {
@@ -32,6 +33,7 @@ const ALFACRM_IMPORT_ENABLED_VALUES = new Set(["1", "true", "yes"]);
 const IMPORT_BLOCKED_MESSAGE = "Импорт ожидает завершения проверки данных и подтверждения замены ранее раскрытого ключа AlfaCRM. Подключение и предпросмотр доступны.";
 // The documented monetary source is Customer.balance, not CustomerTariff.balance.
 const SUBSCRIPTION_SOURCE_CONTRACT = "customer-balance-v2";
+const CUSTOMER_POLICY_CONTRACT = 'customer-status-dictionary-v1';
 const FINANCE_DIRECTION_UNVERIFIED_MESSAGE = "Сырые движения AlfaCRM сохранены. Для денежных проводок требуется подтверждённое сопоставление типов платежей с поступлением и списанием; ID типа и знак суммы сами по себе направление не подтверждают.";
 const moduleOrder = ["families", "staff", "groups", "lessons", "subscriptions", "finance"] as const;
 type ModuleKey = typeof moduleOrder[number];
@@ -42,6 +44,7 @@ type LocalBranch = { id: string; name: string };
 type LegacyDraft = { remoteBranchId: string; localBranchId: string; startDate: string; dataScopes: string[] };
 type ModuleState = {
   scopeContract?: string;
+  customerPolicyContract?: string;
   status: "not_started" | "previewed" | "importing" | "imported" | "error";
   previewCount: number;
   importedCount: number;
@@ -66,12 +69,13 @@ type AlfaState = {
   lastCheckedAt: string;
   remoteBranches: RemoteBranch[];
   branchMappings: Record<string, string>;
+  educationRouting?: Record<string, string>;
   modules: Record<ModuleKey, ModuleState>;
   legacyDraft?: LegacyDraft;
 };
 type Credentials = { email: string; apiKey: string; appKey: string };
 type AlfaSession = Credentials & { endpoint: string; token: string };
-type FetchedRecord = { remoteBranchId: string; item: JsonRecord };
+type FetchedRecord = { remoteBranchId: string; item: JsonRecord; statusName?: string | null };
 type RequestContext = NonNullable<Awaited<ReturnType<typeof getAuthenticatedRequestContext>>>;
 type ImportContext = RequestContext | { scheduler: true; actor: string };
 type RuntimeFetcher = { fetch: (request: Request) => Promise<Response> };
@@ -144,7 +148,12 @@ export async function POST(request: Request) {
     if (action === "connect") return connect(context, body);
     if (action === "refreshBranches") return refreshBranches(context);
     if (action === "saveBranchMappings") return saveBranchMappings(context, body);
+    if (action === 'saveEducationRouting') return saveEducationRouting(context, body);
+    if (action === 'previewEducationRouting') return previewEducationRouting(context);
     if (action === "previewModule") return previewModule(context, body);
+    if (action === "previewCustomers") return previewCustomerPolicy(context);
+    if (action === 'previewLegacyMigration') return legacyMigration(context, body, false);
+    if (action === 'migrateLegacySources') return legacyMigration(context, body, true);
     if (action === "importModule") {
       if (!alfaCrmImportEnabled()) return privateJson({ error: IMPORT_BLOCKED_MESSAGE }, 409);
       return importModule(context, body);
@@ -158,12 +167,88 @@ export async function POST(request: Request) {
   }
 }
 
+async function previewCustomerPolicy(context: ImportContext) {
+  // Read-only source report: no import token, cursor, raw rows or business records are changed.
+  const state = await requireConnectedState();
+  await assertMappedBranchAccess(context, state);
+  const selected = mappedRemoteBranches(state);
+  if (!selected.length) return privateJson({ error: 'Сначала сопоставьте филиалы' }, 409);
+  const session = await storedSession(state);
+  const rows = [];
+  let excludedLifecycle = 0;
+  for (const branch of selected) {
+    const dictionary = await fetchPaged(session, `${branch}/study-status/index`, {});
+    const records = await fetchPaged(session, `${branch}/customer/index`, { is_study: 1, removed: 0, withGroups: true });
+    for (const { record, statusName } of resolveCustomerStatuses(records, dictionary)) {
+      const disposition = alfaBranchDisposition('families', { remoteBranchId: branch, item: record });
+      if (disposition === 'inactive') { excludedLifecycle++; continue; }
+      rows.push({ id: String(record.id ?? ''), branch, status: statusName, localBranch: familyLocalBranch(state, branch, record),
+        branchIds: disposition === 'unknown' ? undefined : (record.branch_ids as Array<string | number>).map(String) });
+    }
+  }
+  const report = previewCustomers(rows, selected, { complete: true });
+  const stored = await env.DB.prepare("SELECT id,status,metadata FROM entities WHERE entity_type='Семья' AND source_system='ALFACRM'").all<{id:string;status:string;metadata:string}>();
+  const existing = (stored.results ?? []).flatMap(row => {
+    let metadata: JsonRecord; try { metadata = JSON.parse(row.metadata) as JsonRecord; } catch { return []; }
+    return [{ id:row.id, status:row.status, remoteBranchId:scalar(metadata.remoteBranchId), customerId:scalar(metadata.alfaCustomerId), localBranchId:scalar(metadata.localBranchId), localArchive:metadata.localArchive===true }];
+  });
+  const comparison = rows.every(row => Array.isArray(row.branchIds)) && report.duplicates === 0
+    ? compareCustomerProjections(rows, existing, selected, { complete: true }) : null;
+  return privateJson({ customerPreview: { ...report, excludedLifecycle,
+    comparison,
+    observedAt: new Date().toISOString(),
+    branchNames: Object.fromEntries(state.remoteBranches.map(branch => [branch.id, branch.name])),
+    // Source statuses alone never authorize replacing the current OS graph.
+    applicationReady: false,
+  }, message: 'Сверка Альфы завершена. Карточки, связи и доступы ОС не изменены.' });
+}
+
+async function previewEducationRouting(context: RequestContext) {
+  const state = await requireConnectedState();
+  await assertMappedBranchAccess(context, state);
+  const session = await storedSession(state);
+  const groups = currentProjectionRows('groups', await fetchModuleRecords(session, 'groups', mappedRemoteBranches(state), { dateFrom: '', dateTo: '' }));
+  return privateJson({ educationGroups: groups.map(({ remoteBranchId, item }) => ({ key: `${remoteBranchId}:${scalar(item.id)}`, sourceBranch: remoteBranchId, name: scalar(item.name), localBranch: state.educationRouting?.[`${remoteBranchId}:${scalar(item.id)}`] ?? state.branchMappings[remoteBranchId] })) });
+}
+
+async function saveEducationRouting(context: RequestContext, body: Record<string, unknown>) {
+  if (!canonicalOwner(context)) return privateJson({ error: 'Разнесение учебных групп изменяет собственник' }, 403);
+  const state = await requireConnectedState();
+  await assertMappedBranchAccess(context, state);
+  if (!body.routing || typeof body.routing !== 'object' || Array.isArray(body.routing)) return privateJson({ error: 'Укажите сопоставление групп' }, 400);
+  const entries = Object.entries(body.routing as Record<string, unknown>);
+  const branches = new Set(mappedRemoteBranches(state));
+  const destinations = new Set(Object.values(state.branchMappings));
+  if (entries.length > 500 || entries.some(([key, value]) => !/^[1-9]\d*:[1-9]\d*$/.test(key) || !branches.has(key.split(':')[0]) || typeof value !== 'string' || !destinations.has(value))) {
+    return privateJson({ error: 'Группа и назначение должны принадлежать сопоставленным филиалам' }, 409);
+  }
+  const session = await storedSession(state);
+  for (const branch of new Set(entries.map(([key]) => key.split(':')[0]))) {
+    const groups = currentProjectionRows('groups', (await fetchPaged(session, `${branch}/group/index`, { removed: 0 })).map(item => ({ remoteBranchId: branch, item })));
+    const ids = new Set(groups.map(row => String(row.item.id)));
+    if (entries.some(([key]) => key.startsWith(`${branch}:`) && !ids.has(key.split(':')[1]))) return privateJson({ error: 'Исходная группа не подтверждена в филиале' }, 409);
+  }
+  const routing = Object.fromEntries(entries) as Record<string, string>;
+  const modules = invalidatePreviews(state.modules);
+  for (const key of ['families', 'groups'] as const) modules[key] = { ...modules[key], status: 'not_started', scopeContract: undefined };
+  const next = { ...state, educationRouting: routing, modules, autosync: state.autosync ? { ...state.autosync, enabled: false, outcome: 'paused' as const } : undefined };
+  await persistState(next);
+  await env.DB.batch([env.DB.prepare("UPDATE integration_connections SET next_sync_at='' WHERE id=?").bind(CONNECTION_ID), auditStatement(context.actor, 'integration.alfacrm_education_routing_saved', { routing })]);
+  return privateJson({ state: publicState(next), message: 'Разнесение групп сохранено. Выполните сверку и загрузку семей и групп.' });
+}
+
+function familyLocalBranch(state: AlfaState, remoteBranchId: string, item: JsonRecord) {
+  const overrides = [...new Set(groupIds(item).map(id => state.educationRouting?.[`${remoteBranchId}:${id}`]).filter((id): id is string => Boolean(id)))];
+  if (overrides.length > 1) throw new AlfaApiError('У клиента группы с разными назначениями филиала. Требуется сверка; карточки сохранены.', 409);
+  return overrides[0] ?? state.branchMappings[remoteBranchId] ?? '';
+}
+
 function alfaAutosyncSecret() {
   return (env as unknown as { ALFACRM_AUTOSYNC_SECRET?: string }).ALFACRM_AUTOSYNC_SECRET ?? '';
 }
 
 async function alfaAutosyncScope(state: AlfaState) {
-  return hashText(JSON.stringify([ALFA_SCOPE_CONTRACT, state.endpoint, Object.entries(state.branchMappings).sort(), state.remoteBranches.map(b => b.id).sort()]));
+  return hashText(JSON.stringify([ALFA_SCOPE_CONTRACT, CUSTOMER_POLICY_CONTRACT, state.endpoint, Object.entries(state.branchMappings).sort(), Object.entries(state.educationRouting ?? {}).sort(), state.remoteBranches.map(b => b.id).sort()]));
 }
 
 async function storedScopeAudit() {
@@ -201,6 +286,9 @@ async function configureAlfaAutosync(context: RequestContext, body: Record<strin
     catch { return privateJson({ error: 'Выберите семьи, сотрудников и зависимые группы или остатки' }, 400); }
     if (schedule.modules.some(m => state.modules[m].status !== 'imported' || state.modules[m].scopeContract !== ALFA_SCOPE_CONTRACT)) {
       return privateJson({ error: 'Сначала повторите полную загрузку выбранных разделов с проверкой филиалов' }, 409);
+    }
+    if (schedule.modules.includes('families') && state.modules.families.customerPolicyContract !== CUSTOMER_POLICY_CONTRACT) {
+      return privateJson({ error: 'Сначала выполните полную сверку клиентов по новым правилам статусов' }, 409);
     }
     state.autosync = schedule;
   }
@@ -474,8 +562,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   if (!selectedBranches.length) return privateJson({ error: "Сначала сопоставьте филиалы" }, 409);
   await assertMappedBranchAccess(context, state);
   const params = moduleParams(module, body);
-  const legacy = await env.DB.prepare("SELECT 1 AS present FROM alfacrm_import_records LIMIT 1").first();
-  if (legacy) return privateJson({ error: "Обнаружен прежний формат AlfaCRM без истории наблюдений. Сначала требуется проверенный перенос источников; существующие записи сохранены." }, 409);
+  if (!(await legacyMigrationEvidence(state)).complete) return privateJson({ error: "Обнаружен прежний формат AlfaCRM без истории наблюдений. Сначала требуется проверенный перенос источников; существующие записи сохранены." }, 409);
   const storedModule = state.modules[module];
   const previewToken = clean(body.previewToken, 80);
   const signature = await previewSignatureFor(module, state, params);
@@ -533,6 +620,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   }
 
   const projectionRows = currentProjectionRows(module, rows);
+  if (module === 'families') for (const row of projectionRows) familyLocalBranch(state, row.remoteBranchId, row.item);
   // Remember identities already published before this snapshot creates new branch copies.
   const existingIdentityIds = module === "families" || module === "staff"
     ? new Set((await readIdentityIndex(env.DB)).cards.map(card => card.id)) : new Set<string>();
@@ -572,6 +660,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   const moduleState: ModuleState = {
     ...storedModule,
     scopeContract: complete && rejected === 0 && !projectionBlocked ? ALFA_SCOPE_CONTRACT : storedModule.scopeContract,
+    customerPolicyContract: module === 'families' && complete && rejected === 0 ? CUSTOMER_POLICY_CONTRACT : storedModule.customerPolicyContract,
     status: rejected || projectionBlocked ? "error" : complete ? "imported" : "importing",
     previewToken: complete || rejected > 0 ? "" : storedModule.previewToken,
     previewSignature: complete || rejected > 0 ? "" : storedModule.previewSignature,
@@ -712,14 +801,23 @@ async function fetchModuleRecords(session: AlfaSession, module: ModuleKey, branc
       continue;
     }
     const items = await fetchPaged(session, path, filters);
-    rows.push(...items.map((item) => ({ remoteBranchId, item })));
+    if (module === 'families') {
+      const dictionary = await fetchPaged(session, `${remoteBranchId}/study-status/index`, {});
+      rows.push(...resolveCustomerStatuses(items, dictionary).map(({ record, statusName }) => ({ remoteBranchId, item: record, statusName })));
+    } else rows.push(...items.map((item) => ({ remoteBranchId, item })));
   }
   return rows;
 }
 
 function currentProjectionRows(module: ModuleKey, rows: FetchedRecord[]) {
-  try { return scopedAlfaRows(module, rows); }
+  let scoped: FetchedRecord[];
+  try { scoped = scopedAlfaRows(module, rows); }
   catch { throw new AlfaApiError("AlfaCRM не подтвердила филиал или состояние записи. Загрузка остановлена; существующие карточки сохранены.", 409); }
+  if (module !== 'families') return scoped;
+  if (scoped.some(row => customerPolicy(row.statusName).lifecycle === 'review')) {
+    throw new AlfaApiError('Есть клиенты с неподтверждённым статусом AlfaCRM. Выполните проверку клиентов и исправьте статус в источнике; существующие карточки сохранены.', 409);
+  }
+  return scoped.filter(row => customerPolicy(row.statusName).include);
 }
 
 async function fetchPaged(session: AlfaSession, path: string, filters: JsonRecord) {
@@ -834,6 +932,48 @@ async function readJson(response: Response): Promise<unknown> {
   } catch {
     throw new AlfaApiError("AlfaCRM вернула некорректный ответ.");
   }
+}
+
+async function legacyMigrationEvidence(state: AlfaState) {
+  const rows = (await env.DB.prepare('SELECT * FROM alfacrm_import_records ORDER BY remote_branch_id,module,record_id').all<JsonRecord>()).results ?? [];
+  const token = await hashText(JSON.stringify(['legacy-evidence-v1', state.endpoint, Object.entries(state.branchMappings).sort(), rows]));
+  const batchId = `legacy-evidence-${token}`;
+  const copies = (await env.DB.prepare('SELECT record_id,payload,payload_hash FROM alfacrm_raw_observations WHERE batch_id=? ORDER BY record_id').bind(batchId).all<{ record_id: string; payload: string; payload_hash: string }>()).results ?? [];
+  const expected = await Promise.all(rows.map(async (row, i) => {
+    // Preserve the complete legacy row, including its original timestamp/hash.
+    // This is historical evidence, never a fresh upstream observation.
+    const payload = JSON.stringify(row);
+    return { row, recordId: String(i), payload, hash: await hashText(payload) };
+  }));
+  const byId = new Map(copies.map(row => [row.record_id, row]));
+  const complete = copies.length === expected.length && expected.every(row => {
+    const copy = byId.get(row.recordId);
+    return copy?.payload === row.payload && copy.payload_hash === row.hash;
+  });
+  return { token, batchId, expected, complete };
+}
+
+async function legacyMigration(context: RequestContext, body: Record<string, unknown>, apply: boolean) {
+  if (!canonicalOwner(context)) return privateJson({ error: 'Перенос старого источника доступен только собственнику' }, 403);
+  const state = await requireConnectedState();
+  await assertMappedBranchAccess(context, state);
+  const evidence = await legacyMigrationEvidence(state);
+  if (!apply) return privateJson({ legacyMigration: { token: evidence.token, count: evidence.expected.length, complete: evidence.complete } });
+  if (!alfaCrmImportEnabled()) return privateJson({ error: IMPORT_BLOCKED_MESSAGE }, 409);
+  if (state.autosync?.enabled) return privateJson({ error: 'Перед переносом остановите автоматическое обновление' }, 409);
+  if (body.token !== evidence.token) return privateJson({ error: 'Состав старых записей или настройки изменились. Повторите предпросмотр переноса.' }, 409);
+  if (!evidence.complete) {
+    const now = new Date().toISOString();
+    await env.DB.prepare("INSERT OR IGNORE INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES (?,?,?,'legacy_evidence',?)")
+      .bind(evidence.batchId, 'legacy_evidence', JSON.stringify({ migration: 'legacy-evidence-v1', targetEndpoint: state.endpoint, originalEndpoint: 'unverified', token: evidence.token }), now).run();
+    await runBatches(evidence.expected.map(row => env.DB.prepare(`INSERT OR IGNORE INTO alfacrm_raw_observations
+      (id,batch_id,remote_branch_id,module,record_id,payload,payload_hash,observed_at) VALUES (?,?,?,?,?,?,?,?)`)
+      .bind(`${evidence.batchId}:${row.recordId}`, evidence.batchId, scalar(row.row.remote_branch_id), 'legacy_evidence', row.recordId, row.payload, row.hash, now)));
+    const verified = await legacyMigrationEvidence(state);
+    if (verified.token !== evidence.token || !verified.complete) throw new AlfaApiError('Проверка переноса не завершена. Исходные записи сохранены; повторите перенос.', 409);
+    await auditStatement(context.actor, 'integration.alfacrm_legacy_evidence_preserved', { count: evidence.expected.length, token: evidence.token }).run();
+  }
+  return privateJson({ legacyMigration: { token: evidence.token, count: evidence.expected.length, complete: true }, message: 'История старого импорта сохранена и проверена. Карточки и доступы не изменены.' });
 }
 
 async function ensureAlfaTables() {
@@ -1046,10 +1186,10 @@ async function canonicalizeFamilies(rows: FetchedRecord[], state: AlfaState, loc
   const statements = [];
   let accepted = 0;
   let rejected = 0;
-  for (const { remoteBranchId, item } of rows) {
+  for (const { remoteBranchId, item, statusName } of rows) {
     const studentId = scalar(item.id);
     const childName = scalar(item.name ?? item.full_name);
-    const localBranchId = state.branchMappings[remoteBranchId] ?? "";
+    const localBranchId = familyLocalBranch(state, remoteBranchId, item);
     if (!studentId || !childName || !localBranchId) { rejected += 1; continue; }
     const phone = normalizePhone(item.phone);
     const email = firstScalar(item.email).toLowerCase();
@@ -1063,7 +1203,11 @@ async function canonicalizeFamilies(rows: FetchedRecord[], state: AlfaState, loc
     const scope = branchNames.get(localBranchId) ?? localBranchId;
     const quality = guardianName ? "Импортировано из AlfaCRM" : "Требует сверки";
     const familyName = `Семья ${guardianName ? guardianName.split(/\s+/)[0] : childName.split(/\s+/)[0]}`.trim();
-    const common = { remoteBranchId, localBranchId, alfaCustomerId: studentId, alfaSource: { module: "families", recordId: studentId } };
+    const policy = customerPolicy(statusName);
+    if (!policy.include) { rejected += 1; continue; }
+    const common = { remoteBranchId, localBranchId, sourceLocalBranchId: state.branchMappings[remoteBranchId], alfaCustomerId: studentId, alfaSource: { module: "families", recordId: studentId },
+      alfaStatusId: scalar(item.study_status_id), alfaStatusName: statusName ?? null,
+      customerLifecycle: policy.lifecycle, attendanceFormat: policy.attendance };
     if (matchKey) statements.push(env.DB.prepare(`INSERT INTO alfacrm_family_merge_candidates
       (remote_branch_id,customer_id,family_entity_id,match_key,guardian_name,phone,status,created_at,updated_at)
       VALUES (?,?,?,?,?,?,'Ожидает сверки',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
@@ -1085,6 +1229,15 @@ async function canonicalizeFamilies(rows: FetchedRecord[], state: AlfaState, loc
         .bind(familyId, childId, "Семья → ребёнок", actor),
     );
     for (const id of [familyId, parentId, childId]) statements.push(lineageStatement("entities", id, "families", remoteBranchId, studentId));
+    if (policy.destination === 'leads') {
+      const leadId = `LEAD-A-${childHash}`;
+      statements.push(env.DB.prepare(`INSERT INTO sales_leads
+        (id,first_click_at,source,stage,status,family_entity_id,child_entity_id,data_quality)
+        VALUES (?,'','ALFACRM','Заявка','Активен',?,?,'Импортировано из AlfaCRM')
+        ON CONFLICT(id) DO UPDATE SET family_entity_id=excluded.family_entity_id,child_entity_id=excluded.child_entity_id,updated_at=CURRENT_TIMESTAMP`)
+        .bind(leadId, familyId, childId));
+      statements.push(lineageStatement('sales_leads', leadId, 'families', remoteBranchId, studentId));
+    }
     accepted += 1;
   }
   await runBatches(statements);
@@ -1146,7 +1299,7 @@ async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, local
   for (const { remoteBranchId, item } of rows) {
     const groupId = scalar(item.id);
     const name = scalar(item.name);
-    const localBranchId = state.branchMappings[remoteBranchId] ?? "";
+    const localBranchId = state.educationRouting?.[`${remoteBranchId}:${groupId}`] ?? state.branchMappings[remoteBranchId] ?? "";
     if (!groupId || !name || !localBranchId) { rejected += 1; continue; }
     const teacherRemoteId = scalar(item.teacher_id) || firstTeacherId(item);
     const candidateTeacherId = teacherRemoteId ? await localTeacherId(remoteBranchId, teacherRemoteId) : "";
@@ -1186,6 +1339,12 @@ async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string) {
     try { item = JSON.parse(row.payload) as JsonRecord; } catch { continue; }
     if (alfaBranchDisposition('families', { remoteBranchId: row.remote_branch_id, item }) !== 'accepted') continue;
     const studentId = scalar(item.id) || row.record_id;
+    const sourceChildId = `CHD-A-${await shortHash(`${row.remote_branch_id}:${studentId}`)}`;
+    const sourceCard = identities.cards.find(card => card.id === sourceChildId);
+    const sourceMetadata = sourceCard ? JSON.parse(sourceCard.metadata) as JsonRecord : {};
+    // An open enquiry or lead is not an enrollment. Unverified single visits
+    // require the same explicit current group evidence as an active customer.
+    if (!['active', 'unverified'].includes(scalar(sourceMetadata.customerLifecycle))) continue;
     const childId = identities.canonical(`CHD-A-${await shortHash(`${row.remote_branch_id}:${studentId}`)}`);
     const familyId = identities.canonical(`FAM-A-${await shortHash(`${row.remote_branch_id}:student:${studentId}`)}`);
     for (const remoteGroupId of groupIds(item)) {
@@ -1418,6 +1577,7 @@ async function assertMappedBranchAccess(context: ImportContext, state: AlfaState
   if (Object.values(state.branchMappings).some((id) => !activeIds.has(id))) {
     throw new AlfaApiError("Сопоставленный филиал больше не активен. Собственник должен обновить сопоставление.", 409);
   }
+  if (Object.entries(state.educationRouting ?? {}).some(([key, target]) => !mappedRemoteBranches(state).includes(key.split(':')[0]) || !Object.values(state.branchMappings).includes(target))) throw new AlfaApiError('Разнесение групп не соответствует сопоставленным филиалам. Обновите его перед загрузкой.', 409);
   if ('scheduler' in context) return;
   if (canonicalOwner(context) || context.auth.user.isAdministrative) return;
   const grants = await env.DB.prepare("SELECT branch_id FROM user_branch_access WHERE user_id=?")
@@ -1474,8 +1634,8 @@ function moduleParams(module: ModuleKey, body: Record<string, unknown>) {
 
 async function previewSignatureFor(module: ModuleKey, state: AlfaState, params: { dateFrom: string; dateTo: string }) {
   const mappings = Object.entries(state.branchMappings).sort(([left], [right]) => left.localeCompare(right));
-  const sourceContract = module === "subscriptions" ? SUBSCRIPTION_SOURCE_CONTRACT : module === "finance" ? "pay-direction-unverified-v2" : undefined;
-  return hashText(JSON.stringify({ scopeContract: ALFA_SCOPE_CONTRACT, endpoint: state.endpoint, connectedAt: state.connectedAt, module, mappings, params, sourceContract }));
+  const sourceContract = module === 'families' ? CUSTOMER_POLICY_CONTRACT : module === "subscriptions" ? SUBSCRIPTION_SOURCE_CONTRACT : module === "finance" ? "pay-direction-unverified-v2" : undefined;
+  return hashText(JSON.stringify({ scopeContract: ALFA_SCOPE_CONTRACT, endpoint: state.endpoint, connectedAt: state.connectedAt, module, mappings, educationRouting: Object.entries(state.educationRouting ?? {}).sort(), params, sourceContract }));
 }
 
 function alfaCrmImportEnabled() {

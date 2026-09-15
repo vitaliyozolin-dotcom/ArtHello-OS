@@ -26,6 +26,7 @@ const adapters = {
   '../../../../lib/production-auth': dataModule('export const getAuthenticatedRequestContext=async()=>globalThis.__alfaLifecycle.actor; export const verifyAuthenticatedRequestCsrf=()=>{if(!globalThis.__alfaLifecycle.csrfValid)throw new Error("fixture csrf rejected");};'),
   '../../../../lib/request-security': dataModule('export const hasTrustedMutationOrigin=()=>globalThis.__alfaLifecycle.originValid;'),
   '../../../../lib/alfacrm-import': alfaImportUrl,
+  '../../../../lib/alfacrm-customer-policy': dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/alfacrm-customer-policy.ts'), 'utf8'), { mode: 'strip' })),
 };
 let source = stripTypeScriptTypes(readFileSync(resolve('app/api/integrations/alfacrm/route.ts'), 'utf8'), { mode: 'transform' })
   .replace(/from\s+["']([^"']+)["']/g, (_all, name) => {
@@ -99,14 +100,14 @@ function mockRecords(byPath, observe = () => {}) {
     const body = init?.body ? JSON.parse(init.body) : {};
     observe(path, body, init);
     if (path === 'auth/login') return Response.json({ token: session.token });
-    const value = byPath[path] ?? [];
+    const value = byPath[path] ?? (/^\d+\/study-status\/index$/.test(path) ? [{ id: 9001, name: 'Активен' }] : []);
     const response = typeof value === 'function' ? await value(body, url, init) : Response.json({ items: value, total: value.length });
     const scope = /^(\d+)\/(customer|teacher|group)\/index$/.exec(path);
     if (!scope || !response.ok) return response;
     let payload; try { payload = await response.clone().json(); } catch { return response; }
     if (!Array.isArray(payload.items)) return response;
     payload.items = payload.items.map(item => item && typeof item === 'object' && !Array.isArray(item)
-      ? { branch_ids: [Number(scope[1])], ...(scope[2] === 'customer' ? { is_study: 1 } : {}), ...item } : item);
+      ? { branch_ids: [Number(scope[1])], ...(scope[2] === 'customer' ? { is_study: 1, study_status_id: 9001 } : {}), ...item } : item);
     return Response.json(payload);
   };
   globalThis.fetch = upstream;
@@ -287,6 +288,65 @@ test('legacy source records block live import until a verified migration and rem
   assert.deepEqual(sql.prepare('SELECT * FROM alfacrm_import_records').all(), before);
   assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_raw_observations').get().n, 0);
   assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM entities').get().n, 0);
+});
+
+test('legacy migration preserves evidence, requires fresh preview and is repeatable without projection', async t => {
+  const { sql } = await setup(t);
+  sql.prepare('INSERT INTO alfacrm_import_records(remote_branch_id,module,record_id,payload,payload_hash,imported_at) VALUES(?,?,?,?,?,?)')
+    .run('1', 'families', 'legacy', '{"id":"legacy","name":"Original"}', 'old-hash', '2026-01-01');
+  const before = sql.prepare('SELECT * FROM alfacrm_import_records').all();
+  const preview = await post({ action: 'previewLegacyMigration' });
+  assert.equal(preview.status, 200, await preview.clone().text());
+  const { legacyMigration } = await preview.json();
+  assert.equal(legacyMigration.count, 1);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_raw_observations').get().n, 0);
+  assert.equal((await post({ action: 'migrateLegacySources', token: 'stale' })).status, 409);
+  harness.actor = actor('ADMIN');
+  assert.equal((await post({ action: 'migrateLegacySources', token: legacyMigration.token })).status, 403);
+  harness.actor = actor();
+  for (let i = 0; i < 2; i++) {
+    const applied = await post({ action: 'migrateLegacySources', token: legacyMigration.token });
+    assert.equal(applied.status, 200, await applied.clone().text());
+  }
+  const observations = sql.prepare('SELECT * FROM alfacrm_raw_observations').all();
+  assert.equal(observations.length, 1);
+  assert.deepEqual(JSON.parse(observations[0].payload), { ...before[0] });
+  assert.deepEqual(sql.prepare('SELECT * FROM alfacrm_import_records').all(), before);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM entities').get().n, 0);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_current_records').get().n, 0);
+  await importSnapshot('families', { '1': [{ id: 101, name: 'Fresh pupil' }] });
+  assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM entities WHERE entity_type='Ребёнок'").get().n, 1);
+  sql.prepare("UPDATE alfacrm_import_records SET payload='{}'").run();
+  assert.equal((await post({ action: 'migrateLegacySources', token: legacyMigration.token })).status, 409);
+  await assert.rejects(() => importSnapshot('families', { '1': [] }), /прежний формат/);
+});
+
+test('interrupted legacy migration stays blocked and resumes without duplicate evidence', async t => {
+  const { sql, state } = await setup(t);
+  for (let i = 0; i < 45; i++) sql.prepare('INSERT INTO alfacrm_import_records(remote_branch_id,module,record_id,payload,payload_hash,imported_at) VALUES(?,?,?,?,?,?)')
+    .run('1', 'families', String(i), '{}', 'old-hash', '2026-01-01');
+  const { legacyMigration } = await (await post({ action: 'previewLegacyMigration' })).json();
+  const originalBatch = harness.env.DB.batch;
+  let batches = 0;
+  harness.env.DB.batch = async statements => {
+    // Schema setup is the first batch. Interrupt the second evidence chunk.
+    batches++;
+    if (batches === 3) throw new Error('simulated interruption');
+    return originalBatch(statements);
+  };
+  try { assert.equal((await post({ action: 'migrateLegacySources', token: legacyMigration.token })).status, 500); }
+  finally { harness.env.DB.batch = originalBatch; }
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_raw_observations').get().n, 40);
+  assert.equal((await (await post({ action: 'previewLegacyMigration' })).json()).legacyMigration.complete, false);
+  await assert.rejects(() => importSnapshot('families', { '1': [] }), /прежний формат/);
+  state.autosync = { enabled: true };
+  await route.persistState(state);
+  assert.equal((await post({ action: 'migrateLegacySources', token: legacyMigration.token })).status, 409);
+  state.autosync = undefined; await route.persistState(state);
+  const response = await post({ action: 'migrateLegacySources', token: legacyMigration.token });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_raw_observations').get().n, 45);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_import_records').get().n, 45);
 });
 
 test('completed family snapshot archives only departed pupils in the selected branch', async t => {
