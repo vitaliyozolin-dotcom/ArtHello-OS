@@ -22,7 +22,8 @@ export function summarizeBranch(records, dictionary, branch) {
     result.statuses[safe] = (result.statuses[safe] ?? 0) + 1;
     if (!['Активен', 'Активен ШКОЛА', 'Открыто', 'Разовое посещение', 'Запись'].includes(safe)) continue;
     result.included++;
-    for (const id of Array.isArray(row.group_ids) ? row.group_ids : []) {
+    for (const value of Array.isArray(row.groups) ? row.groups : Array.isArray(row.group_ids) ? row.group_ids : []) {
+      const id = value && typeof value === 'object' ? value.id : value;
       if (/^[1-9]\d*$/.test(String(id))) result.groups[String(id)] = (result.groups[String(id)] ?? 0) + 1;
     }
   }
@@ -88,10 +89,12 @@ async function main() {
     const dictionary=await paged(`${id}/study-status/index`);
     const records=await paged(`${id}/customer/index`,{is_study:1,removed:0,withGroups:true});
     const groups=await paged(`${id}/group/index`,{removed:0});
+    const teachers=await paged(`${id}/teacher/index`,{removed:0});
     const summary=summarizeBranch(records,dictionary,id);
     const names=new Map(dictionary.map(row=>[String(row.id),row.name]));
     for(const row of records)if(Array.isArray(row.branch_ids)&&row.branch_ids.map(String).includes(id)&&['Активен','Активен ШКОЛА','Открыто','Разовое посещение','Запись'].includes(names.get(String(row.study_status_id))))unique.add(String(row.id));
-    report.sourceBranches.push({id,localBranch:state.branchMappings[id]??null,...summary,groups:groups.map(group=>({id:String(group.id),grade:String(group.name??'').match(/(?:^|\s)(1[01]|[1-9])\s*(?:класс|кл\b)/i)?.[1]??null,year:String(group.name??'').match(/202[0-9].{0,3}202[0-9]/)?.[0]??null,customers:summary.groups[String(group.id)]??0}))});
+    const safeTitle = value => String(value??'').replace(/\d{5,}/g,'*').replace(/[a-zа-яё]+/gi,word=>['класс','кл','атлас','школа','лет','мини','сад','садик','группа','нулевой','первый','второй','третий','четвертый','подготовка','школе','к','младшая','старшая','средняя','подготовительная'].includes(word.toLowerCase())?word:'*');
+    report.sourceBranches.push({id,localBranch:state.branchMappings[id]??null,...summary,customerFields:records[0]?Object.keys(records[0]).sort():[],teacherCount:teachers.length,teachersInBranch:teachers.filter(t=>Array.isArray(t.branch_ids)&&t.branch_ids.map(String).includes(id)).length,groups:groups.map(group=>({id:String(group.id),safeTitle:safeTitle(group.name),grade:String(group.name??'').match(/(?:^|[^0-9])(1[01]|[0-9])[\s_.-]*(?:класс|кл\b)/i)?.[1]??null,year:String(group.name??'').match(/202[0-9].{0,3}202[0-9]/)?.[0]??null,customers:summary.groups[String(group.id)]??0}))});
   }
   report.uniqueIncludedCustomerIds=unique.size;
   report.osFamilies=db.prepare("SELECT scope,status,COUNT(*) AS count FROM entities WHERE entity_type='Семья' GROUP BY scope,status").all();
