@@ -533,6 +533,9 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   }
 
   const projectionRows = currentProjectionRows(module, rows);
+  // Remember identities already published before this snapshot creates new branch copies.
+  const existingIdentityIds = module === "families" || module === "staff"
+    ? new Set((await readIdentityIndex(env.DB)).cards.map(card => card.id)) : new Set<string>();
   const batchId = crypto.randomUUID();
   await env.DB.prepare("INSERT INTO alfacrm_import_batches (id,module,scope,status,created_at) VALUES (?,?,?,'projecting',?)")
     .bind(batchId, module, JSON.stringify({ endpoint: state.endpoint, selectedBranches, params }), new Date().toISOString()).run();
@@ -556,7 +559,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   if (complete && rejected === 0 && ["families", "staff", "groups"].includes(module)) {
     await reconcileCurrentSnapshot(module, selectedBranches, projectionRows, state);
   }
-  if (complete && rejected === 0 && (module === "families" || module === "staff")) await confirmSharedAlfaIdentities(projectionRows, module, state, context.actor, batchId);
+  if (complete && rejected === 0 && (module === "families" || module === "staff")) await confirmSharedAlfaIdentities(projectionRows, module, state, context.actor, batchId, existingIdentityIds);
   await refreshIdentityProjections(env.DB);
   if ((module === "groups" || module === "families") && rejected === 0) await syncMembershipsFromFamilyRaw(state, context.actor);
   await refreshIdentityProjections(env.DB);
@@ -982,7 +985,7 @@ async function reconcileCurrentSnapshot(module: ModuleKey, branchIds: string[], 
 }
 
 /** Same source object in two reciprocal branch memberships; never a contact/name match. */
-async function confirmSharedAlfaIdentities(rows: FetchedRecord[], module: "families" | "staff", state: AlfaState, actor: string, batchId: string) {
+async function confirmSharedAlfaIdentities(rows: FetchedRecord[], module: "families" | "staff", state: AlfaState, actor: string, batchId: string, existingIds: ReadonlySet<string>) {
   const identity = await readIdentityIndex(env.DB);
   const merges = [...identity.merges];
   const observations = new Map<string, FetchedRecord[]>();
@@ -1020,9 +1023,10 @@ async function confirmSharedAlfaIdentities(rows: FetchedRecord[], module: "famil
         continue;
       }
       // Two independently confirmed identities cannot be joined by an automatic source repair.
-      const anchored = roots.filter(root => index.members(root).some(id => !ids.includes(id)));
+      const anchored = roots.filter(root => index.members(root).length > 1);
       if (anchored.length > 1) continue;
-      const survivorId = anchored[0] ?? [...roots].sort()[0];
+      const published = roots.filter(root => existingIds.has(root));
+      const survivorId = anchored[0] ?? [...(published.length ? published : roots)].sort()[0];
       for (const duplicateId of roots.filter(root => root !== survivorId)) {
         const merge = { survivorId, duplicateId };
         merges.push(merge);

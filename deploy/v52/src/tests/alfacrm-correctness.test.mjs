@@ -875,3 +875,29 @@ test('one pupil source ID cannot merge differently named representatives',async 
  assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Клиент' AND status='Активна'").get().n,2);
  assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Клиент' AND data_quality='Требует сверки'").get().n,2);
 });
+
+test('adding a branch preserves the first published canonical employee ID',async t=>{
+ const {sql}=await setup(t);const {createHash}=await import('node:crypto');
+ const ids=['1','2'].map(branch=>({branch,id:`EMP-A-${createHash('sha256').update(`${branch}:777`).digest('hex').slice(0,16).toUpperCase()}`})).sort((a,b)=>b.id.localeCompare(a.id));
+ const first=ids[0];
+ await importSnapshot('staff',{[first.branch]:[{id:777,name:'Stable teacher',branch_ids:[Number(first.branch)]}]},{mappings:{[first.branch]:first.branch==='1'?'BR-SCHOOL':'BR-NURSERY'}});
+ sql.prepare('UPDATE entities SET created_at=? WHERE id=?').run('2020-01-01 00:00:00',first.id);
+ const teacher={id:777,name:'Stable teacher',branch_ids:[1,2]};
+ await importSnapshot('staff',{'1':[teacher],'2':[teacher]},{mappings:{'1':'BR-SCHOOL','2':'BR-NURSERY'}});
+ assert.equal(sql.prepare("SELECT id FROM entities WHERE entity_type='Сотрудник' AND status='Активна'").get().id,first.id);
+});
+
+test('a confirmed root survives a separately imported third-branch copy with a smaller ID',async t=>{
+ const {sql}=await setup(t);const {createHash}=await import('node:crypto');
+ sql.exec("INSERT INTO organization_branches VALUES('BR-THIRD','Third','Активен',3)");
+ const state=await route.readState();state.remoteBranches.push({id:'3',name:'Third remote'});await route.persistState(state);
+ const hash=(branch,id)=>createHash('sha256').update(`${branch}:${id}`).digest('hex').slice(0,16).toUpperCase();
+ let id=1;while(!(hash('3',id)<hash('1',id)&&hash('3',id)<hash('2',id)))id++;
+ const teacher={id,name:'Stable teacher',branch_ids:[1,2,3]};
+ await importSnapshot('staff',{'1':[teacher],'2':[teacher]},{mappings:{'1':'BR-SCHOOL','2':'BR-NURSERY'}});
+ const root=sql.prepare("SELECT id FROM entities WHERE entity_type='Сотрудник' AND status='Активна'").get().id;
+ await importSnapshot('staff',{'3':[teacher]},{mappings:{'3':'BR-THIRD'}});
+ await importSnapshot('staff',{'1':[teacher],'2':[teacher],'3':[teacher]},{mappings:{'1':'BR-SCHOOL','2':'BR-NURSERY','3':'BR-THIRD'}});
+ assert.equal(sql.prepare("SELECT id FROM entities WHERE entity_type='Сотрудник' AND status='Активна'").get().id,root);
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Сотрудник' AND status='Активна'").get().n,1);
+});
