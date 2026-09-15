@@ -1,0 +1,51 @@
+name: Alfa runtime readiness (read only)
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/alfa-runtime-readiness.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+
+jobs:
+  health:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.repository_owner == 'vitaliyozolin-dotcom' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    timeout-minutes: 5
+    steps:
+      # No checkout, downloaded script, secret, database query, restart or import.
+      - name: Read public health and runtime state on the existing gateway
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf 'ALFA_RUNTIME_DIAGNOSTIC=READ_ONLY\n'
+          failed=0
+          for host in arthello-188-225-38-55.sslip.io atlas-188-225-38-55.sslip.io school-188-225-38-55.sslip.io; do
+            code="$(curl --silent --show-error --connect-timeout 5 --max-time 15 --output /dev/null --write-out '%{http_code}' "https://$host/api/health")" || code=transport_error
+            printf 'health host=%s status=%s\n' "$host" "$code"
+            if test "$code" != 200; then failed=1; fi
+          done
+          caddy_state="$(docker inspect --format '{{.State.Status}}' stroios-caddy-1)"
+          printf 'gateway status=%s\n' "$caddy_state"
+          # Only names/status/revision of ArtHello containers; never dump inspect,
+          # environment, logs, credentials, route contents or customer records.
+          while IFS= read -r container; do
+            [[ "$container" =~ ^arthello-direct-[a-zA-Z0-9-]+$ ]] || continue
+            docker inspect --format 'runtime={{.Name}} status={{.State.Status}} revision={{index .Config.Labels "org.opencontainers.image.revision"}}' "$container"
+          done < <(docker ps -a --format '{{.Names}}')
+          if test "$caddy_state" != running; then failed=1; fi
+          printf 'ALFA_RUNTIME_HEALTH_FAILED=%s\n' "$failed"
+          exit "$failed"
