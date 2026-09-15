@@ -151,3 +151,10 @@
 - [ ] Подключить и сверить счета ИП Тюрин и ООО «УК Детское образование» до разнесения этих юрлиц.
 - [ ] Реализовать парное внутригрупповое сопоставление управленческих услуг и исключение оборота в консолидации.
 - [ ] После подтверждённой выборки расширять правила по назначению платежа/ИНН; каждое правило сначала запускать как preview.
+
+## D187 — AlfaCRM background sync
+
+- Candidate implemented: persisted hourly refresh, retries, owner control and scope-change stop; tested against the real importer with synthetic SQLite fixtures.
+- Candidate implemented: preservation of local notes and unchanged verified source records on repeated import.
+- [ ] Complete protected release and runtime activation after reconciling AlfaCRM branch data.
+- [ ] Separately diagnose OS → diary outbox delivery and verify pupils in both School 1–11 and Atlas.
