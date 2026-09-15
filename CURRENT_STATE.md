@@ -1,5 +1,10 @@
 # ArtHello OS — Current State
 
+## 2026-09-15 — D189: единая идентификация, кандидат
+
+Основной ID сохраняет подтверждённые ссылки старых карточек и несколько филиальных назначений. Повторный импорт, архив и учебные привязки используют единый корень; слабые совпадения не объединяют людей. Автоматическое подтверждение — только один ID объекта AlfaCRM с взаимно подтверждёнными филиалами. Production ещё не изменён; оба живых дневника повторно проверены, учеников по-прежнему 0. Доказательства: `docs/acceptance/2026-09-15-d189-unified-identity.md`.
+
+
 - Webhook hardening добавляет невключённые shared primitives: versioned website HMAC-SHA256 связывает timestamp/event/raw-body digest и сравнивается constant-time; durable replay claim атомарно использует существующий PostgreSQL `raw_events` unique hash под advisory lock, различая claimed/duplicate/conflict. Публичный allowlist и provider routes не расширены.
 - Backlog review 2026-09-11 подтверждает закрытие Atlas production activation по принятым D129/D130 receipts. Отдельно принят design-only callback contract для website/bank/Evotor; публичные provider callbacks не включены и требуют реализации durable replay/verifier tests.
 

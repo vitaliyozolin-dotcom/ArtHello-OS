@@ -11,6 +11,8 @@ const dataModule = text => `data:text/javascript;base64,${Buffer.from(text).toSt
 const policyUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/access-policy.ts'), 'utf8'), { mode: 'strip' }));
 const integrationsUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/integrations.ts'), 'utf8'), { mode: 'strip' }));
 const alfaImportUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/alfacrm-import.ts'), 'utf8'), { mode: 'strip' }));
+const identityUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/entity-identity.ts'), 'utf8'), { mode: 'strip' }));
+const identityDbUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/entity-identity-db.ts'), 'utf8'), { mode: 'strip' }).replace("'./entity-identity.ts'", JSON.stringify(identityUrl)));
 const policy = await import(policyUrl);
 globalThis.__alfaCorrectness = { env: {}, actor: null, csrfValid: true, originValid: true };
 const harness = globalThis.__alfaCorrectness;
@@ -18,8 +20,10 @@ const adapters = {
   'cloudflare:workers': dataModule('export const env=globalThis.__alfaCorrectness.env;'),
   '../../../../db': dataModule('export const ensureCoreTables=async()=>{}; export const readIntegrationCredential=async()=>JSON.stringify({email:"fixture@example.test",apiKey:"synthetic-key",appKey:""}); export const saveIntegrationCredential=async()=>{};'),
   '../../../../lib/access-policy': policyUrl,
+  '../../../../lib/entity-identity': identityUrl,
+  '../../../../lib/entity-identity-db': identityDbUrl,
   '../../../../lib/integrations': integrationsUrl,
-  '../../../../lib/production-auth': dataModule('export const getAuthenticatedRequestContext=async()=>globalThis.__alfaCorrectness.actor; export const verifyAuthenticatedRequestCsrf=()=>{if(!globalThis.__alfaCorrectness.csrfValid)throw new Error("fixture csrf rejected");};'),
+  '../../../../lib/production-auth': dataModule('export const isCanonicalOwnerContext=c=>c?.apiRole==="OWNER"&&c.auth.user.isSystemOwner===true; export const getAuthenticatedRequestContext=async()=>globalThis.__alfaCorrectness.actor; export const verifyAuthenticatedRequestCsrf=()=>{if(!globalThis.__alfaCorrectness.csrfValid)throw new Error("fixture csrf rejected");};'),
   '../../../../lib/request-security': dataModule('export const hasTrustedMutationOrigin=()=>globalThis.__alfaCorrectness.originValid;'),
   '../../../../lib/alfacrm-import': alfaImportUrl,
 };
@@ -35,7 +39,7 @@ const session = { endpoint: 'https://fixture.s20.online', token: 'synthetic-toke
 
 function actor(apiRole = 'OWNER', allowedModules = ['integrations']) {
   return { actor: 'fixture@example.test', appUserId: 'FIXTURE-OWNER', apiRole, auth: { user: {
-    id: 'fixture-owner', isSystemOwner: apiRole === 'OWNER', canAccessMedical: false,
+    id: 'fixture-owner', apiRole, isSystemOwner: apiRole === 'OWNER', canAccessMedical: false,
     isAdministrative: apiRole === 'OWNER',
     allowedModules, allowedBranchIds: branches.map(branch => branch.id), branchIds: branches.map(branch => branch.id),
   } } };
@@ -50,6 +54,8 @@ async function setup(t) {
     CREATE TABLE organization_branches(id TEXT PRIMARY KEY,name TEXT,status TEXT,sort_order INTEGER);
     INSERT INTO organization_branches VALUES('BR-SCHOOL','School','Активен',1),('BR-NURSERY','Nursery','Активен',2);
     CREATE TABLE entities(id TEXT PRIMARY KEY,entity_type TEXT,display_name TEXT,status TEXT,source_system TEXT,source_record_id TEXT,data_quality TEXT,scope TEXT,metadata TEXT,created_by TEXT,created_at TEXT,updated_at TEXT);
+    CREATE TABLE entity_merges(survivor_id TEXT,duplicate_id TEXT UNIQUE,reason TEXT,created_by TEXT);
+    CREATE TABLE education_lessons(id TEXT PRIMARY KEY,teacher_entity_id TEXT,substitute_entity_id TEXT);
     CREATE TABLE entity_links(from_entity_id TEXT,to_entity_id TEXT,relation_type TEXT,created_by TEXT,UNIQUE(from_entity_id,to_entity_id,relation_type));
     CREATE TABLE audit_events(actor TEXT,action TEXT,entity_type TEXT,entity_id TEXT,payload TEXT);
     CREATE TABLE integration_connections(id TEXT,owner_entity_id TEXT,status TEXT,auth_status TEXT,verified_transfer INTEGER,is_enabled INTEGER,last_success_at TEXT,next_sync_at TEXT,error_count INTEGER,updated_at TEXT,received_count INTEGER,accepted_count INTEGER,rejected_count INTEGER);
@@ -672,4 +678,190 @@ test('dependent imports cannot reuse pre-reconciliation families or teachers',as
  let calls=0;mockRecords({},()=>calls++);
  for(const moduleKey of ['groups','lessons','subscriptions','finance'])assert.equal((await post({action:'previewModule',module:moduleKey})).status,409,moduleKey);
  assert.equal(calls,0);assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_raw_observations').get().n,0);
+});
+
+test('confirmed family identity survives sync across branches and preserves sibling identities', async t => {
+ const {sql}=await setup(t);
+ const rows={'1':[{id:101,name:'Sibling one',group_ids:[5]}],'2':[{id:102,name:'Sibling two',group_ids:[6]}]};
+ await importSnapshot('families',rows);
+ const families=sql.prepare("SELECT id FROM entities WHERE entity_type='Семья' ORDER BY scope").all();
+ const root=families[0].id,alias=families[1].id;
+ sql.prepare('INSERT INTO entity_merges(survivor_id,duplicate_id) VALUES(?,?)').run(root,alias);
+ sql.prepare("UPDATE entities SET status='Объединена' WHERE id=?").run(alias);
+ await importSnapshot('families',rows);
+ assert.equal(sql.prepare('SELECT status FROM entities WHERE id=?').get(alias).status,'Объединена');
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Ребёнок' AND status='Активна'").get().n,2);
+ await importSnapshot('groups',{'1':[{id:5,name:'School class'}],'2':[{id:6,name:'Atlas class'}]});
+ assert.deepEqual(sql.prepare("SELECT DISTINCT family_entity_id FROM education_students WHERE status='Активен'").all().map(x=>x.family_entity_id),[root]);
+ assert.equal(sql.prepare("SELECT count(DISTINCT child_entity_id) n FROM education_students WHERE status='Активен'").get().n,2);
+});
+
+test('one Alfa source ID with reciprocal branch membership creates one family, child and employee', async t => {
+ const {sql}=await setup(t);
+ const pupil={id:501,name:'Same pupil',branch_ids:[1,2],group_ids:[5]};
+ const teacher={id:701,name:'Same teacher',branch_ids:[1,2]};
+ await importSnapshot('families',{'1':[pupil],'2':[pupil]});
+ await importSnapshot('staff',{'1':[teacher],'2':[teacher]});
+ for(const type of ['Семья','Ребёнок','Сотрудник']) assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type=? AND status='Активна'").get(type).n,1,type);
+ await importSnapshot('groups',{'1':[{id:5,name:'School',teacher_ids:[701]}],'2':[{id:5,name:'Atlas',teacher_ids:[701]}]});
+ assert.equal(sql.prepare("SELECT count(DISTINCT child_entity_id) n FROM education_students WHERE status='Активен'").get().n,1);
+ assert.equal(sql.prepare("SELECT count(DISTINCT teacher_entity_id) n FROM education_groups WHERE status='Активна'").get().n,1);
+ assert.equal(sql.prepare("SELECT count(*) n FROM education_students WHERE status='Активен'").get().n,2);
+ await importSnapshot('families',{'1':[pupil],'2':[pupil]});
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Семья' AND status='Активна'").get().n,1);
+ const family=sql.prepare("SELECT metadata FROM entities WHERE entity_type='Семья' AND status='Активна'").get();
+ assert.equal(JSON.parse(family.metadata).branchAssignments.filter(row=>row.active).length,2);
+});
+
+const mergeAdapters = Object.fromEntries(Object.entries(adapters).map(([key,value])=>[key.replace('../../../../','../../../'),value]));
+mergeAdapters['../../../lib/entity-provenance'] = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/entity-provenance.ts'),'utf8'),{mode:'strip'}));
+const mergeSource = stripTypeScriptTypes(readFileSync(resolve('app/api/entity-merge/route.ts'),'utf8'),{mode:'strip'}).replace(/from\s+["']([^"']+)["']/g,(_all,name)=>{
+ assert.ok(mergeAdapters[name],name);return `from "${mergeAdapters[name]}"`;
+});
+const mergeRoute = await import(dataModule(mergeSource));
+const mergeCards=(survivorId,duplicateId)=>mergeRoute.POST(new Request('https://arthello.example.test/api/entity-merge',{method:'POST',headers:{'content-type':'application/json',origin:'https://arthello.example.test'},body:JSON.stringify({survivorId,duplicateId,reason:'Подтверждено по исходным документам'})}));
+
+test('identity confirmation is atomic, branch authorized and cannot merge siblings as a side effect',async t=>{
+ const {sql}=await setup(t);
+ await importSnapshot('families',{'1':[{id:81,name:'Child one'}],'2':[{id:82,name:'Child two'}]});
+ const ids=sql.prepare("SELECT id FROM entities WHERE entity_type='Семья' ORDER BY id").all().map(x=>x.id);
+ harness.actor=actor('DIRECTOR',['registry']);
+ sql.exec("INSERT INTO user_branch_access VALUES('FIXTURE-OWNER','BR-SCHOOL')");
+ assert.equal((await mergeCards(...ids)).status,403);
+ harness.actor=actor('OWNER',['registry']);
+ harness.csrfValid=false;assert.equal((await mergeCards(...ids)).status,403);harness.csrfValid=true;
+ const realBatch=harness.env.DB.batch;
+ harness.env.DB.batch=async statements=>realBatch([...statements,harness.env.DB.prepare('INSERT INTO missing_fixture_table VALUES(1)')]);
+ assert.equal((await mergeCards(...ids)).status,503);
+ assert.equal(sql.prepare('SELECT count(*) n FROM entity_merges').get().n,0);
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Семья' AND status='Активна'").get().n,2);
+ harness.env.DB.batch=realBatch;
+ const response=await mergeCards(...ids);assert.equal(response.status,200,await response.clone().text());
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Ребёнок' AND status='Активна'").get().n,2);
+ assert.equal((await mergeCards(ids[1],ids[0])).status,409);
+ assert.equal(sql.prepare("SELECT count(*) n FROM audit_events WHERE action='entity.merged'").get().n,1);
+});
+
+test('canonical family archive survives both branch imports and restore keeps alias identity',async t=>{
+ const {sql}=await setup(t);const pupil={id:910,name:'One pupil',branch_ids:[1,2],group_ids:[9]};
+ await importSnapshot('families',{'1':[pupil],'2':[pupil]});
+ await importSnapshot('groups',{'1':[{id:9,name:'School'}],'2':[{id:9,name:'Atlas'}]});
+ const root=sql.prepare("SELECT id FROM entities WHERE entity_type='Семья' AND status='Активна'").get().id;
+ harness.actor=actor('OWNER',['clients']);assert.equal((await archive(root)).status,200);
+ await importSnapshot('families',{'1':[pupil],'2':[pupil]});
+ assert.equal(sql.prepare("SELECT count(*) n FROM education_students WHERE status='Активен'").get().n,0);
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Семья' AND status='Архив'").get().n,1);
+ assert.equal((await archive(root,false)).status,200);
+ await importSnapshot('families',{'1':[pupil],'2':[pupil]});
+ assert.equal(sql.prepare("SELECT count(*) n FROM education_students WHERE status='Активен'").get().n,2);
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Семья' AND status='Активна'").get().n,1);
+});
+
+test('one departing branch cannot archive a person still active in the other branch',async t=>{
+ const {sql}=await setup(t);const teacher={id:910,name:'One teacher',branch_ids:[1,2]};
+ await importSnapshot('staff',{'1':[teacher],'2':[teacher]});
+ const root=sql.prepare("SELECT id FROM entities WHERE entity_type='Сотрудник' AND status='Активна'").get().id;
+ const rootBranch=JSON.parse(sql.prepare('SELECT metadata FROM entities WHERE id=?').get(root).metadata).remoteBranchId;
+ const other=rootBranch==='1'?'2':'1';
+ await importSnapshot('staff',{[rootBranch]:[],[other]:[{...teacher,branch_ids:[Number(other)]}]});
+ assert.equal(sql.prepare('SELECT status FROM entities WHERE id=?').get(root).status,'Активна');
+ assert.equal(sql.prepare('SELECT status FROM hr_employees WHERE id=?').get(root).status,'Работает');
+ assert.equal(JSON.parse(sql.prepare('SELECT metadata FROM entities WHERE id=?').get(root).metadata).branchAssignments.filter(x=>x.active).length,1);
+});
+
+test('real family read follows old ID and returns both children, contracts and original financial links',async t=>{
+ const {sql}=await setup(t);
+ const {drizzle}=await import('drizzle-orm/d1');
+ const {getTableConfig}=await import('drizzle-orm/sqlite-core');
+ const schema=await import('../db/schema.ts');
+ for(const key of ['entityLinks','financialOperations','educationStudents','educationGroups','salesLeads','clientLifecycles','clientAccruals','legalContracts','legalDocumentItems','salesStageEvents','salesTouchpoints']){
+  const config=getTableConfig(schema[key]);
+  sql.exec(`CREATE TABLE IF NOT EXISTS ${config.name} (${config.columns.map(col=>`${col.name} ${col.getSQLType()}`).join(',')})`);
+  const existing=new Set(sql.prepare(`PRAGMA table_info(${config.name})`).all().map(col=>col.name));
+  for(const col of config.columns)if(!existing.has(col.name))sql.exec(`ALTER TABLE ${config.name} ADD COLUMN ${col.name} ${col.getSQLType()}`);
+ }
+ await importSnapshot('families',{'1':[{id:120,name:'Sibling one'}],'2':[{id:121,name:'Sibling two'}]});
+ const ids=sql.prepare("SELECT id FROM entities WHERE entity_type='Семья' ORDER BY id").all().map(row=>row.id);
+ harness.actor=actor('OWNER',['registry','clients']);assert.equal((await mergeCards(...ids)).status,200);
+ for(let i=0;i<ids.length;i++){
+  sql.prepare('INSERT INTO financial_operations(id,counterparty_entity_id,amount_minor) VALUES(?,?,?)').run(`OP${i}`,ids[i],100+i);
+  sql.prepare('INSERT INTO legal_contracts(id,party_entity_id) VALUES(?,?)').run(`CON${i}`,ids[i]);
+ }
+ const originalPrepare=harness.env.DB.prepare;
+ harness.env.DB.prepare=query=>{
+  const wrap=(args=[])=>({...originalPrepare(query).bind(...args),bind(...values){return wrap(values)},raw:async()=>{const stmt=sql.prepare(query);stmt.setReturnArrays(true);return stmt.all(...args)}});
+  return wrap();
+ };
+ harness.orm=drizzle(harness.env.DB);
+ const familyAdapters={...mergeAdapters,
+  '../../../db':dataModule('export const ensureCoreTables=async()=>{};export const getDb=()=>globalThis.__alfaCorrectness.orm;'),
+  '../../../db/schema':new URL('../db/schema.ts',import.meta.url).href,
+  '../../../lib/request-user':dataModule('export const getRequestUser=()=>globalThis.__alfaCorrectness.actor?.actor;'),
+  'drizzle-orm':import.meta.resolve('drizzle-orm'),
+ };
+ const code=stripTypeScriptTypes(readFileSync(resolve('app/api/families/route.ts'),'utf8'),{mode:'transform'}).replace(/from\s+["']([^"']+)["']/g,(_all,name)=>{
+  assert.ok(familyAdapters[name],name);return `from "${familyAdapters[name]}"`;
+ });
+ const familyRoute=await import(dataModule(code));
+ const response=await familyRoute.GET(new Request(`https://arthello.example.test/api/families?id=${ids[1]}`));
+ assert.equal(response.status,200,await response.clone().text());
+ const body=await response.json();
+ assert.equal(body.family.id,ids[0]);
+ assert.equal(body.members.filter(row=>row.entityType==='Ребёнок').length,2);
+ assert.equal(body.relationship.contracts.length,2);
+ assert.deepEqual(body.operations.map(row=>row.counterpartyEntityId).sort(),[...ids].sort());
+ assert.deepEqual(body.operations.map(row=>row.amountMinor).sort(),[100,101]);
+ harness.actor=actor('DIRECTOR',['clients']);
+ sql.exec("INSERT INTO user_branch_access VALUES('FIXTURE-OWNER','BR-SCHOOL')");
+ assert.equal((await familyRoute.GET(new Request(`https://arthello.example.test/api/families?id=${ids[0]}`))).status,403);
+ sql.exec("INSERT INTO user_branch_access VALUES('FIXTURE-OWNER','BR-NURSERY')");
+ assert.equal((await familyRoute.GET(new Request(`https://arthello.example.test/api/families?id=${ids[0]}`))).status,200);
+});
+
+test('source alias repair preserves an explicit archive even when another root sorts first',async t=>{
+ const {sql}=await setup(t);
+ await importSnapshot('families',{'1':[{id:333,name:'One pupil',branch_ids:[1]}],'2':[{id:333,name:'One pupil',branch_ids:[2]}]});
+ const ids=sql.prepare("SELECT id FROM entities WHERE entity_type='Семья' ORDER BY id").all().map(row=>row.id);
+ harness.actor=actor('OWNER',['clients']);assert.equal((await archive(ids[1])).status,200);
+ const pupil={id:333,name:'One pupil',branch_ids:[1,2]};
+ await importSnapshot('families',{'1':[pupil],'2':[pupil]});
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Семья' AND status='Активна'").get().n,0);
+ assert.equal(sql.prepare("SELECT status FROM entities WHERE id=?").get(ids[0]).status,'Архив');
+});
+
+test('another source account cannot overwrite existing identities',async t=>{
+ const {sql}=await setup(t);
+ await importSnapshot('families',{'1':[{id:41,name:'Existing pupil'}]});
+ sql.prepare('UPDATE alfacrm_import_batches SET scope=?').run(JSON.stringify({endpoint:'https://other.s20.online'}));
+ const before=sql.prepare('SELECT count(*) n FROM alfacrm_raw_observations').get().n;
+ await assert.rejects(importSnapshot('families',{'1':[{id:41,name:'Different pupil'}]}),/другим аккаунтом/);
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_raw_observations').get().n,before);
+ assert.equal(sql.prepare("SELECT display_name FROM entities WHERE entity_type='Ребёнок'").get().display_name,'Existing pupil');
+});
+
+test('existing diary principals defer source alias repair instead of silently changing access bindings',async t=>{
+ const {sql}=await setup(t);
+ const rows={'1':[{id:444,name:'One pupil',branch_ids:[1]}],'2':[{id:444,name:'One pupil',branch_ids:[2]}]};
+ await importSnapshot('families',rows);
+ const ids=sql.prepare("SELECT id FROM entities WHERE entity_type='Семья' ORDER BY id").all().map(row=>row.id);
+ sql.exec('CREATE TABLE family_system_access(family_entity_id TEXT,principal_entity_id TEXT)');
+ sql.prepare('INSERT INTO family_system_access VALUES(?,?)').run(ids[1],'EXISTING-PRINCIPAL');
+ const pupil={id:444,name:'One pupil',branch_ids:[1,2]};
+ await importSnapshot('families',{'1':[pupil],'2':[pupil]});
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Семья' AND status='Активна'").get().n,2);
+ assert.equal(sql.prepare('SELECT family_entity_id FROM family_system_access').get().family_entity_id,ids[1]);
+ harness.actor=actor('OWNER',['registry']);assert.equal((await mergeCards(...ids)).status,409);
+ assert.ok(sql.prepare("SELECT count(*) n FROM audit_events WHERE action='identity.source_alias_deferred'").get().n>0);
+});
+
+
+test('an existing employee login is not silently rekeyed by source identity repair',async t=>{
+ const {sql}=await setup(t);
+ await importSnapshot('staff',{'1':[{id:555,name:'One teacher',branch_ids:[1]}],'2':[{id:555,name:'One teacher',branch_ids:[2]}]});
+ const ids=sql.prepare("SELECT id FROM entities WHERE entity_type='Сотрудник' ORDER BY id").all().map(row=>row.id);
+ sql.exec('CREATE TABLE app_users(id TEXT PRIMARY KEY)');sql.prepare('INSERT INTO app_users VALUES(?)').run(ids[1]);
+ const teacher={id:555,name:'One teacher',branch_ids:[1,2]};
+ await importSnapshot('staff',{'1':[teacher],'2':[teacher]});
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Сотрудник' AND status='Активна'").get().n,2);
+ assert.equal(sql.prepare('SELECT id FROM app_users').get().id,ids[1]);
 });

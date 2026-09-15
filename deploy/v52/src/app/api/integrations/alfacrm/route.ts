@@ -1,5 +1,7 @@
 /* eslint-disable @next/next/no-assign-module-variable */
 import { env } from "cloudflare:workers";
+import { buildIdentityIndex, serializeIdentityMutation } from "../../../../lib/entity-identity";
+import { readIdentityIndex, refreshIdentityProjections, identityHasAccessBindings } from "../../../../lib/entity-identity-db";
 import {
   ensureCoreTables,
   readIntegrationCredential,
@@ -75,7 +77,7 @@ type ImportContext = RequestContext | { scheduler: true; actor: string };
 type RuntimeFetcher = { fetch: (request: Request) => Promise<Response> };
 
 let requestTail: Promise<void> = Promise.resolve();
-let mutationTail: Promise<void> = Promise.resolve();
+
 let lastRequestStartedAt = 0;
 
 export async function GET(request: Request) {
@@ -249,13 +251,7 @@ async function runAlfaAutosyncTick() {
 
 // The production runtime has a single worker. Serialize connector mutations so
 // two tabs cannot consume the same preview/cursor or reconcile overlapping scopes.
-async function serializeMutation<T>(action: () => Promise<T>): Promise<T> {
-  let release: (() => void) | undefined;
-  const previous = mutationTail;
-  mutationTail = new Promise<void>((resolve) => { release = resolve; });
-  await previous;
-  try { return await action(); } finally { release?.(); }
-}
+async function serializeMutation<T>(action: () => Promise<T>): Promise<T> { return serializeIdentityMutation(action); }
 
 async function requireContext(request: Request, mutation: boolean): Promise<RequestContext | Response> {
   if (mutation) {
@@ -492,6 +488,8 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   if (!Number.isFinite(previewAt) || previewAge < 0 || previewAge >= previewTtl) {
     return privateJson({ error: `Предпросмотр устарел или его время не подтверждено. Выполните предпросмотр ещё раз; он действует ${module === "subscriptions" ? "6 часов" : "30 минут"}.` }, 409);
   }
+  const otherAccount = await env.DB.prepare("SELECT 1 AS found FROM alfacrm_import_batches WHERE json_valid(scope) AND json_extract(scope,'$.endpoint') IS NOT NULL AND json_extract(scope,'$.endpoint')<>? LIMIT 1").bind(state.endpoint).first();
+  if (otherAccount) return privateJson({ error: "Этот реестр уже связан с другим аккаунтом AlfaCRM. Смена источника требует отдельного переноса идентификаторов." }, 409);
   const session = await storedSession(state);
   const localBranches = await readLocalBranches();
   let rows: FetchedRecord[] = [];
@@ -558,7 +556,10 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   if (complete && rejected === 0 && ["families", "staff", "groups"].includes(module)) {
     await reconcileCurrentSnapshot(module, selectedBranches, projectionRows, state);
   }
+  if (complete && rejected === 0 && (module === "families" || module === "staff")) await confirmSharedAlfaIdentities(projectionRows, module, state, context.actor, batchId);
+  await refreshIdentityProjections(env.DB);
   if ((module === "groups" || module === "families") && rejected === 0) await syncMembershipsFromFamilyRaw(state, context.actor);
+  await refreshIdentityProjections(env.DB);
   await env.DB.prepare("UPDATE alfacrm_import_batches SET status=? WHERE id=?")
     .bind(projectionBlocked ? "blocked" : rejected ? "partial" : "complete", batchId).run();
   const current = new Date().toISOString();
@@ -966,7 +967,7 @@ async function reconcileCurrentSnapshot(module: ModuleKey, branchIds: string[], 
       const recordId = scalar(module === "families" ? metadata.alfaCustomerId : metadata.alfaTeacherId);
       const expectedTypes = module === "families" ? ["Семья", "Клиент", "Ребёнок"] : ["Сотрудник"];
       if (!selected.has(branch) || !recordId || !expectedTypes.includes(entity.entity_type) || seen.has(`${branch}:${recordId}`)) continue;
-      statements.push(env.DB.prepare("UPDATE entities SET status='Архив',updated_at=CURRENT_TIMESTAMP WHERE id=? AND source_system='ALFACRM'").bind(entity.id));
+      statements.push(env.DB.prepare("UPDATE entities SET status=CASE WHEN status='Объединена' THEN status ELSE 'Архив' END,metadata=json_set(metadata,'$.identitySourceStatus','Архив'),updated_at=CURRENT_TIMESTAMP WHERE id=? AND source_system='ALFACRM'").bind(entity.id));
       if (module === "staff") statements.push(env.DB.prepare("UPDATE hr_employees SET status='Неактивен в AlfaCRM',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(entity.id));
     }
   }
@@ -978,6 +979,56 @@ async function reconcileCurrentSnapshot(module: ModuleKey, branchIds: string[], 
     }
   }
   await runBatches(statements);
+}
+
+/** Same source object in two reciprocal branch memberships; never a contact/name match. */
+async function confirmSharedAlfaIdentities(rows: FetchedRecord[], module: "families" | "staff", state: AlfaState, actor: string, batchId: string) {
+  const identity = await readIdentityIndex(env.DB);
+  const merges = [...identity.merges];
+  const observations = new Map<string, FetchedRecord[]>();
+  for (const row of rows) {
+    const key = scalar(row.item.id);
+    if (key) observations.set(key, [...(observations.get(key) ?? []), row]);
+  }
+  const statements = [];
+  for (const [recordId, group] of observations) {
+    const branches = [...new Set(group.map(row => row.remoteBranchId))];
+    if (branches.length < 2) continue;
+    // Branch evidence must agree in every response. Names only veto conflicts.
+    if (!group.every(row => Array.isArray(row.item.branch_ids) && branches.every(branch => (row.item.branch_ids as unknown[]).map(scalar).includes(branch)))
+      || new Set(group.map(row => normalizeName(scalar(row.item.name ?? row.item.full_name)))).size !== 1
+      || (module === "families" && new Set(group.map(row => isoDate(row.item.dob))).size !== 1)) continue;
+    const kinds = module === "staff" ? ["Сотрудник"] : ["Семья", "Клиент", "Ребёнок"];
+    for (const kind of kinds) {
+      const ids = identity.cards.filter(card => {
+        if (card.entityType !== kind) return false;
+        let meta: JsonRecord; try { meta = JSON.parse(card.metadata); } catch { return false; }
+        return branches.includes(scalar(meta.remoteBranchId)) && scalar(module === "staff" ? meta.alfaTeacherId : meta.alfaCustomerId) === recordId;
+      }).map(card => card.id);
+      if (ids.length !== branches.length) continue;
+      const index = buildIdentityIndex(identity.cards, merges);
+      const roots = [...new Set(ids.map(id => index.canonical(id)))];
+      if (roots.length > 1 && await identityHasAccessBindings(env.DB, roots.flatMap(id => index.members(id)))) {
+        for (const id of roots) statements.push(env.DB.prepare("UPDATE entities SET data_quality='Требует сверки' WHERE id=?").bind(id));
+        statements.push(auditStatement(actor, 'identity.source_alias_deferred', { module, recordId, branches, batchId, reason: 'existing_directory_access' }));
+        continue;
+      }
+      // Two independently confirmed identities cannot be joined by an automatic source repair.
+      const anchored = roots.filter(root => index.members(root).some(id => !ids.includes(id)));
+      if (anchored.length > 1) continue;
+      const survivorId = anchored[0] ?? [...roots].sort()[0];
+      for (const duplicateId of roots.filter(root => root !== survivorId)) {
+        const merge = { survivorId, duplicateId };
+        merges.push(merge);
+        const reason = 'Один ID объекта AlfaCRM с подтверждёнными филиалами';
+        statements.push(env.DB.prepare('INSERT INTO entity_merges(survivor_id,duplicate_id,reason,created_by) VALUES(?,?,?,?)').bind(survivorId, duplicateId, reason, actor));
+        statements.push(env.DB.prepare("UPDATE entities SET status='Объединена' WHERE id=?").bind(duplicateId));
+        statements.push(env.DB.prepare("INSERT INTO audit_events(actor,action,entity_type,entity_id,payload) VALUES(?,'identity.source_alias_confirmed','entity',?,?)")
+          .bind(actor, survivorId, JSON.stringify({ ...merge, endpoint: state.endpoint, module, recordId, branches, batchId, evidence: 'reciprocal-source-branch-membership' })));
+      }
+    }
+  }
+  if (statements.length) await env.DB.batch(statements);
 }
 
 async function canonicalizeFamilies(rows: FetchedRecord[], state: AlfaState, localBranches: LocalBranch[], actor: string) {
@@ -1067,6 +1118,7 @@ async function canonicalizeStaff(rows: FetchedRecord[], state: AlfaState, localB
 }
 
 async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, localBranches: LocalBranch[]) {
+  const identities = await readIdentityIndex(env.DB);
   const statements = [];
   const programIds = new Map<string, string>();
   const selectedLocalIds = new Set(Object.values(state.branchMappings));
@@ -1088,9 +1140,9 @@ async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, local
     if (!groupId || !name || !localBranchId) { rejected += 1; continue; }
     const teacherRemoteId = scalar(item.teacher_id) || firstTeacherId(item);
     const candidateTeacherId = teacherRemoteId ? await localTeacherId(remoteBranchId, teacherRemoteId) : "";
-    const currentTeacher = candidateTeacherId ? await env.DB.prepare("SELECT id FROM entities WHERE id=? AND entity_type='Сотрудник' AND status='Активна' AND json_extract(metadata,'$.remoteBranchId')=?")
+    const currentTeacher = candidateTeacherId ? await env.DB.prepare("SELECT id FROM entities WHERE id=? AND entity_type='Сотрудник' AND (status='Активна' OR (status='Объединена' AND json_extract(metadata,'$.identitySourceStatus')='Активна')) AND json_extract(metadata,'$.remoteBranchId')=?")
       .bind(candidateTeacherId, remoteBranchId).first<{ id: string }>() : null;
-    const teacherEntityId = currentTeacher?.id ?? "";
+    const teacherEntityId = currentTeacher ? identities.canonical(currentTeacher.id) : "";
     const id = await localGroupId(remoteBranchId, groupId);
     const programId = programIds.get(localBranchId) ?? `PRG-A-${await shortHash(localBranchId)}`;
     statements.push(env.DB.prepare(`INSERT INTO education_groups
@@ -1106,14 +1158,13 @@ async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, local
 }
 
 async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string) {
-  const existing = await env.DB.prepare("SELECT s.id,e.metadata FROM education_students s JOIN entities e ON e.id=s.child_entity_id WHERE e.source_system='ALFACRM' AND s.id LIKE 'STU-A-%'")
-    .all<{ id: string; metadata: string }>();
-  const selected = new Set(mappedRemoteBranches(state));
+  const identities = await readIdentityIndex(env.DB);
+  const existing = await env.DB.prepare("SELECT s.id,g.unit_entity_id AS branch FROM education_students s JOIN education_groups g ON g.id=s.group_id WHERE s.id LIKE 'STU-A-%'")
+    .all<{ id: string; branch: string }>();
+  const selected = new Set(Object.values(state.branchMappings));
   const archive = [];
   for (const row of existing.results ?? []) {
-    let metadata: JsonRecord;
-    try { metadata = JSON.parse(row.metadata) as JsonRecord; } catch { continue; }
-    if (selected.has(scalar(metadata.remoteBranchId))) archive.push(env.DB.prepare("UPDATE education_students SET status='Архив' WHERE id=?").bind(row.id));
+    if (selected.has(row.branch)) archive.push(env.DB.prepare("UPDATE education_students SET status='Архив' WHERE id=?").bind(row.id));
   }
   await runBatches(archive);
   const rows = await env.DB.prepare("SELECT c.remote_branch_id,c.record_id,o.payload FROM alfacrm_current_records c JOIN alfacrm_raw_observations o ON o.id=c.observation_id WHERE c.module='families' AND c.active=1 ORDER BY c.remote_branch_id,c.record_id")
@@ -1125,8 +1176,8 @@ async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string) {
     try { item = JSON.parse(row.payload) as JsonRecord; } catch { continue; }
     if (alfaBranchDisposition('families', { remoteBranchId: row.remote_branch_id, item }) !== 'accepted') continue;
     const studentId = scalar(item.id) || row.record_id;
-    const childId = `CHD-A-${await shortHash(`${row.remote_branch_id}:${studentId}`)}`;
-    const familyId = `FAM-A-${await shortHash(`${row.remote_branch_id}:student:${studentId}`)}`;
+    const childId = identities.canonical(`CHD-A-${await shortHash(`${row.remote_branch_id}:${studentId}`)}`);
+    const familyId = identities.canonical(`FAM-A-${await shortHash(`${row.remote_branch_id}:student:${studentId}`)}`);
     for (const remoteGroupId of groupIds(item)) {
       const groupId = await localGroupId(row.remote_branch_id, remoteGroupId);
       const studentRowId = `STU-A-${await shortHash(`${row.remote_branch_id}:${studentId}:${remoteGroupId}`)}`;
@@ -1262,14 +1313,14 @@ function entityUpsert(id: string, entityType: string, displayName: string, sourc
     (id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by,created_at,updated_at)
     VALUES (?,?,?,'Активна','ALFACRM',?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,
-      status=CASE WHEN json_extract(entities.metadata,'$.localArchive')=1 THEN 'Архив' ELSE 'Активна' END,
+      status=CASE WHEN entities.status='Объединена' THEN 'Объединена' WHEN json_extract(entities.metadata,'$.localArchive')=1 THEN 'Архив' ELSE 'Активна' END,
       data_quality=CASE WHEN entities.display_name=excluded.display_name AND entities.scope=excluded.scope
         AND entities.status='Активна' AND NOT EXISTS (
           SELECT 1 FROM json_each(excluded.metadata) incoming
           WHERE json_extract(entities.metadata, '$.' || incoming.key) IS NOT incoming.value
         ) THEN entities.data_quality ELSE excluded.data_quality END,
       scope=excluded.scope,metadata=json_patch(entities.metadata,excluded.metadata),updated_at=CURRENT_TIMESTAMP`)
-    .bind(id, entityType, displayName.slice(0, 180), sourceRecordId, dataQuality, scope, JSON.stringify(metadata), actor);
+    .bind(id, entityType, displayName.slice(0, 180), sourceRecordId, dataQuality, scope, JSON.stringify({ ...metadata, identitySourceStatus: "Активна" }), actor);
 }
 
 async function readState(): Promise<AlfaState> {

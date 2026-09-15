@@ -11,6 +11,8 @@ const dataModule = text => `data:text/javascript;base64,${Buffer.from(text).toSt
 const policyUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/access-policy.ts'), 'utf8'), { mode: 'strip' }));
 const integrationsUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/integrations.ts'), 'utf8'), { mode: 'strip' }));
 const alfaImportUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/alfacrm-import.ts'), 'utf8'), { mode: 'strip' }));
+const identityUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/entity-identity.ts'), 'utf8'), { mode: 'strip' }));
+const identityDbUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/entity-identity-db.ts'), 'utf8'), { mode: 'strip' }).replace("'./entity-identity.ts'", JSON.stringify(identityUrl)));
 const policy = await import(policyUrl);
 globalThis.__alfaLifecycle = { env: {}, actor: null, csrfValid: true, originValid: true };
 const harness = globalThis.__alfaLifecycle;
@@ -18,6 +20,8 @@ const adapters = {
   'cloudflare:workers': dataModule('export const env=globalThis.__alfaLifecycle.env;'),
   '../../../../db': dataModule('export const ensureCoreTables=async()=>{}; export const readIntegrationCredential=async()=>JSON.stringify({email:"fixture@example.test",apiKey:"synthetic-key",appKey:""}); export const saveIntegrationCredential=async()=>{};'),
   '../../../../lib/access-policy': policyUrl,
+  '../../../../lib/entity-identity': identityUrl,
+  '../../../../lib/entity-identity-db': identityDbUrl,
   '../../../../lib/integrations': integrationsUrl,
   '../../../../lib/production-auth': dataModule('export const getAuthenticatedRequestContext=async()=>globalThis.__alfaLifecycle.actor; export const verifyAuthenticatedRequestCsrf=()=>{if(!globalThis.__alfaLifecycle.csrfValid)throw new Error("fixture csrf rejected");};'),
   '../../../../lib/request-security': dataModule('export const hasTrustedMutationOrigin=()=>globalThis.__alfaLifecycle.originValid;'),
@@ -50,6 +54,8 @@ async function setup(t) {
     CREATE TABLE organization_branches(id TEXT PRIMARY KEY,name TEXT,status TEXT,sort_order INTEGER);
     INSERT INTO organization_branches VALUES('BR-SCHOOL','School','Активен',1),('BR-NURSERY','Nursery','Активен',2);
     CREATE TABLE entities(id TEXT PRIMARY KEY,entity_type TEXT,display_name TEXT,status TEXT,source_system TEXT,source_record_id TEXT,data_quality TEXT,scope TEXT,metadata TEXT,created_by TEXT,created_at TEXT,updated_at TEXT);
+    CREATE TABLE entity_merges(survivor_id TEXT,duplicate_id TEXT UNIQUE,reason TEXT,created_by TEXT);
+    CREATE TABLE education_lessons(id TEXT PRIMARY KEY,teacher_entity_id TEXT,substitute_entity_id TEXT);
     CREATE TABLE entity_links(from_entity_id TEXT,to_entity_id TEXT,relation_type TEXT,created_by TEXT,UNIQUE(from_entity_id,to_entity_id,relation_type));
     CREATE TABLE audit_events(actor TEXT,action TEXT,entity_type TEXT,entity_id TEXT,payload TEXT);
     CREATE TABLE integration_connections(id TEXT,owner_entity_id TEXT,status TEXT,auth_status TEXT,verified_transfer INTEGER,is_enabled INTEGER,last_success_at TEXT,next_sync_at TEXT,error_count INTEGER,updated_at TEXT,received_count INTEGER,accepted_count INTEGER,rejected_count INTEGER);

@@ -19,6 +19,8 @@ function compile(relative, output, replacements = {}) {
   assert.deepEqual(result.diagnostics?.filter((item) => item.category === ts.DiagnosticCategory.Error), []);
   writeFileSync(join(temp, output), result.outputText);
 }
+compile("../lib/entity-identity.ts", "identity.mjs");
+compile("../lib/entity-identity-db.ts", "identity-db.mjs", { "'./entity-identity.ts'": '"./identity.mjs"' });
 compile("../lib/access-policy.ts", "policy.mjs");
 compile("../lib/section-read-scope.ts", "scope.mjs", { '"./access-policy.ts"': '"./policy.mjs"' });
 writeFileSync(join(temp, "env.mjs"), "export const env={get DB(){return globalThis.__familyAlfaTest.db}};");
@@ -28,6 +30,7 @@ export function isCanonicalOwnerContext(context){return context.canonicalOwner==
 compile("../app/api/families/alfacrm-balances/route.ts", "route.mjs", {
   '"cloudflare:workers"': '"./env.mjs"', '"../../../../db"': '"./db.mjs"',
   '"../../../../lib/access-policy"': '"./policy.mjs"', '"../../../../lib/production-auth"': '"./auth.mjs"',
+  '"../../../../lib/entity-identity-db"': '"./identity-db.mjs"',
   '"../../../../lib/section-read-scope"': '"./scope.mjs"',
 });
 compile("../app/components/FamilyAlfaBalances.tsx", "component.mjs", {
@@ -50,6 +53,8 @@ function fixture(t, ctx = context()) {
   const sqlite = new DatabaseSync(":memory:"); t.after(() => sqlite.close());
   sqlite.exec(`CREATE TABLE entities(id TEXT PRIMARY KEY,entity_type TEXT,scope TEXT,metadata TEXT);
     INSERT INTO entities VALUES ('F-A','Семья','School','{"localBranchId":"A"}'),('F-B','Семья','Nebo','{"localBranchId":"B"}'),('F-X','Семья','Closed','{"localBranchId":"X"}'),('CH-A','Ребёнок','School','{}');
+    ALTER TABLE entities ADD COLUMN status TEXT DEFAULT 'Активна';
+    CREATE TABLE entity_merges(survivor_id TEXT,duplicate_id TEXT);
     CREATE TABLE organization_branches(id TEXT PRIMARY KEY,name TEXT,status TEXT,sort_order INTEGER);
     INSERT INTO organization_branches VALUES ('A','School','Активен',1),('B','Nebo','Активен',2),('X','Closed','Архив',3);
     CREATE TABLE user_branch_access(user_id TEXT,branch_id TEXT);
@@ -192,4 +197,13 @@ test("unimported UI states are explicit and integration is mounted only for the 
   assert.match(html, /Остаток не получен/); assert.doesNotMatch(html, /0,00/);
   const source = readFileSync(new URL("../app/components/FamilyWorkspace.tsx", import.meta.url), "utf8");
   assert.match(source, /<FamilyAlfaBalances key=\{detail.family.id\} familyId=\{detail.family.id\}/);
+});
+
+test('confirmed aliases expose both source histories to owner and only granted branch balances to staff', async t => {
+ const db=fixture(t);balance(db);balance(db,{family:'F-B',remote:'2',local:'B',minor:500});
+ db.exec("INSERT INTO entity_merges VALUES('F-A','F-B'); UPDATE entities SET status='Объединена' WHERE id='F-B'");
+ assert.deepEqual((await (await GET(request())).json()).balances.map(row=>row.remoteBranchId),['1']);
+ globalThis.__familyAlfaTest.context={...context('OWNER',undefined,{isSystemOwner:true}),canonicalOwner:true};
+ assert.deepEqual((await (await GET(request())).json()).balances.map(row=>row.remoteBranchId),['1','2']);
+ assert.equal(db.prepare('SELECT family_entity_id FROM alfacrm_customer_balances WHERE remote_branch_id=?').get('2').family_entity_id,'F-B');
 });

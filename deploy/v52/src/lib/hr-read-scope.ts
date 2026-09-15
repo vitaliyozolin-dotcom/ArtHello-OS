@@ -26,6 +26,12 @@ export function scopeHrReadTables<T extends HrReadTables>(tables: T, scope: Scop
   const entities = new Map(tables.rawEntityRows.map((row) => [String(row.id), row]));
   const employeeBranchIds = (row: Row): string[] => {
     const profile = metadata(entities.get(String(row.id)));
+    if (Object.hasOwn(profile, "branchAssignments")) {
+      if (!Array.isArray(profile.branchAssignments)) return [];
+      const assignments = profile.branchAssignments.filter(item => item && typeof item === "object" && item.active === true);
+      if (assignments.some(item => typeof item.localBranchId !== "string" || !activeIds.has(item.localBranchId))) return [];
+      return [...new Set(assignments.map(item => String(item.localBranchId)).filter(id => allowed.has(id)))];
+    }
     // A present malformed/unknown assignment must not fall back to a broad unit label.
     if (Object.hasOwn(profile, "branchIds")) {
       return Array.isArray(profile.branchIds) && profile.branchIds.length > 0
@@ -42,6 +48,7 @@ export function scopeHrReadTables<T extends HrReadTables>(tables: T, scope: Scop
   const interviewRows = tables.interviewRows.filter((row) => candidateIds.has(row.candidateId));
   const employeeRows = tables.employeeRows.filter((row) => employeeBranchIds(row).length > 0).map((row): Row => ({
     ...row,
+    unit: active.filter(branch => employeeBranchIds(row).includes(String(branch.id))).map(branch => String(branch.name)).join(", "),
     candidateId: candidateIds.has(row.candidateId) ? row.candidateId : "",
     // A workflow document has no independent branch/legal-entity authority.
     contractId: "",

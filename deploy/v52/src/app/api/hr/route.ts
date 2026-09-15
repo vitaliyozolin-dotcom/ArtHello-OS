@@ -1,8 +1,9 @@
+import { buildIdentityIndex } from "../../../lib/entity-identity";
 import { scopeHrReadTables } from "../../../lib/hr-read-scope";
 import { canAccessApi } from "../../../lib/access-policy";
 import { and, asc, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb, getSystemDataMode } from "../../../db";
-import { entities, financialOperations, hrAccesses, hrCandidates, hrDevelopment, hrEmployees, hrInterviews, hrOnboarding, hrRewards, hrVacancies, organizationBranches, userBranchAccess, workflowDocuments } from "../../../db/schema";
+import { entities, entityMerges, financialOperations, hrAccesses, hrCandidates, hrDevelopment, hrEmployees, hrInterviews, hrOnboarding, hrRewards, hrVacancies, organizationBranches, userBranchAccess, workflowDocuments } from "../../../db/schema";
 import { accessAllowed, candidateFunnel } from "../../../lib/hr";
 import { getAuthenticatedRequestContext } from "../../../lib/production-auth";
 import { redactHiddenTaskReferences, selectVisibleTasks } from "../../../lib/task-access-query";
@@ -17,8 +18,10 @@ export async function GET(request:Request){
     let [vacancyRows,candidateRows,interviewRows,employeeRows,onboardingRows,developmentRows,rewardRows,accessRows,rawEntityRows,documentRows,allTasks,operationRows,branchRows]=await Promise.all([
       db.select().from(hrVacancies),db.select().from(hrCandidates).orderBy(asc(hrCandidates.createdAt)),db.select().from(hrInterviews).orderBy(asc(hrInterviews.scheduledAt)),
       db.select().from(hrEmployees),db.select().from(hrOnboarding),db.select().from(hrDevelopment).orderBy(asc(hrDevelopment.eventDate)),db.select().from(hrRewards),db.select().from(hrAccesses),
-      db.select({id:entities.id,displayName:entities.displayName,status:entities.status,metadata:entities.metadata,sourceSystem:entities.sourceSystem,dataQuality:entities.dataQuality}).from(entities),db.select().from(workflowDocuments),selectVisibleTasks(db,context),db.select().from(financialOperations),db.select().from(organizationBranches).where(eq(organizationBranches.status,"Активен")).orderBy(asc(organizationBranches.sortOrder)),
+      db.select({id:entities.id,entityType:entities.entityType,displayName:entities.displayName,status:entities.status,metadata:entities.metadata,sourceSystem:entities.sourceSystem,dataQuality:entities.dataQuality}).from(entities),db.select().from(workflowDocuments),selectVisibleTasks(db,context),db.select().from(financialOperations),db.select().from(organizationBranches).where(eq(organizationBranches.status,"Активен")).orderBy(asc(organizationBranches.sortOrder)),
     ]);
+    const identities=buildIdentityIndex(rawEntityRows,await db.select().from(entityMerges));
+    const canonicalEmployee=(id:string)=>rawEntityRows.some(row=>row.id===id)?identities.canonical(id):id;
     const unrestrictedOwner=context.apiRole==="OWNER"&&context.auth.user.isSystemOwner;
     const branchGrants=unrestrictedOwner?[]:context.auth.user.isAdministrative
       ? branchRows.map(row=>({branchId:row.id}))
@@ -33,14 +36,15 @@ export async function GET(request:Request){
     const vacancies=vacancyRows.filter(x=>visible(x.id,x.positionId,x.sourceType));
     const candidates=candidateRows.filter(x=>visible(x.id,x.entityId,x.vacancyId));
     const interviews=interviewRows.filter(x=>visible(x.id,x.candidateId,x.interviewerEntityId));
-    const employees=employeeRows.filter(x=>visible(x.id,x.candidateId,x.contractId,x.positionId));
-    const employeeIds=new Set(employees.map(x=>x.id));
-    const onboarding=redactHiddenTaskReferences(onboardingRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId)),allTasks);
-    const development=developmentRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId));
-    const rewards=rewardRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId));
-    const accesses=accessRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId));
+    const employees=employeeRows.filter(x=>visible(x.id,x.candidateId,x.contractId,x.positionId)&&!rawEntityRows.some(entity=>entity.id===x.id&&entity.status==="Объединена"));
+    const canonicalEmployeeIds=new Set(employees.map(x=>x.id));
+    const employeeIds=new Set(employeeRows.filter(row=>canonicalEmployeeIds.has(canonicalEmployee(row.id))).map(row=>row.id));
+    const onboarding=redactHiddenTaskReferences(onboardingRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId)).map(row=>({...row,sourceEmployeeId:row.employeeId,employeeId:canonicalEmployee(row.employeeId)})),allTasks);
+    const development=developmentRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId)).map(row=>({...row,sourceEmployeeId:row.employeeId,employeeId:canonicalEmployee(row.employeeId)}));
+    const rewards=rewardRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId)).map(row=>({...row,sourceEmployeeId:row.employeeId,employeeId:canonicalEmployee(row.employeeId)}));
+    const accesses=accessRows.filter(x=>employeeIds.has(x.employeeId)&&visible(x.id,x.employeeId)).map(row=>({...row,sourceEmployeeId:row.employeeId,employeeId:canonicalEmployee(row.employeeId)}));
     const entityRows=rawEntityRows.filter(x=>visible(x.id,x.sourceSystem));
-    const documents=documentRows.filter(x=>employees.some(e=>e.contractId&&e.contractId===x.id)&&visible(x.id));
+    const documents=documentRows.filter(x=>employeeRows.some(e=>employeeIds.has(e.id)&&e.contractId&&e.contractId===x.id)&&visible(x.id));
     const tasksForEmployees=allTasks.filter(x=>x.sourceType==="Онбординг"&&employeeIds.has(x.sourceId)&&visible(x.sourceId,x.automationKey??""));
     const payroll=operationRows.filter(x=>employeeIds.has(x.counterpartyEntityId)&&visible(x.id,x.counterpartyEntityId,x.sourceSystem,x.sourceRef));
     const branches=branchRows.filter(x=>visible(x.id));
