@@ -31,6 +31,7 @@ type AlfaState = {
   lastCheckedAt: string;
   remoteBranches: Array<{ id: string; name: string }>;
   branchMappings: Record<string, string>;
+  educationRouting?: Record<string, string>;
   modules: Record<ModuleKey, ModuleState>;
   legacyDraft?: { remoteBranchId: string; localBranchId: string; startDate: string; dataScopes: string[] };
 };
@@ -50,6 +51,7 @@ type AlfaPayload = {
   error?: string;
 };
 type ActionResponse = Partial<AlfaPayload> & {
+  educationGroups?: Array<{ key: string; sourceBranch: string; name: string; localBranch: string }>;
   customerPreview?: CustomerPreview;
   state?: AlfaState;
   error?: string;
@@ -64,6 +66,7 @@ type ActionResponse = Partial<AlfaPayload> & {
 };
 
 type CustomerPreview = {
+  comparison?: { archiveIds:string[]; preservedArchiveIds:string[]; reviewIds:string[]; updateIds:string[]; moves:Array<{id:string;from:string;to:string}>; newSourceKeys:string[] };
   observedAt: string; branchNames: Record<string, string>;
   byBranch: Record<string, { observed: number; included: number; active: number; open: number; single: number; leads: number; excluded: number; review: number }>;
   includedAssignments: number; uniqueIncludedCustomerIds: number;
@@ -127,6 +130,8 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [customerPreview, setCustomerPreview] = useState<CustomerPreview | null>(null);
+  const [educationGroups, setEducationGroups] = useState<ActionResponse['educationGroups']>();
+  const [routingDraft, setRoutingDraft] = useState<Record<string, string>>({});
   const [connectionEdit, setConnectionEdit] = useState(false);
   const [connection, setConnection] = useState({ endpoint: "https://arthellonew.s20.online", email: "", apiKey: "", appKey: "" });
   const [mappings, setMappings] = useState<Record<string, string>>({});
@@ -224,6 +229,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
     setBusy(key);
     try {
       const result = await request(body);
+      if (result.educationGroups) { setEducationGroups(result.educationGroups); setRoutingDraft(payload.state.educationRouting ?? {}); }
       if (result.state) setCustomerPreview(null);
       if (result.customerPreview) setCustomerPreview(result.customerPreview);
       if (result.state) applyPayload({ state: result.state });
@@ -352,6 +358,16 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
             {!payload.localBranches.length ? <div className="ahAlfaCrmWarning">В ArtHello OS нет активных филиалов для сопоставления. Сначала создайте их в настройках структуры.</div> : null}
             {payload.canManageCredentials?<div><button type="button" disabled={Boolean(busy)} onClick={()=>void auditBranches()}>{busy==="scopeAudit"?"Сверяю…":"Сверить сохранённые данные по филиалам"}</button>
               <button type="button" disabled={Boolean(busy)} onClick={() => { setCustomerPreview(null); void post({ action: 'previewCustomers' }, 'customerPreview'); }}>{busy === 'customerPreview' ? 'Читаю Альфу…' : 'Проверить клиентов без применения'}</button>
+              <button type="button" disabled={Boolean(busy)} onClick={() => void post({ action: 'previewEducationRouting' }, 'educationRouting')}>Разнести учебные группы</button>
+              {educationGroups ? <section aria-label="Разнесение учебных групп">
+                <p>Выберите филиал ОС для каждой группы. Исходные ID Альфы сохранятся; изменения применятся при следующей загрузке семей и групп.</p>
+                <div style={{ maxHeight: 360, overflow: 'auto' }}><table><thead><tr><th>Группа Альфы</th><th>Исходный филиал</th><th>Филиал ОС</th></tr></thead><tbody>{educationGroups.map(group => <tr key={group.key}>
+                  <td>{group.name}</td><td>{state.remoteBranches.find(branch => branch.id === group.sourceBranch)?.name ?? group.sourceBranch}</td>
+                  <td><select aria-label={`Филиал для ${group.name}`} disabled={Boolean(busy)} value={routingDraft[group.key] ?? state.branchMappings[group.sourceBranch]} onChange={event => setRoutingDraft(current => { const next = { ...current }; if (event.target.value === state.branchMappings[group.sourceBranch]) delete next[group.key]; else next[group.key] = event.target.value; return next; })}>
+                    {payload.localBranches.filter(branch => Object.values(state.branchMappings).includes(branch.id)).map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+                  </select></td></tr>)}</tbody></table></div>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void post({ action: 'saveEducationRouting', routing: routingDraft }, 'saveEducationRouting')}>Сохранить разнесение групп</button>
+              </section> : null}
               {customerPreview ? <div role="status">
                 <p>Сверка источника: {customerPreview.observedAt}. Данные ОС не изменены.</p>
                 <table><thead><tr><th>Филиал Альфы</th><th>Активные</th><th>Открыто</th><th>Разовые</th><th>Запись</th><th>Исключены по статусу</th><th>На сверку</th></tr></thead><tbody>
@@ -359,7 +375,8 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
                 </tbody></table>
                 <p>Включено назначений: {customerPreview.includedAssignments}. Уникальных ID клиентов: {customerPreview.uniqueIncludedCustomerIds}. Это не количество семей.</p>
                 <p>Межфилиальных пересечений по ID: {customerPreview.intersections.length}. Чужой филиал: {customerPreview.foreignBranch}. Исключены по состоянию записи: {customerPreview.excludedLifecycle}. Не подтверждено: {customerPreview.unknown}. Повторов: {customerPreview.duplicates}.</p>
-                <p>Школьных назначений для проверки разнесения: {customerPreview.schoolAssignments.length}. Это сверка Альфы; изменения существующих карточек ОС ещё не рассчитаны.</p>
+                <p>Школьных назначений для проверки разнесения: {customerPreview.schoolAssignments.length}.</p>
+                {customerPreview.comparison ? <p>Предварительный план по карточкам ОС: обновить {customerPreview.comparison.updateIds.length}; создать исходных связей {customerPreview.comparison.newSourceKeys.length}; перенести в другой филиал {customerPreview.comparison.moves.length}; архивировать исходных связей {customerPreview.comparison.archiveIds.length}; сохранить ручной архив {customerPreview.comparison.preservedArchiveIds.length}; требуют сверки {customerPreview.comparison.reviewIds.length}. Изменения не применены.</p> : null}
               </div> : null}
               {payload.scopeAudit?<div role="status"><p>{payload.scopeAudit.source}. {payload.scopeAudit.note}</p>
                 <table><thead><tr><th>Раздел</th><th>Записей</th><th>В своём филиале</th><th>Чужой филиал</th><th>Неактивные</th><th>Не подтверждено</th></tr></thead><tbody>

@@ -24,6 +24,39 @@ export type PreviewCustomer = {
   branchIds?: string[];
 };
 
+export type ExistingCustomerProjection = {
+  id: string; remoteBranchId: string; customerId: string; localBranchId: string;
+  status: string; localArchive: boolean;
+};
+
+/** Comparison only: source assignments and existing family projections are not unique families. */
+export function compareCustomerProjections(source: readonly (PreviewCustomer & { localBranch: string })[], existing: readonly ExistingCustomerProjection[], branches: readonly string[], snapshot: { complete: boolean }) {
+  if (!snapshot.complete || source.some(row => !/^[1-9]\d*$/.test(row.id) || !Array.isArray(row.branchIds) || row.branchIds.some(id => !/^[1-9]\d*$/.test(id)))) throw new Error('Состав филиалов не подтверждён: план архивирования недоступен');
+  const selected = new Set(branches);
+  const incoming = new Map(source.filter(row => selected.has(row.branch) && row.branchIds?.includes(row.branch)).map(row => [`${row.branch}:${row.id}`, row]));
+  if (new Set(source.map(row=>`${row.branch}:${row.id}`)).size !== source.length) throw new Error('Повтор исходной записи: план архивирования недоступен');
+  const matched = new Set<string>();
+  const archiveIds: string[] = [], preservedArchiveIds: string[] = [], reviewIds: string[] = [], updateIds: string[] = [];
+  const moves: Array<{ id: string; from: string; to: string }> = [];
+  for (const row of existing) {
+    if (!selected.has(row.remoteBranchId)) continue;
+    const key = `${row.remoteBranchId}:${row.customerId}`;
+    const fresh = incoming.get(key);
+    if (fresh) matched.add(key);
+    if (!/^[1-9]\d*$/.test(row.customerId)) { reviewIds.push(row.id); continue; }
+    if (row.localArchive) { preservedArchiveIds.push(row.id); continue; }
+    if (fresh && customerPolicy(fresh.status).lifecycle === 'review') { reviewIds.push(row.id); continue; }
+    if (!fresh || !customerPolicy(fresh.status).include) {
+      if (row.status !== 'Архив') archiveIds.push(row.id);
+      continue;
+    }
+    updateIds.push(row.id);
+    if (row.localBranchId !== fresh.localBranch) moves.push({ id: row.id, from: row.localBranchId, to: fresh.localBranch });
+  }
+  const newSourceKeys = [...incoming].filter(([key,row]) => !matched.has(key) && customerPolicy(row.status).include).map(([key])=>key);
+  return { archiveIds, preservedArchiveIds, reviewIds, updateIds, moves, newSourceKeys };
+}
+
 export function resolveCustomerStatuses(records: readonly Record<string, unknown>[], dictionary: readonly Record<string, unknown>[]) {
   const names = new Map<string, string>();
   for (const entry of dictionary) {

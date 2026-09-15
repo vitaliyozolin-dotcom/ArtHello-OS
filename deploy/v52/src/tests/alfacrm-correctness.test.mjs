@@ -214,6 +214,45 @@ test('registration creates one linked lead, never an enrolled pupil, across repe
 
 const previousSuccess = '2026-01-02T03:04:05.000Z';
 
+test('explicit group routing moves school projections without changing source identity or nursery groups', async t => {
+  const { sql } = await setup(t);
+  mockRecords({ '2/group/index': [{ id: 50, name: '1-й класс 2026-2027' }] });
+  const response = await post({ action: 'saveEducationRouting', routing: { '2:50': 'BR-SCHOOL' } });
+  assert.equal(response.status, 200, await response.clone().text());
+  await importSnapshot('families', { '2': [{ id: 1, name: 'School pupil', groups: [{ id: 50 }] }, { id: 2, name: 'Nursery pupil', groups: [{ id: 51 }] }] });
+  const pupils = sql.prepare("SELECT id,source_record_id,scope,metadata FROM entities WHERE entity_type='Ребёнок' ORDER BY source_record_id").all();
+  assert.equal(pupils[0].scope, 'School');
+  assert.equal(JSON.parse(pupils[0].metadata).remoteBranchId, '2');
+  assert.equal(JSON.parse(pupils[0].metadata).localBranchId, 'BR-SCHOOL');
+  assert.equal(pupils[1].scope, 'Nursery');
+  await importSnapshot('groups', { '2': [{ id: 50, name: '1-й класс 2026-2027' }, { id: 51, name: 'Nursery group' }] });
+  const groups=sql.prepare('SELECT name,unit_entity_id FROM education_groups ORDER BY name').all();
+  assert.equal(groups.find(row=>row.name.startsWith('1-')).unit_entity_id,'BR-SCHOOL');
+  assert.equal(groups.find(row=>row.name==='Nursery group').unit_entity_id,'BR-NURSERY');
+  assert.equal(sql.prepare("SELECT COUNT(*) n FROM education_students WHERE status='Активен'").get().n,2);
+});
+
+test('routing refuses non-owner, unknown groups and destinations outside mapped branches', async t => {
+  const { sql } = await setup(t);
+  const before = sql.prepare('SELECT * FROM system_runtime_state').all();
+  for (const routing of [{ '2:999': 'BR-SCHOOL' }, { '2:50': 'BR-FOREIGN' }, { '99:50': 'BR-SCHOOL' }]) {
+    const response = await post({ action: 'saveEducationRouting', routing });
+    assert.equal(response.status, 409);
+    assert.deepEqual(sql.prepare('SELECT * FROM system_runtime_state').all(), before);
+  }
+  harness.actor = { ...actor(), apiRole: 'DIRECTOR' };
+  assert.equal((await post({ action: 'saveEducationRouting', routing: {} })).status, 403);
+});
+
+test('conflicting group destinations cannot partially update families or consume the preview', async t => {
+  const { sql, state } = await setup(t);
+  state.educationRouting = { '2:50': 'BR-SCHOOL', '2:51': 'BR-NURSERY' };
+  await route.persistState(state);
+  await assert.rejects(() => importSnapshot('families', { '2': [{ id: 1, name: 'Conflicting pupil', groups: [{ id: 50 }, { id: 51 }] }] }), /разными назначениями/);
+  assert.equal(sql.prepare('SELECT COUNT(*) n FROM entities').get().n, 0);
+  assert.equal(sql.prepare('SELECT COUNT(*) n FROM alfacrm_raw_observations').get().n, 0);
+});
+
 async function prepareSubscriptions(t, count = 1) {
   const value = await setup(t);
   await importSnapshot('families', { '1': Array.from({ length: count }, (_, index) => ({ id: index + 1, name: `Pupil ${index + 1}` })) }, { mappings: { '1': 'BR-SCHOOL' } });

@@ -1,6 +1,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { customerPolicy, previewCustomers, resolveCustomerStatuses } from '../lib/alfacrm-customer-policy.ts';
+import { customerPolicy, previewCustomers, resolveCustomerStatuses, compareCustomerProjections } from '../lib/alfacrm-customer-policy.ts';
+
+test('database comparison isolates false branch copies and preserves manual archives and unknown statuses', () => {
+  const source = [
+    { id:'1', branch:'2', branchIds:['2'], status:'Активен', localBranch:'BR-2' },
+    { id:'2', branch:'2', branchIds:['2'], status:'Открыто', localBranch:'BR-2' },
+    { id:'3', branch:'6', branchIds:['6'], status:'Активен ШКОЛА', localBranch:'BR-SCHOOL' },
+    { id:'4', branch:'2', branchIds:['2'], status:null, localBranch:'BR-2' },
+  ];
+  const existing = [
+    { id:'REAL', remoteBranchId:'2', customerId:'1', localBranchId:'BR-2', status:'Активна', localArchive:false },
+    { id:'FALSE', remoteBranchId:'6', customerId:'1', localBranchId:'BR-6', status:'Активна', localArchive:false },
+    { id:'ARCHIVE', remoteBranchId:'2', customerId:'2', localBranchId:'BR-2', status:'Архив', localArchive:true },
+    { id:'SCHOOL', remoteBranchId:'6', customerId:'3', localBranchId:'BR-6', status:'Активна', localArchive:false },
+    { id:'UNKNOWN', remoteBranchId:'2', customerId:'4', localBranchId:'BR-2', status:'На проверке', localArchive:false },
+  ];
+  const before=structuredClone(existing);
+  const plan=compareCustomerProjections(source,existing,['2','6'],{complete:true});
+  assert.deepEqual(plan.archiveIds,['FALSE']);
+  assert.deepEqual(plan.preservedArchiveIds,['ARCHIVE']);
+  assert.deepEqual(plan.reviewIds,['UNKNOWN']);
+  assert.deepEqual(plan.moves,[{id:'SCHOOL',from:'BR-6',to:'BR-SCHOOL'}]);
+  assert.deepEqual(existing,before);
+  assert.equal(plan.newSourceKeys.length,0);
+  assert.throws(()=>compareCustomerProjections(source,existing,['2','6'],{complete:false}));
+  assert.throws(()=>compareCustomerProjections([...source,source[0]],existing,['2','6'],{complete:true}));
+  assert.throws(()=>compareCustomerProjections([{...source[0],branchIds:undefined}],existing,['2','6'],{complete:true}));
+});
 
 test('status IDs are resolved from each account dictionary without mutating raw records', () => {
   const record = { id: 10, study_status_id: 1 };
