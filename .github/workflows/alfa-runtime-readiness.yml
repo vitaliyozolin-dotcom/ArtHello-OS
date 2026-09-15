@@ -4,7 +4,7 @@ name: Alfa runtime readiness (read only)
   workflow_dispatch:
   push:
     branches: [main]
-    paths: [.github/workflows/alfa-runtime-readiness.yml]
+    paths: [.github/workflows/alfa-runtime-readiness.yml, .github/scripts/alfa-source-audit.mjs]
 
 permissions:
   contents: read
@@ -24,7 +24,7 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       # No checkout, downloaded script, secret, database query, restart or import.
       - name: Read public health and runtime state on the existing gateway
@@ -49,3 +49,17 @@ jobs:
           if test "$caddy_state" != running; then failed=1; fi
           printf 'ALFA_RUNTIME_HEALTH_FAILED=%s\n' "$failed"
           exit "$failed"
+      - name: Checkout trusted main audit source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts/alfa-source-audit.mjs
+          sparse-checkout-cone-mode: false
+      - name: Read Alfa source using its existing protected credential
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          readarray -t candidates < <(docker ps --format '{{.Names}}' | grep -E '^arthello-direct-[1-9][0-9]*-[1-9][0-9]*$')
+          test "${#candidates[@]}" -eq 1
+          docker exec -i "${candidates[0]}" node --input-type=module - < .github/scripts/alfa-source-audit.mjs
