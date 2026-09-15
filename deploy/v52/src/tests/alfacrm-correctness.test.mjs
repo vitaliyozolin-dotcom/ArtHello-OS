@@ -73,6 +73,7 @@ async function setup(t) {
     catch (error) { sql.exec('ROLLBACK'); throw error; }
   } };
   harness.env.ALFACRM_IMPORT_ENABLED = 'true';
+  harness.env.ALFACRM_AUTOSYNC_SECRET = '';
   harness.env.ARTHELLO_PUBLIC_ORIGIN = 'https://arthello.example.test';
   harness.actor = actor(); harness.csrfValid = true; harness.originValid = true;
   await route.ensureAlfaTables();
@@ -503,4 +504,81 @@ test('an empty finance period remains explicitly blocked until payment direction
   assert.equal(sql.prepare('SELECT last_success_at FROM integration_connections').get().last_success_at, previousSuccess);
   assert.equal(sql.prepare("SELECT status FROM alfacrm_import_batches WHERE module='finance'").get().status, 'blocked');
   assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_finance_snapshots').get().n, 0);
+});
+
+test('autosync uses real import, persists cursor and updates existing identities across cycles', async t => {
+  const { state, sql } = await setup(t);
+  state.modules.staff.status = 'imported';
+  await route.persistState(state);
+  harness.env.ALFACRM_AUTOSYNC_SECRET = 'c'.repeat(64);
+  const manual = body => route.POST(new Request('https://arthello.example.test/api/integrations/alfacrm', {
+    method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' },
+  }));
+  assert.equal((await manual({ action:'setAutosync', enabled:true, modules:['staff'] })).status, 200);
+  let name = 'Synthetic Teacher';
+  mockRecords({'1/teacher/index': () => Response.json({items:[{id:1,name}],total:1})});
+  const tick = () => route.POST(new Request('https://arthello.example.test/api/integrations/alfacrm', {
+    method:'POST', headers:{'x-arthello-alfa-autosync':'c'.repeat(64)},body:'{}',
+  }));
+  const due = async () => { const s=await route.readState(); s.autosync.nextAt=0; await route.persistState(s); };
+  // Scheduler has no browser session and cannot depend on a fabricated owner login.
+  harness.actor = null;
+  assert.equal((await (await tick()).json()).outcome, 'pending');
+  assert.equal((await (await tick()).json()).outcome, 'not_due');
+  await due();
+  assert.equal((await (await tick()).json()).outcome, 'complete');
+  assert.equal(sql.prepare("SELECT count(*) AS n FROM entities WHERE entity_type='Сотрудник'").get().n, 1);
+  name = 'Updated Synthetic Teacher';
+  await due(); await tick(); await due(); await tick();
+  assert.equal(sql.prepare("SELECT count(*) AS n FROM entities WHERE entity_type='Сотрудник'").get().n, 1);
+  assert.equal(sql.prepare("SELECT display_name FROM entities WHERE entity_type='Сотрудник'").get().display_name, name);
+  assert.ok((await route.readState()).autosync.lastSuccessAt > 0);
+});
+
+test('autosync rejects non-owner configuration, foreign headers, unimported modules and changed branch scope', async t => {
+  const { state } = await setup(t);
+  harness.env.ALFACRM_AUTOSYNC_SECRET = 'd'.repeat(64);
+  const manual = body => route.POST(new Request('https://arthello.example.test/api/integrations/alfacrm', {method:'POST',body:JSON.stringify(body)}));
+  harness.actor = actor('DIRECTOR');
+  assert.equal((await manual({action:'setAutosync',enabled:true,modules:['staff']})).status,403);
+  harness.actor = actor();
+  assert.equal((await manual({action:'setAutosync',enabled:true,modules:['staff']})).status,409);
+  state.modules.staff.status='imported'; await route.persistState(state);
+  assert.equal((await manual({action:'setAutosync',enabled:true,modules:['staff']})).status,200);
+  assert.equal((await manual({action:'previewModule',module:'staff'})).status,409);
+  const latest=await route.readState(); latest.branchMappings={'1':'BR-NURSERY'}; await route.persistState(latest);
+  let calls=0; mockRecords({},()=>{calls++;});
+  const result = await route.POST(new Request('https://arthello.example.test/api/integrations/alfacrm', {method:'POST',headers:{'x-arthello-alfa-autosync':'d'.repeat(64)},body:'{}'}));
+  assert.equal((await result.json()).outcome,'paused');
+  assert.equal(calls,0);
+  assert.equal((await route.readState()).autosync.enabled,false);
+  assert.equal((await route.POST(new Request('https://arthello.example.test/api/integrations/alfacrm', {method:'POST',headers:{'x-arthello-alfa-autosync':'x'},body:'{}'}))).status,403);
+});
+
+test('repeated sync preserves local notes and verified quality until source-owned fields change', async t => {
+  const { sql } = await setup(t);
+  const records={'1':[{id:1,name:'Synthetic Teacher'}]};
+  await importSnapshot('staff',records);
+  sql.prepare("UPDATE entities SET data_quality='Проверено',metadata=json_set(metadata,'$.note','Local note') WHERE entity_type='Сотрудник'").run();
+  await importSnapshot('staff',records);
+  let row=sql.prepare("SELECT data_quality,metadata FROM entities WHERE entity_type='Сотрудник'").get();
+  assert.equal(row.data_quality,'Проверено');
+  assert.equal(JSON.parse(row.metadata).note,'Local note');
+  await importSnapshot('staff',{'1':[{id:1,name:'Changed Source Name'}]});
+  row=sql.prepare("SELECT data_quality,metadata FROM entities WHERE entity_type='Сотрудник'").get();
+  assert.equal(row.data_quality,'Импортировано из AlfaCRM');
+  assert.equal(JSON.parse(row.metadata).note,'Local note');
+});
+
+test('stopping and disconnecting autosync clear the advertised next run', async t => {
+  const { state, sql } = await setup(t);
+  state.modules.staff.status='imported'; await route.persistState(state);
+  harness.env.ALFACRM_AUTOSYNC_SECRET='e'.repeat(64);
+  const post=body=>route.POST(new Request('https://arthello.example.test/api/integrations/alfacrm',{method:'POST',body:JSON.stringify(body)}));
+  for (const action of ['setAutosync','disconnect']) {
+    assert.equal((await post({action:'setAutosync',enabled:true,modules:['staff']})).status,200);
+    assert.equal((await post({action,enabled:false})).status,200);
+    assert.equal((await route.readState()).autosync.enabled,false);
+    assert.equal(sql.prepare("SELECT next_sync_at FROM integration_connections WHERE id='INT-T-ALFACRM'").get().next_sync_at,'');
+  }
 });
