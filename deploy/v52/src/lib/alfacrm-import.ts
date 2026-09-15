@@ -7,6 +7,67 @@ type AlfaImportBatch = {
   [key: string]: unknown;
 };
 
+export const ALFA_AUTO_MODULES = ['families', 'staff', 'groups', 'subscriptions'] as const;
+export type AlfaAutoModule = typeof ALFA_AUTO_MODULES[number];
+export type AlfaAutosync = {
+  enabled: boolean; modules: AlfaAutoModule[]; scope: string;
+  index: number; phase: 'preview' | 'import'; cursor: number;
+  nextAt: number; lastSuccessAt: number; failures: number;
+  outcome: 'ready' | 'pending' | 'complete' | 'retry' | 'paused';
+};
+
+export function newAlfaAutosync(modules: string[], scope: string, now: number): AlfaAutosync {
+  if (!modules.length || modules.some(m => !ALFA_AUTO_MODULES.includes(m as AlfaAutoModule))
+    || (modules.includes('groups') && !modules.includes('staff'))
+    || (modules.includes('subscriptions') && !modules.includes('families'))) {
+    throw new Error('Выберите семьи, сотрудников и зависимые от них группы или остатки.');
+  }
+  return { enabled: true, modules: ALFA_AUTO_MODULES.filter(m => modules.includes(m)), scope,
+    index: 0, phase: 'preview', cursor: 0, nextAt: now, lastSuccessAt: 0, failures: 0, outcome: 'ready' };
+}
+
+export function advanceAlfaAutosync(state: AlfaAutosync,
+  result: { status: number; previewToken?: unknown; complete?: unknown; nextCursor?: unknown; rejected?: unknown; projectionBlocked?: unknown },
+  now: number): AlfaAutosync {
+  const next = { ...state, nextAt: now + 60_000 };
+  if (result.status >= 400 || Number(result.rejected) > 0 || result.projectionBlocked === true) {
+    next.failures += 1;
+    const transient = result.status === 429 || result.status >= 500;
+    next.enabled = transient && next.failures < 5;
+    next.outcome = next.enabled ? 'retry' : 'paused';
+    next.nextAt = now + Math.min(2 * 3600_000, 300_000 * 2 ** Math.min(next.failures - 1, 5));
+    return next;
+  }
+  next.failures = 0;
+  next.outcome = 'pending';
+  if (state.phase === 'preview') {
+    if (typeof result.previewToken !== 'string' || !result.previewToken) return { ...next, enabled: false, outcome: 'paused' };
+    return { ...next, phase: 'import', cursor: 0 };
+  }
+  if (result.complete === false) {
+    if (!Number.isSafeInteger(result.nextCursor) || Number(result.nextCursor) <= state.cursor) return { ...next, enabled: false, outcome: 'paused' };
+    return { ...next, cursor: Number(result.nextCursor) };
+  }
+  if (result.complete !== true) return { ...next, enabled: false, outcome: 'paused' };
+  next.index += 1;
+  next.phase = 'preview';
+  next.cursor = 0;
+  if (next.index >= state.modules.length) {
+    Object.assign(next, { index: 0, lastSuccessAt: now, nextAt: now + 3600_000, outcome: 'complete' });
+  }
+  return next;
+}
+
+export async function authenticateAlfaAutosync(request: Request, secret: string) {
+  const provided = request.headers.get('x-arthello-alfa-autosync') ?? '';
+  if (request.method !== 'POST' || request.headers.has('cookie') || request.headers.has('origin')
+    || !/^[a-f0-9]{64}$/.test(secret) || !/^[a-f0-9]{64}$/.test(provided)) return false;
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(provided));
+  return crypto.subtle.verify('HMAC', key, signature, encoder.encode(secret));
+}
+
 export async function runChunkedAlfaImport<T extends AlfaImportBatch>(
   importBatch: () => Promise<T>,
   onBatch: (batch: T) => void = () => undefined,
