@@ -51,6 +51,7 @@ type AlfaPayload = {
   error?: string;
 };
 type ActionResponse = Partial<AlfaPayload> & {
+  legacyMigration?: { token: string; count: number; complete: boolean };
   educationGroups?: Array<{ key: string; sourceBranch: string; name: string; localBranch: string }>;
   customerPreview?: CustomerPreview;
   state?: AlfaState;
@@ -130,6 +131,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [customerPreview, setCustomerPreview] = useState<CustomerPreview | null>(null);
+  const [legacyMigration, setLegacyMigration] = useState<ActionResponse['legacyMigration']>();
   const [educationGroups, setEducationGroups] = useState<ActionResponse['educationGroups']>();
   const [routingDraft, setRoutingDraft] = useState<Record<string, string>>({});
   const [connectionEdit, setConnectionEdit] = useState(false);
@@ -232,6 +234,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
       if (result.educationGroups) { setEducationGroups(result.educationGroups); setRoutingDraft(payload.state.educationRouting ?? {}); }
       if (result.state) setCustomerPreview(null);
       if (result.customerPreview) setCustomerPreview(result.customerPreview);
+      if (result.legacyMigration) setLegacyMigration(result.legacyMigration);
       if (result.state) applyPayload({ state: result.state });
       if (result.message) notify(result.message, "success");
       return result;
@@ -359,6 +362,10 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
             {payload.canManageCredentials?<div><button type="button" disabled={Boolean(busy)} onClick={()=>void auditBranches()}>{busy==="scopeAudit"?"Сверяю…":"Сверить сохранённые данные по филиалам"}</button>
               <button type="button" disabled={Boolean(busy)} onClick={() => { setCustomerPreview(null); void post({ action: 'previewCustomers' }, 'customerPreview'); }}>{busy === 'customerPreview' ? 'Читаю Альфу…' : 'Проверить клиентов без применения'}</button>
               <button type="button" disabled={Boolean(busy)} onClick={() => void post({ action: 'previewEducationRouting' }, 'educationRouting')}>Разнести учебные группы</button>
+              <button type="button" disabled={Boolean(busy)} onClick={() => void post({ action: 'previewLegacyMigration' }, 'legacyMigration')}>Проверить историю старого импорта</button>
+              {legacyMigration ? <div role="status"><p>Записей старого импорта: {legacyMigration.count}. {legacyMigration.complete ? 'История сохранена и проверена.' : 'Перед повторной загрузкой нужно сохранить историю старого импорта.'}</p>
+                {!legacyMigration.complete ? <button type="button" disabled={Boolean(busy)} onClick={() => void post({ action: 'migrateLegacySources', token: legacyMigration.token }, 'legacyMigration')}>Сохранить историю импорта</button> : null}
+              </div> : null}
               {educationGroups ? <section aria-label="Разнесение учебных групп">
                 <p>Выберите филиал ОС для каждой группы. Исходные ID Альфы сохранятся; изменения применятся при следующей загрузке семей и групп.</p>
                 <div style={{ maxHeight: 360, overflow: 'auto' }}><table><thead><tr><th>Группа Альфы</th><th>Исходный филиал</th><th>Филиал ОС</th></tr></thead><tbody>{educationGroups.map(group => <tr key={group.key}>

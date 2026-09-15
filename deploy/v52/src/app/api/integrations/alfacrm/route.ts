@@ -152,6 +152,8 @@ export async function POST(request: Request) {
     if (action === 'previewEducationRouting') return previewEducationRouting(context);
     if (action === "previewModule") return previewModule(context, body);
     if (action === "previewCustomers") return previewCustomerPolicy(context);
+    if (action === 'previewLegacyMigration') return legacyMigration(context, body, false);
+    if (action === 'migrateLegacySources') return legacyMigration(context, body, true);
     if (action === "importModule") {
       if (!alfaCrmImportEnabled()) return privateJson({ error: IMPORT_BLOCKED_MESSAGE }, 409);
       return importModule(context, body);
@@ -560,8 +562,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   if (!selectedBranches.length) return privateJson({ error: "Сначала сопоставьте филиалы" }, 409);
   await assertMappedBranchAccess(context, state);
   const params = moduleParams(module, body);
-  const legacy = await env.DB.prepare("SELECT 1 AS present FROM alfacrm_import_records LIMIT 1").first();
-  if (legacy) return privateJson({ error: "Обнаружен прежний формат AlfaCRM без истории наблюдений. Сначала требуется проверенный перенос источников; существующие записи сохранены." }, 409);
+  if (!(await legacyMigrationEvidence(state)).complete) return privateJson({ error: "Обнаружен прежний формат AlfaCRM без истории наблюдений. Сначала требуется проверенный перенос источников; существующие записи сохранены." }, 409);
   const storedModule = state.modules[module];
   const previewToken = clean(body.previewToken, 80);
   const signature = await previewSignatureFor(module, state, params);
@@ -931,6 +932,48 @@ async function readJson(response: Response): Promise<unknown> {
   } catch {
     throw new AlfaApiError("AlfaCRM вернула некорректный ответ.");
   }
+}
+
+async function legacyMigrationEvidence(state: AlfaState) {
+  const rows = (await env.DB.prepare('SELECT * FROM alfacrm_import_records ORDER BY remote_branch_id,module,record_id').all<JsonRecord>()).results ?? [];
+  const token = await hashText(JSON.stringify(['legacy-evidence-v1', state.endpoint, Object.entries(state.branchMappings).sort(), rows]));
+  const batchId = `legacy-evidence-${token}`;
+  const copies = (await env.DB.prepare('SELECT record_id,payload,payload_hash FROM alfacrm_raw_observations WHERE batch_id=? ORDER BY record_id').bind(batchId).all<{ record_id: string; payload: string; payload_hash: string }>()).results ?? [];
+  const expected = await Promise.all(rows.map(async (row, i) => {
+    // Preserve the complete legacy row, including its original timestamp/hash.
+    // This is historical evidence, never a fresh upstream observation.
+    const payload = JSON.stringify(row);
+    return { row, recordId: String(i), payload, hash: await hashText(payload) };
+  }));
+  const byId = new Map(copies.map(row => [row.record_id, row]));
+  const complete = copies.length === expected.length && expected.every(row => {
+    const copy = byId.get(row.recordId);
+    return copy?.payload === row.payload && copy.payload_hash === row.hash;
+  });
+  return { token, batchId, expected, complete };
+}
+
+async function legacyMigration(context: RequestContext, body: Record<string, unknown>, apply: boolean) {
+  if (!canonicalOwner(context)) return privateJson({ error: 'Перенос старого источника доступен только собственнику' }, 403);
+  const state = await requireConnectedState();
+  await assertMappedBranchAccess(context, state);
+  const evidence = await legacyMigrationEvidence(state);
+  if (!apply) return privateJson({ legacyMigration: { token: evidence.token, count: evidence.expected.length, complete: evidence.complete } });
+  if (!alfaCrmImportEnabled()) return privateJson({ error: IMPORT_BLOCKED_MESSAGE }, 409);
+  if (state.autosync?.enabled) return privateJson({ error: 'Перед переносом остановите автоматическое обновление' }, 409);
+  if (body.token !== evidence.token) return privateJson({ error: 'Состав старых записей или настройки изменились. Повторите предпросмотр переноса.' }, 409);
+  if (!evidence.complete) {
+    const now = new Date().toISOString();
+    await env.DB.prepare("INSERT OR IGNORE INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES (?,?,?,'legacy_evidence',?)")
+      .bind(evidence.batchId, 'legacy_evidence', JSON.stringify({ migration: 'legacy-evidence-v1', targetEndpoint: state.endpoint, originalEndpoint: 'unverified', token: evidence.token }), now).run();
+    await runBatches(evidence.expected.map(row => env.DB.prepare(`INSERT OR IGNORE INTO alfacrm_raw_observations
+      (id,batch_id,remote_branch_id,module,record_id,payload,payload_hash,observed_at) VALUES (?,?,?,?,?,?,?,?)`)
+      .bind(`${evidence.batchId}:${row.recordId}`, evidence.batchId, scalar(row.row.remote_branch_id), 'legacy_evidence', row.recordId, row.payload, row.hash, now)));
+    const verified = await legacyMigrationEvidence(state);
+    if (verified.token !== evidence.token || !verified.complete) throw new AlfaApiError('Проверка переноса не завершена. Исходные записи сохранены; повторите перенос.', 409);
+    await auditStatement(context.actor, 'integration.alfacrm_legacy_evidence_preserved', { count: evidence.expected.length, token: evidence.token }).run();
+  }
+  return privateJson({ legacyMigration: { token: evidence.token, count: evidence.expected.length, complete: true }, message: 'История старого импорта сохранена и проверена. Карточки и доступы не изменены.' });
 }
 
 async function ensureAlfaTables() {
