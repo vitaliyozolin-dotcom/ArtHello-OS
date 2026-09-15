@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { runChunkedAlfaImport } from "../../lib/alfacrm-import";
+import { runChunkedAlfaImport, ALFA_AUTO_MODULES, type AlfaAutosync } from "../../lib/alfacrm-import";
 import "./AlfaCrmSetupWizard.css";
 
 type ModuleKey = "families" | "staff" | "groups" | "lessons" | "subscriptions" | "finance";
 type ModuleState = {
+  scopeContract?: string;
   status: "not_started" | "previewed" | "importing" | "imported" | "error";
   previewCount: number;
   importedCount: number;
@@ -20,6 +21,7 @@ type ModuleState = {
   note: string;
 };
 type AlfaState = {
+  autosync?: AlfaAutosync;
   version: 1;
   connected: boolean;
   endpoint: string;
@@ -32,7 +34,10 @@ type AlfaState = {
   modules: Record<ModuleKey, ModuleState>;
   legacyDraft?: { remoteBranchId: string; localBranchId: string; startDate: string; dataScopes: string[] };
 };
+type ScopeAudit = { source:string; note:string; familyCardsByStatus:Array<{status:string;count:number}>; modules:Record<string,{observed:number;accepted:number;foreignBranch:number;inactive:number;unknown:number;uniqueCustomers:number;lastObservedAt:string;byBranch:Record<string,number>}> };
 type AlfaPayload = {
+  scopeAudit?: ScopeAudit;
+  autosyncAvailable?: boolean;
   state: AlfaState;
   localBranches: Array<{ id: string; name: string }>;
   credentialStored: boolean;
@@ -103,6 +108,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
   notify: (message: string, tone?: "success" | "error" | "info") => void;
 }) {
   const dialogRef = useRef<HTMLElement>(null);
+  const [autoModules, setAutoModules] = useState<string[]>(['families', 'staff', 'groups']);
   const [payload, setPayload] = useState<AlfaPayload>({
     state: emptyState(), localBranches: [], credentialStored: false, canManage: false, canManageCredentials: false,
     importEnabled: false, importBlockedReason: "",
@@ -133,6 +139,16 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
       document.body.style.overflow = previousOverflow;
     };
   }, [close]);
+
+  async function auditBranches() {
+    setBusy("scopeAudit");
+    try {
+      const response=await fetch("/api/integrations/alfacrm?scopeAudit=1",{cache:"no-store"});
+      const body=await response.json() as AlfaPayload;
+      if(!response.ok)throw new Error(body.error||"Сверка недоступна");
+      applyPayload(body);
+    }catch(error){notify(error instanceof Error?error.message:"Сверка недоступна","error")}finally{setBusy("")}
+  }
 
   async function load() {
     setLoading(true);
@@ -321,7 +337,39 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
               </div>)}
             </div>
             {!payload.localBranches.length ? <div className="ahAlfaCrmWarning">В ArtHello OS нет активных филиалов для сопоставления. Сначала создайте их в настройках структуры.</div> : null}
+            {payload.canManageCredentials?<div><button type="button" disabled={Boolean(busy)} onClick={()=>void auditBranches()}>{busy==="scopeAudit"?"Сверяю…":"Сверить сохранённые данные по филиалам"}</button>
+              {payload.scopeAudit?<div role="status"><p>{payload.scopeAudit.source}. {payload.scopeAudit.note}</p>
+                <table><thead><tr><th>Раздел</th><th>Записей</th><th>В своём филиале</th><th>Чужой филиал</th><th>Неактивные</th><th>Не подтверждено</th></tr></thead><tbody>
+                {Object.entries(payload.scopeAudit.modules).map(([key,row])=><tr key={key}><td>{modules.find(m=>m.key===key)?.title??key}</td><td>{row.observed}</td><td>{row.accepted}</td><td>{row.foreignBranch}</td><td>{row.inactive}</td><td>{row.unknown}</td></tr>)}
+                </tbody></table>
+                <p>Карточки семей в ОС: {payload.scopeAudit.familyCardsByStatus.map(row=>`${row.status}: ${row.count}`).join("; ")}. Это карточки, а не подтверждённое число действующих семей.</p>
+                {payload.scopeAudit.modules.families?<p>Уникальные ID клиентов с подтверждённым филиалом: {payload.scopeAudit.modules.families.uniqueCustomers}. Последний сохранённый ответ: {payload.scopeAudit.modules.families.lastObservedAt||"нет"}.</p>:null}
+              </div>:null}</div>:null}
             <div className="ahAlfaCrmPanelActions"><button type="button" disabled={!payload.canManageCredentials || Boolean(busy) || !Object.values(mappings).some(Boolean)} onClick={() => void post({ action: "saveBranchMappings", mappings }, "mapping")}>{busy === "mapping" ? "Сохраняю…" : "Сохранить сопоставление филиалов"}</button></div>
+          </section> : null}
+
+          {!loading && state.connected && mappedCount > 0 ? <section className="ahAlfaCrmPanel">
+            <div className="ahAlfaCrmPanelHeading"><div>
+              <h3>Автоматическое обновление</h3>
+              <p>Обновление из AlfaCRM каждый час после завершения предыдущего цикла. Доступы выдаются отдельно.</p>
+            </div><StatusBadge status={state.autosync?.enabled ? 'connected' : 'info'} text={state.autosync?.enabled ? 'Включено' : 'Остановлено'} /></div>
+            <p>Последний полный цикл: {state.autosync?.lastSuccessAt ? new Date(state.autosync.lastSuccessAt).toLocaleString('ru-RU') : 'Ещё не завершён'}.
+              {state.autosync?.enabled ? ` Следующий шаг: ${new Date(state.autosync.nextAt).toLocaleString('ru-RU')}.` : ''}</p>
+            {state.autosync?.outcome === 'retry' ? <p role="status">Временная ошибка. Повтор запланирован; попыток: {state.autosync.failures}.</p> : null}
+            {state.autosync?.outcome === 'paused' ? <p role="status">Обновление остановлено. Проверьте данные и журнал перед включением.</p> : null}
+            {!payload.autosyncAvailable ? <p>Фоновое обновление ещё не подключено на сервере.</p> : null}
+            {ALFA_AUTO_MODULES.map(key => <label key={key} style={{ display: 'block' }}>
+              <input type="checkbox" checked={state.autosync?.enabled ? state.autosync.modules.includes(key) : autoModules.includes(key)}
+                disabled={!payload.canManageCredentials || Boolean(state.autosync?.enabled) || (state.modules[key].status !== 'imported' || state.modules[key].scopeContract !== 'source-branch-membership-v1')}
+                onChange={e => setAutoModules(current => e.target.checked ? [...current, key] : current.filter(m => m !== key))} />
+              {modules.find(m => m.key === key)?.title}{(state.modules[key].status !== 'imported' || state.modules[key].scopeContract !== 'source-branch-membership-v1') ? ' — первичная загрузка не завершена' : ''}
+            </label>)}
+            <div className="ahAlfaCrmPanelActions">
+              <button type="button" disabled={!payload.canManageCredentials || Boolean(busy) || (!state.autosync?.enabled && (!payload.autosyncAvailable || !autoModules.length || autoModules.some(key => (state.modules[key as ModuleKey].status !== 'imported' || state.modules[key as ModuleKey].scopeContract !== 'source-branch-membership-v1'))))}
+                onClick={() => void post({ action: 'setAutosync', enabled: !state.autosync?.enabled, modules: autoModules }, 'autosync')}>
+                {state.autosync?.enabled ? 'Остановить обновление' : 'Включить обновление'}</button>
+              <button type="button" className="secondary" disabled={Boolean(busy)} onClick={() => void load()}>Обновить статус</button>
+            </div>
           </section> : null}
 
           {!loading && state.connected && mappedCount > 0 ? <section className="ahAlfaCrmPanel ahAlfaCrmDataPanel">
@@ -341,7 +389,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
                 period={periods[definition.key]}
                 setPeriod={(period) => setPeriods({ ...periods, [definition.key]: period })}
                 busy={busy}
-                canManage={payload.canManage}
+                canManage={payload.canManage && !state.autosync?.enabled}
                 importEnabled={payload.importEnabled}
                 preview={() => post(moduleRequest("previewModule", definition, periods[definition.key]), `preview-${definition.key}`)}
                 importData={() => importData(definition, periods[definition.key], state.modules[definition.key].previewToken)}

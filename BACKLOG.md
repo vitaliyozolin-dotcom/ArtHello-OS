@@ -1,5 +1,10 @@
 # ArtHello OS — Backlog
 
+## D189 — единая идентификация
+
+Кандидат реализует подтверждённые ссылки карточек, несколько филиалов, устойчивость к повторному импорту и архиву, сохранение истории. Открыто: проверенный выпуск, свежая сверка числа активных семей/сотрудников, разрешение конфликтов разных ID по документам, передача в оба дневника и полный сценарий ученик → урок → оценка/ДЗ/КТП. Общая личность между разными типами карточек не подтверждается автоматически.
+
+
 ## A.4 — sandbox ingestion и банковский OAuth
 
 - [x] `A4-13-01`: append-only raw + отдельные observations + обязательные raw/batch FK реализованы в migration `0014`; финальный Reviewer PASS и exact-head Quality `34517730899` зафиксированы 2026-09-11.
@@ -151,3 +156,15 @@
 - [ ] Подключить и сверить счета ИП Тюрин и ООО «УК Детское образование» до разнесения этих юрлиц.
 - [ ] Реализовать парное внутригрупповое сопоставление управленческих услуг и исключение оборота в консолидации.
 - [ ] После подтверждённой выборки расширять правила по назначению платежа/ИНН; каждое правило сначала запускать как preview.
+
+## D187 — AlfaCRM background sync
+
+- Candidate implemented: persisted hourly refresh, retries, owner control and scope-change stop; tested against the real importer with synthetic SQLite fixtures.
+- Candidate implemented: preservation of local notes and unchanged verified source records on repeated import.
+- [ ] Complete protected release and runtime activation after reconciling AlfaCRM branch data.
+- [ ] Separately diagnose OS → diary outbox delivery and verify pupils in both School 1–11 and Atlas.
+
+### D188 — исправление AlfaCRM и архив семей
+
+- Кандидат: проверка branch_ids/is_study, отсутствие чужих проекций, сохранение ручного архива, teacher_ids и owner-only отчёт. Новый контракт блокирует включение D187 до повторной полной сверки.
+- Открыто: проверенный выпуск, фактическая свежая сверка количества семей/клиентов по всем филиалам, два полных автоматических цикла, отдельная передача в оба дневника. Оценка 200 не является фильтром. Не считать PR исправлением production.

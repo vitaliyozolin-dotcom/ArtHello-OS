@@ -15,6 +15,7 @@ export type EntityListRow = {
 
 export type EntityListOptions = {
   type: string;
+  status?: "current" | "archive" | "all";
   q: string;
   quality: string;
   review: string;
@@ -30,7 +31,7 @@ export function listEntities(rows: EntityListRow[], options: EntityListOptions) 
     ? rows.filter((row) => !row.sourceSystem.startsWith("SYNTHETIC"))
     : rows;
   const duplicateKeys = new Map<string, number>();
-  sourceRows.filter((row) => row.status !== "Объединена").forEach((row) => {
+  sourceRows.filter((row) => row.status !== "Объединена" && row.status !== "Архив").forEach((row) => {
     const key = entityDuplicateKey(row);
     duplicateKeys.set(key, (duplicateKeys.get(key) ?? 0) + 1);
   });
@@ -42,6 +43,11 @@ export function listEntities(rows: EntityListRow[], options: EntityListOptions) 
   const matchingRows = displayRows.filter((row) => {
     if (row.status === "Объединена" && !query) return false;
     if (options.type && row.entityType !== options.type) return false;
+    if (options.type === "Семья") {
+      const status = options.status ?? "current";
+      if (status === "current" && row.status === "Архив") return false;
+      if (status === "archive" && row.status !== "Архив") return false;
+    }
     if (!query) return true;
     return [row.id, row.displayName, row.sourceRecordId, row.scope, row.sourceSystem]
       .some((value) => value.toLocaleLowerCase("ru-RU").includes(query));

@@ -8,10 +8,14 @@ import { DatabaseSync } from 'node:sqlite';
 const dataModule = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
 const nativeFetch = globalThis.fetch;
 const tsModule = path => dataModule(stripTypeScriptTypes(readFileSync(resolve(path), 'utf8'), { mode: 'transform' }));
+const identityUrl = tsModule('lib/entity-identity.ts');
+const identityDbUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/entity-identity-db.ts'), 'utf8'), { mode: 'strip' }).replace("'./entity-identity.ts'", JSON.stringify(identityUrl)));
 const fixture = { env: {}, actor: null, secretReads: 0, secretWrites: 0, calls: [] };
 globalThis.__alfaLegacyRollout = fixture;
 const adapters = {
   'cloudflare:workers': dataModule('export const env=globalThis.__alfaLegacyRollout.env;'),
+  '../../../../lib/entity-identity': identityUrl,
+  '../../../../lib/entity-identity-db': identityDbUrl,
   '../../../../lib/access-policy': tsModule('lib/access-policy.ts'),
   '../../../../lib/integrations': tsModule('lib/integrations.ts'),
   '../../../../lib/production-auth': dataModule('export const getAuthenticatedRequestContext=async()=>globalThis.__alfaLegacyRollout.actor; export const verifyAuthenticatedRequestCsrf=()=>{};'),

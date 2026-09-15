@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { readIdentityIndex } from "../../../../lib/entity-identity-db";
 import { ensureCoreTables } from "../../../../db";
 import { canAccessApi } from "../../../../lib/access-policy";
 import { getAuthenticatedRequestContext, isCanonicalOwnerContext } from "../../../../lib/production-auth";
@@ -35,19 +36,19 @@ export async function GET(request: Request) {
     const family = await db.prepare("SELECT scope,metadata FROM entities WHERE id=? AND entity_type='Семья'")
       .bind(familyId).first<FamilyRow>();
     if (!family) return json({ error: "Семья не найдена" }, 404);
+    const identities = await readIdentityIndex(db);
+    const familyIds = identities.members(familyId);
     const owner = isCanonicalOwnerContext(context);
     const branchRows = await db.prepare("SELECT id,name,status FROM organization_branches ORDER BY sort_order,name")
       .all<{ id: string; name: string; status: string }>();
     const grants = owner ? [] : (await db.prepare("SELECT branch_id AS branchId FROM user_branch_access WHERE user_id=?")
       .bind(context.appUserId).all<{ branchId: string }>()).results;
     const scope = assignedActiveBranchScope(context.auth.user, branchRows.results, grants);
-    let localFamilyBranch: unknown;
-    try { localFamilyBranch = JSON.parse(family.metadata)?.localBranchId; } catch { /* Scope label is the legacy fallback. */ }
-    // Imported identities use a stable branch ID. Do not fall back from an invalid ID to a label.
-    if (!owner && !(localFamilyBranch === undefined
-      ? scope.allowsBranch(family.scope) : scope.branchIds.has(String(localFamilyBranch)))) {
-      return json({ error: "Семья не найдена" }, 404);
-    }
+    const visibleFamily = identities.cards.filter(card => familyIds.includes(card.id)).some(card => {
+      let branch: unknown; try { branch = JSON.parse(card.metadata)?.localBranchId; } catch { return false; }
+      return branch === undefined ? scope.allowsBranch(card.scope) : scope.branchIds.has(String(branch));
+    });
+    if (!owner && !visibleFamily) return json({ error: "Семья не найдена" }, 404);
     const table = await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='alfacrm_customer_balances'")
       .first<{ name: string }>();
     // The first selected import creates the projection; an absent import is never a zero balance.
@@ -67,11 +68,11 @@ export async function GET(request: Request) {
         AND o.record_id='customer-balance-v2:' || b.customer_id
       LEFT JOIN alfacrm_current_records latest ON latest.remote_branch_id=b.remote_branch_id
         AND latest.module='subscriptions' AND latest.record_id='customer-balance-v2:' || b.customer_id AND latest.active=1
-      WHERE b.family_entity_id=?
+      WHERE b.family_entity_id IN (${familyIds.map(() => '?').join(',')})
         AND EXISTS(SELECT 1 FROM alfacrm_current_records c WHERE c.remote_branch_id=b.remote_branch_id
           AND c.module='families' AND c.record_id=b.customer_id AND c.active=1)
       ORDER BY b.local_branch_id,b.remote_branch_id,b.customer_id`)
-      .bind(familyId).all<BalanceRow>();
+      .bind(...familyIds).all<BalanceRow>();
     const names = new Map(branchRows.results.map((row: { id: string; name: string }) => [row.id, row.name]));
     const balances = rows.results.filter((row: BalanceRow) => mappings[row.remote_branch_id] === row.local_branch_id
       && (owner || scope.branchIds.has(row.local_branch_id)))
