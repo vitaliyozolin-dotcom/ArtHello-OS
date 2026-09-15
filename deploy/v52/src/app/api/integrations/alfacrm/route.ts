@@ -1006,6 +1006,12 @@ async function confirmSharedAlfaIdentities(rows: FetchedRecord[], module: "famil
         return branches.includes(scalar(meta.remoteBranchId)) && scalar(module === "staff" ? meta.alfaTeacherId : meta.alfaCustomerId) === recordId;
       }).map(card => card.id);
       if (ids.length !== branches.length) continue;
+      // A customer ID identifies the pupil, not independently named guardians.
+      if (kind === "Клиент" && new Set(group.map(row => normalizeName(scalar(row.item.legal_name ?? row.item.payer_name ?? row.item.parent_name)))).size !== 1) {
+        for (const id of ids) statements.push(env.DB.prepare("UPDATE entities SET data_quality='Требует сверки' WHERE id=?").bind(id));
+        statements.push(auditStatement(actor, 'identity.source_alias_deferred', { module, recordId, branches, batchId, reason: 'guardian_identity_conflict' }));
+        continue;
+      }
       const index = buildIdentityIndex(identity.cards, merges);
       const roots = [...new Set(ids.map(id => index.canonical(id)))];
       if (roots.length > 1 && await identityHasAccessBindings(env.DB, roots.flatMap(id => index.members(id)))) {

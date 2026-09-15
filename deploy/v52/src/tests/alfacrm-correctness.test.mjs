@@ -865,3 +865,13 @@ test('an existing employee login is not silently rekeyed by source identity repa
  assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Сотрудник' AND status='Активна'").get().n,2);
  assert.equal(sql.prepare('SELECT id FROM app_users').get().id,ids[1]);
 });
+
+
+test('one pupil source ID cannot merge differently named representatives',async t=>{
+ const {sql}=await setup(t);const pupil={id:666,name:'One pupil',branch_ids:[1,2]};
+ await importSnapshot('families',{'1':[{...pupil,legal_name:'Guardian one'}],'2':[{...pupil,legal_name:'Guardian two'}]});
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Ребёнок' AND status='Активна'").get().n,1);
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Семья' AND status='Активна'").get().n,1);
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Клиент' AND status='Активна'").get().n,2);
+ assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Клиент' AND data_quality='Требует сверки'").get().n,2);
+});
