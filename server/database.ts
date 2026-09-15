@@ -100,6 +100,7 @@ export function loadMigrationSql() {
     "0007_curriculum_import.sql",
     "0008_schedule_groups.sql",
     "0009_atlas_school.sql",
+    "0010_central_directory.sql",
   ];
   return filenames.map((filename) =>
     readFileSync(join(process.cwd(), "drizzle", filename), "utf8"),
