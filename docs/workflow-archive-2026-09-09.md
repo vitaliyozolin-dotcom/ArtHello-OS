@@ -1,5 +1,15 @@
 # Архив GitHub Actions workflow — 2026-09-09
 
+## Historical R12–R17 verifier disabled from automatic CI — 2026-09-16
+
+`verify-arthello-r14.yml` больше не запускается на `pull_request` и `push`.
+Последние публично проверенные запуски систематически завершались failure уже
+после принятия R17, а шесть jobs проверяют только frozen поколения R12–R17.
+Файл пока сохранён по исходному пути и доступен только через
+`workflow_dispatch`: этот путь читают исторические validators и recovery
+fixtures. Удаление или перенос требует отдельной нормализации их pins. Текущие
+`quality.yml`, `proof-gates.yml` и `verify-arthello-v52.yml` не изменены.
+
 ## Cleanup 2026-09-16 — spent D124/D162/D182/D186 controllers
 
 Пять завершённых или невоспроизводимых одноразовых контроллеров перенесены из

@@ -1,5 +1,9 @@
 # ArtHello OS — Current State
 
+- Historical R12–R17 verification is no longer an automatic PR/main gate.
+  `verify-arthello-r14.yml` remains available through `workflow_dispatch` as a
+  forensic entrypoint because frozen recovery validators still read its exact
+  repository path. Current Quality, Proof and v52 verification remain active.
 - Workflow cleanup 2026-09-16 removed five spent production controllers from the
   active GitHub Actions catalog after checking public terminal run evidence. D182
   completed successfully in run `34819003014`; D186 completed successfully in run
