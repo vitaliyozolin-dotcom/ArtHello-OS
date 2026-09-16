@@ -1,5 +1,12 @@
 # ArtHello OS — Current State
 
+- Workflow cleanup 2026-09-16 removed five spent production controllers from the
+  active GitHub Actions catalog after checking public terminal run evidence. D182
+  completed successfully in run `34819003014`; D186 completed successfully in run
+  `34837407187`; the held Pay recovery has three successful terminal runs; its R18
+  successor only skips after acceptance. The frozen D124 importer repeatedly failed
+  and cannot accept a new main SHA. All five YAML files remain under
+  `docs/workflow-history/`; the active workflow ratchet is now 11.
 - Webhook hardening добавляет невключённые shared primitives: versioned website HMAC-SHA256 связывает timestamp/event/raw-body digest и сравнивается constant-time; durable replay claim атомарно использует существующий PostgreSQL `raw_events` unique hash под advisory lock, различая claimed/duplicate/conflict. Публичный allowlist и provider routes не расширены.
 - Backlog review 2026-09-11 подтверждает закрытие Atlas production activation по принятым D129/D130 receipts. Отдельно принят design-only callback contract для website/bank/Evotor; публичные provider callbacks не включены и требуют реализации durable replay/verifier tests.
 

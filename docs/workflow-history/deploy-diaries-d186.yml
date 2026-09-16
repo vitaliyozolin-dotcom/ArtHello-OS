@@ -1,4 +1,4 @@
-# D186: replace the incomplete plain SQLite copy with a WAL-complete offline backup.
+# Archived D186: replace the incomplete plain SQLite copy with a WAL-complete offline backup.
 # The product, image provenance and production cutover boundaries remain unchanged.
 name: Restore Atlas access and director UI D186
 

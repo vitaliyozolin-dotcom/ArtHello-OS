@@ -1,5 +1,34 @@
 # Архив GitHub Actions workflow — 2026-09-09
 
+## Cleanup 2026-09-16 — spent D124/D162/D182/D186 controllers
+
+Пять завершённых или невоспроизводимых одноразовых контроллеров перенесены из
+активной `.github/workflows` в `docs/workflow-history`, поэтому GitHub больше не
+регистрирует их как запускаемые pipelines. Production state этим cleanup не
+изменялся. Перед переносом публичный GitHub Actions API подтвердил:
+
+- D182 run `34819003014` — `completed/success` на exact source
+  `95873e519113e93d9d52ac08166eb46b317e5c6e`;
+- D186 run `34837407187` — `completed/success` на exact source
+  `7d98caaf00378488061b4dc625cd6dcbe250f33d`;
+- held Pay runs `34747727453`, `34748028556`, `34748950946` —
+  `completed/success`; последующие R18 runs — `skipped`;
+- D124 importer не имеет successful run среди 20 последних проверенных запусков
+  и привязан к замороженным parent/source SHA, поэтому не является повторяемым
+  постоянным импортом.
+
+Исходные git blob/SHA-256 до архивной пометки:
+
+| Активный путь | Git blob | SHA-256 |
+| --- | --- | --- |
+| `deploy-arthello-finance-d182.yml` | `d69d55b8c3f145d0834b24b95c450bae45945c82` | `12baf134010fded88878bab388e6e3101cb28fc5e44c2040e8c8104acf1837f1` |
+| `deploy-arthello-finance-r18-20260911.yml` | `c23e493ded062088332064bac57701adab3e99dc` | `8de8f5a2fd366adeec0d0471581b30a1e712e1775aabeaf76592d81d4b4dfe6b` |
+| `deploy-diaries-d133.yml` (D186) | `d2e677df0eb28a6b210e851bc10f643abdae2ea9` | `d3215e0d15ffaa6c2a58e9c8cec6f8b3f054ad7de7525a25c1fb891598f3596f` |
+| `import-finance-articles-20260911.yml` | `7e29d0db5726baabd5325020cb8f71ebc0e592e2` | `bd9b96d945efc61e07202b8d04079ab544fe4d350e26a8ebd1db79b370d5266e` |
+| `recover-held-arthello-pay-d162.yml` | `43015e3bf98bb422bc2fb144a24750597b68741b` | `f3ca5c75c5cbdb581b13293e1113de3469c425d9a962f6d88c1008e48d76ee4b` |
+
+Активный каталог уменьшен с 16 до 11 workflow; ratchet синхронно снижен до 11.
+
 ## D122 — legacy v44 automatic deploy
 
 `deploy-arthello-v44-ru.yml` архивирован из активного каталога в `deploy/v44/recovery/deploy-arthello-v44-ru.yml`. SHA-256 неизменённых bytes: `f31fb4b98f5b6a74a30b2f18daf292c24b9351e1746f2122796131a0940aa5de`. Этот путь предшествует принятому D113/R17 runtime и больше не должен автоматически пересобирать central при изменениях legacy v44. Новый Atlas controller не переопределяет его историю и не удаляет архив.

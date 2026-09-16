@@ -44,7 +44,7 @@ const artifactDeliveryFixtureUrl = new URL(
   import.meta.url,
 );
 const repositoryDeployUrl = new URL(
-  "../../../../.github/workflows/deploy-arthello-finance-d182.yml",
+  "../../../../docs/workflow-history/deploy-arthello-finance-d182.yml",
   import.meta.url,
 );
 const deployFixtureUrl = new URL(

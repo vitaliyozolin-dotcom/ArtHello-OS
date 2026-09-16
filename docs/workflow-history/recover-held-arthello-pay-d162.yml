@@ -1,4 +1,4 @@
-# D167: publish a static Pay shell after the recovered backend proved insufficient
+# Archived D167: publish a static Pay shell after the recovered backend proved insufficient
 # for a visible user window. No snapshot restore, D1 replacement, image rebuild,
 # secret access, payment activation, or broad cleanup is permitted.
 name: Complete ArtHello Pay D162 recovery
