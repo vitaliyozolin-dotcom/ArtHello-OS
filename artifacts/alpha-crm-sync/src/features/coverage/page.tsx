@@ -3,6 +3,17 @@ import React, { useState } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  coverageStatusColor,
+  NonProdBanner,
+  SectionHeader,
+  StatusBadge,
+  WarningBanner,
+} from "./components";
+import {
+  formatCoverageDuration as fmtDur,
+  formatCoverageTimestamp as fmtTs,
+} from "./format";
+import {
   useGetCoverageEnvironment,
   useGetCoverageRegistry,
   useGetCoverageBatches,
@@ -108,17 +119,6 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtTs(s: string | null | undefined): string {
-  if (!s) return "—";
-  return new Date(s).toLocaleString("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function useRetiredLegacyAction() {
   return {
     data: undefined,
@@ -130,25 +130,6 @@ function useRetiredLegacyAction() {
   };
 }
 
-function fmtDur(ms: number | null | undefined): string {
-  if (!ms) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}min`;
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  OK: "bg-emerald-100 text-emerald-800 border-emerald-300",
-  EMPTY: "bg-yellow-100 text-yellow-800 border-yellow-200",
-  PARTIAL: "bg-amber-100 text-amber-800 border-amber-300",
-  NOT_FOUND: "bg-gray-100 text-gray-600 border-gray-300",
-  FORBIDDEN: "bg-red-100 text-red-700 border-red-300",
-  NOT_EXPOSED: "bg-gray-100 text-gray-500 border-gray-200",
-  ERROR: "bg-red-100 text-red-700 border-red-300",
-  EMBEDDED: "bg-blue-100 text-blue-700 border-blue-200",
-  UNKNOWN: "bg-gray-100 text-gray-500 border-gray-200",
-};
-
 const BATCH_STATUS_COLORS: Record<string, string> = {
   running: "bg-blue-100 text-blue-700",
   completed: "bg-emerald-100 text-emerald-700",
@@ -156,81 +137,6 @@ const BATCH_STATUS_COLORS: Record<string, string> = {
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
-function StatusBadge({ status }: { status: string }) {
-  const cls = STATUS_COLORS[status] ?? STATUS_COLORS.UNKNOWN;
-  return (
-    <span
-      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold border font-mono ${cls}`}
-    >
-      {status}
-    </span>
-  );
-}
-
-function SectionHeader({
-  icon: Icon,
-  title,
-  subtitle,
-}: {
-  icon: React.FC<{ className?: string }>;
-  title: string;
-  subtitle?: string;
-}) {
-  return (
-    <div className="flex items-center gap-2 mb-3">
-      <Icon className="w-4 h-4 text-violet-600 shrink-0" />
-      <div>
-        <h3 className="text-[14px] font-bold text-gray-900">{title}</h3>
-        {subtitle && <p className="text-[11px] text-gray-400">{subtitle}</p>}
-      </div>
-    </div>
-  );
-}
-
-// ─── Warning Banner ───────────────────────────────────────────────────────────
-
-function WarningBanner() {
-  return (
-    <div className="bg-amber-50 border border-amber-300 rounded-[12px] p-3 flex gap-2.5">
-      <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-      <div>
-        <p className="text-[12px] font-bold text-amber-800">
-          Техническое предупреждение
-        </p>
-        <p className="text-[11px] text-amber-700 mt-0.5 leading-relaxed">
-          Банковская интеграция уже содержит счета, балансы, выписки и
-          транзакции, но большинство транзакций ещё{" "}
-          <strong>не сопоставлены, не классифицированы и не сверены</strong> с
-          данными AlphaCRM. Результаты AlphaCRM Coverage — это данные источника
-          (source coverage), а не окончательная финансовая истина. Финальная
-          сверка требует отдельного слоя сопоставления банк ↔ AlphaCRM.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Non-Production Red Warning ───────────────────────────────────────────────
-
-function NonProdBanner({ isProduction }: { isProduction: boolean }) {
-  if (isProduction) return null;
-  return (
-    <div className="bg-red-50 border-2 border-red-400 rounded-[12px] p-3 flex gap-2.5">
-      <ShieldAlert className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
-      <div>
-        <p className="text-[13px] font-bold text-red-800">
-          ⚠ Аудит запущен НЕ в production
-        </p>
-        <p className="text-[11px] text-red-700 mt-0.5 leading-relaxed">
-          NODE_ENV ≠ production. Данные AlphaCRM реальные (продакшн API), но
-          база данных —<strong> development БД</strong>. Результаты верификации
-          отражают реальный AlphaCRM, но не production БД этого приложения.
-        </p>
-      </div>
-    </div>
-  );
-}
 
 // ─── Environment Panel ────────────────────────────────────────────────────────
 
@@ -519,7 +425,7 @@ function SummaryTable() {
         {regCounts.map(({ status, cnt }) => (
           <span
             key={status}
-            className={`px-2 py-1 rounded-lg text-[11px] font-bold border ${STATUS_COLORS[status] ?? "bg-gray-100 text-gray-600 border-gray-200"}`}
+            className={`px-2 py-1 rounded-lg text-[11px] font-bold border ${coverageStatusColor(status)}`}
           >
             {status}: {cnt}
           </span>
