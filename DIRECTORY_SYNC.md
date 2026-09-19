@@ -1,0 +1,9 @@
+# Independent directory receiver — candidate
+
+`POST /api/internal/directory-sync` accepts HMAC-signed `preview` and `apply` actions for this diary's fixed system/branch identity. The body contains a complete version-1 snapshot, a monotonic sequence, classes, students, families and teacher profiles. Existing central IDs remain stable. Teacher profiles do not create user accounts or grant teaching rights.
+
+Classes require explicit `localId` to adopt an existing classroom. A name/grade mismatch is rejected to preserve lessons referenced by `class_name`. Students reference confirmed class and family IDs. Existing unmanaged pupils cannot be silently adopted or overwritten. Departed managed pupils are archived; manual pupils, grades, lessons, users and credentials are preserved. Family-access synchronization retains the managed student's class and rejects a different family before access changes.
+
+SQLite migration 0010 adds only `central_directory_links` and `central_directory_state`. Both are represented in the schema and loaded by normal startup. No destructive rollback is required: the previous application ignores the new tables. A production backup remains required before activation. Changes are applied in one transaction with a compare-and-set sequence guard. An interrupted transaction leaves no partial directory projection.
+
+Tests cover read-only preview, repeat import, stale/different replay, missing/duplicate identities, family/class constraints, explicit classroom adoption, preserving manual data and passwords, signed institution isolation, rollback and concurrent-version rejection. This is receiver code, not a completed production migration. The OS snapshot sender, real class bindings, protected deployment and live end-to-end checks remain required. No live data or credentials are included here.
