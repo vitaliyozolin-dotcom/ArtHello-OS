@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-assign-module-variable */
 import { env } from "cloudflare:workers";
+import { buildDiaryDirectory, type DirectoryClass } from '../../../../lib/diary-directory';
 import { customerPolicy, previewCustomers, resolveCustomerStatuses, compareCustomerProjections } from "../../../../lib/alfacrm-customer-policy";
 import { buildIdentityIndex, serializeIdentityMutation } from "../../../../lib/entity-identity";
 import { readIdentityIndex, refreshIdentityProjections, identityHasAccessBindings } from "../../../../lib/entity-identity-db";
@@ -154,6 +155,8 @@ export async function POST(request: Request) {
     if (action === "previewCustomers") return previewCustomerPolicy(context);
     if (action === 'previewLegacyMigration') return legacyMigration(context, body, false);
     if (action === 'migrateLegacySources') return legacyMigration(context, body, true);
+    if (action === 'previewDiaryDirectory' || action === 'applyDiaryDirectory') return syncDiaryDirectory(context, body, action === 'applyDiaryDirectory');
+    if (action === 'readDiaryDirectoryOptions') return readDiaryDirectoryOptions(context, body);
     if (action === "importModule") {
       if (!alfaCrmImportEnabled()) return privateJson({ error: IMPORT_BLOCKED_MESSAGE }, 409);
       return importModule(context, body);
@@ -932,6 +935,78 @@ async function readJson(response: Response): Promise<unknown> {
   } catch {
     throw new AlfaApiError("AlfaCRM вернула некорректный ответ.");
   }
+}
+
+async function directorySnapshot(branchId: string, sequence: number, classes: DirectoryClass[]) {
+  const groups = (await env.DB.prepare('SELECT id,unit_entity_id AS branchId,status,teacher_entity_id AS teacherId FROM education_groups WHERE unit_entity_id=? ORDER BY id').bind(branchId).all<{id:string;branchId:string;status:string;teacherId:string}>()).results ?? [];
+  const memberships = (await env.DB.prepare(`SELECT s.child_entity_id AS childId,s.family_entity_id AS familyId,s.group_id AS groupId,c.display_name AS displayName
+    FROM education_students s JOIN education_groups g ON g.id=s.group_id JOIN entities c ON c.id=s.child_entity_id JOIN entities f ON f.id=s.family_entity_id
+    WHERE g.unit_entity_id=? AND g.status='Активна' AND s.status='Активен' AND c.status='Активна' AND f.status='Активна' ORDER BY s.id`).bind(branchId).all<{childId:string;familyId:string;groupId:string;displayName:string}>()).results ?? [];
+  const teachers = (await env.DB.prepare("SELECT id,display_name AS displayName FROM entities WHERE entity_type='Сотрудник' AND status='Активна' ORDER BY id").all<{id:string;displayName:string}>()).results ?? [];
+  return buildDiaryDirectory(branchId, sequence, classes, groups, memberships, teachers);
+}
+
+async function sendDirectory(branchId: string, snapshot: ReturnType<typeof buildDiaryDirectory> | null, apply: boolean) {
+  const runtime = env as unknown as Record<string, string>;
+  const atlas = branchId === 'BR-ATLAS-SCHOOL';
+  const origin = runtime[atlas ? 'ATLAS_PUBLIC_ORIGIN' : 'SCHOOL_PUBLIC_ORIGIN'] ?? '';
+  const secret = runtime[atlas ? 'ATLAS_CENTRAL_ACCESS_SECRET' : 'CENTRAL_ACCESS_SECRET'] ?? '';
+  let url: URL;
+  try { url = new URL(origin); } catch { throw new AlfaApiError('Адрес дневника не настроен',409); }
+  if(url.protocol!=='https:' || url.origin!==origin || url.username || url.password || secret.length<32) throw new AlfaApiError('Не подтверждены адрес или ключ дневника',409);
+  const body=JSON.stringify({systemId:atlas?'SYS-SCHOOL-ATLAS':'SYS-SCHOOL-1-11',branchId,action:snapshot===null?'inspect':apply?'apply':'preview',snapshot});
+  const timestamp=String(Math.floor(Date.now()/1000));
+  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  const signature=[...new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(`${timestamp}.${body}`)))].map(b=>b.toString(16).padStart(2,'0')).join('');
+  const response=await fetch(`${origin}/api/internal/directory-sync`,{method:'POST',redirect:'manual',signal:AbortSignal.timeout(30_000),headers:{'content-type':'application/json','x-arthello-timestamp':timestamp,'x-arthello-signature':signature},body});
+  if(!response.ok) throw new AlfaApiError(`Дневник не подтвердил справочник (HTTP ${response.status}). Доступы не изменялись.`,409);
+  const result=await response.json() as {digest?:string;sequence?:number;applied?:boolean;archived?:number;classes?:Array<{id:string;name:string;grade:number}>};
+  if(snapshot===null) {
+    if(!Array.isArray(result.classes) || result.classes.some(row=>!row || typeof row.id!=='string' || typeof row.name!=='string' || !Number.isInteger(row.grade))) throw new AlfaApiError('Дневник не подтвердил список классов',409);
+    return result;
+  }
+  if(result.digest!==await hashText(JSON.stringify(snapshot)) || result.sequence!==snapshot.sequence || result.applied!==apply || !Number.isSafeInteger(result.archived) || (result.archived??-1)<0) throw new AlfaApiError('Ответ дневника не совпадает с отправленным справочником',409);
+  return result;
+}
+
+async function readDiaryDirectoryOptions(context: RequestContext, body: Record<string,unknown>) {
+  if(!canonicalOwner(context)) return privateJson({error:'Передача справочника доступна только собственнику'},403);
+  const state=await requireConnectedState(); await assertMappedBranchAccess(context,state);
+  const branchId=clean(body.branchId,60);
+  if(!['BR-SCHOOL','BR-ATLAS-SCHOOL'].includes(branchId) || !Object.values(state.branchMappings).includes(branchId)) throw new AlfaApiError('Школа не сопоставлена',409);
+  const remote=await sendDirectory(branchId,null,false);
+  const groups=(await env.DB.prepare("SELECT id,name FROM education_groups WHERE unit_entity_id=? AND status='Активна' ORDER BY name,id").bind(branchId).all<{id:string;name:string}>()).results??[];
+  return privateJson({diaryOptions:{branchId,groups,classes:remote.classes}});
+}
+
+async function syncDiaryDirectory(context: RequestContext, body: Record<string,unknown>, apply: boolean) {
+  if(!canonicalOwner(context)) return privateJson({error:'Передача справочника доступна только собственнику'},403);
+  const state=await requireConnectedState(); await assertMappedBranchAccess(context,state);
+  if(state.autosync?.enabled || state.modules.families.status!=='imported' || state.modules.groups.status!=='imported' || state.modules.families.customerPolicyContract!==CUSTOMER_POLICY_CONTRACT || state.modules.families.scopeContract!==ALFA_SCOPE_CONTRACT || state.modules.groups.scopeContract!==ALFA_SCOPE_CONTRACT) throw new AlfaApiError('Сначала завершите сверку семей и групп; перед передачей остановите автообновление',409);
+  const branchId=clean(body.branchId,60);
+  if(!['BR-SCHOOL','BR-ATLAS-SCHOOL'].includes(branchId) || !Object.values(state.branchMappings).includes(branchId)) throw new AlfaApiError('Школа не сопоставлена',409);
+  const key=`diary_directory_preview:${branchId}`;
+  const scope=await alfaAutosyncScope(state);
+  if(!apply) {
+    const snapshot=await directorySnapshot(branchId,Date.now(),body.classes as DirectoryClass[]);
+    const remote=await sendDirectory(branchId,snapshot,false);
+    const token=await hashText(JSON.stringify([scope,snapshot]));
+    const plan={token,scope,snapshot,archived:remote.archived,createdAt:Date.now(),applied:false};
+    await env.DB.prepare('INSERT INTO system_runtime_state(state_key,state_value,updated_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(state_key) DO UPDATE SET state_value=excluded.state_value,updated_at=CURRENT_TIMESTAMP').bind(key,JSON.stringify(plan)).run();
+    return privateJson({diaryDirectory:{branchId,token,students:snapshot.students.length,families:snapshot.families.length,classes:snapshot.classes.length,teachers:snapshot.teachers.length,archived:plan.archived,applied:false},message:'Дневник проверил справочник. Передача ещё не применена.'});
+  }
+  if(!alfaCrmImportEnabled()) return privateJson({error:IMPORT_BLOCKED_MESSAGE},409);
+  const row=await env.DB.prepare('SELECT state_value FROM system_runtime_state WHERE state_key=?').bind(key).first<{state_value:string}>();
+  if(!row) throw new AlfaApiError('Сначала выполните предпросмотр передачи',409);
+  const plan=JSON.parse(row.state_value) as {token:string;scope:string;snapshot:ReturnType<typeof buildDiaryDirectory>;archived:number;createdAt:number;applied:boolean};
+  if(plan.token!==body.token || plan.scope!==scope || Date.now()-plan.createdAt<0 || Date.now()-plan.createdAt>PREVIEW_TTL_MS) throw new AlfaApiError('Предпросмотр передачи устарел',409);
+  const current=await directorySnapshot(branchId,plan.snapshot.sequence,plan.snapshot.classes);
+  if(await hashText(JSON.stringify([scope,current]))!==plan.token) throw new AlfaApiError('Учебные назначения изменились. Повторите предпросмотр передачи.',409);
+  if(!plan.applied) {
+    await sendDirectory(branchId,current,true); plan.applied=true;
+    await env.DB.batch([env.DB.prepare('UPDATE system_runtime_state SET state_value=?,updated_at=CURRENT_TIMESTAMP WHERE state_key=?').bind(JSON.stringify(plan),key),auditStatement(context.actor,'integration.diary_directory_applied',{branchId,token:plan.token,students:current.students.length})]);
+  }
+  return privateJson({diaryDirectory:{branchId,token:plan.token,students:current.students.length,families:current.families.length,classes:current.classes.length,teachers:current.teachers.length,archived:plan.archived,applied:true},message:'Дневник подтвердил приём справочника. Доступы и пароли не изменялись.'});
 }
 
 async function legacyMigrationEvidence(state: AlfaState) {

@@ -27,6 +27,7 @@ const adapters = {
   '../../../../lib/request-security': dataModule('export const hasTrustedMutationOrigin=()=>globalThis.__alfaCorrectness.originValid;'),
   '../../../../lib/alfacrm-import': alfaImportUrl,
   '../../../../lib/alfacrm-customer-policy': dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/alfacrm-customer-policy.ts'), 'utf8'), { mode: 'strip' })),
+  '../../../../lib/diary-directory': dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/diary-directory.ts'), 'utf8'), { mode: 'strip' })),
 };
 let source = stripTypeScriptTypes(readFileSync(resolve('app/api/integrations/alfacrm/route.ts'), 'utf8'), { mode: 'transform' })
   .replace(/from\s+["']([^"']+)["']/g, (_all, name) => {

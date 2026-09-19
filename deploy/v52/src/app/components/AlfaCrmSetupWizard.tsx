@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { DiaryDirectoryPanel } from './DiaryDirectoryPanel';
 import { runChunkedAlfaImport, ALFA_AUTO_MODULES, type AlfaAutosync } from "../../lib/alfacrm-import";
 import "./AlfaCrmSetupWizard.css";
 
@@ -375,6 +376,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
                   </select></td></tr>)}</tbody></table></div>
                 <button type="button" disabled={Boolean(busy)} onClick={() => void post({ action: 'saveEducationRouting', routing: routingDraft }, 'saveEducationRouting')}>Сохранить разнесение групп</button>
               </section> : null}
+              <DiaryDirectoryPanel busy={Boolean(busy)} branches={payload.localBranches.filter(branch=>['BR-SCHOOL','BR-ATLAS-SCHOOL'].includes(branch.id)&&Object.values(state.branchMappings).includes(branch.id))} onAction={body=>post(body,'diaryDirectory')}/>
               {customerPreview ? <div role="status">
                 <p>Сверка источника: {customerPreview.observedAt}. Данные ОС не изменены.</p>
                 <table><thead><tr><th>Филиал Альфы</th><th>Активные</th><th>Открыто</th><th>Разовые</th><th>Запись</th><th>Исключены по статусу</th><th>На сверку</th></tr></thead><tbody>
