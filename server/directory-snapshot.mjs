@@ -23,7 +23,7 @@ export async function applyDirectorySnapshot(db, input, apply) {
   const classes=index(input.classes), families=index(input.families), students=index(input.students), teachers=index(input.teachers);
   const names=new Set();
   for(const row of classes.values()) { requireValue(name(row.name) && Number.isInteger(row.grade) && row.grade>=0 && row.grade<=11 && !names.has(row.name) && (row.localId === undefined || id(row.localId))); names.add(row.name); }
-  for(const row of students.values()) requireValue(name(row.firstName) && name(row.lastName) && classes.has(row.classId) && families.has(row.familyId));
+  for(const row of students.values()) requireValue(name(row.firstName) && typeof row.lastName==='string' && row.lastName.length<=200 && classes.has(row.classId) && families.has(row.familyId));
   for(const row of teachers.values()) requireValue(name(row.displayName));
   const digest=createHash('sha256').update(JSON.stringify(input)).digest('hex');
   const previous=await db.prepare("SELECT sequence,digest FROM central_directory_state WHERE id='primary'").first();
