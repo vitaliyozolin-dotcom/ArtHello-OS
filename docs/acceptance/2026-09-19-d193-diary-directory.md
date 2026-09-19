@@ -20,6 +20,12 @@ The receiver PRs compare against their own pinned diary source, not the unrelate
 
 ## Remaining before completion
 
+### Hosted sender failure and correction
+
+Sender `3edbda824018d85df64f1a8faae3501b66b58f53` passed Proof gates 35438083279, but Verify v52 35438083248 failed because the new lifecycle fixture used the Next.js-reserved variable `module`. Quality secret scanning also flagged the synthetic intercepted-fetch HMAC fixture at line 362. Neither failure involved live credentials or production writes. Renamed the variable, replaced both synthetic keys with distinct repeated characters, and scoped the history-only scanner exception to the exact commit/path/rule/line. No scanner rule or production gate was disabled.
+
+Reproduced the ESLint error locally before editing; after correction the same lint command and both real-SQLite sender tests pass. Hosted validation of this correction is still required.
+
 1. Hosted validation of the final sender and receiver versions and visual verification of the class-mapping screen.
 2. Fresh source reconciliation, unknown-status resolution and confirmed real classroom bindings in both diaries.
 3. Protected deployment of all three components with database backups and rollback proof. Existing spent deployment workflows must not be replayed for new sources.

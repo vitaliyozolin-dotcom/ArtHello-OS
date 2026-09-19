@@ -355,12 +355,12 @@ for (const branchId of ['BR-SCHOOL','BR-ATLAS-SCHOOL']) test(`diary sender previ
   if(branchId==='BR-ATLAS-SCHOOL') sql.exec("INSERT INTO organization_branches VALUES('BR-ATLAS-SCHOOL','Atlas school','Активен',3)");
   state.branchMappings['1']=branchId;
   const {ALFA_SCOPE_CONTRACT}=await import(alfaImportUrl);
-  for(const module of ['families','groups']) Object.assign(state.modules[module],{status:'imported',scopeContract:ALFA_SCOPE_CONTRACT});
+  for(const moduleName of ['families','groups']) Object.assign(state.modules[moduleName],{status:'imported',scopeContract:ALFA_SCOPE_CONTRACT});
   state.modules.families.customerPolicyContract='customer-status-dictionary-v1';
   await route.persistState(state);
   sql.exec("INSERT INTO entities(id,entity_type,display_name,status) VALUES('C1','Ребёнок','Полное имя','Активна'),('F1','Семья','Семья','Активна'); INSERT INTO education_groups(id,name,unit_entity_id,status) VALUES('G1','1 класс','BR-SCHOOL','Активна'); INSERT INTO education_students(id,child_entity_id,family_entity_id,group_id,status) VALUES('S1','C1','F1','G1','Активен')");
-  harness.env.SCHOOL_PUBLIC_ORIGIN='https://school.test';harness.env.CENTRAL_ACCESS_SECRET='fixture-secret-12345678901234567890';
-  harness.env.ATLAS_PUBLIC_ORIGIN='https://atlas.test';harness.env.ATLAS_CENTRAL_ACCESS_SECRET='different-atlas-secret-12345678901234567890';
+  harness.env.SCHOOL_PUBLIC_ORIGIN='https://school.test';harness.env.CENTRAL_ACCESS_SECRET='s'.repeat(40);
+  harness.env.ATLAS_PUBLIC_ORIGIN='https://atlas.test';harness.env.ATLAS_CENTRAL_ACCESS_SECRET='a'.repeat(40);
   sql.prepare('UPDATE education_groups SET unit_entity_id=? WHERE id=?').run(branchId,'G1');
   const calls=[]; let wrongReceipt=false;
   globalThis.fetch=async(url,init)=>{
