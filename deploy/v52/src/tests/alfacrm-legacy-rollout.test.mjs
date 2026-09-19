@@ -21,6 +21,8 @@ const adapters = {
   '../../../../lib/production-auth': dataModule('export const getAuthenticatedRequestContext=async()=>globalThis.__alfaLegacyRollout.actor; export const verifyAuthenticatedRequestCsrf=()=>{};'),
   '../../../../lib/request-security': dataModule('export const hasTrustedMutationOrigin=()=>true;'),
   '../../../../lib/alfacrm-import': tsModule('lib/alfacrm-import.ts'),
+  '../../../../lib/alfacrm-customer-policy': tsModule('lib/alfacrm-customer-policy.ts'),
+  '../../../../lib/diary-directory': tsModule('lib/diary-directory.ts'),
   '../../../../db': dataModule(`export const ensureCoreTables=async()=>{};
     export const readIntegrationCredential=async()=>{globalThis.__alfaLegacyRollout.secretReads+=1;return JSON.stringify({email:"fixture@example.test",apiKey:"synthetic-api-key",appKey:""});};
     export const saveIntegrationCredential=async(_actor,connection,scope,kind)=>{const f=globalThis.__alfaLegacyRollout;f.secretWrites+=1;await f.env.DB.prepare("INSERT OR REPLACE INTO system_runtime_state(state_key,state_value) VALUES(?,?)").bind('integration_credential:v2:'+connection+':'+scope+':'+kind,'fixture-encrypted-envelope').run();};`),

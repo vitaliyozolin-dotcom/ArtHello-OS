@@ -25,6 +25,8 @@ export function identityProjectionStatements(db: D1Database, cards: IdentityReco
       const card = byId.get(id)!; const meta = identityMetadata(card.metadata);
       return { sourceEntityId: id, scope: card.scope, localBranchId: meta.localBranchId ?? '',
         remoteBranchId: meta.remoteBranchId ?? '',
+        customerLifecycle: meta.customerLifecycle ?? null, alfaStatusName: meta.alfaStatusName ?? null,
+        attendanceFormat: meta.attendanceFormat ?? null,
         active: !localArchive && meta.localArchive !== true && (meta.identitySourceStatus ?? card.status) === 'Активна' };
     });
     const meta = identityMetadata(root.metadata);

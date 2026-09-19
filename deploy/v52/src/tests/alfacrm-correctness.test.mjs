@@ -26,6 +26,8 @@ const adapters = {
   '../../../../lib/production-auth': dataModule('export const isCanonicalOwnerContext=c=>c?.apiRole==="OWNER"&&c.auth.user.isSystemOwner===true; export const getAuthenticatedRequestContext=async()=>globalThis.__alfaCorrectness.actor; export const verifyAuthenticatedRequestCsrf=()=>{if(!globalThis.__alfaCorrectness.csrfValid)throw new Error("fixture csrf rejected");};'),
   '../../../../lib/request-security': dataModule('export const hasTrustedMutationOrigin=()=>globalThis.__alfaCorrectness.originValid;'),
   '../../../../lib/alfacrm-import': alfaImportUrl,
+  '../../../../lib/alfacrm-customer-policy': dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/alfacrm-customer-policy.ts'), 'utf8'), { mode: 'strip' })),
+  '../../../../lib/diary-directory': dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/diary-directory.ts'), 'utf8'), { mode: 'strip' })),
 };
 let source = stripTypeScriptTypes(readFileSync(resolve('app/api/integrations/alfacrm/route.ts'), 'utf8'), { mode: 'transform' })
   .replace(/from\s+["']([^"']+)["']/g, (_all, name) => {
@@ -65,6 +67,7 @@ async function setup(t) {
     CREATE TABLE education_programs(id TEXT PRIMARY KEY,title TEXT,version INTEGER,status TEXT,author_entity_id TEXT,methodist_entity_id TEXT,scope TEXT,material_ref TEXT,expected_result TEXT,source_type TEXT,created_at TEXT,updated_at TEXT);
     CREATE TABLE education_groups(id TEXT PRIMARY KEY,name TEXT,unit_entity_id TEXT,program_id TEXT,teacher_entity_id TEXT,room TEXT,status TEXT);
     CREATE TABLE education_students(id TEXT PRIMARY KEY,child_entity_id TEXT,family_entity_id TEXT,group_id TEXT,cabinet_status TEXT,status TEXT);
+    CREATE TABLE sales_leads(id TEXT PRIMARY KEY,first_click_at TEXT,source TEXT,stage TEXT,status TEXT,family_entity_id TEXT,child_entity_id TEXT,data_quality TEXT,updated_at TEXT);
   `);
   const statement = (query, args = []) => ({
     bind(...values) { return statement(query, values); },
@@ -100,14 +103,14 @@ function mockRecords(byPath, observe = () => {}) {
     const body = init?.body ? JSON.parse(init.body) : {};
     observe(path, body, init);
     if (path === 'auth/login') return Response.json({ token: session.token });
-    const value = byPath[path] ?? [];
+    const value = byPath[path] ?? (/^\d+\/study-status\/index$/.test(path) ? [{ id: 9001, name: 'Активен' }] : []);
     const response = typeof value === 'function' ? await value(body, url, init) : Response.json({ items: value, total: value.length });
     const scope = /^(\d+)\/(customer|teacher|group)\/index$/.exec(path);
     if (!scope || !response.ok) return response;
     let payload; try { payload = await response.clone().json(); } catch { return response; }
     if (!Array.isArray(payload.items)) return response;
     payload.items = payload.items.map(item => item && typeof item === 'object' && !Array.isArray(item)
-      ? { branch_ids: [Number(scope[1])], ...(scope[2] === 'customer' ? { is_study: 1 } : {}), ...item } : item);
+      ? { branch_ids: [Number(scope[1])], ...(scope[2] === 'customer' ? { is_study: 1, study_status_id: 9001 } : {}), ...item } : item);
     return Response.json(payload);
   };
   globalThis.fetch = upstream;
@@ -143,7 +146,113 @@ function post(body = { action: 'unknownFixtureAction' }) {
   }));
 }
 
+test('customer preview resolves branch status dictionaries without changing business data', async t => {
+  const { sql } = await setup(t);
+  const before = sql.prepare('SELECT * FROM system_runtime_state ORDER BY state_key').all();
+  mockRecords({
+    '1/study-status/index': [{ id: 10, name: 'Активен' }, { id: 20, name: 'Завершил' }],
+    '2/study-status/index': [{ id: 10, name: 'Открыто' }],
+    '1/customer/index': [{ id: 1, study_status_id: 10 }, { id: 2, study_status_id: 20 }],
+    '2/customer/index': [{ id: 3, study_status_id: 10 }],
+  });
+  const response = await post({ action: 'previewCustomers' });
+  assert.equal(response.status, 200, await response.clone().text());
+  const { customerPreview: report } = await response.json();
+  assert.equal(report.byBranch['1'].active, 1);
+  assert.equal(report.byBranch['1'].excluded, 1);
+  assert.equal(report.byBranch['2'].open, 1);
+  assert.equal(report.uniqueIncludedCustomerIds, 2);
+  assert.equal(report.applicationReady, false);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM entities').get().n, 0);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_raw_observations').get().n, 0);
+  assert.deepEqual(sql.prepare('SELECT * FROM system_runtime_state ORDER BY state_key').all(), before);
+});
+
+test('family import excludes completed and trial clients and retains open status', async t => {
+  const { sql } = await setup(t);
+  mockRecords({
+    '1/study-status/index': [{ id: 10, name: 'Открыто' }, { id: 20, name: 'Завершил' }, { id: 30, name: 'Пробное занятие' }],
+    '1/customer/index': [{ id: 1, name: 'Open pupil', study_status_id: 10 }, { id: 2, name: 'Completed pupil', study_status_id: 20 }, { id: 3, name: 'Trial pupil', study_status_id: 30 }],
+  });
+  await importSnapshot('families', null, { mappings: { '1': 'BR-SCHOOL' } });
+  const cards = sql.prepare("SELECT metadata FROM entities WHERE entity_type='Ребёнок'").all();
+  assert.equal(cards.length, 1);
+  assert.equal(JSON.parse(cards[0].metadata).customerLifecycle, 'open');
+  assert.equal(JSON.parse(cards[0].metadata).alfaStatusName, 'Открыто');
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_raw_observations').get().n, 3);
+  const ids = sql.prepare('SELECT id FROM entities ORDER BY id').all();
+  await importSnapshot('families', null, { mappings: { '1': 'BR-SCHOOL' } });
+  assert.deepEqual(sql.prepare('SELECT id FROM entities ORDER BY id').all(), ids);
+});
+
+test('unknown customer status stops import before any projection or archival', async t => {
+  const { sql } = await setup(t);
+  await importSnapshot('families', { '1': [{ id: 1, name: 'Existing pupil' }] }, { mappings: { '1': 'BR-SCHOOL' } });
+  const before = sql.prepare('SELECT * FROM entities ORDER BY id').all();
+  const observations = sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_raw_observations').get().n;
+  mockRecords({ '1/study-status/index': [], '1/customer/index': [{ id: 1, name: 'Existing pupil', study_status_id: null }] });
+  await assert.rejects(() => importSnapshot('families', null), /неподтверждённым статусом/);
+  assert.deepEqual(sql.prepare('SELECT * FROM entities ORDER BY id').all(), before);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_raw_observations').get().n, observations);
+});
+
+test('registration creates one linked lead, never an enrolled pupil, across repeat imports', async t => {
+  const { sql } = await setup(t);
+  mockRecords({ '1/study-status/index': [{ id: 10, name: 'Запись' }],
+    '1/customer/index': [{ id: 1, name: 'Lead child', study_status_id: 10, group_ids: [50] }] });
+  await importSnapshot('families', null, { mappings: { '1': 'BR-SCHOOL' } });
+  const lead = sql.prepare('SELECT * FROM sales_leads').get();
+  assert.equal(lead.stage, 'Заявка');
+  assert.equal(lead.first_click_at, '', 'source enquiry date is not invented');
+  assert.ok(sql.prepare("SELECT 1 FROM entities WHERE id=? AND entity_type='Семья'").get(lead.family_entity_id));
+  assert.ok(sql.prepare("SELECT 1 FROM entities WHERE id=? AND entity_type='Ребёнок'").get(lead.child_entity_id));
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM education_students').get().n, 0);
+  sql.prepare("UPDATE sales_leads SET stage='Переговоры'").run();
+  await importSnapshot('families', null, { mappings: { '1': 'BR-SCHOOL' } });
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM sales_leads').get().n, 1);
+  assert.equal(sql.prepare('SELECT stage FROM sales_leads').get().stage, 'Переговоры');
+});
+
 const previousSuccess = '2026-01-02T03:04:05.000Z';
+
+test('explicit group routing moves school projections without changing source identity or nursery groups', async t => {
+  const { sql } = await setup(t);
+  mockRecords({ '2/group/index': [{ id: 50, name: '1-й класс 2026-2027' }] });
+  const response = await post({ action: 'saveEducationRouting', routing: { '2:50': 'BR-SCHOOL' } });
+  assert.equal(response.status, 200, await response.clone().text());
+  await importSnapshot('families', { '2': [{ id: 1, name: 'School pupil', groups: [{ id: 50 }] }, { id: 2, name: 'Nursery pupil', groups: [{ id: 51 }] }] });
+  const pupils = sql.prepare("SELECT id,source_record_id,scope,metadata FROM entities WHERE entity_type='Ребёнок' ORDER BY source_record_id").all();
+  assert.equal(pupils[0].scope, 'School');
+  assert.equal(JSON.parse(pupils[0].metadata).remoteBranchId, '2');
+  assert.equal(JSON.parse(pupils[0].metadata).localBranchId, 'BR-SCHOOL');
+  assert.equal(pupils[1].scope, 'Nursery');
+  await importSnapshot('groups', { '2': [{ id: 50, name: '1-й класс 2026-2027' }, { id: 51, name: 'Nursery group' }] });
+  const groups=sql.prepare('SELECT name,unit_entity_id FROM education_groups ORDER BY name').all();
+  assert.equal(groups.find(row=>row.name.startsWith('1-')).unit_entity_id,'BR-SCHOOL');
+  assert.equal(groups.find(row=>row.name==='Nursery group').unit_entity_id,'BR-NURSERY');
+  assert.equal(sql.prepare("SELECT COUNT(*) n FROM education_students WHERE status='Активен'").get().n,2);
+});
+
+test('routing refuses non-owner, unknown groups and destinations outside mapped branches', async t => {
+  const { sql } = await setup(t);
+  const before = sql.prepare('SELECT * FROM system_runtime_state').all();
+  for (const routing of [{ '2:999': 'BR-SCHOOL' }, { '2:50': 'BR-FOREIGN' }, { '99:50': 'BR-SCHOOL' }]) {
+    const response = await post({ action: 'saveEducationRouting', routing });
+    assert.equal(response.status, 409);
+    assert.deepEqual(sql.prepare('SELECT * FROM system_runtime_state').all(), before);
+  }
+  harness.actor = { ...actor(), apiRole: 'DIRECTOR' };
+  assert.equal((await post({ action: 'saveEducationRouting', routing: {} })).status, 403);
+});
+
+test('conflicting group destinations cannot partially update families or consume the preview', async t => {
+  const { sql, state } = await setup(t);
+  state.educationRouting = { '2:50': 'BR-SCHOOL', '2:51': 'BR-NURSERY' };
+  await route.persistState(state);
+  await assert.rejects(() => importSnapshot('families', { '2': [{ id: 1, name: 'Conflicting pupil', groups: [{ id: 50 }, { id: 51 }] }] }), /разными назначениями/);
+  assert.equal(sql.prepare('SELECT COUNT(*) n FROM entities').get().n, 0);
+  assert.equal(sql.prepare('SELECT COUNT(*) n FROM alfacrm_raw_observations').get().n, 0);
+});
 
 async function prepareSubscriptions(t, count = 1) {
   const value = await setup(t);
@@ -356,7 +465,7 @@ test('a fresh Customer money balance is independent of stale family balances and
   const { sql } = await setup(t);
   await importSnapshot('families', { '1': [{ id: 1, name: 'Pupil', balance: 9999, paid_lesson_count: 50 }] }, { mappings: { '1': 'BR-SCHOOL' } });
   const calls = [];
-  const customer = { id: 1, branch_ids: [1], is_study: 1, balance: 123.45, paid_lesson_count: 7 };
+  const customer = { id: 1, branch_ids: [1], is_study: 1, study_status_id: 9001, balance: 123.45, paid_lesson_count: 7 };
   const tariffs = [{ id: 11, customer_id: 1, balance: 80, tariff_id: 8 }, { id: 12, customer_id: 1, balance: null }];
   mockRecords({
     '1/customer/index': body => { assert.equal(body.id, '1'); return Response.json({ items: [customer], total: 1 }); },
