@@ -258,6 +258,10 @@ jobs:
           test "$(git -C diary rev-parse HEAD)" = "$DIARY_SOURCE"
           test "$(git -C diary rev-parse HEAD^{tree})" = "$DIARY_TREE"
           node --test controller/scripts/test/diary-release-smoke.test.mjs
+          node --test controller/scripts/test/alfa-backup.test.mjs
+          python3 -I -B controller/deploy/test_alfa_release.py
+          python3 -I -B controller/deploy/test_alfa_artifact.py
+          python3 -I -B controller/deploy/test_alfa_docker.py
           (cd diary && node --test tests/directory-snapshot.test.mjs tests/central-family-directory.test.mjs)
       - name: Build and verify isolated directory image
         run: |

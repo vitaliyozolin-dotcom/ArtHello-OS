@@ -3,9 +3,19 @@ name: Build closed RU release
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: Package legacy release or install a verified Alfa component
+        required: true
+        default: package
+        type: choice
+        options: [package, alfa-central, alfa-atlas]
       ref:
         description: Immutable application commit SHA to package
         required: true
+        type: string
+      confirmation:
+        description: For installation type DEPLOY ALFA UPDATE TO PRODUCTION
+        required: false
         type: string
 
 permissions:
@@ -17,6 +27,7 @@ concurrency:
 
 jobs:
   verify-build:
+    if: inputs.operation == 'package' || inputs.operation == ''
     runs-on: ubuntu-latest
     timeout-minutes: 60
     services:
@@ -220,3 +231,52 @@ jobs:
             "arthello-ru-images-$RELEASE_REF.manifest" \
             "arthello-ru-images-$RELEASE_REF.sha256" \
             "arthello-ru-pull-release-$RELEASE_REF.sh"
+
+  install-alfa:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' && github.sha == inputs.ref &&
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' && github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      github.run_attempt == 1 &&
+      (inputs.operation == 'alfa-central' || inputs.operation == 'alfa-atlas') &&
+      inputs.confirmation == 'DEPLOY ALFA UPDATE TO PRODUCTION'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    permissions:
+      contents: read
+      actions: read
+    concurrency:
+      group: gateway-38-55-arthello-production
+      cancel-in-progress: false
+      queue: max
+    timeout-minutes: 45
+    env:
+      RELEASE_SHA: ${{ inputs.ref }}
+      RELEASE_SYSTEM: ${{ inputs.operation == 'alfa-central' && 'central' || 'atlas' }}
+      CUTOVER_CONFIRMATION: ${{ inputs.confirmation }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Verify current main before checkout
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          current="$(curl --fail --silent --show-error --max-time 20 \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+          test "$current" = "$RELEASE_SHA"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.ref }}
+          path: alfa-release-${{ github.run_id }}-${{ github.run_attempt }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Verify controller and install exact artifact with retained data
+        working-directory: alfa-release-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -I -B deploy/test_alfa_release.py
+          python3 -I -B deploy/test_alfa_artifact.py
+          python3 -I -B deploy/alfa_release.py
