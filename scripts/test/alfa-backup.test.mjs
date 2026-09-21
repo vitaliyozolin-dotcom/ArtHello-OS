@@ -6,6 +6,50 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { snapshot } from "../../deploy/alfa_backup.mjs";
 
+test("School snapshots its configured database and preserves historical SQLite copies", async () => {
+  const root = mkdtempSync(join(tmpdir(), "school-primary-"));
+  const source = join(root, "source"), target = join(root, "target");
+  mkdirSync(source); mkdirSync(target); mkdirSync(join(source, "history"));
+  const current = new DatabaseSync(join(source, "school-1-11.sqlite"));
+  const historical = new DatabaseSync(join(source, "history", "previous.sqlite"));
+  try {
+    for (const db of [current, historical]) db.exec("CREATE TABLE students(id TEXT); CREATE TABLE school_classes(id TEXT)");
+    current.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; INSERT INTO students VALUES ('current')");
+    historical.exec("INSERT INTO students VALUES ('historical')");
+    historical.close();
+    const receipt = await snapshot(source, target, "school");
+    assert.equal(receipt.databases, 2);
+    assert.equal(receipt.integrity, "ok");
+    assert.equal(receipt.walIncluded, true);
+    assert.equal(receipt.primaryDatabase, "school-1-11.sqlite");
+    const currentCopy = new DatabaseSync(join(target, "database-1.sqlite"), { readOnly: true });
+    const historyCopy = new DatabaseSync(join(target, "database-0.sqlite"), { readOnly: true });
+    assert.equal(currentCopy.prepare("SELECT id FROM students").get().id, "current");
+    assert.equal(historyCopy.prepare("SELECT id FROM students").get().id, "historical");
+    currentCopy.close(); historyCopy.close();
+  } finally {
+    current.close();
+    try { historical.close(); } catch {}
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("School never substitutes another SQLite file for a missing or invalid configured database", async () => {
+  for (const primarySchema of [null, "CREATE TABLE unrelated(id TEXT)"]) {
+    const root = mkdtempSync(join(tmpdir(), "school-invalid-primary-"));
+    const source = join(root, "source"), target = join(root, "target");
+    mkdirSync(source); mkdirSync(target);
+    const other = new DatabaseSync(join(source, "other.sqlite"));
+    other.exec("CREATE TABLE students(id TEXT); CREATE TABLE school_classes(id TEXT)"); other.close();
+    if (primarySchema) {
+      const primary = new DatabaseSync(join(source, "school-1-11.sqlite"));
+      primary.exec(primarySchema); primary.close();
+    }
+    try { await assert.rejects(snapshot(source, target, "school"), /database/); }
+    finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
 test("offline snapshot preserves committed WAL, source bytes and a standalone database", async () => {
   const root = mkdtempSync(join(tmpdir(), "alfa-wal-")),
     source = join(root, "source"),

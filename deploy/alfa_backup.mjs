@@ -55,6 +55,11 @@ export async function snapshot(source, target, system) {
       throw Error("snapshot content changed");
   const databases = before.filter((file) => file.endsWith(".sqlite"));
   if (!databases.length) throw Error("database missing");
+  // The School controller verifies this exact DATABASE_PATH in runtime_plan.
+  // Historical copies share its schema but are not the application's database.
+  const primaryDatabase = system === "school" ? "school-1-11.sqlite" : null;
+  if (primaryDatabase && !databases.includes(primaryDatabase))
+    throw Error("database missing");
   let primary = 0;
   for (let i = 0; i < databases.length; i++) {
     const db = new DatabaseSync(join(raw, databases[i]), { readOnly: true });
@@ -66,7 +71,15 @@ export async function snapshot(source, target, system) {
     );
     if (db.prepare("pragma integrity_check").get().integrity_check !== "ok")
       throw Error("snapshot integrity");
-    if (
+    if (system === "school") {
+      if (databases[i] === primaryDatabase) {
+        if (!tables.has("students") || !tables.has("school_classes")) {
+          db.close();
+          throw Error("configured database schema");
+        }
+        primary++;
+      }
+    } else if (
       system === "central" &&
       tables.has("system_runtime_state") &&
       tables.has("alfacrm_import_records")
@@ -106,6 +119,7 @@ export async function snapshot(source, target, system) {
     system,
     files: before.length,
     databases: databases.length,
+    ...(primaryDatabase ? { primaryDatabase } : {}),
     integrity: "ok",
     walIncluded: before.some((f) => f.endsWith("-wal")),
     manifestSha256: createHash("sha256")
@@ -130,7 +144,7 @@ if (
       ),
     );
   } catch (error) {
-    const codes = { "ambiguous application database": "DATABASE_SCHEMA", "diary identity mismatch": "DIARY_IDENTITY", "insufficient snapshot capacity": "CAPACITY", "snapshot integrity": "INTEGRITY", "database missing": "DATABASE_MISSING" };
+    const codes = { "ambiguous application database": "DATABASE_SCHEMA", "configured database schema": "DATABASE_SCHEMA", "diary identity mismatch": "DIARY_IDENTITY", "insufficient snapshot capacity": "CAPACITY", "snapshot integrity": "INTEGRITY", "database missing": "DATABASE_MISSING" };
     console.error("SNAPSHOT_REFUSED=" + (codes[error?.message] ?? (["EACCES", "EROFS", "ENOSPC"].includes(error?.code) ? error.code : "UNCONFIRMED")));
     process.exitCode = 2;
   }
