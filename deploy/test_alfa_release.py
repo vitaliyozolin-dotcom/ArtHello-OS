@@ -58,6 +58,16 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(calls, [('rm', '-f', 'live'), ('rename', 'retained', 'live'),
                                  ('start', 'live'), ('update', '--restart=unless-stopped', 'live')])
 
+    def test_atlas_cannot_be_installed_over_another_institution_volume(self):
+        old = runtime(); old['Name'] = '/atlas-school-diary'
+        old['Config']['Env'] = ['DATABASE_PATH=/data/atlas-school.sqlite']
+        old['Mounts'] = [{'Type':'volume','Name':'atlas-school-diary-data','Destination':'/data','RW':True},
+                         {'Type':'volume','Name':'atlas-school-diary-backups','Destination':'/backups','RW':True}]
+        release.runtime_plan(old,'atlas','sha256:'+'e'*64,'f'*40,'9'*40)
+        old['Mounts'][0]['Name'] = 'other-school-data'
+        with self.assertRaises(release.Refused):
+            release.runtime_plan(old,'atlas','sha256:'+'e'*64,'f'*40,'9'*40)
+
     def test_before_candidate_creation_retained_runtime_is_still_recovered(self):
         calls = []
         release.rollback_runtime(lambda *args: calls.append(args), 'live', 'retained', 'no', False)

@@ -85,6 +85,10 @@ def runtime_plan(old, system, image, source, tree):
     if system == 'central':
         require(data == 'arthello-direct-v44-data', 'CENTRAL_DATA')
         require(any('dst=/var/lib/arthello-v52-tochka-activation,readonly,' in m for m in mounts), 'BANK_MOUNT')
+    elif system == 'atlas':
+        require(data == 'atlas-school-diary-data'
+                and 'DATABASE_PATH=/data/atlas-school.sqlite' in environment, 'ATLAS_DATA')
+        require(any(m == 'type=volume,src=atlas-school-diary-backups,dst=/backups,volume-nocopy' for m in mounts), 'ATLAS_BACKUPS')
     restart = host['RestartPolicy']['Name']
     require(restart in ('no', 'always', 'unless-stopped', 'on-failure'), 'RESTART')
     if restart == 'on-failure' and host['RestartPolicy']['MaximumRetryCount']:
