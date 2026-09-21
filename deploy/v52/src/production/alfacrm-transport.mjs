@@ -2,7 +2,7 @@ const MAX_REQUEST_BODY_BYTES = 128_000;
 const MAX_RESPONSE_BODY_BYTES = 6_000_000;
 const MAX_SECRET_LENGTH = 4_096;
 const UPSTREAM_TIMEOUT_MS = 30_000;
-const INDEX_PATH = /^\/v2api\/(?:branch\/index|[A-Za-z0-9._-]{1,80}\/(?:customer|teacher|group|lesson|pay|customer-tariff)\/index)$/;
+const INDEX_PATH = /^\/v2api\/(?:branch\/index|[A-Za-z0-9._-]{1,80}\/(?:customer|teacher|group|lesson|pay|customer-tariff|study-status)\/index)$/;
 
 /**
  * Runs the allowlisted AlfaCRM v2 reads in Node. Production exposes this

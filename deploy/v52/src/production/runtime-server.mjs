@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import process from "node:process";
 import { createTochkaTransport } from "./tochka-transport.mjs";
 import { createBackupTransport } from "./backup-transport.mjs";
+import { createDiaryDirectoryTransport } from "./diary-directory-transport.mjs";
 import { createAlfaCrmTransport } from "./alfacrm-transport.mjs";
 
 const applicationRoot = process.cwd();
@@ -84,6 +85,7 @@ const runtime = new Miniflare({
     TOCHKA_TRANSPORT: createTochkaTransport(),
     BACKUP_TRANSPORT: createBackupTransport(),
     ALFACRM_TRANSPORT: createAlfaCrmTransport(),
+    DIARY_DIRECTORY_TRANSPORT: createDiaryDirectoryTransport({atlasOrigin:process.env.ATLAS_PUBLIC_ORIGIN || "",schoolOrigin:process.env.SCHOOL_PUBLIC_ORIGIN || ""}),
   },
   d1Databases: { DB: "arthello-production" },
   d1Persist: dataRoot,

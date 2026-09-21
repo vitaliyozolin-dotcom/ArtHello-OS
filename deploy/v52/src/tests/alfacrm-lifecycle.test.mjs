@@ -166,6 +166,7 @@ async function captureRuntimeBindings(optionalFlag) {
     './tochka-autosync-timer.mjs': adapter('export const startTochkaAutosyncTimer=({enabled,secret})=>{if(enabled!==false||secret!=="")throw new Error("Runtime fixture must keep Tochka autosync disabled");return {stop(){}};};'),
     './alfacrm-autosync-timer.mjs': adapter('export const startAlfaAutosyncTimer=({enabled,secret})=>{if(enabled!==false||secret!=="")throw new Error("Runtime fixture must keep Alfa autosync disabled");return {stop(){}};};'),
     './backup-transport.mjs': adapter('export const createBackupTransport=()=>({fixture:"closed-backup-transport",fetch(){throw new Error("Runtime fixture attempted a backup operation");}});'),
+    './diary-directory-transport.mjs': adapter('export const createDiaryDirectoryTransport=()=>({fixture:"protected-diary-transport"});'),
     './alfacrm-transport.mjs': adapter('export const createAlfaCrmTransport=()=>({fixture:"protected-alfacrm-transport",fetch(){throw new Error("Runtime fixture attempted an AlfaCRM operation");}});'),
   };
   const runtimeSource = readFileSync(resolve('production/runtime-server.mjs'), 'utf8')
@@ -373,6 +374,7 @@ for (const branchId of ['BR-SCHOOL','BR-ATLAS-SCHOOL']) test(`diary sender previ
     const digest=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(payload.snapshot)))).toString('hex');
     return Response.json({digest:wrongReceipt?'wrong':digest,sequence:payload.snapshot.sequence,archived:0,applied:payload.action==='apply'});
   };
+  harness.env.DIARY_DIRECTORY_TRANSPORT={fetch:async request=>globalThis.fetch(request.url,{redirect:request.redirect,body:await request.text(),headers:Object.fromEntries(request.headers)})};
   const body={action:'previewDiaryDirectory',branchId,classes:[{id:'G1',name:'1А',grade:1}]};
   harness.actor=actor('ADMIN');assert.equal((await post(body)).status,403);harness.actor=actor();
   let response=await post(body);assert.equal(response.status,200,await response.clone().text());

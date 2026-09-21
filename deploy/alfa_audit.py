@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 
 ROOT=Path(__file__).resolve().parents[1]
+# Previously accepted School key; D065/R17 protected School transport.
+SCHOOL_HOST_PIN='SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
 
 def load(name):
     spec=importlib.util.spec_from_file_location(name,ROOT/'deploy'/f'{name}.py')
@@ -40,6 +42,18 @@ def school_inventory():
                  '-o','GlobalKnownHostsFile=/dev/null','-o','ConnectTimeout=15','-o','ServerAliveInterval=10','-o','ServerAliveCountMax=2',
                  '--',user+'@'+host,'python3 -']
         response=subprocess.run(command,input=remote,capture_output=True,timeout=90)
+        if response.returncode and (b'Host key verification failed' in response.stderr or b'REMOTE HOST IDENTIFICATION' in response.stderr):
+            # Read an unauthenticated public key, then require the already trusted
+            # fingerprint before sending any identity or remote command. No TOFU.
+            scan=subprocess.run(['ssh-keyscan','-T','15','-p',port,'-t','ed25519',host],capture_output=True,timeout=25)
+            lines=[line for line in scan.stdout.splitlines() if line and not line.startswith(b'#')]
+            if scan.returncode or len(lines)!=1: return {'status':'blocked','reason':'PINNED_KEY_UNAVAILABLE'}
+            candidate=Path(temporary)/'pinned_candidate'; candidate.write_bytes(lines[0]+b'\n'); candidate.chmod(0o600)
+            fingerprint=subprocess.run(['ssh-keygen','-lf',str(candidate),'-E','sha256'],capture_output=True,timeout=10)
+            parts=fingerprint.stdout.decode().split()
+            if fingerprint.returncode or len(parts)<2 or parts[1]!=SCHOOL_HOST_PIN: return {'status':'blocked','reason':'PINNED_KEY_MISMATCH'}
+            known.write_bytes(candidate.read_bytes())
+            response=subprocess.run(command,input=remote,capture_output=True,timeout=90)
         if response.returncode:
             reason='SSH_HOST_KEY_UNCONFIRMED' if b'Host key verification failed' in response.stderr or b'REMOTE HOST IDENTIFICATION' in response.stderr else 'SSH_CONNECTION_UNCONFIRMED'
             return {'status':'blocked','reason':reason}
@@ -64,8 +78,9 @@ def main():
     name='arthello-direct-34837407187-1'; container=release.inspect(name)
     require(container['State']['Running'] is True,'CENTRAL_UNAVAILABLE')
     image=json.loads(release.docker('image','inspect',container['Image']))[0]
-    require(image['Config']['Labels'].get('org.opencontainers.image.revision')=='dc390739a09c1fff24ead9f490e339c1eabd3c3d','CENTRAL_SOURCE')
-    report={'controllerSha':source,'centralSource':'dc390739a09c1fff24ead9f490e339c1eabd3c3d','businessDataChanged':False}
+    central_source=image['Config']['Labels'].get('org.opencontainers.image.revision')
+    require(central_source in ('dc390739a09c1fff24ead9f490e339c1eabd3c3d',source),'CENTRAL_SOURCE')
+    report={'controllerSha':source,'centralSource':central_source,'businessDataChanged':False}
     report['source']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'ALFA_SOURCE_AUDIT=',data=(ROOT/'.github/scripts/alfa-source-audit.mjs').read_bytes())
     report['os']=capture(['docker','run','--rm','--read-only','--network','bridge','--cap-drop','ALL','--security-opt','no-new-privileges:true',
         '--pids-limit','64','--memory','512m','--user','1000:1000',
