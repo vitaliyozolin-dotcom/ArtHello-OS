@@ -11,7 +11,7 @@ function databases(dir) {
 export function summarizeBranch(records, dictionary, branch) {
   const names = new Map(dictionary.map(row => [String(row.id), row.name]));
   if (names.size !== dictionary.length || [...names.values()].some(name => typeof name !== 'string')) throw Error('STATUS_DICTIONARY_INVALID');
-  const result = { observed: records.length, members: 0, foreign: 0, unknownMembership: 0, statuses: {}, included: 0, groups: {} };
+  const result = { observed: records.length, members: 0, foreign: 0, unknownMembership: 0, statuses: {}, included: 0, unknownStatusIds: {}, groups: {} };
   for (const row of records) {
     if (!Array.isArray(row.branch_ids)) { result.unknownMembership++; continue; }
     if (!row.branch_ids.map(String).includes(String(branch))) { result.foreign++; continue; }
@@ -20,6 +20,7 @@ export function summarizeBranch(records, dictionary, branch) {
     // Only known policy labels are printed; upstream free text is never logged.
     const safe = ['Активен', 'Активен ШКОЛА', 'Открыто', 'Разовое посещение', 'Запись', 'Пробное занятие', 'Завершил'].includes(name) ? name : 'UNKNOWN';
     result.statuses[safe] = (result.statuses[safe] ?? 0) + 1;
+    if(safe==='UNKNOWN'){const id=/^[0-9]+$/.test(String(row.study_status_id))?String(row.study_status_id):'MISSING';result.unknownStatusIds[id]=(result.unknownStatusIds[id]??0)+1;}
     if (!['Активен', 'Активен ШКОЛА', 'Открыто', 'Разовое посещение', 'Запись'].includes(safe)) continue;
     result.included++;
     for (const value of Array.isArray(row.groups) ? row.groups : Array.isArray(row.group_ids) ? row.group_ids : []) {

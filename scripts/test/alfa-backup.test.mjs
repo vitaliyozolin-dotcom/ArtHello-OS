@@ -16,7 +16,7 @@ test("offline snapshot preserves committed WAL, source bytes and a standalone da
     db = new DatabaseSync(path);
   try {
     db.exec(
-      "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE students(id TEXT); CREATE TABLE classes(id TEXT); INSERT INTO students VALUES ('synthetic')",
+      "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE students(id TEXT); CREATE TABLE school_classes(id TEXT); CREATE TABLE diary_identity(id TEXT,institution_id TEXT); INSERT INTO diary_identity VALUES ('primary','atlas-school'); INSERT INTO students VALUES ('synthetic')",
     );
     const main = readFileSync(path),
       wal = readFileSync(path + "-wal");
@@ -62,5 +62,15 @@ test("enabled Alfa schedule blocks release without modifying source", async () =
     await assert.rejects(snapshot(source, target, "central"), /paused/);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+ test("a database with unrelated classes or wrong institution is refused", async () => {
+  for (const schema of ["CREATE TABLE students(id TEXT); CREATE TABLE classes(id TEXT)", "CREATE TABLE students(id TEXT); CREATE TABLE school_classes(id TEXT); CREATE TABLE diary_identity(id TEXT,institution_id TEXT); INSERT INTO diary_identity VALUES ('primary','school-1-11')"]) {
+    const root=mkdtempSync(join(tmpdir(),"alfa-wrong-"));
+    mkdirSync(join(root,"source")); mkdirSync(join(root,"target"));
+    const db=new DatabaseSync(join(root,"source","app.sqlite")); db.exec(schema); db.close();
+    try { await assert.rejects(snapshot(join(root,"source"),join(root,"target"),"atlas"), /database|identity/); }
+    finally { rmSync(root,{recursive:true,force:true}); }
   }
 });
