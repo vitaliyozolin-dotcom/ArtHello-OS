@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -239,10 +240,24 @@ def upgrade(old, plan, work, run_key, current_main):
     envfile.write_text('\n'.join(plan['environment']) + '\n')
     envfile.chmod(0o600)
     stopped = renamed = False
+    journal = work / (system + '-operation.json')
+
+    def record(phase):
+        value = {'phase': phase, 'system': system, 'name': name, 'previousContainerId': old['Id'],
+                 'retained': retained, 'dataVolume': plan['dataVolume'], 'backupVolume': backup_volume,
+                 'candidateImage': plan['image'], 'databaseRestoreAllowed': False}
+        temp = journal.with_suffix('.tmp')
+        with temp.open('w') as output:
+            json.dump(value, output)
+            output.flush()
+            os.fsync(output.fileno())
+        temp.replace(journal)
+
     try:
         # Register the recovery state before each mutating command, including
         # cases where Docker commits an operation but the client loses its reply.
         stopped = True
+        record('stopping-predecessor')
         checkpoint('stop-predecessor')
         docker('update', '--restart=no', name)
         docker('stop', '--time', '30', name, timeout=45)
@@ -263,6 +278,7 @@ def upgrade(old, plan, work, run_key, current_main):
         require(backup_receipt['integrity'] == 'ok', 'BACKUP')
         current_main()
         renamed = True
+        record('replacing-runtime')
         checkpoint('replace-runtime-preserve-data')
         docker('rename', name, retained)
         # Candidate uses the same data volume. It may receive traffic immediately;
@@ -292,6 +308,7 @@ def upgrade(old, plan, work, run_key, current_main):
         public_health()
         current_main()
         docker('update', '--restart=' + plan['restart'], name)
+        record('runtime-verified')
         return {'system': system, 'source': plan['source'], 'tree': plan['tree'], 'imageId': plan['image'],
                 'containerId': actual['Id'], 'previousContainerId': old['Id'], 'retained': retained,
                 'dataVolume': plan['dataVolume'], 'backupVolume': backup_volume, 'backup': backup_receipt,
@@ -309,7 +326,8 @@ def upgrade(old, plan, work, run_key, current_main):
         elif stopped:
             docker('start', old['Id'])
             docker('update', '--restart=' + plan['restart'], old['Id'])
-        checkpoint('previous-runtime-restored-data-retained')
+        record('previous-runtime-started-data-retained')
+        checkpoint('previous-runtime-started-data-retained')
         raise
     finally:
         envfile.unlink(missing_ok=True)
@@ -317,6 +335,10 @@ def upgrade(old, plan, work, run_key, current_main):
 
 def main():
     os.umask(0o077)
+    def interrupted(signum, frame):
+        raise Refused('INTERRUPTED')
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, interrupted)
     source = authorization(os.environ)
     checkpoint('protected-context-verified')
     system = os.environ.get('RELEASE_SYSTEM')
