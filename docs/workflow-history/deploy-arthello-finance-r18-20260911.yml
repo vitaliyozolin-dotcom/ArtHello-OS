@@ -1,4 +1,4 @@
-# D162: prove the skipped retained R15 consumer and publish ArtHello Pay.
+# Archived D162: prove the skipped retained R15 consumer and publish ArtHello Pay.
 # Accepted R17 predecessor and complete R15/R13/R12 backup history are preserved.
 # Prove the canonical D1 chain before recognizing its exact backup-control consumers.
 # No database restore after seal/authentication/public boundaries.

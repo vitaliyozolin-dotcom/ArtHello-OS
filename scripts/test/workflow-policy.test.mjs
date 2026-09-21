@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,6 +9,16 @@ import {
   analyzeWorkflowSource,
   evaluateWorkflowCountRatchet,
 } from "../workflow-policy.mjs";
+
+test("keeps the accepted R12-R17 verifier manual-only", async () => {
+  const source = await readFile(
+    new URL("../../.github/workflows/verify-arthello-r14.yml", import.meta.url),
+    "utf8",
+  );
+  const result = analyzeWorkflowSource("verify-arthello-r14.yml", source);
+
+  assert.deepEqual(result.triggers, ["workflow_dispatch"]);
+});
 
 test("workflow count ratchet allows cleanup and rejects unreviewed growth", () => {
   assert.deepEqual(evaluateWorkflowCountRatchet(14, { maximumWorkflowCount: 14 }), []);

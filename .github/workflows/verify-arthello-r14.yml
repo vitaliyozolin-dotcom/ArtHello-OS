@@ -1,32 +1,13 @@
 name: Verify ArtHello Tochka continuation
 'on':
-  pull_request:
-    paths:
-    - .github/workflows/**
-    - .github/scripts/**
-    - deploy/**
-    - scripts/run-frozen-release-contract.py
-    - scripts/run-r14-historical-contract.py
-    - scripts/run-r15-historical-contract.py
-    - scripts/run-accepted-r16-history.py
-    - scripts/test/**
-  push:
-    branches:
-    - main
-    paths:
-    - .github/workflows/**
-    - .github/scripts/**
-    - deploy/**
-    - scripts/run-frozen-release-contract.py
-    - scripts/run-r14-historical-contract.py
-    - scripts/run-r15-historical-contract.py
-    - scripts/run-accepted-r16-history.py
-    - scripts/test/**
+  # R12-R17 are accepted historical contracts. Keep an explicit forensic
+  # entrypoint without making every current deploy/script change re-run them.
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: verify-arthello-r14-${{ github.event.pull_request.head.sha || github.sha }}
-  cancel-in-progress: true
+  group: verify-arthello-r14-history
+  cancel-in-progress: false
 jobs:
   r12-candidate-tests:
     name: r12-candidate-tests

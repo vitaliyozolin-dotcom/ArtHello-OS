@@ -15,7 +15,7 @@ const v52Page = read("deploy/v52/src/app/pay/[[...path]]/page.tsx");
 const v52App = read("deploy/v52/public/pay-assets/app.js");
 const v52Css = read("deploy/v52/public/pay-assets/styles.css");
 const productionWorkflow = read(
-  ".github/workflows/deploy-arthello-finance-r18-20260911.yml",
+  "docs/workflow-history/deploy-arthello-finance-r18-20260911.yml",
 );
 const prerequisiteWorkflow = read(
   ".github/workflows/check-arthello-server-e2e.yml",

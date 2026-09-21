@@ -5,6 +5,17 @@
 Основной ID сохраняет подтверждённые ссылки старых карточек и несколько филиальных назначений. Повторный импорт, архив и учебные привязки используют единый корень; слабые совпадения не объединяют людей. Автоматическое подтверждение — только один ID объекта AlfaCRM с взаимно подтверждёнными филиалами. Production ещё не изменён; оба живых дневника повторно проверены, учеников по-прежнему 0. Доказательства: `docs/acceptance/2026-09-15-d189-unified-identity.md`.
 
 
+- Historical R12–R17 verification is no longer an automatic PR/main gate.
+  `verify-arthello-r14.yml` remains available through `workflow_dispatch` as a
+  forensic entrypoint because frozen recovery validators still read its exact
+  repository path. Current Quality, Proof and v52 verification remain active.
+- Workflow cleanup 2026-09-16 removed five spent production controllers from the
+  active GitHub Actions catalog after checking public terminal run evidence. D182
+  completed successfully in run `34819003014`; D186 completed successfully in run
+  `34837407187`; the held Pay recovery has three successful terminal runs; its R18
+  successor only skips after acceptance. The frozen D124 importer repeatedly failed
+  and cannot accept a new main SHA. All five YAML files remain under
+  `docs/workflow-history/`; the active workflow ratchet is now 11.
 - Webhook hardening добавляет невключённые shared primitives: versioned website HMAC-SHA256 связывает timestamp/event/raw-body digest и сравнивается constant-time; durable replay claim атомарно использует существующий PostgreSQL `raw_events` unique hash под advisory lock, различая claimed/duplicate/conflict. Публичный allowlist и provider routes не расширены.
 - Backlog review 2026-09-11 подтверждает закрытие Atlas production activation по принятым D129/D130 receipts. Отдельно принят design-only callback contract для website/bank/Evotor; публичные provider callbacks не включены и требуют реализации durable replay/verifier tests.
 

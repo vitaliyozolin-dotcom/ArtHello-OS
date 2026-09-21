@@ -8,7 +8,7 @@ const read = (path) =>
   readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 
 test("D186 pins the accepted Atlas source and current central predecessor", () => {
-  const workflow = read(".github/workflows/deploy-diaries-d133.yml");
+  const workflow = read("docs/workflow-history/deploy-diaries-d186.yml");
   const release = read("deploy/release-atlas-d186.sh");
   assert.match(
     workflow,
@@ -26,7 +26,7 @@ test("D186 pins the accepted Atlas source and current central predecessor", () =
 });
 
 test("production runs only after exact successful main gates and manual owner confirmation", () => {
-  const workflow = read(".github/workflows/deploy-diaries-d133.yml");
+  const workflow = read("docs/workflow-history/deploy-diaries-d186.yml");
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /inputs\.confirmation == 'DEPLOY D186 TO PRODUCTION'/);
   assert.match(workflow, /verify_run "\$QUALITY_RUN_ID" "Quality gates"/);
@@ -69,7 +69,7 @@ test("Atlas upgrade is backup-first, preserves the data volume and has rollback"
 });
 
 test("Atlas production release is decoupled from School mutation", () => {
-  const workflow = read(".github/workflows/deploy-diaries-d133.yml");
+  const workflow = read("docs/workflow-history/deploy-diaries-d186.yml");
   assert.doesNotMatch(workflow, /ARTHELLO_RU_SSH_PRIVATE_KEY/);
   assert.doesNotMatch(workflow, /school-curriculum-standalone-cutover\.sh/);
   assert.doesNotMatch(workflow, /run-school-ssh-d138\.sh/);

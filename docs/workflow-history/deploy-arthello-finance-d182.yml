@@ -1,4 +1,4 @@
-# D182: restore reachable branch selection inside mobile Finance.
+# Archived D182: restore reachable branch selection inside mobile Finance.
 # The hosted verifier builds the immutable image. The gateway proves the exact
 # D181 runtime, takes a recoverable D1 snapshot, preserves controlled read-only
 # imports and swaps one candidate. Existing secret mounts are never printed.

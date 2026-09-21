@@ -3,10 +3,20 @@ import React, { useState } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  NonProdBanner,
+  SectionHeader,
+  StatusBadge,
+  WarningBanner,
+} from "./components";
+import {
+  formatCoverageDuration as fmtDur,
+  formatCoverageTimestamp as fmtTs,
+} from "./format";
+import { RegistryTable } from "./registry";
+import { SummaryTable } from "./summary";
+import {
   useGetCoverageEnvironment,
-  useGetCoverageRegistry,
   useGetCoverageBatches,
-  useGetCoverageSummary,
   useGetCoverageFieldInventory,
   useGetCoverageIssues,
   useGetCoverageRawRecords,
@@ -61,9 +71,7 @@ import {
   getGetCoverageDuplicatesQueryKey,
   getGetCoveragePaymentTruthAuditQueryKey,
   getGetCoveragePaymentCleanupAuditQueryKey,
-  type CoverageEndpointEntry,
   type AlphaSyncBatch,
-  type CoverageSummaryEntityRow,
   type AlphaLinkingIssue,
   type AlphaRawRecord,
   type AlphaBranchDetail,
@@ -108,17 +116,6 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtTs(s: string | null | undefined): string {
-  if (!s) return "—";
-  return new Date(s).toLocaleString("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function useRetiredLegacyAction() {
   return {
     data: undefined,
@@ -130,25 +127,6 @@ function useRetiredLegacyAction() {
   };
 }
 
-function fmtDur(ms: number | null | undefined): string {
-  if (!ms) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}min`;
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  OK: "bg-emerald-100 text-emerald-800 border-emerald-300",
-  EMPTY: "bg-yellow-100 text-yellow-800 border-yellow-200",
-  PARTIAL: "bg-amber-100 text-amber-800 border-amber-300",
-  NOT_FOUND: "bg-gray-100 text-gray-600 border-gray-300",
-  FORBIDDEN: "bg-red-100 text-red-700 border-red-300",
-  NOT_EXPOSED: "bg-gray-100 text-gray-500 border-gray-200",
-  ERROR: "bg-red-100 text-red-700 border-red-300",
-  EMBEDDED: "bg-blue-100 text-blue-700 border-blue-200",
-  UNKNOWN: "bg-gray-100 text-gray-500 border-gray-200",
-};
-
 const BATCH_STATUS_COLORS: Record<string, string> = {
   running: "bg-blue-100 text-blue-700",
   completed: "bg-emerald-100 text-emerald-700",
@@ -156,81 +134,6 @@ const BATCH_STATUS_COLORS: Record<string, string> = {
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
-function StatusBadge({ status }: { status: string }) {
-  const cls = STATUS_COLORS[status] ?? STATUS_COLORS.UNKNOWN;
-  return (
-    <span
-      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold border font-mono ${cls}`}
-    >
-      {status}
-    </span>
-  );
-}
-
-function SectionHeader({
-  icon: Icon,
-  title,
-  subtitle,
-}: {
-  icon: React.FC<{ className?: string }>;
-  title: string;
-  subtitle?: string;
-}) {
-  return (
-    <div className="flex items-center gap-2 mb-3">
-      <Icon className="w-4 h-4 text-violet-600 shrink-0" />
-      <div>
-        <h3 className="text-[14px] font-bold text-gray-900">{title}</h3>
-        {subtitle && <p className="text-[11px] text-gray-400">{subtitle}</p>}
-      </div>
-    </div>
-  );
-}
-
-// ─── Warning Banner ───────────────────────────────────────────────────────────
-
-function WarningBanner() {
-  return (
-    <div className="bg-amber-50 border border-amber-300 rounded-[12px] p-3 flex gap-2.5">
-      <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-      <div>
-        <p className="text-[12px] font-bold text-amber-800">
-          Техническое предупреждение
-        </p>
-        <p className="text-[11px] text-amber-700 mt-0.5 leading-relaxed">
-          Банковская интеграция уже содержит счета, балансы, выписки и
-          транзакции, но большинство транзакций ещё{" "}
-          <strong>не сопоставлены, не классифицированы и не сверены</strong> с
-          данными AlphaCRM. Результаты AlphaCRM Coverage — это данные источника
-          (source coverage), а не окончательная финансовая истина. Финальная
-          сверка требует отдельного слоя сопоставления банк ↔ AlphaCRM.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Non-Production Red Warning ───────────────────────────────────────────────
-
-function NonProdBanner({ isProduction }: { isProduction: boolean }) {
-  if (isProduction) return null;
-  return (
-    <div className="bg-red-50 border-2 border-red-400 rounded-[12px] p-3 flex gap-2.5">
-      <ShieldAlert className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
-      <div>
-        <p className="text-[13px] font-bold text-red-800">
-          ⚠ Аудит запущен НЕ в production
-        </p>
-        <p className="text-[11px] text-red-700 mt-0.5 leading-relaxed">
-          NODE_ENV ≠ production. Данные AlphaCRM реальные (продакшн API), но
-          база данных —<strong> development БД</strong>. Результаты верификации
-          отражают реальный AlphaCRM, но не production БД этого приложения.
-        </p>
-      </div>
-    </div>
-  );
-}
 
 // ─── Environment Panel ────────────────────────────────────────────────────────
 
@@ -279,350 +182,6 @@ function EnvironmentPanel() {
           ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-// ─── Endpoint Registry Table ──────────────────────────────────────────────────
-
-function RegistryTable({ branchId }: { branchId: string }) {
-  const { data, isLoading } = useGetCoverageRegistry({ branchId });
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
-  const registry = (data?.registry ?? []) as CoverageEndpointEntry[];
-
-  const okCount = registry.filter((r) => r.status === "OK").length;
-  const emptyCount = registry.filter((r) => r.status === "EMPTY").length;
-  const errCount = registry.filter((r) =>
-    ["ERROR", "FORBIDDEN", "NOT_FOUND", "NOT_EXPOSED"].includes(r.status ?? ""),
-  ).length;
-  const unknownCount = registry.filter((r) => r.status === "UNKNOWN").length;
-
-  if (isLoading) {
-    return (
-      <div className="space-y-1">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="h-8 bg-gray-100 rounded animate-pulse" />
-        ))}
-      </div>
-    );
-  }
-
-  if (registry.length === 0) {
-    return (
-      <div className="text-center py-8 text-gray-400 text-[13px]">
-        Нет данных — запустите <strong>Run Discovery</strong>
-      </div>
-    );
-  }
-
-  const copyText = (text: string, id: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(id);
-      setTimeout(() => setCopied(null), 1500);
-    });
-  };
-
-  return (
-    <div>
-      {/* Stats row */}
-      <div className="flex gap-3 mb-3 flex-wrap text-[11px]">
-        <span className="text-emerald-600 font-semibold">✓ OK: {okCount}</span>
-        <span className="text-yellow-600 font-semibold">
-          ◌ EMPTY: {emptyCount}
-        </span>
-        <span className="text-red-600 font-semibold">
-          ✕ ERROR/NOT_FOUND: {errCount}
-        </span>
-        <span className="text-gray-400">? UNKNOWN: {unknownCount}</span>
-        <span className="text-gray-400 ml-auto">Total: {registry.length}</span>
-      </div>
-
-      {/* Table */}
-      <div className="border border-gray-200 rounded-[10px] overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-[11px]">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="text-left px-3 py-2 font-semibold text-gray-600 whitespace-nowrap">
-                  Entity
-                </th>
-                <th className="text-left px-3 py-2 font-semibold text-gray-600 whitespace-nowrap">
-                  Endpoint
-                </th>
-                <th className="text-left px-3 py-2 font-semibold text-gray-600 whitespace-nowrap">
-                  Status
-                </th>
-                <th className="text-right px-3 py-2 font-semibold text-gray-600 whitespace-nowrap">
-                  HTTP
-                </th>
-                <th className="text-right px-3 py-2 font-semibold text-gray-600 whitespace-nowrap">
-                  Records
-                </th>
-                <th className="text-left px-3 py-2 font-semibold text-gray-600 whitespace-nowrap">
-                  Last checked
-                </th>
-                <th className="text-left px-3 py-2 font-semibold text-gray-600 whitespace-nowrap">
-                  Next action
-                </th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {registry.map((row) => {
-                const isExpanded = expandedId === row.id;
-                return (
-                  <React.Fragment key={row.id ?? row.entity_key}>
-                    <tr
-                      className="border-b border-gray-100 hover:bg-gray-50/60 cursor-pointer"
-                      onClick={() =>
-                        setExpandedId(isExpanded ? null : (row.id ?? null))
-                      }
-                    >
-                      <td className="px-3 py-2 font-mono text-[10px] text-violet-700 whitespace-nowrap">
-                        {row.entity_key ?? "—"}
-                      </td>
-                      <td className="px-3 py-2 font-mono text-[10px] text-gray-500 whitespace-nowrap max-w-[160px] truncate">
-                        {row.endpoint ?? "—"}
-                      </td>
-                      <td className="px-3 py-2">
-                        <StatusBadge status={row.status ?? "UNKNOWN"} />
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-gray-600">
-                        {row.http_status ?? "—"}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums font-semibold">
-                        {row.records_fetched !== null &&
-                        row.records_fetched !== undefined
-                          ? row.records_fetched.toLocaleString()
-                          : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-gray-400 whitespace-nowrap">
-                        {fmtTs(row.last_checked_at)}
-                      </td>
-                      <td className="px-3 py-2 text-gray-500 max-w-[200px]">
-                        <span className="line-clamp-1">
-                          {row.next_action ?? "—"}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        {isExpanded ? (
-                          <ChevronDown className="w-3 h-3 text-gray-400" />
-                        ) : (
-                          <ChevronRight className="w-3 h-3 text-gray-400" />
-                        )}
-                      </td>
-                    </tr>
-                    {isExpanded && (
-                      <tr className="bg-gray-950 text-gray-300">
-                        <td colSpan={8} className="px-4 py-3">
-                          <div className="font-mono text-[10px] space-y-1.5">
-                            <div className="flex items-center gap-2">
-                              <span className="text-gray-500">endpoint:</span>
-                              <span className="text-green-400">
-                                {row.endpoint}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  copyText(
-                                    row.endpoint ?? "",
-                                    (row.id ?? "") + "-ep",
-                                  );
-                                }}
-                                className="text-gray-500 hover:text-gray-300"
-                              >
-                                {copied === (row.id ?? "") + "-ep" ? (
-                                  <CopyCheck className="w-3 h-3" />
-                                ) : (
-                                  <Copy className="w-3 h-3" />
-                                )}
-                              </button>
-                            </div>
-                            {row.notes && (
-                              <div>
-                                <span className="text-gray-500">notes:</span>{" "}
-                                {String(row.notes)}
-                              </div>
-                            )}
-                            {row.error_message && (
-                              <div>
-                                <span className="text-red-400">error:</span>{" "}
-                                <span className="text-red-300">
-                                  {String(row.error_message)}
-                                </span>
-                              </div>
-                            )}
-                            {!!row.discovered_fields && (
-                              <div>
-                                <span className="text-gray-500">
-                                  fields discovered:
-                                </span>
-                                <div className="mt-1 flex flex-wrap gap-1">
-                                  {(row.discovered_fields as string[]).map(
-                                    (f) => (
-                                      <span
-                                        key={f}
-                                        className="px-1 py-0.5 bg-gray-800 text-gray-300 rounded text-[9px]"
-                                      >
-                                        {f}
-                                      </span>
-                                    ),
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                            {!!row.response_sample && (
-                              <div>
-                                <span className="text-gray-500">sample:</span>
-                                <pre className="mt-1 text-[9px] text-gray-400 overflow-x-auto max-h-32">
-                                  {JSON.stringify(row.response_sample, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Coverage Summary Table ───────────────────────────────────────────────────
-
-function SummaryTable() {
-  const { data, isLoading } = useGetCoverageSummary();
-
-  if (isLoading)
-    return <div className="h-32 bg-gray-100 rounded-[12px] animate-pulse" />;
-  if (!data) return null;
-
-  const byEntity = (data.byEntity ?? []) as CoverageSummaryEntityRow[];
-  const regCounts =
-    (data.registryStatusCounts as { status: string; cnt: string }[]) ?? [];
-  const issueCounts =
-    (data.openIssueCounts as { severity: string; cnt: string }[]) ?? [];
-  const lastBatch = data.lastBatch as AlphaSyncBatch | null;
-
-  return (
-    <div className="space-y-3">
-      {/* Registry status pills */}
-      <div className="flex gap-2 flex-wrap">
-        {regCounts.map(({ status, cnt }) => (
-          <span
-            key={status}
-            className={`px-2 py-1 rounded-lg text-[11px] font-bold border ${STATUS_COLORS[status] ?? "bg-gray-100 text-gray-600 border-gray-200"}`}
-          >
-            {status}: {cnt}
-          </span>
-        ))}
-        {issueCounts.map(({ severity, cnt }) => (
-          <span
-            key={severity}
-            className={`px-2 py-1 rounded-lg text-[11px] font-bold border ${severity === "critical" ? "bg-red-100 text-red-700 border-red-200" : severity === "warning" ? "bg-amber-100 text-amber-700 border-amber-200" : "bg-gray-100 text-gray-500 border-gray-200"}`}
-          >
-            {severity} issues: {cnt}
-          </span>
-        ))}
-      </div>
-
-      {/* Last batch */}
-      {lastBatch && (
-        <div className="text-[11px] text-gray-500 font-mono bg-gray-50 rounded px-2 py-1">
-          Last batch:{" "}
-          <span
-            className={`font-bold ${BATCH_STATUS_COLORS[lastBatch.status ?? ""] ?? ""} px-1 rounded`}
-          >
-            {(lastBatch.status ?? "").toUpperCase()}
-          </span>{" "}
-          mode={lastBatch.mode} fetched={lastBatch.total_fetched ?? 0} saved=
-          {lastBatch.total_saved ?? 0} errors={lastBatch.total_errors ?? 0} dur=
-          {fmtDur(lastBatch.duration_ms)} at={fmtTs(lastBatch.started_at)}
-        </div>
-      )}
-
-      {/* By entity table */}
-      {byEntity.length > 0 && (
-        <div className="border border-gray-200 rounded-[10px] overflow-hidden">
-          <table className="w-full text-[11px]">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="text-left px-3 py-2 font-semibold text-gray-600">
-                  Entity
-                </th>
-                <th className="text-right px-3 py-2 font-semibold text-gray-600">
-                  Raw saved
-                </th>
-                <th className="text-right px-3 py-2 font-semibold text-gray-600">
-                  Normalized
-                </th>
-                <th className="text-right px-3 py-2 font-semibold text-gray-600">
-                  Missing ID
-                </th>
-                <th className="text-right px-3 py-2 font-semibold text-gray-600">
-                  Branches
-                </th>
-                <th className="text-left px-3 py-2 font-semibold text-gray-600">
-                  Last synced
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {byEntity.map((row) => {
-                const total = Number(row.total_raw);
-                const norm = Number(row.normalized);
-                const pct = total > 0 ? Math.round((norm / total) * 100) : 0;
-                return (
-                  <tr
-                    key={row.entity_type}
-                    className="border-b border-gray-100 last:border-0"
-                  >
-                    <td className="px-3 py-2 font-mono text-[10px] text-violet-700">
-                      {row.entity_type}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums font-semibold">
-                      {Number(row.total_raw).toLocaleString()}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <span
-                        className={`tabular-nums font-semibold ${pct === 100 ? "text-emerald-600" : pct > 50 ? "text-amber-600" : "text-gray-500"}`}
-                      >
-                        {norm > 0 ? `${norm} (${pct}%)` : "—"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gray-400">
-                      {Number(row.missing_id) > 0
-                        ? Number(row.missing_id)
-                        : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gray-400">
-                      {row.branches}
-                    </td>
-                    <td className="px-3 py-2 text-gray-400">
-                      {fmtTs(row.last_synced)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {byEntity.length === 0 && (
-        <div className="text-center py-8 text-gray-400 text-[13px]">
-          Нет данных в alpha_raw_records — запустите{" "}
-          <strong>Run Raw Sync</strong>
-        </div>
-      )}
     </div>
   );
 }

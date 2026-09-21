@@ -2,6 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Router, type Request } from "express";
 import { z } from "zod/v4";
 import { pool } from "@workspace/db";
+import { normalizeSmsVizitkaPhone } from "../lib/front-office/smsvizitka-phone.js";
 
 export const smsVizitkaShadowRouter = Router();
 
@@ -42,16 +43,6 @@ function configured(): boolean {
     (process.env.SMSVIZITKA_WEBHOOK_TOKEN?.length ?? 0) >= 32 &&
     (process.env.FRONT_OFFICE_PHONE_MATCH_SECRET?.length ?? 0) >= 32
   );
-}
-
-function normalizePhone(value: string): string | null {
-  const digits = value.replace(/\D/g, "");
-  if (digits.length === 10) return "+7" + digits;
-  if (digits.length === 11 && digits.startsWith("8"))
-    return "+7" + digits.slice(1);
-  if (digits.length === 11 && digits.startsWith("7")) return "+" + digits;
-  if (digits.length >= 10 && digits.length <= 15) return "+" + digits;
-  return null;
 }
 
 function maskPhone(value: string): string {
@@ -174,7 +165,7 @@ smsVizitkaShadowRouter.post(
     }
 
     const payload = parsed.data;
-    const normalized = normalizePhone(payload.number);
+    const normalized = normalizeSmsVizitkaPhone(payload.number);
     if (!normalized) {
       res.status(400).json({ status: "error", error: "Invalid phone number" });
       return;

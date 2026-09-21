@@ -157,7 +157,7 @@ test("Atlas runtime fingerprint ignores daemon-local identity but detects runtim
 });
 
 test("D186 production workflow is manual, protected, Atlas-only and independently verified", () => {
-  const workflow = read(".github/workflows/deploy-diaries-d133.yml");
+  const workflow = read("docs/workflow-history/deploy-diaries-d186.yml");
   const release = read("deploy/release-atlas-d186.sh");
   const upgrade = read("deploy/upgrade-atlas-d186.sh");
 
