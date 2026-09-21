@@ -252,6 +252,11 @@ def upgrade(old, plan, work, run_key, current_main):
             output.flush()
             os.fsync(output.fileno())
         temp.replace(journal)
+        descriptor = os.open(work, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     try:
         # Register the recovery state before each mutating command, including

@@ -5,6 +5,7 @@ import {
   readFileSync,
   mkdirSync,
   writeFileSync,
+  statfsSync,
 } from "node:fs";
 import { join, relative } from "node:path";
 import { createHash } from "node:crypto";
@@ -33,6 +34,10 @@ export async function snapshot(source, target, system) {
   const before = files(source),
     hashes = before.map((file) => [file, hash(join(source, file))]);
   if (!before.length) throw Error("empty source");
+  const bytes = before.reduce((sum, file) => sum + lstatSync(join(source, file)).size, 0);
+  const capacity = statfsSync(target);
+  if (capacity.bavail * capacity.bsize < bytes * 3 + 512 * 1024 * 1024)
+    throw Error("insufficient snapshot capacity");
   // The caller has stopped the sole writer; source is mounted read-only.
   // Main databases and WAL sidecars are preserved together, before inspection.
   cpSync(source, raw, {
