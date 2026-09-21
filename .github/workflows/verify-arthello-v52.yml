@@ -262,6 +262,7 @@ jobs:
           python3 -I -B controller/deploy/test_alfa_release.py
           python3 -I -B controller/deploy/test_alfa_artifact.py
           python3 -I -B controller/deploy/test_alfa_audit.py
+          python3 -I -B controller/deploy/test_school_release.py
           python3 -I -B controller/deploy/test_alfa_docker.py
           (cd diary && node --test tests/directory-snapshot.test.mjs tests/central-family-directory.test.mjs)
       - name: Build and verify isolated directory image

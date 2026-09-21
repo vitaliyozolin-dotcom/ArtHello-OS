@@ -35,7 +35,7 @@ def runtime_plan(old, system, image, source, tree):
     name = old['Name'].removeprefix('/')
     require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', name), 'NAME')
     require(old['State']['Running'] is True and not host.get('Privileged'), 'RUNTIME')
-    require(not host.get('Devices') and not host.get('PortBindings') and not host.get('CapAdd'), 'HOST_CAPABILITY')
+    require(not host.get('Devices') and (system == 'school' or not host.get('PortBindings')) and not host.get('CapAdd'), 'HOST_CAPABILITY')
     for key in ('AutoRemove', 'PublishAllPorts', 'ExtraHosts', 'GroupAdd', 'DeviceCgroupRules', 'DeviceRequests',
                 'Ulimits', 'Sysctls', 'Dns', 'DnsOptions', 'DnsSearch', 'OomKillDisable', 'Init', 'PidMode', 'UTSMode', 'UsernsMode'):
         require(not host.get(key), 'UNSUPPORTED_HOST_OPTION')
@@ -89,6 +89,9 @@ def runtime_plan(old, system, image, source, tree):
         require(data == 'atlas-school-diary-data'
                 and 'DATABASE_PATH=/data/atlas-school.sqlite' in environment, 'ATLAS_DATA')
         require(any(m == 'type=volume,src=atlas-school-diary-backups,dst=/backups,volume-nocopy' for m in mounts), 'ATLAS_BACKUPS')
+    elif system == 'school':
+        require(config.get('WorkingDir') == '/app' and 'DATABASE_PATH=/data/school-1-11.sqlite' in environment, 'SCHOOL_DATA')
+        require(any(m['Type'] == 'volume' and m['Destination'] == '/backups' and m['RW'] for m in old['Mounts']), 'SCHOOL_BACKUPS')
     restart = host['RestartPolicy']['Name']
     require(restart in ('no', 'always', 'unless-stopped', 'on-failure'), 'RESTART')
     if restart == 'on-failure' and host['RestartPolicy']['MaximumRetryCount']:
@@ -97,6 +100,13 @@ def runtime_plan(old, system, image, source, tree):
     labels.update({'org.opencontainers.image.revision': source, 'org.opencontainers.image.source-tree': tree,
                    'arthello.release.sha': source, 'arthello.release.tree': tree, 'arthello.config.decision': 'D194'})
     args = ['--restart=no', '--network', networks[0]]
+    if system == 'school':
+        bindings = host.get('PortBindings') or {}
+        require(set(bindings) == {'3000/tcp'} and len(bindings['3000/tcp']) == 1, 'SCHOOL_PORTS')
+        binding = bindings['3000/tcp'][0]
+        require(binding.get('HostIp') in ('127.0.0.1', '0.0.0.0', '') and re.fullmatch(r'[0-9]{1,5}', binding.get('HostPort', ''))
+                and 0 < int(binding['HostPort']) < 65536, 'SCHOOL_PORTS')
+        args += ['--publish', (binding['HostIp'] + ':' if binding['HostIp'] else '') + binding['HostPort'] + ':3000/tcp']
     for alias in old['NetworkSettings']['Networks'][networks[0]].get('Aliases') or []:
         if alias not in (name, old['Id'], old['Id'][:12]):
             require(re.fullmatch(r'[A-Za-z0-9_.-]+', alias), 'NETWORK_ALIAS')
@@ -125,7 +135,7 @@ def runtime_plan(old, system, image, source, tree):
     require(len(entrypoint) <= 1, 'ENTRYPOINT')
     if entrypoint:
         args += ['--entrypoint', entrypoint[0]]
-    return {'name': name, 'environment': environment, 'mounts': mounts, 'dataVolume': data,
+    return {'system': system, 'name': name, 'environment': environment, 'mounts': mounts, 'dataVolume': data,
             'restart': restart, 'args': args, 'command': config.get('Cmd') or [],
             'image': image, 'source': source, 'tree': tree}
 
@@ -146,6 +156,7 @@ OWNER = 'vitaliyozolin-dotcom'
 PINS = {
     'central': ('dc390739a09c1fff24ead9f490e339c1eabd3c3d', None),
     'atlas': ('f856fb3bd098152bb6b02c4d0273c4c9170b130c', 'fdd8316ce50962476dbfee446181ca6c9d71fcc8'),
+    'school': ('54242340f2d9b6a9887d69ecc03520ddf9f7982c', 'e9a2a92edbd150dfeaa4b566a206e6bbb00169ad'),
 }
 
 
@@ -235,8 +246,8 @@ def public_health():
 
 def upgrade(old, plan, work, run_key, current_main):
     name, retained = plan['name'], plan['name'] + '-pre-d194-' + run_key
-    backup_volume = 'arthello-d194-' + ('central' if name.startswith('arthello-direct-') else 'atlas') + '-' + run_key
-    system = 'central' if name.startswith('arthello-direct-') else 'atlas'
+    system = plan['system']
+    backup_volume = 'arthello-d194-' + system + '-' + run_key
     port = 8081 if system == 'central' else 3000
     require(not json.loads(docker('ps', '-aq', '--filter', 'name=^/' + retained + '$', '--format', '{{json .ID}}') or 'null'), 'RETAINED_EXISTS')
     require(not docker('volume', 'ls', '-q', '--filter', 'name=^' + backup_volume + '$').strip(), 'BACKUP_EXISTS')
@@ -354,6 +365,7 @@ def main():
     checkpoint('protected-context-verified')
     system = os.environ.get('RELEASE_SYSTEM')
     require(system in PINS, 'SYSTEM')
+    require(system != 'school', 'USE_PROTECTED_SCHOOL_TRANSPORT')
     spec = importlib.util.spec_from_file_location('artifacts', ROOT / 'deploy/alfa_artifact.py')
     artifacts = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(artifacts)

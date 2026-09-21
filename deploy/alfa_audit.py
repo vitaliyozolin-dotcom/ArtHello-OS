@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from contextlib import contextmanager
 
 ROOT=Path(__file__).resolve().parents[1]
 # Previously accepted School key; D065/R17 protected School transport.
@@ -27,38 +28,51 @@ def capture(command, prefix, *, data=None, timeout=600):
     safe=re.findall(rb'(?:ALFA_OS_AUDIT_BLOCKED|ALFA_SOURCE_AUDIT_FAILED)=([A-Z_0-9]{3,70})',result.stderr)
     return {'status':'blocked','reason':safe[-1].decode() if safe else 'COMMAND_UNCONFIRMED'}
 
-def school_inventory():
+@contextmanager
+def school_connection():
+    """The same pinned production SSH identity for read-only and owner-approved delivery."""
     host=os.environ.get('DEPLOY_HOST',''); user=os.environ.get('DEPLOY_USER',''); port=os.environ.get('DEPLOY_PORT') or '2222'
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]{0,252}',host) or not re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}',user) or not port.isdigit() or not 0<int(port)<65536:
-        return {'status':'blocked','reason':'SSH_CONFIGURATION'}
+        raise release.Refused('SSH_CONFIGURATION')
     with tempfile.TemporaryDirectory(prefix='alfa-school-audit-') as temporary:
         key=Path(temporary)/'identity'; known=Path(temporary)/'known_hosts'
         key.write_text(os.environ.get('SSH_PRIVATE_KEY','')+'\n'); key.chmod(0o600)
         known.write_text(os.environ.get('SSH_KNOWN_HOSTS','')+'\n'); known.chmod(0o600)
-        if not key.stat().st_size>100 or not known.stat().st_size>20: return {'status':'blocked','reason':'SSH_IDENTITY_MISSING'}
-        remote=(ROOT/'deploy/school_inventory.py').read_bytes()
+        if not key.stat().st_size>100 or not known.stat().st_size>20: raise release.Refused('SSH_IDENTITY_MISSING')
         command=['ssh','-p',port,'-i',str(key),'-o','IdentitiesOnly=yes','-o','BatchMode=yes','-o','PasswordAuthentication=no',
                  '-o','KbdInteractiveAuthentication=no','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(known),
                  '-o','GlobalKnownHostsFile=/dev/null','-o','ConnectTimeout=15','-o','ServerAliveInterval=10','-o','ServerAliveCountMax=2',
-                 '--',user+'@'+host,'python3 -']
-        response=subprocess.run(command,input=remote,capture_output=True,timeout=90)
-        if response.returncode and (b'Host key verification failed' in response.stderr or b'REMOTE HOST IDENTIFICATION' in response.stderr):
-            # Read an unauthenticated public key, then require the already trusted
-            # fingerprint before sending any identity or remote command. No TOFU.
-            scan=subprocess.run(['ssh-keyscan','-T','15','-p',port,'-t','ed25519',host],capture_output=True,timeout=25)
-            lines=[line for line in scan.stdout.splitlines() if line and not line.startswith(b'#')]
-            if scan.returncode or len(lines)!=1: return {'status':'blocked','reason':'PINNED_KEY_UNAVAILABLE'}
-            candidate=Path(temporary)/'pinned_candidate'; candidate.write_bytes(lines[0]+b'\n'); candidate.chmod(0o600)
-            fingerprint=subprocess.run(['ssh-keygen','-lf',str(candidate),'-E','sha256'],capture_output=True,timeout=10)
-            parts=fingerprint.stdout.decode().split()
-            if fingerprint.returncode or len(parts)<2 or parts[1]!=SCHOOL_HOST_PIN: return {'status':'blocked','reason':'PINNED_KEY_MISMATCH'}
-            known.write_bytes(candidate.read_bytes())
-            response=subprocess.run(command,input=remote,capture_output=True,timeout=90)
-        if response.returncode:
-            reason='SSH_HOST_KEY_UNCONFIRMED' if b'Host key verification failed' in response.stderr or b'REMOTE HOST IDENTIFICATION' in response.stderr else 'SSH_CONNECTION_UNCONFIRMED'
-            return {'status':'blocked','reason':reason}
-        try: return json.loads(response.stdout)
-        except (ValueError,UnicodeDecodeError): return {'status':'blocked','reason':'SSH_RESPONSE_UNCONFIRMED'}
+                 '--',user+'@'+host]
+        def execute(remote, *, data=None, stream=None, timeout=90):
+            transfer={'stdin':stream} if stream is not None else {'input':data}
+            response=subprocess.run([*command,remote],**transfer,capture_output=True,timeout=timeout)
+            if response.returncode and (b'Host key verification failed' in response.stderr or b'REMOTE HOST IDENTIFICATION' in response.stderr):
+                scan=subprocess.run(['ssh-keyscan','-T','15','-p',port,'-t','ed25519',host],capture_output=True,timeout=25)
+                lines=[line for line in scan.stdout.splitlines() if line and not line.startswith(b'#')]
+                require(not scan.returncode and len(lines)==1,'PINNED_KEY_UNAVAILABLE')
+                candidate=Path(temporary)/'pinned_candidate'; candidate.write_bytes(lines[0]+b'\n'); candidate.chmod(0o600)
+                fingerprint=subprocess.run(['ssh-keygen','-lf',str(candidate),'-E','sha256'],capture_output=True,timeout=10)
+                parts=fingerprint.stdout.decode().split()
+                require(not fingerprint.returncode and len(parts)>=2 and parts[1]==SCHOOL_HOST_PIN,'PINNED_KEY_MISMATCH')
+                known.write_bytes(candidate.read_bytes())
+                if stream is not None: stream.seek(0)
+                response=subprocess.run([*command,remote],**transfer,capture_output=True,timeout=timeout)
+            if response.returncode:
+                refusal=re.findall(rb'SCHOOL_RELEASE_BLOCKED=([A-Z_]{2,80})',response.stdout)
+                if refusal: raise release.Refused('REMOTE_'+refusal[-1].decode())
+            require(response.returncode==0,'SSH_COMMAND_UNCONFIRMED')
+            return response.stdout
+        # Resolve and authenticate before yielding a transport for any mutation.
+        inventory=json.loads(execute('python3 -',data=(ROOT/'deploy/school_inventory.py').read_bytes()))
+        yield execute,inventory
+
+def school_inventory():
+    try:
+        with school_connection() as (_,inventory): return inventory
+    except release.Refused as error:
+        return {'status':'blocked','reason':str(error)}
+    except Exception:
+        return {'status':'blocked','reason':'SSH_RESPONSE_UNCONFIRMED'}
 
 def main():
     os.umask(0o077)
@@ -79,7 +93,7 @@ def main():
     require(container['State']['Running'] is True,'CENTRAL_UNAVAILABLE')
     image=json.loads(release.docker('image','inspect',container['Image']))[0]
     central_source=image['Config']['Labels'].get('org.opencontainers.image.revision')
-    require(central_source in ('dc390739a09c1fff24ead9f490e339c1eabd3c3d',source),'CENTRAL_SOURCE')
+    require(central_source in ('c562a4cdefe14b52cd1ba6cee4b5e9a5183ad052',source),'CENTRAL_SOURCE')
     report={'controllerSha':source,'centralSource':central_source,'businessDataChanged':False}
     report['source']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'ALFA_SOURCE_AUDIT=',data=(ROOT/'.github/scripts/alfa-source-audit.mjs').read_bytes())
     report['os']=capture(['docker','run','--rm','--read-only','--network','bridge','--cap-drop','ALL','--security-opt','no-new-privileges:true',
