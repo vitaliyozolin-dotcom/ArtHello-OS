@@ -502,3 +502,10 @@ D110 terminal failed до изменения production, cleanup success. Нов
 6. Отдельно проверить ОС → дневник 1–11 и ОС → дневник Атласа: ученики, педагоги, принадлежность классам, затем оценки/ДЗ/КТП. Не пересылать всю очередь выдачи/сброса доступов ради обновления справочника.
 
 Откат к прежнему импорту без `localArchive` может вновь активировать вручную архивированные семьи; до отката остановить автообновление и сохранить аудит. Исходные наблюдения, документы и деньги не удалять.
+
+
+### D195 — read-only Alfa reconciliation after D194
+
+Use the existing Build closed RU release workflow on exact current main, operation `alfa-audit`, confirmation `AUDIT ALFA WITHOUT APPLY`, after Quality / Proof / Verify all pass for that SHA. The protected job reads fresh source counts, the OS comparison, legacy evidence readiness and both diary receivers. It does not import, archive, reroute, schedule or grant access. SSH inventory uses the existing identity and strict known_hosts; a failure is reported without changing trust. Aggregate receipt stays privately on the gateway under `.config/arthello/release-state/d195-audit-RUN_ID/receipt.json`. Do not interpret job completion as successful client migration: inspect each receipt check.
+
+Atlas backup requires `students`, `school_classes` and `diary_identity=atlas-school`. A failed pre-switch snapshot returns the previous runtime and leaves current data intact. Run 35645761275 demonstrated that rollback; the previous `classes` schema assertion was erroneous and is corrected in D195.

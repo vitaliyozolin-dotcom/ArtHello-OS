@@ -152,7 +152,9 @@ PINS = {
 def run(*args, input=None, timeout=120):
     result = subprocess.run(args, input=input, capture_output=True, timeout=timeout)
     # Docker arguments, stderr and exception text may contain credentials.
-    require(result.returncode == 0, 'COMMAND_FAILED')
+    if result.returncode != 0:
+        matched = re.search(rb'SNAPSHOT_REFUSED=(DATABASE_SCHEMA|DIARY_IDENTITY|CAPACITY|INTEGRITY|DATABASE_MISSING|EACCES|EROFS|ENOSPC|UNCONFIRMED)(?:\r?\n|$)', result.stderr)
+        raise Refused('SNAPSHOT_' + matched[1].decode() if matched else 'COMMAND_FAILED')
     return result.stdout
 
 

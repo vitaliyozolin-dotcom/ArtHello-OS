@@ -84,9 +84,14 @@ export async function snapshot(source, target, system) {
     } else if (
       system !== "central" &&
       tables.has("students") &&
-      tables.has("classes")
-    )
+      tables.has("school_classes")
+    ) {
+      if (system === "atlas") {
+        if (!tables.has("diary_identity") || db.prepare("SELECT institution_id FROM diary_identity WHERE id='primary'").get()?.institution_id !== "atlas-school")
+          throw Error("diary identity mismatch");
+      }
       primary++;
+    }
     const standalone = join(target, `database-${i}.sqlite`);
     await backup(db, standalone);
     db.close();
@@ -124,8 +129,9 @@ if (
         await snapshot("/source", "/snapshot", process.env.SNAPSHOT_SYSTEM),
       ),
     );
-  } catch {
-    console.error("SNAPSHOT_REFUSED");
+  } catch (error) {
+    const codes = { "ambiguous application database": "DATABASE_SCHEMA", "diary identity mismatch": "DIARY_IDENTITY", "insufficient snapshot capacity": "CAPACITY", "snapshot integrity": "INTEGRITY", "database missing": "DATABASE_MISSING" };
+    console.error("SNAPSHOT_REFUSED=" + (codes[error?.message] ?? (["EACCES", "EROFS", "ENOSPC"].includes(error?.code) ? error.code : "UNCONFIRMED")));
     process.exitCode = 2;
   }
 }

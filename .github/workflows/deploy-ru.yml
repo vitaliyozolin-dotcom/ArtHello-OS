@@ -8,7 +8,7 @@ on:
         required: true
         default: package
         type: choice
-        options: [package, alfa-central, alfa-atlas]
+        options: [package, alfa-central, alfa-atlas, alfa-audit]
       ref:
         description: Immutable application commit SHA to package
         required: true
@@ -280,3 +280,43 @@ jobs:
           python3 -I -B deploy/test_alfa_release.py
           python3 -I -B deploy/test_alfa_artifact.py
           python3 -I -B deploy/alfa_release.py
+
+  audit-alfa:
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+      github.sha == inputs.ref && github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' && github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      github.run_attempt == 1 && inputs.operation == 'alfa-audit' &&
+      inputs.confirmation == 'AUDIT ALFA WITHOUT APPLY'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    permissions:
+      contents: read
+      actions: read
+    concurrency:
+      group: gateway-38-55-arthello-production
+      cancel-in-progress: false
+      queue: max
+    timeout-minutes: 25
+    env:
+      RELEASE_SHA: ${{ inputs.ref }}
+      ALFA_AUDIT_CONFIRMATION: ${{ inputs.confirmation }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.ref }}
+          path: alfa-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Read Alfa source, OS preview and both diary boundaries
+        working-directory: alfa-audit-${{ github.run_id }}-${{ github.run_attempt }}
+        env:
+          ARTHELLO_OWNER_LOGIN: ${{ secrets.ARTHELLO_FINANCE_IMPORT_LOGIN }}
+          ARTHELLO_OWNER_PASSWORD: ${{ secrets.ARTHELLO_FINANCE_IMPORT_PASSWORD }}
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        run: python3 -I -B deploy/alfa_audit.py
