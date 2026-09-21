@@ -256,3 +256,10 @@ test("D181 deploys bounded family settings over the verified D180 runtime", () =
   assert.match(workflow, /ARTHELLO_D181_EXTERNAL=VERIFIED arthello=200 school=200 pay=200/);
   assert.doesNotMatch(workflow, /@arthello\.ru|buh@|api_key\s*:/i);
 });
+
+test('source status dictionary is available through the real production transport', async () => {
+  const transport=createAlfaCrmTransport({fetchImpl:async()=>Response.json({items:[{id:1,name:'Активен'}],total:1})});
+  const response=await transport(request('https://tenant.s20.online/v2api/6/study-status/index',{headers:{'x-alfacrm-token':'synthetic-session-token'},body:{page:0,pageSize:500}}));
+  assert.equal(response.status,200);
+  assert.equal((await response.json()).items[0].name,'Активен');
+});

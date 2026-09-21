@@ -958,7 +958,9 @@ async function sendDirectory(branchId: string, snapshot: ReturnType<typeof build
   const timestamp=String(Math.floor(Date.now()/1000));
   const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
   const signature=[...new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(`${timestamp}.${body}`)))].map(b=>b.toString(16).padStart(2,'0')).join('');
-  const response=await fetch(`${origin}/api/internal/directory-sync`,{method:'POST',redirect:'manual',signal:AbortSignal.timeout(30_000),headers:{'content-type':'application/json','x-arthello-timestamp':timestamp,'x-arthello-signature':signature},body});
+  const transport=(env as unknown as {DIARY_DIRECTORY_TRANSPORT?:RuntimeFetcher}).DIARY_DIRECTORY_TRANSPORT;
+  if(!transport) throw new AlfaApiError('Серверный канал дневника не настроен',503);
+  const response=await transport.fetch(new Request(`${origin}/api/internal/directory-sync`,{method:'POST',redirect:'manual',signal:AbortSignal.timeout(30_000),headers:{'content-type':'application/json','x-arthello-timestamp':timestamp,'x-arthello-signature':signature},body}));
   if(!response.ok) throw new AlfaApiError(`Дневник не подтвердил справочник (HTTP ${response.status}). Доступы не изменялись.`,409);
   const result=await response.json() as {digest?:string;sequence?:number;applied?:boolean;archived?:number;classes?:Array<{id:string;name:string;grade:number}>};
   if(snapshot===null) {

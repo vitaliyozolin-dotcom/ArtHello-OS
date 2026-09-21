@@ -84,7 +84,7 @@ async function main() {
   }
   const branches = await paged('branch/index',{is_active:1});
   const report={observedAt:new Date().toISOString(),sourceBranches:[],osFamilies:[],uniqueIncludedCustomerIds:0};
-  const unique = new Set();
+  const unique = new Set(), mappedIncluded = new Set(), mappedActive = new Set(), mappedMemberships = new Map();
   for(const branch of branches){
     const id=String(branch.id);
     const dictionary=await paged(`${id}/study-status/index`);
@@ -94,10 +94,21 @@ async function main() {
     const summary=summarizeBranch(records,dictionary,id);
     const names=new Map(dictionary.map(row=>[String(row.id),row.name]));
     for(const row of records)if(Array.isArray(row.branch_ids)&&row.branch_ids.map(String).includes(id)&&['Активен','Активен ШКОЛА','Открыто','Разовое посещение','Запись'].includes(names.get(String(row.study_status_id))))unique.add(String(row.id));
+    if(state.branchMappings[id])for(const row of records){
+      if(!Array.isArray(row.branch_ids)||!row.branch_ids.map(String).includes(id))continue;
+      const status=names.get(String(row.study_status_id)), customerId=String(row.id);
+      if(['Активен','Активен ШКОЛА'].includes(status))mappedActive.add(customerId);
+      if(!['Активен','Активен ШКОЛА','Открыто','Разовое посещение','Запись'].includes(status))continue;
+      mappedIncluded.add(customerId);const memberships=mappedMemberships.get(customerId)??new Set();memberships.add(id);mappedMemberships.set(customerId,memberships);
+    }
     const safeTitle = value => String(value??'').replace(/\d{5,}/g,'*').replace(/[a-zа-яё]+/gi,word=>['класс','кл','атлас','школа','лет','мини','сад','садик','группа','нулевой','первый','второй','третий','четвертый','подготовка','школе','к','младшая','старшая','средняя','подготовительная'].includes(word.toLowerCase())?word:'*');
     report.sourceBranches.push({id,localBranch:state.branchMappings[id]??null,...summary,customerFields:records[0]?Object.keys(records[0]).sort():[],teacherCount:teachers.length,teachersInBranch:teachers.filter(t=>Array.isArray(t.branch_ids)&&t.branch_ids.map(String).includes(id)).length,groups:groups.map(group=>({id:String(group.id),safeTitle:safeTitle(group.name),grade:String(group.name??'').match(/(?:^|[^0-9])(1[01]|[0-9])[\s_.-]*(?:класс|кл\b)/i)?.[1]??null,year:String(group.name??'').match(/202[0-9].{0,3}202[0-9]/)?.[0]??null,customers:summary.groups[String(group.id)]??0}))});
   }
   report.uniqueIncludedCustomerIds=unique.size;
+  report.mappedUniqueIncludedCustomerIds=mappedIncluded.size;
+  report.mappedUniqueActiveCustomerIds=mappedActive.size;
+  const intersections={};for(const branches of mappedMemberships.values())if(branches.size>1){const key=[...branches].sort().join(',');intersections[key]=(intersections[key]??0)+1;}
+  report.mappedIntersections=Object.entries(intersections).map(([key,customers])=>({branches:key.split(','),customers}));
   report.osFamilies=db.prepare("SELECT scope,status,COUNT(*) AS count FROM entities WHERE entity_type='Семья' GROUP BY scope,status").all();
   db.close();
   console.log('ALFA_SOURCE_AUDIT='+JSON.stringify(report));
