@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
     paths:
+      - "deploy/**"
       - "artifacts/api-server/src/lib/security/**"
       - "artifacts/api-server/src/routes/**"
       - "artifacts/alpha-crm-sync/**"
