@@ -69,12 +69,14 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ env.CHECKED_SOURCE_SHA }}
+          path: preflight-${{ github.run_id }}-${{ github.run_attempt }}
           persist-credentials: false
           fetch-depth: 1
           submodules: false
           lfs: false
 
       - name: Verify checkout and prerequisite regression suite
+        working-directory: preflight-${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -83,6 +85,7 @@ jobs:
           python3 -I .github/scripts/test-d082-route-diagnostic.py
 
       - name: Inventory Atlas production prerequisites without changing gateway
+        working-directory: preflight-${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -199,6 +202,7 @@ jobs:
             | tee "$RUNNER_TEMP/atlas-production-prerequisites.json"
 
       - name: Inventory gateway storage for D158 without mutation
+        working-directory: preflight-${{ github.run_id }}-${{ github.run_attempt }}
         if: >-
           github.event_name == 'workflow_run' &&
           startsWith(github.event.workflow_run.head_commit.message, 'D158: inventory ArtHello Pay gateway storage')
@@ -238,6 +242,7 @@ jobs:
           echo 'ARTHELLO_GATEWAY_STORAGE_INVENTORY=READ_ONLY'
 
       - name: Diagnose rejected R9 route without changing gateway
+        working-directory: preflight-${{ github.run_id }}-${{ github.run_attempt }}
         if: >-
           github.event_name == 'workflow_run' &&
           startsWith(github.event.workflow_run.head_commit.message, 'D083: read-only route diagnostic')
@@ -287,6 +292,7 @@ jobs:
           exit "$result"
 
       - name: Inventory browser image and dedicated test access without logging in
+        working-directory: preflight-${{ github.run_id }}-${{ github.run_attempt }}
         env:
           ARTHELLO_E2E_LOGIN: ${{ secrets.ARTHELLO_E2E_LOGIN }}
           ARTHELLO_E2E_PASSWORD: ${{ secrets.ARTHELLO_E2E_PASSWORD }}

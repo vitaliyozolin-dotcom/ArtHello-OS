@@ -226,8 +226,8 @@ jobs:
             system: SYS-SCHOOL-ATLAS
             branch: BR-ATLAS-SCHOOL
           - diary: school
-            source: a3443da4b1e74112c44bcae8dc58aea9fd5b50f6
-            tree: 994b0eeafbf5c8b5bf358ef82c275a1b58c42896
+            source: e9a2a92edbd150dfeaa4b566a206e6bbb00169ad
+            tree: 2968837fc2d9fc3124fb10efb59e7607c1ea8e0c
             system: SYS-SCHOOL-1-11
             branch: BR-SCHOOL
     env:
